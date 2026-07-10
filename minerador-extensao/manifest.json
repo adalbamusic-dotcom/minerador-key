@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Minerador KGR",
+  "version": "1.0",
+  "description": "Extração de palavras-chave de cauda longa via Autocomplete API.",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": [
+    "*://suggestqueries.google.com/*",
+    "https://*.supabase.co/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
