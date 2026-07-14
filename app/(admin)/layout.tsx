@@ -1,17 +1,21 @@
 import React from "react";
-import { Navbar } from "@/components/navbar";
+import { redirect } from "next/navigation";
+import { ProductShell } from "@/components/product-shell";
+import { requireSessionProfile } from "@/lib/server/authz";
 
-export default function AdminLayout({
+export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
+  let profile;
+  try { profile = await requireSessionProfile(); } catch { redirect("/"); }
+  if (!profile.isAdmin) redirect("/");
+  return <ProductShell>
     <div className="min-h-screen flex flex-col bg-[#06070a]">
-      <Navbar />
       <div className="flex-1 flex flex-col overflow-hidden">
         {children}
       </div>
     </div>
-  );
+  </ProductShell>;
 }

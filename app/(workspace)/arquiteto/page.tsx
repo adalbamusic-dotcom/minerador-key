@@ -1,18 +1,54 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useBrand } from "@/components/brand-context";
 import { useSession, signOut } from "next-auth/react";
 import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
+import { buildProvisionalGroups, describeAssignedGroups } from "@/lib/arquiteto/engine";
+import { detectArchitectureConflicts } from "@/lib/arquiteto/conflicts";
+import type {
+  ArticleDNA,
+  KeywordArticleReview,
+  ProvisionalArticleGroup,
+  SiloDNA,
+  VersionEnvelope,
+  VersionStatusEvent,
+} from "@/lib/arquiteto/contracts";
+import {
+  applyKeywordArticleReview,
+  buildLogicalKeywordRecommendations,
+  buildRelevantArticleCatalog,
+  buildKeywordReviewBatches,
+  mergeKeywordArticleReviews,
+} from "@/lib/arquiteto/keyword-article-review";
+import { createStatusEvent, createVersionEnvelope } from "@/lib/arquiteto/versioning";
+import { deterministicArticleDnaPayload } from "@/lib/arquiteto/adapters";
+import { articleApprovalIssues, effectiveVersionStatus } from "@/lib/editorial/operational-flow";
+import type { AIReviewAnnotation } from "@/lib/editorial/operational-contracts";
+import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
+import { ArticleDnaSummary, SiloDnaSummary } from "@/components/editorial/dna-panels";
+import { CompactSavedViews } from "@/components/editorial/compact-saved-views";
+import { WorkflowImportDialog, WorkflowStatusBadge } from "@/components/editorial/workflow-status";
+import { DangerApprovalDialog } from "@/components/editorial/danger-approval-dialog";
+import { BackgroundTaskNotice } from "@/components/editorial/background-task-notice";
+import { HistoryControls } from "@/components/editorial/history-controls";
+import { useLocalHistory } from "@/components/editorial/use-local-history";
+import {
+  ArchitectArticleDnaRecoverySchema,
+  ArchitectReviewRecoverySchema,
+  ArchitectSiloDnaRecoverySchema,
+  architectArticleDnaRecoveryKey,
+  architectReviewRecoveryKey,
+  architectSiloDnaRecoveryKey,
+} from "@/lib/editorial/architect-recovery";
+import { readBrowserArtifact, writeBrowserArtifact } from "@/lib/editorial/browser-artifact-store";
 import {
   Loader2,
   X,
   Check,
   Lock,
   RefreshCw,
-  Undo2,
-  Redo2,
   ChevronDown,
   ChevronRight,
   Plus,
@@ -28,13 +64,41 @@ import {
   User,
   PenTool,
   LogOut,
-  Key
+  Key,
+  ArrowRight,
+  Network
 } from "lucide-react";
 
 // Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+interface KeywordImportCandidate {
+  id: string;
+  keyword: string;
+  intent: string | null;
+  volume_search: number | null;
+  status: "aprovado" | "publicado";
+  lista_id: string | null;
+  siloName: string | null;
+}
+
+type ArchitectBackgroundResult =
+  | { kind: "logical_grouping"; groups: ProvisionalArticleGroup[]; regrouped: Array<Record<string, unknown>> }
+  | { kind: "keyword_review"; review: KeywordArticleReview; batchCount: number }
+  | { kind: "article_dna"; versions: VersionEnvelope<ArticleDNA>[]; events: VersionStatusEvent[] }
+  | { kind: "silo_dna"; versions: VersionEnvelope<SiloDNA>[]; events: VersionStatusEvent[] };
+
+type PendingDangerAction =
+  | { type: "delete-selected"; clusterIds: string[]; count: number; protectedCount: number }
+  | { type: "reset-new"; count: number }
+  | { type: "remove-silo"; clusterIds: string[]; articleIds: string[]; siloName: string };
+
+type AiReviewArticle = {
+  mainKeywordObj: { id: string; aiReviewAnnotation?: AIReviewAnnotation } | null;
+  supportKeywords: Array<{ id: string; aiReviewAnnotation?: AIReviewAnnotation }>;
+};
 
 // Helper slug
 const toSlug = (text: string) =>
@@ -271,24 +335,44 @@ export default function ArquitetoPage() {
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
   const { brands, selectedBrandId, setSelectedBrandId, userRole, profileLoading, refreshBrands } = useBrand();
+  const { architectImportedKeywordIds, articleVersions: acceptedArticleDnas, siloVersions: acceptedSiloDnas, versionEvents, aiReviewAnnotations,
+    setArticleVersions: setAcceptedArticleDnas, setSiloVersions: setAcceptedSiloDnas, addVersionEvents,
+    selectedEntityId, setSelectedEntityId, importApprovedKeywordsToArchitect, importApprovedToRadar, radarItems,
+    backgroundTasks, runBackgroundTask, consumeBackgroundTask, dismissBackgroundTask, addAiReviewAnnotations, restoreOperationalSnapshot } = useEditorialPipeline();
 
   // Data
   const [lists,    setLists]    = useState<any[]>([]);
   const [masterList, setMasterList] = useState<any[]>([]);
-  const [masterUndoStack, setMasterUndoStack] = useState<any[][]>([]);
-  const [masterRedoStack, setMasterRedoStack] = useState<any[][]>([]);
+  const [keywordImportPool, setKeywordImportPool] = useState<KeywordImportCandidate[]>([]);
+  const [keywordImportError, setKeywordImportError] = useState<string | null>(null);
+  const importedKeywordIds = useMemo(() => new Set(architectImportedKeywordIds), [architectImportedKeywordIds]);
+  const importedKeywordSignature = useMemo(() => [...architectImportedKeywordIds].sort().join("|"), [architectImportedKeywordIds]);
+  const [keywordImportOpen, setKeywordImportOpen] = useState(false);
+  const [provisionalGroups, setProvisionalGroups] = useState<ProvisionalArticleGroup[]>([]);
 
   // UI state
   const [loading,           setLoading]           = useState(true);
   const [saving,            setSaving]            = useState(false);
   const [updating,          setUpdating]          = useState(false);
   const [loadingKeywords,   setLoadingKeywords]   = useState(false);
-  const [generatingStrategic, setGeneratingStrategic] = useState(false);
+  const architectTasks = useMemo(() => backgroundTasks.filter(task => ["logical_grouping", "keyword_review", "article_dna", "silo_dna"].includes(task.type)), [backgroundTasks]);
+  const runningArchitectTask = (type: "logical_grouping" | "keyword_review" | "article_dna" | "silo_dna") =>
+    architectTasks.find(task => task.type === type && (task.status === "queued" || task.status === "running"));
+  const activeLogicalTask = runningArchitectTask("logical_grouping");
+  const activeKeywordReviewTask = runningArchitectTask("keyword_review");
+  const activeArticleDnaTask = runningArchitectTask("article_dna");
+  const activeSiloDnaTask = runningArchitectTask("silo_dna");
+  const generatingStrategic = Boolean(activeLogicalTask || activeKeywordReviewTask || activeArticleDnaTask || activeSiloDnaTask);
   const [notification,      setNotification]      = useState<{ type:"success"|"error"; message:string }|null>(null);
   const [menuOpen,          setMenuOpen]          = useState(false);
   const [selectionMenuOpen, setSelectionMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const selectionMenuRef = useRef<HTMLDivElement>(null);
+  const lastLoadedImportSignature = useRef("");
+  const recoveredArchitectArtifacts = useRef(new Set<string>());
+  const reviewRecoveryReady = useRef(new Set<string>());
+  const masterListRef = useRef(masterList);
+  masterListRef.current = masterList;
 
   // Accordion — expanded row ids & active tabs per expanded article
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -297,11 +381,91 @@ export default function ArquitetoPage() {
   // Toolbar filters
   const [searchQuery,      setSearchQuery]      = useState("");
   const [filterHierarquia, setFilterHierarquia] = useState("Todos");
+  const [filterStatus, setFilterStatus] = useState("Todos");
 
   // Inline edits
   const [customSlugs,       setCustomSlugs]       = useState<Record<string,string>>({});
   const [customHierarquias, setCustomHierarquias] = useState<Record<string,string>>({});
   const [selectedIds,       setSelectedIds]       = useState<Set<string>>(new Set());
+  const architectHistoryValue = useMemo(() => ({ masterList, customSlugs, customHierarquias, articleVersions: acceptedArticleDnas, siloVersions: acceptedSiloDnas, versionEvents, aiReviewAnnotations }), [masterList, customSlugs, customHierarquias, acceptedArticleDnas, acceptedSiloDnas, versionEvents, aiReviewAnnotations]);
+  const masterHistory = useLocalHistory("arquiteto", architectHistoryValue, snapshot => {
+    setMasterList(snapshot.masterList);
+    setCustomSlugs(snapshot.customSlugs);
+    setCustomHierarquias(snapshot.customHierarquias);
+    setProvisionalGroups(describeAssignedGroups(snapshot.masterList));
+    restoreOperationalSnapshot("arquiteto", snapshot);
+    setSelectedIds(new Set());
+  }, 30, selectedBrandId || "sem-marca");
+  const [selectedStatusAction, setSelectedStatusAction] = useState("");
+  const [pendingDangerAction, setPendingDangerAction] = useState<PendingDangerAction | null>(null);
+  const sessionAccessToken = session?.accessToken || "";
+
+  useEffect(() => {
+    if (!selectedBrandId || recoveredArchitectArtifacts.current.has(selectedBrandId)) return;
+    const brandId = selectedBrandId;
+    let cancelled = false;
+    const recover = async () => {
+      const recoveredEvents: VersionStatusEvent[] = [];
+      try {
+        const raw = await readBrowserArtifact(architectArticleDnaRecoveryKey(brandId));
+        if (raw && !cancelled) {
+          const recovered = ArchitectArticleDnaRecoverySchema.parse(raw);
+          setAcceptedArticleDnas(current => ({ ...current, ...recovered.versions }));
+          recoveredEvents.push(...recovered.events);
+        }
+      } catch { /* artefato inválido não impede a recuperação dos demais */ }
+      try {
+        const raw = await readBrowserArtifact(architectSiloDnaRecoveryKey(brandId));
+        if (raw && !cancelled) {
+          const recovered = ArchitectSiloDnaRecoverySchema.parse(raw);
+          setAcceptedSiloDnas(current => ({ ...current, ...recovered.versions }));
+          recoveredEvents.push(...recovered.events);
+        }
+      } catch { /* artefato inválido não impede a recuperação dos demais */ }
+      if (cancelled) return;
+      recoveredArchitectArtifacts.current.add(brandId);
+      if (recoveredEvents.length) addVersionEvents(recoveredEvents);
+    };
+    void recover();
+    return () => { cancelled = true; };
+  }, [selectedBrandId, setAcceptedArticleDnas, setAcceptedSiloDnas, addVersionEvents]);
+
+  useEffect(() => {
+    if (!selectedBrandId || !recoveredArchitectArtifacts.current.has(selectedBrandId)) return;
+    const timer = window.setTimeout(() => {
+      try {
+        const versionIds = new Set(Object.values(acceptedArticleDnas).map(version => version.versionId));
+        const recovery = ArchitectArticleDnaRecoverySchema.parse({ schemaVersion: 1, versions: acceptedArticleDnas,
+          events: versionEvents.filter(event => versionIds.has(event.versionId)), savedAt: new Date().toISOString() });
+        void writeBrowserArtifact(architectArticleDnaRecoveryKey(selectedBrandId), recovery).catch(() => undefined);
+      } catch { /* cada artefato mantém sua própria recuperação */ }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [acceptedArticleDnas, selectedBrandId, versionEvents]);
+
+  useEffect(() => {
+    if (!selectedBrandId || !recoveredArchitectArtifacts.current.has(selectedBrandId)) return;
+    const timer = window.setTimeout(() => {
+      try {
+        const versionIds = new Set(Object.values(acceptedSiloDnas).map(version => version.versionId));
+        const recovery = ArchitectSiloDnaRecoverySchema.parse({ schemaVersion: 1, versions: acceptedSiloDnas,
+          events: versionEvents.filter(event => versionIds.has(event.versionId)), savedAt: new Date().toISOString() });
+        void writeBrowserArtifact(architectSiloDnaRecoveryKey(selectedBrandId), recovery).catch(() => undefined);
+      } catch { /* cada artefato mantém sua própria recuperação */ }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [acceptedSiloDnas, selectedBrandId, versionEvents]);
+
+  useEffect(() => {
+    const requested = selectedEntityId || (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("articleId") : null);
+    if (!requested || !masterList.length) return;
+    const match = masterList.find(item => item.provisionalGroupId === requested || item.id === requested);
+    if (!match) return;
+    const articleRowId = `art-${match.clusterId}`;
+    setExpandedIds(new Set([articleRowId]));
+    setSelectedIds(new Set([articleRowId]));
+    setSelectedEntityId(null);
+  }, [masterList, selectedEntityId, setSelectedEntityId]);
 
   // Silo modal
   const [isListModalOpen, setIsListModalOpen] = useState(false);
@@ -331,15 +495,15 @@ export default function ArquitetoPage() {
 
   // Session sync
   useEffect(() => {
-    if (sessionStatus === "authenticated" && (session as any)?.accessToken) {
+    if (sessionStatus === "authenticated" && sessionAccessToken) {
       supabase.auth.setSession({
-        access_token: (session as any).accessToken,
+        access_token: sessionAccessToken,
         refresh_token: "",
       }).then(() => { fetchData(); fetchMasterList(); });
     } else if (sessionStatus === "unauthenticated") {
       setLoading(false);
     }
-  }, [selectedBrandId, sessionStatus, session]);
+  }, [selectedBrandId, sessionStatus, sessionAccessToken]);
 
   const showNotification = (type: "success"|"error", msg: string) => {
     setNotification({ type, message: msg });
@@ -347,33 +511,16 @@ export default function ArquitetoPage() {
   };
 
   // ── Fetch silos + briefings
-  const pushMasterHistory = (snapshot = masterList) => {
-    setMasterUndoStack(prev => [...prev.slice(-19), snapshot]);
-    setMasterRedoStack([]);
-  };
+  const pushMasterHistory = (snapshot = masterList, label = "Alteração na arquitetura de artigos") => masterHistory.capture(label, { masterList: snapshot, customSlugs, customHierarquias, articleVersions: acceptedArticleDnas, siloVersions: acceptedSiloDnas, versionEvents, aiReviewAnnotations });
 
   const undoMasterList = () => {
-    setMasterUndoStack(prev => {
-      if (prev.length === 0) return prev;
-      const previous = prev[prev.length - 1];
-      setMasterRedoStack(redo => [masterList, ...redo.slice(0, 19)]);
-      setMasterList(previous);
-      setSelectedIds(new Set());
-      showNotification("success", "Voltando uma alteracao estrutural.");
-      return prev.slice(0, -1);
-    });
+    masterHistory.undo();
+    showNotification("success", "Voltando uma alteração estrutural.");
   };
 
   const redoMasterList = () => {
-    setMasterRedoStack(prev => {
-      if (prev.length === 0) return prev;
-      const next = prev[0];
-      setMasterUndoStack(undo => [...undo.slice(-19), masterList]);
-      setMasterList(next);
-      setSelectedIds(new Set());
-      showNotification("success", "Refazendo alteracao estrutural.");
-      return prev.slice(1);
-    });
+    masterHistory.redo();
+    showNotification("success", "Refazendo alteração estrutural.");
   };
 
   const fetchData = async () => {
@@ -393,9 +540,11 @@ export default function ArquitetoPage() {
   };
 
   // ── Fetch & cluster master list
-  const fetchMasterList = async () => {
+  const fetchMasterList = async (approvedIds = importedKeywordIds) => {
     if (!selectedBrandId) return;
+    lastLoadedImportSignature.current = [...approvedIds].sort().join("|");
     setLoadingKeywords(true);
+    setKeywordImportError(null);
     try {
       const { data: silosData } = await supabase
         .from("listas_kgr").select("id, nome").eq("marca_id", selectedBrandId);
@@ -410,6 +559,18 @@ export default function ArquitetoPage() {
       } else { kwQuery = kwQuery.is("lista_id", null); }
       const { data: kwData } = await kwQuery;
       const allKws = kwData || [];
+      setKeywordImportPool(allKws
+        .filter(keyword => ["aprovado", "publicado"].includes(keyword.status?.toLowerCase()))
+        .map(keyword => ({
+          id: keyword.id,
+          keyword: keyword.keyword,
+          intent: keyword.intent || null,
+          volume_search: keyword.volume_search ?? null,
+          status: keyword.status.toLowerCase() as KeywordImportCandidate["status"],
+          lista_id: keyword.lista_id || null,
+          siloName: keyword.lista_id ? siloNameMap[String(keyword.lista_id)] || null : null,
+        }))
+        .sort((left, right) => left.status.localeCompare(right.status) || left.keyword.localeCompare(right.keyword, "pt-BR")));
 
       // Briefings — busca em paralelo
       const [bWithSiloML, bNoSiloML] = await Promise.all([
@@ -494,7 +655,7 @@ export default function ArquitetoPage() {
       publishedMap.forEach(item => { items.push(item); });
 
       // 2. Aprovados (novos)
-      const approved = allKws.filter(k => k.status?.toLowerCase() === "aprovado");
+      const approved = allKws.filter(k => k.status?.toLowerCase() === "aprovado" && approvedIds.has(k.id));
       approved.forEach(kw => {
         items.push({
           id: kw.id,
@@ -510,8 +671,46 @@ export default function ArquitetoPage() {
         });
       });
 
-      const clustered = clusterMasterList(items);
-      setMasterList(clustered);
+      const deterministicGroups = buildProvisionalGroups(items);
+      const deterministicItems = deterministicGroups.flatMap((group, groupIndex) => {
+        const principalId = group.principalSuggestion.keywordId;
+        const principalKeyword = group.keywords.find(item => item.id === principalId);
+        return group.keywords.map(keyword => ({
+          ...keyword,
+          clusterId: groupIndex + 1,
+          provisionalGroupId: group.id,
+          siloId: group.suggestedSiloId,
+          silo_id: group.suggestedSiloId,
+          siloName: group.suggestedSiloName,
+          computedSlug: keyword.slug_sugerido || toSlug(principalKeyword?.keyword || keyword.keyword),
+          computedHierarquia: keyword.id === principalId
+            ? group.suggestedHierarchy
+            : group.roles[keyword.id] === "reforco_narrativo"
+              ? "Reforco Narrativo"
+              : "Suporte",
+        }));
+      });
+      const clustered = deterministicItems.length ? deterministicItems : clusterMasterList(items);
+      let recoveredReview = false;
+      try {
+        const rawRecovery = await readBrowserArtifact(architectReviewRecoveryKey(selectedBrandId));
+        if (rawRecovery) {
+          const recovery = ArchitectReviewRecoverySchema.parse(rawRecovery);
+          if (recovery.importedKeywordSignature === [...approvedIds].sort().join("|") && recovery.masterList.length) {
+            setProvisionalGroups(recovery.provisionalGroups);
+            setMasterList(recovery.masterList);
+            setCustomSlugs(recovery.customSlugs);
+            setCustomHierarquias(recovery.customHierarchies);
+            if (recovery.annotations.length) addAiReviewAnnotations(recovery.annotations);
+            recoveredReview = true;
+          }
+        }
+      } catch { /* recuperação inválida é ignorada; a lista determinística permanece disponível */ }
+      reviewRecoveryReady.current.add(selectedBrandId);
+      if (!recoveredReview) {
+        setProvisionalGroups(deterministicGroups);
+        setMasterList(clustered);
+      }
 
       // Pre-populate input values for editing briefing directly
       const initialMetaTitles: Record<string, string> = {};
@@ -535,12 +734,33 @@ export default function ArquitetoPage() {
       setDnaCTAs(initialCTAs);
       setDnaAntiCanibalizacoes(initialAntiCanibalizacoes);
 
-      showNotification("success", `${publishedMap.size} publicados + ${approved.length} novos carregados.`);
     } catch (err: any) {
       console.error(err);
+      setKeywordImportError("Não foi possível atualizar os itens do Minerador.");
       showNotification("error", "Erro ao carregar o ecossistema.");
     } finally { setLoadingKeywords(false); }
   };
+
+  useEffect(() => {
+    if (sessionStatus !== "authenticated" || !selectedBrandId || lastLoadedImportSignature.current === importedKeywordSignature) return;
+    void fetchMasterList(new Set(architectImportedKeywordIds));
+    // fetchMasterList is intentionally kept local to this legacy page; the
+    // signature is the stable dependency that controls recovery reloads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [architectImportedKeywordIds, importedKeywordSignature, selectedBrandId, sessionStatus]);
+
+  useEffect(() => {
+    if (!selectedBrandId || !reviewRecoveryReady.current.has(selectedBrandId) || !masterList.length) return;
+    const timer = window.setTimeout(() => {
+      try {
+        const recovery = ArchitectReviewRecoverySchema.parse({ schemaVersion: 1, importedKeywordSignature,
+          masterList, provisionalGroups, customSlugs, customHierarchies: customHierarquias,
+          annotations: aiReviewAnnotations, savedAt: new Date().toISOString() });
+        void writeBrowserArtifact(architectReviewRecoveryKey(selectedBrandId), recovery).catch(() => undefined);
+      } catch { /* falha local não pode interromper o trabalho editorial */ }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [aiReviewAnnotations, customHierarquias, customSlugs, importedKeywordSignature, masterList, provisionalGroups, selectedBrandId]);
 
   // ── Handlers
   const handleCreateList = async (e: React.FormEvent) => {
@@ -619,31 +839,251 @@ export default function ArquitetoPage() {
     }
   };
 
-  const handleGenerateStrategicBriefings = async () => {
+  const processDeterministicStructure = () => {
     if (!masterList.length) return;
-    setGeneratingStrategic(true);
-    try {
-      showNotification("success", "Gerando dossiês estratégicos via IA...");
-      await new Promise(r => setTimeout(r, 2000));
-      showNotification("success", "Dossiês gerados para todos os grupos!");
-      await fetchData();
-      await fetchMasterList();
-    } catch { showNotification("error", "Erro ao gerar dossiês."); }
-    finally { setGeneratingStrategic(false); }
+    const source = masterList.map(item => ({ ...item }));
+    const taskId = runBackgroundTask<ArchitectBackgroundResult>({
+      type: "logical_grouping",
+      label: "Processar lógica sem IA",
+      execute: async update => {
+        update({ message: "Analisando KeywordDNAs e priorizando publicados...", current: 0, total: 1 });
+        await new Promise(resolve => window.setTimeout(resolve, 0));
+        const groups = buildProvisionalGroups(source);
+        const regrouped = groups.flatMap((group, groupIndex) => {
+          const principalId = group.principalSuggestion.keywordId;
+          const principalKeyword = group.keywords.find(item => item.id === principalId);
+          return group.keywords.map(keyword => ({
+            ...keyword,
+            clusterId: groupIndex + 1,
+            provisionalGroupId: group.id,
+            siloId: group.suggestedSiloId,
+            silo_id: group.suggestedSiloId,
+            siloName: group.suggestedSiloName,
+            computedSlug: keyword.slug_sugerido || toSlug(principalKeyword?.keyword || keyword.keyword),
+            computedHierarquia: keyword.id === principalId
+              ? group.suggestedHierarchy
+              : group.roles[keyword.id] === "reforco_narrativo" ? "Reforco Narrativo" : "Suporte",
+          }));
+        });
+        update({ message: `${groups.length} artigo(s) organizados, com no máximo 6 keywords cada.`, current: 1, total: 1 });
+        return { kind: "logical_grouping", groups, regrouped: regrouped.length ? regrouped : clusterMasterList(source) };
+      },
+    });
+    if (!taskId) showNotification("error", "Não foi possível iniciar a tarefa lógica.");
   };
 
   const handlePipelineStep = async (label: string) => {
-    if (!masterList.length) return;
-    setGeneratingStrategic(true);
-    try {
-      showNotification("success", `${label} iniciado.`);
-      await new Promise(r => setTimeout(r, 600));
-    } catch {
-      showNotification("error", `Erro em ${label}.`);
-    } finally {
-      setGeneratingStrategic(false);
-    }
+    if (label === "Gerar DNA dos Artigos") return handleGenerateArticleDnas();
+    if (label === "Gerar DNA dos Silos") return handleGenerateSiloDnas();
   };
+
+  const selectedStrategicGroups = (): ProvisionalArticleGroup[] => articlesList.filter(article => selectedIds.has(article.id)).map(article => {
+    const entityId = article.mainKeywordObj?.provisionalGroupId || article.briefingId;
+    const base = provisionalGroups.find(group => group.id === entityId);
+    const keywords = masterList.filter(keyword => String(keyword.clusterId) === String(article.clusterId));
+    const principalId = article.mainKeywordObj?.id || base?.principalSuggestion.keywordId || keywords[0]?.id;
+    if (!base || !principalId || !keywords.length) return null;
+    const roles = Object.fromEntries(keywords.map(keyword => [keyword.id,
+      keyword.id === principalId ? "principal" : keyword.computedHierarquia === "Reforco Narrativo" ? "reforco_narrativo" : "secundaria"]));
+    return { ...base, keywordIds: keywords.map(keyword => keyword.id), keywords, suggestedSiloId: article.siloId ? String(article.siloId) : null,
+      suggestedSiloName: article.siloName || null, suggestedHierarchy: article.hierarquia.startsWith("Pilar") ? "Pilar" : article.hierarquia.includes("Reforco") ? "Reforco Narrativo" : "Suporte",
+      principalSuggestion: { ...base.principalSuggestion, keywordId: principalId }, roles } as ProvisionalArticleGroup;
+  }).filter((group): group is ProvisionalArticleGroup => Boolean(group));
+
+  const callStrategicApi = async <T,>(path: string, body: unknown): Promise<T> => {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || "Falha no servico estrategico.");
+    return payload.data as T;
+  };
+
+  const activeBrand = brands.find(brand => brand.id === selectedBrandId);
+  const brandContext = activeBrand ? {
+    id: activeBrand.id,
+    name: activeBrand.nome,
+    niche: activeBrand.nicho || null,
+  } : undefined;
+  const deterministicConflicts = useMemo(
+    () => detectArchitectureConflicts(provisionalGroups),
+    [provisionalGroups],
+  );
+
+  const handleRevalidateStructure = () => {
+    const groups = selectedStrategicGroups();
+    if (!groups.length) {
+      showNotification("error", "Selecione os artigos cujas keywords devem ser revisadas pela IA.");
+      return;
+    }
+    const currentGroups = describeAssignedGroups(masterList);
+    const batches = buildKeywordReviewBatches(groups);
+    const taskId = runBackgroundTask<ArchitectBackgroundResult>({
+      type: "keyword_review",
+      label: "Revisar repartição das keywords com IA",
+      execute: async update => {
+        const reviews: KeywordArticleReview[] = [];
+        for (let index = 0; index < batches.length; index += 1) {
+          update({ message: `Revisando lote ${index + 1} de ${batches.length} sem gerar DNA...`, current: index, total: batches.length });
+          reviews.push(await callStrategicApi<KeywordArticleReview>("/api/revalidate-structure", {
+            focusGroups: batches[index],
+            articleCatalog: buildRelevantArticleCatalog(currentGroups, batches[index]),
+            logicalRecommendations: buildLogicalKeywordRecommendations(currentGroups, batches[index]),
+            brand: brandContext,
+          }));
+        }
+        update({ message: "Repartição revisada; aguardando decisão humana.", current: batches.length, total: batches.length });
+        return { kind: "keyword_review", review: mergeKeywordArticleReviews(reviews), batchCount: batches.length };
+      },
+    });
+    if (!taskId) showNotification("error", "Não foi possível iniciar a revisão das keywords.");
+  };
+
+  const handleGenerateArticleDnas = () => {
+    const groups = selectedStrategicGroups();
+    if (!groups.length) {
+      showNotification("error", "Selecione ao menos um artigo para gerar DNA.");
+      return;
+    }
+    const taskId = runBackgroundTask<ArchitectBackgroundResult>({
+      type: "article_dna",
+      label: "Gerar ArticleDNA artigo por artigo",
+      execute: async update => {
+        const versions: VersionEnvelope<ArticleDNA>[] = [];
+        const events: VersionStatusEvent[] = [];
+        for (let index = 0; index < groups.length; index += 1) {
+          update({ message: `Gerando ArticleDNA ${index + 1} de ${groups.length}...`, current: index, total: groups.length });
+          const batch = await callStrategicApi<{ versions: VersionEnvelope<ArticleDNA>[]; events: VersionStatusEvent[] }>("/api/arquiteto/article-dna", {
+            groups: [groups[index]], brand: brandContext,
+          });
+          if (batch.versions.length !== 1 || batch.events.length < 1) {
+            throw new Error(`O artigo ${index + 1} nao retornou um ArticleDNA completo. Nada foi aplicado.`);
+          }
+          versions.push(...batch.versions); events.push(...batch.events);
+        }
+        if (versions.length !== groups.length) {
+          throw new Error(`A IA concluiu ${versions.length} de ${groups.length} ArticleDNAs. Nada foi aplicado.`);
+        }
+        update({ message: "ArticleDNAs disponíveis na planilha para pente-fino.", current: groups.length, total: groups.length });
+        return { kind: "article_dna", versions, events };
+      },
+    });
+    if (!taskId) showNotification("error", "Não foi possível iniciar a geração de ArticleDNA.");
+  };
+
+  const handleGenerateSiloDnas = () => {
+    const groups = selectedStrategicGroups();
+    if (!groups.length) {
+      showNotification("error", "Selecione artigos dos silos que deseja analisar.");
+      return;
+    }
+    const siloMap = new Map<string, { id: string; name: string; articleVersions: VersionEnvelope<ArticleDNA>[] }>();
+    for (const group of groups) {
+      if (!group.suggestedSiloId) continue;
+      const articleVersion = acceptedArticleDnas[group.publishedAnchorId || group.id];
+      if (!articleVersion || effectiveVersionStatus(articleVersion.versionId, versionEvents) !== "approved") continue;
+      const id = String(group.suggestedSiloId);
+      const current = siloMap.get(id) || { id, name: group.suggestedSiloName || "Silo", articleVersions: [] };
+      current.articleVersions.push(articleVersion);
+      siloMap.set(id, current);
+    }
+    if (!siloMap.size) {
+      showNotification("error", "Aceite primeiro o ArticleDNA dos artigos selecionados e confirme o silo.");
+      return;
+    }
+    const silos = [...siloMap.values()];
+    const taskId = runBackgroundTask<ArchitectBackgroundResult>({
+      type: "silo_dna",
+      label: "Gerar SiloDNA silo por silo",
+      execute: async update => {
+        const versions: VersionEnvelope<SiloDNA>[] = [];
+        const events: VersionStatusEvent[] = [];
+        for (let index = 0; index < silos.length; index += 1) {
+          update({ message: `Gerando SiloDNA ${index + 1} de ${silos.length}...`, current: index, total: silos.length });
+          const batch = await callStrategicApi<{ versions: VersionEnvelope<SiloDNA>[]; events: VersionStatusEvent[] }>("/api/arquiteto/silo-dna", {
+            silos: [silos[index]], brand: brandContext,
+          });
+          if (batch.versions.length !== 1 || batch.events.length < 1) {
+            throw new Error(`O silo ${index + 1} nao retornou um SiloDNA completo. Nada foi aplicado.`);
+          }
+          versions.push(...batch.versions); events.push(...batch.events);
+        }
+        update({ message: "SiloDNAs disponíveis na planilha para pente-fino.", current: silos.length, total: silos.length });
+        return { kind: "silo_dna", versions, events };
+      },
+    });
+    if (!taskId) showNotification("error", "Não foi possível iniciar a geração de SiloDNA.");
+  };
+
+  useEffect(() => {
+    if (loading) return;
+    const task = architectTasks.find(candidate => candidate.status === "completed" && !candidate.consumed && candidate.result);
+    if (!task) return;
+    const result = task.result as ArchitectBackgroundResult;
+    if (result.kind === "logical_grouping") {
+      pushMasterHistory(masterListRef.current, "Processar lógica sem IA e agrupar keywords em artigos");
+      setProvisionalGroups(result.groups);
+      setMasterList(result.regrouped);
+      showNotification("success", `${result.groups.length} artigo(s) organizados pela lógica sem IA, com no máximo 6 keywords cada. Tarefa terminada.`);
+    } else if (result.kind === "keyword_review") {
+      const currentMasterList = masterListRef.current;
+      masterHistory.capture("Revisão da repartição de keywords pela IA", { masterList: currentMasterList, customSlugs, customHierarquias, articleVersions: acceptedArticleDnas, siloVersions: acceptedSiloDnas, versionEvents, aiReviewAnnotations });
+      const next = applyKeywordArticleReview(currentMasterList, result.review);
+      const nextAnnotations = next.map(keyword => keyword.aiReviewAnnotation)
+        .filter((annotation): annotation is AIReviewAnnotation => Boolean(annotation));
+      setMasterList(next);
+      setProvisionalGroups(describeAssignedGroups(next));
+      addAiReviewAnnotations(nextAnnotations);
+      try {
+        const annotations = [...new Map([...aiReviewAnnotations, ...nextAnnotations].map(annotation => [annotation.id, annotation])).values()];
+        const recovery = ArchitectReviewRecoverySchema.parse({ schemaVersion: 1, importedKeywordSignature,
+          masterList: next, provisionalGroups: describeAssignedGroups(next), customSlugs, customHierarchies: customHierarquias,
+          annotations, savedAt: new Date().toISOString() });
+        void writeBrowserArtifact(architectReviewRecoveryKey(selectedBrandId), recovery)
+          .then(() => showNotification("success", `${result.review.decisions.length} keyword(s) revisadas em ${result.batchCount} lote(s) e salvas. Confira as marcações da IA.`))
+          .catch(() => showNotification("error", "A Revisão IA foi aplicada, mas o navegador recusou o salvamento durável."));
+      } catch { showNotification("error", "A Revisão IA retornou dados que não puderam ser preparados para salvamento."); }
+    } else if (result.kind === "article_dna") {
+      if (!result.versions.length || !result.events.length) {
+        showNotification("error", "A tarefa terminou sem produzir ArticleDNA. Nenhum status foi alterado; execute novamente.");
+        consumeBackgroundTask(task.id);
+        return;
+      }
+      const nextVersions = { ...acceptedArticleDnas, ...Object.fromEntries(result.versions.map(item => [item.payload.articleId, item])) };
+      const nextEvents = [...versionEvents, ...result.events];
+      setAcceptedArticleDnas(nextVersions);
+      addVersionEvents(result.events);
+      try {
+        const versionIds = new Set(Object.values(nextVersions).map(version => version.versionId));
+        const recovery = ArchitectArticleDnaRecoverySchema.parse({ schemaVersion: 1, versions: nextVersions,
+          events: nextEvents.filter(event => versionIds.has(event.versionId)), savedAt: new Date().toISOString() });
+        void writeBrowserArtifact(architectArticleDnaRecoveryKey(selectedBrandId), recovery)
+          .then(() => showNotification("success", `${result.versions.length} ArticleDNA(s) aplicados e salvos. O status agora aguarda aprovação.`))
+          .catch(() => showNotification("error", "O ArticleDNA foi aplicado, mas o navegador recusou o salvamento durável."));
+      } catch { showNotification("error", "O ArticleDNA retornado não pôde ser validado para salvamento."); }
+    } else if (result.kind === "silo_dna") {
+      if (!result.versions.length || !result.events.length) {
+        showNotification("error", "A tarefa terminou sem produzir SiloDNA. Nenhum resultado foi aplicado.");
+        consumeBackgroundTask(task.id);
+        return;
+      }
+      const nextVersions = { ...acceptedSiloDnas, ...Object.fromEntries(result.versions.map(item => [item.payload.siloId, item])) };
+      const nextEvents = [...versionEvents, ...result.events];
+      setAcceptedSiloDnas(nextVersions);
+      addVersionEvents(result.events);
+      try {
+        const versionIds = new Set(Object.values(nextVersions).map(version => version.versionId));
+        const recovery = ArchitectSiloDnaRecoverySchema.parse({ schemaVersion: 1, versions: nextVersions,
+          events: nextEvents.filter(event => versionIds.has(event.versionId)), savedAt: new Date().toISOString() });
+        void writeBrowserArtifact(architectSiloDnaRecoveryKey(selectedBrandId), recovery)
+          .then(() => showNotification("success", `${result.versions.length} SiloDNA(s) aplicados e salvos. Revise os resumos na planilha.`))
+          .catch(() => showNotification("error", "O SiloDNA foi aplicado, mas o navegador recusou o salvamento durável."));
+      } catch { showNotification("error", "O SiloDNA retornado não pôde ser validado para salvamento."); }
+    }
+    consumeBackgroundTask(task.id);
+  }, [architectTasks, loading, consumeBackgroundTask, setAcceptedArticleDnas, setAcceptedSiloDnas, addVersionEvents, addAiReviewAnnotations, masterHistory.capture]);
 
   const toggleExpand = (id: string) => {
     setExpandedIds(prev => {
@@ -683,7 +1123,7 @@ export default function ArquitetoPage() {
   };
 
   const updateClusterSilo = (clusterId: number, siloId: any, siloName: string | null) => {
-    pushMasterHistory();
+    pushMasterHistory(masterList, `Mover artigo para ${siloName || "Sem Grupo"}`);
     setMasterList(prev => prev.map(kw =>
       kw.clusterId === clusterId
         ? { ...kw, siloId, silo_id: siloId, siloName }
@@ -722,30 +1162,34 @@ export default function ArquitetoPage() {
       showNotification("error", "Silos com artigos publicados nao podem ser apagados.");
       return;
     }
-    pushMasterHistory();
-    const clusterIds = new Set(group.articles.map(art => art.clusterId));
-    setMasterList(prev => prev.map(kw =>
-      clusterIds.has(kw.clusterId)
-        ? { ...kw, siloId: null, silo_id: null, siloName: null }
-        : kw
-    ));
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      group.articles.forEach(art => next.delete(art.id));
-      return next;
-    });
-    showNotification("success", "Silo removido da estrutura local; artigos voltaram para Sem Grupo.");
+    setPendingDangerAction({ type: "remove-silo", clusterIds: group.articles.map(art => String(art.clusterId)),
+      articleIds: group.articles.map(art => String(art.id)), siloName: group.articles[0]?.siloName || "Silo sem nome" });
   };
 
   const handleDetachSupportKeyword = (keyword: any) => {
     const nextClusterId = `manual-${keyword.id}-${Date.now()}`;
-    pushMasterHistory();
+    pushMasterHistory(masterList, `Separar a keyword ${keyword.keyword} do artigo`);
     setMasterList(prev => prev.map(kw =>
       kw.id === keyword.id
         ? { ...kw, clusterId: nextClusterId }
         : kw
     ));
     showNotification("success", "Keyword secundaria removida do artigo sem apagar o registro.");
+  };
+
+  const markAiReviewChecked = (article: AiReviewArticle) => {
+    const articleKeywords = article.mainKeywordObj
+      ? [article.mainKeywordObj, ...article.supportKeywords]
+      : article.supportKeywords;
+    const keywordIds = new Set(articleKeywords.map(keyword => keyword.id));
+    setMasterList(previous => previous.map(keyword => keywordIds.has(keyword.id) && keyword.aiReviewAnnotation
+      ? { ...keyword, aiReviewAnnotation: { ...keyword.aiReviewAnnotation, reviewState: "reviewed" } }
+      : keyword));
+    const reviewedAnnotations: AIReviewAnnotation[] = articleKeywords.flatMap(keyword => keyword.aiReviewAnnotation
+      ? [{ ...keyword.aiReviewAnnotation, reviewState: "reviewed" as const }]
+      : []);
+    addAiReviewAnnotations(reviewedAnnotations);
+    showNotification("success", "Anotações da IA marcadas como revisadas. O status do artigo continua separado.");
   };
 
   const articlesList = useMemo(() => {
@@ -799,6 +1243,9 @@ export default function ArquitetoPage() {
     // Mapeamento final para objetos do tipo Artigo
     const articles = Array.from(clustersMap.values()).map(c => {
       const main = c.mainKeyword;
+      const aiReviewAnnotations: AIReviewAnnotation[] = [main, ...c.supportKeywords]
+        .map(keyword => keyword?.aiReviewAnnotation)
+        .filter((annotation): annotation is AIReviewAnnotation => Boolean(annotation));
       return {
         id: `art-${c.clusterId}`,
         clusterId: c.clusterId,
@@ -815,6 +1262,7 @@ export default function ArquitetoPage() {
         analiseSemantica: main?.analise_semantica || null,
         supportKeywords: c.supportKeywords,
         mainKeywordObj: main,
+        aiReviewAnnotations,
         briefingId: main?.briefingId || `temp-${c.clusterId}`
       };
     });
@@ -841,6 +1289,17 @@ export default function ArquitetoPage() {
     });
   }, [masterList, customHierarquias]);
 
+  const articleWorkflowStatus = useCallback((art: (typeof articlesList)[number]) => {
+    if (art.isPublished) return "published";
+    const articleEntityId = art.mainKeywordObj?.provisionalGroupId || art.briefingId;
+    if (articleEntityId && radarItems.some(item => item.articleId === articleEntityId)) return "sent_radar";
+    const articleVersion = articleEntityId ? acceptedArticleDnas[articleEntityId] : undefined;
+    const versionStatus = articleVersion ? effectiveVersionStatus(articleVersion.versionId, versionEvents) : null;
+    if (versionStatus === "approved") return "approved";
+    if (articleVersion && versionStatus !== "rejected" && versionStatus !== "superseded") return "awaiting_approval";
+    return "draft";
+  }, [acceptedArticleDnas, versionEvents, radarItems]);
+
   // ── Filtros aplicados sobre a lista de artigos
   const filteredArticles = useMemo(() => {
     return articlesList.filter(art => {
@@ -859,9 +1318,70 @@ export default function ArquitetoPage() {
           if (!h.includes(f)) return false;
         }
       }
+      if (filterStatus !== "Todos" && articleWorkflowStatus(art) !== filterStatus) return false;
       return true;
     });
-  }, [articlesList, searchQuery, filterHierarquia]);
+  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus]);
+
+  const sendSelectedApprovedToRadar = () => {
+    const articleIds = articlesList.filter(article => selectedIds.has(article.id))
+      .map(article => article.isPublished
+        ? article.mainKeywordObj?.id
+        : article.mainKeywordObj?.provisionalGroupId || article.briefingId)
+      .filter((id): id is string => Boolean(id) && Boolean(acceptedArticleDnas[id]));
+    if (!articleIds.length) { showNotification("error", "Selecione artigos com ArticleDNA aprovado."); return; }
+    const result = importApprovedToRadar(articleIds);
+    showNotification("success", `${result.imported} artigo(s) enviado(s) ao Radar; ${result.skipped} já existente(s) ou inválido(s).`);
+  };
+
+  const prepareSelectedLogicalArticleDnas = async () => {
+    const actorId = session?.user?.id || "human-reviewer";
+    const versions: VersionEnvelope<ArticleDNA>[] = [];
+    const proposedEvents: VersionStatusEvent[] = [];
+    for (const group of selectedStrategicGroups()) {
+      if (group.publishedAnchorId) continue;
+      const entityId = group.id;
+      const current = acceptedArticleDnas[entityId];
+      const currentStatus = current ? effectiveVersionStatus(current.versionId, versionEvents) : null;
+      if (current && currentStatus !== "rejected" && currentStatus !== "superseded") { versions.push(current); continue; }
+      const payload = deterministicArticleDnaPayload(group, selectedBrandId);
+      const version = await createVersionEnvelope({ entityId, versionNumber: (current?.versionNumber || 0) + 1,
+        previousVersionId: current?.versionId || null, origin: "system", changeReason: "ArticleDNA-base criado pelo agrupamento lógico aprovado pelo usuário.", createdBy: actorId, payload });
+      versions.push(version);
+      proposedEvents.push(createStatusEvent(version.versionId, "proposed", actorId, "Base lógica pronta para decisão humana."));
+    }
+    if (versions.length) setAcceptedArticleDnas(previous => ({ ...previous, ...Object.fromEntries(versions.map(version => [version.payload.articleId, version])) }));
+    if (proposedEvents.length) addVersionEvents(proposedEvents);
+    return { actorId, versions, proposedEvents };
+  };
+
+  const changeSelectedArticleStatus = async (target: string) => {
+    pushMasterHistory(masterList, `Alterar status de ${selectedIds.size} artigo(s) para ${target}`);
+    setSelectedStatusAction(target);
+    if (target === "awaiting_approval") {
+      const prepared = await prepareSelectedLogicalArticleDnas();
+      showNotification(prepared.versions.length ? "success" : "error", prepared.versions.length
+        ? `${prepared.versions.length} artigo(s) enviado(s) para aprovação humana, sem chamar IA.`
+        : "Nenhum artigo novo válido foi encontrado na seleção.");
+    } else if (target === "approved") {
+      const prepared = await prepareSelectedLogicalArticleDnas();
+      const candidates = prepared.versions.filter(version => effectiveVersionStatus(version.versionId, [...versionEvents, ...prepared.proposedEvents]) !== "approved");
+      if (!candidates.length) showNotification("error", "Os artigos selecionados já estão aprovados ou não correspondem a grupos novos válidos.");
+      else {
+        const approvedEvents = candidates.map(version => createStatusEvent(version.versionId, "approved", prepared.actorId, "Status aprovado manualmente na barra de seleção."));
+        const combinedEvents = [...versionEvents, ...prepared.proposedEvents, ...approvedEvents];
+        const eligible = candidates.filter(version => articleApprovalIssues(version, combinedEvents).length === 0);
+        const eligibleIds = new Set(eligible.map(version => version.versionId));
+        addVersionEvents(approvedEvents.filter(event => eligibleIds.has(event.versionId)));
+        const blocked = candidates.filter(version => !eligibleIds.has(version.versionId));
+        const blockers = [...new Set(blocked.flatMap(version => articleApprovalIssues(version, combinedEvents).filter(issue => !issue.includes("aprovação humana"))))];
+        showNotification(eligible.length ? "success" : "error", `${eligible.length} artigo(s) aprovado(s)${blocked.length ? `. ${blocked.length} pendente(s): ${blockers.join(" ")}` : " para o Radar."}`);
+      }
+    } else if (target === "sent_radar") {
+      sendSelectedApprovedToRadar();
+    }
+    setSelectedStatusAction("");
+  };
 
   // ── Mapeamento estável de cores por Artigo (Cluster) dentro de cada Silo
   const groupedArticles = useMemo(() => {
@@ -907,14 +1427,10 @@ export default function ArquitetoPage() {
   const handleDeleteSelectedNonPublished = () => {
     if (selectedIds.size === 0) return;
     const selectedArticles = articlesList.filter(art => selectedIds.has(art.id));
-    const selectedClusterIds = new Set(selectedArticles.map(art => art.clusterId));
+    const selectedClusterIds = selectedArticles.filter(art => !art.isPublished).map(art => String(art.clusterId));
     const protectedCount = selectedArticles.filter(art => art.isPublished).length;
-    pushMasterHistory();
-    setMasterList(prev => prev.filter(item => item.status === "publicado" || !selectedClusterIds.has(item.clusterId)));
-    setSelectedIds(new Set());
-    showNotification("success", protectedCount > 0
-      ? "Novos selecionados removidos. Publicados foram preservados."
-      : "Itens novos selecionados removidos.");
+    if (!selectedClusterIds.length) { showNotification("error", "Nenhum artigo novo pode ser apagado; publicados estão protegidos."); return; }
+    setPendingDangerAction({ type: "delete-selected", clusterIds: selectedClusterIds, count: selectedClusterIds.length, protectedCount });
   };
 
   const handleResetNonPublished = () => {
@@ -924,14 +1440,46 @@ export default function ArquitetoPage() {
       return;
     }
 
-    const ok = window.confirm(`Limpar ${nonPublishedCount} item(ns) nao-publicado(s)? Os publicados serao preservados.`);
-    if (!ok) return;
-
-    pushMasterHistory();
-    setMasterList(prev => prev.filter(item => item.status === "publicado"));
-    setSelectedIds(new Set());
-    showNotification("success", "Reset aplicado: apenas nao-publicados foram removidos.");
+    setMenuOpen(false);
+    setPendingDangerAction({ type: "reset-new", count: nonPublishedCount });
   };
+
+  const confirmDangerAction = () => {
+    if (!pendingDangerAction) return;
+    pushMasterHistory(masterList, pendingDangerAction.type === "reset-new" ? "Resetar organização dos artigos novos" : pendingDangerAction.type === "delete-selected" ? "Apagar artigos novos selecionados" : `Remover silo ${pendingDangerAction.siloName}`);
+    if (pendingDangerAction.type === "delete-selected") {
+      const clusterIds = new Set(pendingDangerAction.clusterIds);
+      setMasterList(previous => previous.filter(item => item.status === "publicado" || !clusterIds.has(String(item.clusterId))));
+      setSelectedIds(new Set());
+      showNotification("success", pendingDangerAction.protectedCount ? "Artigos novos removidos; publicados foram preservados." : "Artigos novos removidos da organização local.");
+    } else if (pendingDangerAction.type === "reset-new") {
+      setMasterList(previous => previous.filter(item => item.status === "publicado"));
+      setSelectedIds(new Set());
+      showNotification("success", "Reset aprovado: somente itens não-publicados foram removidos.");
+    } else {
+      const clusterIds = new Set(pendingDangerAction.clusterIds);
+      setMasterList(previous => previous.map(keyword => clusterIds.has(String(keyword.clusterId)) ? { ...keyword, siloId: null, silo_id: null, siloName: null } : keyword));
+      setSelectedIds(previous => { const next = new Set(previous); pendingDangerAction.articleIds.forEach(id => next.delete(id)); return next; });
+      showNotification("success", "Silo removido da estrutura local; artigos voltaram para Sem Grupo.");
+    }
+    setPendingDangerAction(null);
+  };
+
+  const importApprovedKeywords = async (ids: string[]) => {
+    pushMasterHistory(masterList, `Importar ${ids.length} keyword(s) aprovadas do Minerador`);
+    const { imported, allIds } = importApprovedKeywordsToArchitect(ids);
+    setKeywordImportOpen(false);
+    await fetchMasterList(new Set(allIds));
+    showNotification("success", `${imported} keyword(s) aprovada(s) importada(s) para o Arquiteto.`);
+  };
+
+  const dangerApproval = pendingDangerAction?.type === "reset-new"
+    ? { title: "Resetar a organização dos artigos novos", description: `Esta ação removerá ${pendingDangerAction.count} keyword(s) não-publicada(s) da organização atual.`, impact: ["A organização local dos artigos novos será removida.", "Artigos publicados continuarão protegidos.", "A ação ficará disponível no histórico local para desfazer."], phrase: `RESETAR ${pendingDangerAction.count}`, label: "Aprovar reset" }
+    : pendingDangerAction?.type === "delete-selected"
+      ? { title: "Apagar artigos novos selecionados", description: `Esta ação removerá ${pendingDangerAction.count} artigo(s) novo(s) da estrutura atual.`, impact: ["Keywords e artigos novos selecionados sairão da organização local.", `${pendingDangerAction.protectedCount} publicado(s) permanecerão protegidos.`, "Nenhum registro publicado será alterado."], phrase: `APAGAR ${pendingDangerAction.count}`, label: "Aprovar exclusão" }
+      : pendingDangerAction?.type === "remove-silo"
+        ? { title: `Remover o silo “${pendingDangerAction.siloName}”`, description: "O silo será retirado da organização local e seus artigos voltarão para Sem Grupo.", impact: ["Os artigos não serão apagados.", "As relações locais com este silo serão removidas.", "Silos com publicados não podem chegar a esta confirmação."], phrase: "REMOVER SILO", label: "Aprovar remoção" }
+        : null;
 
   if (sessionStatus === "loading" || profileLoading) {
     return (
@@ -954,7 +1502,7 @@ export default function ArquitetoPage() {
   }
 
   return (
-    <div className="flex-1 bg-[#06070a] flex flex-col overflow-hidden font-mono text-xs relative select-none">
+    <div className="relative flex h-screen min-h-0 flex-col overflow-hidden bg-[#06070a] font-mono text-xs select-none">
 
       {/* ── Toast ── */}
       {notification && (
@@ -969,31 +1517,15 @@ export default function ArquitetoPage() {
       )}
 
       {/* ── BARRA UNICA: FERRAMENTAS + MENU HAMBURGER DE NAVEGABILIDADE ── */}
-      <div className="bg-[#0b0c10] border-b border-slate-900 px-3 h-10 flex items-center justify-between shrink-0 z-30">
+      <div className="sticky top-0 bg-[#0b0c10] border-b border-slate-900 px-3 h-10 flex items-center justify-between shrink-0 z-40">
         
         {/* Esquerda: Identidade + Busca + Filtros + Ferramentas da Planilha (Visíveis) */}
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1">
           <span className="text-slate-500 font-bold uppercase tracking-widest text-[10px] shrink-0">Arquiteto</span>
           <span className="text-slate-800 select-none shrink-0">·</span>
 
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={undoMasterList}
-              disabled={masterUndoStack.length === 0}
-              className="p-1 text-slate-600 hover:text-slate-300 border border-slate-800 hover:border-slate-650 rounded transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Voltar uma alteracao"
-            >
-              <Undo2 className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={redoMasterList}
-              disabled={masterRedoStack.length === 0}
-              className="p-1 text-slate-600 hover:text-slate-300 border border-slate-800 hover:border-slate-650 rounded transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Refazer alteracao"
-            >
-              <Redo2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          <HistoryControls entries={masterHistory.entries} canUndo={masterHistory.canUndo} canRedo={masterHistory.canRedo}
+            onUndo={undoMasterList} onRedo={redoMasterList} onRestore={masterHistory.restore} compact/>
 
           <span className="text-slate-800 select-none shrink-0">|</span>
 
@@ -1014,38 +1546,43 @@ export default function ArquitetoPage() {
             <option value="Reforço Narrativo" className="bg-[#0b0c10]">Reforço Narrativo</option>
           </select>
 
-          <span className="text-slate-800 select-none shrink-0">|</span>
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+            className="bg-transparent border border-slate-800 rounded px-1.5 py-0.5 text-[10px] text-slate-400 focus:outline-none cursor-pointer shrink-0">
+            <option value="Todos" className="bg-[#0b0c10]">Status: Todos</option>
+            <option value="draft" className="bg-[#0b0c10]">Em processo</option>
+            <option value="awaiting_approval" className="bg-[#0b0c10]">Aguardando aprovação</option>
+            <option value="approved" className="bg-[#0b0c10]">Aprovado</option>
+            <option value="sent_radar" className="bg-[#0b0c10]">Importado no Radar</option>
+            <option value="published" className="bg-[#0b0c10]">Publicado</option>
+          </select>
 
-          {/* Carregar */}
-          <button onClick={fetchMasterList} disabled={loadingKeywords}
-            className="flex items-center gap-1 border border-slate-800 hover:border-slate-650 hover:text-slate-200 text-slate-400 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-40 cursor-pointer shrink-0"
-            title="Sincronizar artigos">
-            {loadingKeywords ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            <span>Carregar</span>
-          </button>
+          <CompactSavedViews
+            userId={session?.user?.email || "usuario-local"}
+            brandId={selectedBrandId}
+            module="arquiteto"
+            values={{ searchQuery, filterHierarquia, filterStatus }}
+            onApply={view => { setSearchQuery(view.searchQuery || ""); setFilterHierarquia(view.filterHierarquia || "Todos"); setFilterStatus(view.filterStatus || "Todos"); }}
+          />
 
           {/* Gerar IA */}
-          <button onClick={() => handlePipelineStep("Revalidar Estrutura")} disabled={masterList.length === 0 || generatingStrategic}
-            className="flex items-center gap-1 border border-indigo-900/60 hover:border-indigo-700 text-indigo-400 hover:text-indigo-300 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-40 cursor-pointer shrink-0"
+          <button onClick={processDeterministicStructure} disabled={masterList.length === 0 || generatingStrategic}
+            className="flex items-center gap-1 border border-cyan-900/60 hover:border-cyan-700 text-cyan-400 hover:text-cyan-300 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-40 cursor-pointer shrink-0"
             title="Gerar Dossiês IA">
-            {generatingStrategic ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
-            <span>Revalidar Estrutura (IA)</span>
+            {activeLogicalTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Network className="w-3 h-3" />}
+            <span>{activeLogicalTask ? "Processando lógica…" : "Processar logica (sem IA)"}</span>
           </button>
 
-          <button onClick={() => handlePipelineStep("Gerar DNA dos Artigos")}
-            disabled={masterList.length === 0 || generatingStrategic}
-            className="flex items-center gap-1 border border-indigo-900/60 hover:border-indigo-700 text-indigo-400 hover:text-indigo-300 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-40 cursor-pointer shrink-0"
-            title="Etapa 2: IA cria o DNA individual dos artigos">
-            <Zap className="w-3 h-3" />
-            <span>Gerar DNA dos Artigos (IA)</span>
-          </button>
+          {(activeLogicalTask?.message || deterministicConflicts.length > 0) && (
+            <span className="text-[9px] text-amber-400 whitespace-nowrap">
+              {activeLogicalTask?.message || `${deterministicConflicts.length} conflito(s) logico(s)`}
+            </span>
+          )}
 
-          <button onClick={() => handlePipelineStep("Gerar DNA dos Silos")}
-            disabled={masterList.length === 0 || generatingStrategic}
-            className="flex items-center gap-1 border border-emerald-900/60 hover:border-emerald-700 text-emerald-400 hover:text-emerald-300 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-40 cursor-pointer shrink-0"
-            title="Etapa 3: IA define estrategia macro e linkagem do Silo">
-            <Zap className="w-3 h-3" />
-            <span>Gerar DNA dos Silos (IA)</span>
+          <button onClick={() => { setKeywordImportOpen(true); void fetchMasterList(); }}
+            className="flex items-center gap-1 border border-emerald-900/60 hover:border-emerald-700 text-emerald-400 hover:text-emerald-300 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors cursor-pointer shrink-0"
+            title="Selecionar keywords aprovadas no Minerador">
+            <Plus className="w-3 h-3" />
+            <span>Importar do Minerador</span>
           </button>
 
           {/* Novo Silo */}
@@ -1064,20 +1601,6 @@ export default function ArquitetoPage() {
             <span>Exportar</span>
           </button>
 
-          <button onClick={handleDeleteSelectedNonPublished}
-            disabled={selectedIds.size === 0}
-            className="flex items-center gap-1 border border-slate-800 hover:border-rose-800 text-rose-500 hover:text-rose-400 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer shrink-0"
-            title="Remove apenas itens novos selecionados; publicados sao preservados">
-            <Trash2 className="w-3 h-3" />
-            <span>Apagar Selecionados</span>
-          </button>
-
-          <button onClick={handleResetNonPublished}
-            className="flex items-center gap-1 border border-rose-900/60 hover:border-rose-700 text-rose-400 hover:text-rose-300 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors cursor-pointer shrink-0"
-            title="Limpar importacoes erradas mantendo todos os publicados">
-            <RefreshCw className="w-3 h-3" />
-            <span>Limpar Nao-Publicados (Reset)</span>
-          </button>
         </div>
 
         {/* Direita: Contador de Artigos + Dropdown Hamburger de NAVEGABILIDADE */}
@@ -1162,6 +1685,14 @@ export default function ArquitetoPage() {
                   )}
                 </div>
 
+                <div className="border-t border-rose-950/70 py-1">
+                  <p className="px-3.5 py-1 text-[8px] font-bold uppercase tracking-widest text-rose-700">Zona de segurança</p>
+                  <button onClick={handleResetNonPublished}
+                    className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[10px] text-rose-400 transition-colors hover:bg-rose-950/15">
+                    <RefreshCw className="h-3.5 w-3.5"/><span>Resetar somente não-publicados…</span>
+                  </button>
+                </div>
+
                 {/* Logout Button */}
                 <div className="border-t border-slate-850 py-1 bg-slate-950/20">
                   <button onClick={() => { signOut(); setMenuOpen(false); }}
@@ -1186,15 +1717,16 @@ export default function ArquitetoPage() {
           <div className="flex flex-col items-center justify-center h-full gap-2.5 text-slate-700">
             <span className="text-[11px]">
               {masterList.length === 0
-                ? "Abra o menu (≡) e clique em Carregar Artigos."
+                ? "Nenhum artigo disponível. Use Importar do Minerador."
                 : "Nenhum artigo corresponde aos filtros."}
             </span>
           </div>
         ) : (
-          <div className="w-full overflow-x-auto">
-            <table className="w-full border-collapse min-w-[900px] text-left">
-              <thead className="sticky top-0 z-20">
+          <div className="w-full">
+            <table className="w-full min-w-[1320px] border-separate border-spacing-0 text-left">
+              <thead className="sticky top-0 z-30 bg-[#080a0f] shadow-[0_1px_0_rgba(51,65,85,0.8)]">
                 <tr className="bg-[#080a0f] text-slate-500 text-[9px] font-bold uppercase tracking-widest border-b border-slate-800/80">
+                  <th className="sticky left-0 z-40 w-10 border-r border-slate-850 bg-[#080a0f] px-2 py-2 text-right">#</th>
                   <th className="py-2 px-2.5 w-16">
                     <div className="relative flex items-center gap-1" ref={selectionMenuRef}>
                       <input
@@ -1257,6 +1789,10 @@ export default function ArquitetoPage() {
                   <th className="py-2 px-2.5 w-24">Status</th>
                   <th className="py-2 px-3 w-28">Hierarquia</th>
                   <th className="py-2 px-3">Keyword Principal (Pilar)</th>
+                  <th className="w-24 px-3 py-2 text-center">KeywordDNAs</th>
+                  <th className="w-28 px-3 py-2 text-center">Revisão IA</th>
+                  <th className="w-24 px-3 py-2 text-center">ArticleDNA</th>
+                  <th className="w-24 px-3 py-2 text-center">SiloDNA</th>
                   <th className="py-2 px-3 w-52 text-right">Ações</th>
                 </tr>
               </thead>
@@ -1272,7 +1808,7 @@ export default function ArquitetoPage() {
                   return (
                     <React.Fragment key={group.key}>
                       <tr className={`bg-gray-900 border-l-4 ${siloColor.border} border-y border-slate-800/80`}>
-                        <td colSpan={6} className="px-3 py-2.5">
+                        <td colSpan={11} className="px-3 py-2.5">
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0 flex items-center gap-2">
                               <input
@@ -1292,6 +1828,7 @@ export default function ArquitetoPage() {
                                 <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-wider text-slate-400 ${siloColor.countBg} ${siloColor.countBorder}`}>
                                   {group.articles.length} {group.articles.length === 1 ? "artigo" : "artigos"}
                                 </span>
+                                <SiloDnaSummary version={group.siloId ? acceptedSiloDnas[String(group.siloId)] : undefined} />
                                 {groupHasPublished && (
                                   <span className="shrink-0 rounded border border-slate-700/70 bg-slate-950 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-slate-500">
                                     Publicados protegidos
@@ -1315,13 +1852,24 @@ export default function ArquitetoPage() {
                       {group.articles.map((art) => {
                   const rowBg     = siloColor.rowBg;
                   const isExpanded = expandedIds.has(art.id);
-                  const currentSlug = customSlugs[art.id] ?? art.slug;
-                  const activeTab = activeTabs[art.id] || "suporte";
+                   const currentSlug = customSlugs[art.id] ?? art.slug;
+                   const activeTab = activeTabs[art.id] || "suporte";
+                   const workflowStatus = articleWorkflowStatus(art);
+                   const articleEntityId = art.isPublished
+                     ? art.mainKeywordObj?.id
+                     : art.mainKeywordObj?.provisionalGroupId || art.briefingId;
+                   const articleDnaVersion = articleEntityId ? acceptedArticleDnas[articleEntityId] : undefined;
+                   const siloDnaVersion = art.siloId ? acceptedSiloDnas[String(art.siloId)] : undefined;
+                   const pendingAiReview = art.aiReviewAnnotations.some(annotation => annotation.reviewState === "pending_fine_review");
 
                   return (
                     <React.Fragment key={art.id}>
                       {/* Linha do Artigo */}
-                      <tr className={`border-b border-slate-900/40 transition-colors ${rowBg} ${art.isPublished ? "opacity-60" : "hover:brightness-105"}`}>
+                      <tr className={`border-b border-slate-900/40 transition-colors ${rowBg} ${art.isPublished ? "opacity-60" : "hover:brightness-105"} ${pendingAiReview ? "border-l-2 border-l-violet-500" : ""}`}>
+
+                        <td className="sticky left-0 z-10 w-10 border-r border-slate-850 bg-[#080a0f] px-2 py-2 text-right text-[9px] tabular-nums text-slate-500">
+                          {filteredArticles.findIndex(candidate => candidate.id === art.id) + 1}
+                        </td>
 
                         <td className="py-2 px-2.5 text-center">
                           <input
@@ -1343,20 +1891,13 @@ export default function ArquitetoPage() {
 
                         {/* Status */}
                         <td className="py-2 px-2.5">
-                          {art.isPublished ? (
-                            <span className="text-[9.5px] font-bold uppercase tracking-wider text-slate-500 border border-slate-700/60 px-2 py-0.5 rounded">
-                              Publicado
-                            </span>
-                          ) : (
-                            <span className="text-[9.5px] font-bold uppercase tracking-wider text-indigo-400 border border-indigo-900/40 px-2 py-0.5 rounded">
-                              Novo
-                            </span>
-                          )}
+                          <WorkflowStatusBadge status={workflowStatus}/>
                         </td>
 
                         <td className="py-2 px-3">
                           <select
                             value={art.hierarquia}
+                            onFocus={() => pushMasterHistory(masterList, `Editar hierarquia de ${art.keywordPrincipal}`)}
                             onChange={e => setCustomHierarquias(prev => ({
                               ...prev,
                               [art.id]: e.target.value,
@@ -1390,12 +1931,30 @@ export default function ArquitetoPage() {
                               <input
                                 type="text"
                                 value={currentSlug}
+                                onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)}
                                 onChange={e => setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value }))}
                                 className="w-full max-w-[280px] bg-[#06070a]/60 border border-slate-800 hover:border-slate-700 focus:border-blue-500 rounded px-2.5 py-0.5 text-[10.5px] text-blue-400 font-mono focus:outline-none transition-colors"
                               />
                             )}
                           </div>
                         </td>
+
+                        <td className="px-3 py-2 text-center text-[10px] font-bold text-indigo-300">{art.supportKeywords.length + 1}</td>
+
+                        <td className="px-3 py-2 text-center">
+                          {art.aiReviewAnnotations.length > 0 ? (
+                            <button
+                              onClick={() => toggleExpand(art.id)}
+                              className={`rounded border px-2 py-1 text-[8px] font-bold uppercase tracking-wider ${pendingAiReview ? "border-violet-500/40 bg-violet-500/10 text-violet-300" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"}`}
+                              title="Abrir as alterações e anotações aplicadas pela IA"
+                            >
+                              {pendingAiReview ? `IA aplicada · ${art.aiReviewAnnotations.length}` : "Revisado"}
+                            </button>
+                          ) : <span className="text-[9px] text-slate-700">—</span>}
+                        </td>
+
+                        <td className="px-3 py-2 text-center text-[9px] text-slate-400">{articleDnaVersion ? `v${articleDnaVersion.versionNumber}` : "pendente"}</td>
+                        <td className="px-3 py-2 text-center text-[9px] text-slate-400">{siloDnaVersion ? `v${siloDnaVersion.versionNumber}` : "pendente"}</td>
 
                         <td className="py-2 px-3">
                           {!art.isPublished ? (
@@ -1433,8 +1992,35 @@ export default function ArquitetoPage() {
                       {/* Acordeão Expandido do Artigo */}
                       {isExpanded && (
                         <tr className={`${rowBg} border-b border-slate-900/30`}>
-                          <td colSpan={6} className="py-4 px-10">
-                            
+                          <td colSpan={11} className="py-4 px-10">
+                            {art.aiReviewAnnotations.length > 0 && (
+                              <section className="mb-3 rounded border border-violet-500/25 bg-violet-500/[.05] p-3">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-[9px] font-bold uppercase tracking-widest text-violet-300">Alterações da IA aplicadas localmente</p>
+                                    <p className="mt-1 text-[9px] text-slate-500">Use a própria planilha para mover, corrigir ou desfazer. Isto não aprova o artigo para a próxima etapa.</p>
+                                  </div>
+                                  {pendingAiReview && <button onClick={() => markAiReviewChecked(art)} className="rounded border border-violet-500/30 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-violet-300 hover:bg-violet-500/10">Marcar pente-fino concluído</button>}
+                                </div>
+                                <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                                  {art.aiReviewAnnotations.map(annotation => (
+                                    <div key={annotation.id} className="rounded border border-slate-800 bg-[#08090c] p-2.5">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-[8px] font-bold uppercase tracking-wider text-violet-400">{String(annotation.action).replaceAll("_", " ")}</span>
+                                        <span className="text-[8px] font-mono text-slate-600">{Math.round(annotation.confidence * 100)}%</span>
+                                      </div>
+                                      <p className="mt-1 text-[10px] text-slate-300">{annotation.summary}</p>
+                                      {annotation.details.map((detail: string) => <p key={detail} className="mt-1 text-[9px] text-amber-400">• {detail}</p>)}
+                                    </div>
+                                  ))}
+                                </div>
+                              </section>
+                            )}
+                            <ArticleDnaSummary
+                              version={articleDnaVersion}
+                              published={art.isPublished}
+                            />
+
                             {/* Abas do Acordeão */}
                             <div className="flex items-center gap-1 border-b border-slate-800/80 pb-1.5 mb-3.5">
                               <button
@@ -1710,7 +2296,64 @@ export default function ArquitetoPage() {
         )}
       </main>
 
-      {/* ── Modal Criar Silo ── */}
+      {/* Ações que dependem da seleção ficam sempre no rodapé, fora do scroll da planilha. */}
+      {selectedIds.size > 0 && (
+        <footer className="flex shrink-0 items-center justify-between gap-3 overflow-x-auto border-t border-indigo-900/60 bg-[#0b0c10] px-3 py-2 shadow-2xl">
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="rounded bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white">{selectedIds.size}</span>
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">artigos selecionados</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+              Status
+              <select value={selectedStatusAction} onChange={event => void changeSelectedArticleStatus(event.target.value)} disabled={generatingStrategic}
+                className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[10px] font-semibold normal-case text-slate-300 outline-none hover:border-indigo-700 disabled:opacity-40">
+                <option value="" disabled>Mudar status…</option>
+                <option value="awaiting_approval">Enviar para aprovação</option>
+                <option value="approved">Aprovar propostas</option>
+                <option value="sent_radar">Enviar aprovados ao Radar</option>
+              </select>
+            </label>
+            <button onClick={handleRevalidateStructure} disabled={generatingStrategic}
+              title="Revisar somente se cada keyword faz sentido no artigo atual; publicados e silos existentes têm prioridade"
+              className="flex items-center gap-1 rounded border border-violet-900/60 px-3 py-1.5 text-[10px] font-semibold text-violet-300 hover:border-violet-700 disabled:opacity-40">
+              {activeKeywordReviewTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}
+              {activeKeywordReviewTask ? "Agrupando keywords…" : "Agrupar keywords em artigos (IA)"}
+            </button>
+            <button onClick={() => handlePipelineStep("Gerar DNA dos Artigos")} disabled={generatingStrategic} className="flex items-center gap-1 rounded border border-indigo-900/60 px-3 py-1.5 text-[10px] font-semibold text-indigo-300 hover:border-indigo-700 disabled:opacity-40">{activeArticleDnaTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}{activeArticleDnaTask ? "Detectando ArticleDNA…" : "Detectar viés · ArticleDNA (IA)"}</button>
+            <button onClick={() => handlePipelineStep("Gerar DNA dos Silos")} disabled={generatingStrategic} className="flex items-center gap-1 rounded border border-emerald-900/60 px-3 py-1.5 text-[10px] font-semibold text-emerald-300 hover:border-emerald-700 disabled:opacity-40">{activeSiloDnaTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}{activeSiloDnaTask ? "Detectando SiloDNA…" : "Detectar viés · SiloDNA (IA)"}</button>
+            <button onClick={sendSelectedApprovedToRadar} className="flex items-center gap-1 rounded border border-cyan-900/60 px-3 py-1.5 text-[10px] font-semibold text-cyan-300 hover:border-cyan-700"><ArrowRight className="h-3 w-3"/>Enviar ao Radar</button>
+            <button onClick={handleDeleteSelectedNonPublished} className="flex items-center gap-1 rounded border border-rose-900/60 px-3 py-1.5 text-[10px] font-semibold text-rose-400 hover:border-rose-700"><Trash2 className="h-3 w-3"/>Apagar novos</button>
+            <button onClick={() => setSelectedIds(new Set())} className="rounded border border-slate-800 px-3 py-1.5 text-[10px] text-slate-500 hover:text-slate-300">Limpar seleção</button>
+          </div>
+        </footer>
+      )}
+
+      <BackgroundTaskNotice tasks={architectTasks.slice(-4)} onDismiss={dismissBackgroundTask}/>
+
+      <WorkflowImportDialog
+        open={keywordImportOpen}
+        title="Importar keywords aprovadas do Minerador"
+        description="Todos os itens aprovados e publicados do Minerador aparecem aqui. Selecione os novos; itens sem silo entram como candidatos sem classificação, enquanto importados e publicados permanecem visíveis."
+        rows={keywordImportPool}
+        label={keyword => keyword.keyword}
+        details={keyword => <span className="mt-1 block text-slate-500">{keyword.intent || "Intenção não informada"} · volume {keyword.volume_search || 0} · {keyword.siloName || "Sem silo/categoria"}</span>}
+        disabled={keyword => keyword.status === "publicado" || importedKeywordIds.has(keyword.id)}
+        disabledReason={keyword => keyword.status === "publicado"
+          ? "Publicado e já incorporado como âncora protegida"
+          : "Já importado no Arquiteto"}
+        status={keyword => keyword.status === "publicado" ? "published" : importedKeywordIds.has(keyword.id) ? "sent_architect" : "approved"}
+        loading={loadingKeywords}
+        error={keywordImportError}
+        onRetry={() => fetchMasterList()}
+        onClose={() => setKeywordImportOpen(false)}
+        onImport={importApprovedKeywords}
+      />
+
+      {dangerApproval && <DangerApprovalDialog open title={dangerApproval.title} description={dangerApproval.description}
+        impact={dangerApproval.impact} verificationPhrase={dangerApproval.phrase} confirmLabel={dangerApproval.label}
+        onCancel={() => setPendingDangerAction(null)} onConfirm={confirmDangerAction}/>}
+
       {isListModalOpen && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
           <div className="bg-[#0b0c10] border border-slate-800 w-full max-w-sm rounded shadow-2xl">

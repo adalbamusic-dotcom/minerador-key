@@ -15,8 +15,6 @@ import {
   X,
   Plus,
   RefreshCw,
-  Undo2,
-  Redo2,
   FolderPlus,
   Folders,
   ArrowRight,
@@ -29,10 +27,22 @@ import {
   ChevronRight,
   Building2,
 } from "lucide-react";
+import { HistoryControls } from "@/components/editorial/history-controls";
+import { useLocalHistory } from "@/components/editorial/use-local-history";
 import { useBrand } from "@/components/brand-context";
 import { AppMenu } from "@/components/app-menu";
+import { KeywordDnaPanel } from "@/components/editorial/dna-panels";
+import { CompactSavedViews } from "@/components/editorial/compact-saved-views";
+import { DangerApprovalDialog } from "@/components/editorial/danger-approval-dialog";
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import {
+  autoClassifyIntent,
+  autoDetectNiche,
+  deriveLogicalKeywordDna,
+  mergeLogicalKeywordSemantic,
+  semanticRecordsEqual,
+} from "@/lib/arquiteto/keyword-dna-engine";
 
 // Inicializa o cliente do Supabase com as chaves pÃºblicas
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -58,131 +68,6 @@ interface KeywordItem {
   analise_semantica?: Record<string, string> | null;
   volume_source?: string | null;
   created_at?: string;
-}
-
-// HeurÃ­stica de classificaÃ§Ã£o automÃ¡tica de intenÃ§Ã£o de busca
-function autoClassifyIntent(keyword: string): string {
-  const kw = keyword.toLowerCase();
-  
-  // Transacional / Vendas
-  if (
-    kw.includes("preÃ§o") || kw.includes("preco") || 
-    kw.includes("comprar") || kw.includes("valor") || 
-    kw.includes("contratar") || kw.includes("venda") || 
-    kw.includes("alugar") || kw.includes("orÃ§amento") || 
-    kw.includes("orcamento") || kw.includes("cupom") || 
-    kw.includes("desconto") || kw.includes("promoÃ§Ã£o") || 
-    kw.includes("promocao")
-  ) {
-    return "Vendas";
-  }
-  
-  // Comercial / InvestigaÃ§Ã£o
-  if (
-    kw.includes("melhor") || kw.includes("ranking") || 
-    kw.includes("comparar") || kw.includes("review") || 
-    kw.includes("top") || kw.includes("custo beneficio") || 
-    kw.includes("custo-beneficio") || kw.includes("serviÃ§o") || 
-    kw.includes("clinica") || kw.includes("advogado") || 
-    kw.includes("dentista") || kw.includes("empresa") || 
-    kw.includes("agÃªncia") || kw.includes("agencia")
-  ) {
-    return "Comercial";
-  }
-  
-  // Informativo / Educacional
-  if (
-    kw.includes("como") || kw.includes("o que") || 
-    kw.includes("porque") || kw.includes("onde") || 
-    kw.includes("quem") || kw.includes("quando") || 
-    kw.includes("dicas") || kw.includes("passo a passo") || 
-    kw.includes("guia") || kw.includes("tutorial") || 
-    kw.includes("exemplo") || kw.includes("significado") || 
-    kw.includes("definiÃ§Ã£o") || kw.includes("definicao")
-  ) {
-    return "Informativo";
-  }
-  
-  return "Informativo";
-}
-
-// HeurÃ­stica de identificaÃ§Ã£o automÃ¡tica do nicho com base na palavra-chave
-function autoDetectNiche(keyword: string): string {
-  const kw = keyword.toLowerCase();
-  
-  if (
-    kw.includes("dente") || kw.includes("dentista") || 
-    kw.includes("aparelho") || kw.includes("clareamento") || 
-    kw.includes("canal") || kw.includes("orto") || 
-    kw.includes("implante") || kw.includes("harmonizaÃ§Ã£o") || 
-    kw.includes("harmonizacao") || kw.includes("siso")
-  ) {
-    return "Odontologia";
-  }
-  
-  if (
-    kw.includes("advogado") || kw.includes("processo") || 
-    kw.includes("lei") || kw.includes("direito") || 
-    kw.includes("pensÃ£o") || kw.includes("pensao") || 
-    kw.includes("divÃ³rcio") || kw.includes("divorcio") || 
-    kw.includes("trabalhista") || kw.includes("justiÃ§a") || 
-    kw.includes("justica")
-  ) {
-    return "Advocacia";
-  }
-  
-  if (
-    kw.includes("mÃ©dico") || kw.includes("medico") || 
-    kw.includes("consulta") || kw.includes("clÃ­nica") || 
-    kw.includes("clinica") || kw.includes("pediatra") || 
-    kw.includes("dor") || kw.includes("terapia") || 
-    kw.includes("psicÃ³logo") || kw.includes("psicologo") || 
-    kw.includes("pilates") || kw.includes("fisioterapia")
-  ) {
-    return "SaÃºde";
-  }
-  
-  if (
-    kw.includes("cabelo") || kw.includes("unha") || 
-    kw.includes("depilaÃ§Ã£o") || kw.includes("depilacao") || 
-    kw.includes("massagem") || kw.includes("massagista") || 
-    kw.includes("maquiagem") || kw.includes("estÃ©tica") || 
-    kw.includes("estetica") || kw.includes("sobrancelha") || 
-    kw.includes("cÃ­lios") || kw.includes("cilios")
-  ) {
-    return "EstÃ©tica";
-  }
-  
-  if (
-    kw.includes("treino") || kw.includes("academia") || 
-    kw.includes("dieta") || kw.includes("personal") || 
-    kw.includes("whey") || kw.includes("emagrecer") || 
-    kw.includes("crossfit")
-  ) {
-    return "Fitness";
-  }
-  
-  if (
-    kw.includes("encanador") || kw.includes("eletricista") || 
-    kw.includes("pintor") || kw.includes("reforma") || 
-    kw.includes("construÃ§Ã£o") || kw.includes("construcao") || 
-    kw.includes("ar condicionado") || kw.includes("limpeza") || 
-    kw.includes("chaveiro") || kw.includes("desentupidora")
-  ) {
-    return "ServiÃ§os";
-  }
-  
-  if (
-    kw.includes("seo") || kw.includes("marketing") || 
-    kw.includes("site") || kw.includes("trÃ¡fego") || 
-    kw.includes("trafego") || kw.includes("leads") || 
-    kw.includes("anÃºncio") || kw.includes("anuncio") || 
-    kw.includes("vendas online")
-  ) {
-    return "Marketing";
-  }
-  
-  return "Geral";
 }
 
 // Helper para formatar texto em slug de SEO
@@ -245,8 +130,6 @@ export default function Home() {
   const [lists, setLists] = useState<ListObject[]>([]);
   const [keywords, setKeywords] = useState<KeywordItem[]>([]);
   const [filteredKeywords, setFilteredKeywords] = useState<KeywordItem[]>([]);
-  const [keywordsUndoStack, setKeywordsUndoStack] = useState<KeywordItem[][]>([]);
-  const [keywordsRedoStack, setKeywordsRedoStack] = useState<KeywordItem[][]>([]);
   
   // Estados de Controle/Status
   const [loading, setLoading] = useState(true);
@@ -254,6 +137,8 @@ export default function Home() {
   const [importing, setImporting] = useState(false);
   const [queueProcessing, setQueueProcessing] = useState(false);
   const [queueProgress, setQueueProgress] = useState(0);
+  const [dnaProcessing, setDnaProcessing] = useState(false);
+  const [dnaProgress, setDnaProgress] = useState({ current: 0, total: 0 });
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
   
@@ -269,6 +154,11 @@ export default function Home() {
 
   // SeleÃ§Ãµes Lote
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteApprovalOpen, setDeleteApprovalOpen] = useState(false);
+  const keywordHistory = useLocalHistory("minerador", keywords, snapshot => {
+    setKeywords(snapshot);
+    setSelectedIds(new Set());
+  }, 30, selectedBrandId || "sem-marca");
 
   // Modal de CriaÃ§Ã£o de Lista
   const [isListModalOpen, setIsListModalOpen] = useState(false);
@@ -313,33 +203,101 @@ export default function Home() {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const pushKeywordsHistory = (snapshot = keywords) => {
-    setKeywordsUndoStack(prev => [...prev.slice(-19), snapshot]);
-    setKeywordsRedoStack([]);
-  };
+  const pushKeywordsHistory = (snapshot = keywords, label = "Alteração na planilha de keywords") => keywordHistory.capture(label, snapshot);
 
   const undoKeywords = () => {
-    setKeywordsUndoStack(prev => {
-      if (prev.length === 0) return prev;
-      const previous = prev[prev.length - 1];
-      setKeywordsRedoStack(redo => [keywords, ...redo.slice(0, 19)]);
-      setKeywords(previous);
-      setSelectedIds(new Set());
-      showNotification("success", "Voltando uma alteraÃƒÂ§ÃƒÂ£o na lista atual.");
-      return prev.slice(0, -1);
-    });
+    keywordHistory.undo();
+    showNotification("success", "Voltando uma alteração na lista atual.");
   };
 
   const redoKeywords = () => {
-    setKeywordsRedoStack(prev => {
-      if (prev.length === 0) return prev;
-      const next = prev[0];
-      setKeywordsUndoStack(undo => [...undo.slice(-19), keywords]);
-      setKeywords(next);
-      setSelectedIds(new Set());
-      showNotification("success", "Refazendo alteraÃƒÂ§ÃƒÂ£o na lista atual.");
-      return prev.slice(1);
+    keywordHistory.redo();
+    showNotification("success", "Refazendo alteração na lista atual.");
+  };
+
+  const processLogicalKeywordDna = async (
+    sourceKeywords: KeywordItem[],
+    sourceLists: ListObject[],
+    options: { persist: boolean; showProgress: boolean },
+  ) => {
+    const listById = new Map(sourceLists.map(list => [list.id, list]));
+    const updatedItems: KeywordItem[] = [];
+    const pendingUpdates: Array<{ id: string; intent: string; analise_semantica: Record<string, string> }> = [];
+
+    if (options.showProgress) {
+      setDnaProcessing(true);
+      setDnaProgress({ current: 0, total: sourceKeywords.length });
+    }
+
+    sourceKeywords.forEach((item, index) => {
+      const list = item.lista_id ? listById.get(item.lista_id) : null;
+      const niche = item.analise_semantica?.nicho_override || list?.nicho || autoDetectNiche(item.keyword);
+      const logical = deriveLogicalKeywordDna({
+        keywordId: item.id,
+        keyword: item.keyword,
+        intent: item.intent,
+        niche,
+        location: item.location,
+        existingSemantic: item.analise_semantica,
+      });
+      const semantic = mergeLogicalKeywordSemantic(item.analise_semantica, {
+        ...logical.semantic,
+        nicho_override: niche,
+      });
+      const intent = item.intent || logical.intentLabel;
+      const next = { ...item, intent, analise_semantica: semantic };
+      updatedItems.push(next);
+
+      if (!semanticRecordsEqual(item.analise_semantica, semantic) || item.intent !== intent) {
+        pendingUpdates.push({ id: item.id, intent, analise_semantica: semantic });
+      }
+      if (options.showProgress) setDnaProgress({ current: index + 1, total: sourceKeywords.length });
     });
+
+    let failed = 0;
+    if (options.persist) {
+      for (let offset = 0; offset < pendingUpdates.length; offset += 20) {
+        const chunk = pendingUpdates.slice(offset, offset + 20);
+        const results = await Promise.all(chunk.map(async update => {
+          const { error } = await supabase
+            .from("keywords_kgr")
+            .update({ intent: update.intent, analise_semantica: update.analise_semantica })
+            .eq("id", update.id);
+          return error;
+        }));
+        failed += results.filter(Boolean).length;
+      }
+    }
+
+    if (options.showProgress) setDnaProcessing(false);
+    return { items: updatedItems, changed: pendingUpdates.length, failed };
+  };
+
+  const handleRefreshLogicalDna = async () => {
+    const targetIds = selectedIds.size > 0
+      ? selectedIds
+      : new Set(keywords.filter(keyword => keyword.lista_id || keyword.status?.toLowerCase() === "publicado").map(keyword => keyword.id));
+    const targets = keywords.filter(keyword => targetIds.has(keyword.id));
+    if (targets.length === 0) {
+      showNotification("error", "Nenhuma keyword disponível para atualizar o DNA lógico.");
+      return;
+    }
+
+    try {
+      pushKeywordsHistory(keywords, `Detectar viés e atualizar KeywordDNA de ${targets.length} keyword(s)`);
+      const result = await processLogicalKeywordDna(targets, lists, { persist: true, showProgress: true });
+      const byId = new Map(result.items.map(item => [item.id, item]));
+      setKeywords(current => current.map(item => byId.get(item.id) || item));
+      if (result.failed > 0) {
+        showNotification("error", `${result.changed - result.failed} DNA(s) atualizados; ${result.failed} falharam ao salvar.`);
+      } else {
+        showNotification("success", `${targets.length} KeywordDNA(s) conferidos; ${result.changed} receberam atualização lógica.`);
+      }
+    } catch (error) {
+      console.error("Erro ao atualizar KeywordDNA lógico:", error);
+      setDnaProcessing(false);
+      showNotification("error", "Não foi possível atualizar o KeywordDNA lógico.");
+    }
   };
 
   // Carrega listas e keywords iniciais do Supabase
@@ -452,45 +410,18 @@ export default function Home() {
         setLists([...loadedLists]);
       }
 
-      // C. Auto-classificaÃ§Ã£o de intenÃ§Ã£o em segundo plano para palavras sem intenÃ§Ã£o atribuÃ­da
-      const unclassified = loadedKeywords.filter(k => !k.intent);
-      // D. Auto-classificaÃ§Ã£o de nicho em segundo plano para palavras sem nicho atribuÃ­do no analise_semantica
-      const unniched = loadedKeywords.filter(k => !k.analise_semantica || !k.analise_semantica.nicho_override);
-
-      if (unclassified.length > 0 || unniched.length > 0) {
-        const promises: Promise<void>[] = [];
-
-        unclassified.forEach((k) => {
-          const detected = autoClassifyIntent(k.keyword);
-          const updatePromise = (async () => {
-            await supabase
-              .from("keywords_kgr")
-              .update({ intent: detected })
-              .eq("id", k.id);
-            k.intent = detected;
-          })();
-          promises.push(updatePromise);
-        });
-
-        unniched.forEach((k) => {
-          const detected = autoDetectNiche(k.keyword);
-          const currentSemantic = k.analise_semantica || {};
-          const updatedSemantic = { ...currentSemantic, nicho_override: detected };
-          const updatePromise = (async () => {
-            await supabase
-              .from("keywords_kgr")
-              .update({ analise_semantica: updatedSemantic })
-              .eq("id", k.id);
-            k.analise_semantica = updatedSemantic;
-          })();
-          promises.push(updatePromise);
-        });
-
-        Promise.all(promises).then(() => {
-          setKeywords([...loadedKeywords]);
-        });
-      } else {
-        setKeywords(loadedKeywords);
+      // C. Primeiro processo lógico: deriva o KeywordDNA completo sem IA.
+      // Só grava quando o campo está vazio ou pertence a uma execução lógica anterior;
+      // classificações humanas/IA existentes não são substituídas.
+      const eligibleKeywords = loadedKeywords.filter(keyword => keyword.lista_id || keyword.status?.toLowerCase() === "publicado");
+      const logicalResult = await processLogicalKeywordDna(eligibleKeywords, loadedLists, {
+        persist: true,
+        showProgress: false,
+      });
+      const logicalById = new Map(logicalResult.items.map(item => [item.id, item]));
+      setKeywords(loadedKeywords.map(keyword => logicalById.get(keyword.id) || keyword));
+      if (logicalResult.failed > 0) {
+        showNotification("error", `${logicalResult.failed} KeywordDNA(s) foram calculados localmente, mas não puderam ser salvos.`);
       }
 
       setSelectedIds(new Set());
@@ -503,9 +434,9 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (sessionStatus === "authenticated" && (session as any)?.accessToken) {
+    if (sessionStatus === "authenticated" && session?.accessToken) {
       supabase.auth.setSession({
-        access_token: (session as any).accessToken,
+        access_token: session.accessToken,
         refresh_token: ""
       }).then(() => {
         fetchData();
@@ -516,7 +447,7 @@ export default function Home() {
     } else {
       fetchData();
     }
-  }, [selectedBrandId, sessionStatus, session]);
+  }, [selectedBrandId, sessionStatus, session?.accessToken]);
 
   // Redireciona o Admin para /marcas apenas se NENHUMA marca estiver selecionada
   useEffect(() => {
@@ -1041,8 +972,16 @@ export default function Home() {
 
             const resolvedIntent = intentVal || autoClassifyIntent(keyword);
             const resolvedNiche = autoDetectNiche(keyword);
-
-            const semanticObj: Record<string, any> = { nicho_override: resolvedNiche };
+            const logicalDna = deriveLogicalKeywordDna({
+              keywordId: `import:${toSlug(keyword)}`,
+              keyword,
+              intent: resolvedIntent,
+              niche: resolvedNiche,
+            });
+            const semanticObj: Record<string, string> = mergeLogicalKeywordSemantic(null, {
+              ...logicalDna.semantic,
+              nicho_override: resolvedNiche,
+            });
             if (rowSlugVal) {
               semanticObj.slug_sugerido = toSlug(rowSlugVal);
             } else if (statusVal === "publicado") {
@@ -1136,14 +1075,26 @@ export default function Home() {
       }
 
       const payload = keywordLines.map(keyword => {
-        const analise = manualNicho ? { nicho_override: manualNicho } : null;
+        const resolvedNiche = manualNicho || autoDetectNiche(keyword);
+        const resolvedIntent = manualIntent || autoClassifyIntent(keyword);
+        const logicalDna = deriveLogicalKeywordDna({
+          keywordId: `manual:${toSlug(keyword)}`,
+          keyword,
+          intent: resolvedIntent,
+          niche: resolvedNiche,
+          location: manualLocation.trim() || null,
+        });
+        const analise = mergeLogicalKeywordSemantic(null, {
+          ...logicalDna.semantic,
+          nicho_override: resolvedNiche,
+        });
         return {
           keyword,
           location: manualLocation.trim() || null,
           results_allintitle: null,
           volume_search: null,
           kgr_score: null,
-          intent: manualIntent || null,
+          intent: resolvedIntent,
           status: manualStatus,
           lista_id: manualListId,
           analise_semantica: analise
@@ -1308,6 +1259,7 @@ export default function Home() {
     try {
       // Se a palavra alterada fizer parte da seleÃ§Ã£o atual, aplica a mudanÃ§a em massa
       const idsToUpdate = selectedIds.has(id) ? Array.from(selectedIds) : [id];
+      pushKeywordsHistory(keywords, `Alterar intenção de ${idsToUpdate.length} keyword(s)`);
 
       const { error } = await supabase
         .from("keywords_kgr")
@@ -1340,6 +1292,7 @@ export default function Home() {
         showNotification("error", "Silo de keyword publicada e bloqueado e nao pode ser alterado.");
         return;
       }
+      pushKeywordsHistory(keywords, `Mover ${idsToUpdate.length} keyword(s) de silo/categoria`);
 
       const { error } = await supabase
         .from("keywords_kgr")
@@ -1361,6 +1314,7 @@ export default function Home() {
   const handleUpdateNiche = async (id: string, nicheValue: string) => {
     try {
       const idsToUpdate = selectedIds.has(id) ? Array.from(selectedIds) : [id];
+      pushKeywordsHistory(keywords, `Alterar nicho de ${idsToUpdate.length} keyword(s)`);
 
       const promises = idsToUpdate.map(async (wordId) => {
         const wordItem = keywords.find(k => k.id === wordId);
@@ -1420,6 +1374,7 @@ export default function Home() {
         showNotification("error", "Status publicado e bloqueado e nao pode ser rebaixado.");
         return;
       }
+      pushKeywordsHistory(keywords, `Alterar status de ${idsToUpdate.length} keyword(s) para ${status}`);
 
       const { error } = await supabase
         .from("keywords_kgr")
@@ -1469,6 +1424,7 @@ export default function Home() {
       showNotification("error", "Nada foi movido: publicados nao podem trocar de Silo/Categoria.");
       return;
     }
+    pushKeywordsHistory(keywords, `Mover ${movableIds.length} keyword(s) em lote`);
 
     setUpdating(true);
     try {
@@ -1506,6 +1462,7 @@ export default function Home() {
       showNotification("error", "Nada foi aprovado: publicados ja estao bloqueados e preservados.");
       return;
     }
+    pushKeywordsHistory(keywords, `Aprovar ${approvableIds.length} keyword(s)`);
 
     setUpdating(true);
     try {
@@ -1547,6 +1504,7 @@ export default function Home() {
       );
       if (!ok) return;
     }
+    pushKeywordsHistory(keywords, `Marcar ${selectedIds.size} keyword(s) como publicadas`);
 
     setUpdating(true);
     try {
@@ -1654,25 +1612,18 @@ export default function Home() {
   };
 
   // AÃ§Ã£o em Lote: Excluir com dupla confirmaÃ§Ã£o
-  const handleBatchDelete = async () => {
+  const handleBatchDelete = async (approved = false) => {
     if (selectedIds.size === 0) return;
     const selectedItems = keywords.filter(item => selectedIds.has(item.id));
     const deletableIds = selectedItems
       .filter(item => item.status?.toLowerCase() !== "publicado")
       .map(item => item.id);
-    const protectedCount = selectedItems.length - deletableIds.length;
     if (deletableIds.length === 0) {
       showNotification("error", "Nada foi apagado: publicados estÃƒÂ£o protegidos.");
       return;
     }
     
-    // Primeira ConfirmaÃ§Ã£o
-    const firstConfirm = confirm(`Deseja realmente excluir ${deletableIds.length} palavra(s) nao-publicada(s)? ${protectedCount > 0 ? `${protectedCount} publicada(s) serao preservadas.` : ""}`);
-    if (!firstConfirm) return;
-
-    // Segunda ConfirmaÃ§Ã£o
-    const secondConfirm = confirm(`ATENÃ‡ÃƒO: Esta aÃ§Ã£o Ã© permanente e removerÃ¡ definitivamente os registros do Supabase. Tem certeza absoluta de que deseja excluir estas palavras?`);
-    if (!secondConfirm) return;
+    if (!approved) { setDeleteApprovalOpen(true); return; }
 
     setUpdating(true);
     try {
@@ -1683,9 +1634,10 @@ export default function Home() {
 
       if (error) throw error;
 
-      pushKeywordsHistory();
+      pushKeywordsHistory(keywords, `Excluir ${deletableIds.length} keyword(s) não publicadas`);
       setKeywords(prev => prev.filter(item => item.status?.toLowerCase() === "publicado" || !deletableIds.includes(item.id)));
       setSelectedIds(new Set());
+      setDeleteApprovalOpen(false);
       showNotification("success", "Palavras excluÃ­das com sucesso.");
     } catch (err: any) {
       console.error(err);
@@ -1694,6 +1646,8 @@ export default function Home() {
       setUpdating(false);
     }
   };
+
+  const selectedDeletableCount = keywords.filter(item => selectedIds.has(item.id) && item.status?.toLowerCase() !== "publicado").length;
 
   if (sessionStatus === "loading") {
     return (
@@ -1722,7 +1676,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[#06070a] text-slate-200 flex flex-col font-mono text-xs select-none">
+    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#06070a] font-mono text-xs text-slate-200 select-none">
       
       {/* NotificaÃ§Ã£o pop-up */}
       {notification && (
@@ -1737,30 +1691,14 @@ export default function Home() {
       )}
 
       {/* BARRA UNICA: FERRAMENTAS DO MINERADOR + MENU HAMBURGER DE NAVEGABILIDADE */}
-      <div className="bg-[#0b0c10] border-b border-slate-900 px-3 h-10 flex items-center justify-between sticky top-0 z-30 font-mono shrink-0 overflow-x-auto">
+      <div className="z-30 flex h-10 shrink-0 items-center justify-between overflow-x-auto border-b border-slate-900 bg-[#0b0c10] px-3 font-mono">
         {/* Esquerda: Identidade + Busca + Filtros + Ferramentas locais da Planilha */}
         <div className="flex items-center gap-2 py-1">
           <span className="text-slate-500 font-bold uppercase tracking-widest text-[10px] shrink-0">Minerador</span>
           <span className="text-slate-800 select-none shrink-0">Â·</span>
 
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={undoKeywords}
-              disabled={keywordsUndoStack.length === 0}
-              className="p-1 text-slate-600 hover:text-slate-300 border border-slate-800 hover:border-slate-650 rounded transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Voltar uma alteracao"
-            >
-              <Undo2 className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={redoKeywords}
-              disabled={keywordsRedoStack.length === 0}
-              className="p-1 text-slate-600 hover:text-slate-300 border border-slate-800 hover:border-slate-650 rounded transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Refazer alteracao"
-            >
-              <Redo2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          <HistoryControls entries={keywordHistory.entries} canUndo={keywordHistory.canUndo} canRedo={keywordHistory.canRedo}
+            onUndo={undoKeywords} onRedo={redoKeywords} onRestore={keywordHistory.restore} compact/>
 
           <span className="text-slate-800 select-none shrink-0">|</span>
 
@@ -1803,6 +1741,19 @@ export default function Home() {
             ))}
           </select>
 
+          <CompactSavedViews
+            userId={session?.user?.email || "usuario-local"}
+            brandId={selectedBrandId}
+            module="minerador"
+            values={{ searchQuery, filterStatus, filterIntent, filterListId, sortColumn, sortDirection }}
+            onApply={view => {
+              setSearchQuery(view.searchQuery || ""); setFilterStatus(view.filterStatus || "bruto");
+              setFilterIntent(view.filterIntent || "Todos"); setFilterListId(view.filterListId || "Todos");
+              if (["keyword", "results_allintitle", "volume_search", "kgr_score", "nicho", "lista"].includes(view.sortColumn)) setSortColumn(view.sortColumn as typeof sortColumn);
+              if (view.sortDirection === "asc" || view.sortDirection === "desc") setSortDirection(view.sortDirection);
+            }}
+          />
+
           <span className="text-slate-800 select-none shrink-0">|</span>
 
           {/* Importar CSV */}
@@ -1834,11 +1785,13 @@ export default function Home() {
             <span>Exportar</span>
           </button>
 
-          {/* Refresh */}
-          <button onClick={fetchData}
-            className="p-1 text-slate-600 hover:text-slate-300 border border-slate-800 hover:border-slate-650 rounded transition-colors cursor-pointer shrink-0"
-            title="Recarregar planilha">
-            <RefreshCw className="w-3.5 h-3.5" />
+          {/* Primeiro processo lógico: KeywordDNA sem IA */}
+          <button onClick={handleRefreshLogicalDna}
+            disabled={dnaProcessing || loading}
+            className="flex items-center gap-1 border border-indigo-900/50 bg-indigo-950/20 px-2 py-0.5 text-[10px] font-semibold text-indigo-300 hover:border-indigo-700 hover:text-indigo-200 rounded transition-colors cursor-pointer shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
+            title={selectedIds.size > 0 ? "Atualizar o DNA lógico das keywords selecionadas" : "Atualizar o DNA lógico de todas as keywords carregadas"}>
+            {dnaProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            <span>{dnaProcessing ? `KeywordDNA ${dnaProgress.current}/${dnaProgress.total}` : "Detectar viés · KeywordDNA"}</span>
           </button>
         </div>
 
@@ -2350,9 +2303,15 @@ export default function Home() {
                             )}
                           </div>
 
+                          <KeywordDnaPanel
+                            keyword={item}
+                            statusUpdating={updating}
+                            onWorkflowStatusChange={(status) => handleUpdateStatus(item.id, status)}
+                          />
+
                           {item.analise_semantica && Object.keys(item.analise_semantica).length > 0 ? (
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 text-[12px] font-sans whitespace-normal">
-                              {Object.entries(item.analise_semantica).map(([key, value]) => {
+                              {Object.entries(item.analise_semantica).filter(([key]) => key !== "dna_campos_logicos").map(([key, value]) => {
                                 const formatKeyName = (k: string) => {
                                   const labels: Record<string, string> = {
                                     urgencia_tempo: "â±ï¸ UrgÃªncia / Tempo",
@@ -2399,7 +2358,7 @@ export default function Home() {
 
       {/* FOOTER BATCH ACTIONS BAR */}
       {selectedIds.size > 0 && (
-        <footer className="bg-[#0b0c10] border-t border-slate-900 p-3.5 flex flex-wrap items-center justify-between gap-4 sticky bottom-0 z-30 shadow-2xl animate-in slide-in-from-bottom-12">
+        <footer className="z-30 flex shrink-0 flex-wrap items-center justify-between gap-4 border-t border-slate-900 bg-[#0b0c10] p-3.5 shadow-2xl animate-in slide-in-from-bottom-12">
           
           <div className="flex items-center gap-2">
             <span className="bg-indigo-650 text-white font-bold text-[10px] px-2 py-0.5 rounded">
@@ -2511,7 +2470,7 @@ export default function Home() {
 
             {/* Excluir */}
             <button
-              onClick={handleBatchDelete}
+              onClick={() => void handleBatchDelete(false)}
               disabled={updating || queueProcessing}
               className="flex items-center gap-1 bg-red-950/20 border border-red-900/30 hover:bg-red-900/30 disabled:opacity-50 text-red-400 font-bold py-1.5 px-4 rounded transition-all"
             >
@@ -2522,6 +2481,12 @@ export default function Home() {
           </div>
         </footer>
       )}
+
+      <DangerApprovalDialog open={deleteApprovalOpen} title="Excluir keywords não-publicadas"
+        description={`Esta ação excluirá permanentemente ${selectedDeletableCount} keyword(s) do Supabase.`}
+        impact={["A exclusão é permanente para registros não-publicados.", "Keywords publicadas continuam protegidas.", "A seleção foi recalculada antes desta confirmação."]}
+        verificationPhrase={`EXCLUIR ${selectedDeletableCount}`} confirmLabel="Aprovar exclusão permanente"
+        onCancel={() => setDeleteApprovalOpen(false)} onConfirm={() => handleBatchDelete(true)}/>
 
       {/* Modal de criaÃ§Ã£o de Categoria/Silo */}
       {isListModalOpen && (
