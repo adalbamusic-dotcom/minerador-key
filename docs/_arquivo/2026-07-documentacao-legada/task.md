@@ -1,0 +1,52 @@
+# Lista de Tarefas - Minerador Key
+
+- [x] Inicializar o projeto Next.js com `create-next-app` no diretório raiz
+- [x] Configurar dependências e versões no `package.json`
+- [x] Criar arquivo `.env.example`
+- [x] Criar tipos personalizados para NextAuth (`src/types/next-auth.d.ts`)
+- [x] Configurar NextAuth em `src/app/api/auth/[...nextauth]/route.ts`
+- [x] Criar SessionProvider do NextAuth (`src/components/providers.tsx`)
+- [x] Configurar estilos globais com Tailwind v4 (`src/app/globals.css`)
+- [x] Criar layout principal (`src/app/layout.tsx`)
+- [x] Implementar API de mineração e exportação (`src/app/api/mine/route.ts`)
+- [x] Implementar interface do cliente (`src/app/page.tsx`)
+- [x] Verificar funcionamento do projeto
+- [x] Criar pasta `minerador-extensao` e arquivos da extensão
+  - [x] Criar `manifest.json`
+  - [x] Criar `popup.html`
+  - [x] Criar `popup.js`
+  - [x] Criar `background.js`
+- [x] Atualizar extensão para correção de CSP e pré-filtro
+  - [x] Atualizar `popup.html` com CSS embarcado
+  - [x] Atualizar `executeMining` no `background.js`
+- [x] Criar rota de enriquecimento de volume (Keywords Everywhere)
+  - [x] Criar `app/api/volume/route.ts`
+  - [x] Atualizar `.env.example` e `.env.local` com `KEYWORDS_EVERYWHERE_API_KEY`
+- [x] Adicionar suporte/documentação para RapidAPI
+  - [x] Atualizar `.env` com chaves do RapidAPI
+  - [x] Adicionar comentários estruturados em `app/api/volume/route.ts` mostrando a substituição para RapidAPI
+- [x] Integrar salvamento do Supabase na extensão do Chrome
+  - [x] Atualizar `executeMining` no `background.js` com chaves reais do Supabase do `.env.local`
+- [x] Implementar Fluxo de Login (Next.js & Extensão)
+  - [x] Adicionar CredentialsProvider no NextAuth (`app/api/auth/[...nextauth]/route.ts`)
+  - [x] Atualizar interface web (`app/page.tsx`) com formulário E-mail/Senha
+  - [x] Atualizar popup da extensão (`minerador-extensao/popup.html` e `popup.js`) com tela de login
+  - [x] Atualizar script de segundo plano (`minerador-extensao/background.js`) com cabeçalho de autenticação
+- [x] Implementar Seleção de Múltiplas Localidades Obrigatórias
+  - [x] Criar componente de seleção de localidade (Brasil + Estados + Customizado)
+  - [x] Atualizar lógica do Service Worker (`background.js`) para loop sequencial por localidade
+  - [x] Integrar salvamento individual no Supabase por localidade
+  - [x] Adicionar coluna Localidade nas planilhas do Google Sheets no Next.js
+- [x] Salvar localidades em cache (storage/localStorage)
+  - [x] Integrar auto-salvamento e carregamento no `localStorage` do Next.js
+  - [x] Integrar auto-salvamento e carregamento no `chrome.storage.local` da extensão
+- [x] Adicionar botão de acesso ao aplicativo na Extensão
+  - [x] Criar e estilizar botão no popup.html
+  - [x] Configurar evento para abrir o localhost:3000 em nova aba em popup.js
+- [x] Adicionar suporte a projetos/listas no Dashboard (Master-Detail)
+  - [x] Consumir tabelas `listas_kgr` e `keywords_kgr` associadas
+  - [x] Implementar barra lateral (Sidebar) de listas e botão "+ Nova Lista"
+  - [x] Adicionar badges de intenção interativos e editáveis na tabela
+  - [x] Adicionar ações em lote no rodapé da tabela (Aprovar, console.log de volumes, Excluir)
+  - [x] Integrar modal "Nova Extração" com seleção de lista de destino
+- [x] Verificar build final do projeto e compilação do TypeScript

@@ -1,0 +1,25 @@
+# Glossário
+
+- **BrandDNA** — contexto editorial versionável de uma marca.
+- **KeywordDNA** — classificação e contexto de uma keyword; no legado pode ser derivado de dados de keyword.
+- **ArticleDNA** — identidade editorial de um artigo, com keyword principal, referências e regras.
+- **SiloDNA** — regras e fronteiras de um silo editorial.
+- **SiloPage** — página editorial de um silo; não é SiloDNA.
+- **ContentPlan** — plano editorial versionado que orienta um documento.
+- **ContentDocument** — documento de redação, incluindo conteúdo e proveniência compacta.
+- **Keyword principal** — keyword que identifica o foco central do artigo.
+- **Pilar** — unidade editorial ampla que organiza conteúdos de suporte.
+- **Suporte** — conteúdo associado que aprofunda ou atende uma intenção específica.
+- **Reforço** — keyword ou relação complementar usada para fortalecer cobertura sem trocar a principal.
+- **ID · vN** — identidade estável de entidade seguida de sua versão numerada.
+- **IA aplicada** — proposta ou alteração produzida por IA; não equivale a aprovação.
+- **Publicado protegido** — conteúdo com campos estruturais que não podem mudar livremente.
+- **workflow** — estados e transições operacionais entre módulos.
+- **publicação** — registro e estado de saída de um documento para um destino.
+- **transferência** — importação explícita e seletiva entre etapas.
+- **snapshot** — cópia identificável para auditoria, recuperação ou rollback.
+- **proveniência** — referências compactas às fontes, versões e decisões que originaram um artefato.
+- **formação de artigo** — decisão do Arquiteto que fixa uma principal e até cinco keywords de apoio compatíveis dentro de um ArticleDNA.
+- **cobertura de volume** — indicação `complete`, `partial` ou `unavailable` sobre quanto do volume das referências foi qualificado pelo Minerador.
+- **coerência de slug** — evidência da convergência entre slug, H1 e title; não confirma KGR sozinha.
+- **lock_version** — contador de concorrência otimista para impedir sobrescrita silenciosa.
