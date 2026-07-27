@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   requireSessionProfile,
+  assertCanAccessMarca,
   assertKeywordBelongsToMarca,
   authzErrorResponse,
 } from "@/lib/server/authz";
@@ -11,8 +12,8 @@ export async function POST(req: Request) {
     // 1. Autenticacao e autorizacao (ownership da keyword por marca)
     const profile = await requireSessionProfile();
 
-    const { keywordId, keyword } = await req.json();
-    if (!keywordId || !keyword) {
+    const { keywordId, keyword, brandId } = await req.json();
+    if (!keywordId || !keyword || !brandId) {
       return NextResponse.json(
         { success: false, error: "Parâmetros inválidos. É necessário informar keywordId e keyword." },
         { status: 400 }
@@ -21,7 +22,8 @@ export async function POST(req: Request) {
 
     // 2. Confirma que a keyword pertence a marca permitida.
     //    intent e analise_semantica.nicho_override sao editoriais (permitidos em publicado).
-    await assertKeywordBelongsToMarca(keywordId, profile.marcaId || "", profile);
+    await assertCanAccessMarca(profile.userId, brandId, profile);
+    await assertKeywordBelongsToMarca(keywordId, brandId, profile);
 
     let apiKey = process.env.DEEPSEEK_API_KEY;
     let apiUrl = "https://api.deepseek.com/chat/completions";
@@ -107,9 +109,12 @@ Exemplo de saída esperada:
     // 1. Obtém o registro existente para mesclar o nicho_override no analise_semantica
     const { data: existingWord } = await supabase
       .from("keywords_kgr")
-      .select("analise_semantica")
+      .select("brand_id,analise_semantica")
       .eq("id", keywordId)
+      .eq("brand_id", brandId)
       .single();
+
+    if (!existingWord?.brand_id) throw new Error("Keyword sem tenant canônico.");
 
     const currentSemantic = existingWord?.analise_semantica || {};
     const updatedSemantic = {
@@ -124,7 +129,8 @@ Exemplo de saída esperada:
         intent: intent,
         analise_semantica: updatedSemantic
       })
-      .eq("id", keywordId);
+      .eq("id", keywordId)
+      .eq("brand_id", existingWord.brand_id);
 
     if (updateError) throw updateError;
 

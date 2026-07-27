@@ -1,0 +1,18 @@
+{
+  "status": 307,
+  "headers": {
+    "location": "/marca?secao=configuracoes",
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/(workspace)/layout,_N_T_/(workspace)/perfil/layout,_N_T_/(workspace)/perfil/page,_N_T_/perfil"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/!KHdvcmtzcGFjZSk/perfil/__PAGE__",
+    "/!KHdvcmtzcGFjZSk/perfil",
+    "/!KHdvcmtzcGFjZSk",
+    "/_index",
+    "/_head"
+  ]
+}

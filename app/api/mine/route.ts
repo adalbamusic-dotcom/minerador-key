@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import { getToken } from "next-auth/jwt";
 import { authOptions } from "../auth/[...nextauth]/route";
 import { google } from "googleapis";
 
@@ -12,7 +13,14 @@ export async function POST(req: Request) {
   try {
     // 1. Autenticação e validação de sessão
     const session = await getServerSession(authOptions);
-    if (!session || !session.accessToken) {
+    const nextAuthToken = await getToken({
+      req: new NextRequest(req),
+      secret: process.env.NEXTAUTH_SECRET,
+    });
+    const googleAccessToken = typeof nextAuthToken?.googleAccessToken === "string"
+      ? nextAuthToken.googleAccessToken
+      : null;
+    if (!session || !googleAccessToken) {
       return NextResponse.json(
         { error: "Não autorizado. Por favor, conecte sua conta Google." },
         { status: 401 }
@@ -92,7 +100,7 @@ export async function POST(req: Request) {
 
     // 4. Integração com o Google Sheets para salvar os dados
     const auth = new google.auth.OAuth2();
-    auth.setCredentials({ access_token: session.accessToken });
+    auth.setCredentials({ access_token: googleAccessToken });
     const sheets = google.sheets({ version: "v4", auth });
 
     const sheetTitle = `Minerador Key: ${seed.trim()} (${locations.length} locs)`;
@@ -154,16 +162,22 @@ export async function POST(req: Request) {
       spreadsheetId
     });
 
-  } catch (error: any) {
-    console.error("Erro na API de mineração:", error);
+  } catch (error: unknown) {
+    const errorDetails = error && typeof error === "object"
+      ? error as { status?: unknown; message?: unknown; response?: { status?: unknown } }
+      : {};
+    const status = typeof errorDetails.status === "number"
+      ? errorDetails.status
+      : typeof errorDetails.response?.status === "number" ? errorDetails.response.status : undefined;
+    const message = typeof errorDetails.message === "string" ? errorDetails.message : "Erro interno";
+    console.error("Erro na API de mineração:", { status, code: "GoogleMiningError" });
 
     // Verifica se é um erro de credencial expirada/revogada do Google
     const isAuthError = 
-      error.status === 401 || 
-      error.message?.includes("invalid_grant") || 
-      error.message?.includes("invalid_credentials") || 
-      error.message?.includes("auth") ||
-      error.response?.status === 401;
+      status === 401 ||
+      message.includes("invalid_grant") ||
+      message.includes("invalid_credentials") ||
+      message.includes("auth");
 
     if (isAuthError) {
       return NextResponse.json(
@@ -173,7 +187,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json(
-      { error: `Ocorreu um erro no processamento: ${error.message || "Erro interno do servidor"}` },
+      { error: `Ocorreu um erro no processamento: ${message || "Erro interno do servidor"}` },
       { status: 500 }
     );
   }

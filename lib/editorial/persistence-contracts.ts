@@ -1,8 +1,11 @@
 import { z } from "zod";
-import { ContentDocumentSchema, VersionedArticleDNASchema, VersionedContentPlanSchema, VersionedSiloDNASchema, VersionStatusEventSchema } from "../arquiteto/contracts.ts";
+import { ContentDocumentSchema, VersionedArticleDNASchema, VersionedContentPlanSchema, VersionedSiloDNASchema, VersionedSiloPageSchema, VersionStatusEventSchema } from "../arquiteto/contracts.ts";
 import { BrandInvitationSchema, OperationalPublicationSchema, PlannerItemSchema, RadarItemSchema } from "./operational-flow.ts";
 import { SavedGridViewSchema } from "./data-grid.ts";
 import { AIReviewAnnotationSchema } from "./operational-contracts.ts";
+import { SerpCollectionRecordSchema, SerpReviewRecordSchema } from "./contracts.ts";
+import { RadarHydrationSnapshotSchema } from "../radar/hydration.ts";
+import { SerpMergeConflictSchema } from "../radar/serp-merge.ts";
 
 export const PersistenceModeSchema = z.enum(["server", "local_fallback", "unavailable"]);
 export type PersistenceMode = z.infer<typeof PersistenceModeSchema>;
@@ -24,6 +27,10 @@ export const PersistedEditorialWorkspaceSchema = z.object({
   siloVersions: z.array(VersionedSiloDNASchema),
   versionEvents: z.array(VersionStatusEventSchema),
   contentPlans: z.array(VersionedContentPlanSchema),
+  serpRecords: z.array(SerpCollectionRecordSchema).default([]),
+  serpReviews: z.array(SerpReviewRecordSchema).default([]),
+  serpMergeConflicts: z.array(SerpMergeConflictSchema).default([]),
+  serpPersistenceMode: z.enum(["server", "local_fallback"]).default("local_fallback"),
   documents: z.array(PersistedDocumentSchema),
   publications: z.array(OperationalPublicationSchema),
   invitations: z.array(BrandInvitationSchema),
@@ -40,11 +47,15 @@ export const LocalWorkflowRecoverySchema = z.object({
   architectImportedKeywordIds: z.array(z.string()),
   articleVersions: z.record(z.string(), VersionedArticleDNASchema),
   siloVersions: z.record(z.string(), VersionedSiloDNASchema),
+  siloPageVersions: z.record(z.string(), VersionedSiloPageSchema).default({}),
   versionEvents: z.array(VersionStatusEventSchema),
   contentPlans: z.record(z.string(), VersionedContentPlanSchema),
   documents: z.record(z.string(), ContentDocumentSchema),
   radarItems: z.array(RadarItemSchema),
   plannerItems: z.array(PlannerItemSchema),
+  serpRecords: z.array(SerpCollectionRecordSchema).default([]),
+  serpReviews: z.array(SerpReviewRecordSchema).default([]),
+  serpMergeConflicts: z.array(SerpMergeConflictSchema).default([]),
   operationalPublications: z.array(OperationalPublicationSchema),
   documentLocks: z.record(z.string(), z.number().int().positive()),
   selectedEntityId: z.string().nullable(),
@@ -58,11 +69,11 @@ export function workflowRecoveryStorageKey(brandId: string) {
 }
 
 export const WorkflowCommandSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("import_radar"), brandId: z.string(), articleVersions: z.array(VersionedArticleDNASchema), versionEvents: z.array(VersionStatusEventSchema) }),
+  z.object({ action: z.literal("import_radar"), brandId: z.string(), articleVersions: z.array(VersionedArticleDNASchema), versionEvents: z.array(VersionStatusEventSchema), hydrationByArticleId: z.record(z.string(), RadarHydrationSnapshotSchema).default({}) }),
   z.object({ action: z.literal("transition_radar"), brandId: z.string(), itemIds: z.array(z.string()), target: RadarItemSchema.shape.state, expectedLocks: z.record(z.string(), z.number().int().positive()) }),
   z.object({ action: z.literal("import_planner"), brandId: z.string(), radarItemIds: z.array(z.string()), expectedLocks: z.record(z.string(), z.number().int().positive()) }),
   z.object({ action: z.literal("prepare_plan"), brandId: z.string(), plannerItemId: z.string(), expectedLock: z.number().int().positive(), plan: VersionedContentPlanSchema }),
-  z.object({ action: z.literal("approve_plan"), brandId: z.string(), plannerItemIds: z.array(z.string()), expectedLocks: z.record(z.string(), z.number().int().positive()) }),
+  z.object({ action: z.literal("approve_plan"), brandId: z.string(), plannerItemIds: z.array(z.string()), expectedLocks: z.record(z.string(), z.number().int().positive()), versionEvents: z.array(VersionStatusEventSchema).default([]) }),
   z.object({ action: z.literal("start_writing"), brandId: z.string(), plannerItemId: z.string(), expectedLock: z.number().int().positive(), articleVersion: VersionedArticleDNASchema, plan: VersionedContentPlanSchema, document: ContentDocumentSchema, publication: OperationalPublicationSchema }),
   z.object({ action: z.literal("import_publications"), brandId: z.string(), publicationIds: z.array(z.string()), expectedLocks: z.record(z.string(), z.number().int().positive()) }),
 ]);

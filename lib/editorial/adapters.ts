@@ -1,5 +1,6 @@
 import type { ArchitectKeyword } from "../arquiteto/contracts.ts";
 import { legacyVersionReference } from "../arquiteto/versioning.ts";
+import { adaptKeywordIdentityContext } from "../arquiteto/identity-context.ts";
 import type { EditorialSnapshot, LegacyKeywordView } from "./contracts.ts";
 
 const read = (record: Record<string, unknown> | null, aliases: string[]) => {
@@ -51,7 +52,12 @@ export function snapshotToArchitectKeywords(snapshot: EditorialSnapshot): Archit
   return snapshot.keywords.map(keyword => ({
     id: keyword.id, keyword: keyword.keyword, intent: keyword.intent, volume_search: keyword.volume_search,
     kgr_score: keyword.kgr_score, lista_id: keyword.lista_id, silo_id: keyword.lista_id,
-    siloName: siloNames.get(keyword.lista_id) || null, status: keyword.status || undefined,
-    isPublished: keyword.status?.toLowerCase() === "publicado", analise_semantica: keyword.analise_semantica,
+    siloName: keyword.lista_id ? siloNames.get(keyword.lista_id) || null : null, status: keyword.status || undefined,
+    isPublished: keyword.isPublished ?? keyword.status?.toLowerCase() === "publicado", analise_semantica: keyword.analise_semantica,
+    publishedUrl: keyword.publishedUrl ?? keyword.published_url ?? keyword.url ?? null,
+    url: keyword.url ?? keyword.publishedUrl ?? keyword.published_url ?? null,
+    canonical: keyword.canonical ?? keyword.canonical_url ?? null,
+    slug_sugerido: keyword.slug_sugerido ?? null,
+    ...adaptKeywordIdentityContext(keyword),
   }));
 }

@@ -197,8 +197,10 @@ export function describeProvisionalGroup(
       confidence: Math.max(0, Math.min(1, evidence.combined)),
       alerts,
       principalSuggestion,
-      roles,
-      suggestedHierarchy: anchor?.hierarquia?.toLowerCase().includes("pilar") || (!placement?.overflowFromFullGroup && broad) ? "Pilar" : "Suporte",
+    roles,
+    suggestedHierarchy: anchor?.hierarquia?.toLowerCase().includes("pilar") || (!placement?.overflowFromFullGroup && broad) ? "Pilar" : "Suporte",
+      ...(anchor?.architectureStatus || principal.architectureStatus ? { architectureStatus: anchor?.architectureStatus || principal.architectureStatus } : {}),
+      ...(principal.kgrIdentity || anchor?.kgrIdentity ? { kgrIdentity: principal.kgrIdentity || anchor?.kgrIdentity } : {}),
     };
 }
 

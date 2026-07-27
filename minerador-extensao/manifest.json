@@ -3,10 +3,15 @@
   "name": "Minerador KGR",
   "version": "1.0",
   "description": "Extração de palavras-chave de cauda longa via Autocomplete API.",
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": [
     "*://suggestqueries.google.com/*",
-    "https://*.supabase.co/*"
+    "https://www.google.com/*",
+    "https://www.google.com.br/*",
+    "https://consent.google.com/*",
+    "https://*.supabase.co/*",
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*"
   ],
   "action": {
     "default_popup": "popup.html"

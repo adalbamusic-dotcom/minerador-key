@@ -1,4 +1,4 @@
-export type EditorialBackgroundTaskType = "logical_grouping" | "keyword_review" | "article_dna" | "silo_dna";
+export type EditorialBackgroundTaskType = "logical_grouping" | "keyword_review" | "article_dna" | "silo_dna" | "silo_page";
 export type EditorialBackgroundTaskStatus = "queued" | "running" | "completed" | "failed";
 
 export interface EditorialBackgroundTask<TResult = unknown> {

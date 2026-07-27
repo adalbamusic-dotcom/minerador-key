@@ -1,0 +1,3 @@
+module.exports=[2192,a=>{"use strict";a.s(["radarCanonicalRouteKey",0,function(a){return a.articleDnaVersionId},"resolveRadarRouteItem",0,function(a,b){let c=a.filter(a=>a.articleDnaVersionId===b);if(1===c.length)return c[0];let d=a.filter(a=>{let c;return(c=a.hydration?.principalKeyword,new Set([a.articleDnaVersionId,a.id,a.articleId,a.principalKeywordId,a.hydration?.principalKeywordId,c?.referenceKeywordId,c?.canonicalKeywordId,c?.sourceKeywordId,c?.originalKeywordId,...c?.aliases||[],...(a.hydration?.keywordSnapshots||[]).flatMap(a=>[a.referenceKeywordId,a.canonicalKeywordId,a.sourceKeywordId,a.originalKeywordId,...a.aliases])].filter(a=>!!a))).has(b)});return 1===d.length?d[0]:null}])}];
+
+//# sourceMappingURL=lib_radar_route-resolution_ts_11i5fat._.js.map

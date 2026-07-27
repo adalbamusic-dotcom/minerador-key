@@ -1,29 +1,66 @@
 import { z } from "zod";
-import type { ArticleDNA, ContentDocument, ContentPlan, SiloDNA, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts.ts";
-import { ContentDocumentSchema, ContentPlanSchema, VersionedContentPlanSchema } from "../arquiteto/contracts.ts";
-import { createVersionEnvelope, legacyVersionReference, toVersionReference } from "../arquiteto/versioning.ts";
+import type { ArticleDNA, ContentDocument, ContentPlan, SiloDNA, SiloPage, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts.ts";
+import { ArticleArchitectureStatusSchema, ArticleControlContextSchema, ArticleKeywordReferenceSchema, ArticleKgrIdentitySchema, ContentDocumentSchema, EditorialUnitTypeSchema, KeywordUrlRelationshipSchema, VersionedContentPlanSchema, VersionedSiloPageSchema } from "../arquiteto/contracts.ts";
+import { SerpFormationAssessmentSchema } from "../arquiteto/serp-formation.ts";
+import { toVersionReference } from "../arquiteto/versioning.ts";
 import { isArticleKeywordCountValid } from "../arquiteto/domain-rules.ts";
+import { contentPlanApprovalIssues, createDefinitiveContentPlan } from "../planejador/content-plan.ts";
+import { RadarHydrationSnapshotSchema, createRadarHydrationSnapshot, type RadarHydrationSnapshot, type RadarHydrationSourceKeyword } from "../radar/hydration.ts";
+import { VersionedRadarAnalysisSchema } from "../radar/analysis-contracts.ts";
+import { buildArticleControlContext } from "../arquiteto/strategic-context.ts";
 
 export const WorkflowOriginSchema = z.enum(["real", "local"]);
 export const ArchitectWorkflowStateSchema = z.enum(["draft", "analyzing", "conflicts", "awaiting_approval", "approved", "blocked", "sent_radar"]);
 export const RadarWorkflowStateSchema = z.enum(["imported", "research_pending", "researching", "needs_review", "conflicts", "awaiting_approval", "approved", "sent_planner"]);
 export const PlannerWorkflowStateSchema = z.enum(["draft", "planning", "pending", "awaiting_review", "approved", "sent_writer"]);
 export const PublicationWorkflowStateSchema = z.enum(["draft", "writing", "awaiting_review", "in_review", "approved", "ready_to_export", "queued", "exported", "published", "update_due", "blocked", "archived"]);
+export const PublicationHistoryEntrySchema = z.object({
+  id: z.string(),
+  action: z.enum(["received", "queued", "exported", "published", "update_requested", "reedited", "destination_registered"]),
+  actorId: z.string(),
+  occurredAt: z.string().datetime(),
+  fromState: PublicationWorkflowStateSchema,
+  toState: PublicationWorkflowStateSchema,
+  note: z.string().nullable().default(null),
+  exportFileName: z.string().nullable().default(null),
+  exportFormat: z.enum(["markdown", "json", "csv"]).nullable().default(null),
+  destinationUrl: z.string().url().nullable().default(null),
+});
+export type PublicationHistoryEntry = z.infer<typeof PublicationHistoryEntrySchema>;
 
 export const RadarItemSchema = z.object({
   id: z.string(), brandId: z.string(), articleId: z.string(), articleDnaVersionId: z.string(), articleDnaContentHash: z.string(),
   title: z.string(), slug: z.string(), siloId: z.string(), hierarchy: z.string(), principalKeywordId: z.string(), format: z.string(),
   intent: z.string(), state: RadarWorkflowStateSchema, importedAt: z.string().datetime(), updatedAt: z.string().datetime(), origin: WorkflowOriginSchema, lockVersion: z.number().int().positive().default(1),
+  unitType: EditorialUnitTypeSchema.default("article"), hydration: RadarHydrationSnapshotSchema.nullable().default(null), analysisVersions: z.array(VersionedRadarAnalysisSchema).default([]),
+  arquitetoKeywordDnaReferences: z.array(ArticleKeywordReferenceSchema).optional(),
+  arquitetoKeywordUrlRelations: z.record(z.string(), KeywordUrlRelationshipSchema).optional(),
+  arquitetoArchitectureStatus: ArticleArchitectureStatusSchema.optional(),
+  arquitetoKgrIdentity: ArticleKgrIdentitySchema.optional(),
+  arquitetoStrategyContext: ArticleControlContextSchema.optional(),
+  arquitetoSerpAssessment: SerpFormationAssessmentSchema.nullable().optional(),
 });
 export const PlannerItemSchema = z.object({
   id: z.string(), brandId: z.string(), articleId: z.string(), radarItemId: z.string(), title: z.string(), slug: z.string(), siloId: z.string(),
   format: z.string(), intent: z.string(), state: PlannerWorkflowStateSchema, contentPlanVersionId: z.string().nullable(), importedAt: z.string().datetime(), updatedAt: z.string().datetime(), origin: WorkflowOriginSchema, lockVersion: z.number().int().positive().default(1),
+  unitType: EditorialUnitTypeSchema.default("article"),
 });
 export const OperationalPublicationSchema = z.object({
   id: z.string(), brandId: z.string(), articleId: z.string(), plannerItemId: z.string(), contentPlanVersionId: z.string(), documentId: z.string(),
   title: z.string(), slug: z.string(), siloId: z.string(), hierarchy: z.string(), state: PublicationWorkflowStateSchema,
   responsible: z.string().nullable(), destination: z.string().nullable(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), origin: WorkflowOriginSchema,
   lockVersion: z.number().int().positive().default(1),
+  unitType: EditorialUnitTypeSchema.default("article"),
+  destinationUrl: z.string().url().nullable().default(null),
+  publishedAt: z.string().datetime().nullable().default(null),
+  publishedDocumentHash: z.string().nullable().default(null),
+  lastExportDocumentHash: z.string().nullable().default(null),
+  lastExportedAt: z.string().datetime().nullable().default(null),
+  lastExportFileName: z.string().nullable().default(null),
+  lastExportFormat: z.enum(["markdown", "json", "csv"]).nullable().default(null),
+  updateRequested: z.boolean().default(false),
+  updateRequestedAt: z.string().datetime().nullable().default(null),
+  history: z.array(PublicationHistoryEntrySchema).default([]),
 });
 export type RadarItem = z.infer<typeof RadarItemSchema>;
 export type PlannerItem = z.infer<typeof PlannerItemSchema>;
@@ -74,13 +111,70 @@ export function approvedArticleVersions(versions: Record<string, VersionEnvelope
   return Object.values(versions).filter(version => articleApprovalIssues(version, events).length === 0);
 }
 
-export function importArticlesToRadar(existing: RadarItem[], versions: VersionEnvelope<ArticleDNA>[], brandId: string, now = new Date().toISOString()) {
+/**
+ * Preflight para geracao de SiloDNA.
+ *
+ * Nao exige que cada ArticleDNA possua status separado de "aceite" ou
+ * "approved". Exige apenas:
+ * - ArticleDNA existente;
+ * - contrato valido (ja garantido por VersionEnvelope<ArticleDNA>);
+ * - marca correta;
+ * - silo definido (sem-silo bloqueia);
+ * - artigos agrupados por silo.
+ *
+ * Retorna os silos validos e a lista de issues especificos por artigo.
+ */
+export function siloDnaPreflight(
+  articleVersions: Record<string, VersionEnvelope<ArticleDNA>>,
+  groups: Array<{
+    id: string;
+    publishedAnchorId: string | null;
+    suggestedSiloId: string | null;
+    suggestedSiloName: string | null;
+    keywords: Array<{ id: string; keyword: string }>;
+  }>,
+  brandId: string,
+): { silos: Array<{ id: string; name: string; articleVersions: VersionEnvelope<ArticleDNA>[] }>; issues: string[] } {
+  const siloMap = new Map<string, { id: string; name: string; articleVersions: VersionEnvelope<ArticleDNA>[] }>();
+  const issues: string[] = [];
+  for (const group of groups) {
+    const entityId = group.publishedAnchorId || group.id;
+    const articleVersion = articleVersions[entityId];
+    if (!articleVersion) {
+      issues.push(`ArticleDNA ausente para "${group.keywords[0]?.keyword || entityId}".`);
+      continue;
+    }
+    if (articleVersion.payload.brandId !== brandId) {
+      issues.push(`Marca incorreta para "${articleVersion.payload.promise}".`);
+      continue;
+    }
+    const siloId = group.suggestedSiloId;
+    if (!siloId) {
+      issues.push(`Sem silo definido para "${articleVersion.payload.promise}".`);
+      continue;
+    }
+    const id = String(siloId);
+    const current = siloMap.get(id) || { id, name: group.suggestedSiloName || "Silo", articleVersions: [] };
+    current.articleVersions.push(articleVersion);
+    siloMap.set(id, current);
+  }
+  return { silos: [...siloMap.values()], issues };
+}
+
+export function importArticlesToRadar(existing: RadarItem[], versions: VersionEnvelope<ArticleDNA>[], brandId: string, now = new Date().toISOString(), sourceKeywords: RadarHydrationSourceKeyword[] = [], siloVersions: Record<string, VersionEnvelope<SiloDNA>> = {}, hydrationByArticleId: Record<string, RadarHydrationSnapshot> = {}, serpAssessments: Record<string, unknown> = {}) {
   const existingIds = new Set(existing.map(item => item.articleId));
   const additions = versions.filter(version => version.payload.brandId === brandId && !existingIds.has(version.payload.articleId)).map(version => RadarItemSchema.parse({
     id: `radar:${version.payload.articleId}`, brandId, articleId: version.payload.articleId, articleDnaVersionId: version.versionId,
     articleDnaContentHash: version.contentHash, title: version.payload.promise, slug: version.payload.suggestedSlug, siloId: version.payload.siloId,
     hierarchy: version.payload.hierarchy, principalKeywordId: version.payload.principalKeywordId, format: version.payload.hierarchy,
     intent: version.payload.mainIntent, state: "research_pending", importedAt: now, updatedAt: now, origin: "local", lockVersion: 1,
+    hydration: hydrationByArticleId[version.payload.articleId] || createRadarHydrationSnapshot({ brandId, article: version, sourceKeywords, silo: version.payload.siloId ? siloVersions[version.payload.siloId] : undefined, source: "arquiteto_import", capturedAt: now }),
+    arquitetoKeywordDnaReferences: version.payload.keywordReferences,
+    arquitetoKeywordUrlRelations: Object.fromEntries(version.payload.keywordReferences.filter(reference => reference.keywordUrlRelation).map(reference => [reference.keywordId, reference.keywordUrlRelation])),
+    arquitetoArchitectureStatus: version.payload.architectureStatus,
+    arquitetoKgrIdentity: version.payload.kgrIdentity,
+    arquitetoStrategyContext: buildArticleControlContext(version.payload, { published: Boolean(version.payload.publishedIdentityRef) }),
+    arquitetoSerpAssessment: serpAssessments[version.payload.articleId] || null,
   }));
   return [...existing, ...additions];
 }
@@ -104,16 +198,8 @@ export function importRadarToPlanner(existing: PlannerItem[], radarItems: RadarI
   return [...existing, ...additions];
 }
 
-export async function createOperationalPlan(item: PlannerItem, article: VersionEnvelope<ArticleDNA>, silo: VersionEnvelope<SiloDNA> | undefined, actorId: string) {
-  const keywordRefs = article.payload.keywordReferences.map(reference => ({ entityId: reference.keywordId, versionId: reference.keywordDnaVersionId, contentHash: reference.keywordDnaContentHash }));
-  const payload = ContentPlanSchema.parse({
-    schemaVersion: 1, planId: `plan:${item.articleId}`, brandDnaRef: legacyVersionReference(`brand:${item.brandId}`, { brandId: item.brandId }),
-    keywordDnaRefs: keywordRefs, articleDnaRef: toVersionReference(article), siloDnaRef: silo ? toVersionReference(silo) : legacyVersionReference(`silo:${item.siloId}`, { siloId: item.siloId }),
-    serpEvidenceRefs: [], productEvidenceRefs: [], originalityReportRef: null,
-    approvedOutline: article.payload.requiredTopics.length ? article.payload.requiredTopics.map((topic, index) => ({ id: `section:${index + 1}`, heading: topic, objective: `Cobrir ${topic} dentro da fronteira aprovada.`, keywordDnaRefs: keywordRefs })) : [{ id: "section:1", heading: article.payload.promise, objective: article.payload.desiredResult, keywordDnaRefs: keywordRefs }],
-    writingInstructions: [article.payload.angle, article.payload.antiCannibalizationBoundary], humanPendingDecisions: ["Revisar outline, links, fontes e evidências antes da redação."],
-  });
-  return createVersionEnvelope({ entityId: payload.planId, versionNumber: 1, origin: "human", changeReason: "Planejamento operacional criado para revisão humana.", createdBy: actorId, payload }) as Promise<Readonly<VersionEnvelope<ContentPlan>>>;
+export async function createOperationalPlan(item: PlannerItem, article: VersionEnvelope<ArticleDNA>, silo: VersionEnvelope<SiloDNA> | undefined, actorId: string, serpEvidenceRefs: Array<{ artifactId: string; artifactType: "serp_snapshot"; contentHash: string }> = [], radarAnalysisPackage?: Parameters<typeof createDefinitiveContentPlan>[0]["radarAnalysisPackage"]) {
+  return createDefinitiveContentPlan({ brandId: item.brandId, editorialUnitType: item.unitType, editorialUnitId: item.articleId, article, silo, serpEvidenceRefs, radarAnalysisPackage }, actorId);
 }
 
 export function createOperationalDocument(plan: VersionEnvelope<ContentPlan>, article: VersionEnvelope<ArticleDNA>, item: PlannerItem) {
@@ -124,7 +210,7 @@ export function createOperationalDocument(plan: VersionEnvelope<ContentPlan>, ar
     articleDnaRef: toVersionReference(article), serpSnapshotRefs: plan.payload.serpEvidenceRefs, evidenceRefs: plan.payload.productEvidenceRefs,
     sourceIds: [], linkMap: [], instructions: plan.payload.writingInstructions,
     blocks: [{ id: `heading:${item.articleId}`, type: "heading", level: 1, text: item.title, provenance }, ...plan.payload.approvedOutline.map(section => ({ id: section.id, type: "heading" as const, level: 2 as const, text: section.heading, provenance }))],
-    editorContent: null, metadata: { slug: article.payload.suggestedSlug, principalKeyword: article.payload.principalKeywordId, metaTitle: "", metaDescription: "", socialTitle: "", socialDescription: "",
+    editorContent: null, writingBrief: plan.payload.planning ? { planVersionId: plan.versionId, details: plan.payload.planning, guardianInstructions: plan.payload.planning.guardianInstructions, alerts: plan.payload.planning.alerts, provenance } : undefined, metadata: { slug: article.payload.suggestedSlug, principalKeyword: article.payload.principalKeywordId, metaTitle: "", metaDescription: "", socialTitle: "", socialDescription: "",
       canonical: article.payload.canonical, indexationStatus: "noindex", plannedImages: [] },
   });
 }
@@ -153,3 +239,95 @@ export function createDevelopmentInvitation(input: Omit<BrandInvitation, "id" | 
 }
 
 export function parseOperationalPlan(value: unknown) { return VersionedContentPlanSchema.parse(value); }
+export { contentPlanApprovalIssues };
+
+// --- Reconciliacao do workspace do Arquiteto ---
+import { ArchitectArticleDnaRecoverySchema, architectArticleDnaRecoveryKey } from "./architect-recovery.ts";
+import { readBrowserArtifactReadOnly } from "./browser-artifact-store.ts";
+
+interface ReconcileInput {
+  storedImportedKeywordIds: string[];
+  articleDnasFromMemory: Record<string, VersionEnvelope<ArticleDNA>>;
+  brandId: string;
+}
+
+interface ReconcileOutput {
+  effectiveKeywordIds: Set<string>;
+  source: "localStorage" | "memory_dnas" | "indexeddb_dnas" | "empty";
+  counts: { localStorage: number; memoryDnas: number; indexedDbDnas: number };
+}
+
+export async function reconcileArchitectWorkspace(input: ReconcileInput): Promise<ReconcileOutput> {
+  const counts = { localStorage: 0, memoryDnas: 0, indexedDbDnas: 0 };
+
+  const fromLocalStorage = new Set(input.storedImportedKeywordIds);
+  counts.localStorage = fromLocalStorage.size;
+
+  const fromMemoryDnas = new Set<string>();
+  for (const version of Object.values(input.articleDnasFromMemory)) {
+    for (const ref of version.payload.keywordReferences) {
+      fromMemoryDnas.add(ref.keywordId);
+    }
+  }
+  counts.memoryDnas = fromMemoryDnas.size;
+
+  const fromIndexedDbDnas = new Set<string>();
+  if (fromLocalStorage.size === 0 && fromMemoryDnas.size === 0) {
+    try {
+      const raw = await readBrowserArtifactReadOnly(architectArticleDnaRecoveryKey(input.brandId));
+      if (raw) {
+        const recovered = ArchitectArticleDnaRecoverySchema.parse(raw);
+        for (const version of Object.values(recovered.versions)) {
+          const typed = version as VersionEnvelope<ArticleDNA>;
+          for (const ref of typed.payload.keywordReferences) {
+            fromIndexedDbDnas.add(ref.keywordId);
+          }
+        }
+      }
+    } catch {
+      // IndexedDB invalido nao impede o carregamento
+    }
+  }
+  counts.indexedDbDnas = fromIndexedDbDnas.size;
+
+  const effectiveKeywordIds = new Set([...fromLocalStorage, ...fromMemoryDnas, ...fromIndexedDbDnas]);
+
+  const source: ReconcileOutput["source"] =
+    fromLocalStorage.size > 0 ? "localStorage"
+    : fromMemoryDnas.size > 0 ? "memory_dnas"
+    : fromIndexedDbDnas.size > 0 ? "indexeddb_dnas"
+    : "empty";
+
+  return { effectiveKeywordIds, source, counts };
+}
+
+// ─── SiloPage: fluxo pipeline como unidade editorial ─────────────────────────
+
+export function siloPageApprovalIssues(version: VersionEnvelope<SiloPage>, events: VersionStatusEvent[]) {
+  const page = version.payload; const issues: string[] = [];
+  if (!page.slug) issues.push("A página do silo precisa de um slug válido.");
+  if (!page.h1) issues.push("A página do silo precisa de um H1.");
+  if (!page.seoTitle) issues.push("A página do silo precisa de um título SEO.");
+  if (!page.metaDescription) issues.push("A página do silo precisa de uma meta description.");
+  if (!page.intro) issues.push("A página do silo precisa de um texto introdutório.");
+  if (!page.siloDnaRef.versionId) issues.push("A página do silo precisa de um SiloDNA referenciado.");
+  if (!hasHumanApproval(version.versionId, events)) issues.push("A versão ainda não recebeu aprovação humana.");
+  return issues;
+}
+
+export function approvedSiloPageVersions(versions: Record<string, VersionEnvelope<SiloPage>>, events: VersionStatusEvent[]) {
+  return Object.values(versions).filter(version => siloPageApprovalIssues(version, events).length === 0);
+}
+
+export function importSiloPagesToRadar(existing: RadarItem[], versions: VersionEnvelope<SiloPage>[], brandId: string, now = new Date().toISOString()) {
+  const existingIds = new Set(existing.map(item => item.articleId));
+  const additions = versions.filter(version => version.payload.brandId === brandId && !existingIds.has(version.payload.siloPageId)).map(version => RadarItemSchema.parse({
+    id: `radar:${version.payload.siloPageId}`, brandId, articleId: version.payload.siloPageId, articleDnaVersionId: version.versionId,
+    articleDnaContentHash: version.contentHash, title: version.payload.h1, slug: version.payload.slug, siloId: version.payload.siloId,
+    hierarchy: "SiloPage", principalKeywordId: version.payload.siloId, format: "silo_page", intent: "navigacional",
+    state: "research_pending", importedAt: now, updatedAt: now, origin: "local" as const, lockVersion: 1, unitType: "silo_page" as const,
+  }));
+  return [...existing, ...additions];
+}
+
+export function parseSiloPageVersion(value: unknown) { return VersionedSiloPageSchema.parse(value); }

@@ -1,11 +1,13 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { persistenceReasonFromError, persistenceUnavailableMessage, type PersistenceUnavailableReason } from "../radar/persistence";
 
 let operationalClient: SupabaseClient | null = null;
 
 export class PersistenceUnavailableError extends Error {
   code = "persistence_unavailable";
-  constructor(message = "A persistência editorial ainda não está disponível.") { super(message); this.name = "PersistenceUnavailableError"; }
+  readonly reason: PersistenceUnavailableReason;
+  constructor(message = persistenceUnavailableMessage("repository_unavailable"), reason: PersistenceUnavailableReason = "repository_unavailable") { super(message); this.name = "PersistenceUnavailableError"; this.reason = reason; }
 }
 
 export class OptimisticLockError extends Error {
@@ -17,7 +19,7 @@ export function getOperationalClient() {
   if (operationalClient) return operationalClient;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new PersistenceUnavailableError("Configuração server-side do Supabase ausente.");
+  if (!url || !key) throw new PersistenceUnavailableError(persistenceUnavailableMessage("configuration_missing"), "configuration_missing");
   operationalClient = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
   return operationalClient;
 }
@@ -25,7 +27,7 @@ export function getOperationalClient() {
 export function mapPersistenceError(error: unknown): never {
   const code = typeof error === "object" && error && "code" in error ? String((error as { code: unknown }).code) : "";
   const message = error instanceof Error ? error.message : typeof error === "object" && error && "message" in error ? String((error as { message: unknown }).message) : "Erro de persistência.";
-  if (["42P01", "PGRST205", "PGRST204"].includes(code) || /relation .* does not exist|schema cache/i.test(message)) throw new PersistenceUnavailableError();
+  const reason = persistenceReasonFromError(code, message);
+  if (reason !== "repository_unavailable") throw new PersistenceUnavailableError(persistenceUnavailableMessage(reason), reason);
   throw error instanceof Error ? error : new Error(message);
 }
-

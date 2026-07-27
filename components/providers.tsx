@@ -7,7 +7,7 @@ import { EditorialPipelineProvider } from "./editorial-pipeline-context";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <SessionProvider refetchOnWindowFocus={false}>
+    <SessionProvider refetchOnWindowFocus>
       <BrandProvider>
         <EditorialPipelineProvider>{children}</EditorialPipelineProvider>
       </BrandProvider>

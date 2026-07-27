@@ -1,0 +1,18 @@
+{
+  "status": 307,
+  "headers": {
+    "location": "/marca",
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/(workspace)/layout,_N_T_/(workspace)/inteligencia/layout,_N_T_/(workspace)/inteligencia/page,_N_T_/inteligencia"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/!KHdvcmtzcGFjZSk/inteligencia/__PAGE__",
+    "/!KHdvcmtzcGFjZSk/inteligencia",
+    "/!KHdvcmtzcGFjZSk",
+    "/_index",
+    "/_head"
+  ]
+}

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   requireSessionProfile,
+  assertCanAccessMarca,
   assertKeywordBelongsToMarca,
   authzErrorResponse,
 } from "@/lib/server/authz";
@@ -11,8 +12,8 @@ export async function POST(req: Request) {
     // 1. Autenticacao e autorizacao (ownership da keyword por marca)
     const profile = await requireSessionProfile();
 
-    const { keywordId, keyword } = await req.json();
-    if (!keywordId || !keyword) {
+    const { keywordId, keyword, brandId } = await req.json();
+    if (!keywordId || !keyword || !brandId) {
       return NextResponse.json(
         { success: false, error: "Parâmetros inválidos. É necessário informar keywordId e keyword." },
         { status: 400 }
@@ -22,7 +23,8 @@ export async function POST(req: Request) {
     // 2. Confirma que a keyword pertence a marca permitida do usuario.
     //    analise_semantica e intent sao campos editoriais e continuam editaveis
     //    mesmo para keywords publicadas (nao sao estruturais).
-    await assertKeywordBelongsToMarca(keywordId, profile.marcaId || "", profile);
+    await assertCanAccessMarca(profile.userId, brandId, profile);
+    await assertKeywordBelongsToMarca(keywordId, brandId, profile);
 
     let apiKey = process.env.DEEPSEEK_API_KEY;
     let apiUrl = "https://api.deepseek.com/chat/completions";
@@ -97,9 +99,12 @@ export async function POST(req: Request) {
     // Obter o registro existente para mesclar e não apagar nicho_override e outros overrides
     const { data: existingWord } = await supabase
       .from("keywords_kgr")
-      .select("analise_semantica")
+      .select("brand_id,analise_semantica")
       .eq("id", keywordId)
+      .eq("brand_id", brandId)
       .single();
+
+    if (!existingWord?.brand_id) throw new Error("Keyword sem tenant canônico.");
 
     const currentSemantic = existingWord?.analise_semantica || {};
     const updatedSemantic = { ...currentSemantic, ...parsedData };
@@ -109,7 +114,8 @@ export async function POST(req: Request) {
       .update({
         analise_semantica: updatedSemantic
       })
-      .eq("id", keywordId);
+      .eq("id", keywordId)
+      .eq("brand_id", existingWord.brand_id);
 
     if (updateError) throw updateError;
 

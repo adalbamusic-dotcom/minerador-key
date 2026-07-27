@@ -9,6 +9,7 @@ import {
   SerpArchitectureImpactSchema,
   SerpSnapshotSchema,
   SiloDNASchema,
+  SiloPageSchema,
   StrategicReviewSchema,
   KeywordArticleReviewSchema,
   ProductEvidenceDNASchema,
@@ -21,13 +22,15 @@ import { buildOriginalityReport } from "../lib/arquiteto/originality.ts";
 import { parseStructuredOutput, StructuredOutputError } from "../lib/arquiteto/structured-output.ts";
 import { ProviderRequestError, requestProviderContent } from "../lib/arquiteto/provider-client.ts";
 import { guardPublishedArticleProposal } from "../lib/arquiteto/published-guard.ts";
-import { deterministicArticleDnaPayload, legacyKeywordDnaEnvelope, legacyKeywordDnaReference } from "../lib/arquiteto/adapters.ts";
+import { deterministicArticleDnaPayload, deterministicSiloDnaPayload, deterministicSiloPagePayload, legacyKeywordDnaEnvelope, legacyKeywordDnaReference } from "../lib/arquiteto/adapters.ts";
 import { proposeKeywordDnaRevision } from "../lib/arquiteto/revisions.ts";
 import { approveSuccessor, canonicalJson, contentHash, createStatusEvent, createVersionEnvelope, hydrateExactVersionGraph, hydrateVersionGraph, InMemoryVersionRepository, toVersionReference, VersioningError } from "../lib/arquiteto/versioning.ts";
 import { deriveLogicalKeywordDna, mergeLogicalKeywordSemantic } from "../lib/arquiteto/keyword-dna-engine.ts";
 import { MAX_KEYWORDS_PER_ARTICLE } from "../lib/arquiteto/domain-rules.ts";
 import { CompactProviderResponseSchema } from "../lib/arquiteto/keyword-review-provider.ts";
 import { normalizeArticleDnaProviderPayload } from "../lib/arquiteto/article-dna-provider.ts";
+import { normalizeSiloDnaProviderPayload } from "../lib/arquiteto/silo-dna-provider.ts";
+import { assertManualPublishedSiloPageUrl, assertManualSiloPageSlugAvailable, initialManualSiloPageVerification, normalizeManualSiloPageSlug } from "../lib/arquiteto/manual-silo.ts";
 
 const ref = (entityId: string) => ({ entityId, versionId: `legacy:${entityId}:v1`, contentHash: `legacy:${entityId}` });
 
@@ -53,6 +56,48 @@ test("aprovação lógica cria ArticleDNA-base sem depender de IA", () => {
   assert.equal(ArticleDNASchema.safeParse(payload).success, true);
   assert.equal(payload.keywordReferences.length, 2);
   assert.match(payload.alerts.join(" "), /lógica determinística/);
+});
+
+test("criador manual forma SiloDNA sem artigos e mantém a entidade central separada", () => {
+  const silo = deterministicSiloDnaPayload("silo-manual", "Captação de pacientes", [], { brandId: "brand-1", centralEntity: "captação de pacientes para clínicas" });
+  assert.equal(SiloDNASchema.parse(silo).articleReferences.length, 0);
+  assert.equal(silo.brandId, "brand-1");
+  assert.equal(silo.name, "Captação de pacientes");
+  assert.equal(silo.centralEntity, "captação de pacientes para clínicas");
+  assert.equal(silo.centralEntitySource, "manual");
+  assert.equal(silo.centralKeywordDnaRef, undefined);
+});
+
+test("SiloPage manual nova e publicada preservam identidade e estados independentes", async () => {
+  const silo = deterministicSiloDnaPayload("silo-page-manual", "Captação de pacientes", [], { brandId: "brand-1", centralEntity: "captação de pacientes" });
+  const siloVersion = await createVersionEnvelope({ entityId: silo.siloId, versionNumber: 1, origin: "human", changeReason: "fixture", createdBy: "human-1", payload: silo });
+  const fresh = deterministicSiloPagePayload(siloVersion, "brand-1", "captacao-de-pacientes", { publicationStatus: "new", publicationVerification: initialManualSiloPageVerification("new", null) });
+  assert.equal(fresh.publicationStatus, "new");
+  assert.equal(fresh.publishedUrl, null);
+  assert.equal(fresh.publicationVerification.status, "not_applicable");
+  const publishedUrl = "https://site.com/captacao-de-pacientes";
+  const published = deterministicSiloPagePayload(siloVersion, "brand-1", "captacao-de-pacientes", { publicationStatus: "published", publishedUrl, publicationVerification: initialManualSiloPageVerification("published", publishedUrl) });
+  assert.equal(published.publicationStatus, "published");
+  assert.equal(published.publishedUrl, publishedUrl);
+  assert.equal(published.publicationVerification.status, "not_checked");
+  assert.equal(published.canonical, null);
+});
+
+test("validação do criador manual rejeita slug e URL incoerentes", () => {
+  assert.equal(normalizeManualSiloPageSlug("/Captação-de-pacientes"), "captacao-de-pacientes");
+  assert.throws(() => normalizeManualSiloPageSlug("captacao-de-pacientes"), /começar/);
+  assert.throws(() => normalizeManualSiloPageSlug("https://site.com/silo"), /URL completa/);
+  assert.throws(() => assertManualSiloPageSlugAvailable("captacao-de-pacientes", ["/captacao-de-pacientes"]), /já está registrado/);
+  assert.equal(assertManualPublishedSiloPageUrl("https://site.com/silo", "https://site.com"), "https://site.com/silo");
+  assert.throws(() => assertManualPublishedSiloPageUrl("https://outro.com/silo", "https://site.com"), /domínio da marca/);
+});
+
+test("modal manual não solicita mais Nicho e exibe identidade de SiloDNA/SiloPage", async () => {
+  const source = await readFile("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
+  assert.equal(source.includes("Nicho (opcional)"), false);
+  assert.equal(source.includes("Keyword ou entidade central"), true);
+  assert.equal(source.includes("Criar também a Página do Silo"), true);
+  assert.equal(source.includes("URL publicada"), true);
 });
 
 test("processo lógico prioriza artigo publicado como âncora", () => {
@@ -175,7 +220,7 @@ test("atualização lógica preserva classificação humana e renova somente seu
 });
 
 test("Minerador executa DNA lógico ao carregar e oferece atualização manual sem chamar IA", async () => {
-  const source = await readFile(new URL("../app/(workspace)/minerador/page.tsx", import.meta.url), "utf8");
+  const source = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
   assert.match(source, /processLogicalKeywordDna\(eligibleKeywords, loadedLists/);
   assert.match(source, /onClick=\{handleRefreshLogicalDna\}/);
   assert.match(source, /"Detectar viés · KeywordDNA"/);
@@ -672,4 +717,66 @@ test("adaptador recupera mapa de decisoes, aliases e confianca percentual", () =
   assert.equal(result.decisions[0].suggestedRole, "secundaria");
   assert.equal(result.decisions[0].confidence, 0.87);
   assert.equal(result.decisions[0].targetGroupId, null);
+});
+
+test("published guard nao adiciona campo slug extra ao ArticleDNA strict", () => {
+  // proposal mantem principalKeywordId coerente com as keywordReferences,
+  // mas tenta alterar slug, silo, brandId e canonical — todos protegidos.
+  // O guard deve sobrescrever esses campos SEM adicionar a chave "slug" extra.
+  const proposalWithSamePrincipal = {
+    ...articleDna,
+    brandId: "brand-2",
+    siloId: "silo-2",
+    suggestedSlug: "novo-slug",
+    canonical: "https://example.com/novo",
+  };
+  const guarded = guardPublishedArticleProposal(
+    { articleId: "article-1", isPublished: true, brandId: "brand-1", siloId: "silo-1", principalKeywordId: "kw-1", slug: "slug-publicado", canonical: null },
+    proposalWithSamePrincipal,
+  );
+  assert.equal(guarded.alerts.every(alert => alert.type === "published_immutable_field"), true);
+  assert.equal(guarded.proposal.suggestedSlug, "slug-publicado");
+  assert.equal(guarded.proposal.principalKeywordId, "kw-1");
+  assert.equal(guarded.proposal.brandId, "brand-1");
+  assert.equal(guarded.proposal.siloId, "silo-1");
+  assert.equal(guarded.proposal.canonical, null);
+  // Regression: the guard previously spread a "slug" key that ArticleDNASchema
+  // (strict) rejected, breaking recovery persistence for published articles.
+  const parsed = ArticleDNASchema.safeParse(guarded.proposal);
+  assert.equal(parsed.success, true, `ArticleDNA strict rejeitou proposta guardada: ${JSON.stringify(parsed.error?.issues)}`);
+  assert.equal("slug" in guarded.proposal, false, "A chave 'slug' nao deve aparecer no ArticleDNA guardado");
+});
+
+test("adaptador SiloDNA normaliza aliases e rejeita campos extras sem afrouxar o schema", () => {
+  const result = normalizeSiloDnaProviderPayload({ siloDna: {
+    entidade_central: "SEO para clinicas",
+    objetivo: "Construir autoridade organica",
+    publico: "Gestores de clinicas",
+    problema_macro: "Baixa previsibilidade de captacao",
+    intencao_dominante: "Informativo-comercial",
+    fronteira: "SEO organico para clinicas",
+    topicos_incluidos: ["SEO tecnico"],
+    topicos_excluidos: ["midia paga"],
+    lacunas: ["mensuracao"],
+    confianca: "82%",
+    campo_inventado_pela_ia: "deve ser ignorado",
+    siloId: "silo-inventado",
+    pillarArticleId: "pilar-inventado",
+  } });
+  assert.equal(result.payload.centralEntity, "SEO para clinicas");
+  assert.equal(result.payload.objective, "Construir autoridade organica");
+  assert.equal(result.payload.audience, "Gestores de clinicas");
+  assert.equal(result.payload.macroProblem, "Baixa previsibilidade de captacao");
+  assert.equal(result.payload.dominantIntent, "Informativo-comercial");
+  assert.equal(result.payload.boundary, "SEO organico para clinicas");
+  assert.deepEqual(result.payload.includedTopics, ["SEO tecnico"]);
+  assert.deepEqual(result.payload.excludedTopics, ["midia paga"]);
+  assert.deepEqual(result.payload.gaps, ["mensuracao"]);
+  assert.equal(result.payload.confidence, 0.82);
+  assert.equal(result.warnings.length > 0, true);
+  // Identidade e organizacao sao controladas pelo servidor: o normalizador
+  // nao deve repassar siloId/pillarArticleId inventados pela IA.
+  assert.equal("siloId" in result.payload, false);
+  assert.equal("pillarArticleId" in result.payload, false);
+  assert.equal("campo_inventado_pela_ia" in result.payload, false);
 });

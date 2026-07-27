@@ -6,7 +6,11 @@ import {
   VersionedArticleDNASchema,
   VersionedContentPlanSchema,
   VersionedSiloDNASchema,
+  ArticleArchitectureStatusSchema,
+  ArticleKgrIdentitySchema,
+  KeywordUrlRelationshipSchema,
 } from "../arquiteto/contracts.ts";
+import { SerpResearchSnapshotSchema, SerpReviewSchema } from "../radar/serp/contracts.ts";
 
 export const EditorialStageSchema = z.enum(["marca", "keywords", "artigos", "silos", "serp", "planejamento", "documentos"]);
 export type EditorialStage = z.infer<typeof EditorialStageSchema>;
@@ -22,7 +26,12 @@ export const EditorialBrandDtoSchema = z.object({
 export const EditorialSiloDtoSchema = z.object({ id: z.string(), nome: z.string(), nicho: z.string().nullable(), marca_id: z.string(), created_at: z.string().nullable() });
 export const EditorialKeywordDtoSchema = z.object({
   id: z.string(), keyword: z.string(), intent: z.string().nullable(), volume_search: z.number().nullable(), kgr_score: z.number().nullable(),
-  lista_id: z.string(), status: z.string().nullable(), analise_semantica: z.record(z.string(), z.unknown()).nullable(), created_at: z.string().nullable(),
+  lista_id: z.string().nullable(), status: z.string().nullable(), analise_semantica: z.record(z.string(), z.unknown()).nullable(), created_at: z.string().nullable(),
+  publishedUrl: z.string().url().nullable().optional(), published_url: z.string().url().nullable().optional(),
+  canonical: z.string().url().nullable().optional(), canonical_url: z.string().url().nullable().optional(),
+  url: z.string().url().nullable().optional(), slug_sugerido: z.string().nullable().optional(), isPublished: z.boolean().optional(),
+  keywordUrlRelation: KeywordUrlRelationshipSchema.optional(), architectureStatus: ArticleArchitectureStatusSchema.optional(),
+  urlEvidence: z.record(z.string(), z.unknown()).optional(), kgrIdentity: ArticleKgrIdentitySchema.optional(),
 });
 export type EditorialKeywordDto = z.infer<typeof EditorialKeywordDtoSchema>;
 export const EditorialBriefingDtoSchema = z.object({
@@ -58,9 +67,14 @@ export const SerpCollectionRecordSchema = z.object({
   id: z.string(), input: SerpQueryInputSchema, status: SerpCollectionStatusSchema, provider: z.string(), origin: DataOriginSchema,
   isMock: z.boolean(), snapshot: SerpSnapshotSchema.nullable(), cost: z.number().nonnegative().nullable(), error: z.string().nullable(),
   dnaIntent: z.string().nullable(), conflictReason: z.string().nullable(), humanDecisionRequired: z.boolean(),
+  research: SerpResearchSnapshotSchema.nullable().default(null), persistenceMode: z.enum(["remote", "local"]).default("local"),
+  resolutionMode: z.enum(["remote_canonical", "local_recovery"]).default("local_recovery"),
+  canonicalRemoteVerified: z.boolean().default(false),
 });
 export type SerpQueryInput = z.infer<typeof SerpQueryInputSchema>;
 export type SerpCollectionRecord = z.infer<typeof SerpCollectionRecordSchema>;
+export const SerpReviewRecordSchema = SerpReviewSchema;
+export type SerpReviewRecord = z.infer<typeof SerpReviewRecordSchema>;
 
 export const ExternalSimilarityInputSchema = z.object({ articleId: z.string(), documentId: z.string(), serpSnapshotIds: z.array(z.string()).min(1) });
 export const ExternalSimilarityResultSchema = z.object({ score: z.number().min(0).max(1), phraseMatches: z.array(z.string()), headingMatches: z.array(z.string()), structuralRisks: z.array(z.string()), humanDecisionRequired: z.boolean() });
@@ -68,7 +82,7 @@ export const ProductEvidenceInputSchema = z.object({ articleId: z.string(), prod
 
 export const EditorialLocalWorkspaceSchema = z.object({
   articleVersions: z.record(z.string(), VersionedArticleDNASchema), siloVersions: z.record(z.string(), VersionedSiloDNASchema),
-  serpRecords: z.array(SerpCollectionRecordSchema), productEvidence: z.array(ProductEvidenceDNASchema),
+  serpRecords: z.array(SerpCollectionRecordSchema), serpReviews: z.array(SerpReviewRecordSchema).default([]), productEvidence: z.array(ProductEvidenceDNASchema),
   contentPlans: z.record(z.string(), VersionedContentPlanSchema), documents: z.record(z.string(), ContentDocumentSchema),
 });
 

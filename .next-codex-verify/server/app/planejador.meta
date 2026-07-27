@@ -1,0 +1,16 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/(workspace)/layout,_N_T_/(workspace)/planejador/layout,_N_T_/(workspace)/planejador/page,_N_T_/planejador"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/!KHdvcmtzcGFjZSk/planejador/__PAGE__",
+    "/!KHdvcmtzcGFjZSk/planejador",
+    "/!KHdvcmtzcGFjZSk",
+    "/_index",
+    "/_head"
+  ]
+}

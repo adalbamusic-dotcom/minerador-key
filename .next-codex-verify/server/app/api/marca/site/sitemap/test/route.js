@@ -1,0 +1,11 @@
+var R=require("../../../../../../chunks/[turbopack]_runtime.js")("server/app/api/marca/site/sitemap/test/route.js")
+R.c("server/chunks/[root-of-the-server]__01f2db_._.js")
+R.c("server/chunks/[root-of-the-server]__163w3q6._.js")
+R.c("server/chunks/[root-of-the-server]__0hjigei._.js")
+R.c("server/chunks/node_modules_zod_v4_classic_external_1-pw2v2.js")
+R.c("server/chunks/_0pvv9t6._.js")
+R.c("server/chunks/lib_server_authz_ts_1eaen9x._.js")
+R.c("server/chunks/node_modules_next_1zdbrne._.js")
+R.c("server/chunks/_next-internal_server_app_api_marca_site_sitemap_test_route_actions_1-uw11g.js")
+R.m(470)
+module.exports=R.m(470).exports

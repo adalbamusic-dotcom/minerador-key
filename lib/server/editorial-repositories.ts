@@ -7,6 +7,10 @@ import type { SavedGridView } from "../editorial/data-grid";
 import { SavedGridViewSchema } from "../editorial/data-grid";
 import { getOperationalClient, mapPersistenceError, OptimisticLockError } from "./editorial-db";
 import { contentHash } from "../arquiteto/versioning";
+import type { SerpCollectionRecord, SerpReviewRecord } from "../editorial/contracts";
+import { SerpCollectionRecordSchema, SerpReviewRecordSchema } from "../editorial/contracts";
+import { PersistenceUnavailableError } from "./editorial-db";
+import type { RadarAnalysisVersion } from "../radar/analysis-contracts";
 
 const client = () => getOperationalClient();
 const unwrap = <T>(data: T | null, error: unknown) => { if (error) mapPersistenceError(error); return data; };
@@ -63,6 +67,11 @@ export class WorkflowRepository {
     return unwrap(data, error);
   }
 
+  async findByArticle(marcaId: string, articleId: string, stage: WorkflowStage = "radar") {
+    const { data, error } = await client().from("editorial_workflow_items").select("*").eq("marca_id", marcaId).eq("article_id", articleId).eq("stage", stage).maybeSingle();
+    return unwrap(data, error);
+  }
+
   async importItem(input: { marcaId: string; articleId: string; stage: WorkflowStage; state: string; sourceEntityId: string; sourceVersionId: string | null; sourceContentHash: string | null; payload: object; actorId: string }) {
     const { data, error } = await client().from("editorial_workflow_items").upsert({ marca_id: input.marcaId, article_id: input.articleId, stage: input.stage, state: input.state,
       source_entity_id: input.sourceEntityId, source_version_id: input.sourceVersionId, source_content_hash: input.sourceContentHash, payload: input.payload,
@@ -76,6 +85,74 @@ export class WorkflowRepository {
   async transition(id: string, expectedLock: number, state: string, payload: object, actorId: string) {
     const { data, error } = await client().from("editorial_workflow_items").update({ state, payload, updated_by: actorId }).eq("id", id).eq("lock_version", expectedLock).select("*").maybeSingle();
     if (error) mapPersistenceError(error); if (!data) throw new OptimisticLockError(); return data;
+  }
+
+  async appendRadarAnalysis(marcaId: string, articleId: string, expectedLock: number, analysis: RadarAnalysisVersion, actorId: string) {
+    const current = await this.findByArticle(marcaId, articleId, "radar");
+    if (!current) return null;
+    if (current.marca_id !== marcaId || current.article_id !== articleId) return null;
+    const radar = RadarItemSchema.parse({ ...(current.payload as object), id: current.id, brandId: current.marca_id, articleId: current.article_id, state: current.state, lockVersion: current.lock_version, importedAt: current.created_at, updatedAt: current.updated_at, origin: "real" });
+    if (analysis.payload.brandId !== marcaId || analysis.payload.articleId !== articleId) throw new Error("A análise Radar não corresponde ao artigo ou à marca.");
+    const alreadySaved = radar.analysisVersions.some(version => version.versionId === analysis.versionId);
+    if (alreadySaved) return current;
+    const payload = { ...(current.payload as object), analysisVersions: [...radar.analysisVersions, analysis] };
+    const { data, error } = await client().from("editorial_workflow_items").update({ payload, updated_by: actorId }).eq("id", current.id).eq("marca_id", marcaId).eq("lock_version", expectedLock).select("*").maybeSingle();
+    if (error) mapPersistenceError(error);
+    if (!data) throw new OptimisticLockError();
+    return data;
+  }
+}
+
+export class SerpSnapshotRepository {
+  async list(marcaId: string, articleId?: string) {
+    try {
+      let query = client().from("editorial_serp_snapshots").select("id,marca_id,article_id,version_number,payload,created_at").eq("marca_id", marcaId).order("version_number", { ascending: true });
+      if (articleId) query = query.eq("article_id", articleId);
+      const { data, error } = await query;
+      unwrap(data, error);
+      const records = (data || []).map(row => SerpCollectionRecordSchema.parse(row.payload));
+      return { records, available: true };
+    } catch (error) {
+      if (error instanceof PersistenceUnavailableError) return { records: [] as SerpCollectionRecord[], available: false };
+      throw error;
+    }
+  }
+
+  async save(marcaId: string, record: SerpCollectionRecord, actorId: string) {
+    try {
+      const { error } = await client().from("editorial_serp_snapshots").insert({ id: record.id, marca_id: marcaId, article_id: record.input.articleId, version_number: record.research?.version || 1,
+        previous_snapshot_id: record.research?.previousSnapshotId || null, content_hash: record.research?.contentHash || "", status: record.status, payload: record, created_by: actorId, created_at: record.research?.collectedAt || new Date().toISOString() });
+      if (error) mapPersistenceError(error);
+      return true;
+    } catch (error) {
+      if (error instanceof PersistenceUnavailableError) return false;
+      throw error;
+    }
+  }
+
+  async saveReview(marcaId: string, review: SerpReviewRecord) {
+    try {
+      const { error } = await client().from("editorial_serp_reviews").insert({ id: review.id, marca_id: marcaId, article_id: review.articleId, snapshot_id: review.snapshotId,
+        status: review.status, notes: review.notes, reviewed_by: review.reviewedBy, reviewed_at: review.reviewedAt, payload: review });
+      if (error) mapPersistenceError(error);
+      return true;
+    } catch (error) {
+      if (error instanceof PersistenceUnavailableError) return false;
+      throw error;
+    }
+  }
+
+  async listReviews(marcaId: string, articleId?: string) {
+    try {
+      let query = client().from("editorial_serp_reviews").select("payload").eq("marca_id", marcaId).order("reviewed_at", { ascending: true });
+      if (articleId) query = query.eq("article_id", articleId);
+      const { data, error } = await query;
+      unwrap(data, error);
+      return { reviews: (data || []).map(row => SerpReviewRecordSchema.parse(row.payload)), available: true };
+    } catch (error) {
+      if (error instanceof PersistenceUnavailableError) return { reviews: [] as SerpReviewRecord[], available: false };
+      throw error;
+    }
   }
 }
 
@@ -127,6 +204,10 @@ export class ContentDocumentRepository {
   }
 }
 
+export class PublicationProtectionError extends Error {
+  constructor(message: string) { super(message); this.name = "PublicationProtectionError"; }
+}
+
 export class PublicationRepository {
   async list(marcaId: string) {
     const { data, error } = await client().from("publication_records").select("payload,status,lock_version,updated_at").eq("marca_id", marcaId);
@@ -137,10 +218,36 @@ export class PublicationRepository {
       document_id: publication.documentId, status: publication.state, payload: publication, created_by: actorId, updated_by: actorId }, { onConflict: "marca_id,article_id", ignoreDuplicates: true }).select("*").maybeSingle();
     if (error) mapPersistenceError(error); return data;
   }
+  async find(marcaId: string, publicationId: string) {
+    const { data, error } = await client().from("publication_records").select("id,payload,status,lock_version,updated_at").eq("marca_id", marcaId);
+    unwrap(data, error);
+    const row = (data || []).find(candidate => (candidate.payload as { id?: string })?.id === publicationId);
+    if (!row) return null;
+    return {
+      rowId: row.id as string,
+      publication: OperationalPublicationSchema.parse({ ...(row.payload as object), state: row.status, lockVersion: row.lock_version, updatedAt: row.updated_at }),
+    };
+  }
+  async updateOperational(marcaId: string, publicationId: string, expectedLock: number, publication: OperationalPublication, actorId: string) {
+    const current = await this.find(marcaId, publicationId);
+    if (!current) return null;
+    if (current.publication.brandId !== publication.brandId || current.publication.articleId !== publication.articleId || current.publication.slug !== publication.slug ||
+      current.publication.documentId !== publication.documentId || current.publication.contentPlanVersionId !== publication.contentPlanVersionId || current.publication.unitType !== publication.unitType ||
+      (current.publication.state === "published" && current.publication.destinationUrl !== publication.destinationUrl)) {
+      throw new PublicationProtectionError("Campos estruturais de uma publicação não podem ser alterados.");
+    }
+    const payload = OperationalPublicationSchema.parse(publication);
+    const { data, error } = await client().from("publication_records").update({ status: payload.state, payload, updated_by: actorId })
+      .eq("id", current.rowId).eq("marca_id", marcaId).eq("lock_version", expectedLock).select("id,status,payload,lock_version,updated_at").maybeSingle();
+    if (error) mapPersistenceError(error);
+    if (!data) throw new OptimisticLockError("A publicação foi alterada por outra sessão.");
+    return OperationalPublicationSchema.parse({ ...(data.payload as object), state: data.status, lockVersion: data.lock_version, updatedAt: data.updated_at });
+  }
   async syncDocumentStatus(documentId: string, documentStatus: ContentDocument["status"], actorId: string) {
-    const target = documentStatus === "em_revisao" ? "awaiting_review" : documentStatus === "aprovado" ? "approved" : documentStatus === "escrevendo" ? "writing" : "draft";
     const { data: current, error: currentError } = await client().from("publication_records").select("id,payload,lock_version").eq("document_id", documentId).maybeSingle();
     if (currentError) mapPersistenceError(currentError); if (!current) return;
+    const currentPublication = OperationalPublicationSchema.parse(current.payload);
+    const target = currentPublication.state === "published" ? "published" : documentStatus === "em_revisao" ? "awaiting_review" : documentStatus === "aprovado" ? "approved" : documentStatus === "escrevendo" ? "writing" : "draft";
     const payload = OperationalPublicationSchema.parse({ ...(current.payload as object), state: target });
     const { data, error } = await client().from("publication_records").update({ status: target, payload, updated_by: actorId }).eq("id", current.id).eq("lock_version", current.lock_version).select("id").maybeSingle();
     if (error) mapPersistenceError(error); if (!data) throw new OptimisticLockError("A publicação vinculada foi alterada por outra sessão.");

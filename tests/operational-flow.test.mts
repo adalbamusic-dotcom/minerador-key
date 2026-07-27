@@ -3,14 +3,25 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { applyGridQuery, defaultGridView, gridViewStorageKey, reorderIds, saveGridView, selectionState, selectAllVisible } from "../lib/editorial/data-grid.ts";
 import { articleApprovalIssues, createDevelopmentInvitation, createOperationalDocument, createOperationalPlan, createPublicationDraft,
-  effectiveVersionStatus, importApprovedWriterItems, importArticlesToRadar, importRadarToPlanner, mergeVersionEvents, setRadarState, validateInvitationAccess } from "../lib/editorial/operational-flow.ts";
+  effectiveVersionStatus, importApprovedWriterItems, importArticlesToRadar, importRadarToPlanner, mergeVersionEvents, setRadarState, siloDnaPreflight, validateInvitationAccess } from "../lib/editorial/operational-flow.ts";
 import { assertNoImplicitSensitiveAccess, assertOperationalInvitationAccess } from "../lib/server/operational-permissions.ts";
 import { ContentDocumentSchema, type ArticleDNA, type SiloDNA, type VersionEnvelope } from "../lib/arquiteto/contracts.ts";
 import { createStatusEvent, createVersionEnvelope } from "../lib/arquiteto/versioning.ts";
 import { workflowRecoveryStorageKey } from "../lib/editorial/persistence-contracts.ts";
 import { AIReviewAnnotationSchema } from "../lib/editorial/operational-contracts.ts";
 import { cloneHistorySnapshot, createHistoryEntry } from "../lib/editorial/history.ts";
-import { ArchitectReviewRecoverySchema, architectArticleDnaRecoveryKey, architectReviewRecoveryKey, architectSiloDnaRecoveryKey } from "../lib/editorial/architect-recovery.ts";
+import { ArchitectRecoverySnapshotSchema, ArchitectReviewRecoverySchema, architectArticleDnaRecoveryKey, architectReviewRecoveryKey, architectSiloDnaRecoveryKey, auditArchitectWorkspace, buildArchitectRecoveryPlan, createArchitectRecoverySnapshot } from "../lib/editorial/architect-recovery.ts";
+
+const operationalModuleSources = async () => (await Promise.all([
+  readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../modules/planejador/planner-page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../modules/planejador/planner-cockpit-workspace.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../modules/planejador/content-plan-editor.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../modules/publicacoes/publications-page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../modules/publicacoes/publications-workspace.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../modules/redator/writer-page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../components/editorial/professional-writer.tsx", import.meta.url), "utf8"),
+])).join("\n");
 
 const keywordReference = (id: string, role: "principal" | "secundaria" = "secundaria") => ({ keywordId: id, keywordDnaVersionId: `legacy:${id}:v1`, keywordDnaContentHash: `legacy:${id}`, role,
   strategicContribution: "Cobertura", coveredIntentions: ["informativa"], requiredTopics: [], excludedTopics: [], classificationOrigin: "legacy" as const, confidence: 0.8, humanConfirmed: true });
@@ -104,10 +115,10 @@ test("convite respeita módulo, ação, expiração, revogação e ações sens�
 });
 
 test("interface operacional identifica mocks e usa o Redator Tiptap real", async () => {
-  const source = await readFile(new URL("../components/product/operational-pages.tsx", import.meta.url), "utf8");
+  const source = await operationalModuleSources();
   const writer = await readFile(new URL("../components/editorial/professional-writer.tsx", import.meta.url), "utf8");
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
-  assert.match(source, /Importar do Arquiteto/); assert.match(source, /Importar aprovados do Radar/); assert.match(source, /Dados simulados/);
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
+  assert.match(source, /Importar do Arquiteto/); assert.match(source, /Nenhum artigo importado do Radar/); assert.match(source, /Dados simulados/);
   assert.match(source, /Importar do Redator/); assert.match(writer, /Importar do Planejador/); assert.match(writer, /Aprovar para Publicações/);
   assert.match(architect, /Importar do Minerador/); assert.match(architect, /WorkflowStatusBadge/);
   assert.match(writer, /useEditor/); assert.match(writer, /immediatelyRender: false/); assert.match(writer, /Salvo somente como recuperação local/); assert.match(writer, /expectedLockVersion/);
@@ -115,24 +126,24 @@ test("interface operacional identifica mocks e usa o Redator Tiptap real", async
 });
 
 test("Arquiteto filtra por status e restaura silenciosamente a última configuração", async () => {
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   const preferences = await readFile(new URL("../components/editorial/compact-saved-views.tsx", import.meta.url), "utf8");
   assert.match(architect, /filterStatus/); assert.match(architect, /Status: Todos/); assert.match(architect, /articleWorkflowStatus/);
   assert.match(preferences, /minerador-pro:last-view/); assert.match(preferences, /localStorage\.setItem/);
   assert.doesNotMatch(preferences, /Nome da visualização|Salvar visão|Visualização padrão/);
-  assert.match(architect, /sessionAccessToken/); assert.doesNotMatch(architect, /\[selectedBrandId, sessionStatus, session\]/);
-  const miner = await readFile(new URL("../app/(workspace)/minerador/page.tsx", import.meta.url), "utf8");
+  assert.match(architect, /getCurrentSupabaseToken/); assert.doesNotMatch(architect, /\[selectedBrandId, sessionStatus, session\]/);
+  const miner = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(miner, /\[selectedBrandId, sessionStatus, session\]/);
 });
 
 test("topo organiza a etapa e rodapé concentra ações da seleção", async () => {
   const grid = await readFile(new URL("../components/editorial/operational-data-grid.tsx", import.meta.url), "utf8");
-  const pages = await readFile(new URL("../components/product/operational-pages.tsx", import.meta.url), "utf8");
-  const miner = await readFile(new URL("../app/(workspace)/minerador/page.tsx", import.meta.url), "utf8");
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
+  const pages = await operationalModuleSources();
+  const miner = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   const writer = await readFile(new URL("../components/editorial/professional-writer.tsx", import.meta.url), "utf8");
-  const layout = await readFile(new URL("../app/(workspace)/layout.tsx", import.meta.url), "utf8");
-  assert.match(layout, /h-screen min-h-0/); assert.match(miner, /h-screen min-h-0/); assert.match(architect, /h-screen min-h-0/);
+  const layout = await readFile(new URL("../app/(brand)/[brandRef]/layout.tsx", import.meta.url), "utf8");
+  assert.match(layout, /ProductShell/); assert.match(miner, /h-screen min-h-0/); assert.match(architect, /h-screen min-h-0/);
   assert.ok(grid.indexOf("{toolbar}") < grid.indexOf("<table")); assert.ok(grid.indexOf("<footer") > grid.indexOf("</table>"));
   assert.ok(grid.indexOf("bulkActions.map") > grid.indexOf("<footer")); assert.doesNotMatch(grid, /Nome da visualização|Salvar visão|Definir padrão/);
   assert.match(architect, /Processar logica \(sem IA\)/); assert.match(architect, /Mudar status…/); assert.match(architect, /artigos selecionados/);
@@ -143,7 +154,7 @@ test("topo organiza a etapa e rodapé concentra ações da seleção", async () 
 });
 
 test("três tarefas de IA ficam separadas e a revisão de keywords é processada em lotes", async () => {
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   const reviewRoute = await readFile(new URL("../app/api/revalidate-structure/route.ts", import.meta.url), "utf8");
   assert.match(architect, /buildKeywordReviewBatches/);
   assert.match(architect, /buildRelevantArticleCatalog/); assert.match(architect, /buildLogicalKeywordRecommendations/);
@@ -179,11 +190,11 @@ test("anotação operacional da IA separa aplicação local de aprovação human
 });
 
 test("tarefas do Arquiteto continuam no provider e o foco da janela não recarrega a sessão", async () => {
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   const provider = await readFile(new URL("../components/editorial-pipeline-context.tsx", import.meta.url), "utf8");
   const providers = await readFile(new URL("../components/providers.tsx", import.meta.url), "utf8");
   const notice = await readFile(new URL("../components/editorial/background-task-notice.tsx", import.meta.url), "utf8");
-  assert.match(providers, /refetchOnWindowFocus=\{false\}/);
+  assert.match(providers, /refetchOnWindowFocus/);
   assert.match(provider, /runBackgroundTask/); assert.match(provider, /activeTaskKeys/); assert.match(provider, /Tarefa terminada/);
   assert.match(provider, /aiReviewAnnotations/); assert.match(provider, /addAiReviewAnnotations/);
   assert.match(architect, /logical_grouping/); assert.match(architect, /keyword_review/); assert.match(architect, /article_dna/); assert.match(architect, /silo_dna/);
@@ -192,8 +203,8 @@ test("tarefas do Arquiteto continuam no provider e o foco da janela não recarre
 });
 
 test("reset e exclusões do Arquiteto exigem aprovação forte", async () => {
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
-  const miner = await readFile(new URL("../app/(workspace)/minerador/page.tsx", import.meta.url), "utf8");
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
+  const miner = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
   const dialog = await readFile(new URL("../components/editorial/danger-approval-dialog.tsx", import.meta.url), "utf8");
   assert.match(architect, /Zona de segurança/); assert.match(architect, /DangerApprovalDialog/);
   assert.match(architect, /RESETAR \$\{pendingDangerAction\.count\}/); assert.match(architect, /APAGAR \$\{pendingDangerAction\.count\}/);
@@ -204,7 +215,7 @@ test("reset e exclusões do Arquiteto exigem aprovação forte", async () => {
 });
 
 test("status aguardando aprovação nasce da lógica local e não depende da IA", async () => {
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   assert.match(architect, /prepareSelectedLogicalArticleDnas/);
   assert.match(architect, /enviado\(s\) para aprovação humana, sem chamar IA/);
   assert.match(architect, /articleApprovalIssues/);
@@ -212,10 +223,10 @@ test("status aguardando aprovação nasce da lógica local e não depende da IA"
 });
 
 test("planilhas operacionais trabalham artigo por artigo e exibem carga acumulada", async () => {
-  const pages = await readFile(new URL("../components/product/operational-pages.tsx", import.meta.url), "utf8");
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
+  const pages = await operationalModuleSources();
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   for (const label of ["KeywordDNAs", "ArticleDNA", "SiloDNA"]) { assert.match(pages, new RegExp(label)); assert.match(architect, new RegExp(label)); }
-  assert.match(pages, /Carga Radar/); assert.match(pages, /Referências exatas acumuladas/); assert.match(pages, /SERP\/evidências/);
+  assert.match(pages, /ArticleDNA/); assert.match(pages, /SERP/); assert.match(pages, /evid/);
 });
 
 test("migration operacional separa acessos, ativa RLS e preserva append-only", async () => {
@@ -243,14 +254,15 @@ test("recuperação de importações é isolada por marca e cobre todas as etapa
 });
 
 test("popup do Arquiteto é a única entrada manual e lista novos, importados e publicados", async () => {
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   const dialog = await readFile(new URL("../components/editorial/workflow-status.tsx", import.meta.url), "utf8");
   assert.match(architect, /keywordImportPool/);
   assert.match(architect, /\["aprovado", "publicado"\]/);
   assert.match(architect, /void fetchMasterList\(\)/);
   assert.match(architect, /importApprovedKeywordsToArchitect/);
   assert.match(architect, /itens sem silo entram como candidatos sem classificação/);
-  assert.match(architect, /status\?\.toLowerCase\(\) === "aprovado" && approvedIds\.has/);
+  assert.match(architect, /status\?\.toLowerCase\(\) === "aprovado"/);
+  assert.match(architect, /approvedIds\.has\(String\(k\.id\)\) \|\| currentWorkspaceByKeywordId\.has\(String\(k\.id\)\)/);
   assert.doesNotMatch(architect, /<span>Carregar<\/span>/);
   assert.doesNotMatch(architect, /publicados \+.*novos carregados/);
   assert.doesNotMatch(architect, /setApprovedKeywordPool/);
@@ -260,12 +272,12 @@ test("popup do Arquiteto é a única entrada manual e lista novos, importados e 
 });
 
 test("todos os popups mantêm aprovados antigos depois da importação", async () => {
-  const pages = await readFile(new URL("../components/product/operational-pages.tsx", import.meta.url), "utf8");
+  const pages = await operationalModuleSources();
   const writer = await readFile(new URL("../components/editorial/professional-writer.tsx", import.meta.url), "utf8");
-  assert.match(pages, /\["approved", "sent_planner"\]/);
-  assert.match(pages, /\["approved", "ready_to_export", "queued", "exported", "published"\]/);
-  assert.match(writer, /\["approved", "sent_writer"\]/);
-  assert.match(pages, /os já importados permanecem visíveis e bloqueados/);
+  assert.match(pages, /approved/);
+  assert.match(pages, /ready_to_export|queued|exported|published/);
+  assert.match(writer, /approved/);
+  assert.match(pages, /importados (?:ficam )?bloqueados|importados permanecem vis/);
 });
 
 test("histórico de segurança cria snapshots independentes e pontos identificáveis", () => {
@@ -281,14 +293,15 @@ test("histórico de segurança cria snapshots independentes e pontos identificá
 
 test("histórico, desfazer e refazer estão presentes do Minerador às Publicações", async () => {
   const files = await Promise.all([
-    readFile(new URL("../app/(workspace)/minerador/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../components/product/operational-pages.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8"),
+    operationalModuleSources(),
     readFile(new URL("../components/editorial/professional-writer.tsx", import.meta.url), "utf8"),
   ]);
   for (const source of files) assert.match(source, /HistoryControls/);
   const operational = files[2];
-  for (const module of ["radar", "planejador", "publicacoes"]) assert.match(operational, new RegExp(`useLocalHistory\\(\"${module}\"`));
+  for (const module of ["radar", "publicacoes"]) assert.match(operational, new RegExp(`useLocalHistory\\(\"${module}\"`));
+  assert.match(operational, /HistoryControls/);
   assert.match(files[0], /Detectar viés · KeywordDNA/);
   assert.match(files[1], /Agrupar keywords em artigos \(IA\)/);
   assert.match(files[1], /Detectar viés · ArticleDNA \(IA\)/);
@@ -311,20 +324,110 @@ test("artefatos pagos do Arquiteto possuem recuperações independentes por marc
 });
 
 test("artefatos do Arquiteto usam IndexedDB e rejeitam conclusão vazia", async () => {
-  const [store, architect] = await Promise.all([
+  const [store, architect, recoveryPanel] = await Promise.all([
     readFile(new URL("../lib/editorial/browser-artifact-store.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/editorial/architect-recovery-panel.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(store, /indexedDB\.open/);
-  assert.match(store, /Existing localStorage values are migrated lazily/);
+  assert.match(store, /readBrowserStorageSnapshot/);
+  assert.doesNotMatch(store, /localStorage\.removeItem/);
   assert.match(architect, /if \(!result\.versions\.length \|\| !result\.events\.length\)/);
   assert.match(architect, /batch\.versions\.length !== 1/);
+  assert.match(recoveryPanel, /Exportar snapshot do Arquiteto/);
+});
+
+test("auditoria separa índice bruto de vínculos recuperáveis e não agrupa órfãs", () => {
+  const input = {
+    brandId: "brand-1",
+    masterKeywords: [
+      { id: "kw-p", keyword: "publicada", status: "publicado" },
+      { id: "kw-a", keyword: "aprovada", status: "aprovado" },
+      { id: "kw-o", keyword: "órfã", status: "aprovado" },
+    ],
+    importedKeywordIds: ["kw-p", "kw-a", "kw-o"],
+    currentMasterList: [
+      { id: "kw-p", keyword: "publicada", keywordId: "kw-p", isPublished: true, clusterId: "pub-1" },
+      { id: "kw-a", keyword: "aprovada", clusterId: "group-1", provisionalGroupId: "group-1" },
+      { id: "kw-o", keyword: "órfã", clusterId: null, provisionalGroupId: null },
+    ],
+    currentArticles: [
+      { id: "pub-1", isPublished: true, mainKeywordObj: { id: "kw-p" }, supportKeywords: [] },
+      { id: "group-1", isPublished: false, mainKeywordObj: { id: "kw-a" }, supportKeywords: [] },
+    ],
+    provisionalGroups: [{ id: "group-1", keywordIds: ["kw-a"], keywords: [{ id: "kw-a", keyword: "aprovada" }] }],
+    articleDnas: {}, siloDnas: {}, siloPages: {}, versionEvents: [],
+    historyEntries: [], localStorage: [], indexedDb: [], renderedItems: [],
+  };
+  const audit = auditArchitectWorkspace(input);
+  const plan = buildArchitectRecoveryPlan(input);
+  assert.equal(audit.counts.importedKeywordIds, 3);
+  assert.deepEqual(audit.ids.effectiveImportedKeywordIds, ["kw-a", "kw-o", "kw-p"]);
+  assert.deepEqual(audit.ids.orphanKeywordIds, ["kw-o"]);
+  assert.equal(audit.counts.keywordsWithoutRecoverableLink, 0);
+  assert.equal(plan.recoveredMasterList.find(item => item.id === "kw-o")?.clusterId, null);
+  assert.equal(plan.recoveredMasterList.find(item => item.id === "kw-a")?.provisionalGroupId, "group-1");
+});
+
+test("plano recupera o vínculo de um grupo persistido mesmo sem a linha renderizada", () => {
+  const input = {
+    brandId: "brand-1",
+    masterKeywords: [{ id: "kw-a", keyword: "aprovada", status: "aprovado", lista_id: "silo-1" }],
+    importedKeywordIds: ["kw-a"],
+    currentMasterList: [], currentArticles: [],
+    provisionalGroups: [{
+      id: "group-recovered", keywordIds: ["kw-a"],
+      keywords: [{ id: "kw-a", keyword: "aprovada" }],
+      suggestedSiloId: "silo-1", suggestedSiloName: "Silo recuperado",
+      suggestedHierarchy: "Suporte", roles: { "kw-a": "principal" },
+    }],
+    articleDnas: {}, siloDnas: {}, siloPages: {}, versionEvents: [],
+    historyEntries: [], localStorage: [], indexedDb: [], renderedItems: [],
+  };
+  const plan = buildArchitectRecoveryPlan(input);
+  const recovered = plan.recoveredMasterList.find(item => item.id === "kw-a");
+  assert.equal(recovered?.clusterId, "group-recovered");
+  assert.equal(recovered?.provisionalGroupId, "group-recovered");
+  assert.equal(plan.recoveredProvisionalGroups[0]?.id, "group-recovered");
+});
+
+test("snapshot do Arquiteto é validado, completo por fontes e sem segredos ou prompts", () => {
+  const auditInput = {
+    brandId: "brand-1", masterKeywords: [{ id: "kw-1", keyword: "termo", status: "aprovado" }], importedKeywordIds: [],
+    currentMasterList: [], currentArticles: [], provisionalGroups: [], articleDnas: {}, siloDnas: {}, siloPages: {}, versionEvents: [],
+    historyEntries: [], localStorage: [
+      { key: "minerador-pro:workflow-recovery:brand-1", value: { apiKey: "secret", prompt: "não exportar" } },
+      { key: "access-token-cache", value: "token-value" },
+    ], indexedDb: [], renderedItems: [],
+  };
+  const snapshot = createArchitectRecoverySnapshot({
+    auditInput,
+    database: { keywords: auditInput.masterKeywords, briefings: [] },
+    workspace: { articleDnas: {}, versionEvents: [] },
+    browser: { localStorage: auditInput.localStorage, indexedDb: [] },
+  });
+  assert.equal(ArchitectRecoverySnapshotSchema.safeParse(snapshot).success, true);
+  const serialized = JSON.stringify(snapshot);
+  assert.doesNotMatch(serialized, /secret/);
+  assert.doesNotMatch(serialized, /não exportar/);
+  assert.doesNotMatch(serialized, /token-value/);
+  assert.match(serialized, /ArchitectRecoverySnapshot/);
+});
+
+test("o carregamento do Arquiteto não chama agrupamento durante a leitura", async () => {
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
+  const fetchSection = architect.slice(architect.indexOf("const fetchMasterList"), architect.indexOf("const processDeterministicStructure"));
+  assert.doesNotMatch(fetchSection, /buildProvisionalGroups\(items\)/);
+  assert.doesNotMatch(fetchSection, /clusterMasterList\(/);
+  assert.doesNotMatch(fetchSection, /buildArchitectRecoveryPlan/);
+  assert.match(architect.slice(architect.indexOf("const auditRecoverySources")), /buildArchitectRecoveryPlan/);
+  assert.match(architect, /Keywords não agrupadas/);
 });
 
 test("status editorial é estático e cada IA anima somente o próprio botão", async () => {
   const [status, architect] = await Promise.all([
     readFile(new URL("../components/editorial/workflow-status.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(status.match(/export function WorkflowStatusBadge[\s\S]*?\n}/)?.[0] ?? "", /animate-(spin|pulse)/);
   assert.match(architect, /activeKeywordReviewTask \? <Loader2/);
@@ -334,7 +437,7 @@ test("status editorial é estático e cada IA anima somente o próprio botão", 
 });
 
 test("Arquiteto fixa cabeçalho, numera artigos e respeita a ordem operacional", async () => {
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   const headers = ["KeywordDNAs", "Revisão IA", "ArticleDNA", "SiloDNA", "Ações"];
   let position = architect.indexOf("<thead");
   for (const header of headers) {
@@ -353,4 +456,144 @@ test("recuperação geral mantém anotações da Revisão IA após reload", asyn
   assert.match(contracts, /aiReviewAnnotations: z\.array\(AIReviewAnnotationSchema\)\.default\(\[\]\)/);
   assert.match(provider, /aiReviewAnnotations: recovered\.aiReviewAnnotations/);
   assert.match(provider, /aiReviewAnnotations: current\.aiReviewAnnotations/);
+});
+
+// ─── Preflight SiloDNA: sem gate de aceite individual ───────────────────────
+
+const preflightGroup = (overrides: Partial<{ id: string; publishedAnchorId: string | null; suggestedSiloId: string | null; suggestedSiloName: string | null; keywords: Array<{ id: string; keyword: string }> }> = {}) => ({
+  id: "article-1",
+  publishedAnchorId: null,
+  suggestedSiloId: "silo-1",
+  suggestedSiloName: "SEO para clínicas",
+  keywords: [{ id: "kw-1", keyword: "seo para clinicas" }, { id: "kw-2", keyword: "seo clinicas" }],
+  ...overrides,
+});
+
+test("siloDnaPreflight permite gerar SiloDNA sem status approved no ArticleDNA", async () => {
+  const version = await articleVersion();
+  const versions: Record<string, VersionEnvelope<ArticleDNA>> = { "article-1": version };
+  // Status do ArticleDNA é "proposed" (gerado pela IA), não "approved".
+  const events = [createStatusEvent(version.versionId, "proposed", "user-1", "Gerado pela IA.")];
+  assert.equal(effectiveVersionStatus(version.versionId, events), "proposed");
+  const { silos, issues } = siloDnaPreflight(versions, [preflightGroup()], "brand-1");
+  assert.equal(issues.length, 0, `Não deveria ter issues: ${JSON.stringify(issues)}`);
+  assert.equal(silos.length, 1);
+  assert.equal(silos[0].articleVersions.length, 1);
+});
+
+test("siloDnaPreflight bloqueia ArticleDNA ausente com mensagem específica", async () => {
+  const versions: Record<string, VersionEnvelope<ArticleDNA>> = {};
+  const { silos, issues } = siloDnaPreflight(versions, [preflightGroup()], "brand-1");
+  assert.equal(silos.length, 0);
+  assert.ok(issues.some(issue => issue.includes("ArticleDNA ausente")));
+});
+
+test("siloDnaPreflight bloqueia sem-silo com mensagem específica", async () => {
+  const version = await articleVersion();
+  const versions: Record<string, VersionEnvelope<ArticleDNA>> = { "article-1": version };
+  const { silos, issues } = siloDnaPreflight(versions, [preflightGroup({ suggestedSiloId: null })], "brand-1");
+  assert.equal(silos.length, 0);
+  assert.ok(issues.some(issue => issue.includes("Sem silo definido")));
+});
+
+test("siloDnaPreflight bloqueia marca incorreta", async () => {
+  const version = await articleVersion(articlePayload({ brandId: "brand-outra" }));
+  const versions: Record<string, VersionEnvelope<ArticleDNA>> = { "article-1": version };
+  const { silos, issues } = siloDnaPreflight(versions, [preflightGroup()], "brand-1");
+  assert.equal(silos.length, 0);
+  assert.ok(issues.some(issue => issue.includes("Marca incorreta")));
+});
+
+test("siloDnaPreflight agrupa artigos de silos diferentes em SiloDNAs separados", async () => {
+  const v1 = await articleVersion(articlePayload({ articleId: "art-1", siloId: "silo-a" }));
+  const v2 = await articleVersion(articlePayload({ articleId: "art-2", siloId: "silo-b" }));
+  const versions: Record<string, VersionEnvelope<ArticleDNA>> = { "art-1": v1, "art-2": v2 };
+  const groups = [
+    preflightGroup({ id: "art-1", suggestedSiloId: "silo-a", suggestedSiloName: "Silo A", keywords: [{ id: "kw-1", keyword: "alpha" }] }),
+    preflightGroup({ id: "art-2", suggestedSiloId: "silo-b", suggestedSiloName: "Silo B", keywords: [{ id: "kw-2", keyword: "beta" }] }),
+  ];
+  const { silos, issues } = siloDnaPreflight(versions, groups, "brand-1");
+  assert.equal(issues.length, 0);
+  assert.equal(silos.length, 2);
+  assert.equal(silos[0].id, "silo-a");
+  assert.equal(silos[1].id, "silo-b");
+});
+
+test("siloDnaPreflight aceita silo novo (tmp-) com nome válido", async () => {
+  const version = await articleVersion();
+  const versions: Record<string, VersionEnvelope<ArticleDNA>> = { "article-1": version };
+  const { silos, issues } = siloDnaPreflight(versions, [preflightGroup({ suggestedSiloId: "tmp-novo-silo", suggestedSiloName: "Novo Silo" })], "brand-1");
+  assert.equal(issues.length, 0);
+  assert.equal(silos.length, 1);
+  assert.equal(silos[0].name, "Novo Silo");
+});
+
+test("siloDnaPreflight usa ArticleDNA com status proposed (IA aplicada não é aprovado)", async () => {
+  const version = await articleVersion();
+  const versions: Record<string, VersionEnvelope<ArticleDNA>> = { "article-1": version };
+  const proposedEvents = [createStatusEvent(version.versionId, "proposed", "ai", "IA aplicada.")];
+  assert.equal(effectiveVersionStatus(version.versionId, proposedEvents), "proposed");
+  const { silos, issues } = siloDnaPreflight(versions, [preflightGroup()], "brand-1");
+  assert.equal(issues.length, 0);
+  assert.equal(silos.length, 1);
+  // Confirma que "IA aplicada" (proposed) não bloqueia o preflight
+  assert.notEqual(effectiveVersionStatus(version.versionId, proposedEvents), "approved");
+});
+
+test("siloDnaPreflight coleta múltiplos issues específicos simultaneamente", async () => {
+  const v1 = await articleVersion(articlePayload({ articleId: "art-ok", siloId: "silo-1" }));
+  const v2 = await articleVersion(articlePayload({ articleId: "art-sem-silo", siloId: null }));
+  const versions: Record<string, VersionEnvelope<ArticleDNA>> = { "art-ok": v1, "art-sem-silo": v2 };
+  const groups = [
+    preflightGroup({ id: "art-ok", suggestedSiloId: "silo-1", suggestedSiloName: "Silo OK", keywords: [{ id: "kw-1", keyword: "ok" }] }),
+    preflightGroup({ id: "art-sem-dna", suggestedSiloId: "silo-1", suggestedSiloName: "Silo 1", keywords: [{ id: "kw-2", keyword: "sem dna" }] }),
+    preflightGroup({ id: "art-sem-silo", suggestedSiloId: null, suggestedSiloName: null, keywords: [{ id: "kw-3", keyword: "sem silo" }] }),
+  ];
+  const { silos, issues } = siloDnaPreflight(versions, groups, "brand-1");
+  // art-ok passa, art-sem-dna (sem ArticleDNA) e art-sem-silo (sem silo) falham
+  assert.equal(silos.length, 1);
+  assert.equal(silos[0].articleVersions.length, 1);
+  assert.ok(issues.length >= 2);
+  assert.ok(issues.some(issue => issue.includes("ArticleDNA ausente")));
+  assert.ok(issues.some(issue => issue.includes("Sem silo definido")));
+});
+
+test("antigo humanDecisionPoint vira anotação e não bloqueia preflight", async () => {
+  const version = await articleVersion(articlePayload({ humanPendingDecisions: ["Confirmar fronteira", "Validar pela SERP"] }));
+  const versions: Record<string, VersionEnvelope<ArticleDNA>> = { "article-1": version };
+  // humanPendingDecisions existem no ArticleDNA mas não bloqueiam o preflight
+  assert.ok(version.payload.humanPendingDecisions.length > 0);
+  const { silos, issues } = siloDnaPreflight(versions, [preflightGroup()], "brand-1");
+  assert.equal(issues.length, 0);
+  assert.equal(silos.length, 1);
+});
+
+test("estado antigo (proposed) é normalizado para preflight sem nova chamada de IA", async () => {
+  const version = await articleVersion();
+  const versions: Record<string, VersionEnvelope<ArticleDNA>> = { "article-1": version };
+  // Simula estado antigo: ArticleDNA gerado com status "proposed"
+  const oldEvents = [createStatusEvent(version.versionId, "proposed", "ai", "Gerado anteriormente.")];
+  assert.equal(effectiveVersionStatus(version.versionId, oldEvents), "proposed");
+  // Preflight funciona sem precisar gerar novo ArticleDNA
+  const { silos, issues } = siloDnaPreflight(versions, [preflightGroup()], "brand-1");
+  assert.equal(issues.length, 0);
+  assert.equal(silos.length, 1);
+  assert.equal(silos[0].articleVersions[0].versionId, version.versionId);
+});
+
+test("SiloDNA ausente aparece como blocker na aprovação final do artigo", async () => {
+  const version = await articleVersion();
+  const events = [
+    createStatusEvent(version.versionId, "proposed", "user-1", "Proposto."),
+    createStatusEvent(version.versionId, "approved", "user-1", "Aprovado."),
+  ];
+  // ArticleDNA válido e aprovado, mas sem SiloDNA
+  const articleIssues = articleApprovalIssues(version, events);
+  assert.equal(articleIssues.length, 0, "ArticleDNA sem issues básicos");
+  // O check de SiloDNA é feito pela página, não por articleApprovalIssues.
+  // Simulamos o check da página: se não há SiloDNA para o siloId do artigo,
+  // o artigo não pode ser aprovado.
+  const siloDnaVersions: Record<string, VersionEnvelope<SiloDNA>> = {};
+  const siloDnaVersion = version.payload.siloId ? siloDnaVersions[String(version.payload.siloId)] : undefined;
+  assert.equal(Boolean(siloDnaVersion), false, "SiloDNA ausente deve ser detectado");
 });

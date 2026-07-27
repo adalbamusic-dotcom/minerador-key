@@ -9,8 +9,15 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    ".next-codex-verify/**",
     "out/**",
     "build/**",
+    "**/generated/**",
+    "**/dumps/**",
+    "**/artifacts/**",
+    "**/.tmp/**",
+    "**/tmp/**",
+    "**/temp/**",
     "next-env.d.ts",
     // Scripts temporarios/de diagnostico e docs nao sao codigo de producao.
     "docs/**",

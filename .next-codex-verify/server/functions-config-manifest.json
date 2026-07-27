@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "functions": {
+    "/api/mine": {
+      "maxDuration": 60
+    }
+  }
+}

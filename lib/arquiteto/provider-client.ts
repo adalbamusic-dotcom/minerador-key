@@ -16,6 +16,8 @@ export async function requestProviderContent({
   extraHeaders = {},
   signal,
   fetchImpl = fetch,
+  maxTokens,
+  temperature = 0,
 }: {
   apiUrl: string;
   apiKey: string;
@@ -25,7 +27,19 @@ export async function requestProviderContent({
   extraHeaders?: Record<string, string>;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  maxTokens?: number;
+  temperature?: number;
 }) {
+  const body: Record<string, unknown> = {
+    model,
+    messages: [{ role: "system", content: system }, { role: "user", content: user }],
+    response_format: { type: "json_object" },
+    // temperature 0 para saida mais deterministica e rapida em JSON estruturado
+    temperature,
+  };
+  // max_tokens limita o tamanho da resposta e evita geracao excessiva que
+  // aumenta latencia. Se nao definido, o provedor usa seu default.
+  if (maxTokens !== undefined) body.max_tokens = maxTokens;
   const response = await fetchImpl(apiUrl, {
     method: "POST",
     headers: {
@@ -33,11 +47,7 @@ export async function requestProviderContent({
       Authorization: `Bearer ${apiKey}`,
       ...extraHeaders,
     },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      response_format: { type: "json_object" },
-    }),
+    body: JSON.stringify(body),
     signal,
   });
   if (!response.ok) {

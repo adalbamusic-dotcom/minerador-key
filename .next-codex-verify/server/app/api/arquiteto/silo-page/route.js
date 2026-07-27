@@ -1,0 +1,13 @@
+var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/arquiteto/silo-page/route.js")
+R.c("server/chunks/lib_1x00pjc._.js")
+R.c("server/chunks/node_modules_next_dist_esm_build_templates_app-route_0gxv_-9.js")
+R.c("server/chunks/node_modules_zod_v4_classic_external_1-pw2v2.js")
+R.c("server/chunks/[root-of-the-server]__1pvf2-7._.js")
+R.c("server/chunks/[root-of-the-server]__163w3q6._.js")
+R.c("server/chunks/_0pvv9t6._.js")
+R.c("server/chunks/lib_server_authz_ts_1eaen9x._.js")
+R.c("server/chunks/lib_arquiteto_contracts_ts_0g3l3tz._.js")
+R.c("server/chunks/node_modules_next_1zdbrne._.js")
+R.c("server/chunks/_next-internal_server_app_api_arquiteto_silo-page_route_actions_1j1ud_0.js")
+R.m(61653)
+module.exports=R.m(61653).exports

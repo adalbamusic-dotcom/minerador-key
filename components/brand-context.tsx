@@ -1,8 +1,9 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
 import { useSession } from "next-auth/react";
+import { usePathname } from "next/navigation";
+import { parseBrandRef } from "@/lib/tenant-routing";
 
 export interface Marca {
   id: string;
@@ -10,7 +11,7 @@ export interface Marca {
   site_url: string;
   nicho: string;
   dna_diretrizes: string;
-  silos_existentes: any; // jsonb array/object
+  silos_existentes: unknown; // jsonb array/object
   localizacao: string; // Adicionado localizacao
   created_at: string;
 }
@@ -28,12 +29,9 @@ interface BrandContextType {
 
 const BrandContext = createContext<BrandContextType | undefined>(undefined);
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseKey);
-
 export function BrandProvider({ children }: { children: React.ReactNode }) {
   const { data: session, status: sessionStatus } = useSession();
+  const pathname = usePathname();
   const [brands, setBrands] = useState<Marca[]>([]);
   const [selectedBrandId, setSelectedBrandIdState] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -74,11 +72,10 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem("selected_brand_id", forcedBrandId);
       } else if (loadedBrands.length > 0) {
         const saved = localStorage.getItem("selected_brand_id");
-        if (saved && loadedBrands.some((b: any) => b.id === saved)) {
+        if (saved && loadedBrands.some((b: Marca) => b.id === saved)) {
           setSelectedBrandIdState(saved);
         } else {
-          setSelectedBrandIdState(loadedBrands[0].id);
-          localStorage.setItem("selected_brand_id", loadedBrands[0].id);
+          setSelectedBrandIdState("");
         }
       } else {
         setSelectedBrandIdState("");
@@ -98,15 +95,24 @@ export function BrandProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshBrands();
+    // refreshBrands intentionally follows session identity only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionStatus, session]);
 
-  const activeBrand = brands.find(b => b.id === selectedBrandId) || null;
+  // The canonical tenant comes from the route. Browser selection is only a
+  // compatibility preference for legacy global routes and never an authority.
+  let routeTenant = "";
+  const routeRef = pathname.match(/^\/([^/]+)/)?.[1];
+  if (routeRef) { try { routeTenant = parseBrandRef(routeRef).brandId; } catch { routeTenant = ""; } }
+  const effectiveSelectedBrandId = routeTenant || selectedBrandId;
+  const activeBrand = brands.find(b => b.id === effectiveSelectedBrandId) || null;
 
   return (
     <BrandContext.Provider 
       value={{ 
-        selectedBrandId, 
+        selectedBrandId: effectiveSelectedBrandId,
         setSelectedBrandId, 
         brands, 
         refreshBrands, 

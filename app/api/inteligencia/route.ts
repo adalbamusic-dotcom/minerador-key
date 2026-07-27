@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     const siloIds = (silos || []).map(silo => silo.id);
 
     const [keywordResult, briefingResult] = siloIds.length ? await Promise.all([
-      profile.supabase.from("keywords_kgr").select("id,keyword,intent,volume_search,kgr_score,lista_id,status,analise_semantica,created_at").in("lista_id", siloIds),
+      profile.supabase.from("keywords_kgr").select("id,keyword,intent,volume_search,kgr_score,lista_id,status,analise_semantica,created_at").or(`lista_id.is.null,${siloIds.map(id => `lista_id.eq.${id}`).join(",")}`),
       profile.supabase.from("briefings_artigos").select("id,silo_id,keyword_principal,keywords_secundarias,slug_sugerido,hierarquia,status,meta_title,meta_description,diretrizes_estrategicas,created_at").in("silo_id", siloIds),
     ]) : [{ data: [], error: null }, { data: [], error: null }];
     if (keywordResult.error) throw keywordResult.error;
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       brand: { ...brand, site_url: brand.site_url ?? null, nicho: brand.nicho ?? null, localizacao: brand.localizacao ?? null,
         dna_diretrizes: brand.dna_diretrizes ?? null, created_at: brand.created_at ?? null },
       silos: (silos || []).map(silo => ({ ...silo, nicho: silo.nicho ?? null, created_at: silo.created_at ?? null })),
-      keywords: (keywordResult.data || []).filter(keyword => keyword.lista_id).map(keyword => ({ ...keyword, intent: keyword.intent ?? null,
+      keywords: (keywordResult.data || []).map(keyword => ({ ...keyword, intent: keyword.intent ?? null,
         volume_search: keyword.volume_search ?? null, kgr_score: keyword.kgr_score ?? null, status: keyword.status ?? null,
         analise_semantica: keyword.analise_semantica ?? null, created_at: keyword.created_at ?? null })),
       briefings: (briefingResult.data || []).filter(briefing => briefing.silo_id).map(briefing => ({ ...briefing,

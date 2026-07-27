@@ -112,17 +112,25 @@ test("publicação simulada é tipada e identificada", () => {
 });
 
 test("rotas oficiais separam Marca, Conta, Radar, Planejador, Redator e Publicações", async () => {
-  for (const path of ["marca", "conta", "radar", "planejador", "redator", "publicacoes"]) {
-    const source = await readFile(new URL(`../app/(workspace)/${path}/page.tsx`, import.meta.url), "utf8");
+  const modulePaths = [
+    "../modules/marca/brand-page.tsx",
+    "../modules/conta/account-page.tsx",
+    "../modules/radar/radar-page.tsx",
+    "../modules/planejador/planner-page.tsx",
+    "../modules/redator/writer-page.tsx",
+    "../modules/publicacoes/publications-page.tsx",
+  ];
+  for (const path of modulePaths) {
+    const source = await readFile(new URL(path, import.meta.url), "utf8");
     assert.ok(source.length > 20);
   }
-  const profile = await readFile(new URL("../app/(workspace)/perfil/page.tsx", import.meta.url), "utf8");
-  assert.match(profile, /\/marca\?secao=configuracoes/);
+  const accountRoute = await readFile(new URL("../app/(brand)/[brandRef]/conta/page.tsx", import.meta.url), "utf8");
+  assert.match(accountRoute, /modules\/conta/);
 });
 
 test("Minerador e Arquiteto incorporam seus DNAs sem páginas técnicas", async () => {
-  const miner = await readFile(new URL("../app/(workspace)/minerador/page.tsx", import.meta.url), "utf8");
-  const architect = await readFile(new URL("../app/(workspace)/arquiteto/page.tsx", import.meta.url), "utf8");
+  const miner = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
+  const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   assert.match(miner, /KeywordDnaPanel/); assert.match(architect, /ArticleDnaSummary/); assert.match(architect, /SiloDnaSummary/);
 });
 
@@ -137,7 +145,10 @@ test("layout Admin valida sessão e papel no servidor", async () => {
 });
 
 test("Marca preserva compatibilidade de edição do cliente legado e Conta não edita marca", async () => {
-  const product = await readFile(new URL("../components/product/operational-pages.tsx", import.meta.url), "utf8");
+  const product = (await Promise.all([
+    readFile(new URL("../modules/marca/brand-page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../modules/conta/account-page.tsx", import.meta.url), "utf8"),
+  ])).join("\n");
   assert.match(product, /responsável legado/); assert.match(product, /fetch\("\/api\/marcas"/);
   assert.match(product, /Nenhuma alteração de marca pode ser realizada por esta área/);
 });

@@ -62,6 +62,22 @@
       border-color: var(--accent);
     }
 
+    select {
+      width: 100%;
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background-color: var(--surface-color);
+      color: var(--text-main);
+      font-size: 13px;
+      font-weight: 550;
+      cursor: pointer;
+    }
+    select:disabled { opacity: .65; cursor: not-allowed; }
+    .field-message { margin-top: 6px; color: var(--text-muted); font-size: 11px; }
+    .field-message.error { color: var(--danger); }
+    .retry-button { display: none; margin-top: 6px; padding: 6px 8px; font-size: 11px; }
+
     button {
       width: 100%;
       padding: 12px;
@@ -97,10 +113,26 @@
     #openAppBtn:hover {
       background-color: var(--border);
     }
+    #connectPanelBtn {
+      background: transparent;
+      border: 1px solid var(--accent);
+      color: #93c5fd;
+      margin-top: -8px;
+      margin-bottom: 16px;
+      font-size: 12px;
+    }
+    #connectPanelBtn:hover { background: rgba(59, 130, 246, .14); }
 
     #status, #loginStatus {
       margin-top: 16px;
       font-size: 12px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    #connectionStatus {
+      margin: -8px 0 16px;
+      font-size: 11px;
       color: var(--text-muted);
       text-align: center;
     }
@@ -121,6 +153,21 @@
       font-size: 12px;
       resize: none;
       display: none;
+    }
+    #brandsDiagnostic {
+      height: 150px;
+      color: var(--text-muted);
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 10px;
+    }
+    .diagnostic-button {
+      display: none;
+      margin-top: 6px;
+      padding: 7px 8px;
+      font-size: 11px;
+      background: var(--surface-color);
+      border: 1px solid var(--border);
+      color: var(--text-main);
     }
 
     .profile-bar {
@@ -185,16 +232,25 @@
       <button id="logoutBtn">Sair</button>
     </div>
     
-    <button id="openAppBtn">Acessar Painel Web (Planilhas)</button>
+    <button id="openAppBtn">Abrir Minerador</button>
+    <button id="connectPanelBtn">Conectar esta aba do Minerador</button>
+    <div id="connectionStatus" aria-live="polite">Desconectado</div>
 
-    <div class="input-group" id="brandContainer" style="display: none;">
-      <label for="brandSelect">Selecionar Marca / Cliente</label>
-      <select id="brandSelect" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border); background-color: var(--surface-color); color: var(--text-main); font-size: 13px; font-weight: 550; cursor: pointer;"></select>
+    <div class="input-group" id="brandContainer">
+      <label for="brandSelect">Marca</label>
+      <select id="brandSelect" disabled><option value="">Carregando marcas...</option></select>
+      <div id="brandStatus" class="field-message" aria-live="polite">Carregando marcas...</div>
+      <button id="brandsRetryBtn" class="retry-button" type="button">Tentar novamente</button>
+      <textarea id="brandsDiagnostic" readonly aria-label="Diagnóstico da consulta de marcas"></textarea>
+      <button id="copyBrandsDiagnosticBtn" class="diagnostic-button" type="button">Copiar diagnóstico</button>
+      <button id="closeBrandsDiagnosticBtn" class="diagnostic-button" type="button">Fechar diagnóstico</button>
     </div>
 
     <div class="input-group">
       <label for="listSelect">Salvar na Lista / Projeto</label>
-      <select id="listSelect" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border); background-color: var(--surface-color); color: var(--text-main); font-size: 13px; font-weight: 550; cursor: pointer;"></select>
+      <select id="listSelect" disabled><option value="">Selecione uma marca primeiro</option></select>
+      <div id="listStatus" class="field-message" aria-live="polite">Selecione uma marca primeiro</div>
+      <button id="listsRetryBtn" class="retry-button" type="button">Tentar novamente</button>
     </div>
 
     <div class="input-group">

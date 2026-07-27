@@ -1,0 +1,3 @@
+module.exports=[14747,(a,b,c)=>{b.exports=a.x("path",()=>require("path"))},874,(a,b,c)=>{b.exports=a.x("buffer",()=>require("buffer"))},24361,(a,b,c)=>{b.exports=a.x("util",()=>require("util"))},92509,(a,b,c)=>{b.exports=a.x("url",()=>require("url"))},27699,(a,b,c)=>{b.exports=a.x("events",()=>require("events"))},88947,(a,b,c)=>{b.exports=a.x("stream",()=>require("stream"))},46786,(a,b,c)=>{b.exports=a.x("os",()=>require("os"))},22734,(a,b,c)=>{b.exports=a.x("fs",()=>require("fs"))}];
+
+//# sourceMappingURL=%5Bexternals%5D__0diuc63._.js.map

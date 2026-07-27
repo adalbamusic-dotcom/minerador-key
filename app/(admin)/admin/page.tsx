@@ -1,2 +1,2 @@
-import { AdminOverviewPage } from "@/components/product/operational-pages";
-export default function Page() { return <AdminOverviewPage/>; }
+import { AdminConsole } from "@/modules/admin";
+export default function Page() { return <AdminConsole/>; }
