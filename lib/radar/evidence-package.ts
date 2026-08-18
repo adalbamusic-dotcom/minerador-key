@@ -4,6 +4,7 @@ import { RadarEvidencePackageSchema } from "./analysis-contracts.ts";
 import type { SerpResearchSnapshot } from "./serp/contracts.ts";
 import { isPrimaryRadarSemanticTerm } from "./analysis-insights.ts";
 import type { RadarKgrStrategy } from "./strategy-context.ts";
+import type { RadarCompetitiveReport } from "./competitive-report.ts";
 
 export async function buildRadarEvidencePackage(payload: RadarAnalysisPayload, input: {
   radarItemId: string;
@@ -13,6 +14,7 @@ export async function buildRadarEvidencePackage(payload: RadarAnalysisPayload, i
   selectedAt?: string;
   research: SerpResearchSnapshot;
   kgrStrategy?: RadarKgrStrategy | null;
+  competitiveReport?: RadarCompetitiveReport | null;
 }): Promise<RadarEvidencePackage> {
   const selectedAt = input.selectedAt || new Date().toISOString();
   const includedOrganicResults = payload.serpDecisions.filter(decision => decision.itemType === "organic" && decision.decision === "included").map(({ key, reason, note, ownDomain }) => ({ key, reason, note, ownDomain }));
@@ -47,12 +49,13 @@ export async function buildRadarEvidencePackage(payload: RadarAnalysisPayload, i
       wordCounts: metrics.words || null,
       headings: { h2: metrics.h2 || null, h3: metrics.h3 || null },
       links: { internal: metrics.internalLinks || null, external: metrics.externalLinks || null },
-      formatting: {},
+      formatting: { bold: metrics.bold || null, italic: metrics.italic || null },
       contentElements: { lists: metrics.lists || null, tables: metrics.tables || null, faq: metrics.faq || null },
     },
-    observedSemantics: { recurringTerms: payload.semanticTerms.filter(isPrimaryRadarSemanticTerm), entities: input.research.diagnostic.frequentEntities, recurringTopics: input.research.diagnostic.questions },
+    observedSemantics: { recurringTerms: payload.semanticTerms.filter(isPrimaryRadarSemanticTerm).map(({ term, frequency, pageCount, sources, relation, decision, note }) => ({ term, frequency, pageCount, sources, relation, decision, note })), entities: input.research.diagnostic.frequentEntities, recurringTopics: input.research.diagnostic.questions },
     observedCompetitiveness: payload.competitiveness ? { level: payload.competitiveness.classification, dimensions: payload.competitiveness.dimensions, reasons: payload.competitiveness.reasons } : { level: "insufficient_evidence" as const, dimensions: {}, reasons: ["Nenhuma extração de concorrente foi concluída."] },
     ...(input.kgrStrategy ? { kgrStrategy: input.kgrStrategy } : {}),
+    competitiveReport: input.competitiveReport || payload.competitiveReport || null,
     keywordObservations: payload.keywordDecisions.map(decision => ({ keywordId: decision.keywordId, observation: decision.note || "Referência de keyword revisada no Radar; a decisão editorial pertence ao Planejador.", confidence: decision.note ? "medium" as const : "low" as const })),
     conflicts: input.research.diagnostic.possibleConflicts.map(message => ({ kind: "serp", message, source: input.research.id })),
     humanNotes: payload.humanNotes.length ? payload.humanNotes.join("\n") : null,

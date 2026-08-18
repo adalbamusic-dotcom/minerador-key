@@ -1,0 +1,302 @@
+﻿diff --git a/docs/03-minerador/backlog.md b/docs/03-minerador/backlog.md
+index 8afc7e9..f24558e 100644
+--- a/docs/03-minerador/backlog.md
++++ b/docs/03-minerador/backlog.md
+@@ -1,11 +1,32 @@
+ # Backlog ÔÇö Minerador
+ 
++## Decis├úo arquitetural aprovada ÔÇö Google Ads e retirada completa da Extens├úo ÔÇö 2026-08-02
++
++- SDD aprovada em `propostas/migracao-google-ads-retirada-extensao.md`; a decis├úo ainda n├úo est├í implementada e n├úo autoriza c├│digo automaticamente.
++- Decis├úo: preservar `allintitle`/KGR hist├│ricos; keywords novas podem existir sem ambos; aus├¬ncia permanece indispon├¡vel, nunca zero; Google Ads centraliza ideias, volume, hist├│rico, CPC, lances e concorr├¬ncia Ads server-side.
++- Fronteira preservada: Serper continua provider can├┤nico do Radar para primeira p├ígina e evid├¬ncias SERP. Google Ads n├úo substitui nem altera Serper, os contratos ou o fluxo do Radar; provider aproximado de allintitle seria frente separada e n├úo requisito.
++- Gates: definir conta anunciante por marca, aprovar targeting/cache, implementar com fixtures, executar smoke manual de uma keyword, comprovar paridade e somente ent├úo congelar/remover Extens├úo e RapidAPI.
++- Restri├º├Áes: n├úo chamar APIs reais em testes, n├úo expor credenciais, n├úo confundir MCC com conta anunciante, n├úo presumir BRL, n├úo apagar m├®tricas hist├│ricas nem alterar Arquiteto/Radar silenciosamente.
++
++## Alta prioridade ÔÇö homologar falha allintitle com diagn├│stico preservado
++
++- Recarregar a extens├úo a partir desta pasta e executar uma medi├º├úo pequena autenticada; se a persist├¬ncia falhar, registrar o c├│digo exibido e o diagn├│stico copi├ível para corrigir a causa remota sem mascar├í-la como `no_persisted_allintitle_results`.
++- Confirmar que resultado confirmado atualiza a tabela diretamente, sem pr├®via, e que falha preserva o valor anterior.
++
+ > **Estado vigente ÔÇö 2026-07-27:** 0005/0006 n├úo s├úo tarefas pendentes de aplica├º├úo. O resultado remoto registrado em `estado-atual.md` e `docs/compartilhado/supabase.md` informa 0006 aplicada com validation `READY`; n├úo reexecutar nem executar rollback. Pend├¬ncias de browser autenticado, RLS real e smoke test continuam manuais.
+ 
+ ## Forma├º├úo compartilhada KGR ÔÇö registrado em 2026-07-21
+ 
+ - Feito localmente: evid├¬ncia de Site preservada sem confirma├º├úo autom├ítica.
+ - Pendente: qualifica├º├úo humana/real no Minerador, snapshot SQL/RLS e valida├º├úo manual autenticada.
++## Homologacao da selecao e do retorno allintitle - 2026-07-29
++
++- Pendente manual: depois de recarregar a extensao, repetir uma medicao ja processada e confirmar que cada resultado confirmado aparece diretamente na tabela, sem painel de previa ou confirmacao adicional.
++- Pendente manual: recarregar a extensao e testar clique comum, Ctrl/Cmd, Shift e pintura no popup e na tabela, iniciando em checkbox marcado e desmarcado; confirmar que o clique seguinte nao fica suprimido e que nao ha atraso perceptivel.
++- Pendente manual: repetir a consulta que avancou `3 de 3` sem item na tabela, conferir `ITEM_EVENT_DISPATCHED` e validar que sucesso e zero atualizam diretamente a linha somente com `persistenceOutcome: persisted`; erro preserva o valor anterior, inclusive apos reload.
++- Pendente manual: com a extensao recarregada, iniciar lista longa, sair da pagina do Minerador, aguardar o contador progredir, confirmar alerta nativo e foco da aba Google em CAPTCHA/consentimento, liberar manualmente e retomar sem perder o indice.
++- Restricao: nao executar automaticamente Google real, SQL, migration, limpeza, commit, push ou deploy.
++
+ ## Agora
+ - **Reconciliacao de seguranca 0006:** prepara├º├úo e valida├º├úo pr├®-aplica├º├úo preservadas como hist├│rico; o resultado remoto posterior registrou `READY`. **N├úo executar novamente:** permanecem apenas smoke test autenticado e RLS remoto como valida├º├Áes externas.
+ - **FK `lista_id` can├┤nica:** o resultado registrado mant├®m `fk_keywords_kgr_lista_0005` com `ON DELETE RESTRICT`; a remo├º├úo da FK legada `CASCADE` n├úo ├® pend├¬ncia de aplica├º├úo. **N├úo executar migration/rollback.**
+@@ -235,3 +256,264 @@ Auditoria documental e auditoria de sa├║de n├úo destrutiva em 2026-07-20; ver re
+ - A implementa├º├úo foi interrompida antes do c├│digo porque a SDD n├úo aprova endpoint can├┤nico, payload persistente final ou estrat├®gia de compatibilidade entre popup, service worker e aplica├º├úo.
+ - O caminho obrigat├│rio `docs/00-produto/contratos/importacoes.md` n├úo existe neste checkout.
+ - N├úo criar rota, payload ou persist├¬ncia por infer├¬ncia; retomar somente ap├│s registrar o contrato aprovado.
++## Simplificacao da extensao do Minerador Key - implementacao local - 2026-07-27
++
++- SDD aprovada e implementada localmente no popup, service worker, contratos puros e rotas server-side autenticadas.
++- Removida a exigencia de lista/projeto/silo/categoria da nova importacao. Keywords novas entram como `bruto`, com `brand_id` real e `lista_id` nulo; duplicidades por marca e texto normalizado preservam o registro existente e agregam evidencia.
++- Pendencia de homologacao: executar manualmente Chrome autenticado com troca de marca/aba, extracao de sugestoes, allintitle, volume, confirmacao e leitura remota. Nao executar provider real ou escrita remota durante testes automatizados.
++## Ajuste localizado da interface e preferencias da Extensao - 2026-07-27
++
++- Implementado localmente: hierarquia do popup, painel de conexao, funil multiplo BOFU/MOFU/TOFU, controle Local sobre localidades, filtros com Sem maximo e preferencias por usuario + `brandId`.
++- Pendente manual: recarregar a extensao no Chrome, confirmar a ordem visual, trocar Adalba/Lindisse, validar preferencias isoladas, testar rota divergente e executar uma extracao pequena sem alterar dados remotos durante a homologacao automatizada.
++
++## Correcao urgente da inicializacao do popup da Extensao - concluida localmente - 2026-07-27
++
++- Corrigir regressao `Cannot access 'sectionLabel' before initialization` no bootstrap do popup; concluido localmente com teste de ordem de inicializacao.
++- Separar validacao real da sessao pelo endpoint de marcas da exibicao do email e da restauracao das preferencias; concluido localmente sem limpar armazenamento ou fazer logout automatico.
++- Preservar marcas autorizadas quando a restauracao de filtros/preferencias locais falhar; concluido localmente com tratamento localizado e diagnostico explicito.
++- Exibir mensagens acionaveis para aba nao conectada, rota divergente e outra marca; concluido localmente.
++- Pendente manual: recarregar a extensao no Chrome, validar login invalido/valido, duas marcas com preferencias isoladas, rota correta/incorreta e reconexao explicita.
++
++## Correcao localizada Abrir Minerador -> Conectar aba - concluida localmente - 2026-07-27
++
++- Registrar e reutilizar a aba aberta por `brandId`, ativando a rota `/{brandRef}/minerador`; concluido localmente.
++- Desabilitar conexao durante carregamento e liberar somente com `status=complete`; concluido localmente.
++- Tornar a leitura de conexao passiva e reservar bridge/ping para a acao explicita `Conectar`; concluido localmente.
++- Diferenciar aba ausente, aba carregando, bridge sem resposta, rota divergente e marca divergente; concluido localmente.
++- Reordenar visualmente Abrir/Conectar e TOFU/MOFU/BOFU; concluido localmente sem alterar o contrato de importacao.
++- Pendente manual: recarregar a extensao e a aba do Minerador, testar Adalba, Lindisse, troca de marca, rota incorreta, aba previamente aberta e reconexao apos bridge ausente.
++
++## Diagnostico tecnico da bridge no Chrome - concluido localmente - 2026-07-27
++
++- Instrumentar a cadeia `executeScript -> bridge -> sendMessage -> probe -> ACK -> handshake` com codigos tecnicos e estagios seguros; concluido localmente.
++- Diferenciar `INJECTION_PERMISSION_DENIED`, `INJECTION_FILE_NOT_FOUND`, `INJECTION_EXECUTION_ERROR`, `PROBE_NO_RECEIVER`, `PROBE_TIMEOUT`, `ACK_INVALID` e protocolo incompativel; concluido localmente.
++- Exibir detalhes tecnicos copiaveis no popup sem tokens, cookies, senhas ou payloads de keywords; concluido localmente.
++- Confirmar manualmente no Chrome a pasta carregada, o service worker, `INJECTION_OK`, `PROBE_ACK` e `HANDSHAKE_OK` com Adalba e Lindisse; pendente.
++
++## Compactacao do estado de conexao - concluida localmente - 2026-07-27
++
++- Compactar o estado conectado para nome da marca e indicador verde, mantendo o diagnostico fora do uso normal; concluido localmente.
++- Adicionar `Ver diagnostico`/`Ver detalhes` expansivel e preservar `Copiar detalhes tecnicos`; concluido localmente.
++- Manter handshake, conexao efemera, importacao e medicao de volume sem alteracao; concluido localmente.
++- Validar manualmente no Chrome o resumo conectado, diagnostico recolhido/expandido, copia, fechamento/reabertura do popup e legibilidade; pendente.
++
++## Correcao do estado conectado sobrescrito - concluida localmente - 2026-07-27
++
++- Retornar `HANDSHAKE_OK`/`connected` na leitura passiva quando o registro efemero da aba continuar valido; concluido localmente.
++- Trocar `session_missing` por `panel_not_checked`/`idle` para aba autenticada ainda sem handshake; concluido localmente.
++- Ignorar leitura inicial, listener de aba pronta e resposta antiga depois de conexao explicita por `connectionOperationId` e `connectRequestId`; concluido localmente.
++- Manter a homologacao manual no Chrome para conectar, fechar/reabrir popup, recarregar a aba, trocar Adalba/Lindisse e confirmar invalidacoes reais; pendente.
++
++## Correcao da transicao PROBE_ACK -> HANDSHAKE - concluida localmente - 2026-07-27
++
++- Corrigir o listener da bridge para confirmar `handshake_sent` ao `tabs.sendMessage`; concluido localmente.
++- Impedir que um `PROBE_ACK` valido seja convertido em `bridge_unavailable`; concluido localmente.
++- Separar `connectRequestId`, `probeRequestId` e `handshakeRequestId`, validando aba, marca e tentativa ativa; concluido localmente.
++- Dar precedencia ao resultado explicito de Conectar sobre leituras passivas e ignorar respostas antigas; concluido localmente.
++- Exibir `HANDSHAKE_OK`/`connected` ou `handshake_error` com status estruturado; concluido localmente.
++- Confirmar manualmente no Chrome `INJECTION_OK -> PROBE_ACK -> HANDSHAKE_SENT -> HANDSHAKE_OK -> CONNECTED` com Adalba e depois Lindisse; pendente.
++
++## Fluxo pos-extracao, previa e importacao da Extensao - concluido localmente - 2026-07-27
++
++- Concluido localmente: executor sequencial em background com estado temporario por ator, marca, aba e run, restauracao da semente/previa e progresso apos fechar/reabrir popup.
++- Concluido localmente: Local desligado nacional; Local ligado com Brasil/UF/municipios; pausa, retomada, cancelamento parcial e descarte explicito.
++- Concluido localmente: previa selecionavel, crescente e rolavel, linhas fora de filtro visiveis, deduplicacao por run com evidencias de contexto, contadores e erros.
++- Concluido localmente: allintitle sequencial com zero/error preservados e volume opcional server-side; importacao sem exigir metricas, com confirmacao, resposta real, resultados por linha e retry de falhas.
++- Testes locais: `tests/minerador-extension-extraction.test.mts`, sintaxe dos scripts e `git diff --check`.
++- Pendente manual: recarregar a extensao, testar popup fechado durante execucao, pausar/retomar/cancelar, confirmar previsualizacao e importacao controlada com Adalba/Lindisse; nao executar lote real, SQL, migration, limpeza, commit, push ou deploy.
++
++## Ajuste localizado da tabela - conclu├¡do localmente - 2026-07-27
++
++- Conclu├¡do: colunas expl├¡citas `Funil` e `Principal`, com badges alinhados fora da coluna `Keyword`.
++- Conclu├¡do: `Keyword` como coluna el├ística principal; links/canonicals ficam abaixo da keyword e truncam somente quando necess├írio.
++- Conclu├¡do: funil neutro quando n├úo existe hint persistido; sem infer├¬ncia ou mudan├ºa de contrato.
++- Pendente: valida├º├úo visual manual da densidade e responsividade em 360px, 768px, 1024px e 1440px, al├®m da confer├¬ncia em dark mode.
++
++## Corre├º├úo da distribui├º├úo das colunas da tabela - conclu├¡da localmente - 2026-07-27
++
++- Conclu├¡do: ordem expl├¡cita `Keyword`, `Principal`, `Resultados`, `Volume`, `KGR`, `Inten├º├úo`, `Nicho de mercado`, `Funil`, `Silo/Categoria`, `Status`.
++- Conclu├¡do: Keyword como maior coluna flex├¡vel e tabela m├¡nima de `110rem`, com rolagem horizontal no cont├¬iner existente quando a viewport for menor.
++- Conclu├¡do: larguras fixas para Principal, m├®tricas, inten├º├úo, nicho, funil, silo/categoria e status, sem ocultar colunas ou alterar comportamento.
++- Pendente: valida├º├úo visual manual de alinhamento, keywords longas, viewports menores e dark mode.
++
++## Qualifica├º├úo expl├¡cita e Funil na barra de a├º├Áes - conclu├¡da localmente - 2026-07-27
++
++- Conclu├¡do: remo├º├úo da qualifica├º├úo autom├ítica durante o carregamento; keywords sem processamento continuam neutras.
++- Conclu├¡do: a├º├úo prim├íria `Qualificar selecionadas`, limitada ├á sele├º├úo atual, com resultado individual por keyword.
++- Conclu├¡do: Funil l├│gico opcional em `analise_semantica.funnel`, com valores `TOFU`, `MOFU` e `BOFU`, origem, confian├ºa, evid├¬ncia e revis├úo de conflito.
++- Conclu├¡do: hints da Extens├úo preservados como pista, sem aprova├º├úo autom├ítica; decis├Áes humanas reconhecidas permanecem protegidas.
++- Conclu├¡do: barra inferior reorganizada com a├º├Áes de organiza├º├úo, m├®tricas, qualifica├º├úo, decis├úo KGR, `Mais a├º├Áes` e `Excluir` separado.
++- Pendente: valida├º├úo manual autenticada com dados reais, confer├¬ncia visual em light/dark e execu├º├úo real de endpoints de IA; testes locais n├úo consumiram APIs pagas.
++
++## Corre├º├úo definitiva do chevron de Silo/Categoria - conclu├¡da localmente - 2026-07-27
++
++- Conclu├¡do: seta nativa removida somente do select de `Silo/Categoria`; texto selecionado e `ChevronDown` customizado formam uma unidade visual compacta.
++- Conclu├¡do: truncamento ocorre no texto, com `title` para o valor completo, foco percept├¡vel e select nativo preservado para menu e teclado.
++- Conclu├¡do: colunas, Status, demais selects, handler, persist├¬ncia e dados n├úo foram alterados.
++- Pendente: conferir a mesma composi├º├úo em 360px, 768px e 1024px.
++
++## Padroniza├º├úo do select Silo/Categoria com Nicho de mercado - conclu├¡da localmente - 2026-07-27
++
++- Conclu├¡do: `Silo/Categoria` reutiliza a base visual do select `Nicho de mercado`, sem fonte maior, peso diferente ou wrapper customizado.
++- Conclu├¡do: largura total da c├®lula, truncamento, `title`, foco e menu nativo foram preservados.
++- Conclu├¡do: nenhum valor, op├º├úo, handler, persist├¬ncia, coluna ou dado foi alterado.
++- Pendente: conferir responsividade nos viewports de 360px, 768px e 1024px.
++
++## Preflight just-in-time da medi├º├úo allintitle - conclu├¡da localmente - 2026-07-27
++
++- Conclu├¡do localmente: conex├úo ef├¬mera antiga n├úo ├® mais aceita como prova; `ensureMineradorConnection(...)` executa preflight atual por aba, contexto e opera├º├úo.
++- Conclu├¡do localmente: reload/navega├º├úo marca a conex├úo para revalida├º├úo e a bridge ├® preparada novamente no `complete`; a opera├º├úo executa probe e handshake antes de criar lote.
++- Conclu├¡do localmente: h├í uma ├║nica recupera├º├úo controlada para falhas de probe/ACK/handshake; falha final n├úo abre Google, n├úo inicia query e n├úo altera m├®tricas existentes.
++- Conclu├¡do localmente: `batchId` do popup s├│ ├® atribu├¡do ap├│s a resposta de lote criado; diagn├│sticos carregam IDs e est├ígio real, sem `stage: null` no preflight.
++- Pendente manual: recarregar a extens├úo, conectar Adalba, medir, recarregar a p├ígina na mesma rota sem clicar em Conectar, confirmar renova├º├úo autom├ítica, testar zero/erro e repetir fechando/reabrindo o popup. N├úo executar Google real automatizado, SQL, migration, limpeza, commit, push ou deploy.
++
++## Renovacao automatica antes do allintitle - concluida localmente - 2026-07-28
++
++- Concluido localmente: preflight JIT usa `ensureMineradorConnection(...)` como fluxo canonico de conectar, com registro obsoleto invalidado antes da reinjecao.
++- Concluido localmente: reload/navegacao marca a sessao efemera no `loading`; a bridge e preparada uma unica vez no `complete`, enquanto a operacao explicita continua responsavel por handshake.
++- Concluido localmente: uma unica recuperacao controlada, sem lote ou aba Google antes de `HANDSHAKE_OK`, preservando selecao, limite, sequencia, CAPTCHA, zero, erro e IDs do contrato allintitle.
++- Concluido localmente: diagnostico estruturado com IDs, tabId, bridge anterior/atual, eventos, estagio e resultado da recuperacao.
++- Pendente manual: validar no Chrome o reload na mesma URL, recuperacao automatica, falha orientada, reconexao, popup fechado/reaberto e medicao real. Nao executar operacoes remotas, Google real automatizado, SQL, migration, limpeza, commit, push ou deploy.
++- Correcao definitiva apos reload - 2026-07-28: pendente somente homologacao manual no Chrome para confirmar `loading -> stale -> complete -> injection_ok -> probe_ack -> ready_for_validation -> handshake_ok -> batch_created`.
++- Implementado localmente: uma reinjecao por ciclo de reload, sem polling; rota diferente, marca diferente, aba fechada ou falha de permissao nao reinjetam a bridge.
++- Implementado localmente: popup deixa de mostrar conexao verde durante reload e recebe os estados de atualizacao, pronto para validacao e falha de preparacao.
++- Implementado localmente: ausencia do canal da pagina retorna `page_bridge_unreachable`/`page_bridge_dispatch`; lote e metricas permanecem intocados antes do handshake. A remocao fica restrita ao registro efemero stale.
++
++## Sele├º├úo complementar por intervalo e arraste - corre├º├úo local - 2026-07-29
++
++- Conclu├¡do localmente: sele├º├úo individual, Ctrl/Cmd, Shift e Ctrl/Cmd+Shift pela ordem visual atual.
++- Conclu├¡do localmente: arraste adicional na coluna de sele├º├úo com toler├óncia, modo selecionar/desmarcar e deduplica├º├úo por gesto.
++- Conclu├¡do localmente: cabe├ºalho limitado ├ás linhas vis├¡veis, estado indeterminado e preserva├º├úo de selecionadas ocultas.
++- Pendente: homologa├º├úo visual e de teclado no Chrome em light/dark e viewports 360px, 768px, 1024px e 1440px.
++
++## Allintitle sem depend├¬ncia de silo - corre├º├úo local - 2026-07-29
++
++- Conclu├¡do localmente: remover a pr├®-condi├º├úo indevida de `lista_id`/silo no in├¡cio e na confirma├º├úo da medi├º├úo allintitle.
++- Conclu├¡do localmente: validar ID, texto e `brand_id` com c├│digos `invalid_keyword_id`, `invalid_keyword_text`, `keyword_not_persisted` e `keyword_brand_mismatch`.
++- Preservado: endpoint server-side, transporte background-owned, persist├¬ncia de `results_allintitle`, v├¡nculos de silo/lista, volume, importa├º├úo, qualifica├º├úo e fronteira do Arquiteto.
++- Pendente: homologa├º├úo manual no Chrome com keywords sem silo e com silo, incluindo reload e persist├¬ncia.
++
++## Allintitle background-owned e persistencia server-side - 2026-07-29
++
++- Concluido localmente: SDD aprovada e endpoint dedicado `POST /api/extensao/marcas/[brandId]/keywords/resultados-allintitle` criado sem migration ou schema novo.
++- Concluido localmente: autenticacao server-side, tenant canonico, validacao por keyword, limite de 10, outcomes individuais e preservacao em falhas.
++- Concluido localmente: background chama o endpoint por resultado confirmado e o workspace nao mantem escrita direta concorrente no fluxo allintitle.
++- Concluido localmente: relay declarado e limitado as origens locais aprovadas; contexto invalidado orienta uma unica recarga da pagina, sem tentativa de reviver bridge.
++- Pendente: homologar Chrome autenticado com reload da Extensao/pagina, popup fechado, lote em andamento, CAPTCHA, zero, erro, persistencia e Adalba/Lindisse. Nao executar Google real automatizado, SQL, migration, limpeza, commit, push ou deploy.
++
++## Sele├º├úo por pintura e leitura localizada do allintitle - 2026-07-29
++
++- Implementado localmente: sele├º├úo por arraste baseada em coordenadas e `elementFromPoint`, limitada ├á coluna de sele├º├úo e compat├¡vel com os modos de clique existentes.
++- Implementado localmente: parser localizado para `Aproximadamente`, `Cerca de`, `About` e `Approximately`, separadores de milhar e sufixo de tempo, com abertura ├║nica de Ferramentas quando o seletor conhecido n├úo apresenta o contador.
++- Implementado localmente: contador ausente n├úo ├® classificado como zero; a pr├®via usa mensagem, c├│digo, est├ígio e diagn├│stico estruturados.
++- Conclu├¡do no Chrome: pintura seleciona e desmarca 10 linhas; o Google exibiu `Aproximadamente 282 resultados (0,21 s)` ap├│s `Ferramentas` e o Minerador refletiu 282.
++- Conclu├¡do ap├│s reload da p├ígina do Minerador: a keyword permaneceu com 282.
++- Pendente de homologa├º├úo: recarregar a Extens├úo pelo gerenciador do Chrome e repetir a medi├º├úo com o background atualizado; a automa├º├úo n├úo pode acessar `chrome://extensions`.
++
++## Modo pintar real e reconcilia├º├úo de lote ├│rf├úo - 2026-07-29
++
++- Implementado localmente: handle de pintura cobre a c├®lula de sele├º├úo, mant├®m `elementFromPoint`/`closest`, captura/libera ponteiro e preserva clique, Ctrl/Cmd, Shift, cabe├ºalho e teclado.
++- Implementado localmente: active pointer por `brandId`, reconcilia├º├úo de registros sem executor, estados `orphaned`/`interrupted`, hist├│rico com resultados e cleanup terminal.
++- Implementado localmente: nova opera├º├úo viva bloqueia em `operation_guard`; opera├º├úo ├│rf├ú oferece retomada ou descarte, e cancelamento libera a marca.
++- Pendente: homologa├º├úo manual pelo usu├írio ap├│s reload da Extens├úo; n├úo declarar o gesto conclu├¡do por automa├º├úo ou evento simulado.
++
++## Restaura├º├úo do fluxo de sele├º├úo e medi├º├úo allintitle - 2026-07-29
++
++- Conclu├¡do localmente: remover o limite de 10 da sele├º├úo total; o limite permanece apenas no sublote t├®cnico interno.
++- Conclu├¡do localmente: acompanhar resultados por opera├º├úo e n├úo somente pelo primeiro `batchId`, com progresso geral e diagn├│stico por keyword.
++- Conclu├¡do localmente: restaurar clique normal de checkbox e sele├º├úo por intervalo/pintura na tabela e na pr├®via do popup, sem cursor de cruz.
++- Pendente: homologar no Chrome os modos de sele├º├úo, 51 keywords em seis grupos, popup fechado, reload da p├ígina, pausa/continua├º├úo/cancelamento e o caso `allintitle:"alternativas ao facebook ads para dentistas"` com a contagem 323 refletida na pr├®via e na tabela ap├│s persist├¬ncia.
++
++## Homologa├º├úo pendente ÔÇö popup e lote parcial - 2026-07-29
++
++- Validar no Chrome: no popup, clique livre, Ctrl/Cmd, Shift, Ctrl/Cmd+Shift, pintura, teclado e persist├¬ncia da desmarca├º├úo ap├│s fechar e reabrir.
++- Validar no Chrome: ap├│s importar, allintitle e volume aparecem e funcionam somente na tabela do Minerador; o popup n├úo oferece medi├º├úo para candidatos tempor├írios.
++- Validar no Chrome: lote de 3 e de 10 com um retorno faltante mostra sucesso parcial e permite repetir somente o ID sem resultado confirmado.
++
++## Homologa├º├úo pendente ÔÇö navega├º├úo e CAPTCHA - 2026-07-29
++
++- Confirmar no Chrome que abas transit├│rias sem URL n├úo produzem `navigation_failed` e que a p├ígina inicial do Google n├úo ├® tratada como redirecionamento inesperado.
++- Confirmar que `/sorry/index`, reCAPTCHA ou consentimento pausam o lote, abrem a aba necess├íria e mostram aviso com feito/restante e Retomar/Cancelar.
++
++## Homologa├º├úo pendente ÔÇö lote longo interrompido - 2026-07-29
++
++- Validar com lista longa que o primeiro CAPTCHA em portugu├¬s pausa o lote no item atual; os restantes n├úo podem virar `query_mismatch` em cascata.
++- Validar que, ao abrir a tabela durante uma opera├º├úo ativa, a interface reassocia o lote e mostra feito, total, restante, Retomar e Cancelar.
++
++## Homologa├º├úo pendente ÔÇö pausa de CAPTCHA retom├ível - 2026-07-29
++
++- Validar que `batch_paused` aparece como aviso informativo, com `Retomar` e `Cancelar lote`, e n├úo como falha terminal.
++- Validar que a libera├º├úo do CAPTCHA seguida de `Retomar` continua no ├¡ndice preservado e que as demais a├º├Áes da tabela permanecem utiliz├íveis.
++
++## Homologa├º├úo pendente ÔÇö notifica├º├úo de CAPTCHA sem foco autom├ítico - 2026-07-30
++
++- Validar que CAPTCHA n├úo troca a aba em primeiro plano, enquanto a notifica├º├úo persistente da Extens├úo e o badge `!` continuam percept├¡veis.
++- Validar que clicar na notifica├º├úo ou em `Abrir Google` ├® o ├║nico caminho que abre a aba do desafio.
++
++## Homologa├º├úo pendente ÔÇö classifica├º├úo parcial de inten├º├úo e nicho - 2026-07-30
++
++- Repetir manualmente as tr├¬s keywords que receberam resposta incompleta e confirmar que respostas equivalentes de `intent`/`nicho` s├úo persistidas.
++- Confirmar que resposta ainda incompleta informa aviso parcial, preserva os dados anteriores e n├úo aparece como erro de console.
++
++## Homologa├º├úo pendente ÔÇö pintura imediata de keywords - 2026-07-30
++
++- Validar no Chrome que cada checkbox muda durante o arraste, sem aguardar `pointerup`, e volta ao estado anterior quando o ponteiro retorna.
++- Validar clique, Ctrl/Cmd, Shift, Ctrl/Cmd+Shift, sele├º├úo de vis├¡veis, teclado, mouse e touchpad em light e dark mode.
++
++## Proposta pendente ÔÇö fonte secund├íria de volume - 2026-07-30
++
++- O endpoint `GET /global-volume` do provedor `seo-keyword-research-tool1.p.rapidapi.com` respondeu em leitura com se├º├úo `BR`, volume, global, CPC e tend├¬ncia mensal. Os volumes recebidos s├úo estimativas do provedor, n├úo uma confirma├º├úo independente de dados Google.
++- Avaliar o provedor `ai-google-keyword-research-planner.p.rapidapi.com` como fonte secund├íria somente ap├│s assinatura e teste controlado do contrato/payload.
++- Estrat├®gia proposta: manter uma fonte prim├íria por medi├º├úo; usar a secund├íria apenas para indisponibilidade, falha de contrato ou cota da prim├íria. Nunca disparar as duas para a mesma keyword por padr├úo, nunca misturar valores, e registrar `volume_source`, data e resposta normalizada da fonte efetivamente usada.
++- Antes de implementar: comparar keywords brasileiras de controle, normalizar valores abreviados como `1.3k`, definir aus├¬ncia/parcial/erro sem gravar zero e revisar custo, quota, termos e limites de cada assinatura. A troca de provedor no endpoint server-side exige escopo pr├│prio, fixtures/testes e valida├º├úo manual; nenhuma integra├º├úo, escrita remota ou chamada adicional foi feita por este registro.
++
++## Homologa├º├úo pendente ÔÇö volume brasileiro pelo novo provedor - 2026-07-30
++
++- Repetir uma medi├º├úo autenticada ap├│s a renova├º├úo da cota e confirmar que `GET /global-volume?keyword=<keyword>&country=br` retorna volume somente de `Keyword Overview.BR` para a keyword exata.
++- Confirmar que `1.3k` ├® persistido como `1300`, que aus├¬ncia de BR n├úo usa `global`/outro pa├¡s e que falha/429 preserva volume, resultados allintitle e KGR anteriores.
++- Conferir o limite e custo efetivos da assinatura antes de medi├º├úo em lote. A fonte secund├íria permanece somente proposta; n├úo h├í fallback autom├ítico.
++
++## Homologa├º├úo pendente ÔÇö conclus├úo sem volume BR e avisos - 2026-07-30
++
++- Confirmar no Chrome que keyword sem entrada exata em `Keyword Overview.BR` encerra como conclus├úo normal, sem etapa/c├│digo t├®cnico e sem apar├¬ncia de erro.
++- Confirmar no dark mode que avisos de sucesso, informa├º├úo e erro t├¬m fundo opaco, texto leg├¡vel, borda discreta e a├º├Áes acess├¡veis; validar tamb├®m viewport estreita.
++
++## Homologa├º├úo pendente ÔÇö KGR com volume zero e selos textuais - 2026-07-30
++
++- Validar no Chrome que uma keyword com `volume_search = 0` mostra `N├úo calcul├ível`, inclusive se ainda estiver pendente, e que tentar aprov├í-la como KGR mostra apenas o aviso informativo.
++- Confirmar que `Pendente`, `N├úo calcul├ível`, `N├úo aplic├ível`, `Inconsistente`, `Inv├ílido` e `Sem medi├º├úo` usam a mesma altura, tipografia, borda e alinhamento dos selos de Principal, sem mudar o estilo dos valores num├®ricos KGR.
++- Confirmar que a pol├¡tica `Principal revis├ível` continua decis├úo expl├¡cita e que nenhuma a├º├úo KGR altera slug, canonical ou dados da keyword.
++
++## Homologa├º├úo pendente ÔÇö destaque de volume confirmado - 2026-07-30
++
++- Validar no Chrome que `0 confirmado` aparece somente para zero retornado pela medi├º├úo exata e que zero sem evid├¬ncia permanece normal.
++- Validar que n├║meros positivos confirmados pelo provedor usam o azul de confirma├º├úo, enquanto valores legados, estimados ou sem `volume_measurement` continuam na cor neutra.
++- Conferir t├¡tulo acess├¡vel, legibilidade em dark mode e aus├¬ncia de altera├º├úo em KGR, filtros, ordena├º├úo, persist├¬ncia ou largura da coluna.
++
++## Homologa├º├úo pendente ÔÇö selos da coluna Inten├º├úo - 2026-07-30
++
++- Confirmar no Chrome que inten├º├Áes conhecidas e pendentes usam selos compactos coerentes com Principal e KGR, sem altera├º├úo de valor, filtro ou classifica├º├úo.
++- Conferir truncamento, `title`, dark mode e viewport estreita, garantindo que a coluna Nicho de mercado n├úo seja invadida.
++
++## Homologa├º├úo pendente ÔÇö grade e hover da planilha - 2026-07-30
++
++- Confirmar no Chrome que as linhas horizontais e verticais est├úo mais f├íceis de identificar sem criar contraste agressivo.
++- Confirmar hover em linha comum, selecionada e publicada, no dark mode e nas larguras de 360px, 768px, 1024px e 1440px.
++- Confirmar que o divisor horizontal tem a mesma intensidade do vertical e que somente o hover se destaca mais.
++
++## Homologa├º├úo pendente ÔÇö Busca e Hist├│rico - 2026-07-30
++
++- Confirmar no Chrome que Buscar comporta aproximadamente 60 caracteres e continua filtrando normalmente.
++- Confirmar que Hist├│rico abre abaixo do bot├úo, fecha ao clicar fora ou pressionar Escape e preserva restaurar/fechar; conferir que os demais m├│dulos continuam com o painel lateral.
++
++## Homologa├º├úo pendente ÔÇö r├│tulo de keyword livre - 2026-07-30
++
++- Confirmar no Chrome que o estado `free` mostra `Keyword livre` na coluna Principal, sem altera├º├úo da pol├¡tica t├®cnica, persist├¬ncia ou dos selos de keywords publicadas.
++
++## Homologa├º├úo pendente ÔÇö densidade dos bot├Áes selecionados - 2026-07-30
++
++- Confirmar no Chrome que os bot├Áes da barra inferior t├¬m a mesma altura, padding, tamanho de texto, ├¡cones e radius dos controles no topo, preservando foco, hover, estados desabilitados e quebra de linha em viewport estreita.
++
++## Homologa├º├úo pendente ÔÇö redistribui├º├úo de largura da tabela - 2026-07-30
++
++- Confirmar no Chrome que Principal, Inten├º├úo e Funil ficaram justas ao conte├║do e que Palavra-Chave absorveu a largura liberada, sem truncamento inadequado, invas├úo da coluna seguinte ou altera├º├úo dos selects.

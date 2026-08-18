@@ -2,49 +2,36 @@ import "server-only";
 import type { ZodType } from "zod";
 import { parseStructuredOutput, StructuredOutputError } from "@/lib/arquiteto/structured-output";
 import { ProviderRequestError, requestProviderContent } from "@/lib/arquiteto/provider-client";
+import { AIProviderConfigurationError, type AIProviderErrorCode, resolveAIProvider } from "@/lib/server/ai-provider-config";
 
 export class StructuredAIError extends Error {
   status: number;
   issues?: unknown;
+  code: AIProviderErrorCode | "AI_OUTPUT_INVALID" | "AI_REQUEST_INVALID";
 
-  constructor(message: string, status = 502, issues?: unknown) {
+  constructor(
+    message: string,
+    status = 502,
+    issues?: unknown,
+    code: StructuredAIError["code"] = "AI_PROVIDER_ERROR",
+  ) {
     super(message);
     this.name = "StructuredAIError";
     this.status = status;
     this.issues = issues;
+    this.code = code;
   }
 }
 
-function providerConfig(): {
-  apiKey: string;
-  apiUrl: string;
-  model: string;
-  extraHeaders: Record<string, string>;
-} {
-  const deepseekKey = process.env.DEEPSEEK_API_KEY;
-  if (deepseekKey) {
-    return {
-      apiKey: deepseekKey,
-      apiUrl: "https://api.deepseek.com/chat/completions",
-      model: "deepseek-chat",
-      extraHeaders: {},
-    };
+function providerConfig() {
+  try {
+    return resolveAIProvider();
+  } catch (error) {
+    if (error instanceof AIProviderConfigurationError) {
+      throw new StructuredAIError(error.message, error.status, undefined, error.code);
+    }
+    throw error;
   }
-
-  const openRouterKey = process.env.OPENROUTER_API_KEY;
-  if (openRouterKey) {
-    return {
-      apiKey: openRouterKey,
-      apiUrl: "https://openrouter.ai/api/v1/chat/completions",
-      model: process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4-pro",
-      extraHeaders: {
-        "HTTP-Referer": process.env.NEXTAUTH_URL || "http://localhost:3000",
-        "X-Title": "Minerador Key",
-      },
-    };
-  }
-
-  throw new StructuredAIError("Nenhum provedor de IA esta configurado.", 503);
 }
 
 export async function generateStructuredAI<T>({
@@ -61,7 +48,7 @@ export async function generateStructuredAI<T>({
   maxTokens?: number;
 }): Promise<T> {
   if (user.length > 250_000) {
-    throw new StructuredAIError("Payload estrategico excede o limite permitido.", 413);
+    throw new StructuredAIError("Payload estrategico excede o limite permitido.", 413, undefined, "AI_REQUEST_INVALID");
   }
 
   // Timeout pode ser configurado via env (AI_TIMEOUT_MS). Default 180s.
@@ -99,17 +86,17 @@ export async function generateStructuredAI<T>({
           const issueDetail = firstIssue
             ? ` Campo ${firstIssue.path?.map(String).join(".") || "raiz"}: ${firstIssue.message || "valor invalido"}.`
             : "";
-          throw new StructuredAIError(`${error.message}${issueDetail}`, 502, error.issues);
+          throw new StructuredAIError(`${error.message}${issueDetail}`, 502, error.issues, "AI_OUTPUT_INVALID");
         }
         throw error;
       }
     } catch (error) {
       if (error instanceof StructuredAIError) throw error;
-      if (error instanceof ProviderRequestError) throw new StructuredAIError(error.message, error.status);
+      if (error instanceof ProviderRequestError) throw new StructuredAIError(error.message, error.status, undefined, error.code);
       if (error instanceof Error && error.name === "AbortError") {
-        throw new StructuredAIError("A IA excedeu o tempo limite.", 504);
+        throw new StructuredAIError("A IA excedeu o tempo limite.", 504, undefined, "AI_TIMEOUT");
       }
-      throw new StructuredAIError(error instanceof Error ? error.message : "Erro desconhecido na IA.", 502);
+      throw new StructuredAIError("Falha sanitizada na operação de IA.", 502, undefined, "AI_PROVIDER_UNAVAILABLE");
     } finally {
       clearTimeout(timeout);
     }

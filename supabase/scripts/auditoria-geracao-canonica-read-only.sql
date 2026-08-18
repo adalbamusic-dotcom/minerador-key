@@ -1,0 +1,8 @@
+-- Índice de execução — auditoria profunda de Supabase.
+-- Este arquivo não contém consultas duplicadas.
+-- 1. Execute primeiro: auditoria-geracao-canonica-catalogo-read-only.sql
+-- 2. Confirme schema_migrations e a permissão de leitura.
+-- 3. Execute opcionalmente: auditoria-geracao-canonica-ledger-read-only.sql
+-- 4. Confirme relations e colunas exigidas por cada seção de integridade.
+-- 5. Execute somente as seções compatíveis de: auditoria-geracao-canonica-integridade-read-only.sql
+-- Todos os SQLs de auditoria contêm exclusivamente SELECT e WITH.

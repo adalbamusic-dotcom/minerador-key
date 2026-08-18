@@ -16,10 +16,10 @@ const client = () => getOperationalClient();
 const unwrap = <T>(data: T | null, error: unknown) => { if (error) mapPersistenceError(error); return data; };
 
 export class ArtifactRepository {
-  async save<T>(marcaId: string, type: "article_dna" | "silo_dna" | "content_plan", version: VersionEnvelope<T>, actorId: string) {
+  async save<T>(marcaId: string, type: "article_dna" | "silo_dna" | "content_plan", version: VersionEnvelope<T>, status: VersionStatusEvent["status"], actorId: string) {
     const row = { version_id: version.versionId, entity_id: version.entityId, marca_id: marcaId, artifact_type: type, version_number: version.versionNumber,
       previous_version_id: version.previousVersionId, content_hash: version.contentHash, origin: version.origin, change_reason: version.changeReason,
-      payload: version, created_by: actorId, created_at: version.createdAt };
+      status, payload: version, created_by: actorId, created_at: version.createdAt };
     const { error } = await client().from("editorial_artifact_versions").upsert(row, { onConflict: "version_id", ignoreDuplicates: true });
     if (error) mapPersistenceError(error);
   }
@@ -73,9 +73,9 @@ export class WorkflowRepository {
   }
 
   async importItem(input: { marcaId: string; articleId: string; stage: WorkflowStage; state: string; sourceEntityId: string; sourceVersionId: string | null; sourceContentHash: string | null; payload: object; actorId: string }) {
-    const { data, error } = await client().from("editorial_workflow_items").upsert({ marca_id: input.marcaId, article_id: input.articleId, stage: input.stage, state: input.state,
+    const { data, error } = await client().from("editorial_workflow_items").upsert({ marca_id: input.marcaId, subject_type: "article", subject_id: input.articleId, article_id: input.articleId, stage: input.stage, state: input.state,
       source_entity_id: input.sourceEntityId, source_version_id: input.sourceVersionId, source_content_hash: input.sourceContentHash, payload: input.payload,
-      created_by: input.actorId, updated_by: input.actorId }, { onConflict: "marca_id,article_id,stage", ignoreDuplicates: true }).select("*").maybeSingle();
+      created_by: input.actorId, updated_by: input.actorId }, { onConflict: "marca_id,subject_type,subject_id,stage", ignoreDuplicates: true }).select("*").maybeSingle();
     if (error) mapPersistenceError(error);
     if (data) return data;
     const { data: existing, error: existingError } = await client().from("editorial_workflow_items").select("*").eq("marca_id", input.marcaId).eq("article_id", input.articleId).eq("stage", input.stage).single();
@@ -106,7 +106,7 @@ export class WorkflowRepository {
 export class SerpSnapshotRepository {
   async list(marcaId: string, articleId?: string) {
     try {
-      let query = client().from("editorial_serp_snapshots").select("id,marca_id,article_id,version_number,payload,created_at").eq("marca_id", marcaId).order("version_number", { ascending: true });
+      let query = client().from("editorial_serp_snapshots").select("id,marca_id,article_id,snapshot_version,payload,created_at").eq("marca_id", marcaId).order("snapshot_version", { ascending: true });
       if (articleId) query = query.eq("article_id", articleId);
       const { data, error } = await query;
       unwrap(data, error);
@@ -120,7 +120,7 @@ export class SerpSnapshotRepository {
 
   async save(marcaId: string, record: SerpCollectionRecord, actorId: string) {
     try {
-      const { error } = await client().from("editorial_serp_snapshots").insert({ id: record.id, marca_id: marcaId, article_id: record.input.articleId, version_number: record.research?.version || 1,
+      const { error } = await client().from("editorial_serp_snapshots").insert({ id: record.id, marca_id: marcaId, article_id: record.input.articleId, snapshot_version: record.research?.version || 1,
         previous_snapshot_id: record.research?.previousSnapshotId || null, content_hash: record.research?.contentHash || "", status: record.status, payload: record, created_by: actorId, created_at: record.research?.collectedAt || new Date().toISOString() });
       if (error) mapPersistenceError(error);
       return true;
@@ -133,7 +133,7 @@ export class SerpSnapshotRepository {
   async saveReview(marcaId: string, review: SerpReviewRecord) {
     try {
       const { error } = await client().from("editorial_serp_reviews").insert({ id: review.id, marca_id: marcaId, article_id: review.articleId, snapshot_id: review.snapshotId,
-        status: review.status, notes: review.notes, reviewed_by: review.reviewedBy, reviewed_at: review.reviewedAt, payload: review });
+        status: review.status, reviewed_by: review.reviewedBy, created_at: review.reviewedAt, payload: review });
       if (error) mapPersistenceError(error);
       return true;
     } catch (error) {
@@ -144,7 +144,7 @@ export class SerpSnapshotRepository {
 
   async listReviews(marcaId: string, articleId?: string) {
     try {
-      let query = client().from("editorial_serp_reviews").select("payload").eq("marca_id", marcaId).order("reviewed_at", { ascending: true });
+      let query = client().from("editorial_serp_reviews").select("payload").eq("marca_id", marcaId).order("created_at", { ascending: true });
       if (articleId) query = query.eq("article_id", articleId);
       const { data, error } = await query;
       unwrap(data, error);
@@ -168,7 +168,7 @@ export class ContentDocumentRepository {
   async list(marcaId: string, userId: string) {
     const { data, error } = await client().from("content_documents").select("id,payload,content_hash,lock_version,updated_at").eq("marca_id", marcaId).order("updated_at", { ascending: false });
     unwrap(data, error); const ids = (data || []).map(row => row.id);
-    const states = ids.length ? await client().from("content_document_user_states").select("*").eq("user_key", userId).in("document_id", ids) : { data: [], error: null };
+    const states = ids.length ? await client().from("content_document_user_states").select("*").eq("user_id", userId).in("document_id", ids) : { data: [], error: null };
     unwrap(states.data, states.error); const stateMap = new Map((states.data || []).map(row => [row.document_id, row]));
     return (data || []).map(row => { const state = stateMap.get(row.id); return { document: ContentDocumentSchema.parse(row.payload), contentHash: row.content_hash, lockVersion: row.lock_version, updatedAt: row.updated_at,
       userState: state ? { cursorPosition: state.cursor_position, scrollTop: state.scroll_top, leftPanelOpen: state.left_panel_open, rightPanelOpen: state.right_panel_open, lastOpenedAt: state.last_opened_at } : null }; });
@@ -198,8 +198,8 @@ export class ContentDocumentRepository {
   }
 
   async saveUserState(documentId: string, userId: string, state: { cursorPosition: number | null; scrollTop: number; leftPanelOpen: boolean; rightPanelOpen: boolean }) {
-    const { error } = await client().from("content_document_user_states").upsert({ document_id: documentId, user_key: userId, cursor_position: state.cursorPosition, scroll_top: state.scrollTop,
-      left_panel_open: state.leftPanelOpen, right_panel_open: state.rightPanelOpen, last_opened_at: new Date().toISOString() }, { onConflict: "document_id,user_key" });
+    const { error } = await client().from("content_document_user_states").upsert({ document_id: documentId, user_id: userId, cursor_position: state.cursorPosition, scroll_top: state.scrollTop,
+      left_panel_open: state.leftPanelOpen, right_panel_open: state.rightPanelOpen, last_opened_at: new Date().toISOString() }, { onConflict: "document_id,user_id" });
     if (error) mapPersistenceError(error);
   }
 }
@@ -267,16 +267,16 @@ export class PublicationRepository {
 
 export class ViewPreferenceRepository {
   async list(marcaId: string, userId: string) {
-    const { data, error } = await client().from("editorial_saved_views").select("id,name,module,settings,is_default,updated_at").eq("marca_id", marcaId).eq("user_key", userId);
+    const { data, error } = await client().from("editorial_saved_views").select("id,name,module,settings,is_default,updated_at").eq("marca_id", marcaId).eq("user_id", userId);
     unwrap(data, error); return (data || []).map(row => SavedGridViewSchema.parse({ ...(row.settings as object), id: row.id, name: row.name, module: row.module, brandId: marcaId, userId, isDefault: row.is_default, updatedAt: row.updated_at }));
   }
   async save(view: SavedGridView, userId: string) {
-    if (view.isDefault) await client().from("editorial_saved_views").update({ is_default: false }).eq("marca_id", view.brandId).eq("user_key", userId).eq("module", view.module);
-    const { data, error } = await client().from("editorial_saved_views").upsert({ id: view.id, marca_id: view.brandId, user_key: userId, module: view.module, name: view.name, settings: view, is_default: view.isDefault }, { onConflict: "id" }).select("*").single();
+    if (view.isDefault) await client().from("editorial_saved_views").update({ is_default: false }).eq("marca_id", view.brandId).eq("user_id", userId).eq("module", view.module);
+    const { data, error } = await client().from("editorial_saved_views").upsert({ id: view.id, marca_id: view.brandId, user_id: userId, module: view.module, name: view.name, settings: view, is_default: view.isDefault }, { onConflict: "id" }).select("*").single();
     return unwrap(data, error);
   }
   async delete(id: string, marcaId: string, userId: string) {
-    const { error } = await client().from("editorial_saved_views").delete().eq("id", id).eq("marca_id", marcaId).eq("user_key", userId);
+    const { error } = await client().from("editorial_saved_views").delete().eq("id", id).eq("marca_id", marcaId).eq("user_id", userId);
     if (error) mapPersistenceError(error);
   }
 }

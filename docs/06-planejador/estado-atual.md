@@ -69,8 +69,25 @@ O pacote também preserva a identidade editorial como contexto de origem: o arti
 - **Verificado:** 83 testes focados, typecheck, ESLint direcionado e build Next.js passaram; diff-check sem erros.
 - **Limitação:** a marca não estava selecionada na sessão do navegador; roteiro manual real continua pendente.
 # Roteamento tenant — 2026-07-23
+
+# Correção de abertura do cockpit — 2026-07-29
+- **Verificado no código:** o botão `Abrir cockpit` passou a montar `/{brandRef}/planejador/{contentPlanId}`, preservando o tenant ativo e o `versionId` do plano.
+- **Verificado no código:** os retornos do cockpit para a grade/lista também usam o Planejador tenantizado; sem contexto de marca, a ação fica protegida e não gera uma URL inválida.
+- **Confirmado por teste:** regressão de navegação canônica e `tests/tenant-routing.test.mts` passaram (6/6); lint direcionado passou.
+- **Validado parcialmente no navegador:** a grade autenticada exibe os links tenantizados corretos; o processo `next dev` em execução ainda não reindexou a rota dinâmica e devolve 404 até ser reiniciado.
+- **Pendente:** reiniciar o servidor local, confirmar a entrada no cockpit e validar a persistência remota.
 # Consolidacao fisica dos modulos - 2026-07-23
 - Implementacao proprietaria consolidada em modules/planejador; wrappers canonicos permanecem finos.
 - Suite focada desta rodada: 212/212; browser autenticado, persistencia remota e build continuam pendentes.
 
 - Adicionado wrapper canônico `/{brandRef}/planejador`; o cockpit existente permanece proprietário do módulo.
+## Fase 2A — limite explícito — 2026-08-06
+
+- O Planejador não foi migrado para a nova autorização nesta fatia. Sua rota continua no gate legado deliberadamente, para preservar o contrato editorial enquanto Marca, Conta, seleção e Administração passam por smoke canônico.
+- Pendente: migrar somente após validação manual da Fase 2A e proposta aprovada para os consumidores editoriais.
+
+## Incidente 3B-R1 — porta de entrada do Planejador — 2026-08-09
+
+- O Planejador permanece protegido pelo contexto Supabase autenticado e não recebe grants, suporte ou comunicação enquanto a identidade/sessão não estiverem aprovadas no smoke.
+- A correção local ficou restrita à entrada de autenticação: erros agora são classificados sem mascarar falhas de configuração ou rede, e não foi criado fallback por e-mail, `ADMIN_EMAIL` ou NextAuth.
+- Acesso real ao Planejador, Admin global, conta comum, reload e logout continuam pendentes de validação manual autenticada.

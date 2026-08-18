@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireSessionProfile, authzErrorResponse } from "@/lib/server/authz";
+import { requireCanonicalSessionProfile, authzErrorResponse } from "@/lib/server/authz";
+import { fetchProviderResponse, ProviderRequestError } from "@/lib/arquiteto/provider-client";
+import { aiProviderErrorResponse, AIProviderConfigurationError, resolveAIProvider } from "@/lib/server/ai-provider-config";
 
 export async function POST(req: Request) {
   try {
     // 1. Autenticacao: protege gasto de chave de IA
-    await requireSessionProfile();
+    await requireCanonicalSessionProfile();
 
     const { keywords } = await req.json();
     if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
@@ -14,34 +16,21 @@ export async function POST(req: Request) {
       );
     }
 
-    let apiKey = process.env.DEEPSEEK_API_KEY;
-    let apiUrl = "https://api.deepseek.com/chat/completions";
-    let model = "deepseek-chat";
-
-    if (!apiKey) {
-      apiKey = process.env.OPENROUTER_API_KEY;
-      if (apiKey) {
-        apiUrl = "https://openrouter.ai/api/v1/chat/completions";
-        model = process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4-pro";
-      }
-    }
+    const resolvedProvider = resolveAIProvider();
+    const { apiKey, apiUrl, model } = resolvedProvider;
 
     if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: "Nem DEEPSEEK_API_KEY nem OPENROUTER_API_KEY estão configuradas no .env.local." },
+        { success: false, error: "A credencial do provider de IA configurado não está disponível.", code: "AI_CREDENTIAL_MISSING" },
         { status: 500 }
       );
     }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`
+      "Authorization": `Bearer ${apiKey}`,
+      ...resolvedProvider.extraHeaders,
     };
-
-    if (apiUrl.includes("openrouter.ai")) {
-      headers["HTTP-Referer"] = "http://localhost:3000";
-      headers["X-Title"] = "Minerador Key";
-    }
 
     // Formata dados simplificados para reduzir uso de tokens e agilizar resposta
     const formattedKeywords = keywords.map(item => ({
@@ -51,7 +40,7 @@ export async function POST(req: Request) {
       nicho: item.analise_semantica?.nicho_override || null
     }));
 
-    const response = await fetch(apiUrl, {
+    const response = await fetchProviderResponse(apiUrl, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -70,15 +59,10 @@ export async function POST(req: Request) {
       })
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Erro na chamada da API de IA: ${errorText}`);
-    }
-
     const resData = await response.json();
     const content = resData.choices?.[0]?.message?.content;
     if (!content) {
-      throw new Error("Resposta de IA vazia.");
+      throw new ProviderRequestError("O provider de IA retornou uma resposta inválida.", 502, "AI_PROVIDER_INVALID_RESPONSE");
     }
 
     const parsedResponse = JSON.parse(content);
@@ -88,6 +72,10 @@ export async function POST(req: Request) {
       clusters: parsedResponse.clusters || []
     });
   } catch (err) {
+    if (err instanceof AIProviderConfigurationError || err instanceof ProviderRequestError) {
+      const mapped = aiProviderErrorResponse(err);
+      return NextResponse.json({ success: false, error: mapped.message, code: mapped.code }, { status: mapped.status });
+    }
     const mapped = authzErrorResponse(err);
     if (mapped.status === 500) console.error("Erro na clusterização:", err);
     return NextResponse.json(

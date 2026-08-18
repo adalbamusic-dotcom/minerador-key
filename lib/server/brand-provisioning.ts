@@ -15,10 +15,10 @@ export type ProvisionBrandInput = {
 };
 
 export class BrandProvisioningError extends Error {
-  public readonly code: "OWNER_NOT_FOUND" | "OWNER_REQUIRED" | "OWNER_INVALID" | "OWNER_ROLE_MISSING" | "BRAND_CREATE_FAILED" | "MEMBERSHIP_CREATE_FAILED" | "LIST_CREATE_FAILED" | "COMPENSATION_FAILED";
+  public readonly code: "OWNER_NOT_FOUND" | "OWNER_REQUIRED" | "OWNER_INVALID" | "BRAND_CREATE_FAILED" | "LIST_CREATE_FAILED" | "COMPENSATION_FAILED";
   public readonly status: number;
 
-  constructor(code: "OWNER_NOT_FOUND" | "OWNER_REQUIRED" | "OWNER_INVALID" | "OWNER_ROLE_MISSING" | "BRAND_CREATE_FAILED" | "MEMBERSHIP_CREATE_FAILED" | "LIST_CREATE_FAILED" | "COMPENSATION_FAILED", message: string, status = 409) {
+  constructor(code: "OWNER_NOT_FOUND" | "OWNER_REQUIRED" | "OWNER_INVALID" | "BRAND_CREATE_FAILED" | "LIST_CREATE_FAILED" | "COMPENSATION_FAILED", message: string, status = 409) {
     super(message);
     this.name = "BrandProvisioningError";
     this.code = code;
@@ -50,13 +50,9 @@ async function resolveOwner(client: SupabaseClient, input: ProvisionBrandInput):
   throw new BrandProvisioningError("OWNER_NOT_FOUND", "Não encontramos um usuário cadastrado com esse e-mail. Cadastre o usuário primeiro.");
 }
 
-async function compensate(client: SupabaseClient, brandId: string, membershipId: string | null, listIds: string[]) {
+async function compensate(client: SupabaseClient, brandId: string, listIds: string[]) {
   if (listIds.length) {
-    const result = await client.from("listas_kgr").delete().in("id", listIds);
-    if (result.error) throw result.error;
-  }
-  if (membershipId) {
-    const result = await client.from("brand_memberships").delete().eq("id", membershipId);
+    const result = await client.from("minerador_keyword_lists").delete().in("id", listIds);
     if (result.error) throw result.error;
   }
   const result = await client.from("marcas").delete().eq("id", brandId);
@@ -64,10 +60,8 @@ async function compensate(client: SupabaseClient, brandId: string, membershipId:
 }
 
 export async function provisionBrandWithOwner(client: SupabaseClient, actorUserId: string, input: ProvisionBrandInput) {
+  void actorUserId;
   const owner = await resolveOwner(client, input);
-  const roleResult = await client.from("brand_roles").select("id").is("marca_id", null).eq("slug", "owner").maybeSingle();
-  if (roleResult.error) throw new BrandProvisioningError("OWNER_ROLE_MISSING", "Não foi possível validar o papel owner.", 503);
-  if (!roleResult.data?.id) throw new BrandProvisioningError("OWNER_ROLE_MISSING", "O papel owner não está configurado.", 503);
 
   const brandResult = await client.from("marcas").insert({
     nome: input.nome.trim(),
@@ -82,37 +76,20 @@ export async function provisionBrandWithOwner(client: SupabaseClient, actorUserI
   if (brandResult.error || !brandResult.data?.id) throw new BrandProvisioningError("BRAND_CREATE_FAILED", "Não foi possível criar a marca.", 500);
 
   const brand = brandResult.data as { id: string; owner_user_id?: string | null; status?: string | null; nome: string };
-  let membershipId: string | null = null;
   let listIds: string[] = [];
   try {
-    const membershipResult = await client.from("brand_memberships").insert({
-      marca_id: brand.id,
-      user_key: owner.email?.toLowerCase() || null,
-      role_id: roleResult.data.id,
-      member_user_id: owner.id,
-      role: "owner",
-      permissions: {},
-      status: "active",
-      invited_by: actorUserId,
-    }).select("id,marca_id,member_user_id,role,status").single();
-    if (membershipResult.error || !membershipResult.data?.id) throw new BrandProvisioningError("MEMBERSHIP_CREATE_FAILED", "Não foi possível criar a membership owner.", 500);
-    membershipId = membershipResult.data.id;
-    if (membershipResult.data.marca_id !== brand.id || membershipResult.data.member_user_id !== owner.id || membershipResult.data.role !== "owner" || membershipResult.data.status !== "active") {
-      throw new BrandProvisioningError("MEMBERSHIP_CREATE_FAILED", "A membership owner não corresponde à marca criada.", 500);
-    }
-
     const silos = (input.silos_existentes || []).filter(silo => silo.nome.trim());
     if (silos.length) {
-      const listsResult = await client.from("listas_kgr").insert(silos.map(silo => ({ nome: silo.nome.trim(), nicho: input.nicho?.trim() || null, marca_id: brand.id }))).select("id");
+      const listsResult = await client.from("minerador_keyword_lists").insert(silos.map(silo => ({ nome: silo.nome.trim(), nicho: input.nicho?.trim() || null, marca_id: brand.id }))).select("id");
       if (listsResult.error) throw new BrandProvisioningError("LIST_CREATE_FAILED", "Não foi possível criar os silos iniciais.", 500);
       listIds = (listsResult.data || []).map(item => item.id).filter((id): id is string => typeof id === "string");
     }
 
     if (brand.owner_user_id !== owner.id || brand.status !== "active") throw new BrandProvisioningError("BRAND_CREATE_FAILED", "A marca criada não possui ownership canônico ativo.", 500);
-    return { ...brand, membership_id: membershipId, owner_user_id: owner.id, brandRef: buildBrandRef(brand.nome, brand.id) };
+    return { ...brand, membership_id: null, owner_user_id: owner.id, brandRef: buildBrandRef(brand.nome, brand.id) };
   } catch (error) {
     try {
-      await compensate(client, brand.id, membershipId, listIds);
+      await compensate(client, brand.id, listIds);
     } catch {
       throw new BrandProvisioningError("COMPENSATION_FAILED", "A criação falhou e a compensação não pôde ser confirmada. Nenhum sucesso foi informado.", 500);
     }

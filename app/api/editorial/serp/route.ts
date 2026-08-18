@@ -12,12 +12,12 @@ import { SerpReviewSchema, type SerpSearchInput } from "@/lib/radar/serp/contrac
 import { RequestSchema } from "@/lib/radar/serp/request";
 import { ArtifactRepository, SerpSnapshotRepository, WorkflowRepository } from "@/lib/server/editorial-repositories";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
-import { AuthzError, authzErrorResponse, requireSessionProfile } from "@/lib/server/authz";
+import { AuthzError, authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { PersistenceUnavailableError, mapPersistenceError } from "@/lib/server/editorial-db";
 
 
 async function resolveArticle(
-  profile: Awaited<ReturnType<typeof requireSessionProfile>>,
+  profile: Awaited<ReturnType<typeof requireCanonicalSessionProfile>>,
   brandId: string,
   articleId: string,
   localArticle?: VersionEnvelope<ArticleDNA>,
@@ -59,7 +59,7 @@ async function resolveArticle(
   const lookupIds = canonicalUuidCandidates([principal.keywordId, article.payload.principalKeywordId, hydration?.principalKeyword?.canonicalKeywordId, hydration?.principalKeyword?.sourceKeywordId, hydration?.principalKeyword?.originalKeywordId, resolutionEnvelope.principalKeyword.canonicalKeywordId, resolutionEnvelope.principalKeyword.sourceKeywordId, resolutionEnvelope.principalKeyword.originalKeywordId]);
   let keywordRows: Array<{ id: string; keyword: string; lista_id: string | null }> = [];
   try {
-    const keywordResult = lookupIds.length ? await profile.supabase.from("keywords_kgr").select("id,keyword,lista_id").in("id", lookupIds) : { data: [], error: null };
+    const keywordResult = lookupIds.length ? await profile.supabase.from("minerador_keywords").select("id,keyword,lista_id").in("id", lookupIds) : { data: [], error: null };
     if (keywordResult.error) mapPersistenceError(keywordResult.error);
     keywordRows = (keywordResult.data || []) as Array<{ id: string; keyword: string; lista_id: string | null }>;
   } catch (error) {
@@ -88,13 +88,13 @@ async function resolveArticle(
   const possibleSiloIds = canonicalUuidCandidates([article.payload.siloId, keyword?.lista_id, publishedBriefing?.silo_id, hydratedPrincipal?.siloId, hydration?.silo?.id, resolutionEnvelope.silo?.id]);
   let ownedSilo: { id: string } | null = null;
   try {
-    const siloResult = possibleSiloIds.length ? await profile.supabase.from("listas_kgr").select("id,marca_id").in("id", possibleSiloIds) : { data: [], error: null };
+    const siloResult = possibleSiloIds.length ? await profile.supabase.from("minerador_keyword_lists").select("id,marca_id").in("id", possibleSiloIds) : { data: [], error: null };
     if (siloResult.error) mapPersistenceError(siloResult.error);
     ownedSilo = (siloResult.data || []).find(silo => silo.marca_id === brandId) || null;
   } catch (error) {
     if (!(error instanceof PersistenceUnavailableError) || !usedLocalFallback) throw error;
   }
-  if (!ownedSilo && usedLocalFallback && (hydration?.silo?.id || resolutionEnvelope.silo?.id) && resolutionEnvelope.brandId === brandId && (profile.isAdmin || profile.marcaId === brandId)) ownedSilo = { id: hydration?.silo?.id || resolutionEnvelope.silo!.id };
+  if (!ownedSilo && usedLocalFallback && (hydration?.silo?.id || resolutionEnvelope.silo?.id) && resolutionEnvelope.brandId === brandId) ownedSilo = { id: hydration?.silo?.id || resolutionEnvelope.silo!.id };
   if (!ownedSilo) throw new AuthzError(403, "A keyword principal não pertence à marca selecionada.");
   const candidate = keyword
     ? { id: keyword.id, keyword: keyword.keyword, lista_id: keyword.lista_id, brandId, aliases: [principal.keywordId, ...(hydration?.principalKeyword?.aliases || [])] }
@@ -119,7 +119,7 @@ function summaryFromResearch(research: Awaited<ReturnType<typeof collectSerperSn
 
 export async function POST(request: NextRequest) {
   try {
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
     const input = RequestSchema.parse(await request.json());
     await assertEditorialPermission(profile, input.brandId, "radar", input.action === "review" ? "review" : "edit");
     if (input.action === "review") {

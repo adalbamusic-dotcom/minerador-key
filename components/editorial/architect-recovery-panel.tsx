@@ -27,28 +27,28 @@ export function ArchitectRecoveryPanel({
   onRecover,
 }: ArchitectRecoveryPanelProps) {
   return (
-    <section className="border-b border-slate-900 bg-[#080a0e] px-3 py-2 text-[10px] text-slate-400">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-bold uppercase tracking-widest text-slate-600">Recuperação segura</span>
-        <button onClick={onExportSnapshot} disabled={busy} className="rounded border border-emerald-900/70 px-2 py-1 font-semibold text-emerald-400 hover:border-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
+    <section className="border-b border-slate-800/70 bg-slate-900/55 px-3 py-1.5 text-sm text-slate-300">
+      <div className="flex min-h-9 flex-wrap items-center gap-2">
+        <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Recuperação segura</span>
+        <button onClick={onExportSnapshot} disabled={busy} className="inline-flex h-8 items-center rounded-md border border-emerald-700/60 bg-emerald-950/15 px-2.5 text-[13px] font-medium text-emerald-100 transition-colors hover:border-emerald-400 hover:bg-emerald-900/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 disabled:cursor-not-allowed disabled:opacity-40">
           Exportar snapshot do Arquiteto
         </button>
-        <button onClick={onAudit} disabled={!snapshotReady || busy} className="rounded border border-cyan-900/70 px-2 py-1 font-semibold text-cyan-400 hover:border-cyan-700 disabled:cursor-not-allowed disabled:opacity-40">
+        <button onClick={onAudit} disabled={!snapshotReady || busy} className="inline-flex h-8 items-center rounded-md border border-cyan-700/60 bg-cyan-950/15 px-2.5 text-[13px] font-medium text-cyan-100 transition-colors hover:border-cyan-400 hover:bg-cyan-900/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-40">
           Auditar fontes
         </button>
-        <button onClick={onRecover} disabled={!snapshotReady || !audit || !plan || busy} className="rounded border border-amber-900/70 px-2 py-1 font-semibold text-amber-400 hover:border-amber-700 disabled:cursor-not-allowed disabled:opacity-40">
+        <button onClick={onRecover} disabled={!snapshotReady || !audit || !plan || busy} className="inline-flex h-8 items-center rounded-md border border-amber-700/60 bg-amber-950/15 px-2.5 text-[13px] font-medium text-amber-100 transition-colors hover:border-amber-400 hover:bg-amber-900/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70 disabled:cursor-not-allowed disabled:opacity-40">
           Aplicar recuperação segura
         </button>
-        <span className={snapshotReady ? "text-emerald-500" : "text-slate-600"}>
+        <span className={snapshotReady ? "text-xs text-emerald-200" : "text-xs text-slate-500"}>
           {busy ? "Processando leitura…" : snapshotReady ? `Snapshot validado${snapshotCreatedAt ? ` em ${new Date(snapshotCreatedAt).toLocaleTimeString("pt-BR")}` : ""}` : "Snapshot obrigatório antes da auditoria"}
         </span>
       </div>
-      {error && <p className="mt-1 text-rose-400">{error}</p>}
+      {error && <p className="mt-1 text-xs text-rose-200">{error}</p>}
       {audit && (
-        <details className="mt-2 rounded border border-slate-900 bg-black/20 px-2 py-1.5" open>
-          <summary className="cursor-pointer font-semibold text-slate-300">Relatório de auditoria · {audit.counts.masterKeywords} keywords · {audit.counts.recoverableNewArticles} artigos novos recuperáveis</summary>
-          <pre className="mt-2 whitespace-pre-wrap font-mono text-[9px] leading-4 text-slate-500">{architectRecoveryAuditText(audit)}</pre>
-          {plan && <p className="mt-2 text-[9px] text-amber-500">A recuperação preservará {plan.preservedArticleVersionIds.length} ArticleDNA(s), {plan.preservedSiloVersionIds.length} SiloDNA(s) e {plan.preservedSiloPageVersionIds.length} SiloPage(s), sem chamar IA.</p>}
+        <details className="mt-2 rounded-md border border-slate-800/60 bg-slate-900/30 px-2 py-1.5" open>
+          <summary className="cursor-pointer text-xs font-medium text-slate-200">Relatório de auditoria · {audit.counts.masterKeywords} keywords · {audit.counts.recoverableNewArticles} artigos novos recuperáveis</summary>
+          <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-slate-400">{architectRecoveryAuditText(audit)}</pre>
+          {plan && <p className="mt-2 text-xs leading-5 text-amber-200">A recuperação preservará {plan.preservedArticleVersionIds.length} ArticleDNA(s), {plan.preservedSiloVersionIds.length} SiloDNA(s) e {plan.preservedSiloPageVersionIds.length} SiloPage(s), sem chamar IA.</p>}
         </details>
       )}
     </section>

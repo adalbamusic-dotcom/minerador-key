@@ -27,9 +27,9 @@ export const ArchitectSiloDnaRecoverySchema = z.object({
   savedAt: z.string().datetime(),
 });
 
-export const architectReviewRecoveryKey = (brandId: string) => `minerador-pro:architect-review:${brandId}`;
-export const architectArticleDnaRecoveryKey = (brandId: string) => `minerador-pro:architect-article-dna:${brandId}`;
-export const architectSiloDnaRecoveryKey = (brandId: string) => `minerador-pro:architect-silo-dna:${brandId}`;
+export const architectReviewRecoveryKey = (actorUserId: string, brandId: string) => `minerador-pro:architect-review:${actorUserId}:${brandId}`;
+export const architectArticleDnaRecoveryKey = (actorUserId: string, brandId: string) => `minerador-pro:architect-article-dna:${actorUserId}:${brandId}`;
+export const architectSiloDnaRecoveryKey = (actorUserId: string, brandId: string) => `minerador-pro:architect-silo-dna:${actorUserId}:${brandId}`;
 
 export const ArchitectRecoverySnapshotSchema = z.object({
   schemaVersion: z.literal(1),

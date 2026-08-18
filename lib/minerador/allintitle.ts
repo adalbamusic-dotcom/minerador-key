@@ -8,7 +8,7 @@ export const ALLINTITLE_TOTAL_TIMEOUT_MS = 70000;
 
 export type AllintitleStatus = "success" | "zero_results" | "unavailable" | "captcha" | "blocked" | "error" | "timeout" | "cancelled" | "no_change";
 
-export type AllintitleStage = "checking_extension" | "sending_request" | "opening_google_tab" | "loading_query" | "injecting_reader" | "reading_page" | "returning_result" | "validating_result" | "persisting" | "completed" | "failed" | "timeout" | "paused_captcha" | "cancelled";
+export type AllintitleStage = "checking_extension" | "sending_request" | "opening_google_tab" | "loading_query" | "injecting_reader" | "reading_page" | "google_result_extraction" | "returning_result" | "validating_result" | "persisting" | "completed" | "failed" | "timeout" | "paused_captcha" | "cancelled";
 
 export const allintitleStageLabel: Record<AllintitleStage, string> = {
   checking_extension: "Verificando extensão",
@@ -17,6 +17,7 @@ export const allintitleStageLabel: Record<AllintitleStage, string> = {
   loading_query: "Carregando consulta",
   injecting_reader: "Preparando leitor da página",
   reading_page: "Lendo a página",
+  google_result_extraction: "Extraindo contador do Google",
   returning_result: "Retornando resultado",
   validating_result: "Validando resultado",
   persisting: "Salvando resultado",
@@ -27,18 +28,84 @@ export const allintitleStageLabel: Record<AllintitleStage, string> = {
   cancelled: "Cancelado",
 };
 
-export type AllintitleRequestItem = {
-  keywordId: string;
+export type AllintitleTarget =
+  | { targetKind?: "keyword"; keywordId: string; candidateId?: never }
+  | { targetKind: "discovery_candidate"; candidateId: string; keywordId?: never };
+
+export type AllintitleRequestItem = AllintitleTarget & {
   keyword: string;
   currentResultsAllintitle: number | null;
 };
 
+export function partitionAllintitleItems<T>(items: readonly T[], batchSize = ALLINTITLE_MAX_BATCH_SIZE): T[][] {
+  if (!Number.isInteger(batchSize) || batchSize < 1) throw new Error("O tamanho do sublote allintitle precisa ser positivo.");
+  const batches: T[][] = [];
+  for (let index = 0; index < items.length; index += batchSize) batches.push([...items.slice(index, index + batchSize)]);
+  return batches;
+}
+
+const ALLINTITLE_KEYWORD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export type AllintitleBatchValidationError = {
+  code: "invalid_keyword_id" | "keyword_brand_mismatch" | "keyword_not_persisted" | "invalid_keyword_text";
+  stage: "batch_validation" | "authorization";
+  message: string;
+  diagnostic: Record<string, unknown>;
+};
+
+export function validateAllintitleBatchItems(
+  items: Array<Pick<AllintitleRequestItem, "keywordId" | "keyword"> & { brandId?: string | null }>,
+  activeBrandId: string,
+): AllintitleBatchValidationError | null {
+  for (const item of items) {
+    const keywordId = typeof item?.keywordId === "string" ? item.keywordId.trim() : "";
+    if (!ALLINTITLE_KEYWORD_ID_PATTERN.test(keywordId)) {
+      return {
+        code: "invalid_keyword_id",
+        stage: "batch_validation",
+        message: "Uma das keywords selecionadas não possui um ID válido.",
+        diagnostic: { keywordId: keywordId || null },
+      };
+    }
+    if (typeof item?.keyword !== "string" || !item.keyword.trim()) {
+      return {
+        code: "invalid_keyword_text",
+        stage: "batch_validation",
+        message: "Uma das keywords selecionadas não possui texto válido.",
+        diagnostic: { keywordId },
+      };
+    }
+    if (!item.brandId) {
+      return {
+        code: "keyword_not_persisted",
+        stage: "batch_validation",
+        message: "Uma das keywords ainda não foi persistida no Minerador.",
+        diagnostic: { keywordId, reason: "brand_id_missing" },
+      };
+    }
+    if (item.brandId !== activeBrandId) {
+      return {
+        code: "keyword_brand_mismatch",
+        stage: "authorization",
+        message: "Uma das keywords selecionadas não pertence à marca ativa.",
+        diagnostic: { keywordId, expectedBrandId: activeBrandId, actualBrandId: item.brandId },
+      };
+    }
+  }
+  return null;
+}
+
 export type AllintitleMeasurementRequest = {
-  type: "minerador.allintitle.measure.v1";
+  type: "minerador.allintitle.measure.v1" | "minerador.allintitle.measure.v2";
   batchId: string;
   requestId: string;
-  userId?: string;
+  operationRequestId?: string;
+  actorUserId?: string | null;
   brandId: string;
+  brandRef?: string | null;
+  origin?: string;
+  pathname?: string;
+  protocolVersion?: number;
   requestedAt: string;
   options: { intervalMs: number; maxItems: number };
   items: AllintitleRequestItem[];
@@ -49,6 +116,8 @@ export type AllintitleMeasurementResult = {
   batchId: string;
   requestId: string;
   keywordId: string;
+  targetKind?: "keyword" | "discovery_candidate";
+  candidateId?: string;
   brandId: string;
   keyword: string;
   query: string;
@@ -59,8 +128,17 @@ export type AllintitleMeasurementResult = {
   stage?: AllintitleStage;
   protocolVersion?: number;
   diagnosticUrl?: string;
+  diagnostic?: Record<string, unknown>;
+  persistenceOutcome?: "persisted" | "preserved" | "rejected" | "failed";
   errorCode?: string;
   message?: string;
+  operationBatchId?: string;
+  operationRequestId?: string;
+  operationIndex?: number;
+  completedKeywords?: number;
+  totalKeywords?: number;
+  batchIndex?: number;
+  batchItemIndex?: number;
 };
 
 export type AllintitleSemantic = Record<string, unknown> & {
@@ -83,19 +161,29 @@ export function isPersistableAllintitleResult(result: AllintitleMeasurementResul
     || (result.status === "zero_results" && result.resultsAllintitle === 0);
 }
 
-export function classifyAllintitleText(text: string, expectedQuery: string): Pick<AllintitleMeasurementResult, "status" | "resultsAllintitle" | "errorCode" | "message"> {
+const ALLINTITLE_COUNT_PATTERN = /\b(?:(?:about|approximately|aproximadamente|cerca de)\s*)?([0-9]{1,3}(?:(?:[.,\s])[0-9]{3})*|[0-9]+)\s+(?:resultado|resultados|result|results)\b/i;
+const ALLINTITLE_COUNT_UNAVAILABLE_MESSAGE = "A consulta foi conclu\u00edda, mas o contador de resultados n\u00e3o p\u00f4de ser identificado.";
+
+export function parseAllintitleCountText(text: string): number | null {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  const match = normalized.match(ALLINTITLE_COUNT_PATTERN);
+  if (!match) return null;
+  const value = Number(match[1].replace(/[.,\s]/g, ""));
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+export function classifyAllintitleText(text: string, expectedQuery: string): Pick<AllintitleMeasurementResult, "status" | "resultsAllintitle" | "errorCode" | "message" | "stage"> {
   const normalized = text.replace(/\s+/g, " ").trim();
+  const normalizedForMatching = normalizeAllintitleKeyword(normalized);
   if (/recaptcha|unusual traffic|not a robot|detected unusual traffic/i.test(normalized)) return { status: "captcha", errorCode: "captcha_detected", message: "CAPTCHA ou desafio humano detectado." };
   if (/before you continue|consent\.google|consentimento|consent to/i.test(normalized)) return { status: "blocked", errorCode: "consent_required", message: "Consentimento do Google é necessário." };
   if (/access denied|temporarily blocked|automated queries|sorry\/?index/i.test(normalized)) return { status: "blocked", errorCode: "google_blocked", message: "O Google bloqueou ou recusou a consulta." };
   const expected = normalizeAllintitleKeyword(expectedQuery);
   const foundQuery = normalizeAllintitleKeyword(normalized.match(/(?:allintitle\s*:\s*["“]?[^"”]+["”]?)/i)?.[0]);
   if (foundQuery && expected && foundQuery !== expected) return { status: "unavailable", errorCode: "query_mismatch", message: "A página não confirmou a consulta solicitada." };
-  if (/no results found|nenhum resultado encontrado|não foram encontrados resultados/i.test(normalized)) return { status: "zero_results", resultsAllintitle: 0 };
-  const match = normalized.match(/(?:about|aproximadamente)?\s*([\d.,\s]+)\s+(?:results?|resultados?)/i);
-  if (!match) return { status: "unavailable", errorCode: "count_unavailable", message: "A página não apresentou contagem confiável." };
-  const value = Number(match[1].replace(/[^\d]/g, ""));
-  if (!Number.isSafeInteger(value) || value < 0) return { status: "unavailable", errorCode: "count_invalid", message: "A contagem encontrada não é numérica válida." };
+  if (/no results(?: found)?|nenhum resultado(?: encontrado)?|nao foram encontrados resultados|sem resultados/i.test(normalizedForMatching)) return { status: "zero_results", resultsAllintitle: 0 };
+  const value = parseAllintitleCountText(normalized);
+  if (value === null) return { status: "unavailable", errorCode: "result_count_not_found", message: ALLINTITLE_COUNT_UNAVAILABLE_MESSAGE, stage: "google_result_extraction" };
   if (value === 0) return { status: "zero_results", resultsAllintitle: 0 };
   return { status: "success", resultsAllintitle: value };
 }
@@ -127,12 +215,12 @@ export function buildAllintitleMetricPatch(existing: {
       ? [...history, previous].slice(-10)
       : history,
   };
-  const patch: { results_allintitle: number; analise_semantica: AllintitleSemantic; kgr_score?: number } = {
+  const patch: { results_allintitle: number; analise_semantica: AllintitleSemantic; kgr_score?: number | null } = {
     results_allintitle: result.resultsAllintitle!,
     analise_semantica: semantic,
   };
-  if (applicability !== "not_applicable" && typeof existing.volume_search === "number" && Number.isFinite(existing.volume_search) && existing.volume_search > 0) {
-    patch.kgr_score = Number((result.resultsAllintitle! / existing.volume_search).toFixed(4));
+  if (applicability !== "not_applicable" && typeof existing.volume_search === "number" && Number.isFinite(existing.volume_search)) {
+    patch.kgr_score = existing.volume_search > 0 ? Number((result.resultsAllintitle! / existing.volume_search).toFixed(4)) : null;
   }
   return patch;
 }

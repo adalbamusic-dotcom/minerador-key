@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { assertCanAccessMarca, authzErrorResponse, requireSessionProfile } from "@/lib/server/authz";
+import { assertCanAccessMarca, authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { CollaboratorRoleSchema, ModulePermissionSchema } from "@/lib/editorial/operational-flow";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { InvitationRepository } from "@/lib/server/editorial-repositories";
@@ -13,7 +13,7 @@ const InvitationInputSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
     const input = InvitationInputSchema.parse(await request.json());
     await assertCanAccessMarca(profile.userId, input.brandId, profile); await assertEditorialPermission(profile, input.brandId, "marca", "manage");
     const invitation = await new InvitationRepository().create({ ...input, createdBy: profile.userId }, profile.userId);

@@ -30,13 +30,42 @@ test("Radar mantém Abrir no próprio módulo e separa a navegação para o Arqu
   assert.doesNotMatch(source, /<Link className=\{btn\} href=\{`\/arquiteto\?articleId=\$\{row\.articleId\}`\}>Abrir<\/Link>/);
 });
 
-test("pagina propria do Radar declara as sete abas e navega por articleId", () => {
+test("Radar usa a GlobalTopbar sem duplicar busca, histórico ou estado de grid", () => {
+  const source = readFileSync(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
+  const grid = readFileSync(new URL("../components/editorial/operational-data-grid.tsx", import.meta.url), "utf8");
+  assert.match(source, /topbar=\{\{ moduleId: "radar"/);
+  assert.match(source, /renderTopbarActions/);
+  assert.match(source, /GLOBAL_TOPBAR_ACTION_CONTROL/);
+  assert.match(source, /grid\.setFilter/);
+  assert.match(source, /grid\.exportRows\(grid\.queriedRows, "planilha"\)/);
+  assert.match(source, /grid\.toggleColumns/);
+  assert.match(source, /grid\.setOrderMode/);
+  assert.match(source, /grid\.setPageSize/);
+  assert.match(source, /<HistoryControls[^>]+moduleId="radar" showHistory=\{false\} showUndoRedo=\{false\}/);
+  assert.doesNotMatch(source, /<OperationalDataGrid[^>]+toolbar=\{/);
+  assert.doesNotMatch(source, /router\.(back|forward)\(|window\.history\.(back|forward)\(/);
+  assert.match(grid, /topbar\?: OperationalDataGridTopbar/);
+  assert.match(grid, /search: \{ getValue: \(\) => search, setValue: setSearch \}/);
+  assert.match(grid, /data-operational-topbar-actions/);
+  assert.match(grid, /overflow-x-auto xl:overflow-visible/);
+});
+
+test("pagina propria do Radar declara cinco areas e navega por articleId", () => {
   const page = readFileSync(new URL("../modules/radar/radar-analysis-page.tsx", import.meta.url), "utf8");
-  assert.match(page, /Resumo[\s\S]*SERP[\s\S]*Concorrentes[\s\S]*Estrutura observada[\s\S]*Semântica observada[\s\S]*Curadoria[\s\S]*Histórico/);
+  assert.match(page, /const tabs: RadarTab\[\] = \["resumo", "selecionar-referencias", "analise-amostra", "relatorio", "historico"\]/);
+  assert.match(page, /const tab: Tab = resolveRadarTab\(requestedTab\)/);
+  assert.match(page, /Selecionar referências/);
+  assert.match(page, /Análise da amostra/);
+  assert.match(page, /Relatório/);
   assert.match(page, /\/api\/editorial\/radar-analysis\/extract/);
   assert.match(page, /site_url.*article\.payload\.canonical/);
-  assert.match(page, /tab === "serp" && renderSerp\(\)/);
-  assert.match(page, /Snapshot não encontrado|Resultados:/);
+  assert.match(page, /tab === "selecionar-referencias" && renderSelection\(\)/);
+  assert.match(page, /tab === "analise-amostra" && renderSample\(\)/);
+  assert.match(page, /tab === "relatorio" && renderReport\(\)/);
+  assert.match(page, /tab === "resumo" && renderFlowProgress\(\)/);
+  assert.doesNotMatch(page, /\n\s*\{renderFlowProgress\(\)\}/);
+  assert.match(page, /Analisar referências selecionadas/);
+  assert.doesNotMatch(page, /Analisar esta página/);
   assert.doesNotMatch(page, /adalbapro\.com\.br/);
 });
 
@@ -44,6 +73,6 @@ test("listas de semântica e entidades usam chaves únicas quando os valores se 
   const page = readFileSync(new URL("../modules/radar/radar-analysis-page.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(page, /frequentEntities\.map\(entity =>/);
   assert.doesNotMatch(page, /semanticTerms\.map\(term =>/);
-  assert.match(page, /frequentEntities\.map\(\(entity, index\) =>[\s\S]*key=\{entity \+ ":" \+ index\}/);
-  assert.match(page, /terms\.map\(\(term, index\) =>[\s\S]*key=\{term\.term \+ ":" \+ index\}/);
+  assert.match(page, /frequentEntities\.map\(\(entity, index\) =>[\s\S]*key=\{`\$\{entity\}:\$\{index\}`\}/);
+  assert.match(page, /semanticPresentation\.relevant\.map\(\(term, index\) =>[\s\S]*key=\{`\$\{term\.term\}:\$\{term\.pageIds\.join\("\\|"\)\}:\$\{index\}`\}/);
 });

@@ -26,6 +26,11 @@
 - Executar a validação manual do cockpit com um artigo real e confirmar reload, sucessora, aprovação e transferência idempotente.
 - Confirmar persistência remota dos sucessores e eventos depois da migration vigente.
 - Validar no navegador a troca das cinco etapas, o resumo fixo, a próxima ação e o editor central com dados reais.
+
+## Correção recente — abertura do cockpit — 2026-07-29
+- Corrigido o link legado `/planejador/{contentPlanId}` para a rota canônica tenantizada `/{brandRef}/planejador/{contentPlanId}`.
+- Adicionada regressão para impedir o retorno do link sem `brandRef`.
+- A grade autenticada já exibe o destino tenantizado correto; falta reiniciar o `next dev` atual para reindexar a rota dinâmica e confirmar o clique no cockpit.
 ## Bloqueado
 Decisões editoriais pendentes.
 ## Descartado
@@ -54,3 +59,18 @@ Avançar mock como plano aprovado.
 ## Consolidacao fisica concluida - 2026-07-23
 - Implementacoes exclusivas da area permanecem em modules/planejador; nenhum contrato ou rota foi alterado nesta etapa.
 - Validacao manual autenticada e persistencia remota seguem pendentes.
+## Dependência de Fase 2A — 2026-08-06
+
+- Manter o gate atual do Planejador até o smoke de Marca/Conta/Admin. A migração de autorização editorial é tarefa posterior e não deve introduzir fallback por e-mail ou `user_key`.
+
+## Incidente 3B-R1 — bloqueio preservado — 2026-08-09
+
+- Não avançar para sino interno, notificações, preferências, templates, outbox, fila, delivery events ou provider global até o login real e as sessões estarem estáveis.
+- Validar o Planejador somente depois do smoke autenticado do Admin e da conta comum; grants e suporte auditado continuam em frente posterior.
+
+## Complemento documental Agência/Brand — 2026-08-09
+
+- [x] Registrar que sino, notifications, activity e monitoring permanecem contratos futuros compartilhados, sem runtime nesta tarefa.
+- [x] Registrar comunicação única para Admin, Agência e Brand, com provider global e escopo de evento.
+- [x] Registrar que activity da Agência é agregada/sanitizada e activity da Brand é detalhada, sem substituir entidades editoriais.
+- [ ] Não retomar a sequência operacional enquanto a exclusividade actor → Agency e os gates de identidade/sessão não estiverem aprovados.

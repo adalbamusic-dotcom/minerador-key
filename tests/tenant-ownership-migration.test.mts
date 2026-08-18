@@ -277,7 +277,7 @@ test("consumidores do Minerador exigem tenant canônico após a migration", asyn
   const sitePreview = await readFile(new URL("../app/api/marca/site/import/keywords/preview/route.ts", import.meta.url), "utf8");
   const analyze = await readFile(new URL("../app/api/analyze/route.ts", import.meta.url), "utf8");
   const intent = await readFile(new URL("../app/api/process-intent-niche/route.ts", import.meta.url), "utf8");
-  assert.match(minerador, /\.from\("keywords_kgr"\)/);
+  assert.match(minerador, /\.from\("minerador_keywords"\)/);
   assert.match(minerador, /\.eq\("brand_id", selectedBrandId\)/);
   assert.match(minerador, /brand_id: selectedBrandId/);
   assert.match(siteImport, /insert\(\{ \.\.\.payload, brand_id: brandId \}/);

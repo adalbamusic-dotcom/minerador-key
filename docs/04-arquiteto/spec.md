@@ -51,6 +51,14 @@ Nova execução de IA antes de reconciliação da integridade.
 
 O Arquiteto recebe keywords já tenantizadas por `brand_id`. `lista_id` pode ser nulo sem invalidar a keyword; quando houver lista, ela deve pertencer à mesma marca. O Arquiteto não exclui keywords por estarem sem lista e deve preservar a localização recuperável ou encaminhar a keyword para `Keywords não agrupadas`.
 
+## Rebase canônico do patrimônio do Minerador
+
+Keywords válidas `aprovado` e `publicado` da Brand podem entrar no fluxo canônico do Arquiteto uma única vez. `publicado` conserva seu status e todas as proteções de URL, slug, canonical, Brand e política da principal; ele não é convertido em `aprovado` para fins de entrada.
+
+A elegibilidade é server-side e considera somente a mesma Brand, workflow `keyword/architect` operacional e referências de ArticleDNA canônico válido. Marcadores de `localStorage`, IndexedDB, `importedKeywordIds`, estado incorporado legado e qualquer marcador histórico não são autoridade de sucesso. O recovery/rebaseline histórico foi abandonado no runtime; workflow remoto não-`received` é conflito explícito e não é convertido automaticamente em `received`.
+
+O read model distingue disponível, recebida, incorporada em ArticleDNA novo, publicada protegida e descartada/inválida. Estados de workflow remotos desconhecidos impedem o bootstrap até investigação. A operação em massa é server-side, autenticada, autorizada por Brand, idempotente e depende de preflight sanitizado e aprovação humana; não modifica dados estratégicos do Minerador.
+
 ## 20. Referencia de identidade publicada
 
 `ArticleDNA` pode carregar `publishedIdentityRef` como referencia opcional e compacta da identidade publicada. Esse campo preserva a relacao com `PublicationRecord`/`OperationalPublication`, mas nao altera a imutabilidade do ArticleDNA nem substitui a fonte canonica de slug, canonical, URL, marca ou keyword principal. O Planejador deve bloquear divergencias conhecidas e manter a protecao conservadora.
@@ -129,3 +137,10 @@ confirma a relação, trava a nova principal e conduz a próxima SERP a
 
 O resultado SERP deve ser descobrível na linha do artigo e renderizado junto à keyword correspondente. O vínculo exige `articleId`, `keywordId` e a versão de KeywordDNA da referência; texto, ordem ou índice não são identidade. Após persistência, a UI fecha o preview, atualiza a linha, abre o suporte e mantém a recomendação visível. Assessment incompleto, conflito, erro, versão desatualizada ou recomendação sem hidratação devem ser estados explícitos e não podem substituir um assessment válido anterior.
 Migrations, Minerador, componentes compartilhados e módulos consumidores.
+## 27. Métricas Ads e KGR opcional
+
+`allintitle` e `kgr` são evidências opcionais recebidas do Minerador. `null` significa indisponível ou não medido, nunca zero; sua ausência não bloqueia agrupamento, formação ou aprovação. KGR histórico permanece auxiliar e não é recalculado no Arquiteto.
+
+O Arquiteto pode transportar, por keyword e referência ArticleDNA, um envelope normalizado de demanda Ads com média mensal, série temporal, CPC, competição Ads, close variants, tendência/sazonalidade e proveniência. CPC e competição Ads não representam dificuldade orgânica; close variants não decidem agrupamento; tendência e sazonalidade não aprovam calendário. Volume não escolhe sozinho a principal.
+
+O Arquiteto não acessa Google Ads nem recebe credenciais, customerId, MCC ou resposta bruta. Serper continua responsável pela validação SERP. Atualização de métrica nunca substitui decisão humana, principal confirmada ou identidade publicada. Ver `docs/04-arquiteto/propostas/metricas-google-ads-kgr-opcional.md`.

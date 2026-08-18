@@ -14,6 +14,7 @@ import { publicationSourceIssues, publishedIdentityReferenceIssues, resolvePlann
 import { hasMaterialPlanChange } from "@/lib/planejador/outline";
 import { createStatusEvent } from "@/lib/arquiteto/versioning";
 import { useBrand } from "./brand-context";
+import { useSupabaseSession } from "./auth/supabase-session-context";
 import { updateBrandWorkspace } from "@/lib/editorial/workspace";
 import { LocalWorkflowRecoverySchema, PersistedEditorialWorkspaceSchema, workflowRecoveryStorageKey, type PersistenceMode, type WorkflowCommand, type LocalWorkflowRecovery } from "@/lib/editorial/persistence-contracts";
 import { createRadarHydrationSnapshot, reconcileRadarItems, type RadarHydrationSnapshot, type RadarHydrationSourceKeyword } from "@/lib/radar/hydration";
@@ -63,7 +64,7 @@ const emptyWorkspace = (): BrandWorkspace => ({ architectImportedKeywordIds: [],
   internalLinks: [], externalSources: [], guardianFindings: [], publications: [], radarItems: [], plannerItems: [],
   operationalPublications: [], invitations: [], persistenceMode: "local_fallback", documentLocks: {}, documentUserStates: {}, moduleState: {}, backgroundTasks: [], aiReviewAnnotations: [] });
 
-function saveLocalSerpRecovery(brandId: string, workspace: BrandWorkspace, record: SerpCollectionRecord) {
+function saveLocalSerpRecovery(actorUserId: string, brandId: string, workspace: BrandWorkspace, record: SerpCollectionRecord) {
   if (typeof window === "undefined") return false;
   try {
     const recovery = LocalWorkflowRecoverySchema.parse({
@@ -86,14 +87,14 @@ function saveLocalSerpRecovery(brandId: string, workspace: BrandWorkspace, recor
       aiReviewAnnotations: workspace.aiReviewAnnotations,
       savedAt: new Date().toISOString(),
     });
-    window.localStorage.setItem(workflowRecoveryStorageKey(brandId), JSON.stringify(recovery));
+    window.localStorage.setItem(workflowRecoveryStorageKey(actorUserId, brandId), JSON.stringify(recovery));
     return true;
   } catch {
     return false;
   }
 }
 
-function saveLocalRadarAnalysisRecovery(brandId: string, workspace: BrandWorkspace) {
+function saveLocalRadarAnalysisRecovery(actorUserId: string, brandId: string, workspace: BrandWorkspace) {
   if (typeof window === "undefined") return false;
   try {
     const recovery = LocalWorkflowRecoverySchema.parse({
@@ -116,7 +117,7 @@ function saveLocalRadarAnalysisRecovery(brandId: string, workspace: BrandWorkspa
       aiReviewAnnotations: workspace.aiReviewAnnotations,
       savedAt: new Date().toISOString(),
     });
-    window.localStorage.setItem(workflowRecoveryStorageKey(brandId), JSON.stringify(recovery));
+    window.localStorage.setItem(workflowRecoveryStorageKey(actorUserId, brandId), JSON.stringify(recovery));
     return true;
   } catch {
     return false;
@@ -168,30 +169,36 @@ const EditorialPipelineContext = createContext<EditorialPipelineContextValue | n
 
 export function EditorialPipelineProvider({ children }: { children: React.ReactNode }) {
   const { selectedBrandId } = useBrand();
+  const { actorUserId, sessionEpoch } = useSupabaseSession();
   const [workspaces, setWorkspaces] = useState<Record<string, BrandWorkspace>>({});
   const [snapshots, setSnapshots] = useState<Record<string, EditorialSnapshot>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recoveredBrands = useRef(new Set<string>());
   const activeTaskKeys = useRef(new Map<string, string>());
-  const workspace = workspaces[selectedBrandId] || emptyWorkspace();
+  const actorKey = actorUserId || "unauthenticated";
+  const workspaceKey = selectedBrandId ? `${actorKey}:${selectedBrandId}` : "";
+  const workspace = workspaceKey ? workspaces[workspaceKey] || emptyWorkspace() : emptyWorkspace();
 
   const updateWorkspace = useCallback((updater: (current: BrandWorkspace) => BrandWorkspace) => {
-    if (!selectedBrandId) return;
-    setWorkspaces(previous => updateBrandWorkspace(previous, selectedBrandId, emptyWorkspace, updater));
-  }, [selectedBrandId]);
+    if (!selectedBrandId || !actorUserId) return;
+    setWorkspaces(previous => updateBrandWorkspace(previous, workspaceKey, emptyWorkspace, updater));
+  }, [actorUserId, selectedBrandId, workspaceKey]);
 
   const runBackgroundTask = useCallback(<TResult,>(input: BackgroundTaskInput<TResult>) => {
-    if (!selectedBrandId) return null;
+    if (!selectedBrandId || !actorUserId) return null;
     const brandId = selectedBrandId;
-    const key = `${brandId}:${input.type}`;
+    const actorAtStart = actorUserId;
+    const epochAtStart = sessionEpoch;
+    const key = `${actorAtStart}:${brandId}:${input.type}`;
     const runningId = activeTaskKeys.current.get(key);
     if (runningId) return runningId;
     const id = crypto.randomUUID();
     const startedAt = new Date().toISOString();
     activeTaskKeys.current.set(key, id);
     const updateBrand = (updater: (current: BrandWorkspace) => BrandWorkspace) => {
-      setWorkspaces(previous => updateBrandWorkspace(previous, brandId, emptyWorkspace, updater));
+      if (actorUserId !== actorAtStart || sessionEpoch !== epochAtStart) return;
+      setWorkspaces(previous => updateBrandWorkspace(previous, `${actorAtStart}:${brandId}`, emptyWorkspace, updater));
     };
     updateBrand(current => ({ ...current, backgroundTasks: [...current.backgroundTasks, {
       id, brandId, type: input.type, label: input.label, status: "queued", message: "Preparando tarefa...", current: 0, total: 1,
@@ -212,7 +219,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       } : task) }));
     }).finally(() => activeTaskKeys.current.delete(key));
     return id;
-  }, [selectedBrandId]);
+  }, [actorUserId, selectedBrandId, sessionEpoch]);
 
   const consumeBackgroundTask = useCallback((id: string) => updateWorkspace(current => ({ ...current,
     backgroundTasks: current.backgroundTasks.map(task => task.id === id ? { ...task, consumed: true } : task),
@@ -238,10 +245,16 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
   }), [updateWorkspace]);
 
   const reloadOperational = useCallback(async (sourceSnapshot?: EditorialSnapshot) => {
-    if (!selectedBrandId) return;
+    if (!selectedBrandId || !actorUserId) return;
+    const actorAtStart = actorUserId;
+    const epochAtStart = sessionEpoch;
     try {
       const response = await fetch(`/api/editorial/workspace?marcaId=${encodeURIComponent(selectedBrandId)}`, { cache: "no-store" });
-      if (!response.ok) { updateWorkspace(current => ({ ...current, persistenceMode: response.status === 503 ? "local_fallback" : "unavailable" })); return; }
+      if (actorUserId !== actorAtStart || sessionEpoch !== epochAtStart) return;
+      if (!response.ok) {
+        updateWorkspace(current => ({ ...current, persistenceMode: response.status === 503 ? "local_fallback" : "unavailable" }));
+        return;
+      }
       const body = await response.json(); const persisted = PersistedEditorialWorkspaceSchema.parse(body.data);
       const persistedPlans = persisted.contentPlans.reduce<Record<string, VersionEnvelope<ContentPlan>>>((plans, version) => {
         plans[version.versionId] = version;
@@ -253,7 +266,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         const articleVersions = { ...current.articleVersions, ...Object.fromEntries(persisted.articleVersions.map(version => [version.payload.articleId, version])) };
         const siloVersions = { ...current.siloVersions, ...Object.fromEntries(persisted.siloVersions.map(version => [version.payload.siloId, version])) };
         const incomingRadar = persisted.radarItems.length ? mergeRadarItemsPreservingLocalState(persisted.radarItems, current.radarItems) : current.radarItems;
-        const radarItems = reconcileRadarItems(incomingRadar, articleVersions, selectedBrandId, sourceSnapshot?.keywords || snapshots[selectedBrandId]?.keywords || [], siloVersions);
+        const radarItems = reconcileRadarItems(incomingRadar, articleVersions, selectedBrandId, sourceSnapshot?.keywords || snapshots[workspaceKey]?.keywords || [], siloVersions);
         const serpMerge = persisted.serpRecords.length ? mergeSerpRecordsPreservingPayload(persisted.serpRecords, current.serpRecords) : { records: current.serpRecords, conflicts: current.serpMergeConflicts };
         return { ...current, persistenceMode: persisted.mode, serpPersistenceMode: persisted.serpPersistenceMode,
         radarItems, plannerItems: persisted.plannerItems.length ? persisted.plannerItems : current.plannerItems,
@@ -266,30 +279,37 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         documents: { ...current.documents, ...Object.fromEntries(persisted.documents.map(record => [record.document.id, record.document])) },
         documentLocks: { ...current.documentLocks, ...Object.fromEntries(persisted.documents.map(record => [record.document.id, record.lockVersion])) },
         documentUserStates: { ...current.documentUserStates, ...Object.fromEntries(persisted.documents.filter(record => record.userState).map(record => [record.document.id, record.userState!])) },
-        operationalPublications: persisted.publications, invitations: persisted.invitations,
-      }; });
-    } catch { updateWorkspace(current => ({ ...current, persistenceMode: "local_fallback" })); }
-  }, [selectedBrandId, snapshots, updateWorkspace]);
+         operationalPublications: persisted.publications, invitations: persisted.invitations,
+       }; });
+    } catch {
+      updateWorkspace(current => ({ ...current, persistenceMode: "local_fallback" }));
+    }
+  }, [actorUserId, selectedBrandId, sessionEpoch, snapshots, updateWorkspace, workspaceKey]);
 
   const reload = useCallback(async () => {
-    if (!selectedBrandId) return;
+    if (!selectedBrandId || !actorUserId) return;
+    const actorAtStart = actorUserId;
+    const epochAtStart = sessionEpoch;
     setLoading(true); setError(null);
     try {
       const response = await fetch(`/api/inteligencia?marcaId=${encodeURIComponent(selectedBrandId)}`, { cache: "no-store" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Erro ao carregar inteligência editorial.");
       const snapshot = EditorialSnapshotSchema.parse(body.data);
-      setSnapshots(previous => ({ ...previous, [selectedBrandId]: snapshot })); await reloadOperational(snapshot);
+      if (actorUserId !== actorAtStart || sessionEpoch !== epochAtStart) return;
+      setSnapshots(previous => ({ ...previous, [workspaceKey]: snapshot })); await reloadOperational(snapshot);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Erro ao carregar inteligência editorial.");
-    } finally { setLoading(false); }
-  }, [selectedBrandId, reloadOperational]);
+      if (actorUserId === actorAtStart && sessionEpoch === epochAtStart) setError(reason instanceof Error ? reason.message : "Erro ao carregar inteligência editorial.");
+    } finally {
+      if (actorUserId === actorAtStart && sessionEpoch === epochAtStart) setLoading(false);
+    }
+  }, [actorUserId, selectedBrandId, sessionEpoch, reloadOperational, workspaceKey]);
 
   useEffect(() => {
-    if (!selectedBrandId || recoveredBrands.current.has(selectedBrandId)) return;
+    if (!selectedBrandId || !actorUserId || recoveredBrands.current.has(workspaceKey)) return;
     try {
-      const raw = window.localStorage.getItem(workflowRecoveryStorageKey(selectedBrandId));
-      if (!raw) { recoveredBrands.current.add(selectedBrandId); return; }
+      const raw = window.localStorage.getItem(workflowRecoveryStorageKey(actorUserId, selectedBrandId));
+      if (!raw) { recoveredBrands.current.add(workspaceKey); return; }
       const parsed = JSON.parse(raw);
       let recovered: LocalWorkflowRecovery;
       try {
@@ -319,8 +339,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         });
       }
       const timer = window.setTimeout(() => {
-        recoveredBrands.current.add(selectedBrandId);
-        setWorkspaces(previous => updateBrandWorkspace(previous, selectedBrandId, emptyWorkspace, current => ({
+        recoveredBrands.current.add(workspaceKey);
+        setWorkspaces(previous => updateBrandWorkspace(previous, workspaceKey, emptyWorkspace, current => ({
           ...current,
           architectImportedKeywordIds: recovered.architectImportedKeywordIds,
           articleVersions: recovered.articleVersions,
@@ -347,11 +367,11 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       // NUNCA apagamos o localStorage. O parse pode falhar por mudanca de schema.
       console.error("[pipeline] recovery parse falhou, mantendo localStorage intacto");
     }
-  }, [selectedBrandId]);
+  }, [actorUserId, selectedBrandId, workspaceKey]);
 
   useEffect(() => {
-    if (!selectedBrandId || !recoveredBrands.current.has(selectedBrandId)) return;
-    const current = workspaces[selectedBrandId];
+    if (!selectedBrandId || !actorUserId || !recoveredBrands.current.has(workspaceKey)) return;
+    const current = workspaces[workspaceKey];
     if (!current) return;
     try {
       const recovery = LocalWorkflowRecoverySchema.parse({
@@ -374,17 +394,17 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         aiReviewAnnotations: current.aiReviewAnnotations,
         savedAt: new Date().toISOString(),
       });
-      window.localStorage.setItem(workflowRecoveryStorageKey(selectedBrandId), JSON.stringify(recovery));
+      window.localStorage.setItem(workflowRecoveryStorageKey(actorUserId, selectedBrandId), JSON.stringify(recovery));
     } catch {
       // Recovery is best-effort and must never interrupt an editorial action.
     }
-  }, [selectedBrandId, workspaces]);
+  }, [actorUserId, selectedBrandId, workspaces, workspaceKey]);
 
   useEffect(() => {
-    if (!selectedBrandId || snapshots[selectedBrandId]) return;
+    if (!selectedBrandId || !actorUserId || snapshots[workspaceKey]) return;
     const timer = window.setTimeout(() => void reload(), 0);
     return () => window.clearTimeout(timer);
-  }, [reload, selectedBrandId, snapshots]);
+  }, [actorUserId, reload, selectedBrandId, snapshots, workspaceKey]);
 
   const createSerpResolutionEnvelope = useCallback(async (articleId: string) => {
     if (!selectedBrandId) throw new Error("Selecione uma marca antes de pesquisar a SERP.");
@@ -396,13 +416,13 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       radarItem,
       article,
       hydration: radarItem.hydration,
-      sourceKeywords: (snapshots[selectedBrandId]?.keywords || []) as RadarHydrationSourceKeyword[],
+      sourceKeywords: (snapshots[workspaceKey]?.keywords || []) as RadarHydrationSourceKeyword[],
       silo: article.payload.siloId ? workspace.siloVersions[article.payload.siloId] : undefined,
     });
-  }, [selectedBrandId, snapshots, workspace]);
+  }, [selectedBrandId, snapshots, workspace, workspaceKey]);
 
   const value = useMemo<EditorialPipelineContextValue>(() => ({
-    ...workspace, snapshot: snapshots[selectedBrandId] || null, loading, error, reload, reloadOperational,
+    ...workspace, snapshot: snapshots[workspaceKey] || null, loading, error, reload, reloadOperational,
     setArticleVersions: update => updateWorkspace(current => ({ ...current, articleVersions: typeof update === "function" ? update(current.articleVersions) : update })),
     setSiloVersions: update => updateWorkspace(current => ({ ...current, siloVersions: typeof update === "function" ? update(current.siloVersions) : update })),
     setSiloPageVersions: update => updateWorkspace(current => ({ ...current, siloPageVersions: typeof update === "function" ? update(current.siloPageVersions) : update })),
@@ -420,7 +440,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Não foi possível coletar a SERP.");
       const record = SerpCollectionRecordSchema.parse(body.record);
-      if (!saveLocalSerpRecovery(selectedBrandId, workspace, record)) throw new Error("A coleta real foi concluída, mas a recuperação local não pôde ser salva.");
+      if (!actorUserId || !saveLocalSerpRecovery(actorUserId, selectedBrandId, workspace, record)) throw new Error("A coleta real foi concluída, mas a recuperação local não pôde ser salva.");
       updateWorkspace(current => ({ ...current, serpRecords: [...current.serpRecords.filter(item => item.id !== record.id), record], serpPersistenceMode: body.persistenceMode === "remote" ? "server" : "local_fallback" }));
       return record;
     },
@@ -444,7 +464,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       } catch (error) {
         if (error instanceof Error && !/fetch|Failed|Network|503/i.test(error.message)) throw error;
       }
-      if (!saveLocalRadarAnalysisRecovery(selectedBrandId, nextWorkspace)) {
+      if (!actorUserId || !saveLocalRadarAnalysisRecovery(actorUserId, selectedBrandId, nextWorkspace)) {
         throw new Error("A análise foi aplicada localmente, mas a recuperação do navegador não pôde ser salva.");
       }
       updateWorkspace(current => ({ ...current, persistenceMode: "local_fallback" }));
@@ -486,7 +506,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     setArchitectImportedKeywordIds: keywordIds => updateWorkspace(current => ({ ...current, architectImportedKeywordIds: [...new Set(keywordIds)] })),
     importApprovedToRadar: (articleIds, sourceKeywords = [], serpAssessments = {}) => {
       const candidates = approvedArticleVersions(workspace.articleVersions, workspace.versionEvents).filter(version => articleIds.includes(version.payload.articleId));
-      const hydrationKeywords = sourceKeywords.length ? sourceKeywords : snapshots[selectedBrandId]?.keywords || [];
+      const hydrationKeywords = sourceKeywords.length ? sourceKeywords : snapshots[workspaceKey]?.keywords || [];
       const hydrationByArticleId: Record<string, RadarHydrationSnapshot> = {};
       for (const version of candidates) {
         const hydration = createRadarHydrationSnapshot({ brandId: selectedBrandId, article: version, sourceKeywords: hydrationKeywords, silo: version.payload.siloId ? workspace.siloVersions[version.payload.siloId] : undefined, source: "arquiteto_import" });
@@ -542,9 +562,9 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       const current = workspace.contentPlans[item.contentPlanVersionId] || Object.values(workspace.contentPlans).find(plan => plan.entityId === `plan:${item.articleId}`);
       if (!current) throw new Error("Versão ativa do ContentPlan não encontrada.");
       if (current.payload.planning && !hasMaterialPlanChange(current.payload.planning, details)) return { created: false, versionId: current.versionId };
-      const legacyBriefing = snapshots[selectedBrandId]?.briefings.find(candidate => candidate.id === item.articleId) || null;
+      const legacyBriefing = snapshots[workspaceKey]?.briefings.find(candidate => candidate.id === item.articleId) || null;
       const operationalPublication = workspace.operationalPublications.find(candidate => candidate.articleId === item.articleId) || null;
-      const publicationIdentity = resolvePlannerPublicationIdentity({ brandId: selectedBrandId, brandName: snapshots[selectedBrandId]?.brand.nome, articleId: item.articleId, article: workspace.articleVersions[item.articleId]?.payload || null, operational: operationalPublication, legacyBriefing });
+      const publicationIdentity = resolvePlannerPublicationIdentity({ brandId: selectedBrandId, brandName: snapshots[workspaceKey]?.brand.nome, articleId: item.articleId, article: workspace.articleVersions[item.articleId]?.payload || null, operational: operationalPublication, legacyBriefing });
       const articleIdentityIssues = workspace.articleVersions[item.articleId]?.payload ? publishedIdentityReferenceIssues(workspace.articleVersions[item.articleId].payload, publicationIdentity) : [];
       if (articleIdentityIssues.length) throw new Error(articleIdentityIssues.join(" "));
       const successor = await createContentPlanSuccessor(current, details, actorId, undefined, { publicationIdentity });
@@ -556,7 +576,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       return { created: true, versionId: successor.versionId };
     },
     approvePlannerItems: (ids, actorId = "human") => { const eligible = workspace.plannerItems.filter(item => ids.includes(item.id) && item.state === "awaiting_review" && item.contentPlanVersionId);
-      const approvable = eligible.filter(item => { const plan = workspace.contentPlans[item.contentPlanVersionId!]; if (!plan) return false; const legacyBriefing = snapshots[selectedBrandId]?.briefings.find(candidate => candidate.id === item.articleId) || null; const operationalPublication = workspace.operationalPublications.find(candidate => candidate.articleId === item.articleId) || null; const publicationIdentity = resolvePlannerPublicationIdentity({ brandId: selectedBrandId, brandName: snapshots[selectedBrandId]?.brand.nome, articleId: item.articleId, article: workspace.articleVersions[item.articleId]?.payload || null, operational: operationalPublication, legacyBriefing }); const articleIdentityIssues = workspace.articleVersions[item.articleId] ? publishedIdentityReferenceIssues(workspace.articleVersions[item.articleId].payload, publicationIdentity) : []; return contentPlanApprovalIssues(plan, selectedBrandId).length === 0 && publicationIdentity.state !== "conflict" && publicationSourceIssues(plan.payload.planning!, publicationIdentity).length === 0 && articleIdentityIssues.length === 0; });
+      const approvable = eligible.filter(item => { const plan = workspace.contentPlans[item.contentPlanVersionId!]; if (!plan) return false; const legacyBriefing = snapshots[workspaceKey]?.briefings.find(candidate => candidate.id === item.articleId) || null; const operationalPublication = workspace.operationalPublications.find(candidate => candidate.articleId === item.articleId) || null; const publicationIdentity = resolvePlannerPublicationIdentity({ brandId: selectedBrandId, brandName: snapshots[workspaceKey]?.brand.nome, articleId: item.articleId, article: workspace.articleVersions[item.articleId]?.payload || null, operational: operationalPublication, legacyBriefing }); const articleIdentityIssues = workspace.articleVersions[item.articleId] ? publishedIdentityReferenceIssues(workspace.articleVersions[item.articleId].payload, publicationIdentity) : []; return contentPlanApprovalIssues(plan, selectedBrandId).length === 0 && publicationIdentity.state !== "conflict" && publicationSourceIssues(plan.payload.planning!, publicationIdentity).length === 0 && articleIdentityIssues.length === 0; });
       const events = approvable.flatMap(item => { const plan = workspace.contentPlans[item.contentPlanVersionId!]; return plan ? [createStatusEvent(plan.versionId, "approved", actorId, "ContentPlan aprovado no Planejador.")] : []; });
       updateWorkspace(current => ({ ...current, versionEvents: mergeVersionEvents(current.versionEvents, events), plannerItems: current.plannerItems.map(item => approvable.some(candidate => candidate.id === item.id) ? { ...item, state: "approved" as const, updatedAt: new Date().toISOString(), lockVersion: item.lockVersion + 1 } : item) }));
       void sendWorkflowCommand({ action: "approve_plan", brandId: selectedBrandId, plannerItemIds: approvable.map(item => item.id), expectedLocks: Object.fromEntries(approvable.map(item => [item.id, item.lockVersion])), versionEvents: events }, updateWorkspace); },
@@ -600,7 +620,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     dismissBackgroundTask,
     addAiReviewAnnotations,
     restoreOperationalSnapshot,
-  }), [workspace, snapshots, selectedBrandId, loading, error, reload, reloadOperational, updateWorkspace, runBackgroundTask, consumeBackgroundTask, dismissBackgroundTask, addAiReviewAnnotations, restoreOperationalSnapshot, createSerpResolutionEnvelope]);
+  }), [actorUserId, workspaceKey, workspace, snapshots, selectedBrandId, loading, error, reload, reloadOperational, updateWorkspace, runBackgroundTask, consumeBackgroundTask, dismissBackgroundTask, addAiReviewAnnotations, restoreOperationalSnapshot, createSerpResolutionEnvelope]);
 
   return <EditorialPipelineContext.Provider value={value}>{children}</EditorialPipelineContext.Provider>;
 }

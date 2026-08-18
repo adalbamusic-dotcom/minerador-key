@@ -1,2 +1,6 @@
-import { AccountPage } from "@/modules/conta"; import { requireTenantModule } from "../layout";
-export default async function Page({ params }: { params: Promise<{ brandRef: string }> }) { await requireTenantModule((await params).brandRef, "conta"); return <AccountPage />; }
+import { redirect } from "next/navigation";
+
+/** Personal identity lives at /conta; this tenant-shaped URL is a single safe handoff. */
+export default function LegacyBrandAccountPage() {
+  redirect("/conta");
+}

@@ -4,7 +4,8 @@ import { SiloDNASchema, VersionedArticleDNASchema } from "@/lib/arquiteto/contra
 import { deterministicSiloDnaPayload } from "@/lib/arquiteto/adapters";
 import { normalizeSiloDnaProviderPayload } from "@/lib/arquiteto/silo-dna-provider";
 import { createStatusEvent, createVersionEnvelope } from "@/lib/arquiteto/versioning";
-import { requireSessionProfile, authzErrorResponse } from "@/lib/server/authz";
+import { appendArquitetoArtifact, pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
+import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 
 const SiloInputSchema = z.object({
@@ -14,7 +15,7 @@ const SiloInputSchema = z.object({
 });
 const RequestSchema = z.object({
   silos: z.array(SiloInputSchema).min(1).max(12),
-  brand: z.object({ id: z.string(), name: z.string(), niche: z.string().nullable().optional() }).optional(),
+  brand: z.object({ id: z.string().min(1), name: z.string(), niche: z.string().nullable().optional() }),
 });
 const ResponseSchema = z.object({ silos: z.array(z.record(z.string(), z.unknown())).min(1) });
 
@@ -41,9 +42,9 @@ function buildSiloDnaUserPrompt(silos: z.infer<typeof RequestSchema>["silos"]): 
 
 export async function POST(req: Request) {
   try {
-    const profile = await requireSessionProfile();
     const parsed = RequestSchema.safeParse(await req.json());
     if (!parsed.success) return NextResponse.json({ success: false, error: "Silos invalidos.", issues: parsed.error.flatten() }, { status: 400 });
+    const context = await resolvePipelineContext({ brandId: parsed.data.brand.id, module: "arquiteto", action: "create" });
     const result = await generateStructuredAI({
       system: SYSTEM_PROMPT,
       user: buildSiloDnaUserPrompt(parsed.data.silos),
@@ -60,19 +61,21 @@ export async function POST(req: Request) {
       if (provider.warnings.length) console.warn("[silo-dna] normalizador aplicou avisos", { siloId: input.id, warnings: provider.warnings });
       // Base deterministica garante que todos os campos obrigatórios existam
       // mesmo se a IA retornar uma resposta incompleta ou vazia.
-      const base = deterministicSiloDnaPayload(input.id, input.name, input.articleVersions, parsed.data.brand?.id ? { brandId: parsed.data.brand.id } : {});
+      const base = deterministicSiloDnaPayload(input.id, input.name, input.articleVersions, { brandId: parsed.data.brand.id });
       const basePendingDecisions = provider.payload.humanPendingDecisions ?? base.humanPendingDecisions;
       const warningsAsPending = provider.warnings.map(warning => `Aviso do servidor: ${warning}`);
-      const normalized = SiloDNASchema.parse({ ...base, ...provider.payload, schemaVersion: 1, siloId: input.id, ...(parsed.data.brand?.id ? { brandId: parsed.data.brand.id } : {}), name: base.name, centralEntity: base.centralEntity, centralEntitySource: base.centralEntitySource, ...(base.centralKeywordDnaRef ? { centralKeywordDnaRef: base.centralKeywordDnaRef } : {}), articleReferences,
+      const normalized = SiloDNASchema.parse({ ...base, ...provider.payload, schemaVersion: 1, siloId: input.id, brandId: parsed.data.brand.id, name: base.name, centralEntity: base.centralEntity, centralEntitySource: base.centralEntitySource, ...(base.centralKeywordDnaRef ? { centralKeywordDnaRef: base.centralKeywordDnaRef } : {}), articleReferences,
         pillarArticleId: pillar, supportArticleIds, humanPendingDecisions: [...warningsAsPending, ...basePendingDecisions] });
-      return createVersionEnvelope({ entityId: input.id, versionNumber: 1, previousVersionId: null, origin: "ai",
-        changeReason: "Proposta inicial de SiloDNA.", createdBy: profile.userId, payload: normalized });
+      const version = await createVersionEnvelope({ entityId: input.id, versionNumber: 1, previousVersionId: null, origin: "ai",
+        changeReason: "Proposta inicial de SiloDNA.", createdBy: context.actorUserId, payload: normalized });
+      const persisted = await appendArquitetoArtifact(context, "silo_dna", version, "proposed");
+      return persisted.version;
     }));
-    const events = versions.map(version => createStatusEvent(version.versionId, "proposed", profile.userId, "Aguardando revisao humana."));
+    const events = versions.map(version => createStatusEvent(version.versionId, "proposed", context.actorUserId, "Aguardando revisao humana."));
     return NextResponse.json({ success: true, data: { versions, events } });
   } catch (error) {
-    if (error instanceof StructuredAIError) return NextResponse.json({ success: false, error: error.message, issues: error.issues }, { status: error.status });
-    const mapped = authzErrorResponse(error);
-    return NextResponse.json({ success: false, error: mapped.message }, { status: mapped.status });
+    if (error instanceof StructuredAIError) return NextResponse.json({ success: false, error: error.message, code: error.code, issues: error.issues }, { status: error.status });
+    const mapped = pipelineArtifactErrorResponse(error);
+    return NextResponse.json(mapped.body, { status: mapped.status });
   }
 }

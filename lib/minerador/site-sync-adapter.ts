@@ -96,8 +96,8 @@ function candidatePayload(candidate: SiteKeywordCandidate, workspace: BrandSiteW
   };
 }
 
-export async function loadMineradorSiteSyncSnapshot(brandId: string): Promise<MineradorSiteSyncSnapshot> {
-  const result = await loadBrandSiteWorkspace(brandId);
+export async function loadMineradorSiteSyncSnapshot(actorUserId: string, brandId: string): Promise<MineradorSiteSyncSnapshot> {
+  const result = await loadBrandSiteWorkspace(actorUserId, brandId);
   if (result.parseError) throw new Error(`Catálogo Site/Sitemap inválido: ${result.parseError}`);
   const candidates = result.workspace.candidates
     .map(candidate => candidatePayload(candidate, result.workspace))

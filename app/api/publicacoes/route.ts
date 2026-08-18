@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireSessionProfile, authzErrorResponse, AuthzError } from "@/lib/server/authz";
+import { requireCanonicalSessionProfile, authzErrorResponse, AuthzError } from "@/lib/server/authz";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { OptimisticLockError, PersistenceUnavailableError } from "@/lib/server/editorial-db";
 import { PublicationProtectionError, PublicationRepository } from "@/lib/server/editorial-repositories";
@@ -9,7 +9,7 @@ import { applyPublicationAction, PublicationDomainError } from "@/lib/publicacoe
 
 export async function POST(request: NextRequest) {
   try {
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
     const input = PublicationActionRequestSchema.parse(await request.json());
     await assertEditorialPermission(profile, input.brandId, "publicacoes", input.action === "publish" ? "publish" : input.action === "record_export" ? "export" : "edit");
     const repository = new PublicationRepository();

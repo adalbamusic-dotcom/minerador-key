@@ -32,7 +32,7 @@ export function adaptLegacyBrand(snapshot: EditorialSnapshot) {
 export function adaptLegacyKeyword(keyword: EditorialSnapshot["keywords"][number]): LegacyKeywordView {
   const semantic = keyword.analise_semantica;
   const fields = {
-    intent: keyword.intent ? { value: keyword.intent, available: true, sourcePath: "keywords_kgr.intent" } : read(semantic, ["intencao_principal", "intencao"]),
+    intent: keyword.intent ? { value: keyword.intent, available: true, sourcePath: "minerador_keywords.intent" } : read(semantic, ["intencao_principal", "intencao"]),
     centralEntity: read(semantic, ["entidade_central", "entidade"]),
     audience: read(semantic, ["publico", "publico_alvo"]),
     perceivedProblem: read(semantic, ["problema_percebido", "problema"]),

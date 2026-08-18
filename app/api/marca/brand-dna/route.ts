@@ -4,7 +4,7 @@ import { VersionStatusEventSchema, VersionedBrandDNASchema } from "@/lib/arquite
 import { effectiveBrandDnaVersionId, createBrandDnaVersion } from "@/lib/marca/domain";
 import { BrandDnaSaveRequestSchema } from "@/lib/marca/contracts";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
-import { authzErrorResponse, requireSessionProfile } from "@/lib/server/authz";
+import { authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { getOperationalClient, mapPersistenceError, PersistenceUnavailableError } from "@/lib/server/editorial-db";
 
 const BrandIdSchema = z.string().uuid();
@@ -31,7 +31,7 @@ async function listBrandDna(brandId: string) {
 
 export async function GET(request: NextRequest) {
   try {
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
     const brandId = BrandIdSchema.parse(request.nextUrl.searchParams.get("brandId"));
     await assertEditorialPermission(profile, brandId, "marca", "view");
     return NextResponse.json({ ...(await listBrandDna(brandId)), persistenceMode: "server" });
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
     const input = BrandDnaSaveRequestSchema.parse(await request.json());
     await assertEditorialPermission(profile, input.brandId, "marca", input.action === "approve" ? "approve" : "edit");
     const client = getOperationalClient();

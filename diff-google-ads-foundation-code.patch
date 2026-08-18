@@ -1,0 +1,802 @@
+﻿diff --git a/.env.example b/.env.example
+index 62120b9765f3c8e400f317bf45ec3532712d3df6..fbde0ea7ffad88f6f81942ba7c92bed68c81dd15 100644
+--- a/.env.example
++++ b/.env.example
+@@ -22,8 +22,17 @@ OPENROUTER_MODEL=deepseek/deepseek-chat
+ # Keyword volume providers
+ KEYWORDS_EVERYWHERE_API_KEY=fake-keywords-everywhere-api-key
+ RAPIDAPI_KEY=fake-rapidapi-key
+-RAPIDAPI_HOST=seo-keyword-research8.p.rapidapi.com
+-RAPIDAPI_URL=https://seo-keyword-research8.p.rapidapi.com/keyword-research
++RAPIDAPI_HOST=seo-keyword-research-tool1.p.rapidapi.com
++RAPIDAPI_URL=https://seo-keyword-research-tool1.p.rapidapi.com/global-volume
++
++# Google Ads server-only foundation. Never prefix these variables with NEXT_PUBLIC_.
++GOOGLE_ADS_DEVELOPER_TOKEN=fake-google-ads-developer-token
++GOOGLE_ADS_CLIENT_ID=fake-google-ads-client-id.apps.googleusercontent.com
++GOOGLE_ADS_CLIENT_SECRET=fake-google-ads-client-secret
++GOOGLE_ADS_REFRESH_TOKEN=fake-google-ads-refresh-token
++# MCC/login customer is optional and is not the advertiser customer.
++GOOGLE_ADS_LOGIN_CUSTOMER_ID=1234567890
++GOOGLE_ADS_API_VERSION=v25
+ 
+ # Test configuration. Real database tests remain disabled unless explicitly enabled.
+ TEST_API_BASE=http://localhost:3000
+diff --git a/lib/google/ads/account.ts b/lib/google/ads/account.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..51dd64f7b39dbeb1d7d2ca93843d5a9f42ae4efc
+--- /dev/null
++++ b/lib/google/ads/account.ts
+@@ -0,0 +1,25 @@
++import { normalizeGoogleAdsCustomerId } from "./config.ts";
++import type { GoogleAdsRestClient } from "./client.ts";
++import type { GoogleAdsAdvertiserAccount, GoogleAdsAdvertiserAccountInput } from "./contracts.ts";
++import { GoogleAdsError } from "./errors.ts";
++
++type CustomerSearchStreamResponse = Array<{ results?: Array<{ customer?: { id?: unknown; currencyCode?: unknown; timeZone?: unknown } }> }>;
++
++export async function resolveGoogleAdsAdvertiserAccount(
++  client: GoogleAdsRestClient,
++  input: GoogleAdsAdvertiserAccountInput,
++): Promise<GoogleAdsAdvertiserAccount> {
++  const customerId = normalizeGoogleAdsCustomerId(input.customerId);
++  const loginCustomerId = input.loginCustomerId ? normalizeGoogleAdsCustomerId(input.loginCustomerId) : null;
++  const response = await client.post<CustomerSearchStreamResponse>(
++    customerId,
++    "googleAds:searchStream",
++    { query: "SELECT customer.id, customer.currency_code, customer.time_zone FROM customer LIMIT 1" },
++    { loginCustomerId },
++  );
++  const customer = response.data.flatMap(chunk => chunk.results || []).map(result => result.customer).find(Boolean);
++  if (!customer || String(customer.id || "") !== customerId || typeof customer.currencyCode !== "string" || !customer.currencyCode || typeof customer.timeZone !== "string" || !customer.timeZone) {
++    throw new GoogleAdsError("google_ads_invalid_response", { status: 502, requestId: response.requestId });
++  }
++  return { customerId, loginCustomerId, currencyCode: customer.currencyCode, timeZone: customer.timeZone };
++}
+diff --git a/lib/google/ads/auth.ts b/lib/google/ads/auth.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..490257fd3d8b529e7a5a3ad0c71b09af2b4d4823
+--- /dev/null
++++ b/lib/google/ads/auth.ts
+@@ -0,0 +1,67 @@
++import { getGoogleAdsServerConfig, type GoogleAdsServerConfig } from "./config.ts";
++import { GoogleAdsError } from "./errors.ts";
++
++type AccessToken = { accessToken: string; expiresAt: number };
++type FetchLike = typeof fetch;
++
++let cachedToken: AccessToken | null = null;
++let tokenRefreshInFlight: Promise<AccessToken> | null = null;
++const TOKEN_EXPIRY_MARGIN_MS = 60_000;
++
++function usable(token: AccessToken | null, now: number) {
++  return Boolean(token && token.expiresAt - TOKEN_EXPIRY_MARGIN_MS > now);
++}
++
++async function refreshAccessToken(config: GoogleAdsServerConfig, fetchFn: FetchLike): Promise<AccessToken> {
++  const form = new URLSearchParams({
++    grant_type: "refresh_token",
++    client_id: config.clientId,
++    client_secret: config.clientSecret,
++    refresh_token: config.refreshToken,
++  });
++  let response: Response;
++  try {
++    response = await fetchFn("https://oauth2.googleapis.com/token", {
++      method: "POST",
++      headers: { "content-type": "application/x-www-form-urlencoded" },
++      body: form,
++      cache: "no-store",
++      signal: AbortSignal.timeout(15_000),
++    });
++  } catch (error) {
++    if (error instanceof DOMException && error.name === "TimeoutError") throw new GoogleAdsError("google_ads_timeout", { cause: error });
++    throw new GoogleAdsError("google_ads_oauth", { cause: error });
++  }
++
++  let payload: unknown = null;
++  try { payload = await response.json(); } catch { /* mapped below */ }
++  if (!response.ok || !payload || typeof payload !== "object") {
++    throw new GoogleAdsError("google_ads_oauth", { status: response.status || 502 });
++  }
++  const accessToken = (payload as { access_token?: unknown }).access_token;
++  const expiresIn = (payload as { expires_in?: unknown }).expires_in;
++  if (typeof accessToken !== "string" || !accessToken || typeof expiresIn !== "number" || !Number.isFinite(expiresIn) || expiresIn <= 0) {
++    throw new GoogleAdsError("google_ads_oauth", { status: 502 });
++  }
++  return { accessToken, expiresAt: Date.now() + expiresIn * 1_000 };
++}
++
++export async function getGoogleAdsAccessToken(options: { config?: GoogleAdsServerConfig; fetchFn?: FetchLike; now?: () => number } = {}) {
++  const now = options.now || Date.now;
++  if (usable(cachedToken, now())) return cachedToken!.accessToken;
++  if (!tokenRefreshInFlight) {
++    const config = options.config || getGoogleAdsServerConfig();
++    tokenRefreshInFlight = refreshAccessToken(config, options.fetchFn || fetch)
++      .then((token) => {
++        cachedToken = token;
++        return token;
++      })
++      .finally(() => { tokenRefreshInFlight = null; });
++  }
++  return (await tokenRefreshInFlight).accessToken;
++}
++
++export function resetGoogleAdsAccessTokenCacheForTests() {
++  cachedToken = null;
++  tokenRefreshInFlight = null;
++}
+diff --git a/lib/google/ads/client.ts b/lib/google/ads/client.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..634861075a6eb1d6bbdcba557e0b85342cb13a83
+--- /dev/null
++++ b/lib/google/ads/client.ts
+@@ -0,0 +1,72 @@
++import { getGoogleAdsAccessToken } from "./auth.ts";
++import { normalizeGoogleAdsCustomerId, type GoogleAdsServerConfig } from "./config.ts";
++import { GoogleAdsError } from "./errors.ts";
++
++type FetchLike = typeof fetch;
++
++export type GoogleAdsRestClient = {
++  post<T>(customerId: string, path: string, body: unknown, options?: { loginCustomerId?: string | null }): Promise<{ data: T; requestId: string | null }>;
++};
++
++function responseErrorCode(status: number, payload: unknown) {
++  const providerStatus = payload && typeof payload === "object" && "error" in payload
++    ? (payload as { error?: { status?: unknown } }).error?.status
++    : null;
++  if (providerStatus === "RESOURCE_EXHAUSTED") return "google_ads_quota" as const;
++  if (status === 429) return "google_ads_rate_limited" as const;
++  if (status === 401 || providerStatus === "UNAUTHENTICATED") return "google_ads_oauth" as const;
++  if (status === 403 && providerStatus === "PERMISSION_DENIED") return "google_ads_account_not_authorized" as const;
++  if (status === 403) return "google_ads_developer_token" as const;
++  if (status === 400 || providerStatus === "INVALID_ARGUMENT") return "google_ads_invalid_request" as const;
++  return "google_ads_provider_error" as const;
++}
++
++export function createGoogleAdsRestClient(options: {
++  config: GoogleAdsServerConfig;
++  fetchFn?: FetchLike;
++  getAccessToken?: () => Promise<string>;
++}): GoogleAdsRestClient {
++  const fetchFn = options.fetchFn || fetch;
++  const getAccessToken = options.getAccessToken || (() => getGoogleAdsAccessToken({ config: options.config, fetchFn }));
++
++  return {
++    async post<T>(
++      rawCustomerId: string,
++      path: string,
++      body: unknown,
++      requestOptions: { loginCustomerId?: string | null } = {},
++    ) {
++      const customerId = normalizeGoogleAdsCustomerId(rawCustomerId);
++      const loginCustomerId = requestOptions.loginCustomerId === undefined
++        ? options.config.loginCustomerId
++        : requestOptions.loginCustomerId;
++      const headers: Record<string, string> = {
++        authorization: `Bearer ${await getAccessToken()}`,
++        "developer-token": options.config.developerToken,
++        "content-type": "application/json",
++      };
++      if (loginCustomerId) headers["login-customer-id"] = normalizeGoogleAdsCustomerId(loginCustomerId);
++
++      let response: Response;
++      try {
++        response = await fetchFn(`https://googleads.googleapis.com/${options.config.apiVersion}/customers/${customerId}/${path.replace(/^\/+/, "")}`, {
++          method: "POST",
++          headers,
++          body: JSON.stringify(body),
++          cache: "no-store",
++          signal: AbortSignal.timeout(15_000),
++        });
++      } catch (error) {
++        if (error instanceof DOMException && error.name === "TimeoutError") throw new GoogleAdsError("google_ads_timeout", { cause: error });
++        throw new GoogleAdsError("google_ads_provider_error", { cause: error });
++      }
++
++      const requestId = response.headers.get("request-id") || response.headers.get("google-ads-request-id");
++      let payload: unknown = null;
++      try { payload = await response.json(); } catch { /* mapped below */ }
++      if (!response.ok) throw new GoogleAdsError(responseErrorCode(response.status, payload), { status: response.status, requestId });
++      if (!payload || typeof payload !== "object") throw new GoogleAdsError("google_ads_invalid_response", { status: 502, requestId });
++      return { data: payload as T, requestId };
++    },
++  };
++}
+diff --git a/lib/google/ads/config.ts b/lib/google/ads/config.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..dce0885bc256820a7008a9334a01e2f4163c56d8
+--- /dev/null
++++ b/lib/google/ads/config.ts
+@@ -0,0 +1,48 @@
++import { GoogleAdsError } from "./errors.ts";
++
++export type GoogleAdsServerConfig = {
++  developerToken: string;
++  clientId: string;
++  clientSecret: string;
++  refreshToken: string;
++  loginCustomerId: string | null;
++  apiVersion: string;
++};
++
++export type GoogleAdsEnvironment = Record<string, string | undefined>;
++
++const CUSTOMER_ID_PATTERN = /^\d{10}$/;
++const API_VERSION_PATTERN = /^v\d+$/;
++
++export function normalizeGoogleAdsCustomerId(value: string): string {
++  const normalized = value.replace(/-/g, "").trim();
++  if (!CUSTOMER_ID_PATTERN.test(normalized)) throw new GoogleAdsError("google_ads_invalid_customer_id", { status: 400 });
++  return normalized;
++}
++
++export function getGoogleAdsServerConfig(env: GoogleAdsEnvironment = process.env): GoogleAdsServerConfig {
++  const required = [
++    ["GOOGLE_ADS_DEVELOPER_TOKEN", env.GOOGLE_ADS_DEVELOPER_TOKEN],
++    ["GOOGLE_ADS_CLIENT_ID", env.GOOGLE_ADS_CLIENT_ID],
++    ["GOOGLE_ADS_CLIENT_SECRET", env.GOOGLE_ADS_CLIENT_SECRET],
++    ["GOOGLE_ADS_REFRESH_TOKEN", env.GOOGLE_ADS_REFRESH_TOKEN],
++    ["GOOGLE_ADS_API_VERSION", env.GOOGLE_ADS_API_VERSION],
++  ] as const;
++  if (required.some(([, value]) => !value?.trim())) throw new GoogleAdsError("google_ads_configuration", { status: 503 });
++
++  const apiVersion = env.GOOGLE_ADS_API_VERSION!.trim();
++  if (!API_VERSION_PATTERN.test(apiVersion)) throw new GoogleAdsError("google_ads_configuration", { status: 503 });
++
++  const loginCustomerId = env.GOOGLE_ADS_LOGIN_CUSTOMER_ID?.trim()
++    ? normalizeGoogleAdsCustomerId(env.GOOGLE_ADS_LOGIN_CUSTOMER_ID)
++    : null;
++
++  return {
++    developerToken: env.GOOGLE_ADS_DEVELOPER_TOKEN!.trim(),
++    clientId: env.GOOGLE_ADS_CLIENT_ID!.trim(),
++    clientSecret: env.GOOGLE_ADS_CLIENT_SECRET!.trim(),
++    refreshToken: env.GOOGLE_ADS_REFRESH_TOKEN!.trim(),
++    loginCustomerId,
++    apiVersion,
++  };
++}
+diff --git a/lib/google/ads/contracts.ts b/lib/google/ads/contracts.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..21b15e996be553bde3677e77bf70f99355dae90c
+--- /dev/null
++++ b/lib/google/ads/contracts.ts
+@@ -0,0 +1,83 @@
++import { z } from "zod";
++
++export const GoogleAdsTargetingSchema = z.object({
++  language: z.string().min(1),
++  geoTargetConstants: z.array(z.string().min(1)).default([]),
++  keywordPlanNetwork: z.enum(["GOOGLE_SEARCH", "GOOGLE_SEARCH_AND_PARTNERS"]),
++  includeAdultKeywords: z.boolean().default(false),
++});
++
++const CustomerIdSchema = z.string().min(1);
++const SeedKeywordsSchema = z.array(z.string().trim().min(1)).min(1).max(20);
++
++export const GoogleAdsAdvertiserAccountInputSchema = z.object({
++  customerId: CustomerIdSchema,
++  loginCustomerId: CustomerIdSchema.optional(),
++});
++
++export const GoogleAdsKeywordIdeasInputSchema = z.object({
++  account: GoogleAdsAdvertiserAccountInputSchema,
++  targeting: GoogleAdsTargetingSchema,
++  pageToken: z.string().min(1).optional(),
++  pageSize: z.number().int().min(1).max(10_000).optional(),
++  seed: z.union([
++    z.object({ kind: z.literal("keyword"), keywords: SeedKeywordsSchema }),
++    z.object({ kind: z.literal("url"), url: z.string().url() }),
++    z.object({ kind: z.literal("keyword_and_url"), keywords: SeedKeywordsSchema, url: z.string().url() }),
++    z.object({ kind: z.literal("site"), site: z.string().min(1) }),
++  ]),
++});
++
++export const GoogleAdsHistoricalMetricsInputSchema = z.object({
++  account: GoogleAdsAdvertiserAccountInputSchema,
++  targeting: GoogleAdsTargetingSchema,
++  keywords: SeedKeywordsSchema,
++  includeAverageCpc: z.boolean().default(false),
++});
++
++export type GoogleAdsTargeting = z.infer<typeof GoogleAdsTargetingSchema>;
++export type GoogleAdsAdvertiserAccountInput = z.infer<typeof GoogleAdsAdvertiserAccountInputSchema>;
++export type GoogleAdsKeywordIdeasInput = z.infer<typeof GoogleAdsKeywordIdeasInputSchema>;
++export type GoogleAdsHistoricalMetricsInput = z.infer<typeof GoogleAdsHistoricalMetricsInputSchema>;
++
++export type GoogleAdsAdvertiserAccount = {
++  customerId: string;
++  loginCustomerId: string | null;
++  currencyCode: string;
++  timeZone: string;
++};
++
++export type GoogleAdsMonthlySearchVolume = { year: number; month: string; searches: number | null };
++
++export type GoogleAdsKeywordMetrics = {
++  averageMonthlySearches: number | null;
++  monthlySearchVolumes: GoogleAdsMonthlySearchVolume[];
++  competition: string | null;
++  competitionIndex: number | null;
++  lowTopOfPageBidMicros: string | null;
++  highTopOfPageBidMicros: string | null;
++  averageCpcMicros: string | null;
++};
++
++export type GoogleAdsNormalizedKeyword = GoogleAdsKeywordMetrics & {
++  keyword: string;
++  normalizedKeyword: string;
++  currencyCode: string;
++  timeZone: string;
++  targeting: GoogleAdsTargeting;
++  customerId: string;
++  provider: "google_ads";
++  providerVersion: string;
++  measuredAt: string;
++};
++
++export type GoogleAdsKeywordIdeasPage = {
++  ideas: GoogleAdsNormalizedKeyword[];
++  nextPageToken: string | null;
++  requestId: string | null;
++};
++
++export type GoogleAdsHistoricalMetricsResult = {
++  metrics: GoogleAdsNormalizedKeyword[];
++  requestId: string | null;
++};
+diff --git a/lib/google/ads/errors.ts b/lib/google/ads/errors.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6a6683deee7925f5a60f5a83083173c5893e3c18
+--- /dev/null
++++ b/lib/google/ads/errors.ts
+@@ -0,0 +1,51 @@
++export type GoogleAdsErrorCode =
++  | "google_ads_configuration"
++  | "google_ads_oauth"
++  | "google_ads_account_not_authorized"
++  | "google_ads_invalid_customer_id"
++  | "google_ads_developer_token"
++  | "google_ads_quota"
++  | "google_ads_rate_limited"
++  | "google_ads_timeout"
++  | "google_ads_invalid_request"
++  | "google_ads_invalid_response"
++  | "google_ads_provider_error";
++
++const messages: Record<GoogleAdsErrorCode, string> = {
++  google_ads_configuration: "A integra├º├úo Google Ads n├úo est├í configurada para esta opera├º├úo.",
++  google_ads_oauth: "N├úo foi poss├¡vel autorizar a integra├º├úo Google Ads.",
++  google_ads_account_not_authorized: "A conta anunciante n├úo est├í autorizada para esta opera├º├úo.",
++  google_ads_invalid_customer_id: "A conta anunciante informada ├® inv├ílida.",
++  google_ads_developer_token: "O acesso da integra├º├úo Google Ads foi recusado.",
++  google_ads_quota: "A quota da integra├º├úo Google Ads foi atingida.",
++  google_ads_rate_limited: "A integra├º├úo Google Ads limitou temporariamente esta opera├º├úo.",
++  google_ads_timeout: "A integra├º├úo Google Ads demorou mais do que o esperado.",
++  google_ads_invalid_request: "A solicita├º├úo para Google Ads ├® inv├ílida.",
++  google_ads_invalid_response: "Google Ads retornou uma resposta incompat├¡vel.",
++  google_ads_provider_error: "Google Ads n├úo concluiu a opera├º├úo.",
++};
++
++export class GoogleAdsError extends Error {
++  readonly code: GoogleAdsErrorCode;
++  readonly status: number;
++  readonly requestId: string | null;
++
++  constructor(code: GoogleAdsErrorCode, options: { status?: number; requestId?: string | null; cause?: unknown } = {}) {
++    super(messages[code], { cause: options.cause });
++    this.name = "GoogleAdsError";
++    this.code = code;
++    this.status = options.status ?? 500;
++    this.requestId = options.requestId ?? null;
++  }
++}
++
++export function toGoogleAdsError(error: unknown): GoogleAdsError {
++  if (error instanceof GoogleAdsError) return error;
++  if (error instanceof DOMException && error.name === "TimeoutError") return new GoogleAdsError("google_ads_timeout", { cause: error });
++  return new GoogleAdsError("google_ads_provider_error", { cause: error });
++}
++
++export function googleAdsSafeError(error: unknown) {
++  const normalized = toGoogleAdsError(error);
++  return { code: normalized.code, message: normalized.message, requestId: normalized.requestId };
++}
+diff --git a/lib/google/ads/historical-metrics.ts b/lib/google/ads/historical-metrics.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..87d4d48ed78043cae5ceb9d14b95d83f06d6f8ff
+--- /dev/null
++++ b/lib/google/ads/historical-metrics.ts
+@@ -0,0 +1,38 @@
++import type { GoogleAdsRestClient } from "./client.ts";
++import type { GoogleAdsAdvertiserAccount, GoogleAdsHistoricalMetricsInput, GoogleAdsHistoricalMetricsResult } from "./contracts.ts";
++import { GoogleAdsHistoricalMetricsInputSchema } from "./contracts.ts";
++import { GoogleAdsError } from "./errors.ts";
++import { normalizeGoogleAdsKeywordResult } from "./normalizers.ts";
++
++type HistoricalMetricsResponse = { results?: Array<{ text?: unknown; keywordMetrics?: unknown }> };
++
++export async function generateGoogleAdsHistoricalMetrics(
++  client: GoogleAdsRestClient,
++  input: GoogleAdsHistoricalMetricsInput,
++  account: GoogleAdsAdvertiserAccount,
++  providerVersion: string,
++): Promise<GoogleAdsHistoricalMetricsResult> {
++  const parsed = GoogleAdsHistoricalMetricsInputSchema.safeParse(input);
++  if (!parsed.success) throw new GoogleAdsError("google_ads_invalid_request", { status: 400 });
++  const value = parsed.data;
++  const response = await client.post<HistoricalMetricsResponse>(value.account.customerId, "generateKeywordHistoricalMetrics", {
++    keywords: value.keywords,
++    language: value.targeting.language,
++    geoTargetConstants: value.targeting.geoTargetConstants,
++    keywordPlanNetwork: value.targeting.keywordPlanNetwork,
++    // A representa├º├úo JSON REST preserva a inten├º├úo do campo
++    // historical_metrics_options.include_average_cpc do contrato Google Ads.
++    ...(value.includeAverageCpc ? { historicalMetricsOptions: { includeAverageCpc: true } } : {}),
++  }, { loginCustomerId: account.loginCustomerId });
++  if (!Array.isArray(response.data.results)) throw new GoogleAdsError("google_ads_invalid_response", { status: 502, requestId: response.requestId });
++  return {
++    metrics: response.data.results.map(result => normalizeGoogleAdsKeywordResult({
++      keyword: result.text,
++      metrics: result.keywordMetrics,
++      account,
++      targeting: value.targeting,
++      providerVersion,
++    })),
++    requestId: response.requestId,
++  };
++}
+diff --git a/lib/google/ads/keyword-ideas.ts b/lib/google/ads/keyword-ideas.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b1706f2cb849c1fa987390c53098e1adc5f3eb88
+--- /dev/null
++++ b/lib/google/ads/keyword-ideas.ts
+@@ -0,0 +1,46 @@
++import type { GoogleAdsRestClient } from "./client.ts";
++import type { GoogleAdsAdvertiserAccount, GoogleAdsKeywordIdeasInput, GoogleAdsKeywordIdeasPage } from "./contracts.ts";
++import { GoogleAdsKeywordIdeasInputSchema } from "./contracts.ts";
++import { GoogleAdsError } from "./errors.ts";
++import { normalizeGoogleAdsKeywordResult } from "./normalizers.ts";
++
++type IdeasResponse = { results?: Array<{ text?: unknown; keywordIdeaMetrics?: unknown }>; nextPageToken?: unknown };
++
++function seedBody(seed: GoogleAdsKeywordIdeasInput["seed"]) {
++  if (seed.kind === "keyword") return { keywordSeed: { keywords: seed.keywords } };
++  if (seed.kind === "url") return { urlSeed: { url: seed.url } };
++  if (seed.kind === "keyword_and_url") return { keywordAndUrlSeed: { keywords: seed.keywords, url: seed.url } };
++  return { siteSeed: { site: seed.site } };
++}
++
++export async function generateGoogleAdsKeywordIdeas(
++  client: GoogleAdsRestClient,
++  input: GoogleAdsKeywordIdeasInput,
++  account: GoogleAdsAdvertiserAccount,
++  providerVersion: string,
++): Promise<GoogleAdsKeywordIdeasPage> {
++  const parsed = GoogleAdsKeywordIdeasInputSchema.safeParse(input);
++  if (!parsed.success) throw new GoogleAdsError("google_ads_invalid_request", { status: 400 });
++  const value = parsed.data;
++  const response = await client.post<IdeasResponse>(value.account.customerId, "generateKeywordIdeas", {
++    ...seedBody(value.seed),
++    language: value.targeting.language,
++    geoTargetConstants: value.targeting.geoTargetConstants,
++    keywordPlanNetwork: value.targeting.keywordPlanNetwork,
++    includeAdultKeywords: value.targeting.includeAdultKeywords,
++    ...(value.pageToken ? { pageToken: value.pageToken } : {}),
++    ...(value.pageSize ? { pageSize: value.pageSize } : {}),
++  }, { loginCustomerId: account.loginCustomerId });
++  if (!Array.isArray(response.data.results)) throw new GoogleAdsError("google_ads_invalid_response", { status: 502, requestId: response.requestId });
++  return {
++    ideas: response.data.results.map(result => normalizeGoogleAdsKeywordResult({
++      keyword: result.text,
++      metrics: result.keywordIdeaMetrics,
++      account,
++      targeting: value.targeting,
++      providerVersion,
++    })),
++    nextPageToken: typeof response.data.nextPageToken === "string" && response.data.nextPageToken ? response.data.nextPageToken : null,
++    requestId: response.requestId,
++  };
++}
+diff --git a/lib/google/ads/normalizers.ts b/lib/google/ads/normalizers.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0ae33ccc7ec45963d628b92230fdcd45dd9539de
+--- /dev/null
++++ b/lib/google/ads/normalizers.ts
+@@ -0,0 +1,69 @@
++import type {
++  GoogleAdsAdvertiserAccount,
++  GoogleAdsKeywordMetrics,
++  GoogleAdsMonthlySearchVolume,
++  GoogleAdsNormalizedKeyword,
++  GoogleAdsTargeting,
++} from "./contracts.ts";
++import { GoogleAdsError } from "./errors.ts";
++
++function finiteInteger(value: unknown): number | null {
++  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) ? value : null;
++}
++
++function micros(value: unknown): string | null {
++  if (typeof value === "string" && /^-?\d+$/.test(value)) return value;
++  if (typeof value === "number" && Number.isSafeInteger(value)) return String(value);
++  return null;
++}
++
++export function normalizeGoogleAdsKeyword(value: string) {
++  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLocaleLowerCase("pt-BR");
++}
++
++export function normalizeGoogleAdsKeywordMetrics(value: unknown): GoogleAdsKeywordMetrics {
++  if (!value || typeof value !== "object" || Array.isArray(value)) throw new GoogleAdsError("google_ads_invalid_response", { status: 502 });
++  const record = value as Record<string, unknown>;
++  const monthlySearchVolumes = Array.isArray(record.monthlySearchVolumes)
++    ? record.monthlySearchVolumes.map((entry): GoogleAdsMonthlySearchVolume => {
++      if (!entry || typeof entry !== "object") throw new GoogleAdsError("google_ads_invalid_response", { status: 502 });
++      const volume = entry as Record<string, unknown>;
++      const year = finiteInteger(volume.year);
++      const month = typeof volume.month === "string" ? volume.month : null;
++      if (year === null || !month) throw new GoogleAdsError("google_ads_invalid_response", { status: 502 });
++      return { year, month, searches: finiteInteger(volume.monthlySearches) };
++    })
++    : [];
++  return {
++    averageMonthlySearches: finiteInteger(record.avgMonthlySearches),
++    monthlySearchVolumes,
++    competition: typeof record.competition === "string" ? record.competition : null,
++    competitionIndex: finiteInteger(record.competitionIndex),
++    lowTopOfPageBidMicros: micros(record.lowTopOfPageBidMicros),
++    highTopOfPageBidMicros: micros(record.highTopOfPageBidMicros),
++    averageCpcMicros: micros(record.averageCpcMicros),
++  };
++}
++
++export function normalizeGoogleAdsKeywordResult(input: {
++  keyword: unknown;
++  metrics: unknown;
++  account: GoogleAdsAdvertiserAccount;
++  targeting: GoogleAdsTargeting;
++  providerVersion: string;
++  measuredAt?: string;
++}): GoogleAdsNormalizedKeyword {
++  if (typeof input.keyword !== "string" || !input.keyword.trim()) throw new GoogleAdsError("google_ads_invalid_response", { status: 502 });
++  return {
++    keyword: input.keyword,
++    normalizedKeyword: normalizeGoogleAdsKeyword(input.keyword),
++    ...normalizeGoogleAdsKeywordMetrics(input.metrics),
++    currencyCode: input.account.currencyCode,
++    timeZone: input.account.timeZone,
++    targeting: input.targeting,
++    customerId: input.account.customerId,
++    provider: "google_ads",
++    providerVersion: input.providerVersion,
++    measuredAt: input.measuredAt || new Date().toISOString(),
++  };
++}
+diff --git a/tests/google-ads-foundation.test.mts b/tests/google-ads-foundation.test.mts
+new file mode 100644
+index 0000000000000000000000000000000000000000..98bd7a11927cef36f9bca47894b000d846561587
+--- /dev/null
++++ b/tests/google-ads-foundation.test.mts
+@@ -0,0 +1,152 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { getGoogleAdsAccessToken, resetGoogleAdsAccessTokenCacheForTests } from "../lib/google/ads/auth.ts";
++import { createGoogleAdsRestClient } from "../lib/google/ads/client.ts";
++import { getGoogleAdsServerConfig, normalizeGoogleAdsCustomerId } from "../lib/google/ads/config.ts";
++import { GoogleAdsError, googleAdsSafeError } from "../lib/google/ads/errors.ts";
++import { generateGoogleAdsHistoricalMetrics } from "../lib/google/ads/historical-metrics.ts";
++import { generateGoogleAdsKeywordIdeas } from "../lib/google/ads/keyword-ideas.ts";
++import { normalizeGoogleAdsKeywordResult } from "../lib/google/ads/normalizers.ts";
++import { resolveGoogleAdsAdvertiserAccount } from "../lib/google/ads/account.ts";
++import {
++  googleAdsAccountErrorFixture,
++  googleAdsAccountFixture,
++  googleAdsHistoricalMetricsFixture,
++  googleAdsHistoricalMetricsWithoutCpcFixture,
++  googleAdsKeywordIdeasKeywordSeedFixture,
++  googleAdsKeywordIdeasUrlSeedFixture,
++  googleAdsOauthErrorFixture,
++  googleAdsQuotaErrorFixture,
++} from "./google-ads.fixture.ts";
++
++const config = getGoogleAdsServerConfig({
++  GOOGLE_ADS_DEVELOPER_TOKEN: "test-developer-token",
++  GOOGLE_ADS_CLIENT_ID: "test-client-id",
++  GOOGLE_ADS_CLIENT_SECRET: "test-client-secret",
++  GOOGLE_ADS_REFRESH_TOKEN: "test-refresh-token",
++  GOOGLE_ADS_LOGIN_CUSTOMER_ID: "111-222-3333",
++  GOOGLE_ADS_API_VERSION: "v25",
++});
++const targeting = { language: "languageConstants/1014", geoTargetConstants: ["geoTargetConstants/2076"], keywordPlanNetwork: "GOOGLE_SEARCH" as const, includeAdultKeywords: false };
++const account = { customerId: "1234567890", loginCustomerId: "1112223333", currencyCode: "BRL", timeZone: "America/Sao_Paulo" };
++
++function response(payload: unknown, status = 200, headers: Record<string, string> = {}) {
++  return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json", ...headers } });
++}
++
++test("configura├º├úo exige vers├úo expl├¡cita e n├úo permite customerId inv├ílido", () => {
++  assert.equal(config.apiVersion, "v25");
++  assert.equal(normalizeGoogleAdsCustomerId("123-456-7890"), "1234567890");
++  assert.throws(() => normalizeGoogleAdsCustomerId("adalba"), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_invalid_customer_id");
++  assert.throws(() => getGoogleAdsServerConfig({
++    GOOGLE_ADS_DEVELOPER_TOKEN: "test-developer-token",
++    GOOGLE_ADS_CLIENT_ID: "test-client-id",
++    GOOGLE_ADS_CLIENT_SECRET: "test-client-secret",
++    GOOGLE_ADS_REFRESH_TOKEN: "test-refresh-token",
++    GOOGLE_ADS_API_VERSION: "latest",
++  }), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_configuration");
++});
++
++test("OAuth usa refresh token somente no servidor, reutiliza cache curto e sanitiza falha", async () => {
++  resetGoogleAdsAccessTokenCacheForTests();
++  let calls = 0;
++  const fetchFn = (async (url: string, init?: RequestInit) => {
++    calls += 1;
++    assert.equal(url, "https://oauth2.googleapis.com/token");
++    assert.equal(init?.method, "POST");
++    assert.match(String(init?.body), /grant_type=refresh_token/);
++    return response({ access_token: "short-lived-access-token", expires_in: 3600 });
++  }) as typeof fetch;
++  assert.equal(await getGoogleAdsAccessToken({ config, fetchFn }), "short-lived-access-token");
++  assert.equal(await getGoogleAdsAccessToken({ config, fetchFn }), "short-lived-access-token");
++  assert.equal(calls, 1);
++
++  resetGoogleAdsAccessTokenCacheForTests();
++  await assert.rejects(
++    () => getGoogleAdsAccessToken({ config, fetchFn: (async () => response(googleAdsOauthErrorFixture, 400)) as typeof fetch }),
++    (error: unknown) => googleAdsSafeError(error).code === "google_ads_oauth" && !googleAdsSafeError(error).message.includes("refresh"),
++  );
++});
++
++test("cliente versiona URL, separa MCC/customer e n├úo inclui segredos em erro", async () => {
++  let requestedUrl = "";
++  let requestHeaders: Record<string, string | null> = {};
++  const client = createGoogleAdsRestClient({
++    config,
++    getAccessToken: async () => "access-token",
++    fetchFn: (async (url: string, init?: RequestInit) => {
++      requestedUrl = url;
++      const headers = new Headers(init?.headers);
++      requestHeaders = {
++        loginCustomerId: headers.get("login-customer-id"),
++        developerToken: headers.get("developer-token"),
++      };
++      return response({ ok: true }, 200, { "request-id": "google-request-1" });
++    }) as typeof fetch,
++  });
++  const result = await client.post("123-456-7890", "generateKeywordIdeas", { any: true });
++  assert.equal(requestedUrl, "https://googleads.googleapis.com/v25/customers/1234567890/generateKeywordIdeas");
++  assert.equal(requestHeaders.loginCustomerId, "1112223333");
++  assert.equal(requestHeaders.developerToken, "test-developer-token");
++  assert.equal(result.requestId, "google-request-1");
++  assert.equal(googleAdsSafeError(new GoogleAdsError("google_ads_provider_error")).message.includes("token"), false);
++});
++
++test("conta anunciante recebe moeda e timezone somente da consulta Customer", async () => {
++  const calls: Array<{ url: string; body: unknown }> = [];
++  const client = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async (url: string, init?: RequestInit) => {
++    calls.push({ url, body: JSON.parse(String(init?.body)) });
++    return response(googleAdsAccountFixture);
++  }) as typeof fetch });
++  const resolved = await resolveGoogleAdsAdvertiserAccount(client, { customerId: "123-456-7890", loginCustomerId: "111-222-3333" });
++  assert.deepEqual(resolved, account);
++  const requestBody = calls[0].body as { query: string };
++  assert.match(requestBody.query, /customer\.currency_code/);
++  assert.match(requestBody.query, /customer\.time_zone/);
++});
++
++test("ideias suportam keyword e URL seed com targeting expl├¡cito e pagina├º├úo", async () => {
++  const bodies: unknown[] = [];
++  const client = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async (_url: string, init?: RequestInit) => {
++    const body = JSON.parse(String(init?.body));
++    bodies.push(body);
++    return response(bodies.length === 1 ? googleAdsKeywordIdeasKeywordSeedFixture : googleAdsKeywordIdeasUrlSeedFixture);
++  }) as typeof fetch });
++  const keywordResult = await generateGoogleAdsKeywordIdeas(client, { account: { customerId: account.customerId }, targeting, pageToken: "start", seed: { kind: "keyword", keywords: ["marketing para cl├¡nicas"] } }, account, "v25");
++  const urlResult = await generateGoogleAdsKeywordIdeas(client, { account: { customerId: account.customerId }, targeting, seed: { kind: "url", url: "https://adalbapro.com.br" } }, account, "v25");
++  assert.deepEqual((bodies[0] as { keywordSeed: unknown }).keywordSeed, { keywords: ["marketing para cl├¡nicas"] });
++  assert.equal((bodies[0] as { pageToken: string }).pageToken, "start");
++  assert.deepEqual((bodies[1] as { urlSeed: unknown }).urlSeed, { url: "https://adalbapro.com.br" });
++  assert.equal(keywordResult.ideas[0].averageMonthlySearches, 720);
++  assert.equal(keywordResult.nextPageToken, "next-page");
++  assert.equal(urlResult.ideas[0].currencyCode, "BRL");
++});
++
++test("m├®tricas hist├│ricas preservam 12 meses, micros, null e include_average_cpc", async () => {
++  const bodies: unknown[] = [];
++  const client = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async (_url: string, init?: RequestInit) => {
++    bodies.push(JSON.parse(String(init?.body)));
++    return response(bodies.length === 1 ? googleAdsHistoricalMetricsFixture : googleAdsHistoricalMetricsWithoutCpcFixture);
++  }) as typeof fetch });
++  const present = await generateGoogleAdsHistoricalMetrics(client, { account: { customerId: account.customerId }, targeting, keywords: ["marketing para cl├¡nicas"], includeAverageCpc: true }, account, "v25");
++  const absent = await generateGoogleAdsHistoricalMetrics(client, { account: { customerId: account.customerId }, targeting, keywords: ["keyword sem volume"], includeAverageCpc: false }, account, "v25");
++  assert.deepEqual((bodies[0] as { historicalMetricsOptions: unknown }).historicalMetricsOptions, { includeAverageCpc: true });
++  assert.equal("historicalMetricsOptions" in (bodies[1] as object), false);
++  assert.equal(present.metrics[0].monthlySearchVolumes.length, 12);
++  assert.equal(present.metrics[0].averageCpcMicros, "2200000");
++  assert.equal(present.metrics[0].providerVersion, "v25");
++  assert.equal(absent.metrics[0].averageMonthlySearches, null);
++  assert.equal(absent.metrics[0].averageCpcMicros, null);
++});
++
++test("erros de conta, quota, resposta malformada e timeout s├úo distintos", async () => {
++  const accountClient = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async () => response(googleAdsAccountErrorFixture, 403)) as typeof fetch });
++  await assert.rejects(() => accountClient.post("1234567890", "generateKeywordIdeas", {}), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_account_not_authorized");
++  const quotaClient = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async () => response(googleAdsQuotaErrorFixture, 429)) as typeof fetch });
++  await assert.rejects(() => quotaClient.post("1234567890", "generateKeywordIdeas", {}), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_quota");
++  const rateLimitedClient = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async () => response({ error: { status: "TOO_MANY_REQUESTS" } }, 429)) as typeof fetch });
++  await assert.rejects(() => rateLimitedClient.post("1234567890", "generateKeywordIdeas", {}), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_rate_limited");
++  assert.throws(() => normalizeGoogleAdsKeywordResult({ keyword: "teste", metrics: { monthlySearchVolumes: [{}] }, account, targeting, providerVersion: "v25" }), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_invalid_response");
++  const timeoutClient = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async () => { throw new DOMException("timeout", "TimeoutError"); }) as typeof fetch });
++  await assert.rejects(() => timeoutClient.post("1234567890", "generateKeywordIdeas", {}), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_timeout");
++});
+diff --git a/tests/google-ads.fixture.ts b/tests/google-ads.fixture.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a27151b88ea5bbf25f0420a9ec8369ed128da96d
+--- /dev/null
++++ b/tests/google-ads.fixture.ts
+@@ -0,0 +1,61 @@
++export const googleAdsAccountFixture = [{
++  results: [{ customer: { id: "1234567890", currencyCode: "BRL", timeZone: "America/Sao_Paulo" } }],
++}];
++
++export const googleAdsKeywordIdeasKeywordSeedFixture = {
++  results: [{
++    text: "marketing para cl├¡nicas",
++    keywordIdeaMetrics: {
++      avgMonthlySearches: 720,
++      monthlySearchVolumes: [{ year: 2026, month: "JULY", monthlySearches: 590 }],
++      competition: "MEDIUM",
++      competitionIndex: 42,
++      lowTopOfPageBidMicros: "1200000",
++      highTopOfPageBidMicros: "3500000",
++    },
++  }],
++  nextPageToken: "next-page",
++};
++
++export const googleAdsKeywordIdeasUrlSeedFixture = {
++  results: [{
++    text: "capta├º├úo de pacientes",
++    keywordIdeaMetrics: { avgMonthlySearches: 260, monthlySearchVolumes: [] },
++  }],
++};
++
++export const googleAdsHistoricalMetricsFixture = {
++  results: [{
++    text: "marketing para cl├¡nicas",
++    keywordMetrics: {
++      avgMonthlySearches: 720,
++      monthlySearchVolumes: [
++        { year: 2026, month: "JULY", monthlySearches: 590 },
++        { year: 2026, month: "JUNE", monthlySearches: 720 },
++        { year: 2026, month: "MAY", monthlySearches: 680 },
++        { year: 2026, month: "APRIL", monthlySearches: 700 },
++        { year: 2026, month: "MARCH", monthlySearches: 690 },
++        { year: 2026, month: "FEBRUARY", monthlySearches: 710 },
++        { year: 2026, month: "JANUARY", monthlySearches: 650 },
++        { year: 2025, month: "DECEMBER", monthlySearches: 620 },
++        { year: 2025, month: "NOVEMBER", monthlySearches: 610 },
++        { year: 2025, month: "OCTOBER", monthlySearches: 630 },
++        { year: 2025, month: "SEPTEMBER", monthlySearches: 640 },
++        { year: 2025, month: "AUGUST", monthlySearches: 600 },
++      ],
++      competition: "HIGH",
++      competitionIndex: 78,
++      lowTopOfPageBidMicros: "1500000",
++      highTopOfPageBidMicros: "4700000",
++      averageCpcMicros: "2200000",
++    },
++  }],
++};
++
++export const googleAdsHistoricalMetricsWithoutCpcFixture = {
++  results: [{ text: "keyword sem volume", keywordMetrics: { monthlySearchVolumes: [], competition: "UNSPECIFIED" } }],
++};
++
++export const googleAdsOauthErrorFixture = { error: "invalid_grant" };
++export const googleAdsAccountErrorFixture = { error: { status: "PERMISSION_DENIED" } };
++export const googleAdsQuotaErrorFixture = { error: { status: "RESOURCE_EXHAUSTED" } };

@@ -249,6 +249,7 @@ interface ReconcileInput {
   storedImportedKeywordIds: string[];
   articleDnasFromMemory: Record<string, VersionEnvelope<ArticleDNA>>;
   brandId: string;
+  actorUserId?: string;
 }
 
 interface ReconcileOutput {
@@ -274,7 +275,7 @@ export async function reconcileArchitectWorkspace(input: ReconcileInput): Promis
   const fromIndexedDbDnas = new Set<string>();
   if (fromLocalStorage.size === 0 && fromMemoryDnas.size === 0) {
     try {
-      const raw = await readBrowserArtifactReadOnly(architectArticleDnaRecoveryKey(input.brandId));
+      const raw = await readBrowserArtifactReadOnly(architectArticleDnaRecoveryKey(input.actorUserId || "anonymous", input.brandId));
       if (raw) {
         const recovered = ArchitectArticleDnaRecoverySchema.parse(raw);
         for (const version of Object.values(recovered.versions)) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { authzErrorResponse, requireSessionProfile, AuthzError } from "@/lib/server/authz";
+import { authzErrorResponse, requireCanonicalSessionProfile, AuthzError } from "@/lib/server/authz";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { RedatorSectionRequestSchema, RedatorSectionProposalSchema } from "@/lib/redator/contracts";
@@ -13,7 +13,7 @@ const ProviderSectionSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
     const input = RedatorSectionRequestSchema.parse(await request.json());
     await assertEditorialPermission(profile, input.brandId, "redator", "edit");
     const section = input.document.blocks.find(block => block.id === input.sectionId && block.type === "heading");
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ proposal });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Pedido de escrita inválido.", details: error.issues }, { status: 400 });
-    if (error instanceof StructuredAIError) return NextResponse.json({ error: error.message, issues: error.issues }, { status: error.status });
+    if (error instanceof StructuredAIError) return NextResponse.json({ error: error.message, code: error.code, issues: error.issues }, { status: error.status });
     const mapped = authzErrorResponse(error); return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 }

@@ -6,6 +6,7 @@ import { buildArticleIntentProfile, normalizeSearchIntent } from "./intent-profi
 import { calculateArticleHierarchyStrategy, calculateArticleKeywordStrategy, calculateArticleStrategicPurpose, calculateArticleVolumeStrategy, deriveArticleKgrIdentity } from "./strategic-context.ts";
 import { resolveArticleSerpStrategy, resolveEditorialUnitPurpose, suggestEditorialUnitClassification } from "./unit-strategy.ts";
 import { assertArticleFormation } from "./article-formation-rules.ts";
+import { normalizeKeywordDemandEvidence, sanitizeKeywordProvenanceSnapshot } from "./demand-evidence.ts";
 
 const text = (value: unknown, fallback: string) => typeof value === "string" && value.trim() ? value.trim() : fallback;
 const bool = (value: unknown) => value === true || value === "sim" || value === "true";
@@ -49,6 +50,7 @@ export function legacyKeywordDnaPayload(keyword: ArchitectKeyword): KeywordDNA {
     kgrScore: typeof keyword.kgr_score === "number" ? keyword.kgr_score : null,
     stampOrigin: semantic.dna_origem === "logico_deterministico" ? "system" : "import", confidence: confidence(semantic.dna_confianca), humanConfirmed: semantic.dna_revisao_humana === "aprovado",
     ...siteEvidence,
+    demandEvidence: normalizeKeywordDemandEvidence(keyword),
     ...(() => {
       const context = adaptKeywordIdentityContext(keyword);
       return { ...(context.keywordUrlRelation ? { keywordUrlRelation: context.keywordUrlRelation } : {}), ...(context.architectureStatus ? { architectureStatus: context.architectureStatus } : {}), ...(context.kgrIdentity ? { kgrIdentity: context.kgrIdentity } : {}), primaryKeywordPolicy: context.primaryKeywordPolicy, primaryKeywordPolicyContext: context.primaryKeywordPolicyContext };
@@ -100,8 +102,9 @@ export function articleKeywordReference(keyword: ArchitectKeyword, role: Article
     ...(keyword.urlEvidence ? { urlEvidence: keyword.urlEvidence } : {}),
     keywordDnaSnapshot: KeywordDnaProvenanceSnapshotSchema.parse({
       brandId, keywordId: keyword.id, capturedAt: envelope.createdAt, versionReference: reference,
-      payload: envelope.payload, sourceKeywordSnapshot: { ...keyword },
+      payload: envelope.payload, sourceKeywordSnapshot: sanitizeKeywordProvenanceSnapshot({ ...keyword }) as Record<string, unknown>,
     }),
+    demandEvidence: normalizeKeywordDemandEvidence(keyword),
   };
 }
 

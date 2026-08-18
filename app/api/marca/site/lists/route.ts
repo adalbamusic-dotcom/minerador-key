@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   try {
     const brandId = QuerySchema.parse(new URL(request.url).searchParams.get("brandId"));
     const brand = await authorizedSiteBrand(brandId);
-    const { data, error } = await brand.profile.supabase.from("listas_kgr").select("id,nome,marca_id").eq("marca_id", brandId).order("nome", { ascending: true });
+    const { data, error } = await brand.profile.supabase.from("minerador_keyword_lists").select("id,nome,marca_id").eq("marca_id", brandId).order("nome", { ascending: true });
     if (error) throw error;
     return NextResponse.json({ lists: (data || []).map(item => ({ id: item.id, nome: item.nome })) });
   } catch (error) {

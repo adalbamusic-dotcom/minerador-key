@@ -5,6 +5,7 @@ import { createVersionEnvelope } from "../arquiteto/versioning.ts";
 import type { SerpResearchSnapshot } from "./serp/contracts.ts";
 import { isComparableRadarExtraction } from "./analysis-insights.ts";
 import { RadarKgrStrategySchema, type RadarKgrStrategy } from "./strategy-context.ts";
+import { RadarCompetitiveReportSchema } from "./competitive-report.ts";
 
 export const RadarAnalysisModeSchema = z.enum(["kgr_light", "competitive_full"]);
 export type RadarAnalysisMode = z.infer<typeof RadarAnalysisModeSchema>;
@@ -152,6 +153,7 @@ export const RadarEvidencePackageSchema = z.object({
   observedSemantics: z.object({ recurringTerms: z.array(RadarEvidenceTermSchema), entities: z.array(z.string()), recurringTopics: z.array(z.string()) }).strict(),
   observedCompetitiveness: z.object({ level: z.enum(["low", "medium", "high", "insufficient_evidence"]), dimensions: z.record(z.string(), z.number().min(0).max(1)), reasons: z.array(z.string()) }).strict(),
   kgrStrategy: RadarKgrStrategySchema.nullable().optional(),
+  competitiveReport: RadarCompetitiveReportSchema.nullable().optional(),
   keywordObservations: z.array(z.object({ keywordId: z.string().min(1), observation: z.string().min(1), confidence: RadarAnalysisConfidenceSchema }).strict()),
   conflicts: z.array(z.object({ kind: z.string().min(1), message: z.string().min(1), source: z.string().min(1) }).strict()), humanNotes: z.string().nullable(),
   version: z.number().int().positive(), hash: z.string().regex(/^sha256:[a-f0-9]{64}$/), provenance: z.object({ source: z.literal("radar"), analysisVersionId: z.string().min(1), serpSnapshotHash: z.string().min(1) }).strict(),
@@ -183,6 +185,7 @@ export const RadarAnalysisPayloadSchema = z.object({
   structuralDecisions: z.array(RadarStructuralDecisionSchema),
   competitiveness: RadarCompetitivenessSchema.nullable(),
   keywordDecisions: z.array(RadarKeywordDecisionSchema),
+  competitiveReport: RadarCompetitiveReportSchema.nullable().default(null),
   plannerPackage: z.union([RadarEvidencePackageSchema, LegacyRadarPlannerPackageSchema]).nullable(),
   plannerTransfer: RadarPlannerTransferSchema.nullable().default(null),
   status: RadarAnalysisStatusSchema,
@@ -230,6 +233,11 @@ export function buildRadarBenchmark(mode: RadarAnalysisMode, pages: Array<z.infe
     lists: { label: "Listas", unit: "count", values: valid.map(page => page.listCount) },
     tables: { label: "Tabelas", unit: "count", values: valid.map(page => page.tableCount) },
     faq: { label: "FAQ", unit: "count", values: valid.map(page => page.faqCount) },
+    images: { label: "Imagens", unit: "count", values: valid.map(page => page.imageCount) },
+    blockquotes: { label: "CitaÃ§Ãµes destacadas", unit: "count", values: valid.map(page => page.blockquoteCount) },
+    comparisons: { label: "Sinais de comparaÃ§Ã£o", unit: "count", values: valid.map(page => page.comparisonCount) },
+    bold: { label: "Negritos", unit: "count", values: valid.map(page => page.boldCount) },
+    italic: { label: "ItÃ¡licos", unit: "count", values: valid.map(page => page.italicCount) },
   };
   const metrics = Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, { label: item.label, unit: item.unit, ...numericStats(item.values) } ]));
   const recommendations = mode === "kgr_light" ? ["Use as médias apenas como evidência observada; o Planejador decide a estrutura.", "Priorize intenção, clareza e cobertura essencial."] : ["Compare mediana, faixa típica e outliers como evidência observada.", "O Planejador transforma observações em decisões editoriais após revisão humana."];
@@ -280,17 +288,17 @@ export async function createRadarAnalysisVersion(input: {
     ],
     selectedCompetitorIds: [], extractionIds: [], extractions: [], benchmark: null, semanticTerms: [], structuralDecisions: [], competitiveness: null,
     keywordDecisions: input.article.payload.keywordReferences.map(reference => ({ keywordId: reference.keywordId, decision: "keep", note: "" })),
-    plannerPackage: null, plannerTransfer: null, status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
+    competitiveReport: null, plannerPackage: null, plannerTransfer: null, status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
   });
   const entityId = input.previous?.entityId || `radar-analysis:${input.article.payload.articleId}`;
   const version = await createVersionEnvelope({ entityId, versionNumber: (input.previous?.versionNumber || 0) + 1, previousVersionId: input.previous?.versionId || null, origin: "human", changeReason: input.previous ? "Nova decisão humana na análise do Radar." : "Análise Radar criada após SERP real.", createdBy: input.actorId, createdAt: now, payload });
   return VersionedRadarAnalysisSchema.parse(version);
 }
 
-export async function createRadarAnalysisSuccessor(previous: RadarAnalysisVersion, payloadPatch: Partial<RadarAnalysisPayload>, actorId: string, now = new Date().toISOString()) {
+export async function createRadarAnalysisSuccessor(previous: RadarAnalysisVersion, payloadPatch: Partial<RadarAnalysisPayload>, actorId: string, now = new Date().toISOString(), versionId?: string) {
   const targetStatus = payloadPatch.status || "draft";
   const payload = RadarAnalysisPayloadSchema.parse({ ...previous.payload, ...payloadPatch, status: targetStatus, approvedAt: targetStatus === "approved" ? payloadPatch.approvedAt || now : null, approvedBy: targetStatus === "approved" ? payloadPatch.approvedBy || actorId : null, plannerPackage: targetStatus === "approved" ? payloadPatch.plannerPackage ?? previous.payload.plannerPackage : null, plannerTransfer: payloadPatch.plannerTransfer ?? previous.payload.plannerTransfer });
-  const version = await createVersionEnvelope({ entityId: previous.entityId, versionNumber: previous.versionNumber + 1, previousVersionId: previous.versionId, origin: "human", changeReason: "Atualização humana da curadoria/análise do Radar.", createdBy: actorId, createdAt: now, payload });
+  const version = await createVersionEnvelope({ entityId: previous.entityId, versionId, versionNumber: previous.versionNumber + 1, previousVersionId: previous.versionId, origin: "human", changeReason: "Atualização humana da curadoria/análise do Radar.", createdBy: actorId, createdAt: now, payload });
   return VersionedRadarAnalysisSchema.parse(version);
 }
 
@@ -299,5 +307,5 @@ export function buildRadarPlannerPackage(payload: RadarAnalysisPayload): RadarAn
   const included = payload.serpDecisions.filter(decision => decision.decision === "included").map(decision => decision.key);
   const requirements = payload.structuralDecisions.filter(decision => decision.level === "required").map(decision => decision.label);
   const recommendations = payload.structuralDecisions.filter(decision => decision.level === "recommended" || decision.level === "optional").map(decision => decision.label);
-  return { mode: payload.mode, enforcement: payload.mode === "competitive_full" ? "required" : "advisory", serpSnapshotId: payload.serpSnapshotId, serpSnapshotVersion: payload.serpSnapshotVersion, serpSnapshotHash: payload.serpSnapshotHash, includedSerpKeys: included, selectedCompetitorIds: payload.selectedCompetitorIds, extractionIds: payload.extractionIds, requirements, recommendations, observedData: Object.entries(payload.benchmark?.metrics || {}).map(([key, metric]) => `${key}: ${metric.mean}`), semanticTerms: payload.semanticTerms.filter(term => ["include_topic", "support_term"].includes(term.decision)).map(term => term.term), keywordDecisions: payload.keywordDecisions, competitiveness: payload.competitiveness, futureGuardian: { wordRange: payload.benchmark?.metrics.words ? [Math.round(payload.benchmark.metrics.words.typicalRange[0]), Math.round(payload.benchmark.metrics.words.typicalRange[1])] : null, requiredTopics: payload.semanticTerms.filter(term => term.decision === "include_topic").map(term => term.term), recommendedTopics: payload.semanticTerms.filter(term => term.decision === "support_term").map(term => term.term), requiredStructure: requirements } };
+  return { mode: payload.mode, enforcement: payload.mode === "competitive_full" ? "required" : "advisory", serpSnapshotId: payload.serpSnapshotId, serpSnapshotVersion: payload.serpSnapshotVersion, serpSnapshotHash: payload.serpSnapshotHash, includedSerpKeys: included, selectedCompetitorIds: payload.selectedCompetitorIds, extractionIds: payload.extractionIds, requirements, recommendations, observedData: Object.entries(payload.benchmark?.metrics || {}).map(([key, metric]) => `${key}: ${metric.mean}`), semanticTerms: payload.semanticTerms.filter(term => ["include_topic", "support_term"].includes(term.decision)).map(term => term.term), keywordDecisions: payload.keywordDecisions, competitiveness: payload.competitiveness, ...(payload.competitiveReport ? { competitiveReport: payload.competitiveReport } : {}), futureGuardian: { wordRange: payload.benchmark?.metrics.words ? [Math.round(payload.benchmark.metrics.words.typicalRange[0]), Math.round(payload.benchmark.metrics.words.typicalRange[1])] : null, requiredTopics: payload.semanticTerms.filter(term => term.decision === "include_topic").map(term => term.term), recommendedTopics: payload.semanticTerms.filter(term => term.decision === "support_term").map(term => term.term), requiredStructure: requirements } };
 }

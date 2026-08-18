@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const brand = await authorizedSiteBrand(input.brandId);
     await assertListaBelongsToMarca(input.targetListId, input.brandId, brand.profile);
     input.candidates.forEach(candidate => assertAllowedExternalUrl(candidate.sourceUrl, brand.primaryHost));
-    const { data: existingRows, error } = await brand.profile.supabase.from("keywords_kgr").select("id,brand_id,keyword").eq("lista_id", input.targetListId).eq("brand_id", brand.brandId);
+    const { data: existingRows, error } = await brand.profile.supabase.from("minerador_keywords").select("id,brand_id,keyword").eq("lista_id", input.targetListId).eq("brand_id", brand.brandId);
     if (error) throw error;
     const plan = buildSiteKeywordImportPlan(input.candidates, existingRows || []);
     return NextResponse.json({ batchId: input.batchId, targetListId: input.targetListId, items: plan.items, summary: plan.summary, persisted: false, status: "preview" });

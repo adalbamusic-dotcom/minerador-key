@@ -6,11 +6,11 @@ BEGIN TRANSACTION READ ONLY;
 -- 1. Colunas cuja existencia precisa ser confirmada antes da Sprint 1.
 WITH expected(table_name, column_name) AS (
   VALUES
-    ('keywords_kgr', 'marca_id'),
+    ('minerador_keywords', 'marca_id'),
     ('briefings_artigos', 'status'),
-    ('listas_kgr', 'slug'),
-    ('keywords_kgr', 'slug'),
-    ('keywords_kgr', 'canonical'),
+    ('minerador_keyword_lists', 'slug'),
+    ('minerador_keywords', 'slug'),
+    ('minerador_keywords', 'canonical'),
     ('briefings_artigos', 'slug_sugerido'),
     ('briefings_artigos', 'canonical')
 )
@@ -42,7 +42,7 @@ LEFT JOIN information_schema.constraint_column_usage AS foreign_columns
   ON foreign_columns.constraint_schema = constraints.constraint_schema
  AND foreign_columns.constraint_name = constraints.constraint_name
 WHERE constraints.table_schema = 'public'
-  AND constraints.table_name IN ('marcas', 'perfis', 'listas_kgr', 'keywords_kgr', 'briefings_artigos')
+  AND constraints.table_name IN ('marcas', 'perfis', 'minerador_keyword_lists', 'minerador_keywords', 'briefings_artigos')
   AND constraints.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')
 ORDER BY constraints.table_name, constraints.constraint_name, key_usage.ordinal_position;
 
@@ -50,7 +50,7 @@ ORDER BY constraints.table_name, constraints.constraint_name, key_usage.ordinal_
 SELECT schemaname, tablename, indexname, indexdef
 FROM pg_indexes
 WHERE schemaname = 'public'
-  AND tablename IN ('marcas', 'perfis', 'listas_kgr', 'keywords_kgr', 'briefings_artigos')
+  AND tablename IN ('marcas', 'perfis', 'minerador_keyword_lists', 'minerador_keywords', 'briefings_artigos')
 ORDER BY tablename, indexname;
 
 -- 4. Funcoes de protecao esperadas pela migration 0001.
@@ -84,7 +84,7 @@ JOIN pg_namespace AS namespaces ON namespaces.oid = tables.relnamespace
 JOIN pg_proc AS functions ON functions.oid = triggers.tgfoid
 WHERE namespaces.nspname = 'public'
   AND NOT triggers.tgisinternal
-  AND tables.relname IN ('marcas', 'perfis', 'listas_kgr', 'keywords_kgr', 'briefings_artigos')
+  AND tables.relname IN ('marcas', 'perfis', 'minerador_keyword_lists', 'minerador_keywords', 'briefings_artigos')
 ORDER BY tables.relname, triggers.tgname;
 
 -- 6. Estado de RLS.
@@ -96,21 +96,21 @@ FROM pg_class AS tables
 JOIN pg_namespace AS namespaces ON namespaces.oid = tables.relnamespace
 WHERE namespaces.nspname = 'public'
   AND tables.relkind = 'r'
-  AND tables.relname IN ('marcas', 'perfis', 'listas_kgr', 'keywords_kgr', 'briefings_artigos')
+  AND tables.relname IN ('marcas', 'perfis', 'minerador_keyword_lists', 'minerador_keywords', 'briefings_artigos')
 ORDER BY tables.relname;
 
 -- 7. Policies RLS.
 SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check
 FROM pg_policies
 WHERE schemaname = 'public'
-  AND tablename IN ('marcas', 'perfis', 'listas_kgr', 'keywords_kgr', 'briefings_artigos')
+  AND tablename IN ('marcas', 'perfis', 'minerador_keyword_lists', 'minerador_keywords', 'briefings_artigos')
 ORDER BY tablename, policyname;
 
 -- 8. Grants de tabela e de funcoes publicas.
 SELECT table_name, grantee, privilege_type
 FROM information_schema.role_table_grants
 WHERE table_schema = 'public'
-  AND table_name IN ('marcas', 'perfis', 'listas_kgr', 'keywords_kgr', 'briefings_artigos')
+  AND table_name IN ('marcas', 'perfis', 'minerador_keyword_lists', 'minerador_keywords', 'briefings_artigos')
 ORDER BY table_name, grantee, privilege_type;
 
 SELECT routine_name, grantee, privilege_type
@@ -119,7 +119,7 @@ WHERE specific_schema = 'public'
   AND routine_name LIKE 'protect_%'
 ORDER BY routine_name, grantee, privilege_type;
 
--- 9. Divergencias entre marcas.silos_existentes e listas_kgr.
+-- 9. Divergencias entre marcas.silos_existentes e minerador_keyword_lists.
 WITH configured_silos AS (
   SELECT
     marcas.id::text AS marca_id,
@@ -139,7 +139,7 @@ database_silos AS (
     to_jsonb(listas)->>'marca_id' AS marca_id,
     lower(trim(to_jsonb(listas)->>'nome')) AS silo_name,
     nullif(to_jsonb(listas)->>'slug', '') AS database_slug
-  FROM public.listas_kgr AS listas
+  FROM public.minerador_keyword_lists AS listas
 )
 SELECT
   coalesce(configured.marca_id, database.marca_id) AS marca_id,
@@ -147,7 +147,7 @@ SELECT
   configured.configured_slug,
   database.database_slug,
   CASE
-    WHEN configured.silo_name IS NULL THEN 'somente_listas_kgr'
+    WHEN configured.silo_name IS NULL THEN 'somente_minerador_keyword_lists'
     WHEN database.silo_name IS NULL THEN 'somente_marcas_jsonb'
     WHEN configured.configured_slug IS DISTINCT FROM database.database_slug THEN 'slug_divergente'
     ELSE 'alinhado'
@@ -170,8 +170,8 @@ SELECT
     WHEN nullif(to_jsonb(keywords)->>'lista_id', '') IS NULL THEN 'sem_lista'
     ELSE 'lista_inexistente'
   END AS result
-FROM public.keywords_kgr AS keywords
-LEFT JOIN public.listas_kgr AS listas
+FROM public.minerador_keywords AS keywords
+LEFT JOIN public.minerador_keyword_lists AS listas
   ON listas.id::text = to_jsonb(keywords)->>'lista_id'
 WHERE nullif(to_jsonb(keywords)->>'lista_id', '') IS NULL
    OR listas.id IS NULL
@@ -186,7 +186,7 @@ SELECT
     WHEN nullif(to_jsonb(listas)->>'marca_id', '') IS NULL THEN 'sem_marca'
     ELSE 'marca_inexistente'
   END AS result
-FROM public.listas_kgr AS listas
+FROM public.minerador_keyword_lists AS listas
 LEFT JOIN public.marcas AS marcas
   ON marcas.id::text = to_jsonb(listas)->>'marca_id'
 WHERE nullif(to_jsonb(listas)->>'marca_id', '') IS NULL
@@ -205,7 +205,7 @@ SELECT
     WHEN marcas.id IS NULL THEN 'marca_inexistente'
   END AS result
 FROM public.briefings_artigos AS briefings
-LEFT JOIN public.listas_kgr AS listas
+LEFT JOIN public.minerador_keyword_lists AS listas
   ON listas.id::text = to_jsonb(briefings)->>'silo_id'
 LEFT JOIN public.marcas AS marcas
   ON marcas.id::text = to_jsonb(listas)->>'marca_id'

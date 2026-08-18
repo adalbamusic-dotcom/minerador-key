@@ -39,6 +39,17 @@ test("filtros recalculam a visão sem ocultar aprovados ou publicados no padrão
   assert.deepEqual(deriveMineradorTableRows(hydratedRows, [], filters({ searchQuery: "publicada" })).map(row => row.id), ["published"]);
 });
 
+test("Todos mantém keyword manual/CSV sem volume e o filtro operacional continua explícito", () => {
+  assert.deepEqual(
+    deriveMineradorTableRows(hydratedRows, [], filters({ volumeEligibility: "Todos" })).map(row => row.id),
+    ["approved", "raw", "published"],
+  );
+  assert.deepEqual(
+    deriveMineradorTableRows(hydratedRows, [], filters({ volumeEligibility: "operational" })).map(row => row.id),
+    ["published"],
+  );
+});
+
 test("página não mantém filteredKeywords em estado e Organizar não participa da derivação", () => {
   assert.equal(page.includes("setFilteredKeywords"), false);
   assert.equal(page.includes("const [filteredKeywords"), false);

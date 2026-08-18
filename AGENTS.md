@@ -386,4 +386,48 @@ A conclusão exige comparar objetivo, código, persistência real, interface e c
 8. Conta — preferências e segurança;
 9. Admin — gestão da plataforma.
 
+## Sistema visual compartilhado
+
+Toda tarefa que criar, alterar ou revisar frontend deve ler `docs/compartilhado/sistema-visual.md` antes de modificar a interface.
+
+Regras mínimas:
+
+* reutilizar tokens e componentes existentes;
+* não criar linguagem visual exclusiva para um módulo;
+* texto essencial deve ter pelo menos 14px;
+* botões devem usar variantes compartilhadas e áreas clicáveis adequadas;
+* dark mode deve usar texto off-white, superfícies graduais e bordas discretas;
+* não usar preto ou branco puros em grandes superfícies;
+* não hardcodar cores dentro de componentes;
+* não criar cards, gradientes, sombras, radius ou espaçamentos arbitrários;
+* novas telas devem validar hierarquia, legibilidade, estados interativos e responsividade;
+* mudanças visuais não devem redesenhar áreas fora do escopo.
+
+Para tarefas backend-only, esta seção não se aplica.
+
 Não alterar a ordem nem abrir nova frente sem dependência técnica comprovada.
+
+## Governança da geração canônica
+
+Fontes canônicas adicionais para mudanças estruturais:
+
+- `docs/compartilhado/sdd-geracao-canonica-identidade-tenant.md`;
+- `docs/compartilhado/sdd-arquitetura-integracoes-plataforma-agencia-marca.md`;
+- `docs/compartilhado/plano-implementacao-geracao-canonica.md`;
+- `docs/compartilhado/template-proposta-evolucao-modular.md`.
+
+Uma SDD aprovada define destino e planejamento, não comprova implementação concluída nem autoriza migration, operação remota ou mudança fora do escopo aprovado. Alterações de auth, tenant, schema, RLS, providers, integrações, permissões, contratos compartilhados ou workflow exigem SDD ou adendo aprovado. Todo módulo interrompe mudanças estruturais fora desse escopo e registra uma Proposta de Evolução Modular para análise e aprovação central.
+
+Implementação estrutural avança somente pelos gates do plano canônico. Zero legado deve ser provado em código, banco, RLS, envs, testes, mocks, fixtures, interfaces e documentação ativa. Serper e RapidAPI não podem ser restaurados. Segredos operacionais pertencem a connections de plataforma, agência ou marca e nunca chegam ao navegador.
+
+O usuário executa instalações, SQL, migrations, smoke remoto, Git, deploy e chamadas pagas explicitamente autorizadas.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

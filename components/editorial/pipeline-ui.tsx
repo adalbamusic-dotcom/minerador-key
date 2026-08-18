@@ -14,7 +14,7 @@ const stateMeta: Record<PipelineState, { label: string; className: string; icon:
 };
 
 export function VersionBadge({ version, hash }: { version: string | number; hash?: string }) {
-  return <span title={hash} className="inline-flex rounded border border-indigo-900/60 bg-indigo-950/20 px-1.5 py-0.5 font-mono text-[9px] text-indigo-300">v{version}</span>;
+  return <span title={hash} className="inline-flex rounded border border-context-accent/35 bg-surface-subtle px-1.5 py-0.5 font-mono text-[9px] text-context-accent">v{version}</span>;
 }
 export function ApprovalBadge({ state }: { state: PipelineState }) { const meta = stateMeta[state]; return <span className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] ${meta.className}`}>{meta.label}</span>; }
 export function ConfidenceBadge({ value }: { value: number | null }) { return <span className="text-[9px] text-slate-400">{value == null ? "Confiança não informada" : `${Math.round(value * 100)}% confiança`}</span>; }

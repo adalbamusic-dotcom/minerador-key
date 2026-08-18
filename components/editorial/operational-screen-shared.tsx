@@ -2,13 +2,13 @@
 
 import * as React from "react";
 import { useRouter as useNextRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";
 import { Loader2 } from "lucide-react";
 import { useBrand } from "@/components/brand-context";
 import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
 import { EmptyPipelineState } from "@/components/editorial/pipeline-ui";
 import { WorkflowImportDialog } from "@/components/editorial/workflow-status";
-import { radarCanonicalRouteKey, resolveRadarRouteItem } from "@/lib/radar/route-resolution";
+import { buildRadarArticleHref, radarCanonicalRouteKey, resolveRadarRouteItem } from "@/lib/radar/route-resolution";
 
 export const btn = "inline-flex h-7 items-center rounded border border-indigo-900 bg-indigo-950/20 px-2.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-40";
 export const field = "h-8 w-full rounded border border-slate-800 bg-black px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-600";
@@ -16,22 +16,27 @@ export const card = "rounded-lg border border-slate-900 bg-[#0b0c10] p-4";
 export function useOperationalRouter() {
   const router = useNextRouter();
   const pipeline = useEditorialPipeline();
+  const { activeBrandRef } = useBrand();
   return {
     ...router,
     push: (href: string, options?: Parameters<typeof router.push>[1]) => {
       const match = href.match(/^\/radar\/([^?]+)(.*)$/);
       const key = match ? decodeURIComponent(match[1]) : null;
       const item = key ? resolveRadarRouteItem(pipeline.radarItems, key) : null;
-      const canonicalHref = match && item ? `/radar/${encodeURIComponent(radarCanonicalRouteKey(item))}${match[2]}` : href;
-      return router.push(canonicalHref, options);
+      if (match) {
+        const canonicalHref = item && buildRadarArticleHref({ brandRef: activeBrandRef, articleId: radarCanonicalRouteKey(item) });
+        if (!canonicalHref) return;
+        return router.push(`${canonicalHref}${match[2]}`, options);
+      }
+      return router.push(href, options);
     },
   };
 }
 export const Field = ({ label, value }: { label: string; value: unknown }) => <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">{label}</dt><dd className="mt-1 break-words text-[10px] text-slate-300">{value === null || value === undefined || value === "" ? "Não informado" : String(value)}</dd></div>;
 
-export function ModuleHeader({ title, description, actions }: { title: string; description: string; actions?: React.ReactNode }) {
+export function ModuleHeader({ title, description, actions, tone = "default", brandName }: { title: string; description: string; actions?: React.ReactNode; tone?: "default" | "neutral"; brandName?: string }) {
   const { activeBrand } = useBrand();
-  return <header className="sticky top-0 z-40 flex h-12 items-center justify-between border-b border-slate-900 bg-[#07080b]/95 px-3 backdrop-blur"><div className="min-w-0"><p className="truncate text-[8px] font-bold uppercase tracking-[.2em] text-indigo-400">{activeBrand?.nome || "Sem marca"}</p><div className="flex items-baseline gap-2"><h1 className="text-sm font-bold text-white">{title}</h1><p className="hidden text-[9px] text-slate-600 md:block">{description}</p></div></div><div className="flex items-center gap-1">{actions}</div></header>;
+  return <header className="sticky top-0 z-40 flex h-12 max-w-full items-center justify-between gap-2 overflow-hidden border-b border-slate-900 bg-[#07080b]/95 px-3 backdrop-blur"><div className="min-w-0 flex-1"><p className={`truncate text-[8px] font-bold uppercase tracking-[.2em] ${tone === "neutral" ? "text-slate-400" : "text-indigo-400"}`}>{brandName || activeBrand?.nome || "Sem marca"}</p><div className="flex min-w-0 items-baseline gap-2"><h1 className="truncate text-sm font-bold text-white">{title}</h1><p className="hidden truncate text-[9px] text-slate-600 md:block">{description}</p></div></div><div className="flex min-w-0 shrink-0 items-center gap-1">{actions}</div></header>;
 }
 
 export function useReadyPipeline() {
@@ -51,5 +56,3 @@ export function ImportPanel<T extends { id: string }>({ title, rows, label, disa
 
 export function Metric({ label, value }: { label: string; value: unknown }) { return <div className={card}><p className="text-[8px] font-bold uppercase tracking-wider text-slate-600">{label}</p><p className="mt-2 text-xl font-black text-white">{String(value)}</p></div>; }
 export function LocalCollection({ title, count, description }: { title: string; count: number; description: string }) { return <section className={card}><h2 className="text-xs font-bold">{title}</h2><p className="mt-2 text-2xl font-black text-white">{count}</p><p className="mt-2 text-[10px] text-slate-600">{description}</p></section>; }
-
-

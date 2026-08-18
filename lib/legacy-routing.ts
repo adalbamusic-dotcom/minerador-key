@@ -1,5 +1,5 @@
 export const LEGACY_TENANT_TARGETS: Record<string, string> = {
-  marca: "/", conta: "/conta", minerador: "/minerador", arquiteto: "/arquiteto",
+  marca: "/", minerador: "/minerador", arquiteto: "/arquiteto",
   radar: "/radar", planejador: "/planejador", redator: "/redator", publicacoes: "/publicacoes",
 };
 

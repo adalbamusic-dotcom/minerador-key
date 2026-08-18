@@ -21,7 +21,6 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Scripts temporarios/de diagnostico e docs nao sao codigo de producao.
     "docs/**",
-    "minerador-extensao/**",
     // Testes de regressao sao scripts Node puros (CommonJS), fora do escopo do lint TS/Next.
     "tests/**",
   ]),

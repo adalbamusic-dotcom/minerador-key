@@ -46,3 +46,30 @@ Migrations, contratos editoriais e módulos operacionais.
 ## 20. Navegação global do shell — 2026-07-23
 ProductShell exibe a navegação operacional geral em todas as superfícies, inclusive Admin: Marca, Minerador, Arquiteto, Radar, Planejador, Redator e Publicações. As tabs administrativas permanecem exclusivamente no conteúdo de Admin.
 Atalhos globais para uma marca usam a rota tenantizada canônica; sem marca selecionada, direcionam para `/selecionar-marca?destino=<modulo>`. Trocar a marca dentro de Admin permanece em `/admin` e atualiza somente os atalhos.
+
+## 21. Entrada, ativação e acesso temporário de Agencies — 2026-08-13
+
+O Admin distingue dois caminhos canônicos de entrada:
+
+- `PUBLIC_FREE_TRIAL`: solicitação pública aprovada, seguida de autenticação,
+  onboarding e criação transacional da Agency, owner, membership e
+  `agency_access_period`;
+- `ADMIN_TRUSTED_INVITE`: convite administrativo com Agency proposta,
+  responsável, destinatário e validade de acesso definidos pelo Admin, seguido
+  de autenticação, confirmação explícita e a mesma criação transacional.
+
+Em `PUBLIC_FREE_TRIAL`, `plan_code = FREE` é provenance e a duração de 30
+dias começa na ativação. Em `ADMIN_TRUSTED_INVITE`, a data final do acesso é a
+`access_expires_at` definida pelo Admin. Em ambos os caminhos,
+`agency_invitations.expires_at` é validade técnica do link e não substitui
+`agency_access_periods`.
+
+`agency_access_periods` é a fonte canônica do direito operacional da Agency.
+`agencies.status` não prova sozinho acesso operacional. O histórico Admin
+separa solicitação pública aprovada, ativação aceita e convite administrativo
+conforme `source` e estado reais.
+
+No convite administrativo, `proposed_agency_name` continua obrigatório como
+proposta inicial. O convidado pode corrigi-lo antes da criação da Agency; a
+RPC transacional canônica persiste o nome final no convite e em `agencies.name`.
+Essa confirmação não é uma escrita independente no cliente.

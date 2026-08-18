@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useSession } from "next-auth/react";
+import { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";
 import { Plus } from "lucide-react";
 import { useBrand } from "@/components/brand-context";
 import { OperationalDataGrid, type OperationalGridColumn } from "@/components/editorial/operational-data-grid";
@@ -49,5 +49,4 @@ export function PublicationsPage() {
     <WorkflowImportDialog open={picker} title="Importar artigos aprovados do Redator" description="Todos os documentos aprovados aparecem aqui. Os já importados em Publicações permanecem visíveis e bloqueados." rows={approvedWriter} label={item => item.title} details={item => <span className="mt-1 block text-slate-500">/{item.slug} · {item.hierarchy}</span>} disabled={item => item.alreadyImported} status={item => item.alreadyImported ? item.state : "approved"} onClose={() => setPicker(false)} onImport={importApproved}/>
   </div>;
 }
-
 

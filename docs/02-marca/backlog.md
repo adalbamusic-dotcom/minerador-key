@@ -103,3 +103,63 @@
 ## Consolidacao fisica concluida - 2026-07-23
 - Implementacoes exclusivas da area permanecem em modules/marca; nenhum contrato ou rota foi alterado nesta etapa.
 - Validacao manual autenticada e persistencia remota seguem pendentes.
+
+## Concluido - harmonizacao visual do modulo Marca - 2026-07-27
+
+- Harmonizar as paginas e abas ativas da Marca com o sistema visual compartilhado, preservando comportamento e contratos existentes.
+- Melhorar hierarquia, legibilidade, formularios, tabelas, estados vazios, mensagens e foco de teclado no escopo de `modules/marca`.
+- Manter pendente a validacao manual autenticada e visual em navegador; nenhum SQL remoto, migration, escrita Supabase, commit, push ou deploy foi executado.
+
+## Concluido - correcao da direcao visual neutra da Marca - 2026-07-27
+
+- Remover roxo decorativo, gradientes, abas em capsulas e cards usados apenas como moldura.
+- Reorganizar BrandDNA e demais abas por tipografia, espacamento, alinhamento e divisores discretos.
+- Preservar funcionalidades, dados, rotas, tenantizacao, BrandDNA, Site/Sitemap, convites, permissoes e persistencia.
+- Manter pendente a validacao manual autenticada e visual nos quatro breakpoints; nenhuma operacao remota foi executada.
+
+## Concluído localmente — conexão Google Ads pela Marca — 2026-08-03
+
+- Incluir em `Marca → Configurações` o formulário operacional de conexão por `brandId`, reutilizando a rota server-side existente e sem tocar na integração de volume.
+- Exibir somente a conexão sanitizada; validar IDs completos no cliente e no servidor; exigir confirmação antes de substituir conexão ativa; manter MCC opcional e targeting explícito.
+- Preservar a autorização server-side de `minerador:manage`, sem fallback entre marcas e sem expor credenciais.
+- Pendente: validação manual autenticada em Adalba e Lindisse com IDs reais, confirmação de moeda/fuso e uma atualização de métricas no Minerador. Nenhuma chamada Google Ads real, SQL, migration, alteração de credenciais, commit, push ou deploy foi executada nesta entrega.
+
+## Complemento proposto — operação da Brand dentro da Agência — 2026-08-09
+
+- [x] Preservar Brand como tenant editorial por `brandId`; `agency_brands` concede controle operacional herdado por padrão, limitado por RLS, permissões do actor e restrições explícitas da Brand.
+- [x] Registrar planilha futura de colaboradores com `brand_memberships`, papéis e permissões canônicas, sem UUID manual.
+- [x] Registrar que BrandDNA, dados da Marca e pipeline editorial não serão reconstruídos pelo workspace da Agência.
+- [ ] Auditar formulário de cadastro da Brand e fluxo Agência → Marcas → Cadastrar Marca antes de qualquer implementação.
+- [ ] Definir activity detalhada da Brand somente após mapear eventos e históricos já existentes.
+- [x] Registrar que restrições da Brand devem ser explícitas, persistidas, auditáveis, removíveis e visíveis à Agência sem desaparecerem da interface.
+- [ ] Criar SDD própria para capacidades/restrições Agency → Brand antes de alterar authorization, RLS ou telas de permissão.
+
+## SDD proposta — autorização herdada e restrições da Brand — 2026-08-09
+
+- [x] Formalizar que `agency_brands` concede acesso operacional herdado por padrão.
+- [x] Formalizar restrições explícitas, persistidas, auditáveis e removíveis por capability.
+- [x] Preservar `brand_memberships` para colaboradores próprios da Brand, sem duplicar funcionários da Agency.
+- [ ] Definir estrutura física, RLS, audit trail e telas de “Acesso da Agência” somente após aprovação da SDD.
+# Bloqueado — geração canônica
+
+- Aplicar ou conectar o resolvedor canônico somente após auditoria remota, snapshot, migration 0015 manual e smoke de owner/colaborador. A remoção de membership owner e `user_key` pertence à fase de limpeza posterior.
+## Próximo após Fase 2A — 2026-08-06
+
+- Realizar smoke autenticado da rota raiz da Marca para owner e colaborador com permissão, incluindo slug divergente e isolamento entre marcas.
+- Não ampliar a reconexão para módulos editoriais nem remover `user_key`/membership owner até a fase de corte autorizada.
+
+## Minha Agência — consumo operacional da Brand - 2026-08-10
+
+- [x] Listar Brands existentes da Agency sem recálculo, duplicação, recriação ou alteração de dados.
+- [x] Preparar `Cadastrar Marca` com persistência server-side e referência canônica, sem iniciar módulos editoriais.
+- [ ] Projetar e aprovar UI própria para restrições Brand → Agency; nenhuma restrição é criada ou alterada nesta fase.
+
+## First-run de Marca recém-cadastrada - 2026-08-10
+
+- [x] Restaurar campos operacionais sem incorporar BrandDNA ou pipeline editorial.
+- [x] Converter o cadastro para modal único reutilizado pelo botão do topo e pelo estado vazio.
+- [x] Adicionar ações não destrutivas de edição e colaboradores pelas rotas canônicas existentes.
+- [ ] Criar SDD de lifecycle para standby, arquivamento, reativação e exclusão segura antes de qualquer comportamento adicional.
+- [x] Exibir home útil para Brand sem snapshot, sem fabricar métricas.
+- [x] Encaminhar configuração estratégica para a área existente de BrandDNA.
+- [ ] Validar manualmente CareGlow, Adalba e Lindisse em light/dark, desktop/mobile e teclado.

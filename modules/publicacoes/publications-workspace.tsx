@@ -1,15 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, Download, ExternalLink, FilePenLine, Loader2, Plus, Send } from "lucide-react";
-import { useSession } from "next-auth/react";
+import { Check, Columns3, Download, ExternalLink, FilePenLine, Loader2, Plus, Send } from "lucide-react";
+import { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";
 import { useBrand } from "@/components/brand-context";
 import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
-import { OperationalDataGrid, type OperationalGridColumn } from "@/components/editorial/operational-data-grid";
+import { OperationalDataGrid, type OperationalDataGridTopbarApi, type OperationalGridColumn, type OperationalGridOrderMode, type OperationalGridPageSize } from "@/components/editorial/operational-data-grid";
 import { WorkflowImportDialog, WorkflowStatusBadge } from "@/components/editorial/workflow-status";
 import { EmptyPipelineState } from "@/components/editorial/pipeline-ui";
 import { HistoryControls } from "@/components/editorial/history-controls";
 import { useLocalHistory } from "@/components/editorial/use-local-history";
+import { GLOBAL_TOPBAR_ACTION_CONTROL } from "@/components/global-topbar-control";
 import type { OperationalPublication } from "@/lib/editorial/operational-flow";
 import { applyPublicationAction } from "@/lib/publicacoes/domain";
 import type { PublicationAction, PublicationActionRequest } from "@/lib/publicacoes/contracts";
@@ -89,10 +90,37 @@ export function PublicationsWorkspace() {
   ];
 
   const importApproved = (ids: string[]) => { history.capture(`Importar ${ids.length} item(ns) do Redator`); const result = pipeline.importApprovedToPublications(ids); setPicker(false); setNotice(`${result.imported} item(ns) importado(s); ${result.skipped} ignorado(s).`); };
-  const toolbar = <><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} compact/>{([["library", "Biblioteca"], ["queue", "Fila"], ["published", "Publicados"], ["updates", "Atualizações"]] as const).map(([id, label]) => <button key={id} className={`${btn} ${tab === id ? "border-indigo-500 text-white" : ""}`} onClick={() => setTab(id)}>{label}</button>)}<button className={btn} onClick={() => setPicker(true)}><Plus className="mr-1 h-3 w-3"/>Importar aprovados</button><button className={btn} onClick={exportManifest}><Download className="mr-1 h-3 w-3"/>CSV</button></>;
+  const renderTopbarActions = (grid: OperationalDataGridTopbarApi<PublicationRow>) => <>
+    {([["library", "Biblioteca"], ["queue", "Fila"], ["published", "Publicados"], ["updates", "Atualizações"]] as const).map(([id, label]) => <button key={id} type="button" onClick={() => setTab(id)} aria-pressed={tab === id} className={`${GLOBAL_TOPBAR_ACTION_CONTROL} ${tab === id ? "border-module-accent/50 bg-surface-elevated text-foreground" : ""}`} title={`Exibir ${label.toLowerCase()}`}>
+      {label}
+    </button>)}
+    <button type="button" onClick={() => setPicker(true)} className={GLOBAL_TOPBAR_ACTION_CONTROL} title="Importar itens aprovados do Redator">
+      <Plus className="h-3.5 w-3.5" aria-hidden="true" /><span>Importar aprovados</span>
+    </button>
+    <button type="button" onClick={exportManifest} className={GLOBAL_TOPBAR_ACTION_CONTROL} title="Exportar o manifesto CSV de Publicações">
+      <Download className="h-3.5 w-3.5" aria-hidden="true" /><span>CSV</span>
+    </button>
+    <button type="button" onClick={() => grid.exportRows(grid.queriedRows, "planilha")} className={GLOBAL_TOPBAR_ACTION_CONTROL} title="Exportar a visão filtrada">
+      <Download className="h-3.5 w-3.5" aria-hidden="true" /><span>Exportar</span>
+    </button>
+    <div className="relative shrink-0">
+      <button type="button" onClick={grid.toggleColumns} className={GLOBAL_TOPBAR_ACTION_CONTROL} title="Exibir ou ocultar colunas" aria-label="Visualização">
+        <Columns3 className="h-3.5 w-3.5" aria-hidden="true" /><span>Visualização</span>
+      </button>
+      {grid.showColumns ? <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded-md border border-divider bg-surface-elevated p-2 shadow-lg">
+        {grid.columns.map(column => <label key={column.id} className="flex items-center gap-2 py-1 text-xs text-foreground/75"><input type="checkbox" checked={!grid.hidden.has(column.id)} onChange={() => grid.toggleColumn(column.id)} />{column.header}</label>)}
+      </div> : null}
+    </div>
+    <select aria-label="Modo de ordenação" value={grid.orderMode} onChange={event => grid.setOrderMode(event.target.value as OperationalGridOrderMode)} className={`${GLOBAL_TOPBAR_ACTION_CONTROL} max-w-36 cursor-pointer`}>
+      <option value="automatic">Ordem automática</option><option value="manual">Ordem manual</option>
+    </select>
+    <select aria-label="Quantidade por página" value={String(grid.pageSize)} onChange={event => grid.setPageSize(event.target.value === "all" ? "all" : Number(event.target.value) as OperationalGridPageSize)} className={`${GLOBAL_TOPBAR_ACTION_CONTROL} max-w-24 cursor-pointer`}>
+      {[25, 50, 100, 200].map(size => <option key={size}>{size}</option>)}<option value="all">Todos</option>
+    </select>
+  </>;
 
   return <div className="flex h-screen min-h-0 flex-col">{notice && <div className="shrink-0 border-b border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-[9px] text-amber-300">{notice}</div>}
-    <OperationalDataGrid title="Publicações" description="Biblioteca, fila, exportação e registro manual — sem envio automático ao CMS." module={`publicacoes:${tab}`} userId={sessionId(session)} brandId={selectedBrandId} rows={rows} columns={columns} toolbar={toolbar} emptyTitle="Nenhum conteúdo nesta aba." renderActions={row => <PublicationRowActions row={row} busy={busyId === row.id} onAction={runAction} onExport={exportPublication} onNotice={setNotice}/>} renderExpanded={row => <PublicationExpanded row={row}/>}/>
+    <HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="publicacoes" showHistory={false} showUndoRedo={false}/><OperationalDataGrid module={`publicacoes:${tab}`} userId={sessionId(session)} brandId={selectedBrandId} rows={rows} columns={columns} topbar={{ moduleId: "publicacoes", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "publicacoes" } })), undoLabel: "Desfazer publicação", redoLabel: "Refazer publicação", historyLabel: "Histórico de Publicações", undoTitle: "Desfazer alteração em Publicações", redoTitle: "Refazer alteração em Publicações", historyTitle: count => `Histórico de Publicações (${count})` }, renderActions: renderTopbarActions }} emptyTitle="Nenhum conteúdo nesta aba." renderActions={row => <PublicationRowActions row={row} busy={busyId === row.id} onAction={runAction} onExport={exportPublication} onNotice={setNotice}/>} renderExpanded={row => <PublicationExpanded row={row}/>}/>
     <WorkflowImportDialog open={picker} title="Importar aprovados do Redator" description="Documentos aprovados permanecem visíveis; itens já importados ficam bloqueados." rows={approved} label={item => item.title} details={item => <span className="mt-1 block text-slate-500">/{item.slug} · {item.unitType === "silo_page" ? "SiloPage" : "Artigo"}</span>} disabled={item => item.alreadyImported} status={() => "approved"} onClose={() => setPicker(false)} onImport={importApproved}/>
   </div>;
 }

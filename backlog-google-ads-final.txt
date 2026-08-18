@@ -1,0 +1,25 @@
+﻿# Backlog ÔÇö Minerador
+
+## Decis├úo arquitetural aprovada ÔÇö Google Ads e retirada completa da Extens├úo ÔÇö 2026-08-02
+
+- SDD aprovada em `propostas/migracao-google-ads-retirada-extensao.md`; a decis├úo ainda n├úo est├í implementada e n├úo autoriza c├│digo automaticamente.
+- Decis├úo: preservar `allintitle`/KGR hist├│ricos; keywords novas podem existir sem ambos; aus├¬ncia permanece indispon├¡vel, nunca zero; Google Ads centraliza ideias, volume, hist├│rico, CPC, lances e concorr├¬ncia Ads server-side.
+- Fronteira preservada: Serper continua provider can├┤nico do Radar para primeira p├ígina e evid├¬ncias SERP. Google Ads n├úo substitui nem altera Serper, os contratos ou o fluxo do Radar; provider aproximado de allintitle seria frente separada e n├úo requisito.
+- Gates: definir conta anunciante por marca, aprovar targeting/cache, implementar com fixtures, executar smoke manual de uma keyword, comprovar paridade e somente ent├úo congelar/remover Extens├úo e RapidAPI.
+- Restri├º├Áes: n├úo chamar APIs reais em testes, n├úo expor credenciais, n├úo confundir MCC com conta anunciante, n├úo presumir BRL, n├úo apagar m├®tricas hist├│ricas nem alterar Arquiteto/Radar silenciosamente.
+
+## Alta prioridade ÔÇö homologar falha allintitle com diagn├│stico preservado
+
+- Recarregar a extens├úo a partir desta pasta e executar uma medi├º├úo pequena autenticada; se a persist├¬ncia falhar, registrar o c├│digo exibido e o diagn├│stico copi├ível para corrigir a causa remota sem mascar├í-la como `no_persisted_allintitle_results`.
+- Confirmar que resultado confirmado atualiza a tabela diretamente, sem pr├®via, e que falha preserva o valor anterior.
+
+> **Estado vigente ÔÇö 2026-07-27:** 0005/0006 n├úo s├úo tarefas pendentes de aplica├º├úo. O resultado remoto registrado em `estado-atual.md` e `docs/compartilhado/supabase.md` informa 0006 aplicada com validation `READY`; n├úo reexecutar nem executar rollback. Pend├¬ncias de browser autenticado, RLS real e smoke test continuam manuais.
+
+## Forma├º├úo compartilhada KGR ÔÇö registrado em 2026-07-21
+
+- Feito localmente: evid├¬ncia de Site preservada sem confirma├º├úo autom├ítica.
+- Pendente: qualifica├º├úo humana/real no Minerador, snapshot SQL/RLS e valida├º├úo manual autenticada.
+## Homologacao da selecao e do retorno allintitle - 2026-07-29
+
+- Pendente manual: depois de recarregar a extensao, repetir uma medicao ja processada e confirmar que cada resultado confirmado aparece diretamente na tabela, sem painel de previa ou confirmacao adicional.
+- Pendente manual: recarregar a extensao e testar clique comum, Ctrl/Cmd, Shift e pintura no popup e na tabela, iniciando em checkbox marcado e desmarcado; confirmar que o clique seguinte nao fica suprimido e que nao ha atraso perceptivel.

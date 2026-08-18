@@ -1,11 +1,12 @@
 export type VolumeMetricPatch = {
   volume_search?: number;
   kgr_score?: number | null;
-  volume_source?: "real";
+  volume_source?: "real" | "google_ads";
   analise_semantica?: Record<string, unknown>;
 };
 
 export type ExistingVolumeMetrics = {
+  status?: string;
   volume_search: number | null;
   results_allintitle: number | null;
   kgr_score: number | null;
@@ -192,6 +193,53 @@ export function normalizeSeoKeywordResearchResponse(
   const volume = typeof rawVolume === "number" && Number.isFinite(rawVolume) ? rawVolume : null;
   if (volume === null || volume < 0) {
     return { keyword: requestedKeyword, status: "error", error: "A keyword exata não possui avg_monthly_searches numérico válido." };
+  }
+
+  return { keyword: requestedKeyword, status: "success", volume };
+}
+
+function parseAbbreviatedVolume(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : null;
+  if (typeof value !== "string") return null;
+
+  const match = value.trim().toLowerCase().match(/^(\d+(?:[.,]\d+)?)\s*([km]?)$/);
+  if (!match) return null;
+
+  const numeric = Number(match[1].replace(",", "."));
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  const multiplier = match[2] === "k" ? 1_000 : match[2] === "m" ? 1_000_000 : 1;
+  return numeric * multiplier;
+}
+
+/**
+ * SEO Keyword Research Tool's global-volume endpoint groups results by
+ * country under `Keyword Overview`. The Brazil group is the only eligible
+ * source for the Minerador's Brazilian volume measurement; global and other
+ * countries must never be used as a fallback for a missing BR result.
+ */
+export function normalizeSeoKeywordResearchToolResponse(
+  payload: unknown,
+  requestedKeyword: string,
+): VolumeLookupResult {
+  if (!payload || typeof payload !== "object") {
+    return { keyword: requestedKeyword, status: "error", error: "Resposta SEO Keyword Research Tool não possui Keyword Overview válido." };
+  }
+
+  const overview = (payload as { "Keyword Overview"?: unknown })["Keyword Overview"];
+  if (!overview || typeof overview !== "object" || !Array.isArray((overview as { BR?: unknown }).BR)) {
+    return { keyword: requestedKeyword, status: "not_found" };
+  }
+
+  const requestedKey = normalizeVolumeKeyword(requestedKeyword);
+  const exact = (overview as { BR: unknown[] }).BR.find((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    return normalizeVolumeKeyword((entry as { keyword?: unknown }).keyword) === requestedKey;
+  });
+  if (!exact) return { keyword: requestedKeyword, status: "not_found" };
+
+  const volume = parseAbbreviatedVolume((exact as Record<string, unknown>)["searche volume"]);
+  if (volume === null) {
+    return { keyword: requestedKeyword, status: "error", error: "A keyword exata não possui searche volume brasileiro válido." };
   }
 
   return { keyword: requestedKeyword, status: "success", volume };

@@ -6,6 +6,8 @@ Proposta autorizada localmente em 2026-07-26; implementação bloqueada até a i
 
 > **Estado vigente — 2026-07-27:** cadastro manual e login manual continuam operacionais; Google OAuth está suspenso; NextAuth/Auth.js ainda possui consumidores; Google Sheets permanece separado. Supabase Auth é a decisão aprovada para convergência, não a arquitetura já consolidada. Não instalar dependências nem retirar NextAuth nesta tarefa.
 
+> **Fase preparatória — 2026-08-05:** `@supabase/ssr` foi instalado manualmente e clientes/callback/refresco de cookies foram preparados localmente. NextAuth não foi removido, nenhum consumidor privado foi migrado e Google permanece desativado até smoke completo.
+
 ## Contexto
 
 O projeto possui dois caminhos ativos de sessão:

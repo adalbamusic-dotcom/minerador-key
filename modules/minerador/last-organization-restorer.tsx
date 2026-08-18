@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { mineradorLastOrganizationKey, normalizeMineradorLastOrganization, parseMineradorLastOrganization, type MineradorOrganizationValues } from "@/lib/minerador/last-organization";
+import { MINERADOR_ORGANIZATION_STORAGE_VERSION, mineradorLastOrganizationKey, normalizeMineradorLastOrganization, parseMineradorLastOrganization, type MineradorOrganizationValues } from "@/lib/minerador/last-organization";
 
 type Props = {
   userId: string;
@@ -12,6 +12,13 @@ type Props = {
   onApply: (values: MineradorOrganizationValues) => void;
   onHydrated: (key: string) => void;
 };
+
+function serializeMineradorOrganization(values: MineradorOrganizationValues) {
+  return JSON.stringify({
+    ...values,
+    organizationStorageVersion: MINERADOR_ORGANIZATION_STORAGE_VERSION,
+  });
+}
 
 /** Minerador-only compatibility reader for the existing last-view local preference. */
 export function MineradorLastOrganizationRestorer({ userId, brandId, ready, knownListIds, values, onApply, onHydrated }: Props) {
@@ -37,7 +44,7 @@ export function MineradorLastOrganizationRestorer({ userId, brandId, ready, know
       persistedValueRef.current = raw;
       const parsed = parseMineradorLastOrganization(raw);
       if (parsed) applyRef.current(normalizeMineradorLastOrganization(parsed, knownListIdsKey ? knownListIdsKey.split("|") : []));
-      else if (raw === null) window.localStorage.setItem(key, JSON.stringify(valuesRef.current));
+      else if (raw === null) window.localStorage.setItem(key, serializeMineradorOrganization(valuesRef.current));
     } catch {
       // Preferências indisponíveis ou inválidas não são removidas nem alteram a tabela.
     } finally {
@@ -49,7 +56,7 @@ export function MineradorLastOrganizationRestorer({ userId, brandId, ready, know
   useEffect(() => {
     if (!key || hydratedKey.current !== key) return;
     if (skipInitialPersistKey.current === key) { skipInitialPersistKey.current = null; return; }
-    const serialized = JSON.stringify(values);
+    const serialized = serializeMineradorOrganization(values);
     if (serialized === persistedValueRef.current) return;
     try {
       window.localStorage.setItem(key, serialized);

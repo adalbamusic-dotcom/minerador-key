@@ -76,6 +76,14 @@ O item Radar já recebe `arquitetoStrategyContext` opcional; a extensão permane
 - Arquivos desta rodada: `lib/radar/strategy-context.ts`, `lib/radar/analysis-contracts.ts`, `lib/radar/evidence-package.ts`, `components/radar/radar-analysis-page.tsx`, `tests/radar-kgr-context.test.mts`, SDD e documentação do Radar.
 - Testes focados: 24 passaram. Lint direcionado do Radar passou. O build deve ser executado novamente; `tsc --noEmit` global permanece limitado por erros existentes em `lib/planejador/**` e `tests/site-kgr-contract.test.mts`, sem alteração nesses arquivos.
 
+## Relatorio competitivo - 2026-07-28
+
+- **Verificado no codigo:** `RadarCompetitiveReport` aditivo registra referencias de identidade/DNAs/SERP/analise, workflow, respostas, perguntas, concorrentes, benchmark comparavel, frequencias observadas, semantica, links, elementos visuais, necessidades, limitacoes, hash e proveniencia.
+- **Verificado no codigo:** a aprovacao do Radar consolida o relatorio na mesma versao e o inclui no `RadarEvidencePackage`; o pacote preserva a fronteira do Planejador e nao envia outline, CTA, densidade ou metas finais.
+- **Confirmado por teste:** `tests/radar-competitive-report.test.mts` cobre amostra pequena, exclusao de video/parcial, resposta pendente, frequencia body-only, hash e pacote aditivo. Build, TypeScript e lint direcionado do Radar passam.
+- **Ainda nao verificado:** aprovacao e persistencia remota com artigo real, navegacao autenticada, e validacao visual manual nos quatro breakpoints. Nenhuma chamada real Serper ou escrita remota foi feita.
+- **Limitacao conhecida:** `tests/radar-hydration.test.mts` continua falhando em fixture legado do Arquiteto por `fallbackHierarchyStrategy` sem `score/components`; nao foi alterado por permanecer fora do escopo Radar.
+
 ## Fechamento de usabilidade e coerência — 2026-07-21
 
 - Estados de investigação, publicação da versão e transferência ao Planejador foram separados na página própria. Itens orgânicos pendentes continuam impedindo a conclusão da investigação; envio anterior não conclui a versão atual.
@@ -86,9 +94,49 @@ O item Radar já recebe `arquitetoStrategyContext` opcional; a extensão permane
 - Arquivos principais: `components/radar/radar-analysis-page.tsx`, `lib/radar/analysis-contracts.ts`, `lib/radar/analysis-insights.ts`, `lib/radar/workflow-insights.ts`, `lib/radar/evidence-package.ts`, `tests/radar-usability.test.mts` e `tests/radar-navigation.test.mts`.
 - Testes confirmados nesta rodada: 19 testes focados do Radar, `tsc --noEmit` e lint direcionado do escopo Radar. Nenhuma chamada real Serper, escrita remota, migration, commit ou deploy foi executada.
 - Validação pendente: quatro cenários manuais (artigo novo, publicado, SERP pendente e atualização após envio) e uma única coleta Serper autenticada acionada explicitamente pelo usuário.
+
+## Seleção, amostra e prévia do relatório — 2026-07-29
+
+- Verificado no código: a seleção de uma referência principal ou de apoio já a coloca na fila de análise; a tela não possui checkbox nem ação individual de extração. Formato, artigo próprio e exclusão têm funções próprias e mutuamente exclusivas.
+- Verificado no código: a ação coletiva mostra `Analisar referências selecionadas (N)`, fica desabilitada como `Análise da amostra atualizada` quando não há páginas novas e não reprocessa URLs já extraídas. Decisões, motivos e notas continuam em sucessoras versionadas do payload existente.
+- Verificado no código: o progresso agora usa `Relatório gerado`, e a próxima ação distingue páginas pendentes, amostra observada, prévia revisável, aprovação humana e transferência.
+- Verificado no código: cada alteração de curadoria ou análise gera uma prévia `RadarCompetitiveReport` draft antes da aprovação. O relatório detalhado possui um único título com modo, status e versão; inclui amostra, referências por função, perfil, keywords observadas, semântica, respostas, DNA, necessidades, visuais, links e limitações.
+- Verificado no código: uma página comparável é exibida como valor observado, sem média/mediana de mercado; KGR leve não exige três páginas para gerar prévia.
+- Confirmado por teste: suíte focada desta rodada com 32/32 testes, `tsc --noEmit`, lint direcionado e build passaram. A suíte ampla `tests/radar*.test.mts` ficou em 58/59; a única falha continua sendo o fixture legado fora do escopo em `tests/radar-hydration.test.mts` (`fallbackHierarchyStrategy` sem `score/components`).
+- Ainda não verificado: comportamento autenticado no navegador, persistência remota, coleta real Serper, extração de páginas externas, responsividade e contraste em light/dark. Nenhuma escrita remota, migration, commit ou deploy foi executada.
+
+## Painel de progresso restrito ao Resumo — 2026-07-29
+
+- Verificado no código: o painel completo de fluxo e progresso pertence exclusivamente ao Resumo. As demais áreas mostram somente orientações contextuais relacionadas à tarefa atual.
+
+## Correção da resolução da aba Análise da amostra — 2026-07-29
+
+- Causa registrada: a página consultava `tabAliases[requestedTab]` diretamente, sem normalização centralizada do parâmetro e sem cobertura explícita para variantes legadas. A renderização, o cabeçalho e o estado visual dependiam desse lookup bruto.
+- Verificado no código: `resolveRadarTab` agora normaliza espaços/caixa, resolve `analise-amostra`, `analise_amostra` e `analysis` para a seção canônica e usa `resumo` somente para valores desconhecidos. O mesmo estado resolvido controla o botão ativo, `Etapa atual` e o componente renderizado.
+- Confirmado por teste: a URL `?tab=analise-amostra` resolve para a Análise da amostra; o conteúdo do Resumo não é montado nessa área; o retorno para Resumo restaura o painel; troca de aba não cria versão e os aliases/ fallback permanecem cobertos.
 # Roteamento tenant — 2026-07-23
 # Consolidacao fisica dos modulos - 2026-07-23
 - Implementacao proprietaria consolidada em modules/radar; wrappers canonicos permanecem finos.
 - Suite focada desta rodada: 212/212; browser autenticado, persistencia remota e build continuam pendentes.
 
 - Adicionado wrapper canônico `/{brandRef}/radar`; pesquisa, evidências e persistência existente foram preservadas.
+
+## Correção localizada — navegação canônica do artigo — 2026-07-28
+
+- **Verificado no código:** a origem do 404 era `modules/radar/radar-page.tsx`, que montava `/radar/{row.articleId}`. A rota vigente é `app/(brand)/[brandRef]/radar/[articleId]/page.tsx`.
+- **Verificado no código:** o destino agora é `/{brandRef}/radar/{articleDnaVersionId}`. O `brandRef` é preservado da rota tenantizada e o ID é obtido por `radarCanonicalRouteKey`; `pub-k-*`, ID do relatório e ID de snapshot continuam somente compatibilidade/resolução, não destino novo.
+- **Verificado no código:** `requireTenantModule(brandRef, "radar")` valida sessão, marca e módulo antes da página; o pipeline exibido permanece escopado à marca ativa, sem busca global ou fallback para outro tenant.
+- **Verificado no código:** Radar, Arquiteto, Planejador, detalhe do Radar e helper operacional não montam mais o detalhe global `/radar/{id}`. Sem `brandRef` válido, as ações ficam desabilitadas com `Contexto da marca não disponível`.
+- **Confirmado por teste:** `tests/radar-canonical-navigation.test.mts`, `tests/radar-route-resolution.test.mts` e `tests/tenant-routing.test.mts` passam (11 testes).
+- **Ainda não verificado:** smoke test autenticado em Adalba/Lindisse, abertura real do artigo e isolamento observado no navegador; nenhum relatório, SERP, persistência, migration ou provider foi alterado nesta correção.
+
+
+## Reorganização do fluxo por modo — 2026-07-29
+
+- Verificado no código: o detalhe do Radar usa cinco áreas (Resumo, Selecionar referências, Análise da amostra, Relatório, Histórico), com modo e etapa atual no cabeçalho e progresso único em seis estados.
+- Verificado no código: a sugestão de modo respeita KGR recebido, mantém ausência explícita e não inicia coleta automática. A decisão humana pode substituir a sugestão antes da criação da versão de análise.
+- Verificado no código: a seleção mantém todos os resultados da SERP visíveis; artigo próprio não é enviado para extração/benchmark, e formatos de vídeo/social/outros são referências de formato fora do benchmark editorial.
+- Verificado no código: a análise da amostra separa estrutura, páginas analisadas, formatos, semântica central/relevante/ignorada e recuperação manual. O relatório recebe título por modo e a aprovação/envio continuam usando RadarCompetitiveReport e RadarEvidencePackage existentes.
+- Confirmado por teste: tests/radar-flow-organization.test.mts, tests/radar-navigation.test.mts, tests/radar-usability.test.mts, tests/radar-analysis.test.mts, tests/radar-kgr-context.test.mts e tests/radar-competitive-report.test.mts passam (25 testes focados); tsc --noEmit e lint direcionado do escopo alterado passam.
+- Ainda não verificado: navegação autenticada, persistência remota, isolamento observado no navegador, responsividade real em 360/768/1024/1440 e contraste visual em light/dark. Nenhuma coleta real Serper, escrita remota, migration, commit ou deploy foi executada nesta rodada.
+- Contratos preservados: não foram criadas entidades, migrations ou alterações em ArticleDNA, SiloDNA, KeywordDNA, slug, canonical, marca, URL, ContentPlan ou lógica interna do Planejador.

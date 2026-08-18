@@ -38,3 +38,42 @@ Preferências avançadas e gestão de segurança de conta.
 `modules/conta/account-page.tsx`, sessão e `BrandProvider`.
 ## 19. Arquivos proibidos sem autorização
 Autorização compartilhada, Marca e módulos editoriais.
+
+## 20. Autenticação manual
+Os formulários ativos de login e cadastro usam o componente compartilhado PasswordField. Login utiliza autocomplete current-password; senha e confirmação de cadastro utilizam new-password. Cada campo controla visibilidade independentemente, sem registrar ou enviar a senha ao Admin.
+
+O cadastro cria somente a identidade Auth. Não há tela ativa de redefinição de senha nem de conclusão de convite nesta etapa; o aceite completo de convite permanece pendente em backlog.
+
+## 21. Contrato R4 do shell e Conta pessoal
+
+`/conta` é a rota pessoal canônica da identidade autenticada. O `proxy` não
+pode tratá-la como destino tenant legacy nem encaminhá-la para
+`/selecionar-marca`. A cadeia real é `app/(personal)/conta/page.tsx`,
+`getCanonicalPersonalAccount()` e `PersonalAccountPage`; a área não exige Brand,
+Agency ou seleção de contexto.
+
+`ProductShell` pode ser instanciado por layouts de route groups diferentes, mas
+o estado visual `expanded` pertence ao `ShellVisualProvider` persistente sob
+`Providers`. `mobileOpen` permanece local ao drawer e pode fechar após
+navegação mobile. Autorizações, contexto de rota, Brand operacional e
+revalidação server-side permanecem separados desse estado visual.
+
+## 22. Contrato R5 de estabilidade visual do shell
+
+O layout raiz le `minerador-key-shell-expanded` e
+`minerador-key-operational-brand` por `cookies()` no servidor. O primeiro
+cookie inicializa a expansao sem depender da hidratacao; o segundo e somente
+uma dica de navegacao e so e aceito depois de `listCanonicalAccessibleBrands`
+confirmar o escopo operacional. Dica ausente ou invalida nao cria autorizacao
+nem Brand ativa.
+
+`localStorage` permanece como compatibilidade de preferencias antigas, mas nao
+substitui o estado inicial server-readable quando o cookie existe. O shell nao
+usa timeout, overlay ou opacity para esconder carregamento. O controle de
+expansao e externo ao fluxo e revela seu indicador apenas em hover ou
+`focus-visible`.
+
+O label visual global e `Perfil`, mas a rota pessoal permanece `/conta`.
+`ROUTE_AGENCY_SINGULAR_REVIEW` fica registrado como divida: a rota atual e
+`/agencias/{agencyRef}` e uma possivel forma futura `/agencia/{agencyRef}` nao
+faz parte desta fase.

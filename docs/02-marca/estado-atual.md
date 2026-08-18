@@ -84,6 +84,34 @@ O Site/Sitemap agora preserva evidência de campos convergentes (`sourceFields`)
 - A confirmacao do lote continua explicita e o destino continua sendo uma lista existente validada para a marca.
 - O payload aditivo agora pode registrar no `site_origin` a associacao do destino (`siloId`/`siloName`) e o instante de consolidacao, junto com URL resolvida, canonical e publicacao observadas.
 - Nenhuma entidade nova, migration, publicacao automatica ou alteracao no Arquiteto foi executada; validacao remota e browser autenticado continuam pendentes.
+
+### Harmonizacao visual do modulo Marca - 2026-07-27
+
+- **Verificado no codigo:** as superficies ativas de Visao geral, Site e Sitemap, BrandDNA, Materiais, Skills e prompts, Equipe/convites e Configuracoes foram revisadas sem alterar handlers, contratos, tenantizacao, autenticacao ou persistencia.
+- O shell reutiliza `ModuleHeader`, as abas internas permanecem tenantizadas e a aba Site/Sitemap conserva seu scroll vertical proprio, rolagem horizontal de tabelas e estado de painel na URL.
+- A hierarquia agora diferencia cabecalho de modulo, titulo da secao, metricas, formularios, tabelas, estados vazios e mensagens de operacao. Textos essenciais usam no minimo 14px, controles possuem foco visivel e mensagens operacionais usam `aria-live`/`role=status` quando aplicavel.
+- Foram removidos backgrounds/cores crus e tipografia excessivamente compacta do escopo Marca. Nenhum token global ou componente compartilhado foi alterado; os componentes compartilhados existentes foram apenas reutilizados.
+- Especialistas nao aparecem como tela ativa independente no inventario atual; o papel continua disponivel no fluxo de convites. Materiais e Skills/prompts permanecem colecoes locais, sem nova persistencia.
+- **Confirmado por teste:** suíte focada Marca/Auth/tenant passou 35/35; TypeScript, ESLint focalizado e `git diff --check` passaram. Build e validacao manual autenticada permanecem separados.
+- **Ainda nao verificado:** comportamento visual em navegador autenticado, resolucoes 1440/1024/768/360, dark mode, teclado/foco/hover, troca real entre Adalba e Lindisse e ausencia de erros no console.
+- Nenhuma operacao remota, SQL, migration, escrita Supabase, commit, push ou deploy foi executada.
+
+### Correcao da direcao visual da Marca apos reprovacao manual - 2026-07-27
+
+- **Relatado e confirmado na revisao visual:** a rodada anterior ficou generica, com roxo decorativo, abas em capsulas, bordas e superficies repetidas, BrandDNA dentro de moldura extensa e o campo de posicionamento com aparencia de editor tecnico.
+- A Marca agora usa composicao dark neutra: grafite, cinza, texto off-white, divisores discretos, verde somente para aprovacao, amarelo somente para atencao e acao principal neutra solida.
+- As abas da Marca e os modos do Site/Sitemap usam navegacao horizontal simples, fundo transparente, sem borda individual de botao e com indicador inferior discreto na aba ativa. Rotas, `brandRef`, `secao`, `painel` e teclado foram preservados.
+- BrandDNA deixou de ser um card externo; o cabecalho concentra titulo, descricao, estado discreto e acoes. Os campos usam tipografia de texto normal, fundo neutro, line-height confortavel e scroll integrado.
+- O `ModuleHeader` recebeu apenas a variante aditiva `tone="neutral"`; consumidores que nao a informam mantem o comportamento anterior. Nenhum token global foi alterado.
+- **Confirmado por teste:** testes focados Marca/Auth/tenant 35/35, TypeScript, ESLint focalizado, build e `git diff --check` passaram. O scan local nao encontrou roxo/gradiente/cores cruas no escopo `modules/marca`.
+- **Ainda nao validado manualmente:** navegador autenticado em Adalba/Lindisse, desktop/notebook/tablet/mobile, dark mode, contraste, hover, foco, rolagem do textarea, console e troca de marca real.
+
+# Autorização herdada Agency → Brand - 2026-08-10
+
+- **Implementado localmente:** `agency_brands(status = active)` passou a ser consumido como vínculo operacional herdado, sem criar `brand_memberships` artificiais e preservando `brandId = public.marcas.id`.
+- **Implementado localmente:** restrições persistentes por Brand, Agency e capability, com status revogado e actor/timestamps de auditoria; a restrição bloqueia a capability sem remover o vínculo.
+- **Verificado localmente:** Brand collaborator continua no caminho direto de `brand_memberships`; Agency owner/member usa o caminho Agency → Brand e só recebe capabilities autorizadas.
+- **Pendente:** preflight e RLS remotos, aplicação da 0021, definição/validação manual de grants de membros e smoke autenticado. Nenhuma Brand legada foi reescrita.
 # Roteamento tenant — 2026-07-23
 # Consolidacao fisica dos modulos - 2026-07-23
 - Implementacao proprietaria consolidada em modules/marca; wrappers canonicos permanecem finos.
@@ -91,3 +119,43 @@ O Site/Sitemap agora preserva evidência de campos convergentes (`sourceFields`)
 
 - Implementado localmente: wrappers canônicos `/{brandRef}/...`, contexto de tenant resolvido no servidor e seleção autenticada de marcas.
 - Limite: `brandId` é o tenant canônico e `brandRef` é a referência pública; owner, membership, plano e estado ativo continuam sujeitos às evidências/documentos de autorização e às validações remotas pendentes.
+
+### Conexão Google Ads da Marca — 2026-08-03
+
+- **Verificado no código:** `Marca → Configurações` contém o painel operacional mínimo de conexão Google Ads. Ele reutiliza `GET` e `POST /api/minerador/marcas/[brandId]/google-ads/conexao`, sempre no `brandId` da marca ativa, sem integrar esses dados ao BrandDNA ou alterar a rota de métricas.
+- A leitura inicial devolve somente dados sanitizados: IDs mascarados, presença de MCC, moeda, fuso horário, targeting e data de validação. A validação real da conta só é iniciada pelo botão explícito; credenciais OAuth e tokens não são enviados ao navegador.
+- **Autorização verificada no código:** owner e qualquer colaborador com `minerador:manage` são aceitos pela rota. Sem essa permissão, o painel informa o bloqueio e não permite alteração.
+- Conexão ativa exige confirmação explícita e novos IDs completos antes da revalidação/substituição; não existe edição silenciosa. A validação no navegador exige IDs de 10 dígitos sem hífens, MCC opcional e uma a dez localizações.
+- **Ainda não verificado manualmente:** autenticação real de owner e colaborador, isolamento Adalba/Lindisse, validação com IDs reais, resposta de moeda/fuso e atualização de métricas no Minerador.
+- Nenhuma operação Google Ads real, SQL, migration, alteração de credenciais, commit, push ou deploy foi executada pelo agente.
+# Preparação canônica compartilhada — 2026-08-06
+
+- **Preparado localmente:** resolvedor estrito de `brandRef = slug--brandId` e autorização editorial por `marcas.owner_user_id` ou membership UUID ativa.
+- **Preservado:** rotas, `BrandProvider`, seleção local e consumidores atuais continuam no contrato híbrido até o corte aprovado.
+- **Ainda não verificado:** owners/memberships remotos, `user_key`, policies, grants e dados necessários ao backfill.
+## Fase 2A — entrada canônica da Marca — 2026-08-06
+
+- **Verificado no código:** `/{brandRef}/` usa `slug--UUID` estrito, confirma o slug da marca buscada por ID e autoriza owner diretamente por `owner_user_id` ou colaborador por `member_user_id` ativo com `marca:view`.
+- **Edição:** `PUT /api/marcas` aceita owner ou colaborador apenas com `marca:manage`; Administração global continua sendo a alternativa explícita para gestão global. Nenhuma decisão usa e-mail, `user_key`, `perfis.marca_id` ou seleção local.
+- **Preservado:** Minerador, Arquiteto, Radar, Planejador, Redator e Publicações não foram migrados. Não houve alteração remota de dados, owners, memberships, RLS, providers ou Google Ads.
+- **Pendente:** smoke owner/colaborador, slug divergente, marca inativa, reload, isolamento Adalba/Lindisse e responsividade/teclado no navegador autenticado.
+
+## Google Ads Research Customer ID da Plataforma — 2026-08-15
+
+- **Verificado no código e navegador:** a configuração ativa da Marca não exige nem exibe Customer ID Google Ads para Keyword Discovery/Metrics. A tela informa que a pesquisa usa a Connection global e o Research Customer ID da Plataforma.
+- **Preservado:** o componente/rota de vínculo externo da Brand permanece no checkout para futuras operações de campanhas, anúncios, gastos, conversões e orçamento; não é usado pelo resolvedor de pesquisa.
+
+## Consumo pela Minha Agência — 2026-08-10
+
+- **Verificado no código:** a lista da Agency lê Brands por `agency_brands` ativo e `marcas`; a referência de entrada continua sendo `brandId`/`brandRef` canônico.
+- **Verificado no código:** `Cadastrar Marca` cria a Brand com o owner canônico da Agency e o vínculo operacional, sem criar `brand_memberships` para membros da Agency.
+- **Fora desta fase:** BrandDNA, colaboradores próprios, restrições por área/capability, activity, notificações e qualquer pipeline editorial automático.
+- **Pendente:** validação manual autenticada e qualquer implementação futura da interface de restrições explícitas da Brand.
+
+## Cadastro operacional e first-run — 2026-08-10
+
+- **Formulário restaurado:** nome, website, nicho operacional e localização/área de atuação, todos já presentes nos contratos de dados consumidos por `public.marcas`.
+- **Separação preservada:** BrandDNA, propósito, público-alvo, posicionamento, tom de voz, keywords, SERP e silos não são criados nem alterados pelo cadastro da Agency.
+- **Home de Brand nova:** a rota `/{brandRef}` não depende de `pipeline.snapshot` para renderizar uma visão operacional. O BrandDNA é consultado somente para informar seu estado e o CTA encaminha à aba canônica `?secao=dna`.
+- **Listagem:** a Agency mostra Marca, status traduzido, website, owner quando disponível e ação de entrada; não exibe texto bruto de `dna_diretrizes` como resumo.
+- **Preservação:** Adalba, Lindisse e CareGlow não foram apagadas, recriadas ou alteradas por operação remota.

@@ -1,10 +1,45 @@
 # Spec — Minerador
 
+## Arquitetura aprovada de providers — plataforma, agência e marca
+
+`brand_id` permanece o único tenant de dados do Minerador. Agência é escopo operacional separado: pode administrar conexões de providers e consumo de várias marcas vinculadas, mas nunca autoriza leitura, escrita ou fallback entre seus dados. Google Ads evolui para conexão técnica global server-side; DataForSEO evolui para conexão operacional por agência; os dois contratos devem resolver marca, autorização, agência e provider no servidor antes de qualquer chamada externa.
+
+Até a implementação aprovada na SDD `propostas/arquitetura-provedores-plataforma-agencia.md`, Google Ads continua com conexão operacional por marca, DataForSEO continua lendo a credencial global atual para allintitle e Serper continua provider do Radar. A futura substituição de Serper por DataForSEO exige paridade de contrato, testes e smoke autenticado; não há fallback silencioso entre agência, provider ou marca.
+
+## Regra vigente — Extensão Chrome removida — 2026-08-04
+
+A Extensão Chrome não faz parte da aplicação. Não deve existir bridge, background, script injetado, fila em `chrome.storage`, listener `window.postMessage` exclusivo, notificação Chrome ou instrução de `chrome://extensions` como dependência produtiva.
+
+As ações explícitas de medição allintitle em Descobrir Keywords e Processar Keywords usam o provider DataForSEO server-side. A consulta é `allintitle:"<keyword>"`; o total operacional é exclusivamente `se_results_count`. `items_count`, quantidade de itens e `organic.length` não são totais válidos; zero só é aceito quando explícito.
+
+Sem credenciais DataForSEO, a ação retorna configuração ausente sem chamada paga. Colunas e valores allintitle já persistidos continuam visíveis; falhas de medição não apagam dados, não alteram `measured_at`, não alteram KGR e não substituem valores atuais.
+
+Google Ads, DataForSEO, importação compartilhada, Descoberta, Processador, métricas atuais, histórico e KGR permanecem ativos. Serper continua provider canônico do Radar; não é usado para allintitle. A substituição de allintitle ocorre somente após confirmação, a falha preserva integralmente o valor anterior e o KGR é recalculado após métricas confirmadas.
+
+As seções históricas que mencionam a Extensão descrevem decisões e implementações anteriores; esta regra tem precedência para o comportamento atual.
+
+### Contrato vigente do allintitle DataForSEO
+
+- Endpoint server-side: `POST /v3/serp/google/organic/live/regular`.
+- Payload mínimo: consulta `allintitle:"<keyword>"`, localidade DataForSEO resolvida, idioma, `desktop`, `depth = 10` e `tag = operationRequestId`.
+- Provider/version: `dataforseo` / `v3`; custo fica somente na auditoria server-side.
+- Escopo operacional: Brasil e português no primeiro MVP. Resource names estaduais da Google Ads não são enviados diretamente à DataForSEO e não há soma automática de UFs.
+- Keywords oficiais e candidatas usam a mesma integração; candidatas importadas refletem a keyword oficial vinculada.
+- A ação é explícita, não roda ao abrir, selecionar, filtrar ou ordenar e bloqueia duplicação pelo `operationRequestId`.
+
 O Minerador qualifica a keyword e fornece, quando disponíveis, classificação KGR/não KGR/candidata/desconhecida, score, volume, resultados, intenção, confiança, origem, publicação, URL, slug, canonical e evidências. O Arquiteto não recalcula esses dados nem os transforma automaticamente em tipo de unidade ou perfil SERP; usa-os como origem para decisões editoriais humanas.
 
 ## Regra compartilhada de qualificação
 
 O Minerador é a autoridade para volume, resultados, intenção, KeywordDNA e KGR. Evidência recebida do Site é aditiva, brand-scoped e não confirmada; novas keywords entram como `bruto` até ação explícita de qualificação. O Minerador não forma ArticleDNA nem decide a hierarquia do silo.
+
+### Funil na qualificação
+
+O Funil é uma dimensão estratégica opcional da qualificação da keyword, com valores restritos a `TOFU`, `MOFU` e `BOFU`. A proposta explícita é persistida aditivamente em `analise_semantica.funnel`, acompanhada, quando disponível, por `funnel_source`, `funnel_confidence`, `funnel_review_required` e `funnel_evidence`; não há coluna dedicada nem migration nova.
+
+`analise_semantica.extension_import.funnelHints` permanece evidência de origem da Extensão e nunca equivale a aprovação. A qualificação considera texto, intenção, sinais comerciais/informativos, etapa da jornada, nicho, localidade e hints, sem usar volume, resultados ou KGR como classificador isolado. Conflitos entre hint e proposta exigem revisão humana; decisões humanas identificadas no metadado são preservadas.
+
+A qualificação de intenção, Funil, nicho, viés e KeywordDNA ocorre somente por ação explícita sobre keywords selecionadas. O carregamento da tela não preenche nem persiste Funil ou KeywordDNA.
 ## 1. Propósito
 Importar, organizar e qualificar keywords de uma marca.
 ## 2. Responsabilidades
@@ -35,8 +70,14 @@ Supabase indisponível, lista sem keywords, sessão ausente e importação dupli
 Wrapper de rota em `app/(brand)/[brandRef]/minerador/page.tsx` e implementação funcional em `modules/minerador/minerador-workspace.tsx`, com Supabase browser autenticado e APIs auxiliares.
 ## 15. Critérios de aceite
 Importar, filtrar, selecionar e exportar não misturam marcas e retornam confirmação de persistência.
-## 16. Fora do escopo atual
-Mudança estrutural da implementação do Minerador ou schema novo.
+## 16. Descoberta persistente — Fase 4 aprovada
+
+`/{brandRef}/minerador/descobrir` persiste cada execução concluída e todas as candidatas normalizadas em entidades próprias e tenantizadas de descoberta. A tabela da Descoberta mostra somente candidatas aprovadas pelos filtros; candidatas filtradas permanecem como histórico e não são inseridas em `keywords_kgr` automaticamente.
+
+A mesma `brand_id + operation_request_id` é idempotente. Após recarregar a rota, a última execução concluída ou parcial pode ser restaurada sem nova chamada ao Google Ads; o rascunho da próxima pesquisa e a organização/seleção local continuam independentes do snapshot executado. Falhas de provider ou persistência preservam a última pesquisa válida e não transformam ausência em zero.
+
+## 17. Fora do escopo atual
+Importação da Descoberta ao Processador, exclusão/retenção de histórico e execução remota da migration.
 ## 17. Arquivos pertencentes ao módulo
 `app/(brand)/[brandRef]/minerador/page.tsx`, `app/api/mine`, `volume`, `analyze`, `clusterize`.
 ## 18. Arquivos compartilhados consumidos
@@ -171,3 +212,97 @@ O listener de `minerador:extension-handshake-ping` permanece independente do est
 Volume e `results_allintitle` são métricas independentes. A decisão humana de aplicabilidade não inicia coleta externa; quando aplicável, o KGR é calculado localmente com as duas métricas persistidas. A decisão não aplicável preserva as métricas e apenas retira o score da estratégia.
 
 Se a RapidAPI responder HTTP 429, o Minerador informa somente `Não foi possível coletar volume.`. A rota encerra a coleta, não faz retry automático, não transforma a falha em zero e não altera nenhum registro ou metadado existente.
+
+## 41. Persistência server-side de `results_allintitle` — aprovada em 2026-07-29
+
+O allintitle continua sendo uma ação explícita da Extensão, mas sua execução é background-owned: o workspace entrega o lote por relay declarado, o background executa consultas sequenciais e envia cada resultado terminal ao endpoint autenticado `POST /api/extensao/marcas/{brandId}/keywords/resultados-allintitle`. O popup, a página e o estado `connected` não são requisitos para a continuidade do lote.
+
+O endpoint deriva o ator da sessão bearer da Extensão, valida acesso ativo ao tenant canônico e confere cada `keywordId` em `keywords_kgr.brand_id`. `success` com inteiro não negativo e `zero_results` com `0` atualizam somente `results_allintitle`; `unavailable`, `captcha`, `blocked`, `error`, `timeout` e `cancelled` preservam o valor anterior. Nenhum estado grava `null`, altera volume/KGR ou usa o endpoint de importação.
+
+O payload exige `operationRequestId`, `batchId` e de 1 a 10 itens com `requestId`, `keywordId`, status, valor confirmado quando aplicável e `measuredAt`. A resposta é individual por keyword (`persisted`, `preserved`, `rejected` ou `failed`) e repetir a mesma atualização na mesma linha é idempotente em efeito. Não há migration, tabela nova ou alteração de RLS.
+
+## 42. Seleção complementar por intervalo e arraste — 2026-07-29
+
+A seleção da tabela preserva clique individual, Ctrl/Cmd para alternância não contígua e Shift para intervalo pela ordem visual atual de `filteredKeywords`. Ctrl/Cmd+Shift adiciona o intervalo sem limpar a seleção existente. A âncora `lastSelectionAnchorId` é local, não persistida remotamente e é redefinida quando sai do conjunto visível.
+
+O arraste é complementar e atua somente nos controles de seleção. O gesto começa no estado inicial do checkbox, exige tolerância mínima de movimento, visita cada linha uma vez e aplica selecionar ou desmarcar até o botão ser solto. O cabeçalho atua somente nas linhas visíveis, mantém selecionadas ocultas e expõe estado misto acessível. Filtros, busca e ordenação não limpam a seleção existente.
+
+## 43. Extração localizada do contador allintitle no Google
+
+O leitor da Extensão procura primeiro os seletores semânticos conhecidos, incluindo `#result-stats` e `role=status`. Quando a página concluída não apresenta um contador nesses pontos, ele localiza e abre uma única vez o controle localizado como `Ferramentas`, `Tools` ou `Herramientas`, aguarda a estabilização do painel e consulta seus textos visíveis. A extração não usa a quantidade de cards orgânicos nem números sem a palavra `resultado`, `resultados`, `result` ou `results`.
+
+O parser aceita contagens localizadas com separadores de milhar e ignora o tempo entre parênteses. `success` exige contagem positiva, `zero_results` exige contador zero ou indicação explícita de ausência, e a página com resultados orgânicos sem contador retorna `unavailable`, código `result_count_not_found` e estágio `google_result_extraction`. Esse estado preserva a métrica anterior e exibe que a consulta foi concluída, mas o contador não pôde ser identificado.
+
+## 44. Ciclo de vida e reconciliação do lote allintitle
+
+O background mantém um ponteiro efêmero `allintitle:activeOperationByBrand:{brandId}` somente para estados `queued`, `running`, `paused` ou `captcha_required`. Estados `completed`, `cancelled`, `failed`, `interrupted` e `orphaned` permanecem no histórico com resultados e progresso, mas nunca bloqueiam uma nova operação.
+
+Ao iniciar o service worker, registros ativos sem executor vivo são marcados como `orphaned`, o ponteiro da marca é removido e a retomada passa a ser explícita. Uma operação viva retorna `allintitle_operation_active` no estágio `operation_guard`; uma operação órfã retorna `allintitle_operation_orphaned` no estágio `operation_reconciliation`. Cancelamento grava o estado terminal e libera a marca sem remover resultados persistidos.
+
+## 45.1 Medição de volume por Google Ads
+
+A ação explícita `Atualizar métricas` envia somente IDs e `operationRequestId` para a rota autenticada tenantizada do Minerador. Conta, MCC, idioma, geolocalização, rede, moeda e timezone são resolvidos no servidor pela conexão da marca. A consulta Google Ads preserva média mensal, série mensal, concorrência Ads, lances/CPC em micros, proveniência e versão.
+
+Cada resultado válido é persistido como medição versionada antes de atualizar `volume_search`. Falha parcial, ausência, quota ou OAuth preservam valores anteriores e nunca convertem `null` em zero. Lotes técnicos de até 10.000 são particionados internamente em sequência. A Extensão não mede volume; endpoints RapidAPI de volume estão congelados e não fazem fallback.
+
+## 47. Áreas Descobrir Keywords e Processar Keywords — MVP da Descoberta concluído
+
+O Minerador terá duas áreas: `/{brandRef}/minerador/descobrir` para descoberta, filtros, seleção e importação explícita; e `/{brandRef}/minerador` como Processar Keywords, preservando a planilha atual, métricas, qualificação, KGR, decisão humana e envio ao Arquiteto.
+
+Descoberta não é qualificação editorial. Google Ads Keyword Ideas é sua fonte canônica para volume, histórico, CPC e concorrência Ads; concorrência Ads nunca é usada como KD. Resultados, KD e SERP permanecem futuros e não bloqueiam o MVP. Candidatas só entram no Processador por ação humana explícita, tenantizada e idempotente, como Bruto, Keyword livre, sem lista artificial ou Silo/Categoria, com proveniência `discoveryRunId` preservada.
+
+`DiscoveryRun` e `DiscoveryCandidate` são entidades server-side tenantizadas no fluxo vigente. A seleção, tabela e barra inferior reutilizam componentes extraídos por composição, preservando clique, Ctrl/Cmd, Shift, pintura e selecionar visíveis. Foram validados manualmente a rota, pesquisa nacional, targeting com uma, duas e sete UFs, filtro de volume, persistência, reload, preservação da última pesquisa válida em falha e importação explícita de candidata nova até o Processador.
+
+A Extensão não é mais necessária para descobrir ou importar keywords. Ela permanece como executor produtivo de allintitle, agora consumido pelo Processador para keywords oficiais e pela Descoberta para candidatas, incluindo background, bridge, CAPTCHA, pausa, retomada e notificações. Não duplicar esse executor nem remover a Extensão enquanto o Processador ou a Descoberta dependerem dele.
+
+## 50. Fase 8 — métricas atuais e allintitle nas duas áreas — implementação autorizada localmente
+
+O contrato estrutural desta fase foi implementado no checkout local. `minerador_discovery_candidate_current_metrics` representa a projeção operacional atual da candidata e `minerador_discovery_candidate_metric_history` preserva o histórico append-only; o snapshot da DiscoveryRun não é sobrescrito. A migration aditiva `0013_minerador_discovery_candidate_current_metrics.sql` ainda não foi executada.
+
+O protocolo allintitle existente aceita `keywordId` para keywords oficiais e `candidateId` para candidatas. A Extensão permanece como executor único. Confirmados substituem os valores atuais somente após persistência; falhas preservam valores, data medida e KGR. Candidatas importadas mantêm `keyword_id` vinculado para refletir a mesma medição no Processador.
+
+A regra permanente de métricas é de substituição confirmada: uma medição nova de allintitle, volume, histórico mensal, CPC, concorrência Ads ou targeting substitui o valor operacional atual somente depois da persistência confirmada. Provider, versão e `measured_at` também são atualizados, e o KGR é recalculado com os valores atuais. O valor anterior fica somente em histórico técnico/auditoria.
+
+Falha, ausência, quota, CAPTCHA ou resposta não confirmada preserva integralmente os valores atuais, `measured_at` e KGR. Não se usa `null` para apagar, zero para representar ausência ou média entre medições. Em lote parcial, somente itens confirmados são substituídos.
+
+A integração da Descoberta usa a persistência tenantizada de allintitle para `DiscoveryCandidate` e o contrato aditivo que aceita `candidateId` sem exigir `keywordId` oficial. A Extensão continua sendo o executor técnico único; Descoberta e Processador consomem o mesmo protocolo, sem duplicar leitor, parser, fila, CAPTCHA, pausa ou retomada.
+
+Quando uma candidata possuir `imported_keyword_id`, a keyword oficial será a fonte atual compartilhada pelas duas áreas. A importação transferirá a medição confirmada e sua proveniência sem criar medição concorrente ou repetir automaticamente a consulta. A migration aditiva 0013 foi criada para essa lacuna e permanece pendente de aplicação manual; não foi executada nesta tarefa.
+
+## 49. Nucleo compartilhado de importacao
+
+Extensao e Descoberta devem chamar o mesmo servico server-side de importacao do Minerador. O nucleo normaliza com uma unica funcao neutra, deduplica dentro do lote, procura keywords somente na marca validada, preserva keywords existentes, cria novas como `bruto` com `lista_id = null` e devolve o `keywordId` oficial com resultado por item.
+
+A Extensao preserva seu payload e contrato de resposta. A Descoberta acrescenta lote idempotente, vinculo `DiscoveryRun`/`DiscoveryCandidate`, snapshot de targeting/metricas/proveniencia e atualizacao do estado da candidata. Nenhuma origem pode duplicar a regra de normalizacao ou criar keywords por RPC especifica.
+
+Keywords existentes recebem apenas evidencia aditiva e vinculo de origem; status, lista, silo, publicacao, KGR e decisoes humanas permanecem preservados. A RPC historica da Descoberta e seus patches SQL permanecem legados ate eventual remocao autorizada, sem novos consumidores produtivos e sem migration nova nesta fase.
+
+## 46. Elegibilidade por volume oficial
+
+Google Ads é o provider canônico da elegibilidade mínima de demanda para keywords novas. O limiar operacional é `120` buscas mensais confirmadas.
+
+- média oficial `>= 120`: `eligible` e pode seguir para qualificação;
+- média oficial entre `0` e `119`: `below_threshold` e sai da fila de produção;
+- resposta exata sem média mensal: `unavailable` e sai da fila de produção;
+- sem medição: `pending`;
+- falha técnica: `measurement_failed`, preservando volume, KGR e metadados anteriores.
+
+O estado é aditivo em `analise_semantica.volume_eligibility`, com provider, versão, data, limiar e média retornada. Ele não reutiliza status editorial, não converte ausência em zero e não apaga keywords. A visualização operacional padrão mostra somente `eligible`; keywords publicadas continuam visíveis e estruturalmente protegidas.
+
+## 48. Envio explícito de candidatas ao Processador
+
+Descoberta e Processador são áreas distintas. A pesquisa, o reload, filtros, ordenação e seleção não importam candidatas automaticamente. A importação só ocorre pela ação humana `Enviar selecionadas ao Processador`.
+
+O navegador envia apenas UUIDs técnicos de `DiscoveryCandidate` e um `importRequestId` UUID. O servidor resolve novamente a marca por `brandId`, o ator autenticado e todos os dados da candidata; texto, targeting, métricas ou proveniência enviados livremente pelo navegador não são aceitos como fonte.
+
+O envio é seletivo, tenantizado, idempotente e rastreável. As candidatas precisam pertencer à marca ativa, estar em uma execução concluída, normalizada e aprovadas pelo motor de filtros. A mesma seleção com o mesmo `importRequestId` retorna o resultado consolidado sem duplicar; o mesmo identificador com outra seleção é recusado.
+
+Uma candidata nova cria uma keyword no Processador como `bruto`, `Keyword livre`, sem lista, Silo/Categoria, Principal, KGR, intenção/funil definitivos ou envio automático ao Arquiteto. A intenção e o funil preliminares, targeting, métricas oficiais, provider/version, seed, relação, execução e timestamps permanecem como proveniência. Keywords existentes da mesma marca não são duplicadas nem têm decisões, publicação, lista, silo, métricas ou classificação humana sobrescritas; recebem apenas vínculo adicional de origem.
+
+O lote de importação e os vínculos de origem são entidades server-side com RLS, restrições de tenant e resultado individual por candidata. A RPC histórica e os objetos SQL de `0010`, `0011` e `0012` permanecem documentados sem consumidor produtivo; o fluxo vigente usa o núcleo compartilhado de importação. A validação manual de candidata nova, persistência remota, defaults `bruto`/sem lista e aparecimento no Processador foi concluída. O Processador continua sendo aberto por `/{brandRef}/minerador`, sem redirecionamento automático.
+
+## 45. Seleção livre e fila contínua de allintitle
+
+Clique comum, Ctrl/Cmd, Shift, Ctrl/Cmd+Shift, seleção de visíveis e pintura são complementares tanto na tabela do Minerador quanto na prévia da Extensão. A pintura só inicia após deslocamento de 4px e não troca o cursor normal do checkbox; um gesto de pintura suprime somente o clique sintético dele próprio.
+
+A seleção total não tem limite funcional. O background cria uma operação única por `operationRequestId`, reparte internamente em sublotes sequenciais de até 10 keywords e preserva `brandId`, resultados confirmados, zero explícito, pausas, cancelamento e reconciliação. Cada evento carrega o identificador da operação, `batchId` técnico, índice geral e índice de sublote; a prévia acompanha a operação e mostra cada resultado persistido sem esperar a conclusão total. Durante a execução, o marcador informa progresso e orienta manter o Chrome aberto.

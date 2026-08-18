@@ -4,7 +4,7 @@ import { googleKeywordInsightResponseFixture } from "./google-keyword-insight-re
 import { googleKeywordTrendingInsightResponseFixture } from "./google-keyword-trending-insight-response.fixture.ts";
 import { keywordMagicToolResponseFixture } from "./keyword-magic-tool-response.fixture.ts";
 import { seoKeywordResearchResponseFixture } from "./seo-keyword-research-response.fixture.ts";
-import { buildVolumeMetricPatch, normalizeGoogleKeywordInsightResponse, normalizeGoogleKeywordTrendingInsightResponse, normalizeKeywordMagicToolResponse, normalizeSeoKeywordResearchResponse } from "../lib/minerador/volume-provider.ts";
+import { buildVolumeMetricPatch, normalizeGoogleKeywordInsightResponse, normalizeGoogleKeywordTrendingInsightResponse, normalizeKeywordMagicToolResponse, normalizeSeoKeywordResearchResponse, normalizeSeoKeywordResearchToolResponse } from "../lib/minerador/volume-provider.ts";
 
 test("normaliza o contrato real do Google Keyword Insight por correspondência exata", () => {
   const result = normalizeGoogleKeywordInsightResponse(googleKeywordInsightResponseFixture, "keyword de teste");
@@ -112,6 +112,38 @@ test("SEO Keyword Research aceita zero somente quando o campo numérico existe n
   assert.equal(normalizeSeoKeywordResearchResponse({ result: [{ keyword: "python", avg_monthly_searches: "0" }] }, "python").status, "error");
   assert.equal(normalizeSeoKeywordResearchResponse({ result: [{ keyword: "python" }] }, "python").status, "error");
   assert.equal(normalizeSeoKeywordResearchResponse({ result: [{ keyword: "python related", avg_monthly_searches: 0 }] }, "python").status, "not_found");
+});
+
+test("SEO Keyword Research Tool usa apenas a seção BR e normaliza volume abreviado", () => {
+  assert.deepEqual(
+    normalizeSeoKeywordResearchToolResponse({
+      "Keyword Overview": {
+        global: [{ keyword: "clinica estetica", "searche volume": "33.0k" }],
+        BR: [{ keyword: "clínica estética", "searche volume": "1.3k" }],
+      },
+    }, "clinica estetica"),
+    { keyword: "clinica estetica", status: "success", volume: 1300 },
+  );
+});
+
+test("SEO Keyword Research Tool never uses global volume when BR is absent", () => {
+  assert.deepEqual(
+    normalizeSeoKeywordResearchToolResponse({
+      "Keyword Overview": {
+        global: [{ keyword: "clinica estetica", "searche volume": "33.0k" }],
+      },
+    }, "clinica estetica"),
+    { keyword: "clinica estetica", status: "not_found" },
+  );
+});
+
+test("SEO Keyword Research Tool rejects invalid BR volume", () => {
+  assert.deepEqual(
+    normalizeSeoKeywordResearchToolResponse({
+      "Keyword Overview": { BR: [{ keyword: "clinica estetica", "searche volume": "unavailable" }] },
+    }, "clinica estetica"),
+    { keyword: "clinica estetica", status: "error", error: "A keyword exata não possui searche volume brasileiro válido." },
+  );
 });
 
 test("resposta sem medição não gera patch destrutivo", () => {

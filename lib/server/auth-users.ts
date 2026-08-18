@@ -6,6 +6,7 @@ export type AuthUserSummary = {
   name: string | null;
   emailConfirmed: boolean;
   confirmedAt: string | null;
+  identityStatus: "confirmed" | "pending_confirmation" | "disabled";
 };
 
 function userName(user: { user_metadata?: unknown; email?: string | null }) {
@@ -16,12 +17,22 @@ function userName(user: { user_metadata?: unknown; email?: string | null }) {
   return null;
 }
 
-function summarizeUser(user: { id: string; email?: string | null; user_metadata?: unknown; email_confirmed_at?: string | null; confirmed_at?: string | null }): AuthUserSummary | null {
+function summarizeUser(user: { id: string; email?: string | null; user_metadata?: unknown; email_confirmed_at?: string | null; confirmed_at?: string | null; banned_until?: string | null }): AuthUserSummary | null {
   const email = user.email?.trim();
   if (!email) return null;
   const confirmedAt = user.email_confirmed_at || user.confirmed_at || null;
   const emailConfirmed = Boolean(confirmedAt);
-  return { id: user.id, email, name: userName(user), emailConfirmed, confirmedAt };
+  const bannedUntil = user.banned_until ? Date.parse(user.banned_until) : Number.NaN;
+  const identityStatus = Number.isFinite(bannedUntil) && bannedUntil > Date.now()
+    ? "disabled"
+    : emailConfirmed ? "confirmed" : "pending_confirmation";
+  return { id: user.id, email, name: userName(user), emailConfirmed, confirmedAt, identityStatus };
+}
+
+export async function listAuthUsers(client: SupabaseClient, limit = 50): Promise<AuthUserSummary[]> {
+  const result = await client.auth.admin.listUsers({ page: 1, perPage: Math.min(Math.max(limit, 1), 1000) });
+  if (result.error) throw result.error;
+  return result.data.users.map(summarizeUser).filter((user): user is AuthUserSummary => Boolean(user)).slice(0, limit);
 }
 
 export async function searchAuthUsers(client: SupabaseClient, query: string, limit = 20): Promise<AuthUserSummary[]> {
@@ -46,4 +57,19 @@ export async function searchAuthUsers(client: SupabaseClient, query: string, lim
     const bExact = b.email.toLowerCase() === normalized ? 0 : 1;
     return aExact - bExact || a.email.localeCompare(b.email);
   }).slice(0, limit);
+}
+
+export async function findAuthUserByEmail(client: SupabaseClient, email: string): Promise<AuthUserSummary | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  for (let page = 1; page <= 100; page += 1) {
+    const result = await client.auth.admin.listUsers({ page, perPage: 1000 });
+    if (result.error) throw result.error;
+    for (const user of result.data.users) {
+      const summary = summarizeUser(user);
+      if (summary?.email.toLowerCase() === normalized) return summary;
+    }
+    if (result.data.users.length < 1000) break;
+  }
+  return null;
 }

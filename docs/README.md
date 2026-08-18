@@ -1,322 +1,65 @@
-# Documentação canônica
-
-Comece por [visão geral](00-produto/visao-geral.md), [invariantes](00-produto/invariantes.md) e [fluxo oficial](00-produto/fluxo-oficial.md). Cada chat de implementação deve declarar um módulo proprietário e ler o trio `spec.md`, `estado-atual.md` e `backlog.md` correspondente.
-
-Histórico anterior foi preservado em `_arquivo/2026-07-documentacao-legada/` e não é fonte de verdade.
-
-## Processo
-Minerador
-→ entende e qualifica cada keyword
-
-Arquiteto
-→ decide quais keywords formam cada artigo
-→ escolhe a principal
-→ valida se as keywords realmente pertencem à mesma intenção
-
-Radar
-→ analisa a SERP do artigo já formado
-→ explica concorrentes, formatos, estruturas, perguntas e oportunidades
-
-Planejador
-→ transforma essas evidências em ContentPlan
-
-Redator
-→ executa o ContentPlan
-
-Publicações
-→ recebe documentos prontos, rascunhos, versões e atualizações
-
-Não declarar conclusão baseada apenas em TypeScript ou build.
-
-## Governança documental vigente — 2026-07-27
-
-As fontes de verdade são os invariantes, glossário, fluxo oficial, contratos, ADRs aceitas e o trio `spec.md`/`estado-atual.md`/`backlog.md` de cada módulo. Propostas autorizadas ou implementadas localmente descrevem escopo e evidência, mas não substituem o estado atual. `docs/_arquivo/**` é histórico.
-
-O tenant canônico é `brandId = public.marcas.id`; a rota canônica é `/{brandRef}`, com `brandRef = slug-da-marca--brandId`. `brandUserId` aparece somente como compatibilidade histórica. `/workspace` não é rota atual. `ownerUserId`, `memberUserId` e `actorUserId` são relações distintas e não devem ser colapsadas em uma identidade de tenant.
-
-Os resultados registrados para 0005/0006 indicam que seus efeitos já existem no ambiente alvo e que a 0006 terminou em `READY`; não reexecutar nem reverter. Trechos pré-aplicação permanecem apenas como histórico qualificado. A classificação detalhada e as limitações desta auditoria estão em [relatório de governança documental](00-produto/relatorio-governanca-documental-2026-07-27.md).
-
-
-docs/
-├── README.md
-│
-├── 00-produto/
-│   ├── visao-geral.md
-│   ├── fluxo-oficial.md
-│   ├── glossario.md
-│   ├── invariantes.md
-│   ├── arquitetura.md
-│   │
-│   ├── contratos/
-│   │   ├── README.md
-│   │   └── autorizacao.md
-│   │
-│   ├── decisoes/ (arquivos existentes)
-│   │   ├── ADR-001-dnas-versionados-e-rastreaveis.md
-│   │   ├── ADR-002-ia-aplica-humano-revisa.md
-│   │   ├── ADR-003-silopage-separada-de-silodna.md
-│   │   ├── ADR-004-workflow-publicacao-transferencia-separados.md
-│   │   ├── ADR-005-importacao-seletiva-e-idempotente.md
-│   │   ├── ADR-006-monolito-modular-com-chats-isolados.md
-│   │   ├── ADR-007-localstorage-nao-e-fonte-unica.md
-│   │   ├── ADR-008-protecao-estrutural-dos-publicados.md
-│   │   ├── ADR-009-content-plan-definitivo.md
-│   │   ├── ADR-010-cockpit-planejador-hidratacao.md
-│   │   ├── ADR-011-serp-formacao-e-identidade-publicada.md
-│   │   ├── ADR-012-avaliador-serp-intencao-e-kgr-leve.md
-│   │   ├── ADR-013-article-dna-contexto-estrategico.md
-│   │   ├── ADR-014-criacao-manual-silo-silopage.md
-│   │   ├── ADR-015-perfis-unidades-kgr-serp.md
-│   │   ├── ADR-016-politica-principal-minerador-arquiteto.md
-│   │   ├── ADR-017-fk-lista-restrict-0006.md
-│   │   ├── ADR-018-autenticacao-manual-e-owner-explicito.md
-│   │   ├── ADR-019-supabase-auth-canonico.md
-│   │   ├── ADR-020-kgr-slug-e-formacao-de-artigos.md
-│   │   └── ADR-021-roteamento-tenant-brand-ref.md
-│   │
-│   └── propostas/
-│
-├── 01-admin/
-│   ├── spec.md
-│   ├── estado-atual.md
-│   └── backlog.md
-│
-├── 02-marca/
-│   ├── spec.md
-│   ├── estado-atual.md
-│   └── backlog.md
-│
-├── 03-minerador/
-│   ├── spec.md
-│   ├── estado-atual.md
-│   └── backlog.md
-│
-├── 04-arquiteto/
-│   ├── spec.md
-│   ├── estado-atual.md
-│   ├── backlog.md
-│   └── propostas/
-│
-├── 05-radar/
-│   ├── spec.md
-│   ├── estado-atual.md
-│   ├── backlog.md
-│   └── propostas/
-│
-├── 06-planejador/
-│   ├── spec.md
-│   ├── estado-atual.md
-│   └── backlog.md
-│
-├── 07-redator/
-│   ├── spec.md
-│   ├── estado-atual.md
-│   └── backlog.md
-│
-├── 08-publicacoes/
-│   ├── spec.md
-│   ├── estado-atual.md
-│   └── backlog.md
-│
-├── 09-conta/
-│   ├── spec.md
-│   ├── estado-atual.md
-│   └── backlog.md
-│
-├── compartilhado/
-│   ├── README.md
-│   ├── autenticacao-e-permissoes.md
-│   ├── autenticacao-manual.md
-│   ├── persistencia-local.md
-│   └── supabase.md
-│
-└── _arquivo/
-    └── 2026-07-documentacao-legada/
-
-Documentos planejados ou ainda não criados não aparecem nesta árvore; devem ser registrados apenas em backlog ou proposta com a indicação “a criar”.
-Por que manter três arquivos por área
-
-No seu caso, a separação é melhor porque cada chat será especializado.
-
-spec.md
-
-É o contrato estável do módulo:
-
-o que ele faz;
-o que não faz;
-entidades;
-regras;
-fluxos;
-estados;
-proteções;
-entradas;
-saídas;
-critérios de aceite;
-fronteiras técnicas.
-
-Muda apenas quando uma decisão real do produto muda.
-
-estado-atual.md
-
-É a fotografia honesta da implementação:
-
-funcionando;
-parcialmente funcionando;
-simulado;
-local;
-persistido;
-quebrado;
-regressões conhecidas;
-arquivos centrais;
-testes;
-última validação manual.
-
-Esse documento deve ser atualizado a cada sprint.
-
-backlog.md
-
-É o trabalho futuro:
-
-Agora
-Próximo
-Depois
-Bloqueado
-Descartado
-
-A tarefa concluída não precisa ser apagada imediatamente. Pode ir para uma pequena seção de concluídos recentes e depois ser arquivada.
-
-## Estado atual: onde consultar
-
-O estado vigente não é mantido neste README. Consulte `estado-atual.md` do módulo proprietário e o [relatório de governança documental](00-produto/relatorio-governanca-documental-2026-07-27.md); este README apenas orienta a navegação e a classificação documental.
-
-O bloco abaixo é um snapshot histórico preservado da documentação anterior. Ele não substitui os estados atuais, não deve ser usado para inferir implementação e pode conter descrições já superadas.
-
-## Snapshot histórico preservado
-
-É importante não documentar o projeto como mais pronto do que realmente está.
-
-Admin
-
-Existe esqueleto operacional e acesso ao cadastro de marcas. Ainda precisa amadurecer:
-
-gestão de empresas;
-delegações;
-usuários;
-alertas;
-consumo;
-cobrança;
-notificações.
-Marca
-
-Existe estrutura para:
-
-BrandDNA;
-materiais;
-Skills;
-prompts;
-equipe;
-configurações.
-
-Convites e permissões estão preparados, mas a persistência definitiva ainda depende do banco.
-
-Minerador
-
-É o módulo mais funcional.
-
-Possui:
-
-keywords da extensão;
-importação;
-filtros;
-KGR;
-intenção;
-nicho;
-status;
-seleção;
-exportação;
-KeywordDNA;
-histórico;
-visualizações.
-
-Não deve ser reconstruído.
-
-Arquiteto
-
-O motor e as funcionalidades principais foram implementados:
-
-agrupamento lógico;
-agrupamento por IA;
-ArticleDNA;
-SiloDNA;
-aplicação direta da IA;
-anotações;
-versionamento;
-proteção de publicados;
-envio ao Radar.
-
-Mas o estado atual possui uma regressão grave:
-
-76 keywords aparecem como importadas;
-várias não possuem localização visível;
-artigos novos e grupos anteriores desapareceram;
-o índice de importação ficou inconsistente;
-a introdução da SiloPage ocorreu perto da regressão;
-ainda falta recuperação segura do workspace.
-
-O estado-atual.md do Arquiteto deve deixar isso explícito.
-
-Não pode afirmar que o módulo está concluído enquanto essa inconsistência existir.
-
-Radar
-
-O esqueleto operacional funciona e recebeu um artigo real.
-
-A Serper está configurada no ambiente, mas ainda falta implementar:
-
-consulta real;
-snapshots;
-resultados orgânicos;
-perguntas;
-pesquisas relacionadas;
-diagnóstico;
-comparação com DNAs;
-aprovação da pesquisa.
-Planejador
-
-Recebeu um artigo real do Radar e criou um ContentPlan inicial.
-
-Ainda faltam as regras definitivas de:
-
-outline;
-links;
-âncoras;
-fontes;
-CTA;
-estrutura;
-Skills;
-planejamento por tipo de unidade.
-Redator
-
-O Tiptap está instalado e o artigo abriu diretamente.
-
-Funciona como editor real, mas ainda há pendências:
-
-salvamento definitivo;
-aprovação;
-transição para Publicações;
-integração completa do Guardião;
-persistência remota.
-Publicações
-
-Possui planilha e fluxo preparado, mas ainda não recebeu o primeiro documento aprovado do Redator.
-
-Conta
-
-Deve permanecer separada da organização:
-
-dados pessoais;
-senha;
-sessões;
-notificações;
-preferências;
-segurança.
+# Índice oficial da documentação
+
+Este arquivo orienta a leitura e a atualização da documentação vigente. Não use `docs/_arquivo/` para orientar implementação atual: ele é histórico.
+
+## Precedência documental
+
+1. [Invariantes](00-produto/invariantes.md) e ADRs aceitas em [decisões](00-produto/decisoes/);
+2. SDDs aprovadas;
+3. specs permanentes do módulo proprietário;
+4. código e estado validado;
+5. plano estrutural;
+6. `task.md`, backlog e propostas;
+7. `docs/_arquivo/` como histórico, sem precedência operacional.
+
+Quando houver conflito, registrar a divergência e seguir a fonte de maior precedência; não inferir implementação a partir de proposta, plano ou histórico.
+
+## Documentos canônicos compartilhados
+
+| Documento | Finalidade |
+| --- | --- |
+| [SDD — fundação visual global](compartilhado/sdd-fundacao-visual-global.md) | Define o alvo compartilhado de tokens, estados, GlobalTopbar e GlobalNoticeCenter, sem declarar implementação. |
+| [Sistema visual canônico](compartilhado/sistema-visual.md) | Reúne tokens, componentes, estados e regras visuais aplicáveis às interfaces atuais. |
+| [Operational Grid](compartilhado/operational-grid.md) | Define o padrão planejado para mesas e listas operacionais densas, com adapters por domínio. |
+| [Task de adoção do Operational Grid](compartilhado/task-operational-grid-adoption.md) | Organiza a adoção gradual, os gates de evidência e os bloqueios por módulo. |
+| [SDD — identidade e tenantização](compartilhado/sdd-geracao-canonica-identidade-tenant.md) | Define o destino arquitetônico de identidade UUID, tenant, owner, agência, autorização e corte de contratos legados. |
+| [SDD — integrações](compartilhado/sdd-arquitetura-integracoes-plataforma-agencia-marca.md) | Define o destino arquitetônico de connections, capabilities, grants, bindings, uso, segredos e transferência. |
+| [Plano de implementação da geração canônica](compartilhado/plano-implementacao-geracao-canonica.md) | Define o caminho por fases, gates, confirmação remota, backfill, rollback, testes e smoke. |
+| [Proposta de Evolução Modular](compartilhado/template-proposta-evolucao-modular.md) | Registra uma necessidade estrutural ainda não aprovada antes de qualquer implementação. |
+
+SDD define o destino arquitetônico; plano estrutural define o caminho; `task.md` registra a execução atual; proposta modular registra uma necessidade ainda não aprovada. Histórico não orienta implementação atual.
+
+## Leitura ao iniciar uma fase
+
+1. Ler invariantes, glossário, fluxo oficial e ADRs aplicáveis.
+2. Ler as SDDs aprovadas, o plano estrutural e a Proposta de Evolução Modular quando houver mudança estrutural solicitada.
+3. Ler `spec.md`, `estado-atual.md` e `backlog.md` do módulo proprietário, além de contratos e consumidores confirmados no código.
+4. Atualizar `task.md` com fase, escopo autorizado, gates, pendências e validações previstas antes da implementação.
+
+## Atualização ao finalizar uma fase
+
+- Atualizar `estado-atual.md` do módulo proprietário com evidência local, remota e manual separadas.
+- Atualizar `backlog.md` com pendências, bloqueios e próximos gates.
+- Atualizar `task.md` com o estado real da execução, decisões pendentes e validações realizadas.
+- Atualizar SDD, plano ou ADR somente se a regra arquitetônica permanente tiver mudado e a alteração estiver autorizada.
+- Preservar snapshots, histórico, migrations e evidências; não declarar conclusão apenas por build, TypeScript ou teste unitário.
+
+## Navegação por produto e módulos
+
+Comece por [visão geral](00-produto/visao-geral.md), [invariantes](00-produto/invariantes.md), [glossário](00-produto/glossario.md) e [fluxo oficial](00-produto/fluxo-oficial.md). O fluxo é `Marca → Minerador → Arquiteto → Radar → Planejador → Redator → Publicações`.
+
+| Área | Documentos de trabalho |
+| --- | --- |
+| Admin | [spec](01-admin/spec.md) · [estado](01-admin/estado-atual.md) · [backlog](01-admin/backlog.md) |
+| Marca | [spec](02-marca/spec.md) · [estado](02-marca/estado-atual.md) · [backlog](02-marca/backlog.md) |
+| Minerador | [spec](03-minerador/spec.md) · [estado](03-minerador/estado-atual.md) · [backlog](03-minerador/backlog.md) |
+| Arquiteto | [spec](04-arquiteto/spec.md) · [estado](04-arquiteto/estado-atual.md) · [backlog](04-arquiteto/backlog.md) |
+| Radar | [spec](05-radar/spec.md) · [estado](05-radar/estado-atual.md) · [backlog](05-radar/backlog.md) |
+| Planejador | [spec](06-planejador/spec.md) · [estado](06-planejador/estado-atual.md) · [backlog](06-planejador/backlog.md) |
+| Redator | [spec](07-redator/spec.md) · [estado](07-redator/estado-atual.md) · [backlog](07-redator/backlog.md) |
+| Publicações | [spec](08-publicacoes/spec.md) · [estado](08-publicacoes/estado-atual.md) · [backlog](08-publicacoes/backlog.md) |
+| Conta | [spec](09-conta/spec.md) · [estado](09-conta/estado-atual.md) · [backlog](09-conta/backlog.md) |
+
+## Regras de classificação
+
+Registre sempre se algo foi **Verificado no código**, **Confirmado por teste**, **Validado manualmente**, **Relatado pelo usuário**, **Planejado** ou **Ainda não verificado**. Persistência local, remota e simulada devem ser diferenciadas. TypeScript, build e testes automatizados não provam interface, RLS remota, provider real ou persistência autenticada.

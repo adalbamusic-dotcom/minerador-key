@@ -300,7 +300,7 @@ export function applyKeywordArticleReview(
       .map(item => ({ item, decision: decisions.get(item.id) }))
       .filter(entry => entry.decision?.suggestedRole === "principal")
       .sort((first, second) => (second.decision?.confidence || 0) - (first.decision?.confidence || 0))[0]?.item;
-    const principal = anchor || recommendedPrincipal || [...cluster].sort((first, second) => (second.volume_search || 0) - (first.volume_search || 0))[0];
+    const principal = anchor || recommendedPrincipal || cluster[0];
     if (keyword.id === principal.id) {
       return { ...keyword, reviewRole: "principal" as const };
     }

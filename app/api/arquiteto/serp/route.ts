@@ -7,7 +7,7 @@ import { resolveArticleSerpIdentityContext } from "@/lib/arquiteto/identity-cont
 import { explicitEditorialFormat, normalizeSearchIntent } from "@/lib/arquiteto/intent-profile";
 import { collectSerperSnapshot, SerperProviderError } from "@/lib/radar/serper-provider-core";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
-import { authzErrorResponse, requireSessionProfile } from "@/lib/server/authz";
+import { authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 
 const RequestSchema = z.object({
   brandId: z.string().min(1),
@@ -22,7 +22,7 @@ const RequestSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
     const parsed = RequestSchema.safeParse(await request.json());
     if (!parsed.success) return NextResponse.json({ success: false, error: "Pedido de SERP inválido.", issues: parsed.error.flatten() }, { status: 400 });
     await assertEditorialPermission(profile, parsed.data.brandId, "arquiteto", "edit");

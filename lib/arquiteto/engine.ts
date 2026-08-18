@@ -92,7 +92,7 @@ const commercialScore = (keyword: ArchitectKeyword) => {
 
 export const suggestPrincipal = (keywords: ArchitectKeyword[]) => {
   const published = keywords.find(keyword => keyword.isPublished || keyword.status?.toLowerCase() === "publicado");
-  const maximumVolume = Math.max(1, ...keywords.map(keyword => keyword.volume_search || 0));
+  const maximumVolume = Math.max(1, ...keywords.map(keyword => typeof keyword.volume_search === "number" && Number.isFinite(keyword.volume_search) ? keyword.volume_search : 0));
   const candidates = keywords.map(keyword => {
     const comparisons = keywords.filter(other => other.id !== keyword.id).map(other => compareKeywords(keyword, other));
     const average = (field: "lexical" | "intent" | "entities") => comparisons.length
@@ -103,14 +103,14 @@ export const suggestPrincipal = (keywords: ArchitectKeyword[]) => {
     const centrality = average("entities");
     const brandFit = keyword.analise_semantica?.nicho_override ? 0.8 : 0.5;
     const commercial = commercialScore(keyword);
-    const volume = (keyword.volume_search || 0) / maximumVolume;
+    const volume = (typeof keyword.volume_search === "number" && Number.isFinite(keyword.volume_search) ? keyword.volume_search : 0) / maximumVolume;
     const difficulty = keyword.kgr_score == null ? 0.5 : Math.max(0, Math.min(1, 1 - keyword.kgr_score));
     const slug = slugQuality(keyword.keyword);
     const anchor = keyword.id === published?.id ? 1 : 0;
     const score = published
       ? anchor
       : coverage * 0.3 + intention * 0.2 + centrality * 0.15 + brandFit * 0.1
-        + commercial * 0.05 + volume * 0.1 + difficulty * 0.05 + slug * 0.05;
+        + commercial * 0.05 + difficulty * 0.05 + slug * 0.05;
     return {
       keywordId: keyword.id,
       score,

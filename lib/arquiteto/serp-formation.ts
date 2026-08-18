@@ -95,7 +95,7 @@ export const SerpFormationRecoverySchema = z.object({
 }).strict();
 export type SerpFormationRecovery = z.infer<typeof SerpFormationRecoverySchema>;
 
-export const architectSerpFormationKey = (brandId: string) => `architect-serp-formation:${brandId}`;
+export const architectSerpFormationKey = (actorUserId: string, brandId: string) => `architect-serp-formation:${actorUserId}:${brandId}`;
 
 export function latestSerpFormationAssessment(
   assessments: SerpFormationAssessment[],

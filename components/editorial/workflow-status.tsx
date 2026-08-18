@@ -43,10 +43,12 @@ export function workflowStatusMeta(status: string) {
   return STATUS_META[status.toLowerCase()] || { label: status.replaceAll("_", " "), tone: "border-slate-700 text-slate-300", group: "process" as const };
 }
 
-export function WorkflowStatusBadge({ status }: { status: string }) {
+export function WorkflowStatusBadge({ status, density = "compact" }: { status: string; density?: "compact" | "comfortable" }) {
   const meta = workflowStatusMeta(status);
   const Icon = meta.group === "approved" ? Check : meta.group === "published" ? Lock : meta.group === "sent" ? Send : meta.group === "process" ? CircleDot : Clock3;
-  return <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-1.5 py-0.5 text-[9px] font-semibold ${meta.tone}`} title={`Estado editorial: ${status}. Este indicador nao representa uma tarefa em execucao.`}><Icon className="h-2.5 w-2.5"/>{meta.label}</span>;
+  const densityClass = density === "comfortable" ? "min-h-8 rounded-md px-2 py-1 text-[13px]" : "rounded border px-1.5 py-0.5 text-[9px]";
+  const iconClass = density === "comfortable" ? "h-3.5 w-3.5" : "h-2.5 w-2.5";
+  return <span className={`inline-flex items-center gap-2 whitespace-nowrap font-semibold ${densityClass} ${meta.tone}`} title={`Estado editorial: ${status}. Este indicador nao representa uma tarefa em execucao.`}><Icon className={iconClass}/>{meta.label}</span>;
 }
 
 export function WorkflowStatusSummary({ statuses }: { statuses: string[] }) {

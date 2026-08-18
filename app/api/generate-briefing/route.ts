@@ -1,52 +1,43 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
-  requireSessionProfile,
+  requireCanonicalSessionProfile,
+  AuthzError,
+  assertCanAccessMarca,
   assertListaBelongsToMarca,
   authzErrorResponse,
 } from "@/lib/server/authz";
+import { fetchProviderResponse, ProviderRequestError } from "@/lib/arquiteto/provider-client";
+import { aiProviderErrorResponse, AIProviderConfigurationError, resolveAIProvider } from "@/lib/server/ai-provider-config";
 
 export async function POST(req: Request) {
   try {
     // 1. Autenticacao: protege gasto de IA e gravacao no banco
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
 
     const { keywords } = await req.json();
     if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
       return NextResponse.json(
-        { success: false, error: "Parâmetros inválidos. É necessário informar um array de palavras-chave selecionadas." },
+        { success: false, error: "Par�metros inv�lidos. � necess�rio informar um array de palavras-chave selecionadas." },
         { status: 400 }
       );
     }
 
-    let apiKey = process.env.DEEPSEEK_API_KEY;
-    let apiUrl = "https://api.deepseek.com/chat/completions";
-    let model = "deepseek-chat";
-
-    if (!apiKey) {
-      apiKey = process.env.OPENROUTER_API_KEY;
-      if (apiKey) {
-        apiUrl = "https://openrouter.ai/api/v1/chat/completions";
-        model = process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4-pro";
-      }
-    }
+    const resolvedProvider = resolveAIProvider();
+    const { apiKey, apiUrl, model } = resolvedProvider;
 
     if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: "Nem DEEPSEEK_API_KEY nem OPENROUTER_API_KEY estão configuradas no seu arquivo .env.local." },
+        { success: false, error: "A credencial do provider de IA configurado não está disponível.", code: "AI_CREDENTIAL_MISSING" },
         { status: 500 }
       );
     }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`
+      "Authorization": `Bearer ${apiKey}`,
+      ...resolvedProvider.extraHeaders,
     };
-
-    if (apiUrl.includes("openrouter.ai")) {
-      headers["HTTP-Referer"] = "http://localhost:3000";
-      headers["X-Title"] = "Minerador Key";
-    }
 
     // Inicializa o Supabase
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -57,11 +48,25 @@ export async function POST(req: Request) {
     const siloId = keywords[0]?.lista_id || null;
 
     // 2. Valida ownership do silo/lista antes de gerar e gravar briefing
-    if (siloId) {
-      await assertListaBelongsToMarca(siloId, profile.marcaId || "", profile);
+    if (!siloId) {
+      return NextResponse.json(
+        { success: false, error: "Selecione keywords vinculadas a uma lista da marca antes de gerar o briefing." },
+        { status: 400 }
+      );
     }
 
-    // Buscar os slugs já gerados/salvos para contextualização e anti-canibalização
+    const { data: silo, error: siloError } = await supabase
+      .from("minerador_keyword_lists")
+      .select("marca_id")
+      .eq("id", siloId)
+      .maybeSingle();
+    if (siloError || !silo?.marca_id) {
+      throw new AuthzError(404, "Lista da keyword n�o encontrada.");
+    }
+    await assertCanAccessMarca(profile.userId, silo.marca_id, profile);
+    await assertListaBelongsToMarca(siloId, silo.marca_id, profile);
+
+    // Buscar os slugs j� gerados/salvos para contextualiza��o e anti-canibaliza��o
     let existingSlugs: string[] = [];
     try {
       let query = supabase
@@ -76,9 +81,9 @@ export async function POST(req: Request) {
 
       const { data: briefingsData } = await query;
       if (briefingsData) {
-        existingSlugs = briefingsData
-          .map((b: any) => b.slug_sugerido)
-          .filter(Boolean);
+        existingSlugs = (briefingsData as Array<{ slug_sugerido: string | null }>)
+          .map((briefing) => briefing.slug_sugerido)
+          .filter((slug): slug is string => Boolean(slug));
       }
     } catch (dbErr) {
       console.error("Erro ao buscar slugs existentes para anti-canibalizacao:", dbErr);
@@ -94,7 +99,7 @@ export async function POST(req: Request) {
       analise_semantica: item.analise_semantica || null
     }));
 
-    const response = await fetch(apiUrl, {
+    const response = await fetchProviderResponse(apiUrl, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -102,39 +107,34 @@ export async function POST(req: Request) {
         messages: [
           {
             role: "system",
-            content: `Você é um Arquiteto de SEO e Copywriter B2B. Receberei uma lista de palavras-chave semelhantes. Sua missão é agrupá-las para a criação de UM ÚNICO artigo épico, evitando canibalização. Analise a semântica de todas e retorne EXCLUSIVAMENTE um objeto JSON com:
+            content: `Voc� � um Arquiteto de SEO e Copywriter B2B. Receberei uma lista de palavras-chave semelhantes. Sua miss�o � agrup�-las para a cria��o de UM �NICO artigo �pico, evitando canibaliza��o. Analise a sem�ntica de todas e retorne EXCLUSIVAMENTE um objeto JSON com:
 'keyword_principal': a palavra com maior potencial comercial e volume.
 'keywords_secundarias': array com as demais palavras para uso em H2/H3.
-'slug_sugerido': URL curta, sem stop words, hífen separando palavras, otimizada para SEO.
-'hierarquia': defina se deve ser 'Pilar' (guia completo) ou 'Suporte' (dúvida específica).
-'meta_title': título magnético e otimizado para a palavra principal (max 60 caracteres).
+'slug_sugerido': URL curta, sem stop words, h�fen separando palavras, otimizada para SEO.
+'hierarquia': defina se deve ser 'Pilar' (guia completo) ou 'Suporte' (d�vida espec�fica).
+'meta_title': t�tulo magn�tico e otimizado para a palavra principal (max 60 caracteres).
 'meta_description': resumo focado em CTR e resposta direta (max 155 caracteres).
 'diretrizes_estrategicas': objeto com 'angulo_de_venda' e 'chamada_para_acao' consolidados.
 
-CONTEXTO DE ANTI-CANIBALIZAÇÃO E SILOS:
-O site já possui os seguintes artigos publicados (representados por seus slugs): [${existingSlugs.join(", ")}].
-Seu dever ao criar este novo briefing é garantir que a abordagem seja ÚNICA. Adicione ao objeto JSON as seguintes chaves adicionais:
-'links_internos_sugeridos': um array de strings com 1 a 3 slugs desta lista fornecida que têm total relação semântica com o novo artigo e devem receber links internos.
-'angulo_anti_canibalizacao': uma frase curta explicando como o redator deve focar este texto para não concorrer com os artigos que já existem na lista fornecida.`
+CONTEXTO DE ANTI-CANIBALIZA��O E SILOS:
+O site j� possui os seguintes artigos publicados (representados por seus slugs): [${existingSlugs.join(", ")}].
+Seu dever ao criar este novo briefing � garantir que a abordagem seja �NICA. Adicione ao objeto JSON as seguintes chaves adicionais:
+'links_internos_sugeridos': um array de strings com 1 a 3 slugs desta lista fornecida que t�m total rela��o sem�ntica com o novo artigo e devem receber links internos.
+'angulo_anti_canibalizacao': uma frase curta explicando como o redator deve focar este texto para n�o concorrer com os artigos que j� existem na lista fornecida.`
           },
           {
             role: "user",
-            content: `Analise as seguintes palavras-chave selecionadas e crie o briefing de agrupamento estratégico:\n${JSON.stringify(formattedKeywordsForPrompt, null, 2)}`
+            content: `Analise as seguintes palavras-chave selecionadas e crie o briefing de agrupamento estrat�gico:\n${JSON.stringify(formattedKeywordsForPrompt, null, 2)}`
           }
         ],
         response_format: { type: "json_object" }
       })
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Erro na API do DeepSeek: ${errorText}`);
-    }
-
     const resData = await response.json();
     const content = resData.choices?.[0]?.message?.content;
     if (!content) {
-      throw new Error("Resposta vazia retornada do modelo de IA.");
+      throw new ProviderRequestError("O provider de IA retornou uma resposta inválida.", 502, "AI_PROVIDER_INVALID_RESPONSE");
     }
 
     // Faz o parse do briefing gerado
@@ -169,8 +169,12 @@ Seu dever ao criar este novo briefing é garantir que a abordagem seja ÚNICA. A
       data: savedBriefing
     });
   } catch (err) {
+    if (err instanceof AIProviderConfigurationError || err instanceof ProviderRequestError) {
+      const mapped = aiProviderErrorResponse(err);
+      return NextResponse.json({ success: false, error: mapped.message, code: mapped.code }, { status: mapped.status });
+    }
     const mapped = authzErrorResponse(err);
-    if (mapped.status === 500) console.error("Erro na geração do briefing:", err);
+    if (mapped.status === 500) console.error("Erro na gera��o do briefing:", err);
     return NextResponse.json(
       { success: false, error: mapped.message || "Erro interno de processamento." },
       { status: mapped.status }

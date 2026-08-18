@@ -36,6 +36,12 @@ Investigação, aprovação/publicação da versão e transferência ao Planejad
 
 O benchmark passou a aceitar somente extrações editoriais completas de artigos. Formatos como vídeo e resultados parciais seguem disponíveis para inspeção, mas não contaminam médias ou decisões estruturais. A semântica classifica ruído de navegação, legal e plataforma, permitindo recuperação humana explícita.
 
+## Addendum — relatório competitivo
+
+O Radar estende o mesmo envelope versionado com `RadarCompetitiveReport`, em vez de criar uma entidade persistente paralela. O relatório é gerado a partir da SERP revisada e das extrações selecionadas, referencia as versões de origem e participa do hash do pacote. A aprovação é humana e congela a versão; alterações futuras usam sucessora.
+
+O relatório permanece evidência observada. O Planejador recebe respostas, concorrentes, padrões, semântica, limitações e necessidades como contexto, mas continua responsável por outline, metas, CTA, links, visual e ContentPlan. Formatos não comparáveis e dados ausentes são preservados como limitações, nunca convertidos em inferência.
+
 ## Revisão de usabilidade — contexto KGR recebido
 
 O Radar passa a exibir e transportar `RadarKgrStrategy`, derivado de `ArticleKgrIdentity`, `ArticleVolumeStrategy`, `ArticleHierarchyStrategy` e `ArticleDNA.keywordReferences` já recebidos. A classificação KGR é preservada com origem; a sugestão de profundidade não pode substituí-la por recálculo silencioso baseado na SERP.

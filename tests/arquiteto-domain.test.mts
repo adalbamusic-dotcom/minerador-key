@@ -219,11 +219,13 @@ test("atualização lógica preserva classificação humana e renova somente seu
   assert.equal(refreshed.dna_modelo, second.semantic.dna_modelo);
 });
 
-test("Minerador executa DNA lógico ao carregar e oferece atualização manual sem chamar IA", async () => {
+test("Minerador qualifica somente por ação explícita e não chama IA no motor lógico", async () => {
   const source = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
-  assert.match(source, /processLogicalKeywordDna\(eligibleKeywords, loadedLists/);
-  assert.match(source, /onClick=\{handleRefreshLogicalDna\}/);
-  assert.match(source, /"Detectar viés · KeywordDNA"/);
+  assert.doesNotMatch(source, /processLogicalKeywordDna\(eligibleKeywords, loadedLists/);
+  assert.match(source, /onClick=\{handleQualifySelected\}/);
+  assert.match(source, /<span>Qualificar selecionadas<\/span>/);
+  assert.match(source, /Mais ações/);
+  assert.doesNotMatch(source, /Detectar viés · KeywordDNA/);
   assert.match(source, /onWorkflowStatusChange=\{\(status\) => handleUpdateStatus\(item\.id, status\)\}/);
   const panel = await readFile(new URL("../components/editorial/dna-panels.tsx", import.meta.url), "utf8");
   assert.match(panel, /Status da keyword/);

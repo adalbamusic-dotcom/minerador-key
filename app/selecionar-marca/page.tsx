@@ -1,10 +1,30 @@
-import { Suspense } from "react";
-import { SelectBrandClient } from "./select-brand-client";
+import { redirect } from "next/navigation";
+import { findPendingAgencyOnboarding, listCanonicalAccessibleBrands, requireCanonicalActorUserId } from "@/lib/server/canonical-authorization";
+import { CanonicalAuthorizationError } from "@/lib/tenant/canonical-authorization";
+import { SupabaseSessionError } from "@/lib/server/supabase-session";
 
-function SelectBrandFallback() {
-  return <main className="min-h-screen bg-[#06070a] p-6 text-slate-200"><section className="mx-auto max-w-lg rounded border border-slate-800 bg-[#0b0c10] p-6"><h1 className="text-sm font-bold">Selecione uma marca</h1><p className="mt-4 text-xs text-slate-400">Carregando marcas acessíveis…</p></section></main>;
-}
+/**
+ * Compatibility entry only. The former mandatory context-picker is retired;
+ * canonical login restores a validated context or lands on a global surface.
+ */
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export default function SelectTenantPage() {
-  return <Suspense fallback={<SelectBrandFallback />}><SelectBrandClient /></Suspense>;
+export default async function SelectTenantPage() {
+  let destination = "/conta";
+  try {
+    await requireCanonicalActorUserId();
+    const [brands, pendingOnboarding] = await Promise.all([
+      listCanonicalAccessibleBrands("marca"),
+      findPendingAgencyOnboarding(),
+    ]);
+    if (brands.isPlatformAdmin) destination = "/admin";
+    else if (pendingOnboarding) destination = "/onboarding/agencia";
+  } catch (error) {
+    if ((error instanceof CanonicalAuthorizationError && error.status === 401) || error instanceof SupabaseSessionError) {
+      redirect("/login?callbackUrl=%2Fconta");
+    }
+    throw error;
+  }
+  redirect(destination);
 }

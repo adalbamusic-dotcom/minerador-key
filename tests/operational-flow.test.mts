@@ -244,7 +244,8 @@ test("APIs persistentes revalidam permissão e concorrência no servidor", async
 });
 
 test("recuperação de importações é isolada por marca e cobre todas as etapas", async () => {
-  assert.notEqual(workflowRecoveryStorageKey("brand-1"), workflowRecoveryStorageKey("brand-2"));
+  assert.notEqual(workflowRecoveryStorageKey("actor-1", "brand-1"), workflowRecoveryStorageKey("actor-1", "brand-2"));
+  assert.notEqual(workflowRecoveryStorageKey("actor-1", "brand-1"), workflowRecoveryStorageKey("actor-2", "brand-1"));
   const provider = await readFile(new URL("../components/editorial-pipeline-context.tsx", import.meta.url), "utf8");
   for (const field of ["architectImportedKeywordIds", "articleVersions", "radarItems", "plannerItems", "documents", "operationalPublications"]) {
     assert.match(provider, new RegExp(field));
@@ -258,7 +259,7 @@ test("popup do Arquiteto é a única entrada manual e lista novos, importados e 
   const dialog = await readFile(new URL("../components/editorial/workflow-status.tsx", import.meta.url), "utf8");
   assert.match(architect, /keywordImportPool/);
   assert.match(architect, /\["aprovado", "publicado"\]/);
-  assert.match(architect, /void fetchMasterList\(\)/);
+  assert.match(architect, /void (?:fetchMasterList\(\)|topbarHandlersRef\.current\.fetchMasterList\(\))/);
   assert.match(architect, /importApprovedKeywordsToArchitect/);
   assert.match(architect, /itens sem silo entram como candidatos sem classificação/);
   assert.match(architect, /status\?\.toLowerCase\(\) === "aprovado"/);
@@ -302,7 +303,7 @@ test("histórico, desfazer e refazer estão presentes do Minerador às Publicaç
   const operational = files[2];
   for (const module of ["radar", "publicacoes"]) assert.match(operational, new RegExp(`useLocalHistory\\(\"${module}\"`));
   assert.match(operational, /HistoryControls/);
-  assert.match(files[0], /Detectar viés · KeywordDNA/);
+  assert.match(files[0], /<span>Qualificar selecionadas<\/span>/);
   assert.match(files[1], /Agrupar keywords em artigos \(IA\)/);
   assert.match(files[1], /Detectar viés · ArticleDNA \(IA\)/);
   assert.match(files[1], /Detectar viés · SiloDNA \(IA\)/);
@@ -315,7 +316,7 @@ test("restauração do Redator não é interpretada como nova digitação", asyn
 });
 
 test("artefatos pagos do Arquiteto possuem recuperações independentes por marca", () => {
-  const keys = [architectReviewRecoveryKey("brand-1"), architectArticleDnaRecoveryKey("brand-1"), architectSiloDnaRecoveryKey("brand-1")];
+  const keys = [architectReviewRecoveryKey("actor-1", "brand-1"), architectArticleDnaRecoveryKey("actor-1", "brand-1"), architectSiloDnaRecoveryKey("actor-1", "brand-1")];
   assert.equal(new Set(keys).size, 3);
   assert.ok(keys.every(key => key.includes("brand-1")));
   const recovery = ArchitectReviewRecoverySchema.parse({ schemaVersion: 1, importedKeywordSignature: "kw-1",

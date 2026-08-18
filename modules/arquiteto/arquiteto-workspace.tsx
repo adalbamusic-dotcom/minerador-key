@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useBrand } from "@/components/brand-context";
-import { useSession, signOut } from "next-auth/react";
+import { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";
 import { z } from "zod";
 import { useRouter } from "next/navigation";
 import { buildProvisionalGroups, describeAssignedGroups } from "@/lib/arquiteto/engine";
@@ -28,11 +28,16 @@ import {
   mergeKeywordArticleReviews,
 } from "@/lib/arquiteto/keyword-article-review";
 import { createStatusEvent, createVersionEnvelope } from "@/lib/arquiteto/versioning";
+import { persistArquitetoArtifact } from "@/lib/arquiteto/canonical-persistence";
+import { buildCanonicalArticleWorkspaceItems, mergeCanonicalArticleWorkspaceItems } from "@/lib/arquiteto/canonical-bootstrap";
+import { buildCanonicalWorkflowWorkspaceItems, loadCanonicalArquitetoWorkspace, persistMineradorArquitetoHandoff } from "@/lib/arquiteto/canonical-workspace";
+import { CANONICAL_IMPORTABILITY, type CanonicalImportability } from "@/lib/arquiteto/minerador-handoff";
 import { resolveArchitectDeepLink, sameStringSet } from "@/lib/arquiteto/deep-link";
 import { deterministicArticleDnaPayload, deterministicSiloDnaPayload, deterministicSiloPagePayload } from "@/lib/arquiteto/adapters";
 import { assertManualPublishedSiloPageUrl, assertManualSiloPageSlugAvailable, initialManualSiloPageVerification, normalizeManualSiloPageSlug } from "@/lib/arquiteto/manual-silo";
 import { confirmArticleArchitecture } from "@/lib/arquiteto/architecture-confirmation";
 import { applyHumanEditorialUnitDecision, suggestEditorialUnitClassification } from "@/lib/arquiteto/unit-strategy";
+import { applyArticleSelectionClick, applySelectionPaint, toggleVisibleArticleSelection } from "@/lib/arquiteto/article-selection";
 import { adaptKeywordIdentityContext, resolveArticleSerpIdentityContext, serpAssessmentModeLabel } from "@/lib/arquiteto/identity-context";
 import {
   SerpFormationAssessmentSchema,
@@ -59,6 +64,8 @@ import { DangerApprovalDialog } from "@/components/editorial/danger-approval-dia
 import { BackgroundTaskNotice } from "@/components/editorial/background-task-notice";
 import { HistoryControls } from "@/components/editorial/history-controls";
 import { useLocalHistory } from "@/components/editorial/use-local-history";
+import { useGlobalTopbarControlsRegistration, type GlobalTopbarModuleControls } from "@/components/global-topbar";
+import { GLOBAL_TOPBAR_ACTION_CONTROL, GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY } from "@/components/global-topbar-control";
 import {
   ArchitectArticleDnaRecoverySchema,
   ArchitectRecoverySnapshotSchema,
@@ -75,7 +82,6 @@ import {
   type ArchitectRecoverySnapshot,
 } from "@/lib/editorial/architect-recovery";
 import { readBrowserArtifactReadOnly, readBrowserStorageSnapshot, writeBrowserArtifact } from "@/lib/editorial/browser-artifact-store";
-import { ArchitectRecoveryPanel } from "@/components/editorial/architect-recovery-panel";
 import {
   createAuthenticatedBrowserClient,
   getCurrentSupabaseToken,
@@ -90,7 +96,6 @@ import {
   X,
   Check,
   Lock,
-  RefreshCw,
   ChevronDown,
   ChevronRight,
   Plus,
@@ -102,11 +107,6 @@ import {
   Building2,
   Zap,
   Download,
-  Menu,
-  User,
-  PenTool,
-  LogOut,
-  Key,
   ArrowRight,
   Network
 } from "lucide-react";
@@ -119,6 +119,35 @@ interface KeywordImportCandidate {
   status: "aprovado" | "publicado";
   lista_id: string | null;
   siloName: string | null;
+  importability: CanonicalImportability;
+  workflowState: string | null;
+}
+
+function importabilityReason(candidate: KeywordImportCandidate) {
+  switch (candidate.importability) {
+    case CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED:
+      return "Publicado protegido — disponível para reconstrução arquitetural.";
+    case CANONICAL_IMPORTABILITY.WORKFLOW_RECEIVED:
+      return "Já recebido pelo Arquiteto no workflow canônico remoto.";
+    case CANONICAL_IMPORTABILITY.ARTICLE_DNA_INCORPORATED:
+      return "Já incorporada em ArticleDNA canônico remoto.";
+    case CANONICAL_IMPORTABILITY.REMOTE_WORKFLOW_BLOCKED:
+      return `Workflow remoto incompatível${candidate.workflowState ? ` (${candidate.workflowState})` : ""}.`;
+    default:
+      return "A keyword não está aprovada para importação.";
+  }
+}
+
+function canEnterCanonicalArchitectWorkflow(candidate: KeywordImportCandidate) {
+  return candidate.importability === CANONICAL_IMPORTABILITY.IMPORTABLE
+    || candidate.importability === CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED;
+}
+
+function importabilityStatus(candidate: KeywordImportCandidate) {
+  if (candidate.importability === CANONICAL_IMPORTABILITY.IMPORTABLE) return "approved";
+  if (candidate.importability === CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED) return "published";
+  if (candidate.importability === CANONICAL_IMPORTABILITY.WORKFLOW_RECEIVED || candidate.importability === CANONICAL_IMPORTABILITY.ARTICLE_DNA_INCORPORATED) return "sent_architect";
+  return "blocked";
 }
 
 type ArchitectDatabaseSources = {
@@ -145,52 +174,39 @@ type AiReviewArticle = {
   supportKeywords: Array<{ id: string; aiReviewAnnotation?: AIReviewAnnotation }>;
 };
 
+type ArticleSelectionDrag = {
+  pointerId: number;
+  sourceId: string;
+  mode: "select" | "deselect";
+  startX: number;
+  startY: number;
+  started: boolean;
+  initialSelectedIds: Set<string>;
+  captureTarget: HTMLInputElement;
+  previousUserSelect: string;
+};
+
 // Helper slug
 const toSlug = (text: string) =>
   text.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
     .replace(/\s+/g, "-").replace(/[^\w-]+/g, "");
 
-// Cores por artigo — faixa inteira da <tr>
-// Reiniciam a cada novo silo para manter previsibilidade
-const ARTICLE_COLORS = [
-  "bg-blue-900/[.12]",
-  "bg-emerald-900/[.12]",
-  "bg-violet-900/[.12]",
-  "bg-amber-900/[.12]",
-  "bg-teal-900/[.12]",
-  "bg-rose-900/[.12]",
-  "bg-cyan-900/[.12]",
-  "bg-orange-900/[.12]",
-];
-
-// Barra colorida lateral (indicador de artigo na 1ª célula)
-const ARTICLE_ACCENTS = [
-  "border-l-2 border-l-blue-500/80",
-  "border-l-2 border-l-emerald-500/80",
-  "border-l-2 border-l-violet-500/80",
-  "border-l-2 border-l-amber-500/80",
-  "border-l-2 border-l-teal-500/80",
-  "border-l-2 border-l-rose-500/80",
-  "border-l-2 border-l-cyan-500/80",
-  "border-l-2 border-l-orange-500/80",
-];
-
 const SILO_COLORS = [
-  { border: "border-l-blue-500", rowBg: "bg-blue-500/[.045]", headerText: "text-blue-300", countBg: "bg-blue-500/10", countBorder: "border-blue-500/20" },
-  { border: "border-l-violet-500", rowBg: "bg-violet-500/[.045]", headerText: "text-violet-300", countBg: "bg-violet-500/10", countBorder: "border-violet-500/20" },
-  { border: "border-l-emerald-500", rowBg: "bg-emerald-500/[.045]", headerText: "text-emerald-300", countBg: "bg-emerald-500/10", countBorder: "border-emerald-500/20" },
-  { border: "border-l-amber-500", rowBg: "bg-amber-500/[.045]", headerText: "text-amber-300", countBg: "bg-amber-500/10", countBorder: "border-amber-500/20" },
-  { border: "border-l-cyan-500", rowBg: "bg-cyan-500/[.045]", headerText: "text-cyan-300", countBg: "bg-cyan-500/10", countBorder: "border-cyan-500/20" },
-  { border: "border-l-rose-500", rowBg: "bg-rose-500/[.045]", headerText: "text-rose-300", countBg: "bg-rose-500/10", countBorder: "border-rose-500/20" },
+  { border: "border-l-divider", headerText: "text-foreground", countBg: "bg-surface-subtle", countBorder: "border-divider" },
+  { border: "border-l-context-accent/60", headerText: "text-context-accent", countBg: "bg-context-accent/10", countBorder: "border-context-accent/25" },
+  { border: "border-l-module-accent/60", headerText: "text-module-accent", countBg: "bg-module-accent/10", countBorder: "border-module-accent/25" },
+  { border: "border-l-positive-soft/60", headerText: "text-positive-soft", countBg: "bg-positive-soft/10", countBorder: "border-positive-soft/25" },
+  { border: "border-l-warning/60", headerText: "text-warning", countBg: "bg-warning/10", countBorder: "border-warning/25" },
+  { border: "border-l-pending/60", headerText: "text-pending", countBg: "bg-pending/10", countBorder: "border-pending/25" },
 ];
 
 const SUPPORT_KEYWORD_COLORS = [
-  { row: "bg-blue-950/35", expanded: "bg-blue-950/55", border: "border-blue-500/60", title: "text-blue-300", stripe: "border-l-blue-500" },
-  { row: "bg-violet-950/35", expanded: "bg-violet-950/55", border: "border-violet-500/60", title: "text-violet-300", stripe: "border-l-violet-500" },
-  { row: "bg-emerald-950/35", expanded: "bg-emerald-950/55", border: "border-emerald-500/60", title: "text-emerald-300", stripe: "border-l-emerald-500" },
-  { row: "bg-amber-950/35", expanded: "bg-amber-950/55", border: "border-amber-500/60", title: "text-amber-300", stripe: "border-l-amber-500" },
-  { row: "bg-cyan-950/35", expanded: "bg-cyan-950/55", border: "border-cyan-500/60", title: "text-cyan-300", stripe: "border-l-cyan-500" },
-  { row: "bg-rose-950/35", expanded: "bg-rose-950/55", border: "border-rose-500/60", title: "text-rose-300", stripe: "border-l-rose-500" },
+  { row: "bg-surface-subtle", expanded: "bg-surface-elevated", border: "border-divider", title: "text-context-accent", stripe: "border-l-context-accent" },
+  { row: "bg-surface-subtle", expanded: "bg-surface-elevated", border: "border-divider", title: "text-module-accent", stripe: "border-l-module-accent" },
+  { row: "bg-surface-subtle", expanded: "bg-surface-elevated", border: "border-divider", title: "text-positive-soft", stripe: "border-l-positive-soft" },
+  { row: "bg-surface-subtle", expanded: "bg-surface-elevated", border: "border-divider", title: "text-warning", stripe: "border-l-warning" },
+  { row: "bg-surface-subtle", expanded: "bg-surface-elevated", border: "border-divider", title: "text-pending", stripe: "border-l-pending" },
+  { row: "bg-surface-subtle", expanded: "bg-surface-elevated", border: "border-divider", title: "text-foreground", stripe: "border-l-divider" },
 ];
 
 const EDITORIAL_UNIT_LABELS: Record<EditorialArticleUnitType, string> = {
@@ -198,6 +214,20 @@ const EDITORIAL_UNIT_LABELS: Record<EditorialArticleUnitType, string> = {
 };
 const LANDING_PURPOSE_LABELS: Record<Exclude<LandingPagePurpose, undefined>, string> = {
   seo: "SEO", campaign: "Campanha", hybrid: "Híbrida", unknown: "Ainda não definida",
+};
+
+const ARCHITECT_UI = {
+  toolbarButton: "inline-flex min-h-8 shrink-0 items-center gap-1 rounded border border-divider bg-surface-subtle px-2 text-sm font-medium text-foreground/75 transition-colors hover:border-module-accent/30 hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 disabled:cursor-not-allowed disabled:opacity-40",
+  primaryButton: "inline-flex min-h-8 shrink-0 items-center gap-1 rounded border border-context-accent/35 bg-context-accent/10 px-2 text-sm font-medium text-context-accent transition-colors hover:border-context-accent/55 hover:bg-context-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-40",
+  importButton: "inline-flex min-h-8 shrink-0 items-center gap-1 rounded border border-positive-soft/35 bg-positive-soft/10 px-2 text-sm font-medium text-positive-soft transition-colors hover:border-positive-soft/55 hover:bg-positive-soft/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-positive-soft/30 disabled:cursor-not-allowed disabled:opacity-40",
+  dangerButton: "inline-flex min-h-8 shrink-0 items-center gap-1 rounded border border-danger/45 bg-danger-soft px-2 text-sm font-medium text-danger transition-colors hover:border-danger/65 hover:bg-danger-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30 disabled:cursor-not-allowed disabled:opacity-40",
+  control: "min-h-8 rounded border border-divider bg-surface-subtle px-2 text-sm text-foreground outline-none transition-colors placeholder:text-text-muted focus-visible:border-module-accent/45 focus-visible:ring-2 focus-visible:ring-module-accent/25",
+  iconButton: "inline-flex min-h-8 min-w-8 items-center justify-center rounded border border-divider text-text-muted transition-colors hover:border-module-accent/30 hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30",
+  footerButton: "inline-flex min-h-8 shrink-0 items-center gap-1 rounded border border-divider bg-surface-subtle px-2 text-sm font-medium text-foreground/75 transition-colors hover:border-module-accent/30 hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 disabled:cursor-not-allowed disabled:opacity-40",
+  section: "rounded-md border border-divider bg-surface-subtle p-3",
+  sectionLabel: "text-sm font-semibold uppercase tracking-wider text-foreground/75",
+  metaLabel: "text-sm font-semibold uppercase tracking-wide text-text-muted",
+  metaValue: "mt-1 text-sm leading-5 text-foreground/85",
 };
 
 // ─── Algoritmo de Fusão e Clusterização ────────────────────────────────────
@@ -386,35 +416,30 @@ const clusterMasterList = (list: any[]) => {
 export default function ArquitetoPage() {
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
-  const { brands, selectedBrandId, setSelectedBrandId, userRole, profileLoading, refreshBrands } = useBrand();
+  const { brands, selectedBrandId, profileLoading, refreshBrands } = useBrand();
   const supabase = useMemo(() => createAuthenticatedBrowserClient(), []);
-  const { architectImportedKeywordIds, articleVersions: acceptedArticleDnas, siloVersions: acceptedSiloDnas, siloPageVersions: acceptedSiloPages, versionEvents, aiReviewAnnotations,
+  const { articleVersions: acceptedArticleDnas, siloVersions: acceptedSiloDnas, siloPageVersions: acceptedSiloPages, versionEvents, aiReviewAnnotations,
     setArticleVersions: setAcceptedArticleDnas, setSiloVersions: setAcceptedSiloDnas, setSiloPageVersions: setAcceptedSiloPages, addVersionEvents,
-    selectedEntityId, setSelectedEntityId, importApprovedKeywordsToArchitect, setArchitectImportedKeywordIds, importApprovedToRadar, importApprovedSiloPagesToRadar, radarItems,
+    selectedEntityId, setSelectedEntityId, setArchitectImportedKeywordIds, importApprovedToRadar, importApprovedSiloPagesToRadar, radarItems,
     backgroundTasks, runBackgroundTask, consumeBackgroundTask, dismissBackgroundTask, addAiReviewAnnotations, restoreOperationalSnapshot,
     plannerItems, documents, operationalPublications } = useEditorialPipeline();
 
   // Data
   const [lists,    setLists]    = useState<any[]>([]);
   const [masterList, setMasterList] = useState<any[]>([]);
+  const [canonicalBootstrapError, setCanonicalBootstrapError] = useState<{ code: string; message: string } | null>(null);
+  const [canonicalBootstrapStatus, setCanonicalBootstrapStatus] = useState<"LOADING" | "LOADED" | "EMPTY" | "ERROR">("LOADING");
+  const [canonicalWorkspaceReload, setCanonicalWorkspaceReload] = useState(0);
   const [keywordImportPool, setKeywordImportPool] = useState<KeywordImportCandidate[]>([]);
   const [keywordImportError, setKeywordImportError] = useState<string | null>(null);
+  const [canonicalReceivedKeywordIds, setCanonicalReceivedKeywordIds] = useState<string[]>([]);
   const [databaseSources, setDatabaseSources] = useState<ArchitectDatabaseSources>({ silos: [], keywords: [], briefings: [], capturedAt: "" });
   const [recoverySnapshot, setRecoverySnapshot] = useState<ArchitectRecoverySnapshot | null>(null);
   const [recoveryAudit, setRecoveryAudit] = useState<ArchitectRecoveryAudit | null>(null);
   const [recoveryPlan, setRecoveryPlan] = useState<ArchitectRecoveryPlan | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
-  const importedKeywordIds = useMemo(() => new Set(architectImportedKeywordIds), [architectImportedKeywordIds]);
-  const renderedKeywordIds = useMemo(
-    () => new Set(masterList.map(item => String(item.keywordId || item.id)).filter(Boolean)),
-    [masterList],
-  );
-  const effectiveImportedKeywordIdsForUi = useMemo(
-    () => new Set(recoveryPlan?.correctedImportedKeywordIds || recoveryAudit?.ids.effectiveImportedKeywordIds || (renderedKeywordIds.size ? renderedKeywordIds : architectImportedKeywordIds)),
-    [architectImportedKeywordIds, recoveryAudit, recoveryPlan, renderedKeywordIds],
-  );
-  const importedKeywordSignature = useMemo(() => [...architectImportedKeywordIds].sort().join("|"), [architectImportedKeywordIds]);
+  const canonicalReceivedKeywordSignature = useMemo(() => [...canonicalReceivedKeywordIds].sort().join("|"), [canonicalReceivedKeywordIds]);
   const [keywordImportOpen, setKeywordImportOpen] = useState(false);
   const [provisionalGroups, setProvisionalGroups] = useState<ProvisionalArticleGroup[]>([]);
   const [serpAssessments, setSerpAssessments] = useState<SerpFormationAssessment[]>([]);
@@ -439,12 +464,15 @@ export default function ArquitetoPage() {
   const activeSiloPageTask = runningArchitectTask("silo_page");
   const generatingStrategic = Boolean(activeLogicalTask || activeKeywordReviewTask || activeArticleDnaTask || activeSiloDnaTask || activeSiloPageTask);
   const [notification,      setNotification]      = useState<{ type:"success"|"error"; message:string }|null>(null);
-  const [menuOpen,          setMenuOpen]          = useState(false);
   const [selectionMenuOpen, setSelectionMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const selectionMenuRef = useRef<HTMLDivElement>(null);
+  const headerSelectionRef = useRef<HTMLInputElement>(null);
+  const lastSelectionAnchorId = useRef<string | null>(null);
+  const selectionDragRef = useRef<ArticleSelectionDrag | null>(null);
+  const suppressSelectionClickRef = useRef(false);
   const lastLoadedImportSignature = useRef("");
   const recoveredArchitectArtifacts = useRef(new Set<string>());
+  const canonicalArtifactsLoaded = useRef(new Set<string>());
   const reviewRecoveryReady = useRef(new Set<string>());
   const serpRecoveryReady = useRef(new Set<string>());
   const consumedExternalNavigation = useRef<string | null>(null);
@@ -476,28 +504,37 @@ export default function ArquitetoPage() {
     setProvisionalGroups(describeAssignedGroups(snapshot.masterList));
     restoreOperationalSnapshot("arquiteto", snapshot);
     setSelectedArticleIds(new Set());
+    lastSelectionAnchorId.current = null;
   }, 30, selectedBrandId || "sem-marca");
   const [selectedStatusAction, setSelectedStatusAction] = useState("");
   const [pendingDangerAction, setPendingDangerAction] = useState<PendingDangerAction | null>(null);
   useEffect(() => {
+    lastSelectionAnchorId.current = null;
+    selectionDragRef.current = null;
+    suppressSelectionClickRef.current = false;
+    setSelectedArticleIds(new Set());
+  }, [selectedBrandId]);
+
+  useEffect(() => {
     if (!selectedBrandId || recoveredArchitectArtifacts.current.has(selectedBrandId)) return;
     const brandId = selectedBrandId;
+    if (canonicalArtifactsLoaded.current.has(brandId)) return;
     let cancelled = false;
     const recover = async () => {
       const recoveredEvents: VersionStatusEvent[] = [];
       try {
-        const raw = await readBrowserArtifactReadOnly(architectArticleDnaRecoveryKey(brandId));
+        const raw = await readBrowserArtifactReadOnly(architectArticleDnaRecoveryKey(session?.user?.id || "anonymous", brandId));
         if (raw && !cancelled) {
           const recovered = ArchitectArticleDnaRecoverySchema.parse(raw);
-          setAcceptedArticleDnas(current => ({ ...current, ...recovered.versions }));
+          if (!canonicalArtifactsLoaded.current.has(brandId)) setAcceptedArticleDnas(current => ({ ...current, ...recovered.versions }));
           recoveredEvents.push(...recovered.events);
         }
       } catch { /* artefato inválido não impede a recuperação dos demais */ }
       try {
-        const raw = await readBrowserArtifactReadOnly(architectSiloDnaRecoveryKey(brandId));
+        const raw = await readBrowserArtifactReadOnly(architectSiloDnaRecoveryKey(session?.user?.id || "anonymous", brandId));
         if (raw && !cancelled) {
           const recovered = ArchitectSiloDnaRecoverySchema.parse(raw);
-          setAcceptedSiloDnas(current => ({ ...current, ...recovered.versions }));
+          if (!canonicalArtifactsLoaded.current.has(brandId)) setAcceptedSiloDnas(current => ({ ...current, ...recovered.versions }));
           recoveredEvents.push(...recovered.events);
         }
       } catch { /* artefato inválido não impede a recuperação dos demais */ }
@@ -507,7 +544,101 @@ export default function ArquitetoPage() {
     };
     void recover();
     return () => { cancelled = true; };
-  }, [selectedBrandId, setAcceptedArticleDnas, setAcceptedSiloDnas, addVersionEvents]);
+    // Os comandos do contexto são recriados quando o workspace muda. Incluí-los
+    // aqui faria o readback canônico reiniciar ao atualizar o próprio contexto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBrandId, session?.user?.id]);
+
+  useEffect(() => {
+    if (sessionStatus === "loading" || (sessionStatus === "authenticated" && profileLoading)) {
+      setCanonicalBootstrapStatus("LOADING");
+      return;
+    }
+    if (sessionStatus !== "authenticated" || !selectedBrandId) {
+      setCanonicalBootstrapError(null);
+      setCanonicalBootstrapStatus("EMPTY");
+      setCanonicalReceivedKeywordIds([]);
+      return;
+    }
+    const brandId = selectedBrandId;
+    let cancelled = false;
+    let bootstrapFinalized = false;
+    setLoadingKeywords(true);
+    setCanonicalReceivedKeywordIds([]);
+    setCanonicalBootstrapError(null);
+    setCanonicalBootstrapStatus("LOADING");
+    void loadCanonicalArquitetoWorkspace(brandId).then(canonical => {
+      if (cancelled) return;
+      bootstrapFinalized = true;
+      canonicalArtifactsLoaded.current.add(brandId);
+      const workflowItems = buildCanonicalWorkflowWorkspaceItems(canonical.workflowItems, canonical.keywords, brandId);
+      setCanonicalReceivedKeywordIds(canonical.workflowItems
+        .filter(item => item.marcaId === brandId && item.subjectType === "keyword" && item.stage === "architect" && item.state === "received")
+        .map(item => item.subjectId));
+      const handoffKeywordIds = new Set(workflowItems.map(item => String(item.keywordId)));
+      const bootstrap = buildCanonicalArticleWorkspaceItems(canonical.articleDnas, brandId, handoffKeywordIds);
+      const workspaceItems = mergeCanonicalArticleWorkspaceItems(workflowItems, bootstrap.items, brandId);
+      setMasterList(workspaceItems);
+      setProvisionalGroups(describeAssignedGroups(workspaceItems as Parameters<typeof describeAssignedGroups>[0]));
+      setDatabaseSources(current => ({ ...current, keywords: canonical.availableKeywords, capturedAt: new Date().toISOString() }));
+      const eligibilityByKeywordId = new Map(canonical.importEligibility.map(item => [item.keywordId, item]));
+      setKeywordImportPool(canonical.availableKeywords.flatMap(keyword => {
+        const eligibility = eligibilityByKeywordId.get(keyword.id);
+        if (!eligibility || eligibility.importability === CANONICAL_IMPORTABILITY.NOT_APPROVED) return [];
+        return [{
+          id: keyword.id,
+          keyword: keyword.keyword,
+          intent: typeof keyword.intent === "string" ? keyword.intent : null,
+          volume_search: typeof keyword.volume_search === "number" ? keyword.volume_search : null,
+          status: String(keyword.status || "aprovado").toLocaleLowerCase("pt-BR") as KeywordImportCandidate["status"],
+          lista_id: typeof keyword.lista_id === "string" ? keyword.lista_id : null,
+          siloName: null,
+          importability: eligibility.importability,
+          workflowState: eligibility.workflowState,
+        }];
+      })
+        .sort((left, right) => left.status.localeCompare(right.status) || left.keyword.localeCompare(right.keyword, "pt-BR")));
+      if (bootstrap.contractGaps.length) {
+        setCanonicalBootstrapError({
+          code: "CANONICAL_BOOTSTRAP_CONTRACT_GAP",
+          message: "O handoff remoto foi lido, mas um ArticleDNA relacionado não possui os campos mínimos para aparecer no workspace.",
+        });
+        setCanonicalBootstrapStatus("ERROR");
+      } else {
+        setCanonicalBootstrapError(null);
+        setCanonicalBootstrapStatus(workspaceItems.length ? "LOADED" : "EMPTY");
+      }
+      setAcceptedArticleDnas(Object.fromEntries(canonical.articleDnas.map(version => [version.payload.articleId, version])));
+      setAcceptedSiloDnas(Object.fromEntries(canonical.siloDnas.map(version => [version.payload.siloId, version])));
+      setAcceptedSiloPages(Object.fromEntries(canonical.siloPages.map(version => [version.payload.siloPageId, version])));
+      const canonicalStatuses: VersionStatusEvent["status"][] = ["draft", "proposed", "approved", "rejected", "superseded"];
+      const remoteEvents = canonical.statuses.flatMap(item => canonicalStatuses.includes(item.status as VersionStatusEvent["status"])
+        ? [createStatusEvent(item.versionId, item.status as VersionStatusEvent["status"], session?.user?.id || "canonical-remote", "Estado carregado do artefato canônico.")]
+        : []);
+      if (remoteEvents.length) addVersionEvents(remoteEvents);
+    }).catch(error => {
+      if (!cancelled) {
+        bootstrapFinalized = true;
+        const code = typeof error === "object" && error && "code" in error ? String(error.code) : "QUERY_FAILURE";
+        setCanonicalBootstrapError({ code, message: error instanceof Error ? error.message : "Não foi possível carregar os artefatos canônicos do Arquiteto." });
+        setCanonicalBootstrapStatus("ERROR");
+        setNotification({ type: "error", message: error instanceof Error ? error.message : "Não foi possível carregar os artefatos canônicos do Arquiteto." });
+      }
+    }).finally(() => {
+      if (!cancelled) setLoadingKeywords(false);
+      if (!cancelled && !bootstrapFinalized) {
+        setCanonicalBootstrapStatus(current => current === "LOADING" ? "ERROR" : current);
+        setCanonicalBootstrapError({
+          code: "QUERY_FAILURE",
+          message: "Não foi possível concluir o bootstrap canônico do Arquiteto.",
+        });
+      }
+    });
+    return () => { cancelled = true; };
+    // Os comandos do contexto são recriados após cada atualização do workspace;
+    // o ciclo é controlado por sessão, Brand e estado de perfil, não por eles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [canonicalWorkspaceReload, profileLoading, sessionStatus, selectedBrandId, session?.user?.id]);
 
   useEffect(() => {
     if (!selectedBrandId) return;
@@ -518,7 +649,7 @@ export default function ArquitetoPage() {
     setPublicationVerifications([]);
     const recover = async () => {
       try {
-        const raw = await readBrowserArtifactReadOnly(architectSerpFormationKey(brandId));
+        const raw = await readBrowserArtifactReadOnly(architectSerpFormationKey(session?.user?.id || "anonymous", brandId));
         if (!cancelled && raw) {
           const recovered = SerpFormationRecoverySchema.parse(raw);
           setSerpAssessments(recovered.assessments);
@@ -534,7 +665,7 @@ export default function ArquitetoPage() {
   useEffect(() => {
     if (!selectedBrandId || !serpRecoveryReady.current.has(selectedBrandId)) return;
     const recovery = SerpFormationRecoverySchema.parse({ schemaVersion: 1, brandId: selectedBrandId, updatedAt: new Date().toISOString(), assessments: serpAssessments, verifications: publicationVerifications });
-    const timer = window.setTimeout(() => { void writeBrowserArtifact(architectSerpFormationKey(selectedBrandId), recovery).catch(() => undefined); }, 0);
+    const timer = window.setTimeout(() => { void writeBrowserArtifact(architectSerpFormationKey(session?.user?.id || "anonymous", selectedBrandId), recovery).catch(() => undefined); }, 0);
     return () => window.clearTimeout(timer);
   }, [selectedBrandId, serpAssessments, publicationVerifications]);
 
@@ -545,7 +676,7 @@ export default function ArquitetoPage() {
         const versionIds = new Set(Object.values(acceptedArticleDnas).map(version => version.versionId));
         const recovery = ArchitectArticleDnaRecoverySchema.parse({ schemaVersion: 1, versions: acceptedArticleDnas,
           events: versionEvents.filter(event => versionIds.has(event.versionId)), savedAt: new Date().toISOString() });
-        void writeBrowserArtifact(architectArticleDnaRecoveryKey(selectedBrandId), recovery).catch(() => undefined);
+        void writeBrowserArtifact(architectArticleDnaRecoveryKey(session?.user?.id || "anonymous", selectedBrandId), recovery).catch(() => undefined);
       } catch { /* cada artefato mantém sua própria recuperação */ }
     }, 0);
     return () => window.clearTimeout(timer);
@@ -558,7 +689,7 @@ export default function ArquitetoPage() {
         const versionIds = new Set(Object.values(acceptedSiloDnas).map(version => version.versionId));
         const recovery = ArchitectSiloDnaRecoverySchema.parse({ schemaVersion: 1, versions: acceptedSiloDnas,
           events: versionEvents.filter(event => versionIds.has(event.versionId)), savedAt: new Date().toISOString() });
-        void writeBrowserArtifact(architectSiloDnaRecoveryKey(selectedBrandId), recovery).catch(() => undefined);
+        void writeBrowserArtifact(architectSiloDnaRecoveryKey(session?.user?.id || "anonymous", selectedBrandId), recovery).catch(() => undefined);
       } catch { /* cada artefato mantém sua própria recuperação */ }
     }, 0);
     return () => window.clearTimeout(timer);
@@ -604,7 +735,6 @@ export default function ArquitetoPage() {
   // Close the article-selection menu on outside click.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
       if (selectionMenuRef.current && !selectionMenuRef.current.contains(e.target as Node)) setSelectionMenuOpen(false);
     };
     document.addEventListener("mousedown", handler);
@@ -614,8 +744,7 @@ export default function ArquitetoPage() {
   // Session sync
   useEffect(() => {
     if (sessionStatus === "authenticated") {
-      fetchData();
-      fetchMasterList();
+      void fetchData();
     } else if (sessionStatus === "unauthenticated") {
       setLoading(false);
     }
@@ -640,13 +769,16 @@ export default function ArquitetoPage() {
   };
 
   const fetchData = async () => {
-    if (sessionStatus !== "authenticated" || !selectedBrandId) return;
+    if (sessionStatus !== "authenticated" || !selectedBrandId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       await getCurrentSupabaseToken();
       const silos = await withSupabaseSelectRetry(async () => {
         const { data: silosData, error: silosError } = await supabase
-          .from("listas_kgr").select("*")
+          .from("minerador_keyword_lists").select("*")
           .eq("marca_id", selectedBrandId).order("created_at", { ascending: false });
         if (silosError) throw silosError;
         return silosData || [];
@@ -655,10 +787,10 @@ export default function ArquitetoPage() {
 
     } catch (err: any) {
       const authError = isSupabaseBrowserAuthError(err);
-      console.error("Erro ao carregar listas_kgr no Arquiteto:", {
+      console.error("Erro ao carregar minerador_keyword_lists no Arquiteto:", {
         code: authError ? err.code : err?.code,
         ...(authError ? err.diagnostic : {}),
-        table: "listas_kgr",
+        table: "minerador_keyword_lists",
         operation: "select",
         status: err?.status,
         tokenExpired: authError ? isSupabaseTokenExpirationError(err) : false,
@@ -668,7 +800,9 @@ export default function ArquitetoPage() {
         "error",
         authError ? getSupabaseSessionErrorMessage(err.code, err.expiresAt) : err?.message || "Erro ao carregar dossiês.",
       );
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const readArchitectDatabaseSources = async (): Promise<ArchitectDatabaseSources> => {
@@ -678,11 +812,11 @@ export default function ArquitetoPage() {
     await getCurrentSupabaseToken();
     return withSupabaseSelectRetry(async () => {
       const { data: silosData, error: silosError } = await supabase
-        .from("listas_kgr").select("id, nome, nicho, marca_id, created_at").eq("marca_id", selectedBrandId);
+        .from("minerador_keyword_lists").select("id, nome, nicho, marca_id, created_at").eq("marca_id", selectedBrandId);
       if (silosError) throw silosError;
       const silos = silosData || [];
       const allowedIds = silos.map(silo => silo.id);
-      let keywordQuery = supabase.from("keywords_kgr").select("*").eq("brand_id", selectedBrandId);
+      let keywordQuery = supabase.from("minerador_keywords").select("*").eq("brand_id", selectedBrandId);
       keywordQuery = allowedIds.length
         ? keywordQuery.or(`lista_id.is.null,${allowedIds.map(id => `lista_id.eq.${id}`).join(",")}`)
         : keywordQuery.is("lista_id", null);
@@ -706,11 +840,19 @@ export default function ArquitetoPage() {
   };
 
   // ── Fetch & cluster master list
-  const fetchMasterList = async (approvedIds = importedKeywordIds) => {
+  const fetchMasterList = async () => {
     if (sessionStatus !== "authenticated" || !selectedBrandId) return;
     setLoadingKeywords(true);
     setKeywordImportError(null);
+    const canonicalWorkspaceOwnsMasterList = true;
+    if (canonicalWorkspaceOwnsMasterList) {
+      setCanonicalWorkspaceReload(current => current + 1);
+      return;
+    }
     try {
+      // Inactive legacy path: import eligibility never comes from browser state.
+      // The canonical path above always reloads the remote snapshot.
+      const approvedIds = new Set<string>();
       const sourceData = await readArchitectDatabaseSources();
       setDatabaseSources(sourceData);
       const silosData = sourceData.silos;
@@ -731,6 +873,10 @@ export default function ArquitetoPage() {
           status: keyword.status.toLowerCase() as KeywordImportCandidate["status"],
           lista_id: keyword.lista_id || null,
           siloName: keyword.lista_id ? siloNameMap[String(keyword.lista_id)] || null : null,
+          importability: keyword.status?.toLowerCase() === "publicado"
+            ? CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED
+            : CANONICAL_IMPORTABILITY.IMPORTABLE,
+          workflowState: null,
         }))
         .sort((left, right) => left.status.localeCompare(right.status) || left.keyword.localeCompare(right.keyword, "pt-BR")));
 
@@ -741,15 +887,16 @@ export default function ArquitetoPage() {
       // reconciliação de fontes fica bloqueada até o snapshot ser exportado.
       let persistedReview: z.infer<typeof ArchitectReviewRecoverySchema> | null = null;
       try {
-        const rawRecovery = await readBrowserArtifactReadOnly(architectReviewRecoveryKey(selectedBrandId));
+        const rawRecovery = await readBrowserArtifactReadOnly(architectReviewRecoveryKey(session?.user?.id || "anonymous", selectedBrandId));
         if (rawRecovery) persistedReview = ArchitectReviewRecoverySchema.parse(rawRecovery);
       } catch { /* uma cópia inválida não autoriza reconstrução implícita */ }
-      const currentWorkspaceItems = masterListRef.current.length ? masterListRef.current : persistedReview?.masterList || [];
+      const recoveredWorkspaceItems = persistedReview?.masterList.map(item => item.source ? item : { ...item, source: "LOCAL_RECOVERY" }) || [];
+      const currentWorkspaceItems = masterListRef.current.length ? masterListRef.current : recoveredWorkspaceItems;
       const currentWorkspaceByKeywordId = new Map(currentWorkspaceItems.map(item => [String(item.keywordId || item.id), item]));
 
       const items: any[] = [];
 
-      // 1. Mapear todas as keywords publicadas de keywords_kgr
+      // 1. Mapear todas as keywords publicadas de minerador_keywords
       const pubKws = allKws.filter(k => k.status?.toLowerCase() === "publicado");
       const pubBriefings = allBriefings.filter(b => b.status?.toLowerCase() === "publicado");
 
@@ -791,7 +938,7 @@ export default function ArquitetoPage() {
         });
       });
 
-      // Se houver algum briefing publicado que não esteja no keywords_kgr, adiciona
+      // Se houver algum briefing publicado que não esteja no minerador_keywords, adiciona
       pubBriefings.forEach(b => {
         const key = b.keyword_principal.toLowerCase().trim();
         if (!publishedMap.has(key)) {
@@ -896,7 +1043,10 @@ export default function ArquitetoPage() {
         });
       });
 
-      const renderedIds = new Set(items.map(item => String(item.keywordId || item.id)));
+      const legacyItems = items.map(item => item.source ? item : { ...item, source: "LEGACY_REMOTE" });
+      const renderedIds = new Set(legacyItems.map(item => String(item.keywordId || item.id)));
+      items.length = 0;
+      items.push(...legacyItems);
       currentWorkspaceItems.forEach(item => {
         const keywordId = String(item.keywordId || item.id);
         if (!renderedIds.has(keywordId)) {
@@ -945,7 +1095,7 @@ export default function ArquitetoPage() {
       console.error("Erro ao carregar o ecossistema no Arquiteto:", {
         code: authError ? err.code : err?.code,
         ...(authError ? err.diagnostic : {}),
-        table: "listas_kgr/keywords_kgr/briefings_artigos",
+        table: "minerador_keyword_lists/minerador_keywords/briefings_artigos",
         operation: "select",
         status: err?.status,
         tokenExpired: authError ? isSupabaseTokenExpirationError(err) : false,
@@ -962,25 +1112,17 @@ export default function ArquitetoPage() {
   };
 
   useEffect(() => {
-    if (sessionStatus !== "authenticated" || !selectedBrandId || lastLoadedImportSignature.current === importedKeywordSignature) return;
-    void fetchMasterList(new Set(architectImportedKeywordIds));
-    // fetchMasterList is intentionally kept local to this legacy page; the
-    // signature is the stable dependency that controls recovery reloads.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [architectImportedKeywordIds, importedKeywordSignature, selectedBrandId, sessionStatus]);
-
-  useEffect(() => {
     if (!selectedBrandId || !reviewRecoveryReady.current.has(selectedBrandId) || !masterList.length) return;
     const timer = window.setTimeout(() => {
       try {
-        const recovery = ArchitectReviewRecoverySchema.parse({ schemaVersion: 1, importedKeywordSignature,
+        const recovery = ArchitectReviewRecoverySchema.parse({ schemaVersion: 1, importedKeywordSignature: canonicalReceivedKeywordSignature,
           masterList, provisionalGroups, customSlugs, customHierarchies: customHierarquias,
           annotations: aiReviewAnnotations, savedAt: new Date().toISOString() });
-        void writeBrowserArtifact(architectReviewRecoveryKey(selectedBrandId), recovery).catch(() => undefined);
+        void writeBrowserArtifact(architectReviewRecoveryKey(session?.user?.id || "anonymous", selectedBrandId), recovery).catch(() => undefined);
       } catch { /* falha local não pode interromper o trabalho editorial */ }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [aiReviewAnnotations, customHierarquias, customSlugs, importedKeywordSignature, masterList, provisionalGroups, selectedBrandId]);
+  }, [aiReviewAnnotations, canonicalReceivedKeywordSignature, customHierarquias, customSlugs, masterList, provisionalGroups, selectedBrandId]);
 
   // ── Handlers
   const handleCreateList = async (e: React.FormEvent) => {
@@ -1005,7 +1147,7 @@ export default function ArquitetoPage() {
     if (!newListName.trim()) { showNotification("error", "Nome do silo obrigatório."); return; }
     setSaving(true);
     try {
-      const { data: newList, error } = await supabase.from("listas_kgr")
+      const { data: newList, error } = await supabase.from("minerador_keyword_lists")
         .insert({ nome: newListName.trim(), marca_id: selectedBrandId })
         .select().single();
       if (error) throw error;
@@ -1020,23 +1162,28 @@ export default function ArquitetoPage() {
         entityId: siloId, versionNumber: 1, previousVersionId: null, origin: "human",
         changeReason: "SiloDNA criado manualmente no Arquiteto.", createdBy: session?.user?.id || "human-reviewer", payload: siloPayload,
       });
+      const persistedSilo = await persistArquitetoArtifact({ brandId: selectedBrandId, artifactType: "silo_dna", action: "create", version: siloVersion });
       let pageVersion: VersionEnvelope<SiloPage> | null = null;
       if (createSiloPage && normalizedSlug) {
-        const pagePayload = deterministicSiloPagePayload(siloVersion, selectedBrandId, normalizedSlug, {
+        const pagePayload = deterministicSiloPagePayload(persistedSilo.version as VersionEnvelope<SiloDNA>, selectedBrandId, normalizedSlug, {
           publicationStatus: newSiloPagePublicationStatus,
           publishedUrl,
           publicationVerification: initialManualSiloPageVerification(newSiloPagePublicationStatus, publishedUrl),
         });
-        pageVersion = await createVersionEnvelope({
+        const localPageVersion = await createVersionEnvelope({
           entityId: pagePayload.siloPageId, versionNumber: 1, previousVersionId: null, origin: "human",
           changeReason: "SiloPage criada manualmente no Arquiteto.", createdBy: session?.user?.id || "human-reviewer", payload: pagePayload,
         });
+        const persistedPage = await persistArquitetoArtifact({ brandId: selectedBrandId, artifactType: "silo_page", action: "create", version: localPageVersion });
+        pageVersion = persistedPage.version as VersionEnvelope<SiloPage>;
       }
       const { data: brandData } = await supabase.from("marcas").select("silos_existentes").eq("id", selectedBrandId).single();
       await supabase.from("marcas").update({
         silos_existentes: [...(brandData?.silos_existentes||[]), { nome: newListName.trim(), slug: toSlug(newListName) }]
       }).eq("id", selectedBrandId);
-      setAcceptedSiloDnas(previous => ({ ...previous, [siloVersion.payload.siloId]: siloVersion }));
+      const canonicalSilo = persistedSilo.version as VersionEnvelope<SiloDNA>;
+      setAcceptedSiloDnas(previous => ({ ...previous, [canonicalSilo.payload.siloId]: canonicalSilo }));
+      addVersionEvents([createStatusEvent(canonicalSilo.versionId, "proposed", canonicalSilo.createdBy, "SiloDNA manual aguardando revisão humana.")]);
       addVersionEvents([createStatusEvent(siloVersion.versionId, "proposed", session?.user?.id || "human-reviewer", "SiloDNA manual aguardando revisão humana.")]);
       if (pageVersion) {
         setAcceptedSiloPages(previous => ({ ...previous, [pageVersion!.payload.siloPageId]: pageVersion! }));
@@ -1211,15 +1358,15 @@ export default function ArquitetoPage() {
   const serpIndicatorFor = (article: (typeof articlesList)[number]) => {
     const articleId = articleEntityIdFor(article);
     const execution = articleId ? serpExecution[articleId] : undefined;
-    if (execution?.status === "processing") return { label: `SERP processando · ${execution.completed} de ${execution.queryCount}`, className: "border-amber-500/40 bg-amber-500/10 text-amber-300" };
-    if (execution?.status === "error") return { label: "SERP com erro", className: "border-rose-500/40 bg-rose-500/10 text-rose-300" };
+    if (execution?.status === "processing") return { label: `SERP processando · ${execution.completed} de ${execution.queryCount}`, className: "border-pending/40 bg-pending/10 text-pending" };
+    if (execution?.status === "error") return { label: "SERP com erro", className: "border-danger/40 bg-danger-soft text-danger" };
     const assessment = latestSerpAssessmentFor(articleId);
     if (!assessment) return { label: "SERP não analisada", className: "border-slate-700 text-slate-500" };
     const articleVersion = articleId ? acceptedArticleDnas[articleId] : undefined;
     const expectedVersionId = articleVersion?.versionId || `work:${articleId}`;
-    if (assessment.articleDnaVersionId !== expectedVersionId) return { label: `SERP desatualizada · v${assessment.version}`, className: "border-orange-500/40 bg-orange-500/10 text-orange-300" };
-    if (assessment.conflicts.length) return { label: `SERP com conflito · v${assessment.version}`, className: "border-rose-500/40 bg-rose-500/10 text-rose-300" };
-    return { label: `SERP pronta · v${assessment.version}`, className: "border-cyan-500/40 bg-cyan-500/10 text-cyan-300" };
+    if (assessment.articleDnaVersionId !== expectedVersionId) return { label: `SERP desatualizada · v${assessment.version}`, className: "border-warning/40 bg-warning/10 text-warning" };
+    if (assessment.conflicts.length) return { label: `SERP com conflito · v${assessment.version}`, className: "border-danger/40 bg-danger-soft text-danger" };
+    return { label: `SERP pronta · v${assessment.version}`, className: "border-success/40 bg-success-soft text-success" };
   };
   const handleConfirmArticleArchitecture = async (article: (typeof articlesList)[number], selectedPrincipalKeywordId?: string) => {
     const articleId = articleEntityIdFor(article);
@@ -1229,7 +1376,10 @@ export default function ArquitetoPage() {
     try {
       const actorId = session?.user?.id || "human-reviewer";
       const successor = await confirmArticleArchitecture(current, principalKeywordId, actorId);
-      setAcceptedArticleDnas(previous => ({ ...previous, [articleId!]: successor }));
+      const persisted = await persistArquitetoArtifact({ brandId: selectedBrandId, artifactType: "article_dna", action: "edit", version: successor });
+      const canonicalSuccessor = persisted.version as VersionEnvelope<ArticleDNA>;
+      setAcceptedArticleDnas(previous => ({ ...previous, [articleId!]: canonicalSuccessor }));
+      addVersionEvents([createStatusEvent(canonicalSuccessor.versionId, "proposed", canonicalSuccessor.createdBy, "Arquitetura confirmada; aprovação do workflow continua independente.")]);
       addVersionEvents([createStatusEvent(successor.versionId, "proposed", actorId, "Arquitetura confirmada; aprovação do workflow continua independente.")]);
       showNotification("success", "Arquitetura confirmada em nova versão do ArticleDNA. A próxima SERP usará fortalecimento.");
     } catch (error) {
@@ -1247,7 +1397,10 @@ export default function ArquitetoPage() {
         entityId: current.payload.articleId, versionNumber: current.versionNumber + 1, previousVersionId: current.versionId,
         origin: "human", changeReason: "Classificação manual do tipo e propósito da unidade editorial.", createdBy: actorId, payload,
       });
-      setAcceptedArticleDnas(previous => ({ ...previous, [articleId!]: successor }));
+      const persisted = await persistArquitetoArtifact({ brandId: selectedBrandId, artifactType: "article_dna", action: "edit", version: successor });
+      const canonicalSuccessor = persisted.version as VersionEnvelope<ArticleDNA>;
+      setAcceptedArticleDnas(previous => ({ ...previous, [articleId!]: canonicalSuccessor }));
+      addVersionEvents([createStatusEvent(canonicalSuccessor.versionId, "proposed", canonicalSuccessor.createdBy, "Classificação humana registrada; aprovação editorial continua independente.")]);
       addVersionEvents([createStatusEvent(successor.versionId, "proposed", actorId, "Classificação humana registrada; aprovação editorial continua independente.")]);
       setSerpAssessments(previous => previous.map(assessment => assessment.articleDnaVersionId === current.versionId ? markSerpAssessmentOutdated(assessment, "Desatualizado por mudança do perfil da unidade editorial.") : assessment));
       showNotification("success", "Perfil da unidade salvo em nova versão do ArticleDNA. A SERP anterior foi preservada no histórico.");
@@ -1267,7 +1420,7 @@ export default function ArquitetoPage() {
   const persistSerpState = async (assessments: SerpFormationAssessment[], verifications = publicationVerifications) => {
     if (!selectedBrandId) throw new Error("Marca ausente para persistir o assessment SERP.");
     const recovery = SerpFormationRecoverySchema.parse({ schemaVersion: 1, brandId: selectedBrandId, updatedAt: new Date().toISOString(), assessments, verifications });
-    await writeBrowserArtifact(architectSerpFormationKey(selectedBrandId), recovery);
+    await writeBrowserArtifact(architectSerpFormationKey(session?.user?.id || "anonymous", selectedBrandId), recovery);
   };
 
   const openSerpPreview = () => {
@@ -1377,12 +1530,12 @@ export default function ArquitetoPage() {
     if (!articleId || !keywordDnaId) return null;
     const assessment = latestSerpAssessmentFor(articleId);
     if (!assessment) return null;
-    if (!assessedKeywordDnaIds(assessment).includes(keywordDnaId)) return <div className="mt-1 rounded border border-slate-800 bg-slate-950/30 p-2 text-[8px] text-slate-500">Não consultada neste perfil de validação ({assessment.validationProfile}); a proveniência da KeywordDNA permanece preservada.</div>;
+    if (!assessedKeywordDnaIds(assessment).includes(keywordDnaId)) return <div className="mt-2 rounded-md border border-slate-800 bg-slate-950/40 p-3 text-sm leading-6 text-slate-400">Não consultada neste perfil de validação ({assessment.validationProfile}); a proveniência da KeywordDNA permanece preservada.</div>;
     const recommendation = findSerpRecommendationForKeyword(assessment, keywordDnaId);
     const rawRecommendation = assessment.recommendations.find(item => item.keywordId === keywordDnaId);
-    if (!recommendation) return <div className="mt-1 rounded border border-amber-500/30 bg-amber-500/[.06] p-2 text-[8px] text-amber-300">
-      <p className="font-bold">Recomendação SERP não associada</p>
-      <p className="mt-0.5 text-amber-200/70">KeywordDNA: {keywordDnaId} · ArticleDNA: {assessment.articleDnaVersionId}{rawRecommendation ? ` · versão da recomendação: ${rawRecommendation.keywordDnaVersionId}` : " · referência ausente"}</p>
+    if (!recommendation) return <div className="mt-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+      <p className="font-semibold">Recomendação SERP não associada</p>
+      <p className="mt-1 leading-6 text-warning/80">KeywordDNA: {keywordDnaId} · ArticleDNA: {assessment.articleDnaVersionId}{rawRecommendation ? ` · versão da recomendação: ${rawRecommendation.keywordDnaVersionId}` : " · referência ausente"}</p>
     </div>;
     const identityContext = articleSerpIdentityFor(article);
     const publishedPrincipal = identityContext.principalProtected && keywordDnaId === article.mainKeywordObj?.id;
@@ -1390,20 +1543,20 @@ export default function ArquitetoPage() {
     const proposalAction = publishedPrincipal || recommendation.action === "revisar_conteudo" || recommendation.action === "sugerir_artigo_suporte";
     const assessmentMode = identityContext.mode;
     const assessmentLabel = serpAssessmentModeLabel(assessmentMode);
-    return <div className="mt-1.5 rounded border border-cyan-500/20 bg-cyan-500/[.035] p-2">
-      <div className="flex flex-wrap items-center justify-between gap-1.5">
-        <span className="text-[8px] font-bold uppercase tracking-wider text-cyan-300">{assessmentLabel} · v{assessment.version}</span>
-        <span className="rounded border border-cyan-900/60 px-1.5 py-0.5 text-[7.5px] uppercase tracking-wider text-cyan-400">{recommendation.decision.status}</span>
+    return <div className="mt-2 rounded-lg border border-context-accent/25 bg-context-accent/10 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs font-bold uppercase tracking-wider text-context-accent">{assessmentLabel} · v{assessment.version}</span>
+        <span className="rounded-md border border-context-accent/45 px-2 py-1 text-xs uppercase tracking-wide text-context-accent">{recommendation.decision.status}</span>
       </div>
-      <p className="mt-1 text-[9px] font-semibold text-slate-200">{recommendation.action === "fortalecer_intencao" ? "Fortalecer intenção" : recommendation.action === "revisar_conteudo" ? "Revisar conteúdo ao redor da principal" : recommendation.action === "sugerir_artigo_suporte" ? "Sugerir artigo complementar" : recommendation.action.replaceAll("_", " ")} · confiança {recommendation.confidence}</p>
-      <p className="mt-0.5 text-[8.5px] leading-relaxed text-slate-400">{recommendation.reason}</p>
-      <p className="mt-1 text-[7.5px] text-slate-600">Keyword: {keywordLabel} · analisada em {new Date(assessment.createdAt).toLocaleString("pt-BR")}</p>
-      {recommendation.conflicts.length > 0 && <div className="mt-1 space-y-0.5">{recommendation.conflicts.map(conflict => <p key={conflict} className="text-[8px] text-rose-300">Conflito: {conflict}</p>)}</div>}
-      {recommendation.decision.status === "pending" && <div className="mt-2 flex flex-wrap items-center gap-2">
-        {(publishedPrincipal || !blocked) && <button onClick={() => void handleSerpRecommendationDecision(article, recommendation.keywordId, "followed")} className="rounded border border-emerald-900/60 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-emerald-300 hover:border-emerald-700" title={proposalAction ? "Registrar proposta sem alterar a identidade publicada" : "Aplicar somente a esta keyword na cópia de trabalho"}>{proposalAction ? recommendation.action === "sugerir_artigo_suporte" ? "Sugerir artigo complementar" : "Registrar proposta de atualização" : "Seguir recomendação"}</button>}
-        <button onClick={() => void handleSerpRecommendationDecision(article, recommendation.keywordId, "ignored")} className="rounded border border-slate-700 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200">Ignorar</button>
+      <p className="mt-2 text-base font-semibold text-slate-100">{recommendation.action === "fortalecer_intencao" ? "Fortalecer intenção" : recommendation.action === "revisar_conteudo" ? "Revisar conteúdo ao redor da principal" : recommendation.action === "sugerir_artigo_suporte" ? "Sugerir artigo complementar" : recommendation.action.replaceAll("_", " ")} · confiança {recommendation.confidence}</p>
+      <p className="mt-1 text-sm leading-6 text-slate-300">{recommendation.reason}</p>
+      <p className="mt-2 text-xs text-slate-500">Keyword: {keywordLabel} · analisada em {new Date(assessment.createdAt).toLocaleString("pt-BR")}</p>
+      {recommendation.conflicts.length > 0 && <div className="mt-3 space-y-1 rounded-md border border-danger/45 bg-danger-soft p-3">{recommendation.conflicts.map(conflict => <p key={conflict} className="text-sm leading-6 text-danger">Conflito: {conflict}</p>)}</div>}
+      {recommendation.decision.status === "pending" && <div className="mt-4 flex flex-wrap items-center gap-3">
+        {(publishedPrincipal || !blocked) && <button onClick={() => void handleSerpRecommendationDecision(article, recommendation.keywordId, "followed")} className={ARCHITECT_UI.importButton} title={proposalAction ? "Registrar proposta sem alterar a identidade publicada" : "Aplicar somente a esta keyword na cópia de trabalho"}>{proposalAction ? recommendation.action === "sugerir_artigo_suporte" ? "Sugerir artigo complementar" : "Registrar proposta de atualização" : "Seguir recomendação"}</button>}
+        <button onClick={() => void handleSerpRecommendationDecision(article, recommendation.keywordId, "ignored")} className={ARCHITECT_UI.toolbarButton}>Ignorar</button>
       </div>}
-      {(blocked || publishedPrincipal) && <p className="mt-1 text-[8px] text-amber-400">Keyword principal protegida: a SERP só pode registrar proposta de fortalecimento ao redor da identidade consolidada.</p>}
+      {(blocked || publishedPrincipal) && <p className="mt-3 rounded-md border border-warning/45 bg-warning/10 p-3 text-sm leading-6 text-warning">Keyword principal protegida: a SERP só pode registrar proposta de fortalecimento ao redor da identidade consolidada.</p>}
     </div>;
   };
   const renderSerpRecommendations = (article: (typeof articlesList)[number]) => {
@@ -1416,15 +1569,15 @@ export default function ArquitetoPage() {
     const articleDna = articleEntityIdFor(article) ? acceptedArticleDnas[articleEntityIdFor(article)!] : undefined;
     const publishedCanonical = article.mainKeywordObj?.canonical || articleDna?.payload.canonical || null;
     const assessmentMode = articleSerpIdentityFor(article).mode;
-    return <section className="mb-3 rounded border border-cyan-500/20 bg-cyan-500/[.035] p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/70 pb-2 mb-2">
-        <div><p className="text-[8.5px] font-bold uppercase tracking-widest text-cyan-300">{serpAssessmentModeLabel(assessmentMode)}{assessment.evaluationStatus === "outdated" ? " · Desatualizado por correção do avaliador" : ""}</p><p className="mt-1 text-[9px] text-slate-500">Assessment v{assessment.version} · {assessment.intentCompatibility} · competição {assessment.competitionLevel} · {assessment.queryCount} consulta(s) · perfil {assessment.validationProfile} · {new Date(assessment.createdAt).toLocaleString("pt-BR")}</p></div>
-        <span className="text-[8px] font-mono text-slate-600">{assessment.contentHash.slice(0, 18)}…</span>
+    return <section className="mb-4 rounded-lg border border-context-accent/25 bg-context-accent/10 p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/70 pb-3">
+         <div><p className="text-xs font-bold uppercase tracking-widest text-context-accent">{serpAssessmentModeLabel(assessmentMode)}{assessment.evaluationStatus === "outdated" ? " · Desatualizado por correção do avaliador" : ""}</p><p className="mt-1 text-sm leading-6 text-text-muted">Assessment v{assessment.version} · {assessment.intentCompatibility} · competição {assessment.competitionLevel} · {assessment.queryCount} consulta(s) · perfil {assessment.validationProfile} · {new Date(assessment.createdAt).toLocaleString("pt-BR")}</p></div>
+        <span className="font-mono text-xs text-slate-500">{assessment.contentHash.slice(0, 18)}…</span>
       </div>
-      <p className={`text-[9px] ${complete ? "text-emerald-300" : "text-amber-300"}`}>{complete ? "SERP validada: recomendações associadas às keywords consultadas." : "SERP concluída parcialmente: o resultado não foi associado integralmente e exige revisão humana."} Proveniência: {referenceCount} KeywordDNAs (principal incluída) · consultadas: {assessment.snapshots.length}/{queriedCount} · recomendações: {assessment.recommendations.length}/{queriedCount}.</p>
-      {assessmentMode === "fortalecimento" && <p className="mt-1 rounded border border-amber-500/25 bg-amber-500/[.04] p-2 text-[8px] text-amber-200/80">Principal protegida: {article.keywordPrincipal} · URL: {publicationUrlFor(article) || "não recebida"} · canonical: {publishedCanonical || "não recebida"}. Oportunidades abaixo fortalecem esta identidade.</p>}
-      {assessment.conflicts.length > 0 && <div className="mt-1 space-y-0.5">{assessment.conflicts.map(conflict => <p key={conflict} className="text-[8px] text-rose-300">Conflito do artigo: {conflict}</p>)}</div>}
-      {unassociated.length > 0 && <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/[.05] p-2"><p className="text-[8px] font-bold uppercase tracking-wider text-amber-300">Recomendação SERP não associada</p>{unassociated.map(recommendation => <p key={recommendation.id} className="mt-0.5 text-[8px] text-amber-200/80">KeywordDNA: {recommendation.keywordId} · KeywordDNA v{recommendation.keywordDnaVersionId} · ArticleDNA: {assessment.articleDnaVersionId}</p>)}</div>}
+       <p className={`text-sm leading-6 ${complete ? "text-success" : "text-warning"}`}>{complete ? "SERP validada: recomendações associadas às keywords consultadas." : "SERP concluída parcialmente: o resultado não foi associado integralmente e exige revisão humana."} Proveniência: {referenceCount} KeywordDNAs (principal incluída) · consultadas: {assessment.snapshots.length}/{queriedCount} · recomendações: {assessment.recommendations.length}/{queriedCount}.</p>
+       {assessmentMode === "fortalecimento" && <p className="mt-3 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm leading-6 text-warning">Principal protegida: {article.keywordPrincipal} · URL: {publicationUrlFor(article) || "não recebida"} · canonical: {publishedCanonical || "não recebida"}. Oportunidades abaixo fortalecem esta identidade.</p>}
+       {assessment.conflicts.length > 0 && <div className="mt-3 space-y-1 rounded-md border border-danger/45 bg-danger-soft p-3">{assessment.conflicts.map(conflict => <p key={conflict} className="text-sm leading-6 text-danger">Conflito do artigo: {conflict}</p>)}</div>}
+       {unassociated.length > 0 && <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 p-3"><p className="text-sm font-bold uppercase tracking-wider text-warning">Recomendação SERP não associada</p>{unassociated.map(recommendation => <p key={recommendation.id} className="mt-1 text-sm leading-6 text-warning/80">KeywordDNA: {recommendation.keywordId} · KeywordDNA v{recommendation.keywordDnaVersionId} · ArticleDNA: {assessment.articleDnaVersionId}</p>)}</div>}
     </section>;
   };
   /*
@@ -1440,7 +1593,7 @@ export default function ArquitetoPage() {
         {assessment.recommendations.map(recommendation => {
           const keyword = [article.mainKeywordObj, ...article.supportKeywords].find(item => item?.id === recommendation.keywordId);
           const blocked = article.isPublished && (recommendation.action === "tornar_principal" || (recommendation.action === "separar_artigo" && recommendation.keywordId === article.mainKeywordObj?.id));
-          return <div key={recommendation.id} className="rounded border border-slate-800 bg-[#08090c] p-2.5">
+          return <div key={recommendation.id} className="rounded border border-divider bg-surface-subtle p-2.5">
             <div className="flex items-start justify-between gap-2"><span className="text-[10px] font-semibold text-slate-200">{keyword?.keyword || recommendation.keywordId}</span><span className="rounded border border-cyan-900/60 px-1.5 py-0.5 text-[8px] uppercase tracking-wider text-cyan-400">{recommendation.decision.status}</span></div>
             <p className="mt-1 text-[9px] text-slate-400">{recommendation.reason}</p>
             <p className="mt-1 text-[8px] uppercase tracking-wider text-slate-600">Sugestão: {recommendation.action.replaceAll("_", " ")}</p>
@@ -1576,6 +1729,7 @@ export default function ArquitetoPage() {
 
   const handleGenerateSiloPageForSilo = async (siloId: string, siloName: string) => {
     const actorId = session?.user?.id || "human-reviewer";
+    if (!selectedBrandId) { showNotification("error", "Selecione uma Brand antes de persistir a SiloPage."); return; }
     const siloDnaVersion = acceptedSiloDnas[siloId];
     if (!siloDnaVersion) { showNotification("error", "Gere o SiloDNA deste silo primeiro."); return; }
     const entityId = `silo-page:${siloId}`;
@@ -1589,12 +1743,16 @@ export default function ArquitetoPage() {
     const payload = deterministicSiloPagePayload(siloDnaVersion, selectedBrandId, slug);
     const version = await createVersionEnvelope({ entityId, versionNumber: (current?.versionNumber || 0) + 1,
       previousVersionId: current?.versionId || null, origin: "system", changeReason: "Página do Silo criada pela lógica determinística.", createdBy: actorId, payload });
-    setAcceptedSiloPages(previous => ({ ...previous, [entityId]: version }));
+    const persisted = await persistArquitetoArtifact({ brandId: selectedBrandId, artifactType: "silo_page", action: current ? "edit" : "create", version });
+    const canonicalVersion = persisted.version as VersionEnvelope<SiloPage>;
+    setAcceptedSiloPages(previous => ({ ...previous, [entityId]: canonicalVersion }));
+    addVersionEvents([createStatusEvent(canonicalVersion.versionId, "proposed", canonicalVersion.createdBy, "Página do Silo pronta para revisão humana.")]);
     addVersionEvents([createStatusEvent(version.versionId, "proposed", actorId, "Página do Silo pronta para revisão humana.")]);
     showNotification("success", "Página do Silo gerada. Status: Aguardando aprovação.");
   };
 
   const handleVerifySiloPage = async (pageVersion: VersionEnvelope<SiloPage>) => {
+    if (!selectedBrandId) { showNotification("error", "Selecione uma Brand antes de persistir a verificação."); return; }
     if (pageVersion.payload.publicationStatus !== "published" || !pageVersion.payload.publishedUrl) { showNotification("error", "A conferência exige uma SiloPage publicada com URL registrada."); return; }
     setVerifyingSiloPageId(pageVersion.payload.siloPageId);
     try {
@@ -1613,7 +1771,10 @@ export default function ArquitetoPage() {
       } as const;
       const successorPayload = SiloPageSchema.parse({ ...pageVersion.payload, publicationVerification: verification });
       const successor = await createVersionEnvelope({ entityId: successorPayload.siloPageId, versionNumber: pageVersion.versionNumber + 1, previousVersionId: pageVersion.versionId, origin: "system", changeReason: "Evidência explícita de verificação da identidade da SiloPage.", createdBy: session?.user?.id || "human-reviewer", payload: successorPayload });
-      setAcceptedSiloPages(previous => ({ ...previous, [successorPayload.siloPageId]: successor }));
+      const persisted = await persistArquitetoArtifact({ brandId: selectedBrandId, artifactType: "silo_page", action: "edit", version: successor });
+      const canonicalSuccessor = persisted.version as VersionEnvelope<SiloPage>;
+      setAcceptedSiloPages(previous => ({ ...previous, [successorPayload.siloPageId]: canonicalSuccessor }));
+      addVersionEvents([createStatusEvent(canonicalSuccessor.versionId, "proposed", canonicalSuccessor.createdBy, "Verificação registrada; revisão humana continua independente da publicação.")]);
       addVersionEvents([createStatusEvent(successor.versionId, "proposed", session?.user?.id || "human-reviewer", "Verificação registrada; revisão humana continua independente da publicação.")]);
       showNotification("success", `Verificação registrada: ${verification.status}. URL, slug e canonical foram preservados.`);
     } catch (error) { showNotification("error", error instanceof Error ? error.message : "Falha na verificação da SiloPage."); }
@@ -1721,10 +1882,10 @@ export default function ArquitetoPage() {
       addAiReviewAnnotations(nextAnnotations);
       try {
         const annotations = [...new Map([...aiReviewAnnotations, ...nextAnnotations].map(annotation => [annotation.id, annotation])).values()];
-        const recovery = ArchitectReviewRecoverySchema.parse({ schemaVersion: 1, importedKeywordSignature,
+        const recovery = ArchitectReviewRecoverySchema.parse({ schemaVersion: 1, importedKeywordSignature: canonicalReceivedKeywordSignature,
           masterList: next, provisionalGroups: describeAssignedGroups(next), customSlugs, customHierarchies: customHierarquias,
           annotations, savedAt: new Date().toISOString() });
-        void writeBrowserArtifact(architectReviewRecoveryKey(selectedBrandId), recovery)
+        void writeBrowserArtifact(architectReviewRecoveryKey(session?.user?.id || "anonymous", selectedBrandId), recovery)
           .then(() => showNotification("success", `${result.review.decisions.length} keyword(s) revisadas em ${result.batchCount} lote(s) e salvas. Confira as marca├º├Áes da IA.`))
           .catch(() => showNotification("error", "A Revis├úo IA foi aplicada, mas o navegador recusou o salvamento dur├ível."));
       } catch { showNotification("error", "A Revis├úo IA retornou dados que n├úo puderam ser preparados para salvamento."); }
@@ -1742,7 +1903,7 @@ export default function ArquitetoPage() {
         const versionIds = new Set(Object.values(nextVersions).map(version => version.versionId));
         const recovery = ArchitectArticleDnaRecoverySchema.parse({ schemaVersion: 1, versions: nextVersions,
           events: nextEvents.filter(event => versionIds.has(event.versionId)), savedAt: new Date().toISOString() });
-        void writeBrowserArtifact(architectArticleDnaRecoveryKey(selectedBrandId), recovery)
+        void writeBrowserArtifact(architectArticleDnaRecoveryKey(session?.user?.id || "anonymous", selectedBrandId), recovery)
           .then(() => showNotification("success", `${result.versions.length} ArticleDNA(s) aplicados e salvos. O status agora aguarda aprova├º├úo.`))
           .catch(() => showNotification("error", "O ArticleDNA foi aplicado, mas o navegador recusou o salvamento dur├ível."));
       } catch (error) { console.error("[arquiteto] ArticleDNA", error); showNotification("error", "O ArticleDNA retornado n├úo p├┤de ser validado para salvamento."); }
@@ -1760,7 +1921,7 @@ export default function ArquitetoPage() {
         const versionIds = new Set(Object.values(nextVersions).map(version => version.versionId));
         const recovery = ArchitectSiloDnaRecoverySchema.parse({ schemaVersion: 1, versions: nextVersions,
           events: nextEvents.filter(event => versionIds.has(event.versionId)), savedAt: new Date().toISOString() });
-        void writeBrowserArtifact(architectSiloDnaRecoveryKey(selectedBrandId), recovery)
+        void writeBrowserArtifact(architectSiloDnaRecoveryKey(session?.user?.id || "anonymous", selectedBrandId), recovery)
           .then(() => showNotification("success", `${result.versions.length} SiloDNA(s) aplicados e salvos. Revise os resumos na planilha.`))
           .catch(() => showNotification("error", "O SiloDNA foi aplicado, mas o navegador recusou o salvamento dur├ível."));
       } catch (error) { console.error("[arquiteto] SiloDNA", error); showNotification("error", "O SiloDNA retornado n├úo p├┤de ser validado para salvamento."); }
@@ -1795,14 +1956,6 @@ export default function ArquitetoPage() {
   };
 
   // ── 3. FUSÃO E TRANSFORMAÇÃO: LISTA DE ARTIGOS (1 por Cluster) ──
-  const toggleArticleSelection = (id: string) => {
-    setSelectedArticleIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
   const toggleSiloArticleSelection = (articleIds: string[]) => {
     setSelectedArticleIds(prev => {
       const next = new Set(prev);
@@ -2038,7 +2191,7 @@ export default function ArquitetoPage() {
     return {
       brandId: selectedBrandId,
       masterKeywords: sources.keywords,
-      importedKeywordIds: architectImportedKeywordIds,
+      importedKeywordIds: canonicalReceivedKeywordIds,
       currentMasterList: masterList,
       currentArticles: articlesList,
       provisionalGroups,
@@ -2095,7 +2248,7 @@ export default function ArquitetoPage() {
           ungroupedKeywords,
           provisionalGroups,
           keywordArticleReferences: articlesList.map(article => ({ articleId: article.id, keywordIds: [article.mainKeywordObj?.id, ...article.supportKeywords.map((keyword: any) => keyword.id)].filter(Boolean), roles: Object.fromEntries([[article.mainKeywordObj?.id, "principal"], ...article.supportKeywords.map((keyword: any) => [keyword.id, "secundaria"])]) })),
-          architectImportedKeywordIds,
+          architectImportedKeywordIds: canonicalReceivedKeywordIds,
           articleDnas: acceptedArticleDnas,
           siloDnas: acceptedSiloDnas,
           siloPages: acceptedSiloPages,
@@ -2210,7 +2363,7 @@ export default function ArquitetoPage() {
         const parsed = ProvisionalArticleGroupSchema.safeParse(group);
         return parsed.success ? [parsed.data] : [];
       });
-      const rawReview = await readBrowserArtifactReadOnly(architectReviewRecoveryKey(selectedBrandId));
+      const rawReview = await readBrowserArtifactReadOnly(architectReviewRecoveryKey(session?.user?.id || "anonymous", selectedBrandId));
       let review: z.infer<typeof ArchitectReviewRecoverySchema> | null = null;
       try { if (rawReview) review = ArchitectReviewRecoverySchema.parse(rawReview); } catch { /* snapshot mantém a evidência inválida */ }
       const nextCustomSlugs = review?.customSlugs || customSlugs;
@@ -2230,7 +2383,7 @@ export default function ArquitetoPage() {
         annotations: aiReviewAnnotations,
         savedAt: new Date().toISOString(),
       });
-      await writeBrowserArtifact(architectReviewRecoveryKey(selectedBrandId), persistedReview);
+      await writeBrowserArtifact(architectReviewRecoveryKey(session?.user?.id || "anonymous", selectedBrandId), persistedReview);
       setRecoveryAudit(recoveryPlan);
       showNotification("success", `Recuperação aplicada sem reagrupamento: ${recoveryPlan.counts.recoverableNewArticles} artigo(s) preservado(s), ${recoveryPlan.orphanKeywordIds.length} keyword(s) em Keywords não agrupadas e índice corrigido.`);
     } catch (error) {
@@ -2245,17 +2398,27 @@ export default function ArquitetoPage() {
 
   const prepareSelectedLogicalArticleDnas = async () => {
     const actorId = session?.user?.id || "human-reviewer";
+    if (!selectedBrandId) throw new Error("Selecione uma Brand antes de persistir ArticleDNA.");
     const versions: VersionEnvelope<ArticleDNA>[] = [];
     const proposedEvents: VersionStatusEvent[] = [];
     for (const group of selectedStrategicGroups()) {
       const entityId = group.publishedAnchorId || group.id;
       const current = acceptedArticleDnas[entityId];
       const currentStatus = current ? effectiveVersionStatus(current.versionId, versionEvents) : null;
-      if (current && currentStatus !== "rejected" && currentStatus !== "superseded") { versions.push(current); continue; }
+      if (current && currentStatus !== "rejected" && currentStatus !== "superseded") {
+        const persistedCurrent = await persistArquitetoArtifact({ brandId: selectedBrandId, artifactType: "article_dna", action: "create", version: current });
+        const canonicalCurrent = persistedCurrent.version as VersionEnvelope<ArticleDNA>;
+        versions.push(canonicalCurrent);
+        proposedEvents.push(createStatusEvent(canonicalCurrent.versionId, "proposed", canonicalCurrent.createdBy, "Base lógica pronta para decisão humana."));
+        continue;
+      }
       const payload = deterministicArticleDnaPayload(group, selectedBrandId);
       const version = await createVersionEnvelope({ entityId, versionNumber: (current?.versionNumber || 0) + 1,
         previousVersionId: current?.versionId || null, origin: "system", changeReason: "ArticleDNA-base criado pelo agrupamento lógico aprovado pelo usuário.", createdBy: actorId, payload });
-      versions.push(version);
+      const persisted = await persistArquitetoArtifact({ brandId: selectedBrandId, artifactType: "article_dna", action: "create", version });
+      const canonicalVersion = persisted.version as VersionEnvelope<ArticleDNA>;
+      versions.push(canonicalVersion);
+      proposedEvents.push(createStatusEvent(canonicalVersion.versionId, "proposed", canonicalVersion.createdBy, "Base lógica pronta para decisão humana."));
       proposedEvents.push(createStatusEvent(version.versionId, "proposed", actorId, "Base lógica pronta para decisão humana."));
     }
     if (versions.length) setAcceptedArticleDnas(previous => ({ ...previous, ...Object.fromEntries(versions.map(version => [version.payload.articleId, version])) }));
@@ -2335,13 +2498,148 @@ export default function ArquitetoPage() {
     return Array.from(groups.values());
   }, [filteredArticles]);
 
+  const visibleArticleIds = useMemo(
+    () => groupedArticles.flatMap(group => group.articles.map(article => article.id)),
+    [groupedArticles],
+  );
+  const visibleSelectedArticleCount = visibleArticleIds.filter(id => selectedArticleIds.has(id)).length;
+  const allVisibleArticlesSelected = visibleArticleIds.length > 0 && visibleSelectedArticleCount === visibleArticleIds.length;
+  const someVisibleArticlesSelected = visibleSelectedArticleCount > 0 && !allVisibleArticlesSelected;
+  const hiddenSelectedArticleCount = selectedArticleIds.size - visibleSelectedArticleCount;
+
+  useEffect(() => {
+    const articleIds = new Set(articlesList.map(article => article.id));
+    setSelectedArticleIds(current => {
+      const next = new Set([...current].filter(id => articleIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+    if (lastSelectionAnchorId.current && !articleIds.has(lastSelectionAnchorId.current)) {
+      lastSelectionAnchorId.current = null;
+    }
+  }, [articlesList]);
+
+  useEffect(() => {
+    if (headerSelectionRef.current) {
+      headerSelectionRef.current.indeterminate = someVisibleArticlesSelected;
+    }
+  }, [someVisibleArticlesSelected]);
+
+  const getArticleIdAtPoint = useCallback((clientX: number, clientY: number) => {
+    const element = document.elementFromPoint(clientX, clientY);
+    const checkbox = element?.closest<HTMLElement>("[data-article-selection-id]");
+    return checkbox?.dataset.articleSelectionId || null;
+  }, []);
+
+  const applySelectionPaintAtPoint = useCallback((clientX: number, clientY: number) => {
+    const drag = selectionDragRef.current;
+    if (!drag || !drag.started) return;
+    const currentId = getArticleIdAtPoint(clientX, clientY);
+    if (!currentId || !visibleArticleIds.includes(currentId)) return;
+    setSelectedArticleIds(applySelectionPaint({
+      initialSelectedIds: drag.initialSelectedIds,
+      visibleIds: visibleArticleIds,
+      anchorId: drag.sourceId,
+      currentId,
+      mode: drag.mode,
+    }));
+  }, [getArticleIdAtPoint, visibleArticleIds]);
+
+  const maybeStartSelectionDrag = useCallback((event: React.PointerEvent<HTMLInputElement>) => {
+    const drag = selectionDragRef.current;
+    if (!drag || drag.started || Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return false;
+    event.preventDefault();
+    drag.started = true;
+    suppressSelectionClickRef.current = true;
+    lastSelectionAnchorId.current = drag.sourceId;
+    drag.previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    applySelectionPaintAtPoint(event.clientX, event.clientY);
+    return true;
+  }, [applySelectionPaintAtPoint]);
+
+  const handleSelectionPointerDown = (id: string, event: React.PointerEvent<HTMLInputElement>) => {
+    if (event.button !== 0 || event.isPrimary === false) return;
+    selectionDragRef.current = {
+      pointerId: event.pointerId,
+      sourceId: id,
+      mode: selectedArticleIds.has(id) ? "deselect" : "select",
+      startX: event.clientX,
+      startY: event.clientY,
+      started: false,
+      initialSelectedIds: new Set(selectedArticleIds),
+      captureTarget: event.currentTarget,
+      previousUserSelect: document.body.style.userSelect,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleSelectionPointerMove = (event: React.PointerEvent<HTMLInputElement>) => {
+    const drag = selectionDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const startedNow = maybeStartSelectionDrag(event);
+    if (selectionDragRef.current?.started && !startedNow) {
+      event.preventDefault();
+      applySelectionPaintAtPoint(event.clientX, event.clientY);
+    }
+  };
+
+  const finishSelectionDrag = useCallback((pointerId?: number) => {
+    const drag = selectionDragRef.current;
+    if (!drag || (pointerId !== undefined && drag.pointerId !== pointerId)) return;
+    selectionDragRef.current = null;
+    if (drag.started) {
+      suppressSelectionClickRef.current = true;
+      window.setTimeout(() => { suppressSelectionClickRef.current = false; }, 0);
+    }
+    document.body.style.userSelect = drag.previousUserSelect;
+    if (drag.captureTarget.hasPointerCapture(drag.pointerId)) {
+      drag.captureTarget.releasePointerCapture(drag.pointerId);
+    }
+  }, []);
+
+  useEffect(() => {
+    const finish = () => finishSelectionDrag();
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    window.addEventListener("blur", finish);
+    return () => {
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("blur", finish);
+    };
+  }, [finishSelectionDrag]);
+
+  const handleArticleSelectionClick = (id: string, event: React.MouseEvent<HTMLInputElement>) => {
+    if (suppressSelectionClickRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressSelectionClickRef.current = false;
+      return;
+    }
+    event.preventDefault();
+    const result = applyArticleSelectionClick({
+      selectedIds: selectedArticleIds,
+      visibleIds: visibleArticleIds,
+      id,
+      anchorId: lastSelectionAnchorId.current && visibleArticleIds.includes(lastSelectionAnchorId.current)
+        ? lastSelectionAnchorId.current
+        : null,
+      shiftKey: event.shiftKey,
+      additiveKey: event.ctrlKey || event.metaKey,
+    });
+    setSelectedArticleIds(result.selectedIds);
+    lastSelectionAnchorId.current = result.anchorId;
+  };
+
   const selectArticles = (articleIds: string[]) => {
     setSelectedArticleIds(new Set(articleIds));
+    if (articleIds.length === 0) lastSelectionAnchorId.current = null;
     setSelectionMenuOpen(false);
   };
 
   const selectGroup = (articleIds: string[]) => {
     setSelectedArticleIds(new Set(articleIds));
+    lastSelectionAnchorId.current = null;
     setSelectionMenuOpen(false);
   };
 
@@ -2352,16 +2650,6 @@ export default function ArquitetoPage() {
     const protectedCount = selectedArticles.filter(art => art.isPublished).length;
     if (!selectedClusterIds.length) { showNotification("error", "Nenhum artigo novo pode ser apagado; publicados estão protegidos."); return; }
     setPendingDangerAction({ type: "delete-selected", clusterIds: selectedClusterIds, count: selectedClusterIds.length, protectedCount });
-  };
-
-  const handleResetNonPublished = () => {
-    const nonPublishedCount = masterList.filter(item => item.status !== "publicado").length;
-    if (nonPublishedCount === 0) {
-      showNotification("success", "Nao ha itens novos para limpar.");
-      return;
-    }
-
-    setPendingDangerAction({ type: "reset-new", count: nonPublishedCount });
   };
 
   const confirmDangerAction = () => {
@@ -2386,12 +2674,134 @@ export default function ArquitetoPage() {
   };
 
   const importApprovedKeywords = async (ids: string[]) => {
-    pushMasterHistory(masterList, `Importar ${ids.length} keyword(s) aprovadas do Minerador`);
-    const { imported, allIds } = importApprovedKeywordsToArchitect(ids);
-    setKeywordImportOpen(false);
-    await fetchMasterList(new Set(allIds));
-    showNotification("success", `${imported} keyword(s) aprovada(s) importada(s) para o Arquiteto.`);
+    if (!selectedBrandId || !ids.length) return;
+    try {
+      const result = await persistMineradorArquitetoHandoff({ brandId: selectedBrandId, keywordIds: ids });
+      pushMasterHistory(masterList, `Importar ${result.importedKeywordIds.length} keyword(s) do Minerador`);
+      setKeywordImportOpen(false);
+      setCanonicalWorkspaceReload(current => current + 1);
+      showNotification(
+        "success",
+        result.persistence === "UNCHANGED"
+          ? "As keywords selecionadas já estavam no workspace canônico do Arquiteto."
+          : `${result.createdKeywordIds.length} keyword(s) importada(s) para o Arquiteto.`,
+      );
+    } catch (error) {
+      showNotification("error", error instanceof Error ? error.message : "Não foi possível confirmar o handoff remoto.");
+    }
   };
+
+  const { registerControls, updateControls, unregisterControls } = useGlobalTopbarControlsRegistration();
+  const topbarHandlersRef = useRef({ fetchMasterList, processDeterministicStructure, showNotification, undoMasterList, redoMasterList });
+  topbarHandlersRef.current.fetchMasterList = fetchMasterList;
+  topbarHandlersRef.current.processDeterministicStructure = processDeterministicStructure;
+  topbarHandlersRef.current.showNotification = showNotification;
+  topbarHandlersRef.current.undoMasterList = undoMasterList;
+  topbarHandlersRef.current.redoMasterList = redoMasterList;
+
+  const globalTopbarControls = useMemo<GlobalTopbarModuleControls>(() => ({
+    moduleId: "arquiteto",
+    search: {
+      getValue: () => searchQuery,
+      setValue: (value) => setSearchQuery(value),
+    },
+    history: {
+      getCount: () => masterHistory.entries.length,
+      canUndo: () => masterHistory.canUndo,
+      canRedo: () => masterHistory.canRedo,
+      undo: () => topbarHandlersRef.current.undoMasterList(),
+      redo: () => topbarHandlersRef.current.redoMasterList(),
+      open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "arquiteto" } })),
+    },
+    actions: <div className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto xl:overflow-visible" data-arquiteto-topbar-actions>
+      <select
+        aria-label="Filtrar por hierarquia"
+        value={filterHierarquia}
+        onChange={(event) => setFilterHierarquia(event.target.value)}
+        className={`${GLOBAL_TOPBAR_ACTION_CONTROL} max-w-32 cursor-pointer`}
+      >
+        <option value="Todos">Hierarquia: Todos</option>
+        <option value="Pilar">Pilar</option>
+        <option value="Suporte">Suporte</option>
+        <option value="Reforço Narrativo">Reforço Narrativo</option>
+      </select>
+      <select
+        aria-label="Filtrar por status"
+        value={filterStatus}
+        onChange={(event) => setFilterStatus(event.target.value)}
+        className={`${GLOBAL_TOPBAR_ACTION_CONTROL} max-w-36 cursor-pointer`}
+      >
+        <option value="Todos">Status: Todos</option>
+        <option value="draft">Em processo</option>
+        <option value="awaiting_approval">Aguardando aprovação</option>
+        <option value="approved">Aprovado</option>
+        <option value="sent_radar">Importado no Radar</option>
+        <option value="published">Publicado</option>
+      </select>
+      <CompactSavedViews
+        userId={session?.user?.email || "usuario-local"}
+        brandId={selectedBrandId}
+        module="arquiteto"
+        values={{ searchQuery, filterHierarquia, filterStatus }}
+        onApply={(view) => {
+          setSearchQuery(view.searchQuery || "");
+          setFilterHierarquia(view.filterHierarquia || "Todos");
+          setFilterStatus(view.filterStatus || "Todos");
+        }}
+      />
+      <span className="h-6 shrink-0 border-l border-divider" aria-hidden="true" />
+      <button
+        type="button"
+        onClick={() => topbarHandlersRef.current.processDeterministicStructure()}
+        disabled={masterList.length === 0 || generatingStrategic}
+        className={`${GLOBAL_TOPBAR_ACTION_CONTROL} text-module-accent/85`}
+        title="Processar lógica sem IA"
+      >
+        {activeLogicalTask ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Network className="h-3.5 w-3.5" aria-hidden="true" />}
+        <span>{activeLogicalTask ? "Processando lógica…" : "Processar lógica"}</span>
+      </button>
+      {activeLogicalTask?.message ? <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} max-w-52 shrink-0 truncate text-warning`} title={activeLogicalTask.message}>{activeLogicalTask.message}</span> : null}
+      <button
+        type="button"
+        onClick={() => { setKeywordImportOpen(true); void topbarHandlersRef.current.fetchMasterList(); }}
+        className={`${GLOBAL_TOPBAR_ACTION_CONTROL} text-positive-soft/85`}
+        title="Selecionar keywords aprovadas no Minerador"
+      >
+        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+        <span>Importar do Minerador</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => setIsListModalOpen(true)}
+        className={GLOBAL_TOPBAR_ACTION_CONTROL}
+        title="Criar novo Silo"
+      >
+        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+        <span>Silo</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => topbarHandlersRef.current.showNotification("success", "Exportação iniciada...")}
+        className={GLOBAL_TOPBAR_ACTION_CONTROL}
+        title="Exportar planilha"
+      >
+        <Download className="h-3.5 w-3.5" aria-hidden="true" />
+        <span>Exportar</span>
+      </button>
+      <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} shrink-0 tabular-nums text-text-muted`} aria-label="Artigos visíveis">{filteredArticles.length} artigos</span>
+    </div>,
+  }), [activeLogicalTask, filterHierarquia, filterStatus, filteredArticles.length, generatingStrategic, masterHistory.canRedo, masterHistory.canUndo, masterHistory.entries.length, masterList.length, searchQuery, selectedBrandId, session?.user?.email]);
+  const globalTopbarControlsRef = useRef<GlobalTopbarModuleControls>(globalTopbarControls);
+  globalTopbarControlsRef.current = globalTopbarControls;
+
+  useEffect(() => {
+    registerControls(globalTopbarControlsRef.current);
+    return () => unregisterControls("arquiteto");
+  }, [registerControls, unregisterControls]);
+
+  useEffect(() => {
+    updateControls(globalTopbarControls);
+  }, [globalTopbarControls, updateControls]);
 
   const dangerApproval = pendingDangerAction?.type === "reset-new"
     ? { title: "Resetar a organização dos artigos novos", description: `Esta ação removerá ${pendingDangerAction.count} keyword(s) não-publicada(s) da organização atual.`, impact: ["A organização local dos artigos novos será removida.", "Artigos publicados continuarão protegidos.", "A ação ficará disponível no histórico local para desfazer."], phrase: `RESETAR ${pendingDangerAction.count}`, label: "Aprovar reset" }
@@ -2403,18 +2813,18 @@ export default function ArquitetoPage() {
 
   if (sessionStatus === "loading" || profileLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-[#06070a]">
-        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" />
+        <div className="flex-1 flex items-center justify-center bg-background">
+        <Loader2 className="w-6 h-6 text-module-accent animate-spin" />
       </div>
     );
   }
   if (sessionStatus === "unauthenticated") {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-[#06070a] text-slate-200 p-6 text-center font-mono">
-        <Building2 className="w-10 h-10 text-indigo-500 mb-3" />
+      <div className="flex-1 flex flex-col items-center justify-center bg-background text-foreground p-6 text-center font-sans">
+        <Building2 className="w-10 h-10 text-context-accent mb-3" />
         <h1 className="text-sm font-bold uppercase tracking-wider">Acesso Restrito</h1>
         <button onClick={() => router.push("/api/auth/signin")}
-          className="mt-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded px-5 py-2 text-xs font-bold cursor-pointer">
+          className="mt-5 rounded border border-action-accent/60 bg-action-accent px-5 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent/35 cursor-pointer">
           Ir para Login
         </button>
       </div>
@@ -2422,307 +2832,131 @@ export default function ArquitetoPage() {
   }
 
   return (
-    <div className="relative flex h-screen min-h-0 flex-col overflow-hidden bg-[#06070a] font-mono text-xs select-none">
+    <div className="relative flex h-screen min-h-0 flex-col overflow-hidden bg-background font-sans text-sm text-foreground">
+      <style jsx>{`
+        .architect-scrollbar {
+          scrollbar-color: color-mix(in srgb, var(--foreground) 24%, transparent) transparent;
+          scrollbar-width: thin;
+        }
+        .architect-scrollbar::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+        .architect-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .architect-scrollbar::-webkit-scrollbar-thumb {
+          background: color-mix(in srgb, var(--foreground) 20%, transparent);
+          border-radius: 999px;
+        }
+        .architect-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: color-mix(in srgb, var(--foreground) 32%, transparent);
+        }
+      `}</style>
 
       {/* ── Toast ── */}
       {notification && (
-        <div className={`fixed top-3 right-3 z-[60] flex items-center gap-2 px-3 py-2 rounded border shadow-xl text-xs font-semibold ${
+        <div className={`fixed right-4 top-4 z-[60] flex max-w-[min(28rem,calc(100vw-2rem))] items-start gap-2 rounded-lg border px-4 py-3 text-sm font-semibold shadow-xl ${
           notification.type === "success"
-            ? "bg-[#091510] border-emerald-800/60 text-emerald-400"
-            : "bg-[#150909] border-rose-800/60 text-rose-400"
+            ? "border-success/50 bg-success-soft text-success"
+            : "border-danger/50 bg-danger-soft text-danger"
         }`}>
-          <Check className="w-3 h-3" />
+          <Check className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{notification.message}</span>
         </div>
       )}
 
-      {/* ── BARRA UNICA: FERRAMENTAS + MENU HAMBURGER DE NAVEGABILIDADE ── */}
-      <div className="sticky top-0 bg-[#0b0c10] border-b border-slate-900 px-3 h-10 flex items-center justify-between shrink-0 z-40">
-        
-        {/* Esquerda: Identidade + Busca + Filtros + Ferramentas da Planilha (Visíveis) */}
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1">
-          <span className="text-slate-500 font-bold uppercase tracking-widest text-[10px] shrink-0">Arquiteto</span>
-          <span className="text-slate-800 select-none shrink-0">·</span>
-
-          <HistoryControls entries={masterHistory.entries} canUndo={masterHistory.canUndo} canRedo={masterHistory.canRedo}
-            onUndo={undoMasterList} onRedo={redoMasterList} onRestore={masterHistory.restore} compact/>
-
-          <span className="text-slate-800 select-none shrink-0">|</span>
-
-          {/* Busca */}
-          <div className="relative shrink-0">
-            <Search className="w-3 h-3 text-slate-655 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input type="text" placeholder="Buscar..." value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-36 bg-transparent border border-slate-800 rounded pl-6 pr-2 py-0.5 text-[10.5px] text-slate-200 placeholder-slate-700 focus:outline-none focus:border-slate-600 transition-colors" />
-          </div>
-
-          {/* Filtro Hierarquia */}
-          <select value={filterHierarquia} onChange={e => setFilterHierarquia(e.target.value)}
-            className="bg-transparent border border-slate-800 rounded px-1.5 py-0.5 text-[10px] text-slate-400 focus:outline-none cursor-pointer shrink-0">
-            <option value="Todos" className="bg-[#0b0c10]">Hierarquia: Todos</option>
-            <option value="Pilar" className="bg-[#0b0c10]">Pilar</option>
-            <option value="Suporte" className="bg-[#0b0c10]">Suporte</option>
-            <option value="Reforço Narrativo" className="bg-[#0b0c10]">Reforço Narrativo</option>
-          </select>
-
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-            className="bg-transparent border border-slate-800 rounded px-1.5 py-0.5 text-[10px] text-slate-400 focus:outline-none cursor-pointer shrink-0">
-            <option value="Todos" className="bg-[#0b0c10]">Status: Todos</option>
-            <option value="draft" className="bg-[#0b0c10]">Em processo</option>
-            <option value="awaiting_approval" className="bg-[#0b0c10]">Aguardando aprovação</option>
-            <option value="approved" className="bg-[#0b0c10]">Aprovado</option>
-            <option value="sent_radar" className="bg-[#0b0c10]">Importado no Radar</option>
-            <option value="published" className="bg-[#0b0c10]">Publicado</option>
-          </select>
-
-          <CompactSavedViews
-            userId={session?.user?.email || "usuario-local"}
-            brandId={selectedBrandId}
-            module="arquiteto"
-            values={{ searchQuery, filterHierarquia, filterStatus }}
-            onApply={view => { setSearchQuery(view.searchQuery || ""); setFilterHierarquia(view.filterHierarquia || "Todos"); setFilterStatus(view.filterStatus || "Todos"); }}
-          />
-
-          {/* Gerar IA */}
-          <button onClick={processDeterministicStructure} disabled={masterList.length === 0 || generatingStrategic}
-            className="flex items-center gap-1 border border-cyan-900/60 hover:border-cyan-700 text-cyan-400 hover:text-cyan-300 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:opacity-40 cursor-pointer shrink-0"
-            title="Gerar Dossiês IA">
-            {activeLogicalTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Network className="w-3 h-3" />}
-            <span>{activeLogicalTask ? "Processando lógica…" : "Processar logica (sem IA)"}</span>
-          </button>
-
-          {(activeLogicalTask?.message || deterministicConflicts.length > 0) && (
-            <span className="text-[9px] text-amber-400 whitespace-nowrap">
-              {activeLogicalTask?.message || `${deterministicConflicts.length} conflito(s) logico(s)`}
-            </span>
-          )}
-
-          <button onClick={() => { setKeywordImportOpen(true); void fetchMasterList(); }}
-            className="flex items-center gap-1 border border-emerald-900/60 hover:border-emerald-700 text-emerald-400 hover:text-emerald-300 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors cursor-pointer shrink-0"
-            title="Selecionar keywords aprovadas no Minerador">
-            <Plus className="w-3 h-3" />
-            <span>Importar do Minerador</span>
-          </button>
-
-          {/* Novo Silo */}
-          <button onClick={() => setIsListModalOpen(true)}
-            className="flex items-center gap-1 border border-slate-800 hover:border-slate-650 hover:text-slate-200 text-slate-400 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors cursor-pointer shrink-0"
-            title="Criar novo Silo">
-            <Plus className="w-3 h-3" />
-            <span>Silo</span>
-          </button>
-
-          {/* Exportar */}
-          <button onClick={() => showNotification("success", "Exportação iniciada...")}
-            className="flex items-center gap-1 border border-slate-800 hover:border-emerald-800 text-emerald-500 hover:text-emerald-450 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors cursor-pointer shrink-0"
-            title="Exportar planilha">
-            <Download className="w-3 h-3" />
-            <span>Exportar</span>
-          </button>
-
-          <button onClick={handleResetNonPublished}
-            className="flex items-center gap-1 border border-rose-950/70 text-rose-400 hover:bg-rose-950/15 rounded px-2 py-0.5 text-[10px] font-semibold transition-colors cursor-pointer shrink-0"
-            title="Resetar apenas a organização de artigos não publicados">
-            <RefreshCw className="w-3 h-3" />
-            <span>Resetar não-publicados</span>
-          </button>
-
-        </div>
-
-        <div className="flex items-center gap-2">
-          {articlesList.length > 0 && (
-            <span className="text-slate-700 text-[10px] font-semibold tabular-nums shrink-0 mr-1 hidden sm:inline">
-              {filteredArticles.length} artigos
-            </span>
-          )}
-
-          {false && <div className="relative">
-            {/* Hamburger Button */}
-            <button
-              onClick={() => setMenuOpen(v => !v)}
-              className="flex items-center justify-center bg-transparent hover:bg-slate-900 border border-slate-800 hover:border-slate-600 rounded p-1.5 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-              title="Menu Principal"
-            >
-              <Menu className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Menu Dropdown de Navegabilidade */}
-            {menuOpen && (
-              <div className="absolute right-0 top-full mt-1.5 w-56 bg-[#0e1015] border border-slate-850 rounded shadow-2xl z-[80] overflow-hidden">
-                {/* Header: User account details */}
-                <div className="px-3 py-2 border-b border-slate-850 bg-slate-950/40">
-                  <span className="text-[8px] font-bold text-slate-600 uppercase tracking-widest block">Conta Ativa</span>
-                  <span className="text-slate-400 text-[10px] truncate block font-sans" title={session?.user?.email || ""}>
-                    {session?.user?.email}
-                  </span>
-                </div>
-
-                {/* Seletor de Marcas/Clientes (Admin Only) */}
-                <div className="p-2 border-b border-slate-850">
-                  <span className="text-[8px] font-bold text-slate-600 uppercase tracking-widest block mb-1">Cliente / Marca</span>
-                  {userRole === "admin" ? (
-                    <select
-                      value={selectedBrandId}
-                      onChange={e => { setSelectedBrandId(e.target.value); setMenuOpen(false); }}
-                      className="w-full bg-[#06070a] border border-slate-800 rounded px-2 py-1 text-[11px] text-slate-300 font-bold focus:outline-none cursor-pointer"
-                    >
-                      {brands.length === 0 ? (
-                        <option value="" disabled>Sem Marcas</option>
-                      ) : (
-                        brands.map(brand => (
-                          <option key={brand.id} value={brand.id} className="bg-[#0b0c10]">{brand.nome}</option>
-                        ))
-                      )}
-                    </select>
-                  ) : (
-                    <span className="text-[11px] text-slate-400 font-bold px-1.5 block">
-                      {brands.find(b => b.id === selectedBrandId)?.nome || "Sem Marca"}
-                    </span>
-                  )}
-                </div>
-
-                {/* Links de Navegação */}
-                <div className="py-1">
-                  <button onClick={() => { router.push("/perfil"); setMenuOpen(false); }}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-[11px] text-slate-350 hover:bg-slate-900 transition-colors cursor-pointer">
-                    <User className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Perfil da Marca</span>
-                  </button>
-
-                  <button onClick={() => { router.push("/minerador"); setMenuOpen(false); }}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-[11px] text-slate-350 hover:bg-slate-900 transition-colors cursor-pointer">
-                    <Key className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Minerador Key</span>
-                  </button>
-
-                  <button onClick={() => { router.push("/arquiteto"); setMenuOpen(false); }}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-[11px] text-indigo-400 hover:bg-slate-900 transition-colors cursor-pointer font-bold bg-slate-900/30">
-                    <PenTool className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Arquiteto de Conteúdo</span>
-                  </button>
-
-                  {userRole === "admin" && (
-                    <button onClick={() => { router.push("/admin/marcas"); setMenuOpen(false); }}
-                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-[11px] text-indigo-400 hover:bg-slate-900 transition-colors cursor-pointer">
-                      <Building2 className="w-3.5 h-3.5 text-slate-500" />
-                      <span>Painel Admin</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="border-t border-rose-950/70 py-1">
-                  <p className="px-3.5 py-1 text-[8px] font-bold uppercase tracking-widest text-rose-700">Zona de segurança</p>
-                  <button onClick={handleResetNonPublished}
-                    className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-[10px] text-rose-400 transition-colors hover:bg-rose-950/15">
-                    <RefreshCw className="h-3.5 w-3.5"/><span>Resetar somente não-publicados…</span>
-                  </button>
-                </div>
-
-                {/* Logout Button */}
-                <div className="border-t border-slate-850 py-1 bg-slate-950/20">
-                  <button onClick={() => { signOut(); setMenuOpen(false); }}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-[11px] text-rose-455 hover:bg-rose-950/15 transition-colors cursor-pointer font-bold">
-                    <LogOut className="w-3.5 h-3.5 text-rose-500" />
-                    <span>Sair da Conta</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>}
-        </div>
-      </div>
-
-      <ArchitectRecoveryPanel
-        snapshotReady={Boolean(recoverySnapshot)}
-        snapshotCreatedAt={recoverySnapshot?.createdAt || null}
-        audit={recoveryAudit}
-        plan={recoveryPlan}
-        busy={recoveryBusy}
-        error={recoveryError}
-        onExportSnapshot={() => void exportRecoverySnapshot()}
-        onAudit={() => void auditRecoverySources()}
-        onRecover={() => void applySafeRecovery()}
-      />
+      <HistoryControls moduleId="arquiteto" showHistory={false} showUndoRedo={false} visualVariant="semantic" entries={masterHistory.entries} canUndo={masterHistory.canUndo} canRedo={masterHistory.canRedo}
+        onUndo={undoMasterList} onRedo={redoMasterList} onRestore={masterHistory.restore} compact presentation="popover"/>
 
       {/* ── PLANILHA PRINCIPAL DE ARTIGOS ── */}
-      <main className="flex-1 overflow-auto">
+      <main className="architect-scrollbar min-w-0 flex-1 overflow-y-auto bg-background">
         {ungroupedKeywords.length > 0 && (
-          <section className="border-b border-amber-950/60 bg-amber-950/[.06] px-4 py-3">
+          <section className="border-b border-warning/35 bg-warning/10 px-4 py-4">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-amber-500">Keywords não agrupadas · {ungroupedKeywords.length}</span>
-              <span className="text-[9px] text-slate-600">Sem agrupamento inferido durante a recuperação</span>
+              <span className="text-sm font-bold uppercase tracking-widest text-warning">Keywords não agrupadas · {ungroupedKeywords.length}</span>
+              <span className="text-sm text-text-muted">Sem agrupamento inferido durante a recuperação</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {ungroupedKeywords.map(keyword => (
-                <span key={String(keyword.id)} className="rounded border border-amber-900/50 bg-black/20 px-2 py-1 text-[10px] text-amber-200/80" title="Keyword preservada sem vínculo recuperável com artigo ou grupo">
+                <span key={String(keyword.id)} className="rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm text-warning" title="Keyword preservada sem vínculo recuperável com artigo ou grupo">
                   {keyword.keyword}
                 </span>
               ))}
             </div>
           </section>
         )}
-        {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+        {canonicalBootstrapError ? (
+          <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 px-6 text-center text-danger">
+            <span className="text-base">Não foi possível carregar o workspace canônico do Arquiteto.</span>
+            <span className="text-sm text-danger/80" data-canonical-bootstrap-code={canonicalBootstrapError.code}>
+              {canonicalBootstrapError.code}: {canonicalBootstrapError.message}
+            </span>
+          </div>
+        ) : canonicalBootstrapStatus === "LOADING" ? (
+          <div className="flex min-h-[50vh] items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-module-accent" />
           </div>
         ) : filteredArticles.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2.5 text-slate-700">
-            <span className="text-[11px]">
+          <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 px-6 text-center text-text-muted">
+            <span className="text-base">
               {masterList.length === 0
                 ? "Nenhum artigo disponível. Use Importar do Minerador."
                 : "Nenhum artigo corresponde aos filtros."}
             </span>
           </div>
         ) : (
-          <div className="w-full">
-            <table className="w-full min-w-[1360px] border-separate border-spacing-0 text-left">
-              <thead className="sticky top-0 z-30 bg-[#080a0f] shadow-[0_1px_0_rgba(51,65,85,0.8)]">
-                <tr className="bg-[#080a0f] text-slate-500 text-[9px] font-bold uppercase tracking-widest border-b border-slate-800/80">
-                  <th className="sticky left-0 z-40 w-10 border-r border-slate-850 bg-[#080a0f] px-2 py-2 text-right">#</th>
-                  <th className="py-2 px-2.5 w-16">
+          <div className="architect-scrollbar w-full overflow-x-auto">
+            <table className="w-full min-w-[110rem] table-fixed border-collapse text-left text-sm tracking-wide">
+              <thead className="sticky top-0 z-30 border-b border-divider bg-surface-elevated">
+                <tr className="text-xs font-semibold text-text-muted">
+                  <th className="sticky left-0 z-40 w-9 border-r border-divider bg-surface-elevated px-2 py-2 text-right">#</th>
+                  <th className="w-14 border-r border-slate-800/60 px-2 py-2">
                     <div className="relative flex items-center gap-1" ref={selectionMenuRef}>
                       <input
                         type="checkbox"
-                        checked={filteredArticles.length > 0 && filteredArticles.every(art => selectedArticleIds.has(art.id))}
+                        role="checkbox"
+                        ref={headerSelectionRef}
+                        checked={allVisibleArticlesSelected}
+                        aria-checked={someVisibleArticlesSelected ? "mixed" : allVisibleArticlesSelected}
                         onChange={() => {
-                          const allIds = filteredArticles.map(art => art.id);
-                          const allSelected = allIds.length > 0 && allIds.every(id => selectedArticleIds.has(id));
-                          selectArticles(allSelected ? [] : allIds);
+                          setSelectedArticleIds(current => toggleVisibleArticleSelection(current, visibleArticleIds));
+                          setSelectionMenuOpen(false);
                         }}
-                        className="h-3.5 w-3.5 rounded border-slate-700 bg-[#06070a] accent-blue-500 cursor-pointer"
+                        className="h-4 w-4 cursor-pointer rounded border-slate-700 bg-slate-950 accent-blue-500"
+                        aria-label="Selecionar ou desmarcar todos os artigos visíveis"
                         title="Selecionar tudo que esta visivel"
                       />
                       <button
                         onClick={() => setSelectionMenuOpen(v => !v)}
-                        className="text-slate-600 hover:text-slate-300 transition-colors cursor-pointer p-0.5"
+                        className={`${ARCHITECT_UI.iconButton} min-h-8 min-w-8 border-transparent`}
                         title="Opcoes de selecao"
                       >
                         <MoreHorizontal className="w-3.5 h-3.5" />
                       </button>
                       {selectionMenuOpen && (
-                        <div className="absolute left-0 top-full mt-1 w-64 bg-[#0e1015] border border-slate-850 rounded shadow-2xl z-40 overflow-hidden normal-case tracking-normal">
+                        <div className="absolute left-0 top-full z-40 mt-2 w-72 overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-2xl normal-case tracking-normal">
                           <button
                             onClick={() => selectArticles(filteredArticles.map(art => art.id))}
-                            className="w-full px-3 py-2 text-left text-[10px] text-slate-300 hover:bg-slate-900 transition-colors cursor-pointer"
+                            className="w-full cursor-pointer px-4 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-slate-800"
                           >
                             Selecionar Tudo
                           </button>
                           <button
                             onClick={() => selectArticles(filteredArticles.filter(art => !art.isPublished).map(art => art.id))}
-                            className="w-full px-3 py-2 text-left text-[10px] text-slate-300 hover:bg-slate-900 transition-colors cursor-pointer"
+                            className="w-full cursor-pointer px-4 py-3 text-left text-sm text-slate-200 transition-colors hover:bg-slate-800"
                           >
                             Selecionar Apenas Novos (Aprovados)
                           </button>
-                          <div className="border-y border-slate-850 py-1">
-                            <span className="block px-3 py-1 text-[8px] font-bold uppercase tracking-widest text-slate-600">
+                          <div className="border-y border-slate-800 py-2">
+                            <span className="block px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500">
                               Selecionar Grupo/Cor Especifico
                             </span>
                             {groupedArticles.map(group => (
                               <button
                                 key={group.key}
                                 onClick={() => selectGroup(group.articles.map(art => art.id))}
-                                className="w-full px-3 py-1.5 text-left text-[10px] text-slate-400 hover:bg-slate-900 hover:text-slate-200 transition-colors cursor-pointer truncate"
+                                className="w-full cursor-pointer truncate px-4 py-2 text-left text-sm text-slate-300 transition-colors hover:bg-slate-800 hover:text-slate-100"
                               >
                                 {group.siloName} ({group.articles.length})
                               </button>
@@ -2730,7 +2964,7 @@ export default function ArquitetoPage() {
                           </div>
                           <button
                             onClick={() => selectArticles([])}
-                            className="w-full px-3 py-2 text-left text-[10px] text-slate-500 hover:bg-slate-900 transition-colors cursor-pointer"
+                            className="w-full cursor-pointer px-4 py-3 text-left text-sm text-slate-400 transition-colors hover:bg-slate-800"
                           >
                             Desmarcar Tudo
                           </button>
@@ -2738,22 +2972,22 @@ export default function ArquitetoPage() {
                       )}
                     </div>
                   </th>
-                  <th className="py-2 px-2.5 w-6">{/* chevron */}</th>
-                  <th className="py-2 px-2.5 w-24">Status</th>
-                  <th className="py-2 px-2.5 w-28">APROVAÇÃO</th>
-                  <th className="py-2 px-3 w-28">Hierarquia</th>
-                  <th className="py-2 px-3">Keyword Principal (Pilar)</th>
-                  <th className="w-24 px-3 py-2 text-center">KeywordDNAs</th>
-                  <th className="w-28 px-3 py-2 text-center">Revisão IA</th>
-                  <th className="w-28 px-3 py-2 text-center">ArticleDNA</th>
-                  <th className="w-28 px-3 py-2 text-center">SiloDNA</th>
-                  <th className="py-2 px-3 w-52 text-right">Ações</th>
+                  <th className="w-10 border-r border-slate-800/60 px-2 py-2">{/* chevron */}</th>
+                  <th className="w-28 border-r border-slate-800/60 px-2 py-2">Status</th>
+                  <th className="w-36 border-r border-slate-800/60 px-2 py-2">Aprovação</th>
+                  <th className="w-28 border-r border-slate-800/60 px-2 py-2">Hierarquia</th>
+                  <th className="border-r border-slate-800/60 px-3 py-2">Keyword principal</th>
+                  <th className="w-24 border-r border-slate-800/60 px-2 py-2 text-center">KeywordDNAs</th>
+                  <th className="w-28 border-r border-slate-800/60 px-2 py-2 text-center">Revisão IA</th>
+                  <th className="w-28 border-r border-slate-800/60 px-2 py-2 text-center">ArticleDNA</th>
+                  <th className="w-28 border-r border-slate-800/60 px-2 py-2 text-center">SiloDNA</th>
+                  <th className="w-44 px-2 py-2 text-right">Ações</th>
                 </tr>
               </thead>
 
               <tbody>
                 {groupedArticles.map((group, groupIndex) => {
-                  const siloPaletteSize = Math.min(SILO_COLORS.length, ARTICLE_COLORS.length, ARTICLE_ACCENTS.length);
+                  const siloPaletteSize = SILO_COLORS.length;
                   const siloColor = SILO_COLORS[groupIndex % siloPaletteSize];
                   const groupArticleIds = group.articles.map(art => art.id);
                   const groupHasPublished = group.articles.some(art => art.isPublished);
@@ -2762,8 +2996,8 @@ export default function ArquitetoPage() {
                   return (
                     <React.Fragment key={group.key}>
                       {/* Cabeçalho do Silo — somente informações, ações ficam no rodapé */}
-                      <tr className={`bg-gray-900 border-l-4 ${siloColor.border} border-y border-slate-800/80`}>
-                        <td colSpan={12} className="px-3 py-2.5">
+                      <tr className={`border-l-2 ${siloColor.border} border-y border-slate-800/70 bg-slate-900/45`}>
+                        <td colSpan={12} className="px-3 py-2">
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0 flex items-center gap-2">
                               {/* Checkbox da Página do Silo (teal) — sempre visível, disabled sem SiloDNA */}
@@ -2776,7 +3010,7 @@ export default function ArquitetoPage() {
                                     checked={selectedSiloPageIds.has(pageEntityId)}
                                     onChange={() => toggleSiloPageSelection(pageEntityId)}
                                     disabled={!siloDnaExists}
-                                    className="h-3.5 w-3.5 rounded border-teal-700 bg-[#06070a] accent-teal-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                                    className="h-3.5 w-3.5 cursor-pointer rounded border-divider bg-surface-subtle accent-module-accent disabled:cursor-not-allowed disabled:opacity-30"
                                     title={siloDnaExists ? "Selecionar Página do Silo" : "Gere o SiloDNA primeiro para trabalhar a Página do Silo"}
                                   />
                                 );
@@ -2794,17 +3028,17 @@ export default function ArquitetoPage() {
                                 type="checkbox"
                                 checked={allGroupSelected}
                                 onChange={() => toggleSiloArticleSelection(groupArticleIds)}
-                                className="h-3.5 w-3.5 rounded border-slate-700 bg-[#06070a] accent-blue-500 cursor-pointer"
+                                className="h-3.5 w-3.5 cursor-pointer rounded border-divider bg-surface-subtle accent-module-accent"
                                 title="Selecionar artigos deste silo"
                               />
                               <div className="min-w-0 flex items-center gap-2">
-                                <span className={`text-[10px] font-bold uppercase tracking-widest ${siloColor.headerText}`}>
+                                <span className={`text-sm font-semibold ${siloColor.headerText}`}>
                                   Silo: {group.siloName}
                                 </span>
-                                <span className="truncate text-[10px] text-blue-400 font-mono select-all">
+                                <span className="truncate font-mono text-sm text-blue-200 select-all">
                                   /{group.siloSlug}
                                 </span>
-                                <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-wider text-slate-400 ${siloColor.countBg} ${siloColor.countBorder}`}>
+                                  <span className={`shrink-0 rounded border px-1.5 py-0.5 text-xs font-medium text-slate-300 ${siloColor.countBg} ${siloColor.countBorder}`}>
                                   {group.articles.length} {group.articles.length === 1 ? "artigo" : "artigos"}
                                 </span>
                                 {/* SiloDNA badge */}
@@ -2837,7 +3071,7 @@ export default function ArquitetoPage() {
                               {group.siloId && (() => {
                                 const ps = siloPageStatus(String(group.siloId));
                                 if (ps === "none") return null;
-                                return <WorkflowStatusBadge status={ps} />;
+                                return <WorkflowStatusBadge status={ps} density="comfortable" />;
                               })()}
                               {group.siloId && String(group.siloId).startsWith("tmp-") && !groupHasPublished && (
                                 <button
@@ -2859,9 +3093,9 @@ export default function ArquitetoPage() {
                         const pageVersion = acceptedSiloPages[pageEntityId];
                         const siloDnaVersion = acceptedSiloDnas[String(group.siloId)];
                         return (
-                          <tr className={`${siloColor.rowBg} border-b border-slate-900/30`}>
-                            <td colSpan={12} className="py-4 px-10">
-                              <div className="rounded border border-teal-900/30 bg-teal-950/[.05] p-4">
+                          <tr className="border-b border-slate-900/30 bg-slate-950/60">
+                            <td colSpan={12} className="px-6 py-6 lg:px-10">
+                              <div className="rounded-lg border border-teal-800/50 bg-teal-950/20 p-5">
                                 <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 pb-2 mb-3">
                                   <div>
                                     <span className="text-[9px] font-bold uppercase tracking-widest text-teal-400">Página do Silo</span>
@@ -2906,7 +3140,6 @@ export default function ArquitetoPage() {
 
                       {group.articles.map((art) => {
 
-                  const rowBg     = siloColor.rowBg;
                   const isExpanded = expandedIds.has(art.id);
                    const currentSlug = customSlugs[art.id] ?? art.slug;
                    const activeTab = activeTabs[art.id] || "suporte";
@@ -2925,40 +3158,53 @@ export default function ArquitetoPage() {
                   return (
                     <React.Fragment key={art.id}>
                       {/* Linha do Artigo */}
-                      <tr id={`article-row-${art.id}`} className={`border-b border-slate-900/40 transition-colors ${rowBg} ${art.isPublished ? "opacity-60" : "hover:brightness-105"} ${pendingAiReview ? "border-l-2 border-l-violet-500" : ""}`}>
+                      <tr
+                        id={`article-row-${art.id}`}
+                        className={`border-b border-divider transition-colors ${art.isPublished ? "border-l-2 border-l-danger bg-danger-soft hover:bg-surface-elevated" : selectedArticleIds.has(art.id) ? "bg-selected hover:bg-surface-elevated" : "hover:bg-surface-elevated"} ${pendingAiReview ? "border-l-2 border-l-warning" : ""}`}
+                      >
 
-                        <td className="sticky left-0 z-10 w-10 border-r border-slate-850 bg-[#080a0f] px-2 py-2 text-right text-[9px] tabular-nums text-slate-500">
+                        <td className="sticky left-0 z-10 w-9 border-r border-slate-800/60 bg-slate-950 px-2 py-1 text-right font-mono text-[11px] tabular-nums text-slate-500">
                           {filteredArticles.findIndex(candidate => candidate.id === art.id) + 1}
                         </td>
 
-                        <td className="py-2 px-2.5 text-center">
+                        <td className="w-14 border-r border-slate-800/60 px-2 py-1 text-center">
                           <input
                             type="checkbox"
+                            role="checkbox"
                             checked={selectedArticleIds.has(art.id)}
-                            onChange={() => toggleArticleSelection(art.id)}
-                            className="h-3.5 w-3.5 rounded border-slate-700 bg-[#06070a] accent-blue-500 cursor-pointer"
+                            aria-checked={selectedArticleIds.has(art.id)}
+                            aria-label={art.isPublished ? "Selecionar artigo publicado protegido" : "Selecionar artigo novo"}
+                            data-article-selection-id={art.id}
+                            onClick={event => handleArticleSelectionClick(art.id, event)}
+                            onChange={() => undefined}
+                            onPointerDown={event => handleSelectionPointerDown(art.id, event)}
+                            onPointerMove={handleSelectionPointerMove}
+                            onPointerUp={event => finishSelectionDrag(event.pointerId)}
+                            onPointerCancel={event => finishSelectionDrag(event.pointerId)}
+                            onLostPointerCapture={event => finishSelectionDrag(event.pointerId)}
+                            className="h-3.5 w-3.5 cursor-pointer rounded border-slate-700 bg-slate-950 accent-blue-500"
                             title={art.isPublished ? "Selecionar publicado protegido" : "Selecionar artigo novo"}
                           />
                         </td>
                         
                         {/* Seta Chevron */}
-                        <td className="py-2 px-2.5 text-center">
+                        <td className="w-10 border-r border-slate-800/60 px-2 py-1 text-center">
                           <button onClick={() => toggleExpand(art.id)}
-                            className="text-slate-550 hover:text-slate-300 transition-colors cursor-pointer p-0.5">
+                            className={`${ARCHITECT_UI.iconButton} min-h-7 min-w-7 border-transparent`}>
                             {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                           </button>
                         </td>
 
                         {/* Status */}
-                        <td className="py-2 px-2.5">
-                          <WorkflowStatusBadge status={workflowStatus}/>
+                        <td className="border-r border-slate-800/60 px-2 py-1">
+                          <WorkflowStatusBadge status={workflowStatus} density="comfortable"/>
                         </td>
 
-                        <td className="py-2 px-2.5">
-                          <WorkflowStatusBadge status={approvalStatus}/>
+                        <td className="border-r border-slate-800/60 px-2 py-1">
+                          <WorkflowStatusBadge status={approvalStatus} density="comfortable"/>
                         </td>
 
-                        <td className="py-2 px-3">
+                        <td className="border-r border-slate-800/60 px-2 py-1">
                           <select
                             value={art.hierarquia}
                             onFocus={() => pushMasterHistory(masterList, `Editar hierarquia de ${art.keywordPrincipal}`)}
@@ -2967,57 +3213,61 @@ export default function ArquitetoPage() {
                               [art.id]: e.target.value,
                               [art.briefingId]: e.target.value,
                             }))}
-                            className={`rounded border px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wider focus:outline-none cursor-pointer ${
+                            className={`w-full rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide outline-none transition-colors focus-visible:ring-2 focus-visible:ring-module-accent/35 ${
                               art.hierarquia === "Pilar"
                                 ? "border-blue-500/30 bg-blue-500/10 text-blue-300"
                                 : "border-slate-700/60 bg-slate-900/40 text-slate-400"
                             }`}
                             title={art.isPublished ? "Permitido: mudar hierarquia sem alterar slug, keyword ou Silo" : "Editar hierarquia"}
                           >
-                            <option value="Pilar" className="bg-[#0b0c10]">Pilar</option>
+                            <option value="Pilar" className="bg-surface-elevated">Pilar</option>
                             {Array.from({ length: Math.max(group.articles.length - 1, 1) }, (_, idx) => `Suporte ${idx + 1}`).map(option => (
-                              <option key={option} value={option} className="bg-[#0b0c10]">{option}</option>
+                              <option key={option} value={option} className="bg-surface-elevated">{option}</option>
                             ))}
                           </select>
                         </td>
 
                         {/* Keyword Principal + Slug */}
-                        <td className="py-2 px-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className={`font-bold text-[12px] truncate ${art.isPublished ? "text-slate-400" : "text-slate-100"}`}>
-                              {art.keywordPrincipal}
-                            </span>
-                            {art.isPublished && <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[7.5px] font-bold uppercase tracking-wider ${(articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "locked" ? "border-emerald-900/60 bg-emerald-950/20 text-emerald-300" : (articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "revisable" || (articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "reviewable" ? "border-amber-900/60 bg-amber-950/20 text-amber-300" : "border-rose-900/60 bg-rose-950/20 text-rose-300"}`}>{(articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "locked" ? "Principal travada" : (articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "revisable" || (articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "reviewable" ? "Principal revisável" : "Principal não travada"}</span>}
-                            {art.isPublished ? (
-                              publicationUrlFor(art) ? (
-                                <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="font-mono text-[10.5px] text-cyan-400 hover:text-cyan-300 underline underline-offset-2 select-all shrink-0 truncate max-w-[260px]" title="Abrir URL publicada em nova aba">
-                                  {publicationUrlFor(art)}
-                                </a>
+                        <td className="min-w-0 border-r border-slate-800/60 px-3 py-1">
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className={`min-w-0 truncate text-[13px] font-medium ${art.isPublished ? "text-slate-200" : "text-slate-50"}`} title={art.keywordPrincipal}>
+                                {art.keywordPrincipal}
+                              </span>
+                              {art.isPublished && <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold ${(articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "locked" ? "border-divider bg-surface-subtle text-foreground/75" : (articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "revisable" || (articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "reviewable" ? "border-warning/50 bg-warning/10 text-warning" : "border-context-accent/40 bg-context-accent/10 text-context-accent"}`}>{(articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "locked" ? "Principal travada" : (articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "revisable" || (articleDnaVersion?.payload.primaryKeywordPolicy || art.mainKeywordObj?.primaryKeywordPolicy) === "reviewable" ? "Principal revisável" : "Principal não travada"}</span>}
+                            </div>
+                            <div className="mt-0.5 min-w-0">
+                              {art.isPublished ? (
+                                publicationUrlFor(art) ? (
+                                  <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="block max-w-[280px] truncate font-mono text-xs text-cyan-200 underline decoration-cyan-700 underline-offset-4 transition-colors hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 select-all" title="Abrir URL publicada em nova aba">
+                                    {publicationUrlFor(art)}
+                                  </a>
+                                ) : (
+                                  <span className="block truncate font-mono text-xs text-slate-400" title="A URL publicada não foi recebida; nenhuma URL será inventada">
+                                    URL não recebida · /{art.slug}
+                                  </span>
+                                )
                               ) : (
-                                <span className="font-mono text-[10.5px] text-slate-600 shrink-0" title="A URL publicada não foi recebida; nenhuma URL será inventada">
-                                  URL não recebida · /{art.slug}
-                                </span>
-                              )
-                            ) : (
-                              <input
-                                type="text"
-                                value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug}
-                                onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)}
-                                onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }}
-                                disabled={articleIdentityContext.slugProtected}
-                                className="w-full max-w-[280px] bg-[#06070a]/60 border border-slate-800 hover:border-slate-700 focus:border-blue-500 rounded px-2.5 py-0.5 text-[10.5px] text-blue-400 font-mono focus:outline-none transition-colors disabled:cursor-not-allowed disabled:text-amber-400"
-                              />
-                            )}
+                                <input
+                                  type="text"
+                                  value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug}
+                                  onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)}
+                                  onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }}
+                                  disabled={articleIdentityContext.slugProtected}
+                                  className={`${ARCHITECT_UI.control} h-7 w-full max-w-[280px] font-mono text-xs text-blue-200 disabled:cursor-not-allowed disabled:text-amber-200`}
+                                />
+                              )}
+                            </div>
                           </div>
                         </td>
 
-                        <td className="px-3 py-2 text-center text-[10px] font-bold text-indigo-300">{art.supportKeywords.length + 1}</td>
+                        <td className="border-r border-slate-800/60 px-2 py-1 text-center font-mono text-[12px] text-slate-400">{art.supportKeywords.length + 1}</td>
 
-                        <td className="px-3 py-2 text-center">
+                        <td className="border-r border-slate-800/60 px-2 py-1 text-center">
                           {art.aiReviewAnnotations.length > 0 ? (
                             <button
                               onClick={() => toggleExpand(art.id)}
-                              className={`rounded border px-2 py-1 text-[8px] font-bold uppercase tracking-wider ${pendingAiReview ? "border-violet-500/40 bg-violet-500/10 text-violet-300" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"}`}
+                              className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${pendingAiReview ? "border-warning/40 bg-warning/10 text-warning" : "border-success/35 bg-success-soft text-success"}`}
                               title="Abrir as alterações e anotações aplicadas pela IA"
                             >
                               {pendingAiReview ? `IA aplicada · ${art.aiReviewAnnotations.length}` : "Revisado"}
@@ -3025,10 +3275,10 @@ export default function ArquitetoPage() {
                           ) : <span className="text-[9px] text-slate-700">—</span>}
                         </td>
 
-<td className="px-3 py-2 text-center"><div className="flex flex-col items-center gap-1">{articleDnaVersion ? (<div className="flex flex-col items-center gap-0.5"><span className="rounded border border-indigo-900/60 bg-indigo-950/30 px-1.5 py-0.5 text-[8.5px] font-bold text-indigo-300" title={`Identidade: ${articleDnaVersion.versionId}`}>ID . v{articleDnaVersion.versionNumber}</span><span className={`text-[7.5px] font-semibold ${articleDnaVersion.origin === "ai" ? "text-violet-400" : articleDnaVersion.origin === "system" ? "text-cyan-400" : "text-slate-500"}`}>{articleDnaVersion.origin === "ai" ? "IA aplicada" : articleDnaVersion.origin === "system" ? "Logica" : articleDnaVersion.origin}</span></div>) : <span className="text-[9px] text-slate-700">Pendente</span>}<button onClick={() => openSerpResult(art)} className={`rounded border px-1.5 py-0.5 text-[8px] font-semibold whitespace-nowrap ${serpIndicatorFor(art).className}`} title="Abrir as recomendações SERP junto às keywords">{serpIndicatorFor(art).label}</button></div></td>
-<td className="px-3 py-2 text-center">{siloDnaVersion ? (<div className="flex flex-col items-center gap-0.5"><span className="rounded border border-emerald-900/60 bg-emerald-950/30 px-1.5 py-0.5 text-[8.5px] font-bold text-emerald-300" title={`Identidade: ${siloDnaVersion.versionId}`}>ID . v{siloDnaVersion.versionNumber}</span><span className={`text-[7.5px] font-semibold ${siloDnaVersion.origin === "ai" ? "text-violet-400" : siloDnaVersion.origin === "system" ? "text-cyan-400" : "text-slate-500"}`}>{siloDnaVersion.origin === "ai" ? "IA aplicada" : siloDnaVersion.origin === "system" ? "Logica" : siloDnaVersion.origin}</span></div>) : <span className="text-[9px] text-slate-700">Pendente</span>}</td>
+<td className="border-r border-divider px-2 py-1 text-center"><div className="flex flex-col items-center gap-0.5">{articleDnaVersion ? (<div className="flex flex-col items-center gap-0.5"><span className="rounded border border-context-accent/35 bg-context-accent/10 px-1.5 py-0.5 text-[8.5px] font-bold text-context-accent" title={`Identidade: ${articleDnaVersion.versionId}`}>ID · v{articleDnaVersion.versionNumber}</span><span className={`text-[7.5px] font-semibold ${articleDnaVersion.origin === "ai" ? "text-module-accent" : articleDnaVersion.origin === "system" ? "text-context-accent" : "text-text-muted"}`}>{articleDnaVersion.origin === "ai" ? "IA aplicada" : articleDnaVersion.origin === "system" ? "Lógica" : articleDnaVersion.origin}</span></div>) : <span className="text-[9px] text-text-muted">Pendente</span>}<button onClick={() => openSerpResult(art)} className={`rounded border px-1.5 py-0.5 text-[8px] font-semibold whitespace-nowrap ${serpIndicatorFor(art).className}`} title="Abrir as recomendações SERP junto às keywords">{serpIndicatorFor(art).label}</button></div></td>
+<td className="border-r border-divider px-2 py-1 text-center">{siloDnaVersion ? (<div className="flex flex-col items-center gap-0.5"><span className="rounded border border-positive-soft/35 bg-positive-soft/10 px-1.5 py-0.5 text-[8.5px] font-bold text-positive-soft" title={`Identidade: ${siloDnaVersion.versionId}`}>ID · v{siloDnaVersion.versionNumber}</span><span className={`text-[7.5px] font-semibold ${siloDnaVersion.origin === "ai" ? "text-module-accent" : siloDnaVersion.origin === "system" ? "text-context-accent" : "text-text-muted"}`}>{siloDnaVersion.origin === "ai" ? "IA aplicada" : siloDnaVersion.origin === "system" ? "Lógica" : siloDnaVersion.origin}</span></div>) : <span className="text-[9px] text-text-muted">Pendente</span>}</td>
 
-                        <td className="py-2 px-3">
+                        <td className="px-2 py-1">
                           {!art.isPublished ? (
                             <div className="flex items-center justify-end gap-1.5">
                               <button
@@ -3041,12 +3291,12 @@ export default function ArquitetoPage() {
                               <select
                                 value={art.siloId || ""}
                                 onChange={e => handleMoveArticleToSilo(art, e.target.value)}
-                                className="max-w-[145px] bg-[#06070a]/80 border border-slate-800 rounded px-1.5 py-0.5 text-[9.5px] text-slate-400 focus:outline-none focus:border-blue-600 cursor-pointer"
+                                className="max-w-[145px] rounded border border-divider bg-surface-subtle px-1.5 py-0.5 text-[9.5px] text-text-muted outline-none focus:border-module-accent/45 focus:ring-2 focus:ring-module-accent/20 cursor-pointer"
                                 title="Mudar de Silo"
                               >
-                                <option value="" className="bg-[#0b0c10]">Sem Grupo</option>
+                                <option value="" className="bg-surface-elevated">Sem Grupo</option>
                                 {lists.map(list => (
-                                  <option key={list.id} value={list.id} className="bg-[#0b0c10]">
+                                  <option key={list.id} value={list.id} className="bg-surface-elevated">
                                     {list.nome}
                                   </option>
                                 ))}
@@ -3069,22 +3319,22 @@ export default function ArquitetoPage() {
 
                       {/* Acordeão Expandido do Artigo */}
                       {isExpanded && (
-                        <tr className={`${rowBg} border-b border-slate-900/30`}>
-                          <td colSpan={12} className="py-4 px-10">
+                        <tr className="border-b border-slate-900/60 bg-slate-950/95">
+                          <td colSpan={12} className="px-6 py-6 lg:px-10">
                             {art.aiReviewAnnotations.length > 0 && (
-                              <section className="mb-3 rounded border border-violet-500/25 bg-violet-500/[.05] p-3">
+                              <section className="mb-3 rounded border border-warning/30 bg-warning/10 p-3">
                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                   <div>
-                                    <p className="text-[9px] font-bold uppercase tracking-widest text-violet-300">Alterações da IA aplicadas localmente</p>
+                                    <p className="text-[9px] font-bold uppercase tracking-widest text-warning">Alterações da IA aplicadas localmente</p>
                                     <p className="mt-1 text-[9px] text-slate-500">Use a própria planilha para mover, corrigir ou desfazer. Isto não aprova o artigo para a próxima etapa.</p>
                                   </div>
-                                  {pendingAiReview && <button onClick={() => markAiReviewChecked(art)} className="rounded border border-violet-500/30 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-violet-300 hover:bg-violet-500/10">Marcar pente-fino concluído</button>}
+                                  {pendingAiReview && <button onClick={() => markAiReviewChecked(art)} className="rounded border border-warning/35 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-warning hover:bg-warning/10">Marcar pente-fino concluído</button>}
                                 </div>
                                 <div className="mt-2 grid gap-2 lg:grid-cols-2">
                                   {art.aiReviewAnnotations.map(annotation => (
-                                    <div key={annotation.id} className="rounded border border-slate-800 bg-[#08090c] p-2.5">
+                                    <div key={annotation.id} className="rounded border border-divider bg-surface-subtle p-2.5">
                                       <div className="flex items-center justify-between gap-2">
-                                        <span className="text-[8px] font-bold uppercase tracking-wider text-violet-400">{String(annotation.action).replaceAll("_", " ")}</span>
+                                        <span className="text-[8px] font-bold uppercase tracking-wider text-warning">{String(annotation.action).replaceAll("_", " ")}</span>
                                         <span className="text-[8px] font-mono text-slate-600">{Math.round(annotation.confidence * 100)}%</span>
                                       </div>
                                       <p className="mt-1 text-[10px] text-slate-300">{annotation.summary}</p>
@@ -3095,12 +3345,12 @@ export default function ArquitetoPage() {
                               </section>
                             )}
                             {articleDnaVersion?.payload.intentProfile && (
-                              <section className="mb-3 rounded border border-indigo-500/20 bg-indigo-500/[.035] p-3">
-                                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-[9px]">
-                                  <div><p className="text-[8px] font-bold uppercase tracking-wider text-indigo-300">Intenção principal</p><p className="mt-0.5 text-slate-200">{articleDnaVersion.payload.intentProfile.primaryIntent}</p><p className="text-[8px] text-slate-500">Origem: KeywordDNA da principal · {articleDnaVersion.payload.intentProfile.originalLabel || "rótulo não recebido"}</p></div>
-                                  <div><p className="text-[8px] font-bold uppercase tracking-wider text-indigo-300">Arquitetura</p><p className="mt-0.5 text-slate-200">{articleDnaVersion.payload.architectureStatus || "não definida"}</p><p className="text-[8px] text-slate-500">Confirmação: {articleDnaVersion.payload.intentProfile.confirmation}</p></div>
-                                  <div><p className="text-[8px] font-bold uppercase tracking-wider text-indigo-300">KGR</p><p className="mt-0.5 text-slate-200">{articleDnaVersion.payload.kgrIdentity?.bindingStatus || "não aplicável"}</p><p className="text-[8px] text-slate-500">Slug vinculado: {articleDnaVersion.payload.kgrIdentity?.boundSlug || "—"}</p></div>
-                                  <div><p className="text-[8px] font-bold uppercase tracking-wider text-indigo-300">Publicação</p><p className="mt-0.5 text-slate-200">{articleDnaVersion.payload.publishedIdentityRef ? "publicado protegido" : "novo artigo"}</p><p className="truncate text-[8px] text-slate-500" title={articleDnaVersion.payload.publishedIdentityRef?.publishedUrl || "URL não recebida"}>{articleDnaVersion.payload.publishedIdentityRef?.publishedUrl || "URL não recebida"}</p><p className="truncate text-[8px] text-slate-500" title={articleDnaVersion.payload.canonical || "Canonical não verificado"}>{articleDnaVersion.payload.canonical || "Canonical não verificado"}</p></div>
+                              <section className="mb-4 rounded-lg border border-divider bg-surface-subtle p-4">
+                                <div className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                                  <div><p className="text-xs font-bold uppercase tracking-wider text-context-accent">Intenção principal</p><p className="mt-1 text-base text-foreground">{articleDnaVersion.payload.intentProfile.primaryIntent}</p><p className="text-xs leading-5 text-text-muted">Origem: KeywordDNA da principal · {articleDnaVersion.payload.intentProfile.originalLabel || "rótulo não recebido"}</p></div>
+                                  <div><p className="text-xs font-bold uppercase tracking-wider text-context-accent">Arquitetura</p><p className="mt-1 text-base text-foreground">{articleDnaVersion.payload.architectureStatus || "não definida"}</p><p className="text-xs leading-5 text-text-muted">Confirmação: {articleDnaVersion.payload.intentProfile.confirmation}</p></div>
+                                  <div><p className="text-xs font-bold uppercase tracking-wider text-context-accent">KGR</p><p className="mt-1 text-base text-foreground">{articleDnaVersion.payload.kgrIdentity?.bindingStatus || "não aplicável"}</p><p className="text-xs leading-5 text-text-muted">Slug vinculado: {articleDnaVersion.payload.kgrIdentity?.boundSlug || "—"}</p></div>
+                                  <div><p className="text-xs font-bold uppercase tracking-wider text-context-accent">Publicação</p><p className="mt-1 text-base text-foreground">{articleDnaVersion.payload.publishedIdentityRef ? "publicado protegido" : "novo artigo"}</p><p className="truncate text-xs leading-5 text-text-muted" title={articleDnaVersion.payload.publishedIdentityRef?.publishedUrl || "URL não recebida"}>{articleDnaVersion.payload.publishedIdentityRef?.publishedUrl || "URL não recebida"}</p><p className="truncate text-xs leading-5 text-text-muted" title={articleDnaVersion.payload.canonical || "Canonical não verificado"}>{articleDnaVersion.payload.canonical || "Canonical não verificado"}</p></div>
                                 </div>
                                 {articleDnaVersion.payload.intentProfile.secondaryIntentSignals.length > 0 && <div className="mt-2 border-t border-slate-800/70 pt-2"><p className="text-[8px] font-bold uppercase tracking-wider text-slate-500">Sinais secundários · não sobrescrevem a principal</p><div className="mt-1 flex flex-wrap gap-1.5">{articleDnaVersion.payload.intentProfile.secondaryIntentSignals.map(signal => <span key={signal.keywordId} className="rounded border border-slate-800 px-1.5 py-0.5 text-[8px] text-slate-400">{signal.keywordId}: {signal.intent} · {signal.compatibility}</span>)}</div></div>}
                               </section>
@@ -3111,19 +3361,19 @@ export default function ArquitetoPage() {
                               const policyDescription = policy === "locked" ? "A principal está protegida por vínculo confirmado ou decisão consolidada." : policy === "revisable" ? "A URL, o slug e o canonical estão protegidos; a principal ainda pode ser comparada e substituída somente com decisão humana." : policy === "free" ? "A unidade nova está em formação; a principal permanece livre até a confirmação." : "Publicado sem política suficiente: a identidade estrutural é protegida, mas a principal não foi travada silenciosamente.";
                               const candidates = articleDnaVersion.payload.primaryKeywordCandidates || [];
                               const selectedCandidate = primaryDrafts[art.id] || articleDnaVersion.payload.principalKeywordId;
-                              return <section className="mb-3 rounded border border-amber-500/25 bg-amber-500/[.035] p-3">
-                                <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-[8px] font-bold uppercase tracking-widest text-amber-300">Política da keyword principal</p><p className="mt-1 text-[12px] font-bold text-slate-100">{policyLabel}</p><p className="mt-1 max-w-3xl text-[9px] leading-relaxed text-amber-100/75">{policyDescription}</p></div><span className="rounded border border-slate-700 px-2 py-1 text-[8px] font-mono text-slate-400">Origem: {articleDnaVersion.payload.primaryKeywordPolicyContext?.source || "legacy"}</span></div>
-                                <div className="mt-2 grid gap-2 text-[8.5px] sm:grid-cols-4"><span>Principal atual: <strong className="text-slate-200">{art.keywordPrincipal}</strong></span><span>Política recebida: <strong className="text-slate-200">{articleDnaVersion.payload.primaryKeywordPolicyContext?.sourcePolicy || policy}</strong></span><span>Volume: <strong className="text-slate-200">{articleDnaVersion.payload.primaryKeywordMetrics?.volumeSearch ?? "não recebido"}</strong></span><span>Resultados: <strong className="text-slate-200">{articleDnaVersion.payload.primaryKeywordMetrics?.resultCount ?? "não recebido"}</strong></span></div>
-                                {art.isPublished && <p className="mt-2 rounded border border-emerald-900/50 bg-emerald-950/20 p-2 text-[8.5px] text-emerald-200/80">URL publicada, slug, canonical e marca permanecem protegidos em ambos os estados publicados.</p>}
-                                {art.isPublished && policy === "revisable" && candidates.length > 0 && <div className="mt-2 flex flex-wrap items-end gap-2 border-t border-slate-800/70 pt-2"><label className="flex min-w-[240px] flex-1 flex-col gap-1 text-[8px] font-bold uppercase tracking-wider text-slate-500">Comparar/confirmar candidata<select value={selectedCandidate} onChange={event => setPrimaryDrafts(previous => ({ ...previous, [art.id]: event.target.value }))} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[10px] font-normal normal-case text-slate-200 outline-none focus:border-amber-700"><option value={articleDnaVersion.payload.principalKeywordId}>{art.keywordPrincipal} (principal atual)</option>{candidates.map(candidate => <option key={candidate.keywordId} value={candidate.keywordId}>{candidate.keyword} (candidata)</option>)}</select></label><button type="button" onClick={() => void handleConfirmArticleArchitecture(art, selectedCandidate)} className="rounded border border-indigo-700 px-2.5 py-1.5 text-[8px] font-bold uppercase tracking-wider text-indigo-300 hover:border-indigo-500">Confirmar principal e arquitetura</button></div>}
+                              return <section className="mb-4 rounded-lg border border-amber-500/25 bg-amber-950/20 p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-amber-200">Política da keyword principal</p><p className="mt-1 text-lg font-bold text-slate-50">{policyLabel}</p><p className="mt-1 max-w-3xl text-sm leading-6 text-amber-100/80">{policyDescription}</p></div><span className="rounded-md border border-slate-700 px-3 py-1.5 text-xs font-mono text-slate-300">Origem: {articleDnaVersion.payload.primaryKeywordPolicyContext?.source || "legacy"}</span></div>
+                                <div className="mt-4 grid gap-3 text-sm sm:grid-cols-4"><span>Principal atual: <strong className="text-slate-100">{art.keywordPrincipal}</strong></span><span>Política recebida: <strong className="text-slate-100">{articleDnaVersion.payload.primaryKeywordPolicyContext?.sourcePolicy || policy}</strong></span><span>Volume: <strong className="text-slate-100">{articleDnaVersion.payload.primaryKeywordMetrics?.volumeSearch ?? "não recebido"}</strong></span><span>Resultados: <strong className="text-slate-100">{articleDnaVersion.payload.primaryKeywordMetrics?.resultCount ?? "não recebido"}</strong></span></div>
+                                {art.isPublished && <p className="mt-4 rounded-md border border-emerald-800/50 bg-emerald-950/30 p-3 text-sm leading-6 text-emerald-100">URL publicada, slug, canonical e marca permanecem protegidos em ambos os estados publicados.</p>}
+                                {art.isPublished && policy === "revisable" && candidates.length > 0 && <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-slate-800/70 pt-4"><label className="flex min-w-[240px] flex-1 flex-col gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">Comparar/confirmar candidata<select value={selectedCandidate} onChange={event => setPrimaryDrafts(previous => ({ ...previous, [art.id]: event.target.value }))} className={`${ARCHITECT_UI.control} font-normal normal-case`}><option value={articleDnaVersion.payload.principalKeywordId}>{art.keywordPrincipal} (principal atual)</option>{candidates.map(candidate => <option key={candidate.keywordId} value={candidate.keywordId}>{candidate.keyword} (candidata)</option>)}</select></label><button type="button" onClick={() => void handleConfirmArticleArchitecture(art, selectedCandidate)} className={ARCHITECT_UI.primaryButton}>Confirmar principal e arquitetura</button></div>}
                               </section>;
                             })()}
                             {articleDnaVersion?.payload.strategicPurpose && articleDnaVersion.payload.volumeStrategy && articleDnaVersion.payload.hierarchyStrategy && (
-                              <section className="mb-3 rounded border border-teal-500/20 bg-teal-500/[.035] p-3">
-                                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-[9px]">
-                                  <div className="sm:col-span-2"><p className="text-[8px] font-bold uppercase tracking-wider text-teal-300">Propósito estratégico</p><p className="mt-0.5 text-slate-200">{articleDnaVersion.payload.strategicPurpose.summary}</p><p className="mt-1 text-[8px] text-slate-500">Necessidade: {articleDnaVersion.payload.strategicPurpose.searchNeed}</p></div>
-                                  <div><p className="text-[8px] font-bold uppercase tracking-wider text-teal-300">Volume</p><p className="mt-0.5 text-slate-200">Principal: {articleDnaVersion.payload.volumeStrategy.primaryKeywordVolume ?? "desconhecido"}</p><p className="text-[8px] text-slate-500">Bruto: {articleDnaVersion.payload.volumeStrategy.grossCombinedVolume ?? "desconhecido"} · Ajustado: {articleDnaVersion.payload.volumeStrategy.adjustedCombinedVolume ?? "pendente"}</p><p className="text-[8px] text-slate-500">Sobreposição: {articleDnaVersion.payload.volumeStrategy.overlapRisk}</p></div>
-                                  <div><p className="text-[8px] font-bold uppercase tracking-wider text-teal-300">Hierarquia</p><p className="mt-0.5 text-slate-200">{articleDnaVersion.payload.hierarchyStrategy.role} · score {Math.round(articleDnaVersion.payload.hierarchyStrategy.score * 100)}%</p><p className="text-[8px] text-slate-500">Rank: {articleDnaVersion.payload.hierarchyStrategy.rank ?? "não calculado"} · {articleDnaVersion.payload.hierarchyStrategy.status}</p></div>
+                              <section className="mb-4 rounded-lg border border-teal-500/20 bg-teal-950/20 p-4">
+                                <div className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                                  <div className="sm:col-span-2"><p className="text-xs font-bold uppercase tracking-wider text-teal-200">Propósito estratégico</p><p className="mt-1 text-base text-slate-100">{articleDnaVersion.payload.strategicPurpose.summary}</p><p className="mt-2 text-sm leading-6 text-slate-400">Necessidade: {articleDnaVersion.payload.strategicPurpose.searchNeed}</p></div>
+                                  <div><p className="text-xs font-bold uppercase tracking-wider text-teal-200">Volume</p><p className="mt-1 text-base text-slate-100">Principal: {articleDnaVersion.payload.volumeStrategy.primaryKeywordVolume ?? "desconhecido"}</p><p className="text-sm leading-6 text-slate-400">Bruto: {articleDnaVersion.payload.volumeStrategy.grossCombinedVolume ?? "desconhecido"} · Ajustado: {articleDnaVersion.payload.volumeStrategy.adjustedCombinedVolume ?? "pendente"}</p><p className="text-sm leading-6 text-slate-400">Sobreposição: {articleDnaVersion.payload.volumeStrategy.overlapRisk}</p></div>
+                                  <div><p className="text-xs font-bold uppercase tracking-wider text-teal-200">Hierarquia</p><p className="mt-1 text-base text-slate-100">{articleDnaVersion.payload.hierarchyStrategy.role} · score {Math.round(articleDnaVersion.payload.hierarchyStrategy.score * 100)}%</p><p className="text-sm leading-6 text-slate-400">Rank: {articleDnaVersion.payload.hierarchyStrategy.rank ?? "não calculado"} · {articleDnaVersion.payload.hierarchyStrategy.status}</p></div>
                                 </div>
                                 <div className="mt-2 border-t border-slate-800/70 pt-2"><p className="text-[8px] font-bold uppercase tracking-wider text-slate-500">Contribuição por KeywordDNA</p><div className="mt-1 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">{articleDnaVersion.payload.keywordReferences.map(reference => <div key={reference.keywordId} className="rounded border border-slate-800 px-2 py-1.5"><p className="text-[8px] text-slate-200">{reference.keywordId} · {reference.role}</p><p className="mt-0.5 text-[8px] text-teal-300">{reference.contribution || "não definido"} · volume {reference.volume ?? "desconhecido"}</p><p className="mt-0.5 text-[8px] text-slate-500">{reference.purpose || reference.strategicContribution}</p></div>)}</div></div>
                                 <div className="mt-2 text-[8px] text-slate-500">Racional: {articleDnaVersion.payload.hierarchyStrategy.rationale.join(" ")}</div>
@@ -3134,22 +3384,22 @@ export default function ArquitetoPage() {
                               const draft = unitDrafts[art.id] || { type: suggestion.type, landingPagePurpose: suggestion.landingPagePurpose || "unknown" };
                               const evidence = suggestion.evidence;
                               const statusLabel = suggestion.status === "human_confirmed" ? "Confirmado por pessoa" : suggestion.status === "conflict" ? "Conflito" : suggestion.status === "unknown" ? "Desconhecido" : "Sugestão aguardando confirmação";
-                              return <section className="mb-3 rounded border border-cyan-500/20 bg-cyan-500/[.035] p-3">
+                              return <section className="mb-4 rounded-lg border border-cyan-500/20 bg-cyan-950/20 p-4">
                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                   <div>
-                                    <p className="text-[8px] font-bold uppercase tracking-wider text-cyan-300">Tipo de unidade</p>
-                                    <p className="mt-1 text-[9px] text-slate-400">A sugestão usa evidências disponíveis; ela não equivale a confirmação e não altera a identidade publicada.</p>
+                                    <p className="text-xs font-bold uppercase tracking-wider text-cyan-200">Tipo de unidade</p>
+                                    <p className="mt-1 text-sm leading-6 text-slate-400">A sugestão usa evidências disponíveis; ela não equivale a confirmação e não altera a identidade publicada.</p>
                                   </div>
-                                  <span className={`rounded border px-2 py-1 text-[8px] font-bold uppercase tracking-wider ${suggestion.status === "human_confirmed" ? "border-emerald-800 text-emerald-300" : suggestion.status === "conflict" ? "border-rose-800 text-rose-300" : "border-amber-800 text-amber-300"}`}>{statusLabel}</span>
+                                  <span className={`rounded-md border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${suggestion.status === "human_confirmed" ? "border-emerald-700 bg-emerald-950/30 text-emerald-200" : suggestion.status === "conflict" ? "border-rose-700 bg-rose-950/30 text-rose-200" : "border-amber-700 bg-amber-950/30 text-amber-200"}`}>{statusLabel}</span>
                                 </div>
-                                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                                  <label className="flex flex-col gap-1 text-[8px] font-bold uppercase tracking-wider text-slate-500">Tipo sugerido / decisão<select value={draft.type} onChange={event => setUnitDrafts(previous => ({ ...previous, [art.id]: { ...draft, type: event.target.value as EditorialArticleUnitType, landingPagePurpose: event.target.value === "landing_page" ? draft.landingPagePurpose : "unknown" } }))} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[10px] font-normal normal-case text-slate-200 outline-none focus:border-cyan-700">{(Object.keys(EDITORIAL_UNIT_LABELS) as EditorialArticleUnitType[]).map(type => <option key={type} value={type}>{EDITORIAL_UNIT_LABELS[type]}</option>)}</select></label>
-                                  {draft.type === "landing_page" && <label className="flex flex-col gap-1 text-[8px] font-bold uppercase tracking-wider text-slate-500">Finalidade da landing<select value={draft.landingPagePurpose} onChange={event => setUnitDrafts(previous => ({ ...previous, [art.id]: { ...draft, landingPagePurpose: event.target.value as LandingPagePurpose } }))} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[10px] font-normal normal-case text-slate-200 outline-none focus:border-cyan-700">{(Object.keys(LANDING_PURPOSE_LABELS) as LandingPagePurpose[]).map(purpose => <option key={purpose} value={purpose}>{LANDING_PURPOSE_LABELS[purpose]}</option>)}</select></label>}
-                                  <div className="text-[9px] text-slate-400"><p className="text-[8px] font-bold uppercase tracking-wider text-slate-500">Evidências</p><p className="mt-1">{evidence?.urlPath ? `URL ${evidence.urlPath}` : "URL não recebida"}</p><p>{evidence?.h1 || evidence?.title || evidence?.contentSignals?.join(" · ") || "Nenhum sinal textual recebido"}</p></div>
-                                  <div className="text-[9px] text-slate-400"><p className="text-[8px] font-bold uppercase tracking-wider text-slate-500">Fonte</p><p className="mt-1">{suggestion.source} · confiança {suggestion.confidence !== undefined ? `${Math.round(suggestion.confidence * 100)}%` : "não recebida"}</p><p className="text-slate-500">KGR, intenção e publicação continuam vindos do KeywordDNA.</p></div>
+                                <div className="mt-4 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                                  <label className="flex flex-col gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">Tipo sugerido / decisão<select value={draft.type} onChange={event => setUnitDrafts(previous => ({ ...previous, [art.id]: { ...draft, type: event.target.value as EditorialArticleUnitType, landingPagePurpose: event.target.value === "landing_page" ? draft.landingPagePurpose : "unknown" } }))} className={`${ARCHITECT_UI.control} font-normal normal-case`}>{(Object.keys(EDITORIAL_UNIT_LABELS) as EditorialArticleUnitType[]).map(type => <option key={type} value={type}>{EDITORIAL_UNIT_LABELS[type]}</option>)}</select></label>
+                                  {draft.type === "landing_page" && <label className="flex flex-col gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">Finalidade da landing<select value={draft.landingPagePurpose} onChange={event => setUnitDrafts(previous => ({ ...previous, [art.id]: { ...draft, landingPagePurpose: event.target.value as LandingPagePurpose } }))} className={`${ARCHITECT_UI.control} font-normal normal-case`}>{(Object.keys(LANDING_PURPOSE_LABELS) as LandingPagePurpose[]).map(purpose => <option key={purpose} value={purpose}>{LANDING_PURPOSE_LABELS[purpose]}</option>)}</select></label>}
+                                  <div className="text-sm leading-6 text-slate-300"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Evidências</p><p className="mt-1">{evidence?.urlPath ? `URL ${evidence.urlPath}` : "URL não recebida"}</p><p>{evidence?.h1 || evidence?.title || evidence?.contentSignals?.join(" · ") || "Nenhum sinal textual recebido"}</p></div>
+                                  <div className="text-sm leading-6 text-slate-300"><p className="text-xs font-bold uppercase tracking-wider text-slate-400">Fonte</p><p className="mt-1">{suggestion.source} · confiança {suggestion.confidence !== undefined ? `${Math.round(suggestion.confidence * 100)}%` : "não recebida"}</p><p className="text-slate-400">KGR, intenção e publicação continuam vindos do KeywordDNA.</p></div>
                                 </div>
-                                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-800/70 pt-2"><button type="button" onClick={() => void handleEditorialUnitDecision(art, { type: draft.type, landingPagePurpose: draft.landingPagePurpose, status: draft.type === "other" ? "unknown" : "human_confirmed" })} className="rounded border border-emerald-900/70 px-2.5 py-1 text-[8px] font-bold uppercase tracking-wider text-emerald-300 hover:border-emerald-700">Confirmar tipo</button><button type="button" onClick={() => void handleEditorialUnitDecision(art, { type: draft.type, landingPagePurpose: draft.landingPagePurpose, status: "conflict" })} className="rounded border border-rose-900/70 px-2.5 py-1 text-[8px] font-bold uppercase tracking-wider text-rose-300 hover:border-rose-700">Marcar conflito</button><button type="button" onClick={() => void handleEditorialUnitDecision(art, { type: "other", status: "unknown" })} className="rounded border border-slate-800 px-2.5 py-1 text-[8px] font-bold uppercase tracking-wider text-slate-400 hover:border-slate-600">Manter desconhecido</button></div>
-                                <div className="mt-3 rounded border border-indigo-900/50 bg-indigo-950/20 p-2 text-[9px] text-slate-300"><p className="font-bold uppercase tracking-wider text-indigo-300">Estratégia da validação</p>{articleDnaVersion.payload.serpStrategy ? <div className="mt-1 grid gap-1 sm:grid-cols-3"><span>Ciclo: {articleDnaVersion.payload.serpStrategy.lifecycleMode}</span><span>Competição: {articleDnaVersion.payload.serpStrategy.competitionStrategy}</span><span>Perfil: {articleDnaVersion.payload.serpStrategy.unitProfile}</span></div> : <p className="mt-1 text-slate-500">Estratégia não recebida nesta versão antiga; gerar uma nova classificação para projetá-la.</p>}</div>
+                                <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-800/70 pt-4"><button type="button" onClick={() => void handleEditorialUnitDecision(art, { type: draft.type, landingPagePurpose: draft.landingPagePurpose, status: draft.type === "other" ? "unknown" : "human_confirmed" })} className={ARCHITECT_UI.importButton}>Confirmar tipo</button><button type="button" onClick={() => void handleEditorialUnitDecision(art, { type: draft.type, landingPagePurpose: draft.landingPagePurpose, status: "conflict" })} className={ARCHITECT_UI.dangerButton}>Marcar conflito</button><button type="button" onClick={() => void handleEditorialUnitDecision(art, { type: "other", status: "unknown" })} className={ARCHITECT_UI.toolbarButton}>Manter desconhecido</button></div>
+                                <div className="mt-3 rounded border border-divider bg-surface-subtle p-2 text-[9px] text-foreground/80"><p className="font-bold uppercase tracking-wider text-context-accent">Estratégia da validação</p>{articleDnaVersion.payload.serpStrategy ? <div className="mt-1 grid gap-1 sm:grid-cols-3"><span>Ciclo: {articleDnaVersion.payload.serpStrategy.lifecycleMode}</span><span>Competição: {articleDnaVersion.payload.serpStrategy.competitionStrategy}</span><span>Perfil: {articleDnaVersion.payload.serpStrategy.unitProfile}</span></div> : <p className="mt-1 text-text-muted">Estratégia não recebida nesta versão antiga; gerar uma nova classificação para projetá-la.</p>}</div>
                               </section>;
                             })()}
                             <ArticleDnaSummary
@@ -3157,27 +3407,27 @@ export default function ArquitetoPage() {
                               published={articleIdentityContext.publishedIdentityProtected && articleIdentityContext.principalProtected}
                             />
                             {art.isPublished && articleDnaVersion && !articleIdentityContext.principalProtected && (
-                              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded border border-indigo-500/25 bg-indigo-500/[.04] p-2.5">
-                                <p className="text-[8.5px] text-indigo-200/80">A principal ainda é candidata. Confirme a arquitetura para criar uma nova versão do ArticleDNA e mudar a próxima SERP para fortalecimento.</p>
-                                <button onClick={() => void handleConfirmArticleArchitecture(art, primaryDrafts[art.id])} className="rounded border border-indigo-700 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-indigo-300 hover:border-indigo-500">Confirmar arquitetura</button>
+                              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded border border-warning/35 bg-warning/10 p-2.5">
+                                <p className="text-[8.5px] text-warning/85">A principal ainda é candidata. Confirme a arquitetura para criar uma nova versão do ArticleDNA e mudar a próxima SERP para fortalecimento.</p>
+                                <button onClick={() => void handleConfirmArticleArchitecture(art, primaryDrafts[art.id])} className="rounded border border-warning/50 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-warning hover:border-warning">Confirmar arquitetura</button>
                               </div>
                             )}
                             {renderSerpRecommendations(art)}
 
                             {/* Abas do Acordeão */}
-                            <div className="flex items-center gap-1 border-b border-slate-800/80 pb-1.5 mb-3.5">
+                            <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-slate-800/80 pb-2">
                               <button
                                 onClick={() => setActiveTabs(prev => ({ ...prev, [art.id]: "suporte" }))}
-                                className={`px-3 py-1 font-bold text-[9.5px] uppercase tracking-wider rounded transition-colors cursor-pointer ${
-                                  activeTab === "suporte" ? "bg-slate-850 text-indigo-400" : "text-slate-500 hover:text-slate-350"
+                                className={`min-h-10 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/35 ${
+                                  activeTab === "suporte" ? "bg-surface-elevated text-module-accent" : "text-text-muted hover:bg-surface-subtle hover:text-foreground"
                                 }`}
                               >
                                 Keywords de Suporte ({art.supportKeywords.length})
                               </button>
                               <button
                                 onClick={() => setActiveTabs(prev => ({ ...prev, [art.id]: "dna" }))}
-                                className={`px-3 py-1 font-bold text-[9.5px] uppercase tracking-wider rounded transition-colors cursor-pointer ${
-                                  activeTab === "dna" ? "bg-slate-850 text-teal-400" : "text-slate-500 hover:text-slate-350"
+                                className={`min-h-10 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400/70 ${
+                                  activeTab === "dna" ? "bg-slate-800 text-teal-100" : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
                                 }`}
                               >
                                 DNA do Artigo
@@ -3187,72 +3437,72 @@ export default function ArquitetoPage() {
                             {/* ── ABA 1: KEYWORDS DE SUPORTE ── */}
                             {activeTab === "suporte" && (
                               <div className="flex flex-col gap-2.5">
-                                <div className="border border-blue-500/15 bg-blue-500/[.035] rounded p-3">
-                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/70 pb-2 mb-2">
+                                <div className="rounded-lg border border-blue-500/15 bg-blue-950/20 p-4">
+                                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/70 pb-3">
                                     <div className="min-w-0">
-                                      <span className="text-[8.5px] font-bold text-blue-400 uppercase tracking-widest block">DNA da Palavra Principal</span>
-                                      <div className="flex items-center gap-3 min-w-0">
-                                        <span className="text-[12px] font-bold text-slate-100 truncate">{art.keywordPrincipal}</span>
-                                        <span className="text-[10px] text-blue-400 font-mono select-all shrink-0">/{currentSlug}</span>
+                                      <span className="block text-xs font-bold uppercase tracking-widest text-blue-200">DNA da Palavra Principal</span>
+                                      <div className="mt-1 flex min-w-0 items-center gap-3">
+                                        <span className="truncate text-lg font-bold text-slate-50">{art.keywordPrincipal}</span>
+                                        <span className="shrink-0 font-mono text-sm text-blue-200 select-all">/{currentSlug}</span>
                                       </div>
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-2 text-[9.5px]">
-                                      <span className="rounded border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-blue-300 font-bold uppercase tracking-wider">{art.hierarquia}</span>
-                                      <span className="text-slate-400">Volume <strong className="text-slate-200 font-mono">{(art.volume || 0).toLocaleString("pt-BR")}</strong></span>
-                                      <span className="text-slate-400">Intencao <strong className="text-slate-200">{art.intent || "Informativo"}</strong></span>
-                                      <span className="text-slate-400">KGR <strong className="text-emerald-400 font-mono">{art.kgr != null ? Number(art.kgr).toFixed(3) : "-"}</strong></span>
+                                    <div className="flex flex-wrap items-center gap-3 text-sm">
+                                      <span className="rounded-md border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-blue-100 font-semibold uppercase tracking-wide">{art.hierarquia}</span>
+                                      <span className="text-slate-400">Volume <strong className="font-mono text-slate-100">{(art.volume || 0).toLocaleString("pt-BR")}</strong></span>
+                                      <span className="text-slate-400">Intenção <strong className="text-slate-100">{art.intent || "Informativo"}</strong></span>
+                                      <span className="text-slate-400">KGR <strong className="font-mono text-emerald-200">{art.kgr != null ? Number(art.kgr).toFixed(3) : "-"}</strong></span>
                                     </div>
                                   </div>
 
                                   {art.isPublished && (
-                                    <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/[.06] p-2.5">
-                                      <p className="text-[8.5px] font-bold uppercase tracking-widest text-amber-300">{articleIdentityContext.principalProtected ? "KEYWORD PRINCIPAL PROTEGIDA" : "IDENTIDADE PUBLICADA PROTEGIDA"}</p>
-                                      <p className="mt-1 text-[9px] leading-relaxed text-amber-100/80">{articleIdentityContext.principalProtected ? "A principal está confirmada; a SERP só fortalece o artigo ao redor dela." : "A URL está publicada, mas a principal ainda é candidata ou a arquitetura está pendente; a principal pode ser revisada na cópia de trabalho."}</p>
-                                      <div className="mt-1 space-y-0.5 text-[8px] text-slate-500"><p>Modo: <span className="text-slate-300">{serpAssessmentModeLabel(articleIdentityContext.mode)}</span></p><p>URL publicada: <span className="text-slate-300">{publicationUrlFor(art) || "não recebida"}</span></p><p>Slug: <span className="text-slate-300">/{art.slug}</span> · Canonical: <span className="text-slate-300">{publicationCanonical || "não recebida"}</span></p></div>
-                                      {articleIdentityContext.kgrIdentityProtected && <p className="mt-1 text-[8px] font-bold uppercase tracking-wider text-emerald-300">KGR confirmado · keyword principal e slug vinculados</p>}
+                                    <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-950/30 p-3">
+                                      <p className="text-xs font-bold uppercase tracking-widest text-amber-200">{articleIdentityContext.principalProtected ? "KEYWORD PRINCIPAL PROTEGIDA" : "IDENTIDADE PUBLICADA PROTEGIDA"}</p>
+                                      <p className="mt-1 text-sm leading-6 text-amber-100/90">{articleIdentityContext.principalProtected ? "A principal está confirmada; a SERP só fortalece o artigo ao redor dela." : "A URL está publicada, mas a principal ainda é candidata ou a arquitetura está pendente; a principal pode ser revisada na cópia de trabalho."}</p>
+                                      <div className="mt-2 space-y-1 text-sm leading-6 text-slate-400"><p>Modo: <span className="text-slate-100">{serpAssessmentModeLabel(articleIdentityContext.mode)}</span></p><p>URL publicada: <span className="text-slate-100">{publicationUrlFor(art) || "não recebida"}</span></p><p>Slug: <span className="text-slate-100">/{art.slug}</span> · Canonical: <span className="text-slate-100">{publicationCanonical || "não recebida"}</span></p></div>
+                                      {articleIdentityContext.kgrIdentityProtected && <p className="mt-2 text-xs font-bold uppercase tracking-wider text-emerald-200">KGR confirmado · keyword principal e slug vinculados</p>}
                                     </div>
                                   )}
 
                                   {art.analiseSemantica && Object.keys(art.analiseSemantica).length > 0 ? (
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[9.5px]">
+                                    <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-3">
                                       {art.analiseSemantica.perfil_b2b && (
-                                        <div className="bg-[#06070a]/60 rounded p-1.5 border border-slate-900">
-                                          <span className="text-slate-600 font-bold uppercase tracking-wider text-[7.5px] block mb-0.5">Nicho / Perfil</span>
+                                        <div className="rounded-md border border-slate-800/70 bg-slate-950/40 p-3">
+                                          <span className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Nicho / Perfil</span>
                                           <p className="text-slate-300 leading-relaxed">{art.analiseSemantica.perfil_b2b}</p>
                                         </div>
                                       )}
                                       {art.analiseSemantica.emocao_dominante && (
-                                        <div className="bg-[#06070a]/60 rounded p-1.5 border border-slate-900">
-                                          <span className="text-slate-600 font-bold uppercase tracking-wider text-[7.5px] block mb-0.5">Dor / Objecao</span>
+                                        <div className="rounded-md border border-slate-800/70 bg-slate-950/40 p-3">
+                                          <span className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Dor / Objeção</span>
                                           <p className="text-slate-300 leading-relaxed">{art.analiseSemantica.emocao_dominante}</p>
                                         </div>
                                       )}
                                       {art.analiseSemantica.nivel_consciencia && (
-                                        <div className="bg-[#06070a]/60 rounded p-1.5 border border-slate-900">
-                                          <span className="text-slate-600 font-bold uppercase tracking-wider text-[7.5px] block mb-0.5">Nivel de Consciencia</span>
+                                        <div className="rounded-md border border-slate-800/70 bg-slate-950/40 p-3">
+                                          <span className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Nível de Consciência</span>
                                           <p className="text-slate-300 leading-relaxed">{art.analiseSemantica.nivel_consciencia}</p>
                                         </div>
                                       )}
                                     </div>
                                   ) : (
-                                    <span className="text-[9.5px] text-slate-650 italic">Sem DNA semantico disponivel para a keyword principal.</span>
+                                    <span className="text-sm text-text-muted italic">Sem DNA semântico disponível para a keyword principal.</span>
                                   )}
                                   {renderSerpRecommendationForKeyword(art, art.mainKeywordObj?.id, art.keywordPrincipal)}
                                 </div>
                                 {art.supportKeywords.length === 0 ? (
-                                  <span className="text-[10px] text-slate-655 italic">Nenhuma keyword secundária de suporte vinculada a este artigo.</span>
+                                  <span className="text-sm text-text-muted italic">Nenhuma keyword secundária de suporte vinculada a este artigo.</span>
                                 ) : (
-                                  <div className="border border-slate-800/40 rounded overflow-hidden">
-                                    <table className="w-full text-left text-[10px] border-collapse bg-[#06070a]/20">
+                                  <div className="overflow-hidden rounded-lg border border-slate-800/60">
+                                    <table className="w-full border-collapse bg-slate-950/30 text-left text-sm">
                                       <thead>
-                                        <tr className="bg-[#0b0c10]/40 text-slate-600 font-bold uppercase tracking-wider text-[8px] border-b border-slate-900/50">
-                                          <th className="py-1.5 px-3 w-6"></th>
-                                          <th className="py-1.5 px-3">Keyword</th>
-                                          <th className="py-1.5 px-3 w-20">Volume</th>
-                                          <th className="py-1.5 px-3 w-24">Intenção</th>
-                                          <th className="py-1.5 px-3 w-16">KGR</th>
-                                          <th className="py-1.5 px-3 w-24">Hierarquia</th>
-                                          <th className="py-1.5 px-3 w-20 text-right">Acao</th>
+                                        <tr className="border-b border-slate-800/70 bg-slate-900/60 text-xs font-bold uppercase tracking-wider text-slate-400">
+                                          <th className="w-10 px-3 py-3"></th>
+                                          <th className="px-3 py-3">Keyword</th>
+                                          <th className="w-20 px-3 py-3">Volume</th>
+                                          <th className="w-24 px-3 py-3">Intenção</th>
+                                          <th className="w-16 px-3 py-3">KGR</th>
+                                          <th className="w-24 px-3 py-3">Hierarquia</th>
+                                          <th className="w-20 px-3 py-3 text-right">Ação</th>
                                         </tr>
                                       </thead>
                                       <tbody>
@@ -3261,29 +3511,29 @@ export default function ArquitetoPage() {
                                           const keywordColor = SUPPORT_KEYWORD_COLORS[skIndex % SUPPORT_KEYWORD_COLORS.length];
                                           return (
                                             <React.Fragment key={sk.id}>
-                                              <tr className={`border-l-4 ${keywordColor.stripe} border-b border-slate-900/30 hover:brightness-125 transition-colors ${keywordColor.row}`}>
+                                              <tr className={`border-l-4 ${keywordColor.stripe} border-b border-slate-800/50 transition-colors hover:bg-slate-800/50 ${keywordColor.row}`}>
                                                 
                                                 {/* Chevron do DNA Semântico da Keyword */}
-                                                <td className="py-1 px-3">
+                                                <td className="px-3 py-2.5">
                                                   <button onClick={() => toggleExpandKw(sk.id)}
-                                                    className="text-slate-600 hover:text-slate-300 transition-colors cursor-pointer">
+                                                    className={`${ARCHITECT_UI.iconButton} min-h-8 min-w-8 border-transparent`}>
                                                     {isKwExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                                                   </button>
                                                 </td>
 
-                                                <td className="py-1 px-3 align-top"><div className="font-semibold text-slate-300">{sk.keyword}</div>{renderSerpRecommendationForKeyword(art, sk.id, sk.keyword)}</td>
-                                                <td className="py-1 px-3 text-slate-400 font-mono">{(sk.volume_search || 0).toLocaleString("pt-BR")}</td>
-                                                <td className="py-1 px-3 text-slate-400">{sk.intent || "Informativo"}</td>
-                                                <td className="py-1 px-3 font-mono">
-                                                  <span className={(sk.kgr || 0) < 0.25 ? "text-emerald-400" : (sk.kgr || 0) < 1 ? "text-amber-450" : "text-rose-455"}>
+                                                <td className="px-3 py-2.5 align-top"><div className="text-base font-semibold text-slate-100">{sk.keyword}</div>{renderSerpRecommendationForKeyword(art, sk.id, sk.keyword)}</td>
+                                                <td className="px-3 py-2.5 font-mono text-slate-300">{(sk.volume_search || 0).toLocaleString("pt-BR")}</td>
+                                                <td className="px-3 py-2.5 text-slate-300">{sk.intent || "Informativo"}</td>
+                                                <td className="px-3 py-2.5 font-mono">
+                                                  <span className={(sk.kgr || 0) < 0.25 ? "text-success" : (sk.kgr || 0) < 1 ? "text-warning" : "text-danger"}>
                                                     {sk.kgr != null ? Number(sk.kgr).toFixed(3) : "—"}
                                                   </span>
                                                 </td>
-                                                <td className="py-1 px-3 text-slate-500 font-semibold">{sk.computedHierarquia}</td>
-                                                <td className="py-1 px-3 text-right">
+                                                <td className="px-3 py-2.5 font-semibold text-slate-400">{sk.computedHierarquia}</td>
+                                                <td className="px-3 py-2.5 text-right">
                                                   <button
                                                     onClick={() => handleDetachSupportKeyword(sk)}
-                                                    className="text-slate-600 hover:text-rose-400 transition-colors cursor-pointer p-1"
+                                                    className={`${ARCHITECT_UI.iconButton} min-h-8 min-w-8 border-transparent hover:text-rose-300`}
                                                     title="Remover keyword secundaria deste artigo sem apagar o registro"
                                                   >
                                                     <Unlink className="w-3.5 h-3.5 inline" />
@@ -3297,23 +3547,23 @@ export default function ArquitetoPage() {
                                                   <td colSpan={7} className="py-2.5 px-8">
                                                     {sk.analise_semantica && Object.keys(sk.analise_semantica).length > 0 ? (
                                                       <div className="flex flex-col gap-2">
-                                                        <span className="text-[8.5px] font-bold text-indigo-400 uppercase tracking-widest">DNA Semântico da Keyword</span>
-                                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[9.5px]">
+                                                        <span className="text-[8.5px] font-bold text-context-accent uppercase tracking-widest">DNA Semântico da Keyword</span>
+                                                        <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-3">
                                                           {sk.analise_semantica.perfil_b2b && (
-                                                            <div className={`bg-[#06070a]/60 rounded p-1.5 border ${keywordColor.border}`}>
-                                                              <span className="text-slate-600 font-bold uppercase tracking-wider text-[7.5px] block mb-0.5">Perfil Público B2B</span>
+                                                            <div className={`rounded-md border bg-slate-950/40 p-3 ${keywordColor.border}`}>
+                                                              <span className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Perfil Público B2B</span>
                                                               <p className="text-slate-300 leading-relaxed">{sk.analise_semantica.perfil_b2b}</p>
                                                             </div>
                                                           )}
                                                           {sk.analise_semantica.emocao_dominante && (
-                                                            <div className={`bg-[#06070a]/60 rounded p-1.5 border ${keywordColor.border}`}>
-                                                              <span className="text-slate-600 font-bold uppercase tracking-wider text-[7.5px] block mb-0.5">Dor / Emoção Dominante</span>
+                                                            <div className={`rounded-md border bg-slate-950/40 p-3 ${keywordColor.border}`}>
+                                                              <span className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Dor / Emoção Dominante</span>
                                                               <p className="text-slate-300 leading-relaxed">{sk.analise_semantica.emocao_dominante}</p>
                                                             </div>
                                                           )}
                                                           {sk.analise_semantica.nivel_consciencia && (
-                                                            <div className={`bg-[#06070a]/60 rounded p-1.5 border ${keywordColor.border}`}>
-                                                              <span className="text-slate-600 font-bold uppercase tracking-wider text-[7.5px] block mb-0.5">Nível de Consciência</span>
+                                                            <div className={`rounded-md border bg-slate-950/40 p-3 ${keywordColor.border}`}>
+                                                              <span className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">Nível de Consciência</span>
                                                               <p className="text-slate-300 leading-relaxed">{sk.analise_semantica.nivel_consciencia}</p>
                                                             </div>
                                                           )}
@@ -3337,17 +3587,17 @@ export default function ArquitetoPage() {
 
                             {/* ── ABA 2: DNA DO ARTIGO (Briefing Estratégico) ── */}
                             {activeTab === "dna" && (
-                              <div className="bg-[#06070a]/40 border border-slate-800/40 rounded p-4 flex flex-col gap-3.5">
+                              <div className="flex flex-col gap-3.5 rounded border border-divider bg-surface-subtle p-4">
                                 <div className="flex justify-between items-center pb-2 border-b border-slate-900">
                                   <div>
-                                    <span className="text-[9.5px] font-bold text-teal-400 uppercase tracking-widest block">Metadados e Diretrizes de Briefing</span>
+                                  <span className="block text-xs font-medium uppercase tracking-wider text-teal-300">Metadados e Diretrizes de Briefing</span>
                                     <span className="text-slate-500 text-[9px]">Consolidação estratégica do cluster/artigo</span>
                                   </div>
 
                                   <button
                                     onClick={() => handleSaveArticleDna(art)}
                                     disabled={savingBriefingId === art.briefingId}
-                                    className="bg-indigo-650 hover:bg-indigo-600 disabled:opacity-40 text-white font-bold text-[10px] px-3.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5"
+                                    className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-action-accent/60 bg-action-accent px-3 text-sm font-medium text-foreground transition-colors hover:bg-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent/35 disabled:opacity-40"
                                     title={art.isPublished ? "Salva apenas campos permitidos; slug, keyword e Silo ficam intactos" : "Salvar DNA"}
                                   >
                                     {savingBriefingId === art.briefingId && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
@@ -3359,8 +3609,8 @@ export default function ArquitetoPage() {
                                   {/* Meta Title */}
                                   <div className="flex flex-col gap-1.5">
                                     <div className="flex justify-between">
-                                      <label className="text-[8.5px] font-bold text-slate-500 uppercase tracking-wider">Meta Title (SEO)</label>
-                                      <span className={`text-[8.5px] font-bold ${(dnaMetaTitles[art.briefingId] || "").length > 60 ? "text-red-500" : "text-slate-655"}`}>
+                                      <label className="text-xs font-medium uppercase tracking-wider text-slate-400">Meta Title (SEO)</label>
+                                      <span className={`text-xs font-medium ${(dnaMetaTitles[art.briefingId] || "").length > 60 ? "text-rose-300" : "text-slate-500"}`}>
                                         {(dnaMetaTitles[art.briefingId] || "").length}/60
                                       </span>
                                     </div>
@@ -3369,7 +3619,7 @@ export default function ArquitetoPage() {
                                       value={dnaMetaTitles[art.briefingId] || ""}
                                       onChange={e => setDnaMetaTitles(p => ({ ...p, [art.briefingId]: e.target.value }))}
                                       disabled={art.isPublished}
-                                      className="w-full bg-[#06070a] border border-slate-850 rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-slate-750 disabled:text-slate-500"
+                                      className="w-full rounded-md border border-divider bg-surface-subtle px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-module-accent/45 focus:ring-2 focus:ring-module-accent/20 disabled:text-text-muted"
                                       placeholder="Título magnético otimizado..."
                                     />
                                   </div>
@@ -3377,8 +3627,8 @@ export default function ArquitetoPage() {
                                   {/* Meta Description */}
                                   <div className="flex flex-col gap-1.5">
                                     <div className="flex justify-between">
-                                      <label className="text-[8.5px] font-bold text-slate-500 uppercase tracking-wider">Meta Description</label>
-                                      <span className={`text-[8.5px] font-bold ${(dnaMetaDescriptions[art.briefingId] || "").length > 155 ? "text-red-500" : "text-slate-655"}`}>
+                                      <label className="text-xs font-medium uppercase tracking-wider text-slate-400">Meta Description</label>
+                                      <span className={`text-xs font-medium ${(dnaMetaDescriptions[art.briefingId] || "").length > 155 ? "text-rose-300" : "text-slate-500"}`}>
                                         {(dnaMetaDescriptions[art.briefingId] || "").length}/155
                                       </span>
                                     </div>
@@ -3387,46 +3637,46 @@ export default function ArquitetoPage() {
                                       value={dnaMetaDescriptions[art.briefingId] || ""}
                                       onChange={e => setDnaMetaDescriptions(p => ({ ...p, [art.briefingId]: e.target.value }))}
                                       disabled={art.isPublished}
-                                      className="w-full bg-[#06070a] border border-slate-850 rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-slate-750 disabled:text-slate-500"
+                                       className="w-full rounded-md border border-divider bg-surface-subtle px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-module-accent/45 focus:ring-2 focus:ring-module-accent/20 disabled:text-text-muted"
                                       placeholder="Resumo focado em cliques (CTR)..."
                                     />
                                   </div>
 
                                   {/* Ângulo de Venda */}
                                   <div className="flex flex-col gap-1">
-                                    <label className="text-[8.5px] font-bold text-slate-500 uppercase tracking-wider">💡 Ângulo de Venda Sugerido</label>
+                                    <label className="text-xs font-medium uppercase tracking-wider text-slate-400">💡 Ângulo de Venda Sugerido</label>
                                     <textarea
                                       rows={3}
                                       value={dnaAngulosVenda[art.briefingId] || ""}
                                       onChange={e => setDnaAngulosVenda(p => ({ ...p, [art.briefingId]: e.target.value }))}
                                       disabled={art.isPublished}
-                                      className="w-full bg-[#06070a] border border-slate-850 rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-slate-750 disabled:text-slate-500 resize-none font-sans text-[11px]"
+                                       className="w-full resize-none rounded-md border border-divider bg-surface-subtle px-2.5 py-1.5 font-sans text-sm text-foreground outline-none focus:border-module-accent/45 focus:ring-2 focus:ring-module-accent/20 disabled:text-text-muted"
                                       placeholder="Defina como o artigo deve se posicionar para converter o leitor..."
                                     />
                                   </div>
 
                                   {/* CTA */}
                                   <div className="flex flex-col gap-1">
-                                    <label className="text-[8.5px] font-bold text-slate-500 uppercase tracking-wider">⚡ Chamada Para Ação (CTA)</label>
+                                    <label className="text-xs font-medium uppercase tracking-wider text-slate-400">⚡ Chamada Para Ação (CTA)</label>
                                     <textarea
                                       rows={3}
                                       value={dnaCTAs[art.briefingId] || ""}
                                       onChange={e => setDnaCTAs(p => ({ ...p, [art.briefingId]: e.target.value }))}
                                       disabled={art.isPublished}
-                                      className="w-full bg-[#06070a] border border-slate-850 rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-slate-750 disabled:text-slate-500 resize-none font-sans text-[11px]"
+                                       className="w-full resize-none rounded-md border border-divider bg-surface-subtle px-2.5 py-1.5 font-sans text-sm text-foreground outline-none focus:border-module-accent/45 focus:ring-2 focus:ring-module-accent/20 disabled:text-text-muted"
                                       placeholder="Ex: Baixar planilha, agendar consulta..."
                                     />
                                   </div>
 
                                   {/* Anti-Canibalização */}
                                   <div className="flex flex-col gap-1 sm:col-span-2">
-                                    <label className="text-[8.5px] font-bold text-slate-500 uppercase tracking-wider">🛡️ Ângulo Anti-Canibalização</label>
+                                    <label className="text-xs font-medium uppercase tracking-wider text-slate-400">🛡️ Ângulo Anti-Canibalização</label>
                                     <textarea
                                       rows={2}
                                       value={dnaAntiCanibalizacoes[art.briefingId] || ""}
                                       onChange={e => setDnaAntiCanibalizacoes(p => ({ ...p, [art.briefingId]: e.target.value }))}
                                       disabled={art.isPublished}
-                                      className="w-full bg-[#06070a] border border-slate-850 rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-slate-750 disabled:text-slate-500 resize-none font-sans text-[11px]"
+                                       className="w-full resize-none rounded-md border border-divider bg-surface-subtle px-2.5 py-1.5 font-sans text-sm text-foreground outline-none focus:border-module-accent/45 focus:ring-2 focus:ring-module-accent/20 disabled:text-text-muted"
                                       placeholder="Diretrizes para diferenciar este artigo de outros parecidos do ecossistema..."
                                     />
                                   </div>
@@ -3451,19 +3701,23 @@ export default function ArquitetoPage() {
 
       {/* Ações que dependem da seleção ficam sempre no rodapé, fora do scroll da planilha. */}
       {(selectedArticleIds.size > 0 || selectedSiloPageIds.size > 0) && (
-        <footer className="flex shrink-0 items-center justify-between gap-3 overflow-x-auto border-t border-indigo-900/60 bg-[#0b0c10] px-3 py-2 shadow-2xl">
+        <footer className="architect-scrollbar flex min-h-10 shrink-0 items-center justify-between gap-3 overflow-x-auto border-t border-divider bg-surface-elevated px-3 py-2">
           {/* Contadores separados */}
           <div className="flex shrink-0 items-center gap-3">
             {selectedArticleIds.size > 0 && (
               <div className="flex items-center gap-2">
-                <span className="rounded bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white">{selectedArticleIds.size}</span>
-                <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">{selectedArticleIds.size === 1 ? "artigo selecionado" : "artigos selecionados"}</span>
+                <span className="rounded border border-module-accent/35 bg-module-accent/10 px-1.5 py-0.5 text-[11px] font-semibold text-module-accent">{selectedArticleIds.size}</span>
+                <span className="text-sm text-text-muted">
+                  {hiddenSelectedArticleCount > 0
+                    ? `${selectedArticleIds.size} selecionados · ${visibleSelectedArticleCount} visíveis`
+                    : selectedArticleIds.size === 1 ? "artigo selecionado" : "artigos selecionados"}
+                </span>
               </div>
             )}
             {selectedSiloPageIds.size > 0 && (
               <div className="flex items-center gap-2">
-                <span className="rounded bg-teal-600 px-2 py-0.5 text-[10px] font-bold text-white">{selectedSiloPageIds.size}</span>
-                <span className="text-[9px] font-semibold uppercase tracking-wider text-teal-400">{selectedSiloPageIds.size === 1 ? "página de silo selecionada" : "páginas de silo selecionadas"}</span>
+                <span className="rounded border border-module-accent/35 bg-module-accent/10 px-1.5 py-0.5 text-sm font-semibold text-module-accent">{selectedSiloPageIds.size}</span>
+                <span className="text-sm text-module-accent">{selectedSiloPageIds.size === 1 ? "página de silo selecionada" : "páginas de silo selecionadas"}</span>
               </div>
             )}
           </div>
@@ -3471,10 +3725,10 @@ export default function ArquitetoPage() {
           {/* Ações contextuais */}
           <div className="flex shrink-0 items-center gap-2">
             {/* Status dropdown — funciona para artigos e SiloPages */}
-            <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+            <label className="flex items-center gap-1.5 text-sm font-medium text-text-muted">
               Status
               <select value={selectedStatusAction} onChange={event => void changeSelectedArticleStatus(event.target.value)} disabled={generatingStrategic}
-                className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[10px] font-semibold normal-case text-slate-300 outline-none hover:border-indigo-700 disabled:opacity-40">
+                className={`${ARCHITECT_UI.footerButton} font-normal`}>
                 <option value="" disabled>Mudar status…</option>
                 <option value="awaiting_approval">Enviar para aprovação</option>
                 <option value="approved">Aprovar propostas</option>
@@ -3487,41 +3741,41 @@ export default function ArquitetoPage() {
               <>
                 <button onClick={handleRevalidateStructure} disabled={generatingStrategic}
                   title="Revisar somente se cada keyword faz sentido no artigo atual; publicados e silos existentes têm prioridade"
-                  className="flex items-center gap-1 rounded border border-violet-900/60 px-3 py-1.5 text-[10px] font-semibold text-violet-300 hover:border-violet-700 disabled:opacity-40">
+                  className={`${ARCHITECT_UI.footerButton} border-warning/45 text-warning hover:border-warning`}>
                   {activeKeywordReviewTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}
                   {activeKeywordReviewTask ? "Agrupando keywords…" : "Agrupar keywords em artigos (IA)"}
                 </button>
-                <button onClick={() => handlePipelineStep("Gerar DNA dos Artigos")} disabled={generatingStrategic} className="flex items-center gap-1 rounded border border-indigo-900/60 px-3 py-1.5 text-[10px] font-semibold text-indigo-300 hover:border-indigo-700 disabled:opacity-40">{activeArticleDnaTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}{activeArticleDnaTask ? "Detectando ArticleDNA…" : "Detectar viés · ArticleDNA (IA)"}</button>
-                <button onClick={() => handlePipelineStep("Gerar DNA dos Silos")} disabled={generatingStrategic} className="flex items-center gap-1 rounded border border-emerald-900/60 px-3 py-1.5 text-[10px] font-semibold text-emerald-300 hover:border-emerald-700 disabled:opacity-40">{activeSiloDnaTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}{activeSiloDnaTask ? "Detectando SiloDNA…" : "Detectar viés · SiloDNA (IA)"}</button>
-                <button onClick={openSerpPreview} disabled={generatingStrategic || serpBusy} className="flex items-center gap-1 rounded border border-cyan-900/60 px-3 py-1.5 text-[10px] font-semibold text-cyan-300 hover:border-cyan-700 disabled:opacity-40" title="Ação explícita: uma consulta textual por keyword selecionada">{serpBusy ? <Loader2 className="h-3 w-3 animate-spin"/> : <Search className="h-3 w-3"/>}Validar agrupamento pela SERP</button>
-                <button onClick={handleDeleteSelectedNonPublished} className="flex items-center gap-1 rounded border border-rose-900/60 px-3 py-1.5 text-[10px] font-semibold text-rose-400 hover:border-rose-700"><Trash2 className="h-3 w-3"/>Apagar novos</button>
+                <button onClick={() => handlePipelineStep("Gerar DNA dos Artigos")} disabled={generatingStrategic} className={`${ARCHITECT_UI.footerButton} border-module-accent/45 text-module-accent hover:border-module-accent`}>{activeArticleDnaTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}{activeArticleDnaTask ? "Detectando ArticleDNA…" : "Detectar viés · ArticleDNA (IA)"}</button>
+                <button onClick={() => handlePipelineStep("Gerar DNA dos Silos")} disabled={generatingStrategic} className={`${ARCHITECT_UI.footerButton} border-success/40 text-success hover:border-success`}>{activeSiloDnaTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}{activeSiloDnaTask ? "Detectando SiloDNA…" : "Detectar viés · SiloDNA (IA)"}</button>
+                <button onClick={openSerpPreview} disabled={generatingStrategic || serpBusy} className={`${ARCHITECT_UI.footerButton} border-context-accent/45 text-context-accent hover:border-context-accent`} title="Ação explícita: uma consulta textual por keyword selecionada">{serpBusy ? <Loader2 className="h-3 w-3 animate-spin"/> : <Search className="h-3 w-3"/>}Validar agrupamento pela SERP</button>
+                <button onClick={handleDeleteSelectedNonPublished} className={`${ARCHITECT_UI.footerButton} border-danger/45 text-danger hover:border-danger`}><Trash2 className="h-3 w-3"/>Apagar novos</button>
               </>
             )}
 
             {/* Ação exclusiva de SiloPage — só aparece quando apenas SiloPages estão selecionadas */}
             {selectedSiloPageIds.size > 0 && selectedArticleIds.size === 0 && (
-              <button onClick={handleGenerateSelectedSiloPagesWithIA} disabled={generatingStrategic} className="flex items-center gap-1 rounded border border-teal-900/60 px-3 py-1.5 text-[10px] font-semibold text-teal-300 hover:border-teal-700 disabled:opacity-40" title="Detectar viés · Página do Silo (IA)">{activeSiloPageTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}{activeSiloPageTask ? "Detectando Página…" : "Detectar viés · Página do Silo (IA)"}</button>
+              <button onClick={handleGenerateSelectedSiloPagesWithIA} disabled={generatingStrategic} className={`${ARCHITECT_UI.footerButton} border-module-accent/45 text-module-accent hover:border-module-accent`} title="Detectar viés · Página do Silo (IA)">{activeSiloPageTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}{activeSiloPageTask ? "Detectando Página…" : "Detectar viés · Página do Silo (IA)"}</button>
             )}
 
             {/* Ações de IA separadas quando ambos estão selecionados */}
             {selectedArticleIds.size > 0 && selectedSiloPageIds.size > 0 && (
               <>
-                <button onClick={() => handlePipelineStep("Gerar DNA dos Artigos")} disabled={generatingStrategic} className="flex items-center gap-1 rounded border border-indigo-900/60 px-3 py-1.5 text-[10px] font-semibold text-indigo-300 hover:border-indigo-700 disabled:opacity-40">{activeArticleDnaTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}ArticleDNA · {selectedArticleIds.size} artigo(s)</button>
-                <button onClick={handleGenerateSelectedSiloPagesWithIA} disabled={generatingStrategic} className="flex items-center gap-1 rounded border border-teal-900/60 px-3 py-1.5 text-[10px] font-semibold text-teal-300 hover:border-teal-700 disabled:opacity-40">{activeSiloPageTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}Página do Silo · {selectedSiloPageIds.size} página(s)</button>
+                <button onClick={() => handlePipelineStep("Gerar DNA dos Artigos")} disabled={generatingStrategic} className={`${ARCHITECT_UI.footerButton} border-module-accent/45 text-module-accent hover:border-module-accent`}>{activeArticleDnaTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}ArticleDNA · {selectedArticleIds.size} artigo(s)</button>
+                <button onClick={handleGenerateSelectedSiloPagesWithIA} disabled={generatingStrategic} className={`${ARCHITECT_UI.footerButton} border-module-accent/45 text-module-accent hover:border-module-accent`}>{activeSiloPageTask ? <Loader2 className="h-3 w-3 animate-spin"/> : <Zap className="h-3 w-3"/>}Página do Silo · {selectedSiloPageIds.size} página(s)</button>
               </>
             )}
 
             {/* Enviar ao Radar — sempre disponível */}
-            <button onClick={sendSelectedToRadar} className="flex items-center gap-1 rounded border border-cyan-900/60 px-3 py-1.5 text-[10px] font-semibold text-cyan-300 hover:border-cyan-700"><ArrowRight className="h-3 w-3"/>Enviar ao Radar</button>
-            <button onClick={() => { setSelectedArticleIds(new Set()); setSelectedSiloPageIds(new Set()); }} className="rounded border border-slate-800 px-3 py-1.5 text-[10px] text-slate-500 hover:text-slate-300">Limpar seleção</button>
+            <button onClick={sendSelectedToRadar} className={`${ARCHITECT_UI.footerButton} border-context-accent/45 text-context-accent hover:border-context-accent`}><ArrowRight className="h-3 w-3"/>Enviar ao Radar</button>
+            <button onClick={() => { setSelectedArticleIds(new Set()); setSelectedSiloPageIds(new Set()); lastSelectionAnchorId.current = null; }} className={ARCHITECT_UI.footerButton}>Limpar seleção</button>
           </div>
         </footer>
       )}
 
       {serpPreview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-lg rounded border border-cyan-900/70 bg-[#0b0c10] shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3"><div><p className="text-[10px] font-bold uppercase tracking-widest text-cyan-300">Validar agrupamento pela SERP</p><p className="mt-1 text-[9px] text-slate-500">Ação explícita · nenhuma consulta foi feita ainda</p></div><button onClick={() => setSerpPreview(null)} className="text-slate-500 hover:text-white"><X className="h-4 w-4"/></button></div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4">
+          <div className="w-full max-w-lg rounded border border-divider bg-surface-elevated shadow-2xl">
+            <div className="flex items-center justify-between border-b border-divider px-4 py-3"><div><p className="text-sm font-bold uppercase tracking-widest text-context-accent">Validar agrupamento pela SERP</p><p className="mt-1 text-sm text-text-muted">Ação explícita · nenhuma consulta foi feita ainda</p></div><button onClick={() => setSerpPreview(null)} className="text-text-muted hover:text-foreground"><X className="h-4 w-4"/></button></div>
             <div className="space-y-2 px-4 py-4 text-[10px] text-slate-300">
               <p><span className="text-slate-500">Artigos selecionados:</span> {serpPreview.groups.length}</p>
               <p><span className="text-slate-500">Keywords/consultas previstas:</span> {serpPreview.queryCount}</p>
@@ -3539,16 +3793,14 @@ export default function ArquitetoPage() {
 
       <WorkflowImportDialog
         open={keywordImportOpen}
-        title="Importar keywords aprovadas do Minerador"
-        description="Todos os itens aprovados e publicados do Minerador aparecem aqui. Selecione os novos; itens sem silo entram como candidatos sem classificação, enquanto importados e publicados permanecem visíveis."
+        title="Importar keywords do Minerador"
+        description="A elegibilidade é verificada no estado canônico da Brand. Keywords aprovadas e publicadas protegidas podem entrar uma única vez no novo fluxo."
         rows={keywordImportPool}
         label={keyword => keyword.keyword}
-        details={keyword => <span className="mt-1 block text-slate-500">{keyword.intent || "Intenção não informada"} · volume {keyword.volume_search || 0} · {keyword.siloName || "Sem silo/categoria"}</span>}
-        disabled={keyword => keyword.status === "publicado" || effectiveImportedKeywordIdsForUi.has(keyword.id)}
-        disabledReason={keyword => keyword.status === "publicado"
-          ? "Publicado e já incorporado como âncora protegida"
-          : "Já importado no Arquiteto"}
-        status={keyword => keyword.status === "publicado" ? "published" : effectiveImportedKeywordIdsForUi.has(keyword.id) ? "sent_architect" : "approved"}
+        details={keyword => <span className="mt-1 block text-slate-500">{keyword.intent || "Intenção não informada"} · volume {keyword.volume_search || 0} · {keyword.siloName || "Sem silo/categoria"}{(keyword.importability === CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED || !canEnterCanonicalArchitectWorkflow(keyword)) && <span className="mt-1 block text-amber-300">{importabilityReason(keyword)}</span>}</span>}
+        disabled={keyword => !canEnterCanonicalArchitectWorkflow(keyword)}
+        disabledReason={keyword => importabilityReason(keyword)}
+        status={keyword => importabilityStatus(keyword)}
         loading={loadingKeywords}
         error={keywordImportError}
         onRetry={() => fetchMasterList()}
@@ -3561,48 +3813,48 @@ export default function ArquitetoPage() {
         onCancel={() => setPendingDangerAction(null)} onConfirm={confirmDangerAction}/>}
 
       {isListModalOpen && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0b0c10] border border-slate-800 w-full max-w-sm rounded shadow-2xl">
-            <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-              <span className="font-bold text-[10px] text-white uppercase tracking-wider">Criar Novo Silo</span>
-              <button onClick={() => setIsListModalOpen(false)} className="text-slate-500 hover:text-white cursor-pointer">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4">
+          <div className="w-full max-w-sm rounded border border-divider bg-surface-elevated shadow-2xl">
+              <div className="flex items-center justify-between border-b border-divider px-4 py-3">
+              <span className="text-sm font-semibold uppercase tracking-wider text-foreground">Criar Novo Silo</span>
+              <button onClick={() => setIsListModalOpen(false)} className="cursor-pointer text-text-muted hover:text-foreground">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <form onSubmit={handleCreateList} className="p-4 flex flex-col gap-4">
-              <section className="flex flex-col gap-3 rounded border border-indigo-900/50 bg-indigo-950/10 p-3">
-                <div><p className="text-[9px] font-bold uppercase tracking-wider text-indigo-300">Estratégia do silo</p><p className="mt-1 text-[9px] text-slate-500">O nome e a entidade central definem o SiloDNA. A entidade não vira automaticamente keyword principal de artigo.</p></div>
+              <section className="flex flex-col gap-3 rounded border border-divider bg-surface-subtle p-3">
+                <div><p className="text-sm font-semibold uppercase tracking-wider text-context-accent">Estratégia do silo</p><p className="mt-1 text-sm text-text-muted">O nome e a entidade central definem o SiloDNA. A entidade não vira automaticamente keyword principal de artigo.</p></div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Nome do silo</label>
-                  <input type="text" required placeholder="Ex: Captação de pacientes" value={newListName} onChange={e => setNewListName(e.target.value)} className="w-full bg-[#06070a] border border-slate-800 rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-650 text-xs" />
+                  <label className="text-sm font-semibold uppercase tracking-wider text-text-muted">Nome do silo</label>
+                  <input type="text" required placeholder="Ex: Captação de pacientes" value={newListName} onChange={e => setNewListName(e.target.value)} className="w-full rounded-md border border-divider bg-surface-subtle px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-module-accent/45 focus:ring-2 focus:ring-module-accent/20" />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Keyword ou entidade central</label>
-                  <input type="text" required placeholder="Ex: captação de pacientes para clínicas" value={newListCentralEntity} onChange={e => setNewListCentralEntity(e.target.value)} className="w-full bg-[#06070a] border border-slate-800 rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-650 text-xs" />
-                  <p className="text-[8px] text-slate-600">Se existir uma KeywordDNA correspondente no Arquiteto, a referência real será preservada. Caso contrário, será apenas entidade manual.</p>
+                  <label className="text-sm font-semibold uppercase tracking-wider text-text-muted">Keyword ou entidade central</label>
+                  <input type="text" required placeholder="Ex: captação de pacientes para clínicas" value={newListCentralEntity} onChange={e => setNewListCentralEntity(e.target.value)} className="w-full rounded-md border border-divider bg-surface-subtle px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-module-accent/45 focus:ring-2 focus:ring-module-accent/20" />
+                  <p className="text-sm text-text-muted">Se existir uma KeywordDNA correspondente no Arquiteto, a referência real será preservada. Caso contrário, será apenas entidade manual.</p>
                 </div>
               </section>
-              <section className="flex flex-col gap-3 rounded border border-teal-900/50 bg-teal-950/10 p-3">
-                <div><p className="text-[9px] font-bold uppercase tracking-wider text-teal-300">Página do silo</p><p className="mt-1 text-[9px] text-slate-500">SiloDNA e SiloPage têm versões e aprovações independentes.</p></div>
-                <label className="flex items-center gap-2 text-[10px] text-slate-300"><input type="checkbox" checked={createSiloPage} onChange={e => setCreateSiloPage(e.target.checked)} className="accent-teal-500" />Criar também a Página do Silo</label>
+              <section className="flex flex-col gap-3 rounded border border-module-accent/25 bg-module-accent/10 p-3">
+                <div><p className="text-sm font-semibold uppercase tracking-wider text-module-accent">Página do silo</p><p className="mt-1 text-sm text-text-muted">SiloDNA e SiloPage têm versões e aprovações independentes.</p></div>
+                <label className="flex items-center gap-2 text-sm text-foreground/80"><input type="checkbox" checked={createSiloPage} onChange={e => setCreateSiloPage(e.target.checked)} className="accent-module-accent" />Criar também a Página do Silo</label>
                 {createSiloPage && <>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Slug</label>
-                    <input type="text" required placeholder="/captacao-de-pacientes" value={newSiloPageSlug} onChange={e => setNewSiloPageSlug(e.target.value)} className="w-full bg-[#06070a] border border-slate-800 rounded px-2.5 py-1.5 font-mono text-slate-200 focus:outline-none focus:border-teal-650 text-xs" />
-                    <p className="text-[8px] text-slate-600">Use o caminho iniciado por `/`. URL completa não é aceita neste campo.</p>
+                    <label className="text-sm font-semibold uppercase tracking-wider text-text-muted">Slug</label>
+                    <input type="text" required placeholder="/captacao-de-pacientes" value={newSiloPageSlug} onChange={e => setNewSiloPageSlug(e.target.value)} className="w-full rounded-md border border-divider bg-surface-subtle px-2.5 py-1.5 font-mono text-sm text-foreground outline-none focus:border-module-accent/45 focus:ring-2 focus:ring-module-accent/20" />
+                    <p className="text-sm text-text-muted">Use o caminho iniciado por `/`. URL completa não é aceita neste campo.</p>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Situação de publicação</span>
-                    <div className="flex gap-3 text-[10px] text-slate-300"><label className="flex items-center gap-1.5"><input type="radio" name="silo-publication-status" checked={newSiloPagePublicationStatus === "new"} onChange={() => setNewSiloPagePublicationStatus("new")} className="accent-teal-500" />Novo</label><label className="flex items-center gap-1.5"><input type="radio" name="silo-publication-status" checked={newSiloPagePublicationStatus === "published"} onChange={() => setNewSiloPagePublicationStatus("published")} className="accent-teal-500" />Publicado</label></div>
+                    <span className="text-sm font-semibold uppercase tracking-wider text-text-muted">Situação de publicação</span>
+                    <div className="flex gap-3 text-sm text-foreground/80"><label className="flex items-center gap-1.5"><input type="radio" name="silo-publication-status" checked={newSiloPagePublicationStatus === "new"} onChange={() => setNewSiloPagePublicationStatus("new")} className="accent-module-accent" />Novo</label><label className="flex items-center gap-1.5"><input type="radio" name="silo-publication-status" checked={newSiloPagePublicationStatus === "published"} onChange={() => setNewSiloPagePublicationStatus("published")} className="accent-module-accent" />Publicado</label></div>
                   </div>
-                  {newSiloPagePublicationStatus === "published" && <div className="flex flex-col gap-1"><label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">URL publicada</label><input type="url" required placeholder="https://site.com/captacao-de-pacientes" value={newSiloPagePublishedUrl} onChange={e => setNewSiloPagePublishedUrl(e.target.value)} className="w-full bg-[#06070a] border border-slate-800 rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-teal-650 text-xs" /><p className="text-[8px] text-amber-400">A URL será preservada e iniciará como Não verificada. Nenhuma confirmação online será inferida.</p></div>}
+                  {newSiloPagePublicationStatus === "published" && <div className="flex flex-col gap-1"><label className="text-sm font-semibold uppercase tracking-wider text-text-muted">URL publicada</label><input type="url" required placeholder="https://site.com/captacao-de-pacientes" value={newSiloPagePublishedUrl} onChange={e => setNewSiloPagePublishedUrl(e.target.value)} className="w-full rounded-md border border-divider bg-surface-subtle px-2.5 py-1.5 text-sm text-foreground outline-none focus:border-module-accent/45 focus:ring-2 focus:ring-module-accent/20" /><p className="text-sm text-warning">A URL será preservada e iniciará como Não verificada. Nenhuma confirmação online será inferida.</p></div>}
                 </>}
               </section>
               <div className="flex justify-end gap-2 mt-1">
                 <button type="button" onClick={() => setIsListModalOpen(false)}
-                  className="border border-slate-800 text-slate-400 font-bold py-1.5 px-3 rounded text-xs cursor-pointer hover:bg-slate-900">Cancelar</button>
+                  className="inline-flex min-h-8 items-center rounded border border-divider bg-surface-subtle px-3 py-1.5 text-sm font-medium text-text-muted transition-colors hover:border-module-accent/30 hover:bg-surface-elevated hover:text-foreground cursor-pointer">Cancelar</button>
                 <button type="submit" disabled={saving}
-                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold py-1.5 px-4 rounded text-xs flex items-center gap-1 cursor-pointer">
+                  className="inline-flex min-h-8 items-center gap-1 rounded-md border border-action-accent/60 bg-action-accent px-4 py-1.5 text-sm font-semibold text-foreground transition-colors hover:bg-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent/35 disabled:opacity-40 cursor-pointer">
                   {saving && <Loader2 className="w-3 h-3 animate-spin" />} Criar
                 </button>
               </div>

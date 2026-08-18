@@ -137,6 +137,27 @@ A hierarquia do silo é recebida do Arquiteto e exibida como Pilar/Suporte, orde
 
 O pacote aditivo `RadarEvidencePackage.kgrStrategy` carrega classificação, origem, principal, volume, KGR, alinhamento, composição, volumes declarados, aviso de sobreposição, hierarquia, proteção de publicação e papéis recebidos. Não carrega outline final, metas obrigatórias, CTA, densidade ou alteração dos DNAs.
 
+## Relatorio competitivo e contexto do Planejador
+
+O Radar pode consolidar um `RadarCompetitiveReport` versionado dentro do payload da analise e do `RadarEvidencePackage`, sem nova tabela ou migration. O relatorio referencia explicitamente RadarItem, ArticleDNA, SiloDNA, SerpSnapshot e a versao da analise; seu hash e proveniencia participam do pacote aprovado.
+
+O relatorio organiza workflow, respostas e perguntas observadas, concorrentes diretos/parciais/por formato, perfil comparavel, metricas min/max/media/mediana, semantica, entidades, ruido, links, elementos visuais e necessidades competitivas. Paginas editoriais completas sao a unica amostra do benchmark; videos, parciais e formatos incompativeis permanecem visiveis e fora da media. Frequencia de keyword so e registrada quando sustentada pelo payload e nunca vira meta de densidade.
+
+A sintese de resposta e curta, rastreavel e nao e copy. Necessidades e observacoes chegam ao Planejador como contexto; o Planejador continua decidindo outline, metas, CTA, links, estilo visual e ContentPlan. Aprovar o Radar consolida o relatorio na versao imutavel; qualquer mudanca posterior exige sucessora.
+
 ## Recebimento da SERP de formação do Arquiteto
 
 Na importação de um ArticleDNA aprovado, o Radar pode receber `arquitetoKeywordDnaReferences`, `arquitetoKeywordUrlRelations`, `arquitetoArchitectureStatus`, `arquitetoKgrIdentity` e `arquitetoSerpAssessment` opcionais. Eles preservam a evidência de compatibilidade, relação keyword↔URL, arquitetura e identidade KGR recebidas do Arquiteto; não substituem a coleta/profundidade do Radar. A UI e o workflow do Radar não tomam decisão automática a partir deles.
+
+
+## Fluxo organizado por modo — 2026-07-29
+
+O detalhe do Radar apresenta cinco áreas canônicas: Resumo, Selecionar referências, Análise da amostra, Relatório e Histórico. Os antigos recortes de SERP, concorrentes, estrutura, semântica e curadoria permanecem como responsabilidades dentro dessas áreas, sem criar novas entidades ou alterar o contrato de persistência.
+
+O modo é mostrado antes da investigação. KGR recebido sugere KGR leve; classificação não-KGR sugere Competitivo completo; ausência de KGR permanece explícita. A pessoa pode substituir a sugestão, registrar o motivo e iniciar a investigação usando o snapshot disponível. Abrir o Radar não coleta SERP automaticamente.
+
+No KGR leve, a seleção é uma amostra leve de referências e não exige concorrente direto. No Competitivo completo, a seleção prioriza concorrentes diretos e amostra de três a cinco páginas comparáveis quando disponíveis. O artigo próprio pode aparecer como estado atual, mas nunca entra como concorrente ou benchmark; vídeos, redes sociais e formatos não editoriais aparecem como referências de formato e ficam fora da média estrutural.
+
+O fluxo comum é: SERP coletada → Referências selecionadas → Páginas analisadas → Relatório gerado → Relatório aprovado → Enviado ao Planejador. Cada resultado orgânico possui uma única função: referência principal, apoio, formato, conteúdo próprio ou excluído. `Usar como referência` e `Usar como apoio` entram automaticamente na fila; a extração ocorre somente pela ação coletiva `Analisar referências selecionadas (N)`, e páginas já analisadas não são reprocessadas sem decisão explícita de atualização. A próxima ação é única e deriva do estado real.
+
+Termos centrais recebidos do ArticleDNA/SiloDNA são exibidos como confirmados. Termos observados só aparecem para decisão quando há repetição, relevância, lacuna ou relação com a estratégia. Navegação, legal, plataforma e baixa recorrência ficam em Termos ignorados automaticamente, com recuperação manual. A interface usa Aguardando decisão, Considerar, Usar como apoio e Ignorar, sem expor pending como estado de usuário.

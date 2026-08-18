@@ -6,7 +6,7 @@ import {
   KeywordReviewFocusGroupSchema,
   LogicalKeywordRecommendationSchema,
 } from "@/lib/arquiteto/contracts";
-import { assertCanAccessMarca, requireSessionProfile, authzErrorResponse } from "@/lib/server/authz";
+import { assertCanAccessMarca, requireCanonicalSessionProfile, authzErrorResponse } from "@/lib/server/authz";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { CompactProviderResponseSchema } from "@/lib/arquiteto/keyword-review-provider";
 
@@ -44,7 +44,7 @@ Retorne apenas JSON valido no contrato compacto solicitado. Nada e aplicado ou a
 
 export async function POST(req: Request) {
   try {
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
     const parsed = RequestSchema.safeParse(await req.json());
     if (!parsed.success) {
       return NextResponse.json({ success: false, error: "Lote compacto de keywords invalido.", issues: parsed.error.flatten() }, { status: 400 });
@@ -170,7 +170,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, data: review });
   } catch (error) {
     if (error instanceof StructuredAIError) {
-      return NextResponse.json({ success: false, error: error.message, issues: error.issues }, { status: error.status });
+      return NextResponse.json({ success: false, error: error.message, code: error.code, issues: error.issues }, { status: error.status });
     }
     const mapped = authzErrorResponse(error);
     return NextResponse.json({ success: false, error: mapped.message }, { status: mapped.status });

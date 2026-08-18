@@ -15,8 +15,23 @@ export const ManualSignupSchema = z.object({
 
 export type ManualSignupInput = z.infer<typeof ManualSignupSchema>;
 
+export const InvitedSignupSchema = z.object({
+  password: z.string().min(MANUAL_PASSWORD_MIN_LENGTH, `A senha deve ter pelo menos ${MANUAL_PASSWORD_MIN_LENGTH} caracteres.`),
+  passwordConfirmation: z.string().min(1, "Confirme sua senha."),
+}).superRefine((value, context) => {
+  if (value.password !== value.passwordConfirmation) {
+    context.addIssue({ code: "custom", path: ["passwordConfirmation"], message: "As senhas não coincidem." });
+  }
+});
+
+export type InvitedSignupInput = z.infer<typeof InvitedSignupSchema>;
+
 export function parseManualSignupInput(input: unknown): ManualSignupInput {
   return ManualSignupSchema.parse(input);
+}
+
+export function parseInvitedSignupInput(input: unknown): InvitedSignupInput {
+  return InvitedSignupSchema.parse(input);
 }
 
 export function mapManualSignupError(status: number, payload: unknown): string {

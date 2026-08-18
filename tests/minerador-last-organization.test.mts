@@ -39,6 +39,12 @@ test("preferência inválida ou silo inexistente retorna a organização segura 
   assert.deepEqual(normalizeMineradorLastOrganization(null), defaultMineradorOrganization);
 });
 
+test("o padrão mostra todas e migra o operational histórico sem apagar a preferência local", () => {
+  assert.equal(defaultMineradorOrganization.filterVolumeEligibility, "Todos");
+  assert.equal(normalizeMineradorLastOrganization({ filterVolumeEligibility: "operational" }, []).filterVolumeEligibility, "Todos");
+  assert.equal(normalizeMineradorLastOrganization({ filterVolumeEligibility: "operational", organizationStorageVersion: 2 }, []).filterVolumeEligibility, "operational");
+});
+
 test("a página restaura fora de Organizar e não usa o leitor compartilhado destrutivo", () => {
   assert.equal(page.includes("CompactSavedViews"), false);
   assert.match(page, /MineradorLastOrganizationRestorer/);
@@ -46,6 +52,9 @@ test("a página restaura fora de Organizar e não usa o leitor compartilhado des
   assert.match(page, /mineradorOrganizationButtonSummary\(organizeFilterLabels\)/);
   assert.match(page, /organizationHydrationPending/);
   assert.match(page, /title=\{organizeFilterLabels\.length > 3/);
+  assert.match(page, /filterVolumeEligibility[\s\S]*useState[\s\S]*\("Todos"\)/);
+  assert.match(page, /setFilterVolumeEligibility\("Todos"\)/);
+  assert.match(page, /Nenhuma keyword corresponde aos filtros atuais/);
   assert.equal(restorer.includes("removeItem"), false);
   assert.equal(restorer.includes("setTimeout"), false);
   assert.match(restorer, /useLayoutEffect/);

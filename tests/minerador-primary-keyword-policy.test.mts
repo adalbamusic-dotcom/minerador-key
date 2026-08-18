@@ -10,6 +10,7 @@ const page = readFileSync(new URL("../modules/minerador/minerador-workspace.tsx"
 test("não publicado permanece com principal livre e publicado legado permanece travado", () => {
   assert.equal(readPrimaryKeywordPolicy({ status: "bruto", semantic: {} }), "free");
   assert.equal(readPrimaryKeywordPolicy({ status: "publicado", semantic: {} }), "locked");
+  assert.equal(primaryKeywordPolicyLabel("free"), "Keyword livre");
   assert.equal(primaryKeywordPolicyLabel("reviewable"), "Principal revisável");
 });
 

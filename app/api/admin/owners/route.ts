@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { authzErrorResponse, requireSessionProfile } from "@/lib/server/authz";
+import { authzErrorResponse } from "@/lib/server/authz";
+import { requireCanonicalPlatformAdmin } from "@/lib/server/canonical-authorization";
 import { searchAuthUsers } from "@/lib/server/auth-users";
 
 function createServiceClient() {
@@ -12,8 +13,7 @@ function createServiceClient() {
 
 export async function GET(request: Request) {
   try {
-    const profile = await requireSessionProfile();
-    if (!profile.isAdmin) return NextResponse.json({ error: "Apenas administradores podem consultar usuários owner." }, { status: 403 });
+    await requireCanonicalPlatformAdmin();
     const query = new URL(request.url).searchParams.get("q") || "";
     if (query.trim().length < 2) return NextResponse.json({ users: [] });
     return NextResponse.json({ users: await searchAuthUsers(createServiceClient(), query) }, { headers: { "Cache-Control": "no-store" } });

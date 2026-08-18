@@ -1,15 +1,78 @@
 @import "tailwindcss";
 
 :root {
-  --background: #070a13;
+  --background: #131413;
   --foreground: #f3f4f6;
-  --accent: #6366f1;
+  --action-accent: #193cb8;
+  --accent: var(--action-accent);
+  --module-accent: #10DDE0;
+  --context-accent: #12A1E0;
+  --positive-soft: #63F1AF;
+  --highlight: #C8FF00;
+  --success: #1fcb0a;
+  --warning: #f79001;
+  --pending: #E6CE00;
+  --danger: #A61E1E;
+  --divider-dark: #212121;
+  --divider-light: #d1d1d1;
+  --divider: var(--divider-dark);
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: color-mix(in srgb, var(--divider-light) 42%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--divider-light) 58%, transparent);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--divider-light) 72%, transparent);
+  --scrollbar-corner: var(--background);
+  --surface: color-mix(in srgb, var(--background) 92%, var(--foreground) 8%);
+  --surface-subtle: color-mix(in srgb, var(--background) 96%, var(--foreground) 4%);
+  --surface-elevated: color-mix(in srgb, var(--background) 86%, var(--foreground) 14%);
+  --text: var(--foreground);
+  --text-muted: color-mix(in srgb, var(--foreground) 64%, var(--background) 36%);
+  --border: color-mix(in srgb, var(--foreground) 18%, transparent);
+  --focus: var(--context-accent);
+  --selected: color-mix(in srgb, var(--context-accent) 16%, transparent);
+  --success-soft: color-mix(in srgb, var(--success) 18%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 18%, transparent);
+  --pending-soft: color-mix(in srgb, var(--pending) 18%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+[data-theme="light"],
+.light {
+  --background: #f3f4f6;
+  --foreground: #131413;
+  --divider: var(--divider-light);
+  --scrollbar-thumb: color-mix(in srgb, var(--divider-dark) 30%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--divider-dark) 46%, transparent);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--divider-dark) 62%, transparent);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-action-accent: var(--action-accent);
   --color-accent: var(--accent);
+  --color-module-accent: var(--module-accent);
+  --color-context-accent: var(--context-accent);
+  --color-positive-soft: var(--positive-soft);
+  --color-highlight: var(--highlight);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-pending: var(--pending);
+  --color-danger: var(--danger);
+  --color-divider: var(--divider);
+  --color-divider-dark: var(--divider-dark);
+  --color-divider-light: var(--divider-light);
+  --color-surface: var(--surface);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-border: var(--border);
+  --color-focus: var(--focus);
+  --color-selected: var(--selected);
+  --color-success-soft: var(--success-soft);
+  --color-warning-soft: var(--warning-soft);
+  --color-pending-soft: var(--pending-soft);
+  --color-danger-soft: var(--danger-soft);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
 }
@@ -20,9 +83,56 @@ body {
   font-family: var(--font-sans);
   min-height: 100vh;
   background-image: 
-    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.05) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.05) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(44, 44, 44, 0.05) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(49, 49, 49, 0.05) 0px, transparent 50%);
   background-attachment: fixed;
+}
+
+html {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+@media (max-width: 1023px) {
+  [data-product-shell] {
+    --minerador-sidebar-width: 0px;
+  }
+}
+
+*, *::before, *::after {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background: var(--scrollbar-thumb-active);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--scrollbar-corner);
 }
 
 .professional-editor .ProseMirror { min-height: 60vh; outline: none; font-size: 16px; line-height: 1.75; }
@@ -33,10 +143,10 @@ body {
 .professional-editor .ProseMirror p { margin: .75rem 0; }
 .professional-editor .ProseMirror ul { margin: .75rem 0; list-style: disc; padding-left: 1.5rem; }
 .professional-editor .ProseMirror ol { margin: .75rem 0; list-style: decimal; padding-left: 1.5rem; }
-.professional-editor .ProseMirror blockquote { margin: 1rem 0; border-left: 3px solid #6366f1; padding-left: 1rem; color: #475569; }
+.professional-editor .ProseMirror blockquote { margin: 1rem 0; border-left: 3px solid #193cb8; padding-left: 1rem; color: #475569; }
 .professional-editor .ProseMirror table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 .professional-editor .ProseMirror th,.professional-editor .ProseMirror td { border: 1px solid #cbd5e1; padding: .5rem; vertical-align: top; }
 .professional-editor .ProseMirror .selectedCell { background: #eef2ff; }
 .professional-editor .ProseMirror p.is-editor-empty:first-child::before { color: #94a3b8; content: attr(data-placeholder); float: left; height: 0; pointer-events: none; }
-.editorial-special-block { margin: 1rem 0; border: 1px dashed #818cf8; border-radius: .5rem; background: #eef2ff; padding: .75rem; color: #312e81; }
-.editorial-comment { border-bottom: 2px solid #f59e0b; background: #fef3c7; }
+.editorial-special-block { margin: 1rem 0; border: 1px dashed #81bff8; border-radius: .5rem; background: #eef2ff; padding: .75rem; color: #312e81; }
+.editorial-comment { border-bottom: 2px solid #E6CE00; background: #fef3c7; }

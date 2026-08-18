@@ -2,7 +2,7 @@ export const SUPABASE_TOKEN_REFRESH_MARGIN_SECONDS = 60;
 
 export const SUPABASE_SESSION_REASONS = [
   "SESSION_LOADING",
-  "NEXTAUTH_SESSION_MISSING",
+  "SUPABASE_SESSION_MISSING",
   "GOOGLE_ID_TOKEN_MISSING",
   "SUPABASE_GOOGLE_EXCHANGE_FAILED",
   "SUPABASE_ACCESS_TOKEN_MISSING",
@@ -26,7 +26,7 @@ export function getSupabaseSessionErrorMessage(reason: SupabaseSessionFailureRea
   if (reason === "SUPABASE_ACCESS_TOKEN_MISSING" || reason === "SUPABASE_REFRESH_TOKEN_MISSING") {
     return "A sessão de dados ainda não está pronta. Saia e entre novamente para continuar.";
   }
-  if (reason === "NEXTAUTH_SESSION_MISSING") return "Sua sessão não foi encontrada. Entre novamente para continuar.";
+  if (reason === "SUPABASE_SESSION_MISSING") return "Sua sessão não foi encontrada. Entre novamente para continuar.";
   if (reason === "SUPABASE_TOKEN_INVALID_CLAIMS") return "A sessão de dados recebida é inválida. Entre novamente.";
   return "A sessão de dados está sendo preparada. Tente novamente em instantes.";
 }

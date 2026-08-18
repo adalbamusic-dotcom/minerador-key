@@ -49,13 +49,21 @@ export function tenantModuleFromPathname(pathname: string): TenantRouteModule | 
   return (match[2] || "marca") as TenantRouteModule;
 }
 
+/**
+ * Keeps only query state that is meaningful to a tenant navigation handoff.
+ * The result is never treated as authorization or as a route authority.
+ */
+export function safeTenantNavigationSearch(search: string) {
+  const query = new URLSearchParams(search.replace(/^\?/, ""));
+  const preserved = new URLSearchParams();
+  for (const [key, value] of query) if (safeSwitchQuery.has(key)) preserved.append(key, value);
+  const result = preserved.toString();
+  return result ? `?${result}` : "";
+}
+
 export function switchTenantPath(input: { targetBrand: { brandId: string; brandName: string }; pathname: string; search?: string; allowedModules?: readonly TenantRouteModule[] }) {
   const currentModule = tenantModuleFromPathname(input.pathname);
   const targetModule = currentModule && (!input.allowedModules || input.allowedModules.includes(currentModule)) ? currentModule : "marca";
-  const query = new URLSearchParams(input.search?.replace(/^\?/, "") || "");
-  const preserved = new URLSearchParams();
-  for (const [key, value] of query) if (safeSwitchQuery.has(key)) preserved.append(key, value);
   const target = buildTenantPath({ ...input.targetBrand, module: targetModule });
-  const suffix = preserved.toString();
-  return suffix ? `${target}?${suffix}` : target;
+  return `${target}${safeTenantNavigationSearch(input.search || "")}`;
 }

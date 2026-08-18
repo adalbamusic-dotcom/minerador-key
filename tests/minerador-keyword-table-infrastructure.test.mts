@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+const workspace = readFileSync(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
+const discovery = readFileSync(new URL("../modules/minerador/discovery/discovery-table-placeholder.tsx", import.meta.url), "utf8");
+const shell = readFileSync(new URL("../modules/minerador/keyword-table/keyword-table-shell.tsx", import.meta.url), "utf8");
+const header = readFileSync(new URL("../modules/minerador/keyword-table/keyword-table-header.tsx", import.meta.url), "utf8");
+const selection = readFileSync(new URL("../modules/minerador/keyword-table/keyword-table-selection.tsx", import.meta.url), "utf8");
+const empty = readFileSync(new URL("../modules/minerador/keyword-table/keyword-table-empty-state.tsx", import.meta.url), "utf8");
+const bulk = readFileSync(new URL("../modules/minerador/keyword-table/keyword-table-bulk-bar-shell.tsx", import.meta.url), "utf8");
+test("Processador preserva infraestrutura e usa o executor DataForSEO sem a Extensão", () => { assert.match(workspace, /KeywordTableShell/); assert.match(workspace, /useKeywordTableSelection/); assert.doesNotMatch(workspace, /handleMeasureAllintitleSelection|startAllintitleMeasurement|window\.postMessage/); assert.match(workspace, /handleBatchAllintitle/); assert.match(workspace, /dataforseo\/allintitle/); assert.match(workspace, /someSelectedHaveAllintitle/); assert.match(workspace, /Medir\/Atualizar resultados/); assert.match(workspace, /handleBatchQualify/); });
+test("infraestrutura compartilhada permanece neutra", () => { for (const source of [shell, header, selection, empty, bulk]) assert.doesNotMatch(source, /allintitle|Google Ads|KGR|Arquiteto|Supabase|persist/i); assert.match(selection, /data-keyword-selection-handle/); });
+test("o dock inferior não rola e a tabela mantém seu scroll horizontal legítimo", () => { assert.match(bulk, /overflow-hidden/); assert.doesNotMatch(bulk, /overflow(?:-[xy])?-(?:auto|scroll)/); assert.match(shell, /overflow-x-auto overflow-y-visible/); });
+test("Descoberta usa colunas contratadas sem workflow do Processador", () => { for (const column of ["Keyword", "Relação", "Resultados", "Volume", "Histórico", "CPC", "Concorrência Ads", "Intenção preliminar", "Funil preliminar", "Targeting", "Situação"]) assert.match(discovery, new RegExp(column)); assert.match(discovery, /KeywordTableBulkBarShell/); assert.match(discovery, /useKeywordTableSelection/); assert.doesNotMatch(discovery, /Principal|KGR|Silo\/Categoria|Status editorial|supabase|DiscoveryRun|createGoogleAds/); assert.match(discovery, /dataforseo\/allintitle/); assert.match(discovery, /someSelectedHaveAllintitle/); assert.match(discovery, /Medir\/Atualizar resultados/); assert.match(discovery, /\/discovery\/import/); });
+test("Descoberta prioriza Keyword sem alterar o grid do Processador", () => {
+  assert.match(discovery, /discoveryColumnWidths/);
+  assert.match(discovery, /w-\[380px\]/);
+  assert.match(discovery, /min-w-\[1442px\]/);
+  assert.match(discovery, /useKeywordTableResponsiveWidths/);
+  assert.match(discovery, /keywordCell/);
+  assert.match(discovery, /title=\{candidate\.keyword\}/);
+  assert.match(discovery, /auxiliaryCell/);
+  assert.match(selection, /w-8/);
+  assert.doesNotMatch(workspace, /discoveryColumnWidths|w-\[380px\]/);
+});

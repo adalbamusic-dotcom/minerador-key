@@ -25,7 +25,7 @@ function readHistory(value: unknown): PrimaryKeywordPolicyHistoryEntry[] {
 }
 
 export function primaryKeywordPolicyLabel(policy: PrimaryKeywordPolicy): string {
-  return ({ locked: "Principal travada", reviewable: "Principal revisável", free: "Principal livre" } as const)[policy];
+  return ({ locked: "Principal travada", reviewable: "Principal revisável", free: "Keyword livre" } as const)[policy];
 }
 
 export function setPrimaryKeywordPolicy(

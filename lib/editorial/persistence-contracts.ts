@@ -64,8 +64,8 @@ export const LocalWorkflowRecoverySchema = z.object({
 });
 export type LocalWorkflowRecovery = z.infer<typeof LocalWorkflowRecoverySchema>;
 
-export function workflowRecoveryStorageKey(brandId: string) {
-  return `minerador-pro:workflow-recovery:${brandId}`;
+export function workflowRecoveryStorageKey(actorUserId: string, brandId: string) {
+  return `minerador-pro:workflow-recovery:${actorUserId}:${brandId}`;
 }
 
 export const WorkflowCommandSchema = z.discriminatedUnion("action", [

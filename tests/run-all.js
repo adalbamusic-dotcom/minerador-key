@@ -81,50 +81,6 @@ async function api(method, apiPath, body) {
   }
 }
 
-// Extrai os cookies "name=value" de uma resposta fetch (Node 18+ undici)
-function extractCookies(res) {
-  const raw = typeof res.headers.getSetCookie === 'function'
-    ? res.headers.getSetCookie()
-    : (res.headers.get('set-cookie') ? [res.headers.get('set-cookie')] : []);
-  return raw.map(c => c.split(';')[0].trim()).filter(c => c.includes('='));
-}
-
-// Faz login via NextAuth (credentials provider) e devolve o cookie de sessao.
-// Robusto: nao depende de cookie colado manualmente (que expira).
-async function loginViaNextAuth(email, password) {
-  // 1. Obtem CSRF token + cookie de csrf
-  const csrfRes = await fetch(`${API_BASE}/api/auth/csrf`, { method: 'GET' });
-  if (!csrfRes.ok) return null;
-  const { csrfToken } = await csrfRes.json();
-  const csrfCookies = extractCookies(csrfRes);
-  const csrfCookie = csrfCookies.find(c => c.startsWith('next-auth.csrf-token')) || '';
-
-  // 2. POST credentials com o cookie de csrf
-  const form = new URLSearchParams({
-    csrfToken,
-    email,
-    password,
-    callbackUrl: '/',
-    json: 'true',
-  });
-  const loginRes = await fetch(`${API_BASE}/api/auth/callback/credentials`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      ...(csrfCookie ? { Cookie: csrfCookie } : {}),
-    },
-    body: form.toString(),
-    redirect: 'manual',
-  });
-
-  // 3. Captura o cookie de sessao
-  const loginCookies = extractCookies(loginRes);
-  const sessionCookie = loginCookies.find(c => c.startsWith('next-auth.session-token')) || '';
-  if (!sessionCookie) return null;
-  // envia sessao + csrf juntos
-  return [sessionCookie, csrfCookie].filter(Boolean).join('; ');
-}
-
 async function serverUp() {
   const r = await api('GET', '/');
   return r.status !== 0;
@@ -133,19 +89,19 @@ async function serverUp() {
 // Probe seguro (somente leitura): a migration adiciona a coluna volume_source.
 // Se ela existir, os triggers da mesma migration tambem foram criados.
 async function migrationApplied() {
-  const r = await supa('GET', 'keywords_kgr?select=volume_source&limit=1');
+  const r = await supa('GET', 'minerador_keywords?select=volume_source&limit=1');
   return r.status === 200;
 }
 
 async function findPublishedKeyword() {
-  const r = await supa('GET', 'keywords_kgr?status=eq.publicado&select=id,keyword,lista_id&limit=1');
+  const r = await supa('GET', 'minerador_keywords?status=eq.publicado&select=id,keyword,lista_id&limit=1');
   return r.data && r.data[0] ? r.data[0] : null;
 }
 
 async function findMarcaWithPublished() {
   const pub = await findPublishedKeyword();
   if (!pub || !pub.lista_id) return null;
-  const lr = await supa('GET', `listas_kgr?id=eq.${pub.lista_id}&select=marca_id&limit=1`);
+  const lr = await supa('GET', `minerador_keyword_lists?id=eq.${pub.lista_id}&select=marca_id&limit=1`);
   if (lr.data && lr.data[0] && lr.data[0].marca_id) return lr.data[0].marca_id;
   return null;
 }
@@ -162,14 +118,14 @@ function isProtectedError(r) {
 async function testDeletePublishedKeyword() {
   const kw = await findPublishedKeyword();
   if (!kw) return record('1. DELETE de keyword publicada bloqueada', 'skip', 'sem keyword publicada no banco');
-  const r = await supa('DELETE', `keywords_kgr?id=eq.${kw.id}`);
+  const r = await supa('DELETE', `minerador_keywords?id=eq.${kw.id}`);
   record('1. DELETE de keyword publicada bloqueada', isProtectedError(r), `status=${r.status} | ${JSON.stringify(r.data).slice(0, 140)}`);
 }
 
 async function testRebaixamentoBlocked() {
   const kw = await findPublishedKeyword();
   if (!kw) return record('2. Rebaixamento de status publicada bloqueado', 'skip', 'sem keyword publicada');
-  const r = await supa('PATCH', `keywords_kgr?id=eq.${kw.id}`, { status: 'aprovado' });
+  const r = await supa('PATCH', `minerador_keywords?id=eq.${kw.id}`, { status: 'aprovado' });
   record('2. Rebaixamento de status publicada bloqueado', isProtectedError(r), `status=${r.status} | ${JSON.stringify(r.data).slice(0, 140)}`);
 }
 
@@ -177,21 +133,21 @@ async function testMoveSiloBlocked() {
   const kw = await findPublishedKeyword();
   if (!kw) return record('3. Movimentacao de silo de publicada bloqueada', 'skip', 'sem keyword publicada');
   // Tenta mudar lista_id para um uuid inexistente (deve ser bloqueado)
-  const r = await supa('PATCH', `keywords_kgr?id=eq.${kw.id}`, { lista_id: '00000000-0000-0000-0000-000000000000' });
+  const r = await supa('PATCH', `minerador_keywords?id=eq.${kw.id}`, { lista_id: '00000000-0000-0000-0000-000000000000' });
   record('3. Movimentacao de silo de publicada bloqueada', isProtectedError(r), `status=${r.status} | ${JSON.stringify(r.data).slice(0, 140)}`);
 }
 
 async function testAlterKeywordTextBlocked() {
   const kw = await findPublishedKeyword();
   if (!kw) return record('4. Alteracao de keyword textual publicada bloqueada', 'skip', 'sem keyword publicada');
-  const r = await supa('PATCH', `keywords_kgr?id=eq.${kw.id}`, { keyword: `${kw.keyword} __TESTE_PROTECAO__` });
+  const r = await supa('PATCH', `minerador_keywords?id=eq.${kw.id}`, { keyword: `${kw.keyword} __TESTE_PROTECAO__` });
   record('4. Alteracao de keyword textual publicada bloqueada', isProtectedError(r), `status=${r.status} | ${JSON.stringify(r.data).slice(0, 140)}`);
 }
 
 async function testDeleteListaWithPublishedBlocked() {
   const kw = await findPublishedKeyword();
   if (!kw || !kw.lista_id) return record('5. DELETE de lista com publicada bloqueada', 'skip', 'sem lista com publicada');
-  const r = await supa('DELETE', `listas_kgr?id=eq.${kw.lista_id}`);
+  const r = await supa('DELETE', `minerador_keyword_lists?id=eq.${kw.lista_id}`);
   record('5. DELETE de lista com publicada bloqueada', isProtectedError(r), `status=${r.status} | ${JSON.stringify(r.data).slice(0, 140)}`);
 }
 
@@ -227,41 +183,18 @@ async function testDeleteMarcaApi409() {
     return record('13. DELETE /api/marcas com publicada retorna 409', 'skip', 'sem marca com publicada');
   }
 
-  // --- Obtencao de cookie de sessao admin ---
-  // Prioridade: 1) login automatico via NextAuth (TEST_AUTH_EMAIL + TEST_AUTH_PASSWORD)
-  //             2) cookie colado manualmente (TEST_SESSION_COOKIE)
-  //             3) skip
-  const authEmail = process.env.TEST_AUTH_EMAIL || env.TEST_AUTH_EMAIL || '';
-  const authPass = process.env.TEST_AUTH_PASSWORD || env.TEST_AUTH_PASSWORD || '';
+  // A sessao e fornecida explicitamente pelo operador somente quando este
+  // teste remoto opt-in for autorizado. O runner nao tenta autenticar nem
+  // manipula credenciais de identidade.
   const rawCookie = process.env.TEST_SESSION_COOKIE || env.TEST_SESSION_COOKIE || '';
 
-  let cookieHeader = '';
-
-  if (authEmail && authPass) {
-    console.log('Tentando login automatico via NextAuth (TEST_AUTH_EMAIL/TEST_AUTH_PASSWORD)...');
-    const loggedIn = await loginViaNextAuth(authEmail, authPass);
-    if (loggedIn) {
-      cookieHeader = loggedIn;
-      console.log('Login automatico OK: cookie de sessao obtido (tamanho=' + cookieHeader.length + ')');
-    } else {
-      console.log('Login automatico FALHOU (credenciais invalidas ou erro no NextAuth)');
-    }
-  }
-
-  // Fallback: cookie colado manualmente
-  if (!cookieHeader && rawCookie.trim().length > 0) {
-    console.log('TEST_SESSION_COOKIE presente (fallback manual): tamanho=' + rawCookie.trim().length);
-    cookieHeader = rawCookie.trim().replace(/^Cookie:\s*/i, '');
-    if (!cookieHeader.includes('=')) {
-      cookieHeader = `next-auth.session-token=${cookieHeader}`;
-    }
-  }
+  const cookieHeader = rawCookie.trim().replace(/^Cookie:\s*/i, '');
 
   if (!cookieHeader) {
     return record(
       '13. DELETE /api/marcas com publicada retorna 409',
       'skip',
-      'defina TEST_AUTH_EMAIL + TEST_AUTH_PASSWORD (recomendado) ou TEST_SESSION_COOKIE em .env.local'
+      'defina TEST_SESSION_COOKIE com cookies reais da sessao Supabase quando este teste remoto for explicitamente autorizado'
     );
   }
 

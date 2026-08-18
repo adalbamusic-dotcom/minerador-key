@@ -1,6 +1,6 @@
-export type AdminTab = "visao-geral" | "marcas" | "usuarios" | "planos" | "consumo" | "configuracoes";
+export type AdminTab = "visao-geral" | "marcas" | "agencias" | "usuarios" | "planos" | "consumo" | "configuracoes" | "integracoes";
 
-const knownTabs = new Set<AdminTab>(["visao-geral", "marcas", "usuarios", "planos", "consumo", "configuracoes"]);
+const knownTabs = new Set<AdminTab>(["visao-geral", "marcas", "agencias", "usuarios", "planos", "consumo", "configuracoes", "integracoes"]);
 
 export function isAdminTab(value: string | null | undefined): value is AdminTab {
   return Boolean(value && knownTabs.has(value as AdminTab));

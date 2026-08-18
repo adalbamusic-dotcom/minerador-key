@@ -1,8 +1,5 @@
-import { getServerSession } from "next-auth/next";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").toLowerCase();
+import { requireSupabaseUser, SupabaseSessionError } from "@/lib/server/supabase-session";
 
 function serviceClient(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -23,88 +20,66 @@ export class AuthzError extends Error {
   }
 }
 
-export interface SessionProfile {
+export interface CanonicalSessionProfile {
   userId: string;
-  email: string;
   role: "admin" | "cliente";
-  marcaId: string | null;
   isAdmin: boolean;
   supabase: SupabaseClient;
 }
 
-async function buildSessionProfile(identity: { userId: string; email: string }): Promise<SessionProfile> {
-  const email = identity.email.toLowerCase();
+async function buildCanonicalSessionProfile(identity: { userId: string }): Promise<CanonicalSessionProfile> {
   const userId = identity.userId;
 
   let role: "admin" | "cliente" = "cliente";
-  let marcaId: string | null = null;
-  let isAdmin = email === ADMIN_EMAIL;
+  let isAdmin = false;
 
   // A identidade já foi validada pelo provedor de sessão. O perfil continua
   // sendo resolvido no servidor, por ID, e nunca por um valor enviado pelo cliente.
-  if (!isAdmin) {
-    const supabase = serviceClient();
-    const { data: perfil, error } = await supabase
-      .from("perfis")
-      .select("role, marca_id")
-      .eq("id", userId)
-      .single();
+  const supabase = serviceClient();
+  const { data: perfil, error } = await supabase
+    .from("perfis")
+    .select("role")
+    .eq("id", userId)
+    .single();
 
-    if (!error && perfil) {
-      role = perfil.role === "admin" ? "admin" : "cliente";
-      marcaId = perfil.marca_id || null;
-      isAdmin = role === "admin";
-    }
-  } else {
-    role = "admin";
+  if (!error && perfil) {
+    role = perfil.role === "admin" ? "admin" : "cliente";
+    isAdmin = role === "admin";
   }
 
   return {
     userId,
-    email,
     role,
-    marcaId,
     isAdmin,
     supabase: serviceClient(),
   };
 }
 
 /**
- * Exige sessao valida e carrega o perfil do usuario (role + marca_id).
+ * Exige sessao valida e carrega somente o papel global persistido do ator.
  * Lanca AuthzError(401) se nao houver sessao.
  */
-export async function requireSessionProfile(): Promise<SessionProfile> {
-  const session = await getServerSession(authOptions);
-
-  if (!session || !session.user) {
-    throw new AuthzError(401, "Nao autorizado: sessao ausente.");
+export async function requireCanonicalSessionProfile(): Promise<CanonicalSessionProfile> {
+  try {
+    const user = await requireSupabaseUser();
+    return buildCanonicalSessionProfile({ userId: user.id });
+  } catch {
+    throw new AuthzError(401, "Nao autorizado: sessao Supabase ausente.");
   }
-
-  const email = (session.user.email || "").toLowerCase();
-  const userId = session.user.id as string | undefined;
-  const isConfiguredAdmin = email === ADMIN_EMAIL;
-
-  if (!userId && !isConfiguredAdmin) {
-    throw new AuthzError(401, "Nao autorizado: usuario sem id valido.");
-  }
-
-  return buildSessionProfile({ userId: userId || email, email });
 }
 
 /**
  * Resolve um perfil a partir de uma identidade já validada no Supabase Auth.
- * Usado por contratos server-side que recebem Bearer e não possuem cookie NextAuth.
+ * Usado por contratos server-side que recebem uma identidade já validada pelo Supabase.
  */
-export async function requireSessionProfileForIdentity(identity: { userId: string; email?: string | null }): Promise<SessionProfile> {
+export async function requireCanonicalSessionProfileForIdentity(identity: { userId: string }): Promise<CanonicalSessionProfile> {
   if (!identity.userId.trim()) throw new AuthzError(401, "Nao autorizado: usuario sem id valido.");
-  const profile = await buildSessionProfile({ userId: identity.userId, email: identity.email || "" });
-  if (profile.isAdmin) return profile;
-
+  const profile = await buildCanonicalSessionProfile({ userId: identity.userId });
   const profileResult = await profile.supabase.from("perfis").select("id").eq("id", identity.userId).maybeSingle();
   if (profileResult.error && !/does not exist|column/i.test(profileResult.error.message || "")) {
     throw new AuthzError(503, "Nao foi possivel validar o perfil da identidade.");
   }
-  if (profileResult.data || profile.marcaId) return profile;
+  if (profileResult.data) return profile;
 
   const memberships = await profile.supabase
     .from("brand_memberships")
@@ -117,30 +92,20 @@ export async function requireSessionProfileForIdentity(identity: { userId: strin
     throw new AuthzError(503, "Nao foi possivel validar o vinculo da identidade.");
   }
 
-  const legacyMemberships = await profile.supabase
-    .from("brand_memberships")
-    .select("id")
-    .eq("user_key", identity.email?.toLowerCase() || "")
-    .eq("status", "active")
-    .limit(1);
-  if (!legacyMemberships.error && legacyMemberships.data?.length) return profile;
-  if (legacyMemberships.error) throw new AuthzError(503, "Nao foi possivel validar o vinculo da identidade.");
   throw new AuthzError(403, "Identidade sem perfil autorizado.");
 }
 
 /**
  * Valida que o usuario pode acessar a marca informada.
- * Admin pode acessar qualquer marca. Cliente so a sua.
+ * O papel global nunca concede acesso editorial. Owner e membership ativo
+ * continuam sendo os únicos vínculos válidos para uma marca.
  */
 export async function assertCanAccessMarca(
   userId: string,
   marcaId: string,
-  ctx?: SessionProfile
+  ctx?: CanonicalSessionProfile
 ): Promise<void> {
-  const profile = ctx ?? (await requireSessionProfile());
-  if (profile.isAdmin) return;
-  if (profile.marcaId === marcaId) return;
-
+  const profile = ctx ?? (await requireCanonicalSessionProfile());
   const owner = await profile.supabase
     .from("marcas")
     .select("id")
@@ -152,8 +117,6 @@ export async function assertCanAccessMarca(
     throw new AuthzError(503, "Nao foi possivel validar o owner da marca.");
   }
 
-  // Membership can be resolved canonically by auth.users UUID. The legacy
-  // email key is used only when the canonical columns are unavailable.
   const { data: membership, error } = await profile.supabase
     .from("brand_memberships")
     .select("id,status,member_user_id")
@@ -165,14 +128,17 @@ export async function assertCanAccessMarca(
     throw new AuthzError(503, "Nao foi possivel validar o membership da marca.");
   }
 
-  if (!error && !membership) throw new AuthzError(403, "Acesso negado a esta marca.");
-  const legacy = await profile.supabase
-    .from("brand_memberships")
-    .select("id,status")
-    .eq("marca_id", marcaId)
-    .eq("user_key", profile.email.toLowerCase())
-    .maybeSingle();
-  if (!legacy.error && legacy.data?.status === "active") return;
+  const links = await profile.supabase.from("agency_brands").select("agency_id").eq("brand_id", marcaId).eq("status", "active");
+  if (links.error) throw new AuthzError(503, "Nao foi possivel validar o vinculo Agency-Brand.");
+  for (const link of links.data || []) {
+    const agency = await profile.supabase.from("agencies").select("id,owner_user_id,status").eq("id", link.agency_id).eq("status", "active").maybeSingle();
+    if (agency.error) throw new AuthzError(503, "Nao foi possivel validar a Agency.");
+    if (agency.data?.owner_user_id === profile.userId) return;
+    const agencyMembership = await profile.supabase.from("agency_memberships").select("id,status").eq("agency_id", link.agency_id).eq("user_id", profile.userId).maybeSingle();
+    if (agencyMembership.error) throw new AuthzError(503, "Nao foi possivel validar o membership da Agency.");
+    if (agencyMembership.data?.status === "active") return;
+  }
+
   throw new AuthzError(403, "Acesso negado a esta marca.");
 }
 
@@ -184,13 +150,13 @@ export async function assertCanAccessMarca(
 export async function assertKeywordBelongsToMarca(
   keywordId: string,
   marcaId: string,
-  ctx?: SessionProfile
+  ctx?: CanonicalSessionProfile
 ): Promise<void> {
-  const profile = ctx ?? (await requireSessionProfile());
+  const profile = ctx ?? (await requireCanonicalSessionProfile());
   const supabase = profile.supabase;
 
   const { data: kw, error } = await supabase
-    .from("keywords_kgr")
+    .from("minerador_keywords")
     .select("id, lista_id, brand_id")
     .eq("id", keywordId)
     .single();
@@ -203,13 +169,13 @@ export async function assertKeywordBelongsToMarca(
     throw new AuthzError(409, "Keyword sem tenant canônico.");
   }
 
-  if (!profile.isAdmin && kw.brand_id !== marcaId) {
+  if (kw.brand_id !== marcaId) {
     throw new AuthzError(403, "Keyword nao pertence a marca permitida.");
   }
 
   if (kw.lista_id) {
     const { data: lista, error: listaErr } = await supabase
-      .from("listas_kgr")
+      .from("minerador_keyword_lists")
       .select("marca_id")
       .eq("id", kw.lista_id)
       .single();
@@ -230,13 +196,13 @@ export async function assertKeywordBelongsToMarca(
 export async function assertListaBelongsToMarca(
   listaId: string,
   marcaId: string,
-  ctx?: SessionProfile
+  ctx?: CanonicalSessionProfile
 ): Promise<void> {
-  const profile = ctx ?? (await requireSessionProfile());
+  const profile = ctx ?? (await requireCanonicalSessionProfile());
   const supabase = profile.supabase;
 
   const { data: lista, error } = await supabase
-    .from("listas_kgr")
+    .from("minerador_keyword_lists")
     .select("marca_id")
     .eq("id", listaId)
     .single();
@@ -245,7 +211,7 @@ export async function assertListaBelongsToMarca(
     throw new AuthzError(404, "Lista nao encontrada.");
   }
 
-  if (!profile.isAdmin && lista.marca_id !== marcaId) {
+  if (lista.marca_id !== marcaId) {
     throw new AuthzError(403, "Lista nao pertence a marca permitida.");
   }
 }
@@ -256,13 +222,13 @@ export async function assertListaBelongsToMarca(
  */
 export async function assertNotPublishedKeyword(
   keywordId: string,
-  ctx?: SessionProfile
+  ctx?: CanonicalSessionProfile
 ): Promise<void> {
-  const profile = ctx ?? (await requireSessionProfile());
+  const profile = ctx ?? (await requireCanonicalSessionProfile());
   const supabase = profile.supabase;
 
   const { data: kw, error } = await supabase
-    .from("keywords_kgr")
+    .from("minerador_keywords")
     .select("status")
     .eq("id", keywordId)
     .single();
@@ -281,7 +247,7 @@ export async function assertNotPublishedKeyword(
 
 /**
  * Verifica se existe alguma keyword publicada ligada a uma marca
- * (via listas_kgr). Retorna true se existir. Usado para bloquear
+ * (via minerador_keyword_lists). Retorna true se existir. Usado para bloquear
  * exclusao de marca.
  */
 export async function marcaHasPublished(
@@ -292,7 +258,7 @@ export async function marcaHasPublished(
 
   // 1. Busca listas da marca
   const { data: listas } = await client
-    .from("listas_kgr")
+    .from("minerador_keyword_lists")
     .select("id")
     .eq("marca_id", marcaId);
   const listaIds = (listas || []).map((l: { id: string }) => l.id);
@@ -300,7 +266,7 @@ export async function marcaHasPublished(
 
   // 2. Conta keywords publicadas nessas listas
   const { count } = await client
-    .from("keywords_kgr")
+    .from("minerador_keywords")
     .select("id", { count: "exact", head: true })
     .eq("status", "publicado")
     .eq("brand_id", marcaId)
@@ -326,6 +292,9 @@ export async function marcaHasPublished(
  * Helper para responder a um AuthzError em uma rota de API.
  */
 export function authzErrorResponse(err: unknown) {
+  if (err instanceof SupabaseSessionError) {
+    return { status: 401, message: err.message };
+  }
   if (err instanceof AuthzError) {
     return { status: err.status, message: err.message };
   }

@@ -6,7 +6,8 @@ import { normalizeArticleDnaProviderPayload } from "@/lib/arquiteto/article-dna-
 import { guardPublishedArticleProposal } from "@/lib/arquiteto/published-guard";
 import { resolveArticleSerpIdentityContext } from "@/lib/arquiteto/identity-context";
 import { createStatusEvent, createVersionEnvelope } from "@/lib/arquiteto/versioning";
-import { requireSessionProfile, authzErrorResponse } from "@/lib/server/authz";
+import { appendArquitetoArtifact, pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
+import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { MAX_KEYWORDS_PER_ARTICLE } from "@/lib/arquiteto/domain-rules";
 import { inspectArticleFormation } from "@/lib/arquiteto/article-formation-rules";
@@ -43,9 +44,9 @@ Gere um ArticleDNA por grupo:\n${JSON.stringify(compact)}`;
 
 export async function POST(req: Request) {
   try {
-    const profile = await requireSessionProfile();
     const parsed = RequestSchema.safeParse(await req.json());
     if (!parsed.success) return NextResponse.json({ success: false, error: "Grupos invalidos.", issues: parsed.error.flatten() }, { status: 400 });
+    const context = await resolvePipelineContext({ brandId: parsed.data.brand.id, module: "arquiteto", action: "create" });
     if (parsed.data.groups.some(group => group.keywordIds.length > MAX_KEYWORDS_PER_ARTICLE)) {
       return NextResponse.json({ success: false, error: `Reprocesse a logica: nenhum artigo pode ter mais de ${MAX_KEYWORDS_PER_ARTICLE} keywords.` }, { status: 422 });
     }
@@ -102,14 +103,16 @@ export async function POST(req: Request) {
         slug: normalized.suggestedSlug, canonical: normalized.canonical,
         kgrIdentity: identityContext.kgrIdentityProtected ? (group.kgrIdentity || group.keywords.find(keyword => keyword.id === principalId)?.kgrIdentity) : undefined,
       }, normalized);
-      return createVersionEnvelope({ entityId: guarded.proposal.articleId, versionNumber: 1, previousVersionId: null,
-        origin: "ai", changeReason: "Proposta inicial de ArticleDNA.", createdBy: profile.userId, payload: guarded.proposal });
+      const version = await createVersionEnvelope({ entityId: guarded.proposal.articleId, versionNumber: 1, previousVersionId: null,
+        origin: "ai", changeReason: "Proposta inicial de ArticleDNA.", createdBy: context.actorUserId, payload: guarded.proposal });
+      const persisted = await appendArquitetoArtifact(context, "article_dna", version, "proposed");
+      return persisted.version;
     }));
-    const events = versions.map(version => createStatusEvent(version.versionId, "proposed", profile.userId, "Aguardando revisao humana."));
+    const events = versions.map(version => createStatusEvent(version.versionId, "proposed", context.actorUserId, "Aguardando revisao humana."));
     return NextResponse.json({ success: true, data: { versions, events } });
   } catch (error) {
-    if (error instanceof StructuredAIError) return NextResponse.json({ success: false, error: error.message, issues: error.issues }, { status: error.status });
-    const mapped = authzErrorResponse(error);
-    return NextResponse.json({ success: false, error: mapped.message }, { status: mapped.status });
+    if (error instanceof StructuredAIError) return NextResponse.json({ success: false, error: error.message, code: error.code, issues: error.issues }, { status: error.status });
+    const mapped = pipelineArtifactErrorResponse(error);
+    return NextResponse.json(mapped.body, { status: mapped.status });
   }
 }

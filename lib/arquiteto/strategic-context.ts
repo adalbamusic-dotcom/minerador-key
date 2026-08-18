@@ -291,7 +291,7 @@ export function buildArticleControlContext(article: ArticleDNA, options: { publi
       text: referenceKeyword(primary), slug: article.suggestedSlug, canonical: article.canonical, policy: primaryPolicy.policy,
       protected: identity.principalProtected, protectionReason: primaryPolicy.protectionReason,
     },
-    ...(article.kgrIdentity ? { kgr: article.kgrIdentity } : {}), ...(article.keywordStrategy ? { keywordStrategy: article.keywordStrategy } : {}), volume, hierarchy, strategicPurpose,
+    ...(article.kgrIdentity ? { kgr: article.kgrIdentity } : {}), ...(primary.demandEvidence ? { demandEvidence: primary.demandEvidence } : {}), ...(article.keywordStrategy ? { keywordStrategy: article.keywordStrategy } : {}), volume, hierarchy, strategicPurpose,
     unit: unitStrategy.unit,
     serpStrategy: unitStrategy.serpStrategy,
     intent: { primary: unitStrategy.serpStrategy.primaryIntent, sourceKeywordDnaId: primaryKeywordDnaId },

@@ -1,6 +1,8 @@
 import { autoDetectNiche } from "../arquiteto/keyword-dna-engine.ts";
 import { classifyKgrMeasurement, compareKgrRows, readKgrApplicability } from "./kgr-applicability.ts";
 import { normalizeIntentKey } from "./intent-taxonomy.ts";
+import { isOperationallyEligible, readVolumeEligibility, type VolumeEligibilityStatus } from "./volume-eligibility.ts";
+import { applyManualOrder, type KeywordTableOrderMode } from "./manual-order.ts";
 
 export type MineradorTableRow = {
   id: string;
@@ -29,6 +31,9 @@ export type MineradorTableFilters = {
   sitePublication: string;
   kgrApplicability: string;
   kgrMeasurement: string;
+  volumeEligibility?: "Todos" | "operational" | VolumeEligibilityStatus;
+  orderMode?: KeywordTableOrderMode;
+  manualOrderIds?: readonly string[];
   sortColumn: "keyword" | "results_allintitle" | "volume_search" | "kgr_score" | "nicho" | "lista";
   sortDirection: "asc" | "desc";
 };
@@ -58,9 +63,14 @@ export function deriveMineradorTableRows(
   if (filters.sitePublication !== "Todos") result = result.filter(item => siteField(item, "publicationStatus") === filters.sitePublication);
   if (filters.kgrApplicability !== "Todos") result = result.filter(item => readKgrApplicability(item.analise_semantica) === filters.kgrApplicability);
   if (filters.kgrMeasurement !== "Todos") result = result.filter(item => classifyKgrMeasurement({ kgrScore: item.kgr_score, volume: item.volume_search, results: item.results_allintitle }) === filters.kgrMeasurement);
+  const volumeEligibility = filters.volumeEligibility || "Todos";
+  if (volumeEligibility === "operational") result = result.filter(isOperationallyEligible);
+  else if (volumeEligibility !== "Todos") result = result.filter(item => readVolumeEligibility(item) === volumeEligibility);
 
   const query = filters.searchQuery.trim().toLowerCase();
   if (query) result = result.filter(item => item.keyword.toLowerCase().includes(query) || Boolean(item.location?.toLowerCase().includes(query)));
+
+  if (filters.orderMode === "manual") return applyManualOrder(result, filters.manualOrderIds || [], item => item.id);
 
   return result.sort((a, b) => {
     if (filters.sortColumn === "kgr_score") {

@@ -24,6 +24,23 @@ O Supabase Auth é a decisão aprovada para a arquitetura futura (`signUp`, `sig
 
 NextAuth/Auth.js ainda possui consumidores ativos e funciona como ponte atual para sessão do navegador e `session.accessToken` Supabase. A retirada controlada, `@supabase/ssr`, cookies nativos, atualização dos consumidores e smoke test completo permanecem pendentes. `service_role` somente pode existir no servidor; nunca no navegador ou na Extensão.
 
+## Fase preparatória Supabase SSR — 2026-08-05
+
+`@supabase/ssr` está instalado e a infraestrutura local cria clientes browser/server, refresh de cookies no `proxy.ts`, callback PKCE seguro, helper de usuário/claims e logout Supabase. NextAuth ainda é a sessão operacional de todos os consumidores privados; cookies SSR não concedem acesso por si só. Google permanece desativado e seu botão não é renderizado até o smoke completo. Ver `docs/compartilhado/sdd-consolidacao-sessao-supabase-ssr.md`.
+
+## Fase 2C — corte local de sessão e acesso — 2026-08-06
+
+Supabase Auth SSR passou a ser a sessão local operacional. `auth.users.id` é resolvido no servidor; `perfis.role = 'admin'` abre somente a Administração global. Uma marca exige owner em `marcas.owner_user_id` ou `brand_memberships.member_user_id` ativo, além da permissão solicitada. Admin global e membership de agência não produzem acesso editorial por inferência.
+
+`user_key`, `perfis.marca_id` e campos de estado editorial históricos ainda podem existir fisicamente, mas não são fallback de autorização. Sua retirada exige auditoria de consumidores, snapshot e operação remota manual posterior.
+
 ## RLS, roles e permissões
 
 No SQL local, `is_global_admin`, `can_access_brand`, `can_manage_brand`, `can_access_list` e `tenant_actor_has_permission` separam papel global, acesso ao tenant, gestão da marca e ação granular. `brand_roles` diferencia papéis globais (`marca_id` nulo) de papéis por marca; `brand_member_permissions` registra `membership_id + module + action + granted`. `authenticated` opera sob RLS; `anon` não recebe acesso às tabelas privadas nem execução das funções tenantizadas; `service_role` é reservado ao servidor. A compatibilidade legada por `user_key`/e-mail permanece explicitamente identificada no código e no SQL, não é a identidade canônica.
+
+## Correção dos gates globais — 2026-08-17
+
+- **Verificado no código:** `/admin`, `/conta`, `/selecionar-marca` e as rotas tenantizadas redirecionam sessões ausentes ou inválidas para `/login` com `callbackUrl` seguro.
+- **Verificado no código:** `authzErrorResponse` converte `SupabaseSessionError` em HTTP `401`; APIs privadas não tratam ausência de sessão como erro interno `500`.
+- **Confirmado por teste:** suite focada de Auth/tenant passou `25/25`; smoke HTTP local sem cookies confirmou `307` em `/admin`, `/conta`, `/selecionar-marca` e uma rota tenantizada, além de `401` em `/api/marcas?scope=operational`.
+- **Limitação:** não houve login autenticado real, alteração remota, migration, RLS, deploy ou validação de produção nesta tarefa.

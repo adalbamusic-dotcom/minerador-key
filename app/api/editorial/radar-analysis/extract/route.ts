@@ -3,7 +3,7 @@ import { z } from "zod";
 import { VersionedRadarAnalysisSchema } from "@/lib/radar/analysis-contracts";
 import { extractCompetitorPage, CompetitorExtractionError } from "@/lib/radar/competitor-extractor";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
-import { AuthzError, authzErrorResponse, requireSessionProfile } from "@/lib/server/authz";
+import { AuthzError, authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 
 const InputSchema = z.object({
   brandId: z.string().min(1),
@@ -14,7 +14,7 @@ const InputSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
     const input = InputSchema.parse(await request.json());
     await assertEditorialPermission(profile, input.brandId, "radar", "edit");
     if (input.analysis.payload.brandId !== input.brandId || input.analysis.payload.articleId !== input.articleId) throw new AuthzError(409, "A análise não corresponde ao item Radar selecionado.");

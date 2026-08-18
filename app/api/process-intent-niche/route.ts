@@ -1,16 +1,24 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import {
-  requireSessionProfile,
+  requireCanonicalSessionProfile,
   assertCanAccessMarca,
   assertKeywordBelongsToMarca,
   authzErrorResponse,
 } from "@/lib/server/authz";
+import { extractIntentNicheClassification } from "@/lib/minerador/intent-niche-response";
+import { fetchProviderResponse, ProviderRequestError } from "@/lib/arquiteto/provider-client";
+import { resolveOpenRouterCanonicalConfig, OpenRouterCanonicalError } from "@/lib/minerador/openrouter-canonical";
+import { createCanonicalAuthorizationRepository, createCanonicalServiceClient } from "@/lib/server/canonical-authorization";
+import { createIntegrationRuntimeRepository, IntegrationRuntimeError, recordIntegrationUsageForResource } from "@/lib/server/integrations-runtime";
 
 export async function POST(req: Request) {
+  let apiRequestStarted = false;
+  let canonicalAI: Awaited<ReturnType<typeof resolveOpenRouterCanonicalConfig>> | null = null;
+  let canonicalClient: ReturnType<typeof createCanonicalServiceClient> | null = null;
+  const operationRequestId = crypto.randomUUID();
   try {
     // 1. Autenticacao e autorizacao (ownership da keyword por marca)
-    const profile = await requireSessionProfile();
+    const profile = await requireCanonicalSessionProfile();
 
     const { keywordId, keyword, brandId } = await req.json();
     if (!keywordId || !keyword || !brandId) {
@@ -25,36 +33,23 @@ export async function POST(req: Request) {
     await assertCanAccessMarca(profile.userId, brandId, profile);
     await assertKeywordBelongsToMarca(keywordId, brandId, profile);
 
-    let apiKey = process.env.DEEPSEEK_API_KEY;
-    let apiUrl = "https://api.deepseek.com/chat/completions";
-    let model = "deepseek-chat";
-
-    if (!apiKey) {
-      apiKey = process.env.OPENROUTER_API_KEY;
-      if (apiKey) {
-        apiUrl = "https://openrouter.ai/api/v1/chat/completions";
-        model = process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4-pro";
-      }
-    }
-
-    if (!apiKey) {
-      return NextResponse.json(
-        { success: false, error: "Nem DEEPSEEK_API_KEY nem OPENROUTER_API_KEY estão configuradas no seu arquivo .env.local." },
-        { status: 500 }
-      );
-    }
+    canonicalClient = createCanonicalServiceClient();
+    canonicalAI = await resolveOpenRouterCanonicalConfig({
+      client: canonicalClient,
+      actorUserId: profile.userId,
+      brandId,
+      quotaUnits: 1,
+    });
+    const { apiKey, apiUrl, model } = canonicalAI;
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`
+      "Authorization": `Bearer ${apiKey}`,
+      ...canonicalAI.extraHeaders,
     };
 
-    if (apiUrl.includes("openrouter.ai")) {
-      headers["HTTP-Referer"] = "http://localhost:3000";
-      headers["X-Title"] = "Minerador Key";
-    }
-
-    const response = await fetch(apiUrl, {
+    apiRequestStarted = true;
+    const response = await fetchProviderResponse(apiUrl, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -83,32 +78,19 @@ Exemplo de saída esperada:
       })
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Erro na API: ${errorText}`);
-    }
-
     const resData = await response.json();
     const content = resData.choices?.[0]?.message?.content;
     if (!content) {
-      throw new Error("Resposta vazia retornada do modelo de IA.");
+      throw new ProviderRequestError("O provider de IA retornou uma resposta inválida.", 502, "AI_PROVIDER_INVALID_RESPONSE");
     }
 
-    const parsedData = JSON.parse(content);
-    const intent = parsedData.intent;
-    const niche = parsedData.nicho;
-
-    if (!intent || !niche) {
-      throw new Error("O JSON retornado não contém as chaves 'intent' e 'nicho'.");
-    }
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const classification = extractIntentNicheClassification(JSON.parse(content));
+    if (!classification) throw new Error("O JSON retornado não contém uma intenção e um nicho utilizáveis.");
+    const { intent, nicho: niche } = classification;
 
     // 1. Obtém o registro existente para mesclar o nicho_override no analise_semantica
-    const { data: existingWord } = await supabase
-      .from("keywords_kgr")
+    const { data: existingWord } = await profile.supabase
+      .from("minerador_keywords")
       .select("brand_id,analise_semantica")
       .eq("id", keywordId)
       .eq("brand_id", brandId)
@@ -123,8 +105,8 @@ Exemplo de saída esperada:
     };
 
     // 2. Salva no banco de dados Supabase
-    const { error: updateError } = await supabase
-      .from("keywords_kgr")
+    const { error: updateError } = await profile.supabase
+      .from("minerador_keywords")
       .update({
         intent: intent,
         analise_semantica: updatedSemantic
@@ -134,12 +116,51 @@ Exemplo de saída esperada:
 
     if (updateError) throw updateError;
 
+    if (canonicalAI) {
+      await recordIntegrationUsageForResource({
+        resource: canonicalAI.resource,
+        operation: "module_operation",
+        module: "minerador",
+        resultStatus: "succeeded",
+        units: 1,
+        idempotencyKey: `minerador:process-intent-niche:${operationRequestId}`,
+        metadata: { operationRequestId, keywordId, model: canonicalAI.model },
+      }, {
+        repository: createIntegrationRuntimeRepository(canonicalClient),
+        authorizationRepository: createCanonicalAuthorizationRepository(canonicalClient),
+      });
+    }
+
     return NextResponse.json({
       success: true,
       intent,
       nicho: niche
     });
   } catch (err) {
+    if (apiRequestStarted && canonicalAI && canonicalClient) {
+      await recordIntegrationUsageForResource({
+        resource: canonicalAI.resource,
+        operation: "module_operation",
+        module: "minerador",
+        resultStatus: "failed",
+        units: 1,
+        idempotencyKey: `minerador:process-intent-niche:${operationRequestId}`,
+        errorCode: err instanceof Error && "code" in err ? String((err as Error & { code?: unknown }).code) : "AI_PROVIDER_ERROR",
+        metadata: { operationRequestId, model: canonicalAI.model },
+      }, {
+        repository: createIntegrationRuntimeRepository(canonicalClient),
+        authorizationRepository: createCanonicalAuthorizationRepository(canonicalClient),
+      }).catch(() => undefined);
+    }
+    if (err instanceof IntegrationRuntimeError) {
+      return NextResponse.json({ success: false, operationRequestId, error: err.message, code: err.code, stage: "integration_runtime", diagnostic: { apiRequestStarted, source: "canonical", runtime: err.diagnostic } }, { status: err.status });
+    }
+    if (err instanceof OpenRouterCanonicalError) {
+      return NextResponse.json({ success: false, operationRequestId, error: err.message, code: err.code, stage: "connection_resolution", diagnostic: { apiRequestStarted, source: "canonical" } }, { status: err.status });
+    }
+    if (err instanceof ProviderRequestError) {
+      return NextResponse.json({ success: false, operationRequestId, error: err.message, code: err.code, stage: "provider_request", diagnostic: { apiRequestStarted, source: "canonical" } }, { status: err.status });
+    }
     const mapped = authzErrorResponse(err);
     if (mapped.status === 500) console.error("Erro no process-intent-niche:", err);
     return NextResponse.json(

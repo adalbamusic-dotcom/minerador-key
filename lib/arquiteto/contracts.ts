@@ -70,6 +70,24 @@ export type VersionEnvelope<T> = z.infer<typeof VersionMetadataSchema> & { paylo
 export const versionEnvelopeSchema = <T extends z.ZodType>(payload: T) => VersionMetadataSchema.extend({ payload });
 
 export const SemanticAnalysisSchema = z.record(z.string(), z.unknown()).nullable().optional();
+export const HistoricalKgrEvidenceSchema = z.object({
+  resultsAllintitle: z.number().int().nonnegative().nullable().optional(), kgr: z.number().nullable().optional(),
+  status: z.enum(["available", "historical", "not_measured", "not_applicable", "unavailable", "error", "unknown"]),
+  measuredAt: z.string().datetime().optional(), source: z.string().min(1).optional(), calculationVersion: z.string().min(1).optional(),
+}).strict();
+export type HistoricalKgrEvidence = z.infer<typeof HistoricalKgrEvidenceSchema>;
+export const GoogleAdsMonthlySearchVolumeSchema = z.object({ year: z.number().int().nullable(), month: z.string().nullable(), searches: z.number().int().nonnegative().nullable() }).strict();
+export const GoogleAdsDemandEvidenceSchema = z.object({
+  source: z.literal("google_ads"), providerVersion: z.string().min(1).optional(), measuredAt: z.string().datetime().optional(),
+  averageMonthlySearches: z.number().int().nonnegative().nullable(), monthlySearchVolumes: z.array(GoogleAdsMonthlySearchVolumeSchema),
+  trend: z.number().nullable().optional(), seasonality: z.record(z.string(), z.unknown()).nullable().optional(),
+  competitionAds: z.string().nullable(), competitionIndexAds: z.number().int().nonnegative().nullable(),
+  lowTopOfPageBidMicros: z.string().nullable(), highTopOfPageBidMicros: z.string().nullable(), averageCpcMicros: z.string().nullable(),
+  closeVariants: z.array(z.string()), normalizedCloseVariants: z.array(z.string()), snapshotRef: z.string().min(1).optional(),
+}).strict();
+export type GoogleAdsDemandEvidence = z.infer<typeof GoogleAdsDemandEvidenceSchema>;
+export const KeywordDemandEvidenceSchema = z.object({ historicalKgr: HistoricalKgrEvidenceSchema.optional(), googleAds: GoogleAdsDemandEvidenceSchema.optional() }).strict();
+export type KeywordDemandEvidence = z.infer<typeof KeywordDemandEvidenceSchema>;
 /** Valor recebido do Minerador; `reviewable` permanece como alias de transporte. */
 export const PrimaryKeywordPolicySchema = z.enum(["locked", "reviewable", "revisable", "free", "conflict", "unknown"]);
 export type PrimaryKeywordPolicy = z.infer<typeof PrimaryKeywordPolicySchema>;
@@ -291,6 +309,7 @@ export const ArticleControlContextSchema = z.object({
     protectionReason: z.enum(["kgr_binding_confirmed", "architecture_confirmed", "minerador_locked", "published_revisable", "new_unit", "conflict", "unknown"]),
   }).strict(),
   kgr: ArticleKgrIdentitySchema.optional(),
+  demandEvidence: KeywordDemandEvidenceSchema.optional(),
   keywordStrategy: ArticleKeywordStrategySchema.optional(),
   volume: ArticleVolumeStrategySchema,
   hierarchy: ArticleHierarchyStrategySchema,
@@ -330,6 +349,7 @@ export const ArchitectKeywordSchema = z.object({
   kgrIdentity: ArticleKgrIdentitySchema.optional(),
   primaryKeywordPolicy: PrimaryKeywordPolicySchema.optional(),
   primaryKeywordPolicyContext: PrimaryKeywordPolicyContextSchema.optional(),
+  demandEvidence: KeywordDemandEvidenceSchema.optional(),
 });
 
 export type ArchitectKeyword = z.infer<typeof ArchitectKeywordSchema>;
@@ -576,6 +596,7 @@ export const KeywordDNASchema = z.object({
   kgrIdentity: ArticleKgrIdentitySchema.optional(),
   primaryKeywordPolicy: PrimaryKeywordPolicySchema.optional(),
   primaryKeywordPolicyContext: PrimaryKeywordPolicyContextSchema.optional(),
+  demandEvidence: KeywordDemandEvidenceSchema.optional(),
   siteEvidence: z.object({
     brandId: z.string().min(1), sourceUrl: z.string().url(), catalogEntryId: z.string().min(1),
     sourceFields: z.array(z.string().min(1)).min(1), slugCoherence: z.enum(["high", "medium", "low", "unknown"]),
@@ -620,6 +641,7 @@ export const ArticleKeywordReferenceSchema = z.object({
   keywordUrlRelation: KeywordUrlRelationshipSchema.optional(),
   urlEvidence: z.record(z.string(), z.unknown()).optional(),
   keywordDnaSnapshot: KeywordDnaProvenanceSnapshotSchema.optional(),
+  demandEvidence: KeywordDemandEvidenceSchema.optional(),
 }).strict();
 export type ArticleKeywordReference = z.infer<typeof ArticleKeywordReferenceSchema>;
 

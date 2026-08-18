@@ -1,0 +1,262 @@
+﻿diff --git a/docs/03-minerador/propostas/migracao-google-ads-retirada-extensao.md b/docs/03-minerador/propostas/migracao-google-ads-retirada-extensao.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..e72ecd4ce3cd32bb4b94c0dd927cfa495ebcabcb
+--- /dev/null
++++ b/docs/03-minerador/propostas/migracao-google-ads-retirada-extensao.md
+@@ -0,0 +1,256 @@
++# SDD ÔÇö Migra├º├úo do Minerador para Google Ads e retirada completa da Extens├úo
++
++> **Status:** decis├úo arquitetural aprovada; n├úo implementada.
++> **M├│dulo propriet├írio:** Minerador.
++> **Data:** 2026-08-02.
++> **Limite desta tarefa:** auditoria e documenta├º├úo. N├úo autoriza mudan├ºa de c├│digo, `.env`, depend├¬ncias, banco, Extens├úo, RapidAPI, APIs externas, commit, push ou deploy.
++
++## Problema e objetivo
++
++Hoje o Minerador divide a opera├º├úo entre APP e Extens├úo Chrome. A APP administra a planilha, qualifica├º├úo e persist├¬ncia; a Extens├úo mant├®m popup, service worker, bridge, relay, permiss├Áes Chrome, uma aba Google e CAPTCHA para extrair sugest├Áes e medir `allintitle`. O objetivo aprovado ├® concentrar a intelig├¬ncia de keywords na APP, com Google Ads server-side, e s├│ retirar a Extens├úo/RapidAPI depois de paridade funcional validada.
++
++Google Ads n├úo oferece contador `allintitle` equivalente ao leitor atual. A migra├º├úo n├úo pode declarar que Ads substitui concorr├¬ncia org├ónica, nem inventar valores equivalentes. Serper permanece o provider can├┤nico do Radar para an├ílise da primeira p├ígina e evid├¬ncias SERP: Google Ads n├úo o substitui, n├úo o altera e esta SDD n├úo modifica contratos, provider ou fluxo do Radar.
++
++## Estado confirmado e limites de evid├¬ncia
++
++| Item | Evid├¬ncia | Estado nesta SDD |
++| --- | --- | --- |
++| Vari├íveis `GOOGLE_ADS_*` | Nomes verificados localmente, sem ler valores | Os cinco nomes informados existem; valores e escopo n├úo s├úo registrados. |
++| OAuth, developer token e contas acess├¡veis | Relato e verifica├º├úo controlada anterior | OAuth respondeu e havia duas contas acess├¡veis; n├úo houve chamada nesta tarefa. |
++| Conta anunciante por marca | Auditoria | Ainda n├úo definida. `GOOGLE_ADS_LOGIN_CUSTOMER_ID` ├® MCC/manager, n├úo a conta alvo. |
++| Cliente Google Ads no Minerador | C├│digo | N├úo existe cliente, rota, persist├¬ncia ou UI Google Ads implementados. |
++| Depend├¬ncias | C├│digo | `googleapis` est├í instalado, mas n├úo ├® usado pelo Minerador; n├úo h├í biblioteca espec├¡fica Google Ads. |
++| Volume | C├│digo | `/api/volume` e a rota legada da Extens├úo usam RapidAPI `seo-keyword-research-tool1/global-volume`. |
++| Allintitle | C├│digo e relato manual | A Extens├úo controla a aba Google e o endpoint server-side persiste resultados confirmados. |
++
++Esta SDD n├úo fez chamada Google Ads, RapidAPI, Google Search, Supabase ou qualquer servi├ºo remoto.
++
++## Invent├írio da Extens├úo e destino
++
++| ├ürea | Arquivos | Fun├º├úo atual | Destino |
++| --- | --- | --- | --- |
++| Popup | `popup.html`, `popup.js` | Login transit├│rio, marca/lista, extra├º├úo, filtros, sele├º├úo e importa├º├úo | Painel interno do Minerador; remover s├│ ap├│s paridade. |
++| Service worker | `background.js` | Autocomplete, candidatas, lote allintitle, aba Google, alarmes, CAPTCHA, notifica├º├Áes, reconcilia├º├úo e persist├¬ncia | Ideias migram para Ads; lote/aba/CAPTCHA deixam de existir na alternativa A. |
++| Bridge | `minerador-panel-bridge.js` | Transporte popup/p├ígina/runtime, probe e handshake | Remover ao encerrar opera├º├Áes Chrome. |
++| Relay | `minerador-extension-relay.js` | Comandos/eventos allintitle por `postMessage` | Remover com bridge. |
++| Leitor | `allintitle-google-reader.js` | L├¬ contador e classifica bloqueio/CAPTCHA | Remover na alternativa A; provider SERP separado somente se alternativa B for aprovada. |
++| P├ígina APP | `minerador-extension-handshake-responder.tsx`, p├ígina Minerador | ACK de ator/marca/tenant para handshake v2 | Remover com bridge/relay, preservando autoriza├º├úo normal da APP. |
++| Manifest/config | `manifest.json`, `config.*.js`, `README.md` | Permiss├Áes, hosts e configura├º├úo p├║blica da Extens├úo | Remover no fechamento da Extens├úo; nunca migrar credenciais Ads para cliente. |
++
++Fun├º├Áes j├í existentes na APP: rota tenantizada, planilha, importa├º├úo manual/CSV, sele├º├úo, filtros, hist├│rico, exporta├º├úo, qualifica├º├úo, decis├úo humana de KGR, Site/Sitemap, atualiza├º├úo localizada de `keywords_kgr`, `/api/volume`, normaliza├º├úo/persist├¬ncia de volume, exibi├º├úo de volume/allintitle/KGR e endpoint server-side de `results_allintitle`.
++
++## RapidAPI e consumidores
++
++O provider atual ├® `seo-keyword-research-tool1.p.rapidapi.com/global-volume`, pa├¡s `br`, com correspond├¬ncia exata em `Keyword Overview.BR`.
++
++| Consumidor | Papel | Migra├º├úo prevista |
++| --- | --- | --- |
++| `app/api/volume/route.ts` | Volume da planilha | Trocar internamente por Google Ads depois de fixtures e smoke test; manter contrato de UI compat├¡vel durante rollout. |
++| `app/api/extensao/marcas/[brandId]/volume/route.ts` | Volume do legado da Extens├úo | Congelar/remover junto da Extens├úo, ap├│s paridade. |
++| `lib/minerador/volume-provider.ts` | Tipos, normalizadores e patch volume/KGR | Preservar partes neutras; adicionar adaptador Google Ads sem misturar contratos. Remover RapidAPI s├│ na fase final. |
++| `modules/minerador/minerador-workspace.tsx` | Chama `/api/volume`, persiste e atualiza tabela | Migrar para rota Ads preservando sele├º├úo e falha segura. |
++| `minerador-extensao/*` | Estado/importa├º├úo legada de volume | Remover somente no encerramento da Extens├úo. |
++| `.env.example`, testes | Vari├íveis, fixtures e normalizadores | Atualizar/remover somente quando n├úo houver consumidor. |
++
++## M├®tricas, KGR e consumidores compartilhados
++
++O registro atual cont├®m `volume_search`, `results_allintitle`, `kgr_score`, `intent`, `status`, `lista_id` e `analise_semantica`. Volume e allintitle s├úo independentes. KGR ├® calculado apenas com volume maior que zero, resultado confirmado e aplicabilidade diferente de `not_applicable`.
++
++`volume_search` ├® usado por tabela, filtros, ordena├º├úo, exporta├º├úo, decis├úo KGR e patch no Minerador; pelo Arquiteto em adaptadores, forma├º├úo, contexto e ordena├º├Áes; pelos contratos editoriais; e indiretamente pelo Radar via ArticleDNA/contexto. `results_allintitle` e `kgr_score` seguem pelos adaptadores/contexto para Arquiteto e Radar sem rec├ílculo silencioso.
++
++Invariantes de compatibilidade:
++
++- n├úo apagar/reinterpretar `results_allintitle`, `kgr_score` ou `volume_search` hist├│ricos;
++- aus├¬ncia de allintitle n├úo vira zero, n├úo-KGR ou aprova├º├úo;
++- aus├¬ncia de volume n├úo vira zero;
++- KGR n├úo ├® aprova├º├úo editorial;
++- Arquiteto e Radar n├úo s├úo alterados silenciosamente;
++- origem da nova medi├º├úo permanece rastre├ível na keyword.
++
++## Google Ads: capacidades, conta e segmenta├º├úo
++
++### Capacidades confirmadas
++
++`KeywordPlanIdeaService.GenerateKeywordIdeas` suporta keyword, URL, keyword + URL e site/dom├¡nio, com idioma, localiza├º├úo, rede, pagina├º├úo e m├®tricas hist├│ricas. `GenerateKeywordHistoricalMetrics` ├® o contrato para keywords j├í selecionadas e pode trazer m├®dia mensal, s├®rie mensal, concorr├¬ncia/├¡ndice de Ads e lances de topo em micros. Quando CPC m├®dio fizer parte da resposta esperada, o request deve enviar `historical_metrics_options.include_average_cpc = true`.
++
++Normaliza├º├úo planejada:
++
++- `avg_monthly_searches` ÔåÆ `volume_search`;
++- `monthly_search_volumes` ÔåÆ s├®rie hist├│rica;
++- concorr├¬ncia de Ads e ├¡ndice permanecem distintos de concorr├¬ncia org├ónica;
++- `low_top_of_page_bid_micros`, `high_top_of_page_bid_micros` e `average_cpc_micros` preservam micros at├® a camada de apresenta├º├úo;
++- origem, vers├úo, targeting, data e `request-id` seguro acompanham a medi├º├úo.
++
++### Autentica├º├úo e conta por marca
++
++O servidor renova token usando `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET` e `GOOGLE_ADS_REFRESH_TOKEN`; o developer token fica apenas no servidor. `GOOGLE_ADS_LOGIN_CUSTOMER_ID` identifica a MCC/manager quando aplic├ível, mas cada consulta exige uma conta anunciante (`customer_id`) alvo autorizada.
++
++Antes de c├│digo real, definir a conta anunciante de cada marca. N├úo assumir a primeira conta acess├¡vel ou uma conta global. Uma conta compartilhada somente ├® v├ílida com aprova├º├úo expl├¡cita; caso contr├írio, marca ÔåÆ conta ├® decis├úo estrutural posterior, com autoriza├º├úo, RLS e rollback. Nenhum segredo, token, MCC ou conta desnecess├íria vai ao browser.
++
++O primeiro targeting deve ser expl├¡cito (Brasil, portugu├¬s e rede escolhida), usando constantes oficiais resolvidas no servidor. M├®tricas monet├írias chegam em micros; `currencyCode` e `timeZone` s├úo obtidos da conta anunciante alvo por `Customer` ou `CustomerClient`, nunca inferidos da resposta de m├®tricas nem presumidos como BRL. A medi├º├úo normalizada recebe a moeda da conta j├í validada. Contas ou moedas diferentes nunca s├úo somadas ou comparadas silenciosamente.
++
++## Decis├úo sobre allintitle
++
++### Decis├úo aprovada ÔÇö retirada de allintitle do n├║cleo de keywords novas
++
++Retirar allintitle e KGR do n├║cleo obrigat├│rio das keywords novas:
++
++1. preservar `results_allintitle`, metadados e KGR hist├│ricos;
++2. permitir importa├º├úo/qualifica├º├úo sem allintitle;
++3. mostrar aus├¬ncia de forma expl├¡cita, nunca como `0`;
++4. usar Google Ads, inten├º├úo, coer├¬ncia da marca, SERP do Radar quando aplic├ível e decis├úo humana na nova triagem;
++5. s├│ calcular KGR novo quando houver fonte allintitle explicitamente aprovada; caso contr├írio, fica indispon├¡vel;
++6. eliminar aba Google, CAPTCHA, notifica├º├Áes e Extens├úo.
++
++### Provider aproximado futuro ÔÇö frente separada
++
++Um provider SERP futuro pode dar aproxima├º├úo de allintitle, mas exige SDD pr├│pria: a├º├úo expl├¡cita, custo/quota/cache documentados, origem `serp_provider_approximate`, smoke test, fixtures, falha sem zero e nenhuma chamada em testes. N├úo ├® requisito desta migra├º├úo. Custom Search JSON API n├úo ├® solu├º├úo estrutural.
++
++Serper continua can├┤nico no Radar para primeira p├ígina e evid├¬ncias SERP. Um provider aproximado de allintitle n├úo substitui o Serper, n├úo altera o Radar e n├úo ├® pr├®-requisito da migra├º├úo Google Ads.
++
++## Arquitetura-alvo
++
++```text
++lib/google/
++  oauth/google-ads-token.ts       # refresh server-side e cache curto
++  ads/config.ts                   # GOOGLE_ADS_API_VERSION server-side e atualiza├º├úo controlada
++  ads/client.ts                   # REST, headers e request-id seguro
++  ads/accounts.ts                 # conta target autorizada por marca
++  ads/ideas.ts                    # KeywordPlanIdeaService
++  ads/historical-metrics.ts       # GenerateKeywordHistoricalMetrics
++  ads/normalization.ts            # volume, s├®rie, micros e moeda
++  ads/errors.ts                   # auth/quota/targeting sem segredos
++  ads/fixtures/                   # testes sem rede
++```
++
++N├úo criar cliente gen├®rico que misture Search Console, Business Profile, PageSpeed/CrUX ou Trends. Essas integra├º├Áes s├úo frentes futuras independentes.
++
++Rotas propostas:
++
++```text
++POST /api/minerador/google-ads/ideas
++POST /api/minerador/google-ads/historical-metrics
++```
++
++Ambas exigem: autentica├º├úo can├┤nica vigente; `brandId` resolvido no servidor; owner/membership; coincid├¬ncia entre tenant e input; conta Ads autorizada para a marca; a├º├úo expl├¡cita; Zod; `requestId`; e resposta sem segredo. Primeiro rollout usa `cache: "no-store"` ou cache server-side com chave `brandId + customer + targeting + input normalizado + vers├úo`, TTL documentado e isolamento de tenant. Sem prefetch, polling ou chamada no carregamento.
++
++Contratos m├¡nimos:
++
++```ts
++type GoogleAdsTargeting = {
++  country: "BR";
++  language: "pt";
++  geoTargetConstant: string;
++  languageConstant: string;
++  network: "GOOGLE_SEARCH" | "GOOGLE_SEARCH_AND_PARTNERS";
++};
++
++type GoogleAdsIdeaRequest = {
++  brandId: string;
++  mode: "keyword" | "url" | "keyword_and_url" | "site";
++  keywords?: string[];
++  url?: string;
++  targeting: GoogleAdsTargeting;
++  pageToken?: string;
++};
++
++type GoogleAdsHistoricalMetricsRequest = {
++  brandId: string;
++  keywords: string[];
++  targeting: GoogleAdsTargeting;
++};
++```
++
++A resposta normalizada cont├®m keyword, m├®dia mensal, s├®rie mensal, concorr├¬ncia/├¡ndice Ads, lances/CPC em micros, moeda, fonte `google_ads`, vers├úo, data, targeting e `googleAdsRequestId`.
++
++`GOOGLE_ADS_API_VERSION` ou constante server-side equivalente deve apontar somente para vers├úo suportada, ficar fora do navegador e compor `providerVersion` na proveni├¬ncia. Atualiza├º├Áes de vers├úo s├úo controladas e exigem regress├úo dos contratos antes de upgrade. `customerId` e MCC n├úo fazem parte da resposta do browser.
++
++## Persist├¬ncia recomendada
++
++### Aditiva, sem migration ÔÇö recomendada na primeira paridade
++
++Manter `volume_search = avg_monthly_searches` e acrescentar proveni├¬ncia/hist├│rico em `analise_semantica`, j├í usado por `volume_measurement` e hist├│rico:
++
++```text
++google_ads_measurement = {
++  source, providerVersion, measuredAt, targeting, currencyCode, accountRef,
++  averageMonthlySearches, monthlySearchVolumes, competition, competitionIndex,
++  lowTopOfPageBidMicros, highTopOfPageBidMicros, averageCpcMicros,
++  googleAdsRequestId
++}
++google_ads_measurement_history = [ medi├º├Áes anteriores com a mesma proveni├¬ncia ]
++```
++
++Uma mudan├ºa real move a medi├º├úo anterior para o hist├│rico. Falha, keyword ausente, quota, targeting inv├ílido ou schema inesperado n├úo alteram volume, allintitle, KGR ou evid├¬ncia anterior. O patch ├® at├┤mico por keyword, idempotente e marca a origem Ads sem esconder o `volume_measurement` retrocompat├¡vel.
++
++Exige teste de tamanho do JSON e reten├º├úo n├úo destrutiva. Uma entidade pr├│pria de medi├º├Áes seria melhor para hist├│rico longo, mas requer migration, RLS, rollback e aprova├º├úo posterior; n├úo ├® necess├íria nem autorizada agora.
++
++## Interface-alvo planejada
++
++Adicionar **Intelig├¬ncia de Palavras-Chave** dentro do Minerador, sem redesenhar a planilha atual:
++
++- modos: keyword semente, URL, keyword + URL e site/dom├¡nio apenas se limites oficiais forem aprovados;
++- targeting vis├¡vel; resultados com keyword, volume m├®dio, hist├│rico/tend├¬ncia, CPC, Ads competition/├¡ndice, lances, moeda, origem, data, inten├º├úo, status e sele├º├úo;
++- sele├º├úo independente da renderiza├º├úo e importa├º├úo seletiva/idempotente para a marca ativa;
++- pagina├º├úo, vazio, loading, quota e erro seguro;
++- detalhes em popover/painel acess├¡vel, sem tabela concorrente;
++- nenhuma chamada ao abrir a tela.
++
++Reutilizar tabela, controles, badges, foco, dark mode e responsividade de `docs/compartilhado/sistema-visual.md`; validar 360/768/1024/1440, hover, foco, disabled, loading e erro.
++
++## Plano de migra├º├úo
++
++| Fase | Entrada | Sa├¡da/aceite | Risco, rollback e opera├º├úo manual |
++| --- | --- | --- | --- |
++| 1. Invent├írio/allintitle | Esta SDD | Decis├úo aprovada registrada: hist├│rico preservado e keywords novas sem allintitle/KGR | Sem c├│digo; manter estado atual. |
++| 2. Contrato Ads | Conta alvo e targeting | Zod, erros, cache e v├¡nculo marca/conta aprovados | Conta errada; nenhuma chamada antes da configura├º├úo. |
++| 3. Provider/fixtures | Contrato | `lib/google/ads` e testes sem rede | Segredo/log/schema; c├│digo ainda n├úo ligado ├á UI. |
++| 4. Smoke de uma keyword | Provider | Resultado comparado ao UI Google Ads, sem lote | Quota/conta/targeting; autoriza├º├úo expl├¡cita e opera├º├úo humana. |
++| 5. Painel interno | Smoke aprovado | Ideias/m├®tricas, pagina├º├úo e estados | Regress├úo visual; feature flag/local. |
++| 6. Importa├º├úo seletiva | Painel | Keywords `bruto`, idempotentes e brand-scoped | Duplicidade; snapshot/rollback por lote, sem limpeza autom├ítica. |
++| 7. Volume | Persist├¬ncia aditiva | `Medir volume` usa Ads, preservando campos antigos em falha | KGR/Arquiteto; reativar provider anterior apenas enquanto existir. |
++| 8. Paridade | Fases 4ÔÇô7 validadas | Checklist sem popup para fun├º├Áes migradas | Fluxo incompleto; Extens├úo permanece. |
++| 9. Congelar Extens├úo | Paridade assinada | Sem fun├º├Áes novas, s├│ corre├º├úo cr├¡tica | Usu├írios em opera├º├úo; descongelamento registrado. |
++| 10. Remover Extens├úo | Paridade aprovada + sem opera├º├úo ativa | Popup, worker, bridge, relay, reader, handshake, rotas/docs/permiss├Áes exclusivas removidos | Perda de allintitle novo; restaurar artefato versionado, sem apagar hist├│rico. |
++| 11. Remover RapidAPI | Ads validado e busca de consumidores vazia | Env, rotas, normalizadores, fixtures e docs removidos | Provider falha; rollback s├│ antes da remo├º├úo. |
++| 12. Limpeza/documenta├º├úo | Busca e testes | Exclus├Áes pequenas e docs reais | C├│digo morto; revers├úo de c├│digo, nunca dados. |
++| 13. Minerador ÔåÆ Arquiteto | Dados controlados | Origem/volume chegam sem decis├úo editorial autom├ítica | Mistura/normaliza├º├úo; interromper rollout preservando dados. |
++
++Nenhuma fase posterior ├® autorizada apenas por esta SDD.
++
++## Riscos e mitiga├º├úo
++
++| Risco | Mitiga├º├úo |
++| --- | --- |
++| Conta Ads errada ou compartilhada indevidamente | V├¡nculo marca ÔåÆ conta definido antes de chamadas; MCC separado do customer alvo. |
++| Mistura entre marcas | `brandId` em rota/cache/persist├¬ncia; autoriza├º├úo e conta resolvidas no servidor. |
++| Ads confundido com SEO org├ónico | Campos/origens distintos; allintitle hist├│rico n├úo ├® substitu├¡do. |
++| KGR hist├│rico perdido | Sem reprocessamento/apagamento em massa. |
++| Quota/schema/provider | Falha segura, retry manual, fixtures e sem zero impl├¡cito. |
++| JSON crescer | Medir limite/reten├º├úo n├úo destrutiva; entidade pr├│pria s├│ com SDD/migration. |
++| Remover Extens├úo cedo | Paridade e checklist manual s├úo gates. |
++| Segredo em cliente/log | Server-only; sanitizar erro; expor apenas requestId seguro. |
++| Regress├úo Arquiteto/Radar | Fixtures com/sem allintitle e valida├º├úo ponta a ponta. |
++
++## Testes e aceite futuros
++
++Automatizados, sem API paga: OAuth mockado; headers MCC/customer; ideias nas quatro sementes; pagina├º├úo/targeting/Zod; m├®dia/s├®rie/micros/moeda; `include_average_cpc`; vers├úo Ads suportada e regress├úo de contrato antes de upgrade; quota/erro; patch/hist├│rico/idempot├¬ncia; owner/membership/tenant/cache; sele├º├úo/importa├º├úo; KGR sem infer├¬ncia; adaptadores Arquiteto/Radar; e busca de refer├¬ncias Extens├úo/RapidAPI vazia antes da remo├º├úo.
++
++Valida├º├úo manual: confirmar conta/targeting; comparar uma keyword ao Keyword Planner; conferir s├®rie/CPC/moeda; testar sementes; importar sem duplicar/misturar marcas; medir volume sem alterar allintitle/KGR hist├│ricos; qualificar keyword nova sem allintitle; validar Minerador ÔåÆ Arquiteto; revisar dark/light nos quatro widths; e s├│ ent├úo retirar Extens├úo/RapidAPI.
++
++## Documenta├º├úo, fora de escopo e autoriza├º├Áes pendentes
++
++Depois de cada fase aprovada, atualizar `spec.md`, `estado-atual.md` e `backlog.md`, distinguindo c├│digo, teste, valida├º├úo manual e pend├¬ncia. Uma ADR ser├í necess├íria para v├¡nculo permanente marca ÔåÆ conta Ads ou entidade estrutural de medi├º├Áes.
++
++Fora de escopo: Search Console, Business Profile, PageSpeed/CrUX, Trends e SERP real do Radar. Cada um requer cliente, contrato, custo, origem e autoriza├º├úo pr├│prios.
++
++Decis├Áes aprovadas: retirada completa da Extens├úo somente ap├│s paridade; preserva├º├úo de allintitle e KGR hist├│ricos; keywords novas podem existir sem allintitle e KGR; aus├¬ncia permanece `null`/indispon├¡vel, nunca zero; Serper permanece no Radar.
++
++Autoriza├º├Áes necess├írias: (1) conta anunciante por marca; (2) targeting/cache; (3) primeira chamada real/smoke; (4) c├│digo das fases 2ÔÇô7; (5) migration, se escolhida; e (6) remo├º├úo final de Extens├úo/RapidAPI ap├│s paridade. Esta SDD n├úo autoriza c├│digo automaticamente.
++
++## Refer├¬ncias oficiais
++
++- <https://developers.google.com/google-ads/api/rest/auth>
++- <https://developers.google.com/google-ads/api/docs/keyword-planning/generate-keyword-ideas>
++- <https://developers.google.com/google-ads/api/docs/keyword-planning/generate-historical-metrics>
++- <https://developers.google.com/google-ads/api/reference/rpc/v21/KeywordPlanHistoricalMetrics>

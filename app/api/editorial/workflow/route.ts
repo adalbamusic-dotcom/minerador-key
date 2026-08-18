@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireSessionProfile, authzErrorResponse, AuthzError } from "@/lib/server/authz";
+import { requireCanonicalSessionProfile, authzErrorResponse, AuthzError } from "@/lib/server/authz";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { ArtifactRepository, ContentDocumentRepository, DecisionEventRepository, PublicationRepository, WorkflowRepository } from "@/lib/server/editorial-repositories";
 import { OptimisticLockError, PersistenceUnavailableError } from "@/lib/server/editorial-db";
@@ -12,13 +12,13 @@ const allowedRadar: Record<string, string[]> = { research_pending: ["researching
 
 export async function POST(request: NextRequest) {
   try {
-    const profile = await requireSessionProfile(); const command = WorkflowCommandSchema.parse(await request.json());
+    const profile = await requireCanonicalSessionProfile(); const command = WorkflowCommandSchema.parse(await request.json());
     const workflow = new WorkflowRepository(); const artifacts = new ArtifactRepository(); const decisions = new DecisionEventRepository();
     if (command.action === "import_radar") {
       await assertEditorialPermission(profile, command.brandId, "arquiteto", "approve"); await assertEditorialPermission(profile, command.brandId, "radar", "create");
       for (const version of command.articleVersions) {
         if (articleApprovalIssues(version, command.versionEvents).length) throw new AuthzError(409, "ArticleDNA não atende aos gates de aprovação.");
-        await artifacts.save(command.brandId, "article_dna", version, profile.userId); await artifacts.appendEvents(command.brandId, command.versionEvents.filter(event => event.versionId === version.versionId), profile.userId);
+        await artifacts.save(command.brandId, "article_dna", version, "approved", profile.userId); await artifacts.appendEvents(command.brandId, command.versionEvents.filter(event => event.versionId === version.versionId), profile.userId);
         const item = importArticlesToRadar([], [version], command.brandId, undefined, [], {}, command.hydrationByArticleId)[0]; const row = await workflow.importItem({ marcaId: command.brandId, articleId: version.payload.articleId, stage: "radar", state: item.state,
           sourceEntityId: version.entityId, sourceVersionId: version.versionId, sourceContentHash: version.contentHash, payload: item, actorId: profile.userId });
         await decisions.append({ marcaId: command.brandId, workflowItemId: row.id, articleId: version.payload.articleId, eventType: "import_radar", toState: item.state, sourceVersionId: version.versionId, actorId: profile.userId });
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     if (command.action === "prepare_plan") {
       await assertEditorialPermission(profile, command.brandId, "planejador", "edit"); const current = await workflow.find(command.plannerItemId);
       if (!current || current.marca_id !== command.brandId || current.stage !== "planner" || !["draft", "planning", "pending", "awaiting_review", "approved"].includes(current.state)) throw new AuthzError(409, "Item não pode ser planejado neste estado.");
-      await artifacts.save(command.brandId, "content_plan", command.plan, profile.userId); const payload = { ...(current.payload as object), contentPlanVersionId: command.plan.versionId };
+      await artifacts.save(command.brandId, "content_plan", command.plan, "proposed", profile.userId); const payload = { ...(current.payload as object), contentPlanVersionId: command.plan.versionId };
       await workflow.transition(current.id, command.expectedLock, "awaiting_review", payload, profile.userId); await decisions.append({ marcaId: command.brandId, workflowItemId: current.id, articleId: current.article_id, eventType: "prepare_plan", fromState: current.state, toState: "awaiting_review", sourceVersionId: command.plan.versionId, actorId: profile.userId });
     }
     if (command.action === "approve_plan") {
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
       await assertEditorialPermission(profile, command.brandId, "redator", "create"); const current = await workflow.find(command.plannerItemId);
       if (!current || current.marca_id !== command.brandId || current.stage !== "planner" || !["approved", "sent_writer"].includes(current.state)) throw new AuthzError(409, "Somente ContentPlan aprovado pode abrir o Redator.");
       if ((current.payload as { contentPlanVersionId?: string }).contentPlanVersionId !== command.plan.versionId || contentPlanApprovalIssues(command.plan, command.brandId).length) throw new AuthzError(409, "O ContentPlan enviado não é a versão aprovada ou não atende aos gates editoriais.");
-      await artifacts.save(command.brandId, "article_dna", command.articleVersion, profile.userId); await artifacts.save(command.brandId, "content_plan", command.plan, profile.userId);
+      await artifacts.save(command.brandId, "article_dna", command.articleVersion, "approved", profile.userId); await artifacts.save(command.brandId, "content_plan", command.plan, "approved", profile.userId);
       const documents = new ContentDocumentRepository(); const hash = await contentHash(command.document); await documents.create(command.brandId, command.document, command.articleVersion.payload.articleId, command.plan.versionId, command.articleVersion.versionId, command.articleVersion.payload.suggestedSlug, hash, profile.userId);
       await new PublicationRepository().create(command.brandId, command.publication, profile.userId);
       if (current.state === "approved") await workflow.transition(current.id, command.expectedLock, "sent_writer", current.payload, profile.userId);

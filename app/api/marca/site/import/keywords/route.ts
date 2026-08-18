@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const brand = await authorizedSiteBrand(input.brandId);
     const brandId = brand.brandId;
     await assertListaBelongsToMarca(input.targetListId, brandId, brand.profile);
-    const { data: targetList, error: targetListError } = await brand.profile.supabase.from("listas_kgr").select("id,nome,marca_id").eq("id", input.targetListId).eq("marca_id", brandId).maybeSingle();
+    const { data: targetList, error: targetListError } = await brand.profile.supabase.from("minerador_keyword_lists").select("id,nome,marca_id").eq("id", input.targetListId).eq("marca_id", brandId).maybeSingle();
     if (targetListError) throw targetListError;
     if (!targetList) throw new Error("A lista de destino não foi localizada para a marca ativa.");
     input.candidates.forEach(candidate => assertAllowedExternalUrl(candidate.sourceUrl, brand.primaryHost));
@@ -31,17 +31,17 @@ export async function POST(request: Request) {
         validateDestination: async (requestedBrandId, targetListId) => assertListaBelongsToMarca(targetListId, requestedBrandId, brand.profile),
         findByList: async (requestedBrandId, targetListId) => {
           if (requestedBrandId !== brandId) throw new Error("A marca da importacao nao corresponde ao tenant autorizado.");
-          const { data, error } = await brand.profile.supabase.from("keywords_kgr").select("id,brand_id,keyword,status,analise_semantica").eq("lista_id", targetListId).eq("brand_id", brandId);
+          const { data, error } = await brand.profile.supabase.from("minerador_keywords").select("id,brand_id,keyword,status,analise_semantica").eq("lista_id", targetListId).eq("brand_id", brandId);
           if (error) throw error;
           return data || [];
         },
         updateKeywordEvidence: async ({ id, brandId: requestedBrandId, analise_semantica }) => {
           if (requestedBrandId !== brandId) throw new Error("A marca da atualizacao nao corresponde ao tenant autorizado.");
-          const { error } = await brand.profile.supabase.from("keywords_kgr").update({ analise_semantica }).eq("id", id).eq("brand_id", brandId);
+          const { error } = await brand.profile.supabase.from("minerador_keywords").update({ analise_semantica }).eq("id", id).eq("brand_id", brandId);
           if (error) throw error;
         },
         insertKeyword: async payload => {
-          const { data, error } = await brand.profile.supabase.from("keywords_kgr").insert({ ...payload, brand_id: brandId }).select("id,keyword,brand_id").single();
+          const { data, error } = await brand.profile.supabase.from("minerador_keywords").insert({ ...payload, brand_id: brandId }).select("id,keyword,brand_id").single();
           if (error) throw error;
           if (!data?.id) throw new Error("O Minerador não retornou o ID real da keyword persistida.");
           return { id: data.id, brand_id: data.brand_id || brandId, keyword: data.keyword };

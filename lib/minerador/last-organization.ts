@@ -1,4 +1,5 @@
 import { normalizeIntentKey } from "./intent-taxonomy.ts";
+import type { VolumeEligibilityStatus } from "./volume-eligibility.ts";
 
 export type MineradorOrganizationValues = {
   searchQuery: string;
@@ -10,6 +11,7 @@ export type MineradorOrganizationValues = {
   filterSitePublication: string;
   filterKgrApplicability: string;
   filterKgrMeasurement: string;
+  filterVolumeEligibility: "Todos" | "operational" | VolumeEligibilityStatus;
   sortColumn: "keyword" | "results_allintitle" | "volume_search" | "kgr_score" | "nicho" | "lista";
   sortDirection: "asc" | "desc";
 };
@@ -23,11 +25,15 @@ const siteArchitectures = new Set([all, "awaiting_architecture", "architectural_
 const sitePublications = new Set([all, "published", "not_confirmed", "not_found", "redirected", "canonical_conflict"]);
 const kgrApplicability = new Set([all, "applicable", "not_applicable", "pending"]);
 const kgrMeasurements = new Set([all, "without_data", "partial", "complete", "invalid"]);
+const volumeEligibility = new Set([all, "operational", "pending", "eligible", "below_threshold", "unavailable", "measurement_failed"]);
+
+/** Versiona a preferência local para distinguir o antigo default de uma escolha explícita. */
+export const MINERADOR_ORGANIZATION_STORAGE_VERSION = 2;
 
 export const defaultMineradorOrganization: MineradorOrganizationValues = {
   searchQuery: "", filterStatus: all, filterIntent: all, filterListId: all,
   filterSiteRelation: all, filterSiteArchitecture: all, filterSitePublication: all,
-  filterKgrApplicability: all, filterKgrMeasurement: all, sortColumn: "keyword", sortDirection: "asc",
+  filterKgrApplicability: all, filterKgrMeasurement: all, filterVolumeEligibility: all, sortColumn: "keyword", sortDirection: "asc",
 };
 
 export function mineradorLastOrganizationKey(userId: string, brandId: string) {
@@ -62,6 +68,13 @@ export function normalizeMineradorLastOrganization(
   const listId = requestedListId === all || !requestedListId || (knownListIds && !knownListIds.includes(requestedListId)) ? all : requestedListId;
   const requestedIntent = textValue(value.filterIntent);
   const intent = requestedIntent && requestedIntent !== all ? normalizeIntentKey(requestedIntent) : all;
+  const normalizedVolumeEligibility = knownOrAll(value.filterVolumeEligibility, volumeEligibility) as MineradorOrganizationValues["filterVolumeEligibility"];
+  const hasCurrentStorageVersion = value.organizationStorageVersion === MINERADOR_ORGANIZATION_STORAGE_VERSION;
+  // Antes desta versão, "operational" era gravado automaticamente ao abrir o
+  // Processador. Não tratar esse valor histórico como escolha do usuário.
+  const volumeFilter = normalizedVolumeEligibility === "operational" && !hasCurrentStorageVersion
+    ? all
+    : normalizedVolumeEligibility;
   return {
     searchQuery: textValue(value.searchQuery),
     filterStatus: normalizeStatus(value.filterStatus),
@@ -72,6 +85,7 @@ export function normalizeMineradorLastOrganization(
     filterSitePublication: knownOrAll(value.filterSitePublication, sitePublications),
     filterKgrApplicability: knownOrAll(value.filterKgrApplicability, kgrApplicability),
     filterKgrMeasurement: value.filterKgrMeasurement === "with_score" ? "complete" : value.filterKgrMeasurement === "without_data" ? all : knownOrAll(value.filterKgrMeasurement, kgrMeasurements),
+    filterVolumeEligibility: volumeFilter,
     sortColumn: sortColumns.has(textValue(value.sortColumn) as MineradorOrganizationValues["sortColumn"]) ? textValue(value.sortColumn) as MineradorOrganizationValues["sortColumn"] : "keyword",
     sortDirection: textValue(value.sortDirection) === "desc" ? "desc" : "asc",
   };
@@ -94,6 +108,8 @@ export function mineradorOrganizationLabels(values: MineradorOrganizationValues,
   if (applicability) labels.push(applicability);
   const measurement = ({ without_data: "Sem medição", partial: "Parcial", complete: "Completa", invalid: "Inválida" } as Record<string, string>)[values.filterKgrMeasurement];
   if (measurement) labels.push(`Métricas: ${measurement}`);
+  const volume = ({ operational: "Elegíveis por volume", pending: "Pendente de medição", eligible: "Elegível por volume", below_threshold: "Abaixo do corte", unavailable: "Sem volume oficial", measurement_failed: "Medição falhou" } as Record<string, string>)[values.filterVolumeEligibility];
+  if (volume) labels.push(`Volume: ${volume}`);
   if (values.searchQuery.trim()) labels.push(`Busca: ${values.searchQuery.trim()}`);
   return labels;
 }

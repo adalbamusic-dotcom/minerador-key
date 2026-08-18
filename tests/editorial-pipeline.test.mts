@@ -141,7 +141,7 @@ test("shell oficial não contém grupo Inteligência Editorial", async () => {
 
 test("layout Admin valida sessão e papel no servidor", async () => {
   const source = await readFile(new URL("../app/(admin)/layout.tsx", import.meta.url), "utf8");
-  assert.match(source, /requireSessionProfile/); assert.match(source, /profile\.isAdmin/); assert.match(source, /redirect/);
+  assert.match(source, /requireCanonicalSessionProfile/); assert.match(source, /profile\.isAdmin/); assert.match(source, /redirect/);
 });
 
 test("Marca preserva compatibilidade de edição do cliente legado e Conta não edita marca", async () => {

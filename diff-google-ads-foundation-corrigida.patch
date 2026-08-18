@@ -1,0 +1,1498 @@
+﻿diff --git a/docs/03-minerador/backlog.md b/docs/03-minerador/backlog.md
+index 8afc7e938dedb9ce852972f058e5d21bafe40617..c29e4e088233972eb2b85f32585ba9f21a19b2ee 100644
+--- a/docs/03-minerador/backlog.md
++++ b/docs/03-minerador/backlog.md
+@@ -1,11 +1,33 @@
+ # Backlog ÔÇö Minerador
+ 
++## Decis├úo arquitetural aprovada ÔÇö Google Ads e retirada completa da Extens├úo ÔÇö 2026-08-02
++
++- SDD aprovada em `propostas/migracao-google-ads-retirada-extensao.md`; a decis├úo ainda n├úo est├í implementada e n├úo autoriza c├│digo automaticamente.
++- Decis├úo: preservar `allintitle`/KGR hist├│ricos; keywords novas podem existir sem ambos; aus├¬ncia permanece indispon├¡vel, nunca zero; Google Ads centraliza ideias, volume, hist├│rico, CPC, lances e concorr├¬ncia Ads server-side.
++- Fronteira preservada: Serper continua provider can├┤nico do Radar para primeira p├ígina e evid├¬ncias SERP. Google Ads n├úo substitui nem altera Serper, os contratos ou o fluxo do Radar; provider aproximado de allintitle seria frente separada e n├úo requisito.
++- Gates: definir conta anunciante por marca, aprovar targeting/cache, implementar com fixtures, executar smoke manual de uma keyword, comprovar paridade e somente ent├úo congelar/remover Extens├úo e RapidAPI.
++- Restri├º├Áes: n├úo chamar APIs reais em testes, n├úo expor credenciais, n├úo confundir MCC com conta anunciante, n├úo presumir BRL, n├úo apagar m├®tricas hist├│ricas nem alterar Arquiteto/Radar silenciosamente.
++- Funda├º├úo local corrigida em 2026-08-03: cliente com somente as tr├¬s rotas REST oficiais, `v25` em allowlist, providerVersion derivada do cliente, int64 ProtoJSON, close variants, valida├º├úo de conta antes de fetch, MCC efetivo e cache OAuth isolado por configura├º├úo. Testes usam fixtures e `fetch` simulado; n├úo houve chamada real. Continuam pendentes conta por marca, rota/tela/persist├¬ncia e smoke manual; RapidAPI e Extens├úo seguem ativas at├® paridade.
++
++## Alta prioridade ÔÇö homologar falha allintitle com diagn├│stico preservado
++
++- Recarregar a extens├úo a partir desta pasta e executar uma medi├º├úo pequena autenticada; se a persist├¬ncia falhar, registrar o c├│digo exibido e o diagn├│stico copi├ível para corrigir a causa remota sem mascar├í-la como `no_persisted_allintitle_results`.
++- Confirmar que resultado confirmado atualiza a tabela diretamente, sem pr├®via, e que falha preserva o valor anterior.
++
+ > **Estado vigente ÔÇö 2026-07-27:** 0005/0006 n├úo s├úo tarefas pendentes de aplica├º├úo. O resultado remoto registrado em `estado-atual.md` e `docs/compartilhado/supabase.md` informa 0006 aplicada com validation `READY`; n├úo reexecutar nem executar rollback. Pend├¬ncias de browser autenticado, RLS real e smoke test continuam manuais.
+ 
+ ## Forma├º├úo compartilhada KGR ÔÇö registrado em 2026-07-21
+ 
+ - Feito localmente: evid├¬ncia de Site preservada sem confirma├º├úo autom├ítica.
+ - Pendente: qualifica├º├úo humana/real no Minerador, snapshot SQL/RLS e valida├º├úo manual autenticada.
++## Homologacao da selecao e do retorno allintitle - 2026-07-29
++
++- Pendente manual: depois de recarregar a extensao, repetir uma medicao ja processada e confirmar que cada resultado confirmado aparece diretamente na tabela, sem painel de previa ou confirmacao adicional.
++- Pendente manual: recarregar a extensao e testar clique comum, Ctrl/Cmd, Shift e pintura no popup e na tabela, iniciando em checkbox marcado e desmarcado; confirmar que o clique seguinte nao fica suprimido e que nao ha atraso perceptivel.
++- Pendente manual: repetir a consulta que avancou `3 de 3` sem item na tabela, conferir `ITEM_EVENT_DISPATCHED` e validar que sucesso e zero atualizam diretamente a linha somente com `persistenceOutcome: persisted`; erro preserva o valor anterior, inclusive apos reload.
++- Pendente manual: com a extensao recarregada, iniciar lista longa, sair da pagina do Minerador, aguardar o contador progredir, confirmar alerta nativo e foco da aba Google em CAPTCHA/consentimento, liberar manualmente e retomar sem perder o indice.
++- Restricao: nao executar automaticamente Google real, SQL, migration, limpeza, commit, push ou deploy.
++
+ ## Agora
+ - **Reconciliacao de seguranca 0006:** prepara├º├úo e valida├º├úo pr├®-aplica├º├úo preservadas como hist├│rico; o resultado remoto posterior registrou `READY`. **N├úo executar novamente:** permanecem apenas smoke test autenticado e RLS remoto como valida├º├Áes externas.
+ - **FK `lista_id` can├┤nica:** o resultado registrado mant├®m `fk_keywords_kgr_lista_0005` com `ON DELETE RESTRICT`; a remo├º├úo da FK legada `CASCADE` n├úo ├® pend├¬ncia de aplica├º├úo. **N├úo executar migration/rollback.**
+@@ -235,3 +257,264 @@ Auditoria documental e auditoria de sa├║de n├úo destrutiva em 2026-07-20; ver re
+ - A implementa├º├úo foi interrompida antes do c├│digo porque a SDD n├úo aprova endpoint can├┤nico, payload persistente final ou estrat├®gia de compatibilidade entre popup, service worker e aplica├º├úo.
+ - O caminho obrigat├│rio `docs/00-produto/contratos/importacoes.md` n├úo existe neste checkout.
+ - N├úo criar rota, payload ou persist├¬ncia por infer├¬ncia; retomar somente ap├│s registrar o contrato aprovado.
++## Simplificacao da extensao do Minerador Key - implementacao local - 2026-07-27
++
++- SDD aprovada e implementada localmente no popup, service worker, contratos puros e rotas server-side autenticadas.
++- Removida a exigencia de lista/projeto/silo/categoria da nova importacao. Keywords novas entram como `bruto`, com `brand_id` real e `lista_id` nulo; duplicidades por marca e texto normalizado preservam o registro existente e agregam evidencia.
++- Pendencia de homologacao: executar manualmente Chrome autenticado com troca de marca/aba, extracao de sugestoes, allintitle, volume, confirmacao e leitura remota. Nao executar provider real ou escrita remota durante testes automatizados.
++## Ajuste localizado da interface e preferencias da Extensao - 2026-07-27
++
++- Implementado localmente: hierarquia do popup, painel de conexao, funil multiplo BOFU/MOFU/TOFU, controle Local sobre localidades, filtros com Sem maximo e preferencias por usuario + `brandId`.
++- Pendente manual: recarregar a extensao no Chrome, confirmar a ordem visual, trocar Adalba/Lindisse, validar preferencias isoladas, testar rota divergente e executar uma extracao pequena sem alterar dados remotos durante a homologacao automatizada.
++
++## Correcao urgente da inicializacao do popup da Extensao - concluida localmente - 2026-07-27
++
++- Corrigir regressao `Cannot access 'sectionLabel' before initialization` no bootstrap do popup; concluido localmente com teste de ordem de inicializacao.
++- Separar validacao real da sessao pelo endpoint de marcas da exibicao do email e da restauracao das preferencias; concluido localmente sem limpar armazenamento ou fazer logout automatico.
++- Preservar marcas autorizadas quando a restauracao de filtros/preferencias locais falhar; concluido localmente com tratamento localizado e diagnostico explicito.
++- Exibir mensagens acionaveis para aba nao conectada, rota divergente e outra marca; concluido localmente.
++- Pendente manual: recarregar a extensao no Chrome, validar login invalido/valido, duas marcas com preferencias isoladas, rota correta/incorreta e reconexao explicita.
++
++## Correcao localizada Abrir Minerador -> Conectar aba - concluida localmente - 2026-07-27
++
++- Registrar e reutilizar a aba aberta por `brandId`, ativando a rota `/{brandRef}/minerador`; concluido localmente.
++- Desabilitar conexao durante carregamento e liberar somente com `status=complete`; concluido localmente.
++- Tornar a leitura de conexao passiva e reservar bridge/ping para a acao explicita `Conectar`; concluido localmente.
++- Diferenciar aba ausente, aba carregando, bridge sem resposta, rota divergente e marca divergente; concluido localmente.
++- Reordenar visualmente Abrir/Conectar e TOFU/MOFU/BOFU; concluido localmente sem alterar o contrato de importacao.
++- Pendente manual: recarregar a extensao e a aba do Minerador, testar Adalba, Lindisse, troca de marca, rota incorreta, aba previamente aberta e reconexao apos bridge ausente.
++
++## Diagnostico tecnico da bridge no Chrome - concluido localmente - 2026-07-27
++
++- Instrumentar a cadeia `executeScript -> bridge -> sendMessage -> probe -> ACK -> handshake` com codigos tecnicos e estagios seguros; concluido localmente.
++- Diferenciar `INJECTION_PERMISSION_DENIED`, `INJECTION_FILE_NOT_FOUND`, `INJECTION_EXECUTION_ERROR`, `PROBE_NO_RECEIVER`, `PROBE_TIMEOUT`, `ACK_INVALID` e protocolo incompativel; concluido localmente.
++- Exibir detalhes tecnicos copiaveis no popup sem tokens, cookies, senhas ou payloads de keywords; concluido localmente.
++- Confirmar manualmente no Chrome a pasta carregada, o service worker, `INJECTION_OK`, `PROBE_ACK` e `HANDSHAKE_OK` com Adalba e Lindisse; pendente.
++
++## Compactacao do estado de conexao - concluida localmente - 2026-07-27
++
++- Compactar o estado conectado para nome da marca e indicador verde, mantendo o diagnostico fora do uso normal; concluido localmente.
++- Adicionar `Ver diagnostico`/`Ver detalhes` expansivel e preservar `Copiar detalhes tecnicos`; concluido localmente.
++- Manter handshake, conexao efemera, importacao e medicao de volume sem alteracao; concluido localmente.
++- Validar manualmente no Chrome o resumo conectado, diagnostico recolhido/expandido, copia, fechamento/reabertura do popup e legibilidade; pendente.
++
++## Correcao do estado conectado sobrescrito - concluida localmente - 2026-07-27
++
++- Retornar `HANDSHAKE_OK`/`connected` na leitura passiva quando o registro efemero da aba continuar valido; concluido localmente.
++- Trocar `session_missing` por `panel_not_checked`/`idle` para aba autenticada ainda sem handshake; concluido localmente.
++- Ignorar leitura inicial, listener de aba pronta e resposta antiga depois de conexao explicita por `connectionOperationId` e `connectRequestId`; concluido localmente.
++- Manter a homologacao manual no Chrome para conectar, fechar/reabrir popup, recarregar a aba, trocar Adalba/Lindisse e confirmar invalidacoes reais; pendente.
++
++## Correcao da transicao PROBE_ACK -> HANDSHAKE - concluida localmente - 2026-07-27
++
++- Corrigir o listener da bridge para confirmar `handshake_sent` ao `tabs.sendMessage`; concluido localmente.
++- Impedir que um `PROBE_ACK` valido seja convertido em `bridge_unavailable`; concluido localmente.
++- Separar `connectRequestId`, `probeRequestId` e `handshakeRequestId`, validando aba, marca e tentativa ativa; concluido localmente.
++- Dar precedencia ao resultado explicito de Conectar sobre leituras passivas e ignorar respostas antigas; concluido localmente.
++- Exibir `HANDSHAKE_OK`/`connected` ou `handshake_error` com status estruturado; concluido localmente.
++- Confirmar manualmente no Chrome `INJECTION_OK -> PROBE_ACK -> HANDSHAKE_SENT -> HANDSHAKE_OK -> CONNECTED` com Adalba e depois Lindisse; pendente.
++
++## Fluxo pos-extracao, previa e importacao da Extensao - concluido localmente - 2026-07-27
++
++- Concluido localmente: executor sequencial em background com estado temporario por ator, marca, aba e run, restauracao da semente/previa e progresso apos fechar/reabrir popup.
++- Concluido localmente: Local desligado nacional; Local ligado com Brasil/UF/municipios; pausa, retomada, cancelamento parcial e descarte explicito.
++- Concluido localmente: previa selecionavel, crescente e rolavel, linhas fora de filtro visiveis, deduplicacao por run com evidencias de contexto, contadores e erros.
++- Concluido localmente: allintitle sequencial com zero/error preservados e volume opcional server-side; importacao sem exigir metricas, com confirmacao, resposta real, resultados por linha e retry de falhas.
++- Testes locais: `tests/minerador-extension-extraction.test.mts`, sintaxe dos scripts e `git diff --check`.
++- Pendente manual: recarregar a extensao, testar popup fechado durante execucao, pausar/retomar/cancelar, confirmar previsualizacao e importacao controlada com Adalba/Lindisse; nao executar lote real, SQL, migration, limpeza, commit, push ou deploy.
++
++## Ajuste localizado da tabela - conclu├¡do localmente - 2026-07-27
++
++- Conclu├¡do: colunas expl├¡citas `Funil` e `Principal`, com badges alinhados fora da coluna `Keyword`.
++- Conclu├¡do: `Keyword` como coluna el├ística principal; links/canonicals ficam abaixo da keyword e truncam somente quando necess├írio.
++- Conclu├¡do: funil neutro quando n├úo existe hint persistido; sem infer├¬ncia ou mudan├ºa de contrato.
++- Pendente: valida├º├úo visual manual da densidade e responsividade em 360px, 768px, 1024px e 1440px, al├®m da confer├¬ncia em dark mode.
++
++## Corre├º├úo da distribui├º├úo das colunas da tabela - conclu├¡da localmente - 2026-07-27
++
++- Conclu├¡do: ordem expl├¡cita `Keyword`, `Principal`, `Resultados`, `Volume`, `KGR`, `Inten├º├úo`, `Nicho de mercado`, `Funil`, `Silo/Categoria`, `Status`.
++- Conclu├¡do: Keyword como maior coluna flex├¡vel e tabela m├¡nima de `110rem`, com rolagem horizontal no cont├¬iner existente quando a viewport for menor.
++- Conclu├¡do: larguras fixas para Principal, m├®tricas, inten├º├úo, nicho, funil, silo/categoria e status, sem ocultar colunas ou alterar comportamento.
++- Pendente: valida├º├úo visual manual de alinhamento, keywords longas, viewports menores e dark mode.
++
++## Qualifica├º├úo expl├¡cita e Funil na barra de a├º├Áes - conclu├¡da localmente - 2026-07-27
++
++- Conclu├¡do: remo├º├úo da qualifica├º├úo autom├ítica durante o carregamento; keywords sem processamento continuam neutras.
++- Conclu├¡do: a├º├úo prim├íria `Qualificar selecionadas`, limitada ├á sele├º├úo atual, com resultado individual por keyword.
++- Conclu├¡do: Funil l├│gico opcional em `analise_semantica.funnel`, com valores `TOFU`, `MOFU` e `BOFU`, origem, confian├ºa, evid├¬ncia e revis├úo de conflito.
++- Conclu├¡do: hints da Extens├úo preservados como pista, sem aprova├º├úo autom├ítica; decis├Áes humanas reconhecidas permanecem protegidas.
++- Conclu├¡do: barra inferior reorganizada com a├º├Áes de organiza├º├úo, m├®tricas, qualifica├º├úo, decis├úo KGR, `Mais a├º├Áes` e `Excluir` separado.
++- Pendente: valida├º├úo manual autenticada com dados reais, confer├¬ncia visual em light/dark e execu├º├úo real de endpoints de IA; testes locais n├úo consumiram APIs pagas.
++
++## Corre├º├úo definitiva do chevron de Silo/Categoria - conclu├¡da localmente - 2026-07-27
++
++- Conclu├¡do: seta nativa removida somente do select de `Silo/Categoria`; texto selecionado e `ChevronDown` customizado formam uma unidade visual compacta.
++- Conclu├¡do: truncamento ocorre no texto, com `title` para o valor completo, foco percept├¡vel e select nativo preservado para menu e teclado.
++- Conclu├¡do: colunas, Status, demais selects, handler, persist├¬ncia e dados n├úo foram alterados.
++- Pendente: conferir a mesma composi├º├úo em 360px, 768px e 1024px.
++
++## Padroniza├º├úo do select Silo/Categoria com Nicho de mercado - conclu├¡da localmente - 2026-07-27
++
++- Conclu├¡do: `Silo/Categoria` reutiliza a base visual do select `Nicho de mercado`, sem fonte maior, peso diferente ou wrapper customizado.
++- Conclu├¡do: largura total da c├®lula, truncamento, `title`, foco e menu nativo foram preservados.
++- Conclu├¡do: nenhum valor, op├º├úo, handler, persist├¬ncia, coluna ou dado foi alterado.
++- Pendente: conferir responsividade nos viewports de 360px, 768px e 1024px.
++
++## Preflight just-in-time da medi├º├úo allintitle - conclu├¡da localmente - 2026-07-27
++
++- Conclu├¡do localmente: conex├úo ef├¬mera antiga n├úo ├® mais aceita como prova; `ensureMineradorConnection(...)` executa preflight atual por aba, contexto e opera├º├úo.
++- Conclu├¡do localmente: reload/navega├º├úo marca a conex├úo para revalida├º├úo e a bridge ├® preparada novamente no `complete`; a opera├º├úo executa probe e handshake antes de criar lote.
++- Conclu├¡do localmente: h├í uma ├║nica recupera├º├úo controlada para falhas de probe/ACK/handshake; falha final n├úo abre Google, n├úo inicia query e n├úo altera m├®tricas existentes.
++- Conclu├¡do localmente: `batchId` do popup s├│ ├® atribu├¡do ap├│s a resposta de lote criado; diagn├│sticos carregam IDs e est├ígio real, sem `stage: null` no preflight.
++- Pendente manual: recarregar a extens├úo, conectar Adalba, medir, recarregar a p├ígina na mesma rota sem clicar em Conectar, confirmar renova├º├úo autom├ítica, testar zero/erro e repetir fechando/reabrindo o popup. N├úo executar Google real automatizado, SQL, migration, limpeza, commit, push ou deploy.
++
++## Renovacao automatica antes do allintitle - concluida localmente - 2026-07-28
++
++- Concluido localmente: preflight JIT usa `ensureMineradorConnection(...)` como fluxo canonico de conectar, com registro obsoleto invalidado antes da reinjecao.
++- Concluido localmente: reload/navegacao marca a sessao efemera no `loading`; a bridge e preparada uma unica vez no `complete`, enquanto a operacao explicita continua responsavel por handshake.
++- Concluido localmente: uma unica recuperacao controlada, sem lote ou aba Google antes de `HANDSHAKE_OK`, preservando selecao, limite, sequencia, CAPTCHA, zero, erro e IDs do contrato allintitle.
++- Concluido localmente: diagnostico estruturado com IDs, tabId, bridge anterior/atual, eventos, estagio e resultado da recuperacao.
++- Pendente manual: validar no Chrome o reload na mesma URL, recuperacao automatica, falha orientada, reconexao, popup fechado/reaberto e medicao real. Nao executar operacoes remotas, Google real automatizado, SQL, migration, limpeza, commit, push ou deploy.
++- Correcao definitiva apos reload - 2026-07-28: pendente somente homologacao manual no Chrome para confirmar `loading -> stale -> complete -> injection_ok -> probe_ack -> ready_for_validation -> handshake_ok -> batch_created`.
++- Implementado localmente: uma reinjecao por ciclo de reload, sem polling; rota diferente, marca diferente, aba fechada ou falha de permissao nao reinjetam a bridge.
++- Implementado localmente: popup deixa de mostrar conexao verde durante reload e recebe os estados de atualizacao, pronto para validacao e falha de preparacao.
++- Implementado localmente: ausencia do canal da pagina retorna `page_bridge_unreachable`/`page_bridge_dispatch`; lote e metricas permanecem intocados antes do handshake. A remocao fica restrita ao registro efemero stale.
++
++## Sele├º├úo complementar por intervalo e arraste - corre├º├úo local - 2026-07-29
++
++- Conclu├¡do localmente: sele├º├úo individual, Ctrl/Cmd, Shift e Ctrl/Cmd+Shift pela ordem visual atual.
++- Conclu├¡do localmente: arraste adicional na coluna de sele├º├úo com toler├óncia, modo selecionar/desmarcar e deduplica├º├úo por gesto.
++- Conclu├¡do localmente: cabe├ºalho limitado ├ás linhas vis├¡veis, estado indeterminado e preserva├º├úo de selecionadas ocultas.
++- Pendente: homologa├º├úo visual e de teclado no Chrome em light/dark e viewports 360px, 768px, 1024px e 1440px.
++
++## Allintitle sem depend├¬ncia de silo - corre├º├úo local - 2026-07-29
++
++- Conclu├¡do localmente: remover a pr├®-condi├º├úo indevida de `lista_id`/silo no in├¡cio e na confirma├º├úo da medi├º├úo allintitle.
++- Conclu├¡do localmente: validar ID, texto e `brand_id` com c├│digos `invalid_keyword_id`, `invalid_keyword_text`, `keyword_not_persisted` e `keyword_brand_mismatch`.
++- Preservado: endpoint server-side, transporte background-owned, persist├¬ncia de `results_allintitle`, v├¡nculos de silo/lista, volume, importa├º├úo, qualifica├º├úo e fronteira do Arquiteto.
++- Pendente: homologa├º├úo manual no Chrome com keywords sem silo e com silo, incluindo reload e persist├¬ncia.
++
++## Allintitle background-owned e persistencia server-side - 2026-07-29
++
++- Concluido localmente: SDD aprovada e endpoint dedicado `POST /api/extensao/marcas/[brandId]/keywords/resultados-allintitle` criado sem migration ou schema novo.
++- Concluido localmente: autenticacao server-side, tenant canonico, validacao por keyword, limite de 10, outcomes individuais e preservacao em falhas.
++- Concluido localmente: background chama o endpoint por resultado confirmado e o workspace nao mantem escrita direta concorrente no fluxo allintitle.
++- Concluido localmente: relay declarado e limitado as origens locais aprovadas; contexto invalidado orienta uma unica recarga da pagina, sem tentativa de reviver bridge.
++- Pendente: homologar Chrome autenticado com reload da Extensao/pagina, popup fechado, lote em andamento, CAPTCHA, zero, erro, persistencia e Adalba/Lindisse. Nao executar Google real automatizado, SQL, migration, limpeza, commit, push ou deploy.
++
++## Sele├º├úo por pintura e leitura localizada do allintitle - 2026-07-29
++
++- Implementado localmente: sele├º├úo por arraste baseada em coordenadas e `elementFromPoint`, limitada ├á coluna de sele├º├úo e compat├¡vel com os modos de clique existentes.
++- Implementado localmente: parser localizado para `Aproximadamente`, `Cerca de`, `About` e `Approximately`, separadores de milhar e sufixo de tempo, com abertura ├║nica de Ferramentas quando o seletor conhecido n├úo apresenta o contador.
++- Implementado localmente: contador ausente n├úo ├® classificado como zero; a pr├®via usa mensagem, c├│digo, est├ígio e diagn├│stico estruturados.
++- Conclu├¡do no Chrome: pintura seleciona e desmarca 10 linhas; o Google exibiu `Aproximadamente 282 resultados (0,21 s)` ap├│s `Ferramentas` e o Minerador refletiu 282.
++- Conclu├¡do ap├│s reload da p├ígina do Minerador: a keyword permaneceu com 282.
++- Pendente de homologa├º├úo: recarregar a Extens├úo pelo gerenciador do Chrome e repetir a medi├º├úo com o background atualizado; a automa├º├úo n├úo pode acessar `chrome://extensions`.
++
++## Modo pintar real e reconcilia├º├úo de lote ├│rf├úo - 2026-07-29
++
++- Implementado localmente: handle de pintura cobre a c├®lula de sele├º├úo, mant├®m `elementFromPoint`/`closest`, captura/libera ponteiro e preserva clique, Ctrl/Cmd, Shift, cabe├ºalho e teclado.
++- Implementado localmente: active pointer por `brandId`, reconcilia├º├úo de registros sem executor, estados `orphaned`/`interrupted`, hist├│rico com resultados e cleanup terminal.
++- Implementado localmente: nova opera├º├úo viva bloqueia em `operation_guard`; opera├º├úo ├│rf├ú oferece retomada ou descarte, e cancelamento libera a marca.
++- Pendente: homologa├º├úo manual pelo usu├írio ap├│s reload da Extens├úo; n├úo declarar o gesto conclu├¡do por automa├º├úo ou evento simulado.
++
++## Restaura├º├úo do fluxo de sele├º├úo e medi├º├úo allintitle - 2026-07-29
++
++- Conclu├¡do localmente: remover o limite de 10 da sele├º├úo total; o limite permanece apenas no sublote t├®cnico interno.
++- Conclu├¡do localmente: acompanhar resultados por opera├º├úo e n├úo somente pelo primeiro `batchId`, com progresso geral e diagn├│stico por keyword.
++- Conclu├¡do localmente: restaurar clique normal de checkbox e sele├º├úo por intervalo/pintura na tabela e na pr├®via do popup, sem cursor de cruz.
++- Pendente: homologar no Chrome os modos de sele├º├úo, 51 keywords em seis grupos, popup fechado, reload da p├ígina, pausa/continua├º├úo/cancelamento e o caso `allintitle:"alternativas ao facebook ads para dentistas"` com a contagem 323 refletida na pr├®via e na tabela ap├│s persist├¬ncia.
++
++## Homologa├º├úo pendente ÔÇö popup e lote parcial - 2026-07-29
++
++- Validar no Chrome: no popup, clique livre, Ctrl/Cmd, Shift, Ctrl/Cmd+Shift, pintura, teclado e persist├¬ncia da desmarca├º├úo ap├│s fechar e reabrir.
++- Validar no Chrome: ap├│s importar, allintitle e volume aparecem e funcionam somente na tabela do Minerador; o popup n├úo oferece medi├º├úo para candidatos tempor├írios.
++- Validar no Chrome: lote de 3 e de 10 com um retorno faltante mostra sucesso parcial e permite repetir somente o ID sem resultado confirmado.
++
++## Homologa├º├úo pendente ÔÇö navega├º├úo e CAPTCHA - 2026-07-29
++
++- Confirmar no Chrome que abas transit├│rias sem URL n├úo produzem `navigation_failed` e que a p├ígina inicial do Google n├úo ├® tratada como redirecionamento inesperado.
++- Confirmar que `/sorry/index`, reCAPTCHA ou consentimento pausam o lote, abrem a aba necess├íria e mostram aviso com feito/restante e Retomar/Cancelar.
++
++## Homologa├º├úo pendente ÔÇö lote longo interrompido - 2026-07-29
++
++- Validar com lista longa que o primeiro CAPTCHA em portugu├¬s pausa o lote no item atual; os restantes n├úo podem virar `query_mismatch` em cascata.
++- Validar que, ao abrir a tabela durante uma opera├º├úo ativa, a interface reassocia o lote e mostra feito, total, restante, Retomar e Cancelar.
++
++## Homologa├º├úo pendente ÔÇö pausa de CAPTCHA retom├ível - 2026-07-29
++
++- Validar que `batch_paused` aparece como aviso informativo, com `Retomar` e `Cancelar lote`, e n├úo como falha terminal.
++- Validar que a libera├º├úo do CAPTCHA seguida de `Retomar` continua no ├¡ndice preservado e que as demais a├º├Áes da tabela permanecem utiliz├íveis.
++
++## Homologa├º├úo pendente ÔÇö notifica├º├úo de CAPTCHA sem foco autom├ítico - 2026-07-30
++
++- Validar que CAPTCHA n├úo troca a aba em primeiro plano, enquanto a notifica├º├úo persistente da Extens├úo e o badge `!` continuam percept├¡veis.
++- Validar que clicar na notifica├º├úo ou em `Abrir Google` ├® o ├║nico caminho que abre a aba do desafio.
++
++## Homologa├º├úo pendente ÔÇö classifica├º├úo parcial de inten├º├úo e nicho - 2026-07-30
++
++- Repetir manualmente as tr├¬s keywords que receberam resposta incompleta e confirmar que respostas equivalentes de `intent`/`nicho` s├úo persistidas.
++- Confirmar que resposta ainda incompleta informa aviso parcial, preserva os dados anteriores e n├úo aparece como erro de console.
++
++## Homologa├º├úo pendente ÔÇö pintura imediata de keywords - 2026-07-30
++
++- Validar no Chrome que cada checkbox muda durante o arraste, sem aguardar `pointerup`, e volta ao estado anterior quando o ponteiro retorna.
++- Validar clique, Ctrl/Cmd, Shift, Ctrl/Cmd+Shift, sele├º├úo de vis├¡veis, teclado, mouse e touchpad em light e dark mode.
++
++## Proposta pendente ÔÇö fonte secund├íria de volume - 2026-07-30
++
++- O endpoint `GET /global-volume` do provedor `seo-keyword-research-tool1.p.rapidapi.com` respondeu em leitura com se├º├úo `BR`, volume, global, CPC e tend├¬ncia mensal. Os volumes recebidos s├úo estimativas do provedor, n├úo uma confirma├º├úo independente de dados Google.
++- Avaliar o provedor `ai-google-keyword-research-planner.p.rapidapi.com` como fonte secund├íria somente ap├│s assinatura e teste controlado do contrato/payload.
++- Estrat├®gia proposta: manter uma fonte prim├íria por medi├º├úo; usar a secund├íria apenas para indisponibilidade, falha de contrato ou cota da prim├íria. Nunca disparar as duas para a mesma keyword por padr├úo, nunca misturar valores, e registrar `volume_source`, data e resposta normalizada da fonte efetivamente usada.
++- Antes de implementar: comparar keywords brasileiras de controle, normalizar valores abreviados como `1.3k`, definir aus├¬ncia/parcial/erro sem gravar zero e revisar custo, quota, termos e limites de cada assinatura. A troca de provedor no endpoint server-side exige escopo pr├│prio, fixtures/testes e valida├º├úo manual; nenhuma integra├º├úo, escrita remota ou chamada adicional foi feita por este registro.
++
++## Homologa├º├úo pendente ÔÇö volume brasileiro pelo novo provedor - 2026-07-30
++
++- Repetir uma medi├º├úo autenticada ap├│s a renova├º├úo da cota e confirmar que `GET /global-volume?keyword=<keyword>&country=br` retorna volume somente de `Keyword Overview.BR` para a keyword exata.
++- Confirmar que `1.3k` ├® persistido como `1300`, que aus├¬ncia de BR n├úo usa `global`/outro pa├¡s e que falha/429 preserva volume, resultados allintitle e KGR anteriores.
++- Conferir o limite e custo efetivos da assinatura antes de medi├º├úo em lote. A fonte secund├íria permanece somente proposta; n├úo h├í fallback autom├ítico.
++
++## Homologa├º├úo pendente ÔÇö conclus├úo sem volume BR e avisos - 2026-07-30
++
++- Confirmar no Chrome que keyword sem entrada exata em `Keyword Overview.BR` encerra como conclus├úo normal, sem etapa/c├│digo t├®cnico e sem apar├¬ncia de erro.
++- Confirmar no dark mode que avisos de sucesso, informa├º├úo e erro t├¬m fundo opaco, texto leg├¡vel, borda discreta e a├º├Áes acess├¡veis; validar tamb├®m viewport estreita.
++
++## Homologa├º├úo pendente ÔÇö KGR com volume zero e selos textuais - 2026-07-30
++
++- Validar no Chrome que uma keyword com `volume_search = 0` mostra `N├úo calcul├ível`, inclusive se ainda estiver pendente, e que tentar aprov├í-la como KGR mostra apenas o aviso informativo.
++- Confirmar que `Pendente`, `N├úo calcul├ível`, `N├úo aplic├ível`, `Inconsistente`, `Inv├ílido` e `Sem medi├º├úo` usam a mesma altura, tipografia, borda e alinhamento dos selos de Principal, sem mudar o estilo dos valores num├®ricos KGR.
++- Confirmar que a pol├¡tica `Principal revis├ível` continua decis├úo expl├¡cita e que nenhuma a├º├úo KGR altera slug, canonical ou dados da keyword.
++
++## Homologa├º├úo pendente ÔÇö destaque de volume confirmado - 2026-07-30
++
++- Validar no Chrome que `0 confirmado` aparece somente para zero retornado pela medi├º├úo exata e que zero sem evid├¬ncia permanece normal.
++- Validar que n├║meros positivos confirmados pelo provedor usam o azul de confirma├º├úo, enquanto valores legados, estimados ou sem `volume_measurement` continuam na cor neutra.
++- Conferir t├¡tulo acess├¡vel, legibilidade em dark mode e aus├¬ncia de altera├º├úo em KGR, filtros, ordena├º├úo, persist├¬ncia ou largura da coluna.
++
++## Homologa├º├úo pendente ÔÇö selos da coluna Inten├º├úo - 2026-07-30
++
++- Confirmar no Chrome que inten├º├Áes conhecidas e pendentes usam selos compactos coerentes com Principal e KGR, sem altera├º├úo de valor, filtro ou classifica├º├úo.
++- Conferir truncamento, `title`, dark mode e viewport estreita, garantindo que a coluna Nicho de mercado n├úo seja invadida.
++
++## Homologa├º├úo pendente ÔÇö grade e hover da planilha - 2026-07-30
++
++- Confirmar no Chrome que as linhas horizontais e verticais est├úo mais f├íceis de identificar sem criar contraste agressivo.
++- Confirmar hover em linha comum, selecionada e publicada, no dark mode e nas larguras de 360px, 768px, 1024px e 1440px.
++- Confirmar que o divisor horizontal tem a mesma intensidade do vertical e que somente o hover se destaca mais.
++
++## Homologa├º├úo pendente ÔÇö Busca e Hist├│rico - 2026-07-30
++
++- Confirmar no Chrome que Buscar comporta aproximadamente 60 caracteres e continua filtrando normalmente.
++- Confirmar que Hist├│rico abre abaixo do bot├úo, fecha ao clicar fora ou pressionar Escape e preserva restaurar/fechar; conferir que os demais m├│dulos continuam com o painel lateral.
++
++## Homologa├º├úo pendente ÔÇö r├│tulo de keyword livre - 2026-07-30
++
++- Confirmar no Chrome que o estado `free` mostra `Keyword livre` na coluna Principal, sem altera├º├úo da pol├¡tica t├®cnica, persist├¬ncia ou dos selos de keywords publicadas.
++
++## Homologa├º├úo pendente ÔÇö densidade dos bot├Áes selecionados - 2026-07-30
++
++- Confirmar no Chrome que os bot├Áes da barra inferior t├¬m a mesma altura, padding, tamanho de texto, ├¡cones e radius dos controles no topo, preservando foco, hover, estados desabilitados e quebra de linha em viewport estreita.
++
++## Homologa├º├úo pendente ÔÇö redistribui├º├úo de largura da tabela - 2026-07-30
++
++- Confirmar no Chrome que Principal, Inten├º├úo e Funil ficaram justas ao conte├║do e que Palavra-Chave absorveu a largura liberada, sem truncamento inadequado, invas├úo da coluna seguinte ou altera├º├úo dos selects.
+diff --git a/docs/03-minerador/estado-atual.md b/docs/03-minerador/estado-atual.md
+index a58ae1a7daa4d4a33b4b7ba256f792ba3b98056a..8c77d9880e22a1d68f8bdf96f6499180b1809d17 100644
+--- a/docs/03-minerador/estado-atual.md
++++ b/docs/03-minerador/estado-atual.md
+@@ -32,6 +32,15 @@ A importa├º├úo Site ÔåÆ `keywords_kgr` continua seletiva e idempotente, com IDs
+ - **Bloqueado:** snapshot/SQL remoto, browser autenticado, extens├úo carregada e corre├º├Áes estruturais aguardam execu├º├úo/autoriza├º├úo do usu├írio.
+ - **Arquivos centrais:** `app/(brand)/[brandRef]/minerador/page.tsx`, `minerador-extensao/background.js`, `minerador-extensao/popup.js`.
+ - **Diferen├ºa spec/implementa├º├úo:** m├│dulo funcional e monol├¡tico como aprovado, mas com diverg├¬ncias de escopo por marca, muta├º├Áes no carregamento e transfer├¬ncia n├úo persistida; n├úo reconstruir nesta fase.
++## Correcao do gesto de selecao e da previa allintitle - implementacao local - 2026-07-29
++
++- Correcao complementar: o background agora envia cada evento allintitle tambem no envelope `allintitle_relay_event` aceito pelo relay da pagina; resultados deixam de depender somente do envio direto por aba.
++- Removido visualmente do popup o par redundante de acoes Selecionar visiveis/Limpar visiveis; a selecao continua diretamente nas candidates.
++- Causa confirmada no codigo: a pintura da tabela fazia uma atualizacao React por movimento do ponteiro; a pintura do popup alterava as candidates em memoria, mas nao persistia nem redesenhava ao termino.
++- Implementado localmente: a tabela acumula linhas visitadas e atualiza uma unica vez ao soltar/cancelar; o popup preserva o clique nativo de checkbox e persiste/redesenha ao finalizar pintura. Clique, Ctrl/Cmd, Shift, teclado, filtros e acoes em lote permanecem separados.
++- Implementado localmente: resultados allintitle aceitam `operationRequestId` e `operationBatchId` raiz, mas continuam validados pela marca e pelas keywords da operacao ativa.
++- Confirmado por teste local: 48 testes direcionados e sintaxe dos scripts da extensao passaram. Pendente manual: gesto real e retorno 323 na previa/tabela no Chrome apos reload da extensao. Nenhuma operacao remota foi executada.
++
+ ## Fase B - aplicabilidade KGR e consolidacao Site/Sitemap - 2026-07-22
+ 
+ - Implementado localmente: decisao humana `applicable`/`not_applicable`/`pending`, rotulo `SIM`/`NAO`/`PENDENTE`, origem, ator, data, versao, justificativa e historico em `analise_semantica`.
+@@ -280,3 +289,370 @@ A importa├º├úo Site ÔåÆ `keywords_kgr` continua seletiva e idempotente, com IDs
+ - O responder de handshake agora vive na rota contextual do Minerador e publica `page_handshake_ready` antes do ACK; o background valida ator, marca, rota e acesso antes do ping e registra o ├║ltimo est├ígio confirmado no diagn├│stico.
+ - HTTP 429 da RapidAPI encerra o lote sem retry e retorna somente `N├úo foi poss├¡vel coletar volume.`. Itens n├úo processados s├úo identificados internamente; nenhum volume, KGR, `results_allintitle` ou metadado anterior ├® apagado.
+ - Valida├º├úo local: 39 testes focados, TypeScript, sintaxe da extens├úo e `git diff --check` passaram. RapidAPI, Google, Chrome autenticado, Supabase remoto, migration, commit, push e deploy n├úo foram executados.
++## Simplificacao da extensao do Minerador Key - implementacao local - 2026-07-27
++
++- Implementado localmente no modulo Minerador: popup sem lista, projeto, categoria, silo ou destino editorial; a marca autorizada continua obrigatoria e o `brandId` canonico e validado no handshake e no servidor.
++- Fluxo implementado: sugestoes -> filtros preliminares de intencao/funil -> previa e selecao humana -> allintitle sequencial em lote pequeno -> filtro de resultados -> volume somente das sobreviventes -> filtro de volume -> confirmacao humana -> importacao autenticada.
++- Endpoints canonicos implementados: `POST /api/extensao/marcas/{brandId}/volume` (somente medicao, sem persistencia) e `POST /api/extensao/marcas/{brandId}/keywords/import` (persistencia server-side autenticada).
++- Payload de importacao: `extractionBatchId` e `items`; cada item carrega keyword, origem `extension`, status `bruto`, hints, evidencias de resultados/volume e localidades. Keyword nova usa `brand_id` real e `lista_id: null`; keyword existente recebe somente evidencia aditiva em `analise_semantica`, preservando decisoes e identidade anteriores.
++- O caminho legado `executeMining` permanece isolado para compatibilidade/rollback e nao e chamado pelo popup novo. Nenhum schema, migration, SQL remoto ou limpeza de armazenamento foi executado.
++- Validacao local desta implementacao: 18 testes focados, sintaxe dos scripts da extensao, ESLint direcionado, TypeScript, build Next.js 16 e `git diff --check` passaram. Chrome autenticado, Google, RapidAPI e persistencia Supabase remota continuam pendentes.
++## Ajuste localizado da interface e preferencias da Extensao - 2026-07-27
++
++- Implementado localmente no popup: ordem visual e-mail -> Marca -> conexao -> palavra-chave -> intencao -> funil -> filtros -> localidades -> extracao. A conexao agora possui painel separado para estado principal, rota, marca selecionada e orientacao.
++- Funil substituido por selecao multipla BOFU, MOFU e TOFU, com BOFU como unico padrao inicial. O hint TOFU foi aceito de forma aditiva no contrato puro; nenhuma decisao editorial e promovida automaticamente.
++- Local controla a habilitacao dos controles geograficos. Ao desmarcar Local, estados e municipios ficam desabilitados sem perder escolhas salvas; a proxima extracao nao envia localidades como filtro ativo.
++- Filtros reorganizados em blocos de resultados allintitle e volume mensal, com barras visuais, campos precisos e estado Sem maximo. Volume continua sendo medido exclusivamente pelo endpoint server-side apos resultados.
++- Preferencias nao sensiveis usam `chrome.storage.local` com chave `minerador_extension_preferences:{actorUserId}:{brandId}`. Sessao, token, handshake e keywords nao sao tratados como preferencia; nao houve limpeza de armazenamento.
++- Consumidores preservados: popup, service worker, handshake, endpoint de importacao e rota server-side de volume. Nenhum outro modulo, schema, migration, RLS ou persistencia remota foi alterado.
++- Validacao local desta etapa: testes focados, sintaxe dos scripts, TypeScript, ESLint direcionado, build Next.js e `git diff --check`; homologacao visual no Chrome, troca de marcas, rota divergente e restauracao real permanecem pendentes.
++
++## Correcao urgente da inicializacao do popup da Extensao - 2026-07-27
++
++- Causa localizada no popup: `setLocalControlsEnabled()` acessava `sectionLabel` antes da declaracao local durante a restauracao das preferencias. A excecao era capturada pelo fluxo amplo de carregamento e aparecia incorretamente como falha ao carregar marcas.
++- Corrigido localmente: a etiqueta de localidade e inicializada antes do uso; a consulta server-side de marcas agora e separada da restauracao de preferencias, portanto falha visual/local nao descarta marcas autorizadas.
++- Corrigido localmente: o email so aparece depois de a sessao ser aceita pela API de marcas. Token ausente/invalido nao e tratado como perfil autenticado e nao limpa token, refresh token ou armazenamento.
++- Corrigido localmente: estado inicial `panel_not_checked` exibe aba ainda nao validada, sem codigo tecnico; `session_missing` fica reservado para sessao ausente ou rejeitada; rota e marca divergentes exibem mensagens especificas e orientacao para abrir a rota correta e reconectar.
++- Troca de marca preserva preferencias por `actorUserId + brandId`, salva a marca anterior e invalida somente o handshake da aba; nao faz logout nem reutiliza dados da marca anterior.
++- Validacao local: teste de regressao do TDZ/bootstrap, testes focados, sintaxe dos scripts, TypeScript e build permanecem no escopo. Chrome autenticado, troca real de marcas, rota divergente e persistencia real continuam pendentes.
++
++## Correcao localizada Abrir Minerador -> Conectar aba - 2026-07-27
++
++- Causa localizada: `Abrir Minerador` criava a aba diretamente no popup sem registrar seu `tabId`; `Conectar` consultava apenas a aba ativa. O status automatico tambem chamava o caminho de handshake antes do clique explicito, permitindo ping durante carregamento.
++- Corrigido localmente: o service worker abre/reutiliza a rota canonica `/{brandRef}/minerador`, ativa a aba, registra o candidato por `brandId` em `chrome.storage.session` e informa `loading`/`ready`.
++- Corrigido localmente: `Conectar esta aba` usa o `tabId` registrado, aguarda `status=complete` e somente entao injeta/probeia a bridge e envia o ping. A leitura de status ficou passiva e nao executa handshake automaticamente.
++- Corrigido localmente: `tab_not_open`, `tab_loading`, falha de bridge/ping, rota divergente e marca divergente possuem estados separados. Falha de comunicacao nao e convertida em `route_mismatch`; rota divergente so e classificada depois de resposta da bridge.
++- Corrigido localmente: ordem visual e-mail -> Marca -> Abrir Minerador -> Conectar -> painel -> palavra-chave; funil visual TOFU -> MOFU -> BOFU, mantendo selecao multipla e BOFU como padrao sem preferencia.
++- Preferencias continuam em `minerador_extension_preferences:{actorUserId}:{brandId}`, com debounce e troca de marca sem logout, sem reutilizar o handshake anterior e sem limpar dados.
++- Validacao local: testes direcionados da UI, preflight, handshake, bridge e contratos, sintaxe dos scripts. Chrome autenticado, aba real carregando, bridge real, Adalba/Lindisse e rota divergente continuam pendentes.
++
++## Diagnostico tecnico da bridge no Chrome - implementacao local - 2026-07-27
++
++- O transporte canonico confirmado no codigo e: popup -> service worker -> `chrome.scripting.executeScript` com `minerador-panel-bridge.js` no mundo isolado (`ISOLATED`, frame 0) -> `chrome.tabs.sendMessage` -> listener `chrome.runtime.onMessage` da bridge -> probe `minerador_bridge_probe` -> ACK `bridge_ready` -> eventos de handshake da pagina -> `minerador_handshake_ack`.
++- O manifest nao declara `content_scripts`; a bridge e um content script programaticamente injetado. O arquivo esta presente na pasta `minerador-extensao`, o service worker e `background.js`, e `scripting`/origens locais estao declarados. A origem publicada continua exigindo permissao explicita no manifest empacotado.
++- A falha generica anterior foi localizada no tratamento: rejeicoes de `executeScript` e o erro Chrome `Receiving end does not exist` eram reduzidos a `bridge_unavailable`/`bridge_context_invalidated`, sem indicar a etapa real. O fluxo agora preserva a mensagem original do Chrome e separa permissao, arquivo ausente, excecao, receptor ausente, timeout, ACK invalido e protocolo.
++- Cada tentativa produz diagnostico seguro e copiavel no popup com `TAB_FOUND`, `TAB_LOADING` ou `TAB_COMPLETE`, `INJECTION_STARTED`, `INJECTION_OK`, `PROBE_SENT`, `PROBE_ACK` e `HANDSHAKE_OK`; nao inclui token, senha, cookies ou keywords.
++- A bridge publica `globalThis.__MINERADOR_EXTENSION_BRIDGE__` somente como marcador de disponibilidade, com versao, instancia e `ready`; isso nao concede acesso nem substitui o handshake autenticado.
++- Testes locais cobrem rejeicao da injecao, permissao/origem, arquivo inexistente, excecao, ausencia de receptor, timeout, ACK invalido, mundo isolado, manifest, preservacao de `tabId` e troca de marca. O smoke test autenticado no Chrome ainda e obrigatorio para capturar o codigo efetivo da instalacao carregada.
++
++## Compactacao do estado de conexao - implementacao local - 2026-07-27
++
++- Implementado localmente no popup: o estado conectado agora ocupa uma linha compacta com `Conectado ao Minerador ┬À {nomeDaMarca}` e indicador visual verde sem expor `tabId`, rota, request IDs ou eventos no uso normal.
++- O diagnostico tecnico permanece disponivel no proprio painel por `Ver diagnostico`; inicia recolhido e, ao abrir, mostra o JSON atual e `Copiar detalhes tecnicos` usando a rotina de copia existente.
++- Estado neutro usa `Conecte esta aba para iniciar.`; estado de validacao usa `Validando conexao...`; erros mostram somente a mensagem principal e `Ver detalhes`, sem textarea permanente.
++- O resumo conectado continua sendo renderizado a partir do registro efemero validado pelo background, portanto permanece disponivel apos fechar e reabrir o popup. Bridge, handshake, storage de sessao, importacao, funil, filtros e medicao nao foram alterados nesta etapa.
++- A composicao reutiliza os tokens visuais existentes da extensao (`surface`, `border`, `text`, `accent`, `danger`, `success`), preserva foco visivel e nao cria um dialogo ou sistema de cores paralelo. A extensao permanece em tema escuro; o popup tem largura fixa de 340px e a marca longa usa truncamento seguro.
++- Validacao local: testes focados da extensao, sintaxe, TypeScript, build, ESLint direcionado e verificacao visual estatica; homologacao visual manual no Chrome em popup aberto/fechado continua pendente.
++
++## Correcao do estado conectado sobrescrito - implementacao local - 2026-07-27
++
++- Causa localizada no popup: a leitura passiva do bootstrap e o listener de aba pronta podiam renderizar `panel_not_checked` depois de uma resposta explicita `HANDSHAKE_OK`; respostas antigas agora sao ignoradas por `connectionOperationId`, geracao, marca, aba e operacao ativa.
++- A conexao confirmada continua efemera no `chrome.storage.session`. A leitura passiva valida o registro e a aba atual e retorna `code: HANDSHAKE_OK`, `status: connected`, `state: connected`, `brandId`, `brandRef`, `tabId` e `connectRequestId` quando a conexao permanece valida.
++- Ausencia de registro ou rota sem handshake usa `panel_not_checked`, `status: idle`, `state: idle` e mensagem acionavel. `session_missing` permanece reservado para sessao da extensao ausente ou rejeitada.
++- O popup exibe `connecting` durante a acao explicita e estado neutro sem borda vermelha para aba ainda nao validada; uma leitura passiva nao sobrescreve `connecting` ou `connected`.
++- Invalidacoes reais preservadas: logout, troca de marca, aba fechada, rota/origem/marca/protocolo divergentes e falha de nova validacao explicita. Nenhuma limpeza de `storage.local`, migration, escrita remota, bridge ou manifest foi feita.
++- Validacao local: testes focados da extensao, sintaxe dos scripts, TypeScript, build Next.js 16, ESLint direcionado e `git diff --check` devem ser registrados separadamente; o fechamento/reabertura do popup e a persistencia real continuam homologacao manual no Chrome.
++
++## Correcao da transicao PROBE_ACK -> HANDSHAKE - implementacao local - 2026-07-27
++
++- Causa exata localizada: `minerador-panel-bridge.js` recebia `minerador_handshake_ping`, disparava o evento da pagina e retornava sem `sendResponse`. O `tabs.sendMessage` do background interpretava o fechamento da porta sem resposta como falha de comunicacao e devolvia `bridge_unavailable`, apesar de `PROBE_ACK` valido.
++- Corrigido localmente: a bridge confirma o transporte com `handshake_sent`; o background registra `handshake_sent`, aguarda o ACK autenticado da pagina e so entao registra `HANDSHAKE_OK`/`connected`.
++- A progressao diagnostica agora e `tab_found -> tab_complete -> injection_started -> injection_ok -> probe_sent -> probe_ack -> handshake_sent -> handshake_ok`; falha posterior ao `PROBE_ACK` usa `handshake_error`, nunca `bridge_unavailable`.
++- `connectRequestId`, `probeRequestId` e `handshakeRequestId` foram separados e validados com `tabId`, marca selecionada e tentativa ativa. Respostas passivas antigas ou de outra tentativa nao sobrescrevem a conexao explicita.
++- O resultado de conexao explicita informa `status: connected` ou `status: error`; `status: null` nao e usado para inferir indisponibilidade da bridge.
++- Validacao local: 22 testes de bridge/preflight/handshake/UI, sintaxe e `git diff --check` passaram. Chrome autenticado, `HANDSHAKE_OK` real no popup e repeticao com Adalba/Lindisse continuam como homologacao manual pendente.
++
++## Fluxo pos-extracao, previa e importacao da Extensao - implementacao local - 2026-07-27
++
++- Causa corrigida: o popup bloqueava a extracao ate a resposta final, descartava a previa ao iniciar e exigia volume para importar. O executor agora usa estado temporario em `chrome.storage.session`, vinculado a ator, `brandId`, `tabId` e `runId`, e continua fora do popup.
++- Implementado localmente: Local desligado usa um contexto nacional `{countryCode: "BR"}`; Local ligado habilita Brasil/UF/municipios e valida localidade somente nesse modo. Preferencias geograficas continuam preservadas silenciosamente.
++- Implementado localmente: semente e previa permanecem durante execucao, pausa, cancelamento e reabertura do popup. `Pausar`, `Continuar`, `Cancelar`, `Descartar resultados` e `Nova pesquisa` sao explicitos; cancelamento preserva resultados parciais e descarte remove somente a previa temporaria da execucao.
++- Implementado localmente: previa compacta e rolavel mostra origem/contexto, selecao, allintitle, volume, motivo de filtro, erro e contadores. Duplicatas sao deduplicadas por execucao, preservando evidencias de localidades; filtros nao escondem linhas.
++- Implementado localmente: allintitle permanece sequencial e opcional; zero confirmado permanece zero e falha nao vira zero. Volume usa somente o endpoint server-side existente e e opcional para importar.
++- Implementado localmente: importacao exige apenas extracao concluida/cancelada, selecao, conexao e marca validas; confirma resumo antes do request, preserva linhas em falha e permite retry das falhas. Novas keywords seguem `bruto`, `brand_id` real e `lista_id` nulo.
++- Nao alterado: bridge, handshake, storage de sessao da conexao, manifest, funil, filtros, contrato de medicao e endpoints remotos. Nao houve SQL, migration, escrita remota, limpeza geral de storage, commit, push ou deploy.
++- Confirmado localmente: sintaxe dos scripts, testes direcionados da extensao e `git diff --check`. Ainda nao verificado: Chrome autenticado com popup fechado durante extra├º├úo, provider Google real, endpoint remoto de volume/importacao, persistencia Supabase, dark mode manual e roteiro completo de Adalba/Lindisse.
++
++## Ajuste localizado da tabela - colunas Funil, Principal e Keyword - 2026-07-27
++
++- Implementado localmente: a tabela HTML agora possui colunas pr├│prias para `Funil` e `Principal`; a pol├¡tica da principal n├úo ├® mais renderizada dentro da c├®lula da keyword.
++- Implementado localmente: a tabela usa layout fixo com largura m├¡nima de planilha e deixa a keyword absorver o espa├ºo restante. Keywords longas podem quebrar; canonical publicado fica em segunda linha com truncamento apenas no metadado secund├írio.
++- Implementado localmente: `Funil` l├¬ somente hints j├í existentes em `analise_semantica.extension_import.funnelHints` ou campos equivalentes presentes; sem dado, exibe `ÔÇö`. Nenhum funil ├® inferido, persistido ou alterado.
++- Preservado: filtros, ordena├º├úo, status, resultados, volume, KGR, sele├º├úo, expans├úo, tenantiza├º├úo, persist├¬ncia, importa├º├úo, bridge e extens├úo.
++- Testes locais: layout da tabela, hidrata├º├úo, regress├Áes do Minerador, TypeScript, build Next.js 16 e `git diff --check` passaram. Lint direcionado ainda acusa erros preexistentes do componente (`any`, hooks e memoiza├º├úo), fora do escopo desta corre├º├úo.
++- Valida├º├úo visual manual em 360px, 768px, 1024px e 1440px, light/dark quando aplic├ível, permanece pendente; o script visual previsto n├úo existe neste checkout.
++
++## Corre├º├úo da distribui├º├úo das colunas da tabela - 2026-07-27
++
++- Implementado localmente: a ordem ap├│s as colunas utilit├írias agora ├® `Keyword`, `Principal`, `Resultados`, `Volume`, `KGR`, `Inten├º├úo`, `Nicho de mercado`, `Funil`, `Silo/Categoria`, `Status`.
++- Implementado localmente: `Keyword` permanece como a maior coluna flex├¡vel, com tabela m├¡nima de `110rem` para reservar aproximadamente 420px ou mais; as demais colunas receberam larguras est├íveis para evitar compress├úo e sobreposi├º├úo.
++- Implementado localmente: `KGR`, `Inten├º├úo`, `Nicho de mercado`, `Funil`, `Silo/Categoria` e `Status` preservam leitura, truncamento controlado nos selects e alinhamento entre cabe├ºalho e c├®lulas.
++- Preservado: dados, filtros, ordena├º├úo, sele├º├úo, expans├úo, persist├¬ncia, importa├º├úo, medi├º├úo de volume, funil, bridge, handshake e contratos do Minerador.
++- Valida├º├úo local: teste direcionado de layout, TypeScript, build e `git diff --check`; lint direcionado continua limitado por erros preexistentes do componente. Valida├º├úo visual manual em viewports menores e dark mode permanece pendente.
++
++## Qualifica├º├úo expl├¡cita e Funil na barra de a├º├Áes - 2026-07-27
++
++- Implementado localmente: o carregamento do Minerador n├úo executa mais o DNA l├│gico nem persiste inten├º├úo, nicho ou Funil. Keywords antigas sem classifica├º├úo final permanecem com `ÔÇö` at├® sele├º├úo e a├º├úo expl├¡cita.
++- Implementado localmente: `Qualificar selecionadas` ├® a a├º├úo prim├íria da barra inferior e atualiza inten├º├úo, Funil, nicho, vi├®s, confian├ºa e KeywordDNA l├│gico somente para as linhas selecionadas.
++- Implementado localmente: a proposta de Funil usa somente `TOFU`, `MOFU` ou `BOFU`, considera sinais textuais, inten├º├úo, etapa da jornada, potencial comercial, nicho, localidade e hints da Extens├úo, sem depender apenas de volume, resultados ou KGR.
++- Implementado localmente: a proposta ├® persistida de forma aditiva em `analise_semantica.funnel`; `extension_import.funnelHints` ├® preservado como evid├¬ncia, conflitos recebem `funnel_review_required`, e decis├úo humana reconhecida n├úo ├® sobrescrita.
++- Implementado localmente: cada linha processada aparece no resultado da qualifica├º├úo com inten├º├úo, Funil, nicho, vi├®s, confian├ºa e estado de atualiza├º├úo, preserva├º├úo, conflito ou falha.
++- Implementado localmente: a barra superior mant├®m a├º├Áes globais; a barra inferior agrupa organiza├º├úo, m├®tricas, qualifica├º├úo e decis├úo KGR. `Mais a├º├Áes` cont├®m publica├º├úo, classifica├º├úo especializada de inten├º├úo/nicho e an├ílise sem├óntica; `Excluir` permanece separado e destrutivo.
++- Preservado: layout e ordem das colunas, importa├º├úo, volume, allintitle, bridge, handshake, tenantiza├º├úo, decis├Áes de principal publicada e consumidores do KeywordDNA.
++- Valida├º├úo local: 131 testes direcionados, TypeScript e regress├Áes de layout passaram. Lint direcionado mant├®m erros preexistentes do componente. Build, valida├º├úo visual manual em light/dark e homologa├º├úo autenticada permanecem pendentes nesta etapa.
++
++## Corre├º├úo definitiva do chevron de Silo/Categoria - 2026-07-27
++
++- Implementado localmente: o select de `Silo/Categoria` mant├®m o `<select>` nativo para menu, teclado, foco, altera├º├úo e persist├¬ncia, mas remove a seta nativa com `appearance: none` e comp├Áe o estado fechado com texto trunc├ível e `ChevronDown` separado.
++- Implementado localmente: o wrapper visual usa largura compacta, limite da c├®lula, ├írea clic├ível m├¡nima, espa├ºamento de 6px e chevron sem compress├úo; o `title` preserva o nome completo para valores longos.
++- Preservado: largura e ordem das colunas, valores dos silos, handler, persist├¬ncia, Status, demais selects, dados, bridge, handshake e contratos do Minerador.
++- Valida├º├úo manual no Chrome: desktop autenticado do Minerador, `Sem Silo/Categoria`, `Servi├ºos`, `Crescimento de Cl├¡nicas`, foco vis├¡vel, abertura via teclado e fechamento sem altera├º├úo do valor; `appearance` computado como `none` e separa├º├úo medida em 6px.
++- Pendente: valida├º├úo manual adicional nos viewports de 360px, 768px e 1024px; n├úo foi trocado valor durante a valida├º├úo para evitar escrita remota.
++
++## Padroniza├º├úo do select Silo/Categoria com Nicho de mercado - 2026-07-27
++
++- Implementado localmente: `Silo/Categoria` agora reutiliza a mesma base de classes do select `Nicho de mercado`, incluindo altura, tipografia `10px`, peso `bold`, padding, borda, radius, fundo, largura total e comportamento nativo do chevron.
++- Removido: wrapper `inline-flex`, `width: fit-content`, tipografia `text-sm`, peso `semibold`, ├¡cone `ChevronDown` separado e seta nativa ocultada; o controle voltou a ser um `<select>` nativo consistente com o Nicho.
++- Preservado: op├º├Áes, `title`, handler, persist├¬ncia, largura/ordem das colunas, Status, Funil, Nicho, demais selects e dados.
++- Valida├º├úo manual no Chrome: controles com mesma altura, fonte, peso, padding, borda, fundo e radius computados; foco/menu via teclado exercitados sem alterar o valor.
++- Pendente: valida├º├úo adicional em 360px, 768px e 1024px; sele├º├úo de valor n├úo foi confirmada com escrita para evitar opera├º├úo remota.
++
++## Sele├º├úo complementar por intervalo e arraste - corre├º├úo local - 2026-07-29
++
++- Implementado localmente: clique individual, Ctrl/Cmd+clique, Shift+clique e Ctrl/Cmd+Shift+clique usam a ordem visual filtrada/ordenada como refer├¬ncia; a ├óncora `lastSelectionAnchorId` permanece local e ├® invalidada com seguran├ºa quando fica invis├¡vel.
++- Implementado localmente: arraste somente na coluna de sele├º├úo, com toler├óncia de 4px, modo selecionar/desmarcar definido pelo checkbox inicial, deduplica├º├úo por gesto e supress├úo do clique subsequente.
++- Implementado localmente: cabe├ºalho seleciona ou desmarca somente linhas vis├¡veis, preserva sele├º├Áes ocultas e exibe estado acess├¡vel indeterminado; contador informa o total selecionado e, quando aplic├ível, quantas est├úo vis├¡veis.
++- Preservado: foco, teclado, sele├º├úo individual, filtros, busca, ordena├º├úo, a├º├Áes em lote, tenantiza├º├úo, persist├¬ncia e dados. Nenhuma opera├º├úo remota foi executada.
++- Pendente: valida├º├úo manual em Chrome nos viewports 360px, 768px, 1024px e 1440px, light/dark, com mouse, Ctrl/Cmd, Shift, teclado, filtros e arraste.
++
++## Sele├º├úo por pintura e leitura localizada do allintitle - corre├º├úo local - 2026-07-29
++
++- Implementado localmente: a pintura usa listeners de Pointer Events no documento, `pointerId`, toler├óncia de 4px, `document.elementFromPoint()` e `closest("[data-keyword-selection-id]")`; somente a c├®lula de sele├º├úo possui a ├írea ativa.
++- Implementado localmente: `pointerup`, `pointercancel`, perda de foco e desmontagem encerram o gesto; o clique sem movimento continua usando o fluxo individual e o clique gerado ap├│s pintura ├® suprimido.
++- Implementado localmente: o leitor Google usa vers├úo 2, aguarda estabiliza├º├úo m├¡nima, procura `#result-stats`/`role=status`, abre `Ferramentas`/`Tools`/`Herramientas` uma vez quando necess├írio e extrai contagens ancoradas em texto de resultados.
++- Implementado localmente: `success`, `zero_results` e `unavailable` permanecem separados; contador ausente usa `result_count_not_found`, est├ígio `google_result_extraction`, mensagem expl├¡cita e diagn├│stico estruturado, sem persistir zero.
++- Validado manualmente no Chrome: pintura selecionou 10 linhas e a mesma pintura desmarcou as 10 linhas.
++- Validado manualmente no Google: ap├│s abrir `Ferramentas`, `#result-stats` exibiu `Aproximadamente 282 resultados (0,21 s)`; o valor 282 foi reconhecido e refletido na keyword `Agencia para clinica de estetica`.
++- Validado manualmente ap├│s recarga do Minerador: a linha continuou exibindo `282`, confirmando a leitura da persist├¬ncia j├í realizada pelo fluxo.
++- Corrigido localmente: eventos de resultado e `batch_completed` agora aguardam a entrega do resultado antes do encerramento do lote, evitando `response_missing` por corrida de relay.
++- Ainda n├úo verificado: reload da Extens├úo propriamente dita e nova execu├º├úo usando o background recarregado; a p├ígina interna `chrome://extensions` foi bloqueada pela pol├¡tica da automa├º├úo. N├úo houve SQL, migration, deploy, commit, push ou limpeza de dados.
++
++## Corre├º├úo definitiva do modo pintar e do lote allintitle ├│rf├úo - 2026-07-29
++
++- Causa da pintura: o atributo de sele├º├úo n├úo definia um handle interativo amplo; o `px-3` deixava o ret├óngulo real com aproximadamente 7px e o gesto dependia do bot├úo interno. O wrapper agora cobre a c├®lula inteira sem alterar a largura da coluna, usa `touch-none`, captura/libera `pointerId` e valida o hit-test pelo handle.
++- Causa do bloqueio: a vers├úo anterior confundia qualquer registro `allintitle:{batchId}` com executor vivo, removia estados terminais e n├úo reconciliava registros ativos quando o service worker reiniciava.
++- Implementado localmente: ponteiro `allintitle:activeOperationByBrand:{brandId}`, estados ativos separados de terminais/interrompidos, reconcilia├º├úo no startup, hist├│rico preservado e cleanup protegido por `try/catch` do executor.
++- Implementado localmente: `operation_guard` para execu├º├úo viva, `operation_reconciliation` para ├│rf├úo, comandos de acompanhar, retomar, cancelar e descartar, sem tocar no endpoint, schema, volume, KGR, importa├º├úo ou qualifica├º├úo.
++- Diagn├│stico do lote `6094d433-cc0d-418e-8bf5-73a786edb868`: o retorno fornecido registra o `batchId`, mas n├úo informa o `status` armazenado; o c├│digo anterior n├úo mantinha executor ap├│s rein├¡cio e n├úo oferecia reconcilia├º├úo. O novo startup marcar├í qualquer registro ativo desse lote como `orphaned` se ele ainda existir.
++- Pendente manual do usu├írio: recarregar a Extens├úo e a p├ígina, testar o gesto real com bot├úo prim├írio em dez linhas, repetir iniciando em marcada, verificar acompanhamento/retomada/descarte/cancelamento e iniciar nova medi├º├úo ap├│s cada terminal. A inspe├º├úo automatizada confirmou hitbox de aproximadamente 31px, mas n├úo substitui o gesto manual.
++
++## Remo├º├úo da exig├¬ncia indevida de silo no allintitle - corre├º├úo local - 2026-07-29
++
++- Causa localizada no workspace: `startAllintitleMeasurement` exigia `item.lista_id` e presen├ºa em `allowedListIds`; `handleConfirmAllintitle` repetia o mesmo filtro antes de reconciliar resultados persistidos. A condi├º├úo foi introduzida no handler original de medi├º├úo em 2026-07-27 e pertencia a um guard de escopo de listas, n├úo ao contrato de m├®trica individual.
++- Corrigido localmente: a elegibilidade usa ID t├®cnico v├ílido, texto n├úo vazio, `brand_id` correspondente ├á marca ativa e sele├º├úo expl├¡cita. Keywords Bruto, sem lista, Sem Silo/Categoria, com lista ou com silo continuam no mesmo fluxo.
++- Corrigido localmente: erros de pr├®-valida├º├úo usam `code`, `stage` e `diagnostic`; a valida├º├úo por silo foi removida sem alterar v├¡nculos, listas, endpoint, schema, persist├¬ncia server-side, relay ou background-owned.
++- Pendente: smoke test manual no Chrome com duas keywords Bruto sem silo, uma keyword com silo, reload do Minerador e confirma├º├úo da persist├¬ncia. Nenhuma opera├º├úo remota foi executada.
++
++## Persist├¬ncia server-side e fluxo background-owned do allintitle - implementa├º├úo local - 2026-07-29
++
++- SDD criada e aprovada nesta solicita├º├úo: `propostas/persistencia-server-side-results-allintitle.md`. A autoriza├º├úo cobre somente a persist├¬ncia de `results_allintitle`, sem schema, migration, RLS ou autentica├º├úo global.
++- Implementado localmente: `POST /api/extensao/marcas/[brandId]/keywords/resultados-allintitle` reutiliza a sess├úo autenticada da Extens├úo, permiss├úo tenantizada do Minerador, rate limit e atualiza somente `keywords_kgr.results_allintitle`.
++- Implementado localmente: `success` e `zero_results` persistem valor confirmado; falha, CAPTCHA, bloqueio, timeout, cancelamento e valor ausente preservam o resultado anterior. Respostas individuais distinguem `persisted`, `preserved`, `rejected` e `failed`.
++- Implementado localmente: o workspace n├úo possui mais escrita direta concorrente de `keywords_kgr` no fluxo allintitle; a interface reconcilia o valor somente ap├│s `persistenceOutcome: persisted`.
++- Implementado localmente: o relay `minerador-extension-relay.js` ├® declarado apenas para `localhost:3000` e `127.0.0.1:3000`, valida origem/rota/protocolo e devolve `extension_page_reload_required` para contexto invalidado. A bridge program├ítica permanece apenas para diagn├│stico/conex├úo.
++- Implementado localmente: o background reutiliza o executor sequencial existente, estado em `chrome.storage.session`, uma aba Google, intervalo conservador, pausa por CAPTCHA, retomada, cancelamento, IDs e eventos. O lote n├úo ├® cancelado por popup ou reload da p├ígina.
++- Ainda n├úo verificado: smoke test autenticado no Chrome com Extens├úo recarregada, duas keywords, popup fechado, reload durante o lote, persist├¬ncia real, zero/erro e isolamento Adalba/Lindisse. Nenhuma opera├º├úo remota foi executada.
++## Preflight just-in-time da medicao allintitle - implementacao local - 2026-07-27
++
++- Causa localizada do `ack_timeout`: o registro conectado em `chrome.storage.session` podia sobreviver a reload/navegacao na mesma URL, enquanto a bridge atual ja nao era comprovada; `tabs.onUpdated` tambem ignorava o estado `loading`.
++- Implementado localmente: `ensureMineradorConnection(...)` concentra a validacao de sessao, tabId, origem, rota, modulo, actorUserId, brandId, brandRef, protocolVersion, probe, `bridgeInstanceId` e handshake. A conexao armazenada nao e mais prova suficiente.
++- Implementado localmente: `loading`/navegacao marca a conexao efemera como pendente de revalidacao; no `complete`, a bridge e preparada novamente somente para uma aba do Minerador que ja possuia registro efemero. O handshake continua explicito no preflight da operacao.
++- Implementado localmente: falhas de probe/handshake permitem uma unica recuperacao controlada, com nova injecao, probe e handshake. Sem `HANDSHAKE_OK`, o lote nao e criado e nenhuma aba Google e aberta.
++- Implementado localmente: o popup gera o `batchId` somente apos a resposta de preflight; o workspace usa `Validando conexao...`, `Preparando medicao...` e diagnostico com estagio nao nulo.
++- Diagnosticos preservam `operationRequestId`, `connectRequestId`, `probeRequestId`, `handshakeRequestId`, `tabId`, bridge anterior/atual, ultimo estagio, codigo e mensagem de erro disponivel, sem segredos.
++- Confirmado localmente: sintaxe, testes de preflight/handshake/allintitle, TypeScript e build devem ser registrados separadamente; Google real, reload autenticado, renovacao automatica e persistencia remota continuam validacao manual pendente.
++
++## Renovacao automatica antes do allintitle - correcao local - 2026-07-28
++
++- Causa confirmada: o timeout observado na pagina ocorria antes de a solicitacao chegar a bridge quando a bridge ainda nao estava instalada no documento recarregado. Por isso nao havia `INJECTION_OK`, `PROBE_ACK` ou `HANDSHAKE_OK` no diagnostico.
++- Implementado localmente: `tabs.onUpdated` marca o registro efemero como obsoleto no `loading` e prepara a bridge uma unica vez no documento final `complete`; o preflight remove somente o registro efemero obsoleto e usa `ensureMineradorConnection(...)` para validar tabId, marca, origem, rota, bridge atual, probe e handshake.
++- Implementado localmente: a recuperacao e limitada a uma tentativa. Em falha recuperavel, o registro e invalidado, a bridge e reinjetada, e o fluxo so cria lote depois de `HANDSHAKE_OK`. Nao ha polling nem handshake duplicado no executor allintitle.
++- Diagnostico local preserva `operationRequestId`, IDs de connect/probe/handshake, tabId, bridge anterior/atual, `recoveryAttempted`, `recoveryResult`, eventos, ultimo estagio e codigo real da falha.
++- Mensagens do fluxo: sucesso de renovacao usa `Conexao renovada. Preparando medicao...`; falha usa a mensagem principal de renovacao e orienta conectar novamente a aba.
++- Confirmado localmente: 52 testes direcionados, sintaxe dos scripts, TypeScript e build passaram. ESLint dos scripts da extensao nao apresentou erros; o lint incluindo o workspace continua com 21 erros preexistentes do componente. `git diff --check` nao apresentou erros.
++- Ainda nao verificado: Chrome autenticado com reload na mesma URL, recuperacao real, reabertura do popup e medicao real allintitle. Nenhuma operacao remota foi executada.
++- Correcao definitiva apos reload - 2026-07-28: `loading` apenas marca a sessao efemera como stale, invalida `bridgeInstanceId` atual e atualiza o popup para estado de revalidacao; a reinjecao ocorre uma unica vez no `complete` para a mesma aba, origem, marca e rota.
++- A preparacao pos-reload executa injecao programatica em mundo `ISOLATED`, frame 0, probe limitado e registra `ready_for_validation`; nao declara conexao e nao inicia handshake, lote, Google ou polling.
++- O popup agora diferencia `Atualizando a conexao...`, `Minerador pronto para validacao.` e falha de reinjecao, sem manter o estado verde. O preflight da pagina classifica ausencia de canal como `page_bridge_unreachable` em `page_bridge_dispatch`, nao como `ack_timeout` generico.
++- A operacao allintitle reutiliza a bridge preparada, confirma o `bridgeInstanceId`, executa o handshake e so depois cria o lote. Se a instancia mudar, ha uma unica recuperacao controlada.
++- Eventos pos-reload: `TAB_LOADING_DETECTED`, `CONNECTION_MARKED_STALE`, `TAB_COMPLETE_DETECTED`, `REINJECTION_STARTED`, `REINJECTION_OK`, `RELOAD_PROBE_SENT`, `RELOAD_PROBE_ACK`, `READY_FOR_VALIDATION`.
++- Validacao manual no Chrome permanece pendente; nao houve limpeza ampla: somente o registro efemero stale e removido no preflight. Nenhum logout, SQL, migration, operacao remota, commit, push ou deploy foi executado.
++
++## Restaura├º├úo da sele├º├úo e da fila allintitle - implementa├º├úo local - 2026-07-29
++
++- Regress├úo identificada no c├│digo atual: workspace, popup e background bloqueavam a opera├º├úo acima de 10 itens; a pr├®via correlacionava resultado apenas pelo `batchId`, o que descartaria eventos dos sublotes seguintes.
++- Implementado localmente: uma opera├º├úo aceita qualquer quantidade selecionada e cria sublotes internos sequenciais de at├® 10, com `operationRequestId`, progresso geral, `batchId` t├®cnico por sublote e persist├¬ncia confirmada por item.
++- Implementado localmente: a tabela voltou a iniciar pintura no bot├úo do checkbox, sem cursor de cruz; movimento abaixo de 4px mant├®m o clique individual normal. A pr├®via do popup agora tem clique, Ctrl/Cmd, Shift, Ctrl/Cmd+Shift, pintura e a├º├Áes de selecionar ou limpar vis├¡veis.
++- Implementado localmente: eventos de diagn├│stico por item registram a cadeia do resultado at├® a reconcilia├º├úo da pr├®via, sem consulta real ao Google em testes.
++- Ainda n├úo verificado: Chrome autenticado com a Extens├úo recarregada, sele├º├úo manual, 51 keywords, avan├ºo autom├ítico entre grupos, popup fechado, reload da p├ígina e a consulta que mostrou 323 resultados. Nenhuma opera├º├úo remota foi executada.
++
++## Retorno direto do allintitle ├á tabela - corre├º├úo local - 2026-07-29
++
++- Corre├º├úo de escopo: a pr├®via e a confirma├º├úo manual do lote n├úo pertencem ao fluxo aprovado. O resultado validado no endpoint server-side ├® a ├║nica condi├º├úo para refletir `results_allintitle` na tabela.
++- Implementado localmente: removido o painel de pr├®via e sua sele├º├úo; cada retorno com `persistenceOutcome: persisted` atualiza imediatamente somente a linha correspondente. O encerramento do lote ainda reconcilia o snapshot final como conting├¬ncia para evento individual perdido.
++- Durante a execu├º├úo permanece apenas o estado compacto de progresso com pausar, retomar e cancelar. Falhas, CAPTCHA, timeout e valores ausentes preservam o valor anterior.
++- Ainda n├úo verificado: recarregar extens├úo e p├ígina, medir um lote pequeno no Chrome autenticado e confirmar atualiza├º├úo direta das linhas sem painel de pr├®via. Nenhuma opera├º├úo remota foi executada.
++
++## Leitura e continuidade do allintitle em segundo plano - corre├º├úo local - 2026-07-29
++
++- Causa dos cinco itens sem retorno persist├¡vel: o leitor v2 deixou de considerar o texto principal da p├ígina do Google e procurava somente seletores pequenos. O fallback controlado para `document.body.innerText`, j├í usado pelo leitor funcional anterior, foi restaurado ap├│s a valida├º├úo da consulta.
++- Implementado localmente: o executor mant├®m um watchdog em `chrome.alarms`, com estado persistido por lote. Se o service worker for suspenso, o alarme recupera o lote e continua do ├¡ndice salvo; fechar popup, mudar de aba ou sair da p├ígina do Minerador ap├│s a aceita├º├úo n├úo interrompe o lote.
++- Implementado localmente: CAPTCHA, consentimento e bloqueio pausam o lote, trazem a aba Google ├á frente, exibem notifica├º├úo nativa do Chrome com feito/restante e mant├¬m Retomar/Cancelar no estado compacto do Minerador.
++- Interface: o contador agora informa feito, total e restante sem reintroduzir pr├®via. Resultados confirmados continuam indo diretamente ├á tabela.
++- Ainda n├úo verificado: Chrome autenticado com extens├úo recarregada, uma contagem real, suspens├úo do service worker entre itens, alerta nativo e retomada manual ap├│s CAPTCHA/consentimento. Nenhuma opera├º├úo remota foi executada.
++
++### Corre├º├úo complementar ÔÇö reutiliza├º├úo da mesma consulta
++
++- Causa observada em telas fornecidas: o Google exibe claramente `Aproximadamente 5 resultados` e `Aproximadamente 267 resultados`, mas uma aba reutilizada na mesma URL podia preservar o leitor anterior em mem├│ria ap├│s atualiza├º├úo da extens├úo.
++- Implementado localmente: quando a pr├│xima keyword usa exatamente a consulta j├í aberta, a extens├úo recarrega essa p├ígina sem cache antes de injetar o leitor; o contador vis├¡vel passa a ser analisado pelo c├│digo atual.
++
++## Diagn├│stico preservado de falha na persist├¬ncia allintitle - corre├º├úo local - 2026-07-29
++
++- Corrigido localmente: uma falha de persist├¬ncia por keyword deixa de ser reduzida ao aviso gen├®rico `no_persisted_allintitle_results`. O resultado final carrega c├│digo, mensagem, valor medido e diagn├│stico seguro do endpoint (status HTTP, IDs de correla├º├úo e outcome).
++- Corrigido localmente: o encerramento do lote mostra o primeiro motivo real e permite repetir somente as keywords que falharam; `Copiar diagn├│stico` inclui, no m├íximo, dez falhas sem token, cookie ou chave.
++- Preservado: a tabela s├│ recebe resultado com `persistenceOutcome: persisted`; falha continua sem sobrescrever dado existente, sem reintroduzir pr├®via ou escrita direta pelo workspace.
++- Confirmado por testes locais: contrato do leitor, lote, endpoint de persist├¬ncia e interface de encerramento. Ainda n├úo verificado: nova medi├º├úo autenticada no Chrome para identificar e corrigir, se houver, o c├│digo remoto espec├¡fico do ambiente.
++
++## Fluxo direto do popup e retorno parcial expl├¡cito - corre├º├úo local - 2026-07-29
++
++- Corrigido localmente: o popup deixou de medir allintitle e volume sobre candidatos tempor├írios. Ele agora extrai, permite selecionar e importa; a medi├º├úo ocorre na tabela do Minerador, somente depois de a keyword possuir ID persistido.
++- Corrigido localmente: clique, Ctrl/Cmd, Shift, Ctrl/Cmd+Shift, teclado e pintura da pr├®via usam um ├║nico fluxo de ponteiro. As grava├º├Áes do estado tempor├írio s├úo enfileiradas e versionadas, impedindo uma resposta antiga de restaurar sele├º├Áes j├í alteradas ou descartadas.
++- Corrigido localmente: a tabela captura o ponteiro no in├¡cio da pintura. No fim de um lote parcial, informa quantos resultados foram persistidos e quantas keywords n├úo retornaram medi├º├úo confirmada, mantendo os IDs faltantes para repeti├º├úo dirigida.
++- Ainda n├úo verificado: Chrome autenticado com clique livre e atalhos no popup, reabertura do popup ap├│s desmarcar, importa├º├úo seguida de medi├º├úo na tabela e repeti├º├úo somente de um item faltante. Nenhuma opera├º├úo remota foi executada.
++
++## Navega├º├úo Google e alerta de CAPTCHA - corre├º├úo local - 2026-07-29
++
++- Causa confirmada pelos diagn├│sticos reportados: a consulta podia tentar interpretar a URL transit├│ria vazia da aba Google, gerando `navigation_failed` com `Invalid URL`; o carregamento inicial da aba tamb├®m podia ser confundido com a navega├º├úo da consulta e gerar `unexpected_navigation`.
++- Corrigido localmente: a URL transit├│ria ├® tratada como consulta ausente e a espera observa especificamente a URL da query. P├íginas Google conhecidas de interrup├º├úo (`/sorry/index`, reCAPTCHA e consentimento) s├úo aceitas para o leitor classificar o desafio, em vez de falhar antes com `unexpected_navigation`.
++- Preservado: CAPTCHA ou bloqueio pausa o lote, abre a aba Google, mant├®m feito/restante, emite aviso nativo e apresenta Retomar/Cancelar no Minerador. N├úo h├í persist├¬ncia de m├®trica para o item interrompido.
++- Ainda n├úo verificado: desafio real no Chrome com a vers├úo recarregada da Extens├úo e exibi├º├úo efetiva da notifica├º├úo do sistema. Nenhuma consulta Google, importa├º├úo ou escrita remota foi executada nesta corre├º├úo.
++
++## Pausa imediata por CAPTCHA e reanexo da opera├º├úo ativa - corre├º├úo local - 2026-07-29
++
++- Causa confirmada pelo lote reportado: a p├ígina de desafio do Google em portugu├¬s foi devolvida como `query_mismatch`. O executor a tratou como falha normal e percorreu os itens restantes; os 25 resultados persistidos s├úo v├ílidos, e os 190 n├úo tiveram medi├º├úo confirmada.
++- Corrigido localmente: o leitor reconhece as rotas `/sorry/index` e reCAPTCHA antes de validar a query, al├®m de textos como `tr├ífego incomum` e `Nossos sistemas detectaram`. O primeiro desafio agora gera `captcha`, pausa a opera├º├úo, preserva o ├¡ndice e dispara o aviso/Retomar.
++- Corrigido localmente: `allintitle_operation_active` devolve o snapshot seguro da opera├º├úo ativa. A tabela o usa para acompanhar automaticamente o lote existente, restaurando contador e controles em vez de deixar apenas o erro t├®cnico.
++- Ainda n├úo verificado: CAPTCHA real com a vers├úo atualizada da Extens├úo, pausa no primeiro item afetado, alerta nativo e retomada sem reprocessar os itens j├í conclu├¡dos. Nenhuma opera├º├úo remota foi disparada nesta corre├º├úo.
++
++## Estado retom├ível de CAPTCHA no Minerador - corre├º├úo local - 2026-07-29
++
++- Causa confirmada pelo retorno reportado: o evento `batch_paused` j├í preservava o lote, mas a tabela o apresentava como notifica├º├úo de erro e sem a├º├úo de retomada naquele aviso.
++- Corrigido localmente: CAPTCHA agora ├® estado informativo de pausa, com `Retomar` e `Cancelar lote` tanto no aviso persistente quanto na barra de progresso. O bot├úo principal passa a informar `Aguardando CAPTCHA...`, sem fingir que h├í uma medi├º├úo em curso.
++- Preservado: apenas outra medi├º├úo allintitle da mesma marca fica protegida contra duplicidade; qualifica├º├úo, volume e as demais a├º├Áes da tabela n├úo s├úo bloqueados por esse estado.
++- Ainda n├úo verificado: no Chrome, liberar o desafio e confirmar que `Retomar` continua exatamente do item pausado, sem descartar resultados j├í persistidos.
++
++## Aviso de CAPTCHA sem roubo de foco - corre├º├úo local - 2026-07-30
++
++- Confirmado manualmente pelo usu├írio: dois desafios pausaram, foram liberados e a opera├º├úo continuou, inclusive com a keyword interrompida pulada no retorno final.
++- Corrigido localmente: o executor n├úo ativa mais automaticamente a aba Google ao detectar CAPTCHA ou bloqueio. A notifica├º├úo persistente da Extens├úo, o badge `!`, o clique na notifica├º├úo e o bot├úo `Abrir Google` continuam dispon├¡veis para abrir a aba somente por decis├úo do usu├írio.
++- Preservado: pausa imediata, estado persistido, contador, Retomar/Cancelar, continuidade em segundo plano e prote├º├úo contra uma segunda medi├º├úo concorrente.
++- Ainda n├úo verificado: confirmar no Chrome que o aviso do sistema aparece sem trocar a aba em primeiro plano.
++
++## Resposta parcial da classifica├º├úo de inten├º├úo e nicho - corre├º├úo local - 2026-07-30
++
++- Confirmado manualmente pelo usu├írio: 136 keywords foram classificadas e persistidas; tr├¬s respostas do modelo chegaram sem as chaves de topo esperadas e foram recusadas sem sobrescrever dados anteriores.
++- Corrigido localmente: o endpoint agora aceita somente valores j├í fornecidos pelo modelo nos formatos equivalentes `intent`/`intencao` e `nicho`/`niche`, inclusive quando est├úo sob `classification`, `classificacao`, `result` ou `data`. Respostas sem os dois valores continuam recusadas.
++- Corrigido localmente: falha parcial passa a usar aviso informativo e `console.warn`, com at├® dez keywords falhas no diagn├│stico, sem apresentar conclus├úo parcial como sucesso total.
++- Ainda n├úo verificado: repetir manualmente somente as tr├¬s keywords que falharam, sem disparar lote real automatizado nesta corre├º├úo.
++
++## Pintura imediata da sele├º├úo de keywords - corre├º├úo local - 2026-07-30
++
++- Causa confirmada no c├│digo e no relato do usu├írio: o arraste acumulava checkboxes visitados e alterava `selectedIds` somente no `pointerup`, produzindo atraso visual.
++- Corrigido localmente: a pintura agora recalcula o intervalo entre a checkbox inicial e a checkbox sob o ponteiro a cada movimento. Avan├ºar seleciona ou desmarca imediatamente; voltar remove o trecho que deixou de pertencer ao intervalo, sem esperar soltar o clique.
++- Preservado: clique comum, Ctrl/Cmd, Shift, Ctrl/Cmd+Shift, sele├º├úo de vis├¡veis, sele├º├úo ocultada por filtro, acessibilidade do checkbox e a├º├Áes em lote.
++- Ainda n├úo verificado: gesto real no Chrome, com ida e volta r├ípida, mouse e touchpad, al├®m de modificadores de teclado.
++
++## Volume brasileiro via SEO Keyword Research Tool - corre├º├úo local - 2026-07-30
++
++- Causa confirmada pelo retorno manual: as rotas de volume ainda restringiam configura├º├úo ao host antigo `seo-keyword-research8.p.rapidapi.com` e ao contrato `result[].avg_monthly_searches`; por isso rejeitavam o provedor validado no Playground antes de qualquer medi├º├úo.
++- Corrigido localmente: as rotas server-side do Minerador e da Extens├úo agora usam `GET /global-volume` em `seo-keyword-research-tool1.p.rapidapi.com`, com `keyword` e `country=br`.
++- Normaliza├º├úo segura: somente `Keyword Overview.BR[]` da keyword exata pode produzir `volume_search`; valores abreviados como `1.3k` s├úo convertidos para n├║mero. `global`, outros pa├¡ses, aus├¬ncia de BR, payload parcial ou volume inv├ílido n├úo viram medi├º├úo e n├úo alteram os dados anteriores.
++- Testes locais: 27 testes direcionados, `npx tsc --noEmit`, `npm run build` e `git diff --check` passaram. Nenhuma chamada RapidAPI adicional, escrita remota, migration, commit, push ou deploy foi executada nesta corre├º├úo.
++- Pendente manual: ap├│s a renova├º├úo da cota, medir uma keyword brasileira autenticada e confirmar volume, fonte registrada, persist├¬ncia e preserva├º├úo de valor anterior em aus├¬ncia/falha.
++
++## Conclus├úo sem volume BR e superf├¡cie dos avisos - corre├º├úo local - 2026-07-30
++
++- Corrigido localmente: `not_found` do provedor ÔÇö inclusive aus├¬ncia da se├º├úo `BR` ÔÇö n├úo percorre mais o fluxo de exce├º├úo nem exibe c├│digo t├®cnico como erro. Sem nenhuma medi├º├úo, a interface informa somente que a medi├º├úo foi conclu├¡da sem volume BR dispon├¡vel; em lote parcial, informa a quantidade sem volume BR como conclus├úo normal.
++- Preservado: erro HTTP, payload inv├ílido, quota e falha real do provedor continuam vis├¡veis como erro e n├úo alteram m├®tricas anteriores.
++- Corrigido localmente: os avisos `success`, `info` e `error` usam superf├¡cies `emerald`, `amber` e `rose` opacas com bordas existentes, removendo a classe inv├ílida que deixava o aviso de erro transparente no dark mode.
++- Testes locais: testes direcionados de interface/volume passaram 28/28; TypeScript, `git diff --check` e build passaram. Lint do workspace conserva erros legados fora do trecho alterado.
++- Pendente manual: conferir no Chrome dark mode a conclus├úo sem BR, um erro real e um aviso informativo, em largura de desktop e viewport estreita.
++
++## KGR n├úo calcul├ível para volume zero e estados visuais - corre├º├úo local - 2026-07-30
++
++- Corrigido localmente: toda keyword cujo `volume_search` seja exatamente `0` apresenta `N├úo calcul├ível` na coluna KGR, com prioridade sobre o estado pendente ou a decis├úo sem├óntica. N├úo recebe pontua├º├úo KGR nem tem seus dados existentes alterados.
++- Corrigido localmente: tentar aprovar KGR para uma sele├º├úo que contenha volume zero encerra com aviso informativo, sem persistir uma decis├úo inv├ílida e sem tratar a condi├º├úo conhecida como erro t├®cnico.
++- Interface: os estados textuais de KGR (`Pendente`, `N├úo calcul├ível`, `N├úo aplic├ível`, `Inconsistente`, `Inv├ílido` e `Sem medi├º├úo`) reutilizam a mesma geometria compacta dos selos da coluna Principal. Os valores num├®ricos e sua escala crom├ítica permanecem inalterados.
++- Preservado: pol├¡tica `Principal travada`/`Principal revis├ível`, slug, canonical, volume, resultados allintitle, ordem/largura das colunas e contratos de persist├¬ncia. A pol├¡tica da principal continua uma decis├úo humana expl├¡cita.
++- Testes locais: 43 testes direcionados e `npx tsc --noEmit` passaram; `git diff --check` passou. O lint do workspace conserva 21 erros e 8 avisos legados fora do trecho alterado.
++- Pendente manual: validar no Chrome em dark mode que volume zero exibe o selo `N├úo calcul├ível`, que os demais textos KGR seguem o mesmo padr├úo visual de Principal e que valores num├®ricos n├úo mudaram.
++
++## Destaque visual de volume confirmado - corre├º├úo local - 2026-07-30
++
++- Corrigido localmente: `0 confirmado` permanece reservado ao zero efetivamente retornado pela medi├º├úo exata. Zero sem essa evid├¬ncia continua com a apresenta├º├úo normal, sem sugerir confirma├º├úo.
++- Corrigido localmente: n├║meros positivos retornados pelo provedor passam a usar a mesma cor azul j├í aplicada ao selo `0 confirmado`, permitindo identificar a medi├º├úo real sem acrescentar outro r├│tulo visual.
++- Prote├º├úo: o destaque s├│ ├® aplicado quando `volume_measurement` declara `match: exact`, status `confirmed`/`zero_confirmed` e `rawVolume` igual ao valor atualmente exibido. N├║meros legados, estimados ou sem evid├¬ncia de medi├º├úo mant├¬m a cor existente.
++- Testes locais: 36 testes direcionados e `npx tsc --noEmit` passaram. Nenhuma medi├º├úo, escrita remota ou altera├º├úo de dados foi executada.
++- Pendente manual: conferir no Chrome, em dark mode, zero confirmado, zero pendente, n├║mero confirmado e valor legado na mesma tabela.
++
++## Padroniza├º├úo visual da inten├º├úo - corre├º├úo local - 2026-07-30
++
++- Corrigido localmente: os r├│tulos da coluna Inten├º├úo agora usam o mesmo selo compacto j├í empregado pelos estados textuais de Principal e KGR, sem alterar a taxonomia, a classifica├º├úo ou a largura da coluna.
++- Preservado: inten├º├úo conhecida continua leg├¡vel; `Pendente/n├úo classificada` usa a variante neutra. O texto completo permanece dispon├¡vel no `title` e nomes longos truncam dentro do limite da c├®lula.
++- Pendente manual: conferir no Chrome em dark mode os selos de Inten├º├úo, textos longos e inten├º├úo pendente em desktop e viewport estreita.
++
++## Legibilidade da grade e hover da planilha - corre├º├úo local - 2026-07-30
++
++- Corrigido localmente: os separadores horizontais e verticais das linhas da planilha usam um tom slate discretamente mais claro, preservando a densidade e o dark mode sem criar novos tokens ou cores.
++- Corrigido localmente: o hover identifica a linha sob o mouse. Linhas selecionadas e publicadas mant├¬m seus contextos ├¡ndigo e rose durante o hover, em vez de parecerem uma linha neutra.
++- Preservado: ordem/largura de colunas, sele├º├úo, status, badges, filtros, persist├¬ncia e dados.
++- Pendente manual: validar contraste e leitura da grade em Chrome, nas larguras 360px, 768px, 1024px e 1440px.
++
++### Ajuste corretivo das linhas horizontais
++
++- Corrigido localmente ap├│s valida├º├úo visual: o divisor horizontal agora usa exatamente a mesma intensidade das linhas verticais da tabela. O hover permanece mais claro, como solicitado.
++- Ajustado localmente: o hover de qualquer linha usa cinza neutro, inclusive em linhas selecionadas ou publicadas.
++
++## Busca ampliada e hist├│rico ancorado - corre├º├úo local - 2026-07-30
++
++- Corrigido localmente: o campo Buscar da barra do Minerador comporta aproximadamente 60 caracteres, sem alterar o filtro, a ordena├º├úo ou a largura das colunas da planilha.
++- Corrigido localmente: o Hist├│rico do Minerador abre abaixo do bot├úo como popover, fecha por clique fora, Escape ou bot├úo de fechar. Os demais consumidores mant├¬m o painel lateral anterior pela variante compartilhada compat├¡vel.
++- Corre├º├úo complementar: como a barra do Minerador possui rolagem horizontal e recorta elementos internos, o popover ├® renderizado em portal fixo no `document.body`, ancorado no bot├úo. Assim aparece sobre a planilha, logo abaixo da barra, sem corte.
++- Pendente manual: conferir posi├º├úo do popover, clique externo, Escape, restaura├º├úo e campo Buscar em desktop e viewport estreita.
++
++## Terminologia de keyword fora de artigo - corre├º├úo local - 2026-07-30
++
++- Corrigido localmente: o selo visual do estado t├®cnico `free` passa de `Principal livre` para `Keyword livre`, pois a keyword ainda n├úo integra um artigo.
++- Preservado: o valor t├®cnico `free`, suas regras, sele├º├úo, persist├¬ncia, pol├¡tica de principal publicada e contratos permanecem inalterados.
++- Pendente manual: conferir o r├│tulo na coluna Principal em dark mode, sem regress├úo visual dos selos `Principal travada` e `Principal revis├ível`.
++
++## Densidade consistente das a├º├Áes selecionadas - corre├º├úo local - 2026-07-30
++
++- Corrigido localmente: os controles do rodap├® de a├º├Áes em lote reutilizam a altura, padding, tipografia, radius e escala de ├¡cones compactos da barra superior.
++- Preservado: handlers, disponibilidade, sele├º├úo, menus, cores sem├ónticas, barra de progresso e largura da planilha.
++- Pendente manual: conferir no Chrome a barra inferior em dark mode, com a├º├Áes habilitadas/desabilitadas e nas larguras 360px, 768px, 1024px e 1440px.
++
++## Redistribui├º├úo de largura para Palavra-Chave - corre├º├úo local - 2026-07-30
++
++- Corrigido localmente: Principal, Inten├º├úo e Funil foram reduzidas para 128px, 168px e 80px, respectivamente. Os 62px liberados passam para Palavra-Chave, que j├í ├® a coluna el├ística da tabela fixa.
++- Preservado: ordem das colunas, largura de Resultados, Volume, KGR, Nicho, Silo/Categoria e Status; badges, selects, filtros, dados e persist├¬ncia.
++- Pendente manual: conferir no Chrome Principal travada/revis├ível, inten├º├Áes longas, TOFU/MOFU/BOFU e keywords longas em dark mode e nas larguras 360px, 768px, 1024px e 1440px.
++
++## Funda├º├úo Google Ads server-side - implementa├º├úo local - 2026-08-03
++
++- Corrigido localmente: as rotas REST est├úo fechadas e tipadas em `:generateKeywordIdeas`, `:generateKeywordHistoricalMetrics` e `/googleAds:searchStream`; n├úo aceitam path arbitr├írio. A vers├úo permitida ├® explicitamente `v25` e a mesma configura├º├úo que monta a URL fornece `providerVersion` ├á proveni├¬ncia.
++- Corrigido localmente: campos ProtoJSON `int64` aceitam string decimal ou inteiro seguro de fixture; s├úo convertidos somente quando seguros, aus├¬ncias e valores inv├ílidos permanecem `null`, e micros permanecem strings decimais. A chave normalizada usa Unicode NFC, `trim` e lowercase neutro, sem remover acentos ou pressupor pt-BR.
++- Prote├º├Áes: a conta resolvida ├® a ├║nica fonte de customer, MCC, moeda e fuso. Diverg├¬ncia expl├¡cita no input ├® recusada antes de qualquer `fetch`; MCC configurado ├® aplicado quando o input o omite; OAuth usa cache isolado por configura├º├úo sem expor segredos.
++- Confirmado por testes locais com `fetch` simulado: formatos REST literais, seeds de keyword/URL, pagina├º├úo, 12 meses, CPC presente/ausente, int64, micros, close variants, conta sem autoriza├º├úo, quota, rate limit, timeout e payload malformado. Nenhuma API Google, Serper, RapidAPI ou servi├ºo remoto foi chamado.
++- Deliberadamente ainda n├úo implementado: rota Next, interface, persist├¬ncia, mapeamento marca-conta, cache de dados, substitui├º├úo do provider de volume, altera├º├úo da Extens├úo, remo├º├úo da RapidAPI ou qualquer altera├º├úo no Radar/Serper. RapidAPI e Extens├úo continuam ativas.
++- Pendente manual posterior: configurar uma conta anunciante autorizada explicitamente e executar smoke de uma keyword somente quando a pr├│xima fase estiver autorizada.
+diff --git a/lib/google/ads/account.ts b/lib/google/ads/account.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f07bdc4db959ef84595be9265d1ff5fdbefda3af
+--- /dev/null
++++ b/lib/google/ads/account.ts
+@@ -0,0 +1,24 @@
++import { normalizeGoogleAdsCustomerId } from "./config.ts";
++import type { GoogleAdsRestClient } from "./client.ts";
++import type { GoogleAdsAdvertiserAccount, GoogleAdsAdvertiserAccountInput } from "./contracts.ts";
++import { GoogleAdsError } from "./errors.ts";
++
++type CustomerSearchStreamResponse = Array<{ results?: Array<{ customer?: { id?: unknown; currencyCode?: unknown; timeZone?: unknown } }> }>;
++
++export async function resolveGoogleAdsAdvertiserAccount(
++  client: GoogleAdsRestClient,
++  input: GoogleAdsAdvertiserAccountInput,
++): Promise<GoogleAdsAdvertiserAccount> {
++  const customerId = normalizeGoogleAdsCustomerId(input.customerId);
++  const loginCustomerId = input.loginCustomerId ? normalizeGoogleAdsCustomerId(input.loginCustomerId) : undefined;
++  const response = await client.searchStream<CustomerSearchStreamResponse>(
++    customerId,
++    { query: "SELECT customer.id, customer.currency_code, customer.time_zone FROM customer LIMIT 1" },
++    { loginCustomerId },
++  );
++  const customer = response.data.flatMap(chunk => chunk.results || []).map(result => result.customer).find(Boolean);
++  if (!customer || String(customer.id || "") !== customerId || typeof customer.currencyCode !== "string" || !customer.currencyCode || typeof customer.timeZone !== "string" || !customer.timeZone) {
++    throw new GoogleAdsError("google_ads_invalid_response", { status: 502, requestId: response.requestId });
++  }
++  return { customerId, loginCustomerId: response.loginCustomerId, currencyCode: customer.currencyCode, timeZone: customer.timeZone };
++}
+diff --git a/lib/google/ads/auth.ts b/lib/google/ads/auth.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c41c81b9dff0fdac62cddb8c90e65249788ff5be
+--- /dev/null
++++ b/lib/google/ads/auth.ts
+@@ -0,0 +1,70 @@
++import { getGoogleAdsServerConfig, type GoogleAdsServerConfig } from "./config.ts";
++import { GoogleAdsError } from "./errors.ts";
++
++type AccessToken = { accessToken: string; expiresAt: number };
++type FetchLike = typeof fetch;
++
++const cachedTokens = new Map<GoogleAdsServerConfig, AccessToken>();
++const tokenRefreshesInFlight = new Map<GoogleAdsServerConfig, Promise<AccessToken>>();
++const TOKEN_EXPIRY_MARGIN_MS = 60_000;
++
++function usable(token: AccessToken | null, now: number) {
++  return Boolean(token && token.expiresAt - TOKEN_EXPIRY_MARGIN_MS > now);
++}
++
++async function refreshAccessToken(config: GoogleAdsServerConfig, fetchFn: FetchLike): Promise<AccessToken> {
++  const form = new URLSearchParams({
++    grant_type: "refresh_token",
++    client_id: config.clientId,
++    client_secret: config.clientSecret,
++    refresh_token: config.refreshToken,
++  });
++  let response: Response;
++  try {
++    response = await fetchFn("https://oauth2.googleapis.com/token", {
++      method: "POST",
++      headers: { "content-type": "application/x-www-form-urlencoded" },
++      body: form,
++      cache: "no-store",
++      signal: AbortSignal.timeout(15_000),
++    });
++  } catch (error) {
++    if (error instanceof DOMException && error.name === "TimeoutError") throw new GoogleAdsError("google_ads_timeout", { cause: error });
++    throw new GoogleAdsError("google_ads_oauth", { cause: error });
++  }
++
++  let payload: unknown = null;
++  try { payload = await response.json(); } catch { /* mapped below */ }
++  if (!response.ok || !payload || typeof payload !== "object") {
++    throw new GoogleAdsError("google_ads_oauth", { status: response.status || 502 });
++  }
++  const accessToken = (payload as { access_token?: unknown }).access_token;
++  const expiresIn = (payload as { expires_in?: unknown }).expires_in;
++  if (typeof accessToken !== "string" || !accessToken || typeof expiresIn !== "number" || !Number.isFinite(expiresIn) || expiresIn <= 0) {
++    throw new GoogleAdsError("google_ads_oauth", { status: 502 });
++  }
++  return { accessToken, expiresAt: Date.now() + expiresIn * 1_000 };
++}
++
++export async function getGoogleAdsAccessToken(options: { config?: GoogleAdsServerConfig; fetchFn?: FetchLike; now?: () => number } = {}) {
++  const config = options.config || getGoogleAdsServerConfig();
++  const now = options.now || Date.now;
++  const cachedToken = cachedTokens.get(config) || null;
++  if (cachedToken && usable(cachedToken, now())) return cachedToken.accessToken;
++  let refreshInFlight = tokenRefreshesInFlight.get(config);
++  if (!refreshInFlight) {
++    refreshInFlight = refreshAccessToken(config, options.fetchFn || fetch)
++      .then((token) => {
++        cachedTokens.set(config, token);
++        return token;
++      })
++      .finally(() => { tokenRefreshesInFlight.delete(config); });
++    tokenRefreshesInFlight.set(config, refreshInFlight);
++  }
++  return (await refreshInFlight).accessToken;
++}
++
++export function resetGoogleAdsAccessTokenCacheForTests() {
++  cachedTokens.clear();
++  tokenRefreshesInFlight.clear();
++}
+diff --git a/lib/google/ads/client.ts b/lib/google/ads/client.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b879d0016b43cca37c0c43b0d0ddc51a57f05185
+--- /dev/null
++++ b/lib/google/ads/client.ts
+@@ -0,0 +1,83 @@
++import { getGoogleAdsAccessToken } from "./auth.ts";
++import { normalizeGoogleAdsCustomerId, type GoogleAdsServerConfig } from "./config.ts";
++import { GoogleAdsError } from "./errors.ts";
++
++type FetchLike = typeof fetch;
++type GoogleAdsCallOptions = { loginCustomerId?: string | null };
++
++export type GoogleAdsRestResponse<T> = {
++  data: T;
++  requestId: string | null;
++  providerVersion: GoogleAdsServerConfig["apiVersion"];
++  customerId: string;
++  loginCustomerId: string | null;
++};
++
++export type GoogleAdsRestClient = {
++  generateKeywordIdeas<T>(customerId: string, body: unknown, options?: GoogleAdsCallOptions): Promise<GoogleAdsRestResponse<T>>;
++  generateKeywordHistoricalMetrics<T>(customerId: string, body: unknown, options?: GoogleAdsCallOptions): Promise<GoogleAdsRestResponse<T>>;
++  searchStream<T>(customerId: string, body: unknown, options?: GoogleAdsCallOptions): Promise<GoogleAdsRestResponse<T>>;
++};
++
++function responseErrorCode(status: number, payload: unknown) {
++  const providerStatus = payload && typeof payload === "object" && "error" in payload
++    ? (payload as { error?: { status?: unknown } }).error?.status
++    : null;
++  if (providerStatus === "RESOURCE_EXHAUSTED") return "google_ads_quota" as const;
++  if (status === 429) return "google_ads_rate_limited" as const;
++  if (status === 401 || providerStatus === "UNAUTHENTICATED") return "google_ads_oauth" as const;
++  if (status === 403 && providerStatus === "PERMISSION_DENIED") return "google_ads_account_not_authorized" as const;
++  if (status === 403) return "google_ads_developer_token" as const;
++  if (status === 400 || providerStatus === "INVALID_ARGUMENT") return "google_ads_invalid_request" as const;
++  return "google_ads_provider_error" as const;
++}
++
++export function createGoogleAdsRestClient(options: {
++  config: GoogleAdsServerConfig;
++  fetchFn?: FetchLike;
++  getAccessToken?: () => Promise<string>;
++}): GoogleAdsRestClient {
++  const fetchFn = options.fetchFn || fetch;
++  const getAccessToken = options.getAccessToken || (() => getGoogleAdsAccessToken({ config: options.config, fetchFn }));
++
++  async function post<T>(customerIdInput: string, operation: ":generateKeywordIdeas" | ":generateKeywordHistoricalMetrics" | "/googleAds:searchStream", body: unknown, requestOptions: GoogleAdsCallOptions = {}): Promise<GoogleAdsRestResponse<T>> {
++    const customerId = normalizeGoogleAdsCustomerId(customerIdInput);
++    const loginCustomerId = requestOptions.loginCustomerId === undefined
++      ? options.config.loginCustomerId
++      : requestOptions.loginCustomerId;
++    const effectiveLoginCustomerId = loginCustomerId ? normalizeGoogleAdsCustomerId(loginCustomerId) : null;
++    const headers: Record<string, string> = {
++      authorization: `Bearer ${await getAccessToken()}`,
++      "developer-token": options.config.developerToken,
++      "content-type": "application/json",
++    };
++    if (effectiveLoginCustomerId) headers["login-customer-id"] = effectiveLoginCustomerId;
++
++    let response: Response;
++    try {
++      response = await fetchFn(`https://googleads.googleapis.com/${options.config.apiVersion}/customers/${customerId}${operation}`, {
++        method: "POST",
++        headers,
++        body: JSON.stringify(body),
++        cache: "no-store",
++        signal: AbortSignal.timeout(15_000),
++      });
++    } catch (error) {
++      if (error instanceof DOMException && error.name === "TimeoutError") throw new GoogleAdsError("google_ads_timeout", { cause: error });
++      throw new GoogleAdsError("google_ads_provider_error", { cause: error });
++    }
++
++    const requestId = response.headers.get("request-id") || response.headers.get("google-ads-request-id");
++    let payload: unknown = null;
++    try { payload = await response.json(); } catch { /* mapped below */ }
++    if (!response.ok) throw new GoogleAdsError(responseErrorCode(response.status, payload), { status: response.status, requestId });
++    if (!payload || typeof payload !== "object") throw new GoogleAdsError("google_ads_invalid_response", { status: 502, requestId });
++    return { data: payload as T, requestId, providerVersion: options.config.apiVersion, customerId, loginCustomerId: effectiveLoginCustomerId };
++  }
++
++  return {
++    generateKeywordIdeas: (customerId, body, callOptions) => post(customerId, ":generateKeywordIdeas", body, callOptions),
++    generateKeywordHistoricalMetrics: (customerId, body, callOptions) => post(customerId, ":generateKeywordHistoricalMetrics", body, callOptions),
++    searchStream: (customerId, body, callOptions) => post(customerId, "/googleAds:searchStream", body, callOptions),
++  };
++}
+diff --git a/lib/google/ads/config.ts b/lib/google/ads/config.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c4c99eb4851d1ba8c944ce5a2b79c30bf91e48d7
+--- /dev/null
++++ b/lib/google/ads/config.ts
+@@ -0,0 +1,49 @@
++import { GoogleAdsError } from "./errors.ts";
++
++export type GoogleAdsServerConfig = {
++  developerToken: string;
++  clientId: string;
++  clientSecret: string;
++  refreshToken: string;
++  loginCustomerId: string | null;
++  apiVersion: GoogleAdsSupportedApiVersion;
++};
++
++export type GoogleAdsEnvironment = Record<string, string | undefined>;
++
++const CUSTOMER_ID_PATTERN = /^\d{10}$/;
++export const GOOGLE_ADS_SUPPORTED_API_VERSIONS = ["v25"] as const;
++type GoogleAdsSupportedApiVersion = typeof GOOGLE_ADS_SUPPORTED_API_VERSIONS[number];
++
++export function normalizeGoogleAdsCustomerId(value: string): string {
++  const normalized = value.replace(/-/g, "").trim();
++  if (!CUSTOMER_ID_PATTERN.test(normalized)) throw new GoogleAdsError("google_ads_invalid_customer_id", { status: 400 });
++  return normalized;
++}
++
++export function getGoogleAdsServerConfig(env: GoogleAdsEnvironment = process.env): GoogleAdsServerConfig {
++  const required = [
++    ["GOOGLE_ADS_DEVELOPER_TOKEN", env.GOOGLE_ADS_DEVELOPER_TOKEN],
++    ["GOOGLE_ADS_CLIENT_ID", env.GOOGLE_ADS_CLIENT_ID],
++    ["GOOGLE_ADS_CLIENT_SECRET", env.GOOGLE_ADS_CLIENT_SECRET],
++    ["GOOGLE_ADS_REFRESH_TOKEN", env.GOOGLE_ADS_REFRESH_TOKEN],
++    ["GOOGLE_ADS_API_VERSION", env.GOOGLE_ADS_API_VERSION],
++  ] as const;
++  if (required.some(([, value]) => !value?.trim())) throw new GoogleAdsError("google_ads_configuration", { status: 503 });
++
++  const apiVersion = env.GOOGLE_ADS_API_VERSION!.trim();
++  if (!GOOGLE_ADS_SUPPORTED_API_VERSIONS.includes(apiVersion as GoogleAdsSupportedApiVersion)) throw new GoogleAdsError("google_ads_configuration", { status: 503 });
++
++  const loginCustomerId = env.GOOGLE_ADS_LOGIN_CUSTOMER_ID?.trim()
++    ? normalizeGoogleAdsCustomerId(env.GOOGLE_ADS_LOGIN_CUSTOMER_ID)
++    : null;
++
++  return {
++    developerToken: env.GOOGLE_ADS_DEVELOPER_TOKEN!.trim(),
++    clientId: env.GOOGLE_ADS_CLIENT_ID!.trim(),
++    clientSecret: env.GOOGLE_ADS_CLIENT_SECRET!.trim(),
++    refreshToken: env.GOOGLE_ADS_REFRESH_TOKEN!.trim(),
++    loginCustomerId,
++    apiVersion: apiVersion as GoogleAdsSupportedApiVersion,
++  };
++}
+diff --git a/lib/google/ads/contracts.ts b/lib/google/ads/contracts.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..fcbff5cfe90e5e9fb962aa490d8f495789334d03
+--- /dev/null
++++ b/lib/google/ads/contracts.ts
+@@ -0,0 +1,89 @@
++import { z } from "zod";
++
++export const GoogleAdsTargetingSchema = z.object({
++  language: z.string().min(1),
++  geoTargetConstants: z.array(z.string().min(1)).default([]),
++  keywordPlanNetwork: z.enum(["GOOGLE_SEARCH", "GOOGLE_SEARCH_AND_PARTNERS"]),
++  includeAdultKeywords: z.boolean().default(false),
++});
++
++const CustomerIdSchema = z.string().min(1);
++const SeedKeywordsSchema = z.array(z.string().trim().min(1)).min(1).max(20);
++
++export const GoogleAdsAdvertiserAccountInputSchema = z.object({
++  customerId: CustomerIdSchema,
++  loginCustomerId: CustomerIdSchema.optional(),
++});
++
++export const GoogleAdsKeywordIdeasInputSchema = z.object({
++  account: GoogleAdsAdvertiserAccountInputSchema,
++  targeting: GoogleAdsTargetingSchema,
++  pageToken: z.string().min(1).optional(),
++  pageSize: z.number().int().min(1).max(10_000).optional(),
++  seed: z.union([
++    z.object({ kind: z.literal("keyword"), keywords: SeedKeywordsSchema }),
++    z.object({ kind: z.literal("url"), url: z.string().url() }),
++    z.object({ kind: z.literal("keyword_and_url"), keywords: SeedKeywordsSchema, url: z.string().url() }),
++    z.object({ kind: z.literal("site"), site: z.string().min(1) }),
++  ]),
++});
++
++export const GoogleAdsHistoricalMetricsInputSchema = z.object({
++  account: GoogleAdsAdvertiserAccountInputSchema,
++  targeting: GoogleAdsTargetingSchema,
++  keywords: SeedKeywordsSchema,
++  includeAverageCpc: z.boolean().default(false),
++});
++
++export type GoogleAdsTargeting = z.infer<typeof GoogleAdsTargetingSchema>;
++export type GoogleAdsAdvertiserAccountInput = z.infer<typeof GoogleAdsAdvertiserAccountInputSchema>;
++export type GoogleAdsKeywordIdeasInput = z.infer<typeof GoogleAdsKeywordIdeasInputSchema>;
++export type GoogleAdsHistoricalMetricsInput = z.infer<typeof GoogleAdsHistoricalMetricsInputSchema>;
++
++export type GoogleAdsAdvertiserAccount = {
++  customerId: string;
++  loginCustomerId: string | null;
++  currencyCode: string;
++  timeZone: string;
++};
++
++export type GoogleAdsMonthlySearchVolume = { year: number | null; month: string | null; searches: number | null };
++
++export type GoogleAdsKeywordMetrics = {
++  averageMonthlySearches: number | null;
++  monthlySearchVolumes: GoogleAdsMonthlySearchVolume[];
++  competition: string | null;
++  competitionIndex: number | null;
++  lowTopOfPageBidMicros: string | null;
++  highTopOfPageBidMicros: string | null;
++  averageCpcMicros: string | null;
++};
++
++export type GoogleAdsNormalizedKeyword = GoogleAdsKeywordMetrics & {
++  keyword: string;
++  normalizedKeyword: string;
++  currencyCode: string;
++  timeZone: string;
++  targeting: GoogleAdsTargeting;
++  customerId: string;
++  provider: "google_ads";
++  providerVersion: string;
++  measuredAt: string;
++};
++
++export type GoogleAdsHistoricalMetric = GoogleAdsNormalizedKeyword & {
++  canonicalKeyword: string;
++  closeVariants: string[];
++  requestedKeywords: string[];
++};
++
++export type GoogleAdsKeywordIdeasPage = {
++  ideas: GoogleAdsNormalizedKeyword[];
++  nextPageToken: string | null;
++  requestId: string | null;
++};
++
++export type GoogleAdsHistoricalMetricsResult = {
++  metrics: GoogleAdsHistoricalMetric[];
++  requestId: string | null;
++};
+diff --git a/lib/google/ads/errors.ts b/lib/google/ads/errors.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6a6683deee7925f5a60f5a83083173c5893e3c18
+--- /dev/null
++++ b/lib/google/ads/errors.ts
+@@ -0,0 +1,51 @@
++export type GoogleAdsErrorCode =
++  | "google_ads_configuration"
++  | "google_ads_oauth"
++  | "google_ads_account_not_authorized"
++  | "google_ads_invalid_customer_id"
++  | "google_ads_developer_token"
++  | "google_ads_quota"
++  | "google_ads_rate_limited"
++  | "google_ads_timeout"
++  | "google_ads_invalid_request"
++  | "google_ads_invalid_response"
++  | "google_ads_provider_error";
++
++const messages: Record<GoogleAdsErrorCode, string> = {
++  google_ads_configuration: "A integra├º├úo Google Ads n├úo est├í configurada para esta opera├º├úo.",
++  google_ads_oauth: "N├úo foi poss├¡vel autorizar a integra├º├úo Google Ads.",
++  google_ads_account_not_authorized: "A conta anunciante n├úo est├í autorizada para esta opera├º├úo.",
++  google_ads_invalid_customer_id: "A conta anunciante informada ├® inv├ílida.",
++  google_ads_developer_token: "O acesso da integra├º├úo Google Ads foi recusado.",
++  google_ads_quota: "A quota da integra├º├úo Google Ads foi atingida.",
++  google_ads_rate_limited: "A integra├º├úo Google Ads limitou temporariamente esta opera├º├úo.",
++  google_ads_timeout: "A integra├º├úo Google Ads demorou mais do que o esperado.",
++  google_ads_invalid_request: "A solicita├º├úo para Google Ads ├® inv├ílida.",
++  google_ads_invalid_response: "Google Ads retornou uma resposta incompat├¡vel.",
++  google_ads_provider_error: "Google Ads n├úo concluiu a opera├º├úo.",
++};
++
++export class GoogleAdsError extends Error {
++  readonly code: GoogleAdsErrorCode;
++  readonly status: number;
++  readonly requestId: string | null;
++
++  constructor(code: GoogleAdsErrorCode, options: { status?: number; requestId?: string | null; cause?: unknown } = {}) {
++    super(messages[code], { cause: options.cause });
++    this.name = "GoogleAdsError";
++    this.code = code;
++    this.status = options.status ?? 500;
++    this.requestId = options.requestId ?? null;
++  }
++}
++
++export function toGoogleAdsError(error: unknown): GoogleAdsError {
++  if (error instanceof GoogleAdsError) return error;
++  if (error instanceof DOMException && error.name === "TimeoutError") return new GoogleAdsError("google_ads_timeout", { cause: error });
++  return new GoogleAdsError("google_ads_provider_error", { cause: error });
++}
++
++export function googleAdsSafeError(error: unknown) {
++  const normalized = toGoogleAdsError(error);
++  return { code: normalized.code, message: normalized.message, requestId: normalized.requestId };
++}
+diff --git a/lib/google/ads/historical-metrics.ts b/lib/google/ads/historical-metrics.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..25bbfd8943b50f48387a2784f4d1f136fd4785fa
+--- /dev/null
++++ b/lib/google/ads/historical-metrics.ts
+@@ -0,0 +1,49 @@
++import type { GoogleAdsRestClient } from "./client.ts";
++import type { GoogleAdsAdvertiserAccount, GoogleAdsHistoricalMetricsInput, GoogleAdsHistoricalMetricsResult } from "./contracts.ts";
++import { GoogleAdsHistoricalMetricsInputSchema } from "./contracts.ts";
++import { normalizeGoogleAdsCustomerId } from "./config.ts";
++import { GoogleAdsError } from "./errors.ts";
++import { normalizeGoogleAdsKeywordResult } from "./normalizers.ts";
++
++type HistoricalMetricsResponse = { results?: Array<{ text?: unknown; closeVariants?: unknown; keywordMetrics?: unknown }> };
++
++export async function generateGoogleAdsHistoricalMetrics(
++  client: GoogleAdsRestClient,
++  input: GoogleAdsHistoricalMetricsInput,
++  account: GoogleAdsAdvertiserAccount,
++): Promise<GoogleAdsHistoricalMetricsResult> {
++  const parsed = GoogleAdsHistoricalMetricsInputSchema.safeParse(input);
++  if (!parsed.success) throw new GoogleAdsError("google_ads_invalid_request", { status: 400 });
++  const value = parsed.data;
++  const requestedCustomerId = normalizeGoogleAdsCustomerId(value.account.customerId);
++  if (requestedCustomerId !== account.customerId) throw new GoogleAdsError("google_ads_invalid_request", { status: 400 });
++  if (value.account.loginCustomerId && normalizeGoogleAdsCustomerId(value.account.loginCustomerId) !== account.loginCustomerId) throw new GoogleAdsError("google_ads_invalid_request", { status: 400 });
++  const response = await client.generateKeywordHistoricalMetrics<HistoricalMetricsResponse>(account.customerId, {
++    keywords: value.keywords,
++    language: value.targeting.language,
++    geoTargetConstants: value.targeting.geoTargetConstants,
++    keywordPlanNetwork: value.targeting.keywordPlanNetwork,
++    // A representa├º├úo JSON REST preserva a inten├º├úo do campo
++    // historical_metrics_options.include_average_cpc do contrato Google Ads.
++    ...(value.includeAverageCpc ? { historicalMetricsOptions: { includeAverageCpc: true } } : {}),
++  }, { loginCustomerId: account.loginCustomerId });
++  if (!Array.isArray(response.data.results)) throw new GoogleAdsError("google_ads_invalid_response", { status: 502, requestId: response.requestId });
++  return {
++    metrics: response.data.results.map(result => {
++      const normalized = normalizeGoogleAdsKeywordResult({
++        keyword: result.text,
++        metrics: result.keywordMetrics,
++        account,
++        targeting: value.targeting,
++        providerVersion: response.providerVersion,
++      });
++      return {
++        ...normalized,
++        canonicalKeyword: normalized.keyword,
++        closeVariants: Array.isArray(result.closeVariants) ? result.closeVariants.filter((variant): variant is string => typeof variant === "string") : [],
++        requestedKeywords: [...value.keywords],
++      };
++    }),
++    requestId: response.requestId,
++  };
++}
+diff --git a/lib/google/ads/keyword-ideas.ts b/lib/google/ads/keyword-ideas.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..47e2ecc08d0af57a5e90390ba7a51a5a2b68d340
+--- /dev/null
++++ b/lib/google/ads/keyword-ideas.ts
+@@ -0,0 +1,49 @@
++import type { GoogleAdsRestClient } from "./client.ts";
++import type { GoogleAdsAdvertiserAccount, GoogleAdsKeywordIdeasInput, GoogleAdsKeywordIdeasPage } from "./contracts.ts";
++import { GoogleAdsKeywordIdeasInputSchema } from "./contracts.ts";
++import { normalizeGoogleAdsCustomerId } from "./config.ts";
++import { GoogleAdsError } from "./errors.ts";
++import { normalizeGoogleAdsKeywordResult } from "./normalizers.ts";
++
++type IdeasResponse = { results?: Array<{ text?: unknown; keywordIdeaMetrics?: unknown }>; nextPageToken?: unknown };
++
++function seedBody(seed: GoogleAdsKeywordIdeasInput["seed"]) {
++  if (seed.kind === "keyword") return { keywordSeed: { keywords: seed.keywords } };
++  if (seed.kind === "url") return { urlSeed: { url: seed.url } };
++  if (seed.kind === "keyword_and_url") return { keywordAndUrlSeed: { keywords: seed.keywords, url: seed.url } };
++  return { siteSeed: { site: seed.site } };
++}
++
++export async function generateGoogleAdsKeywordIdeas(
++  client: GoogleAdsRestClient,
++  input: GoogleAdsKeywordIdeasInput,
++  account: GoogleAdsAdvertiserAccount,
++): Promise<GoogleAdsKeywordIdeasPage> {
++  const parsed = GoogleAdsKeywordIdeasInputSchema.safeParse(input);
++  if (!parsed.success) throw new GoogleAdsError("google_ads_invalid_request", { status: 400 });
++  const value = parsed.data;
++  const requestedCustomerId = normalizeGoogleAdsCustomerId(value.account.customerId);
++  if (requestedCustomerId !== account.customerId) throw new GoogleAdsError("google_ads_invalid_request", { status: 400 });
++  if (value.account.loginCustomerId && normalizeGoogleAdsCustomerId(value.account.loginCustomerId) !== account.loginCustomerId) throw new GoogleAdsError("google_ads_invalid_request", { status: 400 });
++  const response = await client.generateKeywordIdeas<IdeasResponse>(account.customerId, {
++    ...seedBody(value.seed),
++    language: value.targeting.language,
++    geoTargetConstants: value.targeting.geoTargetConstants,
++    keywordPlanNetwork: value.targeting.keywordPlanNetwork,
++    includeAdultKeywords: value.targeting.includeAdultKeywords,
++    ...(value.pageToken ? { pageToken: value.pageToken } : {}),
++    ...(value.pageSize ? { pageSize: value.pageSize } : {}),
++  }, { loginCustomerId: account.loginCustomerId });
++  if (!Array.isArray(response.data.results)) throw new GoogleAdsError("google_ads_invalid_response", { status: 502, requestId: response.requestId });
++  return {
++    ideas: response.data.results.map(result => normalizeGoogleAdsKeywordResult({
++      keyword: result.text,
++      metrics: result.keywordIdeaMetrics,
++      account,
++      targeting: value.targeting,
++      providerVersion: response.providerVersion,
++    })),
++    nextPageToken: typeof response.data.nextPageToken === "string" && response.data.nextPageToken ? response.data.nextPageToken : null,
++    requestId: response.requestId,
++  };
++}
+diff --git a/lib/google/ads/normalizers.ts b/lib/google/ads/normalizers.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..71864dd6544b0d4fed66934d44127e610daebdce
+--- /dev/null
++++ b/lib/google/ads/normalizers.ts
+@@ -0,0 +1,74 @@
++import type {
++  GoogleAdsAdvertiserAccount,
++  GoogleAdsKeywordMetrics,
++  GoogleAdsMonthlySearchVolume,
++  GoogleAdsNormalizedKeyword,
++  GoogleAdsTargeting,
++} from "./contracts.ts";
++import { GoogleAdsError } from "./errors.ts";
++
++function int64(value: unknown): number | null {
++  if (typeof value === "string" && /^-?\d+$/.test(value)) {
++    const parsed = Number(value);
++    return Number.isSafeInteger(parsed) ? parsed : null;
++  }
++  return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
++}
++
++function micros(value: unknown): string | null {
++  if (typeof value === "string" && /^-?\d+$/.test(value)) return value;
++  if (typeof value === "number" && Number.isSafeInteger(value)) return String(value);
++  return null;
++}
++
++export function normalizeGoogleAdsKeyword(value: string) {
++  return value.normalize("NFC").trim().toLowerCase();
++}
++
++export function normalizeGoogleAdsKeywordMetrics(value: unknown): GoogleAdsKeywordMetrics {
++  if (!value || typeof value !== "object" || Array.isArray(value)) throw new GoogleAdsError("google_ads_invalid_response", { status: 502 });
++  const record = value as Record<string, unknown>;
++  const monthlySearchVolumes = Array.isArray(record.monthlySearchVolumes)
++    ? record.monthlySearchVolumes.map((entry): GoogleAdsMonthlySearchVolume => {
++      if (!entry || typeof entry !== "object") throw new GoogleAdsError("google_ads_invalid_response", { status: 502 });
++      const volume = entry as Record<string, unknown>;
++      return {
++        year: int64(volume.year),
++        month: typeof volume.month === "string" ? volume.month : null,
++        searches: int64(volume.monthlySearches),
++      };
++    })
++    : [];
++  return {
++    averageMonthlySearches: int64(record.avgMonthlySearches),
++    monthlySearchVolumes,
++    competition: typeof record.competition === "string" ? record.competition : null,
++    competitionIndex: int64(record.competitionIndex),
++    lowTopOfPageBidMicros: micros(record.lowTopOfPageBidMicros),
++    highTopOfPageBidMicros: micros(record.highTopOfPageBidMicros),
++    averageCpcMicros: micros(record.averageCpcMicros),
++  };
++}
++
++export function normalizeGoogleAdsKeywordResult(input: {
++  keyword: unknown;
++  metrics: unknown;
++  account: GoogleAdsAdvertiserAccount;
++  targeting: GoogleAdsTargeting;
++  providerVersion: string;
++  measuredAt?: string;
++}): GoogleAdsNormalizedKeyword {
++  if (typeof input.keyword !== "string" || !input.keyword.trim()) throw new GoogleAdsError("google_ads_invalid_response", { status: 502 });
++  return {
++    keyword: input.keyword,
++    normalizedKeyword: normalizeGoogleAdsKeyword(input.keyword),
++    ...normalizeGoogleAdsKeywordMetrics(input.metrics),
++    currencyCode: input.account.currencyCode,
++    timeZone: input.account.timeZone,
++    targeting: input.targeting,
++    customerId: input.account.customerId,
++    provider: "google_ads",
++    providerVersion: input.providerVersion,
++    measuredAt: input.measuredAt || new Date().toISOString(),
++  };
++}
+diff --git a/tests/google-ads-foundation.test.mts b/tests/google-ads-foundation.test.mts
+new file mode 100644
+index 0000000000000000000000000000000000000000..63f45f31a5885b538d6de065cb910d31c0107926
+--- /dev/null
++++ b/tests/google-ads-foundation.test.mts
+@@ -0,0 +1,138 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { resolveGoogleAdsAdvertiserAccount } from "../lib/google/ads/account.ts";
++import { getGoogleAdsAccessToken, resetGoogleAdsAccessTokenCacheForTests } from "../lib/google/ads/auth.ts";
++import { createGoogleAdsRestClient } from "../lib/google/ads/client.ts";
++import { getGoogleAdsServerConfig, normalizeGoogleAdsCustomerId } from "../lib/google/ads/config.ts";
++import { GoogleAdsError } from "../lib/google/ads/errors.ts";
++import { generateGoogleAdsHistoricalMetrics } from "../lib/google/ads/historical-metrics.ts";
++import { generateGoogleAdsKeywordIdeas } from "../lib/google/ads/keyword-ideas.ts";
++import { normalizeGoogleAdsKeyword, normalizeGoogleAdsKeywordMetrics } from "../lib/google/ads/normalizers.ts";
++import {
++  googleAdsAccountErrorFixture,
++  googleAdsAccountFixture,
++  googleAdsHistoricalMetricsFixture,
++  googleAdsHistoricalMetricsWithoutCpcFixture,
++  googleAdsKeywordIdeasKeywordSeedFixture,
++  googleAdsKeywordIdeasUrlSeedFixture,
++  googleAdsOauthErrorFixture,
++  googleAdsQuotaErrorFixture,
++} from "./google-ads.fixture.ts";
++
++const environment = {
++  GOOGLE_ADS_DEVELOPER_TOKEN: "test-developer-token",
++  GOOGLE_ADS_CLIENT_ID: "test-client-id",
++  GOOGLE_ADS_CLIENT_SECRET: "test-client-secret",
++  GOOGLE_ADS_REFRESH_TOKEN: "test-refresh-token",
++  GOOGLE_ADS_LOGIN_CUSTOMER_ID: "111-222-3333",
++  GOOGLE_ADS_API_VERSION: "v25",
++};
++const config = getGoogleAdsServerConfig(environment);
++const targeting = { language: "languageConstants/1014", geoTargetConstants: ["geoTargetConstants/2076"], keywordPlanNetwork: "GOOGLE_SEARCH" as const, includeAdultKeywords: false };
++const account = { customerId: "1234567890", loginCustomerId: "1112223333", currencyCode: "BRL", timeZone: "America/Sao_Paulo" };
++
++function response(payload: unknown, status = 200, headers: Record<string, string> = {}) {
++  return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json", ...headers } });
++}
++
++test("configura├º├úo aceita somente vers├úo suportada e customerId v├ílido", () => {
++  assert.equal(config.apiVersion, "v25");
++  assert.equal(normalizeGoogleAdsCustomerId("123-456-7890"), "1234567890");
++  assert.throws(() => getGoogleAdsServerConfig({ ...environment, GOOGLE_ADS_API_VERSION: "v24" }), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_configuration");
++});
++
++test("OAuth ├® isolado por configura├º├úo e n├úo faz rede fora do fetch simulado", async () => {
++  resetGoogleAdsAccessTokenCacheForTests();
++  let calls = 0;
++  const fetchFn = (async () => {
++    calls += 1;
++    return response({ access_token: `token-${calls}`, expires_in: 3600 });
++  }) as typeof fetch;
++  assert.equal(await getGoogleAdsAccessToken({ config, fetchFn }), "token-1");
++  assert.equal(await getGoogleAdsAccessToken({ config, fetchFn }), "token-1");
++  const secondConfig = getGoogleAdsServerConfig({ ...environment, GOOGLE_ADS_REFRESH_TOKEN: "other-test-refresh-token" });
++  assert.equal(await getGoogleAdsAccessToken({ config: secondConfig, fetchFn }), "token-2");
++  assert.equal(calls, 2);
++  resetGoogleAdsAccessTokenCacheForTests();
++  await assert.rejects(() => getGoogleAdsAccessToken({ config, fetchFn: (async () => response(googleAdsOauthErrorFixture, 400)) as typeof fetch }), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_oauth");
++});
++
++test("cliente usa literalmente as tr├¬s rotas REST tipadas e MCC configurado", async () => {
++  const urls: string[] = [];
++  const loginHeaders: Array<string | null> = [];
++  const client = createGoogleAdsRestClient({
++    config,
++    getAccessToken: async () => "access-token",
++    fetchFn: (async (url: string, init?: RequestInit) => {
++      urls.push(url);
++      loginHeaders.push(new Headers(init?.headers).get("login-customer-id"));
++      return response({ results: [] }, 200, { "request-id": "request-1" });
++    }) as typeof fetch,
++  });
++  await client.generateKeywordIdeas("1234567890", {});
++  await client.generateKeywordHistoricalMetrics("1234567890", {});
++  await client.searchStream("1234567890", {});
++  assert.deepEqual(urls, [
++    "https://googleads.googleapis.com/v25/customers/1234567890:generateKeywordIdeas",
++    "https://googleads.googleapis.com/v25/customers/1234567890:generateKeywordHistoricalMetrics",
++    "https://googleads.googleapis.com/v25/customers/1234567890/googleAds:searchStream",
++  ]);
++  assert.deepEqual(loginHeaders, ["1112223333", "1112223333", "1112223333"]);
++});
++
++test("resolu├º├úo de conta preserva MCC efetivo e moeda/fuso do Customer", async () => {
++  const client = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async () => response(googleAdsAccountFixture)) as typeof fetch });
++  assert.deepEqual(await resolveGoogleAdsAdvertiserAccount(client, { customerId: "123-456-7890" }), account);
++});
++
++test("ideias usam conta resolvida, URL tipada e bloqueiam diverg├¬ncia antes do fetch", async () => {
++  let calls = 0;
++  const client = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async () => {
++    calls += 1;
++    return response(calls === 1 ? googleAdsKeywordIdeasKeywordSeedFixture : googleAdsKeywordIdeasUrlSeedFixture);
++  }) as typeof fetch });
++  const result = await generateGoogleAdsKeywordIdeas(client, { account: { customerId: account.customerId }, targeting, seed: { kind: "keyword", keywords: ["marketing para cl├¡nicas"] } }, account);
++  const urlResult = await generateGoogleAdsKeywordIdeas(client, { account: { customerId: account.customerId }, targeting, seed: { kind: "url", url: "https://adalbapro.com.br" } }, account);
++  assert.equal(result.ideas[0].providerVersion, "v25");
++  assert.equal(urlResult.ideas[0].averageMonthlySearches, 260);
++  await assert.rejects(() => generateGoogleAdsKeywordIdeas(client, { account: { customerId: "9999999999" }, targeting, seed: { kind: "url", url: "https://adalbapro.com.br" } }, account), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_invalid_request");
++  await assert.rejects(() => generateGoogleAdsKeywordIdeas(client, { account: { customerId: account.customerId, loginCustomerId: "9999999999" }, targeting, seed: { kind: "url", url: "https://adalbapro.com.br" } }, account), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_invalid_request");
++  assert.equal(calls, 2);
++});
++
++test("m├®tricas hist├│ricas normalizam int64 REST, preservam closeVariants e null", async () => {
++  let calls = 0;
++  const client = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async () => {
++    calls += 1;
++    return response(calls === 1 ? googleAdsHistoricalMetricsFixture : googleAdsHistoricalMetricsWithoutCpcFixture);
++  }) as typeof fetch });
++  const present = await generateGoogleAdsHistoricalMetrics(client, { account: { customerId: account.customerId }, targeting, keywords: ["marketing para cl├¡nicas", "marketing clinicas"], includeAverageCpc: true }, account);
++  const absent = await generateGoogleAdsHistoricalMetrics(client, { account: { customerId: account.customerId }, targeting, keywords: ["keyword sem volume"], includeAverageCpc: false }, account);
++  assert.equal(present.metrics[0].averageMonthlySearches, 720);
++  assert.equal(present.metrics[0].monthlySearchVolumes[0].year, 2026);
++  assert.equal(present.metrics[0].monthlySearchVolumes[0].searches, 590);
++  assert.equal(present.metrics[0].competitionIndex, 78);
++  assert.equal(present.metrics[0].averageCpcMicros, "2200000");
++  assert.deepEqual(present.metrics[0].closeVariants, ["marketing clinicas", "marketing para cl├¡nica"]);
++  assert.deepEqual(absent.metrics[0].closeVariants, ["keyword sem volumes", "keyword sem o volume"]);
++  assert.deepEqual(present.metrics[0].requestedKeywords, ["marketing para cl├¡nicas", "marketing clinicas"]);
++  assert.equal(absent.metrics[0].averageMonthlySearches, null);
++  assert.equal(absent.metrics[0].averageCpcMicros, null);
++});
++
++test("normaliza├º├úo de keyword ├® neutra, preserva acentos e int64 inv├ílido n├úo vira zero", () => {
++  assert.equal(normalizeGoogleAdsKeyword("  Cl├¡nicas M├ëDICAS  "), "cl├¡nicas m├®dicas");
++  const metrics = normalizeGoogleAdsKeywordMetrics({ avgMonthlySearches: "not-a-number", competitionIndex: "9007199254740992", monthlySearchVolumes: [{ year: "2026", month: "JULY", monthlySearches: "not-a-number" }] });
++  assert.equal(metrics.averageMonthlySearches, null);
++  assert.equal(metrics.competitionIndex, null);
++  assert.deepEqual(metrics.monthlySearchVolumes, [{ year: 2026, month: "JULY", searches: null }]);
++});
++
++test("erros de conta, quota, rate limit e timeout permanecem discriminados", async () => {
++  const accountClient = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async () => response(googleAdsAccountErrorFixture, 403)) as typeof fetch });
++  await assert.rejects(() => accountClient.generateKeywordIdeas("1234567890", {}), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_account_not_authorized");
++  const quotaClient = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async () => response(googleAdsQuotaErrorFixture, 429)) as typeof fetch });
++  await assert.rejects(() => quotaClient.generateKeywordIdeas("1234567890", {}), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_quota");
++  const rateClient = createGoogleAdsRestClient({ config, getAccessToken: async () => "access-token", fetchFn: (async () => response({}, 429)) as typeof fetch });
++  await assert.rejects(() => rateClient.generateKeywordIdeas("1234567890", {}), (error: unknown) => error instanceof GoogleAdsError && error.code === "google_ads_rate_limited");
++});
+diff --git a/tests/google-ads.fixture.ts b/tests/google-ads.fixture.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..abcb13df40cef8ddcc6e32aa9077505da59c1062
+--- /dev/null
++++ b/tests/google-ads.fixture.ts
+@@ -0,0 +1,62 @@
++export const googleAdsAccountFixture = [{
++  results: [{ customer: { id: "1234567890", currencyCode: "BRL", timeZone: "America/Sao_Paulo" } }],
++}];
++
++export const googleAdsKeywordIdeasKeywordSeedFixture = {
++  results: [{
++    text: "marketing para cl├¡nicas",
++    keywordIdeaMetrics: {
++      avgMonthlySearches: "720",
++      monthlySearchVolumes: [{ year: "2026", month: "JULY", monthlySearches: "590" }],
++      competition: "MEDIUM",
++      competitionIndex: "42",
++      lowTopOfPageBidMicros: "1200000",
++      highTopOfPageBidMicros: "3500000",
++    },
++  }],
++  nextPageToken: "next-page",
++};
++
++export const googleAdsKeywordIdeasUrlSeedFixture = {
++  results: [{
++    text: "capta├º├úo de pacientes",
++    keywordIdeaMetrics: { avgMonthlySearches: "260", monthlySearchVolumes: [] },
++  }],
++};
++
++export const googleAdsHistoricalMetricsFixture = {
++  results: [{
++    text: "marketing para cl├¡nicas",
++    closeVariants: ["marketing clinicas", "marketing para cl├¡nica"],
++    keywordMetrics: {
++      avgMonthlySearches: "720",
++      monthlySearchVolumes: [
++        { year: "2026", month: "JULY", monthlySearches: "590" },
++        { year: "2026", month: "JUNE", monthlySearches: "720" },
++        { year: "2026", month: "MAY", monthlySearches: "680" },
++        { year: "2026", month: "APRIL", monthlySearches: "700" },
++        { year: "2026", month: "MARCH", monthlySearches: "690" },
++        { year: "2026", month: "FEBRUARY", monthlySearches: "710" },
++        { year: "2026", month: "JANUARY", monthlySearches: "650" },
++        { year: "2025", month: "DECEMBER", monthlySearches: "620" },
++        { year: "2025", month: "NOVEMBER", monthlySearches: "610" },
++        { year: "2025", month: "OCTOBER", monthlySearches: "630" },
++        { year: "2025", month: "SEPTEMBER", monthlySearches: "640" },
++        { year: "2025", month: "AUGUST", monthlySearches: "600" },
++      ],
++      competition: "HIGH",
++      competitionIndex: "78",
++      lowTopOfPageBidMicros: "1500000",
++      highTopOfPageBidMicros: "4700000",
++      averageCpcMicros: "2200000",
++    },
++  }],
++};
++
++export const googleAdsHistoricalMetricsWithoutCpcFixture = {
++  results: [{ text: "keyword sem volume", closeVariants: ["keyword sem volumes", "keyword sem o volume"], keywordMetrics: { monthlySearchVolumes: [], competition: "UNSPECIFIED" } }],
++};
++
++export const googleAdsOauthErrorFixture = { error: "invalid_grant" };
++export const googleAdsAccountErrorFixture = { error: { status: "PERMISSION_DENIED" } };
++export const googleAdsQuotaErrorFixture = { error: { status: "RESOURCE_EXHAUSTED" } };

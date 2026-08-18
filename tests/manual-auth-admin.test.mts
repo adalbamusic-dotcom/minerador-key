@@ -29,15 +29,14 @@ test("cadastro trata e-mail duplicado sem expor segredo", () => {
   assert.equal(signupCreatedUser({ user: { id: "user-1", identities: [{}] } }), true);
 });
 
-test("Google fica suspenso por flag server-side, com provider e troca preservados", async () => {
-  const route = await read("app/api/auth/[...nextauth]/route.ts");
-  const flags = await read("lib/server/auth-feature-flags.ts");
-  const page = await read("app/page.tsx");
-  assert.match(flags, /GOOGLE_LOGIN_ENABLED === "true"/);
-  assert.match(route, /GoogleProvider/);
-  assert.match(route, /exchangeGoogleIdTokenForSupabaseToken/);
-  assert.match(route, /GOOGLE_LOGIN_ENABLED \? \[googleProvider\]/);
-  assert.doesNotMatch(page, /signIn\("google"/);
+test("Google fica suspenso e as telas usam somente Supabase Auth nativo", async () => {
+  const [button, page, signup] = await Promise.all([
+    read("components/auth/google-oauth-button.tsx"), read("app/login/page.tsx"), read("app/cadastro/page.tsx"),
+  ]);
+  assert.match(button, /enabled = false/);
+  assert.match(page, /signInWithPassword/);
+  assert.match(signup, /auth\.signUp/);
+  assert.doesNotMatch(page + signup, /signIn\("google"|GoogleOAuthButton/);
 });
 
 test("provisionamento administrativo exige owner Auth real e não promove o Admin", async () => {
@@ -46,37 +45,29 @@ test("provisionamento administrativo exige owner Auth real e não promove o Admi
   assert.match(provisioning, /getUserById/);
   assert.match(provisioning, /listUsers/);
   assert.match(provisioning, /owner_user_id: owner\.id/);
-  assert.match(provisioning, /role: "owner"/);
   assert.match(provisioning, /status: "active"/);
   assert.match(provisioning, /compensate\(client/);
-  assert.match(provisioning, /membership_id/);
+  assert.match(provisioning, /membership_id: null/);
+  assert.doesNotMatch(provisioning, /from\("brand_memberships"\)\.insert|role: "owner"/);
   assert.doesNotMatch(route, /owner_user_id: profile\.userId/);
   assert.doesNotMatch(route, /d67ebbad-a590-45f8-8bb5-a19c6241ac1b/);
 });
 
-test("seleção de owner usa busca server-side por nome/e-mail e não expõe UUID como entrada", async () => {
+test("admin monitora marcas sem fluxo operacional de owner ou criação direta", async () => {
   const panel = await read("modules/admin/brands-admin-panel.tsx");
   const ownersRoute = await read("app/api/admin/owners/route.ts");
   const authUsers = await read("lib/server/auth-users.ts");
   const provisioning = await read("lib/server/brand-provisioning.ts");
-  assert.match(panel, /fetch\(`\/api\/admin\/owners\?q=/);
-  assert.match(panel, /Selecione o proprietário da marca\./);
-  assert.match(panel, /Busque por nome ou e-mail/);
-  assert.match(panel, /UUID Auth:/);
-  assert.doesNotMatch(panel, /placeholder="UUID real do Supabase Auth"/);
+  assert.match(panel, /Monitoramento estrutural global/);
+  assert.doesNotMatch(panel, /Nova marca|ownerQuery|ownerUserId|\/api\/admin\/owners/);
   assert.doesNotMatch(panel, /SUPABASE_SERVICE_ROLE_KEY/);
-  assert.match(ownersRoute, /profile\.isAdmin/);
+  assert.match(ownersRoute, /requireCanonicalPlatformAdmin/);
+  assert.doesNotMatch(ownersRoute, /profile\.isAdmin|requireCanonicalSessionProfile|ADMIN_EMAIL/);
   assert.match(ownersRoute, /searchAuthUsers\(createServiceClient\(\), query\)/);
   assert.match(authUsers, /listUsers/);
   assert.match(authUsers, /email_confirmed_at|confirmed_at/);
   assert.match(authUsers, /full_name|display_name/);
-  assert.match(panel, /ownerSearchText/);
-  assert.match(panel, /selectedOwner/);
-  assert.match(panel, /ownerSearchStatus/);
-  assert.match(panel, /payload\.ownerUserId = selectedOwner!?\.id/);
-  assert.match(panel, /disabled=\{saving \|\|/);
-  assert.match(panel, /setSelectedOwner\(null\)/);
-  assert.doesNotMatch(panel, /payload\.ownerEmail/);
+  assert.doesNotMatch(panel, /SUPABASE_SERVICE_ROLE_KEY/);
   assert.match(provisioning, /auth\.admin\.getUserById/);
 });
 
@@ -123,23 +114,17 @@ type FakeProvisionClient = Parameters<typeof provisionBrandWithOwner>[0] & {
   state: { brands: Array<Record<string, unknown>>; memberships: Array<Record<string, unknown>>; lists: Array<Record<string, unknown>> };
 };
 
-function fakeProvisionClient(options: { failMembership?: boolean; ownerByEmail?: boolean } = {}): FakeProvisionClient {
+function fakeProvisionClient(options: { failLists?: boolean; ownerByEmail?: boolean } = {}): FakeProvisionClient {
   const state = { brands: [] as Array<Record<string, unknown>>, memberships: [] as Array<Record<string, unknown>>, lists: [] as Array<Record<string, unknown>> };
   const resultFor = (table: string, operation: string, payload: unknown, filters: Record<string, unknown>) => {
-    if (operation === "role") return { data: { id: "owner-role" }, error: null };
     if (operation === "brand-insert") {
       const input = payload as Record<string, unknown>;
       const row = { ...input, id: "22222222-2222-4222-8222-222222222222" };
       state.brands.push(row);
       return { data: row, error: null };
     }
-    if (operation === "membership-insert") {
-      if (options.failMembership) return { data: null, error: { message: "membership failed" } };
-      const row = { ...(payload as Record<string, unknown>), id: "33333333-3333-4333-8333-333333333333" };
-      state.memberships.push(row);
-      return { data: row, error: null };
-    }
     if (operation === "lists-insert") {
+      if (options.failLists) return { data: null, error: { message: "lists failed" } };
       const rows = (payload as Array<Record<string, unknown>>).map((item, index) => ({ ...item, id: `44444444-4444-4444-8444-44444444444${index}` }));
       state.lists.push(...rows);
       return { data: rows, error: null };
@@ -147,7 +132,7 @@ function fakeProvisionClient(options: { failMembership?: boolean; ownerByEmail?:
     if (operation === "delete") {
       if (table === "marcas") state.brands = state.brands.filter(row => row.id !== filters.id);
       if (table === "brand_memberships") state.memberships = state.memberships.filter(row => row.id !== filters.id);
-      if (table === "listas_kgr") state.lists = state.lists.filter(row => !(filters.ids as string[]).includes(String(row.id)));
+      if (table === "minerador_keyword_lists") state.lists = state.lists.filter(row => !(filters.ids as string[]).includes(String(row.id)));
       return { data: null, error: null };
     }
     return { data: null, error: null };
@@ -159,7 +144,7 @@ function fakeProvisionClient(options: { failMembership?: boolean; ownerByEmail?:
       listUsers: async () => ({ data: { users: options.ownerByEmail ? [{ id: "11111111-1111-4111-8111-111111111111", email: "owner@example.com" }] : [] }, error: null }),
     } },
     from(table: string) {
-      let operation = table === "brand_roles" ? "role" : "";
+      let operation = "";
       let payload: unknown;
       const filters: Record<string, unknown> = {};
       const builder = {
@@ -169,7 +154,7 @@ function fakeProvisionClient(options: { failMembership?: boolean; ownerByEmail?:
         in: (key: string, values: string[]) => { filters[key] = values; return builder; },
         maybeSingle: async () => resultFor(table, operation, payload, filters),
         single: async () => resultFor(table, operation, payload, filters),
-        insert: (value: unknown) => { payload = value; operation = table === "marcas" ? "brand-insert" : table === "brand_memberships" ? "membership-insert" : "lists-insert"; return builder; },
+        insert: (value: unknown) => { payload = value; operation = table === "marcas" ? "brand-insert" : "lists-insert"; return builder; },
         delete: () => { operation = "delete"; return builder; },
         then: (resolve: (value: unknown) => unknown) => Promise.resolve(resultFor(table, operation, payload, filters)).then(resolve),
       };
@@ -178,15 +163,15 @@ function fakeProvisionClient(options: { failMembership?: boolean; ownerByEmail?:
   } as unknown as FakeProvisionClient;
 }
 
-test("provisionamento usa fixtures para confirmar ownership/membership e compensar falha", async () => {
+test("provisionamento confirma ownership sem membership artificial e compensa falha", async () => {
   const successClient = fakeProvisionClient();
   const created = await provisionBrandWithOwner(successClient, "d67ebbad-a590-45f8-8bb5-a19c6241ac1b", { nome: "Marca Nova", ownerUserId: "11111111-1111-4111-8111-111111111111" });
   assert.equal(created.owner_user_id, "11111111-1111-4111-8111-111111111111");
-  assert.equal(created.membership_id, "33333333-3333-4333-8333-333333333333");
-  assert.equal(successClient.state.memberships.length, 1);
+  assert.equal(created.membership_id, null);
+  assert.equal(successClient.state.memberships.length, 0);
 
-  const failedClient = fakeProvisionClient({ failMembership: true });
-  await assert.rejects(() => provisionBrandWithOwner(failedClient, "d67ebbad-a590-45f8-8bb5-a19c6241ac1b", { nome: "Marca Incompleta", ownerUserId: "11111111-1111-4111-8111-111111111111" }));
+  const failedClient = fakeProvisionClient({ failLists: true });
+  await assert.rejects(() => provisionBrandWithOwner(failedClient, "d67ebbad-a590-45f8-8bb5-a19c6241ac1b", { nome: "Marca Incompleta", ownerUserId: "11111111-1111-4111-8111-111111111111", silos_existentes: [{ nome: "Silo" }] }));
   assert.equal(failedClient.state.brands.length, 0, "falha não pode deixar marca ativa órfã");
 });
 
@@ -203,14 +188,14 @@ test("owner por e-mail é resolvido no Auth e e-mail inexistente não cria marca
   assert.equal(missingClient.state.brands.length, 0);
 });
 
-test("usuário sem marca consulta somente tenants e recebe estado de espera", async () => {
+test("usuário sem marca recebe estado explícito sem escolher primeiro contexto", async () => {
   const selector = await read("app/selecionar-marca/select-brand-client.tsx");
-  const tenants = await read("app/api/tenants/route.ts");
-  assert.match(selector, /fetch\("\/api\/tenants"/);
-  assert.match(selector, /Aguardando associação a uma marca ou convite/);
+  const contexts = await read("app/api/contexts/route.ts");
+  assert.match(selector, /fetch\("\/api\/contexts"/);
+  assert.match(selector, /ainda não possui acesso editorial a uma marca/);
   assert.match(selector, /Sair da conta/);
   assert.doesNotMatch(selector, /listas_kgr|keywords_kgr/);
-  assert.doesNotMatch(tenants, /listas_kgr|keywords_kgr/);
+  assert.doesNotMatch(contexts, /listas_kgr|keywords_kgr/);
 });
 
 test("convite existente permanece na entidade canônica e a lacuna de aceite fica explícita", async () => {

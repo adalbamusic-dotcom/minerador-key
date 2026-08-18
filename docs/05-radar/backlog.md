@@ -45,6 +45,7 @@
 - Validar manualmente a pagina `/radar/[articleId]`: abas, curadoria, extracao controlada, aprovacao e recovery apos reload.
 - Confirmar no Planejador a visualizacao do pacote Radar aprovado e decidir humanamente entre manter o plano atual ou criar sucessora.
 - Integrar fontes externas e originalidade sem transformar observacao em aprovacao automatica.
+- Validar manualmente a navegação tenantizada do Radar em artigo real: `Abrir no Radar`, retorno ao Radar, deep-link do Arquiteto e link do Planejador em Adalba e Lindisse.
 - Adicionar sincronizacao posterior do recovery local sem nova coleta ou extracao.
 
 ## Correção estrutural de evidência — 2026-07-20
@@ -98,6 +99,32 @@
 - Cenário D: artigo com mais de seis referências em recovery/fixture, conflito visível, nenhuma referência apagada e revisão indicada no Arquiteto.
 - Cenário E: KGR ausente, estado honesto e escolha humana de profundidade.
 
+## Relatorio competitivo - pendencias
+
+- Validar manualmente a leitura do relatorio em artigo completo, amostra pequena, video/formato e SERP ausente, sem recolher dados durante o teste.
+- Confirmar no Planejador que o `RadarEvidencePackage.competitiveReport` aparece como contexto e nao preenche outline ou metas automaticamente.
+- Evoluir a extracao somente com contrato aprovado quando houver necessidade de frequencia por title/H1/intro/headings, fontes detalhadas de links, comentarios ou fontes externas; hoje esses campos ficam explicitamente indisponiveis.
+- Avaliar em tarefa propria uma aba dedicada para o relatorio se o volume do Resumo deixar de ser suficiente; esta rodada manteve a composicao existente e adicionou a leitura consolidada sem alterar a navegacao dos consumidores.
+
 ## Consolidacao fisica concluida - 2026-07-23
 - Implementacoes exclusivas da area permanecem em modules/radar; nenhum contrato ou rota foi alterado nesta etapa.
 - Validacao manual autenticada e persistencia remota seguem pendentes.
+
+
+## Fluxo por modo — validação manual restante
+
+- Abrir um artigo KGR publicado e um artigo KGR novo em Adalba e Lindisse; confirmar sugestão KGR leve, motivo humano, proteção da identidade e isolamento entre marcas.
+- Abrir um artigo sem KGR; confirmar sugestão competitiva completa, estado honesto de KGR ausente e ausência de classificação inventada.
+- Na seleção, conferir todos os resultados orgânicos, artigo próprio, vídeos/redes sociais, PAA, relacionadas e Knowledge Graph; confirmar que somente páginas externas selecionadas podem ser analisadas.
+- Validar amostra KGR com uma a três referências e amostra competitiva com três a cinco páginas quando disponíveis; confirmar benchmark sem vídeo, social, parcial ou artigo próprio.
+- Conferir semântica em caso de repetição, termo central, navegação, legal, plataforma e termo pontual; recuperar manualmente um termo ignorado e verificar nova versão de evidência.
+- Conferir a ordem das cinco áreas, a próxima ação única, estados de carregamento/erro/desabilitado, foco de teclado e legibilidade em 360, 768, 1024 e 1440 px, em light e dark.
+- Aprovar e enviar ao Planejador; confirmar pacote como contexto, sem criação automática de outline, metas ou nova entidade.
+
+## Seleção e relatório — pendências após a correção localizada
+
+- Validar manualmente a troca de função de um resultado entre principal, apoio, formato, próprio e excluído, confirmando que apenas uma função fica visível por vez.
+- Validar manualmente a permanência das decisões após recarregar a aba e a não reextração de uma URL já analisada.
+- Confirmar em navegador uma prévia com uma página comparável, incluindo limitação explícita e ausência de média de mercado, e uma prévia com duas ou mais páginas, incluindo média/mediana/mínimo/máximo.
+- Confirmar que apoio, formato e conteúdo próprio são exibidos no relatório sem contaminar a leitura principal do benchmark.
+- Completar smoke test autenticado e persistência remota; esta rodada não acionou Serper real nem alterou storage remoto.

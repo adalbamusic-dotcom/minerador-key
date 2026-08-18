@@ -4,7 +4,8 @@ import { SiloPageSchema, VersionedSiloDNASchema } from "@/lib/arquiteto/contract
 import { deterministicSiloPagePayload } from "@/lib/arquiteto/adapters";
 import { normalizeSiloPageProviderPayload } from "@/lib/arquiteto/silo-page-provider";
 import { createStatusEvent, createVersionEnvelope, toVersionReference } from "@/lib/arquiteto/versioning";
-import { requireSessionProfile, authzErrorResponse } from "@/lib/server/authz";
+import { appendArquitetoArtifact, pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
+import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 
 const RequestSchema = z.object({
@@ -43,9 +44,9 @@ function buildSiloPageUserPrompt(input: z.infer<typeof RequestSchema>): string {
 
 export async function POST(req: Request) {
   try {
-    const profile = await requireSessionProfile();
     const parsed = RequestSchema.safeParse(await req.json());
     if (!parsed.success) return NextResponse.json({ success: false, error: "Dados invalidos.", issues: parsed.error.flatten() }, { status: 400 });
+    const context = await resolvePipelineContext({ brandId: parsed.data.brand.id, module: "arquiteto", action: "create" });
 
     const { siloId, siloName, siloDnaVersion, brand } = parsed.data;
     const slug = siloName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -81,14 +82,15 @@ export async function POST(req: Request) {
     const version = await createVersionEnvelope({
       entityId, versionNumber: 1, previousVersionId: null,
       origin: "ai", changeReason: "Proposta inicial de Página do Silo.",
-      createdBy: profile.userId, payload: normalized,
+      createdBy: context.actorUserId, payload: normalized,
     });
-    const event = createStatusEvent(version.versionId, "proposed", profile.userId, "Aguardando revisao humana.");
+    const persisted = await appendArquitetoArtifact(context, "silo_page", version, "proposed");
+    const event = createStatusEvent(persisted.version.versionId, "proposed", context.actorUserId, "Aguardando revisao humana.");
 
-    return NextResponse.json({ success: true, data: { versions: [version], events: [event] } });
+    return NextResponse.json({ success: true, data: { versions: [persisted.version], events: [event] } });
   } catch (error) {
-    if (error instanceof StructuredAIError) return NextResponse.json({ success: false, error: error.message, issues: error.issues }, { status: error.status });
-    const mapped = authzErrorResponse(error);
-    return NextResponse.json({ success: false, error: mapped.message }, { status: mapped.status });
+    if (error instanceof StructuredAIError) return NextResponse.json({ success: false, error: error.message, code: error.code, issues: error.issues }, { status: error.status });
+    const mapped = pipelineArtifactErrorResponse(error);
+    return NextResponse.json(mapped.body, { status: mapped.status });
   }
 }

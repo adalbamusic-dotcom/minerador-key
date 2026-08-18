@@ -1,6 +1,8 @@
 # SDD â€” SimplificaÃ§Ã£o da extraÃ§Ã£o da extensÃ£o do Minerador
 
-**Status:** proposta definitiva; nÃ£o implementada
+**Status:** aprovada e implementada localmente; homologacao manual pendente
+
+> **Nota de prevalencia:** o bloco de lacuna abaixo e o registro anterior a esta autorizacao. O contrato e a implementacao vigentes estao no registro de implementacao local ao final deste documento.
 **MÃ³dulo proprietÃ¡rio:** Minerador
 **Componente principal:** extensÃ£o Chrome do Minerador
 **Data:** 2026-07-27
@@ -483,9 +485,24 @@ validado marca e RLS.
 Nenhum desses bloqueios deve ser resolvido com migration, alteraÃ§Ã£o remota ou
 heurÃ­stica silenciosa.
 
+## Registro da implementacao local - 2026-07-27
+
+A autorizacao explicita para implementar esta SDD resolveu a lacuna operacional registrada acima. O contrato efetivamente implementado e:
+
+- `POST /api/extensao/marcas/{brandId}/keywords/import`: requer Bearer valido, permissao do tenant Minerador e corpo com `extractionBatchId` e `items`. O servidor confirma o lote, deduplica por `brandId` + keyword normalizada e grava somente apos a confirmacao autenticada.
+- Keyword nova: `keyword`, `brand_id`, `lista_id: null`, `status: bruto`, `location` e envelope aditivo `analise_semantica.extension_import` com origem, lote, localidades, hints e ultima medicao.
+- Keyword existente: nenhum campo de identidade, lista, status editorial, principal ou KGR e substituido; somente `analise_semantica` recebe evidencia aditiva.
+- `POST /api/extensao/marcas/{brandId}/volume`: requer o mesmo contexto autorizado, consulta o provider somente server-side e nao persiste volume.
+- O service worker novo extrai sem Supabase, executa allintitle sequencialmente e transmite a previa ao popup. A funcao legada de escrita permanece isolada e nao e invocada pelo popup novo.
+- Localidades usam Brasil, UFs estaticas no popup e municipio manual; nao foi adicionado host ou consulta externa de Maps/municipios.
+
+Validacao local: 18 testes focados, sintaxe da extensao, ESLint direcionado, TypeScript, build Next.js 16 e `git diff --check` passaram. Homologacao manual autenticada ainda e pendente.
+
 ## 15. Arquivos alterados nesta SDD
 
 Somente esta proposta e o registro correspondente no backlog. NÃ£o houve
 alteraÃ§Ã£o de cÃ³digo, schema, migration, SQL, dados locais/remotos,
 armazenamento, extensÃ£o carregada, Google, RapidAPI, Google Maps, commit,
 push ou deploy.
+
+O paragrafo acima e historico da proposta antes da autorizacao. Ele nao descreve o estado atual do codigo; a secao de registro de implementacao local e a fonte vigente para esta SDD.
