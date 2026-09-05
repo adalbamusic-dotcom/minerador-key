@@ -15,22 +15,50 @@ export const INTEGRATION_CAPABILITY_OPERATIONS = [
   "keyword_discovery",
   "keyword_metrics",
   "allintitle",
+  "serp_compatibility",
   "transactional_email",
+  "speech_transcription",
+  "storage_media",
+  "youtube_video_metadata",
+  "telegram_message_send",
+  "telegram_file_fetch",
 ] as const;
 export type IntegrationCapabilityOperation = typeof INTEGRATION_CAPABILITY_OPERATIONS[number];
 
 export const PLATFORM_ACCESS_POLICY = "HOMOLOGATION_ALLOW_ALL" as const;
-export type IntegrationResourceProviderKey = "google_ads" | "dataforseo" | "openrouter";
+export type IntegrationResourceProviderKey = "google_ads" | "dataforseo" | "deepseek" | "google_cloud" | "youtube_data" | "telegram";
+
+/** Provider identity is enforced after the canonical capability resolves. */
+export const INTEGRATION_CAPABILITY_PROVIDER_REQUIREMENTS: Record<string, IntegrationResourceProviderKey> = {
+  google_ads_keyword_discovery: "google_ads",
+  google_ads_keyword_metrics: "google_ads",
+  "dataforseo.allintitle": "dataforseo",
+  "dataforseo.serp_compatibility": "dataforseo",
+  ai_generation: "deepseek",
+  "google_cloud.speech_transcription": "google_cloud",
+  "google_cloud.storage_media": "google_cloud",
+  "youtube.video_metadata": "youtube_data",
+  "telegram.message_send": "telegram",
+  "telegram.file_fetch": "telegram",
+};
 
 /**
  * Capabilities describe the technical operation that will be recorded in the
  * usage ledger. They are deliberately not an authorization boundary.
  */
 export const INTEGRATION_RESOURCE_BY_OPERATION: Partial<Record<IntegrationCapabilityOperation, IntegrationResourceProviderKey>> = {
-  ai_generation: "openrouter",
+  ai_generation: "deepseek",
   keyword_discovery: "google_ads",
   keyword_metrics: "google_ads",
   allintitle: "dataforseo",
+  // SERP consumes the same global DataForSEO resource. The capability row is
+  // technical ledger metadata; it is not a module/Brand entitlement gate.
+  serp_compatibility: "dataforseo",
+  speech_transcription: "google_cloud",
+  storage_media: "google_cloud",
+  youtube_video_metadata: "youtube_data",
+  telegram_message_send: "telegram",
+  telegram_file_fetch: "telegram",
 };
 
 function resourceProviderForOperation(operation: IntegrationCapabilityOperation) {
@@ -838,6 +866,10 @@ async function resolveConnectionForBinding(input: IntegrationContextInput & { ac
   const provider = await deps.repository.findProvider(connection.provider_id);
   if (diagnostic) diagnostic.connection = { ...diagnostic.connection, providerKey: provider?.provider_key || null };
   if (!provider || provider.status !== "active") runtimeError("INTEGRATION_CONNECTION_DISABLED", "O provider da connection não está disponível.", 403);
+  const expectedProvider = INTEGRATION_CAPABILITY_PROVIDER_REQUIREMENTS[resolved.capability.capability_key];
+  if (expectedProvider && provider.provider_key !== expectedProvider) {
+    runtimeError("INTEGRATION_CONNECTION_MISSING", "A connection não corresponde ao provider canônico da capability.", 403);
+  }
   return {
     connectionId: connection.id,
     providerId: connection.provider_id,

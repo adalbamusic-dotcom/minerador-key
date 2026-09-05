@@ -90,6 +90,8 @@ export function buildCanonicalArticleWorkspaceItems(
         id: reference.keywordId,
         keywordId: reference.keywordId,
         keyword,
+        articleId: article.articleId,
+        workingArticleId: article.articleId,
         intent: reference.originalIntentLabel || reference.normalizedIntent || article.mainIntent,
         volume_search: volume,
         results_allintitle: reference.resultCount ?? (isPrimary ? primaryMetrics?.resultCount ?? null : null),
@@ -101,11 +103,15 @@ export function buildCanonicalArticleWorkspaceItems(
         computedSlug: article.suggestedSlug,
         hierarquia: article.hierarchy,
         computedHierarquia: article.hierarchy,
+        reviewRole: reference.role,
+        keywordDnaRef: reference.keywordDnaSnapshot?.versionReference,
+        keywordDnaSnapshot: reference.keywordDnaSnapshot,
         canonical,
         publishedUrl,
         isPublished: article.publishedIdentityRef?.publicationStatus === "published_protected",
         clusterId: version.entityId,
         provisionalGroupId: version.entityId,
+        ...(reference.demandEvidence ? { demandEvidence: reference.demandEvidence } : {}),
         source: "CANONICAL_REMOTE",
         canonicalArtifact,
       });
@@ -138,10 +144,38 @@ export function mergeCanonicalArticleWorkspaceItems(
   brandId: string,
 ): WorkspaceItem[] {
   const validCanonical = canonicalItems.filter(item => item.canonicalArtifact.brandId === brandId);
-  const canonicalKeywordIds = new Set(validCanonical.map(item => stringValue(item, "keywordId") || stringValue(item, "id")).filter(Boolean));
-  const articleIds = canonicalArticleIds(validCanonical);
+  const workingCopyByKeyword = new Map(existing.map(item => {
+    const keywordId = stringValue(item, "keywordId") || stringValue(item, "id");
+    return keywordId ? [keywordId, item] as const : null;
+  }).filter((entry): entry is readonly [string, WorkspaceItem] => Boolean(entry)));
+  /**
+   * O que a working copy tem e o ArticleDNA não sabe.
+   *
+   * `territoryRef`/`territoryAssignment` são a membership canônica da keyword e
+   * vivem no item de workflow — o ArticleDNA não os carrega. Sem preservá-los
+   * aqui, toda keyword que vira Article perde o Silo a que pertence, e a mesa
+   * volta a dizer "aguardando definição de Silo" para uma decisão que já foi
+   * tomada. O mesmo vale para a formação revisada.
+   *
+   * `canonicalWorkflow` é o item de workflow em si — id e `lock_version`. É por
+   * ele que TODA decisão humana é gravada, com `expectedLock`. O ArticleDNA não
+   * o conhece, então perdê-lo aqui deixava a keyword sem endereço de escrita:
+   * assim que o artigo era materializado, mover, separar, juntar e trocar a
+   * Principal passavam a recusar com "a keyword não tem item canônico". A
+   * revisão humana ficava impossível exatamente nos artigos já formados.
+   */
+  const assignmentKeys = ["workingArticleId", "clusterId", "provisionalGroupId", "siloId", "silo_id", "siloName", "computedSlug", "slug_sugerido", "computedHierarquia", "hierarquia", "reviewRole", "role", "territoryRef", "territoryAssignment", "articleFormationRef", "articleFormationDecision", "canonicalWorkflow"];
+  const canonicalWithWorkingCopy = validCanonical.map(item => {
+    const keywordId = stringValue(item, "keywordId") || stringValue(item, "id");
+    const working = keywordId ? workingCopyByKeyword.get(keywordId) : undefined;
+    if (!working) return item;
+    const overlay = Object.fromEntries(assignmentKeys.filter(key => working[key] !== undefined).map(key => [key, working[key]]));
+    return { ...item, ...overlay };
+  });
+  const canonicalKeywordIds = new Set(canonicalWithWorkingCopy.map(item => stringValue(item, "keywordId") || stringValue(item, "id")).filter(Boolean));
+  const articleIds = canonicalArticleIds(canonicalWithWorkingCopy);
   const seenCanonicalKeywordIds = new Set<string>();
-  const deduplicatedCanonical = validCanonical.filter(item => {
+  const deduplicatedCanonical = canonicalWithWorkingCopy.filter(item => {
     const keywordId = stringValue(item, "keywordId") || stringValue(item, "id");
     if (!keywordId || seenCanonicalKeywordIds.has(keywordId)) return false;
     seenCanonicalKeywordIds.add(keywordId);

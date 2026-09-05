@@ -4,6 +4,7 @@ import { type FormEvent, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Gauge, Link2, Loader2, ShieldCheck } from "lucide-react";
 import type { AgencyIntegrationWorkspace } from "@/lib/server/integration-governance";
 import { internalBadge, internalButtonPrimary, internalField, internalNoticeError, internalNoticeSuccess, internalNoticeWarning, internalSurface, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
 const panel = `${internalSurface} p-5 sm:p-6`;
 
@@ -24,6 +25,7 @@ export function AgencyIntegrationsPage({ initialData }: { initialData: AgencyInt
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  useNoticeBridge({ notice: error || message, module: "conta", area: "Integrações da Agência", title: "Conta · Integrações", fallbackSeverity: error ? "ERROR" : "INFO" });
 
   const effectiveGrantId = data.platformGrants.some((grant) => grant.id === selectedGrantId) ? selectedGrantId : data.platformGrants[0]?.id || "";
   const effectiveBrandId = data.brands.some((brand) => brand.id === selectedBrandId) ? selectedBrandId : data.brands[0]?.id || "";

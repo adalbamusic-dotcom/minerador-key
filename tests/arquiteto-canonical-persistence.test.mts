@@ -179,7 +179,7 @@ test("parser rejeita campo obrigatório ausente e artifact type incompatível", 
 
 test("bootstrap fresh-origin materializa ArticleDNA canônico sem masterList legado", async () => {
   const group = buildProvisionalGroups([
-    { id: "kw-fresh", keyword: "arquiteto fresh origin", intent: "Informativo", volume_search: 30, lista_id: "silo-fresh", status: "aprovado", analise_semantica: { entidade_central: "arquitetura" } },
+    { id: "kw-fresh", keyword: "arquiteto fresh origin", intent: "Informativo", volume_search: 30, lista_id: "silo-fresh", status: "aprovado", analise_semantica: { entidade_central: "arquitetura", volume_measurement: { provider: "google_ads", averageMonthlySearches: 30, monthlySearchVolumes: [], closeVariants: [], normalizedCloseVariants: [] } } },
   ])[0];
   assert.ok(group);
   const payload = deterministicArticleDnaPayload(group, brandId);
@@ -194,6 +194,7 @@ test("bootstrap fresh-origin materializa ArticleDNA canônico sem masterList leg
   assert.equal((workspace[0]?.canonicalArtifact as { entityId: string }).entityId, payload.articleId);
   assert.equal(workspace[0]?.keyword, "arquiteto fresh origin");
   assert.equal(workspace[0]?.computedSlug, payload.suggestedSlug);
+  assert.equal((workspace[0]?.demandEvidence as { googleAds?: { averageMonthlySearches?: number } })?.googleAds?.averageMonthlySearches, 30);
 });
 
 test("bootstrap canônico vence cópia local equivalente, preserva recovery local-only e não duplica", async () => {

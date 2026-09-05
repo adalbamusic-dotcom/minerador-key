@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LoaderCircle, X } from "lucide-react";
 import { internalButton, internalButtonPrimary, internalField, internalNoticeError } from "@/components/editorial/internal-page-visual";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
 const button = `${internalButton} min-h-11 px-4`;
 const input = `${internalField} min-h-11`;
@@ -20,6 +21,7 @@ export function AgencyBrandCreateModal({ agencyRef, canManage, open, onClose }: 
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  useNoticeBridge({ notice: error, module: "conta", area: "Cadastro de marca", title: "Conta · Marca", fallbackSeverity: "ERROR" });
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +74,7 @@ export function AgencyBrandCreateModal({ agencyRef, canManage, open, onClose }: 
         <div>
            <p className="text-sm font-medium text-text-muted">Nova Marca</p>
           <h2 id="agency-brand-create-title" className="mt-1 text-xl font-semibold">Cadastrar Marca</h2>
-           <p className="mt-2 max-w-xl text-sm leading-6 text-text-muted">Cadastre os dados básicos da Marca atendida pela sua Agência. Estratégia e BrandDNA são configurados depois, nas áreas próprias.</p>
+           <p className="mt-2 max-w-xl text-sm leading-6 text-text-muted">Cadastre os dados básicos da Marca atendida pela sua Agência. Estratégia e identidade da marca são configuradas depois, nas áreas próprias.</p>
         </div>
          <button type="button" className={`${internalButton} min-h-11 min-w-11 p-0`} onClick={close} disabled={saving} aria-label="Fechar cadastro de Marca"><X className="h-5 w-5" aria-hidden="true" /></button>
       </div>

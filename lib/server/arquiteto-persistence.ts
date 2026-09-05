@@ -6,6 +6,12 @@ import type {
   SiloPage,
   VersionEnvelope,
 } from "@/lib/arquiteto/contracts";
+import type { ArticleArchitectureAiReview } from "@/lib/arquiteto/article-ai-review";
+import {
+  ARTICLE_AI_REVIEW_ARTIFACT_TYPE,
+  ArticleArchitectureAiReviewSchema,
+  VersionedArticleArchitectureAiReviewSchema,
+} from "@/lib/arquiteto/article-ai-review";
 import {
   ArticleDNASchema,
   SiloDNASchema,
@@ -22,15 +28,24 @@ import {
   type PipelineJsonObject,
 } from "./pipeline-repositories";
 
-export type ArquitetoArtifactType = Extract<ArtifactType, "article_dna" | "silo_dna" | "silo_page">;
+export type ArquitetoArtifactType = Extract<ArtifactType, "article_dna" | "silo_dna" | "silo_page" | "article_architecture_ai_review">;
 export type ArquitetoArtifactVersion =
   | VersionEnvelope<ArticleDNA>
   | VersionEnvelope<SiloDNA>
-  | VersionEnvelope<SiloPage>;
+  | VersionEnvelope<SiloPage>
+  | VersionEnvelope<ArticleArchitectureAiReview>;
 
 export type ArquitetoPersistenceResult = {
   status: "PERSISTED" | "UNCHANGED";
   version: ArquitetoArtifactVersion;
+  source: "CANONICAL_REMOTE";
+};
+
+export type SiloPairPersistenceResult = {
+  status: "PERSISTED";
+  atomicity: "TRANSACTIONAL_RPC";
+  siloDna: VersionEnvelope<SiloDNA>;
+  siloPage: VersionEnvelope<SiloPage>;
   source: "CANONICAL_REMOTE";
 };
 
@@ -42,9 +57,11 @@ function conflictArtifact(message: string): never {
   throw new PipelineRuntimeError("CONFLICT", message, 409);
 }
 
-function artifactEntityId(type: ArquitetoArtifactType, payload: ArticleDNA | SiloDNA | SiloPage) {
+function artifactEntityId(type: ArquitetoArtifactType, payload: ArticleDNA | SiloDNA | SiloPage | ArticleArchitectureAiReview) {
   if (type === "article_dna") return (payload as ArticleDNA).articleId;
   if (type === "silo_dna") return (payload as SiloDNA).siloId;
+  // A revisão da IA é escopada pelo próprio Article revisado.
+  if (type === ARTICLE_AI_REVIEW_ARTIFACT_TYPE) return (payload as ArticleArchitectureAiReview).articleId;
   return (payload as SiloPage).siloPageId;
 }
 
@@ -62,12 +79,14 @@ type CanonicalReadbackDiagnostic = {
 function schemaName(type: ArquitetoArtifactType) {
   if (type === "article_dna") return "VersionedArticleDNASchema";
   if (type === "silo_dna") return "VersionedSiloDNASchema";
+  if (type === ARTICLE_AI_REVIEW_ARTIFACT_TYPE) return "VersionedArticleArchitectureAiReviewSchema";
   return "VersionedSiloPageSchema";
 }
 
 function schemaForType(type: ArquitetoArtifactType) {
   if (type === "article_dna") return VersionedArticleDNASchema;
   if (type === "silo_dna") return VersionedSiloDNASchema;
+  if (type === ARTICLE_AI_REVIEW_ARTIFACT_TYPE) return VersionedArticleArchitectureAiReviewSchema;
   return VersionedSiloPageSchema;
 }
 
@@ -77,9 +96,17 @@ function payloadType(value: unknown) {
   return typeof value;
 }
 
-function normalizeDatabaseTimestamp(value: unknown) {
+/**
+ * O timestamp do banco vira ISO 8601.
+ *
+ * Postgres devolve `2026-09-05 00:29:13.332+00`: separador espaço e fuso de
+ * DOIS dígitos. O contrato pede ISO com `T` e fuso completo — e o fuso curto
+ * escapava do padrão anterior, então a linha gravada com sucesso voltava
+ * reprovada na própria leitura.
+ */
+export function normalizeDatabaseTimestamp(value: unknown) {
   if (typeof value !== "string") return value;
-  if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/.test(value)) return value;
+  if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)$/.test(value)) return value;
   const timestamp = new Date(value);
   return Number.isNaN(timestamp.getTime()) ? value : timestamp.toISOString();
 }
@@ -104,7 +131,7 @@ function canonicalReadbackError(diagnostic: CanonicalReadbackDiagnostic): never 
 function canonicalReadbackDiagnostic(
   type: ArquitetoArtifactType,
   version: ArquitetoArtifactVersion,
-  rowIndex: number,
+  rowIndex: number | null,
   issuePath: string,
   issueCode: string,
   issueMessage: string,
@@ -126,12 +153,12 @@ function assertCanonicalReadback(
   type: ArquitetoArtifactType,
   row: Record<string, unknown>,
   version: ArquitetoArtifactVersion,
-  rowIndex: number,
+  rowIndex: number | null,
 ) {
   if (String(row.marca_id) !== context.brandId) {
     canonicalReadbackDiagnostic(type, version, rowIndex, "marca_id", "custom", "Brand canônica divergente");
   }
-  const payload = version.payload as ArticleDNA | SiloDNA | SiloPage;
+  const payload = version.payload as ArticleDNA | SiloDNA | SiloPage | ArticleArchitectureAiReview;
   const payloadBrandId = "brandId" in payload ? payload.brandId : undefined;
   if (payloadBrandId !== context.brandId) {
     canonicalReadbackDiagnostic(type, version, rowIndex, "payload.brandId", "custom", "Payload fora da Brand canônica");
@@ -150,7 +177,9 @@ function validatePayload(
     ? ArticleDNASchema.parse(version.payload)
     : type === "silo_dna"
       ? SiloDNASchema.parse(version.payload)
-      : SiloPageSchema.parse(version.payload);
+      : type === ARTICLE_AI_REVIEW_ARTIFACT_TYPE
+        ? ArticleArchitectureAiReviewSchema.parse(version.payload)
+        : SiloPageSchema.parse(version.payload);
 
   const payloadBrandId = "brandId" in payload ? payload.brandId : undefined;
   if (payloadBrandId !== context.brandId) {
@@ -163,7 +192,15 @@ function validatePayload(
   return payload;
 }
 
-function canonicalVersionFromRow(type: ArquitetoArtifactType, row: Record<string, unknown>, rowIndex: number | null = null): ArquitetoArtifactVersion {
+/**
+ * A linha do banco vira envelope canônico.
+ *
+ * O banco guarda snake_case; o contrato do Arquiteto fala camelCase. Devolver
+ * a linha crua a quem espera um VersionEnvelope faz o cliente receber um objeto
+ * sem versionId, sem contentHash e sem createdAt — e a escrita, que já
+ * commitou, aparece como falha.
+ */
+export function canonicalVersionFromRow(type: ArquitetoArtifactType, row: Record<string, unknown>, rowIndex: number | null = null): ArquitetoArtifactVersion {
   const candidate = {
     versionId: row.version_id,
     entityId: row.entity_id,
@@ -217,6 +254,32 @@ async function assertCanonicalSiloDnaSource(
   return String(sourceRow.version_id);
 }
 
+/**
+ * Article em formação não tem ArticleDNA consolidado, então `source_version_id`
+ * é opcional. Quando a revisão declara a versão base, ela precisa existir como
+ * ArticleDNA canônico da mesma Brand e do mesmo Article.
+ */
+async function resolveAiReviewSourceVersionId(
+  repository: ArtifactVersionRepository,
+  context: PipelineContext,
+  review: ArticleArchitectureAiReview,
+) {
+  const baseVersionId = review.base.articleVersionId;
+  if (!baseVersionId) return null;
+  const sourceResult = await repository.list(review.articleId, "article_dna");
+  if (sourceResult.status === "NO_DATA") {
+    conflictArtifact("A revisão declara uma versão base de ArticleDNA que não existe na Brand canônica.");
+  }
+  const sourceRow = sourceResult.data.find(row => row.version_id === baseVersionId);
+  if (!sourceRow || sourceRow.marca_id !== context.brandId) {
+    conflictArtifact("A versão base da revisão não corresponde a um ArticleDNA canônico da mesma Brand.");
+  }
+  if (review.base.articleContentHash !== sourceRow.content_hash) {
+    conflictArtifact("O hash da base revisada não corresponde à versão de ArticleDNA declarada.");
+  }
+  return baseVersionId;
+}
+
 export async function appendArquitetoArtifact(
   context: PipelineContext,
   type: ArquitetoArtifactType,
@@ -227,7 +290,9 @@ export async function appendArquitetoArtifact(
   const repository = new ArtifactVersionRepository(context);
   const sourceVersionId = type === "silo_page"
     ? await assertCanonicalSiloDnaSource(repository, context, payload as SiloPage)
-    : null;
+    : type === ARTICLE_AI_REVIEW_ARTIFACT_TYPE
+      ? await resolveAiReviewSourceVersionId(repository, context, payload as ArticleArchitectureAiReview)
+      : null;
 
   const result = await repository.append({
     versionId: version.versionId,
@@ -250,16 +315,89 @@ export async function appendArquitetoArtifact(
   };
 }
 
+/**
+ * Persists the two distinct canonical artifacts through one PostgreSQL RPC.
+ * The RPC is intentionally called only after the normal server context has
+ * authenticated the actor and Brand; it also repeats those checks inside the
+ * transaction and returns both rows for readback validation.
+ */
+export async function persistSiloPairAtomic(
+  context: PipelineContext,
+  siloDna: VersionEnvelope<SiloDNA>,
+  siloPage: VersionEnvelope<SiloPage>,
+  statuses: { siloDna: string; siloPage: string },
+): Promise<SiloPairPersistenceResult> {
+  const dnaPayload = validatePayload(context, "silo_dna", siloDna) as SiloDNA;
+  const pagePayload = validatePayload(context, "silo_page", siloPage) as SiloPage;
+  if (pagePayload.siloId !== dnaPayload.siloId || pagePayload.siloPageId !== `silo-page:${dnaPayload.siloId}`) {
+    conflictArtifact("SiloDNA e SiloPage precisam pertencer ao mesmo Silo.");
+  }
+  if (
+    pagePayload.siloDnaRef.entityId !== siloDna.entityId
+    || pagePayload.siloDnaRef.versionId !== siloDna.versionId
+    || pagePayload.siloDnaRef.contentHash !== siloDna.contentHash
+  ) {
+    conflictArtifact("A SiloPage precisa referenciar exatamente a versão de SiloDNA deste lote.");
+  }
+  if (siloDna.createdBy !== context.actorUserId || siloPage.createdBy !== context.actorUserId) {
+    unauthorizedArtifact("O ator da sessão precisa ser o criador dos dois artefatos pareados.");
+  }
+
+  const result = await context.supabase.rpc("persist_silo_pair_atomic", {
+    p_marca_id: context.brandId,
+    p_actor_user_id: context.actorUserId,
+    p_action: context.action,
+    p_silo_dna: { ...siloDna, payload: dnaPayload },
+    p_silo_page: { ...siloPage, payload: pagePayload },
+    p_silo_dna_status: statuses.siloDna,
+    p_silo_page_status: statuses.siloPage,
+  });
+  if (result.error) throw pipelineErrorFromSupabase(result.error);
+  if (!result.data || typeof result.data !== "object" || Array.isArray(result.data)) {
+    throw new PipelineRuntimeError("QUERY_FAILURE", "A transação pareada não retornou readback canônico.", 503);
+  }
+  const data = result.data as Record<string, unknown>;
+  const dnaRow = data.siloDna;
+  const pageRow = data.siloPage;
+  if (!dnaRow || typeof dnaRow !== "object" || Array.isArray(dnaRow) || !pageRow || typeof pageRow !== "object" || Array.isArray(pageRow)) {
+    throw new PipelineRuntimeError("QUERY_FAILURE", "O readback do par SiloDNA/SiloPage está incompleto.", 503);
+  }
+  const canonicalDna = canonicalVersionFromRow("silo_dna", dnaRow as Record<string, unknown>) as VersionEnvelope<SiloDNA>;
+  const canonicalPage = canonicalVersionFromRow("silo_page", pageRow as Record<string, unknown>) as VersionEnvelope<SiloPage>;
+  assertCanonicalReadback(context, "silo_dna", dnaRow as Record<string, unknown>, canonicalDna, null);
+  assertCanonicalReadback(context, "silo_page", pageRow as Record<string, unknown>, canonicalPage, null);
+  if (
+    canonicalDna.versionId !== siloDna.versionId
+    || canonicalDna.versionNumber !== siloDna.versionNumber
+    || canonicalDna.contentHash !== siloDna.contentHash
+    || canonicalPage.versionId !== siloPage.versionId
+    || canonicalPage.versionNumber !== siloPage.versionNumber
+    || canonicalPage.contentHash !== siloPage.contentHash
+    || String((dnaRow as Record<string, unknown>).status) !== statuses.siloDna
+    || String((pageRow as Record<string, unknown>).status) !== statuses.siloPage
+  ) {
+    throw new PipelineRuntimeError("INVALID_ARTIFACT", "O readback do par pareado diverge do lote solicitado.", 503);
+  }
+  if (
+    canonicalPage.payload.siloDnaRef.versionId !== canonicalDna.versionId
+    || canonicalPage.payload.siloDnaRef.contentHash !== canonicalDna.contentHash
+  ) {
+    throw new PipelineRuntimeError("INVALID_ARTIFACT", "A referência da SiloPage não corresponde ao SiloDNA retornado.", 503);
+  }
+  return { status: "PERSISTED", atomicity: "TRANSACTIONAL_RPC", siloDna: canonicalDna as VersionEnvelope<SiloDNA>, siloPage: canonicalPage as VersionEnvelope<SiloPage>, source: "CANONICAL_REMOTE" };
+}
+
 export async function listArquitetoArtifacts(context: PipelineContext) {
   const repository = new ArtifactVersionRepository(context);
   const result = await repository.list();
   if (result.status === "NO_DATA") {
-    return { articleDnas: [], siloDnas: [], siloPages: [], statuses: [], source: "CANONICAL_REMOTE" as const };
+    return { articleDnas: [], siloDnas: [], siloPages: [], aiReviews: [], statuses: [], source: "CANONICAL_REMOTE" as const };
   }
 
   const articleDnas: VersionEnvelope<ArticleDNA>[] = [];
   const siloDnas: VersionEnvelope<SiloDNA>[] = [];
   const siloPages: VersionEnvelope<SiloPage>[] = [];
+  const aiReviews: VersionEnvelope<ArticleArchitectureAiReview>[] = [];
   const statuses: Array<{ versionId: string; status: string }> = [];
   for (const [rowIndex, row] of result.data.entries()) {
     const type = row.artifact_type;
@@ -275,12 +413,16 @@ export async function listArquitetoArtifacts(context: PipelineContext) {
       const version = canonicalVersionFromRow(type, row, rowIndex) as VersionEnvelope<SiloPage>;
       assertCanonicalReadback(context, type, row, version, rowIndex);
       siloPages.push(version);
+    } else if (type === ARTICLE_AI_REVIEW_ARTIFACT_TYPE) {
+      const version = canonicalVersionFromRow(type, row, rowIndex) as VersionEnvelope<ArticleArchitectureAiReview>;
+      assertCanonicalReadback(context, type, row, version, rowIndex);
+      aiReviews.push(version);
     }
-    if (type === "article_dna" || type === "silo_dna" || type === "silo_page") {
+    if (type === "article_dna" || type === "silo_dna" || type === "silo_page" || type === ARTICLE_AI_REVIEW_ARTIFACT_TYPE) {
       statuses.push({ versionId: String(row.version_id), status: String(row.status) });
     }
   }
-  return { articleDnas, siloDnas, siloPages, statuses, source: "CANONICAL_REMOTE" as const };
+  return { articleDnas, siloDnas, siloPages, aiReviews, statuses, source: "CANONICAL_REMOTE" as const };
 }
 
 export function pipelineArtifactErrorResponse(error: unknown) {

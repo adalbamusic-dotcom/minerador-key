@@ -22,6 +22,20 @@ export const RadarHydrationSiloSchema = z.object({
   name: z.string().trim().min(1).nullable(),
   siloDnaVersionId: z.string().min(1).nullable(),
   siloDnaContentHash: z.string().min(1).nullable(),
+  /**
+   * O território que originou o Silo, e a SiloPage que é a raiz dele.
+   *
+   * Opcionais porque linha antiga não os tem — mas o Radar precisa deles
+   * para saber onde o Article mora: sem a raiz ele investiga um artigo solto,
+   * e sem o território não consegue voltar à decisão que criou o Silo.
+   */
+  territoryRef: z.string().min(1).nullable().default(null),
+  siloPageId: z.string().min(1).nullable().default(null),
+  siloPageVersionId: z.string().min(1).nullable().default(null),
+  siloPageSlug: z.string().min(1).nullable().default(null),
+  siloPageCanonical: z.string().min(1).nullable().default(null),
+  siloPagePublicationStatus: z.string().min(1).nullable().default(null),
+  articleRole: z.enum(["pillar", "support"]).nullable().default(null),
 }).strict();
 
 export const RadarHydrationSnapshotSchema = z.object({
@@ -79,6 +93,26 @@ export function createRadarHydrationSnapshot(input: {
   article: VersionEnvelope<ArticleDNA>;
   sourceKeywords?: RadarHydrationSourceKeyword[];
   silo?: VersionEnvelope<SiloDNA>;
+  /**
+   * Contexto do Silo já RESOLVIDO pelo handoff.
+   *
+   * Quando vem preenchido, ele manda: o `siloId` canônico foi resolvido pelo
+   * território, e o ArticleDNA continua sem declarar Silo — o que é correto,
+   * porque essa resolução é hidratação, não sucessão do artefato.
+   */
+  resolvedSilo?: {
+    siloId: string;
+    siloName: string | null;
+    territoryRef: string;
+    siloDnaVersionId: string;
+    siloDnaContentHash: string;
+    siloPageId: string | null;
+    siloPageVersionId: string | null;
+    siloPageSlug: string | null;
+    siloPageCanonical: string | null;
+    siloPagePublicationStatus: string | null;
+    articleRole: "pillar" | "support";
+  } | null;
   source: "arquiteto_import" | "reconciled";
   capturedAt?: string;
 }): RadarHydrationSnapshot | null {
@@ -87,9 +121,22 @@ export function createRadarHydrationSnapshot(input: {
   const principal = snapshots.find(snapshot => snapshot.role === "principal") || null;
   const principalSource = principal || snapshots[0] || null;
   if (!principalSource) return null;
-  const siloId = input.article.payload.siloId || principalSource.siloId;
-  const siloName = principalSource.siloName || null;
-  const silo = siloId ? RadarHydrationSiloSchema.parse({ id: siloId, name: siloName, siloDnaVersionId: input.silo?.versionId || null, siloDnaContentHash: input.silo?.contentHash || null }) : null;
+  const resolvido = input.resolvedSilo || null;
+  const siloId = resolvido?.siloId || input.article.payload.siloId || principalSource.siloId;
+  const siloName = resolvido?.siloName || principalSource.siloName || null;
+  const silo = siloId ? RadarHydrationSiloSchema.parse({
+    id: siloId,
+    name: siloName,
+    siloDnaVersionId: resolvido?.siloDnaVersionId || input.silo?.versionId || null,
+    siloDnaContentHash: resolvido?.siloDnaContentHash || input.silo?.contentHash || null,
+    territoryRef: resolvido?.territoryRef || input.article.payload.territoryRef || null,
+    siloPageId: resolvido?.siloPageId ?? null,
+    siloPageVersionId: resolvido?.siloPageVersionId ?? null,
+    siloPageSlug: resolvido?.siloPageSlug ?? null,
+    siloPageCanonical: resolvido?.siloPageCanonical ?? null,
+    siloPagePublicationStatus: resolvido?.siloPagePublicationStatus ?? null,
+    articleRole: resolvido?.articleRole ?? null,
+  }) : null;
   return RadarHydrationSnapshotSchema.parse({ schemaVersion: 1, brandId: input.brandId, articleId: input.article.payload.articleId, articleDnaVersionId: input.article.versionId, source: input.source, capturedAt: input.capturedAt || new Date().toISOString(), principalKeywordId: input.article.payload.principalKeywordId, principalKeyword: principal, keywordSnapshots: snapshots, silo });
 }
 

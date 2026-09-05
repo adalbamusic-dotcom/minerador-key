@@ -1,5 +1,8 @@
 # Visual Rules
 
+> Auxiliar. `SKILL.md` prevalece em qualquer divergência. Este arquivo cobre
+> apenas direção visual, escala tipográfica, radius, bordas, sombra e movimento.
+
 ## Visual direction
 
 The interface should feel:
@@ -22,15 +25,22 @@ The interface should not feel:
 
 ## Typography
 
-Primary font:
+Primary font: the family already defined by the global styles.
 
-`Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+`var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif`
+
+Mono, restricted to id, hash, slug and code:
+
+`var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace`
+
+Do not introduce a new family. Do not hardcode a font stack in a component.
 
 Type scale:
 
 | Token | Size | Line height | Weight |
 |---|---:|---:|---:|
-| caption | 12px | 1.4 | 500 |
+| caption | 12px | 1.4 | 500 |  <- absolute floor, nothing smaller
+| control | 12px | 20px | 500 |  <- compact GlobalTopbar controls only
 | label | 14px | 1.4 | 500 |
 | body-sm | 14px | 1.55 | 400 |
 | body | 16px | 1.6 | 400 |

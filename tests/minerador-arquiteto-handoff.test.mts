@@ -12,6 +12,16 @@ import { mergeCanonicalArticleWorkspaceItems } from "../lib/arquiteto/canonical-
 const brandId = "95bef1bb-0a3d-4218-a01f-ac7281c55e45";
 const otherBrandId = "550e8400-e29b-41d4-a716-446655440099";
 
+/** KeywordDNA consolidada: a importação normal exige qualificação conclusiva. */
+const readyQualification = {
+  versionId: "ksq-ready",
+  contentHash: "hash-ready",
+  intent: "informational",
+  funnel: "TOFU",
+  semanticState: "conclusive" as const,
+  collectedAt: "2026-08-29T00:00:00.000Z",
+};
+
 function workflow(id: string, subjectId: string, marcaId = brandId, state = "received") {
   return {
     id,
@@ -52,6 +62,18 @@ test("handoff cria item keyword/architect e mantém a keyword não agrupada", ()
   assert.equal(items[0]?.keyword, "keyword canônica");
   assert.equal(items[0]?.clusterId, null);
   assert.equal(items[0]?.provisionalGroupId, null);
+});
+
+test("handoff preserva versão e hash de origem quando o Minerador os fornece", () => {
+  const contentHash = `sha256:${"b".repeat(64)}`;
+  const plan = buildMineradorArquitetoHandoffPlan({
+    brandId,
+    keywords: [{ id: "kw-versioned", brandId, status: "aprovado", sourceVersionId: "keyword-dna:kw-versioned:v3", contentHash }],
+    existingKeywordIds: new Set(),
+  });
+
+  assert.equal(plan.rows[0]?.source_version_id, "keyword-dna:kw-versioned:v3");
+  assert.equal(plan.rows[0]?.source_content_hash, contentHash);
 });
 
 test("handoff remoto received permanece no workspace antes do ArticleDNA", () => {
@@ -110,7 +132,7 @@ test("somente workflow recebido é operacional no workspace", () => {
 test("a elegibilidade ignora marcador local legado e permite keyword nova aprovada", async () => {
   const eligibility = resolveCanonicalMineradorArquitetoImportEligibility({
     brandId,
-    keywords: [{ id: "kw-new", brandId, status: "aprovado" }],
+    keywords: [{ id: "kw-new", brandId, status: "aprovado", semanticQualification: readyQualification }],
     workflowItems: [],
     articleDnaKeywordIds: new Set(),
   });
@@ -119,6 +141,15 @@ test("a elegibilidade ignora marcador local legado e permite keyword nova aprova
     importability: CANONICAL_IMPORTABILITY.IMPORTABLE,
     workflowState: null,
   }]);
+
+  // Aprovado sem Qualificação Semântica continua importável: o gate é estrutural.
+  const withoutQualification = resolveCanonicalMineradorArquitetoImportEligibility({
+    brandId,
+    keywords: [{ id: "kw-incomplete", brandId, status: "aprovado", semanticQualification: null }],
+    workflowItems: [],
+    articleDnaKeywordIds: new Set(),
+  });
+  assert.equal(withoutQualification[0]?.importability, CANONICAL_IMPORTABILITY.IMPORTABLE);
 
   const workspace = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(workspace, /transientHistoricalMarkerIdsForUi/);
@@ -153,7 +184,7 @@ test("workflow remoto e ArticleDNA remoto bloqueiam a keyword canonicamente", ()
 test("workflow e ArticleDNA de outra Brand não afetam a elegibilidade da Brand atual", () => {
   const eligibility = resolveCanonicalMineradorArquitetoImportEligibility({
     brandId,
-    keywords: [{ id: "kw-isolated", brandId, status: "aprovado" }],
+    keywords: [{ id: "kw-isolated", brandId, status: "aprovado", semanticQualification: readyQualification }],
     workflowItems: [workflow("wf-other", "kw-isolated", otherBrandId)],
     articleDnaKeywordIds: new Set(),
   });

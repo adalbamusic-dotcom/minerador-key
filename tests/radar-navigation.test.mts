@@ -23,11 +23,12 @@ test("comparação de Set evita setter quando expansão e seleção já estão c
   assert.equal(sameStringSet(new Set(["art-cluster-1", "other"]), ["art-cluster-1"]), false);
 });
 
-test("Radar mantém Abrir no próprio módulo e separa a navegação para o Arquiteto", () => {
+test("Radar concentra a operação no Workbench e remove a pilha fixa de ações da linha", () => {
   const source = readFileSync(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
-  assert.match(source, /Abrir no Radar/);
-  assert.match(source, /Ver no Arquiteto/);
-  assert.doesNotMatch(source, /<Link className=\{btn\} href=\{`\/arquiteto\?articleId=\$\{row\.articleId\}`\}>Abrir<\/Link>/);
+  assert.match(source, /<RadarWorkbench/);
+  assert.match(source, /onOpenArticle=\{openActiveArticle\}/);
+  assert.match(source, /renderExpanded=\{row => <RadarProfile/);
+  assert.doesNotMatch(source, /renderActions=\{row =>/);
 });
 
 test("Radar usa a GlobalTopbar sem duplicar busca, histórico ou estado de grid", () => {
@@ -50,17 +51,20 @@ test("Radar usa a GlobalTopbar sem duplicar busca, histórico ou estado de grid"
   assert.match(grid, /overflow-x-auto xl:overflow-visible/);
 });
 
-test("pagina propria do Radar declara cinco areas e navega por articleId", () => {
+test("pagina propria do Radar declara as áreas canônicas e navega por articleId", () => {
   const page = readFileSync(new URL("../modules/radar/radar-analysis-page.tsx", import.meta.url), "utf8");
-  assert.match(page, /const tabs: RadarTab\[\] = \["resumo", "selecionar-referencias", "analise-amostra", "relatorio", "historico"\]/);
+  assert.match(page, /const tabs: RadarTab\[\] = \["resumo", "serp", "referencias", "analise-serp", "evidencias-adicionais", "relatorio", "historico"\]/);
   assert.match(page, /const tab: Tab = resolveRadarTab\(requestedTab\)/);
-  assert.match(page, /Selecionar referências/);
-  assert.match(page, /Análise da amostra/);
+  assert.match(page, /Referências/);
+  assert.match(page, /Análise SERP/);
+  assert.match(page, /Evidências adicionais/);
   assert.match(page, /Relatório/);
   assert.match(page, /\/api\/editorial\/radar-analysis\/extract/);
   assert.match(page, /site_url.*article\.payload\.canonical/);
-  assert.match(page, /tab === "selecionar-referencias" && renderSelection\(\)/);
-  assert.match(page, /tab === "analise-amostra" && renderSample\(\)/);
+  assert.match(page, /tab === "serp" && <RadarSerpScreen/);
+  assert.match(page, /tab === "referencias" && renderAdvancedSelection\(\)/);
+  assert.match(page, /tab === "analise-serp" && renderSample\(\)/);
+  assert.match(page, /tab === "evidencias-adicionais" && <RadarExpertBriefPanel/);
   assert.match(page, /tab === "relatorio" && renderReport\(\)/);
   assert.match(page, /tab === "resumo" && renderFlowProgress\(\)/);
   assert.doesNotMatch(page, /\n\s*\{renderFlowProgress\(\)\}/);

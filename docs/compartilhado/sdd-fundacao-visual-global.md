@@ -158,14 +158,14 @@ das planilhas é sucessora independente.
 
 | Evidência | Estado |
 | --- | --- |
-| `app/globals.css` | tokens base e acentos de contexto/módulo presentes; contrato completo ainda ausente |
+| `app/globals.css` | paleta oficial completa, derivados por `color-mix` e `@theme inline` implementados |
 | `ProductShell` | presente e compartilhado; Sidebar existente |
 | acesso a `/conta` | presente no shell |
-| `GlobalTopbar` | não encontrado como implementação canônica |
-| `GlobalNoticeCenter` / `publishNotice` / `NotificationBell` | não encontrados como implementação canônica |
+| `GlobalTopbar` | implementado em `components/global-topbar.tsx` (40px, slots de página e de módulo) |
+| `GlobalNoticeCenter` / `publishNotice` / `NotificationBell` | implementados em `components/global-notice-center.tsx` e `lib/visual-notice-contract.ts` |
 | notices locais | presentes em módulos e painéis distintos |
-| guard `check-visual-system.mjs` | não existe neste checkout |
-| grids/planilhas | sem padronização estrutural desta SDD |
+| guard `check-visual-system.mjs` | implementado e ativo; roxo é falha fatal, resto por baseline decrescente |
+| grids/planilhas | contrato visual em `.agents/skills/app-visual-system/references/operational-grid-layout.md`; referência implementada no Minerador |
 
 O estado acima é separado de `TARGET APPROVED`. Nenhum item ausente é tratado
 como implementado por esta documentação.

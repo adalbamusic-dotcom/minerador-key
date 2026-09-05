@@ -232,6 +232,8 @@ export function sanitizeGoogleAdsSmokeResult(input: {
 
 export async function runGoogleAdsSmoke(input: GoogleAdsSmokeInput, onStage?: (stage: GoogleAdsSmokeStage) => void) {
   const startedAt = Date.now();
+  // This is the explicitly invoked local CLI smoke path. Product routes use
+  // resolveGoogleAdsPlatformConfig() and never fall back to this ENV reader.
   const config = getGoogleAdsServerConfig();
   const client = createGoogleAdsRestClient({ config });
   onStage?.("oauth_resolution");

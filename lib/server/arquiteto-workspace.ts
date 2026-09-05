@@ -3,6 +3,11 @@ import "server-only";
 import type { PipelineContext } from "./pipeline-runtime";
 import { PipelineRuntimeError, pipelineErrorFromSupabase } from "./pipeline-runtime";
 import { listArquitetoArtifacts } from "./arquiteto-persistence";
+import { readBrandSiloCatalog } from "@/lib/arquiteto/territorial-landscape";
+import { isFullyConsolidatedQualification, qualificationConsolidatedAxes, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
+import { readCurrentKeywordSemanticQualifications } from "./keyword-semantic-qualification-store";
+import { readCurrentKeywordContextualPresentations } from "./keyword-contextual-presentation-store";
+import type { KeywordContextualPresentation } from "@/lib/minerador/keyword-contextual-presentation";
 import {
   buildMineradorArquitetoHandoffPlan,
   MINERADOR_ARQUITETO_RECEIVED_STATE,
@@ -72,17 +77,43 @@ async function listArchitectWorkflowItems(context: PipelineContext) {
 }
 
 async function listBrandKeywords(context: PipelineContext) {
-  const result = await context.supabase.from("minerador_keywords").select("*").eq("brand_id", context.brandId);
+  const result = await context.supabase.from("minerador_keywords").select("*").eq("brand_id", context.brandId).is("deleted_at", null);
   if (result.error) readFailure(result.error);
   return (result.data || []) as Array<Record<string, unknown> & { id: string; brand_id: string; keyword: string }>;
 }
 
-function sourceFromKeyword(keyword: Record<string, unknown> & { id: string; brand_id: string }): MineradorKeywordHandoffSource {
+function sourceFromKeyword(keyword: Record<string, unknown> & { id: string; brand_id: string }, qualification?: KeywordSemanticQualification | null, presentation?: KeywordContextualPresentation | null): MineradorKeywordHandoffSource {
+  const sourceVersionId = ["keywordDnaVersionId", "keyword_dna_version_id", "sourceVersionId", "source_version_id"]
+    .map(key => keyword[key])
+    .find(value => typeof value === "string" && value.trim());
   return {
     id: keyword.id,
     brandId: keyword.brand_id,
     status: typeof keyword.status === "string" ? keyword.status : null,
+    sourceVersionId: typeof sourceVersionId === "string" ? sourceVersionId : null,
     contentHash: typeof keyword.content_hash === "string" ? keyword.content_hash : null,
+    // A Qualificação viaja como está: eixos preenchidos só quando conclusivos,
+    // e `semanticState` diz a verdade sobre o que a SERP concluiu.
+    semanticQualification: qualification
+      ? {
+        versionId: qualification.id,
+        versionNumber: qualification.lifecycle.version,
+        contentHash: qualification.lifecycle.contentHash,
+        intent: qualificationConsolidatedAxes(qualification).intent,
+        funnel: qualificationConsolidatedAxes(qualification).funnel,
+        semanticState: isFullyConsolidatedQualification(qualification) ? "conclusive" : "non_conclusive",
+        collectedAt: qualification.source.collectedAt,
+      }
+      : null,
+    // Apresentação Contextual é contexto opcional: viaja quando existe.
+    contextualPresentation: presentation
+      ? {
+        versionId: presentation.id,
+        versionNumber: presentation.lifecycle.version,
+        contentHash: presentation.lifecycle.contentHash,
+        generatedAt: presentation.provenance.generatedAt,
+      }
+      : null,
   };
 }
 
@@ -110,6 +141,18 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
   }
 
   const eligibleKeywords = keywords.filter(keyword => isCanonicalHandoffStatus(typeof keyword.status === "string" ? keyword.status : null));
+  // Leitura opcional: a Qualificação Semântica enriquece o pacote quando existe.
+  // Ausência, evidência mista ou insuficiente não bloqueiam o handoff — o
+  // pacote transporta honestamente o que há, sem inventar Intenção nem Funil.
+  const qualifications = await readCurrentKeywordSemanticQualifications({
+    brandId: context.brandId,
+    keywordIds: eligibleKeywords.map(keyword => keyword.id),
+  }).catch(() => new Map<string, KeywordSemanticQualification>());
+  // Apresentação Contextual: leitura opcional, sem gerar bloqueio nem IA.
+  const presentations = await readCurrentKeywordContextualPresentations({
+    brandId: context.brandId,
+    keywordIds: eligibleKeywords.map(keyword => keyword.id),
+  }).catch(() => new Map<string, KeywordContextualPresentation>());
   const articleIds = articleDnaKeywordIds(artifacts, context.brandId);
   const workflowByKeywordId = new Map<string, WorkflowRow>();
   for (const workflow of workflowItems) {
@@ -126,9 +169,12 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
   const existingKeywordIds = new Set(eligibleKeywords
     .filter(keyword => articleIds.has(keyword.id) || workflowByKeywordId.get(keyword.id)?.state === MINERADOR_ARQUITETO_RECEIVED_STATE)
     .map(keyword => keyword.id));
+  // Sem segundo gate semântico: aprovado no Minerador é condição suficiente.
+  // A Qualificação Semântica viaja integralmente como informação readonly.
+  const sources = eligibleKeywords.map(keyword => sourceFromKeyword(keyword, qualifications.get(keyword.id) || null, presentations.get(keyword.id) || null));
   const plan = buildMineradorArquitetoHandoffPlan({
     brandId: context.brandId,
-    keywords: eligibleKeywords.map(sourceFromKeyword),
+    keywords: sources,
     existingKeywordIds,
   });
   return {
@@ -147,11 +193,16 @@ async function persistCanonicalHandoff(context: PipelineContext, prepared: Await
 }
 
 export async function loadCanonicalArquitetoWorkspace(context: PipelineContext) {
-  const [allWorkflowRows, availableKeywords, artifacts] = await Promise.all([
+  const [allWorkflowRows, availableKeywords, artifacts, brandRow] = await Promise.all([
     listArchitectWorkflowItems(context),
     listBrandKeywords(context),
     listArquitetoArtifacts(context),
+    // Catálogo `marcas.silos_existentes`: estado remoto da MESMA Brand, escrito
+    // pela criação manual de Silo. Chega pelo read-model canônico em vez de ser
+    // lido do contexto de Marca no browser.
+    context.supabase.from("marcas").select("silos_existentes").eq("id", context.brandId).maybeSingle(),
   ]);
+  if (brandRow.error) throw brandRow.error;
 
   const workflowRows = allWorkflowRows.filter(row => row.state === MINERADOR_ARQUITETO_RECEIVED_STATE);
   const keywordIds = new Set(workflowRows
@@ -165,6 +216,12 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext) 
   const articleDnas = latestByEntity(artifacts.articleDnas).filter(version =>
     version.payload.keywordReferences.some(reference => keywordIds.has(reference.keywordId)),
   );
+  const workspacePresentations = await readCurrentKeywordContextualPresentations({
+    brandId: context.brandId,
+    keywordIds: keywords.map(keyword => keyword.id),
+  }).catch(() => new Map<string, KeywordContextualPresentation>());
+  // A elegibilidade é estrutural: status canônico, Brand, lifecycle e
+  // duplicação. Nenhuma dimensão semântica participa desta decisão.
   const importEligibility = resolveCanonicalMineradorArquitetoImportEligibility({
     brandId: context.brandId,
     keywords: availableKeywords.map(keyword => ({
@@ -184,15 +241,21 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext) 
       .filter(version => version.payload.brandId === context.brandId)
       .flatMap(version => version.payload.keywordReferences.map(reference => reference.keywordId))),
   });
-  const siloIds = new Set(articleDnas
-    .map(version => version.payload.siloId)
-    .filter((value): value is string => Boolean(value)));
-  const siloDnas = latestByEntity(artifacts.siloDnas).filter(version => siloIds.has(version.payload.siloId));
-  const siloPages = latestByEntity(artifacts.siloPages).filter(version => siloIds.has(version.payload.siloId));
+  // O criador manual grava o par canônico antes de existir ArticleDNA. Se o
+  // readback dependesse apenas de artigos associados, um F5 esconderia o
+  // SiloDNA/SiloPage recém-criado da cópia de trabalho e do select de Silo.
+  const siloDnas = latestByEntity(artifacts.siloDnas)
+    .filter(version => version.payload.brandId === context.brandId);
+  const siloPages = latestByEntity(artifacts.siloPages)
+    .filter(version => version.payload.brandId === context.brandId);
+  // Revisão IA vigente por Article: é ela que faz o estado sobreviver ao F5.
+  const aiReviews = latestByEntity(artifacts.aiReviews)
+    .filter(version => version.payload.brandId === context.brandId);
   const relatedVersionIds = new Set([
     ...articleDnas.map(version => version.versionId),
     ...siloDnas.map(version => version.versionId),
     ...siloPages.map(version => version.versionId),
+    ...aiReviews.map(version => version.versionId),
   ]);
 
   return {
@@ -201,10 +264,15 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext) 
     importEligibility,
     keywords,
     availableKeywords,
+    // Apresentação Contextual persistida no Minerador: viaja somente leitura
+    // para o perfil da keyword no Arquiteto. Não é regenerada nem editada aqui.
+    keywordPresentations: [...workspacePresentations.values()],
     articleDnas,
     siloDnas,
     siloPages,
+    aiReviews,
     statuses: artifacts.statuses.filter(item => relatedVersionIds.has(item.versionId)),
+    brandSiloCatalog: readBrandSiloCatalog(brandRow.data?.silos_existentes),
   };
 }
 

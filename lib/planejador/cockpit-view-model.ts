@@ -58,7 +58,10 @@ export function buildCockpitViewModel(input: { item: PlannerItem; plan: VersionE
   const publicationState = input.publicationIdentity?.state === "published" ? "published" : input.publicationIdentity?.state === "conflict" ? "conflict" : input.publicationIdentity?.state === "unknown" ? "unknown" : "new";
   const keywordStrategy = details.keywordStrategy || (input.article ? buildKeywordStrategySnapshot({ article: input.article.payload, details, publicationState, keywordLabels: { [input.hydration.primaryKeyword.technical.id]: input.hydration.primaryKeyword.label, ...Object.fromEntries(input.hydration.secondaryKeywords.map(reference => [reference.technical.id, reference.label])) } }) : null);
   const sourcePending = details.sources.filter(source => source.status === "needs_source").length;
-  const linkPending = details.internalLinks.filter(link => link.status !== "approved").length;
+  const unhydratedLinkReferences = details.structure.sections.flatMap(section => section.internalLinks || []).length;
+  const linkReferenceCount = details.internalLinks.length + unhydratedLinkReferences;
+  const structuredLinkPending = details.internalLinks.filter(link => link.status !== "approved").length;
+  const linkPending = structuredLinkPending + unhydratedLinkReferences;
   const gabaritoInformative = Boolean(details.gabarito && (details.gabarito.globalWords.min !== null || details.gabarito.globalWords.ideal !== null || details.gabarito.globalWords.max !== null || details.gabarito.estimatedParagraphs !== null));
   const radarRequired = details.radar.analysisEnforcement === "required";
   const radarApproved = input.hydration.radar.origin === "real" && input.hydration.radar.review === "approved";
@@ -88,12 +91,13 @@ export function buildCockpitViewModel(input: { item: PlannerItem; plan: VersionE
   if (details.structure.sections.some(section => !section.objective.trim())) alerts.push({ kind: "bloqueio", message: "Defina o objetivo de todas as seções.", step: "structure" });
   if (coverage.questions.some(item => item.priority === "required" && (!item.sectionId || item.status === "pending"))) alerts.push({ kind: "bloqueio", message: "Associe as perguntas obrigatórias ao outline.", step: "resources" });
   if (sourcePending) alerts.push({ kind: "bloqueio", message: `${sourcePending} fonte(s) necessária(s) antes da aprovação.`, step: "resources" });
-  if (linkPending) alerts.push({ kind: "pendencia", message: `${linkPending} link(s) ainda não foram aprovados.`, step: "resources" });
+  if (structuredLinkPending) alerts.push({ kind: "pendencia", message: `${structuredLinkPending} link(s) estruturado(s) ainda não foram aprovados.`, step: "resources" });
   if (!details.cta.text.trim() || details.cta.text.toLowerCase().includes("pendente")) alerts.push({ kind: "bloqueio", message: "Defina o CTA principal.", step: "strategy" });
   if (!gabaritoInformative) alerts.push({ kind: "bloqueio", message: "Defina uma estimativa de extensão no gabarito.", step: "structure" });
   if (!details.images.length) alerts.push({ kind: "aviso", message: "Nenhuma imagem foi planejada.", step: "resources" });
   if (!details.sources.length) alerts.push({ kind: "aviso", message: "Nenhuma fonte planejada; marque Fonte necessária quando houver claim.", step: "resources" });
-  if (!details.internalLinks.length) alerts.push({ kind: "aviso", message: "Nenhum link interno planejado.", step: "resources" });
+  if (!linkReferenceCount) alerts.push({ kind: "aviso", message: "Nenhum link interno planejado.", step: "resources" });
+  if (unhydratedLinkReferences) alerts.push({ kind: "pendencia", message: `${unhydratedLinkReferences} referência(s) de link interno aguardam hidratação de destino estruturado.`, step: "resources" });
   if (metrics.estimatedParagraphs === null) alerts.push({ kind: "pendencia", message: "O gabarito ainda não possui estimativa de parágrafos.", step: "structure" });
   if (keywordStrategy) {
     for (const issue of keywordStrategyIssues(keywordStrategy, input.article?.payload || null)) {
@@ -126,6 +130,6 @@ export function buildCockpitViewModel(input: { item: PlannerItem; plan: VersionE
     alertCounts: { avisos: alerts.filter(alert => alert.kind === "aviso").length, pendencias: pendingAlerts.length, conflitos: conflicts.length, bloqueios: blockingAlerts.length },
     nextAction: next, canApprove: input.item.state === "awaiting_review" && blockingAlerts.length === 0 && input.approvalIssues.length === 0,
     status: { workflow, publication, transfer, transferRaw },
-    radarRequired, radarApproved, linkPending, sourcePending, gabaritoInformative,
+    radarRequired, radarApproved, linkPending, linkReferenceCount, sourcePending, gabaritoInformative,
   };
 }

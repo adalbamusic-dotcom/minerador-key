@@ -39,7 +39,7 @@ O refresh não pode começar por uma limpeza genérica. Há quatro gates reais:
    Agency e da Brand que os originaram;
 3. `perfis` tem zero linhas, embora as funções canônicas reconheçam Admin
    global somente por `perfis.role = 'admin'`;
-4. `migration_backup` contém 443 linhas de recuperação, incluindo duas cópias
+4. `migration_backup` contém 303 linhas de recuperação, incluindo duas cópias
    de 147 keywords com fingerprints diferentes.
 
 Portanto, o manifesto está completo, mas `READY_FOR_REFRESH_EXECUTION = NO`
@@ -417,7 +417,9 @@ Cada etapa deve confirmar zero referências remanescentes antes da seguinte.
   mortos finais.
 - **Objetos:** seis tabelas `migration_backup` após gate; nenhum objeto público
   adicional além dos três Google já classificados.
-- **Dados:** 443 linhas de backup.
+- **Dados:** 303 linhas de backup. O total anterior de 443 era um erro de
+  agregação documental: as seis contagens individuais registradas desde o
+  primeiro snapshot somam 303 e não existe evidência de outras 140 linhas.
 - **Migration:** sim para DROP do schema/tabelas, se aprovado.
 - **Risco:** alto e irreversível sem export.
 - **Rollback:** restauração do dump verificado por fingerprint.
@@ -499,3 +501,27 @@ decisões bloqueadoras: allowlist, UUID Admin, retenção do Usage e migration_b
   quem é o Admin global e se o histórico de Usage/backups pode ser apagado.
 - Nenhuma alteração remota, chamada de provider, migration, reset ou leitura de
   segredo foi realizada.
+
+## 12. Encerramento pós-Batches 1–7
+
+Estado final capturado em 2026-08-17 pelo verificador read-only
+`master-refresh-batch-7-canonical-baseline-read-only.sql`:
+
+- catálogo `public`: 1.368 definições, fingerprint
+  `f058b86b56e6d99ab24dac967241c221`;
+- todos os 32 gates finais em `PASS`, zero drift bloqueador e zero finding
+  crítico novo;
+- `auth.users = 4`, Admin global preservado, tenants e Usage de homologação
+  zerados;
+- integrações canônicas, Vault, Minerador e pipeline editorial preservados;
+- `migration_backup` e Google Ads dinâmico ausentes.
+
+O ledger remoto histórico não foi reconstruído e permanece fora do contrato de
+prova. As dívidas Serper, IA ENV, `briefings_artigos` e convites de Brand ficam
+nos módulos proprietários e não bloqueiam a fundação.
+
+`DATABASE_REFRESH = COMPLETE`
+
+`GLOBAL_FOUNDATION = READY`
+
+`READY_FOR_FRESH_AREA_DEVELOPMENT = YES`

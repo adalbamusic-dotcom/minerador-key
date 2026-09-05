@@ -15,6 +15,9 @@ export function useKeywordTableColumnResize(
   constraints: Record<string, WidthConstraints> = {},
 ) {
   const [widths, setWidths] = useState(initialWidths);
+  // Colunas ajustadas explicitamente pelo humano: a projeção responsiva não
+  // pode desfazer esse ajuste automaticamente.
+  const [resizedColumnIds, setResizedColumnIds] = useState<string[]>([]);
   const widthsRef = useRef(widths);
   const cleanupRef = useRef<(() => void) | null>(null);
   useEffect(() => { widthsRef.current = widths; }, [widths]);
@@ -35,6 +38,7 @@ export function useKeywordTableColumnResize(
     const handleMove = (moveEvent: globalThis.MouseEvent | globalThis.PointerEvent) => {
       moveEvent.preventDefault();
       const nextWidth = clamp(startWidth + moveEvent.clientX - startX, constraints[columnId]);
+      setResizedColumnIds(current => current.includes(columnId) ? current : [...current, columnId]);
       setWidths(current => current[columnId] === nextWidth ? current : { ...current, [columnId]: nextWidth });
     };
     const handleEnd = () => finish();
@@ -56,7 +60,7 @@ export function useKeywordTableColumnResize(
 
   useEffect(() => finish, [finish]);
 
-  return { widths, startResize };
+  return { widths, resizedColumnIds, startResize };
 }
 
 export function KeywordTableColumnResizeHandle({

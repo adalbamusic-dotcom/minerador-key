@@ -18,7 +18,7 @@ import {
 } from "./account-access";
 
 const panel = "rounded-lg border border-slate-800/80 bg-slate-900/40 p-6";
-const actionButton = "inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-slate-700 px-3 text-sm font-semibold text-slate-200 transition-colors hover:border-slate-600 hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400";
+const actionButton = "inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-slate-700 px-3 text-sm font-semibold text-slate-200 transition-colors hover:border-slate-600 hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/35";
 
 function initials(name: string | null | undefined, email: string | null | undefined) {
   const source = (name || email || "U").trim();
@@ -96,7 +96,7 @@ function AccessPanel({ access }: { access: AccountTenantAccess }) {
 
 function PreferencesPanel() {
   return <section className="md:col-span-2 border-t border-slate-800/80 pt-6" aria-labelledby="account-preferences-title">
-    <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-slate-500" aria-hidden="true"/><div><h2 id="account-preferences-title" className="text-xl font-bold text-slate-100">Preferências</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Nenhuma preferência pessoal persistida está disponível para edição nesta conta. Configurações da marca, BrandDNA, Site/Sitemap e permissões ficam fora desta área.</p></div></div>
+    <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-slate-500" aria-hidden="true"/><div><h2 id="account-preferences-title" className="text-xl font-bold text-slate-100">Preferências</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Nenhuma preferência pessoal persistida está disponível para edição nesta conta. Configurações da marca, identidade da marca, Site/Sitemap e permissões ficam fora desta área.</p></div></div>
   </section>;
 }
 

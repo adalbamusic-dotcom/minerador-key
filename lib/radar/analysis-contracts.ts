@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { VersionMetadataSchema } from "../arquiteto/contracts.ts";
+import { InternalLinkGraphRefSchema, VersionMetadataSchema } from "../arquiteto/contracts.ts";
 import type { ArticleDNA, VersionEnvelope } from "../arquiteto/contracts.ts";
 import { createVersionEnvelope } from "../arquiteto/versioning.ts";
 import type { SerpResearchSnapshot } from "./serp/contracts.ts";
@@ -145,7 +145,7 @@ const RadarEvidenceMetricSchema = RadarBenchmarkMetricSchema.nullable();
 
 export const RadarEvidencePackageSchema = z.object({
   schemaVersion: z.literal(1), packageType: z.literal("radar_evidence"), id: z.string().min(1), brandId: z.string().min(1), radarItemId: z.string().min(1), articleId: z.string().min(1), articleDnaId: z.string().min(1),
-  serp: z.object({ snapshotId: z.string().min(1), version: z.number().int().positive(), hash: z.string().min(1), provider: z.literal("serper"), query: z.string().min(1), capturedAt: z.string().datetime() }).strict(),
+  serp: z.object({ snapshotId: z.string().min(1), version: z.number().int().positive(), hash: z.string().min(1), provider: z.enum(["dataforseo", "serper"]), query: z.string().min(1), capturedAt: z.string().datetime() }).strict(),
   analysisMode: z.object({ mode: RadarAnalysisModeSchema, selectedBy: z.string().min(1), selectedAt: z.string().datetime(), reason: z.string().optional() }).strict(),
   includedOrganicResults: z.array(RadarEvidenceCuratedItemSchema), excludedOrganicResults: z.array(RadarEvidenceCuratedItemSchema),
   relevantQuestions: z.array(RadarEvidenceQuestionSchema), relevantRelatedSearches: z.array(RadarEvidenceQuestionSchema), relevantEntities: z.array(RadarEvidenceEntitySchema),
@@ -159,6 +159,39 @@ export const RadarEvidencePackageSchema = z.object({
   version: z.number().int().positive(), hash: z.string().regex(/^sha256:[a-f0-9]{64}$/), provenance: z.object({ source: z.literal("radar"), analysisVersionId: z.string().min(1), serpSnapshotHash: z.string().min(1) }).strict(),
 }).strict();
 export type RadarEvidencePackage = z.infer<typeof RadarEvidencePackageSchema>;
+
+export const RadarPlannerHandoffStatusSchema = z.enum(["GENERATED", "REVIEWED", "APPROVED", "REJECTED", "SUPERSEDED"]);
+export const RadarPlannerHandoffDecisionSchema = z.object({
+  id: z.string().min(1), target: z.string().min(1), decision: z.string().min(1), actorId: z.string().min(1), decidedAt: z.string().datetime(), note: z.string().max(4000),
+}).strict();
+export type RadarPlannerHandoffDecision = z.infer<typeof RadarPlannerHandoffDecisionSchema>;
+export const RadarExpertEvidenceSchema = z.object({
+  id: z.string().min(1), expertId: z.string().min(1), briefId: z.string().min(1), contributionId: z.string().min(1),
+  evidenceType: z.enum(["ORIGINAL", "TRANSCRIPTION", "EXTRACTION", "EDITORIAL_ORGANIZATION"]),
+  approvedContent: z.string().min(1), provider: z.literal("telegram"), externalUpdateId: z.string().min(1), originalAssetUri: z.string().url().nullable(), checksum: z.string().nullable(),
+  contributedAt: z.string().datetime(), humanDecision: z.enum(["pending", "accepted", "rejected"]), fidelityStatus: z.enum(["unreviewed", "faithful", "needs_review", "conflict"]),
+}).strict();
+export type RadarExpertEvidence = z.infer<typeof RadarExpertEvidenceSchema>;
+export const RadarProductEvidenceSchema = z.object({
+  id: z.string().min(1), source: z.literal("product"), referenceId: z.string().nullable(), summary: z.string().min(1), humanDecision: z.enum(["pending", "accepted", "rejected"]),
+}).strict();
+export type RadarProductEvidence = z.infer<typeof RadarProductEvidenceSchema>;
+export const RadarPlannerHandoffSchema = z.object({
+  schemaVersion: z.literal(2), packageType: z.literal("radar_planner_handoff"), id: z.string().min(1), brandId: z.string().min(1), radarItemId: z.string().min(1), articleId: z.string().min(1), articleDnaVersionId: z.string().min(1), siloDnaVersionId: z.string().nullable(),
+  status: RadarPlannerHandoffStatusSchema,
+  sourceAnalysisVersionId: z.string().min(1), sourceAnalysisVersionNumber: z.number().int().positive(),
+  approvedReport: z.object({
+    reportId: z.string().min(1), version: z.number().int().positive(), hash: z.string().regex(/^sha256:[a-f0-9]{64}$/), status: z.literal("APPROVED"), summary: z.string().min(1), limitations: z.array(z.string()),
+    needs: z.array(z.object({ id: z.string().min(1), title: z.string().min(1), decision: z.string().min(1), note: z.string() }).strict()), recommendations: z.array(z.string()), humanDecisions: z.array(RadarPlannerHandoffDecisionSchema),
+  }).strict(),
+  evidencePackage: RadarEvidencePackageSchema,
+  serp: z.object({ snapshotId: z.string().min(1), version: z.number().int().positive(), hash: z.string().min(1), provider: z.enum(["dataforseo", "serper"]), query: z.string().min(1), capturedAt: z.string().datetime(), references: z.array(z.object({ position: z.number().int().positive(), title: z.string(), url: z.string().url(), role: z.enum(["primary", "support", "format", "excluded"]) }).strict()) }).strict(),
+  expertEvidence: z.array(RadarExpertEvidenceSchema), productEvidence: z.array(RadarProductEvidenceSchema), humanDecisions: z.array(RadarPlannerHandoffDecisionSchema),
+  internalLinkGraphRef: InternalLinkGraphRefSchema.nullable().optional(),
+  provenance: z.object({ source: z.literal("radar"), provider: z.enum(["dataforseo", "serper"]), articleDnaVersionId: z.string().min(1), articleDnaContentHash: z.string().nullable(), siloDnaVersionId: z.string().nullable(), analysisVersionId: z.string().min(1), serpSnapshotId: z.string().min(1), serpSnapshotVersion: z.number().int().positive(), serpSnapshotHash: z.string().min(1), expertContributionIds: z.array(z.string()), productEvidenceIds: z.array(z.string()), capturedAt: z.string().datetime() }).strict(),
+  version: z.number().int().positive(), previousHandoffId: z.string().nullable(), hash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+}).strict();
+export type RadarPlannerHandoff = z.infer<typeof RadarPlannerHandoffSchema>;
 export const LegacyRadarPlannerPackageSchema = z.object({
   mode: RadarAnalysisModeSchema, enforcement: RadarEnforcementSchema, serpSnapshotId: z.string().min(1), serpSnapshotVersion: z.number().int().positive(), serpSnapshotHash: z.string().min(1), includedSerpKeys: z.array(z.string()), selectedCompetitorIds: z.array(z.string()), extractionIds: z.array(z.string()), requirements: z.array(z.string()), recommendations: z.array(z.string()), observedData: z.array(z.string()).default([]), semanticTerms: z.array(z.string()), keywordDecisions: z.array(RadarKeywordDecisionSchema), competitiveness: RadarCompetitivenessSchema.nullable(),
   futureGuardian: z.object({ wordRange: z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]).nullable(), requiredTopics: z.array(z.string()), recommendedTopics: z.array(z.string()), requiredStructure: z.array(z.string()) }).strict(),
@@ -186,7 +219,7 @@ export const RadarAnalysisPayloadSchema = z.object({
   competitiveness: RadarCompetitivenessSchema.nullable(),
   keywordDecisions: z.array(RadarKeywordDecisionSchema),
   competitiveReport: RadarCompetitiveReportSchema.nullable().default(null),
-  plannerPackage: z.union([RadarEvidencePackageSchema, LegacyRadarPlannerPackageSchema]).nullable(),
+  plannerPackage: z.union([RadarPlannerHandoffSchema, RadarEvidencePackageSchema, LegacyRadarPlannerPackageSchema]).nullable(),
   plannerTransfer: RadarPlannerTransferSchema.nullable().default(null),
   status: RadarAnalysisStatusSchema,
   humanNotes: z.array(z.string()),

@@ -2,6 +2,25 @@
 
 Este arquivo contém as regras operacionais mínimas do repositório. Ele não substitui specs, ADRs, contratos nem estados atuais dos módulos.
 
+## Estado global atual pós-refresh — 2026-08-27
+
+O Master Refresh remoto está encerrado e congelado:
+
+- `DATABASE_REFRESH = COMPLETE`;
+- `GLOBAL_FOUNDATION = READY`;
+- `READY_FOR_FRESH_AREA_DEVELOPMENT = YES`;
+- baseline canônica de 2026-08-17: `f058b86b56e6d99ab24dac967241c221`;
+- `0043 = CLOSED` e `0044 = CLOSED`.
+
+Agencies/Brands e dados antigos de homologação foram removidos no refresh. A
+recriação posterior de AdalbaPro/Care Glow foi intencional e não representa
+drift. A fundação global — banco, Auth, Agency/Brand e integrações — fica
+congelada; mudanças futuras exigem evidência nova e gate próprio.
+
+A fase vigente é `FUNCTIONAL_AREA_DEVELOPMENT`, na ordem:
+`Marca → Minerador → Arquiteto → Radar → Planejador → Redator → Publicações`.
+Não reabrir o refresh para desenvolver uma área funcional.
+
 ## 1. Fontes de verdade
 
 Antes de alterar código ou documentação, leia:
@@ -16,16 +35,23 @@ Antes de alterar código ou documentação, leia:
 
 Precedência em caso de conflito:
 
-1. invariantes aprovados;
-2. ADRs aceitos;
-3. spec atual;
-4. contratos confirmados no código;
-5. estado atual validado;
-6. backlog;
-7. propostas não aprovadas;
-8. histórico.
+`invariantes/ADRs → SDD → spec → código/estado validado → estado-atual → backlog → pareceres → docs/_arquivo`
 
-`docs/_arquivo/` é histórico e não é fonte de verdade.
+`docs/_arquivo/` é **HISTÓRICO / NÃO OPERACIONAL** e nunca substitui uma fonte
+canônica ativa. Propostas não aprovadas orientam planejamento, mas não
+autorizam implementação nem mudam o estado do produto.
+
+Mapa de fontes canônicas:
+
+- produto e invariantes: `docs/00-produto/invariantes.md`,
+  `docs/00-produto/glossario.md` e `docs/00-produto/fluxo-oficial.md`;
+- pipeline, papéis e handoffs: `docs/00-produto/pipeline-editorial-papeis-handoffs.md`;
+- estado estrutural validado: `docs/00-produto/mapa-estado-atual-plataforma.md`;
+- regras de trabalho e documentação: `docs/compartilhado/regras-de-trabalho-e-documentacao.md`;
+- sistema visual: `docs/compartilhado/sistema-visual.md`;
+- contrato do InternalLinkGraph: `docs/04-arquiteto/links-internos-estado-e-contrato.md`;
+- spec, `estado-atual.md` e `backlog.md` do módulo proprietário;
+- ADRs, SDDs e contratos específicos conforme a área alterada.
 
 Não registrar como implementado algo que existe apenas como proposta. Quando necessário, distinguir: **Verificado no código**, **Confirmado por teste**, **Validado manualmente**, **Relatado pelo usuário**, **Planejado** e **Ainda não verificado**.
 
@@ -33,25 +59,43 @@ Não registrar como implementado algo que existe apenas como proposta. Quando ne
 
 O Minerador Key é um monólito modular multi-marca.
 
-Fluxo operacional:
+Hierarquia de tenancy e responsabilidade:
+
+`Plataforma → Agência → Marca`
+
+Tenant editorial canônico: `brandId = public.marcas.id`.
+
+Pipeline editorial:
 
 `Marca → Minerador → Arquiteto → Radar → Planejador → Redator → Publicações`
 
-Pipeline estratégico:
+Artefatos canônicos:
 
-`BrandDNA → KeywordDNA → ArticleDNA → SiloDNA / SiloPage → SERP e evidências → ContentPlan → ContentDocument → PublicationRecord`
+`BrandDNA → KeywordDNA → ArticleDNA → SiloDNA/SiloPage → InternalLinkGraph → RadarApprovedPackage → ContentPlan → ContentDocument → PublicationRecord`
 
-Cada etapa acrescenta contexto sem apagar silenciosamente a anterior. A proveniência deve continuar rastreável até as keywords originais.
+Princípio de composição:
 
-Responsabilidades:
+Cada módulo recebe o trabalho consolidado da etapa anterior, acrescenta
+somente a inteligência pertencente à sua fronteira e entrega contexto
+suficiente para que a próxima etapa não precise refazer seu trabalho.
 
-- **Marca:** BrandDNA, posicionamento, materiais, site, equipe, papéis, permissões e contexto da marca;
-- **Minerador:** Extensão, importação, listas, qualificação, KGR, intenção, KeywordDNA e envio ao Arquiteto;
-- **Arquiteto:** formação dos artigos, principal, secundárias, reforços, ArticleDNA, SiloDNA, SiloPage e validação do agrupamento;
-- **Radar:** recebe o artigo formado e investiga SERP, concorrentes, estruturas, semântica, perguntas, fontes e evidências;
-- **Planejador:** transforma estratégia e evidências em ContentPlan;
-- **Redator:** executa o ContentPlan e produz ContentDocument;
-- **Publicações:** controla fila, URLs, exportações, versões, publicação, atualização e histórico.
+Fronteiras dos módulos:
+
+- **Marca:** BrandDNA e contexto operacional da marca;
+- **Minerador:** KeywordDNA;
+- **Arquiteto:** ArticleDNA + SiloDNA/SiloPage + InternalLinkGraph;
+- **Radar:** investigação + evidências + RadarApprovedPackage;
+- **Planejador:** ContentPlan;
+- **Redator:** ContentDocument;
+- **Publicações:** PublicationRecord.
+
+Estado estrutural do InternalLinkGraph:
+
+`INTERNAL_LINK_GRAPH_REMOTE_FOUNDATION = READY`
+
+`CROSS_BRAND_GRAPH_ISOLATION = PASS`
+
+Próxima frente do Graph: implementação funcional/UI da aba Links Internos.
 
 O Radar não reagrupa keywords, não redefine papéis e não troca silenciosamente a principal. O Planejador não refaz a investigação da SERP.
 
@@ -140,33 +184,27 @@ Regras:
 - não existe fallback silencioso para outra marca;
 - dados de marcas diferentes nunca se misturam.
 
-## 6. Marca ativa, Extensão e Minerador
+## 6. Marca ativa e Minerador
 
-Extensão e Minerador operam sempre no contexto da marca ativa.
+Marca e Minerador operam sempre no contexto da marca ativa.
 
 - toda importação carrega o `brandId` real;
 - nome ou slug não substituem o `brandId`;
-- trocar a marca atualiza o contexto da Extensão;
-- a Extensão não envia keywords para marca anterior, padrão ou presumida;
 - listas, keywords, idempotência e deduplicação são isoladas por marca;
 - marca nova pode iniciar com Minerador vazio;
 - estado vazio de uma marca não sobrescreve dados válidos de outra.
 
-Estado já validado e que não deve ser redesenhado sem evidência de regressão:
-
-- Adalba e Lindisse estão isoladas;
-- troca de marca e rotas tenantizadas funcionam;
-- Minerador da Lindisse inicia vazio;
-- dados da Adalba permanecem preservados;
-- a Extensão acompanha a marca ativa.
-
 O Minerador é proprietário da ingestão e qualificação das keywords.
 
-Quando Radar ou outro módulo precisar alterar contrato compartilhado consumido pela Extensão ou pelo Minerador, pode fazer mudança aditiva mínima com testes de marca ativa, isolamento, importação e consumidores anteriores. Mudança incompatível exige SDD.
+Quando outro módulo precisar alterar contrato compartilhado consumido pelo
+Minerador, pode fazer mudança aditiva mínima com testes de marca ativa,
+isolamento, importação e consumidores anteriores. Mudança incompatível exige
+SDD.
 
 ## 7. Radar e SERP
 
-O Radar recebe o `ArticleDNA` como contrato do artigo formado.
+O Radar recebe o `ArticleDNA` como contrato do artigo formado e entrega
+investigação, evidências e `RadarApprovedPackage` ao Planejador.
 
 Pode conferir ou atualizar snapshots, investigar concorrentes, estruturas, semântica, perguntas, fontes e evidências, além de registrar conflitos, lacunas e oportunidades.
 
@@ -174,7 +212,10 @@ Não pode reagrupar ou remover keywords, redefinir principal/secundárias/refor�
 
 Diagnósticos externos geram alertas ou propostas. Alterações de arquitetura voltam ao Arquiteto e exigem decisão humana.
 
-Chamadas reais de SERP devem ser explícitas. Testes usam fixtures e não consomem créditos.
+Novas chamadas reais de SERP usam o provider DataForSEO conforme o contrato
+vigente e devem ser explícitas. Snapshots históricos de providers aposentados
+continuam legíveis como proveniência, mas não autorizam chamadas novas nem
+fallback. Testes usam fixtures e não consomem créditos.
 
 ## 8. Identidade, autenticação e usuários
 
@@ -224,7 +265,8 @@ Regras:
 - importações são seletivas, explícitas e idempotentes;
 - seleção controla ações, não renderização;
 - estado vazio nunca substitui estado válido;
-- localStorage não pode ser fonte única de verdade;
+- React state, localStorage e IndexedDB são estado de apresentação/recuperação,
+  nunca fonte canônica de autorização ou persistência;
 - localStorage e IndexedDB não podem ser limpos sem autorização;
 - sucesso só aparece após confirmação real do salvamento;
 - operação estrutural exige snapshot, validação e rollback;
@@ -285,13 +327,15 @@ Ações como enviar, exportar ou publicar não são status editoriais.
 
 ## 14. Banco e migrations consolidadas
 
-Os efeitos das migrations `0005` e `0006` já existem no banco.
+Os efeitos das migrations `0005`, `0006` e `0036` já existem no banco.
 
-Não executar novamente `0005`, `0006` nem seus rollbacks.
+Não executar novamente essas migrations nem seus rollbacks. Os nomes
+`keywords_kgr` e `listas_kgr` permanecem somente no histórico de migrations.
 
 Estado consolidado:
 
-- `keywords_kgr.brand_id` existe;
+- `minerador_keywords` e `minerador_keyword_lists` são as entidades canônicas;
+- `minerador_keywords.brand_id` existe;
 - `marcas.owner_user_id` existe;
 - `brand_memberships` existe;
 - RLS e policies tenantizadas existem;
@@ -301,9 +345,15 @@ Estado consolidado:
 
 FK canônica:
 
-`keywords_kgr.lista_id → listas_kgr.id → ON DELETE RESTRICT`
+`minerador_keywords.lista_id → minerador_keyword_lists.id → ON DELETE RESTRICT`
 
-Excluir lista nunca pode apagar keywords. Keywords sem lista continuam válidas e visíveis.
+`minerador_keyword_lists → marcas` possui exatamente uma FK operacional com
+`ON DELETE RESTRICT`.
+
+Medições podem usar `ON DELETE CASCADE` para o ciclo de vida da medição, sem
+autorizar cascade da Marca para listas ou da lista para keywords. Excluir
+lista nunca pode apagar keywords. Keywords sem lista continuam válidas e
+visíveis.
 
 ## 15. Segurança operacional
 
@@ -358,9 +408,14 @@ Não solicitar plugins de GitHub ou Supabase.
 
 TypeScript, build e testes unitários não provam que a interface funciona. Regressões visuais ou operacionais exigem validação manual.
 
-Alterações compartilhadas entre Extensão, Minerador, Arquiteto e Radar devem testar marca ativa, isolamento por `brandId`, importação idempotente, preservação de listas/keywords e consumidores anteriores.
+Alterações compartilhadas entre módulos devem testar marca ativa, isolamento
+por `brandId`, importação idempotente, preservação de listas/keywords e
+consumidores anteriores.
 
 ## 17. Documentação ao concluir
+
+Ao concluir trabalho em um módulo, atualizar seu `estado-atual.md` e
+`backlog.md`.
 
 - atualizar `estado-atual.md`;
 - atualizar `backlog.md`;
@@ -376,19 +431,24 @@ A conclusão exige comparar objetivo, código, persistência real, interface e c
 
 ## 18. Ordem atual de desenvolvimento
 
-1. Radar — SERP real;
-2. Arquiteto — recuperação e integridade;
-3. Planejador — ContentPlan definitivo;
-4. Redator — salvamento, aprovação e envio;
-5. Publicações — exportação e atualização;
-6. Marca — equipe, permissões e BrandDNA;
-7. Minerador — revisão fina;
+1. Marca — BrandDNA, site e equipe;
+2. Minerador — qualificação e KeywordDNA;
+3. Arquiteto — ArticleDNA, SiloDNA, SiloPage e InternalLinkGraph;
+4. Radar — investigação, SERP, evidências e RadarApprovedPackage;
+5. Planejador — ContentPlan;
+6. Redator — ContentDocument;
+7. Publicações — PublicationRecord;
 8. Conta — preferências e segurança;
 9. Admin — gestão da plataforma.
 
 ## Sistema visual compartilhado
 
-Toda tarefa que criar, alterar ou revisar frontend deve ler `docs/compartilhado/sistema-visual.md` antes de modificar a interface.
+Fonte canônica: `docs/compartilhado/sistema-visual.md`.
+
+Toda tarefa que criar, alterar ou revisar frontend deve ler essa fonte antes
+de modificar a interface. A skill de apoio é
+`.agents/skills/app-visual-system/SKILL.md`; ela orienta a aplicação e a
+revisão do sistema, sem substituir o documento canônico.
 
 Regras mínimas:
 
@@ -415,6 +475,11 @@ Fontes canônicas adicionais para mudanças estruturais:
 - `docs/compartilhado/sdd-arquitetura-integracoes-plataforma-agencia-marca.md`;
 - `docs/compartilhado/plano-implementacao-geracao-canonica.md`;
 - `docs/compartilhado/template-proposta-evolucao-modular.md`.
+
+Para a consolidação atual, consultar também o pipeline editorial, o mapa de
+estado da plataforma, as regras compartilhadas de documentação e o contrato
+do InternalLinkGraph indicados no mapa de fontes acima. Não duplicar essas
+especificações neste arquivo.
 
 Uma SDD aprovada define destino e planejamento, não comprova implementação concluída nem autoriza migration, operação remota ou mudança fora do escopo aprovado. Alterações de auth, tenant, schema, RLS, providers, integrações, permissões, contratos compartilhados ou workflow exigem SDD ou adendo aprovado. Todo módulo interrompe mudanças estruturais fora desse escopo e registra uma Proposta de Evolução Modular para análise e aprovação central.
 

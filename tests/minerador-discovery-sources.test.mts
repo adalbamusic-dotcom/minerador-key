@@ -126,11 +126,11 @@ test("tabela identifica discretamente Google Ads, Manual e CSV", async () => {
 test("tabela multi-source preserva largura legível e scroll horizontal compartilhado", async () => {
   const table = await readFile(new URL("../modules/minerador/discovery/discovery-table-placeholder.tsx", import.meta.url), "utf8");
   assert.match(table, /KeywordTableShell ref=\{tableRef\} scroll="x"/);
-  assert.match(table, /min-w-\[1442px\]/);
+  assert.match(table, /style=\{\{ minWidth: discoveryTableMinimumWidth \}\}/);
   assert.match(table, /useKeywordTableResponsiveWidths/);
   assert.match(table, /data-keyword-table="discovery"/);
   assert.match(table, /sourceBadge = .*shrink-0/);
-  assert.doesNotMatch(table, /min-w-\[1760px\]/);
+  assert.doesNotMatch(table, /min-w-\[1442px\]/);
 });
 
 test("Processador não mantém botões visíveis concorrentes de CSV ou Manual", async () => {

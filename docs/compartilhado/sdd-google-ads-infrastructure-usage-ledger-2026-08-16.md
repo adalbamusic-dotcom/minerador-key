@@ -3,21 +3,24 @@
 - **Status:** SDD consolidada com inventário remoto; prepara implementação e pacote local. Apply, SQL remoto e smoke continuam dependentes de autorização explícita.
 - **Módulo proprietário:** Integrações / Usage / Google Ads Infrastructure Resource
 - **Data:** 2026-08-16
-- **Precedência:** complementa a SDD arquitetural de integrações e o adendo `GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV`. Para Google Ads, substitui qualquer interpretação anterior que obrigue Connection, Vault, `secret_ref`, grant ou binding de módulo no caminho de Usage.
+- **Precedência:** complementa a SDD arquitetural de integrações e o adendo `GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV_STATIC_PLUS_SECRET_STORE_REFRESH_TOKEN`. O resolver de credencial usa configuração estática ENV + `secret_ref` da Connection global; esta SDD trata somente o writer/ledger de Usage e não escolhe, copia ou retorna o segredo.
 - **Fora do escopo:** alterar runtime, schema, RLS, dados remotos, credenciais, DataForSEO, OpenRouter, UI, quotas, grants, bindings ou executar provider.
 
 ## 1. Problema comprovado
 
 `public.integration_usage_events` foi materializada pela migration 0024 com a premissa de que todo provider externo teria uma Connection persistida. O evento exige `connection_id NOT NULL`, possui FK para `integration_connections`, FK composta `(connection_id, provider_id)` e idempotência única em `(connection_id, idempotency_key)`.
 
-Essa premissa é correta para Connections governáveis, como DataForSEO e OpenRouter. Ela é incompatível com a decisão arquitetural vigente para Google Ads:
+Essa premissa é correta para Connections governáveis, como DataForSEO e OpenRouter. Para Google Ads, a resolução da credencial e o ledger de Usage são contratos separados:
 
 ```text
-Google Ads runtime
-  = GOOGLE_ADS_* em PLATFORM_ENV / Vercel
-  ≠ Connection persistida
-  ≠ Vault / secret_ref
-  ≠ grant ou binding por módulo
+Google Ads credential resolver
+  = configuração estática ENV / Vercel
+  + refresh token por secret_ref no Secret Store
+  ≠ segredo em coluna pública ou no browser
+
+Google Ads Usage writer
+  = observabilidade sanitizada
+  ≠ escolha de credencial ou autorização
 ```
 
 Hoje, após Provider e persistência da Discovery terem sucesso, `google-ads-discovery-usage.ts` ainda chama `resolveIntegrationResourceForActor()`. O resolvedor consulta contexto, catálogo técnico e uma Connection global READY com `secret_ref`; sua ausência ou lifecycle não READY impede a escrita de Usage e transforma uma execução já persistida em erro HTTP 503.
@@ -28,9 +31,9 @@ Hoje, após Provider e persistência da Discovery terem sucesso, `google-ads-dis
 2. `actor_user_id`, `agency_id` e `brand_id` continuam registrando o consumidor e o tenant dos dados.
 3. `operation_kind`, `module`, unidades, custo, status, ambiente e correlação sanitizada continuam no ledger.
 4. Usage é observabilidade append-only; não concede autorização, entitlement, quota, Connection ou credencial.
-5. Google Ads permanece exclusivamente `PLATFORM_ENV`; o ledger não altera nem escolhe essa configuração.
+5. Google Ads usa configuração estática ENV + Refresh Token no Secret Store; o ledger não altera nem escolhe essa configuração.
 6. DataForSEO e OpenRouter permanecem Connection-backed, com `secret_ref` e Vault somente server-side.
-7. Não será criada Connection falsa, sentinel, placeholder ou legada para Google Ads.
+7. Não será criada Connection falsa, sentinel, placeholder ou legada para Google Ads; a Connection global canônica, quando existente, guarda apenas o `secret_ref` operacional.
 8. RLS, ACL, owner, trigger append-only, isolamento por Brand e dados históricos permanecem preservados.
 
 ## 3. Contrato atual auditado
@@ -167,7 +170,7 @@ Não remover, editar, desativar ou migrar a Connection persistida nesta tarefa. 
 
 1. `google-ads-discovery-usage.ts` via `resolveIntegrationResourceForActor()`;
 2. `integrations-runtime.ts` via `resolveHomologationResourceForActor()`;
-3. `platform-integrations-admin.ts` apenas como leitura histórica do catálogo; a interface ativa sintetiza o status de Google Ads a partir de `PLATFORM_ENV` e filtra a Connection Google Ads persistida da lista operacional;
+3. `platform-integrations-admin.ts` lê o catálogo e expõe status estático + referência sanitizada; a interface ativa permite somente a rotação do refresh token no Secret Store e filtra a Connection Google Ads global da lista operacional;
 4. actions administrativas antigas permanecem guardadas por `GOOGLE_ADS_PLATFORM_ENV_READ_ONLY`.
 
 A remoção futura exige prova de zero consumidores de runtime, Usage, Admin operacional, schema remoto e documentação ativa, além de plano de retenção dos eventos históricos que a referenciem.

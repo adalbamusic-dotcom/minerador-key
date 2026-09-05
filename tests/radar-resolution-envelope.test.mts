@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertRemoteKeywordMatchesEnvelope,
+  assertRadarWorkflowIdentityMatchesEnvelope,
   createRadarSerpResolutionEnvelope,
   hashRadarSerpResolutionEnvelope,
   validateRadarSerpResolutionEnvelope,
@@ -39,11 +40,11 @@ const version = {
   createdBy: "fixture",
   payload: article,
 } as any;
-const radarItem = { id: "radar:pub-b-33333333-3333-4333-8333-333333333333", articleId: article.articleId } as any;
+const radarItem = { id: "radar:pub-b-33333333-3333-4333-8333-333333333333", articleId: article.articleId, articleDnaVersionId: version.versionId } as any;
 
 test("a fronteira cliente -> rota preserva a keyword textual e o alias publicado", async () => {
-  const envelope = await createRadarSerpResolutionEnvelope({ brandId, radarItem, article: version, sourceKeywords: [sourceKeyword] });
-  const requestBody = JSON.parse(JSON.stringify({ action: "collect", brandId, articleId: article.articleId, location: "Brasil", language: "pt-BR", device: "desktop", resolutionEnvelope: envelope }));
+  const envelope = await createRadarSerpResolutionEnvelope({ brandId, radarItem, article: version, articleDnaVersionId: radarItem.articleDnaVersionId, sourceKeywords: [sourceKeyword] });
+  const requestBody = JSON.parse(JSON.stringify({ action: "collect", brandId, articleId: article.articleId, articleDnaVersionId: radarItem.articleDnaVersionId, location: "Brasil", language: "pt-BR", device: "desktop", resolutionEnvelope: envelope }));
   const receivedRequest = CollectRequestSchema.parse(requestBody);
   const received = await validateRadarSerpResolutionEnvelope(receivedRequest.resolutionEnvelope);
 
@@ -57,7 +58,7 @@ test("a fronteira cliente -> rota preserva a keyword textual e o alias publicado
 });
 
 test("hash adulterado e texto técnico bloqueiam a recuperação local", async () => {
-  const envelope = await createRadarSerpResolutionEnvelope({ brandId, radarItem, article: version, sourceKeywords: [sourceKeyword] });
+  const envelope = await createRadarSerpResolutionEnvelope({ brandId, radarItem, article: version, articleDnaVersionId: radarItem.articleDnaVersionId, sourceKeywords: [sourceKeyword] });
   await assert.rejects(() => validateRadarSerpResolutionEnvelope({ ...envelope, principalKeyword: { ...envelope.principalKeyword, keyword: "outra keyword" } }), /hash inválido|alterada/);
   await assert.rejects(() => validateRadarSerpResolutionEnvelope({ ...envelope, principalKeyword: { ...envelope.principalKeyword, keyword: sourceKeyword.keyword }, snapshotHash: "sha256:0000000000000000000000000000000000000000000000000000000000000000" }), /hash inválido|alterada/);
   const technical = { ...envelope, principalKeyword: { ...envelope.principalKeyword, keyword: envelope.principalKeyword.canonicalKeywordId || "pub-k-technical" } };
@@ -67,6 +68,28 @@ test("hash adulterado e texto técnico bloqueiam a recuperação local", async (
 });
 
 test("keyword remota divergente vira conflito antes do provedor", async () => {
-  const envelope = await createRadarSerpResolutionEnvelope({ brandId, radarItem, article: version, sourceKeywords: [sourceKeyword] });
+  const envelope = await createRadarSerpResolutionEnvelope({ brandId, radarItem, article: version, articleDnaVersionId: radarItem.articleDnaVersionId, sourceKeywords: [sourceKeyword] });
   assert.throws(() => assertRemoteKeywordMatchesEnvelope(envelope, "captação de pacientes com anúncios"), /diverge/);
+});
+
+test("separa o RadarItem técnico do articleId canônico na resolução do workflow", async () => {
+  const envelope = await createRadarSerpResolutionEnvelope({ brandId, radarItem, article: version, articleDnaVersionId: radarItem.articleDnaVersionId, sourceKeywords: [sourceKeyword] });
+  const workflowId = "44444444-4444-4444-8444-444444444444";
+  const base = {
+    workflowId,
+    workflowBrandId: brandId,
+    workflowArticleId: article.articleId,
+    workflowSourceVersionId: version.versionId,
+    workflowPayload: { ...radarItem, brandId, articleId: article.articleId, articleDnaVersionId: version.versionId },
+    brandId,
+    articleId: article.articleId,
+    articleDnaVersionId: version.versionId,
+  };
+
+  assert.notEqual(radarItem.id, radarItem.articleId);
+  assert.doesNotThrow(() => assertRadarWorkflowIdentityMatchesEnvelope({ ...base, resolutionEnvelope: envelope }));
+  assert.doesNotThrow(() => assertRadarWorkflowIdentityMatchesEnvelope({ ...base, resolutionEnvelope: { ...envelope, radarItemId: workflowId } }));
+  assert.throws(() => assertRadarWorkflowIdentityMatchesEnvelope({ ...base, resolutionEnvelope: { ...envelope, radarItemId: "radar:other-article" } }), /não corresponde/);
+  assert.throws(() => assertRadarWorkflowIdentityMatchesEnvelope({ ...base, workflowPayload: { ...base.workflowPayload, articleId: "other-article" }, resolutionEnvelope: envelope }), /não corresponde/);
+  assert.throws(() => assertRadarWorkflowIdentityMatchesEnvelope({ ...base, workflowSourceVersionId: "article-v-other", resolutionEnvelope: { ...envelope, radarItemId: workflowId } }), /não corresponde/);
 });

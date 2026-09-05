@@ -1,11 +1,40 @@
 import { z } from "zod";
 import { SerpCollectionRecordSchema } from "../../editorial/contracts.ts";
-import { VersionedArticleDNASchema } from "../../arquiteto/contracts.ts";
 import { RadarHydrationSnapshotSchema } from "../hydration.ts";
 import { RadarSerpResolutionEnvelopeSchema } from "../resolution-envelope.ts";
 
+export function buildRadarSerpCollectPayload(input: {
+  brandId: string;
+  articleId: string;
+  articleDnaVersionId: string;
+  location: string;
+  language: string;
+  device: "desktop" | "mobile";
+  articleVersion?: unknown;
+  resolutionEnvelope: z.infer<typeof RadarSerpResolutionEnvelopeSchema>;
+}) {
+  const articleDnaVersionId = input.articleDnaVersionId.trim();
+  if (!articleDnaVersionId) throw new Error("A versão do ArticleDNA deste item do Radar não está disponível.");
+  return {
+    action: "collect" as const,
+    brandId: input.brandId,
+    articleId: input.articleId,
+    articleDnaVersionId,
+    location: input.location,
+    language: input.language,
+    device: input.device,
+    articleVersion: input.articleVersion,
+    resolutionEnvelope: input.resolutionEnvelope,
+  };
+}
+
 const LocalArticleContextSchema = z.object({
-  articleVersion: VersionedArticleDNASchema.optional(),
+  // The client may carry a legacy/local recovery envelope whose ArticleDNA
+  // contains fields newer than this route's request contract. Keep request
+  // validation focused on the SERP operation; resolveArticle validates the
+  // local ArticleDNA only when the remote canonical read is unavailable.
+  articleVersion: z.unknown().optional(),
+  articleDnaVersionId: z.string().min(1).optional(),
   hydration: RadarHydrationSnapshotSchema.nullable().optional(),
   resolutionEnvelope: RadarSerpResolutionEnvelopeSchema,
 });

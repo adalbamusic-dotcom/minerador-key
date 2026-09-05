@@ -77,3 +77,18 @@ O label visual global e `Perfil`, mas a rota pessoal permanece `/conta`.
 `ROUTE_AGENCY_SINGULAR_REVIEW` fica registrado como divida: a rota atual e
 `/agencias/{agencyRef}` e uma possivel forma futura `/agencia/{agencyRef}` nao
 faz parte desta fase.
+
+## 23. Evolução funcional da identidade pessoal
+
+Perfil cuida da pessoa; Agência e Marca continuam cuidando da organização e do
+trabalho. O nome editável reutiliza `auth.users.user_metadata.full_name`, com
+confirmação por readback. A página pessoal, a sessão compartilhada e o avatar
+da `GlobalTopbar` consomem a mesma identidade Auth; o papel global e o e-mail
+continuam somente informativos.
+
+O avatar remoto usa o bucket exclusivo `profile-avatars`, com escrita,
+alteração e remoção limitadas ao caminho do próprio `auth.uid()`. A entrada é
+JPEG/PNG/WEBP, o processamento produz WEBP 256×256 e a única referência
+persistida é `auth.users.user_metadata.avatar_url`. Perfil, `GlobalTopbar` e
+`ProfilePopover` leem essa mesma identidade; o sucesso exige readback do objeto
+Storage e do metadata Auth. Não existe dependência de Brand ou Agency.

@@ -71,6 +71,7 @@ export const SiteKeywordCandidateSchema = z.object({
   suggestedRole: SiteKeywordSuggestedRoleSchema.default("unclassified"), slugCoherence: SiteKeywordSlugCoherenceSchema.default("unknown"),
   urlSituation: SiteVerificationStatusSchema.default("unverified"), publicationStatus: SitePublicationStatusSchema.default("not_confirmed"), keywordUrlRelation: SiteKeywordUrlRelationSchema.default("undefined"),
   architectureStatus: SiteKeywordArchitectureStatusSchema.default("awaiting_architecture"), relationConfirmedBy: z.string().nullable().default(null), relationConfirmedAt: OptionalText,
+  lastCheckedAt: OptionalText,
   confidence: SiteKeywordConfidenceSchema, qualificationStatus: SiteKeywordQualificationStatusSchema.default("awaiting_minerador"), isKgr: z.literal(false).default(false),
   status: SiteKeywordCandidateStatusSchema.default("new"), originalText: z.string().trim().min(1), extractedAt: OptionalText, mineradorKeywordId: z.string().uuid().nullable().default(null), importBatchId: z.string().uuid().nullable().default(null), sentAt: OptionalText,
 });

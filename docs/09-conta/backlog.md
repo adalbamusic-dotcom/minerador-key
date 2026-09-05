@@ -74,9 +74,21 @@ Duplicar edição de marca em Conta.
 - Nenhuma regra de negócio ou contrato foi alterado. Testes estruturais, ESLint, TypeScript, build e `git diff --check` permanecem obrigatórios antes da entrega.
 
 ## Próximo
-- Criar SDD específica para perfil/avatar persistido, se o produto aprovar campo, Storage e policies.
+- Aplicar manualmente, após preflight, a migration `0045_profile_avatar_storage.sql`
+  e executar o smoke autenticado de upload/readback do avatar.
 - Retomar alteração/recuperação de senha somente após a consolidação do Supabase Auth prevista no ADR-019.
 - Migrar consumidores de NextAuth em etapas somente após smoke da sessão SSR; Google continua bloqueado até provider, callbacks e Redirect URLs confirmados manualmente.
+
+## Evolução funcional da identidade — 2026-08-18
+
+- [x] Nome pessoal editável com `auth.updateUser` + readback e publicação no
+  Notification Center global `global:perfil`.
+- [x] Editor de avatar com validação, crop, zoom, reposicionamento, compressão
+  WEBP 256×256 e upload pelo contrato `profile-avatars` preparado localmente.
+- [x] Perfil pessoal e avatar da GlobalTopbar compartilham a identidade de
+  sessão; Agência e Marca permanecem fora da responsabilidade da página.
+- [ ] Validar manualmente no Chrome o upload/readback do avatar, o popover, a
+  edição do nome e os estados light/dark/responsivos após aplicar a migration.
 ## Concluídos recentes
 Auditoria documental inicial em 2026-07-20.
 ## Consolidacao fisica concluida - 2026-07-23

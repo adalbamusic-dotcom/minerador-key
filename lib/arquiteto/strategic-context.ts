@@ -14,6 +14,7 @@ import {
   type ArchitectKeyword,
   type ProvisionalArticleGroup,
 } from "./contracts.ts";
+import { readArticleKgrDecision } from "./article-kgr-decision.ts";
 import { isConfirmedKgrIdentity, normalizePrimaryKeywordPolicy, resolveArticleSerpIdentityContext, resolvePrimaryKeywordPolicy } from "./identity-context.ts";
 import { normalizeSearchIntent } from "./intent-profile.ts";
 import { buildArticleUnitStrategy } from "./unit-strategy.ts";
@@ -185,9 +186,34 @@ export function calculateArticleKeywordStrategy(input: {
 
 export function deriveArticleKgrIdentity(group: ProvisionalArticleGroup, principal: ArchitectKeyword, suggestedSlug: string): ArticleKgrIdentity | undefined {
   const existing = group.kgrIdentity || principal.kgrIdentity;
-  if (!existing) return undefined;
-  const principalKeywordDnaId = existing.principalKeywordDnaId || sourceKeywordDnaId(principal);
-  const samePrincipal = !existing.principalKeywordDnaId || existing.principalKeywordDnaId === principalKeywordDnaId;
+  const principalKeywordDnaId = sourceKeywordDnaId(principal);
+  const principalChanged = Boolean(existing?.primaryKeywordId && existing.primaryKeywordId !== principal.id);
+  if (!existing || principalChanged) {
+    const decision = readArticleKgrDecision({ principal, principalKeywordId: principal.id });
+    if (!decision.fullKgr && !decision.requiresHumanDecision) return undefined;
+    return {
+      isKgrArticle: decision.decision === "YES",
+      source: "minerador",
+      principalKeywordDnaId,
+      principalKeywordDnaVersionId: principal.keywordDnaRef?.versionId,
+      principalKeywordDnaContentHash: principal.keywordDnaRef?.contentHash,
+      primaryKeywordId: principal.id,
+      primaryVolume: finiteVolume(principal.volume_search),
+      kgrValue: decision.principalKgrScore,
+      principalKgrApplicability: decision.principalApplicability,
+      bindingStatus: decision.decision === "YES" ? "candidate" : "not_applicable",
+      status: decision.decision === "YES" ? "candidate" : decision.decision === "NO" ? "not_kgr" : "unknown",
+      ...(decision.decision === "YES" ? { boundSlug: suggestedSlug } : {}),
+      decision: decision.decision,
+      decisionSource: decision.source,
+      decisionReason: decision.fullKgr ? "KGR pleno da Principal pela regra 0 <= KGR < 0.25." : decision.requiresHumanDecision ? "Decisão humana obrigatória para KGR do artigo." : "Decisão derivada exclusivamente dos fatos atuais da Principal.",
+      decisionContractVersion: "article-kgr-decision-v1",
+      ...(existing?.decisionHistory?.length ? { decisionHistory: existing.decisionHistory } : {}),
+      purpose: decision.fullKgr ? "KGR pleno da Principal pela regra 0 <= KGR < 0.25." : "Decisão do artigo reavaliada a partir da Principal atual.",
+    };
+  }
+  const resolvedPrincipalKeywordDnaId = existing.principalKeywordDnaId || principalKeywordDnaId;
+  const samePrincipal = !existing.principalKeywordDnaId || existing.principalKeywordDnaId === resolvedPrincipalKeywordDnaId;
   const sameSlug = !existing.boundSlug || existing.boundSlug === suggestedSlug;
   const conflict = existing.isKgrArticle && (!samePrincipal || !sameSlug);
   const bindingStatus = conflict ? "conflict" : existing.bindingStatus;
@@ -196,9 +222,14 @@ export function deriveArticleKgrIdentity(group: ProvisionalArticleGroup, princip
     : "not_kgr";
   return {
     ...existing,
-    principalKeywordDnaId,
+    principalKeywordDnaId: resolvedPrincipalKeywordDnaId,
+    principalKeywordDnaVersionId: existing.principalKeywordDnaVersionId || principal.keywordDnaRef?.versionId,
+    principalKeywordDnaContentHash: existing.principalKeywordDnaContentHash || principal.keywordDnaRef?.contentHash,
     primaryKeywordId: principal.id,
     primaryVolume: finiteVolume(principal.volume_search),
+    kgrValue: existing.kgrValue ?? readArticleKgrDecision({ principal, principalKeywordId: principal.id }).principalKgrScore,
+    principalKgrApplicability: existing.principalKgrApplicability || readArticleKgrDecision({ principal, principalKeywordId: principal.id }).principalApplicability,
+    decisionContractVersion: existing.decisionContractVersion || "article-kgr-decision-v1",
     boundSlug: existing.boundSlug || (existing.isKgrArticle ? suggestedSlug : undefined),
     bindingStatus,
     status,

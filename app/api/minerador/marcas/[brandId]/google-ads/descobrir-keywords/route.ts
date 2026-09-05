@@ -19,6 +19,9 @@ import { mapDiscoveryCandidateRow } from "@/lib/minerador/discovery-candidate-ad
 import { createCanonicalAuthorizationRepository, createCanonicalServiceClient } from "@/lib/server/canonical-authorization";
 import { createIntegrationRuntimeRepository, IntegrationRuntimeError } from "@/lib/server/integrations-runtime";
 import { GoogleAdsDiscoveryUsageError, recordGoogleAdsDiscoveryUsage } from "@/lib/minerador/google-ads-discovery-usage";
+import { readDiscoveryCurrentMetricsInChunks } from "@/lib/minerador/discovery-current-metrics-readback";
+import { buildDiscoveryPostPersistenceWarning, sanitizeDiscoveryInternalError } from "@/lib/minerador/google-ads-discovery-diagnostics";
+import { readDiscoveryRunContext } from "@/lib/minerador/discovery-context";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -37,6 +40,8 @@ const DiscoveryDraftSchema = z.object({
   includeTerms: z.string(),
   excludeTerms: z.string(),
   includeAdultKeywords: z.boolean(),
+  discoveryMode: z.enum(["keyword", "customer_discovery"]).optional(),
+  discoveryFocus: z.enum(["all_customer", "hire"]).optional(),
 });
 
 const DiscoveryRequestSchema = z.object({
@@ -76,6 +81,8 @@ const defaultDraft = (seed: string, targeting: z.infer<typeof DiscoveryRequestSc
   includeTerms: "",
   excludeTerms: "",
   includeAdultKeywords: targeting.includeAdultKeywords,
+  discoveryMode: "keyword",
+  discoveryFocus: "all_customer",
 });
 
 function isPersistenceUnavailable(error: { code?: string; message?: string } | null | undefined) {
@@ -126,10 +133,22 @@ function routeError(error: unknown, apiRequestStarted: boolean, geoDiagnostic: G
     const diagnostic = buildGoogleAdsProviderDiagnostic(error, apiRequestStarted, { ...(geoDiagnostic || {}), detail: failedState ? `Falha ao validar a localização ${failedState}.` : geoTargetRejected && geoDiagnostic ? `A Google Ads rejeitou uma das ${geoDiagnostic.resolvedGeoTargetCount} localidades selecionadas.` : undefined });
     return { status: error.status || 502, code: geoTargetRejected ? "GOOGLE_ADS_GEO_TARGET_INVALID" : "GOOGLE_ADS_DISCOVERY_ERROR", stage: "provider_request", message: geoTargetRejected ? "Uma ou mais localidades selecionadas não foram aceitas." : error.message, diagnostic };
   }
-  return { status: 502, code: "GOOGLE_ADS_DISCOVERY_ERROR", stage: "provider_request", message: "Não foi possível concluir a descoberta no Google Ads.", diagnostic: buildGoogleAdsUnknownFailureDiagnostic({ apiRequestStarted, providerResponseReceived, internalStage, extra: geoDiagnostic || {} }) };
+  const internal = sanitizeDiscoveryInternalError(error);
+  return { status: 502, code: "GOOGLE_ADS_DISCOVERY_ERROR", stage: providerResponseReceived ? internalStage : "provider_request", message: "Não foi possível concluir a descoberta no Google Ads.", diagnostic: { ...buildGoogleAdsUnknownFailureDiagnostic({ apiRequestStarted, providerResponseReceived, internalStage, extra: geoDiagnostic || {} }), internalErrorCode: internal.code, internalErrorMessage: internal.message } };
 }
 
 function asStringArray(value: unknown) { return Array.isArray(value) && value.every(item => typeof item === "string") ? value as string[] : []; }
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function finiteNumberOrNull(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+type DiscoverySeoHistoryRow = { candidate_id?: unknown; new_value?: unknown; measured_at?: unknown; provider?: unknown; operation_request_id?: unknown };
 
 async function loadRunSnapshot(profile: Awaited<ReturnType<typeof requireCanonicalSessionProfile>>, brandId: string, runId: string) {
   const runResult = await profile.supabase.from("minerador_discovery_runs").select("*").eq("brand_id", brandId).eq("id", runId).maybeSingle();
@@ -139,11 +158,49 @@ async function loadRunSnapshot(profile: Awaited<ReturnType<typeof requireCanonic
   if (candidateResult.error) throw candidateResult.error;
   const run = runResult.data as Record<string, unknown>;
   const rawCandidates = (candidateResult.data || []).map(row => mapDiscoveryCandidateRow(row as Record<string, unknown>));
-  const currentResult = rawCandidates.length ? await profile.supabase.from("minerador_discovery_candidate_current_metrics").select("*").eq("brand_id", brandId).in("candidate_id", rawCandidates.map(candidate => candidate.candidateId)) : { data: [], error: null };
-  if (currentResult.error && !isPersistenceUnavailable(currentResult.error)) throw currentResult.error;
-  const currentById = new Map((currentResult.data || []).map(row => [String(row.candidate_id), mapDiscoveryCandidateCurrentMetrics(row as Record<string, unknown>)]));
-  const candidates = rawCandidates.map(candidate => mergeDiscoveryCandidateCurrentMetrics(candidate, currentById.get(candidate.candidateId)));
+  const currentResult = await readDiscoveryCurrentMetricsInChunks<Record<string, unknown>>({
+    candidateIds: rawCandidates.map(candidate => candidate.candidateId),
+    readChunk: async candidateIds => {
+      const result = await profile.supabase.from("minerador_discovery_candidate_current_metrics").select("*").eq("brand_id", brandId).in("candidate_id", [...candidateIds]);
+      if (result.error && isPersistenceUnavailable(result.error)) return { data: [], error: null };
+      return { data: result.data as Record<string, unknown>[] | null, error: result.error };
+    },
+  });
+  const currentById = new Map(currentResult.rows.map(row => [String(row.candidate_id), mapDiscoveryCandidateCurrentMetrics(row)]));
+  const seoHistoryResult = await readDiscoveryCurrentMetricsInChunks<DiscoverySeoHistoryRow>({
+    candidateIds: rawCandidates.map(candidate => candidate.candidateId),
+    readChunk: async candidateIds => {
+      const result = await profile.supabase
+        .from("minerador_discovery_candidate_metric_history")
+        .select("candidate_id,new_value,measured_at,provider,operation_request_id")
+        .eq("brand_id", brandId)
+        .eq("metric_type", "allintitle")
+        .eq("outcome", "success")
+        .in("candidate_id", [...candidateIds])
+        .order("measured_at", { ascending: false });
+      if (result.error && isPersistenceUnavailable(result.error)) return { data: [], error: null };
+      return { data: result.data as DiscoverySeoHistoryRow[] | null, error: result.error };
+    },
+  });
+  const seoHistoryByCandidateId = new Map(seoHistoryResult.rows.map(row => [String(row.candidate_id), row]));
+  const candidates = rawCandidates.map(candidate => {
+    const projected = mergeDiscoveryCandidateCurrentMetrics(candidate, currentById.get(candidate.candidateId));
+    const history = seoHistoryByCandidateId.get(candidate.candidateId);
+    const newValue = asObject(history?.new_value);
+    if (!history || !newValue || !Object.prototype.hasOwnProperty.call(newValue, "keywordDifficulty") || !projected.currentMetrics) return projected;
+    return {
+      ...projected,
+      currentMetrics: {
+        ...projected.currentMetrics,
+        keywordDifficulty: finiteNumberOrNull(newValue.keywordDifficulty),
+        keywordDifficultyMeasuredAt: typeof history.measured_at === "string" ? history.measured_at : null,
+        keywordDifficultyProvider: typeof history.provider === "string" ? history.provider : null,
+        keywordDifficultyOperationRequestId: typeof history.operation_request_id === "string" ? history.operation_request_id : null,
+      },
+    };
+  });
   const source = run.source === "manual" || run.source === "csv" ? run.source : "google_ads";
+  const discoveryContext = readDiscoveryRunContext(run.source_data);
   const firstTargeting = rawCandidates[0]?.targeting;
   const targeting: ExecutedTargeting | null = source === "google_ads" ? {
     countryCode: "BR",
@@ -168,6 +225,8 @@ async function loadRunSnapshot(profile: Awaited<ReturnType<typeof requireCanonic
     includeTerms: typeof run.include_terms === "string" ? run.include_terms : "",
     excludeTerms: typeof run.exclude_terms === "string" ? run.exclude_terms : "",
     includeAdultKeywords: run.include_adult_keywords === true,
+    discoveryMode: discoveryContext?.discoveryMode || "keyword",
+    discoveryFocus: discoveryContext?.discoveryFocus || "all_customer",
   } as DiscoverySearchDraft;
   return { source, operationRequestId: String(run.operation_request_id), executedAt: String(run.executed_at), draft, candidates, targeting, foundCount: Number(run.received_count || candidates.length), returnedCount: candidates.length, truncated: Boolean(run.response_truncated), nextPageAvailable: Boolean(run.response_truncated) };
 }
@@ -293,7 +352,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const canonicalIdeas = new Map<string, typeof page.ideas[number]>();
     for (const idea of page.ideas) if (!canonicalIdeas.has(idea.normalizedKeyword)) canonicalIdeas.set(idea.normalizedKeyword, idea);
     internalStage = "persistence";
-    const { data: existingRows, error: existingError } = await profile.supabase.from("minerador_keywords").select("id,keyword").eq("brand_id", context.brandId);
+    const { data: existingRows, error: existingError } = await profile.supabase.from("minerador_keywords").select("id,keyword").eq("brand_id", context.brandId).is("deleted_at", null);
     if (existingError) throw existingError;
     const existingByCanonical = new Map((existingRows || []).map(row => [normalizeGoogleAdsKeyword(String(row.keyword || "")), String(row.id)]));
     const candidates = [...canonicalIdeas.values()].map((idea, index) => ({ candidateId: `${operationRequestId}:${index + 1}`, keyword: idea.keyword, canonicalKeyword: idea.normalizedKeyword, averageMonthlySearches: idea.averageMonthlySearches, monthlySearchVolumes: idea.monthlySearchVolumes, competition: idea.competition, competitionIndex: idea.competitionIndex, lowTopOfPageBidMicros: idea.lowTopOfPageBidMicros, highTopOfPageBidMicros: idea.highTopOfPageBidMicros, averageCpcMicros: idea.averageCpcMicros, currencyCode: idea.currencyCode, timeZone: idea.timeZone, targeting: idea.targeting, source: "google_ads" as const, sourceData: null, provider: idea.provider, providerVersion: idea.providerVersion, measuredAt: idea.measuredAt, existingKeywordId: existingByCanonical.get(idea.normalizedKeyword) || null } satisfies DiscoveryCandidate));
@@ -308,8 +367,31 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (persistResult.error && isPersistenceUnavailable(persistResult.error)) return persistenceUnavailableResponse(operationRequestId, true, true);
     if (persistResult.error) throw persistResult.error;
     const persistedRunId = persistResult.data && typeof persistResult.data === "object" && "runId" in persistResult.data ? String((persistResult.data as { runId: string }).runId) : runId;
-    const snapshot = await loadRunSnapshot(profile, context.brandId, persistedRunId);
-    if (snapshot) await syncCandidateCurrentMetrics(profile, context.brandId, context.actorUserId, snapshot.candidates);
+    const persistedSnapshotFallback: NonNullable<Awaited<ReturnType<typeof loadRunSnapshot>>> = {
+      source: "google_ads",
+      operationRequestId,
+      executedAt,
+      draft,
+      candidates,
+      targeting: executedTargeting,
+      foundCount: page.ideas.length,
+      returnedCount: candidates.length,
+      truncated: Boolean(page.nextPageToken) || page.ideas.length >= GOOGLE_ADS_DISCOVERY_PAGE_CAP,
+      nextPageAvailable: Boolean(page.nextPageToken) || page.ideas.length >= GOOGLE_ADS_DISCOVERY_PAGE_CAP,
+    };
+    internalStage = "readback_current_metrics";
+    let snapshot: Awaited<ReturnType<typeof loadRunSnapshot>> = persistedSnapshotFallback;
+    let postPersistenceError: unknown = null;
+    let postPersistenceStage: string | null = null;
+    try {
+      snapshot = await loadRunSnapshot(profile, context.brandId, persistedRunId);
+      internalStage = "sync_current_metrics";
+      if (snapshot) await syncCandidateCurrentMetrics(profile, context.brandId, context.actorUserId, snapshot.candidates);
+    } catch (error) {
+      postPersistenceError = error;
+      postPersistenceStage = internalStage;
+      snapshot = persistedSnapshotFallback;
+    }
     if (!snapshot) return snapshotResponse(snapshot, { apiRequestStarted: true, providerResponseReceived: true, failureType: "INTERNAL_POST_REQUEST_ERROR", internalStage: "persistence", googleAdsRequestId: providerRequestId, provider: "google_ads", providerVersion: "v25", persisted: false, usageRecorded: false });
     internalStage = "usage";
     usageAttempted = true;
@@ -328,6 +410,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       dependencies: googleAdsUsageDependencies(),
     });
     usageRecorded = true;
+    if (postPersistenceError) {
+      return NextResponse.json({
+        success: true,
+        partial: true,
+        warning: "A pesquisa foi salva, mas a sincronização das métricas atuais não foi concluída.",
+        restored: true,
+        source: snapshot.source,
+        operationRequestId: snapshot.operationRequestId,
+        executedAt: snapshot.executedAt,
+        draft: snapshot.draft,
+        candidates: snapshot.candidates,
+        targeting: snapshot.targeting,
+        foundCount: snapshot.foundCount,
+        returnedCount: snapshot.returnedCount,
+        truncated: snapshot.truncated,
+        nextPageAvailable: snapshot.nextPageAvailable,
+        diagnostic: buildDiscoveryPostPersistenceWarning(postPersistenceError, { internalStage: postPersistenceStage || "post_persistence", providerRequestId, extra: { ...(geoDiagnostic || {}), provider: "google_ads", providerVersion: "v25", usageRecorded: true, usageResultStatus: "succeeded" } }),
+      });
+    }
     return snapshotResponse(snapshot, { apiRequestStarted: true, providerResponseReceived: true, failureType: "PROVIDER_SUCCESS", internalStage: "usage", googleAdsRequestId: providerRequestId, provider: "google_ads", providerVersion: "v25", persisted: true, usageRecorded: true, usageResultStatus: "succeeded", idempotent: Boolean(persistResult.data && typeof persistResult.data === "object" && "idempotent" in persistResult.data && (persistResult.data as { idempotent: boolean }).idempotent) });
   } catch (error) {
     if (error instanceof ZodError) return NextResponse.json({ success: false, operationRequestId, code: "INVALID_DISCOVERY_REQUEST", stage: "argument_validation", message: "A solicitação de descoberta é inválida.", diagnostic: { apiRequestStarted: false, issues: error.issues.map(issue => ({ path: issue.path, code: issue.code })) } }, { status: 400 });

@@ -72,7 +72,8 @@ inalterados; sua remoção pertence aos Batches 4/5.
 - `supabase/scripts/master-refresh-batch-1-preflight-read-only.sql`;
 - `supabase/scripts/master-refresh-batch-1-post-verifier-bound-read-only.sql`;
 - `supabase/baseline/master-refresh-batch-1-20260817.txt`;
-- `supabase/rollback/master-refresh-batch-1-writers.rollback.md`;
+- rollback de aplicação: histórico no Git, não mantido no checkout ativo após
+  o encerramento do Batch 1;
 - `lib/server/brand-provisioning.ts`;
 - `lib/server/platform-integrations-admin.ts`;
 - testes direcionados em `tests/manual-auth-admin.test.mts` e

@@ -1,5 +1,96 @@
 # Backlog — Marca
 
+## Skills — fundação remota fechada e convergência local — 2026-08-28
+
+- [x] Primeira BrandSkill real persistida e confirmada por readback
+  (Care Glow / `brand_voice` / v1 / `draft`).
+- [x] Convergir o checkout para um contrato único: `expectedSections`,
+  `VALID` / `VALID_WITH_NOTICES` / `INVALID`,
+  `matched` / `alias_matched` / `not_found`.
+- [x] Remover a constante global `MARKDOWN_MAX_BYTES` que duplicava
+  `definition.maxFileSizeBytes`.
+- [x] Alinhar repository e rota ao `BrandSkillSchema`/`BrandSkillActionRequestSchema`.
+- [x] Brand Context Pack resolve a versão corrente válida, incluindo rascunho, e mantém `available != applied`.
+- [x] Zerar erros de TypeScript em Brand Skills.
+- [ ] **Próximo gate:** F5 na Care Glow e confirmar que a Skill v1 é recuperada
+  do servidor.
+- [ ] Depois do F5: validar leitura pela IA antes e depois de transições de governança, sem tratar aprovação como gate de disponibilidade.
+
+
+## Skills — validação de Markdown — 2026-08-28
+
+- [x] Retirar o bloqueio por heading literal: estrutura do gabarito virou
+  recomendação com diagnóstico.
+- [x] Introduzir `invalid` / `valid_with_notices` / `valid`; só `invalid` impede
+  o envio.
+- [x] Adicionar aliases determinísticos e reconhecimento por contenção de
+  tokens, sem IA.
+- [x] Cobrir o arquivo real com `tests/care-glow-skill.fixture.ts`.
+- [ ] **Próximo gate:** reteste manual com `CareGlow_SKILL.md` na Care Glow.
+- [ ] Decidir se versões persistidas antes da correção devem ser
+  renormalizadas — exige escrita remota e gate próprio.
+- [ ] Ampliar os gabaritos além de `brand_voice` conforme as áreas
+  consumidoras definirem novas capacidades.
+
+## Skills da Marca — correção de contrato — 2026-08-28
+
+- [x] Substituir o construtor livre pelo modelo dirigido por gabarito.
+- [x] Criar `SkillDefinition` local com `brand_voice` e seções obrigatórias e
+  opcionais distintas.
+- [x] Entrada por arquivo `.md` com validação, prévia segura e relatório de
+  estrutura encontrada versus esperada.
+- [x] Identidade estável por `brandId + definitionKey`, com nome humano
+  editável que não quebra consumidores.
+- [x] Versionamento local por hash; substituir arquivo idêntico não cria versão.
+- [x] Revisar a SDD para o payload definitivo antes de qualquer migration.
+- [ ] **Próximo gate:** validar manualmente a entrada `.md` com a Care Glow.
+- [ ] Depois da validação: escolher a opção de persistência, aprovar a SDD e só
+  então migration, RLS, API e ligação dos consumidores.
+- [ ] Decidir se `SkillDefinition` permanece em código ou vira registro global
+  persistido — decisão separada, não bloqueia o BrandSkill.
+
+## Skills da Marca — experiência frontend — 2026-08-28
+
+- [x] Empty state, cabeçalho, busca e filtros de categoria, estado e área.
+- [x] Criação, edição, modo de leitura, duplicação, arquivamento e exclusão da
+  cópia local, com fluxo de estado e versionamento local simulados.
+- [x] Template guiado de voz em `Voz e estilo`, sem substituir o BrandDNA.
+- [x] Áreas aplicáveis e uso recomendado como conceitos distintos, com InfoHint.
+- [x] Aviso permanente de cópia de trabalho local, sem mensagem de persistência.
+- [ ] **Próximo gate:** validação humana da experiência com a Care Glow antes de
+  qualquer decisão de persistência.
+- [ ] Depois da validação: retomar a SDD de persistência e só então API, RLS e
+  ligação dos consumidores.
+
+## Skills da Marca — 2026-08-28
+
+- [x] Auditar BrandSkill, BrandPrompt, BrandMaterial, consumidores e
+  persistência; confirmar `REMOTE_PERSISTENCE_EXISTS = NO`.
+- [x] Propor contrato mínimo de BrandSkill com versão, hash, status, áreas
+  aplicáveis e `sourceRefs`, preservando o contrato legado do Planejador.
+- [x] Propor `getBrandContextPack` como resolver compartilhado, com
+  `available != applied` e referências compactas.
+- [x] Implementar a aba Skills com criação, filtros, editor e aprovação humana,
+  marcada como não persistente.
+- [x] Criar SDD `propostas/skills-da-marca-persistencia-e-contexto-compartilhado.md`.
+- [ ] **Próximo gate:** decidir entre Opção A (estender
+  `editorial_artifact_versions`) e Opção B (tabela `public.brand_skills`) e
+  aprovar a SDD. Sem essa decisão não há migration, API nem consumidor ligado.
+- [ ] Após aprovação: migration, RLS, `app/api/marca/skills`, smoke autenticado
+  de isolamento por marca e só então ligar Planejador e Redator ao Context Pack.
+- [ ] Reconstruir Prompts em tarefa própria, depois de Skills consolidada.
+- [ ] Definir contrato de conteúdo de Material para habilitar
+  "Criar Skill a partir de Material" com revisão humana.
+
+## Consolidação de governança compartilhada — 2026-08-25
+
+- [x] Registrar a Marca como consumidora da disponibilidade da Agência, sem
+  Connection, credential, provider ou quota de módulo.
+- [x] Registrar especialista como identidade de domínio tenantizada e
+  Telegram como Bot global com binding explícito.
+- [ ] Validar manualmente, após os gates de infraestrutura, isolamento por
+  `brandId`, revogação do binding e contribuição para o `ExpertBrief` correto.
+
 ## Regra compartilhada KGR/formação — concluído localmente em 2026-07-21
 
 - Contrato aditivo de candidata com `isKgr: false`, coerência, campos de origem e status de qualificação.
@@ -163,3 +254,63 @@
 - [x] Exibir home útil para Brand sem snapshot, sem fabricar métricas.
 - [x] Encaminhar configuração estratégica para a área existente de BrandDNA.
 - [ ] Validar manualmente CareGlow, Adalba e Lindisse em light/dark, desktop/mobile e teclado.
+
+## Brand Skills — próximo gate manual — 2026-08-28
+
+- [x] Consolidar contrato local único: definição code-owned, parser diagnóstico, domínio, API e painel server-backed.
+- [ ] Executar smoke autenticado de conteúdo real: selecionar tipo, Markdown, salvar, confirmar readback e recarregar.
+- [ ] Confirmar que uma Skill corrente da própria Marca chega ao consumidor escolhido sem aplicação automática; a aprovação humana permanece governança, não gate de leitura.
+
+## Brand Skills — primeiro consumidor Minerador — 2026-08-28
+
+- [x] Declarar `minerador` como consumidor de `brand_voice` no gabarito compartilhado.
+- [x] Entregar às áreas compatíveis a versão corrente válida da própria Marca e registrar referências de proveniência somente quando realmente aplicadas.
+- [ ] Validar com a `brand_voice` v1 `draft` real da Care Glow e revisar a apresentação contextual produzida no Minerador.
+- [ ] Avaliar futuros consumidores apenas em tarefas próprias, sem ampliar esta integração para outras áreas.
+
+## Persistência canônica de Site/Sitemap — SDD proposta — 2026-09-02
+
+- [x] Auditoria completa da aba Site: UI, contratos, storage, rotas, coleta,
+      segurança, normalização, testes e migrations relacionadas.
+- [x] Comprovado que o catálogo do site vive **somente** no navegador
+      (`lib/marca/site-store.ts`, IndexedDB/localStorage por ator), que as rotas
+      de sitemap/verificação são stateless e que `brand_site_*` não é referenciada
+      por nenhum código.
+- [x] SDD proposta: `propostas/2026-09-02-sdd-site-sitemap-persistencia-canonica.md`.
+      Recomenda 3 tabelas (sitemaps, sync_runs, catalog_entries), não as 8 da 0004.
+- [x] `LEGACY_0004_POLICY = HISTORICAL_DESIGN_INPUT` — nunca aplicar: referencia
+      `listas_kgr`, usa RLS no padrão antigo e `created_by text`.
+- [x] Defeito de normalização registrado: `normalizeSiteUrl` só remove a barra
+      final na raiz, então `/a/` e `/a` gerariam entradas duplicadas.
+- [ ] **Aguardando aprovação do Planner Geral.** Nenhum código, migration ou SQL.
+- [ ] Fase 2 do Arquiteto continua bloqueada até a Fase 5 desta frente.
+
+## Site/Sitemap canônico — Fases 1 e 2 entregues; gate de SQL — 2026-09-02
+
+- [x] Fase 1 — `site-canonical-url.ts`, `site-persistence-contracts.ts`,
+      `site-publication-reconciliation.ts` + 17 testes puros.
+- [x] Script `test:marca` criado; 39/39.
+- [x] Fase 2 — migration local
+      `20260902120000_brand_site_canonical_persistence.sql`, não aplicada.
+- [x] Condição de parada do escopo verificada: nenhum dos quatro estados locais é
+      fonte única de decisão/proveniência; a decisão "ignorar URL" foi para o
+      catálogo remoto.
+- [ ] **USUÁRIO executa o SQL remoto.** Antes disso, nada de repository ou escrita.
+- [ ] Após execução: readback remoto de schema, RLS, constraints e índices.
+- [ ] Fase 3 repository + persistência do sync · Fase 4 UI remota ·
+      Fase 5 `readBrandSiteSnapshot` (desbloqueia Fase 2 do Arquiteto) ·
+      Fase 6 smoke cross-browser.
+- [ ] Resíduo declarado: "ignorar candidata de termo" continua local; vira adendo
+      se o uso real provar necessidade.
+
+## Fase 3 — atomicity gate bloqueou; adendo A1 aguardando SQL — 2026-09-02
+
+- [x] Auditoria: sem driver Postgres; PostgREST não permite transação multi-write.
+- [x] Precedente `persist_silo_pair_atomic` identificado e reaproveitado como padrão.
+- [x] Adendo A1 na SDD + migration local + contrato de domínio + 13 testes.
+- [x] **USUÁRIO executou o SQL do adendo A1 — APPLIED, materialização remota PASS.**
+- [ ] **A2 — exclusividade de execução `running` por Brand.** Sem índice único
+      parcial, duas execuções concorrentes no mesmo sitemap continuam possíveis.
+- [ ] Só então: sitemap repository · sync run repository · catalog repository ·
+      persistência em `POST /api/marca/site/sitemap/sync`.
+- [ ] Fase 4 (UI remota) e Fase 5 (`readBrandSiteSnapshot`) seguem depois.

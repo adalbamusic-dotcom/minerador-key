@@ -1,13 +1,18 @@
 import "server-only";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { GoogleAdsError } from "@/lib/google/ads/errors";
 import { createGoogleAdsRestClient, type GoogleAdsRestClient } from "@/lib/google/ads/client";
 import {
-  getGoogleAdsPlatformConfig,
+  createGoogleAdsPlatformConfig,
+  getGoogleAdsStaticPlatformConfig,
+  GoogleAdsPlatformConfigError,
   type GoogleAdsPlatformConfig,
 } from "@/lib/google/ads/config";
 import { GoogleAdsTargetingSchema, type GoogleAdsAdvertiserAccount, type GoogleAdsTargeting } from "@/lib/google/ads/contracts";
 import { GOOGLE_ADS_DISCOVERY_COUNTRY, GOOGLE_ADS_DISCOVERY_LANGUAGES, GOOGLE_ADS_DISCOVERY_STATE_GEO_TARGETS } from "@/lib/minerador/google-ads-discovery-catalog";
+import { createCanonicalServiceClient } from "@/lib/server/canonical-authorization";
+import { createIntegrationSecretStore, IntegrationSecretStoreError } from "@/lib/server/integration-secret-store";
 
 export const GOOGLE_ADS_CAPABILITY_KEYS = {
   discovery: "google_ads_keyword_discovery",
@@ -48,6 +53,11 @@ export type GoogleAdsCanonicalContext = {
   accountState: GoogleAdsCanonicalAccountState | null;
 };
 
+type GoogleAdsSecretResolverClient = Pick<SupabaseClient, "from" | "rpc">;
+
+export const GOOGLE_ADS_REFRESH_TOKEN_SECRET_NAME = "google_ads_refresh_token";
+export const GOOGLE_ADS_REFRESH_TOKEN_SECRET_DESCRIPTION = "Google Ads OAuth refresh token; rotacionado pelo Admin global";
+
 export class GoogleAdsConfigurationBlocker extends Error {
   public readonly status: 409 | 503;
   public readonly code:
@@ -62,6 +72,9 @@ export class GoogleAdsConfigurationBlocker extends Error {
     | "GOOGLE_ADS_PROVIDER_MISMATCH"
     | "GOOGLE_ADS_TARGETING_MISMATCH"
     | "GOOGLE_ADS_TARGETING_INVALID"
+    | "GOOGLE_ADS_REFRESH_TOKEN_SECRET_MISSING"
+    | "GOOGLE_ADS_REFRESH_TOKEN_SECRET_INVALID"
+    | "GOOGLE_ADS_REFRESH_TOKEN_SECRET_UNAVAILABLE"
     | "GOOGLE_ADS_PLATFORM_READ_ONLY";
 
   constructor(code: GoogleAdsConfigurationBlocker["code"], message: string, status: 409 | 503 = 503) {
@@ -142,6 +155,11 @@ export function assertCanonicalAccountState(account: GoogleAdsAdvertiserAccount,
 }
 
 function configBlocker(error: unknown): never {
+  if (error instanceof GoogleAdsPlatformConfigError) {
+    if (error.code === "GOOGLE_ADS_REFRESH_TOKEN_SECRET_MISSING" || error.code === "GOOGLE_ADS_REFRESH_TOKEN_SECRET_INVALID" || error.code === "GOOGLE_ADS_REFRESH_TOKEN_SECRET_UNAVAILABLE") {
+      throw new GoogleAdsConfigurationBlocker(error.code, error.message, 503);
+    }
+  }
   if (error && typeof error === "object" && "code" in error) {
     const code = String((error as { code: string }).code);
     if (code === "GOOGLE_ADS_PLATFORM_RESEARCH_CUSTOMER_MISSING") {
@@ -157,17 +175,69 @@ function configBlocker(error: unknown): never {
   throw new GoogleAdsConfigurationBlocker("GOOGLE_ADS_PLATFORM_ENV_MISSING", "A configuração server-side Google Ads está incompleta.", 503);
 }
 
-/** Resolves only platform environment variables; no database or secret store is consulted. */
+/**
+ * Resolves the only operational Google Ads credential authority. Static
+ * configuration remains in ENV; the OAuth refresh token is read by reference
+ * from the server-side Secret Store and never falls back to ENV.
+ */
+export async function resolveGoogleAdsPlatformConfig(
+  client: GoogleAdsSecretResolverClient,
+  environment: NodeJS.ProcessEnv = process.env,
+  options: { requireReady?: boolean } = {},
+): Promise<GoogleAdsPlatformConfig> {
+  const staticConfig = getGoogleAdsStaticPlatformConfig(environment);
+  const providerResult = await client.from("integration_providers")
+    .select("id,status")
+    .eq("provider_key", "google_ads")
+    .maybeSingle();
+  if (providerResult.error) {
+    throw new GoogleAdsPlatformConfigError("GOOGLE_ADS_REFRESH_TOKEN_SECRET_UNAVAILABLE", "Não foi possível consultar a Connection canônica do Google Ads.");
+  }
+  const provider = providerResult.data as { id: string; status: string } | null;
+  if (!provider || provider.status !== "active") {
+    throw new GoogleAdsPlatformConfigError("GOOGLE_ADS_REFRESH_TOKEN_SECRET_MISSING", "A Connection canônica do Google Ads ainda não está configurada.");
+  }
+
+  let connectionQuery = client.from("integration_connections")
+    .select("id,owner_scope_type,environment,lifecycle_status,secret_ref")
+    .eq("provider_id", provider.id)
+    .eq("owner_scope_type", "platform")
+    .eq("environment", "production")
+    .neq("lifecycle_status", "revoked");
+  if (options.requireReady !== false) connectionQuery = connectionQuery.eq("lifecycle_status", "ready");
+  const connectionResult = await connectionQuery.maybeSingle();
+  if (connectionResult.error) {
+    throw new GoogleAdsPlatformConfigError("GOOGLE_ADS_REFRESH_TOKEN_SECRET_UNAVAILABLE", "Não foi possível consultar a Connection canônica do Google Ads.");
+  }
+  const connection = connectionResult.data as { id: string; owner_scope_type: string; environment: string; lifecycle_status: string; secret_ref: string | null } | null;
+  if (!connection?.secret_ref?.trim()) {
+    throw new GoogleAdsPlatformConfigError("GOOGLE_ADS_REFRESH_TOKEN_SECRET_MISSING", "O OAuth Refresh Token Google Ads ainda não foi configurado no Secret Store.");
+  }
+
+  let refreshToken: string | null = null;
+  try {
+    refreshToken = await createIntegrationSecretStore(client).resolve(connection.secret_ref);
+  } catch (error) {
+    if (error instanceof IntegrationSecretStoreError && error.code === "INTEGRATION_SECRET_REF_INVALID") {
+      throw new GoogleAdsPlatformConfigError("GOOGLE_ADS_REFRESH_TOKEN_SECRET_INVALID", "A referência do OAuth Refresh Token Google Ads é inválida.");
+    }
+    throw new GoogleAdsPlatformConfigError("GOOGLE_ADS_REFRESH_TOKEN_SECRET_UNAVAILABLE", "O Secret Store do Google Ads não está disponível.");
+  }
+  return createGoogleAdsPlatformConfig(staticConfig, refreshToken);
+}
+
 export async function resolveGoogleAdsCanonicalContext(input: {
   actorUserId: string;
   agencyId?: string | null;
   brandId: string;
   environment?: "development" | "test" | "staging" | "production";
   operation: GoogleAdsCanonicalOperation;
+  config?: GoogleAdsPlatformConfig;
+  secretResolverClient?: GoogleAdsSecretResolverClient;
 }): Promise<GoogleAdsCanonicalContext> {
   let config: GoogleAdsPlatformConfig;
   try {
-    config = getGoogleAdsPlatformConfig();
+    config = input.config || await resolveGoogleAdsPlatformConfig(input.secretResolverClient || createCanonicalServiceClient());
   } catch (error) {
     return configBlocker(error);
   }

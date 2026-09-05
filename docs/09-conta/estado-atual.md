@@ -1,5 +1,25 @@
 # Estado atual — Conta
 
+## Evolução funcional da identidade — 2026-08-18
+
+- **Nome:** a página pessoal usa `auth.users.user_metadata.full_name`, salva
+  por `auth.updateUser` e só mostra confirmação após `auth.getUser` confirmar o
+  mesmo valor. E-mail de acesso e papel global continuam somente leitura.
+- **Avatar:** o editor aceita JPEG/PNG/WEBP, rejeita SVG e arquivos acima de
+  5 MB, oferece crop 1:1, arraste, zoom e compressão WEBP 256×256. O upload usa
+  o bucket `profile-avatars` no caminho do `auth.uid()`, salva a URL em
+  `auth.users.user_metadata.avatar_url` e confirma Storage + Auth antes de
+  publicar sucesso.
+- **Identidade compartilhada:** `SupabaseSessionProvider` é a fonte usada pela
+  página pessoal e pela `GlobalTopbar`; a prévia temporária usa override em
+  memória e é limpa quando o ator muda, sai ou recarrega a aplicação.
+- **Vínculos:** Agency e Brand permanecem listadas a partir das resoluções
+  server-side existentes, sem edição de membership, papel, owner ou contexto.
+- **Validação local:** testes focados de Conta, shell, visual e identidade
+  passaram; typecheck global continua com os três erros históricos `TS1501` em
+  `tests/agency-adalba-platform-internal.test.mts`. A migration e o smoke real
+  de upload ainda não foram executados.
+
 ## Autenticação e identidade — 2026-07-27
 
 A Conta continua consumindo a sessão atual baseada em NextAuth, enquanto Supabase Auth permanece a decisão aprovada para convergência futura. Cadastro manual cria somente a identidade e não associa marca automaticamente; Google OAuth está suspenso. A retirada do NextAuth, cookies Supabase definitivos e smoke test completo continuam pendentes.
@@ -38,7 +58,7 @@ A Conta continua consumindo a sessão atual baseada em NextAuth, enquanto Supaba
 - **Persistido remotamente:** nenhuma mutação nova foi criada. A validação de acesso existente continua server-side; perfil, avatar e preferências pessoais não possuem persistência própria identificada.
 - **Bloqueado:** alteração de senha e recuperação continuam aguardando a consolidação aprovada do Supabase Auth; não foi criado formulário paralelo. Edição de perfil/avatar e preferências permanecem sem contrato de persistência.
 - **Testes locais:** suite focada da Conta + autenticação/tenant + PasswordField: 25/25; ESLint focalizado, TypeScript, build e `git diff --check`: aprovados.
-- **Validação manual:** ainda pendente para sessão autenticada, Adalba/Lindisse, owner, Admin global, colaborador, mobile, dark mode e teclado. O script opcional `check-visual-system.mjs` não existe neste checkout.
+- **Validação manual:** ainda pendente para sessão autenticada, Adalba/Lindisse, owner, Admin global, colaborador, mobile, dark mode e teclado. O guard `check-visual-system.mjs` existe e é obrigatório: `pnpm run check:visual-system`.
 
 ## Refinamento visual da Conta — 2026-07-27
 

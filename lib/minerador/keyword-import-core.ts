@@ -134,7 +134,8 @@ async function findExistingByKeyword(client: SupabaseClient, brandId: string, no
   const result = await client
     .from("minerador_keywords")
     .select("id,keyword,brand_id,lista_id,status,analise_semantica")
-    .eq("brand_id", brandId);
+    .eq("brand_id", brandId)
+    .is("deleted_at", null);
   if (result.error) throw result.error;
   return ((result.data || []) as KeywordRow[]).find(row => normalizeKeyword(row.keyword) === normalized) || null;
 }
@@ -156,7 +157,8 @@ export async function importKeywordsWithCore(input: {
   const existingResult = await input.supabase
     .from("minerador_keywords")
     .select("id,keyword,brand_id,lista_id,status,analise_semantica")
-    .eq("brand_id", input.brandId);
+    .eq("brand_id", input.brandId)
+    .is("deleted_at", null);
   if (existingResult.error) throw existingResult.error;
 
   const existingByKey = new Map<string, KeywordRow>();
@@ -193,7 +195,8 @@ export async function importKeywordsWithCore(input: {
         .from("minerador_keywords")
         .update({ analise_semantica: semantic })
         .eq("id", previous.id)
-        .eq("brand_id", input.brandId);
+        .eq("brand_id", input.brandId)
+        .is("deleted_at", null);
       if (update.error) {
         failed += 1;
         resultItems.push({ index, keyword: item.keyword, normalizedKeyword, outcome: "failed", keywordId: previous.id, reason: "existing_evidence_update_failed", errorCode: safeDatabaseErrorCode(update.error) });
@@ -234,7 +237,8 @@ export async function importKeywordsWithCore(input: {
       .from("minerador_keywords")
         .update({ analise_semantica: semantic })
         .eq("id", concurrent.id)
-        .eq("brand_id", input.brandId);
+        .eq("brand_id", input.brandId)
+        .is("deleted_at", null);
       if (!update.error) {
         existingByKey.set(normalizedKeyword, concurrent);
         existing += 1;

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AdminMembershipSummary, AdminUserRecord } from "@/lib/admin-users-contract";
 import { internalButton, internalButtonDanger, internalButtonPrimary, internalField, internalNoticeError, internalNoticeSuccess, internalSelected, internalSurface, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
 type Notice = { tone: "success" | "error"; message: string } | null;
 
@@ -35,6 +36,7 @@ export default function UsersAdminPanel() {
   const [confirmGrant, setConfirmGrant] = useState(false);
   const [confirmRemoval, setConfirmRemoval] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  useNoticeBridge({ notice, module: "admin", area: "Usuários", title: "Administração · Usuários", fallbackSeverity: "INFO" });
 
   const load = useCallback(async (nextQuery: string) => {
     setLoading(true);

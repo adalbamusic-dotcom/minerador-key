@@ -6,6 +6,7 @@ import { normalizeSiloDnaProviderPayload } from "@/lib/arquiteto/silo-dna-provid
 import { createStatusEvent, createVersionEnvelope } from "@/lib/arquiteto/versioning";
 import { appendArquitetoArtifact, pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
+import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 
 const SiloInputSchema = z.object({
@@ -45,7 +46,9 @@ export async function POST(req: Request) {
     const parsed = RequestSchema.safeParse(await req.json());
     if (!parsed.success) return NextResponse.json({ success: false, error: "Silos invalidos.", issues: parsed.error.flatten() }, { status: 400 });
     const context = await resolvePipelineContext({ brandId: parsed.data.brand.id, module: "arquiteto", action: "create" });
+    const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: context.actorUserId, brandId: context.brandId, client: context.supabase });
     const result = await generateStructuredAI({
+      provider,
       system: SYSTEM_PROMPT,
       user: buildSiloDnaUserPrompt(parsed.data.silos),
       schema: ResponseSchema,

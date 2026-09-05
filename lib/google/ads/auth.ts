@@ -1,4 +1,4 @@
-import { getGoogleAdsPlatformConfig, type GoogleAdsServerConfig } from "./config.ts";
+import type { GoogleAdsServerConfig } from "./config.ts";
 import { GoogleAdsError } from "./errors.ts";
 
 type AccessToken = { accessToken: string; expiresAt: number };
@@ -46,8 +46,8 @@ async function refreshAccessToken(config: GoogleAdsServerConfig, fetchFn: FetchL
   return { accessToken, expiresAt: Date.now() + expiresIn * 1_000 };
 }
 
-export async function getGoogleAdsAccessToken(options: { config?: GoogleAdsServerConfig; fetchFn?: FetchLike; now?: () => number } = {}) {
-  const config = options.config || getGoogleAdsPlatformConfig();
+export async function getGoogleAdsAccessToken(options: { config: GoogleAdsServerConfig; fetchFn?: FetchLike; now?: () => number }) {
+  const config = options.config;
   const now = options.now || Date.now;
   const cachedToken = cachedTokens.get(config) || null;
   if (cachedToken && usable(cachedToken, now())) return cachedToken.accessToken;

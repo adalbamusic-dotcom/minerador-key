@@ -3,6 +3,12 @@ import { buildAllintitleQuery } from "./allintitle.ts";
 export const DATAFORSEO_SERP_PROVIDER = "dataforseo" as const;
 export const DATAFORSEO_SERP_PROVIDER_VERSION = "v3" as const;
 export const DATAFORSEO_SERP_ENDPOINT = "/v3/serp/google/organic/live/regular" as const;
+/**
+ * SERP completa: 17 orgânicos e ~34 campos por item contra 7 e 9 do `regular`,
+ * além dos blocos de feature (people_also_ask, popular_products, video…).
+ * Medição real 2026-08-29: US$ 0,0035 contra US$ 0,0020.
+ */
+export const DATAFORSEO_SERP_ADVANCED_ENDPOINT = "/v3/serp/google/organic/live/advanced" as const;
 export const DATAFORSEO_DEFAULT_LOCATION_CODE = 2076;
 export const DATAFORSEO_DEFAULT_LANGUAGE_CODE = "pt";
 export const DATAFORSEO_DEFAULT_DEPTH = 10;

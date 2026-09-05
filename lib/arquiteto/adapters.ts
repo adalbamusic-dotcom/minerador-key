@@ -1,4 +1,4 @@
-import { ArticleDNASchema, KeywordDnaProvenanceSnapshotSchema, SiloDNASchema, SiloPageSchema, type ArchitectKeyword, type ArticleDNA, type ArticleKeywordReference, type KeywordDNA, type ProvisionalArticleGroup, type SiloDNA, type SiloPage, type VersionEnvelope, type VersionReference } from "./contracts.ts";
+import { ArticleDNASchema, KeywordDnaProvenanceSnapshotSchema, SiloDNASchema, SiloPageSchema, VersionReferenceSchema, type ArchitectKeyword, type ArticleDNA, type ArticleKeywordReference, type KeywordDNA, type ProvisionalArticleGroup, type SiloDNA, type SiloPage, type VersionEnvelope, type VersionReference, type KeywordDnaProvenanceSnapshot } from "./contracts.ts";
 import { deepFreeze, legacyVersionReference, toVersionReference } from "./versioning.ts";
 import { resolvePublishedIdentity } from "./serp-formation.ts";
 import { adaptKeywordIdentityContext, resolvePrimaryKeywordPolicy } from "./identity-context.ts";
@@ -74,9 +74,59 @@ export function legacyKeywordDnaEnvelope(keyword: ArchitectKeyword): VersionEnve
     createdAt: new Date(0).toISOString(), createdBy: "legacy-adapter", payload });
 }
 
+function provenanceCapturedAt(keyword: ArchitectKeyword, explicit?: string) {
+  const candidate = explicit
+    || (keyword as Record<string, unknown>).updated_at
+    || (keyword as Record<string, unknown>).updatedAt
+    || (keyword as Record<string, unknown>).created_at
+    || (keyword as Record<string, unknown>).createdAt;
+  if (typeof candidate === "string" && !Number.isNaN(Date.parse(candidate))) return new Date(candidate).toISOString();
+  return new Date(0).toISOString();
+}
+
+function explicitKeywordDnaReference(keyword: ArchitectKeyword, sourceVersionId?: string | null, sourceContentHash?: string | null): VersionReference | null {
+  const existing = VersionReferenceSchema.safeParse(keyword.keywordDnaRef);
+  if (existing.success) return existing.data;
+  const candidate = VersionReferenceSchema.safeParse({
+    entityId: keyword.id,
+    versionId: sourceVersionId,
+    contentHash: sourceContentHash,
+  });
+  return candidate.success ? candidate.data : null;
+}
+
+function sourceKeywordSnapshot(keyword: ArchitectKeyword) {
+  const source = Object.fromEntries(
+    Object.entries(keyword as ArchitectKeyword & { keywordDnaSnapshot?: unknown })
+      .filter(([key]) => key !== "keywordDnaSnapshot"),
+  );
+  return sanitizeKeywordProvenanceSnapshot(source) as Record<string, unknown>;
+}
+
+/**
+ * Materializa a referência individual sem reduzir a origem a texto/métrica.
+ * O payload normalizado atende ao contrato histórico; sourceKeywordSnapshot
+ * conserva o registro recebido, inclusive nulls, refs, decisões e evidências.
+ */
+export function buildKeywordDnaProvenanceSnapshot(
+  keyword: ArchitectKeyword,
+  options: { brandId?: string; capturedAt?: string; sourceVersionId?: string | null; sourceContentHash?: string | null } = {},
+): KeywordDnaProvenanceSnapshot {
+  const reference = explicitKeywordDnaReference(keyword, options.sourceVersionId, options.sourceContentHash) || legacyKeywordDnaReference(keyword);
+  return KeywordDnaProvenanceSnapshotSchema.parse({
+    brandId: options.brandId || String((keyword as Record<string, unknown>).brand_id || "legacy"),
+    keywordId: keyword.id,
+    capturedAt: provenanceCapturedAt(keyword, options.capturedAt),
+    versionReference: reference,
+    payload: legacyKeywordDnaPayload(keyword),
+    sourceKeywordSnapshot: sourceKeywordSnapshot(keyword),
+  });
+}
+
 export function articleKeywordReference(keyword: ArchitectKeyword, role: ArticleKeywordReference["role"], brandId = "legacy"): ArticleKeywordReference {
-  const reference = keyword.keywordDnaRef ?? legacyKeywordDnaReference(keyword);
-  const envelope = legacyKeywordDnaEnvelope(keyword);
+  const suppliedSnapshot = KeywordDnaProvenanceSnapshotSchema.safeParse(keyword.keywordDnaSnapshot);
+  const snapshot = suppliedSnapshot.success ? suppliedSnapshot.data : buildKeywordDnaProvenanceSnapshot(keyword, { brandId });
+  const reference = snapshot.versionReference;
   const volume = typeof keyword.volume_search === "number" && Number.isFinite(keyword.volume_search) && keyword.volume_search >= 0 ? keyword.volume_search : null;
   const contribution = role === "principal" ? "central" : role === "secundaria" ? "incremental_volume" : "semantic_coverage";
   const purpose = role === "principal" ? "Define a identidade e a intenção central do artigo."
@@ -100,10 +150,7 @@ export function articleKeywordReference(keyword: ArchitectKeyword, role: Article
     overlapRisk: "unknown",
     ...(keyword.keywordUrlRelation ? { keywordUrlRelation: keyword.keywordUrlRelation } : {}),
     ...(keyword.urlEvidence ? { urlEvidence: keyword.urlEvidence } : {}),
-    keywordDnaSnapshot: KeywordDnaProvenanceSnapshotSchema.parse({
-      brandId, keywordId: keyword.id, capturedAt: envelope.createdAt, versionReference: reference,
-      payload: envelope.payload, sourceKeywordSnapshot: sanitizeKeywordProvenanceSnapshot({ ...keyword }) as Record<string, unknown>,
-    }),
+    keywordDnaSnapshot: snapshot,
     demandEvidence: normalizeKeywordDemandEvidence(keyword),
   };
 }
@@ -124,7 +171,6 @@ export function deterministicArticleDnaPayload(group: ProvisionalArticleGroup, b
   const narrativeReinforcementIds = references.filter(reference => reference.role === "reforco_narrativo").map(reference => reference.keywordId);
   const pending = "Pendente de enriquecimento e revisão humana";
   const entities = [...new Set(group.keywords.flatMap(keyword => stringList(keyword.analise_semantica?.entidade_central)))];
-  const kgrIdentity = group.kgrIdentity || principal.kgrIdentity;
   const architectureStatus = group.architectureStatus || principal.architectureStatus;
   const suggestedSlug = principal.slug_sugerido || principal.keyword.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const volumeStrategy = calculateArticleVolumeStrategy(group);
@@ -136,7 +182,7 @@ export function deterministicArticleDnaPayload(group: ProvisionalArticleGroup, b
   const intentProfile = buildArticleIntentProfile({ principal, principalReference: enrichedReferences.find(reference => reference.keywordId === principalId)!, references: enrichedReferences });
   const strategicPurpose = calculateArticleStrategicPurpose(group, intentProfile.primaryIntent, volumeStrategy, hierarchyStrategy);
   const keywordStrategy = calculateArticleKeywordStrategy({ group, principalIntent: intentProfile.primaryIntent, volume: volumeStrategy, published: Boolean(group.publishedAnchorId) });
-  const resolvedKgrIdentity = kgrIdentity ? deriveArticleKgrIdentity(group, principal, suggestedSlug) : undefined;
+  const resolvedKgrIdentity = deriveArticleKgrIdentity(group, principal, suggestedSlug);
   const primaryPolicy = resolvePrimaryKeywordPolicy({
     published: Boolean(group.publishedAnchorId), sourcePolicy: principal.primaryKeywordPolicy,
     principalKeywordId: principalId, keywordUrlRelation: principal.keywordUrlRelation,
@@ -163,6 +209,10 @@ export function deterministicArticleDnaPayload(group: ProvisionalArticleGroup, b
   return ArticleDNASchema.parse({
     schemaVersion: 1, articleId: group.publishedAnchorId || group.id, brandId, principalKeywordId: principalId,
     secondaryKeywordIds, narrativeReinforcementIds, keywordReferences: enrichedReferences, siloId: group.suggestedSiloId,
+    // O pai estrutural do fluxo Silo-first viaja com o grupo e precisa CHEGAR
+    // ao payload. Sem ele o ArticleDNA só descobre o próprio Silo pelo consenso
+    // das keywords — e passa a mudar de pai sempre que uma delas se mover.
+    ...(group.territoryRef ? { territoryRef: group.territoryRef } : {}),
     hierarchy: group.suggestedHierarchy, suggestedSlug, canonical: publicationIdentity?.status === "coherent" ? publicationIdentity.canonical || null : null,
     mainIntent: intentProfile.primaryIntent,
     intentProfile, volumeStrategy, hierarchyStrategy, strategicPurpose, keywordStrategy, unitClassification, unitPurpose, serpStrategy,
@@ -174,8 +224,15 @@ export function deterministicArticleDnaPayload(group: ProvisionalArticleGroup, b
     antiCannibalizationBoundary: text(semantic.fronteira_anti_canibalizacao, `Manter a cobertura centrada em “${principal.keyword}” e revisar sobreposições antes da publicação.`),
     nearbyArticleIds: [], differentiation: [], entities, requiredTopics: group.keywords.map(keyword => keyword.keyword),
     questions: stringList(semantic.perguntas), objections: stringList(semantic.objecoes || semantic.objecao_implicita), evidenceNeeded: stringList(semantic.evidencias_necessarias),
-    sourcesNeeded: stringList(semantic.fontes_necessarias), internalLinks: [], alerts: [...group.alerts, "ArticleDNA-base criado pela lógica determinística, sem IA."],
-    confidence: group.confidence, humanPendingDecisions: ["Enriquecer estratégia, promessa, CTA e fronteira com IA ou revisão humana antes do planejamento final.", ...(publicationIdentity?.status === "conflict" ? ["Resolver conflito entre URLs/canonicals de origem antes de confirmar a identidade publicada."] : [])],
+    sourcesNeeded: stringList(semantic.fontes_necessarias), internalLinks: [],
+    // Promessa, CTA e enriquecimento editorial pertencem ao Planejador/Redator:
+    // seguem como alerta informativo e não bloqueiam a aprovação estrutural.
+    alerts: [
+      ...group.alerts,
+      "ArticleDNA-base criado pela lógica determinística, sem IA.",
+      "Estratégia, promessa, CTA e fronteira serão enriquecidas no Planejador/Redator; não bloqueiam a arquitetura.",
+    ],
+    confidence: group.confidence, humanPendingDecisions: [...(publicationIdentity?.status === "conflict" ? ["Resolver conflito entre URLs/canonicals de origem antes de confirmar a identidade publicada."] : [])],
     ...(architectureStatus ? { architectureStatus } : {}),
     ...(resolvedKgrIdentity ? { kgrIdentity: resolvedKgrIdentity } : {}),
     primaryKeywordMetrics: { volumeSearch: typeof principal.volume_search === "number" ? principal.volume_search : null, resultCount: typeof (principal as Record<string, unknown>).results_allintitle === "number" ? (principal as Record<string, unknown>).results_allintitle as number : null, kgrScore: typeof principal.kgr_score === "number" ? principal.kgr_score : null },
@@ -246,6 +303,50 @@ export function deterministicSiloDnaPayload(
   });
 }
 
+/**
+ * Cria apenas o registro estrutural mínimo de um silo manual.
+ *
+ * Este payload não inventa entidade central, intenção, público ou artigo.
+ * Esses campos ficam explicitamente pendentes até o processamento lógico e a
+ * confirmação humana da arquitetura.
+ */
+export function manualSiloDnaDraftPayload(
+  siloId: string,
+  siloName: string,
+  brandId: string,
+): SiloDNA {
+  const pending = "Pendente de formação editorial";
+  return SiloDNASchema.parse({
+    schemaVersion: 1,
+    formationStatus: "draft",
+    siloId,
+    brandId,
+    name: siloName.trim(),
+    centralEntity: "",
+    centralEntitySource: "manual",
+    objective: "",
+    audience: "",
+    macroProblem: "",
+    dominantIntent: "",
+    pillarArticleId: null,
+    supportArticleIds: [],
+    articleReferences: [],
+    articleRoles: [],
+    narrativeOrder: [],
+    linkMap: [],
+    boundary: "",
+    includedTopics: [],
+    excludedTopics: [],
+    nearbySiloIds: [],
+    possibleConflicts: [],
+    gaps: [],
+    nextContents: [],
+    confidence: 0,
+    hierarchySignals: [],
+    humanPendingDecisions: [pending, "Definir entidade central, intenção dominante e fronteira do silo."],
+  });
+}
+
 /** Cria a base determinística da Página do Silo a partir do SiloDNA e seus artigos. */
 export function deterministicSiloPagePayload(
   siloDnaVersion: VersionEnvelope<SiloDNA>,
@@ -261,7 +362,15 @@ export function deterministicSiloPagePayload(
   const intro = `${silo.objective} Este conteúdo organiza os principais temas sobre ${silo.centralEntity.toLowerCase()} para ${silo.audience.toLowerCase()}.`;
   const sections = silo.narrativeOrder.map((articleId, index) => ({
     id: `section:${index + 1}`,
-    heading: silo.articleRoles.find(role => role.articleId === articleId)?.reason || `Seção ${index + 1}`,
+    // O título da seção nomeia o RECORTE, não a justificativa interna.
+    //
+    // `reason` explica por que aquele artigo tem aquele papel — é registro de
+    // decisão, não texto de página. Usá-lo como heading punha "unidade
+    // editorial principal confirmada pelo humano" na frente do leitor, e daí
+    // ele ainda virava candidato a texto de link.
+    heading: silo.articleRoles.find(role => role.articleId === articleId)?.role === "Pilar"
+      ? `${silo.centralEntity}: visão geral`
+      : `${silo.centralEntity}: aprofundamento ${index}`,
     objective: `Conectar o leitor ao tema ${silo.centralEntity.toLowerCase()}.`,
     linkedArticleIds: [articleId],
   }));
@@ -281,5 +390,52 @@ export function deterministicSiloPagePayload(
     breadcrumbs, pillarArticleId: silo.pillarArticleId, supportArticleIds: silo.supportArticleIds,
     indexationStatus: "noindex" as const, alerts: ["Página do Silo criada pela lógica determinística, sem IA."],
     confidence: silo.confidence, humanPendingDecisions: ["Revisar H1, SEO, intro, seções e CTA antes da publicação."],
+  });
+}
+
+/** Cria a página pareada em estado novo, sem fabricar texto publicável. */
+export function manualSiloPageDraftPayload(
+  siloDnaVersion: VersionEnvelope<SiloDNA>,
+  brandId: string,
+  slug: string,
+): SiloPage {
+  const silo = siloDnaVersion.payload;
+  return SiloPageSchema.parse({
+    schemaVersion: 1,
+    formationStatus: "draft",
+    siloPageId: `silo-page:${silo.siloId}`,
+    brandId,
+    siloDnaRef: toVersionReference(siloDnaVersion),
+    siloId: silo.siloId,
+    slug,
+    publicationStatus: "new",
+    publishedUrl: null,
+    publicationVerification: {
+      status: "not_applicable",
+      checkedAt: null,
+      requestedUrl: null,
+      resolvedUrl: null,
+      declaredCanonical: null,
+      httpStatus: null,
+      sitemapUrl: null,
+      sitemapMatch: null,
+      message: null,
+    },
+    h1: "",
+    seoTitle: "",
+    metaDescription: "",
+    canonical: null,
+    intro: "",
+    sections: [],
+    cta: "",
+    coverImageBrief: "",
+    visualBriefing: "",
+    breadcrumbs: [],
+    pillarArticleId: null,
+    supportArticleIds: [],
+    indexationStatus: "noindex",
+    alerts: ["Página do Silo criada como rascunho estrutural; conteúdo publicável ainda não foi formado."],
+    confidence: 0,
+    humanPendingDecisions: ["Formar a arquitetura do silo antes de preencher a página."],
   });
 }

@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import type { ContentPlan, ContentPlanDetails, VersionEnvelope } from "@/lib/arquiteto/contracts";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
-const inputClass = "mt-1 h-8 w-full rounded border border-slate-800 bg-black px-2 text-[11px] text-slate-200 outline-none focus:border-indigo-600";
-const areaClass = "mt-1 w-full rounded border border-slate-800 bg-black p-2 text-[11px] text-slate-200 outline-none focus:border-indigo-600";
-const buttonClass = "inline-flex h-7 items-center rounded border border-indigo-900 bg-indigo-950/20 px-2.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-40";
+const inputClass = "mt-1 h-8 w-full rounded border border-divider bg-surface-subtle px-2 text-[11px] text-foreground outline-none transition-colors hover:border-module-accent/25 focus:border-module-accent/45";
+const areaClass = "mt-1 w-full rounded border border-divider bg-surface-subtle p-2 text-[11px] text-foreground outline-none transition-colors hover:border-module-accent/25 focus:border-module-accent/45";
+const buttonClass = "inline-flex h-7 items-center rounded border border-divider bg-surface-subtle px-2.5 text-[10px] font-bold text-foreground/75 transition-colors hover:border-module-accent/30 hover:bg-surface-elevated hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40";
 
 const splitLines = (value: string) => value.split("\n").map(item => item.trim()).filter(Boolean);
 const joinLines = (value: string[]) => value.join("\n");
@@ -20,6 +21,7 @@ export function ContentPlanEditor({ plan, issues, onSave, onClose }: {
   const [draft, setDraft] = useState<ContentPlanDetails | null>(() => plan.payload.planning ? structuredClone(plan.payload.planning) : null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  useNoticeBridge({ notice: message, module: "planejador", area: "Editor de plano", title: "Planejador · Editor", fallbackSeverity: "INFO" });
 
   if (!draft) return <div className="rounded border border-red-900/50 bg-red-950/20 p-3 text-[10px] text-red-300">Este plano ainda é v1. Prepare uma versão definitiva antes de editar.</div>;
 
@@ -36,9 +38,9 @@ export function ContentPlanEditor({ plan, issues, onSave, onClose }: {
     finally { setSaving(false); }
   };
 
-  return <form onSubmit={event => { event.preventDefault(); void save(); }} className="space-y-3 rounded border border-indigo-900/50 bg-indigo-950/10 p-3 text-[10px]">
+  return <form onSubmit={event => { event.preventDefault(); void save(); }} className="space-y-3 rounded border border-context-accent/25 bg-context-accent/10 p-3 text-[10px]">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <div><strong className="text-indigo-200">ContentPlan definitivo · v{plan.versionNumber}</strong><p className="text-slate-500">A edição cria uma nova versão; a anterior permanece imutável.</p></div>
+      <div><strong className="text-context-accent">Plano editorial definitivo · v{plan.versionNumber}</strong><p className="text-slate-500">A edição cria uma nova versão; a anterior permanece imutável.</p></div>
       <div className="flex gap-1"><button type="button" className={buttonClass} onClick={onClose}>Fechar</button><button type="submit" className={`${buttonClass} border-emerald-900 text-emerald-300`} disabled={saving}>{saving ? "Salvando…" : "Salvar sucessora"}</button></div>
     </div>
     {message && <p className="rounded border border-amber-900/50 bg-amber-950/20 p-2 text-amber-300">{message}</p>}

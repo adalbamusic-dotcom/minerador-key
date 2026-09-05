@@ -67,7 +67,7 @@ export function matchGoogleAdsVolumeMetrics(keywords: GoogleAdsVolumeKeyword[], 
   return { matches, unmatchedKeywordIds: keywords.filter(keyword => !matchedIds.has(keyword.id)).map(keyword => keyword.id) };
 }
 
-export function buildGoogleAdsVolumeMetricPatch(existing: ExistingVolumeMetrics, measurement: GoogleAdsVolumeMeasurement): GoogleAdsVolumeMetricPatch | null {
+export function buildGoogleAdsVolumeMetricPatch(existing: ExistingVolumeMetrics, measurement: GoogleAdsVolumeMeasurement, options: { requireCurrentResultsMeasurement?: boolean } = {}): GoogleAdsVolumeMetricPatch | null {
   if (measurement.averageMonthlySearches === null || measurement.averageMonthlySearches < 0) return null;
   const base = buildVolumeMetricPatch(existing, {
     keyword: measurement.keyword,
@@ -76,7 +76,7 @@ export function buildGoogleAdsVolumeMetricPatch(existing: ExistingVolumeMetrics,
     source: "google_ads",
     measuredAt: measurement.measuredAt,
     match: "exact",
-  });
+  }, options);
   if (!base.volume_search && base.volume_search !== 0) return null;
   const semantic = existing.status === "publicado"
     ? { ...(base.analise_semantica || {}) }

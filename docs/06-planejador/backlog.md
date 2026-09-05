@@ -1,4 +1,39 @@
 # Backlog — Planejador
+
+## ContentPlan determinístico e cockpit — 2026-08-27
+
+- [x] Implementar a construção determinística v2 com gabarito, faixas por seção, cobertura de evidências, preservação de referências e plano visual sem geração automática.
+- [x] Expor no editor central as decisões humanas e as restrições necessárias para o Redator, sem escrever o artigo final nem criar FAQ automaticamente.
+- [x] Normalizar o cockpit com o sistema visual compartilhado e manter a rota tenantizada canônica.
+- [x] Cobrir a fatia local com fixtures: plano com pacote Radar, plano sem pacote, estabilidade determinística, proteção de publicação e regressões do cockpit.
+- [ ] Validar manualmente em sessão autenticada um ContentPlan real/fixture, salvar sucessora, recarregar, aprovar e transferir ao Redator.
+- [ ] Confirmar persistência/readback remoto e hidratação de destinos de links/fontes; nenhuma operação remota foi executada nesta implementação.
+
+## Gate de leitura do Radar fechado — 2026-08-26
+
+- [x] Registrar `RADAR_HANDOFF_V2=READY` e `PLANNER_READ_CONTRACT=READY`.
+- [x] Preservar `CONTENTPLAN_BOUNDARY`: `RadarPlannerHandoff` é evidência,
+  não `ContentPlan`.
+- [x] Registrar `RADAR_PLANNER_HANDOFF_V2=PASS`, retrocompatibilidade PASS e
+  `HANDOFF_DATABASE_CHANGE_REQUIRED=NO`.
+- [x] Confirmar que a fundação Telegram/Experts remota está READY para o
+  consumo futuro de `ExpertEvidence`.
+- [ ] Validar contribuição Telegram real, texto/áudio E2E e Speech real; a
+  fundação READY não substitui esses smokes.
+- [ ] Validar o fluxo real aprovado, readback, reload e sucessora do plano sem
+  sobrescrever plano existente.
+
+## Handoff canônico do Radar — 2026-08-26
+
+- [x] Receber `RadarPlannerHandoff` v2 como evidência versionada e manter
+  `ContentPlan` como contrato decisório próprio.
+- [x] Preservar compatibilidade de itens legados e isolamento por `brandId`.
+- [x] Manter Serper histórico legível no handoff sem permitir nova coleta;
+  novas coletas usam DataForSEO.
+- [ ] Validar o fluxo real aprovado, readback, reload e sucessora do plano sem
+  sobrescrever plano existente.
+- [x] Confirmar a fundação Telegram remota antes de consumir `ExpertEvidence`
+  real; o consumo da contribuição real ainda permanece pendente.
 ## Concluído recentemente - estratégia KGR, volume e cobertura - 2026-07-21
 
 ## Consolidacao fisica concluida - 2026-07-23
@@ -74,3 +109,9 @@ Avançar mock como plano aprovado.
 - [x] Registrar comunicação única para Admin, Agência e Brand, com provider global e escopo de evento.
 - [x] Registrar que activity da Agência é agregada/sanitizada e activity da Brand é detalhada, sem substituir entidades editoriais.
 - [ ] Não retomar a sequência operacional enquanto a exclusividade actor → Agency e os gates de identidade/sessão não estiverem aprovados.
+
+## Brand Skills + IA — próximo gate
+
+- [x] Preparar builder compartilhado para `brandId + module + purpose` e proveniência compacta.
+- [ ] Conectar a primeira chamada IA real do Planejador ao builder, após existir operação autorizada.
+- [ ] Executar smoke controlado com a Skill ativa Care Glow e conferir `appliedSkillRefs` sem duplicar Markdown no ContentPlan.

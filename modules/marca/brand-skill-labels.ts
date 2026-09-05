@@ -1,0 +1,9 @@
+import type { BrandSkillStatus } from "@/lib/marca/brand-skill-contracts";
+import type { SkillDefinitionModule } from "@/lib/marca/skill-definitions";
+
+export const brandSkillModuleLabels: Record<SkillDefinitionModule, string> = { minerador: "Minerador", arquiteto: "Arquiteto", radar: "Radar", planejador: "Planejador", redator: "Redator", publicacoes: "Publicações" };
+export const brandSkillStatusLabels: Record<BrandSkillStatus, string> = { draft: "Rascunho", pending_approval: "Aguardando aprovação", active: "Ativa", archived: "Arquivada" };
+export const brandSkillStatusTones: Record<BrandSkillStatus, string> = { draft: "border-divider text-text-muted", pending_approval: "border-warning/40 bg-warning-soft text-warning", active: "border-success/40 bg-success-soft text-success", archived: "border-divider text-text-muted" };
+export const brandSkillHints = { definition: "O gabarito é definido pela Plataforma; a Marca alimenta o gabarito com o próprio conhecimento.", consumers: "Estas áreas são recomendações do gabarito. Uma versão corrente da Skill continua disponível à IA da mesma Marca, sem virar uma permissão por módulo.", name: "Rótulo humano da Skill. Renomear não altera a identidade técnica nem quebra consumidores.", markdown: "A Skill é alimentada por um arquivo .md; o conteúdo original é preservado.", structure: "Compara as seções encontradas no arquivo com as seções esperadas pelo gabarito.", status: "O estado é confirmado pelo servidor e preserva governança e histórico; rascunhos e pendências continuam disponíveis para IA quando são a versão corrente." } as const;
+export const brandSkillPrototypeNotice = "A versão é confirmada no servidor antes da conclusão.";
+export function consumerModulesLabel(modules: SkillDefinitionModule[]) { return modules.map(module => brandSkillModuleLabels[module]).join(" · "); }

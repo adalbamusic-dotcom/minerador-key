@@ -1,3 +1,5 @@
+import { isLegacyPublishedStatus } from "./editorial-status.ts";
+
 export const PrimaryKeywordPolicies = ["locked", "reviewable", "free"] as const;
 export type PrimaryKeywordPolicy = typeof PrimaryKeywordPolicies[number];
 
@@ -14,7 +16,7 @@ export type PrimaryKeywordPolicyHistoryEntry = {
 export function readPrimaryKeywordPolicy(input: { status?: string | null; semantic?: Semantic }): PrimaryKeywordPolicy {
   const explicit = input.semantic?.primary_keyword_policy;
   if (PrimaryKeywordPolicies.includes(explicit as PrimaryKeywordPolicy)) return explicit as PrimaryKeywordPolicy;
-  return input.status?.toLowerCase() === "publicado" ? "locked" : "free";
+  return isLegacyPublishedStatus(input.status) ? "locked" : "free";
 }
 
 function readHistory(value: unknown): PrimaryKeywordPolicyHistoryEntry[] {
@@ -30,11 +32,11 @@ export function primaryKeywordPolicyLabel(policy: PrimaryKeywordPolicy): string 
 
 export function setPrimaryKeywordPolicy(
   semantic: Semantic,
-  input: { status: string; keyword: string; policy: Extract<PrimaryKeywordPolicy, "locked" | "reviewable">; actorId: string; changedAt: string; reason?: string },
+  input: { status: string; publicationConfirmed?: boolean; keyword: string; policy: Extract<PrimaryKeywordPolicy, "locked" | "reviewable">; actorId: string; changedAt: string; reason?: string },
 ): Record<string, unknown> {
   const current = { ...(semantic ?? {}) };
   const previous = readPrimaryKeywordPolicy({ status: input.status, semantic: current });
-  if (input.status.toLowerCase() !== "publicado") return semantic && typeof semantic === "object" ? semantic : current;
+  if (!isLegacyPublishedStatus(input.status) && input.publicationConfirmed !== true) return semantic && typeof semantic === "object" ? semantic : current;
   if (previous === input.policy) return semantic && typeof semantic === "object" ? semantic : current;
   const history = readHistory(current.primary_keyword_policy_history);
   history.push({ previous, next: input.policy, actorId: input.actorId, changedAt: input.changedAt, ...(input.reason ? { reason: input.reason } : {}) });

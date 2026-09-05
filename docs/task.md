@@ -1,6 +1,39 @@
-# Task atual — geração canônica
+# Registro de tasks — geração canônica e fase funcional
 
-## Fase atual
+> A task vigente é [FUNCTIONAL_AREA_DEVELOPMENT](task-functional-area-development.md).
+> As seções abaixo preservam o histórico da fase de geração canônica e não
+> representam autorização ou gate atual.
+
+## Registro da Fase 3 — preflight DeepSeek — 2026-08-19
+
+- **Módulo proprietário:** Plataforma / Integrações compartilhadas de IA;
+- **Entregue:** preflight remoto read-only e runbook manual sem exposição de
+  segredo;
+- **Estado:** `DEEPSEEK_REMOTE_PREFLIGHT = BLOCKED` e
+  `DEEPSEEK_PROVIDER_HOMOLOGATED = NOT_RUN`;
+- **Evidência:** provider DeepSeek ausente; capability `ai_generation` ativa
+  com `unit_name = request`; Connection OpenRouter global ainda `READY`;
+- **Não executado:** cadastro remoto, secret, health check, smoke pago,
+  migration, schema, commit, push e deploy;
+- **Documento:** [runbook da Fase 3](compartilhado/runbook-homologacao-deepseek-fase-3-2026-08-19.md).
+
+## Registro da Fase 3A — configuração administrativa DeepSeek — 2026-08-19
+
+- **Módulo proprietário:** Admin / Integrações da Plataforma;
+- **Implementado localmente:** card e painel `Configurar` em
+  `/admin?tab=integracoes`, API Key password, modelo `deepseek-v4-pro` e
+  endpoint `https://api.deepseek.com` somente leitura;
+- **Writer:** rota protegida por `requireCanonicalPlatformAdmin`, Secret
+  Store/Vault, provider/Connection `platform/production` idempotentes e
+  readback sem segredo. O salvamento deixa a Connection `pending`;
+- **Preservado:** health check continua sendo botão explícito e separado;
+  OpenRouter não foi reintroduzido na UI nem os 37 eventos históricos foram
+  alterados;
+- **Validação:** testes administrativos, writer DeepSeek e health check com
+  fixtures passaram; nenhuma escrita remota, chamada paga, migration, schema,
+  commit, push ou deploy foi executado.
+
+## Fase anterior — geração canônica
 
 Fase ativa: 3B-R2a — Comunicação transacional mínima + 3B-R4a — fatia mínima de convite/onboarding, autorizadas para implementação local controlada. A 3B-R1 está homologada manualmente conforme evidência sanitizada recebida; comunicação real e provider continuam pendentes.
 

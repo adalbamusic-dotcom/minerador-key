@@ -98,7 +98,8 @@ export function hydratePlanner(input: PlannerHydrationInput): PlannerHydration {
   const keywordRefs = article?.keywordReferences || [];
   const secondaryKeywords = keywordRefs.filter(ref => ref.role === "secundaria").map(ref => keywordReference(ref.keywordId, input.snapshot, ref.keywordDnaVersionId, input.brandId, input.radarHydration));
   const reinforcementKeywords = keywordRefs.filter(ref => ref.role === "reforco_narrativo").map(ref => keywordReference(ref.keywordId, input.snapshot, ref.keywordDnaVersionId, input.brandId, input.radarHydration));
-  const siloId = article?.siloId || page?.siloId || details?.siloId || input.item.siloId;
+  // Silo é etapa posterior a Artigos: a ausência é estado válido e vira referência ausente.
+  const siloId = article?.siloId || page?.siloId || details?.siloId || input.item.siloId || "";
   const siloDto = input.snapshot?.silos.find(candidate => candidate.id === siloId && candidate.marca_id === input.brandId);
   const siloLabel = input.silo?.payload.centralEntity || input.radarHydration?.silo?.name || siloDto?.nome || null;
   const siloRef = siloLabel ? reference({ id: siloId, type: "Silo", origin: input.silo ? input.silo.origin : "legacy_snapshot", expectedVersion: input.silo?.versionId || input.radarHydration?.silo?.siloDnaVersionId || null, label: siloLabel }, true) : absent(siloId, "Silo", "Nome do silo não foi hidratado para a marca ativa.");

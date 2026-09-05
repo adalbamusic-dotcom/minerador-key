@@ -4,6 +4,7 @@ import { ContentPlanSchema, type ArticleDNA, type VersionEnvelope } from "../lib
 import { createStatusEvent, createVersionEnvelope } from "../lib/arquiteto/versioning.ts";
 import { ContentPlanProtectionError, createContentPlanSuccessor, contentPlanApprovalIssues, createDefinitiveContentPlan } from "../lib/planejador/content-plan.ts";
 import { buildKeywordStrategySnapshot, keywordStrategyIssues } from "../lib/planejador/keyword-strategy.ts";
+import { readPlannerRadarEvidence } from "../lib/planejador/deterministic-plan.ts";
 import type { PlannerPublicationIdentity } from "../lib/planejador/publication-identity.ts";
 
 const reference = (id: string, role: "principal" | "secundaria") => ({ keywordId: id, keywordDnaVersionId: `legacy:${id}:v1`, keywordDnaContentHash: `legacy:${id}`, role, strategicContribution: "Cobertura editorial", coveredIntentions: ["informacional"], requiredTopics: ["fundamentos"], excludedTopics: [], classificationOrigin: "legacy" as const, confidence: 0.8, humanConfirmed: true });
@@ -103,4 +104,60 @@ test("ContentPlan publicado protege identidade e permite edicao editorial", asyn
   const identityChange = structuredClone(first.payload.planning!);
   identityChange.metadata.slug = "slug-alterado";
   await assert.rejects(() => createContentPlanSuccessor(first, identityChange, "human", undefined, { publicationIdentity: identity }), (error: unknown) => error instanceof ContentPlanProtectionError && error.issues.some(issue => /slug/.test(issue)));
+});
+
+test("ContentPlan determinístico transforma evidência Radar em gabarito, seções e plano visual", async () => {
+  const articleVersion = await version();
+  const radarAnalysisPackage = {
+    analysisMode: "competitive_full" as const,
+    analysisEnforcement: "required" as const,
+    requirements: ["Responder à intenção principal"],
+    recommendations: ["Usar exemplos comparáveis"],
+    observedData: ["Amostra competitiva aprovada"],
+    humanDecisions: ["radar_report: approved"],
+    evidencePackage: {
+      schemaVersion: 1,
+      packageType: "radar_evidence",
+      serp: { provider: "dataforseo", query: "construir demanda orgânica" },
+      relevantQuestions: [{ key: "q1", text: "Como começar a construir demanda?", note: "" }],
+      relevantEntities: [{ text: "busca orgânica", source: "h1", note: "" }],
+      observedSemantics: { entities: ["conteúdo próprio"], recurringTopics: ["execução"] },
+      observedStructure: { sampleSize: 5, wordCounts: { median: 1200, typicalRange: [900, 1500] } },
+    },
+  };
+  const plan = await createDefinitiveContentPlan({ brandId: "brand-1", editorialUnitType: "article", editorialUnitId: article.articleId, article: articleVersion, radarAnalysisPackage }, "human", "2026-08-27T12:00:00.000Z");
+  const details = plan.payload.planning!;
+  assert.deepEqual(details.gabarito?.globalWords, { min: 900, ideal: 1200, max: 1500 });
+  assert.equal(details.gabarito?.counts.images, 3);
+  assert.equal(details.images.length, 3);
+  assert.deepEqual(details.images.map(image => image.visualFunction), ["cover", "breathing", "breathing"]);
+  assert.ok(details.images.every(image => image.status === "planned" && image.prompt === null));
+  assert.ok(details.structure.sections.every(section => section.wordRange && section.paragraphRange && section.estimatedParagraphs !== null));
+  assert.ok(details.questions.some(item => item.text === "Como começar a construir demanda?"));
+  assert.ok(details.entities.some(item => item.text === "busca orgânica"));
+  assert.equal(details.blocks.filter(block => block.type === "faq").length, 0);
+  assert.ok(details.guardianInstructions.some(instruction => /não gerar FAQ/i.test(instruction)));
+  assert.deepEqual(details.radar.evidencePackage, radarAnalysisPackage.evidencePackage);
+  assert.equal(readPlannerRadarEvidence(details.radar).wordRange?.ideal, 1200);
+});
+
+test("ContentPlan sem amostra Radar não inventa extensão, fontes, links ou URLs", async () => {
+  const articleVersion = await version();
+  const plan = await createDefinitiveContentPlan({ brandId: "brand-1", editorialUnitType: "article", editorialUnitId: article.articleId, article: articleVersion }, "human", "2026-08-27T12:00:00.000Z");
+  const details = plan.payload.planning!;
+  assert.deepEqual(details.gabarito?.globalWords, { min: null, ideal: null, max: null });
+  assert.equal(details.gabarito?.estimatedParagraphs, null);
+  assert.equal(details.images.length, 3);
+  assert.equal(details.sources.length, 0);
+  assert.equal(details.internalLinks.length, 0);
+  assert.ok(details.images.every(image => image.prompt === null && image.altText === null));
+  assert.ok(plan.payload.humanPendingDecisions.some(decision => /Radar aprovado/i.test(decision)));
+});
+
+test("a construção determinística é estável para a mesma entrada e data", async () => {
+  const articleVersion = await version();
+  const input = { brandId: "brand-1", editorialUnitType: "article" as const, editorialUnitId: article.articleId, article: articleVersion };
+  const first = await createDefinitiveContentPlan(input, "human", "2026-08-27T12:00:00.000Z");
+  const second = await createDefinitiveContentPlan(input, "human", "2026-08-27T12:00:00.000Z");
+  assert.deepEqual(second.payload, first.payload);
 });

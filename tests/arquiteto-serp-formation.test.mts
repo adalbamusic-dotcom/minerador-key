@@ -5,7 +5,7 @@ import { articleKeywordReference, deterministicArticleDnaPayload } from "../lib/
 import { ArticleDNASchema, ProvisionalArticleGroupSchema } from "../lib/arquiteto/contracts.ts";
 import { adaptKeywordIdentityContext, resolveArticleSerpIdentityContext } from "../lib/arquiteto/identity-context.ts";
 import { explicitEditorialFormat, intentCompatibility, normalizeSearchIntent } from "../lib/arquiteto/intent-profile.ts";
-import { applySerpRecommendationToWorkCopy, assessedKeywordDnaIds, buildSerpFormationAssessment, decideSerpRecommendation, findSerpRecommendationForKeyword, isPublishedStructuralRecommendation, markSerpAssessmentOutdated, normalizeArchitectSerpSnapshot, resolvePublishedIdentity, resolveSerpValidationProfile, SerpFormationAssessmentSchema, SerpKeywordRecommendationSchema, supersedeRecommendations, unassociatedSerpRecommendations } from "../lib/arquiteto/serp-formation.ts";
+import { applySerpRecommendationToWorkCopy, assessedKeywordDnaIds, buildSerpFormationAssessment, buildSerpFormationEvidence, buildSiloCandidateSerpEvidence, decideSerpRecommendation, findSerpRecommendationForKeyword, isPublishedStructuralRecommendation, latestActiveSerpFormationAssessment, markSerpAssessmentOutdated, normalizeArchitectSerpSnapshot, preserveSiloCandidateEvidenceOnFailure, resolvePublishedIdentity, resolveSerpValidationProfile, SerpFormationAssessmentSchema, SerpFormationRecoverySchema, SerpKeywordRecommendationSchema, supersedeRecommendations, unassociatedSerpRecommendations } from "../lib/arquiteto/serp-formation.ts";
 import { collectSerperSnapshot } from "../lib/radar/serper-provider-core.ts";
 import { createVersionEnvelope } from "../lib/arquiteto/versioning.ts";
 import { importArticlesToRadar } from "../lib/editorial/operational-flow.ts";
@@ -28,6 +28,50 @@ async function snapshots() {
 }
 test.afterEach(restore);
 
+test("SERP produz evidência por IDs estáveis sem alterar grupo ou movimentar keywords", async () => {
+  const references = group.keywords.map((item, index) => articleKeywordReference(item, index === 0 ? "principal" : "secundaria", "brand-1"));
+  const source = await snapshots();
+  const overlapping = SerpResearchSnapshotSchema.parse({ ...source[1], organicResults: source[0]!.organicResults });
+  const originalGroup = structuredClone(group);
+  const evidence = buildSerpFormationEvidence({ principalKeywordId: "kw-1", keywordReferences: references, snapshots: [source[0]!, overlapping] });
+  assert.deepEqual(group, originalGroup);
+  assert.equal(evidence.keywordObservations.length, 2);
+  assert.equal(evidence.overlaps[0]?.leftKeywordId, "kw-1");
+  assert.equal(evidence.overlaps[0]?.rightKeywordId, "kw-2");
+  assert.equal(evidence.overlaps[0]?.leftKeywordDnaVersionId, references[0]!.keywordDnaVersionId);
+  assert.equal(evidence.keywordObservations.find(item => item.keywordId === "kw-1")?.likelyCannibalization, "likely");
+  assert.equal(evidence.keywordObservations.find(item => item.keywordId === "kw-1")?.needsSeparation, false);
+  assert.equal(evidence.guidelines.some(item => /não move|não.*grupo/i.test(item)), true);
+});
+
+test("ausência de SERP vira insuficiência e não conflito", async () => {
+  const references = [articleKeywordReference(group.keywords[0]!, "principal", "brand-1")];
+  const empty = SerpResearchSnapshotSchema.parse({ ...(await snapshots())[0]!, organicResults: [], diagnostic: { ...(await snapshots())[0]!.diagnostic, confidence: "insufficient", possibleConflicts: [], verdict: "informacao_insuficiente" } });
+  const evidence = buildSerpFormationEvidence({ principalKeywordId: "kw-1", keywordReferences: references, snapshots: [empty] });
+  const observation = evidence.keywordObservations[0]!;
+  assert.equal(observation.insufficientEvidence, true);
+  assert.equal(observation.conflict, false);
+  assert.equal(observation.needsSeparation, null);
+  assert.equal(observation.canJoin, null);
+});
+
+test("candidata a Silo recebe somente evidência e readback preserva assessment", async () => {
+  const candidate = { ...group.keywords[0]!, id: "silo-candidate-1", keyword: "tratamento estético", siloCandidate: { status: "candidate" as const, origin: "deterministic" as const, score: 0.8, reasons: ["termo amplo"], signals: { volumeRank: 1, volumeHigh: true, resultsPresent: true, shortTerm: true, broadEntity: true, capacityPotential: true, kgrOpportunity: false, commercialSecondary: false, specificNeed: false, relatedKeywordCount: 2 } } };
+  const candidateReference = articleKeywordReference(candidate, "reforco_narrativo", "brand-1");
+  const candidateSnapshot = SerpResearchSnapshotSchema.parse({ ...(await snapshots())[0]!, id: "candidate-snapshot", articleId: "silo-candidate:silo-candidate-1", articleDnaVersionId: "work:silo-candidate:silo-candidate-1", keywordId: candidate.id, keywordDnaVersionId: candidateReference.keywordDnaVersionId, diagnostic: { ...(await snapshots())[0]!.diagnostic, pageTypes: ["category", "article"], secondaryIntents: ["commercial_investigation"], relatedSearches: ["tratamento facial"] } });
+  const candidateEvidence = buildSiloCandidateSerpEvidence({ brandId: "brand-1", createdBy: "human-1", keywordDnaSnapshot: candidateReference.keywordDnaSnapshot!, snapshot: candidateSnapshot });
+  assert.equal(candidateEvidence.evidence.categoryHubLike, true);
+  assert.equal(candidateEvidence.evidence.evidenceStatus, "observed");
+  assert.equal(candidateEvidence.snapshot?.articleId, "silo-candidate:silo-candidate-1");
+  assert.equal(candidateEvidence.keywordDnaSnapshot.keywordId, candidate.id);
+  const priorRecovery = SerpFormationRecoverySchema.parse({ schemaVersion: 1, brandId: "brand-1", updatedAt: new Date().toISOString(), assessments: [], siloCandidateEvidence: [candidateEvidence], verifications: [] });
+  const readback = SerpFormationRecoverySchema.parse(JSON.parse(JSON.stringify(priorRecovery)));
+  assert.equal(readback.siloCandidateEvidence[0]?.evidence.categoryHubLike, true);
+  const failed = buildSiloCandidateSerpEvidence({ brandId: "brand-1", createdBy: "human-1", keywordDnaSnapshot: candidateReference.keywordDnaSnapshot!, snapshot: null });
+  assert.equal(preserveSiloCandidateEvidenceOnFailure([candidateEvidence], [failed])[0]?.snapshot?.id, "candidate-snapshot");
+  assert.equal(preserveSiloCandidateEvidenceOnFailure([], [failed])[0]?.evidence.evidenceStatus, "insufficient");
+});
+
 test("preserva KeywordDNA integral, roles e hash no assessment", async () => {
   const references = group.keywords.map((item, index) => articleKeywordReference(item, index === 0 ? "principal" : "secundaria", "brand-1"));
   const result = await buildSerpFormationAssessment({ brandId: "brand-1", articleId: "group-1", articleDnaVersionId: "work:group-1", createdBy: "human-1", principalKeywordId: "kw-1", keywordReferences: references, keywordDnaReferences: references.map(reference => reference.keywordDnaSnapshot!).filter(Boolean), snapshots: await snapshots() });
@@ -36,6 +80,14 @@ test("preserva KeywordDNA integral, roles e hash no assessment", async () => {
   assert.equal(parsed.keywordDnaReferences[0]?.sourceKeywordSnapshot.analise_semantica && typeof parsed.keywordDnaReferences[0].sourceKeywordSnapshot.analise_semantica, "object");
   assert.equal(parsed.recommendations.find(item => item.keywordId === "kw-1")?.currentRole, "principal");
   assert.match(parsed.contentHash, /^sha256:[a-f0-9]{64}$/);
+});
+
+test("o gate da IA reconhece somente o assessment SERP ativo persistido", async () => {
+  const references = group.keywords.map((item, index) => articleKeywordReference(item, index === 0 ? "principal" : "secundaria", "brand-1"));
+  const assessment = await buildSerpFormationAssessment({ brandId: "brand-1", articleId: "group-1", articleDnaVersionId: "work:group-1", createdBy: "human-1", principalKeywordId: "kw-1", keywordReferences: references, keywordDnaReferences: references.map(reference => reference.keywordDnaSnapshot!).filter(Boolean), snapshots: await snapshots() });
+  assert.equal(latestActiveSerpFormationAssessment([assessment], "brand-1", "group-1")?.id, assessment.id);
+  const outdated = markSerpAssessmentOutdated(assessment);
+  assert.equal(latestActiveSerpFormationAssessment([outdated], "brand-1", "group-1"), undefined);
 });
 
 test("decisões humanas persistem e assessment anterior fica superseded", async () => {
@@ -118,8 +170,21 @@ test("planilha torna o resultado SERP descobrível e ligado à keyword", async (
   assert.equal(source.includes("Seguir recomendação"), true);
   assert.equal(source.includes("Recomendação SERP não associada"), true);
   assert.equal(source.includes("SERP de fortalecimento"), true);
-  assert.equal(source.includes("KEYWORD PRINCIPAL PROTEGIDA"), true);
+  assert.equal(source.includes("Principal protegida"), true);
   assert.equal(/[ÃÂ][§£µ©]|Ãƒ|Â·/.test(source), false);
+});
+
+test("fluxo SERP mantém a working copy estrutural intacta e não restaura modal intermediário", async () => {
+  const source = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("const confirmSerpValidation");
+  const end = source.indexOf("const handleSerpRecommendationDecision", start);
+  const flow = source.slice(start, end);
+  assert.equal(flow.includes("setMasterList"), false);
+  assert.equal(flow.includes("setProvisionalGroups"), false);
+  assert.equal(flow.includes("persistWorkingCopyAssignments"), false);
+  assert.equal(flow.includes("applySerpRecommendationToWorkCopy"), false);
+  assert.equal(source.includes("siloCandidates: siloCandidateKeywords"), true);
+  assert.equal(source.includes("Validar SERP"), true);
 });
 
 test("transferência aprovada preserva referências KeywordDNA e assessment no item Radar", async () => {

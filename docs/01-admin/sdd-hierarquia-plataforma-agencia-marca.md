@@ -26,7 +26,10 @@ O contrato vigente é `auth.users.id` para identidade, `public.perfis.role = 'ad
 - `agency_admin` não é owner automático. Owners e `brand_memberships` não são escritos pelos scripts.
 - Há um bootstrap editorial legado que pode materializar `brand_memberships` para qualquer Admin global durante fluxo editorial. Ele está fora deste escopo; não executar fluxos editoriais durante o smoke de bootstrap se a ausência de mudança nessas memberships precisar ser comprovada.
 - Uma marca tem no máximo uma agência operacional ativa, já imposto pelo índice parcial de `0014`.
-- Providers Google Ads, DataForSEO e Serper não são migrados, lidos nem alterados.
+- O bootstrap desta SDD não migra, lê nem altera providers. A governança atual
+  de Google Ads, DataForSEO, DeepSeek, mídia e Telegram está registrada na SDD
+  compartilhada de integrações; nenhum provider é propriedade da Agência ou de
+  um módulo.
 
 ## Plano manual
 

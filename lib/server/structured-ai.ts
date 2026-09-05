@@ -1,8 +1,114 @@
 import "server-only";
 import type { ZodType } from "zod";
-import { parseStructuredOutput, StructuredOutputError } from "@/lib/arquiteto/structured-output";
-import { ProviderRequestError, requestProviderContent } from "@/lib/arquiteto/provider-client";
-import { AIProviderConfigurationError, type AIProviderErrorCode, resolveAIProvider } from "@/lib/server/ai-provider-config";
+import { parseStructuredJson, StructuredOutputError } from "@/lib/arquiteto/structured-output";
+import { ProviderRequestError } from "@/lib/arquiteto/provider-client";
+import { requestDeepSeekChatCompletion } from "@/lib/server/deepseek-provider";
+import type { DeepSeekCanonicalResolution, DeepSeekThinkingMode } from "@/lib/server/deepseek-canonical";
+import type { AIProviderErrorCode } from "@/lib/server/ai-provider-config";
+
+/**
+ * Operação de saída textual: o provider responde em texto puro e a aplicação é
+ * quem monta o contrato. Reutiliza a mesma Connection canônica, o mesmo
+ * timeout, o mesmo diagnóstico e o mesmo mapeamento de erro do caminho JSON.
+ */
+export async function generatePlainTextAI({
+  provider,
+  system,
+  user,
+  timeoutMs,
+  maxTokens = 2000,
+  thinkingMode,
+  fetchImpl,
+  onDiagnostic,
+}: {
+  provider: Pick<DeepSeekCanonicalResolution, "provider" | "apiKey" | "apiUrl" | "model" | "extraHeaders" | "thinkingMode">;
+  system: string;
+  user: string;
+  timeoutMs?: number;
+  maxTokens?: number;
+  thinkingMode?: DeepSeekThinkingMode;
+  fetchImpl?: typeof fetch;
+  onDiagnostic?: (diagnostic: StructuredAIDiagnostic) => void;
+}): Promise<string> {
+  if (user.length > 250_000) {
+    throw new StructuredAIError("Payload estrategico excede o limite permitido.", 413, undefined, "AI_REQUEST_INVALID");
+  }
+  if (provider.provider !== "deepseek") {
+    throw new StructuredAIError("A camada compartilhada de IA aceita somente a Connection DeepSeek.", 409, undefined, "AI_PROVIDER_INVALID");
+  }
+
+  const resolvedTimeout = timeoutMs ?? (Number(process.env.AI_TIMEOUT_MS) || 180_000);
+  const runAttempt = async (attemptNumber: number): Promise<string> => {
+  const diagnostic: StructuredAIDiagnostic = {
+    attempt: attemptNumber,
+    providerResolved: true,
+    model: provider.model,
+    thinkingMode: thinkingMode ?? provider.thinkingMode,
+    requestStarted: false,
+    httpStatus: null,
+    finishReason: null,
+    nativeFinishReason: null,
+    contentPresent: false,
+    contentLength: 0,
+    reasoningPresent: false,
+    providerDurationMs: null,
+    jsonParsed: false,
+    zodPassed: false,
+  };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), resolvedTimeout);
+  const startedAt = Date.now();
+  try {
+    diagnostic.requestStarted = true;
+    onDiagnostic?.({ ...diagnostic });
+    const result = await requestDeepSeekChatCompletion({
+      apiUrl: provider.apiUrl,
+      apiKey: provider.apiKey,
+      model: provider.model,
+      system,
+      user,
+      extraHeaders: provider.extraHeaders,
+      signal: controller.signal,
+      maxTokens,
+      thinkingMode: thinkingMode ?? provider.thinkingMode,
+      responseFormat: "text",
+      fetchImpl,
+    });
+    Object.assign(diagnostic, result.diagnostic);
+    diagnostic.providerDurationMs = Date.now() - startedAt;
+    onDiagnostic?.({ ...diagnostic });
+    const text = result.content?.trim() || "";
+    if (!text) {
+      throw new StructuredAIError("O provider DeepSeek não retornou conteúdo utilizável.", 502, undefined, "AI_PROVIDER_INVALID_RESPONSE");
+    }
+    return text;
+  } catch (error) {
+    if (error instanceof ProviderRequestError) {
+      diagnostic.httpStatus = error.status;
+      diagnostic.providerDurationMs = Date.now() - startedAt;
+      onDiagnostic?.({ ...diagnostic });
+    }
+    if (error instanceof StructuredAIError) throw error;
+    if (error instanceof ProviderRequestError) throw new StructuredAIError(error.message, error.status, undefined, error.code);
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new StructuredAIError("A IA excedeu o tempo limite.", 504, undefined, "AI_TIMEOUT");
+    }
+    throw new StructuredAIError("Falha sanitizada na operação de IA.", 502, undefined, "AI_PROVIDER_UNAVAILABLE");
+  } finally {
+    clearTimeout(timeout);
+  }
+  };
+
+  try {
+    return await runAttempt(1);
+  } catch (error) {
+    // Somente a resposta sem conteúdo utilizável é recuperável. Auth, quota,
+    // configuração, validação e timeout nunca são retentados automaticamente.
+    const recoverable = error instanceof StructuredAIError && error.code === "AI_PROVIDER_INVALID_RESPONSE";
+    if (!recoverable || MAX_PROVIDER_ATTEMPTS_PER_OPERATION < 2) throw error;
+    return await runAttempt(2);
+  }
+}
 
 export class StructuredAIError extends Error {
   status: number;
@@ -23,46 +129,86 @@ export class StructuredAIError extends Error {
   }
 }
 
-function providerConfig() {
-  try {
-    return resolveAIProvider();
-  } catch (error) {
-    if (error instanceof AIProviderConfigurationError) {
-      throw new StructuredAIError(error.message, error.status, undefined, error.code);
-    }
-    throw error;
-  }
-}
+export type StructuredAIDiagnostic = {
+  providerResolved: boolean;
+  model: string | null;
+  thinkingMode: DeepSeekThinkingMode | null;
+  requestStarted: boolean;
+  httpStatus: number | null;
+  finishReason: string | null;
+  nativeFinishReason: string | null;
+  contentPresent: boolean;
+  contentLength: number;
+  reasoningPresent: boolean;
+  reasoningLength?: number;
+  completionTokens?: number | null;
+  reasoningTokens?: number | null;
+  promptTokens?: number | null;
+  /** Duração real da chamada ao provider, medida na aplicação. */
+  providerDurationMs?: number | null;
+  jsonParsed: boolean;
+  zodPassed: boolean;
+  /** Tentativa de provider desta operação (1 ou 2); ausente no caminho JSON. */
+  attempt?: number;
+};
+
+/** Uma ação humana admite no máximo duas tentativas de provider. */
+export const MAX_PROVIDER_ATTEMPTS_PER_OPERATION = 2;
 
 export async function generateStructuredAI<T>({
+  provider,
   system,
   user,
   schema,
   timeoutMs,
   maxTokens = 4000,
+  thinkingMode,
+  fetchImpl,
+  onDiagnostic,
 }: {
+  provider: Pick<DeepSeekCanonicalResolution, "provider" | "apiKey" | "apiUrl" | "model" | "extraHeaders" | "thinkingMode">;
   system: string;
   user: string;
   schema: ZodType<T>;
   timeoutMs?: number;
   maxTokens?: number;
+  thinkingMode?: DeepSeekThinkingMode;
+  fetchImpl?: typeof fetch;
+  onDiagnostic?: (diagnostic: StructuredAIDiagnostic) => void;
 }): Promise<T> {
   if (user.length > 250_000) {
     throw new StructuredAIError("Payload estrategico excede o limite permitido.", 413, undefined, "AI_REQUEST_INVALID");
   }
 
-  // Timeout pode ser configurado via env (AI_TIMEOUT_MS). Default 180s.
-  // Modelos grandes (deepseek-v4-pro) podem demorar mais para JSON estruturado.
-  const resolvedTimeout = timeoutMs ?? (Number(process.env.AI_TIMEOUT_MS) || 180_000);
-  const provider = providerConfig();
+  if (provider.provider !== "deepseek") {
+    throw new StructuredAIError("A camada compartilhada de IA aceita somente a Connection DeepSeek.", 409, undefined, "AI_PROVIDER_INVALID");
+  }
 
-  // Retry unico em caso de timeout: modelos de IA podem ter latencia variavel.
-  // A primeira tentativa usa o timeout completo; a segunda usa metade.
-  const attempt = async (attemptTimeoutMs: number): Promise<T> => {
+  // Timeout pode ser configurado via env (AI_TIMEOUT_MS). Default 180s.
+  // O modo de Thinking é por operação; a ausência de override preserva o
+  // contrato da Connection (incluindo o default do provider).
+  const resolvedTimeout = timeoutMs ?? (Number(process.env.AI_TIMEOUT_MS) || 180_000);
+  const attempt = async (): Promise<T> => {
+    const diagnostic: StructuredAIDiagnostic = {
+      providerResolved: true,
+      model: provider.model,
+      thinkingMode: thinkingMode ?? provider.thinkingMode,
+      requestStarted: false,
+      httpStatus: null,
+      finishReason: null,
+      nativeFinishReason: null,
+      contentPresent: false,
+      contentLength: 0,
+      reasoningPresent: false,
+      jsonParsed: false,
+      zodPassed: false,
+    };
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), attemptTimeoutMs);
+    const timeout = setTimeout(() => controller.abort(), resolvedTimeout);
     try {
-      const content = await requestProviderContent({
+      diagnostic.requestStarted = true;
+      onDiagnostic?.({ ...diagnostic });
+      const result = await requestDeepSeekChatCompletion({
         apiUrl: provider.apiUrl,
         apiKey: provider.apiKey,
         model: provider.model,
@@ -71,16 +217,29 @@ export async function generateStructuredAI<T>({
         extraHeaders: provider.extraHeaders,
         signal: controller.signal,
         maxTokens,
+        thinkingMode: thinkingMode ?? provider.thinkingMode,
+        fetchImpl,
       });
+      Object.assign(diagnostic, result.diagnostic);
+      onDiagnostic?.({ ...diagnostic });
+      if (!result.content) {
+        throw new StructuredAIError("O provider DeepSeek não retornou conteúdo utilizável.", 502, undefined, "AI_PROVIDER_INVALID_RESPONSE");
+      }
 
       try {
-        return parseStructuredOutput(content, schema);
+        const parsed = parseStructuredJson(result.content);
+        diagnostic.jsonParsed = true;
+        const validated = schema.safeParse(parsed);
+        diagnostic.zodPassed = validated.success;
+        onDiagnostic?.({ ...diagnostic });
+        if (!validated.success) throw new StructuredOutputError("A IA retornou JSON fora do contrato esperado.", validated.error.issues);
+        return validated.data;
       } catch (error) {
         if (error instanceof StructuredOutputError) {
           console.error("[structured-ai] resposta rejeitada", {
             reason: error.message,
             issues: error.issues,
-            contentLength: content.length,
+            contentLength: diagnostic.contentLength,
           });
           const firstIssue = Array.isArray(error.issues) ? error.issues[0] as { path?: PropertyKey[]; message?: string } : null;
           const issueDetail = firstIssue
@@ -91,6 +250,10 @@ export async function generateStructuredAI<T>({
         throw error;
       }
     } catch (error) {
+      if (error instanceof ProviderRequestError) {
+        diagnostic.httpStatus = error.status;
+        onDiagnostic?.({ ...diagnostic });
+      }
       if (error instanceof StructuredAIError) throw error;
       if (error instanceof ProviderRequestError) throw new StructuredAIError(error.message, error.status, undefined, error.code);
       if (error instanceof Error && error.name === "AbortError") {
@@ -102,14 +265,5 @@ export async function generateStructuredAI<T>({
     }
   };
 
-  try {
-    return await attempt(resolvedTimeout);
-  } catch (error) {
-    // Retry somente em caso de timeout (504). Erros de validacao ou API nao retentam.
-    if (error instanceof StructuredAIError && error.status === 504) {
-      console.warn("[structured-ai] timeout na primeira tentativa, retentando com metade do tempo...");
-      return await attempt(Math.max(60_000, Math.floor(resolvedTimeout / 2)));
-    }
-    throw error;
-  }
+  return attempt();
 }

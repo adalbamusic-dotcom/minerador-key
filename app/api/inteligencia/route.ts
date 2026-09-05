@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     const siloIds = (silos || []).map(silo => silo.id);
 
     const [keywordResult, briefingResult] = siloIds.length ? await Promise.all([
-      profile.supabase.from("minerador_keywords").select("id,keyword,intent,volume_search,kgr_score,lista_id,status,analise_semantica,created_at").or(`lista_id.is.null,${siloIds.map(id => `lista_id.eq.${id}`).join(",")}`),
+      profile.supabase.from("minerador_keywords").select("id,keyword,intent,volume_search,kgr_score,lista_id,status,analise_semantica,created_at").is("deleted_at", null).or(`lista_id.is.null,${siloIds.map(id => `lista_id.eq.${id}`).join(",")}`),
       profile.supabase.from("briefings_artigos").select("id,silo_id,keyword_principal,keywords_secundarias,slug_sugerido,hierarquia,status,meta_title,meta_description,diretrizes_estrategicas,created_at").in("silo_id", siloIds),
     ]) : [{ data: [], error: null }, { data: [], error: null }];
     if (keywordResult.error) throw keywordResult.error;

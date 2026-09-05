@@ -27,6 +27,11 @@ export type DiscoveryCandidateCurrentMetrics = {
   metricsProvider: string | null;
   metricsProviderVersion: string | null;
   updatedAt: string | null;
+  /** Enriquecimento DataForSEO Overview lido da projeção/histórico; não exige coluna nova. */
+  keywordDifficulty?: number | null;
+  keywordDifficultyMeasuredAt?: string | null;
+  keywordDifficultyProvider?: string | null;
+  keywordDifficultyOperationRequestId?: string | null;
 };
 
 const asNumberOrNull = (value: unknown) => {
@@ -63,6 +68,10 @@ export function mapDiscoveryCandidateCurrentMetrics(row: Record<string, unknown>
     metricsProvider: typeof row.metrics_provider === "string" ? row.metrics_provider : null,
     metricsProviderVersion: typeof row.metrics_provider_version === "string" ? row.metrics_provider_version : null,
     updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
+    keywordDifficulty: asNumberOrNull(row.keyword_difficulty),
+    keywordDifficultyMeasuredAt: typeof row.keyword_difficulty_measured_at === "string" ? row.keyword_difficulty_measured_at : null,
+    keywordDifficultyProvider: typeof row.keyword_difficulty_provider === "string" ? row.keyword_difficulty_provider : null,
+    keywordDifficultyOperationRequestId: typeof row.keyword_difficulty_operation_request_id === "string" ? row.keyword_difficulty_operation_request_id : null,
   };
 }
 

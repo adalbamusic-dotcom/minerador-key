@@ -22,6 +22,10 @@ interface BulkAction<T> { label: string; onClick: (rows: T[]) => void | Promise<
 
 export type OperationalGridPageSize = 25 | 50 | 100 | 200 | "all";
 export type OperationalGridOrderMode = "automatic" | "manual";
+export type OperationalGridBulkSelectionChange =
+  | { kind: "row"; rowId: string; checked: boolean }
+  | { kind: "visible"; rowIds: string[]; checked: boolean }
+  | { kind: "clear" };
 
 export interface OperationalDataGridTopbarApi<T extends { id: string }> {
   search: string;
@@ -59,6 +63,7 @@ export interface OperationalDataGridProps<T extends { id: string }> {
   emptyTitle?: string;
   searchPlaceholder?: string;
   bulkActions?: BulkAction<T>[];
+  renderBulkBar?: (selectedRows: T[]) => React.ReactNode;
   renderActions?: (row: T) => React.ReactNode;
   renderExpanded?: (row: T) => React.ReactNode;
   onRowOrderChange?: (ids: string[]) => void;
@@ -68,17 +73,25 @@ export interface OperationalDataGridProps<T extends { id: string }> {
   description?: string;
   expandedRowId?: string | null;
   onExpandedRowChange?: (rowId: string | null) => void;
+  onSelectionChange?: (rowIds: string[]) => void;
+  bulkSelectedRowIds?: ReadonlySet<string>;
+  onBulkSelectionChange?: (rowIds: string[], change: OperationalGridBulkSelectionChange) => void;
+  activeRowId?: string | null;
+  activeRowClassName?: string;
+  bulkSelectedRowClassName?: string;
+  onRowActivate?: (row: T) => void;
   topbar?: OperationalDataGridTopbar<T>;
 }
 
-const control = "h-7 rounded border border-slate-800 bg-[#090a0e] px-2 text-[10px] text-slate-300 outline-none focus:border-indigo-600";
+const control = "h-7 rounded border border-divider bg-surface-subtle px-2 text-[10px] text-foreground/85 outline-none transition-colors hover:border-module-accent/25 focus:border-module-accent/45";
 
 export function OperationalDataGrid<T extends { id: string }>({ module, userId, brandId, rows, columns, loading = false, error = null,
-  emptyTitle = "Nenhum item encontrado", searchPlaceholder = "Buscar…", bulkActions = [], renderActions, renderExpanded,
-  onRowOrderChange, initialPageSize = 25, toolbar, title, description, expandedRowId, onExpandedRowChange, topbar }: OperationalDataGridProps<T>) {
+  emptyTitle = "Nenhum item encontrado", searchPlaceholder = "Buscar…", bulkActions = [], renderBulkBar, renderActions, renderExpanded,
+  onRowOrderChange, initialPageSize = 25, toolbar, title, description, expandedRowId, onExpandedRowChange, onSelectionChange, bulkSelectedRowIds, onBulkSelectionChange, activeRowId,
+  activeRowClassName = "bg-selected", bulkSelectedRowClassName = "bg-selected", onRowActivate, topbar }: OperationalDataGridProps<T>) {
   const [search, setSearch] = useState(""); const [filters, setFilters] = useState<Record<string, string>>({});
   const [sort, setSort] = useState<{ columnId: string; direction: "asc" | "desc" } | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set()); const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [uncontrolledBulkSelected, setUncontrolledBulkSelected] = useState<Set<string>>(new Set()); const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [hidden, setHidden] = useState<Set<string>>(new Set()); const [widths, setWidths] = useState<Record<string, number>>({});
   const [pageSize, setPageSize] = useState<25 | 50 | 100 | 200 | "all">(initialPageSize); const [page, setPage] = useState(1);
   const [orderMode, setOrderMode] = useState<"automatic" | "manual">("automatic"); const [manualOrder, setManualOrder] = useState<string[]>(rows.map(row => row.id));
@@ -94,8 +107,14 @@ export function OperationalDataGrid<T extends { id: string }>({ module, userId, 
   const safePageSize = pageSize === "all" ? (queried.length <= 1000 ? Math.max(queried.length, 1) : 200) : pageSize;
   const pages = Math.max(1, Math.ceil(queried.length / safePageSize)); const currentPage = Math.min(page, pages);
   const pageRows = queried.slice((currentPage - 1) * safePageSize, currentPage * safePageSize);
-  const visibleIds = pageRows.map(row => row.id); const selection = selectionState(selected, visibleIds);
-  useEffect(() => { if (selectAllRef.current) selectAllRef.current.indeterminate = selection.indeterminate; }, [selection.indeterminate]);
+  const bulkSelected = bulkSelectedRowIds || uncontrolledBulkSelected;
+  const commitBulkSelection = (next: Set<string>, change: OperationalGridBulkSelectionChange) => {
+    if (bulkSelectedRowIds === undefined) setUncontrolledBulkSelected(next);
+    onBulkSelectionChange?.([...next], change);
+  };
+  const visibleIds = pageRows.map(row => row.id); const bulkSelection = selectionState(bulkSelected, visibleIds);
+  useEffect(() => { if (selectAllRef.current) selectAllRef.current.indeterminate = bulkSelection.indeterminate; }, [bulkSelection.indeterminate]);
+  useEffect(() => { onSelectionChange?.([...bulkSelected]); }, [onSelectionChange, bulkSelected]);
 
   function applyLastConfiguration(values: Record<string, string>) {
     try {
@@ -157,18 +176,18 @@ export function OperationalDataGrid<T extends { id: string }>({ module, userId, 
     </div> : null}
     {error ? <div className="m-4 rounded border border-red-900/50 bg-red-950/20 p-4 text-xs text-red-300">{error}</div> : loading ? <div className="flex min-h-44 items-center justify-center text-xs text-slate-500">Carregando planilha…</div> : !queried.length ? <div className="flex min-h-44 items-center justify-center text-xs text-slate-500">{emptyTitle}</div> : <div ref={scrollRef} onScroll={event => window.localStorage.setItem(`${storageKey}:scroll`, String(event.currentTarget.scrollTop))} className="min-h-0 flex-1 overflow-auto">
       <table className="w-full table-fixed border-collapse text-[10px]" style={{ minWidth: Math.max(960, visibleColumns.reduce((total, column) => total + (widths[column.id] || column.width || 140), 150)) }}>
-        <thead className="sticky top-0 z-30 bg-[#101116] text-slate-500"><tr><th className="sticky left-0 z-40 w-10 border-b border-r border-slate-800 bg-[#101116] p-1 text-center">#</th><th className="sticky left-10 z-40 w-9 border-b border-r border-slate-800 bg-[#101116] p-1"><input ref={selectAllRef} type="checkbox" checked={selection.checked} onChange={event => setSelected(current => selectAllVisible(current, visibleIds, event.target.checked))}/></th><th className="w-7 border-b border-slate-800" title={sort ? "A ordenação manual está bloqueada pela ordenação automática." : "Arrastar para reordenar"}><GripVertical className="mx-auto h-3 w-3"/></th>
-          {visibleColumns.map((column, index) => { const sticky = column.pinned === "left" || index === 0; return <th key={column.id} style={{ width: widths[column.id] || column.width || 140, left: sticky ? 79 : undefined }} className={`${sticky ? "sticky z-30 bg-[#101116]" : ""} relative border-b border-r border-slate-850 p-2 text-left`}><button disabled={!column.sortable || orderMode === "manual"} onClick={() => setSort(current => current?.columnId === column.id ? current.direction === "asc" ? { columnId: column.id, direction: "desc" } : null : { columnId: column.id, direction: "asc" })} className="w-full truncate text-left disabled:cursor-default">{column.header}{sort?.columnId === column.id ? sort.direction === "asc" ? " ↑" : " ↓" : ""}</button><span onMouseDown={event => resizeColumn(column.id, event.clientX, widths[column.id] || column.width || 140)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-indigo-500"/></th>; })}
+        <thead className="sticky top-0 z-30 bg-[#101116] text-slate-500"><tr><th className="sticky left-0 z-40 w-10 border-b border-r border-slate-800 bg-[#101116] p-1 text-center">#</th><th className="sticky left-10 z-40 w-9 border-b border-r border-slate-800 bg-[#101116] p-1"><input ref={selectAllRef} type="checkbox" checked={bulkSelection.checked} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onChange={event => { const checked = event.target.checked; commitBulkSelection(selectAllVisible(bulkSelected, visibleIds, checked), { kind: "visible", rowIds: visibleIds, checked }); }}/></th><th className="w-7 border-b border-slate-800" title={sort ? "A ordenação manual está bloqueada pela ordenação automática." : "Arrastar para reordenar"}><GripVertical className="mx-auto h-3 w-3"/></th>
+          {visibleColumns.map((column, index) => { const sticky = column.pinned === "left" || index === 0; return <th key={column.id} style={{ width: widths[column.id] || column.width || 140, left: sticky ? 79 : undefined }} className={`${sticky ? "sticky z-30 bg-[#101116]" : ""} relative border-b border-r border-slate-850 p-2 text-left`}><button disabled={!column.sortable || orderMode === "manual"} onClick={() => setSort(current => current?.columnId === column.id ? current.direction === "asc" ? { columnId: column.id, direction: "desc" } : null : { columnId: column.id, direction: "asc" })} className="w-full truncate text-left disabled:cursor-default">{column.header}{sort?.columnId === column.id ? sort.direction === "asc" ? " ↑" : " ↓" : ""}</button><span onMouseDown={event => resizeColumn(column.id, event.clientX, widths[column.id] || column.width || 140)} className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-context-accent"/></th>; })}
           {renderActions && <th className="sticky right-0 z-40 w-40 border-b border-l border-slate-800 bg-[#101116] p-2 text-right">Ações</th>}
         </tr></thead>
-        <tbody>{pageRows.map((row, index) => <React.Fragment key={row.id}><tr draggable={orderMode === "manual" && !sort} onDragStart={() => setDraggedId(row.id)} onDragOver={event => event.preventDefault()} onDrop={() => { if (!draggedId) return; const next = reorderIds(manualOrder, draggedId, row.id, Boolean(sort)); setManualOrder(next); onRowOrderChange?.(next); setDraggedId(null); }} className={`border-b border-slate-900 hover:bg-slate-900/40 ${selected.has(row.id) ? "bg-indigo-950/15" : ""}`}>
-          <td className="sticky left-0 z-20 border-r border-slate-850 bg-[#0b0c10] p-2 text-center text-slate-600">{(currentPage - 1) * safePageSize + index + 1}</td><td className="sticky left-10 z-20 border-r border-slate-850 bg-[#0b0c10] p-2 text-center"><input type="checkbox" checked={selected.has(row.id)} onChange={event => setSelected(current => { const next = new Set(current); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next; })}/></td><td className="p-1 text-center text-slate-700">{renderExpanded ? <button aria-label={`${(expandedRowId !== undefined ? expandedRowId === row.id : expanded.has(row.id)) ? "Fechar" : "Abrir"} detalhes`} onClick={() => { const isOpen = expandedRowId !== undefined ? expandedRowId === row.id : expanded.has(row.id); const nextId = isOpen ? null : row.id; if (onExpandedRowChange) onExpandedRowChange(nextId); else setExpanded(current => { const next = new Set(current); if (next.has(row.id)) next.delete(row.id); else next.add(row.id); return next; }); }}>{(expandedRowId !== undefined ? expandedRowId === row.id : expanded.has(row.id)) ? <ChevronDown className="h-3 w-3"/> : <ChevronRight className="h-3 w-3"/>}</button> : orderMode === "manual" ? <GripVertical className="mx-auto h-3 w-3 cursor-grab"/> : null}</td>
+        <tbody>{pageRows.map((row, index) => <React.Fragment key={row.id}><tr draggable={orderMode === "manual" && !sort} tabIndex={onRowActivate ? 0 : undefined} aria-current={activeRowId !== undefined && activeRowId === row.id ? "true" : undefined} data-focused-row={activeRowId === row.id ? "true" : undefined} data-bulk-selected={bulkSelected.has(row.id) ? "true" : undefined} onClick={onRowActivate ? event => { const target = event.target as HTMLElement; if (target.closest("button, input, a, select, textarea, [role=\"button\"]")) return; onRowActivate(row); } : undefined} onKeyDown={onRowActivate ? event => { if ((event.key === "Enter" || event.key === " ") && event.target === event.currentTarget) { event.preventDefault(); onRowActivate(row); } } : undefined} onDragStart={() => setDraggedId(row.id)} onDragOver={event => event.preventDefault()} onDrop={() => { if (!draggedId) return; const next = reorderIds(manualOrder, draggedId, row.id, Boolean(sort)); setManualOrder(next); onRowOrderChange?.(next); setDraggedId(null); }} className={`border-b border-slate-900 ${onRowActivate ? "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus" : "hover:bg-slate-900/40"} ${activeRowId === row.id ? activeRowClassName : ""} ${bulkSelected.has(row.id) ? bulkSelectedRowClassName : ""}`}>
+          <td className="sticky left-0 z-20 border-r border-slate-850 bg-[#0b0c10] p-2 text-center text-slate-600">{(currentPage - 1) * safePageSize + index + 1}</td><td className="sticky left-10 z-20 border-r border-slate-850 bg-[#0b0c10] p-2 text-center"><input type="checkbox" checked={bulkSelected.has(row.id)} onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onChange={event => { const checked = event.target.checked; const next = new Set(bulkSelected); if (checked) next.add(row.id); else next.delete(row.id); commitBulkSelection(next, { kind: "row", rowId: row.id, checked }); }}/></td><td className="p-1 text-center text-slate-700">{renderExpanded ? <button type="button" aria-label={`${(expandedRowId !== undefined ? expandedRowId === row.id : expanded.has(row.id)) ? "Fechar" : "Abrir"} detalhes`} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); const isOpen = expandedRowId !== undefined ? expandedRowId === row.id : expanded.has(row.id); const nextId = isOpen ? null : row.id; if (onExpandedRowChange) onExpandedRowChange(nextId); else setExpanded(current => { const next = new Set(current); if (next.has(row.id)) next.delete(row.id); else next.add(row.id); return next; }); }}>{(expandedRowId !== undefined ? expandedRowId === row.id : expanded.has(row.id)) ? <ChevronDown className="h-3 w-3"/> : <ChevronRight className="h-3 w-3"/>}</button> : orderMode === "manual" ? <GripVertical className="mx-auto h-3 w-3 cursor-grab"/> : null}</td>
           {visibleColumns.map((column, columnIndex) => { const sticky = column.pinned === "left" || columnIndex === 0; return <td key={column.id} style={{ left: sticky ? 79 : undefined }} className={`${sticky ? "sticky z-10 bg-[#0b0c10]" : ""} truncate border-r border-slate-900 p-2 align-top`}>{column.render ? column.render(row) : String(column.value(row) ?? "—")}</td>; })}
           {renderActions && <td className="sticky right-0 z-20 border-l border-slate-850 bg-[#0b0c10] p-1.5 text-right">{renderActions(row)}</td>}
         </tr>{(expandedRowId !== undefined ? expandedRowId === row.id : expanded.has(row.id)) && renderExpanded && <tr className="border-b border-slate-850"><td colSpan={visibleColumns.length + (renderActions ? 4 : 3)} className="bg-[#07080b] p-4">{renderExpanded(row)}</td></tr>}</React.Fragment>)}</tbody>
       </table>
     </div>}
-    <footer className={`flex shrink-0 items-center justify-between gap-2 overflow-x-auto border-t px-3 py-1.5 text-[9px] ${selected.size > 0 ? "border-indigo-900 bg-indigo-950/25 text-indigo-200" : "border-slate-850 text-slate-600"}`}><div className="flex shrink-0 items-center gap-2"><strong>{queried.length} item(ns) · {selected.size} selecionado(s)</strong>{selected.size > 0 && <>{bulkActions.map(action => <button key={action.label} disabled={action.disabled} className={control} onClick={() => void action.onClick(rows.filter(row => selected.has(row.id)))}>{action.label}</button>)}<button className={control} onClick={() => exportRows(rows.filter(row => selected.has(row.id)), "selecionados")}><Download className="mr-1 inline h-3 w-3"/>Exportar selecionados</button><button className={control} onClick={() => setSelected(new Set())}>Limpar seleção</button></>}</div><div className="flex shrink-0 items-center gap-1"><button className={control} disabled={currentPage <= 1} onClick={() => setPage(value => Math.max(1, value - 1))}>Anterior</button><span>{currentPage}/{pages}</span><button className={control} disabled={currentPage >= pages} onClick={() => setPage(value => Math.min(pages, value + 1))}>Próxima</button><button className={control} onClick={resetSystem}><Settings2 className="mr-1 inline h-3 w-3"/>Restaurar</button></div></footer>
+    <footer className={`flex shrink-0 items-center justify-between gap-2 overflow-x-auto border-t px-3 py-1.5 text-[9px] ${bulkSelected.size > 0 ? "border-divider bg-selected text-context-accent" : "border-slate-850 text-slate-600"}`}><div className="flex shrink-0 items-center gap-2"><strong>{queried.length} item(ns) · {bulkSelected.size} selecionado(s)</strong>{bulkSelected.size > 0 && <>{renderBulkBar ? renderBulkBar(rows.filter(row => bulkSelected.has(row.id))) : bulkActions.map(action => <button key={action.label} disabled={action.disabled} className={control} onClick={() => void action.onClick(rows.filter(row => bulkSelected.has(row.id)))}>{action.label}</button>)}<button className={control} onClick={() => exportRows(rows.filter(row => bulkSelected.has(row.id)), "selecionados")}><Download className="mr-1 inline h-3 w-3"/>Exportar selecionados</button><button className={control} onClick={() => commitBulkSelection(new Set(), { kind: "clear" })}>Limpar seleção</button></>}</div><div className="flex shrink-0 items-center gap-1"><button className={control} disabled={currentPage <= 1} onClick={() => setPage(value => Math.max(1, value - 1))}>Anterior</button><span>{currentPage}/{pages}</span><button className={control} disabled={currentPage >= pages} onClick={() => setPage(value => Math.min(pages, value + 1))}>Próxima</button><button className={control} onClick={resetSystem}><Settings2 className="mr-1 inline h-3 w-3"/>Restaurar</button></div></footer>
   </section>;
 }
 

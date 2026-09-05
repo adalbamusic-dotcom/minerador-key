@@ -6,13 +6,38 @@ Perfis editoriais: `ArticleDNA.unitClassification`, `unitPurpose` e `serpStrateg
 
 O produto é uma aplicação Next.js App Router em um único repositório. Os módulos de negócio são proprietários de suas telas, regras e documentação; contratos explícitos podem ser consumidos entre módulos. Código em `lib/editorial`, `lib/server`, `components/*context*` e `components/product-shell.tsx` é compartilhado e não deve ser alterado incidentalmente. A árvore tenantizada vigente é `app/(brand)/[brandRef]`; referências a `(workspace)` são históricas ou compatibilidade controlada, não uma segunda superfície funcional.
 
-## Mapa arquitetural vigente — 2026-07-27
+O Arquiteto também é proprietário do `InternalLinkGraph`, fonte persistente e
+tenantizada das relações de links internos. React Flow é somente uma projeção
+visual: viewport, seleção, zoom e layout não são autoridade nem compõem o hash
+estrutural. A fundação remota, o readback e o smoke de isolamento cross-brand
+foram confirmados; a próxima frente é a aba funcional de Links Internos.
+
+SiloDNA e SiloPage permanecem entidades separadas, com persistência
+transacional pareada. No smoke, o owner técnico `postgres` foi usado para a
+fixture porque `service_role` não possui `UPDATE` em
+`editorial_artifact_versions`; isso é uma evidência operacional, não
+autorização para ampliar grants.
+
+## Mapa arquitetural vigente — 2026-08-27
 
 `app/` contém rotas, layouts, boundaries, parâmetros, composição e Route Handlers. Os grupos `(admin)` e `(brand)` não aparecem na URL: o Admin global usa `/admin`; o contexto de marca usa `/{brandRef}`. As rotas globais incluem `/`, `/login`, `/cadastro` e `/selecionar-marca`. As rotas tenantizadas incluem `/{brandRef}/`, `/minerador`, `/arquiteto`, `/radar`, `/radar/{articleId}`, `/planejador`, `/redator`, `/publicacoes` e `/conta`.
 
-`modules/` contém a implementação funcional proprietária: Admin global; Marca e BrandDNA/Site/Sitemap/equipe; Minerador e keywords/listas/KGR/KeywordDNA/Extensão; Arquiteto e ArticleDNA/SiloDNA/SiloPage/keywords não agrupadas; Radar e SERP/evidências/curadoria; Planejador, Redator, Publicações e Conta. O Radar recebe ArticleDNA e não reagrupa nem troca principal; Planejador não refaz SERP; Redator não redefine ContentPlan silenciosamente.
+`modules/` contém a implementação funcional proprietária: Admin global; Marca e BrandDNA/Site/Sitemap/equipe; Minerador e keywords/listas/KGR/KeywordDNA/Extensão; Arquiteto e ArticleDNA/SiloDNA/SiloPage/InternalLinkGraph/keywords não agrupadas; Radar e SERP/evidências/curadoria; Planejador, Redator, Publicações e Conta. O Radar recebe ArticleDNA e não reagrupa nem troca principal; Planejador não refaz SERP; Redator não redefine ContentPlan silenciosamente.
 
-`lib/` contém infraestrutura e contratos: `lib/server/auth-users.ts` consulta usuários Auth somente server-side; `lib/server/brand-provisioning.ts` resolve owner real, cria marca/membership/listas e compensa falhas; `lib/server/authz.ts` e `lib/server/tenant-context.ts` autorizam por ator, tenant, papel e permissão; `lib/supabase/` contém cliente browser autenticado sem `service_role`; `lib/editorial/` e `lib/*` de cada domínio guardam contratos, serviços, recuperação e regras compartilhadas. `app/api/` concentra operações server-side e integrações, incluindo `/api/admin/owners`, `/api/marcas`, APIs editoriais e Site/Sitemap. `supabase/` contém migrations, dry-runs, validações e rollbacks, sem significar que uma migration foi aplicada nesta tarefa.
+`lib/` contém infraestrutura e contratos: `lib/server/auth-users.ts` consulta usuários Auth somente server-side; `lib/server/brand-provisioning.ts` resolve owner real, cria marca/membership/listas e compensa falhas; `lib/server/authz.ts` e `lib/server/tenant-context.ts` autorizam por ator, tenant, papel e permissão; `lib/supabase/` contém cliente browser autenticado sem `service_role`; `lib/editorial/` e `lib/*` de cada domínio guardam contratos, serviços, recuperação e regras compartilhadas. `app/api/` concentra operações server-side e integrações, incluindo `/api/admin/owners`, `/api/marcas`, APIs editoriais e Site/Sitemap. `supabase/` contém migrations, dry-runs, validações e rollbacks; a aplicação remota deve ser confirmada nos estados e readbacks, não inferida pela presença de um arquivo.
+
+## InternalLinkGraph e estado estrutural
+
+O `InternalLinkGraph` é a fonte persistente e tenantizada das relações de
+links internos do Arquiteto. React Flow é somente uma projeção visual; estado
+de viewport, seleção, zoom e layout não é autoridade nem compõe o hash
+estrutural. A fundação remota, o readback e o smoke de isolamento cross-brand
+foram confirmados; a próxima frente é a aba funcional de Links Internos.
+
+O par SiloDNA/SiloPage permanece separado e possui persistência transacional
+pareada. O smoke usou owner técnico `postgres` para a fixture porque
+`service_role` não possui `UPDATE` em `editorial_artifact_versions`; isso é
+uma evidência operacional registrada, não autorização para ampliar grants.
 
 ## Tenant, identidades e autorização
 
@@ -38,6 +63,15 @@ O Minerador usa tabelas legadas via Supabase no cliente. O pipeline editorial te
 
 ## Integrações externas
 
-Supabase, NextAuth, Google Sheets, provedores de volume, DeepSeek/IA e Serper são integrações observadas no código. Disponibilidade, credenciais e execução em produção não foram verificadas nesta sprint. Mocks de SERP, evidência de produto e parte do fluxo editorial existem deliberadamente e devem continuar explícitos.
+Supabase, NextAuth, Google Sheets, provedores de volume, DataForSEO, DeepSeek/IA,
+Google Cloud, YouTube Data API e Telegram são integrações compartilhadas
+observadas no produto. Disponibilidade, credenciais e execução de cada operação
+continuam separadas por evidência. Mocks de SERP, evidência de produto e parte
+do fluxo editorial existem deliberadamente e devem continuar explícitos.
 
-Extensão Arquiteto–SERP: a rota de formação reutiliza o núcleo Serper server-side e persiste assessments, snapshots, decisões e verificações no artefato IndexedDB brand-scoped. A transferência aprovada para Radar leva referências KeywordDNA/assessment como campos opcionais; UI e workflow Radar permanecem inalterados.
+Extensão Arquiteto–SERP: a formação preserva avaliações e snapshots
+brand-scoped; o Radar consome a infraestrutura SERP compartilhada por contrato
+próprio. A transferência aprovada leva referências KeywordDNA/assessment como
+campos opcionais; UI e workflow dos módulos permanecem inalterados. Referências
+ao provider SERP legado em snapshots, testes ou payloads históricos não são
+contrato operacional vigente e dependem do gate separado de zero legado.

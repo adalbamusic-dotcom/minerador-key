@@ -8,11 +8,18 @@ export type BrowserIdentity = {
   user: { id: string; email: string | null; name: string | null; image: string | null };
 };
 
+type PresentationOverride = Pick<BrowserIdentity["user"], "name" | "image">;
+
 type SupabaseSessionContextValue = {
   data: BrowserIdentity | null;
   status: "loading" | "authenticated" | "unauthenticated";
   actorUserId: string | null;
   sessionEpoch: number;
+  /**
+   * Session presentation state used to reflect a profile readback immediately.
+   * It never replaces Auth metadata and is cleared when the actor changes.
+   */
+  setPresentationOverride: (override: Partial<PresentationOverride> | null) => void;
   signOut: (callbackUrl?: string) => Promise<void>;
 };
 
@@ -25,7 +32,7 @@ function identityFromSession(session: Session | null): BrowserIdentity | null {
     user: {
       id: session.user.id,
       email: session.user.email || null,
-      name: typeof metadata.full_name === "string" ? metadata.full_name : typeof metadata.name === "string" ? metadata.name : null,
+      name: typeof metadata.full_name === "string" ? metadata.full_name : typeof metadata.name === "string" ? metadata.name : typeof metadata.display_name === "string" ? metadata.display_name : null,
       image: typeof metadata.avatar_url === "string" ? metadata.avatar_url : null,
     },
   };
@@ -35,6 +42,7 @@ export function SupabaseSessionProvider({ children }: { children: React.ReactNod
   const [session, setSession] = useState<Session | null>(null);
   const [status, setStatus] = useState<SupabaseSessionContextValue["status"]>("loading");
   const [sessionEpoch, setSessionEpoch] = useState(0);
+  const [presentationOverride, setPresentationOverrideState] = useState<Partial<PresentationOverride> | null>(null);
   const actorUserIdRef = useRef<string | null>(null);
 
   const commitSession = (nextSession: Session | null) => {
@@ -63,20 +71,33 @@ export function SupabaseSessionProvider({ children }: { children: React.ReactNod
     return () => { active = false; subscription.subscription.unsubscribe(); };
   }, []);
 
+  useEffect(() => {
+    // Presentation state belongs to the current in-memory session only. Never
+    // carry it across actors, logout, or a new Auth session.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPresentationOverrideState(null);
+  }, [session?.user?.id]);
+
   const value = useMemo<SupabaseSessionContextValue>(() => ({
-    data: identityFromSession(session),
+    data: (() => {
+      const identity = identityFromSession(session);
+      if (!identity || !presentationOverride) return identity;
+      return { user: { ...identity.user, ...presentationOverride, id: identity.user.id, email: identity.user.email } };
+    })(),
     status,
     actorUserId: session?.user?.id || null,
     sessionEpoch,
+    setPresentationOverride: (override) => setPresentationOverrideState((current) => override ? { ...current, ...override } : null),
     async signOut(callbackUrl = "/login") {
       actorUserIdRef.current = null;
+      setPresentationOverrideState(null);
       setSessionEpoch(epoch => epoch + 1);
       setSession(null);
       setStatus("unauthenticated");
       await getBrowserSupabaseClient().auth.signOut();
       window.location.assign(callbackUrl);
     },
-  }), [session, status, sessionEpoch]);
+  }), [presentationOverride, session, status, sessionEpoch]);
 
   return <SupabaseSessionContext.Provider value={value}>{children}</SupabaseSessionContext.Provider>;
 }

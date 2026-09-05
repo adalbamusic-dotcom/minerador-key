@@ -1,5 +1,19 @@
 # Spec — Marca
 
+## Governança compartilhada da Marca — 2026-08-25
+
+Marca é tenant e consumidor: `brandId = public.marcas.id`. A Agência
+disponibiliza capabilities e Connections conforme seu vínculo, plano, período,
+quota e política; a Marca não possui IA/SERP própria por inferência e não
+administra credentials, Connections ou providers globais. A UI tenantizada
+mostra somente origem e status efetivos, sem secrets.
+
+Especialistas são identidades de domínio da Marca, distintas de usuários Auth.
+Telegram é Bot global da Plataforma e só roteia contribuição editorial por
+binding explícito para `brandId`, `expertId`, `telegramUserId`,
+`telegramChatId` e `briefId`. A Marca administra o especialista/binding dentro
+do seu escopo, não o Bot Token.
+
 ## Regra compartilhada de Site/Sitemap
 
 Candidates observadas no Site carregam `sourceFields`, coerência de slug, papel sugerido e `qualificationStatus`, mas sempre `isKgr: false`. A aba não confirma principal, volume, intenção ou aprovação; a importação explícita para o Minerador grava a origem como `bruto` e preserva a marca.
@@ -35,7 +49,7 @@ Sem sessão, sem marca e configuração server-side ausente.
 ## 15. Critérios de aceite
 Dados persistem somente para a marca autorizada.
 ## 16. Fora do escopo atual
-Persistência própria de materiais, Skills e prompts; gestão completa de memberships, permissões, aceite e revogação; ponte oficial de `activeBrandDnaVersionId`.
+Persistência própria de materiais e prompts; gestão completa de memberships, permissões, aceite e revogação; ponte oficial de `activeBrandDnaVersionId`.
 ## 17. Arquivos pertencentes ao módulo
 `app/(brand)/[brandRef]/page.tsx`, `app/api/marca/**`, `components/marca/**`, `lib/marca/**` e a renderização da seção Marca em `components/product-shell.tsx`.
 ## 18. Arquivos compartilhados consumidos
@@ -69,3 +83,22 @@ O estado local do workspace é isolado por marca e o carregamento não pode depe
 - Cada nova keyword entra como `bruto`, com texto, `lista_id` e proveniência `analise_semantica.site_origin`; métricas, intenção, KGR, DNA e aprovação não são inventados.
 - O lote local só recebe resultado final depois da resposta persistida; resposta sem `persisted: true` é erro explícito e não pode produzir sucesso visual.
 - A principal sugerida é apenas uma inferência determinística de convergência entre slug, H1 e título; confirmação permanece humana.
+
+## 24. Brand Skills — disponibilidade contextual canônica — 2026-08-28
+
+Uma BrandSkill persistida é patrimônio contextual da própria Marca. A versão
+corrente aplicável, com `definitionKey`, conteúdo e hash válidos, fica
+disponível às áreas tenantizadas compatíveis com a Marca — Minerador,
+Arquiteto, Radar, Planejador, Redator e Publicações — sem cópias por módulo.
+
+`draft`, `pending_approval` e `active` preservam seu significado de governança
+e histórico, mas não bloqueiam a leitura pela IA. `archived` e a versão técnica
+`superseded` não entram no contexto corrente. Havendo sucessora, apenas a
+versão corrente daquela `definitionKey` é resolvida. `consumerModules` é
+metadado de recomendação do gabarito, nunca autorização rígida de acesso.
+
+Disponibilidade não equivale a aplicação: o `BrandContextPack` devolve
+referências com `applied: false`; cada operação decide explicitamente se
+injeta uma Skill no seu prompt e só então registra a proveniência com
+`definitionKey`, versão, hash e lifecycle. BrandDNA continua independente; sua
+indisponibilidade é lacuna declarada e não bloqueia uma BrandSkill válida.

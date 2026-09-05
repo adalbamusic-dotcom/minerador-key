@@ -87,6 +87,74 @@ test("site adapter uses repository IDs and preserves existing Minerador records"
   assert.equal(inserts[0].status, "bruto"); const origin = (inserts[0].analise_semantica as { site_origin: { source: string; batchId: string; siloId?: string; siloName?: string | null } }).site_origin; assert.equal(origin.source, "site_sitemap"); assert.equal(origin.batchId, "00000000-0000-0000-0000-000000000006"); assert.equal(origin.siloId, listId); assert.equal(origin.siloName, "Silo existente");
 });
 
+test("evidência de keyword existente pode ser atualizada sem Silo", async () => {
+  const brandId = "00000000-0000-0000-0000-000000000001";
+  const keywordId = "00000000-0000-0000-0000-000000000002";
+  const rows = [{ id: keywordId, brand_id: brandId, keyword: "Sem silo", status: "bruto", analise_semantica: {} as Record<string, unknown> }];
+  let updates = 0;
+  let inserts = 0;
+  const repository = {
+    async validateDestination(receivedBrandId: string, targetListId: string | null) {
+      assert.equal(receivedBrandId, brandId);
+      assert.equal(targetListId, null);
+    },
+    async findByList(receivedBrandId: string, targetListId: string | null) {
+      assert.equal(receivedBrandId, brandId);
+      assert.equal(targetListId, null);
+      return rows;
+    },
+    async updateKeywordEvidence(input: { id: string; brandId: string; analise_semantica: Record<string, unknown> }) {
+      assert.equal(input.id, keywordId);
+      assert.equal(input.brandId, brandId);
+      rows[0].analise_semantica = input.analise_semantica;
+      updates += 1;
+    },
+    async insertKeyword() {
+      inserts += 1;
+      throw new Error("não deveria criar uma keyword nova sem Silo");
+    },
+  };
+  const result = await importSiteKeywordsToMinerador({
+    brandId,
+    targetListId: null,
+    targetListName: null,
+    importBatchId: "00000000-0000-0000-0000-000000000003",
+    requestedBy: "user-1",
+    candidates: [{
+      id: "00000000-0000-0000-0000-000000000004",
+      brandId,
+      catalogEntryId: null,
+      sourceKind: "manual_url",
+      text: "Sem silo",
+      normalizedText: "sem silo",
+      sourceUrl: "https://example.com/sem-silo",
+      sourceField: "other",
+      sourceFields: ["other"],
+      suggestedRole: "unclassified",
+      confidence: "medium",
+      urlSituation: "canonical_confirmed",
+      publicationStatus: "not_confirmed",
+      keywordUrlRelation: "undefined",
+      architectureStatus: "awaiting_architecture",
+      resolvedUrl: "https://example.com/sem-silo",
+      declaredCanonicalUrl: "https://example.com/sem-silo",
+      lastCheckedAt: "2026-01-01T00:00:00.000Z",
+    }],
+    repository,
+    now: "2026-01-01T00:00:00.000Z",
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.persisted, true);
+  assert.equal(result.existing[0].mineradorKeywordId, keywordId);
+  assert.equal(result.items[0].sourceKind, "manual_url");
+  assert.equal(updates, 1);
+  assert.equal(inserts, 0);
+  const origin = rows[0].analise_semantica.site_origin as { source: string; siloId?: string; catalogEntryId: string | null };
+  assert.equal(origin.source, "manual_url");
+  assert.equal(origin.catalogEntryId, null);
+  assert.equal(origin.siloId, undefined);
+});
+
 test("consolidação preserva URL resolvida, canonical e publicação confirmada", () => {
   const evidence = {
     schemaVersion: "site-sitemap-v1" as const, source: "site_sitemap" as const, brandId: "brand-a", catalogEntryId: "catalog-published",
@@ -143,4 +211,20 @@ test("prévia do Minerador separa nova, evidência alterada, sem alteração e d
   assert.equal(plan.summary.updated, 1);
   assert.equal(plan.summary.duplicateInBatch, 1);
   assert.equal(plan.items[1].outcome, "evidence_updated");
+});
+
+test("prévia bloqueia keyword nova sem Silo", () => {
+  const candidate: MineradorSiteSyncCandidate = {
+    id: "new", brandId: "brand-a", text: "Nova", normalizedText: "nova", catalogEntryId: "catalog-new",
+    sourceUrl: "https://example.com/new", sourceField: "h1", sourceFields: ["h1"], suggestedRole: "unclassified",
+    slugCoherence: "unknown", urlSituation: "unverified", publicationStatus: "not_confirmed", keywordUrlRelation: "undefined",
+    architectureStatus: "awaiting_architecture", relationConfirmedBy: null, relationConfirmedAt: null,
+    extractedAt: "2026-01-01T00:00:00.000Z", confidence: "medium", resolvedUrl: "https://example.com/new",
+    declaredCanonicalUrl: null, catalogTitle: "Nova",
+  };
+  const plan = buildMineradorSiteSyncPlan([candidate], [], null);
+  assert.equal(plan.summary.new, 0);
+  assert.equal(plan.summary.blocked, 1);
+  assert.equal(plan.items[0].outcome, "blocked");
+  assert.match(plan.items[0].reason || "", /Silo\/Categoria/);
 });

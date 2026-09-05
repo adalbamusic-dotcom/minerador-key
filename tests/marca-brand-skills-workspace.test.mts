@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { importBrandSkill } from "../lib/marca/brand-skill-domain.ts";
+import { emptyBrandSkillFilters, filterBrandSkills, latestBrandSkillVersions, skillVersionLabel, versionsOfDefinition } from "../lib/marca/brand-skill-workspace.ts";
+import { careGlowSkillFile } from "./care-glow-skill.fixture.ts";
+const make = () => importBrandSkill({ brandId: "brand-a", definitionKey: "brand_voice", name: "Voz", filename: careGlowSkillFile.filename, markdown: careGlowSkillFile.content, byteSize: careGlowSkillFile.byteSize, mimeType: careGlowSkillFile.mimeType, importedBy: "actor", now: "2026-08-28T12:00:00.000Z" });
+test("workspace is a server-list projection with readable status label", async () => { const skill = await make(); assert.equal(skillVersionLabel(skill), "v1 · Rascunho"); assert.deepEqual(latestBrandSkillVersions([skill], "brand-a"), [skill]); });
+test("projection never leaks another brand", async () => { const one = await make(); const two = { ...one, brandId: "brand-b", name: "Outra" }; assert.deepEqual(filterBrandSkills({ skills: [one, two], brandId: "brand-a", filters: emptyBrandSkillFilters }), [one]); });
+test("projection filters consumer from definition rather than payload", async () => { const skill = { ...(await make()), status: "active" as const }; assert.equal(filterBrandSkills({ skills: [skill], brandId: "brand-a", filters: { ...emptyBrandSkillFilters, consumer: "redator" } }).length, 1); });
+test("versions stay ordered without local mutation helpers", async () => { const first = await make(); const second = { ...first, version: 2 }; assert.deepEqual(versionsOfDefinition([first, second], "brand-a", "brand_voice").map(item => item.version), [2, 1]); });

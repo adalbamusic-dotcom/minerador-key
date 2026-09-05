@@ -5,6 +5,7 @@ import Papa from "papaparse";
 import { X } from "lucide-react";
 import type { DiscoveryCandidate } from "@/lib/minerador/discovery-keywords";
 import { normalizeDiscoverySourceEntries, parseDiscoveryCsvRows, parseManualKeywords, type DiscoverySourceEntryInput } from "@/lib/minerador/discovery-sources";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
 type SourceKind = "manual" | "csv";
 export type DiscoverySourceControlsHandle = {
@@ -68,6 +69,7 @@ export const DiscoverySourceControls = forwardRef<DiscoverySourceControlsHandle,
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  useNoticeBridge({ notice: error || listsError, module: "minerador", area: "Importação de fontes", title: "Minerador · Importação", fallbackSeverity: "ERROR" });
   const fileRef = useRef<HTMLInputElement>(null);
   const listsFetchStarted = useRef(false);
 

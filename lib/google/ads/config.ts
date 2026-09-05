@@ -9,8 +9,12 @@ export type GoogleAdsServerConfig = {
   apiVersion: GoogleAdsSupportedApiVersion;
 };
 
-export type GoogleAdsPlatformConfig = GoogleAdsServerConfig & {
+export type GoogleAdsStaticPlatformConfig = Omit<GoogleAdsServerConfig, "refreshToken"> & {
   researchCustomerId: string;
+};
+
+export type GoogleAdsPlatformConfig = GoogleAdsStaticPlatformConfig & {
+  refreshToken: string;
 };
 
 export type GoogleAdsEnvironment = Record<string, string | undefined>;
@@ -22,7 +26,10 @@ export type GoogleAdsSupportedApiVersion = typeof GOOGLE_ADS_SUPPORTED_API_VERSI
 export type GoogleAdsPlatformConfigErrorCode =
   | "GOOGLE_ADS_PLATFORM_ENV_MISSING"
   | "GOOGLE_ADS_PLATFORM_RESEARCH_CUSTOMER_MISSING"
-  | "GOOGLE_ADS_PLATFORM_RESEARCH_CUSTOMER_INVALID";
+  | "GOOGLE_ADS_PLATFORM_RESEARCH_CUSTOMER_INVALID"
+  | "GOOGLE_ADS_REFRESH_TOKEN_SECRET_MISSING"
+  | "GOOGLE_ADS_REFRESH_TOKEN_SECRET_INVALID"
+  | "GOOGLE_ADS_REFRESH_TOKEN_SECRET_UNAVAILABLE";
 
 export class GoogleAdsPlatformConfigError extends Error {
   readonly code: GoogleAdsPlatformConfigErrorCode;
@@ -40,6 +47,7 @@ export function normalizeGoogleAdsCustomerId(value: string): string {
   return normalized;
 }
 
+/** Explicit local CLI smoke/bootstrap configuration; never used by product runtime resolvers. */
 export function getGoogleAdsServerConfig(env: GoogleAdsEnvironment = process.env): GoogleAdsServerConfig {
   const required = [
     ["GOOGLE_ADS_DEVELOPER_TOKEN", env.GOOGLE_ADS_DEVELOPER_TOKEN],
@@ -67,16 +75,32 @@ export function getGoogleAdsServerConfig(env: GoogleAdsEnvironment = process.env
   };
 }
 
-/**
- * Google Ads is platform infrastructure. This resolver intentionally has no
- * database, Connection, Vault, binding, grant or quota dependency.
- */
-export function getGoogleAdsPlatformConfig(env: GoogleAdsEnvironment = process.env): GoogleAdsPlatformConfig {
+export type GoogleAdsStaticConfigStatus = {
+  developerTokenConfigured: boolean;
+  clientIdConfigured: boolean;
+  clientSecretConfigured: boolean;
+  loginCustomerIdConfigured: boolean;
+  researchCustomerIdConfigured: boolean;
+  apiVersionConfigured: boolean;
+};
+
+export function getGoogleAdsStaticConfigStatus(env: GoogleAdsEnvironment = process.env): GoogleAdsStaticConfigStatus {
+  return {
+    developerTokenConfigured: Boolean(env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim()),
+    clientIdConfigured: Boolean(env.GOOGLE_ADS_CLIENT_ID?.trim()),
+    clientSecretConfigured: Boolean(env.GOOGLE_ADS_CLIENT_SECRET?.trim()),
+    loginCustomerIdConfigured: Boolean(env.GOOGLE_ADS_LOGIN_CUSTOMER_ID?.trim()),
+    researchCustomerIdConfigured: Boolean(env.GOOGLE_ADS_RESEARCH_CUSTOMER_ID?.trim()),
+    apiVersionConfigured: true,
+  };
+}
+
+/** Resolves only the non-secret Google Ads platform configuration from ENV. */
+export function getGoogleAdsStaticPlatformConfig(env: GoogleAdsEnvironment = process.env): GoogleAdsStaticPlatformConfig {
   const required = [
     env.GOOGLE_ADS_DEVELOPER_TOKEN,
     env.GOOGLE_ADS_CLIENT_ID,
     env.GOOGLE_ADS_CLIENT_SECRET,
-    env.GOOGLE_ADS_REFRESH_TOKEN,
     env.GOOGLE_ADS_LOGIN_CUSTOMER_ID,
   ];
   if (required.some((value) => !value?.trim())) {
@@ -106,9 +130,33 @@ export function getGoogleAdsPlatformConfig(env: GoogleAdsEnvironment = process.e
     developerToken: env.GOOGLE_ADS_DEVELOPER_TOKEN!.trim(),
     clientId: env.GOOGLE_ADS_CLIENT_ID!.trim(),
     clientSecret: env.GOOGLE_ADS_CLIENT_SECRET!.trim(),
-    refreshToken: env.GOOGLE_ADS_REFRESH_TOKEN!.trim(),
     loginCustomerId,
     researchCustomerId,
     apiVersion: GOOGLE_ADS_SUPPORTED_API_VERSIONS[0],
   };
+}
+
+export function normalizeGoogleAdsRefreshToken(refreshToken: unknown): string {
+  if (typeof refreshToken !== "string" || !refreshToken.trim()) {
+    throw new GoogleAdsPlatformConfigError("GOOGLE_ADS_REFRESH_TOKEN_SECRET_MISSING", "O OAuth Refresh Token Google Ads não está configurado no Secret Store.");
+  }
+  const normalizedRefreshToken = refreshToken.trim();
+  if (normalizedRefreshToken.length > 200_000 || /\s/.test(normalizedRefreshToken)) {
+    throw new GoogleAdsPlatformConfigError("GOOGLE_ADS_REFRESH_TOKEN_SECRET_INVALID", "O OAuth Refresh Token Google Ads armazenado é inválido.");
+  }
+  return normalizedRefreshToken;
+}
+
+export function createGoogleAdsPlatformConfig(staticConfig: GoogleAdsStaticPlatformConfig, refreshToken: unknown): GoogleAdsPlatformConfig {
+  const normalizedRefreshToken = normalizeGoogleAdsRefreshToken(refreshToken);
+  return { ...staticConfig, refreshToken: normalizedRefreshToken };
+}
+
+/**
+ * Compatibility builder used by fixtures and explicitly injected server
+ * configurations. The operational resolver supplies the token from the
+ * Secret Store; this function never reads GOOGLE_ADS_REFRESH_TOKEN from ENV.
+ */
+export function getGoogleAdsPlatformConfig(env: GoogleAdsEnvironment = process.env, refreshToken?: unknown): GoogleAdsPlatformConfig {
+  return createGoogleAdsPlatformConfig(getGoogleAdsStaticPlatformConfig(env), refreshToken);
 }

@@ -12,12 +12,17 @@ test("fluxo do Radar expõe seis etapas em ordem e identifica a etapa atual", ()
   assert.equal(progress[1].done, true);
 });
 
-test("resolver de aba normaliza a amostra, preserva abas válidas e usa fallback controlado", () => {
+test("resolver de aba normaliza as áreas canônicas, preserva aliases e usa fallback controlado", () => {
   assert.equal(resolveRadarTab("resumo"), "resumo");
-  assert.equal(resolveRadarTab("selecionar-referencias"), "selecionar-referencias");
-  assert.equal(resolveRadarTab("analise-amostra"), "analise-amostra");
-  assert.equal(resolveRadarTab("analise_amostra"), "analise-amostra");
-  assert.equal(resolveRadarTab("analysis"), "analise-amostra");
+  assert.equal(resolveRadarTab("serp"), "serp");
+  assert.equal(resolveRadarTab("resultados-serp"), "serp");
+  assert.equal(resolveRadarTab("referencias"), "referencias");
+  assert.equal(resolveRadarTab("selecionar-referencias"), "referencias");
+  assert.equal(resolveRadarTab("analise-serp"), "analise-serp");
+  assert.equal(resolveRadarTab("analise-amostra"), "analise-serp");
+  assert.equal(resolveRadarTab("analise_amostra"), "analise-serp");
+  assert.equal(resolveRadarTab("analysis"), "analise-serp");
+  assert.equal(resolveRadarTab("evidencias-adicionais"), "evidencias-adicionais");
   assert.equal(resolveRadarTab(" relatorio "), "relatorio");
   assert.equal(resolveRadarTab("aba-desconhecida"), "resumo");
   assert.equal(resolveRadarTab(null), "resumo");
@@ -40,14 +45,17 @@ test("referência tem uma única função e a decisão de apoio não vira concor
   assert.equal(deriveRadarReferenceRole({ decision: "excluded", ownDomain: true }), "excluded");
 });
 
-test("página implementa as cinco áreas e conserva a extração explícita", () => {
+test("página implementa as áreas sequenciais e conserva a extração explícita", () => {
   const page = readFileSync(new URL("../modules/radar/radar-analysis-page.tsx", import.meta.url), "utf8");
-  assert.match(page, /const tabs: RadarTab\[\] = \["resumo", "selecionar-referencias", "analise-amostra", "relatorio", "historico"\]/);
+  assert.match(page, /const tabs: RadarTab\[\] = \["resumo", "serp", "referencias", "analise-serp", "evidencias-adicionais", "relatorio", "historico"\]/);
   assert.match(page, /const tab: Tab = resolveRadarTab\(requestedTab\)/);
   assert.match(page, /tab === "resumo" && renderFlowProgress\(\)/);
   assert.doesNotMatch(page, /\n\s*\{renderFlowProgress\(\)\}/);
-  assert.match(page, /tab === "selecionar-referencias" && renderSelection\(\)/);
-  assert.match(page, /tab === "analise-amostra" && renderSample\(\)/);
+  assert.match(page, /tab === "serp" && <RadarSerpScreen/);
+  assert.match(page, /tab === "referencias" && renderAdvancedSelection\(\)/);
+  assert.match(page, /tab === "analise-serp" && renderSample\(\)/);
+  assert.match(page, /tab === "evidencias-adicionais" && <RadarExpertBriefPanel/);
+  assert.doesNotMatch(page, /tab === "analise-serp" && <ExpertContributionPanel/);
   assert.match(page, /tab === "relatorio" && renderReport\(\)/);
   assert.match(page, /tab === "historico"/);
   assert.match(page, /const setTab = \(next: Tab\) =>/);
@@ -55,5 +63,5 @@ test("página implementa as cinco áreas e conserva a extração explícita", ()
   assert.match(page, /Analisar referências selecionadas/);
   assert.doesNotMatch(page, /Analisar esta página/);
   assert.match(page, /analysisQueue = organicResults/);
-  assert.match(page, /não coleta dados automaticamente/);
+  assert.match(page, /não dispara nova coleta/);
 });

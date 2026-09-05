@@ -9,6 +9,20 @@
   --context-accent: #12A1E0;
   --positive-soft: #63F1AF;
   --highlight: #C8FF00;
+  /*
+   * Papéis semânticos fixos da plataforma.
+   *
+   * identity-new       → slug, link e canonical ainda NÃO publicados
+   * identity-published → slug, link e canonical de conteúdo já publicado no site
+   * keyword            → toda keyword renderizada, em qualquer superfície
+   *
+   * `--keyword` é valor próprio da paleta (#e0fbff), não alias de outro papel:
+   * a keyword é o dado central do produto e não pode herdar a cor de um estado
+   * (pendente, atenção, sucesso) que muda por outro motivo.
+   */
+  --identity-new: var(--module-accent);
+  --identity-published: var(--action-accent);
+  --keyword: #e0fbff;
   --success: #1fcb0a;
   --warning: #f79001;
   --pending: #E6CE00;
@@ -33,6 +47,8 @@
   --warning-soft: color-mix(in srgb, var(--warning) 18%, transparent);
   --pending-soft: color-mix(in srgb, var(--pending) 18%, transparent);
   --danger-soft: color-mix(in srgb, var(--danger) 18%, transparent);
+  --ui-label-info-gap: 2px;
+  --ui-label-control-gap: 4px;
 }
 
 [data-theme="light"],
@@ -54,6 +70,9 @@
   --color-context-accent: var(--context-accent);
   --color-positive-soft: var(--positive-soft);
   --color-highlight: var(--highlight);
+  --color-identity-new: var(--identity-new);
+  --color-identity-published: var(--identity-published);
+  --color-keyword: var(--keyword);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-pending: var(--pending);
@@ -88,8 +107,13 @@ body {
   background-attachment: fixed;
 }
 
+/*
+ * Sem `scrollbar-gutter: stable`: ele reservava uma faixa morta de ~10px na
+ * direita mesmo quando o documento não rolava, e a barra vertical das áreas
+ * operacionais ficava descolada da borda da tela. As áreas operacionais têm
+ * altura fixa e rolagem própria, então o documento raramente rola.
+ */
 html {
-  scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
@@ -135,6 +159,86 @@ html {
   background: var(--scrollbar-corner);
 }
 
+.inline-label-cluster {
+  display: inline-flex;
+  align-items: center;
+  max-inline-size: 100%;
+  white-space: nowrap;
+}
+
+.inline-label-cluster__label,
+.inline-label-cluster__info,
+.inline-label-cluster__control {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.inline-label-cluster__label {
+  flex-shrink: 1;
+}
+
+.inline-label-cluster__info,
+.inline-label-cluster__control {
+  flex-shrink: 0;
+}
+
+.inline-label-cluster__info {
+  margin-inline-start: var(--ui-label-info-gap);
+}
+
+.inline-label-cluster__control {
+  margin-inline-start: var(--ui-label-control-gap);
+  position: relative;
+  z-index: 2;
+}
+
+/*
+ * The visual slot stays at glyph size while the pseudo-element preserves a
+ * larger, keyboard-visible interaction area without pushing the next slot
+ * away from the glyph. The hit area extends into the trailing gap; a real
+ * trailing control remains above that transparent area.
+ */
+.info-hint-inline-trigger {
+  position: relative;
+  inline-size: 12px;
+  block-size: 12px;
+  flex-shrink: 0;
+  padding: 0;
+  isolation: isolate;
+}
+
+.info-hint-inline-trigger::before {
+  position: absolute;
+  z-index: 0;
+  inset-block: -5px;
+  inset-inline-start: 0;
+  inset-inline-end: -5px;
+  border-radius: 6px;
+  background: transparent;
+  content: "";
+  pointer-events: auto;
+}
+
+.info-hint-inline-trigger:hover::before {
+  background: color-mix(in srgb, var(--pending) 10%, transparent);
+}
+
+.info-hint-inline-trigger:focus-visible {
+  outline: none;
+}
+
+.info-hint-inline-trigger:focus-visible::before {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pending) 50%, transparent);
+}
+
+.info-hint-inline-trigger > svg {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
 .professional-editor .ProseMirror { min-height: 60vh; outline: none; font-size: 16px; line-height: 1.75; }
 .professional-editor .ProseMirror h1 { margin: 0 0 1.25rem; font-size: 2rem; line-height: 1.2; font-weight: 800; }
 .professional-editor .ProseMirror h2 { margin: 2rem 0 .75rem; font-size: 1.5rem; line-height: 1.3; font-weight: 750; }
@@ -143,10 +247,10 @@ html {
 .professional-editor .ProseMirror p { margin: .75rem 0; }
 .professional-editor .ProseMirror ul { margin: .75rem 0; list-style: disc; padding-left: 1.5rem; }
 .professional-editor .ProseMirror ol { margin: .75rem 0; list-style: decimal; padding-left: 1.5rem; }
-.professional-editor .ProseMirror blockquote { margin: 1rem 0; border-left: 3px solid #193cb8; padding-left: 1rem; color: #475569; }
+.professional-editor .ProseMirror blockquote { margin: 1rem 0; border-left: 3px solid var(--action-accent); padding-left: 1rem; color: color-mix(in srgb, var(--action-accent) 22%, #1f2937); }
 .professional-editor .ProseMirror table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 .professional-editor .ProseMirror th,.professional-editor .ProseMirror td { border: 1px solid #cbd5e1; padding: .5rem; vertical-align: top; }
-.professional-editor .ProseMirror .selectedCell { background: #eef2ff; }
+.professional-editor .ProseMirror .selectedCell { background: color-mix(in srgb, var(--action-accent) 10%, #ffffff); }
 .professional-editor .ProseMirror p.is-editor-empty:first-child::before { color: #94a3b8; content: attr(data-placeholder); float: left; height: 0; pointer-events: none; }
-.editorial-special-block { margin: 1rem 0; border: 1px dashed #81bff8; border-radius: .5rem; background: #eef2ff; padding: .75rem; color: #312e81; }
+.editorial-special-block { margin: 1rem 0; border: 1px dashed color-mix(in srgb, var(--action-accent) 45%, #ffffff); border-radius: .5rem; background: color-mix(in srgb, var(--action-accent) 8%, #ffffff); padding: .75rem; color: color-mix(in srgb, var(--action-accent) 70%, #131413); }
 .editorial-comment { border-bottom: 2px solid #E6CE00; background: #fef3c7; }

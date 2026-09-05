@@ -109,7 +109,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const normalized = normalizeDiscoverySourceEntries({ source: input.source, entries: resolved.entries });
     if (!normalized.accepted.length) return failure("DISCOVERY_SOURCE_NO_VALID_KEYWORDS", 400, "Nenhuma keyword válida foi encontrada para a Descoberta.", { requestId, receivedCount: input.entries.length, rejectedCount: normalized.rejectedCount, duplicateCount: normalized.duplicateCount }, "source_validation");
 
-    const existing = await profile.supabase.from("minerador_keywords").select("id,keyword").eq("brand_id", context.brandId);
+    const existing = await profile.supabase.from("minerador_keywords").select("id,keyword").eq("brand_id", context.brandId).is("deleted_at", null);
     if (existing.error) throw existing.error;
     const existingByCanonical = new Map<string, string>();
     for (const row of existing.data || []) {

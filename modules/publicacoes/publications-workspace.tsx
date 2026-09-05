@@ -15,9 +15,10 @@ import type { OperationalPublication } from "@/lib/editorial/operational-flow";
 import { applyPublicationAction } from "@/lib/publicacoes/domain";
 import type { PublicationAction, PublicationActionRequest } from "@/lib/publicacoes/contracts";
 import { createPublicationExport, createPublicationsCsv } from "@/lib/publicacoes/export";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
-const btn = "inline-flex h-7 items-center rounded border border-indigo-900 bg-indigo-950/20 px-2.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-950/50 disabled:cursor-not-allowed disabled:opacity-40";
-const field = "h-7 w-full rounded border border-slate-800 bg-black px-2 text-[10px] text-slate-200 outline-none focus:border-indigo-600";
+const btn = "inline-flex h-7 items-center rounded border border-divider bg-surface-subtle px-2.5 text-[10px] font-bold text-foreground/75 transition-colors hover:border-module-accent/30 hover:bg-surface-elevated hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40";
+const field = "h-7 w-full rounded border border-divider bg-surface-subtle px-2 text-[10px] text-foreground outline-none transition-colors hover:border-module-accent/25 focus:border-module-accent/45";
 const card = "rounded border border-slate-800 bg-[#090a0e] p-2";
 
 type LegacyPublication = {
@@ -38,6 +39,7 @@ export function PublicationsWorkspace() {
   const { data: session } = useSession(); const { selectedBrandId } = useBrand(); const pipeline = useEditorialPipeline();
   const [tab, setTab] = useState<"library" | "queue" | "published" | "updates">("library"); const [picker, setPicker] = useState(false);
   const [notice, setNotice] = useState(""); const [busyId, setBusyId] = useState<string | null>(null);
+  useNoticeBridge({ notice, module: "publicacoes", area: "Publicações", title: "Publicações", fallbackSeverity: "INFO" });
   const historyValue = useMemo(() => ({ operationalPublications: pipeline.operationalPublications }), [pipeline.operationalPublications]);
   const history = useLocalHistory("publicacoes", historyValue, snapshot => pipeline.restoreOperationalSnapshot("publicacoes", snapshot), 30, selectedBrandId || "sem-marca");
 
@@ -69,7 +71,7 @@ export function PublicationsWorkspace() {
   };
 
   const exportPublication = async (publication: OperationalPublication, format: "markdown" | "json") => {
-    const document = pipeline.documents[publication.documentId]; if (!document) { setNotice("O ContentDocument não está disponível para exportação."); return; }
+    const document = pipeline.documents[publication.documentId]; if (!document) { setNotice("O conteúdo do artigo não está disponível para exportação."); return; }
     setBusyId(publication.id); setNotice("");
     try {
       const artifact = await createPublicationExport(publication, document, format); downloadFile(artifact.fileName, artifact.mimeType, artifact.content);
@@ -80,7 +82,7 @@ export function PublicationsWorkspace() {
   const exportManifest = () => { downloadFile("publicacoes.csv", "text/csv;charset=utf-8", createPublicationsCsv(pipeline.operationalPublications)); setNotice("Manifesto CSV exportado."); };
   const columns: OperationalGridColumn<PublicationRow>[] = [
     { id: "title", header: "Conteúdo", value: row => row.title, pinned: "left", sortable: true, width: 250 },
-    { id: "unitType", header: "Unidade", value: row => row.unitType === "silo_page" ? "SiloPage" : "Artigo", width: 95 },
+    { id: "unitType", header: "Unidade", value: row => row.unitType === "silo_page" ? "Página do silo" : "Artigo", width: 95 },
     { id: "slug", header: "Slug", value: row => row.slug, width: 180, render: row => <code>/{row.slug}</code> },
     { id: "silo", header: "Silo", value: row => row.siloId, width: 130 },
     { id: "responsible", header: "Responsável", value: row => row.responsible || "não atribuído", width: 150 },
@@ -121,7 +123,7 @@ export function PublicationsWorkspace() {
 
   return <div className="flex h-screen min-h-0 flex-col">{notice && <div className="shrink-0 border-b border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-[9px] text-amber-300">{notice}</div>}
     <HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="publicacoes" showHistory={false} showUndoRedo={false}/><OperationalDataGrid module={`publicacoes:${tab}`} userId={sessionId(session)} brandId={selectedBrandId} rows={rows} columns={columns} topbar={{ moduleId: "publicacoes", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "publicacoes" } })), undoLabel: "Desfazer publicação", redoLabel: "Refazer publicação", historyLabel: "Histórico de Publicações", undoTitle: "Desfazer alteração em Publicações", redoTitle: "Refazer alteração em Publicações", historyTitle: count => `Histórico de Publicações (${count})` }, renderActions: renderTopbarActions }} emptyTitle="Nenhum conteúdo nesta aba." renderActions={row => <PublicationRowActions row={row} busy={busyId === row.id} onAction={runAction} onExport={exportPublication} onNotice={setNotice}/>} renderExpanded={row => <PublicationExpanded row={row}/>}/>
-    <WorkflowImportDialog open={picker} title="Importar aprovados do Redator" description="Documentos aprovados permanecem visíveis; itens já importados ficam bloqueados." rows={approved} label={item => item.title} details={item => <span className="mt-1 block text-slate-500">/{item.slug} · {item.unitType === "silo_page" ? "SiloPage" : "Artigo"}</span>} disabled={item => item.alreadyImported} status={() => "approved"} onClose={() => setPicker(false)} onImport={importApproved}/>
+    <WorkflowImportDialog open={picker} title="Importar aprovados do Redator" description="Documentos aprovados permanecem visíveis; itens já importados ficam bloqueados." rows={approved} label={item => item.title} details={item => <span className="mt-1 block text-slate-500">/{item.slug} · {item.unitType === "silo_page" ? "Página do silo" : "Artigo"}</span>} disabled={item => item.alreadyImported} status={() => "approved"} onClose={() => setPicker(false)} onImport={importApproved}/>
   </div>;
 }
 
@@ -148,7 +150,7 @@ function PublicationPublishForm({ row, busy, onPublish, onNotice, update = false
 }
 
 function PublicationExpanded({ row }: { row: PublicationRow }) {
-  return <dl className="grid gap-2 md:grid-cols-4"><Detail label="Artigo" value={row.articleId}/><Detail label="Unidade" value={row.unitType === "silo_page" ? "SiloPage" : "Artigo"}/><Detail label="ContentPlan" value={row.contentPlanVersionId || "legado"}/><Detail label="ContentDocument" value={row.documentId || "ausente"}/><Detail label="Destino" value={isWorkflow(row) ? row.destination || "não definido" : row.destination || "não definido"}/><Detail label="URL final" value={isWorkflow(row) ? row.destinationUrl || "não registrada" : "não registrada"}/><Detail label="Última exportação" value={isWorkflow(row) ? row.lastExportFileName || "não exportado" : "não aplicável"}/><div className={card}><strong className="text-[9px] uppercase text-slate-500">Histórico</strong>{isWorkflow(row) && row.history.length ? <ul className="mt-1 space-y-1">{row.history.slice().reverse().map(event => <li key={event.id} className="text-[9px] text-slate-400">{new Date(event.occurredAt).toLocaleString("pt-BR")} · {event.action}{event.destinationUrl ? ` · ${event.destinationUrl}` : ""}</li>)}</ul> : <p className="mt-1 text-[9px] text-slate-600">Nenhum evento operacional registrado.</p>}</div></dl>;
+  return <dl className="grid gap-2 md:grid-cols-4"><Detail label="Artigo" value={row.articleId}/><Detail label="Unidade" value={row.unitType === "silo_page" ? "Página do silo" : "Artigo"}/><Detail label="Plano editorial" value={row.contentPlanVersionId || "legado"}/><Detail label="Conteúdo do artigo" value={row.documentId || "ausente"}/><Detail label="Destino" value={isWorkflow(row) ? row.destination || "não definido" : row.destination || "não definido"}/><Detail label="URL final" value={isWorkflow(row) ? row.destinationUrl || "não registrada" : "não registrada"}/><Detail label="Última exportação" value={isWorkflow(row) ? row.lastExportFileName || "não exportado" : "não aplicável"}/><div className={card}><strong className="text-[9px] uppercase text-slate-500">Histórico</strong>{isWorkflow(row) && row.history.length ? <ul className="mt-1 space-y-1">{row.history.slice().reverse().map(event => <li key={event.id} className="text-[9px] text-slate-400">{new Date(event.occurredAt).toLocaleString("pt-BR")} · {event.action}{event.destinationUrl ? ` · ${event.destinationUrl}` : ""}</li>)}</ul> : <p className="mt-1 text-[9px] text-slate-600">Nenhum evento operacional registrado.</p>}</div></dl>;
 }
 
 function Detail({ label, value }: { label: string; value: string }) { return <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">{label}</dt><dd className="mt-1 break-words text-[10px] text-slate-300">{value}</dd></div>; }

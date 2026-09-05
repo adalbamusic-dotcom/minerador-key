@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authzErrorResponse, requireCanonicalSessionProfile, AuthzError } from "@/lib/server/authz";
+import { createCanonicalServiceClient } from "@/lib/server/canonical-authorization";
+import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { RedatorSectionRequestSchema, RedatorSectionProposalSchema } from "@/lib/redator/contracts";
@@ -19,7 +21,9 @@ export async function POST(request: NextRequest) {
     const section = input.document.blocks.find(block => block.id === input.sectionId && block.type === "heading");
     if (!section) throw new AuthzError(422, "A seção solicitada não pertence ao documento.");
     const context = createSectionPromptContext(input.document, input.sectionId, input.humanInstruction);
+    const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: profile.userId, brandId: input.brandId, client: createCanonicalServiceClient() });
     const generated = await generateStructuredAI({
+      provider,
       system: SECTION_WRITING_SYSTEM_PROMPT,
       user: buildSectionWritingPrompt(context),
       schema: ProviderSectionSchema,

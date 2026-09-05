@@ -1,5 +1,66 @@
 # Estado atual — Planejador
 
+## ContentPlan determinístico e cockpit editorial — 2026-08-27
+
+- **Implementado localmente:** `lib/planejador/deterministic-plan.ts` interpreta o pacote Radar sem criar uma segunda fonte de verdade, distribui referências por seção, preserva perguntas/entidades/objeções, mantém lacunas de fontes e links explícitas e constrói o gabarito a partir de métricas observadas quando disponíveis.
+- **Implementado localmente:** novos planos v2 recebem plano visual determinístico com uma capa e dois respiros, todos em `planned`, sem geração automática de imagem ou prompt inventado; FAQ não é oferecido como bloco novo.
+- **Implementado localmente:** o editor central expõe função argumentativa, tópicos, perguntas, entidades, objeções, instruções, restrições, exclusões, faixas de palavras/parágrafos, tom, profundidade, detalhe, referências preservadas e histórico local.
+- **Implementado localmente:** o cockpit foi normalizado para o sistema visual compartilhado, com estados legíveis de carregamento, ausência, conflito, proteção de publicação, revisão e plano visual em tamanhos responsivos.
+- **Verificado:** 25 testes focados Planejador/Radar, 20 testes do sistema visual, ESLint direcionado, `check-visual-system` e `git diff --check` passaram nesta execução.
+- **TypeScript:** `tsc --noEmit` continua bloqueado por erros preexistentes em `lib/minerador/keyword-qualification.ts` e pelas flags de regex dos testes `tests/agency-adalba-platform-internal.test.mts`; nenhum erro novo foi reportado nos arquivos desta implementação.
+- **Validado parcialmente no navegador:** a rota válida `/{brandRef}/planejador` resolve para o login tenantizado sem sessão; cockpit com dados reais, troca autenticada das etapas e inspeção visual completa aguardam login.
+- **Não executado:** migration, SQL, escrita/readback remoto, SERP paga, geração de imagem, publicação, commit, push e deploy.
+
+## InternalLinkGraph como contexto de entrada — 2026-08-26
+
+O Planejador pode receber a referência opcional e versionada
+`internalLinkGraphRef` dentro do handoff do Radar. Isso não transforma o
+grafo em `ContentPlan`, não concede mutação ao Planejador e mantém a escolha
+de seção, contexto, quantidade planejada e conceito de âncora separada da
+decisão estrutural do Arquiteto. A fundação remota, o readback e o isolamento
+cross-brand estão confirmados; o adaptador funcional de leitura do Planejador
+continua dependente da evolução do consumidor e não exige nova migration.
+
+## Gate de leitura do Radar — 2026-08-26
+
+```text
+RADAR_HANDOFF_V2=READY
+PLANNER_READ_CONTRACT=READY
+CONTENTPLAN_BOUNDARY=PRESERVED
+RADAR_PLANNER_HANDOFF_V2=PASS
+BACKWARD_COMPATIBILITY=PASS
+HANDOFF_DATABASE_CHANGE_REQUIRED=NO
+PERSISTENCE=EXISTS_NEEDS_ADAPTER
+```
+
+O Planejador lê o envelope v2 como evidência versionada e continua sendo o
+único responsável pelo `ContentPlan`. O envelope preserva ArticleDNA,
+`brandId`, `articleId`, `articleDnaVersionId`, SiloDNA, evidências SERP,
+proveniência, decisões humanas e hashes/versionamento; `ExpertEvidence` é
+opcional e `ProductEvidence` permanece opcional/futura. Não há mudança de
+banco.
+
+A fundação Telegram/Experts está `REMOTE VERIFIED`, mas contribuição Telegram
+real, texto/áudio E2E e Speech real continuam pendentes. O Planejador não
+refaz SERP e não transforma o envelope em decisão editorial automática.
+
+## Entrada canônica do Radar — 2026-08-26
+
+- **Implementado localmente:** o Planejador aceita o `RadarPlannerHandoff`
+  v2 como evidência de origem e o adapta ao `ContentPlan` existente sem
+  confundir as duas entidades.
+- **Preservado:** identidade por `brandId`, ArticleDNA/SiloDNA, versões,
+  hashes, aprovação humana, decisões, referências SERP e compatibilidade com
+  itens antigos sem envelope.
+- **Gate:** novas coletas para handoff usam DataForSEO. Um pacote histórico
+  Serper já válido e aprovado também pode formar o envelope sucessor, sem
+  converter ou apagar `provider=serper` da provenance.
+- **Persistência:** `EXISTS_NEEDS_ADAPTER` no payload JSONB do workflow;
+  nenhuma migration ou alteração remota foi executada.
+- **Pendente:** smoke autenticado Radar → Planejador com dados reais,
+  persistência/readback/reload e decisão humana do primeiro ContentPlan;
+  contribuição Telegram real permanece um gate separado.
+
 ## Estratégia KGR, volume e cobertura — 2026-07-21
 
 - **Implementado:** SDD `propostas/estrategia-kgr-volume-e-cobertura.md`; o Planejador consome as estratégias já formadas pelo ArticleDNA e registra snapshot compacto opcional no ContentPlan.
@@ -91,3 +152,10 @@ O pacote também preserva a identidade editorial como contexto de origem: o arti
 - O Planejador permanece protegido pelo contexto Supabase autenticado e não recebe grants, suporte ou comunicação enquanto a identidade/sessão não estiverem aprovadas no smoke.
 - A correção local ficou restrita à entrada de autenticação: erros agora são classificados sem mascarar falhas de configuração ou rede, e não foi criado fallback por e-mail, `ADMIN_EMAIL` ou NextAuth.
 - Acesso real ao Planejador, Admin global, conta comum, reload e logout continuam pendentes de validação manual autenticada.
+
+## Brand Skills no contexto de IA — 2026-08-28
+
+- **Implementado localmente:** builder compartilhado de Brand Context e adaptador `content-plan` do Planejador, com `definitionKey`, versão, hash e ID de versão quando a operação efetivamente o usar.
+- **Preservado:** BrandDNA continua superior; evidência Radar, ArticleDNA e identidade publicada não são alterados. ContentPlan guarda apenas referências compactas.
+- **Limite confirmado:** o runtime atual do Planejador é determinístico e não contém chamada de IA/provider. Nenhum provider, dado remoto ou ContentPlan real foi alterado.
+- **Pendente:** ativar a Skill real Care Glow, integrar a primeira operação IA autorizada antes do prompt e executar smoke controlado.

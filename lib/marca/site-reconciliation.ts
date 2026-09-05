@@ -73,7 +73,7 @@ export function extractCandidatesForEntry(entry: SiteCatalogEntry, now = new Dat
       id: crypto.randomUUID(), brandId: entry.brandId, catalogEntryId: entry.id, text: source.text, normalizedText, sourceUrl: entry.normalizedUrl,
       sourceField: source.sourceField, sourceFields, suggestedRole: candidateRole(source.sourceField, source.text, entry, isPrimary), slugCoherence: isPrimary ? slugCoherenceFromFields(sourceFields) : "unknown",
       urlSituation: entry.verificationStatus, publicationStatus: entry.verificationStatus === "not_found" ? "not_found" : entry.verificationStatus === "redirect" ? "redirected" : entry.verificationStatus === "canonical_conflict" ? "canonical_conflict" : "not_confirmed", keywordUrlRelation: isPrimary ? "candidate_primary" : "undefined",
-      architectureStatus: "awaiting_architecture", relationConfirmedBy: null, relationConfirmedAt: null,
+      architectureStatus: "awaiting_architecture", relationConfirmedBy: null, relationConfirmedAt: null, lastCheckedAt: entry.lastVerifiedAt,
       confidence: isPrimary ? primarySignal.confidence : candidateConfidence(source.score), qualificationStatus: "awaiting_minerador", isKgr: false,
       status: "new", originalText: source.text, extractedAt: now, mineradorKeywordId: null, importBatchId: null, sentAt: null,
     });

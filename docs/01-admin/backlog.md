@@ -1,5 +1,56 @@
 # Backlog — Admin
 
+## Consolidação canônica da fundação compartilhada — 2026-08-25
+
+- [x] Registrar Plataforma/Admin → Agência → Marca como governança acima dos módulos.
+- [x] Registrar DataForSEO, DeepSeek, Google Cloud Speech/Storage e YouTube como operações compartilhadas, sem provider por módulo.
+- [x] Registrar Bot Telegram global, `getMe = PASS` e separação entre Bot pronto e webhook pronto.
+- [ ] Configurar webhook público e executar inbound E2E Telegram; não transformar `NOT_CONFIGURED` em `READY`.
+- [ ] Executar smokes de operação separados das Connections `READY`, preservando a distinção entre credential, connection/provider e operation.
+
+> Entradas datadas posteriores preservam o histórico operacional de cada fase.
+> Qualquer menção antiga a Serper, OpenRouter ou provider por módulo deve ser
+> lida como snapshot/superseded, não como estado ou autorização vigente.
+
+## Telegram global + entradas de especialistas — 2026-08-25
+
+- [x] Preparar SDD, contratos `ExpertBrief`/`ExpertContribution`, provider/capabilities globais e migration local tenant-safe.
+- [x] Preparar Admin para Bot Token Telegram, segredo de webhook automático, `getMe` sem URL e `setWebhook` somente por ação explícita com URL HTTPS.
+- [x] Preparar binding por Marca, onboarding de uso único, deduplicação de Updates e fila durável para Local Worker.
+- [ ] Aplicar manualmente a migration, configurar o webhook público e executar inbound E2E sem expor o token; Bot Token/Secret Store e `getMe` já estão registrados como configurados.
+- [ ] Executar os smokes de operação Storage/Speech/YouTube separados da Connection `READY`; os SDKs e a configuração global já estão registrados como disponíveis.
+
+## Google Cloud Media APIs compartilhadas — 2026-08-25
+
+- [x] Preparar SDD, capabilities e migration sucessora local para Speech-to-Text, Cloud Storage e YouTube Data API.
+- [x] Integrar providers/Connection globais, Secret Store server-side, operações compartilhadas e health checks explícitos no Admin.
+- [x] Preservar Agency/Brand gate, isolamento por `brandId`, ausência de integrações por módulo e separar Telegram como infraestrutura global própria.
+- [ ] Habilitar/confirmar manualmente APIs, bucket/segredos específicos e executar os três smokes reais; `Connection READY` não é prova de operação concluída.
+
+## Google Ads — rotação exclusiva do OAuth Refresh Token — 2026-08-24
+
+- [x] Tornar os campos estáticos Google Ads somente leitura na UI e manter sua
+  resolução em ENV/server-side.
+- [x] Expor somente a ação protegida de rotação do OAuth Refresh Token para
+  Admin global, sem retornar o segredo e sem health check automático.
+- [x] Persistir a nova referência no Secret Store antes de atualizar o ponteiro
+  da Connection; readback da UI permanece sanitizado.
+- [ ] Executar manualmente a rotação real e o health check Google Ads; nenhum
+  provider é chamado pelo salvamento do formulário.
+
+## Integrações de IA — Fase 2 local — 2026-08-19
+
+- [x] Apresentar DeepSeek como único provider operacional de IA, sem seleção ou
+  fallback OpenRouter.
+- [x] Preservar histórico/Usage OpenRouter e distinguir `NOT_CONFIGURED`,
+  `READY` e `ERROR` sem criar configuração remota nesta tarefa.
+- [ ] Validar manualmente o smoke real de operação DeepSeek com readback/Usage;
+  Connection `READY`, segredo e modelo `deepseek-v4-pro` já estão registrados.
+
+Itens posteriores que citam OpenRouter pertencem ao backlog histórico anterior
+ao cutover local; não representam seleção, fallback ou configuração operacional
+vigente.
+
 ## Central de Comunicação da Plataforma — migration local preparada
 
 - **Auditoria local concluída:** o envio atual de convite e acesso usa
@@ -462,7 +513,7 @@ O adendo completo está em `docs/compartilhado/adendo-modelo-canonico-conta-agen
   ausência do catálogo não bloqueia provider, mas não grava evento sem
   `capability_id` válido.
 
-# Integrações — OpenRouter / modelo operacional (2026-08-15)
+# Histórico — Integrações — OpenRouter / modelo operacional (2026-08-15)
 
 - [x] Persistir o model ID em `integration_connections.metadata` sem recriar a
   Connection ou alterar o secret.
@@ -472,6 +523,27 @@ O adendo completo está em `docs/compartilhado/adendo-modelo-canonico-conta-agen
   real final com o modelo disponível.
 - [ ] Avaliar catálogo editável de modelos do OpenRouter em tarefa própria; a
   implementação atual valida model ID, sem inventar catálogo local.
+
+# Integrações — DataForSEO SERP de compatibilidade (2026-08-24)
+
+- [x] Auditar o naming existente e escolher `dataforseo.serp_compatibility`
+  como chave única da nova capability.
+- [x] Adicionar `serp_compatibility` ao contrato de operações e ao catálogo
+  Platform, preservando `allintitle` e as operações legadas.
+- [x] Manter a operação nova no caminho governado por capability,
+  grant/binding, Connection e quota; não usar o bypass legado de homologação.
+- [x] Preparar migration sucessora sem editar 0024, sem inserir IDs de Agency/
+  Brand e sem executar schema remoto.
+- [x] Cobrir provider DataForSEO, reutilização de Connection, governança,
+  Brand no Usage, compatibilidade e ausência de fallback Serper/RapidAPI nos
+  testes locais direcionados.
+- [ ] Aplicar manualmente a migration sucessora e confirmar readback remoto.
+- [ ] Cadastrar/confirmar capability, Connection DataForSEO READY e
+  Platform → AdalbaPro → Adalba com grant, binding e quota pelo Admin.
+- [ ] Homologar o consumidor Arquiteto em tarefa própria, sem alterar este
+  foundation gate.
+
+`DATAFORSEO_SERP_CAPABILITY_READY = PENDING_MANUAL_APPLY`.
 
 ## Evidência local separada
 

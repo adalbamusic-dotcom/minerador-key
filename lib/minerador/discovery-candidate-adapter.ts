@@ -38,6 +38,7 @@ function asSourceData(value: unknown): DiscoverySourceData | null {
       competition: typeof importedMetrics.competition === "string" ? importedMetrics.competition : null,
       competitionIndex: asNumberOrNull(importedMetrics.competitionIndex),
       resultsAllintitle: asNumberOrNull(importedMetrics.resultsAllintitle),
+      keywordDifficulty: asNumberOrNull(importedMetrics.keywordDifficulty),
     } : null,
     recognizedFields: Array.isArray(object.recognizedFields) ? object.recognizedFields.filter((item): item is string => typeof item === "string") : [],
     ignoredFields: Array.isArray(object.ignoredFields) ? object.ignoredFields.filter((item): item is string => typeof item === "string") : [],
@@ -73,4 +74,3 @@ export function mapDiscoveryCandidateRow(row: Record<string, unknown>): Discover
     importedKeywordId: typeof row.imported_keyword_id === "string" ? row.imported_keyword_id : null,
   };
 }
-

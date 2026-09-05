@@ -8,6 +8,7 @@ import { resolveArticleSerpIdentityContext } from "@/lib/arquiteto/identity-cont
 import { createStatusEvent, createVersionEnvelope } from "@/lib/arquiteto/versioning";
 import { appendArquitetoArtifact, pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
+import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { MAX_KEYWORDS_PER_ARTICLE } from "@/lib/arquiteto/domain-rules";
 import { inspectArticleFormation } from "@/lib/arquiteto/article-formation-rules";
@@ -47,6 +48,7 @@ export async function POST(req: Request) {
     const parsed = RequestSchema.safeParse(await req.json());
     if (!parsed.success) return NextResponse.json({ success: false, error: "Grupos invalidos.", issues: parsed.error.flatten() }, { status: 400 });
     const context = await resolvePipelineContext({ brandId: parsed.data.brand.id, module: "arquiteto", action: "create" });
+    const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: context.actorUserId, brandId: context.brandId, client: context.supabase });
     if (parsed.data.groups.some(group => group.keywordIds.length > MAX_KEYWORDS_PER_ARTICLE)) {
       return NextResponse.json({ success: false, error: `Reprocesse a logica: nenhum artigo pode ter mais de ${MAX_KEYWORDS_PER_ARTICLE} keywords.` }, { status: 422 });
     }
@@ -55,6 +57,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "A formação do artigo possui bloqueios estruturais.", issues: formationIssues }, { status: 422 });
     }
     const result = await generateStructuredAI({
+      provider,
       system: SYSTEM_PROMPT,
       user: buildArticleDnaUserPrompt(parsed.data.groups, parsed.data.brand),
       schema: ResponseSchema,

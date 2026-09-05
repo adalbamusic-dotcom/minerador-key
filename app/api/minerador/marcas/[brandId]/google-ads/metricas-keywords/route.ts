@@ -54,6 +54,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { data: keywordRows, error: keywordError } = input.keywordIds.length ? await profile.supabase
       .from("minerador_keywords")
       .select("id,brand_id,keyword,status,volume_search,results_allintitle,kgr_score,volume_source,analise_semantica")
+      .eq("brand_id", context.brandId)
+      .is("deleted_at", null)
       .in("id", input.keywordIds) : { data: [], error: null };
     if (keywordError) throw keywordError;
     const keywords = (keywordRows || []).map(row => ({ id: String(row.id), brandId: String(row.brand_id || ""), keyword: String(row.keyword || ""), status: String(row.status || ""), volume_search: typeof row.volume_search === "number" ? row.volume_search : null, results_allintitle: typeof row.results_allintitle === "number" ? row.results_allintitle : null, kgr_score: typeof row.kgr_score === "number" ? row.kgr_score : null, volume_source: typeof row.volume_source === "string" ? row.volume_source : null, analise_semantica: row.analise_semantica && typeof row.analise_semantica === "object" ? row.analise_semantica as Record<string, unknown> : null })) as GoogleAdsVolumeKeyword[];
@@ -126,7 +128,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
       const patch = measurement.averageMonthlySearches === null
         ? buildGoogleAdsUnavailableVolumePatch(keyword, measurement)
-        : buildGoogleAdsVolumeMetricPatch(keyword, measurement);
+        : buildGoogleAdsVolumeMetricPatch(keyword, measurement, { requireCurrentResultsMeasurement: true });
       internalStage = "persist_measurements";
       const { data: persistedMeasurement, error: measurementError } = await profile.supabase
         .from("minerador_keyword_metric_measurements")
@@ -137,7 +139,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       persistenceWriteCount += 1;
       if (patch) {
         internalStage = "project_keywords";
-        const { error: projectionError } = await profile.supabase.from("minerador_keywords").update(patch).eq("id", measurement.keywordId).eq("brand_id", context.brandId);
+        const { error: projectionError } = await profile.supabase.from("minerador_keywords").update(patch).eq("id", measurement.keywordId).eq("brand_id", context.brandId).is("deleted_at", null);
         if (projectionError) {
           await profile.supabase.from("minerador_keyword_metric_measurements").update({ outcome: "projection_failed" }).eq("id", persistedMeasurement.id).eq("brand_id", context.brandId);
           throw projectionError;
@@ -180,7 +182,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
               averageMonthlySearches: null,
               googleAdsRequestId,
             }),
-          }).eq("id", keyword.id).eq("brand_id", authorizedBrandId!);
+          }).eq("id", keyword.id).eq("brand_id", authorizedBrandId!).is("deleted_at", null);
         } catch {
           // A falha de marcação compensatória não pode apagar o diagnóstico original.
         }

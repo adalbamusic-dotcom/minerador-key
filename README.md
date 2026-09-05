@@ -25,9 +25,19 @@ Next.js 16 (App Router), React 19, TypeScript, Tailwind, Zod, NextAuth, Supabase
 
 ## Módulos e documentação
 
-O repositório é um monólito modular. A documentação canônica está em [docs/README.md](docs/README.md): cada módulo possui `spec.md`, `estado-atual.md` e `backlog.md`; as regras globais ficam em `docs/00-produto/`. Documentos históricos foram preservados em `docs/_arquivo/` e não são fonte de verdade.
+O repositório é um monólito modular. A documentação canônica está em [docs/README.md](docs/README.md): cada módulo possui `spec.md`, `estado-atual.md` e `backlog.md`; os contratos globais de pipeline, estado e sistema visual ficam em `docs/00-produto/` e `docs/compartilhado/`. Documentos históricos foram preservados em `docs/_arquivo/` e não são fonte de verdade.
 
 Fluxo oficial: `Marca → Minerador → Arquiteto → Radar → Planejador → Redator → Publicações`.
+
+## Estado da fundação
+
+O Master Refresh está encerrado: `DATABASE_REFRESH = COMPLETE` e
+`GLOBAL_FOUNDATION = READY`. A baseline canônica de 2026-08-17 é
+`f058b86b56e6d99ab24dac967241c221`; `0043` e `0044` estão fechadas. Banco,
+Auth, Agency/Brand e integrações são infraestrutura congelada para a fase
+`FUNCTIONAL_AREA_DEVELOPMENT`. A documentação da fase e o backlog global estão
+em [docs/task-functional-area-development.md](docs/task-functional-area-development.md)
+e [docs/00-produto/backlog.md](docs/00-produto/backlog.md).
 
 ## Executar localmente
 

@@ -11,9 +11,9 @@ export type SiteKeywordMineradorExisting = {
 
 export interface SiteKeywordEvidence {
   schemaVersion: "site-sitemap-v1";
-  source: "site_sitemap";
+  source: "site_sitemap" | "manual_url";
   brandId: string;
-  catalogEntryId: string;
+  catalogEntryId: string | null;
   sourceUrl: string;
   resolvedUrl: string | null;
   declaredCanonicalUrl: string | null;
@@ -32,6 +32,10 @@ export interface SiteKeywordEvidence {
   extractedAt: string | null;
   importedAt: string;
   lastCheckedAt: string;
+  httpStatus?: number | null;
+  contentType?: string | null;
+  pageTitle?: string | null;
+  pageH1?: string | null;
   relationConfirmedBy: string | null;
   relationConfirmedAt: string | null;
   siloId?: string;
@@ -54,16 +58,22 @@ export interface SiteKeywordMineradorInsert {
   };
 }
 
-export type SiteKeywordMineradorCandidateInput = Pick<SiteKeywordCandidate, "id" | "brandId" | "text" | "catalogEntryId" | "sourceUrl" | "sourceField" | "suggestedRole" | "confidence"> & Partial<Pick<SiteKeywordCandidate, "normalizedText" | "sourceFields" | "slugCoherence" | "urlSituation" | "publicationStatus" | "keywordUrlRelation" | "architectureStatus" | "extractedAt">> & {
+export type SiteKeywordMineradorCandidateInput = Omit<Pick<SiteKeywordCandidate, "id" | "brandId" | "text" | "catalogEntryId" | "sourceUrl" | "sourceField" | "suggestedRole" | "confidence">, "catalogEntryId"> & { catalogEntryId: string | null } & Partial<Pick<SiteKeywordCandidate, "normalizedText" | "sourceFields" | "slugCoherence" | "urlSituation" | "publicationStatus" | "keywordUrlRelation" | "architectureStatus" | "extractedAt">> & {
+  sourceKind?: "site_sitemap" | "manual_url";
   resolvedUrl?: string | null;
   declaredCanonicalUrl?: string | null;
   relationConfirmedBy?: string | null;
   relationConfirmedAt?: string | null;
+  lastCheckedAt?: string | null;
+  httpStatus?: number | null;
+  contentType?: string | null;
+  pageTitle?: string | null;
+  pageH1?: string | null;
 };
 
 export interface SiteKeywordMineradorRepository {
-  validateDestination(brandId: string, targetListId: string): Promise<void>;
-  findByList(brandId: string, targetListId: string): Promise<SiteKeywordMineradorExisting[]>;
+  validateDestination(brandId: string, targetListId: string | null): Promise<void>;
+  findByList(brandId: string, targetListId: string | null): Promise<SiteKeywordMineradorExisting[]>;
   insertKeyword(payload: SiteKeywordMineradorInsert): Promise<{ id: string; brand_id: string; keyword: string }>;
   updateKeywordEvidence?(input: { id: string; brandId: string; analise_semantica: Record<string, unknown> }): Promise<void>;
 }
@@ -72,7 +82,8 @@ export interface SiteKeywordImportItem {
   candidateId: string;
   text: string;
   normalizedText: string;
-  catalogEntryId: string;
+  catalogEntryId: string | null;
+  sourceKind: "site_sitemap" | "manual_url";
   sourceUrl: string;
   sourceField: SiteKeywordCandidate["sourceField"];
   sourceFields: SiteKeywordCandidate["sourceFields"];
@@ -85,6 +96,11 @@ export interface SiteKeywordImportItem {
   resolvedUrl: string | null;
   declaredCanonicalUrl: string | null;
   extractedAt: string | null;
+  lastCheckedAt?: string | null;
+  httpStatus?: number | null;
+  contentType?: string | null;
+  pageTitle?: string | null;
+  pageH1?: string | null;
   confidence: SiteKeywordCandidate["confidence"];
   outcome: "imported" | "existing_in_minerador" | "evidence_updated" | "no_change" | "duplicate_in_batch" | "failed";
   mineradorKeywordId: string | null;
@@ -94,7 +110,7 @@ export interface SiteKeywordImportItem {
 export interface SiteKeywordImportResult {
   batchId: string;
   brandId: string;
-  targetListId: string;
+  targetListId: string | null;
   status: "completed" | "partial" | "failed";
   persisted: boolean;
   items: SiteKeywordImportItem[];
@@ -120,6 +136,7 @@ function itemBase(candidate: SiteKeywordMineradorCandidateInput, normalizedText:
     text: candidate.text,
     normalizedText,
     catalogEntryId: candidate.catalogEntryId,
+    sourceKind: candidate.sourceKind || "site_sitemap",
     sourceUrl: candidate.sourceUrl,
     sourceField: candidate.sourceField,
     sourceFields: candidate.sourceFields?.length ? candidate.sourceFields : [candidate.sourceField],
@@ -132,6 +149,11 @@ function itemBase(candidate: SiteKeywordMineradorCandidateInput, normalizedText:
     resolvedUrl: candidate.resolvedUrl ?? null,
     declaredCanonicalUrl: candidate.declaredCanonicalUrl ?? null,
     extractedAt: candidate.extractedAt ?? null,
+    lastCheckedAt: candidate.lastCheckedAt ?? null,
+    httpStatus: candidate.httpStatus ?? null,
+    contentType: candidate.contentType ?? null,
+    pageTitle: candidate.pageTitle ?? null,
+    pageH1: candidate.pageH1 ?? null,
     confidence: candidate.confidence,
   };
 }
@@ -140,10 +162,10 @@ function errorReason(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Falha ao persistir a keyword no Minerador.";
 }
 
-function buildEvidence(candidate: SiteKeywordMineradorCandidateInput, normalizedText: string, batchId: string, requestedBy: string, importedAt: string, destination: { siloId: string; siloName?: string | null }): SiteKeywordEvidence {
+function buildEvidence(candidate: SiteKeywordMineradorCandidateInput, normalizedText: string, batchId: string, requestedBy: string, importedAt: string, destination: { siloId?: string | null; siloName?: string | null }): SiteKeywordEvidence {
   return {
     schemaVersion: "site-sitemap-v1",
-    source: "site_sitemap",
+    source: candidate.sourceKind || "site_sitemap",
     brandId: candidate.brandId,
     catalogEntryId: candidate.catalogEntryId,
     sourceUrl: candidate.sourceUrl,
@@ -163,10 +185,14 @@ function buildEvidence(candidate: SiteKeywordMineradorCandidateInput, normalized
     requestedBy,
     extractedAt: candidate.extractedAt ?? null,
     importedAt,
-    lastCheckedAt: importedAt,
+    lastCheckedAt: candidate.lastCheckedAt ?? importedAt,
+    httpStatus: candidate.httpStatus ?? null,
+    contentType: candidate.contentType ?? null,
+    pageTitle: candidate.pageTitle ?? null,
+    pageH1: candidate.pageH1 ?? null,
     relationConfirmedBy: candidate.relationConfirmedBy ?? null,
     relationConfirmedAt: candidate.relationConfirmedAt ?? null,
-    siloId: destination.siloId,
+    siloId: destination.siloId || undefined,
     siloName: destination.siloName ?? null,
     consolidatedAt: importedAt,
   };
@@ -195,7 +221,7 @@ export function mergeSiteEvidence(existing: Record<string, unknown> | null | und
 
 export async function importSiteKeywordsToMinerador(input: {
   brandId: string;
-  targetListId: string;
+  targetListId: string | null;
   candidates: SiteKeywordMineradorCandidateInput[];
   importBatchId: string;
   requestedBy: string;
@@ -204,7 +230,6 @@ export async function importSiteKeywordsToMinerador(input: {
   now?: string;
 }): Promise<SiteKeywordImportResult> {
   if (!input.brandId) throw new Error("Marca obrigatória para importar keywords.");
-  if (!input.targetListId) throw new Error("Lista de destino obrigatória para importar keywords.");
   if (!input.candidates.length) throw new Error("Nenhuma candidata foi selecionada para importar.");
 
   await input.repository.validateDestination(input.brandId, input.targetListId);
@@ -268,6 +293,12 @@ export async function importSiteKeywordsToMinerador(input: {
       continue;
     }
 
+    if (!input.targetListId) {
+      const reason = "Silo/Categoria é necessário somente para importar uma keyword nova. Selecione um destino para criar a keyword.";
+      items.push({ ...base, outcome: "failed", mineradorKeywordId: null, reason });
+      failed.push({ candidateId: candidate.id, keyword: candidate.text, reason });
+      continue;
+    }
     const evidence = buildEvidence(candidate, normalizedText, input.importBatchId, input.requestedBy, importedAt, { siloId: input.targetListId, siloName: input.targetListName });
     const payload: SiteKeywordMineradorInsert = {
       brand_id: input.brandId,

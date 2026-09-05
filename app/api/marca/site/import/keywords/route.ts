@@ -6,8 +6,8 @@ import { SiteKeywordArchitectureStatusSchema, SiteKeywordSourceFieldSchema, Site
 import { assertAllowedExternalUrl } from "@/lib/marca/site-security";
 import { importSiteKeywordsToMinerador } from "@/lib/marca/site-minerador-import";
 
-const CandidateSchema = z.object({ id: z.string().uuid(), brandId: z.string().uuid(), text: z.string().trim().min(1), normalizedText: z.string().trim().min(1), sourceUrl: z.string().url(), sourceField: SiteKeywordSourceFieldSchema, sourceFields: z.array(SiteKeywordSourceFieldSchema).default([]), suggestedRole: SiteKeywordSuggestedRoleSchema, slugCoherence: z.enum(["high", "medium", "low", "unknown"]).default("unknown"), urlSituation: SiteVerificationStatusSchema.default("unverified"), publicationStatus: SitePublicationStatusSchema.default("not_confirmed"), keywordUrlRelation: SiteKeywordUrlRelationSchema.default("undefined"), architectureStatus: SiteKeywordArchitectureStatusSchema.default("awaiting_architecture"), relationConfirmedBy: z.string().nullable().optional(), relationConfirmedAt: z.string().datetime().nullable().optional(), extractedAt: z.string().datetime().nullable().optional(), resolvedUrl: z.string().url().nullable().optional(), declaredCanonicalUrl: z.string().url().nullable().optional(), confidence: z.enum(["high", "medium", "low"]), catalogEntryId: z.string().uuid() });
-const InputSchema = z.object({ brandId: z.string().uuid(), targetListId: z.string().uuid(), batchId: z.string().uuid(), candidates: z.array(CandidateSchema).min(1).max(500) });
+const CandidateSchema = z.object({ id: z.string().uuid(), brandId: z.string().uuid(), text: z.string().trim().min(1), normalizedText: z.string().trim().min(1), sourceKind: z.enum(["site_sitemap", "manual_url"]).optional(), sourceUrl: z.string().url(), sourceField: SiteKeywordSourceFieldSchema, sourceFields: z.array(SiteKeywordSourceFieldSchema).default([]), suggestedRole: SiteKeywordSuggestedRoleSchema, slugCoherence: z.enum(["high", "medium", "low", "unknown"]).default("unknown"), urlSituation: SiteVerificationStatusSchema.default("unverified"), publicationStatus: SitePublicationStatusSchema.default("not_confirmed"), keywordUrlRelation: SiteKeywordUrlRelationSchema.default("undefined"), architectureStatus: SiteKeywordArchitectureStatusSchema.default("awaiting_architecture"), relationConfirmedBy: z.string().nullable().optional(), relationConfirmedAt: z.string().datetime().nullable().optional(), lastCheckedAt: z.string().datetime().nullable().optional(), httpStatus: z.number().int().nullable().optional(), contentType: z.string().nullable().optional(), pageTitle: z.string().nullable().optional(), pageH1: z.string().nullable().optional(), extractedAt: z.string().datetime().nullable().optional(), resolvedUrl: z.string().url().nullable().optional(), declaredCanonicalUrl: z.string().url().nullable().optional(), confidence: z.enum(["high", "medium", "low"]), catalogEntryId: z.string().uuid().nullable() });
+const InputSchema = z.object({ brandId: z.string().uuid(), targetListId: z.string().uuid().nullable().optional().default(null), batchId: z.string().uuid(), candidates: z.array(CandidateSchema).min(1).max(500) });
 
 export async function POST(request: Request) {
   try {
@@ -15,10 +15,12 @@ export async function POST(request: Request) {
     if (input.candidates.some(candidate => candidate.brandId !== input.brandId)) throw new Error("A candidata não pertence à marca ativa.");
     const brand = await authorizedSiteBrand(input.brandId);
     const brandId = brand.brandId;
-    await assertListaBelongsToMarca(input.targetListId, brandId, brand.profile);
-    const { data: targetList, error: targetListError } = await brand.profile.supabase.from("minerador_keyword_lists").select("id,nome,marca_id").eq("id", input.targetListId).eq("marca_id", brandId).maybeSingle();
+    if (input.targetListId) await assertListaBelongsToMarca(input.targetListId, brandId, brand.profile);
+    const { data: targetList, error: targetListError } = input.targetListId
+      ? await brand.profile.supabase.from("minerador_keyword_lists").select("id,nome,marca_id").eq("id", input.targetListId).eq("marca_id", brandId).maybeSingle()
+      : { data: null, error: null };
     if (targetListError) throw targetListError;
-    if (!targetList) throw new Error("A lista de destino não foi localizada para a marca ativa.");
+    if (input.targetListId && !targetList) throw new Error("A lista de destino não foi localizada para a marca ativa.");
     input.candidates.forEach(candidate => assertAllowedExternalUrl(candidate.sourceUrl, brand.primaryHost));
     const result = await importSiteKeywordsToMinerador({
       brandId,
@@ -26,18 +28,22 @@ export async function POST(request: Request) {
       candidates: input.candidates,
       importBatchId: input.batchId,
       requestedBy: brand.profile.userId,
-      targetListName: targetList.nome,
+      targetListName: targetList?.nome || null,
       repository: {
-        validateDestination: async (requestedBrandId, targetListId) => assertListaBelongsToMarca(targetListId, requestedBrandId, brand.profile),
+        validateDestination: async (requestedBrandId, targetListId) => {
+          if (targetListId) await assertListaBelongsToMarca(targetListId, requestedBrandId, brand.profile);
+        },
         findByList: async (requestedBrandId, targetListId) => {
           if (requestedBrandId !== brandId) throw new Error("A marca da importacao nao corresponde ao tenant autorizado.");
-          const { data, error } = await brand.profile.supabase.from("minerador_keywords").select("id,brand_id,keyword,status,analise_semantica").eq("lista_id", targetListId).eq("brand_id", brandId);
+          let query = brand.profile.supabase.from("minerador_keywords").select("id,brand_id,keyword,status,analise_semantica").eq("brand_id", brandId).is("deleted_at", null);
+          if (targetListId) query = query.eq("lista_id", targetListId);
+          const { data, error } = await query;
           if (error) throw error;
           return data || [];
         },
         updateKeywordEvidence: async ({ id, brandId: requestedBrandId, analise_semantica }) => {
           if (requestedBrandId !== brandId) throw new Error("A marca da atualizacao nao corresponde ao tenant autorizado.");
-          const { error } = await brand.profile.supabase.from("minerador_keywords").update({ analise_semantica }).eq("id", id).eq("brand_id", brandId);
+          const { error } = await brand.profile.supabase.from("minerador_keywords").update({ analise_semantica }).eq("id", id).eq("brand_id", brandId).is("deleted_at", null);
           if (error) throw error;
         },
         insertKeyword: async payload => {

@@ -7,6 +7,22 @@ Operações remotas nesta etapa: Nenhuma
 Módulo proprietário: Fundação compartilhada / Persistência do Pipeline
 Classificação: DEFAULT_ACL_BASELINE_VERIFIED_WITH_DOCUMENTED_EVIDENCE_EXCEPTION
 
+## Histórico — adendo estrutural InternalLinkGraph e par SiloDNA/SiloPage — 2026-08-26
+
+O estado auditado acima descreve a fundação editorial anterior. A extensão
+local agora preparada adiciona, em migration separada, o
+`InternalLinkGraph` como entidade canônica de relações internas, sem alterar
+o significado de ArticleDNA, SiloDNA ou SiloPage. O grafo é tenantizado por
+`brandId`, append-only, com referências de versão, hashes determinísticos,
+propostas separadas, RLS e readback.
+
+Também foi preparada a RPC `persist_silo_pair_atomic(...)` para a consolidação
+humana de SiloDNA/SiloPage. Ela mantém as entidades e aprovações distintas,
+mas executa os dois inserts na mesma transação. A lista/workflow do Arquiteto
+continua fora desse boundary. A aplicação remota posterior, o readback e o
+smoke estão registrados no estado vigente do Arquiteto; este bloco preserva o
+snapshot de preparação e não é a fonte atual de status.
+
 ## Decisão local de DEFAULT ACL
 
 O gate aprovou a policy para implementação local com:
@@ -526,3 +542,51 @@ storage, commit, push ou deploy nesta etapa.
 
 A aprovação desta SDD autorizará separadamente implementação local, preflights,
 snapshot e migrations sucessoras. Não autoriza aplicação remota.
+
+## Adendo estrutural — correção dos guards do InternalLinkGraph — 2026-08-27
+
+### Defeito encontrado
+
+O validator `internal_link_graph_validate_version_chain()` usava `SELECT ...
+FOR SHARE`. Com as tabelas aprovadas concedendo a `service_role` somente
+`SELECT, INSERT`, uma sucessora v2 falhava antes de validar a cadeia. A RPC
+principal já usa lock advisory, mas a integridade não pode depender somente da
+RPC. A persistência da working copy também validava identidade e
+`lock_version`, mas não comprovava no banco que as referências de SiloDNA,
+SiloPage e ArticleDNA pertenciam à mesma Brand.
+
+### Correção sucessora preparada
+
+A migration local
+`20260827044408_internal_link_graph_integrity_guards.sql` substitui o lock de
+linha do validator por `pg_advisory_xact_lock` na chave
+`brand_id + graph_id`, preservando as validações de predecessor, versão,
+linhagem e Brand. Ela adiciona o trigger
+`internal_link_graph_working_copies_validate_references_trg` para validar no
+banco, em INSERT e UPDATE, tipo, existência, hash, Brand, Silo e origem das
+referências persistidas no payload da working copy. A working copy continua
+mutável e `lock_version` continua sendo concorrência otimista, não versão
+editorial.
+
+Não há concessão de `UPDATE`, `SECURITY DEFINER`, tabela nova, mudança de RLS,
+alteração do par SiloDNA/SiloPage, handoff ou provider. O rollback local
+`supabase/rollback/20260827044408_internal_link_graph_integrity_guards.rollback.sql`
+remove somente o guard novo e restaura a definição anterior do validator.
+
+### Evidência e gate
+
+Os testes estruturais locais passaram: migration sucessora, rollback,
+preflight, persistência server-side e regressão do InternalLinkGraph. A
+migration foi aplicada manualmente e o readback remoto confirmou o validator
+invoker, `FOR SHARE = NO`, advisory lock por Brand/Grafo, `search_path`, guard
+da working copy, grants append-only e os três triggers append-only. O smoke
+remoto transacional passou para v1/v2, predecessor stale, sucessor duplicado,
+INSERT privilegiado direto, working copy, RLS, referências cross-brand e
+rollback; nenhum fixture permaneceu.
+
+A identidade de smoke Auth permaneceu sem perfil, ownership ou membership. A
+criação do par SiloDNA/SiloPage durante o smoke precisou usar o owner técnico
+`postgres`: o RPC existente é `SECURITY INVOKER`, usa `FOR UPDATE` em
+`editorial_artifact_versions` e `service_role` não possui `UPDATE` nessa
+tabela. Nenhum grant foi alterado nesta etapa; esse gap operacional permanece
+separado da correção dos guards do InternalLinkGraph.

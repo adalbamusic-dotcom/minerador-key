@@ -6,6 +6,43 @@
 - **Escopo:** contratos conceituais de conexões, capacidades, grants, bindings, consumo, segurança e transferência de marca
 - **Fora do escopo:** código, schema, migrations, RLS, provider, segredo, UI, rota, teste de conexão e operação remota
 
+### Adendo de precedência — OpenRouter → DeepSeek — Fase 1 — 2026-08-19
+
+O [adendo arquitetônico histórico do corte OpenRouter → DeepSeek](../_arquivo/2026-08-documentacao-legada/adendo-corte-openrouter-deepseek-fase-1-2026-08-19.md) e sua [auditoria vinculada](../_arquivo/2026-08-documentacao-legada/auditoria-corte-openrouter-deepseek-fase-1-2026-08-19.md) registram a precedência sobre referências anteriores de IA nesta SDD. OpenRouter está superseded como provider canônico; DeepSeek Official API é o único provider ativo previsto para a primeira fase, em uma Connection `platform`, com modelo explícito `deepseek-v4-pro`, sem fallback ou roteamento paralelo. Esta anotação registra decisão e auditoria; não autoriza implementação, migration, Connection remota ou chamada paga.
+
+### Atualização de implementação local — Fase 2 — 2026-08-19
+
+O código local implementa a decisão acima na camada compartilhada e nos
+consumidores auditados. A resolução exige Connection DeepSeek, capability,
+modelo permitido e segredo server-side; JSON válido do provider continua
+submetido a `JSON.parse` e validação Zod locais. Thinking é configurável por
+operação/capability. OpenRouter permanece somente como histórico/Usage legível,
+sem caminho ativo, fallback, seleção ou health check. Esta atualização não
+configura Connection remota, não altera schema e não homologa provider real.
+
+> As referências posteriores desta SDD a OpenRouter, Connections de OpenRouter
+> ou disponibilidade global de OpenRouter são snapshot histórico/contrato
+> superseded da Fase 1. Para o runtime atual, somente DeepSeek é provider de
+> `ai_generation`; o histórico remoto não é apagado nem reutilizado.
+
+### Consolidação canônica de estado — 2026-08-25
+
+O estado manual consolidado da infraestrutura compartilhada é:
+
+| Recurso | Estado documental | Limite da evidência |
+| --- | --- | --- |
+| Google Ads | credential configurada; infraestrutura fixa da Plataforma | connection/provider smoke e operation smoke continuam separados |
+| DataForSEO | `Connection READY` | disponibilidade da Connection não equivale a cada smoke de operação |
+| DeepSeek | `Connection READY`, modelo `deepseek-v4-pro` disponível | operation smoke continua separado |
+| Google Cloud Speech | `READY` | operação real depende de ação explícita |
+| Google Cloud Storage | `READY` | bucket/uso de mídia continuam separados do estado da Connection |
+| YouTube Data API | `READY` | metadata não implica download, áudio ou transcrição |
+| Telegram Bot global | token e segredo configurados; `getMe = PASS` | webhook não configurado; inbound E2E pendente |
+
+`PLATFORM_INTEGRATION_FOUNDATION = READY` e
+`READY_FOR_RADAR_DEVELOPMENT = YES`. Nenhum desses estados autoriza chamada
+paga automática, escrita remota ou provider por módulo.
+
 ## 1. Decisão arquitetônica
 
 A arquitetura final admite conexões em três escopos exclusivos: `platform`, `agency` e `brand`. Uma conexão possui exatamente um escopo proprietário e não muda de owner por compartilhamento. Compartilhar significa conceder uso de uma mesma conexão; não copia credencial, token ou segredo.
@@ -41,9 +78,9 @@ flowchart TD
 
 Variáveis de ambiente e configuração de Vercel servem à infraestrutura de deployment e, quando aprovadas como infraestrutura fixa da Plataforma, à configuração server-side de um provider. Elas nunca são cadastro operacional de Agency ou Brand, não chegam ao browser e não substituem autorização, governança de consumo ou auditoria.
 
-`GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV` é o destino aprovado para a infraestrutura fixa do Google Ads: `.env.local` em desenvolvimento e Environment Variables da Vercel em produção. O contrato atual prevê `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID` e `GOOGLE_ADS_RESEARCH_CUSTOMER_ID`; `GOOGLE_ADS_API_VERSION` pode permanecer como parâmetro técnico se o runtime ainda o consumir. Nenhuma variável é `NEXT_PUBLIC_`.
+`GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV_STATIC_PLUS_SECRET_STORE_REFRESH_TOKEN` é o destino aprovado para a infraestrutura fixa do Google Ads: configuração estática em `.env.local`/Environment Variables da Vercel e OAuth Refresh Token no Secret Store server-side, apontado por `integration_connections.secret_ref`. O contrato estático prevê `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID` e `GOOGLE_ADS_RESEARCH_CUSTOMER_ID`; a versão da API permanece allowlisted no cliente. O refresh token é rotacionável somente pelo Admin global, nunca é retornado ao browser e não possui fallback para ENV. Nenhuma variável é `NEXT_PUBLIC_`.
 
-Essa decisão é um target aprovado e não declara remoção já validada de Connection, Vault, `secret_ref`, grant, binding, entitlement ou tabela legada do código. O smoke autenticado e a prova de ausência de consumidores continuam sendo gates separados. DataForSEO e OpenRouter permanecem Connections governáveis; seus segredos operacionais não devem voltar a env como fallback silencioso.
+Essa decisão é um target aprovado e não declara remoção já validada de grant, binding, entitlement ou tabela legada do código. A Connection global e seu `secret_ref` são a referência operacional do segredo, sem armazenar o valor em coluna pública. O smoke autenticado e a prova de ausência de consumidores continuam sendo gates separados. DataForSEO e DeepSeek permanecem Connections governáveis; seus segredos operacionais não devem voltar a env como fallback silencioso.
 
 ## 4. Superfícies administrativas futuras
 
@@ -61,13 +98,16 @@ Nenhuma superfície lê ou devolve segredo. Todas mostram somente metadados sani
 
 | Integração | Contrato atual/legado | Destino canônico | Origem permitida | Dados produzidos | Estado |
 | --- | --- | --- | --- | --- | --- |
-| Google Ads | configuração/medição por marca e refresh token operacional em contrato legado | infraestrutura fixa da Plataforma via `PLATFORM_ENV`; Research Customer global executa pesquisa e `brandId` permanece dono dos dados | `all_active_agencies` durante homologação; futura governança de quantidade/período | por `brandId`; consumo atribuído à agência e marca | target aprovado; smoke pendente |
-| DataForSEO | credencial operacional por env em contrato legado | Connection global da Plataforma ou Connection própria de Agency, sem fallback | `platform_granted`, `agency_owned`, `unavailable` | por `brandId`; consumo/custo por agência, marca e ator | target aprovado; smoke pendente |
-| OpenRouter | chave operacional por env em contrato legado | Connection global da Plataforma ou Connection governável futura, separada do modelo | `platform_granted`, `unavailable` | por `brandId`; consumo/custo por agência, marca e ator | target aprovado; smoke pendente |
+| Google Ads | configuração/medição por marca e refresh token operacional em contrato legado | infraestrutura fixa da Plataforma; estáticos em ENV e refresh token no Secret Store via Connection global; Research Customer global executa pesquisa e `brandId` permanece dono dos dados | `all_active_agencies` durante homologação; futura governança de quantidade/período | por `brandId`; consumo atribuído à agência e marca | target aprovado; rotação/health check/smoke pendentes |
+| DataForSEO | capability SERP/orgânico compartilhada | Connection global da Plataforma ou Connection própria de Agency, sem fallback | `platform_granted`, `agency_owned`, `unavailable` | por `brandId`; consumo/custo por agência, marca e ator | Connection READY; operação separada |
+| DeepSeek | IA canônica compartilhada, modelo explícito | Connection global da Plataforma ou Connection própria de Agency conforme capability aprovada | `platform_granted`, `agency_owned`, `agency_granted`, `unavailable` | por `brandId`; consumo/custo por agência, marca e ator | Connection READY; operação separada |
+| Google Cloud Speech/Storage | mídia e processamento compartilhados | Connection global da Plataforma | `platform_granted`, `unavailable` | por `brandId` quando houver operação editorial | READY manual; health/operação separados |
+| YouTube Data API | metadata pública compartilhada | Connection global da Plataforma | `platform_granted`, `unavailable` | por `brandId` quando houver operação editorial | READY manual; operação separada |
+| Telegram Bot global | entrada externa compartilhada | Connection global da Plataforma; binding explícito por Brand/Expert | `platform_granted`, `unavailable` | por `brandId` após binding e brief explícitos | Bot configurado; webhook pendente |
 | IA própria | provider e contratos atuais dispersos | conexão por agência, grant da agência ou conexão própria da marca | `agency_owned`, `agency_granted`, `brand_owned`, `unavailable` | por `brandId`; auditoria de custo/uso | proposta |
 | WordPress/site/sitemap | integrações de Marca | conexão própria da marca | `brand_owned` | por `brandId` | proposta |
-| Serper | referência residual inválida | inexistente | nenhum | histórico preservado | resíduo inválido a eliminar |
-| RapidAPI | referência residual inválida | inexistente | nenhum | histórico preservado | resíduo inválido a eliminar |
+| Serper (histórico) | referência residual inválida | inexistente | nenhum | histórico preservado | fora do contrato ativo; zero legado é gate separado |
+| RapidAPI (histórico) | referência residual inválida | inexistente | nenhum | histórico preservado | fora do contrato ativo; zero legado é gate separado |
 | Extensão | bridge/ingestão com estado e gate próprios | decisão separada, sem relação com Serper/RapidAPI | conforme SDD própria | dados previamente produzidos preservados | estado próprio |
 
 ## 6. Capacidades e ambientes
@@ -82,13 +122,11 @@ Capacidade é mais específica que provider. Exemplos iniciais:
 | `dataforseo_serp_compatibility` | platform; agency | Arquiteto | capability canônica; Arquiteto não importa entidades internas do Radar |
 | `dataforseo_radar_serp` | platform; agency | Radar | Minerador não consome investigação SERP do Radar |
 | `dataforseo_amazon_products` | platform; agency | proposta futura do Radar | exige Proposta de Evolução Modular |
-| `openrouter_chat_completion` | platform | módulos aprovados | modelo, limite e ambiente explícitos |
-| `openrouter_content_planning` | platform | Planejador | consumo por agência/marca/ator |
-| `openrouter_content_writing` | platform | Redator | consumo por agência/marca/ator |
-| `openrouter_image_prompting` | platform | Planejador/Redator | não fixa provider de imagem nesta SDD |
-| `ai_content_planning` | agency; brand | Planejador | provider não definido aqui |
-| `ai_content_writing` | agency; brand | Redator | provider não definido aqui |
-| `ai_image_generation` | agency; brand | Planejador/Redator | provider não definido aqui |
+| `ai_generation` | platform; agency conforme capability | módulos aprovados | DeepSeek, modelo, limite e ambiente explícitos |
+| `ai_content_planning` | platform; agency conforme capability | Planejador | consumo por agência/marca/ator |
+| `ai_content_writing` | platform; agency conforme capability | Redator | consumo por agência/marca/ator |
+| `ai_image_prompting` | platform; agency conforme capability | Planejador/Redator | não fixa provider de imagem nesta SDD |
+| `ai_image_generation` | agency; brand | Planejador/Redator | provider de imagem não definido aqui |
 | `wordpress_publish` | brand | Publicações | conexão e URL da marca |
 | `wordpress_update` | brand | Publicações | conexão e URL da marca |
 | `wordpress_media` | brand | Publicações | conexão e URL da marca |
@@ -112,9 +150,10 @@ Conexão, grant e binding possuem `lifecycle_status` próprio: `draft`, `validat
 | `agency_brand_transfers` | transferência administrativa de marca entre agências, sem alterar `brandId` | token somente por hash, aprovação/auditoria/rollback metadata; retenção operacional | brand owner, source agency authorized admin, destination agency authorized admin e platform recovery process |
 
 `integration_connections` permanece o contrato canônico para Connections
-governáveis, especialmente DataForSEO e OpenRouter. O Google Ads fixo da
-Plataforma é a exceção explicitamente aprovada em `PLATFORM_ENV`; não se deve
-forçar uma Connection, `secret_ref` ou binding de módulo para representá-lo.
+governáveis, especialmente DataForSEO e DeepSeek. Para Google Ads, a
+Connection global é usada somente como ponteiro server-side do refresh token
+(`secret_ref`), sem segredo em coluna pública e sem binding de módulo para
+autorizar a operação.
 
 `agency_brand_transfers` contém conceitualmente `brand_id`, `from_agency_id`, `to_agency_id`, `status`, `requested_by_user_id`, `accepted_by_user_id`, `approved_by_user_id`, `token_hash`, `expires_at`, `scheduled_at`, `completed_at`, `failure_reason` e `rollback_metadata`. Estados: `requested`, `pending_acceptance`, `approved`, `scheduled`, `transferring`, `validating`, `completed`, `cancelled`, `failed` e `rolled_back`.
 
@@ -150,7 +189,7 @@ Permissões conceituais de agência: `agency:manage`, `agency:members`, `agency:
 
 Um grant referencia conexão existente sem copiar segredo. Sua origem/destino permitidos são `platform → agency`, `platform → brand` conforme política global ou `agency → brand`; contém capability, `environment`, `lifecycle_status`, vigência, autor administrativo e motivo. Grant revogado, suspenso, falho ou fora do ambiente não é resolução válida.
 
-Os modos conceituais de distribuição global são `explicit`, `all_active_agencies` e `all_authorized_brands`. Eles representam governança futura e não quota por módulo. Durante `HOMOLOGATION_OPEN`, Google Ads, DataForSEO e OpenRouter global `READY` ficam disponíveis a Agencies ACTIVE e Brands ACTIVE/autorizadas; fora dessa fase, a política efetiva é explícita, visível e nunca gera fallback silencioso.
+Os modos conceituais de distribuição global são `explicit`, `all_active_agencies` e `all_authorized_brands`. Eles representam governança futura e não quota por módulo. Durante `HOMOLOGATION_OPEN`, Google Ads, DataForSEO, DeepSeek e as operações globais de mídia `READY` ficam disponíveis a Agencies ACTIVE e Brands ACTIVE/autorizadas; fora dessa fase, a política efetiva é explícita, visível e nunca gera fallback silencioso.
 
 ### Binding
 
@@ -254,15 +293,15 @@ Durante a homologação, a política temporária é `HOMOLOGATION_OPEN` com
 `PLATFORM_ACCESS_POLICY = HOMOLOGATION_ALLOW_ALL`:
 
 ```text
-Connection global READY (DataForSEO/OpenRouter)
+Connection global READY (DataForSEO/DeepSeek/Google Cloud/YouTube)
 + Agência ACTIVE
 + Brand ACTIVE/autorizada
 = recurso disponível
 ```
 
-Para Google Ads, cujo source aprovado é `PLATFORM_ENV`, o primeiro termo é
-`Platform Google Ads configuration READY`; a regra de Agency, Brand e
-isolamento permanece a mesma.
+Para Google Ads, cujo source aprovado combina configuração estática ENV e
+Secret Store, o primeiro termo é `Platform Google Ads configuration READY`; a
+regra de Agency, Brand e isolamento permanece a mesma.
 
 Essa regra não é bypass: continuam obrigatórios autenticação, `actorUserId`,
 Agency, Brand, membership/owner/autorização, isolamento de tenant, provider
@@ -275,47 +314,50 @@ capability operacional ≠ autorização de módulo
 
 ### Google Ads — infraestrutura fixa da Plataforma
 
-`GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV` e
-`GOOGLE_ADS_AVAILABILITY = ALL_ACTIVE_AGENCIES`. A configuração server-side
-aprovada é composta por:
+`GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV_STATIC_PLUS_SECRET_STORE_REFRESH_TOKEN`
+e `GOOGLE_ADS_AVAILABILITY = ALL_ACTIVE_AGENCIES`. A configuração server-side
+aprovada é composta por estáticos em ENV:
 
 - `GOOGLE_ADS_DEVELOPER_TOKEN`;
 - `GOOGLE_ADS_CLIENT_ID`;
 - `GOOGLE_ADS_CLIENT_SECRET`;
-- `GOOGLE_ADS_REFRESH_TOKEN`;
 - `GOOGLE_ADS_LOGIN_CUSTOMER_ID`;
 - `GOOGLE_ADS_RESEARCH_CUSTOMER_ID`.
+
+O `GOOGLE_ADS_REFRESH_TOKEN` é um segredo operacional no Secret Store e a
+Connection global guarda somente seu `secret_ref`. Somente o Admin global pode
+rotacioná-lo.
 
 Desenvolvimento usa `.env.local` e produção usa Environment Variables da
 Vercel. Nenhuma variável é `NEXT_PUBLIC_`. `GOOGLE_ADS_API_VERSION` pode
 permanecer como parâmetro técnico se o runtime ainda o consumir.
 
-Google Ads não depende conceitualmente de `integration_connection`,
-`secret_ref`/Vault, credencial de Agency/Brand, entitlement por operação ou
-grant/quota por módulo. Isso é um target aprovado: não declara que dependências
-existentes foram removidas do código. `brandId` continua identificando o dono
+Google Ads não depende de credencial de Agency/Brand, entitlement por operação
+ou grant/quota de módulo para resolver o segredo global. A Connection global e
+o `secret_ref` são usados somente como ponteiro server-side; isso não declara
+que dependências legadas foram removidas do código. `brandId` continua identificando o dono
 dos dados produzidos; `GOOGLE_ADS_RESEARCH_CUSTOMER_ID` identifica a conta
 global usada em pesquisa. Operações futuras de campanhas reais de uma Brand
 podem exigir Customer ID próprio, sem contaminar a pesquisa atual.
 
-`GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV` não significa
+`GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV_STATIC_PLUS_SECRET_STORE_REFRESH_TOKEN` não significa
 `GOOGLE_ADS_USAGE = UNCONTROLLED`: a Plataforma poderá aplicar governança de
 quantidade e período antes da chamada, sem transformar isso em quota de módulo.
 
-### DataForSEO e OpenRouter — Connections governáveis
+### DataForSEO e DeepSeek — Connections governáveis
 
 `DATAFORSEO_CONFIG_SOURCE = CONNECTION` e
-`OPENROUTER_CONFIG_SOURCE = CONNECTION`. Durante a homologação, uma Connection
-global `READY` fica disponível para Agencies ACTIVE e Brands ACTIVE/autorizadas;
-futuramente podem existir Connection própria de Agency, limites, planos e
-restrições. Não há fallback silencioso entre fontes e não há permissão por
-módulo.
+`DEEPSEEK_CONFIG_SOURCE = CONNECTION`. Durante a homologação, Connections
+globais `READY` ficam disponíveis para Agencies ACTIVE e Brands
+ACTIVE/autorizadas; futuramente podem existir Connections próprias de Agency,
+limites, planos e restrições. Não há fallback silencioso entre fontes e não há
+permissão por módulo.
 
-OpenRouter mantém Connection e modelo separados: o modelo é configuração
-operacional, não credencial, entitlement ou nova Connection. DataForSEO é o
-provider orgânico canônico. Serper não deve ser restaurado; Arquiteto e Radar
-terão consumidores DataForSEO próprios, com contratos e smokes/paridade
-separados.
+DeepSeek mantém Connection e modelo separados: o modelo é configuração
+operacional, não credencial, entitlement ou nova Connection. DataForSEO é a
+infraestrutura orgânica compartilhada. O Radar reutiliza o contrato de SERP
+sem criar provider próprio. O provider SERP legado não deve ser restaurado;
+qualquer referência restante é histórica ou um gate separado de zero legado.
 
 ### Quota e unidades
 

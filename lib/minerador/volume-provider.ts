@@ -1,3 +1,5 @@
+import { isValidDataForSeoAllintitleMeasurement } from "./dataforseo-competition.ts";
+
 export type VolumeMetricPatch = {
   volume_search?: number;
   kgr_score?: number | null;
@@ -253,6 +255,7 @@ export function normalizeSeoKeywordResearchToolResponse(
 export function buildVolumeMetricPatch(
   existing: ExistingVolumeMetrics,
   measuredVolume: number | Extract<VolumeLookupResult, { status: "success" }> | undefined,
+  options: { requireCurrentResultsMeasurement?: boolean } = {},
 ): VolumeMetricPatch {
   if (measuredVolume === undefined) return {};
 
@@ -265,7 +268,18 @@ export function buildVolumeMetricPatch(
     volume_source: "real",
   };
 
-  const results = existing.results_allintitle;
+  const rawAllintitleMeasurement = existing.analise_semantica?.allintitle_measurement;
+  const existingAllintitleMeasurement = rawAllintitleMeasurement && typeof rawAllintitleMeasurement === "object" && !Array.isArray(rawAllintitleMeasurement)
+    ? rawAllintitleMeasurement as Record<string, unknown>
+    : null;
+  const measuredResults = isValidDataForSeoAllintitleMeasurement(existingAllintitleMeasurement)
+    ? typeof existingAllintitleMeasurement?.resultsAllintitle === "number"
+      ? existingAllintitleMeasurement.resultsAllintitle
+      : typeof existingAllintitleMeasurement?.results_allintitle === "number"
+        ? existingAllintitleMeasurement.results_allintitle
+        : null
+    : null;
+  const results = options.requireCurrentResultsMeasurement ? measuredResults : existing.results_allintitle;
   const canCalculateKgr = volume > 0 && results !== null && Number.isFinite(results) && results >= 0;
   patch.kgr_score = canCalculateKgr ? Number((results / volume).toFixed(4)) : null;
 

@@ -14,6 +14,75 @@ export const SerpRecommendationActionSchema = z.enum([
 export const SerpRecommendationStatusSchema = z.enum(["pending", "followed", "ignored", "superseded"]);
 export const SerpRecommendationConfidenceSchema = z.enum(["alta", "media", "baixa", "inconclusiva"]);
 export const SerpValidationProfileSchema = z.enum(["standard", "kgr_light", "published_architecture", "published_strengthening"]);
+export const SerpFormationEvidenceCompatibilitySchema = z.enum(["coerente", "parcialmente_coerente", "incompativel", "insuficiente"]);
+export const SerpFormationOverlapSchema = z.enum(["low", "medium", "high", "unknown"]);
+export const SerpFormationCannibalizationSchema = z.enum(["likely", "unlikely", "unknown"]);
+
+export const SerpFormationKeywordEvidenceSchema = z.object({
+  keywordId: z.string().min(1),
+  keywordDnaVersionId: z.string().min(1),
+  snapshotIds: z.array(z.string().min(1)).min(1),
+  compatibility: SerpFormationEvidenceCompatibilitySchema,
+  overlap: SerpFormationOverlapSchema,
+  observedIntent: z.string().nullable(),
+  dominantPageType: z.string().nullable(),
+  competition: z.enum(["baixa", "media", "alta", "desconhecida"]),
+  conflict: z.boolean(),
+  conflictReasons: z.array(z.string()),
+  likelyCannibalization: SerpFormationCannibalizationSchema,
+  needsSeparation: z.boolean().nullable(),
+  canJoin: z.boolean().nullable(),
+  principalPossiblyInadequate: z.boolean().nullable(),
+  insufficientEvidence: z.boolean(),
+}).strict();
+export type SerpFormationKeywordEvidence = z.infer<typeof SerpFormationKeywordEvidenceSchema>;
+
+export const SerpFormationOverlapEvidenceSchema = z.object({
+  leftKeywordId: z.string().min(1),
+  leftKeywordDnaVersionId: z.string().min(1),
+  rightKeywordId: z.string().min(1),
+  rightKeywordDnaVersionId: z.string().min(1),
+  sharedResultCount: z.number().int().nonnegative(),
+  sharedDomainCount: z.number().int().nonnegative(),
+  overlap: SerpFormationOverlapSchema,
+}).strict();
+export type SerpFormationOverlapEvidence = z.infer<typeof SerpFormationOverlapEvidenceSchema>;
+
+export const SerpFormationEvidenceSchema = z.object({
+  keywordObservations: z.array(SerpFormationKeywordEvidenceSchema).min(1),
+  overlaps: z.array(SerpFormationOverlapEvidenceSchema),
+  guidelines: z.array(z.string().min(1)).min(1),
+}).strict();
+export type SerpFormationEvidence = z.infer<typeof SerpFormationEvidenceSchema>;
+
+export const SerpSiloCandidateEvidenceSchema = z.object({
+  keywordId: z.string().min(1),
+  keywordDnaVersionId: z.string().min(1),
+  snapshotIds: z.array(z.string().min(1)),
+  observedIntent: z.string().nullable(),
+  dominantPageTypes: z.array(z.string()),
+  categoryHubLike: z.boolean().nullable(),
+  broadUniverse: z.boolean().nullable(),
+  multipleNeeds: z.boolean().nullable(),
+  amplitudeSufficient: z.boolean().nullable(),
+  evidenceStatus: z.enum(["observed", "insufficient"]),
+  notes: z.array(z.string().min(1)).min(1),
+}).strict();
+export type SerpSiloCandidateEvidence = z.infer<typeof SerpSiloCandidateEvidenceSchema>;
+
+export const SerpSiloCandidateAssessmentSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: z.string().min(1),
+  brandId: z.string().min(1),
+  keywordId: z.string().min(1),
+  keywordDnaVersionId: z.string().min(1),
+  keywordDnaSnapshot: KeywordDnaProvenanceSnapshotSchema,
+  snapshot: SerpResearchSnapshotSchema.nullable(),
+  evidence: SerpSiloCandidateEvidenceSchema,
+  createdAt: z.string().datetime(),
+  createdBy: z.string().min(1),
+}).strict();
+export type SerpSiloCandidateAssessment = z.infer<typeof SerpSiloCandidateAssessmentSchema>;
 
 export const SerpRecommendationDecisionSchema = z.object({
   status: SerpRecommendationStatusSchema,
@@ -62,8 +131,20 @@ export const SerpFormationAssessmentSchema = z.object({
   recommendations: z.array(SerpKeywordRecommendationSchema).min(1),
   conflicts: z.array(z.string()),
   notes: z.array(z.string()),
+  formationEvidence: SerpFormationEvidenceSchema.optional(),
   evaluationStatus: z.enum(["active", "outdated"]).default("active"),
   outdatedReason: z.string().nullable().default(null),
+  /**
+   * Qual composição esta evidência observou.
+   *
+   * Sem isso não há como provar que a avaliação vigente ainda descreve o
+   * artigo de agora: uma SERP excelente de outra composição continuaria
+   * exibindo um ✓ verde enquanto autoriza gravar outra coisa.
+   *
+   * Opcional porque avaliações anteriores ao gate não a declaram — e essas
+   * são tratadas como desatualizadas, nunca como atuais.
+   */
+  formationBaseHash: z.string().min(1).optional(),
 }).strict();
 export type SerpFormationAssessment = z.infer<typeof SerpFormationAssessmentSchema>;
 
@@ -92,6 +173,7 @@ export const SerpFormationRecoverySchema = z.object({
   updatedAt: z.string().datetime(),
   assessments: z.array(SerpFormationAssessmentSchema),
   verifications: z.array(SerpPublicationVerificationSchema).default([]),
+  siloCandidateEvidence: z.array(SerpSiloCandidateAssessmentSchema).default([]),
 }).strict();
 export type SerpFormationRecovery = z.infer<typeof SerpFormationRecoverySchema>;
 
@@ -104,6 +186,17 @@ export function latestSerpFormationAssessment(
 ): SerpFormationAssessment | undefined {
   return assessments
     .filter(assessment => assessment.brandId === brandId && assessment.articleId === articleId)
+    .sort((left, right) => right.version - left.version)
+    .at(0);
+}
+
+export function latestActiveSerpFormationAssessment(
+  assessments: SerpFormationAssessment[],
+  brandId: string,
+  articleId: string,
+): SerpFormationAssessment | undefined {
+  return assessments
+    .filter(assessment => assessment.brandId === brandId && assessment.articleId === articleId && assessment.evaluationStatus === "active")
     .sort((left, right) => right.version - left.version)
     .at(0);
 }
@@ -252,6 +345,171 @@ function compatibilityFor(snapshots: SerpResearchSnapshot[], references: Article
   return outlier || snapshots.some(snapshot => snapshot.diagnostic.verdict === "parcialmente_coerente") ? "parcialmente_coerente" : "coerente";
 }
 
+const sharedUrlCount = (left: SerpResearchSnapshot, right: SerpResearchSnapshot) => {
+  const rightUrls = new Set(right.organicResults.map(result => result.url));
+  return [...new Set(left.organicResults.map(result => result.url))].filter(url => rightUrls.has(url)).length;
+};
+
+const sharedDomainCount = (left: SerpResearchSnapshot, right: SerpResearchSnapshot) => {
+  const rightDomains = new Set(right.organicResults.map(result => result.domain));
+  return [...new Set(left.organicResults.map(result => result.domain))].filter(domain => rightDomains.has(domain)).length;
+};
+
+function overlapFor(sharedResults: number, sharedDomains: number, left: SerpResearchSnapshot, right: SerpResearchSnapshot): SerpFormationOverlapEvidence["overlap"] {
+  if (!left.organicResults.length || !right.organicResults.length) return "unknown";
+  const denominator = Math.max(1, Math.min(new Set(left.organicResults.map(result => result.url)).size, new Set(right.organicResults.map(result => result.url)).size));
+  const ratio = sharedResults / denominator;
+  if (ratio >= 0.5 || sharedResults >= 5 || sharedDomains >= 5) return "high";
+  if (ratio > 0 || sharedDomains > 0) return "medium";
+  return "low";
+}
+
+function keywordCompatibilityFor(reference: ArticleKeywordReference, snapshot: SerpResearchSnapshot): SerpFormationKeywordEvidence["compatibility"] {
+  if (!snapshot.organicResults.length || snapshot.diagnostic.verdict === "informacao_insuficiente") return "insuficiente";
+  const expected = normalizeSearchIntent(reference.normalizedIntent || reference.keywordDnaSnapshot?.payload.searchIntent || reference.coveredIntentions[0]);
+  const observed = normalizeSearchIntent(snapshot.diagnostic.dominantIntent);
+  if (expected === "unknown" || observed === "unknown") return "insuficiente";
+  if (expected !== observed) return snapshot.diagnostic.confidence === "high" ? "incompativel" : "parcialmente_coerente";
+  return snapshot.diagnostic.verdict === "parcialmente_coerente" ? "parcialmente_coerente" : "coerente";
+}
+
+/**
+ * Produz somente evidência observacional. Não recebe a working copy e não
+ * possui operação de regrouping, promoção ou consolidação de ArticleDNA.
+ */
+export function buildSerpFormationEvidence(input: {
+  principalKeywordId: string;
+  keywordReferences: ArticleKeywordReference[];
+  snapshots: SerpResearchSnapshot[];
+}): SerpFormationEvidence {
+  const normalizedSnapshots = input.snapshots.map(normalizeArchitectSerpSnapshot);
+  const referencesByKeyword = new Map(input.keywordReferences.map(reference => [reference.keywordId, reference]));
+  const overlaps: SerpFormationOverlapEvidence[] = [];
+
+  for (let leftIndex = 0; leftIndex < normalizedSnapshots.length; leftIndex += 1) {
+    const left = normalizedSnapshots[leftIndex];
+    if (!left) continue;
+    for (let rightIndex = leftIndex + 1; rightIndex < normalizedSnapshots.length; rightIndex += 1) {
+      const right = normalizedSnapshots[rightIndex];
+      if (!right) continue;
+      const leftReference = referencesByKeyword.get(left.keywordId);
+      const rightReference = referencesByKeyword.get(right.keywordId);
+      if (!leftReference || !rightReference) continue;
+      const sharedResults = sharedUrlCount(left, right);
+      const sharedDomains = sharedDomainCount(left, right);
+      overlaps.push(SerpFormationOverlapEvidenceSchema.parse({
+        leftKeywordId: left.keywordId,
+        leftKeywordDnaVersionId: leftReference.keywordDnaVersionId,
+        rightKeywordId: right.keywordId,
+        rightKeywordDnaVersionId: rightReference.keywordDnaVersionId,
+        sharedResultCount: sharedResults,
+        sharedDomainCount: sharedDomains,
+        overlap: overlapFor(sharedResults, sharedDomains, left, right),
+      }));
+    }
+  }
+
+  const keywordObservations = normalizedSnapshots.map(snapshot => {
+    const reference = referencesByKeyword.get(snapshot.keywordId);
+    if (!reference) throw new Error(`Referência KeywordDNA ausente para a evidência SERP ${snapshot.keywordId}.`);
+    const pairOverlaps = overlaps.filter(overlap => overlap.leftKeywordId === snapshot.keywordId || overlap.rightKeywordId === snapshot.keywordId);
+    const overlap = pairOverlaps.length
+      ? pairOverlaps.some(item => item.overlap === "high") ? "high" : pairOverlaps.some(item => item.overlap === "medium") ? "medium" : pairOverlaps.every(item => item.overlap === "low") ? "low" : "unknown"
+      : "unknown";
+    const compatibility = keywordCompatibilityFor(reference, snapshot);
+    const insufficientEvidence = compatibility === "insuficiente" || snapshot.diagnostic.confidence === "insufficient";
+    const conflict = snapshot.diagnostic.possibleConflicts.length > 0;
+    const needsSeparation = insufficientEvidence ? null : compatibility === "incompativel" || conflict;
+    const canJoin = insufficientEvidence ? null : compatibility === "coerente" && !conflict;
+    const principalPossiblyInadequate = snapshot.keywordId === input.principalKeywordId
+      ? insufficientEvidence ? null : compatibility === "incompativel" || conflict
+      : null;
+    return SerpFormationKeywordEvidenceSchema.parse({
+      keywordId: snapshot.keywordId,
+      keywordDnaVersionId: reference.keywordDnaVersionId,
+      snapshotIds: [snapshot.id],
+      compatibility,
+      overlap,
+      observedIntent: snapshot.diagnostic.dominantIntent || null,
+      dominantPageType: snapshot.diagnostic.pageTypes[0] || null,
+      competition: competitionFor([snapshot]),
+      conflict,
+      conflictReasons: snapshot.diagnostic.possibleConflicts,
+      likelyCannibalization: overlap === "high" ? "likely" : overlap === "low" ? "unlikely" : "unknown",
+      needsSeparation,
+      canJoin,
+      principalPossiblyInadequate,
+      insufficientEvidence,
+    });
+  });
+
+  return SerpFormationEvidenceSchema.parse({
+    keywordObservations,
+    overlaps,
+    guidelines: [
+      "SERP é evidência observacional; não move, divide, junta ou consolida grupos.",
+      "Ausência de resultado ou cobertura permanece como evidência insuficiente, não como conflito.",
+      "Qualquer separação, junção, troca de principal ou criação de Silo continua dependendo de decisão humana.",
+    ],
+  });
+}
+
+export function buildSiloCandidateSerpEvidence(input: {
+  brandId: string;
+  createdBy: string;
+  createdAt?: string;
+  keywordDnaSnapshot: z.infer<typeof KeywordDnaProvenanceSnapshotSchema>;
+  snapshot?: SerpResearchSnapshot | null;
+}): SerpSiloCandidateAssessment {
+  const snapshot = input.snapshot ? normalizeArchitectSerpSnapshot(input.snapshot) : null;
+  const createdAt = input.createdAt || new Date().toISOString();
+  const evidence = snapshot
+    ? SerpSiloCandidateEvidenceSchema.parse({
+      keywordId: input.keywordDnaSnapshot.keywordId,
+      keywordDnaVersionId: input.keywordDnaSnapshot.versionReference.versionId,
+      snapshotIds: [snapshot.id],
+      observedIntent: snapshot.diagnostic.dominantIntent || null,
+      dominantPageTypes: snapshot.diagnostic.pageTypes,
+      categoryHubLike: snapshot.organicResults.length ? snapshot.diagnostic.pageTypes.some(type => /category|local|institutional/i.test(type)) || snapshot.diagnostic.pageTypes.length >= 2 : null,
+      broadUniverse: snapshot.organicResults.length ? snapshot.diagnostic.pageTypes.length >= 2 || snapshot.diagnostic.frequentEntities.length >= 2 : null,
+      multipleNeeds: snapshot.organicResults.length ? snapshot.diagnostic.secondaryIntents.length > 0 || snapshot.peopleAlsoAsk.length > 1 || snapshot.relatedSearches.length > 1 : null,
+      amplitudeSufficient: snapshot.organicResults.length ? snapshot.diagnostic.pageTypes.length >= 2 && (snapshot.diagnostic.secondaryIntents.length > 0 || snapshot.relatedSearches.length > 1) : null,
+      evidenceStatus: snapshot.organicResults.length && snapshot.diagnostic.confidence !== "insufficient" ? "observed" : "insufficient",
+      notes: snapshot.organicResults.length && snapshot.diagnostic.confidence !== "insufficient"
+        ? ["A SERP acrescenta sinais sobre amplitude e tipo de hub; isso não confirma um Silo."]
+        : ["Evidência insuficiente; a candidata permanece reservada sem promoção ou criação de Silo."],
+    })
+    : SerpSiloCandidateEvidenceSchema.parse({
+      keywordId: input.keywordDnaSnapshot.keywordId,
+      keywordDnaVersionId: input.keywordDnaSnapshot.versionReference.versionId,
+      snapshotIds: [], observedIntent: null, dominantPageTypes: [], categoryHubLike: null, broadUniverse: null,
+      multipleNeeds: null, amplitudeSufficient: null, evidenceStatus: "insufficient",
+      notes: ["SERP indisponível ou não consultada; ausência não confirma conflito nem elimina a candidata."],
+    });
+  return SerpSiloCandidateAssessmentSchema.parse({
+    schemaVersion: 1,
+    id: `serp-silo-candidate:${input.brandId}:${input.keywordDnaSnapshot.keywordId}:${input.keywordDnaSnapshot.versionReference.versionId}`,
+    brandId: input.brandId,
+    keywordId: input.keywordDnaSnapshot.keywordId,
+    keywordDnaVersionId: input.keywordDnaSnapshot.versionReference.versionId,
+    keywordDnaSnapshot: input.keywordDnaSnapshot,
+    snapshot,
+    evidence,
+    createdAt,
+    createdBy: input.createdBy,
+  });
+}
+
+export function preserveSiloCandidateEvidenceOnFailure(previous: SerpSiloCandidateAssessment[], incoming: SerpSiloCandidateAssessment[]): SerpSiloCandidateAssessment[] {
+  const incomingByKey = new Map(incoming.map(item => [`${item.keywordId}:${item.keywordDnaVersionId}`, item]));
+  const previousByKey = new Map(previous.map(item => [`${item.keywordId}:${item.keywordDnaVersionId}`, item]));
+  return [...new Set([...previousByKey.keys(), ...incomingByKey.keys()])].map(key => {
+    const next = incomingByKey.get(key);
+    const old = previousByKey.get(key);
+    return next?.snapshot || !old?.snapshot ? next || old! : old;
+  });
+}
+
 export async function buildSerpFormationAssessment(input: {
   brandId: string;
   articleId: string;
@@ -267,6 +525,8 @@ export async function buildSerpFormationAssessment(input: {
   validationProfile?: z.infer<typeof SerpValidationProfileSchema>;
   previousVersion?: number;
   createdAt?: string;
+  /** Composição observada; viaja com a evidência para provar currency. */
+  formationBaseHash?: string | null;
 }): Promise<SerpFormationAssessment> {
   const createdAt = input.createdAt || new Date().toISOString();
   const assessmentMode = input.assessmentMode || "formacao";
@@ -298,7 +558,11 @@ export async function buildSerpFormationAssessment(input: {
     version: (input.previousVersion || 0) + 1, previousVersionId: input.previousVersionId || null, createdAt, createdBy: input.createdBy,
     mode: "keyword_individual" as const, assessmentMode, validationProfile, queryCount: normalizedSnapshots.length, queriedKeywordDnaIds: queriedIds, keywordDnaReferences: input.keywordDnaReferences,
     snapshots: normalizedSnapshots, intentCompatibility: compatibilityFor(normalizedSnapshots, input.keywordReferences, input.principalKeywordId), competitionLevel: competitionFor(normalizedSnapshots),
+    formationEvidence: buildSerpFormationEvidence({ principalKeywordId: input.principalKeywordId, keywordReferences: input.keywordReferences, snapshots: normalizedSnapshots }),
     dominantResultTypes: resultTypes(input.snapshots), recommendations, conflicts, notes,
+    // A evidência carimba a composição que observou; sem isso não há como
+    // provar depois que ela ainda descreve o artigo de agora.
+    ...(input.formationBaseHash ? { formationBaseHash: input.formationBaseHash } : {}),
   };
   return SerpFormationAssessmentSchema.parse({ ...draft, contentHash: await contentHash(draft) });
 }
