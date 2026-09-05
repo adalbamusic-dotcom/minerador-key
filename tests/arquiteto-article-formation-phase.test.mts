@@ -123,7 +123,13 @@ test("o painel nasce com os dois botões da operação", () => {
   assert.match(panel, /Processar artigos/);
   assert.match(panel, /Concluir formação/);
   // Confirmar só depois de processar.
-  assert.match(panel, /disabled=\{busy \|\| !processed\}/);
+  // Concluir exige processar ANTES e exige seleção: sem escopo o botão
+  // prometeria agir sobre "tudo", que é o que fazia o gate reclamar de artigo
+  // que a pessoa não escolheu.
+  assert.match(panel, /disabled=\{busy \|\| !processed \|\| selectedCount === 0\}/);
+  assert.match(panel, /disabled=\{busy \|\| selectedCount === 0\}/);
+  assert.match(panel, /data-testid="architect-formation-selection-count"/);
+  assert.match(panel, /Selecione pelo menos um artigo\./);
 });
 
 test("o painel traz os gráficos e as pontuações do candidato", () => {

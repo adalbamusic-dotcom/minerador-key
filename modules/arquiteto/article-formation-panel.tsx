@@ -81,6 +81,7 @@ export function ArticleFormationPanel({
   stale,
   scenarioState,
   busy,
+  selectedCount,
   confirmed,
   selectedCandidate,
   selectedSingletonAudit,
@@ -111,6 +112,14 @@ export function ArticleFormationPanel({
   /** Estágio do cenário em uma palavra: processada, parcial, confirmada… */
   scenarioState: string;
   busy: boolean;
+  /**
+   * Quantos Articles estão selecionados na tabela.
+   *
+   * A tabela é a área de seleção e o painel é a área de trabalho: sem seleção
+   * não há escopo, e um botão habilitado prometeria agir sobre "tudo" — que é
+   * justamente o que fazia o gate reclamar de artigo que ninguém escolheu.
+   */
+  selectedCount: number;
   confirmed: { articles: number; keywords: number; pending: number } | null;
   selectedCandidate: ArticleCandidate | null;
   /** Presente quando o candidato aberto tem uma keyword só. */
@@ -218,7 +227,8 @@ export function ArticleFormationPanel({
         <button
           type="button"
           onClick={onProcess}
-          disabled={busy}
+          disabled={busy || selectedCount === 0}
+          title={selectedCount === 0 ? "Selecione pelo menos um artigo." : `Processar ${selectedCount} artigo(s) selecionado(s).`}
           data-testid="architect-process-articles"
           className="inline-flex min-h-9 items-center gap-1.5 rounded border border-module-accent/50 bg-module-accent/10 px-3 text-sm font-semibold text-module-accent transition-colors hover:bg-module-accent/20 disabled:opacity-40"
         >
@@ -227,13 +237,22 @@ export function ArticleFormationPanel({
         <button
           type="button"
           onClick={onConfirm}
-          disabled={busy || !processed}
+          disabled={busy || !processed || selectedCount === 0}
           data-testid="architect-confirm-formation"
-          title={processed ? "Concluir a formação revisada e materializar os ArticleDNA" : "Processe os artigos antes de concluir."}
+          title={selectedCount === 0
+            ? "Selecione pelo menos um artigo."
+            : processed ? `Concluir os ${selectedCount} artigo(s) selecionado(s) e materializar os ArticleDNA` : "Processe os artigos antes de concluir."}
           className="inline-flex min-h-9 items-center gap-1.5 rounded border border-positive-soft/45 px-3 text-sm font-semibold text-positive-soft transition-colors hover:bg-positive-soft/10 disabled:opacity-40"
         >
           Concluir formação
         </button>
+        {/* O escopo fica dito por extenso: a pessoa não deve precisar deduzir
+            sobre o que os dois botões vão agir. */}
+        <span className="text-sm text-text-muted" data-testid="architect-formation-selection-count">
+          {selectedCount === 0
+            ? "Selecione pelo menos um artigo."
+            : `${selectedCount} artigo${selectedCount === 1 ? "" : "s"} selecionado${selectedCount === 1 ? "" : "s"}`}
+        </span>
         {stale && (
           <span className="text-sm text-warning" data-testid="architect-formation-stale">
             Formação desatualizada: o lote mudou desde a última análise.

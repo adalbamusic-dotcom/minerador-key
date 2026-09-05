@@ -64,6 +64,7 @@ import { articleParentLabel, assertSingleParent, readArticleParent, resolveParen
 import { findApprovedGraphForSilo, relevantEdgesForArticle, resolveCanonicalSiloForArticle } from "@/lib/arquiteto/radar-handoff-context";
 import { materializeArticleSiloId, readArticleSiloContract } from "@/lib/arquiteto/article-silo-materialization";
 import { resolveSiloPagePublicationIdentity } from "@/lib/arquiteto/silo-page-publication-identity";
+import { assertSelectionScope, scopeFormationUniverses, selectedCandidateRefsOf } from "@/lib/arquiteto/article-selection-scope";
 import {
   ARTICLE_COMPATIBILITY_LABELS,
   ARTICLE_FUNNEL_LABELS,
@@ -7999,6 +8000,36 @@ export default function ArquitetoPage() {
     setPendingScenarioChange(null);
   }, [pendingScenarioChange, scenarioPreview, changeCandidatePrincipal, changeKeywordRole, moveKeywordToCandidate, splitKeywordFromCandidate, mergeCandidates]);
 
+  /**
+   * O ESCOPO DA FASE ARTIGOS É A SELEÇÃO — NUNCA O LOTE.
+   *
+   * A tabela é a área de seleção; o painel é a área de trabalho. Quando os
+   * quatro motores saíram da tela, `processDeterministicStructure` — que já
+   * era selection-scoped — ficou órfão, e os dois botões da fase passaram a
+   * operar sobre `articleFormationUniverses` inteiro.
+   *
+   * O sintoma que o humano viu: "1 artigo precisa de decisão humana" sobre um
+   * Article que ele não tinha selecionado. O gate olhava o lote enquanto a
+   * pessoa olhava a seleção — a mesma pergunta com dois escopos.
+   *
+   * Nada de seleção NÃO significa tudo. Significa que não há o que fazer.
+   */
+  const selectedCandidateRefs = useMemo(
+    () => selectedCandidateRefsOf({ selectedArticleIds, articles: articlesList }),
+    [articlesList, selectedArticleIds],
+  );
+
+  /**
+   * Os universos recortados pela seleção.
+   *
+   * Universo sem nenhum candidato selecionado sai inteiro: ele não participa,
+   * não bloqueia e não é alterado.
+   */
+  const selectedFormationUniverses = useMemo(
+    () => scopeFormationUniverses({ universes: articleFormationUniverses, selectedCandidateRefs }),
+    [articleFormationUniverses, selectedCandidateRefs],
+  );
+
   const siloLabelByRef = useMemo(
     () => new Map(articleFormationUniverses.map(universe => [universe.siloRef, universe.siloLabel])),
     [articleFormationUniverses],
@@ -8247,9 +8278,14 @@ export default function ArquitetoPage() {
    */
   const processArticleFormation = useCallback(async () => {
     if (!selectedBrandId) return;
+    const escopo = assertSelectionScope(selectedCandidateRefs);
+    if (!escopo.ok) {
+      showNotification("error", escopo.reason);
+      return;
+    }
     setFormationBusy(true);
     try {
-      if (!articleFormationUniverses.length) {
+      if (!selectedFormationUniverses.length) {
         showNotification("error", "Nenhum Silo confirmado libera formação de artigos ainda.");
         return;
       }
@@ -8667,6 +8703,11 @@ export default function ArquitetoPage() {
 
   const confirmArticleFormation = useCallback(async () => {
     if (!selectedBrandId || !articleFormationMarker) return;
+    const escopo = assertSelectionScope(selectedCandidateRefs);
+    if (!escopo.ok) {
+      showNotification("error", escopo.reason);
+      return;
+    }
     setFormationBusy(true);
     try {
       /**
@@ -8676,7 +8717,9 @@ export default function ArquitetoPage() {
        * validador ou colisão com publicado NÃO entram. Confirmação parcial é o
        * caso normal — o pronto passa, o resto continua candidato.
        */
-      const plano = buildArticleFormationConfirmationPlan({ universes: articleFormationUniverses });
+      // O plano decide sobre os SELECIONADOS. Um Article não selecionado com
+      // pendência não entra e, por isso, não barra quem está pronto.
+      const plano = buildArticleFormationConfirmationPlan({ universes: selectedFormationUniverses });
       const sintese = summarizeConfirmationPlan(plano);
 
       /**
@@ -8688,7 +8731,7 @@ export default function ArquitetoPage() {
        * contradição no acervo canônico.
        */
       const portaria = validateFormationConclusion({
-        universes: articleFormationUniverses,
+        universes: selectedFormationUniverses,
         plan: plano,
         keywordSiloRef: new Map(masterList.map(keyword => [
           String(keyword.id),
@@ -9672,6 +9715,7 @@ export default function ArquitetoPage() {
                       currentBaseHash: articleFormationBase,
                     })]}
                     busy={formationBusy}
+                    selectedCount={selectedCandidateRefs.size}
                     confirmed={confirmedFormation}
                     selectedCandidate={selectedFormationCandidate}
                     selectedSingletonAudit={selectedSingletonAudit}

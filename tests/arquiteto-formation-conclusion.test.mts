@@ -28,8 +28,10 @@ const kw = (id: string, keyword: string): ArticleFormationKeyword => ({
 test("concluir não reexecuta o formador nem os motores", () => {
   const trecho = workspace.slice(workspace.indexOf("const confirmArticleFormation"));
   const corpo = trecho.slice(0, trecho.indexOf("\n  }, ["));
-  // A fonte é o cenário corrente, já com as decisões humanas dentro dele.
-  assert.match(corpo, /buildArticleFormationConfirmationPlan\(\{ universes: articleFormationUniverses \}\)/);
+  // A fonte é o cenário SELECIONADO, já com as decisões humanas dentro dele.
+  // Olhar o lote inteiro fazia a portaria reclamar de artigo que a pessoa não
+  // tinha escolhido — a mesma pergunta com dois escopos.
+  assert.match(corpo, /buildArticleFormationConfirmationPlan\(\{ universes: selectedFormationUniverses \}\)/);
   // E nada de reagrupar, medir SERP ou chamar IA no caminho da escrita.
   assert.doesNotMatch(corpo, /buildProvisionalGroups|buildSiloScopedProvisionalGroups|confirmSerpValidation|runKeywordReview/);
 });
@@ -336,7 +338,10 @@ test("reprocessar é dono da SERP; concluir apenas valida", () => {
   assert.doesNotMatch(corpoConcluir, /buildProvisionalGroups|buildSiloScopedProvisionalGroups/);
   assert.doesNotMatch(corpoConcluir, /confirmSerpValidation|serpGroupsForCandidates|callStrategicApi/);
   // Ele lê o cenário vigente, passa pela portaria e materializa.
-  assert.match(corpoConcluir, /buildArticleFormationConfirmationPlan\(\{ universes: articleFormationUniverses \}\)/);
+  assert.match(corpoConcluir, /buildArticleFormationConfirmationPlan\(\{ universes: selectedFormationUniverses \}\)/);
+  // Concluir também é selection-scoped: sem seleção não há escopo, e "nada
+  // selecionado" nunca significa "todos".
+  assert.match(corpoConcluir, /assertSelectionScope\(selectedCandidateRefs\)/);
   assert.match(corpoConcluir, /validateFormationConclusion\(/);
   assert.match(corpoConcluir, /materializeApprovedArticleDnas\(plano\.approved\)/);
 });
