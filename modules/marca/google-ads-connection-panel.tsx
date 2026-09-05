@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { internalButton, internalButtonPrimary, internalField } from "@/components/editorial/internal-page-visual";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
 type SanitizedConnection = {
   customerIdRef: string;
@@ -27,6 +28,7 @@ export function GoogleAdsConnectionPanel({ brandId }: { brandId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [message, setMessage] = useState("");
+  useNoticeBridge({ notice: message, module: "marca", area: "Google Ads", title: "Marca · Google Ads", fallbackSeverity: "INFO" });
   const [replaceConfirmed, setReplaceConfirmed] = useState(false);
   const [form, setForm] = useState({ customerId: "" });
 

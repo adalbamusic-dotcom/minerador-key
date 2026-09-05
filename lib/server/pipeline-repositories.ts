@@ -2,9 +2,10 @@ import "server-only";
 
 import type { PipelineContext, PipelineMutationResult, PipelineReadResult } from "./pipeline-runtime";
 import { PipelineRuntimeError, persisted, pipelineErrorFromSupabase, readMany, readOne } from "./pipeline-runtime";
+import { canonicalUuidOrGenerate, canonicalUuidOrNull, normalizePersistenceTimestamp } from "./serp-persistence-adapter";
 
 export type PipelineJsonObject = Record<string, unknown>;
-export type ArtifactType = "article_dna" | "silo_dna" | "silo_page" | "content_plan";
+export type ArtifactType = "article_dna" | "silo_dna" | "silo_page" | "content_plan" | "article_architecture_ai_review";
 
 type PipelineRepositoryContext = Pick<PipelineContext, "actorUserId" | "brandId" | "supabase">;
 type PipelineRow = Record<string, unknown>;
@@ -199,17 +200,17 @@ export class SerpSnapshotRepository extends ContextBoundRepository {
 
   async append(input: SerpSnapshotAppendInput): Promise<PipelineMutationResult<PipelineRow>> {
     const result = await this.client.from("editorial_serp_snapshots").insert({
-      id: input.id ?? crypto.randomUUID(),
+      id: canonicalUuidOrGenerate(input.id),
       marca_id: this.brandId,
       article_id: input.articleId,
       source_version_id: input.sourceVersionId ?? null,
       snapshot_version: input.snapshotVersion,
-      previous_snapshot_id: input.previousSnapshotId ?? null,
+      previous_snapshot_id: canonicalUuidOrNull(input.previousSnapshotId),
       content_hash: input.contentHash,
       status: input.status,
       payload: input.payload,
       created_by: this.actorUserId,
-      ...(input.createdAt ? { created_at: input.createdAt } : {}),
+      ...(input.createdAt ? { created_at: normalizePersistenceTimestamp(input.createdAt) } : {}),
     }).select("*").single();
     return persisted(mutationData(result.data as PipelineRow | null, result.error));
   }
@@ -234,16 +235,18 @@ export class SerpReviewRepository extends ContextBoundRepository {
   }
 
   async append(input: SerpReviewAppendInput): Promise<PipelineMutationResult<PipelineRow>> {
+    const snapshotId = canonicalUuidOrNull(input.snapshotId);
+    if (!snapshotId) throw new PipelineRuntimeError("INVALID_CONTEXT", "snapshot_id precisa ser o UUID canônico do snapshot remoto.", 400);
     const result = await this.client.from("editorial_serp_reviews").insert({
-      id: input.id ?? crypto.randomUUID(),
+      id: canonicalUuidOrGenerate(input.id),
       marca_id: this.brandId,
       article_id: input.articleId,
-      snapshot_id: input.snapshotId,
+      snapshot_id: snapshotId,
       source_version_id: input.sourceVersionId ?? null,
       status: input.status,
       reviewed_by: this.actorUserId,
       payload: input.payload,
-      ...(input.reviewedAt ? { created_at: input.reviewedAt } : {}),
+      ...(input.reviewedAt ? { created_at: normalizePersistenceTimestamp(input.reviewedAt) } : {}),
     }).select("*").single();
     return persisted(mutationData(result.data as PipelineRow | null, result.error));
   }

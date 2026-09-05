@@ -104,6 +104,44 @@ export function assertRadarEnvelopeMatchesArticle(
   }
 }
 
+type RadarWorkflowIdentityInput = {
+  workflowId: string;
+  workflowBrandId: string;
+  workflowArticleId: string;
+  workflowSourceVersionId?: string | null;
+  workflowPayload: unknown;
+  brandId: string;
+  articleId: string;
+  articleDnaVersionId: string;
+  resolutionEnvelope: Pick<RadarSerpResolutionEnvelope, "radarItemId">;
+};
+
+function recordFromUnknown(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+/**
+ * A persisted workflow row and a recovered browser item can expose the same
+ * Radar item through different technical IDs. The UUID from the workflow row
+ * is canonical; the older `radar:<articleId>` payload ID is accepted only
+ * when every editorial identity still matches the current row.
+ */
+export function isRadarWorkflowIdentityCompatible(input: RadarWorkflowIdentityInput): boolean {
+  if (!input.workflowId || input.workflowBrandId !== input.brandId || input.workflowArticleId !== input.articleId) return false;
+  if (input.workflowSourceVersionId && input.workflowSourceVersionId !== input.articleDnaVersionId) return false;
+  if (input.resolutionEnvelope.radarItemId === input.workflowId) return true;
+  const payload = recordFromUnknown(input.workflowPayload);
+  return payload?.id === input.resolutionEnvelope.radarItemId
+    && payload.brandId === input.brandId
+    && payload.articleId === input.articleId
+    && payload.articleDnaVersionId === input.articleDnaVersionId;
+}
+
+export function assertRadarWorkflowIdentityMatchesEnvelope(input: RadarWorkflowIdentityInput) {
+  if (isRadarWorkflowIdentityCompatible(input)) return;
+  throw new RadarResolutionEnvelopeError("transfer_conflict", "A transferência editorial não corresponde ao item atual do Radar.");
+}
+
 export function assertRemoteKeywordMatchesEnvelope(envelope: RadarSerpResolutionEnvelope, keyword: string) {
   if (normalizeKeyword(keyword).toLocaleLowerCase() !== normalizeKeyword(envelope.principalKeyword.keyword).toLocaleLowerCase()) {
     throw new RadarResolutionEnvelopeError("transfer_conflict", "A keyword canônica remota diverge do texto transferido pelo Arquiteto; a coleta foi bloqueada.");
@@ -118,11 +156,22 @@ export async function createRadarSerpResolutionEnvelope(input: {
   brandId: string;
   radarItem: RadarItem;
   article: VersionEnvelope<ArticleDNA>;
+  articleDnaVersionId: string;
   hydration?: RadarHydrationSnapshot | null;
   sourceKeywords?: RadarHydrationSourceKeyword[];
   silo?: VersionEnvelope<SiloDNA>;
   transferredAt?: string;
 }): Promise<RadarSerpResolutionEnvelope> {
+  const articleDnaVersionId = typeof input.articleDnaVersionId === "string" ? input.articleDnaVersionId.trim() : "";
+  if (!articleDnaVersionId) {
+    throw new RadarResolutionEnvelopeError("invalid_transfer", "A versão do ArticleDNA deste item do Radar não está disponível.");
+  }
+  if (input.radarItem.articleDnaVersionId && input.radarItem.articleDnaVersionId !== articleDnaVersionId) {
+    throw new RadarResolutionEnvelopeError("transfer_conflict", "O item do Radar diverge da versão do ArticleDNA selecionada.");
+  }
+  if (input.article.versionId && input.article.versionId !== articleDnaVersionId) {
+    throw new RadarResolutionEnvelopeError("transfer_conflict", "A versão do ArticleDNA local diverge da versão transportada pelo item do Radar.");
+  }
   const derived = !input.hydration?.principalKeyword?.keyword && input.sourceKeywords?.length
     ? createRadarHydrationSnapshot({ brandId: input.brandId, article: input.article, sourceKeywords: input.sourceKeywords, silo: input.silo, source: "reconciled" })
     : null;
@@ -137,7 +186,7 @@ export async function createRadarSerpResolutionEnvelope(input: {
     radarItemId: input.radarItem.id,
     articleId: input.article.payload.articleId,
     articleDna: {
-      versionId: input.article.versionId,
+      versionId: articleDnaVersionId,
       versionNumber: input.article.versionNumber,
       contentHash: input.article.contentHash,
       publicationState: publicationState(input.article, principal),
@@ -149,7 +198,7 @@ export async function createRadarSerpResolutionEnvelope(input: {
       targetModule: "radar",
       source: "browser_hydration",
       transferredAt: input.transferredAt || new Date().toISOString(),
-      importKey: `radar:${input.article.payload.articleId}:${input.article.versionId}:${input.radarItem.id}`,
+      importKey: `radar:${input.article.payload.articleId}:${articleDnaVersionId}:${input.radarItem.id}`,
     },
   };
   return RadarSerpResolutionEnvelopeSchema.parse({ ...unsigned, snapshotHash: await hashRadarSerpResolutionEnvelope(unsigned) });

@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import {
   resolveDataForSeoCanonicalConfig,
+  resolveDataForSeoCanonicalSerpCompatibilityConfig,
   resolveDataForSeoIntegrationEnvironment,
   DataForSeoCanonicalError,
 } from "../lib/minerador/dataforseo-canonical.ts";
@@ -45,13 +46,13 @@ function authRepository(): CanonicalAuthorizationRepository {
   };
 }
 
-function dependencies(overrides: Partial<{ grants: IntegrationGrantRow[]; bindings: IntegrationBindingRow[]; connections: IntegrationConnectionRow[]; quotas: IntegrationQuotaPolicyRow[]; providerKey: string }> = {}): IntegrationRuntimeDependencies {
+function dependencies(overrides: Partial<{ capability: IntegrationCapabilityRow | null; grants: IntegrationGrantRow[]; bindings: IntegrationBindingRow[]; connections: IntegrationConnectionRow[]; quotas: IntegrationQuotaPolicyRow[]; providerKey: string }> = {}): IntegrationRuntimeDependencies {
   const grants = overrides.grants || [grant];
   const bindings = overrides.bindings || [binding];
   const connections = overrides.connections || [connection];
   const quotas = overrides.quotas || [quota];
   const repository: IntegrationRuntimeRepository = {
-    findCapability: async () => capability,
+    findCapability: async () => Object.prototype.hasOwnProperty.call(overrides, "capability") ? overrides.capability || null : capability,
     findActiveGrants: async () => grants,
     findActiveBindings: async () => bindings,
     findConnection: async (id) => connections.find((row) => row.id === id) || null,
@@ -108,6 +109,32 @@ test("resolve DataForSEO uses the canonical Brand/Agency resource and Vault secr
   assert.doesNotMatch(JSON.stringify(result.resource), /vault-(?:login|password)/);
 });
 
+test("Radar SERP resolves the global DataForSEO resource without a module entitlement", async () => {
+  const result = await resolveDataForSeoCanonicalSerpCompatibilityConfig({
+    actorUserId: ACTOR,
+    agencyId: AGENCY,
+    brandId: BRAND,
+    environment: "test",
+    client: client(),
+    runtimeDependencies: dependencies({
+      capability: { ...capability, capability_key: "dataforseo.serp_compatibility", operation_kind: "serp_compatibility" },
+      grants: [],
+      bindings: [],
+      quotas: [],
+    }),
+    secretStore: { resolve: async () => JSON.stringify({ DATAFORSEO_LOGIN: "vault-login", DATAFORSEO_PASSWORD: "vault-password" }), store: async () => "unused" },
+    technicalEnvironment: { NODE_ENV: "test", DATAFORSEO_LOCATION_CODE: "2076", DATAFORSEO_LANGUAGE_CODE: "pt", DATAFORSEO_TIMEOUT_MS: "30000" },
+  });
+
+  assert.equal(result.resource.resourceKey, "dataforseo");
+  assert.equal(result.resource.connection.providerKey, "dataforseo");
+  assert.equal(result.resource.capability?.capability_key, "dataforseo.serp_compatibility");
+  assert.equal(result.resource.entitlement.reason, "HOMOLOGATION_ALLOW_ALL_RESOURCE_AVAILABLE");
+  assert.equal(result.resource.binding, null);
+  assert.equal(result.resource.brandId, BRAND);
+  assert.equal(result.credentialSource, "connection");
+});
+
 test("canonical DataForSEO rejects missing Vault secret without env fallback", async () => {
   await assert.rejects(
     () => resolveDataForSeoCanonicalConfig({ actorUserId: ACTOR, agencyId: AGENCY, brandId: BRAND, environment: "test", client: client(), runtimeDependencies: dependencies(), secretStore: { resolve: async () => null, store: async () => "unused" } }),
@@ -117,7 +144,7 @@ test("canonical DataForSEO rejects missing Vault secret without env fallback", a
 
 test("canonical DataForSEO reports the resource provider as unavailable without fallback", async () => {
   await assert.rejects(
-    () => resolveDataForSeoCanonicalConfig({ actorUserId: ACTOR, agencyId: AGENCY, brandId: BRAND, environment: "test", client: client(), runtimeDependencies: dependencies({ providerKey: "openrouter" }), secretStore: { resolve: async () => "{}", store: async () => "unused" } }),
+    () => resolveDataForSeoCanonicalConfig({ actorUserId: ACTOR, agencyId: AGENCY, brandId: BRAND, environment: "test", client: client(), runtimeDependencies: dependencies({ providerKey: "deepseek" }), secretStore: { resolve: async () => "{}", store: async () => "unused" } }),
     (error: unknown) => error instanceof IntegrationRuntimeError && error.code === "INTEGRATION_CONNECTION_MISSING",
   );
 });

@@ -12,6 +12,8 @@ export const AIReviewAnnotationSchema = z.object({
   source: z.literal("ai"),
   reviewState: z.enum(["pending_fine_review", "reviewed", "adjusted", "dismissed"]),
   appliedLocally: z.boolean(),
+  /** `false` registra execução sem mutação: não gera pendência humana. */
+  structuralChange: z.boolean().optional(),
   createdAt: z.string().datetime(),
 });
 

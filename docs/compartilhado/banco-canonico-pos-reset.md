@@ -31,12 +31,13 @@ Legenda de consumidores usada na matriz:
 As referências a RLS, policies e FKs na matriz são as declarações encontradas
 nas migrations locais. O catálogo remoto não foi consultado nesta tarefa.
 
-### Precedência documental — Google Ads (2026-08-16)
+### Precedência documental — Google Ads (revisada em 2026-08-24)
 
-Este baseline preserva a evidência histórica e o inventário da transição. As
-linhas que descrevem `integration_connections`, `secret_ref`/Vault ou binding
-como sucessores da configuração do Google Ads não prevalecem sobre a SDD
-arquitetural canônica atual: `GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV`.
+Este baseline preserva a evidência histórica e o inventário da transição. A
+configuração estática Google Ads permanece em ENV, mas o OAuth Refresh Token
+operacional agora é resolvido pelo Secret Store via `secret_ref` da Connection
+global e só pode ser rotacionado pelo Admin global. As descrições abaixo não
+comprovam rotação ou health check remoto.
 `minerador_google_ads_connections` continua preservada e classificada como
 `MIGRATE_THEN_DROP` até Discovery/Metrics passarem nos smokes e a prova de
 consumidores permitir uma decisão própria. Nenhuma remoção é autorizada por

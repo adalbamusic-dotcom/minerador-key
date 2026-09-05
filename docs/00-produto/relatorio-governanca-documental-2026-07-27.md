@@ -1,5 +1,16 @@
 # Relatório de governança documental — 2026-07-27
 
+## Precedência de consolidação — 2026-08-25
+
+Este relatório permanece como fotografia da revisão de 2026-07-27. A fonte
+canônica posterior registra DataForSEO como infraestrutura SERP compartilhada,
+DeepSeek como IA canônica, Google Cloud Speech/Storage e YouTube como operações
+compartilhadas e Telegram como Bot global da Plataforma. O Radar está aberto
+para desenvolvimento (`READY_FOR_RADAR_DEVELOPMENT = YES`), mas coleta real,
+persistência remota e inbound Telegram continuam gates separados. As passagens
+abaixo que mencionam o provider SERP legado são preservadas como histórico da
+fotografia anterior, não como contrato operacional atual.
+
 ## Escopo e segurança
 
 Auditoria e atualização documental do Minerador Key. O conteúdo anterior do `AGENTS.md` foi preservado e recebeu somente a regra adicional de consulta à documentação do Next.js 16. Nenhum arquivo de produção, contrato TypeScript, rota, API, provider, schema, SQL ou migration foi alterado por esta tarefa. Não houve escrita remota, chamada paga, limpeza de localStorage/IndexedDB, execução de migration, commit, push ou deploy.
@@ -45,9 +56,9 @@ As mudanças foram aditivas e documentais: regras atuais foram registradas no in
 - Verificação simples de links Markdown locais fora de `docs/_arquivo`: 23 links analisados, 0 quebrados na segunda passada.
 - Build, testes de aplicação, browser autenticado, Supabase remoto, migrations, providers e IA: não executados por regra operacional.
 
-## Pendências honestas
+## Pendências da revisão de 2026-07-27 — histórico
 
-Continuam dependentes de ação manual e evidência externa: login/Chrome real da extensão, execução autenticada real do provider SERP, smoke test e validação da persistência remota, RLS remoto, migration 0004, validação browser do recovery do Arquiteto e confirmação visual dos fluxos. O provider Serper já está integrado no código e testado com fixtures; nenhuma dessas pendências foi convertida em “concluída” por documentação.
+Continuam dependentes de ação manual e evidência externa: login/Chrome real da extensão, execução autenticada real do provider SERP legado, smoke test e validação da persistência remota, RLS remoto, migration 0004, validação browser do recovery do Arquiteto e confirmação visual dos fluxos. O provider SERP legado estava integrado no código e testado com fixtures naquela fotografia; nenhuma dessas pendências foi convertida em “concluída” por documentação.
 
 ## Segunda passada arquitetural — 2026-07-27
 
@@ -73,5 +84,5 @@ Validação desta segunda passada: `git diff --check` terminou com código 0, em
 - A proposta ativa de Marca foi alinhada a `app/(brand)/[brandRef]`, `modules/marca` e APIs/libs reais. Referências a `app/(workspace)`, `brandUserId` ou `components/product/operational-pages.tsx` que permanecem em snapshots e propostas históricas foram preservadas e qualificadas como históricas.
 - `docs/README.md` lista apenas ADRs existentes e separa documentos planejados dos documentos presentes. O README raiz documenta as rotas globais, tenantizadas e o detalhe do Radar.
 - `AGENTS.md` passou a exigir consulta à documentação local do Next.js 16 em `node_modules/next/dist/docs/` antes de mudanças em rotas, APIs, cache, proxy/middleware ou convenções.
-- O topo do estado do Radar distingue provider Serper integrado server-side, testes com fixtures, ausência de coleta autenticada real validada, dependência de migration/validação manual para persistência remota e fallback local sem equivalência a persistência remota.
-- Os arquivos temporários de auditoria (`.next-codex-verify/`, `.codex-page-lint.txt`, `arquivos-nao-rastreados.txt`, `diff-completo.patch`, `diff-documentacao-completo.txt`, `diff-documentacao.patch` e `status-completo.txt`) permanecem fora do escopo documental e devem ficar fora do commit. Os novos arquivos documentais continuam não rastreados até o stage manual do usuário.
+- O topo do estado do Radar naquela fotografia distinguia provider SERP legado server-side, testes com fixtures, ausência de coleta autenticada real validada, dependência de migration/validação manual para persistência remota e fallback local sem equivalência a persistência remota.
+- Os arquivos temporários de auditoria (`.next-codex-verify/`, `.codex-page-lint.txt`, `arquivos-nao-rastreados.txt`, `diff-completo.patch`, `diff-documentacao-completo.txt`, `diff-documentacao.patch` e `status-completo.txt`) estavam fora do escopo documental desta revisão histórica; a consolidação pós-refresh removeu os artefatos descartáveis ainda presentes, sem alterar documentos canônicos, migrations ou código funcional. Os novos arquivos documentais continuam não rastreados até o stage manual do usuário.

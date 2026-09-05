@@ -17,16 +17,41 @@ base dos contratos de escopo, grants, bindings, segurança e transferência de
 marca; este documento acrescenta o inventário de consumidores e o contrato de
 governança necessário antes de qualquer nova UI.
 
-### Precedência do adendo canônico de 2026-08-16
+> **Precedência IA — 2026-08-19:** o adendo
+> `docs/_arquivo/2026-08-documentacao-legada/adendo-corte-openrouter-deepseek-fase-1-2026-08-19.md` supersede as
+> passagens abaixo que descrevem DeepSeek → OpenRouter ou OpenRouter como
+> provider canônico. A decisão nova prevê somente DeepSeek Official API na
+> primeira fase, Connection `platform`, sem fallback, sem roteamento paralelo
+> e sem implementação nesta etapa. OpenRouter permanece preservado apenas como
+> histórico até o corte futuro ser comprovado.
 
-Para Google Ads, as passagens deste inventário que descrevem uma Connection,
-Vault, `secret_ref`, grant ou binding como destino de configuração são
-proposta/transição anterior e não prevalecem sobre a SDD arquitetural. O
-destino aprovado agora é `GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV`, com
-disponibilidade global durante a homologação. As descrições de consumidores e
-do estado local abaixo permanecem evidência histórica; não comprovam que o
-target já foi implementado nem autorizam migration. DataForSEO e OpenRouter
-continuam sujeitos ao contrato de Connection governável.
+> **Atualização Fase 2 — 2026-08-19:** o cutover local foi implementado. O
+> runtime atual resolve somente DeepSeek por Connection e mantém JSON parse/Zod,
+> estado anterior e Usage; a Connection/secret remoto e a homologação real
+> continuam pendentes. As passagens históricas de OpenRouter abaixo não são
+> contrato operacional vigente.
+
+> Qualquer ocorrência de OpenRouter nas matrizes e exemplos seguintes é
+> evidência histórica do contrato anterior ou do ledger preservado; não autoriza
+> nova resolução, configuração, fallback, seleção ou health check.
+
+> **Precedência Google Ads — 2026-08-24:** a configuração estática continua
+> em ENV/server-side, mas o OAuth Refresh Token operacional é resolvido pelo
+> Secret Store através da Connection global e só pode ser rotacionado pelo
+> Admin global. Esta regra supersede qualquer trecho histórico que trate o
+> refresh token como autoridade exclusiva de ENV.
+
+### Precedência do adendo canônico revisada em 2026-08-24
+
+Para Google Ads, as passagens deste inventário que tratam ENV como autoridade
+exclusiva do refresh token são proposta/transição anterior. O destino atual é
+`GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV_STATIC_PLUS_SECRET_STORE_REFRESH_TOKEN`:
+estáticos em ENV, OAuth Refresh Token no Secret Store via Connection global e
+rotação somente pelo Admin global. As descrições de consumidores e do estado
+local abaixo permanecem evidência histórica; não comprovam operação remota nem
+autorizam migration. DataForSEO e DeepSeek continuam sujeitos ao contrato de
+Connection governável; referências de OpenRouter abaixo são históricas e não
+representam provider ativo.
 
 ## 1. Decisão central
 

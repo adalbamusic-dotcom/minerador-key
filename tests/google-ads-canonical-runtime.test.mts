@@ -19,28 +19,30 @@ const ENV = {
   GOOGLE_ADS_API_VERSION: "invalid-version",
 };
 
-test("platform resolver requires all six env variables and normalizes both customer IDs", () => {
-  const config = getGoogleAdsPlatformConfig(ENV);
+test("platform resolver reads static fields from ENV and receives the refresh token explicitly", () => {
+  const config = getGoogleAdsPlatformConfig(ENV, ENV.GOOGLE_ADS_REFRESH_TOKEN);
   assert.equal(config.loginCustomerId, "1112223333");
   assert.equal(config.researchCustomerId, "4445556666");
   assert.equal(config.apiVersion, "v25");
   assert.equal(config.developerToken, ENV.GOOGLE_ADS_DEVELOPER_TOKEN);
+  assert.equal(config.refreshToken, ENV.GOOGLE_ADS_REFRESH_TOKEN);
 });
 
-test("platform resolver reports missing and invalid Research Customer ID without exposing secrets", () => {
+test("platform resolver requires an explicit refresh token and reports static errors without exposing secrets", () => {
   const missing: Partial<typeof ENV> = { ...ENV };
   delete missing.GOOGLE_ADS_RESEARCH_CUSTOMER_ID;
-  assert.throws(() => getGoogleAdsPlatformConfig(missing), (error: unknown) => error instanceof GoogleAdsPlatformConfigError && error.code === "GOOGLE_ADS_PLATFORM_RESEARCH_CUSTOMER_MISSING");
+  assert.throws(() => getGoogleAdsPlatformConfig(missing, ENV.GOOGLE_ADS_REFRESH_TOKEN), (error: unknown) => error instanceof GoogleAdsPlatformConfigError && error.code === "GOOGLE_ADS_PLATFORM_RESEARCH_CUSTOMER_MISSING");
 
-  assert.throws(() => getGoogleAdsPlatformConfig({ ...ENV, GOOGLE_ADS_RESEARCH_CUSTOMER_ID: "123" }), (error: unknown) => error instanceof GoogleAdsPlatformConfigError && error.code === "GOOGLE_ADS_PLATFORM_RESEARCH_CUSTOMER_INVALID");
+  assert.throws(() => getGoogleAdsPlatformConfig({ ...ENV, GOOGLE_ADS_RESEARCH_CUSTOMER_ID: "123" }, ENV.GOOGLE_ADS_REFRESH_TOKEN), (error: unknown) => error instanceof GoogleAdsPlatformConfigError && error.code === "GOOGLE_ADS_PLATFORM_RESEARCH_CUSTOMER_INVALID");
+  assert.throws(() => getGoogleAdsPlatformConfig(ENV), (error: unknown) => error instanceof GoogleAdsPlatformConfigError && error.code === "GOOGLE_ADS_REFRESH_TOKEN_SECRET_MISSING");
   assert.doesNotMatch(JSON.stringify(new GoogleAdsPlatformConfigError("GOOGLE_ADS_PLATFORM_ENV_MISSING", "safe")), /developer-token|client-secret|refresh-token/i);
 });
 
-test("canonical context carries actor, agency and brand while resolving account only from platform env", async () => {
+test("canonical context carries actor, agency and brand while using an explicitly resolved config", async () => {
   const previous = { ...process.env };
   Object.assign(process.env, ENV);
   try {
-    const context = await resolveGoogleAdsCanonicalContext({ actorUserId: "actor", agencyId: "agency", brandId: "brand", operation: "metrics" });
+    const context = await resolveGoogleAdsCanonicalContext({ actorUserId: "actor", agencyId: "agency", brandId: "brand", operation: "metrics", config: getGoogleAdsPlatformConfig(ENV, ENV.GOOGLE_ADS_REFRESH_TOKEN) });
     assert.equal(context.actorUserId, "actor");
     assert.equal(context.agencyId, "agency");
     assert.equal(context.brandId, "brand");
@@ -60,7 +62,7 @@ test("canonical client uses the resolved platform config and has no secret resol
       agencyId: null,
       brandId: "brand",
       operation: "discovery",
-      config: getGoogleAdsPlatformConfig(ENV),
+      config: getGoogleAdsPlatformConfig(ENV, ENV.GOOGLE_ADS_REFRESH_TOKEN),
       customerId: "4445556666",
       managerCustomerId: "1112223333",
       targeting: null,

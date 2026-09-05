@@ -4,6 +4,16 @@ import { createVersionEnvelope, legacyVersionReference, toVersionReference } fro
 import type { PlannerPublicationIdentity } from "./publication-identity.ts";
 import { protectedIdentityIssues, publicationSourceIssues } from "./publication-identity.ts";
 import { buildKeywordStrategySnapshot, keywordStrategyIssues } from "./keyword-strategy.ts";
+import {
+  assignPlannerTextToSections,
+  defaultPlannerImagePlan,
+  estimatedParagraphsForWords,
+  paragraphRangeForWords,
+  plannerParagraphGuidance,
+  readPlannerRadarEvidence,
+  sectionKeywordRefs,
+  splitPlannerWordRange,
+} from "./deterministic-plan.ts";
 
 export class ContentPlanProtectionError extends Error {
   readonly issues: string[];
@@ -35,63 +45,104 @@ export interface DefinitiveContentPlanInput {
 }
 
 function sourceDetails(input: DefinitiveContentPlanInput, article: ArticleDNA | null, evidenceRefs: ContentPlanDetails["evidenceRefs"]): ContentPlanDetails["sources"] {
-  const required = article?.sourcesNeeded || [];
-  return required.map((claim, index) => ({
+  const required = [
+    ...(article?.sourcesNeeded || []).map(claim => ({ claim, sourceType: "needs_human_source", reason: "A fonte precisa ser localizada e aprovada por uma pessoa; o Planejador não inventa URL ou estatística." })),
+    ...(article?.evidenceNeeded || []).map(claim => ({ claim: `Evidência necessária: ${claim}`, sourceType: "needs_human_evidence", reason: "A evidência precisa ser localizada e aprovada por uma pessoa; o Planejador não converte lacunas em fatos." })),
+  ];
+  return required.map((requirement, index) => ({
     id: `source:${input.editorialUnitId}:${index + 1}`,
-    claim,
+    claim: requirement.claim,
     entity: article?.entities[index] || "Entidade a confirmar",
-    sourceType: "needs_human_source",
+    sourceType: requirement.sourceType,
     candidateUrl: null,
     title: null,
-    reason: "A fonte precisa ser localizada e aprovada por uma pessoa; o Planejador não inventa URL ou estatística.",
+    reason: requirement.reason,
     evidenceRef: evidenceRefs[index] || null,
     status: evidenceRefs[index] ? "suggested" : "needs_source",
     humanApproved: false,
   }));
 }
 
+function unique(items: string[]) {
+  return [...new Set(items.map(item => item.trim()).filter(Boolean))];
+}
+
 function buildDetails(input: DefinitiveContentPlanInput, keywordRefs: VersionReference[], evidenceRefs: ContentPlanDetails["evidenceRefs"]): ContentPlanDetails {
   const article = input.article?.payload || null;
   const page = input.siloPage?.payload || null;
-  const headings = article?.requiredTopics.length ? article.requiredTopics : page?.sections.map(section => section.heading) || [article?.promise || page?.h1 || "Estrutura editorial"];
-  const sections = headings.map((heading, index) => ({
+  const radarEvidence = readPlannerRadarEvidence(input.radarAnalysisPackage);
+  const sourceHeadings = article?.requiredTopics.length ? article.requiredTopics : page?.sections.map(section => section.heading) || [];
+  const headings = unique(sourceHeadings.length ? sourceHeadings : [article?.promise || page?.h1 || "Estrutura editorial"]);
+  const sectionQuestions = assignPlannerTextToSections(unique([...(article?.questions || []), ...radarEvidence.questions]), headings);
+  const sectionEntities = assignPlannerTextToSections(unique([...(article?.entities || []), ...radarEvidence.entities]), headings);
+  const sectionObjections = assignPlannerTextToSections(article?.objections || [], headings);
+  const sections = headings.map((heading, index) => {
+    const matchingTopics = unique([
+      heading,
+      ...(article?.coverage || []).filter(topic => topic.toLowerCase().includes(heading.toLowerCase()) || heading.toLowerCase().includes(topic.toLowerCase())),
+      ...radarEvidence.topics.filter(topic => topic.toLowerCase().includes(heading.toLowerCase()) || heading.toLowerCase().includes(topic.toLowerCase())),
+    ]);
+    const assignedQuestions = sectionQuestions.filter(item => item.index === index).map(item => item.item);
+    const assignedEntities = sectionEntities.filter(item => item.index === index).map(item => item.item);
+    const assignedObjections = sectionObjections.filter(item => item.index === index).map(item => item.item);
+    const wordRange = splitPlannerWordRange(radarEvidence.wordRange, headings.length, index);
+    const paragraphRange = paragraphRangeForWords(wordRange);
+    return {
     id: `section:${index + 1}`,
     level: 2 as 2 | 3,
     heading,
     objective: article ? `Cobrir ${heading} dentro da fronteira: ${article.antiCannibalizationBoundary}.` : page?.sections[index]?.objective || `Organizar a cobertura de ${heading}.`,
-    topics: article?.coverage.filter(topic => topic.toLowerCase().includes(heading.toLowerCase())) || [heading],
-    questions: article?.questions.slice(index, index + 1) || [],
-    entities: article?.entities || [],
-    objections: article?.objections || [],
-    keywordDnaRefs: keywordRefs,
-    evidenceRefs,
+    topics: matchingTopics,
+    questions: assignedQuestions,
+    entities: assignedEntities,
+    objections: assignedObjections,
+    keywordDnaRefs: sectionKeywordRefs(keywordRefs, headings.length, index),
+    evidenceRefs: evidenceRefs.length ? [evidenceRefs[index % evidenceRefs.length]] : [],
     order: index,
     suggestedHeading: heading,
     decidedHeading: null,
-    argumentativeFunction: null,
-    wordRange: null,
-    paragraphRange: null,
-    estimatedParagraphs: null,
-    excludedTopics: [],
-    internalLinks: [],
+    argumentativeFunction: `Responder ao recorte “${heading}” sem sair da fronteira editorial.`,
+    wordRange,
+    paragraphRange,
+    estimatedParagraphs: estimatedParagraphsForWords(wordRange),
+    excludedTopics: article?.excludedSubjects || [],
+    internalLinks: index === 0 ? article?.internalLinks || [] : [],
     externalLinks: [],
     imageId: null,
     ctaId: null,
-    instructions: [],
-    restrictions: [],
+    instructions: unique([
+      ...plannerParagraphGuidance(wordRange),
+      ...(index === 0 ? radarEvidence.requirements : []),
+    ]),
+    restrictions: unique([
+      ...(article?.excludedSubjects || []).map(subject => `Não abordar: ${subject}.`),
+      `Respeitar a fronteira: ${article?.antiCannibalizationBoundary || input.silo?.payload.boundary || "definida no plano"}.`,
+    ]),
     alerts: [],
     origin: "observed" as const,
     humanDecision: null,
-  }));
+    };
+  });
   const h1 = page?.h1 || article?.promise || "H1 pendente de revisão humana";
   const slug = page?.slug || article?.suggestedSlug || input.editorialUnitId;
   const canonical = page?.canonical ?? article?.canonical ?? null;
   const intent = article?.mainIntent || "navegacional";
   const promise = article?.promise || page?.intro || h1;
   const boundary = article?.antiCannibalizationBoundary || input.silo?.payload.boundary || "Definir a fronteira desta unidade antes da redação.";
-  const questions = (article?.questions || []).map((text, index) => ({ id: `question:${input.editorialUnitId}:${index + 1}`, text, origin: "observed" as const, priority: "useful" as const, classification: null, sectionId: sections[index]?.id || null, status: "pending" as const, humanDecision: null }));
-  const entities = (article?.entities || []).map((text, index) => ({ id: `entity:${input.editorialUnitId}:${index + 1}`, text, origin: "observed" as const, priority: "useful" as const, classification: null, sectionId: null, status: "pending" as const, humanDecision: null }));
-  const objections = (article?.objections || []).map((text, index) => ({ id: `objection:${input.editorialUnitId}:${index + 1}`, text, origin: "observed" as const, priority: "useful" as const, classification: null, sectionId: null, status: "pending" as const, humanDecision: null }));
+  const allQuestions = unique([...(article?.questions || []), ...radarEvidence.questions]);
+  const allEntities = unique([...(article?.entities || []), ...radarEvidence.entities]);
+  const questions = allQuestions.map((text, index) => ({ id: `question:${input.editorialUnitId}:${index + 1}`, text, origin: "observed" as const, priority: "useful" as const, classification: null, sectionId: sections[sectionQuestions.find(item => item.item === text)?.index ?? index % sections.length]?.id || null, status: "pending" as const, humanDecision: null }));
+  const entities = allEntities.map((text, index) => ({ id: `entity:${input.editorialUnitId}:${index + 1}`, text, origin: "observed" as const, priority: "useful" as const, classification: null, sectionId: sections[sectionEntities.find(item => item.item === text)?.index ?? index % sections.length]?.id || null, status: "pending" as const, humanDecision: null }));
+  const objections = (article?.objections || []).map((text, index) => ({ id: `objection:${input.editorialUnitId}:${index + 1}`, text, origin: "observed" as const, priority: "useful" as const, classification: null, sectionId: sections[sectionObjections.find(item => item.item === text)?.index ?? index % sections.length]?.id || null, status: "pending" as const, humanDecision: null }));
+  const images = defaultPlannerImagePlan({ unitId: input.editorialUnitId, subject: h1 });
+  const paragraphRange = paragraphRangeForWords(radarEvidence.wordRange);
+  const estimatedParagraphs = estimatedParagraphsForWords(radarEvidence.wordRange);
+  const gabaritoHumanDecision = radarEvidence.wordRange ? `Faixa global derivada de ${radarEvidence.wordRangeSource}; revisar humanamente antes da aprovação.` : null;
+  const imageBlocks = images.map((image, index) => ({ id: `block:image:${input.editorialUnitId}:${index + 1}`, type: "image" as const, sectionId: index === 0 ? null : sections[Math.min(index - 1, sections.length - 1)]?.id || null, order: index + 1, objective: image.objective, instructions: image.requiredElements, origin: "planner" as const, humanDecision: null, alert: null }));
+  const radarRequirements = unique([...(input.radarAnalysisPackage?.requirements || []), ...radarEvidence.requirements]);
+  const radarRecommendations = unique([...(input.radarAnalysisPackage?.recommendations || []), ...radarEvidence.recommendations]);
+  const radarObservedData = unique([...(input.radarAnalysisPackage?.observedData || []), ...radarEvidence.observedData]);
+  const radarHumanDecisions = unique([...(input.radarAnalysisPackage?.humanDecisions || []), ...radarEvidence.humanDecisions]);
   const baseDetails: ContentPlanDetails = {
     brandId: input.brandId,
     editorialUnitType: input.editorialUnitType,
@@ -103,7 +154,7 @@ function buildDetails(input: DefinitiveContentPlanInput, keywordRefs: VersionRef
       primaryIntent: intent,
       secondaryIntents: article?.auxiliaryIntents || [],
       intentValidation: "validated",
-      validationNotes: ["Intenção herdada de uma unidade de origem aprovada; a SERP, quando ausente, continua pendente."],
+      validationNotes: ["Intenção herdada de uma unidade de origem aprovada; a SERP, quando ausente, continua pendente.", ...(radarEvidence.isApprovedHandoff ? ["Pacote Radar aprovado preservado como evidência de entrada; não substitui a decisão humana do Planejador."] : [])],
       angle: article?.angle || "Ângulo pendente de revisão humana.",
       promise,
       differentiation: article?.differentiation || [],
@@ -115,7 +166,7 @@ function buildDetails(input: DefinitiveContentPlanInput, keywordRefs: VersionRef
     sources: sourceDetails(input, article, evidenceRefs),
     evidenceRefs,
     cta: { text: article?.cta || page?.cta || "CTA pendente de revisão humana.", objective: "Conduzir o próximo passo coerente com a intenção.", placement: "Após a entrega principal da unidade." },
-    images: [{ id: `image:${input.editorialUnitId}:1`, position: "Após a introdução", objective: "Apoiar a compreensão da promessa sem criar evidência fictícia.", subject: h1, visualFunction: "contextual", requiredElements: [], avoid: ["texto ilegível", "estatísticas não verificadas"], aspectRatio: "16:9", prompt: null, altText: null, status: "planned", humanApproved: false }],
+    images,
     skills: { skillIds: input.skillIds || [], promptIds: input.promptIds || [] },
     metadata: { slug, canonical, principalKeywordId: article?.principalKeywordId || input.editorialUnitId, metaTitle: "", metaDescription: "", socialTitle: "", socialDescription: "", indexationStatus: "noindex" },
     radar: {
@@ -125,19 +176,19 @@ function buildDetails(input: DefinitiveContentPlanInput, keywordRefs: VersionRef
       analysisMode: input.radarAnalysisPackage?.analysisMode || null,
       analysisEnforcement: input.radarAnalysisPackage?.analysisEnforcement || null,
       packageHash: input.radarAnalysisPackage?.packageHash || null,
-      requirements: input.radarAnalysisPackage?.requirements || [],
-      recommendations: input.radarAnalysisPackage?.recommendations || [],
-      observedData: input.radarAnalysisPackage?.observedData || [],
-      humanDecisions: input.radarAnalysisPackage?.humanDecisions || [],
+      requirements: radarRequirements,
+      recommendations: radarRecommendations,
+      observedData: radarObservedData,
+      humanDecisions: radarHumanDecisions,
       evidencePackage: input.radarAnalysisPackage?.evidencePackage || null,
     },
     review: { workflowStatus: "awaiting_review", publicationStatus: "not_started", transferStatus: "not_sent", humanNotes: input.humanNotes || [] },
-    gabarito: { globalWords: { min: null, ideal: null, max: null }, paragraphRange: { min: null, max: null }, estimatedParagraphs: null, tone: null, depth: null, detail: null, counts: { h2: sections.filter(section => section.level === 2).length, h3: sections.filter(section => section.level === 3).length, intro: 1, conclusion: 1, faq: 0, tables: 0, comparisons: 0, checklists: 0, lists: 0, quotes: 0, images: 1, internalLinks: 0, externalLinks: 0, cta: 1, specialBlocks: 0 }, alerts: [], humanDecision: null },
-    blocks: [{ id: `block:intro:${input.editorialUnitId}`, type: "intro" as const, sectionId: null, order: 0, objective: "Apresentar a promessa da unidade.", instructions: [], origin: "planner" as const, humanDecision: null, alert: null }, { id: `block:conclusion:${input.editorialUnitId}`, type: "conclusion" as const, sectionId: null, order: sections.length + 1, objective: "Concluir sem introduzir novo tema.", instructions: [], origin: "planner" as const, humanDecision: null, alert: null }],
+    gabarito: { globalWords: radarEvidence.wordRange || { min: null, ideal: null, max: null }, paragraphRange: paragraphRange || { min: null, max: null }, estimatedParagraphs, tone: null, depth: null, detail: null, counts: { h2: sections.filter(section => section.level === 2).length, h3: sections.filter(section => section.level === 3).length, intro: 1, conclusion: 1, faq: 0, tables: 0, comparisons: 0, checklists: 0, lists: 0, quotes: 0, images: images.length, internalLinks: 0, externalLinks: 0, cta: 1, specialBlocks: 0 }, alerts: [...(radarEvidence.wordRange ? [] : ["Amostra de extensão recebida ainda não disponível; a faixa deve ser definida por uma pessoa."]), ...(article?.internalLinks?.length ? ["Há referências de links internos recebidas do ArticleDNA que ainda precisam ser hidratadas em destinos estruturados."] : [])], humanDecision: gabaritoHumanDecision },
+    blocks: [{ id: `block:intro:${input.editorialUnitId}`, type: "intro" as const, sectionId: null, order: 0, objective: "Apresentar a promessa da unidade.", instructions: [], origin: "planner" as const, humanDecision: null, alert: null }, ...imageBlocks, { id: `block:conclusion:${input.editorialUnitId}`, type: "conclusion" as const, sectionId: null, order: images.length + 1, objective: "Concluir sem introduzir novo tema.", instructions: [], origin: "planner" as const, humanDecision: null, alert: null }],
     questions,
     entities,
     objections,
-    guardianInstructions: ["Não escrever parágrafos fora da estrutura aprovada.", "Registrar lacunas de fonte como pendência."],
+    guardianInstructions: ["Não escrever parágrafos fora da estrutura aprovada.", "Registrar lacunas de fonte e evidência como pendência.", "Não gerar FAQ automaticamente; perguntas recebidas devem ser associadas às seções aprovadas.", "Prompts de imagem permanecem pendentes nesta etapa; não executar geração automaticamente.", ...(article?.internalLinks?.length ? ["Não inventar destinos de links internos; hidratar cada referência antes de aprovar."] : []), ...(article?.evidenceNeeded?.length ? [`Evidências requeridas pelo ArticleDNA: ${article.evidenceNeeded.join(" · ")}`] : []), ...(radarRequirements.length ? [`Requisitos recebidos do Radar: ${radarRequirements.join(" · ")}`] : [])],
     alerts: [],
   };
   return article ? { ...baseDetails, keywordStrategy: buildKeywordStrategySnapshot({ article, details: baseDetails }) } : baseDetails;
@@ -150,6 +201,8 @@ export async function createDefinitiveContentPlan(input: DefinitiveContentPlanIn
   const planId = input.previous?.payload.planId || `plan:${input.editorialUnitId}`;
   const articleRef = input.article ? toVersionReference(input.article) : legacyVersionReference(`unit:${input.editorialUnitId}`, { brandId: input.brandId });
   const siloRef = input.silo ? toVersionReference(input.silo) : legacyVersionReference(`silo:${input.siloPage?.payload.siloId || input.editorialUnitId}`, { brandId: input.brandId });
+  const details = buildDetails(input, keywordRefs, evidenceRefs);
+  const radarEvidence = readPlannerRadarEvidence(input.radarAnalysisPackage);
   const payload = ContentPlanSchema.parse({
     schemaVersion: 2,
     planId,
@@ -160,10 +213,10 @@ export async function createDefinitiveContentPlan(input: DefinitiveContentPlanIn
     serpEvidenceRefs: evidenceRefs,
     productEvidenceRefs: [],
     originalityReportRef: null,
-    approvedOutline: buildDetails(input, keywordRefs, evidenceRefs).structure.sections.map(section => ({ id: section.id, heading: section.heading, objective: section.objective, keywordDnaRefs: section.keywordDnaRefs })),
+    approvedOutline: details.structure.sections.map(section => ({ id: section.id, heading: section.heading, objective: section.objective, keywordDnaRefs: section.keywordDnaRefs })),
     writingInstructions: [article?.angle || input.siloPage?.payload.visualBriefing || "Seguir o plano aprovado e registrar qualquer lacuna como pendência."].filter(Boolean),
-    humanPendingDecisions: ["Revisar estrutura, links, fontes, CTA, imagens e metadados antes da aprovação.", ...(evidenceRefs.length ? [] : ["Nenhuma SERP real aprovada foi anexada ao plano."])],
-    planning: buildDetails(input, keywordRefs, evidenceRefs),
+    humanPendingDecisions: ["Revisar estrutura, links, fontes, CTA, imagens e metadados antes da aprovação.", ...(radarEvidence.isApprovedHandoff ? [] : ["Nenhum pacote Radar aprovado foi anexado ao plano."])],
+    planning: details,
   });
   return createVersionEnvelope({ entityId: planId, versionNumber: (input.previous?.versionNumber || 0) + 1, previousVersionId: input.previous?.versionId || null, origin: "human", changeReason: input.previous ? "Sucessora editada no Planejador." : "ContentPlan definitivo criado para revisão humana.", createdBy: actorId, createdAt: now, payload });
 }

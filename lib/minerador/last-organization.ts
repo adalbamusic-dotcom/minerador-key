@@ -12,14 +12,14 @@ export type MineradorOrganizationValues = {
   filterKgrApplicability: string;
   filterKgrMeasurement: string;
   filterVolumeEligibility: "Todos" | "operational" | VolumeEligibilityStatus;
-  sortColumn: "keyword" | "results_allintitle" | "volume_search" | "kgr_score" | "nicho" | "lista";
+  sortColumn: "keyword" | "results_allintitle" | "volume_search" | "kgr_score" | "cpc" | "keyword_difficulty" | "nicho" | "lista";
   sortDirection: "asc" | "desc";
 };
 
 export type MineradorOrganizationList = { id: string; nome: string };
 
 const all = "Todos";
-const sortColumns = new Set<MineradorOrganizationValues["sortColumn"]>(["keyword", "results_allintitle", "volume_search", "kgr_score", "nicho", "lista"]);
+const sortColumns = new Set<MineradorOrganizationValues["sortColumn"]>(["keyword", "results_allintitle", "volume_search", "kgr_score", "cpc", "keyword_difficulty", "nicho", "lista"]);
 const siteRelations = new Set([all, "confirmed_primary", "candidate_primary", "supporting", "mentioned", "undefined"]);
 const siteArchitectures = new Set([all, "awaiting_architecture", "architectural_review_required", "architecture_confirmed", "conflict"]);
 const sitePublications = new Set([all, "published", "not_confirmed", "not_found", "redirected", "canonical_conflict"]);

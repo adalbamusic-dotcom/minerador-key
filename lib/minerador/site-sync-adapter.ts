@@ -37,8 +37,8 @@ function siteEvidenceKey(value: Record<string, unknown> | null | undefined): str
   return [origin.source, origin.brandId, origin.catalogEntryId, origin.normalizedText, origin.sourceUrl].map(String).join("|");
 }
 
-export function buildMineradorSiteSyncPlan(candidates: MineradorSiteSyncCandidate[], existingRows: ExistingKeyword[], targetListId: string): MineradorSiteSyncPlan {
-  const existingByText = new Map(existingRows.filter(row => row.lista_id === targetListId).map(row => [row.keyword.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim(), row]));
+export function buildMineradorSiteSyncPlan(candidates: MineradorSiteSyncCandidate[], existingRows: ExistingKeyword[], targetListId: string | null): MineradorSiteSyncPlan {
+  const existingByText = new Map(existingRows.filter(row => !targetListId || row.lista_id === targetListId).map(row => [row.keyword.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim(), row]));
   const seen = new Set<string>();
   const items = candidates.map(candidate => {
     const text = candidate.text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -46,8 +46,18 @@ export function buildMineradorSiteSyncPlan(candidates: MineradorSiteSyncCandidat
     if (seen.has(text)) return { candidate, outcome: "duplicate_in_batch" as const, mineradorKeywordId: null, reason: "Keyword duplicada dentro da conferência." };
     seen.add(text);
     const existing = existingByText.get(text);
-    if (!existing) return { candidate, outcome: "new" as const, mineradorKeywordId: null };
-    const expectedKey = ["site_sitemap", candidate.brandId, candidate.catalogEntryId, text, candidate.sourceUrl].map(String).join("|");
+    if (!existing) {
+      if (!targetListId) {
+        return {
+          candidate,
+          outcome: "blocked" as const,
+          mineradorKeywordId: null,
+          reason: "Silo/Categoria é necessário somente para importar uma keyword nova. Selecione um destino para criar a keyword.",
+        };
+      }
+      return { candidate, outcome: "new" as const, mineradorKeywordId: null };
+    }
+    const expectedKey = [candidate.sourceKind || "site_sitemap", candidate.brandId, candidate.catalogEntryId, text, candidate.sourceUrl].map(String).join("|");
     const actualKey = siteEvidenceKey(existing.analise_semantica);
     return { candidate, outcome: actualKey === expectedKey ? "no_change" as const : "evidence_updated" as const, mineradorKeywordId: existing.id };
   });
@@ -62,7 +72,7 @@ export function buildMineradorSiteSyncPlan(candidates: MineradorSiteSyncCandidat
       unchanged: items.filter(item => item.outcome === "no_change").length,
       duplicateInBatch: items.filter(item => item.outcome === "duplicate_in_batch").length,
       invalid: items.filter(item => item.outcome === "invalid").length,
-      blocked: 0,
+      blocked: items.filter(item => item.outcome === "blocked").length,
     },
   };
 }
@@ -88,6 +98,7 @@ function candidatePayload(candidate: SiteKeywordCandidate, workspace: BrandSiteW
     architectureStatus: candidate.architectureStatus,
     relationConfirmedBy: candidate.relationConfirmedBy,
     relationConfirmedAt: candidate.relationConfirmedAt,
+    lastCheckedAt: candidate.lastCheckedAt,
     extractedAt: candidate.extractedAt,
     confidence: candidate.confidence,
     resolvedUrl: entry.resolvedUrl,

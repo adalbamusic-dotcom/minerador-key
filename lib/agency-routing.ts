@@ -1,4 +1,4 @@
-import { isTenantId } from "./tenant-routing";
+import { isTenantId } from "./tenant-routing.ts";
 
 const AGENCY_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

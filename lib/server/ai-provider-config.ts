@@ -1,4 +1,9 @@
-export type AIProviderId = "deepseek" | "openrouter";
+/**
+ * Compatibility error contract for routes that still map shared provider
+ * failures. New AI operations must resolve a Connection through
+ * deepseek-canonical.ts; this module deliberately has no ENV resolver.
+ */
+export type AIProviderId = "deepseek";
 
 export type AIProviderErrorCode =
   | "AI_PROVIDER_NOT_CONFIGURED"
@@ -9,7 +14,8 @@ export type AIProviderErrorCode =
   | "AI_PROVIDER_UNAVAILABLE"
   | "AI_PROVIDER_ERROR"
   | "AI_PROVIDER_INVALID_RESPONSE"
-  | "AI_TIMEOUT";
+  | "AI_TIMEOUT"
+  | "AI_PROVIDER_CONNECTION_REQUIRED";
 
 export interface ResolvedAIProvider {
   provider: AIProviderId;
@@ -22,11 +28,11 @@ export interface ResolvedAIProvider {
 export type AIProviderEnvironment = Readonly<Record<string, string | undefined>>;
 
 export class AIProviderConfigurationError extends Error {
-  readonly code: Extract<AIProviderErrorCode, "AI_PROVIDER_NOT_CONFIGURED" | "AI_PROVIDER_INVALID" | "AI_CREDENTIAL_MISSING">;
+  readonly code: Extract<AIProviderErrorCode, "AI_PROVIDER_NOT_CONFIGURED" | "AI_PROVIDER_INVALID" | "AI_CREDENTIAL_MISSING" | "AI_PROVIDER_CONNECTION_REQUIRED">;
   readonly status = 503;
 
   constructor(
-    code: Extract<AIProviderErrorCode, "AI_PROVIDER_NOT_CONFIGURED" | "AI_PROVIDER_INVALID" | "AI_CREDENTIAL_MISSING">,
+    code: Extract<AIProviderErrorCode, "AI_PROVIDER_NOT_CONFIGURED" | "AI_PROVIDER_INVALID" | "AI_CREDENTIAL_MISSING" | "AI_PROVIDER_CONNECTION_REQUIRED">,
     message: string,
   ) {
     super(message);
@@ -35,51 +41,12 @@ export class AIProviderConfigurationError extends Error {
   }
 }
 
-export function resolveAIProvider(env: AIProviderEnvironment = process.env): ResolvedAIProvider {
-  const rawProvider = env.AI_PROVIDER?.trim().toLowerCase();
-  if (!rawProvider) {
-    throw new AIProviderConfigurationError(
-      "AI_PROVIDER_NOT_CONFIGURED",
-      "Nenhum provider de IA foi explicitamente configurado.",
-    );
-  }
-
-  if (rawProvider !== "deepseek" && rawProvider !== "openrouter") {
-    throw new AIProviderConfigurationError(
-      "AI_PROVIDER_INVALID",
-      "O provider de IA configurado não é suportado.",
-    );
-  }
-
-  const provider = rawProvider as AIProviderId;
-  const apiKey = provider === "deepseek" ? env.DEEPSEEK_API_KEY?.trim() : env.OPENROUTER_API_KEY?.trim();
-  if (!apiKey) {
-    throw new AIProviderConfigurationError(
-      "AI_CREDENTIAL_MISSING",
-      "A credencial do provider de IA configurado não está disponível.",
-    );
-  }
-
-  if (provider === "deepseek") {
-    return {
-      provider,
-      apiKey,
-      apiUrl: "https://api.deepseek.com/chat/completions",
-      model: "deepseek-chat",
-      extraHeaders: {},
-    };
-  }
-
-  return {
-    provider,
-    apiKey,
-    apiUrl: "https://openrouter.ai/api/v1/chat/completions",
-    model: env.OPENROUTER_MODEL?.trim() || "deepseek/deepseek-v4-pro",
-    extraHeaders: {
-      "HTTP-Referer": env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000",
-      "X-Title": "Minerador Key",
-    },
-  };
+export function resolveAIProvider(_env: AIProviderEnvironment = process.env): never {
+  void _env;
+  throw new AIProviderConfigurationError(
+    "AI_PROVIDER_CONNECTION_REQUIRED",
+    "Operações novas de IA devem resolver uma Connection DeepSeek server-side.",
+  );
 }
 
 export function aiProviderErrorResponse(error: unknown): { status: number; code: AIProviderErrorCode; message: string } {

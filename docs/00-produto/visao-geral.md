@@ -2,7 +2,7 @@
 
 ## Propósito
 
-Minerador Key é um produto interno para transformar dados de marca e palavras-chave em uma cadeia editorial rastreável: descoberta, arquitetura, pesquisa, planejamento, redação e publicação. A evidência deste documento foi revisada no código em 2026-07-27.
+Minerador Key é um produto interno para transformar dados de marca e palavras-chave em uma cadeia editorial rastreável: descoberta, arquitetura, pesquisa, planejamento, redação e publicação. A evidência deste documento foi revisada no código em 2026-08-27.
 
 ## Público e problema
 
@@ -10,13 +10,76 @@ Atende equipes que planejam crescimento orgânico por marca. O problema tratado 
 
 ## Fluxo operacional
 
-Marca fornece contexto; Minerador registra e qualifica keywords; Arquiteto organiza a arquitetura editorial; Radar reúne evidências de SERP; Planejador cria o plano; Redator produz o documento; Publicações recebe o item aprovado. Cada transferência é seletiva e deve preservar marca, identidade e proveniência.
+Marca fornece contexto; Minerador registra e qualifica keywords; Arquiteto organiza a arquitetura editorial e os links internos; Radar reúne evidências de SERP; Planejador cria o plano; Redator produz o documento; Publicações recebe o item aprovado. Cada transferência é seletiva e deve preservar marca, identidade e proveniência.
 
 ## Pipeline estratégico
 
-`BrandDNA → KeywordDNA → ArticleDNA / SiloDNA / SiloPage → SERP → ContentPlan → ContentDocument → PublicationRecord`.
+`BrandDNA → KeywordDNA → ArticleDNA / SiloDNA / SiloPage / InternalLinkGraph → SERP → ContentPlan → ContentDocument → PublicationRecord`.
+
+`InternalLinkGraph` pertence ao Arquiteto e registra relações persistentes por
+Brand. Radar e Planejador podem receber uma referência versionada para leitura,
+sem reagrupamento ou mutação do grafo; a próxima frente é a experiência
+funcional de Links Internos.
 
 O código possui contratos Zod e envelopes versionados para parte desse pipeline. Nem todas as etapas possuem integração externa real ou persistência completa; ver os estados de cada módulo.
+
+## Fundação global pós-refresh
+
+Em 2026-08-17, o Master Refresh foi encerrado com baseline remoto read-only e
+zero drift bloqueador. Auth e o Admin global foram preservados; Agencies,
+Brands e dados de homologação foram zerados; DataForSEO, DeepSeek, Vault e a
+infraestrutura técnica Google Ads foram preservados; o legado Google Ads
+dinâmico e `migration_backup` foram removidos. Banco, Auth, Agency/Brand e
+integrações passam a ser infraestrutura congelada. Evoluções estruturais
+futuras exigem evidência nova e gate próprio, sem reabrir o refresh concluído.
+
+OpenRouter permanece somente como histórico/Usage legível do corte de provider;
+não é provider ativo, fallback ou opção de configuração vigente.
+
+Baseline: [Master Refresh Batch 7](auditorias/master-refresh-batch-7-canonical-baseline-2026-08-17.md).
+
+```text
+DATABASE_REFRESH = COMPLETE
+GLOBAL_FOUNDATION = READY
+READY_FOR_FRESH_AREA_DEVELOPMENT = YES
+BASELINE_DATE = 2026-08-17
+BASELINE_FINGERPRINT = f058b86b56e6d99ab24dac967241c221
+0043 = CLOSED
+0044 = CLOSED
+```
+
+Depois do reset, novas Agencies/Brands podem ser criadas novamente pela
+interface. A recriação de AdalbaPro/Care Glow foi intencional e não é drift.
+Esta informação é **Relatada pelo usuário** nesta consolidação; não foi
+reexecutado smoke remoto nesta tarefa.
+
+### Fase funcional vigente
+
+`FUNCTIONAL_AREA_DEVELOPMENT`
+
+`Marca → Minerador → Arquiteto → Radar → Planejador → Redator → Publicações`
+
+A fundação global está congelada. O backlog funcional não autoriza novas
+migrations, limpeza ou reforma transversal sem um gate próprio.
+
+### Smokes reais do Minerador
+
+Os seguintes resultados foram registrados como **Relatados pelo usuário /
+smoke real**, sem transformar as demais áreas em homologadas automaticamente:
+
+- `GOOGLE_ADS_DISCOVERY = PASS`;
+- `GOOGLE_ADS_HISTORICAL_METRICS = PASS`;
+- `DATAFORSEO_ALLINTITLE = PASS`;
+- `MANUAL_CSV_IMPORT = PASS`;
+- `PROCESSOR_IMPORT = PASS`;
+- `INTENT_NICHE = PASS`;
+- `KEYWORD_PROFILE = PASS`.
+
+A humanização preserva `technical canonical name != display label`: nomes como
+`BrandDNA`, `KeywordDNA`, `ArticleDNA`, `SiloDNA`, `SiloPage`,
+`InternalLinkGraph`, `ContentPlan`,
+`ContentDocument` e `PublicationRecord` continuam canônicos internamente e
+recebem labels compreensíveis na interface.
 
 ## Módulos
 
@@ -25,8 +88,8 @@ O código possui contratos Zod e envelopes versionados para parte desse pipeline
 | Admin | visão e gestão de marcas existentes |
 | Marca | contexto e acesso por marca |
 | Minerador | importação, filtros, KGR e exportação no Supabase legado |
-| Arquiteto | lógica editorial, versões, recuperação e propostas de IA |
-| Radar | possui rota tenantizada por artigo, provider Serper integrado server-side e diagnóstico determinístico testado com fixtures; coleta real autenticada, smoke test e persistência remota ainda aguardam validação manual |
+| Arquiteto | lógica editorial, ArticleDNA, SiloDNA, SiloPage, InternalLinkGraph e propostas de IA |
+| Radar | possui rota tenantizada por artigo e contrato de evidência sobre a infraestrutura SERP compartilhada DataForSEO; coleta real autenticada e persistência remota ainda aguardam validação manual; `READY_FOR_RADAR_DEVELOPMENT = YES` |
 | Planejador | criação e aprovação inicial de ContentPlan |
 | Redator | editor Tiptap e abertura de documentos |
 | Publicações | planilha/esqueleto de entrega |

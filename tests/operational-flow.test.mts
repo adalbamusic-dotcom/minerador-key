@@ -50,12 +50,31 @@ test("visualizações são isoladas por usuário, marca e módulo e aceitam padr
   assert.equal(defaultGridView(views)?.id, "v2"); assert.equal(views.filter(view => view.isDefault).length, 1);
 });
 
-test("aprovação do Arquiteto valida 2 a 6 keywords, silo e evento humano", async () => {
+test("aprovação do Arquiteto valida 1 a 6 keywords e evento humano, sem exigir silo", async () => {
   const version = await articleVersion(); const approved = createStatusEvent(version.versionId, "approved", "human", "Revisado");
   assert.deepEqual(articleApprovalIssues(version, [approved]), []);
   const one = await articleVersion(articlePayload({ secondaryKeywordIds: [], keywordReferences: [keywordReference("kw-1", "principal")] }));
-  assert.match(articleApprovalIssues(one, [createStatusEvent(one.versionId, "approved", "human", "Revisado")]).join(" "), /2 e 6/);
-  const noSilo = await articleVersion(articlePayload({ siloId: null })); assert.match(articleApprovalIssues(noSilo, [createStatusEvent(noSilo.versionId, "approved", "human", "Revisado")]).join(" "), /silo/);
+  assert.deepEqual(articleApprovalIssues(one, [createStatusEvent(one.versionId, "approved", "human", "Revisado")]), []);
+  const sevenIds = ["kw-2", "kw-3", "kw-4", "kw-5", "kw-6", "kw-7"];
+  const seven = await articleVersion(articlePayload({ secondaryKeywordIds: sevenIds, keywordReferences: [keywordReference("kw-1", "principal"), ...sevenIds.map(id => keywordReference(id))] }));
+  assert.match(articleApprovalIssues(seven, [createStatusEvent(seven.versionId, "approved", "human", "Revisado")]).join(" "), /1 e 6/);
+  // Silo é a etapa seguinte: um artigo fechado aprova sem silo definido.
+  const noSilo = await articleVersion(articlePayload({ siloId: null })); assert.deepEqual(articleApprovalIssues(noSilo, [createStatusEvent(noSilo.versionId, "approved", "human", "Revisado")]), []);
+});
+
+test("artigo aprovado sem Silo não é projetado ao Radar nem ao Planejador", async () => {
+  // Aprovar o ArticleDNA fecha a fase Artigos; o Radar só recebe unidade
+  // estruturalmente completa, depois de Silos e Links Internos.
+  const version = await articleVersion(articlePayload({ siloId: null }));
+  const radar = importArticlesToRadar([], [version], "brand-1");
+
+  assert.equal(radar.length, 0);
+  assert.equal(importRadarToPlanner([], radar, "brand-1").length, 0);
+
+  const withSilo = await articleVersion(articlePayload({ siloId: "silo-1" }));
+  const complete = importArticlesToRadar([], [withSilo], "brand-1");
+  assert.equal(complete.length, 1);
+  assert.equal(complete[0].siloId, "silo-1");
 });
 
 test("Radar importa sem duplicar e somente a marca correta", async () => {
@@ -211,7 +230,8 @@ test("reset e exclusões do Arquiteto exigem aprovação forte", async () => {
   assert.doesNotMatch(architect, /window\.confirm\(`Limpar/);
   assert.match(miner, /EXCLUIR \$\{selectedDeletableCount\}/); assert.match(miner, /handleBatchDelete\(true\)/);
   assert.doesNotMatch(miner, /Primeira Confirma|Segunda Confirma/);
-  assert.match(dialog, /verificationPhrase/); assert.match(dialog, /acknowledged/); assert.match(dialog, /Aprovação de ação destrutiva/);
+  assert.match(dialog, /verificationPhrase/); assert.match(dialog, /DeleteConfirmation/); assert.match(dialog, /Aprovação de ação/);
+  assert.doesNotMatch(dialog, /acknowledged|type="checkbox"/);
 });
 
 test("status aguardando aprovação nasce da lógica local e não depende da IA", async () => {
@@ -225,8 +245,8 @@ test("status aguardando aprovação nasce da lógica local e não depende da IA"
 test("planilhas operacionais trabalham artigo por artigo e exibem carga acumulada", async () => {
   const pages = await operationalModuleSources();
   const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
-  for (const label of ["KeywordDNAs", "ArticleDNA", "SiloDNA"]) { assert.match(pages, new RegExp(label)); assert.match(architect, new RegExp(label)); }
-  assert.match(pages, /ArticleDNA/); assert.match(pages, /SERP/); assert.match(pages, /evid/);
+  for (const label of ["Perfis das keywords", "Definição do artigo", "Arquitetura do silo"]) { assert.match(pages, new RegExp(label)); assert.match(architect, new RegExp(label)); }
+  assert.match(pages, /Definição do artigo/); assert.match(pages, /SERP/); assert.match(pages, /evid/);
 });
 
 test("migration operacional separa acessos, ativa RLS e preserva append-only", async () => {
@@ -303,10 +323,10 @@ test("histórico, desfazer e refazer estão presentes do Minerador às Publicaç
   const operational = files[2];
   for (const module of ["radar", "publicacoes"]) assert.match(operational, new RegExp(`useLocalHistory\\(\"${module}\"`));
   assert.match(operational, /HistoryControls/);
-  assert.match(files[0], /<span>Qualificar selecionadas<\/span>/);
+  assert.match(files[0], /<span className="hidden sm:inline">Processar lógica<\/span>/);
   assert.match(files[1], /Agrupar keywords em artigos \(IA\)/);
-  assert.match(files[1], /Detectar viés · ArticleDNA \(IA\)/);
-  assert.match(files[1], /Detectar viés · SiloDNA \(IA\)/);
+  assert.match(files[1], /Definição do artigo ·/);
+  assert.match(files[1], /Gerar arquitetura do silo \(IA\)/);
 });
 
 test("restauração do Redator não é interpretada como nova digitação", async () => {
@@ -439,7 +459,7 @@ test("status editorial é estático e cada IA anima somente o próprio botão", 
 
 test("Arquiteto fixa cabeçalho, numera artigos e respeita a ordem operacional", async () => {
   const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
-  const headers = ["KeywordDNAs", "Revisão IA", "ArticleDNA", "SiloDNA", "Ações"];
+  const headers = ["Perfis das keywords", "Revisão IA", "Definição do artigo", "Arquitetura do silo", "Ações"];
   let position = architect.indexOf("<thead");
   for (const header of headers) {
     const next = architect.indexOf(`>${header}<`, position);

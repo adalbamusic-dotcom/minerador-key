@@ -2,30 +2,61 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isTenantId } from "@/lib/tenant-routing";
-import { getGoogleAdsPlatformConfig, normalizeGoogleAdsCustomerId, GoogleAdsPlatformConfigError } from "@/lib/google/ads/config";
+import { getGoogleAdsStaticConfigStatus, normalizeGoogleAdsCustomerId, normalizeGoogleAdsRefreshToken, GoogleAdsPlatformConfigError, type GoogleAdsStaticConfigStatus } from "@/lib/google/ads/config";
 import { createIntegrationSecretStore, IntegrationSecretStoreError } from "@/lib/server/integration-secret-store";
-import { PlatformHealthCheckError, runPlatformProviderHealthProbe, type PlatformHealthProviderKey } from "@/lib/server/platform-integrations-health";
-import { normalizeOpenRouterModel, readOpenRouterModel, writeOpenRouterModel } from "@/lib/openrouter-model-config";
+import { PlatformHealthCheckError, runPlatformProviderHealthProbe, type PlatformHealthOperation, type PlatformHealthProviderKey } from "@/lib/server/platform-integrations-health";
+import { DEEPSEEK_DEFAULT_MODEL } from "@/lib/server/deepseek-canonical";
+import {
+  GOOGLE_CLOUD_SERVICE_ACCOUNT_SECRET_DESCRIPTION,
+  GOOGLE_CLOUD_SERVICE_ACCOUNT_SECRET_NAME,
+  readGoogleCloudMediaBucketName,
+  YOUTUBE_DATA_API_KEY_SECRET_DESCRIPTION,
+  YOUTUBE_DATA_API_KEY_SECRET_NAME,
+  normalizeGoogleCloudServiceAccountSecret,
+  normalizeMediaBucketName,
+  normalizeYouTubeDataApiSecret,
+} from "@/lib/server/google-cloud/contracts";
 import {
   INTEGRATION_CAPABILITY_OPERATIONS,
   INTEGRATION_ENVIRONMENTS,
   type IntegrationCapabilityOperation,
   type IntegrationEnvironment,
 } from "@/lib/server/integrations-runtime";
+import {
+  GOOGLE_ADS_REFRESH_TOKEN_SECRET_DESCRIPTION,
+  GOOGLE_ADS_REFRESH_TOKEN_SECRET_NAME,
+  resolveGoogleAdsPlatformConfig,
+} from "@/lib/server/google-ads-canonical";
+import {
+  TELEGRAM_BOT_TOKEN_SECRET_DESCRIPTION,
+  TELEGRAM_BOT_TOKEN_SECRET_NAME,
+  createTelegramWebhookSecret,
+  normalizeTelegramSecret,
+  parseTelegramConfigurationInput,
+  parseTelegramSecret,
+  type TelegramConfigurationInput,
+} from "@/lib/server/telegram/contracts";
+import type { StorageClientFactory } from "@/lib/server/google-cloud/storage-operation";
 
 type QueryClient = Pick<SupabaseClient, "from">;
 type SecretMutationClient = Pick<SupabaseClient, "from" | "rpc">;
 
-export type SupportedPlatformProviderKey = "google_ads" | "dataforseo" | "deepseek" | "openrouter";
+export type SupportedPlatformProviderKey = "google_ads" | "dataforseo" | "deepseek" | "google_cloud" | "youtube_data" | "telegram";
 
 export const PLATFORM_ACCESS_POLICY = "HOMOLOGATION_ALLOW_ALL" as const;
 export type PlatformAccessPolicy = typeof PLATFORM_ACCESS_POLICY;
 
 export const PLATFORM_CAPABILITY_CATALOG = [
   { capabilityKey: "dataforseo.allintitle", providerKey: "dataforseo", operationKind: "allintitle", unitName: "request" },
+  { capabilityKey: "dataforseo.serp_compatibility", providerKey: "dataforseo", operationKind: "serp_compatibility", unitName: "request" },
   { capabilityKey: "google_ads_keyword_discovery", providerKey: "google_ads", operationKind: "keyword_discovery", unitName: "request" },
   { capabilityKey: "google_ads_keyword_metrics", providerKey: "google_ads", operationKind: "keyword_metrics", unitName: "request" },
-  { capabilityKey: "ai_generation", providerKey: "openrouter", operationKind: "ai_generation", unitName: "request" },
+  { capabilityKey: "ai_generation", providerKey: "deepseek", operationKind: "ai_generation", unitName: "request" },
+  { capabilityKey: "google_cloud.speech_transcription", providerKey: "google_cloud", operationKind: "speech_transcription", unitName: "request" },
+  { capabilityKey: "google_cloud.storage_media", providerKey: "google_cloud", operationKind: "storage_media", unitName: "request" },
+  { capabilityKey: "youtube.video_metadata", providerKey: "youtube_data", operationKind: "youtube_video_metadata", unitName: "request" },
+  { capabilityKey: "telegram.message_send", providerKey: "telegram", operationKind: "telegram_message_send", unitName: "request" },
+  { capabilityKey: "telegram.file_fetch", providerKey: "telegram", operationKind: "telegram_file_fetch", unitName: "request" },
 ] as const;
 
 export type PlatformCapabilityCatalogEntry = (typeof PLATFORM_CAPABILITY_CATALOG)[number];
@@ -34,8 +65,14 @@ const SUPPORTED_PLATFORM_PROVIDERS: Record<SupportedPlatformProviderKey, { displ
   google_ads: { displayName: "Google Ads", secretName: "google_ads_platform", secretDescription: "Google Ads platform credential" },
   dataforseo: { displayName: "DataForSEO", secretName: "dataforseo_platform", secretDescription: "DataForSEO platform credential" },
   deepseek: { displayName: "DeepSeek", secretName: "deepseek_platform", secretDescription: "DeepSeek platform credential" },
-  openrouter: { displayName: "OpenRouter", secretName: "openrouter_platform", secretDescription: "OpenRouter platform credential" },
+  google_cloud: { displayName: "Google Cloud Media", secretName: GOOGLE_CLOUD_SERVICE_ACCOUNT_SECRET_NAME, secretDescription: GOOGLE_CLOUD_SERVICE_ACCOUNT_SECRET_DESCRIPTION },
+  youtube_data: { displayName: "YouTube Data API", secretName: YOUTUBE_DATA_API_KEY_SECRET_NAME, secretDescription: YOUTUBE_DATA_API_KEY_SECRET_DESCRIPTION },
+  telegram: { displayName: "Telegram Bot", secretName: TELEGRAM_BOT_TOKEN_SECRET_NAME, secretDescription: TELEGRAM_BOT_TOKEN_SECRET_DESCRIPTION },
 };
+
+function isSupportedPlatformProviderKey(value: string): value is SupportedPlatformProviderKey {
+  return Object.prototype.hasOwnProperty.call(SUPPORTED_PLATFORM_PROVIDERS, value);
+}
 
 export type IntegrationAdminProvider = {
   id: string;
@@ -53,6 +90,20 @@ export type IntegrationAdminCapability = {
   status: "active" | "disabled" | "legacy";
 };
 
+export type IntegrationAdminHealthCheck = {
+  status: "ready" | "error" | null;
+  checkedAt: string | null;
+  code: string | null;
+  message: string | null;
+  providerRequestRef: string | null;
+  stage: string | null;
+  httpStatus: string | null;
+  googleAdsCode: string | null;
+  currentModel: string | null;
+  currentModelAvailable: boolean | null;
+  details: Record<string, string | null>;
+};
+
 export type IntegrationAdminConnection = {
   id: string;
   providerKey: string;
@@ -65,18 +116,14 @@ export type IntegrationAdminConnection = {
   configuredModel: string | null;
   managerCustomerIdConfigured: boolean;
   researchCustomerId: string | null;
-  healthCheck: {
-    status: "ready" | "error" | null;
-    checkedAt: string | null;
-    code: string | null;
-    message: string | null;
-    providerRequestRef: string | null;
-    stage: string | null;
-    httpStatus: string | null;
-    googleAdsCode: string | null;
-    currentModel: string | null;
-    currentModelAvailable: boolean | null;
-  };
+  healthCheck: IntegrationAdminHealthCheck;
+  googleCloudBucketName: string | null;
+  googleCloudHealth: {
+    speech: IntegrationAdminHealthCheck | null;
+    storage: IntegrationAdminHealthCheck | null;
+  } | null;
+  telegramWebhookConfigured: boolean;
+  telegramWebhookUrl: string | null;
 };
 
 export type IntegrationAdminGrant = {
@@ -128,6 +175,7 @@ export type IntegrationAdminAgency = {
 
 export type PlatformIntegrationsSnapshot = {
   platformAccessPolicy: PlatformAccessPolicy;
+  googleAdsStaticConfig: GoogleAdsStaticConfigStatus;
   providers: IntegrationAdminProvider[];
   capabilities: IntegrationAdminCapability[];
   platformConnections: IntegrationAdminConnection[];
@@ -149,13 +197,16 @@ export type PlatformIntegrationsSnapshot = {
  * current catalog uses a provider prefix where a platform policy can safely
  * determine the compatible READY connection without adding a provider FK.
  */
-export function providerKeyForPlatformCapability(capabilityKey: string): Exclude<SupportedPlatformProviderKey, "deepseek"> | null {
+export function providerKeyForPlatformCapability(capabilityKey: string): SupportedPlatformProviderKey | null {
   const normalized = capabilityKey.trim().toLowerCase();
   const catalogEntry = PLATFORM_CAPABILITY_CATALOG.find((entry) => entry.capabilityKey === normalized);
   if (catalogEntry) return catalogEntry.providerKey;
   if (normalized.startsWith("google_ads.") || normalized.startsWith("google_ads_")) return "google_ads";
   if (normalized.startsWith("dataforseo.") || normalized.startsWith("dataforseo_")) return "dataforseo";
-  if (normalized.startsWith("openrouter.") || normalized.startsWith("openrouter_")) return "openrouter";
+  if (normalized.startsWith("deepseek.") || normalized.startsWith("deepseek_")) return "deepseek";
+  if (normalized.startsWith("google_cloud.") || normalized.startsWith("google_cloud_")) return "google_cloud";
+  if (normalized.startsWith("youtube.") || normalized.startsWith("youtube_")) return "youtube_data";
+  if (normalized.startsWith("telegram.") || normalized.startsWith("telegram_")) return "telegram";
   return null;
 }
 
@@ -245,6 +296,13 @@ function readGoogleAdsResearchCustomerId(metadata: unknown) {
   }
 }
 
+function readDeepSeekConfiguredModel(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return DEEPSEEK_DEFAULT_MODEL;
+  const record = metadata as Record<string, unknown>;
+  const value = record.deepseek_model ?? (record.deepseek && typeof record.deepseek === "object" && !Array.isArray(record.deepseek) ? (record.deepseek as Record<string, unknown>).model : null);
+  return typeof value === "string" && value.trim() ? value.trim() : DEEPSEEK_DEFAULT_MODEL;
+}
+
 export async function readPlatformIntegrations(client: QueryClient): Promise<PlatformIntegrationsSnapshot> {
   const [providersResult, capabilitiesResult, connectionsResult, grantsResult, bindingsResult, quotasResult, usageResult, usageAggregateResult, agenciesResult, brandsResult] = await Promise.all([
     client.from("integration_providers").select("id,provider_key,display_name,status").order("display_name", { ascending: true }),
@@ -275,60 +333,67 @@ export async function readPlatformIntegrations(client: QueryClient): Promise<Pla
   }
 
   const providers = (providersResult.data || []) as Array<{ id: string; provider_key: string; display_name: string; status: IntegrationAdminProvider["status"] }>;
+  const operationalProviders = providers.filter((provider) => isSupportedPlatformProviderKey(provider.provider_key));
   const capabilities = (capabilitiesResult.data || []) as Array<{ id: string; capability_key: string; operation_kind: IntegrationCapabilityOperation; environment: IntegrationEnvironment; unit_name: string; status: IntegrationAdminCapability["status"] }>;
   const providerById = providerMap(providers);
   const capabilityById = capabilityMap(capabilities);
   const agencyById = new Map((agenciesResult.data || []).map((row) => [row.id, row.name]));
   const brandById = new Map((brandsResult.data || []).map((row) => [row.id, row.nome]));
 
-  const persistedPlatformConnections = ((connectionsResult.data || []) as Array<{ id: string; provider_id: string; owner_scope_type: "platform"; environment: IntegrationEnvironment; lifecycle_status: IntegrationAdminConnection["lifecycleStatus"]; secret_ref: string | null; metadata: Record<string, unknown> | null }>).map((row) => ({
-    id: row.id,
-    providerKey: providerById.get(row.provider_id)?.provider_key || "Provider não encontrado",
-    providerName: providerById.get(row.provider_id)?.display_name || "Provider não encontrado",
-    label: typeof row.metadata?.label === "string" ? row.metadata.label : null,
-    ownerScope: "platform" as const,
-    environment: row.environment,
-    lifecycleStatus: row.lifecycle_status,
-    secretConfigured: Boolean(row.secret_ref?.trim()),
-    configuredModel: providerById.get(row.provider_id)?.provider_key === "openrouter" ? readOpenRouterModel(row.metadata) : null,
-    managerCustomerIdConfigured: row.provider_id ? providerById.get(row.provider_id)?.provider_key === "google_ads" && hasGoogleAdsManagerCustomerId(row.metadata) : false,
-    researchCustomerId: providerById.get(row.provider_id)?.provider_key === "google_ads" ? readGoogleAdsResearchCustomerId(row.metadata) : null,
-    healthCheck: safeHealthCheck(safeMetadata(row.metadata).health_check),
-  }));
-  let googleAdsPlatformConnection: IntegrationAdminConnection;
-  try {
-    getGoogleAdsPlatformConfig();
-    googleAdsPlatformConnection = {
-      id: "google_ads_platform_env",
-      providerKey: "google_ads",
-      providerName: "Google Ads",
-      label: "Plataforma / infraestrutura",
-      ownerScope: "platform",
-      environment: "production",
-      lifecycleStatus: "ready",
-      secretConfigured: true,
-      configuredModel: null,
-      managerCustomerIdConfigured: true,
-      researchCustomerId: null,
-      healthCheck: { status: null, checkedAt: null, code: null, message: null, providerRequestRef: null, stage: null, httpStatus: null, googleAdsCode: null, currentModel: null, currentModelAvailable: null },
+  const persistedPlatformConnections = ((connectionsResult.data || []) as Array<{ id: string; provider_id: string; owner_scope_type: "platform"; environment: IntegrationEnvironment; lifecycle_status: IntegrationAdminConnection["lifecycleStatus"]; secret_ref: string | null; metadata: Record<string, unknown> | null }>).map((row) => {
+    const providerKey = providerById.get(row.provider_id)?.provider_key || "Provider não encontrado";
+    const telegramState = telegramWebhookState(row.metadata);
+    const healthCheck = safeHealthCheck(safeMetadata(row.metadata).health_check);
+    return {
+      id: row.id,
+      providerKey,
+      providerName: providerById.get(row.provider_id)?.display_name || "Provider não encontrado",
+      label: typeof row.metadata?.label === "string" ? row.metadata.label : null,
+      ownerScope: "platform" as const,
+      environment: row.environment,
+      lifecycleStatus: row.lifecycle_status,
+      secretConfigured: Boolean(row.secret_ref?.trim()),
+      configuredModel: providerKey === "deepseek" ? readDeepSeekConfiguredModel(row.metadata) : null,
+      managerCustomerIdConfigured: providerKey === "google_ads" && hasGoogleAdsManagerCustomerId(row.metadata),
+      researchCustomerId: providerKey === "google_ads" ? readGoogleAdsResearchCustomerId(row.metadata) : null,
+      healthCheck,
+      googleCloudBucketName: providerKey === "google_cloud" ? readGoogleCloudMediaBucketName(row.metadata) : null,
+      googleCloudHealth: providerKey === "google_cloud" ? safeGoogleCloudHealth(safeMetadata(row.metadata).google_cloud_health, healthCheck) : null,
+      ...telegramState,
     };
-  } catch (error) {
-    const code = error instanceof GoogleAdsPlatformConfigError ? error.code : "GOOGLE_ADS_PLATFORM_ENV_MISSING";
-    googleAdsPlatformConnection = {
-      id: "google_ads_platform_env",
-      providerKey: "google_ads",
-      providerName: "Google Ads",
-      label: "Plataforma / infraestrutura",
-      ownerScope: "platform",
-      environment: "production",
-      lifecycleStatus: "error",
-      secretConfigured: false,
-      configuredModel: null,
-      managerCustomerIdConfigured: false,
-      researchCustomerId: null,
-      healthCheck: { status: "error", checkedAt: null, code, message: "A configuração server-side Google Ads está incompleta.", providerRequestRef: null, stage: "configuration", httpStatus: null, googleAdsCode: null, currentModel: null, currentModelAvailable: null },
-    };
-  }
+  }).filter((connection) => isSupportedPlatformProviderKey(connection.providerKey));
+  const googleAdsStaticConfig = getGoogleAdsStaticConfigStatus();
+  const persistedGoogleAdsConnection = persistedPlatformConnections.find((connection) => connection.providerKey === "google_ads" && connection.environment === "production");
+  const googleAdsPlatformConnection: IntegrationAdminConnection = persistedGoogleAdsConnection || {
+    id: "google_ads_platform_connection",
+    providerKey: "google_ads",
+    providerName: "Google Ads",
+    label: "Plataforma / infraestrutura",
+    ownerScope: "platform",
+    environment: "production",
+    lifecycleStatus: "error",
+    secretConfigured: false,
+    configuredModel: null,
+    managerCustomerIdConfigured: googleAdsStaticConfig.loginCustomerIdConfigured,
+    researchCustomerId: null,
+    healthCheck: {
+      status: "error",
+      checkedAt: null,
+      code: "GOOGLE_ADS_REFRESH_TOKEN_SECRET_MISSING",
+      message: "O OAuth Refresh Token Google Ads ainda não foi configurado no Secret Store.",
+      providerRequestRef: null,
+      stage: "configuration",
+      httpStatus: null,
+      googleAdsCode: null,
+      currentModel: null,
+    currentModelAvailable: null,
+      details: {},
+    },
+    googleCloudBucketName: null,
+    googleCloudHealth: null,
+    telegramWebhookConfigured: false,
+    telegramWebhookUrl: null,
+  };
   const platformConnections = [googleAdsPlatformConnection, ...persistedPlatformConnections.filter((connection) => connection.providerKey !== "google_ads")];
 
   const grants = ((grantsResult.data || []) as Array<{ id: string; capability_id: string; target_scope_type: "agency" | "brand"; target_agency_id: string | null; target_brand_id: string | null; source_scope_type: "platform" | "agency"; source_agency_id: string | null; environment: IntegrationEnvironment; lifecycle_status: IntegrationAdminGrant["lifecycleStatus"]; starts_at: string; ends_at: string | null }>).map((row) => ({
@@ -376,7 +441,8 @@ export async function readPlatformIntegrations(client: QueryClient): Promise<Pla
 
   return {
     platformAccessPolicy: PLATFORM_ACCESS_POLICY,
-    providers: providers.map((row) => ({ id: row.id, providerKey: row.provider_key, displayName: row.display_name, status: row.status })),
+    googleAdsStaticConfig,
+    providers: operationalProviders.map((row) => ({ id: row.id, providerKey: row.provider_key, displayName: row.display_name, status: row.status })),
     capabilities: capabilities.map((row) => ({ id: row.id, capabilityKey: row.capability_key, operationKind: row.operation_kind, environment: row.environment, unitName: row.unit_name, status: row.status })),
     platformConnections,
     agencies: (agenciesResult.data || []).map((row) => ({ id: row.id, name: row.name })),
@@ -396,6 +462,9 @@ export async function readPlatformIntegrations(client: QueryClient): Promise<Pla
 export async function createPlatformIntegrationProvider(client: QueryClient, input: { providerKey: unknown; displayName: unknown; status: unknown }) {
   const providerKey = key(input.providerKey, "providerKey", /^[a-z0-9][a-z0-9_]*$/);
   rejectLegacyProvider(providerKey);
+  if (providerKey === "google_ads") {
+    throw new PlatformIntegrationsAdminError(409, "GOOGLE_ADS_PLATFORM_ENV_READ_ONLY", "Google Ads possui provider canônico fixo e não aceita cadastro manual.");
+  }
   const displayName = text(input.displayName, "displayName", 160);
   const status = enumValue(input.status ?? "active", ["active", "disabled", "legacy"] as const, "status");
   const result = await client.from("integration_providers").insert({ provider_key: providerKey, display_name: displayName, status }).select("id,provider_key,display_name,status").single();
@@ -406,6 +475,12 @@ export async function createPlatformIntegrationProvider(client: QueryClient, inp
 export async function updatePlatformIntegrationProvider(client: QueryClient, input: { id: unknown; displayName?: unknown; status?: unknown }) {
   const id = text(input.id, "id", 80);
   if (!isTenantId(id)) throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_INVALID_INPUT", "O provider solicitado é inválido.");
+  const currentResult = await client.from("integration_providers").select("id,provider_key").eq("id", id).maybeSingle();
+  if (currentResult.error) failRemote("Não foi possível validar o provider solicitado.");
+  if (!currentResult.data) throw new PlatformIntegrationsAdminError(404, "INTEGRATIONS_NOT_FOUND", "Provider não encontrado.");
+  if (currentResult.data.provider_key === "google_ads") {
+    throw new PlatformIntegrationsAdminError(409, "GOOGLE_ADS_PLATFORM_ENV_READ_ONLY", "Google Ads possui provider canônico fixo e não aceita edição estrutural.");
+  }
   const patch: Record<string, string> = {};
   if (typeof input.displayName !== "undefined") patch.display_name = text(input.displayName, "displayName", 160);
   if (typeof input.status !== "undefined") patch.status = enumValue(input.status, ["active", "disabled", "legacy"] as const, "status");
@@ -418,6 +493,9 @@ export async function updatePlatformIntegrationProvider(client: QueryClient, inp
 
 export async function createPlatformIntegrationCapability(client: QueryClient, input: { capabilityKey: unknown; operationKind: unknown; environment: unknown; unitName: unknown; status: unknown }) {
   const capabilityKey = key(input.capabilityKey, "capabilityKey", /^[a-z0-9][a-z0-9_.-]*$/);
+  if (providerKeyForPlatformCapability(capabilityKey) === "google_ads") {
+    throw new PlatformIntegrationsAdminError(409, "GOOGLE_ADS_PLATFORM_ENV_READ_ONLY", "Capabilities Google Ads pertencem ao catálogo canônico e não aceitam cadastro manual.");
+  }
   const operationKind = enumValue(input.operationKind, INTEGRATION_CAPABILITY_OPERATIONS, "operationKind");
   const environment = enumValue(input.environment, INTEGRATION_ENVIRONMENTS, "environment");
   const unitName = text(input.unitName, "unitName", 80);
@@ -430,6 +508,12 @@ export async function createPlatformIntegrationCapability(client: QueryClient, i
 export async function updatePlatformIntegrationCapability(client: QueryClient, input: { id: unknown; unitName?: unknown; status?: unknown }) {
   const id = text(input.id, "id", 80);
   if (!isTenantId(id)) throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_INVALID_INPUT", "A capability solicitada é inválida.");
+  const currentResult = await client.from("integration_capabilities").select("id,capability_key").eq("id", id).maybeSingle();
+  if (currentResult.error) failRemote("Não foi possível validar a capability solicitada.");
+  if (!currentResult.data) throw new PlatformIntegrationsAdminError(404, "INTEGRATIONS_NOT_FOUND", "Capability não encontrada.");
+  if (providerKeyForPlatformCapability(currentResult.data.capability_key) === "google_ads") {
+    throw new PlatformIntegrationsAdminError(409, "GOOGLE_ADS_PLATFORM_ENV_READ_ONLY", "Capabilities Google Ads pertencem ao catálogo canônico e não aceitam edição estrutural.");
+  }
   const patch: Record<string, string> = {};
   if (typeof input.unitName !== "undefined") patch.unit_name = text(input.unitName, "unitName", 80);
   if (typeof input.status !== "undefined") patch.status = enumValue(input.status, ["active", "disabled", "legacy"] as const, "status");
@@ -510,6 +594,7 @@ export async function createPlatformIntegrationConnection(client: QueryClient, a
   const providerResult = await client.from("integration_providers").select("id,provider_key,status").eq("id", providerId).maybeSingle();
   if (providerResult.error) failRemote("Não foi possível validar o provider selecionado.");
   if (!providerResult.data) throw new PlatformIntegrationsAdminError(404, "INTEGRATIONS_NOT_FOUND", "Provider não encontrado.");
+  if (!isSupportedPlatformProviderKey(providerResult.data.provider_key)) throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_PROVIDER_NOT_ALLOWED", "Esse provider não pertence ao contrato operacional atual.");
   if (providerResult.data.status === "legacy") throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_PROVIDER_NOT_ALLOWED", "Provider legado não pode receber connection operacional.");
   if (providerResult.data.provider_key === "google_ads") {
     throw new PlatformIntegrationsAdminError(409, "GOOGLE_ADS_PLATFORM_ENV_READ_ONLY", "Google Ads é infraestrutura fixa da Plataforma e não aceita Connection dinâmica.");
@@ -966,7 +1051,99 @@ export async function updatePlatformGoogleAdsResearchCustomerId(client: SecretMu
   */
 }
 
-const SUPPORTED_PLATFORM_PROVIDER_KEYS = ["google_ads", "dataforseo", "deepseek", "openrouter"] as const;
+function logGoogleAdsRefreshTokenRotation(actorUserId: string, success: boolean, code: string | null = null) {
+  console.info("[integrations] google_ads_refresh_token_rotation", {
+    credential: "google_ads_refresh_token",
+    operation: "rotated",
+    actorUserIdRef: actorUserId.slice(-8),
+    timestamp: new Date().toISOString(),
+    success,
+    code,
+  });
+}
+
+export async function rotatePlatformGoogleAdsRefreshToken(client: SecretMutationClient, actorUserId: string, input: {
+  refreshToken: unknown;
+  label?: unknown;
+}) {
+  let normalizedRefreshToken: string;
+  try {
+    normalizedRefreshToken = normalizeGoogleAdsRefreshToken(input.refreshToken);
+  } catch (error) {
+    const mapped = error instanceof Error ? error : new Error("GOOGLE_ADS_REFRESH_TOKEN_SECRET_INVALID");
+    logGoogleAdsRefreshTokenRotation(actorUserId, false, "code" in mapped ? String((mapped as { code?: unknown }).code || "GOOGLE_ADS_REFRESH_TOKEN_SECRET_INVALID") : "GOOGLE_ADS_REFRESH_TOKEN_SECRET_INVALID");
+    if (error instanceof PlatformIntegrationsAdminError) throw error;
+    throw new PlatformIntegrationsAdminError(400, "GOOGLE_ADS_REFRESH_TOKEN_SECRET_INVALID", mapped.message);
+  }
+
+  try {
+    const connection = await ensureSupportedPlatformConnection(client, actorUserId, {
+      providerKey: "google_ads",
+      environment: "production",
+      label: typeof input.label === "undefined" ? "Plataforma / infraestrutura" : text(input.label, "label", 160),
+    });
+    let nextSecretRef: string;
+    try {
+      // Vault secret names are unique. On the first configuration there is
+      // no reference yet, so the adapter creates the named secret. A later
+      // rotation must update the existing reference instead of creating a
+      // second secret with the same name.
+      nextSecretRef = await createIntegrationSecretStore(client).store({
+        secretRef: connection.secretRef,
+        secret: normalizedRefreshToken,
+        name: GOOGLE_ADS_REFRESH_TOKEN_SECRET_NAME,
+        description: GOOGLE_ADS_REFRESH_TOKEN_SECRET_DESCRIPTION,
+      });
+    } catch (error) {
+      const code = error instanceof IntegrationSecretStoreError ? error.code : "INTEGRATION_SECRET_STORE_UNAVAILABLE";
+      throw new PlatformIntegrationsAdminError(503, code, "Não foi possível armazenar o OAuth Refresh Token no Secret Store.");
+    }
+
+    const rotatedAt = new Date().toISOString();
+    const currentMetadata = connection.metadata && typeof connection.metadata === "object" && !Array.isArray(connection.metadata) ? connection.metadata : {};
+    const currentGoogleAdsMetadata = currentMetadata.google_ads && typeof currentMetadata.google_ads === "object" && !Array.isArray(currentMetadata.google_ads)
+      ? currentMetadata.google_ads as Record<string, unknown>
+      : {};
+    const metadata = {
+      ...currentMetadata,
+      label: typeof input.label === "undefined" ? (typeof currentMetadata.label === "string" ? currentMetadata.label : "Plataforma / infraestrutura") : text(input.label, "label", 160),
+      google_ads: {
+        ...currentGoogleAdsMetadata,
+        static_config_source: "PLATFORM_ENV",
+        refresh_token_source: "SECRET_STORE",
+        refresh_token_rotated_at: rotatedAt,
+        refresh_token_rotated_by_ref: actorUserId.slice(-8),
+      },
+    };
+    const updateResult = await client.from("integration_connections")
+      .update({ secret_ref: nextSecretRef, metadata, lifecycle_status: "pending", updated_at: rotatedAt })
+      .eq("id", connection.id)
+      .select("id,provider_id,owner_scope_type,environment,lifecycle_status,secret_ref")
+      .single();
+    if (updateResult.error || !updateResult.data) failRemote("Não foi possível atualizar a referência do OAuth Refresh Token Google Ads.");
+
+    logGoogleAdsRefreshTokenRotation(actorUserId, true);
+    return {
+      id: updateResult.data.id,
+      providerId: updateResult.data.provider_id,
+      providerKey: "google_ads" as const,
+      ownerScope: updateResult.data.owner_scope_type,
+      environment: updateResult.data.environment,
+      lifecycleStatus: updateResult.data.lifecycle_status,
+      secretConfigured: Boolean(updateResult.data.secret_ref),
+      tokenSaved: true as const,
+      healthValidated: false as const,
+      refreshTokenSource: "SECRET_STORE" as const,
+      rotatedAt,
+    };
+  } catch (error) {
+    const code = error instanceof PlatformIntegrationsAdminError ? error.code : "INTEGRATIONS_REMOTE_UNAVAILABLE";
+    logGoogleAdsRefreshTokenRotation(actorUserId, false, code);
+    throw error;
+  }
+}
+
+const SUPPORTED_PLATFORM_PROVIDER_KEYS = ["google_ads", "dataforseo", "deepseek", "google_cloud", "youtube_data", "telegram"] as const;
 
 type PreparedPlatformConnection = {
   id: string;
@@ -1056,6 +1233,25 @@ function normalizeSupportedProviderSecret(providerKey: Exclude<SupportedPlatform
   if (typeof value !== "string" || !value.trim() || value.length > 200_000) {
     throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_SECRET_PAYLOAD_INVALID", "A credencial informada é inválida.");
   }
+  if (providerKey === "google_cloud") {
+    try { return normalizeGoogleCloudServiceAccountSecret(value); }
+    catch { throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_SECRET_PAYLOAD_INVALID", "A Service Account Google Cloud está incompleta ou possui campos não permitidos."); }
+  }
+  if (providerKey === "youtube_data") {
+    try { return normalizeYouTubeDataApiSecret(value); }
+    catch { throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_SECRET_PAYLOAD_INVALID", "A API key do YouTube Data está incompleta ou possui campos não permitidos."); }
+  }
+  if (providerKey === "telegram") {
+    try {
+      return parseTelegramConfigurationInput(value);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "TELEGRAM_CONFIGURATION_INVALID";
+      if (code === "BOT_TOKEN_REQUIRED") throw new PlatformIntegrationsAdminError(400, "BOT_TOKEN_REQUIRED", "Informe o Bot Token do Telegram.");
+      if (code === "TELEGRAM_BOT_TOKEN_INVALID") throw new PlatformIntegrationsAdminError(400, "BOT_TOKEN_INVALID", "O Bot Token do Telegram possui formato inválido.");
+      if (code === "TELEGRAM_WEBHOOK_SECRET_INVALID") throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_SECRET_PAYLOAD_INVALID", "O segredo do webhook Telegram possui formato inválido.");
+      throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_SECRET_PAYLOAD_INVALID", "A configuração do Telegram possui formato inválido.");
+    }
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
@@ -1067,7 +1263,7 @@ function normalizeSupportedProviderSecret(providerKey: Exclude<SupportedPlatform
   }
   const allowedFields = providerKey === "dataforseo"
     ? ["DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD"]
-    : [providerKey === "deepseek" ? "DEEPSEEK_API_KEY" : "OPENROUTER_API_KEY"];
+    : ["DEEPSEEK_API_KEY"];
   const record = parsed as Record<string, unknown>;
   if (Object.keys(record).some((field) => !allowedFields.includes(field))) {
     throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_SECRET_PAYLOAD_INVALID", "A credencial informada contém campos não permitidos.");
@@ -1088,22 +1284,50 @@ export async function configureSupportedPlatformProvider(client: SecretMutationC
   label?: unknown;
   managerCustomerId?: unknown;
   researchCustomerId?: unknown;
+  bucketName?: unknown;
+  youtubeHealthVideoId?: unknown;
+  telegramWebhookUrl?: unknown;
   secretPayload: unknown;
 }) {
   const providerKey = enumValue(input.providerKey, SUPPORTED_PLATFORM_PROVIDER_KEYS, "providerKey");
   if (providerKey === "google_ads") throw new PlatformIntegrationsAdminError(409, "GOOGLE_ADS_PLATFORM_ENV_READ_ONLY", "Google Ads é infraestrutura fixa da Plataforma e só pode ser configurado por variáveis server-side.");
-  if (providerKey === "deepseek") {
-    throw new PlatformIntegrationsAdminError(409, "INTEGRATIONS_PROVIDER_NOT_ALLOWED", "DeepSeek direto permanece legado e não recebe Connection global nesta fase.");
-  }
   const environment = enumValue(input.environment ?? "production", INTEGRATION_ENVIRONMENTS, "environment");
   const providerDefinition = SUPPORTED_PLATFORM_PROVIDERS[providerKey];
   const label = text(input.label ?? providerDefinition.displayName, "label", 160);
-  const secretPayload = normalizeSupportedProviderSecret(providerKey, input.secretPayload);
+  const normalizedSecret = normalizeSupportedProviderSecret(providerKey, input.secretPayload);
   const connection = await ensureSupportedPlatformConnection(client, actorUserId, { providerKey, environment, label });
+
+  const secretStore = createIntegrationSecretStore(client);
+  let secretPayload: string;
+  if (providerKey === "telegram") {
+    const configuration = normalizedSecret as TelegramConfigurationInput;
+    let webhookSecret = configuration.webhookSecret;
+    if (!webhookSecret && connection.secretRef?.trim()) {
+      let previousPayload: string | null = null;
+      try {
+        previousPayload = await secretStore.resolve(connection.secretRef);
+      } catch (error) {
+        if (error instanceof IntegrationSecretStoreError) {
+          throw new PlatformIntegrationsAdminError(503, error.code, "Não foi possível recuperar o segredo Telegram existente do Secret Store.");
+        }
+        throw error;
+      }
+      if (previousPayload) {
+        try { webhookSecret = parseTelegramSecret(previousPayload).TELEGRAM_WEBHOOK_SECRET; } catch { /* generate a safe replacement below */ }
+      }
+    }
+    if (!webhookSecret) {
+      try { webhookSecret = createTelegramWebhookSecret(); }
+      catch { throw new PlatformIntegrationsAdminError(503, "WEBHOOK_SECRET_GENERATION_FAILED", "Não foi possível gerar automaticamente o segredo do webhook Telegram."); }
+    }
+    secretPayload = normalizeTelegramSecret({ TELEGRAM_BOT_TOKEN: configuration.botToken, TELEGRAM_WEBHOOK_SECRET: webhookSecret });
+  } else {
+    secretPayload = normalizedSecret as string;
+  }
 
   let secretRef: string;
   try {
-    secretRef = await createIntegrationSecretStore(client).store({
+    secretRef = await secretStore.store({
       secretRef: connection.secretRef,
       secret: secretPayload,
       name: providerDefinition.secretName,
@@ -1111,18 +1335,48 @@ export async function configureSupportedPlatformProvider(client: SecretMutationC
     });
   } catch (error) {
     if (error instanceof IntegrationSecretStoreError) {
-      throw new PlatformIntegrationsAdminError(503, error.code, "Não foi possível configurar o secret store compartilhado.");
+      throw new PlatformIntegrationsAdminError(503, providerKey === "telegram" ? "BOT_TOKEN_SAVE_FAILED" : error.code, providerKey === "telegram" ? "Não foi possível salvar o Bot Token no Secret Store." : "Não foi possível configurar o secret store compartilhado.");
     }
     throw error;
   }
 
-  const metadata = { ...connection.metadata, label };
+  const metadata = {
+    ...connection.metadata,
+    label,
+    ...(providerKey === "deepseek" ? { deepseek_model: DEEPSEEK_DEFAULT_MODEL } : {}),
+    ...(providerKey === "google_cloud" ? {
+      google_cloud_media: {
+        ...(connection.metadata.google_cloud_media && typeof connection.metadata.google_cloud_media === "object" && !Array.isArray(connection.metadata.google_cloud_media) ? connection.metadata.google_cloud_media as Record<string, unknown> : {}),
+        ...(typeof input.bucketName === "undefined" || input.bucketName === null || input.bucketName === "" ? {} : (() => {
+          const bucketName = normalizeMediaBucketName(input.bucketName);
+          if (!bucketName) throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_INVALID_INPUT", "bucketName é inválido.");
+          return { bucket_name: bucketName };
+        })()),
+      },
+    } : {}),
+    ...(providerKey === "youtube_data" ? {
+      ...(typeof input.youtubeHealthVideoId === "undefined" || input.youtubeHealthVideoId === null || input.youtubeHealthVideoId === "" ? {} : (() => {
+        const videoId = text(input.youtubeHealthVideoId, "youtubeHealthVideoId", 120);
+        return { youtube_health_video_id: videoId };
+      })()),
+    } : {}),
+    ...(providerKey === "telegram" ? {
+      telegram: {
+        ...(connection.metadata.telegram && typeof connection.metadata.telegram === "object" && !Array.isArray(connection.metadata.telegram) ? connection.metadata.telegram as Record<string, unknown> : {}),
+        webhook_configured_at: null,
+        ...(typeof input.telegramWebhookUrl === "undefined" || input.telegramWebhookUrl === null || input.telegramWebhookUrl === "" ? {} : { webhook_url: text(input.telegramWebhookUrl, "telegramWebhookUrl", 2_000) }),
+      },
+    } : {}),
+  };
   const updateResult = await client.from("integration_connections")
     .update({ secret_ref: secretRef, metadata, lifecycle_status: "pending", updated_at: new Date().toISOString() })
     .eq("id", connection.id)
     .select("id,provider_id,owner_scope_type,environment,lifecycle_status,metadata,secret_ref")
     .single();
-  if (updateResult.error) failRemote("Não foi possível persistir a configuração da connection da Plataforma.");
+  if (updateResult.error) {
+    if (providerKey === "telegram") throw new PlatformIntegrationsAdminError(503, "BOT_TOKEN_SAVE_FAILED", "O Bot Token foi recebido, mas não foi possível persistir a configuração da Connection.");
+    failRemote("Não foi possível persistir a configuração da connection da Plataforma.");
+  }
 
   return {
     id: updateResult.data.id,
@@ -1136,50 +1390,7 @@ export async function configureSupportedPlatformProvider(client: SecretMutationC
   };
 }
 
-export async function updateOpenRouterModel(client: SecretMutationClient, input: { connectionId: unknown; model: unknown }) {
-  const connectionId = text(input.connectionId, "connectionId", 80);
-  if (!isTenantId(connectionId)) throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_INVALID_INPUT", "A connection solicitada é inválida.");
-  const model = normalizeOpenRouterModel(input.model);
-  if (!model) throw new PlatformIntegrationsAdminError(400, "OPENROUTER_MODEL_INVALID", "Informe um model ID OpenRouter válido, no formato provider/model.");
-
-  const connectionResult = await client.from("integration_connections")
-    .select("id,provider_id,owner_scope_type,environment,lifecycle_status,metadata,secret_ref")
-    .eq("id", connectionId)
-    .maybeSingle();
-  if (connectionResult.error) failRemote("Não foi possível consultar a connection OpenRouter da Plataforma.");
-  const connection = connectionResult.data as { id: string; provider_id: string; owner_scope_type: string; environment: IntegrationEnvironment; lifecycle_status: IntegrationAdminConnection["lifecycleStatus"]; metadata: Record<string, unknown> | null; secret_ref: string | null } | null;
-  if (!connection) throw new PlatformIntegrationsAdminError(404, "INTEGRATIONS_NOT_FOUND", "Connection não encontrada.");
-  if (connection.owner_scope_type !== "platform" || connection.environment !== "production") throw new PlatformIntegrationsAdminError(409, "INTEGRATIONS_CONNECTION_SCOPE_INVALID", "A configuração do modelo exige a Connection OpenRouter global de produção.");
-  if (!connection.secret_ref?.trim()) throw new PlatformIntegrationsAdminError(409, "OPENROUTER_SECRET_NOT_CONFIGURED", "Configure a credencial OpenRouter antes de definir o modelo.");
-
-  const providerResult = await client.from("integration_providers").select("id,provider_key,status").eq("id", connection.provider_id).maybeSingle();
-  if (providerResult.error) failRemote("Não foi possível validar o provider da connection OpenRouter.");
-  if (!providerResult.data || providerResult.data.provider_key !== "openrouter" || providerResult.data.status !== "active") {
-    throw new PlatformIntegrationsAdminError(409, "INTEGRATIONS_PROVIDER_MISMATCH", "A connection selecionada não é um provider OpenRouter ativo.");
-  }
-  if (connection.lifecycle_status !== "ready") throw new PlatformIntegrationsAdminError(409, "OPENROUTER_CONNECTION_NOT_READY", "A Connection OpenRouter precisa estar READY antes de alterar o modelo.");
-
-  const updatedAt = new Date().toISOString();
-  const updateResult = await client.from("integration_connections")
-    .update({ metadata: writeOpenRouterModel(connection.metadata, model), updated_at: updatedAt })
-    .eq("id", connection.id)
-    .select("id,provider_id,owner_scope_type,environment,lifecycle_status,metadata,secret_ref")
-    .single();
-  if (updateResult.error) failRemote("Não foi possível persistir o modelo OpenRouter.");
-
-  return {
-    id: updateResult.data.id,
-    providerId: updateResult.data.provider_id,
-    providerKey: "openrouter" as const,
-    ownerScope: updateResult.data.owner_scope_type,
-    environment: updateResult.data.environment,
-    lifecycleStatus: updateResult.data.lifecycle_status,
-    configuredModel: readOpenRouterModel(updateResult.data.metadata),
-    secretConfigured: Boolean(updateResult.data.secret_ref),
-  };
-}
-
-const PLATFORM_HEALTH_PROVIDER_KEYS = ["google_ads", "dataforseo", "openrouter"] as const;
+const PLATFORM_HEALTH_PROVIDER_KEYS = ["google_ads", "dataforseo", "deepseek", "google_cloud", "youtube_data", "telegram"] as const;
 
 function isPlatformHealthProviderKey(value: string): value is PlatformHealthProviderKey {
   return PLATFORM_HEALTH_PROVIDER_KEYS.includes(value as PlatformHealthProviderKey);
@@ -1189,9 +1400,22 @@ function safeMetadata(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function telegramWebhookState(value: unknown): { telegramWebhookConfigured: boolean; telegramWebhookUrl: string | null } {
+  const telegram = safeMetadata(safeMetadata(value).telegram);
+  const webhookUrl = typeof telegram.webhook_url === "string" && telegram.webhook_url.trim() ? telegram.webhook_url.trim() : null;
+  const configuredAt = typeof telegram.webhook_configured_at === "string" && telegram.webhook_configured_at.trim() ? telegram.webhook_configured_at.trim() : null;
+  return { telegramWebhookConfigured: Boolean(webhookUrl && configuredAt), telegramWebhookUrl: webhookUrl };
+}
+
 function safeHealthCheck(value: unknown): IntegrationAdminConnection["healthCheck"] {
   const health = safeMetadata(value);
   const diagnostics = safeMetadata(health.diagnostics);
+  const rawDetails = safeMetadata(health.details);
+  const details: Record<string, string | null> = {};
+  for (const field of ["botId", "botName", "botUsername", "webhookConfigured", "webhookUrl", "pendingUpdateCount", "lastError", "bucketConfigured", "destructiveWrite", "apiCall"] as const) {
+    const detail = rawDetails[field];
+    if (typeof detail === "string") details[field] = detail;
+  }
   return {
     status: health.status === "ready" || health.status === "error" ? health.status : null,
     checkedAt: typeof health.checked_at === "string" ? health.checked_at : null,
@@ -1203,45 +1427,115 @@ function safeHealthCheck(value: unknown): IntegrationAdminConnection["healthChec
     googleAdsCode: typeof diagnostics.googleAdsCode === "string" ? diagnostics.googleAdsCode : null,
     currentModel: typeof health.current_model === "string" ? health.current_model : null,
     currentModelAvailable: typeof health.current_model_available === "boolean" ? health.current_model_available : null,
+    details,
   };
+}
+
+function safeGoogleCloudHealth(value: unknown, legacyHealth: IntegrationAdminHealthCheck) {
+  const health = safeMetadata(value);
+  const speechValue = health.speech ? safeHealthCheck(health.speech) : null;
+  const storageValue = health.storage ? safeHealthCheck(health.storage) : null;
+  if (speechValue || storageValue) return { speech: speechValue, storage: storageValue };
+  if (legacyHealth.stage === "bucket_metadata" || legacyHealth.code?.startsWith("BUCKET_") || legacyHealth.code === "MEDIA_BUCKET_NOT_CONFIGURED" || legacyHealth.code === "STORAGE_API_DISABLED") {
+    return { speech: null, storage: legacyHealth };
+  }
+  if (legacyHealth.stage === "credential_and_client" || legacyHealth.code === "CREDENTIAL_INVALID") {
+    return { speech: legacyHealth, storage: null };
+  }
+  return { speech: null, storage: null };
 }
 
 function healthMetadata(value: unknown, health: Record<string, unknown>) {
   return { ...safeMetadata(value), health_check: health };
 }
 
+function operationHealthMetadata(value: unknown, health: Record<string, unknown>, providerKey: string, healthOperation: PlatformHealthOperation | undefined) {
+  const metadata = healthMetadata(value, health);
+  if (providerKey !== "google_cloud") return metadata;
+  const current = safeMetadata(safeMetadata(value).google_cloud_health);
+  const operation = healthOperation === "storage" ? "storage" : "speech";
+  return { ...metadata, google_cloud_health: { ...current, [operation]: health } };
+}
+
 export async function healthCheckPlatformIntegrationConnection(client: SecretMutationClient, input: {
   connectionId: unknown;
   providerKey: unknown;
+  healthOperation?: unknown;
   fetchImpl?: typeof fetch;
+  storageClientFactory?: StorageClientFactory;
 }) {
   const providerKey = text(input.providerKey, "providerKey", 80);
   if (!isPlatformHealthProviderKey(providerKey)) {
-    throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_PROVIDER_NOT_ALLOWED", "Somente Google Ads, DataForSEO e OpenRouter possuem health check global nesta fase.");
+    throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_PROVIDER_NOT_ALLOWED", "Esse provider não possui health check global no contrato atual.");
   }
+  const healthOperation = typeof input.healthOperation === "undefined" ? undefined : enumValue(input.healthOperation, ["speech", "storage", "youtube", "telegram_get_me", "telegram_webhook"] as const, "healthOperation") as PlatformHealthOperation;
 
   if (providerKey === "google_ads") {
+    const connectionId = text(input.connectionId, "connectionId", 80);
+    if (!isTenantId(connectionId)) throw new PlatformIntegrationsAdminError(400, "INTEGRATIONS_INVALID_INPUT", "A connection Google Ads solicitada é inválida.");
+    const connectionResult = await client.from("integration_connections")
+      .select("id,provider_id,owner_scope_type,environment,lifecycle_status,secret_ref,metadata")
+      .eq("id", connectionId)
+      .maybeSingle();
+    if (connectionResult.error) failRemote("Não foi possível consultar a connection Google Ads.");
+    const connection = connectionResult.data as { id: string; provider_id: string; owner_scope_type: string; environment: IntegrationEnvironment; lifecycle_status: IntegrationAdminConnection["lifecycleStatus"]; secret_ref: string | null; metadata: Record<string, unknown> | null } | null;
+    if (!connection) throw new PlatformIntegrationsAdminError(404, "INTEGRATIONS_NOT_FOUND", "A connection Google Ads ainda não foi criada. Substitua o token antes de testar.");
+    if (connection.owner_scope_type !== "platform" || connection.environment !== "production") throw new PlatformIntegrationsAdminError(409, "INTEGRATIONS_CONNECTION_SCOPE_INVALID", "O health check Google Ads exige uma connection global de produção.");
+    const providerResult = await client.from("integration_providers").select("id,provider_key,status").eq("id", connection.provider_id).maybeSingle();
+    if (providerResult.error) failRemote("Não foi possível validar o provider Google Ads.");
+    if (!providerResult.data || providerResult.data.provider_key !== "google_ads" || providerResult.data.status !== "active") throw new PlatformIntegrationsAdminError(409, "INTEGRATIONS_PROVIDER_MISMATCH", "A connection selecionada não corresponde a um provider Google Ads ativo.");
+
     const checkedAt = new Date().toISOString();
+    const markFailure = async (code: string, message: string, providerRequestRef: string | null, diagnostics: Record<string, string | null> = {}) => {
+      const updateResult = await client.from("integration_connections")
+        .update({
+          lifecycle_status: "error",
+          metadata: healthMetadata(connection.metadata, { status: "error", checked_at: checkedAt, code, message, provider_request_ref: providerRequestRef, stage: diagnostics.stage || null, diagnostics }),
+          updated_at: checkedAt,
+        })
+        .eq("id", connection.id);
+      if (updateResult.error) failRemote("O health check Google Ads falhou e não foi possível persistir o estado sanitizado da connection.");
+    };
     try {
-      const probe = await runPlatformProviderHealthProbe({ providerKey, fetchImpl: input.fetchImpl });
+      const config = await resolveGoogleAdsPlatformConfig(client, process.env, { requireReady: false });
+      const probe = await runPlatformProviderHealthProbe({ providerKey, googleAdsConfig: config, fetchImpl: input.fetchImpl });
+      const metadata = healthMetadata(connection.metadata, {
+        status: "ready",
+        checked_at: checkedAt,
+        code: null,
+        message: null,
+        provider_request_ref: probe.providerRequestRef,
+        cost_amount: probe.costAmount,
+        details: probe.details,
+      });
+      const updateResult = await client.from("integration_connections")
+        .update({ lifecycle_status: "ready", metadata, updated_at: checkedAt })
+        .eq("id", connection.id)
+        .select("id,provider_id,owner_scope_type,environment,lifecycle_status,secret_ref")
+        .single();
+      if (updateResult.error || !updateResult.data) failRemote("O Google Ads respondeu, mas não foi possível persistir o estado READY da connection.");
       return {
-        id: "google_ads_platform_env",
-        providerId: "google_ads_platform_env",
+        id: updateResult.data.id,
+        providerId: updateResult.data.provider_id,
         providerKey,
         ownerScope: "platform" as const,
-        environment: "production" as const,
-        lifecycleStatus: "ready" as const,
-        secretConfigured: true,
-        checkedAt,
+        environment: updateResult.data.environment,
+         lifecycleStatus: updateResult.data.lifecycle_status,
+         secretConfigured: Boolean(updateResult.data.secret_ref),
+         status: "ready" as const,
+         checkedAt,
         providerRequestRef: probe.providerRequestRef,
         costAmount: probe.costAmount,
         details: probe.details,
-        source: "PLATFORM_ENV" as const,
+        source: "PLATFORM_ENV_STATIC_PLUS_SECRET_STORE_REFRESH_TOKEN" as const,
       };
     } catch (error) {
       const mapped = error instanceof PlatformHealthCheckError
         ? error
-        : new PlatformHealthCheckError(502, "PLATFORM_HEALTH_PROVIDER_FAILED", "O provider não confirmou a infraestrutura Google Ads.");
+        : error instanceof GoogleAdsPlatformConfigError
+          ? new PlatformHealthCheckError(503, error.code, error.message, null, { stage: "configuration", httpStatus: null })
+          : new PlatformHealthCheckError(502, "PLATFORM_HEALTH_PROVIDER_FAILED", "O provider não confirmou a infraestrutura Google Ads.");
+      await markFailure(mapped.code, mapped.message, mapped.providerRequestRef, mapped.diagnostics);
       throw new PlatformIntegrationsAdminError(mapped.status, mapped.code, mapped.message, mapped.diagnostics, mapped.providerRequestRef);
     }
   }
@@ -1266,11 +1560,13 @@ export async function healthCheckPlatformIntegrationConnection(client: SecretMut
   if (providerResult.data.status !== "active") throw new PlatformIntegrationsAdminError(409, "INTEGRATIONS_PROVIDER_DISABLED", "O provider da connection está desabilitado no catálogo técnico.");
 
   const checkedAt = new Date().toISOString();
+  const preserveConnectionOnStorageFailure = providerKey === "google_cloud" && healthOperation === "storage";
   const markFailure = async (code: string, message: string, providerRequestRef: string | null, diagnostics: Record<string, string | null> = {}) => {
+    const health = { status: "error", checked_at: checkedAt, code, message, provider_request_ref: providerRequestRef, stage: diagnostics.stage || null, diagnostics };
     const updateResult = await client.from("integration_connections")
       .update({
-        lifecycle_status: "error",
-        metadata: healthMetadata(connection.metadata, { status: "error", checked_at: checkedAt, code, message, provider_request_ref: providerRequestRef, stage: diagnostics.stage || null, diagnostics }),
+        ...(preserveConnectionOnStorageFailure ? {} : { lifecycle_status: "error" }),
+        metadata: operationHealthMetadata(connection.metadata, health, providerKey, healthOperation),
         updated_at: checkedAt,
       })
       .eq("id", connection.id);
@@ -1299,8 +1595,8 @@ export async function healthCheckPlatformIntegrationConnection(client: SecretMut
   }
 
   try {
-    const probe = await runPlatformProviderHealthProbe({ providerKey, secretPayload, metadata: connection.metadata, fetchImpl: input.fetchImpl });
-    const metadata = healthMetadata(connection.metadata, {
+    const probe = await runPlatformProviderHealthProbe({ providerKey, secretPayload, metadata: connection.metadata, healthOperation, fetchImpl: input.fetchImpl, storageClientFactory: input.storageClientFactory });
+    const health = {
       status: "ready",
       checked_at: checkedAt,
       code: null,
@@ -1310,7 +1606,8 @@ export async function healthCheckPlatformIntegrationConnection(client: SecretMut
       details: probe.details,
       current_model: probe.currentModel ?? null,
       current_model_available: probe.currentModelAvailable ?? null,
-    });
+    };
+    const metadata = operationHealthMetadata(connection.metadata, health, providerKey, healthOperation);
     const updateResult = await client.from("integration_connections")
       .update({ lifecycle_status: "ready", metadata, updated_at: checkedAt })
       .eq("id", connection.id)
@@ -1323,13 +1620,15 @@ export async function healthCheckPlatformIntegrationConnection(client: SecretMut
       providerKey,
       ownerScope: updateResult.data.owner_scope_type,
       environment: updateResult.data.environment,
-      lifecycleStatus: updateResult.data.lifecycle_status,
-      secretConfigured: Boolean(updateResult.data.secret_ref),
-      checkedAt,
+       lifecycleStatus: updateResult.data.lifecycle_status,
+       secretConfigured: Boolean(updateResult.data.secret_ref),
+       status: "ready" as const,
+       checkedAt,
       providerRequestRef: probe.providerRequestRef,
       costAmount: probe.costAmount,
       currentModel: probe.currentModel ?? null,
       currentModelAvailable: probe.currentModelAvailable ?? null,
+      details: probe.details,
     };
   } catch (error) {
     const mapped = error instanceof PlatformHealthCheckError

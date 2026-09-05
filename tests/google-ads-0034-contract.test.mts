@@ -73,9 +73,12 @@ test("rollback é explícito, condicionado e não usa CASCADE", async () => {
   assert.doesNotMatch(sql, /DROP TABLE/i);
 });
 
-test("Google Ads usa exclusivamente o resolver de infraestrutura env da Plataforma", async () => {
+test("Google Ads usa ENV somente para configuração estática e Secret Store para o refresh token", async () => {
   const source = await read(canonicalPath);
-  assert.match(source, /getGoogleAdsPlatformConfig/);
+  assert.match(source, /getGoogleAdsStaticPlatformConfig/);
   assert.match(source, /GOOGLE_ADS_PLATFORM_RESEARCH_CUSTOMER_MISSING/);
-  assert.doesNotMatch(source, /createIntegrationSecretStore|integration_connections|secret_ref|Vault/);
+  assert.match(source, /createIntegrationSecretStore/);
+  assert.match(source, /integration_connections/);
+  assert.match(source, /secret_ref/);
+  assert.match(source, /never falls back to ENV/);
 });

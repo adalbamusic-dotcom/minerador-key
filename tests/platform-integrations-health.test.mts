@@ -4,6 +4,7 @@ import {
   healthCheckPlatformIntegrationConnection,
 } from "../lib/server/platform-integrations-admin.ts";
 import { runPlatformProviderHealthProbe } from "../lib/server/platform-integrations-health.ts";
+import { getGoogleAdsPlatformConfig } from "../lib/google/ads/config.ts";
 
 const SECRET = "never-return-this-secret";
 const CONNECTION_ID = "10000000-0000-4000-8000-000000000001";
@@ -16,6 +17,7 @@ const GOOGLE_ENV = {
   GOOGLE_ADS_LOGIN_CUSTOMER_ID: "1234567890",
   GOOGLE_ADS_RESEARCH_CUSTOMER_ID: "9876543210",
 };
+const GOOGLE_CONFIG = getGoogleAdsPlatformConfig(GOOGLE_ENV, GOOGLE_ENV.GOOGLE_ADS_REFRESH_TOKEN);
 
 function response(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
@@ -45,6 +47,7 @@ function fakeAdminClient(secretPayload: string, providerKey: string, fetchImpl: 
         select() { return builder; },
         update(payload: Record<string, unknown>) { mode = "update"; updatePayload = payload; return builder; },
         eq() { return builder; },
+        neq() { return builder; },
         async maybeSingle() {
           if (table === "integration_connections") return { data: { id: CONNECTION_ID, provider_id: PROVIDER_ID, owner_scope_type: "platform", environment: "production", lifecycle_status: lifecycleStatus, secret_ref: "10000000-0000-4000-8000-000000000003", metadata: currentMetadata }, error: null };
           return { data: { id: PROVIDER_ID, provider_key: providerKey, status: "active" }, error: null };
@@ -70,10 +73,11 @@ function fakeAdminClient(secretPayload: string, providerKey: string, fetchImpl: 
   return { client, updates, get lifecycleStatus() { return lifecycleStatus; }, fetchImpl };
 }
 
-test("Google Ads probe uses only platform env and validates MCC plus Research Customer through accessible customers", async () => {
+test("Google Ads probe uses static platform config plus Secret Store and validates MCC plus Research Customer through accessible customers", async () => {
   const calls: string[] = [];
   const result = await withGoogleEnv(() => runPlatformProviderHealthProbe({
     providerKey: "google_ads",
+    googleAdsConfig: GOOGLE_CONFIG,
     fetchImpl: async (url, init) => {
         calls.push(String(url));
         if (String(url).includes("oauth2.googleapis.com")) return response({ access_token: "access-token", expires_in: 3600 });
@@ -109,33 +113,34 @@ test("DataForSEO probe makes one minimal mocked request and sanitizes failures",
   );
 });
 
-test("OpenRouter connection health authenticates against the user models endpoint without requiring chat completion", async () => {
+test("DeepSeek connection health authenticates against the models endpoint without requiring chat completion", async () => {
   const result = await runPlatformProviderHealthProbe({
-    providerKey: "openrouter",
-    secretPayload: JSON.stringify({ OPENROUTER_API_KEY: SECRET }),
+    providerKey: "deepseek",
+    secretPayload: JSON.stringify({ DEEPSEEK_API_KEY: SECRET }),
     fetchImpl: async (url, init) => {
-      assert.equal(url, "https://openrouter.ai/api/v1/models/user");
+      assert.equal(url, "https://api.deepseek.com/models");
       assert.equal(init?.method, "GET");
       assert.equal((init?.headers as Record<string, string>).authorization, `Bearer ${SECRET}`);
-      return response({ data: [{ id: "deepseek/deepseek-v4-flash-0731" }] }, 200, { "x-request-id": "openrouter-request" });
+      return response({ data: [{ id: "deepseek-v4-pro" }] }, 200, { "x-request-id": "deepseek-request" });
     },
   });
-  assert.equal(result.currentModel, "deepseek/deepseek-v4-flash-0731");
+  assert.equal(result.currentModel, "deepseek-v4-pro");
   assert.equal(result.currentModelAvailable, true);
-  assert.equal(result.providerRequestRef, "openrouter-request");
+  assert.equal(result.providerRequestRef, "deepseek-request");
   await assert.rejects(
-    runPlatformProviderHealthProbe({ providerKey: "openrouter", secretPayload: JSON.stringify({ OPENROUTER_API_KEY: SECRET }), fetchImpl: async () => response({ error: SECRET }, 401) }),
+    runPlatformProviderHealthProbe({ providerKey: "deepseek", secretPayload: JSON.stringify({ DEEPSEEK_API_KEY: SECRET }), fetchImpl: async () => response({ error: SECRET }, 401) }),
     (error: unknown) => error instanceof Error && !error.message.includes(SECRET),
   );
 });
 
-test("OpenRouter remains READY when the separately configured model is unavailable", async () => {
+test("DeepSeek reports the configured model as unavailable without changing the Connection", async () => {
   const result = await runPlatformProviderHealthProbe({
-    providerKey: "openrouter",
-    secretPayload: JSON.stringify({ OPENROUTER_API_KEY: SECRET }),
+    providerKey: "deepseek",
+    secretPayload: JSON.stringify({ DEEPSEEK_API_KEY: SECRET }),
+    metadata: { deepseek_model: "deepseek-v4-flash" },
     fetchImpl: async () => response({ data: [{ id: "another/provider-model" }] }),
   });
-  assert.equal(result.currentModel, "deepseek/deepseek-v4-flash-0731");
+  assert.equal(result.currentModel, "deepseek-v4-flash");
   assert.equal(result.currentModelAvailable, false);
 });
 
@@ -143,6 +148,7 @@ test("Google Ads health exposes only safe stage, HTTP status, provider code and 
   await withGoogleEnv(() => assert.rejects(
     runPlatformProviderHealthProbe({
       providerKey: "google_ads",
+      googleAdsConfig: GOOGLE_CONFIG,
       fetchImpl: async (url) => String(url).includes("oauth2.googleapis.com")
         ? response({ access_token: "access-token", expires_in: 3600 })
         : response({ error: { status: "PERMISSION_DENIED" } }, 403, { "google-ads-request-id": "google-error-request" }),
@@ -156,10 +162,10 @@ test("Google Ads health exposes only safe stage, HTTP status, provider code and 
   ));
 });
 
-test("global health check promotes pending to ready without grant, binding or quota", async () => {
-  const fake = fakeAdminClient(JSON.stringify({ OPENROUTER_API_KEY: SECRET }), "openrouter", async () => response({ data: [{ id: "deepseek/deepseek-v4-flash-0731" }] }));
+test("global DeepSeek health check promotes pending to ready without grant, binding or quota", async () => {
+  const fake = fakeAdminClient(JSON.stringify({ DEEPSEEK_API_KEY: SECRET }), "deepseek", async () => response({ data: [{ id: "deepseek-v4-pro" }] }));
   const adminClient = fake.client as unknown as Parameters<typeof healthCheckPlatformIntegrationConnection>[0];
-  const result = await healthCheckPlatformIntegrationConnection(adminClient, { connectionId: CONNECTION_ID, providerKey: "openrouter", fetchImpl: fake.fetchImpl });
+  const result = await healthCheckPlatformIntegrationConnection(adminClient, { connectionId: CONNECTION_ID, providerKey: "deepseek", fetchImpl: fake.fetchImpl });
   assert.equal(result.lifecycleStatus, "ready");
   assert.equal(fake.lifecycleStatus, "ready");
   assert.equal((fake.updates.at(-1)?.lifecycle_status), "ready");
@@ -167,25 +173,27 @@ test("global health check promotes pending to ready without grant, binding or qu
   assert.doesNotMatch(JSON.stringify(result), new RegExp(SECRET));
 });
 
-test("Google Ads global health uses platform env without reading or writing an integration connection", async () => {
-  const result = await withGoogleEnv(() => healthCheckPlatformIntegrationConnection({ from() { throw new Error("Google Ads health must not access the database"); } } as never, {
-    connectionId: "google_ads_platform_env",
+test("Google Ads global health resolves the refresh token from the Secret Store and persists only sanitized state", async () => {
+  const fake = fakeAdminClient(GOOGLE_ENV.GOOGLE_ADS_REFRESH_TOKEN, "google_ads", async (url) => String(url).includes("oauth2.googleapis.com")
+    ? response({ access_token: "access-token", expires_in: 3600 })
+    : response({ resourceNames: ["customers/1234567890", "customers/9876543210"] }, 200, { "request-id": "google-request" }));
+  const result = await withGoogleEnv(() => healthCheckPlatformIntegrationConnection(fake.client as never, {
+    connectionId: CONNECTION_ID,
     providerKey: "google_ads",
-    fetchImpl: async (url) => String(url).includes("oauth2.googleapis.com")
-      ? response({ access_token: "access-token", expires_in: 3600 })
-      : response({ resourceNames: ["customers/1234567890", "customers/9876543210"] }, 200, { "request-id": "google-request" }),
+    fetchImpl: fake.fetchImpl,
   }));
   assert.equal(result.lifecycleStatus, "ready");
-  assert.equal(result.source, "PLATFORM_ENV");
+  assert.equal(result.source, "PLATFORM_ENV_STATIC_PLUS_SECRET_STORE_REFRESH_TOKEN");
   assert.equal(result.providerRequestRef, "google-request");
+  assert.equal(fake.lifecycleStatus, "ready");
   assert.doesNotMatch(JSON.stringify(result), /developer-token|client-secret|refresh-token/i);
 });
 
-test("failed global health check marks error and never returns ready or a secret", async () => {
-  const fake = fakeAdminClient(JSON.stringify({ OPENROUTER_API_KEY: SECRET }), "openrouter", async () => response({ error: "unauthorized" }, 401));
+test("failed global DeepSeek health check marks error and never returns ready or a secret", async () => {
+  const fake = fakeAdminClient(JSON.stringify({ DEEPSEEK_API_KEY: SECRET }), "deepseek", async () => response({ error: "unauthorized" }, 401));
   const adminClient = fake.client as unknown as Parameters<typeof healthCheckPlatformIntegrationConnection>[0];
   await assert.rejects(
-    healthCheckPlatformIntegrationConnection(adminClient, { connectionId: CONNECTION_ID, providerKey: "openrouter", fetchImpl: fake.fetchImpl }),
+    healthCheckPlatformIntegrationConnection(adminClient, { connectionId: CONNECTION_ID, providerKey: "deepseek", fetchImpl: fake.fetchImpl }),
     (error: unknown) => error instanceof Error && !error.message.includes(SECRET),
   );
   assert.equal(fake.lifecycleStatus, "error");

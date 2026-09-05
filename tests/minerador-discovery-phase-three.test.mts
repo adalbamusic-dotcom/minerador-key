@@ -33,6 +33,8 @@ test("targeting resolve códigos internos, rejeita mais de dez e mostra nomes hu
   assert.throws(() => resolveDiscoveryTargeting(["XX"]), /GOOGLE_ADS_INVALID_GEO_TARGET/);
   assert.deepEqual(discoveryTargetingLabels(["geoTargetConstants/2076"]), { label: "Brasil", details: ["Brasil"] });
   assert.deepEqual(discoveryTargetingLabels(["geoTargetConstants/20106", "geoTargetConstants/20094"]).details, ["Minas Gerais", "São Paulo"]);
+  assert.deepEqual(discoveryTargetingLabels(undefined), { label: "Sem targeting", details: ["Targeting não disponível"] });
+  assert.deepEqual(discoveryTargetingLabels({}), { label: "Sem targeting", details: ["Targeting não disponível"] });
 });
 test("targeting usa os IDs oficiais atuais de todas as UFs brasileiras", () => {
   const expected = {

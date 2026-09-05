@@ -81,11 +81,14 @@ test("rotas Google Ads usam somente a infraestrutura server-side da Plataforma",
     assert.doesNotMatch(source, /minerador_google_ads_connections/);
     assert.match(source, /resolveGoogleAdsCanonicalContext/);
   }
-  assert.match(canonical, /getGoogleAdsPlatformConfig/);
+  assert.match(canonical, /getGoogleAdsStaticPlatformConfig/);
   assert.match(canonical, /GOOGLE_ADS_PLATFORM_RESEARCH_CUSTOMER_MISSING/);
   assert.match(canonical, /GOOGLE_ADS_TARGETING_INVALID/);
   assert.match(canonical, /GOOGLE_ADS_DISCOVERY_STATE_GEO_TARGETS/);
-  assert.doesNotMatch(canonical, /integration_connections|integration_secret|secret_ref|createIntegrationSecretStore/);
+  assert.match(canonical, /resolveGoogleAdsPlatformConfig/);
+  assert.match(canonical, /createIntegrationSecretStore/);
+  assert.match(canonical, /integration_connections/);
+  assert.match(canonical, /secret_ref/);
 });
 
 test("consumidores Google Ads usam as capabilities canônicas do Minerador", async () => {
@@ -110,6 +113,7 @@ test("configuração canônica rejeita targeting divergente e não consulta pers
   const source = await read(canonicalPath);
   assert.match(source, /GOOGLE_ADS_TARGETING_MISMATCH/);
   assert.match(source, /canonicalTargetingEquals/);
-  assert.match(source, /getGoogleAdsPlatformConfig/);
-  assert.doesNotMatch(source, /resolveGoogleAdsSecret|integration_connections|secret_ref|Vault/);
+  assert.match(source, /getGoogleAdsStaticPlatformConfig/);
+  assert.match(source, /resolveGoogleAdsPlatformConfig/);
+  assert.match(source, /Secret Store/);
 });

@@ -413,7 +413,7 @@ export function auditArchitectWorkspace(input: ArchitectRecoveryAuditInput): Arc
   };
 }
 
-const ASSIGNMENT_FIELDS = ["clusterId", "provisionalGroupId", "siloId", "silo_id", "siloName", "computedSlug", "computedHierarquia", "reviewRole", "aiReviewAnnotation", "keywordDnaRef"] as const;
+const ASSIGNMENT_FIELDS = ["clusterId", "provisionalGroupId", "siloId", "silo_id", "siloName", "computedSlug", "computedHierarquia", "reviewRole", "aiReviewAnnotation", "keywordDnaRef", "siloCandidate"] as const;
 
 function recordsFromArtifacts(values: Array<{ key: string; value: unknown }> | undefined): RecoveryRecord[] {
   const records: RecoveryRecord[] = [];

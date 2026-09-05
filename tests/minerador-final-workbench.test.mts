@@ -39,13 +39,15 @@ test("Descoberta ocupa a largura útil e preserva seleção de texto", () => {
 });
 
 test("DNA expandido não repete título e keyword e permanece compacto", () => {
-  assert.match(dnaPanels, /KeywordDNA/);
+  assert.match(dnaPanels, /KeywordDnaPanel/);
   assert.match(dnaPanels, /KeywordDnaProvenance/);
   assert.match(dnaPanels, /showProvenance = true/);
+  assert.match(dnaPanels, /data-keyword-profile="bento"/);
+  assert.match(dnaPanels, /Proveniência e detalhes técnicos/);
   assert.doesNotMatch(dnaPanels, /#\$\{visualPosition\}/);
   assert.doesNotMatch(dnaPanels, /<h3[^>]*>\{keyword\.keyword\}<\/h3>/);
-  assert.match(processor, /showProvenance=\{false\}/);
-  assert.match(processor, /<KeywordDnaProvenance keyword=\{item\} \/>/);
+  assert.doesNotMatch(processor, /showProvenance=\{false\}/);
+  assert.doesNotMatch(processor, /<KeywordDnaProvenance keyword=\{item\} \/>/);
 });
 
 test("barra de seleção é um dock único no viewport e reserva espaço para as últimas linhas", () => {
@@ -72,10 +74,10 @@ test("GlobalTopbar agrupa as ferramentas do Minerador imediatamente antes das ta
 
 test("as duas tabelas têm mínimo semântico e reduzem colunas flexíveis antes do scroll", () => {
   assert.match(processor, /data-keyword-table="processor"/);
-  assert.match(processor, /min-w-\[1234px\]/);
+  assert.match(processor, /const processorTableMinimumWidth = keywordTableMinimumWidth\(processorColumnConstraints/);
   assert.match(processor, /flexible: true/);
   assert.match(discoveryTable, /data-keyword-table="discovery"/);
-  assert.match(discoveryTable, /min-w-\[1442px\]/);
+  assert.match(discoveryTable, /keywordTableMinimumWidth\(discoveryColumnConstraints, tableColumnIds\)/);
   assert.match(discoveryTable, /flexible: true/);
 });
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, MailCheck } from "lucide-react";
 import { internalButton, internalField, internalSurface } from "@/components/editorial/internal-page-visual";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
 type CommunicationConfig = {
   provider: "resend";
@@ -25,6 +26,7 @@ export default function CommunicationAdminPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  useNoticeBridge({ notice, module: "admin", area: "Comunicação", title: "Administração · Comunicação", fallbackSeverity: "INFO" });
 
   const load = async () => {
     setLoading(true);

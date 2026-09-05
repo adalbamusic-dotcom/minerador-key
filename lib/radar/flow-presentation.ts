@@ -1,22 +1,31 @@
 import type { RadarAnalysisVersion } from "./analysis-contracts.ts";
 import { classifyRadarSemanticTerm, isPrimaryRadarSemanticTerm } from "./analysis-insights.ts";
 
-export const RADAR_TAB_KEYS = ["resumo", "selecionar-referencias", "analise-amostra", "relatorio", "historico"] as const;
+export const RADAR_TAB_KEYS = ["resumo", "serp", "referencias", "analise-serp", "evidencias-adicionais", "relatorio", "historico"] as const;
 export type RadarTab = typeof RADAR_TAB_KEYS[number];
 
 const RADAR_TAB_ALIASES: Record<string, RadarTab> = {
   resumo: "resumo",
-  serp: "selecionar-referencias",
-  concorrentes: "selecionar-referencias",
-  "selecionar-referencias": "selecionar-referencias",
-  "selecionar_referencias": "selecionar-referencias",
-  estrutura: "analise-amostra",
-  "estrutura-observada": "analise-amostra",
-  semantica: "analise-amostra",
-  "semantica-observada": "analise-amostra",
-  "analise-amostra": "analise-amostra",
-  "analise_amostra": "analise-amostra",
-  analysis: "analise-amostra",
+  serp: "serp",
+  "resultados-serp": "serp",
+  "resultados_serp": "serp",
+  concorrentes: "referencias",
+  referencias: "referencias",
+  "selecionar-referencias": "referencias",
+  "selecionar_referencias": "referencias",
+  estrutura: "analise-serp",
+  "estrutura-observada": "analise-serp",
+  semantica: "analise-serp",
+  "semantica-observada": "analise-serp",
+  "analise-serp": "analise-serp",
+  "analise_serp": "analise-serp",
+  "analise-amostra": "analise-serp",
+  "analise_amostra": "analise-serp",
+  analysis: "analise-serp",
+  evidencias: "evidencias-adicionais",
+  especialista: "evidencias-adicionais",
+  "evidencias-adicionais": "evidencias-adicionais",
+  "evidencias_adicionais": "evidencias-adicionais",
   decisoes: "relatorio",
   curadoria: "relatorio",
   relatorio: "relatorio",

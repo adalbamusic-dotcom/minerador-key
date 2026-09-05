@@ -159,6 +159,7 @@ export async function assertKeywordBelongsToMarca(
     .from("minerador_keywords")
     .select("id, lista_id, brand_id")
     .eq("id", keywordId)
+    .is("deleted_at", null)
     .single();
 
   if (error || !kw) {
@@ -231,6 +232,7 @@ export async function assertNotPublishedKeyword(
     .from("minerador_keywords")
     .select("status")
     .eq("id", keywordId)
+    .is("deleted_at", null)
     .single();
 
   if (error || !kw) {
@@ -270,6 +272,7 @@ export async function marcaHasPublished(
     .select("id", { count: "exact", head: true })
     .eq("status", "publicado")
     .eq("brand_id", marcaId)
+    .is("deleted_at", null)
     .in("lista_id", listaIds);
 
   if ((count || 0) > 0) return true;

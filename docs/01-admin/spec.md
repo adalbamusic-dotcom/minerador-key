@@ -1,4 +1,24 @@
 # Spec — Admin
+
+## Consolidação de governança das integrações — 2026-08-25
+
+O Admin Global é o proprietário da infraestrutura compartilhada. Administra
+Connections, capabilities, grants, bindings, quotas, ambientes, rotação e
+uso sanitizado. A Agência recebe disponibilidade conforme plano/período/política
+e a Marca consome o que sua Agência disponibiliza. Minerador, Arquiteto, Radar,
+Planejador, Redator e Publicações não possuem provider, Connection, credential,
+grant, binding ou quota próprios.
+
+Estado documental: `PLATFORM_INTEGRATION_FOUNDATION = READY` e
+`READY_FOR_RADAR_DEVELOPMENT = YES`. DataForSEO, DeepSeek (`deepseek-v4-pro`),
+Google Cloud Speech/Storage e YouTube Data API possuem Connection/estado
+`READY` conforme evidência manual registrada. Google Ads mantém credential
+configurada, com connection/provider smoke e operation smoke separados.
+
+Telegram usa um Bot global da Plataforma. Token/segredo configurados e
+`getMe = PASS` não significam webhook configurado: `TELEGRAM_WEBHOOK =
+NOT_CONFIGURED` e inbound E2E continua pendente. A Marca administra
+especialistas e bindings de domínio; não recebe secrets.
 ## 1. Propósito
 Administrar a visão da plataforma e o cadastro de marcas. **Verificado no código.**
 ## 2. Responsabilidades

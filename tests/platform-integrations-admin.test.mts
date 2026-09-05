@@ -29,11 +29,12 @@ test("leitura usa somente a camada server-side real e sanitiza secrets", async (
   assert.match(route, /requireCanonicalPlatformAdmin/);
   assert.match(route, /createCanonicalServiceClient/);
   assert.doesNotMatch(panel, /SUPABASE_SERVICE_ROLE_KEY|secret_ref/);
+  assert.match(panel, /type="password"/);
   assert.match(service, /secretConfigured: Boolean\(row\.secret_ref/);
-  assert.doesNotMatch(panel, /https?:\/\//);
+  assert.match(panel, /DEEPSEEK_BASE_URL/);
 });
 
-test("catálogos permanecem separados e Serper não é cadastrado", async () => {
+test("catálogos permanecem separados e OpenRouter não é cadastrado como provider operacional", async () => {
   const service = await read("lib/server/platform-integrations-admin.ts");
   const panel = await read("modules/admin/platform-integrations-panel.tsx");
   assert.match(service, /createPlatformIntegrationProvider/);
@@ -44,8 +45,9 @@ test("catálogos permanecem separados e Serper não é cadastrado", async () => 
   assert.match(panel, /O que o produto permite fazer, independentemente do provider/);
   assert.match(panel, /Google Ads/);
   assert.match(panel, /DataForSEO/);
-  assert.match(panel, /OpenRouter/);
-  assert.doesNotMatch(panel, /key: "deepseek"/);
+  assert.match(panel, /DeepSeek/);
+  assert.match(panel, /key: "deepseek"/);
+  assert.doesNotMatch(panel, /OpenRouter/);
   assert.match(panel, /sem fallback silencioso/);
   assert.match(panel, /Distribuição por Agência/);
   assert.match(panel, /Configurações das APIs/);
@@ -63,8 +65,8 @@ test("fluxo humano reutiliza o secret store e mantém governança técnica avan�
   assert.match(service, /secret_ref: null/);
   assert.match(service, /configureSupportedPlatformProvider/);
   assert.match(service, /createIntegrationSecretStore\(client\)/);
-  assert.match(panel, /Salvar credencial com segurança/);
-  assert.match(panel, /secret store\/Vault existente é reutilizado/);
+  assert.match(panel, /Salvar configuração/);
+  assert.match(panel, /Secret Store\/Vault existente/);
   assert.match(panel, /Catálogo técnico \(avançado\)/);
   assert.match(panel, /Criar connection em DRAFT/);
 });
@@ -88,30 +90,32 @@ test("nenhuma chamada externa ou test_connection é criada ao abrir a tela", asy
   assert.doesNotMatch(panel, /test_connection|dispatch_once|resend|fetch\("https?:/i);
 });
 
-test("R2 oferece configuração explícita por API e não cria catálogo no carregamento", async () => {
+test("Admin expõe configurações canônicas sem health check automático", async () => {
   const route = await read("app/api/admin/integrations/route.ts");
   const service = await read("lib/server/platform-integrations-admin.ts");
   const panel = await read("modules/admin/platform-integrations-panel.tsx");
-  const modelConfig = await read("lib/openrouter-model-config.ts");
-  for (const label of ["Google Ads", "DataForSEO", "OpenRouter", "Developer Token", "OAuth Client ID", "OAuth Client Secret", "Refresh Token", "Login Customer ID (MCC)", "Research Customer ID", "Conta cliente Google Ads da Plataforma usada por descoberta de keywords e métricas do Keyword Planner.", "GOOGLE_ADS_LOGIN_CUSTOMER_ID", "GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN", "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD", "OPENROUTER_API_KEY", "OPENROUTER_MODEL"]) {
+  const modelConfig = await read("lib/deepseek-model-config.ts");
+  for (const label of ["Google Ads", "DataForSEO", "DeepSeek", "DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD", "DEEPSEEK_BASE_URL", "DEEPSEEK_DEFAULT_MODEL", "Developer Token", "OAuth Refresh Token", "Secret Store", "API Key", "Salvar configuração"]) {
     assert.match(panel, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
-  assert.match(modelConfig, /deepseek\/deepseek-v4-flash-0731/);
+  assert.match(modelConfig, /deepseek-v4-pro/);
   assert.doesNotMatch(panel, /GOOGLE_ADS_API_VERSION/);
   assert.match(panel, /configure_supported_platform_provider/);
   assert.match(route, /case "configure_supported_platform_provider"/);
   assert.match(route, /case "update_google_ads_research_customer_id"/);
-  assert.match(route, /case "update_openrouter_model"/);
+  assert.doesNotMatch(route, /update_openrouter_model/);
   assert.match(service, /SUPPORTED_PLATFORM_PROVIDER_KEYS/);
   assert.match(service, /ensureSupportedPlatformConnection/);
   assert.match(service, /lifecycle_status: "pending"/);
   assert.doesNotMatch(panel, /localStorage|sessionStorage/);
   assert.doesNotMatch(panel, /secret_ref/);
-  assert.match(service, /updateOpenRouterModel/);
-  assert.match(service, /writeOpenRouterModel/);
-  assert.match(panel, /Salvar modelo sem recriar Connection/);
-  assert.match(panel, /Readback persistido/);
-  assert.match(panel, /atualiza somente a metadata não secreta/);
+  assert.doesNotMatch(service, /updateOpenRouterModel|writeOpenRouterModel/);
+  assert.match(panel, /DEEPSEEK_BASE_URL/);
+  assert.match(panel, /readOnly/);
+  assert.match(panel, /health check/);
+  assert.doesNotMatch(panel, /Configuração remota ainda não realizada|não cadastra segredo/);
+  assert.doesNotMatch(service, /INTEGRATIONS_REMOTE_CONFIGURATION_PENDING|DEEPSEEK_REMOTE_CONFIGURATION_PENDING/);
+  assert.match(service, /deepseek_model: DEEPSEEK_DEFAULT_MODEL/);
 });
 
 test("política de homologação materializa a cadeia canônica sem bypass", async () => {
@@ -138,7 +142,8 @@ test("distribuição ativa não oferece grants manuais por capability", async ()
   const panel = await read("modules/admin/platform-integrations-panel.tsx");
   assert.match(panel, /data\.platformAccessPolicy/);
   assert.match(panel, /Disponibilidade dos resources da Plataforma/);
-  for (const resource of ["Google Ads", "DataForSEO", "OpenRouter"]) assert.match(panel, new RegExp(resource));
+  for (const resource of ["Google Ads", "DataForSEO", "DeepSeek"]) assert.match(panel, new RegExp(resource));
+  assert.doesNotMatch(panel, /OpenRouter/);
   assert.match(panel, /Distribuição por Agência/);
   assert.doesNotMatch(panel, /Configuração avançada\/futura[^\n]*grants manuais por capability/);
   assert.doesNotMatch(panel, /Conceder e criar binding da Agência/);
@@ -149,7 +154,7 @@ test("bootstrap canônico cria somente capabilities ativas com consumidores ou c
   const route = await read("app/api/admin/integrations/route.ts");
   const service = await read("lib/server/platform-integrations-admin.ts");
   const panel = await read("modules/admin/platform-integrations-panel.tsx");
-  for (const key of ["dataforseo.allintitle", "google_ads_keyword_discovery", "google_ads_keyword_metrics", "ai_generation"]) {
+  for (const key of ["dataforseo.allintitle", "dataforseo.serp_compatibility", "google_ads_keyword_discovery", "google_ads_keyword_metrics", "ai_generation"]) {
     assert.match(service, new RegExp(`capabilityKey: "${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
   }
   assert.match(service, /bootstrapPlatformCapabilityCatalog/);

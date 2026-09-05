@@ -6,9 +6,11 @@ import { createContext, useCallback, useContext, useEffect, useId, useMemo, useR
 import { CornerUpLeft, CornerUpRight, History, Search } from "lucide-react";
 import { useSupabaseSession } from "@/components/auth/supabase-session-context";
 import { NotificationBell } from "@/components/global-notice-center";
+import { ContextHelpCenter } from "@/components/context-help-center";
 import { SessionLogoutButton } from "@/components/auth/session-logout-button";
 import { useBrand } from "@/components/brand-context";
 import { GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY } from "@/components/global-topbar-control";
+import { resolveContextHelpArea } from "@/lib/context-help";
 
 type TopbarMode = "page" | "module";
 
@@ -198,6 +200,7 @@ function ProfilePopover() {
 export function GlobalTopbar({ pageTabs, pageActions, moduleActions }: { pageTabs?: ReactNode; pageActions?: ReactNode; moduleActions?: ReactNode }) {
   const pathname = usePathname();
   const model = useMemo(() => topbarModel(pathname), [pathname]);
+  const contextHelpArea = useMemo(() => resolveContextHelpArea(pathname), [pathname]);
   const arquitetoLayout = model.moduleId === "arquiteto";
   const { controls, pageControls } = useGlobalTopbarControlsRegistration();
   const moduleControls = model.moduleId && controls?.moduleId === model.moduleId ? controls : null;
@@ -205,16 +208,6 @@ export function GlobalTopbar({ pageTabs, pageActions, moduleActions }: { pageTab
   const moduleTabsContent = moduleControls?.tabs;
   const registeredPageTabs = pageControls?.tabs !== undefined ? pageControls.tabs : pageTabs;
   const registeredPageActions = pageControls?.actions !== undefined ? pageControls.actions : pageActions;
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const previousGutter = root.style.getPropertyValue("scrollbar-gutter");
-    root.style.setProperty("scrollbar-gutter", "stable");
-    return () => {
-      if (previousGutter) root.style.setProperty("scrollbar-gutter", previousGutter);
-      else root.style.removeProperty("scrollbar-gutter");
-    };
-  }, []);
 
   return <header className={`sticky top-0 z-40 flex h-10 shrink-0 items-center border-b border-divider bg-background/95 pl-14 pr-2 backdrop-blur-sm lg:pl-3 ${model.moduleId === "minerador" ? "max-sm:pl-2" : ""}`} data-global-topbar data-topbar-mode={model.mode}>
     <div className={`flex min-w-0 ${model.moduleId === "minerador" ? "max-sm:hidden" : ""} ${arquitetoLayout ? "flex-1 xl:flex-[0.6]" : "flex-1"} items-center gap-1.5`}>
@@ -224,13 +217,13 @@ export function GlobalTopbar({ pageTabs, pageActions, moduleActions }: { pageTab
       </div>
 
       {model.mode === "module" ? <div className="flex shrink-0 items-center gap-0.5">
-         {moduleControls?.history ? <button type="button" onClick={moduleControls.history.undo} disabled={!moduleControls.history.canUndo()} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-divider bg-surface-subtle text-foreground/65 transition-colors hover:border-divider-light/40 hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-divider-light/25 active:bg-surface disabled:cursor-not-allowed disabled:opacity-30" aria-label={moduleControls.history.undoLabel || "Desfazer"} title={moduleControls.history.undoTitle || "Desfazer última alteração"}>
+         {moduleControls?.history ? <button type="button" onClick={moduleControls.history.undo} disabled={!moduleControls.history.canUndo()} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-divider bg-surface-subtle text-foreground/65 transition-colors hover:border-module-accent/30 hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 active:bg-surface disabled:cursor-not-allowed disabled:opacity-30" aria-label={moduleControls.history.undoLabel || "Desfazer"} title={moduleControls.history.undoTitle || "Desfazer última alteração"}>
           <CornerUpLeft className="h-4 w-4" aria-hidden="true" />
         </button> : null}
-         {moduleControls?.history ? <button type="button" onClick={moduleControls.history.redo} disabled={!moduleControls.history.canRedo()} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-divider bg-surface-subtle text-foreground/65 transition-colors hover:border-divider-light/40 hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-divider-light/25 active:bg-surface disabled:cursor-not-allowed disabled:opacity-30" aria-label={moduleControls.history.redoLabel || "Refazer"} title={moduleControls.history.redoTitle || "Refazer alteração"}>
+         {moduleControls?.history ? <button type="button" onClick={moduleControls.history.redo} disabled={!moduleControls.history.canRedo()} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-divider bg-surface-subtle text-foreground/65 transition-colors hover:border-module-accent/30 hover:bg-surface-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/30 active:bg-surface disabled:cursor-not-allowed disabled:opacity-30" aria-label={moduleControls.history.redoLabel || "Refazer"} title={moduleControls.history.redoTitle || "Refazer alteração"}>
           <CornerUpRight className="h-4 w-4" aria-hidden="true" />
         </button> : null}
-        {moduleControls?.history ? <button type="button" data-global-topbar-history-button={moduleControls.moduleId} onClick={moduleControls.history.open} className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-foreground/65 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-divider-light/60" aria-label={moduleControls.history.historyLabel || "Histórico"} title={moduleControls.history.historyTitle?.(moduleControls.history.getCount()) || `Histórico (${moduleControls.history.getCount()})`}>
+        {moduleControls?.history ? <button type="button" data-global-topbar-history-button={moduleControls.moduleId} onClick={moduleControls.history.open} className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md text-foreground/65 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/35" aria-label={moduleControls.history.historyLabel || "Histórico"} title={moduleControls.history.historyTitle?.(moduleControls.history.getCount()) || `Histórico (${moduleControls.history.getCount()})`}>
           <History className="h-4 w-4" aria-hidden="true" />
         </button> : null}
       </div> : null}
@@ -248,10 +241,11 @@ export function GlobalTopbar({ pageTabs, pageActions, moduleActions }: { pageTab
       {model.mode === "page" ? <div className="pointer-events-auto w-fit">{registeredPageActions}</div> : moduleActionsContent}
     </div> : null}
 
-    <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
+    <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-visible">
       {model.moduleId === "minerador" && moduleActionsContent ? <div className="min-w-0 flex-1 max-w-[min(52vw,52rem)] overflow-hidden" data-topbar-module-actions>{moduleActionsContent}</div> : null}
       {moduleTabsContent ? <div className="min-w-0 shrink-0" data-topbar-module-tabs>{moduleTabsContent}</div> : null}
       <NotificationBell />
+      <ContextHelpCenter key={contextHelpArea || "none"} area={contextHelpArea} />
       <ProfilePopover />
     </div>
   </header>;

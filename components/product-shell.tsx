@@ -14,6 +14,8 @@ import { buildAdminPath } from "@/lib/admin-routing";
 import { buildGlobalNavigationContext, writeGlobalNavigationContext } from "@/lib/navigation/global-context";
 import { NewSessionSlotLink } from "@/components/auth/new-session-slot-link";
 import { SessionLogoutButton } from "@/components/auth/session-logout-button";
+import * as Tooltip from "@radix-ui/react-tooltip";
+import { InfoHint } from "@/components/info-hint";
 import { useShellVisual } from "@/components/shell-visual-context";
 import { GlobalTopbar, GlobalTopbarControlsProvider } from "@/components/global-topbar";
 
@@ -136,7 +138,8 @@ export function ProductShell({ children, tenant }: { children: React.ReactNode; 
 
   const shellStyle = { "--minerador-sidebar-width": expanded ? "15rem" : "3.5rem" } as CSSProperties;
 
-  return <div data-product-shell style={shellStyle} className={`min-h-screen bg-background text-foreground lg:grid ${shellColumns}`}>
+  return <Tooltip.Provider delayDuration={300} skipDelayDuration={150}>
+    <div data-product-shell style={shellStyle} className={`min-h-screen bg-background text-foreground lg:grid ${shellColumns}`}>
     <button type="button" onClick={() => setMobileOpen(true)} className="fixed left-3 top-3 z-40 inline-flex min-h-10 min-w-10 items-center justify-center rounded-md border border-divider bg-background px-2 text-foreground shadow-sm lg:hidden" aria-label="Abrir navegação principal">
       <Menu className="h-5 w-5" aria-hidden="true" />
     </button>
@@ -156,7 +159,8 @@ export function ProductShell({ children, tenant }: { children: React.ReactNode; 
         <div className="border-b border-divider p-2">
           <div className="space-y-1">
             {expanded ? <p className="text-sm font-semibold text-foreground/60">Marca atual</p> : <span className="sr-only">Marca atual</span>}
-            {availableBrands.length ? <button type="button" onClick={() => {
+            {availableBrands.length ? <InfoHint title="Marca atual" description="O contexto escolhido define a marca usada pelos módulos tenantizados.">
+              <button type="button" onClick={() => {
               if (!expanded) {
                 setExpandedPreference(true);
                 setBrandSelectorOpen(true);
@@ -166,7 +170,8 @@ export function ProductShell({ children, tenant }: { children: React.ReactNode; 
             }} className={`inline-flex min-h-10 items-center gap-2 rounded-md text-sm font-semibold text-foreground hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent ${expanded ? "w-full justify-start px-2" : "w-full justify-center"}`} aria-expanded={brandSelectorOpen} aria-haspopup="listbox" title={currentName}>
               <Store className="h-4 w-4 shrink-0 text-context-accent" aria-hidden="true" />
               {expanded ? <><span className="truncate">{currentName}</span><ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" /></> : null}
-            </button> : null}
+              </button>
+            </InfoHint> : null}
           </div>
           {expanded && brandSelectorOpen && availableBrands.length ? <div className="mt-2 space-y-1 rounded-md border border-divider bg-foreground/5 p-1" role="listbox" aria-label="Marcas autorizadas">
             {availableBrands.map((brand) => <button type="button" key={brand.id} onClick={() => switchBrand(brand.id)} role="option" aria-selected={brand.id === selectedBrandId} className="flex min-h-10 w-full items-center rounded-md px-2 text-left text-sm text-foreground/75 hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent">
@@ -224,5 +229,6 @@ export function ProductShell({ children, tenant }: { children: React.ReactNode; 
         {children}
       </main>
     </GlobalTopbarControlsProvider>
-  </div>;
+    </div>
+  </Tooltip.Provider>;
 }

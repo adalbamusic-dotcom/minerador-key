@@ -2,11 +2,13 @@ import { z } from "zod";
 import type { ArticleDNA, ContentDocument, ContentPlan, SiloDNA, SiloPage, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts.ts";
 import { ArticleArchitectureStatusSchema, ArticleControlContextSchema, ArticleKeywordReferenceSchema, ArticleKgrIdentitySchema, ContentDocumentSchema, EditorialUnitTypeSchema, KeywordUrlRelationshipSchema, VersionedContentPlanSchema, VersionedSiloPageSchema } from "../arquiteto/contracts.ts";
 import { SerpFormationAssessmentSchema } from "../arquiteto/serp-formation.ts";
+import type { ArticleInternalLinks, ResolvedSiloContext } from "../arquiteto/radar-handoff-context.ts";
+import type { ArchitectSerpProvenance } from "../arquiteto/radar-handoff-gate.ts";
 import { toVersionReference } from "../arquiteto/versioning.ts";
 import { isArticleKeywordCountValid } from "../arquiteto/domain-rules.ts";
 import { contentPlanApprovalIssues, createDefinitiveContentPlan } from "../planejador/content-plan.ts";
 import { RadarHydrationSnapshotSchema, createRadarHydrationSnapshot, type RadarHydrationSnapshot, type RadarHydrationSourceKeyword } from "../radar/hydration.ts";
-import { VersionedRadarAnalysisSchema } from "../radar/analysis-contracts.ts";
+import { RadarPlannerHandoffSchema, VersionedRadarAnalysisSchema, type RadarPlannerHandoff } from "../radar/analysis-contracts.ts";
 import { buildArticleControlContext } from "../arquiteto/strategic-context.ts";
 
 export const WorkflowOriginSchema = z.enum(["real", "local"]);
@@ -30,6 +32,8 @@ export type PublicationHistoryEntry = z.infer<typeof PublicationHistoryEntrySche
 
 export const RadarItemSchema = z.object({
   id: z.string(), brandId: z.string(), articleId: z.string(), articleDnaVersionId: z.string(), articleDnaContentHash: z.string(),
+  // O Radar só recebe unidade estruturalmente completa: Silo é obrigatório no
+  // handoff, que é posterior a Silos e Links Internos.
   title: z.string(), slug: z.string(), siloId: z.string(), hierarchy: z.string(), principalKeywordId: z.string(), format: z.string(),
   intent: z.string(), state: RadarWorkflowStateSchema, importedAt: z.string().datetime(), updatedAt: z.string().datetime(), origin: WorkflowOriginSchema, lockVersion: z.number().int().positive().default(1),
   unitType: EditorialUnitTypeSchema.default("article"), hydration: RadarHydrationSnapshotSchema.nullable().default(null), analysisVersions: z.array(VersionedRadarAnalysisSchema).default([]),
@@ -39,11 +43,43 @@ export const RadarItemSchema = z.object({
   arquitetoKgrIdentity: ArticleKgrIdentitySchema.optional(),
   arquitetoStrategyContext: ArticleControlContextSchema.optional(),
   arquitetoSerpAssessment: SerpFormationAssessmentSchema.nullable().optional(),
+  /**
+   * A proveniência da SERP da FORMAÇÃO — o parecer e a decisão humana.
+   *
+   * Sem isto o Radar recomeça a conversa do zero e pode "descobrir" a mesma
+   * divergência que uma pessoa já viu e decidiu seguir assim.
+   */
+  arquitetoSerpProvenance: z.object({
+    assessmentId: z.string().min(1),
+    formationBaseHash: z.string().min(1),
+    verdict: z.enum(["COMPATIBLE", "INCONCLUSIVE", "DIVERGENCE"]),
+    humanResolution: z.object({
+      decision: z.string().min(1), reason: z.string().min(1),
+      decidedBy: z.string().min(1), decidedAt: z.string().min(1),
+    }).strict().nullable(),
+  }).strict().nullable().optional(),
+  /**
+   * As relações internas APROVADAS que envolvem este Article.
+   *
+   * `anchorConcepts` é universo permitido de formulação, nunca a âncora final
+   * nem quantidade ou posição de link: essas três são pergunta do Radar.
+   */
+  arquitetoInternalLinks: z.object({
+    graphId: z.string().min(1),
+    graphVersionId: z.string().min(1),
+    graphContentHash: z.string().min(1),
+    edges: z.array(z.object({
+      sourceNodeId: z.string().min(1), targetNodeId: z.string().min(1),
+      relationType: z.string().min(1), anchorConcepts: z.array(z.string().min(1)),
+      reason: z.string().min(1), priority: z.string().min(1),
+      direction: z.enum(["outbound", "inbound"]),
+    }).strict()),
+  }).strict().nullable().optional(),
 });
 export const PlannerItemSchema = z.object({
   id: z.string(), brandId: z.string(), articleId: z.string(), radarItemId: z.string(), title: z.string(), slug: z.string(), siloId: z.string(),
   format: z.string(), intent: z.string(), state: PlannerWorkflowStateSchema, contentPlanVersionId: z.string().nullable(), importedAt: z.string().datetime(), updatedAt: z.string().datetime(), origin: WorkflowOriginSchema, lockVersion: z.number().int().positive().default(1),
-  unitType: EditorialUnitTypeSchema.default("article"),
+  unitType: EditorialUnitTypeSchema.default("article"), radarHandoff: RadarPlannerHandoffSchema.optional(),
 });
 export const OperationalPublicationSchema = z.object({
   id: z.string(), brandId: z.string(), articleId: z.string(), plannerItemId: z.string(), contentPlanVersionId: z.string(), documentId: z.string(),
@@ -62,6 +98,18 @@ export const OperationalPublicationSchema = z.object({
   updateRequestedAt: z.string().datetime().nullable().default(null),
   history: z.array(PublicationHistoryEntrySchema).default([]),
 });
+/**
+ * O que o Arquiteto resolveu para este Article antes de entregá-lo.
+ *
+ * Chega pronto do lado do Arquiteto: aqui não se descobre Silo, não se lê
+ * grafo e não se consulta nada. O importador só hidrata.
+ */
+export type RadarArticleHandoffContext = {
+  silo: ResolvedSiloContext;
+  internalLinks: ArticleInternalLinks | null;
+  serpProvenance: ArchitectSerpProvenance | null;
+};
+
 export type RadarItem = z.infer<typeof RadarItemSchema>;
 export type PlannerItem = z.infer<typeof PlannerItemSchema>;
 export type OperationalPublication = z.infer<typeof OperationalPublicationSchema>;
@@ -98,9 +146,10 @@ export function articleApprovalIssues(version: VersionEnvelope<ArticleDNA>, even
   const article = version.payload; const issues: string[] = [];
   const principal = article.keywordReferences.filter(reference => reference.role === "principal");
   if (principal.length !== 1) issues.push("O artigo precisa de exatamente uma keyword principal.");
-  if (!isArticleKeywordCountValid(article.keywordReferences.length)) issues.push("O artigo precisa ter entre 2 e 6 keywords.");
-  if (!article.siloId) issues.push("O artigo precisa de silo definido.");
-  if (!article.hierarchy) issues.push("O artigo precisa de função definida.");
+  if (!isArticleKeywordCountValid(article.keywordReferences.length)) issues.push("O artigo precisa ter entre 1 e 6 keywords.");
+  // Silo e hierarquia Pilar/Suporte pertencem à etapa Silos, posterior a
+  // Artigos. Exigi-los aqui criava dependência circular: o artigo não fechava
+  // sem Silo e o Silo só nasce depois do ArticleDNA aprovado.
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(article.suggestedSlug)) issues.push("O slug precisa ser válido.");
   if (blockingConflicts > 0) issues.push("Existem conflitos bloqueadores.");
   if (!hasHumanApproval(version.versionId, events)) issues.push("A versão ainda não recebeu aprovação humana.");
@@ -161,20 +210,33 @@ export function siloDnaPreflight(
   return { silos: [...siloMap.values()], issues };
 }
 
-export function importArticlesToRadar(existing: RadarItem[], versions: VersionEnvelope<ArticleDNA>[], brandId: string, now = new Date().toISOString(), sourceKeywords: RadarHydrationSourceKeyword[] = [], siloVersions: Record<string, VersionEnvelope<SiloDNA>> = {}, hydrationByArticleId: Record<string, RadarHydrationSnapshot> = {}, serpAssessments: Record<string, unknown> = {}) {
+/**
+ * O Silo do RadarItem é RESOLVIDO, não exigido do ArticleDNA.
+ *
+ * Filtrar por `payload.siloId` descartava em silêncio todo Article cujo Silo
+ * canônico nasce da consolidação — ou seja, todos eles: o `siloId` mora no
+ * SiloDNA, e o que liga os dois é o `territoryRef` que ambos declaram.
+ * Preencher o campo no ArticleDNA para o importador enxergar seria alterar o
+ * artefato de cima por conveniência de quem lê embaixo.
+ */
+export function importArticlesToRadar(existing: RadarItem[], versions: VersionEnvelope<ArticleDNA>[], brandId: string, now = new Date().toISOString(), sourceKeywords: RadarHydrationSourceKeyword[] = [], siloVersions: Record<string, VersionEnvelope<SiloDNA>> = {}, hydrationByArticleId: Record<string, RadarHydrationSnapshot> = {}, serpAssessments: Record<string, unknown> = {}, handoffContext: Record<string, RadarArticleHandoffContext> = {}) {
   const existingIds = new Set(existing.map(item => item.articleId));
-  const additions = versions.filter(version => version.payload.brandId === brandId && !existingIds.has(version.payload.articleId)).map(version => RadarItemSchema.parse({
+  const siloIdOf = (version: VersionEnvelope<ArticleDNA>) =>
+    handoffContext[version.payload.articleId]?.silo.siloId || version.payload.siloId || null;
+  const additions = versions.filter(version => version.payload.brandId === brandId && !existingIds.has(version.payload.articleId) && Boolean(siloIdOf(version))).map(version => RadarItemSchema.parse({
     id: `radar:${version.payload.articleId}`, brandId, articleId: version.payload.articleId, articleDnaVersionId: version.versionId,
-    articleDnaContentHash: version.contentHash, title: version.payload.promise, slug: version.payload.suggestedSlug, siloId: version.payload.siloId,
+    articleDnaContentHash: version.contentHash, title: version.payload.promise, slug: version.payload.suggestedSlug, siloId: siloIdOf(version)!,
     hierarchy: version.payload.hierarchy, principalKeywordId: version.payload.principalKeywordId, format: version.payload.hierarchy,
     intent: version.payload.mainIntent, state: "research_pending", importedAt: now, updatedAt: now, origin: "local", lockVersion: 1,
-    hydration: hydrationByArticleId[version.payload.articleId] || createRadarHydrationSnapshot({ brandId, article: version, sourceKeywords, silo: version.payload.siloId ? siloVersions[version.payload.siloId] : undefined, source: "arquiteto_import", capturedAt: now }),
+    hydration: hydrationByArticleId[version.payload.articleId] || createRadarHydrationSnapshot({ brandId, article: version, sourceKeywords, silo: siloIdOf(version) ? siloVersions[siloIdOf(version)!] : undefined, resolvedSilo: handoffContext[version.payload.articleId]?.silo ?? null, source: "arquiteto_import", capturedAt: now }),
     arquitetoKeywordDnaReferences: version.payload.keywordReferences,
     arquitetoKeywordUrlRelations: Object.fromEntries(version.payload.keywordReferences.filter(reference => reference.keywordUrlRelation).map(reference => [reference.keywordId, reference.keywordUrlRelation])),
     arquitetoArchitectureStatus: version.payload.architectureStatus,
     arquitetoKgrIdentity: version.payload.kgrIdentity,
     arquitetoStrategyContext: buildArticleControlContext(version.payload, { published: Boolean(version.payload.publishedIdentityRef) }),
     arquitetoSerpAssessment: serpAssessments[version.payload.articleId] || null,
+    arquitetoSerpProvenance: handoffContext[version.payload.articleId]?.serpProvenance ?? null,
+    arquitetoInternalLinks: handoffContext[version.payload.articleId]?.internalLinks ?? null,
   }));
   return [...existing, ...additions];
 }
@@ -188,12 +250,21 @@ export function setRadarState(items: RadarItem[], ids: string[], target: RadarIt
   return items.map(item => ids.includes(item.id) && allowed[item.state].includes(target) ? { ...item, state: target, updatedAt: now, lockVersion: item.lockVersion + 1 } : item);
 }
 
-export function importRadarToPlanner(existing: PlannerItem[], radarItems: RadarItem[], brandId: string, now = new Date().toISOString()) {
+function approvedHandoffForRadarItem(item: RadarItem, brandId: string): RadarPlannerHandoff | undefined {
+  const versions = item.analysisVersions.filter(version => version.payload.status === "approved").sort((left, right) => right.versionNumber - left.versionNumber);
+  for (const version of versions) {
+    const parsed = RadarPlannerHandoffSchema.safeParse(version.payload.plannerPackage);
+    if (parsed.success && parsed.data.status === "APPROVED" && parsed.data.brandId === brandId && parsed.data.radarItemId === item.id && parsed.data.articleId === item.articleId && parsed.data.articleDnaVersionId === item.articleDnaVersionId) return parsed.data;
+  }
+  return undefined;
+}
+
+export function importRadarToPlanner(existing: PlannerItem[], radarItems: RadarItem[], brandId: string, now = new Date().toISOString(), handoffs: Record<string, RadarPlannerHandoff> = {}) {
   const existingIds = new Set(existing.map(item => item.articleId));
   const additions = radarItems.filter(item => item.brandId === brandId && item.state === "approved" && !existingIds.has(item.articleId)).map(item => PlannerItemSchema.parse({
     id: `planner:${item.articleId}`, brandId, articleId: item.articleId, radarItemId: item.id, title: item.title, slug: item.slug,
     siloId: item.siloId, format: item.format, intent: item.intent, state: "draft", contentPlanVersionId: null,
-    importedAt: now, updatedAt: now, origin: "local", lockVersion: 1,
+    importedAt: now, updatedAt: now, origin: "local", lockVersion: 1, radarHandoff: handoffs[item.id] || approvedHandoffForRadarItem(item, brandId),
   }));
   return [...existing, ...additions];
 }
@@ -273,9 +344,9 @@ export async function reconcileArchitectWorkspace(input: ReconcileInput): Promis
   counts.memoryDnas = fromMemoryDnas.size;
 
   const fromIndexedDbDnas = new Set<string>();
-  if (fromLocalStorage.size === 0 && fromMemoryDnas.size === 0) {
+  if (fromLocalStorage.size === 0 && fromMemoryDnas.size === 0 && input.actorUserId) {
     try {
-      const raw = await readBrowserArtifactReadOnly(architectArticleDnaRecoveryKey(input.actorUserId || "anonymous", input.brandId));
+      const raw = await readBrowserArtifactReadOnly(architectArticleDnaRecoveryKey(input.actorUserId, input.brandId));
       if (raw) {
         const recovered = ArchitectArticleDnaRecoverySchema.parse(raw);
         for (const version of Object.values(recovered.versions)) {

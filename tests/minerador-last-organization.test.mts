@@ -16,6 +16,8 @@ test("restaura organização válida, adapta status legado e nomeia o critério 
   const restored = normalizeMineradorLastOrganization({ filterStatus: "Publicado", filterIntent: "Todos", filterListId: "Todos", sortColumn: "keyword", sortDirection: "asc" }, []);
   assert.equal(restored.filterStatus, "publicado");
   assert.deepEqual(mineradorOrganizationLabels(restored, []), ["Publicados"]);
+  assert.equal(normalizeMineradorLastOrganization({ sortColumn: "cpc", sortDirection: "desc" }).sortColumn, "cpc");
+  assert.equal(normalizeMineradorLastOrganization({ sortColumn: "cpc", sortDirection: "desc" }).sortDirection, "desc");
 });
 
 test("resumo mantém a ordem estável, limita a três nomes e preserva tooltip completo", () => {

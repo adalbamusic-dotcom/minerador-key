@@ -12,7 +12,7 @@ export type DiscoverySourceData = {
   location: string | null;
   intent: string | null;
   funnel: string | null;
-  importedMetrics: { averageMonthlySearches: number | null; cpc: string | null; competition: string | null; competitionIndex: number | null; resultsAllintitle: number | null } | null;
+  importedMetrics: { averageMonthlySearches: number | null; cpc: string | null; competition: string | null; competitionIndex: number | null; resultsAllintitle: number | null; keywordDifficulty?: number | null } | null;
   recognizedFields: string[];
   ignoredFields: string[];
 };

@@ -22,15 +22,16 @@ import { buildOriginalityReport } from "../lib/arquiteto/originality.ts";
 import { parseStructuredOutput, StructuredOutputError } from "../lib/arquiteto/structured-output.ts";
 import { ProviderRequestError, requestProviderContent } from "../lib/arquiteto/provider-client.ts";
 import { guardPublishedArticleProposal } from "../lib/arquiteto/published-guard.ts";
-import { deterministicArticleDnaPayload, deterministicSiloDnaPayload, deterministicSiloPagePayload, legacyKeywordDnaEnvelope, legacyKeywordDnaReference } from "../lib/arquiteto/adapters.ts";
+import { deterministicArticleDnaPayload, deterministicSiloDnaPayload, deterministicSiloPagePayload, legacyKeywordDnaEnvelope, legacyKeywordDnaReference, manualSiloDnaDraftPayload, manualSiloPageDraftPayload } from "../lib/arquiteto/adapters.ts";
 import { proposeKeywordDnaRevision } from "../lib/arquiteto/revisions.ts";
 import { approveSuccessor, canonicalJson, contentHash, createStatusEvent, createVersionEnvelope, hydrateExactVersionGraph, hydrateVersionGraph, InMemoryVersionRepository, toVersionReference, VersioningError } from "../lib/arquiteto/versioning.ts";
 import { deriveLogicalKeywordDna, mergeLogicalKeywordSemantic } from "../lib/arquiteto/keyword-dna-engine.ts";
 import { MAX_KEYWORDS_PER_ARTICLE } from "../lib/arquiteto/domain-rules.ts";
 import { CompactProviderResponseSchema } from "../lib/arquiteto/keyword-review-provider.ts";
+import { buildAiArchitectureReviewPlan, buildKeywordArticleReviewDiff, enrichAiArchitectureReview } from "../lib/arquiteto/ai-architecture-review.ts";
 import { normalizeArticleDnaProviderPayload } from "../lib/arquiteto/article-dna-provider.ts";
 import { normalizeSiloDnaProviderPayload } from "../lib/arquiteto/silo-dna-provider.ts";
-import { assertManualPublishedSiloPageUrl, assertManualSiloPageSlugAvailable, initialManualSiloPageVerification, normalizeManualSiloPageSlug } from "../lib/arquiteto/manual-silo.ts";
+import { assertManualPublishedSiloPageUrl, assertManualSiloPageSlugAvailable, autoManualSiloPageSlug, initialManualSiloPageVerification, normalizeManualSiloPageSlug } from "../lib/arquiteto/manual-silo.ts";
 
 const ref = (entityId: string) => ({ entityId, versionId: `legacy:${entityId}:v1`, contentHash: `legacy:${entityId}` });
 
@@ -58,7 +59,7 @@ test("aprovação lógica cria ArticleDNA-base sem depender de IA", () => {
   assert.match(payload.alerts.join(" "), /lógica determinística/);
 });
 
-test("criador manual forma SiloDNA sem artigos e mantém a entidade central separada", () => {
+test("contrato SiloDNA continua formando a arquitetura somente quando a entidade já foi definida", () => {
   const silo = deterministicSiloDnaPayload("silo-manual", "Captação de pacientes", [], { brandId: "brand-1", centralEntity: "captação de pacientes para clínicas" });
   assert.equal(SiloDNASchema.parse(silo).articleReferences.length, 0);
   assert.equal(silo.brandId, "brand-1");
@@ -66,6 +67,19 @@ test("criador manual forma SiloDNA sem artigos e mantém a entidade central sepa
   assert.equal(silo.centralEntity, "captação de pacientes para clínicas");
   assert.equal(silo.centralEntitySource, "manual");
   assert.equal(silo.centralKeywordDnaRef, undefined);
+});
+
+test("criação manual gera SiloDNA e SiloPage pareados em draft sem entidade inventada", async () => {
+  const silo = manualSiloDnaDraftPayload("silo-draft", "Captação de pacientes", "brand-1");
+  const siloVersion = await createVersionEnvelope({ entityId: silo.siloId, versionNumber: 1, origin: "human", changeReason: "fixture", createdBy: "human-1", payload: silo });
+  const page = manualSiloPageDraftPayload(siloVersion, "brand-1", "captacao-de-pacientes");
+  assert.equal(silo.formationStatus, "draft");
+  assert.equal(silo.centralEntity, "");
+  assert.equal(silo.articleReferences.length, 0);
+  assert.equal(page.formationStatus, "draft");
+  assert.equal(page.h1, "");
+  assert.equal(page.siloDnaRef.versionId, siloVersion.versionId);
+  assert.equal(page.publicationStatus, "new");
 });
 
 test("SiloPage manual nova e publicada preservam identidade e estados independentes", async () => {
@@ -83,21 +97,58 @@ test("SiloPage manual nova e publicada preservam identidade e estados independen
   assert.equal(published.canonical, null);
 });
 
-test("validação do criador manual rejeita slug e URL incoerentes", () => {
-  assert.equal(normalizeManualSiloPageSlug("/Captação-de-pacientes"), "captacao-de-pacientes");
-  assert.throws(() => normalizeManualSiloPageSlug("captacao-de-pacientes"), /começar/);
+test("normalização do criador manual gera o slug canônico sem exigir barra", () => {
+  assert.equal(normalizeManualSiloPageSlug("Manicure"), "/manicure");
+  assert.equal(normalizeManualSiloPageSlug("Estética Facial"), "/estetica-facial");
+  assert.equal(normalizeManualSiloPageSlug("manicure"), "/manicure");
+  assert.equal(normalizeManualSiloPageSlug("/manicure"), "/manicure");
+  assert.equal(normalizeManualSiloPageSlug("///manicure"), "/manicure");
+  assert.equal(normalizeManualSiloPageSlug("Manicure Premium"), "/manicure-premium");
+  assert.equal(normalizeManualSiloPageSlug("  Clínica de Estética  "), "/clinica-de-estetica");
+  assert.equal(normalizeManualSiloPageSlug("/manicure---premium"), "/manicure-premium");
   assert.throws(() => normalizeManualSiloPageSlug("https://site.com/silo"), /URL completa/);
-  assert.throws(() => assertManualSiloPageSlugAvailable("captacao-de-pacientes", ["/captacao-de-pacientes"]), /já está registrado/);
+  assert.throws(() => assertManualSiloPageSlugAvailable("/captacao-de-pacientes", ["/captacao-de-pacientes"]), /já está registrado/);
+  assert.throws(() => assertManualSiloPageSlugAvailable("/captacao-de-pacientes", ["/captacao-de-pacientes/"]), /já está registrado/);
   assert.equal(assertManualPublishedSiloPageUrl("https://site.com/silo", "https://site.com"), "https://site.com/silo");
   assert.throws(() => assertManualPublishedSiloPageUrl("https://outro.com/silo", "https://site.com"), /domínio da marca/);
 });
 
-test("modal manual não solicita mais Nicho e exibe identidade de SiloDNA/SiloPage", async () => {
+test("slug automático acompanha o nome até a primeira edição manual", () => {
+  assert.equal(autoManualSiloPageSlug("Mani"), "/mani");
+  assert.equal(autoManualSiloPageSlug("Manicure"), "/manicure");
+  assert.equal(autoManualSiloPageSlug("Manicure Profissional"), "/manicure-profissional");
+  assert.equal(autoManualSiloPageSlug(""), "");
+});
+
+test("modal manual cria o par canônico do silo com nome e slug", async () => {
   const source = await readFile("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
-  assert.equal(source.includes("Nicho (opcional)"), false);
-  assert.equal(source.includes("Keyword ou entidade central"), true);
-  assert.equal(source.includes("Criar também a Página do Silo"), true);
-  assert.equal(source.includes("URL publicada"), true);
+  const modalStart = source.indexOf("{isListModalOpen && (");
+  const modal = source.slice(modalStart, source.indexOf("\n      )}", modalStart));
+  assert.equal(modal.includes("Nicho (opcional)"), false);
+  assert.equal(modal.includes("Keyword ou entidade central"), false);
+  assert.equal(modal.includes("Criar também a Página do Silo"), false);
+  assert.equal(modal.includes("URL publicada"), false);
+  assert.match(modal, /label className="[^"]*">NOME DO SILO<\/label>/);
+  assert.match(modal, /placeholder="Ex\.: Manicure"/);
+  assert.match(modal, /label className="[^"]*">SLUG<\/label>/);
+  assert.match(modal, /placeholder="Ex\.: \/manicure"/);
+  assert.match(modal, /Gerado automaticamente\. Você pode editar\./);
+  assert.doesNotMatch(modal, /Use o caminho iniciado por/);
+  assert.match(source, /if \(!newListName\.trim\(\)\)/);
+      assert.doesNotMatch(source, /if \(!newSiloSlug\.trim\(\)\)/);
+      assert.match(source, /if \(!slugManuallyEdited\) setNewSiloSlug\(autoManualSiloPageSlug\(value\)\)/);
+      assert.match(source, /setSlugManuallyEdited\(true\); setNewSiloSlug\(e\.target\.value\)/);
+      assert.match(source, /const slugDraft = slugManuallyEdited \? newSiloSlug : newListName;/);
+      assert.match(source, /normalizedSlug = normalizeManualSiloPageSlug\(slugDraft\);[\s\S]*assertManualSiloPageSlugAvailable\(normalizedSlug/);
+      assert.doesNotMatch(source, /newListCentralEntity/);
+      assert.doesNotMatch(source, /newSiloPageSlug/);
+  // Silo-first: `+ Silo` cria SÓ o candidato pela porta canônica. Lista de
+  // keywords, SiloDNA e SiloPage pertencem ao fim da cadeia, não à criação.
+  assert.match(source, /createRemoteSiloCandidate\(/);
+  assert.match(source, /manualSiloCandidateDraft\(/);
+  assert.match(source, /criado como candidato e confirmado no readback/);
+  assert.doesNotMatch(source, /createCanonicalManualSilo\(/);
+  assert.doesNotMatch(source, /SiloDNA e Página do Silo em formação/);
 });
 
 test("processo lógico prioriza artigo publicado como âncora", () => {
@@ -169,7 +220,44 @@ test("revisão da IA move somente keyword nova e preserva a âncora publicada", 
   assert.equal(describeAssignedGroups(next)[0].principalSuggestion.keywordId, "pub-1");
 });
 
-test("repartição de keywords pode propor novo artigo e novo silo sem persistir", () => {
+test("revisão arquitetural mantém subtarefas A-E e diff compacto por IDs", () => {
+  const groups = buildProvisionalGroups([
+    kw("pub-stage", "seo para clinicas", { status: "publicado", isPublished: true }),
+    kw("new-stage", "seo para clinicas esteticas"),
+  ]);
+  const focusGroups = buildKeywordReviewBatches(groups, 2, 1)[0]!;
+  const plan = buildAiArchitectureReviewPlan({
+    focusGroups,
+    articleCatalog: buildKeywordArticleCatalog(groups),
+    logicalRecommendations: buildLogicalKeywordRecommendations(groups, focusGroups),
+    serpAssessments: [{ snapshots: [{ id: "snapshot-1" }] } as never],
+  });
+  assert.deepEqual(plan.map(stage => stage.stage), [
+    "diagnosticar_grupos", "revisar_pertencimento", "revisar_papeis", "revisar_canibalizacao", "consolidar_proposta",
+  ]);
+  const review = KeywordArticleReviewSchema.parse({
+    decisions: focusGroups[0]!.keywords.map(keyword => ({
+      keywordId: keyword.keywordId,
+      sourceGroupId: focusGroups[0]!.groupId,
+      action: "manter_no_artigo" as const,
+      targetGroupId: null,
+      newArticleKey: null,
+      siloPlacement: { action: "manter_silo" as const, siloId: null, siloName: null, newSiloKey: null },
+      suggestedRole: keyword.keywordId === focusGroups[0]!.currentPrincipalKeywordId ? "principal" as const : "secundaria" as const,
+      justification: "Mantém aderência ao grupo.", confidence: 0.8, humanDecisionPoints: [],
+    })),
+    conflicts: [], summary: "Proposta por IDs.",
+  });
+  const diff = buildKeywordArticleReviewDiff(focusGroups, review);
+  const enriched = enrichAiArchitectureReview({ review, proposalId: "proposal-1", stageTrace: plan, diff });
+  assert.equal(enriched.approvalStatus, "pending_human");
+  assert.equal(enriched.source, "ai");
+  assert.equal(enriched.proposalId, "proposal-1");
+  assert.deepEqual(enriched.diff?.map(item => item.keywordId), review.decisions.map(item => item.keywordId));
+  assert.equal((enriched as Record<string, unknown>).keywordDnaSnapshot, undefined);
+});
+
+test("repartição de keywords preserva proposta de silo somente como anotação", () => {
   const current = [{ ...kw("new-3", "marketing odontologico para implantes"), clusterId: 4, provisionalGroupId: "group-source", siloId: "silo-1" }];
   const review = KeywordArticleReviewSchema.parse({
     decisions: [{ keywordId: "new-3", sourceGroupId: "group-source", action: "criar_novo_artigo", targetGroupId: null, newArticleKey: "implantes",
@@ -179,9 +267,9 @@ test("repartição de keywords pode propor novo artigo e novo silo sem persistir
   });
   const next = applyKeywordArticleReview(current, review, "2026-07-14T12:00:00.000Z");
   assert.equal(next[0].provisionalGroupId, "ai-group-group-source-implantes");
-  assert.equal(next[0].siloId, "tmp-ai-silo-marketing-implantes");
-  assert.equal(next[0].siloName, "Marketing para Implantes");
-  assert.deepEqual(next[0].aiReviewAnnotation?.details, ["Confirmar novo silo"]);
+  assert.equal(next[0].siloId, null);
+  assert.equal(next[0].siloName, null);
+  assert.match(next[0].aiReviewAnnotation?.details.join(" ") || "", /nenhum Silo foi criado/);
 });
 
 test("primeiro processo lógico preenche o KeywordDNA completo sem IA", () => {
@@ -223,7 +311,7 @@ test("Minerador qualifica somente por ação explícita e não chama IA no motor
   const source = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /processLogicalKeywordDna\(eligibleKeywords, loadedLists/);
   assert.match(source, /onClick=\{handleQualifySelected\}/);
-  assert.match(source, /<span>Qualificar selecionadas<\/span>/);
+  assert.match(source, /<span className="hidden sm:inline">Processar lógica<\/span>/);
   assert.match(source, /Mais ações/);
   assert.doesNotMatch(source, /Detectar viés · KeywordDNA/);
   assert.match(source, /onWorkflowStatusChange=\{\(status\) => handleUpdateStatus\(item\.id, status\)\}/);
@@ -611,7 +699,7 @@ test("processo logico limita cada artigo a seis keywords e abre suportes no silo
   assert.ok(groups.every(group => group.keywordIds.length <= MAX_KEYWORDS_PER_ARTICLE));
   assert.equal(publishedGroup?.principalSuggestion.keywordId, "pub-limit");
   assert.equal(publishedGroup?.keywordIds.length, MAX_KEYWORDS_PER_ARTICLE);
-  assert.ok(overflow.every(group => group.suggestedSiloId === "silo-publicado"));
+  assert.ok(overflow.every(group => group.suggestedSiloId === null));
   assert.ok(overflow.every(group => group.suggestedHierarchy === "Suporte"));
   assert.ok(overflow.some(group => group.alerts.some(alert => /limite de 6 keywords/.test(alert))));
 });
@@ -647,7 +735,7 @@ test("revisao da IA nao consegue concentrar mais de seis keywords em um artigo",
 
   assert.ok(nextGroups.every(group => group.keywordIds.length <= MAX_KEYWORDS_PER_ARTICLE));
   assert.equal(anchored?.principalSuggestion.keywordId, "pub-cap");
-  assert.ok(nextGroups.some(group => !group.publishedAnchorId && group.suggestedSiloId === "silo-1"));
+  assert.ok(nextGroups.filter(group => !group.publishedAnchorId).every(group => group.suggestedSiloId === null));
 });
 
 test("adaptador da revisao aceita variacoes cosmeticas sem afrouxar decisoes", () => {
@@ -781,4 +869,54 @@ test("adaptador SiloDNA normaliza aliases e rejeita campos extras sem afrouxar o
   assert.equal("siloId" in result.payload, false);
   assert.equal("pillarArticleId" in result.payload, false);
   assert.equal("campo_inventado_pela_ia" in result.payload, false);
+});
+
+test("a formação nunca herda uma segunda Principal do reviewRole", () => {
+  // Estado real observado: duas keywords marcadas "principal" na cópia de trabalho.
+  const groups = describeAssignedGroups([
+    kw("kw-a", "retinol principia antes e depois", { clusterId: "grupo-1", provisionalGroupId: "grupo-1", reviewRole: "principal", volume_search: 1900 }),
+    kw("kw-b", "principia olheiras antes e depois", { clusterId: "grupo-1", provisionalGroupId: "grupo-1", reviewRole: "principal", volume_search: 720 }),
+    kw("kw-c", "serum principia niacinamida", { clusterId: "grupo-1", provisionalGroupId: "grupo-1", reviewRole: "secundaria", volume_search: 300 }),
+  ] as never);
+  const group = groups[0];
+
+  const principais = Object.entries(group.roles).filter(([, role]) => role === "principal");
+  assert.equal(principais.length, 1, "exatamente uma Principal por Article");
+  assert.equal(principais[0][0], group.principalSuggestion.keywordId);
+  assert.equal(group.roles[group.principalSuggestion.keywordId], "principal");
+  // A não-principal que vinha marcada "principal" cai para o papel estrutural.
+  const outra = Object.keys(group.roles).find(id => id !== group.principalSuggestion.keywordId && id !== "kw-c")!;
+  assert.notEqual(group.roles[outra], "principal");
+  assert.equal(group.roles[outra], "secundaria");
+});
+
+test("a formação preserva secundária e reforço narrativo das não-principais", () => {
+  const group = describeAssignedGroups([
+    kw("kw-a", "serum facial principia", { clusterId: "grupo-2", provisionalGroupId: "grupo-2", reviewRole: "principal", volume_search: 1900 }),
+    kw("kw-b", "serum facial principia resenha", { clusterId: "grupo-2", provisionalGroupId: "grupo-2", reviewRole: "secundaria", volume_search: 800 }),
+    kw("kw-c", "serum facial principia como usar", { clusterId: "grupo-2", provisionalGroupId: "grupo-2", reviewRole: "reforco_narrativo", volume_search: 400 }),
+  ] as never)[0];
+
+  assert.equal(group.roles["kw-a"], "principal");
+  assert.equal(group.roles["kw-b"], "secundaria");
+  assert.equal(group.roles["kw-c"], "reforco_narrativo");
+  assert.equal(Object.values(group.roles).filter(role => role === "principal").length, 1);
+});
+
+test("trocar a Principal deixa somente a nova como principal na formação", () => {
+  const antes = describeAssignedGroups([
+    kw("kw-a", "serum facial principia", { clusterId: "grupo-3", provisionalGroupId: "grupo-3", reviewRole: "principal", volume_search: 1900 }),
+    kw("kw-b", "serum principia niacinamida", { clusterId: "grupo-3", provisionalGroupId: "grupo-3", reviewRole: "secundaria", volume_search: 800 }),
+  ] as never)[0];
+  assert.equal(antes.roles["kw-a"], "principal");
+
+  // Decisão humana: B passa a Principal e A é demovida na mesma operação.
+  const depois = describeAssignedGroups([
+    kw("kw-a", "serum facial principia", { clusterId: "grupo-3", provisionalGroupId: "grupo-3", reviewRole: "secundaria", volume_search: 1900 }),
+    kw("kw-b", "serum principia niacinamida", { clusterId: "grupo-3", provisionalGroupId: "grupo-3", reviewRole: "principal", volume_search: 800 }),
+  ] as never)[0];
+
+  assert.equal(depois.roles["kw-b"], "principal");
+  assert.notEqual(depois.roles["kw-a"], "principal");
+  assert.equal(Object.values(depois.roles).filter(role => role === "principal").length, 1);
 });

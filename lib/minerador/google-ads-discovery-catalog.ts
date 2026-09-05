@@ -65,7 +65,9 @@ export function discoveryGeoTargetConstants(states: string[]) {
   return resolveDiscoveryTargeting(states).geoTargetConstants;
 }
 
-export function discoveryTargetingLabels(geoTargetConstants: string[]) {
+export function discoveryTargetingLabels(rawGeoTargetConstants?: unknown) {
+  if (!Array.isArray(rawGeoTargetConstants)) return { label: "Sem targeting", details: ["Targeting não disponível"] };
+  const geoTargetConstants = rawGeoTargetConstants.filter((value): value is string => typeof value === "string");
   if (geoTargetConstants.length === 1 && geoTargetConstants[0] === GOOGLE_ADS_DISCOVERY_COUNTRY.geoTargetConstant) return { label: "Brasil", details: ["Brasil"] };
   const details = GOOGLE_ADS_DISCOVERY_STATE_OPTIONS.filter(state => geoTargetConstants.includes(GOOGLE_ADS_DISCOVERY_STATE_GEO_TARGETS[state])).map(state => GOOGLE_ADS_DISCOVERY_STATE_LABELS[state]);
   return { label: `${details.length || geoTargetConstants.length} estado(s)`, details };

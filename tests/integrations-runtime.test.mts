@@ -68,7 +68,7 @@ function authorizationRepository(activeAgencyIds: string[] = [AGENCY_A]): Canoni
 function dependencies(input: {
   activeAgencyIds?: string[];
   capability?: IntegrationCapabilityRow | null;
-  providerKey?: "google_ads" | "dataforseo" | "openrouter";
+  providerKey?: "google_ads" | "dataforseo" | "deepseek";
   connections?: IntegrationConnectionRow[];
 } = {}): IntegrationRuntimeDependencies & { usage: IntegrationUsageEvent[]; calls: Record<string, number> } {
   const technicalCapability = input.capability === undefined ? capability() : input.capability;
@@ -109,9 +109,9 @@ function dependencies(input: {
   return { repository, authorizationRepository: authorizationRepository(input.activeAgencyIds), now: () => NOW, usage, calls };
 }
 
-function input(context: { agencyId?: string | null; brandId?: string | null; actorUserId?: string; operation?: "keyword_discovery" | "keyword_metrics" | "allintitle" | "ai_generation" } = {}) {
+function input(context: { agencyId?: string | null; brandId?: string | null; actorUserId?: string; operation?: "keyword_discovery" | "keyword_metrics" | "allintitle" | "serp_compatibility" | "ai_generation" } = {}) {
   const operation = context.operation || "keyword_discovery";
-  const capabilityKey = operation === "allintitle" ? "dataforseo.allintitle" : operation === "ai_generation" ? "ai_generation" : operation === "keyword_metrics" ? "google_ads_keyword_metrics" : "google_ads_keyword_discovery";
+  const capabilityKey = operation === "allintitle" ? "dataforseo.allintitle" : operation === "serp_compatibility" ? "dataforseo.serp_compatibility" : operation === "ai_generation" ? "ai_generation" : operation === "keyword_metrics" ? "google_ads_keyword_metrics" : "google_ads_keyword_discovery";
   return {
     actorUserId: context.actorUserId || ACTOR_A,
     agencyId: context.agencyId === undefined ? AGENCY_A : context.agencyId,
@@ -155,17 +155,136 @@ test("a missing technical catalog row does not become an entitlement denial", as
   assert.equal(resource.quota.status, "UNLIMITED");
 });
 
-test("DataForSEO and OpenRouter map to their provider resources", async (t) => {
+test("DataForSEO and DeepSeek map to their provider resources", async (t) => {
   await t.test("DataForSEO", async () => {
     const resource = await resolveIntegrationResourceForActor(input({ operation: "allintitle" }), dependencies({ providerKey: "dataforseo", capability: capability({ capability_key: "dataforseo.allintitle", operation_kind: "allintitle" }) }));
     assert.equal(resource.resourceKey, "dataforseo");
     assert.equal(resource.connection.providerKey, "dataforseo");
   });
-  await t.test("OpenRouter", async () => {
-    const resource = await resolveIntegrationResourceForActor(input({ operation: "ai_generation" }), dependencies({ providerKey: "openrouter", capability: capability({ capability_key: "ai_generation", operation_kind: "ai_generation" }) }));
-    assert.equal(resource.resourceKey, "openrouter");
-    assert.equal(resource.connection.providerKey, "openrouter");
+  await t.test("DeepSeek", async () => {
+    const resource = await resolveIntegrationResourceForActor(input({ operation: "ai_generation" }), dependencies({ providerKey: "deepseek", capability: capability({ capability_key: "ai_generation", operation_kind: "ai_generation" }) }));
+    assert.equal(resource.resourceKey, "deepseek");
+    assert.equal(resource.connection.providerKey, "deepseek");
   });
+});
+
+test("SERP compatibility resolves the global DataForSEO resource without module entitlement", async () => {
+  const deps = dependencies({
+    providerKey: "dataforseo",
+    capability: capability({ capability_key: "dataforseo.serp_compatibility", operation_kind: "serp_compatibility" }),
+  });
+  const resource = await resolveIntegrationResourceForActor(input({ operation: "serp_compatibility", brandId: BRAND_A }), deps);
+
+  assert.equal(resource.resourceKey, "dataforseo");
+  assert.equal(resource.connection.connectionId, PLATFORM_CONNECTION);
+  assert.equal(resource.connection.providerKey, "dataforseo");
+  assert.equal(resource.capability?.capability_key, "dataforseo.serp_compatibility");
+  assert.equal(resource.entitlement.reason, "HOMOLOGATION_ALLOW_ALL_RESOURCE_AVAILABLE");
+  assert.equal(resource.binding, null);
+  assert.equal(resource.quota.status, "UNLIMITED");
+  assert.equal(resource.brandId, BRAND_A);
+  assert.deepEqual(deps.calls, { grants: 0, bindings: 0, quotas: 0, usageInsert: 0 });
+
+  const event = await recordIntegrationUsageForResource({
+    resource,
+    operation: "module_operation",
+    module: "radar",
+    resultStatus: "succeeded",
+    units: 1,
+    idempotencyKey: "radar-serp-compatibility-1",
+  }, deps);
+
+  assert.ok(event);
+  assert.equal(event.provider_id, PROVIDER);
+  assert.equal(event.connection_id, PLATFORM_CONNECTION);
+  assert.equal(event.capability_id, resource.capability?.id);
+  assert.equal(event.operation_kind, "module_operation");
+  assert.equal(event.agency_id, AGENCY_A);
+  assert.equal(event.brand_id, BRAND_A);
+  assert.equal(event.units, 1);
+});
+
+test("SERP compatibility can resolve the global provider without a technical catalog row", async () => {
+  const deps = dependencies({ providerKey: "dataforseo", capability: null });
+  const resource = await resolveIntegrationResourceForActor(input({ operation: "serp_compatibility", brandId: BRAND_A }), deps);
+
+  assert.equal(resource.resourceKey, "dataforseo");
+  assert.equal(resource.connection.providerKey, "dataforseo");
+  assert.equal(resource.capability, null);
+  assert.equal(resource.brandId, BRAND_A);
+  assert.equal(resource.entitlement.reason, "HOMOLOGATION_ALLOW_ALL_RESOURCE_AVAILABLE");
+});
+
+test("one DataForSEO Connection can serve allintitle and SERP consumers", async () => {
+  const sharedConnection = connection();
+  const allintitle = await resolveIntegrationResourceForActor(
+    input({ operation: "allintitle" }),
+    dependencies({
+      providerKey: "dataforseo",
+      connections: [sharedConnection],
+      capability: capability({ capability_key: "dataforseo.allintitle", operation_kind: "allintitle" }),
+    }),
+  );
+  const serp = await resolveIntegrationResourceForActor(
+    input({ operation: "serp_compatibility", brandId: BRAND_A }),
+    dependencies({
+      providerKey: "dataforseo",
+      connections: [sharedConnection],
+      capability: capability({ capability_key: "dataforseo.serp_compatibility", operation_kind: "serp_compatibility" }),
+    }),
+  );
+
+  assert.equal(allintitle.connection.connectionId, serp.connection.connectionId);
+  assert.equal(allintitle.connection.providerKey, "dataforseo");
+  assert.equal(serp.connection.providerKey, "dataforseo");
+});
+
+test("SERP compatibility blocks only tenant authorization or an unavailable provider", async (t) => {
+  await t.test("wrong provider", async () => {
+    await expectCode(
+      () => resolveIntegrationResourceForActor(input({ operation: "serp_compatibility", brandId: BRAND_A }), dependencies({ providerKey: "google_ads" })),
+      "INTEGRATION_CONNECTION_MISSING",
+    );
+  });
+  await t.test("inactive Brand availability", async () => {
+    await expectCode(
+      () => resolveIntegrationResourceForActor(input({ operation: "serp_compatibility", brandId: BRAND_A }), dependencies({ providerKey: "dataforseo", activeAgencyIds: [] })),
+      "INTEGRATION_CONTEXT_INVALID",
+    );
+  });
+});
+
+test("allintitle and SERP retain distinct technical capability metadata", async () => {
+  const allintitle = await resolveIntegrationResourceForActor(input({ operation: "allintitle", brandId: BRAND_A }), dependencies({
+    providerKey: "dataforseo",
+    capability: capability({ capability_key: "dataforseo.allintitle", operation_kind: "allintitle" }),
+  }));
+  const serp = await resolveIntegrationResourceForActor(input({ operation: "serp_compatibility", brandId: BRAND_A }), dependencies({
+    providerKey: "dataforseo",
+    capability: capability({ capability_key: "dataforseo.serp_compatibility", operation_kind: "serp_compatibility" }),
+  }));
+  assert.equal(allintitle.capability?.capability_key, "dataforseo.allintitle");
+  assert.equal(serp.capability?.capability_key, "dataforseo.serp_compatibility");
+});
+
+test("module Usage still requires Brand for global SERP compatibility", async () => {
+  const deps = dependencies({
+    providerKey: "dataforseo",
+    capability: capability({ capability_key: "dataforseo.serp_compatibility", operation_kind: "serp_compatibility" }),
+  });
+  const resource = await resolveIntegrationResourceForActor(input({ operation: "serp_compatibility", brandId: BRAND_A }), deps);
+  await expectCode(
+    () => recordIntegrationUsageForResource({
+      resource: { ...resource, brandId: null },
+      operation: "module_operation",
+      module: "arquiteto",
+      resultStatus: "succeeded",
+      units: 1,
+      idempotencyKey: "arquiteto-serp-compatibility-without-brand",
+    }, deps),
+    "INTEGRATION_CONTEXT_INVALID",
+  );
+  assert.equal(deps.calls.usageInsert, 0);
 });
 
 test("a non-READY global Connection blocks the resource without consulting grants", async () => {

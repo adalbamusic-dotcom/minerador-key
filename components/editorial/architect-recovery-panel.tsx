@@ -40,7 +40,7 @@ export function ArchitectRecoveryPanel({
           Aplicar recuperação segura
         </button>
         <span className={snapshotReady ? "text-xs text-emerald-200" : "text-xs text-slate-500"}>
-          {busy ? "Processando leitura…" : snapshotReady ? `Snapshot validado${snapshotCreatedAt ? ` em ${new Date(snapshotCreatedAt).toLocaleTimeString("pt-BR")}` : ""}` : "Snapshot obrigatório antes da auditoria"}
+          {busy ? "Processando leitura…" : snapshotReady ? `Ponto de recuperação validado${snapshotCreatedAt ? ` em ${new Date(snapshotCreatedAt).toLocaleTimeString("pt-BR")}` : ""}` : "Ponto de recuperação obrigatório antes da auditoria"}
         </span>
       </div>
       {error && <p className="mt-1 text-xs text-rose-200">{error}</p>}
@@ -48,7 +48,7 @@ export function ArchitectRecoveryPanel({
         <details className="mt-2 rounded-md border border-slate-800/60 bg-slate-900/30 px-2 py-1.5" open>
           <summary className="cursor-pointer text-xs font-medium text-slate-200">Relatório de auditoria · {audit.counts.masterKeywords} keywords · {audit.counts.recoverableNewArticles} artigos novos recuperáveis</summary>
           <pre className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-slate-400">{architectRecoveryAuditText(audit)}</pre>
-          {plan && <p className="mt-2 text-xs leading-5 text-amber-200">A recuperação preservará {plan.preservedArticleVersionIds.length} ArticleDNA(s), {plan.preservedSiloVersionIds.length} SiloDNA(s) e {plan.preservedSiloPageVersionIds.length} SiloPage(s), sem chamar IA.</p>}
+          {plan && <p className="mt-2 text-xs leading-5 text-amber-200">A recuperação preservará {plan.preservedArticleVersionIds.length} definição(ões) de artigo, {plan.preservedSiloVersionIds.length} arquitetura(s) de silo e {plan.preservedSiloPageVersionIds.length} página(s) de silo, sem chamar IA.</p>}
         </details>
       )}
     </section>

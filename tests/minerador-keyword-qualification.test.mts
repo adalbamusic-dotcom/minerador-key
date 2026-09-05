@@ -32,8 +32,48 @@ test("decisão humana de Funil não é sobrescrita", () => {
   assert.deepEqual(applyFunnelQualification(semantic, result), semantic);
 });
 
-test("keyword sem qualificação continua sem Funil final", () => {
+test("keyword semanticamente incompreensível resolve Funil como desconhecido explícito", () => {
   const result = classifyKeywordFunnel({ keyword: "tema amplo", semantic: {} });
-  assert.equal(result.proposed, "TOFU");
+  assert.equal(result.proposed, null);
+  assert.equal(result.resolution, "explicit_unknown");
+  assert.equal(result.determinable, true);
   assert.equal(Object.prototype.hasOwnProperty.call({}, "funnel"), false);
+  assert.equal(applyFunnelQualification({}, result).funnel, undefined);
+  assert.equal(applyFunnelQualification({}, result).funnel_review_required, "não");
+});
+
+test("termo incompreensível não recebe TOFU por fallback, mas relação específica recebe Funil canônico", () => {
+  const generic = classifyKeywordFunnel({ keyword: "fragmento zzqv 8842", intent: "Pendente", semantic: { intencao_ambigua: "sim" } });
+  const specific = classifyKeywordFunnel({ keyword: "portaria remota para condomínio pequeno", intent: "Comercial", semantic: { etapa_jornada: "Consideração", potencial_comercial: "medium", publico: "Responsável por condomínio pequeno" } });
+
+  assert.equal(generic.resolution, "explicit_unknown");
+  assert.equal(generic.determinable, true);
+  assert.equal(applyFunnelQualification({ intencao_ambigua: "sim" }, generic).funnel, undefined);
+  assert.equal(specific.proposed, "MOFU");
+  assert.equal(specific.determinable, true);
+  assert.equal(applyFunnelQualification({}, specific).funnel, "MOFU");
+});
+
+test("keywords amplas ou ambíguas recebem TOFU quando o termo é reconhecível", () => {
+  const result = classifyKeywordFunnel({
+    keyword: "unhas em acrilico",
+    intent: "Pendente",
+    niche: "Estética",
+    semantic: { intencao_ambigua: "sim", entidade_central: "unhas", modificadores: "em acrilico" },
+  });
+
+  assert.equal(result.proposed, "TOFU");
+  assert.equal(result.resolution, "value");
+  assert.equal(result.determinable, true);
+  assert.equal(applyFunnelQualification({}, result).funnel, "TOFU");
+});
+
+test("comparação e ação resolvem MOFU e BOFU mesmo quando a intenção é ambígua", () => {
+  const comparison = classifyKeywordFunnel({ keyword: "gel ou acrilico qual é melhor", intent: "Comercial", semantic: { intencao_ambigua: "sim" } });
+  const price = classifyKeywordFunnel({ keyword: "unhas de gel preço", intent: "Pendente", semantic: { intencao_ambigua: "sim" } });
+  const local = classifyKeywordFunnel({ keyword: "manicure perto de mim", intent: "Pendente", semantic: { intencao_ambigua: "sim" } });
+
+  assert.equal(comparison.proposed, "MOFU");
+  assert.equal(price.proposed, "BOFU");
+  assert.equal(local.proposed, "BOFU");
 });

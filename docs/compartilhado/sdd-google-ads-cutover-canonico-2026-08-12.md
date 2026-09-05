@@ -7,12 +7,14 @@
 **Migration:** Não criada
 **Operações remotas:** Nenhuma
 
-> **Precedência documental — 2026-08-16:** esta proposta de corte para
+> **Precedência documental — 2026-08-24:** esta proposta de corte para
 > `integration_connections`/Vault foi supersedida, como destino de
-> configuração do Google Ads, pelo adendo da SDD arquitetural canônica. Ela é
-> preservada como auditoria histórica e não autoriza implementação, migration
-> ou operação remota. O target atual é `GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV`;
-> smokes e prova de ausência de consumidores continuam pendentes.
+> configuração estática do Google Ads, pelo adendo da SDD arquitetural
+> canônica. Ela é preservada como auditoria histórica e não autoriza
+> migration ou operação remota. O contrato atual é configuração estática em
+> ENV + OAuth Refresh Token por `secret_ref` no Secret Store, com rotação
+> exclusiva pelo Admin global. A implementação local e o health check explícito
+> não equivalem a rotação remota ou smoke homologado.
 
 ## 1. Objetivo e limites
 

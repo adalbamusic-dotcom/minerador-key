@@ -6,6 +6,7 @@ import { normalizeSiloPageProviderPayload } from "@/lib/arquiteto/silo-page-prov
 import { createStatusEvent, createVersionEnvelope, toVersionReference } from "@/lib/arquiteto/versioning";
 import { appendArquitetoArtifact, pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
+import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 
 const RequestSchema = z.object({
@@ -47,11 +48,13 @@ export async function POST(req: Request) {
     const parsed = RequestSchema.safeParse(await req.json());
     if (!parsed.success) return NextResponse.json({ success: false, error: "Dados invalidos.", issues: parsed.error.flatten() }, { status: 400 });
     const context = await resolvePipelineContext({ brandId: parsed.data.brand.id, module: "arquiteto", action: "create" });
+    const deepSeekProvider = await resolveDeepSeekCanonicalConfig({ actorUserId: context.actorUserId, brandId: context.brandId, client: context.supabase });
 
     const { siloId, siloName, siloDnaVersion, brand } = parsed.data;
     const slug = siloName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
     const result = await generateStructuredAI({
+      provider: deepSeekProvider,
       system: SYSTEM_PROMPT,
       user: buildSiloPageUserPrompt(parsed.data),
       schema: ResponseSchema,

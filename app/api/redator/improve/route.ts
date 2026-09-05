@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
+import { createCanonicalServiceClient } from "@/lib/server/canonical-authorization";
+import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { RedatorImproveRequestSchema, RedatorImproveProposalSchema } from "@/lib/redator/contracts";
@@ -13,7 +15,8 @@ export async function POST(request: NextRequest) {
     const profile = await requireCanonicalSessionProfile();
     const input = RedatorImproveRequestSchema.parse(await request.json());
     await assertEditorialPermission(profile, input.brandId, "redator", "edit");
-    const generated = await generateStructuredAI({ system: IMPROVE_SYSTEM_PROMPT, user: buildImprovePrompt(input.document, input.selectedText, input.humanInstruction), schema: ProviderImproveSchema, maxTokens: 2200 });
+    const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: profile.userId, brandId: input.brandId, client: createCanonicalServiceClient() });
+    const generated = await generateStructuredAI({ provider, system: IMPROVE_SYSTEM_PROMPT, user: buildImprovePrompt(input.document, input.selectedText, input.humanInstruction), schema: ProviderImproveSchema, maxTokens: 2200 });
     const proposal = RedatorImproveProposalSchema.parse({ ...generated, humanDecisionRequired: true, origin: "ai" });
     return NextResponse.json({ proposal });
   } catch (error) {

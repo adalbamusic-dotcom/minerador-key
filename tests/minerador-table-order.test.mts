@@ -5,6 +5,7 @@ import { applyManualOrder, moveIdBefore, moveIdByOffset, reconcileManualOrderIds
 import { deriveMineradorTableRows } from "../lib/minerador/table-view.ts";
 
 const processor = readFileSync(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
+const dnaPanel = readFileSync(new URL("../components/editorial/dna-panels.tsx", import.meta.url), "utf8");
 const discovery = readFileSync(new URL("../modules/minerador/discovery/discovery-table-placeholder.tsx", import.meta.url), "utf8");
 const resize = readFileSync(new URL("../modules/minerador/keyword-table/keyword-table-resize.tsx", import.meta.url), "utf8");
 
@@ -46,12 +47,15 @@ test("as duas planilhas usam arraste por ponteiro e resize compartilhados", () =
     assert.match(source, /data-keyword-table-row-id/);
     assert.match(source, /onPointerDragStart=\{.*startPointerDragging/);
   }
-  assert.match(processor, /<KeywordTableShell scroll="x"(?:\s+className=\{[^}]+\})?>/);
+  assert.match(processor, /<KeywordTableShell ref=\{tableRef\} scroll="x" className=\{selectedIds\.size > 0 \? "pb-14" : ""\}>/);
   assert.match(processor, /visualPosition=\{index \+ 1\}/);
-  assert.match(processor, /Outros campos do KeywordDNA/);
+  assert.match(processor, /<KeywordDnaPanel/);
+  assert.match(dnaPanel, /data-keyword-profile="bento"/);
+  assert.match(dnaPanel, /Proveniência e detalhes técnicos/);
+  assert.doesNotMatch(processor, /Outros campos do perfil da keyword/);
   assert.doesNotMatch(processor, /JSON\.stringify\(value\)/);
-  assert.match(processor, /columnResize\.widths\[columnId\]/);
-  assert.match(discovery, /columnResize\.widths\[columnId\]/);
+  assert.match(processor, /responsiveWidths\[columnId\]/);
+  assert.match(discovery, /responsiveWidths\[columnId\]/);
   assert.match(resize, /onMouseDown/);
   assert.match(resize, /cursor-col-resize/);
   assert.match(resize, /cursor-row-resize/);

@@ -6,7 +6,9 @@ import { EditorialSnapshotSchema, SerpCollectionRecordSchema, SerpReviewRecordSc
 import { createMockPlanAndDocument, mockProductEvidenceProvider, mockSerpProvider } from "@/lib/editorial/providers";
 import { createMockOperationalBundle } from "@/lib/editorial/providers";
 import type { AIReviewAnnotation, BrandMaterial, BrandPrompt, BrandSkill, ExternalSourceSuggestion, GuardianFinding, InternalLinkAssignment, PublicationRecord } from "@/lib/editorial/operational-contracts";
-import type { BrandInvitation, OperationalPublication, PlannerItem, RadarItem } from "@/lib/editorial/operational-flow";
+import type { BrandInvitation, OperationalPublication, PlannerItem, RadarArticleHandoffContext, RadarItem } from "@/lib/editorial/operational-flow";
+import { buildRadarHandoffContexts, type RadarHandoffBlocked } from "@/lib/arquiteto/radar-handoff-context";
+import type { InternalLinkGraph } from "@/lib/arquiteto/contracts";
 import { approvedArticleVersions, approvedSiloPageVersions, createDevelopmentInvitation, createOperationalDocument, createOperationalPlan, createPublicationDraft,
   contentPlanApprovalIssues, importApprovedWriterItems, importArticlesToRadar, importRadarToPlanner, importSiloPagesToRadar, mergeVersionEvents, setRadarState } from "@/lib/editorial/operational-flow";
 import { createContentPlanSuccessor } from "@/lib/planejador/content-plan";
@@ -20,9 +22,14 @@ import { LocalWorkflowRecoverySchema, PersistedEditorialWorkspaceSchema, workflo
 import { createRadarHydrationSnapshot, reconcileRadarItems, type RadarHydrationSnapshot, type RadarHydrationSourceKeyword } from "@/lib/radar/hydration";
 import type { SerpFormationAssessment } from "@/lib/arquiteto/serp-formation";
 import { createRadarSerpResolutionEnvelope } from "@/lib/radar/resolution-envelope";
+import { buildRadarSerpCollectPayload } from "@/lib/radar/serp/request";
 import type { BackgroundTaskInput, EditorialBackgroundTask } from "@/lib/editorial/background-tasks";
 import type { EditorialHistoryModule } from "@/lib/editorial/history";
 import { VersionedRadarAnalysisSchema, type RadarAnalysisVersion } from "@/lib/radar/analysis-contracts";
+import { beginRadarAnalysisReadback, beginRadarAnalysisWrite, canApplyRadarAnalysisReadback, EMPTY_RADAR_ANALYSIS_SYNC_STATE, finishRadarAnalysisWrite, radarAnalysisReadbackFingerprint, type RadarAnalysisSyncState } from "@/lib/radar/analysis-readback";
+import { beginRadarSerpReviewReadback, beginRadarSerpReviewWrite, canApplyRadarSerpReviewReadback, EMPTY_RADAR_SERP_REVIEW_SYNC_STATE, finishRadarSerpReviewWrite, radarSerpReviewReadbackFingerprint, type RadarSerpReviewSyncState } from "@/lib/radar/serp-review-readback";
+import { radarPlannerPackageToContentPlanInput } from "@/lib/radar/planner-handoff";
+import { latestRadarR5SerpRecord } from "@/lib/radar/r5-sequential";
 import { mergeRadarItemsPreservingLocalState } from "@/lib/radar/workspace-merge";
 import { mergeSerpRecordsPreservingPayload, type SerpMergeConflict } from "@/lib/radar/serp-merge";
 
@@ -36,6 +43,8 @@ interface BrandWorkspace {
   serpReviews: SerpReviewRecord[];
   serpMergeConflicts: SerpMergeConflict[];
   serpPersistenceMode: "server" | "local_fallback";
+  /** Snapshot-scoped proof from the narrow readback endpoint; never inferred from a broad workspace load. */
+  serpReviewReadbackSnapshotIds: string[];
   productEvidence: ProductEvidenceDNA[];
   contentPlans: Record<string, VersionEnvelope<ContentPlan>>;
   documents: Record<string, ContentDocument>;
@@ -59,12 +68,21 @@ interface BrandWorkspace {
   aiReviewAnnotations: AIReviewAnnotation[];
 }
 
-const emptyWorkspace = (): BrandWorkspace => ({ architectImportedKeywordIds: [], articleVersions: {}, siloVersions: {}, siloPageVersions: {}, versionEvents: [], serpRecords: [], serpReviews: [], serpMergeConflicts: [], serpPersistenceMode: "local_fallback",
+const emptyWorkspace = (): BrandWorkspace => ({ architectImportedKeywordIds: [], articleVersions: {}, siloVersions: {}, siloPageVersions: {}, versionEvents: [], serpRecords: [], serpReviews: [], serpMergeConflicts: [], serpPersistenceMode: "local_fallback", serpReviewReadbackSnapshotIds: [],
   productEvidence: [], contentPlans: {}, documents: {}, selectedEntityId: null, skills: [], prompts: [], materials: [],
   internalLinks: [], externalSources: [], guardianFindings: [], publications: [], radarItems: [], plannerItems: [],
   operationalPublications: [], invitations: [], persistenceMode: "local_fallback", documentLocks: {}, documentUserStates: {}, moduleState: {}, backgroundTasks: [], aiReviewAnnotations: [] });
 
-function saveLocalSerpRecovery(actorUserId: string, brandId: string, workspace: BrandWorkspace, record: SerpCollectionRecord) {
+function latestRadarSnapshotFingerprint(workspace: BrandWorkspace, articleId: string) {
+  const snapshot = workspace.serpRecords
+    .filter(record => record.input.articleId === articleId)
+    .slice()
+    .sort((left, right) => (left.research?.version || 0) - (right.research?.version || 0))
+    .at(-1);
+  return snapshot ? JSON.stringify({ id: snapshot.id, version: snapshot.research?.version || null, hash: snapshot.research?.contentHash || null }) : null;
+}
+
+function saveLocalSerpRecovery(actorUserId: string, brandId: string, workspace: BrandWorkspace, record: SerpCollectionRecord | null, review?: SerpReviewRecord) {
   if (typeof window === "undefined") return false;
   try {
     const recovery = LocalWorkflowRecoverySchema.parse({
@@ -78,8 +96,8 @@ function saveLocalSerpRecovery(actorUserId: string, brandId: string, workspace: 
       documents: workspace.documents,
       radarItems: workspace.radarItems,
       plannerItems: workspace.plannerItems,
-      serpRecords: [...workspace.serpRecords.filter(item => item.id !== record.id), record],
-      serpReviews: workspace.serpReviews,
+      serpRecords: record ? [...workspace.serpRecords.filter(item => item.id !== record.id), record] : workspace.serpRecords,
+      serpReviews: review ? [...workspace.serpReviews.filter(item => item.id !== review.id), review] : workspace.serpReviews,
       serpMergeConflicts: workspace.serpMergeConflicts,
       operationalPublications: workspace.operationalPublications,
       documentLocks: workspace.documentLocks,
@@ -136,15 +154,28 @@ interface EditorialPipelineContextValue extends BrandWorkspace {
   addVersionEvents: (events: VersionStatusEvent[]) => void;
   setSelectedEntityId: (id: string | null) => void;
   simulateSerp: (articleId: string, keyword: string, location: string) => Promise<void>;
-  collectSerp: (articleId: string, location: string) => Promise<SerpCollectionRecord>;
-  saveRadarAnalysis: (articleId: string, analysis: RadarAnalysisVersion) => Promise<{ persistenceMode: "remote" | "local" }>;
-  reviewSerp: (articleId: string, snapshotId: string, status: "approved" | "rejected", notes: string) => Promise<void>;
+  collectSerp: (articleId: string, location: string, articleDnaVersionId: string) => Promise<SerpCollectionRecord>;
+  saveRadarAnalysis: (articleId: string, analysis: RadarAnalysisVersion) => Promise<{ persistenceMode: "remote" | "local"; readbackConfirmed: boolean }>;
+  reloadRadarAnalysis: (articleId: string) => Promise<void>;
+  reloadSerpReview: (articleId: string) => Promise<void>;
+  reviewSerp: (articleId: string, snapshotId: string, status: "approved" | "rejected", notes: string) => Promise<{ persistenceMode: "remote" | "local"; readbackConfirmed: boolean; review: SerpReviewRecord }>;
   simulateProductEvidence: (articleId: string, query: string, location: string) => Promise<void>;
   simulatePlanAndDocument: () => Promise<void>;
   simulateOperationalSkeleton: (articleId?: string, targetArticleId?: string) => void;
   importApprovedKeywordsToArchitect: (keywordIds: string[]) => { imported: number; allIds: string[] };
   setArchitectImportedKeywordIds: (keywordIds: string[]) => void;
-  importApprovedToRadar: (articleIds: string[], sourceKeywords?: RadarHydrationSourceKeyword[], serpAssessments?: Record<string, SerpFormationAssessment>) => { imported: number; skipped: number };
+  /**
+   * Envia Articles aprovados ao Radar.
+   *
+   * `handoffContext` é OPCIONAL porque quem não o traz não pode ser punido
+   * com descarte silencioso: o contexto é resolvido aqui, pela mesma
+   * autoridade que o Arquiteto usa. Quem ainda assim não passa volta em
+   * `blocked`, com o motivo legível.
+   *
+   * `await`: a escrita remota é a autoridade. Estado local que mudou antes
+   * do servidor confirmar não é importação, é otimismo.
+   */
+  importApprovedToRadar: (articleIds: string[], sourceKeywords?: RadarHydrationSourceKeyword[], serpAssessments?: Record<string, SerpFormationAssessment>, handoffContext?: Record<string, RadarArticleHandoffContext>, graphs?: readonly InternalLinkGraph[]) => Promise<{ imported: number; skipped: number; blocked: RadarHandoffBlocked[] }>;
   importApprovedSiloPagesToRadar: (siloPageIds: string[]) => { imported: number; skipped: number };
   updateRadarState: (ids: string[], target: RadarItem["state"]) => void;
   importApprovedToPlanner: (radarIds: string[]) => { imported: number; skipped: number };
@@ -176,6 +207,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
   const [error, setError] = useState<string | null>(null);
   const recoveredBrands = useRef(new Set<string>());
   const activeTaskKeys = useRef(new Map<string, string>());
+  const radarAnalysisSyncRef = useRef(new Map<string, RadarAnalysisSyncState>());
+  const serpReviewSyncRef = useRef(new Map<string, RadarSerpReviewSyncState>());
   const actorKey = actorUserId || "unauthenticated";
   const workspaceKey = selectedBrandId ? `${actorKey}:${selectedBrandId}` : "";
   const workspace = workspaceKey ? workspaces[workspaceKey] || emptyWorkspace() : emptyWorkspace();
@@ -406,15 +439,93 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     return () => window.clearTimeout(timer);
   }, [actorUserId, reload, selectedBrandId, snapshots, workspaceKey]);
 
-  const createSerpResolutionEnvelope = useCallback(async (articleId: string) => {
+  const reloadRadarAnalysis = useCallback(async (articleId: string) => {
+    if (!selectedBrandId || !actorUserId) return;
+    const syncKey = `${selectedBrandId}:${articleId}`;
+    const currentItem = workspace.radarItems.find(item => item.articleId === articleId);
+    if (!currentItem) return;
+    const requestFingerprint = radarAnalysisReadbackFingerprint({ item: currentItem, snapshotId: latestRadarSnapshotFingerprint(workspace, articleId) });
+    const readbackStart = beginRadarAnalysisReadback(radarAnalysisSyncRef.current.get(syncKey) || EMPTY_RADAR_ANALYSIS_SYNC_STATE);
+    radarAnalysisSyncRef.current.set(syncKey, readbackStart.state);
+    const response = await fetch(`/api/editorial/radar-analysis?brandId=${encodeURIComponent(selectedBrandId)}&articleId=${encodeURIComponent(articleId)}`, { cache: "no-store", headers: { Accept: "application/json" } });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.readbackConfirmed !== true || body.brandId !== selectedBrandId || body.articleId !== articleId || typeof body.radarItemId !== "string") return;
+    const analyses = VersionedRadarAnalysisSchema.array().parse(Array.isArray(body.analyses) ? body.analyses : []);
+    if (!analyses.length) return;
+    updateWorkspace(current => {
+      const local = current.radarItems.find(item => item.articleId === articleId);
+      if (!local) return current;
+      const currentSync = radarAnalysisSyncRef.current.get(syncKey) || EMPTY_RADAR_ANALYSIS_SYNC_STATE;
+      if (!canApplyRadarAnalysisReadback(currentSync, readbackStart.token)) return current;
+      if (radarAnalysisReadbackFingerprint({ item: local, snapshotId: latestRadarSnapshotFingerprint(current, articleId) }) !== requestFingerprint) return current;
+      const byVersion = new Map([...local.analysisVersions, ...analyses].map(version => [version.versionId, version]));
+      return { ...current, persistenceMode: "server", radarItems: current.radarItems.map(item => item.articleId === articleId ? { ...item, id: body.radarItemId, analysisVersions: [...byVersion.values()].sort((left, right) => left.versionNumber - right.versionNumber), lockVersion: typeof body.lockVersion === "number" ? Math.max(item.lockVersion, body.lockVersion) : item.lockVersion } : item) };
+    });
+  }, [actorUserId, selectedBrandId, updateWorkspace, workspace]);
+
+  const reloadSerpReview = useCallback(async (articleId: string) => {
+    if (!selectedBrandId || !actorUserId) return;
+    const currentItem = workspace.radarItems.find(item => item.articleId === articleId);
+    const currentRecord = latestRadarR5SerpRecord(workspace.serpRecords, articleId);
+    if (!currentItem || !currentRecord?.research || currentRecord.origin !== "real") return;
+    const syncKey = `${selectedBrandId}:${articleId}`;
+    const fingerprint = radarSerpReviewReadbackFingerprint({ item: currentItem, record: currentRecord });
+    const readbackStart = beginRadarSerpReviewReadback(serpReviewSyncRef.current.get(syncKey) || EMPTY_RADAR_SERP_REVIEW_SYNC_STATE);
+    serpReviewSyncRef.current.set(syncKey, readbackStart.state);
+    const applyFallback = () => updateWorkspace(current => {
+      const item = current.radarItems.find(candidate => candidate.articleId === articleId);
+      const record = latestRadarR5SerpRecord(current.serpRecords, articleId);
+      const sync = serpReviewSyncRef.current.get(syncKey) || readbackStart.state;
+      if (!item || !record?.research || !canApplyRadarSerpReviewReadback(sync, readbackStart.token)) return current;
+      if (radarSerpReviewReadbackFingerprint({ item, record }) !== fingerprint) return current;
+      return { ...current, serpPersistenceMode: "local_fallback", serpReviewReadbackSnapshotIds: current.serpReviewReadbackSnapshotIds.filter(snapshotId => snapshotId !== record.id) };
+    });
+    try {
+      const params = new URLSearchParams({ brandId: selectedBrandId, articleId, articleDnaVersionId: currentItem.articleDnaVersionId, snapshotId: currentRecord.id });
+      const response = await fetch(`/api/editorial/serp?${params.toString()}`, { cache: "no-store", headers: { Accept: "application/json" } });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.persistenceMode !== "remote" || body.readbackConfirmed !== true || body.brandId !== selectedBrandId || body.articleId !== articleId || body.articleDnaVersionId !== currentItem.articleDnaVersionId || body.snapshotId !== currentRecord.id) {
+        applyFallback();
+        return;
+      }
+      const record = SerpCollectionRecordSchema.parse(body.record);
+      const reviews = SerpReviewRecordSchema.array().parse(Array.isArray(body.reviews) ? body.reviews : []);
+      if (record.id !== currentRecord.id || record.research?.articleDnaVersionId !== currentItem.articleDnaVersionId || reviews.some(review => review.brandId !== selectedBrandId || review.articleId !== articleId || review.snapshotId !== record.id)) {
+        applyFallback();
+        return;
+      }
+      updateWorkspace(current => {
+        const item = current.radarItems.find(candidate => candidate.articleId === articleId);
+        const visibleRecord = latestRadarR5SerpRecord(current.serpRecords, articleId);
+        const sync = serpReviewSyncRef.current.get(syncKey) || readbackStart.state;
+        if (!item || !visibleRecord?.research || !canApplyRadarSerpReviewReadback(sync, readbackStart.token)) return current;
+        if (radarSerpReviewReadbackFingerprint({ item, record: visibleRecord }) !== fingerprint) return current;
+        const merged = mergeSerpRecordsPreservingPayload([record], current.serpRecords);
+        return {
+          ...current,
+          serpRecords: merged.records,
+          serpMergeConflicts: merged.conflicts,
+          serpReviews: [...current.serpReviews.filter(review => review.snapshotId !== record.id), ...reviews],
+          serpPersistenceMode: "server",
+          serpReviewReadbackSnapshotIds: [...new Set([...current.serpReviewReadbackSnapshotIds, record.id])],
+        };
+      });
+    } catch {
+      applyFallback();
+    }
+  }, [actorUserId, selectedBrandId, updateWorkspace, workspace]);
+
+  const createSerpResolutionEnvelope = useCallback(async (articleId: string, articleDnaVersionId: string) => {
     if (!selectedBrandId) throw new Error("Selecione uma marca antes de pesquisar a SERP.");
     const article = workspace.articleVersions[articleId];
     const radarItem = workspace.radarItems.find(item => item.articleId === articleId);
     if (!article || !radarItem) throw new Error("O artigo não está disponível no contexto editorial local do Radar.");
+    if (!articleDnaVersionId.trim() || radarItem.articleDnaVersionId !== articleDnaVersionId) throw new Error("A versão do ArticleDNA deste item do Radar não está disponível ou não corresponde ao artigo selecionado.");
     return createRadarSerpResolutionEnvelope({
       brandId: selectedBrandId,
       radarItem,
       article,
+      articleDnaVersionId,
       hydration: radarItem.hydration,
       sourceKeywords: (snapshots[workspaceKey]?.keywords || []) as RadarHydrationSourceKeyword[],
       silo: article.payload.siloId ? workspace.siloVersions[article.payload.siloId] : undefined,
@@ -422,7 +533,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
   }, [selectedBrandId, snapshots, workspace, workspaceKey]);
 
   const value = useMemo<EditorialPipelineContextValue>(() => ({
-    ...workspace, snapshot: snapshots[workspaceKey] || null, loading, error, reload, reloadOperational,
+    ...workspace, snapshot: snapshots[workspaceKey] || null, loading, error, reload, reloadOperational, reloadRadarAnalysis, reloadSerpReview,
     setArticleVersions: update => updateWorkspace(current => ({ ...current, articleVersions: typeof update === "function" ? update(current.articleVersions) : update })),
     setSiloVersions: update => updateWorkspace(current => ({ ...current, siloVersions: typeof update === "function" ? update(current.siloVersions) : update })),
     setSiloPageVersions: update => updateWorkspace(current => ({ ...current, siloPageVersions: typeof update === "function" ? update(current.siloPageVersions) : update })),
@@ -432,11 +543,11 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       const record = await mockSerpProvider.collectSnapshot({ articleId, keyword, location: location || "Brasil", language: "pt-BR", device: "desktop" });
       updateWorkspace(current => ({ ...current, serpRecords: [...current.serpRecords.filter(item => item.id !== record.id), record] }));
     },
-    collectSerp: async (articleId, location) => {
+    collectSerp: async (articleId, location, articleDnaVersionId) => {
       if (!selectedBrandId) throw new Error("Selecione uma marca antes de pesquisar a SERP.");
       const articleVersion = workspace.articleVersions[articleId];
-      const resolutionEnvelope = await createSerpResolutionEnvelope(articleId);
-      const response = await fetch("/api/editorial/serp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "collect", brandId: selectedBrandId, articleId, location: location || "Brasil", language: "pt-BR", device: "desktop", articleVersion, resolutionEnvelope }) });
+      const resolutionEnvelope = await createSerpResolutionEnvelope(articleId, articleDnaVersionId);
+      const response = await fetch("/api/editorial/serp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildRadarSerpCollectPayload({ brandId: selectedBrandId, articleId, articleDnaVersionId, location: location || "Brasil", language: "pt-BR", device: "desktop", articleVersion, resolutionEnvelope })) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Não foi possível coletar a SERP.");
       const record = SerpCollectionRecordSchema.parse(body.record);
@@ -452,34 +563,77 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       if (!currentItem) throw new Error("Item Radar não encontrado.");
       const nextItem = { ...currentItem, analysisVersions: currentItem.analysisVersions.some(version => version.versionId === parsed.versionId) ? currentItem.analysisVersions : [...currentItem.analysisVersions, parsed], updatedAt: new Date().toISOString() };
       const nextWorkspace = { ...workspace, radarItems: workspace.radarItems.map(item => item.articleId === articleId ? nextItem : item) };
-      updateWorkspace(current => ({ ...current, radarItems: current.radarItems.map(item => item.articleId === articleId ? nextItem : item) }));
+      const syncKey = `${selectedBrandId}:${articleId}`;
+      const writeState = beginRadarAnalysisWrite(radarAnalysisSyncRef.current.get(syncKey) || EMPTY_RADAR_ANALYSIS_SYNC_STATE);
+      radarAnalysisSyncRef.current.set(syncKey, writeState);
       try {
+        try {
         const response = await fetch("/api/editorial/radar-analysis", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save", brandId: selectedBrandId, articleId, expectedLock: currentItem.lockVersion, analysis: parsed }) });
         const body = await response.json().catch(() => ({}));
         if (response.ok) {
-          updateWorkspace(current => ({ ...current, radarItems: current.radarItems.map(item => item.articleId === articleId ? { ...item, lockVersion: typeof body.lockVersion === "number" ? body.lockVersion : item.lockVersion + 1 } : item), persistenceMode: "server" }));
-          return { persistenceMode: "remote" as const };
+          const readbackResponse = await fetch(`/api/editorial/radar-analysis?brandId=${encodeURIComponent(selectedBrandId)}&articleId=${encodeURIComponent(articleId)}&versionId=${encodeURIComponent(parsed.versionId)}`, { cache: "no-store", headers: { Accept: "application/json" } });
+          const readbackBody = await readbackResponse.json().catch(() => ({}));
+          if (!readbackResponse.ok) throw new Error(`A análise foi gravada, mas o readback remoto não pôde ser confirmado (${readbackResponse.status}${typeof readbackBody.error === "string" ? `: ${readbackBody.error}` : ""}).`);
+          if (readbackBody.persistenceMode !== "remote" || readbackBody.readbackConfirmed !== true || readbackBody.brandId !== selectedBrandId || readbackBody.articleId !== articleId || typeof readbackBody.radarItemId !== "string" || (typeof body.workflowRowId === "string" ? readbackBody.radarItemId !== body.workflowRowId : readbackBody.radarItemId !== currentItem.id)) throw new Error("A análise foi gravada, mas o readback remoto não corresponde à linha Radar selecionada.");
+          const persistedAnalysis = VersionedRadarAnalysisSchema.parse(readbackBody.analysis);
+          if (persistedAnalysis.versionId !== parsed.versionId || persistedAnalysis.payload.brandId !== parsed.payload.brandId || persistedAnalysis.payload.articleId !== parsed.payload.articleId || persistedAnalysis.payload.articleDnaVersionId !== parsed.payload.articleDnaVersionId || persistedAnalysis.payload.serpSnapshotId !== parsed.payload.serpSnapshotId || persistedAnalysis.payload.serpSnapshotVersion !== parsed.payload.serpSnapshotVersion || persistedAnalysis.payload.serpSnapshotHash !== parsed.payload.serpSnapshotHash || JSON.stringify(persistedAnalysis.payload.serpDecisions) !== JSON.stringify(parsed.payload.serpDecisions) || JSON.stringify(persistedAnalysis.payload.selectedCompetitorIds) !== JSON.stringify(parsed.payload.selectedCompetitorIds)) {
+            throw new Error("A análise foi gravada, mas o readback remoto não corresponde ao snapshot selecionado.");
+          }
+          updateWorkspace(current => ({ ...current, radarItems: current.radarItems.map(item => item.articleId === articleId ? { ...item, id: readbackBody.radarItemId, analysisVersions: [...new Map([...item.analysisVersions, persistedAnalysis].map(version => [version.versionId, version])).values()].sort((left, right) => left.versionNumber - right.versionNumber), lockVersion: typeof readbackBody.lockVersion === "number" ? Math.max(item.lockVersion, readbackBody.lockVersion) : item.lockVersion } : item), persistenceMode: "server" }));
+          return { persistenceMode: "remote" as const, readbackConfirmed: true };
         }
-        if (response.status !== 503) throw new Error(body.error || "Não foi possível persistir a análise Radar.");
+        if (response.status !== 503) {
+          const details = Array.isArray(body.details)
+            ? body.details
+              .map((detail: { path?: unknown; message?: unknown }) => {
+                const path = Array.isArray(detail.path) ? detail.path.filter((part): part is string | number => typeof part === "string" || typeof part === "number").join(".") : "";
+                return [path, typeof detail.message === "string" ? detail.message : ""].filter(Boolean).join(": ");
+              })
+              .filter(Boolean)
+              .join(" ")
+            : "";
+          throw new Error([body.error || "Não foi possível persistir a análise Radar.", details].filter(Boolean).join(" "));
+        }
       } catch (error) {
         if (error instanceof Error && !/fetch|Failed|Network|503/i.test(error.message)) throw error;
       }
       if (!actorUserId || !saveLocalRadarAnalysisRecovery(actorUserId, selectedBrandId, nextWorkspace)) {
         throw new Error("A análise foi aplicada localmente, mas a recuperação do navegador não pôde ser salva.");
       }
-      updateWorkspace(current => ({ ...current, persistenceMode: "local_fallback" }));
-      return { persistenceMode: "local" as const };
+      updateWorkspace(current => ({ ...current, radarItems: current.radarItems.map(item => item.articleId === articleId ? nextItem : item), persistenceMode: "local_fallback" }));
+      return { persistenceMode: "local" as const, readbackConfirmed: false };
+      } finally {
+        const currentSync = radarAnalysisSyncRef.current.get(syncKey) || writeState;
+        radarAnalysisSyncRef.current.set(syncKey, finishRadarAnalysisWrite(currentSync));
+      }
     },
     reviewSerp: async (articleId, snapshotId, status, notes) => {
       if (!selectedBrandId) throw new Error("Selecione uma marca antes de revisar a SERP.");
       const currentRecord = workspace.serpRecords.find(record => record.id === snapshotId);
       const articleVersion = workspace.articleVersions[articleId];
-      const resolutionEnvelope = await createSerpResolutionEnvelope(articleId);
-      const response = await fetch("/api/editorial/serp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "review", brandId: selectedBrandId, articleId, snapshotId, status, notes, record: currentRecord, articleVersion, resolutionEnvelope }) });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || "Não foi possível registrar a revisão da SERP.");
-      const review = SerpReviewRecordSchema.parse(body.review);
-      updateWorkspace(current => ({ ...current, serpReviews: [...current.serpReviews.filter(item => item.snapshotId !== review.snapshotId), review], serpPersistenceMode: body.persistenceMode === "remote" ? "server" : "local_fallback" }));
+      const radarItem = workspace.radarItems.find(item => item.articleId === articleId);
+      if (!radarItem) throw new Error("Item Radar não encontrado para a revisão da SERP.");
+      const syncKey = `${selectedBrandId}:${articleId}`;
+      const writeState = beginRadarSerpReviewWrite(serpReviewSyncRef.current.get(syncKey) || EMPTY_RADAR_SERP_REVIEW_SYNC_STATE);
+      serpReviewSyncRef.current.set(syncKey, writeState);
+      try {
+        const resolutionEnvelope = await createSerpResolutionEnvelope(articleId, radarItem.articleDnaVersionId);
+        const response = await fetch("/api/editorial/serp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "review", brandId: selectedBrandId, articleId, articleDnaVersionId: radarItem.articleDnaVersionId, snapshotId, status, notes, record: currentRecord, articleVersion, resolutionEnvelope }) });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || "Não foi possível registrar a revisão da SERP.");
+        const review = SerpReviewRecordSchema.parse(body.review);
+        if (body.persistenceMode === "remote" && body.readbackConfirmed !== true) throw new Error("A revisão foi gravada, mas o readback remoto não pôde ser confirmado.");
+        if (body.persistenceMode === "remote") {
+          updateWorkspace(current => ({ ...current, serpReviews: [...current.serpReviews.filter(item => item.snapshotId !== review.snapshotId), review], serpPersistenceMode: "server", serpReviewReadbackSnapshotIds: [...new Set([...current.serpReviewReadbackSnapshotIds, review.snapshotId])] }));
+          return { persistenceMode: "remote" as const, readbackConfirmed: true, review };
+        }
+        if (!actorUserId || !saveLocalSerpRecovery(actorUserId, selectedBrandId, workspace, null, review)) throw new Error("A revisão foi aplicada localmente, mas a recuperação do navegador não pôde ser salva.");
+        updateWorkspace(current => ({ ...current, serpReviews: [...current.serpReviews.filter(item => item.snapshotId !== review.snapshotId), review], serpPersistenceMode: "local_fallback", serpReviewReadbackSnapshotIds: current.serpReviewReadbackSnapshotIds.filter(currentSnapshotId => currentSnapshotId !== review.snapshotId) }));
+        return { persistenceMode: "local" as const, readbackConfirmed: false, review };
+      } finally {
+        const currentSync = serpReviewSyncRef.current.get(syncKey) || writeState;
+        serpReviewSyncRef.current.set(syncKey, finishRadarSerpReviewWrite(currentSync));
+      }
     },
     simulateProductEvidence: async (articleId, query, location) => {
       const evidence = await mockProductEvidenceProvider.collect({ articleId, productQuery: query, marketplace: "marketplace-simulado", location: location || "Brasil" });
@@ -504,18 +658,52 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       return { imported, allIds };
     },
     setArchitectImportedKeywordIds: keywordIds => updateWorkspace(current => ({ ...current, architectImportedKeywordIds: [...new Set(keywordIds)] })),
-    importApprovedToRadar: (articleIds, sourceKeywords = [], serpAssessments = {}) => {
+    importApprovedToRadar: async (articleIds, sourceKeywords = [], serpAssessments = {}, handoffContext = {}, graphs = []) => {
       const candidates = approvedArticleVersions(workspace.articleVersions, workspace.versionEvents).filter(version => articleIds.includes(version.payload.articleId));
       const hydrationKeywords = sourceKeywords.length ? sourceKeywords : snapshots[workspaceKey]?.keywords || [];
+
+      /*
+       * Contexto que não veio pronto é RESOLVIDO aqui — não descartado.
+       *
+       * A tela Radar chamava sem contexto, o `siloIdOf` caía em
+       * `payload.siloId` (null por desenho) e os oito artigos sumiam como
+       * "ignorados". Resolver no mesmo builder do Arquiteto encerra a
+       * divergência entre as duas telas.
+       */
+      const semContexto = candidates.filter(version => !handoffContext[version.payload.articleId]);
+      const resolvido = semContexto.length
+        ? buildRadarHandoffContexts({
+          articles: semContexto,
+          siloVersions: Object.values(workspace.siloVersions),
+          siloPageVersions: Object.values(workspace.siloPageVersions),
+          graphs,
+        })
+        : { eligible: [], blocked: [] as RadarHandoffBlocked[] };
+      const contexto: Record<string, RadarArticleHandoffContext> = { ...handoffContext };
+      for (const entry of resolvido.eligible) {
+        contexto[entry.articleId] = { silo: entry.silo, internalLinks: entry.internalLinks, serpProvenance: null };
+      }
+
       const hydrationByArticleId: Record<string, RadarHydrationSnapshot> = {};
       for (const version of candidates) {
-        const hydration = createRadarHydrationSnapshot({ brandId: selectedBrandId, article: version, sourceKeywords: hydrationKeywords, silo: version.payload.siloId ? workspace.siloVersions[version.payload.siloId] : undefined, source: "arquiteto_import" });
+        const doArtigo = contexto[version.payload.articleId] || null;
+        const hydration = createRadarHydrationSnapshot({ brandId: selectedBrandId, article: version, sourceKeywords: hydrationKeywords, resolvedSilo: doArtigo?.silo ?? null, silo: version.payload.siloId ? workspace.siloVersions[version.payload.siloId] : undefined, source: "arquiteto_import" });
         if (hydration) hydrationByArticleId[version.payload.articleId] = hydration;
       }
-      const before = workspace.radarItems.length; const next = importArticlesToRadar(workspace.radarItems, candidates, selectedBrandId, undefined, hydrationKeywords, workspace.siloVersions, hydrationByArticleId, serpAssessments);
+      const before = workspace.radarItems.length; const next = importArticlesToRadar(workspace.radarItems, candidates, selectedBrandId, undefined, hydrationKeywords, workspace.siloVersions, hydrationByArticleId, serpAssessments, contexto);
+
+      /*
+       * A escrita remota decide. Só depois dela o estado local muda.
+       *
+       * O disparo solto marcava a importação como bem-sucedida no instante do
+       * clique: uma falha do servidor deixava a tela dizendo que os artigos
+       * foram enviados enquanto nenhum tinha sido.
+       */
+      await sendWorkflowCommand({ action: "import_radar", brandId: selectedBrandId, articleVersions: candidates, versionEvents: workspace.versionEvents.filter(event => candidates.some(version => version.versionId === event.versionId)), hydrationByArticleId, handoffContext: contexto }, updateWorkspace);
       updateWorkspace(current => ({ ...current, radarItems: next }));
-      void sendWorkflowCommand({ action: "import_radar", brandId: selectedBrandId, articleVersions: candidates, versionEvents: workspace.versionEvents.filter(event => candidates.some(version => version.versionId === event.versionId)), hydrationByArticleId }, updateWorkspace);
-      return { imported: next.length - before, skipped: articleIds.length - (next.length - before) };
+
+      const importados = next.length - before;
+      return { imported: importados, skipped: candidates.length - importados - resolvido.blocked.length, blocked: resolvido.blocked };
     },
     importApprovedSiloPagesToRadar: siloPageIds => {
       const candidates = approvedSiloPageVersions(workspace.siloPageVersions, workspace.versionEvents).filter(version => siloPageIds.includes(version.payload.siloPageId));
@@ -544,9 +732,9 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         const approvedSerp = workspace.serpRecords.find(record => record.input.articleId === item.articleId && record.origin === "real" && record.research && workspace.serpReviews.some(review => review.snapshotId === record.id && review.status === "approved"));
         const serpEvidenceRefs = approvedSerp?.research ? [{ artifactId: approvedSerp.id, artifactType: "serp_snapshot" as const, contentHash: approvedSerp.research.contentHash }] : [];
         const rawPackageData = approvedAnalysis?.payload.plannerPackage;
-        const packageData = rawPackageData && "packageType" in rawPackageData ? { mode: rawPackageData.analysisMode.mode, enforcement: "advisory" as const, requirements: [], recommendations: [], observedData: ["SERP: " + rawPackageData.serp.query, "Resultados incluidos: " + rawPackageData.includedOrganicResults.length, "Amostra estrutural: " + rawPackageData.observedStructure.sampleSize], keywordDecisions: [], evidencePackage: rawPackageData } : rawPackageData;
-        const radarAnalysisPackage = approvedAnalysis && packageData ? { analysisVersionId: approvedAnalysis.versionId, packageHash: approvedAnalysis.contentHash, analysisMode: packageData.mode, analysisEnforcement: packageData.enforcement, requirements: packageData.requirements, recommendations: packageData.recommendations, observedData: packageData.observedData, humanDecisions: packageData.keywordDecisions.map(decision => `${decision.keywordId}: ${decision.decision}${decision.note ? ` — ${decision.note}` : ""}`), evidencePackage: "evidencePackage" in packageData ? packageData.evidencePackage : null } : undefined;
-        const plan = existing || await createOperationalPlan(item, article, workspace.siloVersions[item.siloId], actorId, serpEvidenceRefs, radarAnalysisPackage);
+        const packageData = radarPlannerPackageToContentPlanInput(item.radarHandoff || rawPackageData || null);
+        const radarAnalysisPackage = approvedAnalysis && packageData ? { analysisVersionId: approvedAnalysis.versionId, packageHash: approvedAnalysis.contentHash, ...packageData } : undefined;
+        const plan = existing || await createOperationalPlan(item, article, item.siloId ? workspace.siloVersions[item.siloId] : undefined, actorId, serpEvidenceRefs, radarAnalysisPackage);
         prepared.push({ itemId: item.id, plan: plan as VersionEnvelope<ContentPlan> });
       }
       updateWorkspace(current => ({ ...current,
@@ -558,9 +746,9 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     savePlannerPlan: async (plannerItemId, details, actorId) => {
       if (!selectedBrandId) throw new Error("Selecione uma marca antes de salvar o plano.");
       const item = workspace.plannerItems.find(candidate => candidate.id === plannerItemId);
-      if (!item?.contentPlanVersionId) throw new Error("Prepare o ContentPlan antes de editá-lo.");
+      if (!item?.contentPlanVersionId) throw new Error("Prepare o plano editorial antes de editá-lo.");
       const current = workspace.contentPlans[item.contentPlanVersionId] || Object.values(workspace.contentPlans).find(plan => plan.entityId === `plan:${item.articleId}`);
-      if (!current) throw new Error("Versão ativa do ContentPlan não encontrada.");
+      if (!current) throw new Error("Versão ativa do plano editorial não encontrada.");
       if (current.payload.planning && !hasMaterialPlanChange(current.payload.planning, details)) return { created: false, versionId: current.versionId };
       const legacyBriefing = snapshots[workspaceKey]?.briefings.find(candidate => candidate.id === item.articleId) || null;
       const operationalPublication = workspace.operationalPublications.find(candidate => candidate.articleId === item.articleId) || null;
@@ -582,10 +770,10 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       void sendWorkflowCommand({ action: "approve_plan", brandId: selectedBrandId, plannerItemIds: approvable.map(item => item.id), expectedLocks: Object.fromEntries(approvable.map(item => [item.id, item.lockVersion])), versionEvents: events }, updateWorkspace); },
     startWriting: async plannerItemId => {
       const item = workspace.plannerItems.find(candidate => candidate.id === plannerItemId);
-      if (!item || (item.state !== "approved" && item.state !== "sent_writer")) throw new Error("Apenas ContentPlans aprovados podem seguir para o Redator.");
-      const article = workspace.articleVersions[item.articleId]; if (!article) throw new Error("ArticleDNA não encontrado.");
+      if (!item || (item.state !== "approved" && item.state !== "sent_writer")) throw new Error("Apenas planos editoriais aprovados podem seguir para o Redator.");
+      const article = workspace.articleVersions[item.articleId]; if (!article) throw new Error("Definição do artigo não encontrada.");
       const plan = Object.values(workspace.contentPlans).find(candidate => candidate.versionId === item.contentPlanVersionId);
-      if (!plan) throw new Error("ContentPlan aprovado não encontrado.");
+      if (!plan) throw new Error("Plano editorial aprovado não encontrado.");
       const document = Object.values(workspace.documents).find(candidate => candidate.articleDnaRef.entityId === article.entityId) || createOperationalDocument(plan, article, item);
       const publication = workspace.operationalPublications.find(candidate => candidate.articleId === item.articleId) || createPublicationDraft(item, plan, document, article);
       updateWorkspace(current => ({ ...current, documents: { ...current.documents, [document.id]: document },
@@ -620,7 +808,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     dismissBackgroundTask,
     addAiReviewAnnotations,
     restoreOperationalSnapshot,
-  }), [actorUserId, workspaceKey, workspace, snapshots, selectedBrandId, loading, error, reload, reloadOperational, updateWorkspace, runBackgroundTask, consumeBackgroundTask, dismissBackgroundTask, addAiReviewAnnotations, restoreOperationalSnapshot, createSerpResolutionEnvelope]);
+  }), [actorUserId, workspaceKey, workspace, snapshots, selectedBrandId, loading, error, reload, reloadOperational, reloadRadarAnalysis, reloadSerpReview, updateWorkspace, runBackgroundTask, consumeBackgroundTask, dismissBackgroundTask, addAiReviewAnnotations, restoreOperationalSnapshot, createSerpResolutionEnvelope]);
 
   return <EditorialPipelineContext.Provider value={value}>{children}</EditorialPipelineContext.Provider>;
 }

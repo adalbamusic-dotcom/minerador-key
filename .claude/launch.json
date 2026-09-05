@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "//": "Anexa ao dev server que o usuário já mantém rodando. A porta 3000 é obrigatória: NEXTAUTH_URL e APP_BASE_URL apontam para ela, então subir em outra porta quebraria os callbacks de autenticação.",
+      "name": "minerador-key",
+      "url": "http://localhost:3000"
+    },
+    {
+      "//": "Use este quando NÃO houver dev server rodando. Requer a 3000 livre.",
+      "name": "minerador-key-start",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000,
+      "autoPort": false
+    }
+  ]
+}

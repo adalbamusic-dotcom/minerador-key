@@ -1,6 +1,7 @@
 import { classifyDiscoveryRelation, candidateMatchesCpc, candidateMatchesTerms, candidateMatchesVolume, type DiscoveryCandidate } from "./discovery-keywords.ts";
 import { normalizeGoogleAdsKeyword } from "../google/ads/normalizers.ts";
 import type { DiscoverySearchDraft } from "@/modules/minerador/discovery/discovery-types";
+import { buildDiscoveryRunSourceData } from "./discovery-context.ts";
 
 export type DiscoveryFilterReason = "out_of_relation" | "out_of_volume" | "out_of_cpc" | "missing_include_term" | "excluded_term";
 export type DiscoveryFilterOutcome = "approved" | "out_of_relation" | "out_of_volume" | "out_of_cpc" | "missing_include_term" | "excluded_term" | "duplicate_consolidated" | "partial_normalization_failure";
@@ -114,7 +115,7 @@ export function buildDiscoveryRunRow(input: DiscoveryRunPersistenceInput) {
     currency_code: input.currencyCode,
     time_zone: input.timeZone,
     source: "google_ads" as const,
-    source_data: null,
+    source_data: buildDiscoveryRunSourceData(input.draft),
     status: input.status,
     received_count: input.receivedCount,
     normalized_count: input.normalizedCount,

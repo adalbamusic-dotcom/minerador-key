@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AgencyCapability, AgencyWorkspaceMember } from "@/lib/server/agency-workspace";
 import { internalButton, internalField, internalNoticeError, internalNoticeSuccess } from "@/components/editorial/internal-page-visual";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
 const button = `${internalButton} min-h-11 px-4`;
 const input = `${internalField} min-h-11`;
@@ -18,6 +19,7 @@ export function AgencyDataForm({ agencyRef, name, canManage }: { agencyRef: stri
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  useNoticeBridge({ notice: error || message, module: "conta", area: "Agência", title: "Conta · Agência", fallbackSeverity: error ? "ERROR" : "INFO" });
 
   async function save() {
     setSaving(true); setMessage(""); setError("");
@@ -46,6 +48,7 @@ export function AgencyMemberControls({ agencyRef, members, capabilities, canMana
   const [error, setError] = useState("");
   const [candidates, setCandidates] = useState<Array<{ name: string | null; email: string }>>([]);
   const [saving, setSaving] = useState(false);
+  useNoticeBridge({ notice: error || message, module: "conta", area: "Membros da Agência", title: "Conta · Membros", fallbackSeverity: error ? "ERROR" : "INFO" });
 
      if (!canManage) return <p className="text-sm leading-6 text-text-muted">Você pode consultar os membros, mas apenas o owner ou um administrador da Agência pode gerenciar vínculos e capacidades.</p>;
 

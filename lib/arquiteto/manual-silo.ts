@@ -4,16 +4,30 @@ const slugPattern = /^\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function normalizeManualSiloPageSlug(value: string): string {
   const input = value.trim();
-  if (/^https?:\/\//i.test(input) || /\s/.test(input)) throw new Error("Informe somente o slug, sem URL completa ou espaços.");
-  if (!input.startsWith("/")) throw new Error("O slug da Página do Silo deve começar com '/'.");
-  const normalized = `/${input.slice(1).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()}`;
-  if (!slugPattern.test(normalized)) throw new Error("O slug deve usar apenas letras minúsculas, números e hífens.");
-  return normalized.slice(1);
+  if (!input) throw new Error("O slug do silo é obrigatório.");
+  if (/^https?:\/\//i.test(input)) throw new Error("Informe somente o slug, sem URL completa.");
+
+  const body = input
+    .replace(/^\/+/, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const normalized = `/${body}`;
+  if (!body || !slugPattern.test(normalized)) throw new Error("Não foi possível gerar um slug válido a partir deste valor.");
+  return normalized;
+}
+
+export function autoManualSiloPageSlug(name: string): string {
+  const input = name.trim();
+  if (!input) return "";
+  try { return normalizeManualSiloPageSlug(input); } catch { return ""; }
 }
 
 export function assertManualSiloPageSlugAvailable(slug: string, knownSlugs: string[]): void {
-  const normalized = slug.replace(/^\//, "").toLowerCase();
-  if (knownSlugs.some(candidate => candidate.replace(/^\//, "").toLowerCase() === normalized)) {
+  const normalized = slug.replace(/^\/+|\/+$/g, "").toLowerCase();
+  if (knownSlugs.some(candidate => candidate.replace(/^\/+|\/+$/g, "").toLowerCase() === normalized)) {
     throw new Error("Este slug já está registrado para a marca ativa.");
   }
 }

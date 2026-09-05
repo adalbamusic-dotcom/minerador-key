@@ -8,12 +8,56 @@ import { SavedGridViewSchema } from "../editorial/data-grid";
 import { getOperationalClient, mapPersistenceError, OptimisticLockError } from "./editorial-db";
 import { contentHash } from "../arquiteto/versioning";
 import type { SerpCollectionRecord, SerpReviewRecord } from "../editorial/contracts";
-import { SerpCollectionRecordSchema, SerpReviewRecordSchema } from "../editorial/contracts";
 import { PersistenceUnavailableError } from "./editorial-db";
 import type { RadarAnalysisVersion } from "../radar/analysis-contracts";
+import {
+  buildSerpReviewPersistenceRow,
+  buildSerpSnapshotPersistenceRow,
+  canonicalUuidOrNull,
+  markStoredSerpSnapshotAsRemote,
+  parseStoredSerpReviewPayload,
+  parseStoredSerpSnapshotPayload,
+  type SerpReviewPersistenceRow,
+  type SerpSnapshotPersistenceRow,
+} from "./serp-persistence-adapter";
 
 const client = () => getOperationalClient();
 const unwrap = <T>(data: T | null, error: unknown) => { if (error) mapPersistenceError(error); return data; };
+const isoDate = (value: string) => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+};
+
+type RemoteArtifactRow = {
+  artifact_type: string;
+  payload: unknown;
+  version_id: string;
+  entity_id: string;
+  version_number: number;
+  previous_version_id: string | null;
+  content_hash: string;
+  origin: string;
+  change_reason: string;
+  created_by: string;
+  created_at: string;
+};
+
+function versionPayload<T>(row: RemoteArtifactRow, schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false } }) {
+  const storedEnvelope = schema.safeParse(row.payload);
+  if (storedEnvelope.success) return storedEnvelope.data;
+  return {
+    versionId: row.version_id,
+    entityId: row.entity_id,
+    versionNumber: row.version_number,
+    previousVersionId: row.previous_version_id,
+    contentHash: row.content_hash,
+    origin: row.origin,
+    changeReason: row.change_reason,
+    createdAt: isoDate(row.created_at),
+    createdBy: row.created_by,
+    payload: row.payload,
+  } as T;
+}
 
 export class ArtifactRepository {
   async save<T>(marcaId: string, type: "article_dna" | "silo_dna" | "content_plan", version: VersionEnvelope<T>, status: VersionStatusEvent["status"], actorId: string) {
@@ -33,19 +77,19 @@ export class ArtifactRepository {
   }
 
   async list(marcaId: string) {
-    const { data, error } = await client().from("editorial_artifact_versions").select("artifact_type,payload").eq("marca_id", marcaId);
+    const { data, error } = await client().from("editorial_artifact_versions").select("artifact_type,payload,version_id,entity_id,version_number,previous_version_id,content_hash,origin,change_reason,created_by,created_at").eq("marca_id", marcaId);
     unwrap(data, error);
     const articles: VersionEnvelope<ArticleDNA>[] = []; const silos: VersionEnvelope<SiloDNA>[] = []; const plans: VersionEnvelope<ContentPlan>[] = [];
-    for (const row of data || []) {
-      if (row.artifact_type === "article_dna") articles.push(VersionedArticleDNASchema.parse(row.payload));
-      if (row.artifact_type === "silo_dna") silos.push(VersionedSiloDNASchema.parse(row.payload));
-      if (row.artifact_type === "content_plan") plans.push(VersionedContentPlanSchema.parse(row.payload));
+    for (const row of (data || []) as RemoteArtifactRow[]) {
+      if (row.artifact_type === "article_dna") articles.push(VersionedArticleDNASchema.parse(versionPayload(row, VersionedArticleDNASchema)));
+      if (row.artifact_type === "silo_dna") silos.push(VersionedSiloDNASchema.parse(versionPayload(row, VersionedSiloDNASchema)));
+      if (row.artifact_type === "content_plan") plans.push(VersionedContentPlanSchema.parse(versionPayload(row, VersionedContentPlanSchema)));
     }
     const versionIds = [...articles, ...silos, ...plans].map(version => version.versionId);
     if (!versionIds.length) return { articles, silos, plans, events: [] as VersionStatusEvent[] };
     const { data: eventRows, error: eventError } = await client().from("editorial_version_status_events").select("id,version_id,status,reason,actor_id,occurred_at").in("version_id", versionIds).order("occurred_at");
     unwrap(eventRows, eventError);
-    const events = (eventRows || []).map(row => VersionStatusEventSchema.parse({ eventId: row.id, versionId: row.version_id, status: row.status, reason: row.reason, actorId: row.actor_id, occurredAt: row.occurred_at }));
+    const events = (eventRows || []).map(row => VersionStatusEventSchema.parse({ eventId: row.id, versionId: row.version_id, status: row.status, reason: row.reason, actorId: row.actor_id, occurredAt: isoDate(row.occurred_at) }));
     return { articles, silos, plans, events };
   }
 }
@@ -56,8 +100,8 @@ export class WorkflowRepository {
     const { data, error } = await client().from("editorial_workflow_items").select("id,marca_id,article_id,stage,state,payload,lock_version,created_at,updated_at").eq("marca_id", marcaId).in("stage", ["radar", "planner"]);
     unwrap(data, error); const radar: RadarItem[] = []; const planner: PlannerItem[] = [];
     for (const row of data || []) {
-      if (row.stage === "radar") radar.push(RadarItemSchema.parse({ ...(row.payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: row.created_at, updatedAt: row.updated_at, origin: "real" }));
-      if (row.stage === "planner") planner.push(PlannerItemSchema.parse({ ...(row.payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: row.created_at, updatedAt: row.updated_at, origin: "real" }));
+      if (row.stage === "radar") radar.push(RadarItemSchema.parse({ ...(row.payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: isoDate(row.created_at), updatedAt: isoDate(row.updated_at), origin: "real" }));
+      if (row.stage === "planner") planner.push(PlannerItemSchema.parse({ ...(row.payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: isoDate(row.created_at), updatedAt: isoDate(row.updated_at), origin: "real" }));
     }
     return { radar, planner };
   }
@@ -91,7 +135,7 @@ export class WorkflowRepository {
     const current = await this.findByArticle(marcaId, articleId, "radar");
     if (!current) return null;
     if (current.marca_id !== marcaId || current.article_id !== articleId) return null;
-    const radar = RadarItemSchema.parse({ ...(current.payload as object), id: current.id, brandId: current.marca_id, articleId: current.article_id, state: current.state, lockVersion: current.lock_version, importedAt: current.created_at, updatedAt: current.updated_at, origin: "real" });
+    const radar = RadarItemSchema.parse({ ...(current.payload as object), id: current.id, brandId: current.marca_id, articleId: current.article_id, state: current.state, lockVersion: current.lock_version, importedAt: isoDate(current.created_at), updatedAt: isoDate(current.updated_at), origin: "real" });
     if (analysis.payload.brandId !== marcaId || analysis.payload.articleId !== articleId) throw new Error("A análise Radar não corresponde ao artigo ou à marca.");
     const alreadySaved = radar.analysisVersions.some(version => version.versionId === analysis.versionId);
     if (alreadySaved) return current;
@@ -103,14 +147,43 @@ export class WorkflowRepository {
   }
 }
 
+function snapshotPayloadHasId(payload: unknown, candidateId: string) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const object = payload as { id?: unknown; research?: { id?: unknown } | null };
+  return object.id === candidateId || object.research?.id === candidateId;
+}
+
 export class SerpSnapshotRepository {
+  private async findRemoteSnapshot(marcaId: string, articleId: string, candidateId: string) {
+    const { data, error } = await client().from("editorial_serp_snapshots")
+      .select("id,source_version_id,payload")
+      .eq("marca_id", marcaId)
+      .eq("article_id", articleId);
+    unwrap(data, error);
+    const rows = (data || []) as Array<Pick<SerpSnapshotPersistenceRow, "id" | "source_version_id" | "payload">>;
+    return rows.find(row => row.id === candidateId || snapshotPayloadHasId(row.payload, candidateId)) || null;
+  }
+
+  private async resolvePreviousSnapshotId(marcaId: string, articleId: string, candidateId: string | null | undefined) {
+    const canonical = canonicalUuidOrNull(candidateId);
+    if (canonical) return canonical;
+    if (!candidateId) return null;
+    const row = await this.findRemoteSnapshot(marcaId, articleId, candidateId);
+    return canonicalUuidOrNull(row?.id);
+  }
+
   async list(marcaId: string, articleId?: string) {
     try {
-      let query = client().from("editorial_serp_snapshots").select("id,marca_id,article_id,snapshot_version,payload,created_at").eq("marca_id", marcaId).order("snapshot_version", { ascending: true });
+      let query = client().from("editorial_serp_snapshots").select("id,marca_id,article_id,source_version_id,snapshot_version,previous_snapshot_id,content_hash,status,payload,created_by,created_at").eq("marca_id", marcaId).order("snapshot_version", { ascending: true });
       if (articleId) query = query.eq("article_id", articleId);
       const { data, error } = await query;
       unwrap(data, error);
-      const records = (data || []).map(row => SerpCollectionRecordSchema.parse(row.payload));
+      const records = (data || []).map(row => {
+        const typedRow = row as unknown as Pick<SerpSnapshotPersistenceRow, "source_version_id" | "payload">;
+        const record = markStoredSerpSnapshotAsRemote(parseStoredSerpSnapshotPayload(typedRow.payload, typedRow.source_version_id));
+        if (record.research && record.research.brandId !== marcaId) throw new Error("O snapshot SERP remoto não pertence à marca solicitada.");
+        return record;
+      });
       return { records, available: true };
     } catch (error) {
       if (error instanceof PersistenceUnavailableError) return { records: [] as SerpCollectionRecord[], available: false };
@@ -120,8 +193,9 @@ export class SerpSnapshotRepository {
 
   async save(marcaId: string, record: SerpCollectionRecord, actorId: string) {
     try {
-      const { error } = await client().from("editorial_serp_snapshots").insert({ id: record.id, marca_id: marcaId, article_id: record.input.articleId, snapshot_version: record.research?.version || 1,
-        previous_snapshot_id: record.research?.previousSnapshotId || null, content_hash: record.research?.contentHash || "", status: record.status, payload: record, created_by: actorId, created_at: record.research?.collectedAt || new Date().toISOString() });
+      const previousSnapshotId = await this.resolvePreviousSnapshotId(marcaId, record.input.articleId, record.research?.previousSnapshotId);
+      const { row } = buildSerpSnapshotPersistenceRow({ brandId: marcaId, record, actorId, previousSnapshotId });
+      const { error } = await client().from("editorial_serp_snapshots").insert(row);
       if (error) mapPersistenceError(error);
       return true;
     } catch (error) {
@@ -132,9 +206,18 @@ export class SerpSnapshotRepository {
 
   async saveReview(marcaId: string, review: SerpReviewRecord) {
     try {
-      const { error } = await client().from("editorial_serp_reviews").insert({ id: review.id, marca_id: marcaId, article_id: review.articleId, snapshot_id: review.snapshotId,
-        status: review.status, reviewed_by: review.reviewedBy, created_at: review.reviewedAt, payload: review });
+      const snapshot = await this.findRemoteSnapshot(marcaId, review.articleId, review.snapshotId);
+      const snapshotId = canonicalUuidOrNull(snapshot?.id);
+      if (!snapshotId) return false;
+      const snapshotRecord = snapshot ? parseStoredSerpSnapshotPayload(snapshot.payload, snapshot.source_version_id) : null;
+      const sourceVersionId = snapshot?.source_version_id || snapshotRecord?.research?.articleDnaVersionId || null;
+      const row = buildSerpReviewPersistenceRow({ brandId: marcaId, review, snapshotId, sourceVersionId });
+      const { data, error } = await client().from("editorial_serp_reviews").insert(row).select("id").maybeSingle();
       if (error) mapPersistenceError(error);
+      if (!data) throw new Error("A revisão SERP foi enviada, mas o registro não retornou para confirmação.");
+      const readback = await this.listReviews(marcaId, review.articleId);
+      const confirmed = readback.available && readback.reviews.some(item => item.id === review.id || (item.snapshotId === review.snapshotId && item.status === review.status && item.reviewedBy === review.reviewedBy));
+      if (!confirmed) throw new Error("A revisão SERP foi gravada, mas o readback não corresponde ao snapshot revisado.");
       return true;
     } catch (error) {
       if (error instanceof PersistenceUnavailableError) return false;
@@ -144,11 +227,12 @@ export class SerpSnapshotRepository {
 
   async listReviews(marcaId: string, articleId?: string) {
     try {
-      let query = client().from("editorial_serp_reviews").select("payload").eq("marca_id", marcaId).order("created_at", { ascending: true });
+      let query = client().from("editorial_serp_reviews").select("id,marca_id,article_id,snapshot_id,source_version_id,status,reviewed_by,payload,created_at").eq("marca_id", marcaId).order("created_at", { ascending: true });
       if (articleId) query = query.eq("article_id", articleId);
       const { data, error } = await query;
       unwrap(data, error);
-      return { reviews: (data || []).map(row => SerpReviewRecordSchema.parse(row.payload)), available: true };
+      const reviews = (data || []).map(row => parseStoredSerpReviewPayload(row.payload, row as unknown as SerpReviewPersistenceRow));
+      return { reviews, available: true };
     } catch (error) {
       if (error instanceof PersistenceUnavailableError) return { reviews: [] as SerpReviewRecord[], available: false };
       throw error;

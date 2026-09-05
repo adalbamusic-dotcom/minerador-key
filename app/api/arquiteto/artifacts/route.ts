@@ -9,13 +9,14 @@ import {
   type SiloPage,
   type VersionEnvelope,
 } from "@/lib/arquiteto/contracts";
+import { ARTICLE_AI_REVIEW_ARTIFACT_TYPE, VersionedArticleArchitectureAiReviewSchema, type ArticleArchitectureAiReview } from "@/lib/arquiteto/article-ai-review";
 import { appendArquitetoArtifact, listArquitetoArtifacts, pipelineArtifactErrorResponse, type ArquitetoArtifactType } from "@/lib/server/arquiteto-persistence";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 
 const BrandQuerySchema = z.object({ brandId: z.string().min(1) });
 const RequestSchema = z.object({
   brandId: z.string().min(1),
-  artifactType: z.enum(["article_dna", "silo_dna", "silo_page"]),
+  artifactType: z.enum(["article_dna", "silo_dna", "silo_page", ARTICLE_AI_REVIEW_ARTIFACT_TYPE]),
   action: z.enum(["create", "edit"]),
   status: z.string().trim().min(1).max(80).optional(),
   version: z.unknown(),
@@ -24,6 +25,9 @@ const RequestSchema = z.object({
 function parseVersion(type: ArquitetoArtifactType, value: unknown) {
   if (type === "article_dna") return VersionedArticleDNASchema.parse(value) as VersionEnvelope<ArticleDNA>;
   if (type === "silo_dna") return VersionedSiloDNASchema.parse(value) as VersionEnvelope<SiloDNA>;
+  if (type === ARTICLE_AI_REVIEW_ARTIFACT_TYPE) {
+    return VersionedArticleArchitectureAiReviewSchema.parse(value) as VersionEnvelope<ArticleArchitectureAiReview>;
+  }
   return VersionedSiloPageSchema.parse(value) as VersionEnvelope<SiloPage>;
 }
 

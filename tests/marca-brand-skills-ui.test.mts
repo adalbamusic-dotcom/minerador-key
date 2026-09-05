@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import fs from "node:fs";
+const panel = fs.readFileSync(new URL("../modules/marca/brand-skills-panel.tsx", import.meta.url), "utf8");
+const editor = fs.readFileSync(new URL("../modules/marca/brand-skill-editor.tsx", import.meta.url), "utf8");
+const route = fs.readFileSync(new URL("../app/api/marca/skills/route.ts", import.meta.url), "utf8");
+test("panel reads and saves through the server API", () => { assert.match(panel, /fetch\(`\/api\/marca\/skills/); assert.match(panel, /action: "save"/); assert.match(panel, /payload:/); assert.doesNotMatch(panel, /localStorage|cópia local/); });
+test("editor accepts valid Markdown with notices", () => { assert.match(editor, /VALID_WITH_NOTICES/); assert.match(editor, /sectionDiagnostics/); assert.match(editor, /readback do servidor/); });
+test("editor does not retain required-section blockers", () => { assert.doesNotMatch(editor, /requiredSections|recommendedSections|optionalSections/); assert.match(editor, /validation\.status !== "INVALID"/); });
+test("route shares the BrandSkill action schema", () => { assert.match(route, /BrandSkillActionRequestSchema/); assert.match(route, /input\.payload/); });

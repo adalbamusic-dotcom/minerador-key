@@ -5,12 +5,13 @@ import test from "node:test";
 import {
   createNoticeRecord,
   formatNoticeDiagnostic,
-  NOTICE_RETENTION_MS,
+  NOTICE_PREVIEW_DURATION_MS,
   NOTICE_SEVERITIES,
   noticeToneToken,
   sanitizeCopyPayload,
   validateNoticeInput,
 } from "../lib/visual-notice-contract.ts";
+import { resolveNoticeScope } from "../lib/visual-notice-scope.ts";
 
 const root = new URL("../", import.meta.url);
 const read = (file: string) => readFile(new URL(file, root), "utf8");
@@ -25,14 +26,13 @@ test("tokens visuais oficiais e temas permanecem centralizados", async () => {
   assert.match(css, /data-theme="light"/);
 });
 
-test("severidades globais mapeiam para tokens semânticos e TTL compartilhado", () => {
+test("severidades globais mapeiam para tokens semânticos e histórico de sessão", () => {
   assert.deepEqual(NOTICE_SEVERITIES, ["SUCCESS", "INFO", "PENDING", "WARNING", "ERROR"]);
   assert.equal(noticeToneToken("SUCCESS"), "success");
   assert.equal(noticeToneToken("INFO"), "context-accent");
   assert.equal(noticeToneToken("PENDING"), "pending");
   assert.equal(noticeToneToken("WARNING"), "warning");
   assert.equal(noticeToneToken("ERROR"), "danger");
-  assert.equal(NOTICE_RETENTION_MS, 120_000);
   const fixture = NOTICE_SEVERITIES.map((severity, index) => createNoticeRecord({
     severity,
     title: `Fixture ${severity}`,
@@ -41,6 +41,32 @@ test("severidades globais mapeiam para tokens semânticos e TTL compartilhado", 
     confirmed: severity === "SUCCESS",
   }, 100 + index, `fixture-${severity}`));
   assert.deepEqual(fixture.map((notice) => notice.severity), [...NOTICE_SEVERITIES]);
+  assert.equal(fixture[0].readState, "unread");
+  assert.equal(fixture[0].readAt, null);
+  assert.equal(NOTICE_PREVIEW_DURATION_MS, 5_000);
+});
+
+test("escopo de notice usa somente o tenant canônico e separa áreas", () => {
+  const brandId = "09762023-d0d4-4c24-b34e-d0fdfd43f891";
+  const otherBrandId = "19762023-d0d4-4c24-b34e-d0fdfd43f891";
+  const agencyId = "29762023-d0d4-4c24-b34e-d0fdfd43f891";
+  const minerador = resolveNoticeScope(`/care-glow--${brandId}/minerador`);
+  const radar = resolveNoticeScope(`/care-glow--${brandId}/radar`);
+  const radarDetail = resolveNoticeScope(`/care-glow--${brandId}/radar/article-123`);
+  const otherBrand = resolveNoticeScope(`/outra-marca--${otherBrandId}/minerador`);
+  const agency = resolveNoticeScope(`/agencias/adalbapro--${agencyId}/integracoes`);
+  const admin = resolveNoticeScope("/admin");
+
+  assert.equal(minerador?.key, `brand:${brandId}:minerador`);
+  assert.equal(minerador?.brandId, brandId);
+  assert.equal(radar?.key, `brand:${brandId}:radar`);
+  assert.equal(radarDetail?.key, `brand:${brandId}:radar`);
+  assert.notEqual(minerador?.key, radar?.key);
+  assert.equal(otherBrand?.key, `brand:${otherBrandId}:minerador`);
+  assert.notEqual(minerador?.key, otherBrand?.key);
+  assert.equal(agency?.key, `agency:${agencyId}:agencia`);
+  assert.equal(admin?.key, "global:admin");
+  assert.equal(resolveNoticeScope("/rota-desconhecida"), null);
 });
 
 test("SUCCESS de persistência exige confirmação real", () => {
@@ -85,13 +111,36 @@ test("topbar, provider e piloto Minerador compartilham a infraestrutura", async 
   assert.match(topbar, /data-topbar-mode/);
   assert.match(topbar, /data-topbar-center-slot/);
   assert.match(provider, /setNotices/);
-  assert.match(provider, /setToast\(record\)/);
-  assert.match(provider, /NOTICE_RETENTION_MS/);
+  assert.match(provider, /setToast\(input\.showToast && scope \? record : null\)/);
+  assert.doesNotMatch(provider, /NOTICE_RETENTION_MS|setInterval/);
+  assert.match(provider, /createPortal/);
+  assert.match(provider, /className="fixed z-50/);
+  assert.match(provider, /updatePanelPosition/);
+  assert.match(provider, /visibleNotices/);
+  assert.match(provider, /autoOpenNotice/);
+  assert.match(provider, /onPointerEnter={markPanelInteracting}/);
   assert.match(shell, /<GlobalTopbar \/>/);
   assert.doesNotMatch(shell, /Notifica.*ainda n.o dispon.vel/);
   assert.match(minerador, /useNoticeCenter/);
   assert.match(minerador, /useGlobalTopbarControlsRegistration/);
   assert.doesNotMatch(minerador, /notificationTimerRef|setNotification\(/);
+});
+
+test("Notification Center preserva histórico e oferece fechamento acessível", async () => {
+  const provider = await read("components/global-notice-center.tsx");
+  assert.match(provider, /markNoticeRead/);
+  assert.match(provider, /markAllNoticesRead/);
+  assert.match(provider, /const dismissNotice = markNoticeRead/);
+  assert.match(provider, /pointerdown/);
+  assert.match(provider, /event\.key !== "Escape"/);
+  assert.match(provider, /aria-controls=\{panelId\}/);
+  assert.match(provider, /const panelId = "global-notification-center"/);
+  assert.match(provider, /formatNoticeTime\(notice.createdAt\)/);
+  assert.match(provider, /Histórico operacional desta sessão · disponível até recarregar ou sair\./);
+  assert.match(provider, /Marcar todos como lidos/);
+  assert.match(provider, /Marcar como lido/);
+  assert.match(provider, /consumeAutoOpenNotice/);
+  assert.match(provider, /NOTICE_PREVIEW_DURATION_MS/);
 });
 
 test("R1 mantém alinhamento, ordem, busca responsiva e perfil compacto", async () => {
@@ -108,6 +157,13 @@ test("R1 mantém alinhamento, ordem, busca responsiva e perfil compacto", async 
   assert.doesNotMatch(topbar, /max-w-28/);
   assert.match(shell, /h-10 min-h-10 items-center justify-between border-b border-divider/);
   assert.match(shell, /border-r border-divider/);
+});
+
+test("R1.1 mantém o popover do perfil fora do clipping do slot direito", async () => {
+  const topbar = await read("components/global-topbar.tsx");
+  assert.match(topbar, /items-center justify-end gap-1 overflow-visible/);
+  assert.doesNotMatch(topbar, /items-center justify-end gap-1 overflow-hidden/);
+  assert.match(topbar, /absolute right-0 top-full z-50/);
 });
 
 test("R2 mantém cards flutuantes neutros e severidade apenas semântica", async () => {
@@ -222,7 +278,8 @@ test("R2.3B mantém as duas abas do Minerador no mesmo slot global", async () =>
 
   assert.match(topbar, /tabs\?: ReactNode/);
   assert.match(topbar, /data-topbar-module-tabs/);
-  assert.match(topbar, /scrollbar-gutter/);
+  // A topbar não reserva mais gutter: a barra vertical fica colada na borda da tela.
+  assert.doesNotMatch(topbar, /scrollbar-gutter/);
   assert.ok(topbar.indexOf("data-topbar-module-tabs") < topbar.indexOf("<NotificationBell />"));
   assert.match(tabs, /data-minerador-section-tabs/);
   assert.match(tabs, /grid h-8 w-40 shrink-0 grid-cols-2/);
@@ -232,7 +289,10 @@ test("R2.3B mantém as duas abas do Minerador no mesmo slot global", async () =>
   assert.match(tabs, /hover:border-module-accent\/30/);
   assert.doesNotMatch(tabs, /(?:purple|violet|indigo)/i);
   const css = await read("app/globals.css");
-  assert.match(css, /html \{[\s\S]*scrollbar-gutter: stable;/);
+  // Nenhuma faixa reservada: a barra vertical encosta na borda direita da tela.
+  // Proíbe a declaração ativa, não a menção — o comentário que explica a regra pode citá-la.
+  assert.doesNotMatch(css, /^\s*scrollbar-gutter\s*:/m);
+  assert.match(css, /html \{[\s\S]*scrollbar-width: thin;/);
   assert.match(discovery, /useGlobalTopbarControlsRegistration/);
   assert.match(discovery, /tabs: <MineradorSectionTabs brandRef=\{brandRef\} \/>/);
   assert.doesNotMatch(discovery, /ModuleHeader/);
@@ -282,10 +342,11 @@ test("R2.3 conecta o Arquiteto à busca e ao histórico globais sem duplicar est
 });
 
 test("R2.4 absorve a operação completa do Arquiteto na GlobalTopbar", async () => {
-  const [topbar, arquiteto, controls] = await Promise.all([
+  const [topbar, arquiteto, controls, workbench] = await Promise.all([
     read("components/global-topbar.tsx"),
     read("modules/arquiteto/arquiteto-workspace.tsx"),
     read("components/global-topbar-control.ts"),
+    read("modules/arquiteto/arquiteto-workbench.tsx"),
   ]);
 
   assert.match(controls, /GLOBAL_TOPBAR_ACTION_CONTROL/);
@@ -299,12 +360,16 @@ test("R2.4 absorve a operação completa do Arquiteto na GlobalTopbar", async ()
   assert.match(arquiteto, /value=\{filterStatus\}/);
   assert.match(arquiteto, /setFilterStatus\(event\.target\.value\)/);
   assert.match(arquiteto, /topbarHandlersRef\.current\.processDeterministicStructure/);
+  assert.match(arquiteto, /tabs: <nav[^>]+role="tablist"[^>]+data-arquiteto-topbar-tabs/);
+  assert.match(workbench, /architect-process-/);
+  assert.doesNotMatch(arquiteto, /contextExpanded|setContextExpanded|architect-context-toggle/);
+  assert.match(arquiteto, /architect-process-context-panel/);
   assert.match(arquiteto, /setKeywordImportOpen\(true\); void topbarHandlersRef\.current\.fetchMasterList\(\)/);
-  assert.match(arquiteto, /onClick=\{\(\) => setIsListModalOpen\(true\)\}/);
+  assert.match(arquiteto, /onClick=\{\(\) => \{ setNewListName\(""\); setNewSiloSlug\(""\); setSlugManuallyEdited\(false\); setIsListModalOpen\(true\); \}\}/);
   assert.match(arquiteto, /Exportação iniciada/);
   assert.match(arquiteto, /gap-1 overflow-x-auto xl:overflow-visible/);
   assert.doesNotMatch(arquiteto, /data-arquiteto-topbar-actions[^>]*overflow-x-scroll/);
-  assert.match(arquiteto, /title="Processar lógica sem IA"/);
+  assert.match(arquiteto, /title: workspaceMode === "silos" \? "Formar a working copy provisória dos Silos" : "Processar lógica sem IA"/);
   assert.match(arquiteto, /title="Selecionar keywords aprovadas no Minerador"/);
   assert.match(arquiteto, /title="Criar novo Silo"/);
   assert.match(arquiteto, /title="Exportar planilha"/);

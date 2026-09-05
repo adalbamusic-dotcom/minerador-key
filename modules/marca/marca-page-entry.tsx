@@ -9,14 +9,16 @@ import { SiteSitemapPanel } from "./site-sitemap-panel";
 import { BrandPage } from "./brand-page";
 import { normalizeSiteUrl } from "@/lib/marca/site-domain";
 import { buildTenantPath } from "@/lib/tenant-routing";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
-const tabs = [["visao", "Visão geral"], ["site", "Site e Sitemap"], ["dna", "BrandDNA"], ["materiais", "Materiais"], ["skills", "Skills e prompts"], ["equipe", "Equipe"], ["configuracoes", "Configurações"]] as const;
+const tabs = [["visao", "Visão geral"], ["site", "Site e Sitemap"], ["dna", "Identidade da marca"], ["materiais", "Materiais"], ["skills", "Skills e prompts"], ["equipe", "Equipe"], ["configuracoes", "Configurações"]] as const;
 
 export function MarcaPageEntry({ initialSection = "visao", initialPanel }: { initialSection?: string; initialPanel?: string }) {
   const { activeBrand, refreshBrands } = useBrand();
   const marcaPath = activeBrand ? buildTenantPath({ brandId: activeBrand.id, brandName: activeBrand.nome, module: "marca" }) : "/selecionar-marca";
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  useNoticeBridge({ notice: message, module: "marca", area: "Marca", title: "Marca", fallbackSeverity: "INFO" });
 
   const saveSiteUrl = async (siteUrl: string) => {
     if (!activeBrand) throw new Error("Nenhuma marca ativa.");

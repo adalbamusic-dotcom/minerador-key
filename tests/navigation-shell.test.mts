@@ -83,12 +83,13 @@ test("shell global reflowa no desktop e restaura somente contexto revalidado", a
 });
 
 test("seletor global usa somente o escopo operacional e nao vaza catalogo do Admin", async () => {
-  const [brandContext, marcasRoute, shell, personalRoute, personalPage, selectorPage, login, globalContext] = await Promise.all([
+  const [brandContext, marcasRoute, shell, personalRoute, personalPage, profileEditor, selectorPage, login, globalContext] = await Promise.all([
     read("components/brand-context.tsx"),
     read("app/api/marcas/route.ts"),
     read("components/product-shell.tsx"),
     read("app/(personal)/conta/page.tsx"),
     read("modules/conta/personal-account-page.tsx"),
+    read("modules/conta/profile-identity-editor.tsx"),
     read("app/selecionar-marca/page.tsx"),
     read("app/login/page.tsx"),
     read("lib/navigation/global-context.ts"),
@@ -114,7 +115,7 @@ test("seletor global usa somente o escopo operacional e nao vaza catalogo do Adm
   assert.match(personalRoute, /isPlatformAdmin=\{account\.isPlatformAdmin\}/);
   assert.match(personalPage, /identity\.image/);
   assert.match(personalPage, /recuperar-senha\?callbackUrl=%2Fconta/);
-  assert.match(personalPage, /Admin global/);
+  assert.match(profileEditor, /Admin global/);
   assert.match(selectorPage, /destination = "\/conta"/);
   assert.match(selectorPage, /redirect\(destination\)/);
   assert.doesNotMatch(selectorPage, /Escolha onde deseja trabalhar|SelectBrandClient/);

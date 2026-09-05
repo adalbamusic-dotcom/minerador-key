@@ -1,5 +1,76 @@
 # Estado atual — Admin
 
+## Consolidação canônica das integrações — 2026-08-25
+
+- **Fundação compartilhada:** `PLATFORM_INTEGRATION_FOUNDATION = READY`.
+  Admin Global governa Connections, capabilities, grants, bindings, quotas e
+  uso; Agências recebem disponibilidade e Marcas consomem por `brandId`.
+  Nenhum módulo possui provider, credential, Connection ou quota próprios.
+- **Status confirmado no Admin:** DataForSEO `Connection READY`; DeepSeek
+  `Connection READY` com `deepseek-v4-pro` disponível; Google Cloud Speech e
+  Storage `READY`; YouTube Data API `READY`.
+- **Google Ads:** credential configurada no painel. Isso não substitui
+  connection/provider smoke nem operation smoke.
+- **Telegram global:** Bot Token e Webhook Secret configurados, `getMe = PASS`
+  para `Assistente Conteúdo do EEAT`; `TELEGRAM_WEBHOOK = NOT_CONFIGURED` e
+  inbound E2E permanece pendente. `TELEGRAM_BOT_READY` não implica
+  `TELEGRAM_WEBHOOK_READY`.
+- **Radar:** `READY_FOR_RADAR_DEVELOPMENT = YES`; o desenvolvimento usa
+  contratos compartilhados e não cria provider, quota ou Connection do módulo.
+
+Entradas posteriores substituem snapshots administrativos anteriores. Os
+blocos históricos abaixo permanecem para proveniência e não reabrem provider,
+Connection, segredo ou operação remota.
+
+## Fundação Telegram + especialistas externos — 2026-08-25
+
+- **Preparado localmente:** SDD `docs/compartilhado/sdd-telegram-expert-contribution-platform.md`, migration sucessora `supabase/migrations/20260825150000_telegram_expert_contribution_platform_foundation.sql`, adapter Bot API, webhook, fila durável e Local Worker.
+- **Verificado no código:** Telegram é um provider global da Plataforma, com uma Connection/Secret Store compartilhados, capabilities `telegram.message_send` e `telegram.file_fetch`, `getMe`/`getWebhookInfo` explícitos e ação separada de `setWebhook`.
+- **Verificado no código:** salvar exige somente o Bot Token; o Webhook Secret é gerado ou preservado server-side, nunca retorna ao navegador, e o salvamento não chama o Telegram. `Testar Bot` executa `getMe` sem URL; `Configurar Webhook` exige URL pública HTTPS e executa `setWebhook` somente por ação explícita.
+- **Verificado no código:** o Admin não exibe token; a Marca administra `brand_experts` e gera token opaco de onboarding. Não há Connection, grant ou quota por módulo ou por especialista.
+- **Evidência manual:** Bot Token e Webhook Secret configurados e `getMe = PASS`. Permanecem pendentes a aplicação manual da migration, configuração do webhook público e o inbound E2E. Nenhuma migration, escrita remota ou configuração adicional de secret foi executada nesta rodada.
+
+## Google Cloud Media APIs compartilhadas — 2026-08-25
+
+- **Preparado localmente:** a SDD `docs/compartilhado/sdd-google-cloud-media-apis-platform.md`, a migration sucessora `supabase/migrations/20260825090000_google_cloud_media_capabilities.sql`, os contratos server-side de Speech-to-Text, Cloud Storage e YouTube Data API e a configuração global em `/admin?tab=integracoes`.
+- **Verificado no código:** Google Cloud Media usa somente Connection global da Plataforma; Speech/Storage compartilham o provider `google_cloud`, YouTube usa `youtube_data`, e as capabilities não possuem nome de módulo. O resolver reutiliza os gates de ator, Agency, Brand, grant/binding, Connection READY e quota.
+- **Verificado no código:** Service Account e API key passam pelo Secret Store server-side; o Admin recebe somente estados sanitizados. Health checks são ações explícitas: Speech, Storage e YouTube não são chamados ao abrir ou salvar a configuração.
+- **Verificado no código:** operações compartilhadas suportam Speech curto/longo, objetos temporários brand-scoped e metadata público de vídeo. Telegram é uma integração global separada; não há yt-dlp, FFmpeg, download de vídeo ou consumidor editorial Radar implementado nesta etapa.
+- **Evidência manual:** Speech, Storage e YouTube estão `READY` no Admin. Operação real, bucket/segredos específicos e smokes de uso continuam separados do estado da Connection. Nenhuma operação remota adicional foi executada nesta consolidação.
+
+## Google Ads — rotação exclusiva do OAuth Refresh Token — 2026-08-24
+
+- **Verificado no código:** `/admin?tab=integracoes` exibe os campos estáticos
+  Google Ads somente como status. Developer Token, Client ID, Client Secret,
+  Login Customer ID, Research Customer ID e versão da API não possuem edição
+  pela UI.
+- **Verificado no código:** o único campo mutável é o OAuth Refresh Token. A
+  rota POST continua protegida por `requireCanonicalPlatformAdmin()` e a ação
+  `rotate_google_ads_refresh_token` envia o valor somente ao servidor.
+- **Verificado no código:** a rotação cria uma nova referência no Secret Store
+  antes de trocar `integration_connections.secret_ref`; o lifecycle volta para
+  `pending`, o health check não é executado automaticamente e o segredo não
+  aparece no readback, metadata, logs ou browser.
+- **Verificado no código:** o botão `Testar conexão` é explícito e resolve o
+  segredo pelo Secret Store antes de chamar o provider. A UI só confirma a
+  operação após readback sanitizado.
+- **Ainda não verificado:** rotação manual, health check real e persistência
+  remota da Connection. Nenhuma operação remota ou chamada paga foi executada
+  nesta implementação.
+
+## Integrações de IA — cutover local DeepSeek — 2026-08-19
+
+- **Verificado no código:** a UI e o catálogo operacional apresentam DeepSeek
+  como provider único de IA; OpenRouter não é opção de configuração, modelo,
+  health check ou fallback.
+- **Verificado no código:** a Connection DeepSeek permanece server-side e a
+  tela distingue configuração ausente, erro e validação pendente sem afirmar
+  `READY` automaticamente. A ação de health check continua explícita.
+- **Evidência manual:** Connection DeepSeek `READY`, modelo `deepseek-v4-pro`
+  disponível e ação de health explícita. Smoke de operação/uso e persistência
+  continuam gates separados. Os registros OpenRouter abaixo são evidência
+  histórica preservada e não representam o caminho ativo atual.
+
 ## Central de Comunicação da Plataforma — 2026-08-07
 
 - **Auditoria local:** a configuração atual de e-mail usa Resend diretamente
@@ -438,7 +509,7 @@ esta seção vigente prevalece para o runtime local atual.
   da execução manual do diagnóstico read-only. A 0023 não foi alterada nem
   autorizada para aplicação.
 
-# Plataforma / Integrações - primeira implementação funcional - 2026-08-11
+# Histórico — Plataforma / Integrações - primeira implementação funcional - 2026-08-11
 
 - **Implementado localmente:** nova tab horizontal `/admin?tab=integracoes`, sem sidebar própria e sem alteração do shell R5.
 - **Leitura server-side:** a área consulta exclusivamente as sete tabelas 0024/0025 e devolve somente dados sanitizados; `secret_ref` e segredos não chegam ao client.
@@ -692,7 +763,7 @@ foi executada nesta atualização documental.
   global.
 - `SCHEMA_CHANGE_REQUIRED = NO` · `DATABASE_SCHEMA_CHANGED = NO`.
 
-# OpenRouter — modelo operacional editável — 2026-08-15
+# Histórico — OpenRouter — modelo operacional editável — 2026-08-15
 
 - `integration_connections.metadata.openrouter_model` é a configuração
   operacional persistente do modelo; `secret_ref`, lifecycle e
@@ -711,3 +782,24 @@ foi executada nesta atualização documental.
 - `OPENROUTER_CONNECTION = READY` · `OPENROUTER_MODEL_CONFIG = PERSISTED` ·
   `OPENROUTER_MODEL_CHANGE_WITHOUT_RESTART = PASS` ·
   `SCHEMA_CHANGE_REQUIRED = NO` · `DATABASE_SCHEMA_CHANGED = NO`.
+
+# DataForSEO — capability de SERP de compatibilidade — 2026-08-24
+
+- Verificado no código: a chave nova canônica é
+  `dataforseo.serp_compatibility`; `dataforseo_serp_compatibility` não é criada
+  como segunda forma. A operação técnica é `serp_compatibility` e a unidade é
+  `request`.
+- Verificado no código: a operação nova foi adicionada ao catálogo de
+  integrações e ao catálogo Platform, mas não ao mapa legado de resources de
+  homologação. Ela exige capability ativa, grant/binding, Connection
+  DataForSEO READY e quota aplicável.
+- Verificado no código: a mesma Connection Platform DataForSEO pode atender
+  capacidades distintas; o provider canônico da nova capability é validado no
+  caminho governado.
+- Migration sucessora preparada localmente:
+  `20260824185700_dataforseo_serp_compatibility_operation.sql`. A migration
+  `0024_integrations_resource_governance.sql` não foi alterada.
+- Nenhuma migration, capability remota, grant, binding, quota, health check,
+  chamada DataForSEO, alteração da rota do Arquiteto ou configuração de
+  AdalbaPro/Adalba foi executada nesta atualização.
+- `DATAFORSEO_SERP_CAPABILITY_READY = PENDING_MANUAL_APPLY`.

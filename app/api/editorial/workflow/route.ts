@@ -19,9 +19,34 @@ export async function POST(request: NextRequest) {
       for (const version of command.articleVersions) {
         if (articleApprovalIssues(version, command.versionEvents).length) throw new AuthzError(409, "ArticleDNA não atende aos gates de aprovação.");
         await artifacts.save(command.brandId, "article_dna", version, "approved", profile.userId); await artifacts.appendEvents(command.brandId, command.versionEvents.filter(event => event.versionId === version.versionId), profile.userId);
-        const item = importArticlesToRadar([], [version], command.brandId, undefined, [], {}, command.hydrationByArticleId)[0]; const row = await workflow.importItem({ marcaId: command.brandId, articleId: version.payload.articleId, stage: "radar", state: item.state,
-          sourceEntityId: version.entityId, sourceVersionId: version.versionId, sourceContentHash: version.contentHash, payload: item, actorId: profile.userId });
-        await decisions.append({ marcaId: command.brandId, workflowItemId: row.id, articleId: version.payload.articleId, eventType: "import_radar", toState: item.state, sourceVersionId: version.versionId, actorId: profile.userId });
+        /*
+         * O RadarItem é CONSTRUÍDO e VALIDADO antes de qualquer escrita.
+         *
+         * Sem o contexto do handoff o importador não resolve o Silo — os
+         * ArticleDNA não declaram `siloId` por desenho — e devolvia lista
+         * vazia. O `[0]` virava `undefined` e seguia para `importItem`, que
+         * gravaria uma linha sem payload. Falta de contexto agora é recusa
+         * declarada, com o artigo nomeado.
+         *
+         * O contexto chega do cliente como INSUMO: a validação abaixo confere
+         * que o item resultante fecha com a versão e o hash que estão sendo
+         * gravados, e o schema recusa o que não fechar.
+         */
+        const construidos = importArticlesToRadar([], [version], command.brandId, undefined, [], {}, command.hydrationByArticleId, {}, command.handoffContext as never);
+        const item = construidos[0];
+        if (!item) {
+          throw new AuthzError(409, `Sem Silo canônico resolvido para "${version.payload.promise}": o handoff não pode gravar RadarItem sem pai.`);
+        }
+        const validado = RadarItemSchema.parse(item);
+        if (validado.articleId !== version.payload.articleId
+          || validado.articleDnaVersionId !== version.versionId
+          || validado.articleDnaContentHash !== version.contentHash
+          || validado.brandId !== command.brandId) {
+          throw new AuthzError(409, "O RadarItem construído não corresponde ao ArticleDNA enviado.");
+        }
+        const row = await workflow.importItem({ marcaId: command.brandId, articleId: version.payload.articleId, stage: "radar", state: validado.state,
+          sourceEntityId: version.entityId, sourceVersionId: version.versionId, sourceContentHash: version.contentHash, payload: validado, actorId: profile.userId });
+        await decisions.append({ marcaId: command.brandId, workflowItemId: row.id, articleId: version.payload.articleId, eventType: "import_radar", toState: validado.state, sourceVersionId: version.versionId, actorId: profile.userId });
       }
     }
     if (command.action === "transition_radar") {

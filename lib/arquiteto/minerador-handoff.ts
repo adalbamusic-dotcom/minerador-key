@@ -21,7 +21,37 @@ export type MineradorKeywordHandoffSource = {
   id: string;
   brandId: string;
   status?: string | null;
+  sourceVersionId?: string | null;
   contentHash?: string | null;
+  /**
+   * Referência da Qualificação Semântica persistida, quando existir.
+   * A ausência nunca bloqueia o envio; o pacote apenas transporta menos.
+   */
+  semanticQualification?: {
+    versionId: string;
+    versionNumber?: number;
+    contentHash: string;
+    /**
+     * Eixos só viajam preenchidos quando a evidência é conclusiva. SERP mista,
+     * fraca ou insuficiente transporta `null` — nenhum valor é inventado para
+     * liberar o fluxo.
+     */
+    intent: string | null;
+    funnel: string | null;
+    /** Honestidade explícita do que a evidência concluiu. */
+    semanticState: "conclusive" | "non_conclusive";
+    collectedAt: string;
+  } | null;
+  /**
+   * Referência da Apresentação Contextual persistida, quando existir.
+   * É contexto upstream opcional: ausência nunca bloqueia o handoff.
+   */
+  contextualPresentation?: {
+    versionId: string;
+    versionNumber: number;
+    contentHash: string;
+    generatedAt: string;
+  } | null;
 };
 
 export type MineradorArquitetoHandoffRow = {
@@ -32,7 +62,7 @@ export type MineradorArquitetoHandoffRow = {
   stage: "architect";
   state: "received";
   source_entity_id: string;
-  source_version_id: null;
+  source_version_id: string | null;
   source_content_hash: string | null;
   payload: {
     brandId: string;
@@ -79,6 +109,9 @@ export function resolveCanonicalMineradorArquitetoImportEligibility(input: {
       else if (workflowState === MINERADOR_ARQUITETO_RECEIVED_STATE) importability = CANONICAL_IMPORTABILITY.WORKFLOW_RECEIVED;
       else if (workflowState) importability = CANONICAL_IMPORTABILITY.REMOTE_WORKFLOW_BLOCKED;
       else if (status === "publicado") importability = CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED;
+      // O humano já aprovou no Minerador: o Arquiteto não adiciona um segundo
+      // juiz semântico. Dimensão indeterminada é resultado legítimo da análise
+      // e viaja como informação, nunca como bloqueio.
       else if (status === "aprovado") importability = CANONICAL_IMPORTABILITY.IMPORTABLE;
       else importability = CANONICAL_IMPORTABILITY.NOT_APPROVED;
 
@@ -113,19 +146,55 @@ export function buildMineradorArquitetoHandoffPlan(input: {
       stage: "architect",
       state: MINERADOR_ARQUITETO_RECEIVED_STATE,
       source_entity_id: keyword.id,
-      source_version_id: null,
-      source_content_hash: keyword.contentHash ?? null,
+      // Proveniência do transporte: a versão persistida da Qualificação
+      // Semântica é a referência canônica do que sustenta este handoff.
+      source_version_id: keyword.semanticQualification?.versionId ?? keyword.sourceVersionId ?? null,
+      source_content_hash: keyword.semanticQualification?.contentHash ?? keyword.contentHash ?? null,
       payload: {
         brandId: input.brandId,
         keywordId: keyword.id,
         source: "MINERADOR",
         decision: keyword.status ?? null,
         state: MINERADOR_ARQUITETO_RECEIVED_STATE,
+        semanticQualification: keyword.semanticQualification ?? null,
+        // Opcional por contrato: null quando a keyword não tem apresentação.
+        contextualPresentation: keyword.contextualPresentation
+          ? { ...keyword.contextualPresentation, keywordId: keyword.id, brandId: input.brandId }
+          : null,
       },
     })),
     importedKeywordIds: keywords.map(keyword => keyword.id),
     createdKeywordIds: newKeywords.map(keyword => keyword.id),
     existingKeywordIds,
     status: newKeywords.length ? "PERSISTED" : "UNCHANGED",
+  };
+}
+
+/**
+ * Leitura da Apresentação Contextual transportada no handoff.
+ * O Arquiteto consome a referência versionada do Minerador: nunca regenera,
+ * nunca altera o artifact e nunca a usa para decidir Intenção ou Funil.
+ */
+export function readMineradorHandoffPresentationRef(payload: unknown): {
+  versionId: string;
+  versionNumber: number;
+  contentHash: string;
+  keywordId: string;
+  brandId: string;
+  generatedAt: string;
+} | null {
+  const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : null;
+  const ref = record?.contextualPresentation;
+  const item = ref && typeof ref === "object" && !Array.isArray(ref) ? ref as Record<string, unknown> : null;
+  if (!item) return null;
+  const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
+  if (!text(item.versionId) || !text(item.keywordId) || !text(item.brandId)) return null;
+  return {
+    versionId: text(item.versionId),
+    versionNumber: typeof item.versionNumber === "number" ? item.versionNumber : 0,
+    contentHash: text(item.contentHash),
+    keywordId: text(item.keywordId),
+    brandId: text(item.brandId),
+    generatedAt: text(item.generatedAt),
   };
 }

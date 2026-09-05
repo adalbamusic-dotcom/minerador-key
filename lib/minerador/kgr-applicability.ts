@@ -6,6 +6,8 @@ export type KgrApplicability = z.infer<typeof KgrApplicabilitySchema>;
 export const KgrMeasurementSchema = z.enum(["without_data", "partial", "complete", "invalid"]);
 export type KgrMeasurement = z.infer<typeof KgrMeasurementSchema>;
 
+export type KgrTechnicalTone = "success" | "warning" | "danger" | "neutral";
+
 export type KgrSemantic = Record<string, unknown>;
 
 export type KgrDecisionHistoryEntry = {
@@ -21,6 +23,7 @@ export type KgrRowForSort = {
   volume_search: number | null;
   results_allintitle: number | null;
   analise_semantica?: KgrSemantic | null;
+  currentKgrReady?: boolean;
 };
 
 export function kgrDecisionLabel(applicability: KgrApplicability): "SIM" | "NÃO" | "PENDENTE" {
@@ -61,6 +64,38 @@ export function hasUsableKgrScore(value: unknown): value is number {
 export function calculateKgrFromMetrics(volume: unknown, results: unknown): number | null {
   if (!finiteNonNegative(volume) || volume <= 0 || !finiteNonNegative(results)) return null;
   return Number((results / volume).toFixed(4));
+}
+
+/** Limite canônico da faixa plenamente KGR: o score precisa ser estritamente menor. */
+export const KGR_FULL_RANGE_LIMIT = 0.25;
+
+export type KgrVisualRange = "full_kgr" | "other" | "unavailable";
+export type KgrVisualState = { range: KgrVisualRange; favorable: boolean };
+
+/**
+ * Regra visual única do score KGR, consumida por toda a UI do Minerador.
+ * Deriva exclusivamente do valor numérico real — nunca de status editorial,
+ * aplicabilidade humana, revisão ou aprovação — e nunca da string formatada.
+ */
+export function deriveKgrVisualState(score: unknown): KgrVisualState {
+  if (!finiteNonNegative(score)) return { range: "unavailable", favorable: false };
+  return score < KGR_FULL_RANGE_LIMIT
+    ? { range: "full_kgr", favorable: true }
+    : { range: "other", favorable: false };
+}
+
+/**
+ * Tom técnico do score. `success` significa somente "score na faixa plenamente
+ * KGR"; nunca keyword aprovada, KGR aplicável ou revisão concluída.
+ */
+export function kgrTechnicalTone(score: unknown, volume?: unknown): KgrTechnicalTone {
+  // O volume permanece na assinatura pelos consumidores existentes, mas a cor
+  // do score não depende dele.
+  void volume;
+  const visual = deriveKgrVisualState(score);
+  if (visual.range === "unavailable") return "neutral";
+  if (visual.favorable) return "success";
+  return (score as number) <= 1 ? "warning" : "danger";
 }
 
 export function classifyKgrMeasurement(input: {
@@ -135,13 +170,13 @@ const measurementRank: Record<KgrMeasurement, number> = { complete: 0, partial: 
 export function compareKgrRows(a: KgrRowForSort, b: KgrRowForSort, direction: "asc" | "desc" = "asc"): number {
   const aApplicability = readKgrApplicability(a.analise_semantica);
   const bApplicability = readKgrApplicability(b.analise_semantica);
-  const aMeasurement = classifyKgrMeasurement({ kgrScore: a.kgr_score, volume: a.volume_search, results: a.results_allintitle });
-  const bMeasurement = classifyKgrMeasurement({ kgrScore: b.kgr_score, volume: b.volume_search, results: b.results_allintitle });
+  const aMeasurement = a.currentKgrReady === false ? "without_data" : classifyKgrMeasurement({ kgrScore: a.kgr_score, volume: a.volume_search, results: a.results_allintitle });
+  const bMeasurement = b.currentKgrReady === false ? "without_data" : classifyKgrMeasurement({ kgrScore: b.kgr_score, volume: b.volume_search, results: b.results_allintitle });
   const group = (applicabilityRank[aApplicability] * 3) + measurementRank[aMeasurement];
   const otherGroup = (applicabilityRank[bApplicability] * 3) + measurementRank[bMeasurement];
   if (group !== otherGroup) return direction === "asc" ? group - otherGroup : otherGroup - group;
-  const aScore = finiteNonNegative(a.kgr_score) ? a.kgr_score : Number.POSITIVE_INFINITY;
-  const bScore = finiteNonNegative(b.kgr_score) ? b.kgr_score : Number.POSITIVE_INFINITY;
+  const aScore = a.currentKgrReady === false ? Number.POSITIVE_INFINITY : finiteNonNegative(a.kgr_score) ? a.kgr_score : Number.POSITIVE_INFINITY;
+  const bScore = b.currentKgrReady === false ? Number.POSITIVE_INFINITY : finiteNonNegative(b.kgr_score) ? b.kgr_score : Number.POSITIVE_INFINITY;
   if (aScore !== bScore) return direction === "asc" ? aScore - bScore : bScore - aScore;
   return 0;
 }

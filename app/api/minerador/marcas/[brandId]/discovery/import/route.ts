@@ -5,6 +5,8 @@ import { AuthzError, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { requireTenantPermission } from "@/lib/server/tenant-context";
 import { DiscoveryImportRequestSchema, DiscoveryImportResponseSchema } from "@/lib/minerador/discovery-import";
 import { importKeywordsWithCore, type KeywordImportCoreItem } from "@/lib/minerador/keyword-import-core";
+import { classifyDiscoveryPerspective } from "@/lib/minerador/discovery-perspective";
+import { readDiscoveryRunContext } from "@/lib/minerador/discovery-context";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -80,6 +82,13 @@ function runDiagnostic(run: JsonRecord, candidateCount: number) {
 
 function buildSourceSnapshot(run: JsonRecord, candidate: JsonRecord, current: JsonRecord | null = null) {
   const metric = (name: string, fallback: unknown) => current && Object.prototype.hasOwnProperty.call(current, name) ? current[name] : fallback;
+  const discoveryContext = readDiscoveryRunContext(run.source_data);
+  const discoverySnapshot = discoveryContext ? {
+    discoveryMode: discoveryContext.discoveryMode,
+    discoveryFocus: discoveryContext.discoveryFocus,
+    discoveryPerspective: classifyDiscoveryPerspective(String(candidate.keyword_original || ""), String(run.seed_original || discoveryContext.seedOriginal || ""), discoveryContext.discoveryFocus),
+    discoveryPerspectiveClassifier: discoveryContext.perspectiveClassifier,
+  } : {};
   return {
     discoveryRunId: candidate.discovery_run_id,
     discoveryCandidateId: candidate.id,
@@ -96,6 +105,7 @@ function buildSourceSnapshot(run: JsonRecord, candidate: JsonRecord, current: Js
     provider: candidate.provider,
     providerVersion: candidate.provider_version,
     measuredAt: candidate.measured_at,
+    ...discoverySnapshot,
     metrics: {
       averageMonthlySearches: metric("volume_search", candidate.average_monthly_searches) ?? null,
       monthlySearchVolumes: metric("monthly_search_volumes", candidate.monthly_search_volumes) ?? [],

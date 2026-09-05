@@ -10,6 +10,8 @@ const stringArray = (value: unknown) => Array.isArray(value)
 
 const nullableString = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : null;
 
+const optionalString = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : undefined;
+
 const normalizedToken = (value: unknown) => typeof value === "string" ? value
   .normalize("NFD")
   .replace(/[\u0300-\u036f]/g, "")
@@ -71,7 +73,8 @@ const normalizedRole = (value: unknown) => {
 
 const normalizedConfidence = (value: unknown) => {
   const numeric = typeof value === "string" ? Number(value.replace(",", ".").replace("%", "")) : value;
-  return typeof numeric === "number" && numeric > 1 && numeric <= 100 ? numeric / 100 : numeric;
+  if (typeof numeric !== "number" || !Number.isFinite(numeric)) return undefined;
+  return numeric > 1 && numeric <= 100 ? numeric / 100 : numeric;
 };
 
 const normalizedPlacement = (value: unknown) => {
@@ -117,9 +120,11 @@ export function normalizeKeywordReviewProviderResponse(value: unknown): unknown 
         providerWarning: actionIsKnown ? undefined : `A IA devolveu a acao nao reconhecida "${rawActionLabel}"; a distribuicao logica foi mantida por seguranca.`,
         targetGroupId: nullableString(decision.targetGroupId ?? decision.target_group_id ?? decision.targetArticleId ?? decision.target_article_id),
         newArticleKey: nullableString(decision.newArticleKey ?? decision.new_article_key),
-        suggestedRole: normalizedRole(decision.suggestedRole ?? decision.suggested_role ?? decision.role ?? decision.papel),
+        suggestedRole: typeof (decision.suggestedRole ?? decision.suggested_role ?? decision.role ?? decision.papel) === "string"
+          ? normalizedRole(decision.suggestedRole ?? decision.suggested_role ?? decision.role ?? decision.papel)
+          : undefined,
         siloPlacement: normalizedPlacement(decision.siloPlacement ?? decision.silo_placement),
-        justification: decision.justification ?? decision.justificativa ?? decision.reason ?? decision.motivo,
+        justification: optionalString(decision.justification ?? decision.justificativa ?? decision.reason ?? decision.motivo),
         confidence: normalizedConfidence(decision.confidence ?? decision.confianca ?? decision.score),
         humanDecision: nullableString(decision.humanDecision ?? decision.human_decision ?? humanPoints[0]),
       };
@@ -149,16 +154,16 @@ export const CompactProviderResponseSchema = z.preprocess(normalizeKeywordReview
       siloName: z.string().min(1).nullable().optional(),
       newSiloKey: z.string().min(1).nullable().optional(),
     }).optional(),
-    justification: z.string().min(1).max(2000).optional(),
+    justification: z.string().min(1).max(320).optional(),
     confidence: z.coerce.number().min(0).max(1).optional(),
-    humanDecision: z.string().min(1).max(400).nullable().optional(),
-    providerWarning: z.string().min(1).max(400).optional(),
+    humanDecision: z.string().min(1).max(240).nullable().optional(),
+    providerWarning: z.string().min(1).max(240).optional(),
   })).min(1).max(40),
   conflicts: z.array(z.object({
     keywordIds: z.array(z.string().min(1)).default([]),
-    reason: z.string().min(1).max(600),
+    reason: z.string().min(1).max(320),
   })).max(12).default([]),
-  summary: z.string().min(1).max(5000),
+  summary: z.string().min(1).max(600),
 }));
 
 export type CompactProviderResponse = z.infer<typeof CompactProviderResponseSchema>;

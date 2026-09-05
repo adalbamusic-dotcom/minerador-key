@@ -69,7 +69,31 @@ export function workflowRecoveryStorageKey(actorUserId: string, brandId: string)
 }
 
 export const WorkflowCommandSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("import_radar"), brandId: z.string(), articleVersions: z.array(VersionedArticleDNASchema), versionEvents: z.array(VersionStatusEventSchema), hydrationByArticleId: z.record(z.string(), RadarHydrationSnapshotSchema).default({}) }),
+  z.object({ action: z.literal("import_radar"), brandId: z.string(), articleVersions: z.array(VersionedArticleDNASchema), versionEvents: z.array(VersionStatusEventSchema), hydrationByArticleId: z.record(z.string(), RadarHydrationSnapshotSchema).default({}),
+    /**
+     * Contexto arquitetural resolvido pelo cliente.
+     *
+     * O servidor o REVALIDA contra o estado canônico antes de gravar; ele
+     * chega como insumo, nunca como veredito. Sem isto a rota reconstruía o
+     * RadarItem sem Silo e obtinha uma lista vazia.
+     */
+    handoffContext: z.record(z.string(), z.object({
+      silo: z.object({
+        siloId: z.string().min(1),
+        siloName: z.string().nullable(),
+        territoryRef: z.string(),
+        siloDnaVersionId: z.string().min(1),
+        siloDnaContentHash: z.string().min(1),
+        siloPageId: z.string().nullable(),
+        siloPageVersionId: z.string().nullable(),
+        siloPageSlug: z.string().nullable(),
+        siloPageCanonical: z.string().nullable(),
+        siloPagePublicationStatus: z.string().nullable(),
+        articleRole: z.enum(["pillar", "support"]),
+      }).strict(),
+      internalLinks: z.unknown().nullable(),
+      serpProvenance: z.unknown().nullable(),
+    }).strict()).default({}) }),
   z.object({ action: z.literal("transition_radar"), brandId: z.string(), itemIds: z.array(z.string()), target: RadarItemSchema.shape.state, expectedLocks: z.record(z.string(), z.number().int().positive()) }),
   z.object({ action: z.literal("import_planner"), brandId: z.string(), radarItemIds: z.array(z.string()), expectedLocks: z.record(z.string(), z.number().int().positive()) }),
   z.object({ action: z.literal("prepare_plan"), brandId: z.string(), plannerItemId: z.string(), expectedLock: z.number().int().positive(), plan: VersionedContentPlanSchema }),

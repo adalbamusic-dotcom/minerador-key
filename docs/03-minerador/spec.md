@@ -1,10 +1,136 @@
 # Spec — Minerador
 
+## Contrato canônico atual — 2026-08-27
+
+DeepSeek é o provider canônico de IA do Minerador para as operações que usam
+R5/R6; o modelo, o modo de raciocínio e o orçamento continuam decisões da
+capability/operação. JSON Output, `JSON.parse`, validação Zod, preservação do
+estado anterior em erro e zero fallback OpenRouter são regras permanentes.
+
+DataForSEO é a infraestrutura compartilhada para allintitle, KD e
+compatibilidade SERP. OpenRouter e Serper permanecem somente como histórico,
+fixtures ou provenance legível; não são provider ativo, fallback ou nova
+chamada. O status remoto de Connections e a homologação real são estado
+operacional e devem ser lidos em
+[`estado-atual.md`](estado-atual.md), sem inferência a partir desta spec.
+
+## Histórico de implementação local da Fase 2 — 2026-08-19
+
+O cutover local do runtime de IA foi implementado: novas operações resolvem
+somente DeepSeek por Connection de Plataforma, com `deepseek-v4-pro` como
+modelo inicial, JSON mode e validação local independente do provider. R5
+preserva suas três fases, métricas imutáveis, progresso, Usage e o estado
+anterior em falha; o modo Thinking é uma decisão da operação/capability e não
+uma política global.
+
+OpenRouter não é provider ativo, fallback, alternativa de seleção ou health
+check. Usage, Connections e diagnósticos históricos permanecem legíveis. A
+Connection/secret remoto DeepSeek, o health check real e o smoke autenticado
+continuam não configurados/não executados; portanto este estado é
+`DEEPSEEK_LOCAL_CUTOVER = PASS`, não homologação real.
+
+Na Fase 3A, a configuração operacional foi implementada localmente em
+`/admin?tab=integracoes`: API Key password obrigatória, endpoint
+`https://api.deepseek.com` e modelo `deepseek-v4-pro` somente leitura. O
+writer administrativo reutiliza a Connection global equivalente, usa o Secret
+Store/Vault e só confirma sucesso após readback sem segredo. Salvar não executa
+health check; provider, Connection, segredo, health check e smoke reais ainda
+aguardam ação manual autorizada.
+
+## Regra permanente do R5 — leitura semântica independente antes da comparação — 2026-08-21
+
+O R5 deve formar uma interpretação independente da keyword original antes de
+consultar a interpretação da Lógica. A keyword original é o objeto primário
+(`R5_PRIMARY_OBJECT = RAW_KEYWORD`); os valores da Lógica são hipóteses
+produzidas por outro processador, não verdades a repetir.
+
+A ordem canônica é:
+`rawKeyword → interpretação independente → sinais semânticos → comparação com Lógica → evidências externas → delta real → proposta/concordância → revisão humana`.
+
+Na Phase 1, `rawKeyword` é recebido explicitamente. A revisão identifica,
+quando aplicável, entidade, modificadores, ação, problema, necessidade,
+localidade, comparação, sinal comercial, audiência, resultado desejado, tipo
+de busca, interpretações possíveis e ambiguidade. Somente depois compara esses
+sinais com `logicHypothesis`. Nomes de técnica/produto e linguagem de
+possibilidade não promovem BOFU sem sinal explícito na keyword.
+
+A evidência segue a prioridade `keyword → modificadores → estrutura semântica → evidência externa compatível → heurística`. Volume, Resultado, KGR e KD
+não substituem significado semântico. A Phase 2 só registra evidência externa
+quando ela altera, reforça ou enfraquece a interpretação; a Phase 3 sintetiza
+leitura independente, Lógica e evidência externa sem apagar a primeira leitura.
+
+Uma divergência só chega ao R6/R6.1 quando há mudança real, evidência
+identificável, justificativa específica e interpretação semanticamente
+superior. Se isso não puder ser demonstrado, a IA deve concordar ou manter a
+ambiguidade. A IA propõe; o humano decide; somente depois de persistência e
+readback existe novo snapshot canônico. Volume, Resultado, CPC, KD, KGR,
+timestamps, targeting, URL, canonical e `brandId` permanecem fatos imutáveis.
+
+Esta regra é permanente do contrato R5, não uma otimização temporária de
+prompt. A leitura intermediária não cria campos de banco; mudanças permanentes
+no comportamento do R5 devem atualizar esta seção da spec.
+
+## Regra permanente do R6 — divergência real separada de decisão pendente — 2026-08-21
+
+`CORREÇÕES PROPOSTAS` é reservado a uma divergência semântica acionável: valor
+atual diferente de sugestão concreta, evidência suficiente e delta aceito pelo
+Value Gate. Um campo estratégico ainda sem leitura consolidada (`Intenção`,
+`Nicho` ou `Funil`) não é uma correção e não deve ser exibido como
+`Valor lógico: Não informado → Sugestão IA: Não informado`.
+
+Esses campos pertencem a `DECISÕES PENDENTES` ou `AMBIGUIDADES PENDENTES`, com
+ação humana explícita para confirmar desconhecido ou editar. O mapeamento é
+visual/read-model do R6; não inventa uma sugestão da IA, não altera o R5 e não
+cria campo ou estado persistido novo. Concordâncias ficam compactadas e
+recolhidas por padrão, preservando a comparação individual para auditoria.
+
+Esta separação vale também para keywords em que a execução R5 concluiu sem
+correções: zero divergências é um resultado válido, enquanto a confirmação
+humana de um campo estratégico ausente continua sendo uma decisão pendente
+independente.
+
+## Histórico — adendo arquitetônico da Fase 1 — OpenRouter → DeepSeek — 2026-08-19
+
+No snapshot da Fase 1, o provider canônico de IA previsto era a DeepSeek
+Official API, em uma única Connection `platform`, com modelo explícito
+`deepseek-v4-pro`, sem fallback, roteamento paralelo ou troca automática. Esse
+target foi implementado localmente na Fase 2; o registro abaixo permanece como
+evidência histórica da decisão, do mapa de consumidores e do escopo original.
+
+## Histórico — diagnóstico sanitizado do R5 pré-cutover — 2026-08-19
+
+Falhas de revisão semântica R5 devem devolver ao diagnóstico operacional,
+quando a resposta do provider existir, o modelo solicitado/retornado, o motivo
+de encerramento normalizado e nativo, o parâmetro/limite real de tokens,
+usage, reasoning tokens, presença/tamanho de conteúdo, modo de saída resolvido
+e metadados de roteamento sanitizados. O payload completo, prompt, reasoning,
+headers e credencial nunca são expostos. O aviso do bulk deve preservar esse
+diagnóstico no `copyPayload` para o smoke autenticado; ausência de diagnóstico
+na resposta significa falha anterior ao envelope do provider.
+
+O adapter não troca modelo/provider, não acrescenta retry/fallback e não
+altera o orçamento antes da confirmação por provider real. A condição
+`AI_PROVIDER_RESPONSE_TRUNCATED` só é válida para `finish_reason` ou
+`native_finish_reason` que represente encerramento por limite/incompleto.
+
+## Adendo vigente — KD como evidência DataForSEO — 2026-08-19
+
+O Processador pode obter `keyword_difficulty` pelo DataForSEO Labs Keyword Overview durante a ação existente de Resultados. KD é métrica SEO complementar, somente leitura, sem thresholds, classificação editorial, aprovação automática ou alteração de KGR, decisão humana e status final. O valor deve permanecer separado da intenção canônica e das métricas Google Ads; a IA pode recebê-lo como evidência, mas não pode alterá-lo. Snapshots importados da Discovery permanecem não validados até uma medição oficial do Processador. A persistência é aditiva no JSONB e a proveniência do provider deve ser preservada. As passagens históricas abaixo que descrevem KD como futuro referem-se ao estado anterior a este adendo.
+
+## Adendo vigente — filtros SEO da Descoberta — 2026-08-19
+
+Na Descoberta, `Resultado` e `KD` são filtros locais de segunda etapa, aplicados somente depois que as candidatas Google Ads existem e sobre evidências DataForSEO já disponíveis no read-model. Cada filtro aceita mínimo/máximo numérico; zero é válido e ausência (`null`) não é convertida em zero. Quando um intervalo está ativo, candidatas sem a medição correspondente ficam fora. Alterar, limpar, abrir, ordenar ou selecionar filtros não inicia chamada paga. O enriquecimento continua sendo a ação explícita existente de `dataforseo/allintitle`, que também obtém Keyword Overview/KD; Google Ads continua sendo a fonte de descoberta, volume e CPC. Snapshots da Descoberta permanecem snapshots e o Processador continua responsável pela revalidação oficial.
+
 ## Arquitetura aprovada de providers — plataforma, agência e marca
 
 `brand_id` permanece o único tenant de dados do Minerador. Agência é escopo operacional separado: pode administrar conexões de providers e consumo de várias marcas vinculadas, mas nunca autoriza leitura, escrita ou fallback entre seus dados. Google Ads evolui para conexão técnica global server-side; DataForSEO evolui para conexão operacional por agência; os dois contratos devem resolver marca, autorização, agência e provider no servidor antes de qualquer chamada externa.
 
-Até a implementação aprovada na SDD `propostas/arquitetura-provedores-plataforma-agencia.md`, Google Ads continua com conexão operacional por marca, DataForSEO continua lendo a credencial global atual para allintitle e Serper continua provider do Radar. A futura substituição de Serper por DataForSEO exige paridade de contrato, testes e smoke autenticado; não há fallback silencioso entre agência, provider ou marca.
+O estado vigente de integração consolidado posteriormente é: Google Ads como
+infraestrutura fixa da Plataforma, DataForSEO como capability compartilhada de
+SERP/orgânico e DeepSeek como IA canônica. O Radar consome a infraestrutura SERP
+compartilhada e não possui provider próprio; coleta autenticada, persistência e
+prova de ausência do provider SERP legado continuam gates separados. Não há
+fallback silencioso entre agência, provider ou marca.
 
 ## Regra vigente — Extensão Chrome removida — 2026-08-04
 
@@ -14,7 +140,12 @@ As ações explícitas de medição allintitle em Descobrir Keywords e Processar
 
 Sem credenciais DataForSEO, a ação retorna configuração ausente sem chamada paga. Colunas e valores allintitle já persistidos continuam visíveis; falhas de medição não apagam dados, não alteram `measured_at`, não alteram KGR e não substituem valores atuais.
 
-Google Ads, DataForSEO, importação compartilhada, Descoberta, Processador, métricas atuais, histórico e KGR permanecem ativos. Serper continua provider canônico do Radar; não é usado para allintitle. A substituição de allintitle ocorre somente após confirmação, a falha preserva integralmente o valor anterior e o KGR é recalculado após métricas confirmadas.
+Google Ads, DataForSEO, importação compartilhada, Descoberta, Processador,
+métricas atuais, histórico e KGR permanecem ativos. DataForSEO allintitle e a
+SERP compartilhada são operações distintas; o Radar não recebe autorização ou
+quota própria. A falha de medição preserva integralmente o valor anterior e o
+KGR é recalculado após métricas confirmadas. Referências antigas ao provider
+SERP legado são históricas e não representam o contrato vigente.
 
 As seções históricas que mencionam a Extensão descrevem decisões e implementações anteriores; esta regra tem precedência para o comportamento atual.
 
@@ -105,7 +236,7 @@ A conferencia Site/Sitemap permanece preview-first e exige confirmacao explicita
 O Minerador nao gera nem edita briefing de silo. Briefings e suas tabelas/rotas permanecem sob os consumidores proprietarios existentes; o Minerador conserva apenas a associacao de silo e a qualificacao de keywords.
 ## 22. Apresentacao e estabilidade - Fase B.1
 
-A tabela e informativa: KGR e Intencao nao possuem edicao por linha. A decisao KGR ocorre somente em massa sobre a selecao, por `Aprovar como KGR` ou `Marcar nao aplicavel`; a aprovacao exige medicao valida e a nao aplicabilidade preserva as metricas.
+Intencao nao possui edicao por linha. A coluna KGR mostra o score tecnico (ou o estado da medicao quando nao ha score) e, abaixo, o seletor da decisao humana de aplicabilidade (`Pendente`, `Aplicavel`, `Nao aplicavel`), o mesmo da Revisao Humana e com o mesmo contrato de persistencia, readback e historico. A decisao tambem pode ser aplicada em lote sobre a selecao pela barra inferior, ao lado do Status; keywords ja na decisao alvo nao sao reescritas e keywords com revisao em edicao ficam de fora ate a edicao ser concluida ou cancelada. A decisao nunca altera score, Volume, Resultado nem status editorial, e a nao aplicabilidade preserva as metricas. A conclusao da Revisao Humana tambem esta disponivel em lote na barra inferior, entre o seletor de KGR e o Status, com o mesmo contrato da conclusao individual: defaults conservadores para itens sem decisao, Aplicabilidade do KGR obrigatoria quando o calculo e possivel, revisoes ja concluidas e em edicao ficam de fora. Concluir continua nao sendo gate de status, aprovacao ou handoff (adendo de 2026-08-29). Regra revisada em 2026-09-03; o texto anterior (tabela informativa, decisao KGR somente em massa por `Aprovar como KGR`/`Marcar nao aplicavel`) esta superado.
 
 Os filtros ficam no painel recolhivel `Organizar`, com contador de filtros ativos e limpeza explicita. Mutations locais incorporam somente registros afetados e preservam busca, filtros, ordenacao, scroll, linha expandida e selecao quando ainda valida. `Conferir com o site` pertence a barra inferior da selecao e opera somente sobre keywords selecionadas.
 
@@ -269,6 +400,14 @@ A integração da Descoberta usa a persistência tenantizada de allintitle para 
 
 Quando uma candidata possuir `imported_keyword_id`, a keyword oficial será a fonte atual compartilhada pelas duas áreas. A importação transferirá a medição confirmada e sua proveniência sem criar medição concorrente ou repetir automaticamente a consulta. A migration aditiva 0013 foi criada para essa lacuna e permanece pendente de aplicação manual; não foi executada nesta tarefa.
 
+## 51. Bulk bar da Descoberta — triagem opcional e envio sem gate de métricas — 2026-08-19
+
+A bulk bar da Descoberta representa triagem, não consolidação do KeywordDNA. Sua ordem canônica é `Atualizar métricas → Medir resultados → Enviar selecionadas ao Processador`, com os contadores de seleção à esquerda e `Limpar seleção` separado à direita. `Exportar` não faz parte desta barra; qualquer exportação autorizada em outro ponto da aplicação permanece independente.
+
+`Atualizar métricas` continua sendo a ação explícita de Google Ads para volume, histórico, CPC e concorrência Ads. `Medir resultados` continua sendo a ação explícita de DataForSEO para Resultado/allintitle, KD e demais evidências SEO já suportadas. Nenhuma das duas ações é disparada por seleção, filtro ou envio.
+
+O envio ao Processador é a ação principal e aceita a candidata com os dados disponíveis, mesmo sem volume atualizado, Resultado ou KD. Quando presentes, métricas, provider, timestamps e snapshots acompanham a proveniência existente. O Processador continua responsável por revalidar suas etapas oficiais antes da decisão final.
+
 ## 49. Nucleo compartilhado de importacao
 
 Extensao e Descoberta devem chamar o mesmo servico server-side de importacao do Minerador. O nucleo normaliza com uma unica funcao neutra, deduplica dentro do lote, procura keywords somente na marca validada, preserva keywords existentes, cria novas como `bruto` com `lista_id = null` e devolve o `keywordId` oficial com resultado por item.
@@ -306,3 +445,164 @@ O lote de importação e os vínculos de origem são entidades server-side com R
 Clique comum, Ctrl/Cmd, Shift, Ctrl/Cmd+Shift, seleção de visíveis e pintura são complementares tanto na tabela do Minerador quanto na prévia da Extensão. A pintura só inicia após deslocamento de 4px e não troca o cursor normal do checkbox; um gesto de pintura suprime somente o clique sintético dele próprio.
 
 A seleção total não tem limite funcional. O background cria uma operação única por `operationRequestId`, reparte internamente em sublotes sequenciais de até 10 keywords e preserva `brandId`, resultados confirmados, zero explícito, pausas, cancelamento e reconciliação. Cada evento carrega o identificador da operação, `batchId` técnico, índice geral e índice de sublote; a prévia acompanha a operação e mostra cada resultado persistido sem esperar a conclusão total. Durante a execução, o marcador informa progresso e orienta manter o Chrome aberto.
+
+## 52. Ciclo de vida canônico de exclusão de keywords — 2026-08-20
+
+Keyword não publicada pode ser excluída definitivamente após o usuário digitar o nome exato da keyword, mesmo quando possui medições, proveniência, análise, KeywordDNA ou histórico próprio. A exclusão usa uma única operação transacional server-side, limpa dependências próprias de forma explícita e preserva referências compartilhadas e artefatos editoriais append-only.
+
+Keyword publicada é identificada no servidor por publicação formal em `analise_semantica.site_origin` ou por linhagem real até `PublicationRecord`, com evidência técnica e confirmação canônica pelo nome exato. `status = 'publicado'` ou `published` sem vínculo formal é somente sinal legado não verificado e não ativa a janela de recuperação. DNA, ArticleDNA, workflow, handoff, métricas, análise ou status editorial isolados nunca ativam a janela.
+
+A primeira remoção de uma keyword publicada grava `deleted_at` e `purge_after = deleted_at + 24 hours`, retira a linha da operação normal e a exibe em recuperação com tempo aproximado. O usuário pode restaurá-la antes do vencimento. Depois do vencimento, somente a operação server-side de purge pode destruí-la; a publicação, URL, canonical, versões, hashes, anotações e eventos downstream preservados não são apagados.
+
+O contrato global compartilhado está implementado em `lib/lifecycle/`, com UI comum de confirmação/impacto/recuperação. A migration sucessora `supabase/migrations/0047_global_lifecycle_delete_recovery_purge.sql` foi aplicada no projeto canônico após preflight e post-verifier; o rollback permanece local. O smoke autenticado da UI, restore/purge reais e o pipeline novo completo ainda são pendentes.
+
+## 53. Integridade da leitura lógica e confirmação humana do KeywordDNA — 2026-08-20
+
+O Processo Lógico continua sendo a leitura determinística inicial, não a verdade semântica final. A decomposição reconhece relações como `a domicílio`, preserva a entidade central sem incorporar o modificador e usa sinais de serviço como `manicure` e `pedicure` para detectar o nicho quando houver evidência textual. A intenção externa do DataForSEO permanece uma evidência independente e nunca substitui a intenção canônica.
+
+O read-model canônico continua sendo a única projeção consumida pela tabela, Perfil da Keyword, Revisão e Decisão. A leitura usa a proposta lógica, decisões humanas e valores humanos confirmados na precedência definida; não promove valores externos nem fabrica valor para campo ausente.
+
+**Superado pelo adendo de 2026-08-29 (seção final): a revisão humana deixou de ser gate de aprovação, status ou handoff.** O texto abaixo descreve o estado anterior. O gate de revisão humana exigia, antes de `dna_revisao_humana = aprovado` e da transição para decisão final: revisão IA concluída, aplicabilidade do KGR tratada quando o cálculo é possível, toda divergência resolvida, todo enriquecimento tratado e confirmação explícita dos campos estratégicos sem evidência (`Intenção`, `Nicho` e `Funil`). A confirmação explícita pode manter o campo desconhecido; isso registra a decisão humana sem inventar um valor. Um marcador legado de revisão concluída, isoladamente, não libera o status.
+
+Essa regra é aditiva em `analise_semantica.human_review` e usa os campos JSONB existentes. Não cria coluna, migration, provider ou etapa nova.
+
+## 54. Consistência canônica, completude e reabertura da revisão — 2026-08-20
+
+Tabela, Perfil da Keyword, Revisão Humana e Decisão devem consumir o mesmo read-model de uma keyword. A fronteira local é `resolveCanonicalKeywordSnapshot`, que reúne fatos atuais revalidados no Processador, leitura lógica, decisões humanas, maturidade, status editorial e vínculo de publicação sem promover snapshots importados da Descoberta a etapas validadas.
+
+O snapshot separa o score técnico do KGR de sua aplicabilidade. Quando Volume e Resultado atuais permitem o cálculo, o score permanece visível mesmo que a aplicabilidade seja `Não aplicável`; a aplicabilidade não apaga nem altera Resultado, Volume ou KGR. CPC e KD continuam evidências dos providers canônicos, e a intenção externa do DataForSEO permanece independente da intenção canônica.
+
+Intenção, Nicho e Funil possuem estado de completude separado do valor exibido: `resolved`, `confirmed_unknown` ou `unresolved`. Ausência não é convertida em valor inventado. `confirmed_unknown` é uma decisão humana válida e aparece como `Indeterminado`; `unresolved` mantém o campo em aberto no read-model e **não** impede aprovar o status final (adendo de 2026-08-29). A maturidade do DNA mede completude/confiabilidade do processo, não qualidade editorial da keyword.
+
+Uma revisão concluída pode ser reaberta por `Revisar novamente`/`Editar revisão`. A reabertura cria uma cópia de trabalho local, permite editar decisões humanas, enriquecimentos, campos estratégicos e aplicabilidade do KGR, e não executa provider nem altera Volume, Resultado, CPC, KD ou score KGR. Cancelar descarta a cópia e preserva a última consolidação. Sem mudança substantiva não há nova versão artificial; mudança confirmada segue o mecanismo de persistência/histórico já existente.
+
+Este contrato não altera engine lógico, Google Ads, DataForSEO, KGR, IA, APIs, schema ou migrations.
+
+## 55. Preset protegido das colunas Resultados e Volume — 2026-08-20
+
+As tabelas de Descobrir e Processar usam um preset de largura legível para as
+colunas operacionais. `Resultados` começa com `128px` e mínimo de `115px`;
+`Volume` começa com `120px` e mínimo de `105px`. Ambas são colunas protegidas
+na projeção responsiva: as colunas flexíveis e secundárias cedem espaço antes
+delas. Quando o viewport não comportar o conjunto mínimo, o shell da tabela
+mantém sua rolagem horizontal legítima em vez de comprimir esses headers.
+
+KGR, CPC e KD também recebem presets compactos (`88px`, `96px` e `70px` no
+Processador), enquanto Silo/Categoria reduz sua largura padrão para liberar
+espaço. O header de `Resultados` e `Volume` permanece em uma linha com seu
+InfoHint e ordenação. O redimensionamento manual existente continua ativo,
+respeitando os mínimos por coluna.
+
+Não existe persistência de largura no contrato atual
+(`COLUMN_WIDTH_PERSISTENCE_EXISTS = NO`); após F5 o estado inicial volta ao
+novo preset. Nenhum dado, handler, provider, API, schema ou migration é
+alterado por este ajuste.
+
+## 56. Contrato rígido de processamento e estados de execução — 2026-08-20
+
+O Processador somente exibe a conclusão verde de Conferir site, Lógica,
+Volume, Resultados, IA ou Revisar quando o artefato atual é válido para os
+inputs da keyword. Quando a operação exige persistência, a promoção depende de
+persistência e readback canônicos; o retorno normal de um handler, isoladamente,
+não é evidência de conclusão.
+
+`resolveMineradorProcessState()` é a projeção compartilhada entre barra,
+tabela e Perfil. Ela separa `attemptState` (`not_run`, `running`, `success`,
+`failed`) de `artifactState` (`missing`, `current_valid`, `stale`, `invalid`).
+Falhas de provider não limpam o último artefato válido; durante a tentativa e
+após uma falha a UI não o promove como uma nova validação. A implementação usa
+os metadados, hashes e medições existentes e não cria schema ou migration.
+
+Lógica exige metadados atuais do motor; Volume e Resultados exigem medição
+válida do respectivo provider e aceitam zero real sem convertê-lo em ausência;
+KGR é automático e só é atual quando Volume e Resultado atuais permitem o
+cálculo; IA exige as três fases, parse, schema, persistência, readback e hash
+compatível; Revisar exige a revisão humana persistida para o mesmo hash da IA;
+Conferir site somente conclui após confirmação persistida. Uma nova IA torna a
+revisão humana anterior incompatível até nova consolidação.
+
+Na R5 em três fases, a Phase 1 e a Phase 2 são resumos compactos limitados a
+no máximo três itens por categoria, sem thresholds editoriais ou alteração de
+números. Os tetos locais são `1100` tokens de conclusão para Phase 1 e Phase
+2, e `600` para Phase 3. As três fases usam o mesmo envelope de confiabilidade:
+uma chamada inicial e no máximo uma recuperação da própria fase, somente em
+ação DeepSeek explicitamente iniciada pelo usuário. Truncamento recupera a
+mesma fase; schema inválido só pode usar o reparo estrutural único da Phase 3.
+Fases válidas nunca são reexecutadas por falha posterior. Tentativas, tokens,
+modelo, fase, status, custo e identificadores de execução são registrados na
+Usage/progresso. Não há fallback de provider ou modelo.
+
+## 57. Convergência do pipeline e contrato obrigatório de saída — 2026-08-20
+
+O Processo Lógico é independente da revisão R5. Cada execução lógica persiste,
+no JSONB semântico existente, `logical_output_contract` versão `r1`. O
+contrato cobre Intenção, Nicho, Funil e os demais campos lógicos do KeywordDNA;
+cada campo precisa ser `value`, `explicit_unknown`, `ambiguous` ou `pending`.
+Ausência silenciosa, `undefined`, path perdido ou valor inventado não satisfaz
+o contrato.
+
+`Lógica ✓` só é promovida depois de engine, contrato completo, persistência,
+readback e freshness do input atuais. Uma reexecução calcula uma nova proposta
+antes de substituir a atual; falha preserva o artefato válido anterior e não
+promove a tentativa a verde.
+
+Cada clique de processo possui `executionRequestId`. Notices, progresso,
+tentativas e Usage carregam a correlação; estados verdes derivam do último
+readback/execução válida, nunca de um notice antigo. A IA não cria silenciosamente
+Intenção, Nicho ou Funil ausentes da Lógica.
+
+## 58. Consolidação semântica do KeywordDNA — regra canônica e rollout front-first — 2026-08-28
+
+O Minerador continua proprietário da qualificação individual da keyword. A Leitura Lógica é a primeira interpretação determinística; Google Ads expressa demanda; e a Qualificação Semântica fecha as dimensões independentes de **Intenção** e **Funil** quando houver evidência adequada. A Revisão Humana resolve somente as decisões humanas cabíveis. A Decisão reúne demanda, competição, KGR, semântica, revisão, status e proveniência.
+
+Intenção e Funil são e permanecem eixos independentes. Funil não é derivado de Intenção, nem a intenção `Local` promove automaticamente `BOFU`. Após Lógica concluída, uma ausência semântica final é apresentada como `Indefinido`, nunca como `Pendente`.
+
+A IA é revisora e fonte de enriquecimento contextual: não define nem vota a Intenção/Funil canônicos. Uma futura camada de plano de apresentação da keyword por IA também é contextual e não recebe autoridade semântica, editorial ou de status.
+
+A futura SERP semântica explícita do Minerador é uma evidência individual e externa. Quando sua coleta, targeting e evidência forem válidos e conclusivos, ela fecha a Intenção e/ou o Funil da keyword. A atuação humana nesse caso é validar ou invalidar a evidência — por exemplo, query, targeting, coleta ou qualidade inválidos — e requisitar nova coleta; não substituir arbitrariamente uma SERP válida e conclusiva. Uma SERP inconclusiva não inventa valor canônico.
+
+`Resultados`/allintitle e Keyword Overview DataForSEO continuam evidências quantitativas e não são, por si, essa qualificação semântica. KGR permanece um processo independente, derivado somente de Volume e Resultado. O card DataForSEO ter sido removido do Perfil é composição visual, não remoção de fatos, proveniência ou processo.
+
+As três utilizações de SERP permanecem separadas: qualificação individual no Minerador, compatibilidade de formação no Arquiteto e investigação do artigo no Radar. O mesmo snapshot não é evidência independente em dois consumidores; uma SERP materialmente nova no Arquiteto apenas sinaliza revisão upstream, sem alterar o KeywordDNA. O handoff futuro deve entregar uma versão consolidada, imutável e referenciável do KeywordDNA; o Arquiteto lê Intenção/Funil upstream e não os reclassifica silenciosamente.
+
+O front aprovado nesta etapa é somente uma cópia de trabalho: preview local e layout não equivalem a SERP real, consolidação persistida, versão imutável ou handoff real. O contrato estrutural, a persistência e o rollout correspondente continuam sujeitos à SDD e ao adendo específico.
+
+## 59. IA do Minerador — Apresentação Contextual da keyword para a Marca — 2026-08-28
+
+A IA do Minerador é uma camada **opcional** de **Apresentação Contextual da keyword para a Marca**. A pergunta operacional que ela responde é "Como esta Marca deve apresentar este tema?", nunca "Qual é a intenção desta busca?". Nenhum processo do Minerador depende da sua execução.
+
+A apresentação pode consumir a keyword/tema original, o contexto autorizado da Marca, a Voz da Marca disponível, o BrandDNA aprovado quando existir e outros contextos editoriais autorizados conforme seus contratos forem disponibilizados. Contexto ausente é declarado como lacuna e nunca inventado.
+
+A Voz da Marca é resolvida exclusivamente dentro da própria `brandId`. Nome, slug isolado, owner ou qualquer outra Brand não são fallback. Disponibilidade de uma Skill e aprovação editorial são conceitos distintos: uma Skill disponível para uso não é, por isso, uma Skill aprovada, e o lifecycle real da versão consumida é preservado na proveniência da execução.
+
+O BrandDNA aprovado acrescenta contexto quando disponível. Sua ausência é registrada como lacuna, não impede o uso de uma Voz da Marca disponível e não autoriza fallback para `marcas.dna_diretrizes`.
+
+O output canônico é `ContextualPresentation { text }`: orientação editorial compacta. Não é ArticleDNA, ContentPlan, ContentDocument, artigo pronto, post pronto nem roteiro pronto.
+
+A camada não possui autoridade canônica: `AI_CAN_DEFINE_INTENT = NO`, `AI_CAN_DEFINE_FUNNEL = NO`, `AI_CAN_CLASSIFY_SERP = NO`, `AI_CAN_DECIDE_KGR = NO`, `AI_CAN_CHANGE_STATUS = NO`, `AI_CAN_CHANGE_ARCHITECTURE = NO`. A Apresentação Contextual não altera o KeywordDNA.
+
+Volume, Resultados, KD, KGR, Intenção, Funil, SERP e status editorial não são insumos de elaboração desta camada; permanecem nos seus contratos próprios do Minerador.
+
+O semantic review R5 deixou de ser o papel operacional do processo IA. Artefatos históricos podem ser preservados, mas o fluxo corrente não produz concordâncias IA × Lógica, divergências R5, enriquecimentos R5 nem decisões de Intenção/Funil originadas pela IA.
+
+A IA é acionada somente por ação explícita do usuário no processo IA da barra canônica. Não há execução automática em mount, abertura do Perfil, F5 ou testes automatizados, e o painel consumidor não possui gatilho próprio.
+
+Executar ou reexecutar a IA não invalida Lógica, Volume, Resultados, Revisão ou qualquer outro processo: proveniência não implica stale cross-process.
+
+A eventual persistência e versionamento da Apresentação Contextual exige contrato próprio e **não** pode reutilizar `ai_review` R5. O desenho definitivo pertence à SDD específica registrada no backlog.
+
+## 60. Aprovação humana sem gates editoriais e independência dos processos — adendo de 2026-08-29
+
+Aprovar é uma **decisão humana explícita sobre o estado atual da keyword**, não um certificado de que todos os processos deram verde. A aprovação exige apenas integridade técnica: keyword existente e não excluída, `brandId` correto, usuário autorizado e ação explícita. Nenhum gate editorial adicional.
+
+É permitido aprovar com SERP conclusiva, mista, fraca ou ausente; com IA executada ou não; com revisão executada ou não; com KGR aplicável, não aplicável ou não decidido. Aprovar **não** converte SERP mista em conclusiva, não fecha Intenção ou Funil e não altera nenhum artefato de processo.
+
+`APPROVAL_ALWAYS_AVAILABLE = YES` · `SERP_REQUIRED_FOR_APPROVAL = NO` · `REVIEW_REQUIRED_FOR_APPROVAL = NO` · `AI_REQUIRED_FOR_APPROVAL = NO` · `KGR_REQUIRED_FOR_APPROVAL = NO`. As mesmas negativas valem para status e para o handoff ao Arquiteto, onde permanecem apenas a Brand ativa e o status editorial.
+
+Reexecutar um processo cria uma nova versão do artefato **daquele processo** e não invalida, apaga nem torna stale nenhum outro. A única dependência legítima é `RESULTS_OR_VOLUME_MAY_RECALCULATE_KGR = YES`. Aprovação, revisão, seleção e linha expandida sobrevivem a qualquer reexecução, e repetir teste **não** exige excluir a keyword: os artifacts são versionados e append-only.
+
+A Revisão Humana deixa de ser gate e passa a existir apenas quando há decisão humana concreta disponível — hoje, a aplicabilidade do KGR. Sem decisão pendente, a UI declara ausência de pendência em vez de cobrar uma revisão inexistente.
+
+O handoff transporta honestamente o que existe: quando a SERP não conclui, `intent` e `funnel` viajam nulos com `semanticState = non_conclusive`; quando conclui, viajam preenchidos com `semanticState = conclusive`. Nenhum valor é inventado para liberar o fluxo.
+
+Restaurar qualquer um desses gates exige nova decisão explícita de produto.

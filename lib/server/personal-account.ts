@@ -16,7 +16,7 @@ export async function getCanonicalPersonalAccount() {
   }
   const [brands, agencies] = await Promise.all([listCanonicalAccessibleBrands("marca"), listCanonicalAccessibleAgencies()]);
   const metadata = user.data.user.user_metadata || {};
-  const name = typeof metadata.full_name === "string" ? metadata.full_name : typeof metadata.name === "string" ? metadata.name : null;
+  const name = typeof metadata.full_name === "string" ? metadata.full_name : typeof metadata.name === "string" ? metadata.name : typeof metadata.display_name === "string" ? metadata.display_name : null;
   const image = typeof metadata.avatar_url === "string" ? metadata.avatar_url : null;
   return {
     actorUserId,

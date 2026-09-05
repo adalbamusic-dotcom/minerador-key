@@ -1,5 +1,253 @@
 # Backlog — Minerador
 
+## Aplicabilidade do KGR na planilha e em lote — 2026-09-03
+
+- [x] Mostrar na coluna KGR o score técnico e o seletor da decisão humana de
+  aplicabilidade, reutilizando a ação `kgr` da Revisão Humana.
+- [x] Oferecer a decisão de aplicabilidade em lote na barra inferior, ao lado
+  do Status, com persistência por keyword, readback e resumo do que mudou.
+- [x] Revisar a spec (seção 22) e os testes que fixavam a tabela como
+  informativa para KGR.
+- [x] Oferecer `Concluir revisão` em lote na barra inferior, antes do Status,
+  com o contrato da conclusão individual e sem transformar a revisão em gate.
+- [ ] Decidir explicitamente se a mudança de status para `aprovado` deve
+  exigir revisão concluída; hoje `REVIEW_REQUIRED_FOR_APPROVAL = NO` (adendo de
+  2026-08-29) e nenhum gate foi restaurado.
+- [ ] Validar manualmente na UI com marca real: altura das linhas com o
+  seletor, seleção em lote grande e comportamento com revisão em edição aberta.
+
+## Google Ads — diagnóstico OAuth e cache de token — 2026-09-03
+
+- [ ] Capturar `error` e `error_description` do endpoint de token em
+  `lib/google/ads/auth.ts` para o aviso do Minerador informar `invalid_grant`
+  em vez da mensagem genérica de autorização.
+- [ ] Corrigir o cache de access token, que usa o objeto de configuração como
+  chave e nunca reaproveita o token entre requisições do resolver canônico.
+- [ ] Conferir no Google Cloud se a tela de consentimento OAuth está em modo
+  Testing; se estiver, publicar para evitar expiração do refresh token em 7 dias.
+
+## Consolidação canônica da infraestrutura — 2026-08-25
+
+- [x] Registrar DataForSEO, DeepSeek, Google Cloud, YouTube e Telegram como
+  infraestrutura compartilhada, sem provider ou quota por módulo.
+- [x] Registrar a governança Plataforma → Agência → Marca e o tenant
+  `brandId = public.marcas.id`.
+- [x] Registrar `READY_FOR_RADAR_DEVELOPMENT = YES` e o consumo de SERP
+  compartilhada pelo Radar.
+- [ ] Manter separado o gate de operação real, persistência/readback e o gate
+  de ausência do provider SERP legado; não restaurar fallback.
+
+> Entradas posteriores abaixo preservam o backlog de cada fase. Quando uma
+> entrada anterior à consolidação menciona Serper, OpenRouter ou provider por
+> módulo, ela é histórica/supersedida pela seção acima e não é autorização de
+> runtime, fallback ou remoção de dados.
+
+## Google Ads — rotação OAuth e resolver canônico — 2026-08-24
+
+- [x] Separar configuração estática server-side do OAuth Refresh Token
+  operacional no Secret Store.
+- [x] Fazer Discovery, Metrics e health check usarem o resolver canônico sem
+  fallback automático para ENV.
+- [x] Manter a UI Admin limitada à rotação do refresh token, com Connection
+  `pending` e health check explícito após a troca.
+- [x] Cobrir criação de nova referência, preservação da referência anterior
+  quando o ponteiro falha, ausência de exposição do segredo e readback seguro.
+- [ ] Executar rotação, health check e smoke autenticado reais após configurar
+  a Connection; nenhuma chamada paga foi executada nesta implementação.
+
+## R5 Semantic Reviewer — leitura independente e gate de valor semântico — 2026-08-21
+
+- [x] Registrar na spec permanente do Minerador que a leitura semântica
+  independente precede a comparação com a hipótese da Lógica.
+- [x] Fazer a keyword original ser o objeto primário da Phase 1 e separar a
+  hipótese lógica da interpretação independente; disponibilizar `rawKeyword` nas
+  três fases sem repetir o snapshot semântico completo.
+- [x] Aplicar gate determinístico de no-op e de evidência de baixa qualidade antes
+  de expandir divergências para o contrato R6/R6.1; preservar ambiguidade legítima
+  e impedir BOFU especulativo baseado apenas em técnica/produto.
+- [x] Reforçar Phase 2/3 para usar métricas somente como evidência relacionada,
+  sem transformar Volume, Resultado, KGR ou KD em proxy semântico.
+- [x] Expor telemetria interna de valor por `executionRequestId`, sem migration,
+  schema persistido novo ou ruído técnico no usuário final; manter budgets
+  `1100/1100/600` e as três chamadas existentes.
+- [x] Cobrir no-op, BOFU especulativo, BOFU local explícito, MOFU comparativo,
+  ambiguidade + TOFU e resumo de revisão sem correções.
+- [ ] Executar smoke autenticado real e confirmar, com resposta atual do provider,
+  a qualidade semântica, uso, persistência, readback e a preservação das métricas.
+
+`R5_INDEPENDENT_READING_IMPLEMENTED = YES`;
+`R5_SEMANTIC_QUALITY_SMOKE = PENDING`.
+
+## R5/R6 — auditoria vertical de execução e separação de estados — 2026-08-21
+
+- [x] Rastrear no código a origem da linha `Não informado → Não informado` e
+  confirmar que ela vinha do adaptador R6 de campos estratégicos desconhecidos,
+  não de uma nova heurística R5.
+- [x] Separar `DECISÕES PENDENTES` de `CORREÇÕES PROPOSTAS`, preservando
+  `Confirmar desconhecido`, `Editar`, o gate humano e o readback existentes.
+- [x] Manter concordâncias compactadas/recolhidas e adicionar regressão para a
+  distinção visual entre divergência real e campo sem leitura consolidada.
+- [ ] Repetir smoke autenticado com `executionRequestId`, `unhas em acrilico` e
+  uma keyword com divergência lexical concreta; conferir payloads das fases,
+  telemetria Value Gate, `ai_review` persistido e readback.
+
+`EXECUTION_AUDITED = STATIC_CODE_TRACE_ONLY`;
+`NO_OP_ORIGIN = R6_STRATEGIC_UNKNOWN_ROW_MAPPING`;
+`READY_FOR_NEXT_REAL_SMOKE = YES`.
+
+## Histórico — Fase 3 — preflight e runbook para homologação real DeepSeek — 2026-08-19
+
+- [x] Criar o preflight remoto read-only com result set único, sem secrets,
+  TEMP, DDL ou DML.
+- [x] Confirmar a fundação remota, capability `ai_generation` com
+  `unit_name = request`, Secret Store/ACL e Usage sem modificar o estado.
+- [x] Registrar o mecanismo real de Connection, secret, health, R5 e Usage no
+  [runbook da Fase 3](../compartilhado/runbook-homologacao-deepseek-fase-3-2026-08-19.md).
+- [x] Implementar a configuração administrativa local DeepSeek: API Key
+  password, endpoint/modelo canônicos, writer server-side, Secret Store,
+  Connection idempotente e readback sanitizado.
+- [ ] Resolver o provider DeepSeek ausente e a Connection OpenRouter ativa em
+  etapa remota/autorizada separada.
+- [ ] Executar manualmente a configuração DeepSeek pela UI e confirmar o
+  readback remoto, sem duplicar provider/Connection.
+- [ ] Executar health check real, smoke R5 autenticado e readback de Usage;
+  somente depois avaliar homologação.
+
+`DEEPSEEK_REMOTE_PREFLIGHT = BLOCKED`; `DEEPSEEK_PROVIDER_HOMOLOGATED = NOT_RUN`.
+
+## R5 DeepSeek Oficial — contrato de divergências e non-thinking — 2026-08-19
+
+- [x] Auditar os `max_tokens` reais enviados pelas três fases: `700/700/600`.
+- [x] Forçar as três fases a enviar `thinking.type = disabled`, sem alterar o
+  default global da Connection ou outros módulos.
+- [x] Alinhar o contrato da Phase 1: toda divergência exige
+  `evidenceUsed: string[]` não vazio, com exemplo JSON explícito e somente
+  evidências lógicas.
+- [x] Adicionar diagnóstico sanitizado por issue Zod (`path`, `code`,
+  `expected`, tipo `received`) sem persistir conteúdo do modelo.
+- [x] Expor no diagnóstico sanitizado o budget solicitado, modo efetivo,
+  configuração explícita e `reasoningEffort` quando disponível.
+- [x] Preservar JSON mode, `JSON.parse`, Zod, truncamento, `ai_review` anterior,
+  execução sequencial e zero fallback OpenRouter.
+- [ ] Executar novo smoke autenticado/pago manual com `unhas de gel decoradas`,
+  confirmando `finishReason = stop`, `reasoning = false`, contrato Phase 1,
+  conteúdo, usage e readback.
+
+## Histórico — Fase 2 — cutover local OpenRouter → DeepSeek — 2026-08-19
+
+- [x] Implementar a camada compartilhada oficial DeepSeek com Connection,
+  segredo server-side, modelo allowlisted, JSON mode e validação local.
+- [x] Migrar R5 e consumidores estruturados sem fallback, roteamento paralelo
+  ou troca automática de provider; preservar Usage e estado anterior em falha.
+- [x] Retirar OpenRouter de resolver ativo, rotas ENV, Admin/UI e health check;
+  manter somente histórico e fixtures/guards explícitos.
+- [x] Cobrir ausência de Connection, provider divergente, JSON vazio,
+  truncamento, schema inválido, thinking por operação e zero requisições
+  OpenRouter em fixtures.
+- [ ] Confirmar remotamente a Connection DeepSeek, secret, capability,
+  autorização e modelo permitido.
+- [ ] Executar health check e smoke autenticado/pago manual, com readback de
+  `ai_review` e Usage; somente depois avaliar homologação real.
+
+`DEEPSEEK_LOCAL_CUTOVER = PASS`; `DEEPSEEK_PROVIDER_HOMOLOGATED = NOT_RUN`.
+
+Itens posteriores que citam OpenRouter pertencem a backlog/histórico de fases
+anteriores e não reabrem provider, fallback ou smoke real nesta fase.
+
+## Histórico — Fase 1: adendo e auditoria OpenRouter → DeepSeek — 2026-08-19
+
+- [x] Registrar DeepSeek Official API como destino canônico da primeira fase,
+  em Connection `platform`, com modelo explícito e sem fallback.
+- [x] Mapear resolver ENV, Connection/Secret Store, capability, binding,
+  Usage, consumidores, Admin/UI, testes, fixtures e documentação OpenRouter.
+- [x] Confirmar localmente que o schema `integration_*` é genérico e não exige
+  migration específica para representar DeepSeek.
+- [x] Preservar Usage, Connections e referências históricas OpenRouter; não
+  alterar runtime, schema, dados ou provider nesta etapa.
+- [ ] Confirmar catálogo remoto e Connection DeepSeek em auditoria read-only.
+- [ ] Implementar o adapter/resolver DeepSeek somente após aprovação da fase
+  seguinte, migrando R5, rotas legadas, Arquiteto e Redator sem fallback.
+- [ ] Executar smoke autenticado manual explícito e provar zero requisições
+  OpenRouter antes de qualquer limpeza histórica.
+
+## Integridade de reprocessamento e freshness do Processador — 2026-08-19
+
+- [x] Separar a identidade do motor lógico (`logicProcessorVersion`) da
+  versão do schema do DNA, sem migration.
+- [x] Reprocessar keywords novas e históricas somente após seleção explícita,
+  com persistência, readback canônico e projeção compartilhada na tabela e no
+  KeywordDNA.
+- [x] Impedir que snapshots da Descoberta, estado React ou projeções locais
+  promovam lógica, Volume, Resultados ou KGR como etapas validadas.
+- [x] Recalcular/projetar KGR somente com Volume e Resultado atuais válidos;
+  preservar zero e `null` de KD sem conversão para zero.
+- [ ] Executar smoke autenticado do Processador com uma keyword nova e uma
+  histórica, revalidar Volume/Resultados e conferir visualmente a consistência
+  tabela → KeywordDNA após reload.
+
+
+## Histórico — Minerador R5.2 pré-cutover — 2026-08-19
+
+- [x] Remover `provider.require_parameters = true` do request das três fases;
+  o routing normal do OpenRouter volta a operar sem fixar provider ou modelo.
+- [x] Preservar `session_id`, reasoning best-effort, `json_schema`/`json_object`,
+  validação server-side e budgets `700/700/600`.
+- [x] Diagnosticar HTTP 4xx com `error.code`, `error.type`, mensagem sanitizada
+  e categoria operacional quando reconhecível, sem credencial, prompt ou
+  headers.
+- [x] Confirmar localmente o request sem filtro e o diagnóstico de 404
+  pré-provider; contagem de endpoints elegíveis não está disponível sem
+  consulta adicional do OpenRouter.
+- [ ] Executar smoke autenticado com `campanha de trafego pago`; o primeiro
+  gate esperado é HTTP 200, provider/modelo/request ID resolvidos e Fase 1
+  iniciada.
+
+- [x] Remover `reviewStatus` dos schemas intermediários da Fase 1 e Fase 2; manter o campo somente na síntese/final `ai_review`.
+- [x] Tornar os schemas por fase estritos e manter o prompt de cada fase limitado às suas próprias chaves.
+- [x] Resolver reasoning pelo metadata do modelo: `enabled:false` quando opcional e menor effort suportado quando obrigatório, sem regra por slug.
+- [x] Enviar `session_id` estável nas três chamadas da mesma execução sem impor `provider.require_parameters`.
+- [x] Expor usage sanitizado por fase: prompt, completion, total, reasoning, custo, limite e finish reason.
+- [x] Validar localmente sem chamada paga, provider fixo, fallback, migration ou alteração do schema persistido.
+- [ ] Executar smoke autenticado com `campanha de trafego pago` e depois `marketing digital`; confirmar schema, routing, tokens, persistência e readback.
+
+## Minerador R5.2 — revisão IA em três fases — 2026-08-19
+
+- [x] Separar a revisão por keyword em semântica, evidências normalizadas e síntese final, sem reenviar o universo bruto da keyword em cada fase.
+- [x] Manter Google Ads, DataForSEO, KGR e o KeywordDNA lógico como fatos de entrada; a IA não altera números nem substitui a intenção canônica.
+- [x] Expandir a síntese no servidor para o contrato `ai_review`/`fieldReviews[]` existente e persistir somente após as três fases e a validação final.
+- [x] Integrar o progresso NDJSON à bulk bar existente com `1/3`, `2/3` e `3/3`, registrar usage/diagnóstico por chamada e respeitar a capability de reasoning do modelo selecionado sem fallback.
+- [x] Validar localmente sem chamadas pagas, migration ou mudança de schema/provider.
+- [ ] Executar smoke autenticado real com `campanha de trafego pago`; confirmar três chamadas OpenRouter, usage por fase, readback e invariância das métricas.
+- [ ] Corrigir separadamente o diagnóstico `DATAFORSEO_PARTIAL_RESULTS` para distinguir allintitle de Keyword Overview por suboperação.
+
+## Concluído localmente — R5 OpenRouter: diagnóstico real de truncamento — 2026-08-19
+
+- [x] Preservar no diagnóstico sanitizado modelo solicitado/retornado,
+  `finishReason`, `nativeFinishReason`, presença/tamanho de conteúdo, usage,
+  reasoning tokens, formato resolvido e metadados de provider/roteamento sem
+  prompt, reasoning, headers ou credencial.
+- [x] Diferenciar o parâmetro realmente enviado: `max_tokens` ou
+  `max_completion_tokens`, incluindo o limite efetivo.
+- [x] Propagar o diagnóstico da resposta R5 para o `copyPayload` do notice do
+  bulk; antes desta correção `handleBatchSemanticReview` descartava
+  `resData.diagnostic` ao montar `failedDetails`.
+- [x] Manter o request operacional atual em `max_tokens = 1800`; nenhuma troca
+  de modelo/provider, aumento de orçamento, retry ou fallback foi aplicada
+  antes do novo smoke.
+- [ ] Executar uma única tentativa autenticada pelo usuário com `marketing
+  digital` e devolver o diagnóstico copiado para confirmar a causa real. Não
+  repetir automaticamente nem executar chamada paga nesta etapa local.
+
+## Concluído localmente — KD DataForSEO no Processador — 2026-08-19
+
+- [x] Adicionada a evidência `keyword_difficulty` do DataForSEO Labs ao passo `Resultados`, com proveniência/histórico no JSONB existente e sem migration/schema.
+- [x] KD exposto na tabela, DataForSEO, Revisão Humana, Decisão e detalhes técnicos; ordenação numérica preserva zero e mantém ausentes no fim.
+- [x] Discovery/importação permanece distinta de revalidação oficial; IA recebe KD como contexto somente leitura e não cria regra editorial, limiar ou aprovação automática.
+- [ ] Executar smoke autenticado real do Processador para confirmar resposta Keyword Overview, custo/usage, persistência e readback visual. A chamada complementar é necessária porque o endpoint SERP allintitle atual não entrega KD.
+
+- [ ] Aplicar, somente após autorização específica e preflight remoto aprovado, `0044_google_ads_metrics_time_zone_compatibility.sql`; executar imediatamente o post-verifier bound.
+- [ ] Publicar a correção local de readback da Discovery e repetir pela utilização normal somente Descobrir Keywords e Atualizar métricas, sem nova auditoria global.
+
 ## Concluído — 0043 Historical Metrics Google Ads
 
 - [x] Preflight remoto e baseline bound aprovados.
@@ -798,7 +1046,7 @@ Current gate: `GOOGLE_ADS_CANONICAL_SCHEMA_GAP`; no code, migration, backfill, p
 - [x] Retirar da Marca a exigência de Customer ID para pesquisa e preservar o contrato de conta publicitária futura.
 - [ ] Configurar o Research Customer ID real da Plataforma e executar os smokes pagos de Discovery e Metrics pela Marca Adalba.
 
-## Google Ads — infraestrutura fixa por env — 2026-08-16
+## Histórico superseded — Google Ads — infraestrutura fixa por env — 2026-08-16
 
 - [x] Implementar `getGoogleAdsPlatformConfig()` como fonte exclusiva server-side para Google Ads.
 - [x] Retirar o formulário de credenciais Google Ads da UI ativa e manter o health check explícito.
@@ -808,7 +1056,7 @@ Current gate: `GOOGLE_ADS_CANONICAL_SCHEMA_GAP`; no code, migration, backfill, p
 - [x] Fechar o diagnóstico pós-`apiRequestStarted` com classificação de transporte, OAuth, HTTP, sucesso e erro interno; o smoke final com MCC como Research Customer retornou sucesso.
 - [ ] Definir em etapa posterior o ledger de Usage para infraestrutura env; o schema atual exige `connection_id` e não foi alterado nesta task.
 
-Estado local: `GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV`; `SCHEMA_CHANGE_REQUIRED = NO`; `DATABASE_SCHEMA_CHANGED = NO`.
+Estado local histórico de 2026-08-16: `GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV`; a regra vigente de 2026-08-24 separa estáticos em ENV do OAuth Refresh Token no Secret Store. `SCHEMA_CHANGE_REQUIRED = NO`; `DATABASE_SCHEMA_CHANGED = NO`.
 
 ## Google Ads Research — pacote de migration preparado localmente — 2026-08-16
 
@@ -825,3 +1073,440 @@ Estado local: `GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV`; `SCHEMA_CHANGE_REQUIRED
 - [x] Post-verifier bound e readback independente retornaram `PASS`; nenhum smoke de provider foi executado ou ficou necessário para fechar esta migration.
 
 `0043_CLOSED = YES`.
+
+## Notification Center global — 2026-08-18
+
+- [x] Transformar o sino em histórico operacional compartilhado por escopo,
+  com abertura, reabertura, badge de não lidos, leitura individual/coletiva e
+  preservação ao fechar o painel.
+- [x] Conectar bridges aditivos aos avisos existentes das áreas de Minerador,
+  Arquiteto, Radar, Marca, Planejador, Publicações, Conta e Admin.
+- [x] Manter feedback inline compatível e tornar o painel a apresentação padrão;
+  toast externo só existe por solicitação explícita.
+- [x] Separar histórico por módulo e `brandId`/`agencyId`, sem usar slug como
+  identidade ou misturar Brand/áreas.
+- [x] Abrir automaticamente o sino para preview curto de aviso novo, fechar
+  sem apagar e interromper o timer durante interação.
+- [x] Validar contrato e comportamento com testes focados, sem provider real,
+  escrita remota ou alteração estrutural.
+- [x] Executar validação manual autenticada em Minerador, Arquiteto e Radar;
+  auto-open, auto-close, isolamento e retorno ao histórico foram confirmados.
+- [ ] Avaliar posteriormente persistência entre sessões; F5/logout/login
+  continuam fora do escopo atual.
+
+Estado local: `NOTIFICATION_CENTER_GLOBAL = IMPLEMENTED_SESSION_SCOPED`;
+`DATABASE_CHANGED = NO`; `SCHEMA_CHANGE_REQUIRED = NO`.
+
+## Minerador R1.2 — Perfil da Keyword por processo — 2026-08-18
+
+- [x] Organizar o perfil em uma caixa Bento por processo, sem caixa individual por campo.
+- [x] Separar identidade, leitura lógica, Google Ads, DataForSEO, KGR, revisão IA, decisão humana e proveniência técnica.
+- [x] Manter históricos, request IDs, versões, payloads e campos internos preservados em detalhes recolhidos por padrão.
+- [x] Cobrir a ordem visual e a separação dos dados com testes focados; nenhuma migration, API, provider ou contrato de persistência foi alterado.
+- [ ] Executar smoke autenticado e revisão visual do perfil expandido em viewport estreito, desktop e dark mode.
+
+## Minerador R1.3 — compactação visual do Perfil da Keyword — 2026-08-18
+
+- [x] Omitir placeholders e campos vazios, mantendo situação, confiança e estados de processo legíveis.
+- [x] Condicionar URL/canonical ao contexto publicado e retirar origem técnica do bloco principal.
+- [x] Mostrar Google Ads/DataForSEO, KGR e IA em estados vazios compactos; expandir somente com dados reais.
+- [x] Aplicar Bento responsivo por processo, wrapping seguro e decisão humana compacta sem repetir pendências.
+- [x] Preservar payloads, históricos, request IDs, versões e proveniência em detalhes técnicos recolhidos.
+- [x] Validar localmente com 28 testes focados, lint direcionado, guard visual e `git diff --check`.
+- [ ] Executar smoke visual autenticado em 360/768/1024/1440, light/dark mode, e confirmar interação real do acordeão.
+
+## Minerador R5 — OpenRouter compact output — 2026-08-19
+
+- [x] Compactar a saída do provider para concordâncias por nome, divergências,
+  enriquecimentos e ambiguidades remanescentes.
+- [x] Expandir a resposta compacta no servidor para o `fieldReviews[]` já
+  consumido pelo `ai_review`, checklist humano R6/R6.1 e KeywordDNA.
+- [x] Diagnosticar truncamento com `finish_reason`, limite enviado, uso de
+  tokens, reasoning sanitizado, modelo e modo de `response_format`.
+- [x] Adaptar `json_schema`/`json_object` pela capacidade declarada sem trocar
+  modelo/provider e bloquear explicitamente quando nenhum formato mínimo é
+  compatível.
+- [x] Validar localmente sem chamada paga: testes focados e loader canônico
+  aprovados; schema, migration, provider, Connection e métricas quantitativas
+  preservados.
+- [ ] Repetir smoke autenticado real de R5 com `marketing digital`; confirmar
+  `finish_reason = stop`, readback de `ai_review` e Volume/Resultado/KGR/CPC
+  invariáveis. Não repetir automaticamente enquanto o smoke não for autorizado.
+## Descoberta — filtros SEO por Resultado e KD — 2026-08-19
+
+- [x] Adicionar intervalos locais mínimo/máximo para Resultado e KD sem chamada automática DataForSEO.
+- [x] Reutilizar a ação explícita existente de enriquecimento DataForSEO para atualizar Resultado + Keyword Overview/KD nas candidatas selecionadas.
+- [x] Preservar zero, `null`, snapshot da Descoberta, tenant `brandId` e revalidação posterior no Processador.
+- [x] Cobrir filtros, ausência, ausência≠zero, separação de providers e ausência de `fetch` nos controles locais com testes direcionados.
+- [ ] Executar smoke autenticado: pesquisar no Google Ads, medir explicitamente SEO em lote, aplicar Resultado/KD e confirmar visualmente em 360/768/1024/1440 e dark mode.
+
+## Descoberta — reorganização da bulk bar — 2026-08-19
+
+- [x] Ordenar a barra como `Atualizar métricas`, `Medir resultados` e `Enviar selecionadas ao Processador`.
+- [x] Manter contadores à esquerda e `Limpar seleção` separado à direita.
+- [x] Remover `Exportar` somente da bulk bar da Descoberta.
+- [x] Manter medições opcionais e permitir envio sem volume, Resultado ou KD previamente medidos.
+- [x] Cobrir ordem, ações explícitas, ausência de chamadas automáticas e ausência de gate no envio.
+- [ ] Executar smoke autenticado visual e confirmar o handoff com snapshots presentes e ausentes.
+
+## Minerador — distribuição inicial de InfoHint — 2026-08-19
+
+- [x] Reutilizar o `InfoHint` global sem criar tooltip local, query selector ou implementação por página.
+- [x] Explicar conceitos e métricas do primeiro lote: Volume, KGR, Intenção, Nicho, Funil, Silo/Categoria, Status e Perfil da keyword.
+- [x] Explicar ações operacionais sem alterar handlers: Processar lógica, Atualizar métricas, Revisar com IA, Revisar e Enviar ao Arquiteto.
+- [x] Manter pré-condições, erros e controles autoexplicativos visíveis sem depender do tooltip.
+- [x] Validar localmente com testes focados, lint direcionado, guard visual e `git diff --check`.
+- [ ] Executar revisão manual autenticada em Minerador/Descoberta, incluindo hover, foco por teclado, dark mode e viewport estreito.
+- [ ] Distribuir o próximo lote no Arquiteto somente após essa revisão manual; depois seguir Radar, Planejador, Redator, Publicações e Marca.
+
+## Minerador — exclusão e ciclo de vida da keyword — 2026-08-20
+
+- [x] Auditar FKs e referências de medições, descoberta, proveniência, DNA, workflow e publicação antes da exclusão.
+- [x] Bloquear exclusão definitiva quando houver histórico ou publicação e exigir readback antes de refletir remoção na UI.
+- [x] Remover a exclusão automática de duplicatas durante o carregamento e manter a ação explícita tenant-scoped.
+- [x] Preservar medições, histórico, proveniência e dados de outras marcas; não adicionar `CASCADE`, migration ou ferramenta de purge.
+- [ ] Definir em SDD um contrato próprio de arquivamento/soft delete, caso o produto precise retirar keywords com histórico sem exclusão definitiva.
+
+## Minerador — homologação / purge controlado de dados de teste — 2026-08-20
+
+- [x] Preparar dry-run read-only com `PURGE_PLAN`, IDs exatos, contagens de dependências e inventário de FKs.
+- [x] Preparar helper manual isolado, Admin-only, gated por homologação, com `approvedPlanHash`, subtransação por keyword e readback.
+- [x] Bloquear publicação, histórico protegido, cross-brand, drift e referências estruturais desconhecidas; preservar o botão normal `Excluir`.
+- [x] Validar localmente com testes estáticos, sem provider, SQL remoto, schema, migration ou escrita de dados.
+- [ ] Executar manualmente somente após revisão do plano e autorização operacional dos IDs de teste; nenhum purge é disparado ao abrir o Minerador.
+
+## Minerador — pre-delete dependency audit — 2026-08-20
+
+- [x] Remover do catálogo ativo o descriptor legado `brand_site_keyword_candidates`, cuja migration 0004 permanece preparada/não aplicada e sem consumidor remoto canônico confirmado.
+- [x] Manter dependências canônicas obrigatórias em fail-closed e distinguir `clear`, dependência bloqueante e falha de auditoria.
+- [x] Registrar diagnóstico sanitizado com chave, tabela, coluna, código e categoria do erro sem expor segredos.
+- [x] Validar localmente com 13 testes focados, sem provider, SQL remoto, migration, schema, purge ou dados.
+- [ ] Executar smoke autenticado do botão normal `Excluir` e confirmar readback no ambiente alvo.
+
+## Minerador — camada InfoHint e barra de processos — 2026-08-20
+
+- [x] Reutilizar o `InfoHint` compartilhado nos seis processos, com glyph independente do botão e textos funcionais curtos.
+- [x] Aplicar glyph visível somente aos conceitos de tabela/Descoberta que precisam de atenção; manter headers e campos comuns como triggers textuais sem glyph adicional.
+- [x] Dar forma compacta e perceptível a cada processo, preservando estado ativo, disabled, progresso e handlers existentes.
+- [x] Cobrir Processor/Descobrir com 10 testes focados e passar o guard visual.
+- [ ] Executar homologação visual autenticada em 360/768/1024/1440, light/dark mode, foco, Escape e tooltip próximo às bordas.
+
+## Plataforma/Minerador — lifecycle global e exclusão canônica — aplicado — 2026-08-20
+
+- [x] Formalizar que keyword não publicada exige confirmação digitada pelo nome exato e pode receber hard delete imediato, sem bloqueio por processamento, métricas, proveniência, DNA ou histórico próprio.
+- [x] Formalizar que somente publicação server-side real — vínculo formal de site ou linhagem até `PublicationRecord` — ativa tombstone recuperável de 24 horas; status legado isolado não basta.
+- [x] Preparar RPC transacional de hard delete, remoção recuperável, restore e purge vencido; manter `partialDelete = false` e sem CASCADE genérico.
+- [x] Limpar dependências próprias, preservar referências compartilhadas, artefatos editoriais, hashes, anotações, eventos append-only e publicação downstream.
+- [x] Retirar tombstones das grades/consumidores operacionais e adicionar painel de recuperação com restore e tempo aproximado, sem countdown por segundo.
+- [x] Implementar a camada compartilhada `lib/lifecycle/`, confirmação digitada/impacto/recuperação e integração do Minerador sem `delete` client-side.
+- [x] Validar manualmente a variante hard delete autenticada em viewport mobile, tablet e desktop, incluindo match, Enter inválido, Escape e limpeza ao reabrir; a variante publicada permanece dependente de registro publicado elegível.
+- [x] Aplicar manualmente 0047 somente após preflight, baseline/fingerprint e drift gate; post-verifier remoto passou antes do cleanup.
+- [x] Limpar a allowlist de homologação com a RPC tipada: três raízes removidas, dois ArticleDNA preservados, zero PublicationRecord tocado e readback PASS.
+- [ ] Executar smoke autenticado de não publicado processado, publicado formal recuperável, restore dentro de 24 horas e purge somente após vencimento.
+- [ ] Adotar handlers de lifecycle nos demais módulos editoriais quando seus contratos de exclusão forem habilitados; não inferir publicação por labels ou workflow.
+- [ ] Executar o pipeline novo gradualmente em Minerador → Arquiteto → Radar → Planejador → Redator → Publicações.
+
+## Minerador — respiro horizontal das barras superiores do Descobrir — 2026-08-20
+
+- [x] Aplicar padding horizontal responsivo somente nas barras superiores de busca e filtros do Descobrir.
+- [x] Preservar tabela/planilha, handlers, filtros funcionais, InfoHints, providers, APIs e persistência.
+- [x] Adicionar teste focado para o wrapper de espaçamento e os invariantes da tabela.
+- [ ] Homologar visualmente em 360/768/1024/1440, incluindo dark mode e ausência de overflow.
+
+## Minerador — integridade de intenção, nicho, funil e confirmação humana — 2026-08-20
+
+- [x] Corrigir os sinais determinísticos de `a domicilio` e de serviço de estética sem transformar heurística em verdade semântica final.
+- [x] Preservar a projeção pelo read-model canônico e manter a intenção externa do DataForSEO independente da intenção lógica/humana.
+- [x] Bloquear conclusão humana enquanto divergências, enriquecimentos, aplicabilidade KGR ou campos estratégicos sem evidência permanecerem sem decisão.
+- [x] Permitir confirmação explícita de desconhecido para Intenção, Nicho e Funil sem inventar valor.
+- [x] Fazer o status final consumir confirmação humana válida, não apenas marcador legado de revisão.
+- [x] Cobrir engine, read-model, revisão humana, freshness, revalidação e R5.2 com testes locais; nenhum provider pago foi chamado.
+- [ ] Repetir smoke autenticado da keyword real `manicure e pedicure a domicilio`, conferir persistência/readback remoto e validar visualmente a revisão em desktop/mobile.
+
+## Minerador — consistência canônica, completude e reabertura da revisão — 2026-08-20
+
+- [x] Criar um snapshot/read-model único para tabela, Perfil da Keyword, Revisão Humana e Decisão.
+- [x] Preservar o score KGR atual quando calculável e separar score de aplicabilidade, sem alterar o cálculo.
+- [x] Projetar CPC, KD, Resultado, Volume, intenção canônica, intenção externa, Nicho e Funil pelos mesmos dados canônicos.
+- [x] Diferenciar campo resolvido, indeterminado confirmado e não resolvido; impedir confirmação com pendência estratégica.
+- [x] Permitir `Revisar novamente` e `Cancelar` em cópia de trabalho, sem reexecutar provider nem alterar medições.
+- [x] Cobrir o contrato com testes focados, lint central e guard visual.
+- [ ] Executar smoke autenticado com keyword nova, reload/readback e validação visual da consistência entre as quatro superfícies.
+
+## Plataforma — ajuda contextual global Fase 1 — 2026-08-20
+
+- [x] Criar o contrato tipado compartilhado para áreas, tópicos, busca local e
+  ausência explícita de conteúdo, sem fallback cruzado.
+- [x] Integrar trigger contextual na `GlobalTopbar` somente nas áreas
+  tenantizadas Marca → Publicações, preservando Conta/Admin fora do escopo.
+- [x] Implementar drawer responsivo com busca, detalhe, Escape, foco, portal e
+  tokens visuais existentes.
+- [x] Publicar o piloto local do Minerador com Sobre, Conferir site, Lógica,
+  Volume, Resultados, IA e Revisão Humana, sem alterar handlers ou providers.
+- [x] Atualizar o contrato compartilhado, o sistema visual e a skill
+  `app-visual-system`.
+- [ ] Criar e validar conteúdo próprio das demais áreas; não liberar fallback
+  global enquanto os contratos locais não estiverem confirmados.
+- [ ] Repetir homologação visual autenticada em light mode quando o ambiente
+  oferecer o alternador de tema.
+
+## Minerador — proteção de largura de Resultados e Volume — 2026-08-20
+
+- [x] Preservar `Resultados` e `Volume` com presets e mínimos legíveis nas
+  tabelas de Descobrir e Processar.
+- [x] Fazer a projeção responsiva reduzir primeiro colunas flexíveis e
+  secundárias, mantendo scroll horizontal quando necessário.
+- [x] Manter InfoHint, ordenação, resize manual, handlers, dados e tabela sem
+  redesign funcional.
+- [x] Validar o contrato local com 28 testes focados, guard visual e diff check.
+- [ ] Executar screenshot autenticado em 1024/1440/1920px, F5 e resize manual;
+  não criar persistência de largura sem requisito posterior explícito.
+
+## Minerador — contrato rígido de processamento e estabilização R5 — 2026-08-20
+
+- [x] Centralizar a completude de site, lógica, Volume, Resultados, KGR, IA e Revisão em `resolveMineradorProcessState()`.
+- [x] Diferenciar tentativa (`not_run/running/success/failed`) de artefato (`missing/current_valid/stale/invalid`) sem apagar evidência anterior em falha.
+- [x] Exigir validação e readback antes da promoção verde; conferir `measuredAt` nas revalidações Google Ads/DataForSEO.
+- [x] Manter KGR automático dependente de Volume e Resultado atuais, aceitando zero real e sem botão próprio.
+- [x] Vincular a conclusão da IA ao parse/schema/readback e ao `inputHash` atual; vincular a Revisão Humana à mesma revisão de IA.
+- [x] Compactar a Phase 2 do R5 para três itens curtos por categoria e teto local de 1100 tokens.
+- [x] Adicionar no máximo um retry de truncamento da Phase 2, somente em DeepSeek e ação explicitamente iniciada pelo usuário, com Usage/progresso identificáveis.
+- [x] Manter três fases, provider/modelo/connection e contratos Google Ads/DataForSEO sem fallback ou migration.
+- [ ] Executar smoke autenticado real com `unhas de gel preço`, confirmar Phase 2 PASS, persistência/readback e check verde da IA.
+- [ ] Validar no navegador que truncamento duplo mantém dados anteriores, deixa retry manual disponível e não deixa a keyword presa em estado intermediário.
+- [ ] Avaliar futuramente se a distinção de tentativa após reload exige evolução estrutural; não criar schema neste bloco.
+
+## Minerador — rollout de conteúdo da ajuda contextual — 2026-08-20
+
+- [x] Expandir o catálogo local com tópicos gerais, Descobrir, Processar,
+  Perfil da Keyword e Revisão/Decisão.
+- [x] Preservar os IDs do piloto e adicionar aliases de busca para os termos
+  reais da interface.
+- [x] Manter a ajuda como orientação: não criar fallback, provider, chamada
+  paga, alteração de dados ou decisão automática.
+- [x] Validar o catálogo com 5 testes focados e o guard do sistema visual.
+- [ ] Homologar visualmente o conteúdo no drawer autenticado em Descobrir e
+  Processar, em 360/768/1024/1440 e nos temas disponíveis.
+- [ ] Avaliar uma extensão futura de escopo por aba somente em bloco próprio,
+  caso o contrato compartilhado passe a suportar esse contexto sem quebrar as
+  áreas existentes.
+
+## Minerador — R5 Phase 3: alinhamento de schema e reparo único — 2026-08-20
+
+- [x] Auditar o schema Zod real e manter o contrato estrito sem permissividade
+  ou campos semânticos inventados.
+- [x] Alinhar o prompt da Phase 3 com os objetos reais de divergência e
+  enriquecimento e incluir exemplo JSON mínimo válido.
+- [x] Implementar no máximo uma tentativa `repair_1` somente para schema
+  inválido da Phase 3 em ação explícita; não repetir Phase 1/2.
+- [x] Preservar distinção entre schema inválido, JSON inválido e truncamento.
+- [x] Adicionar `responseShape`, `schemaIssuePaths` e `schemaIssues` ao
+  diagnóstico/Usage sanitizado.
+- [x] Cobrir saída válida, reparo bem-sucedido, reparo inválido, ausência de
+  ação explícita e truncamento com 20 testes focados.
+- [ ] Executar smoke autenticado real com DeepSeek para `manicure proximo a
+  mim`, confirmar repair/readback e check verde da IA.
+
+## Minerador — convergência do pipeline e confiabilidade R5 — 2026-08-20
+
+- [x] Centralizar as três fases no envelope compartilhado com teto de duas
+  chamadas por fase e recuperação somente na fase que falhou.
+- [x] Compactar a Phase 1 para o contrato necessário à Phase 3/R6 e elevar seu
+  teto local para 1100 tokens; manter Phase 2 em 1100 e Phase 3 em 600.
+- [x] Preservar o reparo estrutural único da Phase 3 e impedir loops ou
+  reinício de fases já válidas.
+- [x] Registrar fase, tentativa, retry, tokens, custo, provider/modelo e
+  `executionRequestId` no progresso/Usage; sucesso só após persistência e
+  readback finais.
+- [x] Exigir `logical_output_contract` completo para promover Lógica e para os
+  gates que a consomem, sem inventar valores ausentes.
+- [x] Preservar artefato lógico anterior quando uma reexecução falha e cobrir
+  a convergência com fixtures sem provider pago.
+- [ ] Executar smoke autenticado real do pipeline completo e confirmar retry,
+  persistência, readback e correlação dos notices após reload.
+
+## Minerador — Funil lógico sem `Pendente` final — 2026-08-20
+
+- [x] Resolver TOFU para termos amplos reconhecíveis sem sinal mais forte,
+  inclusive com Intenção ambígua.
+- [x] Resolver MOFU/BOFU por comparação, consideração, ação, contratação,
+  preço e localidade explícita.
+- [x] Registrar desconhecido semântico pelo contrato lógico existente e
+  apresentar `Indefinido` no read-model comum.
+- [x] Adicionar InfoHint visível à coluna Funil e atualizar o tópico detalhado
+  do ContextHelp.
+- [x] Cobrir a mudança com testes de lógica, contrato, read-model e tabela.
+- [ ] Fazer smoke visual autenticado e confirmar a leitura em todos os
+  consumidores do KeywordDNA.
+
+## Minerador — Funil: InfoHint visível e label de apresentação — 2026-08-21
+
+- [x] Manter glyph InfoHint global visível no header da coluna Funil com a
+  explicação completa de TOFU, MOFU e BOFU.
+- [x] Impedir propagação do clique do InfoHint para qualquer ordenação da
+  tabela, sem criar tooltip local ou alterar handlers de sort.
+- [x] Atualizar o read-model de apresentação para `Indefinido` quando a Lógica
+  terminou sem evidência suficiente; `Pendente` continua reservado a processo
+  incompleto.
+- [x] Atualizar o tópico do ContextHelp para “Entender TOFU, MOFU e BOFU” e
+  incluir aliases de funil, jornada, topo/meio/fundo e Indefinido.
+- [ ] Homologar visualmente o glyph, tooltip e label em 360/768/1024/1440px,
+  nos temas claro/escuro e com cabeçalho de tabela em uso.
+
+## Minerador — R5 como revisora semântica acionável — 2026-08-21
+
+- [x] Restringir divergências da IA aos campos semânticos revisáveis e manter
+  fatos de Google Ads, DataForSEO, KGR, targeting e identidade somente como
+  evidência imutável.
+- [x] Filtrar divergências que repetem a lógica, sugestões de Funil pendente,
+  fatos medidos, duplicações e enriquecimentos genéricos; limitar
+  enriquecimentos úteis a três itens.
+- [x] Compactar concordâncias na Revisão Humana e deixar correções,
+  enriquecimentos e ambiguidades como o caminho operacional principal.
+- [x] Humanizar referências de evidência na interface e apresentar o Funil
+  processado sem classificação como `Indefinido`.
+- [ ] Executar smoke autenticado real com IA, confirmar divergências úteis,
+  enriquecimentos filtrados, persistência/readback e reabertura sem chamada
+  automática.
+- [ ] Homologar visualmente a Revisão Humana e a proveniência nos breakpoints
+  360/768/1024/1440px e nos temas disponíveis.
+
+## Minerador — R6: artefatos independentes, freshness e revisão humana — 2026-08-24
+
+- [x] Criar SDD e auditoria estrutural sem chamadas de provider, escrita
+  remota, migration ou alteração de runtime.
+- [x] Documentar o acoplamento atual do read-model, os hashes existentes,
+  tentativas locais, readbacks e a preservação de artefatos anteriores.
+- [x] Definir a matriz formal de reprocessamento para Lógica, Volume,
+  Resultados, IA e Revisão.
+- [x] Definir a política de conclusão explícita da Revisão Humana:
+  divergência → `keep_logic`, enriquecimento → `ignore`, desconhecido
+  estratégico → `confirm_unknown`.
+- [ ] Aprovar o SDD antes de alterar o envelope de artefatos, hashes,
+  freshness ou o gate de conclusão humana.
+- [ ] Implementar o contrato aprovado com regressões de independência,
+  preservação, readback, reload e smoke autenticado.
+
+## Próxima sequência — consolidação semântica do KeywordDNA após front-first — 2026-08-28
+
+O Perfil foi validado manualmente pelo usuário como composição front-end. Os itens abaixo são posteriores, independentes e não são considerados entregues por preview local, teste de interface ou cópia de trabalho.
+
+1. [ ] Implementar a qualificação semântica real por SERP no Minerador.
+2. [ ] Executar smoke real de Intenção/Funil com evidência semântica SERP.
+3. [ ] Definir e aprovar critérios de força para a evidência semântica.
+4. [ ] Implementar persistência e versionamento de KeywordDNA consolidado.
+5. [ ] Implementar handoff real Minerador → Arquiteto com versão imutável.
+6. [ ] Implementar consumidor do Arquiteto para a versão consolidada.
+7. [x] Fornecer contexto de marca à IA sem transferir-lhe autoridade canônica; o consumidor contextual local foi implementado sem autoridade canônica.
+8. [x] Criar a Skill de voz da Marca; a fundação persistente e o gabarito `brand_voice` já estão disponíveis.
+9. [x] Implementar plano de apresentação da keyword por IA como saída contextual, não como decisão de Intenção/Funil; smoke real permanece pendente.
+
+## Minerador — primeiro consumo real de Brand Skill por IA — 2026-08-28
+
+- [x] Conectar o Perfil da Keyword à Apresentação Contextual por ação explícita, usando o provider canônico vigente e sem mutar KeywordDNA.
+- [x] Resolver BrandDNA aprovado quando existir e a `brand_voice` corrente válida da mesma Brand, com contexto compacto e proveniência de Skills efetivamente aplicadas.
+- [x] Preservar Intenção/Funil canônicos, fatos medidos, SERP, KGR e decisões humanas fora da autoridade da IA.
+- [x] Tratar ausência de Skill corrente válida como apresentação neutra não bloqueante; rascunhos persistidos entram explicitamente pela política canônica.
+- [ ] Executar smoke autenticado real na Care Glow com a `brand_voice` v1 `draft` e comparar a apresentação com KeywordDNA, BrandDNA (quando disponível) e Skill aplicada.
+- [ ] Definir persistência/versionamento da apresentação somente em tarefa própria, caso o produto aprove a saída como artefato não canônico.
+
+## Minerador — IA contextual congelada e próxima frente estrutural — 2026-08-28
+
+Substitui a entrada parcial anterior desta frente. Smokes reais **PASS** com Care Glow em `skin care noturno`, `retinol principia antes e depois` e `mascara skin care`. Working copy não é persistência: a apresentação existe apenas na sessão.
+
+- [x] Tornar o processo IA a Apresentação Contextual, com gatilho único na barra e sem revisão semântica R5 no fluxo operacional.
+- [x] Consumir a Voz da Marca pela infraestrutura compartilhada da Marca, por `brandId`, com proveniência de versão (`definitionKey`, `versionId`, `versionNumber`, `contentHash`, `lifecycleStatus`).
+- [x] Adotar saída em texto puro do provider com contrato `ContextualPresentation { text }` montado pela aplicação.
+- [x] Manter a IA opcional e sem autoridade sobre Intenção, Funil, SERP, KGR ou status editorial.
+- [x] Retirar Volume, Resultados, KD, KGR, Intenção, Funil, SERP e status editorial dos insumos da apresentação.
+- [x] Corrigir a semântica de lifecycle: disponível para uso não é sinônimo de aprovada.
+- [x] Recovery de conteúdo truncado: `TRUNCATED_EMPTY_CONTENT_RECOVERY` com `MAX_PROVIDER_ATTEMPTS_PER_OPERATION = 2`, sem retry para erros não recuperáveis e com accounting por tentativas reais.
+
+### Próxima frente estrutural — persistência e versionamento da Apresentação Contextual
+
+Status: **REQUIRES_SDD**. Não implementar antes da SDD aprovada. O desenho precisa decidir, no mínimo:
+
+1. [ ] Entidade/artefato proprietário da apresentação — **não reutilizar `ai_review` R5**.
+2. [ ] `brandId` como escopo canônico.
+3. [ ] `keywordId` da apresentação.
+4. [ ] `inputKeywordDnaRef` da execução.
+5. [ ] `text` da apresentação.
+6. [ ] `version` do artefato.
+7. [ ] `contentHash` do conteúdo.
+8. [ ] `appliedSkillRefs` com versão, hash e lifecycle das Skills aplicadas.
+9. [ ] Referência da versão de BrandDNA quando existir.
+10. [ ] Proveniência de execução (provider, modelo, request/operation ids, usage).
+11. [ ] Lifecycle do artefato.
+12. [ ] Imutabilidade da versão publicada.
+13. [ ] Sucessão de versão.
+14. [ ] Rollback aditivo e reversível.
+15. [ ] Handoff downstream.
+16. [ ] Consumo pelo Planejador.
+17. [ ] Consumo pelo Redator.
+
+### Observação não prioritária — orçamento de reasoning
+
+Se as falhas de conteúdo vazio persistirem mesmo após as 2 tentativas, avaliar **A.** completion budget específico da Apresentação Contextual ou **B.** `thinkingMode` explícito para esta operação. Não implementar agora; enquanto o recovery estiver funcionando, isto **não** é débito bloqueante.
+
+### Outras pendências relacionadas
+
+- [ ] BrandDNA aprovado da Care Glow (hoje é lacuna declarada).
+- [ ] Loader canônico server-side de materiais aprovados da Marca.
+- [x] SERP real da Qualificação Semântica para Intenção/Funil canônicos — CALL 3 implementada e smoke real PASS.
+
+### Persistência canônica da Qualificação Semântica — 2026-08-28 · homologada em 2026-08-29
+
+SDD: [sdd-persistencia-qualificacao-semantica-serp-2026-08-28.md](propostas/sdd-persistencia-qualificacao-semantica-serp-2026-08-28.md).
+
+- [x] Aplicar o CHECK de `keyword_semantic_qualification` (operação manual do responsável).
+- [x] Smoke manual de F5 e de outro navegador, sem chamada DataForSEO no read.
+- [x] Keyword inconclusiva mantendo "SERP · Analisada · sem consolidação" após F5.
+- [ ] Smoke do gate de aprovação e do handoff com Qualificação consolidada.
+- [ ] Reprocessar keywords cuja Qualificação existia apenas em sessão (não há backfill: exige nova execução do Resultados).
+- [ ] Avaliar exibição de histórico de versões da Qualificação no Perfil (hoje só a versão corrente é lida).
+
+### SERP advanced + Apresentação Contextual — fechamento de 2026-08-29
+
+Estado canônico em [estado-atual.md](estado-atual.md#minerador--serp-advanced--apresentação-contextual-persistida-estado-homologado--2026-08-29).
+
+Concluído nesta frente:
+
+- [x] CALL 3 da Qualificação Semântica migrada de `regular` para `advanced` (3 chamadas por keyword, sem quarta).
+- [x] Derivação v2 com cobertura e dominância separadas, sinais estruturais e reforço fora do denominador.
+- [x] Persistência e F5 da Qualificação Semântica.
+- [x] CHECK aceitando `keyword_contextual_presentation`.
+- [x] Store da Apresentação: write, readback, v2 com `previous_version_id`, idempotência e isolamento por Marca.
+- [x] Apresentação Contextual sobrevivendo a F5 (fim do "sumiu depois do reload").
+- [x] Thinking desabilitado só nesta operação, com raciocínio zerado medido.
+- [x] Teto do parser da apresentação ajustado para conteúdo válido real (2.200 → 3.200).
+- [x] Domínios de falha da IA separados: geração, resposta e persistência deixaram de se confundir.
+- [x] Overflow horizontal do Perfil (nowrap herdado pelo `td colSpan`).
+- [x] Estado visual da IA: "falhou" deixou de ser exibido como "não executada".
+
+Pendências operacionais desta frente:
+
+- [ ] Validação manual cross-browser da Apresentação Contextual persistida.
+- [ ] F5 do lote de 8 keywords (a geração e a persistência do lote já passaram; a reidratação do lote não foi verificada).
+- [ ] Smoke manual ponta a ponta Minerador → Arquiteto transportando a `presentationRef`.
+- [ ] Validação manual mais ampla de navegação e seleção da planilha (só o overflow foi reproduzido e corrigido).
+- [ ] Acumular amostra real de SERPs para eventual recalibração ou consolidação dos thresholds da derivação v2 — hoje `PROVISIONAL_HEURISTIC`.
+- [ ] Reconciliação do migration ledger (frente separada; `db push` não é seguro enquanto ela existir).
+
+## Aprovação humana sem gates editoriais e independência dos processos — 2026-08-29
+
+Estado canônico em [estado-atual.md](estado-atual.md#minerador--aprovação-humana-sem-gates-editoriais-e-independência-dos-processos--2026-08-29). SDD em [propostas/sdd-aprovacao-humana-sem-gates-editoriais-2026-08-29.md](propostas/sdd-aprovacao-humana-sem-gates-editoriais-2026-08-29.md).
+
+Concluído nesta frente:
+
+- [x] Aprovar/rejeitar deixou de exigir Revisão Humana, SERP persistida e SERP consolidada.
+- [x] `gateReason()` do handoff reduzido a integridade técnica (Brand ativa + status editorial).
+- [x] Recusas `INVALID_ARTIFACT` por evidência semântica removidas de `prepareCanonicalHandoff`.
+- [x] `lib/minerador/serp-canonical-evidence.ts` removido: o vocabulário de impedimento não tem mais consumidor.
+- [x] `semanticState` (`conclusive` | `non_conclusive`) no contrato do handoff, com `intent`/`funnel` honestamente nulos quando a SERP não conclui.
+- [x] Estado canônico da Revisão Humana (`no_decision_needed` | `decision_available` | `decisions_recorded`); "Revisão pendente" saiu do KeywordDNA.
+- [x] Cobertura A–Q em `tests/minerador-aprovacao-sem-gates.test.mts`, incluindo a regressão de `retinol principia antes e depois`.
+
+Pendências operacionais desta frente:
+
+- [ ] Validação manual na UI autenticada: aprovar keyword com SERP mista, sem IA e sem revisão; reprocessar IA e SERP e confirmar que seleção, linha expandida, aprovação e revisão sobrevivem.
+- [ ] Revisar se a Revisão Humana deve ganhar novas decisões humanas reais além da aplicabilidade do KGR — hoje o painel é majoritariamente leitura.

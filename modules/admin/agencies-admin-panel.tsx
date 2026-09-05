@@ -5,6 +5,7 @@ import { Loader2, MailPlus, X } from "lucide-react";
 import { GlobalTopbarPageControls } from "@/components/global-topbar";
 import { GLOBAL_TOPBAR_ACTION_CONTROL } from "@/components/global-topbar-control";
 import { internalButton as btn, internalField, internalSurface as card } from "@/components/editorial/internal-page-visual";
+import { useNoticeBridge } from "@/components/global-notice-center";
 
 type AccessPeriod = { planCode: string; origin: string; startsAt: string; endsAt: string | null; status: string };
 type Agency = { id: string; name: string; agencyRef: string; status: string; accessStatus?: "READY" | "PENDING" | "REQUIRES_ATTENTION"; ownerIdentityStatus?: "IDENTITY_FOUND" | "CONFIRMATION_PENDING" | "IDENTITY_NOT_FOUND"; accessPeriod?: AccessPeriod | null };
@@ -72,6 +73,7 @@ export default function AgenciesAdminPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  useNoticeBridge({ notice, module: "admin", area: "Agências", title: "Administração · Agências", fallbackSeverity: "INFO" });
   const [form, setForm] = useState({ agencyName: "", responsibleName: "", destinationEmail: "", accessExpiresAt: "" });
 
   const load = async () => {

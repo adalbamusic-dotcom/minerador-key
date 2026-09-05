@@ -10,13 +10,14 @@ As conclusões abaixo distinguem código local, API interna, persistência
 remota prevista pelo código, estado local e mock/placeholder. Nenhum estado
 remoto atual de provider foi revalidado nesta auditoria.
 
-### Precedência documental — Google Ads (2026-08-16)
+### Precedência documental — Google Ads (revisada em 2026-08-24)
 
 As linhas de Google Ads abaixo são um retrato local/histórico da interface e
-dos consumidores na data da auditoria. O destino arquitetural posterior é
-`GOOGLE_ADS_CONFIG_SOURCE = PLATFORM_ENV`, não uma quota, grant, binding ou
-Connection por módulo; os fatos de implementação e os smokes continuam
-separados. DataForSEO e OpenRouter permanecem Connections governáveis.
+dos consumidores na data da auditoria. O contrato atual separa configuração
+estática em ENV do OAuth Refresh Token no Secret Store, apontado pela
+Connection global e rotacionável somente pelo Admin global. DataForSEO e
+OpenRouter permanecem Connections governáveis; fatos de implementação e smokes
+continuam separados.
 
 ## Matriz de superfícies
 

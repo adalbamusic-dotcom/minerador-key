@@ -8,7 +8,6 @@ import {
   applyPlatformHomologationPolicy,
   bootstrapPlatformCapabilityCatalog,
   configureSupportedPlatformProvider,
-  updateOpenRouterModel,
   configurePlatformGoogleAdsConnection,
   updatePlatformGoogleAdsResearchCustomerId,
   healthCheckPlatformIntegrationConnection,
@@ -17,10 +16,15 @@ import {
   readPlatformIntegrations,
   updatePlatformIntegrationCapability,
   updatePlatformIntegrationProvider,
+  rotatePlatformGoogleAdsRefreshToken,
 } from "@/lib/server/platform-integrations-admin";
+import { configureTelegramPlatformWebhook, TelegramWebhookAdminError } from "@/lib/server/telegram/admin";
 
 function errorResponse(error: unknown) {
   if (error instanceof PlatformIntegrationsAdminError) {
+    return NextResponse.json({ error: error.message, code: error.code, diagnostic: error.diagnostics, providerRequestRef: error.providerRequestRef }, { status: error.status });
+  }
+  if (error instanceof TelegramWebhookAdminError) {
     return NextResponse.json({ error: error.message, code: error.code, diagnostic: error.diagnostics, providerRequestRef: error.providerRequestRef }, { status: error.status });
   }
   const mapped = authzErrorResponse(error);
@@ -77,6 +81,12 @@ export async function POST(request: Request) {
           label: body.label,
         });
         break;
+      case "rotate_google_ads_refresh_token":
+        result = await rotatePlatformGoogleAdsRefreshToken(client, admin.actorUserId, {
+          refreshToken: body.refreshToken,
+          label: body.label,
+        });
+        break;
       case "update_google_ads_research_customer_id":
         result = await updatePlatformGoogleAdsResearchCustomerId(client, {
           connectionId: body.connectionId,
@@ -90,6 +100,9 @@ export async function POST(request: Request) {
           label: body.label,
           managerCustomerId: body.managerCustomerId,
           researchCustomerId: body.researchCustomerId,
+          bucketName: body.bucketName,
+          youtubeHealthVideoId: body.youtubeHealthVideoId,
+          telegramWebhookUrl: body.telegramWebhookUrl,
           secretPayload: body.secretPayload,
         });
         break;
@@ -97,10 +110,11 @@ export async function POST(request: Request) {
         result = await healthCheckPlatformIntegrationConnection(client, {
           connectionId: body.connectionId,
           providerKey: body.providerKey,
+          healthOperation: body.healthOperation,
         });
         break;
-      case "update_openrouter_model":
-        result = await updateOpenRouterModel(client, { connectionId: body.connectionId, model: body.model });
+      case "configure_telegram_webhook":
+        result = await configureTelegramPlatformWebhook({ client, connectionId: String(body.connectionId || ""), url: String(body.url || "") });
         break;
       default:
         return NextResponse.json({ error: "Ação de integração inválida.", code: "INTEGRATIONS_INVALID_ACTION" }, { status: 400 });

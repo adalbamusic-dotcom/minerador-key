@@ -74,7 +74,7 @@ O export local é um resumo sanitizado, com count e fingerprint do conjunto comp
 | `perfis_before_0005_20260724` | 1 | `adad261679f64bd820ba9dfab3fdeae2` | `perfis_before_0005_20260724.jsonl` |
 | `policies_before_0005_20260724` | 2 | `f95208610ded30018af00f5db9340eac` | `policies_before_0005_20260724.jsonl` |
 
-Total: **443 linhas**. Cada arquivo passou por parse JSONL, contagem local e SHA-256; os hashes estão no `export-manifest.json`. As duas cópias de 147 keywords não são idênticas: os fingerprints divergem.
+Total canônico corrigido: **303 linhas** (`147 + 147 + 5 + 1 + 1 + 2`). O total anterior de 443 foi um erro de agregação documental introduzido junto das mesmas seis contagens; nenhum arquivo, tabela ou snapshot sustenta 140 linhas adicionais. Cada arquivo passou por parse JSONL, contagem local e SHA-256; os hashes estão no `export-manifest.json`. As duas cópias de 147 keywords não são idênticas: os fingerprints divergem.
 
 Catálogo remoto: zero FKs de entrada, zero FKs de saída, zero triggers de usuário e zero dependências de functions/triggers/rewrite nas seis tabelas. Busca local: zero consumidores de runtime; existem apenas referências históricas em um script de snapshot, um teste de migration e documentação. Os nomes e essas referências confirmam a finalidade de recuperação da migration 0005 falha em 2026-07-24.
 

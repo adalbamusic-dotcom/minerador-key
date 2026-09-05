@@ -1,5 +1,16 @@
 import { z } from "zod";
 import { MAX_KEYWORDS_PER_ARTICLE } from "./domain-rules.ts";
+import { TerritoryRefSchema } from "./territory-ref.ts";
+import { TerritoryNarrativeSchema } from "./territory-narrative.ts";
+import { SiloWorkingCopyRefSchema } from "./silo-working-copy-record.ts";
+import {
+  ARTICLE_TERMINAL_COMPATIBILITY,
+  ARTICLE_TERMINAL_FUNNELS,
+  ARTICLE_TERMINAL_INTENTS,
+  ARTICLE_TERMINAL_KGR,
+  ARTICLE_TERMINAL_KGR_APPLICABILITY,
+  ARTICLE_TERMINAL_PROTECTIONS,
+} from "./article-classification-closure.ts";
 
 export const ConfidenceSchema = z.number().min(0).max(1);
 export const IntentSchema = z.string().trim().min(1).nullable().optional();
@@ -80,10 +91,14 @@ export const GoogleAdsMonthlySearchVolumeSchema = z.object({ year: z.number().in
 export const GoogleAdsDemandEvidenceSchema = z.object({
   source: z.literal("google_ads"), providerVersion: z.string().min(1).optional(), measuredAt: z.string().datetime().optional(),
   averageMonthlySearches: z.number().int().nonnegative().nullable(), monthlySearchVolumes: z.array(GoogleAdsMonthlySearchVolumeSchema),
-  trend: z.number().nullable().optional(), seasonality: z.record(z.string(), z.unknown()).nullable().optional(),
+  metricStatus: z.string().min(1).nullable().optional(), currencyCode: z.string().min(1).nullable().optional(), timeZone: z.string().min(1).nullable().optional(),
+  targeting: z.record(z.string(), z.unknown()).nullable().optional(), providerCanonicalKeyword: z.string().min(1).nullable().optional(),
+  matchedRequestedKeywords: z.array(z.string()).nullable().optional(), unmatchedRequestedKeywords: z.array(z.string()).nullable().optional(),
+  trend: z.union([z.number(), z.string().min(1)]).nullable().optional(), seasonality: z.record(z.string(), z.unknown()).nullable().optional(),
+  peakMonths: z.array(z.unknown()).nullable().optional(), recentGrowth: z.union([z.number(), z.string().min(1)]).nullable().optional(), historyCoverageMonths: z.number().int().nonnegative().nullable().optional(),
   competitionAds: z.string().nullable(), competitionIndexAds: z.number().int().nonnegative().nullable(),
   lowTopOfPageBidMicros: z.string().nullable(), highTopOfPageBidMicros: z.string().nullable(), averageCpcMicros: z.string().nullable(),
-  closeVariants: z.array(z.string()), normalizedCloseVariants: z.array(z.string()), snapshotRef: z.string().min(1).optional(),
+  closeVariants: z.array(z.string()), normalizedCloseVariants: z.array(z.string()), snapshotRef: z.string().min(1).nullable().optional(),
 }).strict();
 export type GoogleAdsDemandEvidence = z.infer<typeof GoogleAdsDemandEvidenceSchema>;
 export const KeywordDemandEvidenceSchema = z.object({ historicalKgr: HistoricalKgrEvidenceSchema.optional(), googleAds: GoogleAdsDemandEvidenceSchema.optional() }).strict();
@@ -158,12 +173,57 @@ export const ArticleArchitectureStatusSchema = z.enum([
 ]);
 export type ArticleArchitectureStatus = z.infer<typeof ArticleArchitectureStatusSchema>;
 
+/**
+ * A decisão pertence ao artigo formado, mas sua cópia de trabalho fica no
+ * payload da keyword que atualmente exerce o papel de Principal. Os campos
+ * são aditivos para que identidades KGR históricas continuem legíveis.
+ */
+export const ArticleKgrDecisionSchema = z.enum([
+  "YES",
+  "NO",
+  "PENDING_HUMAN_DECISION",
+  "PENDING_APPLICABILITY",
+  "ABSENT",
+]);
+export type ArticleKgrDecision = z.infer<typeof ArticleKgrDecisionSchema>;
+
+export const ArticleKgrDecisionSourceSchema = z.enum([
+  "FULL_KGR_RULE",
+  "HUMAN_DECISION",
+  "CONFIRMED_KGR_BINDING",
+  "KEYWORD_APPLICABILITY_RULE",
+  "AWAITING_HUMAN_DECISION",
+  "AWAITING_KEYWORD_APPLICABILITY",
+  "MISSING_KGR_SCORE",
+]);
+export type ArticleKgrDecisionSource = z.infer<typeof ArticleKgrDecisionSourceSchema>;
+
+export const ArticleKgrDecisionHistoryEntrySchema = z.object({
+  decision: z.enum(["YES", "NO"]),
+  source: z.literal("HUMAN_DECISION"),
+  principalKeywordId: z.string().min(1),
+  principalKeywordDnaId: z.string().min(1).optional(),
+  principalKeywordDnaVersionId: z.string().min(1).optional(),
+  principalKeywordDnaContentHash: ContentHashSchema.optional(),
+  principalKgrScore: z.number().nonnegative().nullable().optional(),
+  principalKgrApplicability: z.enum(["pending", "applicable", "not_applicable"]).optional(),
+  actorUserId: z.string().min(1),
+  decidedAt: z.string().datetime(),
+  reason: z.string().min(1),
+}).strict();
+export type ArticleKgrDecisionHistoryEntry = z.infer<typeof ArticleKgrDecisionHistoryEntrySchema>;
+
 export const ArticleKgrIdentitySchema = z.object({
   isKgrArticle: z.boolean(),
   source: z.enum(["minerador", "confirmed_import", "human_confirmation", "legacy", "unknown"]),
   principalKeywordDnaId: z.string().min(1).optional(),
+  brandId: z.string().min(1).optional(),
+  articleId: z.string().min(1).optional(),
+  workflowItemId: z.string().min(1).optional(),
   boundSlug: z.string().min(1).optional(),
   bindingStatus: z.enum(["confirmed", "candidate", "conflict", "not_applicable"]),
+  principalKeywordDnaVersionId: z.string().min(1).optional(),
+  principalKeywordDnaContentHash: ContentHashSchema.optional(),
   status: z.enum(["confirmed", "candidate", "conflict", "not_kgr", "unknown"]).optional(),
   primaryKeywordId: z.string().min(1).optional(),
   primaryVolume: z.number().nullable().optional(),
@@ -171,6 +231,7 @@ export const ArticleKgrIdentitySchema = z.object({
   purpose: z.string().min(1).optional(),
   evidenceKeywordDnaIds: z.array(z.string().min(1)).optional(),
   kgrValue: z.number().nullable().optional(),
+  principalKgrApplicability: z.enum(["pending", "applicable", "not_applicable"]).optional(),
   kgrTier: z.string().min(1).optional(),
   confirmedAt: z.string().datetime().optional(),
   confirmedBy: z.string().min(1).optional(),
@@ -178,6 +239,15 @@ export const ArticleKgrIdentitySchema = z.object({
   sourceHash: ContentHashSchema.optional(),
   evidence: z.array(z.record(z.string(), z.unknown())).optional(),
   humanDecision: z.record(z.string(), z.unknown()).optional(),
+  decision: ArticleKgrDecisionSchema.optional(),
+  decisionSource: ArticleKgrDecisionSourceSchema.optional(),
+  decisionReason: z.string().min(1).optional(),
+  decisionContractVersion: z.string().min(1).optional(),
+  decisionHistory: z.array(ArticleKgrDecisionHistoryEntrySchema).optional(),
+  decidedBy: z.string().min(1).optional(),
+  decidedAt: z.string().datetime().optional(),
+  evaluatedAt: z.string().datetime().optional(),
+  evaluatedBy: z.string().min(1).optional(),
 }).strict();
 export type ArticleKgrIdentity = z.infer<typeof ArticleKgrIdentitySchema>;
 
@@ -324,6 +394,26 @@ export const ArticleControlContextSchema = z.object({
 }).strict();
 export type ArticleControlContext = z.infer<typeof ArticleControlContextSchema>;
 
+export const SiloCandidateMarkSchema = z.object({
+  status: z.enum(["candidate", "not_candidate"]),
+  origin: z.enum(["deterministic", "human"]),
+  score: ConfidenceSchema.nullable(),
+  reasons: z.array(z.string().min(1)).min(1),
+  signals: z.object({
+    volumeRank: ConfidenceSchema.nullable(),
+    volumeHigh: z.boolean(),
+    resultsPresent: z.boolean(),
+    shortTerm: z.boolean(),
+    broadEntity: z.boolean(),
+    capacityPotential: z.boolean(),
+    kgrOpportunity: z.boolean(),
+    commercialSecondary: z.boolean(),
+    specificNeed: z.boolean(),
+    relatedKeywordCount: z.number().int().nonnegative(),
+  }).strict(),
+}).strict();
+export type SiloCandidateMark = z.infer<typeof SiloCandidateMarkSchema>;
+
 export const ArchitectKeywordSchema = z.object({
   id: z.string().min(1),
   keyword: z.string().trim().min(1),
@@ -350,6 +440,10 @@ export const ArchitectKeywordSchema = z.object({
   primaryKeywordPolicy: PrimaryKeywordPolicySchema.optional(),
   primaryKeywordPolicyContext: PrimaryKeywordPolicyContextSchema.optional(),
   demandEvidence: KeywordDemandEvidenceSchema.optional(),
+  /** Proveniência já materializada na working copy; não substitui a origem remota. */
+  keywordDnaSnapshot: z.record(z.string(), z.unknown()).optional(),
+  /** Hipótese determinística da Fase 2; não é aprovação nem SiloDNA. */
+  siloCandidate: SiloCandidateMarkSchema.optional(),
 });
 
 export type ArchitectKeyword = z.infer<typeof ArchitectKeywordSchema>;
@@ -390,11 +484,20 @@ export const GroupEvidenceSchema = z.object({
   combined: ConfidenceSchema,
 });
 
+export const ProvisionalGroupingReasonSchema = z.object({
+  code: z.enum(["same_intent", "same_entity", "same_need", "semantic_variation", "possible_separation", "ambiguity", "conflict"]),
+  kind: z.enum(["support", "review", "conflict"]),
+  message: z.string().min(1),
+}).strict();
+export type ProvisionalGroupingReason = z.infer<typeof ProvisionalGroupingReasonSchema>;
+
 export const ProvisionalArticleGroupSchema = z.object({
   id: z.string().min(1),
   keywordIds: z.array(z.string().min(1)).min(1).max(MAX_KEYWORDS_PER_ARTICLE),
   keywords: z.array(ArchitectKeywordSchema).min(1).max(MAX_KEYWORDS_PER_ARTICLE),
   publishedAnchorId: z.string().nullable(),
+  /** Território que originou a proposta. Ausente = grupo legado, pré-2B. */
+  territoryRef: TerritoryRefSchema.optional(),
   suggestedSiloId: z.string().nullable(),
   suggestedSiloName: z.string().nullable(),
   evidence: GroupEvidenceSchema,
@@ -403,6 +506,7 @@ export const ProvisionalArticleGroupSchema = z.object({
   principalSuggestion: PrincipalSuggestionSchema,
   roles: z.record(z.string(), KeywordRoleSchema),
   suggestedHierarchy: z.enum(["Pilar", "Suporte", "Reforco Narrativo"]),
+  groupingReasons: z.array(ProvisionalGroupingReasonSchema).optional(),
   architectureStatus: ArticleArchitectureStatusSchema.optional(),
   kgrIdentity: ArticleKgrIdentitySchema.optional(),
 });
@@ -469,6 +573,8 @@ export const KeywordReviewCandidateSchema = z.object({
   editorialType: z.string().nullable(),
   confidence: ConfidenceSchema.nullable(),
   isPublished: z.boolean(),
+  /** Snapshot de entrada preservado para a revisão estrutural; não é resposta da IA. */
+  keywordDnaSnapshot: z.record(z.string(), z.unknown()).optional(),
 }).strict();
 export type KeywordReviewCandidate = z.infer<typeof KeywordReviewCandidateSchema>;
 
@@ -546,10 +652,48 @@ export const KeywordArticleDecisionSchema = z.object({
 });
 export type KeywordArticleDecision = z.infer<typeof KeywordArticleDecisionSchema>;
 
+export const AiArchitectureReviewStageSchema = z.enum([
+  "diagnosticar_grupos",
+  "revisar_pertencimento",
+  "revisar_papeis",
+  "revisar_canibalizacao",
+  "consolidar_proposta",
+]);
+export type AiArchitectureReviewStage = z.infer<typeof AiArchitectureReviewStageSchema>;
+
+export const AiArchitectureReviewStageTraceSchema = z.object({
+  stage: AiArchitectureReviewStageSchema,
+  status: z.enum(["completed", "evidence_insufficient"]),
+  keywordIds: z.array(z.string().min(1)),
+  groupIds: z.array(z.string().min(1)),
+  note: z.string().min(1),
+}).strict();
+export type AiArchitectureReviewStageTrace = z.infer<typeof AiArchitectureReviewStageTraceSchema>;
+
+/** Diff compacto da proposta. A resposta nunca precisa repetir o KeywordDNA. */
+export const KeywordArticleReviewDiffSchema = z.object({
+  keywordId: z.string().min(1),
+  sourceGroupId: z.string().min(1),
+  targetGroupId: z.string().min(1).nullable(),
+  newArticleKey: z.string().min(1).nullable(),
+  fromRole: z.enum(["principal", "secundaria", "reforco_narrativo", "candidata_divisao"]).nullable(),
+  toRole: z.enum(["principal", "secundaria", "reforco_narrativo"]),
+  action: KeywordArticleDecisionSchema.shape.action,
+  justification: z.string().min(1),
+  confidence: ConfidenceSchema,
+  publishedProtected: z.boolean(),
+}).strict();
+export type KeywordArticleReviewDiff = z.infer<typeof KeywordArticleReviewDiffSchema>;
+
 export const KeywordArticleReviewSchema = z.object({
   decisions: z.array(KeywordArticleDecisionSchema).min(1),
   conflicts: z.array(ConflictSchema),
   summary: z.string().min(1),
+  proposalId: z.string().min(1).optional(),
+  source: z.literal("ai").optional(),
+  approvalStatus: z.literal("pending_human").optional(),
+  stageTrace: z.array(AiArchitectureReviewStageTraceSchema).min(1).optional(),
+  diff: z.array(KeywordArticleReviewDiffSchema).optional(),
 }).strict();
 export type KeywordArticleReview = z.infer<typeof KeywordArticleReviewSchema>;
 
@@ -668,6 +812,41 @@ export const PublishedIdentityReferenceSchema = z.object({
 }).strict();
 export type PublishedIdentityReference = z.infer<typeof PublishedIdentityReferenceSchema>;
 
+/**
+ * CLASSIFICAÇÃO TERMINAL DO ARTIGO.
+ *
+ * "Pendente" é estado de PROCESSO; ele pode existir na working copy e não
+ * pode existir num ArticleDNA aprovado. Este objeto é o retrato fechado: cada
+ * campo tem um valor terminal, o motivo por extenso e a origem do valor —
+ * fato da Principal, agregado do grupo, evidência SERP ou decisão do artigo.
+ *
+ * OPCIONAL por retrocompatibilidade, pela mesma razão de `territoryRef`: os
+ * ArticleDNA anteriores a este contrato não o têm, e ausência significa
+ * LEGADO a fechar, nunca "sem classificação por decisão". O portão de
+ * conclusão exige o objeto; a leitura de acervo antigo continua possível.
+ *
+ * Aditivo no payload jsonb de `editorial_artifact_versions`: nenhuma coluna,
+ * nenhuma migration.
+ */
+export const ClassificationSourceSchema = z.enum(["principal", "group", "serp", "article_decision"]);
+
+const resolvedField = <T extends z.ZodTypeAny>(value: T) => z.object({
+  value,
+  // O motivo NÃO é decorativo: é o que impede um terminal de virar carimbo.
+  reason: z.string().min(1),
+  source: ClassificationSourceSchema,
+}).strict();
+
+export const ArticleClassificationSchema = z.object({
+  intent: resolvedField(z.enum(ARTICLE_TERMINAL_INTENTS)),
+  funnel: resolvedField(z.enum(ARTICLE_TERMINAL_FUNNELS)),
+  kgr: resolvedField(z.enum(ARTICLE_TERMINAL_KGR)),
+  kgrApplicability: resolvedField(z.enum(ARTICLE_TERMINAL_KGR_APPLICABILITY)),
+  compatibility: resolvedField(z.enum(ARTICLE_TERMINAL_COMPATIBILITY)),
+  protection: resolvedField(z.enum(ARTICLE_TERMINAL_PROTECTIONS)),
+}).strict();
+export type ArticleClassificationContract = z.infer<typeof ArticleClassificationSchema>;
+
 export const ArticleDNASchema = z.object({
   schemaVersion: z.literal(1),
   articleId: z.string().min(1),
@@ -677,6 +856,24 @@ export const ArticleDNASchema = z.object({
   narrativeReinforcementIds: z.array(z.string().min(1)),
   keywordReferences: z.array(ArticleKeywordReferenceSchema).min(1).max(MAX_KEYWORDS_PER_ARTICLE),
   siloId: z.string().nullable(),
+  /**
+   * Território de origem no fluxo Silo-first. OPCIONAL por retrocompatibilidade:
+   * todo ArticleDNA consolidado antes da Fase 2B não tem território, e ausência
+   * significa LEGACY_NEEDS_RECONCILIATION — nunca "sem território por decisão".
+   *
+   * NÃO substitui `siloId` nem é derivado dele: Silo consolidado e Território de
+   * trabalho são espaços de identidade distintos (C4). Aditivo no payload jsonb
+   * de editorial_artifact_versions, cujo artifact_type 'article_dna' já existe:
+   * nenhuma coluna, nenhuma migration.
+   */
+  territoryRef: TerritoryRefSchema.optional(),
+  /**
+   * Retrato fechado das classificações — sem nenhum estado de processo.
+   *
+   * Ausente = ArticleDNA anterior a este contrato. Presente = a fase Artigos
+   * encerrou intenção, funil, KGR, aplicabilidade, compatibilidade e proteção.
+   */
+  classification: ArticleClassificationSchema.optional(),
   hierarchy: z.enum(["Pilar", "Suporte", "Reforco Narrativo"]),
   suggestedSlug: z.string().min(1),
   canonical: z.string().url().nullable(),
@@ -732,6 +929,13 @@ export const ArticleDNASchema = z.object({
   if (expectedIds.some(id => !referenceIds.has(id)) || referenceIds.size !== new Set(expectedIds).size) {
     context.addIssue({ code: "custom", path: ["keywordReferences"], message: "As referencias devem cobrir exatamente as keywords resumidas." });
   }
+  // Uma keyword ocupa UM papel. Sem esta checagem, a mesma keyword em
+  // secondaryKeywordIds e narrativeReinforcementIds (ou repetindo a principal)
+  // passava: o Set colapsava a duplicata e o teto era medido sobre o conjunto
+  // deduplicado, escondendo a incoerencia de papeis.
+  if (new Set(expectedIds).size !== expectedIds.length) {
+    context.addIssue({ code: "custom", path: ["keywordReferences"], message: "Uma keyword nao pode ocupar dois papeis no mesmo ArticleDNA." });
+  }
   if (expectedIds.length > MAX_KEYWORDS_PER_ARTICLE || expectedIds.filter(id => id !== article.principalKeywordId).length > 5) {
     context.addIssue({ code: "custom", path: ["keywordReferences"], message: "Um ArticleDNA aceita uma principal e no maximo cinco keywords de apoio." });
   }
@@ -748,23 +952,62 @@ export const ArticleDNAReferenceSchema = z.object({
 
 export const SiloDNASchema = z.object({
   schemaVersion: z.literal(1),
+  formationStatus: z.enum(["draft", "formed"]).default("formed"),
   siloId: z.string().min(1),
   brandId: z.string().min(1).optional(),
+  /**
+   * Território que originou o Silo no fluxo Silo-first. OPCIONAL por
+   * retrocompatibilidade: todo SiloDNA anterior à 2C não tem território, e
+   * ausência significa LEGACY_NEEDS_RECONCILIATION — nunca "sem território por
+   * decisão". A obrigatoriedade vive no gate de NOVA consolidação.
+   *
+   * Não substitui `siloId` nem `existingSiloRef`, e nunca é derivado deles:
+   * Silo consolidado e Território de trabalho são espaços distintos (C4).
+   */
+  territoryRef: TerritoryRefSchema.optional(),
+  /**
+   * Proveniência da working copy que originou esta versão consolidada.
+   *
+   * OPCIONAIS por retrocompatibilidade — todo SiloDNA anterior à 2C nasceu sem
+   * working copy remota. A obrigatoriedade vive no gate de NOVA consolidação.
+   *
+   * Existem para responder, no replay, "os artefatos vieram DESTA versão da
+   * working copy?". Como a RPC de consolidação compara o payload inteiro, a
+   * verificação entra sem lógica de comparação nova.
+   */
+  workingCopyRef: SiloWorkingCopyRefSchema.optional(),
+  workingCopyLockVersion: z.number().int().positive().optional(),
+  /**
+   * Snapshot da narrativa do Territorio de origem, preservado na consolidacao.
+   *
+   * Existe porque a narrativa e o que responde POR QUE estes artigos pertencem
+   * juntos. Sem ela o SiloDNA guarda a estrutura (papeis, ordem, links) e perde
+   * a razao editorial que a produziu, e a razao nao e reconstituivel a partir
+   * da estrutura: narrativas diferentes geram a mesma lista ordenada.
+   *
+   * NAO se confunde com `narrativeOrder` (sequencia de leitura dos artigos) nem
+   * com `boundary` (texto descritivo/legado da fronteira). E copia fiel de
+   * `Territory.narrative`, nunca redigida no Silo.
+   *
+   * OPCIONAL pelo mesmo motivo de `territoryRef`: SiloDNA anterior a 2C nasceu
+   * sem territorio. A obrigatoriedade vive no gate de NOVA consolidacao.
+   */
+  territoryNarrative: TerritoryNarrativeSchema.optional(),
   name: z.string().min(1).optional(),
-  centralEntity: z.string().min(1),
+  centralEntity: z.string(),
   centralEntitySource: z.enum(["manual", "keyword_dna"]).optional(),
   centralKeywordDnaRef: VersionReferenceSchema.optional(),
-  objective: z.string().min(1),
-  audience: z.string().min(1),
-  macroProblem: z.string().min(1),
-  dominantIntent: z.string().min(1),
+  objective: z.string(),
+  audience: z.string(),
+  macroProblem: z.string(),
+  dominantIntent: z.string(),
   pillarArticleId: z.string().nullable(),
   supportArticleIds: z.array(z.string()),
   articleReferences: z.array(ArticleDNAReferenceSchema),
   articleRoles: z.array(z.object({ articleId: z.string(), role: z.string(), reason: z.string() })),
   narrativeOrder: z.array(z.string()),
   linkMap: z.array(z.object({ fromArticleId: z.string(), toArticleId: z.string(), reason: z.string() })),
-  boundary: z.string().min(1),
+  boundary: z.string(),
   includedTopics: z.array(z.string()),
   excludedTopics: z.array(z.string()),
   nearbySiloIds: z.array(z.string()),
@@ -773,12 +1016,31 @@ export const SiloDNASchema = z.object({
   nextContents: z.array(z.string()),
   confidence: ConfidenceSchema,
   humanPendingDecisions: z.array(z.string()),
+  serpAssessmentRefs: z.array(VersionReferenceSchema).optional(),
+  serpGuidelines: z.array(z.string().min(1)).optional(),
   hierarchySignals: z.array(z.object({
     articleDnaId: z.string().min(1), principalVolume: z.number().nonnegative().nullable(), combinedVolume: z.number().nonnegative().nullable(),
     tailLength: z.number().int().nonnegative(), kgrScore: z.number().nonnegative().nullable(), semanticCentrality: ConfidenceSchema,
     intentBreadth: z.number().nonnegative(), suggestedRole: z.enum(["pillar", "support"]), supportOrder: z.number().int().positive().nullable(), rationale: z.string().min(1),
   }).strict()).default([]),
 }).strict().superRefine((silo, context) => {
+  // Proveniência é PAR: ou os dois campos existem, ou nenhum. Meia proveniência
+  // não diz de qual versão da working copy o Silo veio — descreve a metade que
+  // sobrou. A checagem vem antes do desvio de rascunho porque vale para os dois.
+  if ((silo.workingCopyRef === undefined) !== (silo.workingCopyLockVersion === undefined)) {
+    context.addIssue({
+      code: "custom",
+      path: ["workingCopyRef"],
+      message: "workingCopyRef e workingCopyLockVersion precisam existir juntos ou faltar juntos.",
+    });
+  }
+  if (silo.formationStatus === "draft") {
+    if (!silo.name?.trim()) context.addIssue({ code: "custom", path: ["name"], message: "Um SiloDNA em rascunho precisa preservar o nome do silo." });
+    return;
+  }
+  for (const field of ["centralEntity", "objective", "audience", "macroProblem", "dominantIntent", "boundary"] as const) {
+    if (!silo[field].trim()) context.addIssue({ code: "custom", path: [field], message: "O SiloDNA formado precisa preencher este campo." });
+  }
   const referenced = new Set(silo.articleReferences.map(reference => reference.articleId));
   const expected = [silo.pillarArticleId, ...silo.supportArticleIds].filter((id): id is string => Boolean(id));
   if (expected.some(id => !referenced.has(id)) || referenced.size !== new Set(expected).size) {
@@ -820,10 +1082,13 @@ export type SiloPagePublicationVerification = z.infer<typeof SiloPagePublication
 
 export const SiloPageSchema = z.object({
   schemaVersion: z.literal(1),
+  formationStatus: z.enum(["draft", "formed"]).default("formed"),
   siloPageId: z.string().min(1),
   brandId: z.string().min(1),
   siloDnaRef: VersionReferenceSchema,
   siloId: z.string().min(1),
+  /** Mesmo território do SiloDNA pareado. Ausente = SiloPage legada, pré-2C. */
+  territoryRef: TerritoryRefSchema.optional(),
   slug: z.string().min(1),
   publicationStatus: z.enum(["new", "published"]).default("new"),
   publishedUrl: z.string().url().nullable().default(null),
@@ -831,13 +1096,13 @@ export const SiloPageSchema = z.object({
     status: "not_applicable", checkedAt: null, requestedUrl: null, resolvedUrl: null, declaredCanonical: null,
     httpStatus: null, sitemapUrl: null, sitemapMatch: null, message: null,
   }),
-  h1: z.string().min(1),
-  seoTitle: z.string().min(1),
-  metaDescription: z.string().min(1),
+  h1: z.string(),
+  seoTitle: z.string(),
+  metaDescription: z.string(),
   canonical: z.string().url().nullable(),
-  intro: z.string().min(1),
+  intro: z.string(),
   sections: z.array(SiloPageSectionSchema),
-  cta: z.string().min(1),
+  cta: z.string(),
   coverImageBrief: z.string(),
   visualBriefing: z.string(),
   breadcrumbs: z.array(SiloPageBreadcrumbSchema),
@@ -848,6 +1113,14 @@ export const SiloPageSchema = z.object({
   confidence: ConfidenceSchema,
   humanPendingDecisions: z.array(z.string()),
 }).strict().superRefine((page, context) => {
+  if (page.formationStatus === "draft") {
+    if (page.publicationStatus !== "new") context.addIssue({ code: "custom", path: ["publicationStatus"], message: "Uma SiloPage em rascunho deve estar como nova." });
+    if (page.publishedUrl) context.addIssue({ code: "custom", path: ["publishedUrl"], message: "Uma SiloPage em rascunho não pode possuir URL publicada." });
+    return;
+  }
+  for (const field of ["h1", "seoTitle", "metaDescription", "intro", "cta"] as const) {
+    if (!page[field].trim()) context.addIssue({ code: "custom", path: [field], message: "A SiloPage formada precisa preencher este campo." });
+  }
   if (page.publicationStatus === "published" && !page.publishedUrl) {
     context.addIssue({ code: "custom", path: ["publishedUrl"], message: "SiloPage publicada precisa preservar a URL publicada completa." });
   }
@@ -859,6 +1132,225 @@ export const SiloPageSchema = z.object({
 export type SiloPage = z.infer<typeof SiloPageSchema>;
 export type SiloPageSection = z.infer<typeof SiloPageSectionSchema>;
 export type SiloPageBreadcrumb = z.infer<typeof SiloPageBreadcrumbSchema>;
+
+// ─── InternalLinkGraph: fonte canônica das relações editoriais ───────────────
+// O grafo é uma entidade própria do Arquiteto. ArticleDNA, SiloDNA e SiloPage
+// continuam sendo entidades distintas; os campos abaixo apenas referenciam
+// versões já existentes e não copiam sua autoridade editorial.
+
+export const InternalLinkGraphNodeTypeSchema = z.enum(["SILO_PAGE", "ARTICLE_DNA"]);
+export type InternalLinkGraphNodeType = z.infer<typeof InternalLinkGraphNodeTypeSchema>;
+
+export const InternalLinkGraphRelationTypeSchema = z.enum([
+  "PILLAR_TO_SUPPORT",
+  "SUPPORT_TO_PILLAR",
+  "SUPPORT_TO_SUPPORT",
+  "SILO_PAGE_TO_ARTICLE",
+  "ARTICLE_TO_SILO_PAGE",
+]);
+export type InternalLinkGraphRelationType = z.infer<typeof InternalLinkGraphRelationTypeSchema>;
+
+export const InternalLinkGraphPrioritySchema = z.enum(["HIGH", "MEDIUM", "LOW"]);
+export type InternalLinkGraphPriority = z.infer<typeof InternalLinkGraphPrioritySchema>;
+
+export const InternalLinkGraphOriginSchema = z.enum(["human", "ai", "system"]);
+export type InternalLinkGraphOrigin = z.infer<typeof InternalLinkGraphOriginSchema>;
+
+export const InternalLinkGraphNodeSchema = z.object({
+  nodeId: z.string().min(1),
+  brandId: z.string().min(1),
+  nodeType: InternalLinkGraphNodeTypeSchema,
+  articleDnaVersionRef: VersionReferenceSchema.nullable().default(null),
+  siloPageVersionRef: VersionReferenceSchema.nullable().default(null),
+  architecturalRole: z.enum(["PILAR", "SUPORTE", "REFORCO", "OUTRO"]).nullable().default(null),
+  snapshot: z.object({
+    label: z.string().min(1).nullable().default(null),
+    siloId: z.string().min(1).nullable().default(null),
+  }).strict().default({ label: null, siloId: null }),
+}).strict().superRefine((node, context) => {
+  const referenceCount = Number(Boolean(node.articleDnaVersionRef)) + Number(Boolean(node.siloPageVersionRef));
+  if (referenceCount !== 1) {
+    context.addIssue({ code: "custom", path: ["articleDnaVersionRef"], message: "Cada nó precisa referenciar exatamente um ArticleDNA ou uma SiloPage." });
+  }
+  if (node.nodeType === "ARTICLE_DNA" && !node.articleDnaVersionRef) {
+    context.addIssue({ code: "custom", path: ["articleDnaVersionRef"], message: "Nó ARTICLE_DNA precisa de referência de versão." });
+  }
+  if (node.nodeType === "SILO_PAGE" && !node.siloPageVersionRef) {
+    context.addIssue({ code: "custom", path: ["siloPageVersionRef"], message: "Nó SILO_PAGE precisa de referência de versão." });
+  }
+});
+export type InternalLinkGraphNode = z.infer<typeof InternalLinkGraphNodeSchema>;
+
+export const InternalLinkGraphEdgeSchema = z.object({
+  edgeId: z.string().min(1),
+  sourceNodeId: z.string().min(1),
+  targetNodeId: z.string().min(1),
+  relationType: InternalLinkGraphRelationTypeSchema,
+  reason: z.string().min(1),
+  priority: InternalLinkGraphPrioritySchema,
+  anchorConcepts: z.array(z.string().trim().min(1)).min(1),
+  origin: InternalLinkGraphOriginSchema,
+  createdBy: z.string().min(1),
+  createdAt: z.string().datetime(),
+  provenance: z.object({
+    source: z.string().min(1),
+    references: z.array(z.string().min(1)),
+  }).strict(),
+}).strict();
+export type InternalLinkGraphEdge = z.infer<typeof InternalLinkGraphEdgeSchema>;
+
+export const InternalLinkGraphStructuralPayloadSchema = z.object({
+  brandId: z.string().min(1),
+  graphId: z.string().min(1),
+  siloId: z.string().min(1),
+  baseSiloDnaVersionRef: VersionReferenceSchema,
+  baseSiloPageVersionRef: VersionReferenceSchema,
+  participatingArticleDnaVersionRefs: z.array(VersionReferenceSchema),
+  nodes: z.array(InternalLinkGraphNodeSchema),
+  edges: z.array(InternalLinkGraphEdgeSchema),
+  // Warnings and conflicts remain part of the persisted diagnostic snapshot.
+  // They are deliberately excluded from the graph content hash in
+  // internal-link-graph.ts, because they are not editorial topology.
+  warnings: z.array(z.string()),
+  conflicts: z.array(z.string()),
+}).strict();
+export type InternalLinkGraphStructuralPayload = z.infer<typeof InternalLinkGraphStructuralPayloadSchema>;
+
+export const InternalLinkGraphSchema = z.object({
+  schemaVersion: z.literal(1),
+  graphVersionId: z.string().min(1),
+  graphId: z.string().min(1),
+  brandId: z.string().min(1),
+  siloId: z.string().min(1),
+  baseSiloDnaVersionRef: VersionReferenceSchema,
+  baseSiloPageVersionRef: VersionReferenceSchema,
+  participatingArticleDnaVersionRefs: z.array(VersionReferenceSchema),
+  versionNumber: z.number().int().positive(),
+  previousVersionId: z.string().min(1).nullable(),
+  workflowStatus: VersionStatusSchema,
+  basisHash: ContentHashSchema,
+  contentHash: ContentHashSchema,
+  createdBy: z.string().min(1),
+  createdAt: z.string().datetime(),
+  approvedBy: z.string().min(1).nullable(),
+  approvedAt: z.string().datetime().nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+  nodes: z.array(InternalLinkGraphNodeSchema),
+  edges: z.array(InternalLinkGraphEdgeSchema),
+  warnings: z.array(z.string()),
+  conflicts: z.array(z.string()),
+}).strict().superRefine((graph, context) => {
+  const nodeIds = new Set<string>();
+  for (const [index, node] of graph.nodes.entries()) {
+    if (nodeIds.has(node.nodeId)) context.addIssue({ code: "custom", path: ["nodes", index, "nodeId"], message: "O grafo não pode possuir nó duplicado." });
+    nodeIds.add(node.nodeId);
+    if (node.brandId !== graph.brandId) context.addIssue({ code: "custom", path: ["nodes", index, "brandId"], message: "Nó fora da Brand do grafo." });
+  }
+  const edges = new Set<string>();
+  for (const [index, edge] of graph.edges.entries()) {
+    if (edge.sourceNodeId === edge.targetNodeId) context.addIssue({ code: "custom", path: ["edges", index], message: "Auto-link não é permitido." });
+    if (!nodeIds.has(edge.sourceNodeId) || !nodeIds.has(edge.targetNodeId)) context.addIssue({ code: "custom", path: ["edges", index], message: "Aresta precisa apontar para nós do mesmo grafo." });
+    const key = `${edge.sourceNodeId}\u0000${edge.targetNodeId}`;
+    if (edges.has(key)) context.addIssue({ code: "custom", path: ["edges", index], message: "Aresta dirigida duplicada no grafo." });
+    edges.add(key);
+  }
+  const references = new Set(graph.participatingArticleDnaVersionRefs.map(reference => reference.versionId));
+  if (references.size !== graph.participatingArticleDnaVersionRefs.length) context.addIssue({ code: "custom", path: ["participatingArticleDnaVersionRefs"], message: "ArticleDNA participante não pode ser repetido." });
+  if (graph.workflowStatus === "approved" && (!graph.approvedBy || !graph.approvedAt)) context.addIssue({ code: "custom", path: ["approvedBy"], message: "Grafo aprovado precisa registrar ator e data de aprovação." });
+  if (graph.workflowStatus !== "approved" && (graph.approvedBy || graph.approvedAt)) context.addIssue({ code: "custom", path: ["approvedBy"], message: "Aprovação não pode ser registrada antes do estado aprovado." });
+});
+export type InternalLinkGraph = z.infer<typeof InternalLinkGraphSchema>;
+
+export const InternalLinkGraphWorkingCopySchema = z.object({
+  schemaVersion: z.literal(1),
+  workingCopyId: z.string().min(1),
+  graphId: z.string().min(1),
+  brandId: z.string().min(1),
+  siloId: z.string().min(1),
+  baseGraphVersionId: z.string().min(1).nullable(),
+  baseGraphContentHash: ContentHashSchema.nullable(),
+  baseSiloDnaVersionRef: VersionReferenceSchema,
+  baseSiloPageVersionRef: VersionReferenceSchema,
+  participatingArticleDnaVersionRefs: z.array(VersionReferenceSchema),
+  basisHash: ContentHashSchema,
+  contentHash: ContentHashSchema,
+  createdBy: z.string().min(1),
+  createdAt: z.string().datetime(),
+  updatedBy: z.string().min(1),
+  updatedAt: z.string().datetime(),
+  lockVersion: z.number().int().positive(),
+  metadata: z.record(z.string(), z.unknown()),
+  nodes: z.array(InternalLinkGraphNodeSchema),
+  edges: z.array(InternalLinkGraphEdgeSchema),
+  warnings: z.array(z.string()),
+  conflicts: z.array(z.string()),
+}).strict().superRefine((workingCopy, context) => {
+  if ((workingCopy.baseGraphVersionId === null) !== (workingCopy.baseGraphContentHash === null)) {
+    context.addIssue({ code: "custom", path: ["baseGraphVersionId"], message: "A working copy precisa manter a referência e o hash do grafo-base juntos." });
+  }
+  const nodeIds = new Set<string>();
+  for (const [index, node] of workingCopy.nodes.entries()) {
+    if (nodeIds.has(node.nodeId)) context.addIssue({ code: "custom", path: ["nodes", index, "nodeId"], message: "A working copy não pode possuir nó duplicado." });
+    nodeIds.add(node.nodeId);
+    if (node.brandId !== workingCopy.brandId) context.addIssue({ code: "custom", path: ["nodes", index, "brandId"], message: "Nó fora da Brand da working copy." });
+  }
+  const edges = new Set<string>();
+  for (const [index, edge] of workingCopy.edges.entries()) {
+    if (edge.sourceNodeId === edge.targetNodeId) context.addIssue({ code: "custom", path: ["edges", index], message: "Auto-link não é permitido na working copy." });
+    if (!nodeIds.has(edge.sourceNodeId) || !nodeIds.has(edge.targetNodeId)) context.addIssue({ code: "custom", path: ["edges", index], message: "Aresta precisa apontar para nós da mesma working copy." });
+    const key = `${edge.sourceNodeId}\u0000${edge.targetNodeId}`;
+    if (edges.has(key)) context.addIssue({ code: "custom", path: ["edges", index], message: "Aresta dirigida duplicada na working copy." });
+    edges.add(key);
+  }
+});
+export type InternalLinkGraphWorkingCopy = z.infer<typeof InternalLinkGraphWorkingCopySchema>;
+
+export const InternalLinkGraphProposalSchema = z.object({
+  schemaVersion: z.literal(1),
+  proposalId: z.string().min(1),
+  graphId: z.string().min(1),
+  brandId: z.string().min(1),
+  baseGraphVersionId: z.string().min(1),
+  baseGraphContentHash: ContentHashSchema,
+  inputHash: ContentHashSchema,
+  outputHash: ContentHashSchema.nullable(),
+  payload: z.object({
+    nodes: z.array(InternalLinkGraphNodeSchema),
+    edges: z.array(InternalLinkGraphEdgeSchema),
+    warnings: z.array(z.string()),
+    conflicts: z.array(z.string()),
+  }).strict(),
+  reviewStatus: z.enum(["pending_human", "accepted", "partially_accepted", "rejected"]),
+  createdBy: z.string().min(1),
+  createdAt: z.string().datetime(),
+  reviewedBy: z.string().min(1).nullable(),
+  reviewedAt: z.string().datetime().nullable(),
+  reviewNote: z.string().nullable(),
+  aiExecutionRef: z.string().min(1).nullable(),
+}).strict().superRefine((proposal, context) => {
+  if (proposal.reviewStatus === "pending_human" && (proposal.reviewedBy || proposal.reviewedAt)) context.addIssue({ code: "custom", path: ["reviewedBy"], message: "Proposta pendente não pode possuir revisão humana." });
+  if (proposal.reviewStatus !== "pending_human" && (!proposal.reviewedBy || !proposal.reviewedAt)) context.addIssue({ code: "custom", path: ["reviewedBy"], message: "Proposta decidida precisa registrar a revisão humana." });
+});
+export type InternalLinkGraphProposal = z.infer<typeof InternalLinkGraphProposalSchema>;
+
+export const InternalLinkGraphRefSchema = z.object({
+  graphId: z.string().min(1),
+  graphVersionId: z.string().min(1),
+  brandId: z.string().min(1),
+  siloId: z.string().min(1),
+  baseSiloDnaVersionRef: VersionReferenceSchema,
+  baseSiloPageVersionRef: VersionReferenceSchema,
+  participatingArticleDnaVersionRefs: z.array(VersionReferenceSchema),
+  versionNumber: z.number().int().positive(),
+  workflowStatus: VersionStatusSchema,
+  basisHash: ContentHashSchema,
+  contentHash: ContentHashSchema,
+  approvedBy: z.string().min(1).nullable(),
+  approvedAt: z.string().datetime().nullable(),
+  nodes: z.array(InternalLinkGraphNodeSchema),
+  edges: z.array(InternalLinkGraphEdgeSchema),
+}).strict();
+export type InternalLinkGraphRef = z.infer<typeof InternalLinkGraphRefSchema>;
 
 export const EditorialUnitTypeSchema = z.enum(["article", "silo_page"]);
 export type EditorialUnitType = z.infer<typeof EditorialUnitTypeSchema>;

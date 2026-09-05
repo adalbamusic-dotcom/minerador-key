@@ -21,6 +21,8 @@ const STATUS_META: Record<string, { label: string; tone: string; group: "process
   em_revisao: { label: "Aguardando aprovação", tone: "border-amber-900 text-amber-300", group: "review" },
   in_review: { label: "Em revisão", tone: "border-amber-900 text-amber-300", group: "review" },
   awaiting_approval: { label: "Aguardando aprovação", tone: "border-amber-900 text-amber-300", group: "review" },
+  awaiting_human_review: { label: "Aguardando revisão humana", tone: "border-warning/45 text-warning", group: "review" },
+  ready_for_approval: { label: "Pronto para aprovação", tone: "border-context-accent/45 text-context-accent", group: "review" },
   aprovado: { label: "Aprovado", tone: "border-emerald-900 text-emerald-300", group: "approved" },
   approved: { label: "Aprovado", tone: "border-emerald-900 text-emerald-300", group: "approved" },
   sent_architect: { label: "Importado no Arquiteto", tone: "border-cyan-900 text-cyan-300", group: "sent" },
@@ -28,8 +30,8 @@ const STATUS_META: Record<string, { label: string; tone: string; group: "process
   sent_planner: { label: "Importado no Planejador", tone: "border-cyan-900 text-cyan-300", group: "sent" },
   sent_writer: { label: "Importado no Redator", tone: "border-cyan-900 text-cyan-300", group: "sent" },
   ready_to_export: { label: "Importado em Publicações", tone: "border-cyan-900 text-cyan-300", group: "sent" },
-  queued: { label: "Na fila", tone: "border-violet-900 text-violet-300", group: "sent" },
-  exported: { label: "Exportado", tone: "border-violet-900 text-violet-300", group: "sent" },
+  queued: { label: "Na fila", tone: "border-pending/40 text-pending", group: "sent" },
+  exported: { label: "Exportado", tone: "border-context-accent/30 text-context-accent", group: "sent" },
   publicado: { label: "Publicado", tone: "border-emerald-800 text-emerald-200", group: "published" },
   published: { label: "Publicado", tone: "border-emerald-800 text-emerald-200", group: "published" },
   update_due: { label: "Atualização pendente", tone: "border-amber-900 text-amber-300", group: "review" },
@@ -48,7 +50,9 @@ export function WorkflowStatusBadge({ status, density = "compact" }: { status: s
   const Icon = meta.group === "approved" ? Check : meta.group === "published" ? Lock : meta.group === "sent" ? Send : meta.group === "process" ? CircleDot : Clock3;
   const densityClass = density === "comfortable" ? "min-h-8 rounded-md px-2 py-1 text-[13px]" : "rounded border px-1.5 py-0.5 text-[9px]";
   const iconClass = density === "comfortable" ? "h-3.5 w-3.5" : "h-2.5 w-2.5";
-  return <span className={`inline-flex items-center gap-2 whitespace-nowrap font-semibold ${densityClass} ${meta.tone}`} title={`Estado editorial: ${status}. Este indicador nao representa uma tarefa em execucao.`}><Icon className={iconClass}/>{meta.label}</span>;
+  // max-w-full + truncate: em grade de largura fixa o rótulo longo ("Aguardando
+  // aprovação") não pode empurrar a coluna e criar rolagem horizontal na planilha.
+  return <span className={`inline-flex min-w-0 max-w-full items-center gap-2 whitespace-nowrap font-semibold ${densityClass} ${meta.tone}`} title={`Estado editorial: ${meta.label} (${status}). Este indicador nao representa uma tarefa em execucao.`}><Icon className={`shrink-0 ${iconClass}`}/><span className="truncate">{meta.label}</span></span>;
 }
 
 export function WorkflowStatusSummary({ statuses }: { statuses: string[] }) {

@@ -1,9 +1,9 @@
 # Sistema visual canônico — Minerador Key
 
-**Status documental:** `TARGET APPROVED` — planejamento estrutural visual; a implementação desta fundação não foi iniciada nesta tarefa.<br>
-**Estado verificado:** `CURRENTLY IMPLEMENTED = PARTIAL`; os tokens base e o `ProductShell` existem, mas a topbar e o centro global de avisos ainda não existem como contratos/componentes canônicos.<br>
+**Status documental:** `IMPLEMENTED INCREMENTALLY` — o contrato de Inline Label / Affordance Cluster foi implementado sem redesenhar o shell; a fundação visual global continua parcial.<br>
+**Estado verificado:** `CURRENTLY IMPLEMENTED = PARTIAL`; os tokens base, o `ProductShell`, o `InfoHint` e o contrato de `InlineLabelCluster` existem, enquanto a topbar global e outras áreas da fundação permanecem incrementais.<br>
 **Módulo proprietário:** infraestrutura compartilhada / sistema visual.<br>
-**Limite desta revisão:** documentação somente; não autoriza alteração de frontend, shell, módulos, Supabase/schema ou operação remota.
+**Limite desta revisão:** esta atualização cobre somente Inline Label / Affordance Cluster e seus consumidores visuais; não altera shell, lógica de módulos, Supabase/schema ou operação remota.
 
 ## 1. Objetivo
 
@@ -17,13 +17,18 @@ Este documento orienta a composição visual sem autorizar redesign global, alte
 
 A precedência visual é:
 
-1. este documento (`docs/compartilhado/sistema-visual.md`);
-2. tokens e estilos globais existentes;
-3. componentes compartilhados existentes;
-4. padrões visuais já validados;
-5. regra específica do módulo.
+1. a skill `app-visual-system` (`.agents/skills/app-visual-system/SKILL.md`);
+2. este documento (`docs/compartilhado/sistema-visual.md`);
+3. tokens e estilos globais existentes;
+4. componentes compartilhados existentes;
+5. padrões visuais já validados;
+6. regra específica do módulo.
 
-A skill `app-visual-system` é auxiliar e não substitui esta documentação canônica.
+A skill é a fonte executável do contrato: ela é carregada em toda tarefa de
+frontend e concentra as regras que o guard automatizado verifica. Este
+documento permanece canônico para o produto e para governança. Quando os dois
+divergirem, vale a skill e este documento deve ser corrigido na mesma tarefa —
+não se mantém duas versões da mesma regra.
 
 ### Caminhos reais confirmados
 
@@ -31,18 +36,39 @@ A skill `app-visual-system` é auxiliar e não substitui esta documentação can
 - componentes compartilhados: `components/`, incluindo `components/product-shell.tsx`, `components/editorial/operational-data-grid.tsx`, `components/editorial/operational-screen-shared.tsx` e `components/editorial/workflow-status.tsx`;
 - implementação proprietária: `modules/`;
 - Tailwind: v4, importado por `app/globals.css` com `@import "tailwindcss"` e `@theme inline`;
-- não há `src/styles/`, `src/components/`, `tailwind.config.*` ou `check-visual-system.mjs` neste checkout.
+- não há `src/styles/`, `src/components/` nem `tailwind.config.*` neste checkout — o Tailwind v4 é configurado por CSS;
+- guard visual: `scripts/check-visual-system.mjs`, executado por `pnpm run check:visual-system`;
+- baseline de dívida visual: `scripts/visual-system-baseline.json`;
+- skill: `.agents/skills/app-visual-system/`, com as referências `operational-grid-layout.md`, `color-contract.md`, `inline-label-clusters.md` e `visual-rules.md`.
 
-O estado atual de `app/globals.css` foi auditado. Ele possui `--background`, `--foreground`, `--accent`, `--module-accent` e `--context-accent`, além dos mapeamentos Tailwind correspondentes. Isso é uma implementação parcial dos tokens-alvo; não representa ainda o contrato semântico completo abaixo.
+O estado atual de `app/globals.css` foi auditado. Ele possui a paleta oficial completa em `:root`, os derivados de superfície por `color-mix` e os mapeamentos Tailwind em `@theme inline`. Os tokens-alvo estão implementados; a dívida remanescente está no consumo, não na definição.
 
-O `ProductShell` é o shell compartilhado atual e já oferece acesso pessoal pela rota `/conta`. Não foram encontrados, no código ativo auditado, `GlobalTopbar`, `GlobalNoticeCenter`, `publishNotice` ou `NotificationBell` canônicos. Há notices e notificações locais em módulos distintos. Esses fatos são estado atual, não autorização para uma migração big-bang.
+O `ProductShell` é o shell compartilhado atual e já oferece acesso pessoal pela rota `/conta`. `GlobalTopbar`, `GlobalNoticeCenter`, `publishNotice` e `NotificationBell` **existem** como componentes canônicos em `components/global-topbar.tsx` e `components/global-notice-center.tsx`, com o contrato de severidade em `lib/visual-notice-contract.ts`. Alguns módulos ainda mantêm notices locais; a absorção continua gradual, sem big-bang.
 
 ## 3. Tipografia
 
+### Linguagem visível
+
+Nomes técnicos canônicos são independentes dos labels exibidos na interface. A UI deve preferir linguagem curta e compreensível sem renomear contratos internos.
+
+Essa regra é permanente na fase pós-refresh: `technical canonical name != display label`.
+Por exemplo, `BrandDNA` aparece como **Identidade da marca**, `KeywordDNA`
+como **Perfil da keyword**, `ArticleDNA` como **Definição do artigo**,
+`SiloDNA` como **Arquitetura do silo**, `ContentPlan` como **Plano editorial**,
+`ContentDocument` como **Conteúdo do artigo** e `PublicationRecord` como
+**Registro de publicação**. Os nomes técnicos continuam sendo usados em tipos,
+APIs, rotas, persistência e contratos.
+
 - Texto corrido: 15px ou 16px.
 - Texto de interface, tabela e controles: mínimo de 14px.
+- Controles compactos da `GlobalTopbar`: 12px com line-height de 20px.
 - Texto auxiliar: 12px ou 13px somente para IDs, datas, contadores e metadados.
 - Botões: mínimo de 14px.
+
+**Piso absoluto: 12px.** Nenhum texto da plataforma fica abaixo disso, em
+nenhuma superfície, incluindo planilhas e painéis de detalhe. Densidade se
+obtém com espaçamento e altura de linha, não encolhendo a fonte. O guard falha
+em qualquer `text-[Npx]` com `N < 12`.
 - Título principal da tela: aproximadamente 24px.
 - Título de seção: 18px ou 20px.
 - Título de painel: 16px.
@@ -81,22 +107,69 @@ escolhem a cor a partir do módulo.
 | --- | --- | --- |
 | `background` | `#131413` | canvas global no dark mode |
 | `foreground` | `#f3f4f6` | texto e elementos principais |
-| `action-accent` | `#193cb8` | ação primária e interação de ação |
+| `action-accent` | `#193cb8` | ação principal e seleção forte |
 | `context-accent` | `#12A1E0` | contexto, título da área e informação neutra |
-| `module-accent` | `#10DDE0` | identidade operacional do módulo |
+| `module-accent` | `#10DDE0` | interação: hover, focus, ring e tab ativa |
 | `positive-soft` | `#63F1AF` | seleção, reforço e marcação positiva auxiliar |
 | `highlight` | `#C8FF00` | fixação, marcação especial ou re-encontro rápido |
 | `success` | `#1fcb0a` | conclusão confirmada |
 | `warning` | `#f79001` | atenção, risco ou degradação |
 | `pending` | `#E6CE00` | revisão, espera ou decisão humana |
 | `danger` | `#A61E1E` | falha, bloqueio ou ação destrutiva |
+| `keyword` | `#e0fbff` | **exclusivo da keyword** em toda a plataforma (ver 5.0.1) |
 | `divider-dark` | `#212121` | divisor no dark mode |
 | `divider-light` | `#d1d1d1` | divisor no light mode |
 
 Os nomes CSS finais podem ser adaptados à convenção existente, desde que
-preservem este contrato semântico e tenham uma única fonte central. A expansão
-dos tokens atuais é trabalho futuro; esta tabela não declara que todos já estão
-implementados.
+preservem este contrato semântico e tenham uma única fonte central. A tabela
+está integralmente implementada em `app/globals.css`.
+
+### 5.0 Separação obrigatória entre os três accents
+
+Confundir os três é a origem da maior parte da dívida visual do projeto:
+
+- `action-accent` significa **eu ajo** — botão primário, seleção forte;
+- `context-accent` significa **eu informo** — título da área, `INFO`, contexto;
+- `module-accent` significa **eu reajo ao ponteiro ou ao teclado** — hover,
+  focus, ring, borda de input em interação, tab ativa.
+
+`module-accent` **não** é identidade do módulo e não pinta conteúdo. É o
+feedback de interação da plataforma inteira, idêntico em todas as áreas. Um
+módulo não tem cor própria.
+
+### 5.0.1 Papéis fixos de identidade e keyword
+
+Três papéis editoriais têm cor obrigatória em toda a plataforma, expostos como
+aliases semânticos em `app/globals.css`:
+
+| Papel | Alias | Token base | Valor | Onde se aplica |
+| --- | --- | --- | --- | --- |
+| identidade nova | `identity-new` | `module-accent` | `#10DDE0` | slug, link e canonical de conteúdo ainda não publicado |
+| identidade publicada | `identity-published` | `action-accent` | `#193cb8` | slug, link e canonical **somente** quando o status é publicado |
+| keyword | `keyword` | — (valor próprio) | `#e0fbff` | toda keyword renderizada: planilha, cards, painéis, listas e detalhes |
+
+Regras:
+
+- usar sempre as classes `text-identity-new`, `text-identity-published` e
+  `text-keyword`; nenhum componente repete o valor bruto;
+- a distinção entre identidade nova e publicada é obrigatória: as duas cores
+  nunca podem ser trocadas entre si, e `identity-published` só vale quando o
+  status do item é publicado — slug protegido por outro motivo continua novo;
+- keyword mantém a mesma cor em qualquer módulo — o papel é da keyword, não da
+  tela onde ela aparece.
+
+**`#e0fbff` é cor oficial da paleta e existe exclusivamente para a keyword.**
+Não é alias de outro papel: a keyword é o dado central do produto e não pode
+herdar a cor de um estado (`pending`, `warning`, `success`) que muda por outro
+motivo. Nenhum outro elemento da plataforma usa `#e0fbff`, e a keyword não usa
+nenhuma outra cor — nem quando está selecionada, publicada, com conflito ou
+desativada. Nesses casos o estado é comunicado por badge, borda ou fundo, nunca
+recolorindo a keyword.
+
+Fica explícito o que **não** é keyword e portanto não recebe `text-keyword`:
+contagens (`3 keywords`), identificadores (`principalKeywordId`), rótulos de
+coluna, nomes de lista e textos de origem. O papel vale para o **valor textual
+da keyword**.
 
 ### 5.1 Semântica obrigatória de status
 
@@ -115,15 +188,29 @@ fica reservado para fixação, exceção ou destaque que precise ser reencontrad
 
 ### 5.2 Cores proibidas e valores brutos
 
-O frontend ativo não pode introduzir `purple`, `violet`, `indigo`, `fuchsia`,
-`lavender`, `lilac` ou equivalentes roxo/violeta/azul-lilás. Também não pode
-introduzir hex, `rgb`, `rgba`, `hsl`, `hsla` ou cores Tailwind fora do contrato
-em componentes ativos. Valores brutos ficam somente nos arquivos centrais de
-tokens. `transparent`, `currentColor`, `inherit` e derivações por alpha ou
-`color-mix` dos tokens oficiais são permitidos.
+**Roxo é bloqueio absoluto, não dívida gradual.**
 
-Assets e logos externos devem ser classificados antes de qualquer automação;
-esta regra não autoriza alteração automática desses ativos.
+`purple`, `violet`, `indigo`, `fuchsia`, `lavender`, `lilac`, roxo, violeta,
+lilás e qualquer equivalente azul-lilás ficam proibidos em toda a plataforma —
+como classe Tailwind, hex, `rgb`, `hsl`, `oklch`, nome de token, nome de
+variável ou comentário descrevendo intenção visual. Não há período de
+transição e não há allowlist: o guard falha e a tarefa não conclui.
+
+O frontend ativo também não pode introduzir hex, `rgb`, `rgba`, `hsl`, `hsla`,
+`oklch` ou cores Tailwind fora do contrato. Valores brutos ficam somente em
+`app/globals.css`. `transparent`, `currentColor`, `inherit` e derivações por
+alpha ou `color-mix` dos tokens oficiais são permitidos.
+
+Classes de cor com tom inexistente no Tailwind — `slate-850` e similares — são
+igualmente proibidas: não geram CSS algum e produzem bordas e fundos que
+simplesmente não são renderizados.
+
+Assets e logos externos de terceiros (por exemplo o ícone oficial do Google)
+são a única exceção. Devem ser classificados explicitamente e nunca copiados
+para a linguagem visual da plataforma.
+
+O mapeamento de conversão de cor legada para token está em
+`.agents/skills/app-visual-system/references/color-contract.md`.
 
 ## 6. Botões
 
@@ -174,12 +261,19 @@ O padrão compartilhado para mesas e listas operacionais densas é a família
 Processar Keywords e Descobrir Keywords; essa referência não declara que os
 demais módulos já foram migrados.
 
-O contrato detalhado está em [Operational Grid](operational-grid.md). Ele
+O contrato **estrutural** está em [Operational Grid](operational-grid.md). Ele
 define uma composição comum de cabeçalho, linhas, seleção, pintura de seleção,
 ordenação manual, sort, resize, scroll horizontal, detalhe expandido, ações em
 lote e estado vazio. As regras de domínio permanecem nos adapters de cada
 módulo; a primitive compartilhada não interpreta KeywordDNA, ArticleDNA,
 ContentPlan ou PublicationRecord.
+
+O contrato **visual** — geometria do cabeçalho, densidade da linha, badges,
+painel de detalhe em bento numerado, pares label/valor, estado vazio e barra de
+lote — está em
+`.agents/skills/app-visual-system/references/operational-grid-layout.md`.
+Toda planilha nova ou tocada segue aquele arquivo. Não existe um segundo estilo
+de tabela na plataforma.
 
 Aplicação planejada não é implementação concluída. O Minerador é a
 **REFERENCE IMPLEMENTED**; a adoção **PLATFORM-WIDE** permanece planejada e
@@ -191,6 +285,84 @@ aprovação além de testes/build.
 Usar card somente quando representar uma unidade conceitual real. Preferir agrupamento, espaçamento, títulos, divisores discretos e superfícies graduais.
 
 Evitar card dentro de card, borda em todo bloco, sombra em todo painel, excesso de radius e caixas usadas para compensar falta de hierarquia.
+
+## 9.1 InfoHint
+
+`InfoHint` é o primitive canônico de ajuda contextual curta. Módulos devem
+reutilizá-lo em vez de criar tooltips locais equivalentes. O conteúdo segue a
+Quiet UI, abre por hover e foco e não contém links, ações, formulários ou
+documentação extensa. Informação essencial não pode depender exclusivamente
+do `InfoHint`; para conteúdo interativo ou maior, usar um padrão apropriado,
+como Popover, em contrato separado.
+
+O visual compartilhado usa o amarelo canônico `pending` somente como assinatura
+de contexto: ícone próprio, título, seta e estados hover/foco do trigger. O
+fundo, a borda e o corpo permanecem neutros, sem semântica de warning. Corpo e
+título usam 14px com line-height próximo de 1.4–1.5, e a largura fica em torno
+de 320px com contenção pelo viewport.
+
+### 9.2 Inline Label / Affordance Cluster
+
+`InlineLabelCluster` é o primitive compartilhado para manter um texto e suas
+affordances imediatamente associadas como uma unidade visual. O espaçamento é
+centralizado nos tokens `--ui-label-info-gap: 2px` e
+`--ui-label-control-gap: 4px` em `app/globals.css`.
+
+Contrato:
+
+- label → InfoHint: `2px`;
+- InfoHint → controle trailing: `4px`;
+- label → controle trailing sem InfoHint: `4px`;
+- `inline-flex`, `align-items: center`, `white-space: nowrap` e slots de
+  glyph/controle sem shrink;
+- sem `justify-between`, `flex-grow`, posicionamento absoluto ou offsets
+  negativos por consumidor;
+- somente a mesa pode resolver compressão com largura mínima/scroll
+  horizontal; o cluster nunca invade a coluna vizinha.
+
+O trigger padrão do `InfoHint` mantém um glyph visual compacto e uma área
+interativa maior centralizada no primitive, sem ampliar o afastamento percebido
+entre o texto e o glyph. Em botões de processo, o ícone funcional permanece
+com o espaçamento normal do botão e o `InfoHint` fica anexado ao label dentro do
+`InlineLabelCluster`. O `InfoHint` envolve o botão de ação existente como
+trigger customizado, enquanto o glyph compartilhado ocupa o slot `info`,
+preservando a ação original sem criar nested button.
+
+A implementação foi aplicada aos cabeçalhos e ações compartilhados do
+Minerador e da Descoberta; a ordenação, handlers e conteúdo dos InfoHints não
+foram alterados.
+
+### 9.3 Ajuda contextual por área
+
+O padrão **Contextual Help Drawer** é a camada de ajuda complementar da
+`GlobalTopbar` para as áreas operacionais tenantizadas. Ele não substitui o
+`InfoHint`: o InfoHint explica um controle em poucas palavras; o drawer reúne
+busca, tópicos e detalhe da área atual.
+
+Contrato visual e comportamental:
+
+- trigger compacto de `CircleHelp` ao lado do sino, com `InfoHint` e nome
+  acessível `Ajuda desta área`;
+- drawer fixo à direita, sem reflow, com `max-w-sm` no desktop e largura total
+  em viewport estreita;
+- superfície `surface-elevated`, borda `divider`, texto `foreground` e foco
+  `context-accent`, sem nova paleta ou cards decorativos;
+- cabeçalho `Ajuda — <área>`, fechar, busca local, lista de tópicos e detalhe
+  com retorno à lista;
+- busca somente nos tópicos carregados, normalizando acentos, maiúsculas e
+  espaços;
+- Escape, fechamento explícito, foco visível e retorno de foco ao trigger;
+- ausência de conteúdo exibida explicitamente, sem fallback para outra área;
+- conteúdo estático e versionado, de propriedade do módulo, sem HTML remoto,
+  IA, links, CTA, formulário ou chamada externa;
+- disponível em Marca, Minerador, Arquiteto, Radar, Planejador, Redator e
+  Publicações; fora de Admin, Conta/Perfil, autenticação, seleção de contexto,
+  agência e rotas públicas.
+
+O contrato detalhado está em
+[Contrato de ajuda contextual](contrato-ajuda-contextual.md). A implementação
+incremental deve validar 360, 768, 1024 e 1440px em light/dark mode, além de
+hover, foco, Escape, busca, detalhe e mudança de área.
 
 ## 10. Espaçamento e radius
 
@@ -278,13 +450,15 @@ componente já exista.
 
 | Área | `TARGET APPROVED` | `CURRENTLY IMPLEMENTED` |
 | --- | --- | --- |
-| Tokens e paleta | paleta oficial e tokens semânticos únicos | parcial: `app/globals.css` possui os tokens base e acentos de contexto/módulo |
-| Topbar | `GlobalTopbar` integrado ao `ProductShell` | não encontrado como componente canônico; o shell atual continua sendo `ProductShell` |
-| Notices | `publishNotice()` → `GlobalNoticeCenter` → toast e sino | não encontrado; módulos ainda mantêm notices/notificações locais |
-| Perfil | avatar com acesso à conta pessoal | acesso atual a `/conta` confirmado no shell |
-| Sidebar | preservada, sem redesign nesta fase | existente no `ProductShell` |
-| Planilhas | herança de tokens e estados, sem redesenho de grid | padronização estrutural ainda não iniciada |
-| Guard visual | teste/lint contra cores proibidas e valores brutos | planejado, sem `check-visual-system.mjs` neste checkout |
+| Tokens e paleta | paleta oficial e tokens semânticos únicos | implementado: `app/globals.css` possui a paleta completa, derivados por `color-mix` e `@theme inline` |
+| Ausência de roxo | zero ocorrência em todo o frontend ativo | implementado: 34 linhas convertidas para tokens; guard bloqueia reintrodução |
+| Topbar | `GlobalTopbar` integrado ao `ProductShell` | implementado: `components/global-topbar.tsx`, 40px, slots registráveis de página e de módulo |
+| Notices | `publishNotice()` → `GlobalNoticeCenter` → toast e sino | implementado: `components/global-notice-center.tsx` e `lib/visual-notice-contract.ts`; módulos legados ainda mantêm notices locais |
+| Perfil | avatar 28×28 com popover de conta | implementado no `GlobalTopbar` |
+| Sidebar | preservada, sem redesign nesta fase | existente no `ProductShell`, colapsável com preferência persistida por cookie |
+| Planilhas | Operational Grid único, com painel de detalhe em bento numerado | referência implementada no Minerador; adoção nos demais módulos em andamento |
+| Guard visual | falha em cor proibida, valor bruto, classe inválida e fonte < 12px | implementado: `scripts/check-visual-system.mjs` varre `app/`, `components/` e `modules/` com baseline que só pode diminuir |
+| Light mode | tema completo com toggle | **não implementado**: os tokens existem em `app/globals.css`, mas nada escreve `data-theme` e não há `prefers-color-scheme`. Decisão pendente: implementar o toggle ou remover o bloco |
 
 ## 17. Contrato de temas
 
@@ -296,16 +470,35 @@ tokens oficiais, sem criar tonalidades independentes. A validação deve cobrir
 contraste, legibilidade, foco perceptível e distinção entre superfície,
 superfície elevada e canvas.
 
+`foreground` não é cor de borda. `divider-light` **não deve ser usado no dark**
+para estrutura, hover ou focus: visualmente vira branco e cria a linha forte
+que o princípio de estrutura neutra proíbe. Hover e focus no dark usam
+`module-accent` em baixa intensidade, conforme a seção 7.
+
 ### Light mode
 
 Se o produto oferecer light mode, o background deve derivar de `#f3f4f6`, o
 foreground deve ser `#131413` e os divisores devem usar `divider-light =
 #d1d1d1`. Os acentos permanecem os mesmos; não se cria uma segunda paleta de
-marca. A existência de um tema light completo ainda não foi declarada como
-implementada.
+marca.
+
+**Estado atual: o light mode não está implementado.** O bloco `[data-theme="light"]`
+existe em `app/globals.css`, mas nenhum código escreve `data-theme` ou a classe
+`.light` no `<html>`, e não há `@media (prefers-color-scheme)`. O único leitor é
+`modules/arquiteto/arquiteto-workbench.tsx`, que sempre resolve para `dark`.
+
+Isso é ambiguidade aberta e precisa de decisão explícita: implementar o toggle
+(persistido junto da preferência de shell) ou remover o bloco. Enquanto não for
+decidido, nenhuma tarefa deve afirmar "validado em light mode" — não há light
+mode para validar.
 
 Scrollbars, bordas, focus, selected e disabled pertencem ao mesmo contrato de
 tokens. Um módulo não pode definir essas cores de forma independente.
+
+A barra de rolagem vertical encosta na borda direita da tela: não se reserva
+`scrollbar-gutter` nem padding ao lado dela. Cada tela tem uma única barra
+vertical; área operacional com rolagem própria usa `h-[calc(100vh-2.5rem)]`
+com `overflow-hidden`, descontando a `GlobalTopbar`, e nunca `h-screen`.
 
 ## 18. GlobalTopbar — arquitetura alvo
 
@@ -403,17 +596,31 @@ Não será feito big-bang. A sequência planejada é:
 7. remover duplicações somente após regressões e smoke manual;
 8. tratar planilhas em etapa sucessora.
 
-Um guard futuro de teste/lint deverá falhar quando componente ativo introduzir
-`purple`, `violet`, `indigo`, `fuchsia`, `lilac`, `lavender` ou valores brutos
-fora dos arquivos centrais autorizados. O guard deverá classificar assets/logos
-externos antes de sinalizar uma exceção. A ausência desse guard hoje é uma
-pendência explícita, não uma prova de conformidade total.
+O guard existe e está ativo: `scripts/check-visual-system.mjs`, executado por
+`pnpm run check:visual-system`.
+
+Comportamento:
+
+- varre `app/`, `components/` e `modules/` (`.tsx`, `.ts`, `.css`);
+- **roxo é sempre fatal**, em qualquer arquivo, inclusive `app/globals.css` —
+  detectado por nome e por matiz do hex, e nunca aceito no baseline;
+- valor bruto, classe Tailwind crua, tom inexistente e fonte abaixo de 12px
+  entram em `scripts/visual-system-baseline.json`, que só pode diminuir: se a
+  dívida de um arquivo aumenta, o guard falha;
+- `--strict` exige zero dívida (estado-alvo);
+- `--update-baseline` trava um ganho depois de uma limpeza;
+- `--files a b c` verifica arquivos específicos em modo estrito.
+
+Assets e logos externos de terceiros continuam classificados manualmente antes
+de qualquer automação.
 
 ## 22. Registro estrutural e governança
 
 O registro estrutural mínimo está em [SDD — fundação visual global](sdd-fundacao-visual-global.md).
-Ele descreve alvo, escopo, migração gradual, gates, riscos e rollback visual;
-não autoriza implementação nesta tarefa.
+Ele descreve alvo, escopo, migração gradual, gates, riscos e rollback visual.
+Esta implementação permanece limitada ao contrato Inline Label / Affordance
+Cluster e aos consumidores mapeados acima; não reabre a fundação visual
+global nem autoriza mudança de shell.
 
 Não foi criado ADR novo: não há ADR visual aceito no conjunto auditado que
 precise ser duplicado, e a decisão compartilhada fica registrada neste
@@ -435,11 +642,48 @@ GLOBAL_NOTICE_CENTER_TARGET = DEFINED_NOT_IMPLEMENTED
 NOTICE_RETENTION = 120000_MS_MEMORY_OR_SESSION_ONLY
 PERSISTENT_NOTIFICATION_SCOPE = OUT_OF_SCOPE_FUTURE_SYSTEM
 SPREADSHEET_STANDARDIZATION = SUCCESSOR_TASK
-IMPLEMENTATION_STATUS = NOT_STARTED_FOR_THIS_FOUNDATION
+IMPLEMENTATION_STATUS = PARTIAL_INCREMENTAL; INLINE_LABEL_CLUSTER = IMPLEMENTED
 ADR_DECISION = NOT_CREATED_NON_REDUNDANT
 SDD_DECISION = MINIMAL_SDD_CREATED_FOR_PLANNING
-CODE_CHANGED = NO
+CODE_CHANGED = INLINE_LABEL_CLUSTER_AND_MAPPED_CONSUMERS
 SHELL_CHANGED = NO
-MODULES_CHANGED = NO
+MODULES_CHANGED = MINERADOR_CONSUMERS_ONLY
 REMOTE_OPERATION = NONE
 ```
+
+## 24. Atualização operacional — Notification Center global — 2026-08-18
+
+Esta seção atualiza o snapshot de planejamento da seção 23 para o estado
+operacional abaixo.
+
+O alvo documental acima foi implementado de forma incremental, sem redesenhar
+o shell compartilhado:
+
+- `GlobalNoticeProvider` permanece acima das páginas no `app/layout.tsx` e
+  mantém históricos independentes por escopo durante a sessão SPA. O escopo
+  usa o módulo da rota e, quando aplicável, o `brandId` ou `agencyId` canônico;
+  slugs não participam do isolamento.
+- `NotificationBell` abre e fecha o painel ancorado, permite reabertura,
+  fechamento por clique externo e `Escape`, restaura foco e expõe estados de
+  não lido/lido. Avisos novos abrem o painel em preview curto e o fechamento
+  automático não remove o registro; interação ativa interrompe o timer.
+- `publishNotice` é a ponte compartilhada entre feedback operacional e o
+  histórico; o painel é a superfície padrão dos avisos. Toast externo só é
+  emitido por solicitação explícita (`showToast`), e nenhum produtor atual o
+  solicita.
+- A retenção permanece em memória durante a sessão SPA, sem expiração
+  arbitrária. Fechar o painel ou marcar como lido não remove o aviso; reload,
+  logout e novo login iniciam estado limpo. Não há persistência após F5/login,
+  tabela, migration, polling ou websocket nesta etapa.
+- Bridges aditivos foram conectados aos avisos existentes de Minerador,
+  Arquiteto, Radar, Marca, Planejador, Publicações, Conta e Admin. Os
+  contratos locais continuam válidos onde a mensagem inline ainda é útil.
+- Testes automatizados visuais passaram; a validação manual autenticada foi
+  concluída em Minerador, Arquiteto e Radar. O painel ficou ancorado ao sino,
+  contido no viewport, com scroll interno, conteúdo visível, auto-open/preview
+  e isolamento ao navegar entre áreas.
+- Correção incremental da regressão do perfil: o slot direito da GlobalTopbar
+  não recorta mais o popover local do avatar; a área de ações do Minerador
+  mantém seu clipping próprio. A validação autenticada confirmou abertura,
+  fechamento externo, `Escape`, reabertura e interação independente com o sino
+  em Minerador, Radar e Marca, no dark mode.

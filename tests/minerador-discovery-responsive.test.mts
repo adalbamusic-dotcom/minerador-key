@@ -10,20 +10,20 @@ const shell = readFileSync(new URL("../modules/minerador/keyword-table/keyword-t
 const table = readFileSync(new URL("../modules/minerador/discovery/discovery-table-placeholder.tsx", import.meta.url), "utf8");
 
 test("a página e os controles da Descoberta não ampliam o documento", () => {
-  assert.match(page, /w-full min-w-0 max-w-\[1800px\].*overflow-x-clip/);
-  assert.match(search, /section className="min-w-0 max-w-full/);
+  assert.match(page, /flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-x-clip/);
+  assert.match(search, /section className="min-w-0 w-full max-w-full/);
   assert.match(search, /grid min-w-0/);
   assert.doesNotMatch(search, /xl:grid-cols-\[minmax\(20rem/);
   assert.match(header, /max-w-full items-center justify-between gap-2 overflow-hidden/);
-  assert.match(tabs, /sm:hidden/);
+  assert.match(tabs, /lg:hidden/);
   assert.doesNotMatch(tabs, /overflow-x-auto/);
 });
 
 test("somente o shell da tabela da Descoberta recebe rolagem horizontal", () => {
   assert.match(shell, /scroll\?: "both" \| "x"/);
   assert.match(shell, /overflow-x-auto overflow-y-visible/);
-  assert.match(table, /<KeywordTableShell scroll="x"/);
-  assert.match(table, /min-w-\[1530px\]/);
+  assert.match(table, /<KeywordTableShell[^>]*scroll="x"/);
+  assert.match(table, /style=\{\{ minWidth: discoveryTableMinimumWidth \}\}/);
 });
 
 test("Estados/UF usa popover ancorado e limitado à viewport", () => {

@@ -37,7 +37,7 @@ export async function buildRadarEvidencePackage(payload: RadarAnalysisPayload, i
     radarItemId: input.radarItemId,
     articleId: payload.articleId,
     articleDnaId: input.research.articleDnaVersionId,
-    serp: { snapshotId: input.research.id, version: input.research.version, hash: input.research.contentHash, provider: "serper" as const, query: input.research.query, capturedAt: input.research.collectedAt },
+    serp: { snapshotId: input.research.id, version: input.research.version, hash: input.research.contentHash, provider: input.research.provider === "dataforseo" ? "dataforseo" as const : "serper" as const, query: input.research.query, capturedAt: input.research.collectedAt },
     analysisMode: { mode: payload.mode, selectedBy: input.selectedBy, selectedAt, ...(payload.modeHumanReason ? { reason: payload.modeHumanReason } : {}) },
     includedOrganicResults,
     excludedOrganicResults,

@@ -192,6 +192,35 @@ test("ArtifactVersionRepository é append-only, escopado por Brand e não duplic
   }
 });
 
+test("repositories SERP do pipeline não enviam IDs textuais para colunas UUID", async () => {
+  const client = new FakeClient([{ data: { id: "550e8400-e29b-41d4-a716-446655440002" }, error: null }]);
+  const repository = new SerpSnapshotRepository(context(client));
+  await repository.append({
+    id: "serp:legacy-id",
+    articleId: "article-1",
+    sourceVersionId: "article-dna-v1",
+    snapshotVersion: 1,
+    previousSnapshotId: "serp:legacy-previous",
+    contentHash: "hash",
+    status: "needs_review",
+    payload: { provider: "dataforseo" },
+    createdAt: "2026-08-25T12:00:00-03:00",
+  });
+  const insert = client.calls.find(call => call.table === "editorial_serp_snapshots" && call.operation === "insert");
+  const payload = insert?.payload as { id?: string; previous_snapshot_id?: string | null; source_version_id?: string; created_at?: string } | undefined;
+  assert.equal(typeof payload?.id, "string");
+  assert.match(payload?.id || "", /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  assert.equal(payload?.previous_snapshot_id, null);
+  assert.equal(payload?.source_version_id, "article-dna-v1");
+  assert.equal(payload?.created_at, "2026-08-25T15:00:00.000Z");
+
+  const reviewRepository = new SerpReviewRepository(context(new FakeClient()));
+  await assert.rejects(
+    reviewRepository.append({ id: "serp-review:legacy-id", articleId: "article-1", snapshotId: "serp:legacy-id", status: "approved", payload: {} }),
+    (error: unknown) => error instanceof PipelineRuntimeError && error.code === "INVALID_CONTEXT",
+  );
+});
+
 test("WorkflowRepository aplica brandId e lock_version e retorna CONFLICT sem confirmação", async () => {
   const client = new FakeClient([{ data: null, error: null }]);
   const repository = new WorkflowRepository(context(client));

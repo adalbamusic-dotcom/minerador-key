@@ -59,11 +59,12 @@ test("intenção existe somente como contexto preliminar", () => {
   assert.doesNotMatch(page, /setFilterIntent|filterIntent/);
   assert.match(page, /intent=\{preliminaryIntent\}/);
 });
-test("linha de filtros preserva a ordem contratada e capacidades futuras", () => {
-  assert.match(filters, /Resultados.*em breve/);
-  assert.match(filters, /KD.*em breve/);
+test("linha de filtros preserva a ordem e habilita Resultado/KD sem provider automático", () => {
+  assert.match(filters, /NumericRangeFilter label="Resultado"/);
+  assert.match(filters, /NumericRangeFilter label="KD"/);
+  assert.match(filters, /Alterar o filtro não chama a DataForSEO/);
   const rendered = filters.slice(filters.indexOf("return <section"));
-  assert.ok(rendered.indexOf("Resultados") < rendered.indexOf("Volume"));
+  assert.ok(rendered.indexOf("Resultado") < rendered.indexOf("Volume"));
   assert.ok(rendered.indexOf("Volume") < rendered.indexOf("KD"));
   assert.ok(rendered.indexOf("KD") < rendered.indexOf("CPC"));
   assert.ok(rendered.indexOf("CPC") < rendered.indexOf("Incluir palavras-chave"));
