@@ -6,8 +6,7 @@ import { useBrand } from "@/components/brand-context";
 import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
 import type { RadarAnalysisVersion, RadarExpertEvidence } from "@/lib/radar/analysis-contracts";
 import { analysisApprovalIssues, buildRadarBenchmark, createRadarAnalysisSuccessor, createRadarAnalysisVersion, suggestRadarAnalysisMode } from "@/lib/radar/analysis-contracts";
-import { approveRadarReport } from "@/lib/radar/report-approval";
-import { isRadarPlannerHandoff } from "@/lib/radar/planner-handoff";
+import { buildRadarPlannerHandoff, isRadarPlannerHandoff } from "@/lib/radar/planner-handoff";
 import { compareStrategyWithSerp, resolveRadarPublication, type RadarComparisonStatus } from "@/lib/radar/editorial-identity";
 import { buildRadarArchitectHref, buildRadarArticleHref, buildRadarModuleHref, radarCanonicalRouteKey, resolveRadarRouteItem } from "@/lib/radar/route-resolution";
 import { selectLatestRadarSerpRecord } from "@/lib/radar/serp-hydration";
@@ -18,6 +17,7 @@ import { classifyRadarExtractionFormat, classifyRadarSemanticTerm, extractionFor
 import { deriveRadarTransferState } from "@/lib/radar/workflow-insights";
 import { buildRadarKgrStrategy, radarKgrClassificationLabel, radarSlugAlignmentLabel } from "@/lib/radar/strategy-context";
 import { buildRadarCompetitiveReport } from "@/lib/radar/competitive-report";
+import { buildRadarEvidencePackage } from "@/lib/radar/evidence-package";
 import { buildRadarFlowProgress, deriveRadarReferenceRole, radarSemanticDecisionLabel, resolveRadarTab, selectRadarSemanticPresentation, type RadarReferenceRole, type RadarTab } from "@/lib/radar/flow-presentation";
 import { buildExpertTopicContext } from "@/lib/radar/r6-sequential";
 import { parseRadarExpertEvidenceReviews, projectRadarExpertEvidence, type RadarExpertBriefEvidenceSource, type RadarExpertContributionEvidenceSource } from "@/lib/radar/expert-evidence";
@@ -462,50 +462,93 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
   };
 
   /**
-   * A tela NÃO implementa aprovação — ela chama a autoridade.
+   * Aprovação das evidências.
    *
-   * O portão, a ordem dos builders, a exigência de readback e a transição do
-   * RadarItem vivem em `approveRadarReport`. Aqui ficam só as coisas que
-   * pertencem mesmo à tela: montar as entradas, e contar o resultado.
+   * A ordem importa e vive aqui: portão → relatório competitivo → pacote de
+   * evidências → handoff do Planejador → sucessora → READBACK. Um POST que
+   * não lançou exceção não é prova de que o remoto guardou o que foi enviado,
+   * então quem encerra é o readback, não a ausência de erro.
    */
   const approve = async () => {
     if (!analysis || !research || !selectedBrandId) return;
     setBusy("approve");
     try {
-      const resultado = await approveRadarReport({
-        analysis,
-        research,
+      // O portão. Evidência do especialista ainda em leitura, com erro ou com
+      // pendência é bloqueio: aprovar sobre leitura incompleta aprovaria o que
+      // ninguém viu.
+      const issues: string[] = [];
+      if (!remoteExpertEvidence.loaded || remoteExpertEvidence.selectionKey !== remoteExpertEvidenceSelectionKey) {
+        issues.push("Aguarde a leitura remota do ExpertBrief antes de aprovar.");
+      }
+      if (remoteExpertEvidence.error) {
+        issues.push("A contribuição do especialista não pôde ser lida; a aprovação permanece bloqueada.");
+      }
+      if (remoteExpertEvidence.pendingCount || remoteExpertEvidence.blockedCount) {
+        issues.push("Revise todas as contribuições remotas do especialista antes de aprovar o relatório.");
+      }
+      issues.push(...analysisApprovalIssues(analysis, kgrStrategy));
+      if (issues.length) { setNotice(issues.join(" ")); return; }
+
+      const approvalVersionId = crypto.randomUUID();
+      const approvalVersionNumber = analysis.versionNumber + 1;
+      const approvedAt = new Date().toISOString();
+
+      const report = await buildRadarCompetitiveReport({
+        payload: analysis.payload,
         article: article.payload,
-        hasResearch: Boolean(research),
-        brandIdSelected: Boolean(selectedBrandId),
-        kgrStrategy,
-        expertEvidence: {
-          loaded: remoteExpertEvidence.loaded,
-          selectionMatches: remoteExpertEvidence.selectionKey === remoteExpertEvidenceSelectionKey,
-          error: Boolean(remoteExpertEvidence.error),
-          pendingCount: remoteExpertEvidence.pendingCount,
-          blockedCount: remoteExpertEvidence.blockedCount,
-        },
+        research,
         radarItemId: row.id,
+        analysisVersionId: approvalVersionId,
+      } as Parameters<typeof buildRadarCompetitiveReport>[0]);
+
+      const packageData = await buildRadarEvidencePackage(analysis.payload, {
+        radarItemId: row.id,
+        analysisVersionId: approvalVersionId,
+        analysisVersionNumber: approvalVersionNumber,
+      } as Parameters<typeof buildRadarEvidencePackage>[1]);
+
+      const handoff = await buildRadarPlannerHandoff({
+        packageData,
+        approvedReport: report,
         brandId: row.brandId,
+        radarItemId: row.id,
         articleId: row.articleId,
         articleDnaVersionId: row.articleDnaVersionId,
         articleDnaContentHash: row.articleDnaContentHash,
         siloDnaVersionId: silo?.versionId || null,
-        radarItemState: row.state,
+        sourceAnalysisVersionId: approvalVersionId,
+        sourceAnalysisVersionNumber: approvalVersionNumber,
         selectedBy: actorId(session),
-        expertEvidencePayload: remoteExpertEvidence.evidence,
-        persist: async successor => {
-          const saved = await save(successor);
-          return { persistenceMode: saved.persistenceMode, readbackConfirmed: saved.readbackConfirmed };
-        },
-        transitionToApproved: () => pipeline.updateRadarState([row.id], "approved"),
-      });
+        humanDecisions: analysis.payload.keywordDecisions.map(decision => ({
+          id: `keyword:${decision.keywordId}`,
+          target: `keyword:${decision.keywordId}`,
+          decision: decision.decision,
+          note: decision.note,
+        })) as Parameters<typeof buildRadarPlannerHandoff>[0]["humanDecisions"],
+        expertEvidence: remoteExpertEvidence.evidence,
+        now: approvedAt,
+      } as Parameters<typeof buildRadarPlannerHandoff>[0]);
 
-      if (!resultado.ok) {
-        setNotice(resultado.reason === "BLOCKED" ? resultado.issues.join(" ") : resultado.message);
+      const successor = await createRadarAnalysisSuccessor(
+        analysis,
+        {
+          status: "approved",
+          competitiveReport: report,
+          approvedAt,
+          approvedBy: actorId(session),
+          plannerPackage: packageData,
+          plannerHandoff: handoff,
+        } as Parameters<typeof createRadarAnalysisSuccessor>[1],
+        actorId(session),
+        approvalVersionId,
+      );
+
+      const saved = await save(successor);
+      if (saved.persistenceMode !== "remote" || !saved.readbackConfirmed) {
+        setNotice("A aprovação foi aplicada apenas na recuperação local; a persistência remota não foi confirmada.");
         return;
       }
+      if (row.state === "awaiting_approval") pipeline.updateRadarState([row.id], "approved");
       setNotice("Evidências aprovadas. Write remoto e readback confirmados; a identidade permanece protegida e o Planejador decide se cria nova versão do plano.");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Não foi possível aprovar as evidências."); } finally { setBusy(""); }
   };
