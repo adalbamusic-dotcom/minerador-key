@@ -3870,6 +3870,14 @@ export default function ArquitetoPage() {
         // Recusa é DECLARADA, nunca item mudo — e depois do envio, para incluir
         // o que o importador barrou além do que a resolução já tinha barrado.
         if (semSilo.length) showNotification("warning", `Bloqueado no handoff: ${semSilo.join(" ")}`);
+        // §5 · o caminho legado é DECLARADO. Enquanto o `siloId` não vier
+        // materializado no ArticleDNA, o pai é lido pelo território — leitura,
+        // não conserto — e quem envia precisa ver quantos ainda dependem disso.
+        const porLegado = Object.values(contexto)
+          .filter(item => item.silo.siloIdProvenance === "LEGACY_TERRITORY_HYDRATION").length;
+        if (porLegado) {
+          showNotification("warning", `${porLegado} artigo(s) ainda não trazem o Silo gravado no próprio ArticleDNA: ele foi deduzido para este envio. Confirme a formação para gravá-lo no artefato.`);
+        }
         setPendingRadarSmokeReadback(articleIds);
       }
     }

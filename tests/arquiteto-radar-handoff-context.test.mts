@@ -4,6 +4,7 @@ import {
   findApprovedGraphForSilo,
   radarLinkContextIsStale,
   relevantEdgesForArticle,
+  legacyHydratedHandoffArticleIds,
   resolveCanonicalSiloForArticle,
 } from "../lib/arquiteto/radar-handoff-context.ts";
 
@@ -83,6 +84,7 @@ const contexto = {
   siloPageId: "silo-page:working-silo:3", siloPageVersionId: "page-v1",
   siloPageSlug: "/anti-idade-e-retinol", siloPageCanonical: null, siloPagePublicationStatus: "published",
   articleRole: "pillar" as const,
+  siloIdProvenance: "DECLARED" as const,
 };
 
 test("grafo proposto, de outro Silo ou de outra versão não é aceito", () => {
@@ -291,4 +293,49 @@ test("a escrita remota é aguardada antes do estado local", () => {
 test("nenhum artigo é descartado em silêncio pelo importador", () => {
   assert.match(operationalFlow, /const siloIdOf = /);
   assert.match(pipeline, /blocked: resolvido\.blocked/);
+});
+
+/* -------- §5 · a hidratação de legado é declarada, não silenciosa -------- */
+
+test("§5 · resolver pelo território marca procedência LEGADO, e declarar marca CONTRATO", () => {
+  // Sem `siloId` no artefato: o pai é lido pelo território — e isso APARECE.
+  const legado = resolveCanonicalSiloForArticle({
+    article: artigo(), siloVersions: [siloDna()], siloPageVersions: [siloPage()],
+  });
+  assert.equal(legado.ok, true);
+  if (!legado.ok) return;
+  assert.equal(legado.context.siloId, "working-silo:3");
+  assert.equal(legado.context.siloIdProvenance, "LEGACY_TERRITORY_HYDRATION");
+
+  // Com `siloId` materializado no artefato: é o contrato cumprido.
+  const declarado = resolveCanonicalSiloForArticle({
+    article: artigo({ siloId: "working-silo:3" }), siloVersions: [siloDna()], siloPageVersions: [siloPage()],
+  });
+  assert.equal(declarado.ok, true);
+  if (!declarado.ok) return;
+  assert.equal(declarado.context.siloId, "working-silo:3", "mesmo Silo pelos dois caminhos");
+  assert.equal(declarado.context.siloIdProvenance, "DECLARED");
+});
+
+test("§5 · a dívida é contável: o lote diz quantos vieram pelo legado", () => {
+  const entradas = [
+    { articleId: "art-A", label: "A", silo: { siloIdProvenance: "LEGACY_TERRITORY_HYDRATION" }, internalLinks: null },
+    { articleId: "art-B", label: "B", silo: { siloIdProvenance: "DECLARED" }, internalLinks: null },
+    { articleId: "art-C", label: "C", silo: { siloIdProvenance: "LEGACY_TERRITORY_HYDRATION" }, internalLinks: null },
+  ] as never;
+  assert.deepEqual(legacyHydratedHandoffArticleIds(entradas), ["art-A", "art-C"]);
+  // Lote em conformidade devolve lista vazia — é assim que a quitação aparece.
+  const conforme = [{ articleId: "art-B", label: "B", silo: { siloIdProvenance: "DECLARED" }, internalLinks: null }] as never;
+  assert.deepEqual(legacyHydratedHandoffArticleIds(conforme), []);
+});
+
+test("§5 · a hidratação LÊ, não conserta: o artefato continua sem siloId", () => {
+  const article = artigo();
+  const resolucao = resolveCanonicalSiloForArticle({
+    article, siloVersions: [siloDna()], siloPageVersions: [siloPage()],
+  });
+  assert.equal(resolucao.ok, true);
+  // O que o §5 proíbe é o consumidor completar o artefato. Ele não completa:
+  // quem materializa `siloId` é a sucessora da fase Artigos.
+  assert.equal((article as { siloId: string | null }).siloId, null);
 });

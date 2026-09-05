@@ -143,30 +143,47 @@ export function resolveSiloPagePublicationIdentity(input: {
     const resolvida = urlValida(observado.resolvedUrl);
     const declarada = urlValida(observado.declaredCanonicalUrl) || urlValida(observado.normalizedCanonicalUrl);
 
+    /*
+     * DIVERGÊNCIA NÃO SE RESOLVE ESCOLHENDO UM LADO.
+     *
+     * Se o artefato já declara canonical e o catálogo observou outro, os
+     * dois estão falando de endereços diferentes para a mesma página. Pegar
+     * o do catálogo reescreveria identidade publicada em silêncio; pegar o do
+     * artefato esconderia o que o site realmente serve. O honesto é preservar
+     * o que a página declara e marcar `canonical_mismatch`, que é o status
+     * que o gate consulta para NÃO aprovar.
+     */
+    const jaDeclarado = urlValida(input.current?.canonical);
+    const divergente = Boolean(jaDeclarado && declarada && jaDeclarado !== declarada);
+
     const verification: Verification = {
       ...vazio(),
-      status: traduzido ?? "not_checked",
+      status: divergente ? "canonical_mismatch" : traduzido ?? "not_checked",
       checkedAt: observado.lastVerifiedAt ?? null,
       requestedUrl: resolvida,
       resolvedUrl: resolvida,
       declaredCanonical: declarada,
       httpStatus: observado.httpStatus ?? null,
       sitemapMatch: observado.inSitemap ?? null,
-      message: traduzido
+      message: divergente
+        ? `A SiloPage declara ${jaDeclarado} e o catálogo observou ${declarada}: a identidade publicada não é reescrita aqui.`
+        : traduzido
         ? null
         : REASON_BY_CATALOG[observado.verificationStatus]
           || `O catálogo classificou esta página como "${observado.verificationStatus}", sem equivalente que sustente aprovação.`,
     };
 
     return {
-      // Identidade publicada NÃO é reescrita: o canonical é o observado, e na
-      // falta dele o que a página já declarava.
-      canonical: declarada || urlValida(input.current?.canonical) || resolvida,
+      // Identidade publicada NÃO é reescrita: o que a página já declara vem
+      // primeiro, e o observado só preenche o vazio.
+      canonical: jaDeclarado || declarada || resolvida,
       canonicalIsPlanned: false,
       publicationStatus: "published",
       publishedUrl: resolvida || urlValida(input.current?.publishedUrl),
       publicationVerification: verification,
-      reason: traduzido === "canonical_confirmed"
+      reason: divergente
+        ? `Canonical divergente entre o artefato e o catálogo; a aprovação fica bloqueada até alguém decidir qual é o endereço desta página.`
+        : traduzido === "canonical_confirmed"
         ? "O catálogo do site confirmou o canonical desta página publicada."
         : traduzido
           ? `O catálogo observou esta página como ${traduzido}.`

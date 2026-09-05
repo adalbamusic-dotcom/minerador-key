@@ -40,6 +40,17 @@ export type ResolvedSiloContext = {
   siloPagePublicationStatus: string | null;
   /** O papel do Article dentro do Silo, lido do SiloDNA consolidado. */
   articleRole: "pillar" | "support";
+  /**
+   * COMO o Silo foi resolvido — e por isso nunca é silencioso.
+   *
+   * `DECLARED`: o ArticleDNA trouxe `siloId` materializado. É o contrato.
+   * `LEGACY_TERRITORY_HYDRATION`: o artefato não trouxe, e o pai foi lido
+   * pelo território. Continua sendo LEITURA — nada é gravado de volta no
+   * artefato —, mas fica contável: sem este campo, um lote inteiro rodando
+   * pelo caminho legado passava por contrato cumprido, e a dívida ficava
+   * invisível justamente para quem precisa decidir quitá-la.
+   */
+  siloIdProvenance: "DECLARED" | "LEGACY_TERRITORY_HYDRATION";
 };
 
 export type SiloResolution =
@@ -107,6 +118,7 @@ export function resolveCanonicalSiloForArticle(input: {
       siloPageCanonical: pagina?.payload.canonical ?? null,
       siloPagePublicationStatus: pagina?.payload.publicationStatus ?? null,
       articleRole: silo.payload.pillarArticleId === input.article.articleId ? "pillar" : "support",
+      siloIdProvenance: porDeclaracao ? "DECLARED" : "LEGACY_TERRITORY_HYDRATION",
     },
   };
 }
@@ -276,3 +288,22 @@ export function buildRadarHandoffContexts(input: {
 
   return { eligible, blocked };
 }
+
+/**
+ * Quais artigos do lote foram resolvidos pelo caminho LEGADO.
+ *
+ * §5 proíbe o handoff consertar o artefato, e ele não conserta — a resolução
+ * por território é leitura. O que faltava era tornar essa leitura contável:
+ * enquanto o número não aparece, um lote inteiro rodando pelo caminho legado
+ * é indistinguível de um lote em conformidade, e ninguém sabe que há dívida.
+ *
+ * Quem quita é a sucessora criada no fechamento da fase Artigos, que
+ * materializa `siloId` no próprio ArticleDNA. Depois disso esta lista fica
+ * vazia para artefatos novos, e o que sobra é legado de verdade.
+ */
+export const legacyHydratedHandoffArticleIds = (
+  entries: readonly RadarHandoffContextEntry[],
+): string[] => entries
+  .filter(entry => entry.silo.siloIdProvenance === "LEGACY_TERRITORY_HYDRATION")
+  .map(entry => entry.articleId)
+  .sort();

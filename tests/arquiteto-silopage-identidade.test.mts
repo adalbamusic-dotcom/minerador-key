@@ -101,3 +101,78 @@ test("a consolidação usa a identidade resolvida sem reescrever o que existe", 
   assert.match(workspace, /const identidadePublicavel = resolveSiloPagePublicationIdentity\(\{/);
   assert.match(workspace, /brandSiteUrl: brands\.find\(item => item\.id === selectedBrandId\)\?\.site_url \?\? null/);
 });
+
+/* ---- auditoria §6 · divergência entre artefato e catálogo é bloqueio ----- */
+
+test("canonical já declarado pela SiloPage não é reescrito pelo catálogo", () => {
+  const resultado = resolveSiloPagePublicationIdentity({
+    slug: "anti-idade-e-retinol",
+    brandSiteUrl: "https://careglow.com.br",
+    observation: {
+      verificationStatus: "canonical_confirmed",
+      resolvedUrl: "https://careglow.com.br/anti-idade-e-retinol",
+      declaredCanonicalUrl: "https://careglow.com.br/outro-endereco",
+      normalizedCanonicalUrl: null,
+    },
+    current: {
+      publicationStatus: "published",
+      publishedUrl: "https://careglow.com.br/anti-idade-e-retinol",
+      canonical: "https://careglow.com.br/anti-idade-e-retinol",
+    },
+  });
+
+  // O que a página declara sobrevive — o catálogo não sobrescreve identidade
+  // publicada em silêncio.
+  assert.equal(resultado.canonical, "https://careglow.com.br/anti-idade-e-retinol");
+  // E a divergência não some: vira o status que o gate consulta para recusar.
+  assert.equal(resultado.publicationVerification.status, "canonical_mismatch");
+  assert.match(resultado.publicationVerification.message || "", /outro-endereco/);
+  assert.match(resultado.reason, /divergente/i);
+});
+
+test("sem divergência, o catálogo continua preenchendo o vazio", () => {
+  const semCanonical = resolveSiloPagePublicationIdentity({
+    slug: "anti-idade-e-retinol",
+    brandSiteUrl: "https://careglow.com.br",
+    observation: {
+      verificationStatus: "canonical_confirmed",
+      resolvedUrl: "https://careglow.com.br/anti-idade-e-retinol",
+      declaredCanonicalUrl: "https://careglow.com.br/anti-idade-e-retinol",
+      normalizedCanonicalUrl: null,
+    },
+    current: { publicationStatus: "published", publishedUrl: null, canonical: null },
+  });
+  assert.equal(semCanonical.canonical, "https://careglow.com.br/anti-idade-e-retinol");
+  assert.equal(semCanonical.publicationVerification.status, "canonical_confirmed");
+
+  // Concordando, também não há bloqueio.
+  const iguais = resolveSiloPagePublicationIdentity({
+    slug: "anti-idade-e-retinol",
+    brandSiteUrl: "https://careglow.com.br",
+    observation: {
+      verificationStatus: "canonical_confirmed",
+      resolvedUrl: "https://careglow.com.br/anti-idade-e-retinol",
+      declaredCanonicalUrl: "https://careglow.com.br/anti-idade-e-retinol",
+      normalizedCanonicalUrl: null,
+    },
+    current: {
+      publicationStatus: "published",
+      publishedUrl: "https://careglow.com.br/anti-idade-e-retinol",
+      canonical: "https://careglow.com.br/anti-idade-e-retinol",
+    },
+  });
+  assert.equal(iguais.publicationVerification.status, "canonical_confirmed");
+});
+
+test("status fraco do catálogo não destrava aprovação, e diz por quê", () => {
+  for (const fraco of ["discovered", "unverified", "canonical_missing", "redirect", "noindex"]) {
+    const resultado = resolveSiloPagePublicationIdentity({
+      slug: "anti-idade-e-retinol",
+      brandSiteUrl: "https://careglow.com.br",
+      observation: { verificationStatus: fraco, resolvedUrl: null, declaredCanonicalUrl: null, normalizedCanonicalUrl: null },
+      current: null,
+    });
+    assert.equal(resultado.publicationVerification.status, "not_checked", `${fraco} não vira status forte`);
+    assert.ok((resultado.publicationVerification.message || "").length > 0, `${fraco} explica o motivo`);
+  }
+});
