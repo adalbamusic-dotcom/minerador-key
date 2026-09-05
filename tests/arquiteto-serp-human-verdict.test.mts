@@ -144,7 +144,7 @@ test("a aba SERP separa observação humana de sinal técnico", () => {
   assert.match(workspace, /Detalhes técnicos da SERP/);
   assert.match(workspace, /Sem evidência suficiente, nada aqui é conflito nem exige decisão\./);
   // Ações de recomendação só aparecem no caminho de divergência.
-  assert.match(workspace, /articleSerpVerdict\.kind === "DIVERGENCE"\n\s*\? <>/);
+  assert.match(workspace, /articleSerpVerdict\.kind === "DIVERGENCE"\r?\n\s*\? <>/);
   assert.doesNotMatch(workspace, /Conclusão arquitetural: <strong>/);
   assert.doesNotMatch(workspace, /Com conflito observado: <strong/);
 });

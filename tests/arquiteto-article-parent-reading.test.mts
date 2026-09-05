@@ -78,8 +78,8 @@ test("status e aprovação da grade leem o mesmo ArticleDNA do painel", () => {
 test("concluir formação materializa o ArticleDNA já aprovado", () => {
   // Materializar como proposta e exigir um segundo clique criava duas decisões
   // humanas para um único ato editorial.
-  assert.match(workspace, /status: "approved",\n        \}\);/);
-  assert.doesNotMatch(workspace, /status: "proposed",\n        \}\);/);
+  assert.match(workspace, /status: "approved",\r?\n        \}\);/);
+  assert.doesNotMatch(workspace, /status: "proposed",\r?\n        \}\);/);
   assert.match(workspace, /const confirmado = confirmedArticlePayload\(/);
   assert.match(workspace, /createStatusEvent\(canonico\.versionId, "approved", actorId,/);
   // E o artefato sai COMPLETO: território e Silo canônico. Emitir `siloId:

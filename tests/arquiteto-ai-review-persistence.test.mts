@@ -262,7 +262,7 @@ test("a versão base declarada precisa ser um ArticleDNA canônico da mesma Bran
 });
 
 test("a escrita é server-side, com readback obrigatório antes do sucesso", () => {
-  assert.match(workspace, /const persisted = await persistArquitetoArtifact\(\{\n\s*brandId: selectedBrandId,\n\s*artifactType: ARTICLE_AI_REVIEW_ARTIFACT_TYPE,/);
+  assert.match(workspace, /const persisted = await persistArquitetoArtifact\(\{\r?\n\s*brandId: selectedBrandId,\r?\n\s*artifactType: ARTICLE_AI_REVIEW_ARTIFACT_TYPE,/);
   assert.match(workspace, /const readbackArticleAiReviews = async \(versions: readonly VersionedArticleArchitectureAiReview\[\]\) => \{/);
   assert.match(workspace, /A revisão da IA não foi confirmada no readback canônico/);
   assert.match(workspace, /await readbackArticleAiReviews\(persistedReviews\);/);

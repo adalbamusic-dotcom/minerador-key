@@ -278,7 +278,7 @@ test("o canvas do modo Silos não projeta cenário de Article nem fabrica territ
   assert.doesNotMatch(workspace, /territoryRef: `territory:\$\{/);
   assert.match(workspace, /return \{ current: territorialCurrent, logic: territorialLogicSnapshot, serp: territorialCurrent, ai: territorialCurrent \};/);
   // Território não tem pilar nem apoio: os campos de Article ficam vazios.
-  assert.match(workspace, /pillarArticleId: null,\n        supportArticleIds: \[\],\n        articleIds: \[\],/);
+  assert.match(workspace, /pillarArticleId: null,\r?\n        supportArticleIds: \[\],\r?\n        articleIds: \[\],/);
 });
 
 test("o contador da mesa acompanha a unidade do modo", () => {

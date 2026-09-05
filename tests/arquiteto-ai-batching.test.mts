@@ -276,7 +276,7 @@ test("o guard de tamanho falha só o Article que excede, com motivo específico"
   // O handler transforma isso em falha daquele artigo e segue para o próximo.
   assert.match(workspace, /if \(!measurement\.withinLimit\) \{/);
   assert.match(workspace, /Contexto estratégico de \$\{measurement\.bytes\} caracteres excede o limite/);
-  assert.match(workspace, /executionStates\.push\(\{ articleId: batchArticleId, state: "ERROR" \}\);\n\s*continue;/);
+  assert.match(workspace, /executionStates\.push\(\{ articleId: batchArticleId, state: "ERROR" \}\);\r?\n\s*continue;/);
 });
 
 test("no-op não vira proposta: zero material em Workbench e no Article", () => {
