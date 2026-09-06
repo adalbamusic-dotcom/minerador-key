@@ -549,7 +549,20 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       const resolutionEnvelope = await createSerpResolutionEnvelope(articleId, articleDnaVersionId);
       const response = await fetch("/api/editorial/serp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildRadarSerpCollectPayload({ brandId: selectedBrandId, articleId, articleDnaVersionId, location: location || "Brasil", language: "pt-BR", device: "desktop", articleVersion, resolutionEnvelope })) });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || "Não foi possível coletar a SERP.");
+      if (!response.ok) {
+        /*
+         * O CÓDIGO viaja junto com a mensagem.
+         *
+         * Sem ele o Radar classificava um vínculo quebrado de Silo como falha
+         * transitória e oferecia "tentar novamente" para algo que nenhuma
+         * repetição resolve.
+         */
+        const failure = Object.assign(new Error(body.error || "Não foi possível coletar a SERP."), {
+          code: typeof body.code === "string" && body.code.trim() ? body.code : `http_${response.status}`,
+          status: response.status,
+        });
+        throw failure;
+      }
       const record = SerpCollectionRecordSchema.parse(body.record);
       if (!actorUserId || !saveLocalSerpRecovery(actorUserId, selectedBrandId, workspace, record)) throw new Error("A coleta real foi concluída, mas a recuperação local não pôde ser salva.");
       updateWorkspace(current => ({ ...current, serpRecords: [...current.serpRecords.filter(item => item.id !== record.id), record], serpPersistenceMode: body.persistenceMode === "remote" ? "server" : "local_fallback" }));
@@ -860,7 +873,18 @@ async function sendWorkflowCommand(
     if (response.ok) return { ok: true };
     const body = await response.json().catch(() => null) as { code?: unknown; error?: unknown } | null;
     const code = typeof body?.code === "string" && body.code.trim() ? body.code : `http_${response.status}`;
-    update(current => ({ ...current, persistenceMode: code === "persistence_unavailable" ? "local_fallback" : "unavailable" }));
+    /*
+     * SO degrada o modo de persistencia quando a falha E de persistencia.
+     *
+     * Um 4xx e contrato malformado do nosso lado — o servidor esta de pe e a
+     * leitura continua boa. Marcar `unavailable` fazia a planilha dizer "nao
+     * conclua que a marca esta vazia" enquanto o GET respondia normalmente.
+     * A recusa ja volta ao chamador; nao precisa mentir sobre o caminho de
+     * leitura tambem.
+     */
+    if (response.status >= 500 || code === "persistence_unavailable") {
+      update(current => ({ ...current, persistenceMode: code === "persistence_unavailable" ? "local_fallback" : "unavailable" }));
+    }
     return {
       ok: false,
       code,

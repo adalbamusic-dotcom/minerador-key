@@ -90,6 +90,10 @@ export const WorkflowCommandSchema = z.discriminatedUnion("action", [
         siloPageCanonical: z.string().nullable(),
         siloPagePublicationStatus: z.string().nullable(),
         articleRole: z.enum(["pillar", "support"]),
+        // Adicionado junto com o marcador de procedencia em
+        // ResolvedSiloContext. O objeto e .strict(): sem isto o cliente envia
+        // uma chave a mais e o comando inteiro vira 400.
+        siloIdProvenance: z.enum(["DECLARED", "LEGACY_TERRITORY_HYDRATION"]),
       }).strict(),
       internalLinks: z.unknown().nullable(),
       serpProvenance: z.unknown().nullable(),

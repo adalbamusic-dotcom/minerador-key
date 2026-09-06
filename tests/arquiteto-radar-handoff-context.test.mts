@@ -339,3 +339,40 @@ test("§5 · a hidratação LÊ, não conserta: o artefato continua sem siloId",
   // quem materializa `siloId` é a sucessora da fase Artigos.
   assert.equal((article as { siloId: string | null }).siloId, null);
 });
+
+/* --- o contexto resolvido precisa CABER no comando que vai ao servidor ---- */
+
+test("o silo resolvido atravessa o WorkflowCommandSchema sem sobrar campo", async () => {
+  // Este teste existe por causa de um defeito real: `siloIdProvenance` foi
+  // adicionado a `ResolvedSiloContext` e não ao schema do comando, que é
+  // `.strict()`. O cliente passou a enviar uma chave a mais, o servidor
+  // devolveu 400 "Comando editorial inválido" e a importação parou inteira.
+  //
+  // O tipo sozinho não pega isso: o contexto vira JSON e o schema é a única
+  // fronteira que confere o que atravessa.
+  const { WorkflowCommandSchema } = await import("../lib/editorial/persistence-contracts.ts");
+
+  const resolucao = resolveCanonicalSiloForArticle({
+    article: artigo(), siloVersions: [siloDna()], siloPageVersions: [siloPage()],
+  });
+  assert.equal(resolucao.ok, true);
+  if (!resolucao.ok) return;
+
+  const comando = {
+    action: "import_radar" as const,
+    brandId: "brand-1",
+    articleVersions: [],
+    versionEvents: [],
+    hydrationByArticleId: {},
+    handoffContext: {
+      "article:pilar": { silo: resolucao.context, internalLinks: null, serpProvenance: null },
+    },
+  };
+
+  const parsed = WorkflowCommandSchema.safeParse(comando);
+  assert.equal(
+    parsed.success,
+    true,
+    `o contexto resolvido não passou no schema do comando: ${parsed.success ? "" : JSON.stringify(parsed.error.issues)}`,
+  );
+});
