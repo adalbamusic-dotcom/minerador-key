@@ -4,6 +4,36 @@
 
 ---
 
+## HIPÓTESE FALSIFICADA — 2026-09-06, consultas diretas ao Supabase
+
+**A linha incompatível NÃO era a causa.** Consultas somente-leitura ao banco
+mostraram:
+
+| Verificação remota | Resultado |
+|---|---|
+| Itens do Radar | **3 registros**, incluindo serum e máscara |
+| Itens validados com a normalização de datas do leitor | **3/3 passam** |
+| Versões de ArticleDNA, SiloDNA e ContentPlan | **100/100 passam** |
+| Eventos dessas versões | **111/111 passam** |
+| Snapshots SERP | **5/5 passam** |
+| SERP de "mascara de skincare" | 2 snapshots, 7 resultados cada |
+
+Os registros existem e **todos passam nos schemas**. Portanto:
+
+1. A hipótese de que os itens nunca foram gravados está **descartada**.
+2. A hipótese de que uma linha incompatível derrubava o leitor está
+   **descartada para estes registros**.
+
+A proteção de leitura parcial que foi implementada **continua correta e útil** —
+o risco de código era real —, mas **não pode ser apresentada como a causa deste
+incidente**. As seções abaixo que a descrevem como causa estão corrigidas por
+esta ressalva.
+
+**Onde a perda está, então:** entre o banco e a tela. E há um defeito confirmado
+nesse trecho, descrito na §1.5.
+
+---
+
 ## Grau de evidência — leia antes do resto
 
 Este relatório mistura três coisas que **não** têm o mesmo peso. A distinção foi
@@ -12,8 +42,8 @@ acrescentada em 2026-09-06 depois de o texto original tratar as três como uma s
 | Grau | O que significa | Nesta auditoria |
 |---|---|---|
 | **Risco confirmado no código** | Lido na fonte, verificável por qualquer um | `Schema.parse()` dentro do laço, sem `try` por linha, em `WorkflowRepository.list` e `ArtifactRepository.list`. **Confirmado.** |
-| **Causa reproduzida** | O defeito foi disparado com o dado real | **NÃO reproduzido.** Nenhum registro concreto foi identificado como o que quebra o parse. |
-| **Estado remoto verificado** | Consultado no banco | **NÃO verificado.** Nenhum SQL foi executado por mim. |
+| **Causa reproduzida** | O defeito foi disparado com o dado real | **FALSIFICADA.** 3/3 itens do Radar passam no schema; nenhuma linha incompatível existe entre eles. |
+| **Estado remoto verificado** | Consultado no banco | **VERIFICADO pelo usuário** em 2026-09-06, somente leitura. Ver bloco acima. |
 
 **O que isso implica.** A correção entregue elimina um risco real e demonstrável:
 a partir de agora, um registro incompatível não derruba os demais. Mas **não está
@@ -100,6 +130,45 @@ módulos novos e 9 modificados** que estiveram 19 dias sem commit.
 Linha gravada sob um shape, lida sob o seguinte: o schema evoluiu e o leitor não
 tolera o passado. **Não houve corrupção. Houve deriva de contrato sem política
 de leitura de versões antigas.**
+
+### 1.5 O defeito que sobrevive à falsificação — agregação do GET
+
+Com os registros provados íntegros, a perda está entre o banco e a tela. E o GET
+do workspace tinha **três defeitos** que explicam exatamente isso.
+
+```ts
+// antes
+const [workflow, artifacts, documents, publications,
+       invitations, views, serp, reviews] = await Promise.all([ ... ]);
+const data = PersistedEditorialWorkspaceSchema.parse({ ... });
+// catch:
+if (error instanceof z.ZodError) return NextResponse.json({ error: "Marca inválida." }, { status: 400 });
+```
+
+1. **`Promise.all` sobre OITO repositórios.** Qualquer um que lance derruba a
+   resposta inteira. Falha em documentos, convites, publicações ou preferências
+   — nada disso tem relação com o Radar — apaga os artigos que foram lidos sem
+   problema nenhum.
+2. **`parse` monolítico do payload.** Um campo ruim em qualquer seção invalida
+   todas, inclusive `radarItems` que passaram.
+3. **`ZodError` sobre dado persistido virava `400 "Marca inválida."`** —
+   indistinguível de `marcaId` malformado, que é erro de entrada. Quem lia a
+   mensagem procurava a marca; o problema estava no que o banco devolveu.
+
+É a mesma doença da §1.2, **um andar acima**: uma falha esconde tudo. Só que
+esta sobrevive à falsificação, porque não depende de nenhuma linha estar
+incompatível.
+
+**Status:** corrigido. `Promise.allSettled` com cada seção nomeada, `safeParse`
+do payload com as seções recusadas na resposta, e `persisted_data_invalid` (502)
+separado de `invalid_brand_id` (400). Só a queda do próprio `workflow` torna a
+mesa do Radar ilegível.
+
+**Ainda não provado:** que era ESTE o defeito disparado no incidente. O que
+fecha isso é o `requestId` agora presente em toda resposta e no log — a próxima
+leitura diz qual seção caiu, se alguma.
+
+---
 
 ### 1.4 A cadeia completa do sintoma
 
