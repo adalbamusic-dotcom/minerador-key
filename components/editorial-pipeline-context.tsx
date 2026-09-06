@@ -1,5 +1,6 @@
 "use client";
 
+import { blockedByIncompleteDependencies, emptyLoadDiagnostics, type WorkspaceLoadDiagnostics } from "@/lib/editorial/partial-read";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ArticleDNA, ContentDocument, ContentPlan, ContentPlanDetails, ProductEvidenceDNA, SiloDNA, SiloPage, VersionEnvelope, VersionStatusEvent } from "@/lib/arquiteto/contracts";
 import { EditorialSnapshotSchema, SerpCollectionRecordSchema, SerpReviewRecordSchema, type EditorialSnapshot, type SerpCollectionRecord, type SerpReviewRecord } from "@/lib/editorial/contracts";
@@ -61,6 +62,8 @@ interface BrandWorkspace {
   operationalPublications: OperationalPublication[];
   invitations: BrandInvitation[];
   persistenceMode: PersistenceMode;
+  /** Como a ultima leitura remota terminou. Vazio confirmado != falha. */
+  loadDiagnostics: WorkspaceLoadDiagnostics;
   documentLocks: Record<string, number>;
   documentUserStates: Record<string, { cursorPosition: number | null; scrollTop: number; leftPanelOpen: boolean; rightPanelOpen: boolean; lastOpenedAt: string }>;
   moduleState: Record<string, { search?: string; selectedId?: string | null; expandedId?: string | null; scrollTop?: number }>;
@@ -71,7 +74,7 @@ interface BrandWorkspace {
 const emptyWorkspace = (): BrandWorkspace => ({ architectImportedKeywordIds: [], articleVersions: {}, siloVersions: {}, siloPageVersions: {}, versionEvents: [], serpRecords: [], serpReviews: [], serpMergeConflicts: [], serpPersistenceMode: "local_fallback", serpReviewReadbackSnapshotIds: [],
   productEvidence: [], contentPlans: {}, documents: {}, selectedEntityId: null, skills: [], prompts: [], materials: [],
   internalLinks: [], externalSources: [], guardianFindings: [], publications: [], radarItems: [], plannerItems: [],
-  operationalPublications: [], invitations: [], persistenceMode: "local_fallback", documentLocks: {}, documentUserStates: {}, moduleState: {}, backgroundTasks: [], aiReviewAnnotations: [] });
+  operationalPublications: [], invitations: [], persistenceMode: "local_fallback", loadDiagnostics: emptyLoadDiagnostics(), documentLocks: {}, documentUserStates: {}, moduleState: {}, backgroundTasks: [], aiReviewAnnotations: [] });
 
 function latestRadarSnapshotFingerprint(workspace: BrandWorkspace, articleId: string) {
   const snapshot = workspace.serpRecords
@@ -285,7 +288,20 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       const response = await fetch(`/api/editorial/workspace?marcaId=${encodeURIComponent(selectedBrandId)}`, { cache: "no-store" });
       if (actorUserId !== actorAtStart || sessionEpoch !== epochAtStart) return;
       if (!response.ok) {
-        updateWorkspace(current => ({ ...current, persistenceMode: response.status === 503 ? "local_fallback" : "unavailable" }));
+        // Falha de leitura PERMANECE falha. Antes ela virava lista vazia e a
+        // tela convidava a importar como se a marca nao tivesse nada.
+        const negado = response.status === 401 || response.status === 403;
+        updateWorkspace(current => ({ ...current,
+          persistenceMode: response.status === 503 ? "local_fallback" : "unavailable",
+          loadDiagnostics: {
+            state: negado ? "access_denied" : "read_failure",
+            loadedCount: 0,
+            incompatible: [],
+            message: negado
+              ? "Esta sessao nao tem acesso aos dados desta marca."
+              : `A leitura remota falhou (HTTP ${response.status}).`,
+          },
+        }));
         return;
       }
       const body = await response.json(); const persisted = PersistedEditorialWorkspaceSchema.parse(body.data);
@@ -301,7 +317,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         const incomingRadar = persisted.radarItems.length ? mergeRadarItemsPreservingLocalState(persisted.radarItems, current.radarItems) : current.radarItems;
         const radarItems = reconcileRadarItems(incomingRadar, articleVersions, selectedBrandId, sourceSnapshot?.keywords || snapshots[workspaceKey]?.keywords || [], siloVersions);
         const serpMerge = persisted.serpRecords.length ? mergeSerpRecordsPreservingPayload(persisted.serpRecords, current.serpRecords) : { records: current.serpRecords, conflicts: current.serpMergeConflicts };
-        return { ...current, persistenceMode: persisted.mode, serpPersistenceMode: persisted.serpPersistenceMode,
+        return { ...current, persistenceMode: persisted.mode, loadDiagnostics: persisted.loadDiagnostics, serpPersistenceMode: persisted.serpPersistenceMode,
         radarItems, plannerItems: persisted.plannerItems.length ? persisted.plannerItems : current.plannerItems,
         serpRecords: serpMerge.records, serpMergeConflicts: serpMerge.conflicts,
         serpReviews: persisted.serpReviews.length ? [...current.serpReviews.filter(review => !persisted.serpReviews.some(incoming => incoming.id === review.id)), ...persisted.serpReviews] : current.serpReviews,
@@ -315,7 +331,9 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
          operationalPublications: persisted.publications, invitations: persisted.invitations,
        }; });
     } catch {
-      updateWorkspace(current => ({ ...current, persistenceMode: "local_fallback" }));
+      updateWorkspace(current => ({ ...current, persistenceMode: "local_fallback",
+        loadDiagnostics: { state: "read_failure", loadedCount: 0, incompatible: [],
+          message: "Nao foi possivel falar com o servidor. O que aparece aqui e recuperacao local." } }));
     }
   }, [actorUserId, selectedBrandId, sessionEpoch, snapshots, updateWorkspace, workspaceKey]);
 
@@ -712,6 +730,33 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
        * clique: uma falha do servidor deixava a tela dizendo que os artigos
        * foram enviados enquanto nenhum tinha sido.
        */
+      /*
+       * Dependencia que nao pode ser lida BLOQUEIA o artigo.
+       *
+       * Transferir sobre leitura parcial decidiria sobre o que ninguem viu: o
+       * artefato pode estar la, em formato que este codigo nao entende. A
+       * recusa nomeia o registro em vez de sumir com o artigo.
+       */
+      const bloqueiosDeDependencia = blockedByIncompleteDependencies({
+        articleIds: candidates.map(version => version.payload.articleId),
+        incompatible: workspace.loadDiagnostics.incompatible,
+      });
+      if (bloqueiosDeDependencia.length) {
+        const impedidos = new Set(bloqueiosDeDependencia.map(item => item.articleId));
+        return {
+          imported: 0,
+          skipped: 0,
+          blocked: [
+            ...resolvido.blocked,
+            ...bloqueiosDeDependencia.map(item => ({
+              articleId: item.articleId,
+              label: candidates.find(version => version.payload.articleId === item.articleId)?.payload.promise || item.articleId,
+              reasons: [item.detail],
+            })),
+          ],
+        };
+        void impedidos;
+      }
       const escrita = await sendWorkflowCommand({ action: "import_radar", brandId: selectedBrandId, articleVersions: candidates, versionEvents: workspace.versionEvents.filter(event => candidates.some(version => version.versionId === event.versionId)), hydrationByArticleId, handoffContext: contexto }, updateWorkspace);
       /*
        * Servidor recusou: NADA de estado local.

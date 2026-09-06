@@ -1,4 +1,5 @@
 "use client";
+import { loadStateSummary } from "@/lib/editorial/partial-read";
 
 import { loadInternalLinkGraphs } from "@/lib/arquiteto/internal-link-graph-persistence";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -30,6 +31,9 @@ import { areRadarR5TopicsReviewed, classifyRadarR5SerpFailure, deriveRadarR5Pers
 import { deriveRadarSerpReviewState } from "@/lib/radar/serp-review-state";
 import { buildExpertTopicContext, buildRadarR6ConsolidatedReport, normalizeRadarR6ReportState, radarR6CanApproveReport, radarR6TopicReviewCounts, radarR6ReportStateLabel, type RadarR6ExpertEvidenceInput, type RadarR6ExpertTopicContext } from "@/lib/radar/r6-sequential";
 import { parseRadarR7TopicResponse, preserveRadarR7TopicsOnFailure, radarR7ReportEvidenceFingerprint } from "@/lib/radar/r7-sequential";
+import { approveRadarReport } from "@/lib/radar/report-approval";
+import { buildRadarKgrStrategy } from "@/lib/radar/strategy-context";
+import { classifyRadarSerpCollectionFailure, radarSerpCollectionAction, type RadarSerpCollectionState } from "@/lib/radar/serp-collection-state";
 import { ImportPanel, Field, card, btn, sessionId, useReadyPipeline } from "@/components/editorial/operational-screen-shared";
 import { useNoticeBridge } from "@/components/global-notice-center";
 import { RadarWorkbench } from "./radar-workbench";
@@ -59,7 +63,7 @@ function radarSelectionScope(row: Pick<RadarItem, "brandId" | "articleId" | "art
 }
 
 export function RadarPage({ brandRef }: { brandRef: string }) {
-  const { data: session } = useSession(); const router = useRouter(); const { selectedBrandId } = useBrand(); const { pipeline, state } = useReadyPipeline(); const [picker, setPicker] = useState(false); const [notice, setNotice] = useState(""); const [busyArticleId, setBusyArticleId] = useState<string | null>(null); const [reviewingArticleId, setReviewingArticleId] = useState<string | null>(null); const [serpAction, setSerpAction] = useState<RadarSerpAction | null>(null); const serpActionRef = useRef<RadarSerpAction | null>(null); const reviewingArticleIdRef = useRef<string | null>(null); const [expandedRadarId, setExpandedRadarId] = useState<string | null>(null); const [spreadsheetSelection, setSpreadsheetSelection] = useState(createRadarSpreadsheetSelection); const { activeArticleId, selectedArticleIds } = spreadsheetSelection; const [r4LocalByArticle, setR4LocalByArticle] = useState<Record<string, RadarR4LocalArticleState>>({}); const [r4SerpQueue, setR4SerpQueue] = useState<RadarR4SerpQueue | null>(null); const [topicHistoryByArticle, setTopicHistoryByArticle] = useState<Record<string, RadarR5TopicHistory>>({}); const [expertEvidenceByArticle, setExpertEvidenceByArticle] = useState<Record<string, RadarR6ExpertEvidenceInput[]>>({}); const [canonicalExpertEvidenceByArticle, setCanonicalExpertEvidenceByArticle] = useState<Record<string, RadarExpertEvidence[]>>({}); const [expertContributionSummaryByArticle, setExpertContributionSummaryByArticle] = useState<Record<string, { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true }>>({});
+  const { data: session } = useSession(); const router = useRouter(); const { selectedBrandId } = useBrand(); const { pipeline, state } = useReadyPipeline(); const [picker, setPicker] = useState(false); const [notice, setNotice] = useState(""); const [busyArticleId, setBusyArticleId] = useState<string | null>(null); const [reviewingArticleId, setReviewingArticleId] = useState<string | null>(null); const [serpAction, setSerpAction] = useState<RadarSerpAction | null>(null); const serpActionRef = useRef<RadarSerpAction | null>(null); const reviewingArticleIdRef = useRef<string | null>(null); const [expandedRadarId, setExpandedRadarId] = useState<string | null>(null); const [spreadsheetSelection, setSpreadsheetSelection] = useState(createRadarSpreadsheetSelection); const { activeArticleId, selectedArticleIds } = spreadsheetSelection; const [r4LocalByArticle, setR4LocalByArticle] = useState<Record<string, RadarR4LocalArticleState>>({}); const [r4SerpQueue, setR4SerpQueue] = useState<RadarR4SerpQueue | null>(null); const [topicHistoryByArticle, setTopicHistoryByArticle] = useState<Record<string, RadarR5TopicHistory>>({}); const [expertEvidenceByArticle, setExpertEvidenceByArticle] = useState<Record<string, RadarR6ExpertEvidenceInput[]>>({}); const [canonicalExpertEvidenceByArticle, setCanonicalExpertEvidenceByArticle] = useState<Record<string, RadarExpertEvidence[]>>({}); const [expertContributionSummaryByArticle, setExpertContributionSummaryByArticle] = useState<Record<string, { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true; articleDnaVersionId: string }>>({}); const approvingArticleIdRef = useRef<string | null>(null); const collectingArticleIdRef = useRef<string | null>(null); const [collectionByArticle, setCollectionByArticle] = useState<Record<string, { state: RadarSerpCollectionState; blockedReason: string | null }>>({});
   const claimSerpAction = (next: RadarSerpAction) => { if (serpActionRef.current || serpAction) return false; serpActionRef.current = next; setSerpAction(next); return true; };
   const releaseSerpAction = (articleId: string, kind: RadarSerpAction["kind"]) => { if (serpActionRef.current?.articleId === articleId && serpActionRef.current.kind === kind) serpActionRef.current = null; setSerpAction(current => current?.articleId === articleId && current.kind === kind ? null : current); };
   const applySpreadsheetSelection = useCallback((transition: (current: RadarSpreadsheetSelectionState) => RadarSpreadsheetSelectionState) => setSpreadsheetSelection(transition), []);
@@ -79,7 +83,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   }, [applySpreadsheetSelection, pipeline.radarItems]);
   const handleRowActivate = useCallback((row: RadarItem) => { if ((serpActionRef.current && serpActionRef.current.articleId !== row.articleId) || (reviewingArticleIdRef.current && reviewingArticleIdRef.current !== row.articleId) || (serpAction && serpAction.articleId !== row.articleId) || (reviewingArticleId && reviewingArticleId !== row.articleId)) return; selectAndActivate(row.articleId); }, [reviewingArticleId, selectAndActivate, serpAction]);
   const handleExpandedChange = useCallback((id: string | null) => { const rowArticleId = id ? pipeline.radarItems.find(row => row.id === id)?.articleId : null; if ((serpActionRef.current && id && rowArticleId !== serpActionRef.current.articleId) || (reviewingArticleIdRef.current && id && rowArticleId !== reviewingArticleIdRef.current) || (serpAction && id && rowArticleId !== serpAction.articleId) || (reviewingArticleId && id && rowArticleId !== reviewingArticleId)) return; setExpandedRadarId(id); }, [pipeline.radarItems, reviewingArticleId, serpAction]);
-  const handleExpertEvidenceChange = useCallback((articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true; canonicalEvidence: RadarExpertEvidence[] }) => { setExpertEvidenceByArticle(current => ({ ...current, [articleId]: evidence })); setCanonicalExpertEvidenceByArticle(current => ({ ...current, [articleId]: summary.canonicalEvidence })); setExpertContributionSummaryByArticle(current => ({ ...current, [articleId]: { contributionCount: summary.contributionCount, pendingCount: summary.pendingCount, blockedEvidenceCount: summary.blockedEvidenceCount, remote: true } })); }, []);
+  const handleExpertEvidenceChange = useCallback((articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true; canonicalEvidence: RadarExpertEvidence[]; articleDnaVersionId: string }) => { setExpertEvidenceByArticle(current => ({ ...current, [articleId]: evidence })); setCanonicalExpertEvidenceByArticle(current => ({ ...current, [articleId]: summary.canonicalEvidence })); setExpertContributionSummaryByArticle(current => ({ ...current, [articleId]: { contributionCount: summary.contributionCount, pendingCount: summary.pendingCount, blockedEvidenceCount: summary.blockedEvidenceCount, remote: true, articleDnaVersionId: summary.articleDnaVersionId } })); }, []);
   useNoticeBridge({ notice, module: "radar", area: "Radar", title: "Radar", fallbackSeverity: "INFO" });
   const radarReadbackScopeKey = useMemo(() => {
     if (!selectedBrandId) return null;
@@ -210,7 +214,30 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       r6Report,
       nextAction: nextActionForRadarR4Article({ baseAction: baseR3.nextAction, localState }),
     };
-    return { article, view, analysis, latestSerpRecord: record, latestReview, reviewState, referenceCounts, analysisQueue, pagesAnalyzed, reportGenerated, reportApproved, reportState, r6Report, sentToPlanner, additionalEvidenceState, activity, nextAction: r3.nextAction, stages, publicationLabel, serpStatus, r3 };
+    /*
+     * O MESMO contexto estratégico que a rota de detalhe monta.
+     *
+     * `analysisApprovalIssues` usa o KGR para barrar composição acima do teto.
+     * Sem calculá-lo aqui, o Workbench aprovaria uma composição que a outra
+     * tela recusa — e a autoridade única viraria uma função com duas respostas.
+     */
+    const kgrStrategy = article
+      ? buildRadarKgrStrategy({ article: article.payload, context: row.arquitetoStrategyContext || null, published: publication?.state === "published", slug: row.slug || article.payload.suggestedSlug, siloName: siloLabel(row), pillarArticleId: row.siloId ? pipeline.siloVersions[row.siloId]?.payload.pillarArticleId : undefined })
+      : null;
+    /*
+     * A ação da Coleta é DERIVADA do estado real, não de um clique preso na
+     * sessão: sem snapshot há uma ação primária explícita; com snapshot, a
+     * primeira coleta não é oferecida e atualizar continua sendo outra decisão.
+     */
+    const collection = radarSerpCollectionAction({
+      hasSnapshot: Boolean(view),
+      state: collectionByArticle[row.articleId]?.state || (view ? "SUCCESS" : "NOT_COLLECTED"),
+      contextReady: resolveRowKeyword(row).ok,
+      blockedReason: collectionByArticle[row.articleId]?.blockedReason,
+    });
+    // Bloqueio estrutural manda corrigir o vínculo, nunca repetir a coleta.
+    if (collection.state === "STRUCTURAL_BLOCK") r3.nextAction = "Corrija o vínculo da keyword antes de coletar.";
+    return { article, view, analysis, latestSerpRecord: record, latestReview, reviewState, referenceCounts, analysisQueue, pagesAnalyzed, reportGenerated, reportApproved, reportState, r6Report, sentToPlanner, additionalEvidenceState, activity, nextAction: r3.nextAction, stages, publicationLabel, serpStatus, kgrStrategy, expertSummary, collection, r3: { ...r3, serp: { ...r3.serp, collection } } };
   };
   const resolvedActiveArticleId = resolveRadarWorkbenchArticleId({ selectedId: activeArticleId, rowIds: pipeline.radarItems.map(row => row.articleId) });
   const activeRadarItem = resolvedActiveArticleId ? pipeline.radarItems.find(row => row.articleId === resolvedActiveArticleId) || null : null;
@@ -251,7 +278,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   };
   const columns: OperationalGridColumn<RadarItem>[] = [
     { id: "article", header: "Artigo", value: row => `${row.title} ${resolveRowKeyword(row).keyword} ${row.hierarchy}`, pinned: "left", sortable: true, width: 280, render: row => { const data = rowWorkbenchData(row); const isFocused = row.articleId === activeArticleId; return <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><strong className="block truncate text-sm text-foreground">{data.r3.title}</strong>{isFocused && <span className="shrink-0 rounded border border-context-accent/35 px-1.5 py-0.5 text-[10px] font-semibold text-context-accent">Em foco</span>}</div><span className="mt-1 block truncate text-sm text-keyword">{data.r3.keyword} · {data.r3.silo} · {data.r3.articleDnaVersion}</span></div>; } },
-    { id: "serp", header: "SERP", value: row => { const data = rowWorkbenchData(row); return `${data.r3.serp.provider} ${data.r3.serp.resultCount} ${data.r3.serp.pendingCount} ${data.r3.r4?.serp.state || ""}`; }, width: 185, render: row => { const data = rowWorkbenchData(row).r3; const queue = data.r4?.serp; const queueLabel = queue?.state === "QUEUED" ? `Na fila ${queue.position || 1}/${queue.total || 1}` : queue?.state === "RUNNING" ? `Processando ${queue.position || 1}/${queue.total || 1}` : queue?.state === "WAITING_REVIEW" ? "Aguardando revisão" : queue?.state === "FAILED_RETRYABLE" ? "Falha · tentar novamente" : queue?.state === "FAILED_FINAL" ? "Falha final" : queue?.state === "COMPLETED" ? "SERP concluída" : data.serp.resultCount ? `${data.serp.resultCount} resultado(s)` : "Aguardando SERP"; return <div><strong className="block text-sm text-foreground">{queueLabel}</strong><span className="mt-1 block text-sm text-text-muted">{data.serp.provider} · {data.serp.pendingCount} pendente(s)</span></div>; } },
+    { id: "serp", header: "SERP", value: row => { const data = rowWorkbenchData(row); return `${data.r3.serp.provider} ${data.r3.serp.resultCount} ${data.r3.serp.pendingCount} ${data.r3.r4?.serp.state || ""}`; }, width: 185, render: row => { const data = rowWorkbenchData(row).r3; const queue = data.r4?.serp; const queueLabel = queue?.state === "QUEUED" ? `Na fila ${queue.position || 1}/${queue.total || 1}` : queue?.state === "RUNNING" ? `Processando ${queue.position || 1}/${queue.total || 1}` : queue?.state === "WAITING_REVIEW" ? "Aguardando revisão" : queue?.state === "FAILED_RETRYABLE" ? "Falha · tentar novamente" : queue?.state === "FAILED_FINAL" ? (data.serp.collection?.state === "STRUCTURAL_BLOCK" ? "Coleta bloqueada" : "Falha final") : queue?.state === "COMPLETED" ? "SERP concluída" : data.serp.resultCount ? `${data.serp.resultCount} resultado(s)` : "Aguardando SERP"; return <div><strong className="block text-sm text-foreground">{queueLabel}</strong><span className="mt-1 block text-sm text-text-muted">{data.serp.provider} · {data.serp.pendingCount} pendente(s)</span></div>; } },
     { id: "amazon", header: "Amazon", value: row => { const data = rowWorkbenchData(row); return radarR4AmazonStatusLabel(data.r3.r4?.amazon || "AMAZON_NOT_APPLICABLE"); }, width: 165, render: row => { const data = rowWorkbenchData(row).r3; const amazonState = data.r4?.amazon || "AMAZON_NOT_APPLICABLE"; return <div><strong className="block text-sm text-foreground">{radarR4AmazonStatusLabel(amazonState)}</strong><span className="mt-1 block text-sm text-text-muted">Sem coleta externa</span></div>; } },
     { id: "content", header: "Conteúdo", value: row => { const data = rowWorkbenchData(row).r3.content; return `${data.articleDnaVersion} ${data.needs} ${data.evidenceCount}`; }, width: 190, render: row => { const data = rowWorkbenchData(row).r3.content; return <div><strong className="block text-sm text-foreground">{data.articleDnaVersion} · {data.needs} necessidade(s)</strong><span className="mt-1 block text-sm text-text-muted">{data.evidenceCount} evidência(s) · {data.sourceCount} fonte(s)</span></div>; } },
     { id: "specialist", header: "Especialista", value: row => rowWorkbenchData(row).r3.specialist.status, width: 180, render: row => { const data = rowWorkbenchData(row).r3.specialist; return <div><strong className="block text-sm text-foreground">{data.status}</strong><span className="mt-1 block text-sm text-text-muted">{data.expert} · {data.contributionsReceived} recebida(s) · {data.pending} pendente(s)</span></div>; } },
@@ -267,24 +294,55 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     return { articleId: row.articleId, keywordReady: resolveRowKeyword(row).ok, serpCollected: Boolean(data.latestSerpRecord?.origin === "real" && data.latestSerpRecord.research) || ["WAITING_REVIEW", "COMPLETED"].includes(local.serp.state || ""), serpReviewed: data.latestReview?.status === "approved" && data.reviewState.currentness === "current", analysisStarted: Boolean(data.analysis), reportGenerated: data.reportGenerated || data.reportState !== "NOT_STARTED", reportApproved: data.reportApproved, sentToPlanner: data.sentToPlanner, rowState: row.state, topicsState: local.topics.state, topicsReviewed: areRadarR5TopicsReviewed(local.topics.items, local.topics.reviewedIds), topicsTotal: topicCounts.total, topicsReviewedCount: topicCounts.reviewed, specialistState: local.specialist, serpQueueState: local.serp.state, amazonState: local.amazon };
   };
   const selectedSnapshotsFor = (rows: RadarItem[]) => rows.map(bulkSnapshotFor);
+  const setCollectionState = (articleId: string, state: RadarSerpCollectionState, blockedReason: string | null) =>
+    setCollectionByArticle(current => ({ ...current, [articleId]: { state, blockedReason } }));
+  /*
+   * A COLETA É EXPLÍCITA E ÚNICA.
+   *
+   * `collectingArticleIdRef` fecha a porta antes de qualquer await: dois
+   * cliques rápidos produziam duas requisições, dois snapshots e dois avisos
+   * de sucesso. `busyArticleId` é estado de render e chega tarde demais.
+   */
   const collect = async (row: RadarItem): Promise<"WAITING_REVIEW" | "FAILED_RETRYABLE" | "FAILED_FINAL"> => {
+    if (collectingArticleIdRef.current) return "FAILED_RETRYABLE";
     const resolved = resolveRowKeyword(row);
-    if (!resolved.ok) { setNotice(resolved.message); return "FAILED_FINAL"; }
+    if (!resolved.ok) {
+      setCollectionState(row.articleId, "STRUCTURAL_BLOCK", resolved.message);
+      setNotice(resolved.message);
+      return "FAILED_FINAL";
+    }
     if (busyArticleId) return "FAILED_RETRYABLE";
+    collectingArticleIdRef.current = row.articleId;
     history.capture(`Coletar SERP real de ${row.title}`);
+    setCollectionState(row.articleId, "VALIDATING", null);
     updateLocalState(row.articleId, current => ({ ...current, serp: { ...current.serp, state: "RUNNING", position: current.serp.position || 1, total: current.serp.total || 1, error: null } }));
-    setBusyArticleId(row.articleId); setNotice("Pesquisando a SERP real via DataForSEO…");
+    setBusyArticleId(row.articleId); setNotice("Validando o artigo antes de falar com o DataForSEO…");
     try {
+      setCollectionState(row.articleId, "COLLECTING", null);
+      setNotice("Pesquisando a SERP real via DataForSEO…");
       const record = await pipeline.collectSerp(row.articleId, pipeline.snapshot!.brand.localizacao || "Brasil", row.articleDnaVersionId);
+      setCollectionState(row.articleId, "PERSISTING", null);
       updateLocalState(row.articleId, current => ({ ...current, serp: { ...current.serp, state: "WAITING_REVIEW", position: current.serp.position || 1, total: current.serp.total || 1, error: null } }));
+      setCollectionState(row.articleId, "SUCCESS", null);
       setNotice(`SERP real v${record.research?.version || 1} coletada: ${record.research?.organicResults.length || 0} resultado(s). ${record.persistenceMode === "remote" ? "Persistência remota confirmada." : "Coleta concluída, mas a persistência remota não foi confirmada."}`);
       return "WAITING_REVIEW";
     } catch (error) {
-      const failureState = classifyRadarR5SerpFailure(error);
-      updateLocalState(row.articleId, current => ({ ...current, serp: { ...current.serp, state: failureState, position: current.serp.position || 1, total: current.serp.total || 1, error: error instanceof Error ? error.message : "Falha na coleta SERP." } }));
-      setNotice(error instanceof Error ? error.message : "Não foi possível coletar a SERP real.");
+      /*
+       * Vínculo quebrado não é retry.
+       *
+       * A classificação passou a olhar o código que o servidor devolve antes
+       * de qualquer chamada paga. Um Silo não comprovado deixa de aparecer
+       * como "falha · tentar novamente" e passa a dizer o que precisa ser
+       * corrigido — e onde.
+       */
+      const motivo = error instanceof Error ? error.message : "Falha na coleta SERP.";
+      const classificacao = classifyRadarSerpCollectionFailure(error);
+      setCollectionState(row.articleId, classificacao, classificacao === "STRUCTURAL_BLOCK" ? motivo : null);
+      const failureState = classificacao === "STRUCTURAL_BLOCK" ? "FAILED_FINAL" as const : classifyRadarR5SerpFailure(error);
+      updateLocalState(row.articleId, current => ({ ...current, serp: { ...current.serp, state: failureState, position: current.serp.position || 1, total: current.serp.total || 1, error: motivo } }));
+      setNotice(motivo);
       return failureState;
-    } finally { setBusyArticleId(null); }
+    } finally { collectingArticleIdRef.current = null; setBusyArticleId(null); }
   };
   const radarItemForArticleId = (articleId: string) => pipeline.radarItems.find(row => row.articleId === articleId);
   const radarItemIdsForArticles = (articleIds: string[]) => articleIds.map(articleId => radarItemForArticleId(articleId)?.id).filter((id): id is string => Boolean(id));
@@ -329,7 +387,17 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   const startSerpAnalysis = async () => {
     const target = activeRadarItem;
     const data = activeWorkbenchData;
-    if (!target || !data || serpActionRef.current || serpAction || busyArticleId || reviewingArticleIdRef.current || reviewingArticleId) return;
+    /*
+     * CLIQUE QUE NÃO FAZ NADA NÃO PODE FICAR MUDO.
+     *
+     * O guard devolvia `void` em silêncio quando outra ação estava em voo, e a
+     * pessoa clicava em "Iniciar curadoria" sem resposta nenhuma — nem sucesso,
+     * nem erro, nem motivo. Recusa é declarada, como em todo o resto do fluxo.
+     */
+    if (!target || !data) { setNotice("Selecione um artigo antes de iniciar a curadoria."); return; }
+    if (serpActionRef.current || serpAction) { setNotice("Outra ação da SERP ainda está em andamento neste artigo. Aguarde a conclusão."); return; }
+    if (busyArticleId) { setNotice("A coleta da SERP ainda está em andamento. Aguarde a conclusão para iniciar a curadoria."); return; }
+    if (reviewingArticleIdRef.current || reviewingArticleId) { setNotice("A revisão da SERP está em andamento. Aguarde a conclusão para iniciar a curadoria."); return; }
     if (data.analysis) { setNotice("A curadoria já foi iniciada para o snapshot atual; nenhuma nova versão foi criada."); return; }
     const view = data.view;
     const research = view?.record.research;
@@ -550,12 +618,69 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     updateLocalState(activeRadarItem.articleId, current => ({ ...current, report: "REPORT_REVIEWED" }));
     setNotice("Relatório marcado como revisado localmente. A aprovação continua separada.");
   };
-  const approveReportForArticle = () => {
-    if (!activeRadarItem || !activeWorkbenchData?.r6Report) return;
-    if (!radarR6CanApproveReport(activeWorkbenchData.r6Report)) { setNotice("O relatório só pode ser aprovado após revisão humana, SERP aprovada e consolidação das pendências do especialista."); return; }
-    const approvedEvidenceFingerprint = radarR7ReportEvidenceFingerprint(activeWorkbenchData.r6Report);
-    updateLocalState(activeRadarItem.articleId, current => ({ ...current, report: "REPORT_APPROVED", reportApprovedEvidenceFingerprint: approvedEvidenceFingerprint }));
-    setNotice("Relatório aprovado localmente. Isso não cria uma versão remota nem envia ao Planejador.");
+  /*
+   * APROVAR É UM ATO SÓ — e ele não mora nesta tela.
+   *
+   * Antes daqui saía um flag em `useState` com a mensagem "aprovado
+   * localmente": um verbo idêntico ao da rota de detalhe para uma ação que não
+   * criava versão, não gerava pacote e não sobrevivia ao F5. Agora as duas
+   * superfícies chamam `approveRadarReport`, e o que fecha é o readback.
+   *
+   * A revisão local do relatório continua sendo pré-condição de BOTÃO, não de
+   * decisão: ela é estado de sessão e não pode decidir o que vale no remoto.
+   */
+  const approveReportForArticle = async () => {
+    const target = activeRadarItem;
+    const data = activeWorkbenchData;
+    if (!target || !data?.r6Report || approvingArticleIdRef.current) return;
+    if (!data.analysis || !data.article || !data.latestSerpRecord?.research) {
+      setNotice("Este artigo ainda não tem SERP coletada e análise iniciada para aprovar.");
+      return;
+    }
+    if (!radarR6CanApproveReport(data.r6Report)) {
+      setNotice("Revise o relatório localmente e resolva as pendências de SERP, Amazon e especialista antes de aprovar.");
+      return;
+    }
+    approvingArticleIdRef.current = target.articleId;
+    setNotice("Registrando a aprovação do relatório…");
+    try {
+      const result = await approveRadarReport({
+        identity: { brandId: target.brandId, articleId: target.articleId, articleDnaVersionId: target.articleDnaVersionId, radarItemId: target.id },
+        analysis: data.analysis,
+        article: data.article,
+        research: data.latestSerpRecord.research,
+        serpReview: { status: data.latestReview?.status ?? null, currentness: data.reviewState.currentness },
+        expertEvidence: {
+          loaded: Boolean(data.expertSummary),
+          contextMatches: data.expertSummary?.articleDnaVersionId === target.articleDnaVersionId,
+          failed: false,
+          pendingCount: data.expertSummary?.pendingCount || 0,
+          blockedCount: data.expertSummary?.blockedEvidenceCount || 0,
+          approved: canonicalExpertEvidenceByArticle[target.articleId] || [],
+        },
+        kgrStrategy: data.kgrStrategy,
+        siloDnaVersionId: target.siloId ? pipeline.siloVersions[target.siloId]?.versionId || null : null,
+        selectedBy: sessionId(session),
+        persist: successor => pipeline.saveRadarAnalysis(target.articleId, successor),
+      });
+
+      if (!result.ok) {
+        setNotice(result.reason === "BLOCKED" ? result.issues.join(" ") : result.message);
+        return;
+      }
+      if (result.outcome === "ALREADY_APPROVED") {
+        setNotice("Este relatório já está aprovado nesta versão, com o mesmo snapshot e a mesma curadoria. Nenhuma sucessora foi criada.");
+        return;
+      }
+      updateLocalState(target.articleId, current => ({ ...current, report: "REPORT_APPROVED", reportApprovedEvidenceFingerprint: radarR7ReportEvidenceFingerprint(data.r6Report!) }));
+      if (target.state === "awaiting_approval") pipeline.updateRadarState([target.id], "approved");
+      setNotice(`Relatório aprovado na versão v${result.analysisVersionNumber}. Write remoto e readback confirmados; o pacote de evidências foi consolidado.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Não foi possível aprovar o relatório.");
+    } finally {
+      approvingArticleIdRef.current = null;
+
+    }
   };
   const updateTopicsForArticle = (articleId: string, update: (items: RadarR4Topic[]) => RadarR4Topic[], invalidatedTopicId?: string) => {
     const current = localStateFor(articleId).topics.items;
@@ -649,7 +774,18 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   const openActiveArticle = () => { if (!activeRadarItem) return; const href = buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(activeRadarItem) }); if (href) router.push(href); };
   const activeTopicQueuePosition = activeRadarItem ? pendingTopicRows.findIndex(row => row.id === activeRadarItem.id) + 1 : undefined;
   const serpReviewRemoteConfirmed = Boolean(activeWorkbenchData?.latestReview?.status === "approved" && activeWorkbenchData.r3.serp.reviewCurrentness === "current" && activeWorkbenchData.latestSerpRecord && pipeline.serpReviewReadbackSnapshotIds.includes(activeWorkbenchData.latestSerpRecord.id));
-  return <div className="flex min-h-screen flex-col bg-background">{notice && <div className="shrink-0 border-b border-warning/40 bg-warning-soft/30 px-4 py-2 text-sm text-warning" role="status">{notice}</div>}<RadarWorkbench key={activeRadarRowId || "radar-empty"} model={activeWorkbenchData?.r3 || null} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} onReviewSerp={reviewSerpForArticle} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onStartSerpAnalysis={() => void startSerpAnalysis()} onSerpDecisionChange={(key, role, reason) => void persistSerpDecision(key, role, reason)} onSerpDecisionReasonChange={(key, reason) => void persistSerpDecision(key, undefined, reason)} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} serpApprovalBlockedReason={serpApprovalBlockedReason} serpReviewRemoteConfirmed={serpReviewRemoteConfirmed} onRefreshSerp={() => activeRadarItem ? void collect(activeRadarItem) : undefined} onFocusAdjacent={focusAdjacent} pendingReviewCount={pendingReviewRows.length} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} onExistingContentAdd={addExistingContentForArticle} onExistingContentStateChange={updateExistingContentState} onReportGenerate={generateReportForArticle} onReportReview={reviewReportForArticle} onReportApprove={approveReportForArticle} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2></div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle="Nenhum artigo importado. Use “Importar do Arquiteto”." renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importable} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${version.payload.mainIntent}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
+  /*
+   * A frase depende de COMO a leitura terminou, nao de um booleano.
+   *
+   * Vazio confirmado convida a importar; falha de leitura pede nova tentativa;
+   * parcial diz quantos registros nao couberam. Antes os tres diziam a mesma
+   * coisa, e a tela chamava de vazia uma marca cuja consulta havia falhado.
+   */
+  const diagnostico = pipeline.loadDiagnostics;
+  const radarEmptyTitle = diagnostico.state === "complete" || diagnostico.state === "empty_confirmed"
+    ? "Nenhum artigo importado. Use “Importar do Arquiteto”."
+    : loadStateSummary(diagnostico);
+  return <div className="flex min-h-screen flex-col bg-background">{notice && <div className="shrink-0 border-b border-warning/40 bg-warning-soft/30 px-4 py-2 text-sm text-warning" role="status">{notice}</div>}<RadarWorkbench key={activeRadarRowId || "radar-empty"} model={activeWorkbenchData?.r3 || null} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} onReviewSerp={reviewSerpForArticle} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onStartSerpAnalysis={() => void startSerpAnalysis()} onSerpDecisionChange={(key, role, reason) => void persistSerpDecision(key, role, reason)} onSerpDecisionReasonChange={(key, reason) => void persistSerpDecision(key, undefined, reason)} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} serpApprovalBlockedReason={serpApprovalBlockedReason} serpReviewRemoteConfirmed={serpReviewRemoteConfirmed} onRefreshSerp={() => activeRadarItem ? void collect(activeRadarItem) : undefined} onFocusAdjacent={focusAdjacent} pendingReviewCount={pendingReviewRows.length} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} onExistingContentAdd={addExistingContentForArticle} onExistingContentStateChange={updateExistingContentState} onReportGenerate={generateReportForArticle} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importable} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${version.payload.mainIntent}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
 }
 
 function RadarProfile({ r3, articleHref, architectHref }: { r3: RadarR3Model; articleHref: string | null; architectHref: string | null }) {

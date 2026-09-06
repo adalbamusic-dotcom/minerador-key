@@ -4,13 +4,38 @@
 
 ---
 
-## Resposta direta
+## Grau de evidência — leia antes do resto
 
-**Nada aconteceu com o banco de dados. A mesa não está suja — ela está sendo escondida.**
+Este relatório mistura três coisas que **não** têm o mesmo peso. A distinção foi
+acrescentada em 2026-09-06 depois de o texto original tratar as três como uma só.
 
-Existe um defeito de leitura que faz **uma única linha fora do schema apagar a
-mesa inteira daquele módulo**. Os dados estão lá. O leitor é que desiste de
-todos por causa de um.
+| Grau | O que significa | Nesta auditoria |
+|---|---|---|
+| **Risco confirmado no código** | Lido na fonte, verificável por qualquer um | `Schema.parse()` dentro do laço, sem `try` por linha, em `WorkflowRepository.list` e `ArtifactRepository.list`. **Confirmado.** |
+| **Causa reproduzida** | O defeito foi disparado com o dado real | **NÃO reproduzido.** Nenhum registro concreto foi identificado como o que quebra o parse. |
+| **Estado remoto verificado** | Consultado no banco | **NÃO verificado.** Nenhum SQL foi executado por mim. |
+
+**O que isso implica.** A correção entregue elimina um risco real e demonstrável:
+a partir de agora, um registro incompatível não derruba os demais. Mas **não está
+provado** que era ele a causa do sintoma relatado. Pode haver outra, ou mais de
+uma.
+
+O que fecha a questão é a §2: se as consultas devolverem linhas do Radar e a
+interface passar a mostrá-las com o diagnóstico novo, a causa era esta. Se
+devolverem vazio, a escrita é o alvo e o Escopo 1 do adendo continua de pé.
+
+---
+
+## Resposta direta (com a ressalva acima)
+
+**Não há evidência de que algo tenha acontecido com o banco de dados.** Há um
+defeito de leitura confirmado no código que, se disparado, faz a mesa parecer
+vazia sem que nada tenha sido perdido.
+
+O defeito: **uma única linha fora do schema derruba a leitura da mesa inteira**
+daquele módulo. Nada é perdido — o leitor é que desiste de todos por causa de um.
+Isso agora está corrigido, e um registro incompatível passa a ser nomeado em vez
+de sumir com o resto.
 
 E a consequência prática mais importante deste relatório: **limpar a mesa seria o
 pior movimento possível.** Apagaria trabalho real para esconder um defeito de
@@ -19,7 +44,7 @@ proíbe.
 
 ---
 
-## 1. A causa, com o código
+## 1. O risco confirmado, com o código
 
 ### 1.1 O RLS não participa disso
 

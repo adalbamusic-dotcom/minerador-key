@@ -1,3 +1,4 @@
+import { resolveLoadState } from "@/lib/editorial/partial-read";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireCanonicalSessionProfile, authzErrorResponse } from "@/lib/server/authz";
@@ -20,7 +21,18 @@ export async function GET(request: NextRequest) {
     const data = PersistedEditorialWorkspaceSchema.parse({ mode: "server", radarItems: workflow.radar, plannerItems: workflow.planner,
       articleVersions: artifacts.articles, siloVersions: artifacts.silos, versionEvents: artifacts.events, contentPlans: artifacts.plans,
       serpRecords: serp.records, serpReviews: reviews.reviews, serpPersistenceMode: serp.available && reviews.available ? "server" : "local_fallback",
-      documents, publications, invitations, views, loadedAt: new Date().toISOString() });
+      documents, publications, invitations, views, loadedAt: new Date().toISOString(),
+      // Incompatíveis dos DOIS leitores, nomeados. Vazio confirmado e falha de
+      // leitura deixam de chegar como a mesma lista vazia.
+      loadDiagnostics: {
+        state: resolveLoadState({
+          loadedCount: workflow.radar.length + workflow.planner.length + artifacts.articles.length + artifacts.silos.length,
+          incompatibleCount: workflow.incompatible.length + artifacts.incompatible.length,
+        }),
+        loadedCount: workflow.radar.length + workflow.planner.length,
+        incompatible: [...workflow.incompatible, ...artifacts.incompatible],
+        message: null,
+      } });
     return NextResponse.json({ data });
   } catch (error) {
     if (error instanceof PersistenceUnavailableError) return NextResponse.json({ code: error.code, error: error.message }, { status: 503 });
