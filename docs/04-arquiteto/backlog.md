@@ -1,3 +1,24 @@
+## Fechamento humano e ações por aba — 2026-09-06
+
+- [x] Separar, na leitura, a versão aprovada da revisão corrente.
+- [x] Papel do artigo com fonte única (decisão humana vigente).
+- [x] Serviço único de fechamento para aprovação individual e em lote.
+- [x] Seletor "Alterar status" com enviar para aprovação, aprovar e reabrir
+  revisão, com contagem de elegíveis e bloqueados antes do clique.
+- [x] Bloqueio que nomeia o problema e o controle que o resolve.
+- [x] Remover `changeSelectedArticleStatus` em vez de reconectá-lo.
+- [x] Revalidação da aprovação no servidor, aditiva na rota de artefatos.
+- [x] Reabertura como sucessora em `proposed`, sem rebaixar a versão aprovada.
+- [x] Corrigir a fronteira das ações por aba (Silo em Artigos, Radar em Links).
+- [x] Marcar a revisão de links como desatualizada quando o artigo ganha
+  sucessora, preservando o grafo aprovado.
+- [ ] Do produto: aprovar artigos na tela, recarregar e conferir em outra sessão
+  que voltam aprovados com a mesma versão e hash.
+- [ ] Do produto: provocar gravação sem readback e conferir que a tela manda
+  recarregar em vez de repetir.
+- [ ] Restaurar os três vínculos territoriais divergentes — fora deste corte,
+  precisa de impacto demonstrado antes de qualquer restauração.
+
 ## Persistência canônica da revisão IA — 2026-08-29
 
 - [x] Reutilizar `editorial_artifact_versions` com `article_architecture_ai_review`.

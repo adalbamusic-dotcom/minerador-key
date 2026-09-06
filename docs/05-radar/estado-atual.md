@@ -1,5 +1,60 @@
 # Estado atual — Radar
 
+## Continuidade entre sessões — base validada — 2026-09-06
+
+```text
+RECUPERACAO_ENTRE_SESSOES = VALIDADA (cenario Care Glow)
+LIMPEZA_DE_DADOS          = NAO NECESSARIA
+RECRIACAO_DE_BANCO        = NAO NECESSARIA
+ALTERACAO_DA_FUNDACAO     = NAO NECESSARIA
+CAUSA_RAIZ                = NAO IDENTIFICADA (ver "limites" abaixo)
+```
+
+> **Recuperação dos artigos e da SERP entre sessões: validada no cenário Care
+> Glow. A investigação não demonstrou necessidade de limpeza, recriação do banco
+> ou alteração da fundação global.**
+
+- **Verificado remotamente, somente leitura** (consultas do usuário, 06/09/2026):
+  três itens do Radar encontrados e válidos, incluindo "serum facial principia" e
+  "mascara de skincare"; 100 versões editoriais e 111 eventos examinados sem
+  incompatibilidade; cinco snapshots SERP válidos, sendo dois da máscara com sete
+  resultados cada.
+- **Validação manual:** após limpar o cache dos dois navegadores e reiniciar,
+  **ambos recuperaram os três artigos e a SERP existente**. Capturas de
+  06/09/2026, entre 04:43 e 04:46, anexadas como evidência.
+- **Correções aplicadas no período** — nenhuma delas comprovada como a causa:
+  - leitura resiliente por linha nos leitores de workflow, artefatos e eventos
+    (`lib/editorial/partial-read.ts`, `lib/server/editorial-repositories.ts`);
+  - isolamento por repositório no `GET /api/editorial/workspace`
+    (`Promise.allSettled`), com a seção que falha **nomeada** em vez de
+    derrubar a resposta inteira;
+  - `persisted_data_invalid` (502) separado de `invalid_brand_id` (400) — dado
+    persistido ruim deixou de ser reportado como "Marca inválida";
+  - `requestId` em toda resposta e no log, com contagens por repositório,
+    estado da leitura e seções que falharam, sem segredos;
+  - falha da escrita do workflow deixou de ser reportada como importação
+    concluída, e 4xx deixou de degradar o modo de persistência da leitura.
+
+### Limites desta validação
+
+- **A causa raiz NÃO foi identificada.** A hipótese de linha incompatível foi
+  **falsificada** pelas consultas remotas (3/3 itens passam no schema). O
+  isolamento da agregação é a explicação mais plausível entre as mudanças
+  aplicadas, mas **plausível não é identificado**: reinício do servidor e
+  limpeza de cache aconteceram no mesmo intervalo.
+- **Como fechar isso, se voltar a ocorrer:** o log do `GET` agora traz
+  `requestId` e `failedSections`. Uma ocorrência com `failedSections` não
+  vazio identifica a seção; vazio elimina a agregação como causa.
+- **O Radar não está concluído** e a plataforma não está homologada. Ver o
+  backlog.
+
+### Referências canônicas
+
+Identidade, tenantização, autorização, persistência e versionamento seguem a
+fundação global — este documento não redefine nenhuma delas. Ver
+`docs/00-produto/auditorias/reconciliacao-mesa-editorial-2026-09-06.md` e
+`docs/05-radar/adendo-sdd-persistencia-verificavel.md`.
+
 ## Correção funcional — readback remoto da aprovação SERP após F5 — 2026-08-27
 
 - **Verificado remotamente, somente leitura:** existem aprovações append-only

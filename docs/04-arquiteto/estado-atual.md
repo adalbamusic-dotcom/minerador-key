@@ -1,3 +1,63 @@
+## Fechamento humano do Article e ações por aba — 2026-09-06
+
+```text
+CLOSING_AUTHORITY        = lib/arquiteto/article-closing-service.ts (individual e lote)
+STATUS_SELECTOR          = rodapé da aba Artigos · enviar para aprovação · aprovar · reabrir revisão
+SERVER_REVALIDATION      = POST /api/arquiteto/artifacts (extensão aditiva, 422)
+LEGACY_STATUS_PATH       = REMOVIDO (changeSelectedArticleStatus)
+TAB_BOUNDARY             = mover para Silo em Artigos · enviar ao Radar em Links internos
+NEW_DDL = 0 · NEW_MIGRATION = 0 · REMOTE_WRITES = 0 · RADAR_FILES_CHANGED = 0
+```
+
+- **Proposta:** `docs/04-arquiteto/propostas/sdd-fechamento-humano-e-aprovacao-em-lote-2026-09-06.md`,
+  com a distribuição de ações por aba.
+- **Uma autoridade para os dois caminhos** (`article-closing-service.ts`): o botão
+  individual e o seletor em lote entram por `closeArticleRevision`. O lote é um
+  laço sobre o mesmo ato. Cada artigo devolve `approved` · `already_approved` ·
+  `blocked` · `failed` · `pending_confirmation`, com motivo e identidade da
+  versão. Falha de um não apaga o que já foi confirmado; bloqueados continuam
+  selecionados.
+- **`changeSelectedArticleStatus` foi removido, não reconectado.** Ele "aprovava"
+  acrescentando evento local — sem validação, sem persistência, sem readback — e
+  estava sem chamador desde que o seletor antigo saiu da barra. Ligá-lo ao novo
+  seletor daria a aparência de aprovação até o F5 desfazer tudo.
+- **Reaprovar o que já está aprovado não cria versão.** `confirmedArticlePayload`
+  carimba data e acrescenta alerta a cada chamada: o hash sempre muda e comparar
+  conteúdo não responde nada. A pergunta passou a ser se resta decisão a
+  registrar — versão aprovada, arquitetura confirmada e mesma Principal
+  significa que não resta.
+- **Reabrir revisão sucede, não rebaixa.** A aprovação pertence à versão que a
+  recebeu; a reabertura cria uma sucessora em `proposed`. O readback dela é o
+  desta operação — `readbackConfirmedArticleDnas` exige `approved` e recusaria
+  justamente o que se acabou de gravar.
+- **Readback inconclusivo manda reler.** O writer não é transacional: sem
+  confirmação a tela não mexe no estado local e o resultado é
+  `pending_confirmation`, nunca falha nem sucesso.
+- **A SERP do fechamento vem do gate** (`serpEvidenceFromGate`). Recalcular a
+  partir dos registros crus fazia evidência *sustentada* — que não tem
+  `humanResolution` porque não precisa de uma — aparecer bloqueada aqui e
+  liberada lá. Evidência vigente e indecisa passou a ter bloqueio próprio
+  (`SERP_AWAITS_DECISION`): mandar coletar de novo não resolveria nada.
+- **Revalidação no servidor** (`article-approval-revalidation.ts`): a rota já
+  resolvia a marca autorizada e validava contrato, mas aceitava
+  `status: "approved"` para qualquer ArticleDNA que passasse no schema. Agora o
+  caminho de aprovação confere marca autorizada, Principal única e coerente com
+  as referências, arquitetura confirmada e presença de evidência SERP — 422 com
+  os motivos. Proposta e rascunho continuam podendo ser gravados incompletos.
+- **Fronteira entre abas corrigida:** as condições estavam invertidas. O seletor
+  "Mover selecionados para Silo" aparecia fora da aba Artigos e "Enviar ao
+  Radar" aparecia dentro dela — dava para trocar o Silo de um artigo na aba de
+  âncoras, e a transferência se oferecia no meio da formação.
+- **Grafo aprovado envelhece com o artigo** (`internal-link-graph-staleness.ts`):
+  uma sucessora na fase Artigos não invalida o grafo, mas ele passa a descrever
+  uma composição anterior. A fase Links agora diz isso e nomeia os artigos; o
+  gate do Radar já recusava a base nova pela comparação de `versionId`.
+- **Validação:** `test:arquiteto` 1524/1525 (a falha restante é a pré-existente
+  do Minerador, `Processar lógica`), `test:redator` 3/3, TypeScript sem erro
+  novo. `test:operational` (9) e `test:authz` (1) seguem falhando por deriva
+  pré-existente — asserções sobre uma geração anterior da tela, ausentes também
+  em HEAD. Interface não validada manualmente.
+
 ## Fase 2C — consolidação de Silo a partir de Território confirmado — 2026-09-03
 
 ```text

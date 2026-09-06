@@ -1,18 +1,40 @@
 # Adendo de SDD — Radar: persistência verificável e continuidade entre sessões
 
 **Data:** 2026-09-06 · **Módulo proprietário:** Radar
-**Status:** especificação para implementação. O Escopo 0 é pré-requisito dos demais.
+**Status:** Escopo 0 cancelado · Escopo 4 entregue · Escopos 1, 2 e 3 abertos.
 
 ---
 
-> **RESSALVA — 2026-09-06.** O Escopo 0 deste adendo aponta RLS como fork
-> possível. **Isso está errado e foi corrigido pela auditoria posterior:** o
-> cliente server-side usa `SUPABASE_SERVICE_ROLE_KEY`, que bypassa RLS. A causa
-> real é leitura estrita sem isolamento por linha em `WorkflowRepository.list`.
-> Ver `docs/00-produto/auditorias/reconciliacao-mesa-editorial-2026-09-06.md`.
-> Os Escopos 1 a 4 continuam válidos; o Escopo 0 não.
+> ## ENCERRAMENTO PARCIAL — 2026-09-06
+>
+> **Três hipóteses deste documento foram FALSIFICADAS por consulta remota e
+> precisam ser lidas como descartadas, não como pendentes:**
+>
+> - **RLS (Escopo 0).** O cliente server-side usa `SUPABASE_SERVICE_ROLE_KEY`,
+>   que **bypassa RLS**. A policy nunca participou do sintoma. O Escopo 0 está
+>   **cancelado**.
+> - **Registros ausentes.** As consultas do usuário encontraram três itens do
+>   Radar, 100 versões, 111 eventos e cinco snapshots SERP — **todos válidos**.
+>   A hipótese de que nada havia sido gravado está **descartada**.
+> - **Linha incompatível derrubando o leitor.** 3/3 itens do Radar passam no
+>   schema. **Descartada para estes registros.**
+>
+> **Resultado operacional:** após limpar o cache dos dois navegadores e
+> reiniciar, ambos recuperaram os três artigos e a SERP. A recuperação entre
+> sessões está **validada** no cenário Care Glow.
+>
+> **A causa raiz não foi identificada.** Ver os limites em
+> `docs/05-radar/estado-atual.md`.
+>
+> **Escopos que continuam válidos e abertos:** 1 (importação confirmada por
+> readback), 2 (SERP e processos humanos) e 3 (hidratação entre sessões). O
+> Escopo 4 (diagnóstico por operação) foi **entregue**: `requestId`,
+> contagens por repositório, seções que falharam e os cinco desfechos da leitura.
 
-## 0. PARE AQUI — um fork não resolvido decide o resto
+## 0. ~~PARE AQUI — um fork não resolvido~~ · CANCELADO
+
+> Mantido apenas como registro do raciocínio descartado. A hipótese de RLS está
+> falsificada: service role bypassa RLS. **Não implementar nada desta seção.**
 
 O teste de continuidade entre navegadores usa **duas contas diferentes**
 (`adalbapro@gmail.com` no navegador B). Isso não invalida o teste por si só, mas

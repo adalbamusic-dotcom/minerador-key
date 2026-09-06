@@ -4,6 +4,34 @@
 
 ---
 
+## DESFECHO — 2026-09-06
+
+> **Recuperação dos artigos e da SERP entre sessões: validada no cenário Care
+> Glow. A investigação não demonstrou necessidade de limpeza, recriação do banco
+> ou alteração da fundação global.**
+
+Após limpar o cache dos dois navegadores e reiniciar, **ambos recuperaram os três
+artigos e a SERP existente**. Capturas de 06/09/2026, entre 04:43 e 04:46.
+
+**Três causas foram investigadas e NENHUMA se sustentou como comprovada:**
+
+| Hipótese | Situação |
+|---|---|
+| Banco desconectado / registros nunca gravados | **Falsificada** — 3 itens, 100 versões, 111 eventos e 5 snapshots existem e são válidos |
+| RLS filtrando por sessão | **Falsificada** — o cliente server-side usa service role, que bypassa RLS |
+| Linha incompatível derrubando o leitor | **Falsificada** — 3/3 itens do Radar passam no schema |
+
+**A causa raiz permanece não identificada.** Várias correções foram aplicadas no
+mesmo intervalo em que houve reinício do servidor e limpeza de cache; nenhuma
+delas pode ser apontada como a que resolveu. O isolamento da agregação (§1.5) é
+a mais plausível, e o `requestId` com `failedSections` no log é o que
+identifica a seção se o sintoma reaparecer.
+
+Este relatório mantém as seções seguintes como **registro do raciocínio e dos
+riscos de código confirmados** — não como diagnóstico do incidente.
+
+---
+
 ## HIPÓTESE FALSIFICADA — 2026-09-06, consultas diretas ao Supabase
 
 **A linha incompatível NÃO era a causa.** Consultas somente-leitura ao banco
@@ -50,27 +78,25 @@ a partir de agora, um registro incompatível não derruba os demais. Mas **não 
 provado** que era ele a causa do sintoma relatado. Pode haver outra, ou mais de
 uma.
 
-O que fecha a questão é a §2: se as consultas devolverem linhas do Radar e a
-interface passar a mostrá-las com o diagnóstico novo, a causa era esta. Se
-devolverem vazio, a escrita é o alvo e o Escopo 1 do adendo continua de pé.
+**As consultas da §2 já foram executadas** e devolveram os registros íntegros,
+o que falsificou esta hipótese. A §2 fica como procedimento para uma eventual
+reincidência, não como pendência.
+
+O que identificaria a causa numa próxima ocorrência é o `requestId` com
+`failedSections` no log do GET: seção nomeada aponta a agregação; lista vazia
+a elimina.
 
 ---
 
-## Resposta direta (com a ressalva acima)
+## Sobre "limpar a mesa"
 
-**Não há evidência de que algo tenha acontecido com o banco de dados.** Há um
-defeito de leitura confirmado no código que, se disparado, faz a mesa parecer
-vazia sem que nada tenha sido perdido.
+**Nenhuma exclusão foi necessária, e a auditoria confirma que ela teria sido o
+pior movimento:** os registros estavam íntegros o tempo todo. Apagar teria
+destruído trabalho real para esconder um defeito que não estava nos dados.
 
-O defeito: **uma única linha fora do schema derruba a leitura da mesa inteira**
-daquele módulo. Nada é perdido — o leitor é que desiste de todos por causa de um.
-Isso agora está corrigido, e um registro incompatível passa a ser nomeado em vez
-de sumir com o resto.
-
-E a consequência prática mais importante deste relatório: **limpar a mesa seria o
-pior movimento possível.** Apagaria trabalho real para esconder um defeito de
-contrato — exatamente o que o critério de conclusão da sua própria especificação
-proíbe.
+Isto deixou de ser princípio e virou fato verificado — as consultas remotas
+mostraram 3/3 itens do Radar, 100/100 versões, 111/111 eventos e 5/5 snapshots
+válidos.
 
 ---
 

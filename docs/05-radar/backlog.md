@@ -1,5 +1,50 @@
 # Backlog — Radar
 
+## Continuidade entre sessões — base validada — 2026-09-06
+
+- [x] Isolar os leitores por linha para que um registro incompatível não esconda
+  os demais (`safeParse` em workflow, artefatos e eventos).
+- [x] Isolar os oito repositórios do `GET` do workspace, nomeando a seção que
+  falha em vez de devolver a marca como vazia.
+- [x] Separar dado persistido inválido (502 `persisted_data_invalid`) de entrada
+  inválida (400 `invalid_brand_id`).
+- [x] Distinguir os cinco desfechos da leitura: completo, parcial, vazio
+  confirmado, acesso negado e falha.
+- [x] `requestId` rastreável em toda resposta e no log, sem segredos.
+- [x] Falha da escrita remota deixa de ser reportada como importação concluída.
+- [x] Validar recuperação entre duas sessões após limpeza de cache — Care Glow.
+
+### Abertas
+
+- [ ] **Unificar os indicadores da investigação corrente.** "Análise reaberta"
+  não pode coexistir com um indicador que apresente a mesma investigação como
+  concluída.
+- [ ] **Mostrar a aprovação histórica separada da revisão atual.**
+- [ ] Homologar nova importação, nova aprovação e entrega ao Planejador.
+- [ ] Readback por artigo na importação: o POST devolver os `RadarItem`
+  canônicos relidos, e o cliente aplicar só os confirmados.
+- [ ] Reconstruir a investigação SERP a partir dos dois snapshots já existentes
+  da máscara, **sem nova coleta paga**.
+- [ ] Criar `test:radar`: 36 dos 38 arquivos de teste do Radar não rodam em
+  suíte nenhuma, e dois falham por fixture desatualizada.
+- [ ] Decidir os dois campos de contrato escritos e nunca lidos
+  (`arquitetoSerpProvenance`, `arquitetoInternalLinks`).
+- [ ] Decidir as duas autoridades de aprovação: o Workbench aprova localmente e
+  não cria versão remota nem envia ao Planejador.
+
+### Preservar como regressão
+
+- [ ] Carregamento do workspace com um repositório falhando: os demais precisam
+  continuar chegando, com a seção nomeada.
+- [ ] Isolamento por marca na leitura e na importação.
+- [ ] Recuperação entre sessões após limpeza de cache.
+
+### Fora do escopo do Radar
+
+- Fechamento humano e aprovação em lote do Arquiteto seguem no escopo próprio.
+- A fundação global permanece congelada; reabrir só com defeito reproduzido,
+  evidência do ponto de falha e escopo delimitado.
+
 ## Correção funcional — aprovação SERP pós-F5 — 2026-08-27
 
 - [x] Substituir a confirmação global/fallback local por readback remoto

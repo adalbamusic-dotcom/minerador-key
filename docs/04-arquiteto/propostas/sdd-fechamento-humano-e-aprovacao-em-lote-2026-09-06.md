@@ -1,6 +1,6 @@
 # SDD — Fechamento humano do Article e aprovação em lote
 
-**Data:** 2026-09-06 · **Owner:** Arquiteto · **Status:** proposta. Etapa 1 (consistência de leitura) implementada; etapa 2 (fechamento unificado + seletor) pendente.
+**Data:** 2026-09-06 · **Owner:** Arquiteto · **Status:** implementada. Etapa 1 (consistência de leitura) e etapa 2 (fechamento unificado, seletor de status, revalidação no servidor e fronteira das ações por aba) entregues; homologação na tela pendente.
 
 ## Problema
 
@@ -116,6 +116,34 @@ CURRENT        evidência descreve a composição de agora
 ## Revalidação no servidor
 
 A rota confere marca, autorização, principal única, composição, decisões obrigatórias, conflitos e validade da evidência SERP — contra o contexto autorizado, não contra o que o cliente afirma. Botão habilitado e evento enviado não bastam.
+
+## Distribuição das ações por aba
+
+Cada aba fecha o que ela decide. A regra que organiza a tabela: uma aba nunca
+oferece o ato que outra é responsável por decidir — ela pode apontar o problema,
+nunca resolvê-lo pelas costas da fase dona.
+
+| Aba | Decide | Ações na barra da seleção |
+|---|---|---|
+| Artigos | composição do artigo e pertencimento ao Silo | alterar status (enviar para aprovação · aprovar · reabrir revisão), mover selecionados para Silo, excluir |
+| Silos | identidade, fronteira e página do Silo | consolidar Silo, aprovar SiloPage |
+| Links internos | relações e âncoras **sobre** a arquitetura já fechada | processar grafo, confirmar grafo, enviar ao Radar |
+
+As duas condições estavam **invertidas** no rodapé: "Mover selecionados para
+Silo" aparecia fora da aba Artigos e "Enviar ao Radar" aparecia dentro dela. Na
+prática dava para trocar o Silo de um artigo na aba de âncoras — a aba que não
+decide pertencimento — e a transferência ao Radar se oferecia no meio da
+formação, antes do grafo existir.
+
+`Enviar ao Radar` **não é status editorial**: é transferência, e fecha a passada
+de Links internos. `Mover para Silo` também não é status: é pertencimento, e
+pertence a Artigos.
+
+Quando uma mudança em Artigos gera sucessora, o grafo aprovado passa a descrever
+uma composição anterior. Ele **não** é invalidado nem reescrito: a fase Links
+passa a relatar a defasagem, nomeando os artigos, e o gate do Radar recusa a base
+nova pela comparação de `articleDnaVersionRef.versionId`. Processar uma sucessora
+do grafo é o que resolve — por isso a defasagem convoca a fase, não a trava.
 
 ## Fora de escopo
 
