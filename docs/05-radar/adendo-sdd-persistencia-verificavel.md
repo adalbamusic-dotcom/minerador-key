@@ -5,6 +5,13 @@
 
 ---
 
+> **RESSALVA — 2026-09-06.** O Escopo 0 deste adendo aponta RLS como fork
+> possível. **Isso está errado e foi corrigido pela auditoria posterior:** o
+> cliente server-side usa `SUPABASE_SERVICE_ROLE_KEY`, que bypassa RLS. A causa
+> real é leitura estrita sem isolamento por linha em `WorkflowRepository.list`.
+> Ver `docs/00-produto/auditorias/reconciliacao-mesa-editorial-2026-09-06.md`.
+> Os Escopos 1 a 4 continuam válidos; o Escopo 0 não.
+
 ## 0. PARE AQUI — um fork não resolvido decide o resto
 
 O teste de continuidade entre navegadores usa **duas contas diferentes**
