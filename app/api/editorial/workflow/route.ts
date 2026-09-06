@@ -98,7 +98,20 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ ok: true });
   } catch (error) {
-    if (error instanceof z.ZodError) return NextResponse.json({ error: "Comando editorial inválido.", details: error.issues }, { status: 400 });
+    // Codigo proprio + caminho recusado. "Comando editorial invalido" sozinho
+    // custou uma rodada inteira de investigacao: o cliente nao tinha como
+    // saber QUAL campo o schema recusou.
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({
+        code: "invalid_workflow_command",
+        error: "Comando editorial inválido.",
+        details: error.issues.map(issue => ({
+          path: issue.path.map(part => String(part)),
+          code: issue.code,
+          message: issue.message,
+        })),
+      }, { status: 400 });
+    }
     if (error instanceof OptimisticLockError) return NextResponse.json({ code: error.code, error: error.message }, { status: 409 });
     if (error instanceof PersistenceUnavailableError) return NextResponse.json({ code: error.code, error: error.message }, { status: 503 });
     const mapped = authzErrorResponse(error); return NextResponse.json({ error: mapped.message }, { status: mapped.status });

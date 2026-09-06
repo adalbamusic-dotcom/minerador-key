@@ -860,6 +860,21 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
  * Marcar o modo de persistência continua certo. O que faltava era contar o
  * fracasso a quem decide se a operação aconteceu.
  */
+/** Os caminhos que o schema recusou, legíveis: `handoffContext.<articleId>.silo…`. */
+function zodPathsOf(details: unknown): string {
+  if (!Array.isArray(details)) return "";
+  return details
+    .map((detail: { path?: unknown; message?: unknown }) => {
+      const path = Array.isArray(detail.path)
+        ? detail.path.filter((part): part is string | number => typeof part === "string" || typeof part === "number").join(".")
+        : "";
+      return [path, typeof detail.message === "string" ? detail.message : ""].filter(Boolean).join(": ");
+    })
+    .filter(Boolean)
+    .slice(0, 5)
+    .join(" · ");
+}
+
 export type WorkflowCommandOutcome =
   | { ok: true }
   | { ok: false; code: string; message: string };
@@ -871,7 +886,7 @@ async function sendWorkflowCommand(
   try {
     const response = await fetch("/api/editorial/workflow", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
     if (response.ok) return { ok: true };
-    const body = await response.json().catch(() => null) as { code?: unknown; error?: unknown } | null;
+    const body = await response.json().catch(() => null) as { code?: unknown; error?: unknown; details?: unknown } | null;
     const code = typeof body?.code === "string" && body.code.trim() ? body.code : `http_${response.status}`;
     /*
      * SO degrada o modo de persistencia quando a falha E de persistencia.
@@ -888,7 +903,12 @@ async function sendWorkflowCommand(
     return {
       ok: false,
       code,
-      message: typeof body?.error === "string" && body.error.trim() ? body.error : "A escrita remota não foi confirmada pelo servidor.",
+      message: [
+        typeof body?.error === "string" && body.error.trim() ? body.error : "A escrita remota não foi confirmada pelo servidor.",
+        // O CAMINHO RECUSADO, quando o servidor o entrega. Sem ele, um 400 de
+        // schema vira "comando inválido" e ninguém sabe qual campo caiu.
+        zodPathsOf(body?.details),
+      ].filter(Boolean).join(" "),
     };
   } catch (error) {
     update(current => ({ ...current, persistenceMode: "local_fallback" }));

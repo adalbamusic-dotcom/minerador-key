@@ -342,6 +342,12 @@ test("§5 · a hidratação LÊ, não conserta: o artefato continua sem siloId",
 
 /* --- o contexto resolvido precisa CABER no comando que vai ao servidor ---- */
 
+/*
+ * O teste abaixo ficou fraco de proposito documentado: ele passa
+ * `articleVersions: []`, entao cobre so o contexto de Silo. O comando REAL
+ * leva envelopes de ArticleDNA e snapshots de hidratacao, e e por isso que o
+ * arquivo `arquiteto-import-radar-command.test.mts` existe ao lado dele.
+ */
 test("o silo resolvido atravessa o WorkflowCommandSchema sem sobrar campo", async () => {
   // Este teste existe por causa de um defeito real: `siloIdProvenance` foi
   // adicionado a `ResolvedSiloContext` e não ao schema do comando, que é
