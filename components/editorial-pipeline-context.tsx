@@ -699,7 +699,28 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
        * clique: uma falha do servidor deixava a tela dizendo que os artigos
        * foram enviados enquanto nenhum tinha sido.
        */
-      await sendWorkflowCommand({ action: "import_radar", brandId: selectedBrandId, articleVersions: candidates, versionEvents: workspace.versionEvents.filter(event => candidates.some(version => version.versionId === event.versionId)), hydrationByArticleId, handoffContext: contexto }, updateWorkspace);
+      const escrita = await sendWorkflowCommand({ action: "import_radar", brandId: selectedBrandId, articleVersions: candidates, versionEvents: workspace.versionEvents.filter(event => candidates.some(version => version.versionId === event.versionId)), hydrationByArticleId, handoffContext: contexto }, updateWorkspace);
+      /*
+       * Servidor recusou: NADA de estado local.
+       *
+       * Gravar aqui produzia a importação fantasma — visível nesta aba,
+       * sobrevivendo ao F5 pela recuperação local e inexistente para todo
+       * mundo. Cada artigo volta nomeado, com o motivo que o servidor deu.
+       */
+      if (!escrita.ok) {
+        return {
+          imported: 0,
+          skipped: 0,
+          blocked: [
+            ...resolvido.blocked,
+            ...candidates.map(version => ({
+              articleId: version.payload.articleId,
+              label: version.payload.promise || version.payload.articleId,
+              reasons: [escrita.message],
+            })),
+          ],
+        };
+      }
       updateWorkspace(current => ({ ...current, radarItems: next }));
 
       const importados = next.length - before;
@@ -813,10 +834,46 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
   return <EditorialPipelineContext.Provider value={value}>{children}</EditorialPipelineContext.Provider>;
 }
 
-async function sendWorkflowCommand(command: WorkflowCommand, update: (updater: (current: BrandWorkspace) => BrandWorkspace) => void) {
-  try { const response = await fetch("/api/editorial/workflow", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
-    if (response.ok) return; const body = await response.json(); update(current => ({ ...current, persistenceMode: body.code === "persistence_unavailable" ? "local_fallback" : "unavailable" }));
-  } catch { update(current => ({ ...current, persistenceMode: "local_fallback" })); }
+/**
+ * O DESFECHO DA ESCRITA REMOTA — devolvido, nunca engolido.
+ *
+ * Esta função capturava a falha, marcava `persistenceMode` e retornava
+ * normalmente. Quem a chamava com `await` seguia em frente e reportava
+ * sucesso: a tela dizia "1 item enviado", o estado local guardava o item e
+ * nada tinha chegado ao banco. O item sobrevivia ao F5 pela recuperação
+ * local e sumia em qualquer outro navegador — inclusive para outra pessoa
+ * na mesma Brand, porque a leitura remota é por marca, não por usuário.
+ *
+ * Marcar o modo de persistência continua certo. O que faltava era contar o
+ * fracasso a quem decide se a operação aconteceu.
+ */
+export type WorkflowCommandOutcome =
+  | { ok: true }
+  | { ok: false; code: string; message: string };
+
+async function sendWorkflowCommand(
+  command: WorkflowCommand,
+  update: (updater: (current: BrandWorkspace) => BrandWorkspace) => void,
+): Promise<WorkflowCommandOutcome> {
+  try {
+    const response = await fetch("/api/editorial/workflow", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
+    if (response.ok) return { ok: true };
+    const body = await response.json().catch(() => null) as { code?: unknown; error?: unknown } | null;
+    const code = typeof body?.code === "string" && body.code.trim() ? body.code : `http_${response.status}`;
+    update(current => ({ ...current, persistenceMode: code === "persistence_unavailable" ? "local_fallback" : "unavailable" }));
+    return {
+      ok: false,
+      code,
+      message: typeof body?.error === "string" && body.error.trim() ? body.error : "A escrita remota não foi confirmada pelo servidor.",
+    };
+  } catch (error) {
+    update(current => ({ ...current, persistenceMode: "local_fallback" }));
+    return {
+      ok: false,
+      code: "network",
+      message: error instanceof Error ? error.message : "A escrita remota falhou antes de chegar ao servidor.",
+    };
+  }
 }
 
 export function useEditorialPipeline() {

@@ -585,3 +585,42 @@ test("25 · território de uma proposta local é lido dos ArticleDNAs, nunca inv
   const nenhum = resolveProposalTerritoryRef({ articleIds: ["art-A"], territoryRefByArticleId: new Map() });
   assert.deepEqual(nenhum, { territoryRef: null, issue: "NO_TERRITORY" });
 });
+
+// ===========================================================================
+// 26 · A IMPORTAÇÃO FANTASMA — escrita remota recusada não vira estado local
+// ===========================================================================
+
+test("26 · falha remota não é reportada como importação, e não grava local", () => {
+  const contexto = executable(read("components/editorial-pipeline-context.tsx"));
+
+  // `sendWorkflowCommand` DEVOLVE o desfecho. Antes ela capturava a falha,
+  // marcava persistenceMode e voltava normal — quem usava `await` seguia em
+  // frente e dizia "1 item enviado" com o banco vazio.
+  assert.match(contexto, /Promise<WorkflowCommandOutcome>/);
+  assert.match(contexto, /if \(response\.ok\) return \{ ok: true \};/);
+  assert.match(contexto, /return \{\s*ok: false,/);
+
+  // E o importador do Radar checa esse desfecho ANTES de tocar no estado local.
+  const inicio = contexto.indexOf("importApprovedToRadar: async");
+  assert.ok(inicio > 0, "importApprovedToRadar existe");
+  const corpo = contexto.slice(inicio, contexto.indexOf("importApprovedSiloPagesToRadar", inicio));
+  assert.match(corpo, /const escrita = await sendWorkflowCommand\(/);
+  assert.match(corpo, /if \(!escrita\.ok\)/);
+
+  // A recusa vem antes da escrita local — e devolve imported: 0.
+  const guarda = corpo.indexOf("if (!escrita.ok)");
+  const escritaLocal = corpo.indexOf("radarItems: next");
+  assert.ok(guarda > 0 && guarda < escritaLocal, "o guard precede a escrita local");
+  assert.match(corpo.slice(guarda, escritaLocal), /imported: 0/);
+});
+
+test("27 · a leitura do Radar é por marca, não por usuário", () => {
+  // É isto que torna o teste em outro navegador conclusivo: se o item estivesse
+  // no banco, qualquer sessão com acesso à mesma Brand o veria. Não ver em
+  // outro navegador prova que a escrita remota não aconteceu.
+  const repos = executable(read("lib/server/editorial-repositories.ts"));
+  const consulta = repos.slice(repos.indexOf('.in("stage", ["radar", "planner"])') - 400, repos.indexOf('.in("stage", ["radar", "planner"])') + 60);
+  assert.match(consulta, /\.eq\("marca_id", marcaId\)/);
+  assert.ok(!/\.eq\("created_by"/.test(consulta), "não filtra por autor");
+  assert.ok(!/\.eq\("updated_by"/.test(consulta), "nem por quem atualizou");
+});
