@@ -1,3 +1,4 @@
+import type { RadarSerpCollectionAction } from "./serp-collection-state.ts";
 import type { ArticleDNA, VersionEnvelope } from "../arquiteto/contracts.ts";
 import type { RadarItem } from "../editorial/operational-flow.ts";
 import type { RadarAnalysisVersion } from "./analysis-contracts.ts";
@@ -43,6 +44,8 @@ export type RadarR3Model = {
   mode: string;
   article: VersionEnvelope<ArticleDNA> | null;
   serp: {
+    /** A ação da subaba Coleta, resolvida fora do componente. Opcional por retrocompatibilidade. */
+    collection?: RadarSerpCollectionAction;
     provider: string;
     status: string;
     latestSnapshotId: string | null;

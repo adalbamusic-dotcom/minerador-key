@@ -193,3 +193,52 @@ test("o status do artigo acompanha o fechamento e nunca promete aprovação sem 
   assert.match(badges, /ready_for_approval: \{ label: "Pronto para aprovação"/);
   assert.match(workspace, /articleReview\.statusBadge/);
 });
+
+/* ---- versão aprovada e revisão corrente são tempos diferentes ---------- */
+
+test("aprovado COM pendência nova mostra a revisão, não some", () => {
+  /*
+   * O caso da captura: "Revisão humana · Aprovado" e "2 decisões pendentes"
+   * ao mesmo tempo, sem ato nenhum para fechar a segunda. `approved`
+   * curto-circuitava a contagem e o botão — condicionado a
+   * `readyForApproval` — desaparecia justamente quando era necessário.
+   */
+  const comPendencia = checklistInput({
+    approved: true,
+    approvedVersionLabel: "v5",
+    kgr: { label: "A decidir", requiresHumanDecision: true, fullKgr: false, principalKeyword: "skin care principia", principalScoreLabel: "0,177" },
+  });
+
+  assert.equal(comPendencia.approved, true, "a versão aprovada continua aprovada");
+  assert.equal(comPendencia.revisionPending, true, "e a revisão corrente está pendente");
+  assert.equal(comPendencia.status, "AWAITING_HUMAN_REVIEW", "o status descreve o presente, não o histórico");
+  assert.ok(comPendencia.pendingCount > 0);
+  assert.match(comPendencia.headline, /v5 aprovada · revisão atual com \d+ pendência/);
+  // As pendências precisam ser nomeáveis: "resolva" sem dizer o quê é mudo.
+  assert.ok(comPendencia.blockers.length > 0);
+});
+
+test("a frase nomeia a versão e o estado da revisão", () => {
+  const semPendencia = checklistInput({ approved: true, approvedVersionLabel: "v7" });
+  assert.equal(semPendencia.revisionPending, false);
+  assert.equal(semPendencia.status, "APPROVED");
+  assert.match(semPendencia.headline, /v7 aprovada · sem pendência/);
+  // Aprovado e sem pendência não oferece sucessora: não há conteúdo alterado.
+  assert.equal(semPendencia.readyForApproval, false);
+});
+
+test("a tela mostra os dois tempos e o caminho de resolução", () => {
+  const review = readFileSync("modules/arquiteto/article-formation-review.tsx", "utf8");
+  assert.match(review, /data-testid="architect-article-headline"/);
+  assert.match(review, /data-testid="architect-revision-pending"/);
+  assert.match(review, /A versão aprovada permanece válida e não é reescrita/);
+  // O botão não pode mais ser escondido por `approved` sozinho.
+  assert.doesNotMatch(review, /\{closure\.approved \? \(\s*<p[\s\S]{0,200}\) : \(\s*<>/);
+});
+
+test("o papel da cópia de trabalho vem da decisão humana, não do legado", () => {
+  const canonico = readFileSync("lib/arquiteto/canonical-workspace.ts", "utf8");
+  // `assignment.role` divergiu da decisão e produziu duas Principais na tela.
+  assert.match(canonico, /const decidedRole = resolveArticleFormationState\(assignment\)\.decision\?\.role;/);
+  assert.match(canonico, /const assignedRole = decidedRole \?\? assignmentStringOrUndefined\(assignment, "role", "reviewRole"\);/);
+});

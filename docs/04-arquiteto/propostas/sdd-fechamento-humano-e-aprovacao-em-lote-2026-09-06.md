@@ -68,3 +68,55 @@ Transições oferecidas pelo seletor:
 Não há homologação por teste automatizado apenas. Para liberar o teste do Radar, os artigos escolhidos precisam reaparecer **aprovados após recarga e em outra sessão**, com a mesma versão e hash, além de passar pelos requisitos arquiteturais do handoff.
 
 Casos obrigatórios: versão aprovada com pendências novas; papel legado divergente da decisão; lote misto com contagens exatas; bloqueio por duas principais, SERP desatualizada ou decisão pendente; reaprovação sem duplicar versão ou evento; alteração concorrente tratada com bloqueio e recarga; erro de gravação nunca apresentado como aprovação; isolamento por marca; preservação de todas as keywords.
+
+---
+
+# Complemento — Etapa 2: fechamento operacional
+
+**Data:** 2026-09-06 · **Status:** em implementação.
+
+## Serviço único de fechamento
+
+`closeArticleRevision` é a autoridade. Aprovação individual e em lote entram por ela; o lote é um laço sobre o mesmo ato, nunca um caminho paralelo.
+
+Ela orquestra o que já existe — `confirmArticleArchitecture`, `consolidationIssuesFor`, `persistArquitetoArtifact`, `readbackConfirmedArticleDnas` — e a persistência entra por porta, não por import: o domínio não conhece fetch.
+
+`changeSelectedArticleStatus` **não é reconectado**. Ele adiciona evento local e não passa por validação, persistência nem readback; ligá-lo ao seletor daria a aparência de aprovação sem o ato.
+
+## Resultado por artigo
+
+```
+approved            sucessora persistida e confirmada por readback
+already_approved    nada a consolidar; conteúdo inalterado não gera versão
+blocked             pendência nomeada, com a ação que a resolve
+failed              erro de gravação; NUNCA apresentado como aprovação
+pending_confirmation escrita possivelmente commitada, readback inconclusivo
+```
+
+`pending_confirmation` existe porque o writer não é transacional. Tratá-lo como falha convidaria a repetir e gravar duas vezes; tratá-lo como sucesso mentiria. Ele manda **reler**, não repetir.
+
+Falha de um artigo não apaga o que já foi confirmado. Bloqueados permanecem selecionados.
+
+## Bloqueio que resolve
+
+Cada bloqueio carrega `code`, `detail` e `resolveWith` — o controle que resolve. "Existem conflitos" sem dizer quais e onde é pendência que ninguém consegue fechar.
+
+Conflito entre Silos nomeia artigos e Silos envolvidos e a origem do diagnóstico. Mensagens repetidas são agrupadas **preservando as referências**. Não existe "ignorar todos", e conflito não se resolve sozinho.
+
+## SERP: três estados, não dois
+
+```
+NOT_COLLECTED  nunca houve coleta para este candidato
+STALE          houve coleta, mas para outra composição (formationBaseHash difere)
+CURRENT        evidência descreve a composição de agora
+```
+
+"Não executada" para evidência histórica que só não corresponde à composição atual é rótulo errado: apaga trabalho feito. `serpAssessmentRef` preenchida prova coleta, nunca validade.
+
+## Revalidação no servidor
+
+A rota confere marca, autorização, principal única, composição, decisões obrigatórias, conflitos e validade da evidência SERP — contra o contexto autorizado, não contra o que o cliente afirma. Botão habilitado e evento enviado não bastam.
+
+## Fora de escopo
+
+Os três vínculos territoriais divergentes. Movimentação para Silo e envio ao Radar permanecem ações separadas do status editorial.

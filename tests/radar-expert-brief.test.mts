@@ -152,8 +152,13 @@ test("detalhe só aprova e entrega ExpertEvidence após readback remoto revisado
   assert.match(source, /remoteExpertEvidenceSelectionKey/);
   assert.match(source, /expertEvidenceNeedsReapproval/);
   assert.match(source, /onExpertEvidenceChange=\{refreshRemoteExpertEvidence\}/);
-  assert.match(source, /Revise todas as contribuições remotas do especialista antes de aprovar o relatório/);
-  assert.match(source, /expertEvidence: remoteExpertEvidence\.evidence/);
+  // A leitura remota continua sendo o insumo do detalhe; o que mudou é onde a
+  // REGRA mora. Ela saiu da tela para a autoridade única — o Workbench aplica
+  // exatamente a mesma —, então é lá que a frase precisa ser conferida.
+  assert.match(source, /approved: remoteExpertEvidence\.evidence/);
+  assert.match(source, /pendingCount: remoteExpertEvidence\.pendingCount/);
+  const autoridade = await readFile(new URL("../lib/radar/report-approval.ts", import.meta.url), "utf8");
+  assert.match(autoridade, /Revise todas as contribuições remotas do especialista antes de aprovar o relatório/);
 });
 
 test("Workbench usa o articleId canônico ao hidratar o contexto do ExpertBrief", async () => {

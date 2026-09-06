@@ -57,18 +57,31 @@ test("o painel sintetiza as quatro fontes em vez de listá-las como etapas", () 
 
 /* ------------------------ §7 controles humanos --------------------------- */
 
-test("as oito ações de revisão têm controle na tela", () => {
+test("as ações de revisão têm controle na tela — e só as que agem", () => {
   for (const testid of [
     "architect-review-make-principal",
     "architect-review-set-role",
     "architect-review-split",
     "architect-review-remove",
     "architect-review-move",
-    "architect-review-move-silo",
     "architect-review-merge-preview",
   ]) {
     assert.ok(review.includes(testid), `falta o controle ${testid}`);
   }
+});
+
+test("mover entre Silos NÃO é ação da revisão de composição", () => {
+  /*
+   * Atravessar Silo é mudança de membership territorial, e o contrato já dizia
+   * isso recusando com CROSS_SILO_REQUIRES_TERRITORIAL_DECISION. Um select que
+   * sempre recusa ensina a regra pelo tropeço: a pessoa tenta, lê o erro, e só
+   * então descobe onde a decisão mora. O Silo vira leitura, com o caminho dito.
+   */
+  assert.doesNotMatch(review, /architect-review-move-silo/);
+  assert.doesNotMatch(review, /Mover para outro Silo/);
+  assert.doesNotMatch(review, /move_to_silo/);
+  assert.match(review, /data-testid="architect-review-silo-readonly"/);
+  assert.match(review, /Silo definido na fase Silos/);
 });
 
 test("nenhum controle materializa: o painel só propõe", () => {

@@ -155,7 +155,14 @@ export function radarAnalysisCandidates(view: RadarSerpView | null | undefined, 
 export type RadarSerpCurationSummary = {
   selectedCompetitors: number;
   approvedReferences: number;
+  /** Decisões pendentes DENTRO da análise. Só faz sentido com curadoria iniciada. */
   pendingDecisions: number;
+  /** Existe análise compatível com este snapshot/artigo/versão? */
+  curationStarted: boolean;
+  /** Resultados orgânicos do snapshot, independentemente de haver análise. */
+  observedResults: number;
+  /** Resultados esperando a curadoria começar — zero depois que ela começa. */
+  awaitingCuration: number;
   needs: number;
   gaps: number;
   conflicts: number;
@@ -169,9 +176,23 @@ export function buildRadarSerpCurationSummary(input: {
   const compatibleAnalysis = input.view && input.analysis && analysisMatchesSelectionScope(input.view, input.analysis, input.scope) ? input.analysis : null;
   const projection = buildRadarSerpSelectionProjection(input.view, compatibleAnalysis, input.scope);
   const approvedReferences = projection.rows.filter(row => row.decision?.decision === "included").length;
+  /*
+   * "Pendente" e "ainda não iniciada" são estados diferentes.
+   *
+   * `pendingDecisions` conta decisões pendentes DENTRO de uma análise. Sem
+   * análise a projeção é vazia e o número dá zero — e a tela mostrava
+   * "Decisões pendentes: 0" ao lado de sete resultados dizendo "Aguardando
+   * decisão". Zero ali não significava nada resolvido: significava que não
+   * havia onde registrar decisão.
+   */
+  const observedResults = input.view?.organicResults.length || 0;
+  const curationStarted = Boolean(compatibleAnalysis);
   return {
     selectedCompetitors: selectedRadarOrganicResults(input.view, input.analysis, input.scope).length,
     approvedReferences,
+    curationStarted,
+    observedResults,
+    awaitingCuration: curationStarted ? 0 : observedResults,
     pendingDecisions: pendingOrganicDecisionCount(input.view, compatibleAnalysis, input.scope),
     needs: compatibleAnalysis?.payload.competitiveReport?.needs.length || 0,
     gaps: compatibleAnalysis?.payload.competitiveReport?.profile.limitations.length || 0,

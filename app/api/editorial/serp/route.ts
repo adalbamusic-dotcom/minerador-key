@@ -36,11 +36,25 @@ async function resolveArticle(
   let workflow: Awaited<ReturnType<WorkflowRepository["findByArticle"]>> = null;
   let article: VersionEnvelope<ArticleDNA> | null = null;
   let usedLocalFallback = false;
+  /**
+   * Os Silos canônicos DESTA marca, lidos do repositório tenantizado.
+   *
+   * O guard de posse do Silo nasceu quando Silo era sinônimo de lista do
+   * Minerador. No fluxo Silo-first o `siloId` passou a vir do SiloDNA, que é
+   * outro espaço de identidade — e nem sempre um UUID. Conferir só
+   * `minerador_keyword_lists` recusava artigos legítimos e, pior, culpava a
+   * keyword por um problema de Silo.
+   *
+   * A prova de posse continua sendo REMOTA e escopada por marca: o que muda é
+   * que ela passa a aceitar as duas identidades canônicas, não uma só.
+   */
+  const brandSiloDnaIds = new Set<string>();
   try {
     workflow = await new WorkflowRepository().findByArticle(brandId, articleId, "radar");
     if (workflow && workflow.marca_id === brandId) {
       const artifacts = await new ArtifactRepository().list(brandId);
       article = artifacts.articles.find(version => version.payload.articleId === articleId && (!workflow?.source_version_id || version.versionId === workflow.source_version_id)) || artifacts.articles.find(version => version.payload.articleId === articleId) || null;
+      for (const silo of artifacts.silos) brandSiloDnaIds.add(silo.payload.siloId);
     }
   } catch (error) {
     if (!(error instanceof PersistenceUnavailableError) || !localArticle) throw error;
@@ -106,17 +120,37 @@ async function resolveArticle(
   if (hydratedPrincipal) assertRemoteKeywordMatchesEnvelope(resolutionEnvelope, hydratedPrincipal.keyword);
   const transferPrincipal = resolutionEnvelope.principalKeyword;
   if (!keyword && !publishedBriefing && !hydratedPrincipal && !transferPrincipal) throw new AuthzError(409, "A keyword principal deste artigo não foi encontrada no vínculo canônico nem na recuperação local.");
-  const possibleSiloIds = canonicalUuidCandidates([article.payload.siloId, keyword?.lista_id, publishedBriefing?.silo_id, hydratedPrincipal?.siloId, hydration?.silo?.id, resolutionEnvelope.silo?.id]);
-  let ownedSilo: { id: string } | null = null;
+  /*
+   * Duas identidades de Silo, duas provas de posse — ambas remotas.
+   *
+   * `minerador_keyword_lists` continua sendo a prova do espaço legado; o
+   * SiloDNA da marca é a prova do espaço canônico. Nenhuma delas confia no
+   * payload do navegador, e um Silo de outra marca não passa em nenhuma.
+   */
+  const siloCandidates = [...new Set([article.payload.siloId, keyword?.lista_id, publishedBriefing?.silo_id, hydratedPrincipal?.siloId, hydration?.silo?.id, resolutionEnvelope.silo?.id]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0))];
+  const possibleSiloIds = canonicalUuidCandidates(siloCandidates);
+  const ownedSiloIds: string[] = [];
   try {
     const siloResult = possibleSiloIds.length ? await profile.supabase.from("minerador_keyword_lists").select("id,marca_id").in("id", possibleSiloIds) : { data: [], error: null };
     if (siloResult.error) mapPersistenceError(siloResult.error);
-    ownedSilo = (siloResult.data || []).find(silo => silo.marca_id === brandId) || null;
+    for (const silo of siloResult.data || []) if (silo.marca_id === brandId) ownedSiloIds.push(silo.id);
   } catch (error) {
     if (!(error instanceof PersistenceUnavailableError) || !usedLocalFallback) throw error;
   }
-  if (!ownedSilo && usedLocalFallback && (hydration?.silo?.id || resolutionEnvelope.silo?.id) && resolutionEnvelope.brandId === brandId) ownedSilo = { id: hydration?.silo?.id || resolutionEnvelope.silo!.id };
-  if (!ownedSilo) throw new AuthzError(403, "A keyword principal não pertence à marca selecionada.");
+  for (const candidate of siloCandidates) if (brandSiloDnaIds.has(candidate) && !ownedSiloIds.includes(candidate)) ownedSiloIds.push(candidate);
+  if (!ownedSiloIds.length && usedLocalFallback && (hydration?.silo?.id || resolutionEnvelope.silo?.id) && resolutionEnvelope.brandId === brandId) {
+    ownedSiloIds.push((hydration?.silo?.id || resolutionEnvelope.silo!.id) as string);
+  }
+  /*
+   * A mensagem passa a dizer o que realmente falhou.
+   *
+   * Antes, um Silo não comprovado era anunciado como "a keyword principal não
+   * pertence à marca" — a tela mandava corrigir a keyword e o vínculo quebrado
+   * era outro. Culpar o objeto errado custou uma investigação inteira.
+   */
+  if (!ownedSiloIds.length) throw new AuthzError(403, "O Silo deste artigo não pôde ser comprovado dentro da marca selecionada. Nenhuma coleta foi iniciada.");
+  const ownedSilo = { id: ownedSiloIds[0] };
   const candidate = keyword
     ? { id: keyword.id, keyword: keyword.keyword, lista_id: keyword.lista_id, brandId, aliases: [principal.keywordId, ...(hydration?.principalKeyword?.aliases || [])] }
     : publishedBriefing

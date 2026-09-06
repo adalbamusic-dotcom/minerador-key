@@ -215,6 +215,9 @@ export function ArticleFormationReviewPanel({
     onConfirm: () => void;
   } | null;
   closure: {
+    /** "v5 aprovada · revisão atual com 2 pendências" — os dois tempos juntos. */
+    headline: string;
+    revisionPending: boolean;
     approved: boolean;
     readyForApproval: boolean;
     statusLabel: string;
@@ -502,23 +505,13 @@ export function ArticleFormationReviewPanel({
                   {/* §11 — outro Silo não é destino de arrasto: vira decisão de
                       membership territorial, e o artigo de lá é recalculado. */}
                   {siloTargets.length > 0 && (
-                    <select
-                      disabled={busy}
-                      value=""
-                      aria-label={`Mover ${item.label} para outro Silo`}
-                      data-testid="architect-review-move-silo"
-                      onChange={event => {
-                        if (event.target.value) {
-                          onPreview({ kind: "move_to_silo", keywordId: item.keywordId, fromCandidateRef: candidateRef, targetSiloRef: event.target.value });
-                        }
-                      }}
-                      className="min-h-8 rounded border border-divider bg-surface px-1.5 text-sm text-text-muted"
+                    <span
+                      className="text-sm leading-6 text-text-muted"
+                      data-testid="architect-review-silo-readonly"
+                      title="Mover um artigo entre Silos é mudança estrutural de membership e pertence à fase Silos."
                     >
-                      <option value="">Mover para outro Silo…</option>
-                      {siloTargets.map(target => (
-                        <option key={target.siloRef} value={target.siloRef}>{target.label}</option>
-                      ))}
-                    </select>
+                      Silo definido na fase Silos
+                    </span>
                   )}
                 </div>
               </li>
@@ -602,13 +595,21 @@ export function ArticleFormationReviewPanel({
       {closure && (
         <div className="mt-4 border-t border-divider pt-3" data-testid="architect-article-approval">
           <p className="text-sm font-semibold text-foreground">Fechamento do artigo</p>
-          <p className="mt-1 text-sm leading-6 text-text-muted">
-            Status: {closure.statusLabel}
-            {closure.pendingCount ? ` · ${closure.pendingCount} pendência(s)` : ""}
+          {/* A VERSÃO APROVADA E A REVISÃO CORRENTE SÃO TEMPOS DIFERENTES.
+              Colapsá-las em "Aprovado" escondia o botão exatamente quando
+              havia pendência sobre uma versão já aprovada — a pessoa lia
+              "Aprovado · 2 pendências" e não tinha ato para fechar a segunda. */}
+          <p className="mt-1 text-sm leading-6 text-foreground" data-testid="architect-article-headline">
+            {closure.headline}
           </p>
-          {closure.approved ? (
-            <p className="mt-2 text-sm leading-6 text-success" data-testid="architect-article-approved">
-              ArticleDNA aprovado. O artigo segue para a etapa Silos.
+          {closure.approved && (
+            <p className="mt-1 text-sm leading-6 text-success" data-testid="architect-article-approved">
+              A versão aprovada permanece válida e não é reescrita. Fechar a revisão atual cria uma sucessora.
+            </p>
+          )}
+          {closure.revisionPending ? (
+            <p className="mt-2 text-sm leading-6 text-warning" data-testid="architect-revision-pending">
+              Resolva as decisões abaixo para poder fechar esta revisão.
             </p>
           ) : (
             <>
@@ -627,6 +628,11 @@ export function ArticleFormationReviewPanel({
                 </ul>
               )}
             </>
+          )}
+          {closure.revisionPending && closure.blockers.length > 0 && (
+            <ul className="mt-2 space-y-1 text-sm leading-6 text-text-muted" data-testid="architect-approval-blockers">
+              {closure.blockers.map(blocker => <li key={blocker}>• {blocker}</li>)}
+            </ul>
           )}
           <p className="mt-2 text-sm leading-6 text-text-muted">
             A aprovação fecha a definição deste artigo. Silo, categoria e briefing do Planejador não são decididos aqui.

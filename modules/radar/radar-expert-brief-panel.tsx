@@ -62,7 +62,7 @@ type RadarExpertBriefPanelProps = {
   articleRole: string;
   context: RadarR6ExpertTopicContext | null;
   suggestedQuestions?: unknown[];
-  onExpertEvidenceChange?: (articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: { contributionCount: number; pendingCount: number; remote: true; canonicalEvidence: RadarExpertEvidence[]; blockedEvidenceCount: number }) => void;
+  onExpertEvidenceChange?: (articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: { contributionCount: number; pendingCount: number; remote: true; canonicalEvidence: RadarExpertEvidence[]; blockedEvidenceCount: number; articleDnaVersionId: string }) => void;
 };
 
 type Draft = { title: string; questions: RadarExpertBriefQuestion[] };
@@ -323,7 +323,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
         if (projected.reason === "content_not_readable") blockedEvidenceCount += 1;
       }
     }
-    onExpertEvidenceChange?.(articleId, evidence, { contributionCount: scopedContributions.length, pendingCount: pendingContributionCount, remote: true, canonicalEvidence, blockedEvidenceCount });
+    onExpertEvidenceChange?.(articleId, evidence, { contributionCount: scopedContributions.length, pendingCount: pendingContributionCount, remote: true, canonicalEvidence, blockedEvidenceCount, articleDnaVersionId });
   }, [activeBrief, articleDnaVersionId, articleId, brandId, onExpertEvidenceChange, pendingContributionCount, reviews, scopedContributions]);
 
   const setDraftValue = (update: (current: Draft) => Draft) => {

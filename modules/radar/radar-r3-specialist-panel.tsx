@@ -28,7 +28,7 @@ type RadarR3SpecialistPanelProps = {
   /** Fixture médica só pode ser aberta por testes explícitos; nunca é renderizada no artigo real. */
   showLocalFixture?: boolean;
   expertContext?: RadarR6ExpertTopicContext | null;
-  onExpertEvidenceChange?: (articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: { contributionCount: number; pendingCount: number; remote: true; canonicalEvidence: RadarExpertEvidence[]; blockedEvidenceCount: number }) => void;
+  onExpertEvidenceChange?: (articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: { contributionCount: number; pendingCount: number; remote: true; canonicalEvidence: RadarExpertEvidence[]; blockedEvidenceCount: number; articleDnaVersionId: string }) => void;
 };
 
 const inset = "rounded-md border border-divider bg-surface-subtle p-3";

@@ -65,6 +65,8 @@ import { findApprovedGraphForSilo, relevantEdgesForArticle, resolveCanonicalSilo
 import { materializeArticleSiloId, readArticleSiloContract } from "@/lib/arquiteto/article-silo-materialization";
 import { resolveSiloPagePublicationIdentity } from "@/lib/arquiteto/silo-page-publication-identity";
 import { assertSelectionScope, scopeFormationUniverses, selectedCandidateRefsOf } from "@/lib/arquiteto/article-selection-scope";
+import { readArticleStructuralState, resolveTerritoryChangeImpact } from "@/lib/arquiteto/article-structural-impact";
+import { detectExactPublishedRootDuplicates, resolveSupersedeReadiness, territoryRefsOutOfCompetition } from "@/lib/arquiteto/territory-duplicate";
 import {
   ARTICLE_COMPATIBILITY_LABELS,
   ARTICLE_FUNNEL_LABELS,
@@ -2660,6 +2662,9 @@ export default function ArquitetoPage() {
     return buildArticleReviewChecklist({
       hasArticleDna: Boolean(version),
       approved: Boolean(version && effectiveVersionStatus(version.versionId, versionEvents) === "approved"),
+      // A frase precisa nomear a versão: "v5 aprovada" e "revisão atual"
+      // são tempos diferentes, e o rótulo é o que os separa na tela.
+      approvedVersionLabel: version ? `v${version.versionNumber}` : null,
       kgr: {
         label: kgr.label,
         requiresHumanDecision: kgr.requiresHumanDecision,
@@ -7495,8 +7500,47 @@ export default function ArquitetoPage() {
    * revela cabeceira, cauda e profundidade. Recalculada do read-model, então
    * sobrevive ao F5 sem storage próprio.
    */
+  /**
+   * A identidade estrutural de cada Silo, para o guarda de duplicata.
+   *
+   * Só isto: quem aponta para a mesma raiz publicada de um Silo que já tem
+   * SiloDNA canônico. Nome parecido não entra — dois Silos podem legitimamente
+   * se chamar de forma próxima e cobrir coisas diferentes.
+   */
+  const territoryIdentities = useMemo(() => remoteTerritories.map(item => ({
+    territoryRef: item.territoryRef,
+    name: item.territory.name ?? null,
+    lifecycleStatus: item.territory.lifecycleStatus,
+    publishedStructureRef: item.territory.publishedStructureRef ?? null,
+    hasCanonicalSilo: Object.values(acceptedSiloDnas)
+      .some(version => version.payload.territoryRef === item.territoryRef),
+  })), [remoteTerritories, acceptedSiloDnas]);
+
+  const duplicateTerritories = useMemo(
+    () => detectExactPublishedRootDuplicates(territoryIdentities),
+    [territoryIdentities],
+  );
+
+  /**
+   * Cada duplicata com a sua pré-condição resolvida.
+   *
+   * Marcar como substituído com busca dentro deixaria a keyword presa num
+   * Silo que os leitores excluem: some da proposta e não volta a lugar
+   * nenhum. Restaurar primeiro, marcar depois.
+   */
+  const duplicateReadiness = useMemo(() => duplicateTerritories.map(duplicata => {
+    const atribuidas = masterList.filter(keyword => keyword.territoryRef === duplicata.duplicateTerritoryRef);
+    return {
+      duplicata,
+      atribuidas: atribuidas.map(keyword => String(keyword.keyword || keyword.id)),
+      readiness: resolveSupersedeReadiness({ duplicate: duplicata, assignedKeywordCount: atribuidas.length }),
+    };
+  }), [duplicateTerritories, masterList]);
+
   const architectureAnalysis = useMemo(() => buildArchitectureAnalysis({
     universe: keywordUniverse,
+    // Duplicata exata não disputa score com o próprio canônico.
+    outOfCompetitionTerritoryRefs: territoryRefsOutOfCompetition(territoryIdentities),
     territories: [...territorialSurface.landscape.candidateTerritories, ...territorialSurface.landscape.confirmedTerritories]
       .map(territory => ({
         territoryRef: territory.territoryRef,
@@ -7934,6 +7978,8 @@ export default function ArquitetoPage() {
 
   /** §14 — o que a portaria respondeu na última tentativa de concluir. */
   const [conclusionGates, setConclusionGates] = useState<readonly ConclusionGate[]>([]);
+  /** Impacto estrutural aguardando confirmação informada do humano. */
+  const [architectureImpactAck, setArchitectureImpactAck] = useState<ReturnType<typeof resolveTerritoryChangeImpact> | null>(null);
 
 
 
@@ -8029,6 +8075,32 @@ export default function ArquitetoPage() {
     () => scopeFormationUniverses({ universes: articleFormationUniverses, selectedCandidateRefs }),
     [articleFormationUniverses, selectedCandidateRefs],
   );
+
+  /**
+   * ARTICLE APROVADO NÃO PODE SUMIR DA TELA.
+   *
+   * Quando a fase Silos move buscas de um ArticleDNA aprovado, o artefato
+   * continua no acervo mas deixa de ser projetado: o agrupamento corrente só
+   * enxerga keywords de territórios confirmados. O artigo vira invisível — sem
+   * revisão, sem reprocesso, sem sequer aparecer como pendência.
+   *
+   * Esta leitura devolve esses artigos ao campo de visão, com o motivo.
+   */
+  const structuralRevisions = useMemo(() => {
+    const territoryByKeywordId = new Map(masterList.map(keyword => [
+      String(keyword.id),
+      typeof keyword.territoryRef === "string" ? keyword.territoryRef : null,
+    ]));
+    const nomeDaKeyword = new Map(masterList.map(keyword => [String(keyword.id), String(keyword.keyword || keyword.id)]));
+    return Object.values(acceptedArticleDnas)
+      .filter(version => effectiveVersionStatus(version.versionId, versionEvents) === "approved")
+      .map(version => ({
+        version,
+        label: nomeDaKeyword.get(version.payload.principalKeywordId) || version.payload.suggestedSlug || version.payload.articleId,
+        reading: readArticleStructuralState({ article: version.payload, territoryByKeywordId }),
+      }))
+      .filter(item => item.reading.state === "REVISION_REQUIRED");
+  }, [acceptedArticleDnas, masterList, versionEvents]);
 
   const siloLabelByRef = useMemo(
     () => new Map(articleFormationUniverses.map(universe => [universe.siloRef, universe.siloLabel])),
@@ -8314,6 +8386,13 @@ export default function ArquitetoPage() {
        * Só entram os artigos SEM evidência vigente. Coletar de novo o que já
        * está atual seria gastar provider para reconfirmar o que não mudou.
        */
+      // Artigo aprovado que perdeu buscas para outro território não aparece
+      // no cenário; dizer o nome dele é a diferença entre "revisar" e "sumiu".
+      if (structuralRevisions.length) {
+        showNotification("warning", `${structuralRevisions.length} ArticleDNA aprovado(s) precisam de revisão estrutural e não estão no cenário: `
+          + structuralRevisions.map(item => `${item.label} — ${item.reading.reason}`).join(" · "));
+      }
+
       const pendentes = serpGroupsForCandidates(articleSerpGateSummary.needsCollection);
       if (!pendentes.length) {
         // Nada a coletar não é "nada aconteceu": é evidência reaproveitada. A
@@ -8333,7 +8412,7 @@ export default function ArquitetoPage() {
     } finally {
       setFormationBusy(false);
     }
-  }, [selectedBrandId, articleFormationUniverses, articleFormationBase, articleFormationSummary, articleSerpGateSummary, serpGroupsForCandidates, showNotification]);
+  }, [structuralRevisions, selectedBrandId, articleFormationUniverses, articleFormationBase, articleFormationSummary, articleSerpGateSummary, serpGroupsForCandidates, showNotification]);
 
   /**
    * Cria os ArticleDNA dos candidatos aprovados.
@@ -8905,6 +8984,63 @@ export default function ArquitetoPage() {
         : "Nada a confirmar no cenário atual.");
       return;
     }
+
+    /*
+     * SILOS NÃO DESMONTA ARTICLE APROVADO EM SILÊNCIO.
+     *
+     * Uma confirmação de arquitetura já moveu duas das três buscas de um
+     * ArticleDNA aprovado para outro território. O artefato seguiu intacto no
+     * acervo, mas sumiu da tela: o agrupamento corrente só projeta keywords de
+     * territórios confirmados, e as dele passaram a viver em dois lugares.
+     *
+     * Silos continua podendo mudar a arquitetura. O que ele não pode é fazer
+     * isso sem dizer quem perde o quê — a decisão precisa ser informada, e o
+     * Article impactado precisa entrar em revisão em vez de desaparecer.
+     */
+    const impactoEstrutural = resolveTerritoryChangeImpact({
+      proposals: plan.assignments.map(assignment => ({ keywordId: assignment.keywordId, territoryRef: assignment.territoryRef })),
+      // O preview precisa do lote inteiro: dizer só "1 Article afetado"
+      // esconderia para onde o resto está indo — foi assim que uma migração
+      // inteira passou despercebida.
+      approvedArticles: Object.values(acceptedArticleDnas)
+        .filter(version => effectiveVersionStatus(version.versionId, versionEvents) === "approved"),
+      territoryByKeywordId: new Map(masterList.map(keyword => [
+        String(keyword.id),
+        typeof keyword.territoryRef === "string" ? keyword.territoryRef : null,
+      ])),
+      labelByKeywordId: new Map(masterList.map(keyword => [String(keyword.id), String(keyword.keyword || keyword.id)])),
+    });
+
+    /*
+     * QUEBRA DE ESTRUTURA APROVADA É BLOQUEIO, NÃO AVISO.
+     *
+     * "Confirme novamente para aplicar mesmo assim" convidava a criar
+     * conscientemente o estado inconsistente que já custou uma investigação
+     * inteira: o Article some da tela e não há jornada para revisá-lo.
+     * Enquanto a revisão estrutural não existir, o caminho honesto é recusar.
+     *
+     * RESTAURAÇÃO é outra coisa. Devolver buscas ao território do Article
+     * reaproxima a membership do DNA aprovado; proibi-la pelo mesmo motivo que
+     * proíbe a quebra tornaria o estrago permanente. Ela passa, com preview.
+     */
+    /*
+     * Bloqueio cobre DUAS coisas: quebra de estrutura aprovada e restauração
+     * pela metade. A segunda não é destrutiva, mas deixaria o Article
+     * divergente entre um clique e outro — estado que ninguém pediu e que só
+     * existe porque o lote foi aplicado parcialmente.
+     */
+    if (impactoEstrutural.blocked.length) {
+      showNotification("error", impactoEstrutural.summary);
+      setArchitectureImpactAck(impactoEstrutural);
+      return;
+    }
+    if (!impactoEstrutural.clean && !architectureImpactAck) {
+      // Restauração ainda pede olho humano: o primeiro clique mostra o efeito.
+      setArchitectureImpactAck(impactoEstrutural);
+      showNotification("warning", `${impactoEstrutural.summary} Confirme novamente para aplicar.`);
+      return;
+    }
+    setArchitectureImpactAck(null);
 
     setArchitectureBusy(true);
     const aplicadas: string[] = [];
@@ -9766,10 +9902,32 @@ export default function ArquitetoPage() {
                       conflict: [...articleParentBindings.values()].filter(item => item.code === "PARENT_CONFLICT").length,
                       unresolved: [...articleParentBindings.values()].filter(item => item.code === "PARENT_UNRESOLVED").length,
                     }}
-                    onChangePrincipal={(candidateRef, keywordId) => { void changeCandidatePrincipal(candidateRef, keywordId); }}
-                    onSplitKeyword={(candidateRef, keywordId) => { void splitKeywordFromCandidate(candidateRef, keywordId); }}
-                    onMoveKeyword={(keywordId, targetCandidateRef) => { void moveKeywordToCandidate(keywordId, targetCandidateRef); }}
-                    onMergeCandidates={(left, right) => { void mergeCandidates(left, right); }}
+                    /*
+                     * MUDANÇA DE COMPOSIÇÃO É PROPOSTA, NUNCA CLIQUE DIRETO.
+                     *
+                     * Estes quatro controles gravavam na working copy remota no
+                     * primeiro clique, enquanto os MESMOS atos, na revisão de
+                     * composição, passam por "Ver efeito" e "Aplicar". Dois
+                     * caminhos para a mesma decisão, um deles sem volta.
+                     *
+                     * Foi assim que "skin care rosto" saiu de um artigo de três
+                     * keywords e virou candidato sozinho sem ninguém decidir
+                     * isso: uma exploração virou composição ativa, e a SERP
+                     * seguinte foi coletada para o artigo errado.
+                     *
+                     * Agora tudo entra como proposta; aplicar continua sendo um
+                     * ato à parte, e a base antiga fica intacta até lá.
+                     */
+                    onChangePrincipal={(candidateRef, keywordId) => setPendingScenarioChange({ kind: "change_principal", candidateRef, keywordId })}
+                    onSplitKeyword={(candidateRef, keywordId) => setPendingScenarioChange({ kind: "split_keyword", candidateRef, keywordId })}
+                    onMoveKeyword={(keywordId, targetCandidateRef) => {
+                      const origem = articleFormationUniverses
+                        .flatMap(universe => universe.candidates)
+                        .find(candidate => candidate.keywords.some(item => item.keywordId === keywordId));
+                      if (!origem) return;
+                      setPendingScenarioChange({ kind: "move_keyword", keywordId, fromCandidateRef: origem.candidateRef, toCandidateRef: targetCandidateRef });
+                    }}
+                    onMergeCandidates={(left, right) => setPendingScenarioChange({ kind: "merge_candidates", leftCandidateRef: left, rightCandidateRef: right })}
                     onProcess={() => { void processArticleFormation(); }}
                     onConfirm={() => { void confirmArticleFormation(); }}
                   />
@@ -9823,6 +9981,76 @@ export default function ArquitetoPage() {
               }}
               architecture={{
                 panel: (
+                  <>
+                  {/* O PLANO INTEIRO, ANTES DE ESCREVER.
+                      Dizer só "1 Article afetado" esconderia para onde o resto
+                      do lote está indo — foi exatamente assim que a migração
+                      de duas buscas passou despercebida. */}
+                  {/* DUPLICATA DE RAIZ PUBLICADA.
+                      Dois Silos apontando para a mesma entrada do catálogo
+                      disputavam score por ordenação — e o de campos vazios
+                      chegou a levar uma busca de ArticleDNA aprovado. */}
+                  {duplicateReadiness.length > 0 && (
+                    <section className="mt-3 rounded border border-warning/40 bg-warning/10 p-3" data-testid="architect-duplicate-territories">
+                      <p className="text-sm font-semibold text-foreground">Silo duplicado da mesma estrutura publicada</p>
+                      <ul className="mt-1 space-y-1">
+                        {duplicateReadiness.map(item => (
+                          <li key={item.duplicata.duplicateTerritoryRef} className="text-sm leading-6 text-text-muted">
+                            <span className="font-semibold text-foreground">
+                              {siloLabelByRef.get(item.duplicata.duplicateTerritoryRef) || item.duplicata.duplicateTerritoryRef}
+                            </span>{" "}
+                            — {item.duplicata.reason}
+                            <br />
+                            Canônico: {siloLabelByRef.get(item.duplicata.canonicalTerritoryRef) || item.duplicata.canonicalTerritoryRef}
+                            {" · "}
+                            {item.readiness.state === "ready"
+                              ? "sem buscas atribuídas: pode ser marcado como substituído."
+                              : item.readiness.reason}
+                            {item.atribuidas.length > 0 && <> Buscas presas: {item.atribuidas.join(", ")}.</>}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-2 text-sm leading-6 text-text-muted">
+                        Enquanto não for marcado, ele não compete mais por afinidade — mas continua no acervo.
+                      </p>
+                    </section>
+                  )}
+                  {architectureImpactAck && (
+                    <section
+                      className={`mt-3 rounded border p-3 ${architectureImpactAck.blocked.length ? "border-danger/45 bg-danger-soft" : "border-warning/40 bg-warning/10"}`}
+                      data-testid="architect-territory-impact-preview"
+                    >
+                      <p className="text-sm font-semibold text-foreground">
+                        {architectureImpactAck.blocked.length ? "Confirmação bloqueada" : "Restauração estrutural · confirme para aplicar"}
+                      </p>
+                      <p className="mt-1 text-sm leading-6 text-text-muted">{architectureImpactAck.summary}</p>
+
+                      {architectureImpactAck.impacted.length > 0 && (
+                        <ul className="mt-2 space-y-1">
+                          {architectureImpactAck.impacted.map(item => (
+                            <li key={item.articleId} className="text-sm leading-6 text-foreground">
+                              <span className="font-semibold">{item.label}</span>{" "}
+                              <span className="text-text-muted">
+                                {item.alignedBefore}/{item.keywordCountBefore} → {item.alignedAfter}/{item.keywordCountBefore} no território · {item.reason}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                      <p className="mt-3 text-sm font-semibold text-text-muted">Todas as atribuições deste plano</p>
+                      <ul className="mt-1 space-y-0.5" data-testid="architect-territory-plan-rows">
+                        {architectureImpactAck.plannedAssignments.map(linha => (
+                          <li key={linha.keywordId} className="text-sm leading-6 text-text-muted">
+                            {linha.label}: {siloLabelByRef.get(linha.currentTerritoryRef || "") || linha.currentTerritoryRef || "sem Silo"}
+                            {" → "}
+                            {siloLabelByRef.get(linha.proposedTerritoryRef || "") || linha.proposedTerritoryRef || "sem Silo"}
+                            {linha.unchanged ? " (sem mudança)" : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
                   <ArchitecturePanel
                     analysis={architectureAnalysis}
                     processed={Boolean(architectureMarker)}
@@ -9872,6 +10100,7 @@ export default function ArquitetoPage() {
                     onConfirm={() => { void confirmArchitecture(); }}
                     onContinueToArticles={() => setWorkspaceMode("articles")}
                   />
+                  </>
                 ),
               }}
             />
@@ -10839,7 +11068,7 @@ export default function ArquitetoPage() {
                                           onChange: value => setUnitDrafts(current => ({ ...current, [art.id]: { ...expandedUnitDraft, type: value as EditorialArticleUnitType } })),
                                           onConfirm: () => { void handleEditorialUnitDecision(art, { type: expandedUnitDraft.type, landingPagePurpose: expandedUnitDraft.landingPagePurpose, status: "human_confirmed" }); } }
                                         : null}
-                                      closure={{ approved: articleReview.approved, readyForApproval: articleReview.readyForApproval, statusLabel: articleReview.statusLabel, pendingCount: articleReview.pendingCount, blockers: articleReview.blockers }}
+                                      closure={{ approved: articleReview.approved, headline: articleReview.headline, revisionPending: articleReview.revisionPending, readyForApproval: articleReview.readyForApproval, statusLabel: articleReview.statusLabel, pendingCount: articleReview.pendingCount, blockers: articleReview.blockers }}
                                       onApproveArticle={() => { void handleConfirmArticleArchitecture(art); }}
                                       onPreview={change => setPendingScenarioChange(change)}
                                       onApply={() => { void applyPendingScenarioChange(); }}
@@ -11159,8 +11388,18 @@ export default function ArquitetoPage() {
 
           {/* Ações contextuais */}
           <div className="flex shrink-0 items-center gap-2">
-            {/* Ações exclusivas de artigos — só aparecem quando apenas artigos estão selecionados */}
-             {!articleMode && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && (
+            {/*
+              * A FRONTEIRA ENTRE AS ABAS.
+              *
+              * Artigos fecha composição e pertencimento ao Silo. Links internos
+              * trabalha relações e âncoras SOBRE essa arquitetura — ele pode
+              * apontar problema, nunca mover keyword de Silo.
+              *
+              * As duas condições estavam invertidas: o seletor de Silo aparecia
+              * fora de Artigos e o envio ao Radar aparecia dentro dela. A pessoa
+              * trocava o Silo de um artigo na aba de âncoras.
+              */}
+             {articleMode && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && (
               <>
                 <select
                   aria-label="Mover selecionados para Silo"
@@ -11181,7 +11420,9 @@ export default function ArquitetoPage() {
              {articleMode && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button type="button" onClick={() => void requestSelectedKeywordDeletion()} disabled={updating} className={`${ARCHITECT_UI.footerButton} border-danger/45 text-danger hover:border-danger disabled:cursor-not-allowed disabled:opacity-40`} title="Excluir somente as KeywordDNAs dos artigos selecionados pelo ciclo de vida canônico"><Trash2 className="h-3 w-3" aria-hidden="true"/>Excluir</button>}
              */}
              {articleMode && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button type="button" onClick={() => void requestSelectedKeywordDeletion()} disabled={updating} className={`${ARCHITECT_UI.footerButton} border-danger/45 text-danger hover:border-danger disabled:cursor-not-allowed disabled:opacity-40`} title="Excluir somente as KeywordDNAs dos artigos selecionados pelo ciclo de vida canonico"><Trash2 className="h-3 w-3" aria-hidden="true"/>Excluir</button>}
-             {articleMode && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button onClick={() => { void sendSelectedToRadar(); }} disabled={!canSendSelectedArticlesToRadar} title={canSendSelectedArticlesToRadar ? "Enviar ArticleDNAs aprovados e avaliações SERP completas ao Radar" : selectedArticleRadarGateIssues.join(" ")} className={`${ARCHITECT_UI.footerButton} border-context-accent/45 text-context-accent hover:border-context-accent disabled:cursor-not-allowed disabled:opacity-40`}><ArrowRight className="h-3 w-3"/>Enviar ao Radar</button>}
+             {/* Transferência não é status editorial: ela fecha a passada em
+                 Links internos, depois do grafo, não no meio da formação. */}
+             {workspaceMode === "links" && selectedArticleIds.size > 0 && selectedSiloPageIds.size === 0 && <button onClick={() => { void sendSelectedToRadar(); }} disabled={!canSendSelectedArticlesToRadar} title={canSendSelectedArticlesToRadar ? "Enviar ArticleDNAs aprovados e avaliações SERP completas ao Radar" : selectedArticleRadarGateIssues.join(" ")} className={`${ARCHITECT_UI.footerButton} border-context-accent/45 text-context-accent hover:border-context-accent disabled:cursor-not-allowed disabled:opacity-40`}><ArrowRight className="h-3 w-3"/>Enviar ao Radar</button>}
             <button onClick={() => { markSelectionInteraction("clear-selection"); setSelectedArticleIds(new Set()); setSelectedSiloPageIds(new Set()); lastSelectionAnchorId.current = null; }} className={ARCHITECT_UI.footerButton}>Limpar seleção</button>
           </div>
         </footer>
