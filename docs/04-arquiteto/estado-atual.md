@@ -1,3 +1,516 @@
+## Reset da homologação e fluxo básico — 2026-09-08
+
+```text
+ARQUITETO_RESET_TO_ZERO = BLOQUEADO (falta GRANT DELETE ao service_role)
+ARQUITETO_ARTIFACTS_AFTER_RESET = 130  (nada foi apagado)
+ADVANCED_MANUAL_CONTROLS_VISIBLE = NO
+ARTICLE_FOOTER_ACTIONS = CONTAGEM | LIMPAR_SELECAO
+ARTICLE_DNA_FINAL_ACTION = CONCLUIR_FORMACAO
+RADAR_FILES_CHANGED = 0 · PLANNER_FILES_CHANGED = 0
+```
+
+- **O reset existe, foi ensaiado e NÃO pôde ser executado.** O
+  `service_role` não tem `DELETE` em nenhuma das dez tabelas do escopo —
+  `42501` em todas. A sonda roda um delete que casa com NADA antes de qualquer
+  escrita, então o ensaio prova a permissão sem apagar uma linha. Nada foi
+  removido: 280 versões, 60 itens de workflow, 6 grafos e 9 snapshots seguem
+  como estavam.
+- **A trava que importa não é a confirmação, é o ESCOPO.**
+  `editorial_artifact_versions` guarda, sob a mesma marca, 150 linhas que não
+  são do Arquiteto: 83 `keyword_semantic_qualification`, 66
+  `keyword_contextual_presentation` e 1 `brand_skill`. Um delete por
+  `marca_id` teria destruído o trabalho do Minerador junto com os 130
+  artefatos da mesa. O filtro é por TIPO, sempre.
+- **Fora do escopo por decisão:** os 4 itens de workflow com `stage=radar`.
+  Eles referenciam artigos que deixariam de existir, mas são mesa do Radar —
+  esta operação não decide por ela. Ficam órfãos e precisam de um corte próprio.
+- **Rodapé da fase 1 enxugado** (§5/§6): saíram "Reabrir revisão de N",
+  "Mover selecionados para Silo" e "Excluir". Ficaram a contagem da seleção,
+  "Limpar seleção" e o "Enviar ao Radar" da aba Links. Reprocessar e Concluir
+  continuam no painel da fase, com `resolveFormationSelectionScope` como
+  autoridade única.
+- **Ajustes manuais fora da tela**: `advancedOpen` virou constante `false`.
+  Tornar principal, trocar papel, separar, remover, mover e juntar continuam
+  implementados e testados — trocar a constante por estado devolve todos.
+- **Fresh saiu da UI** (§3): o reinício virou operação administrativa. A rota,
+  o domínio e as travas continuam existindo e sob teste.
+- **Validação:** `test:arquiteto` 1633/1634 (falha restante pré-existente do
+  Minerador), TypeScript sem erro novo, lint limpo.
+
+## Fronteira da rodada de homologação — 2026-09-06
+
+```text
+FRESH_HAS_ACTIVE_ROUND_BOUNDARY = YES
+FRESH_HISTORY_PRESERVED = YES
+OLD_APPROVED_ARTIFACTS_VISIBLE_AS_CURRENT = NO (provado por teste; remoto ainda sem rodada)
+SERP_HISTORY_REUSABLE_ACROSS_ROUNDS = YES · SERP_REUSE_REQUIRES_BASEHASH_MATCH = YES
+CANONICAL_ARTIFACT_STATE_CROSSES_ROUNDS = NO
+BRAND_DNA_PRESERVED = YES · KEYWORD_DNA_PRESERVED = YES
+SAFE_TO_EXECUTE_FRESH_REMOTE = YES (nada foi executado neste corte)
+RADAR_FILES_CHANGED = 0 · PLANNER_FILES_CHANGED = 0
+```
+
+- **O risco era real.** Limpar a cópia de trabalho não bastaria:
+  `canonical-version-authority` resolve "a última aprovada" e encontraria o
+  SiloDNA e o ArticleDNA da rodada anterior, apresentando-os como cenário
+  corrente. A cópia estaria limpa e o cenário, não.
+- **`homologation-round.ts`** declara a fronteira. O marcador
+  `arquiteto_homologation_round` guarda `roundId`, `startedAt`, `startedBy`,
+  `reason: FRESH` e `previousRoundId`; a rodada ativa é a de `startedAt` mais
+  recente. Nenhum schema físico mudou — `editorial_workflow_items` já
+  comporta o marcador.
+- **A regra de autoridade NÃO mudou** (§6). `canonical-version-authority`
+  continua sendo "a última aprovada". O que a fronteira faz é restringir o
+  UNIVERSO sobre o qual ela responde, e só em homologação: sem modo e sem
+  rodada, `bounded = false` e tudo passa, como no produto de hoje.
+- **Aplicada na ENTRADA**, no carregamento canônico, e não dentro de cada read
+  model — assim continua havendo uma leitura só. Vale para ArticleDNA, SiloDNA,
+  SiloPage e InternalLinkGraph aprovado.
+- **A rodada é lida antes de qualquer carga**, a cada troca de marca.
+  Hidratá-la só ao abrir o preview faria a fronteira valer apenas naquela
+  sessão: depois de um F5 os artefatos antigos voltariam como correntes.
+- **O marcador é gravado DEPOIS da limpeza** e é preservado por ele mesmo: se a
+  limpeza falhar, não existe rodada nova para declarar.
+- **A exceção intencional é a SERP** (§8): parecer histórico atravessa rodadas,
+  mas só por identidade forte — `formationBaseHash` idêntico. Estado canônico
+  não atravessa; evidência sim. BrandDNA e KeywordDNA também atravessam: são
+  entradas canônicas, não estado de trabalho desta fase.
+- **`npm run audit:rodada`** responde `ACTIVE_HOMOLOGATION_ROUND_ID`, os
+  contadores ativos × históricos e
+  `OLD_APPROVED_ARTIFACTS_VISIBLE_AS_CURRENT`. Leitura de hoje: nenhuma rodada
+  declarada, 10 ArticleDNA e 3 SiloDNA aprovados no histórico, 9 pareceres SERP.
+- **Validação:** `test:arquiteto` 1632/1633 (falha restante pré-existente do
+  Minerador), TypeScript sem erro novo, lint limpo.
+
+## Reiniciar homologação — 2026-09-06
+
+```text
+HOMOLOGATION_FRESH_AVAILABLE = YES
+HOMOLOGATION_FRESH_VISIBLE_IN_PRODUCTION = NO
+FRESH_CLEARS_WORKING_COPY = YES
+FRESH_DELETES_APPROVED_HISTORY = NO · FRESH_DELETES_SERP_HISTORY = NO
+FRESH_IS_SEPARATE_FROM_REPROCESS = YES · NORMAL_REPROCESS_IS_INCREMENTAL = YES
+APPROVED_ARTIFACTS_DELETED = 0
+RADAR_FILES_CHANGED = 0 · PLANNER_FILES_CHANGED = 0
+```
+
+- **Três operações, três semânticas.** `Reprocessar` é incremental e preserva a
+  estrutura corrente. `Restaurar` conserta em direção ao ArticleDNA aprovado.
+  `Reiniciar homologação` recomeça a cópia de trabalho da rodada. Elas não
+  compartilham botão nem código.
+- **`homologation-fresh.ts` é lista de PERMISSÃO.** Limpa `keyword`,
+  `architecture_analysis`, `article_formation_analysis`, `silo_working_copy` e
+  `territory` — cada um com o motivo declarado. Qualquer `subject_type` fora da
+  lista é preservado por omissão: o erro caro aqui é apagar demais.
+- **Preservados por regra**, não por acidente: `article_formation_serp_assessment`,
+  `territorial_serp_assessment` e `territorial_ai_review`. Evidência órfã é
+  inofensiva — e é ela que permite testar o reaproveitamento por
+  `formationBaseHash` na rodada seguinte (§12).
+- **Nenhum artefato versionado é apagado.** `editorial_artifact_versions` e
+  `minerador_keywords` não aparecem na rota; há teste que falha se aparecerem.
+  Proposta no-op continua no banco e simplesmente não é autoridade — quem
+  resolve isso é `canonical-version-authority`, não um DELETE.
+- **Três travas, nenhuma vinda do cliente:** o modo é lido de
+  `ARQUITETO_HOMOLOGATION_MODE` (server-only); a marca vem de
+  `resolvePipelineContext`; e a frase de confirmação é derivada do TAMANHO do
+  plano recalculado no servidor — plano diferente do que a pessoa viu produz
+  frase diferente e a rota recusa com 409. A variável pública
+  `NEXT_PUBLIC_ARQUITETO_HOMOLOGATION_MODE` controla só a visibilidade do
+  botão; ligar apenas ela mostra o controle e a rota recusa.
+- **Preview obrigatório:** o primeiro clique busca o plano e mostra o que some
+  e o que fica, lado a lado. O segundo confirma. O resumo final vem do
+  **readback**, não do que foi pedido.
+- **O estado local some junto** — seleção, previews pendentes, rascunhos e
+  working copy de links. Deixar a tela mostrando a rodada anterior sobre um
+  remoto já limpo seria pior que não limpar.
+- **Nada foi executado.** A rota existe, é testada e nunca foi chamada contra o
+  remoto neste corte.
+- **Validação:** `test:arquiteto` 1623/1624 (falha restante pré-existente do
+  Minerador), TypeScript sem erro novo, lint limpo.
+
+## Restaurar a cópia de trabalho a partir do aprovado — 2026-09-06
+
+```text
+NORMAL_REPROCESS_IS_INCREMENTAL = YES · NORMAL_REPROCESS_IS_FRESH = NO
+RESTORE_WORKING_COPY_AVAILABLE = YES
+RESTORE_BASELINE = CANONICAL_APPROVED_ARTIFACTS
+RESTORE_PROVIDER_CALLS = 0 · RESTORE_IS_ATOMIC = YES
+REPROCESS_RESULT_IS_EXPLAINABLE = YES
+ARTICLE_SELECTION_AUTHORITIES = 1
+FRESH_FORMATION_AVAILABLE = NO (próximo corte)
+SAFE_TO_PROCESS_LINKS = NO
+RADAR_FILES_CHANGED = 0 · PLANNER_FILES_CHANGED = 0
+```
+
+- **Por que `Confirmar arquitetura` mostrava "0 Silos · 6 atribuições (sem
+  mudança)".** O plano dela nasce da ANÁLISE do cenário corrente; sobre um
+  drift antigo a cópia de trabalho já concorda consigo mesma, e a análise não
+  tem com o que discordar. `Reprocessar` tem o mesmo limite por desenho: ele é
+  incremental e preserva a estrutura corrente. Nenhum dos dois consegue
+  reparar — e insistir neles era o caminho errado.
+- **`working-copy-restore.ts`** tem outro baseline: o **ArticleDNA aprovado**.
+  Ele pergunta só "onde a keyword deveria estar, segundo o artefato aprovado?"
+  e devolve a diferença, agrupada por Article, no formato `1/3 → 3/3`.
+- **O que a restauração não faz:** não edita ArticleDNA, não cria sucessora,
+  não aprova, não chama provider, não reagrupa por similaridade. Há teste que
+  falha se `persistArquitetoArtifact`, `createVersionEnvelope`,
+  `confirmSerpValidation` ou `fetch(` aparecerem no módulo.
+- **Atômica de verdade:** falha em qualquer atribuição desfaz as anteriores
+  pelo mesmo writer e declara a operação inteira como falha —
+  `applied: 0`. O que não pôde ser desfeito é NOMEADO, não silenciado.
+- **Preview obrigatório:** primeiro clique mostra `ARTICLES_AFETADOS` e
+  `KEYWORDS_A_RESTAURAR` com origem → destino por keyword; nada é gravado.
+- **§15 — a seleção ainda tinha caminho antigo.** `CALL_SITES` da recusa: os
+  dois handlers já usavam a autoridade única, mas o **painel da fase** lia
+  `selectedCandidateRefs.size` e escrevia "Selecione pelo menos um artigo" nos
+  títulos e no contador — com a linha já selecionada. Ele passou a receber
+  `scopeReason` pronto; `applyClosingToSelection` também.
+- **§14 — `Reprocessar` fecha a conta:** "Processamento concluído: N Article(s)
+  analisado(s). SERP reaproveitada para X/Y · Z sem evidência vigente.
+  A sustentado(s) · B divergente(s) · C inconclusivo(s). D pronto(s) para
+  concluir."
+- **Validação:** `test:arquiteto` 1609/1610 (falha restante pré-existente do
+  Minerador), TypeScript sem erro novo, lint limpo.
+
+## Processamento automático fecha a formação — 2026-09-06
+
+```text
+SERP_DISPLAY_AUTHORITIES = 1
+ARTICLE_SINGLE_KEYWORD_PRINCIPAL_AUTOMATIC = YES
+ARTICLE_SINGLE_KEYWORD_COMPATIBILITY_TERMINAL = YES (NOT_APPLICABLE)
+CURRENT_INCONCLUSIVE_REQUIRES_MICRO_HUMAN_DECISION = NO
+AMBIGUITY_IS_TERMINAL_RESULT = YES · INDETERMINATE_IS_TERMINAL_RESULT = YES
+STRUCTURAL_BASELINE_PRESERVED_FALLBACK = YES
+ARTICLES_CAN_MOVE_KEYWORD_BETWEEN_SILOS = NO
+RADAR_FILES_CHANGED = 0 · PLANNER_FILES_CHANGED = 0
+```
+
+- **A contradição da SERP tinha duas chaves.** O badge lia `serpAssessments`
+  por `articleId`; o gate lia `remoteArticleSerp` por `candidateRef`. Para
+  `skin care rosto`, cujo parecer está gravado sob o `candidateRef`, o badge
+  não achava nada e dizia "não executada" enquanto o painel exibia o parecer
+  inteiro ao lado. `articleSerpVerdictFor` passou a resolver pela chave do
+  gate primeiro; o acervo por `articleId` só responde quando não há registro.
+- **Auditado antes de mexer** (`audit:formation`): `skin care rosto` ·
+  `article-formation:8f8ccb38…` · base `serpbase:762ab4a2983a8d82` ·
+  assessment **v3** com base **idêntica** · verdict INCONCLUSIVE ·
+  `SERP_CANONICAL_STATE = CURRENT_INCONCLUSIVE_UNRESOLVED` ·
+  `SERP_DISPLAY_SOURCE = CURRENT_ASSESSMENT`. A evidência existia, era vigente,
+  e o badge é que mentia.
+- **`formation-phase-policy.ts`** declara `PHASE1_UNRESOLVED_SERP_BLOCKS_CONCLUSION
+  = false`. O gate ganhou `unresolvedBlocksConclusion` com **padrão `true`**:
+  quem não declara nada continua sendo cobrado. Evidência vigente e indecisa
+  passa a preservar o baseline (`humanFormationRef`, `humanRole`, Principal
+  vigente) e registra `STRUCTURAL_BASELINE_PRESERVED` como resultado terminal.
+- **O que continua bloqueando:** SERP ausente, falhada ou desatualizada. Ali
+  não há evidência sobre esta composição, e a hipótese da lógica não substitui
+  o mercado.
+- **Artigo de uma keyword** fecha com `compatibility = NOT_APPLICABLE` —
+  "Não aplicável", não "Ambígua". Ambígua diz que faltou base; num artigo de
+  uma keyword não falta base, a pergunta não se aplica. Composição com
+  secundária não avaliada continua AMBÍGUA.
+- **Efeito medido:** `HUMAN_RESOLUTION_REQUIRED` foi de 7 NO + 1 YES para
+  **8 NO**, e o candidato indeciso passou a registrar
+  `DECISION_BASIS = STRUCTURAL_BASELINE_PRESERVED`.
+- **As auditorias acompanham a política** — `audit:formation` importa a mesma
+  constante, para não ser mais severa que a portaria real.
+- **Validação:** `test:arquiteto` 1597/1598 (falha restante pré-existente do
+  Minerador), TypeScript sem erro novo, lint limpo.
+
+## Fase 1: processamento fecha, humano confirma o resultado — 2026-09-06
+
+```text
+ARTICLE_SELECTION_AUTHORITIES = 1
+SEPARATE_SEND_FOR_APPROVAL_STEP = NO · SEPARATE_APPROVE_ARTICLEDNA_STEP = NO
+ARTICLE_DNA_FINAL_ACTION = CONCLUIR_FORMACAO
+ADVANCED_MANUAL_CONTROLS_DEFERRED = YES
+SILO_MEMBERSHIP_OWNER = SILOS · ARTICLE_FORMATION_OWNER = ARTIGOS
+RADAR_FILES_CHANGED = 0 · PLANNER_FILES_CHANGED = 0
+```
+
+- **O bug do print, explicado.** O rodapé contava `selectedArticleIds` (linhas
+  selecionadas) e as ações contavam `selectedCandidateRefs` (só as linhas que
+  são candidatas do cenário corrente). Uma linha selecionada sem
+  `candidateRef` somava no primeiro e sumia no segundo: a tela dizia "1 artigo
+  selecionado" e o botão respondia "Selecione pelo menos um artigo" — uma
+  recusa que nenhum clique resolve.
+- **`resolveFormationSelectionScope`** é a autoridade única: devolve
+  `selectedCount`, `candidateRefs`, `excluded` e uma recusa que **nomeia** quem
+  ficou de fora e o que resolve. Reprocessar e Concluir leem o mesmo objeto.
+  O nome evita colisão com o `resolveArticleProcessScope` que já existia em
+  `article-process-scope.ts` e responde outra pergunta (keywords do lote da IA).
+- **A etapa intermediária saiu** (§13). O rodapé tinha "Enviar para aprovação",
+  que não gravava sucessora — só movia de fila. A fase 1 tem dois atos,
+  `Reprocessar artigos` e `Concluir formação`, e um desfazer:
+  `Reabrir revisão`.
+- **O rótulo parou de anunciar ato que não houve** (§9). "Formação concluída"
+  aparecia assim que existia ArticleDNA, mesmo com a versão `proposed` e o
+  botão de concluir ainda por clicar. Agora: *ArticleDNA aprovado* ·
+  *Formação processada · falta concluir* · *Formação em processamento*.
+- **Ajustes manuais atrás de uma porta** (§7). Tornar principal, trocar papel,
+  separar, remover e mover continuam existindo — sob "Ajustes avançados", fora
+  do caminho crítico. Nada foi apagado, e um teste falha se alguém remover.
+- **Validação:** `test:arquiteto` 1587/1588 (falha restante pré-existente do
+  Minerador), TypeScript sem erro novo, lint limpo.
+
+## Confirmar arquitetura: preview obrigatório — 2026-09-06
+
+```text
+SILO_PHASE_FINAL_ACTION = CONFIRMAR_ARQUITETURA
+SILO_PHASE_CLOSED       = NO   (depende do clique humano; nada foi gravado)
+SILO_DNA_APPROVED       = 3/3
+SILO_PAGE_APPROVAL_READY = 3/3 (preflight, com a identidade que a confirmação grava)
+SILO_PAGE_APPROVED      = 0/3
+APPROVED_ARTICLES_EXACT_MATCH = 6/8 · DRIFTED = 2/8 · LOCAL_ASSIGNMENTS_TO_RESTORE = 3
+SAFE_TO_REPROCESS_ARTICLES = NO · SAFE_TO_PROCESS_LINKS = NO
+PROVIDER_CALLS = 0 · REMOTE_WRITES = 0
+```
+
+- **O primeiro clique agora é preview SEMPRE.** O preview de impacto existia,
+  mas só disparava quando o plano mexia em estrutura aprovada; plano limpo
+  gravava direto, e a pessoa nunca via quais Silos seriam confirmados nem
+  quantas keywords mudariam de território. "Não quebra nada" não é o mesmo que
+  "já pode ir".
+- **A confirmação é amarrada ao plano previsto** por assinatura
+  (`confirmTerritoryRefs` + `keywordId->territoryRef`, ordenados). Se o lote
+  mudar entre os dois cliques, volta a ser preview em vez de aplicar o que
+  ninguém olhou.
+- **A tela do preview** mostra os Silos do plano, a contagem de atribuições e,
+  por Silo, o estado da SiloPage vindo do MESMO preflight da fase — canonical
+  confirmado ou planejado, publicação, e `SILO_PAGE_APPROVAL_READY = NO` quando
+  for o caso. O bloco de impacto continua nomeando o Article afetado no formato
+  `1/3 → 3/3`.
+- **Invariantes preservadas:** `BREAKS_APPROVED_STRUCTURE` e
+  `PARTIAL_RESTORATION` continuam recusa, não aviso — e agora limpam o preview
+  pendente para que ninguém "confirme de novo" sobre um plano bloqueado.
+- **A restauração não reagrupa.** O baseline continua sendo
+  `humanFormationRef`/`humanRole` persistidos em cada keyword; nenhuma
+  heurística de similaridade participa. Travado por teste.
+- **`audit:drift` já ignorava proposta no-op:** ele compara contra a versão
+  APROVADA de maior número. `skin care principia` aparece `[v10] MATCH` mesmo
+  com a v17 `proposed` no acervo.
+- **Estado do drift medido agora:** `skin care pele oleosa [v5]` perdeu
+  `skin care pele oleosa` e `skin care para peles oleosas` para
+  *Pele Oleosa e Acne (candidate)*; `retinol creamy antes e depois [v6]` perdeu
+  `retinol da creamy` para o *Anti-idade e Retinol (candidate)* duplicado. Três
+  atribuições, dois Articles.
+- **SERP do lote, para a etapa seguinte** (`audit:formation`): 8 candidatos —
+  2 `CURRENT_SUPPORTED`, 2 `CURRENT_DIVERGENCE_RESOLVED`,
+  3 `CURRENT_INCONCLUSIVE_RESOLVED`, 1 `CURRENT_INCONCLUSIVE_UNRESOLVED`.
+- **Validação:** `test:arquiteto` 1579/1580 (falha restante pré-existente do
+  Minerador), TypeScript sem erro novo.
+
+## Sucessora só nasce de decisão editorial — 2026-09-06
+
+```text
+ARTICLE_CONCLUSION_CREATES_NOOP_SUCCESSOR = NO
+SKIN_CARE_PRINCIPIA_ALREADY_CANONICAL_APPROVED = YES (v10)
+SAFE_TO_USE_SKIN_CARE_PRINCIPIA_AS_NOOP_SMOKE = NO
+RESTORE_LOCAL_DRIFT_BEFORE_LINKS = YES
+PROVIDER_CALLS = 0 · REMOTE_WRITES = 0 · RADAR_FILES_CHANGED = 0
+```
+
+- **Por que o `UNCHANGED` do writer nunca salvava.** Ele compara
+  `contentHash`, e `confirmedArticlePayload` carimba data e acrescenta alerta a
+  cada chamada: o hash SEMPRE muda. Cada clique em `Concluir formação` criava
+  uma sucessora idêntica — e, até o corte anterior, essa proposta ainda escondia
+  a versão aprovada na tela.
+- **`article-editorial-diff.ts`** compara a proposta contra a CANÔNICA aprovada
+  por lista de decisões (Principal, composição, papéis, Silo, território, slug,
+  classificação, KGR, evidência SERP, identidade publicada), com carimbos
+  removidos em profundidade — `confirmedAt`, `decidedAt`, `actorId`, `history`
+  e equivalentes. `alerts` e `humanPendingDecisions` ficam fora: são registro
+  do processo, não a decisão.
+- **A guarda roda ANTES da escrita**, dentro de `materializeApprovedArticleDnas`.
+  Sem diferença substantiva: `NO_NEW_VERSION`, e a mesa diz "O ArticleDNA
+  aprovado já representa esta formação. Nenhuma nova versão foi necessária." —
+  no-op é resultado, não silêncio, senão a pessoa clica de novo achando que
+  falhou.
+- **A auditoria usa a MESMA autoridade.** `audit:versoes` passou a reportar
+  `CAMPOS_EDITORIAIS_ALTERADOS` e `CONCLUIR_FORMACAO_CRIARIA_SUCESSORA`, para
+  que o relatório e a tela nunca discordem sobre o que é revisão.
+- **Medido durante este corte:** `skin care principia` estava em v16 quando
+  comecei e apareceu em **v17** ao final — outro no-op criado por um clique
+  entre as duas execuções. Canônica continua `v10 approved`;
+  `CAMPOS_EDITORIAIS_ALTERADOS = nenhum`.
+- **Validação:** `test:arquiteto` 1572/1573 (falha restante pré-existente do
+  Minerador), TypeScript sem erro novo.
+
+## Primeira passada sobre arquitetura planejada — 2026-09-06
+
+```text
+CURRENT_SCENARIO_HAS_PUBLISHED_CONTENT = NO
+PUBLISHED_VERIFICATION_REQUIRED_NOW    = NO   (declarado em publication-scenario.ts)
+SITEMAP_VERIFICATION_REQUIRED_NOW      = NO
+PUBLISHED_STRUCTURE_RECONCILIATION_DEFERRED = YES
+READY_FOR_RADAR_REQUIRES_PUBLISHED_PAGE = NO
+LINKS_MODIFIES_ARTICLE_DNA = NO · LINKS_OUTPUT = INTERNAL_LINK_GRAPH
+PROVIDER_CALLS = 0 · REMOTE_WRITES = 0 · RADAR_FILES_CHANGED = 0
+```
+
+- **O cenário é declarado, não escondido.** `publication-scenario.ts` publica
+  `CURRENT_SCENARIO_REQUIRES_PUBLISHED_VERIFICATION = false` com o porquê e o
+  que volta a valer depois. `resolveSiloPageApprovalReadiness` ganhou
+  `publishedVerificationRequired`, **padrão `true`**: quem não declara nada
+  continua sendo cobrado exatamente como antes.
+- **A bandeira é aplicada no SERVIDOR**, no adapter da consolidação, lendo a
+  constante do código. Aceitá-la no corpo da requisição deixaria a tela relaxar
+  o próprio portão — a rota não a conhece.
+- **Identidade contraditória continua bloqueando.** Canonical divergente entre
+  o artefato e o catálogo não é "falta verificar a publicação": são dois
+  endereços declarados para a mesma página. Nem o cenário planejado aprova isso.
+- **Nada foi apagado.** Sitemap, catálogo do site, `SiteCatalogObservation`,
+  `plannedSiloPageCanonical`, `canonical_mismatch` e os bloqueios
+  `PUBLICATION_UNVERIFIED`, `PUBLISHED_URL_MISSING` e
+  `PUBLISHED_IDENTITY_MUTATED` continuam implementados e sob teste.
+- **Efeito medido** (`npm run audit:silopage`, read-only): com o cenário
+  declarado, `rotina-skincare-facial` e `anti-idade-e-retinol` já ficam
+  `READY` como estão gravadas; `skin-care-para-peles-oleosas` fica `READY` com
+  o canonical planejado que a confirmação transporta. **3/3.**
+- **A própria auditoria tinha o defeito da canônica.** `audit:arquiteto` pegava
+  a versão mais nova e depois exigia `approved`: uma proposta escondia a
+  entidade inteira. Corrigido — o corte agora é da última APROVADA, e
+  `CURRENT_ARTICLES` passou de 9 para **10** (`skin care principia` reapareceu
+  com sua v10 aprovada).
+- **Ponto de partida do smoke** (`skin care principia`, `article-formation:16b09488…`):
+  canônica `v10 approved`; território `territory:6d8facce…` → Silo
+  `working-silo:2`; SERP `REUSABLE_CURRENT`, `state=resolved`, baseHash do
+  acervo idêntico ao do DNA, decisão humana registrada; classificações
+  resolvidas pela regra. Nenhuma chamada de provider seria necessária.
+- **Validação:** `test:arquiteto` 1556/1557 (falha restante pré-existente do
+  Minerador), `test:redator` 3/3, TypeScript sem erro novo.
+
+## Preflight da SiloPage antes da confirmação — 2026-09-06
+
+```text
+SILO_PAGE_PUBLICATION_IDENTITY_AUTHORITY = lib/arquiteto/silo-page-publication-identity.ts
+CONFIRM_ARCHITECTURE_USES_IT             = YES
+SILO_PAGE_PREFLIGHT_VISIBLE              = YES
+SILO_PAGE_APPROVAL_AUTHORITIES           = 1 (Confirmar arquitetura)
+APPROVAL_READY_COM_IDENTIDADE            = 3/3
+PROVIDER_CALLS = 0 · NEW_MIGRATION = 0 · REMOTE_WRITES = 0
+```
+
+- **A autoridade já existia e já é consumida.** `resolveSiloPagePublicationIdentity`
+  resolve canonical confirmado pelo catálogo, canonical PLANEJADO a partir da
+  origem declarada pela Brand e `canonical_mismatch` quando o artefato e o
+  catálogo declaram endereços diferentes. A consolidação a chama e **grava** o
+  resultado no payload (`canonical`, `publicationStatus`, `publishedUrl`,
+  `publicationVerification`). Nenhuma autoridade nova foi criada.
+- **Por que as três estavam bloqueadas.** As v1 gravadas são anteriores a esse
+  transporte: o artefato nunca recebeu o que a varredura do site já tinha
+  observado. Medido com `npm run audit:silopage` (read-only, zero provider):
+  as três ficam `APPROVAL_READY = YES` assim que a identidade resolvida entra
+  no payload — que é exatamente o que `Confirmar arquitetura` faz hoje.
+- **`siloPageApprovalPreflight`** é a mesma `resolveSiloPageApprovalReadiness`
+  chamada com uma decisão sintética que casa com a versão em mãos, para que
+  sobrem só os impedimentos ESTRUTURAIS. Ela não aprova e não persiste nada:
+  existe para que "falta decisão humana" não apareça como impedimento numa tela
+  cujo objetivo é informar quem vai decidir.
+- **Preflight visível na aba Silos:** por Silo, SiloDNA · SiloPage · Canonical ·
+  Publicação · pronto para confirmar, com o código do bloqueio quando existe.
+- **Aprovado ≠ publicado.** Página nova aprova com canonical planejado e
+  `published = NO`; página existente aprova com canonical confirmado e
+  `published = YES`. Evidência fraca do catálogo (`discovered`, `redirect`,
+  `noindex`) não confirma identidade publicada, e divergência entre o declarado
+  e o observado bloqueia sem escolher lado.
+- **Validação:** `test:arquiteto` 1550/1551 (falha restante pré-existente do
+  Minerador), TypeScript sem erro novo. Testes A–G em
+  `tests/arquiteto-silopage-preflight.test.mts`.
+
+## Artefato canônico aprovado × proposta em edição — 2026-09-06
+
+```text
+CANONICAL_APPROVED_AND_WORKING_PROPOSAL_ARE_DISTINCT = YES
+PROPOSED_VERSION_CAN_DEMOTE_APPROVED                 = NO
+ARTICLE_UNIT_TYPE_IS_HUMAN_DECISION                  = NO (derivado)
+SILO_PAGE_NEVER_APPROVED                             = 3/3
+NEW_MIGRATION = 0 · REMOTE_WRITES = 0 · RADAR_FILES_CHANGED = 0
+```
+
+- **A proposta rebaixava a aprovada.** `listArquitetoArtifacts` devolve TODAS as
+  versões em ordem crescente de `version_number`; a mesa as colapsava com
+  `Object.fromEntries` por `articleId`, e sobrava a mais nova — aprovada ou
+  não. Bastava nascer um `proposed` para o artigo aparecer "Aguardando
+  aprovação" com a aprovação anterior intacta no acervo.
+- **`canonical-version-authority.ts`** separa os dois fatos: `canonical` é a
+  última aprovada, `workingProposal` é a revisão acima dela, `latest` continua
+  sendo a base de qualquer sucessora — numerar a partir da canônica colidiria
+  de versão. `canonicalRevisionState` acrescenta `workingProposalExists` e
+  `canonicalIsStale` como perguntas SEPARADAS: invalidar exige motivo
+  declarado, nunca "existe versão mais nova".
+- **O provider compartilhado não mudou.** A lista completa vive em estado local
+  do Arquiteto (`canonicalArticleVersions`, `canonicalSiloPageVersions`) e a
+  autoridade é derivada dela somada ao mapa do provider — assim uma sucessora
+  recém-gravada entra na conta sem esperar o F5.
+- **Tipo de unidade virou fato derivado** (`editorialUnitTypeIsDerived`).
+  Confirmar que um Article é um Article não decidia nada e gravava sucessora
+  `proposed`, rebaixando o artigo. Decisão humana continua onde há ambiguidade
+  real: `unknown`, `conflict` ou o balde `other`.
+- **Medido no acervo** (`npm run audit:versoes`, read-only): das 33 entidades da
+  marca, **uma** tem proposta acima da aprovada — `article-formation:16b09488…`
+  (slug `principia`), v10 aprovada e v16 `proposed`. O diff campo a campo entre
+  as duas é **um campo**: `unitClassification`, e nele só o carimbo
+  `confirmedAt` mudou (22:45:42 → 22:57:15). Mesmo `type`, mesmo `status`,
+  mesma `source`. Seis versões de puro no-op.
+- **SiloPage 0/3 = NEVER_APPROVED.** As três estão em v1 `proposed`, versão
+  única: não há aprovada mascarada nem aprovada stale. `Confirmar arquitetura`
+  já pede `siloPage: "approved"`, e a recusa é nomeada:
+  `SILO_PAGE_APPROVAL_PUBLICATION_UNVERIFIED: not_applicable` (Skincare Facial e
+  Anti-idade e Retinol, publicadas e sem verificação de identidade) e
+  `SILO_PAGE_APPROVAL_CANONICAL_MISSING` (Skin care para peles oleosas, nova e
+  sem canonical planejado). Nada disso é bug de fluxo — são duas pendências
+  reais, e a tela ainda não as mostra antes do clique.
+- **Validação:** `test:arquiteto` 1538/1539 (falha restante pré-existente do
+  Minerador), TypeScript sem erro novo.
+
+## Ownership das fases e autoridade única do ArticleDNA — 2026-09-06
+
+```text
+ARTICLE_DNA_APPROVAL_OWNER    = ARTICLES_TAB
+ARTICLE_DNA_FINAL_ACTION      = CONCLUIR_FORMACAO (confirmArticleFormation)
+ARTICLE_DNA_APPROVAL_AUTHORITIES = 1
+SILO_CONFLICT_OWNER           = SILOS_TAB
+LINKS_CAN_APPROVE_ARTICLEDNA  = NO
+LINKS_CONSUMES_APPROVED_ARTICLEDNA = YES
+NEW_MIGRATION = 0 · REMOTE_WRITES = 0 · RADAR_FILES_CHANGED = 0 · PLANNER_FILES_CHANGED = 0
+```
+
+- **Conflito territorial vazando para o artigo.** `articleConflictsFor` só usava
+  o cenário revisado dentro da aba Artigos; fora dela caía em
+  `detectArchitectureConflicts`, que compara `suggestedSiloId` no agrupamento
+  PROVISÓRIO do engine e emite `fronteira_de_silo` — conflito de nível `silo`.
+  Resultado: na aba Links internos, um artigo com Silo já confirmado exibia
+  "Temas semanticamente proximos foram direcionados a silos diferentes" como
+  decisão humana pendente DELE, sobre um agrupamento que a revisão substituiu.
+  O fallback foi removido: a autoridade é o cenário revisado em qualquer aba, e
+  sem candidato correspondente a resposta é vazia.
+- **Segunda autoridade de aprovação, e mais fraca.**
+  `consolidateArticleArchitecture` (via `Aprovar ArticleDNA`, o seletor de
+  status e o atalho do painel) gravava `status: "approved"` por
+  `confirmArticleArchitecture` + `consolidationIssuesFor` — sem passar por
+  `validateFormationConclusion`. Ela não cobrava o gate SERP do lote, as
+  classificações não resolvidas, a keyword atravessando dois Silos nem o teto de
+  composição. Os três controles foram removidos; quem aprova é
+  `Concluir formação`. A porta de persistência do fechamento recusa a ação
+  `approve` por escrito, para que uma reintrodução falhe em vez de abrir um
+  segundo caminho de escrita.
+- **Links dizia o estado da tela no lugar do que falta fazer.** A fase agora
+  nomeia a dependência upstream — quais artigos do Silo ainda não foram
+  concluídos — antes de qualquer estado interno. E `linksSaveState` era um
+  latch: etapas marcavam `saving` e um `return` no meio deixava o estado preso,
+  fazendo a fase recusar tudo com "Há uma operação em curso" sem operação
+  alguma. `processarLinks` libera o latch ao sair.
+- **Não corrigido de propósito:** registrar "Tipo de unidade"
+  (`handleEditorialUnitDecision`) grava a sucessora SEM status, e a rota aplica
+  `proposed` — rebaixando um ArticleDNA já aprovado para "Aguardando
+  aprovação". É o que explica a coluna Aprovação nos prints de homologação.
+  Mudar isso é decisão editorial (a classificação reabre ou não a aprovação?) e
+  está reportada ao Planejador.
+- **Validação:** `test:arquiteto` 1528/1529 (falha restante pré-existente do
+  Minerador), `test:redator` 3/3, TypeScript sem erro novo. `test:operational`
+  (9) e `test:editorial` (4) seguem falhando por deriva pré-existente.
+
 ## Fechamento humano do Article e ações por aba — 2026-09-06
 
 ```text
@@ -493,6 +1006,76 @@ STRUCTURAL_KGR_DECISION_REQUIRED = NO
   foram alterados.
 - **Validação:** testes SERP focados 32/32 passaram. Provider real, Chrome,
 # Estado atual — Arquiteto
+
+## Purga administrativa de Arquiteto e Radar — Care Glow — 2026-09-08
+
+```text
+STATUS            = SCRIPT PRONTO, NAO EXECUTADO
+AUTORIZACAO       = responsavel pela marca, explicita, registrada nesta entrada
+MARCA ALVO        = 09762023-d0d4-4c24-b34e-d0fdfd43f891 (Care Glow)
+ESCOPO            = stage IN ('architect','radar') + artefatos article_dna/silo_dna/silo_page
+PRESERVADO        = Marca, Minerador, Planejador, Redator, Publicacoes,
+                    usuarios, permissoes, integracoes e TODAS as outras marcas
+SQL_EXECUTADO_POR_MIM = 0
+```
+
+**Natureza.** Não é saneamento de defeito. A auditoria de 2026-09-06 provou os
+registros íntegros e a continuidade validada. Isto é **descarte deliberado de
+trabalho**, decidido pelo responsável pela marca. A regra "proibido limpar dados
+para corrigir problema de interface" **permanece válida** e não é revogada por
+esta operação — ela não se aplica porque não há problema de interface a corrigir.
+
+**Levantamento inicial informado** (a conferir na execução): 115 versões de
+ArticleDNA, 9 revisões de arquitetura por IA, 21 registros de trabalho do
+Arquiteto, 4 artigos do Radar, 10 eventos de importação, 9 snapshots e 6
+revisões SERP. Zero SiloDNA/SiloPage e zero grafos de links.
+
+### Os dois scripts
+
+| Arquivo | Papel |
+|---|---|
+| `supabase/scripts/2026-09-08-arquiteto-radar-purge-export-read-only.sql` | **Backup.** Somente leitura. Emite as linhas completas em JSON, com resumo e hashes do que deve ser preservado. **Rodar primeiro e salvar fora do repositório.** |
+| `supabase/scripts/2026-09-08-arquiteto-radar-purge-care-glow.sql` | **Purga.** Uma transação, com `:simular` para ensaiar sem apagar. |
+
+Substituem os dois scripts anteriores: agora é um caminho só, com alvo fixo e
+verificação embutida.
+
+### Garantias embutidas no script
+
+- **Identidade validada** antes de qualquer remoção; marca inexistente aborta.
+- **Condições positivas** para `architect` e `radar` — `stage <> 'architect'`
+  foi eliminado, porque excluir pelo complemento apagaria estágio futuro que
+  ninguém revisou.
+- **Dependências abortam com os ids à vista:** Planejador, ContentPlan que cite o
+  artigo no payload, Redator, Publicações, e entidade que apareça em outra marca.
+- **Uma transação**, com `lock_timeout` e `statement_timeout`; dependentes
+  removidos antes das origens; nenhum `UPDATE` anulando referência para
+  contornar validação.
+- **Gatilhos append-only nomeados um a um** (`editorial_artifact_versions`,
+  `version_status_events`, `decision_events`, `serp_snapshots`,
+  `serp_reviews`), **desabilitados e reabilitados na mesma transação**, com
+  verificação de restauração. Nenhuma função, FK ou validação é removida.
+- **Preservação comprovada por hash de ids**, não só contagem — Minerador, outras
+  marcas e outros artefatos.
+- **Órfãos verificados** em `version_status_events` e `decision_events`.
+- **Qualquer divergência levanta exceção** e desfaz tudo.
+- **`:simular = true`** roda o caminho inteiro e aborta de propósito no fim.
+
+### O que o script NÃO faz — é seu
+
+1. **Rodar a exportação antes.** Sem ela a purga é irreversível.
+2. **Conferir Arquiteto e Radar vazios nas duas sessões**, pelo servidor. Se vier
+   conteúdo, é recuperação local — não dado remoto.
+3. **Não limpar `localStorage` indiscriminadamente.** Confirmar que recuperação
+   local antiga não repovoou o servidor.
+4. **Reexecutar com `:simular = true`** sobre o estado já vazio, provando
+   idempotência.
+5. Registrar aqui o resultado por tabela e a validação nas duas sessões.
+
+### Pendência separada
+
+A **ausência de seleção e exclusão na aba Silos** fica registrada como correção
+funcional própria, no backlog. Não é motivo desta purga nem é resolvida por ela.
 
 ## Fundação InternalLinkGraph e atomicidade do par — estado vigente 2026-08-27
 

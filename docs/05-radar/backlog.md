@@ -1,5 +1,38 @@
 # Backlog — Radar
 
+## Purga administrativa de Arquiteto e Radar — Care Glow — 2026-09-08
+
+- [x] Consolidar um único script administrativo, substituindo os dois anteriores.
+- [x] Fixar o alvo e validar a identidade da marca antes de remover.
+- [x] Lista explícita dos registros, com condições positivas para `architect` e
+  `radar` no lugar de `stage <> 'architect'`.
+- [x] Mapear dependências por FK **e dentro dos payloads**; Planejador, Redator,
+  Publicações ou outra marca abortam mostrando os identificadores.
+- [x] Exportação prévia somente-leitura com manifesto de ids, contagens, hashes
+  do preservado e procedimento de restauração.
+- [x] Uma transação, dependentes antes das origens, sem anular referência.
+- [x] Gatilhos append-only nomeados, suspensos e restaurados no mesmo escopo,
+  com verificação — sem remover função, FK ou validação.
+- [x] Verificação de conjunto zerado, preservação por hash de ids e ausência de
+  órfãos, com rollback integral em qualquer divergência.
+- [x] Modo `:simular` para ensaio e para provar idempotência sobre estado vazio.
+
+### Abertas — execução
+
+- [ ] Rodar a exportação e **guardar o JSON fora do repositório**.
+- [ ] Rodar com `:simular = true` e conferir o manifesto.
+- [ ] Executar a purga e registrar o resultado por tabela.
+- [ ] Conferir Arquiteto e Radar vazios **nas duas sessões**, pelo servidor.
+- [ ] Confirmar que recuperação local não repovoou o servidor.
+- [ ] Reexecutar em modo simulação sobre o estado vazio.
+- [ ] Validar o script em ambiente isolado: dependência externa, falha
+  intermediária e execução repetida.
+
+### Correção funcional separada
+
+- [ ] **Aba Silos sem seleção e sem exclusão.** Registrado como defeito próprio;
+  não é motivo desta purga nem é resolvido por ela.
+
 ## Continuidade entre sessões — base validada — 2026-09-06
 
 - [x] Isolar os leitores por linha para que um registro incompatível não esconda

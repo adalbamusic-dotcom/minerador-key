@@ -1,5 +1,75 @@
 # Estado atual — Radar
 
+## Purga administrativa de Arquiteto e Radar — Care Glow — 2026-09-08
+
+```text
+STATUS            = SCRIPT PRONTO, NAO EXECUTADO
+AUTORIZACAO       = responsavel pela marca, explicita, registrada nesta entrada
+MARCA ALVO        = 09762023-d0d4-4c24-b34e-d0fdfd43f891 (Care Glow)
+ESCOPO            = stage IN ('architect','radar') + artefatos article_dna/silo_dna/silo_page
+PRESERVADO        = Marca, Minerador, Planejador, Redator, Publicacoes,
+                    usuarios, permissoes, integracoes e TODAS as outras marcas
+SQL_EXECUTADO_POR_MIM = 0
+```
+
+**Natureza.** Não é saneamento de defeito. A auditoria de 2026-09-06 provou os
+registros íntegros e a continuidade validada. Isto é **descarte deliberado de
+trabalho**, decidido pelo responsável pela marca. A regra "proibido limpar dados
+para corrigir problema de interface" **permanece válida** e não é revogada por
+esta operação — ela não se aplica porque não há problema de interface a corrigir.
+
+**Levantamento inicial informado** (a conferir na execução): 115 versões de
+ArticleDNA, 9 revisões de arquitetura por IA, 21 registros de trabalho do
+Arquiteto, 4 artigos do Radar, 10 eventos de importação, 9 snapshots e 6
+revisões SERP. Zero SiloDNA/SiloPage e zero grafos de links.
+
+### Os dois scripts
+
+| Arquivo | Papel |
+|---|---|
+| `supabase/scripts/2026-09-08-arquiteto-radar-purge-export-read-only.sql` | **Backup.** Somente leitura. Emite as linhas completas em JSON, com resumo e hashes do que deve ser preservado. **Rodar primeiro e salvar fora do repositório.** |
+| `supabase/scripts/2026-09-08-arquiteto-radar-purge-care-glow.sql` | **Purga.** Uma transação, com `:simular` para ensaiar sem apagar. |
+
+Substituem os dois scripts anteriores: agora é um caminho só, com alvo fixo e
+verificação embutida.
+
+### Garantias embutidas no script
+
+- **Identidade validada** antes de qualquer remoção; marca inexistente aborta.
+- **Condições positivas** para `architect` e `radar` — `stage <> 'architect'`
+  foi eliminado, porque excluir pelo complemento apagaria estágio futuro que
+  ninguém revisou.
+- **Dependências abortam com os ids à vista:** Planejador, ContentPlan que cite o
+  artigo no payload, Redator, Publicações, e entidade que apareça em outra marca.
+- **Uma transação**, com `lock_timeout` e `statement_timeout`; dependentes
+  removidos antes das origens; nenhum `UPDATE` anulando referência para
+  contornar validação.
+- **Gatilhos append-only nomeados um a um** (`editorial_artifact_versions`,
+  `version_status_events`, `decision_events`, `serp_snapshots`,
+  `serp_reviews`), **desabilitados e reabilitados na mesma transação**, com
+  verificação de restauração. Nenhuma função, FK ou validação é removida.
+- **Preservação comprovada por hash de ids**, não só contagem — Minerador, outras
+  marcas e outros artefatos.
+- **Órfãos verificados** em `version_status_events` e `decision_events`.
+- **Qualquer divergência levanta exceção** e desfaz tudo.
+- **`:simular = true`** roda o caminho inteiro e aborta de propósito no fim.
+
+### O que o script NÃO faz — é seu
+
+1. **Rodar a exportação antes.** Sem ela a purga é irreversível.
+2. **Conferir Arquiteto e Radar vazios nas duas sessões**, pelo servidor. Se vier
+   conteúdo, é recuperação local — não dado remoto.
+3. **Não limpar `localStorage` indiscriminadamente.** Confirmar que recuperação
+   local antiga não repovoou o servidor.
+4. **Reexecutar com `:simular = true`** sobre o estado já vazio, provando
+   idempotência.
+5. Registrar aqui o resultado por tabela e a validação nas duas sessões.
+
+### Pendência separada
+
+A **ausência de seleção e exclusão na aba Silos** fica registrada como correção
+funcional própria, no backlog. Não é motivo desta purga nem é resolvida por ela.
+
 ## Continuidade entre sessões — base validada — 2026-09-06
 
 ```text
