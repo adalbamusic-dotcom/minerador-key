@@ -390,12 +390,12 @@
 
 ### Abertas — execução
 
-- [ ] Rodar a exportação e **guardar o JSON fora do repositório**.
+- [ ] Rodar com `v_simular := true` e conferir o manifesto impresso.
 - [ ] Rodar com `:simular = true` e conferir o manifesto.
 - [ ] Executar a purga e registrar o resultado por tabela.
 - [ ] Conferir Arquiteto e Radar vazios **nas duas sessões**, pelo servidor.
 - [ ] Confirmar que recuperação local não repovoou o servidor.
-- [ ] Reexecutar em modo simulação sobre o estado vazio.
+- [ ] Reexecutar em simulação sobre o estado vazio (idempotência).
 - [ ] Validar o script em ambiente isolado: dependência externa, falha
   intermediária e execução repetida.
 

@@ -1030,15 +1030,22 @@ ArticleDNA, 9 revisões de arquitetura por IA, 21 registros de trabalho do
 Arquiteto, 4 artigos do Radar, 10 eventos de importação, 9 snapshots e 6
 revisões SERP. Zero SiloDNA/SiloPage e zero grafos de links.
 
-### Os dois scripts
+### O script — arquivo único
 
-| Arquivo | Papel |
-|---|---|
-| `supabase/scripts/2026-09-08-arquiteto-radar-purge-export-read-only.sql` | **Backup.** Somente leitura. Emite as linhas completas em JSON, com resumo e hashes do que deve ser preservado. **Rodar primeiro e salvar fora do repositório.** |
-| `supabase/scripts/2026-09-08-arquiteto-radar-purge-care-glow.sql` | **Purga.** Uma transação, com `:simular` para ensaiar sem apagar. |
+`supabase/scripts/2026-09-08-descarte-arquiteto-radar-care-glow.sql`
 
-Substituem os dois scripts anteriores: agora é um caminho só, com alvo fixo e
-verificação embutida.
+**SQL PostgreSQL puro**, para copiar e colar no editor do Supabase. Sem
+`\set`, sem placeholder, sem substituição manual — a marca já está fixa no
+próprio script. Tudo dentro de um `DO` block, que é uma transação implícita:
+qualquer exceção desfaz tudo, inclusive o estado dos gatilhos.
+
+**Backup dispensado por decisão explícita.** Este é descarte DEFINITIVO, sem
+restauração. Está escrito no cabeçalho do script para ninguém supor o
+contrário depois.
+
+Executar **duas vezes**: primeiro com `v_simular := true` (percorre tudo,
+imprime o manifesto e aborta de propósito), depois com `false`. Uma terceira,
+de volta em `true` sobre o estado já vazio, prova idempotência.
 
 ### Garantias embutidas no script
 

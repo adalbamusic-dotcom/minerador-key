@@ -8,23 +8,22 @@
   `radar` no lugar de `stage <> 'architect'`.
 - [x] Mapear dependências por FK **e dentro dos payloads**; Planejador, Redator,
   Publicações ou outra marca abortam mostrando os identificadores.
-- [x] Exportação prévia somente-leitura com manifesto de ids, contagens, hashes
-  do preservado e procedimento de restauração.
+- [x] Backup DISPENSADO por decisão explícita: descarte definitivo, declarado
+  no cabeçalho. O manifesto é impresso na simulação.
 - [x] Uma transação, dependentes antes das origens, sem anular referência.
-- [x] Gatilhos append-only nomeados, suspensos e restaurados no mesmo escopo,
-  com verificação — sem remover função, FK ou validação.
+- [x] Gatilhos: estado real lido de `pg_trigger.tgenabled` e reposto tal como
+  estava (O/D/R/A), verificado — sem remover função, FK ou validação.
 - [x] Verificação de conjunto zerado, preservação por hash de ids e ausência de
   órfãos, com rollback integral em qualquer divergência.
 - [x] Modo `:simular` para ensaio e para provar idempotência sobre estado vazio.
 
 ### Abertas — execução
 
-- [ ] Rodar a exportação e **guardar o JSON fora do repositório**.
-- [ ] Rodar com `:simular = true` e conferir o manifesto.
+- [ ] Rodar com `v_simular := true` e conferir o manifesto impresso.
 - [ ] Executar a purga e registrar o resultado por tabela.
 - [ ] Conferir Arquiteto e Radar vazios **nas duas sessões**, pelo servidor.
 - [ ] Confirmar que recuperação local não repovoou o servidor.
-- [ ] Reexecutar em modo simulação sobre o estado vazio.
+- [ ] Reexecutar em simulação sobre o estado vazio (idempotência).
 - [ ] Validar o script em ambiente isolado: dependência externa, falha
   intermediária e execução repetida.
 
