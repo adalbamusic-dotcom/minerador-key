@@ -96,6 +96,26 @@ export async function POST(request: Request) {
     }, client);
     if (!contribuicao) throw new AuthzError(404, "Contribuição não encontrada nesta pauta.");
 
+    /*
+     * CLICAR DE NOVO NA MESMA DECISÃO NÃO É UMA DECISÃO NOVA — §10.
+     *
+     * Sem esta guarda, o segundo clique reescreve `decidedAt` e `decidedBy`: o
+     * histórico passaria a dizer que a pessoa decidiu às 23:04 uma coisa que
+     * ela decidiu às 22:53. Nada muda no banco e a resposta diz isso.
+     */
+    const gravadaAntes = radarSpecialistReviewsOf(brief.radarContext)[input.contributionId] || null;
+    if (gravadaAntes
+      && gravadaAntes.decision === input.decision
+      && gravadaAntes.classification === input.classification
+      && gravadaAntes.relatedRequirementId === input.relatedRequirementId) {
+      return NextResponse.json({
+        brief,
+        review: gravadaAntes,
+        persistence: "remote_readback_confirmed",
+        write: "unchanged",
+      }, { headers: noStoreHeaders });
+    }
+
     const radarContext = radarContextWithSpecialistReview({
       radarContext: brief.radarContext,
       contributionId: input.contributionId,
@@ -135,13 +155,21 @@ export async function POST(request: Request) {
     }, client);
     const confirmada = readback ? radarSpecialistReviewsOf(readback.radarContext)[input.contributionId] : null;
     if (!readback || !confirmada || confirmada.decision !== input.decision) {
-      throw new AuthzError(503, "A decisão foi enviada, mas o readback remoto não a confirmou.");
+      /*
+       * O CÓDIGO TEM NOME — §5.
+       *
+       * "Não foi possível salvar" cobre rota, rede, permissão e schema ao
+       * mesmo tempo. Este caso é outro: a escrita foi aceita e a releitura
+       * discorda dela. Quem for investigar precisa saber qual dos dois.
+       */
+      throw new AuthzError(503, `SPECIALIST_DECISION_READBACK_MISMATCH: a decisão foi gravada, mas a releitura remota devolveu ${confirmada ? confirmada.decision : "nenhuma decisão"} em vez de ${input.decision}.`);
     }
 
     return NextResponse.json({
       brief: readback,
       review: confirmada,
       persistence: "remote_readback_confirmed",
+      write: "applied",
     }, { headers: noStoreHeaders });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Decisão de revisão inválida.", details: error.issues }, { status: 400, headers: noStoreHeaders });

@@ -126,7 +126,8 @@ test("§13 · a rota confirma a DECISÃO no readback, não só a resposta do ban
   const bloco = await blocoDoReadback();
   assert.match(bloco, /radarSpecialistReviewsOf\(readback\.radarContext\)\[input\.contributionId\]/);
   assert.match(bloco, /confirmada\.decision !== input\.decision/);
-  assert.match(bloco, /readback remoto não a confirmou/);
+  /* A recusa tem nome próprio desde o SPECIALIST_3.1 — veja o teste do §5. */
+  assert.match(bloco, /SPECIALIST_DECISION_READBACK_MISMATCH/);
 });
 
 test("§13 · a rota exige que a contribuição pertença à pauta informada", async () => {
@@ -148,4 +149,38 @@ test("§13 · salvar a pauta preserva as decisões gravadas no servidor", async 
   const bloco = fonte.slice(inicio, fonte.indexOf("\n", fonte.indexOf("updateExpertBrief", inicio)));
   assert.match(bloco, /stored: current\.radarContext/, "o que vence é o que está gravado, não o que o cliente mandou");
   assert.match(bloco, /updateExpertBrief\(\{ \.\.\.input, radarContext,/, "o contexto preservado precisa chegar ao update");
+});
+
+/* ================= SPECIALIST_3.1 · idempotência e mismatch ================ */
+
+test("§10 · a rota não reescreve quando a decisão já é a mesma", async () => {
+  const fonte = await readFile(new URL("../app/api/editorial/expert-contributions/review/route.ts", import.meta.url), "utf8");
+  const inicio = fonte.indexOf("const gravadaAntes = radarSpecialistReviewsOf");
+  const fim = fonte.indexOf("const radarContext = radarContextWithSpecialistReview", inicio);
+  assert.ok(inicio > 0 && fim > inicio, "a guarda de idempotência precisa vir ANTES da escrita");
+  const bloco = fonte.slice(inicio, fim);
+
+  /*
+   * OS TRÊS CAMPOS JUNTOS.
+   *
+   * Comparar só a decisão deixaria uma correção de classificação passar como
+   * "nada mudou" — e a correção nunca chegaria ao banco.
+   */
+  assert.match(bloco, /gravadaAntes\.decision === input\.decision/);
+  assert.match(bloco, /gravadaAntes\.classification === input\.classification/);
+  assert.match(bloco, /gravadaAntes\.relatedRequirementId === input\.relatedRequirementId/);
+  assert.match(bloco, /write: "unchanged"/);
+});
+
+test("§5 · a divergência do readback tem código próprio, e não vira 'não deu'", async () => {
+  const fonte = await readFile(new URL("../app/api/editorial/expert-contributions/review/route.ts", import.meta.url), "utf8");
+  const inicio = fonte.indexOf("const confirmada = readback");
+  const fim = fonte.indexOf("write: \"applied\"", inicio);
+  assert.ok(inicio > 0 && fim > inicio);
+  const bloco = fonte.slice(inicio, fim);
+
+  assert.match(bloco, /SPECIALIST_DECISION_READBACK_MISMATCH/);
+  /* A mensagem diz o que voltou: sem isso não dá para saber o que conferir. */
+  assert.match(bloco, /em vez de \$\{input\.decision\}/);
+  assert.match(bloco, /503/);
 });
