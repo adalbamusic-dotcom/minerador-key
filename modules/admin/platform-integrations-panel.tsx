@@ -359,7 +359,16 @@ export default function PlatformIntegrationsPanel() {
         const databaseConstraint = typeof result?.diagnostic?.databaseConstraint === "string" && /^[A-Za-z0-9_]{1,120}$/.test(result.diagnostic.databaseConstraint)
           ? result.diagnostic.databaseConstraint
           : "";
-        const technicalDetail = [databaseCode, databaseConstraint].filter(Boolean).join(" / ");
+        /*
+         * O CÓDIGO DO ERRO ENTRA NA MENSAGEM — TELEGRAM_SET_WEBHOOK_UI · §6.
+         *
+         * `WEBHOOK_READBACK_MISMATCH` e `SET_WEBHOOK_FAILED` significam coisas
+         * diferentes e pedem ações diferentes: o primeiro é o Telegram ter
+         * aceitado sem instalar; o segundo é ele ter recusado. Sem o código, as
+         * duas viram "não deu certo" e alguém tenta o mesmo clique de novo.
+         */
+        const codigo = typeof result?.code === "string" && /^[A-Z0-9_]{3,60}$/.test(result.code) ? result.code : "";
+        const technicalDetail = [codigo, databaseCode, databaseConstraint].filter(Boolean).join(" / ");
         throw new Error(`${result.error || "Não foi possível salvar a integração."}${technicalDetail ? ` (diagnóstico técnico: ${technicalDetail})` : ""}`);
       }
       const readbackOk = await load();
@@ -434,11 +443,36 @@ export default function PlatformIntegrationsPanel() {
     }
   };
 
+  /**
+   * A URL QUE SERÁ CONFIGURADA — a salva, ou a da própria origem.
+   *
+   * Configurar o webhook não pode exigir que alguém reabra o formulário e
+   * redigite o Bot token: são coisas diferentes, e o token nem é lido de volta
+   * do Secret Store. A URL pretendida já está gravada; quando não está, a
+   * origem da tela responde.
+   */
+  const telegramWebhookAlvo = (connection: PlatformIntegrationsSnapshot["platformConnections"][number] | undefined) =>
+    (editingProvider === "telegram" && apiForm.telegramWebhookUrl.trim())
+    || connection?.telegramWebhookTargetUrl
+    || connection?.telegramWebhookUrl
+    || telegramWebhookUrlSugerida();
+
   const configureTelegramWebhook = async () => {
-    if (editingProvider !== "telegram") return;
     const connection = data?.platformConnections.find((item) => item.providerKey === "telegram" && item.environment === "production");
     if (!connection) return;
-    await mutate({ action: "configure_telegram_webhook", connectionId: connection.id, url: apiForm.telegramWebhookUrl.trim() }, "Webhook Telegram configurado explicitamente. O endpoint agora pode receber o smoke manual.");
+    const url = telegramWebhookAlvo(connection).trim();
+    if (!url) {
+      setError("Informe a URL pública HTTPS do webhook antes de configurá-lo.");
+      return;
+    }
+    /*
+     * A MENSAGEM DE SUCESSO CITA A URL CONFIRMADA.
+     *
+     * `configureTelegramPlatformWebhook` só chega aqui depois do readback: se
+     * o Telegram não confirmasse este endereço, a rota teria falhado com a
+     * mensagem real, e não com um sucesso genérico.
+     */
+    await mutate({ action: "configure_telegram_webhook", connectionId: connection.id, url }, `Webhook confirmado pelo Telegram em ${url}.`);
   };
 
   const testConnection = async (definition: (typeof supportedApiDefinitions)[number], healthOperation?: "speech" | "storage" | "youtube" | "telegram_get_me" | "telegram_webhook") => {
@@ -549,7 +583,7 @@ export default function PlatformIntegrationsPanel() {
                 </div>
                 <div className="flex flex-wrap gap-2 lg:justify-end">
                    <button type="button" className={primary} disabled={saving} onClick={() => beginConfiguration(definition.key)}>{definition.key === "google_ads" ? connection?.secretConfigured ? "Substituir token" : "Configurar token" : connection?.secretConfigured ? "Substituir credencial" : "Configurar"}</button>
-                  {definition.key === "google_cloud" ? <>{renderHealthButton("Testar Speech", "speech")}{renderHealthButton("Testar Storage", "storage")}</> : definition.key === "telegram" ? <><button type="button" className={secondary} disabled={!canTest} onClick={() => void testConnection(definition, "telegram_get_me")} title={!connection ? "Configure uma Connection antes de testar." : !connection.secretConfigured ? "Salve a credencial antes de testar." : undefined}>{isChecking(definition, "telegram_get_me") ? "Validando…" : "Testar Bot"}</button><button type="button" className={secondary} disabled={!canTest} onClick={() => void testConnection(definition, "telegram_webhook")} title={!connection ? "Configure uma Connection antes de testar." : !connection.secretConfigured ? "Salve a credencial antes de testar." : undefined}>{isChecking(definition, "telegram_webhook") ? "Validando…" : "Testar Webhook"}</button></> : renderHealthButton(definition.key === "youtube_data" ? "Testar YouTube" : "Testar conexão", definition.key === "youtube_data" ? "youtube" : undefined)}
+                  {definition.key === "google_cloud" ? <>{renderHealthButton("Testar Speech", "speech")}{renderHealthButton("Testar Storage", "storage")}</> : definition.key === "telegram" ? <><button type="button" className={secondary} disabled={!canTest} onClick={() => void testConnection(definition, "telegram_get_me")} title={!connection ? "Configure uma Connection antes de testar." : !connection.secretConfigured ? "Salve a credencial antes de testar." : undefined}>{isChecking(definition, "telegram_get_me") ? "Validando…" : "Testar Bot"}</button><button type="button" className={secondary} disabled={!canTest} onClick={() => void testConnection(definition, "telegram_webhook")} title={!connection ? "Configure uma Connection antes de testar." : !connection.secretConfigured ? "Salve a credencial antes de testar." : undefined}>{isChecking(definition, "telegram_webhook") ? "Validando…" : "Testar Webhook"}</button><button type="button" className={secondary} disabled={!canTest || saving} onClick={() => void configureTelegramWebhook()} title={!connection ? "Configure uma Connection antes de configurar o webhook." : !connection.secretConfigured ? "Salve a credencial antes de configurar o webhook." : "Chama setWebhook no Telegram e confirma com getWebhookInfo."}>Configurar Webhook</button></> : renderHealthButton(definition.key === "youtube_data" ? "Testar YouTube" : "Testar conexão", definition.key === "youtube_data" ? "youtube" : undefined)}
                 </div>
               </div>;
             })}
@@ -604,8 +638,8 @@ export default function PlatformIntegrationsPanel() {
             </form> : (() => { const definition = supportedApiDefinitions.find((item) => item.key === editingProvider); if (!definition) return null; return <form className="mt-5 space-y-5 border-t border-foreground/15 pt-5" onSubmit={configureApi}>
               <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold">{definition.name}</p><p className="mt-1 text-sm text-foreground/65">Origem: {definition.origin} · ambiente: production · connection global da Plataforma</p></div><button type="button" className={secondary} disabled={saving} onClick={() => { setEditingProvider(null); setApiForm(emptyApiForm); }}>Cancelar</button></div>
               <label className="block text-sm">Nome da configuração<input className={input} value={apiForm.label} onChange={(event) => updateApiForm("label", event.target.value)} maxLength={160} /></label>
-               {editingProvider === "dataforseo" ? <div className="grid gap-4 md:grid-cols-2"><label className="text-sm"><span>Login</span><input className={input} type="password" autoComplete="new-password" value={apiForm.dataforseoLogin} onChange={(event) => updateApiForm("dataforseoLogin", event.target.value)} required /><span className="mt-1 block text-sm leading-5 text-foreground/65">Variável atual: DATAFORSEO_LOGIN</span></label><label className="text-sm"><span>Password</span><input className={input} type="password" autoComplete="new-password" value={apiForm.dataforseoPassword} onChange={(event) => updateApiForm("dataforseoPassword", event.target.value)} required /><span className="mt-1 block text-sm leading-5 text-foreground/65">Variável atual: DATAFORSEO_PASSWORD</span></label></div> : editingProvider === "telegram" ? <div className="grid gap-4 md:grid-cols-2"><label className="text-sm"><span>Bot token</span><input className={input} type="password" autoComplete="new-password" value={apiForm.telegramBotToken} onChange={(event) => updateApiForm("telegramBotToken", event.target.value)} required /><span className="mt-1 block text-sm leading-5 text-foreground/65">O token fica somente no Secret Store.</span></label><div className="rounded-md border border-foreground/15 bg-foreground/5 p-3"><p className="text-sm font-semibold">Segredo do webhook</p><p className="mt-1 text-sm text-foreground/75">Configurado automaticamente</p><p className="mt-1 text-sm leading-5 text-foreground/65">O servidor gera ou preserva o segredo no Secret Store. O valor nunca é exibido nesta tela.</p></div><label className="text-sm md:col-span-2"><span>URL pública do webhook (opcional nesta etapa)</span><input className={input} type="url" value={apiForm.telegramWebhookUrl} onChange={(event) => updateApiForm("telegramWebhookUrl", event.target.value)} placeholder="https://seu-dominio/api/integrations/telegram/webhook" /><span className="mt-1 block text-sm leading-5 text-foreground/65">Salvar não chama getMe, getWebhookInfo nem setWebhook. Use Configurar Webhook somente depois, com uma URL pública HTTPS.</span></label></div> : null}
-               <div className="flex flex-wrap items-center justify-between gap-3"><p className="max-w-2xl text-sm text-foreground/60">Secrets existentes não são lidos de volta. Com uma Connection já configurada, salvar apenas a credencial atualiza o Secret Store/Vault e mantém uma única Connection.</p><div className="flex flex-wrap gap-2">{editingProvider === "telegram" && apiForm.telegramWebhookUrl.trim() ? <button type="button" className={secondary} disabled={saving} onClick={() => void configureTelegramWebhook()}>Configurar Webhook</button> : null}<button type="submit" className={primary} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}Salvar configuração</button></div></div>
+               {editingProvider === "dataforseo" ? <div className="grid gap-4 md:grid-cols-2"><label className="text-sm"><span>Login</span><input className={input} type="password" autoComplete="new-password" value={apiForm.dataforseoLogin} onChange={(event) => updateApiForm("dataforseoLogin", event.target.value)} required /><span className="mt-1 block text-sm leading-5 text-foreground/65">Variável atual: DATAFORSEO_LOGIN</span></label><label className="text-sm"><span>Password</span><input className={input} type="password" autoComplete="new-password" value={apiForm.dataforseoPassword} onChange={(event) => updateApiForm("dataforseoPassword", event.target.value)} required /><span className="mt-1 block text-sm leading-5 text-foreground/65">Variável atual: DATAFORSEO_PASSWORD</span></label></div> : editingProvider === "telegram" ? <div className="grid gap-4 md:grid-cols-2"><label className="text-sm"><span>Bot token</span><input className={input} type="password" autoComplete="new-password" value={apiForm.telegramBotToken} onChange={(event) => updateApiForm("telegramBotToken", event.target.value)} required /><span className="mt-1 block text-sm leading-5 text-foreground/65">O token fica somente no Secret Store.</span></label><div className="rounded-md border border-foreground/15 bg-foreground/5 p-3"><p className="text-sm font-semibold">Segredo do webhook</p><p className="mt-1 text-sm text-foreground/75">Configurado automaticamente</p><p className="mt-1 text-sm leading-5 text-foreground/65">O servidor gera ou preserva o segredo no Secret Store. O valor nunca é exibido nesta tela.</p></div><label className="text-sm md:col-span-2"><span>URL pública do webhook (opcional nesta etapa)</span><input className={input} type="url" value={apiForm.telegramWebhookUrl} onChange={(event) => updateApiForm("telegramWebhookUrl", event.target.value)} placeholder="https://seu-dominio/api/integrations/telegram/webhook" /><span className="mt-1 block text-sm leading-5 text-foreground/65">Salvar não chama getMe, getWebhookInfo nem setWebhook. O botão Configurar Webhook fica na linha de ações do provider e não exige reabrir este formulário.</span></label></div> : null}
+               <div className="flex flex-wrap items-center justify-between gap-3"><p className="max-w-2xl text-sm text-foreground/60">Secrets existentes não são lidos de volta. Com uma Connection já configurada, salvar apenas a credencial atualiza o Secret Store/Vault e mantém uma única Connection.</p><div className="flex flex-wrap gap-2"><button type="submit" className={primary} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}Salvar configuração</button></div></div>
             </form>; })()}
           </>}
         </section>
