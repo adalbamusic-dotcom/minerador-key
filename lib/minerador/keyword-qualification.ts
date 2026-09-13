@@ -154,7 +154,11 @@ export function classifyKeywordFunnel(input: {
   const explicitTextBofu = containsAny(text, BOFU_SIGNALS);
   const explicitTextMofu = containsAny(text, MOFU_SIGNALS);
   const explicitTextTofu = containsAny(text, TOFU_SIGNALS);
-  const recognizedBroadQuery = hasRecognizableBroadQuery(input);
+  const recognizedBroadQuery = hasRecognizableBroadQuery({
+  keyword: input.keyword,
+  niche: input.niche,
+  semantic,
+  });
   const evidence: string[] = [];
   let proposed: FunnelValue | null = null;
   let resolution: FunnelResolution = "explicit_unknown";
