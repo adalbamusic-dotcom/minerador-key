@@ -194,8 +194,16 @@ test("GATE 14.1 · J e K — a entrada de vídeo mudou do Especialista para Víd
   assert.doesNotMatch(areaVideos, /from "@\/lib\/radar\/(deep-research|search-mode|serp)/);
   /* §2.3.3: a declaração de escopo virou o InfoHint de "Conteúdo extraído". */
   assert.match(areaVideos, /title="Conteúdo extraído"/);
-  assert.match(areaVideos, /O texto extraído é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito\./);
-  assert.match(areaVideos, /ainda não existem/, "prometer transcrição sem entregá-la seria pior que a ausência");
+  assert.match(areaVideos, /O texto integral é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito\./);
+  /*
+   * VIDEOS 3.3 · O QUE A ÁREA DEVE MUDOU, E A FRASE MUDOU JUNTO.
+   *
+   * Esta linha guardava "ainda não existem — são gates posteriores", que
+   * negava o casamento logo acima do resultado do casamento. O que a área
+   * ainda deve é a TRADUÇÃO, e é isso que ela declara — sem prometer nada.
+   */
+  assert.equal(/ainda não existem — são gates posteriores/.test(areaVideos), false, "a copy obsoleta não voltou");
+  assert.match(areaVideos, /não traduzido/, "prometer tradução sem entregá-la seria pior que a ausência");
 });
 
 /* ==========  L, M e N · CONGELADO NÃO OFERECE ANÁLISE  ================= */

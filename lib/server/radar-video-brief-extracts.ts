@@ -87,6 +87,16 @@ export async function readRadarExtractRun(input: {
     sourceLanguage: (item.source_language as string) ?? null,
     reasonForRelevance: String(item.reason_for_relevance),
     matchedQuestions: (item.matched_questions as string[]) || [],
+    /*
+     * OS CRITÉRIOS NÃO SÃO COLUNA, E NÃO DEVEM SER.
+     *
+     * Eles são conclusão sobre o texto do trecho à luz da pauta congelada — as
+     * duas coisas já estão gravadas. `radarCoverageFromExtracts` reconstrói a
+     * lista na leitura; guardá-la aqui criaria uma segunda verdade, que
+     * envelheceria no dia em que a régua mudasse.
+     */
+    matchedCriteria: [] as string[],
+    answersTitle: false,
     matchedEntities: (item.matched_entities as string[]) || [],
     supportType: item.support_type as RadarRelevantExtract["supportType"],
     confidence: Number(item.confidence),

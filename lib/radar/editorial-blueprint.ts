@@ -263,6 +263,29 @@ function posicaoDoBloco(input: {
  *
  * Definição textual, dado numérico e afirmação factual não melhoram em vídeo —
  * e propor um ali seria encher a pauta de trabalho sem retorno.
+ *
+ * ======= DÍVIDA CONHECIDA · A GUIA PRECISA CONVERSAR COM O TÍTULO =======
+ *
+ * VIDEOS_3.4 · §10 · REGRA PARA A GERAÇÃO FUTURA, ainda NÃO implementada aqui.
+ *
+ * A guia (`lookFor`) sai do TIPO DO CONCEITO e da presença de especialista; o
+ * título da pauta sai do RÓTULO do bloco. Os dois podem discordar, e no bundle
+ * real discordaram: a pauta "O que causa acne?" caiu no ramo do especialista e
+ * recebeu "a ressalva do profissional · o caso em que a regra não vale · o erro
+ * comum de quem lê sobre o assunto". Nenhum desses três pede CAUSA, que é
+ * exatamente o que o título promete.
+ *
+ * O casamento já se protege disso — o título é o contrato e a guia não o
+ * compensa —, então a incoerência hoje aparece como pauta NOT_FOUND em vez de
+ * evidência errada. Mas a pauta continua nascendo torta.
+ *
+ * O QUE FALTA: derivar a intenção do título (causa, classificação,
+ * agravamento, procedimento…) e exigir que a guia a contemple. Para a pauta
+ * causal, algo como "fatores que contribuem · mecanismos mencionados · causas
+ * diferenciadas de agravantes · ressalvas do profissional".
+ *
+ * NÃO FAZER ISSO RETROATIVAMENTE: bundle congelado é congelado. A validação
+ * vale para a próxima investigação que congelar.
  */
 function razaoDeVideo(input: {
   tipo: RadarConceptType;
@@ -303,7 +326,15 @@ function razaoDeVideo(input: {
   return null;
 }
 
-const CONTRIBUICAO_POR_TIPO: Record<string, Array<"VALIDATE" | "CORRECT" | "QUALIFY" | "ADD_EXPERIENCE">> = {
+/**
+ * O QUE SE ESPERA RECEBER, POR TIPO DE PONTO — exportado a partir do 1.1.1.
+ *
+ * O card de "Pontos para revisão" passou a mostrar esta lista, que antes só
+ * existia no bloco "Revisão necessária". Duas tabelas com o mesmo mapeamento
+ * divergiriam no primeiro tipo novo, e a aba mostraria "Validar" onde a pauta
+ * enviada dissesse "Validar · Corrigir".
+ */
+export const RADAR_SPECIALIST_CONTRIBUTION_BY_KIND: Record<string, Array<"VALIDATE" | "CORRECT" | "QUALIFY" | "ADD_EXPERIENCE">> = {
   RESOLVE_CONFLICT: ["VALIDATE", "CORRECT", "QUALIFY"],
   RESOLVE_FACTUAL_UNCERTAINTY: ["VALIDATE", "CORRECT"],
   VERIFY_AND_ADD_EXPERIENCE: ["VALIDATE", "ADD_EXPERIENCE", "QUALIFY"],
@@ -501,7 +532,7 @@ export function buildRadarEditorialBlueprint(input: {
       topic: requisito.topic,
       question: requisito.specificQuestion,
       whyNeeded: requisito.whyReviewIsNeeded,
-      expectedContribution: CONTRIBUICAO_POR_TIPO[requisito.kind] || ["VALIDATE"],
+      expectedContribution: RADAR_SPECIALIST_CONTRIBUTION_BY_KIND[requisito.kind] || ["VALIDATE"],
       relatedSectionId: secao?.id || null,
       /*
        * SEM BLOCO, O PROFISSIONAL PRECISA SABER DISSO — não receber um vazio.

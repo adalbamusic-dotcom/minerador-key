@@ -279,7 +279,15 @@ export function RadarVideoBriefList({ briefs }: { briefs: readonly RadarVideoBri
       </p>}
       <p className="mt-1 text-xs leading-5 text-text-muted">{brief.evidenceNeeded}</p>
       {/* §2 · a proveniência congelada continua visível; ausência não vira linha vazia. */}
-      {brief.provenance.length > 0 && <p className="mt-1 text-xs leading-5 text-text-muted" data-testid="radar-video-brief-provenance">
+      {/*
+        * AUSENTE E VAZIA SÃO A MESMA COISA AQUI — VIDEOS 3.5.
+        *
+        * Esta lista passou a ser renderizada também pela área Vídeos, e por lá
+        * chegam projeções de pauta que não carregam proveniência. Uma linha de
+        * leitura não pode derrubar a tela inteira por causa de um campo que ela
+        * já sabia tratar como opcional quando vazio.
+        */}
+      {(brief.provenance?.length || 0) > 0 && <p className="mt-1 text-xs leading-5 text-text-muted" data-testid="radar-video-brief-provenance">
         Origem: {brief.provenance.map(origem => `${origem.source}${origem.detail ? ` (${origem.detail})` : ""}`).join(" · ")}
       </p>}
     </div>)}

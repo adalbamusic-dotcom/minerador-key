@@ -1,3 +1,88 @@
+## 32. Exportação: dois contratos independentes
+
+Salvar o sistema e usar o conhecimento produzido por ele são finalidades
+diferentes e não cabem no mesmo arquivo. O Arquiteto exporta dois produtos, e
+a fronteira entre eles é regra, não conveniência.
+
+As duas exportações são **somente leitura**: não alteram estado, não chamam
+provider, não criam versão e não modificam artefato. Cobrem o conjunto inteiro
+da Brand, independentemente da seleção e dos filtros da mesa, e leem os mesmos
+read-models canônicos que alimentam a interface — nunca o HTML da tabela.
+
+`EXPORT_SOURCE = CANONICAL_READ_MODELS` ·
+`EXPORT_REQUIRES_SELECTION = NO` · `EXPORT_WRITES_REMOTE_STATE = NO` ·
+`LINK_ROLE_SOURCE = SILODNA` · `LINK_RELATIONS_SOURCE = INTERNAL_LINK_GRAPH`.
+
+### 32.1 BACKUP_RESTORABLE_V1 — recuperar o Arquiteto
+
+Representação canônica, versionada e importável. O arquivo se declara no
+cabeçalho: `minekey_export_type = ARQUITETO_BACKUP`, `schema_version = 1`,
+Brand, data e contagem. A tabela usa uma linha por artefato, com
+`record_type`, `record_key`, `record_version`, `status`, `content_hash`,
+`parent_ref` e `payload_json` — o conteúdo canônico inteiro, sem achatar um
+objeto complexo em centenas de colunas.
+
+`record_key` é a identidade do ARTEFATO (`siloId`, `articleId`, `graphId`),
+nunca o identificador de uma linha de banco. A cobertura por tipo e as lacunas
+conhecidas estão na auditoria datada de 2026-09-13.
+
+Importar é sempre em duas etapas: `parse + preview` e, depois de confirmação
+humana, `restore`. O preview roda no servidor, contra o estado canônico real, e
+classifica cada registro como `CREATE`, `NO_OP`, `REMAP`, `CONFLICT` ou
+`BLOCKED`. Um `CONFLICT` ou `BLOCKED` recusa o lote inteiro — restauração
+parcial silenciosa não existe.
+
+A restauração entra pelos **writers canônicos** de cada tipo e herda deles a
+validação de Brand, contrato, identidade e lock; não existe INSERT genérico em
+tabela. Quando a identidade é emitida pelo servidor, como em território e
+working copy de Silo, o artefato volta com identificador novo, que entra no
+mapa `id antigo → id restaurado`; todas as referências são religadas por esse
+mapa antes da escrita. Mesmo artefato com o mesmo hash é `NO_OP`, o que torna a
+restauração idempotente: importar duas vezes não cria sucessora nem duplicata.
+Mesma identidade com conteúdo divergente é `CONFLICT`. Restaurar entre Brands
+exige decisão explícita. Nada publicado ou canônico divergente é sobrescrito em
+silêncio.
+
+Depois da escrita, o servidor relê o remoto e compara semanticamente com o
+backup religado. Retorno 2xx da mutation não é prova de sucesso; a comparação
+ignora apenas identificador remapeado e carimbo novo de restauração, e exige
+equivalência de conteúdo, relações, papéis, estados e topologia.
+
+### 32.2 EDITORIAL_EXPORT_V1 — escrever o artigo
+
+Uma linha por ArticleDNA canônico, com o que ajuda a produzir conteúdo: Silo,
+papel no Silo, Principal, slug, intenção, funil, volume, resultados, KGR e
+aplicabilidade, secundárias e reforços, o contexto do KeywordDNA já congelado
+no ArticleDNA (entidade central, modificadores, público, problema percebido,
+resultado desejado, tipo editorial, nível de consciência, etapa da jornada),
+parecer e mercado observado da SERP vigente, evidências e fontes necessárias,
+e os links internos **agregados na linha do artigo**: recebe de, aponta para,
+conceitos de âncora e relações internas.
+
+Catorze arestas não viram catorze linhas: a unidade do arquivo é o artigo.
+UUID interno, hash, version id, lock version, id de nó e id de aresta ficam de
+fora — quem restaura estado é o backup.
+
+`EDITORIAL_EXPORT_IS_IMPORTABLE = NO`. O contrato é deliberadamente one-way, e
+o importador só aceita arquivo que se declara `ARQUITETO_BACKUP`. É isso que
+impede um CSV editorial editado no Excel de virar estado canônico.
+
+### 32.3 CSV e interface
+
+Os dois arquivos são UTF-8 com BOM, delimitados por `;`, com aspas, vírgulas,
+quebras de linha e textos livres escapados, datas em ISO 8601 e arrays em
+lista estável (`valor 1 | valor 2`). Objeto nunca sai como `[object Object]`.
+Nomes: `arquiteto-backup-<brand>-YYYY-MM-DD-HHmm.csv` e
+`arquiteto-editorial-<brand>-YYYY-MM-DD-HHmm.csv`.
+
+`Exportar` é um menu com os dois produtos e com `Restaurar backup`.
+`Importar do Minerador` continua significando KeywordDNA vindo da etapa
+anterior e não se mistura com recuperação operacional.
+
+O sucesso só é anunciado depois que o arquivo foi montado e o download foi
+disparado, com a contagem real do que saiu. Falha declara o motivo; anunciar
+início de exportação sem arquivo produzido é proibido.
+
 ## 31. Precedência evidencial da SERP e contrato downstream
 
 Lógica é hipótese determinística; IA é proposta analítica; SERP é evidência

@@ -1,3 +1,50 @@
+## Backup restaurável e export editorial — 2026-09-13
+
+- [x] Auditar os artefatos do Arquiteto e suas dependências antes do restore
+  (`docs/04-arquiteto/auditoria-backup-restauravel-2026-09-13.md`).
+- [x] `BACKUP_RESTORABLE_V1`: arquivo autodeclarado, um registro por artefato,
+  payload canônico inteiro em `payload_json`.
+- [x] Preview/dry-run com validação de formato, integridade, hashes, Brand e
+  conflitos; remapeamento de referências e idempotência.
+- [x] `EDITORIAL_EXPORT_V1`: uma linha por ArticleDNA, links agregados, sem
+  UUID, hash, lock version ou id de banco.
+- [x] Importador exclusivo do backup; export editorial deliberadamente one-way.
+- [x] Menu Exportar com os dois produtos e `Restaurar backup` separado de
+  `Importar do Minerador`.
+- [x] Auditoria corrigida: os writers canônicos por tipo já existiam, e a
+  restauração os reutiliza em vez de criar rota genérica.
+- [x] Autoridade de restauração server-side com preview classificado
+  (`CREATE`/`NO_OP`/`REMAP`/`CONFLICT`/`BLOCKED`), mapa de identidade,
+  idempotência e readback com comparação semântica.
+- [x] Rota `/api/arquiteto/backup/restore` com `preview` e `apply`, e a
+  fronteira do formato repetida no servidor.
+- [x] Teste de ida e volta rodando a autoridade real sobre driver simulado:
+  estado A → export → ambiente vazio → restore → estado B equivalente.
+- [x] Troca de Brand como decisão explícita, com identidade de versão
+  reemitida de forma determinística e referências religadas.
+- [x] Fingerprint semântico por tipo de artefato e comparação A × B.
+- [x] Runner de homologação remota (`npm run arquiteto:backup-homologation`),
+  que não depende de DELETE e recusa Brand de destino não vazia.
+- [ ] **Bloqueia `BACKUP_RESTORABLE_V1 = YES`:** executar o runner contra o
+  banco real, com Brand descartável, e anexar a saída. Execução do usuário.
+- [ ] Validação manual na UI depois do ciclo: F5, segundo navegador, Silos,
+  Artigos e Links internos reconstruídos pelos loaders normais.
+- [ ] Cobrir as duas stored procedures (`persist_internal_link_graph` e
+  `persist_silo_working_copy_atomic`) — só o ciclo remoto as exercita.
+
+## Exportação CSV das três fases — 2026-09-13
+
+- [x] Corrigir o botão Exportar: o download real substitui o aviso de
+  "Exportação iniciada..." que não entregava arquivo.
+- [x] Exportar Silos, Artigos e Links internos a partir dos read-models
+  canônicos, sempre o conjunto da Brand e nunca a seleção ou o HTML da tabela.
+- [x] CSV de Links com uma linha por aresta, papel lido do SiloDNA e relação
+  lida do InternalLinkGraph.
+- [x] UTF-8 com BOM, escape completo, datas ISO 8601, ids/hashes inteiros e
+  arrays em lista estável.
+- [ ] Validar manualmente na UI com marca real: abertura no Excel PT-BR,
+  Silo sem SiloPage, Silo sem grafo e grafo grande.
+
 ## Reset da homologação — 2026-09-08
 
 - [x] Script de reset com ensaio por padrão e escopo por tipo de artefato.

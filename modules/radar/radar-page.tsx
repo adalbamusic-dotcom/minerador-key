@@ -40,6 +40,7 @@ import { buildRadarAutomaticResearchCuration } from "@/lib/radar/research-auto-s
 import { RADAR_EXTRACTION_MAX_ATTEMPTS, radarExtractionFailureIsRecoverable } from "@/lib/radar/extraction-retry";
 import { radarPhase1NextAction } from "@/lib/radar/serp-phase1";
 import { RADAR_DEFAULT_SEARCH_MODE, radarSearchModeLabel, type RadarPrimarySearchMode } from "@/lib/radar/search-mode";
+import type { RadarSpecialistCounters } from "@/lib/radar/specialist-lifecycle";
 import { buildRadarArticleDnaSummary, buildRadarReportSummary, buildRadarResearchCardSummary, buildRadarSpecialistSummary, radarSpecialistCell, RADAR_OPERATIONAL_STATUS_LABEL, RADAR_OPERATIONAL_STATUS_ORDER, radarOperationalRow, type RadarOperationalTone } from "@/lib/radar/operational-view";
 import { radarExtractionBatches, radarExtractionErrorMessage } from "@/lib/radar/extraction-request";
 import { buildRadarAnalysisMembership } from "@/lib/radar/analysis-membership";
@@ -66,6 +67,7 @@ import { buildRadarInvestigationView } from "@/lib/radar/investigation-state";
 import { ImportPanel, Field, card, btn, sessionId, useReadyPipeline } from "@/components/editorial/operational-screen-shared";
 import { useNoticeBridge } from "@/components/global-notice-center";
 import { RadarWorkbench } from "./radar-workbench";
+import type { RadarSpecialistPanelSummary } from "./radar-expert-brief-panel";
 import { RadarR3ProfileMirror } from "./radar-r3-profile-mirror";
 import { RadarR4BulkOperationsBar, RadarR5QueueProgress, type RadarR5QueueView } from "./radar-r4-bulk-operations-bar";
 import { useRadarAnalysisReadback } from "./use-radar-analysis-readback";
@@ -120,7 +122,7 @@ const TOM_DA_LINHA: Record<RadarOperationalTone, string> = {
 };
 
 export function RadarPage({ brandRef }: { brandRef: string }) {
-  const { data: session } = useSession(); const router = useRouter(); const { selectedBrandId } = useBrand(); const { pipeline, state } = useReadyPipeline(); const [picker, setPicker] = useState(false); const [notice, setNotice] = useState(""); const [busyArticleId, setBusyArticleId] = useState<string | null>(null); const [reviewingArticleId, setReviewingArticleId] = useState<string | null>(null); const [serpAction, setSerpAction] = useState<RadarSerpAction | null>(null); const serpActionRef = useRef<RadarSerpAction | null>(null); const reviewingArticleIdRef = useRef<string | null>(null); const [expandedRadarId, setExpandedRadarId] = useState<string | null>(null); const [spreadsheetSelection, setSpreadsheetSelection] = useState(createRadarSpreadsheetSelection); const { activeArticleId, selectedArticleIds } = spreadsheetSelection; const [r4LocalByArticle, setR4LocalByArticle] = useState<Record<string, RadarR4LocalArticleState>>({}); const [r4SerpQueue, setR4SerpQueue] = useState<RadarR4SerpQueue | null>(null); const [topicHistoryByArticle, setTopicHistoryByArticle] = useState<Record<string, RadarR5TopicHistory>>({}); const [expertEvidenceByArticle, setExpertEvidenceByArticle] = useState<Record<string, RadarR6ExpertEvidenceInput[]>>({}); const [canonicalExpertEvidenceByArticle, setCanonicalExpertEvidenceByArticle] = useState<Record<string, RadarExpertEvidence[]>>({}); const [expertContributionSummaryByArticle, setExpertContributionSummaryByArticle] = useState<Record<string, { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true; articleDnaVersionId: string }>>({}); const approvingArticleIdRef = useRef<string | null>(null); const collectingArticleIdRef = useRef<string | null>(null); const generatingReportIdRef = useRef<string | null>(null); const [collectionByArticle, setCollectionByArticle] = useState<Record<string, { state: RadarSerpCollectionState; blockedReason: string | null }>>({});
+  const { data: session } = useSession(); const router = useRouter(); const { selectedBrandId } = useBrand(); const { pipeline, state } = useReadyPipeline(); const [picker, setPicker] = useState(false); const [notice, setNotice] = useState(""); const [busyArticleId, setBusyArticleId] = useState<string | null>(null); const [reviewingArticleId, setReviewingArticleId] = useState<string | null>(null); const [serpAction, setSerpAction] = useState<RadarSerpAction | null>(null); const serpActionRef = useRef<RadarSerpAction | null>(null); const reviewingArticleIdRef = useRef<string | null>(null); const [expandedRadarId, setExpandedRadarId] = useState<string | null>(null); const [spreadsheetSelection, setSpreadsheetSelection] = useState(createRadarSpreadsheetSelection); const { activeArticleId, selectedArticleIds } = spreadsheetSelection; const [r4LocalByArticle, setR4LocalByArticle] = useState<Record<string, RadarR4LocalArticleState>>({}); const [r4SerpQueue, setR4SerpQueue] = useState<RadarR4SerpQueue | null>(null); const [topicHistoryByArticle, setTopicHistoryByArticle] = useState<Record<string, RadarR5TopicHistory>>({}); const [expertEvidenceByArticle, setExpertEvidenceByArticle] = useState<Record<string, RadarR6ExpertEvidenceInput[]>>({}); const [canonicalExpertEvidenceByArticle, setCanonicalExpertEvidenceByArticle] = useState<Record<string, RadarExpertEvidence[]>>({}); const [expertContributionSummaryByArticle, setExpertContributionSummaryByArticle] = useState<Record<string, { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true; articleDnaVersionId: string; counters: RadarSpecialistCounters }>>({}); const approvingArticleIdRef = useRef<string | null>(null); const collectingArticleIdRef = useRef<string | null>(null); const generatingReportIdRef = useRef<string | null>(null); const [collectionByArticle, setCollectionByArticle] = useState<Record<string, { state: RadarSerpCollectionState; blockedReason: string | null }>>({});
   /*
    * AS FONTES DE VÍDEO SÃO REMOTAS — o dicionário abaixo é CACHE, não cópia.
    *
@@ -139,7 +141,16 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     readbackConfirmed: boolean;
     /** De qual artigo é a sobreposição de seleção já carregada. `null` = nenhuma. */
     overlayArticleId: string | null;
-  }>({ sources: [], texts: [], loading: false, saving: false, extracting: null, lastBatch: null, error: null, readbackConfirmed: false, overlayArticleId: null });
+    /**
+     * O ESTADO DA FILA DO WORKER DO USUÁRIO — leitura, nunca execução.
+     *
+     * A Vercel serve a tela e enfileira; quem processa é a máquina do usuário.
+     * Isto aqui é só o que o Supabase registra, para a tela poder dizer se há
+     * alguém do outro lado — e para não chamar de erro da fonte o que é
+     * ausência de processador.
+     */
+    worker: { queued: number; processing: number; lastHeartbeatAt: string | null } | null;
+  }>({ sources: [], texts: [], loading: false, saving: false, extracting: null, lastBatch: null, error: null, readbackConfirmed: false, overlayArticleId: null, worker: null });
   /**
    * UMA TENTATIVA POR CONTEXTO — §2.3.2, e é isto que mata o laço.
    *
@@ -153,6 +164,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * botão para isso.
    */
   const bibliotecaTentada = useRef(new Set<string>());
+  /* A mesma guarda, para a leitura do casamento gravado. */
+  const casamentoTentado = useRef(new Set<string>());
 
   /**
    * O CASAMENTO GRAVADO — Gate 3.
@@ -169,7 +182,15 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     coverage: RadarBriefCoverage[] | null;
     running: boolean;
     error: string | null;
-  }>({ articleId: null, coverage: null, running: false, error: null });
+    /*
+     * A LEITURA REMOTA FALHOU? — VIDEOS_3.4.1 · §7.
+     *
+     * `coverage: null` com este campo falso é 'ainda não casaram'; com ele
+     * verdadeiro é 'existe casamento e não consegui ler'. Colapsar os dois
+     * fazia a tela convidar a recasar algo que já estava gravado.
+     */
+    loadFailed: boolean;
+  }>({ articleId: null, coverage: null, running: false, error: null, loadFailed: false });
 
   /*
    * O QUE A ÚLTIMA COLETA DEVOLVEU, PARA QUEM ENCADEIA.
@@ -246,13 +267,51 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * tela e atualiza só os checkboxes: zerar `sources` enquanto a requisição
    * viaja apagava a biblioteca inteira por meio segundo a cada troca.
    */
+  /**
+   * O ESTADO DA FILA VEM DE ROTA PRÓPRIA — USER_WORKER_1 · §6.
+   *
+   * A tela CONSULTA o estado operacional; ela não reivindica nem processa nada.
+   * A rota é separada de `radar-video-sources` porque aquela é auditada para
+   * não encostar na fila, e essa garantia vale mais do que uma requisição
+   * economizada.
+   *
+   * NUNCA REJEITA. Falha de leitura devolve `null`, e `null` apaga a linha em
+   * vez de afirmar "desligado" — não saber e estar desligado são coisas
+   * diferentes.
+   */
+  const lerEstadoDoWorker = useCallback(async (brandId: string) => {
+    try {
+      const resposta = await fetch(`/api/editorial/radar-worker-status?brandId=${encodeURIComponent(brandId)}`);
+      const corpo = await resposta.json();
+      if (!resposta.ok || !corpo?.success || !corpo.worker) return null;
+      return {
+        queued: Number(corpo.worker.queued) || 0,
+        processing: Number(corpo.worker.processing) || 0,
+        lastHeartbeatAt: typeof corpo.worker.lastHeartbeatAt === "string" ? corpo.worker.lastHeartbeatAt : null,
+      };
+    } catch {
+      return null;
+    }
+  }, []);
+
   const loadVideoLibrary = useCallback(async (articleId: string | null) => {
     if (!selectedBrandId) return;
     setVideoLibrary(current => ({ ...current, loading: true, error: null }));
     try {
       const busca = new URLSearchParams({ brandId: selectedBrandId });
       if (articleId) busca.set("articleId", articleId);
-      const resposta = await fetch(`/api/editorial/radar-video-sources?${busca.toString()}`);
+      /*
+       * DUAS LEITURAS, E A DA FILA NÃO PODE DERRUBAR A DA BIBLIOTECA.
+       *
+       * Fonte é o assunto desta área; presença de worker é enfeite operacional
+       * ao lado. `lerEstadoDoWorker` nunca rejeita — se a fila não puder ser
+       * lida, a linha some da tela em vez de inventar um estado, e as fontes
+       * continuam aparecendo.
+       */
+      const [resposta, estadoDoWorker] = await Promise.all([
+        fetch(`/api/editorial/radar-video-sources?${busca.toString()}`),
+        lerEstadoDoWorker(selectedBrandId),
+      ]);
       const corpo = await resposta.json();
       if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível ler a biblioteca de vídeos.");
       setVideoLibrary(current => ({
@@ -261,6 +320,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         texts: corpo.texts || current.texts,
         loading: false, saving: false, extracting: null,
         error: null, readbackConfirmed: true, overlayArticleId: articleId,
+        worker: estadoDoWorker,
       }));
     } catch (error) {
       setVideoLibrary(current => ({
@@ -269,7 +329,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         error: error instanceof Error ? error.message : "Falha ao ler a biblioteca de vídeos.",
       }));
     }
-  }, [selectedBrandId]);
+  }, [lerEstadoDoWorker, selectedBrandId]);
 
   /** Repetir depois de uma falha é decisão de quem opera, não do efeito. */
   const reloadVideoLibrary = useCallback((articleId: string | null) => {
@@ -494,7 +554,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       });
       const corpo = await resposta.json();
       if (!corpo?.success) throw new Error(corpo?.error || "Não foi possível casar as pautas com o conteúdo.");
-      setVideoMatching({ articleId, coverage: corpo.coverage || [], running: false, error: null });
+      setVideoMatching({ articleId, coverage: corpo.coverage || [], running: false, error: null, loadFailed: false });
       const partes = [`${corpo.summary?.supported ?? 0} pauta(s) coberta(s)`, `${corpo.summary?.extracts ?? 0} trecho(s)`];
       if (corpo.reused) partes.push("nada mudou desde o último casamento");
       if (corpo.skippedWithoutText?.length) partes.push(`${corpo.skippedWithoutText.length} fonte(s) selecionada(s) ainda sem texto`);
@@ -504,8 +564,39 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     }
   }, [selectedBrandId]);
 
+  /**
+   * O CASAMENTO GRAVADO, AO ABRIR — VIDEOS_3.4.1 · §2 e §5.
+   *
+   * Esta leitura NÃO EXISTIA, e era o defeito inteiro: `videoMatching` só era
+   * escrito pelo clique, então o F5 apagava da tela um resultado que estava
+   * íntegro no banco e a área voltava a dizer 'ainda não foram casados'.
+   *
+   * Ela LÊ e só lê: nenhum provider, nenhum casamento novo, nenhuma execução
+   * criada. `no-store` porque a resposta muda com o que o banco tem agora — um
+   * GET servido de cache traria o estado anterior ao último casamento.
+   */
+  const loadVideoMatching = useCallback(async (articleId: string | null) => {
+    if (!selectedBrandId || !articleId) return;
+    try {
+      const busca = new URLSearchParams({ brandId: selectedBrandId, articleId });
+      const resposta = await fetch(`/api/editorial/radar-video-matching?${busca.toString()}`, { cache: "no-store" });
+      const corpo = await resposta.json();
+      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível carregar o casamento salvo.");
+      /*
+       * SEM EXECUÇÃO, O ESTADO CONTINUA `null`. A rota devolve cobertura vazia
+       * quando nunca se casou, e `[]` na tela significaria 'casou e não achou
+       * nada' — que é outra resposta.
+       */
+      setVideoMatching({ articleId, coverage: corpo.run ? corpo.coverage || [] : null, running: false, error: null, loadFailed: false });
+    } catch (error) {
+      /* §7 · erro de leitura é dito como erro, nunca como ausência. */
+      setVideoMatching({ articleId, coverage: null, running: false, error: error instanceof Error ? error.message : "Não foi possível carregar o casamento salvo.", loadFailed: true });
+    }
+  }, [selectedBrandId]);
+
+
   const handleExpandedChange = useCallback((id: string | null) => { const rowArticleId = id ? pipeline.radarItems.find(row => row.id === id)?.articleId : null; if ((serpActionRef.current && id && rowArticleId !== serpActionRef.current.articleId) || (reviewingArticleIdRef.current && id && rowArticleId !== reviewingArticleIdRef.current) || (serpAction && id && rowArticleId !== serpAction.articleId) || (reviewingArticleId && id && rowArticleId !== reviewingArticleId)) return; setExpandedRadarId(id); }, [pipeline.radarItems, reviewingArticleId, serpAction]);
-  const handleExpertEvidenceChange = useCallback((articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true; canonicalEvidence: RadarExpertEvidence[]; articleDnaVersionId: string }) => { setExpertEvidenceByArticle(current => ({ ...current, [articleId]: evidence })); setCanonicalExpertEvidenceByArticle(current => ({ ...current, [articleId]: summary.canonicalEvidence })); setExpertContributionSummaryByArticle(current => ({ ...current, [articleId]: { contributionCount: summary.contributionCount, pendingCount: summary.pendingCount, blockedEvidenceCount: summary.blockedEvidenceCount, remote: true, articleDnaVersionId: summary.articleDnaVersionId } })); }, []);
+  const handleExpertEvidenceChange = useCallback((articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: RadarSpecialistPanelSummary) => { setExpertEvidenceByArticle(current => ({ ...current, [articleId]: evidence })); setCanonicalExpertEvidenceByArticle(current => ({ ...current, [articleId]: summary.canonicalEvidence })); setExpertContributionSummaryByArticle(current => ({ ...current, [articleId]: { contributionCount: summary.contributionCount, pendingCount: summary.pendingCount, blockedEvidenceCount: summary.blockedEvidenceCount, remote: true, articleDnaVersionId: summary.articleDnaVersionId, counters: summary.counters } })); }, []);
   useNoticeBridge({ notice, module: "radar", area: "Radar", title: "Radar", fallbackSeverity: "INFO" });
   const radarReadbackScopeKey = useMemo(() => {
     if (!selectedBrandId) return null;
@@ -543,6 +634,27 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     bibliotecaTentada.current.add(chave);
     void loadVideoLibrary(articleId);
   }, [activeArticleId, loadVideoLibrary, pipeline.radarItems, selectedBrandId]);
+
+  /**
+   * O CASAMENTO GRAVADO, AO ABRIR — VIDEOS_3.4.1 · §2 e §5.
+   *
+   * Ele mora AQUI, e não lá embaixo junto de `activeRadarItem`, pelo mesmo
+   * motivo que o efeito acima: há um retorno antecipado de carregamento no
+   * meio do componente, e um hook depois dele não roda em todo render. React
+   * acusa mudança na ordem dos hooks e a tela fica preta — foi exatamente o
+   * que aconteceu quando este efeito nasceu no lugar errado.
+   *
+   * Uma tentativa por marca + artigo: o F5 lê, a troca de artigo relê.
+   */
+  useEffect(() => {
+    if (!selectedBrandId) return;
+    const articleId = resolveRadarWorkbenchArticleId({ selectedId: activeArticleId, rowIds: pipeline.radarItems.map(row => row.articleId) });
+    if (!articleId) return;
+    const chave = `${selectedBrandId}:${articleId}`;
+    if (casamentoTentado.current.has(chave)) return;
+    casamentoTentado.current.add(chave);
+    void loadVideoMatching(articleId);
+  }, [activeArticleId, loadVideoMatching, pipeline.radarItems, selectedBrandId]);
 
   if (state || !pipeline.snapshot) return state;
   const approved = approvedArticleVersions(pipeline.articleVersions, pipeline.versionEvents);
@@ -630,7 +742,18 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       ...(sentToPlanner ? [{ label: "Transferência registrada", detail: "Pacote disponível para o Planejador", at: analysis?.createdAt || null }] : []),
     ];
     const activity = {
-      requestsSent: 0,
+      /*
+       * SPECIALIST_1 · §5 — O ZERO FIXO SAIU DAQUI.
+       *
+       * `requestsSent: 0` era literal: a rota de envio existia, gravava
+       * `sent_at`, e esta linha continuava dizendo que ninguém tinha pedido
+       * nada. O número agora vem das pautas lidas do banco para este artigo
+       * e esta versão do ArticleDNA — e só `sent_at` conta como pedido.
+       *
+       * Sem painel carregado ainda não há leitura, e zero é a resposta certa:
+       * é o que se sabe, não uma afirmação sobre o que existe no banco.
+       */
+      requestsSent: expertSummary?.counters.sent || 0,
       contributionsReceived: expertSummary?.contributionCount || 0,
       pending: referenceCounts.pending + (reportGenerated && !reportApproved ? 1 : 0) + (r6Report?.pendingContributions.length || 0) + (reportApproved && !sentToPlanner ? 1 : 0),
       lastUpdatedAt: view?.capturedAt || analysis?.createdAt || row.updatedAt || null,
@@ -654,7 +777,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       ...baseR3,
       r4: localState,
       content: { ...baseR3.content, rows: contentRows },
-       specialist: { ...baseR3.specialist, existingContent: localState.existingContent?.length ? localState.existingContent.map(item => item.label).join(" · ") : baseR3.specialist.existingContent, contributionsReceived: expertSummary?.contributionCount || baseR3.specialist.contributionsReceived, reviewedEvidence: canonicalExpertEvidence.length, pending: (expertSummary?.pendingCount || 0) + (expertSummary?.blockedEvidenceCount || 0), status: expertSummary ? (expertSummary.pendingCount || expertSummary.blockedEvidenceCount ? "Contribuição aguardando revisão" : "Contribuição revisada localmente") : radarR4SpecialistStatusLabel(localState.specialist) },
+       specialist: { ...baseR3.specialist, requestsSent: expertSummary?.counters.sent || 0, existingContent: localState.existingContent?.length ? localState.existingContent.map(item => item.label).join(" · ") : baseR3.specialist.existingContent, contributionsReceived: expertSummary?.contributionCount || baseR3.specialist.contributionsReceived, reviewedEvidence: canonicalExpertEvidence.length, pending: (expertSummary?.pendingCount || 0) + (expertSummary?.blockedEvidenceCount || 0), status: expertSummary ? (expertSummary.pendingCount || expertSummary.blockedEvidenceCount ? "Contribuição aguardando revisão" : "Contribuição revisada localmente") : radarR4SpecialistStatusLabel(localState.specialist) },
       report: reportState === "NOT_STARTED"
         ? baseR3.report
         : { ...baseR3.report, status: radarR6ReportStateLabel(reportState), summary: r6Report?.summary || "Prévia consolidada local aguardando revisão humana.", approved: reportApproved },
@@ -807,9 +930,19 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       finalized: deepResearch.finalizedBundle,
       specialist: r3.specialist,
     });
+    /*
+     * OS PONTOS SAEM DA MESMA AUTORIDADE QUE OS CONTA — SPECIALIST_1 · §7.
+     *
+     * `buildRadarSpecialistSummary` prefere o congelamento à leitura viva, e
+     * a lista precisa obedecer à mesma preferência. Duas escolhas separadas
+     * mostrariam "1 ponto para revisão" ao lado de dois pontos listados.
+     */
+    const pontosDeRevisao = deepResearch.finalizedBundle
+      ? deepResearch.finalizedBundle.authority.specialistRequirements
+      : deepResearch.observed.authorityEvidence.specialistReviewRequirements;
     const r3Consolidado: RadarR3Model = {
       ...r3, editorialContext, researchContext, deepResearch,
-      specialist: { ...r3.specialist, summary: especialista, status: especialista.statusLabel },
+      specialist: { ...r3.specialist, summary: especialista, status: especialista.statusLabel, requirements: pontosDeRevisao },
       serp: { ...r3.serp, collection, investigation },
     };
 
@@ -2448,7 +2581,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     * `localStorage` derrubava do estado uma coleta que o DataForSEO já tinha
     * entregue e cobrado. A frase agora nomeia o navegador como responsável e
     * afirma, na mesma linha, que a pesquisa não precisa ser refeita.
-    */}{pipeline.localRecoveryWarning && <div className="shrink-0 border-b border-pending/40 bg-pending/10 px-4 py-2 text-sm text-foreground" role="status" data-testid="radar-local-recovery-warning">{pipeline.localRecoveryWarning}</div>}<RadarWorkbench model={activeWorkbenchData?.r3 || null} articleId={activeRadarItem?.articleId || null} onReloadLibrary={reloadVideoLibrary} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} videoSources={{ ...videoLibrary, briefs: videoBriefsDoArtigo.briefs, briefsUnavailableReason: videoBriefsDoArtigo.reason, investigationFinalized: videoBriefsDoArtigo.finalizada, frozenBriefCount: videoBriefsDoArtigo.frozenBriefCount, coverage: videoMatching.coverage, matching: videoMatching.running }} onRunMatching={runVideoMatching} onRegisterVideoSources={registerVideoSources} onExtractVideoText={extractVideoText} onFetchVideoMetadata={fetchVideoMetadata} onProvideVideoTranscript={provideVideoTranscript} onUploadVideoMedia={uploadVideoMedia} onLibraryAction={runVideoLibraryAction} onReportGenerate={() => void generateReportForArticle()} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onStartDeepResearch={() => void startDeepResearch()} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} searchMode={activeRadarItem ? searchModeByArticle[activeRadarItem.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importable} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
+    */}{pipeline.localRecoveryWarning && <div className="shrink-0 border-b border-pending/40 bg-pending/10 px-4 py-2 text-sm text-foreground" role="status" data-testid="radar-local-recovery-warning">{pipeline.localRecoveryWarning}</div>}<RadarWorkbench model={activeWorkbenchData?.r3 || null} articleId={activeRadarItem?.articleId || null} onReloadLibrary={reloadVideoLibrary} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} videoSources={{ ...videoLibrary, briefs: videoBriefsDoArtigo.briefs, briefsUnavailableReason: videoBriefsDoArtigo.reason, investigationFinalized: videoBriefsDoArtigo.finalizada, frozenBriefCount: videoBriefsDoArtigo.frozenBriefCount, coverage: videoMatching.coverage, matching: videoMatching.running, matchingLoadFailed: videoMatching.loadFailed, matchingError: videoMatching.error }} onRunMatching={runVideoMatching} onRegisterVideoSources={registerVideoSources} onExtractVideoText={extractVideoText} onFetchVideoMetadata={fetchVideoMetadata} onProvideVideoTranscript={provideVideoTranscript} onUploadVideoMedia={uploadVideoMedia} onLibraryAction={runVideoLibraryAction} onReportGenerate={() => void generateReportForArticle()} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onStartDeepResearch={() => void startDeepResearch()} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} searchMode={activeRadarItem ? searchModeByArticle[activeRadarItem.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importable} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
 }
 
 function RadarProfile({ r3, articleHref, architectHref }: { r3: RadarR3Model; articleHref: string | null; architectHref: string | null }) {

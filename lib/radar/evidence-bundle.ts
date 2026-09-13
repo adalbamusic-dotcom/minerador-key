@@ -35,6 +35,7 @@ import { assertRadarEvidenceAuthority, radarSerpEvidenceStanding, type RadarEvid
 import { assertRadarAiDiscoveryAuthority, type RadarAiDiscoveryContext } from "./ai-discovery-context.ts";
 
 import type { RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
+import { assertRadarVideoEvidenceLayer, type RadarVideoEvidenceLayer } from "./video-evidence.ts";
 
 /* ============================== o vínculo =============================== */
 
@@ -63,6 +64,15 @@ export type RadarEvidenceBundle = {
   conflicts: RadarEvidenceResolution[];
   /** O que não foi possível observar. Ausência declarada, nunca omitida. */
   limitations: string[];
+  /**
+   * A EVIDÊNCIA AUDIOVISUAL — VIDEOS_3.5 · §5, e ela vive AQUI.
+   *
+   * Não dentro do ArticleDNA: o Radar não reescreve o que o Arquiteto
+   * aprovou. A camada é opcional porque um artigo pode não ter pedido apoio
+   * audiovisual, ou não ter casado ainda — e `null` diz isso sem inventar
+   * uma execução vazia.
+   */
+  video: RadarVideoEvidenceLayer | null;
 };
 
 /* ============================ as invariantes ============================ */
@@ -115,12 +125,21 @@ export function assertRadarEvidenceProvenance(bundle: RadarEvidenceBundle): void
   }
 
   for (const conflito of bundle.conflicts) assertRadarEvidenceAuthority(conflito);
+
+  /*
+   * A CAMADA DE VÍDEO SEGUE A MESMA REGRA DAS OUTRAS: ou está íntegra, ou
+   * não sai daqui. Trecho sem âncora, resultado sem pauta ou execução sem
+   * identidade chegariam ao Planejador como evidência que ninguém confere.
+   */
+  if (bundle.video) assertRadarVideoEvidenceLayer(bundle.video);
 }
 
 /* ============================== a montagem ============================== */
 
 export function buildRadarEvidenceBundle(input: {
   observed: RadarCompetitiveObservedModel;
+  /** A camada audiovisual daquela rodada, quando houve casamento. */
+  video?: RadarVideoEvidenceLayer | null;
   /** A investigação está vigente e a amostra sustenta leitura de mercado? */
   serp: { current: boolean; sufficient: boolean; valid: boolean };
   conflicts?: readonly RadarEvidenceResolution[];
@@ -141,6 +160,7 @@ export function buildRadarEvidenceBundle(input: {
     serpStanding: radarSerpEvidenceStanding(input.serp),
     conflicts: [...(input.conflicts || [])],
     limitations: [...input.observed.limitations],
+    video: input.video || null,
   };
 
   assertRadarEvidenceProvenance(bundle);

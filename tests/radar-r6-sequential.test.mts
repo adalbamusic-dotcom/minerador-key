@@ -206,8 +206,8 @@ test("R6 mantém DeepSeek/Telegram e mídia fora do render automático", () => {
    */
   const videos = readFileSync(new URL("../modules/radar/radar-r3-videos-panel.tsx", import.meta.url), "utf8");
   assert.match(videos, /data-testid="radar-videos-register"/);
-  /* Gate 2: a extração existe; o que a área ainda deve é dito por extenso. */
-  assert.match(videos, /O texto extraído é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito\./, "a área diz o que ainda não faz");
+  /* Gate 2 e VIDEOS 3.3: o que a área faz com o texto é dito por extenso. */
+  assert.match(videos, /O texto integral é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito\./, "a área diz o que não faz com o texto");
   /* A frase por fonte ("Texto ainda não extraído") vem do domínio, não daqui. */
   assert.match(videos, /\{leitura\.textStatus\}/);
   assert.ok(!/LINK_REGISTERED|AWAITING_FILE/.test(videos), "os estados locais não sobreviveram");

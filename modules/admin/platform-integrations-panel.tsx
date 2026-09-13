@@ -18,6 +18,27 @@ const integrationViews: Array<{ id: IntegrationView; label: string }> = [
   { id: "usage", label: "Consumo" },
 ];
 
+/**
+ * O CAMINHO DA ROTA QUE RECEBE O WEBHOOK — um só, e é este arquivo que o diz.
+ *
+ * Digitar a URL à mão a cada configuração é um convite ao erro de uma letra: o
+ * Telegram aceita `setWebhook` para qualquer endereço válido, entrega tudo lá, e
+ * o sistema fica esperando mensagens que chegaram em outro lugar.
+ *
+ * Derivada da ORIGEM da própria tela, não de uma constante com o domínio: em
+ * produção dá a URL canônica, em preview dá a do preview — que é a correta para
+ * aquele ambiente. Continua editável, porque quem opera pode saber de um domínio
+ * que a tela não conhece.
+ */
+const TELEGRAM_WEBHOOK_PATH = "/api/integrations/telegram/webhook";
+
+function telegramWebhookUrlSugerida() {
+  if (typeof window === "undefined") return "";
+  const origem = window.location.origin;
+  /* `setWebhook` recusa o que não for HTTPS público; sugerir localhost enganaria. */
+  return origem.startsWith("https://") ? `${origem}${TELEGRAM_WEBHOOK_PATH}` : "";
+}
+
 const supportedApiDefinitions: Array<{
   key: SupportedProviderKey;
   name: string;
@@ -345,7 +366,7 @@ export default function PlatformIntegrationsPanel() {
       ...emptyApiForm,
       label: definition?.name || "",
       googleCloudBucketName: providerKey === "google_cloud" ? existingConnection?.googleCloudBucketName || "" : "",
-      telegramWebhookUrl: providerKey === "telegram" ? existingConnection?.telegramWebhookUrl || "" : "",
+      telegramWebhookUrl: providerKey === "telegram" ? existingConnection?.telegramWebhookUrl || telegramWebhookUrlSugerida() : "",
     });
     setError("");
     setNotice("");
@@ -412,9 +433,20 @@ export default function PlatformIntegrationsPanel() {
       ? "Cloud Storage validado. O status do bucket foi atualizado separadamente da Connection."
       : healthOperation === "speech"
         ? "Speech-to-Text validado. A Connection Google Cloud foi atualizada."
-        : `${definition.name}${healthOperation === "telegram_webhook" ? " webhook" : ""} validada. A Connection está READY.`;
+        : healthOperation === "telegram_webhook"
+          /*
+           * "VALIDADA" DIZIA QUE A CONSULTA FUNCIONOU, e foi lido como "o
+           * webhook existe". Com `url` vazio, a mesma frase aparecia ao lado de
+           * "Webhook: Não configurado" — a tela se contradizendo na mesma linha.
+           *
+           * A confirmação de verdade vem do recarregamento logo abaixo, que relê
+           * o estado do provedor. Aqui a mensagem só reconhece a consulta.
+           */
+          ? "Estado do webhook consultado no Telegram. O painel abaixo mostra o que ele respondeu."
+          : `${definition.name} validada. A Connection está READY.`;
     const saved = await mutate({ action: "health_check_platform_connection", connectionId: connection.id, providerKey: definition.key, ...(healthOperation ? { healthOperation } : {}) }, successMessage);
-    if (!saved) await load();
+    /* ADMIN_UI_REFLECTS_REMOTE_STATE: reler é o que fecha a contradição. */
+    if (!saved || healthOperation === "telegram_webhook") await load();
     setCheckingProvider(null);
   };
 
@@ -590,7 +622,7 @@ export default function PlatformIntegrationsPanel() {
 
             <section aria-labelledby="connections-title">
               <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="connections-title" className="text-lg font-semibold">Connections técnicas da Plataforma</h2><p className="mt-1 text-sm text-foreground/70">Visão de governança persistida. Configurações concretas devem usar os formulários de API acima.</p></div><Database className="h-5 w-5 text-context-accent" aria-hidden="true" /></div>
-              {data.platformConnections.length ? <div className="mt-4 divide-y divide-foreground/10">{data.platformConnections.map((connection) => <div key={connection.id} className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><div><p className="text-sm font-semibold">{connection.label || connection.providerName}</p><p className="mt-1 text-sm text-foreground/65">{connection.providerName} · {connection.environment} · {statusLabel(connection.lifecycleStatus)}</p>{connection.providerKey === "telegram" ? <p className="mt-1 text-sm text-foreground/60">Webhook: {connection.telegramWebhookConfigured ? "Configurado" : "Não configurado"}</p> : null}</div><p className="text-sm text-foreground/70">Credencial: {connection.secretConfigured ? "Configurada" : "Não configurada"}</p></div>)}</div> : emptyState("Nenhuma connection da Plataforma configurada.")}
+              {data.platformConnections.length ? <div className="mt-4 divide-y divide-foreground/10">{data.platformConnections.map((connection) => <div key={connection.id} className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><div><p className="text-sm font-semibold">{connection.label || connection.providerName}</p><p className="mt-1 text-sm text-foreground/65">{connection.providerName} · {connection.environment} · {statusLabel(connection.lifecycleStatus)}</p>{connection.providerKey === "telegram" ? <p className="mt-1 break-all text-sm text-foreground/60">Webhook: {connection.telegramWebhookConfigured ? connection.telegramWebhookUrl || "Configurado" : "Não configurado"}</p> : null}</div><p className="text-sm text-foreground/70">Credencial: {connection.secretConfigured ? "Configurada" : "Não configurada"}</p></div>)}</div> : emptyState("Nenhuma connection da Plataforma configurada.")}
               <form className="mt-5 grid gap-3 border-t border-foreground/15 pt-5 sm:grid-cols-3" onSubmit={createConnection}>
                 <label className="text-sm">Provider<select className={input} value={connectionForm.providerId} onChange={(event) => setConnectionForm({ ...connectionForm, providerId: event.target.value })} required><option value="">Selecione um provider</option>{data.providers.filter((provider) => provider.status !== "legacy" && provider.providerKey !== "deepseek").map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}</select></label>
                 <label className="text-sm">Ambiente<select className={input} value={connectionForm.environment} onChange={(event) => setConnectionForm({ ...connectionForm, environment: event.target.value })}>{environments.map((environment) => <option key={environment} value={environment}>{environment}</option>)}</select></label>

@@ -366,13 +366,13 @@ test("R2.4 absorve a operação completa do Arquiteto na GlobalTopbar", async ()
   assert.match(arquiteto, /architect-process-context-panel/);
   assert.match(arquiteto, /setKeywordImportOpen\(true\); void topbarHandlersRef\.current\.fetchMasterList\(\)/);
   assert.match(arquiteto, /onClick=\{\(\) => \{ setNewListName\(""\); setNewSiloSlug\(""\); setSlugManuallyEdited\(false\); setIsListModalOpen\(true\); \}\}/);
-  assert.match(arquiteto, /Exportação iniciada/);
+  assert.match(arquiteto, /topbarHandlersRef\.current\.toggleExportMenu\(\)/);
   assert.match(arquiteto, /gap-1 overflow-x-auto xl:overflow-visible/);
   assert.doesNotMatch(arquiteto, /data-arquiteto-topbar-actions[^>]*overflow-x-scroll/);
   assert.match(arquiteto, /title: workspaceMode === "silos" \? "Formar a working copy provisória dos Silos" : "Processar lógica sem IA"/);
   assert.match(arquiteto, /title="Selecionar keywords aprovadas no Minerador"/);
   assert.match(arquiteto, /title="Criar novo Silo"/);
-  assert.match(arquiteto, /title="Exportar planilha"/);
+  assert.match(arquiteto, /title="Exportar backup restaurável ou dados editoriais desta Marca"/);
   assert.match(controls, /items-center gap-1 rounded-md[^`]*px-1/);
   assert.match(arquiteto, /<HistoryControls moduleId="arquiteto" showHistory=\{false\} showUndoRedo=\{false\} visualVariant="semantic"/);
   assert.match(topbar, /data-global-topbar-history-button=\{moduleControls\.moduleId\}/);

@@ -1400,10 +1400,30 @@ function safeMetadata(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+/**
+ * QUEM RESPONDE PELO WEBHOOK É O TELEGRAM — TELEGRAM_WEBHOOK_READBACK.
+ *
+ * A leitura era só local: `webhook_url` + `webhook_configured_at`, gravados
+ * apenas por `configure_telegram_webhook`. Um webhook configurado por fora —
+ * outro ambiente, outra ferramenta, um `setWebhook` manual — aparecia como
+ * "Não configurado" para sempre, e a tela contradizia o provedor.
+ *
+ * A ORDEM É: o que o Telegram disse na última consulta manda; o registro
+ * local responde quando ninguém consultou ainda. O contrário faria a tela
+ * repetir uma memória velha depois que o provedor já tivesse mudado.
+ */
 function telegramWebhookState(value: unknown): { telegramWebhookConfigured: boolean; telegramWebhookUrl: string | null } {
-  const telegram = safeMetadata(safeMetadata(value).telegram);
+  const metadata = safeMetadata(value);
+  const telegram = safeMetadata(metadata.telegram);
   const webhookUrl = typeof telegram.webhook_url === "string" && telegram.webhook_url.trim() ? telegram.webhook_url.trim() : null;
   const configuredAt = typeof telegram.webhook_configured_at === "string" && telegram.webhook_configured_at.trim() ? telegram.webhook_configured_at.trim() : null;
+
+  /* O `getWebhookInfo` mais recente, gravado por "Testar Webhook". */
+  const detalhes = safeMetadata(safeMetadata(metadata.health_check).details);
+  const consultado = detalhes.stage === "get_webhook_info";
+  const urlRemota = typeof detalhes.webhookUrl === "string" && detalhes.webhookUrl.trim() ? detalhes.webhookUrl.trim() : null;
+
+  if (consultado) return { telegramWebhookConfigured: Boolean(urlRemota), telegramWebhookUrl: urlRemota || webhookUrl };
   return { telegramWebhookConfigured: Boolean(webhookUrl && configuredAt), telegramWebhookUrl: webhookUrl };
 }
 

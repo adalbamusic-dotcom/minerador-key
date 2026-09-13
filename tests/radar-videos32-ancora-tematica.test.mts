@@ -164,7 +164,12 @@ test("VÍDEOS 3.2 · 3 — dentro de um trecho já temático, a pergunta volta a
   /*
    * "Qual a ordem dos passos da rotina?" pergunta sobre ordem e passos. Num
    * segmento que já falou de rotina, essas palavras são a substância — e é
-   * isso que separa SUPPORTED de uma menção solta.
+   * isso que separa evidência de uma menção solta.
+   *
+   * VIDEOS 3.3 · O QUE MUDOU: quem qualifica agora é a GUIA da pauta, não a
+   * pergunta. "ordem dos passos" é o que ela manda procurar, e um trecho que
+   * cobre um critério de quatro não "responde" — ele cobre um aspecto. O enum
+   * guarda `ANSWERS_QUESTION` para quem cobre dois ou mais.
    */
   const pauta: RadarFrozenBriefInput = {
     briefId: "b1", topic: "Rotina para pele oleosa", narrativePurpose: "",
@@ -175,8 +180,9 @@ test("VÍDEOS 3.2 · 3 — dentro de um trecho já temático, a pergunta volta a
   const segmentos = [{ text: "a ordem dos passos da rotina comeca pela limpeza", startMs: 0, endMs: 4_000 }];
   const { coverage } = matchRadarVideoBriefs({ briefs: [pauta], sources: [fonte({ videoSourceId: "f", segments: segmentos })] });
 
-  assert.equal(coverage[0].extracts.length, 1, "o segmento tem âncora (rotina) e a pergunta o qualifica");
-  assert.equal(coverage[0].extracts[0].supportType, "ANSWERS_QUESTION");
+  assert.equal(coverage[0].extracts.length, 1, "o segmento tem âncora (rotina) e a guia o qualifica");
+  assert.deepEqual(coverage[0].extracts[0].matchedCriteria, ["ordem dos passos"]);
+  assert.equal(coverage[0].extracts[0].supportType, "COVERS_TOPIC", "um critério coberto, sem entidade citada, é cobrir o assunto");
 
   /* Já o mesmo vocabulário SEM a âncora não produz nada. */
   const semAncora = [{ text: "a ordem dos passos comeca pela configuracao", startMs: 0, endMs: 4_000 }];
@@ -214,10 +220,20 @@ test("VÍDEOS 3.2 · 4 — a versão do matcher entra na identidade da execuçã
 test("VÍDEOS 3.2 · 5 — o transcript bruto não abre por padrão", () => {
   const fonte = painel();
 
-  /* O resultado vem primeiro; as fontes com texto, depois. */
-  const resultado = fonte.indexOf("Resultado do casamento");
+  /*
+   * VIDEOS 3.5 · AS DUAS DEIXARAM DE DISPUTAR A MESMA COLUNA.
+   *
+   * A separação que este gate criou continua, por outro meio: a matéria-prima
+   * foi para a coluna de consulta, à direita, e o RESULTADO ocupa a largura
+   * inteira abaixo da grade operacional. Não é mais "quem vem antes" — são
+   * lugares diferentes, e é por isso que um não empurra o outro para fora da
+   * tela.
+   */
+  const grade = fonte.indexOf('data-testid="radar-videos-operational-grid"');
   const fontes = fonte.indexOf("Fontes com texto disponível");
-  assert.ok(resultado > 0 && fontes > resultado, "resultado antes da matéria-prima");
+  const resultado = fonte.indexOf("Resultado do casamento");
+  assert.ok(grade > 0 && fontes > grade, "a matéria-prima vive dentro da grade operacional");
+  assert.ok(resultado > fontes, "e o resultado vem depois dela, em largura total");
 
   /*
    * O TRANSCRIPT RECOLHEU.
@@ -226,7 +242,17 @@ test("VÍDEOS 3.2 · 5 — o transcript bruto não abre por padrão", () => {
    * resultado editorial para fora da tela. `<details>` sem `open`: nasce
    * fechado, não guarda nada e não chama ninguém.
    */
-  const bloco = fonte.slice(fonte.indexOf("Ver transcrição completa") - 400, fonte.indexOf("Ver transcrição completa") + 300);
+  /*
+   * A ÂNCORA É O `<summary>`, NÃO A FRASE.
+   *
+   * "Ver transcrição completa" passou a aparecer ANTES, dentro do InfoHint que
+   * a VIDEOS 3.3 corrigiu — ele diz onde o transcript inteiro continua. Cortar
+   * pela primeira ocorrência recortava o pedaço errado do arquivo e a prova
+   * falava de outro trecho de código.
+   */
+  const marca = fonte.indexOf("Ver transcrição completa</summary>");
+  assert.ok(marca > 0, "o disclosure existe");
+  const bloco = fonte.slice(marca - 400, marca + 300);
   assert.match(bloco, /<details className="mt-2">/);
   assert.equal(/<details[^>]*\bopen\b/.test(bloco), false, "RAW_TRANSCRIPT_DEFAULT_COLLAPSED = YES");
   assert.match(fonte, /data-testid=\{`radar-videos-transcript-\$\{fonte\.id\}`\}/);

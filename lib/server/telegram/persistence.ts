@@ -110,10 +110,42 @@ export async function listActiveBrandExperts(brandId: string, client?: Persisten
   return ((result.data || []) as Array<Record<string, unknown>>).map(mapExpert);
 }
 
-export async function createBrandExpert(input: { brandId: string; displayName: string; specialty?: string | null; createdBy: string }, client?: PersistenceClient) {
-  const result = await clientOrDefault(client).from("brand_experts").insert({ brand_id: input.brandId, display_name: input.displayName.trim(), specialty: input.specialty?.trim() || null, created_by: input.createdBy }).select("id,brand_id,display_name,specialty,status,created_at").single();
+/**
+ * `metadata` guarda de onde o participante veio — SPECIALIST_2.1.
+ *
+ * Um registro criado pelo convite e um digitado na área Marca são a mesma
+ * linha com histórias diferentes. Sem a proveniência, ninguém saberia depois
+ * qual deles pode ter o nome sobrescrito pelo Telegram.
+ */
+export async function createBrandExpert(input: { brandId: string; displayName: string; specialty?: string | null; createdBy: string; metadata?: Record<string, unknown> }, client?: PersistenceClient) {
+  const result = await clientOrDefault(client).from("brand_experts").insert({ brand_id: input.brandId, display_name: input.displayName.trim(), specialty: input.specialty?.trim() || null, created_by: input.createdBy, metadata: input.metadata || {} }).select("id,brand_id,display_name,specialty,status,created_at").single();
   fail(result, "Não foi possível criar o especialista da Marca.");
   return mapExpert(result.data as Record<string, unknown>);
+}
+
+/**
+ * O NOME DO TELEGRAM SUBSTITUI O PROVISÓRIO — e nada além dele.
+ *
+ * O `WHERE display_name = <provisório>` é a guarda inteira: um nome que uma
+ * pessoa digitou na área Marca não é trocado por um apelido de app, mesmo que
+ * a mesma pessoa entre pelo link. Decisão humana ganha de metadado.
+ *
+ * Silencioso por desenho: se nada for atualizado, o convite continua válido e
+ * a tela segue mostrando "Especialista convidado". Falhar o `/start` por causa
+ * de um rótulo deixaria o especialista sem conseguir entrar.
+ */
+export async function renameProvisionalBrandExpert(input: { brandId: string; expertId: string; displayName: string; provisionalName: string }, client?: PersistenceClient) {
+  const nome = input.displayName.trim().slice(0, 160);
+  if (!nome) return false;
+  const result = await clientOrDefault(client)
+    .from("brand_experts")
+    .update({ display_name: nome, updated_at: new Date().toISOString() })
+    .eq("brand_id", input.brandId)
+    .eq("id", input.expertId)
+    .eq("display_name", input.provisionalName)
+    .select("id");
+  if (result.error) return false;
+  return Boolean(result.data?.length);
 }
 
 export async function listBrandExpertBindings(brandId: string, client?: PersistenceClient) {
@@ -129,6 +161,57 @@ export async function issueTelegramOnboardingToken(input: { brandId: string; exp
   fail(result, "Não foi possível criar o token de onboarding Telegram.");
   if (!result.data) throw new Error("TELEGRAM_ONBOARDING_TOKEN_NOT_CREATED");
   return { id: String(result.data.id), token, expiresAt: String(result.data.expires_at) };
+}
+
+/**
+ * O ESTADO DOS CONVITES, para a tela reconstruir a consulta depois do F5.
+ *
+ * O token bruto NÃO volta daqui — `token_hash` é o que existe no banco, e é
+ * assim que tem de ser. O que volta é se ainda há convite ABERTO: com isso a
+ * tela sabe distinguir "aguardando o especialista entrar" de "o link expirou,
+ * gere outro", sem fingir que consegue remontar a URL.
+ */
+export async function listTelegramOnboardingTokens(input: { brandId: string; expertIds: readonly string[] }, client?: PersistenceClient) {
+  if (!input.expertIds.length) return [];
+  const result = await clientOrDefault(client)
+    .from("telegram_onboarding_tokens")
+    .select("id,expert_id,created_at,expires_at,used_at,revoked_at")
+    .eq("brand_id", input.brandId)
+    .in("expert_id", [...input.expertIds])
+    .order("created_at", { ascending: false });
+  fail(result, "Não foi possível ler os convites Telegram desta Marca.");
+  return ((result.data || []) as Array<Record<string, unknown>>).map(row => ({
+    id: String(row.id),
+    expertId: String(row.expert_id),
+    createdAt: String(row.created_at),
+    expiresAt: String(row.expires_at),
+    usedAt: typeof row.used_at === "string" ? row.used_at : null,
+    revokedAt: typeof row.revoked_at === "string" ? row.revoked_at : null,
+  }));
+}
+
+/**
+ * GERAR OUTRO LINK INVALIDA O ANTERIOR — e essa é a parte que importa.
+ *
+ * Sem a revogação, cada clique deixaria mais um convite válido circulando por
+ * WhatsApp e e-mail, todos abrindo a mesma consulta. Um convite de uso único
+ * que se multiplica não é de uso único.
+ *
+ * Só os ABERTOS são revogados: o `ck_telegram_onboarding_token_state` proíbe
+ * `used_at` e `revoked_at` juntos, e revogar um convite já consumido apagaria
+ * o registro de que alguém entrou por ele.
+ */
+export async function revokeOpenTelegramOnboardingTokens(input: { brandId: string; expertId: string }, client?: PersistenceClient) {
+  const result = await clientOrDefault(client)
+    .from("telegram_onboarding_tokens")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("brand_id", input.brandId)
+    .eq("expert_id", input.expertId)
+    .is("used_at", null)
+    .is("revoked_at", null)
+    .select("id");
+  fail(result, "Não foi possível revogar os convites Telegram anteriores.");
+  return (result.data || []).length;
 }
 
 export async function revokeTelegramBinding(bindingId: string, brandId: string, client?: PersistenceClient) {

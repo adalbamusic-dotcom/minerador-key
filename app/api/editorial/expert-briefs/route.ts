@@ -4,6 +4,7 @@ import { AuthzError, assertCanAccessMarca, authzErrorResponse, requireCanonicalS
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { createCanonicalServiceClient } from "@/lib/server/canonical-authorization";
 import { ExpertBriefInputSchema, ExpertBriefStatusSchema } from "@/lib/server/expert-contribution-contracts";
+import { radarSpecialistDuplicateDraft, radarSpecialistRequirementIdOf } from "@/lib/radar/specialist-lifecycle";
 import { createExpertBrief, getExpertBrief, listActiveBrandExperts, listBrandExpertBindings, listExpertBriefsForContext, listExpertContributions, updateExpertBrief } from "@/lib/server/telegram/persistence";
 
 const BriefRequestSchema = ExpertBriefInputSchema.omit({ brandId: true }).extend({ brandId: z.string().uuid() });
@@ -83,10 +84,33 @@ export async function POST(request: Request) {
     await assertEditorialPermission(profile, input.brandId, "radar", "edit");
     const client = createCanonicalServiceClient();
     await assertUsableExpert({ brandId: input.brandId, expertId: input.expertId }, client);
+
+    /*
+     * DOIS CLIQUES NÃO VIRAM DUAS PAUTAS — SPECIALIST_1 · §2.
+     *
+     * A pauta que nasce de um ponto de revisão tem identidade: marca, artigo,
+     * versão do ArticleDNA, requisito e especialista. Sem esta verificação, o
+     * segundo clique em "Criar pauta" — ou uma aba aberta duas vezes — criaria
+     * um pedido gêmeo, e o especialista receberia a mesma dúvida em duplicata.
+     *
+     * A GUARDA MORA NA ROTA, não na tela: o botão desabilitado some no primeiro
+     * F5, e a tela não é a única porta desta rota.
+     *
+     * Devolver a pauta existente é melhor do que recusar: quem pediu queria a
+     * pauta daquele ponto, e ela passa a existir de um jeito ou de outro. O
+     * status 200 com `creation: "already_exists"` diz o que aconteceu.
+     */
+    const requirementId = radarSpecialistRequirementIdOf(input.radarContext);
+    if (requirementId) {
+      const existentes = await listExpertBriefsForContext({ brandId: input.brandId, expertId: input.expertId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
+      const gemea = radarSpecialistDuplicateDraft({ requirementId, briefs: existentes });
+      if (gemea) return NextResponse.json({ brief: gemea, persistence: "remote_readback_confirmed", notification: "NOT_SENT", creation: "already_exists" }, { headers: noStoreHeaders });
+    }
+
     const created = await createExpertBrief({ ...input, status: "draft", createdBy: profile.userId }, client);
     const readback = await getExpertBrief({ brandId: input.brandId, briefId: created.id, expertId: input.expertId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
     if (!readback) throw new AuthzError(503, "A pauta foi criada, mas o readback compatível não foi confirmado.");
-    return NextResponse.json({ brief: readback, persistence: "remote_readback_confirmed", notification: "NOT_SENT" }, { status: 201, headers: noStoreHeaders });
+    return NextResponse.json({ brief: readback, persistence: "remote_readback_confirmed", notification: "NOT_SENT", creation: "created" }, { status: 201, headers: noStoreHeaders });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Dados do brief inválidos.", details: error.issues }, { status: 400, headers: noStoreHeaders });
     const mapped = authzErrorResponse(error);

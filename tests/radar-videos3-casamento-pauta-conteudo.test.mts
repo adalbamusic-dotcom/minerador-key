@@ -70,14 +70,41 @@ const fonte = (patch: Partial<RadarMatchableSource> & { videoSourceId: string })
   ...patch,
 });
 
-/** Uma palestra de verdade: ruído no começo, o assunto no meio, despedida no fim. */
+/**
+ * Uma palestra de verdade: ruído no começo, o assunto no meio, despedida no fim.
+ *
+ * VIDEOS 3.3 · ELA CRESCEU, e por um motivo: a m3 recorta JANELAS em volta da
+ * ocorrência, não segmentos soltos. Numa fixture de cinco linhas toda janela
+ * engolia a palestra inteira, e provas sobre recorte viravam provas sobre nada.
+ * O bloco do retinol fica longe o bastante para ser outra passagem — que é o
+ * que permite mostrar dois recortes diferentes do MESMO áudio.
+ */
 const PALESTRA = [
-  { text: "bom dia a todos e obrigado pelo convite", startMs: 0, endMs: 3_000 },
+  { text: "bom dia a todos e obrigado pelo convite", startMs: 500, endMs: 3_000 },
   { text: "a ordem dos passos da rotina comeca pela limpeza", startMs: 8_140, endMs: 11_000 },
   { text: "depois vem o acido salicilico em concentracao baixa", startMs: 11_000, endMs: 14_200 },
   { text: "vamos falar de outra coisa agora", startMs: 30_000, endMs: 32_000 },
   { text: "o erro comum e usar acido salicilico todo dia", startMs: 40_000, endMs: 44_500 },
+  { text: "vou responder algumas duvidas do publico", startMs: 50_000, endMs: 52_000 },
+  { text: "a primeira veio la do fundo da sala", startMs: 52_000, endMs: 54_000 },
+  { text: "sim eu tambem acho isso importante", startMs: 54_000, endMs: 56_000 },
+  { text: "e ai a gente conversa com calma", startMs: 56_000, endMs: 58_000 },
+  { text: "obrigado pela paciencia de voces", startMs: 58_000, endMs: 60_000 },
+  { text: "agora sim o ultimo bloco de hoje", startMs: 60_000, endMs: 62_000 },
+  { text: "muita gente erra com o retinol logo no comeco", startMs: 62_000, endMs: 65_000 },
+  { text: "o erro comum e usar retinol na primeira semana", startMs: 65_000, endMs: 68_000 },
+  { text: "ate a proxima e bom descanso", startMs: 70_000, endMs: 72_000 },
 ];
+
+/**
+ * A PAUTA CUJO ASSUNTO A PALESTRA REALMENTE COBRE.
+ *
+ * `pauta()` fala de "pele oleosa", e esta palestra nunca diz essas palavras —
+ * na m3 isso vira `PARTIAL`, com o que falta nomeado. Para provar o caminho
+ * `SUPPORTED` é preciso uma pauta cujo assunto o áudio cubra inteiro.
+ */
+const pautaCoberta = (patch: Partial<RadarFrozenBriefInput> & { briefId: string }): RadarFrozenBriefInput =>
+  pauta({ topic: "Rotina de limpeza", relatedSectionTitle: null, ...patch });
 
 /* ==========  A, B e C · QUEM PARTICIPA  ========================== */
 
@@ -110,12 +137,21 @@ test("VÍDEOS 3 · E e F — o texto é o original e os tempos são do segmento"
   assert.ok(trechos.length >= 1);
 
   const primeiro = trechos[0];
-  /* Os tempos são EXATAMENTE os dos segmentos 1 e 2 — nada arredondado. */
-  assert.equal(primeiro.startMs, 8_140);
-  assert.equal(primeiro.endMs, 14_200);
+  /*
+   * OS TEMPOS SÃO EXATAMENTE OS DOS SEGMENTOS DA JANELA — nada arredondado.
+   *
+   * VIDEOS 3.3 · a janela abre em volta da ocorrência, porque um segmento de
+   * sete palavras não carrega assunto e relação ao mesmo tempo. O que NÃO muda
+   * é a origem: começo do primeiro segmento, fim do último, texto colado deles.
+   */
+  assert.deepEqual(primeiro.segmentIndexes, [0, 1, 2, 3, 4, 5, 6]);
+  assert.equal(primeiro.startMs, 500, "o início é o do primeiro segmento da janela");
+  assert.equal(primeiro.endMs, 54_000, "e o fim é o do último");
+  assert.equal(primeiro.startMs, PALESTRA[primeiro.segmentIndexes[0]].startMs);
+  assert.equal(primeiro.endMs, PALESTRA[primeiro.segmentIndexes[primeiro.segmentIndexes.length - 1]].endMs);
   /* E o texto é a concatenação exata deles, sem reescrita. */
-  assert.equal(primeiro.originalText, "a ordem dos passos da rotina comeca pela limpeza depois vem o acido salicilico em concentracao baixa");
-  assert.deepEqual(primeiro.segmentIndexes, [1, 2]);
+  assert.equal(primeiro.originalText, primeiro.segmentIndexes.map(indice => PALESTRA[indice].text).join(" "));
+  assert.match(primeiro.originalText, /a ordem dos passos da rotina comeca pela limpeza depois vem o acido salicilico/);
 
   /* Cada palavra do trecho veio do transcript, e nenhuma foi acrescentada. */
   const doTranscript = PALESTRA.map(item => item.text).join(" ");
@@ -216,13 +252,18 @@ test("VÍDEOS 3 · H — pauta sem evidência é NOT_FOUND, e isso não é erro"
   assert.equal(coverage[0].state, "NOT_FOUND");
   assert.deepEqual(coverage[0].extracts, []);
   assert.deepEqual(coverage[0].usefulSourceIds, []);
-  assert.match(coverage[0].reason, /Isso não é falha/);
+  assert.match(coverage[0].reason, /Nenhuma passagem atende o que esta pauta manda procurar/);
 });
 
 test("VÍDEOS 3 · I — tocar o assunto sem responder a pergunta permanece PARTIAL", () => {
   /*
-   * O SEGMENTO CITA A ENTIDADE E NÃO RESPONDE NADA. Chamar isso de SUPPORTED
+   * O SEGMENTO CITA A ENTIDADE E NÃO ATENDE A GUIA. Chamar isso de SUPPORTED
    * venderia cobertura que não existe — e o Planejador leria como resolvido.
+   *
+   * VIDEOS 3.4 · "eu uso ácido salicílico há anos" toca o objetivo do título
+   * (procedimento) e não cobre NENHUM aspecto da guia. Vira PARCIAL com zero
+   * de um — e é isso que se lê na tela: há resposta de longe, e falta tudo o
+   * que a pauta mandou procurar.
    */
   const soMenciona = [
     { text: "eu uso acido salicilico ha anos", startMs: 1_000, endMs: 3_000 },
@@ -234,20 +275,31 @@ test("VÍDEOS 3 · I — tocar o assunto sem responder a pergunta permanece PART
   });
 
   assert.equal(coverage[0].state, "PARTIAL");
-  assert.ok(coverage[0].extracts.length >= 1);
-  assert.equal(coverage[0].extracts[0].supportType, "MENTIONS_ENTITY");
-  assert.match(coverage[0].reason, /nenhuma das 1 pergunta\(s\) da pauta foi respondida/);
+  assert.deepEqual(coverage[0].matchedCriteria, [], "nenhum aspecto da guia foi coberto");
+  assert.deepEqual(coverage[0].missingCriteria, ["ordem dos passos"]);
+  assert.match(coverage[0].reason, /0 de 1 aspecto\(s\) da guia encontrado\(s\), falta: ordem dos passos\./);
 
-  /* Responder UMA de duas também é PARTIAL, e a que falta é nomeada. */
-  const duasPerguntas = pauta({ briefId: "b2", questions: ["Qual a ordem dos passos da rotina?", "Quanto tempo dura o tratamento completo?"] });
-  const parcial = matchRadarVideoBriefs({ briefs: [duasPerguntas], sources: [fonte({ videoSourceId: "f1", segments: PALESTRA })] });
+  /* Atender UM de dois critérios é PARTIAL, e o que falta é nomeado. */
+  const duasCoisas = pautaCoberta({ briefId: "b2", whatToLookFor: ["ordem dos passos", "os sinais visiveis no rosto"] });
+  const parcial = matchRadarVideoBriefs({ briefs: [duasCoisas], sources: [fonte({ videoSourceId: "f1", segments: PALESTRA })] });
   assert.equal(parcial.coverage[0].state, "PARTIAL");
-  assert.match(parcial.coverage[0].reason, /falta: Quanto tempo dura o tratamento completo\?/);
+  assert.deepEqual(parcial.coverage[0].matchedCriteria, ["ordem dos passos"]);
+  assert.match(parcial.coverage[0].reason, /1 de 2 aspecto\(s\) da guia encontrado\(s\), falta: os sinais visiveis no rosto\./);
 
-  /* E responder todas é SUPPORTED. */
-  const completa = matchRadarVideoBriefs({ briefs: [pauta({ briefId: "b3" })], sources: [fonte({ videoSourceId: "f1", segments: PALESTRA })] });
+  /*
+   * VIDEOS 3.3 · E A PAUTA CUJO ASSUNTO O ÁUDIO NÃO COBRE NÃO RECEBE NADA.
+   *
+   * `pauta()` fala de pele oleosa e esta palestra nunca diz isso. O assunto é
+   * metade do portão, e sem ele não há trecho — nem com a guia inteira
+   * atendida por outro assunto.
+   */
+  const assuntoDescoberto = matchRadarVideoBriefs({ briefs: [pauta({ briefId: "b4", topic: "Fotoprotetor mineral", questions: ["Qual fotoprotetor mineral escolher?"], entities: ["óxido de zinco"] })], sources: [fonte({ videoSourceId: "f1", segments: PALESTRA })] });
+  assert.equal(assuntoDescoberto.coverage[0].state, "NOT_FOUND");
+
+  /* E atender a guia inteira, sobre o assunto certo, é SUPPORTED. */
+  const completa = matchRadarVideoBriefs({ briefs: [pautaCoberta({ briefId: "b3" })], sources: [fonte({ videoSourceId: "f1", segments: PALESTRA })] });
   assert.equal(completa.coverage[0].state, "SUPPORTED");
-  assert.match(completa.coverage[0].reason, /1 fonte\(s\) útil\(eis\)/);
+  assert.match(completa.coverage[0].reason, /Objetivo da pauta respondido em 1 trecho\(s\) · 1 de 1 aspecto\(s\) da guia encontrado\(s\) em 1 fonte\(s\)\./);
 });
 
 /* ==========  D e J · A FONTE É REUTILIZADA  ===================== */
@@ -261,7 +313,7 @@ test("VÍDEOS 3 · D e J — o mesmo transcript serve a dois artigos, sem retran
 
   const artigoA = matchRadarVideoBriefs({ briefs: [pauta({ briefId: "a1" })], sources: [mesmaFonte] });
   const artigoB = matchRadarVideoBriefs({
-    briefs: [pauta({ briefId: "b1", topic: "Erros comuns com ácidos", whatToLookFor: ["erro comum"], questions: [], entities: ["ácido salicílico"] })],
+    briefs: [pauta({ briefId: "b1", topic: "Erros comuns com retinol", whatToLookFor: ["erro comum"], questions: [], entities: ["retinol"] })],
     sources: [mesmaFonte],
   });
 
@@ -359,7 +411,16 @@ test("VÍDEOS 3 · M — o recorte é amarrado ao bundle congelado que o origino
    */
   assert.match(rota(), /if \(!pautas\) \{\s*\r?\n\s*return NextResponse\.json\(\{\s*\r?\n\s*success: false, code: "FROZEN_INVESTIGATION_REQUIRED",/);
   assert.match(rota(), /status: 409/);
-  assert.match(rota(), /videoBriefSnapshots/);
+  /*
+   * VIDEOS_3.4.1 · A LEITURA DAS PAUTAS MUDOU DE CASA, NÃO DE REGRA.
+   *
+   * Ela saiu da rota e virou o read model que o clique e o F5 compartilham —
+   * duas montagens do mesmo resultado era o defeito que aquele gate corrigiu.
+   * O que se exige continua sendo o mesmo: bundle congelado, nunca blueprint.
+   */
+  const leitura = ler("../lib/server/radar-video-matching-read.ts");
+  assert.match(leitura, /videoBriefSnapshots/);
+  assert.match(rota(), /readRadarFrozenVideoBriefs\(context\.brandId, parsed\.data\.articleId\)/);
   const corpo = rota().replace(/\/\*[\s\S]*?\*\//g, "");
   assert.ok(!corpo.includes("blueprint?.videoBriefs"), "o blueprint vivo não é usado");
   assert.ok(!corpo.includes("videoBriefs)"), "nem por outro caminho");
@@ -379,7 +440,7 @@ test("VÍDEOS 3 · N — clicar numa pauta não chama nada", async () => {
   const { RadarR3VideosPanel } = await import("../modules/radar/radar-r3-videos-panel.tsx");
 
   const { coverage } = matchRadarVideoBriefs({
-    briefs: [pauta({ briefId: "b1" })],
+    briefs: [pautaCoberta({ briefId: "b1" })],
     sources: [fonte({ videoSourceId: "f1", segments: PALESTRA })],
   });
 
@@ -412,8 +473,8 @@ test("VÍDEOS 3 · N — clicar numa pauta não chama nada", async () => {
   /* §5 · estado, fonte, trecho original e tempos — tudo por pauta. */
   assert.equal(tela.get("radar-videos-coverage-b1").textContent, "SUPPORTED");
   assert.match(tela.text(), /a ordem dos passos da rotina comeca pela limpeza/);
-  assert.match(tela.text(), /Por que ajuda:/);
-  assert.match(tela.text(), /00:08–00:14/, "e o tempo mostrado é o do segmento");
+  assert.match(tela.text(), /cobre: ordem dos passos/, "o trecho diz qual critério da pauta ele sustenta");
+  assert.match(tela.text(), /00:01–00:54/, "e o tempo mostrado é o da janela real");
 
   /* E ler o resultado não chama nada: nem provider, nem a ação de casar. */
   assert.equal(tentativasDeRede.length, antes, "ler o resultado não chama provider");
@@ -431,10 +492,19 @@ test("VÍDEOS 3 · K — o casamento vem do servidor, então sobrevive ao F5", (
   assert.match(texto, /const \[videoMatching, setVideoMatching\] = useState/);
   assert.match(texto, /fetch\("\/api\/editorial\/radar-video-matching"/);
 
-  /* E a resposta usada é a RELIDA do banco, não a que foi calculada. */
-  assert.match(rota(), /READBACK: o que respondemos é o que o banco confirmou/);
-  assert.match(rota(), /const gravado = await readRadarExtractRun\(\{[\s\S]{0,200}\}\);\s*\r?\n\s*const relido = radarCoverageFromExtracts/);
-  assert.match(rota(), /coverage: relido,/);
+  /*
+   * E A RESPOSTA USADA É A RELIDA DO BANCO, não a que foi calculada — pela
+   * MESMA projeção que o carregamento usa (VIDEOS_3.4.1 · §4). Duas montagens
+   * do mesmo resultado era o que fazia o F5 discordar do clique.
+   */
+  assert.match(rota(), /READBACK PELA MESMA PROJEÇÃO QUE O F5 USA/);
+  assert.match(rota(), /const gravado = await loadRadarVideoBriefMatching\(\{/);
+  assert.match(rota(), /coverage: gravado\.coverage,/);
+
+  /* E a tela LÊ o casamento gravado ao abrir: é isso que sobrevive ao F5. */
+  assert.match(texto, /const busca = new URLSearchParams\(\{ brandId: selectedBrandId, articleId \}\);/);
+  assert.match(texto, /fetch\(`\/api\/editorial\/radar-video-matching\?\$\{busca\.toString\(\)\}`, \{ cache: "no-store" \}\)/);
+  assert.match(texto, /void loadVideoMatching\(articleId\);/);
 
   /* Nenhum efeito de render casa pautas: a ação é humana. */
   for (const efeito of texto.match(/useEffect\([\s\S]*?\n {2}\}, \[[^\]]*\]\);/g) || []) {
@@ -445,8 +515,8 @@ test("VÍDEOS 3 · K — o casamento vem do servidor, então sobrevive ao F5", (
   /* A cobertura persistida é reclassificada pelo MESMO classificador. */
   assert.match(dominio(), /export function radarCoverageFromExtracts/);
   const coberturaGravada = radarCoverageFromExtracts({
-    briefs: [pauta({ briefId: "b1" })],
-    extracts: matchRadarVideoBriefs({ briefs: [pauta({ briefId: "b1" })], sources: [fonte({ videoSourceId: "f1", segments: PALESTRA })] }).coverage[0].extracts,
+    briefs: [pautaCoberta({ briefId: "b1" })],
+    extracts: matchRadarVideoBriefs({ briefs: [pautaCoberta({ briefId: "b1" })], sources: [fonte({ videoSourceId: "f1", segments: PALESTRA })] }).coverage[0].extracts,
   });
   assert.equal(coberturaGravada[0].state, "SUPPORTED");
 });
@@ -475,8 +545,10 @@ test("VÍDEOS 3 · §6 — o trecho fica no idioma original, e a limitação é 
    * criar nada: eles são o vocabulário operacional que abria janelas entre
    * assuntos sem relação.
    *
-   * A pergunta segue não respondida: "Qual a ordem dos passos da rotina?" pede
-   * dois termos, e só "rotina" aparece. Menção sem resposta é MENTIONS_ENTITY.
+   * VIDEOS 3.3 · E A RELAÇÃO TAMBÉM SE DIZ EM INGLÊS. "order" e "steps" não
+   * criam assunto nenhum — continuam vocabulário operacional —, mas dizem O QUE
+   * está sendo dito sobre "rotina", que é a segunda metade do portão. Por isso
+   * a pergunta passa a estar respondida por este trecho.
    */
   assert.equal(trecho.originalText, "the order of the rotina steps starts with limpeza then comes acido salicilico", "o texto continua como veio");
   assert.deepEqual(trecho.segmentIndexes, [0, 1]);
@@ -520,7 +592,7 @@ test("VÍDEOS 3 · §14 — nenhum artigo, nenhum ContentPlan, nenhuma pesquisa"
 
   /* E o resumo existe para a tela falar de cobertura, não de artigo. */
   const resumo = summarizeRadarBriefCoverage(
-    matchRadarVideoBriefs({ briefs: [pauta({ briefId: "b1" }), pauta({ briefId: "b2", topic: "Fotoprotetor", questions: ["Qual escolher?"], entities: ["óxido de zinco"], whatToLookFor: ["textura"] })], sources: [fonte({ videoSourceId: "f1", segments: PALESTRA })] }).coverage,
+    matchRadarVideoBriefs({ briefs: [pautaCoberta({ briefId: "b1" }), pauta({ briefId: "b2", topic: "Fotoprotetor", questions: ["Qual escolher?"], entities: ["óxido de zinco"], whatToLookFor: ["textura"] })], sources: [fonte({ videoSourceId: "f1", segments: PALESTRA })] }).coverage,
   );
   assert.equal(resumo.briefs, 2);
   assert.equal(resumo.supported, 1);

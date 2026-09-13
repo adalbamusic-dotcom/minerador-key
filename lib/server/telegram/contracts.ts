@@ -138,6 +138,17 @@ export type TelegramInboundSource = {
   updateId: string;
   userId: string | null;
   chatId: string | null;
+  /**
+   * O QUE O TELEGRAM DIZ SOBRE QUEM ESCREVEU — e por que não vai ao metadata.
+   *
+   * Serve para nomear o participante provisório no `/start`, no lugar de
+   * "Especialista convidado". Fica FORA de `sanitizeTelegramUpdateMetadata`
+   * de propósito: `telegram_inbound_updates` é o log de entrega, e nome de
+   * pessoa não pertence a um log técnico que ninguém precisa ler.
+   */
+  firstName: string | null;
+  lastName: string | null;
+  username: string | null;
   messageId: string | null;
   callbackQueryId: string | null;
   callbackData: string | null;
@@ -181,6 +192,9 @@ export function extractTelegramInbound(update: TelegramUpdate): TelegramInboundS
     updateId: String(update.update_id),
     userId: stringId(message?.from?.id || callback?.from.id),
     chatId: stringId(sourceMessage?.chat.id),
+    firstName: message?.from?.first_name || callback?.from.first_name || null,
+    lastName: message?.from?.last_name || callback?.from.last_name || null,
+    username: message?.from?.username || callback?.from.username || null,
     messageId: stringId(sourceMessage?.message_id),
     callbackQueryId: callback?.id || null,
     callbackData: callback?.data || null,

@@ -643,3 +643,66 @@ Executado via Supabase CLI 2.111.0, db query --linked, em transação única.
 - Validação nas duas sessões da interface: AINDA NÃO VERIFICADA nesta execução. Cache local não foi apagado. Não declarar sincronização visual homologada com base apenas neste SQL.
 - Script: supabase/scripts/2026-09-08-descarte-arquiteto-radar-care-glow.sql. Mantido em simulação por padrão. Ele aborta se grafos reaparecerem: não é reset universal para qualquer acervo futuro.
 - Nenhum commit, push ou deploy executado nesta entrega.
+
+## Coerência entre título e guia das pautas audiovisuais — registrado em 2026-09-13
+
+Regra para a GERAÇÃO FUTURA de VideoBrief (VIDEOS_3.4 · §10). Nada retroativo:
+bundle congelado permanece como está.
+
+- `whatToLookFor` deve ser semanticamente coerente com o `title` da pauta. Hoje a
+  guia sai do tipo do conceito e da presença de especialista, enquanto o título sai
+  do rótulo do bloco — e os dois podem discordar.
+- Discordância real no bundle `bundle:2be6e384`: a pauta "O que causa acne?" recebeu
+  a guia do ramo do especialista (ressalva do profissional, exceção à regra, erro
+  comum). Nenhum desses três pede CAUSA, que é o que o título promete.
+- Guia correta para uma pauta causal: fatores que contribuem; mecanismos mencionados;
+  causas diferenciadas de agravantes; ressalvas do profissional.
+- A geração deve validar TITLE_INTENT ↔ WHAT_TO_LOOK_FOR antes de congelar.
+- Efeito hoje: o casamento (m4) usa o TÍTULO como contrato e não deixa a guia
+  compensá-lo, então a incoerência aparece como pauta NOT_FOUND — não como
+  evidência errada. A pauta continua nascendo torta; só não contamina mais o
+  resultado.
+- Ponto no código: `razaoDeVideo`, em `lib/radar/editorial-blueprint.ts`.
+
+## SPECIALIST_2.1 — dívidas abertas da consulta externa
+
+Registradas em 2026-09-13, ao liberar a consulta Telegram sem cadastro manual.
+Nenhuma delas bloqueia o smoke; todas bloqueiam produção multi-marca.
+
+### P1 — MULTI-MARCA: uma pessoa, uma marca só
+
+Os índices `uq_telegram_binding_active_user` e `uq_telegram_binding_active_chat`,
+criados em `20260825150000_telegram_expert_contribution_platform_foundation.sql`,
+são únicos por `(bot_key, telegram_user_id)` e `(bot_key, telegram_chat_id)`
+entre TODAS as marcas. Consequência concreta: uma pessoa vinculada à marca A que
+abrir o link da marca B recebe `23505` e o webhook responde
+`TELEGRAM_BINDING_ALREADY_EXISTS` — um erro que ela não causou e não consegue
+resolver.
+
+O efeito é duplo: `findActiveTelegramBinding` (`lib/server/telegram/persistence.ts`)
+busca por `telegram_user_id` SEM `brandId` e usa `maybeSingle()`. Mesmo depois de
+afrouxar o índice, o roteamento precisaria decidir a qual consulta uma mensagem
+pertence — hoje ele depende de só existir uma.
+
+Corrigir ANTES de liberar o fluxo para mais de uma marca em produção. Exige
+migration (identidade Telegram global, participação N:N) e reescrita do
+roteamento de binding.
+
+### P1 — MAIS DE 8 PAUTAS SÃO TRUNCADAS EM SILÊNCIO
+
+`sendBriefSelection`, em `lib/server/telegram/webhook.ts`, monta o teclado com
+`briefs.slice(0, 8)`. Da nona pauta em diante o especialista não vê a opção e não
+recebe aviso nenhum — ele simplesmente não consegue responder àquele ponto.
+
+Nunca truncar pauta em silêncio: ou pagina, ou diz quantas ficaram de fora.
+
+### BACKLOG FUTURO — canal de e-mail
+
+Não implementado neste gate por decisão explícita do SPECIALIST_2.1 §9. O link
+copiado já pode ser colado num e-mail escrito por uma pessoa.
+
+- `EMAIL_OUTBOUND` — enviar o convite por e-mail a partir do Radar, com o mesmo
+  token one-time. Exige provider transacional e registro de entrega.
+- `EMAIL_INBOUND_WEBHOOK` — receber a contribuição por resposta de e-mail.
+  Exige dedupe por Message-ID equivalente ao de `external_update_id`, e uma
+  decisão sobre anexos (o pipeline de mídia hoje só conhece `telegram_file_id`).

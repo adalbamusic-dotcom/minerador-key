@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getTelegramBot } from "./adapter";
 import { extractTelegramInbound, sanitizeTelegramUpdateMetadata, TelegramUpdateSchema, TELEGRAM_WEBHOOK_HEADER, type TelegramSecret } from "./contracts";
 import { resolveTelegramPlatformSecret, type TelegramPlatformSecretResolution } from "./canonical";
+import { RADAR_SPECIALIST_PROVISIONAL_NAME, radarSpecialistTelegramDisplayName } from "@/lib/radar/specialist-consultation";
 import {
   claimTelegramInboundUpdate,
   consumeTelegramOnboardingToken,
@@ -16,6 +17,7 @@ import {
   listOpenExpertBriefs,
   markBindingInteraction,
   markExpertBriefAwaitingReview,
+  renameProvisionalBrandExpert,
   selectTelegramBrief,
   type PersistenceClient,
   type TelegramBindingRecord,
@@ -76,6 +78,24 @@ async function handleStart(input: { secret: TelegramSecret; inbound: ReturnType<
   if (!binding) {
     await bot.sendMessage({ chatId, text: "Este link de conexão é inválido, expirou ou já foi utilizado." });
     return markIgnored(input.inbound.updateId, "TELEGRAM_ONBOARDING_TOKEN_INVALID", input.client);
+  }
+  /*
+   * O CONVIDADO GANHA NOME AQUI — e o convite não depende disso.
+   *
+   * O participante nasceu como "Especialista convidado" porque, na hora do
+   * convite, ninguém sabia quem ia aceitar. Agora o Telegram informou, e a
+   * tela do Radar deixa de mostrar um rótulo genérico para sempre.
+   *
+   * Não bloqueia: se o Telegram não trouxer nome nem @username, ou se a
+   * atualização falhar, o vínculo já está feito e o especialista entra do
+   * mesmo jeito. Um rótulo não pode barrar uma consulta.
+   */
+  const nomeReal = radarSpecialistTelegramDisplayName(input.inbound);
+  if (nomeReal) {
+    await renameProvisionalBrandExpert({
+      brandId: binding.brandId, expertId: binding.expertId,
+      displayName: nomeReal, provisionalName: RADAR_SPECIALIST_PROVISIONAL_NAME,
+    }, dependencyClient(input.client));
   }
   await bot.sendMessage({ chatId, text: "Conexão confirmada. Envie uma contribuição quando um brief estiver disponível." });
   await finishTelegramInboundUpdate(input.inbound.updateId, "PROCESSED", { bindingId: binding.id }, dependencyClient(input.client));
