@@ -378,8 +378,15 @@ export function radarDossierDivergesFromFrozen(dossier: RadarEvidenceBundle, fro
  */
 export type RadarPlannerChannelState = "FINALIZED" | "NOT_EXECUTED" | "UNAVAILABLE";
 
-/** §19 e §20 — áreas sem engine declaram estado, nunca evidência inventada. */
-export type RadarPlannerAreaState = "NOT_USED" | "NOT_STARTED" | "NOT_REQUIRED" | "REQUIREMENTS_PREPARED";
+/**
+ * §19 e §20 — áreas sem engine declaram estado, nunca evidência inventada.
+ *
+ * `EVIDENCE_ACCEPTED` entrou com o SPECIALIST_3 e é o único estado desta lista
+ * que afirma um FATO EDITORIAL: alguém leu uma resposta profissional e a
+ * aceitou. Ele não é inferido de contribuição recebida — só da decisão humana
+ * que viaja na camada de especialista do dossiê.
+ */
+export type RadarPlannerAreaState = "NOT_USED" | "NOT_STARTED" | "NOT_REQUIRED" | "REQUIREMENTS_PREPARED" | "EVIDENCE_ACCEPTED";
 
 export const RADAR_PLANNER_CONTRACT_VERSION = 3;
 
@@ -557,7 +564,17 @@ export function buildRadarPlannerEvidenceHandoff(input: {
     },
     areas: {
       videos: input.areas?.videos ?? "NOT_USED",
-      specialist: input.areas?.specialist ?? (requisitos.length ? "REQUIREMENTS_PREPARED" : "NOT_REQUIRED"),
+      /*
+       * "EVIDÊNCIA ACEITA" SÓ SAI DA DECISÃO HUMANA GRAVADA — SPECIALIST_3 · §10.
+       *
+       * A camada de especialista do dossiê carrega exclusivamente contribuições
+       * com decisão ativa; não decididas e recusadas viajam como CONTAGEM, não
+       * como item. Por isso ler `items.length` aqui não pode confundir "chegou
+       * resposta" com "uma pessoa aceitou" — a camada já separou as duas coisas.
+       */
+      specialist: input.areas?.specialist ?? (input.dossier.specialist?.items.length
+        ? "EVIDENCE_ACCEPTED"
+        : requisitos.length ? "REQUIREMENTS_PREPARED" : "NOT_REQUIRED"),
     },
     editorialBlueprint: input.blueprint,
     acknowledgedInsufficiency: frozen.acknowledgedInsufficiency,

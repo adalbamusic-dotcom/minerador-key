@@ -5,6 +5,7 @@ import { assertEditorialPermission } from "@/lib/server/editorial-authorization"
 import { createCanonicalServiceClient } from "@/lib/server/canonical-authorization";
 import { ExpertBriefInputSchema, ExpertBriefStatusSchema } from "@/lib/server/expert-contribution-contracts";
 import { radarSpecialistDuplicateDraft, radarSpecialistRequirementIdOf } from "@/lib/radar/specialist-lifecycle";
+import { radarContextPreservingReviews } from "@/lib/radar/specialist-contribution-review";
 import { createExpertBrief, getExpertBrief, listActiveBrandExperts, listBrandExpertBindings, listExpertBriefsForContext, listExpertContributions, updateExpertBrief } from "@/lib/server/telegram/persistence";
 
 const BriefRequestSchema = ExpertBriefInputSchema.omit({ brandId: true }).extend({ brandId: z.string().uuid() });
@@ -130,7 +131,22 @@ export async function PATCH(request: Request) {
     const current = await getExpertBrief({ brandId: input.brandId, briefId: input.briefId, expertId: input.expertId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
     if (!current) throw new AuthzError(404, "Pauta não encontrada neste contexto de artigo, versão e especialista.");
     if (!["draft", "reviewed"].includes(current.status)) throw new AuthzError(409, "Esta pauta já foi enviada ou está recebendo contribuição; suas perguntas estão congeladas.");
-    const updated = await updateExpertBrief({ ...input, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
+
+    /*
+     * SALVAR UMA PERGUNTA NÃO PODE APAGAR UMA DECISÃO — SPECIALIST_3 · §13.
+     *
+     * O cliente manda o `radar_context` inteiro, montado a partir de uma
+     * leitura que pode ser de minutos atrás. As decisões humanas sobre as
+     * contribuições vivem nesse mesmo objeto, e são gravadas por outra rota:
+     * sem esta guarda, editar o título da pauta devolveria ao banco um
+     * contexto sem as decisões tomadas nesse intervalo — em outra aba, em
+     * outra máquina, ou pela pessoa que revisava enquanto esta editava.
+     *
+     * O QUE ESTÁ GRAVADO VENCE. Esta rota não é a dona dessa informação, e o
+     * que ela não é dona ela preserva em vez de propagar.
+     */
+    const radarContext = radarContextPreservingReviews({ incoming: input.radarContext, stored: current.radarContext });
+    const updated = await updateExpertBrief({ ...input, radarContext, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
     if (!updated) throw new AuthzError(404, "Pauta não encontrada neste contexto de artigo, versão e especialista.");
     const readback = await getExpertBrief({ brandId: input.brandId, briefId: input.briefId, expertId: input.expertId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId }, client);
     if (!readback) throw new AuthzError(503, "A pauta foi atualizada, mas o readback compatível não foi confirmado.");

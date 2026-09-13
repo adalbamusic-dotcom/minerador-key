@@ -516,11 +516,12 @@ test("SPECIALIST_1 · §2 — criar a consulta é ação humana explícita e lev
    */
   const { tela, servidor } = await montarPainel({ experts: [expertAtivo] }, [requisito]);
   try {
-    const botao = tela.get("radar-specialist-create-consultation") as HTMLButtonElement;
+    const botao = tela.get("radar-specialist-next-action") as HTMLButtonElement;
+    assert.equal(botao.textContent, "Criar consulta", "a próxima ação deste ponto é criar a consulta");
     assert.equal(botao.disabled, false, "não é preciso cadastrar ninguém antes");
     assert.equal(servidor.chamadas.filter(item => item.method === "POST").length, 0, "montar a tela não cria consulta nenhuma");
 
-    await tela.click("radar-specialist-create-consultation");
+    await tela.click("radar-specialist-next-action");
 
     const posts = servidor.chamadas.filter(item => item.method === "POST");
     assert.equal(posts.length, 1, "REQUIREMENT_CAN_CREATE_DRAFT = YES");
@@ -545,7 +546,7 @@ test("SPECIALIST_1 · §2 — criar a consulta é ação humana explícita e lev
 test("SPECIALIST_1 · §2 — dois cliques seguidos não abrem dois pedidos", async () => {
   const { tela, servidor } = await montarPainel({ experts: [expertAtivo] }, [requisito]);
   try {
-    await tela.doubleClick("radar-specialist-create-consultation");
+    await tela.doubleClick("radar-specialist-next-action");
 
     assert.equal(servidor.chamadas.filter(item => item.method === "POST").length, 1, "DUPLICATE_DRAFT_PROTECTED = YES");
   } finally {
@@ -576,10 +577,19 @@ test("SPECIALIST_1 · §5 — a tela mostra pedidos enviados lidos do banco, nã
     assert.ok(contadores.includes("0 resposta(s)"));
     assert.ok(contadores.includes("0 aceita(s)"));
 
-    const pautas = tela.all("radar-specialist-brief-row").map(item => item.textContent || "");
-    assert.ok(pautas.some(texto => texto.includes("Aguardando o especialista")));
-    assert.ok(pautas.some(texto => texto.includes("Pauta em rascunho")));
-    assert.ok(!pautas.some(texto => texto.includes("Pauta revisada")), "o rótulo legado não chega à tela");
+    /*
+     * O ESTADO DE CADA PAUTA CONTINUA VISÍVEL — no card do seu ponto.
+     *
+     * O SPECIALIST_3 eliminou a lista "PAUTAS / PEDIDOS": ela duplicava o card
+     * do ponto, com o mesmo título e outro botão. O que este teste protege —
+     * que o estado canônico apareça e o rótulo legado do banco não — continua
+     * valendo, e agora é lido de onde a pessoa opera.
+     */
+    const pontos = tela.all("radar-specialist-review-point").map(item => item.textContent || "");
+    assert.equal(pontos.length, 2);
+    assert.ok(pontos.some(texto => texto.includes("Aguardando o especialista")), `estados: ${pontos.join(" | ")}`);
+    assert.ok(pontos.some(texto => texto.includes("Pauta em rascunho")), `estados: ${pontos.join(" | ")}`);
+    assert.ok(!pontos.some(texto => texto.includes("Pauta revisada")), "o rótulo legado não chega à tela");
   } finally {
     tela.destroy();
     servidor.restaurar();

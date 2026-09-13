@@ -317,6 +317,40 @@ export async function updateExpertBrief(input: { brandId: string; expertId: stri
   return result.data ? mapBrief(result.data as Record<string, unknown>) : null;
 }
 
+/**
+ * GRAVAR SÓ O `radar_context` — e não tocar em mais nada da pauta.
+ *
+ * A decisão humana sobre uma contribuição acontece DEPOIS do envio, quando as
+ * perguntas já estão congeladas. `updateExpertBrief` reescreve título, artigo,
+ * perguntas e status: usá-la para registrar um "Aceitar como evidência" faria
+ * um clique de revisão reenviar a pauta inteira de volta ao banco, com o que
+ * quer que a tela tivesse em mãos naquele instante.
+ *
+ * `updated_at` também fica de fora, e é deliberado: a pauta não mudou. Mexer
+ * nela faria a coluna de data dizer que o especialista foi consultado agora.
+ */
+export async function persistExpertBriefRadarContext(input: {
+  brandId: string;
+  briefId: string;
+  expertId: string;
+  articleId: string;
+  articleDnaVersionId: string;
+  radarContext: Record<string, unknown>;
+}, client?: PersistenceClient) {
+  const result = await clientOrDefault(client)
+    .from("expert_briefs")
+    .update({ radar_context: input.radarContext })
+    .eq("brand_id", input.brandId)
+    .eq("id", input.briefId)
+    .eq("expert_id", input.expertId)
+    .eq("article_id", input.articleId)
+    .eq("article_dna_version_id", input.articleDnaVersionId)
+    .select(EXPERT_BRIEF_SELECT)
+    .maybeSingle();
+  fail(result, "Não foi possível gravar a decisão sobre a contribuição.");
+  return result.data ? mapBrief(result.data as Record<string, unknown>) : null;
+}
+
 const EXPERT_CONTRIBUTION_SELECT = "id,brand_id,expert_id,brief_id,provider,source_type,original_text,transcript_text,organization_payload,external_update_id,original_asset_uri,original_checksum,processing_status,received_at";
 
 function mapContribution(row: Record<string, unknown>) {

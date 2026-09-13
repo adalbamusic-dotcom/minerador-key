@@ -36,6 +36,7 @@ import { assertRadarAiDiscoveryAuthority, type RadarAiDiscoveryContext } from ".
 
 import type { RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
 import { assertRadarVideoEvidenceLayer, type RadarVideoEvidenceLayer } from "./video-evidence.ts";
+import { assertRadarSpecialistEvidenceLayer, type RadarSpecialistEvidenceLayer } from "./specialist-evidence.ts";
 
 /* ============================== o vínculo =============================== */
 
@@ -73,6 +74,18 @@ export type RadarEvidenceBundle = {
    * uma execução vazia.
    */
   video: RadarVideoEvidenceLayer | null;
+  /**
+   * A EVIDÊNCIA PROFISSIONAL — SPECIALIST_3 · §9, e ela vive AQUI também.
+   *
+   * Pelo mesmo motivo da camada de vídeo: o Radar não reescreve o contrato que
+   * o Arquiteto aprovou. O que um especialista respondeu ACRESCENTA evidência à
+   * versão do ArticleDNA — não redefine o artigo.
+   *
+   * `null` quando nenhuma contribuição foi aceita ainda, o que é diferente de
+   * uma camada vazia: `null` diz "não houve", a camada com `items: []` e
+   * `notApproved: 3` diz "houve, e ninguém decidiu".
+   */
+  specialist: RadarSpecialistEvidenceLayer | null;
 };
 
 /* ============================ as invariantes ============================ */
@@ -132,6 +145,21 @@ export function assertRadarEvidenceProvenance(bundle: RadarEvidenceBundle): void
    * identidade chegariam ao Planejador como evidência que ninguém confere.
    */
   if (bundle.video) assertRadarVideoEvidenceLayer(bundle.video);
+
+  /*
+   * A CAMADA DE ESPECIALISTA TAMBÉM PRECISA APONTAR PARA ESTE FUNDAMENTO.
+   *
+   * Ela é a única cujo conteúdo é a fala de uma pessoa identificada. Uma camada
+   * amarrada a outra versão do ArticleDNA chegaria ao Planejador como opinião
+   * profissional sobre um artigo que já mudou — com nome e data, o que é pior
+   * do que um dado anônimo desatualizado.
+   */
+  if (bundle.specialist) {
+    assertRadarSpecialistEvidenceLayer(bundle.specialist);
+    if (bundle.specialist.binding.articleId !== bundle.binding.articleId) throw new Error("RADAR_EVIDENCE_BUNDLE_SPECIALIST_ARTICLE_MISMATCH");
+    if (bundle.specialist.binding.articleDnaVersionId !== bundle.binding.articleDnaVersionId) throw new Error("RADAR_EVIDENCE_BUNDLE_SPECIALIST_ARTICLE_DNA_MISMATCH");
+    if (bundle.specialist.binding.articleDnaContentHash !== bundle.binding.articleDnaContentHash) throw new Error("RADAR_EVIDENCE_BUNDLE_SPECIALIST_ARTICLE_DNA_HASH_MISMATCH");
+  }
 }
 
 /* ============================== a montagem ============================== */
@@ -140,6 +168,8 @@ export function buildRadarEvidenceBundle(input: {
   observed: RadarCompetitiveObservedModel;
   /** A camada audiovisual daquela rodada, quando houve casamento. */
   video?: RadarVideoEvidenceLayer | null;
+  /** A camada profissional, quando alguém aceitou alguma contribuição. */
+  specialist?: RadarSpecialistEvidenceLayer | null;
   /** A investigação está vigente e a amostra sustenta leitura de mercado? */
   serp: { current: boolean; sufficient: boolean; valid: boolean };
   conflicts?: readonly RadarEvidenceResolution[];
@@ -161,6 +191,7 @@ export function buildRadarEvidenceBundle(input: {
     conflicts: [...(input.conflicts || [])],
     limitations: [...input.observed.limitations],
     video: input.video || null,
+    specialist: input.specialist || null,
   };
 
   assertRadarEvidenceProvenance(bundle);

@@ -706,3 +706,63 @@ copiado já pode ser colado num e-mail escrito por uma pessoa.
 - `EMAIL_INBOUND_WEBHOOK` — receber a contribuição por resposta de e-mail.
   Exige dedupe por Message-ID equivalente ao de `external_update_id`, e uma
   decisão sobre anexos (o pipeline de mídia hoje só conhece `telegram_file_id`).
+
+### P1 — DUAS DECISÕES SIMULTÂNEAS NA MESMA PAUTA PODEM PERDER UMA
+
+Registrado no SPECIALIST_3.
+
+A decisão humana sobre uma contribuição é gravada em
+`expert_briefs.radar_context.contributionReviews`, por
+`app/api/editorial/expert-contributions/review/route.ts`. A rota LÊ o contexto,
+mescla a decisão e ESCREVE o objeto inteiro de volta — sem trava otimista.
+
+Duas pessoas decidindo sobre contribuições DIFERENTES da mesma pauta, dentro da
+mesma janela de leitura-escrita, produzem last-write-wins: a segunda gravação
+apaga a primeira. O readback confirma a decisão de quem escreveu por último, e
+nada acusa a perda.
+
+Na prática o risco é baixo — uma pauta costuma ter poucas contribuições e um
+revisor —, e a alternativa exige `If-Match` sobre `updated_at` ou uma coluna de
+decisão por contribuição. As duas exigem migration, que este gate não autorizou.
+
+Corrigir antes de mais de um revisor operar a mesma marca em paralelo.
+
+### DÍVIDA ASSUMIDA — decisões anteriores ao SPECIALIST_3 não foram migradas
+
+Antes deste gate, aceitar/rejeitar era gravado em `localStorage`, na chave
+`radar:expert-evidence-review:<marca>:<artigo>:<versão>`. Aquilo nunca saiu do
+navegador: não havia como o servidor lê-lo, e portanto não há migração possível
+a partir do servidor.
+
+No runtime homologado não havia decisão nenhuma tomada — a única contribuição
+estava em "Contribuição a revisar" quando o gate começou. Se alguma existir em
+outro navegador, ela precisa ser tomada de novo, uma vez, e passa a ser remota.
+
+### P1 — A CAMADA DE ESPECIALISTA EXISTE NO CONTRATO E NÃO TEM CAMINHO DE RUNTIME
+
+Registrado no SPECIALIST_3 (§9 e §10).
+
+`RadarEvidenceBundle.specialist` foi criada, validada e provada no round-trip do
+`RadarPlannerHandoffV3` — inclusive a recusa de uma camada amarrada a outra
+versão do ArticleDNA. O que ela ainda NÃO tem é quem a construa em produção:
+`buildRadarEvidenceBundle` e `buildRadarPlannerEvidenceHandoff` não são chamados
+por nenhum arquivo de `app/`, `lib/` ou `modules/` — só por teste. O contrato v3
+inteiro está pronto e desligado, e isso é anterior a este gate.
+
+O que o Planejador recebe HOJE é o handoff v2, montado em `report-approval.ts`,
+com `expertEvidence: RadarExpertEvidence[]`. Depois deste gate ele já chega com
+a DECISÃO HUMANA REMOTA — antes ela vinha do `localStorage` de quem aprovou. Mas
+o contrato v2 não tem onde carregar:
+
+- `requirementId` — a necessidade que originou a consulta
+- a pergunta efetivamente enviada
+- a classificação editorial
+- a distinção entre `SUPPORT_ONLY` e `QUOTE_CANDIDATE`, que
+  `RadarExpertEvidenceSchema.humanDecision` colapsa em `accepted`
+
+NÃO foi criada uma terceira representação da mesma evidência para contornar
+isso: duas verdades envelhecendo em ritmos diferentes é exatamente o que o
+módulo de dossiê existe para impedir. A ligação certa é ligar o v3, não
+remendar o v2.
+
+Fazer junto com o gate que ligar o `RadarEvidenceBundle` v3 ao runtime.
