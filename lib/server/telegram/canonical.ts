@@ -44,6 +44,23 @@ export async function telegramPlatformBotUsername(client: TelegramClient): Promi
     .limit(1)
     .maybeSingle();
   const metadata = objectMetadata(connection.data?.metadata);
+
+  /*
+   * A CHAVE DURÁVEL PRIMEIRO.
+   *
+   * `health_check.details` guarda o ÚLTIMO health check de qualquer operação:
+   * testar o webhook apagava o @username que o `getMe` tinha descoberto, e o
+   * convite do Radar deixava de ter link. `telegram.bot_username` não é
+   * sobrescrito por consulta nenhuma.
+   *
+   * O fallback existe para connections gravadas antes desta separação: elas
+   * ainda têm o username no health check, e continuam funcionando até o
+   * próximo "Testar Bot" mover o valor para o lugar certo.
+   */
+  const telegram = objectMetadata(metadata.telegram);
+  const persistido = typeof telegram.bot_username === "string" ? telegram.bot_username.trim().replace(/^@/, "") : "";
+  if (persistido) return persistido;
+
   const health = objectMetadata(metadata.health_check);
   const details = objectMetadata(health.details);
   return typeof details.botUsername === "string" && details.botUsername.trim() ? details.botUsername.trim().replace(/^@/, "") : null;

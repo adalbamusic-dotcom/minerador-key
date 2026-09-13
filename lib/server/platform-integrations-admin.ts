@@ -123,7 +123,11 @@ export type IntegrationAdminConnection = {
     storage: IntegrationAdminHealthCheck | null;
   } | null;
   telegramWebhookConfigured: boolean;
+  /** O @username que o `getMe` descobriu. O deep link do Radar depende dele. */
+  telegramBotUsername: string | null;
   telegramWebhookUrl: string | null;
+  /** O endereço que alguém pretende configurar. Não é confirmação de nada. */
+  telegramWebhookTargetUrl: string | null;
 };
 
 export type IntegrationAdminGrant = {
@@ -360,6 +364,7 @@ export async function readPlatformIntegrations(client: QueryClient): Promise<Pla
       googleCloudBucketName: providerKey === "google_cloud" ? readGoogleCloudMediaBucketName(row.metadata) : null,
       googleCloudHealth: providerKey === "google_cloud" ? safeGoogleCloudHealth(safeMetadata(row.metadata).google_cloud_health, healthCheck) : null,
       ...telegramState,
+      telegramBotUsername: telegramBotUsername(row.metadata),
     };
   }).filter((connection) => isSupportedPlatformProviderKey(connection.providerKey));
   const googleAdsStaticConfig = getGoogleAdsStaticConfigStatus();
@@ -392,7 +397,9 @@ export async function readPlatformIntegrations(client: QueryClient): Promise<Pla
     googleCloudBucketName: null,
     googleCloudHealth: null,
     telegramWebhookConfigured: false,
+    telegramBotUsername: null,
     telegramWebhookUrl: null,
+    telegramWebhookTargetUrl: null,
   };
   const platformConnections = [googleAdsPlatformConnection, ...persistedPlatformConnections.filter((connection) => connection.providerKey !== "google_ads")];
 
@@ -1364,7 +1371,17 @@ export async function configureSupportedPlatformProvider(client: SecretMutationC
       telegram: {
         ...(connection.metadata.telegram && typeof connection.metadata.telegram === "object" && !Array.isArray(connection.metadata.telegram) ? connection.metadata.telegram as Record<string, unknown> : {}),
         webhook_configured_at: null,
-        ...(typeof input.telegramWebhookUrl === "undefined" || input.telegramWebhookUrl === null || input.telegramWebhookUrl === "" ? {} : { webhook_url: text(input.telegramWebhookUrl, "telegramWebhookUrl", 2_000) }),
+        /*
+         * DUAS URLs, DOIS SIGNIFICADOS.
+         *
+         * Salvar o formulário gravava em `webhook_url`, o mesmo campo que a
+         * confirmação do Telegram usa — e o banco passava a afirmar que o
+         * webhook estava naquele endereço porque alguém o DIGITOU.
+         *
+         * `webhook_target_url` é o que se pretende configurar; `webhook_url`
+         * só é escrito pelo readback, com o que o Telegram devolveu.
+         */
+        ...(typeof input.telegramWebhookUrl === "undefined" || input.telegramWebhookUrl === null || input.telegramWebhookUrl === "" ? {} : { webhook_target_url: text(input.telegramWebhookUrl, "telegramWebhookUrl", 2_000) }),
       },
     } : {}),
   };
@@ -1412,7 +1429,17 @@ function safeMetadata(value: unknown): Record<string, unknown> {
  * local responde quando ninguém consultou ainda. O contrário faria a tela
  * repetir uma memória velha depois que o provedor já tivesse mudado.
  */
-function telegramWebhookState(value: unknown): { telegramWebhookConfigured: boolean; telegramWebhookUrl: string | null } {
+/** O @username durável, com o fallback do health check legado. */
+function telegramBotUsername(value: unknown): string | null {
+  const telegram = safeMetadata(safeMetadata(value).telegram);
+  const persistido = typeof telegram.bot_username === "string" ? telegram.bot_username.trim().replace(/^@/, "") : "";
+  if (persistido) return persistido;
+  const detalhes = safeMetadata(safeMetadata(safeMetadata(value).health_check).details);
+  const legado = typeof detalhes.botUsername === "string" ? detalhes.botUsername.trim().replace(/^@/, "") : "";
+  return legado || null;
+}
+
+function telegramWebhookState(value: unknown): { telegramWebhookConfigured: boolean; telegramWebhookUrl: string | null; telegramWebhookTargetUrl: string | null } {
   const metadata = safeMetadata(value);
   const telegram = safeMetadata(metadata.telegram);
   const webhookUrl = typeof telegram.webhook_url === "string" && telegram.webhook_url.trim() ? telegram.webhook_url.trim() : null;
@@ -1423,8 +1450,11 @@ function telegramWebhookState(value: unknown): { telegramWebhookConfigured: bool
   const consultado = detalhes.stage === "get_webhook_info";
   const urlRemota = typeof detalhes.webhookUrl === "string" && detalhes.webhookUrl.trim() ? detalhes.webhookUrl.trim() : null;
 
-  if (consultado) return { telegramWebhookConfigured: Boolean(urlRemota), telegramWebhookUrl: urlRemota || webhookUrl };
-  return { telegramWebhookConfigured: Boolean(webhookUrl && configuredAt), telegramWebhookUrl: webhookUrl };
+  /* A pretendida nunca vira "configurado": ela é só o que alguém digitou. */
+  const alvo = typeof telegram.webhook_target_url === "string" && telegram.webhook_target_url.trim() ? telegram.webhook_target_url.trim() : null;
+
+  if (consultado) return { telegramWebhookConfigured: Boolean(urlRemota), telegramWebhookUrl: urlRemota, telegramWebhookTargetUrl: alvo || webhookUrl };
+  return { telegramWebhookConfigured: Boolean(webhookUrl && configuredAt), telegramWebhookUrl: webhookUrl, telegramWebhookTargetUrl: alvo || webhookUrl };
 }
 
 function safeHealthCheck(value: unknown): IntegrationAdminConnection["healthCheck"] {
@@ -1469,8 +1499,31 @@ function healthMetadata(value: unknown, health: Record<string, unknown>) {
   return { ...safeMetadata(value), health_check: health };
 }
 
+/**
+ * O QUE UM HEALTH CHECK DESCOBRE E NÃO PODE PERDER.
+ *
+ * `health_check` guarda SEMPRE o último resultado, de qualquer operação — é um
+ * campo só. O `getMe` gravava o @username do Bot ali dentro, e o "Testar
+ * Webhook" seguinte o apagava ao escrever `get_webhook_info` por cima.
+ *
+ * O EFEITO ERA INVISÍVEL NO ADMIN e mortal no Radar: o deep link do convite
+ * depende do @username, e ele sumia por alguém ter testado outra coisa.
+ *
+ * Fatos duráveis vivem em chave própria — `telegram.bot_username` —, fora do
+ * campo que a próxima consulta sobrescreve. O mesmo padrão que `google_cloud`
+ * já usava para não deixar o teste de Storage apagar o de Speech.
+ */
 function operationHealthMetadata(value: unknown, health: Record<string, unknown>, providerKey: string, healthOperation: PlatformHealthOperation | undefined) {
   const metadata = healthMetadata(value, health);
+
+  if (providerKey === "telegram") {
+    const telegram = safeMetadata(safeMetadata(value).telegram);
+    const detalhes = safeMetadata(health.details);
+    const username = typeof detalhes.botUsername === "string" ? detalhes.botUsername.trim().replace(/^@/, "") : "";
+    /* Só o `getMe` conhece o username; as outras operações preservam o que há. */
+    return { ...metadata, telegram: { ...telegram, ...(username ? { bot_username: username, bot_id: typeof detalhes.botId === "string" ? detalhes.botId : null, bot_username_checked_at: new Date().toISOString() } : {}) } };
+  }
+
   if (providerKey !== "google_cloud") return metadata;
   const current = safeMetadata(safeMetadata(value).google_cloud_health);
   const operation = healthOperation === "storage" ? "storage" : "speech";

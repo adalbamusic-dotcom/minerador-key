@@ -253,12 +253,29 @@ function apiStatus(data: PlatformIntegrationsSnapshot, definition: (typeof suppo
   }
   if (definition.key === "telegram") {
     if (!connection || !connection.secretConfigured) return { label: "Não configurado", tone: "text-pending", detail: "Bot Token: Não configurado. Salve o token para gerar automaticamente o segredo do webhook." };
-    const botName = connection.healthCheck.details.botName || connection.healthCheck.details.botUsername;
-    const botDetail = botName ? ` Último getMe: ${botName}.` : "";
+    /*
+     * QUATRO FATOS SEPARADOS — TELEGRAM_PLATFORM_CONFIGURATION · §6.
+     *
+     * Antes eram uma frase corrida em que "Webhook: Não configurado" se perdia
+     * no meio de "Bot Token: Configurado". Cada linha responde uma pergunta, e
+     * o @username aparece porque é dele que o deep link do Radar depende — ele
+     * sumia quando "Testar Webhook" sobrescrevia o health check.
+     */
+    const username = connection.telegramBotUsername;
+    const webhook = connection.telegramWebhookConfigured
+      ? connection.telegramWebhookUrl || "Configurado"
+      : connection.telegramWebhookTargetUrl
+        ? `Não configurado. Pretendida: ${connection.telegramWebhookTargetUrl} — use Configurar Webhook.`
+        : "Não configurado.";
     return {
-      label: "Configurado",
-      tone: "text-success",
-      detail: `Bot Token: Configurado. Segredo do webhook: Configurado automaticamente. Webhook: ${connection.telegramWebhookConfigured ? "Configurado" : "Não configurado"}.${botDetail} Salvar não chama o Telegram; use Testar Bot para validar explicitamente.`,
+      label: connection.telegramWebhookConfigured && username ? "Configurado" : "Parcial",
+      tone: connection.telegramWebhookConfigured && username ? "text-success" : "text-pending",
+      detail: [
+        "Bot Token: Configurado.",
+        `Bot username: ${username ? `@${username}` : "Não confirmado — use Testar Bot."}`,
+        "Segredo do webhook: Configurado automaticamente.",
+        `Webhook: ${webhook}`,
+      ].join(" "),
     };
   }
   if (!connection) {
@@ -622,7 +639,7 @@ export default function PlatformIntegrationsPanel() {
 
             <section aria-labelledby="connections-title">
               <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="connections-title" className="text-lg font-semibold">Connections técnicas da Plataforma</h2><p className="mt-1 text-sm text-foreground/70">Visão de governança persistida. Configurações concretas devem usar os formulários de API acima.</p></div><Database className="h-5 w-5 text-context-accent" aria-hidden="true" /></div>
-              {data.platformConnections.length ? <div className="mt-4 divide-y divide-foreground/10">{data.platformConnections.map((connection) => <div key={connection.id} className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><div><p className="text-sm font-semibold">{connection.label || connection.providerName}</p><p className="mt-1 text-sm text-foreground/65">{connection.providerName} · {connection.environment} · {statusLabel(connection.lifecycleStatus)}</p>{connection.providerKey === "telegram" ? <p className="mt-1 break-all text-sm text-foreground/60">Webhook: {connection.telegramWebhookConfigured ? connection.telegramWebhookUrl || "Configurado" : "Não configurado"}</p> : null}</div><p className="text-sm text-foreground/70">Credencial: {connection.secretConfigured ? "Configurada" : "Não configurada"}</p></div>)}</div> : emptyState("Nenhuma connection da Plataforma configurada.")}
+              {data.platformConnections.length ? <div className="mt-4 divide-y divide-foreground/10">{data.platformConnections.map((connection) => <div key={connection.id} className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"><div><p className="text-sm font-semibold">{connection.label || connection.providerName}</p><p className="mt-1 text-sm text-foreground/65">{connection.providerName} · {connection.environment} · {statusLabel(connection.lifecycleStatus)}</p>{connection.providerKey === "telegram" ? <><p className="mt-1 text-sm text-foreground/60">Bot: {connection.telegramBotUsername ? "@" + connection.telegramBotUsername : "não confirmado"}</p><p className="mt-1 break-all text-sm text-foreground/60">Webhook: {connection.telegramWebhookConfigured ? connection.telegramWebhookUrl || "Configurado" : "Não configurado"}</p></> : null}</div><p className="text-sm text-foreground/70">Credencial: {connection.secretConfigured ? "Configurada" : "Não configurada"}</p></div>)}</div> : emptyState("Nenhuma connection da Plataforma configurada.")}
               <form className="mt-5 grid gap-3 border-t border-foreground/15 pt-5 sm:grid-cols-3" onSubmit={createConnection}>
                 <label className="text-sm">Provider<select className={input} value={connectionForm.providerId} onChange={(event) => setConnectionForm({ ...connectionForm, providerId: event.target.value })} required><option value="">Selecione um provider</option>{data.providers.filter((provider) => provider.status !== "legacy" && provider.providerKey !== "deepseek").map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}</select></label>
                 <label className="text-sm">Ambiente<select className={input} value={connectionForm.environment} onChange={(event) => setConnectionForm({ ...connectionForm, environment: event.target.value })}>{environments.map((environment) => <option key={environment} value={environment}>{environment}</option>)}</select></label>
