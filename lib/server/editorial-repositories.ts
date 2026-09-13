@@ -1,3 +1,4 @@
+import { pruneRadarAnalysisHistory } from "@/lib/radar/analysis-history-pruning";
 import "server-only";
 import type { ArticleDNA, ContentDocument, ContentPlan, SiloDNA, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts";
 import { VersionedArticleDNASchema, VersionedContentPlanSchema, VersionedSiloDNASchema, VersionStatusEventSchema, ContentDocumentSchema } from "../arquiteto/contracts";
@@ -146,7 +147,22 @@ export class WorkflowRepository {
        * O schema NÃO foi afrouxado: o registro incompatível continua fora da
        * lista de itens. Ele passa a ser NOMEADO em vez de sumir.
        */
-      const base = { ...(row.payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: isoDate(row.created_at), updatedAt: isoDate(row.updated_at), origin: "real" };
+      /*
+       * O HISTÓRICO ENTRA PODADO — RADAR_LIVE_UX_1 · §14.
+       *
+       * Medido em produção: 6,0 MB de workspace, 5,98 MB em `analysisVersions`.
+       * A poda corta 63% preservando a versão corrente e a última aprovada, que
+       * são as únicas cujo conteúdo pesado a tela abre.
+       *
+       * Aqui, e não na rota, porque é a leitura do repositório que todo mundo
+       * usa: podar só num consumidor deixaria os outros carregando 6 MB.
+       */
+      const bruto = row.payload as Record<string, unknown>;
+      const historico = Array.isArray(bruto?.analysisVersions) ? bruto.analysisVersions : null;
+      const payload = historico
+        ? { ...bruto, analysisVersions: pruneRadarAnalysisHistory(historico as Parameters<typeof pruneRadarAnalysisHistory>[0]) }
+        : bruto;
+      const base = { ...(payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: isoDate(row.created_at), updatedAt: isoDate(row.updated_at), origin: "real" };
       const schema = row.stage === "radar" ? RadarItemSchema : PlannerItemSchema;
       const parsed = schema.safeParse(base);
       if (!parsed.success) {

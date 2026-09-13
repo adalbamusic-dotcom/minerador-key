@@ -1425,11 +1425,23 @@ function safeMetadata(value: unknown): Record<string, unknown> {
  * outro ambiente, outra ferramenta, um `setWebhook` manual — aparecia como
  * "Não configurado" para sempre, e a tela contradizia o provedor.
  *
- * A ORDEM É: o que o Telegram disse na última consulta manda; o registro
- * local responde quando ninguém consultou ainda. O contrário faria a tela
- * repetir uma memória velha depois que o provedor já tivesse mudado.
+ * As DUAS leituras existentes são respostas do Telegram — o `getWebhookInfo` do
+ * "Testar Webhook" e o readback obrigatório do "Configurar Webhook". Qual delas
+ * vale está resolvido em `telegramWebhookState`, pela hora de cada uma.
  */
 /** O @username durável, com o fallback do health check legado. */
+/**
+ * O INSTANTE DE UMA OBSERVAÇÃO, ou `null` quando não dá para saber.
+ *
+ * Sem data não há como comparar duas leituras; devolver `0` faria uma
+ * observação sem carimbo perder de todas as outras por construção.
+ */
+function instante(valor: unknown): number | null {
+  if (typeof valor !== "string" || !valor.trim()) return null;
+  const tempo = Date.parse(valor);
+  return Number.isFinite(tempo) ? tempo : null;
+}
+
 function telegramBotUsername(value: unknown): string | null {
   const telegram = safeMetadata(safeMetadata(value).telegram);
   const persistido = typeof telegram.bot_username === "string" ? telegram.bot_username.trim().replace(/^@/, "") : "";
@@ -1442,20 +1454,40 @@ function telegramBotUsername(value: unknown): string | null {
 function telegramWebhookState(value: unknown): { telegramWebhookConfigured: boolean; telegramWebhookUrl: string | null; telegramWebhookTargetUrl: string | null } {
   const metadata = safeMetadata(value);
   const telegram = safeMetadata(metadata.telegram);
-  const webhookUrl = typeof telegram.webhook_url === "string" && telegram.webhook_url.trim() ? telegram.webhook_url.trim() : null;
-  const configuredAt = typeof telegram.webhook_configured_at === "string" && telegram.webhook_configured_at.trim() ? telegram.webhook_configured_at.trim() : null;
+  const saude = safeMetadata(metadata.health_check);
+  const detalhes = safeMetadata(saude.details);
 
-  /* O `getWebhookInfo` mais recente, gravado por "Testar Webhook". */
-  const detalhes = safeMetadata(safeMetadata(metadata.health_check).details);
-  const consultado = detalhes.stage === "get_webhook_info";
-  const urlRemota = typeof detalhes.webhookUrl === "string" && detalhes.webhookUrl.trim() ? detalhes.webhookUrl.trim() : null;
+  /* O que o `setWebhook` confirmou pelo readback, e quando. */
+  const confirmada = typeof telegram.webhook_url === "string" && telegram.webhook_url.trim() ? telegram.webhook_url.trim() : null;
+  const confirmadaEm = instante(telegram.webhook_configured_at);
 
-  /* A pretendida nunca vira "configurado": ela é só o que alguém digitou. */
+  /* O que o "Testar Webhook" leu, e quando. */
+  const consultada = detalhes.stage === "get_webhook_info"
+    ? (typeof detalhes.webhookUrl === "string" && detalhes.webhookUrl.trim() ? detalhes.webhookUrl.trim() : "")
+    : null;
+  const consultadaEm = consultada === null ? null : instante(saude.checked_at);
+
+  /* O endereço que alguém pretende configurar. Nunca é prova de nada. */
   const alvo = typeof telegram.webhook_target_url === "string" && telegram.webhook_target_url.trim() ? telegram.webhook_target_url.trim() : null;
 
-  if (consultado) return { telegramWebhookConfigured: Boolean(urlRemota), telegramWebhookUrl: urlRemota, telegramWebhookTargetUrl: alvo || webhookUrl };
-  return { telegramWebhookConfigured: Boolean(webhookUrl && configuredAt), telegramWebhookUrl: webhookUrl, telegramWebhookTargetUrl: alvo || webhookUrl };
+  /*
+   * VENCE A OBSERVAÇÃO MAIS RECENTE — e é só isso.
+   *
+   * As duas fontes são respostas do Telegram: uma veio do `getWebhookInfo` do
+   * "Testar Webhook", a outra do readback obrigatório do "Configurar Webhook".
+   * Dar precedência fixa a qualquer uma delas erra metade das vezes.
+   *
+   * FOI ASSIM QUE ERROU: um "Testar Webhook" de 11:03:39, com `url` vazia,
+   * derrubava a confirmação de 11:03:52 e o card dizia "Não configurado" com o
+   * webhook instalado havia treze segundos. A regra não era ler o provedor —
+   * era preferir uma das leituras sem olhar a hora.
+   */
+  const decideAConsulta = consultada !== null && (confirmadaEm === null || (consultadaEm !== null && consultadaEm > confirmadaEm));
+  if (decideAConsulta) return { telegramWebhookConfigured: Boolean(consultada), telegramWebhookUrl: consultada || null, telegramWebhookTargetUrl: alvo || confirmada };
+
+  return { telegramWebhookConfigured: Boolean(confirmada && confirmadaEm), telegramWebhookUrl: confirmada, telegramWebhookTargetUrl: alvo || confirmada };
 }
+
 
 function safeHealthCheck(value: unknown): IntegrationAdminConnection["healthCheck"] {
   const health = safeMetadata(value);
