@@ -1,5 +1,20 @@
 # Estado atual — Minerador
 
+## Normalização do funil lógico no painel KeywordDNA — 2026-09-12
+
+- **Verificado no código:** `components/editorial/dna-panels.tsx` normaliza o
+  resultado de `funnelPresentationValue` na criação de
+  `logicalFunnelDisplayValue`, com contrato explícito `string | null`, sem cast.
+  Preservados o formatador compartilhado, o uso em `funnel.logic` e os demais
+  consumidores do painel; valores sem conteúdo significativo tornam-se `null`.
+- **Confirmado por build:** `pnpm run build` passou, incluindo TypeScript e
+  geração das páginas. Correção local de tipagem, sem alteração de persistência
+  ou contrato público; interface não validada manualmente nesta tarefa.
+- Lint direcionado sem diagnósticos e `git diff --check` sem erros.
+  Testes existentes do painel e da consolidação: 10 passaram e 8 falharam;
+  as falhas estão em expectativas de estrutura/classes do painel bento,
+  fora das linhas alteradas. A suíte de consolidação semântica passou.
+
 ## Consolidação canônica de integrações — 2026-08-25
 
 - **Fundação:** `PLATFORM_INTEGRATION_FOUNDATION = READY`.

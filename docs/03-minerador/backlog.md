@@ -1,5 +1,12 @@
 # Backlog — Minerador
 
+## Correção de build do funil lógico — 2026-09-12
+
+- [x] Normalizar `logicalFunnelDisplayValue` na origem para `string | null`,
+  preservando `funnel.logic` sem cast; `pnpm run build` passou.
+- [ ] Revisar as 8 expectativas de estrutura/classes que falham em
+  `tests/minerador-keyword-profile-bento.test.mts`, em tarefa própria.
+
 ## Aplicabilidade do KGR na planilha e em lote — 2026-09-03
 
 - [x] Mostrar na coluna KGR o score técnico e o seletor da decisão humana de
