@@ -7,6 +7,8 @@ import {
   type RadarPlannerHandoffV3,
 } from "../lib/radar/planner-handoff.ts";
 import { buildRadarEvidenceBundle } from "../lib/radar/evidence-bundle.ts";
+import { buildRadarSpecialistEvidenceLayer } from "../lib/radar/specialist-evidence.ts";
+import { radarSpecialistExtraction } from "../lib/radar/specialist-contribution-review.ts";
 import { freezeRadarEvidenceBundle, radarFinalizationReadiness, radarFrozenBundleHash } from "../lib/radar/investigation-finalization.ts";
 import { buildRadarDeepResearchView } from "../lib/radar/deep-research-view.ts";
 import { startRadarDeepResearch } from "../lib/radar/deep-research.ts";
@@ -854,4 +856,123 @@ test("GATE 16 · a identidade muda quando qualquer vínculo muda, e só então",
 
   /* E repetir a mesma entrada devolve exatamente a mesma identidade. */
   assert.deepEqual(radarPlannerHandoffIdentity(base), referencia);
+});
+
+/* ==========  SPECIALIST_3 · a camada de especialista no dossiê  ========== */
+
+/**
+ * §9 e §10 — A RESPOSTA PROFISSIONAL ATRAVESSANDO A FRONTEIRA.
+ *
+ * Estes testes vivem aqui, e não no arquivo do SPECIALIST_3, porque a fixture
+ * do dossiê inteiro mora neste arquivo. O que eles perseguem é o mesmo que o
+ * resto do Gate 16: que nada seja inventado nem perdido na travessia — e a
+ * camada de especialista é a única cujo conteúdo é a fala de uma pessoa
+ * identificada, o que torna as duas falhas piores.
+ */
+
+const revisada = (decision: "ACCEPTED_EVIDENCE" | "REJECTED" | "NOT_APPROVED", id = "contribuicao-1") => ({
+  extraction: radarSpecialistExtraction({
+    contributionId: id, expertId: "especialista-1", briefId: "pauta-1",
+    requirementId: "specialist:4a13e0cb", requirementKind: "RESOLVE_FACTUAL_UNCERTAINTY",
+    requirementTopic: "O que causa acne",
+    sourceType: "TEXT",
+    originalText: "Oleosidade isolada não deve ser apresentada como causa direta da acne.",
+    transcriptText: null, receivedAt: "2026-09-13T08:11:57.000Z",
+    externalUpdateId: "update-1", decision,
+  }),
+  requirementQuestion: "O que pode ser afirmado com segurança neste ponto?",
+  requirementKind: "RESOLVE_FACTUAL_UNCERTAINTY",
+  sentQuestions: ["O que pode ser afirmado com segurança neste ponto?"],
+  expertDisplayName: "Adalberto Escalante",
+});
+
+const camadaDeEspecialista = (sources = [revisada("ACCEPTED_EVIDENCE")]) => buildRadarSpecialistEvidenceLayer({
+  binding: ARTIGO,
+  preparedRequirements: 1,
+  sources,
+});
+
+const dossieComEspecialista = (sources = [revisada("ACCEPTED_EVIDENCE")]) => buildRadarEvidenceBundle({
+  observed: vista().observed,
+  serp: { current: true, sufficient: true, valid: true },
+  specialist: camadaDeEspecialista(sources),
+});
+
+test("SPECIALIST_3 · §9 · a camada viaja no dossiê, amarrada à mesma versão do ArticleDNA", () => {
+  const dossie = dossieComEspecialista();
+  assert.equal(dossie.specialist?.items.length, 1);
+  assert.deepEqual(dossie.specialist?.binding, ARTIGO);
+  /* Sem camada, o campo é `null` — que diz "não houve", e não "houve e está vazia". */
+  assert.equal(buildRadarEvidenceBundle({ observed: vista().observed, serp: { current: true, sufficient: true, valid: true } }).specialist, null);
+});
+
+test("SPECIALIST_3 · §9 · uma camada de OUTRA versão do ArticleDNA não sai daqui", () => {
+  /*
+   * O pior caso desta camada: opinião profissional com nome e data chegando ao
+   * Planejador sobre um artigo que já mudou. Pior que dado anônimo velho.
+   */
+  for (const patch of [{ articleId: "outro" }, { articleDnaVersionId: "outra" }, { articleDnaContentHash: "outro" }]) {
+    assert.throws(
+      () => buildRadarEvidenceBundle({
+        observed: vista().observed,
+        serp: { current: true, sufficient: true, valid: true },
+        specialist: buildRadarSpecialistEvidenceLayer({ binding: { ...ARTIGO, ...patch }, preparedRequirements: 1, sources: [revisada("ACCEPTED_EVIDENCE")] }),
+      }),
+      /RADAR_EVIDENCE_BUNDLE_SPECIALIST_/,
+      JSON.stringify(patch),
+    );
+  }
+});
+
+test("SPECIALIST_3 · §10 · o handoff declara EVIDENCE_ACCEPTED só com decisão humana ativa", () => {
+  const aceita = montar({ dossier: dossieComEspecialista() });
+  assert.equal(aceita.ok, true);
+  assert.equal(aceita.ok && aceita.handoff.areas.specialist, "EVIDENCE_ACCEPTED");
+
+  /*
+   * RECEBER NÃO É ACEITAR. Com a contribuição no banco e ninguém tendo
+   * decidido, a área volta a declarar apenas que há requisitos preparados.
+   */
+  const semDecisao = montar({ dossier: dossieComEspecialista([revisada("NOT_APPROVED")]) });
+  assert.equal(semDecisao.ok && semDecisao.handoff.areas.specialist, "REQUIREMENTS_PREPARED");
+
+  const recusada = montar({ dossier: dossieComEspecialista([revisada("REJECTED")]) });
+  assert.equal(recusada.ok && recusada.handoff.areas.specialist, "REQUIREMENTS_PREPARED");
+});
+
+test("SPECIALIST_3 · §10 · a evidência profissional sobrevive ao round-trip do contrato", () => {
+  const resultado = montar({ dossier: dossieComEspecialista([revisada("ACCEPTED_EVIDENCE"), revisada("REJECTED", "contribuicao-2")]) });
+  assert.equal(resultado.ok, true);
+  if (!resultado.ok) return;
+
+  const devolta = parseRadarPlannerHandoff(serializeRadarPlannerHandoff(resultado.handoff));
+  const camada = devolta.dossier.specialist;
+  assert.equal(camada?.items.length, 1);
+  assert.equal(camada?.rejected, 1, "a recusada não vira evidência, e não some da contagem");
+
+  const item = camada!.items[0];
+  /* As sete coisas que o §10 manda chegar ao Planejador, e a proveniência. */
+  assert.equal(item.requirementQuestion, "O que pode ser afirmado com segurança neste ponto?");
+  assert.deepEqual(item.sentQuestions, ["O que pode ser afirmado com segurança neste ponto?"]);
+  assert.equal(item.expert.displayName, "Adalberto Escalante");
+  assert.ok(item.originalText.includes("Oleosidade isolada"));
+  assert.ok(item.extractedSummary.length > 0);
+  assert.equal(item.classification, "RESSALVA");
+  assert.equal(item.humanDecision, "ACCEPTED_EVIDENCE");
+  assert.equal(item.provenance.externalUpdateId, "update-1");
+});
+
+test("SPECIALIST_3 · §14 · nada disso toca o ArticleDNA", () => {
+  const semEspecialista = montar();
+  const comEspecialista = montar({ dossier: dossieComEspecialista() });
+  assert.equal(semEspecialista.ok && comEspecialista.ok, true);
+  if (!semEspecialista.ok || !comEspecialista.ok) return;
+
+  /*
+   * O VÍNCULO É IDÊNTICO, e é isso que significa não mutar o ArticleDNA: a
+   * evidência acrescenta uma camada presa à mesma versão, sem redefinir o
+   * contrato editorial que o Arquiteto aprovou.
+   */
+  assert.deepEqual(comEspecialista.handoff.binding, semEspecialista.handoff.binding);
+  assert.deepEqual(comEspecialista.handoff.frozen.binding, semEspecialista.handoff.frozen.binding);
 });

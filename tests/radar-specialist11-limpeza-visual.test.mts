@@ -360,9 +360,11 @@ test("SPECIALIST_1.1.1 · o estado do convite vive no ponto e não numa barra pr
      * O SPECIALIST_2.1 removeu a última exigência de cadastro: o botão nasce
      * habilitado, e o estado do convite aparece dentro do próprio ponto.
      */
-    assert.equal((tela.get("radar-specialist-create-consultation") as HTMLButtonElement).disabled, false);
+    const acao = tela.get("radar-specialist-next-action") as HTMLButtonElement;
+    assert.equal(acao.textContent, "Criar consulta");
+    assert.equal(acao.disabled, false);
     assert.equal(tela.query("radar-specialist-needs-expert"), null, "não há mais nada a cadastrar antes");
-    assert.ok(tela.get("radar-specialist-review-point").contains(tela.get("radar-specialist-create-consultation")));
+    assert.ok(tela.get("radar-specialist-review-point").contains(acao), "a ação vive DENTRO do ponto — SPECIALIST_3 · §1");
 
     /* E o cabeçalho compacto continua dizendo o estado, sem ocupar uma linha extra. */
     assert.ok((tela.get("radar-specialist-state-line").textContent || "").includes("Nenhum especialista selecionado."));
@@ -375,7 +377,7 @@ test("SPECIALIST_1.1.1 · o estado do convite vive no ponto e não numa barra pr
 test("SPECIALIST_1.1.1 · sem nenhum participante na marca, criar consulta continua possível", async () => {
   const { tela, servidor } = await montarPainel({}, [requisitoReal]);
   try {
-    assert.equal((tela.get("radar-specialist-create-consultation") as HTMLButtonElement).disabled, false);
+    assert.equal((tela.get("radar-specialist-next-action") as HTMLButtonElement).disabled, false);
     assert.equal(tela.query("radar-specialist-empty-experts"), null);
     assert.equal(tela.query("radar-specialist-needs-expert"), null);
   } finally {
@@ -426,9 +428,19 @@ test("SPECIALIST_1.1 · a área não repete uma dashboard técnica abaixo do pai
 
 test("SPECIALIST_1.1 · o fluxo não mudou: criar, aprovar e enviar continuam no painel", async () => {
   const painel = await readFile(new URL("../modules/radar/radar-expert-brief-panel.tsx", import.meta.url), "utf8");
+  /*
+   * OS RÓTULOS DAS AÇÕES MUDARAM DE CASA no SPECIALIST_3.
+   *
+   * A próxima ação de um ponto é decidida no domínio (`specialist-flow.ts`),
+   * e é de lá que vem o texto do botão. Auditar só o painel passaria a medir
+   * onde a string mora, não se a ação existe.
+   */
+  const fluxo = await readFile(new URL("../lib/radar/specialist-flow.ts", import.meta.url), "utf8");
+  const superficie = painel + fluxo;
 
-  for (const acao of ["Criar consulta", "Salvar pauta", "Aprovar para envio", "Enviar ao especialista", "Aceitar como evidência", "Rejeitar"]) {
-    assert.ok(painel.includes(acao), `a ação continua existindo: ${acao}`);
+  /* Os rótulos mudaram no SPECIALIST_3; o que continua protegido é a AÇÃO existir. */
+  for (const acao of ["Criar consulta", "Salvar pauta", "Aprovar pauta para envio", "Enviar pedido ao especialista", "Aceitar como evidência", "Rejeitar"]) {
+    assert.ok(superficie.includes(acao), `a ação continua existindo: ${acao}`);
   }
   assert.match(painel, /remote_readback_confirmed/);
 

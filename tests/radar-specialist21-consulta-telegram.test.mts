@@ -322,7 +322,16 @@ function servidorFalso(dados: RespostaFalsa, invite: unknown = { link: "https://
     return {
       ok: true,
       json: async () => ({
-        brief: { id: "brief-criada", brandId, expertId, articleId, articleDnaVersionId, title: "Pauta", radarContext: {}, questions: [], status: "draft", createdAt: "2026-09-13T10:00:00Z", updatedAt: "2026-09-13T10:00:00Z", sentAt: null, completedAt: null },
+        /*
+         * A PAUTA VOLTA COM A PROVENIÊNCIA DO PONTO — como a rota real devolve.
+         *
+         * `radarContext: {}` era uma fixture imprecisa: a rota grava
+         * `specialistRequirement` e `consultation` no contexto antes do
+         * readback. Sem eles, a pauta criada não se liga ao ponto que a
+         * originou, e a tela continuaria oferecendo "Criar consulta" para um
+         * ponto que já tem uma.
+         */
+        brief: { id: "brief-criada", brandId, expertId, articleId, articleDnaVersionId, title: "Pauta", radarContext: { specialistRequirement: { requirementId: requisitoEnviado.requirementId || requisito.requirementId }, consultation: { consultationId: "consultation|x", requirementId: requisitoEnviado.requirementId || requisito.requirementId, invitedBy: "u", invitedAt: "2026-09-13T10:00:00Z", origin: "radar_specialist_consultation" } }, questions: [{ id: "q1", text: "O que pode ser afirmado com segurança?", origin: "radar", need: null, reference: null, justification: null }], status: "draft", createdAt: "2026-09-13T10:00:00Z", updatedAt: "2026-09-13T10:00:00Z", sentAt: null, completedAt: null },
         expertId, connected: !invite, invite, notification: "NOT_SENT",
       }),
     };
@@ -367,10 +376,11 @@ test("SPECIALIST_2.1 · criar consulta não exige cadastro e devolve link para c
   const area = areaDeTransferencia();
   try {
     /* MANUAL_EXPERT_REGISTRATION_REQUIRED = NO: sem especialista nenhum na marca. */
-    const botao = tela.get("radar-specialist-create-consultation") as HTMLButtonElement;
+    const botao = tela.get("radar-specialist-next-action") as HTMLButtonElement;
+    assert.equal(botao.textContent, "Criar consulta");
     assert.equal(botao.disabled, false);
 
-    await tela.click("radar-specialist-create-consultation");
+    await tela.click("radar-specialist-next-action");
 
     const posts = servidor.chamadas.filter(item => item.method === "POST");
     assert.equal(posts.length, 1);
@@ -380,7 +390,9 @@ test("SPECIALIST_2.1 · criar consulta não exige cadastro e devolve link para c
     const consulta = tela.get("radar-specialist-consultation");
     assert.ok((consulta.textContent || "").includes("Especialista convidado"), `participante: ${consulta.textContent}`);
 
-    await tela.click("radar-specialist-copy-link");
+    /* Criada a consulta, a PRÓXIMA AÇÃO do ponto passa a ser compartilhar o link. */
+    assert.equal(tela.get("radar-specialist-next-action").textContent, "Copiar link do convite");
+    await tela.click("radar-specialist-next-action");
     assert.deepEqual(area.copiado, ["https://t.me/minekey_bot?start=tok-abc"], "COPY_LINK_BUTTON = YES");
     assert.ok((tela.get("radar-specialist-consultation").textContent || "").includes("Link copiado"));
 
@@ -407,13 +419,22 @@ test("SPECIALIST_2.1 · criar consulta não exige cadastro e devolve link para c
 test("SPECIALIST_2.1 · sem username do Bot, a consulta existe e a tela diz o que falta", async () => {
   const { tela, servidor } = await montarPainel({}, { link: null, message: "Olá.\n\n(link indisponível)", botUsername: null, expiresAt: "2026-09-14T10:00:00Z" });
   try {
-    await tela.click("radar-specialist-create-consultation");
+    await tela.click("radar-specialist-next-action");
     const consulta = tela.get("radar-specialist-consultation");
 
-    assert.equal(tela.query("radar-specialist-copy-link"), null, "não há link para copiar");
+    const acao = tela.get("radar-specialist-next-action") as HTMLButtonElement;
+    /* O convite ficou ABERTO na projeção; sem Bot, o que se oferece é outro link. */
+    assert.equal(acao.textContent, "Gerar novo link", "não há link para copiar");
+    assert.equal(acao.disabled, true, "sem Bot confirmado o botão mentiria");
     assert.ok((consulta.textContent || "").includes("username do Bot ainda não foi confirmado no Admin"));
-    /* E o caminho de saída existe: gerar outro link, não um botão sumido. */
-    assert.ok(tela.query("radar-specialist-reissue-link"), "OR_SAFE_REISSUE_FLOW_EXISTS");
+    /*
+     * E O CAMINHO DE SAÍDA CONTINUA EXPLÍCITO — agora como motivo escrito.
+     *
+     * O SPECIALIST_3 trocou o botão inerte sem explicação por um botão inerte
+     * COM o critério ao lado. Foi essa a leitura do runtime: inativo sem
+     * motivo é indistinguível de quebrado.
+     */
+    assert.match(tela.get("radar-specialist-next-action-reason").textContent || "", /username do Bot/);
   } finally {
     tela.destroy();
     servidor.restaurar();
@@ -423,12 +444,14 @@ test("SPECIALIST_2.1 · sem username do Bot, a consulta existe e a tela diz o qu
 test("SPECIALIST_2.1 · especialista já conectado não recebe link novo", async () => {
   const { tela, servidor } = await montarPainel({}, null);
   try {
-    await tela.click("radar-specialist-create-consultation");
+    await tela.click("radar-specialist-next-action");
     const consulta = tela.get("radar-specialist-consultation");
 
     assert.ok((consulta.textContent || "").includes("Telegram conectado"), `estado: ${consulta.textContent}`);
-    assert.equal(tela.query("radar-specialist-copy-link"), null, "emitir outro token criaria um convite órfão");
-    assert.equal(tela.query("radar-specialist-reissue-link"), null, "quem entrou não precisa de link");
+    /* Quem entrou não precisa de link: a próxima ação já é sobre a pauta. */
+    const acao = tela.get("radar-specialist-next-action").textContent || "";
+    assert.equal(acao.includes("link"), false, `emitir outro token criaria um convite órfão: ${acao}`);
+    assert.equal(acao.includes("convite"), false, `quem entrou não precisa de convite: ${acao}`);
   } finally {
     tela.destroy();
     servidor.restaurar();
@@ -451,7 +474,13 @@ test("SPECIALIST_2.1 · pauta conectada aparece como CONECTADO, não como enviad
   try {
     const ponto = tela.get("radar-specialist-review-point").textContent || "";
     assert.ok(ponto.includes("Especialista conectado"), `estado do ponto: ${ponto}`);
-    assert.ok(!ponto.includes("Pedido enviado"));
+    /*
+     * A RÉGUA DO SPECIALIST_3 desenha o caminho INTEIRO, com as etapas futuras
+     * apagadas — então "Pedido enviado" aparece como texto mesmo num ponto que
+     * ninguém enviou. O que diz onde este ponto ESTÁ é a etapa corrente, e é
+     * nela que a invariante mora.
+     */
+    assert.equal(tela.get("radar-specialist-flow-current").textContent, "Pauta pronta", "conectado não é enviado");
 
     const contadores = tela.get("radar-specialist-counters").textContent || "";
     assert.ok(contadores.includes("0 enviado(s)"), `CREATING_CONSULTATION_COUNTS_AS_SENT = NO: ${contadores}`);

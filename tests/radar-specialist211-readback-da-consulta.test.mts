@@ -129,7 +129,8 @@ function textoVisivel(raiz: HTMLElement): string {
 
 const pautaRemota = {
   id: "brief-remota", brandId, expertId, articleId, articleDnaVersionId,
-  title: "Pauta", questions: [], status: "reviewed",
+  /* A rota de consulta sempre cria a pauta com a pergunta congelada do ponto. */
+  title: "Pauta", questions: [{ id: "q1", text: requisito.specificQuestion, origin: "radar", need: null, reference: null, justification: null }], status: "reviewed",
   radarContext: {
     specialistRequirement: { requirementId: requisito.requirementId },
     consultation: radarSpecialistConsultationContext({ ...escopo, invitedBy: "user-1", invitedAt: "2026-09-13T08:56:05Z" }),
@@ -192,11 +193,11 @@ test("SPECIALIST_2.1.1 · o link não volta do banco, e o caminho de saída é e
      * COPY_LINK_SURVIVES_F5 = NO, e isso é correto: só o hash é persistido.
      * OR_SAFE_REISSUE_FLOW_EXISTS = YES — o botão não some, ele muda de função.
      */
-    assert.equal(tela.query("radar-specialist-copy-link"), null, "o token não pode ser remontado");
-    assert.equal((tela.get("radar-specialist-reissue-link") as HTMLButtonElement).disabled, false);
-    assert.ok((tela.get("radar-specialist-consultation").textContent || "").includes("O link anterior continua válido até ser substituído."));
+    const acao = tela.get("radar-specialist-next-action") as HTMLButtonElement;
+    assert.equal(acao.textContent, "Gerar novo link", "o token não pode ser remontado");
+    assert.equal(acao.disabled, false);
 
-    await tela.click("radar-specialist-reissue-link");
+    await tela.click("radar-specialist-next-action");
     const posts = servidor.chamadas.filter(item => item.method === "POST");
     assert.equal(posts.length, 1);
     assert.equal((posts[0].body as Record<string, unknown>).action, "reissue");
@@ -231,12 +232,13 @@ test("SPECIALIST_2.1.1 · conectado troca o convite pelo envio", async () => {
     assert.ok(texto.includes("Helena Braga · Telegram conectado"), `estado: ${texto}`);
 
     /* §6 — o convite sai de cena quando já não serve para nada. */
-    assert.equal(tela.query("radar-specialist-copy-link"), null);
-    assert.equal(tela.query("radar-specialist-reissue-link"), null);
+    const acao = tela.get("radar-specialist-next-action") as HTMLButtonElement;
+    assert.equal(acao.textContent?.includes("link"), false, `ainda oferecendo convite: ${acao.textContent}`);
 
     /* SEND_ENABLED_AFTER_ACTIVE_BINDING = YES */
-    assert.equal((tela.get("radar-specialist-send-brief") as HTMLButtonElement).disabled, false);
-    await tela.click("radar-specialist-send-brief");
+    assert.equal(acao.textContent, "Enviar pedido ao especialista");
+    assert.equal(acao.disabled, false);
+    await tela.click("radar-specialist-next-action");
 
     const posts = servidor.chamadas.filter(item => item.method === "POST");
     assert.equal(posts.length, 1);
@@ -252,8 +254,8 @@ test("SPECIALIST_2.1.1 · conectado troca o convite pelo envio", async () => {
 test("SPECIALIST_2.1.1 · SEND_DISABLED_BEFORE_BINDING = YES", async () => {
   const { tela, servidor } = await montarAposF5({ consultations: [aguardando], briefs: [pautaRemota] });
   try {
-    /* Sem `chat_id` não há para onde mandar: o botão nem existe. */
-    assert.equal(tela.query("radar-specialist-send-brief"), null);
+    /* Sem `chat_id` não há para onde mandar: a ação nem é sobre envio. */
+    assert.equal(tela.get("radar-specialist-next-action").textContent?.includes("Enviar"), false);
   } finally {
     tela.destroy();
     servidor.restaurar();
@@ -264,8 +266,16 @@ test("SPECIALIST_2.1.1 · pauta não aprovada bloqueia o envio mesmo conectado",
   const rascunho = { ...aguardando, status: "draft", connected: true, invite: { state: "USED", expiresAt: null } };
   const { tela, servidor } = await montarAposF5({ consultations: [rascunho], briefs: [{ ...pautaRemota, status: "draft" }], bindings: [{ expertId, status: "active" }] });
   try {
-    assert.equal((tela.get("radar-specialist-send-brief") as HTMLButtonElement).disabled, true);
-    assert.ok((tela.get("radar-specialist-consultation").textContent || "").includes("Aprove a pauta para envio"));
+    /*
+     * O SPECIALIST_3 trocou o botão de envio inerte pela ação que FALTA.
+     *
+     * A invariante é a mesma — sem aprovação humana não há envio —, e agora
+     * ela aparece como o passo seguinte em vez de um botão morto com o
+     * critério escondido no editor lá embaixo.
+     */
+    const acao = tela.get("radar-specialist-next-action") as HTMLButtonElement;
+    assert.equal(acao.textContent, "Aprovar pauta para envio");
+    assert.equal(acao.textContent?.includes("Enviar"), false, "SEND_BLOCKED_BEFORE_APPROVAL = YES");
   } finally {
     tela.destroy();
     servidor.restaurar();
@@ -279,7 +289,7 @@ test("SPECIALIST_2.1.1 · pauta já enviada mostra a data e não reoferece envio
     const texto = tela.get("radar-specialist-consultation").textContent || "";
     assert.ok(texto.includes("Pedido enviado"), `estado: ${texto}`);
     assert.ok(texto.includes("Enviado em"));
-    assert.equal(tela.query("radar-specialist-send-brief"), null);
+    assert.equal(tela.get("radar-specialist-next-action").textContent?.includes("Enviar"), false, "pauta enviada não reoferece envio");
   } finally {
     tela.destroy();
     servidor.restaurar();
@@ -293,7 +303,7 @@ test("SPECIALIST_2.1.1 · o F5 não cria participante, pauta, consulta nem token
     assert.equal(servidor.chamadas.filter(item => item.method === "POST").length, 0);
     assert.equal(servidor.chamadas.filter(item => item.method === "PATCH").length, 0);
     assert.equal(tela.all("radar-specialist-consultation").length, 1, "uma consulta, não duas");
-    assert.equal(tela.query("radar-specialist-create-consultation"), null, "o ponto com consulta não reoferece criar");
+    assert.equal(tela.get("radar-specialist-next-action").textContent, "Gerar novo link", "o ponto com consulta não reoferece criar");
   } finally {
     tela.destroy();
     servidor.restaurar();
@@ -364,7 +374,8 @@ test("SPECIALIST_2.1.2 · com o bot confirmado, a tela não acusa a plataforma",
   const { tela, servidor } = await montarAposF5({ consultations: [aguardando], briefs: [pautaRemota] });
   try {
     assert.equal(tela.query("radar-specialist-bot-missing"), null, "o bot está confirmado no GET");
-    assert.equal((tela.get("radar-specialist-reissue-link") as HTMLButtonElement).disabled, false);
+    assert.equal((tela.get("radar-specialist-next-action") as HTMLButtonElement).disabled, false);
+    assert.equal(tela.query("radar-specialist-next-action-reason"), null, "ação possível não carrega motivo de bloqueio");
   } finally {
     tela.destroy();
     servidor.restaurar();
@@ -397,7 +408,8 @@ test("SPECIALIST_2.1.2 · sem bot confirmado, o aviso aparece e o botão não me
 
     assert.ok(tela.get("radar-specialist-bot-missing").textContent?.includes("não foi confirmado no Admin"));
     /* Sem bot não há link a gerar: oferecer o botão habilitado seria mentir. */
-    assert.equal((tela.get("radar-specialist-reissue-link") as HTMLButtonElement).disabled, true);
+    assert.equal((tela.get("radar-specialist-next-action") as HTMLButtonElement).disabled, true);
+    assert.match(tela.get("radar-specialist-next-action-reason").textContent || "", /username do Bot/);
   } finally {
     tela.destroy();
     servidor.restaurar();

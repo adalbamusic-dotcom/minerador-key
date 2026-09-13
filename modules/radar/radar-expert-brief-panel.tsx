@@ -21,6 +21,26 @@ import {
 import { useRadarAreaLiveRead } from "./use-radar-area-live-read";
 import { RADAR_SPECIALIST_INVITE_LABELS, RADAR_SPECIALIST_INVITE_STATES, radarSpecialistConsultationOf, type RadarSpecialistInviteState } from "@/lib/radar/specialist-consultation";
 import {
+  RADAR_SPECIALIST_CLASSIFICATIONS,
+  RADAR_SPECIALIST_CLASSIFICATION_HINTS,
+  RADAR_SPECIALIST_CLASSIFICATION_LABELS,
+  RADAR_SPECIALIST_CLASSIFICATION_SOURCE_LABELS,
+  RADAR_SPECIALIST_DECISION_LABELS,
+  radarSpecialistDecisionIsActive,
+  radarSpecialistDecisionToProjection,
+  radarSpecialistExtraction,
+  radarSpecialistReviewsOf,
+  type RadarSpecialistClassification,
+  type RadarSpecialistDecision,
+  type RadarSpecialistStoredReview,
+} from "@/lib/radar/specialist-contribution-review";
+import {
+  radarSpecialistBriefActionLabel,
+  radarSpecialistFlow,
+  radarSpecialistNextAction,
+  radarSpecialistQuestionControls,
+} from "@/lib/radar/specialist-flow";
+import {
   buildRadarExpertBriefContext,
   normalizeRadarExpertBriefQuestions,
   questionFromRadarSuggestion,
@@ -45,9 +65,15 @@ type RadarExpertContributionRecord = RadarExpertContributionEvidenceSource & {
   processingStatus: string;
 };
 
-type ExpertReviewDecision = "pending" | "accepted" | "support" | "quote" | "rejected";
-type ExpertReviewClassification = "experiência" | "opinião" | "critério" | "processo" | "ressalva" | "limitação" | "exemplo";
-type ExpertReview = RadarExpertEvidenceReview & { classification: ExpertReviewClassification | null; need: string | null };
+/**
+ * A REVISÃO É REMOTA — SPECIALIST_3 · §13.
+ *
+ * Ela vinha do `localStorage`, e por isso só existia no navegador onde alguém
+ * clicou: abrir o mesmo artigo na Vercel depois de decidir no local mostrava
+ * tudo "aguardando decisão" de novo. Agora ela é lida do `radar_context` da
+ * pauta, que é remoto, e gravada pela rota de revisão.
+ */
+type ExpertReview = RadarSpecialistStoredReview;
 
 type RadarBriefRecord = {
   id: string;
@@ -252,31 +278,6 @@ function errorMessage(value: unknown, fallback: string) {
   return value instanceof Error && value.message ? value.message : fallback;
 }
 
-function parseStoredReviews(value: unknown): Record<string, ExpertReview> {
-  const source = asObject(value);
-  if (!source) return {};
-  const validDecisions = new Set<ExpertReviewDecision>(["pending", "accepted", "support", "quote", "rejected"]);
-  const validClassifications = new Set<ExpertReviewClassification>(reviewClassifications.map(item => item.value));
-  return Object.fromEntries(Object.entries(source).flatMap(([id, raw]) => {
-    const review = asObject(raw);
-    if (!review || typeof review.decision !== "string" || !validDecisions.has(review.decision as ExpertReviewDecision)) return [];
-    return [[id, {
-      decision: review.decision as ExpertReviewDecision,
-      classification: typeof review.classification === "string" && validClassifications.has(review.classification as ExpertReviewClassification) ? review.classification as ExpertReviewClassification : null,
-      need: optionalRecordValue(review.need),
-    } satisfies ExpertReview]];
-  }));
-}
-
-function organizationText(contribution: RadarExpertContributionRecord) {
-  const payload = contribution.organizationPayload;
-  if (!payload) return null;
-  for (const key of ["text", "organizedText", "summary", "content"]) {
-    if (typeof payload[key] === "string" && payload[key].trim()) return payload[key].trim();
-  }
-  return null;
-}
-
 function sourceTypeLabel(sourceType: RadarExpertContributionRecord["sourceType"]) {
   return ({ TEXT: "Texto", VOICE: "Mensagem de voz", AUDIO: "Áudio", DOCUMENT: "Documento" } as const)[sourceType];
 }
@@ -285,22 +286,19 @@ function processingStatusLabel(status: string) {
   return ({ RECEIVED: "Recebida", PENDING_LOCAL_PROCESSING: "Aguardando processamento", PROCESSING: "Em processamento", EXTRACTED: "Asset preservado", FAILED_RETRYABLE: "Falha recuperável", FAILED_FINAL: "Falha final" } as Record<string, string>)[status] || "Estado não reconhecido";
 }
 
-const reviewDecisionLabels: Record<ExpertReviewDecision, string> = {
-  pending: "Aguardando decisão",
-  accepted: "Evidência principal",
-  support: "Evidência de apoio",
-  quote: "Possível citação",
-  rejected: "Não utilizar",
-};
-
-const reviewClassifications: Array<{ value: ExpertReviewClassification; label: string }> = [
-  { value: "experiência", label: "Experiência prática" },
-  { value: "opinião", label: "Opinião profissional" },
-  { value: "critério", label: "Critério de decisão" },
-  { value: "processo", label: "Processo" },
-  { value: "ressalva", label: "Ressalva" },
-  { value: "limitação", label: "Limitação" },
-  { value: "exemplo", label: "Exemplo" },
+/**
+ * AS QUATRO DECISÕES, NA ORDEM EM QUE ELAS PESAM.
+ *
+ * Aceitar como evidência sustenta uma afirmação do artigo; usar como apoio não
+ * sustenta sozinha; marcar citação preserva a fala com procedência; rejeitar
+ * mantém no histórico e para por ali. Os rótulos vêm do domínio para a tela e
+ * o Planejador nunca divergirem sobre o que uma decisão significa.
+ */
+const DECISOES: Array<{ value: RadarSpecialistDecision; label: string }> = [
+  { value: "ACCEPTED_EVIDENCE", label: "Aceitar como evidência" },
+  { value: "SUPPORT_ONLY", label: "Usar como apoio" },
+  { value: "QUOTE_CANDIDATE", label: "Marcar citação literal" },
+  { value: "REJECTED", label: "Rejeitar" },
 ];
 
 /**
@@ -324,7 +322,7 @@ const VAZIO_CONTRIBUICOES: RadarExpertContributionRecord[] = [];
 const VAZIO_CONSULTAS: RadarConsultationView[] = [];
 
 /** A decisão humana que transforma contribuição em evidência. */
-const acceptedDecisions = new Set<ExpertReviewDecision>(["accepted", "support", "quote"]);
+const REVISAO_PENDENTE: ExpertReview = { decision: "NOT_APPROVED", classification: null, relatedRequirementId: null, decidedAt: "", decidedBy: null };
 
 export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId, articleTitle, articleVersion, articleRole, context, suggestedQuestions = [], requirements = [], onExpertEvidenceChange }: RadarExpertBriefPanelProps) {
   /**
@@ -349,7 +347,6 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
    */
   const pendenteRef = useRef(false);
   const lerPendente = useCallback(() => pendenteRef.current, []);
-  const [reviews, setReviews] = useState<Record<string, ExpertReview>>({});
   const [selectedExpertId, setSelectedExpertId] = useState("");
   const [selectedBriefId, setSelectedBriefId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft(articleTitle));
@@ -399,7 +396,9 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [newQuestion, setNewQuestion] = useState("");
-  const [hydratedReviewKey, setHydratedReviewKey] = useState<string | null>(null);
+  /** A contribuição cuja classificação está aberta para correção — §5. */
+  const [editandoClassificacao, setEditandoClassificacao] = useState("");
+  const [decidindo, setDecidindo] = useState("");
 
   const contextPayload = useMemo(() => context ? buildRadarExpertBriefContext(context) : null, [context]);
   const initialQuestions = useMemo(() => normalizeRadarExpertBriefQuestions(suggestedQuestions), [suggestedQuestions]);
@@ -533,7 +532,21 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
     return mapa;
   }, [articleContributions]);
 
-  const decisionOf = useCallback((contributionId: string): ExpertReviewDecision => reviews[contributionId]?.decision || "pending", [reviews]);
+  /**
+   * AS DECISÕES HUMANAS, LIDAS DO REMOTO — SPECIALIST_3 · §13.
+   *
+   * Elas moram no `radar_context` de cada pauta, que já chega nesta leitura.
+   * Derivar daqui, em vez de guardar em estado, é o que faz F5, troca de
+   * artigo, sessão nova e troca entre local e Vercel mostrarem a MESMA coisa:
+   * nenhuma delas passa pelo navegador onde alguém clicou.
+   */
+  const reviews = useMemo<Record<string, ExpertReview>>(() => {
+    const total: Record<string, ExpertReview> = {};
+    for (const brief of briefs) Object.assign(total, radarSpecialistReviewsOf(brief.radarContext));
+    return total;
+  }, [briefs]);
+
+  const decisionOf = useCallback((contributionId: string): RadarSpecialistDecision => reviews[contributionId]?.decision || "NOT_APPROVED", [reviews]);
 
   /* A leitura única das pautas: contadores e pontos falam do mesmo conjunto. */
   const vinculados = useMemo(() => new Set(bindings.filter(item => item.status === "active").map(item => item.expertId)), [bindings]);
@@ -546,7 +559,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       sentAt: brief.sentAt,
       requirementId: radarSpecialistRequirementIdOf(brief.radarContext),
       contributionIds: recebidas.map(item => item.id),
-      acceptedContributionIds: recebidas.filter(item => acceptedDecisions.has(decisionOf(item.id))).map(item => item.id),
+      acceptedContributionIds: recebidas.filter(item => radarSpecialistDecisionIsActive(decisionOf(item.id))).map(item => item.id),
       /*
        * CONECTADO É FATO DO BANCO: existe vínculo Telegram ativo para este
        * participante. CONVIDADO é fato da pauta: ela nasceu de uma consulta.
@@ -560,65 +573,92 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
   const counters = useMemo(() => radarSpecialistCounters({ requirements, briefs: briefReadings }), [briefReadings, requirements]);
   const reviewPoints = useMemo(() => radarSpecialistReviewPoints({ requirements, briefs: briefReadings }), [briefReadings, requirements]);
   const requirementByBriefId = useMemo(() => new Map(briefReadings.map(item => [item.id, item.requirementId])), [briefReadings]);
+  /**
+   * AS PAUTAS SEM PONTO — as únicas que não têm card próprio onde morar.
+   *
+   * Toda pauta nascida de um ponto de revisão aparece no card daquele ponto, e
+   * listá-la de novo numa segunda seção era a duplicação do §1.
+   */
+  const pautasAvulsas = useMemo(() => briefs.filter(brief => !radarSpecialistRequirementIdOf(brief.radarContext)), [briefs]);
   const briefById = useMemo(() => new Map(briefs.map(brief => [brief.id, brief])), [briefs]);
   const requirementById = useMemo(() => new Map(requirements.map(item => [item.requirementId, item])), [requirements]);
   const consultationByRequirement = useMemo(() => new Map(consultations.filter(item => item.requirementId).map(item => [item.requirementId as string, item])), [consultations]);
 
-  /*
-   * A REVISÃO LOCAL É DO ARTIGO, NÃO DE UMA PAUTA.
+  /**
+   * O PONTO DE REVISÃO DE UMA CONTRIBUIÇÃO — derivado, nunca perguntado (§4).
    *
-   * A chave antiga incluía o briefId, e a decisão sobre uma contribuição sumia
-   * ao trocar de pauta — inclusive dos contadores. A chave passa a ser o
-   * contexto do artigo, e as chaves antigas ainda são lidas uma vez para que
-   * nenhuma decisão já tomada se perca na mudança.
+   * A contribuição sabe a pauta, a pauta sabe o ponto, o ponto sabe o assunto.
+   * O select "Relacionar à necessidade" perguntava exatamente isto, e oferecia
+   * `competitor:aHR0cHM6…` como alternativa de resposta.
+   *
+   * A associação manual só entra quando NÃO há o que derivar — uma resposta
+   * que chegou por pauta avulsa — e nesse caso ela vence, porque foi uma
+   * pessoa que a fez.
    */
-  const reviewStorageKey = useMemo(() => `radar:expert-evidence-review:${encodeURIComponent(brandId)}:${encodeURIComponent(articleId)}:${encodeURIComponent(articleDnaVersionId)}`, [articleDnaVersionId, articleId, brandId]);
-  const legacyReviewKeys = useMemo(() => briefs.map(brief => `${reviewStorageKey}:${encodeURIComponent(brief.id)}`), [briefs, reviewStorageKey]);
-  const pendingContributionCount = articleContributions.filter(contribution => decisionOf(contribution.id) === "pending").length;
-  const selectedEvidenceCount = articleContributions.filter(contribution => acceptedDecisions.has(decisionOf(contribution.id))).length;
+  const requirementOfContribution = useCallback((contribution: RadarExpertContributionRecord) => {
+    const manual = reviews[contribution.id]?.relatedRequirementId || null;
+    const automatico = requirementByBriefId.get(contribution.briefId) || null;
+    const requirementId = manual || automatico;
+    return { requirementId, requirement: requirementId ? requirementById.get(requirementId) || null : null, manual: Boolean(manual) };
+  }, [requirementByBriefId, requirementById, reviews]);
+
+  /**
+   * A CONTRIBUIÇÃO EXTRAÍDA — SPECIALIST_3 · §7, e ela não aprova nada (§8).
+   *
+   * Classificação sugerida, síntese recortada do que foi dito, aplicação
+   * editorial derivada do ponto. `humanDecision` entra a partir do que está
+   * GRAVADO: esta projeção não tem como promover coisa nenhuma a evidência, o
+   * que é de propósito — se tivesse, reabrir a tela criaria evidência sozinha.
+   */
+  const extractionOf = useCallback((contribution: RadarExpertContributionRecord) => {
+    const { requirementId, requirement } = requirementOfContribution(contribution);
+    const review = reviews[contribution.id] || REVISAO_PENDENTE;
+    const card = requirement ? radarSpecialistReviewCard(requirement) : null;
+    return radarSpecialistExtraction({
+      contributionId: contribution.id,
+      expertId: contribution.expertId,
+      briefId: contribution.briefId,
+      requirementId,
+      requirementKind: requirement?.kind || null,
+      requirementTopic: requirement?.topic || null,
+      requirementClaim: requirement?.claim || null,
+      requirementQuestion: card?.question || requirement?.specificQuestion || null,
+      sourceType: contribution.sourceType,
+      originalText: contribution.originalText,
+      transcriptText: contribution.transcriptText,
+      organizationPayload: contribution.organizationPayload,
+      externalUpdateId: contribution.externalUpdateId,
+      originalAssetUri: contribution.originalAssetUri,
+      checksum: contribution.checksum,
+      receivedAt: contribution.receivedAt,
+      decision: review.decision,
+      classification: review.classification,
+    });
+  }, [requirementOfContribution, reviews]);
+
+  const pendingContributionCount = articleContributions.filter(contribution => decisionOf(contribution.id) === "NOT_APPROVED").length;
+  const selectedEvidenceCount = articleContributions.filter(contribution => radarSpecialistDecisionIsActive(decisionOf(contribution.id))).length;
   const briefLocked = Boolean(activeBrief && ["awaiting_expert", "receiving", "awaiting_review"].includes(activeBrief.status));
   const bindingConfigured = Boolean(selectedExpertId && bindings.some(binding => binding.expertId === selectedExpertId && binding.status === "active"));
   const canSave = Boolean(selectedExpertId && draftOpen && draft.title.trim() && contextPayload && !busy && !briefLocked);
   const canReview = Boolean(activeBrief && draftOpen && draft.title.trim() && !busy && !briefLocked);
   const canSend = Boolean(activeBrief && activeBrief.status === "reviewed" && !dirty && bindingConfigured && draft.questions.length && !busy);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    let active = true;
-    const timer = window.setTimeout(() => {
-      if (!active) return;
-      try {
-        const herdadas = legacyReviewKeys.reduce<Record<string, ExpertReview>>((total, key) => {
-          const raw = window.localStorage.getItem(key);
-          return raw ? { ...total, ...parseStoredReviews(JSON.parse(raw)) } : total;
-        }, {});
-        const raw = window.localStorage.getItem(reviewStorageKey);
-        setReviews({ ...herdadas, ...parseStoredReviews(raw ? JSON.parse(raw) : null) });
-      } catch {
-        setReviews({});
-      } finally {
-        setHydratedReviewKey(reviewStorageKey);
-      }
-    }, 0);
-    return () => { active = false; window.clearTimeout(timer); };
-  }, [legacyReviewKeys, reviewStorageKey]);
-
-  useEffect(() => {
-    if (hydratedReviewKey !== reviewStorageKey || typeof window === "undefined") return;
-    window.localStorage.setItem(reviewStorageKey, JSON.stringify(reviews));
-  }, [hydratedReviewKey, reviewStorageKey, reviews]);
+  /** Ordenar só existe quando há ordem: com uma pergunta, Subir/Descer somem — §3. */
+  const controlesDePergunta = radarSpecialistQuestionControls(draft.questions.length);
 
   useEffect(() => {
     const evidence: RadarR6ExpertEvidenceInput[] = articleContributions.map(contribution => {
-      const review = reviews[contribution.id] || { decision: "pending" as const, classification: null, need: null };
+      const extracao = extractionOf(contribution);
       return {
         id: contribution.id,
         contributionId: contribution.id,
-        summary: organizationText(contribution) || contribution.transcriptText || contribution.originalText || "Contribuição recebida sem texto disponível.",
-        reviewed: review.decision !== "pending",
-        decision: review.decision,
-        classification: review.classification,
-        need: review.need,
+        /* A síntese extraída, e não mais o texto cru: é ela que o relatório lê. */
+        summary: extracao.extractedSummary || "Contribuição recebida sem texto disponível.",
+        reviewed: extracao.humanDecision !== "NOT_APPROVED",
+        decision: radarSpecialistDecisionToProjection(extracao.humanDecision),
+        classification: extracao.classification,
+        /* A necessidade vem do ponto de revisão, não de um select preenchido à mão. */
+        need: extracao.requirementId,
         sourceType: contribution.sourceType,
       };
     });
@@ -627,13 +667,14 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
     for (const contribution of articleContributions) {
       const brief = briefById.get(contribution.briefId);
       if (!brief) continue;
-      const review = reviews[contribution.id] || { decision: "pending" as const };
+      /* A projeção canônica fala o enum antigo; a tradução mora no domínio. */
+      const review: RadarExpertEvidenceReview = { decision: radarSpecialistDecisionToProjection(decisionOf(contribution.id)) };
       const projected = projectRadarExpertEvidence({ brandId, articleId, articleDnaVersionId, brief, contribution, review });
       if (projected.evidence) canonicalEvidence.push(projected.evidence);
       if (projected.reason === "content_not_readable") blockedEvidenceCount += 1;
     }
     onExpertEvidenceChange?.(articleId, evidence, { contributionCount: articleContributions.length, pendingCount: pendingContributionCount, remote: true, canonicalEvidence, blockedEvidenceCount, articleDnaVersionId, counters });
-  }, [articleContributions, articleDnaVersionId, articleId, brandId, briefById, counters, onExpertEvidenceChange, pendingContributionCount, reviews]);
+  }, [articleContributions, articleDnaVersionId, articleId, brandId, briefById, counters, decisionOf, extractionOf, onExpertEvidenceChange, pendingContributionCount]);
 
   const setDraftValue = (update: (current: Draft) => Draft) => {
     setDraft(current => update(current));
@@ -827,6 +868,54 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
   };
 
   /**
+   * APROVAR A PAUTA DE ONDE ELA É LIDA — SPECIALIST_3 · §1.
+   *
+   * "Enviar pauta" ficava desabilitado até o brief estar `reviewed`, e a
+   * aprovação só existia dentro do editor, atrás de "Abrir pauta", no fim da
+   * coluna. O critério estava certo e era invisível: de fora, o botão parecia
+   * quebrado — foi exatamente essa a leitura do runtime.
+   *
+   * A aprovação continua sendo ato humano explícito e continua exigindo pelo
+   * menos uma pergunta. O que mudou é ela acontecer no card do ponto, onde a
+   * pessoa está olhando, com o texto da pauta que o banco tem — e não com o
+   * rascunho que o editor tiver em mãos.
+   */
+  const aprovarPauta = async (brief: RadarBriefRecord) => {
+    setBusy("review");
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/editorial/expert-briefs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          brandId,
+          expertId: brief.expertId,
+          articleId,
+          articleDnaVersionId,
+          briefId: brief.id,
+          title: brief.title,
+          radarContext: brief.radarContext,
+          questions: brief.questions,
+          status: "reviewed",
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(recordValue(asObject(payload)?.error) || "Não foi possível aprovar esta pauta para envio.");
+      if (payload.persistence !== "remote_readback_confirmed") throw new Error("A aprovação não retornou confirmação remota da pauta.");
+      const persisted = parseBrief(payload.brief);
+      if (!persisted || !radarExpertBriefMatchesContext(persisted, { brandId, articleId, articleDnaVersionId })) throw new Error("O readback da aprovação retornou uma pauta fora do contexto selecionado.");
+      setOverlayBriefs(current => [persisted, ...current.filter(item => item.id !== persisted.id)]);
+      leituraDaArea.refresh();
+      setNotice("Pauta aprovada para envio. Nada foi enviado ainda.");
+    } catch (approveError) {
+      setError(errorMessage(approveError, "Não foi possível aprovar esta pauta para envio."));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  /**
    * ENVIAR A PAUTA — a única ação que escreve `sent_at`.
    *
    * Recebe pauta e participante por argumento porque a consulta do card não
@@ -911,23 +1000,85 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
     }
   };
 
-  const updateReview = (contributionId: string, update: Partial<ExpertReview>) => {
-    setReviews(current => ({
-      ...current,
-      [contributionId]: {
-        decision: current[contributionId]?.decision || "pending",
-        classification: current[contributionId]?.classification || null,
-        need: current[contributionId]?.need || null,
-        ...update,
-      },
-    }));
+  /**
+   * A DECISÃO HUMANA VAI PARA O SERVIDOR — SPECIALIST_3 · §6 e §13.
+   *
+   * Era `setReviews` num `useState` espelhado em `localStorage`. O clique
+   * parecia funcionar e sobrevivia ao F5, mas a decisão morava no navegador:
+   * abrir o mesmo artigo na Vercel depois de decidir no local mostrava tudo
+   * "aguardando decisão" outra vez.
+   *
+   * Agora o clique é uma escrita remota com readback obrigatório, e a tela só
+   * muda depois que o servidor confirma o que gravou. Enquanto ela não
+   * confirma, a decisão anterior continua na tela — nunca uma falsa.
+   */
+  const registrarDecisao = async (contribution: RadarExpertContributionRecord, update: {
+    decision?: RadarSpecialistDecision;
+    classification?: RadarSpecialistClassification | null;
+    relatedRequirementId?: string | null;
+  }) => {
+    const atual = reviews[contribution.id] || REVISAO_PENDENTE;
+    setDecidindo(contribution.id);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/editorial/expert-contributions/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          brandId, articleId, articleDnaVersionId,
+          briefId: contribution.briefId,
+          contributionId: contribution.id,
+          decision: update.decision ?? atual.decision,
+          classification: update.classification !== undefined ? update.classification : atual.classification,
+          relatedRequirementId: update.relatedRequirementId !== undefined ? update.relatedRequirementId : atual.relatedRequirementId,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(recordValue(asObject(payload)?.error) || "Não foi possível gravar a decisão sobre esta contribuição.");
+      if (payload.persistence !== "remote_readback_confirmed") throw new Error("A decisão não retornou confirmação remota.");
+      const persisted = parseBrief(payload.brief);
+      if (!persisted || !radarExpertBriefMatchesContext(persisted, { brandId, articleId, articleDnaVersionId })) throw new Error("O readback da decisão retornou uma pauta fora do contexto selecionado.");
+      setOverlayBriefs(current => [persisted, ...current.filter(brief => brief.id !== persisted.id)]);
+      leituraDaArea.refresh();
+      setEditandoClassificacao("");
+    } catch (reviewError) {
+      setError(errorMessage(reviewError, "Não foi possível gravar a decisão sobre esta contribuição."));
+    } finally {
+      setDecidindo("");
+    }
   };
 
   if (!context) return <section className={surface} aria-label="ExpertBrief indisponível"><h3 className="text-base font-semibold text-foreground">ExpertBrief</h3><p className="mt-2 text-sm text-text-muted">ArticleDNA não está hidratado para este artigo. A seleção de especialista e qualquer chamada de IA permanecem bloqueadas.</p></section>;
 
-  const needOptions = [...new Set([...context.serpNeeds, ...context.openGaps])];
-  const resultPoints = reviewPoints.filter(point => point.contributionIds.length > 0);
-  const unassignedContributions = articleContributions.filter(contribution => !requirementByBriefId.get(contribution.briefId));
+  /*
+   * AS OPÇÕES DE ASSOCIAÇÃO MANUAL SÃO OS PONTOS, NÃO O INTERNO — §4 e §12.
+   *
+   * O select antigo listava `context.serpNeeds` e `context.openGaps` inteiros:
+   * `competitor:aHR0cHM6Ly93d3c…: marketplace / success`, `article_editorial /
+   * success`, tópicos de benchmark. É diagnóstico do Radar, não vocabulário de
+   * quem revisa — e nenhuma daquelas linhas é uma necessidade do artigo.
+   *
+   * O que se pode associar a uma resposta é um PONTO DE REVISÃO deste artigo,
+   * com o título que uma pessoa lê. Nada mais entra na lista.
+   */
+  const needOptions = reviewPoints.map(point => ({ value: point.requirementId, label: point.title }));
+  /*
+   * O RESULTADO É AGRUPADO PELO VÍNCULO EFETIVO — automático ou manual (§4).
+   *
+   * Agrupar por `requirementByBriefId` ignorava a associação manual: uma
+   * resposta que alguém ligou a um ponto continuava listada logo abaixo, sob
+   * "sem ponto de revisão associado". A tela contradizia a decisão que a
+   * própria pessoa tinha acabado de tomar.
+   */
+  const contributionsByRequirement = new Map<string, RadarExpertContributionRecord[]>();
+  const unassignedContributions: RadarExpertContributionRecord[] = [];
+  for (const contribution of articleContributions) {
+    const { requirementId } = requirementOfContribution(contribution);
+    if (!requirementId) { unassignedContributions.push(contribution); continue; }
+    contributionsByRequirement.set(requirementId, [...(contributionsByRequirement.get(requirementId) || []), contribution]);
+  }
+  const resultPoints = reviewPoints.filter(point => (contributionsByRequirement.get(point.requirementId) || []).length > 0);
 
   /**
    * UMA LINHA DE ESTADO, NA ORDEM DO QUE PEDE ATENÇÃO.
@@ -949,36 +1100,105 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
             ? `${selectedExpert.displayName} · pauta em rascunho, ainda não enviada`
             : `${selectedExpert.displayName} · ${bindingConfigured ? "vinculado ao Telegram" : "sem vínculo Telegram"}`;
 
+  /**
+   * A CONTRIBUIÇÃO, NO FORMATO COMPACTO DO §11.
+   *
+   * ===================== O QUE SAIU DA VISÃO NORMAL =====================
+   *
+   * Três colunas lado a lado — Original, Transcrição fiel, Contribuição
+   * extraída — para um texto que na prática é o MESMO nas três. E dois selects
+   * vazios antes de qualquer decisão: um pedindo uma classificação que ninguém
+   * sabia o que significava, outro oferecendo `competitor:aHR0cHM6…` como
+   * "necessidade".
+   *
+   * Agora: quem respondeu, a resposta original recolhida, a contribuição
+   * organizada com a classificação JÁ SUGERIDA, onde isso se aplica no artigo,
+   * e as quatro decisões. Ids, transcrição e proveniência continuam inteiros —
+   * um nível abaixo, em "Detalhes avançados". NADA foi apagado (§12).
+   */
   const contributionCard = (contribution: RadarExpertContributionRecord, brief: RadarBriefRecord | null) => {
-    const review = reviews[contribution.id] || { decision: "pending" as const, classification: null, need: null };
-    const organized = organizationText(contribution);
-    const verbatimText = contribution.transcriptText || contribution.originalText || "";
-    const originalText = contribution.originalText || (contribution.originalAssetUri ? "Asset original preservado no armazenamento server-side." : "O material original ainda aguarda preservação.");
+    const review = reviews[contribution.id] || REVISAO_PENDENTE;
+    const extracao = extractionOf(contribution);
+    const { requirementId, manual } = requirementOfContribution(contribution);
+    const verbatimText = extracao.originalText;
+    const originalText = verbatimText || (contribution.originalAssetUri ? "Asset original preservado no armazenamento server-side." : "O material original ainda aguarda preservação.");
+    const editandoEste = editandoClassificacao === contribution.id;
+    const ocupado = decidindo === contribution.id;
+
     return <article className="rounded-md border border-divider bg-surface p-3" key={contribution.id} data-testid="radar-specialist-review-contribution">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h5 className="text-sm font-semibold text-foreground">{expertName(contribution.expertId)} · {sourceTypeLabel(contribution.sourceType)}</h5>
-          <p className="mt-1 text-sm text-text-muted">Telegram · {formatDate(contribution.receivedAt)}{contributionDuration(contribution) ? ` · ${contributionDuration(contribution)}` : ""} · {processingStatusLabel(contribution.processingStatus)}</p>
+        <div className="min-w-0">
+          <h5 className="text-sm font-semibold text-foreground">{expertName(contribution.expertId)} · Telegram</h5>
+          <p className="mt-1 text-sm text-text-muted">{formatDate(contribution.receivedAt)}{contributionDuration(contribution) ? ` · ${contributionDuration(contribution)}` : ""} · {processingStatusLabel(contribution.processingStatus)}</p>
         </div>
-        <span className="rounded-full border border-divider px-2 py-1 text-sm text-text-muted">{reviewDecisionLabels[review.decision]}</span>
+        <span className="shrink-0 rounded-full border border-divider px-2 py-1 text-sm text-text-muted" data-testid="radar-specialist-decision-state">{RADAR_SPECIALIST_DECISION_LABELS[review.decision]}</span>
       </div>
-      <div className="mt-3 grid gap-3 lg:grid-cols-3">
-        <div><p className="text-sm font-semibold text-foreground">Original</p><p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-text-muted">{originalText}</p></div>
-        <div><p className="text-sm font-semibold text-foreground">Transcrição fiel</p><p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-text-muted">{contribution.transcriptText || "Ainda não disponível; o original permanece preservado."}</p></div>
-        <div><p className="text-sm font-semibold text-foreground">Contribuição extraída</p><p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-text-muted">{organized || "Ainda não organizada; não é evidência aprovada."}</p></div>
+
+      {/* O ORIGINAL É A AUTORIDADE DE FIDELIDADE — recolhido, jamais substituído. */}
+      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-text-muted">Resposta original</p>
+      <details className="mt-1 rounded-md border border-divider p-2" data-testid="radar-specialist-original-text"><summary className="cursor-pointer text-sm text-text-muted">Ver texto completo</summary><p className="mt-2 whitespace-pre-wrap text-sm leading-5 text-foreground">{originalText}</p></details>
+
+      {/*
+        * A CLASSIFICAÇÃO CHEGA SUGERIDA, COM A ORIGEM DECLARADA — §5.
+        *
+        * O gate proíbe exigir a escolha manual como primeira ação, e proíbe
+        * aceitar automaticamente como evidência. As duas coisas convivem: a
+        * sugestão aparece pronta e corrigível, e nenhuma delas decide nada.
+        */}
+      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-text-muted">Contribuição organizada</p>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <strong className="text-sm text-foreground" data-testid="radar-specialist-classification">{RADAR_SPECIALIST_CLASSIFICATION_LABELS[extracao.classification]}</strong>
+        <span className="text-sm text-text-muted" data-testid="radar-specialist-classification-source">({RADAR_SPECIALIST_CLASSIFICATION_SOURCE_LABELS[extracao.classificationSource]})</span>
+        {!editandoEste && <button type="button" className="text-sm text-context-accent underline underline-offset-2" onClick={() => setEditandoClassificacao(contribution.id)} data-testid="radar-specialist-change-classification">Alterar</button>}
       </div>
-      <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <label className="block text-sm text-foreground">Classificação<select value={review.classification || ""} onChange={event => updateReview(contribution.id, { classification: (event.target.value || null) as ExpertReviewClassification | null })} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground"><option value="">Selecionar classificação</option>{reviewClassifications.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></label>
-        <label className="block text-sm text-foreground">Relacionar à necessidade<select value={review.need || ""} onChange={event => updateReview(contribution.id, { need: event.target.value || null })} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground"><option value="">Nenhuma selecionada</option>{needOptions.map(need => <option value={need} key={need}>{need}</option>)}</select></label>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" className={review.decision === "accepted" ? primaryAction : action} onClick={() => updateReview(contribution.id, { decision: "accepted" })} disabled={!verbatimText}>Aceitar como evidência</button>
-        <button type="button" className={review.decision === "support" ? primaryAction : action} onClick={() => updateReview(contribution.id, { decision: "support" })} disabled={!verbatimText}>Usar como apoio</button>
-        <button type="button" className={review.decision === "quote" ? primaryAction : action} onClick={() => updateReview(contribution.id, { decision: "quote" })} disabled={!verbatimText}>Marcar citação literal</button>
-        <button type="button" className={review.decision === "rejected" ? primaryAction : action} onClick={() => updateReview(contribution.id, { decision: "rejected" })}>Rejeitar</button>
-      </div>
-      {review.decision === "quote" && verbatimText && <blockquote className="mt-3 border-l-2 border-context-accent pl-3 text-sm leading-5 text-foreground">“{verbatimText}”<footer className="mt-1 text-text-muted">Trecho original preservado; timestamps só aparecem quando fornecidos pelo provider.</footer></blockquote>}
-      <details className="mt-3 rounded-md border border-divider p-2"><summary className="cursor-pointer text-sm font-semibold text-text-muted">Proveniência / detalhes técnicos</summary><dl className="mt-2 grid gap-2 text-sm text-text-muted sm:grid-cols-2"><div><dt>contributionId</dt><dd className="break-all text-foreground">{contribution.id}</dd></div><div><dt>briefId</dt><dd className="break-all text-foreground">{brief?.id || contribution.briefId}</dd></div><div><dt>externalUpdateId</dt><dd className="break-all text-foreground">{contribution.externalUpdateId}</dd></div><div><dt>originalAssetUri</dt><dd className="break-all text-foreground">{contribution.originalAssetUri || "não disponível"}</dd></div><div><dt>checksum</dt><dd className="break-all text-foreground">{contribution.checksum || "não disponível"}</dd></div></dl></details>
+      {editandoEste && <label className="mt-2 block text-sm text-foreground">Classificação
+        <select value={extracao.classification} disabled={ocupado} onChange={event => void registrarDecisao(contribution, { classification: event.target.value as RadarSpecialistClassification })} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground" aria-label="Classificação da contribuição">
+          {RADAR_SPECIALIST_CLASSIFICATIONS.map(item => <option value={item} key={item}>{RADAR_SPECIALIST_CLASSIFICATION_LABELS[item]} — {RADAR_SPECIALIST_CLASSIFICATION_HINTS[item]}</option>)}
+        </select>
+      </label>}
+      <blockquote className="mt-2 border-l-2 border-divider pl-3 text-sm leading-5 text-foreground" data-testid="radar-specialist-extracted-summary">{extracao.extractedSummary || "Ainda não organizada; não é evidência aprovada."}</blockquote>
+
+      <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-text-muted">Aplicação no artigo</p>
+      <p className="mt-1 text-sm text-text-muted" data-testid="radar-specialist-editorial-use">{extracao.editorialUse}{manual ? " (associação manual)" : ""}</p>
+
+      {/*
+        * AS QUATRO DECISÕES — e cada clique é uma escrita remota (§6 e §13).
+        *
+        * Sem texto legível não há o que aceitar: um áudio ainda em transcrição
+        * não pode virar evidência, porque ninguém leu o que ele diz. Rejeitar,
+        * esse, continua possível — recusar não exige ler o conteúdo inteiro.
+        */}
+      <div className="mt-3 flex flex-wrap gap-2">{DECISOES.map(item => <button
+        type="button"
+        key={item.value}
+        className={review.decision === item.value ? primaryAction : action}
+        onClick={() => void registrarDecisao(contribution, { decision: item.value })}
+        disabled={ocupado || (item.value !== "REJECTED" && !verbatimText)}
+        data-testid={`radar-specialist-decision-${item.value}`}
+      >{ocupado ? "Gravando…" : item.label}</button>)}</div>
+
+      {review.decision === "QUOTE_CANDIDATE" && extracao.quoteCandidate && <blockquote className="mt-3 border-l-2 border-context-accent pl-3 text-sm leading-5 text-foreground" data-testid="radar-specialist-quote">“{extracao.quoteCandidate}”<footer className="mt-1 text-text-muted">Trecho original preservado; timestamps só aparecem quando fornecidos pelo provider.</footer></blockquote>}
+
+      <details className="mt-3 rounded-md border border-divider p-2" data-testid="radar-specialist-contribution-advanced"><summary className="cursor-pointer text-sm font-semibold text-text-muted">Detalhes avançados</summary>
+        {/*
+          * A ASSOCIAÇÃO MANUAL É EXCEÇÃO, E POR ISSO MORA AQUI — §4.
+          *
+          * Ela só tem uso quando a resposta chegou por uma pauta avulsa, que
+          * não nasceu de ponto nenhum: ali não há o que derivar. Para todo o
+          * resto, o vínculo automático já respondeu, e mexer nele é sobrescrever
+          * uma verdade do banco com um palpite de tela.
+          */}
+        {needOptions.length > 0 && <label className="mt-2 block text-sm text-foreground">Relacionar a outro ponto de revisão
+          <select value={requirementId || ""} disabled={ocupado} onChange={event => void registrarDecisao(contribution, { relatedRequirementId: event.target.value || null })} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground" aria-label="Relacionar a outro ponto de revisão">
+            <option value="">Vínculo automático da pauta</option>
+            {needOptions.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}
+          </select>
+        </label>}
+        <p className="mt-3 text-sm text-text-muted">Transcrição fiel: {contribution.transcriptText ? "disponível abaixo" : "ainda não disponível; o original permanece preservado."}</p>
+        {contribution.transcriptText && <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-text-muted">{contribution.transcriptText}</p>}
+        <p className="mt-3 text-sm text-text-muted">Síntese: {extracao.summarySource === "AI_ORGANIZATION" ? "organização revisável da resposta" : extracao.summarySource === "VERBATIM" ? "o próprio texto recebido, sem corte" : "recorte das primeiras frases do texto recebido"}.</p>
+        <dl className="mt-3 grid gap-2 text-sm text-text-muted sm:grid-cols-2"><div><dt>contributionId</dt><dd className="break-all text-foreground">{contribution.id}</dd></div><div><dt>briefId</dt><dd className="break-all text-foreground">{brief?.id || contribution.briefId}</dd></div><div><dt>requirementId</dt><dd className="break-all text-foreground">{requirementId || "não associado"}</dd></div><div><dt>externalUpdateId</dt><dd className="break-all text-foreground">{contribution.externalUpdateId}</dd></div><div><dt>originalAssetUri</dt><dd className="break-all text-foreground">{contribution.originalAssetUri || "não disponível"}</dd></div><div><dt>checksum</dt><dd className="break-all text-foreground">{contribution.checksum || "não disponível"}</dd></div><div><dt>Decidida em</dt><dd className="text-foreground">{review.decidedAt ? formatDate(review.decidedAt) : "ainda não decidida"}</dd></div><div><dt>Persistência da decisão</dt><dd className="text-foreground">Remota, no contexto da pauta, confirmada por readback.</dd></div></dl>
+      </details>
     </article>;
   };
 
@@ -1107,9 +1327,22 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       </div>
 
       <aside className="space-y-3 min-w-0" data-testid="radar-specialist-review-points-column">
-        <section className={surface} aria-label="Pontos preparados para revisão profissional">
+        {/*
+          * UM CARD POR PONTO — SPECIALIST_3 · §1.
+          *
+          * "PONTOS PARA REVISÃO" e "PAUTAS / PEDIDOS" eram duas listas com o
+          * MESMO título dentro, lado a lado. Com um ponto preparado e a sua
+          * pauta derivada, a coluna mostrava dois cards e dois botões — e a
+          * leitura natural era que havia dois pedidos a enviar. Enviar um
+          * deixava o outro parecendo travado, que foi o que o runtime relatou.
+          *
+          * Uma pauta não é outra coisa além do que o ponto virou. O card é um
+          * só, e ele EVOLUI: ponto preparado → pauta pronta → pedido enviado →
+          * resposta recebida → contribuição a revisar → evidência decidida.
+          */}
+        <section className={surface} aria-label="Pontos de revisão deste artigo">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">PONTOS PARA REVISÃO</h4>
+            <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">PONTOS DE REVISÃO</h4>
             <span className="text-sm text-text-muted">{reviewPoints.length}</span>
           </div>
           {!reviewPoints.length && <p className="mt-2 rounded-md border border-divider bg-surface px-3 py-3 text-sm text-text-muted">Nenhum ponto preparado para revisão.</p>}
@@ -1118,9 +1351,58 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
             const card = requisito ? radarSpecialistReviewCard(requisito) : null;
             const convite = invites[point.requirementId] || null;
             const consulta = consultationByRequirement.get(point.requirementId) || null;
+            const pauta = point.briefId ? briefById.get(point.briefId) || null : null;
+            const fluxo = radarSpecialistFlow(point.state);
+            const aRevisar = point.contributionIds.filter(id => decisionOf(id) === "NOT_APPROVED").length;
+            /*
+             * A PRÓXIMA AÇÃO, E O MOTIVO QUANDO ELA NÃO PODE ACONTECER.
+             *
+             * O critério que travava "Enviar pauta" existia e era correto — o
+             * brief precisa estar aprovado. Ele só não estava escrito em lugar
+             * nenhum que a pessoa pudesse ler. Agora o motivo vem junto.
+             */
+            const proxima = radarSpecialistNextAction({
+              state: point.state,
+              connected: Boolean(consulta?.connected),
+              inviteState: consulta?.invite.state || "NONE",
+              hasInviteLink: Boolean(convite?.link),
+              botConfigured: Boolean(botUsername),
+              /*
+               * A PAUTA MANDA SOBRE `sent_at`, e a projeção da consulta segue.
+               *
+               * Só a rota de envio escreve `sent_at`, e o readback dela volta
+               * como pauta — que entra no overlay na hora. A projeção da
+               * consulta é leitura derivada e chega na próxima releitura: ler
+               * a consulta primeiro deixava o card dizendo "Editar pauta" e
+               * oferecendo enviar uma pauta que já tinha sido enviada.
+               *
+               * TROCAR A ORDEM AQUI É MUTANTE EQUIVALENTE, e está registrado
+               * como tal: `||` já cai para o outro lado quando um dos dois é
+               * nulo, e os dois nunca discordam com valor — saem da mesma
+               * coluna. A ordem documenta a autoridade, não corrige um caso.
+               * O defeito real era ler a consulta SOZINHA, que é o que o
+               * rótulo da pauta fazia; esse, sim, morre em teste.
+               */
+              sentAt: pauta?.sentAt || consulta?.sentAt || null,
+              approved: (pauta?.status || consulta?.status) === "reviewed",
+              questionCount: pauta ? normalizeRadarExpertBriefQuestions(pauta.questions).length : 0,
+              pendingReview: aRevisar > 0,
+              contributionCount: point.contributionIds.length,
+            });
+            const executarProxima = () => {
+              if (proxima.kind === "CREATE_CONSULTATION" && requisito) return void createConsultationFromRequirement(requisito);
+              if (proxima.kind === "ISSUE_INVITE" && requisito) return void createConsultationFromRequirement(requisito, "reissue");
+              if (proxima.kind === "SHARE_INVITE") return void copiar(convite?.link || "", point.requirementId, "link");
+              if (proxima.kind === "APPROVE_BRIEF" && pauta) return void aprovarPauta(pauta);
+              if (proxima.kind === "SEND_BRIEF" && consulta) return void enviarPauta(consulta.briefId, consulta.participant.id);
+            };
             return <li className="rounded-md border border-divider bg-surface p-3" key={point.requirementId} data-testid="radar-specialist-review-point">
             <p className="text-sm font-semibold text-foreground">{point.title}</p>
             <p className="mt-1 text-sm font-semibold uppercase tracking-wide text-text-muted">{radarSpecialistPriorityLabel(point.priority)} · {point.stateLabel}</p>
+            {/* A régua diz ONDE no caminho este ponto está — sem repetir o título. */}
+            <ol className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-xs" data-testid="radar-specialist-flow" aria-label="Andamento deste ponto de revisão">
+              {fluxo.steps.map(step => <li key={step.stage} className={step.current ? "font-semibold text-context-accent" : step.reached ? "text-foreground" : "text-text-muted"} aria-current={step.current ? "step" : undefined} data-testid={step.current ? "radar-specialist-flow-current" : undefined}>{step.label}</li>)}
+            </ol>
             {/*
               * A PERGUNTA, O MOTIVO E O QUE SE ESPERA — nada do diagnóstico.
               *
@@ -1134,7 +1416,22 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
             <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-text-muted">Por que revisar</p>
             <p className="mt-1 text-sm text-text-muted" data-testid="radar-specialist-point-reason">{card?.reason || point.whyReviewIsNeeded || "Esta afirmação precisa de validação profissional."}</p>
             {card && <><p className="mt-3 text-xs font-semibold uppercase tracking-wide text-text-muted">O que esperamos</p><p className="mt-1 text-sm text-text-muted">{card.expectation}</p>{card.contributions.length > 0 && <p className="mt-1 text-sm text-foreground" data-testid="radar-specialist-point-contributions">{card.contributions.join(" · ")}</p>}</>}
-            {point.canCreateDraft && <button type="button" className={`${primaryAction} mt-3`} onClick={() => void createConsultationFromRequirement(requisito as RadarFrozenSpecialistRequirement)} disabled={busy !== "" || !requisito} data-testid="radar-specialist-create-consultation">{creatingRequirementId === point.requirementId ? "Criando consulta…" : "Criar consulta"}</button>}
+            {/*
+              * UMA AÇÃO, E ELA DIZ O QUE FALTA QUANDO NÃO PODE ACONTECER.
+              *
+              * Antes eram três botões espalhados pelo card — criar consulta,
+              * gerar link, enviar pauta — cada um aparecendo ou sumindo por
+              * conta própria, e o de enviar ficava inerte sem explicar nada.
+              * Aqui existe a próxima do fluxo, e só ela.
+              */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {proxima.actionable
+                ? proxima.kind === "REVIEW_CONTRIBUTION"
+                  ? <a href="#radar-specialist-review-result" className={primaryAction} data-testid="radar-specialist-next-action">{proxima.label}</a>
+                  : <button type="button" className={primaryAction} onClick={executarProxima} disabled={!proxima.enabled || busy !== "" || (proxima.kind === "CREATE_CONSULTATION" && !requisito)} data-testid="radar-specialist-next-action">{creatingRequirementId === point.requirementId ? "Criando consulta…" : busy === "send" && proxima.kind === "SEND_BRIEF" ? "Enviando…" : busy === "review" && proxima.kind === "APPROVE_BRIEF" ? "Aprovando…" : proxima.label}</button>
+                : <span className="text-sm text-text-muted" data-testid="radar-specialist-next-action">{proxima.label}</span>}
+              {proxima.reason && <span className="text-sm text-text-muted" data-testid="radar-specialist-next-action-reason">{proxima.reason}</span>}
+            </div>
             {/*
               * A CONSULTA, LIDA DO BANCO — SPECIALIST_2.1.1 · §4, §5 e §9.
               *
@@ -1154,28 +1451,24 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
               <p className="mt-1 text-sm text-text-muted">{consulta.sentAt ? "Pedido enviado" : consulta.status === "reviewed" ? "Pauta aprovada para envio" : "Pauta em preparação"}</p>
               {!consulta.connected && <p className="mt-1 text-sm text-text-muted" data-testid="radar-specialist-invite-state">{RADAR_SPECIALIST_INVITE_LABELS[consulta.invite.state]}</p>}
 
-              {convite?.link && <div className="mt-2 flex flex-wrap gap-2">
-                <button type="button" className={action} onClick={() => void copiar(convite.link || "", point.requirementId, "link")} data-testid="radar-specialist-copy-link">Copiar link</button>
-                <button type="button" className={action} onClick={() => void copiar(convite.message, point.requirementId, "mensagem")} data-testid="radar-specialist-copy-message">Copiar mensagem</button>
-              </div>}
-              {!convite?.link && !consulta.connected && <div className="mt-2 flex flex-wrap items-center gap-2">
-                {/* Sem bot confirmado não há link a gerar: o botão mentiria. */}
-                <button type="button" className={action} onClick={() => void createConsultationFromRequirement(requisito as RadarFrozenSpecialistRequirement, "reissue")} disabled={busy !== "" || !requisito || !botUsername} data-testid="radar-specialist-reissue-link">{creatingRequirementId === point.requirementId ? "Gerando…" : "Gerar novo link"}</button>
-                <span className="text-sm text-text-muted">{consulta.invite.state === "OPEN" ? "O link anterior continua válido até ser substituído." : "Gere um link para o especialista entrar."}</span>
-              </div>}
+              {/*
+                * COPIAR A MENSAGEM ACOMPANHA O LINK, e nada mais duplica a ação.
+                *
+                * Gerar o link e enviar a pauta viraram a PRÓXIMA AÇÃO do card.
+                * Repeti-los aqui recriaria os dois botões concorrentes que o §1
+                * veio eliminar — e era a segunda cópia que parecia travada.
+                */}
+              {convite?.link && <button type="button" className={`${action} mt-2`} onClick={() => void copiar(convite.message, point.requirementId, "mensagem")} data-testid="radar-specialist-copy-message">Copiar mensagem do convite</button>}
+              {(pauta?.sentAt || consulta.sentAt) && <p className="mt-2 text-sm text-text-muted">Enviado em {formatDate((pauta?.sentAt || consulta.sentAt) as string)}.</p>}
 
               {/*
-                * ENVIAR SÓ DEPOIS DO /START — §6 e §7.
+                * "EDITAR" ANTES DO ENVIO, "VER" DEPOIS — §2.
                 *
-                * Sem `chat_id` não há para onde mandar, e o `chat_id` só nasce
-                * quando a pessoa abre o bot. Habilitar antes disso ofereceria
-                * uma ação que falharia no provider.
+                * Depois do envio as perguntas estão congeladas: a rota recusa
+                * alteração em pauta `awaiting_expert`. "Abrir pauta" prometia
+                * uma edição que não ia acontecer, e sugeria criar outra.
                 */}
-              {consulta.connected && !consulta.sentAt && <button type="button" className={`${primaryAction} mt-2`} onClick={() => void enviarPauta(consulta.briefId, consulta.participant.id)} disabled={consulta.status !== "reviewed" || busy !== ""} data-testid="radar-specialist-send-brief">{busy === "send" ? "Enviando…" : "Enviar pauta"}</button>}
-              {consulta.connected && !consulta.sentAt && consulta.status !== "reviewed" && <p className="mt-1 text-sm text-text-muted">Aprove a pauta para envio antes de enviá-la.</p>}
-              {consulta.sentAt && <p className="mt-2 text-sm text-text-muted">Enviado em {formatDate(consulta.sentAt)}.</p>}
-
-              <button type="button" className={`${action} mt-2`} onClick={() => { const brief = briefById.get(consulta.briefId); if (brief) openBrief(brief); }}>Abrir pauta</button>
+              <button type="button" className={`${action} mt-2`} onClick={() => { const brief = briefById.get(consulta.briefId); if (brief) openBrief(brief); }} data-testid="radar-specialist-open-brief">{radarSpecialistBriefActionLabel({ sentAt: pauta?.sentAt || consulta.sentAt })}</button>
               {copied === `${point.requirementId}:link` && <p className="mt-2 text-sm text-success" role="status">Link copiado</p>}
               {copied === `${point.requirementId}:mensagem` && <p className="mt-2 text-sm text-success" role="status">Mensagem copiada</p>}
               {/*
@@ -1192,13 +1485,21 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           })}</ul>
         </section>
 
-        <section className={surface} aria-label="Pautas e pedidos deste artigo">
+        {/*
+          * SÓ O QUE NÃO CABE EM NENHUM PONTO — o resto da lista virou duplicata.
+          *
+          * Toda pauta que nasceu de um ponto de revisão já aparece, uma vez,
+          * no card daquele ponto. O que sobra aqui é a pauta AVULSA: criada à
+          * mão, sem requisito, e que portanto não tem card onde morar. Na
+          * maioria dos artigos esta seção simplesmente não existe.
+          */}
+        {pautasAvulsas.length > 0 && <section className={surface} aria-label="Pautas avulsas deste artigo">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">PAUTAS / PEDIDOS</h4>
-            <span className="text-sm text-text-muted">{briefs.length}</span>
+            <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">PAUTAS AVULSAS</h4>
+            <span className="text-sm text-text-muted">{pautasAvulsas.length}</span>
           </div>
-          {!briefs.length && <p className="mt-2 rounded-md border border-divider bg-surface px-3 py-3 text-sm text-text-muted">Nenhuma pauta criada.</p>}
-          <ul className="mt-3 space-y-2">{briefs.map(brief => {
+          <p className="mt-1 text-sm text-text-muted">Criadas fora de um ponto de revisão preparado.</p>
+          <ul className="mt-3 space-y-2">{pautasAvulsas.map(brief => {
             const recebidas = contributionsByBrief.get(brief.id) || [];
             /*
              * O ESTADO CANÔNICO, NUNCA O RÓTULO DO BANCO — §6.
@@ -1208,12 +1509,12 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
              * revisões no mesmo enum; expor a palavra crua faria a tela dizer
              * "revisada" sobre uma pauta que ninguém enviou.
              */
-            const state = radarSpecialistStateFromBrief({ status: brief.status, sentAt: brief.sentAt, contributions: recebidas.length, acceptedContributions: recebidas.filter(item => acceptedDecisions.has(decisionOf(item.id))).length, connected: vinculados.has(brief.expertId), invited: Boolean(radarSpecialistConsultationOf(brief.radarContext)) });
+            const state = radarSpecialistStateFromBrief({ status: brief.status, sentAt: brief.sentAt, contributions: recebidas.length, acceptedContributions: recebidas.filter(item => radarSpecialistDecisionIsActive(decisionOf(item.id))).length, connected: vinculados.has(brief.expertId), invited: Boolean(radarSpecialistConsultationOf(brief.radarContext)) });
             return <li className="rounded-md border border-divider bg-surface p-3" key={brief.id} data-testid="radar-specialist-brief-row">
               <p className="text-sm font-semibold text-foreground">{brief.title}</p>
               <p className="mt-1 text-sm text-text-muted">{expertName(brief.expertId)} · {briefDate(brief)}</p>
               <p className="mt-2 flex flex-wrap gap-2 text-sm"><span className="rounded-full border border-divider px-2 py-1 text-foreground">{radarSpecialistStateLabel(state)}</span><span className="rounded-full border border-divider px-2 py-1 text-text-muted">{recebidas.length} resposta(s)</span></p>
-              <button type="button" className={`${action} mt-3`} onClick={() => openBrief(brief)}>Abrir pauta</button>
+              <button type="button" className={`${action} mt-3`} onClick={() => openBrief(brief)}>{radarSpecialistBriefActionLabel({ sentAt: brief.sentAt })}</button>
             </li>;
           })}</ul>
           {selectedExpert && scopedBriefs.length > 0 && <label className="mt-3 block text-sm text-foreground">Histórico deste artigo, versão e especialista
@@ -1222,7 +1523,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
               {scopedBriefs.map(brief => <option value={brief.id} key={brief.id}>{brief.title} · {radarSpecialistStateLabel(radarSpecialistStateFromBrief({ status: brief.status, sentAt: brief.sentAt, contributions: (contributionsByBrief.get(brief.id) || []).length }))} · {briefDate(brief)}</option>)}
             </select>
           </label>}
-        </section>
+        </section>}
 
         {selectedExpert && draftOpen && <section className={surface} aria-label="Editor de perguntas do ExpertBrief">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1230,17 +1531,39 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
             <span className="rounded-full border border-divider px-3 py-1 text-sm text-text-muted">{activeBrief ? radarSpecialistStateLabel(radarSpecialistStateFromBrief({ status: activeBrief.status, sentAt: activeBrief.sentAt, contributions: (contributionsByBrief.get(activeBrief.id) || []).length })) : "Nova pauta local"}</span>
           </div>
           <label className="mt-3 block text-sm text-foreground">Título da pauta<input value={draft.title} onChange={event => setDraftValue(current => ({ ...current, title: event.target.value }))} maxLength={240} disabled={briefLocked} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground disabled:cursor-not-allowed disabled:opacity-70" /></label>
-          <div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" className={action} onClick={() => void generateSuggestions()} disabled={busy !== "" || briefLocked}>{busy === "suggestions" ? "Gerando sugestões…" : "Gerar sugestões"}</button><span className="text-sm text-text-muted">A IA só é chamada por esta ação; o resultado continua revisável.</span></div>
+          {briefLocked && <p className="mt-2 text-sm text-text-muted" data-testid="radar-specialist-brief-locked">Esta pauta já foi enviada; as perguntas estão congeladas e só podem ser consultadas.</p>}
           <ol className="mt-3 space-y-2" aria-label="Perguntas editáveis do ExpertBrief">
             {draft.questions.map((question, index) => <li className="rounded-md border border-divider bg-surface p-3" key={question.id}>
               <div className="flex items-start gap-2"><span className="pt-2 text-sm font-semibold text-context-accent">{index + 1}.</span><textarea value={question.text} onChange={event => updateQuestion(question.id, event.target.value)} rows={2} disabled={briefLocked} className="min-h-16 min-w-0 flex-1 rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground disabled:cursor-not-allowed disabled:opacity-70" aria-label={`Pergunta ${index + 1}`} /></div>
               <p className="mt-2 text-sm text-text-muted">Origem: {radarExpertBriefQuestionOriginLabel(question.origin)}{question.need ? ` · necessidade: ${question.need}` : ""}</p>
               {question.reference && <p className="mt-1 break-words text-sm text-text-muted">Referência: {question.reference}</p>}
-              <div className="mt-2 flex flex-wrap gap-2"><button type="button" className={action} onClick={() => moveQuestion(question.id, -1)} disabled={briefLocked || index === 0}>Subir</button><button type="button" className={action} onClick={() => moveQuestion(question.id, 1)} disabled={briefLocked || index === draft.questions.length - 1}>Descer</button><button type="button" className={action} onClick={() => removeQuestion(question.id)} disabled={briefLocked}>Remover</button></div>
+              {/*
+                * SUBIR E DESCER SÓ EXISTEM QUANDO HÁ ORDEM — §3.
+                *
+                * Com uma pergunta só, os dois ficavam permanentemente inativos:
+                * três controles na tela, dois deles inertes para sempre. Quem
+                * olhava não tinha como saber que aquilo era o esperado.
+                */}
+              <div className="mt-2 flex flex-wrap gap-2" data-testid="radar-specialist-question-controls">
+                {controlesDePergunta.canReorder && <><button type="button" className={action} onClick={() => moveQuestion(question.id, -1)} disabled={briefLocked || index === 0}>Subir</button><button type="button" className={action} onClick={() => moveQuestion(question.id, 1)} disabled={briefLocked || index === draft.questions.length - 1}>Descer</button></>}
+                <button type="button" className={action} onClick={() => removeQuestion(question.id)} disabled={briefLocked}>Remover</button>
+              </div>
             </li>)}
           </ol>
           {!draft.questions.length && <p className="mt-3 rounded-md border border-divider bg-surface px-3 py-2 text-sm text-text-muted">Nenhuma pergunta adicionada. Crie uma pergunta ou gere sugestões explicitamente.</p>}
           <div className="mt-3 flex flex-col gap-2"><input aria-label="Nova pergunta ao especialista" value={newQuestion} onChange={event => setNewQuestion(event.target.value)} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); addQuestion(); } }} disabled={briefLocked} className="min-h-10 min-w-0 flex-1 rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground disabled:cursor-not-allowed disabled:opacity-70" placeholder="Adicionar pergunta" /><button type="button" className={action} onClick={addQuestion} disabled={briefLocked || !newQuestion.trim()}>Adicionar pergunta</button></div>
+          {/*
+            * "SUGESTÕES POR IA" É AÇÃO SECUNDÁRIA — §3.
+            *
+            * Ela estava no topo do editor, com o mesmo peso visual do resto e
+            * um parágrafo permanente explicando que a IA só roda ao clicar. O
+            * aviso era verdadeiro e ocupava espaço a cada render: ele passa a
+            * ser o `title` do próprio botão, onde é lido quando interessa.
+            *
+            * A chamada continua sendo EXCLUSIVAMENTE desta ação, e o resultado
+            * continua revisável antes de qualquer gravação.
+            */}
+          <button type="button" className="mt-2 text-sm text-context-accent underline underline-offset-2 disabled:cursor-not-allowed disabled:text-text-muted disabled:no-underline" onClick={() => void generateSuggestions()} disabled={busy !== "" || briefLocked} title="A IA só é chamada por esta ação; o resultado continua revisável antes de salvar." data-testid="radar-specialist-generate-suggestions">{busy === "suggestions" ? "Gerando sugestões…" : "Sugestões por IA"}</button>
           <div className="mt-4 flex flex-wrap gap-2"><button type="button" className={primaryAction} onClick={() => void persist(undefined, selectedBriefId ? "saved" : "created")} disabled={!canSave}>{busy === "save" ? "Salvando…" : selectedBriefId ? "Salvar pauta" : "Salvar pauta e criar"}</button><button type="button" className={action} onClick={() => void persist("reviewed", "reviewed")} disabled={!canReview}>{busy === "review" ? "Registrando aprovação…" : activeBrief?.status === "reviewed" && !dirty ? "Aprovada para envio" : "Aprovar para envio"}</button></div>
           {dirty && <p className="mt-2 text-sm text-pending">Alterações locais ainda não salvas.</p>}
 
@@ -1256,7 +1579,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       * cabem numa coluna de um terço: é aqui que alguém decide se a resposta
       * de um profissional vira evidência do artigo.
       */}
-    <section className={surface} aria-label="Resultado da revisão do especialista" data-testid="radar-specialist-review-result">
+    <section id="radar-specialist-review-result" className={surface} aria-label="Resultado da revisão do especialista" data-testid="radar-specialist-review-result">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">RESULTADO DA REVISÃO</h4>
         <span className="text-sm text-text-muted">{selectedEvidenceCount} aceita(s) · {pendingContributionCount} pendente(s)</span>
@@ -1264,14 +1587,18 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       {!articleContributions.length && <p className="mt-2 rounded-md border border-divider bg-surface px-3 py-3 text-sm text-text-muted">A revisão começa quando uma contribuição é recebida.</p>}
       <div className="mt-3 space-y-4">{resultPoints.map(point => <section className="rounded-md border border-divider bg-surface-subtle p-3" key={point.requirementId} data-testid="radar-specialist-result-point">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0"><h5 className="text-sm font-semibold text-foreground">{point.title}</h5><p className="mt-1 text-sm text-text-muted">{point.specificQuestion}</p></div>
+          {/*
+            * A PERGUNTA ENVIADA, NÃO O DIAGNÓSTICO INTEIRO — §12.
+            *
+            * `specificQuestion` começa com a contagem de mercado que levou o
+            * Radar até aqui. O texto congelado continua na proveniência; aqui
+            * fica o que foi efetivamente perguntado ao profissional.
+            */}
+          <div className="min-w-0"><h5 className="text-sm font-semibold text-foreground">{point.title}</h5><p className="mt-1 text-sm text-text-muted">{requirementById.get(point.requirementId) ? radarSpecialistReviewCard(requirementById.get(point.requirementId) as RadarFrozenSpecialistRequirement).question : point.specificQuestion}</p></div>
           <span className="shrink-0 rounded-full border border-divider px-3 py-1 text-sm text-foreground">{point.stateLabel}</span>
         </div>
         <p className="mt-2 text-sm text-text-muted">Especialista: {expertName(point.expertId)}</p>
-        <div className="mt-3 space-y-3">{point.contributionIds.map(contributionId => {
-          const contribution = articleContributions.find(item => item.id === contributionId);
-          return contribution ? contributionCard(contribution, point.briefId ? briefById.get(point.briefId) || null : null) : null;
-        })}</div>
+        <div className="mt-3 space-y-3">{(contributionsByRequirement.get(point.requirementId) || []).map(contribution => contributionCard(contribution, briefById.get(contribution.briefId) || null))}</div>
       </section>)}</div>
       {unassignedContributions.length > 0 && <section className="mt-4 rounded-md border border-divider bg-surface-subtle p-3" data-testid="radar-specialist-result-unassigned">
         <h5 className="text-sm font-semibold text-foreground">Respostas sem ponto de revisão associado</h5>
