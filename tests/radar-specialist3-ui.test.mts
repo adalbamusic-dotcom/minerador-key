@@ -79,7 +79,14 @@ const contribuicao = (patch: Record<string, unknown> = {}) => ({
   sourceType: "TEXT",
   originalText: "Oleosidade isolada não deve ser tratada como causa direta da acne, desde que a barreira cutânea esteja íntegra.",
   transcriptText: null, organizationPayload: null,
-  processingStatus: "RECEIVED", receivedAt: "2026-09-13T08:11:57Z",
+  /*
+   * O INSTANTE NA FORMA QUE O POSTGREST DEVOLVE — com deslocamento.
+   *
+   * A fixture antiga usava `Z`, que o `RadarExpertEvidenceSchema` aceita e o
+   * banco não produz. Foi por isso que a suíte inteira passou enquanto o
+   * primeiro "Aceitar como evidência" real derrubava a página com ZodError.
+   */
+  processingStatus: "RECEIVED", receivedAt: "2026-09-13T08:11:57.420036+00:00",
   evidence: { externalUpdateId: "update-1", originalAssetUri: null, checksum: null },
   ...patch,
 });

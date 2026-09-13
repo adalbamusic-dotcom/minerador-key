@@ -671,7 +671,15 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       const review: RadarExpertEvidenceReview = { decision: radarSpecialistDecisionToProjection(decisionOf(contribution.id)) };
       const projected = projectRadarExpertEvidence({ brandId, articleId, articleDnaVersionId, brief, contribution, review });
       if (projected.evidence) canonicalEvidence.push(projected.evidence);
-      if (projected.reason === "content_not_readable") blockedEvidenceCount += 1;
+      /*
+       * DECIDIDA E NÃO PROMOVIDA É BLOQUEIO, qualquer que seja o motivo.
+       *
+       * `pending_review` é o estado normal de quem ainda não decidiu e não
+       * conta. Os outros dois são contribuições que UMA PESSOA já aceitou e
+       * que mesmo assim não viraram evidência — e é isso que precisa travar a
+       * aprovação do relatório, em vez de sumir da contagem.
+       */
+      if (projected.reason && projected.reason !== "pending_review") blockedEvidenceCount += 1;
     }
     onExpertEvidenceChange?.(articleId, evidence, { contributionCount: articleContributions.length, pendingCount: pendingContributionCount, remote: true, canonicalEvidence, blockedEvidenceCount, articleDnaVersionId, counters });
   }, [articleContributions, articleDnaVersionId, articleId, brandId, briefById, counters, decisionOf, extractionOf, onExpertEvidenceChange, pendingContributionCount]);
