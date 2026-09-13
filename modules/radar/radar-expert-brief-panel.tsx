@@ -337,6 +337,18 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
    * a tela recém-carregada mostrar a consulta em vez de pedir um cadastro.
    */
   const [consultations, setConsultations] = useState<RadarConsultationView[]>([]);
+  /**
+   * O @username DO BOT, LIDO DA PLATAFORMA — SPECIALIST_2.1.2.
+   *
+   * A tela deduzia "o bot está confirmado?" a partir de `invite.link` ter vindo
+   * nulo num POST anterior. Depois de confirmar o Bot no Admin, o Radar
+   * continuava repetindo o aviso: ele estava lendo o resultado de uma AÇÃO
+   * velha, não o ESTADO atual da integração.
+   *
+   * A autoridade é `integration_connections.metadata.telegram.bot_username`,
+   * a mesma que o Admin mostra, projetada pelo GET desta área.
+   */
+  const [botUsername, setBotUsername] = useState<string | null>(null);
   const [copied, setCopied] = useState("");
   /*
    * O GUARDA FECHA A PORTA ANTES DO PRIMEIRO `await`.
@@ -404,6 +416,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
         if (!response.ok || !active) return;
         const brutas: unknown[] = Array.isArray(payload.consultations) ? payload.consultations : [];
         setConsultations(brutas.map(parseConsultation).filter((item): item is RadarConsultationView => Boolean(item)));
+        setBotUsername(optionalRecordValue(payload.botUsername));
       })
       .catch(() => { /* a área continua utilizável sem a projeção; o erro do GET principal já aparece. */ });
     return () => { active = false; controller.abort(); };
@@ -1033,7 +1046,8 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
                 <button type="button" className={action} onClick={() => void copiar(convite.message, point.requirementId, "mensagem")} data-testid="radar-specialist-copy-message">Copiar mensagem</button>
               </div>}
               {!convite?.link && !consulta.connected && <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button type="button" className={action} onClick={() => void createConsultationFromRequirement(requisito as RadarFrozenSpecialistRequirement, "reissue")} disabled={busy !== "" || !requisito} data-testid="radar-specialist-reissue-link">{creatingRequirementId === point.requirementId ? "Gerando…" : "Gerar novo link"}</button>
+                {/* Sem bot confirmado não há link a gerar: o botão mentiria. */}
+                <button type="button" className={action} onClick={() => void createConsultationFromRequirement(requisito as RadarFrozenSpecialistRequirement, "reissue")} disabled={busy !== "" || !requisito || !botUsername} data-testid="radar-specialist-reissue-link">{creatingRequirementId === point.requirementId ? "Gerando…" : "Gerar novo link"}</button>
                 <span className="text-sm text-text-muted">{consulta.invite.state === "OPEN" ? "O link anterior continua válido até ser substituído." : "Gere um link para o especialista entrar."}</span>
               </div>}
 
@@ -1051,7 +1065,15 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
               <button type="button" className={`${action} mt-2`} onClick={() => { const brief = briefById.get(consulta.briefId); if (brief) openBrief(brief); }}>Abrir pauta</button>
               {copied === `${point.requirementId}:link` && <p className="mt-2 text-sm text-success" role="status">Link copiado</p>}
               {copied === `${point.requirementId}:mensagem` && <p className="mt-2 text-sm text-success" role="status">Mensagem copiada</p>}
-              {convite && !convite.link && !consulta.connected && <p className="mt-2 text-sm text-warning">O username do Bot ainda não foi confirmado no Admin; sem ele o link direto não pode ser montado.</p>}
+              {/*
+                * O AVISO SÓ APARECE QUANDO O BOT REALMENTE NÃO ESTÁ CONFIRMADO.
+                *
+                * Antes bastava um POST antigo ter voltado sem link para a tela
+                * acusar a plataforma. Agora ela consulta o mesmo dado do Admin:
+                * sem `botUsername`, o aviso é verdade; com ele, o que falta é
+                * apenas gerar um link — e esse caminho já está logo acima.
+                */}
+              {!botUsername && !consulta.connected && <p className="mt-2 text-sm text-warning" data-testid="radar-specialist-bot-missing">O username do Bot ainda não foi confirmado no Admin; sem ele o link direto não pode ser montado.</p>}
             </div>}
           </li>;
           })}</ul>
