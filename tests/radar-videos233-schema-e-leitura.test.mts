@@ -320,7 +320,7 @@ test("VÍDEOS 2.3.3 · H — a copy explicativa foi para o InfoHint", () => {
   assert.match(tela, /<InfoHint\s*\n\s*title="Biblioteca de fontes da marca"/);
   assert.match(tela, /<InfoHint\s*\n\s*title="Conteúdo extraído"/);
   assert.match(tela, /A fonte de vídeo pertence à MARCA e pode servir a vários artigos/);
-  assert.match(tela, /O texto extraído é preservado no idioma ORIGINAL/);
+  assert.match(tela, /O texto integral é preservado no idioma ORIGINAL/);
 
   /* E não sobraram como parágrafo permanente. */
   assert.ok(!tela.includes('data-testid="radar-videos-roadmap"'), "o parágrafo de escopo saiu da primeira camada");

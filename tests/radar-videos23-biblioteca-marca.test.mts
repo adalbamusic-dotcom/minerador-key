@@ -437,7 +437,17 @@ test("VÍDEOS 2.3 · §20 — só as selecionadas entram na coluna de conteúdo"
   const tela = painel();
 
   assert.match(tela, /const selecionadasDoArtigo = registradas\.filter\(item => item\.selectedForArticle && item\.registrationStatus !== "ARCHIVED"\)/);
-  const coluna = tela.slice(tela.indexOf('data-testid="radar-videos-extracted"'));
+  /*
+   * VIDEOS 3.5 · A COLUNA DE CONTEÚDO MUDOU DE LUGAR, NÃO DE REGRA.
+   *
+   * "Fontes com texto disponível" saiu de baixo do resultado e foi para a
+   * coluna da direita. O que este teste guarda continua o mesmo: só as fontes
+   * SELECIONADAS entram ali, nunca a biblioteca inteira.
+   */
+  const inicioDaColuna = tela.indexOf('data-testid="radar-videos-sources-heading"');
+  const fimDaColuna = tela.indexOf('data-testid="radar-videos-brief-panel"');
+  assert.ok(inicioDaColuna > 0 && fimDaColuna > inicioDaColuna, "a coluna de conteúdo tem começo e fim conhecidos");
+  const coluna = tela.slice(inicioDaColuna, fimDaColuna);
   assert.match(coluna, /selecionadasDoArtigo\.length === 0/);
   assert.match(coluna, /\{selecionadasDoArtigo\.map\(fonte => \{/);
   /* A biblioteca inteira não entra automaticamente. */

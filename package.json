@@ -19,6 +19,8 @@
     "audit:drift": "node --env-file-if-exists=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/arquiteto-audit-drift.mts",
     "audit:formation": "node --env-file-if-exists=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/arquiteto-audit-formation-base.mts",
     "audit:arquiteto": "node --env-file-if-exists=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/arquiteto-audit-backfill.mts",
+    "user-worker": "node --env-file-if-exists=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --import ./scripts/node-ts-register.mjs scripts/local-worker.mts --continuous",
+    "local-worker": "node --env-file-if-exists=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --import ./scripts/node-ts-register.mjs scripts/local-worker.mts --continuous",
     "local-worker:once": "node --env-file-if-exists=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --conditions=react-server --import ./scripts/node-ts-register.mjs scripts/local-worker.mts",
     "test": "pnpm run test:authz && pnpm run test:arquiteto && pnpm run test:editorial && pnpm run test:redator && pnpm run test:operational",
     "test:authz": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/authenticated-tenant-access.test.mts tests/auth-jwt-lifecycle.test.mts tests/manual-auth-admin.test.mts tests/phase-2d-legacy-cut.test.mts",
@@ -28,8 +30,14 @@
     "test:redator": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/redator-domain.test.mts",
     "test:operational": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/operational-flow.test.mts",
     "test:radar": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --experimental-loader ./tests/integrations-runtime-loader.mjs --test \"tests/radar-*.test.mts\"",
+    "test:worker": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --experimental-loader ./tests/integrations-runtime-loader.mjs --test tests/local-worker-writeback.test.mts tests/local-worker-continuous.test.mts tests/user-worker-1.test.mts",
+    "test:specialist": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --experimental-loader ./tests/integrations-runtime-loader.mjs --test tests/telegram-foundation.test.mts tests/telegram-webhook-readback.test.mts tests/telegram-admin-brand.test.mts tests/telegram-configuration-flow.test.mts tests/expert-contribution-contracts.test.mts tests/radar-expert-brief.test.mts tests/radar-expert-contribution.test.mts tests/radar-expert-evidence.test.mts tests/radar-expert-organization.test.mts tests/radar-gate18-2-fundamento-especialista.test.mts tests/radar-gate18-7-especialista-planilha.test.mts tests/radar-specialist1-ponte-e-contadores.test.mts tests/radar-specialist11-limpeza-visual.test.mts tests/radar-specialist21-consulta-telegram.test.mts tests/radar-specialist211-readback-da-consulta.test.mts",
+    "specialist:smoke-check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --experimental-loader ./tests/integrations-runtime-loader.mjs scripts/specialist-smoke-check.mts",
     "test:integrations-runtime": "node --experimental-loader ./tests/integrations-runtime-loader.mjs --test tests/integrations-runtime.test.mts",
-    "test:real-db": "node tests/run-all.js"
+    "test:real-db": "node tests/run-all.js",
+    "test:arquiteto-backup": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/arquiteto-backup-e-export-editorial.test.mts",
+    "test:arquiteto-backup-roundtrip": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-loader ./tests/integrations-runtime-loader.mjs --test tests/arquiteto-backup-roundtrip.test.mts",
+    "arquiteto:backup-homologation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-loader ./tests/integrations-runtime-loader.mjs scripts/arquiteto-backup-homologation.mts"
   },
   "dependencies": {
     "@google-cloud/speech": "^8.0.1",

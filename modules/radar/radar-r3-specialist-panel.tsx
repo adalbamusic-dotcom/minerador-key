@@ -5,9 +5,8 @@ import { RADAR_INTENT_NOT_CONCLUDED, radarDeclaredArticleIntent } from "@/lib/ra
 import type { RadarR3Model } from "@/lib/radar/r3-workbench";
 import { radarR6TopicOriginLabel } from "@/lib/radar/r6-sequential";
 import type { RadarR6ExpertEvidenceInput, RadarR6ExpertTopicContext } from "@/lib/radar/r6-sequential";
-import type { RadarExpertEvidence } from "@/lib/radar/analysis-contracts";
 import { ExpertContributionPanel } from "./expert-contribution-panel";
-import { RadarExpertBriefPanel } from "./radar-expert-brief-panel";
+import { RadarExpertBriefPanel, type RadarSpecialistPanelSummary } from "./radar-expert-brief-panel";
 
 type RadarR3SpecialistPanelProps = {
   model: RadarR3Model;
@@ -26,7 +25,7 @@ type RadarR3SpecialistPanelProps = {
   /** Fixture médica só pode ser aberta por testes explícitos; nunca é renderizada no artigo real. */
   showLocalFixture?: boolean;
   expertContext?: RadarR6ExpertTopicContext | null;
-  onExpertEvidenceChange?: (articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: { contributionCount: number; pendingCount: number; remote: true; canonicalEvidence: RadarExpertEvidence[]; blockedEvidenceCount: number; articleDnaVersionId: string }) => void;
+  onExpertEvidenceChange?: (articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: RadarSpecialistPanelSummary) => void;
 };
 
 const inset = "rounded-md border border-divider bg-surface-subtle p-3";
@@ -46,8 +45,7 @@ export function RadarR3SpecialistPanel({ model, onTopicChange, onTopicRemove, on
   const topics = model.r4?.topics;
   const topicStateLabel = topics?.state === "TOPICS_READY_FOR_REVIEW" ? `Proposta da IA · ${topics.reviewedIds.length}/${topics.items.length} revisada(s)` : topics?.state === "TOPICS_APPROVED" || topics?.state === "READY_TO_SEND" ? "Aprovada para envio · infraestrutura pendente" : topics?.state || "Nenhuma pauta preparada";
   return <section className="space-y-4" aria-label="Área Especialista do Radar">
-    {model.r4?.specialist === "READY_TO_SEND" && <div className="rounded-md border border-warning/50 bg-warning-soft/20 p-3 text-sm text-foreground"><p className="font-semibold">Infraestrutura de contribuição aguardando fundação remota</p><p className="mt-1 text-text-muted">A pauta continua aprovada localmente e não foi enviada automaticamente.</p></div>}
-    <RadarExpertBriefPanel key={`${model.articleId}:${model.articleDnaVersionId}`} brandId={model.brandId} articleId={model.articleId} articleDnaVersionId={model.articleDnaVersionId} articleTitle={model.title} articleVersion={model.articleDnaVersion} articleRole={model.hierarchy} context={expertContext} suggestedQuestions={model.r4?.topics.items || []} onExpertEvidenceChange={onExpertEvidenceChange} />
+    <RadarExpertBriefPanel key={`${model.articleId}:${model.articleDnaVersionId}`} brandId={model.brandId} articleId={model.articleId} articleDnaVersionId={model.articleDnaVersionId} articleTitle={model.title} articleVersion={model.articleDnaVersion} articleRole={model.hierarchy} context={expertContext} suggestedQuestions={model.r4?.topics.items || []} requirements={model.specialist.requirements} onExpertEvidenceChange={onExpertEvidenceChange} />
     {topics && topics.state !== "NOT_PREPARED" && <section className={inset} aria-label="Fila local de revisão de pautas">
       <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-base font-semibold text-foreground">Pautas do especialista</h3><p className="mt-1 text-sm text-text-muted">{topicStateLabel}. Proposto pela IA ≠ aprovado para envio.</p></div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-divider px-3 py-1 text-sm text-text-muted">{topicStateLabel}</span>{(canUndoTopics || canRedoTopics) && <><button type="button" className={button} onClick={() => onTopicUndo?.(model.articleId)} disabled={!canUndoTopics}>Desfazer</button><button type="button" className={button} onClick={() => onTopicRedo?.(model.articleId)} disabled={!canRedoTopics}>Refazer</button></>}</div></div>
       {topicQueueTotal && topicQueuePosition ? <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-divider bg-surface px-3 py-2 text-sm text-text-muted"><strong className="text-foreground">Pauta {topicQueuePosition} de {topicQueueTotal}</strong><button type="button" className={button} onClick={() => onTopicAdjacent?.("previous")} disabled={!onTopicAdjacent || topicQueuePosition <= 1}>Anterior</button><button type="button" className={button} onClick={() => onTopicAdjacent?.("next")} disabled={!onTopicAdjacent || topicQueuePosition >= topicQueueTotal}>Próxima pendente</button></div> : null}
@@ -59,19 +57,6 @@ export function RadarR3SpecialistPanel({ model, onTopicChange, onTopicRemove, on
       })}</ol>
       <div className="mt-4 flex flex-col gap-2 sm:flex-row"><label className="sr-only" htmlFor={`radar-r4-topic-${model.articleId}`}>Adicionar pauta</label><input id={`radar-r4-topic-${model.articleId}`} value={newTopic} onChange={event => setNewTopic(event.target.value)} className="min-h-10 flex-1 rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus" placeholder="Adicionar pauta" /><button type="button" className={button} disabled={!newTopic.trim() || !onTopicAdd} onClick={() => { onTopicAdd?.(model.articleId, newTopic); setNewTopic(""); }}>Adicionar pauta</button></div>
     </section>}
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-      <div className={inset}><p className="text-xs text-text-muted">Especialista</p><p className="mt-1 text-sm font-semibold text-foreground">{model.specialist.expert}</p><p className="mt-1 text-xs text-text-muted">{model.specialist.status}</p></div>
-      <div className={inset}><p className="text-xs text-text-muted">Canal</p><p className="mt-1 text-sm font-semibold text-foreground">{model.specialist.channel}</p></div>
-      <div className={inset}><p className="text-xs text-text-muted">Pedidos enviados</p><p className="mt-1 text-sm font-semibold text-foreground">{model.specialist.requestsSent}</p></div>
-      <div className={inset}><p className="text-xs text-text-muted">Contribuições recebidas</p><p className="mt-1 text-sm font-semibold text-foreground">{model.specialist.contributionsReceived}</p></div>
-      <div className={inset}><p className="text-xs text-text-muted">Evidências revisadas</p><p className="mt-1 text-sm font-semibold text-foreground">{model.specialist.reviewedEvidence} · {model.specialist.pending} pendente(s)</p></div>
-    </div>
-    <div className="grid gap-3 md:grid-cols-2">
-      <section className={inset}><h3 className="text-sm font-semibold text-foreground">Especialista</h3><p className="mt-2 text-sm text-text-muted">{model.specialist.expert} · {model.specialist.specialty}</p><p className="mt-2 text-sm text-text-muted">A vinculação futura preserva brandId, expertId e TelegramExpertBinding explícitos.</p></section>
-      <section className={inset}><h3 className="text-sm font-semibold text-foreground">Pedidos</h3><p className="mt-2 text-sm text-text-muted">{model.specialist.requestsSent} pedido(s) enviado(s). Necessidade Radar atual: {model.report.needs || "a definir após análise"}.</p></section>
-      <section className={inset}><h3 className="text-sm font-semibold text-foreground">Contribuições</h3><p className="mt-2 text-sm text-text-muted">{model.specialist.contributionsReceived} contribuição(ões) verificadas. Áudio, texto, documentos e transcrição entram somente após vínculo e armazenamento canônicos.</p></section>
-      <section className={`${inset} md:col-span-2`}><h3 className="text-sm font-semibold text-foreground">Revisão</h3><p className="mt-2 text-sm text-text-muted">{model.specialist.reviewedEvidence} evidência(s) revisada(s) · {model.specialist.pending} pendência(s). A confirmação humana do especialista permanece distinta da aprovação editorial.</p></section>
-    </div>
-    {showLocalFixture ? <details className="rounded-md border border-divider bg-surface p-4"><summary className="cursor-pointer text-sm font-semibold text-foreground">Abrir fixture local da contribuição</summary><p className="mt-3 text-sm text-text-muted">Fixture demonstrativa para validar a organização da contribuição. Não representa Telegram real conectado nem cria ExpertEvidence remoto.</p>{article ? <div className="mt-4"><ExpertContributionPanel article={{ title: model.title, principal: model.keyword || null, intent: radarDeclaredArticleIntent(article.payload) || RADAR_INTENT_NOT_CONCLUDED, silo: model.silo || null, publication: model.publication, serpStatus: model.serp.status, versionNumber: article.versionNumber }} radarNeed={model.report.summary} serpAnalyzed={Boolean(model.serp.analysis)}/></div> : <p className="mt-3 text-sm text-warning">ArticleDNA indisponível; a fixture não foi aberta.</p>}</details> : <p className="rounded-md border border-divider bg-surface-subtle p-3 text-sm text-text-muted">Fixture local disponível apenas em modo de teste explícito. Não representa Telegram real conectado.</p>}
+    {showLocalFixture ? <details className="rounded-md border border-divider bg-surface p-4"><summary className="cursor-pointer text-sm font-semibold text-foreground">Abrir fixture local da contribuição</summary><p className="mt-3 text-sm text-text-muted">Fixture demonstrativa para validar a organização da contribuição. Não representa Telegram real conectado nem cria ExpertEvidence remoto.</p>{article ? <div className="mt-4"><ExpertContributionPanel article={{ title: model.title, principal: model.keyword || null, intent: radarDeclaredArticleIntent(article.payload) || RADAR_INTENT_NOT_CONCLUDED, silo: model.silo || null, publication: model.publication, serpStatus: model.serp.status, versionNumber: article.versionNumber }} radarNeed={model.report.summary} serpAnalyzed={Boolean(model.serp.analysis)}/></div> : <p className="mt-3 text-sm text-warning">ArticleDNA indisponível; a fixture não foi aberta.</p>}</details> : null}
   </section>;
 }

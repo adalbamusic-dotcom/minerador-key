@@ -229,6 +229,12 @@ import { useLocalHistory } from "@/components/editorial/use-local-history";
 import { authenticatedArchitectActor } from "@/lib/arquiteto/f5-integrity";
 import { createInternalLinkGraph, createInternalLinkGraphWorkingCopy, inferInternalLinkGraphRelationType, isInternalLinkGraphRelationCompatible, updateInternalLinkGraphWorkingCopy } from "@/lib/arquiteto/internal-link-graph";
 import { loadInternalLinkGraphWorkingCopy, loadInternalLinkGraphs, persistInternalLinkGraph, persistInternalLinkGraphWorkingCopy, InternalLinkGraphWorkingCopyPersistenceError } from "@/lib/arquiteto/internal-link-graph-persistence";
+import { ArquitetoExportError, type ArquitetoExportGraph, type ArquitetoExportInput, type ArquitetoExportSilo } from "@/lib/arquiteto/export-source";
+import { buildArquitetoBackup } from "@/lib/arquiteto/backup-export";
+import { buildArquitetoEditorialExport } from "@/lib/arquiteto/editorial-export";
+import { buildArquitetoKeywordDnaExport } from "@/lib/arquiteto/editorial-keyword-dna-export";
+import { BackupContractError, parseBackup } from "@/lib/arquiteto/backup-contract";
+import type { RestoreApplyReport, RestorePlan } from "@/lib/arquiteto/backup-restore";
 import { ArchitectArchitectureMap, ArchitectWorkbench, type ArchitectLinksScenario, type ArchitectMapArticle, type ArchitectMapScenario, type ArchitectMapSilo, type ArchitectMapSnapshot, type ArchitectMapState, type ArchitectProcess, type ArchitectProcessState, type ArchitectWorkspaceMode } from "./arquiteto-workbench";
 import { useGlobalTopbarControlsRegistration, type GlobalTopbarModuleControls } from "@/components/global-topbar";
 import { KeywordTableColumnResizeHandle, useKeywordTableColumnResize } from "@/modules/minerador/keyword-table/keyword-table-resize";
@@ -717,6 +723,21 @@ export default function ArquitetoPage() {
   const [pendingManualArchitecture, setPendingManualArchitecture] = useState<PendingManualArchitecture | null>(null);
   // Revisão IA canônica por Article: é o que sobrevive ao F5.
   const [articleAiReviews, setArticleAiReviews] = useState<Record<string, VersionedArticleArchitectureAiReview>>({});
+  /*
+   * EXPORTAR VIROU MENU, E IMPORTAR NÃO SE MISTUROU COM O MINERADOR.
+   *
+   * "Importar do Minerador" continua significando KeywordDNA vindo da etapa
+   * anterior. "Restaurar backup" é recuperação operacional do Arquiteto. São
+   * atos diferentes e ficam em lugares diferentes: juntá-los faria alguém
+   * restaurar um banco achando que estava puxando keywords.
+   */
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [restorePlan, setRestorePlan] = useState<RestorePlan | null>(null);
+  /* O conteúdo cru fica retido entre a prévia e a confirmação: o apply envia
+     o MESMO arquivo que foi classificado, nunca um relido do disco. */
+  const [restoreSource, setRestoreSource] = useState<{ fileName: string; content: string } | null>(null);
+  const [backupRestoreBusy, setBackupRestoreBusy] = useState(false);
+  const [restoreReport, setRestoreReport] = useState<RestoreApplyReport | null>(null);
   // Hash da base arquitetural vigente, para detectar revisão de base antiga.
   const [articleBaseHashes, setArticleBaseHashes] = useState<Record<string, string>>({});
   const [rejectedKeywordReviewIds, setRejectedKeywordReviewIds] = useState<Set<string>>(new Set());
@@ -6961,7 +6982,15 @@ export default function ArquitetoPage() {
   };
 
   const { registerControls, updateControls, unregisterControls } = useGlobalTopbarControlsRegistration();
-  const topbarHandlersRef = useRef({ fetchMasterList, processDeterministicStructure, showNotification, undoMasterList, redoMasterList });
+  const topbarHandlersRef = useRef({
+    fetchMasterList, processDeterministicStructure, showNotification, undoMasterList, redoMasterList,
+    exportBackup: async (): Promise<void> => {},
+    exportProduction: async (): Promise<void> => {},
+    exportArticles: async (): Promise<void> => {},
+    exportKeywordDna: async (): Promise<void> => {},
+    restoreBackupFile: (async () => {}) as (file: File) => Promise<void>,
+    toggleExportMenu: () => {},
+  });
   const siloHandlersRef = useRef({ formSilosWorkingCopy, reviewSilosWithIA, consolidateSilos, validateTerritorialSerp: async () => {}, reviewTerritorialWithAi: async () => {} });
   topbarHandlersRef.current.fetchMasterList = fetchMasterList;
   topbarHandlersRef.current.processDeterministicStructure = processDeterministicStructure;
@@ -12848,6 +12877,252 @@ export default function ArquitetoPage() {
   const mapVisibleArticleIds = useMemo(() => new Set(filteredArticles.map(article => article.id)), [filteredArticles]);
   const mapScenarioLabel = mapState.scenario === "logic" ? "Lógica" : mapState.scenario === "serp" ? "SERP" : mapState.scenario === "ai" ? "IA" : "Atual";
 
+  /**
+   * A FONTE DAS DUAS EXPORTAÇÕES — read-models canônicos, somente leitura.
+   *
+   * O conjunto sai dos mesmos artefatos que alimentam a mesa, e NÃO do HTML da
+   * tabela: SiloDNA/SiloPage, ArticleDNA e InternalLinkGraph. Papel
+   * Pilar/Suporte é lido do SiloDNA; relação, direção, reason, priority e
+   * anchorConcepts são lidos do grafo. Nada é recalculado.
+   *
+   * A seleção da planilha e os filtros da mesa não estreitam o arquivo: as
+   * duas exportações cobrem o conjunto inteiro da Brand. Nenhuma escrita,
+   * nenhum provider, nenhuma versão.
+   */
+  const exportBusyRef = useRef(false);
+  const buildArquitetoExportInput = async (): Promise<ArquitetoExportInput> => {
+    if (!selectedBrandId) throw new ArquitetoExportError("NO_BRAND", "Selecione uma Marca antes de exportar.");
+    {
+      const siloPageForSilo = (siloId: string) => acceptedSiloPages[`silo-page:${siloId}`]
+        || Object.values(acceptedSiloPages).find(version => version.payload.siloId === siloId && version.payload.brandId === selectedBrandId)
+        || canonicalSiloPageVersions.find(version => version.payload.siloId === siloId && version.payload.brandId === selectedBrandId)
+        || null;
+      const siloDnas = Object.values(acceptedSiloDnas)
+        .filter(version => version.payload.brandId === selectedBrandId)
+        .sort((left, right) => left.payload.siloId.localeCompare(right.payload.siloId, "pt-BR"));
+
+      // Os dois contratos precisam do grafo: o backup guarda working copy e
+      // versão aprovada como artefatos distintos, e o editorial agrega os links
+      // na linha do artigo. As leituras aqui são GET — nenhuma escrita remota.
+      const graphBySiloId = new Map<string, ArquitetoExportGraph>();
+      const approvedBySiloId = new Map<string, InternalLinkGraph>();
+      const remoteGraphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => [] as InternalLinkGraph[]);
+      const todosGrafos = [...remoteGraphs, ...approvedLinkGraphs].filter(graph => graph.brandId === selectedBrandId);
+      for (const silo of siloDnas) {
+        const siloId = silo.payload.siloId;
+        const doSilo = todosGrafos.filter(graph => graph.siloId === siloId).sort((left, right) => right.versionNumber - left.versionNumber);
+        const aprovado = doSilo.find(graph => graph.workflowStatus === "approved") || null;
+        const graphId = doSilo[0]?.graphId || `arquiteto:internal-links:${siloId}`;
+        // A working copy é a autoridade de topologia que a aba mostra; a
+        // versão aprovada responde quando não existe cópia em edição.
+        const workingCopy = siloId === resolvedLinksSiloId && linksWorkingCopy
+          ? linksWorkingCopy
+          : await loadInternalLinkGraphWorkingCopy(selectedBrandId, graphId).catch(() => null);
+        if (aprovado) approvedBySiloId.set(siloId, aprovado);
+        if (workingCopy) graphBySiloId.set(siloId, { source: "working_copy", graph: workingCopy });
+        else if (aprovado) graphBySiloId.set(siloId, { source: "approved", graph: aprovado });
+      }
+
+      const silos: ArquitetoExportSilo[] = siloDnas.map(siloDna => {
+        const siloId = siloDna.payload.siloId;
+        const territoryRef = siloDna.payload.territoryRef ?? null;
+        const territorio = territoryRef ? remoteTerritories.find(item => item.territoryRef === territoryRef) : null;
+        return {
+          siloDna,
+          siloPage: siloPageForSilo(siloId),
+          territory: territoryRef
+            ? {
+              lifecycleStatus: territorio?.territory.lifecycleStatus ?? null,
+              state: territorio?.state ?? null,
+              consolidated: territorio?.territory.lifecycleStatus === "consolidated" || Boolean(territorio?.territory.consolidation),
+            }
+            : null,
+          graph: graphBySiloId.get(siloId) || null,
+          approvedGraph: approvedBySiloId.get(siloId) || null,
+        };
+      });
+
+      const articlesById = new Map<string, VersionEnvelope<ArticleDNA>>();
+      for (const [articleId, autoridade] of articleVersionAuthorities) {
+        const version = autoridade.canonical || autoridade.latest;
+        if (version && version.payload.brandId === selectedBrandId) articlesById.set(articleId, version);
+      }
+      const rowByArticleId = new Map(articlesList.map(article => [String(articleEntityIdFor(article) || ""), article]));
+      const keywordLabelById = new Map(masterList.map(keyword => [String(keyword.id), String(keyword.keyword || "")]));
+
+      /*
+       * O ESTADO OPERACIONAL VEM DO REMOTO, NA HORA.
+       *
+       * A mesa guarda projeções (a proposta da IA, o hash da base), não o
+       * payload persistido inteiro. Exportar a partir dela faria o backup
+       * carregar menos do que o banco tem — e a restauração devolveria uma
+       * mesa vazia com os artefatos certos. Esta é uma leitura GET.
+       */
+      const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId).catch(() => null);
+
+      return {
+        brandId: selectedBrandId,
+        brandLabel: activeBrand?.nome || null,
+        silos,
+        articles: [...articlesById.values()].sort((left, right) => left.payload.articleId.localeCompare(right.payload.articleId, "pt-BR")),
+        aiReviews: Object.values(articleAiReviews) as unknown as VersionEnvelope<Record<string, unknown>>[],
+        territories: (canonical?.territories || []).map(item => ({ territoryRef: item.territoryRef, territory: item.territory as unknown as Record<string, unknown> })),
+        siloWorkingCopies: (canonical?.siloWorkingCopies || []).map(item => ({ workingCopyRef: item.workingCopyRef, workingCopy: item.workingCopy as unknown as Record<string, unknown> })),
+        territorialSerp: (canonical?.territorialSerp || []).map(item => ({ questionId: item.questionId, payload: item.payload as unknown as Record<string, unknown> })),
+        articleFormationSerp: (canonical?.articleFormationSerp || []).map(item => ({ candidateRef: item.candidateRef, payload: item.payload as unknown as Record<string, unknown> })),
+        territorialAi: (canonical?.territorialAi || []).map(item => ({ questionId: item.questionId, payload: item.payload as unknown as Record<string, unknown> })),
+        architectureMarker: (canonical?.architectureMarker as unknown as Record<string, unknown>) || null,
+        articleFormationMarker: (canonical?.articleFormationMarker as unknown as Record<string, unknown>) || null,
+        keywordAssignments: (canonical?.workflowItems || [])
+          .filter(item => item.subjectType === "keyword" && item.stage === "architect")
+          .map(item => ({ keywordId: item.subjectId, payload: item.payload })),
+        keywordLabelById,
+        versionStatusOf: versionId => effectiveVersionStatus(versionId, versionEvents),
+        workflowStatusOf: articleId => remoteWorkflowStatus.get(articleId)?.status ?? null,
+        articleReadModelOf: articleId => {
+          const row = rowByArticleId.get(articleId);
+          if (!row) return null;
+          const kgr = articleKgrDecisionFor(row);
+          const serp = articleSerpVerdictFor(row);
+          return {
+            serpVerdict: serp.label,
+            serpImpact: serp.impact,
+            kgrDecision: kgr.decision,
+            kgrDecisionSource: kgr.source,
+            kgrApplicability: articleClassificationFor(row).classification.kgrApplicability.value,
+          };
+        },
+      };
+    }
+  };
+
+  /**
+   * O download real. O sucesso só é anunciado depois que o arquivo existe e o
+   * clique foi disparado: anunciar o início sem arquivo era promessa vazia.
+   */
+  const downloadArquitetoFile = (artifact: { fileName: string; mimeType: string; content: string }) => {
+    const blob = new Blob([artifact.content], { type: artifact.mimeType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = artifact.fileName;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  const EXPORT_LABELS = {
+    backup: "Backup restaurável",
+    articles: "Artigos",
+    "keyword-dna": "KeywordDNA dos artigos",
+    production: "Produção",
+  } as const;
+
+  /**
+   * Produção são DOIS arquivos: o artigo como unidade e o DNA de cada termo
+   * que ele precisa incorporar. Baixar os dois de uma vez é o caminho normal;
+   * o submenu existe para quem quer só um deles.
+   */
+  const runArquitetoExport = async (kind: "backup" | "articles" | "keyword-dna" | "production") => {
+    if (exportBusyRef.current) return;
+    if (!selectedBrandId) return showNotification("error", "Selecione uma Marca antes de exportar.");
+    exportBusyRef.current = true;
+    setExportMenuOpen(false);
+    try {
+      const input = await buildArquitetoExportInput();
+      const artifacts = kind === "backup"
+        ? [buildArquitetoBackup(input)]
+        : kind === "articles"
+          ? [buildArquitetoEditorialExport(input)]
+          : kind === "keyword-dna"
+            ? [buildArquitetoKeywordDnaExport(input)]
+            : [buildArquitetoEditorialExport(input), buildArquitetoKeywordDnaExport(input)];
+      for (const artifact of artifacts) downloadArquitetoFile(artifact);
+      showNotification("success", `${artifacts.map(artifact => artifact.summary).join(" ")} Arquivo(s): ${artifacts.map(artifact => artifact.fileName).join(", ")}`);
+    } catch (error) {
+      const motivo = error instanceof ArquitetoExportError || error instanceof Error ? error.message : "Não foi possível montar o arquivo.";
+      showNotification("error", `${EXPORT_LABELS[kind]} não exportado: ${motivo}`);
+    } finally {
+      exportBusyRef.current = false;
+    }
+  };
+
+  /**
+   * RESTAURAR BACKUP — preview antes de qualquer escrita.
+   *
+   * Só arquivo que se declara `ARQUITETO_BACKUP` na versão suportada entra
+   * aqui. Um CSV editorial editado no Excel é recusado pelo contrato, não pela
+   * boa vontade de quem clica.
+   */
+  const callRestoreRoute = async (mode: "preview" | "apply", content: string) => {
+    const response = await fetch("/api/arquiteto/backup/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brandId: selectedBrandId, mode, backup: content }),
+    });
+    const body = await response.json().catch(() => null) as { success?: boolean; error?: string; data?: unknown } | null;
+    if (!response.ok || !body?.success) throw new Error(body?.error || "A restauração não foi confirmada pelo servidor.");
+    return body.data as { plan: RestorePlan } & Partial<RestoreApplyReport>;
+  };
+
+  const handleRestoreBackupFile = async (file: File) => {
+    if (!selectedBrandId) return showNotification("error", "Selecione uma Marca antes de restaurar.");
+    setExportMenuOpen(false);
+    setBackupRestoreBusy(true);
+    setRestoreReport(null);
+    try {
+      const content = await file.text();
+      // O formato é conferido no cliente para falhar cedo e com mensagem boa;
+      // a fronteira que vale, porém, é a do servidor, que repete a checagem.
+      parseBackup(content);
+      const data = await callRestoreRoute("preview", content);
+      setRestoreSource({ fileName: file.name, content });
+      setRestorePlan(data.plan);
+      showNotification(data.plan.executable ? "success" : "warning", data.plan.summary);
+    } catch (error) {
+      setRestorePlan(null);
+      setRestoreSource(null);
+      const motivo = error instanceof BackupContractError || error instanceof Error ? error.message : "Arquivo inválido.";
+      showNotification("error", `Restauração não iniciada: ${motivo}`);
+    } finally {
+      setBackupRestoreBusy(false);
+    }
+  };
+
+  /**
+   * A confirmação humana separa a prévia da escrita. O apply reenvia o MESMO
+   * arquivo classificado, e o servidor replaneja antes de gravar: se o estado
+   * remoto mudou entre a prévia e o clique, o lote é recusado inteiro.
+   */
+  const handleConfirmRestore = async () => {
+    if (!restoreSource || !restorePlan?.executable) return;
+    setBackupRestoreBusy(true);
+    try {
+      const data = await callRestoreRoute("apply", restoreSource.content);
+      const report = data as RestoreApplyReport;
+      setRestoreReport(report);
+      setRestorePlan(report.plan);
+      showNotification(report.readback.equivalent ? "success" : "warning", report.summary);
+    } catch (error) {
+      showNotification("error", `Restauração não concluída: ${error instanceof Error ? error.message : "erro desconhecido"}`);
+    } finally {
+      setBackupRestoreBusy(false);
+    }
+  };
+
+  // O ref é sincronizado FORA do render: a barra é memoizada e precisa
+  // enxergar a versão corrente dos handlers sem entrar nas dependências.
+  useEffect(() => {
+    topbarHandlersRef.current.exportBackup = () => runArquitetoExport("backup");
+    topbarHandlersRef.current.exportProduction = () => runArquitetoExport("production");
+    topbarHandlersRef.current.exportArticles = () => runArquitetoExport("articles");
+    topbarHandlersRef.current.exportKeywordDna = () => runArquitetoExport("keyword-dna");
+    topbarHandlersRef.current.restoreBackupFile = handleRestoreBackupFile;
+    topbarHandlersRef.current.toggleExportMenu = () => setExportMenuOpen(current => !current);
+  });
+
   const globalTopbarControls = useMemo<GlobalTopbarModuleControls>(() => ({
     moduleId: "arquiteto",
     tabs: <nav className="flex items-center gap-0.5" aria-label="Áreas do Arquiteto" role="tablist" data-arquiteto-topbar-tabs>
@@ -12922,22 +13197,88 @@ export default function ArquitetoPage() {
          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
          <span>Silo</span>
        </button>}
-      <button
-        type="button"
-        onClick={() => topbarHandlersRef.current.showNotification("success", "Exportação iniciada...")}
-        className={GLOBAL_TOPBAR_ACTION_CONTROL}
-        title="Exportar planilha"
-      >
-        <Download className="h-3.5 w-3.5" aria-hidden="true" />
-        <span>Exportar</span>
-      </button>
+      {/* Dois produtos, um menu: salvar o sistema e usar o conhecimento dele
+          são finalidades diferentes e não cabem no mesmo arquivo. */}
+      <div className="relative shrink-0">
+        <button
+          type="button"
+          onClick={() => topbarHandlersRef.current.toggleExportMenu()}
+          className={GLOBAL_TOPBAR_ACTION_CONTROL}
+          title="Exportar backup restaurável ou dados editoriais desta Marca"
+          aria-label="Exportar"
+          aria-haspopup="menu"
+          aria-expanded={exportMenuOpen}
+          aria-controls="arquiteto-export-menu"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>Exportar</span>
+        </button>
+        {exportMenuOpen && (
+          <div id="arquiteto-export-menu" role="menu" data-arquiteto-export-menu className="absolute right-0 top-full z-50 mt-1 flex min-w-72 flex-col gap-1 rounded border border-divider bg-surface-elevated p-2 shadow-lg">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { void topbarHandlersRef.current.exportBackup(); }}
+              className="flex flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-sm font-medium text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent"
+            >
+              <span>Backup restaurável</span>
+              <span className="text-xs font-normal text-text-muted">Recupera o Arquiteto. Um registro por artefato, com o payload canônico inteiro.</span>
+            </button>
+            {/* Produção são dois arquivos: o artigo como unidade e o DNA de
+                cada termo que ele precisa incorporar. */}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { void topbarHandlersRef.current.exportProduction(); }}
+              className="flex flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-sm font-medium text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent"
+            >
+              <span>Dados editoriais / Produção</span>
+              <span className="text-xs font-normal text-text-muted">Baixa os dois: uma linha por artigo e uma linha por keyword, com o DNA de cada termo.</span>
+            </button>
+            <div role="group" aria-label="Arquivos de produção separados" className="flex flex-col gap-0.5 border-l border-divider pl-2 ml-2">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { void topbarHandlersRef.current.exportArticles(); }}
+                className="rounded px-2 py-1 text-left text-xs font-medium text-text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent"
+              >
+                Só Artigos
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { void topbarHandlersRef.current.exportKeywordDna(); }}
+                className="rounded px-2 py-1 text-left text-xs font-medium text-text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent"
+              >
+                Só KeywordDNA dos artigos
+              </button>
+            </div>
+            <span className="my-0.5 border-t border-divider" aria-hidden="true" />
+            <label className="flex cursor-pointer flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-sm font-medium text-foreground transition-colors hover:bg-surface-subtle">
+              <span>Restaurar backup</span>
+              <span className="text-xs font-normal text-text-muted">Somente arquivo ARQUITETO_BACKUP. Mostra a prévia antes de qualquer escrita.</span>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="sr-only"
+                aria-label="Selecionar arquivo de backup do Arquiteto"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) void topbarHandlersRef.current.restoreBackupFile(file);
+                }}
+              />
+            </label>
+          </div>
+        )}
+      </div>
       {/* Contador da MESA, não do módulo: no modo Silos a unidade visível é a
           keyword territorial. Rotular tudo como "artigos" era Article-first. */}
       {workspaceMode === "silos"
         ? <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} shrink-0 tabular-nums text-text-muted`} aria-label="Keywords na estrutura de silos">{territorialSurface.surface.counts.keywords} keywords</span>
         : <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} shrink-0 tabular-nums text-text-muted`} aria-label="Artigos e keywords aguardando decisão de silo">{filteredArticles.length} artigos{visiblePipelineRows.length ? ` · ${visiblePipelineRows.length} aguardando` : ""}</span>}
     </div>,
-  }), [acceptedArticleDnas, activeLogicalTask, filterHierarquia, filterStatus, filteredArticles.length, generatingStrategic, masterHistory.canRedo, masterHistory.canUndo, masterHistory.entries.length, masterList.length, pendingSiloReview, searchQuery, selectedBrandId, session?.user?.email, siloConsolidating, siloReviewBusy, siloWorkingCopies.length, territorialSurface, visiblePipelineRows.length, workspaceMode]);
+  }), [acceptedArticleDnas, activeLogicalTask, exportMenuOpen, filterHierarquia, filterStatus, filteredArticles.length, generatingStrategic, masterHistory.canRedo, masterHistory.canUndo, masterHistory.entries.length, masterList.length, pendingSiloReview, searchQuery, selectedBrandId, session?.user?.email, siloConsolidating, siloReviewBusy, siloWorkingCopies.length, territorialSurface, visiblePipelineRows.length, workspaceMode]);
   const globalTopbarControlsRef = useRef<GlobalTopbarModuleControls>(globalTopbarControls);
   globalTopbarControlsRef.current = globalTopbarControls;
 
@@ -15294,6 +15635,94 @@ export default function ArquitetoPage() {
       {dangerApproval && <DangerApprovalDialog open title={dangerApproval.title} description={dangerApproval.description}
         impact={dangerApproval.impact} verificationPhrase={dangerApproval.phrase} confirmLabel={dangerApproval.label}
         onCancel={() => setPendingDangerAction(null)} onConfirm={confirmDangerAction}/>}
+
+      {/* PRÉVIA DA RESTAURAÇÃO — nenhuma escrita aconteceu até aqui.
+          O plano é leitura: diz o que entraria, o que já está igual, o que
+          conflita e o que não tem caminho canônico de escrita. */}
+      {restorePlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="dialog" aria-modal="true" aria-label="Prévia da restauração do backup">
+          <div data-arquiteto-restore-preview className="flex max-h-[86vh] w-full max-w-3xl flex-col gap-3 overflow-hidden rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl">
+            <div className="min-w-0">
+              <p className="text-base font-semibold text-foreground">Prévia da restauração</p>
+              <p className="mt-0.5 text-sm text-text-muted">{restorePlan.summary}</p>
+              <p className="mt-0.5 text-xs text-text-muted">
+                Backup da Brand {restorePlan.sourceBrandId} · exportado em {restorePlan.exportedAt || "data não declarada"} · Marca ativa {restorePlan.brandId}{restoreSource ? ` · arquivo ${restoreSource.fileName}` : ""}.
+              </p>
+            </div>
+
+            {restorePlan.issues.length > 0 && (
+              <ul className="max-h-32 shrink-0 overflow-auto rounded border border-divider bg-surface p-2 text-sm">
+                {restorePlan.issues.map((issue, index) => (
+                  <li key={`${issue.code}-${index}`} className={issue.severity === "error" ? "text-danger" : "text-warning"}>
+                    <span className="font-semibold">{issue.code}</span>
+                    <span> · {issue.detail}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="min-h-0 flex-1 overflow-auto rounded border border-divider">
+              <table className="w-full text-left text-sm">
+                <thead className="sticky top-0 bg-surface text-text-muted">
+                  <tr>
+                    <th className="px-2 py-1 font-semibold">Artefato</th>
+                    <th className="px-2 py-1 font-semibold">Identidade</th>
+                    <th className="px-2 py-1 font-semibold">Ação</th>
+                    <th className="px-2 py-1 font-semibold">Motivo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-divider/70">
+                  {restorePlan.entries.map((entry, index) => (
+                    <tr key={`${entry.recordType}-${entry.recordKey}-${index}`}>
+                      <td className="px-2 py-1 font-mono text-xs text-foreground/80">{entry.recordType}</td>
+                      <td className="px-2 py-1 font-mono text-xs text-foreground/80">{entry.recordKey}{entry.recordVersion ? ` v${entry.recordVersion}` : ""}</td>
+                      <td className={`px-2 py-1 text-xs font-bold ${entry.outcome === "CONFLICT" || entry.outcome === "BLOCKED" ? "text-danger" : entry.outcome === "NO_OP" ? "text-text-muted" : entry.outcome === "REMAP" ? "text-context-accent" : "text-success"}`}>{entry.outcome}</td>
+                      <td className="px-2 py-1 text-xs text-text-muted">{entry.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* O readback é a prova. Retorno 2xx da escrita não basta: a
+                comparação semântica diz se o que voltou é o que o backup
+                representava. */}
+            {restoreReport && (
+              <div role="note" className={`shrink-0 rounded border px-2 py-1.5 text-sm ${restoreReport.readback.equivalent ? "border-success/50 bg-success-soft text-success" : "border-danger/50 bg-danger-soft text-danger"}`}>
+                <p className="font-semibold">{restoreReport.summary}</p>
+                {Object.keys(restoreReport.identityMap).length > 0 && (
+                  <p className="mt-0.5 text-xs">{Object.keys(restoreReport.identityMap).length} identidade(s) remapeada(s) e religada(s) nas referências.</p>
+                )}
+                {restoreReport.readback.differences.slice(0, 5).map((difference, index) => (
+                  <p key={`${difference.recordKey}-${index}`} className="mt-0.5 font-mono text-xs">{difference.recordType} {difference.recordKey} · {difference.field}</p>
+                ))}
+              </div>
+            )}
+
+            <div className="flex shrink-0 items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setRestorePlan(null); setRestoreSource(null); setRestoreReport(null); }}
+                className="min-h-9 rounded border border-divider px-3 text-sm font-semibold text-foreground transition-colors hover:border-module-accent"
+              >
+                Fechar
+              </button>
+              {/* A confirmação humana é o que separa a prévia da escrita. */}
+              {!restoreReport && (
+                <button
+                  type="button"
+                  onClick={() => { void handleConfirmRestore(); }}
+                  disabled={!restorePlan.executable || backupRestoreBusy}
+                  title={restorePlan.executable ? "Restaurar pelos writers canônicos e confirmar por readback" : "O plano tem conflito ou bloqueio: nada pode ser aplicado."}
+                  className="min-h-9 rounded border border-success/50 bg-success-soft px-3 text-sm font-semibold text-success transition-colors hover:bg-success/15 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {backupRestoreBusy ? "Restaurando..." : "Restaurar backup"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {isListModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4">

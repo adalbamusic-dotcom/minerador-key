@@ -359,7 +359,7 @@ test("GATE 18.2 · I — card e Relatório respondem pela mesma autoridade", () 
   assert.match(pagina, /const especialista = buildRadarSpecialistSummary\(\{/, "a montagem única existe");
   assert.match(
     pagina,
-    /specialist: \{ \.\.\.r3\.specialist, summary: especialista, status: especialista\.statusLabel \}/,
+    /specialist: \{ \.\.\.r3\.specialist, summary: especialista, status: especialista\.statusLabel/,
     "e é ela que responde pelo estado da linha",
   );
 });

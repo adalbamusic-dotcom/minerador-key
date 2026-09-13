@@ -532,14 +532,18 @@ test("GATE 15.1 · W — registrar material não transcreve, não baixa e não p
 
   /* E o que a área ainda não faz está escrito, não insinuado. */
   /*
-   * GATE 2 · A FRASE MUDOU PORQUE O COMPORTAMENTO MUDOU.
+   * A FRASE MUDA QUANDO O COMPORTAMENTO MUDA — e já mudou duas vezes.
    *
-   * "nada é transcrito nem enviado" virou falso: a extração passou a existir.
-   * O que a área continua devendo — e continua dizendo que deve — é o
-   * casamento com a pauta, a tradução e a evidência.
+   * GATE 2 · "nada é transcrito nem enviado" virou falso quando a extração
+   * passou a existir. VIDEOS 3.3 · "o casamento ainda não existe" virou falso
+   * do mesmo jeito, e ficou impresso logo acima do resultado do casamento.
+   *
+   * O que a área ainda deve é a TRADUÇÃO — e é só isso que ela declara dever.
    */
-  assert.match(painel, /ainda não existem/);
-  assert.match(painel, /O texto extraído é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito\./);
+  assert.equal(/ainda não existem — são gates posteriores/.test(painel), false, "a copy obsoleta não voltou");
+  assert.match(painel, /O casamento usa as pautas da investigação para localizar e selecionar somente os trechos editorialmente relevantes/);
+  assert.match(painel, /não traduzido/, "a ausência de tradução continua dita");
+  assert.match(painel, /O texto integral é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito\./);
 });
 
 test("GATE 15.1 · X — modo sem engine não oferece ação falsa", () => {

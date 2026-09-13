@@ -1,3 +1,194 @@
+## Homologação remota preparada e KeywordDNA de produção — 2026-09-13
+
+```text
+CROSS_BRAND_REMAP = IMPLEMENTADO · identidade reemitida de forma determinística
+FINGERPRINT_POR_TIPO = IMPLEMENTADO
+HOMOLOGATION_RUNNER = scripts/arquiteto-backup-homologation.mts
+ROUNDTRIP_EQUIVALENT_REMOTE = NO (não executado contra o banco)
+EDITORIAL_KEYWORD_DNA_CSV = IMPLEMENTADO · EDITORIAL_ARTICLE_CSV = INALTERADO
+BACKUP_RESTORABLE_V1 = NO · MIGRATIONS_ADDED = 0
+```
+
+- **Troca de Brand virou decisão explícita.** `allowCrossBrand` no plano, na
+  rota e no runner. Sem ela o plano é `BLOCKED` com `CROSS_BRAND_RESTORE`. Com
+  ela, `localizeBackupForBrand` reescreve a Brand no payload, **reemite toda
+  identidade de versão** de forma determinística — derivada de (Brand de
+  destino, id de origem), nunca sorteada, senão a segunda restauração deixaria
+  de ser idempotente — e recalcula os hashes de conteúdo num laço de ponto
+  fixo, porque o hash da SiloPage depende do hash do SiloDNA e o do grafo
+  depende dos dois. O mapa de identidade é achatado no fim: sem isso um
+  consumidor pararia no salto intermediário.
+- **Fingerprint semântico por tipo de artefato**, com `ignoreEnvironment` para
+  `brandId`/`marca_id` — os únicos campos documentados como
+  environment-specific, ignorados apenas quando a comparação atravessa Brands.
+- **Runner de homologação remota:** `npm run arquiteto:backup-homologation --
+  --source <brandId> --target <brandId>`. Não depende de DELETE, recusa Brand
+  de destino com qualquer artefato do Arquiteto, executa export → preview →
+  restore → readback → fingerprint A × B → conferência de relações → segunda
+  restauração, e imprime o relatório com todos os flags. `--dry-run` para no
+  preview.
+- **Ainda NÃO executado contra o banco.** Escrita remota e validação de
+  navegador são execução do usuário; enquanto não rodarem,
+  `ROUNDTRIP_EQUIVALENT_REMOTE = NO` e `BACKUP_RESTORABLE_V1 = NO`.
+- **`keywords-dna.csv`** (`lib/arquiteto/editorial-keyword-dna-export.ts`):
+  uma linha por keyword membro dos ArticleDNA exportados. O papel
+  PRINCIPAL/SECUNDÁRIA/REFORÇO vem da composição canônica do ArticleDNA; os
+  sinais semânticos vêm do KeywordDNA **daquela** keyword, nunca copiados da
+  Principal; a aplicabilidade do KGR é a decisão do Minerador por keyword.
+  Ausência vira vazio ou `A confirmar`. Nenhum UUID, hash, version id ou lock
+  version. O `artigos.csv` seguiu inalterado, com os agregados.
+- **Menu:** `Dados editoriais / Produção` baixa os dois arquivos; abaixo dele,
+  `Só Artigos` e `Só KeywordDNA dos artigos`.
+- **Confirmado por teste:** 19 casos no contrato e 8 no roundtrip, incluindo
+  troca de Brand com e sem decisão explícita e segunda restauração toda NO_OP
+  na Brand nova. TypeScript limpo; ESLint do workspace na baseline.
+
+## Restauração canônica do backup — implementação local — 2026-09-13
+
+```text
+BACKUP_EXPORT_COMPLETE = YES
+BACKUP_IMPORT_PREVIEW_COMPLETE = YES
+BACKUP_REMOTE_RESTORE_COMPLETE = IMPLEMENTED_NOT_EXECUTED_AGAINST_DATABASE
+BACKUP_REMOTE_READBACK_COMPLETE = IMPLEMENTED_NOT_EXECUTED_AGAINST_DATABASE
+RESTORE_IDEMPOTENT = YES
+ROUNDTRIP_EQUIVALENT = YES_AGAINST_SIMULATED_DRIVER · NO_AGAINST_DATABASE
+EDITORIAL_EXPORT_UNCHANGED = YES · MIGRATIONS_ADDED = 0 · MANUAL_UI_VALIDATED = NO
+RADAR/PLANNER/REDATOR/PUBLICACOES_FILES_CHANGED = 0
+```
+
+- **A auditoria anterior estava errada e foi corrigida.** Ela dizia que
+  faltava writer canônico para território, working copy e pareceres; os
+  `lib/server/arquiteto-*-store.ts` já expunham autoridade tipada para cada
+  um. A restauração reutiliza esses writers — nenhum INSERT genérico em
+  tabela, e há teste que recusa esse padrão no código-fonte.
+- **Cobertura:** os quinze tipos do backup restauram por caminho canônico —
+  ArticleDNA, SiloDNA, SiloPage, revisão de IA, território, working copy de
+  Silo, pareceres de SERP territorial e de formação, proposta de IA
+  territorial, os dois marcadores, membership de keyword, grafo aprovado,
+  working copy do grafo e status operacional do estágio `architect`.
+- **Duas etapas:** `parse + preview` e, após confirmação humana, `restore`. O
+  preview roda no servidor contra o estado real e classifica cada registro
+  como `CREATE`, `NO_OP`, `REMAP`, `CONFLICT` ou `BLOCKED`. Conflito ou
+  bloqueio recusa o lote inteiro.
+- **Identidade:** território e working copy têm identificador emitido pelo
+  servidor. Voltam com id novo, que entra no mapa `antigo → restaurado`, e
+  todas as referências são religadas antes da escrita. O teste confirma que o
+  id antigo não aparece no destino.
+- **Idempotência:** a segunda restauração do mesmo arquivo é toda `NO_OP` e
+  não cria sucessora nem duplicata, verificado contando as linhas de versão.
+- **Readback:** depois da escrita o servidor relê e compara semanticamente,
+  ignorando só identidade remapeada e carimbo novo. Um teste adultera a linha
+  depois da mutation e confirma que a restauração não se declara bem-sucedida.
+- **O que a prova NÃO cobre:** o driver de banco é simulado. Ele substitui o
+  driver, não a regra — writers, schemas e validações são os de produção —
+  mas as duas stored procedures do grafo e da working copy de Silo não são
+  emuladas, por decisão: inventar o comportamento de um procedimento que não
+  está no repositório enfraqueceria a prova. E o ciclo nunca rodou contra o
+  banco real, que segue bloqueado pelo `GRANT DELETE` ausente.
+- **Confirmado por teste:** `tests/arquiteto-backup-roundtrip.test.mts` (5
+  casos, roda a autoridade real) e
+  `tests/arquiteto-backup-e-export-editorial.test.mts` (14 casos). Scripts
+  `test:arquiteto-backup` e `test:arquiteto-backup-roundtrip`.
+- **EDITORIAL_EXPORT_V1 não foi alterado.**
+
+## Dois contratos de exportação e o importador de backup — implementação local — 2026-09-13
+
+```text
+BACKUP_CONTRACT = BACKUP_RESTORABLE_V1 · BACKUP_EXPORT = IMPLEMENTED
+BACKUP_IMPORT_PREVIEW = IMPLEMENTED · BACKUP_RESTORE_WRITE = NOT_ENABLED
+BACKUP_RESTORE_PROVEN = NO
+EDITORIAL_EXPORT = EDITORIAL_EXPORT_V1 · ONE_WAY = YES
+EDITORIAL_EXPORT_IS_IMPORTABLE = NO
+MIGRATIONS = 0 · REMOTE_WRITES = 0 · RADAR/PLANNER_FILES_CHANGED = 0
+```
+
+- **A separação nasceu de uma evidência.** O CSV técnico de Links tinha 14
+  linhas e 51 colunas de UUID, hash, version id e proveniência: bom para
+  auditoria, ruim para quem quer pegar o ArticleDNA e escrever em outra
+  ferramenta. As três exportações por área foram substituídas por dois
+  produtos com finalidades declaradas.
+- **Auditoria antes do restore**, como exigido:
+  `docs/04-arquiteto/auditoria-backup-restauravel-2026-09-13.md` enumera os
+  artefatos do Arquiteto, o caminho de leitura e de escrita de cada um e as
+  quatro lacunas que impedem declarar o backup restaurável hoje.
+- **`BACKUP_RESTORABLE_V1`** (`lib/arquiteto/backup-contract.ts`,
+  `backup-export.ts`): o arquivo se declara no cabeçalho
+  (`minekey_export_type = ARQUITETO_BACKUP`, `schema_version = 1`, Brand, data,
+  contagem, tipos) e usa uma linha por artefato com `record_type`,
+  `record_key`, `record_version`, `status`, `content_hash`, `parent_ref` e
+  `payload_json` canônico completo. `record_key` é a identidade do artefato,
+  nunca o id de uma linha do banco.
+- **Importador** (`backup-restore.ts`): preview antes de qualquer escrita, com
+  validação de formato, integridade de referências, hashes, Brand e conflitos.
+  Mesmo hash é no-op; identidade divergente sobre artefato canônico ou
+  publicado vira conflito e trava o plano inteiro; restaurar entre Brands
+  exige decisão explícita. As referências são religadas por mapa
+  `id antigo → id restaurado`, sem despejar UUID de outro banco.
+- **`EDITORIAL_EXPORT_V1`** (`editorial-export.ts`): uma linha por ArticleDNA,
+  com Silo, papel, composição, contexto do KeywordDNA congelado, SERP vigente
+  e links **agregados na linha do artigo**. Nenhum UUID, hash, version id,
+  lock version, id de nó ou de aresta. Contrato one-way: o importador só
+  aceita arquivo que se declara `ARQUITETO_BACKUP`.
+- **UI:** `Exportar` virou menu com `Backup restaurável`,
+  `Dados editoriais / Produção` e `Restaurar backup`.
+  `Importar do Minerador` continua separado e segue significando KeywordDNA da
+  etapa anterior. A prévia da restauração é um diálogo próprio.
+- **A gravação da restauração está deliberadamente fechada.** O ciclo
+  `export → limpeza controlada → import` nunca rodou contra o banco — o reset
+  de homologação segue bloqueado por `GRANT DELETE` ausente. A prévia diz isso
+  na tela em vez de oferecer um botão que ninguém viu funcionar.
+- **Confirmado por teste:** `tests/arquiteto-backup-e-export-editorial.test.mts`,
+  17 casos. TypeScript limpo; ESLint do workspace idêntico à baseline.
+- **Ainda não validado:** o ciclo real de restauração, a abertura dos dois
+  arquivos no Excel PT-BR e o comportamento com acervo grande.
+
+## Exportação CSV das três fases — superada em 2026-09-13
+
+```text
+EXPORT_SILOS_CSV = PASS · EXPORT_ARTICLES_CSV = PASS · EXPORT_LINKS_CSV = PASS
+LINK_EXPORT_ROW_COUNT = GRAPH_EDGE_COUNT
+LINK_EXPORT_ROLE_SOURCE = SILODNA
+LINK_EXPORT_RELATIONS_SOURCE = INTERNAL_LINK_GRAPH
+EXPORT_DOES_NOT_REQUIRE_SELECTION = PASS · EXPORT_DOES_NOT_WRITE_REMOTE_STATE = PASS
+CSV_ESCAPING = PASS · UTF8_BOM = PASS
+RADAR_FILES_CHANGED = 0 · PLANNER_FILES_CHANGED = 0 · MIGRATIONS = 0
+```
+
+- **O botão anunciava e não entregava.** `Exportar` chamava
+  `showNotification("success", "Exportação iniciada...")` e terminava ali:
+  nenhum arquivo era montado. O fluxo real de download entrou em
+  `handleExportCurrentArea`, e o sucesso só é anunciado depois do `Blob` e do
+  clique no anchor, com a contagem do que realmente saiu. Falha declara o
+  motivo.
+- **Implementado localmente:** `lib/arquiteto/export-csv.ts` é domínio puro
+  (sem React, sem rede, sem storage) e monta as três tabelas a partir dos
+  read-models canônicos: SiloDNA/SiloPage, ArticleDNA e InternalLinkGraph. A
+  área corrente define o arquivo; a seleção e os filtros da mesa não estreitam
+  o conjunto.
+- **Links sem perda de informação:** uma linha por aresta, com identidade do
+  Silo/SiloPage, versão/hash/estado/base do grafo, as duas pontas com tipo,
+  papel, keyword e slug, relação, âncoras, reason, priority, origem,
+  proveniência, contadores in/out e aprovação/status das pontas. `SILO_PAGE`
+  preenche os campos equivalentes e deixa vazios os exclusivos de ArticleDNA.
+  Pilar/Suporte vem de `resolveSiloHierarchyView` sobre o SiloDNA — o teste
+  prova isso declarando `OUTRO` nos nós do grafo e exigindo `PILAR`/`SUPORTE`
+  no CSV.
+- **CSV:** UTF-8 com BOM, delimitador `;`, CRLF, escape RFC 4180 para aspas,
+  delimitador, vírgula e quebra de linha, datas ISO 8601, ids e hashes
+  completos, arrays em `valor 1 | valor 2` e nenhum `[object Object]`.
+- **Somente leitura:** o módulo não contém `fetch`, writer, provider ou
+  criação de versão. A única leitura remota do handler são os GET do grafo
+  (`loadInternalLinkGraphs` e `loadInternalLinkGraphWorkingCopy`), e apenas na
+  área de Links. A working copy é a autoridade de topologia; a versão aprovada
+  responde quando não existe cópia em edição.
+- **Confirmado por teste:** `tests/arquiteto-export-csv.test.mts`, 15 casos,
+  todos passando. `tests/visual-foundation.test.mts` foi atualizado para o
+  novo contrato do botão.
+- **TypeScript e ESLint:** sem erro novo. O arquivo do workspace mantém
+  exatamente a mesma contagem do ESLint da baseline.
+- **Ainda não validado:** abertura real no Excel PT-BR, Silo sem SiloPage,
+  Silo sem grafo e grafo grande na UI com marca real.
+
 ## Reset da homologação e fluxo básico — 2026-09-08
 
 ```text

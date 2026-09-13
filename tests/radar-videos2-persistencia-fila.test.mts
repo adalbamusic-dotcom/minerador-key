@@ -312,8 +312,16 @@ test("VÍDEOS 2 · §3 — o processamento só nasce da ação humana", () => {
   /* E a área continua declarando o que ainda não faz. */
   /* §2.3.3: a declaração de escopo virou o InfoHint de "Conteúdo extraído". */
   assert.match(painel, /title="Conteúdo extraído"/);
-  assert.match(painel, /O texto extraído é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito\./);
-  assert.match(painel, /ainda não existem/);
+  assert.match(painel, /O texto integral é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito\./);
+  /*
+   * VIDEOS 3.3 · O QUE A ÁREA DEVE MUDOU, E A FRASE MUDOU JUNTO.
+   *
+   * Esta linha guardava "ainda não existem — são gates posteriores", que
+   * negava o casamento logo acima do resultado do casamento. O que a área
+   * ainda deve é a TRADUÇÃO, e é isso que ela declara — sem prometer nada.
+   */
+  assert.equal(/ainda não existem — são gates posteriores/.test(painel), false, "a copy obsoleta não voltou");
+  assert.match(painel, /não traduzido/, "a ausência de tradução continua dita");
 });
 
 /* ==========  PROVIDER E STORAGE  =============================== */

@@ -53,10 +53,17 @@ function trecho(fonte: string, de: string, ate: string): string {
 /* ==========  1 · O DISCLOSURE  ======================================= */
 
 test("VÍDEOS 3.1 · 1 — a pauta virou expansível fechado, sem estado e sem efeito", () => {
-  const area = trecho(workbench(), "const areaDeVideos = <div", "const copyDeVideos =");
+  /*
+   * VIDEOS 3.5 · §1.B — O EXPANSÍVEL MUDOU DE COLUNA, NÃO DE NATUREZA.
+   *
+   * Ele saiu de baixo do painel inteiro e foi para a coluna da direita da área
+   * Vídeos, embaixo das fontes com texto. Continua recolhido, continua sem
+   * estado, e continua lendo o snapshot congelado.
+   */
+  const area = painel();
 
-  assert.match(area, /<details className="[^"]*" data-testid="radar-videos-brief-panel">/);
-  assert.match(area, /Pautas audiovisuais da investigação · \{videoSources!\.briefs\.length\}/);
+  assert.match(area, /<details className=\{bloco\} data-testid="radar-videos-brief-panel">/);
+  assert.match(area, /Pautas audiovisuais da investigação · \{vista!\.briefs\.length\}/);
 
   /*
    * FECHADO POR CONSTRUÇÃO, NÃO POR ESTADO INICIAL.
@@ -66,24 +73,36 @@ test("VÍDEOS 3.1 · 1 — a pauta virou expansível fechado, sem estado e sem e
    * não grava nada em lugar nenhum. Um `open={...}` controlado reintroduziria
    * exatamente a pergunta "onde isso é guardado?".
    */
-  const bloco = trecho(area, "<details className=", "</details>}");
+  /*
+   * A ÂNCORA É O DISCLOSURE DAS PAUTAS, não o primeiro `<details>` do arquivo.
+   *
+   * Desde que as fontes com texto vieram para a mesma coluna, o primeiro
+   * `<details>` do painel é o da transcrição. Cortar por ele media outro bloco
+   * — e a prova falaria de um trecho de código que não é este.
+   */
+  const bloco = trecho(area, '<details className={bloco} data-testid="radar-videos-brief-panel">', "</details>}");
   assert.equal(/\bopen\b/.test(bloco), false, "TOP_BRIEF_BLOCK_DEFAULT = COLLAPSED");
   assert.equal(/useState|useEffect|localStorage|onToggle|onClick/.test(bloco), false, "EXPAND_COLLAPSE_PROVIDER_CALLS = 0");
 
   /* §4 · a biblioteca vem antes: o expansível é consulta, não a ação do dia. */
   assert.ok(
-    area.indexOf("<RadarR3VideosPanel") < area.indexOf("data-testid=\"radar-videos-brief-panel\""),
-    "as fontes vêm antes da pauta recolhida",
+    area.indexOf("radar-videos-input") < area.indexOf("data-testid=\"radar-videos-brief-panel\""),
+    "a biblioteca vem antes da pauta recolhida",
+  );
+  /* E a pauta vem depois das fontes com texto, na mesma coluna — §1.B. */
+  assert.ok(
+    area.indexOf("radar-videos-sources-heading") < area.indexOf("data-testid=\"radar-videos-brief-panel\""),
+    "as fontes com texto vêm antes da pauta",
   );
 });
 
 /* ==========  2 · UMA AUTORIDADE, UMA PROJEÇÃO  ====================== */
 
 test("VÍDEOS 3.1 · 2 — a pauta vem do bundle congelado, e só dele", () => {
-  const area = trecho(workbench(), "const areaDeVideos = <div", "const copyDeVideos =");
+  const area = painel();
 
-  /* O expansível lê a MESMA projeção que o painel de baixo consome. */
-  assert.match(area, /<RadarVideoBriefList briefs=\{videoSources!\.briefs\} \/>/);
+  /* O expansível lê a MESMA projeção que o resultado de baixo consome. */
+  assert.match(area, /<RadarVideoBriefList briefs=\{vista!\.briefs\} \/>/);
   assert.equal(/blueprint\.videoBriefs/.test(semComentarios(area)), false, "a leitura do blueprint vivo saiu da área");
 
   /* E a projeção nasce do snapshot congelado. */
@@ -149,7 +168,7 @@ test("VÍDEOS 3.1 · 4 — depois do casamento, cada pauta diz o que deu", () =>
    * O resultado inteiro está atrás de `cobertura`; a frase de prontidão é uma
    * só e carrega o mesmo estado que habilita o botão.
    */
-  assert.match(fonte, /data-testid="radar-videos-coverage-summary" data-readiness=\{prontidao\.state\}/);
+  assert.match(fonte, /data-testid="radar-videos-coverage-summary"[\s\S]{0,120}data-readiness=\{prontidao\.state\}/);
   assert.equal(/briefsUnavailableReason \|\| prontidao\.reason/.test(fonte), false);
 });
 
@@ -167,7 +186,16 @@ test("VÍDEOS 3.1 · 5 — nada além da apresentação mudou", () => {
    */
   assert.match(fonte, /const prontidao = radarMatchingReadiness\(\{/);
   assert.match(fonte, /disabled=\{!onRunMatching \|\| ocupado \|\| vista\?\.matching \|\| !prontidao\.canRun\}/);
-  assert.equal(/fetch\(|dataforseo|supabase/i.test(fonte), false, "o painel não fala com o servidor");
+  /*
+   * A VERIFICAÇÃO É SOBRE CHAMADAS, NÃO SOBRE A PALAVRA.
+   *
+   * O painel EXPLICA de onde vem o estado que ele mostra — "leitura do que o
+   * Supabase registra" —, e a varredura crua casava com a própria explicação.
+   * Apagar o comentário para o teste passar tornaria o arquivo pior; o que a
+   * proibição protege é o código, e é nele que ela continua valendo.
+   */
+  const codigo = fonte.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  assert.equal(/fetch\(|dataforseo|supabase/i.test(codigo), false, "o painel não fala com o servidor");
   assert.equal(/matchRadarVideoBriefs|anchorRadarExtract/.test(fonte), false, "MATCHER_CHANGED = NO");
   assert.equal(/transcript.*extrair|readRadarPublicTranscript/i.test(fonte), false, "TRANSCRIPT_CHANGED = NO");
 

@@ -21,7 +21,7 @@ export type ExternalProcessingJob = {
   claimed_by: string | null;
 };
 
-type WorkerClient = Pick<SupabaseClient, "from" | "rpc">;
+export type WorkerClient = Pick<SupabaseClient, "from" | "rpc">;
 
 /**
  * O ENCADEAMENTO É DA CADEIA DO ESPECIALISTA — e continua sendo.

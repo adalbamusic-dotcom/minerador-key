@@ -4,7 +4,6 @@ import { useState } from "react";
 import { ChevronDown, FileCheck2, Search, UserRound, Video } from "lucide-react";
 import { RADAR_R3_AREAS, type RadarR3Area, type RadarR3Model } from "@/lib/radar/r3-workbench";
 import type { RadarR6ExpertEvidenceInput, RadarR6ExpertTopicContext } from "@/lib/radar/r6-sequential";
-import type { RadarExpertEvidence } from "@/lib/radar/analysis-contracts";
 import { radarR4SerpStatusLabel, type RadarR4AmazonState } from "@/lib/radar/r4-queue";
 import { radarSufficiencyLabel } from "@/lib/radar/investigation-sufficiency";
 import { RADAR_PHASE1_HANDLER } from "@/lib/radar/operational-actions";
@@ -23,9 +22,10 @@ import { RadarR3AmazonPanel } from "./radar-r3-amazon-panel";
 import { RadarR3ContentDossier } from "./radar-r3-content-dossier";
 import { RadarR3VideosPanel, type RadarVideoSourcesView } from "./radar-r3-videos-panel";
 import { summarizeRadarVideoLibrary, type RadarLibrarySource } from "@/lib/radar/video-library";
-import { RadarBlueprintSummaryCard, RadarSpecialistBriefList, RadarVideoBriefList } from "./radar-r3-blueprint";
+import { RadarBlueprintSummaryCard } from "./radar-r3-blueprint";
 import { RadarR3ResearchDetails } from "./radar-r3-research-details";
 import { RadarR3SpecialistPanel } from "./radar-r3-specialist-panel";
+import type { RadarSpecialistPanelSummary } from "./radar-expert-brief-panel";
 import { RadarR6ReportPanel } from "./radar-r6-report-panel";
 
 type RadarR3WorkbenchProps = {
@@ -102,7 +102,7 @@ type RadarR3WorkbenchProps = {
   onSearchModeChange?: (mode: RadarPrimarySearchMode) => void;
   onAmazonStateChange?: (articleId: string, state: RadarR4AmazonState) => void;
   expertContext?: RadarR6ExpertTopicContext | null;
-  onExpertEvidenceChange?: (articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: { contributionCount: number; pendingCount: number; remote: true; canonicalEvidence: RadarExpertEvidence[]; blockedEvidenceCount: number; articleDnaVersionId: string }) => void;
+  onExpertEvidenceChange?: (articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: RadarSpecialistPanelSummary) => void;
   /** Kept for the canonical article route and legacy deep-link callers. */
   onOpenArticle: () => void;
   onOpenDetail: (tab?: "resumo" | "serp" | "referencias" | "analise-serp" | "relatorio") => void;
@@ -774,28 +774,16 @@ export function RadarR3Workbench({ videoSources, onRegisterVideoSources, onExtra
   const areaDeVideos = <div className="space-y-3">
     <RadarR3VideosPanel articleId={articleId} videoSources={videoSources} onRegisterVideoSources={onRegisterVideoSources} onExtractVideoText={onExtractVideoText} onFetchVideoMetadata={onFetchVideoMetadata} onProvideVideoTranscript={onProvideVideoTranscript} onUploadVideoMedia={onUploadVideoMedia} onLibraryAction={onLibraryAction} onReloadLibrary={onReloadLibrary} onRunMatching={onRunMatching} />
     {/*
-      * A PAUTA RECOLHEU — VIDEOS 3.1 · §1 e §3.
+      * A PAUTA MUDOU DE COLUNA — VIDEOS 3.5 · §1.
       *
-      * O bloco aberto no topo estava certo no conteúdo e errado no espaço:
-      * empurrava a biblioteca, a seleção e o casamento para baixo da dobra, e
-      * repetia logo abaixo as mesmas quatro pautas. Quem abre a área Vídeos
-      * quer escolher fontes; a pauta é consulta.
+      * Ela morava aqui, abaixo do painel inteiro, e agora vive na coluna da
+      * direita da área Vídeos, embaixo das fontes com texto. O motivo é o
+      * mesmo de sempre: quem abre a área quer escolher fontes e ler o
+      * resultado; a pauta é consulta, e consulta acompanha o material.
       *
-      * `<details>` e não estado de React: recolher não é decisão a guardar.
-      * Sem `open`, sem efeito, sem storage — ele nasce fechado a cada montagem,
-      * e o F5 não tem o que restaurar. Abrir e fechar não toca em nada.
-      *
-      * A lista vem de `videoSources.briefs`, que é o snapshot congelado. O
-      * `model.deepResearch.blueprint.videoBriefs` saiu daqui: era a segunda
-      * leitura da mesma pauta, e divergia da de baixo depois do congelamento.
+      * A autoridade não mudou — continua `videoSources.briefs`, que é o
+      * snapshot congelado, e continua recolhida por padrão.
       */}
-    {(videoSources?.briefs.length || 0) > 0 && <details className="rounded-md border border-divider bg-surface p-3" data-testid="radar-videos-brief-panel">
-      <summary className="cursor-pointer text-sm font-semibold text-context-accent">
-        Pautas audiovisuais da investigação · {videoSources!.briefs.length}
-      </summary>
-      <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">Onde um vídeo enriquece a narrativa deste artigo, segundo a investigação congelada.</p>
-      <div className="mt-2.5"><RadarVideoBriefList briefs={videoSources!.briefs} /></div>
-    </details>}
   </div>;
   const copyDeVideos = resumoDaBiblioteca(videoSources?.sources || [], articleId, {
     loading: videoSources?.loading,
@@ -887,16 +875,17 @@ export function RadarR3Workbench({ videoSources, onRegisterVideoSources, onExtra
       {expandedArea === "videos" && areaDeVideos}
       {expandedArea === "especialista" && <div key={model.articleId} className="space-y-3">
         {/*
-          * §15 — A PAUTA CHEGA SOZINHA, E PREPARADO NÃO É ENVIADO.
+          * O BLOCO "REVISÃO NECESSÁRIA" SAIU DAQUI — SPECIALIST_1.1.1.
           *
-          * Os pontos que a investigação preparou aparecem aqui sem ninguém
-          * copiar nada. Nenhum pedido saiu: o envio é outra decisão.
+          * Ele mostrava a mesma necessidade que "PONTOS PARA REVISÃO" mostra na
+          * coluna direita, em outro formato: duas interfaces disputando a mesma
+          * decisão, e quem opera tinha de descobrir qual delas obedecer.
+          *
+          * A autoridade visual passa a ser uma só. Nada foi perdido: as formas
+          * concretas de contribuir ("Validar · Corrigir") entraram no card, e o
+          * resto continua em `model.deepResearch.blueprint.specialistBriefs`,
+          * que o dossiê e o handoff seguem lendo.
           */}
-        {model.deepResearch && <section className="rounded-md border border-divider bg-surface p-3" aria-label="Pauta do especialista do Radar" data-testid="radar-specialist-brief-panel">
-          <h3 className="text-base font-semibold text-foreground">Revisão necessária</h3>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-text-muted">O que a investigação precisa que um profissional esclareça, com o contexto já reunido.</p>
-          <div className="mt-2.5"><RadarSpecialistBriefList briefs={model.deepResearch.blueprint.specialistBriefs} /></div>
-        </section>}
         <RadarR3SpecialistPanel model={model} expertContext={expertContext} onExpertEvidenceChange={onExpertEvidenceChange} onTopicChange={onTopicChange} onTopicRemove={onTopicRemove} onTopicMove={onTopicMove} onTopicAdd={onTopicAdd} onTopicReview={onTopicReview} onTopicUndo={onTopicUndo} onTopicRedo={onTopicRedo} canUndoTopics={canUndoTopics} canRedoTopics={canRedoTopics} onTopicAdjacent={onTopicAdjacent} topicQueuePosition={topicQueuePosition} topicQueueTotal={topicQueueTotal} />
       </div>}
       {expandedArea === "relatorio" && <div key={model.articleId} className="space-y-3">

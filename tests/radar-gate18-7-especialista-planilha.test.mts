@@ -221,7 +221,8 @@ test("GATE 18.7 · B — card e planilha consomem o MESMO objeto, não a mesma f
   /* A montagem é uma, e acontece onde a investigação existe. */
   assert.equal((pagina.match(/buildRadarSpecialistSummary\(/g) || []).length, 1, "há exatamente uma montagem");
   assert.match(pagina, /const especialista = buildRadarSpecialistSummary\(\{\s*\r?\n\s*observed: deepResearch\.observed,\s*\r?\n\s*finalized: deepResearch\.finalizedBundle,/);
-  assert.match(pagina, /specialist: \{ \.\.\.r3\.specialist, summary: especialista, status: especialista\.statusLabel \}/);
+  /* A âncora prova a autoridade da linha; o resto do objeto pode crescer. */
+  assert.match(pagina, /specialist: \{ \.\.\.r3\.specialist, summary: especialista, status: especialista\.statusLabel/);
 
   /* O card consome, não monta. */
   assert.match(workbench, /const resumoEspecialista = model\.specialist\.summary/);

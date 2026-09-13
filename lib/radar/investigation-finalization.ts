@@ -211,13 +211,35 @@ const FrozenAuthoritySchema = z.object({
     claimId: z.string().min(1),
     canonicalClaim: z.string(),
   }).strict()),
-  /** Requisitos PREPARADOS. Finalizar a pesquisa não conclui o especialista. */
+  /**
+   * Requisitos PREPARADOS. Finalizar a pesquisa não conclui o especialista.
+   *
+   * SPECIALIST_1 · §4 — O CONTEXTO EDITORIAL PASSOU A SER CONGELADO.
+   *
+   * Antes sobreviviam cinco campos, e o resto — assunto, afirmação, motivo da
+   * revisão, conflito — só existia no modelo vivo, remontado a cada leitura.
+   * A pauta que nasce do congelado ficava sem título e sem contexto: o
+   * especialista receberia uma pergunta sem o caso que a originou.
+   *
+   * OS NOVOS CAMPOS SÃO OPCIONAIS de propósito. Bundle congelado antes desta
+   * mudança continua válido e legível, sem ser regravado — congelado é
+   * congelado, inclusive quando o schema melhora.
+   */
   specialistRequirements: z.array(z.object({
     requirementId: z.string().min(1),
     claimId: z.string().min(1),
     kind: z.string().min(1),
     priority: z.string().min(1),
     specificQuestion: z.string(),
+    topic: z.string().optional(),
+    claim: z.string().optional(),
+    whyReviewIsNeeded: z.string().optional(),
+    ymylRelevance: z.string().optional(),
+    marketObservation: z.string().optional(),
+    factualEvidence: z.string().optional(),
+    conflict: z.string().nullable().optional(),
+    sourceCandidates: z.array(z.string()).optional(),
+    provenance: z.string().optional(),
   }).strict()),
 }).strict();
 
@@ -522,9 +544,14 @@ export function freezeRadarEvidenceBundle(input: {
       marketVsFactConflicts: autoridade.marketVsFactConflicts.map(item => ({
         claimId: item.claimId, canonicalClaim: item.canonicalClaim,
       })),
+      /* §4 · o contexto editorial do ponto viaja junto, para a pauta nascer inteira. */
       specialistRequirements: autoridade.specialistReviewRequirements.map(item => ({
         requirementId: item.requirementId, claimId: item.claimId, kind: item.kind,
         priority: item.priority, specificQuestion: item.specificQuestion,
+        topic: item.topic, claim: item.claim, whyReviewIsNeeded: item.whyReviewIsNeeded,
+        ymylRelevance: item.ymylRelevance, marketObservation: item.marketObservation,
+        factualEvidence: item.factualEvidence, conflict: item.conflict,
+        sourceCandidates: [...item.sourceCandidates], provenance: item.provenance,
       })),
     },
     discovery: {

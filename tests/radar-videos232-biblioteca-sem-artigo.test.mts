@@ -428,7 +428,17 @@ test("VÍDEOS 2.3.2 · M — com artigo, o card acrescenta a linha do artigo", (
 
 test("VÍDEOS 2.3.2 · N — a leitura é tentada uma vez por contexto, e não em laço", () => {
   const texto = pagina();
-  const efeito = texto.slice(texto.indexOf("  useEffect(() => {\n    if (!selectedBrandId) return;"));
+  /*
+   * A ÂNCORA NÃO PODE DEPENDER DO FIM DE LINHA.
+   *
+   * O arquivo vive como LF ou CRLF conforme quem o escreveu por último — e um
+   * `indexOf` com "\n" cru devolve -1 no segundo caso, cortando o arquivo
+   * inteiro. O teste então passava a falar de uma string vazia, que casa com
+   * qualquer proibição e com nenhuma exigência.
+   */
+  const inicio = texto.search(/ {2}useEffect\(\(\) => \{\r?\n {4}if \(!selectedBrandId\) return;/);
+  assert.ok(inicio >= 0, "o efeito da biblioteca foi encontrado");
+  const efeito = texto.slice(inicio);
   const corpo = efeito.slice(0, efeito.indexOf("}, ["));
   const deps = efeito.slice(efeito.indexOf("}, ["), efeito.indexOf("]);") + 3);
 

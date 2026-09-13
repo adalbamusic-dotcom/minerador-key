@@ -1,4 +1,5 @@
 import type { RadarSpecialistSummary } from "./operational-view.ts";
+import type { RadarFrozenSpecialistRequirement } from "./specialist-lifecycle.ts";
 import { radarConclusiveIntent, radarDeclaredArticleIntent } from "./editorial-identity.ts";
 import type { RadarSerpCollectionAction } from "./serp-collection-state.ts";
 import type { RadarInvestigationView } from "./investigation-state.ts";
@@ -166,6 +167,15 @@ export type RadarR3Model = {
      * resposta que existe, e "Não necessário" com zero requisitos é válido.
      */
     summary: RadarSpecialistSummary | null;
+    /**
+     * OS PONTOS DE REVISÃO, VINDOS DA MESMA AUTORIDADE DO RESUMO.
+     *
+     * A coluna direita da área Especialista os lista, e é deles que nasce a
+     * pauta. Deixar a tela buscá-los por conta própria abriria a chance de o
+     * resumo contar três pontos enquanto a lista mostra dois — a divergência
+     * que `summary` foi criado para fechar.
+     */
+    requirements: readonly RadarFrozenSpecialistRequirement[];
   };
   report: {
     status: string;
@@ -283,6 +293,7 @@ export function buildRadarR3Model(input: {
     status: "Opcional · aguardando seleção",
     /* A investigação não chega a este builder; quem a tem preenche depois. */
     summary: null,
+    requirements: [] as readonly RadarFrozenSpecialistRequirement[],
   };
   const contentRows: RadarR3ContentRow[] = [
     { area: "DNA", data: "ArticleDNA", value: `${articleVersion} · ${principal}`, source: "ArticleDNA recebido do Arquiteto", state: input.article ? "preservado" : "pendente" },

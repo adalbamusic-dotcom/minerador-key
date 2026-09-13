@@ -19,6 +19,36 @@ export class TelegramCanonicalError extends Error {
   }
 }
 
+/**
+ * O @username DO BOT — o que transforma um token em link clicável.
+ *
+ * Ele vem do health check do Admin, gravado em `metadata.health_check.details`:
+ * é a resposta do próprio Telegram, e não uma constante que alguém digitou.
+ * Sem ele o convite ainda existe (o token é válido), mas o operador teria de
+ * montar a URL na mão — por isso a ausência devolve `null` em vez de falhar.
+ *
+ * Vivia dentro da rota de Marca. A rota de consulta do Radar precisa do mesmo
+ * valor, e duas cópias divergiriam no primeiro ajuste de lookup.
+ */
+export async function telegramPlatformBotUsername(client: TelegramClient): Promise<string | null> {
+  const provider = await client.from("integration_providers").select("id").eq("provider_key", TELEGRAM_PROVIDER_KEY).maybeSingle();
+  if (provider.error || !provider.data) return null;
+  const connection = await client
+    .from("integration_connections")
+    .select("metadata")
+    .eq("provider_id", provider.data.id)
+    .eq("owner_scope_type", "platform")
+    .eq("environment", "production")
+    .neq("lifecycle_status", "revoked")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const metadata = objectMetadata(connection.data?.metadata);
+  const health = objectMetadata(metadata.health_check);
+  const details = objectMetadata(health.details);
+  return typeof details.botUsername === "string" && details.botUsername.trim() ? details.botUsername.trim().replace(/^@/, "") : null;
+}
+
 export type TelegramPlatformSecretResolution = {
   secret: TelegramSecret;
   connectionId: string;

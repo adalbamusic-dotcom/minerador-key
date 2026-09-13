@@ -1,11 +1,22 @@
-import { runLocalWorkerOnce } from "../lib/server/local-worker/runner";
+import { runLocalWorkerOnce, type ExternalProcessingJob } from "../lib/server/local-worker/runner";
+import { runLocalWorkerContinuously } from "../lib/server/local-worker/continuous";
 import { createCanonicalServiceClient } from "../lib/server/canonical-authorization";
 import { createRadarExpertContributionWorkerProcessor } from "../lib/server/local-worker/radar-expert-contribution";
 import { createRadarVideoTextWorkerProcessor } from "../lib/server/local-worker/radar-video-text";
 import { isTenantId } from "../lib/tenant-routing";
 
 /**
- * O WORKER LOCAL — uma execução, um job.
+ * O WORKER LOCAL — dois modos, um só worker.
+ *
+ *   pnpm run local-worker        serviço contínuo: pega job, processa, pega o
+ *                                próximo, e espera quando a fila esvazia
+ *   pnpm run local-worker:once   uma execução, um job — o modo de homologação,
+ *                                preservado com a trava LOCAL_WORKER_RUN=1
+ *
+ * O MESMO ARQUIVO SERVE AOS DOIS de propósito. Um segundo script duplicaria a
+ * validação de ambiente, a escolha do ator e — pior — o roteamento por
+ * `job_kind`. Foi exatamente esse tipo de duplicação que deixou o processor de
+ * vídeo existindo, testado e não LIGADO, com a fonte parada em `QUEUED`.
  *
  * ENV: o script carrega `.env` e `.env.local` pelo próprio Node
  * (`--env-file-if-exists`), na mesma ordem de precedência que o Next usa. Quem
@@ -16,6 +27,7 @@ import { isTenantId } from "../lib/tenant-routing";
  * NADA AQUI IMPRIME SEGREDO. As checagens abaixo falam de NOMES de variáveis.
  */
 
+const continuo = process.argv.includes("--continuous");
 const workerId = process.env.LOCAL_WORKER_ID?.trim() || `local-worker-${process.pid}`;
 const actorUserId = process.env.LOCAL_WORKER_ACTOR_USER_ID?.trim() || "";
 
@@ -39,6 +51,9 @@ function configuracaoAusente(): string[] {
  *
  * E ele não é adivinhado: nada de "primeiro usuário do banco" nem de dono
  * arbitrário. Quem roda o worker declara em nome de quem está rodando.
+ *
+ * No modo contínuo esta validação acontece ANTES do laço: um worker que roda
+ * para sempre com ator inválido falharia em cada volta, para sempre.
  */
 function atorInvalido(valor: string): string | null {
   if (!valor) return "LOCAL_WORKER_ACTOR_USER_ID não configurado";
@@ -46,7 +61,15 @@ function atorInvalido(valor: string): string | null {
   return null;
 }
 
-if (process.env.LOCAL_WORKER_RUN !== "1") {
+/*
+ * A TRAVA DE HOMOLOGAÇÃO CONTINUA SENDO DO MODO `once`.
+ *
+ * `LOCAL_WORKER_RUN=1` existe para que rodar o script sem querer não consuma
+ * um job durante um smoke. O modo contínuo é iniciado por um comando próprio e
+ * explícito — pedir a variável ali seria exigir cerimônia para começar um
+ * serviço que a pessoa acabou de mandar começar.
+ */
+if (!continuo && process.env.LOCAL_WORKER_RUN !== "1") {
   console.log("LOCAL_WORKER_RUN=1 não configurado; nenhum job foi executado.");
 } else {
   const faltando = configuracaoAusente();
@@ -71,9 +94,45 @@ if (process.env.LOCAL_WORKER_RUN !== "1") {
      */
     const especialista = createRadarExpertContributionWorkerProcessor({ actorUserId, client });
     const video = createRadarVideoTextWorkerProcessor({ actorUserId, client });
-    const processor = (job: Parameters<typeof especialista>[0]) =>
+    const processor = (job: ExternalProcessingJob) =>
       job.job_kind === "radar_video_text_acquisition" ? video(job) : especialista(job);
-    const result = await runLocalWorkerOnce({ workerId, processor, client });
-    console.log(JSON.stringify({ status: result.status, jobId: result.job?.id || null }));
+
+    if (!continuo) {
+      const result = await runLocalWorkerOnce({ workerId, processor, client });
+      console.log(JSON.stringify({ status: result.status, jobId: result.job?.id || null }));
+    } else {
+      /*
+       * ENCERRAMENTO COOPERATIVO.
+       *
+       * O sinal não interrompe um job em andamento: ele impede o PRÓXIMO
+       * claim. Matar o processo no meio devolveria a fonte ao limbo com o lease
+       * ainda válido — ninguém mais poderia reivindicá-la até ele expirar.
+       *
+       * Dois sinais seguidos continuam matando o processo pelo caminho normal
+       * do Node: quem precisa sair agora não fica refém do próprio worker.
+       */
+      const parada = new AbortController();
+      let pedidoDeParada = false;
+      for (const sinal of ["SIGINT", "SIGTERM"] as const) {
+        process.on(sinal, () => {
+          if (pedidoDeParada) return;
+          pedidoDeParada = true;
+          console.log(`\n${sinal} recebido; encerrando após o job atual. Nenhum job novo será reivindicado.`);
+          parada.abort();
+        });
+      }
+
+      console.log(`local-worker contínuo iniciado · workerId=${workerId} · aguardando jobs (Ctrl+C para encerrar).`);
+      const relatorio = await runLocalWorkerContinuously({
+        workerId, processor, client,
+        signal: parada.signal,
+        onCycle: ({ status, job }) => {
+          /* Fila vazia é o estado normal e não merece uma linha por volta. */
+          if (status === "EMPTY") return;
+          console.log(JSON.stringify({ status, jobId: job?.id || null, jobKind: job?.job_kind || null }));
+        },
+      });
+      console.log(JSON.stringify({ encerrado: true, ...relatorio }));
+    }
   }
 }

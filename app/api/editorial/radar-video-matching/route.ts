@@ -2,15 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   matchRadarVideoBriefs,
-  radarCoverageFromExtracts,
   radarExtractRunFingerprint,
-  summarizeRadarBriefCoverage,
-  type RadarFrozenBriefInput,
   type RadarMatchableSource,
 } from "@/lib/radar/video-brief-matching";
-import { persistRadarExtractRun, readRadarExtractRun } from "@/lib/server/radar-video-brief-extracts";
+import { persistRadarExtractRun } from "@/lib/server/radar-video-brief-extracts";
+import { loadRadarVideoBriefMatching, readRadarFrozenVideoBriefs } from "@/lib/server/radar-video-matching-read";
 import { PipelineRuntimeError, resolvePipelineContext } from "@/lib/server/pipeline-runtime";
-import { WorkflowRepository } from "@/lib/server/editorial-repositories";
 
 /**
  * O CASAMENTO ENTRE PAUTA E CONTEÚDO — por ação humana, e só sobre o que já
@@ -26,6 +23,16 @@ import { WorkflowRepository } from "@/lib/server/editorial-repositories";
  * evidência que muda de sentido na próxima investigação.
  */
 
+/*
+ * A LEITURA CANÔNICA É DINÂMICA — §8.
+ *
+ * Ela depende da marca, do artigo e do que o banco tem AGORA. Uma projeção
+ * guardada em cache devolveria, depois de um casamento, o estado anterior — e
+ * o sintoma seria idêntico ao que este gate corrige: a tela discordando do
+ * banco. Nada aqui se resolve com F5 duplo ou espera.
+ */
+export const dynamic = "force-dynamic";
+
 const CorpoSchema = z.object({
   brandId: z.string().uuid(),
   articleId: z.string().trim().min(1).max(256),
@@ -34,7 +41,6 @@ const CorpoSchema = z.object({
 const ConsultaSchema = z.object({
   brandId: z.string().uuid(),
   articleId: z.string().trim().min(1).max(256),
-  frozenBundleId: z.string().trim().min(1).max(256),
 });
 
 type Contexto = Awaited<ReturnType<typeof resolvePipelineContext>>;
@@ -92,78 +98,51 @@ async function lerFontesDoArtigo(context: Contexto, articleId: string): Promise<
   });
 }
 
-/**
- * AS PAUTAS CONGELADAS DO ARTIGO. Sem elas não há casamento.
- *
- * O caminho é o mesmo que `radar-analysis` já usa — item do workflow, versões
- * de análise dentro do payload, bundle congelado dentro da análise. Reusar o
- * `WorkflowRepository` em vez de montar a consulta aqui é o que impede as duas
- * leituras de divergirem quando a de lá mudar.
- *
- * A escolhida é a análise MAIS RECENTE que tenha bundle congelado: uma análise
- * posterior sem congelamento não apaga a evidência da anterior.
- */
-async function lerPautasCongeladas(brandId: string, articleId: string): Promise<{
-  briefs: RadarFrozenBriefInput[]; frozenBundleId: string; frozenBundleHash: string;
-} | null> {
-  const item = await new WorkflowRepository().findByArticle(brandId, articleId, "radar");
-  if (!item) return null;
-
-  const payload = item.payload as { analysisVersions?: Array<{ payload?: Record<string, unknown> }> } | null;
-  const versoes = Array.isArray(payload?.analysisVersions) ? payload.analysisVersions : [];
-
-  for (const versao of [...versoes].reverse()) {
-    const bundle = versao?.payload?.finalizedBundle as Record<string, unknown> | null | undefined;
-    const blueprint = bundle?.blueprint as Record<string, unknown> | undefined;
-    const snapshots = (blueprint?.videoBriefSnapshots as RadarFrozenBriefInput[] | undefined) || [];
-    if (bundle?.bundleId && snapshots.length) {
-      return {
-        briefs: snapshots,
-        frozenBundleId: String(bundle.bundleId),
-        frozenBundleHash: String(bundle.bundleHash || ""),
-      };
-    }
-  }
-  return null;
-}
-
 function falha(error: unknown) {
   if (error instanceof z.ZodError) return NextResponse.json({ success: false, error: "Requisição de casamento inválida.", issues: error.flatten() }, { status: 400 });
   if (error instanceof PipelineRuntimeError) return NextResponse.json({ success: false, error: error.message, code: error.code }, { status: error.status });
   return NextResponse.json({ success: false, error: error instanceof Error ? error.message : "Falha no casamento de vídeo." }, { status: 500 });
 }
 
-/** LER o casamento gravado. Nunca recalcula, nunca grava — é isto que sobrevive ao F5. */
+/**
+ * LER O CASAMENTO GRAVADO — nunca recalcula, nunca grava.
+ *
+ * VIDEOS_3.4.1 · É esta leitura que faz o resultado sobreviver ao F5, e ela
+ * não existia no caminho da tela: a página vivia do que o POST devolvia, e
+ * recarregar apagava um casamento íntegro no banco.
+ *
+ * O `frozenBundleId` SAIU DA CONSULTA. Ele é derivado no servidor, da mesma
+ * investigação congelada que o casamento usou — exigi-lo do cliente obrigava a
+ * tela a conhecer bundle para poder pedir o próprio resultado.
+ */
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const parsed = ConsultaSchema.safeParse({
       brandId: url.searchParams.get("brandId") || "",
       articleId: url.searchParams.get("articleId") || "",
-      frozenBundleId: url.searchParams.get("frozenBundleId") || "",
     });
     if (!parsed.success) return NextResponse.json({ success: false, error: "Consulta de casamento inválida.", issues: parsed.error.flatten() }, { status: 400 });
 
     const context = await resolvePipelineContext({ brandId: parsed.data.brandId, module: "radar", action: "view" });
-    const pautas = await lerPautasCongeladas(context.brandId, parsed.data.articleId);
-    const gravado = await readRadarExtractRun({
-      brandId: context.brandId, articleId: parsed.data.articleId,
-      frozenBundleId: parsed.data.frozenBundleId, client: context.supabase,
+    const gravado = await loadRadarVideoBriefMatching({
+      brandId: context.brandId, articleId: parsed.data.articleId, client: context.supabase,
     });
 
-    const coverage = pautas ? radarCoverageFromExtracts({ briefs: pautas.briefs, extracts: gravado.extracts }) : [];
     return NextResponse.json({
       success: true,
       run: gravado.run,
-      coverage,
-      summary: summarizeRadarBriefCoverage(coverage),
+      coverage: gravado.coverage,
+      summary: gravado.summary,
+      matcherVersion: gravado.matcherVersion,
+      inputFingerprint: gravado.inputFingerprint,
+      frozenBundleId: gravado.frozenBundleId,
       persistenceMode: "remote",
     });
   } catch (error) {
     return falha(error);
   }
 }
-
 /** CASAR — ação explícita. Lê o que está gravado, compara, e grava a execução. */
 export async function POST(request: Request) {
   try {
@@ -172,7 +151,7 @@ export async function POST(request: Request) {
 
     const context = await resolvePipelineContext({ brandId: parsed.data.brandId, module: "radar", action: "edit" });
 
-    const pautas = await lerPautasCongeladas(context.brandId, parsed.data.articleId);
+    const pautas = await readRadarFrozenVideoBriefs(context.brandId, parsed.data.articleId);
     if (!pautas) {
       return NextResponse.json({
         success: false, code: "FROZEN_INVESTIGATION_REQUIRED",
@@ -181,7 +160,15 @@ export async function POST(request: Request) {
     }
 
     const fontes = await lerFontesDoArtigo(context, parsed.data.articleId);
-    const { coverage, skippedWithoutText } = matchRadarVideoBriefs({ briefs: pautas.briefs, sources: fontes });
+    const { coverage, skippedWithoutText, candidatesFound } = matchRadarVideoBriefs({ briefs: pautas.briefs, sources: fontes });
+    /*
+     * SÓ OS EXTRATOS EDITORIAIS SÃO GRAVADOS — VIDEOS 3.3 · §1 e §6.
+     *
+     * `candidatesFound` conta as janelas que o material sustentou; `extracts`
+     * são as poucas que a seleção editorial manteve. Os dois números viajam na
+     * resposta porque a diferença entre eles é o assunto deste gate: a m2
+     * gravava os 509 candidatos como se fossem evidência.
+     */
     const extracts = coverage.flatMap(item => item.extracts);
 
     const execucao = await persistRadarExtractRun({
@@ -195,19 +182,26 @@ export async function POST(request: Request) {
       client: context.supabase,
     });
 
-    /* READBACK: o que respondemos é o que o banco confirmou, não o que casamos. */
-    const gravado = await readRadarExtractRun({
-      brandId: context.brandId, articleId: parsed.data.articleId,
-      frozenBundleId: pautas.frozenBundleId, client: context.supabase,
+    /*
+     * READBACK PELA MESMA PROJEÇÃO QUE O F5 USA — VIDEOS_3.4.1 · §4.
+     *
+     * O que respondemos é o que o banco confirmou, e é o MESMO objeto que a
+     * tela receberia ao recarregar. Enquanto eram duas montagens, o clique
+     * mostrava uma coisa e o F5 outra — que foi exatamente o defeito.
+     */
+    const gravado = await loadRadarVideoBriefMatching({
+      brandId: context.brandId, articleId: parsed.data.articleId, client: context.supabase,
     });
-    const relido = radarCoverageFromExtracts({ briefs: pautas.briefs, extracts: gravado.extracts });
 
     return NextResponse.json({
       success: true,
       run: gravado.run,
       reused: execucao.reused,
-      coverage: relido,
-      summary: summarizeRadarBriefCoverage(relido),
+      coverage: gravado.coverage,
+      summary: gravado.summary,
+      matcherVersion: gravado.matcherVersion,
+      inputFingerprint: gravado.inputFingerprint,
+      candidatesFound,
       /* Fonte selecionada SEM texto não é erro: é uma extração que falta fazer. */
       skippedWithoutText,
       readbackConfirmed: true,

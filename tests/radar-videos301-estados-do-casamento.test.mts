@@ -244,7 +244,7 @@ test("VÍDEOS 3.0.1 · a mensagem e o botão leem a MESMA prontidão", () => {
    * Um consumidor a menos é uma divergência a menos.
    */
   assert.match(tela, /: prontidao\.reason\}/);
-  assert.match(tela, /data-testid="radar-videos-coverage-summary" data-readiness=\{prontidao\.state\}/);
+  assert.match(tela, /data-testid="radar-videos-coverage-summary"[\s\S]{0,120}data-readiness=\{prontidao\.state\}/);
   assert.equal(/briefsUnavailableReason \|\| prontidao\.reason/.test(tela), false, "a segunda frase não sobreviveu");
   assert.match(tela, /data-readiness=\{prontidao\.state\}/);
 

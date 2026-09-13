@@ -13,6 +13,8 @@ import {
 import { radarVideoAcquisitionCapability, radarVideoMetadataCanRequest, radarVideoTextCanRequest, type RadarVideoTextState } from "@/lib/radar/video-text-acquisition";
 import { radarMatchingReadiness, summarizeRadarBriefCoverage, type RadarBriefCoverage } from "@/lib/radar/video-brief-matching";
 import { InfoHint } from "@/components/info-hint";
+import { RadarVideoBriefList } from "./radar-r3-blueprint";
+import { radarUserWorkerPresence } from "@/lib/radar/user-worker-presence";
 
 /**
  * VÍDEOS — a área que não usa SERP.
@@ -52,6 +54,14 @@ export type RadarVideoBriefView = {
 export type RadarVideoSourcesView = {
   /** A biblioteca da MARCA, com a seleção do artigo corrente por cima. */
   sources: RadarLibrarySource[];
+  /**
+   * O ESTADO DA FILA DO WORKER DO USUÁRIO — leitura do que o Supabase registra.
+   *
+   * A Vercel serve a tela e enfileira; processar é da máquina do usuário. Sem
+   * isto, um worker desligado aparecia como fonte travada, e a pessoa ia mexer
+   * no único lugar onde não havia nada a corrigir.
+   */
+  worker?: { queued: number; processing: number; lastHeartbeatAt: string | null } | null;
   texts: RadarVideoSourceText[];
   briefs: RadarVideoBriefView[];
   /** Declarado quando o artigo não tem investigação: não se inventa pauta. */
@@ -64,6 +74,15 @@ export type RadarVideoSourcesView = {
    */
   coverage: RadarBriefCoverage[] | null;
   matching: boolean;
+  /*
+   * A LEITURA DO CASAMENTO GRAVADO FALHOU — §7.
+   *
+   * Sem isto, `coverage: null` dizia duas coisas ao mesmo tempo: 'nunca
+   * casaram' e 'existe e não consegui ler'. A segunda mandava a pessoa
+   * recasar o que já estava no banco.
+   */
+  matchingLoadFailed?: boolean;
+  matchingError?: string | null;
   /*
    * O ESTADO DA INVESTIGAÇÃO — §3.0.1, e são dois fatos, não um.
    *
@@ -186,13 +205,49 @@ export function RadarR3VideosPanel({ articleId = null, videoSources, onRegisterV
     })),
   });
   const cobertura = vista?.coverage || null;
+  const matchingLoadFailed = Boolean(vista?.matchingLoadFailed);
   const coberturaPorPauta = new Map((cobertura || []).map(item => [item.videoBriefId, item]));
   const resumoDaCobertura = cobertura ? summarizeRadarBriefCoverage(cobertura) : null;
   const nomeDaFonte = new Map(registradas.map(item => [item.id, radarVideoSourceDisplay(item).title]));
 
+const leituraDoWorker = vista?.worker
+    ? radarUserWorkerPresence({ queued: vista.worker.queued, processing: vista.worker.processing, lastHeartbeatAt: vista.worker.lastHeartbeatAt })
+    : null;
+
   return <section className="space-y-3" aria-label="Área Vídeos do Radar" data-testid="radar-videos-panel">
 
-    {/* ======================= TOPO · as fontes ======================= */}
+    {/*
+      * QUEM PROCESSA NÃO É ESTA TELA — USER_WORKER_1 · §7.
+      *
+      * O job nasce aqui e é executado na máquina do usuário. Esta linha diz se
+      * existe alguém do outro lado, e a evidência é o batimento de um job
+      * reivindicado: sem batimento recente e com trabalho parado, o que falta é
+      * o worker — não a fonte.
+      */}
+    {leituraDoWorker && <p
+      className={`text-sm ${leituraDoWorker.state === "CONNECTED" ? "text-positive" : leituraDoWorker.state === "WAITING_FOR_WORKER" ? "text-pending" : "text-text-muted"}`}
+      data-testid="radar-videos-worker"
+      data-worker-state={leituraDoWorker.state}
+      role="status"
+    >{leituraDoWorker.label} · {leituraDoWorker.detail}</p>}
+
+    {/*
+      * DUAS COLUNAS NA PARTE OPERACIONAL — VIDEOS 3.5 · §1 e §3.
+      *
+      * À ESQUERDA, maior, a biblioteca: é onde se trabalha — filtrar,
+      * registrar, selecionar, processar, arquivar. À DIREITA, menor, o que se
+      * CONSULTA enquanto se trabalha: as fontes que já têm texto e, embaixo
+      * delas, as pautas da investigação.
+      *
+      * A grade é `lg:` para cima. Abaixo disso ela vira uma coluna só, e a
+      * ordem do DOM já é a ordem pedida — biblioteca, fontes com texto,
+      * pautas, resultado. Sem media query invertendo nada, sem overflow
+      * horizontal: cada coluna é `minmax(0, …)`, que é o que impede uma
+      * palavra longa de esticar a grade inteira.
+      */}
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" data-testid="radar-videos-operational-grid">
+
+    {/* ================ ESQUERDA · a biblioteca da marca ================ */}
     <section className={bloco}>
       {/*
         * EXPLICAÇÃO VAI PARA O INFOHINT; ESTADO E AÇÃO FICAM — §2.3.3.
@@ -493,7 +548,70 @@ export function RadarR3VideosPanel({ articleId = null, videoSources, onRegisterV
       </ul> : null}
     </section>
 
-    {/* ================= ABAIXO · conteúdo e casamento ================= */}
+    {/* =========== DIREITA · o material e as pautas, para consulta ======= */}
+    <aside className="space-y-3" data-testid="radar-videos-side-column">
+      <section className={bloco}>
+        <h4 className="text-sm font-semibold text-foreground" data-testid="radar-videos-sources-heading">Fontes com texto disponível</h4>
+        {(selecionadasDoArtigo.length === 0
+            ? <p className="mt-1 text-sm text-text-muted">Nenhuma fonte selecionada para este artigo.</p>
+            : <ul className="mt-2 space-y-2">
+              {selecionadasDoArtigo.map(fonte => {
+                const texto = textoPorFonte.get(fonte.id) || null;
+                const leitura = radarVideoSourceDisplay(fonte);
+                return <li key={fonte.id} className={inset}>
+                  <p className="text-sm font-semibold text-foreground">{leitura.title}</p>
+                  <p className={`mt-1 text-sm ${TOM_DO_ESTADO[fonte.textState] || "text-text-muted"}`}>{leitura.textStatus}</p>
+                  {texto
+                    ? <>
+                      <p className="mt-1 text-sm text-text-muted">
+                        Idioma original: {texto.languageCode || "não informado"} ·{" "}
+                        {/* §6 · declarado, nunca presumido. Nada é estimado. */}
+                        {texto.hasTimestamps ? `${texto.segments.length} trecho(s) com tempo` : "sem marcação de tempo"}
+                        {texto.hasTimestamps && texto.segments.length > 0 && ` · começa em ${tempoLegivel(texto.segments[0].startMs)}`}
+                        {texto.hasTimestamps && texto.segments.length > 0 && ` · termina em ${tempoLegivel(texto.segments[texto.segments.length - 1].endMs)}`}
+                      </p>
+                      {/*
+                        * A MATÉRIA-PRIMA RECOLHEU — VIDEOS 3.2.
+                        *
+                        * Setecentos e trinta e três segmentos abertos por padrão
+                        * empurravam o resultado editorial para fora da tela e
+                        * misturavam duas coisas: o que a fonte DISSE e o que o
+                        * casamento CONCLUIU. O transcript continua inteiro, a um
+                        * clique — e o clique não grava nada nem chama ninguém.
+                        */}
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-sm text-context-accent" data-testid={`radar-videos-transcript-${fonte.id}`}>Ver transcrição completa</summary>
+                        <p className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-sm leading-6 text-foreground">{texto.transcriptText}</p>
+                      </details>
+                    </>
+                    : <p className="mt-1 text-sm text-text-muted">
+                      {leitura.textStatusReason || "Nada foi extraído desta fonte ainda."}
+                    </p>}
+                </li>;
+              })}
+            </ul>)}
+      </section>
+
+      {/*
+        * AS PAUTAS, RECOLHIDAS, EMBAIXO DO MATERIAL — §1.B.
+        *
+        * Mesma autoridade de sempre: `briefs` é o snapshot congelado
+        * (`frozenBundle.blueprint.videoBriefSnapshots`), e não o blueprint
+        * vivo. `<details>` sem `open` e sem estado: recolher não é decisão a
+        * guardar, e o F5 não tem o que restaurar.
+        */}
+      {(vista?.briefs.length || 0) > 0 && <details className={bloco} data-testid="radar-videos-brief-panel">
+        <summary className="cursor-pointer text-sm font-semibold text-context-accent">
+          Pautas audiovisuais da investigação · {vista!.briefs.length}
+        </summary>
+        <p className="mt-2 text-sm leading-6 text-text-muted">Onde um vídeo enriquece a narrativa deste artigo, segundo a investigação congelada.</p>
+        <div className="mt-2.5"><RadarVideoBriefList briefs={vista!.briefs} /></div>
+      </details>}
+    </aside>
+
+    </div>
+
+    {/* ========== ABAIXO, EM LARGURA TOTAL · o resultado — §2 ========== */}
     {/*
       * UMA LISTA DE PAUTAS, NÃO DUAS — VIDEOS 3.1 · §3 e §6.
       *
@@ -518,9 +636,20 @@ export function RadarR3VideosPanel({ articleId = null, videoSources, onRegisterV
           */}
         <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
           Resultado do casamento
+          {/*
+            * A COPY DIZIA QUE O CASAMENTO NÃO EXISTIA — VIDEOS 3.3 · §11.
+            *
+            * Ela sobreviveu ao gate que criou o casamento, e passou a negar,
+            * logo acima do resultado, exatamente o que a tela estava mostrando.
+            * Promessa e negação erradas custam o mesmo: quem lê para de confiar
+            * no que está escrito.
+            *
+            * O que ficou é o que é verdade hoje — e nada sobre tradução, que
+            * continua não existindo.
+            */}
           <InfoHint
             title="Conteúdo extraído"
-            description="O texto extraído é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito. O casamento entre pauta e conteúdo, a tradução de trechos e a evidência de vídeo ainda não existem — são gates posteriores."
+            description="O texto integral é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito. O casamento usa as pautas da investigação para localizar e selecionar somente os trechos editorialmente relevantes: o TÍTULO da pauta decide o que conta como resposta, e o que ela manda procurar qualifica e ranqueia — no máximo três trechos por pauta, e o transcript inteiro continua a um clique em 'Ver transcrição completa'."
           />
         </h3>
       {/*
@@ -552,12 +681,27 @@ export function RadarR3VideosPanel({ articleId = null, videoSources, onRegisterV
           * removida. A mensagem e o botão continuam lendo a MESMA prontidão —
           * agora sem um segundo texto ao lado para divergir dela.
           */}
-        <span className="text-sm text-text-muted" data-testid="radar-videos-coverage-summary" data-readiness={prontidao.state}>
-          {cobertura
-            ? `${resumoDaCobertura!.supported} pauta(s) coberta(s) · ${resumoDaCobertura!.partial} parcial(is) · ${resumoDaCobertura!.notFound} sem trecho · ${resumoDaCobertura!.extracts} trecho(s)`
-            : prontidao.canRun
-              ? "Pautas e conteúdo ainda não foram casados."
-              : prontidao.reason}
+        {/*
+          * AUSÊNCIA E FALHA DE LEITURA NÃO SÃO A MESMA FRASE — VIDEOS_3.4.1 · §7.
+          *
+          * As duas apareciam como 'ainda não foram casados', e foi assim que um
+          * casamento íntegro no banco virou convite para recasar. Quem nunca
+          * casou precisa do CTA; quem casou e não conseguiu ler precisa saber
+          * que o problema é a leitura.
+          */}
+        <span
+          className={`text-sm ${matchingLoadFailed ? "text-warning" : "text-text-muted"}`}
+          data-testid="radar-videos-coverage-summary"
+          data-readiness={prontidao.state}
+          data-matching-state={matchingLoadFailed ? "READ_ERROR" : cobertura ? "LOADED" : "NEVER_MATCHED"}
+        >
+          {matchingLoadFailed
+            ? vista?.matchingError || "Não foi possível carregar o casamento salvo."
+            : cobertura
+              ? `${resumoDaCobertura!.supported} pauta(s) coberta(s) · ${resumoDaCobertura!.partial} parcial(is) · ${resumoDaCobertura!.notFound} sem trecho · ${resumoDaCobertura!.extracts} trecho(s)`
+              : prontidao.canRun
+                ? "Pautas e conteúdo ainda não foram casados."
+                : prontidao.reason}
         </span>
       </div>
 
@@ -569,16 +713,21 @@ export function RadarR3VideosPanel({ articleId = null, videoSources, onRegisterV
         * o original, e os tempos são os do transcript.
         */}
       {/*
-        * O RESULTADO, PAUTA A PAUTA — §5.
+        * O RESULTADO É A RESPOSTA DA PAUTA — VIDEOS 3.3 · §7 e §9.
         *
-        * Sem repetir o briefing: o que aparece aqui é o desfecho de cada pauta
-        * nesta execução — estado, fonte que sustentou, trecho original, tempos
-        * quando existem, e o que ficou faltando. Nada é traduzido, resumido ou
-        * reescrito; os tempos são os do transcript.
+        * A estrutura é a MESMA do bloco "Pautas audiovisuais da investigação":
+        * lá a pauta diz o que procurar; aqui a mesma lista volta partida em
+        * duas — o que foi encontrado, com onde foi encontrado, e o que
+        * continua faltando. Uma taxonomia só, lida nos dois lugares.
+        *
+        * O que NÃO aparece aqui são os candidatos. Eles existiram às dezenas
+        * dentro do casamento; o que se mostra é a evidência escolhida.
         */}
-      {cobertura && <div className="mt-3 space-y-2" data-testid="radar-videos-brief-extracts">
+            {cobertura && <div className="mt-3 space-y-2" data-testid="radar-videos-brief-extracts">
         {vista?.briefs.map(pauta => {
           const dela = coberturaPorPauta.get(pauta.briefId) || null;
+          const encontrados = dela?.matchedCriteria || [];
+          const faltantes = dela?.missingCriteria || [];
           return <div key={pauta.briefId} className={inset} data-testid={`radar-videos-result-${pauta.briefId}`}>
             <p className="flex flex-wrap items-baseline justify-between gap-2">
               <span className="text-sm font-semibold text-foreground">{pauta.topic}</span>
@@ -587,65 +736,66 @@ export function RadarR3VideosPanel({ articleId = null, videoSources, onRegisterV
                 data-testid={`radar-videos-coverage-${pauta.briefId}`}
               >{dela?.state || "NOT_FOUND"}</span>
             </p>
-            {/* §5 · o que faltou é dito; ausência de trecho não é erro. */}
+
+            {/*
+              * ASSUNTO RELACIONADO NÃO É COBERTURA PARCIAL — VIDEOS_3.4 · §6.
+              *
+              * Quando o material fala do tema mas nenhuma passagem responde o
+              * objetivo do título, o estado é NOT_FOUND e a frase diz isso. A
+              * m3 transformava esse caso em PARCIAL, e quem lia entendia que
+              * havia meia resposta onde não havia nenhuma.
+              */}
             {(!dela || !dela.extracts.length) && <p className="mt-1 text-sm text-text-muted" data-testid={`radar-videos-brief-empty-${pauta.briefId}`}>
               {dela?.reason || "Esta pauta não foi alcançada por nenhuma fonte nesta execução."}
             </p>}
-            {dela && dela.extracts.length > 0 && <ul className="mt-2 space-y-2">
-            {dela.extracts.map(trecho => <li key={`${trecho.videoSourceId}:${trecho.startMs}`} className={inset}>
-              <p className="text-sm font-semibold text-foreground">
-                {nomeDaFonte.get(trecho.videoSourceId) || trecho.videoSourceId}
-                <span className="ml-2 font-normal text-text-muted">{tempoLegivel(trecho.startMs)}–{tempoLegivel(trecho.endMs)}</span>
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">{trecho.originalText}</p>
-              <p className="mt-1 text-sm text-text-muted">Por que ajuda: {trecho.reasonForRelevance}</p>
-              {trecho.sourceLanguage && <p className="mt-1 text-sm text-text-muted">Idioma original: {trecho.sourceLanguage} · não traduzido</p>}
-              {trecho.limitations.length > 0 && <p className="mt-1 text-sm text-text-muted">{trecho.limitations.join(" · ")}</p>}
-            </li>)}
-            </ul>}
+
+            {dela && dela.extracts.length > 0 && <>
+              {/* §6 · a resposta primeiro: é ela que a pauta foi buscar. */}
+              <p className="mt-2 text-sm uppercase tracking-wide text-text-muted">Resposta encontrada para a pauta</p>
+              <ul className="mt-1 space-y-2">
+                {dela.extracts.map((trecho, posicao) => <li key={`${trecho.videoSourceId}:${trecho.startMs}`} className={inset}>
+                  <p className="text-sm font-semibold text-foreground">
+                    Evidência {posicao + 1} — {nomeDaFonte.get(trecho.videoSourceId) || trecho.videoSourceId}
+                    <span className="ml-2 font-normal text-text-muted">{tempoLegivel(trecho.startMs)}–{tempoLegivel(trecho.endMs)}</span>
+                  </p>
+                  {/*
+                    * §4 · RESPONDER E ENRIQUECER SÃO COISAS DIFERENTES.
+                    *
+                    * O trecho que traz a ressalva do profissional sem explicar
+                    * causa nenhuma completa a evidência causal ao lado dele —
+                    * e não sustentaria a pauta sozinho. Dizer qual é qual
+                    * evita que os dois pareçam a mesma coisa.
+                    */}
+                  <p className="mt-0.5 text-sm text-text-muted" data-testid={`radar-videos-extract-role-${pauta.briefId}-${posicao + 1}`}>
+                    {trecho.answersTitle ? "Responde o objetivo da pauta" : "Enriquece a resposta"}
+                    {trecho.matchedCriteria.length > 0 && ` · cobre: ${trecho.matchedCriteria.join(" · ")}`}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">{trecho.originalText}</p>
+                  {trecho.sourceLanguage && <p className="mt-1 text-sm text-text-muted">Idioma original: {trecho.sourceLanguage} · não traduzido</p>}
+                  {trecho.limitations.length > 0 && <p className="mt-1 text-sm text-text-muted">{trecho.limitations.join(" · ")}</p>}
+                </li>)}
+              </ul>
+
+              {encontrados.length > 0 && <>
+                <p className="mt-2 text-sm uppercase tracking-wide text-text-muted">Aspectos da guia encontrados</p>
+                <ul className="mt-1 space-y-0.5" data-testid={`radar-videos-found-${pauta.briefId}`}>
+                  {encontrados.map(criterio => <li key={criterio} className="text-sm leading-6 text-positive">✓ {criterio}</li>)}
+                </ul>
+              </>}
+
+              {faltantes.length > 0 && <>
+                <p className="mt-2 text-sm uppercase tracking-wide text-text-muted">Ainda faltando</p>
+                <ul className="mt-1 space-y-0.5" data-testid={`radar-videos-brief-gap-${pauta.briefId}`}>
+                  {faltantes.map(criterio => <li key={criterio} className="text-sm leading-6 text-pending">– {criterio}</li>)}
+                </ul>
+              </>}
+
+              <p className="mt-2 text-sm text-text-muted" data-testid={`radar-videos-brief-score-${pauta.briefId}`}>{dela.reason}</p>
+            </>}
           </div>;
         })}
       </div>}
 
-      <h4 className="mt-4 text-sm font-semibold text-foreground" data-testid="radar-videos-sources-heading">Fontes com texto disponível</h4>
-      {(selecionadasDoArtigo.length === 0
-          ? <p className="mt-1 text-sm text-text-muted">Nenhuma fonte selecionada para este artigo.</p>
-          : <ul className="mt-2 space-y-2">
-            {selecionadasDoArtigo.map(fonte => {
-              const texto = textoPorFonte.get(fonte.id) || null;
-              const leitura = radarVideoSourceDisplay(fonte);
-              return <li key={fonte.id} className={inset}>
-                <p className="text-sm font-semibold text-foreground">{leitura.title}</p>
-                <p className={`mt-1 text-sm ${TOM_DO_ESTADO[fonte.textState] || "text-text-muted"}`}>{leitura.textStatus}</p>
-                {texto
-                  ? <>
-                    <p className="mt-1 text-sm text-text-muted">
-                      Idioma original: {texto.languageCode || "não informado"} ·{" "}
-                      {/* §6 · declarado, nunca presumido. Nada é estimado. */}
-                      {texto.hasTimestamps ? `${texto.segments.length} trecho(s) com tempo` : "sem marcação de tempo"}
-                      {texto.hasTimestamps && texto.segments.length > 0 && ` · começa em ${tempoLegivel(texto.segments[0].startMs)}`}
-                      {texto.hasTimestamps && texto.segments.length > 0 && ` · termina em ${tempoLegivel(texto.segments[texto.segments.length - 1].endMs)}`}
-                    </p>
-                    {/*
-                      * A MATÉRIA-PRIMA RECOLHEU — VIDEOS 3.2.
-                      *
-                      * Setecentos e trinta e três segmentos abertos por padrão
-                      * empurravam o resultado editorial para fora da tela e
-                      * misturavam duas coisas: o que a fonte DISSE e o que o
-                      * casamento CONCLUIU. O transcript continua inteiro, a um
-                      * clique — e o clique não grava nada nem chama ninguém.
-                      */}
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-sm text-context-accent" data-testid={`radar-videos-transcript-${fonte.id}`}>Ver transcrição completa</summary>
-                      <p className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-sm leading-6 text-foreground">{texto.transcriptText}</p>
-                    </details>
-                  </>
-                  : <p className="mt-1 text-sm text-text-muted">
-                    {leitura.textStatusReason || "Nada foi extraído desta fonte ainda."}
-                  </p>}
-              </li>;
-            })}
-          </ul>)}
       </section>
     </div>
 
@@ -653,8 +803,9 @@ export function RadarR3VideosPanel({ articleId = null, videoSources, onRegisterV
       * O QUE ESTA ÁREA AINDA NÃO FAZ — dito, não insinuado.
       *
       * Prometer num rótulo o que não se entrega é pior do que a ausência: quem
-      * opera esperaria a leitura de volta. A extração passou a existir; o
-      * casamento com a pauta, a tradução e a evidência, não.
+      * opera esperaria a leitura de volta. A extração e o casamento passam a
+      * existir; a TRADUÇÃO dos trechos e a evidência de vídeo, não — e é por
+      * isso que todo trecho em outro idioma carrega a limitação dizendo isso.
       */}
   </section>;
 }
