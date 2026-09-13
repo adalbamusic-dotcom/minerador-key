@@ -343,3 +343,82 @@ test("SPECIALIST_2.1.1 · nenhuma migration foi criada para consertar o readback
   const migrations = await readdir(new URL("../supabase/migrations/", import.meta.url));
   assert.deepEqual(migrations.filter(nome => /specialist|consultation|expert/i.test(nome)), ["20260825150000_telegram_expert_contribution_platform_foundation.sql"]);
 });
+
+/* ========= SPECIALIST_2.1.2 · o @username vem da plataforma ========= */
+
+test("SPECIALIST_2.1.2 · com o bot confirmado, a tela não acusa a plataforma", async () => {
+  /*
+   * O DEFEITO: a tela deduzia "o bot está confirmado?" de `invite.link` ter
+   * vindo nulo num POST anterior. Depois de confirmar o Bot no Admin, o Radar
+   * seguia repetindo o aviso — lendo o resultado de uma AÇÃO velha, não o
+   * ESTADO atual da integração.
+   */
+  const { tela, servidor } = await montarAposF5({ consultations: [aguardando], briefs: [pautaRemota] });
+  try {
+    assert.equal(tela.query("radar-specialist-bot-missing"), null, "o bot está confirmado no GET");
+    assert.equal((tela.get("radar-specialist-reissue-link") as HTMLButtonElement).disabled, false);
+  } finally {
+    tela.destroy();
+    servidor.restaurar();
+  }
+});
+
+test("SPECIALIST_2.1.2 · sem bot confirmado, o aviso aparece e o botão não mente", async () => {
+  const servidor = servidorFalso({ consultations: [aguardando], briefs: [pautaRemota] });
+  /* O GET da plataforma passa a dizer que o bot não foi confirmado. */
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (entrada: unknown, init?: { method?: string; body?: string }) => {
+    const resposta = await (originalFetch as unknown as (a: unknown, b?: unknown) => Promise<{ ok: boolean; json: () => Promise<Record<string, unknown>> }>)(entrada, init);
+    const url = String(entrada);
+    if ((init?.method || "GET") === "GET" && url.includes("/expert-consultations")) {
+      const payload = await resposta.json();
+      return { ok: true, json: async () => ({ ...payload, botUsername: null }) };
+    }
+    return resposta;
+  }) as unknown as typeof globalThis.fetch;
+
+  const tela = await montarRadar();
+  try {
+    const { RadarExpertBriefPanel } = await import("../modules/radar/radar-expert-brief-panel.tsx");
+    await tela.render(comProductShell(React.createElement(RadarExpertBriefPanel, {
+      brandId, articleId, articleDnaVersionId,
+      articleTitle: "O que causa acne", articleVersion: "v12", articleRole: "pilar",
+      context: contexto, requirements: [requisito],
+      onExpertEvidenceChange: () => {},
+    })));
+
+    assert.ok(tela.get("radar-specialist-bot-missing").textContent?.includes("não foi confirmado no Admin"));
+    /* Sem bot não há link a gerar: oferecer o botão habilitado seria mentir. */
+    assert.equal((tela.get("radar-specialist-reissue-link") as HTMLButtonElement).disabled, true);
+  } finally {
+    tela.destroy();
+    servidor.restaurar();
+  }
+});
+
+test("SPECIALIST_2.1.2 · a autoridade do @username é a mesma do Admin", async () => {
+  const painelRadar = await readFile(new URL("../modules/radar/radar-expert-brief-panel.tsx", import.meta.url), "utf8");
+  const rotaConsulta = await readFile(new URL("../app/api/editorial/expert-consultations/route.ts", import.meta.url), "utf8");
+  const canonical = await readFile(new URL("../lib/server/telegram/canonical.ts", import.meta.url), "utf8");
+
+  /* A tela LÊ o estado da plataforma em vez de deduzi-lo de um POST. */
+  assert.match(painelRadar, /setBotUsername\(optionalRecordValue\(payload\.botUsername\)\)/);
+  assert.match(painelRadar, /\{!botUsername && !consulta\.connected &&/);
+
+  /* E a rota o resolve pela função canônica, a mesma que o Admin usa. */
+  assert.match(rotaConsulta, /botUsername: await telegramPlatformBotUsername\(client\)/);
+  assert.match(semComentariosDe(canonical), /telegram\.bot_username/);
+
+  /* OLD_HEALTH_CHECK_USERNAME_DEPENDENCY: o legado é só fallback, nunca a preferência. */
+  const limpo = semComentariosDe(canonical);
+  assert.ok(limpo.indexOf("telegram.bot_username") < limpo.indexOf("details.botUsername"));
+
+  /* E nenhum username fixo em lugar nenhum do caminho do Radar. */
+  for (const fonte of [painelRadar, rotaConsulta, canonical]) {
+    assert.ok(!/minekeybot/i.test(fonte), "nenhum bot hardcodado");
+  }
+});
+
+function semComentariosDe(fonte: string) {
+  return fonte.replace(/\/\*[\s\S]*?\*\//g, "");
+}

@@ -297,7 +297,15 @@ function servidorFalso(dados: RespostaFalsa, invite: unknown = { link: "https://
     chamadas.push({ url, method, body: init?.body ? JSON.parse(init.body) as Record<string, unknown> : null });
     if (method === "GET") {
       return url.includes("/expert-consultations")
-        ? { ok: true, json: async () => ({ consultations: projecao(), botUsername: "minekey_bot" }) }
+        /*
+         * O @username SEGUE O CENÁRIO, não uma constante.
+         *
+         * Depois do SPECIALIST_2.1.2, a tela lê o estado do bot deste GET em vez
+         * de deduzi-lo do POST. Um cenário sem link só é coerente se o bot
+         * também não estiver confirmado — senão o teste montaria um mundo que
+         * não existe: bot pronto e link impossível.
+         */
+        ? { ok: true, json: async () => ({ consultations: projecao(), botUsername: (invite as { link?: string | null } | null)?.link ? "minekey_bot" : null }) }
         : { ok: true, json: async () => ({ experts: dados.experts || [], bindings: dados.bindings || [], briefs: dados.briefs || [], contributions: dados.contributions || [] }) };
     }
     /* Criado o convite, a projeção passa a existir: é o que a recarga relê. */
