@@ -168,7 +168,25 @@ export function projectKeywordDnaForArchitect(
   const summaryPrimary = compact([
     field("Volume", integerLabel(snapshot.metrics.volume.value), { unresolved: snapshot.metrics.volume.value === null }),
     field("Resultados", integerLabel(snapshot.metrics.result.value), { unresolved: snapshot.metrics.result.value === null }),
-    field("Intenção", snapshot.semantic.intentField.label, { unresolved: snapshot.semantic.intentField.state === "unresolved" }),
+    /*
+     * §11 — KEYWORD_CARD_INTENT_SOURCE = KEYWORD_DNA.
+     *
+     * `intentField` vem do read model do Minerador, que resolve a coluna
+     * `intent` e o contrato lógico — e devolve "Ambíguo" quando nenhum dos
+     * dois responde. A Qualificação Semântica, logo abaixo neste mesmo painel,
+     * já dizia "Informativa" sobre a mesma keyword.
+     *
+     * A qualificação é a autoridade canônica do KeywordDNA e responde primeiro.
+     * O read model continua respondendo quando ela não existe: ausência de
+     * qualificação não apaga o que o Minerador apurou.
+     *
+     * Nada é reescrito no Minerador nem na formação — só a leitura desta tela.
+     */
+    field(
+      "Intenção",
+      textValue(qualification?.intent) ?? snapshot.semantic.intentField.label,
+      { unresolved: !qualification?.intent && snapshot.semantic.intentField.state === "unresolved" },
+    ),
     field("Funil", snapshot.semantic.funnelField.label, { unresolved: snapshot.semantic.funnelField.state === "unresolved" }),
     field("KGR", decimalLabel(kgrScore), { unresolved: kgrScore === null }),
     field("Aplicabilidade", snapshot.metrics.kgr.applicabilityLabel, { unresolved: snapshot.metrics.kgr.applicability === "pending" }),

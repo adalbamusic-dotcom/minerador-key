@@ -244,19 +244,33 @@ test("a fase Artigos mantém o fechamento do ArticleDNA no fluxo", () => {
    * aprovação saiu do fluxo junto — e sem ArticleDNA aprovado a etapa Silos
    * não forma working copy, o que trava Links Internos e o Radar.
    */
-  assert.match(review, /data-testid="architect-approve-article"/);
-  assert.match(review, /Aprovar ArticleDNA/);
+  const formacao = readFileSync("modules/arquiteto/article-formation-panel.tsx", "utf8");
+  /*
+   * O caminho continua no fluxo, com UMA autoridade.
+   *
+   * O botão daqui gravava `approved` por caminho próprio, sem passar por
+   * `validateFormationConclusion` — era uma segunda aprovação, mais fraca que
+   * a primeira. O ato é "Concluir formação"; o painel de revisão aponta para
+   * ele em vez de virar beco sem saída.
+   */
+  assert.doesNotMatch(review, /data-testid="architect-approve-article"/);
+  assert.match(review, /Concluir formação/);
   assert.match(review, /data-testid="architect-approval-blockers"/);
+  assert.match(formacao, /data-testid="architect-confirm-formation"/);
   // E o painel da fase Artigos recebe o fechamento de fato.
   assert.match(workspace, /closure=\{\{ approved: articleReview\.approved/);
-  assert.match(workspace, /onApproveArticle=\{\(\) => \{ void handleConfirmArticleArchitecture\(art\); \}\}/);
+  assert.match(workspace, /data-testid="architect-closing-authority"/);
 });
 
-test("aprovar continua exigindo que as pendências estejam resolvidas", () => {
+test("concluir formação continua exigindo que as pendências estejam resolvidas", () => {
   const review = readFileSync("modules/arquiteto/article-formation-review.tsx", "utf8");
-  // Aprovar não é decorativo: ele é bloqueado e mostra o que falta.
-  assert.match(review, /disabled=\{busy \|\| !closure\.readyForApproval\}/);
+  const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
+  // O bloqueio não é decorativo: ele nomeia o que falta, nas duas telas.
   assert.match(review, /closure\.blockers\.map/);
+  assert.match(review, /data-testid="architect-revision-pending"/);
+  assert.match(workspace, /articleClosingIssues\.map/);
+  // E a portaria da conclusão continua sendo a que decide gravar.
+  assert.match(workspace, /const portaria = validateFormationConclusion\(\{/);
 });
 
 test("as decisões obrigatórias voltaram ao fluxo, com o controle que as resolve", () => {

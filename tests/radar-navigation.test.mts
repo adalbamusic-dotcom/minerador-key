@@ -68,7 +68,7 @@ test("pagina propria do Radar declara as áreas canônicas e navega por articleI
   assert.match(page, /tab === "relatorio" && renderReport\(\)/);
   assert.match(page, /tab === "resumo" && renderFlowProgress\(\)/);
   assert.doesNotMatch(page, /\n\s*\{renderFlowProgress\(\)\}/);
-  assert.match(page, /Analisar referências selecionadas/);
+  assert.match(page, /Analisar páginas selecionadas/);
   assert.doesNotMatch(page, /Analisar esta página/);
   assert.doesNotMatch(page, /adalbapro\.com\.br/);
 });

@@ -123,11 +123,71 @@ test("o painel e os handlers usam o mesmo escopo", () => {
   const painel = readFileSync("modules/arquiteto/article-formation-panel.tsx", "utf8");
 
   assert.match(workspace, /scopeFormationUniverses\(\{ universes: articleFormationUniverses, selectedCandidateRefs \}\)/);
-  assert.match(workspace, /selectedCandidateRefsOf\(\{ selectedArticleIds, articles: articlesList \}\)/);
-  // Os dois atos recusam antes de trabalhar, com a frase do domínio.
-  const recusas = workspace.match(/assertSelectionScope\(selectedCandidateRefs\)/g) || [];
-  assert.equal(recusas.length, 2, "processar e concluir precisam do mesmo portão");
+  /*
+   * UMA autoridade de escopo.
+   *
+   * O rodapé contava linhas selecionadas e as ações contavam `candidateRef`:
+   * a tela dizia "1 artigo selecionado" e o botão respondia "Selecione pelo
+   * menos um artigo", sobre a mesma seleção.
+   */
+  assert.match(workspace, /resolveFormationSelectionScope\(\{ selectedArticleIds, articles: articlesList \}\)/);
+  const recusas = workspace.split("} = formationScopeRef.current;").length - 1;
+  assert.equal(recusas, 2, "processar e concluir precisam do mesmo portão");
+  // O ref existe porque lista de dependência envelhece: os dois `useCallback`
+  // liam a memo sem citá-la nas dependências e ficavam congelados no escopo da
+  // renderização em que nasceram.
+  assert.ok(workspace.includes(
+    "formationScopeRef.current = { scope: formationSelectionScope, universes: selectedFormationUniverses };",
+  ));
   // E a barra diz o escopo por extenso.
   assert.match(painel, /data-testid="architect-formation-selection-count"/);
-  assert.match(painel, /selectedCount === 0/);
+  // O painel recebe o motivo da autoridade única, não recalcula o seu.
+  assert.match(painel, /scopeReason: string \| null;/);
+});
+
+/* ------------- a resolução humana da SERP existe de verdade -------------- */
+
+test("a decisão humana da SERP tem UI, handler, remoto e readback", () => {
+  const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
+  const review = readFileSync("modules/arquiteto/article-formation-review.tsx", "utf8");
+
+  // O botão existe e exige motivo — decisão sem justificativa não é decisão.
+  assert.match(review, /Manter composição/);
+  assert.match(review, /disabled=\{busy \|\| serpReason\.trim\(\)\.length < 8\}/);
+
+  // O handler grava no remoto...
+  assert.match(workspace, /const acceptSerpForCandidate = useCallback/);
+  assert.match(workspace, /"\/api\/arquiteto\/serp-resolution"/);
+  assert.match(workspace, /decision: "accept_current_composition"/);
+
+  // ...e o READBACK é quem encerra: a decisão precisa voltar amarrada à MESMA
+  // base sobre a qual foi tomada, senão é decisão sobre outra composição.
+  assert.match(workspace, /const canonical = await loadCanonicalArquitetoWorkspace\(selectedBrandId\);/);
+  assert.match(workspace, /confirmado\?\.formationBaseHash !== registro\.formationBaseHash/);
+  assert.match(workspace, /A decisão não foi confirmada pelo remoto/);
+});
+
+/* -------- §9: composição só muda por proposta, nunca por clique ---------- */
+
+test("os controles de composição do painel entram como PROPOSTA", () => {
+  const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
+
+  /*
+   * O split acidental de "skin care rosto" aconteceu porque o painel gravava
+   * na working copy remota no primeiro clique, enquanto os MESMOS atos, na
+   * revisão, passavam por "Ver efeito" e "Aplicar". Uma exploração virou
+   * composição ativa, e a SERP seguinte foi coletada para o artigo errado.
+   */
+  assert.match(workspace, /onChangePrincipal=\{\(candidateRef, keywordId\) => setPendingScenarioChange\(\{ kind: "change_principal"/);
+  assert.match(workspace, /onSplitKeyword=\{\(candidateRef, keywordId\) => setPendingScenarioChange\(\{ kind: "split_keyword"/);
+  assert.match(workspace, /onMergeCandidates=\{\(left, right\) => setPendingScenarioChange\(\{ kind: "merge_candidates"/);
+  assert.match(workspace, /kind: "move_keyword", keywordId, fromCandidateRef: origem\.candidateRef/);
+
+  // Nenhum dos quatro pode voltar a mutar direto do painel.
+  assert.doesNotMatch(workspace, /onSplitKeyword=\{\(candidateRef, keywordId\) => \{ void splitKeywordFromCandidate/);
+  assert.doesNotMatch(workspace, /onChangePrincipal=\{\(candidateRef, keywordId\) => \{ void changeCandidatePrincipal/);
+  assert.doesNotMatch(workspace, /onMergeCandidates=\{\(left, right\) => \{ void mergeCandidates/);
+
+  // E aplicar continua sendo ato à parte, com recusa respeitada.
+  assert.match(workspace, /if \(!change \|\| scenarioPreview\?\.refusal\) return;/);
 });

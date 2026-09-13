@@ -241,7 +241,9 @@ test("o trilho visual passou a ser Silos → Artigos → Links internos", () => 
 test("a aba Silos tem cabeçalho próprio na mesma mesa", () => {
   // O cabeçalho da aba Silos depende da PROJEÇÃO escolhida: Sitemap é outra
   // leitura da mesma aba, não uma aba nova.
-  assert.match(workspace, /siloView === "sitemap" \? <SitemapViewHeader \/> : <TerritorialWorkspaceHeader \/>/);
+  // O cabeçalho ganhou o "selecionar todos" (§8) e deixou de ser auto-fechado.
+  // O que este teste guarda é a ESCOLHA por projeção, não a forma da tag.
+  assert.ok(workspace.includes('siloView === "sitemap" ? <SitemapViewHeader /> : <TerritorialWorkspaceHeader'));
   // Uma tabela só: Artigos e Links continuam com os cabeçalhos deles.
   assert.equal((workspace.match(/<thead/g) || []).length, 1);
 

@@ -214,3 +214,92 @@ export function materializeArticleSiloId(input: {
     payload: { ...input.article, siloId: binding.siloId },
   };
 }
+
+/* --------------------------- o vínculo de origem -------------------------- */
+
+/**
+ * §3/§4 — O ARTICLEDNA NASCE ANTES DO SILODNA, E NASCE COM `siloId` NULO.
+ *
+ * A auditoria dos contratos (registrada em `silo-closure-readiness.ts`)
+ * mostrou que `ArticleDNA` não tem campo apontando para `SiloDNA`: `siloId` é
+ * anulável e quem carrega o pai é `territoryRef`. Logo a ordem real é
+ * `ArticleDNA → SiloDNA → SiloPage`, e no fechamento canônico o artigo é
+ * escrito ANTES de existir Silo algum para referenciar.
+ *
+ * Deixar `siloId` nulo aqui é decisão de produto declarada, não omissão: a
+ * alternativa seria criar uma sucessora de cada ArticleDNA logo depois só para
+ * preencher o campo — versão nova sem nenhuma diferença editorial, exatamente
+ * o que este projeto já pagou caro para parar de fazer.
+ *
+ * O que continua sendo recusado é o que produziria referência FALSA:
+ *
+ *   sem `territoryRef`            → o artigo não teria pai nenhum;
+ *   dois Silos no mesmo território → 1:1 quebrado, e ninguém desempata;
+ *   `siloId` divergente do canônico → trocar o pai é decisão humana.
+ *
+ * Quando o Silo canônico JÁ existe, o campo é preenchido: nascer nulo ao lado
+ * de um pai que existe seria dívida criada de propósito.
+ */
+export const ARTICLE_PARENT_BINDING_STAGES = [
+  /** Fechamento canônico: o SiloDNA ainda não existe e `siloId` nasce nulo. */
+  "INITIAL",
+  /** Materialização contra Silo já canônico: sem pai, não escreve. */
+  "CANONICAL_REQUIRED",
+] as const;
+export type ArticleParentBindingStage = (typeof ARTICLE_PARENT_BINDING_STAGES)[number];
+
+export type ArticleParentBindingResult =
+  | { ok: true; payload: ArticleDNA; siloId: string | null; reason: string }
+  | { ok: false; reason: string };
+
+export function bindArticleParentForMaterialization(input: {
+  article: ArticleDNA;
+  siloVersions: readonly VersionEnvelope<SiloDNA>[];
+  stage: ArticleParentBindingStage;
+}): ArticleParentBindingResult {
+  if (input.stage === "CANONICAL_REQUIRED") {
+    const materializado = materializeArticleSiloId({ article: input.article, siloVersions: input.siloVersions });
+    return materializado.ok
+      ? { ok: true, payload: materializado.payload, siloId: materializado.siloId, reason: "Silo canônico já declara este território." }
+      : { ok: false, reason: materializado.reason };
+  }
+
+  const binding = resolveCanonicalSiloIdForTerritory({
+    territoryRef: input.article.territoryRef,
+    siloVersions: input.siloVersions,
+  });
+  if (binding.state === "NO_TERRITORY") return { ok: false, reason: binding.reason };
+  if (binding.state === "AMBIGUOUS") return { ok: false, reason: binding.reason };
+
+  const atual = typeof input.article.siloId === "string" && input.article.siloId.trim()
+    ? input.article.siloId
+    : null;
+
+  if (binding.state === "NO_SILO") {
+    if (atual) {
+      return {
+        ok: false,
+        reason: `O artigo declara o Silo ${atual}, mas nenhum SiloDNA canônico reivindica ${binding.territoryRef}.`,
+      };
+    }
+    return {
+      ok: true,
+      siloId: null,
+      payload: { ...input.article, siloId: null },
+      reason: "ArticleDNA inicial: o pai é o território confirmado e o Silo canônico nasce em seguida.",
+    };
+  }
+
+  if (atual && atual !== binding.siloId) {
+    return {
+      ok: false,
+      reason: `O artigo declara o Silo ${atual} e o território aponta para ${binding.siloId}: trocar o pai é decisão humana.`,
+    };
+  }
+  return {
+    ok: true,
+    siloId: binding.siloId,
+    payload: { ...input.article, siloId: binding.siloId },
+    reason: "O território já tem Silo canônico: o artigo nasce declarando o pai.",
+  };
+}

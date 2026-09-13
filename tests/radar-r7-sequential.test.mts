@@ -232,7 +232,17 @@ test("R7 mantém fixture e caminhos remotos fora do fluxo real", () => {
   assert.match(page, /parseRadarR7TopicResponse/);
   assert.match(page, /preserveRadarR7TopicsOnFailure/);
   assert.match(page, /reportApprovedEvidenceFingerprint/);
-  assert.doesNotMatch(page, /useEffect\([^]*collectSerp/);
+  /*
+   * NENHUM EFEITO DE RENDER COLETA SERP.
+   *
+   * A asserção é por CORPO de efeito, não pelo arquivo: a forma antiga
+   * (`useEffect\([^]*collectSerp`) casava qualquer efeito seguido, em qualquer
+   * ponto do arquivo, de uma menção a `collectSerp` — e passava só porque a
+   * página não tinha efeito nenhum.
+   */
+  for (const efeito of page.match(/useEffect\([\s\S]*?\n {2}\}, \[[^\]]*\]\);/g) || []) {
+    assert.equal(/collectSerp|pipeline\.collect/.test(efeito), false, "nenhum useEffect pode coletar SERP");
+  }
 });
 
 test("R7 registra os gates que permanecem sem smoke remoto", () => {

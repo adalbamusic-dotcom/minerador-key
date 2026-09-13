@@ -37,7 +37,11 @@ test("o cabeçalho distingue SiloPage de Article", () => {
 /* ----------------------------- §5 rótulos -------------------------------- */
 
 test("o rótulo da unidade diz o que ela é, sem 'Artigo em formação'", () => {
-  assert.match(workspace, /"ARTICLE · PUBLICADO" : articleDnaVersion \? "ARTICLE" : "CANDIDATO"/);
+  // O rótulo passou a vir de `readFormationConclusionState`: o ternário inline
+  // sobre "existe ArticleDNA?" não sabia distinguir formação concluída de
+  // formação aberta, e chamava as duas de "ainda não confirmado".
+  assert.ok(workspace.includes("const formacao = readFormationConclusionState({"));
+  assert.ok(workspace.includes("{formacao.unitLabel}"));
   assert.doesNotMatch(workspace, /Artigo em formação/);
   assert.match(rows, /SILOPAGE/);
 });

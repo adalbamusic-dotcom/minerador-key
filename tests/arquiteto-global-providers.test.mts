@@ -84,7 +84,9 @@ test("a experiência do Arquiteto apresenta ações funcionais sem infraestrutur
   assert.doesNotMatch(workspace, /Confirmar validação SERP/);
   assert.match(workspace, /callStrategicApi<[\s\S]*?\}, "serp"\)/);
   assert.match(workspace, /callStrategicApiEnvelope<[\s\S]*?, "ai"\)/);
-  assert.match(workspace, /confirmSelectedArchitectures/);
+  // A confirmação em lote da fase Artigos é `Concluir formação`; o atalho do
+  // painel chama a MESMA função, nunca um segundo caminho de aprovação.
+  assert.match(workspace, /confirmArticleFormation/);
   assert.match(workspace, /handleManualKeywordRoleChange/);
 });
 
@@ -95,9 +97,18 @@ test("a confirmação do ArticleDNA é protegida, lê o canônico e não envia a
   // Aprovar ArticleDNA e enviar ao Radar são eventos distintos: a aprovação
   // não agenda handoff; o readback pertence ao envio explícito.
   assert.doesNotMatch(workspace, /setPendingRadarSmoke\(/);
-  assert.match(workspace, /setPendingRadarSmokeReadback\(articleIds\);/);
+  assert.match(workspace, /setPendingRadarSmokeReadback\(selectedArticleOperational/);
   assert.match(workspace, /serpAssessmentRefs/);
-  assert.match(workspace, /Smoke ArticleDNA → Radar/);
+  /*
+   * O readback do envio deixou de ser um "smoke" local.
+   *
+   * A frase antiga — "Smoke ArticleDNA → Radar" — acompanhava uma conferência
+   * que comparava `radarItems` com ele mesmo. O que se afirma agora é mais
+   * forte: o veredito vem de `verifyRadarHandoffReadback` sobre o que o
+   * SERVIDOR devolveu, e é ele que a mensagem reporta.
+   */
+  assert.match(workspace, /RADAR_HANDOFF_CONFIRMED/);
+  assert.match(workspace, /describeRadarReadback\(verdict\)/);
   const articleConfirmation = workspace.slice(workspace.indexOf("const readbackConfirmedArticleDnas"), workspace.indexOf("const sendSelectedToRadar"));
   assert.doesNotMatch(articleConfirmation, /InternalLinkGraph/);
 });

@@ -65,8 +65,8 @@
   Minerador Key trata processamento pesado, podendo retomar jobs quando voltar
   a estar online. O webhook não executa processamento pesado.
 - O Radar investiga e organiza evidências do ArticleDNA recebido, usando a
-  infraestrutura SERP compartilhada e preparando `RadarEvidencePackage` para
-  o Planejador. Não forma ArticleDNA, troca principal, altera slug/canonical,
+  infraestrutura SERP compartilhada e preparando o `PlannerHandoff v3` para o
+  Planejador. Não forma ArticleDNA, troca principal, altera slug/canonical,
   modifica SiloDNA nem envia conteúdo diretamente ao Redator.
 
 ```text
@@ -76,5 +76,52 @@ TELEGRAM_BOT_READY != TELEGRAM_WEBHOOK_READY
 TELEGRAM_WEBHOOK = NOT_CONFIGURED
 TELEGRAM_INBOUND_E2E = PENDING
 ```
+
+## Radar — investigação competitiva — 2026-09-11
+
+23. O Radar não redefine o ArticleDNA. Ele acrescenta evidência amarrada a
+    `articleId + articleDnaVersionId + articleDnaContentHash`; o dossiê de
+    trabalho é `ArticleDNA + RadarEvidenceBundle`, e ao finalizar
+    `RadarFrozenEvidenceBundle + ArticleDNA` formam o `PlannerHandoff v3`.
+24. Modo de pesquisa não é área. `Pesquisa → YouTube` é motor de descoberta
+    competitiva — consulta a plataforma, cria universo, produz modelo próprio.
+    A área `Vídeos` é ingestão deliberada: o USER fornece as fontes, não existe
+    SERP e a fonte não vira concorrente automaticamente. Os dois papéis não
+    compartilham identidade semântica; um mesmo vídeo só existe nos dois após
+    decisão humana explícita.
+25. Nenhum passo do lifecycle da pesquisa ocorre automaticamente por `mount`,
+    F5, troca de área ou expansão de painel. `START`, `ANALYZE`, `FINALIZE` e
+    `RESET` são ações explícitas do USER.
+26. A intenção declarada do artigo vem do fundamento aprovado, nunca da SERP.
+    `unknown`, `ambiguous` e `indeterminate` não são declarações conclusivas, e
+    só existe conflito entre dois valores conclusivos que realmente divergem. A
+    ordem das fontes e o tratamento dos sentinelas são centralizados; nenhuma
+    projeção monta a própria ordem.
+27. A SERP vigente e suficiente é evidência principal sobre a realidade
+    competitiva e **não** prova verdade factual. Fontes primárias e
+    qualificadas prevalecem sobre recorrência de mercado em matéria de fato, e
+    o conflito fica escrito dos dois lados em vez de ser resolvido em silêncio.
+28. Estrutura de links internos é do Arquiteto; aplicação evidencial é do
+    Radar; integração no `ContentPlan` é do Planejador. Relação `REQUIRED` sem
+    contexto sustentado vira
+    `applicationStatus = REQUIRED_RELATION_WITHOUT_SUPPORTED_PLACEMENT` com
+    `recommendedOccurrences = 0`; zero ocorrências não remove a relação.
+29. Necessidade preparada não é pedido enviado: `PREPARED != SENT`. O Radar
+    prepara `SpecialistBriefs` e não dispara contribuição por Telegram
+    automaticamente.
+30. `FINALIZE` é ação do USER e não chama provider. Depois do congelamento,
+    nenhuma leitura pode reconstruir silenciosamente conclusões diferentes das
+    que o bundle registrou.
+31. `RESET` limpa apenas a pesquisa corrente e preserva ArticleDNA, KeywordDNA,
+    SiloDNA, SiloPage, InternalLinkGraph, o histórico append-only, os vídeos
+    deliberadamente registrados e as contribuições reais do especialista.
+    `RESET` não inicia pesquisa nova.
+32. O `RadarEditorialBlueprint` é projeção editorial, não `ContentPlan`. Não
+    fixa H2 final, título final, contagem de palavras nem ordem rígida; o
+    `ContentPlan` continua sendo decisão do Planejador.
+33. O cliente envia `sourceId` e não escolhe URL arbitrária; o servidor resolve
+    o id contra o plano e as candidatas persistidas. Duas URLs do mesmo domínio
+    são fontes distintas. Falha HTTP legítima vira limitação declarada;
+    `SOURCE_UNKNOWN` para id produzido pelo próprio pipeline é defeito.
 
 Estas regras são canônicas. Uma exceção exige proposta SDD aprovada e atualização desta documentação quando permanente.

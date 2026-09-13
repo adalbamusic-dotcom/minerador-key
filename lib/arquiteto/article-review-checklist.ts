@@ -38,12 +38,32 @@ export type ArticleReviewChecklist = {
   statusBadge: string;
   readyForApproval: boolean;
   approved: boolean;
+  /**
+   * DUAS COISAS DIFERENTES, LADO A LADO.
+   *
+   * `approved` é fato histórico: a versão vigente foi aprovada, e essa
+   * decisão pertence àquela versão. `revisionPending` é o presente: a
+   * composição em revisão ainda tem decisão humana em aberto.
+   *
+   * Antes disto o status colapsava as duas em "Aprovado", e o botão de
+   * aprovar — condicionado a `readyForApproval` — sumia exatamente quando
+   * havia pendência sobre uma versão já aprovada. A pessoa via
+   * "Aprovado · 2 decisões pendentes" e não tinha ato nenhum para fechar a
+   * segunda.
+   */
+  revisionPending: boolean;
+  /** A revisão corrente pode ser fechada agora? Independe de `approved`. */
+  revisionReadyToClose: boolean;
+  /** Frase única para a tela: "v5 aprovada · revisão atual com 2 pendências". */
+  headline: string;
   blockers: string[];
 };
 
 export type ArticleReviewChecklistInput = {
   hasArticleDna: boolean;
   approved: boolean;
+  /** Rótulo da versão aprovada, para a frase distinguir os dois tempos. */
+  approvedVersionLabel?: string | null;
   kgr: {
     label: string;
     requiresHumanDecision: boolean;
@@ -98,13 +118,23 @@ export function buildArticleReviewChecklist(input: ArticleReviewChecklistInput):
       : "Nenhuma ação necessária.",
   });
 
+  /*
+   * TIPO DE UNIDADE: FATO DERIVADO quando não há ambiguidade real.
+   *
+   * Cobrar "Registrar decisão" para confirmar que um Article é um Article
+   * criava pendência artificial — e a confirmação gravava uma sucessora
+   * `proposed`, rebaixando um ArticleDNA já aprovado. A decisão humana
+   * continua existindo onde o sinal é insuficiente ou divergente.
+   */
   decisions.push({
     id: "unit-type",
     kind: "unit_type",
     title: "Tipo de unidade",
     resolved: input.unitType.defined,
     state: input.unitType.label || "A definir",
-    what: input.unitType.defined ? "Tipo de unidade definido." : "Falta registrar o tipo de unidade do artigo.",
+    what: input.unitType.defined
+      ? "Tipo de unidade definido pela formação."
+      : "O tipo da unidade não pôde ser derivado: falta decisão humana.",
     why: "O tipo da unidade orienta o Planejador e o Redator; categoria/cluster pertence à etapa Silos.",
     how: input.unitType.defined ? "Nenhuma ação necessária." : "Escolher o tipo e registrar a decisão nesta aba.",
   });
@@ -150,11 +180,35 @@ export function buildArticleReviewChecklist(input: ArticleReviewChecklistInput):
 
   const resolvedCount = decisions.filter(decision => decision.resolved).length;
   const pendingCount = decisions.length - resolvedCount;
-  const status: ArticleReviewStatus = input.approved
-    ? "APPROVED"
-    : !input.hasArticleDna
-      ? "IN_FORMATION"
-      : pendingCount > 0 ? "AWAITING_HUMAN_REVIEW" : "READY_FOR_APPROVAL";
+
+  /*
+   * A REVISÃO CORRENTE É CALCULADA SEM OLHAR PARA `approved`.
+   *
+   * Aprovação anterior não resolve pendência nova — ela pertence à versão que
+   * foi aprovada. Deixar `approved` curto-circuitar isto escondia o ato que
+   * a pessoa precisava executar.
+   */
+  const revisionPending = input.hasArticleDna && pendingCount > 0;
+  const revisionReadyToClose = input.hasArticleDna && pendingCount === 0;
+
+  const status: ArticleReviewStatus = !input.hasArticleDna
+    ? "IN_FORMATION"
+    : revisionPending
+      ? "AWAITING_HUMAN_REVIEW"
+      : input.approved
+        ? "APPROVED"
+        : "READY_FOR_APPROVAL";
+
+  const versao = input.approvedVersionLabel?.trim();
+  const headline = !input.hasArticleDna
+    ? "Em formação: nenhuma versão materializada ainda."
+    : input.approved && revisionPending
+      ? `${versao ? `${versao} aprovada` : "Versão aprovada"} · revisão atual com ${pendingCount} pendência${pendingCount === 1 ? "" : "s"}`
+      : input.approved
+        ? `${versao ? `${versao} aprovada` : "Versão aprovada"} · sem pendência na revisão atual`
+        : revisionPending
+          ? `Revisão atual com ${pendingCount} pendência${pendingCount === 1 ? "" : "s"}`
+          : "Revisão atual fechada: pronta para aprovação.";
 
   return {
     decisions,
@@ -164,8 +218,18 @@ export function buildArticleReviewChecklist(input: ArticleReviewChecklistInput):
     status,
     statusLabel: STATUS_LABELS[status],
     statusBadge: STATUS_BADGES[status],
-    readyForApproval: status === "READY_FOR_APPROVAL",
+    /*
+     * Pronto para aprovar é sobre a REVISÃO, não sobre o histórico. Uma versão
+     * aprovada cuja revisão corrente fechou continua podendo gerar sucessora —
+     * é assim que uma mudança material é consolidada sem reescrever o passado.
+     */
+    // Aprovado sem pendência não tem o que fechar: sucessora só nasce de
+    // conteúdo alterado, e oferecer o botão aqui criaria versão à toa.
+    readyForApproval: revisionReadyToClose && !input.approved,
     approved: input.approved,
+    revisionPending,
+    revisionReadyToClose,
+    headline,
     blockers: decisions.filter(decision => !decision.resolved).map(decision => `${decision.title}: ${decision.what}`),
   };
 }

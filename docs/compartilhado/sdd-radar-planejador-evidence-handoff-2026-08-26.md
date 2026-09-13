@@ -1,8 +1,28 @@
 # SDD — Handoff canônico de evidências Radar → Planejador
 
-Status: Aprovada para implementação local; handoff v2 PASS e pronto para
-leitura pelo Planejador. Não autoriza migration, operação remota ou chamada
-externa.
+Status: Aprovada e implementada. **O contrato vigente é o v3**
+(`RADAR_PLANNER_CONTRACT_VERSION = 3` em `lib/radar/planner-handoff.ts`). Não
+autoriza migration, operação remota ou chamada externa.
+
+## Sucessão v2 → v3 — 2026-09-11
+
+O corpo desta SDD descreve o gate v2 e permanece como histórico da decisão. O
+que mudou no v3, com a Fase 1 da Pesquisa Google homologada:
+
+- a fonte passa a ser **ArticleDNA aprovado + `RadarFrozenEvidenceBundle`
+  íntegro + o dossiê de evidência correspondente**, em vez de um relatório
+  aprovado avulso;
+- o envelope inclui o `RadarEditorialBlueprint` **diretamente**, além de
+  `SpecialistBriefs` e `VideoBriefs` congelados;
+- o vínculo de identidade é `articleId + articleDnaVersionId +
+  articleDnaContentHash`: evidência não sobrevive ao fundamento que a originou;
+- três identidades permanecem distintas e não devem ser confundidas: hash do
+  ArticleDNA, hash do bundle do Radar (`bundle:<hex>`) e hash do handoff
+  (`handoff:<hex>`).
+
+O limite não mudou: o envelope **não** é um `ContentPlan`. O Planejador não
+pesquisa de novo, não reinterpreta o Radar como investigação nova e não remonta
+o Blueprint do zero — ele decide o `ContentPlan` final.
 
 Módulos proprietários: Radar e Planejador, com contrato compartilhado da Plataforma.
 

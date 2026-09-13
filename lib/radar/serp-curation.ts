@@ -1,6 +1,7 @@
 import { analysisApprovalIssues, type RadarAnalysisVersion } from "./analysis-contracts.ts";
 import { deriveRadarReferenceRole, type RadarReferenceRole } from "./flow-presentation.ts";
 import type { RadarSerpView } from "./snapshot-view.ts";
+import type { RadarSerpReviewCurrentness } from "./serp-review-state.ts";
 import type { SerpOrganicResult } from "./serp/contracts.ts";
 
 /**
@@ -154,8 +155,24 @@ export function radarAnalysisCandidates(view: RadarSerpView | null | undefined, 
 
 export type RadarSerpCurationSummary = {
   selectedCompetitors: number;
+  /**
+   * Referências da APROVAÇÃO CORRENTE. Zero quando não existe uma.
+   *
+   * Este contador mostrava 8 ao lado de 7 selecionadas porque somava toda
+   * decisão marcada como incluída — concorrente, apoio e formato — sob um
+   * rótulo que fala de aprovação humana. Duas fontes, um nome só.
+   */
   approvedReferences: number;
+  /** Decisões incluídas de qualquer papel: concorrente, apoio ou formato. */
+  includedReferences: number;
+  /** Decisões pendentes DENTRO da análise. Só faz sentido com curadoria iniciada. */
   pendingDecisions: number;
+  /** Existe análise compatível com este snapshot/artigo/versão? */
+  curationStarted: boolean;
+  /** Resultados orgânicos do snapshot, independentemente de haver análise. */
+  observedResults: number;
+  /** Resultados esperando a curadoria começar — zero depois que ela começa. */
+  awaitingCuration: number;
   needs: number;
   gaps: number;
   conflicts: number;
@@ -165,13 +182,38 @@ export function buildRadarSerpCurationSummary(input: {
   view: RadarSerpView | null | undefined;
   analysis: RadarAnalysisVersion | null | undefined;
   scope?: RadarSerpSelectionScope;
+  /** A revisão humana da SERP, com a leitura de atualidade. */
+  review?: { status: "approved" | "rejected" | null; currentness?: RadarSerpReviewCurrentness } | null;
 }) : RadarSerpCurationSummary {
   const compatibleAnalysis = input.view && input.analysis && analysisMatchesSelectionScope(input.view, input.analysis, input.scope) ? input.analysis : null;
   const projection = buildRadarSerpSelectionProjection(input.view, compatibleAnalysis, input.scope);
-  const approvedReferences = projection.rows.filter(row => row.decision?.decision === "included").length;
+  const includedReferences = projection.rows.filter(row => row.decision?.decision === "included").length;
+  /*
+   * Aprovação preservada não é aprovação de agora.
+   *
+   * Sem revisão aprovada E atual para este snapshot, o número correto é
+   * zero — não o total de uma versão anterior.
+   */
+  const aprovacaoCorrente = input.review?.status === "approved" && input.review.currentness === "current";
+  const approvedReferences = aprovacaoCorrente ? selectedRadarOrganicResults(input.view, input.analysis, input.scope).length : 0;
+  /*
+   * "Pendente" e "ainda não iniciada" são estados diferentes.
+   *
+   * `pendingDecisions` conta decisões pendentes DENTRO de uma análise. Sem
+   * análise a projeção é vazia e o número dá zero — e a tela mostrava
+   * "Decisões pendentes: 0" ao lado de sete resultados dizendo "Aguardando
+   * decisão". Zero ali não significava nada resolvido: significava que não
+   * havia onde registrar decisão.
+   */
+  const observedResults = input.view?.organicResults.length || 0;
+  const curationStarted = Boolean(compatibleAnalysis);
   return {
     selectedCompetitors: selectedRadarOrganicResults(input.view, input.analysis, input.scope).length,
     approvedReferences,
+    includedReferences,
+    curationStarted,
+    observedResults,
+    awaitingCuration: curationStarted ? 0 : observedResults,
     pendingDecisions: pendingOrganicDecisionCount(input.view, compatibleAnalysis, input.scope),
     needs: compatibleAnalysis?.payload.competitiveReport?.needs.length || 0,
     gaps: compatibleAnalysis?.payload.competitiveReport?.profile.limitations.length || 0,

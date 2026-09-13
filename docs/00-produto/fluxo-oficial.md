@@ -9,7 +9,7 @@ O Minerador qualifica KGR/não KGR, métricas, intenção e publicação. O Arqu
 | Marca | perfil, marca, nicho, localização e silos | contexto de marca / BrandDNA | Verificado no código: rota de marcas e `BrandProvider` |
 | Minerador | listas e keywords | keywords qualificadas e KeywordDNA | Verificado no código: tela e tabelas legadas; a forma exata da transferência ainda não foi verificada ponta a ponta |
 | Arquiteto | keywords da marca | ArticleDNA, SiloDNA, SiloPage e InternalLinkGraph | Verificado no código: contratos, rotas e fundação persistente; validação funcional da aba Links Internos ainda pendente |
-| Radar | ArticleDNA aprovado | item de pesquisa / evidência SERP | Verificado no código: rota tenantizada, contrato de evidência e fronteira server-side para a infraestrutura SERP compartilhada DataForSEO. Testes usam fixtures. Coleta real autenticada e persistência remota permanecem pendentes. |
+| Radar | ArticleDNA aprovado | `RadarEvidenceBundle` → `RadarFrozenEvidenceBundle` → `PlannerHandoff v3` | Verificado no código e **homologado em runtime real** na Fase 1 do modo Google (2026-09-11): coleta autenticada DataForSEO, persistência remota, readback e congelamento. YouTube e Amazon permanecem frentes próprias. |
 | Planejador | Radar aprovado | ContentPlan | Verificado no código: contrato, comandos e persistência prevista |
 | Redator | ContentPlan aprovado | ContentDocument | Verificado no código: Tiptap e criação de documento; aprovação final é parcial |
 | Publicações | documento aprovado | registro de publicação | Verificado no código: estrutura e importação; destino externo não verificado |
@@ -21,6 +21,18 @@ administra a infraestrutura; Agência recebe disponibilidade; Marca consome por
 `brandId`; e cada módulo usa somente o contrato compartilhado necessário. A
 Connection READY de um provider não equivale, sozinha, a smoke de uma operação
 editorial nem a persistência remota confirmada.
+
+O Radar investiga o artigo já formado em quatro áreas operacionais —
+`Pesquisa`, `Vídeos`, `Especialista` e `Relatório` — e a `Pesquisa` tem três
+modos competitivos: `Google`, `YouTube` e `Amazon`. Modo de pesquisa não é
+área: `Pesquisa → YouTube` é motor de descoberta competitiva com SERP própria,
+enquanto a área `Vídeos` é ingestão deliberada de fontes que o USER escolhe,
+sem SERP. Hoje apenas o modo Google está implementado e homologado.
+
+O Radar não redefine o ArticleDNA: ele acrescenta evidência amarrada a
+`articleId + articleDnaVersionId + articleDnaContentHash`. O dossiê de trabalho
+é `ArticleDNA + RadarEvidenceBundle`; ao finalizar,
+`RadarFrozenEvidenceBundle + ArticleDNA` formam o `PlannerHandoff v3`.
 
 Na formação compartilhada, o Site apenas sugere candidatas; a confirmação de KGR, volume, resultados, intenção e KeywordDNA pertence ao Minerador; o Arquiteto escolhe uma principal e até cinco apoios compatíveis, consolida a arquitetura de silo e os links internos quando aplicável; e o Radar analisa somente o artigo já formado, sem regrouping.
 

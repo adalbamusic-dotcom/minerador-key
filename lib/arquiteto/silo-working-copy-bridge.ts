@@ -118,6 +118,96 @@ export function draftSiloWorkingCopyFromProposal(input: {
 }
 
 /**
+ * §1/§3 — A PROPOSTA RECONSTRUÍDA DO REMOTO.
+ *
+ * A homologação encontrou o fechamento canônico morrendo em
+ * "A proposta local de skincare não está carregada": os 5 ArticleDNA já
+ * existiam no servidor, o território estava confirmado, a working copy remota
+ * tinha as referências — e mesmo assim a consolidação exigia um objeto que só
+ * existe enquanto a aba Silos esteve aberta e ninguém deu F5.
+ *
+ * Isso é o inverso de `REMOTE_STATE_IS_AUTHORITY`. Com ArticleDNA canônico e
+ * território confirmado, a arquitetura do Silo é DERIVÁVEL — e derivá-la aqui
+ * não inventa nada: cada campo abaixo vem da linha remota ou dos artefatos
+ * canônicos, e o que não vem de lá fica vazio em vez de ser adivinhado.
+ *
+ * Esta é a inversa de `draftSiloWorkingCopyFromProposal`. As duas juntas
+ * fecham o ciclo remoto → proposta → remoto sem passar por memória de sessão.
+ */
+export function proposalFromRemoteWorkingCopy(input: {
+  remote: CanonicalSiloWorkingCopy;
+  /** Versão canônica de cada ArticleDNA referenciado, por articleId. */
+  articleVersionById: ReadonlyMap<string, { versionId: string; contentHash: string; keywordReferences?: readonly { keywordId: string; keywordDnaVersionId: string; keywordDnaContentHash: string }[] }>;
+}): SiloWorkingCopy {
+  const state = input.remote.workingCopy;
+  /*
+   * O Pilar é o DECIDIDO. A sugestão não promove ninguém — e sem decisão a
+   * proposta sai sem Pilar, para o portão da consolidação recusar em vez de
+   * consolidar sobre um palpite.
+   */
+  const pillarArticleId = state.pillarSelection?.articleId ?? null;
+  const excluded = new Set(state.exclusions.map(exclusion => exclusion.articleId));
+  const referencias = state.articleRefs.filter(reference => !excluded.has(reference.articleId));
+
+  return {
+    // A identidade da proposta é a do Silo canônico quando ele existe; sem ele,
+    // o território — nunca um contador de sessão, que mudaria a cada boot.
+    id: state.existingSiloId || state.territoryRef,
+    brandId: state.brandId,
+    name: state.name,
+    slug: state.slug,
+    formationStatus: "draft",
+    source: state.existingSiloId
+      ? "existing"
+      : referencias.length > 1 ? "new_candidate" : "insufficient_architecture",
+    existingSiloId: state.existingSiloId,
+    articleReferences: referencias.map(reference => ({
+      articleId: reference.articleId,
+      articleDnaVersionId: reference.articleDnaVersionId,
+      articleDnaContentHash: reference.articleDnaContentHash,
+      keywordDnaReferences: (input.articleVersionById.get(reference.articleId)?.keywordReferences || [])
+        .map(item => ({
+          keywordId: item.keywordId,
+          keywordDnaVersionId: item.keywordDnaVersionId,
+          keywordDnaContentHash: item.keywordDnaContentHash,
+        })),
+      role: reference.articleId === pillarArticleId ? "pillar_candidate" : "support",
+      rationale: reference.articleId === pillarArticleId
+        ? "Pilar decidido, lido da working copy remota."
+        : "Suporte derivado da composição remota do Silo.",
+    })),
+    pillarCandidateArticleId: pillarArticleId,
+    supportArticleIds: deriveSupportArticleIds({
+      articleIds: referencias.map(reference => reference.articleId),
+      pillarArticleId,
+      exclusions: state.exclusions,
+    }),
+    // Pontuações são artefato da heurística que propôs, não do que foi decidido.
+    // Reconstruí-las aqui seria inventar números que ninguém calculou.
+    pillarScores: [],
+    reservedCandidateIds: [],
+    reasons: [...state.reasons],
+    conflicts: [...state.conflicts],
+    siloPage: {
+      siloPageId: `${state.territoryRef}:page`,
+      slug: state.slug,
+      distinctFromPillar: true,
+      pillarArticleId: null,
+      supportArticleIds: referencias
+        .map(reference => reference.articleId)
+        .filter(articleId => articleId !== pillarArticleId),
+      collisionReasons: [],
+    },
+    publishedProtection: {
+      protected: false,
+      siloPageIds: [],
+      articleIds: [],
+      protectedFields: [],
+    },
+  };
+}
+
+/**
  * Decisão humana de Pilar, pronta para persistir.
  *
  * `decidedOverArticleIds` é a composição VIGENTE no momento do clique. Sem ela,

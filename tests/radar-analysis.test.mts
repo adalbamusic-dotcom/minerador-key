@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analysisApprovalIssues, buildRadarBenchmark, buildRadarPlannerPackage, suggestRadarAnalysisMode } from "../lib/radar/analysis-contracts.ts";
+import { analysisApprovalIssues, buildRadarBenchmark, buildRadarPlannerPackage, RadarExtractionPageSchema, suggestRadarAnalysisMode } from "../lib/radar/analysis-contracts.ts";
 import { buildRadarEvidencePackage } from "../lib/radar/evidence-package.ts";
 
 test("sugestao de modo usa somente a regra KGR estrita existente", () => {
@@ -11,7 +11,7 @@ test("sugestao de modo usa somente a regra KGR estrita existente", () => {
 });
 
 test("benchmark preserva media, mediana, faixa e outlier sem impor meta editorial", () => {
-  const pages = [1, 2, 3, 4].map((index) => ({ id: `p${index}`, url: `https://example.com/${index}`, status: "success" as const, fetchedAt: "2026-07-20T12:00:00.000Z", title: "Titulo", metaDescription: "Meta", canonical: null, h1: ["H1"], h2: Array(index).fill("H2"), h3: [], wordCount: index * 100, internalLinkCount: index, externalLinkCount: 1, listCount: 0, tableCount: 0, faqCount: 0, imageCount: 0, blockquoteCount: 0, comparisonCount: 0, hasDates: false, author: null, structuredDataTypes: [], recurringTerms: [], boldCount: 0, italicCount: 0, error: null }));
+  const pages = [1, 2, 3, 4].map((index) => RadarExtractionPageSchema.parse({ id: `p${index}`, url: `https://example.com/${index}`, status: "success" as const, fetchedAt: "2026-07-20T12:00:00.000Z", title: "Titulo", metaDescription: "Meta", canonical: null, h1: ["H1"], h2: Array(index).fill("H2"), h3: [], wordCount: index * 100, internalLinkCount: index, externalLinkCount: 1, listCount: 0, tableCount: 0, faqCount: 0, imageCount: 0, blockquoteCount: 0, comparisonCount: 0, hasDates: false, author: null, structuredDataTypes: [], recurringTerms: [], boldCount: 0, italicCount: 0, error: null }));
   const benchmark = buildRadarBenchmark("competitive_full", pages);
   assert.equal(benchmark?.metrics.words.mean, 250);
   assert.equal(benchmark?.metrics.words.median, 250);

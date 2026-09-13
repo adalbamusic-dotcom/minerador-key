@@ -6,8 +6,8 @@ import type { RadarSerpView } from "../lib/radar/snapshot-view.ts";
 import { buildRadarSerpCurationSummary, buildRadarSerpSelectionProjection, radarAnalysisCandidates, radarAnalysisMatchesSerp, radarOrganicRenderKey, radarOrganicSelectionFor, radarSerpApprovalBlockReason, radarSerpApprovalIssues, selectedRadarOrganicDecisionKeys, selectedRadarOrganicResults } from "../lib/radar/serp-curation.ts";
 
 const organic = (position: number, url = `https://example.com/result-${position}`) => ({ position, title: `Resultado ${position}`, url, domain: "example.com", snippet: "Evidência observada", sitelinks: [], date: null, inferredType: "article" as const, confidence: "medium" as const, manualType: null, notes: "" });
-const view = (snapshotId = "snapshot-1", results = [organic(1), organic(2), organic(3), organic(4)]): RadarSerpView => ({ record: { id: snapshotId, research: {} } as never, query: "keyword", version: 1, capturedAt: "2026-08-26T12:00:00.000Z", hash: `sha256:${snapshotId}`, provider: "dataforseo", origin: "real", persistenceMode: "remote", organicResults: results, peopleAlsoAsk: [], relatedSearches: [], knowledgeGraph: null, diagnostic: { dominantIntent: "informational", secondaryIntents: [], confidence: "medium", dominantFormats: ["article"], resultTypeCounts: {}, pageTypes: [], recurringTitlePatterns: [], recurringSnippetPatterns: [], frequentEntities: [], frequentDomains: [], localSignals: [], questions: [], relatedSearches: [], possibleConflicts: [], opportunities: [], limitations: [], verdict: "coerente" }, partial: false, source: "research" });
-const analysis = (currentView: RadarSerpView, included: number[]): RadarAnalysisVersion => ({ versionId: "analysis-1", entityId: "analysis:article-1", versionNumber: 1, previousVersionId: null, contentHash: "sha256:analysis", origin: "human", changeReason: "fixture", createdAt: "2026-08-26T12:00:00.000Z", createdBy: "human", payload: { schemaVersion: 1, brandId: "brand-1", articleId: "article-1", articleDnaVersionId: "article-dna-1", serpSnapshotId: currentView.record.id, serpSnapshotVersion: currentView.version, serpSnapshotHash: currentView.hash || "", serpDecisions: currentView.organicResults.map(result => ({ key: `organic:${result.position}`, itemType: "organic" as const, decision: included.includes(result.position) ? "included" as const : "excluded" as const, reason: included.includes(result.position) ? "Concorrente selecionado pelo usuário." : "Resultado SERP excluído pelo usuário.", note: "", ownDomain: false })), selectedCompetitorIds: included.map(position => `organic:${position}`), extractionIds: [], extractions: [], benchmark: null, semanticTerms: [], structuralDecisions: [], competitiveness: null, keywordDecisions: [], competitiveReport: null, plannerPackage: null, plannerTransfer: null, mode: "kgr_light", modeRecommendation: { suggestedMode: "kgr_light", reasons: ["fixture"], confidence: "low", ruleSource: "minerador_kgr_strict" }, modeHumanReason: "", status: "draft", humanNotes: [], approvedAt: null, approvedBy: null } });
+const view = (snapshotId = "snapshot-1", results = [organic(1), organic(2), organic(3), organic(4)]): RadarSerpView => ({ record: { id: snapshotId, research: {} } as never, query: "keyword", version: 1, capturedAt: "2026-08-26T12:00:00.000Z", hash: `sha256:${snapshotId}`, provider: "dataforseo", origin: "real", persistenceMode: "remote", organicResults: results, peopleAlsoAsk: [], relatedSearches: [], knowledgeGraph: null, diagnostic: { dominantIntent: "informational", secondaryIntents: [], confidence: "medium", dominantFormats: ["article"], resultTypeCounts: {}, pageTypes: [], recurringTitlePatterns: [], recurringSnippetPatterns: [], frequentEntities: [], frequentDomains: [], localSignals: [], questions: [], relatedSearches: [], possibleConflicts: [], opportunities: [], limitations: [], verdict: "coerente", rawItemTypeCounts: {} }, partial: false, source: "research" });
+const analysis = (currentView: RadarSerpView, included: number[]): RadarAnalysisVersion => ({ versionId: "analysis-1", entityId: "analysis:article-1", versionNumber: 1, previousVersionId: null, contentHash: "sha256:analysis", origin: "human", changeReason: "fixture", createdAt: "2026-08-26T12:00:00.000Z", createdBy: "human", payload: { schemaVersion: 1, brandId: "brand-1", articleId: "article-1", articleDnaVersionId: "article-dna-1", serpSnapshotId: currentView.record.id, serpSnapshotVersion: currentView.version, serpSnapshotHash: currentView.hash || "", serpDecisions: currentView.organicResults.map(result => ({ key: `organic:${result.position}`, itemType: "organic" as const, decision: included.includes(result.position) ? "included" as const : "excluded" as const, reason: included.includes(result.position) ? "Concorrente selecionado pelo usuário." : "Resultado SERP excluído pelo usuário.", note: "", ownDomain: false })), selectedCompetitorIds: included.map(position => `organic:${position}`), extractionIds: [], extractions: [], extractionFailures: [], verifiedSources: [], sourceVerificationFailures: [], deepResearch: null, finalizedBundle: null, benchmark: null, semanticTerms: [], structuralDecisions: [], competitiveness: null, keywordDecisions: [], competitiveReport: null, plannerPackage: null, plannerTransfer: null, mode: "kgr_light", modeRecommendation: { suggestedMode: "kgr_light", reasons: ["fixture"], confidence: "low", ruleSource: "minerador_kgr_strict" }, modeHumanReason: "", status: "draft", humanNotes: [], approvedAt: null, approvedBy: null, analysisCompletedAt: null } });
 
 test("resultado SERP tem chave visual ligada ao snapshot, posição e URL, sem índice de array", () => {
   const result = organic(4, "https://other.example/changed");
@@ -44,7 +44,13 @@ test("seleção canônica permanece estável em rerender e análise recebe somen
   assert.deepEqual(radarAnalysisCandidates(currentView, swappedAnalysis).map(candidate => candidate.key), ["organic:2", "organic:3"]);
   const summary = buildRadarSerpCurationSummary({ view: currentView, analysis: currentAnalysis });
   assert.equal(summary.selectedCompetitors, 2);
-  assert.equal(summary.approvedReferences, 2);
+  // Aprovadas passou a significar aprovação CORRENTE; sem revisão atual, zero.
+  assert.equal(summary.includedReferences, 2);
+  assert.equal(summary.approvedReferences, 0);
+  const aprovado = buildRadarSerpCurationSummary({ view: currentView, analysis: currentAnalysis, review: { status: "approved", currentness: "current" } });
+  assert.equal(aprovado.approvedReferences, 2);
+  const reaberto = buildRadarSerpCurationSummary({ view: currentView, analysis: currentAnalysis, review: { status: "approved", currentness: "reopened" } });
+  assert.equal(reaberto.approvedReferences, 0);
   assert.equal(summary.pendingDecisions, 0);
 });
 
@@ -141,11 +147,28 @@ test("fluxo normal não depende mais da curadoria detalhada nem limita a lista a
   assert.match(page, /buildRadarSerpSelectionProjection/);
   assert.doesNotMatch(page, /const decisions = new Map/);
   assert.match(page, /selectionAtStart/);
-  assert.match(page, /onSerpDecisionChange=\{\(key, role, reason\)/);
-  assert.match(page, /reasonOverride !== undefined/);
+  /*
+   * GATE 15.3 · a confirmação de curadoria manual saiu da superfície da Fase 1.
+   *
+   * A função continua na página (§17), com o motivo viajando junto da alteração
+   * confirmada — o que o teste abaixo continua verificando. O que não existe
+   * mais é o caminho pelo qual o Workbench a acionava.
+   */
+  assert.match(page, /const confirmSerpCuration = async/, "a função segue íntegra");
+  assert.doesNotMatch(page, /onConfirmSerpCuration=\{/, "MANUAL_COMPETITOR_CURATION_VISIBLE = NO");
+  // O motivo viaja junto com a alteração confirmada, não em um write próprio.
+  assert.match(page, /change.reason\?.trim\(\) \|\| valores.reason/);
   assert.match(panel, /reasonInputRefs/);
   assert.match(panel, /row\?\.contains\(next\)/);
-  assert.match(pipeline, /radarItems: current\.radarItems\.map\(item => item\.articleId === articleId \? nextItem : item\)/);
+  /*
+   * GATE 18.10 · o item aplicado no fallback é `itemLocal`, e ele É `nextItem`
+   * menos as afirmações que só o servidor pode fazer (`analysisCompletedAt` e
+   * `finalizedBundle`). A garantia aqui — a versão com as decisões de curadoria
+   * entra no workspace mesmo sem confirmação remota — continua inteira; o que
+   * saiu foi o carimbo que fazia a tela dizer "Finalizado" sem banco.
+   */
+  assert.match(pipeline, /const itemLocal = \{ \.\.\.nextItem, analysisVersions: nextItem\.analysisVersions\.map\(/, "a versão local nasce de nextItem");
+  assert.match(pipeline, /radarItems: current\.radarItems\.map\(item => item\.articleId === articleId \? itemLocal : item\)/);
   assert.match(pipeline, /serpDecisions\) !== JSON\.stringify\(parsed\.payload\.serpDecisions\)/);
   assert.match(pipeline, /selectedCompetitorIds\) !== JSON\.stringify\(parsed\.payload\.selectedCompetitorIds\)/);
 });

@@ -73,6 +73,12 @@ export function ArchitecturePanel({
   processChips,
   selectedCluster,
   consolidation,
+  preflight,
+  proposal,
+  currentAssigned,
+  pendingAssigned,
+  restore,
+  homologation,
   onProcess,
   onConfirm,
   onContinueToArticles,
@@ -88,6 +94,81 @@ export function ArchitecturePanel({
   processChips: ArchitectureProcessChip[];
   selectedCluster: ClusterAnalysis | null;
   /**
+   * O QUE A CONFIRMAÇÃO VAI ENCONTRAR — antes do clique.
+   *
+   * A pessoa só descobria o bloqueio depois de confirmar e ver a recusa vir do
+   * servidor. Cada linha diz, por Silo, o estado dos quatro fatos que a
+   * portaria confere, e nomeia o impedimento quando existe.
+   */
+  preflight: readonly {
+    siloId: string;
+    label: string;
+    siloDna: string;
+    siloPage: string;
+    canonical: string;
+    publication: string;
+    ready: boolean;
+    blockers: readonly string[];
+  }[];
+  /**
+   * RESTAURAR ≠ REPROCESSAR.
+   *
+   * Reprocessar é incremental: ele preserva a estrutura corrente, e por isso
+   * reproduz um cenário contaminado em vez de consertá-lo. Restaurar tem outro
+   * baseline — o ArticleDNA aprovado — e devolve as keywords ao território que
+   * o artefato declara. Não edita artefato, não chama provider.
+   */
+  restore: {
+    plan: {
+      clean: boolean;
+      summary: string;
+      articlesAffected: number;
+      keywordsToRestore: number;
+      articles: readonly {
+        articleId: string;
+        label: string;
+        alignedBefore: number;
+        keywordCount: number;
+        keywords: readonly {
+          keywordId: string;
+          label: string;
+          currentTerritoryLabel: string | null;
+          approvedTerritoryLabel: string | null;
+        }[];
+      }[];
+    };
+    previewOpen: boolean;
+    busy: boolean;
+    onRestore: () => void;
+  };
+  /**
+   * REINICIAR HOMOLOGAÇÃO — `null` em produção.
+   *
+   * Terceira operação, distinta das outras duas: `Reprocessar` é incremental,
+   * `Restaurar` conserta em direção ao aprovado, e esta RECOMEÇA a cópia de
+   * trabalho da rodada. Nenhum artefato versionado é apagado.
+   */
+  /**
+   * `null` nesta rodada — ver §3 do corte de reset.
+   *
+   * O reset da homologação virou operação administrativa explícita
+   * (`npm run reset:arquiteto`), executada uma vez. A rota e o domínio
+   * continuam existindo e testados; o que sai é o controle, para não competir
+   * com Reprocessar e Restaurar no caminho básico.
+   */
+  homologation: {
+    plan: {
+      summary: string;
+      totalCleared: number;
+      totalPreserved: number;
+      phrase: string;
+      clearing: readonly { subjectType: string; count: number; reason: string }[];
+      preserving: readonly { subjectType: string; count: number; reason: string }[];
+    } | null;
+    busy: boolean;
+    onRestart: () => void;
+  } | null;
+  /**
    * A etapa seguinte do Silo, dentro do painel da fase.
    *
    * Formar a cópia de trabalho e consolidar viviam nos botões Lógica e
@@ -99,7 +180,36 @@ export function ArchitecturePanel({
    * O Pilar continua sendo decisão humana: este bloco leva até a escolha,
    * não a substitui.
    */
-  consolidation: {
+  /**
+   * §12 — os números do que o processamento PROPÔS.
+   *
+   * A linha da análise diz como o lote foi lido; esta diz o que vai
+   * acontecer. Enquanto só existia a primeira, "2 sem profundidade" era
+   * tudo que a pessoa via — e "sem profundidade" não conta o que foi
+   * feito com aquelas keywords.
+   */
+  /** Quantas keywords JÁ têm membership gravada. Eixo separado da proposta. */
+  currentAssigned?: number | null;
+  /** Quantas decisões da proposta ainda DIFEREM do gravado. */
+  pendingAssigned?: number | null;
+
+  proposal?: {
+    KEYWORDS_ANALYZED: number;
+    RESOLVED_KEYWORDS: number;
+    SILOS_REUSED: number;
+    SILOS_PROPOSED: number;
+    ASSIGNED: number;
+    EXPLICIT_UNASSIGNED: number;
+    BLOCKED: number;
+  } | null;
+
+  /**
+   * `null` quando a fase está no caminho básico.
+   *
+   * Formar cópias e consolidar são passos que `Confirmar arquitetura` já
+   * executa; oferecê-los ao lado dela dava três atos para a mesma coisa.
+   */
+  consolidation: null | {
     workingCopies: number;
     pillarsDecided: number;
     consolidated: number;
@@ -168,6 +278,140 @@ export function ArchitecturePanel({
         )}
       </div>
 
+      {homologation && (
+        <div className="mt-3 rounded border border-danger/40 bg-danger-soft/40 p-3" data-testid="architect-homologation-fresh">
+          <p className="text-sm font-semibold text-foreground">Reiniciar homologação</p>
+          <p className="mt-1 text-sm leading-6 text-text-muted">
+            Limpa a cópia de trabalho da rodada atual sem apagar o histórico aprovado. Diferente de
+            Reprocessar, que é incremental, e de Restaurar, que devolve as keywords ao território do
+            ArticleDNA aprovado.
+          </p>
+
+          {homologation.plan && (
+            <div className="mt-2 grid gap-3 sm:grid-cols-2" data-testid="architect-homologation-fresh-preview">
+              <div>
+                <p className="text-sm font-semibold text-warning">Será limpo ({homologation.plan.totalCleared})</p>
+                <ul className="mt-1 space-y-0.5 text-sm leading-6 text-text-muted">
+                  {homologation.plan.clearing.map(item => (
+                    <li key={item.subjectType}>{item.count} × {item.subjectType} — {item.reason}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-positive-soft">Será preservado ({homologation.plan.totalPreserved})</p>
+                <ul className="mt-1 space-y-0.5 text-sm leading-6 text-text-muted">
+                  {homologation.plan.preserving.map(item => (
+                    <li key={item.subjectType}>{item.count} × {item.subjectType} — {item.reason}</li>
+                  ))}
+                  <li>Artefatos versionados (ArticleDNA, SiloDNA, SiloPage, grafos) — nenhum é apagado.</li>
+                </ul>
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            disabled={busy || homologation.busy}
+            data-testid="architect-homologation-fresh-action"
+            onClick={homologation.onRestart}
+            title="Limpa a working copy da rodada atual sem apagar o histórico aprovado."
+            className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded border border-danger/50 px-3 text-sm font-semibold text-danger transition-colors hover:bg-danger/10 disabled:opacity-40"
+          >
+            {homologation.busy
+              ? "Reiniciando…"
+              : homologation.plan
+                ? `Confirmar reinício (${homologation.plan.phrase})`
+                : "Reiniciar homologação"}
+          </button>
+        </div>
+      )}
+
+      {!restore.plan.clean && (
+        <div className="mt-3 rounded border border-warning/40 bg-warning/10 p-3" data-testid="architect-restore-working-copy">
+          <p className="text-sm font-semibold text-foreground">A cópia de trabalho não representa os ArticleDNA aprovados</p>
+          <p className="mt-1 text-sm leading-6 text-text-muted">
+            {restore.plan.summary} Reprocessar não conserta isto: ele preserva a estrutura corrente.
+            Restaurar devolve as keywords ao território que o artefato aprovado declara — sem editar
+            ArticleDNA, sem criar sucessora e sem chamar provider.
+          </p>
+          <p className="mt-2 text-sm text-text-muted">
+            ARTICLES_AFETADOS = {restore.plan.articlesAffected} · KEYWORDS_A_RESTAURAR = {restore.plan.keywordsToRestore}
+          </p>
+
+          {restore.previewOpen && (
+            <ul className="mt-2 space-y-2" data-testid="architect-restore-preview">
+              {restore.plan.articles.map(article => (
+                <li key={article.articleId}>
+                  <p className="text-sm font-medium text-foreground">
+                    {article.label}{" "}
+                    <span className="text-text-muted">
+                      {article.alignedBefore}/{article.keywordCount} → {article.keywordCount}/{article.keywordCount}
+                    </span>
+                  </p>
+                  <ul className="mt-0.5 space-y-0.5">
+                    {article.keywords.map(keyword => (
+                      <li key={keyword.keywordId} className="text-sm leading-6 text-text-muted">
+                        {keyword.label}: {keyword.currentTerritoryLabel || "sem Silo"} → {keyword.approvedTerritoryLabel || "sem Silo"}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <button
+            type="button"
+            disabled={busy || restore.busy}
+            data-testid="architect-restore-action"
+            onClick={restore.onRestore}
+            title={restore.previewOpen
+              ? "Aplica as atribuições acima de uma vez só; se alguma falhar, todas voltam."
+              : "Primeiro clique mostra o que seria restaurado. Nada é gravado agora."}
+            className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded border border-warning/50 px-3 text-sm font-semibold text-warning transition-colors hover:bg-warning/10 disabled:opacity-40"
+          >
+            {restore.busy
+              ? "Restaurando…"
+              : restore.previewOpen
+                ? `Restaurar ${restore.plan.keywordsToRestore} atribuição(ões)`
+                : "Restaurar cópia de trabalho"}
+          </button>
+        </div>
+      )}
+
+      {preflight.length > 0 && (
+        <div className="mt-3 rounded border border-divider bg-surface p-3" data-testid="architect-silopage-preflight">
+          <p className="text-sm font-semibold text-foreground">O que a confirmação vai fechar</p>
+          <p className="mt-0.5 text-sm leading-6 text-text-muted">
+            Confirmar arquitetura fecha SiloDNA e SiloPage juntos. Aprovado não é publicado: uma página
+            planejada pode ser aprovada com canonical planejado e continuar fora do ar.
+          </p>
+          <ul className="mt-2 space-y-2">
+            {preflight.map(silo => (
+              <li key={silo.siloId} className="rounded border border-divider/70 p-2" data-testid={`architect-silopage-preflight-${silo.siloId}`}>
+                <p className="text-sm font-medium text-foreground">
+                  {silo.label}
+                  <span className={`ml-2 text-xs font-semibold ${silo.ready ? "text-positive-soft" : "text-warning"}`}>
+                    {silo.ready ? "pronto para confirmar" : "SILO_PAGE_APPROVAL_READY = NO"}
+                  </span>
+                </p>
+                <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-sm leading-6 text-text-muted sm:grid-cols-4">
+                  <div><dt className="inline">SiloDNA: </dt><dd className="inline text-foreground">{silo.siloDna}</dd></div>
+                  <div><dt className="inline">SiloPage: </dt><dd className="inline text-foreground">{silo.siloPage}</dd></div>
+                  <div><dt className="inline">Canonical: </dt><dd className="inline text-foreground">{silo.canonical}</dd></div>
+                  <div><dt className="inline">Publicação: </dt><dd className="inline text-foreground">{silo.publication}</dd></div>
+                </dl>
+                {silo.blockers.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 text-sm leading-6 text-warning">
+                    {silo.blockers.map(motivo => <li key={motivo}>• {motivo}</li>)}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {!processed ? (
         <p className="mt-2 text-sm leading-6 text-text-muted">
           Importe as keywords e processe a arquitetura: o Arquiteto lê o lote inteiro antes de sugerir qualquer silo.
@@ -183,6 +427,13 @@ export function ArchitecturePanel({
               {summary.strengthening} fortalece(m) Silos existentes · {summary.newSilos} novo(s) Silo(s) recomendado(s) ·{" "}
               {summary.insufficient} sem profundidade para Silo · {summary.ambiguous} precisa(m) de revisão
             </p>
+            {proposal && (
+              <p className="mt-1 text-sm leading-6 text-foreground" data-testid="architect-architecture-proposal">
+                {proposal.SILOS_PROPOSED} Silo(s) a criar · {proposal.SILOS_REUSED} reutilizado(s) ·{" "}
+                {proposal.ASSIGNED} keyword(s) atribuída(s) · {proposal.EXPLICIT_UNASSIGNED} sem Silo ·{" "}
+                {proposal.BLOCKED} bloqueio(s)
+              </p>
+            )}
             <p className="mt-1 text-sm text-text-muted" data-testid="architect-scenario-state">
               Estado: <span className="text-foreground">{scenarioState}</span> · Confiança: <span className="text-foreground">{summary.confidence}</span>
             </p>
@@ -243,11 +494,38 @@ export function ArchitecturePanel({
 
           {/* Cobertura do lote — sempre com a quantidade, nunca só o percentual. */}
           <div className="mt-3 grid gap-1" data-testid="architect-chart-coverage">
-            <p className="text-sm font-semibold text-text-muted">Cobertura do lote</p>
-            <Bar label="Associadas a Silo" value={cobertura.associadas} total={totalKeywords} tone="bg-success/70" />
-            <Bar label="Com destino sugerido" value={cobertura.sugeridas} total={totalKeywords} tone="bg-module-accent/70" />
-            <Bar label="Ambíguas" value={cobertura.ambiguas} total={totalKeywords} tone="bg-warning/70" />
-            <Bar label="Sem destino" value={cobertura.semDestino} total={totalKeywords} tone="bg-text-muted/50" />
+            {/*
+              * §4 — DOIS EIXOS, NUNCA SOMADOS.
+              *
+              * A cobertura era montada com os DESTINOS DOS GRUPOS: um grupo
+              * "sem profundidade" contava como "sem destino" mesmo depois de a
+              * proposta ter dado destino às suas keywords. A tela dizia
+              * "9 atribuídas" e "6 sem destino" ao mesmo tempo.
+              *
+              * ATUAL é o que está gravado. PROPOSTA é o que Confirmar vai
+              * materializar.
+              */}
+            <p className="text-sm font-semibold text-text-muted">Atual · já gravado</p>
+            <Bar label="Associadas a Silo" value={currentAssigned ?? 0} total={proposal?.KEYWORDS_ANALYZED || totalKeywords} tone="bg-text-muted/50" />
+            {/*
+              * §2/§3 — proposta materializada não é pendência.
+              *
+              * A proposta é derivada, então continua sendo calculada depois da
+              * confirmação. Enquanto o rótulo dizia "aguardando", a tela
+              * mostrava "Atual 9/9" e "Proposta 9/9 aguardando" ao mesmo
+              * tempo — e a pessoa não sabia se faltava clicar de novo.
+              */}
+            <p className="mt-2 text-sm font-semibold text-module-accent">
+              {(pendingAssigned ?? 0) > 0 ? "Proposta · aguardando confirmação" : "Proposta · aplicada"}
+            </p>
+            <Bar
+              label={(pendingAssigned ?? 0) > 0 ? "Com destino proposto" : "Última proposta aplicada"}
+              value={proposal?.ASSIGNED ?? cobertura.associadas}
+              total={proposal?.KEYWORDS_ANALYZED || totalKeywords}
+              tone={(pendingAssigned ?? 0) > 0 ? "bg-module-accent/70" : "bg-success/70"}
+            />
+            <Bar label="Sem destino, com motivo" value={proposal?.EXPLICIT_UNASSIGNED ?? cobertura.semDestino} total={proposal?.KEYWORDS_ANALYZED || totalKeywords} tone="bg-warning/70" />
+            <Bar label="Bloqueadas" value={proposal?.BLOCKED ?? cobertura.ambiguas} total={proposal?.KEYWORDS_ANALYZED || totalKeywords} tone="bg-danger/70" />
           </div>
 
           {selectedCluster && (

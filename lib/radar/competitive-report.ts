@@ -1,8 +1,12 @@
 import { contentHash } from "../arquiteto/versioning.ts";
+import { RADAR_INTENT_NOT_CONCLUDED, radarDeclaredArticleIntent, radarIntentConflict } from "./editorial-identity.ts";
 import type { ArticleDNA } from "../arquiteto/contracts.ts";
 import type { SerpResearchSnapshot } from "./serp/contracts.ts";
 import type { RadarAnalysisPayload } from "./analysis-contracts.ts";
 import { classifyRadarExtractionFormat, extractionFormatLabel, isComparableRadarExtraction, isPrimaryRadarSemanticTerm } from "./analysis-insights.ts";
+import { RadarCompetitiveModelSchema, buildRadarCompetitiveModel } from "./competitive-model.ts";
+import type { RadarArticleResearchContext } from "./article-research-context.ts";
+import { radarNormalizedUrl, radarReferenceOrigin, type RadarResearchReference } from "./research-reference.ts";
 import { z } from "zod";
 
 const DecisionSchema = z.enum(["use", "counterpoint", "ignore", "duplicate", "outside_intent", "pending"]);
@@ -120,6 +124,36 @@ export const RadarCompetitiveReportSchema = z.object({
   needs: z.array(NeedSchema),
   dnaComparison: z.object({ expectedIntent: z.string().min(1), observedIntent: z.string().nullable(), intentStatus: z.enum(["aligned", "partial", "conflict", "unknown"]), expectedTopics: z.array(z.string()), observedTopics: z.array(z.string()), notes: z.array(z.string()) }).strict(),
   summary: z.object({ text: z.string().min(1), confidence: ConfidenceSchema, limitations: z.array(z.string()) }).strict(),
+  /*
+   * O MOLDE OBSERVADO, DENTRO DO RELATÓRIO.
+   *
+   * Bloco aditivo: `.default(null)` mantém relatórios antigos válidos, e a
+   * ausência passa a significar "gerado antes do modelo" — que é exatamente
+   * o que a barra de investigação usa para pedir a geração. Não há entidade
+   * nova: o modelo vive na versão da análise que o produziu.
+   */
+  observedCompetitiveModel: RadarCompetitiveModelSchema.nullable().default(null),
+  /*
+   * DE ONDE CADA PÁGINA DA AMOSTRA VEIO.
+   *
+   * Com a pesquisa multi-query, uma página do benchmark pode ter sido
+   * descoberta por uma secundária e nunca ter aparecido na SERP canônica. O
+   * resumo não precisa disso na primeira linha — mas o relatório precisa poder
+   * responder "e essa página, de onde saiu?". Aditivo com `.default([])`.
+   */
+  referenceProvenance: z.array(z.object({
+    url: z.string().min(1),
+    referenceId: z.string().nullable().default(null),
+    origin: z.enum(["CANONICAL", "AUXILIARY", "CANONICAL_AND_AUXILIARY", "FORMATION", "UNKNOWN"]),
+    queryCount: z.number().int().nonnegative(),
+    classification: z.string(),
+    appearances: z.array(z.object({
+      keyword: z.string().nullable(),
+      keywordRole: z.enum(["principal", "secundaria", "reforco_narrativo"]),
+      sourceType: z.enum(["canonical", "auxiliary", "formation"]),
+      rank: z.number().int().positive(),
+    }).strict()).default([]),
+  }).strict()).default([]),
   approvedAt: z.string().datetime().nullable(),
   approvedBy: z.string().nullable(),
   contentHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
@@ -154,6 +188,14 @@ export async function buildRadarCompetitiveReport(input: {
   analysisVersionNumber: number;
   generatedBy: string;
   siloDnaVersionId?: string | null;
+  /**
+   * O contexto resolvido do artigo — textos reais das keywords e tópicos
+   * editoriais. Opcional por retrocompatibilidade; sem ele, a observação por
+   * keyword usa apenas promessa e tópicos obrigatórios.
+   */
+  researchContext?: RadarArticleResearchContext | null;
+  /** As referências do universo pesquisado — dão procedência às páginas da amostra. */
+  references?: readonly RadarResearchReference[] | null;
   previousReport?: RadarCompetitiveReport | null;
   now?: string;
   status?: "draft" | "approved" | "superseded";
@@ -173,7 +215,19 @@ export async function buildRadarCompetitiveReport(input: {
     const decision = payload.serpDecisions.find(item => item.key === `organic:${result.position}`);
     return !decision?.ownDomain && !isSupportOrFormat(result) && (selected.has(`organic:${result.position}`) || decision?.decision === "included");
   }).map(result => result.url));
-  const comparable = pages.filter(page => isComparableRadarExtraction(page) && primaryUrls.has(page.url));
+  /*
+   * A AMOSTRA NÃO É MAIS SÓ A DA SERP CANÔNICA.
+   *
+   * Uma página descoberta por consulta auxiliar e marcada como concorrente na
+   * curadoria da pesquisa entra no benchmark — foi exatamente isso que a ponte
+   * do R10.2D abriu. A comparação é por URL normalizada: a mesma página escrita
+   * com `www.` ou barra final não vira duas.
+   */
+  const pesquisaPrimarias = new Set((payload.deepResearch?.researchCuration?.references || [])
+    .filter(entry => entry.decision === "primary")
+    .map(entry => entry.normalizedUrl));
+  const ehPrimaria = (page: { url: string }) => primaryUrls.has(page.url) || pesquisaPrimarias.has(radarNormalizedUrl(page.url));
+  const comparable = pages.filter(page => isComparableRadarExtraction(page) && ehPrimaria(page));
   const excluded = pages.filter(page => !comparable.some(item => item.id === page.id));
   const extractionsByUrl = new Map(pages.map(page => [page.url, page]));
   const competitors = organic.map(result => {
@@ -249,21 +303,58 @@ export async function buildRadarCompetitiveReport(input: {
   const excludedReasons = excluded.map(page => `${page.id}: ${classifyRadarExtractionFormat(page)} / ${page.status}`);
   const profileLimitations = comparable.length < 3 ? ["A amostra editorial comparável é pequena; média, mediana e faixa não representam todo o mercado."] : [];
   if (excluded.length) profileLimitations.push("Formatos parciais ou não editoriais permanecem visíveis, mas não entram no benchmark.");
-  const keywordTerms = new Set([input.article.promise, ...input.article.keywordReferences.map(reference => reference.keywordId), ...input.article.requiredTopics].map(normalize));
+  /*
+   * ID NÃO É TEXTO.
+   *
+   * Este conjunto era montado com `keywordReferences.map(r => r.keywordId)` —
+   * identificadores comparados contra termos extraídos de páginas. Nunca casava,
+   * e a observação por keyword ficava inoperante sem nenhum aviso. Agora entram
+   * os TEXTOS resolvidos pelo contexto; keyword sem texto não entra e vira
+   * limitação.
+   */
+  const textosResolvidos = input.researchContext?.resolvedKeywordTexts || [];
+  const keywordTerms = new Set([input.article.promise, ...textosResolvidos, ...input.article.requiredTopics].map(normalize));
+  const semTexto = (input.researchContext?.keywords || []).filter(keyword => !keyword.identity.text);
   const keywordObservations = comparable.flatMap(page => page.recurringTerms.filter(term => keywordTerms.has(normalize(term.term))).map(term => ({ term: term.term, pageId: page.id, frequency: term.frequency, perThousandWords: page.wordCount ? Number((term.frequency / page.wordCount * 1000).toFixed(2)) : 0, source: "body_observed" as const, sourceCoverage: "body_only" as const, note: "Ocorrência observada no corpo extraído; posição em title/H1/intro/headings não foi capturada nesta versão." })));
   const noise = payload.semanticTerms.filter(term => !isPrimaryRadarSemanticTerm(term)).map(term => ({ term: term.term, category: "other" as const, reason: term.relation || "Termo fora da evidência semântica principal." }));
   const observedTopics = [...new Set(payload.semanticTerms.filter(isPrimaryRadarSemanticTerm).map(term => term.term))];
   const expectedTopics = [...new Set([...input.article.requiredTopics, ...input.article.entities])];
   const observedIntent = input.research.diagnostic.dominantIntent || null;
-  const expectedIntent = input.article.mainIntent;
-  const intentStatus = !observedIntent ? "unknown" as const : normalize(observedIntent) === normalize(expectedIntent) ? "aligned" as const : "partial" as const;
+  /*
+   * O CONTRATO EXIGE TEXTO, E AUSÊNCIA NÃO É TEXTO DE INTENÇÃO.
+   *
+   * `expectedIntent` é `z.string().min(1)` no snapshot persistido, então não
+   * pode virar nulo sem migração. O que ele NÃO pode continuar sendo é o campo
+   * cru: com "unknown" gravado, a comparação declarava "partial" contra uma
+   * SERP que na verdade não tinha com o que ser comparada. A ausência passa a
+   * ser declarada em português, e o status a conhecê-la.
+   */
+  const intencaoDeclarada = radarDeclaredArticleIntent(input.article);
+  const expectedIntent = intencaoDeclarada || RADAR_INTENT_NOT_CONCLUDED;
+  const intentStatus = !observedIntent || !intencaoDeclarada
+    ? "unknown" as const
+    : radarIntentConflict({ expected: intencaoDeclarada, observed: observedIntent }).conflicting ? "partial" as const : "aligned" as const;
   const visualNeeds = comparable.length ? [{ id: "visual:sample", observation: `${comparable.length} página(s) editorial(is) apresentaram elementos visuais observáveis; posição, briefing e prompt final permanecem decisão do Planejador.`, evidenceIds: comparable.map(page => page.id), plannerDecisionRequired: true as const }] : [];
+  /*
+   * NECESSIDADE COMPETITIVA EXIGE BENCHMARK.
+   *
+   * Com zero páginas comparáveis o relatório ainda emitia "Tópicos e entidades
+   * recorrentes" com dezenas de termos crus da extração — incluindo restos de
+   * entidade HTML — e o consolidado somava tudo como 49 necessidades. Termo
+   * observado na SERP é observação; necessidade competitiva é conclusão sobre
+   * uma amostra que aqui não existia.
+   */
+  const amostraSustentaLeitura = comparable.length > 0;
   const needs = [
     ...(observedResponses.filter(response => response.humanDecision === "use").length ? [{ id: "need:questions", category: "question" as const, title: "Perguntas úteis para revisar no Planejador", priority: "medium" as const, evidenceIds: usefulResponses.map(item => item.responseId), competitorIds: [], responseIds: usefulResponses.map(item => item.responseId), topics: usefulResponses.map(item => observedResponses.find(response => response.id === item.responseId)?.question || ""), articleDnaRelation: "Complementa as perguntas recebidas sem alterar o ArticleDNA.", siloDnaRelation: "Compatibilidade com o SiloDNA deve ser confirmada no Planejador.", cannibalizationRisk: "unknown" as const, confidence: "medium" as const, humanDecision: "send_planner" as const, note: "Enviado como contexto observado; não significa copiar a resposta nem criar FAQ automaticamente.", limitation: null }] : []),
-    ...(observedTopics.length ? [{ id: "need:semantics", category: "semantics" as const, title: "Tópicos e entidades recorrentes", priority: "medium" as const, evidenceIds: payload.semanticTerms.filter(isPrimaryRadarSemanticTerm).map(term => term.term), competitorIds: [], responseIds: [], topics: observedTopics, articleDnaRelation: "Confronta a cobertura recebida pelo ArticleDNA; o Radar não a reescreve.", siloDnaRelation: "Relaciona-se ao silo recebido, sem redefinir a sua arquitetura.", cannibalizationRisk: "unknown" as const, confidence: "medium" as const, humanDecision: "send_planner" as const, note: "O Planejador decide se há utilidade editorial e onde aplicar.", limitation: null }] : []),
-    ...(payload.benchmark ? [{ id: "need:structure", category: "structure" as const, title: "Padrões estruturais observados", priority: "low" as const, evidenceIds: comparable.map(page => page.id), competitorIds: competitors.filter(competitor => competitor.includedInBenchmark).map(competitor => competitor.id), responseIds: [], topics: [], articleDnaRelation: "Não altera estrutura do artigo recebido.", siloDnaRelation: "Não altera a hierarquia do silo.", cannibalizationRisk: "unknown" as const, confidence: comparable.length >= 3 ? "medium" as const : "low" as const, humanDecision: "evidence_only" as const, note: "Evidência para o Planejador, não meta de palavras, headings ou densidade.", limitation: comparable.length < 3 ? "Amostra pequena para generalização." : null }] : []),
+    ...(amostraSustentaLeitura && observedTopics.length ? [{ id: "need:semantics", category: "semantics" as const, title: "Tópicos e entidades recorrentes", priority: "medium" as const, evidenceIds: payload.semanticTerms.filter(isPrimaryRadarSemanticTerm).map(term => term.term), competitorIds: [], responseIds: [], topics: observedTopics, articleDnaRelation: "Confronta a cobertura recebida pelo ArticleDNA; o Radar não a reescreve.", siloDnaRelation: "Relaciona-se ao silo recebido, sem redefinir a sua arquitetura.", cannibalizationRisk: "unknown" as const, confidence: "medium" as const, humanDecision: "send_planner" as const, note: "O Planejador decide se há utilidade editorial e onde aplicar.", limitation: null }] : []),
+    ...(amostraSustentaLeitura && payload.benchmark ? [{ id: "need:structure", category: "structure" as const, title: "Padrões estruturais observados", priority: "low" as const, evidenceIds: comparable.map(page => page.id), competitorIds: competitors.filter(competitor => competitor.includedInBenchmark).map(competitor => competitor.id), responseIds: [], topics: [], articleDnaRelation: "Não altera estrutura do artigo recebido.", siloDnaRelation: "Não altera a hierarquia do silo.", cannibalizationRisk: "unknown" as const, confidence: comparable.length >= 3 ? "medium" as const : "low" as const, humanDecision: "evidence_only" as const, note: "Evidência para o Planejador, não meta de palavras, headings ou densidade.", limitation: comparable.length < 3 ? "Amostra pequena para generalização." : null }] : []),
   ];
-  const limitations = ["O relatório resume observações e não contém copy para reutilização.", "Frequência por posição, comentários, autoridade e fontes não presentes no payload permanecem indisponíveis.", ...profileLimitations];
+  const limitations = [
+    ...(amostraSustentaLeitura ? [] : ["Não foi possível formar uma amostra editorial comparável: nenhuma necessidade competitiva foi derivada. Os termos observados na SERP permanecem como observação, não como conclusão."]),
+    ...(semTexto.length ? [`${semTexto.length} keyword(s) da composição não tiveram o texto resolvido e ficaram fora da observação textual.`] : []),
+    ...(input.researchContext ? [] : ["O contexto resolvido do artigo não foi fornecido; a observação por keyword usou apenas promessa e tópicos obrigatórios."]),
+    "O relatório resume observações e não contém copy para reutilização.", "Frequência por posição, comentários, autoridade e fontes não presentes no payload permanecem indisponíveis.", ...profileLimitations];
   const base = {
     schemaVersion: 1 as const, reportType: "radar_competitive_report" as const, id: `radar-competitive-report:${input.analysisVersionId}`, brandId: payload.brandId, radarItemId: input.radarItemId, articleId: payload.articleId, articleDnaVersionId: payload.articleDnaVersionId, siloDnaVersionId: input.siloDnaVersionId || null,
     serp: { snapshotId: input.research.id, version: input.research.version, hash: input.research.contentHash, query: input.research.query, capturedAt: input.research.collectedAt }, analysis: { versionId: input.analysisVersionId, versionNumber: input.analysisVersionNumber }, status: input.status || "draft", version: input.analysisVersionNumber, previousReportId: input.previousReport?.id || null,
@@ -282,6 +373,39 @@ export async function buildRadarCompetitiveReport(input: {
     linksObserved: { internal: metricFrom(payload, "internalLinks"), external: metricFrom(payload, "externalLinks"), limitation: "A extração informa contagens; não classifica âncoras nem decide links internos finais." },
     visualsObserved: { images: metricFrom(payload, "images"), lists: metricFrom(payload, "lists"), tables: metricFrom(payload, "tables"), blockquotes: metricFrom(payload, "blockquotes"), limitation: "Elementos visuais observados não definem estilo, posição ou prompt final." },
     visualNeeds, needs, dnaComparison: { expectedIntent, observedIntent, intentStatus, expectedTopics, observedTopics, notes: ["O Radar confronta o cenário observado com o DNA recebido e preserva conflitos para decisão humana."] },
+    /*
+     * O MODELO GRAVADO É O MESMO QUE A TELA LEU.
+     *
+     * Ele recebe aqui a mesma largura de assunto e a mesma procedência por
+     * consulta que a aba usa. Sem isso, o relatório aprovado carregaria uma
+     * leitura conceitual mais pobre do que a que a pessoa aprovou.
+     */
+    observedCompetitiveModel: buildRadarCompetitiveModel({
+      pages, query: input.research.query, observedIntent,
+      principal: (input.researchContext?.keywords || []).find(keyword => keyword.identity.role === "principal")?.identity.text || null,
+      editorialTopics: input.researchContext?.editorialTopics,
+      keywordTexts: (input.researchContext?.keywords || []).map(keyword => keyword.identity.text || "").filter(Boolean),
+      centralEntities: (input.researchContext?.keywords || [])
+        .map(keyword => (keyword.strategy.keywordDnaSnapshot as { payload?: Record<string, unknown> } | null)?.payload?.centralEntity)
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0),
+      provenance: (input.references || []).map(reference => ({
+        url: reference.url,
+        appearances: reference.appearances.map(item => ({ keyword: item.keyword, keywordRole: item.keywordRole, sourceType: item.sourceType })),
+      })),
+    }),
+    /* A procedência de cada página da amostra, quando a investigação a conhece. */
+    referenceProvenance: pages.flatMap(page => {
+      const referencia = (input.references || []).find(item => item.normalizedUrl === radarNormalizedUrl(page.url));
+      if (!referencia) return [];
+      return [{
+        url: page.url,
+        referenceId: referencia.referenceId,
+        origin: radarReferenceOrigin(referencia),
+        queryCount: referencia.queryCount,
+        classification: referencia.classification,
+        appearances: referencia.appearances.map(item => ({ keyword: item.keyword, keywordRole: item.keywordRole, sourceType: item.sourceType, rank: item.rank })),
+      }];
+    }),
     summary: { text: comparable.length ? `Relatório competitivo com ${comparable.length} página(s) editorial(is) comparável(is), ${observedResponses.length} resposta(s)/pesquisa(s) observada(s) e ${needs.length} necessidade(s) contextualizada(s).` : "Relatório competitivo iniciado, mas ainda sem página editorial comparável extraída.", confidence: comparable.length >= 3 ? "medium" as const : "low" as const, limitations },
     approvedAt: input.status === "approved" ? input.approvedAt || now : null, approvedBy: input.status === "approved" ? input.approvedBy || input.generatedBy : null,
     provenance: { source: "radar" as const, generatedAt: now, generatedBy: input.generatedBy, sourceAnalysisVersionId: input.analysisVersionId, sourceSerpSnapshotHash: input.research.contentHash },

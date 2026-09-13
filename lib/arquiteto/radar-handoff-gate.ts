@@ -46,8 +46,16 @@ export type RadarCandidateArticle = {
   articleDnaContentHash: string | null;
   /** Pai territorial declarado no payload. */
   territoryRef: string | null;
-  /** Silo CANÔNICO — só existe depois de SiloDNA + SiloPage consolidados. */
+  /** Silo CANÔNICO declarado no payload. `null` é o normal na primeira passada. */
   siloId: string | null;
+  /**
+   * O par canônico do TERRITÓRIO foi resolvido?
+   *
+   * `ArticleDNA.siloId` nasce nulo por contrato — o artigo é escrito antes do
+   * SiloDNA existir. Quem responde "existe Silo canônico para este artigo" é a
+   * resolução por território, feita uma vez pelo chamador e informada aqui.
+   */
+  canonicalSiloResolved?: boolean;
   principalKeywordId: string | null;
   secondaryKeywordIds: readonly string[];
   narrativeReinforcementIds: readonly string[];
@@ -62,6 +70,27 @@ export type RadarCandidateArticle = {
   /** Este ArticleDNA descreve o cenário corrente? */
   belongsToCurrentScenario: boolean;
   readbackConfirmed: boolean;
+  /**
+   * A FORMAÇÃO JÁ ABSORVEU ESTE PARECER?
+   *
+   * `Concluir formação` é o ato que decide sobre a composição — inclusive
+   * sobre um parecer SERP inconclusivo. Quando ele acontece e produz um
+   * ArticleDNA aprovado e vigente, a pergunta "a SERP espera decisão?" já foi
+   * respondida: respondida por gente, no lugar onde ela é feita.
+   *
+   * Sem isto, o portão final reabria o inconclusivo e pedia à pessoa uma
+   * decisão que ela já tinha tomado — e que não tem mais onde ser tomada,
+   * porque a fase Artigos está encerrada.
+   */
+  formationConcluded?: boolean;
+  /**
+   * Pendência humana EXPLÍCITA gravada no próprio artefato.
+   *
+   * Esta é a única coisa que ainda barra por SERP depois da formação: uma
+   * decisão nomeada, vigente e não resolvida. `humanPendingDecisions` do
+   * ArticleDNA é onde ela vive.
+   */
+  humanPendingDecisions?: readonly string[];
 };
 
 export type RadarEligibility = {
@@ -120,11 +149,22 @@ export function resolveRadarEligibility(article: RadarCandidateArticle): RadarEl
     },
     {
       code: "CANONICAL_SILO_BINDING",
-      ok: Boolean(article.siloId),
-      // O território confirmado NÃO é o Silo canônico: o `siloId` só passa a
-      // existir quando SiloDNA e SiloPage são consolidados. Sem ele o Radar
-      // recebe um artigo cuja página-raiz ainda não existe.
-      detail: article.siloId
+      /*
+       * O PAR CANÔNICO PODE SER RESOLVIDO PELO TERRITÓRIO.
+       *
+       * Esta checagem exigia `siloId` preenchido no ArticleDNA. Mas o contrato
+       * da materialização inicial é o oposto: o ArticleDNA nasce ANTES do
+       * SiloDNA — a auditoria de referências provou que ele não aponta para o
+       * Silo — e `siloId` nasce `null`, com `territoryRef` carregando o pai.
+       *
+       * O que precisa existir é o PAR: SiloDNA e SiloPage canônicos do
+       * território. Quem resolve isso é `resolveCanonicalSiloForArticle`, e o
+       * chamador informa o resultado em `canonicalSiloResolved`. Exigir o
+       * campo em vez do par mandava criar sucessora de ArticleDNA só para
+       * preencher referência — exatamente o que a doutrina proíbe.
+       */
+      ok: Boolean(article.siloId) || Boolean(article.canonicalSiloResolved),
+      detail: article.siloId || article.canonicalSiloResolved
         ? "O artigo aponta para um Silo canônico."
         : "O artigo tem território confirmado, mas nenhum Silo canônico: falta consolidar SiloDNA e SiloPage.",
     },
@@ -182,13 +222,38 @@ export function resolveRadarEligibility(article: RadarCandidateArticle): RadarEl
           ? "A coleta da SERP falhou neste artigo."
           : "A evidência SERP descreve a composição atual.",
     },
-    {
-      code: "SERP_RESOLVED",
-      ok: Boolean(article.serpState && SERP_LIBERA.has(article.serpState)),
-      detail: article.serpState && SERP_LIBERA.has(article.serpState)
-        ? "O parecer da SERP está sustentado ou resolvido por decisão humana."
-        : "O parecer da SERP ainda espera decisão editorial.",
-    },
+    (() => {
+      /*
+       * A FORMAÇÃO CONCLUÍDA É A DECISÃO EDITORIAL SOBRE A SERP.
+       *
+       * A homologação recusou quatro ArticleDNA aprovados dizendo "o parecer
+       * da SERP ainda espera decisão editorial". Os quatro tinham parecer
+       * inconclusivo — e os quatro já tinham passado por `Concluir formação`,
+       * que é exatamente o ato onde essa decisão é tomada. O portão final
+       * pedia de novo uma decisão já tomada, num lugar onde ela não pode mais
+       * ser tomada: a fase Artigos está encerrada.
+       *
+       * A autoridade é o RESULTADO canônico da formação, não o parecer bruto.
+       * O que continua barrando é pendência humana EXPLÍCITA gravada no
+       * artefato — essa é vigente e ninguém a resolveu.
+       */
+      const liberadoPelaSerp = Boolean(article.serpState && SERP_LIBERA.has(article.serpState));
+      const pendenciaExplicita = (article.humanPendingDecisions || []).length > 0;
+      const absorvidoPelaFormacao = Boolean(article.formationConcluded)
+        && article.readbackConfirmed
+        && !pendenciaExplicita;
+      return {
+        code: "SERP_RESOLVED",
+        ok: liberadoPelaSerp || absorvidoPelaFormacao,
+        detail: liberadoPelaSerp
+          ? "O parecer da SERP está sustentado ou resolvido por decisão humana."
+          : absorvidoPelaFormacao
+            ? "A conclusão da formação decidiu sobre este parecer; o ArticleDNA aprovado é o resultado dessa decisão."
+            : pendenciaExplicita
+              ? `A formação deixou decisão humana pendente: ${(article.humanPendingDecisions || []).join(" · ")}`
+              : "O parecer da SERP ainda espera decisão editorial.",
+      };
+    })(),
     {
       code: "INTERNAL_LINK_GRAPH_APPROVED",
       ok: article.internalLinkGraphApproved,

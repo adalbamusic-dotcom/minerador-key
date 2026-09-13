@@ -6,6 +6,8 @@ import type { SerpResearchSnapshot } from "./serp/contracts.ts";
 import { isComparableRadarExtraction } from "./analysis-insights.ts";
 import { RadarKgrStrategySchema, type RadarKgrStrategy } from "./strategy-context.ts";
 import { RadarCompetitiveReportSchema } from "./competitive-report.ts";
+import { RadarDeepResearchRecordSchema, type RadarDeepResearchRecord } from "./deep-research.ts";
+import { RadarFrozenEvidenceBundleSchema } from "./investigation-finalization.ts";
 
 export const RadarAnalysisModeSchema = z.enum(["kgr_light", "competitive_full"]);
 export type RadarAnalysisMode = z.infer<typeof RadarAnalysisModeSchema>;
@@ -31,6 +33,15 @@ export const RadarSerpDecisionSchema = z.object({
   reason: z.string().max(1000),
   note: z.string().max(4000),
   ownDomain: z.boolean(),
+  /*
+   * A URL QUE ESTA DECISÃO DESCREVE.
+   *
+   * A chave é posicional (`organic:2`) e a extração recebia a URL do cliente ao
+   * lado dela: chave legítima com destino trocado passava pelo portão. Com a URL
+   * na decisão, o par vira verificável no servidor. Aditiva e opcional — decisão
+   * gravada antes deste corte continua válida e é validada só pela chave.
+   */
+  url: z.string().optional(),
 }).strict();
 
 export const RadarRecurringTermSchema = z.object({
@@ -40,6 +51,36 @@ export const RadarRecurringTermSchema = z.object({
   sources: z.array(z.enum(["title", "meta", "canonical", "h1", "h2", "h3", "body", "structured_data"])),
   pageIds: z.array(z.string().min(1)),
 }).strict();
+
+/**
+ * UM LINK COMO A PÁGINA CONCORRENTE O ESCREVEU.
+ *
+ * `externalLinks = 1` nunca respondeu a pergunta que interessa. Saber que uma
+ * página cita a American Academy of Dermatology dentro da seção "Por que a
+ * pele fica oleosa", com a âncora escrita assim, no meio deste parágrafo — isso
+ * responde. É a diferença entre contar e observar.
+ *
+ * O href é CAPTURADO, nunca navegado: esta observação nasce do HTML que a
+ * extração já tinha em mãos. Nenhum destino é acessado neste contrato.
+ */
+export const RadarObservedLinkSchema = z.object({
+  /** A URL resolvida contra a página de origem. Absoluta, sem ser visitada. */
+  destinationUrl: z.string(),
+  destinationDomain: z.string(),
+  /** `NON_WEB` guarda mailto/tel/javascript: observados, nunca candidatos a fonte. */
+  kind: z.enum(["INTERNAL", "EXTERNAL", "NON_WEB"]),
+  /** O texto ORIGINAL da âncora. `null` quando a página não deu nenhum. */
+  anchorText: z.string().nullable(),
+  /** O parágrafo, item ou célula que contém o link — compacto, não o HTML. */
+  surroundingText: z.string(),
+  /** O heading mais próximo acima do link, quando o documento o expõe. */
+  sectionHeading: z.string().nullable(),
+  /** `nofollow`, `sponsored`, `ugc`… observação, nunca julgamento de qualidade. */
+  rel: z.array(z.string()),
+  target: z.string().nullable(),
+  order: z.number().int().nonnegative(),
+}).strict();
+export type RadarObservedLink = z.infer<typeof RadarObservedLinkSchema>;
 
 export const RadarExtractionPageSchema = z.object({
   id: z.string().min(1),
@@ -67,6 +108,44 @@ export const RadarExtractionPageSchema = z.object({
   recurringTerms: z.array(RadarRecurringTermSchema),
   boldCount: z.number().int().nonnegative(),
   italicCount: z.number().int().nonnegative(),
+  /*
+   * OBSERVAÇÕES ESTRUTURAIS ADICIONAIS.
+   *
+   * Todas com `default`: um `RadarExtractionPage` gravado antes deste corte
+   * continua parseando, e o campo ausente vira ausência declarada — nunca um
+   * número inventado. Nada aqui é meta: são medidas do que a página faz.
+   */
+  paragraphCount: z.number().int().nonnegative().default(0),
+  paragraphWordCounts: z.array(z.number().int().nonnegative()).default([]),
+  /** H1/H2/H3 na ordem em que aparecem — a hierarquia, não só a contagem. */
+  headingOutline: z.array(z.object({ level: z.union([z.literal(1), z.literal(2), z.literal(3)]), text: z.string() }).strict()).default([]),
+  introWordCount: z.number().int().nonnegative().default(0),
+  introText: z.string().default(""),
+  closingWordCount: z.number().int().nonnegative().default(0),
+  closingText: z.string().default(""),
+  hasClosing: z.boolean().default(false),
+  /** Termos que a página coloca em destaque. Observação, nunca prescrição. */
+  emphasizedTerms: z.array(z.string()).default([]),
+  /*
+   * ADITIVO: `.default([])`.
+   *
+   * Os links observados nasceram depois de extrações já gravadas. Sem o
+   * default, cada página anterior deixaria de parsear e a versão inteira da
+   * análise viraria registro incompatível na recuperação. Ausência é ausência
+   * declarada — nunca link inventado.
+   */
+  observedLinks: z.array(RadarObservedLinkSchema).default([]),
+  /**
+   * Onde a principal recebida aparece nesta página.
+   *
+   * `null` quando a keyword não foi informada à extração: ausência de dado é
+   * declarada, não convertida em "não aparece".
+   */
+  keywordPlacement: z.object({
+    keyword: z.string(),
+    title: z.boolean(), h1: z.boolean(), h2: z.boolean(), h3: z.boolean(), intro: z.boolean(), body: z.boolean(),
+    occurrences: z.number().int().nonnegative(),
+  }).strict().nullable().default(null),
   error: z.string().nullable(),
 }).strict();
 export type RadarExtractionPage = z.infer<typeof RadarExtractionPageSchema>;
@@ -218,7 +297,98 @@ export const RadarAnalysisPayloadSchema = z.object({
   structuralDecisions: z.array(RadarStructuralDecisionSchema),
   competitiveness: RadarCompetitivenessSchema.nullable(),
   keywordDecisions: z.array(RadarKeywordDecisionSchema),
+  /*
+   * AS FALHAS DE EXTRAÇÃO, POR PÁGINA.
+   *
+   * "3 não puderam ser processadas" era tudo que sobrava: sem URL, sem código,
+   * sem status. Agora cada falha fica registrada na versão da análise, e a tela
+   * pode agregar para quem opera e detalhar para quem investiga. Aditivo com
+   * `.default([])`.
+   */
+  extractionFailures: z.array(z.object({
+    key: z.string().min(1),
+    url: z.string(),
+    code: z.string().min(1),
+    message: z.string(),
+    status: z.number().int().nonnegative().nullable().default(null),
+    observedAt: z.string().min(1),
+  }).strict()).default([]),
+  /*
+   * AS FONTES QUE OS CONCORRENTES CITAM, VERIFICADAS.
+   *
+   * O Gate 11 capturou destinos sem visitá-los. Para avaliar uma afirmação de
+   * consequência, saber que a AAD foi citada não basta — é preciso ver o que
+   * ela é. Estas são as fontes que o ANALYZE visitou, com o que a página
+   * declarou de si: título, autoria, data, dados estruturados.
+   *
+   * Nunca o artigo da fonte: só o metadado e um resumo compacto. Aditivo com
+   * `.default([])`, porque nasceu depois de análises já gravadas.
+   */
+  verifiedSources: z.array(z.object({
+    domain: z.string().min(1),
+    url: z.string().min(1),
+    sourceType: z.string().min(1),
+    classificationReason: z.string(),
+    confidence: z.enum(["HIGH", "MEDIUM", "LOW"]),
+    signals: z.array(z.string()).default([]),
+    provenance: z.string(),
+    title: z.string().default(""),
+    author: z.string().nullable().default(null),
+    hasDates: z.boolean().default(false),
+    structuredDataTypes: z.array(z.string()).default([]),
+    /** Resumo compacto, para saber do que a fonte trata. Não é a fonte. */
+    summary: z.string().max(600).default(""),
+    observedAt: z.string().min(1),
+  }).strict()).default([]),
+  /** Fonte que não pôde ser verificada: limitação declarada, nunca omissão. */
+  sourceVerificationFailures: z.array(z.object({
+    sourceId: z.string().min(1),
+    domain: z.string().min(1),
+    url: z.string(),
+    code: z.string().min(1),
+    message: z.string(),
+    status: z.number().int().nonnegative().nullable().default(null),
+    observedAt: z.string().min(1),
+  }).strict()).default([]),
+  /*
+   * QUANDO O ANALYZE TERMINOU DE VERDADE — §7 do Gate 18.4.
+   *
+   * O ANALYZE grava duas vezes: a AMOSTRA (páginas lidas) e depois a CAMADA DE
+   * EVIDÊNCIA (fontes verificadas, modelo, relatório). Entre uma e outra existe
+   * uma versão persistida, legítima, com doze páginas e zero pendências — e a
+   * leitura de fase 1 concluía dali que era hora de finalizar.
+   *
+   * O SMOKE MOSTROU ISSO: a segunda gravação falhou e a tela ofereceu
+   * "Finalizar pesquisa" mesmo assim. Congelar ali produziria um bundle sem a
+   * camada factual, com aparência de investigação completa.
+   *
+   * Este carimbo só é escrito na gravação FINAL. Aditivo com `.default(null)`:
+   * análises gravadas antes deste gate simplesmente não o têm.
+   */
+  analysisCompletedAt: z.string().nullable().default(null),
   competitiveReport: RadarCompetitiveReportSchema.nullable().default(null),
+  /*
+   * A INVESTIGAÇÃO PROFUNDA, CONGELADA NA VERSÃO QUE A ORIGINOU.
+   *
+   * Guarda quem iniciou, quando, sobre qual fundamento (ArticleDNA, keywords,
+   * Silo, SERP de formação, grafo) e o que aconteceu com cada consulta
+   * planejada. É o que permite dizer "esta leitura é de outra versão" em vez de
+   * atualizar o passado em silêncio. Aditivo com `.default(null)`.
+   */
+  deepResearch: RadarDeepResearchRecordSchema.nullable().default(null),
+  /*
+   * A INVESTIGAÇÃO CONGELADA — o que "finalizada" significa, provável depois.
+   *
+   * O registro acima diz QUEM finalizou e QUANDO. Ele não diz O QUÊ: a leitura
+   * competitiva continuava sendo recalculada a cada abertura, e uma melhoria no
+   * agrupamento semântico mudaria conceitos, lacunas e plano de links sob o
+   * mesmo carimbo de finalização.
+   *
+   * Aqui fica a fotografia com identidade própria e hash do próprio conteúdo.
+   * Aditivo com `.default(null)`: análises gravadas antes continuam válidas e
+   * simplesmente não têm bundle.
+   */
+  finalizedBundle: RadarFrozenEvidenceBundleSchema.nullable().default(null),
   plannerPackage: z.union([RadarPlannerHandoffSchema, RadarEvidencePackageSchema, LegacyRadarPlannerPackageSchema]).nullable(),
   plannerTransfer: RadarPlannerTransferSchema.nullable().default(null),
   status: RadarAnalysisStatusSchema,
@@ -299,6 +469,8 @@ export async function createRadarAnalysisVersion(input: {
   humanReason?: string;
   ownDomainHost?: string | null;
   previous?: RadarAnalysisVersion;
+  /** O congelamento da investigação profunda, quando ela é quem cria esta versão. */
+  deepResearch?: RadarDeepResearchRecord | null;
   now?: string;
 }) {
   const now = input.now || new Date().toISOString();
@@ -314,14 +486,14 @@ export async function createRadarAnalysisVersion(input: {
     modeRecommendation: input.modeRecommendation,
     modeHumanReason: input.humanReason || "",
     serpDecisions: [
-       ...input.research.organicResults.map(result => ({ key: `organic:${result.position}`, itemType: "organic", decision: "pending", reason: "", note: "", ownDomain: Boolean(input.ownDomainHost && (() => { try { return new URL(result.url).hostname.toLowerCase().replace(/^www\\./, "") === input.ownDomainHost!.toLowerCase().replace(/^www\\./, ""); } catch { return false; } })()) })),
+       ...input.research.organicResults.map(result => ({ key: `organic:${result.position}`, itemType: "organic", decision: "pending", reason: "", note: "", url: result.url, ownDomain: Boolean(input.ownDomainHost && (() => { try { return new URL(result.url).hostname.toLowerCase().replace(/^www\\./, "") === input.ownDomainHost!.toLowerCase().replace(/^www\\./, ""); } catch { return false; } })()) })),
       ...input.research.peopleAlsoAsk.map(result => ({ key: `paa:${result.position}`, itemType: "people_also_ask", decision: "pending", reason: "", note: "", ownDomain: false })),
       ...input.research.relatedSearches.map((result, index) => ({ key: `related:${index + 1}`, itemType: "related_search", decision: "pending", reason: "", note: "", ownDomain: false })),
       ...(input.research.knowledgeGraph ? [{ key: "knowledge_graph:1", itemType: "knowledge_graph", decision: "pending", reason: "", note: "", ownDomain: false }] : []),
     ],
     selectedCompetitorIds: [], extractionIds: [], extractions: [], benchmark: null, semanticTerms: [], structuralDecisions: [], competitiveness: null,
     keywordDecisions: input.article.payload.keywordReferences.map(reference => ({ keywordId: reference.keywordId, decision: "keep", note: "" })),
-    competitiveReport: null, plannerPackage: null, plannerTransfer: null, status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
+    competitiveReport: null, deepResearch: input.deepResearch || null, finalizedBundle: null, plannerPackage: null, plannerTransfer: null, status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
   });
   const entityId = input.previous?.entityId || `radar-analysis:${input.article.payload.articleId}`;
   const version = await createVersionEnvelope({ entityId, versionNumber: (input.previous?.versionNumber || 0) + 1, previousVersionId: input.previous?.versionId || null, origin: "human", changeReason: input.previous ? "Nova decisão humana na análise do Radar." : "Análise Radar criada após SERP real.", createdBy: input.actorId, createdAt: now, payload });

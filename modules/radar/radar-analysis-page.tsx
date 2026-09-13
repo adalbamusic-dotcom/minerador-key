@@ -1,12 +1,16 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { radarConclusiveIntent, radarDeclaredArticleIntent } from "@/lib/radar/editorial-identity";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";
 import { useBrand } from "@/components/brand-context";
 import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
 import type { RadarAnalysisVersion, RadarExpertEvidence } from "@/lib/radar/analysis-contracts";
-import { analysisApprovalIssues, buildRadarBenchmark, createRadarAnalysisSuccessor, createRadarAnalysisVersion, suggestRadarAnalysisMode } from "@/lib/radar/analysis-contracts";
-import { buildRadarPlannerHandoff, isRadarPlannerHandoff } from "@/lib/radar/planner-handoff";
+import { buildRadarBenchmark, createRadarAnalysisSuccessor, createRadarAnalysisVersion, suggestRadarAnalysisMode } from "@/lib/radar/analysis-contracts";
+import { isRadarPlannerHandoff } from "@/lib/radar/planner-handoff";
+import { approveRadarReport, radarReportApprovalIssues } from "@/lib/radar/report-approval";
+import { deriveRadarSerpReviewState } from "@/lib/radar/serp-review-state";
+import { selectedRadarOrganicDecisionKeys } from "@/lib/radar/serp-curation";
 import { compareStrategyWithSerp, resolveRadarPublication, type RadarComparisonStatus } from "@/lib/radar/editorial-identity";
 import { buildRadarArchitectHref, buildRadarArticleHref, buildRadarModuleHref, radarCanonicalRouteKey, resolveRadarRouteItem } from "@/lib/radar/route-resolution";
 import { selectLatestRadarSerpRecord } from "@/lib/radar/serp-hydration";
@@ -17,7 +21,7 @@ import { classifyRadarExtractionFormat, classifyRadarSemanticTerm, extractionFor
 import { deriveRadarTransferState } from "@/lib/radar/workflow-insights";
 import { buildRadarKgrStrategy, radarKgrClassificationLabel, radarSlugAlignmentLabel } from "@/lib/radar/strategy-context";
 import { buildRadarCompetitiveReport } from "@/lib/radar/competitive-report";
-import { buildRadarEvidencePackage } from "@/lib/radar/evidence-package";
+
 import { buildRadarFlowProgress, deriveRadarReferenceRole, radarSemanticDecisionLabel, resolveRadarTab, selectRadarSemanticPresentation, type RadarReferenceRole, type RadarTab } from "@/lib/radar/flow-presentation";
 import { buildExpertTopicContext } from "@/lib/radar/r6-sequential";
 import { parseRadarExpertEvidenceReviews, projectRadarExpertEvidence, type RadarExpertBriefEvidenceSource, type RadarExpertContributionEvidenceSource } from "@/lib/radar/expert-evidence";
@@ -156,6 +160,18 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
   const legacyReview = serp ? pipeline.serpReviews.filter(review => review.snapshotId === serp.id).at(-1) : undefined;
   const latestAnalysis = row?.analysisVersions.slice().sort((a, b) => b.versionNumber - a.versionNumber)[0] || null;
   const analysis = radarAnalysisMatchesSerp({ analysis: latestAnalysis, brandId: row?.brandId || selectedBrandId || "", articleId, articleDnaVersionId: row?.articleDnaVersionId || "", view: serpView }) ? latestAnalysis : null;
+  /*
+   * A MESMA leitura de atualidade que o Workbench usa.
+   *
+   * Sem ela esta tela aprovava sobre uma SERP cuja curadoria já tinha mudado:
+   * o registro dizia `approved`, mas descrevia uma amostra que ninguém mais
+   * estava vendo. É o gate que faltava aqui e existia lá.
+   */
+  const serpReviewState = deriveRadarSerpReviewState({
+    reviews: pipeline.serpReviews.filter(review => review.articleId === articleId),
+    snapshotId: serp?.id,
+    selectedCompetitorIds: selectedRadarOrganicDecisionKeys(serpView, analysis, row ? { brandId: row.brandId, articleId: row.articleId, articleDnaVersionId: row.articleDnaVersionId } : undefined),
+  });
   const conflicts = serp ? pipeline.serpMergeConflicts.filter(conflict => conflict.snapshotId === serp.id || conflict.articleId === articleId) : [];
   const plannerItem = pipeline.plannerItems.find(item => item.articleId === articleId);
   const publicationLegacy = pipeline.publications.find(item => item.articleId === articleId) || null;
@@ -188,13 +204,13 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
   } : null;
 
   const kgrStrategy = row && article && identity ? buildRadarKgrStrategy({ article: article.payload, context: row.arquitetoStrategyContext || null, published: identity.publication.published, slug: identity.slug, siloName, pillarArticleId: silo?.payload.pillarArticleId }) : null;
-  const recommendation = suggestRadarAnalysisMode({ kgr: kgrStrategy?.kgrScore ?? keywordSource?.kgr_score ?? null, volume: kgrStrategy?.principalVolume ?? keywordSource?.volume_search ?? null, kgrClassification: kgrStrategy?.classification, resultCount: serpView?.organicResults.length || 0, keywordDnaConfidence: null, format: article?.payload.hierarchy || row?.format || "article", intent: article?.payload.mainIntent || row?.intent || "" });
+  const recommendation = suggestRadarAnalysisMode({ kgr: kgrStrategy?.kgrScore ?? keywordSource?.kgr_score ?? null, volume: kgrStrategy?.principalVolume ?? keywordSource?.volume_search ?? null, kgrClassification: kgrStrategy?.classification, resultCount: serpView?.organicResults.length || 0, keywordDnaConfidence: null, format: article?.payload.hierarchy || row?.format || "article", intent: radarDeclaredArticleIntent(article?.payload) || radarConclusiveIntent(row?.intent) || "" });
   useEffect(() => {
     if (!analysis && !modeTouched.current && mode !== recommendation.suggestedMode) {
       setMode(recommendation.suggestedMode);
     }
   }, [analysis, mode, recommendation.suggestedMode]);
-  const comparison = article ? compareStrategyWithSerp({ expectedIntent: article.payload.mainIntent, observedIntent: serpView?.diagnostic?.dominantIntent, expectedTopics: article.payload.requiredTopics.slice(0, 8), observedTopics: serpView?.diagnostic?.frequentEntities || [], hasOrganicEvidence: Boolean(serpView?.organicResults.length) }) : null;
+  const comparison = article ? compareStrategyWithSerp({ expectedIntent: radarDeclaredArticleIntent(article.payload), observedIntent: serpView?.diagnostic?.dominantIntent, expectedTopics: article.payload.requiredTopics.slice(0, 8), observedTopics: serpView?.diagnostic?.frequentEntities || [], hasOrganicEvidence: Boolean(serpView?.organicResults.length) }) : null;
   const evidenceApproved = analysis?.payload.status === "approved";
   const latestApprovedAnalysis = row?.analysisVersions.filter(version => version.payload.status === "approved").sort((a, b) => b.versionNumber - a.versionNumber)[0] || null;
   const transfer = deriveRadarTransferState({ currentVersionNumber: analysis?.versionNumber || 0, analysisStatus: analysis?.payload.status || null, transfer: analysis?.payload.plannerTransfer || null, fallbackSentVersionNumber: row?.state === "sent_planner" ? latestApprovedAnalysis?.versionNumber || null : null });
@@ -385,7 +401,28 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
   const excludedReferenceCount = referenceCounts.excluded;
   const pendingComparableCount = organicResults.filter(result => resultRole(result) === "pending" && !isOwnResult(result, resultDecision(`organic:${result.position}`)) && !isFormatReference(result)).length;
   const selectedMode = analysis?.payload.mode || mode;
-  const approvalIssues = analysis ? analysisApprovalIssues(analysis, kgrStrategy) : [];
+  /*
+   * O QUE A TELA MOSTRA É O QUE A AUTORIDADE DECIDE.
+   *
+   * Enquanto a lista exibida vinha de `analysisApprovalIssues` e a decisão de
+   * `approve` somava outras checagens, a tela conseguia dizer "sem pendências"
+   * sobre um artigo que o clique recusaria em seguida.
+   */
+  const approvalIssues = row && article ? radarReportApprovalIssues({
+    identity: { brandId: row.brandId, articleId: row.articleId, articleDnaVersionId: row.articleDnaVersionId, radarItemId: row.id },
+    analysis,
+    article,
+    research,
+    serpReview: { status: serpReviewState.review?.status ?? null, currentness: serpReviewState.currentness },
+    expertEvidence: {
+      loaded: remoteExpertEvidence.loaded,
+      contextMatches: remoteExpertEvidence.selectionKey === remoteExpertEvidenceSelectionKey,
+      failed: Boolean(remoteExpertEvidence.error),
+      pendingCount: remoteExpertEvidence.pendingCount,
+      blockedCount: remoteExpertEvidence.blockedCount,
+    },
+    kgrStrategy,
+  }) : [];
   const referencesSelected = Boolean(analysis && pendingComparableCount === 0);
   const pagesAnalyzed = Boolean(analysis && extractionPages.length > 0);
   const reportGenerated = Boolean(analysis?.payload.competitiveReport);
@@ -470,82 +507,38 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
    * então quem encerra é o readback, não a ausência de erro.
    */
   const approve = async () => {
-    if (!analysis || !research || !selectedBrandId) return;
+    if (!analysis || !research || !article || !selectedBrandId) return;
     setBusy("approve");
     try {
-      // O portão. Evidência do especialista ainda em leitura, com erro ou com
-      // pendência é bloqueio: aprovar sobre leitura incompleta aprovaria o que
-      // ninguém viu.
-      const issues: string[] = [];
-      if (!remoteExpertEvidence.loaded || remoteExpertEvidence.selectionKey !== remoteExpertEvidenceSelectionKey) {
-        issues.push("Aguarde a leitura remota do ExpertBrief antes de aprovar.");
-      }
-      if (remoteExpertEvidence.error) {
-        issues.push("A contribuição do especialista não pôde ser lida; a aprovação permanece bloqueada.");
-      }
-      if (remoteExpertEvidence.pendingCount || remoteExpertEvidence.blockedCount) {
-        issues.push("Revise todas as contribuições remotas do especialista antes de aprovar o relatório.");
-      }
-      issues.push(...analysisApprovalIssues(analysis, kgrStrategy));
-      if (issues.length) { setNotice(issues.join(" ")); return; }
-
-      const approvalVersionId = crypto.randomUUID();
-      const approvalVersionNumber = analysis.versionNumber + 1;
-      const approvedAt = new Date().toISOString();
-
-      const report = await buildRadarCompetitiveReport({
-        payload: analysis.payload,
-        article: article.payload,
-        research,
-        radarItemId: row.id,
-        analysisVersionId: approvalVersionId,
-      } as Parameters<typeof buildRadarCompetitiveReport>[0]);
-
-      const packageData = await buildRadarEvidencePackage(analysis.payload, {
-        radarItemId: row.id,
-        analysisVersionId: approvalVersionId,
-        analysisVersionNumber: approvalVersionNumber,
-      } as Parameters<typeof buildRadarEvidencePackage>[1]);
-
-      const handoff = await buildRadarPlannerHandoff({
-        packageData,
-        approvedReport: report,
-        brandId: row.brandId,
-        radarItemId: row.id,
-        articleId: row.articleId,
-        articleDnaVersionId: row.articleDnaVersionId,
-        articleDnaContentHash: row.articleDnaContentHash,
-        siloDnaVersionId: silo?.versionId || null,
-        sourceAnalysisVersionId: approvalVersionId,
-        sourceAnalysisVersionNumber: approvalVersionNumber,
-        selectedBy: actorId(session),
-        humanDecisions: analysis.payload.keywordDecisions.map(decision => ({
-          id: `keyword:${decision.keywordId}`,
-          target: `keyword:${decision.keywordId}`,
-          decision: decision.decision,
-          note: decision.note,
-        })) as Parameters<typeof buildRadarPlannerHandoff>[0]["humanDecisions"],
-        expertEvidence: remoteExpertEvidence.evidence,
-        now: approvedAt,
-      } as Parameters<typeof buildRadarPlannerHandoff>[0]);
-
-      const successor = await createRadarAnalysisSuccessor(
+      // A DECISÃO NÃO MORA AQUI. Esta tela reúne o contexto canônico e chama a
+      // autoridade única; o Workbench chama a mesma função com o mesmo
+      // contrato. Duas telas, um só significado para "aprovar".
+      const result = await approveRadarReport({
+        identity: { brandId: row.brandId, articleId: row.articleId, articleDnaVersionId: row.articleDnaVersionId, radarItemId: row.id },
         analysis,
-        {
-          status: "approved",
-          competitiveReport: report,
-          approvedAt,
-          approvedBy: actorId(session),
-          plannerPackage: packageData,
-          plannerHandoff: handoff,
-        } as Parameters<typeof createRadarAnalysisSuccessor>[1],
-        actorId(session),
-        approvalVersionId,
-      );
+        article,
+        research,
+        serpReview: { status: serpReviewState.review?.status ?? null, currentness: serpReviewState.currentness },
+        expertEvidence: {
+          loaded: remoteExpertEvidence.loaded,
+          contextMatches: remoteExpertEvidence.selectionKey === remoteExpertEvidenceSelectionKey,
+          failed: Boolean(remoteExpertEvidence.error),
+          pendingCount: remoteExpertEvidence.pendingCount,
+          blockedCount: remoteExpertEvidence.blockedCount,
+          approved: remoteExpertEvidence.evidence,
+        },
+        kgrStrategy,
+        siloDnaVersionId: silo?.versionId || null,
+        selectedBy: actorId(session),
+        persist: successor => save(successor),
+      });
 
-      const saved = await save(successor);
-      if (saved.persistenceMode !== "remote" || !saved.readbackConfirmed) {
-        setNotice("A aprovação foi aplicada apenas na recuperação local; a persistência remota não foi confirmada.");
+      if (!result.ok) {
+        setNotice(result.reason === "BLOCKED" ? result.issues.join(" ") : result.message);
+        return;
+      }
+      if (result.outcome === "ALREADY_APPROVED") {
+        setNotice("Este relatório já está aprovado nesta versão, com o mesmo snapshot e a mesma curadoria. Nenhuma sucessora foi criada.");
         return;
       }
       if (row.state === "awaiting_approval") pipeline.updateRadarState([row.id], "approved");
@@ -605,7 +598,7 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
         </div>
       </section>
       <section className="rounded-lg border border-divider bg-surface p-5"><h2 className="text-xl font-semibold text-foreground">Outras referências da SERP</h2><p className="mt-2 text-base text-text-muted">Perguntas, pesquisas relacionadas e entidades contextualizam o relatório, mas não são páginas para extração.</p><div className="mt-4 grid gap-4 lg:grid-cols-3">{serpView.peopleAlsoAsk.length > 0 && <div><h3 className="text-base font-semibold text-foreground">Perguntas relacionadas</h3>{serpView.peopleAlsoAsk.map((item, index) => <div className="mt-2 rounded-md border border-divider bg-surface-subtle p-3 text-base" key={serpView.record.id + ":paa:" + item.position + ":" + index}><p className="text-foreground">{item.question}</p>{analysis && <button className={button + " mt-3"} onClick={() => patchDecision("paa:" + item.position, { decision: "included", reason: "Pergunta útil para o contexto do relatório." })}>Usar no relatório</button>}</div>)}</div>}{serpView.relatedSearches.length > 0 && <div><h3 className="text-base font-semibold text-foreground">Pesquisas relacionadas</h3><div className="mt-2 flex flex-wrap gap-2">{serpView.relatedSearches.map((item, index) => <span className="rounded-full border border-divider px-3 py-2 text-sm text-text-muted" key={serpView.record.id + ":related:" + item.term + ":" + index}>{item.term}</span>)}</div></div>}{serpView.knowledgeGraph && <div><h3 className="text-base font-semibold text-foreground">Entidade observada</h3><div className="mt-2 rounded-md border border-divider bg-surface-subtle p-3 text-base"><strong className="text-foreground">{serpView.knowledgeGraph.title || "Entidade sem título"}</strong><p className="mt-2 text-text-muted">{serpView.knowledgeGraph.description || "Sem descrição retornada."}</p></div></div>}</div></section>
-      <section className="rounded-lg border border-context-accent/50 bg-surface p-5"><div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className="text-xl font-semibold text-foreground">Análise da amostra</h2><p className="mt-2 text-base text-text-muted">{analysisQueue.length ? analysisQueue.length + " página(s) comparável(is) nova(s) aguardam análise" : "Todas as páginas comparáveis selecionadas já foram analisadas."}</p></div><button className={button} disabled={!analysis || !analysisQueue.length || busy === "extract"} onClick={() => void extractSelected()}>{busy === "extract" ? "Analisando referências…" : analysisQueue.length ? "Analisar referências selecionadas (" + analysisQueue.length + ")" : "Análise da amostra atualizada"}</button></div>{!analysisQueue.length && analysis && <p className="mt-3 text-sm text-text-muted">Selecione uma nova referência principal ou de apoio para reativar a análise. Páginas já analisadas não serão reprocessadas.</p>}</section>
+      <section className="rounded-lg border border-context-accent/50 bg-surface p-5"><div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className="text-xl font-semibold text-foreground">Análise da amostra</h2><p className="mt-2 text-base text-text-muted">{analysisQueue.length ? analysisQueue.length + " página(s) comparável(is) nova(s) aguardam análise" : "Todas as páginas comparáveis selecionadas já foram analisadas."}</p></div><button className={button} disabled={!analysis || !analysisQueue.length || busy === "extract"} onClick={() => void extractSelected()}>{busy === "extract" ? "Analisando páginas…" : analysisQueue.length ? "Analisar páginas selecionadas (" + analysisQueue.length + ")" : "Análise da amostra atualizada"}</button></div>{!analysisQueue.length && analysis && <p className="mt-3 text-sm text-text-muted">Selecione uma nova referência principal ou de apoio para reativar a análise. Páginas já analisadas não serão reprocessadas.</p>}</section>
     </section>;
   };
 

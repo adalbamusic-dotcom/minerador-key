@@ -195,7 +195,17 @@ export function resolveArticleFormationSerpState(input: {
   observed: ObservedArticleSerp | null;
   processing?: boolean;
   failed?: boolean;
+  /**
+   * Evidência VIGENTE e indecisa impede concluir?
+   *
+   * Padrão `true`: quem não declara nada continua sendo cobrado. A fase 1
+   * declara `false` — ver `formation-phase-policy.ts`. Ausência, falha e
+   * desatualização continuam bloqueando nos dois casos: ali não há evidência
+   * sobre esta composição, e a hipótese da lógica não substitui o mercado.
+   */
+  unresolvedBlocksConclusion?: boolean;
 }): ArticleSerpGateState {
+  const indecisoBloqueia = input.unresolvedBlocksConclusion ?? true;
   const monta = (
     state: ArticleSerpState,
     reason: string,
@@ -229,15 +239,36 @@ export function resolveArticleFormationSerpState(input: {
 
   const decidido = input.observed.humanDecisionBaseHash === input.expectedBaseHash;
 
+  /*
+   * Vigente e indecisa: quem decide se isso trava é a POLÍTICA DA FASE.
+   *
+   * Na fase 1 o baseline estrutural é preservado e o motivo vira resultado
+   * terminal — a decisão humana acontece no ato que fecha o artigo inteiro,
+   * não numa microaprovação por keyword.
+   */
   if (input.observed.verdict === "DIVERGENCE") {
-    return decidido
-      ? monta("current_divergent_resolved", "A SERP diverge da composição e a decisão editorial já foi registrada para esta base.", { blocks: false })
-      : monta("current_divergent_unresolved", "A SERP foi executada e diverge desta composição; a decisão editorial precisa ser registrada.", { human: true });
+    if (decidido) {
+      return monta("current_divergent_resolved", "A SERP diverge da composição e a decisão editorial já foi registrada para esta base.", { blocks: false });
+    }
+    return monta(
+      "current_divergent_unresolved",
+      indecisoBloqueia
+        ? "A SERP foi executada e diverge desta composição; a decisão editorial precisa ser registrada."
+        : "A SERP diverge desta composição e não há ajuste determinístico seguro: a composição decidida foi preservada.",
+      { blocks: indecisoBloqueia, human: indecisoBloqueia },
+    );
   }
   if (input.observed.verdict === "INCONCLUSIVE") {
-    return decidido
-      ? monta("current_inconclusive_resolved", "A evidência é insuficiente e a decisão de seguir assim já foi registrada para esta base.", { blocks: false })
-      : monta("current_inconclusive_unresolved", "A SERP foi executada mas não confirma nem rejeita esta composição; decida explicitamente.", { human: true });
+    if (decidido) {
+      return monta("current_inconclusive_resolved", "A evidência é insuficiente e a decisão de seguir assim já foi registrada para esta base.", { blocks: false });
+    }
+    return monta(
+      "current_inconclusive_unresolved",
+      indecisoBloqueia
+        ? "A SERP foi executada mas não confirma nem rejeita esta composição; decida explicitamente."
+        : "A SERP não apresentou evidência suficiente para alterar a formação; a composição decidida foi preservada.",
+      { blocks: indecisoBloqueia, human: indecisoBloqueia },
+    );
   }
   return monta("current_supported", "A SERP vigente sustenta esta composição.", { blocks: false });
 }

@@ -1,3 +1,239 @@
+## Reset da homologação — 2026-09-08
+
+- [x] Script de reset com ensaio por padrão e escopo por tipo de artefato.
+- [x] Sonda de permissão antes de qualquer escrita, com os GRANT necessários.
+- [x] Rodapé da fase 1 com contagem e Limpar seleção.
+- [x] Controles manuais e Fresh fora do caminho básico, sem remoção de código.
+- [ ] **Do proprietário do banco — bloqueia os PASSOS 1 e 2:**
+
+  ```sql
+  GRANT DELETE ON public.editorial_version_status_events TO service_role;
+  GRANT DELETE ON public.editorial_artifact_versions TO service_role;
+  GRANT DELETE ON public.editorial_workflow_items TO service_role;
+  GRANT DELETE ON public.internal_link_graph_edges TO service_role;
+  GRANT DELETE ON public.internal_link_graph_nodes TO service_role;
+  GRANT DELETE ON public.internal_link_graph_proposals TO service_role;
+  GRANT DELETE ON public.internal_link_graph_working_copies TO service_role;
+  GRANT DELETE ON public.internal_link_graphs TO service_role;
+  GRANT DELETE ON public.editorial_serp_reviews TO service_role;
+  GRANT DELETE ON public.editorial_serp_snapshots TO service_role;
+  ```
+
+  Depois: `npm run reset:arquiteto -- 09762023-d0d4-4c24-b34e-d0fdfd43f891`
+  (ensaio) e só então `--confirm`.
+- [ ] Decidir o que fazer com os 4 itens `stage=radar` que ficarão órfãos.
+- [ ] PASSO 3 em diante (§17): importar 6–10 keywords novas, 1 Silo, 2–3
+  Articles — com 1 single-keyword e 1 multi-keyword — e rodar a cadeia até
+  `READY_FOR_RADAR`.
+
+## Fronteira da rodada — 2026-09-06
+
+- [x] Marcador canônico da rodada ativa, sem migration.
+- [x] Fronteira aplicada na entrada, para ArticleDNA, SiloDNA, SiloPage e grafos.
+- [x] Rodada lida antes da carga, não só ao abrir o preview.
+- [x] Regra de `canonical-version-authority` intocada; só o universo muda.
+- [x] SERP e KeywordDNA atravessam rodada; estado canônico não.
+- [x] `npm run audit:rodada` com a pergunta que libera a execução.
+- [ ] **Do produto:** com `ARQUITETO_HOMOLOGATION_MODE=true` e
+  `NEXT_PUBLIC_ARQUITETO_HOMOLOGATION_MODE=true`, rodar `audit:rodada` antes e
+  depois do fresh. Esperado depois: `ACTIVE_ARTICLES = 0`, `ACTIVE_SILOS = 0`,
+  `OLD_APPROVED_ARTIFACTS_VISIBLE_AS_CURRENT = NO` com o histórico intacto.
+- [ ] §14 — importar 6–10 keywords de 1 Silo, com 1 Article single-keyword e 1
+  multi-keyword, e rodar a cadeia inteira até `READY_FOR_RADAR`.
+- [ ] Se a segunda passada de publicados precisar religar SiloDNA aprovado a
+  território, isso é corte próprio: o fresh deixa o par no acervo sem
+  território de trabalho correspondente.
+
+## Reiniciar homologação — 2026-09-06
+
+- [x] Autoridade pura com lista de permissão e motivo por tipo.
+- [x] Rota com modo server-only, escopo por marca e frase ligada ao plano.
+- [x] Preview de duas etapas mostrando o que some e o que fica.
+- [x] Limpeza do estado local junto com o remoto.
+- [x] Testes A–I do corte.
+- [ ] **Do produto:** definir `ARQUITETO_HOMOLOGATION_MODE=true` e
+  `NEXT_PUBLIC_ARQUITETO_HOMOLOGATION_MODE=true` no ambiente de homologação.
+  Sem as duas, o botão não aparece e a rota recusa.
+- [ ] Do produto (§9/§10): depois do fresh, importar 5–10 keywords de 1 Silo e
+  rodar a cadeia inteira — arquitetura, artigos, SERP, conclusão, links.
+- [ ] §12 — conferir na rodada nova que a SERP histórica é reaproveitada quando
+  o `formationBaseHash` coincide e coletada quando não.
+- [ ] Territórios entram na limpeza: o par SiloDNA/SiloPage aprovado permanece
+  no acervo como histórico, mas passa a não ter território de trabalho
+  correspondente. É o comportamento pedido em §4/§8; se a segunda passada de
+  publicados precisar religar os dois, isso é corte próprio.
+
+## Restauração e formação limpa — 2026-09-06
+
+- [x] Autoridade pura de restauração com baseline no artefato aprovado.
+- [x] Preview obrigatório e aplicação atômica com desfazer.
+- [x] Controle na aba Silos, explicando por que Reprocessar não resolve.
+- [x] Painel da fase Artigos lendo o escopo da autoridade única.
+- [x] Resultado explicável do Reprocessar.
+- [ ] **§9–§12 — `Reiniciar formação` (FRESH).** Não entrou neste corte: ele
+  precisa decidir o que acontece com `humanFormationRef`/`humanRole` (a
+  restauração os preserva; o fresh recomeça), e essa é uma decisão editorial
+  que muda o que a pessoa perde. Fica para corte próprio, depois da
+  restauração provar 8/8.
+- [ ] Do produto: `Restaurar cópia de trabalho` (1º clique = preview, 2º
+  aplica) e depois `npm run audit:drift` até `8/8`.
+- [ ] §18 — homologar num conjunto limpo (1 Silo, 3–5 keywords) antes de voltar
+  às 28.
+- [ ] Links continua parado: `LINKS_READY = NO` enquanto os Articles não
+  estiverem limpos.
+
+## Processamento automático da fase Artigos — 2026-09-06
+
+- [x] Auditar a contradição da SERP em `skin care rosto` antes de mexer na UI.
+- [x] Uma autoridade visual de SERP: badge e parecer pela mesma chave.
+- [x] Política de fase declarada para evidência vigente e indecisa.
+- [x] Fallback `STRUCTURAL_BASELINE_PRESERVED` como resultado terminal.
+- [x] Artigo de uma keyword: compatibilidade `NOT_APPLICABLE`.
+- [x] Auditorias alinhadas à política da fase.
+- [ ] Do produto (§16): smoke com `skin care rosto` — Reprocessar artigos →
+  conferir `FORMATION_DECISIONS_PENDING = 0` → Concluir formação, sem abrir
+  Ajustes avançados. Depois (§17), um Article multi-keyword.
+- [ ] §7 — incorporar ajuste determinístico seguro na divergência dentro do
+  mesmo Silo, com proveniência. Hoje a divergência vigente preserva baseline;
+  o ajuste automático ainda não existe.
+- [ ] Registrar `UPSTREAM_SILO_REVIEW_SUGGESTED` quando a SERP apontar outro
+  Silo. A constante existe; falta o ponto que a emite.
+
+## Simplificação da fase 1 — 2026-09-06
+
+- [x] Uma autoridade de seleção para o rodapé e as duas ações.
+- [x] Recusa que nomeia a linha fora do cenário em vez de repetir "selecione".
+- [x] Remover a etapa "Enviar para aprovação" do fluxo.
+- [x] Rótulo de fase coerente com o estado real do artefato.
+- [x] Controles manuais sob "Ajustes avançados".
+- [ ] §3/§4/§5 — fazer `Reprocessar artigos` fechar sozinho intenção, funil,
+  KGR, aplicabilidade e compatibilidade, com `STRUCTURAL_BASELINE_PRESERVED`
+  quando a SERP não sustentar mudança. Hoje a resolução terminal já existe
+  (`article-classification-closure`), mas 1 candidato do lote está em
+  `CURRENT_INCONCLUSIVE_UNRESOLVED` e ainda pede decisão.
+- [ ] §10 — auditar `SERP_DISPLAY_SOURCE` × `SERP_STATE_SOURCE`: não renderizar
+  "Parecer da SERP" quando não há assessment; rotular fallback lógico como tal.
+- [ ] §11 — Article de uma keyword: compatibilidade `NOT_APPLICABLE` e Principal
+  automática, sem decisão manual.
+- [ ] Do produto: smoke do §16 com um Article realmente incompleto.
+
+## Fechamento da fase Silos — 2026-09-06
+
+- [x] Preview obrigatório antes de qualquer escrita de `Confirmar arquitetura`.
+- [x] Confirmação amarrada à assinatura do plano previsto.
+- [x] Preview mostra Silos, atribuições, SiloPage, canonical e publicação.
+- [x] Recusa de quebra e de restauração parcial preservadas.
+- [x] Verificado que a restauração parte de `humanFormationRef`/`humanRole`.
+- [x] Verificado que `audit:drift` ignora proposta no-op.
+- [ ] **Do produto:** clicar `Confirmar arquitetura` (1º clique = preview,
+  2º = aplica) e rodar `npm run audit:silopage` para o readback.
+- [ ] **Do produto:** restaurar as 3 atribuições locais e rodar `audit:drift`
+  até `8/8`. Se o plano da confirmação não trouxer as três, é isso que o
+  preview vai mostrar — e aí falta um caminho de restauração dirigido.
+- [ ] `territory:17a6da12` (Anti-idade e Retinol candidate) deve terminar com
+  `ACTIVE_ASSIGNMENTS = 0`; `superseded` fica para corte próprio, sem bloquear.
+- [ ] Continua parado: SERP, Concluir formação, Processar links, Radar.
+
+## Guarda de no-op na conclusão — 2026-09-06
+
+- [x] Comparador editorial normalizado contra a canônica aprovada.
+- [x] `Concluir formação` recusa criar sucessora sem diff substantivo.
+- [x] No-op vira mensagem, não silêncio.
+- [x] Auditoria e mesa compartilham a mesma autoridade de diff.
+- [ ] Do produto: escolher para o smoke um Article que REALMENTE precise de
+  formação/revisão. `skin care principia` já está formado e canônico em v10 —
+  usá-lo só produziria `NO_NEW_VERSION`.
+- [ ] Restaurar o drift LOCAL para 8/8 ANTES de processar links: o grafo é do
+  Silo/conjunto, e com Article em drift estrutural `LINK_GRAPH_REBASE_SAFE = NO`.
+- [ ] Limpeza das propostas no-op de `principia` (v11–v17) fica para quando
+  existir mecanismo de abandono/supersessão de proposta. Não promover nem
+  deletar para limpar tela.
+
+## Passada planejada e reconciliação de publicados — 2026-09-06
+
+- [x] Declarar o cenário de publicação em um lugar só, com o porquê.
+- [x] `publishedVerificationRequired` com padrão `true` na portaria da SiloPage.
+- [x] Aplicar a bandeira no servidor, nunca pelo corpo da requisição.
+- [x] Manter `canonical_mismatch` bloqueando mesmo no cenário planejado.
+- [x] Corrigir a seleção da canônica na auditoria (`audit:arquiteto`).
+- [ ] **PUBLISHED_STRUCTURE_RECONCILIATION** — segunda passada: conteúdo
+  publicado vs planejado, sitemap, canonical, redirects, slug protegido,
+  keyword principal publicada, SiloPage publicada, catálogo do site, duplicatas
+  de raiz publicada e `publishedStructureRef`. Quando entrar, virar
+  `CURRENT_SCENARIO_REQUIRES_PUBLISHED_VERIFICATION = true`.
+- [ ] Do produto (smoke ponta a ponta com `skin care principia`): Confirmar
+  arquitetura → Reprocessar artigos → Concluir formação → Processar links →
+  Confirmar links internos → conferir `READY_FOR_RADAR`. Sem importar ao Radar.
+- [ ] Continua parado: as 3 assignments do drift LOCAL e o rebase dos 6 grafos.
+
+## Preflight da SiloPage — 2026-09-06
+
+- [x] Auditar a autoridade de identidade/publicação e confirmar o consumo pela
+  consolidação (`CONFIRM_ARCHITECTURE_USES_IT = YES`).
+- [x] Preflight read-only por SiloPage (`npm run audit:silopage`).
+- [x] `siloPageApprovalPreflight` reusando a portaria existente.
+- [x] Preflight visível na aba Silos antes de `Confirmar arquitetura`.
+- [x] Testes A–G do corte.
+- [ ] Do produto: rodar `Confirmar arquitetura` para as três — a identidade já
+  resolvida entra no payload e a portaria libera 3/3. Conferir no readback
+  `SILO_PAGE_APPROVED = 3/3` com entityId, versionId, slug, canonical e
+  `published`.
+- [ ] Continua parado de propósito: SERP/formação, rebase dos 6 grafos
+  (`baseStale`, reaproveitáveis) e as 3 assignments do drift LOCAL.
+
+## Canônica × proposta e SiloPage — 2026-09-06
+
+- [x] Separar `canonical` (última aprovada) de `workingProposal` na leitura.
+- [x] Proposta em edição deixa de rebaixar a versão aprovada.
+- [x] Invalidação estrutural exige motivo declarado, nunca "há versão mais nova".
+- [x] Grade mostra a versão aprovada e a revisão em andamento separadas.
+- [x] Links consome a canônica aprovada, não a proposta.
+- [x] Tipo de unidade vira fato derivado; some a pendência artificial.
+- [x] Auditoria read-only de diff entre canônica e proposta (`audit:versoes`).
+- [x] Classificar SiloPage 0/3: NEVER_APPROVED nas três.
+- [ ] Mostrar na aba Silos os bloqueios de aprovação da SiloPage ANTES do
+  clique — hoje a recusa só existe no servidor.
+- [ ] Do produto: verificar identidade das duas SiloPages publicadas e planejar
+  o canonical da nova, para `Confirmar arquitetura` fechar 3/3.
+- [ ] Do produto: a proposta v16 de `principia` é no-op; ela fica no histórico
+  até existir mecanismo de abandono de proposta. Não promover para limpar tela.
+
+## Ownership das fases e autoridade única — 2026-09-06
+
+- [x] Remover o fallback provisório da leitura de conflito do artigo.
+- [x] Manter o conflito de fronteira de Silo na fase Silos.
+- [x] Remover a segunda autoridade de aprovação do ArticleDNA.
+- [x] Recusar por escrito a ação `approve` na porta de persistência do fechamento.
+- [x] Fase Links nomeia a dependência de Artigos antes do estado da tela.
+- [x] Liberar o latch de `linksSaveState` ao sair de `processarLinks`.
+- [ ] Decisão do Planejador: registrar "Tipo de unidade" deve reabrir a
+  aprovação do ArticleDNA? Hoje ela rebaixa para `proposed` sem dizer.
+- [ ] Decisão do Planejador: qualificar os rótulos das colunas Aprovação e
+  Status. O badge é compartilhado com outros módulos.
+- [ ] Do produto: reprocessar `skin care principia` com SERP e concluir a
+  formação, conferindo que os dois conflitos não reaparecem.
+
+## Fechamento humano e ações por aba — 2026-09-06
+
+- [x] Separar, na leitura, a versão aprovada da revisão corrente.
+- [x] Papel do artigo com fonte única (decisão humana vigente).
+- [x] Serviço único de fechamento para aprovação individual e em lote.
+- [x] Seletor "Alterar status" com enviar para aprovação, aprovar e reabrir
+  revisão, com contagem de elegíveis e bloqueados antes do clique.
+- [x] Bloqueio que nomeia o problema e o controle que o resolve.
+- [x] Remover `changeSelectedArticleStatus` em vez de reconectá-lo.
+- [x] Revalidação da aprovação no servidor, aditiva na rota de artefatos.
+- [x] Reabertura como sucessora em `proposed`, sem rebaixar a versão aprovada.
+- [x] Corrigir a fronteira das ações por aba (Silo em Artigos, Radar em Links).
+- [x] Marcar a revisão de links como desatualizada quando o artigo ganha
+  sucessora, preservando o grafo aprovado.
+- [ ] Do produto: aprovar artigos na tela, recarregar e conferir em outra sessão
+  que voltam aprovados com a mesma versão e hash.
+- [ ] Do produto: provocar gravação sem readback e conferir que a tela manda
+  recarregar em vez de repetir.
+- [ ] Restaurar os três vínculos territoriais divergentes — fora deste corte,
+  precisa de impacto demonstrado antes de qualquer restauração.
+
 ## Persistência canônica da revisão IA — 2026-08-29
 
 - [x] Reutilizar `editorial_artifact_versions` com `article_architecture_ai_review`.
@@ -134,6 +370,39 @@
   downstream sem mutação e o retorno humano ao Arquiteto; não iniciar nesta
   tarefa.
 # Backlog — Arquiteto
+
+## Purga administrativa de Arquiteto e Radar — Care Glow — 2026-09-08
+
+- [x] Consolidar um único script administrativo, substituindo os dois anteriores.
+- [x] Fixar o alvo e validar a identidade da marca antes de remover.
+- [x] Lista explícita dos registros, com condições positivas para `architect` e
+  `radar` no lugar de `stage <> 'architect'`.
+- [x] Mapear dependências por FK **e dentro dos payloads**; Planejador, Redator,
+  Publicações ou outra marca abortam mostrando os identificadores.
+- [x] Exportação prévia somente-leitura com manifesto de ids, contagens, hashes
+  do preservado e procedimento de restauração.
+- [x] Uma transação, dependentes antes das origens, sem anular referência.
+- [x] Gatilhos append-only nomeados, suspensos e restaurados no mesmo escopo,
+  com verificação — sem remover função, FK ou validação.
+- [x] Verificação de conjunto zerado, preservação por hash de ids e ausência de
+  órfãos, com rollback integral em qualquer divergência.
+- [x] Modo `:simular` para ensaio e para provar idempotência sobre estado vazio.
+
+### Abertas — execução
+
+- [ ] Rodar com `v_simular := true` e conferir o manifesto impresso.
+- [ ] Rodar com `:simular = true` e conferir o manifesto.
+- [ ] Executar a purga e registrar o resultado por tabela.
+- [ ] Conferir Arquiteto e Radar vazios **nas duas sessões**, pelo servidor.
+- [ ] Confirmar que recuperação local não repovoou o servidor.
+- [ ] Reexecutar em simulação sobre o estado vazio (idempotência).
+- [ ] Validar o script em ambiente isolado: dependência externa, falha
+  intermediária e execução repetida.
+
+### Correção funcional separada
+
+- [ ] **Aba Silos sem seleção e sem exclusão.** Registrado como defeito próprio;
+  não é motivo desta purga nem é resolvido por ela.
 
 ## Fundação estrutural de Links Internos — 2026-08-26
 
@@ -1646,3 +1915,20 @@ subject_type.
       em status nao-final.
 - [ ] UI nao consome a working copy remota nem a rota de consolidacao.
 - [ ] Marca Site/Sitemap = HOLD.
+
+
+## Descarte administrativo executado — 2026-09-08
+
+Proprietário da operação: Arquiteto; participação do Radar explicitamente autorizada.
+Projeto hjjlntdpdgvpnazdztqw; marca Care Glow (09762023-d0d4-4c24-b34e-d0fdfd43f891).
+Descarte definitivo de testes autorizado pelo usuário, com backup dispensado.
+Executado via Supabase CLI 2.111.0, db query --linked, em transação única.
+
+- Confirmado no banco: removidos 21 workflows do Arquiteto e 4 do Radar; 115 ArticleDNA; 9 article_architecture_ai_review; 114 eventos de status; 10 eventos de decisão; 9 snapshots e 6 revisões SERP. Silos e tabelas do grafo já estavam vazios.
+- Preservados: 29 keywords, 3 listas, 83 qualificações semânticas, 66 apresentações contextuais e 1 brand_skill. Comparação de conteúdo integral dos registros preservados nas 17 tabelas do script passou.
+- Cinco triggers append-only restaurados exatamente ao estado O; nenhuma função, FK ou migration removida/aplicada.
+- Primeiro ensaio detectou text versus uuid em version_id e desfez a transação. Script corrigido para text[], inclusão das revisões IA, exclusão por folhas de previous_version_id/source_version_id e previous_snapshot_id, locks e comparação de conteúdo preservado.
+- Ensaio corrigido: PASS com rollback intencional. Execução definitiva: PASS. Readback SQL independente: PASS. Reexecução em simulação sobre vazio: PASS com rollback intencional. O erro P0001 SIMULACAO CONCLUIDA é deliberado, não falha da purga.
+- Validação nas duas sessões da interface: AINDA NÃO VERIFICADA nesta execução. Cache local não foi apagado. Não declarar sincronização visual homologada com base apenas neste SQL.
+- Script: supabase/scripts/2026-09-08-descarte-arquiteto-radar-care-glow.sql. Mantido em simulação por padrão. Ele aborta se grafos reaparecerem: não é reset universal para qualquer acervo futuro.
+- Nenhum commit, push ou deploy executado nesta entrega.

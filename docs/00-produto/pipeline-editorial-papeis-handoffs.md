@@ -17,7 +17,7 @@ ARQUITETO
 ArticleDNA + SiloDNA + SiloPage + InternalLinkGraph
   ↓
 RADAR
-SerpEvidence + ExternalEvidence + ExpertEvidence + RadarApprovedPackage
+RadarEvidenceBundle → RadarFrozenEvidenceBundle → PlannerHandoff v3
   ↓
 PLANEJADOR
 ContentPlan
@@ -75,7 +75,29 @@ Recebe unidade editorial já formada.
 
 SERP do Radar é investigativa, diferente da SERP de compatibilidade do Arquiteto.
 
-Fluxo: Coleta → Concorrentes → Análise → Evidências → Revisão → Histórico.
+Áreas operacionais: `Pesquisa`, `Vídeos`, `Especialista`, `Relatório`. A antiga
+área `Conteúdo` não é área operacional.
+
+`Pesquisa` tem três modos competitivos — `Google`, `YouTube`, `Amazon` —, com
+seleção única por investigação. Somente Google está implementado e homologado.
+
+Fluxo operacional vigente do modo Google, todo por ação explícita do USER:
+
+```text
+NOT_STARTED → START → READY_TO_ANALYZE → ANALYZE
+            → READY_TO_FINALIZE → FINALIZE → FINALIZED
+```
+
+`RESET` é ação separada. Nenhum passo ocorre por `mount`, F5, troca de área ou
+expansão de painel. O workflow antigo por abas
+`Coleta → Concorrentes → Análise → Evidências → Revisão → Aprovar SERP` **não**
+faz parte do fluxo operacional atual.
+
+`Pesquisa → YouTube` é motor de descoberta competitiva: consulta a plataforma,
+cria universo competitivo e produz modelo próprio. A área `Vídeos` é ingestão
+deliberada: o USER fornece as fontes, não existe SERP, a fonte não vira
+concorrente automaticamente e o processamento é orientado pelos `VideoBriefs`.
+Os dois papéis não compartilham identidade semântica.
 
 ExternalEvidence segue: necessidade → Source → Evidence → revisão humana → aprovação.
 
@@ -85,7 +107,18 @@ Evidence registra o que sustenta, o que não sustenta, limites, conflitos, decis
 
 Especialista: Need → ExpertBrief → ExpertContribution → transcrição/fidelidade → organização → revisão → ExpertEvidence.
 
-Entrega ao Planejador: RadarApprovedPackage conceitual com brandId, articleId, articleDnaVersionId, ArticleDNA preservado, SiloContext/InternalLinkGraph ref, SerpSnapshot/SerpEvidence, ExternalEvidence, ExpertEvidence, ProductEvidence quando aplicável, EvidenceNeeds, gaps, conflicts, humanDecisions, approvedReport, provenance, version/hash.
+Entrega ao Planejador: `PlannerHandoff v3`
+(`RADAR_PLANNER_CONTRACT_VERSION = 3`), formado por ArticleDNA aprovado +
+`RadarFrozenEvidenceBundle` íntegro + o dossiê de evidência correspondente. O
+envelope inclui o `RadarEditorialBlueprint` diretamente, além de brandId,
+articleId, articleDnaVersionId, SiloContext/InternalLinkGraph ref, evidências,
+necessidades, lacunas, conflitos, decisões humanas, proveniência e
+versão/hash.
+
+O Radar também entrega `SpecialistBriefs` e `VideoBriefs` congelados. O
+Blueprint **não** é um `ContentPlan`: ele não fixa H2 final, título final,
+contagem de palavras nem ordem rígida. O Planejador não pesquisa de novo, não
+reinterpreta o Radar como investigação nova e não remonta o Blueprint do zero.
 
 Não cria ContentPlan nem estrutura final do artigo.
 
@@ -93,7 +126,7 @@ Não cria ContentPlan nem estrutura final do artigo.
 
 Papel: compilar inteligência aprovada em especificação executável.
 
-Recebe BrandDNA/contexto autorizado, KeywordDNAs, ArticleDNA, SiloDNA/SiloPage, InternalLinkGraph, publicationContext, RadarApprovedPackage, evidências, necessidades, gaps, conflitos, perguntas, entidades, fontes, decisões e versões.
+Recebe BrandDNA/contexto autorizado, KeywordDNAs, ArticleDNA, SiloDNA/SiloPage, InternalLinkGraph, publicationContext, `PlannerHandoff v3`, evidências, necessidades, gaps, conflitos, perguntas, entidades, fontes, decisões e versões.
 
 Entrega ContentPlan aprovado/versionado com identidade, estratégia, gabarito global, SectionSpecs, palavras/ranges, H1/H2/H3, parágrafos, distribuição de keywords, perguntas, entidades, objeções, claims, Evidence Map, links internos, anchorConcepts, links externos, CTA, plano visual, instruções, restrições e proveniência.
 

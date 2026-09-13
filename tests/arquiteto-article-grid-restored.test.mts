@@ -65,7 +65,16 @@ test("as unidades são visualmente distintas", () => {
   assert.match(pages, /SILOPAGE/);
   // Article, publicado e candidato são rotulados na própria linha original —
   // e publicado só existe quando o Minerador entrega a keyword publicada.
-  assert.match(workspace, /"ARTICLE · PUBLICADO" : articleDnaVersion \? "ARTICLE" : "CANDIDATO"/);
+  /*
+   * O RÓTULO MUDOU DE LUGAR, NÃO DE PRINCÍPIO.
+   *
+   * Ele vinha de um ternário inline sobre "existe ArticleDNA?". Com a formação
+   * concluída e o Silo ainda por consolidar, isso respondia "não" e a mesa
+   * dizia "ainda não confirmado" sobre uma decisão já tomada. Agora responde
+   * `readFormationConclusionState`, com formação e artefato separados.
+   */
+  assert.ok(workspace.includes("const formacao = readFormationConclusionState({"));
+  assert.ok(workspace.includes("{formacao.unitLabel}"));
   assert.doesNotMatch(workspace, /Artigo em formação/);
 });
 

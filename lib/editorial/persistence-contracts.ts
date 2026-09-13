@@ -1,3 +1,4 @@
+import { WorkspaceLoadDiagnosticsSchema, emptyLoadDiagnostics } from "./partial-read.ts";
 import { z } from "zod";
 import { ContentDocumentSchema, VersionedArticleDNASchema, VersionedContentPlanSchema, VersionedSiloDNASchema, VersionedSiloPageSchema, VersionStatusEventSchema } from "../arquiteto/contracts.ts";
 import { BrandInvitationSchema, OperationalPublicationSchema, PlannerItemSchema, RadarItemSchema } from "./operational-flow.ts";
@@ -35,6 +36,13 @@ export const PersistedEditorialWorkspaceSchema = z.object({
   publications: z.array(OperationalPublicationSchema),
   invitations: z.array(BrandInvitationSchema),
   views: z.array(SavedGridViewSchema),
+  /**
+   * ADITIVO. Cliente antigo ignora e continua funcionando.
+   *
+   * Sem isto, `radarItems: []` significava cinco coisas diferentes — inclusive
+   * "a consulta falhou" — e a interface escolhia a mais otimista.
+   */
+  loadDiagnostics: WorkspaceLoadDiagnosticsSchema.default(emptyLoadDiagnostics()),
   loadedAt: z.string().datetime(),
 });
 export type PersistedEditorialWorkspace = z.infer<typeof PersistedEditorialWorkspaceSchema>;
@@ -90,6 +98,10 @@ export const WorkflowCommandSchema = z.discriminatedUnion("action", [
         siloPageCanonical: z.string().nullable(),
         siloPagePublicationStatus: z.string().nullable(),
         articleRole: z.enum(["pillar", "support"]),
+        // Adicionado junto com o marcador de procedencia em
+        // ResolvedSiloContext. O objeto e .strict(): sem isto o cliente envia
+        // uma chave a mais e o comando inteiro vira 400.
+        siloIdProvenance: z.enum(["DECLARED", "LEGACY_TERRITORY_HYDRATION"]),
       }).strict(),
       internalLinks: z.unknown().nullable(),
       serpProvenance: z.unknown().nullable(),

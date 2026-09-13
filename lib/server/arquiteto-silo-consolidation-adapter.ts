@@ -33,6 +33,7 @@ import {
   resolveSiloPageApprovalReadiness,
   type SiloPageApprovalDecision,
 } from "@/lib/arquiteto/silo-page-approval";
+import { CURRENT_SCENARIO_REQUIRES_PUBLISHED_VERIFICATION } from "@/lib/arquiteto/publication-scenario";
 import type { TerritoryCandidate } from "@/lib/arquiteto/territory";
 import type { SiloDNA, SiloPage, VersionEnvelope } from "@/lib/arquiteto/contracts";
 
@@ -288,6 +289,15 @@ export async function consolidateSiloFromWorkingCopy(
     siloDnaVersion: { versionId: request.siloDna.versionId },
     decision: request.siloPageApproval ?? null,
     actor: "human",
+    /*
+     * O CENÁRIO É DECLARADO NO CÓDIGO, NÃO ENVIADO PELO CLIENTE.
+     *
+     * Aceitar esta bandeira no corpo da requisição deixaria a tela relaxar o
+     * próprio portão. Esta passada fecha arquitetura planejada; a capacidade
+     * de reconciliar publicados continua inteira e volta a ser exigida quando
+     * a constante mudar.
+     */
+    publishedVerificationRequired: CURRENT_SCENARIO_REQUIRES_PUBLISHED_VERIFICATION,
   });
   refuse(refuseStatusEscalation({
     siloDnaStatus: request.statuses.siloDna,

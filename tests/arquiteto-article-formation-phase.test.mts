@@ -20,6 +20,9 @@ const marker = (overrides: Partial<ArticleFormationMarkerPayload["confirmation"]
   contractVersion: ARTICLE_FORMATION_MARKER_CONTRACT_VERSION,
   baseHash: "artbase:abc",
   processedAt: "2026-09-04T10:00:00.000Z",
+  // O corte que quebrou o ciclo Silo/Article passou a congelar as formacoes
+  // concluidas aqui; este marcador nao concluiu nenhuma.
+  concludedFormations: [],
   confirmation: {
     status: "none",
     confirmedAt: null,
@@ -39,9 +42,24 @@ test("a tabela não projeta mais um artigo por keyword elegível", () => {
   assert.match(workspace, /if \(!kw\.isPublished && !candidato\) return;/);
 });
 
-test("sem formação processada, nenhuma keyword vira artigo", () => {
-  // O índice fica vazio até existir marcador: é o que impede o legado voltar.
-  assert.match(workspace, /if \(!articleFormationMarker\) return indice;/);
+test("sem formação processada, nenhuma keyword vira artigo sozinha", () => {
+  /*
+   * A GUARDA MUDOU DE LUGAR, NÃO DE PROPÓSITO.
+   *
+   * Ela era "o índice fica vazio até existir marcador", e isso criou um
+   * deadlock circular na homologação de 2026-09-08: a tabela só teria linha
+   * depois de processar, e processar exigia selecionar uma linha.
+   *
+   * O que a guarda protege continua valendo: uma KEYWORD não vira Artigo por
+   * projeção. A linha existe porque a FORMAÇÃO agrupou — ela nasce de um
+   * `candidateRef`, e enquanto não é processada se declara CANDIDATO, sem
+   * ArticleDNA e sem SERP.
+   */
+  assert.match(workspace, /const candidato = kw\.isPublished \? null : formationCandidateByKeyword\.get/);
+  assert.match(workspace, /if \(!kw\.isPublished && !candidato\) return;/);
+  assert.match(workspace, /isFormationCandidate: Boolean\(c\.candidateRef\) && !articleFormationMarker/);
+  // E o índice não volta a depender do marcador.
+  assert.doesNotMatch(workspace, /if \(!articleFormationMarker\) return indice;/);
 });
 
 test("keyword sem artigo continua visível como pendente", () => {
@@ -126,10 +144,16 @@ test("o painel nasce com os dois botões da operação", () => {
   // Concluir exige processar ANTES e exige seleção: sem escopo o botão
   // prometeria agir sobre "tudo", que é o que fazia o gate reclamar de artigo
   // que a pessoa não escolheu.
-  assert.match(panel, /disabled=\{busy \|\| !processed \|\| selectedCount === 0\}/);
-  assert.match(panel, /disabled=\{busy \|\| selectedCount === 0\}/);
+  /*
+   * A recusa vem da AUTORIDADE ÚNICA de escopo, não de uma contagem própria.
+   *
+   * O painel lia `selectedCandidateRefs.size` e dizia "Selecione pelo menos um
+   * artigo" com uma linha já selecionada — recusa que nenhum clique resolve.
+   */
+  assert.match(panel, /disabled=\{busy \|\| !processed \|\| Boolean\(scopeReason\)\}/);
+  assert.match(panel, /disabled=\{busy \|\| Boolean\(scopeReason\)\}/);
   assert.match(panel, /data-testid="architect-formation-selection-count"/);
-  assert.match(panel, /Selecione pelo menos um artigo\./);
+  assert.match(panel, /title=\{scopeReason \?\? /);
 });
 
 test("o painel traz os gráficos e as pontuações do candidato", () => {
@@ -156,8 +180,21 @@ test("o painel mostra os papéis das keywords do candidato", () => {
 
 /* ---------------------------- contrato do corte -------------------------- */
 
+/**
+ * Comentário não é chamada.
+ *
+ * A asserção casava com a PALAVRA "serp" em qualquer lugar do arquivo —
+ * inclusive num comentário explicando por que o hash da base precisa mudar
+ * quando o KeywordDNA muda, senão o parecer antigo seria reaproveitado sobre
+ * outra formação. O que este teste guarda é que o domínio não CHAME provider
+ * nenhum; explicar a regra em prosa é o oposto de violá-la.
+ */
+const semComentarios = (fonte: string) => fonte
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
+
 test("este corte é determinístico: sem SERP e sem IA na formação", () => {
-  const dominio = readFileSync("lib/arquiteto/article-formation.ts", "utf8");
+  const dominio = semComentarios(readFileSync("lib/arquiteto/article-formation.ts", "utf8"));
   assert.doesNotMatch(dominio, /fetch\(|serp|ai_|deepseek|dataforseo/i);
   // O painel CONTA quantas formações pediriam SERP (§13); ele não a executa.
   // Nomear a evidência é leitura; chamar o provider é que era proibido.

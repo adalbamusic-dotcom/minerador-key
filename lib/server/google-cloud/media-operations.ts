@@ -2,7 +2,7 @@ import "server-only";
 
 import { resolveGoogleCloudSpeech, resolveGoogleCloudStorage, resolveYouTubeVideoMetadata, type GoogleCloudMediaResolution } from "./canonical";
 import { transcribeLongAudio, transcribeShortAudio, type SpeechAudioMetadata, type SpeechClientFactory, type SpeechTranscriptResult } from "./speech-operation";
-import { checkTemporaryMediaObject, removeTemporaryMediaObject, uploadTemporaryMediaObject, type StorageClientFactory, type TemporaryMediaObject } from "./storage-operation";
+import { checkTemporaryMediaObject, removeTemporaryMediaObject, uploadRadarVideoDurableObject, uploadTemporaryMediaObject, type StorageClientFactory, type TemporaryMediaObject } from "./storage-operation";
 import { fetchYouTubeVideoMetadata, type YouTubeVideoMetadata } from "./youtube-metadata-operation";
 import type { IntegrationEnvironment, IntegrationRuntimeDependencies } from "@/lib/server/integrations-runtime";
 import type { IntegrationSecretStore } from "@/lib/server/integration-secret-store";
@@ -43,6 +43,18 @@ export async function uploadSharedTemporaryMedia(input: ResolutionInput & { sour
   const resolution = await resolveGoogleCloudStorage({ ...input, quotaUnits: 1 });
   if (!resolution.credentials || !resolution.bucketName) throw new Error("GOOGLE_CLOUD_STORAGE_CONFIGURATION_NOT_RESOLVED");
   const result = await uploadTemporaryMediaObject({ credentials: resolution.credentials, bucketName: resolution.bucketName, brandId: input.brandId, source: input.source, data: input.data, contentType: input.contentType, fileName: input.fileName, checksum: input.checksum, objectId: input.objectId, clientFactory: input.clientFactory });
+  return { resolution, result };
+}
+
+export async function uploadSharedRadarVideoMedia(input: ResolutionInput & { videoSourceId: string; data: Buffer | Uint8Array; contentType: string; fileName?: string | null; checksum?: string | null; objectId?: string; clientFactory?: StorageClientFactory }): Promise<SharedStorageResult> {
+  const resolution = await resolveGoogleCloudStorage({ ...input, quotaUnits: 1 });
+  if (!resolution.credentials || !resolution.bucketName) throw new Error("GOOGLE_CLOUD_STORAGE_CONFIGURATION_NOT_RESOLVED");
+  const result = await uploadRadarVideoDurableObject({
+    credentials: resolution.credentials, bucketName: resolution.bucketName,
+    brandId: input.brandId, videoSourceId: input.videoSourceId,
+    data: input.data, contentType: input.contentType, fileName: input.fileName,
+    checksum: input.checksum, objectId: input.objectId, clientFactory: input.clientFactory,
+  });
   return { resolution, result };
 }
 

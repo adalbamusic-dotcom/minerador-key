@@ -1,3 +1,4 @@
+import { readSiloLifecycle, type SiloLifecycleReading } from "./silo-lifecycle.ts";
 /**
  * O PAI ESTRUTURAL DO ARTICLE.
  *
@@ -173,6 +174,14 @@ export type ArticleParentReading = {
   canonicalSiloId: string | null;
   /** Pertence a um Silo? Verdadeiro já na confirmação, não na consolidação. */
   hasParent: boolean;
+  /**
+   * Os DOIS eixos do Silo, separados.
+   *
+   * A tela mostrava só a pendência, e ela lia como falha: um Silo recém
+   * confirmado aparecia com um aviso de consolidação pendente e nada dizendo
+   * que a arquitetura de trabalho estava fechada. São perguntas diferentes.
+   */
+  lifecycle: SiloLifecycleReading;
 };
 
 export function readArticleParent(input: {
@@ -181,8 +190,15 @@ export function readArticleParent(input: {
   territoryConfirmed: boolean;
   canonicalSiloId: string | null;
   canonicalSiloName?: string | null;
+  /** Contestações de fronteira abertas para este Silo, vindas da SERP. */
+  openBoundaryChallenges?: number;
 }): ArticleParentReading {
   const nome = (input.canonicalSiloName || input.territoryName || "").trim();
+  const lifecycle = readSiloLifecycle({
+    territoryConfirmed: input.territoryConfirmed,
+    canonicalSiloId: input.canonicalSiloId,
+    openBoundaryChallenges: input.openBoundaryChallenges,
+  });
 
   if (input.canonicalSiloId) {
     return {
@@ -192,6 +208,7 @@ export function readArticleParent(input: {
       territoryRef: input.territoryRef,
       canonicalSiloId: input.canonicalSiloId,
       hasParent: true,
+      lifecycle,
     };
   }
 
@@ -203,6 +220,7 @@ export function readArticleParent(input: {
       territoryRef: null,
       canonicalSiloId: null,
       hasParent: false,
+      lifecycle,
     };
   }
 
@@ -210,10 +228,20 @@ export function readArticleParent(input: {
     ? {
       state: "TERRITORY_CONFIRMED",
       label: nome || "Silo confirmado",
+      /*
+       * §8 — a pendência CONTINUA sendo dita, e continua sendo verdade.
+       *
+       * O que mudou é que ela deixou de ser a única coisa dita: `lifecycle`
+       * carrega, no mesmo objeto, que a arquitetura de trabalho está
+       * confirmada e que a fronteira ainda pode ser revisada por evidência
+       * SERP. Esconder a pendência seria mentir; mostrá-la sozinha fazia um
+       * estado normal parecer falha.
+       */
       pending: "consolidação canônica pendente",
       territoryRef: input.territoryRef,
       canonicalSiloId: null,
       hasParent: true,
+      lifecycle,
     }
     : {
       state: "TERRITORY_CANDIDATE",
@@ -222,6 +250,7 @@ export function readArticleParent(input: {
       territoryRef: input.territoryRef,
       canonicalSiloId: null,
       hasParent: false,
+      lifecycle,
     };
 }
 

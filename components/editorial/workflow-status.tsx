@@ -22,6 +22,10 @@ const STATUS_META: Record<string, { label: string; tone: string; group: "process
   in_review: { label: "Em revisão", tone: "border-amber-900 text-amber-300", group: "review" },
   awaiting_approval: { label: "Aguardando aprovação", tone: "border-amber-900 text-amber-300", group: "review" },
   awaiting_human_review: { label: "Aguardando revisão humana", tone: "border-warning/45 text-warning", group: "review" },
+  // O trabalho humano daquela formação terminou; o que falta é o fechamento
+  // canônico do Silo, que acontece sozinho. Por isso `process`, e não `review`:
+  // não há tarefa esperando alguém.
+  awaiting_silo_consolidation: { label: "Aguardando consolidação do Silo", tone: "border-emerald-900 text-emerald-300", group: "process" },
   ready_for_approval: { label: "Pronto para aprovação", tone: "border-context-accent/45 text-context-accent", group: "review" },
   aprovado: { label: "Aprovado", tone: "border-emerald-900 text-emerald-300", group: "approved" },
   approved: { label: "Aprovado", tone: "border-emerald-900 text-emerald-300", group: "approved" },

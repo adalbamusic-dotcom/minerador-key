@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ArticleDNA, ProductEvidenceDNA, SiloDNA, VersionEnvelope } from "../arquiteto/contracts.ts";
+import { RADAR_INTENT_NOT_CONCLUDED, radarDeclaredArticleIntent } from "./editorial-identity.ts";
 import type { RadarCompetitiveReport } from "./competitive-report.ts";
 import type {
   RadarR4AmazonState,
@@ -199,7 +200,8 @@ export function buildExpertTopicContext(articleId: string, input: RadarR6TopicCo
     articleDnaContentHash: input.article.contentHash,
     articleDna: {
       principal: article.promise,
-      intent: article.mainIntent,
+      /* `z.string().min(1)`: a ausência é declarada, não disfarçada de intenção. */
+      intent: radarDeclaredArticleIntent(article) || RADAR_INTENT_NOT_CONCLUDED,
       silo: silo?.payload.name || silo?.payload.centralEntity || article.siloId || "Silo não vinculado",
       audience: article.audience,
       problem: article.problem,

@@ -105,6 +105,17 @@ export function planTerritorialSiloComposition(input: {
     issues.push({ code: "DUPLICATE_SUPPORT", detail: [...new Set(duplicatedSupports)].sort().join(", ") });
   }
 
+  /*
+   * §3/§10 — NENHUM SILO CANÔNICO VAZIO.
+   *
+   * A passada anterior abriu aqui um caminho para consolidar o Silo com as
+   * formações à espera, assumindo a ordem SiloDNA → ArticleDNA. A auditoria
+   * dos contratos desfez a premissa: ArticleDNA NÃO referencia SiloDNA, então
+   * ele nasce primeiro e o Silo se forma sobre artigos que já existem.
+   *
+   * Sem dependência circular, não há motivo para um Silo vazio — e o portão
+   * volta a exigir o que sempre foi verdade de um Silo consolidado.
+   */
   if (!composition.pillarArticleId) {
     issues.push({ code: "PILLAR_NOT_SELECTED", detail: "Um Silo consolidado exige exatamente um Pilar, escolhido por decisão humana." });
   } else if (supports.includes(composition.pillarArticleId)) {
@@ -210,6 +221,21 @@ export const SILO_CONSOLIDATION_BLOCKER_CODES = [
   "HUMAN_SILO_CONSOLIDATION_REQUIRED",
   "SILO_TERRITORY_REF_MISSING",
   "SILO_TERRITORY_REF_MISMATCH",
+  /**
+   * §6 — a formação dos Articles ainda não concluiu.
+   *
+   * Consolidar antes disso grava como contrato uma fronteira que a SERP dos
+   * Articles ainda pode contestar. Desfazer depois custa uma sucessora em cada
+   * artefato — SiloDNA, SiloPage e o grafo que nasceria por cima.
+   */
+  "ARTICLE_FORMATION_NOT_CONCLUDED",
+  /**
+   * §2/§6 — há contestação de fronteira aberta, vinda da SERP dos Articles.
+   *
+   * Quem resolve é a fase Silos: reprocessar a arquitetura incorpora a
+   * evidência e confirmar aplica a membership. Artigos nunca move keyword.
+   */
+  "SILO_RECONSIDERATION_PENDING",
 ] as const;
 export type SiloConsolidationBlockerCode = (typeof SILO_CONSOLIDATION_BLOCKER_CODES)[number];
 
@@ -259,6 +285,21 @@ export type SiloConsolidationReadinessInput = {
   siloPageTerritoryRef?: string | null;
   /** Evidência de estrutura publicada ainda represada na frente da Marca. */
   publishedStructureEvidenceAvailable?: boolean;
+  /**
+   * §6 — a formação dos Articles deste Silo já foi concluída?
+   *
+   * `undefined` preserva o comportamento anterior: quem ainda não sabe
+   * responder não é barrado por uma pergunta que não fez. Quem sabe, responde.
+   */
+  articleFormationConcluded?: boolean;
+  /**
+   * §2/§6 — contestações de fronteira abertas, vindas da SERP dos Articles.
+   *
+   * Só as que MUDAM fronteira entram: um achado que confirma o Silo atual é
+   * evidência a favor, e tratá-lo como pendência travaria a fase por algo que
+   * diz "está certo".
+   */
+  openBoundaryChallenges?: readonly { scopeLabel: string; suggestedSiloLabel: string | null }[];
 };
 
 /**
@@ -358,6 +399,31 @@ export function resolveSiloConsolidationReadiness(
 
   if (!input.decision) {
     blockers.push({ code: "HUMAN_SILO_CONSOLIDATION_REQUIRED", detail: territory.territoryRef });
+  }
+
+  /*
+   * §6 — a consolidação canônica é a ÚLTIMA coisa, não a primeira.
+   *
+   * Confirmar arquitetura fecha a arquitetura de trabalho; o par canônico só
+   * nasce quando a formação concluiu e a fronteira parou de se mexer. Gravar
+   * antes disso é assinar um contrato sobre um limite que a evidência ainda
+   * pode mudar.
+   */
+  if (input.articleFormationConcluded === false) {
+    blockers.push({
+      code: "ARTICLE_FORMATION_NOT_CONCLUDED",
+      detail: "A formação dos Articles deste Silo ainda não foi concluída.",
+    });
+  }
+
+  const contestacoes = input.openBoundaryChallenges || [];
+  if (contestacoes.length) {
+    blockers.push({
+      code: "SILO_RECONSIDERATION_PENDING",
+      detail: contestacoes
+        .map(item => `${item.scopeLabel} → ${item.suggestedSiloLabel || "fronteira ambígua"}`)
+        .join(" · "),
+    });
   }
 
   return blockers.length

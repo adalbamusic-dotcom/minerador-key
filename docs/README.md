@@ -104,7 +104,7 @@ Comece por [visão geral](00-produto/visao-geral.md), [invariantes](00-produto/i
 | Marca | [spec](02-marca/spec.md) · [estado](02-marca/estado-atual.md) · [backlog](02-marca/backlog.md) |
 | Minerador | [spec](03-minerador/spec.md) · [estado](03-minerador/estado-atual.md) · [backlog](03-minerador/backlog.md) |
 | Arquiteto | [spec](04-arquiteto/spec.md) · [estado](04-arquiteto/estado-atual.md) · [backlog](04-arquiteto/backlog.md) |
-| Radar | [spec](05-radar/spec.md) · [estado](05-radar/estado-atual.md) · [backlog](05-radar/backlog.md) |
+| Radar | [spec](05-radar/spec.md) · [estado](05-radar/estado-atual.md) · [backlog](05-radar/backlog.md) · [autoridade evidencial](05-radar/diretriz-autoridade-evidencial.md) · [homologação Google Fase 1](00-produto/auditorias/relatorio-radar-google-fase1-homologacao-2026-09-11.md) |
 | Planejador | [spec](06-planejador/spec.md) · [estado](06-planejador/estado-atual.md) · [backlog](06-planejador/backlog.md) |
 | Redator | [spec](07-redator/spec.md) · [estado](07-redator/estado-atual.md) · [backlog](07-redator/backlog.md) |
 | Publicações | [spec](08-publicacoes/spec.md) · [estado](08-publicacoes/estado-atual.md) · [backlog](08-publicacoes/backlog.md) |

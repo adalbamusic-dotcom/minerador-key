@@ -183,7 +183,6 @@ test("planilha principal de Artigos mantém colunas canônicas e expansão indep
     "Artigo",
     "Keyword principal",
     "Quantidade de keywords",
-    "Revisão IA",
     "Definição do artigo",
     "Silo",
     "Ações",
@@ -195,6 +194,15 @@ test("planilha principal de Artigos mantém colunas canônicas e expansão indep
   const positions = expectedColumns.map(column => header.indexOf(`>${column}<`));
 
   assert.ok(positions.every(position => position >= 0));
+  /*
+   * ARTICLE_TABLE_AI_REVIEW_COLUMN_VISIBLE = NO.
+   *
+   * A coluna é legado do processo antigo: IA hoje é parte da evidência e do
+   * processamento, não um estágio manual com casa própria na mesa. E o lugar
+   * dela não pode ser ocupado por outra coluna de IA.
+   */
+  assert.equal(header.indexOf(">Revisão IA<"), -1);
+  assert.doesNotMatch(header, /columnId="aiReview"/);
   assert.deepEqual([...positions].sort((left, right) => left - right), positions);
   assert.ok(header.indexOf('>#</th>') < header.indexOf('type="checkbox"') && header.indexOf('type="checkbox"') < header.indexOf('{/* chevron */}'));
   assert.match(workspace, /data-article-expanded=\{isExpanded \? "true" : "false"\}/);

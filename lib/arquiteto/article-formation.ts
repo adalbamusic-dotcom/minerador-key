@@ -28,6 +28,7 @@
  * Domínio puro: sem provider, sem storage, sem UI. Não cria ArticleDNA — o
  * resultado é CANDIDATO, para revisão humana.
  */
+import { intentComparisonKey } from "./keyword-dna-signals.ts";
 
 /** Papel da keyword dentro do Article. Sugestão, não decisão. */
 export type ArticleKeywordRole = "principal" | "secundaria" | "reforco";
@@ -43,11 +44,28 @@ export const MAX_ARTICLE_KEYWORDS = 6;
 export type ArticleFormationKeyword = {
   keywordId: string;
   keyword: string;
+  /**
+   * Intenção CANÔNICA, vinda do KeywordDNA.
+   *
+   * NÃO é `minerador_keywords.intent`: na Brand real essa coluna vem
+   * "Pendente" enquanto o DNA já diz "Informativa". Alimentar a formação com
+   * a coluna faz duas keywords "Pendente" contarem como "mesma intenção" e
+   * ganharem convergência por um campo que ninguém preencheu.
+   */
   intent: string | null;
   volume: number | null;
   kgr: number | null;
   /** Entidade central declarada pela análise semântica do Minerador. */
   entity: string | null;
+  /** Estado da qualificação semântica; sinal incerto não sustenta agrupamento. */
+  semanticState?: "conclusive" | "non_conclusive" | null;
+  /** Modificadores do KeywordDNA — sinal temático. */
+  modifiers?: readonly string[];
+  /** Confiança declarada do DNA, quando existe. */
+  confidence?: string | null;
+  /** Proveniência: a versão exata em que a formação se apoia. */
+  dnaVersionId?: string | null;
+  dnaContentHash?: string | null;
   /** Problema/pergunta central observado. */
   problem: string | null;
   isPublished: boolean;
@@ -143,7 +161,13 @@ const overlap = (left: Set<string>, right: Set<string>) => {
   return shared / Math.min(left.size, right.size);
 };
 
-const normalizedIntent = (value: string | null) => (value || "").trim().toLowerCase() || null;
+/*
+ * "Pendente" não é intenção — a MESMA regra da fase Silos, pela mesma função.
+ *
+ * Sem isto, duas keywords pendentes contam como "mesma intenção principal" e
+ * ganham 0.2 de convergência por um campo vazio.
+ */
+const normalizedIntent = (value: string | null) => intentComparisonKey(value);
 
 /**
  * Duas buscas pedem o mesmo conteúdo?
@@ -194,9 +218,38 @@ export function sameArticleAffinity(
     affinity += 0.2;
     reasons.push("mesma intenção principal");
   }
-  if (left.entity && right.entity && left.entity.trim().toLowerCase() === right.entity.trim().toLowerCase()) {
+  /*
+   * ENTIDADE SÓ CONTA VINDA DE DNA CONCLUSIVO.
+   *
+   * Sustentar convergência em entidade extraída de qualificação que o próprio
+   * Minerador marcou como não conclusiva é decidir sobre sinal incerto — a
+   * mesma regra que a fase Silos aplica.
+   */
+  const conclusiva = (keyword: ArticleFormationKeyword) => keyword.semanticState === "conclusive";
+  if (
+    left.entity && right.entity
+    && conclusiva(left) && conclusiva(right)
+    && left.entity.trim().toLowerCase() === right.entity.trim().toLowerCase()
+  ) {
     affinity += 0.1;
-    reasons.push("mesma entidade central");
+    reasons.push("mesma entidade central (KeywordDNA conclusivo)");
+  }
+  /*
+   * MODIFICADORES são sinal TEMÁTICO; funil não entra.
+   *
+   * TOFU/MOFU/BOFU explica estágio editorial e não prova que duas buscas
+   * pedem o mesmo conteúdo — a mesma regra da fase Silos.
+   */
+  const modificadores = (keyword: ArticleFormationKeyword) =>
+    new Set((keyword.modifiers || []).map(item => item.trim().toLowerCase()).filter(Boolean));
+  const modsEsquerda = modificadores(left);
+  const modsDireita = modificadores(right);
+  if (modsEsquerda.size && modsDireita.size) {
+    const comuns = [...modsEsquerda].filter(item => modsDireita.has(item)).length;
+    if (comuns) {
+      affinity += 0.1;
+      reasons.push("modificadores em comum no KeywordDNA");
+    }
   }
   if (left.problem && right.problem && left.problem.trim().toLowerCase() === right.problem.trim().toLowerCase()) {
     affinity += 0.15;
@@ -240,8 +293,15 @@ export function siloThemeTokens(input: {
 
 /** Abaixo disso as buscas pedem conteúdos diferentes. */
 const AFFINITY_FLOOR = 0.5;
-/** Acima disso, separar viraria canibalização. */
-const CANNIBAL_FLOOR = 0.75;
+/**
+ * Acima disso, separar viraria canibalização.
+ *
+ * Exportado porque a normalização de candidatos
+ * (`article-candidate-normalization.ts`) decide FUNDIR pelo mesmo piso: se
+ * separar aqui já era canibalização, os dois grupos nunca deveriam ter nascido
+ * separados. Duplicar o número faria as duas etapas discordarem em silêncio.
+ */
+export const CANNIBAL_FLOOR = 0.75;
 
 /* ------------------------------- principal ------------------------------- */
 
@@ -287,6 +347,13 @@ export function suggestPrincipal(input: {
     // Empatadas em centralidade, a menos específica representa o grupo: uma
     // busca que contém a outra parece central por conter, não por representar.
     if (left.especificidade !== right.especificidade) return left.especificidade - right.especificidade;
+    /*
+     * §6 — a Principal representa o Article, então ela se apoia em dado
+     * verificado. Entre empatadas, a de qualificação conclusiva vem antes.
+     */
+    const conclusivaLeft = left.keyword.semanticState === "conclusive" ? 0 : 1;
+    const conclusivaRight = right.keyword.semanticState === "conclusive" ? 0 : 1;
+    if (conclusivaLeft !== conclusivaRight) return conclusivaLeft - conclusivaRight;
     // KGR menor é mais acessível; volume maior desempata por último.
     const kgrLeft = left.keyword.kgr ?? Number.POSITIVE_INFINITY;
     const kgrRight = right.keyword.kgr ?? Number.POSITIVE_INFINITY;
@@ -710,11 +777,22 @@ export function articleFormationBaseHash(input: {
   siloRefs: readonly string[];
   keywordIds: readonly string[];
   publishedArticlePaths: readonly string[];
+  /**
+   * A versão do KeywordDNA de cada membro.
+   *
+   * Sem isto, um DNA corrigido no Minerador deixava o hash igual — e a SERP
+   * antiga continuava sendo REUSED sobre uma formação que já não se apoiava
+   * nos mesmos dados. Mudou o dado da keyword, mudou a base.
+   */
+  keywordDna?: readonly { keywordId: string; dnaVersionId: string | null; dnaContentHash: string | null }[];
 }): string {
   const canonical = JSON.stringify([
     [...input.siloRefs].sort(),
     [...input.keywordIds].sort(),
     [...input.publishedArticlePaths].sort(),
+    [...(input.keywordDna || [])]
+      .map(item => `${item.keywordId}|${item.dnaVersionId || "sem-dna"}|${item.dnaContentHash || "sem-hash"}`)
+      .sort(),
   ]);
   let h1 = 0x811c9dc5;
   let h2 = 0x01000193;

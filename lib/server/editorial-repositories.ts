@@ -5,6 +5,7 @@ import type { BrandInvitation, OperationalPublication, PlannerItem, RadarItem } 
 import { BrandInvitationSchema, OperationalPublicationSchema, PlannerItemSchema, RadarItemSchema } from "../editorial/operational-flow";
 import type { SavedGridView } from "../editorial/data-grid";
 import { SavedGridViewSchema } from "../editorial/data-grid";
+import { firstIssueMessage, rejectedPaths, type IncompatibleRecord } from "../editorial/partial-read.ts";
 import { getOperationalClient, mapPersistenceError, OptimisticLockError } from "./editorial-db";
 import { contentHash } from "../arquiteto/versioning";
 import type { SerpCollectionRecord, SerpReviewRecord } from "../editorial/contracts";
@@ -80,17 +81,54 @@ export class ArtifactRepository {
     const { data, error } = await client().from("editorial_artifact_versions").select("artifact_type,payload,version_id,entity_id,version_number,previous_version_id,content_hash,origin,change_reason,created_by,created_at").eq("marca_id", marcaId);
     unwrap(data, error);
     const articles: VersionEnvelope<ArticleDNA>[] = []; const silos: VersionEnvelope<SiloDNA>[] = []; const plans: VersionEnvelope<ContentPlan>[] = [];
+    const incompatible: IncompatibleRecord[] = [];
     for (const row of (data || []) as RemoteArtifactRow[]) {
-      if (row.artifact_type === "article_dna") articles.push(VersionedArticleDNASchema.parse(versionPayload(row, VersionedArticleDNASchema)));
-      if (row.artifact_type === "silo_dna") silos.push(VersionedSiloDNASchema.parse(versionPayload(row, VersionedSiloDNASchema)));
-      if (row.artifact_type === "content_plan") plans.push(VersionedContentPlanSchema.parse(versionPayload(row, VersionedContentPlanSchema)));
+      /*
+       * Mesmo isolamento. A reconstrução do envelope (`versionPayload`) entra
+       * na proteção: ela já tolera payload legado, mas o schema final ainda
+       * podia lançar e derrubar todos os artefatos da marca.
+       */
+      const artefato = row.artifact_type === "article_dna" ? { schema: VersionedArticleDNASchema, destino: articles }
+        : row.artifact_type === "silo_dna" ? { schema: VersionedSiloDNASchema, destino: silos }
+        : row.artifact_type === "content_plan" ? { schema: VersionedContentPlanSchema, destino: plans }
+        : null;
+      if (!artefato) continue;
+      const parsedArtifact = artefato.schema.safeParse(versionPayload(row, artefato.schema as never));
+      if (!parsedArtifact.success) {
+        incompatible.push({
+          kind: "artifact_version",
+          id: String(row.version_id),
+          articleId: row.entity_id ? String(row.entity_id) : null,
+          stage: String(row.artifact_type),
+          paths: rejectedPaths(parsedArtifact.error.issues),
+          message: firstIssueMessage(parsedArtifact.error.issues, "O artefato não corresponde ao contrato vigente."),
+        });
+        continue;
+      }
+      (artefato.destino as unknown[]).push(parsedArtifact.data);
     }
     const versionIds = [...articles, ...silos, ...plans].map(version => version.versionId);
-    if (!versionIds.length) return { articles, silos, plans, events: [] as VersionStatusEvent[] };
+    if (!versionIds.length) return { articles, silos, plans, events: [] as VersionStatusEvent[], incompatible };
     const { data: eventRows, error: eventError } = await client().from("editorial_version_status_events").select("id,version_id,status,reason,actor_id,occurred_at").in("version_id", versionIds).order("occurred_at");
     unwrap(eventRows, eventError);
-    const events = (eventRows || []).map(row => VersionStatusEventSchema.parse({ eventId: row.id, versionId: row.version_id, status: row.status, reason: row.reason, actorId: row.actor_id, occurredAt: isoDate(row.occurred_at) }));
-    return { articles, silos, plans, events };
+    // Evento inválido não pode derrubar os artefatos que já foram lidos.
+    const events: VersionStatusEvent[] = [];
+    for (const row of eventRows || []) {
+      const parsedEvent = VersionStatusEventSchema.safeParse({ eventId: row.id, versionId: row.version_id, status: row.status, reason: row.reason, actorId: row.actor_id, occurredAt: isoDate(row.occurred_at) });
+      if (!parsedEvent.success) {
+        incompatible.push({
+          kind: "version_status_event",
+          id: String(row.id),
+          articleId: row.version_id ? String(row.version_id) : null,
+          stage: null,
+          paths: rejectedPaths(parsedEvent.error.issues),
+          message: firstIssueMessage(parsedEvent.error.issues, "O evento de status não corresponde ao contrato vigente."),
+        });
+        continue;
+      }
+      events.push(parsedEvent.data);
+    }
+    return { articles, silos, plans, events, incompatible };
   }
 }
 
@@ -98,12 +136,34 @@ type WorkflowStage = "radar" | "planner";
 export class WorkflowRepository {
   async list(marcaId: string) {
     const { data, error } = await client().from("editorial_workflow_items").select("id,marca_id,article_id,stage,state,payload,lock_version,created_at,updated_at").eq("marca_id", marcaId).in("stage", ["radar", "planner"]);
-    unwrap(data, error); const radar: RadarItem[] = []; const planner: PlannerItem[] = [];
+    unwrap(data, error); const radar: RadarItem[] = []; const planner: PlannerItem[] = []; const incompatible: IncompatibleRecord[] = [];
     for (const row of data || []) {
-      if (row.stage === "radar") radar.push(RadarItemSchema.parse({ ...(row.payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: isoDate(row.created_at), updatedAt: isoDate(row.updated_at), origin: "real" }));
-      if (row.stage === "planner") planner.push(PlannerItemSchema.parse({ ...(row.payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: isoDate(row.created_at), updatedAt: isoDate(row.updated_at), origin: "real" }));
+      /*
+       * safeParse POR LINHA. Antes, `.parse()` dentro do laço derrubava a
+       * consulta inteira por causa de um registro em formato anterior — e
+       * junto iam os artigos bons e os itens do Planejador da mesma marca.
+       *
+       * O schema NÃO foi afrouxado: o registro incompatível continua fora da
+       * lista de itens. Ele passa a ser NOMEADO em vez de sumir.
+       */
+      const base = { ...(row.payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: isoDate(row.created_at), updatedAt: isoDate(row.updated_at), origin: "real" };
+      const schema = row.stage === "radar" ? RadarItemSchema : PlannerItemSchema;
+      const parsed = schema.safeParse(base);
+      if (!parsed.success) {
+        incompatible.push({
+          kind: "workflow_item",
+          id: String(row.id),
+          articleId: row.article_id ? String(row.article_id) : null,
+          stage: String(row.stage),
+          paths: rejectedPaths(parsed.error.issues),
+          message: firstIssueMessage(parsed.error.issues, "O registro não corresponde ao contrato vigente."),
+        });
+        continue;
+      }
+      if (row.stage === "radar") radar.push(parsed.data as RadarItem);
+      else planner.push(parsed.data as PlannerItem);
     }
-    return { radar, planner };
+    return { radar, planner, incompatible };
   }
 
   async find(id: string) {
@@ -140,10 +200,25 @@ export class WorkflowRepository {
     const alreadySaved = radar.analysisVersions.some(version => version.versionId === analysis.versionId);
     if (alreadySaved) return current;
     const payload = { ...(current.payload as object), analysisVersions: [...radar.analysisVersions, analysis] };
-    const { data, error } = await client().from("editorial_workflow_items").update({ payload, updated_by: actorId }).eq("id", current.id).eq("marca_id", marcaId).eq("lock_version", expectedLock).select("*").maybeSingle();
+    /*
+     * A VOLTA NÃO PRECISA DA LINHA INTEIRA.
+     *
+     * `select("*")` devolvia o payload recém-gravado — nesta linha, 9,77 MB
+     * medidos — e quem chama usa apenas `id`, `lock_version` e o `id` de dentro
+     * do payload, que já está em `current`. Era uma perna gratuita somada a uma
+     * escrita que já ia no limite: a subida leva o payload inteiro porque o
+     * PostgREST substitui a coluna, e a descida levava tudo de novo.
+     *
+     * Isto NÃO resolve o crescimento do payload — só para de pagar duas vezes
+     * por ele. O crescimento é decisão de esquema, e está reportado.
+     */
+    const idNoPayload = current.payload && typeof current.payload === "object" && !Array.isArray(current.payload) && typeof (current.payload as { id?: unknown }).id === "string"
+      ? (current.payload as { id: string }).id
+      : null;
+    const { data, error } = await client().from("editorial_workflow_items").update({ payload, updated_by: actorId }).eq("id", current.id).eq("marca_id", marcaId).eq("lock_version", expectedLock).select("id,lock_version").maybeSingle();
     if (error) mapPersistenceError(error);
     if (!data) throw new OptimisticLockError();
-    return data;
+    return { ...(data as { id: string; lock_version: number }), payload: idNoPayload ? { id: idNoPayload } : null };
   }
 }
 

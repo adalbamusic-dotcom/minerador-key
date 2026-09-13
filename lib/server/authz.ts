@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { requireSupabaseUser, SupabaseSessionError } from "@/lib/server/supabase-session";
+import { SupabaseSessionError } from "@/lib/server/supabase-session";
 
 function serviceClient(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -61,6 +61,8 @@ async function buildCanonicalSessionProfile(identity: { userId: string }): Promi
  */
 export async function requireCanonicalSessionProfile(): Promise<CanonicalSessionProfile> {
   try {
+    /* Import tardio: ver a nota em `requireCanonicalActorUserId`. */
+    const { requireSupabaseUser } = await import("@/lib/server/supabase-session");
     const user = await requireSupabaseUser();
     return buildCanonicalSessionProfile({ userId: user.id });
   } catch {

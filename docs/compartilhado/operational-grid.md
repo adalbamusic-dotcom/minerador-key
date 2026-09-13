@@ -358,3 +358,36 @@ SCHEMA_CHANGE = NO
 CODE_CHANGE = NO
 REMOTE_OPERATION = NONE
 ```
+
+## 19. Correção do expansor da linha — 2026-09-11
+
+Correção de interface, sem regra de domínio. Não vira invariante editorial.
+
+O botão do expansor (`renderExpanded`) media 12×12 px dentro de uma célula de
+29×34 px — 12% da área. Um clique nos 88% restantes atingia o `<td>`, subia até
+o `onClick` da linha, cujo guarda `target.closest("button, input, a, …")` não
+casa com uma célula, e a linha era **ativada** em vez de expandida. O efeito
+visível era "o chevron não abre o detalhe".
+
+Medido num navegador real, antes e depois:
+
+```text
+antes   botão 12,0 × 12,0 em célula 29,3 × 34,0  =  12%
+        zona morta 8,9px esquerda · 8,4px direita · 9px topo · 13px base
+depois  botão 28,8 × 28,0 em célula 29,3 × 34,0  =  81%
+```
+
+O botão passou a ocupar a célula (`p-0` na célula, `flex h-full w-full … py-2`
+no botão). O `stopPropagation` do botão permanece: expandir não seleciona a
+linha, e marcar o checkbox não expande.
+
+Guardado por `tests/radar-fix-expansor-planilha.test.mts`, com cliques reais no
+DOM. `happy-dom` não calcula layout, então a geometria fica travada pelas
+classes que a produzem; os pixels acima vieram do navegador.
+
+```text
+CODE_CHANGE = YES (components/editorial/operational-data-grid.tsx)
+DOMAIN_RULE = NO
+DATABASE_CHANGE = NO
+REMOTE_OPERATION = NONE
+```

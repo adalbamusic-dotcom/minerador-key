@@ -60,7 +60,7 @@ test("página implementa as áreas sequenciais e conserva a extração explícit
   assert.match(page, /tab === "historico"/);
   assert.match(page, /const setTab = \(next: Tab\) =>/);
   assert.doesNotMatch(page, /const setTab = \(next: Tab\) => \{[^}]*createRadarAnalysisSuccessor/);
-  assert.match(page, /Analisar referências selecionadas/);
+  assert.match(page, /Analisar páginas selecionadas/);
   assert.doesNotMatch(page, /Analisar esta página/);
   assert.match(page, /analysisQueue = organicResults/);
   assert.match(page, /não dispara nova coleta/);

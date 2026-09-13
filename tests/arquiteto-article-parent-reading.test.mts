@@ -82,10 +82,16 @@ test("concluir formação materializa o ArticleDNA já aprovado", () => {
   assert.doesNotMatch(workspace, /status: "proposed",\r?\n        \}\);/);
   assert.match(workspace, /const confirmado = confirmedArticlePayload\(/);
   assert.match(workspace, /createStatusEvent\(canonico\.versionId, "approved", actorId,/);
-  // E o artefato sai COMPLETO: território e Silo canônico. Emitir `siloId:
-  // null` fazia a fase seguinte terminar o serviço desta.
-  assert.match(workspace, /const materializado = materializeArticleSiloId\(\{/);
-  assert.match(workspace, /const payload = materializado\.payload;/);
+  /*
+   * O pai continua sendo resolvido AQUI, e não deduzido pela fase seguinte —
+   * que era o buraco original. O que a auditoria do §3 mudou é que, no
+   * fechamento canônico, o ArticleDNA nasce antes do SiloDNA existir: aí o pai
+   * é o território e `siloId` nasce nulo por decisão de produto. Com Silo
+   * canônico presente, o artefato continua saindo completo.
+   */
+  assert.match(workspace, /const vinculo = bindArticleParentForMaterialization\(\{/);
+  assert.match(workspace, /stage: estagio,/);
+  assert.match(workspace, /const payload = vinculo.payload;/);
 });
 
 test("o cabeçalho do grupo não redecide o que o agrupamento já nomeou", () => {

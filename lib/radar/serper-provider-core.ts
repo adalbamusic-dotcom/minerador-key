@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { radarIntentConflict } from "./editorial-identity.ts";
 import { SerpDiagnosticSchema, SerpKnowledgeGraphSchema, SerpOrganicResultSchema, SerpPeopleAlsoAskSchema, SerpRelatedSearchSchema, SerpResearchSnapshotSchema, type SerpConfidence, type SerpResultKind, type SerpResearchSnapshot, type SerpSearchInput } from "./serp/contracts.ts";
 
 const SerperResponseSchema = z.object({
@@ -75,7 +76,9 @@ function diagnosticFor(input: SerpSearchInput, organic: Array<z.infer<typeof Ser
   const frequentEntities = input.articleEntities.filter(entity => combined.includes(entity.toLowerCase())).slice(0, 12);
   const localSignals = organic.filter(result => result.inferredType === "local").map(result => result.domain).slice(0, 10);
   const conflicts: string[] = [];
-  if (input.expectedIntent && dominantIntent && !dominantIntent.includes(input.expectedIntent.toLowerCase().split("_")[0])) conflicts.push(`A intenção esperada (${input.expectedIntent}) não coincide claramente com a intenção aparente (${dominantIntent}).`);
+  /* A decisão de conflito é da autoridade; aqui só se registra o resultado. */
+  const leituraDeIntencao = radarIntentConflict({ expected: input.expectedIntent, observed: dominantIntent });
+  if (leituraDeIntencao.conflicting) conflicts.push(leituraDeIntencao.reason);
   if (input.expectedFormat && dominantFormats.length && !dominantFormats.some(format => format.includes(input.expectedFormat.toLowerCase().split("_")[0]))) conflicts.push(`O formato esperado (${input.expectedFormat}) não aparece como formato dominante.`);
   const missingTopics = input.requiredTopics.filter(topic => topic.trim() && !combined.includes(topic.toLowerCase())).slice(0, 8);
   if (missingTopics.length) conflicts.push(`Tópicos do ArticleDNA sem ocorrência textual nos snippets: ${missingTopics.join(", ")}.`);

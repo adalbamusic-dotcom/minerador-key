@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRadarBenchmark, type RadarExtractionPage, type RadarSemanticTerm } from "../lib/radar/analysis-contracts.ts";
+import { buildRadarBenchmark, RadarExtractionPageSchema, type RadarExtractionPage, type RadarSemanticTerm } from "../lib/radar/analysis-contracts.ts";
 import { classifyRadarSemanticTerm, isComparableRadarExtraction, isPrimaryRadarSemanticTerm, summarizeRadarExtractionFormats, summarizeRadarSemantics } from "../lib/radar/analysis-insights.ts";
 import { deriveRadarInvestigationState, deriveRadarTransferState } from "../lib/radar/workflow-insights.ts";
 
-const basePage = (overrides: Partial<RadarExtractionPage> = {}): RadarExtractionPage => ({
+const basePage = (overrides: Partial<RadarExtractionPage> = {}): RadarExtractionPage => RadarExtractionPageSchema.parse({
   id: "page-1", url: "https://example.com/blog/guia", status: "success", fetchedAt: "2026-07-21T12:00:00.000Z", title: "Guia editorial", metaDescription: "Meta", canonical: null, h1: ["Guia"], h2: [], h3: [], wordCount: 1000, internalLinkCount: 2, externalLinkCount: 1, listCount: 1, tableCount: 0, faqCount: 0, imageCount: 1, blockquoteCount: 0, comparisonCount: 0, hasDates: false, author: null, structuredDataTypes: ["Article"], recurringTerms: [], boldCount: 0, italicCount: 0, error: null, ...overrides,
 });
 

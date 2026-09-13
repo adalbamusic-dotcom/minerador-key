@@ -1,5 +1,276 @@
 # Estado atual — Radar
 
+## Pesquisa Google — Fase 1 — HOMOLOGADA — 2026-09-11
+
+A Pesquisa Google do Radar concluiu a Fase 1 e foi validada em runtime real
+pelo USER, com provider DataForSEO, no fluxo
+`RESET → START → ANALYZE → FINALIZE → F5`.
+
+Esta seção descreve o que existe hoje. Os números da rodada usada na
+homologação ficam no relatório datado, não aqui:
+[relatório de homologação](../00-produto/auditorias/relatorio-radar-google-fase1-homologacao-2026-09-11.md).
+As regras permanentes ficam na [spec](spec.md); as próximas frentes, no
+[backlog](backlog.md).
+
+```text
+GOOGLE_SEARCH_PHASE_1 = HOMOLOGADA
+YOUTUBE_SEARCH = NÃO HOMOLOGADA — gate próprio
+AMAZON_SEARCH = NÃO IMPLEMENTADA como engine operacional
+```
+
+### IMPLEMENTED — verificado no código
+
+Áreas operacionais do Radar: `Pesquisa`, `Vídeos`, `Especialista`, `Relatório`
+(`RADAR_R3_AREAS` em `lib/radar/r3-workbench.ts`). A antiga área `Conteúdo`
+não é área operacional.
+
+Modos de pesquisa competitiva, em `lib/radar/search-mode.ts`
+(`RadarPrimarySearchMode = WEB | YOUTUBE | AMAZON`), com a capacidade da engine
+declarada e não presumida em `RADAR_SEARCH_MODE_ENGINE`:
+
+| Modo | Rótulo | Engine declarada | Situação |
+| --- | --- | --- | --- |
+| `WEB` | Google | `available` | implementada e homologada |
+| `YOUTUBE` | YouTube | `partial` | universo, separação e modelo de vídeo existem; a coleta usa o bloco de vídeos da SERP do Google. Não homologada |
+| `AMAZON` | Amazon | `planned` | a casca reconhece o modo; a engine de produto é frente própria |
+
+A seleção é única por investigação e fica gravada nela; o modo não muda no meio.
+
+Lifecycle da Pesquisa Google, todo por ação explícita do USER:
+
+```text
+NOT_STARTED → START → READY_TO_ANALYZE → ANALYZE
+            → READY_TO_FINALIZE → FINALIZE → FINALIZED
+```
+
+Nenhum passo ocorre por `mount`, F5, troca de área ou expansão de painel.
+`RESET` é ação explícita e separada.
+
+`START` executa, numa passagem: contexto do Article → plano de consultas →
+SERP canônica → SERPs auxiliares → universo de pesquisa → deduplicação →
+curadoria automática → persistência → readback. Não há revisão manual
+intermediária obrigatória.
+
+`ANALYZE` executa, como uma operação do USER: extração dos concorrentes →
+persistência da amostra → readback → verificação de fontes → consolidação de
+evidências → persistência final → readback final.
+
+`FINALIZE` é ação do USER e não chama provider. Congela
+`RadarFrozenEvidenceBundle` com `EditorialBlueprint`, `SpecialistBriefs`,
+`VideoBriefs` e a proveniência, amarrado a `articleId`, `articleDnaVersionId`
+e `articleDnaContentHash` (`lib/radar/investigation-finalization.ts`).
+
+`RESET` limpa somente a pesquisa corrente (`RADAR_RESET_CLEARED` em
+`lib/radar/radar-reset.ts`) e não inicia pesquisa nova.
+
+Camadas de domínio implementadas:
+
+- `RadarCompetitiveObservedModel` — autoridade única da observação competitiva;
+- `SemanticConceptModel` — observações cruas preservadas → normalização →
+  agrupamento → conceitos, perguntas e entidades;
+- `AiDiscoveryContext` — unidades respondíveis, perguntas centrais, requisitos
+  de definição, cobertura de entidades, suporte factual e conexões com o
+  especialista;
+- `RadarEditorialBlueprint` — projeção editorial do Radar, com estados
+  `READY` / `INSUFFICIENT` declarados;
+- `RadarSpecialistBrief` e `RadarVideoBrief`;
+- `RadarEvidenceBundle`, `RadarFrozenEvidenceBundle` e `PlannerHandoff v3`
+  (`RADAR_PLANNER_CONTRACT_VERSION = 3`).
+
+Autoridade centralizada de intenção declarada em `lib/radar/editorial-identity.ts`
+(`radarConclusiveIntent`, `radarDeclaredArticleIntent`,
+`radarDeclaredKeywordIntent`, `radarIntentConflict`).
+
+### TESTED — confirmado por teste
+
+Suíte `pnpm run test:radar`: 900 testes, zero falhas na data desta seção.
+
+Cobrem, entre outros: despacho real no DOM, remoção do workflow legado da
+superfície, handoff canônico v3, reset formal, encadeamento da persistência do
+ANALYZE, autoridade de intenção com censo de leituras cruas, projeção única do
+Especialista e a área clicável do expansor da planilha.
+
+### REMOTE VERIFIED
+
+Persistência e readback confirmados na rodada real: escrita intermediária da
+amostra, readback, escrita final, readback final, concorrência otimista
+encadeada (`versão N → sample write → readback N+1 → final write com N+1 →
+readback N+2`) e congelamento remoto do bundle.
+
+### MANUAL UI VALIDATION
+
+`RESET → START → ANALYZE → FINALIZE → F5` executado pelo USER com provider
+real. Após F5, o bundle congelado foi preservado e nenhuma conclusão diferente
+foi reconstruída silenciosamente.
+
+### VIDEOS_2.4 — HOMOLOGADO EM RUNTIME REAL — 2026-09-14
+
+O USER executou o fluxo completo com provider real: `youtube-transcript@1.3.1`
+consultado pelo Local Worker, jobs `COMPLETED`, transcripts persistidos e
+`TEXT_READY` em duas fontes — 406 e 733 segmentos com tempos reais.
+
+```text
+TIMESTAMP_COVERAGE = 100,1% e 100,0% da duração oficial
+TIMESTAMP_UNIT     = resolvida pela duração da YouTube Data API
+F5                 = preserva TEXT_READY
+WORKER POSTERIOR   = EMPTY (a idempotência recusa antes de chamar o endpoint)
+```
+
+A cobertura de ~100% é o que prova que o defeito de unidade do pacote não passou:
+lida na unidade errada, a legenda cobriria 0,1% ou 100.000% do vídeo.
+
+Migrations aplicadas: `20260911120000`, `20260911180000`, `20260912100000` e
+`20260913100000`.
+
+### PENDING
+
+- **`20260914100000_radar_video_brief_extracts.sql` não aplicada.** Cria as duas
+  tabelas do casamento (execução + trechos). Sem ela o recorte não persiste, e o
+  Gate 3 não pode ser exercido com dados reais.
+- **Smoke real de GCS + Speech (VIDEOS_2.2) não executado.** A via do áudio
+  enviado continua sem exercício em runtime — a via pública tornou-a menos
+  urgente, não desnecessária.
+- Legenda de vídeo público de terceiros: fora do alcance da configuração atual.
+  A limitação é declarada na tela, com os caminhos que a resolvem — não é falha.
+- Tradução, casamento entre pauta e conteúdo, `VideoEvidence` e artigo:
+  gates posteriores.
+
+### BLOCKED
+
+Nada bloqueado nesta frente.
+
+## Purga administrativa de Arquiteto e Radar — Care Glow — 2026-09-08
+
+```text
+STATUS            = SCRIPT PRONTO, NAO EXECUTADO
+AUTORIZACAO       = responsavel pela marca, explicita, registrada nesta entrada
+MARCA ALVO        = 09762023-d0d4-4c24-b34e-d0fdfd43f891 (Care Glow)
+ESCOPO            = stage IN ('architect','radar') + artefatos article_dna/silo_dna/silo_page
+PRESERVADO        = Marca, Minerador, Planejador, Redator, Publicacoes,
+                    usuarios, permissoes, integracoes e TODAS as outras marcas
+SQL_EXECUTADO_POR_MIM = 0
+```
+
+**Natureza.** Não é saneamento de defeito. A auditoria de 2026-09-06 provou os
+registros íntegros e a continuidade validada. Isto é **descarte deliberado de
+trabalho**, decidido pelo responsável pela marca. A regra "proibido limpar dados
+para corrigir problema de interface" **permanece válida** e não é revogada por
+esta operação — ela não se aplica porque não há problema de interface a corrigir.
+
+**Levantamento inicial informado** (a conferir na execução): 115 versões de
+ArticleDNA, 9 revisões de arquitetura por IA, 21 registros de trabalho do
+Arquiteto, 4 artigos do Radar, 10 eventos de importação, 9 snapshots e 6
+revisões SERP. Zero SiloDNA/SiloPage e zero grafos de links.
+
+### O script — arquivo único
+
+`supabase/scripts/2026-09-08-descarte-arquiteto-radar-care-glow.sql`
+
+**SQL PostgreSQL puro**, para copiar e colar no editor do Supabase. Sem
+`\set`, sem placeholder, sem substituição manual — a marca já está fixa no
+próprio script. Tudo dentro de um `DO` block, que é uma transação implícita:
+qualquer exceção desfaz tudo, inclusive o estado dos gatilhos.
+
+**Backup dispensado por decisão explícita.** Este é descarte DEFINITIVO, sem
+restauração. Está escrito no cabeçalho do script para ninguém supor o
+contrário depois.
+
+Executar **duas vezes**: primeiro com `v_simular := true` (percorre tudo,
+imprime o manifesto e aborta de propósito), depois com `false`. Uma terceira,
+de volta em `true` sobre o estado já vazio, prova idempotência.
+
+### Garantias embutidas no script
+
+- **Identidade validada** antes de qualquer remoção; marca inexistente aborta.
+- **Condições positivas** para `architect` e `radar` — `stage <> 'architect'`
+  foi eliminado, porque excluir pelo complemento apagaria estágio futuro que
+  ninguém revisou.
+- **Dependências abortam com os ids à vista:** Planejador, ContentPlan que cite o
+  artigo no payload, Redator, Publicações, e entidade que apareça em outra marca.
+- **Uma transação**, com `lock_timeout` e `statement_timeout`; dependentes
+  removidos antes das origens; nenhum `UPDATE` anulando referência para
+  contornar validação.
+- **Gatilhos append-only nomeados um a um** (`editorial_artifact_versions`,
+  `version_status_events`, `decision_events`, `serp_snapshots`,
+  `serp_reviews`), com o estado REAL lido de `pg_trigger.tgenabled` e **reposto tal como
+  estava** (O/D/R/A), verificado depois. Nenhuma função, FK ou validação é removida.
+- **Preservação comprovada por hash de ids**, não só contagem — Minerador, outras
+  marcas e outros artefatos.
+- **Órfãos verificados** em `version_status_events` e `decision_events`.
+- **Qualquer divergência levanta exceção** e desfaz tudo.
+- **`:simular = true`** roda o caminho inteiro e aborta de propósito no fim.
+
+### O que o script NÃO faz — é seu
+
+1. **Rodar a exportação antes.** Sem ela a purga é irreversível.
+2. **Conferir Arquiteto e Radar vazios nas duas sessões**, pelo servidor. Se vier
+   conteúdo, é recuperação local — não dado remoto.
+3. **Não limpar `localStorage` indiscriminadamente.** Confirmar que recuperação
+   local antiga não repovoou o servidor.
+4. **Reexecutar com `:simular = true`** sobre o estado já vazio, provando
+   idempotência.
+5. Registrar aqui o resultado por tabela e a validação nas duas sessões.
+
+### Pendência separada
+
+A **ausência de seleção e exclusão na aba Silos** fica registrada como correção
+funcional própria, no backlog. Não é motivo desta purga nem é resolvida por ela.
+
+## Continuidade entre sessões — base validada — 2026-09-06
+
+```text
+RECUPERACAO_ENTRE_SESSOES = VALIDADA (cenario Care Glow)
+LIMPEZA_DE_DADOS          = NAO NECESSARIA
+RECRIACAO_DE_BANCO        = NAO NECESSARIA
+ALTERACAO_DA_FUNDACAO     = NAO NECESSARIA
+CAUSA_RAIZ                = NAO IDENTIFICADA (ver "limites" abaixo)
+```
+
+> **Recuperação dos artigos e da SERP entre sessões: validada no cenário Care
+> Glow. A investigação não demonstrou necessidade de limpeza, recriação do banco
+> ou alteração da fundação global.**
+
+- **Verificado remotamente, somente leitura** (consultas do usuário, 06/09/2026):
+  três itens do Radar encontrados e válidos, incluindo "serum facial principia" e
+  "mascara de skincare"; 100 versões editoriais e 111 eventos examinados sem
+  incompatibilidade; cinco snapshots SERP válidos, sendo dois da máscara com sete
+  resultados cada.
+- **Validação manual:** após limpar o cache dos dois navegadores e reiniciar,
+  **ambos recuperaram os três artigos e a SERP existente**. Capturas de
+  06/09/2026, entre 04:43 e 04:46, anexadas como evidência.
+- **Correções aplicadas no período** — nenhuma delas comprovada como a causa:
+  - leitura resiliente por linha nos leitores de workflow, artefatos e eventos
+    (`lib/editorial/partial-read.ts`, `lib/server/editorial-repositories.ts`);
+  - isolamento por repositório no `GET /api/editorial/workspace`
+    (`Promise.allSettled`), com a seção que falha **nomeada** em vez de
+    derrubar a resposta inteira;
+  - `persisted_data_invalid` (502) separado de `invalid_brand_id` (400) — dado
+    persistido ruim deixou de ser reportado como "Marca inválida";
+  - `requestId` em toda resposta e no log, com contagens por repositório,
+    estado da leitura e seções que falharam, sem segredos;
+  - falha da escrita do workflow deixou de ser reportada como importação
+    concluída, e 4xx deixou de degradar o modo de persistência da leitura.
+
+### Limites desta validação
+
+- **A causa raiz NÃO foi identificada.** A hipótese de linha incompatível foi
+  **falsificada** pelas consultas remotas (3/3 itens passam no schema). O
+  isolamento da agregação é a explicação mais plausível entre as mudanças
+  aplicadas, mas **plausível não é identificado**: reinício do servidor e
+  limpeza de cache aconteceram no mesmo intervalo.
+- **Como fechar isso, se voltar a ocorrer:** o log do `GET` agora traz
+  `requestId` e `failedSections`. Uma ocorrência com `failedSections` não
+  vazio identifica a seção; vazio elimina a agregação como causa.
+- **O Radar não está concluído** e a plataforma não está homologada. Ver o
+  backlog.
+
+### Referências canônicas
+
+Identidade, tenantização, autorização, persistência e versionamento seguem a
+fundação global — este documento não redefine nenhuma delas. Ver
+`docs/00-produto/auditorias/reconciliacao-mesa-editorial-2026-09-06.md` e
+`docs/05-radar/adendo-sdd-persistencia-verificavel.md`.
+
 ## Correção funcional — readback remoto da aprovação SERP após F5 — 2026-08-27
 
 - **Verificado remotamente, somente leitura:** existem aprovações append-only
@@ -946,3 +1217,20 @@ O item Radar já recebe `arquitetoStrategyContext` opcional; a extensão permane
   passaram. ESLint direcionado, `check:visual-system` e `git diff --check`
   passaram; o checkout preexistente e suas alterações não relacionadas foram
   preservados.
+
+
+## Descarte administrativo executado — 2026-09-08
+
+Proprietário da operação: Arquiteto; participação do Radar explicitamente autorizada.
+Projeto hjjlntdpdgvpnazdztqw; marca Care Glow (09762023-d0d4-4c24-b34e-d0fdfd43f891).
+Descarte definitivo de testes autorizado pelo usuário, com backup dispensado.
+Executado via Supabase CLI 2.111.0, db query --linked, em transação única.
+
+- Confirmado no banco: removidos 21 workflows do Arquiteto e 4 do Radar; 115 ArticleDNA; 9 article_architecture_ai_review; 114 eventos de status; 10 eventos de decisão; 9 snapshots e 6 revisões SERP. Silos e tabelas do grafo já estavam vazios.
+- Preservados: 29 keywords, 3 listas, 83 qualificações semânticas, 66 apresentações contextuais e 1 brand_skill. Comparação de conteúdo integral dos registros preservados nas 17 tabelas do script passou.
+- Cinco triggers append-only restaurados exatamente ao estado O; nenhuma função, FK ou migration removida/aplicada.
+- Primeiro ensaio detectou text versus uuid em version_id e desfez a transação. Script corrigido para text[], inclusão das revisões IA, exclusão por folhas de previous_version_id/source_version_id e previous_snapshot_id, locks e comparação de conteúdo preservado.
+- Ensaio corrigido: PASS com rollback intencional. Execução definitiva: PASS. Readback SQL independente: PASS. Reexecução em simulação sobre vazio: PASS com rollback intencional. O erro P0001 SIMULACAO CONCLUIDA é deliberado, não falha da purga.
+- Validação nas duas sessões da interface: AINDA NÃO VERIFICADA nesta execução. Cache local não foi apagado. Não declarar sincronização visual homologada com base apenas neste SQL.
+- Script: supabase/scripts/2026-09-08-descarte-arquiteto-radar-care-glow.sql. Mantido em simulação por padrão. Ele aborta se grafos reaparecerem: não é reset universal para qualquer acervo futuro.
+- Nenhum commit, push ou deploy executado nesta entrega.

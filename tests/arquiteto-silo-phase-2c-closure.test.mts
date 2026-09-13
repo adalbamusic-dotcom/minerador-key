@@ -244,10 +244,17 @@ const operation = () => openSiloConsolidationOperation({
 
 test("09 · a consolidação parte do snapshot remoto, não da proposta local", () => {
   const ui = executable(read(UI));
-  const start = ui.indexOf("const consolidateSilos = async () => {");
+  // A assinatura ganhou escopo opcional para o fechamento automático chamar o
+  // MESMO caminho canônico; o que este teste guarda é de onde ele lê.
+  const start = ui.indexOf("const consolidateSilos = async (");
   assert.ok(start > 0, "consolidateSilos existe");
   const body = ui.slice(start, ui.indexOf("\n  };", start));
-  assert.match(body, /const consolidable = remoteSiloWorkingCopies/);
+  /*
+   * A fonte continua sendo a WC REMOTA. O fechamento automático passa a lista
+   * que ACABOU de ler do servidor porque `setState` não repropaga no mesmo
+   * tick — não é proposta local entrando por outra porta.
+   */
+  assert.match(body, /const consolidable = \[\.\.\.\(escopo\?\.remoteWorkingCopies \|\| remoteSiloWorkingCopies\)\]/);
   assert.match(body, /remote\.workingCopy\.pillarSelection/);
   assert.match(body, /workingCopyExpectedLock: remote\.lockVersion/);
   assert.match(body, /territoryExpectedLock: territory\.lockVersion/);
@@ -584,4 +591,59 @@ test("25 · território de uma proposta local é lido dos ArticleDNAs, nunca inv
 
   const nenhum = resolveProposalTerritoryRef({ articleIds: ["art-A"], territoryRefByArticleId: new Map() });
   assert.deepEqual(nenhum, { territoryRef: null, issue: "NO_TERRITORY" });
+});
+
+// ===========================================================================
+// 26 · A IMPORTAÇÃO FANTASMA — escrita remota recusada não vira estado local
+// ===========================================================================
+
+test("26 · falha remota não é reportada como importação, e não grava local", () => {
+  const contexto = executable(read("components/editorial-pipeline-context.tsx"));
+
+  // `sendWorkflowCommand` DEVOLVE o desfecho. Antes ela capturava a falha,
+  // marcava persistenceMode e voltava normal — quem usava `await` seguia em
+  // frente e dizia "1 item enviado" com o banco vazio.
+  assert.match(contexto, /Promise<WorkflowCommandOutcome>/);
+  /*
+   * O sucesso do `import_radar` ficou MAIS exigente, não menos: resposta 200
+   * não basta mais. O servidor precisa declarar `readbackConfirmed` e devolver
+   * os itens, e cada artigo enviado tem de aparecer neles com a mesma versão e
+   * o mesmo hash — senão o desfecho é recusa.
+   */
+  assert.match(contexto, /if \(command\.action !== "import_radar"\) return \{ok:true\};/);
+  assert.match(contexto, /body\.readbackConfirmed!==true/);
+  assert.match(contexto, /code:"readback_mismatch"/);
+  assert.match(contexto, /return \{\s*ok: false,/);
+
+  // E o importador do Radar checa esse desfecho ANTES de tocar no estado local.
+  const inicio = contexto.indexOf("importApprovedToRadar: async");
+  assert.ok(inicio > 0, "importApprovedToRadar existe");
+  const corpo = contexto.slice(inicio, contexto.indexOf("importApprovedSiloPagesToRadar", inicio));
+  assert.match(corpo, /const escrita = await sendWorkflowCommand\(/);
+  assert.match(corpo, /if \(!escrita\.ok\)/);
+
+  /*
+   * A recusa vem antes de qualquer escrita local — e devolve imported: 0.
+   *
+   * A escrita deixou de partir de uma lista montada no cliente: o estado local
+   * agora recebe os itens que o READBACK devolveu. Não há mais `radarItems:
+   * next` a preceder; o que se guarda é que nada é escrito antes do guard.
+   */
+  const guarda = corpo.indexOf("if (!escrita.ok)");
+  const escritaLocal = corpo.indexOf("updateWorkspace(");
+  assert.ok(guarda > 0 && guarda < escritaLocal, "o guard precede a escrita local");
+  assert.match(corpo, /const remote=escrita\.radarItems \|\| \[\];/, "o estado local vem do readback remoto");
+  assert.equal(corpo.includes("radarItems: next"), false, "nada de lista montada no cliente");
+  assert.match(corpo.slice(guarda, escritaLocal), /imported: 0/);
+});
+
+test("27 · a leitura do Radar é por marca, não por usuário", () => {
+  // É isto que torna o teste em outro navegador conclusivo: se o item estivesse
+  // no banco, qualquer sessão com acesso à mesma Brand o veria. Não ver em
+  // outro navegador prova que a escrita remota não aconteceu.
+  const repos = executable(read("lib/server/editorial-repositories.ts"));
+  const consulta = repos.slice(repos.indexOf('.in("stage", ["radar", "planner"])') - 400, repos.indexOf('.in("stage", ["radar", "planner"])') + 60);
+  assert.match(consulta, /\.eq\("marca_id", marcaId\)/);
+  assert.ok(!/\.eq\("created_by"/.test(consulta), "não filtra por autor");
+  assert.ok(!/\.eq\("updated_by"/.test(consulta), "nem por quem atualizou");
 });

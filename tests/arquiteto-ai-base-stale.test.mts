@@ -308,8 +308,20 @@ test("L · execução em sessão prevalece sobre a revisão desatualizada, sem c
 });
 
 test("a linha rotula STALE como Desatualizada e o hash não usa reviewRole", () => {
-  assert.match(workspace, /articleProcess\.ai\.state === "STALE" \?/);
-  assert.match(workspace, /Desatualizada/);
+  /*
+   * A leitura de STALE vive no PAINEL, não numa coluna da planilha.
+   *
+   * A coluna "Revisão IA" saiu por decisão de contrato: IA é evidência do
+   * processamento, não um estágio manual com casa própria na mesa. O que não
+   * podia acontecer era a leitura sumir junto — e ela não sumiu.
+   */
+  assert.match(workspace, /articleAiStateLabel\(articleProcess\.ai\.state\)/);
+  assert.match(workspace, /articleProcess\.ai\.state === "STALE" &&/);
+  // O rótulo é do read model, uma fonte só para as duas telas.
+  assert.match(
+    readFileSync("lib/arquiteto/article-process-read-model.ts", "utf8"),
+    /STALE: "Desatualizada"/,
+  );
   const base = readFileSync("lib/arquiteto/article-ai-review.ts", "utf8");
   const hashBlock = base.slice(base.indexOf("const articleContentHash"), base.indexOf("return {", base.indexOf("const articleContentHash")));
   assert.match(hashBlock, /canonicalArticleStructuralKeywords\(input\.keywords, input\.principalKeywordId\)/);

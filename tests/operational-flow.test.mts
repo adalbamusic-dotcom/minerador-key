@@ -237,9 +237,18 @@ test("reset e exclusões do Arquiteto exigem aprovação forte", async () => {
 test("status aguardando aprovação nasce da lógica local e não depende da IA", async () => {
   const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   assert.match(architect, /prepareSelectedLogicalArticleDnas/);
-  assert.match(architect, /enviado\(s\) para aprovação humana, sem chamar IA/);
   assert.match(architect, /articleApprovalIssues/);
-  assert.match(architect, /pendente\(s\).*blockers\.join/);
+  // O envio para aprovação passa pelo serviço de fechamento, sobre a formação
+  // já salva. Antes ele vivia em `changeSelectedArticleStatus`, que trocava o
+  // status só com evento local — sem validação, sem persistência, sem readback.
+  // Na fase 1 o fluxo é "Reprocessar artigos → Concluir formação": a etapa
+  // intermediária de envio para aprovação saiu, e nada disso chama IA.
+  assert.match(architect, /await materializeApprovedArticleDnas\(plano\.approved\)/);
+  // O serviço de fechamento continua no código; o controle dele saiu do rodapé
+  // da fase 1, que agora tem só contagem e Limpar seleção.
+  assert.match(architect, /const applyClosingToSelection = async \(/);
+  // O bloqueio precisa dizer o que RESOLVE, não apenas que existe.
+  assert.match(architect, /blocker\.resolveWith/);
 });
 
 test("planilhas operacionais trabalham artigo por artigo e exibem carga acumulada", async () => {

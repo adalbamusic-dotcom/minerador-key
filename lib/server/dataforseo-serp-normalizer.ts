@@ -170,7 +170,16 @@ export function normalizeDataForSeoSerpResponse(body: unknown, input: SerpSearch
     const term = item && /related_search/.test(clean(item.type).toLowerCase()) ? textFrom(item.title) || textFrom(item.keyword) : "";
     return term ? SerpRelatedSearchSchema.parse({ term, classification: null, notes: "" }) : null;
   }).filter((item): item is z.infer<typeof SerpRelatedSearchSchema> => Boolean(item));
-  const diagnostic = diagnosticFor(input, organic, paa, related);
+  /*
+    * A conta que explica a cardinalidade: quantos itens de cada tipo o provider
+    * devolveu, antes do filtro que mantém apenas organic e video.
+    */
+   const rawItemTypeCounts = rawItems.reduce<Record<string, number>>((counts, raw) => {
+     const tipo = String((raw as { type?: unknown })?.type || "desconhecido");
+     counts[tipo] = (counts[tipo] || 0) + 1;
+     return counts;
+   }, {});
+   const diagnostic = { ...diagnosticFor(input, organic, paa, related), rawItemTypeCounts };
   return SerpResearchSnapshotSchema.parse({ id: `serp:${input.articleId}:${crypto.randomUUID()}`, brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId, keywordId: input.keywordId, keywordDnaVersionId: input.keywordDnaVersionId, query: input.keyword, country: "br", language: input.language, location: input.location, device: input.device, resultLimit: input.resultLimit, provider: "dataforseo", providerEndpoint: "/search", origin: "real", isMock: false, collectedAt, version: input.version, previousSnapshotId: input.previousSnapshotId, contentHash: hash({ query: input.keyword, locationCode: config.locationCode, languageCode: config.languageCode, device: input.device, organic, paa, related, knowledgeGraph: knowledgeGraphFrom(rawItems), diagnostic }), persistenceMode: "local", status: "needs_review", organicResults: organic, peopleAlsoAsk: paa, relatedSearches: related, knowledgeGraph: knowledgeGraphFrom(rawItems), diagnostic });
 }
 

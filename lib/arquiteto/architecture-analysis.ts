@@ -196,6 +196,13 @@ const confidenceOf = (scores: ClusterAnalysis["scores"], destination: ClusterDes
 export function buildArchitectureAnalysis(input: {
   universe: KeywordUniverse | null;
   territories: readonly AnalysisTerritory[];
+  /**
+   * Territórios que não devem competir por score, por identidade estrutural.
+   *
+   * Duplicata exata da mesma raiz publicada entra aqui. Opcional: sem o
+   * conjunto, o comportamento anterior é preservado inteiro.
+   */
+  outOfCompetitionTerritoryRefs?: ReadonlySet<string>;
   publishedArchitecture?: PublishedSiteArchitecture | null;
   /** Texto por keywordId, para comparar o grupo com a identidade dos silos. */
   keywordTexts: ReadonlyMap<string, string>;
@@ -209,8 +216,23 @@ export function buildArchitectureAnalysis(input: {
     const clusterTokens = tokensOf(textos.join(" "));
     const label = (cluster.headKeywordId ? input.keywordTexts.get(cluster.headKeywordId) : null) || textos[0] || cluster.clusterRef;
 
+    /*
+     * Fora da disputa: arquivado, substituído e DUPLICATA EXATA.
+     *
+     * `scoreSiloFit` ordena por afinidade de tokens, e o desempate cai na
+     * ordem da lista. Com dois territórios de mesmo nome apontando para a
+     * mesma raiz publicada, isso vira sorteio — e foi assim que um candidato
+     * de campos vazios venceu um consolidado com SiloDNA, SiloPage e
+     * fronteira declarada, levando junto uma busca de ArticleDNA aprovado.
+     *
+     * A exclusão é DETERMINÍSTICA e vem de fora: quem decide é a identidade
+     * estrutural (mesma entrada de catálogo), não a pontuação. Nenhuma
+     * heurística foi alterada aqui.
+     */
+    const foraDaDisputa = input.outOfCompetitionTerritoryRefs ?? new Set<string>();
     const fits = input.territories
       .filter(territory => territory.lifecycleStatus !== "archived" && territory.lifecycleStatus !== "superseded")
+      .filter(territory => !foraDaDisputa.has(territory.territoryRef))
       .map(territory => ({ territory, score: scoreSiloFit({ clusterTokens, territory }) }))
       .sort((left, right) => right.score.value - left.score.value);
 

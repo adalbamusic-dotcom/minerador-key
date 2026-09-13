@@ -3,13 +3,14 @@ import { ArticleFormationSerpPayloadSchema } from "./article-serp-record.ts";
 import { TerritorialSerpPayloadSchema } from "./territorial-serp-record.ts";
 import { TerritorialAiPayloadSchema } from "./territorial-ai-record.ts";
 import { ArchitectureMarkerPayloadSchema, type ArchitectureMarkerPayload } from "./architecture-marker-record.ts";
-import { ArticleFormationMarkerPayloadSchema, type ArticleFormationMarkerPayload } from "./article-formation-marker.ts";
+import { ArticleFormationMarkerPayloadSchema, type ArticleFormationMarkerInput, type ArticleFormationMarkerPayload } from "./article-formation-marker.ts";
 import { ArticleKgrIdentitySchema, SiloCandidateMarkSchema, VersionedArticleDNASchema, VersionedSiloDNASchema, VersionedSiloPageSchema, type ArticleDNA, type ArchitectKeyword, type SiloDNA, type SiloPage, type VersionEnvelope } from "./contracts.ts";
 import { VersionedArticleArchitectureAiReviewSchema, type VersionedArticleArchitectureAiReview } from "./article-ai-review.ts";
 import { buildKeywordDnaProvenanceSnapshot } from "./adapters.ts";
 import { adaptKeywordIdentityContext } from "./identity-context.ts";
 import { parseKeywordContextualPresentation, type KeywordContextualPresentation } from "../minerador/keyword-contextual-presentation.ts";
 import { TerritoryCandidateSchema, type TerritoryCandidate } from "./territory.ts";
+import { resolveArticleFormationState } from "./article-formation-decision.ts";
 import { SiloWorkingCopyStateSchema, type SiloWorkingCopyState } from "./silo-working-copy-record.ts";
 import type { SiloConsolidationRequestBody } from "./silo-consolidation-operation.ts";
 import type { CanonicalImportability } from "./minerador-handoff.ts";
@@ -404,7 +405,21 @@ export function buildCanonicalWorkflowWorkspaceItems(
     const assignedProvisionalGroupId = assignmentStringOrUndefined(assignment, "provisionalGroupId", "clusterId");
     const assignedSlug = assignmentStringOrUndefined(assignment, "computedSlug", "slug_sugerido");
     const assignedHierarchy = assignmentStringOrUndefined(assignment, "computedHierarquia", "hierarquia");
-    const assignedRole = assignmentStringOrUndefined(assignment, "role", "reviewRole");
+    /*
+     * O PAPEL TEM UMA FONTE SÓ: A DECISÃO HUMANA VIGENTE.
+     *
+     * `assignment.role` é campo legado e ficou divergindo da decisão. No
+     * acervo: `mantecorp skin care` com `role: "principal"` e
+     * `articleFormationDecision.role: "secundaria"` — e o ArticleDNA aprovado
+     * dizendo "secundaria". A tela mostrava DUAS principais no mesmo artigo,
+     * porque um lugar lia o legado e outro lia a decisão.
+     *
+     * O próprio contrato de `articleFormationDecision` alerta contra criar
+     * "uma segunda fonte capaz de divergir da primeira, sem regra de
+     * desempate". A decisão vence; o legado só preenche o que ela não diz.
+     */
+    const decidedRole = resolveArticleFormationState(assignment).decision?.role;
+    const assignedRole = decidedRole ?? assignmentStringOrUndefined(assignment, "role", "reviewRole");
     const parsedKgrIdentity = ArticleKgrIdentitySchema.safeParse(assignment.kgrIdentity);
     const assignedKgrIdentity = parsedKgrIdentity.success ? parsedKgrIdentity.data : undefined;
     const isPublished = keywordStatus(keyword) === "publicado" || keyword.isPublished === true;
@@ -760,7 +775,7 @@ export async function persistArchitectureMarker(
  */
 export async function persistArticleFormationMarker(
   brandId: string,
-  marker: ArticleFormationMarkerPayload,
+  marker: ArticleFormationMarkerInput,
 ): Promise<ArticleFormationMarkerPayload> {
   const response = await fetch("/api/arquiteto/article-formation-marker", {
     method: "POST",

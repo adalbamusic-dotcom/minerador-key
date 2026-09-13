@@ -270,6 +270,19 @@ export const CONCLUSION_GATE_CODES = [
    * escolher um default por conveniência.
    */
   "ARTICLE_REQUIRED_CLASSIFICATIONS_RESOLVED",
+  /**
+   * §5 — dois artigos do mesmo Silo não podem nascer disputando o assunto.
+   *
+   * Canibalização gravada é pior que candidato barrado: depois de virar
+   * ArticleDNA, os dois passam a ser contrato, entram no Radar e no Redator, e
+   * desfazer custa uma sucessão em cada um. A detecção acontece antes de
+   * `Processar artigos` e é HIPÓTESE; aqui ela vira impedimento porque este é
+   * o último ponto em que o par ainda pode ser desfeito de graça.
+   *
+   * A saída não depende de nenhuma infraestrutura nova: unir os dois
+   * candidatos, ou diferenciar a composição de um deles, apaga o par.
+   */
+  "NO_UNRESOLVED_CANNIBALIZATION",
 ] as const;
 
 export type ConclusionGateCode = (typeof CONCLUSION_GATE_CODES)[number];
@@ -321,6 +334,21 @@ export function validateFormationConclusion(input: {
    * Aqui só se pergunta se sobrou pendência — e pendência barra a escrita.
    */
   unresolvedClassifications?: ReadonlyMap<string, readonly string[]>;
+  /**
+   * §5 — pares de candidatos marcados como possível canibalização e ainda
+   * não confrontados.
+   *
+   * Quem detecta é `detectCandidateOverlap`, na fase de formação; quem
+   * confronta é a SERP, em `Processar artigos`. A portaria só pergunta se
+   * sobrou par aberto entre os artigos que seriam gravados AGORA.
+   */
+  unresolvedCannibalization?: readonly {
+    left: string;
+    right: string;
+    leftLabel?: string;
+    rightLabel?: string;
+    reasons: readonly string[];
+  }[];
   serpGates: ReadonlyMap<string, { state: string; blocksConclusion: boolean; requiresHumanDecision: boolean; reason: string }>;
 }): ConclusionVerdict {
   const candidatos = input.universes.flatMap(universe =>
@@ -369,6 +397,16 @@ export function validateFormationConclusion(input: {
   const semColeta = comGate.filter(item => !item.gate || item.gate.blocksConclusion && !item.gate.requiresHumanDecision);
   const semDecisao = comGate.filter(item => item.gate?.requiresHumanDecision);
   const semEvidencia = [...semColeta, ...semDecisao];
+
+  /*
+   * §5 — só o par em que OS DOIS lados seriam gravados agora.
+   *
+   * Se um dos candidatos já está barrado por outro motivo, a canibalização
+   * não chega ao acervo e não há o que impedir: barrar o lote nesse caso
+   * seria travar quem estava pronto por causa de quem nem vai ser escrito.
+   */
+  const canibalizacaoAberta = (input.unresolvedCannibalization || [])
+    .filter(par => aprovadosDoPlano.has(par.left) && aprovadosDoPlano.has(par.right));
 
   const slugBloqueado = input.plan.blocked.filter(item => item.code === "SLUG_BLOCKED");
   const conflitoAberto = input.plan.blocked.filter(item => item.code === "FORMATION_CONFLICT");
@@ -431,6 +469,15 @@ export function validateFormationConclusion(input: {
         : `${classificacoesAbertas.length} artigo(s) ainda possuem classificações não resolvidas: ${[...new Set(classificacoesAbertas.flatMap(item => item.campos))].join(", ")}.`,
     },
     {
+      code: "NO_UNRESOLVED_CANNIBALIZATION",
+      ok: canibalizacaoAberta.length === 0,
+      detail: canibalizacaoAberta.length === 0
+        ? "Nenhum par de artigos do mesmo Silo disputa o mesmo assunto."
+        : `${canibalizacaoAberta.length} par(es) do mesmo Silo ainda disputam o mesmo assunto: `
+          + `${canibalizacaoAberta.map(par => `“${par.leftLabel || par.left}” × “${par.rightLabel || par.right}” (${par.reasons.join(", ")})`).join("; ")}. `
+          + "Una os dois num só artigo ou diferencie a composição de um deles antes de concluir.",
+    },
+    {
       code: "NO_OPEN_HUMAN_CONFLICT",
       ok: conflitoAberto.length === 0,
       detail: conflitoAberto.length === 0
@@ -476,6 +523,9 @@ export function validateFormationConclusion(input: {
     // Parecer vigente esperando decisão também barra — mas por outro motivo,
     // e a mensagem precisa dizer qual dos dois é.
     "SERP_HUMAN_DECISION",
+    // Dois artigos do mesmo Silo sobre o mesmo assunto é contradição
+    // estrutural, e é o último momento em que desfazer sai de graça.
+    "NO_UNRESOLVED_CANNIBALIZATION",
   ];
 
   return {

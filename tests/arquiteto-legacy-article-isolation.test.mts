@@ -117,10 +117,19 @@ test("a fase Artigos tem caminho para registrar tipo de unidade e aprovar", () =
   // quatro abas pelo painel de revisão levou o único caminho de aprovação
   // junto, e sem ArticleDNA aprovado a etapa Silos não forma cópia de trabalho.
   const painel = readFileSync("modules/arquiteto/article-formation-review.tsx", "utf8");
-  assert.match(painel, /data-testid="architect-approve-article"/);
+  const formacao = readFileSync("modules/arquiteto/article-formation-panel.tsx", "utf8");
   assert.match(painel, /data-testid="architect-review-unit-type-confirm"/);
-  assert.match(workspace, /onApproveArticle=\{/);
   assert.match(workspace, /unitTypeControl=\{/);
+  /*
+   * O FECHAMENTO CONTINUA NO FLUXO — mas com UMA autoridade.
+   *
+   * O botão "Aprovar ArticleDNA" deste painel gravava `approved` por caminho
+   * próprio, sem a portaria da conclusão. Quem fecha é "Concluir formação"; o
+   * painel de revisão diz onde o ato está, para não virar beco sem saída.
+   */
+  assert.doesNotMatch(painel, /data-testid="architect-approve-article"/);
+  assert.match(formacao, /data-testid="architect-confirm-formation"/);
+  assert.match(painel, /Concluir formação/);
 });
 
 test("a fase Silos tem caminho para formar cópia de trabalho e consolidar", () => {

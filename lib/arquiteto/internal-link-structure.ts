@@ -132,3 +132,110 @@ export function structuralLinkBlockers(units: readonly StructuralLinkUnit[]): st
   }
   return blockers;
 }
+
+/* --------------------------- o que a mesa precisa ver --------------------- */
+
+/**
+ * §7/§8 — ZERO ARESTA É RESULTADO POSSÍVEL, MAS PRECISA DE PROVA.
+ *
+ * A homologação encontrou 6 nós e 0 arestas com a frase "o Silo não tem duas
+ * páginas linkáveis" — que era falsa em dois níveis: havia seis páginas, e a
+ * portaria estrutural tinha passado. As catorze conexões chegaram a ser
+ * derivadas e foram descartadas uma a uma, em silêncio, por um motivo que a
+ * mensagem não mencionava.
+ *
+ * Daí esta função: ela não decide nada: conta o que aconteceu e NOMEIA cada
+ * página descartada e cada par recusado. Zero arestas continua sendo um
+ * desfecho legítimo — só não pode mais ser um desfecho mudo.
+ *
+ * Domínio puro.
+ */
+export type BlockedLinkPage = { nodeId: string; label: string; reason: string };
+export type RefusedLinkPair = { sourceNodeId: string; targetNodeId: string; reason: string };
+
+export type StructuralLinkDerivationReadout = {
+  linkNodes: number;
+  linkablePages: number;
+  blockedPages: BlockedLinkPage[];
+  edgesProposed: number;
+  /** Páginas linkáveis que não entraram em nenhuma aresta. */
+  orphans: { nodeId: string; label: string }[];
+  /** Pares estruturais que existiam e não viraram aresta, com o motivo. */
+  refusedPairs: RefusedLinkPair[];
+  readyToConfirm: boolean;
+  /** A linha de contadores. Nenhum zero é omitido. */
+  readout: string;
+  /** A mesma coisa em português. */
+  summary: string;
+};
+
+export function describeStructuralLinkDerivation(input: {
+  units: readonly StructuralLinkUnit[];
+  /** Nós que não podem participar do grafo, com o motivo de cada um. */
+  blockedPages?: readonly BlockedLinkPage[];
+  /** As conexões que a arquitetura propôs, antes de qualquer filtro. */
+  connections: readonly StructuralLinkConnection[];
+  /** As arestas que sobreviveram — já com conceito de âncora. */
+  edges: readonly { sourceNodeId: string; targetNodeId: string }[];
+  /** Impedimentos da portaria estrutural, quando houver. */
+  blockers?: readonly string[];
+}): StructuralLinkDerivationReadout {
+  const bloqueadas = [...(input.blockedPages || [])];
+  const bloqueadosPorId = new Map(bloqueadas.map(item => [item.nodeId, item]));
+  const rotuloDe = (nodeId: string) => input.units.find(unit => unit.nodeId === nodeId)?.label || nodeId;
+
+  const arestas = new Set(input.edges.map(edge => `${edge.sourceNodeId}->${edge.targetNodeId}`));
+  const refusedPairs: RefusedLinkPair[] = input.connections
+    .filter(conexao => !arestas.has(`${conexao.sourceNodeId}->${conexao.targetNodeId}`))
+    .map(conexao => {
+      const origem = bloqueadosPorId.get(conexao.sourceNodeId);
+      const destino = bloqueadosPorId.get(conexao.targetNodeId);
+      return {
+        sourceNodeId: conexao.sourceNodeId,
+        targetNodeId: conexao.targetNodeId,
+        /*
+         * O motivo é o da PÁGINA, quando existe. Sem página bloqueada e sem
+         * aresta, o par já estava no grafo — dizer "recusado" ali seria
+         * inventar um impedimento que não houve.
+         */
+        reason: destino
+          ? `${rotuloDe(conexao.targetNodeId)}: ${destino.reason}`
+          : origem
+            ? `${rotuloDe(conexao.sourceNodeId)}: ${origem.reason}`
+            : "A relação já existe na working copy.",
+      };
+    });
+
+  const participantes = new Set(input.edges.flatMap(edge => [edge.sourceNodeId, edge.targetNodeId]));
+  const orphans = input.units
+    .filter(unit => !participantes.has(unit.nodeId) && !bloqueadosPorId.has(unit.nodeId))
+    .map(unit => ({ nodeId: unit.nodeId, label: unit.label }));
+
+  const linkablePages = input.units.length - bloqueadas.length;
+  const readyToConfirm = !(input.blockers || []).length && bloqueadas.length === 0 && input.edges.length > 0;
+
+  return {
+    linkNodes: input.units.length,
+    linkablePages,
+    blockedPages: bloqueadas,
+    edgesProposed: input.edges.length,
+    orphans,
+    refusedPairs,
+    readyToConfirm,
+    readout: [
+      `LINK_NODES = ${input.units.length}`,
+      `LINKABLE_PAGES = ${linkablePages}`,
+      `EDGES_PROPOSED = ${input.edges.length}`,
+      `ORPHANS = ${orphans.length}`,
+      `BLOCKED_PAGES = ${bloqueadas.length}`,
+      `GRAPH_READY_TO_CONFIRM = ${readyToConfirm ? "YES" : "NO"}`,
+    ].join(" · "),
+    summary: input.edges.length
+      ? `${input.edges.length} relação(ões) estrutural(is) proposta(s) entre ${linkablePages} páginas.`
+      : bloqueadas.length
+        ? `Nenhuma relação foi proposta: ${bloqueadas.length} página(s) bloqueada(s) — ${bloqueadas.map(item => `${item.label}: ${item.reason}`).join(" · ")}`
+        : refusedPairs.length
+          ? `Nenhuma relação NOVA foi proposta entre ${linkablePages} páginas: ${refusedPairs.map(item => `${rotuloDe(item.sourceNodeId)} → ${rotuloDe(item.targetNodeId)} (${item.reason})`).join(" · ")}`
+          : `Nenhuma relação estrutural existe entre as ${linkablePages} página(s) deste Silo.`,
+  };
+}
