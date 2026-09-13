@@ -136,10 +136,18 @@ function kgrCalculationStateLabel(input: { volume: unknown; allintitle: unknown;
   return "Calculável";
 }
 
-function profileAdsCompetition(value: unknown): ProfileFieldValue {
+function profileAdsCompetition(value: unknown): string | null {
   if (!isMeaningfulProfileValue(value)) return null;
+
   const normalized = normalizeProfileMarker(String(value));
-  return ({ low: "Baixa", medium: "Média", high: "Alta" } as Record<string, string>)[normalized] || value;
+
+  return (
+    {
+      low: "Baixa",
+      medium: "Média",
+      high: "Alta",
+    } as Record<string, string>
+  )[normalized] || String(value);
 }
 
 function funnelPresentationValue(value: unknown): unknown {
@@ -1134,7 +1142,10 @@ export function KeywordDnaPanel({
   const canonicalNicheDiffers = keywordReadModel.nicheState === "confirmed_unknown"
     || (keywordReadModel.nicheState === "resolved" && normalizeProfileMarker(keywordReadModel.niche || "") !== normalizeProfileMarker(logicalNicheValue || ""));
   const canonicalFunnelValue = keywordReadModel.funnel || keywordReadModel.funnelLabel;
-  const logicalFunnelDisplayValue = funnelPresentationValue(logicalFunnelValue);
+  const logicalFunnelRawValue = funnelPresentationValue(logicalFunnelValue);
+  const logicalFunnelDisplayValue: string | null = isMeaningfulProfileValue(logicalFunnelRawValue)
+    ? String(logicalFunnelRawValue)
+    : null;
   const canonicalFunnelDisplayValue = funnelPresentationValue(keywordReadModel.funnelLabel);
   const aiAxisValue = (axis: SemanticConsolidationAxis): string | null => {
     const field = aiReview ? reviewFields(aiReview).find(candidate => canonicalHumanReviewField(String(candidate.field || "")) === axis) : null;
