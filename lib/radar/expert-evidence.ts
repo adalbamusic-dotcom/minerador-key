@@ -39,8 +39,36 @@ export function parseRadarExpertEvidenceReviews(value: unknown): Record<string, 
 
 export type RadarExpertEvidenceProjection = {
   evidence: RadarExpertEvidence | null;
-  reason: "pending_review" | "content_not_readable" | null;
+  reason: "pending_review" | "content_not_readable" | "contributed_at_unreadable" | null;
 };
+
+/**
+ * O INSTANTE DO PROVIDER, NORMALIZADO PARA O CANÔNICO — e por que isto existe.
+ *
+ * ======================= O DEFEITO QUE ISTO CONSERTA =======================
+ *
+ * `RadarExpertEvidenceSchema.contributedAt` é `z.string().datetime()`, que
+ * EXIGE o sufixo `Z`. O PostgREST devolve `timestamptz` com deslocamento:
+ * `2026-09-13T11:11:57.420036+00:00`. As duas formas descrevem o mesmo
+ * instante, e o schema recusa a segunda.
+ *
+ * Enquanto nenhuma contribuição real tinha decisão humana, o caminho nem era
+ * alcançado: a projeção devolve `pending_review` ANTES do `parse`. O primeiro
+ * "Aceitar como evidência" sobre um dado de verdade quebrou a página inteira
+ * com um ZodError, dentro de um efeito de render.
+ *
+ * ================== POR QUE NORMALIZAR, E NÃO AFROUXAR ==================
+ *
+ * Aceitar deslocamento no schema deixaria a evidência gravada com `Z` numa
+ * linha e `+00:00` em outra, para o mesmo instante. Qualquer comparação de
+ * ordem por string — e há várias rio abaixo — passaria a depender do formato
+ * que o provider escolheu naquele dia. O contrato continua exigindo UTC
+ * canônico; quem converte é a fronteira, que é onde a diferença nasce.
+ */
+function canonicalInstant(value: string): string | null {
+  const instante = new Date(value);
+  return Number.isNaN(instante.getTime()) ? null : instante.toISOString();
+}
 
 function nonEmptyText(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -96,6 +124,17 @@ export function projectRadarExpertEvidence(input: {
     : transcriptText
       ? "TRANSCRIPTION"
       : "ORIGINAL";
+  /*
+   * UM INSTANTE ILEGÍVEL NÃO DERRUBA A ÁREA — ele bloqueia a promoção.
+   *
+   * Lançar aqui é lançar dentro de um efeito de render, e o Radar inteiro
+   * some da tela por causa de uma linha. A evidência não sai, o motivo é
+   * declarado, e a aprovação do relatório continua bloqueada por ele — que é
+   * o comportamento correto para um dado que não dá para conferir.
+   */
+  const contributedAt = canonicalInstant(input.contribution.receivedAt);
+  if (!contributedAt) return { evidence: null, reason: "contributed_at_unreadable" };
+
   const humanDecision = decision === "rejected" ? "rejected" : "accepted";
   const fidelityStatus = decision === "rejected" ? "conflict" : "faithful";
   const evidence = RadarExpertEvidenceSchema.parse({
@@ -109,7 +148,7 @@ export function projectRadarExpertEvidence(input: {
     externalUpdateId: input.contribution.externalUpdateId,
     originalAssetUri: input.contribution.originalAssetUri,
     checksum: input.contribution.checksum,
-    contributedAt: input.contribution.receivedAt,
+    contributedAt,
     humanDecision,
     fidelityStatus,
   });
@@ -118,6 +157,13 @@ export function projectRadarExpertEvidence(input: {
 
 export function buildRadarExpertEvidence(input: Parameters<typeof projectRadarExpertEvidence>[0]) {
   const projection = projectRadarExpertEvidence(input);
-  if (!projection.evidence) throw new Error(projection.reason === "pending_review" ? "RADAR_EXPERT_EVIDENCE_REVIEW_REQUIRED" : "RADAR_EXPERT_EVIDENCE_CONTENT_NOT_READABLE");
+  if (!projection.evidence) {
+    /* Cada recusa com o seu nome: um erro genérico esconderia qual conferir. */
+    throw new Error(projection.reason === "pending_review"
+      ? "RADAR_EXPERT_EVIDENCE_REVIEW_REQUIRED"
+      : projection.reason === "contributed_at_unreadable"
+        ? "RADAR_EXPERT_EVIDENCE_CONTRIBUTED_AT_UNREADABLE"
+        : "RADAR_EXPERT_EVIDENCE_CONTENT_NOT_READABLE");
+  }
   return projection.evidence;
 }
