@@ -93,7 +93,7 @@ test("TELEGRAM_CONFIG · salvar o formulário não afirma que o webhook existe",
   /* Duas URLs, dois significados: pretendida e confirmada. */
   assert.match(fonte, /webhook_target_url: text\(input\.telegramWebhookUrl/);
   assert.ok(!/webhook_url: text\(input\.telegramWebhookUrl/.test(fonte), "salvar não escreve a URL confirmada");
-  assert.match(fonte, /telegramWebhookTargetUrl: alvo \|\| webhookUrl/);
+  assert.match(fonte, /telegramWebhookTargetUrl: alvo \|\| confirmada/);
   /* E a pretendida nunca conta como configurado. */
   assert.ok(!/telegramWebhookConfigured: Boolean\(alvo\)/.test(fonte));
 });

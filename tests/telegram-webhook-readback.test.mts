@@ -26,16 +26,24 @@ const semComentarios = (fonte: string) => fonte.replace(/\/\*[\s\S]*?\*\//g, "")
 
 /* ==================== a leitura do estado remoto ===================== */
 
-test("WEBHOOK_READBACK · o que o Telegram respondeu tem precedência sobre o registro local", () => {
+test("WEBHOOK_READBACK · as duas leituras do Telegram são comparadas pela hora", () => {
   const fonte = semComentarios(admin);
 
-  /* O `getWebhookInfo` gravado pelo teste é consultado. */
-  assert.match(fonte, /stage === "get_webhook_info"/);
+  /*
+   * ESTE TESTE PEDIA A REGRA ERRADA.
+   *
+   * Ele exigia precedência FIXA do `getWebhookInfo` sobre o registro local — e
+   * foi exatamente isso que fez o card dizer "Não configurado" com o webhook
+   * instalado havia treze segundos: a consulta era mais velha que a confirmação.
+   *
+   * As duas fontes são respostas do provedor. Quem decide é a mais recente, e o
+   * comportamento está exercido em `telegram-webhook-admin-readback.test.mts`.
+   */
+  assert.match(fonte, /stage === "get_webhook_info"/, "só consulta de webhook decide");
   assert.match(fonte, /detalhes\.webhookUrl/);
-  /* E decide o rótulo: URL remota vazia = não configurado, mesmo com registro local. */
-  assert.match(fonte, /if \(consultado\) return \{ telegramWebhookConfigured: Boolean\(urlRemota\)/);
-  /* Sem consulta nenhuma, o registro local ainda responde. */
-  assert.match(fonte, /return \{ telegramWebhookConfigured: Boolean\(webhookUrl && configuredAt\)/);
+  assert.match(fonte, /consultadaEm !== null && consultadaEm > confirmadaEm/, "a hora decide, não a origem");
+  /* E a confirmação sem carimbo não conta: sem hora não há como comparar. */
+  assert.match(fonte, /Boolean\(confirmada && confirmadaEm\)/);
 });
 
 test("WEBHOOK_READBACK · a mensagem do teste não afirma mais que existe webhook", () => {

@@ -18,6 +18,7 @@ import {
   type RadarSpecialistBriefReading,
   type RadarSpecialistCounters,
 } from "@/lib/radar/specialist-lifecycle";
+import { useRadarAreaLiveRead } from "./use-radar-area-live-read";
 import { RADAR_SPECIALIST_INVITE_LABELS, RADAR_SPECIALIST_INVITE_STATES, radarSpecialistConsultationOf, type RadarSpecialistInviteState } from "@/lib/radar/specialist-consultation";
 import {
   buildRadarExpertBriefContext,
@@ -302,21 +303,58 @@ const reviewClassifications: Array<{ value: ExpertReviewClassification; label: s
   { value: "exemplo", label: "Exemplo" },
 ];
 
+/**
+ * AS TABELAS CUJO EVENTO SIGNIFICA "a área Especialista mudou".
+ *
+ * `expert_contributions` é a resposta que chega; `expert_briefs` muda de
+ * estado no envio e na revisão; `telegram_expert_bindings` nasce no `/start`
+ * e é o que transforma um convite aberto em especialista conectado.
+ *
+ * `external_processing_jobs` FICA DE FORA de propósito: a fila é de todas as
+ * marcas e de todos os tipos de trabalho, e o que interessa aqui — o áudio
+ * transcrito — chega como UPDATE na própria contribuição.
+ */
+const RADAR_SPECIALIST_LIVE_TABLES = ["expert_contributions", "expert_briefs", "telegram_expert_bindings"] as const;
+
+/* Referências estáveis: um array novo a cada render remontaria os memos. */
+const VAZIO_EXPERTS: RadarExpertRecord[] = [];
+const VAZIO_BINDINGS: RadarBindingSummary[] = [];
+const VAZIO_BRIEFS: RadarBriefRecord[] = [];
+const VAZIO_CONTRIBUICOES: RadarExpertContributionRecord[] = [];
+const VAZIO_CONSULTAS: RadarConsultationView[] = [];
+
 /** A decisão humana que transforma contribuição em evidência. */
 const acceptedDecisions = new Set<ExpertReviewDecision>(["accepted", "support", "quote"]);
 
 export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId, articleTitle, articleVersion, articleRole, context, suggestedQuestions = [], requirements = [], onExpertEvidenceChange }: RadarExpertBriefPanelProps) {
-  const [experts, setExperts] = useState<RadarExpertRecord[]>([]);
-  const [bindings, setBindings] = useState<RadarBindingSummary[]>([]);
-  const [briefs, setBriefs] = useState<RadarBriefRecord[]>([]);
-  const [contributions, setContributions] = useState<RadarExpertContributionRecord[]>([]);
+  /**
+   * O QUE VEM DO SERVIDOR NÃO É ESTADO DA TELA.
+   *
+   * Eram quatro `useState` preenchidos por efeito. Cada leitura nova produzia
+   * uma sequência de `setState`, e entre elas existiam renders com metade dos
+   * dados novos e metade dos antigos — a área piscava para "nenhuma resposta"
+   * no meio de uma revalidação.
+   *
+   * Agora tudo é DERIVADO do read-model. O único estado local é o overlay das
+   * pautas, abaixo, porque ele representa uma escrita confirmada que a tela já
+   * pode mostrar antes da próxima leitura chegar.
+   */
+  const [overlayBriefs, setOverlayBriefs] = useState<RadarBriefRecord[]>([]);
+  /*
+   * O RITMO DO TIQUE LÊ UMA REF, e não o estado.
+   *
+   * `aguardandoAlgo` é derivado do que o próprio hook devolveu; passá-lo como
+   * prop criaria a dependência circular leitura → estado → leitura. A ref
+   * carrega o valor da volta anterior, que é o que a política precisa saber.
+   */
+  const pendenteRef = useRef(false);
+  const lerPendente = useCallback(() => pendenteRef.current, []);
   const [reviews, setReviews] = useState<Record<string, ExpertReview>>({});
   const [selectedExpertId, setSelectedExpertId] = useState("");
   const [selectedBriefId, setSelectedBriefId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft(articleTitle));
   const [draftOpen, setDraftOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"save" | "review" | "suggestions" | "send" | "requirement" | "">("");
   const [creatingRequirementId, setCreatingRequirementId] = useState<string | null>(null);
   /**
@@ -336,7 +374,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
    * é a pauta, se o convite ainda está aberto, se alguém entrou. É o que faz
    * a tela recém-carregada mostrar a consulta em vez de pedir um cadastro.
    */
-  const [consultations, setConsultations] = useState<RadarConsultationView[]>([]);
+
   /**
    * O @username DO BOT, LIDO DA PLATAFORMA — SPECIALIST_2.1.2.
    *
@@ -348,7 +386,6 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
    * A autoridade é `integration_connections.metadata.telegram.bot_username`,
    * a mesma que o Admin mostra, projetada pelo GET desta área.
    */
-  const [botUsername, setBotUsername] = useState<string | null>(null);
   const [copied, setCopied] = useState("");
   /*
    * O GUARDA FECHA A PORTA ANTES DO PRIMEIRO `await`.
@@ -368,60 +405,107 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
   const initialQuestions = useMemo(() => normalizeRadarExpertBriefQuestions(suggestedQuestions), [suggestedQuestions]);
   const canLoad = Boolean(brandId && articleId && articleDnaVersionId && context);
 
-  useEffect(() => {
-    if (!canLoad) return;
-    let active = true;
-    const controller = new AbortController();
+  /**
+   * A ÁREA ESPECIALISTA, LIDA DE UMA VEZ — RADAR_LIVE_UX_2.1 · §2.
+   *
+   * Eram dois efeitos independentes, cada um com o seu `AbortController` e o
+   * seu ciclo. Duas leituras da MESMA área, disparadas em sequência de render:
+   * uma podia terminar com o estado da outra ainda pela metade, e nada as
+   * reunia num instante coerente.
+   *
+   * Agora é UMA função de refetch, com os dois GET em PARALELO. Eles continuam
+   * separados porque respondem a permissões diferentes — `expert-briefs` lista
+   * a Marca, `expert-consultations` projeta a consulta — mas quem espera pelos
+   * dois é o mesmo `Promise.all`, e o resultado entra no cache junto.
+   */
+  const carregarArea = useCallback(async (signal: AbortSignal) => {
     const params = new URLSearchParams({ brandId, articleId, articleDnaVersionId });
-    void fetch(`/api/editorial/expert-briefs?${params.toString()}`, { headers: { Accept: "application/json" }, cache: "no-store", signal: controller.signal })
-      .then(async response => {
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(recordValue(asObject(payload)?.error) || "Não foi possível carregar os especialistas da Marca.");
-        if (!active) return;
-        const rawExperts: unknown[] = Array.isArray(payload.experts) ? payload.experts : [];
-        const rawBindings: unknown[] = Array.isArray(payload.bindings) ? payload.bindings : [];
-        const rawBriefs: unknown[] = Array.isArray(payload.briefs) ? payload.briefs : [];
-        const rawContributions: unknown[] = Array.isArray(payload.contributions) ? payload.contributions : [];
-        setExperts(rawExperts.map(parseExpert).filter((item): item is RadarExpertRecord => Boolean(item && item.status === "active" && item.brandId === brandId)));
-        setBindings(rawBindings.map(parseBinding).filter((item): item is RadarBindingSummary => Boolean(item && item.status === "active")));
-        setBriefs(rawBriefs.map(parseBrief).filter((item): item is RadarBriefRecord => Boolean(item && radarExpertBriefMatchesContext(item, { brandId, articleId, articleDnaVersionId }))));
-        setContributions(rawContributions.map(parseContribution).filter((item): item is RadarExpertContributionRecord => Boolean(item && item.brandId === brandId)));
-      })
-      .catch(loadError => {
-        if (active && (loadError as Error)?.name !== "AbortError") setError(errorMessage(loadError, "Não foi possível carregar os especialistas da Marca."));
-      })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; controller.abort(); };
-  }, [articleDnaVersionId, articleId, brandId, canLoad]);
+    const opcoes = { headers: { Accept: "application/json" }, cache: "no-store" as const, signal };
+
+    const [respostaBriefs, respostaConsultas] = await Promise.all([
+      fetch(`/api/editorial/expert-briefs?${params.toString()}`, opcoes),
+      fetch(`/api/editorial/expert-consultations?${params.toString()}`, opcoes),
+    ]);
+
+    const payload = await respostaBriefs.json().catch(() => ({}));
+    if (!respostaBriefs.ok) throw new Error(recordValue(asObject(payload)?.error) || "Não foi possível carregar os especialistas da Marca.");
+
+    /*
+     * A PROJEÇÃO DA CONSULTA PODE FALTAR SEM DERRUBAR A ÁREA.
+     *
+     * Ela acrescenta o estado do convite; sem ela a área ainda mostra pautas e
+     * respostas. Tratar as duas com a mesma severidade deixaria o operador sem
+     * nada por causa da parte menos crítica.
+     */
+    const consultasPayload = respostaConsultas.ok ? await respostaConsultas.json().catch(() => ({})) : {};
+
+    const lista = (valor: unknown): unknown[] => (Array.isArray(valor) ? valor : []);
+    return {
+      experts: lista(payload.experts).map(parseExpert).filter((item): item is RadarExpertRecord => Boolean(item && item.status === "active" && item.brandId === brandId)),
+      bindings: lista(payload.bindings).map(parseBinding).filter((item): item is RadarBindingSummary => Boolean(item && item.status === "active")),
+      briefs: lista(payload.briefs).map(parseBrief).filter((item): item is RadarBriefRecord => Boolean(item && radarExpertBriefMatchesContext(item, { brandId, articleId, articleDnaVersionId }))),
+      contributions: lista(payload.contributions).map(parseContribution).filter((item): item is RadarExpertContributionRecord => Boolean(item && item.brandId === brandId)),
+      consultations: lista((consultasPayload as Record<string, unknown>).consultations).map(parseConsultation).filter((item): item is RadarConsultationView => Boolean(item)),
+      botUsername: optionalRecordValue((consultasPayload as Record<string, unknown>).botUsername),
+    };
+  }, [articleDnaVersionId, articleId, brandId]);
 
   /**
-   * A LEITURA QUE FALTAVA — SPECIALIST_2.1.1 · §3.
+   * A LEITURA VIVA DA ÁREA — RADAR_LIVE_UX_2.1 · §3 e §4.
    *
-   * Sem ela, tudo o que o POST devolveu morria no primeiro F5 e a área voltava
-   * a pedir "Selecionar especialista" com a consulta inteira gravada no banco.
-   * `recarregarConsultas` também é chamada depois de criar ou reemitir, para a
-   * tela nunca depender só do que ela mesma lembra.
+   * O Realtime é o sinal preferido; o tique entra quando ele não está
+   * disponível — e não dá para saber de antemão se estas tabelas estão na
+   * publication. Os dois caminhos chamam `carregarArea`, que é a autoridade.
+   *
+   * O payload do evento NUNCA vira estado: um INSERT bruto não conhece a
+   * projeção nem as permissões que o read-model aplica.
    */
-  const [recargaConsultas, setRecargaConsultas] = useState(0);
-  const recarregarConsultas = useCallback(() => setRecargaConsultas(atual => atual + 1), []);
+  const leituraDaArea = useRadarAreaLiveRead({
+    area: "specialist",
+    brandId, articleId, articleDnaVersionId,
+    tables: RADAR_SPECIALIST_LIVE_TABLES,
+    load: carregarArea,
+    open: true,
+    pending: lerPendente,
+    enabled: canLoad,
+  });
 
-  useEffect(() => {
-    if (!canLoad) return;
-    let active = true;
-    const controller = new AbortController();
-    const params = new URLSearchParams({ brandId, articleId, articleDnaVersionId });
-    void fetch(`/api/editorial/expert-consultations?${params.toString()}`, { headers: { Accept: "application/json" }, cache: "no-store", signal: controller.signal })
-      .then(async response => {
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !active) return;
-        const brutas: unknown[] = Array.isArray(payload.consultations) ? payload.consultations : [];
-        setConsultations(brutas.map(parseConsultation).filter((item): item is RadarConsultationView => Boolean(item)));
-        setBotUsername(optionalRecordValue(payload.botUsername));
-      })
-      .catch(() => { /* a área continua utilizável sem a projeção; o erro do GET principal já aparece. */ });
-    return () => { active = false; controller.abort(); };
-  }, [articleDnaVersionId, articleId, brandId, canLoad, recargaConsultas]);
+  const experts = leituraDaArea.data?.experts || VAZIO_EXPERTS;
+  const bindings = leituraDaArea.data?.bindings || VAZIO_BINDINGS;
+  const contributions = leituraDaArea.data?.contributions || VAZIO_CONTRIBUICOES;
+  const consultations = leituraDaArea.data?.consultations || VAZIO_CONSULTAS;
+  const botUsername = leituraDaArea.data?.botUsername ?? null;
+  const loading = leituraDaArea.loading;
 
+  /**
+   * O OVERLAY DA PAUTA — uma escrita já confirmada, antes da próxima leitura.
+   *
+   * Salvar, aprovar ou enviar devolve o readback remoto: aquilo JÁ é verdade,
+   * e esperar o refetch para mostrar deixaria o botão parecendo sem efeito. O
+   * overlay some sozinho quando a leitura seguinte traz a mesma pauta.
+   */
+  const briefs = useMemo(() => {
+    const base = leituraDaArea.data?.briefs || VAZIO_BRIEFS;
+    if (!overlayBriefs.length) return base;
+    const porId = new Map(base.map(item => [item.id, item]));
+    for (const item of overlayBriefs) porId.set(item.id, item);
+    return [...porId.values()];
+  }, [leituraDaArea.data, overlayBriefs]);
+
+  /*
+   * QUANDO VALE OLHAR MAIS DE PERTO — RADAR_LIVE_UX_2.1 · §6.
+   *
+   * Convite aberto esperando alguém entrar, pauta enviada sem resposta, áudio
+   * em processamento: são os estados em que alguém está esperando algo mudar.
+   * Fora deles, perguntar a cada poucos segundos gasta leitura para confirmar
+   * que nada aconteceu.
+   */
+  const aguardandoAlgo = useMemo(() => {
+    if (consultations.some(item => !item.connected && item.invite.state === "OPEN")) return true;
+    if (briefs.some(item => item.sentAt && !item.completedAt)) return true;
+    return contributions.some(item => item.processingStatus === "PENDING_LOCAL_PROCESSING" || item.processingStatus === "PROCESSING");
+  }, [briefs, consultations, contributions]);
+  useEffect(() => { pendenteRef.current = aguardandoAlgo; }, [aguardandoAlgo]);
   const selectedExpert = experts.find(expert => expert.id === selectedExpertId) || null;
   const expertName = useCallback((expertId: string | null) => experts.find(expert => expert.id === expertId)?.displayName || "Especialista não identificado", [experts]);
   const scopedBriefs = useMemo(() => briefs.filter(brief => brief.expertId === selectedExpertId && radarExpertBriefMatchesContext(brief, { brandId, expertId: selectedExpertId || undefined, articleId, articleDnaVersionId })), [articleDnaVersionId, articleId, brandId, briefs, selectedExpertId]);
@@ -662,7 +746,8 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       if (payload.persistence !== "remote_readback_confirmed") throw new Error("A confirmação remota da pauta não retornou um readback compatível.");
       const persisted = parseBrief(payload.brief);
       if (!persisted || !radarExpertBriefMatchesContext(persisted, { brandId, expertId: selectedExpertId, articleId, articleDnaVersionId })) throw new Error("O readback retornou uma pauta fora do contexto selecionado.");
-      setBriefs(current => [persisted, ...current.filter(brief => brief.id !== persisted.id)]);
+      setOverlayBriefs(current => [persisted, ...current.filter(brief => brief.id !== persisted.id)]);
+      leituraDaArea.refresh();
       setSelectedBriefId(persisted.id);
       setDraft({ title: persisted.title, questions: normalizeRadarExpertBriefQuestions(persisted.questions) });
       setDraftOpen(true);
@@ -712,7 +797,8 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       if (!response.ok) throw new Error(recordValue(asObject(payload)?.error) || "Não foi possível criar a consulta deste ponto de revisão.");
       const persisted = parseBrief(payload.brief);
       if (!persisted || !radarExpertBriefMatchesContext(persisted, { brandId, articleId, articleDnaVersionId })) throw new Error("O readback retornou uma pauta fora do contexto selecionado.");
-      setBriefs(current => [persisted, ...current.filter(brief => brief.id !== persisted.id)]);
+      setOverlayBriefs(current => [persisted, ...current.filter(brief => brief.id !== persisted.id)]);
+      leituraDaArea.refresh();
 
       const convite = asObject(payload.invite);
       const link = convite ? optionalRecordValue(convite.link) : null;
@@ -725,7 +811,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
         },
       }));
       /* A projeção remota é relida: a tela não fica dependendo do que lembrou. */
-      recarregarConsultas();
+      leituraDaArea.refresh();
       setNotice(payload.connected
         ? "O especialista desta consulta já está conectado. Nenhum link novo foi gerado."
         : link
@@ -766,9 +852,10 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       if (payload.persistence !== "remote_readback_confirmed") throw new Error("O envio não retornou confirmação remota da pauta.");
       const persisted = parseBrief(payload.brief);
       if (!persisted || !radarExpertBriefMatchesContext(persisted, { brandId, expertId: expertIdDaPauta, articleId, articleDnaVersionId })) throw new Error("O readback do envio retornou uma pauta fora do contexto selecionado.");
-      setBriefs(current => [persisted, ...current.filter(brief => brief.id !== persisted.id)]);
+      setOverlayBriefs(current => [persisted, ...current.filter(brief => brief.id !== persisted.id)]);
+      leituraDaArea.refresh();
       if (selectedBriefId === persisted.id) { setDraft({ title: persisted.title, questions: normalizeRadarExpertBriefQuestions(persisted.questions) }); setDirty(false); }
-      recarregarConsultas();
+      leituraDaArea.refresh();
       setNotice(payload.send === "already_confirmed" ? "Esta pauta já havia sido enviada; nenhum novo envio foi feito." : "Pauta enviada ao especialista e confirmada por readback remoto.");
     } catch (sendError) {
       setError(errorMessage(sendError, "Não foi possível enviar a pauta ao especialista."));
@@ -793,7 +880,8 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       if (payload.persistence !== "remote_readback_confirmed") throw new Error("O envio não retornou confirmação remota da pauta.");
       const persisted = parseBrief(payload.brief);
       if (!persisted || !radarExpertBriefMatchesContext(persisted, { brandId, expertId: selectedExpertId, articleId, articleDnaVersionId })) throw new Error("O readback do envio retornou uma pauta fora do contexto selecionado.");
-      setBriefs(current => [persisted, ...current.filter(brief => brief.id !== persisted.id)]);
+      setOverlayBriefs(current => [persisted, ...current.filter(brief => brief.id !== persisted.id)]);
+      leituraDaArea.refresh();
       setDraft({ title: persisted.title, questions: normalizeRadarExpertBriefQuestions(persisted.questions) });
       setDirty(false);
       setNotice(payload.send === "already_confirmed" ? "Esta pauta já havia sido enviada; nenhum novo envio foi feito." : "Pauta enviada ao especialista e confirmada por readback remoto.");
@@ -907,9 +995,34 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
     <header className={surface} data-testid="radar-specialist-header">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h3 className="text-base font-semibold text-foreground">Especialista</h3>
-        <p className="text-sm text-text-muted" data-testid="radar-specialist-counters">{counters.prepared} ponto(s) preparado(s) · {counters.sent} enviado(s) · {counters.responded} resposta(s) · {counters.accepted} aceita(s)</p>
+        {/*
+          * "RESPOSTA" É A MENSAGEM QUE CHEGOU, não a pauta que foi respondida.
+          *
+          * O resumo mostrava `counters.responded`, que conta PAUTAS com pelo
+          * menos uma contribuição. Duas mensagens do especialista na mesma pauta
+          * apareciam como "1 resposta" — e quem acabou de receber a segunda lia
+          * que nada tinha mudado.
+          *
+          * O contador do domínio continua igual: `responded` responde "quantas
+          * pautas voltaram", que é outra pergunta e tem outros consumidores.
+          */}
+        <p className="text-sm text-text-muted" data-testid="radar-specialist-counters">{counters.prepared} ponto(s) preparado(s) · {counters.sent} enviado(s) · {articleContributions.length} resposta(s) · {counters.accepted} aceita(s)</p>
       </div>
-      <p className="mt-1 text-sm text-text-muted" data-testid="radar-specialist-state-line">{estadoOperacional}</p>
+      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p className="text-sm text-text-muted" data-testid="radar-specialist-state-line">{estadoOperacional}</p>
+        <div className="flex items-center gap-2">
+          {/*
+            * "ATUALIZANDO…" NÃO APAGA O QUE ESTÁ NA TELA — §8.
+            *
+            * Trocar o conteúdo por um estado de carga durante a revalidação
+            * faria a área piscar para "nenhuma resposta recebida" a cada tique,
+            * e quem estivesse lendo uma contribuição a perderia de vista.
+            */}
+          {leituraDaArea.revalidating && <span className="text-sm text-text-muted" role="status" data-testid="radar-specialist-revalidating">Atualizando…</span>}
+          {/* Atualiza SÓ esta área: nunca F5, nunca recarga do workspace. */}
+          <button type="button" className={action} onClick={() => leituraDaArea.refresh()} data-testid="radar-specialist-refresh">Atualizar</button>
+        </div>
+      </div>
     </header>
 
     {loading && <p className={surface + " text-sm text-text-muted"}>Carregando especialistas utilizáveis desta Marca…</p>}

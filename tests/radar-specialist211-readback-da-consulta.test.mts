@@ -323,9 +323,16 @@ test("SPECIALIST_2.1.1 · a consulta é lida do banco, não remontada na tela", 
   /* O token bruto nunca sai do servidor numa leitura. */
   assert.ok(!/token: token\.token[\s\S]{0,200}export async function GET/.test(rota));
 
-  /* REACT_STATE_REQUIRED = NO: a tela busca a projeção ao montar. */
+  /*
+   * REACT_STATE_REQUIRED = NO — e agora nem estado local existe.
+   *
+   * O RADAR_LIVE_UX_2.1 trocou os `setState` por derivação do read-model: a
+   * consulta exibida É o que a leitura da área devolveu, sem cópia intermediária
+   * que pudesse divergir dela por um render.
+   */
   assert.match(painel, /\/api\/editorial\/expert-consultations\?/);
-  assert.match(painel, /setConsultations\(/);
+  assert.match(painel, /const consultations = leituraDaArea\.data\?\.consultations/);
+  assert.ok(!/setConsultations\(/.test(painel), "não há cópia por setState");
   /*
    * E RELÊ DEPOIS DE CADA AÇÃO QUE MUDA A CONSULTA.
    *
@@ -333,9 +340,10 @@ test("SPECIALIST_2.1.1 · a consulta é lida do banco, não remontada na tela", 
    * recarga, a tela voltaria a acreditar na própria memória — que é o defeito
    * que este gate consertou.
    */
-  assert.ok((painel.match(/recarregarConsultas\(\)/g) || []).length >= 2, "a recarga acontece nas ações que mudam a consulta");
-  assert.match(painel, /const createConsultationFromRequirement[\s\S]{0,3000}recarregarConsultas\(\)/, "criar e reemitir releem");
-  assert.match(painel, /const enviarPauta[\s\S]{0,2500}recarregarConsultas\(\)/, "o envio relê");
+  /* E relê depois de cada ação que muda a consulta — agora a área inteira. */
+  assert.ok((painel.match(/leituraDaArea\.refresh\(\)/g) || []).length >= 3, "as ações que mudam a consulta releem");
+  assert.match(painel, /const createConsultationFromRequirement[\s\S]{0,3500}leituraDaArea\.refresh\(\)/, "criar e reemitir releem");
+  assert.match(painel, /const enviarPauta[\s\S]{0,2500}leituraDaArea\.refresh\(\)/, "o envio relê");
 });
 
 test("SPECIALIST_2.1.1 · nenhuma migration foi criada para consertar o readback", async () => {
@@ -402,7 +410,9 @@ test("SPECIALIST_2.1.2 · a autoridade do @username é a mesma do Admin", async 
   const canonical = await readFile(new URL("../lib/server/telegram/canonical.ts", import.meta.url), "utf8");
 
   /* A tela LÊ o estado da plataforma em vez de deduzi-lo de um POST. */
-  assert.match(painelRadar, /setBotUsername\(optionalRecordValue\(payload\.botUsername\)\)/);
+  /* O username vem do read-model da área, derivado sem cópia por setState. */
+  assert.match(painelRadar, /botUsername: optionalRecordValue\(\(consultasPayload as Record<string, unknown>\)\.botUsername\)/);
+  assert.match(painelRadar, /const botUsername = leituraDaArea\.data\?\.botUsername/);
   assert.match(painelRadar, /\{!botUsername && !consulta\.connected &&/);
 
   /* E a rota o resolve pela função canônica, a mesma que o Admin usa. */
