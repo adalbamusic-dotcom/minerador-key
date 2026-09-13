@@ -34,9 +34,18 @@ próprio.
 6. Redator
 7. Publicações
 
+## Áreas funcionais — andamento
+
+- [x] **Radar — Pesquisa Google, Fase 1: HOMOLOGADA** em runtime real
+  (2026-09-11). Registro:
+  [relatório datado](auditorias/relatorio-radar-google-fase1-homologacao-2026-09-11.md).
+  Próximos eixos do módulo — Vídeos, Especialista, Pesquisa YouTube, Pesquisa
+  Amazon e consumo do handoff pelo Planejador — estão no
+  [backlog do Radar](../05-radar/backlog.md) e nenhum foi iniciado.
+
 ## Pendências funcionais
 
-- [ ] Escolher e preparar a primeira área funcional.
+- [x] Escolher e preparar a primeira área funcional — Radar.
 - [ ] Validar cada área com seus próprios testes e smoke, preservando
   `brandId`, isolamento tenantizado e proveniência.
 - [ ] Registrar manualmente o resultado de cada área sem transformar um smoke

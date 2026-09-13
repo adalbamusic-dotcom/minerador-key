@@ -123,13 +123,26 @@ test("o painel e os handlers usam o mesmo escopo", () => {
   const painel = readFileSync("modules/arquiteto/article-formation-panel.tsx", "utf8");
 
   assert.match(workspace, /scopeFormationUniverses\(\{ universes: articleFormationUniverses, selectedCandidateRefs \}\)/);
-  assert.match(workspace, /selectedCandidateRefsOf\(\{ selectedArticleIds, articles: articlesList \}\)/);
-  // Os dois atos recusam antes de trabalhar, com a frase do domínio.
-  const recusas = workspace.match(/assertSelectionScope\(selectedCandidateRefs\)/g) || [];
-  assert.equal(recusas.length, 2, "processar e concluir precisam do mesmo portão");
+  /*
+   * UMA autoridade de escopo.
+   *
+   * O rodapé contava linhas selecionadas e as ações contavam `candidateRef`:
+   * a tela dizia "1 artigo selecionado" e o botão respondia "Selecione pelo
+   * menos um artigo", sobre a mesma seleção.
+   */
+  assert.match(workspace, /resolveFormationSelectionScope\(\{ selectedArticleIds, articles: articlesList \}\)/);
+  const recusas = workspace.split("} = formationScopeRef.current;").length - 1;
+  assert.equal(recusas, 2, "processar e concluir precisam do mesmo portão");
+  // O ref existe porque lista de dependência envelhece: os dois `useCallback`
+  // liam a memo sem citá-la nas dependências e ficavam congelados no escopo da
+  // renderização em que nasceram.
+  assert.ok(workspace.includes(
+    "formationScopeRef.current = { scope: formationSelectionScope, universes: selectedFormationUniverses };",
+  ));
   // E a barra diz o escopo por extenso.
   assert.match(painel, /data-testid="architect-formation-selection-count"/);
-  assert.match(painel, /selectedCount === 0/);
+  // O painel recebe o motivo da autoridade única, não recalcula o seu.
+  assert.match(painel, /scopeReason: string \| null;/);
 });
 
 /* ------------- a resolução humana da SERP existe de verdade -------------- */

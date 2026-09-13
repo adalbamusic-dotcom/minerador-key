@@ -4,9 +4,30 @@ Estado estrutural: READY
 Próxima etapa: implementação funcional/UI.
 
 ## Papel
+
 Arquiteto decide quem linka para quem, direção, reason, priority e anchorConcepts.
-Planejador decide seção/contexto/obrigatoriedade editorial.
+
+Radar decide a **aplicação evidencial**: quantidade recomendada, contextos,
+afinidade de seção, âncora, variantes, distribuição, confiança e a evidência que
+sustenta cada uma. Não altera a estrutura do grafo.
+
+Planejador integra a aplicação ao ContentPlan final.
+
 Redator formula anchor final e materializa o link.
+
+### Relação exigida sem contexto sustentado
+
+Quando a relação é `REQUIRED` e a evidência não sustentou nenhum contexto
+natural de aplicação:
+
+```text
+structuralRequirement  = REQUIRED
+applicationStatus      = REQUIRED_RELATION_WITHOUT_SUPPORTED_PLACEMENT
+recommendedOccurrences = 0
+```
+
+Zero ocorrências **não** significa remover a relação: a exigência estrutural
+continua de pé e volta como pendência declarada, não como silêncio.
 
 ## MVP
 Graph por Silo.

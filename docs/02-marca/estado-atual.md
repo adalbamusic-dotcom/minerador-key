@@ -670,3 +670,8 @@ PHASE_3_IMPLEMENTED = NO — repositories e rota NÃO alterados
   por Brand** (sem índice único parcial, duas execuções concorrentes no mesmo
   sitemap continuam possíveis) · repositories · runtime real do sync · UI e
   leitura remota · `readBrandSiteSnapshot` · smokes correspondentes.
+
+
+## Descarte de oito estruturas Site — 2026-09-08
+
+Proprietário: Marca. Usuário identificou como falsos e autorizou excluir os oito registros do catálogo Site da Care Glow: anti-idade-e-retinol, barreira-e-reparacao, clareamento-e-manchas, hidratacao-intensa, oleos-corporais-e-banho, pele-oleosa-e-acne, protecao-solar, rotina-skincare-facial. DELETE remoto executado em transação por oito IDs e marca fixa, com contagem exigida de 8 e hash do conteúdo dos demais registros do catálogo preservado. Nenhuma FK referenciava a tabela; nenhum trigger foi desabilitado. Keywords/listas não foram alteradas. Readback independente confirmou zero registros-alvo, 29 keywords e 3 listas. Não houve alteração do site externo nem bloqueio de redescoberta numa futura sincronização. Validação visual após recarga ainda pendente; sem limpeza de cache.

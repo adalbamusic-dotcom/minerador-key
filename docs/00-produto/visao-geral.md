@@ -10,7 +10,7 @@ Atende equipes que planejam crescimento orgânico por marca. O problema tratado 
 
 ## Fluxo operacional
 
-Marca fornece contexto; Minerador registra e qualifica keywords; Arquiteto organiza a arquitetura editorial e os links internos; Radar reúne evidências de SERP; Planejador cria o plano; Redator produz o documento; Publicações recebe o item aprovado. Cada transferência é seletiva e deve preservar marca, identidade e proveniência.
+Marca fornece contexto; Minerador registra e qualifica keywords; Arquiteto organiza a arquitetura editorial e os links internos; Radar investiga a realidade competitiva do artigo formado e entrega evidência congelada; Planejador cria o plano; Redator produz o documento; Publicações recebe o item aprovado. Cada transferência é seletiva e deve preservar marca, identidade e proveniência.
 
 ## Pipeline estratégico
 
@@ -89,7 +89,7 @@ recebem labels compreensíveis na interface.
 | Marca | contexto e acesso por marca |
 | Minerador | importação, filtros, KGR e exportação no Supabase legado |
 | Arquiteto | lógica editorial, ArticleDNA, SiloDNA, SiloPage, InternalLinkGraph e propostas de IA |
-| Radar | possui rota tenantizada por artigo e contrato de evidência sobre a infraestrutura SERP compartilhada DataForSEO; coleta real autenticada e persistência remota ainda aguardam validação manual; `READY_FOR_RADAR_DEVELOPMENT = YES` |
+| Radar | investigação competitiva do ArticleDNA formado, em quatro áreas (Pesquisa, Vídeos, Especialista, Relatório); Pesquisa Google Fase 1 homologada em runtime real com DataForSEO, persistência remota e bundle congelado; YouTube e Amazon são frentes próprias |
 | Planejador | criação e aprovação inicial de ContentPlan |
 | Redator | editor Tiptap e abertura de documentos |
 | Publicações | planilha/esqueleto de entrega |

@@ -252,5 +252,15 @@ test("a UI fala de SERP, nunca do provider", () => {
 
   assert.match(handler, /Validar SERP|SERP dos silos|parecer/i);
   assert.doesNotMatch(handler, /DataForSeo|dataforseo|DeepSeek|token|crédito|Connection/i);
-  assert.match(handler, /Nada foi aplicado/);
+  /*
+   * "Nada foi aplicado" continua verdadeiro quando a SERP roda SOZINHA — ela
+   * de fato só produz pareceres. O que mudou é que, chamada de dentro de
+   * `Processar arquitetura`, ela não anuncia mais "prontos para revisão
+   * humana": ali a evidência vira insumo da proposta, e abrir revisão criava
+   * uma terceira etapa que o fluxo de dois botões não tem.
+   */
+  const completo = workspace.slice(inicio, inicio + 4000);
+  assert.match(completo, /Nada foi aplicado/);
+  assert.ok(completo.includes("dentroDoProcessamento"), "a SERP precisa saber de onde foi chamada");
+  assert.ok(workspace.includes("validateTerritorialSerp(true)"), "o processamento precisa marcar a SERP como insumo");
 });

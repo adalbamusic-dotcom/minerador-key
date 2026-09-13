@@ -3,7 +3,7 @@ import { ArticleFormationSerpPayloadSchema } from "./article-serp-record.ts";
 import { TerritorialSerpPayloadSchema } from "./territorial-serp-record.ts";
 import { TerritorialAiPayloadSchema } from "./territorial-ai-record.ts";
 import { ArchitectureMarkerPayloadSchema, type ArchitectureMarkerPayload } from "./architecture-marker-record.ts";
-import { ArticleFormationMarkerPayloadSchema, type ArticleFormationMarkerPayload } from "./article-formation-marker.ts";
+import { ArticleFormationMarkerPayloadSchema, type ArticleFormationMarkerInput, type ArticleFormationMarkerPayload } from "./article-formation-marker.ts";
 import { ArticleKgrIdentitySchema, SiloCandidateMarkSchema, VersionedArticleDNASchema, VersionedSiloDNASchema, VersionedSiloPageSchema, type ArticleDNA, type ArchitectKeyword, type SiloDNA, type SiloPage, type VersionEnvelope } from "./contracts.ts";
 import { VersionedArticleArchitectureAiReviewSchema, type VersionedArticleArchitectureAiReview } from "./article-ai-review.ts";
 import { buildKeywordDnaProvenanceSnapshot } from "./adapters.ts";
@@ -775,7 +775,7 @@ export async function persistArchitectureMarker(
  */
 export async function persistArticleFormationMarker(
   brandId: string,
-  marker: ArticleFormationMarkerPayload,
+  marker: ArticleFormationMarkerInput,
 ): Promise<ArticleFormationMarkerPayload> {
   const response = await fetch("/api/arquiteto/article-formation-marker", {
     method: "POST",

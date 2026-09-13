@@ -53,7 +53,14 @@ test("a aprovação não agenda handoff automático ao Radar", () => {
   assert.equal(workspace.includes("setPendingRadarSmoke("), false);
   assert.equal(workspace.includes("pendingRadarSmoke?.length"), false);
   assert.match(workspace, /O handoff ao Radar é ação explícita e posterior a Silos e Links Internos/);
-  assert.match(workspace, /setPendingRadarSmokeReadback\(articleIds\);/);
+  /*
+   * O readback continua sendo agendado SÓ pelo envio explícito.
+   *
+   * O que mudou foi o insumo: em vez de ids soltos ele recebe as alegações
+   * (versão do ArticleDNA, do SiloDNA e do grafo) que sustentaram a marca —
+   * as mesmas que a leitura remota vai conferir.
+   */
+  assert.match(workspace, /setPendingRadarSmokeReadback\(selectedArticleOperational/);
 });
 
 test("Pronto para Silos não é Pronto para Radar", () => {

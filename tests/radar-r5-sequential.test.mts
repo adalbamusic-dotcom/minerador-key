@@ -93,7 +93,17 @@ test("R5 mantém a operação no consumidor canônico e não chama provider no r
   assert.match(page, /pipeline\.reviewSerp/);
   assert.match(page, /for \(const id of queue\.articleIds\)/);
   assert.match(page, /\/api\/editorial\/radar-topics/);
-  assert.doesNotMatch(page, /useEffect\([^]*collectSerp/);
+  /*
+   * NENHUM EFEITO DE RENDER COLETA SERP.
+   *
+   * A asserção é por CORPO de efeito, não pelo arquivo: a forma antiga
+   * (`useEffect\([^]*collectSerp`) casava qualquer efeito seguido, em qualquer
+   * ponto do arquivo, de uma menção a `collectSerp` — e passava só porque a
+   * página não tinha efeito nenhum.
+   */
+  for (const efeito of page.match(/useEffect\([\s\S]*?\n {2}\}, \[[^\]]*\]\);/g) || []) {
+    assert.equal(/collectSerp|pipeline\.collect/.test(efeito), false, "nenhum useEffect pode coletar SERP");
+  }
   assert.match(route, /resolveDeepSeekCanonicalConfig/);
   assert.match(route, /generateStructuredAI/);
   assert.match(route, /humanDecisionRequired: true/);

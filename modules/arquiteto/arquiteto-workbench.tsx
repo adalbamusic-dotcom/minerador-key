@@ -255,6 +255,18 @@ type ArchitectFlowNodeData = {
   ghosted?: boolean;
   roleLabel?: string;
   secondaryLabels?: string[];
+  /**
+   * O CARTÃO DO MAPA DE LINKS.
+   *
+   * Estes campos são opcionais de propósito: os mapas de Silos e Artigos não os
+   * preenchem e continuam desenhando exatamente como antes. Quando eles vêm, o
+   * card mostra o que a hierarquia do Silo precisa dizer sem que ninguém tenha
+   * de decifrar linhas — papel numerado, endereço, entradas e saídas.
+   */
+  slug?: string | null;
+  linkCounts?: { in: number; out: number };
+  /** Fluxo de cima para baixo, com handles de entrada e saída separados. */
+  verticalHandles?: boolean;
 };
 
 type ArchitectFlowNode = Node<ArchitectFlowNodeData, "architect" | "architect-group">;
@@ -346,11 +358,21 @@ function flowNode(
   };
 }
 
-function linkFlowEdge(edge: InternalLinkGraphEdge, selected: boolean): Edge {
+function linkFlowEdge(edge: InternalLinkGraphEdge, selected: boolean, rowOf?: (nodeId: string) => number): Edge {
+  /*
+   * A PISTA DEPENDE DA DIREÇÃO.
+   *
+   * Descer sai do rodapé e entra pelo topo; subir sai do topo e entra pelo
+   * rodapé. Sem isso, a volta do suporte para o Pilar precisava contornar o
+   * card inteiro — as cinco arestas ascendentes desenhavam o emaranhado.
+   */
+  const descendo = rowOf ? rowOf(edge.sourceNodeId) <= rowOf(edge.targetNodeId) : true;
   return {
     id: edge.edgeId,
     source: edge.sourceNodeId,
     target: edge.targetNodeId,
+    sourceHandle: descendo ? "out-bottom" : "out-top",
+    targetHandle: descendo ? "in-top" : "in-bottom",
     type: "smoothstep",
     selectable: true,
     focusable: true,
@@ -441,49 +463,96 @@ export function buildInternalLinkGraphProjection(
 ): ArchitectFlowProjection {
   if (!graph) return { nodes: [], edges: [] };
 
+  /*
+   * LAYOUT HIERÁRQUICO — a arquitetura lida de cima para baixo.
+   *
+   * O mapa era três colunas da esquerda para a direita, e a hierarquia do Silo
+   * — raiz, Pilar, suportes — só existia na cor da borda. Quem olhava não
+   * conseguia responder "quem é o Pilar" sem decifrar linhas.
+   *
+   *              SILOPAGE
+   *                  |
+   *                PILAR
+   *          /       |       \
+   *     SUPORTE   SUPORTE   SUPORTE
+   *
+   * Isto é PROJEÇÃO: nenhuma posição é persistida e nenhuma aresta muda. O
+   * grafo continua sendo a autoridade; o mapa só arruma o que ele já diz.
+   */
   const siloNodes = graph.nodes.filter(node => node.nodeType === "SILO_PAGE");
   const pillarNodes = graph.nodes.filter(node => node.nodeType === "ARTICLE_DNA" && node.architecturalRole === "PILAR");
   const articleNodes = graph.nodes.filter(node => node.nodeType === "ARTICLE_DNA" && node.architecturalRole !== "PILAR");
-  const columnX = { silo: 8, pillar: 280, support: 552 } as const;
-  const stackGap = 132;
-  const articleHeight = 96;
-  const articleStackHeight = Math.max(articleHeight, Math.max(pillarNodes.length, articleNodes.length, 1) * stackGap);
-  const siloY = Math.max(24, articleStackHeight / 2 - 44);
+  const nodeWidth = 236;
+  // Nome sem "column": o guard do mapa de Artigos proíbe layout em colunas lá,
+  // e este espaçamento horizontal é da FILEIRA de suportes, que é outro mapa.
+  const gapX = 44;
+  const step = nodeWidth + gapX;
+  const rowY = { silo: 0, pillar: 176, support: 352 } as const;
   const positions = new Map<string, { x: number; y: number }>();
 
+  const larguraDosSuportes = Math.max(articleNodes.length, 1) * step - gapX;
+  const centro = larguraDosSuportes / 2 - nodeWidth / 2;
+  // Raiz e Pilar centralizados sobre a fileira de suportes; mais de um de cada
+  // (caso raro) se distribui em volta do centro em vez de empilhar por cima.
+  const centralizar = (total: number, index: number) => centro + (index - (total - 1) / 2) * step;
+
   siloNodes.forEach((node, index) => {
-    positions.set(node.nodeId, { x: columnX.silo, y: siloY + index * stackGap });
+    positions.set(node.nodeId, { x: centralizar(siloNodes.length, index), y: rowY.silo });
   });
   pillarNodes.forEach((node, index) => {
-    positions.set(node.nodeId, { x: columnX.pillar, y: 24 + index * stackGap });
+    positions.set(node.nodeId, { x: centralizar(pillarNodes.length, index), y: rowY.pillar });
   });
   articleNodes.forEach((node, index) => {
-    positions.set(node.nodeId, { x: columnX.support, y: 24 + index * stackGap });
+    positions.set(node.nodeId, { x: index * step, y: rowY.support });
   });
+
+  /** In/Out por nó, contados no MESMO grafo que desenha as arestas. */
+  const entradas = new Map<string, number>();
+  const saidas = new Map<string, number>();
+  for (const edge of graph.edges) {
+    saidas.set(edge.sourceNodeId, (saidas.get(edge.sourceNodeId) || 0) + 1);
+    entradas.set(edge.targetNodeId, (entradas.get(edge.targetNodeId) || 0) + 1);
+  }
+
+  /*
+   * SUPORTE 1, SUPORTE 2, SUPORTE 3…
+   *
+   * A numeração segue a ordem da fileira, que é a ordem em que o SiloDNA
+   * declarou os suportes. Ela nomeia a posição no desenho — não é hierarquia
+   * nova nem prioridade: o papel continua vindo do SiloDNA.
+   */
+  const ordemDoSuporte = new Map(articleNodes.map((node, index) => [node.nodeId, index + 1]));
 
   const nodes = graph.nodes.map(node => {
     const kind = internalLinkNodeKind(node);
     const display = nodeDisplay[node.nodeId];
     const roleLabel = node.nodeType === "SILO_PAGE"
       ? "SiloPage"
-      : node.architecturalRole === "PILAR" ? "Pilar" : node.architecturalRole === "SUPORTE" ? "Suporte" : "ArticleDNA";
+      : node.architecturalRole === "PILAR" ? "Pilar" : node.architecturalRole === "SUPORTE" ? `Suporte ${ordemDoSuporte.get(node.nodeId) ?? ""}`.trim() : "ArticleDNA";
     return flowNode(
       node.nodeId,
-      positions.get(node.nodeId) || { x: columnX.support, y: 24 },
+      positions.get(node.nodeId) || { x: 0, y: rowY.support },
       {
         label: internalLinkNodeLabel(node),
-        meta: [roleLabel, display?.slug ? "/" + display.slug.replace(/^\/+/, "") : null, display?.canonical || null].filter(Boolean).join(" · "),
+        meta: [roleLabel, display?.slug ? "/" + display.slug.replace(/^\/+/, "") : null].filter(Boolean).join(" · "),
         kind,
         roleLabel,
         changed: false,
+        // O card do Silo: endereço em caixa própria e In/Out nos cantos.
+        slug: display?.slug ?? null,
+        linkCounts: { in: entradas.get(node.nodeId) || 0, out: saidas.get(node.nodeId) || 0 },
+        verticalHandles: true,
       },
-      { sourcePosition: Position.Right, targetPosition: Position.Left, selectable: true, focusable: true },
+      { sourcePosition: Position.Bottom, targetPosition: Position.Top, selectable: true, focusable: true },
     );
   }).map(node => ({ ...node, selected: node.id === selectedNodeId }));
 
+  /** A fileira de cada nó decide a pista que a aresta usa. */
+  const rowOf = (nodeId: string) => positions.get(nodeId)?.y ?? rowY.support;
+
   return {
     nodes,
-    edges: graph.edges.map(edge => linkFlowEdge(edge, edge.edgeId === selectedEdgeId)),
+    edges: graph.edges.map(edge => linkFlowEdge(edge, edge.edgeId === selectedEdgeId, rowOf)),
   };
 }
 
@@ -793,6 +862,31 @@ function ArchitectFlowNodeView({ data, selected, targetPosition, sourcePosition,
   const kindLabel = data.kind === "silo" ? "SiloPage" : data.kind === "pillar" ? "Pilar" : data.kind === "support" ? "Suporte" : "Keyword";
   const ghostTone = data.ghosted ? "opacity-40" : "";
   const keyword = data.kind === "keyword";
+
+  /*
+   * O CARD DO SILO — papel, endereço e quantas relações entram e saem.
+   *
+   * Quatro handles, não um par: descer usa `out-bottom → in-top` e subir usa
+   * `out-top → in-bottom`. Com um handle por lado, a volta do suporte para o
+   * Pilar contornava o card inteiro; com pistas separadas ela vira um traço
+   * curto, e a direção continua inequívoca pela seta.
+   */
+  if (data.verticalHandles) {
+    const dot = "!h-2 !w-2 !rounded-full !border !border-context-accent/70 !bg-surface";
+    return <div className={`nopan relative min-h-16 w-full rounded-lg border px-3 pb-6 pt-3 shadow-sm transition-colors ${tone} ${ghostTone} ${selected ? "ring-2 ring-module-accent/45" : ""}`} data-testid={`architect-flow-node-${id}`} aria-label={`${data.label}. ${data.meta}`}>
+      <Handle id="in-top" type="target" position={Position.Top} className={dot} style={{ left: "35%" }} />
+      <Handle id="out-top" type="source" position={Position.Top} className={dot} style={{ left: "65%" }} />
+      <span className="absolute -top-2.5 left-3 rounded border border-context-accent/50 bg-surface px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-context-accent">{data.roleLabel || kindLabel}</span>
+      <p className="mt-1 break-words whitespace-normal text-sm font-semibold uppercase leading-5 text-foreground" title={data.label}>{data.label}</p>
+      {data.slug && <p className="mt-2 break-all rounded border border-divider bg-surface px-2 py-1 font-mono text-[11px] leading-4 text-text-muted" title={data.slug}>/{data.slug.replace(/^\/+/, "")}</p>}
+      {data.linkCounts && <p className="absolute inset-x-3 bottom-1.5 flex justify-between text-[11px] text-text-muted">
+        <span>In: {data.linkCounts.in}</span><span>Out: {data.linkCounts.out}</span>
+      </p>}
+      <Handle id="out-bottom" type="source" position={Position.Bottom} className={dot} style={{ left: "35%" }} />
+      <Handle id="in-bottom" type="target" position={Position.Bottom} className={dot} style={{ left: "65%" }} />
+    </div>;
+  }
+
   return <div className={`nopan relative min-h-16 w-full rounded-lg border px-3 py-2 shadow-sm transition-colors ${tone} ${ghostTone} ${selected ? "ring-2 ring-module-accent/45" : ""}`} data-testid={`architect-flow-node-${id}`} aria-label={`${data.label}. ${data.meta}`}>
     <Handle type="target" position={targetPosition || Position.Left} className="!h-1.5 !w-1.5 !border-0 !bg-transparent !opacity-0" />
     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-muted">{data.roleLabel || kindLabel}</p>

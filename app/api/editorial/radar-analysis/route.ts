@@ -66,7 +66,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ persistenceMode: "remote", versionId: input.analysis.versionId, lockVersion: row.lock_version, radarItemId: row.id, workflowRowId: row.id, payloadRadarItemId });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ code: "invalid_request", error: "Solicitação de análise Radar inválida.", details: error.issues }, { status: 400 });
-    if (error instanceof PersistenceUnavailableError) return NextResponse.json({ code: error.code, error: error.message, recoverableLocally: true }, { status: 503 });
+    /*
+     * O 503 CARREGA A CAUSA — hotfix final.
+     *
+     * `reason` e `driver` viajam em `details`: sem eles, "não foi possível
+     * conectar" cobria timeout de statement, payload grande demais e socket
+     * derrubado sob a mesma frase, e cada clique custava outra rodada de
+     * adivinhação.
+     */
+    if (error instanceof PersistenceUnavailableError) {
+      console.error("[radar-analysis:persist]", error.reason, error.driver?.code || "", error.driver?.message || "");
+      return NextResponse.json({ code: error.code, error: error.message, recoverableLocally: true, details: { reason: error.reason, driver: error.driver } }, { status: 503 });
+    }
     if (error instanceof OptimisticLockError) return NextResponse.json({ code: "optimistic_conflict", error: error.message }, { status: 409 });
     const mapped = authzErrorResponse(error);
     return NextResponse.json({ code: error instanceof AuthzError ? "authorization_error" : "radar_analysis_error", error: mapped.message }, { status: mapped.status });

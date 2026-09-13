@@ -10,6 +10,17 @@ export type SpeechAudioMetadata = {
   audioChannelCount?: number | null;
   model?: string | null;
   enableAutomaticPunctuation?: boolean;
+  /**
+   * OS TEMPOS DE PALAVRA — risco R1 do Gate 0 de Vídeos.
+   *
+   * O Speech-to-Text devolve `words[].startTime/endTime` quando
+   * `enableWordTimeOffsets` é pedido. A capacidade sempre existiu no provider;
+   * este adaptador é que não a pedia e descartava a resposta.
+   *
+   * Continua OPCIONAL: a contribuição do Especialista não precisa de tempo, e
+   * ligar por padrão mudaria o custo e o formato de um caminho que já roda.
+   */
+  enableWordTimeOffsets?: boolean;
 };
 
 export type SpeechRecognitionConfig = {
@@ -19,6 +30,7 @@ export type SpeechRecognitionConfig = {
   audioChannelCount?: number;
   model?: string;
   enableAutomaticPunctuation: boolean;
+  enableWordTimeOffsets?: boolean;
 };
 
 export type SpeechClientLike = {
@@ -32,12 +44,29 @@ export type SpeechLongRunningOperationLike = {
 
 export type SpeechClientFactory = (credentials: GoogleCloudServiceAccountCredentials) => Promise<SpeechClientLike> | SpeechClientLike;
 
+/** Um trecho com tempo REAL devolvido pelo provider. Nunca calculado. */
+export type SpeechTranscriptSegment = {
+  text: string;
+  startMs: number;
+  endMs: number;
+};
+
 export type SpeechTranscriptResult = {
   transcript: string;
   confidence: number | null;
   alternatives: Array<{ transcript: string; confidence: number | null }>;
   languageCode: string;
   mode: "short" | "long";
+  /**
+   * DECLARADO, NÃO PRESUMIDO.
+   *
+   * `TIMESTAMPED` só quando o provider devolveu tempos de verdade. Dividir a
+   * duração proporcionalmente pelas palavras produziria números plausíveis e
+   * falsos — e um trecho citado no tempo errado é pior do que um trecho sem
+   * tempo, porque parece verificável.
+   */
+  timestampState: "TIMESTAMPED" | "NON_TIMESTAMPED";
+  segments: SpeechTranscriptSegment[];
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -58,7 +87,27 @@ export function buildSpeechRecognitionConfig(metadata: SpeechAudioMetadata = {})
   if (typeof metadata.sampleRateHertz === "number" && Number.isInteger(metadata.sampleRateHertz) && metadata.sampleRateHertz > 0) config.sampleRateHertz = metadata.sampleRateHertz;
   if (typeof metadata.audioChannelCount === "number" && Number.isInteger(metadata.audioChannelCount) && metadata.audioChannelCount > 0) config.audioChannelCount = metadata.audioChannelCount;
   if (typeof metadata.model === "string" && metadata.model.trim()) config.model = metadata.model.trim();
+  if (metadata.enableWordTimeOffsets) config.enableWordTimeOffsets = true;
   return config;
+}
+
+/**
+ * O TEMPO QUE O PROVIDER DEVOLVEU — ou nada.
+ *
+ * A API devolve duração ora como `{ seconds, nanos }`, ora como string
+ * (`"12.500s"`), dependendo do cliente e do transporte. Qualquer outra coisa
+ * vira `null`: um tempo que não veio não pode ser estimado.
+ */
+function durationToMs(value: unknown): number | null {
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value.replace(/s$/, ""));
+    return Number.isFinite(parsed) ? Math.round(parsed * 1000) : null;
+  }
+  const duration = record(value);
+  const seconds = typeof duration.seconds === "string" ? Number.parseInt(duration.seconds, 10) : numberOrNull(duration.seconds);
+  const nanos = numberOrNull(duration.nanos);
+  if (seconds === null && nanos === null) return null;
+  return Math.round((seconds || 0) * 1000 + (nanos || 0) / 1_000_000);
 }
 
 function normalizeResponse(response: unknown, metadata: SpeechAudioMetadata, mode: "short" | "long"): SpeechTranscriptResult {
@@ -74,12 +123,34 @@ function normalizeResponse(response: unknown, metadata: SpeechAudioMetadata, mod
       return [{ transcript, confidence: numberOrNull(alternativeRecord.confidence) }];
     });
   });
+
+  /*
+   * OS TEMPOS SAEM DA PRIMEIRA ALTERNATIVA DE CADA RESULTADO — que é a que
+   * compõe o transcript. Ler as demais misturaria hipóteses concorrentes na
+   * mesma linha do tempo.
+   */
+  const segments = results.flatMap((result) => {
+    const primeira = record(Array.isArray(record(result).alternatives) ? (record(result).alternatives as unknown[])[0] : null);
+    const words = Array.isArray(primeira.words) ? primeira.words : [];
+    return words.flatMap((word) => {
+      const wordRecord = record(word);
+      const text = typeof wordRecord.word === "string" ? wordRecord.word.trim() : "";
+      const startMs = durationToMs(wordRecord.startTime);
+      const endMs = durationToMs(wordRecord.endTime);
+      /* Palavra sem os DOIS tempos não vira trecho: meio tempo não é tempo. */
+      if (!text || startMs === null || endMs === null) return [];
+      return [{ text, startMs, endMs }];
+    });
+  });
+
   return {
     transcript: alternatives[0]?.transcript || "",
     confidence: alternatives[0]?.confidence ?? null,
     alternatives,
     languageCode: typeof metadata.languageCode === "string" && metadata.languageCode.trim() ? metadata.languageCode.trim() : "pt-BR",
     mode,
+    timestampState: segments.length ? "TIMESTAMPED" : "NON_TIMESTAMPED",
+    segments,
   };
 }
 

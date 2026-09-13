@@ -151,7 +151,15 @@ test("a aba SERP separa observação humana de sinal técnico", () => {
 
 test("conflito técnico só vira rótulo humano em divergência", () => {
   assert.match(workspace, /if \(articleSerpVerdictFor\(article\)\.kind === "DIVERGENCE"\) return \{ label: `SERP com divergência/);
-  assert.match(workspace, /if \(assessment && articleSerpVerdictFor\(art\)\.kind === "DIVERGENCE"\) return "conflicts";/);
+  /*
+   * A divergência TAMBÉM ocupava a coluna Aprovação, devolvendo `conflicts`.
+   *
+   * Aprovação fala do artefato canônico; SERP é evidência sobre a formação.
+   * Duas perguntas, e a resposta de uma estava na célula da outra — junto com
+   * `draft`, que se chama "Em processo" e colidia com a coluna de Status.
+   * O rótulo próprio da SERP, acima, continua sendo onde a divergência é dita.
+   */
+  assert.doesNotMatch(workspace, /if \(assessment && articleSerpVerdictFor\(art\)\.kind === "DIVERGENCE"\) return "conflicts";/);
   // A contagem de conflitos do portão do Radar saiu da memo local: quem responde
   // por divergência ali é o gate canônico, pelo estado da SERP da formação, e
   // não pelo assessment legado.

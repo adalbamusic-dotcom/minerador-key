@@ -166,8 +166,18 @@ test("a Revisão do Arquiteto exibe checklist, ações e o botão de aprovação
   assert.match(workspace, /data-testid="architect-review-checklist"/);
   assert.match(workspace, /data-testid="architect-review-decision"/);
   assert.match(workspace, /data-testid="architect-article-approval"/);
-  assert.match(workspace, /Aprovar ArticleDNA/);
-  assert.match(workspace, /disabled=\{!articleReview\.readyForApproval\}/);
+  /*
+   * O FECHAMENTO É NOMEADO, E TEM UMA AUTORIDADE SÓ.
+   *
+   * Antes o painel trazia um "Aprovar ArticleDNA" próprio, que gravava
+   * `approved` sem passar pela portaria da conclusão. A revisão agora aponta
+   * para "Concluir formação" e mostra, ali mesmo, o que ainda falta — o
+   * mesmo portão que a barra de seleção consulta.
+   */
+  assert.doesNotMatch(workspace, /data-testid="architect-approve-article"/);
+  assert.match(workspace, /data-testid="architect-closing-authority"/);
+  assert.match(workspace, /Concluir formação/);
+  assert.match(workspace, /articleClosingBlockers\(closingCandidateFor\(art\), "approve"\)/);
   assert.match(workspace, /decisão\(ões\) pendente\(s\)/);
   assert.doesNotMatch(workspace, /alteração\(ões\) aguardando confirmação/);
 });

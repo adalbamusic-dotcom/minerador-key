@@ -4,13 +4,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createCanonicalServiceClient } from "@/lib/server/canonical-authorization";
 import { enqueueExternalProcessingJob } from "@/lib/server/telegram/persistence";
 import { persistExpertContributionOrganizationWriteback, persistExpertContributionTranscriptWriteback, persistTelegramContributionAssetWriteback, type LocalWorkerWriteback } from "@/lib/local-worker/writeback";
+import { persistRadarVideoSourceText, type RadarVideoTextWriteback } from "@/lib/server/radar-video-text";
 
 export type ExternalProcessingJob = {
   id: string;
   brand_id: string;
   brief_id: string | null;
   contribution_id: string | null;
-  job_kind: "telegram_media_preservation" | "speech_transcription" | "document_extraction";
+  job_kind: "telegram_media_preservation" | "speech_transcription" | "document_extraction" | "radar_video_text_acquisition";
+  /* O sujeito do job quando ele é de vídeo. Nunca preenchido junto de `contribution_id`. */
+  video_source_id?: string | null;
   status: string;
   attempts: number;
   max_attempts: number;
@@ -20,15 +23,23 @@ export type ExternalProcessingJob = {
 
 type WorkerClient = Pick<SupabaseClient, "from" | "rpc">;
 
+/**
+ * O ENCADEAMENTO É DA CADEIA DO ESPECIALISTA — e continua sendo.
+ *
+ * `briefId` e `contributionId` são obrigatórios aqui porque um follow-up
+ * pertence a uma contribuição: preservação → transcrição → organização. O job
+ * de vídeo NÃO encadeia nada nesta fase, então o tipo exclui o kind dele em vez
+ * de aceitá-lo e falhar na inserção.
+ */
 export type LocalWorkerFollowUpJob = {
   brandId: string;
   briefId: string;
   contributionId: string;
-  jobKind: ExternalProcessingJob["job_kind"];
+  jobKind: Exclude<ExternalProcessingJob["job_kind"], "radar_video_text_acquisition">;
   payload?: Record<string, unknown>;
 };
 
-export type LocalWorkerProcessorOutcome = { status?: "COMPLETED" | "BLOCKED"; payload?: Record<string, unknown>; writeback?: LocalWorkerWriteback; followUpJobs?: LocalWorkerFollowUpJob[] };
+export type LocalWorkerProcessorOutcome = { status?: "COMPLETED" | "BLOCKED"; payload?: Record<string, unknown>; writeback?: LocalWorkerWriteback | RadarVideoTextWriteback; followUpJobs?: LocalWorkerFollowUpJob[] };
 export type LocalWorkerProcessor = (job: ExternalProcessingJob) => Promise<LocalWorkerProcessorOutcome>;
 
 function fail(result: { error: { code?: string; message?: string } | null }, message: string): never | void {
@@ -67,8 +78,19 @@ export async function completeExternalProcessingJob(input: { jobId: string; work
   fail(result, "Não foi possível concluir o job do worker local");
 }
 
-export async function applyLocalWorkerWriteback(input: { writeback: LocalWorkerWriteback; client?: WorkerClient }) {
+export async function applyLocalWorkerWriteback(input: { writeback: LocalWorkerWriteback | RadarVideoTextWriteback; client?: WorkerClient }) {
   const client = input.client || createCanonicalServiceClient();
+  /*
+   * O TEXTO DE VÍDEO ESCREVE NA TABELA DELE — nunca em `expert_contributions`.
+   *
+   * Vídeo deliberado e contribuição de especialista são entidades semânticas
+   * diferentes (invariante 24). Reaproveitar o PADRÃO de escrita é bom;
+   * reaproveitar a TABELA faria a fila mentir sobre o que preservou.
+   */
+  if (input.writeback.kind === "radar_video_source_text") {
+    await persistRadarVideoSourceText({ writeback: input.writeback, client: client as never });
+    return;
+  }
   if (input.writeback.kind === "telegram_contribution_asset") {
     await persistTelegramContributionAssetWriteback({ client, writeback: input.writeback });
   } else if (input.writeback.kind === "expert_contribution_transcript") {

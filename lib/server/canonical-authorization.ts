@@ -1,7 +1,6 @@
 import "server-only";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { requireSupabaseUser } from "@/lib/server/supabase-session";
 import { TENANT_MODULES, type TenantContext, type TenantModule, type TenantRole } from "@/lib/server/tenant-context";
 import { isTenantId } from "@/lib/tenant-routing";
 import { buildAgencyRef } from "@/lib/agency-routing";
@@ -56,6 +55,15 @@ export function createCanonicalServiceClient(): ServiceClient {
  * against canonical persisted records after Auth verifies the current user.
  */
 export async function requireCanonicalActorUserId() {
+  /*
+   * IMPORT TARDIO, E DELIBERADO.
+   *
+   * Esta função exige uma requisição em andamento; o Local Worker nunca a
+   * chama. Importar a sessão no topo do módulo arrastava `next/headers` para
+   * o boot do worker e o quebrava com `ERR_MODULE_NOT_FOUND` — por um módulo
+   * que ele não usa. Aqui dentro, o custo fica com quem tem o benefício.
+   */
+  const { requireSupabaseUser } = await import("@/lib/server/supabase-session");
   const actorUserId = (await requireSupabaseUser()).id;
   if (!isTenantId(actorUserId)) {
     throw new CanonicalAuthorizationError(401, "ACTOR_INVALID", "A sess\u00e3o autenticada n\u00e3o possui uma identidade UUID v\u00e1lida.");

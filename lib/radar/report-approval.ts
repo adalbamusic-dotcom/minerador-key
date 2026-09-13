@@ -33,6 +33,8 @@
 
 import type { ArticleDNA, VersionEnvelope } from "../arquiteto/contracts.ts";
 import { analysisApprovalIssues, createRadarAnalysisSuccessor, type RadarAnalysisVersion, type RadarExpertEvidence } from "./analysis-contracts.ts";
+import { isComparableRadarExtraction } from "./analysis-insights.ts";
+import { resolveRadarInvestigationSufficiency } from "./investigation-sufficiency.ts";
 import { buildRadarCompetitiveReport } from "./competitive-report.ts";
 import { buildRadarEvidencePackage } from "./evidence-package.ts";
 import { buildRadarPlannerHandoff, isRadarPlannerHandoff } from "./planner-handoff.ts";
@@ -144,6 +146,44 @@ export function radarReportApprovalIssues(input: RadarApprovalGateInput): string
     issues.push("A contribuição do especialista não pôde ser lida; a aprovação permanece bloqueada.");
   } else if (expert.pendingCount || expert.blockedCount) {
     issues.push("Revise todas as contribuições remotas do especialista antes de aprovar o relatório.");
+  }
+
+  /*
+   * APROVAR EXIGE O RELATÓRIO — não a promessa de gerá-lo depois.
+   *
+   * O relatório era construído dentro da própria aprovação: a pessoa clicava
+   * em aprovar e o objeto nascia junto com o "aprovado". Ela nunca leu o que
+   * estava assinando. O relatório passa a ser um ato anterior e visível, e a
+   * ausência do modelo observado marca justamente o relatório gerado antes
+   * desta leitura — que também não pode fechar a investigação.
+   */
+  /*
+   * AMOSTRA VAZIA NÃO APROVA.
+   *
+   * O smoke aprovou uma investigação com 7 selecionadas, 4 analisadas, 3 falhas
+   * e ZERO páginas comparáveis. O portão media relatório e evidência, mas nunca
+   * perguntou se havia do que concluir.
+   */
+  if (analysis) {
+    const payload = analysis.payload;
+    const suficiencia = resolveRadarInvestigationSufficiency({
+      hasSnapshot: Boolean(research),
+      curationConfirmed: payload.selectedCompetitorIds.length > 0,
+      selected: payload.selectedCompetitorIds.length,
+      analyzed: payload.extractions.length,
+      failed: payload.extractionFailures.length,
+      comparable: payload.extractions.filter(isComparableRadarExtraction).length,
+    });
+    if (!suficiencia.canApprove) {
+      issues.push(`Não há amostra competitiva suficiente para concluir esta investigação. ${suficiencia.reasons[0] || ""}`.trim());
+    }
+  }
+
+  const relatorio = analysis?.payload.competitiveReport || null;
+  if (analysis && !relatorio) {
+    issues.push("Gere o relatório competitivo desta versão antes de aprovar a investigação.");
+  } else if (relatorio && !relatorio.observedCompetitiveModel) {
+    issues.push("O relatório desta versão foi gerado antes do modelo competitivo observado; gere o relatório novamente antes de aprovar.");
   }
 
   if (analysis) issues.push(...analysisApprovalIssues(analysis, input.kgrStrategy));

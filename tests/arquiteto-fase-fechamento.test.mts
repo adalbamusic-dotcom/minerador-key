@@ -102,8 +102,18 @@ test("confirmar a arquitetura aprova SiloDNA e SiloPage", () => {
   assert.match(workspace, /siloPageVersionId: prepared\.siloPage\.versionId/);
   assert.match(workspace, /siloPageContentHash: prepared\.siloPage\.contentHash/);
   assert.match(workspace, /siloDnaVersionId: prepared\.siloDna\.versionId/);
-  // O `null` fixo era o motivo de as três SiloPages ficarem em `proposed`.
-  assert.doesNotMatch(workspace, /siloPageApproval: null/);
+  /*
+   * O `null` proibido é o da consolidação COM artigos — foi ele que deixou as
+   * três SiloPages em `proposed` para sempre.
+   *
+   * A consolidação de IDENTIDADE, que fecha a fase Silos antes dos Articles,
+   * passa `null` de propósito: sem seções a página não passa no gate próprio
+   * dela, e aprová-la seria prometer uma página que ninguém pode publicar.
+   */
+  const comArtigos = workspace.slice(workspace.indexOf("const consolidateSilos"));
+  const corpo = comArtigos.slice(0, comArtigos.indexOf("const consolidateSiloIdentities"));
+  assert.ok(corpo.length, "o corpo de consolidateSilos precisa ser isolado do caminho de identidade");
+  assert.doesNotMatch(corpo, /siloPageApproval: null/);
   assert.doesNotMatch(workspace, /createStatusEvent\(canonicalPage\.versionId, "proposed"/);
 });
 
@@ -134,9 +144,30 @@ test("a fase Links opera por ato, não por motor", () => {
 
 /* --------------- §5 — a formação não emite artefato incompleto ----------- */
 
-test("concluir formação exige Silo consolidado", () => {
-  assert.match(workspace, /const materializado = materializeArticleSiloId\(\{/);
-  assert.match(workspace, /Um artigo não pôde ser concluído/);
-  // Recusa nomeada: o artigo não passa adiante sem pai, e o motivo é dito.
+test("concluir formação declara o pai canônico quando ele existe", () => {
+  /*
+   * ESTE TESTE GUARDAVA UM CICLO.
+   *
+   * Ele exigia que concluir a formação recusasse sem SiloDNA canônico. Mas a
+   * decisão de produto passou a criar o Silo canônico DEPOIS das formações
+   * estabilizadas — e aí um esperava o outro para sempre.
+   *
+   * O que continua valendo é a metade certa: quando o Silo canônico existe, o
+   * artigo sai daqui declarando o pai, e o pai vem do acervo, não de um palpite
+   * do chamador. O que mudou é o desfecho da ausência: virou pendência
+   * nomeada, e a formação fecha assim mesmo.
+   */
+  /*
+   * A auditoria do §3 mudou de novo QUEM resolve o pai, e por um motivo:
+   * `ArticleDNA` não referencia `SiloDNA`, então no fechamento canônico o
+   * artigo nasce ANTES do Silo, com `siloId` nulo. O binder passou a receber a
+   * etapa. O invariante deste teste não mudou — Silo canônico existente é
+   * declarado, ausência vira pendência nomeada — e é ele que está aqui.
+   */
+  assert.match(workspace, /const vinculo = bindArticleParentForMaterialization\(\{/);
   assert.match(workspace, /siloVersions: Object\.values\(acceptedSiloDnas\)/);
+  assert.match(workspace, /aguardandoSilo\.push\(\{/);
+  assert.match(workspace, /candidateRef: aprovado\.candidateRef,/);
+  // A recusa que fechava o ciclo não pode voltar.
+  assert.doesNotMatch(workspace, /showNotification\("warning", `Um artigo não pôde ser concluído/);
 });

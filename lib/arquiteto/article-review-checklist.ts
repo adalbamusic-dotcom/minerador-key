@@ -118,13 +118,23 @@ export function buildArticleReviewChecklist(input: ArticleReviewChecklistInput):
       : "Nenhuma ação necessária.",
   });
 
+  /*
+   * TIPO DE UNIDADE: FATO DERIVADO quando não há ambiguidade real.
+   *
+   * Cobrar "Registrar decisão" para confirmar que um Article é um Article
+   * criava pendência artificial — e a confirmação gravava uma sucessora
+   * `proposed`, rebaixando um ArticleDNA já aprovado. A decisão humana
+   * continua existindo onde o sinal é insuficiente ou divergente.
+   */
   decisions.push({
     id: "unit-type",
     kind: "unit_type",
     title: "Tipo de unidade",
     resolved: input.unitType.defined,
     state: input.unitType.label || "A definir",
-    what: input.unitType.defined ? "Tipo de unidade definido." : "Falta registrar o tipo de unidade do artigo.",
+    what: input.unitType.defined
+      ? "Tipo de unidade definido pela formação."
+      : "O tipo da unidade não pôde ser derivado: falta decisão humana.",
     why: "O tipo da unidade orienta o Planejador e o Redator; categoria/cluster pertence à etapa Silos.",
     how: input.unitType.defined ? "Nenhuma ação necessária." : "Escolher o tipo e registrar a decisão nesta aba.",
   });

@@ -784,6 +784,29 @@ export const ArticleKeywordReferenceSchema = z.object({
   overlapRisk: z.enum(["low", "medium", "high", "unknown"]).optional(),
   keywordUrlRelation: KeywordUrlRelationshipSchema.optional(),
   urlEvidence: z.record(z.string(), z.unknown()).optional(),
+  /*
+   * A QUALIFICAÇÃO SEMÂNTICA USADA NA FORMAÇÃO.
+   *
+   * O Minerador consolida intenção e funil no artefato
+   * `keyword_semantic_qualification`, e o handoff já a transportava até o
+   * Arquiteto — mas ela parava ali. O ArticleDNA registrava as métricas e
+   * perdia a leitura semântica que as explicava, então o Radar mostrava
+   * "intenção pendente" para uma keyword que o Minerador já havia classificado.
+   *
+   * Referência VERSIONADA, não cópia mutável: versionId e contentHash apontam
+   * para o artefato que existia quando esta versão do ArticleDNA foi formada.
+   * Aditivo e opcional — versão antiga continua válida e declara a ausência.
+   */
+  semanticQualificationRef: z.object({
+    versionId: z.string().min(1),
+    versionNumber: z.number().int().positive().optional(),
+    contentHash: z.string().min(1),
+    /** Eixos só viajam preenchidos quando a evidência é conclusiva. */
+    intent: z.string().nullable(),
+    funnel: z.string().nullable(),
+    semanticState: z.enum(["conclusive", "non_conclusive"]),
+    collectedAt: z.string().min(1),
+  }).strict().optional(),
   keywordDnaSnapshot: KeywordDnaProvenanceSnapshotSchema.optional(),
   demandEvidence: KeywordDemandEvidenceSchema.optional(),
 }).strict();

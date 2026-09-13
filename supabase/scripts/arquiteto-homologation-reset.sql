@@ -46,7 +46,12 @@ DECLARE
     'keyword', 'territory', 'silo_working_copy',
     'architecture_analysis', 'article_formation_analysis',
     'territorial_serp_assessment', 'article_formation_serp_assessment',
-    'territorial_ai_review', 'arquiteto_homologation_round'
+    'territorial_ai_review', 'arquiteto_homologation_round',
+    -- Status operacional do artigo (PRONTO_PARA_RADAR / ENVIADO_AO_RADAR),
+    -- gravado em `stage = 'architect'`. O item do Radar usa a MESMA
+    -- subject_type em `stage = 'radar'` e NÃO é tocado: o delete filtra por
+    -- stage, e o pré-voo continua barrando o que é do Radar.
+    'article'
   ];
 
   -- O que o RADAR escreve em `editorial_decision_events`. Estas linhas

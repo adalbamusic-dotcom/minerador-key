@@ -34,12 +34,12 @@ export const RADAR_SERP_COLLECTION_STATES = [
 export type RadarSerpCollectionState = (typeof RADAR_SERP_COLLECTION_STATES)[number];
 
 export const RADAR_SERP_COLLECTION_LABEL: Record<RadarSerpCollectionState, string> = {
-  NOT_COLLECTED: "Iniciar coleta SERP",
+  NOT_COLLECTED: "Iniciar coleta da SERP",
   VALIDATING: "Validando artigo…",
   COLLECTING: "Coletando SERP…",
   PERSISTING: "Salvando snapshot…",
   SUCCESS: "Snapshot disponível",
-  TRANSIENT_FAILURE: "Tentar novamente",
+  TRANSIENT_FAILURE: "Iniciar coleta da SERP",
   STRUCTURAL_BLOCK: "Coleta bloqueada",
 };
 
@@ -154,7 +154,9 @@ export function radarSerpCollectionAction(input: {
   const retry = input.state === "TRANSIENT_FAILURE";
   return {
     state: retry ? "TRANSIENT_FAILURE" : "SUCCESS",
-    actionLabel: retry ? RADAR_SERP_COLLECTION_LABEL.TRANSIENT_FAILURE : "Atualizar SERP",
+    // Com snapshot o rótulo é sempre "Atualizar SERP" — inclusive depois de
+    // uma falha transitória. A ação tem exatamente dois nomes possíveis.
+    actionLabel: "Atualizar SERP",
     canStart: input.contextReady,
     isFirstCollection: false,
     detail: retry

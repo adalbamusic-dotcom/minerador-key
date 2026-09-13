@@ -181,8 +181,35 @@ test("R6 mantém DeepSeek/Telegram e mídia fora do render automático", () => {
   assert.match(route, /resolveDeepSeekCanonicalConfig/);
   assert.match(route, /generateStructuredAI/);
   assert.match(route, /3 a 5/);
-  assert.doesNotMatch(page, /useEffect\([^]*collectSerp/);
+  /*
+   * NENHUM EFEITO DE RENDER COLETA SERP.
+   *
+   * A asserção é por CORPO de efeito, não pelo arquivo: a forma antiga
+   * (`useEffect\([^]*collectSerp`) casava qualquer efeito seguido, em qualquer
+   * ponto do arquivo, de uma menção a `collectSerp` — e passava só porque a
+   * página não tinha efeito nenhum.
+   */
+  for (const efeito of page.match(/useEffect\([\s\S]*?\n {2}\}, \[[^\]]*\]\);/g) || []) {
+    assert.equal(/collectSerp|pipeline\.collect/.test(efeito), false, "nenhum useEffect pode coletar SERP");
+  }
   assert.doesNotMatch(panel, /fetch\(/);
-  assert.match(panel, /LINK_REGISTERED/);
-  assert.match(panel, /AWAITING_FILE/);
+
+  /*
+   * GATE 14.1 · o registro de mídia foi para a área Vídeos.
+   *
+   * GATE 1 DE VÍDEOS · o estado do material deixou de ser local.
+   *
+   * `LINK_REGISTERED` e `AWAITING_FILE` eram estados de um `useState` que era a
+   * única cópia da fonte. A fonte passou a ser persistida, e o estado agora é
+   * `REGISTERED`/`ARCHIVED` na tabela canônica. O que este teste protege
+   * continua sendo o mesmo: nenhum download acontece no painel.
+   */
+  const videos = readFileSync(new URL("../modules/radar/radar-r3-videos-panel.tsx", import.meta.url), "utf8");
+  assert.match(videos, /data-testid="radar-videos-register"/);
+  /* Gate 2: a extração existe; o que a área ainda deve é dito por extenso. */
+  assert.match(videos, /O texto extraído é preservado no idioma ORIGINAL: nada é traduzido, resumido nem reescrito\./, "a área diz o que ainda não faz");
+  /* A frase por fonte ("Texto ainda não extraído") vem do domínio, não daqui. */
+  assert.match(videos, /\{leitura\.textStatus\}/);
+  assert.ok(!/LINK_REGISTERED|AWAITING_FILE/.test(videos), "os estados locais não sobreviveram");
+  assert.doesNotMatch(videos, /fetch\(/);
 });

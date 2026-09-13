@@ -197,3 +197,23 @@ export function applyHumanEditorialUnitDecision(article: ArticleDNA, input: { ty
   const pending = article.humanPendingDecisions.filter(decision => !decision.toLocaleLowerCase("pt-BR").includes("tipo da unidade") && !decision.toLocaleLowerCase("pt-BR").includes("landing page"));
   return ArticleDNASchema.parse({ ...article, unitClassification: classification, unitPurpose: purpose, serpStrategy: strategy, humanPendingDecisions: pending });
 }
+
+/**
+ * O TIPO DA UNIDADE É FATO DERIVADO — não decisão humana pendente.
+ *
+ * Pedir que alguém clique "Registrar decisão" para confirmar que um Article é
+ * um Article cria pendência artificial: bloqueia a conclusão da formação e,
+ * pior, a confirmação grava uma sucessora `proposed` que rebaixa um ArticleDNA
+ * já aprovado. Nada disso decide nada — a fase Artigos já formou a unidade.
+ *
+ * A decisão humana continua existindo onde há ambiguidade REAL: sinal
+ * insuficiente (`unknown`), divergência declarada (`conflict`) ou o balde
+ * `other`, que é justamente "não sabemos qual é". Página de categoria não
+ * entra nesta conta: cluster e SiloPage pertencem à fase Silos.
+ */
+export function editorialUnitTypeIsDerived(unit: EditorialUnitClassification | null | undefined): boolean {
+  if (!unit) return false;
+  if (unit.status === "human_confirmed") return true;
+  if (unit.status === "conflict" || unit.status === "unknown") return false;
+  return unit.type !== "other";
+}

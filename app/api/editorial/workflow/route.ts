@@ -1,3 +1,8 @@
+import { persistGlobalTransition } from "@/lib/server/global-workflow-transition";
+import { getOperationalClient } from "@/lib/server/editorial-db";
+import { buildCanonicalIndex } from "@/lib/server/global-workflow-canonical";
+import { readReadyBase, validateReadyForRadarClaims } from "@/lib/arquiteto/operational-status";
+import { radarReadbackMatches } from "@/lib/editorial/global-workflow-status";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireCanonicalSessionProfile, authzErrorResponse, AuthzError } from "@/lib/server/authz";
@@ -16,9 +21,22 @@ export async function POST(request: NextRequest) {
     const workflow = new WorkflowRepository(); const artifacts = new ArtifactRepository(); const decisions = new DecisionEventRepository();
     if (command.action === "import_radar") {
       await assertEditorialPermission(profile, command.brandId, "arquiteto", "approve"); await assertEditorialPermission(profile, command.brandId, "radar", "create");
+      const db=getOperationalClient();
+      const canonical=await buildCanonicalIndex(db,command.brandId);
+      const confirmedRadar=[];
       for (const version of command.articleVersions) {
+        const ready=await db.from("editorial_workflow_items").select("id,state,payload,lock_version").eq("marca_id",command.brandId).eq("stage","architect").eq("subject_type","article").eq("subject_id",version.payload.articleId).maybeSingle();
+        if(ready.error) throw ready.error;
+        const base=readReadyBase(ready.data?.payload);
+        if(!ready.data || ready.data.state!=="PRONTO_PARA_RADAR" || !base || base.articleDnaVersionId!==version.versionId) throw new AuthzError(409,"O artigo precisa estar Pronto para Radar sobre a versão enviada.");
+        const context=command.handoffContext[version.payload.articleId]?.silo;
+        if(!context || context.siloDnaVersionId!==base.siloDnaVersionId || context.siloPageVersionId!==base.siloPageVersionId) throw new AuthzError(409,"Contexto de envio diverge da base pronta.");
+        const gate=validateReadyForRadarClaims({claims:[{articleId:version.payload.articleId,...base}],canonical});
+        if(gate.refused.length) throw new AuthzError(409,gate.refused[0].blockers.join(" "));
+        const stored=await db.from("editorial_artifact_versions").select("content_hash").eq("marca_id",command.brandId).eq("version_id",version.versionId).single();
+        if(stored.error || stored.data?.content_hash!==version.contentHash || await contentHash(version.payload)!==version.contentHash) throw new AuthzError(409,"ArticleDNA diverge da versão remota.");
         if (articleApprovalIssues(version, command.versionEvents).length) throw new AuthzError(409, "ArticleDNA não atende aos gates de aprovação.");
-        await artifacts.save(command.brandId, "article_dna", version, "approved", profile.userId); await artifacts.appendEvents(command.brandId, command.versionEvents.filter(event => event.versionId === version.versionId), profile.userId);
+        // Importação consome aprovação remota; nunca aprova artefatos enviados pelo cliente.
         /*
          * O RadarItem é CONSTRUÍDO e VALIDADO antes de qualquer escrita.
          *
@@ -47,7 +65,16 @@ export async function POST(request: NextRequest) {
         const row = await workflow.importItem({ marcaId: command.brandId, articleId: version.payload.articleId, stage: "radar", state: validado.state,
           sourceEntityId: version.entityId, sourceVersionId: version.versionId, sourceContentHash: version.contentHash, payload: validado, actorId: profile.userId });
         await decisions.append({ marcaId: command.brandId, workflowItemId: row.id, articleId: version.payload.articleId, eventType: "import_radar", toState: validado.state, sourceVersionId: version.versionId, actorId: profile.userId });
+        const readback=await workflow.find(row.id);
+        if(!radarReadbackMatches(readback,command.brandId,version.payload.articleId,version.versionId,version.contentHash)) throw new AuthzError(502,"Radar não confirmado no readback remoto.");
+        await persistGlobalTransition(db, {
+          brandId: command.brandId, articleId: version.payload.articleId, actorId: profile.userId,
+          target: "ENVIADO_AO_RADAR", previous: ready.data, payload: base,
+          sourceVersionId: version.versionId,
+        });
+        confirmedRadar.push(RadarItemSchema.parse({...readback!.payload as object,id:readback!.id,lockVersion:readback!.lock_version,state:readback!.state}));
       }
+      return NextResponse.json({ok:true,radarItems:confirmedRadar,readbackConfirmed:true});
     }
     if (command.action === "transition_radar") {
       await assertEditorialPermission(profile, command.brandId, "radar", command.target === "approved" ? "approve" : "edit");

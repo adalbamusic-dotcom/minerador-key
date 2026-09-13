@@ -86,6 +86,16 @@ export type SiloPageApprovalInput = {
   decision: SiloPageApprovalDecision | null | undefined;
   /** IA nunca aprova. Só `"human"` passa. */
   actor: "human" | "ai" | "system";
+  /**
+   * O cenário exige prova de publicação?
+   *
+   * Padrão `true`: quem não declara nada continua sendo cobrado. Uma passada
+   * que fecha arquitetura PLANEJADA declara `false` — ver
+   * `publication-scenario.ts`. Identidade contraditória (canonical divergente)
+   * continua bloqueando nos dois casos: isso não é falta de verificação, é o
+   * artefato afirmando dois endereços para a mesma página.
+   */
+  publishedVerificationRequired?: boolean;
 };
 
 /**
@@ -185,11 +195,22 @@ export function resolveSiloPageApprovalReadiness(input: SiloPageApprovalInput): 
 
   // --------------------------------------------------- quando já publicada
   if (siloPage.publicationStatus === "published") {
-    if (!siloPage.publishedUrl) {
-      blockers.push({ code: "SILO_PAGE_APPROVAL_PUBLISHED_URL_MISSING", detail: siloPage.siloPageId });
-    }
     const verification = siloPage.publicationVerification.status;
-    if (!RESOLVED_PUBLICATION_STATUSES.includes(verification as never)) {
+    if (input.publishedVerificationRequired ?? true) {
+      if (!siloPage.publishedUrl) {
+        blockers.push({ code: "SILO_PAGE_APPROVAL_PUBLISHED_URL_MISSING", detail: siloPage.siloPageId });
+      }
+      if (!RESOLVED_PUBLICATION_STATUSES.includes(verification as never)) {
+        blockers.push({ code: "SILO_PAGE_APPROVAL_PUBLICATION_UNVERIFIED", detail: verification });
+      }
+    } else if (verification === "canonical_mismatch") {
+      /*
+       * Divergência de canonical NÃO é "falta verificar a publicação".
+       *
+       * São dois endereços declarados para a mesma página — o artefato diz um,
+       * o catálogo observou outro. Aprovar isso carimbaria a contradição no
+       * acervo, e nenhuma decisão de escopo torna isso aceitável.
+       */
       blockers.push({ code: "SILO_PAGE_APPROVAL_PUBLICATION_UNVERIFIED", detail: verification });
     }
   }
@@ -209,4 +230,38 @@ export function resolveSiloPageApprovalReadiness(input: SiloPageApprovalInput): 
   }
 
   return blockers.length ? { state: "blocked", blockers } : { state: "approved", blockers: [] };
+}
+
+/**
+ * O PREFLIGHT: o que impediria aprovar esta página, ANTES do clique.
+ *
+ * A pessoa só descobria o bloqueio depois de confirmar a arquitetura e ver a
+ * recusa vir do servidor. Isto NÃO é uma segunda autoridade: é a mesma
+ * `resolveSiloPageApprovalReadiness`, chamada com uma decisão sintética que
+ * casa exatamente com a versão em mãos, para que sobrem só os impedimentos
+ * ESTRUTURAIS — canonical ausente, identidade publicada não confirmada, slug,
+ * pareamento com o SiloDNA.
+ *
+ * A decisão sintética não aprova nada e não é persistida: ela existe para que
+ * "falta decisão humana" não apareça como impedimento numa tela cujo objetivo
+ * é justamente informar a pessoa que vai decidir.
+ */
+export function siloPageApprovalPreflight(
+  input: Omit<SiloPageApprovalInput, "decision" | "actor">,
+): SiloPageApprovalReadiness {
+  return resolveSiloPageApprovalReadiness({
+    ...input,
+    actor: "human",
+    decision: {
+      actorUserId: "preflight",
+      decidedAt: new Date(0).toISOString(),
+      reason: "Simulação de portaria para a mesa: nada é aprovado nem persistido aqui.",
+      scope: "silo_page_approval",
+      siloPageId: input.siloPage.siloPageId,
+      siloPageVersionId: input.siloPageVersion.versionId,
+      siloPageContentHash: input.siloPageVersion.contentHash,
+      siloDnaVersionId: input.siloDnaVersion.versionId,
+      territoryRef: input.territoryRef,
+    },
+  });
 }

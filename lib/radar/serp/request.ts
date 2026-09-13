@@ -28,6 +28,46 @@ export function buildRadarSerpCollectPayload(input: {
   };
 }
 
+/**
+ * A COLETA AUXILIAR DE PESQUISA.
+ *
+ * A SERP canônica do artigo é a da principal: ela tem snapshot, revisão e
+ * aprovação. As secundárias e o reforço produzem outra coisa — evidência de
+ * pesquisa, que alimenta o universo competitivo e **não** vira a SERP do
+ * artigo.
+ *
+ * A keyword viaja por ID. O texto é resolvido no servidor, a partir da
+ * composição canônica do próprio ArticleDNA: nenhum texto do navegador vira
+ * consulta paga.
+ */
+export function buildRadarSerpAuxiliaryPayload(input: {
+  brandId: string;
+  articleId: string;
+  articleDnaVersionId: string;
+  keywordId: string;
+  location: string;
+  language: string;
+  device: "desktop" | "mobile";
+  articleVersion?: unknown;
+  resolutionEnvelope: z.infer<typeof RadarSerpResolutionEnvelopeSchema>;
+}) {
+  const articleDnaVersionId = input.articleDnaVersionId.trim();
+  if (!articleDnaVersionId) throw new Error("A versão do ArticleDNA deste item do Radar não está disponível.");
+  if (!input.keywordId.trim()) throw new Error("A pesquisa auxiliar exige o identificador da keyword da composição.");
+  return {
+    action: "collect_auxiliary" as const,
+    brandId: input.brandId,
+    articleId: input.articleId,
+    articleDnaVersionId,
+    keywordId: input.keywordId,
+    location: input.location,
+    language: input.language,
+    device: input.device,
+    articleVersion: input.articleVersion,
+    resolutionEnvelope: input.resolutionEnvelope,
+  };
+}
+
 const LocalArticleContextSchema = z.object({
   // The client may carry a legacy/local recovery envelope whose ArticleDNA
   // contains fields newer than this route's request contract. Keep request
@@ -49,6 +89,18 @@ export const CollectRequestSchema = z.object({
   ...LocalArticleContextSchema.shape,
 });
 
+export const CollectAuxiliaryRequestSchema = z.object({
+  action: z.literal("collect_auxiliary"),
+  brandId: z.string().uuid(),
+  articleId: z.string().min(1),
+  /** A keyword da composição, por ID. O texto é do servidor, nunca do cliente. */
+  keywordId: z.string().min(1),
+  location: z.string().min(1).max(160),
+  language: z.string().min(2).max(20),
+  device: z.enum(["desktop", "mobile"]),
+  ...LocalArticleContextSchema.shape,
+});
+
 export const ReviewRequestSchema = z.object({
   action: z.literal("review"),
   brandId: z.string().uuid(),
@@ -60,4 +112,4 @@ export const ReviewRequestSchema = z.object({
   ...LocalArticleContextSchema.shape,
 });
 
-export const RequestSchema = z.discriminatedUnion("action", [CollectRequestSchema, ReviewRequestSchema]);
+export const RequestSchema = z.discriminatedUnion("action", [CollectRequestSchema, CollectAuxiliaryRequestSchema, ReviewRequestSchema]);

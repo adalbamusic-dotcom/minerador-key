@@ -51,7 +51,15 @@ export type ArticleTerminalKgr = (typeof ARTICLE_TERMINAL_KGR)[number];
 export const ARTICLE_TERMINAL_KGR_APPLICABILITY = ["APPLICABLE", "NOT_APPLICABLE"] as const;
 export type ArticleTerminalKgrApplicability = (typeof ARTICLE_TERMINAL_KGR_APPLICABILITY)[number];
 
-export const ARTICLE_TERMINAL_COMPATIBILITY = ["COMPATIBLE", "PARTIAL", "INCOMPATIBLE", "AMBIGUOUS"] as const;
+/*
+ * "Não aplicável" é diferente de "ambígua".
+ *
+ * Ambígua diz que faltou base para afirmar coerência ou conflito. Num artigo
+ * de UMA keyword não falta base: não existe par a avaliar, e a pergunta não se
+ * aplica. Devolver "Ambígua" ali fazia a mesa exibir incerteza sobre uma
+ * comparação que ninguém pode fazer.
+ */
+export const ARTICLE_TERMINAL_COMPATIBILITY = ["COMPATIBLE", "PARTIAL", "INCOMPATIBLE", "AMBIGUOUS", "NOT_APPLICABLE"] as const;
 export type ArticleTerminalCompatibility = (typeof ARTICLE_TERMINAL_COMPATIBILITY)[number];
 
 export const ARTICLE_TERMINAL_PROTECTIONS = ["NEW", "PUBLISHED_LOCKED", "PUBLISHED_REVISABLE"] as const;
@@ -172,6 +180,8 @@ export type ClassificationEvidence = {
   compatibilityConflicts: number;
   /** Secundárias cuja compatibilidade foi avaliada. */
   compatibilityEvaluated: number;
+  /** Quantas keywords a composição tem. Uma só não tem par a comparar. */
+  compositionKeywordCount?: number;
 
   isPublished: boolean;
   principalProtected: boolean;
@@ -343,6 +353,20 @@ function resolveKgr(
 }
 
 function resolveCompatibility(evidence: ClassificationEvidence): ResolvedField<ArticleTerminalCompatibility> {
+  /*
+   * Artigo de uma keyword não tem compatibilidade pairwise.
+   *
+   * A Principal é a própria keyword por estrutura, e não há secundária com
+   * quem compará-la. Isto é resultado terminal, não incerteza — e não gera
+   * decisão humana nenhuma.
+   */
+  if (evidence.compositionKeywordCount === 1) {
+    return {
+      value: "NOT_APPLICABLE",
+      source: "group",
+      reason: "Artigo de uma keyword: não existe par para avaliar compatibilidade.",
+    };
+  }
   if (!evidence.compatibilityEvaluated) {
     return {
       value: "AMBIGUOUS",
@@ -483,6 +507,7 @@ export const ARTICLE_COMPATIBILITY_LABELS: Record<ArticleTerminalCompatibility, 
   PARTIAL: "Parcial",
   INCOMPATIBLE: "Incompatível",
   AMBIGUOUS: "Ambígua",
+  NOT_APPLICABLE: "Não aplicável",
 };
 
 export const ARTICLE_PROTECTION_LABELS: Record<ArticleTerminalProtection, string> = {

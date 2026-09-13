@@ -26,6 +26,16 @@ export const SerpDiagnosticSchema = z.object({
   possibleConflicts: z.array(z.string()),
   opportunities: z.array(z.string()),
   limitations: z.array(z.string()),
+  /*
+   * A DISTRIBUIÇÃO BRUTA DA RESPOSTA, POR TIPO.
+   *
+   * "Por que aparecem exatamente 8?" não tinha como ser respondido: o payload
+   * cru não é persistido, e só as posições preservadas (5,6,7,8,9,11,12,13)
+   * denunciavam que o provider devolveu mais itens de outros tipos. Aditivo com
+   * `.default({})`: snapshot antigo continua válido, e a próxima coleta traz a
+   * conta.
+   */
+  rawItemTypeCounts: z.record(z.string(), z.number().int().nonnegative()).default({}),
   verdict: z.enum(["coerente", "parcialmente_coerente", "possivel_conflito", "informacao_insuficiente"]),
 }).strict();
 export type SerpDiagnostic = z.infer<typeof SerpDiagnosticSchema>;

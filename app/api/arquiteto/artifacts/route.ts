@@ -10,6 +10,7 @@ import {
   type VersionEnvelope,
 } from "@/lib/arquiteto/contracts";
 import { ARTICLE_AI_REVIEW_ARTIFACT_TYPE, VersionedArticleArchitectureAiReviewSchema, type ArticleArchitectureAiReview } from "@/lib/arquiteto/article-ai-review";
+import { articleApprovalRevalidationIssues } from "@/lib/arquiteto/article-approval-revalidation";
 import { appendArquitetoArtifact, listArquitetoArtifacts, pipelineArtifactErrorResponse, type ArquitetoArtifactType } from "@/lib/server/arquiteto-persistence";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 
@@ -53,6 +54,32 @@ export async function POST(request: Request) {
       action: parsed.action,
     });
     const version = parseVersion(parsed.artifactType, parsed.version);
+
+    /*
+     * APROVAR É REVALIDADO AQUI — extensão aditiva, não rota nova.
+     *
+     * Esta rota já resolve a marca autorizada e valida o contrato; o que
+     * faltava era conferir as precondições da aprovação antes de gravar
+     * `approved`. Até aqui, a única coisa que impedia gravar um artigo
+     * incoerente como aprovado era a tela que o enviou.
+     *
+     * Só o caminho de aprovação é revalidado: propostas e rascunhos continuam
+     * podendo ser gravados incompletos, que é o estado normal deles.
+     */
+    if (parsed.artifactType === "article_dna" && parsed.status === "approved") {
+      const issues = articleApprovalRevalidationIssues({
+        version: version as VersionEnvelope<ArticleDNA>,
+        authorizedBrandId: context.brandId,
+      });
+      if (issues.length) {
+        return NextResponse.json({
+          success: false,
+          error: `A aprovação não passou na revalidação do servidor: ${issues.map(issue => issue.detail).join(" ")}`,
+          data: { issues },
+        }, { status: 422 });
+      }
+    }
+
     const persisted = await appendArquitetoArtifact(context, parsed.artifactType, version, parsed.status || "proposed");
     return NextResponse.json({ success: true, data: { persistence: persisted.status, version: persisted.version, source: persisted.source } });
   } catch (error) {

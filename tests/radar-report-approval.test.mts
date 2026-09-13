@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { approveRadarReport, radarReportApprovalIssues, type ApproveRadarReportInput, type RadarApprovalGateInput } from "../lib/radar/report-approval.ts";
-import { RadarAnalysisPayloadSchema, type RadarAnalysisVersion } from "../lib/radar/analysis-contracts.ts";
+import { RadarAnalysisPayloadSchema, RadarExtractionPageSchema, type RadarAnalysisVersion } from "../lib/radar/analysis-contracts.ts";
 import { isRadarPlannerHandoff } from "../lib/radar/planner-handoff.ts";
+import { buildRadarCompetitiveReport } from "../lib/radar/competitive-report.ts";
 import type { SerpResearchSnapshot } from "../lib/radar/serp/contracts.ts";
 import type { ArticleDNA, VersionEnvelope } from "../lib/arquiteto/contracts.ts";
 
@@ -37,7 +38,24 @@ const article = (): VersionEnvelope<ArticleDNA> => ({
   payload: { articleId, brandId, promise: "Cobrir skin care para pele oleosa", suggestedSlug: "pele-oleosa", mainIntent: "informacional", hierarchy: "Pilar", requiredTopics: [], coverage: ["skin care"], entities: [], questions: [], objections: [], keywordReferences: [], principalKeywordId: "kw-1", canonical: null, sourcesNeeded: [], evidenceNeeded: [] } as unknown as ArticleDNA,
 } as VersionEnvelope<ArticleDNA>);
 
-function analysisVersion(patch: Record<string, unknown> = {}, status: "draft" | "approved" = "draft"): RadarAnalysisVersion {
+/*
+ * A AMOSTRA COMPARÁVEL ENTROU NA FIXTURE.
+ *
+ * O portão passou a recusar investigação sem página editorial comparável — foi
+ * exatamente com zero comparáveis que o smoke aprovou uma SERP. O caminho feliz
+ * precisa descrever uma amostra que existe; a ausência dela virou caso próprio.
+ */
+const paginaComparavel = (position: number) => RadarExtractionPageSchema.parse({
+  id: `page-${position}`, url: `https://exemplo-${position}.com/pagina`, status: "success",
+  fetchedAt: "2026-09-06T11:00:00.000Z", title: `Artigo ${position}`, metaDescription: "", canonical: null,
+  h1: ["Skin care"], h2: ["Como usar", "Benefícios"], h3: [], wordCount: 1200, internalLinkCount: 6,
+  externalLinkCount: 2, listCount: 3, tableCount: 0, faqCount: 0, imageCount: 4, blockquoteCount: 0,
+  comparisonCount: 0, hasDates: true, author: null, structuredDataTypes: ["Article"], recurringTerms: [],
+  boldCount: 8, italicCount: 0, error: "",
+});
+const amostraComparavel = [1, 2, 3].map(paginaComparavel);
+
+function analysisVersionSemRelatorio(patch: Record<string, unknown> = {}, status: "draft" | "approved" = "draft"): RadarAnalysisVersion {
   const payload = RadarAnalysisPayloadSchema.parse({
     schemaVersion: 1, brandId, articleId, articleDnaVersionId,
     serpSnapshotId: snapshotId, serpSnapshotVersion: 1, serpSnapshotHash: "sha256:" + "a".repeat(64),
@@ -48,7 +66,7 @@ function analysisVersion(patch: Record<string, unknown> = {}, status: "draft" | 
       { key: "organic:2", itemType: "organic", decision: "excluded", reason: "fora do tema", note: "", ownDomain: false },
       { key: "organic:3", itemType: "organic", decision: "excluded", reason: "fora do tema", note: "", ownDomain: false },
     ],
-    selectedCompetitorIds: ["organic:1"], extractionIds: [], extractions: [],
+    selectedCompetitorIds: ["organic:1"], extractionIds: amostraComparavel.map(page => page.id), extractions: amostraComparavel,
     benchmark: null, semanticTerms: [], structuralDecisions: [], competitiveness: null,
     keywordDecisions: [], competitiveReport: null, plannerPackage: null, plannerTransfer: null,
     status, humanNotes: [], approvedAt: null, approvedBy: null,
@@ -56,6 +74,23 @@ function analysisVersion(patch: Record<string, unknown> = {}, status: "draft" | 
   });
   return { versionId: "analysis-v1", entityId: `radar-analysis:${articleId}`, versionNumber: 1, previousVersionId: null, contentHash: "sha256:" + "c".repeat(64), origin: "human", changeReason: "fixture", createdAt: "2026-09-06T09:30:00.000Z", createdBy: "fixture", payload } as RadarAnalysisVersion;
 }
+
+/*
+ * O RELATÓRIO É PRÉ-CONDIÇÃO, ENTÃO ELE ENTRA NA FIXTURE.
+ *
+ * Aprovar deixou de construir o relatório por dentro: ele agora é um ato
+ * anterior e visível. A fixture padrão passa a descrever esse estado, e a
+ * ausência do relatório vira um caso de teste próprio, não o caminho feliz.
+ */
+const relatorioFixture = await buildRadarCompetitiveReport({
+  payload: analysisVersionSemRelatorio().payload, article: article().payload, research: research(),
+  radarItemId, analysisVersionId: "analysis-v1", analysisVersionNumber: 1, generatedBy: "fixture", status: "draft",
+});
+
+function analysisVersion(patch: Record<string, unknown> = {}, status: "draft" | "approved" = "draft"): RadarAnalysisVersion {
+  return analysisVersionSemRelatorio({ competitiveReport: relatorioFixture, ...patch }, status);
+}
+
 
 const identity = { brandId, articleId, articleDnaVersionId, radarItemId };
 
@@ -284,4 +319,36 @@ test("o payload da análise recusa campo desconhecido em vez de descartá-lo", (
     () => RadarAnalysisPayloadSchema.parse({ ...analysisVersion().payload, plannerHandoff: { qualquer: "coisa" } }),
     /Unrecognized key|unrecognized_keys/,
   );
+});
+
+test("aprovar sem relatório competitivo desta versão é recusado", () => {
+  const issues = radarReportApprovalIssues(gateInput({ analysis: analysisVersionSemRelatorio() }));
+  assert.ok(issues.some(issue => /Gere o relatório competitivo desta versão/.test(issue)));
+});
+
+test("relatório gerado antes do modelo observado não fecha a investigação", () => {
+  const legado = { ...relatorioFixture, observedCompetitiveModel: null };
+  const issues = radarReportApprovalIssues(gateInput({ analysis: analysisVersionSemRelatorio({ competitiveReport: legado }) }));
+  assert.ok(issues.some(issue => /gerado antes do modelo competitivo observado/.test(issue)));
+});
+
+test("o relatório da fixture carrega o modelo observado e libera o portão", () => {
+  assert.notEqual(relatorioFixture.observedCompetitiveModel, null);
+  assert.deepEqual(radarReportApprovalIssues(gateInput()), []);
+});
+
+test("aprovar sem amostra editorial comparável é recusado, mesmo com relatório", () => {
+  const semAmostra = analysisVersionSemRelatorio({ competitiveReport: relatorioFixture, extractions: [], extractionIds: [] });
+  const issues = radarReportApprovalIssues(gateInput({ analysis: semAmostra }));
+  assert.ok(issues.some(issue => /amostra competitiva suficiente/i.test(issue)));
+});
+
+test("falha de extração sem nenhuma página comparável também bloqueia", () => {
+  const comFalhas = analysisVersionSemRelatorio({
+    competitiveReport: relatorioFixture,
+    extractions: [], extractionIds: [],
+    extractionFailures: [{ key: "organic:1", url: "https://exemplo-1.com/pagina", code: "fetch_failed", message: "timeout", status: 504, observedAt: "2026-09-06T11:05:00.000Z" }],
+  });
+  const issues = radarReportApprovalIssues(gateInput({ analysis: comFalhas }));
+  assert.ok(issues.some(issue => /amostra competitiva suficiente/i.test(issue)));
 });

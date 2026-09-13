@@ -28,6 +28,7 @@ export const ARTICLE_CLOSING_BLOCKERS = [
   "STRUCTURAL_CONFLICT",
   "SERP_NOT_COLLECTED",
   "SERP_STALE",
+  "SERP_AWAITS_DECISION",
   "FORMATION_NOT_SAVED",
 ] as const;
 export type ArticleClosingBlockerCode = (typeof ARTICLE_CLOSING_BLOCKERS)[number];
@@ -46,6 +47,7 @@ export const BLOCKER_RESOLUTION: Record<ArticleClosingBlockerCode, string> = {
   STRUCTURAL_CONFLICT: "Revisar a atribuição arquitetural ou registrar decisão justificada.",
   SERP_NOT_COLLECTED: "Reprocessar artigos para coletar a evidência deste candidato.",
   SERP_STALE: "A composição mudou: reprocessar para reavaliar, ou decidir sobre a evidência atual.",
+  SERP_AWAITS_DECISION: "Registrar a decisão editorial sobre a SERP na aba SERP deste artigo.",
   FORMATION_NOT_SAVED: "Salvar a formação antes de enviar para aprovação.",
 };
 
@@ -86,6 +88,30 @@ export function resolveSerpEvidenceState(input: {
   return input.assessmentBaseHash === input.currentBaseHash ? "CURRENT" : "STALE";
 }
 
+/**
+ * A LEITURA DA SERP VEM DO GATE, NÃO DE UMA SEGUNDA CONTA.
+ *
+ * `article-serp-gate` já é a autoridade da fase Artigos: ele sabe que
+ * "sustentada" não precisa de decisão nenhuma e que "divergente" precisa. Se o
+ * fechamento recalculasse isso a partir dos registros crus, um artigo com
+ * evidência sustentada — que não tem `humanResolution` porque não precisa de
+ * uma — apareceria bloqueado aqui e liberado lá: a mesma pergunta com duas
+ * respostas, separadas só pela tela que se está olhando.
+ *
+ * `processing` e `failed` entram como não coletada de propósito: nos dois
+ * casos não existe evidência utilizável para esta composição, e o caminho que
+ * resolve é o mesmo — voltar ao provider.
+ */
+export function serpEvidenceFromGate(
+  gate: { state: string; blocksConclusion: boolean } | null | undefined,
+): { serp: SerpEvidenceState; serpDecisionResolved: boolean } {
+  if (!gate) return { serp: "NOT_COLLECTED", serpDecisionResolved: false };
+  if (gate.state === "stale") return { serp: "STALE", serpDecisionResolved: false };
+  if (!gate.state.startsWith("current_")) return { serp: "NOT_COLLECTED", serpDecisionResolved: false };
+  // O gate já respondeu se ainda falta gente decidir: `blocksConclusion`.
+  return { serp: "CURRENT", serpDecisionResolved: !gate.blocksConclusion };
+}
+
 /* ------------------------------- o portão -------------------------------- */
 
 export type ArticleClosingCandidate = {
@@ -105,6 +131,30 @@ export type ArticleClosingCandidate = {
 };
 
 export type ArticleClosingAction = "submit_for_approval" | "approve" | "reopen_revision";
+
+/**
+ * O VERBO DE CADA AÇÃO.
+ *
+ * Um lote de "enviar para aprovação" anunciando "3 aprovado(s)" descreveria um
+ * ato que não aconteceu. O resultado é o mesmo mecanismo; a palavra não é.
+ */
+const ACTION_WORDS: Record<ArticleClosingAction, { done: string; noop: string; counted: string }> = {
+  submit_for_approval: {
+    done: "Enviado para aprovação e confirmado no readback",
+    noop: "Já estava na fila de aprovação: nenhuma versão nova foi criada.",
+    counted: "enviado(s)",
+  },
+  approve: {
+    done: "Aprovado e confirmado no readback",
+    noop: "Já aprovado: o conteúdo não mudou e nenhuma versão nova foi criada.",
+    counted: "aprovado(s)",
+  },
+  reopen_revision: {
+    done: "Revisão reaberta e confirmada no readback",
+    noop: "A revisão já estava aberta: nenhuma versão nova foi criada.",
+    counted: "reaberto(s)",
+  },
+};
 
 /**
  * O que impede este artigo de receber esta ação.
@@ -164,6 +214,16 @@ export function articleClosingBlockers(
   }
   if (candidate.serp === "STALE" && !candidate.serpDecisionResolved) {
     blockers.push(bloqueio("SERP_STALE", "A evidência existente descreve outra composição."));
+  }
+  /*
+   * Evidência VIGENTE ainda pode estar esperando gente.
+   *
+   * Divergente e inconclusiva descrevem esta composição — coletar de novo não
+   * muda nada. Chamar isso de "não coletada" mandaria refazer a coleta que já
+   * existe; o que falta é a decisão editorial.
+   */
+  if (candidate.serp === "CURRENT" && !candidate.serpDecisionResolved) {
+    blockers.push(bloqueio("SERP_AWAITS_DECISION", "A SERP vigente ainda aguarda decisão editorial."));
   }
   return blockers;
 }
@@ -225,7 +285,7 @@ export async function closeArticleRevision(input: {
       return {
         ...base, outcome: "already_approved", blockers: [],
         versionId: persistido.versionId, versionNumber: persistido.versionNumber, contentHash: persistido.contentHash,
-        message: "Já aprovado: o conteúdo não mudou e nenhuma versão nova foi criada.",
+        message: ACTION_WORDS[input.action].noop,
       };
     }
     if (!persistido.readbackConfirmed) {
@@ -243,7 +303,7 @@ export async function closeArticleRevision(input: {
     return {
       ...base, outcome: "approved", blockers: [],
       versionId: persistido.versionId, versionNumber: persistido.versionNumber, contentHash: persistido.contentHash,
-      message: `Aprovado e confirmado no readback${persistido.versionNumber ? ` (v${persistido.versionNumber})` : ""}.`,
+      message: `${ACTION_WORDS[input.action].done}${persistido.versionNumber ? ` (v${persistido.versionNumber})` : ""}.`,
     };
   } catch (error) {
     return {
@@ -286,9 +346,10 @@ export async function closeArticleRevisions(input: {
   const failed = conta("failed");
   const pendingConfirmation = conta("pending_confirmation");
 
+  const palavra = ACTION_WORDS[input.action].counted;
   const partes = [
-    approved ? `${approved} aprovado(s)` : null,
-    alreadyApproved ? `${alreadyApproved} já aprovado(s)` : null,
+    approved ? `${approved} ${palavra}` : null,
+    alreadyApproved ? `${alreadyApproved} já ${palavra}` : null,
     blocked ? `${blocked} bloqueado(s)` : null,
     failed ? `${failed} com falha` : null,
     pendingConfirmation ? `${pendingConfirmation} aguardando confirmação` : null,

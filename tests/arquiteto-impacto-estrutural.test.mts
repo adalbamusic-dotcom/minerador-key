@@ -146,8 +146,19 @@ test("perder a Principal devolve a decisão ao humano, sem escolher sozinho", ()
 test("B) confirmar arquitetura calcula impacto antes de escrever", () => {
   const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
   assert.match(workspace, /const impactoEstrutural = resolveTerritoryChangeImpact\(\{/);
-  // O primeiro clique mostra o que se perde; aplicar exige confirmar de novo.
-  assert.match(workspace, /if \(!impactoEstrutural\.clean && !architectureImpactAck\)/);
+  /*
+   * QUEM MOSTRA O QUE SE PERDE É PROCESSAR.
+   *
+   * Este teste exigia o preview de dois cliques dentro de Confirmar. Ele
+   * existia porque Processar não produzia nada — sem prévia, confirmar
+   * aplicaria um plano invisível. Agora Processar materializa a proposta e
+   * devolve os contadores, e Confirmar aplica uma vez só.
+   *
+   * O que NÃO mudou, e é o que este teste guarda: o impacto sobre estrutura
+   * aprovada é calculado ANTES de qualquer escrita, e quebra é recusa.
+   */
+  assert.ok(workspace.includes("if (!architectureMarker) {"), "confirmar precisa exigir cenário processado");
+  assert.ok(workspace.includes("if (architectureIsStale) {"), "confirmar precisa recusar cenário vencido");
   assert.match(workspace, /setArchitectureImpactAck\(impactoEstrutural\)/);
   // E o cálculo acontece ANTES de qualquer escrita.
   const posImpacto = workspace.indexOf("const impactoEstrutural = resolveTerritoryChangeImpact");

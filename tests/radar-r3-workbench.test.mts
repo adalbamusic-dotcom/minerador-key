@@ -14,7 +14,14 @@ const article = { versionNumber: 1, payload: { promise: "Artigo do Radar", mainI
 const view = { provider: "dataforseo", capturedAt: "2026-08-25T12:00:00.000Z", organicResults: [{ position: 1, title: "Resultado", domain: "example.com", url: "https://example.com/artigo" }], peopleAlsoAsk: [], relatedSearches: [], diagnostic: null, record: { id: "snapshot-1" } } as unknown as RadarSerpView;
 
 test("R3 mantém as quatro áreas centrais na ordem operacional", () => {
-  assert.deepEqual(RADAR_R3_AREAS, ["serp", "amazon", "conteudo", "especialista"]);
+  /*
+   * GATE 14 · Amazon deixou de ser um lugar e virou um destino da Pesquisa.
+   *
+   * Enquanto havia um card por destino, a tela descrevia a implementação: quem
+   * opera pesquisa uma vez, no modo que escolheu. O Relatório entrou porque é
+   * uma pergunta feita todos os dias e vivia solta no fim da tela.
+   */
+  assert.deepEqual(RADAR_R3_AREAS, ["pesquisa", "videos", "especialista", "relatorio"]);
 });
 
 test("R3 usa os dados reais disponíveis da SERP no Workbench, tabela e perfil", () => {
@@ -30,7 +37,9 @@ test("R3 usa os dados reais disponíveis da SERP no Workbench, tabela e perfil",
 
 test("próxima ação R3 respeita a sequência e não bloqueia por Amazon ou especialista opcionais", () => {
   const input = { identityReady: true, serpCollected: true, referencesPending: 0, analysisStarted: true, analysisQueue: 0, pagesAnalyzed: 2, amazonStatus: "not_applicable" as const, amazonNeedsReview: false, specialistSelected: false, specialistPending: 0, reportGenerated: true, reportApproved: false, sentToPlanner: false };
-  assert.match(deriveRadarR3NextAction(input), /aprove o relatório/i);
+  // R9.4B: o verbo final passou a nomear a investigação, não o objeto relatório.
+  assert.match(deriveRadarR3NextAction(input), /aprove a investigação/i);
+  assert.match(deriveRadarR3NextAction({ ...input, reportGenerated: false }), /Gere o relatório competitivo/i);
   assert.match(deriveRadarR3NextAction({ ...input, serpCollected: false }), /Colete/i);
   assert.match(deriveRadarR3NextAction({ ...input, reportApproved: true }), /Planejador/i);
 });
@@ -41,7 +50,9 @@ test("R3 expande uma área por vez e mantém Amazon sem API/ProductEvidence", ()
   assert.match(workbench, /useState<RadarR3Area \| null>\(null\)/);
   assert.match(workbench, /current === area \? null : area/);
   assert.match(workbench, /aria-expanded=\{expanded\}/);
-  assert.match(workbench, /RadarR3SerpPanel/);
+  /* GATE 15.3: a Pesquisa abre CONSULTA, não o workflow de seis abas. */
+  assert.doesNotMatch(workbench, /RadarR3SerpPanel/);
+  assert.match(workbench, /RadarR3ResearchDetails/);
   assert.match(workbench, /RadarR3AmazonPanel/);
   assert.match(workbench, /RadarR3ContentDossier/);
   assert.match(workbench, /RadarR3SpecialistPanel/);
@@ -70,32 +81,71 @@ test("R3.1 apresenta semântica editorial no Conteúdo e recolhe IDs na proveni�
   assert.equal(model.content.rows.find(item => item.data === "SiloDNA")?.value, "Preservado");
   assert.equal(model.content.technical.siloId, "silo-1");
   const content = read("../modules/radar/radar-r3-content-dossier.tsx");
-  assert.match(content, /Proveniência \/ detalhes técnicos/);
+  assert.match(content, /Proveniência e detalhes técnicos/);
   assert.match(content, /model\.technical\.siloId/);
   assert.doesNotMatch(content, /data: "SiloDNA", value: input\.row\.siloId/);
 });
 
-test("R3.2 mantém o Workbench vazio até existir artigo selecionado", () => {
+test("R3.2 mantém a CAMADA DO ARTIGO vazia até existir artigo selecionado", () => {
   const workbench = read("../modules/radar/radar-r3-workbench.tsx");
   const page = read("../modules/radar/radar-page.tsx");
+
+  /*
+   * A PREMISSA MUDOU NO §2.3.2 — e mudou de propósito.
+   *
+   * "Workbench vazio sem artigo" valia quando as quatro áreas eram do artigo.
+   * Vídeos deixou de ser: a biblioteca é da MARCA, e trancá-la atrás de uma
+   * seleção de artigo foi o defeito que o USER relatou. O que este teste
+   * protege continua valendo para as TRÊS áreas que dependem mesmo de artigo.
+   */
   assert.match(workbench, /Selecione um artigo para trabalhar/);
   assert.match(workbench, /disabled aria-disabled="true"/);
   assert.match(workbench, /radar-r3-card-\$\{area\}-disabled/);
   assert.doesNotMatch(workbench, /Aguardando artigo selecionado/);
   assert.doesNotMatch(workbench, /Expandir no Workbench/);
-  assert.match(page, /key=\{activeRadarRowId \|\| "radar-empty"\}/);
+
+  /* Só Vídeos escapa do desabilitado, e está escrito assim. */
+  assert.match(workbench, /area === "videos"\s*\r?\n\s*\? <AreaCard[^\n]*copy=\{copyDeVideos\}/);
+  assert.match(workbench, /: <DisabledAreaCard key=\{area\} area=\{area\} \/>\)\}/);
+
+  /*
+   * E A KEY SAIU DA PÁGINA. Ela remontava o Workbench inteiro a cada troca de
+   * artigo — inclusive a biblioteca da marca, que não tem nada com isso. A
+   * remontagem ficou nos painéis do artigo, onde o rascunho é de um só.
+   */
+  assert.doesNotMatch(page, /<RadarWorkbench key=/);
+  assert.match(workbench, /\{expandedArea === "pesquisa" && <div key=\{model\.articleId\}/);
+  assert.match(workbench, /\{expandedArea === "especialista" && <div key=\{model\.articleId\}/);
+  assert.match(workbench, /\{expandedArea === "relatorio" && <div key=\{model\.articleId\}/);
+
   assert.doesNotMatch(page, /fallbackId: pipeline\.radarItems\[0\]/);
 });
 
 test("R4 mantém identidade, quatro cards fixas e relatório fora do estado fechado", () => {
   const workbench = read("../modules/radar/radar-r3-workbench.tsx");
   const page = read("../modules/radar/radar-page.tsx");
-  assert.match(workbench, /Trabalhando em/);
   assert.match(workbench, /data-testid=\{`radar-r3-card-\$\{area\}`\}/);
-  assert.match(workbench, /min-h-28/);
+  /*
+   * GATE 14 · o card é SUMMARY, não painel.
+   *
+   * A altura mínima de oito linhas existia para caber uma frase explicativa
+   * que ninguém lê duas vezes. Agora a altura é a do conteúdo — e o piso é o
+   * guard que impede a frase de voltar.
+   */
+  assert.doesNotMatch(workbench, /min-h-28|min-h-32/, "o card não reserva altura para texto explicativo");
   assert.doesNotMatch(workbench, /Prévia consolidada/);
   assert.match(workbench, /StatusMark/);
-  assert.doesNotMatch(workbench, /keyword[\s\S]*silo[\s\S]*hierarchy/i);
+  /*
+   * GATE 14.1 · o fundamento voltou ao cabeçalho — em uma linha, não em grade.
+   *
+   * O guard antigo proibia keyword/silo/hierarquia no Workbench porque eles
+   * vinham como a grade de seis colunas do layout legado. A faixa de contexto é
+   * o oposto disso: uma linha, sem `<dl>`, sem card, e sem nenhum handler.
+   */
+  assert.match(workbench, /data-testid="radar-article-context-band"/);
+  assert.doesNotMatch(workbench, /<ContextValue/, "a grade de contexto legada não volta");
+  const faixa = workbench.slice(workbench.indexOf("function ArticleContextBand"), workbench.indexOf("O RELATÓRIO RESPONDE PERGUNTAS"));
+  assert.doesNotMatch(faixa, /onClick|onChange|onToggle/, "ARTICLE_DNA_READ_ONLY: a faixa não recebe handler");
   assert.match(page, /activeArticleId/);
   assert.match(page, /selectedArticleIds/);
   assert.match(page, /bulkSelectedRowIds=\{bulkSelectedRowIds\}/);
@@ -144,14 +194,25 @@ test("R3 mantém a tabela utilizável abaixo do Workbench expandido", () => {
   assert.match(page, /flex min-h-0 flex-1 flex-col/);
 });
 
-test("R3 mantém conteúdo existente do especialista separado do dossiê Content", () => {
+test("R3 mantém o material da marca separado do dossiê do Article", () => {
   const page = read("../modules/radar/radar-page.tsx");
   const specialist = read("../modules/radar/radar-r3-specialist-panel.tsx");
+  const videos = read("../modules/radar/radar-r3-videos-panel.tsx");
   const content = read("../modules/radar/radar-r3-content-dossier.tsx");
   assert.match(page, /model=\{activeWorkbenchData\?\.r3 \|\| null\}/);
   assert.match(page, /r3=\{rowWorkbenchData\(row\)\.r3\}/);
-  assert.match(specialist, /YouTube/);
-  assert.match(specialist, /Telegram real/);
+
+  /*
+   * GATE 14.1 · registrar um vídeo não é falar com um profissional.
+   *
+   * O formulário de material vivia dentro do Especialista, que passava a
+   * carregar um processo que não é dele. Ele mudou para Vídeos inteiro —
+   * mesmos handlers, mesmo estado.
+   */
+  assert.match(videos, /YouTube/);
+  assert.equal(/YouTube/.test(specialist), false, "o Especialista não registra material");
+  assert.match(specialist, /Telegram real/, "e continua dono do canal com a pessoa");
+
   assert.match(content, /ArticleDNA/);
   assert.match(content, /model\.rows/);
   assert.match(content, /não altera ArticleDNA/);

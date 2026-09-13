@@ -130,8 +130,25 @@ test("o workspace nunca chama o formador com a marca inteira", () => {
   assert.doesNotMatch(workspace, /buildProvisionalGroups\(masterList/);
 });
 
-test("o universo recebe os grupos do formador, não os inventa", () => {
+test("o universo recebe a composição de um motor, não a inventa na tela", () => {
   const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
-  assert.match(workspace, /groups: \(escopo\?\.groups \|\| \[\]\)\.map/);
-  assert.match(workspace, /principalKeywordId: String\(group\.principalSuggestion\.keywordId\)/);
+  /*
+   * A AUTORIDADE MUDOU DE MOTOR, NÃO DE LUGAR.
+   *
+   * Antes a composição vinha de `buildSiloScopedProvisionalGroups`, que
+   * agrupa sobre a lista BRUTA de keywords — sem entidade, sem modificadores,
+   * sem estado semântico, com a coluna `intent` em "Pendente". O KeywordDNA só
+   * chegava depois, para descrever o que já tinha sido decidido às cegas, e
+   * foi assim que três formulações de "pele oleosa" viraram três Articles.
+   *
+   * Agora quem responde é `deriveSemanticNuclei`, sobre a assinatura semântica
+   * do DNA canônico. O princípio é o mesmo e é ele que este teste guarda: a
+   * tela DELEGA a composição, nunca a monta.
+   */
+  assert.match(workspace, /const particao = deriveSemanticNuclei\(\{ signatures: assinaturas \}\)/);
+  assert.match(workspace, /splitNucleusIfEditorialBoundary\(\{/);
+  // §13 — a Principal é escolhida pelo motor, depois de o tema existir.
+  assert.match(workspace, /suggestPrincipal\(\{ keywords: membros, siloTokens: tokensDoSilo \}\)/);
+  // E o agrupamento provisório deixou de decidir a composição do Article.
+  assert.doesNotMatch(workspace, /groups: \(escopo\?\.groups \|\| \[\]\)\.map/);
 });

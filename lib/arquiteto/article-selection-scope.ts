@@ -68,3 +68,89 @@ export function assertSelectionScope(selectedCandidateRefs: ReadonlySet<string>)
     ? { ok: true, selectedCount: selectedCandidateRefs.size }
     : { ok: false, reason: "Selecione pelo menos um artigo." };
 }
+
+/**
+ * A ÚNICA AUTORIDADE DE ESCOPO DA FASE ARTIGOS.
+ *
+ * O rodapé contava linhas selecionadas e as ações contavam `candidateRef`. São
+ * conjuntos diferentes: uma linha selecionada que não é candidata do cenário
+ * corrente — Article de acervo, keyword sem universo de formação — soma no
+ * primeiro e some no segundo. A tela dizia "1 artigo selecionado" e a ação
+ * respondia "Selecione pelo menos um artigo", sobre a mesma seleção.
+ *
+ * Aqui as duas leituras vivem no mesmo objeto, e a recusa NOMEIA quem ficou de
+ * fora em vez de mandar selecionar o que já está selecionado.
+ */
+export type FormationSelectionScope = {
+  /** O que a planilha mostra selecionado. */
+  selectedCount: number;
+  /** O que a fase consegue processar. */
+  candidateRefs: Set<string>;
+  /** Selecionados que não participam do cenário corrente, com o motivo. */
+  excluded: { articleId: string; label: string }[];
+  /**
+   * Ids selecionados que não existem mais na planilha.
+   *
+   * A identidade da linha é derivada do `candidateRef`, e o `candidateRef`
+   * carrega a Principal do candidato. Quando a formação recompõe o cenário e a
+   * Principal muda, o id anterior deixa de existir — e a seleção guardada
+   * aponta para uma linha que não está mais lá.
+   *
+   * Sem nomear este caso, a recusa dizia "nenhum participa da formação" sem
+   * dizer por quê, e não havia como distinguir de uma linha sem `candidateRef`.
+   */
+  missing: string[];
+  ok: boolean;
+  /** Frase da recusa; `null` quando há escopo. */
+  reason: string | null;
+};
+
+export function resolveFormationSelectionScope(input: {
+  selectedArticleIds: ReadonlySet<string>;
+  articles: readonly { id: string; candidateRef?: string | null; keywordPrincipal?: string | null }[];
+}): FormationSelectionScope {
+  const selecionados = input.articles.filter(article => input.selectedArticleIds.has(article.id));
+  const candidateRefs = new Set(selecionados
+    .map(article => article.candidateRef)
+    .filter((ref): ref is string => Boolean(ref)));
+  const excluded = selecionados
+    .filter(article => !article.candidateRef)
+    .map(article => ({ articleId: article.id, label: String(article.keywordPrincipal || article.id) }));
+  const presentes = new Set(input.articles.map(article => article.id));
+  const missing = [...input.selectedArticleIds].filter(id => !presentes.has(id));
+
+  const selectedCount = input.selectedArticleIds.size;
+  if (!selectedCount) {
+    return { selectedCount, candidateRefs, excluded, missing, ok: false, reason: "Selecione pelo menos um artigo." };
+  }
+  if (!candidateRefs.size && missing.length === selectedCount) {
+    /*
+     * A seleção inteira aponta para linhas que não existem mais.
+     *
+     * É o que acontece quando a formação recompõe o cenário e a Principal de
+     * um candidato muda: o `candidateRef` muda com ela, e o id guardado fica
+     * órfão. Dizer "nenhum participa da formação" aqui mandaria a pessoa
+     * investigar o Silo quando o problema é a seleção ter envelhecido.
+     */
+    return {
+      selectedCount, candidateRefs, excluded, missing, ok: false,
+      reason: `${missing.length} linha(s) selecionada(s) não existem mais no cenário — a formação foi recomposta. `
+        + "Selecione novamente os candidatos que quer processar.",
+    };
+  }
+  if (!candidateRefs.size) {
+    /*
+     * A pessoa selecionou — o problema é outro, e precisa ser dito.
+     *
+     * Repetir "selecione pelo menos um artigo" sobre uma seleção existente é a
+     * recusa que ninguém consegue resolver: não há ato que a satisfaça.
+     */
+    const nomes = excluded.map(item => item.label).join(" · ");
+    return {
+      selectedCount, candidateRefs, excluded, missing, ok: false,
+      reason: `${selectedCount} artigo(s) selecionado(s), mas nenhum participa da formação do cenário corrente${nomes ? `: ${nomes}` : ""}. `
+        + "Reprocessar artigos recompõe o cenário; se o artigo pertence a outro Silo, feche a fase Silos primeiro.",
+    };
+  }
+  return { selectedCount, candidateRefs, excluded, missing, ok: true, reason: null };
+}

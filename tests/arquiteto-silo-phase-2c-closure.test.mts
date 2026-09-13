@@ -244,10 +244,17 @@ const operation = () => openSiloConsolidationOperation({
 
 test("09 · a consolidação parte do snapshot remoto, não da proposta local", () => {
   const ui = executable(read(UI));
-  const start = ui.indexOf("const consolidateSilos = async () => {");
+  // A assinatura ganhou escopo opcional para o fechamento automático chamar o
+  // MESMO caminho canônico; o que este teste guarda é de onde ele lê.
+  const start = ui.indexOf("const consolidateSilos = async (");
   assert.ok(start > 0, "consolidateSilos existe");
   const body = ui.slice(start, ui.indexOf("\n  };", start));
-  assert.match(body, /const consolidable = remoteSiloWorkingCopies/);
+  /*
+   * A fonte continua sendo a WC REMOTA. O fechamento automático passa a lista
+   * que ACABOU de ler do servidor porque `setState` não repropaga no mesmo
+   * tick — não é proposta local entrando por outra porta.
+   */
+  assert.match(body, /const consolidable = \[\.\.\.\(escopo\?\.remoteWorkingCopies \|\| remoteSiloWorkingCopies\)\]/);
   assert.match(body, /remote\.workingCopy\.pillarSelection/);
   assert.match(body, /workingCopyExpectedLock: remote\.lockVersion/);
   assert.match(body, /territoryExpectedLock: territory\.lockVersion/);
@@ -597,7 +604,15 @@ test("26 · falha remota não é reportada como importação, e não grava local
   // marcava persistenceMode e voltava normal — quem usava `await` seguia em
   // frente e dizia "1 item enviado" com o banco vazio.
   assert.match(contexto, /Promise<WorkflowCommandOutcome>/);
-  assert.match(contexto, /if \(response\.ok\) return \{ ok: true \};/);
+  /*
+   * O sucesso do `import_radar` ficou MAIS exigente, não menos: resposta 200
+   * não basta mais. O servidor precisa declarar `readbackConfirmed` e devolver
+   * os itens, e cada artigo enviado tem de aparecer neles com a mesma versão e
+   * o mesmo hash — senão o desfecho é recusa.
+   */
+  assert.match(contexto, /if \(command\.action !== "import_radar"\) return \{ok:true\};/);
+  assert.match(contexto, /body\.readbackConfirmed!==true/);
+  assert.match(contexto, /code:"readback_mismatch"/);
   assert.match(contexto, /return \{\s*ok: false,/);
 
   // E o importador do Radar checa esse desfecho ANTES de tocar no estado local.
@@ -607,10 +622,18 @@ test("26 · falha remota não é reportada como importação, e não grava local
   assert.match(corpo, /const escrita = await sendWorkflowCommand\(/);
   assert.match(corpo, /if \(!escrita\.ok\)/);
 
-  // A recusa vem antes da escrita local — e devolve imported: 0.
+  /*
+   * A recusa vem antes de qualquer escrita local — e devolve imported: 0.
+   *
+   * A escrita deixou de partir de uma lista montada no cliente: o estado local
+   * agora recebe os itens que o READBACK devolveu. Não há mais `radarItems:
+   * next` a preceder; o que se guarda é que nada é escrito antes do guard.
+   */
   const guarda = corpo.indexOf("if (!escrita.ok)");
-  const escritaLocal = corpo.indexOf("radarItems: next");
+  const escritaLocal = corpo.indexOf("updateWorkspace(");
   assert.ok(guarda > 0 && guarda < escritaLocal, "o guard precede a escrita local");
+  assert.match(corpo, /const remote=escrita\.radarItems \|\| \[\];/, "o estado local vem do readback remoto");
+  assert.equal(corpo.includes("radarItems: next"), false, "nada de lista montada no cliente");
   assert.match(corpo.slice(guarda, escritaLocal), /imported: 0/);
 });
 

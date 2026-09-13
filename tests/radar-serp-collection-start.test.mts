@@ -15,13 +15,13 @@ const pronto = { hasSnapshot: false, state: "NOT_COLLECTED" as const, contextRea
 test("sem snapshot existe uma ação primária explícita e nenhum provider é chamado", () => {
   const action = radarSerpCollectionAction(pronto);
   assert.equal(action.state, "NOT_COLLECTED");
-  assert.equal(action.actionLabel, "Iniciar coleta SERP");
+  assert.equal(action.actionLabel, "Iniciar coleta da SERP");
   assert.equal(action.canStart, true);
   assert.equal(action.isFirstCollection, true);
   assert.match(action.detail, /explícita/);
 
   // O rótulo é o canônico do contrato, não texto solto do componente.
-  assert.equal(RADAR_SERP_COLLECTION_LABEL.NOT_COLLECTED, "Iniciar coleta SERP");
+  assert.equal(RADAR_SERP_COLLECTION_LABEL.NOT_COLLECTED, "Iniciar coleta da SERP");
 });
 
 test("sem contexto mínimo não há ação oferecida", () => {
@@ -123,7 +123,9 @@ test("falha transitória oferece tentar novamente", () => {
   }
 
   const action = radarSerpCollectionAction({ ...pronto, state: "TRANSIENT_FAILURE" });
-  assert.equal(action.actionLabel, "Tentar novamente");
+  // A ação tem dois rótulos só; a possibilidade de repetir vive no detalhe.
+  assert.equal(action.actionLabel, "Iniciar coleta da SERP");
+  assert.match(action.detail, /Repetir pode resolver/);
   assert.equal(action.canStart, true);
   assert.equal(action.isFirstCollection, true);
 });
@@ -134,7 +136,7 @@ test("com snapshot o estado é sucesso e a primeira coleta não é oferecida", (
   const action = radarSerpCollectionAction({ hasSnapshot: true, state: "SUCCESS", contextReady: true });
   assert.equal(action.state, "SUCCESS");
   assert.equal(action.isFirstCollection, false);
-  assert.notEqual(action.actionLabel, "Iniciar coleta SERP");
+  assert.notEqual(action.actionLabel, "Iniciar coleta da SERP");
   assert.equal(action.actionLabel, "Atualizar SERP");
 });
 

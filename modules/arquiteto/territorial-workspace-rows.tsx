@@ -144,13 +144,28 @@ function Cell({ value, className = "" }: { value: string | null; className?: str
  * Cabeçalho do modo Silos. Vive na MESMA `<thead>` da planilha; o modo Artigos
  * e o modo Links mantêm os seus cabeçalhos intactos.
  */
-export function TerritorialWorkspaceHeader() {
+export function TerritorialWorkspaceHeader({ selectAll = null }: {
+  /** §8 — "selecionar todos" do lote; ausente = tabela sem seleção. */
+  selectAll?: { checked: boolean; onChange: (marcar: boolean) => void } | null;
+} = {}) {
   return (
     <tr className="text-xs font-semibold text-text-muted" data-testid="architect-territorial-head">
       <th colSpan={99} className="border-b border-divider px-3 py-2 text-left">
         <div className={TERRITORIAL_GRID}>
-          {TERRITORIAL_COLUMNS.map(column => (
-            <span key={column} className="truncate">{column}</span>
+          {TERRITORIAL_COLUMNS.map((column, index) => (
+            <span key={column} className="flex min-w-0 items-center gap-2 truncate">
+              {index === 0 && selectAll && (
+                <input
+                  type="checkbox"
+                  checked={selectAll.checked}
+                  onChange={event => selectAll.onChange(event.target.checked)}
+                  aria-label="Selecionar todas as keywords do lote"
+                  data-testid="architect-keyword-select-all"
+                  className="h-3.5 w-3.5 shrink-0 accent-module-accent"
+                />
+              )}
+              <span className="truncate">{column}</span>
+            </span>
           ))}
         </div>
       </th>
@@ -442,12 +457,22 @@ function KeywordRow({
   keywordLabelFor,
   context,
   controls,
+  proposed,
+  selection,
+  dna,
+  expandida = false,
+  onToggleExpand,
 }: {
   row: TerritorialKeywordRow;
   keywordLabel: string;
   keywordLabelFor: (keywordId: string) => string;
   context: GroupContext;
   controls: SiloAssignmentControls | null;
+  proposed?: ProposedDestination | null;
+  selection?: KeywordSelectionControls | null;
+  dna?: KeywordDnaInspection | null;
+  expandida?: boolean;
+  onToggleExpand?: (keywordId: string) => void;
 }) {
   const hypothesis = row.hypothesis;
   const head = hypothesis?.headKeywordId ?? null;
@@ -465,7 +490,29 @@ function KeywordRow({
       <td colSpan={99} className="px-3 py-2">
         <div className={`${TERRITORIAL_GRID} text-sm`}>
           {/* Unidade */}
-          <span className="flex min-w-0 items-baseline gap-2">
+          <span className="flex min-w-0 items-center gap-2">
+            {selection && (
+              <input
+                type="checkbox"
+                checked={selection.selected.has(row.keywordId)}
+                onChange={() => selection.onToggle(row.keywordId)}
+                aria-label={`Selecionar ${keywordLabel}`}
+                data-testid="architect-keyword-select"
+                className="h-3.5 w-3.5 shrink-0 accent-module-accent"
+              />
+            )}
+            {onToggleExpand && (
+              <button
+                type="button"
+                onClick={() => onToggleExpand(row.keywordId)}
+                aria-expanded={expandida}
+                aria-label={`${expandida ? "Recolher" : "Expandir"} KeywordDNA de ${keywordLabel}`}
+                data-testid="architect-keyword-expand"
+                className="shrink-0 rounded px-1 text-xs text-text-muted transition-colors hover:text-foreground"
+              >
+                {expandida ? "▾" : "▸"}
+              </button>
+            )}
             <span className="shrink-0 rounded border border-divider px-1.5 text-xs font-bold uppercase tracking-widest text-text-muted">Keyword</span>
             <span className="truncate font-medium text-keyword" title={keywordLabel}>{keywordLabel}</span>
           </span>
@@ -496,10 +543,100 @@ function KeywordRow({
             {hypothesis ? <span className="text-warning" data-testid="architect-territorial-hypothesis">{hypothesisLabel}</span> : null}
           </p>
         )}
+        {proposed && (
+          <p className="mt-1 text-sm leading-6" data-testid="architect-keyword-proposed">
+            <span className="text-text-muted">Atual: </span>
+            <span className="text-foreground">{hasMembership && context.label ? context.label : "Sem silo"}</span>
+            <span className="text-text-muted"> · Proposto: </span>
+            <span className="font-semibold text-module-accent">{proposed.silo}</span>
+            <span className="text-text-muted"> · {proposed.status}</span>
+            {proposed.basis ? <span className="block text-text-muted">Base: {proposed.basis}</span> : null}
+          </p>
+        )}
         {row.decisionReason ? <p className="mt-1 text-sm leading-6 text-text-muted">{row.decisionReason}</p> : null}
+        {expandida && dna && (
+          <div
+            className="mt-2 grid gap-3 rounded border border-module-accent/30 bg-surface p-3 sm:grid-cols-2 lg:grid-cols-3"
+            data-testid="architect-keyword-dna-panel"
+          >
+            <DnaBloco titulo="Identidade" linhas={dna.identidade} />
+            <DnaBloco titulo="Estratégia" linhas={dna.estrategia} />
+            <DnaBloco titulo="Semântica" linhas={dna.semantica} />
+            <DnaBloco titulo="Arquitetura" linhas={dna.arquitetura} />
+            <DnaBloco titulo="Proveniência" linhas={dna.proveniencia} />
+            {/* §10 — leitura. O Arquiteto não reescreve o DNA do Minerador. */}
+            <p className="text-sm leading-6 text-text-muted sm:col-span-2 lg:col-span-3">
+              KeywordDNA é somente leitura aqui: ele vem do Minerador e o Arquiteto não o reescreve.
+              Dado incorreto se corrige na origem.
+            </p>
+          </div>
+        )}
+        {expandida && !dna && (
+          <p className="mt-2 text-sm leading-6 text-warning" data-testid="architect-keyword-dna-missing">
+            Esta keyword não trouxe KeywordDNA canônico do Minerador.
+          </p>
+        )}
         {controls ? <SiloDecisionControl row={row} controls={controls} /> : null}
       </td>
     </tr>
+  );
+}
+
+/**
+ * §5 — O DESTINO PROPOSTO, POR KEYWORD.
+ *
+ * A row lia só a membership gravada, então depois de processar ela
+ * continuava dizendo "Sem silo" para as nove — enquanto o resumo já
+ * mostrava a proposta com nove destinos. Duas leituras da mesma tela.
+ *
+ * Isto NÃO finge que a associação foi aprovada: o estado atual continua
+ * onde estava, e a proposta aparece ao lado, marcada como pendente.
+ */
+export type ProposedDestination = { silo: string; status: string; basis?: string };
+
+/**
+ * §8 — SELEÇÃO NA ABA SILOS É INSPEÇÃO, NÃO ESCOPO DE PROCESSAMENTO.
+ *
+ * `Processar arquitetura` continua lendo o LOTE INTEIRO: ele precisa enxergar
+ * as fronteiras entre todas as keywords para decidir onde uma começa e a outra
+ * acaba. A seleção serve para a pessoa inspecionar e para as ações operacionais
+ * que vierem depois — nunca para quebrar a visão global do motor.
+ */
+export type KeywordSelectionControls = {
+  selected: ReadonlySet<string>;
+  onToggle: (keywordId: string) => void;
+  onToggleAll: (keywordIds: readonly string[], marcar: boolean) => void;
+};
+
+/**
+ * §9/§10 — O KEYWORDDNA COMO LEITURA.
+ *
+ * O Arquiteto não reescreve o DNA recebido do Minerador. Este painel existe
+ * para a pessoa CONFERIR em que dado a proposta se apoiou; dado errado é
+ * problema upstream, e se resolve no Minerador.
+ */
+export type KeywordDnaInspection = {
+  identidade: { label: string; value: string }[];
+  estrategia: { label: string; value: string }[];
+  semantica: { label: string; value: string }[];
+  arquitetura: { label: string; value: string }[];
+  proveniencia: { label: string; value: string }[];
+};
+
+function DnaBloco({ titulo, linhas }: { titulo: string; linhas: { label: string; value: string }[] }) {
+  if (!linhas.length) return null;
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-bold uppercase tracking-widest text-module-accent">{titulo}</p>
+      <dl className="mt-1 grid gap-0.5">
+        {linhas.map(linha => (
+          <div key={linha.label} className="flex flex-wrap gap-1.5 text-sm leading-6">
+            <dt className="text-text-muted">{linha.label}:</dt>
+            <dd className="min-w-0 break-words font-medium text-foreground">{linha.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 
@@ -547,6 +684,9 @@ export function TerritorialWorkspaceRows({
   processingByRef = null,
   decisionByRef = null,
   detailsByRef = null,
+  proposedByKeywordId = null,
+  selection = null,
+  dnaByKeywordId = null,
 }: {
   surface: TerritorialSurface;
   /** Texto da KeywordDNA; o componente não vai buscar dado por conta própria. */
@@ -555,6 +695,12 @@ export function TerritorialWorkspaceRows({
   controls?: SiloAssignmentControls | null;
   /** Ação de promover página publicada a silo candidato. */
   siteControls?: SiteStructureControls | null;
+  /** §5 — destino que a working proposal dá a cada keyword. */
+  proposedByKeywordId?: ReadonlyMap<string, ProposedDestination> | null;
+  /** §8 — seleção para inspeção; NÃO limita o processamento arquitetural. */
+  selection?: KeywordSelectionControls | null;
+  /** §9 — o KeywordDNA de cada keyword, para o painel expandido. */
+  dnaByKeywordId?: ReadonlyMap<string, KeywordDnaInspection> | null;
   /** Ação de confirmar o silo. */
   confirmControls?: SiloConfirmationControls | null;
   /** Estados dos quatro processos por silo; read-model de UI. */
@@ -566,6 +712,15 @@ export function TerritorialWorkspaceRows({
 }) {
   // Recolher é conveniência de leitura: nenhum dado sai da mesa nem da busca.
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
+  /* §9 — a expansão é da tela: nada aqui muda dado nenhum. */
+  const [expandidas, setExpandidas] = React.useState<Set<string>>(new Set());
+  const alternarExpansao = React.useCallback((keywordId: string) => {
+    setExpandidas(anterior => {
+      const proximo = new Set(anterior);
+      if (proximo.has(keywordId)) proximo.delete(keywordId); else proximo.add(keywordId);
+      return proximo;
+    });
+  }, []);
 
   if (surface.emptyState.isEmpty) {
     return (
@@ -637,6 +792,11 @@ export function TerritorialWorkspaceRows({
                       keywordLabelFor={keywordLabelFor}
                       context={context}
                       controls={controls}
+                      proposed={proposedByKeywordId?.get(row.keywordId) ?? null}
+                      selection={selection}
+                      dna={dnaByKeywordId?.get(row.keywordId) ?? null}
+                      expandida={expandidas.has(row.keywordId)}
+                      onToggleExpand={alternarExpansao}
                     />
                   ))}
                 </React.Fragment>

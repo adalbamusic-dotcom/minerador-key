@@ -3,6 +3,7 @@ import { z } from "zod";
 import { SerpSnapshotSchema, VersionedArticleDNASchema, type ArticleDNA, type VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { SerpCollectionRecordSchema, SerpQueryInputSchema, SerpReviewRecordSchema } from "@/lib/editorial/contracts";
 import { RadarItemSchema } from "@/lib/editorial/operational-flow";
+import { radarDeclaredArticleIntent, radarDeclaredKeywordIntent } from "@/lib/radar/editorial-identity";
 import { type RadarHydrationSnapshot } from "@/lib/radar/hydration";
 import { canonicalUuidCandidates, isCanonicalUuid } from "@/lib/radar/identifiers";
 import { resolvePrimaryKeyword } from "@/lib/radar/keyword-resolver";
@@ -10,6 +11,7 @@ import { assertRadarEnvelopeMatchesArticle, assertRadarWorkflowIdentityMatchesEn
 import { SerpReviewSchema, type SerpResearchSnapshot, type SerpSearchInput } from "@/lib/radar/serp/contracts";
 import { RequestSchema } from "@/lib/radar/serp/request";
 import { ArtifactRepository, SerpSnapshotRepository, WorkflowRepository } from "@/lib/server/editorial-repositories";
+import { recoverRadarSerpSnapshot } from "@/lib/radar/serp-recovery";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { AuthzError, authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { PersistenceUnavailableError, mapPersistenceError } from "@/lib/server/editorial-db";
@@ -22,7 +24,15 @@ const SerpReviewReadbackQuerySchema = z.object({
   brandId: z.string().uuid(),
   articleId: z.string().min(1),
   articleDnaVersionId: z.string().uuid(),
-  snapshotId: z.string().min(1),
+  /*
+   * SEM `snapshotId` A PERGUNTA MUDA — e continua sendo uma leitura.
+   *
+   * Com id, a rota confirma UM snapshot conhecido (comportamento original,
+   * intacto). Sem id, ela responde qual coleta real ja gravada responde por
+   * este artigo — o caminho de recuperacao de uma coleta ja paga que nunca
+   * chegou ao estado do navegador. Nenhum provider e consultado nos dois.
+   */
+  snapshotId: z.string().min(1).nullable().default(null),
 });
 
 async function resolveArticle(
@@ -161,7 +171,47 @@ async function resolveArticle(
   const resolved = resolvePrimaryKeyword({ brandId, article: article.payload, keywords: [candidate], allowedSiloIds: [ownedSilo.id] });
   if (!resolved.ok) throw new AuthzError(409, resolved.message);
   const canonicalRemoteVerified = Boolean(keyword || publishedBriefing);
-  return { workflow, article, resolved, usedLocalFallback, resolutionMode: canonicalRemoteVerified ? "remote_canonical" as const : "local_recovery" as const, canonicalRemoteVerified };
+  return { workflow, article, resolved, hydration, usedLocalFallback, resolutionMode: canonicalRemoteVerified ? "remote_canonical" as const : "local_recovery" as const, canonicalRemoteVerified };
+}
+
+/**
+ * O TEXTO DE UMA KEYWORD AUXILIAR — RESOLVIDO AQUI, NUNCA RECEBIDO.
+ *
+ * A composição do ArticleDNA guarda IDs. O texto vive em `minerador_keywords`
+ * (canônico) e na hidratação que o Arquiteto transportou. O cliente manda o ID
+ * e só; aceitar texto do navegador seria aceitar consulta paga arbitrária.
+ */
+async function resolveAuxiliaryKeywordText(
+  profile: Awaited<ReturnType<typeof requireCanonicalSessionProfile>>,
+  reference: { keywordId: string },
+  hydration: RadarHydrationSnapshot | null,
+) {
+  const hidratada = hydration?.keywordSnapshots.find(snapshot =>
+    snapshot.referenceKeywordId === reference.keywordId
+    || snapshot.canonicalKeywordId === reference.keywordId
+    || snapshot.sourceKeywordId === reference.keywordId
+    || snapshot.originalKeywordId === reference.keywordId) || null;
+
+  const lookupIds = canonicalUuidCandidates([
+    reference.keywordId,
+    hidratada?.canonicalKeywordId,
+    hidratada?.sourceKeywordId,
+    hidratada?.originalKeywordId,
+  ]);
+
+  try {
+    const result = lookupIds.length
+      ? await profile.supabase.from("minerador_keywords").select("id,keyword").in("id", lookupIds)
+      : { data: [], error: null };
+    if (result.error) mapPersistenceError(result.error);
+    const row = ((result.data || []) as Array<{ id: string; keyword: string }>).find(item => lookupIds.includes(item.id));
+    if (row?.keyword?.trim()) return { keyword: row.keyword.trim(), source: "remote_canonical" as const };
+  } catch (error) {
+    if (!(error instanceof PersistenceUnavailableError)) throw error;
+  }
+
+  if (hidratada?.keyword?.trim()) return { keyword: hidratada.keyword.trim(), source: "hydration" as const };
+  return null;
 }
 
 function summaryFromResearch(research: SerpResearchSnapshot) {
@@ -204,6 +254,49 @@ export async function GET(request: NextRequest) {
         persistenceMode: "local_fallback",
         readbackConfirmed: false,
       }, { status: 503 });
+    }
+
+    /*
+     * RECUPERAR E LER — nunca coletar.
+     *
+     * Este ramo existe porque uma coleta paga pode estar gravada aqui e
+     * ausente da tela: enquanto a copia local teve poder de veto sobre o
+     * estado em memoria, o registro remoto ficava sem quem o mostrasse. Sem
+     * este caminho a unica saida era clicar em Iniciar pesquisa outra vez e
+     * pagar de novo pelo mesmo dado.
+     */
+    if (!input.snapshotId) {
+      const recuperacao = recoverRadarSerpSnapshot({ records: history.records, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId });
+      if (recuperacao.state !== "RECOVERED") {
+        return NextResponse.json({
+          brandId: input.brandId,
+          articleId: input.articleId,
+          articleDnaVersionId: input.articleDnaVersionId,
+          snapshotId: null,
+          record: null,
+          reviews: [],
+          recovery: recuperacao.state,
+          recoveryReason: recuperacao.reason,
+          persistenceMode: "remote",
+          readbackConfirmed: true,
+        });
+      }
+      const recuperado = recuperacao.record;
+      const revisoesRecuperadas = reviewHistory.reviews
+        .filter(review => review.brandId === input.brandId && review.articleId === input.articleId && review.snapshotId === recuperado.id)
+        .map(review => SerpReviewRecordSchema.parse(review));
+      return NextResponse.json({
+        brandId: input.brandId,
+        articleId: input.articleId,
+        articleDnaVersionId: input.articleDnaVersionId,
+        snapshotId: recuperado.id,
+        record: SerpCollectionRecordSchema.parse(recuperado),
+        reviews: revisoesRecuperadas,
+        recovery: recuperacao.state,
+        recoveryReason: recuperacao.reason,
+        persistenceMode: "remote",
+        readbackConfirmed: true,
+      });
     }
 
     const record = history.records.find(candidate => candidate.id === input.snapshotId) || null;
@@ -253,14 +346,118 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ review, persistenceMode: persisted ? "remote" : "local", readbackConfirmed: persisted });
     }
     const resolutionEnvelope = await validateRadarSerpResolutionEnvelope(input.resolutionEnvelope);
-    const { article, resolved, resolutionMode, canonicalRemoteVerified } = await resolveArticle(profile, input.brandId, input.articleId, input.articleVersion, input.hydration, resolutionEnvelope);
+    const { article, resolved, hydration, resolutionMode, canonicalRemoteVerified } = await resolveArticle(profile, input.brandId, input.articleId, input.articleVersion, input.hydration, resolutionEnvelope);
     if (input.articleDnaVersionId && input.articleDnaVersionId !== article.versionId) throw new RadarResolutionEnvelopeError("transfer_conflict", "A versão do ArticleDNA enviada pelo Radar diverge da versão canônica.");
+
+    /*
+     * ===================== A PESQUISA AUXILIAR =============================
+     *
+     * Mesma autorização da SERP canônica — workflow, envelope, ArticleDNA e
+     * posse do Silo já foram provados acima. O que muda é o DESTINO: esta
+     * coleta não vira snapshot do artigo, não entra na cadeia de versões, não
+     * recebe revisão nem aprovação. Ela é evidência de pesquisa, e o Radar a
+     * guarda no registro da investigação.
+     *
+     * A SERP canônica do Article continua sendo uma só: a da principal.
+     */
+    if (input.action === "collect_auxiliary") {
+      const reference = article.payload.keywordReferences.find(item => item.keywordId === input.keywordId);
+      if (!reference) throw new AuthzError(409, "A keyword informada não pertence à composição deste artigo.");
+      if (reference.role === "principal" || reference.keywordId === article.payload.principalKeywordId) {
+        throw new AuthzError(409, "A keyword principal é coletada pela SERP canônica do artigo, não como pesquisa auxiliar.");
+      }
+
+      const auxiliar = await resolveAuxiliaryKeywordText(profile, reference, hydration);
+      if (!auxiliar) throw new AuthzError(409, "O texto desta keyword não foi resolvido no vínculo canônico. Nenhuma coleta foi iniciada.");
+
+      /*
+       * A intenção da CONSULTA é a da keyword, não a do artigo: é ela que diz
+       * que tipo de concorrente esperar.
+       *
+       * "unknown" NÃO É UMA INTENÇÃO — §10 do Gate 18.4. É o que
+       * `normalizeSearchIntent` devolve quando não consegue classificar, e ela
+       * é truthy: o `||` parava nela e o diagnóstico da SERP registrava "A
+       * intenção esperada (unknown) não coincide com a aparente (informacional)"
+       * — uma lacuna sobre a ausência de leitura, não sobre o artigo.
+       *
+       * A ordem é a das autoridades, a mesma do Gate 18.2: qualificação
+       * semântica da keyword, intenção normalizada quando ela conclui algo,
+       * classificação terminal fechada pelo Arquiteto e, por fim, o campo livre.
+       */
+      /*
+       * A ORDEM ERA CERTA E ESTAVA NO LUGAR ERRADO.
+       *
+       * O Gate 18.4 filtrou o sentinela aqui com uma `conclusiva()` local, e o
+       * 18.5 repetiu a mesma cadeia no caminho canônico logo abaixo. Duas
+       * cópias da mesma decisão, cada uma com a sua ordem — que é exatamente
+       * como o defeito atravessou três gates. A precedência entre keyword e
+       * artigo continua sendo desta rota; a ordem DENTRO de cada um, não.
+       */
+      const intencao = radarDeclaredKeywordIntent(reference)
+        || radarDeclaredArticleIntent(article.payload)
+        /*
+         * Nada conclusivo: string vazia, e o provider PULA a comparação.
+         * É a resposta honesta — sem intenção declarada não há divergência a
+         * registrar, e inventar uma produziria a lacuna que este gate remove.
+         */
+        || "";
+      const queryInput = SerpQueryInputSchema.parse({ keyword: auxiliar.keyword, articleId: input.articleId, location: input.location, language: input.language, device: input.device });
+      const searchInput: SerpSearchInput = {
+        brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: article.versionId,
+        keywordId: reference.keywordId, keywordDnaVersionId: reference.keywordDnaVersionId,
+        keyword: queryInput.keyword, location: queryInput.location, language: queryInput.language, device: queryInput.device,
+        expectedIntent: intencao, expectedFormat: article.payload.hierarchy,
+        requiredTopics: reference.requiredTopics.length ? reference.requiredTopics : article.payload.requiredTopics,
+        articleEntities: article.payload.entities,
+        resultLimit: Number.parseInt(process.env.SERP_DEFAULT_RESULTS || "10", 10) || 10,
+        /* Versão 1 e sem antecessor: a cadeia de versões pertence à SERP canônica. */
+        version: 1, previousSnapshotId: null,
+      };
+      const dataForSeoAuxiliar = await resolveDataForSeoCanonicalSerpCompatibilityConfig({ actorUserId: profile.userId, brandId: input.brandId, quotaUnits: 1 });
+      const auxiliaryRequestId = crypto.randomUUID();
+      const auxiliaryResearch = await collectDataForSeoSerpSnapshot(searchInput, { config: dataForSeoAuxiliar.config, operationRequestId: auxiliaryRequestId });
+      await recordIntegrationUsage({
+        resource: dataForSeoAuxiliar.resource,
+        operation: "module_operation",
+        module: "radar",
+        resultStatus: "succeeded",
+        units: 1,
+        idempotencyKey: `dataforseo:radar:serp-auxiliar:${auxiliaryRequestId}:${input.articleId}`,
+        providerReference: null,
+        metadata: { operationKind: "serp_auxiliary", articleId: input.articleId, keywordId: reference.keywordId, snapshotId: auxiliaryResearch.id },
+      });
+      return NextResponse.json({
+        serpClass: "auxiliary_research",
+        keywordId: reference.keywordId,
+        role: reference.role,
+        resolvedKeyword: auxiliar.keyword,
+        keywordSource: auxiliar.source,
+        research: { ...auxiliaryResearch, resolutionMode, canonicalRemoteVerified },
+        /* Dito em voz alta: nada foi gravado como snapshot do artigo. */
+        persistenceMode: "not_persisted_as_article_snapshot",
+        note: "Pesquisa auxiliar: alimenta o universo competitivo da investigação e não substitui a SERP canônica do artigo.",
+      });
+    }
+
     const repository = new SerpSnapshotRepository(); const history = await repository.list(input.brandId, input.articleId);
     const realHistory = history.records.filter(record => record.origin === "real" && record.research);
     const previous = realHistory.at(-1); const lastVersion = previous?.research?.version || 0;
+    /*
+     * A INTENÇÃO DA SERP CANÔNICA — o terceiro leitor do sentinela.
+     *
+     * Este caminho passava `article.payload.mainIntent` CRU ao provider, e foi
+     * ele que gravou "a intenção esperada (unknown)" no diagnóstico do snapshot
+     * da rodada real. O caminho auxiliar já havia sido corrigido no Gate 18.4;
+     * este não.
+     *
+     * A ordem é a mesma das autoridades: classificação terminal do Arquiteto,
+     * depois o campo livre — e nenhum dos dois vale se disser "unknown".
+     */
+    const intencaoCanonica = radarDeclaredArticleIntent(article.payload)
+      || "";
     const queryInput = SerpQueryInputSchema.parse({ keyword: resolved.keyword, articleId: input.articleId, location: input.location, language: input.language, device: input.device });
     const searchInput: SerpSearchInput = { brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: article.versionId, keywordId: resolved.keywordId, keywordDnaVersionId: resolved.keywordDnaVersionId,
-      keyword: queryInput.keyword, location: queryInput.location, language: queryInput.language, device: queryInput.device, expectedIntent: article.payload.mainIntent, expectedFormat: article.payload.hierarchy,
+      keyword: queryInput.keyword, location: queryInput.location, language: queryInput.language, device: queryInput.device, expectedIntent: intencaoCanonica, expectedFormat: article.payload.hierarchy,
       requiredTopics: article.payload.requiredTopics, articleEntities: article.payload.entities, resultLimit: Number.parseInt(process.env.SERP_DEFAULT_RESULTS || "10", 10) || 10, version: lastVersion + 1, previousSnapshotId: previous?.id || null };
     const dataForSeo = await resolveDataForSeoCanonicalSerpCompatibilityConfig({ actorUserId: profile.userId, brandId: input.brandId, quotaUnits: 1 });
     const operationRequestId = crypto.randomUUID();
@@ -278,7 +475,7 @@ export async function POST(request: NextRequest) {
       metadata: { operationKind: "serp", articleId: input.articleId, snapshotId: research.id },
     });
     let record = SerpCollectionRecordSchema.parse({ id: research.id, input: queryInput, status: "needs_review", provider: "dataforseo", origin: "real", isMock: false, snapshot: summary, research: resolvedResearch, persistenceMode: "local", resolutionMode, canonicalRemoteVerified, cost: null, error: null,
-      dnaIntent: article.payload.mainIntent, conflictReason: research.diagnostic.possibleConflicts[0] || null, humanDecisionRequired: true });
+      dnaIntent: radarDeclaredArticleIntent(article.payload), conflictReason: research.diagnostic.possibleConflicts[0] || null, humanDecisionRequired: true });
     const persisted = await repository.save(input.brandId, record, profile.userId);
     if (persisted) record = SerpCollectionRecordSchema.parse({ ...record, persistenceMode: "remote", research: { ...resolvedResearch, persistenceMode: "remote" } });
     return NextResponse.json({ record, resolvedKeyword: resolved.keyword, persistenceMode: persisted ? "remote" : "local" });

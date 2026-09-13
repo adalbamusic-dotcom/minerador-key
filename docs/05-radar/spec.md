@@ -1,5 +1,232 @@
 # Spec — Radar
 
+## Contrato canônico da Pesquisa — Fase 1 Google — 2026-09-11
+
+Regra permanente. Substitui, para o fluxo operacional vigente, as seções
+anteriores desta spec que descrevem o workflow por abas
+`Coleta → Concorrentes → Análise → Evidências → Revisão → Aprovar SERP`: esse
+workflow não faz parte do fluxo operacional atual e permanece aqui apenas como
+histórico.
+
+### Fronteira do módulo
+
+```text
+Arquiteto → ArticleDNA aprovado → Radar → Planejador
+```
+
+O Radar **não redefine o ArticleDNA**. Ele acrescenta evidência amarrada a
+`articleId + articleDnaVersionId + articleDnaContentHash`.
+
+O dossiê de trabalho é, conceitualmente:
+
+```text
+ArticleDNA + RadarEvidenceBundle
+```
+
+Ao finalizar:
+
+```text
+RadarFrozenEvidenceBundle + ArticleDNA → PlannerHandoff v3
+```
+
+### Áreas operacionais
+
+`Pesquisa`, `Vídeos`, `Especialista`, `Relatório`. A antiga área `Conteúdo` não
+é área operacional.
+
+### Modos de pesquisa competitiva
+
+`Pesquisa` tem três modos — `Google`, `YouTube`, `Amazon` — e eles são modos da
+mesma pesquisa competitiva, não áreas. A seleção é única por investigação, é
+feita antes de começar, fica gravada na investigação e não muda no meio.
+
+### Pesquisa YouTube não é a área Vídeos
+
+Invariante. Os dois papéis não compartilham identidade semântica.
+
+| | `Pesquisa → YouTube` | Área `Vídeos` |
+| --- | --- | --- |
+| Origem do material | a plataforma responde a uma consulta | o USER escolhe e fornece |
+| Existe SERP? | sim | não |
+| O que produz | universo competitivo e modelo competitivo próprio | material para enriquecer a narrativa |
+| A fonte vira concorrente? | sim, é esse o papel | não, nunca automaticamente |
+| Orientado por | plano de consultas | `VideoBriefs` |
+
+Um mesmo vídeo pode vir a existir nos dois papéis, mas só após decisão humana
+explícita — nunca por herança automática de um papel para o outro.
+
+### Lifecycle do modo Google
+
+```text
+NOT_STARTED → START → READY_TO_ANALYZE → ANALYZE
+            → READY_TO_FINALIZE → FINALIZE → FINALIZED
+```
+
+`RESET` é ação explícita do USER. Nenhum passo ocorre automaticamente por
+`mount`, F5, troca de área ou expansão de painel.
+
+### START
+
+Contexto do Article → plano de consultas → SERP canônica → SERPs auxiliares →
+universo de pesquisa → deduplicação → curadoria automática → persistência →
+readback. Nenhuma revisão manual intermediária é obrigatória.
+
+### ANALYZE
+
+Extração dos concorrentes → persistência da amostra → readback → verificação de
+fontes → consolidação de evidências → persistência final → readback final.
+
+Contabilidade:
+
+```text
+SELECTED = ANALYZED_SUCCESS + FAILED_FINAL
+ao concluir: PENDING = 0
+```
+
+Falha final **não** é pendência.
+
+### Concorrência otimista
+
+```text
+versão N → escrita da amostra → readback N+1 → escrita final com N+1 → readback N+2
+```
+
+Não desativar concorrência otimista. Conflito real entre sessões continua
+protegido; `last-write-wins` e retry cego com sobrescrita são proibidos.
+
+### Verificação de fontes
+
+O cliente envia `sourceId`; o cliente **não** escolhe URL arbitrária. O servidor
+resolve o `sourceId` contra o plano e as candidatas persistidas. Duas URLs do
+mesmo domínio são fontes distintas.
+
+Falhas HTTP legítimas — `403`, `404`, `410`, `429`, `timeout`, `5xx`, acesso
+bloqueado — viram limitações declaradas. `SOURCE_UNKNOWN` para um id produzido
+pelo próprio pipeline é defeito, não limitação normal.
+
+### Intenção declarada
+
+A intenção do artigo vem do fundamento aprovado, nunca da SERP. A intenção
+observada vem da pesquisa. `unknown`, `ambiguous` e `indeterminate` não são
+declarações conclusivas. Só existe conflito entre dois valores conclusivos que
+realmente divergem. A ordem e os sentinelas são centralizados em
+`lib/radar/editorial-identity.ts`; nenhuma projeção monta a própria ordem.
+
+### Modelo competitivo observado
+
+`RadarCompetitiveObservedModel` é a autoridade da observação competitiva e
+reúne amostra, intenção, formatos, estrutura, conceitos, perguntas, entidades,
+lacunas, diferenciações, conflitos, concorrentes, suficiência e limitações.
+Nenhuma tela recalcula esses números por conta própria.
+
+### Semântica
+
+`SemanticConceptModel`: observações cruas preservadas → normalização →
+agrupamento → conceitos → perguntas → entidades. O vocabulário canônico é
+`semantic coverage`, `concepts`, `entities`, `relationships` e `questions`.
+Não usar "LSI".
+
+### Links internos — fronteira
+
+```text
+ARQUITETO    estrutura:  relações, direção, conceito de âncora, InternalLinkGraph
+RADAR        aplicação:  quantidade recomendada, contextos, afinidade de seção,
+                         âncora, variantes, distribuição, confiança, evidência
+PLANEJADOR   integração: o ContentPlan final
+```
+
+Quando a relação é `REQUIRED` e nenhum contexto natural foi sustentado pela
+evidência:
+
+```text
+structuralRequirement  = REQUIRED
+applicationStatus      = REQUIRED_RELATION_WITHOUT_SUPPORTED_PLACEMENT
+recommendedOccurrences = 0
+```
+
+Zero ocorrências **não** significa remover a relação.
+
+### YMYL e E-E-A-T
+
+YMYL é avaliado por afirmação e por artigo, não apenas por nicho. E-E-A-T não é
+score. Os sinais têm estado declarado: `SUPPORTED`, `DECLARED`, `UNVERIFIED`,
+`ABSENT`. Recorrência de mercado não é verdade factual.
+
+### Descoberta por IA
+
+`AiDiscoveryContext` reúne unidades respondíveis, perguntas centrais,
+requisitos de definição, cobertura de entidades, suporte factual e conexões com
+o especialista. Para TOFU informacional, descoberta e compreensão são
+requeridas.
+
+Não existe "GEO score", e não existem versões separadas do artigo para busca e
+para sistemas de IA: é o mesmo artigo, preparado uma vez.
+
+### Blueprint editorial
+
+`RadarEditorialBlueprint` é a projeção editorial do Radar e **não** é o
+`ContentPlan`. Reúne objetivo, orientação de abertura, orientação de fechamento
+quando sustentada, blocos candidatos, perguntas, definições, entidades, estado
+factual, diferenciação, links internos, necessidades de especialista,
+oportunidades de vídeo, proveniência e limitações.
+
+Não fixa H2 final, título final, contagem de palavras nem ordem rígida final. O
+`ContentPlan` continua sendo do Planejador.
+
+### Pautas de especialista
+
+`SpecialistReviewRequirements → RadarSpecialistBrief`, com leitura humana:
+`topic`, `question`, `whyNeeded`, `expectedContribution`, `relatedSection`,
+contexto de evidência, prioridade e proveniência. A contribuição esperada pode
+ser `VALIDATE`, `CORRECT`, `QUALIFY` ou `ADD_EXPERIENCE`.
+
+```text
+PREPARED != SENT
+```
+
+O Radar não envia pedido por Telegram automaticamente.
+
+### Pautas de vídeo
+
+`RadarVideoBrief` é pauta audiovisual derivada do Blueprint — não é pesquisa
+YouTube. Pode indicar `topic`, `narrativePurpose`, `whatToLookFor`,
+`relatedSection`, `questions`, `entities`, `evidenceNeeded`, prioridade e
+proveniência. Só é produzida quando existe benefício narrativo real; não se
+obriga vídeo para todo conceito.
+
+### FINALIZE
+
+Ação exclusiva do USER e sem provider. Congela `RadarFrozenEvidenceBundle`,
+`EditorialBlueprint`, `SpecialistBriefs`, `VideoBriefs` e a proveniência
+necessária. O bundle é amarrado a `articleId`, à versão do ArticleDNA e ao hash
+do ArticleDNA. Após F5, conclusões diferentes não podem ser reconstruídas
+silenciosamente.
+
+### RESET
+
+Limpa apenas a pesquisa corrente. Preserva `ArticleDNA`, `KeywordDNA`,
+`SiloDNA`, `SiloPage`, `InternalLinkGraph`, o histórico append-only, os vídeos
+deliberadamente registrados e as contribuições reais do especialista. `RESET`
+não inicia pesquisa nova.
+
+### PlannerHandoff v3
+
+Fonte: ArticleDNA aprovado + `RadarFrozenEvidenceBundle` íntegro + o dossiê de
+evidência correspondente. O envelope inclui o Blueprint diretamente.
+
+O Planejador não pesquisa de novo, não reinterpreta o Radar como investigação
+nova e não remonta o Blueprint do zero. Ele decide o `ContentPlan` final.
+
+### Contratos de UI
+
+Cards principais: `Pesquisa`, `Vídeos`, `Especialista`, `Relatório`. O
+ArticleDNA aparece como resumo global somente leitura. Detalhe técnico fica em
+progressive disclosure.
+
+A primeira camada não prioriza ids, hashes, ids de lote, readback ou depuração.
+Planilha e Workbench usam a mesma autoridade operacional — a mesma projeção, não
+duas chamadas da mesma função.
+
 ## Consolidação canônica de integrações e abertura da fase — 2026-08-25
 
 `PLATFORM_INTEGRATION_FOUNDATION = READY` e

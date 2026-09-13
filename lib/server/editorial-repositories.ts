@@ -200,10 +200,25 @@ export class WorkflowRepository {
     const alreadySaved = radar.analysisVersions.some(version => version.versionId === analysis.versionId);
     if (alreadySaved) return current;
     const payload = { ...(current.payload as object), analysisVersions: [...radar.analysisVersions, analysis] };
-    const { data, error } = await client().from("editorial_workflow_items").update({ payload, updated_by: actorId }).eq("id", current.id).eq("marca_id", marcaId).eq("lock_version", expectedLock).select("*").maybeSingle();
+    /*
+     * A VOLTA NÃO PRECISA DA LINHA INTEIRA.
+     *
+     * `select("*")` devolvia o payload recém-gravado — nesta linha, 9,77 MB
+     * medidos — e quem chama usa apenas `id`, `lock_version` e o `id` de dentro
+     * do payload, que já está em `current`. Era uma perna gratuita somada a uma
+     * escrita que já ia no limite: a subida leva o payload inteiro porque o
+     * PostgREST substitui a coluna, e a descida levava tudo de novo.
+     *
+     * Isto NÃO resolve o crescimento do payload — só para de pagar duas vezes
+     * por ele. O crescimento é decisão de esquema, e está reportado.
+     */
+    const idNoPayload = current.payload && typeof current.payload === "object" && !Array.isArray(current.payload) && typeof (current.payload as { id?: unknown }).id === "string"
+      ? (current.payload as { id: string }).id
+      : null;
+    const { data, error } = await client().from("editorial_workflow_items").update({ payload, updated_by: actorId }).eq("id", current.id).eq("marca_id", marcaId).eq("lock_version", expectedLock).select("id,lock_version").maybeSingle();
     if (error) mapPersistenceError(error);
     if (!data) throw new OptimisticLockError();
-    return data;
+    return { ...(data as { id: string; lock_version: number }), payload: idNoPayload ? { id: idNoPayload } : null };
   }
 }
 

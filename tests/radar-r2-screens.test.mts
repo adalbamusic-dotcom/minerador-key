@@ -27,7 +27,7 @@ test("referências avançadas expõem busca, filtros, funções e ação coletiv
   assert.match(page, /Filtrar por função/);
   assert.match(page, /Somente pendentes/);
   assert.match(page, /Restaurar para decisão/);
-  assert.match(page, /Analisar referências selecionadas/);
+  assert.match(page, /Analisar páginas selecionadas/);
 });
 
 test("análise, evidências adicionais e atividade mantêm suas fronteiras", () => {

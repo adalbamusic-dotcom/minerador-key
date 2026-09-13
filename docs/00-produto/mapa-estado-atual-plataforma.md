@@ -40,7 +40,26 @@ Próxima frente: aba Links Internos funcional com React Flow real, edição huma
 Silo Pair: smoke transacional positivo. Manter observação explícita sobre uso de postgres na preparação de fixture por ausência de UPDATE do service_role em editorial_artifact_versions, sem conceder grant automaticamente.
 
 ## Radar
-SERP avançada com Coleta/Concorrentes/Análise/Evidências/Revisão/Histórico e readback de aprovação. Próximas frentes: homologação final DataForSEO, ExternalEvidence, ExpertBrief/Telegram, ExpertContribution, transcrição, ExpertEvidence, relatório consolidado e RadarApprovedPackage/handoff.
+
+Pesquisa Google — Fase 1: **HOMOLOGADA** em runtime real (2026-09-11), no fluxo
+`RESET → START → ANALYZE → FINALIZE → F5` com DataForSEO real, persistência
+remota, readback, concorrência otimista e bundle congelado preservado após F5.
+
+Áreas operacionais: `Pesquisa`, `Vídeos`, `Especialista`, `Relatório`. O
+workflow antigo por abas Coleta/Concorrentes/Análise/Evidências/Revisão saiu do
+fluxo operacional.
+
+Modos competitivos da `Pesquisa`: Google (implementado e homologado), YouTube
+(engine `partial`, não homologada) e Amazon (engine `planned`, não
+implementada).
+
+Entregues: `RadarCompetitiveObservedModel`, `SemanticConceptModel`,
+`AiDiscoveryContext`, `RadarEditorialBlueprint`, `SpecialistBriefs`,
+`VideoBriefs`, `RadarFrozenEvidenceBundle` e `PlannerHandoff v3`.
+
+Próximas frentes, nenhuma iniciada: Vídeos (Gate 0 de persistência/infra),
+Especialista (workflow real + Telegram), Pesquisa YouTube, Pesquisa Amazon e
+consumo do handoff pelo Planejador.
 
 ## Planejador
 ContentPlan determinístico possui implementação local relevante. Persistência remota e smoke autenticado completo devem permanecer separados de testes locais.

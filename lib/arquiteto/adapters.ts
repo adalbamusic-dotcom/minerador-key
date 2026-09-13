@@ -123,11 +123,37 @@ export function buildKeywordDnaProvenanceSnapshot(
   });
 }
 
+/**
+ * A referência versionada da Qualificação Semântica, quando o handoff a trouxe.
+ *
+ * Nada é inventado: sem `versionId`, `contentHash`, data e estado reais, a
+ * referência não existe — e a ausência fica explícita no fundamento em vez de
+ * virar um campo preenchido por conveniência.
+ */
+function semanticQualificationRef(keyword: ArchitectKeyword): ArticleKeywordReference["semanticQualificationRef"] {
+  const bruto = (keyword as Record<string, unknown>).semanticQualification;
+  if (!bruto || typeof bruto !== "object") return undefined;
+  const item = bruto as Record<string, unknown>;
+  const texto = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : null;
+  const versionId = texto(item.versionId);
+  const contentHash = texto(item.contentHash);
+  const collectedAt = texto(item.collectedAt);
+  const semanticState = item.semanticState === "conclusive" || item.semanticState === "non_conclusive" ? item.semanticState : null;
+  if (!versionId || !contentHash || !collectedAt || !semanticState) return undefined;
+  return {
+    versionId, contentHash, collectedAt, semanticState,
+    ...(typeof item.versionNumber === "number" && Number.isInteger(item.versionNumber) && item.versionNumber > 0 ? { versionNumber: item.versionNumber } : {}),
+    intent: texto(item.intent),
+    funnel: texto(item.funnel),
+  };
+}
+
 export function articleKeywordReference(keyword: ArchitectKeyword, role: ArticleKeywordReference["role"], brandId = "legacy"): ArticleKeywordReference {
   const suppliedSnapshot = KeywordDnaProvenanceSnapshotSchema.safeParse(keyword.keywordDnaSnapshot);
   const snapshot = suppliedSnapshot.success ? suppliedSnapshot.data : buildKeywordDnaProvenanceSnapshot(keyword, { brandId });
   const reference = snapshot.versionReference;
   const volume = typeof keyword.volume_search === "number" && Number.isFinite(keyword.volume_search) && keyword.volume_search >= 0 ? keyword.volume_search : null;
+  const qualificacao = semanticQualificationRef(keyword);
   const contribution = role === "principal" ? "central" : role === "secundaria" ? "incremental_volume" : "semantic_coverage";
   const purpose = role === "principal" ? "Define a identidade e a intenção central do artigo."
     : role === "secundaria" ? "Amplia alcance e volume compatível sem criar outra URL."
@@ -151,6 +177,11 @@ export function articleKeywordReference(keyword: ArchitectKeyword, role: Article
     ...(keyword.keywordUrlRelation ? { keywordUrlRelation: keyword.keywordUrlRelation } : {}),
     ...(keyword.urlEvidence ? { urlEvidence: keyword.urlEvidence } : {}),
     keywordDnaSnapshot: snapshot,
+    /*
+     * A qualificação viaja igual para principal, secundária e reforço: o
+     * envelope do fundamento não muda com o papel.
+     */
+    ...(qualificacao ? { semanticQualificationRef: qualificacao } : {}),
     demandEvidence: normalizeKeywordDemandEvidence(keyword),
   };
 }

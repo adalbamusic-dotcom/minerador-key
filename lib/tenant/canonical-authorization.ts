@@ -49,31 +49,42 @@ export interface CanonicalAuthorizationRepository {
   findBrandAgencyRestrictions?(brandId: string, agencyId: string): Promise<string[]>;
 }
 
+export type CanonicalAuthorizationCode =
+  | "ACTOR_INVALID"
+  | "PLATFORM_ADMIN_REQUIRED"
+  | "BRAND_REF_INVALID"
+  | "BRAND_NOT_FOUND"
+  | "BRAND_REF_MISMATCH"
+  | "BRAND_INACTIVE"
+  | "BRAND_ACCESS_DENIED"
+  | "DENIED_NO_RELATION"
+  | "DENIED_AGENCY_PERMISSION"
+  | "DENIED_BRAND_RESTRICTION"
+  | "AGENCY_REF_INVALID"
+  | "AGENCY_NOT_FOUND"
+  | "AGENCY_REF_MISMATCH"
+  | "AGENCY_INACTIVE"
+  | "AGENCY_ACCESS_DENIED"
+  | "BRAND_AGENCY_MISSING"
+  | "BRAND_AGENCY_AMBIGUOUS"
+  | "REMOTE_UNAVAILABLE";
+
 export class CanonicalAuthorizationError extends Error {
-  constructor(
-    public readonly status: 401 | 403 | 404 | 409 | 503,
-    public readonly code:
-      | "ACTOR_INVALID"
-      | "PLATFORM_ADMIN_REQUIRED"
-      | "BRAND_REF_INVALID"
-      | "BRAND_NOT_FOUND"
-      | "BRAND_REF_MISMATCH"
-      | "BRAND_INACTIVE"
-      | "BRAND_ACCESS_DENIED"
-      | "DENIED_NO_RELATION"
-      | "DENIED_AGENCY_PERMISSION"
-      | "DENIED_BRAND_RESTRICTION"
-      | "AGENCY_REF_INVALID"
-      | "AGENCY_NOT_FOUND"
-      | "AGENCY_REF_MISMATCH"
-      | "AGENCY_INACTIVE"
-      | "AGENCY_ACCESS_DENIED"
-      | "BRAND_AGENCY_MISSING"
-      | "BRAND_AGENCY_AMBIGUOUS"
-      | "REMOTE_UNAVAILABLE",
-    message: string,
-  ) {
+  /*
+   * CAMPOS EXPLÍCITOS, e não parameter properties.
+   *
+   * Elas produzem código em vez de anotá-lo, e o Node as recusa no modo
+   * strip-only — que é como o Local Worker roda este módulo fora do Next.
+   * A união dos códigos virou tipo nomeado no caminho: ela estava declarada
+   * inline dentro da assinatura e não podia ser referida em lugar nenhum.
+   */
+  readonly status: 401 | 403 | 404 | 409 | 503;
+  readonly code: CanonicalAuthorizationCode;
+
+  constructor(status: 401 | 403 | 404 | 409 | 503, code: CanonicalAuthorizationCode, message: string) {
     super(message);
+    this.status = status;
+    this.code = code;
   }
 }
 

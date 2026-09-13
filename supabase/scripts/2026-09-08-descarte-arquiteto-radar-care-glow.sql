@@ -44,7 +44,7 @@ DECLARE
 
   v_marca         record;
   v_workflow      uuid[];
-  v_artefatos     uuid[];
+  v_artefatos     text[];
   v_snapshots     uuid[];
   v_revisoes      uuid[];
   v_articles      text[];
@@ -56,6 +56,12 @@ DECLARE
   v_estados       jsonb := '{}'::jsonb;
   v_par           record;
   v_acao          text;
+  v_preserved_before jsonb;
+  v_preserved_after jsonb;
+  v_fingerprint text;
+  v_filter text;
+  v_table text;
+  v_pass integer;
 
   -- Os gatilhos append-only que impedem DELETE nestas tabelas.
   v_gatilhos text[][] := ARRAY[
@@ -96,7 +102,7 @@ WHERE marca_id = v_alvo AND stage IN ('architect', 'radar');
 
 SELECT array_agg(version_id) INTO v_artefatos
 FROM public.editorial_artifact_versions
-WHERE marca_id = v_alvo AND artifact_type IN ('article_dna', 'silo_dna', 'silo_page');
+WHERE marca_id = v_alvo AND artifact_type IN ('article_dna', 'silo_dna', 'silo_page', 'article_architecture_ai_review');
 
 SELECT array_agg(id) INTO v_snapshots
 FROM public.editorial_serp_snapshots WHERE marca_id = v_alvo;
@@ -105,7 +111,7 @@ SELECT array_agg(id) INTO v_revisoes
 FROM public.editorial_serp_reviews WHERE marca_id = v_alvo;
 
 v_workflow  := coalesce(v_workflow,  ARRAY[]::uuid[]);
-v_artefatos := coalesce(v_artefatos, ARRAY[]::uuid[]);
+v_artefatos := coalesce(v_artefatos, ARRAY[]::text[]);
 v_snapshots := coalesce(v_snapshots, ARRAY[]::uuid[]);
 v_revisoes  := coalesce(v_revisoes,  ARRAY[]::uuid[]);
 v_articles  := coalesce(v_articles,  ARRAY[]::text[]);
@@ -170,7 +176,7 @@ SELECT jsonb_build_object(
   'eventosDeStatus', (SELECT count(*) FROM public.editorial_version_status_events
                       WHERE version_id = ANY(v_artefatos)),
   'eventosDeDecisao',(SELECT count(*) FROM public.editorial_decision_events
-                      WHERE marca_id = v_alvo AND workflow_item_id = ANY(v_workflow))
+                      WHERE marca_id = v_alvo AND (workflow_item_id = ANY(v_workflow) OR source_version_id = ANY(v_artefatos)))
 ) INTO v_manifesto;
 RAISE NOTICE 'MANIFESTO: %', jsonb_pretty(v_manifesto);
 
@@ -195,6 +201,23 @@ SELECT jsonb_build_object(
                         FROM public.editorial_artifact_versions WHERE marca_id <> v_alvo)
 ) INTO v_antes;
 RAISE NOTICE 'A PRESERVAR: %', jsonb_pretty(v_antes);
+-- Compara conteúdo completo dos registros preservados, sem exportar dados.
+v_preserved_after := '{}'::jsonb;
+FOREACH v_table IN ARRAY ARRAY['editorial_artifact_versions','editorial_workflow_items','editorial_decision_events','editorial_version_status_events','editorial_serp_snapshots','editorial_serp_reviews','minerador_keywords','minerador_keyword_lists','marcas','brand_memberships','content_documents','publication_records','internal_link_graphs','internal_link_graph_nodes','internal_link_graph_edges','internal_link_graph_working_copies','internal_link_graph_proposals'] LOOP
+ v_filter := CASE v_table
+ WHEN 'editorial_artifact_versions' THEN 'NOT (version_id = ANY($1))'
+ WHEN 'editorial_workflow_items' THEN 'NOT (id = ANY($2))'
+ WHEN 'editorial_version_status_events' THEN 'NOT (version_id = ANY($1))'
+ WHEN 'editorial_decision_events' THEN 'NOT (marca_id = $5 AND (coalesce(workflow_item_id = ANY($2),false) OR coalesce(source_version_id = ANY($1),false)))'
+ WHEN 'editorial_serp_snapshots' THEN 'NOT (id = ANY($3))'
+ WHEN 'editorial_serp_reviews' THEN 'NOT (id = ANY($4))'
+ ELSE 'true' END;
+ EXECUTE format('SELECT md5(coalesce(string_agg(to_jsonb(t)::text, chr(10) ORDER BY to_jsonb(t)::text), '''')) FROM public.%I t WHERE %s',v_table,v_filter)
+ INTO v_fingerprint USING v_artefatos,v_workflow,v_snapshots,v_revisoes,v_alvo;
+ v_preserved_after := v_preserved_after || jsonb_build_object(v_table,v_fingerprint);
+END LOOP;
+
+v_preserved_before := v_preserved_after;
 
 -- =====================================================================
 -- 5 · GATILHOS — estado REAL capturado, restaurado exatamente
@@ -208,7 +231,7 @@ FOR v_par IN SELECT v_gatilhos[i][1] AS tabela, v_gatilhos[i][2] AS gatilho
              FROM generate_subscripts(v_gatilhos, 1) AS i LOOP
   SELECT t.tgenabled INTO v_acao
   FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-  WHERE t.tgname = v_par.gatilho AND c.relname = v_par.tabela AND NOT t.tgisinternal;
+  WHERE t.tgname = v_par.gatilho AND c.relnamespace = 'public'::regnamespace AND c.relname = v_par.tabela AND NOT t.tgisinternal;
 
   IF v_acao IS NULL THEN
     RAISE EXCEPTION 'GATILHO_AUSENTE: %.% nao existe. O banco nao esta no estado previsto.',
@@ -226,13 +249,18 @@ RAISE NOTICE 'GATILHOS SUSPENSOS. Estados originais: %', v_estados;
 -- =====================================================================
 
 DELETE FROM public.editorial_decision_events
-WHERE marca_id = v_alvo AND workflow_item_id = ANY(v_workflow);
+WHERE marca_id = v_alvo AND (workflow_item_id = ANY(v_workflow) OR source_version_id = ANY(v_artefatos));
 GET DIAGNOSTICS v_n = ROW_COUNT; RAISE NOTICE 'decision_events: %', v_n;
 
 DELETE FROM public.editorial_serp_reviews WHERE id = ANY(v_revisoes);
 GET DIAGNOSTICS v_n = ROW_COUNT; RAISE NOTICE 'serp_reviews: %', v_n;
 
-DELETE FROM public.editorial_serp_snapshots WHERE id = ANY(v_snapshots);
+LOOP
+  DELETE FROM public.editorial_serp_snapshots s WHERE id = ANY(v_snapshots)
+    AND NOT EXISTS (SELECT 1 FROM public.editorial_serp_snapshots child WHERE child.previous_snapshot_id = s.id);
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  EXIT WHEN v_n = 0;
+END LOOP;
 GET DIAGNOSTICS v_n = ROW_COUNT; RAISE NOTICE 'serp_snapshots: %', v_n;
 
 DELETE FROM public.editorial_version_status_events WHERE version_id = ANY(v_artefatos);
@@ -241,7 +269,13 @@ GET DIAGNOSTICS v_n = ROW_COUNT; RAISE NOTICE 'version_status_events: %', v_n;
 DELETE FROM public.editorial_workflow_items WHERE id = ANY(v_workflow);
 GET DIAGNOSTICS v_n = ROW_COUNT; RAISE NOTICE 'workflow_items: %', v_n;
 
-DELETE FROM public.editorial_artifact_versions WHERE version_id = ANY(v_artefatos);
+LOOP
+  DELETE FROM public.editorial_artifact_versions a WHERE version_id = ANY(v_artefatos)
+    AND NOT EXISTS (SELECT 1 FROM public.editorial_artifact_versions child
+      WHERE child.source_version_id = a.version_id OR child.previous_version_id = a.version_id);
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  EXIT WHEN v_n = 0;
+END LOOP;
 GET DIAGNOSTICS v_n = ROW_COUNT; RAISE NOTICE 'artifact_versions: %', v_n;
 
 -- =====================================================================
@@ -262,7 +296,7 @@ FOR v_par IN SELECT v_gatilhos[i][1] AS tabela, v_gatilhos[i][2] AS gatilho
 
   SELECT t.tgenabled INTO v_acao
   FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-  WHERE t.tgname = v_par.gatilho AND c.relname = v_par.tabela;
+  WHERE t.tgname = v_par.gatilho AND c.relnamespace = 'public'::regnamespace AND c.relname = v_par.tabela;
 
   IF v_acao IS DISTINCT FROM (v_estados->>v_par.gatilho) THEN
     RAISE EXCEPTION 'GATILHO_NAO_RESTAURADO: %.% esta em % e era %. Rollback.',
@@ -279,7 +313,7 @@ SELECT jsonb_build_object(
   'wfArquitetoRadar', (SELECT count(*) FROM public.editorial_workflow_items
                        WHERE marca_id = v_alvo AND stage IN ('architect','radar')),
   'artefatosArq',     (SELECT count(*) FROM public.editorial_artifact_versions
-                       WHERE marca_id = v_alvo AND artifact_type IN ('article_dna','silo_dna','silo_page')),
+                       WHERE marca_id = v_alvo AND artifact_type IN ('article_dna','silo_dna','silo_page','article_architecture_ai_review')),
   'snapshotsSerp',    (SELECT count(*) FROM public.editorial_serp_snapshots WHERE marca_id = v_alvo),
   'revisoesSerp',     (SELECT count(*) FROM public.editorial_serp_reviews WHERE marca_id = v_alvo),
   'mineradorKeywords',(SELECT count(*) FROM public.minerador_keywords WHERE brand_id = v_alvo),
@@ -334,6 +368,24 @@ WHERE d.workflow_item_id IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM public.editorial_workflow_items w WHERE w.id = d.workflow_item_id);
 IF v_n > 0 THEN RAISE EXCEPTION 'ORFAOS_DECISION_EVENTS: %. Rollback.', v_n; END IF;
 
+
+-- Compara conteúdo completo dos registros preservados, sem exportar dados.
+v_preserved_after := '{}'::jsonb;
+FOREACH v_table IN ARRAY ARRAY['editorial_artifact_versions','editorial_workflow_items','editorial_decision_events','editorial_version_status_events','editorial_serp_snapshots','editorial_serp_reviews','minerador_keywords','minerador_keyword_lists','marcas','brand_memberships','content_documents','publication_records','internal_link_graphs','internal_link_graph_nodes','internal_link_graph_edges','internal_link_graph_working_copies','internal_link_graph_proposals'] LOOP
+ v_filter := CASE v_table
+ WHEN 'editorial_artifact_versions' THEN 'NOT (version_id = ANY($1))'
+ WHEN 'editorial_workflow_items' THEN 'NOT (id = ANY($2))'
+ WHEN 'editorial_version_status_events' THEN 'NOT (version_id = ANY($1))'
+ WHEN 'editorial_decision_events' THEN 'NOT (marca_id = $5 AND (coalesce(workflow_item_id = ANY($2),false) OR coalesce(source_version_id = ANY($1),false)))'
+ WHEN 'editorial_serp_snapshots' THEN 'NOT (id = ANY($3))'
+ WHEN 'editorial_serp_reviews' THEN 'NOT (id = ANY($4))'
+ ELSE 'true' END;
+ EXECUTE format('SELECT md5(coalesce(string_agg(to_jsonb(t)::text, chr(10) ORDER BY to_jsonb(t)::text), '''')) FROM public.%I t WHERE %s',v_table,v_filter)
+ INTO v_fingerprint USING v_artefatos,v_workflow,v_snapshots,v_revisoes,v_alvo;
+ v_preserved_after := v_preserved_after || jsonb_build_object(v_table,v_fingerprint);
+END LOOP;
+
+IF v_preserved_after IS DISTINCT FROM v_preserved_before THEN RAISE EXCEPTION 'CONTEUDO_PRESERVADO_DIVERGIU'; END IF;
 RAISE NOTICE 'VERIFICACAO OK — conjunto zerado, preservado intacto, sem orfaos';
 
 -- =====================================================================
@@ -359,7 +411,7 @@ $descarte$;
 --     WHERE marca_id = '09762023-d0d4-4c24-b34e-d0fdfd43f891' AND stage IN ('architect','radar')),
 --   'artefatosArq', (SELECT count(*) FROM public.editorial_artifact_versions
 --     WHERE marca_id = '09762023-d0d4-4c24-b34e-d0fdfd43f891'
---       AND artifact_type IN ('article_dna','silo_dna','silo_page')),
+--       AND artifact_type IN ('article_dna','silo_dna','silo_page','article_architecture_ai_review')),
 --   'serp', (SELECT count(*) FROM public.editorial_serp_snapshots
 --     WHERE marca_id = '09762023-d0d4-4c24-b34e-d0fdfd43f891'),
 --   'mineradorPreservado', (SELECT count(*) FROM public.minerador_keywords

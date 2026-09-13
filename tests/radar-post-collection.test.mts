@@ -44,15 +44,21 @@ test("o painel troca o rótulo em vez de exibir zero enganoso", () => {
 
 test("iniciar curadoria não chama provider nem cria SERP nova", () => {
   const workbench = readFileSync("modules/radar/radar-page.tsx", "utf8");
-  const corpo = workbench.slice(workbench.indexOf("const startSerpAnalysis = async"), workbench.indexOf("const persistSerpDecision"));
+  const corpo = workbench.slice(workbench.indexOf("const startSerpAnalysis = async"), workbench.indexOf("const resetRadarInvestigation = async"));
   assert.equal(/collectSerp|dataforseo/i.test(corpo), false, "a curadoria não fala com o provider");
-  assert.match(corpo, /createRadarAnalysisVersion\(\{/, "usa o snapshot existente");
+  assert.match(corpo, /curationVersionFor\(target, data\.article, research\)/, "usa o snapshot existente");
   assert.equal(/createRadarAnalysisSuccessor/.test(corpo), false, "abrir a curadoria não cria sucessora consolidada");
+
+  // A fábrica compartilhada com a pesquisa profunda continua criando a versão
+  // inicial a partir do snapshot recebido — sem falar com o provider.
+  const fabrica = workbench.slice(workbench.indexOf("const curationVersionFor = async"), workbench.indexOf("const startSerpAnalysis = async"));
+  assert.match(fabrica, /createRadarAnalysisVersion\(\{/);
+  assert.equal(/collectSerp|dataforseo/i.test(fabrica), false);
 });
 
 test("clique recusado explica o motivo em vez de retornar em silêncio", () => {
   const workbench = readFileSync("modules/radar/radar-page.tsx", "utf8");
-  const corpo = workbench.slice(workbench.indexOf("const startSerpAnalysis = async"), workbench.indexOf("const persistSerpDecision"));
+  const corpo = workbench.slice(workbench.indexOf("const startSerpAnalysis = async"), workbench.indexOf("const resetRadarInvestigation = async"));
   for (const motivo of [
     /Selecione um artigo antes de iniciar a curadoria/,
     /Outra ação da SERP ainda está em andamento/,
@@ -76,8 +82,15 @@ test("resultados não selecionados continuam visíveis e a seleção controla s�
 
 test("workspace que não carregou não é anunciado como marca vazia", () => {
   const workbench = readFileSync("modules/radar/radar-page.tsx", "utf8");
-  assert.match(workbench, /pipeline\.persistenceMode === "server" \? "Nenhum artigo importado/);
-  assert.match(workbench, /recuperação local desta sessão/);
+  /*
+   * A implementação vigente distingue pelo diagnóstico de leitura, não por
+   * `persistenceMode`: "Nenhum artigo importado" só aparece quando a carga
+   * terminou (`complete`) ou a marca está comprovadamente vazia
+   * (`empty_confirmed`). Carga parcial ou falha descreve o que houve.
+   */
+  assert.match(workbench, /diagnostico\.state === "complete" \|\| diagnostico\.state === "empty_confirmed"/);
+  assert.match(workbench, /\? "Nenhum artigo importado/);
+  assert.match(workbench, /: loadStateSummary\(diagnostico\)/);
 });
 
 test("o merge remoto/local preserva os dois lados sem inventar item", () => {

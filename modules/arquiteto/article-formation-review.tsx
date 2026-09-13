@@ -123,7 +123,6 @@ export function ArticleFormationReviewPanel({
   pendingDecisions,
   unitTypeControl,
   closure,
-  onApproveArticle,
   materialized,
   preview,
   principalComparison,
@@ -224,7 +223,6 @@ export function ArticleFormationReviewPanel({
     pendingCount: number;
     blockers: readonly string[];
   } | null;
-  onApproveArticle: () => void;
   /** Por que este agrupamento descreve uma página só — em texto. */
   conclusion: string[];
   keywords: readonly { keywordId: string; label: string; role: "principal" | "secundaria" | "reforco" }[];
@@ -259,13 +257,49 @@ export function ArticleFormationReviewPanel({
 }) {
   const [mergeTarget, setMergeTarget] = React.useState("");
   const [serpReason, setSerpReason] = React.useState("");
+  /**
+   * §7 — OS CONTROLES MANUAIS SAEM DO CAMINHO CRÍTICO.
+   *
+   * Na fase 1 o processamento fecha a formação e o humano confirma o
+   * RESULTADO. Tornar principal, separar, remover, mover e juntar continuam
+   * existindo — mas como ajuste, não como requisito para fechar o ArticleDNA.
+   */
+  /*
+   * §5 — ADVANCED_MANUAL_CONTROLS_VISIBLE = NO.
+   *
+   * A fase 1 homologa o fluxo automático: processar fecha a formação e o humano
+   * confirma o resultado. Tornar principal, trocar papel, separar, remover,
+   * mover e juntar continuam implementados e testados — eles só não aparecem,
+   * porque cada um abre uma jornada que esta rodada não precisa provar.
+   *
+   * Trocar esta constante por estado devolve o botão e os controles.
+   */
+  const advancedOpen = false;
 
   return (
     <section aria-label={`Revisão da formação de ${articleLabel}`} data-testid="architect-formation-review">
-      <p className="text-sm font-semibold uppercase tracking-wider text-module-accent">
-        {materialized ? "Formação concluída" : "Revisão da formação"}
+      {/*
+        * §9 — o rótulo não pode anunciar um ato que ainda não aconteceu.
+        *
+        * "Formação concluída" aparecia assim que existia ArticleDNA, mesmo
+        * com a versão em `proposed` e o botão de concluir ainda por clicar. A
+        * frase agora segue o estado real do artefato.
+        */}
+      <p className="text-sm font-semibold uppercase tracking-wider text-module-accent" data-testid="architect-formation-phase-label">
+        {closure?.approved
+          ? "ArticleDNA aprovado"
+          : materialized
+            ? "Formação processada · falta concluir"
+            : "Formação em processamento"}
       </p>
 
+      {/*
+        * §7 — o ajuste manual fica atrás de uma porta, não no caminho.
+        *
+        * Nada foi apagado: tornar principal, trocar papel, separar, remover,
+        * mover e juntar continuam aqui. Eles só deixam de ser o que a pessoa
+        * precisa fazer para conseguir fechar um ArticleDNA normal.
+        */}
       {/* §9 — depois de concluir, o painel diz o que ficou gravado. Uma nova
           mudança estrutural não reescreve o ArticleDNA aprovado em silêncio:
           ela sucede a versão vigente pelo mecanismo canônico. */}
@@ -431,7 +465,7 @@ export function ArticleFormationReviewPanel({
                     {item.role === "principal" ? "Principal" : item.role === "secundaria" ? "Secundária" : "Reforço"}
                   </span>
                 </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
+                <div className="mt-2 flex flex-wrap items-center gap-2" hidden={!advancedOpen} data-testid="architect-review-row-controls">
                   {item.role !== "principal" && (
                     <button
                       type="button"
@@ -607,35 +641,34 @@ export function ArticleFormationReviewPanel({
               A versão aprovada permanece válida e não é reescrita. Fechar a revisão atual cria uma sucessora.
             </p>
           )}
+          {/*
+            * ESTE PAINEL NÃO APROVA.
+            *
+            * O botão "Aprovar ArticleDNA" que ficava aqui gravava
+            * `status: "approved"` por um caminho próprio, sem passar pela
+            * portaria da conclusão — gate SERP do lote, classificações não
+            * resolvidas, keyword atravessando dois Silos, teto de composição.
+            * Era uma segunda aprovação, e mais fraca que a primeira.
+            *
+            * Aqui se RESOLVE a revisão. Quem fecha é "Concluir formação", na
+            * aba Artigos, sobre a seleção da planilha.
+            */}
           {closure.revisionPending ? (
             <p className="mt-2 text-sm leading-6 text-warning" data-testid="architect-revision-pending">
-              Resolva as decisões abaixo para poder fechar esta revisão.
+              Resolva as decisões abaixo e conclua a formação na aba Artigos para fechar esta revisão.
             </p>
           ) : (
-            <>
-              <button
-                type="button"
-                disabled={busy || !closure.readyForApproval}
-                data-testid="architect-approve-article"
-                onClick={onApproveArticle}
-                className="mt-2 min-h-9 rounded border border-positive-soft/45 px-3 text-sm font-semibold text-positive-soft transition-colors hover:bg-positive-soft/10 disabled:opacity-40"
-              >
-                Aprovar ArticleDNA
-              </button>
-              {!closure.readyForApproval && closure.blockers.length > 0 && (
-                <ul className="mt-2 space-y-1 text-sm leading-6 text-text-muted" data-testid="architect-approval-blockers">
-                  {closure.blockers.map(blocker => <li key={blocker}>• {blocker}</li>)}
-                </ul>
-              )}
-            </>
+            <p className="mt-2 text-sm leading-6 text-positive-soft" data-testid="architect-revision-ready">
+              Revisão resolvida. Selecione este artigo na aba Artigos e use “Concluir formação” para fechá-lo.
+            </p>
           )}
-          {closure.revisionPending && closure.blockers.length > 0 && (
+          {closure.blockers.length > 0 && (
             <ul className="mt-2 space-y-1 text-sm leading-6 text-text-muted" data-testid="architect-approval-blockers">
               {closure.blockers.map(blocker => <li key={blocker}>• {blocker}</li>)}
             </ul>
           )}
           <p className="mt-2 text-sm leading-6 text-text-muted">
-            A aprovação fecha a definição deste artigo. Silo, categoria e briefing do Planejador não são decididos aqui.
+            Esta aba resolve a definição deste artigo. Silo, categoria e briefing do Planejador não são decididos aqui.
           </p>
         </div>
       )}

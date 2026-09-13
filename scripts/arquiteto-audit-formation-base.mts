@@ -22,6 +22,7 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { PHASE1_UNRESOLVED_SERP_BLOCKS_CONCLUSION, STRUCTURAL_BASELINE_PRESERVED } from "../lib/arquiteto/formation-phase-policy.ts";
 import { buildCanonicalWorkflowWorkspaceItems } from "../lib/arquiteto/canonical-workspace.ts";
 import { buildSiloScopedProvisionalGroups } from "../lib/arquiteto/article-formation-scope.ts";
 import { buildArticleFormationUniverse } from "../lib/arquiteto/article-formation.ts";
@@ -194,6 +195,17 @@ for (const territorio of confirmados) {
     console.log(`  assessment baseHash      ${p?.formationBaseHash ?? "—"}${combina ? "  (bate)" : registro ? "  (NÃO bate)" : ""}`);
     console.log(`  verdict / observedIntent ${p?.verdict ?? "—"} / ${p?.interpretation?.observedIntent ?? "—"}`);
     console.log(`  SERP_STATE               ${estado}`);
-    console.log(`  HUMAN_RESOLUTION_REQUIRED ${estado.endsWith("_UNRESOLVED") ? "YES" : "NO"}`);
+    /*
+     * A auditoria não pode ser mais severa que a portaria real.
+     *
+     * Na fase 1, evidência VIGENTE e indecisa preserva o baseline estrutural
+     * em vez de virar microdecisão — ver `formation-phase-policy`. Só a falta
+     * de evidência sobre esta composição continua exigindo ação.
+     */
+    const indeciso = estado.endsWith("_UNRESOLVED");
+    console.log(`  HUMAN_RESOLUTION_REQUIRED ${indeciso && PHASE1_UNRESOLVED_SERP_BLOCKS_CONCLUSION ? "YES" : "NO"}`);
+    if (indeciso && !PHASE1_UNRESOLVED_SERP_BLOCKS_CONCLUSION) {
+      console.log(`  DECISION_BASIS            ${STRUCTURAL_BASELINE_PRESERVED}`);
+    }
   }
 }

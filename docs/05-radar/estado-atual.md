@@ -1,5 +1,144 @@
 # Estado atual — Radar
 
+## Pesquisa Google — Fase 1 — HOMOLOGADA — 2026-09-11
+
+A Pesquisa Google do Radar concluiu a Fase 1 e foi validada em runtime real
+pelo USER, com provider DataForSEO, no fluxo
+`RESET → START → ANALYZE → FINALIZE → F5`.
+
+Esta seção descreve o que existe hoje. Os números da rodada usada na
+homologação ficam no relatório datado, não aqui:
+[relatório de homologação](../00-produto/auditorias/relatorio-radar-google-fase1-homologacao-2026-09-11.md).
+As regras permanentes ficam na [spec](spec.md); as próximas frentes, no
+[backlog](backlog.md).
+
+```text
+GOOGLE_SEARCH_PHASE_1 = HOMOLOGADA
+YOUTUBE_SEARCH = NÃO HOMOLOGADA — gate próprio
+AMAZON_SEARCH = NÃO IMPLEMENTADA como engine operacional
+```
+
+### IMPLEMENTED — verificado no código
+
+Áreas operacionais do Radar: `Pesquisa`, `Vídeos`, `Especialista`, `Relatório`
+(`RADAR_R3_AREAS` em `lib/radar/r3-workbench.ts`). A antiga área `Conteúdo`
+não é área operacional.
+
+Modos de pesquisa competitiva, em `lib/radar/search-mode.ts`
+(`RadarPrimarySearchMode = WEB | YOUTUBE | AMAZON`), com a capacidade da engine
+declarada e não presumida em `RADAR_SEARCH_MODE_ENGINE`:
+
+| Modo | Rótulo | Engine declarada | Situação |
+| --- | --- | --- | --- |
+| `WEB` | Google | `available` | implementada e homologada |
+| `YOUTUBE` | YouTube | `partial` | universo, separação e modelo de vídeo existem; a coleta usa o bloco de vídeos da SERP do Google. Não homologada |
+| `AMAZON` | Amazon | `planned` | a casca reconhece o modo; a engine de produto é frente própria |
+
+A seleção é única por investigação e fica gravada nela; o modo não muda no meio.
+
+Lifecycle da Pesquisa Google, todo por ação explícita do USER:
+
+```text
+NOT_STARTED → START → READY_TO_ANALYZE → ANALYZE
+            → READY_TO_FINALIZE → FINALIZE → FINALIZED
+```
+
+Nenhum passo ocorre por `mount`, F5, troca de área ou expansão de painel.
+`RESET` é ação explícita e separada.
+
+`START` executa, numa passagem: contexto do Article → plano de consultas →
+SERP canônica → SERPs auxiliares → universo de pesquisa → deduplicação →
+curadoria automática → persistência → readback. Não há revisão manual
+intermediária obrigatória.
+
+`ANALYZE` executa, como uma operação do USER: extração dos concorrentes →
+persistência da amostra → readback → verificação de fontes → consolidação de
+evidências → persistência final → readback final.
+
+`FINALIZE` é ação do USER e não chama provider. Congela
+`RadarFrozenEvidenceBundle` com `EditorialBlueprint`, `SpecialistBriefs`,
+`VideoBriefs` e a proveniência, amarrado a `articleId`, `articleDnaVersionId`
+e `articleDnaContentHash` (`lib/radar/investigation-finalization.ts`).
+
+`RESET` limpa somente a pesquisa corrente (`RADAR_RESET_CLEARED` em
+`lib/radar/radar-reset.ts`) e não inicia pesquisa nova.
+
+Camadas de domínio implementadas:
+
+- `RadarCompetitiveObservedModel` — autoridade única da observação competitiva;
+- `SemanticConceptModel` — observações cruas preservadas → normalização →
+  agrupamento → conceitos, perguntas e entidades;
+- `AiDiscoveryContext` — unidades respondíveis, perguntas centrais, requisitos
+  de definição, cobertura de entidades, suporte factual e conexões com o
+  especialista;
+- `RadarEditorialBlueprint` — projeção editorial do Radar, com estados
+  `READY` / `INSUFFICIENT` declarados;
+- `RadarSpecialistBrief` e `RadarVideoBrief`;
+- `RadarEvidenceBundle`, `RadarFrozenEvidenceBundle` e `PlannerHandoff v3`
+  (`RADAR_PLANNER_CONTRACT_VERSION = 3`).
+
+Autoridade centralizada de intenção declarada em `lib/radar/editorial-identity.ts`
+(`radarConclusiveIntent`, `radarDeclaredArticleIntent`,
+`radarDeclaredKeywordIntent`, `radarIntentConflict`).
+
+### TESTED — confirmado por teste
+
+Suíte `pnpm run test:radar`: 900 testes, zero falhas na data desta seção.
+
+Cobrem, entre outros: despacho real no DOM, remoção do workflow legado da
+superfície, handoff canônico v3, reset formal, encadeamento da persistência do
+ANALYZE, autoridade de intenção com censo de leituras cruas, projeção única do
+Especialista e a área clicável do expansor da planilha.
+
+### REMOTE VERIFIED
+
+Persistência e readback confirmados na rodada real: escrita intermediária da
+amostra, readback, escrita final, readback final, concorrência otimista
+encadeada (`versão N → sample write → readback N+1 → final write com N+1 →
+readback N+2`) e congelamento remoto do bundle.
+
+### MANUAL UI VALIDATION
+
+`RESET → START → ANALYZE → FINALIZE → F5` executado pelo USER com provider
+real. Após F5, o bundle congelado foi preservado e nenhuma conclusão diferente
+foi reconstruída silenciosamente.
+
+### VIDEOS_2.4 — HOMOLOGADO EM RUNTIME REAL — 2026-09-14
+
+O USER executou o fluxo completo com provider real: `youtube-transcript@1.3.1`
+consultado pelo Local Worker, jobs `COMPLETED`, transcripts persistidos e
+`TEXT_READY` em duas fontes — 406 e 733 segmentos com tempos reais.
+
+```text
+TIMESTAMP_COVERAGE = 100,1% e 100,0% da duração oficial
+TIMESTAMP_UNIT     = resolvida pela duração da YouTube Data API
+F5                 = preserva TEXT_READY
+WORKER POSTERIOR   = EMPTY (a idempotência recusa antes de chamar o endpoint)
+```
+
+A cobertura de ~100% é o que prova que o defeito de unidade do pacote não passou:
+lida na unidade errada, a legenda cobriria 0,1% ou 100.000% do vídeo.
+
+Migrations aplicadas: `20260911120000`, `20260911180000`, `20260912100000` e
+`20260913100000`.
+
+### PENDING
+
+- **`20260914100000_radar_video_brief_extracts.sql` não aplicada.** Cria as duas
+  tabelas do casamento (execução + trechos). Sem ela o recorte não persiste, e o
+  Gate 3 não pode ser exercido com dados reais.
+- **Smoke real de GCS + Speech (VIDEOS_2.2) não executado.** A via do áudio
+  enviado continua sem exercício em runtime — a via pública tornou-a menos
+  urgente, não desnecessária.
+- Legenda de vídeo público de terceiros: fora do alcance da configuração atual.
+  A limitação é declarada na tela, com os caminhos que a resolvem — não é falha.
+- Tradução, casamento entre pauta e conteúdo, `VideoEvidence` e artigo:
+  gates posteriores.
+
+### BLOCKED
+
+Nada bloqueado nesta frente.
+
 ## Purga administrativa de Arquiteto e Radar — Care Glow — 2026-09-08
 
 ```text
@@ -1078,3 +1217,20 @@ O item Radar já recebe `arquitetoStrategyContext` opcional; a extensão permane
   passaram. ESLint direcionado, `check:visual-system` e `git diff --check`
   passaram; o checkout preexistente e suas alterações não relacionadas foram
   preservados.
+
+
+## Descarte administrativo executado — 2026-09-08
+
+Proprietário da operação: Arquiteto; participação do Radar explicitamente autorizada.
+Projeto hjjlntdpdgvpnazdztqw; marca Care Glow (09762023-d0d4-4c24-b34e-d0fdfd43f891).
+Descarte definitivo de testes autorizado pelo usuário, com backup dispensado.
+Executado via Supabase CLI 2.111.0, db query --linked, em transação única.
+
+- Confirmado no banco: removidos 21 workflows do Arquiteto e 4 do Radar; 115 ArticleDNA; 9 article_architecture_ai_review; 114 eventos de status; 10 eventos de decisão; 9 snapshots e 6 revisões SERP. Silos e tabelas do grafo já estavam vazios.
+- Preservados: 29 keywords, 3 listas, 83 qualificações semânticas, 66 apresentações contextuais e 1 brand_skill. Comparação de conteúdo integral dos registros preservados nas 17 tabelas do script passou.
+- Cinco triggers append-only restaurados exatamente ao estado O; nenhuma função, FK ou migration removida/aplicada.
+- Primeiro ensaio detectou text versus uuid em version_id e desfez a transação. Script corrigido para text[], inclusão das revisões IA, exclusão por folhas de previous_version_id/source_version_id e previous_snapshot_id, locks e comparação de conteúdo preservado.
+- Ensaio corrigido: PASS com rollback intencional. Execução definitiva: PASS. Readback SQL independente: PASS. Reexecução em simulação sobre vazio: PASS com rollback intencional. O erro P0001 SIMULACAO CONCLUIDA é deliberado, não falha da purga.
+- Validação nas duas sessões da interface: AINDA NÃO VERIFICADA nesta execução. Cache local não foi apagado. Não declarar sincronização visual homologada com base apenas neste SQL.
+- Script: supabase/scripts/2026-09-08-descarte-arquiteto-radar-care-glow.sql. Mantido em simulação por padrão. Ele aborta se grafos reaparecerem: não é reset universal para qualquer acervo futuro.
+- Nenhum commit, push ou deploy executado nesta entrega.
