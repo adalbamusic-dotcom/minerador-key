@@ -141,6 +141,19 @@ function servidor(estadoInicial: {
       const atual = estado.briefs[0] as Record<string, unknown>;
       const radarContext = atual.radarContext as Record<string, unknown>;
       const revisoes = (radarContext.contributionReviews || {}) as Record<string, unknown>;
+
+      /*
+       * A IDEMPOTÊNCIA DA ROTA REAL, ESPELHADA AQUI — §10.
+       *
+       * A rota não reescreve `decidedAt` quando a decisão já é a mesma: o
+       * histórico diria que a pessoa decidiu de novo algo que ela decidiu uma
+       * vez. Um duplo que sempre grava não exercitaria esse caminho.
+       */
+      const gravada = revisoes[String(body.contributionId)] as Record<string, unknown> | undefined;
+      if (gravada && gravada.decision === body.decision && (gravada.classification ?? null) === (body.classification ?? null) && (gravada.relatedRequirementId ?? null) === (body.relatedRequirementId ?? null)) {
+        return json({ brief: atual, review: gravada, persistence: "remote_readback_confirmed", write: "unchanged" });
+      }
+
       const atualizada = {
         ...atual,
         radarContext: {
@@ -158,7 +171,7 @@ function servidor(estadoInicial: {
         },
       };
       estado.briefs = [atualizada];
-      return json({ brief: atualizada, persistence: "remote_readback_confirmed" });
+      return json({ brief: atualizada, persistence: "remote_readback_confirmed", write: "applied" });
     }
 
     if (url.includes("/api/editorial/expert-briefs/send")) {
@@ -486,7 +499,13 @@ test("§13 · sem confirmação remota, a tela NÃO muda a decisão", async () =
   try {
     await tela.click("radar-specialist-decision-ACCEPTED_EVIDENCE");
     assert.equal(tela.get("radar-specialist-decision-state").textContent, "Aguardando sua decisão");
-    assert.match(tela.text(), /não retornou confirmação remota/);
+
+    /* E a falha aparece NO CARD, colada no botão — SPECIALIST_3.1 · §6. */
+    const desfecho = tela.get("radar-specialist-decision-feedback");
+    assert.equal(desfecho.getAttribute("role"), "alert");
+    assert.match(desfecho.textContent || "", /Não foi possível salvar a decisão/);
+    assert.match(desfecho.textContent || "", /sem confirmação remota/);
+    assert.ok(tela.get("radar-specialist-review-contribution").contains(desfecho), "o desfecho mora no card, não no alto do painel");
   } finally {
     tela.destroy();
     globalThis.fetch = originalFetch;
@@ -555,6 +574,137 @@ test("§3 · com duas perguntas, Subir e Descer voltam", async () => {
     assert.equal(controles.length, 2);
     assert.ok(controles[0].textContent?.includes("Subir"));
     assert.ok(controles[0].textContent?.includes("Descer"));
+  } finally {
+    tela.destroy();
+    rede.restaurar();
+  }
+});
+
+/* ============ SPECIALIST_3.1 · o clique que não podia terminar calado ============ */
+
+/**
+ * O BLOQUEIO DO RUNTIME: clicar, ver "Gravando…", e nada mudar.
+ *
+ * A escrita funcionava — a decisão estava no banco. O que faltava era a tela
+ * DIZER o que aconteceu: o sucesso não falava nada e o erro ia para o topo do
+ * painel, a uma seção de distância do card. Os dois desfechos são
+ * indistinguíveis de um botão quebrado.
+ */
+
+test("§6 e §7 · as quatro decisões usam a mesma rota e todas confirmam na tela", async () => {
+  for (const caso of [
+    { decision: "ACCEPTED_EVIDENCE", estado: "Aceita como evidência" },
+    { decision: "SUPPORT_ONLY", estado: "Usada como apoio" },
+    { decision: "QUOTE_CANDIDATE", estado: "Marcada como citação literal" },
+    { decision: "REJECTED", estado: "Rejeitada" },
+  ]) {
+    const rede = servidor({
+      briefs: [pauta({ status: "awaiting_review", sentAt: "2026-09-13T08:09:08Z" })],
+      contributions: [contribuicao()],
+      consultations: [consulta({ status: "awaiting_review", sentAt: "2026-09-13T08:09:08Z" })],
+    });
+    const tela = await montarPainel();
+    try {
+      await tela.click(`radar-specialist-decision-${caso.decision}`);
+
+      /* MESMA ROTA para as quatro: nada de quatro implementações divergentes. */
+      const escritas = rede.escritas.filter(item => item.url.includes("/expert-contributions/review"));
+      assert.equal(escritas.length, 1, caso.decision);
+      assert.equal(escritas[0].body.decision, caso.decision);
+
+      assert.equal(tela.get("radar-specialist-decision-state").textContent, caso.estado, caso.decision);
+      const desfecho = tela.get("radar-specialist-decision-feedback");
+      assert.equal(desfecho.getAttribute("role"), "status", caso.decision);
+      assert.equal(desfecho.textContent, `${caso.estado}.`, caso.decision);
+    } finally {
+      tela.destroy();
+      rede.restaurar();
+    }
+  }
+});
+
+test("§6 · uma rota ausente aparece com o status HTTP, e não como silêncio", async () => {
+  /*
+   * O 404 É O CASO QUE IMPORTA: um build sem a rota de revisão devolve
+   * exatamente isso, e sem o número na mensagem toda falha vira "não deu".
+   */
+  const rede = servidor({
+    briefs: [pauta({ status: "awaiting_review", sentAt: "2026-09-13T08:09:08Z" })],
+    contributions: [contribuicao()],
+    consultations: [consulta({ status: "awaiting_review", sentAt: "2026-09-13T08:09:08Z" })],
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (entrada: unknown, init?: { method?: string; body?: string }) => {
+    if (String(entrada).includes("/expert-contributions/review")) {
+      return { ok: false, status: 404, json: async () => ({}) };
+    }
+    return originalFetch(entrada as never, init as never);
+  }) as unknown as typeof globalThis.fetch;
+
+  const tela = await montarPainel();
+  try {
+    await tela.click("radar-specialist-decision-ACCEPTED_EVIDENCE");
+    const desfecho = tela.get("radar-specialist-decision-feedback");
+    assert.match(desfecho.textContent || "", /HTTP 404/);
+    assert.equal(tela.get("radar-specialist-decision-state").textContent, "Aguardando sua decisão");
+  } finally {
+    tela.destroy();
+    globalThis.fetch = originalFetch;
+    rede.restaurar();
+  }
+});
+
+test("§10 · clicar de novo na mesma decisão não cria uma segunda decisão", async () => {
+  const rede = servidor({
+    briefs: [pauta({ status: "awaiting_review", sentAt: "2026-09-13T08:09:08Z" })],
+    contributions: [contribuicao()],
+    consultations: [consulta({ status: "awaiting_review", sentAt: "2026-09-13T08:09:08Z" })],
+  });
+  const tela = await montarPainel();
+  try {
+    await tela.click("radar-specialist-decision-ACCEPTED_EVIDENCE");
+    assert.equal(tela.get("radar-specialist-decision-state").textContent, "Aceita como evidência");
+
+    await tela.click("radar-specialist-decision-ACCEPTED_EVIDENCE");
+    /* O estado não regride, e a tela diz que nada mudou em vez de fingir. */
+    assert.equal(tela.get("radar-specialist-decision-state").textContent, "Aceita como evidência");
+    assert.match(tela.get("radar-specialist-decision-feedback").textContent || "", /já estava registrada/);
+  } finally {
+    tela.destroy();
+    rede.restaurar();
+  }
+});
+
+test("§6 · o desfecho aparece SÓ no card em que se clicou", async () => {
+  /*
+   * Com duas respostas na mesma pauta — o caso comum de um especialista que
+   * manda um texto e depois um áudio —, uma mensagem sem dono diria
+   * "Aceita como evidência" embaixo da resposta que ninguém decidiu.
+   *
+   * Sobrevivente da bateria de mutação: a fixture tinha uma contribuição só.
+   */
+  const segunda = "b0000000-0000-4000-8000-0000000000a5";
+  const rede = servidor({
+    briefs: [pauta({ status: "awaiting_review", sentAt: "2026-09-13T08:09:08Z" })],
+    contributions: [contribuicao(), contribuicao({ id: segunda, originalText: "Uma segunda resposta, sobre outro aspecto.", receivedAt: "2026-09-13T09:20:00.000000+00:00" })],
+    consultations: [consulta({ status: "awaiting_review", sentAt: "2026-09-13T08:09:08Z" })],
+  });
+  const tela = await montarPainel();
+  try {
+    assert.equal(tela.all("radar-specialist-review-contribution").length, 2);
+
+    await tela.click(`radar-specialist-decision-ACCEPTED_EVIDENCE`);
+
+    const desfechos = tela.all("radar-specialist-decision-feedback");
+    assert.equal(desfechos.length, 1, "a mensagem tem dono");
+
+    /* E ela está dentro do card cuja decisão mudou, não do outro. */
+    const cards = tela.all("radar-specialist-review-contribution");
+    const decididos = tela.all("radar-specialist-decision-state").map(item => item.textContent);
+    assert.deepEqual(decididos.filter(item => item === "Aceita como evidência").length, 1);
+    assert.equal(cards.filter(card => card.contains(desfechos[0])).length, 1);
+    const cardComDesfecho = cards.find(card => card.contains(desfechos[0]));
+    assert.ok(cardComDesfecho?.textContent?.includes("Aceita como evidência"), "a mensagem acompanha a decisão que mudou");
   } finally {
     tela.destroy();
     rede.restaurar();

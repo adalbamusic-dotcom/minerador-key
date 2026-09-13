@@ -399,6 +399,19 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
   /** A contribuição cuja classificação está aberta para correção — §5. */
   const [editandoClassificacao, setEditandoClassificacao] = useState("");
   const [decidindo, setDecidindo] = useState("");
+  /**
+   * O DESFECHO DA DECISÃO, AO LADO DA DECISÃO — SPECIALIST_3.1 · §6.
+   *
+   * O sucesso não dizia nada e o erro ia para o alto do painel, a uma tela de
+   * distância do card onde se clicou: o RESULTADO DA REVISÃO é a seção de
+   * largura inteira, lá embaixo. Quem clicava via o botão piscar "Gravando…"
+   * e voltar ao normal — indistinguível de um clique que não fez nada.
+   *
+   * Agora todo desfecho aparece no próprio card, e nenhum clique termina em
+   * silêncio. É também o instrumento: a mensagem diz se a falha veio da rota,
+   * do readback ou do navegador.
+   */
+  const [desfechoDaDecisao, setDesfechoDaDecisao] = useState<{ contributionId: string; ok: boolean; message: string } | null>(null);
 
   const contextPayload = useMemo(() => context ? buildRadarExpertBriefContext(context) : null, [context]);
   const initialQuestions = useMemo(() => normalizeRadarExpertBriefQuestions(suggestedQuestions), [suggestedQuestions]);
@@ -1026,7 +1039,9 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
     relatedRequirementId?: string | null;
   }) => {
     const atual = reviews[contribution.id] || REVISAO_PENDENTE;
+    const decisao = update.decision ?? atual.decision;
     setDecidindo(contribution.id);
+    setDesfechoDaDecisao(null);
     setError("");
     setNotice("");
     try {
@@ -1037,21 +1052,38 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           brandId, articleId, articleDnaVersionId,
           briefId: contribution.briefId,
           contributionId: contribution.id,
-          decision: update.decision ?? atual.decision,
+          decision: decisao,
           classification: update.classification !== undefined ? update.classification : atual.classification,
           relatedRequirementId: update.relatedRequirementId !== undefined ? update.relatedRequirementId : atual.relatedRequirementId,
         }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(recordValue(asObject(payload)?.error) || "Não foi possível gravar a decisão sobre esta contribuição.");
-      if (payload.persistence !== "remote_readback_confirmed") throw new Error("A decisão não retornou confirmação remota.");
+      /*
+       * O STATUS ENTRA NA MENSAGEM — é ele que separa os casos.
+       *
+       * 404 é rota ausente (build velho), 401/403 é sessão, 4xx de schema é
+       * payload, 5xx é servidor. Sem o número, toda falha vira "não deu" e a
+       * investigação recomeça do zero a cada tentativa.
+       */
+      if (!response.ok) throw new Error(`${recordValue(asObject(payload)?.error) || "a rota recusou a decisão"} (HTTP ${response.status})`);
+      if (payload.persistence !== "remote_readback_confirmed") throw new Error("a rota respondeu sem confirmação remota da gravação");
       const persisted = parseBrief(payload.brief);
-      if (!persisted || !radarExpertBriefMatchesContext(persisted, { brandId, articleId, articleDnaVersionId })) throw new Error("O readback da decisão retornou uma pauta fora do contexto selecionado.");
+      if (!persisted || !radarExpertBriefMatchesContext(persisted, { brandId, articleId, articleDnaVersionId })) throw new Error("o readback devolveu uma pauta fora do contexto deste artigo");
       setOverlayBriefs(current => [persisted, ...current.filter(brief => brief.id !== persisted.id)]);
       leituraDaArea.refresh();
       setEditandoClassificacao("");
+      /* §6 — o sucesso também fala, e fala do lado de quem clicou. */
+      setDesfechoDaDecisao({
+        contributionId: contribution.id,
+        ok: true,
+        message: payload.write === "unchanged" ? `${RADAR_SPECIALIST_DECISION_LABELS[decisao]} — já estava registrada.` : `${RADAR_SPECIALIST_DECISION_LABELS[decisao]}.`,
+      });
     } catch (reviewError) {
-      setError(errorMessage(reviewError, "Não foi possível gravar a decisão sobre esta contribuição."));
+      setDesfechoDaDecisao({
+        contributionId: contribution.id,
+        ok: false,
+        message: `Não foi possível salvar a decisão: ${errorMessage(reviewError, "o navegador não conseguiu falar com o servidor")}.`,
+      });
     } finally {
       setDecidindo("");
     }
@@ -1184,6 +1216,19 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
         disabled={ocupado || (item.value !== "REJECTED" && !verbatimText)}
         data-testid={`radar-specialist-decision-${item.value}`}
       >{ocupado ? "Gravando…" : item.label}</button>)}</div>
+
+      {/*
+        * NENHUM CLIQUE TERMINA EM SILÊNCIO — §6.
+        *
+        * Sucesso e falha aparecem AQUI, colados nos botões. O erro morava no
+        * alto do painel, a uma seção de distância: quem clicava não via nada
+        * acontecer e concluía, com razão, que o botão estava quebrado.
+        */}
+      {desfechoDaDecisao?.contributionId === contribution.id && <p
+        className={`mt-2 text-sm ${desfechoDaDecisao.ok ? "text-success" : "text-warning"}`}
+        role={desfechoDaDecisao.ok ? "status" : "alert"}
+        data-testid="radar-specialist-decision-feedback"
+      >{desfechoDaDecisao.message}</p>}
 
       {review.decision === "QUOTE_CANDIDATE" && extracao.quoteCandidate && <blockquote className="mt-3 border-l-2 border-context-accent pl-3 text-sm leading-5 text-foreground" data-testid="radar-specialist-quote">“{extracao.quoteCandidate}”<footer className="mt-1 text-text-muted">Trecho original preservado; timestamps só aparecem quando fornecidos pelo provider.</footer></blockquote>}
 
