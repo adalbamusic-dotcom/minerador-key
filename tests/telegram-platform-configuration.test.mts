@@ -154,3 +154,72 @@ test("TELEGRAM_CONFIG · nenhum segredo é impresso ou devolvido ao cliente", ()
   assert.ok(!/TELEGRAM_BOT_TOKEN|TELEGRAM_WEBHOOK_SECRET/.test(painel), "a tela não conhece os segredos");
   assert.match(painel, /O token fica somente no Secret Store/);
 });
+
+/* ============ a ação de configurar, acessível de verdade ============ */
+
+test("TELEGRAM_CONFIG · Configurar Webhook fica na linha de ações, não escondido no formulário", () => {
+  /*
+   * O DEFEITO DE RUNTIME: o botão só existia dentro do modo de edição, e só se
+   * a URL estivesse digitada no formulário. Para configurar o webhook parecia
+   * necessário reabrir o cadastro e redigitar o Bot token — que nem é lido de
+   * volta do Secret Store. A ação existia e ninguém a alcançava.
+   */
+  /*
+   * O BLOCO DE AÇÕES DO PROVIDER, delimitado pelo próprio JSX.
+   *
+   * Uma janela de N caracteres a partir de "Testar Bot" media o COMENTÁRIO que
+   * cita o rótulo, não o botão. A âncora é a condição que abre o bloco.
+   */
+  const semComentario = semComentarios(painel);
+  const inicio = semComentario.indexOf('definition.key === "telegram" ?');
+  const fim = semComentario.indexOf(": renderHealthButton", inicio);
+  assert.ok(inicio > 0 && fim > inicio, "o bloco de ações do Telegram existe");
+  const acoes = semComentario.slice(inicio, fim);
+
+  for (const rotulo of ["Testar Bot", "Testar Webhook", "Configurar Webhook"]) {
+    assert.ok(acoes.includes(rotulo), `${rotulo} está na linha de ações do provider`);
+  }
+
+  /* E não depende mais de `editingProvider` nem do campo do formulário. */
+  const fonte = semComentarios(painel);
+  assert.ok(!/editingProvider === "telegram" && apiForm\.telegramWebhookUrl\.trim\(\) \? <button/.test(fonte), "a condição antiga saiu");
+  assert.ok(!/const configureTelegramWebhook = async \(\) => \{\s*if \(editingProvider !== "telegram"\) return;/.test(fonte), "a ação não exige modo de edição");
+});
+
+test("TELEGRAM_CONFIG · a URL vem do que está salvo, com a origem como último recurso", () => {
+  const fonte = semComentarios(painel);
+
+  assert.match(fonte, /connection\?\.telegramWebhookTargetUrl/);
+  assert.match(fonte, /connection\?\.telegramWebhookUrl/);
+  assert.match(fonte, /telegramWebhookUrlSugerida\(\)/);
+  /* Sem URL nenhuma, a ação recusa em vez de chamar o Telegram com string vazia. */
+  assert.match(fonte, /Informe a URL pública HTTPS do webhook antes de configurá-lo/);
+});
+
+test("TELEGRAM_CONFIG · o erro real chega à tela, com o código que distingue as causas", () => {
+  const fonte = semComentarios(painel);
+
+  /* `result.error` é a mensagem do TelegramWebhookAdminError, não um genérico. */
+  assert.match(fonte, /\$\{result\.error \|\| "Não foi possível salvar a integração\."\}/);
+  assert.match(fonte, /typeof result\?\.code === "string"/);
+  assert.match(fonte, /technicalDetail = \[codigo, databaseCode, databaseConstraint\]/);
+
+  /* E o sucesso só é anunciado com a URL que o Telegram confirmou. */
+  assert.match(fonte, /Webhook confirmado pelo Telegram em \$\{url\}/);
+});
+
+test("TELEGRAM_CONFIG · a rota devolve mensagem e código do erro do webhook", async () => {
+  const rotaAdmin = await readFile(new URL("../app/api/admin/integrations/route.ts", import.meta.url), "utf8");
+
+  /*
+   * O BLOCO DO WEBHOOK, RECORTADO.
+   *
+   * `PlatformIntegrationsAdminError` tem a MESMA linha logo acima, e um
+   * `assert.match` no arquivo inteiro encontrava a dele — passando mesmo com a
+   * mensagem do webhook trocada por um genérico. Provado por mutação.
+   */
+  const inicio = rotaAdmin.indexOf("error instanceof TelegramWebhookAdminError");
+  assert.ok(inicio > 0, "o tratamento específico existe");
+  const bloco = rotaAdmin.slice(inicio, rotaAdmin.indexOf("}", rotaAdmin.indexOf("NextResponse.json", inicio)));
+  assert.match(bloco, /error: error\.message, code: error\.code/, "a mensagem real do webhook chega ao cliente");
+});
