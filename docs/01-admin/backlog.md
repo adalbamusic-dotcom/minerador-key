@@ -1,5 +1,15 @@
 # Backlog — Admin
 
+## Exclusão de convite direto e link de 24 horas — 2026-09-14
+
+- [x] Documentar autorização e escopo na SDD do Admin.
+- [x] Preparar RPC transacional de exclusão restrita a `service_role`, endpoint Admin e confirmação visual; preservar convites de solicitação pública e aceitos.
+- [x] Ajustar TTL dos novos convites em produção para 24 horas, sem reescrever convites antigos ou prazo de acesso.
+- [x] Passar 30 testes direcionados, TypeScript, lint direcionado, build e `git diff --check`; guard visual global permanece com falha preexistente em Arquiteto.
+- [ ] Aplicar migration manualmente após revisar backup/snapshot; depois publicar código manualmente e validar exclusão com readback remoto e convite real de 24 horas.
+- [ ] Confirmar no Resend e na Vercel o fluxo ponta a ponta; e-mail externo já enviado não é removido.
+
+
 ## Validade de novos convites em produção — 2026-09-13
 
 - [x] Esclarecer que o TTL implementado era 7 dias, não uma espera de 24 horas.
@@ -9,7 +19,7 @@
 - [x] Validar 30 testes direcionados, TypeScript, lint e build local.
 - [ ] Publicar manualmente depois da revisão; para um convite direto antigo
   com prazo longo, revogar e criar outro somente se for necessário novo link.
-- [ ] Homologar o link real no host Vercel após a correção separada de
+- [ ] Homologar o link real no host Vercel após publicar a correção separada de
   `/auth/new-slot`; a mudança de TTL isolada não habilita o onboarding.
 
 ## Convite no host Vercel sem subdomínio — proposta de 2026-09-13
@@ -20,10 +30,12 @@
   `/login?error=session_slot_unavailable` no host publicado.
 - [x] Documentar a proposta limitada em
   `sdd-convite-agencia-sem-slot-vercel-2026-09-13.md`.
-- [ ] Obter aprovação do fallback de convite no mesmo origin antes de alterar
+- [x] Obter aprovação do fallback de convite no mesmo origin antes de alterar
   a rota de Auth; o cadastro comum não conclui o convite.
-- [ ] Implementar, testar e homologar o fluxo convidado na Vercel sem
-  subdomínio, preservando isolamento e aceite explícito.
+- [x] Implementar e testar localmente o fluxo convidado sem subdomínio,
+  preservando token, isolamento lógico e aceite explícito.
+- [ ] Publicar manualmente a correção e homologar o fluxo real na Vercel com
+  destinatário novo, existente e outra sessão conectada.
 
 
 ## Convite administrativo após falha de envio — 2026-09-13
