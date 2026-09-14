@@ -7,6 +7,12 @@
 - **Dependência remota:** migration e deploy devem ser executados manualmente pelo usuário após revisão de backup. O convite anteriormente revogado para `adalbadesign@gmail.com` não foi removido remotamente por esta implementação. E-mail já recebido não pode ser apagado da caixa de entrada nem do Resend pelo botão.
 - **Verificação:** 30 testes direcionados, TypeScript, lint direcionado, build e `git diff --check` passaram. O guard visual global estrito ainda falha por uma ocorrência preexistente em Arquiteto, fora do escopo. Nenhum teste SQL transacional em banco local nem smoke visual/manual ou remoto foi feito; não declarar comportamento remoto homologado.
 
+## Continuidade do cadastro a partir do convite — correção local de 2026-09-14
+
+- **Causa confirmada:** o endpoint de continuidade consulta `auth.users` para não enumerar identidades. Para `adalbafotos@gmail.com`, a identidade Auth já existe e está confirmada; o convite direto permanece `PENDING`, sem aceite ou Agency. O redirecionamento para login foi, portanto, esperado.
+- **Defeito corrigido localmente:** quando o destinatário escolhe “Criar conta para aceitar convite” ou abre `/cadastro` com `callbackUrl` tokenizado, a tela recupera o token somente do caminho canônico `/onboarding/agencia`, valida a associação, fixa o e-mail do convite e chama `invited-signup`. O cadastro genérico não é usado nesse contexto.
+- **Verificação:** 8 testes de continuidade/fallback, TypeScript, lint direcionado e build passaram. Smoke real na Vercel continua pendente.
+
 
 ## Consolidação canônica das integrações — 2026-08-25
 

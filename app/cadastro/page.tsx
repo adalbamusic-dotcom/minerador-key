@@ -7,6 +7,7 @@ import { PasswordField } from "@/components/auth/password-field";
 import { resendSignupConfirmation } from "@/lib/auth/resend-confirmation";
 import { safeAuthRedirect } from "@/lib/auth/safe-auth-redirect";
 import { getBrowserSupabaseClient } from "@/lib/supabase/browser-client";
+import { agencyInviteTokenFromPath } from "@/lib/auth/agency-invite-fallback";
 
 type InvitationDetails = {
   destination_email: string;
@@ -24,7 +25,10 @@ function CadastroScreen() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = safeAuthRedirect(searchParams.get("callbackUrl"));
-  const inviteToken = searchParams.get("inviteToken")?.trim() || "";
+  const explicitInviteToken = searchParams.get("inviteToken")?.trim() || "";
+  const callbackInviteToken = agencyInviteTokenFromPath(callbackUrl);
+  const inviteToken = explicitInviteToken || callbackInviteToken || "";
+  const inviteTokenMismatch = Boolean(explicitInviteToken && callbackInviteToken && explicitInviteToken !== callbackInviteToken);
   const inviteMode = Boolean(inviteToken);
   const [invitation, setInvitation] = useState<InvitationDetails | null>(null);
   const [validatedInvitationToken, setValidatedInvitationToken] = useState("");
@@ -32,13 +36,15 @@ function CadastroScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(inviteTokenMismatch ? "O link de convite não corresponde ao cadastro solicitado." : "");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const [confirmationRequired, setConfirmationRequired] = useState(false);
 
   useEffect(() => {
     if (!inviteMode) return;
+
+    if (inviteTokenMismatch) return;
 
     let cancelled = false;
     void fetch(`/api/onboarding/agency?token=${encodeURIComponent(inviteToken)}`, { cache: "no-store" })
@@ -63,7 +69,7 @@ function CadastroScreen() {
       });
 
     return () => { cancelled = true; };
-  }, [inviteMode, inviteToken]);
+  }, [inviteMode, inviteToken, inviteTokenMismatch]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setSuccess(""); setLoading(true);
