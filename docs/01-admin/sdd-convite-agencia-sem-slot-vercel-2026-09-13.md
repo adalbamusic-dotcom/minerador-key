@@ -1,7 +1,7 @@
 # SDD proposta — convite de Agência sem subdomínio de sessão
 
 **Módulo proprietário:** Admin (convite administrativo de Agência).  
-**Estado:** proposta para aprovação; nenhuma alteração de runtime autorizada por este documento.  
+**Estado:** aprovada pelo usuário em 2026-09-14 para implementação local; runtime implementado localmente, ainda não publicado nem homologado em produção.
 **Data:** 2026-09-13.
 
 ## Problema confirmado
@@ -42,7 +42,26 @@ Não há nova entidade, migration, SQL, alteração de Supabase Auth, credencial
 
 ## Gate de decisão
 
-- [ ] Aprovado para implementar somente o fallback de convite descrito acima.
+- [x] Aprovado pelo usuário em 2026-09-14 para implementar somente o fallback de convite descrito acima.
 - [ ] Rejeitado; aguardar domínio/host wildcard e manter o comportamento atual.
-- **Aprovador e data:** pendentes.
+- **Aprovador e data:** usuário, 2026-09-14.
 
+## Implementação local após aprovação — 2026-09-14
+
+- O fallback usa somente `next` sanitizado com caminho exato
+  `/onboarding/agencia` e um único token não vazio; `next` externo, sem token,
+  duplicado ou com fragmento continua no erro de slot. Host isolado disponível
+  segue o fluxo original.
+- O redirect do convite no mesmo origin define `private, no-store` e
+  `Referrer-Policy: no-referrer`. A tela existente continua a exigir e-mail
+  compatível e saída explícita de outra sessão; a orientação foi esclarecida
+  como uma conta por vez no mesmo endereço. Nenhum logout automático foi criado.
+- Testes direcionados (19), TypeScript, ESLint direcionado e build passaram.
+  Resposta HTTP local no build de produção confirmou `307` para o onboarding
+  tokenizado e manteve `/login?error=session_slot_unavailable` para entradas
+  não convidadas. O smoke com token real na Vercel permanece **manual e
+  pendente**; não houve deploy, SQL, migration, alteração de Auth remoto ou
+  novo envio nesta implementação.
+- O guard visual estrito do arquivo tocado passou. A suíte visual global
+  permanece com cinco falhas preexistentes em Arquiteto/Radar fora do escopo;
+  nenhuma alteração nesses módulos foi feita.

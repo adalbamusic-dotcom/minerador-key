@@ -89,12 +89,24 @@ dias começa na ativação. Em `ADMIN_TRUSTED_INVITE`, a data final do acesso é
 separa solicitação pública aprovada, ativação aceita e convite administrativo
 conforme `source` e estado reais.
 
-Para novos convites de Agency, a validade técnica do link é de 12 horas em
+Para novos convites de Agency, a validade técnica do link é de 24 horas em
 produção e de 2 horas em homologação/desenvolvimento. Convites já emitidos
 mantêm o `expires_at` gravado. Esse prazo não é espera antes do aceite nem
 altera a validade de acesso definida pelo Admin.
+
+Quando o host publicado não oferecer subdomínios de sessão, somente o link
+tokenizado de convite de Agency pode continuar no mesmo origin até o
+onboarding. Nesse caso, o navegador usa uma conta autenticada por vez: se a
+conta atual não corresponde ao destinatário, a saída é explícita e o convite
+não é aceito. Os demais fluxos de nova sessão continuam a exigir host isolado.
 
 No convite administrativo, `proposed_agency_name` continua obrigatório como
 proposta inicial. O convidado pode corrigi-lo antes da criação da Agency; a
 RPC transacional canônica persiste o nome final no convite e em `agencies.name`.
 Essa confirmação não é uma escrita independente no cliente.
+Convite direto `ADMIN_INVITE` ainda não aceito pode ser excluído definitivamente
+pelo Admin global, após confirmação, removendo convite, gerações de token,
+mensagens e eventos internos em uma transação. Convite aceito e solicitação
+pública não participam dessa exclusão; esta conserva revogação e histórico.
+E-mail já enviado pelo provider não pode ser recolhido. O contrato e o gate
+estão em `sdd-exclusao-convite-direto-24h-2026-09-14.md`.

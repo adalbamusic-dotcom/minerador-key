@@ -7,6 +7,7 @@ import {
   canonicalAgencyInvitationTemplate,
   formatCommunicationPlanName,
   formatInvitationExpiry,
+  formatTechnicalInvitationExpiry,
   publicFreeTrialApprovedTemplate,
   publicFreeTrialRequestReceivedTemplate,
   resolveAgencyInvitationPresetCode,
@@ -35,6 +36,7 @@ test("labels e expiração vêm dos campos semânticos do convite", () => {
   assert.equal(formatCommunicationPlanName("FREE"), "Plano Free");
   assert.equal(formatCommunicationPlanName("TEAM"), "Plano Team");
   assert.equal(formatInvitationExpiry("2026-08-17T12:00:00.000Z"), new Date("2026-08-17T12:00:00.000Z").toLocaleDateString("pt-BR"));
+  assert.equal(formatTechnicalInvitationExpiry("2026-08-17T12:00:00.000Z"), "17/08/2026, 09:00 (horário de Brasília)");
   assert.throws(() => formatInvitationExpiry("not-a-date"), /COMMUNICATION_INVITATION_EXPIRY_INVALID/);
 });
 
@@ -51,7 +53,7 @@ test("dispatcher usa o convite real e preserva o fluxo hash-only", async () => {
   assert.match(dispatcher, /recipientName = invitation\.data\.responsible_name/);
   assert.match(dispatcher, /agencyName = invitation\.data\.proposed_agency_name/);
   assert.match(dispatcher, /formatCommunicationPlanName\(invitation\.data\.plan_code\)/);
-  assert.match(dispatcher, /formatInvitationExpiry\(invitation\.data\.expires_at\)/);
+  assert.match(dispatcher, /formatTechnicalInvitationExpiry\(invitation\.data\.expires_at\)/);
   assert.match(dispatcher, /cta_label: "Concluir acesso"/);
   assert.match(dispatcher, /randomBytes\(32\)\.toString\("base64url"\)/);
   assert.match(messages, /p_payload: input\.payload/);

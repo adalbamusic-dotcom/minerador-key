@@ -48,7 +48,8 @@ test("new-slot deriva host novo sem transportar identidade e mant√©m a continua√
   assert.match(route, /safeAuthRedirect\(request\.nextUrl\.searchParams\.get\("next"\), "\/login"\)/);
   assert.doesNotMatch(route, /getSession|getUser|cookie|token|userId|localStorage|indexedDB/i);
   assert.match(callback, /safeAuthRedirect\(request\.nextUrl\.searchParams\.get\("next"\)\)/);
-  assert.match(login, /safeAuthRedirect\(searchParams\.get\("callbackUrl"\)\)/);
+  assert.match(login, /requestedCallbackUrl = searchParams\.get\("callbackUrl"\)/);
+  assert.match(login, /safeAuthRedirect\(requestedCallbackUrl\)/);
   assert.match(signup, /emailRedirectTo:.*\/auth\/callback\?next=/);
   assert.match(onboarding, /\/onboarding\/agencia/);
 });

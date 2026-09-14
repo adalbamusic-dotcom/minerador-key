@@ -75,3 +75,9 @@ export function formatInvitationExpiry(expiresAt: string) {
   if (!Number.isFinite(date.getTime())) throw new Error("COMMUNICATION_INVITATION_EXPIRY_INVALID");
   return date.toLocaleDateString("pt-BR");
 }
+
+export function formatTechnicalInvitationExpiry(expiresAt: string) {
+  const date = new Date(expiresAt);
+  if (!Number.isFinite(date.getTime())) throw new Error("COMMUNICATION_INVITATION_EXPIRY_INVALID");
+  return `${new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(date)} (horário de Brasília)`;
+}

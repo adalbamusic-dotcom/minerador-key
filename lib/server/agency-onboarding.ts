@@ -210,7 +210,7 @@ export async function rejectAgencyApplication(client: SupabaseClient, input: { a
 }
 
 export async function listAgencyInvitations(client: SupabaseClient) {
-  const result = await client.from("agency_invitations").select("id,application_id,is_operational,proposed_agency_name,plan_code,source,expires_at,access_expires_at,status,created_at,agency_id,communication_generation").order("created_at", { ascending: false });
+  const result = await client.from("agency_invitations").select("id,application_id,is_operational,destination_email,proposed_agency_name,plan_code,source,expires_at,access_expires_at,status,created_at,agency_id,communication_generation").order("created_at", { ascending: false });
   if (result.error) throw new AgencyOnboardingError(503, "ONBOARDING_INVITATION_LIST_FAILED", "Não foi possível carregar os convites.");
   return (result.data || []).map((invitation) => ({ ...invitation, isOperational: invitation.is_operational, status: invitation.status === "PENDING" && new Date(invitation.expires_at) <= new Date() ? "EXPIRED" : invitation.status }));
 }
@@ -221,6 +221,25 @@ export async function revokeAgencyInvitation(client: SupabaseClient, invitationI
   if (result.error || !result.data) throw new AgencyOnboardingError(409, "ONBOARDING_INVITATION_REVOKE_FAILED", "Este convite não está disponível para revogação.");
   const generations = await client.rpc("revoke_agency_invitation_token_generations", { p_invitation_id: id });
   if (generations.error) throw new AgencyOnboardingError(503, "ONBOARDING_INVITATION_REVOKE_FAILED", "As geraÃ§Ãµes de token nÃ£o puderam ser atualizadas.");
+}
+
+export async function deleteUnacceptedDirectAgencyInvitation(client: SupabaseClient, invitationId: unknown) {
+  const id = requiredUuid(invitationId, "O convite");
+  const result = await client.rpc("delete_unaccepted_direct_agency_invitation", { p_invitation_id: id });
+  if (result.error || result.data !== true) {
+    if (result.error?.code === "PGRST202" || result.error?.code === "42883") {
+      throw new AgencyOnboardingError(503, "ONBOARDING_INVITATION_DELETE_MIGRATION_MISSING", "A exclusão definitiva ainda não está disponível no banco. Aplique a migration antes de usar este botão.");
+    }
+    const code = result.error?.message?.includes("AGENCY_INVITATION_DELETE_MESSAGE_BUSY")
+      ? "ONBOARDING_INVITATION_DELETE_MESSAGE_BUSY"
+      : "ONBOARDING_INVITATION_DELETE_UNAVAILABLE";
+    const message = code === "ONBOARDING_INVITATION_DELETE_MESSAGE_BUSY"
+      ? "O envio está em andamento. Aguarde e tente excluir novamente."
+      : "Este convite não pode ser excluído. Somente convites diretos ainda não aceitos podem ser removidos.";
+    throw new AgencyOnboardingError(result.error ? 409 : 503, code, message);
+  }
+  const readback = await client.from("agency_invitations").select("id").eq("id", id).maybeSingle();
+  if (readback.error || readback.data) throw new AgencyOnboardingError(503, "ONBOARDING_INVITATION_DELETE_UNCONFIRMED", "A exclusão não pôde ser confirmada. Atualize a lista antes de tentar novamente.");
 }
 
 export async function rotateAgencyInvitation(client: SupabaseClient, invitationId: unknown, origin: string, actorUserId = "") {

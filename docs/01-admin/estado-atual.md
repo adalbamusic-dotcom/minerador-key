@@ -1,5 +1,13 @@
 # Estado atual — Admin
 
+## Exclusão de convite direto e 24 horas — implementação local de 2026-09-14
+
+- **Autorizado pelo usuário:** novos links em produção duram 24 horas; convites diretos ainda não aceitos podem ser excluídos definitivamente, inclusive após revogação. Prazo de acesso da Agency e convites antigos não são alterados.
+- **Implementado localmente:** migration com RPC transacional `service_role` para eliminar eventos, mensagens, tokens e convite `ADMIN_INVITE` por id, recusando aceite, vínculos de Agency e envio em andamento; API Admin com readback; confirmação na interface. Convites de `PUBLIC_APPLICATION` continuam revogáveis e históricos. Nenhuma identidade Auth ou Agency é apagada.
+- **Dependência remota:** migration e deploy devem ser executados manualmente pelo usuário após revisão de backup. O convite anteriormente revogado para `adalbadesign@gmail.com` não foi removido remotamente por esta implementação. E-mail já recebido não pode ser apagado da caixa de entrada nem do Resend pelo botão.
+- **Verificação:** 30 testes direcionados, TypeScript, lint direcionado, build e `git diff --check` passaram. O guard visual global estrito ainda falha por uma ocorrência preexistente em Arquiteto, fora do escopo. Nenhum teste SQL transacional em banco local nem smoke visual/manual ou remoto foi feito; não declarar comportamento remoto homologado.
+
+
 ## Consolidação canônica das integrações — 2026-08-25
 
 - **Fundação compartilhada:** `PLATFORM_INTEGRATION_FOUNDATION = READY`.
@@ -843,7 +851,8 @@ foi executada nesta atualização documental.
   dessa implementação. Não foi configurado subdomínio próprio.
 - **Estado da solução:** SDD `sdd-convite-agencia-sem-slot-vercel-2026-09-13.md`
   proposta para fallback estrito do convite no mesmo origin, com uma sessão por
-  vez e aceite explícito; **aguarda aprovação** antes de alterar rota de Auth.
+  vez e aceite explícito; **à época aguardava aprovação**, concedida em
+  2026-09-14 conforme o registro de implementação abaixo.
   Nenhum runtime, dado remoto, configuração de Auth ou deploy foi alterado nesta
   etapa de diagnóstico.
 
@@ -858,7 +867,32 @@ foi executada nesta atualização documental.
   Testes direcionados (30), TypeScript, lint direcionado e build passaram;
   `git diff --check` passou. Nenhum SQL, migration, envio, configuração remota
   ou deploy foi executado.
-- **Limitação:** o fluxo no host `vercel.app` continua sem fallback de slot até
-  aprovação e implementação da SDD separada. Convite direto legado com validade
-  acima de 12 horas não é rotacionável sob a política nova; pode ser revogado e
-  substituído manualmente após publicação, sem alterar sua história.
+- **Limitação:** o fluxo no host `vercel.app` ainda dependia do fallback de
+  slot; sua implementação local de 2026-09-14 está registrada abaixo e precisa
+  de publicação. Convite direto legado com validade acima de 12 horas não é
+  rotacionável sob a política nova; pode ser revogado e substituído manualmente
+  após publicação, sem alterar sua história.
+
+# Convite de Agência sem subdomínio na Vercel — implementação local de 2026-09-14
+
+- **Autorizado pelo usuário:** fallback limitado ao convite de Agência no mesmo
+  origin, conforme SDD aprovada nesta data. O módulo proprietário permanece
+  Admin; os consumidores de Auth e sessão mantêm os contratos anteriores.
+- **Verificado no código:** `/auth/new-slot` usa host isolado quando disponível.
+  Se não houver host de slot, somente `/onboarding/agencia` com token único e
+  não vazio segue no host atual, com `no-store` e política de referência
+  restrita. Login genérico, caminho externo e convite sem token continuam no
+  erro de slot. Onboarding valida e-mail e exige saída explícita de outra conta.
+- **Testado localmente:** 19 testes direcionados, TypeScript, ESLint direcionado
+  e build passaram. No build servido localmente, o redirect `307` preservou o
+  token de teste até o onboarding; fluxo não convidado permaneceu no erro.
+  O servidor local não reproduz o hostname público exato do deployment.
+- **Visual:** mensagem de sessão única acrescentada ao aviso existente, sem
+  novo componente, token ou layout. Cores preexistentes do aviso/erro foram
+  convertidas aos tokens semânticos `warning` e `danger`; o guard estrito do
+  arquivo passou. A suíte visual global ainda falha em cinco casos de
+  Arquiteto/Radar fora do escopo. Validação visual autenticada em larguras/temas
+  permanece pendente; light mode não está ativo.
+- **Pendente:** publicação e smoke reais pelo usuário na Vercel, inclusive
+  cadastro convidado, aceite e readback da Agency. Nenhum envio, dado remoto,
+  configuração de Supabase ou deploy foi alterado por esta tarefa.

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createCanonicalServiceClient, requireCanonicalPlatformAdmin } from "@/lib/server/canonical-authorization";
-import { AgencyOnboardingError, createDirectAgencyInvitation, listAgencyInvitations, revokeAgencyInvitation, rotateAgencyInvitation } from "@/lib/server/agency-onboarding";
+import { AgencyOnboardingError, createDirectAgencyInvitation, deleteUnacceptedDirectAgencyInvitation, listAgencyInvitations, revokeAgencyInvitation, rotateAgencyInvitation } from "@/lib/server/agency-onboarding";
 import { dispatchCommunicationMessage } from "@/lib/server/communication/dispatcher";
 
 function errorResponse(error: unknown) {
@@ -39,4 +39,13 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ success: true });
   }
   catch (error) { return errorResponse(error); }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    await requireCanonicalPlatformAdmin();
+    const body = await request.json();
+    await deleteUnacceptedDirectAgencyInvitation(createCanonicalServiceClient(), body?.invitationId);
+    return NextResponse.json({ success: true }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) { return errorResponse(error); }
 }

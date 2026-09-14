@@ -11,6 +11,7 @@ import {
   AGENCY_COMMUNICATION_PRESET_CODES,
   formatCommunicationPlanName,
   formatInvitationExpiry,
+  formatTechnicalInvitationExpiry,
   resolveAgencyCommunicationPreset,
   resolveAgencyInvitationPresetCode,
   resolveAgencyInvitationTemplate,
@@ -58,7 +59,7 @@ async function buildMessageContent(client: SupabaseClient, row: CommunicationMes
     recipientName = invitation.data.responsible_name;
     agencyName = invitation.data.proposed_agency_name;
     planName = formatCommunicationPlanName(invitation.data.plan_code);
-    technicalExpiresAt = formatInvitationExpiry(invitation.data.expires_at);
+    technicalExpiresAt = formatTechnicalInvitationExpiry(invitation.data.expires_at);
     const presetCode = resolveAgencyInvitationPresetCode(invitation.data.source);
     template = resolveAgencyCommunicationPreset(presetCode) || resolveAgencyInvitationTemplate(await loadTemplate(client, row));
     if (presetCode === AGENCY_COMMUNICATION_PRESET_CODES.publicFreeTrialApproved) {

@@ -1,5 +1,7 @@
 # Adendo aprovado — validade técnica de 12 horas do convite de Agência
 
+**Histórico:** este adendo descreve a decisão de 2026-09-13, substituída para novos convites em produção pelo adendo/SDD `sdd-exclusao-convite-direto-24h-2026-09-14.md`, aprovado em 2026-09-14. A política vigente é 24 horas; convites persistidos antes da mudança mantêm seu prazo original.
+
 **Módulo proprietário:** Admin.  
 **Autorização:** pedido explícito do usuário em 2026-09-13 para links de convite válidos por 12 horas em produção.  
 **Escopo:** altera apenas o TTL de novos convites de Agência em produção e o fallback de ambiente desconhecido. Substitui somente a linha temporal de 7 dias da SDD `docs/compartilhado/sdd-agency-invitation-successor-lifecycle.md`; preserva seu restante.
@@ -15,7 +17,10 @@ O contrato implementado era 7 dias em produção, 2 horas em homologação/desen
 - `createDirectAgencyInvitation`, `approveAgencyApplication` e `renewAgencyInvitation` usam o resolver central e passam a criar novos prazos de 12 horas em produção.
 - O dispatcher apresenta o vencimento persistido real; a checagem de token/onboarding continua a recusar convite expirado, revogado, aceito ou de e-mail incompatível. Hash-only, uso único, RLS e confirmação humana permanecem.
 - Um convite direto antigo ainda `PENDING` com prazo maior que 12 horas não é reescrito. Pela classificação de renovação atual, não pode receber nova geração sob a política nova; o Admin deverá revogá-lo e criar um novo convite após o deploy, se precisar de um link com 12 horas. Convites ligados a application exigem sucessor conforme o lifecycle existente.
-- Esta mudança não conserta `/auth/new-slot` no host `vercel.app`; esse fallback permanece proposto separadamente em `sdd-convite-agencia-sem-slot-vercel-2026-09-13.md`.
+- Esta mudança de TTL, isoladamente, não conserta `/auth/new-slot` no host
+  `vercel.app`. O fallback foi aprovado e implementado localmente em
+  2026-09-14, na SDD `sdd-convite-agencia-sem-slot-vercel-2026-09-13.md`, mas
+  ainda depende de publicação e smoke reais.
 
 ## Verificação e rollback
 
