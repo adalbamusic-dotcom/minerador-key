@@ -1,5 +1,47 @@
 # Backlog — Admin
 
+## Validade de novos convites em produção — 2026-09-13
+
+- [x] Esclarecer que o TTL implementado era 7 dias, não uma espera de 24 horas.
+- [x] Registrar autorização e contrato de 12 horas no adendo do Admin.
+- [x] Alterar o resolver local para 12 horas em produção, preservando 2 horas
+  em homologação/desenvolvimento e o `expires_at` dos convites existentes.
+- [x] Validar 30 testes direcionados, TypeScript, lint e build local.
+- [ ] Publicar manualmente depois da revisão; para um convite direto antigo
+  com prazo longo, revogar e criar outro somente se for necessário novo link.
+- [ ] Homologar o link real no host Vercel após a correção separada de
+  `/auth/new-slot`; a mudança de TTL isolada não habilita o onboarding.
+
+## Convite no host Vercel sem subdomínio — proposta de 2026-09-13
+
+- [x] Confirmar em leitura remota que o e-mail de convite foi aceito pelo
+  Resend e que o destinatário não tinha identidade em `auth.users`.
+- [x] Reproduzir o `307` de `/auth/new-slot` para
+  `/login?error=session_slot_unavailable` no host publicado.
+- [x] Documentar a proposta limitada em
+  `sdd-convite-agencia-sem-slot-vercel-2026-09-13.md`.
+- [ ] Obter aprovação do fallback de convite no mesmo origin antes de alterar
+  a rota de Auth; o cadastro comum não conclui o convite.
+- [ ] Implementar, testar e homologar o fluxo convidado na Vercel sem
+  subdomínio, preservando isolamento e aceite explícito.
+
+
+## Convite administrativo após falha de envio — 2026-09-13
+
+- [x] Diagnosticar o `APP_BASE_URL_MISSING` na mensagem remota e a divergência
+  entre convite direto `PENDING` e filtro visual de `is_operational`.
+- [x] Corrigir localmente a visibilidade de convites `ADMIN_INVITE` pendentes,
+  preservando a regra de `is_operational` para `PUBLIC_APPLICATION`.
+- [x] Cobrir os estados pendente, revogado, link expirado e acesso expirado em
+  teste direcionado; TypeScript e ESLint direcionado passaram.
+- [ ] Publicar manualmente a correção depois de confirmar `APP_BASE_URL` na
+  Vercel e confirmar na aba Convites o registro existente.
+- [ ] Executar o reenvio real pela interface e confirmar aceitação no Resend e
+  readback da mensagem, sem criar convite duplicado.
+- [ ] Validar manualmente a tela autenticada em dark/light e larguras móveis;
+  o guard visual global permanece bloqueado por dívida de Arquiteto/Radar fora
+  do escopo desta correção.
+
 ## Consolidação canônica da fundação compartilhada — 2026-08-25
 
 - [x] Registrar Plataforma/Admin → Agência → Marca como governança acima dos módulos.

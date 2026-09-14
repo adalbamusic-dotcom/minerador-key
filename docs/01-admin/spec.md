@@ -89,6 +89,11 @@ dias começa na ativação. Em `ADMIN_TRUSTED_INVITE`, a data final do acesso é
 separa solicitação pública aprovada, ativação aceita e convite administrativo
 conforme `source` e estado reais.
 
+Para novos convites de Agency, a validade técnica do link é de 12 horas em
+produção e de 2 horas em homologação/desenvolvimento. Convites já emitidos
+mantêm o `expires_at` gravado. Esse prazo não é espera antes do aceite nem
+altera a validade de acesso definida pelo Admin.
+
 No convite administrativo, `proposed_agency_name` continua obrigatório como
 proposta inicial. O convidado pode corrigi-lo antes da criação da Agency; a
 RPC transacional canônica persiste o nome final no convite e em `agencies.name`.

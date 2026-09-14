@@ -803,3 +803,62 @@ foi executada nesta atualização documental.
   chamada DataForSEO, alteração da rota do Arquiteto ou configuração de
   AdalbaPro/Adalba foi executada nesta atualização.
 - `DATAFORSEO_SERP_CAPABILITY_READY = PENDING_MANUAL_APPLY`.
+
+# Convite administrativo pendente oculto — correção local de 2026-09-13
+
+- **Confirmado em leitura remota:** o convite direto recente permanece `PENDING`,
+  com `is_operational = false`, validade técnica futura e mensagem de convite
+  `FAILED` após uma tentativa (`APP_BASE_URL_MISSING`). A mensagem não chegou
+  ao Resend; o registro da configuração global permanece `READY`.
+- **Causa verificada no código:** `is_operational` identifica o convite corrente
+  de uma `AgencyApplication`, não um `ADMIN_INVITE` sem `application_id`. A UI
+  exigia esse marcador para todos os convites e escondia o convite direto,
+  enquanto a trava de duplicidade o encontrava pelo status `PENDING`.
+- **Correção local:** a aba Convites considera status, validade do link e do
+  acesso nos convites diretos; para solicitações públicas, continua exigindo
+  `is_operational`. Reutiliza a ação existente de reenvio/revogação, sem novo
+  endpoint, schema ou alteração de dados remotos.
+- **Validação:** testes direcionados do Admin/onboarding (24) e TypeScript
+  passaram; ESLint direcionado passou (arquivo de teste ignorado pela
+  configuração). O guard visual global e cinco testes visuais falham em
+  Arquiteto/Radar fora do escopo. A tela autenticada em produção ainda não foi
+  validada manualmente e a correção ainda não foi publicada.
+- **Próximo passo operacional:** confirmar `APP_BASE_URL` no ambiente do
+  deployment, publicar manualmente a correção, confirmar que o convite aparece
+  e usar a ação existente de reenvio somente após o readback do ambiente.
+
+# Link do convite na Vercel sem host de sessão — diagnóstico de 2026-09-13
+
+- **Confirmado em leitura remota:** um convite direto posterior foi persistido
+  como `PENDING`; a mensagem correspondente ficou `SENT`, com identificador do
+  Resend. Isso comprova aceite pelo provider, não entrega final ao destinatário.
+  O e-mail convidado não tinha identidade em `auth.users` no momento da consulta.
+- **Confirmado no deployment:** `/auth/new-slot?next=/onboarding/agencia` em
+  `minerador-key.vercel.app` respondeu `307` para
+  `/login?error=session_slot_unavailable`. A ausência de host de sessão
+  descarta o `next` tokenizado; o cadastro comum acessível daí cria só a
+  identidade Auth e não aceita o convite.
+- **Diferença local/produção:** `s-*.localhost` viabiliza o slot local. O host
+  `vercel.app` atual não oferece o wildcard necessário ao isolamento de sessões
+  dessa implementação. Não foi configurado subdomínio próprio.
+- **Estado da solução:** SDD `sdd-convite-agencia-sem-slot-vercel-2026-09-13.md`
+  proposta para fallback estrito do convite no mesmo origin, com uma sessão por
+  vez e aceite explícito; **aguarda aprovação** antes de alterar rota de Auth.
+  Nenhum runtime, dado remoto, configuração de Auth ou deploy foi alterado nesta
+  etapa de diagnóstico.
+
+# Prazo técnico de novos convites — alteração local de 2026-09-13
+
+- **Contrato anterior confirmado no código:** 7 dias em produção e 2 horas em
+  homologação/desenvolvimento. Não havia espera de 24 horas para aceitar o link.
+- **Autorizado pelo usuário:** 12 horas para novos links de convite em produção.
+  O adendo `adendo-ttl-convite-agencia-12h-2026-09-13.md` limita a alteração a
+  esse TTL; duração de acesso da Agency e convites já persistidos não mudam.
+- **Implementado localmente:** resolver e testes de lifecycle/política ajustados.
+  Testes direcionados (30), TypeScript, lint direcionado e build passaram;
+  `git diff --check` passou. Nenhum SQL, migration, envio, configuração remota
+  ou deploy foi executado.
+- **Limitação:** o fluxo no host `vercel.app` continua sem fallback de slot até
+  aprovação e implementação da SDD separada. Convite direto legado com validade
+  acima de 12 horas não é rotacionável sob a política nova; pode ser revogado e
+  substituído manualmente após publicação, sem alterar sua história.

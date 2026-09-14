@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildAdminPath } from "../lib/admin-routing.ts";
+import { isActionableAgencyInvitation } from "../lib/admin/agency-invitation-visibility.ts";
 
 const root = new URL("../", import.meta.url);
 const read = (path: string) => readFile(new URL(path, root), "utf8");
@@ -49,9 +50,7 @@ test("painel classifica solicitações, convites, ativações e acesso por seus 
   const [panel, server] = await Promise.all([read("modules/admin/agencies-admin-panel.tsx"), read("lib/server/agency-admin.ts")]);
   assert.match(panel, /applications\.filter\(\(item\) => item\.status === "PENDING"\)/);
   assert.doesNotMatch(panel, /const pendingApplications = applications\.filter\([^\n]*APPROVED/);
-  assert.match(panel, /invitation\.status !== "PENDING"/);
-  assert.match(panel, /isFutureDate\(invitation\.expires_at\)/);
-  assert.match(panel, /invitation\.source !== "ADMIN_INVITE" \|\| isFutureDate\(invitation\.access_expires_at\)/);
+  assert.match(panel, /isActionableAgencyInvitation\(invitation\)/);
   assert.match(panel, /Ativação · \$\{invitation\.status\}/);
   assert.match(panel, /Convite administrativo · \$\{invitation\.status\}/);
   assert.doesNotMatch(panel, /Convite · \$\{item\.status\}/);
@@ -59,4 +58,21 @@ test("painel classifica solicitações, convites, ativações e acesso por seus 
   assert.match(panel, /Válido até/);
   assert.match(server, /from\("agency_access_periods"\)/);
   assert.match(server, /accessPeriod: accessPeriodsByAgency\.get\(row\.id\) \|\| null/);
+});
+
+test("Admin mostra convite direto pendente mesmo sem marcador de application operacional", () => {
+  const now = Date.parse("2026-09-14T03:00:00Z");
+  const invitation = {
+    status: "PENDING",
+    source: "ADMIN_INVITE",
+    expires_at: "2026-09-21T02:08:05Z",
+    access_expires_at: "2026-12-13T02:59:59Z",
+    is_operational: false,
+    isOperational: false,
+  };
+  assert.equal(isActionableAgencyInvitation(invitation, now), true);
+  assert.equal(isActionableAgencyInvitation({ ...invitation, source: "PUBLIC_APPLICATION" }, now), false);
+  assert.equal(isActionableAgencyInvitation({ ...invitation, status: "REVOKED" }, now), false);
+  assert.equal(isActionableAgencyInvitation({ ...invitation, expires_at: "2026-09-14T02:59:59Z" }, now), false);
+  assert.equal(isActionableAgencyInvitation({ ...invitation, access_expires_at: "2026-09-14T02:59:59Z" }, now), false);
 });
