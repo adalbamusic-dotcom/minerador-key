@@ -16,6 +16,7 @@ import {
 } from "@/lib/auth/classify-auth-error";
 import { getBrowserSupabaseClient } from "@/lib/supabase/browser-client";
 import { restoreLastGlobalNavigationContext } from "@/lib/navigation/global-context";
+import { agencyInviteTokenFromPath } from "@/lib/auth/agency-invite-fallback";
 
 function LoginScreen() {
   const { data: session, status } = useSupabaseSession();
@@ -38,6 +39,10 @@ function LoginScreen() {
   const [unconfirmed, setUnconfirmed] = useState(false);
   const requestedCallbackUrl = searchParams.get("callbackUrl");
   const callbackUrl = safeAuthRedirect(requestedCallbackUrl);
+  const inviteToken = agencyInviteTokenFromPath(callbackUrl);
+  const signupHref = inviteToken
+    ? `/cadastro?callbackUrl=${encodeURIComponent(callbackUrl)}&inviteToken=${encodeURIComponent(inviteToken)}`
+    : `/cadastro?callbackUrl=${encodeURIComponent(callbackUrl)}`;
   const restoreActorRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -149,7 +154,7 @@ function LoginScreen() {
           <button type="submit" disabled={loading} className="min-h-10 w-full rounded-md bg-accent px-3 text-sm font-semibold text-foreground disabled:opacity-60">{loading ? "Entrando..." : "Entrar"}</button>
         </form>
         <div className="text-sm"><Link href={`/recuperar-senha?callbackUrl=${encodeURIComponent(callbackUrl)}`} className="font-semibold text-accent hover:underline">Esqueci minha senha</Link></div>
-        <p className="text-sm text-foreground/70">Ainda não possui acesso? <Link href={`/cadastro?callbackUrl=${encodeURIComponent(callbackUrl)}`} className="font-semibold text-accent hover:underline">Criar cadastro</Link></p>
+        <p className="text-sm text-foreground/70">{inviteToken ? "Este link é um convite de Agência. Ainda não possui uma conta? " : "Ainda não possui acesso? "}<Link href={signupHref} className="font-semibold text-accent hover:underline">{inviteToken ? "Criar conta para aceitar convite" : "Criar cadastro"}</Link></p>
       </section>
     </main>
   );

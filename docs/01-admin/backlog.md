@@ -9,6 +9,12 @@
 - [ ] Aplicar migration manualmente após revisar backup/snapshot; depois publicar código manualmente e validar exclusão com readback remoto e convite real de 24 horas.
 - [ ] Confirmar no Resend e na Vercel o fluxo ponta a ponta; e-mail externo já enviado não é removido.
 
+## Continuidade do convite no login/cadastro — 2026-09-14
+
+- [x] Confirmar por leitura remota que `adalbafotos@gmail.com` já possui identidade Auth confirmada; o login inicial é esperado para esse destinatário.
+- [x] Corrigir o link de “Criar cadastro” para preservar o convite e abrir o cadastro convidado, com e-mail fixo e token validado.
+- [ ] Publicar e testar na Vercel: identidade existente (login → aceite), identidade nova (criar conta → aceite) e e-mail divergente.
+
 
 ## Validade de novos convites em produção — 2026-09-13
 

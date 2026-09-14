@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { agencyInviteFallbackPath } from "../lib/auth/agency-invite-fallback.ts";
+import { agencyInviteFallbackPath, agencyInviteTokenFromPath } from "../lib/auth/agency-invite-fallback.ts";
 
 test("fallback do convite preserva apenas onboarding tokenizado no mesmo host", () => {
   assert.equal(agencyInviteFallbackPath("/onboarding/agencia?token=abc123"), "/onboarding/agencia?token=abc123");
   assert.equal(agencyInviteFallbackPath("/onboarding/agencia?operation=op-1&token=abc123"), "/onboarding/agencia?operation=op-1&token=abc123");
+});
+
+test("token do convite é recuperado quando o login encaminha para o cadastro", () => {
+  assert.equal(agencyInviteTokenFromPath("/onboarding/agencia?operation=op-1&token=abc123"), "abc123");
+  assert.equal(agencyInviteTokenFromPath("/login?callbackUrl=%2Fonboarding%2Fagencia%3Ftoken%3Dabc123"), null);
 });
 
 test("outras entradas new-slot nunca usam o fallback do convite", () => {
