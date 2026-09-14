@@ -6,6 +6,7 @@ import { GlobalTopbarPageControls } from "@/components/global-topbar";
 import { GLOBAL_TOPBAR_ACTION_CONTROL } from "@/components/global-topbar-control";
 import { internalButton as btn, internalField, internalSurface as card } from "@/components/editorial/internal-page-visual";
 import { useNoticeBridge } from "@/components/global-notice-center";
+import { isActionableAgencyInvitation } from "@/lib/admin/agency-invitation-visibility";
 
 type AccessPeriod = { planCode: string; origin: string; startsAt: string; endsAt: string | null; status: string };
 type Agency = { id: string; name: string; agencyRef: string; status: string; accessStatus?: "READY" | "PENDING" | "REQUIRES_ATTENTION"; ownerIdentityStatus?: "IDENTITY_FOUND" | "CONFIRMATION_PENDING" | "IDENTITY_NOT_FOUND"; accessPeriod?: AccessPeriod | null };
@@ -26,17 +27,6 @@ function communicationNotice(status: string | undefined) {
   if (status === "FAILED") return "Mensagem persistida, mas a tentativa de envio falhou. O retry permanece limitado e auditável.";
   if (status === "QUEUED" || status === "NOT_CONFIGURED") return "Mensagem persistida na fila durável. O envio ainda não foi confirmado.";
   return "Operação concluída sem confirmação de entrega.";
-}
-
-function isFutureDate(value: string | null | undefined) {
-  const timestamp = Date.parse(value || "");
-  return Number.isFinite(timestamp) && timestamp > Date.now();
-}
-
-function isActionableInvitation(invitation: Invitation) {
-  if (invitation.status !== "PENDING" || !isFutureDate(invitation.expires_at)) return false;
-  if (invitation.is_operational === false || invitation.isOperational === false) return false;
-  return invitation.source !== "ADMIN_INVITE" || isFutureDate(invitation.access_expires_at);
 }
 
 function invitationValidity(invitation: Invitation) {
@@ -119,7 +109,7 @@ export default function AgenciesAdminPanel() {
 
   const pendingApplications = applications.filter((item) => item.status === "PENDING");
   const activeAgencies = agencies.filter((item) => item.status === "active");
-  const operationalInvitations = invitations.filter(isActionableInvitation);
+  const operationalInvitations = invitations.filter((invitation) => isActionableAgencyInvitation(invitation));
   const historicalApplications = applications.filter((item) => item.status === "APPROVED" || item.status === "REJECTED");
   const historicalInvitations = invitations.filter((item) => ["ACCEPTED", "REVOKED", "EXPIRED"].includes(item.status));
   const pageAction = <button type="button" className={GLOBAL_TOPBAR_ACTION_CONTROL} onClick={() => { setOpen(true); setError(""); }}><MailPlus className="h-3.5 w-3.5" aria-hidden="true" />Convidar agência</button>;

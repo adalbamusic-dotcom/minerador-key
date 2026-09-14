@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
-  AGENCY_INVITATION_DURATION_DAYS,
+  AGENCY_INVITATION_PRODUCTION_TTL_HOURS,
   canonicalAgencyInvitationExpiry,
   classifyAgencyInvitationRenewal,
 } from "../lib/server/agency-invitation-lifecycle.ts";
@@ -12,7 +12,8 @@ const read = (path: string) => readFile(new URL(path, root), "utf8");
 const now = new Date("2026-08-10T12:00:00.000Z");
 
 test("convite PENDING dentro da política reutiliza o mesmo invitation", () => {
-  assert.equal(classifyAgencyInvitationRenewal({ status: "PENDING", expiresAt: "2026-08-13T12:00:00.000Z", now }), "REUSE_CURRENT_INVITATION");
+  assert.equal(classifyAgencyInvitationRenewal({ status: "PENDING", expiresAt: "2026-08-10T18:00:00.000Z", now }), "REUSE_CURRENT_INVITATION");
+  assert.equal(classifyAgencyInvitationRenewal({ status: "PENDING", expiresAt: "2026-08-11T01:00:00.000Z", now }), "CREATE_SUCCESSOR_INVITATION");
 });
 
 test("expirado, revogado ou aceito exige sucessor", () => {
@@ -22,10 +23,10 @@ test("expirado, revogado ou aceito exige sucessor", () => {
   assert.equal(classifyAgencyInvitationRenewal({ status: "PENDING", expiresAt: "2026-08-09T12:00:00.000Z", now }), "CREATE_SUCCESSOR_INVITATION");
 });
 
-test("validade legada além de sete dias é incompatível e não é corrigida no registro antigo", () => {
-  assert.equal(AGENCY_INVITATION_DURATION_DAYS, 7);
+test("validade legada além de doze horas é incompatível e não é corrigida no registro antigo", () => {
+  assert.equal(AGENCY_INVITATION_PRODUCTION_TTL_HOURS, 12);
   assert.equal(classifyAgencyInvitationRenewal({ status: "PENDING", expiresAt: "2026-12-13T00:00:00.000Z", now }), "CREATE_SUCCESSOR_INVITATION");
-  assert.equal(canonicalAgencyInvitationExpiry(now), "2026-08-17T12:00:00.000Z");
+  assert.equal(canonicalAgencyInvitationExpiry(now), "2026-08-11T00:00:00.000Z");
 });
 
 test("o contrato atual bloqueia sucessor até revisão do schema, sem apagar ou editar o legado", async () => {

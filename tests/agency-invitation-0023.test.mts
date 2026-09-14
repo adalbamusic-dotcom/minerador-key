@@ -10,10 +10,10 @@ import {
 const root = new URL("../", import.meta.url);
 const read = (path: string) => readFile(new URL(path, root), "utf8");
 
-test("resolver usa sete dias em produção", () => {
+test("resolver usa doze horas em produção", () => {
   const policy = resolveAgencyInvitationPolicy({ AGENCY_INVITATION_ENV: "production" });
   assert.equal(policy.environment, "production");
-  assert.equal(policy.ttlHours, 168);
+  assert.equal(policy.ttlHours, 12);
 });
 
 test("resolver usa duas horas em homologação, development e preview", () => {
@@ -24,8 +24,8 @@ test("resolver usa duas horas em homologação, development e preview", () => {
 
 test("resolver aceita override injetável e fallback seguro", () => {
   assert.equal(resolveAgencyInvitationPolicy({ AGENCY_INVITATION_ENV: "test" }, { ttlMs: 30 * 60 * 1000 }).ttlHours, 0.5);
-  assert.equal(resolveAgencyInvitationPolicy({ AGENCY_INVITATION_ENV: "unknown" }).ttlHours, 168);
-  assert.equal(resolveAgencyInvitationPolicy({}).ttlHours, 168);
+  assert.equal(resolveAgencyInvitationPolicy({ AGENCY_INVITATION_ENV: "unknown" }).ttlHours, 12);
+  assert.equal(resolveAgencyInvitationPolicy({}).ttlHours, 12);
 });
 
 test("mudança de policy não recalcula validade histórica", () => {
