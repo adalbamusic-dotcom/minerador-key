@@ -9,6 +9,7 @@ import { radarResearchUniverseFingerprint } from "../lib/radar/research-curation
 import { autoDecideRadarReference } from "../lib/radar/research-auto-selection.ts";
 import { freezeRadarEvidenceBundle, radarFinalizationReadiness } from "../lib/radar/investigation-finalization.ts";
 import { radarActionOutcome, radarClaimAction, type RadarActionClaim } from "../lib/radar/operational-actions.ts";
+import { radarSearchModeAvailability } from "../lib/radar/search-mode.ts";
 import type { RadarArticleResearchContext } from "../lib/radar/article-research-context.ts";
 import type { RadarExtractionPage, RadarObservedLink } from "../lib/radar/analysis-contracts.ts";
 import type { RadarR3Model } from "../lib/radar/r3-workbench.ts";
@@ -408,7 +409,18 @@ test("GATE 15.2 · L e M — com bundle congelado, ANALYZE e FINALIZE não exist
   await abrirArea(tela, "pesquisa");
   assert.ok(tela.query("radar-frozen-bundle"), "o bloco do congelado é a leitura");
   assert.equal(tela.query("radar-deep-research-button"), null);
-  assert.match(tela.get("radar-frozen-bundle").textContent || "", new RegExp(congelamento.bundle.bundleHash));
+  /*
+   * RADAR_FINAL_2.4 · §5 · O HASH SAIU DO CARD — e não do produto.
+   *
+   * Id técnico não fica fora do disclosure de proveniência: ele existe para
+   * conferência, e no card competia com a leitura. O que este teste protege
+   * continua sendo o mesmo — o congelado é a leitura e não há ação primária —
+   * e a garantia foi atualizada para onde o dado passou a morar.
+   */
+  const card = tela.get("radar-frozen-bundle").textContent || "";
+  assert.equal(card.includes(congelamento.bundle.bundleHash), false, "o hash não disputa espaço com a decisão");
+  assert.match(card, /Investigação congelada/);
+  assert.ok(card.includes("comparável(is)"), "o card diz o que a pessoa decide olhando");
   semOperacao(spy);
   tela.destroy();
 });
@@ -471,16 +483,24 @@ test("GATE 15.2 · P e §10 — o seletor escolhe um modo só, e Amazon não ofe
   semOperacao(spy);
 
   /*
-   * MODO SEM ENGINE NÃO OFERECE START.
+   * A AÇÃO ACOMPANHA A ENGINE DECLARADA — PROFILES_2.1 · §8.
    *
-   * A tela é remontada com Amazon escolhido, e a autoridade da Fase 1 recusa —
-   * com motivo escrito, não com um botão que não faz nada.
+   * Este trecho dizia "modo sem engine não oferece START" e verificava isso na
+   * Amazon, que era o único exemplo disponível. Ela ganhou engine no 2.1, e a
+   * regra continua a mesma: a tela pergunta à disponibilidade em vez de
+   * decidir sozinha. Um botão habilitado num modo sem engine e um botão morto
+   * num modo com engine são o mesmo defeito, em direções opostas.
    */
   const comAmazon = await montarTela(vista({ record: null, mode: "AMAZON" }), { searchMode: "AMAZON" });
   const acao = comAmazon.tela.query("radar-deep-research-button") as HTMLButtonElement | null;
-  assert.ok(!acao || acao.disabled, "AMAZON_FALSE_ACTION = NO");
-  if (acao) await comAmazon.tela.click(acao);
-  assert.equal(comAmazon.spy.start, 0, "e clicar nele não inicia pesquisa");
+  const podeIniciar = radarSearchModeAvailability("AMAZON").canStart;
+  if (podeIniciar) {
+    assert.ok(acao && !acao.disabled, "AMAZON_ENGINE_PRESENT: a ação existe e está viva");
+  } else {
+    assert.ok(!acao || acao.disabled, "AMAZON_FALSE_ACTION = NO");
+    if (acao) await comAmazon.tela.click(acao);
+    assert.equal(comAmazon.spy.start, 0, "e clicar nele não inicia pesquisa");
+  }
 
   tela.destroy(); comAmazon.tela.destroy();
 });

@@ -524,7 +524,16 @@ test("GATE 15.1 · W — registrar material não transcreve, não baixa e não p
    * O próprio painel diz "nenhum download acontece aqui" — proibir o termo
    * proibiria a frase que garante o comportamento.
    */
-  assert.equal(/\bfetch\(|transcribe\(|startTranscription|downloadFile|<DeepResearch|buildRadar/i.test(painel), false, "VIDEOS_REGISTER_ONLY");
+  /*
+   * REGISTRAR CONTINUA NÃO TRANSCREVENDO NEM BAIXANDO — §8 do RADAR_LIVE_UX_2.2.
+   *
+   * O painel ganhou UMA rede: a leitura da transcrição já preservada, quando
+   * alguém abre o disclosure. Ela não transcreve, não baixa e não cria job — e
+   * a varredura passa a nomear o que proíbe em vez de proibir a palavra.
+   */
+  assert.equal(/transcribe\(|startTranscription|downloadFile|<DeepResearch|buildRadar/i.test(painel), false, "VIDEOS_REGISTER_ONLY");
+  assert.equal((painel.match(/\bfetch\(/g) || []).length, 1, "VIDEOS_REGISTER_ONLY: uma leitura só");
+  assert.match(painel, /fetch\(`\/api\/editorial\/radar-video-text\?/, "e é a leitura da transcrição");
   /* A rota do registro também não transcreve, não baixa e não cria job. */
   const rota = readFileSync(new URL("../app/api/editorial/radar-video-sources/route.ts", import.meta.url), "utf8");
   assert.equal(/transcribe|download|external_processing_jobs|runSharedLongSpeech|googleapis/i.test(rota), false, "VIDEOS_REGISTER_ONLY na rota");
@@ -547,18 +556,31 @@ test("GATE 15.1 · W — registrar material não transcreve, não baixa e não p
 });
 
 test("GATE 15.1 · X — modo sem engine não oferece ação falsa", () => {
-  const amazon = radarSearchModeAvailability("AMAZON");
-  assert.equal(amazon.canStart, false);
-  assert.match(amazon.reason || "", /ainda não foi construída/);
-
-  /* Com Amazon escolhido, a Fase 1 não oferece START. */
-  const semEngine = radarPhase1Action({
-    state: "NOT_STARTED", contextReady: true, hasPrimaryQuery: true, running: false,
-    mode: "AMAZON", selected: 0, pending: 0, failed: 0, analyzed: 0,
-  });
-  assert.equal(semEngine.id, "NONE", "AMAZON_FALSE_ACTION_AVAILABLE = NO");
-  assert.equal(semEngine.enabled, false);
-  assert.equal(semEngine.blockedReason, amazon.reason);
+  /*
+   * A REGRA, NÃO O MODO — PROFILES_2.1 · §8.
+   *
+   * Quando este teste nasceu, a Amazon era o único modo sem engine, e ele
+   * escreveu "AMAZON" onde queria dizer "um modo sem engine". A Amazon passou a
+   * ter engine; a regra não mudou, e é ela que fica verificada aqui: a ação de
+   * Fase 1 acompanha a disponibilidade declarada, nos dois sentidos.
+   *
+   * Se um modo novo entrar como `planned`, esta asserção o cobre sozinha.
+   */
+  for (const modo of ["WEB", "YOUTUBE", "AMAZON"] as const) {
+    const disponibilidade = radarSearchModeAvailability(modo);
+    const acao = radarPhase1Action({
+      state: "NOT_STARTED", contextReady: true, hasPrimaryQuery: true, running: false,
+      mode: modo, selected: 0, pending: 0, failed: 0, analyzed: 0,
+    });
+    if (disponibilidade.canStart) {
+      assert.equal(acao.id, "START_RESEARCH", `${modo} tem engine e oferece START`);
+      assert.equal(acao.enabled, true);
+    } else {
+      assert.equal(acao.id, "NONE", `${modo}_FALSE_ACTION_AVAILABLE = NO`);
+      assert.equal(acao.enabled, false);
+      assert.equal(acao.blockedReason, disponibilidade.reason);
+    }
+  }
 
   /* Google continua disponível — a indisponibilidade é do modo, não do fluxo. */
   assert.equal(radarSearchModeAvailability("WEB").canStart, true);

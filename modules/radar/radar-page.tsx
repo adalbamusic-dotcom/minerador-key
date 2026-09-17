@@ -5,7 +5,7 @@ import { loadInternalLinkGraphs } from "@/lib/arquiteto/internal-link-graph-pers
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";
-import { CheckCircle2, Columns3, Download, Plus, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, Columns3, Download, Plus, XCircle } from "lucide-react";
 import { useBrand } from "@/components/brand-context";
 import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
 import { OperationalDataGrid, type OperationalDataGridTopbarApi, type OperationalGridBulkSelectionChange, type OperationalGridColumn } from "@/components/editorial/operational-data-grid";
@@ -16,7 +16,7 @@ import { GLOBAL_TOPBAR_ACTION_CONTROL } from "@/components/global-topbar-control
 import { approvedArticleVersions, type RadarItem } from "@/lib/editorial/operational-flow";
 import type { VersionEnvelope, ArticleDNA } from "@/lib/arquiteto/contracts";
 import type { RadarAnalysisPayload, RadarAnalysisVersion, RadarExpertEvidence, RadarExtractionPage } from "@/lib/radar/analysis-contracts";
-import { buildRadarBenchmark, createRadarAnalysisSuccessor, createRadarAnalysisVersion, RadarExtractionPageSchema, suggestRadarAnalysisMode } from "@/lib/radar/analysis-contracts";
+import { buildRadarBenchmark, createRadarAnalysisContext, createRadarAnalysisSuccessor, createRadarAnalysisVersion, RadarExtractionPageSchema, suggestRadarAnalysisMode } from "@/lib/radar/analysis-contracts";
 import { resolvePrimaryKeyword } from "@/lib/radar/keyword-resolver";
 import { buildRadarArchitectHref, buildRadarArticleHref, radarCanonicalRouteKey } from "@/lib/radar/route-resolution";
 import { buildRadarSerpView } from "@/lib/radar/snapshot-view";
@@ -39,7 +39,21 @@ import { buildRadarResetPayload, radarResetDecision, radarResetLabel, radarReset
 import { buildRadarAutomaticResearchCuration } from "@/lib/radar/research-auto-selection";
 import { RADAR_EXTRACTION_MAX_ATTEMPTS, radarExtractionFailureIsRecoverable } from "@/lib/radar/extraction-retry";
 import { radarPhase1NextAction } from "@/lib/radar/serp-phase1";
-import { RADAR_DEFAULT_SEARCH_MODE, radarSearchModeLabel, type RadarPrimarySearchMode } from "@/lib/radar/search-mode";
+import { RADAR_DEFAULT_SEARCH_MODE, radarPrimaryModeCommitment, radarPrimaryModeOfAnalysis, radarResearchPlanOfAnalysis, radarSearchModeLabel, type RadarPrimarySearchMode } from "@/lib/radar/search-mode";
+import { buildRadarResearchPackage, radarProfileOfTarget, radarProfileSupportPlan, type RadarResearchPackage, type RadarResearchProfile, type RadarSupportResearchRecord } from "@/lib/radar/research-profile";
+import { radarAmazonReportEvidence, radarResearchProfileStateOfAnalysis, radarYoutubeFinalizeDecision, radarYoutubeReportEvidence, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
+import { buildRadarAmazonQueryPlan, radarAmazonQueryId, type RadarAmazonSearchRun } from "@/lib/radar/amazon-search-run";
+import { radarPrimaryProfileOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
+import { radarResearchPrimaryCollection, radarResearchProvenanceSummary, radarResearchSampleSummary, type RadarResearchProvenancePayload, type RadarResearchSamplePayload } from "@/lib/radar/research-read-model";
+import { loadRadarResearchProvenance, loadRadarResearchSample } from "@/lib/radar/research-part-client";
+import { buildRadarEditorialCommercialModel, buildRadarEditorialVideoModel } from "@/lib/radar/editorial-profile-model";
+import { radarAmazonSelectCandidates } from "@/lib/radar/amazon-candidate-selection";
+import { radarAmazonDedupeProducts, radarAmazonEmptyTargetFor, radarAmazonParseTargetInput, radarAmazonValidateSetup, type RadarAmazonEditorialIntent, type RadarAmazonEditorialIntentType, type RadarAmazonResearchTarget, type RadarAmazonTargetProduct } from "@/lib/radar/amazon-editorial-target";
+import { RadarAmazonTargetSetup } from "./radar-amazon-target-setup";
+import { radarAmazonEligibleCandidates } from "@/lib/radar/amazon-eligibility";
+import { postRadarPlannerHandoff, postRadarPlannerHandoffBatch, radarHandoffBatchSummary } from "@/lib/radar/planner-handoff-client";
+import { radarCompetitiveBlueprintViewOfAnalysis, type RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
+import { buildRadarMultimodalBlueprint, type RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
 import type { RadarSpecialistCounters } from "@/lib/radar/specialist-lifecycle";
 import { buildRadarArticleDnaSummary, buildRadarReportSummary, buildRadarResearchCardSummary, buildRadarSpecialistSummary, radarSpecialistCell, RADAR_OPERATIONAL_STATUS_LABEL, RADAR_OPERATIONAL_STATUS_ORDER, radarOperationalRow, type RadarOperationalTone } from "@/lib/radar/operational-view";
 import { radarExtractionBatches, radarExtractionErrorMessage } from "@/lib/radar/extraction-request";
@@ -52,7 +66,13 @@ import { buildRadarSemanticConceptModel } from "@/lib/radar/semantic-concept-mod
 import { buildRadarWorkbenchStages, resolveRadarWorkbenchArticleId, summarizeRadarReferenceCounts, type RadarAdditionalEvidenceState } from "@/lib/radar/workbench";
 import { clearSelection, createRadarSpreadsheetSelection, selectAndActivateArticle, selectVisibleArticles, setArticleSelection, type RadarSpreadsheetSelectionState } from "@/lib/radar/spreadsheet-selection";
 import { buildRadarR3Model, type RadarR3Model } from "@/lib/radar/r3-workbench";
-import type { RadarVideoSourceInputVerdict, RadarVideoSourceText } from "@/lib/radar/video-source";
+import { buildRadarYoutubeQueryPlan } from "@/lib/radar/youtube-search-queries";
+import { RadarYoutubeSearchRunSchema, radarYoutubeApplySelection, radarYoutubeResetPatch, radarYoutubeRunSummary, type RadarYoutubeSearchRun } from "@/lib/radar/youtube-search-run";
+import { buildRadarYoutubeBlueprint } from "@/lib/radar/youtube-blueprint";
+import { freezeRadarYoutubeInvestigation } from "@/lib/radar/youtube-evidence";
+import type { RadarVideoSourceInputVerdict, RadarVideoSourceTextSummary } from "@/lib/radar/video-source";
+import { useRadarAreaLiveRead } from "./use-radar-area-live-read";
+
 import type { RadarLibrarySource } from "@/lib/radar/video-library";
 import type { RadarBriefCoverage } from "@/lib/radar/video-brief-matching";
 import { availableBulkActions, createRadarR4LocalArticleState, createRadarR4SerpQueue, nextActionForRadarR4Article, radarR4SpecialistStatusLabel, removeRadarR4Topic, moveRadarR4Topic, updateRadarR4Topic, updateRadarR4SerpQueueItem, type RadarR4AmazonState, type RadarR4BulkArticleSnapshot, type RadarR4BulkOperation, type RadarR4ExistingContentKind, type RadarR4ExistingContentState, type RadarR4LocalArticleState, type RadarR4SerpQueue, type RadarR4Topic } from "@/lib/radar/r4-queue";
@@ -72,6 +92,40 @@ import { RadarR3ProfileMirror } from "./radar-r3-profile-mirror";
 import { RadarR4BulkOperationsBar, RadarR5QueueProgress, type RadarR5QueueView } from "./radar-r4-bulk-operations-bar";
 import { useRadarAnalysisReadback } from "./use-radar-analysis-readback";
 import { useRadarSerpReviewReadback } from "./use-radar-serp-review-readback";
+
+/**
+ * A BIBLIOTECA SEM ARTIGO CONTINUA SENDO UMA CHAVE — RADAR_LIVE_UX_2.2 · §2.
+ *
+ * O acervo é da MARCA e se administra sem artigo nenhum. O hook exige as três
+ * partes da chave para habilitar a leitura; a sentinela diz explicitamente
+ * "esta é a biblioteca da marca, sem camada de artigo" em vez de desligar a
+ * área — e mantém o cache dessa leitura separado do de cada artigo.
+ */
+const SEM_ARTIGO = "__sem-artigo__";
+
+/* Referências estáveis: um array novo a cada render remontaria os memos. */
+const VIDEOS_SEM_FONTES: RadarLibrarySource[] = [];
+const VIDEOS_SEM_TEXTOS: RadarVideoSourceTextSummary[] = [];
+
+/**
+ * AS TABELAS CUJO EVENTO SIGNIFICA "a área Vídeos mudou" — §3.
+ *
+ * `external_processing_jobs` entra AQUI, ao contrário do Especialista: em
+ * Vídeos a fila É o assunto. É ela que leva a fonte de AGUARDANDO a
+ * PROCESSANDO, e sem esse sinal a transição mais importante desta área — a que
+ * o User Worker produz — só apareceria no tique.
+ *
+ * O payload do evento nunca é autoridade: ele dispara a releitura do
+ * read-model, e é o read-model que diz o que a tela mostra.
+ */
+const RADAR_VIDEOS_LIVE_TABLES = [
+  "radar_video_sources",
+  "radar_article_video_sources",
+  "radar_video_source_texts",
+  "radar_video_brief_extract_runs",
+  "radar_video_brief_extracts",
+  "external_processing_jobs",
+] as const;
 
 type RadarR5TopicHistory = { past: RadarR4Topic[][]; future: RadarR4Topic[][] };
 type RadarSerpAction = { articleId: string; kind: "start" | "decision" | "extract" };
@@ -130,67 +184,35 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * não reler a cada render; ele nasce vazio, é preenchido por leitura e nunca
    * é a única cópia de uma fonte registrada.
    */
-  const [videoLibrary, setVideoLibrary] = useState<{
-    sources: RadarLibrarySource[];
-    texts: RadarVideoSourceText[];
-    loading: boolean;
+  /**
+   * O ESTADO DAS AÇÕES — e SÓ delas — RADAR_LIVE_UX_2.2.
+   *
+   * O que o servidor sabe (fontes, textos, casamento, fila) deixou de morar em
+   * estado React: quem lê é `useRadarAreaLiveRead`, e a tela deriva dele. O que
+   * sobra aqui é o que só o navegador sabe — qual ação está em curso e o que a
+   * última delas respondeu.
+   *
+   * Misturar os dois era o defeito: uma leitura nova reescrevia `saving` e
+   * `extracting`, e um clique reescrevia a lista de fontes com o que a tela
+   * tinha em mãos.
+   */
+  const [videoAction, setVideoAction] = useState<{
     saving: boolean;
     extracting: string | null;
+    matching: boolean;
     lastBatch: Array<{ raw: string; verdict: RadarVideoSourceInputVerdict; reason: string }> | null;
     error: string | null;
-    readbackConfirmed: boolean;
-    /** De qual artigo é a sobreposição de seleção já carregada. `null` = nenhuma. */
-    overlayArticleId: string | null;
-    /**
-     * O ESTADO DA FILA DO WORKER DO USUÁRIO — leitura, nunca execução.
-     *
-     * A Vercel serve a tela e enfileira; quem processa é a máquina do usuário.
-     * Isto aqui é só o que o Supabase registra, para a tela poder dizer se há
-     * alguém do outro lado — e para não chamar de erro da fonte o que é
-     * ausência de processador.
-     */
-    worker: { queued: number; processing: number; lastHeartbeatAt: string | null } | null;
-  }>({ sources: [], texts: [], loading: false, saving: false, extracting: null, lastBatch: null, error: null, readbackConfirmed: false, overlayArticleId: null, worker: null });
-  /**
-   * UMA TENTATIVA POR CONTEXTO — §2.3.2, e é isto que mata o laço.
+  }>({ saving: false, extracting: null, matching: false, lastBatch: null, error: null });
+  /*
+   * AS GUARDAS DE "UMA TENTATIVA POR CONTEXTO" SAÍRAM — RADAR_LIVE_UX_2.2.
    *
-   * O efeito antigo guardava-se por `readbackConfirmed`, e tinha o próprio
-   * cache como dependência. No caminho de ERRO os dois viravam falso de novo,
-   * o efeito redisparava, e a leitura entrava em laço — foi esse laço que o
-   * USER viu como "tela piscando".
-   *
-   * A chave é marca + artigo: cada contexto é tentado UMA vez, dê certo ou não.
-   * Repetir depois de falhar passa a ser decisão de quem opera, e existe um
-   * botão para isso.
+   * Elas existiam porque a leitura era um efeito que podia entrar em laço no
+   * caminho de erro. Quem lê a área agora é `useRadarAreaLiveRead`, que tem
+   * cache por chave, uma leitura por chave e política de revalidação própria —
+   * a guarda virou parte da infraestrutura, e duplicá-la aqui só impediria a
+   * área de se atualizar sozinha, que é o ponto deste gate.
    */
-  const bibliotecaTentada = useRef(new Set<string>());
-  /* A mesma guarda, para a leitura do casamento gravado. */
-  const casamentoTentado = useRef(new Set<string>());
 
-  /**
-   * O CASAMENTO GRAVADO — Gate 3.
-   *
-   * Separado do estado da BIBLIOTECA de propósito: o transcript é da marca e a
-   * biblioteca é da marca; o recorte é do ARTIGO, e vive e morre com ele. Juntá-los
-   * num objeto só faria trocar de artigo parecer que a biblioteca mudou.
-   *
-   * `coverage: null` significa "ainda não casado" — diferente de "casado e sem
-   * trecho", que é uma resposta.
-   */
-  const [videoMatching, setVideoMatching] = useState<{
-    articleId: string | null;
-    coverage: RadarBriefCoverage[] | null;
-    running: boolean;
-    error: string | null;
-    /*
-     * A LEITURA REMOTA FALHOU? — VIDEOS_3.4.1 · §7.
-     *
-     * `coverage: null` com este campo falso é 'ainda não casaram'; com ele
-     * verdadeiro é 'existe casamento e não consegui ler'. Colapsar os dois
-     * fazia a tela convidar a recasar algo que já estava gravado.
-     */
-    loadFailed: boolean;
-  }>({ articleId: null, coverage: null, running: false, error: null, loadFailed: false });
 
   /*
    * O QUE A ÚLTIMA COLETA DEVOLVEU, PARA QUEM ENCADEIA.
@@ -294,49 +316,343 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     }
   }, []);
 
-  const loadVideoLibrary = useCallback(async (articleId: string | null) => {
-    if (!selectedBrandId) return;
-    setVideoLibrary(current => ({ ...current, loading: true, error: null }));
-    try {
-      const busca = new URLSearchParams({ brandId: selectedBrandId });
-      if (articleId) busca.set("articleId", articleId);
-      /*
-       * DUAS LEITURAS, E A DA FILA NÃO PODE DERRUBAR A DA BIBLIOTECA.
-       *
-       * Fonte é o assunto desta área; presença de worker é enfeite operacional
-       * ao lado. `lerEstadoDoWorker` nunca rejeita — se a fila não puder ser
-       * lida, a linha some da tela em vez de inventar um estado, e as fontes
-       * continuam aparecendo.
-       */
-      const [resposta, estadoDoWorker] = await Promise.all([
-        fetch(`/api/editorial/radar-video-sources?${busca.toString()}`),
-        lerEstadoDoWorker(selectedBrandId),
-      ]);
-      const corpo = await resposta.json();
-      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível ler a biblioteca de vídeos.");
-      setVideoLibrary(current => ({
-        ...current,
-        sources: corpo.sources || [],
-        texts: corpo.texts || current.texts,
-        loading: false, saving: false, extracting: null,
-        error: null, readbackConfirmed: true, overlayArticleId: articleId,
-        worker: estadoDoWorker,
-      }));
-    } catch (error) {
-      setVideoLibrary(current => ({
-        ...current,
-        loading: false, saving: false, extracting: null,
-        error: error instanceof Error ? error.message : "Falha ao ler a biblioteca de vídeos.",
-      }));
-    }
-  }, [lerEstadoDoWorker, selectedBrandId]);
+  /**
+   * A ÁREA VÍDEOS, LIDA COMO ÁREA — RADAR_LIVE_UX_2.2 · §1 e §2.
+   *
+   * ========================= O QUE ISTO SUBSTITUI =========================
+   *
+   * Eram dois efeitos com guarda de "uma tentativa por contexto": a biblioteca
+   * e o casamento eram lidos UMA VEZ ao abrir o artigo e nunca mais. Um job
+   * processado pelo User Worker mudava o banco e a tela continuava dizendo
+   * AGUARDANDO até alguém dar F5.
+   *
+   * Agora a área usa a MESMA infraestrutura homologada no Especialista:
+   * `useRadarAreaLiveRead`, com o cache, a revalidação em segundo plano, o
+   * sinal do Realtime e o tique de reserva. Nenhuma política nova foi criada.
+   *
+   * ==================== POR QUE O ARTIGO PODE NÃO EXISTIR ====================
+   *
+   * A biblioteca é da MARCA e se administra sem artigo nenhum — §2.3.2. O hook
+   * exige as três partes da chave para habilitar a leitura, então a ausência de
+   * artigo entra como sentinela explícita em vez de desligar a área: a chave
+   * passa a ser "a biblioteca desta marca, sem camada de artigo", que é
+   * exatamente o que se está lendo.
+   */
+  const videosArticleId = resolveRadarWorkbenchArticleId({ selectedId: activeArticleId, rowIds: pipeline.radarItems.map(row => row.articleId) });
+  const videosArticleDnaVersionId = pipeline.radarItems.find(row => row.articleId === videosArticleId)?.articleDnaVersionId || "";
 
-  /** Repetir depois de uma falha é decisão de quem opera, não do efeito. */
-  const reloadVideoLibrary = useCallback((articleId: string | null) => {
-    if (!selectedBrandId) return;
-    bibliotecaTentada.current.delete(`${selectedBrandId}:${articleId || ""}`);
-    void loadVideoLibrary(articleId);
-  }, [loadVideoLibrary, selectedBrandId]);
+  const carregarAreaVideos = useCallback(async (signal: AbortSignal) => {
+    if (!selectedBrandId) throw new Error("Nenhuma marca selecionada.");
+    const busca = new URLSearchParams({ brandId: selectedBrandId });
+    if (videosArticleId) busca.set("articleId", videosArticleId);
+    const opcoes = { cache: "no-store" as const, signal };
+
+    /*
+     * TRÊS LEITURAS EM PARALELO, E SÓ AS DESTA ÁREA.
+     *
+     * Nada de workspace editorial: fontes, casamento gravado e presença do
+     * worker. As duas últimas não podem derrubar a primeira — fonte é o assunto
+     * da área; casamento e fila são leituras que a acompanham.
+     */
+    const [respostaFontes, respostaCasamento, estadoDoWorker] = await Promise.all([
+      fetch(`/api/editorial/radar-video-sources?${busca.toString()}`, opcoes),
+      videosArticleId
+        ? fetch(`/api/editorial/radar-video-matching?${new URLSearchParams({ brandId: selectedBrandId, articleId: videosArticleId }).toString()}`, opcoes).catch(() => null)
+        : Promise.resolve(null),
+      lerEstadoDoWorker(selectedBrandId),
+    ]);
+
+    const corpo = await respostaFontes.json().catch(() => ({}));
+    if (!respostaFontes.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível ler a biblioteca de vídeos.");
+
+    const casamento = respostaCasamento ? await respostaCasamento.json().catch(() => null) : null;
+    const casamentoLido = Boolean(casamento?.success);
+
+    return {
+      sources: (corpo.sources || []) as RadarLibrarySource[],
+      texts: (corpo.texts || []) as RadarVideoSourceTextSummary[],
+      worker: estadoDoWorker,
+      /*
+       * SEM EXECUÇÃO, A COBERTURA CONTINUA `null`. A rota devolve cobertura
+       * vazia quando nunca se casou, e `[]` na tela significaria "casou e não
+       * achou nada" — que é outra resposta.
+       */
+      coverage: casamentoLido ? (casamento.run ? (casamento.coverage || []) as RadarBriefCoverage[] : null) : null,
+      /* §7 · erro de leitura é dito como erro, nunca como ausência. */
+      matchingLoadFailed: Boolean(videosArticleId && !casamentoLido),
+      matchingError: videosArticleId && !casamentoLido ? (casamento?.error || "Não foi possível carregar o casamento salvo.") : null,
+      overlayArticleId: videosArticleId,
+    };
+  }, [lerEstadoDoWorker, selectedBrandId, videosArticleId]);
+
+  /*
+   * QUANDO VALE OLHAR MAIS DE PERTO — §4.
+   *
+   * Há job enfileirado ou em processamento: alguém está esperando o User Worker
+   * terminar. Fora disso, perguntar a cada três segundos gasta leitura para
+   * confirmar que nada mudou.
+   */
+  const videosPendenteRef = useRef(false);
+  const lerPendenteVideos = useCallback(() => videosPendenteRef.current, []);
+
+  const leituraDeVideos = useRadarAreaLiveRead({
+    area: "videos",
+    brandId: selectedBrandId || "",
+    articleId: videosArticleId || SEM_ARTIGO,
+    articleDnaVersionId: videosArticleDnaVersionId || SEM_ARTIGO,
+    tables: RADAR_VIDEOS_LIVE_TABLES,
+    load: carregarAreaVideos,
+    open: true,
+    pending: lerPendenteVideos,
+    enabled: Boolean(selectedBrandId),
+  });
+
+  /**
+   * A VISTA DA ÁREA — derivada, nunca copiada por efeito — §11.
+   *
+   * Durante a revalidação `leituraDeVideos.data` continua sendo o último estado
+   * VÁLIDO: o hook só troca o valor quando o novo chega. É isso que impede a
+   * área de voltar para "nenhum texto disponível" a cada tique.
+   */
+  const vistaDeVideos = useMemo(() => ({
+    sources: leituraDeVideos.data?.sources || VIDEOS_SEM_FONTES,
+    texts: leituraDeVideos.data?.texts || VIDEOS_SEM_TEXTOS,
+    worker: leituraDeVideos.data?.worker || null,
+    coverage: leituraDeVideos.data?.coverage ?? null,
+    matchingLoadFailed: Boolean(leituraDeVideos.data?.matchingLoadFailed),
+    matchingError: leituraDeVideos.data?.matchingError || null,
+    loading: leituraDeVideos.loading,
+    revalidating: leituraDeVideos.revalidating,
+    /* Só é readback confirmado depois que UMA leitura voltou. */
+    readbackConfirmed: Boolean(leituraDeVideos.data),
+    saving: videoAction.saving,
+    extracting: videoAction.extracting,
+    matching: videoAction.matching,
+    lastBatch: videoAction.lastBatch,
+    error: videoAction.error || leituraDeVideos.error,
+  }), [leituraDeVideos.data, leituraDeVideos.error, leituraDeVideos.loading, leituraDeVideos.revalidating, videoAction]);
+
+  /*
+   * O RITMO DO TIQUE LÊ UMA REF — a fila em curso é o que pede atenção (§4).
+   *
+   * Passá-la como valor criaria a dependência circular leitura → estado →
+   * leitura; a ref carrega o que a volta anterior soube, que é o que a política
+   * precisa para decidir.
+   */
+  useEffect(() => {
+    const fila = leituraDeVideos.data?.worker;
+    videosPendenteRef.current = Boolean(fila && (fila.queued > 0 || fila.processing > 0));
+  }, [leituraDeVideos.data]);
+
+  const youtubeEmVoo = useRef<string | null>(null);
+  const [youtubeBusy, setYoutubeBusy] = useState(false);
+  /*
+   * §1 · UM CLIQUE POR VEZ, E ELE É DESTE ARTIGO.
+   *
+   * A trava guarda o articleId, não um booleano: dois artigos abertos em abas
+   * diferentes coletam coisas diferentes, e um semáforo global recusaria a
+   * segunda coleta legítima dizendo que "já está em andamento".
+   */
+  const amazonEmVoo = useRef<string | null>(null);
+  const [amazonBusy, setAmazonBusy] = useState(false);
+  const [amazonSetupPorArtigo, setAmazonSetupPorArtigo] = useState<Record<string, {
+    intent: RadarAmazonEditorialIntent | null;
+    target: RadarAmazonResearchTarget | null;
+    rawInput: string;
+  }>>({});
+  const [amazonResolving, setAmazonResolving] = useState(false);
+  /** PORTABLE_EXPORT_1 · §3 · exportar é ação humana, e ela tem estado próprio. */
+  const [exportando, setExportando] = useState(false);
+  /**
+   * ===== 1.1 · §1 · UM BOTÃO "EXPORTAR", COM O QUE EXPORTAR DENTRO =====
+   *
+   * A barra tinha dois: `[Exportar]` e `[CSV · Dossiês finalizados]`. Lado a
+   * lado, eles obrigam a decidir antes de saber que existe uma escolha — e o
+   * primeiro rótulo reivindica o verbo inteiro para uma das duas coisas.
+   *
+   * São dois PRODUTOS diferentes com o mesmo verbo: a planilha da operação e o
+   * dossiê editorial. Um menu diz isso; dois botões escondem.
+   */
+  const [menuDeExport, setMenuDeExport] = useState(false);
+  const [amazonCandidates, setAmazonCandidates] = useState<{
+    term: string;
+    items: Array<{ asin: string; title: string; imageUrl: string | null }>;
+  } | null>(null);
+  /*
+   * ============ §4, §10 e §11 · O ESTADO DA LEITURA SOB DEMANDA ============
+   *
+   * A chave é `articleId:analysisVersionId`. Guardar por artigo faria a
+   * amostra de uma investigação aparecer sobre a fotografia de outra depois
+   * de uma coleta nova — e nada na tela diria.
+   *
+   * Cache acelera; não decide. Identidade diferente, busca de novo.
+   */
+  const [lazyPesquisa, setLazyPesquisa] = useState<Record<string, {
+    /*
+     * A corrida é do PERFIL, e o estado é compartilhado: a chave já carrega
+     * a versão da análise, e cada artigo tem um perfil primário só.
+     */
+    /*
+     * ===== 2.4 · §6 · UM ESTADO SÓ, TRÊS PERFIS =====
+     *
+     * Amazon e YouTube renderizam a CORRIDA; o Google renderiza PÁGINAS
+     * resolvidas por `finalizedBundle.sample.extractionIds`. As duas formas
+     * convivem no mesmo estado porque a rota, o cliente e a chave de cache são
+     * os mesmos — um segundo estado divergiria na primeira correção feita só
+     * num deles.
+     */
+    sample?: {
+      state: "IDLE" | "LOADING" | "READY" | "FAILED";
+      run: RadarAmazonSearchRun | RadarYoutubeSearchRun | null;
+      pages: RadarExtractionPage[];
+      integrity: RadarResearchSamplePayload["integrity"];
+      message: string | null;
+    };
+    provenance?: { state: "IDLE" | "LOADING" | "READY" | "FAILED"; data: RadarResearchProvenancePayload | null; message: string | null };
+  }>>({});
+
+  /* §25 · o semáforo da entrega ao Planejador, junto dos outros. */
+  const [plannerBusy, setPlannerBusy] = useState(false);
+
+  const analiseCorrenteDe = useCallback((row: RadarItem) =>
+    row.analysisVersions.slice().sort((esquerda, direita) => direita.versionNumber - esquerda.versionNumber)[0] || null, []);
+
+  /**
+   * §1 · A QUE UNIVERSO ESTE ARTIGO JÁ SE COMPROMETEU.
+   *
+   * A pergunta é respondida pelo que está GRAVADO na versão corrente da
+   * análise, não pelo seletor da tela: o seletor é uma preferência de quem
+   * olha; o que está gravado é o que foi pago e curado.
+   */
+  const compromissoDeModo = useCallback((row: RadarItem | null, modo: RadarPrimarySearchMode) => {
+    /*
+     * A MESMA RESOLUÇÃO DO SERVIDOR — 1.2 · §1.
+     *
+     * `radarPrimaryModeOfAnalysis` é a função que a rota paga também chama. A
+     * tela deixou de saber QUAIS campos provam cada modo: se ela soubesse,
+     * seriam duas cópias da regra, e um dia elas discordariam — foi assim que
+     * o 1.1 acabou com a trava só de um lado.
+     */
+    const payload = row ? analiseCorrenteDe(row)?.payload : null;
+    return radarPrimaryModeCommitment({ mode: modo, currentMode: radarPrimaryModeOfAnalysis(payload) });
+  }, [analiseCorrenteDe]);
+
+  /**
+   * ========== O CONTÊINER NEUTRO, GARANTIDO — 1.3 · §3 ==========
+   *
+   * ANTES: sem versão de análise gravada, a pesquisa de YouTube dizia "colete a
+   * SERP uma vez antes". Isso tornava o fluxo IMPOSSÍVEL — a coleta do Google
+   * comprometeria o artigo com WEB e o YouTube ficaria bloqueado em seguida.
+   *
+   * O vaso da persistência é do RADAR, não do Google. Quando ele não existe,
+   * nasce aqui: sem provider, sem SERP, sem concorrentes e sem modo primário.
+   * `deepResearch` e `youtubeSearch` nascem nulos, então o artigo continua sem
+   * compromisso — quem compromete é o START, não o contêiner.
+   */
+  const garantirContextoDoRadar = useCallback(async (row: RadarItem) => {
+    const existente = analiseCorrenteDe(row);
+    if (existente) return existente;
+
+    const article = pipeline.articleVersions[row.articleId];
+    if (!article) throw new Error("O ArticleDNA deste artigo não foi carregado; recarregue a marca antes de iniciar a pesquisa.");
+
+    const contexto = await createRadarAnalysisContext({ brandId: row.brandId, article, actorId: sessionId(session) });
+    await pipeline.saveRadarAnalysis(row.articleId, contexto);
+    await pipeline.reloadRadarAnalysis(row.articleId);
+    return contexto;
+  }, [analiseCorrenteDe, pipeline, session]);
+
+  /**
+   * A ESCRITA DA INVESTIGAÇÃO DE YOUTUBE — corrida, congelamento ou os dois.
+   *
+   * O patch é explícito porque o reset precisa zerar os DOIS campos de uma vez:
+   * zerar a corrida e deixar o blueprint congelado faria a tela mostrar leitura
+   * competitiva de uma amostra apagada.
+   */
+  /**
+   * ============ O PLANO DE PESQUISA DO ARTIGO — 1.1 · §1 e §2 ============
+   *
+   * As fontes se SOMAM, e o papel de cada uma é derivado do alvo. A tela lê
+   * daqui em vez de inferir por conta: uma segunda inferência acabaria
+   * discordando da do servidor, que é o defeito que o 1.2 fechou.
+   */
+  const planoDePesquisa = useCallback((row: RadarItem | null) =>
+    radarResearchPlanOfAnalysis(row ? analiseCorrenteDe(row)?.payload : null), [analiseCorrenteDe]);
+
+  /**
+   * ===== O BLUEPRINT MULTIFORMATO VIVO — 1.1 · §4, §5 e §6 =====
+   *
+   * Ele é RECALCULADO a cada abertura, e é por isso que o congelado tem
+   * precedência na tela: depois do FINALIZE, o que vale é a fotografia.
+   *
+   * A leitura do Google sai do snapshot mais recente que TENHA features.
+   * Snapshot antigo não tem essa leitura, e ela não é fabricada (§4): sem ela,
+   * o blueprint sai só com o YouTube e diz o que faltou.
+   */
+  const multimodalDoArtigo = useCallback((row: RadarItem | null): RadarMultimodalBlueprint | null => {
+    if (!row) return null;
+    const corrida = analiseCorrenteDe(row)?.payload.youtubeSearch || null;
+    const comFeatures = pipeline.serpRecords
+      .filter(registro => registro.input.articleId === row.articleId && registro.research?.serpFeatures)
+      .slice(-1)[0];
+    const features = comFeatures?.research?.serpFeatures || null;
+    if (!features && !corrida?.universe.length) return null;
+    return buildRadarMultimodalBlueprint({
+      features,
+      youtubeUniverse: corrida?.universe || [],
+      generatedAt: new Date().toISOString(),
+    });
+  }, [analiseCorrenteDe, pipeline.serpRecords]);
+  /**
+   * ====== A VERSÃO CORRENTE LIDA DO SERVIDOR, NÃO DA TELA ======
+   *
+   * `analiseCorrenteDe` lê o `RadarItem` que o render capturou. Isso basta para
+   * um clique — o render é recente. Não basta DEPOIS de o servidor ter gravado
+   * no meio da mesma função: o START do YouTube grava a corrida lá, e daí em
+   * diante o objeto em mãos descreve o passado.
+   *
+   * Suceder a partir dele produz `optimistic_conflict`: o banco já está uma
+   * versão à frente. E recarregar o estado não resolve, porque a função
+   * assíncrona em curso continua segurando o `row` antigo — o React só entrega
+   * o novo no próximo render, que ainda não aconteceu.
+   *
+   * A leitura remota devolve VALOR, e valor atravessa o await.
+   */
+  const versaoCorrenteNoServidor = useCallback(async (row: RadarItem) => {
+    const local = analiseCorrenteDe(row);
+    const remoto = await pipeline.readRemoteRadarAnalyses(row.articleId).catch(() => null);
+    if (!remoto?.available || !remoto.analyses.length) return local;
+    const maisNova = remoto.analyses.slice().sort((esquerda, direita) => direita.versionNumber - esquerda.versionNumber)[0];
+    if (!local) return maisNova as typeof local;
+    return maisNova.versionNumber > local.versionNumber ? maisNova as typeof local : local;
+  }, [analiseCorrenteDe, pipeline]);
+
+  const gravarYoutube = useCallback(async (
+    row: RadarItem,
+    /*
+     * AMAZON_SEARCH_2 · o reabrir do perfil Amazon escreve por aqui também.
+     *
+     * Uma segunda função de gravação teria a mesma forma e a mesma trava de
+     * concorrência — e um dia só uma delas ganharia a correção seguinte.
+     */
+    patch: Partial<Pick<RadarAnalysisPayload, "youtubeSearch" | "youtubeFrozenInvestigation" | "supportResearch" | "amazonSearch" | "amazonBlueprint" | "amazonFrozenInvestigation" | "researchPackage">>,
+    /*
+     * A BASE EXPLÍCITA existe para quem escreve depois de o servidor ter
+     * escrito. Quem escreve a partir de um clique não precisa dela e não paga
+     * a leitura remota.
+     */
+    base?: Awaited<ReturnType<typeof versaoCorrenteNoServidor>>,
+  ) => {
+    /* O contêiner é infraestrutura: se faltar, cria-se — não se recusa o clique. */
+    const anterior = base || analiseCorrenteDe(row) || await garantirContextoDoRadar(row);
+    const proxima = await createRadarAnalysisSuccessor(anterior, patch, sessionId(session));
+    await pipeline.saveRadarAnalysis(row.articleId, proxima);
+    await pipeline.reloadRadarAnalysis(row.articleId);
+    return proxima;
+  }, [analiseCorrenteDe, garantirContextoDoRadar, pipeline, session]);
+
+  /** [Atualizar] da área: relê SÓ Vídeos, nunca o workspace — §10. */
+  const reloadVideoLibrary = useCallback(() => { leituraDeVideos.refresh(); }, [leituraDeVideos]);
 
   /**
    * REGISTRAR — a única escrita desta área, e só no clique.
@@ -354,7 +670,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   const registerVideoSources = useCallback(async (articleId: string | null, raw: string) => {
     if (!selectedBrandId || !raw.trim()) return;
     const item = articleId ? pipeline.radarItems.find(row => row.articleId === articleId) || null : null;
-    setVideoLibrary(current => ({ ...current, saving: true, lastBatch: null, error: null }));
+    setVideoAction(atual => ({ ...atual, saving: true, lastBatch: null, error: null }));
     try {
       const resposta = await fetch("/api/editorial/radar-video-sources", {
         method: "POST",
@@ -369,21 +685,13 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const corpo = await resposta.json();
       if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível registrar as fontes de vídeo.");
       if (!corpo.readbackConfirmed) throw new Error("A gravação não foi confirmada pela releitura remota.");
-      setVideoLibrary(current => ({
-        ...current,
-        sources: corpo.sources || [],
-        texts: corpo.texts || current.texts,
-        loading: false, saving: false, extracting: null,
-        lastBatch: corpo.entries || [], error: null, readbackConfirmed: true, overlayArticleId: articleId,
-      }));
+      /* O readback confirmou; quem substitui a lista é a releitura da área. */
+      setVideoAction(atual => ({ ...atual, saving: false, extracting: null, lastBatch: corpo.entries || [], error: null }));
+      leituraDeVideos.refresh();
     } catch (error) {
-      setVideoLibrary(current => ({
-        ...current,
-        saving: false, lastBatch: null,
-        error: error instanceof Error ? error.message : "Falha ao registrar as fontes de vídeo.",
-      }));
+      setVideoAction(atual => ({ ...atual, saving: false, lastBatch: null, error: error instanceof Error ? error.message : "Falha ao registrar as fontes de vídeo." }));
     }
-  }, [pipeline.radarItems, selectedBrandId]);
+  }, [leituraDeVideos, pipeline.radarItems, selectedBrandId]);
 
 
   /**
@@ -395,7 +703,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    */
   const extractVideoText = useCallback(async (articleId: string | null, videoSourceId: string) => {
     if (!selectedBrandId) return;
-    setVideoLibrary(current => ({ ...current, extracting: videoSourceId, error: null }));
+    setVideoAction(atual => ({ ...atual, extracting: videoSourceId, error: null }));
     try {
       const resposta = await fetch("/api/editorial/radar-video-text", {
         method: "POST",
@@ -405,12 +713,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const corpo = await resposta.json();
       if (!corpo?.success) throw new Error(corpo?.error || "Não foi possível enfileirar a extração.");
     } catch (error) {
-      setVideoLibrary(current => ({ ...current, extracting: null, error: error instanceof Error ? error.message : "Falha ao enfileirar a extração." }));
+      setVideoAction(atual => ({ ...atual, extracting: null, error: error instanceof Error ? error.message : "Falha ao enfileirar a extração." }));
       return;
     }
     /* O estado vem do servidor, sempre: a releitura é a confirmação. */
-    await loadVideoLibrary(articleId);
-  }, [loadVideoLibrary, selectedBrandId]);
+    leituraDeVideos.refresh();
+  }, [leituraDeVideos, selectedBrandId]);
 
 
   /**
@@ -430,11 +738,11 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const corpo = await resposta.json();
       if (!corpo?.success) throw new Error(corpo?.error || "Não foi possível obter os metadados.");
     } catch (error) {
-      setVideoLibrary(current => ({ ...current, error: error instanceof Error ? error.message : "Falha ao obter os metadados." }));
+      setVideoAction(atual => ({ ...atual, error: error instanceof Error ? error.message : "Falha ao obter os metadados." }));
       return;
     }
-    await loadVideoLibrary(articleId);
-  }, [loadVideoLibrary, selectedBrandId]);
+    leituraDeVideos.refresh();
+  }, [leituraDeVideos, selectedBrandId]);
 
   /**
    * INFORMAR A TRANSCRIÇÃO — o caminho legítimo quando a marca já a tem.
@@ -454,11 +762,11 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const corpo = await resposta.json();
       if (!corpo?.success) throw new Error(corpo?.error || "Não foi possível preservar a transcrição.");
     } catch (error) {
-      setVideoLibrary(current => ({ ...current, error: error instanceof Error ? error.message : "Falha ao preservar a transcrição." }));
+      setVideoAction(atual => ({ ...atual, error: error instanceof Error ? error.message : "Falha ao preservar a transcrição." }));
       return;
     }
-    await loadVideoLibrary(articleId);
-  }, [loadVideoLibrary, selectedBrandId]);
+    leituraDeVideos.refresh();
+  }, [leituraDeVideos, selectedBrandId]);
 
 
   /**
@@ -470,7 +778,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    */
   const uploadVideoMedia = useCallback(async (articleId: string | null, videoSourceId: string, file: File) => {
     if (!selectedBrandId) return;
-    setVideoLibrary(current => ({ ...current, extracting: videoSourceId, error: null }));
+    setVideoAction(atual => ({ ...atual, extracting: videoSourceId, error: null }));
     try {
       const corpoEnvio = new FormData();
       corpoEnvio.set("brandId", selectedBrandId);
@@ -481,11 +789,11 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const corpo = await resposta.json();
       if (!corpo?.success) throw new Error(corpo?.error || "Não foi possível enviar a mídia.");
     } catch (error) {
-      setVideoLibrary(current => ({ ...current, extracting: null, error: error instanceof Error ? error.message : "Falha ao enviar a mídia." }));
+      setVideoAction(atual => ({ ...atual, extracting: null, error: error instanceof Error ? error.message : "Falha ao enviar a mídia." }));
       return;
     }
-    await loadVideoLibrary(articleId);
-  }, [loadVideoLibrary, selectedBrandId]);
+    leituraDeVideos.refresh();
+  }, [leituraDeVideos, selectedBrandId]);
 
 
   /**
@@ -508,7 +816,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     videoSourceIds: string[],
   ) => {
     if (!selectedBrandId) return;
-    setVideoLibrary(current => ({ ...current, saving: true, error: null }));
+    setVideoAction(atual => ({ ...atual, saving: true, error: null }));
     try {
       const resposta = await fetch("/api/editorial/radar-video-library", {
         method: "POST",
@@ -528,12 +836,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         setNotice(`${corpo.enqueued} enfileirada(s) · ${corpo.reusedText} com texto reutilizado`);
       }
     } catch (error) {
-      setVideoLibrary(current => ({ ...current, saving: false, error: error instanceof Error ? error.message : "Falha na ação da biblioteca." }));
+      setVideoAction(atual => ({ ...atual, saving: false, error: error instanceof Error ? error.message : "Falha na ação da biblioteca." }));
       return;
     }
     /* O estado vem do servidor: a releitura é a confirmação. */
-    await loadVideoLibrary(articleId);
-  }, [loadVideoLibrary, selectedBrandId]);
+    leituraDeVideos.refresh();
+  }, [leituraDeVideos, selectedBrandId]);
 
 
 
@@ -545,7 +853,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    */
   const runVideoMatching = useCallback(async (articleId: string | null) => {
     if (!selectedBrandId || !articleId) return;
-    setVideoMatching(current => ({ ...current, articleId, running: true, error: null }));
+    setVideoAction(atual => ({ ...atual, matching: true, error: null }));
     try {
       const resposta = await fetch("/api/editorial/radar-video-matching", {
         method: "POST",
@@ -554,45 +862,24 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       });
       const corpo = await resposta.json();
       if (!corpo?.success) throw new Error(corpo?.error || "Não foi possível casar as pautas com o conteúdo.");
-      setVideoMatching({ articleId, coverage: corpo.coverage || [], running: false, error: null, loadFailed: false });
+      /*
+       * O RESULTADO APARECE PELO READ-MODEL — §7.
+       *
+       * A resposta do POST já traz a cobertura relida, mas guardá-la aqui
+       * criaria uma segunda cópia que envelhece sozinha: a próxima leitura da
+       * área traria a mesma coisa por outro caminho. Uma autoridade só.
+       */
+      setVideoAction(atual => ({ ...atual, matching: false, error: null }));
+      leituraDeVideos.refresh();
       const partes = [`${corpo.summary?.supported ?? 0} pauta(s) coberta(s)`, `${corpo.summary?.extracts ?? 0} trecho(s)`];
       if (corpo.reused) partes.push("nada mudou desde o último casamento");
       if (corpo.skippedWithoutText?.length) partes.push(`${corpo.skippedWithoutText.length} fonte(s) selecionada(s) ainda sem texto`);
       setNotice(partes.join(" · "));
     } catch (error) {
-      setVideoMatching(current => ({ ...current, articleId, running: false, error: error instanceof Error ? error.message : "Falha ao casar pautas." }));
+      setVideoAction(atual => ({ ...atual, matching: false, error: error instanceof Error ? error.message : "Falha ao casar pautas." }));
     }
-  }, [selectedBrandId]);
+  }, [leituraDeVideos, selectedBrandId]);
 
-  /**
-   * O CASAMENTO GRAVADO, AO ABRIR — VIDEOS_3.4.1 · §2 e §5.
-   *
-   * Esta leitura NÃO EXISTIA, e era o defeito inteiro: `videoMatching` só era
-   * escrito pelo clique, então o F5 apagava da tela um resultado que estava
-   * íntegro no banco e a área voltava a dizer 'ainda não foram casados'.
-   *
-   * Ela LÊ e só lê: nenhum provider, nenhum casamento novo, nenhuma execução
-   * criada. `no-store` porque a resposta muda com o que o banco tem agora — um
-   * GET servido de cache traria o estado anterior ao último casamento.
-   */
-  const loadVideoMatching = useCallback(async (articleId: string | null) => {
-    if (!selectedBrandId || !articleId) return;
-    try {
-      const busca = new URLSearchParams({ brandId: selectedBrandId, articleId });
-      const resposta = await fetch(`/api/editorial/radar-video-matching?${busca.toString()}`, { cache: "no-store" });
-      const corpo = await resposta.json();
-      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível carregar o casamento salvo.");
-      /*
-       * SEM EXECUÇÃO, O ESTADO CONTINUA `null`. A rota devolve cobertura vazia
-       * quando nunca se casou, e `[]` na tela significaria 'casou e não achou
-       * nada' — que é outra resposta.
-       */
-      setVideoMatching({ articleId, coverage: corpo.run ? corpo.coverage || [] : null, running: false, error: null, loadFailed: false });
-    } catch (error) {
-      /* §7 · erro de leitura é dito como erro, nunca como ausência. */
-      setVideoMatching({ articleId, coverage: null, running: false, error: error instanceof Error ? error.message : "Não foi possível carregar o casamento salvo.", loadFailed: true });
-    }
-  }, [selectedBrandId]);
 
 
   const handleExpandedChange = useCallback((id: string | null) => { const rowArticleId = id ? pipeline.radarItems.find(row => row.id === id)?.articleId : null; if ((serpActionRef.current && id && rowArticleId !== serpActionRef.current.articleId) || (reviewingArticleIdRef.current && id && rowArticleId !== reviewingArticleIdRef.current) || (serpAction && id && rowArticleId !== serpAction.articleId) || (reviewingArticleId && id && rowArticleId !== reviewingArticleId)) return; setExpandedRadarId(id); }, [pipeline.radarItems, reviewingArticleId, serpAction]);
@@ -624,37 +911,6 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * caminho de erro reabria — leitura falha, `readbackConfirmed` volta a falso,
    * o efeito redispara, e assim indefinidamente. Era o laço que piscava a tela.
    */
-  useEffect(() => {
-    if (!selectedBrandId) return;
-    /* O artigo é resolvido aqui dentro: `activeRadarItem` só existe depois do
-     * retorno antecipado de carregamento, e um hook não pode ficar lá embaixo. */
-    const articleId = resolveRadarWorkbenchArticleId({ selectedId: activeArticleId, rowIds: pipeline.radarItems.map(row => row.articleId) });
-    const chave = `${selectedBrandId}:${articleId || ""}`;
-    if (bibliotecaTentada.current.has(chave)) return;
-    bibliotecaTentada.current.add(chave);
-    void loadVideoLibrary(articleId);
-  }, [activeArticleId, loadVideoLibrary, pipeline.radarItems, selectedBrandId]);
-
-  /**
-   * O CASAMENTO GRAVADO, AO ABRIR — VIDEOS_3.4.1 · §2 e §5.
-   *
-   * Ele mora AQUI, e não lá embaixo junto de `activeRadarItem`, pelo mesmo
-   * motivo que o efeito acima: há um retorno antecipado de carregamento no
-   * meio do componente, e um hook depois dele não roda em todo render. React
-   * acusa mudança na ordem dos hooks e a tela fica preta — foi exatamente o
-   * que aconteceu quando este efeito nasceu no lugar errado.
-   *
-   * Uma tentativa por marca + artigo: o F5 lê, a troca de artigo relê.
-   */
-  useEffect(() => {
-    if (!selectedBrandId) return;
-    const articleId = resolveRadarWorkbenchArticleId({ selectedId: activeArticleId, rowIds: pipeline.radarItems.map(row => row.articleId) });
-    if (!articleId) return;
-    const chave = `${selectedBrandId}:${articleId}`;
-    if (casamentoTentado.current.has(chave)) return;
-    casamentoTentado.current.add(chave);
-    void loadVideoMatching(articleId);
-  }, [activeArticleId, loadVideoMatching, pipeline.radarItems, selectedBrandId]);
 
   if (state || !pipeline.snapshot) return state;
   const approved = approvedArticleVersions(pipeline.articleVersions, pipeline.versionEvents);
@@ -910,8 +1166,21 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * planilha: um número que só significa algo para quem escreveu o código. A
      * próxima ação é uma das três, com o mesmo nome do botão.
      */
+    /*
+     * ======== §7 · A PRÓXIMA AÇÃO SAI DA MESMA AUTORIDADE ========
+     *
+     * `radarPhase1NextAction` descreve as fases do pipeline do GOOGLE. Num
+     * artigo de vídeo ela devolvia "Iniciar Pesquisa" — inclusive depois de a
+     * investigação estar congelada, porque aquelas fases nunca souberam do
+     * YouTube. Nada aqui é fixo: a continuação é derivada do estado.
+     */
+    const projecaoDoPerfil = radarResearchProfileStateOfAnalysis({
+      payload: analiseCorrenteDe(row)?.payload || null,
+      profile: radarProfileOfTarget(searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE),
+    });
     r3.nextAction = collection.state === "STRUCTURAL_BLOCK" ? r3.nextAction
-      : radarPhase1NextAction(deepResearch.phase1);
+      : !projecaoDoPerfil.ownedByGooglePipeline ? projecaoDoPerfil.nextAction.label
+        : radarPhase1NextAction(deepResearch.phase1);
     /*
      * O ESPECIALISTA, RESOLVIDO UMA VEZ — GATE 18.7.
      *
@@ -1014,10 +1283,13 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    */
   const operationalRowFor = (row: RadarItem) => {
     const data = rowWorkbenchData(row);
+    const projecao = projecaoDePesquisa(row);
     return radarOperationalRow({
       view: data.r3.deepResearch,
       running: busyArticleId === row.articleId,
       legacyNextAction: data.r3.nextAction,
+      /* §9 · a pesquisa congelada impede a linha de negar o que aconteceu. */
+      research: projecao.ownedByGooglePipeline ? null : projecao,
     });
   };
 
@@ -1038,7 +1310,18 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * estado vem de `radarOperationalStatus`: a planilha não pode ter uma
      * verdade diferente da do Workbench sobre a mesma investigação.
      */
-    { id: "research", header: "Pesquisa", value: row => { const data = rowWorkbenchData(row); return `${data.r3.serp.provider} ${data.r3.serp.resultCount} ${data.r3.serp.pendingCount} ${data.r3.r4?.serp.state || ""}`; }, width: 200, render: row => { const data = rowWorkbenchData(row).r3; const modo = searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE; if (data.deepResearch) { const resumo = buildRadarResearchCardSummary({ view: data.deepResearch, mode: modo }); return <div><strong className="block text-sm text-foreground">{resumo.statusLabel}</strong><span className="mt-1 block text-sm text-text-muted">{resumo.modeLabel} · {resumo.counts.analyzed} de {resumo.counts.references} analisada(s)</span></div>; } const queue = data.r4?.serp; const queueLabel = queue?.state === "QUEUED" ? `Na fila ${queue.position || 1}/${queue.total || 1}` : queue?.state === "RUNNING" ? `Processando ${queue.position || 1}/${queue.total || 1}` : queue?.state === "WAITING_REVIEW" ? "Aguardando revisão" : queue?.state === "FAILED_RETRYABLE" ? "Falha · tentar novamente" : queue?.state === "FAILED_FINAL" ? (data.serp.collection?.state === "STRUCTURAL_BLOCK" ? "Coleta bloqueada" : "Falha final") : queue?.state === "COMPLETED" ? "Pesquisa concluída" : data.serp.resultCount ? `${data.serp.resultCount} resultado(s)` : "Não iniciada"; return <div><strong className="block text-sm text-foreground">{queueLabel}</strong><span className="mt-1 block text-sm text-text-muted">{radarSearchModeLabel(modo)} · {data.serp.pendingCount} pendente(s)</span></div>; } },
+    { id: "research", header: "Pesquisa", value: row => { const data = rowWorkbenchData(row); return `${data.r3.serp.provider} ${data.r3.serp.resultCount} ${data.r3.serp.pendingCount} ${data.r3.r4?.serp.state || ""}`; }, width: 200, render: row => { const data = rowWorkbenchData(row).r3; const modo = searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE;
+      /*
+       * ======== §7 · A LINHA LÊ A MESMA AUTORIDADE QUE O CARD ========
+       *
+       * Ela projetava `deepResearch` — o read-model do GOOGLE —, e por isso
+       * dizia "Não iniciada · Iniciar Pesquisa YouTube" sobre um artigo com
+       * investigação de vídeo congelada. Fora do perfil Google, quem responde
+       * é a projeção do perfil.
+       */
+      const projecao = projecaoDePesquisa(row);
+      if (!projecao.ownedByGooglePipeline) return <div><strong className="block text-sm text-foreground" data-testid={`radar-row-research-${row.articleId}`}>{projecao.statusLabel}</strong><span className="mt-1 block text-sm text-text-muted">{projecao.lines.slice(0, 2).join(" · ")}</span></div>;
+      if (data.deepResearch) { const resumo = buildRadarResearchCardSummary({ view: data.deepResearch, mode: modo }); return <div><strong className="block text-sm text-foreground">{resumo.statusLabel}</strong><span className="mt-1 block text-sm text-text-muted">{resumo.modeLabel} · {resumo.counts.analyzed} de {resumo.counts.references} analisada(s)</span></div>; } const queue = data.r4?.serp; const queueLabel = queue?.state === "QUEUED" ? `Na fila ${queue.position || 1}/${queue.total || 1}` : queue?.state === "RUNNING" ? `Processando ${queue.position || 1}/${queue.total || 1}` : queue?.state === "WAITING_REVIEW" ? "Aguardando revisão" : queue?.state === "FAILED_RETRYABLE" ? "Falha · tentar novamente" : queue?.state === "FAILED_FINAL" ? (data.serp.collection?.state === "STRUCTURAL_BLOCK" ? "Coleta bloqueada" : "Falha final") : queue?.state === "COMPLETED" ? "Pesquisa concluída" : data.serp.resultCount ? `${data.serp.resultCount} resultado(s)` : "Não iniciada"; return <div><strong className="block text-sm text-foreground">{queueLabel}</strong><span className="mt-1 block text-sm text-text-muted">{radarSearchModeLabel(modo)} · {data.serp.pendingCount} pendente(s)</span></div>; } },
     { id: "content", header: "Conteúdo", value: row => { const data = rowWorkbenchData(row).r3.content; return `${data.articleDnaVersion} ${data.needs} ${data.evidenceCount}`; }, width: 190, render: row => { const data = rowWorkbenchData(row).r3; const resumo = data.researchContext ? buildRadarArticleDnaSummary(data.researchContext) : null; return <div><strong className="block text-sm text-foreground">{resumo ? `${resumo.silo || "Sem silo"} · ${resumo.role || "Sem papel"}` : data.content.articleDnaVersion}</strong><span className="mt-1 block text-sm text-text-muted">{resumo ? `${resumo.keywordCount} keyword(s)${resumo.funnel ? ` · funil ${resumo.funnel.toLowerCase()}` : ""}` : `${data.content.needs} necessidade(s)`}</span></div>; } },
     /*
      * A LINHA LÊ A NECESSIDADE; O SUBTÍTULO, O FLUXO.
@@ -1056,7 +1339,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * que a coluna responde agora é quantas verificações estão prontas e
      * quantos pontos seguem em aberto — a mesma leitura do card.
      */
-    { id: "report", header: "Relatório", value: row => rowWorkbenchData(row).reportState, width: 190, render: row => { const data = rowWorkbenchData(row); const localReport = data.reportState !== "NOT_STARTED"; const resumo = data.r3.deepResearch ? buildRadarReportSummary({ observed: data.r3.deepResearch.observed, view: data.r3.deepResearch }) : null; const exigidos = resumo?.checks.filter(item => item.state !== "NOT_REQUIRED").length || 0; return <div><strong className="block text-sm text-foreground">{localReport ? radarR6ReportStateLabel(data.reportState) : data.r3.report.status}</strong><span className="mt-1 block text-sm text-text-muted">{resumo ? `${resumo.checks.filter(item => item.state === "READY").length} de ${exigidos} pronta(s) · ${resumo.blockers.length} em aberto` : `${data.r3.report.needs} necessidade(s) · ${data.r3.report.sentToPlanner ? "Planejador" : "Não enviado"}`}</span></div>; } },
+    { id: "report", header: "Relatório", value: row => rowWorkbenchData(row).reportState, width: 190, render: row => { const data = rowWorkbenchData(row); const localReport = data.reportState !== "NOT_STARTED"; const resumo = data.r3.deepResearch ? buildRadarReportSummary({ observed: data.r3.deepResearch.observed, view: data.r3.deepResearch, youtube: radarYoutubeReportEvidence(projecaoDePesquisa(row)), amazon: radarAmazonReportEvidence({ projecao: projecaoAmazon(row), payload: analiseCorrenteDe(row)?.payload || null }) }) : null; const exigidos = resumo?.checks.filter(item => item.state !== "NOT_REQUIRED").length || 0; return <div><strong className="block text-sm text-foreground">{localReport ? radarR6ReportStateLabel(data.reportState) : data.r3.report.status}</strong><span className="mt-1 block text-sm text-text-muted">{resumo ? `${resumo.checks.filter(item => item.state === "READY").length} de ${exigidos} pronta(s) · ${resumo.blockers.length} em aberto` : `${data.r3.report.needs} necessidade(s) · ${data.r3.report.sentToPlanner ? "Planejador" : "Não enviado"}`}</span></div>; } },
     { id: "nextAction", header: "Próxima ação", value: row => operationalRowFor(row).nextAction, width: 235, render: row => <span className="block whitespace-normal text-sm leading-5 text-foreground">{operationalRowFor(row).nextAction}</span> },
     { id: "format", header: "Formato", value: row => row.format, filterOptions: [...new Set(pipeline.radarItems.map(item => item.format))].map(value => ({ label: value, value })), width: 110 },
     /*
@@ -1111,6 +1394,21 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * cliques rápidos produziam duas requisições, dois snapshots e dois avisos
    * de sucesso. `busyArticleId` é estado de render e chega tarde demais.
    */
+  /**
+   * ============ A ÚNICA PORTA ATÉ A SERP DO GOOGLE ============
+   *
+   * Duas chamadas ao provider seriam duas políticas: uma delas acabaria sem o
+   * bloqueio de duplo clique, sem a localidade da marca ou sem o vínculo do
+   * ArticleDNA — e a divergência só apareceria na fatura.
+   *
+   * Quem chama daqui são dois fluxos com propósitos diferentes: `collect`, que
+   * é a investigação Google principal com sua curadoria, e o apoio do perfil
+   * YouTube/Amazon, que coleta e PARA (§5). A chamada é a mesma; o que cada um
+   * faz com o snapshot é que muda.
+   */
+  const coletarSerpDoProvider = (row: RadarItem) =>
+    pipeline.collectSerp(row.articleId, pipeline.snapshot!.brand.localizacao || "Brasil", row.articleDnaVersionId);
+
   const collect = async (row: RadarItem): Promise<"WAITING_REVIEW" | "FAILED_RETRYABLE" | "FAILED_FINAL"> => {
     if (collectingArticleIdRef.current) return "FAILED_RETRYABLE";
     const resolved = resolveRowKeyword(row);
@@ -1128,7 +1426,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     try {
       setCollectionState(row.articleId, "COLLECTING", null);
       setNotice("Pesquisando a SERP real via DataForSEO…");
-      const record = await pipeline.collectSerp(row.articleId, pipeline.snapshot!.brand.localizacao || "Brasil", row.articleDnaVersionId);
+      const record = await coletarSerpDoProvider(row);
       ultimaColetaRef.current = { articleId: row.articleId, research: record.research || null };
       setCollectionState(row.articleId, "PERSISTING", null);
       updateLocalState(row.articleId, current => ({ ...current, serp: { ...current.serp, state: "WAITING_REVIEW", position: current.serp.position || 1, total: current.serp.total || 1, error: null } }));
@@ -1156,7 +1454,25 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   const radarItemForArticleId = (articleId: string) => pipeline.radarItems.find(row => row.articleId === articleId);
   const radarItemIdsForArticles = (articleIds: string[]) => articleIds.map(articleId => radarItemForArticleId(articleId)?.id).filter((id): id is string => Boolean(id));
   const transition = (articleIds: string[], target: RadarItem["state"], label: string) => { const radarItemIds = radarItemIdsForArticles(articleIds); if (!radarItemIds.length) return; history.capture(label); pipeline.updateRadarState(radarItemIds, target); };
-  const sendToPlanner = (articleIds: string[]) => { const radarItemIds = radarItemIdsForArticles(articleIds); history.capture(`Enviar ${articleIds.length} artigo(s) ao Planejador`); return pipeline.importApprovedToPlanner(radarItemIds); };
+  /**
+   * ============ §4 · O LOTE COORDENA N HANDOFFS ============
+   *
+   * Ele chamava `importApprovedToPlanner`, que move a esteira e nada mais:
+   * sem dossiê, sem prontidão, sem identidade de ArticleDNA. Um artigo que
+   * saía por ali chegava ao Planejador SEM evidência atrás, e o item aparecia
+   * lá como qualquer outro.
+   *
+   * Agora ele repete a MESMA porta do botão individual — e junta os
+   * desfechos, um por artigo.
+   */
+  const sendToPlanner = async (articleIds: string[]) => {
+    if (!selectedBrandId) return [];
+    history.capture(`Enviar ${articleIds.length} artigo(s) ao Planejador`);
+    const resultados = await postRadarPlannerHandoffBatch({ brandId: selectedBrandId, articleIds });
+    /* A tela relê cada artigo: o estado de envio é do servidor. */
+    for (const item of resultados) await pipeline.reloadRadarAnalysis(item.articleId).catch(() => {});
+    return resultados;
+  };
   const startSerpBatch = async (ids: string[], mode: "default" | "explicit_refresh" = "default") => {
     const rows = ids.map(id => radarItemForArticleId(id)).filter((row): row is RadarItem => Boolean(row));
     const actions = availableBulkActions(selectedSnapshotsFor(rows));
@@ -1338,9 +1654,1107 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    *
    * A frase diz o custo, porque o custo é o que torna o clique repetido caro.
    */
+  /* ==================== PESQUISA → YOUTUBE · YOUTUBE_SEARCH_1 =================== */
+
+  /**
+   * O START DO YOUTUBE — ação humana, e a única porta para o provider.
+   *
+   * Ele monta o plano no domínio, manda coletar, constrói o universo e grava a
+   * corrida na versão da análise. Nenhum efeito chega aqui: cada consulta é uma
+   * chamada paga, e quem decide gastá-la é quem clica.
+   *
+   * A guarda é uma `ref` e fecha antes do primeiro `await`: estado de render
+   * chega tarde, e dois cliques no mesmo tique pagariam duas coletas.
+   */
+
+  /**
+   * ======== §2, §3 e §5 · O APOIO DO GOOGLE, DENTRO DO MESMO START ========
+   *
+   * O botão "Adicionar leitura Google" chamava `startSerpAnalysis`, que é
+   * INICIAR CURADORIA — o caminho da investigação Google principal. Ele exige
+   * snapshot canônico completo, e respondia dizendo exatamente isso. O apoio
+   * nunca coletou coisa alguma.
+   *
+   * O que o apoio precisa é de uma COLETA: a mesma que o perfil Google usa,
+   * sobre a keyword principal, uma vez. Ela produz snapshot com `serpFeatures`,
+   * alimenta a Feature Intelligence e entra no cruzamento — e não abre
+   * curadoria, não pede seleção de dez concorrentes e não cria um segundo
+   * FINALIZE.
+   *
+   * O papel fica GRAVADO (§4). Sem isso, meses depois ninguém distingue "o
+   * Google foi a radiografia principal deste artigo" de "o Google sustentou um
+   * vídeo": os dois produzem o mesmo snapshot.
+   */
+  const coletarApoioDoGoogle = async (target: RadarItem, packageRunId: string): Promise<RadarSupportResearchRecord | null> => {
+    const data = rowWorkbenchData(target);
+    const perfil = radarProfileOfTarget(searchModeByArticle[target.articleId] || RADAR_DEFAULT_SEARCH_MODE);
+    const principal = data.researchContext?.keywords.find(item => item.identity.role === "principal")?.identity.text || null;
+    const apoio = radarProfileSupportPlan({ profile: perfil, primaryKeyword: principal });
+    if (!apoio) return null;
+
+    /*
+     * UM SNAPSHOT QUE JÁ EXISTE NÃO É RECOLETADO.
+     *
+     * O artigo pode ter passado pelo perfil Google antes de virar vídeo. Pagar
+     * a mesma SERP de novo para carimbar "apoio coletado" cobraria da pessoa a
+     * troca de perfil.
+     */
+    const existente = data.latestSerpRecord?.research || null;
+    if (existente) {
+      const reaproveitado = {
+        source: apoio.source, role: apoio.role, keyword: apoio.keyword, packageRunId,
+        collectedAt: new Date().toISOString(), serpSnapshotId: existente.id, failureReason: null,
+      };
+      await gravarYoutube(target, { supportResearch: reaproveitado }, await versaoCorrenteNoServidor(target)).catch(() => {});
+      return reaproveitado;
+    }
+
+    try {
+      const registro = await coletarSerpDoProvider(target);
+      const coletado = {
+        source: apoio.source, role: apoio.role, keyword: apoio.keyword, packageRunId,
+        collectedAt: new Date().toISOString(),
+        serpSnapshotId: registro.research?.id || null,
+        failureReason: null,
+      };
+      await gravarYoutube(target, { supportResearch: coletado }, await versaoCorrenteNoServidor(target));
+      return coletado;
+    } catch (erro) {
+      /*
+       * §7 · A FALHA DO APOIO NÃO DERRUBA A PRINCIPAL.
+       *
+       * As consultas do YouTube já foram pagas e já estão gravadas. Propagar
+       * este erro faria o pacote inteiro parecer falho e convidaria a um novo
+       * START que cobraria tudo de novo para corrigir uma leitura que custou
+       * uma consulta. O motivo fica gravado, e o retry alcança só o apoio.
+       */
+      const motivo = erro instanceof Error ? erro.message : "A leitura de apoio do Google falhou.";
+      const falhou = {
+        source: apoio.source, role: apoio.role, keyword: apoio.keyword, packageRunId,
+        collectedAt: null, serpSnapshotId: null, failureReason: motivo.slice(0, 500),
+      };
+      await gravarYoutube(target, { supportResearch: falhou }, await versaoCorrenteNoServidor(target)).catch(() => {});
+      return falhou;
+    }
+  };
+
+  /** §7 · o retry que alcança SÓ o apoio. A principal já foi paga. */
+  const repetirApoioDoGoogle = async () => {
+    const target = activeRadarItem;
+    if (!target) { setNotice("Selecione um artigo antes de repetir o apoio."); return; }
+    const corrida = analiseCorrenteDe(target)?.payload.youtubeSearch || null;
+    if (!corrida) { setNotice("Não há pesquisa principal a que este apoio pertença."); return; }
+    if (youtubeEmVoo.current || youtubeBusy || busyArticleId) { setNotice("Outra coleta ainda está em andamento neste artigo."); return; }
+    setYoutubeBusy(true);
+    try {
+      const apoio = await coletarApoioDoGoogle(target, corrida.runId);
+      await pipeline.reloadRadarAnalysis(target.articleId);
+      /* O que a função gravou, não o que o render anterior tinha em mãos. */
+      setNotice(apoio?.collectedAt
+        ? "Apoio do Google coletado. A pesquisa principal não foi refeita."
+        : apoio?.failureReason || "Este perfil não planeja apoio do Google.");
+    } finally { setYoutubeBusy(false); }
+  };
+
+  /**
+   * ============ §6 · O PACOTE, LIDO DO QUE ESTÁ GRAVADO ============
+   *
+   * Uma investigação, não duas. A tela deixou de listar fontes com botões
+   * porque somar leitura deixou de ser decisão de clique: o perfil responde.
+   */
+  /**
+   * ============ §3 · A AUTORIDADE ÚNICA DE ESTADO DA PESQUISA ============
+   *
+   * Card, corpo, tabela, próxima ação e botões leem DAQUI. Antes havia quatro
+   * cálculos independentes, e a tela somava "não iniciada" com "finalizada"
+   * sobre a mesma investigação.
+   */
+  const projecaoDePesquisa = (row: RadarItem | null): RadarResearchProfileProjection =>
+    radarResearchProfileStateOfAnalysis({
+      payload: row ? analiseCorrenteDe(row)?.payload || null : null,
+      profile: radarProfileOfTarget(row ? searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE),
+    });
+
+  /**
+   * ====== §7 e §19 · O BLUEPRINT CANÔNICO, MONTADO UMA VEZ ======
+   *
+   * Área Pesquisa, cards, Relatório e o futuro handoff ao Planejador leem daqui.
+   * Montá-lo dentro de componentes React repetiria, com um dado mais caro, o
+   * defeito que o 1.1 fechou: quatro leituras divergindo sobre a mesma
+   * investigação, cada uma defensável isolada.
+   */
+  const blueprintCanonico = (row: RadarItem | null, perfil?: RadarResearchProfile): RadarCompetitiveBlueprintView => {
+    const analise = row ? analiseCorrenteDe(row)?.payload || null : null;
+    const corrida = analise?.youtubeSearch || null;
+    const contexto = row ? rowWorkbenchData(row).researchContext : null;
+
+    /*
+     * ============ §31 · UMA MONTAGEM, TRÊS PERFIS ============
+     *
+     * O perfil pode ser FORÇADO por quem sabe qual painel está desenhando —
+     * o da Amazon monta o dele mesmo quando o seletor ainda aponta outro
+     * lugar. Uma segunda função para isso teria a mesma forma e divergiria
+     * na primeira correção feita só de um lado.
+     */
+    const gravadoAmazon = analise?.amazonBlueprint || null;
+
+    return radarCompetitiveBlueprintViewOfAnalysis({
+      profile: perfil || radarProfileOfTarget(row ? searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE),
+      /* A Amazon entra PRONTA: o adapter roda no servidor e o resultado é gravado. */
+      amazonFrozen: analise?.amazonFrozenInvestigation || null,
+      amazonBlueprint: gravadoAmazon?.profile === "AMAZON" ? gravadoAmazon : null,
+      amazonUniverseSize: analise?.amazonSearch?.universe.length || 0,
+      articleId: row?.articleId || "sem-artigo",
+      articleDnaVersionId: row?.articleDnaVersionId || "sem-dna",
+      /*
+       * O hash do DNA NÃO É INVENTADO quando não está gravado nesta versão.
+       *
+       * Ele existe no pacote congelado do Google; num artigo de vídeo pode não
+       * haver nenhum. `null` diz "não sei", que é diferente de um hash errado
+       * amarrando a fotografia ao DNA de outra coisa.
+       */
+      articleDnaContentHash: analise?.finalizedBundle?.binding.articleDnaContentHash ?? null,
+      frozen: analise?.youtubeFrozenInvestigation || null,
+      /*
+       * O recálculo só é montado quando NÃO há fotografia — e a autoridade
+       * confere isso de novo do lado dela. Calcular sempre custaria um blueprint
+       * por render para ser descartado.
+       */
+      liveBlueprint: !analise?.youtubeFrozenInvestigation && corrida?.state === "COLLECTED" && corrida.universe.length
+        ? buildRadarYoutubeBlueprint({
+          run: corrida,
+          declaredIntent: contexto ? radarDeclaredArticleIntent(contexto.article) : null,
+          editorialTopics: contexto?.editorialTopics || [],
+          generatedAt: new Date().toISOString(),
+        })
+        : null,
+      liveMultimodal: analise?.youtubeFrozenInvestigation ? null : multimodalDoArtigo(row),
+      primaryKeyword: contexto?.keywords.find(item => item.identity.role === "principal")?.identity.text || null,
+      supportSnapshotId: analise?.supportResearch?.serpSnapshotId ?? null,
+      /*
+       * 1.1 · §1 · O MODELO DO GOOGLE ENTRA PRONTO.
+       *
+       * A autoridade operacional dele continua sendo o pipeline; o adapter lê
+       * o RESULTADO. Recalcular aqui seria assumir a investigação.
+       */
+      googleObserved: row ? rowWorkbenchData(row).r3.deepResearch?.observed ?? null : null,
+      /* §4 · a fotografia canônica do Google, quando ela existe. */
+      googleFrozenAt: analise?.finalizedBundle?.frozenAt ?? null,
+      serpSnapshotId: analise?.serpSnapshotId ?? null,
+      generatedAt: new Date().toISOString(),
+    });
+  };
+
+  /**
+   * ===== PROFILES_2 · §2 · O PRODUTO EDITORIAL DE CADA PERFIL =====
+   *
+   * A mesma casca do Google, derivada do blueprint canônico que já existe —
+   * §22: se o campo existe, reusar. O que muda entre os perfis é a FORMA do
+   * produto, não a autoridade: o ArticleDNA continua sendo o núcleo, e ele
+   * entra aqui pelo contexto resolvido do artigo.
+   */
+  const modeloEditorialDoPerfil = (row: RadarItem | null, perfil: "YOUTUBE" | "AMAZON") => {
+    const contextoDoArtigo = row ? rowWorkbenchData(row).researchContext : null;
+    const vista = blueprintCanonico(row, perfil);
+    const canonico = vista.blueprint;
+    if (!contextoDoArtigo || !canonico) return null;
+
+    if (perfil === "YOUTUBE" && canonico.profile === "YOUTUBE") {
+      return buildRadarEditorialVideoModel({ context: contextoDoArtigo, blueprint: canonico });
+    }
+    if (perfil === "AMAZON" && canonico.profile === "AMAZON") {
+      /*
+       * ===== §23, §24 e §30 · O ALVO GRAVADO MANDA NO MODELO COMERCIAL =====
+       *
+       * A seleção de candidatos é recalculada aqui, sobre o universo já
+       * coletado: ela é determinística e não custa chamada nenhuma. Congelá-la
+       * seria guardar uma terceira cópia do que a corrida já tem.
+       */
+      const configuracao = row ? analiseCorrenteDe(row)?.payload.amazonEditorialSetup || null : null;
+      const corridaAmazon = row ? analiseCorrenteDe(row)?.payload.amazonSearch || null : null;
+
+      /*
+       * ===== 1.1 · §2 e §11 · O RANKING NUNCA VÊ O UNIVERSO BRUTO =====
+       *
+       * A compatibilidade com o alvo acontece ANTES da ordenação. Rodar o
+       * critério sobre os 59 produtos da coleta real produzia uma lista bem
+       * ordenada comparando sérum Nivea com creme de mãos Nivea e sérum Dove.
+       */
+      const elegiveis = configuracao && corridaAmazon
+        ? radarAmazonEligibleCandidates({
+          intent: configuracao.intent,
+          target: configuracao.target,
+          universe: corridaAmazon.universe,
+        })
+        : null;
+
+      return buildRadarEditorialCommercialModel({
+        context: contextoDoArtigo,
+        blueprint: canonico,
+        setup: configuracao,
+        selection: configuracao && corridaAmazon && elegiveis
+          ? radarAmazonSelectCandidates({
+            intent: configuracao.intent,
+            universe: elegiveis.eligible,
+            observedCount: elegiveis.rawCount,
+            queryCount: corridaAmazon.queries.filter(item => item.executed).length,
+          })
+          : null,
+        eligibility: elegiveis,
+        /* O plano de links lê URL e título por ASIN; a lista vem da shortlist. */
+        universe: corridaAmazon?.universe || [],
+      });
+    }
+    return null;
+  };
+
+  const pacoteDePesquisa = (row: RadarItem | null): RadarResearchPackage => {
+    const perfil = radarProfileOfTarget(row ? searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE);
+    const analise = row ? analiseCorrenteDe(row)?.payload || null : null;
+    const contexto = row ? rowWorkbenchData(row).researchContext : null;
+    const plano = radarResearchPlanOfAnalysis(analise);
+
+    /*
+     * ====== 2.1 · §9 e §10 · A COLETA PRINCIPAL VEM DA AUTORIDADE ======
+     *
+     * Lia-se `analise.youtubeSearch` direto, e o transporte compacto zera esse
+     * campo depois do freeze. O resultado era a tela dizendo "Finalizado · 3
+     * consultas · 38 vídeos" no cabeçalho e "não coletada" três linhas abaixo.
+     *
+     * A leitura agora é a mesma dos outros cards: fotografia primeiro.
+     */
+    const principal = radarResearchPrimaryCollection({ payload: analise, profile: perfil });
+
+    return buildRadarResearchPackage({
+      profile: perfil,
+      primaryKeyword: contexto?.keywords.find(item => item.identity.role === "principal")?.identity.text || null,
+      primaryRunning: principal.running,
+      primaryCollected: principal.collected,
+      primaryFailed: principal.failed,
+      primaryQueryCount: principal.queryCount,
+      primaryResultCount: principal.resultCount,
+      support: analise?.supportResearch || null,
+      /* Uma SERP do Google já gravada satisfaz o apoio — §6. */
+      webSerpCollected: plano.sources.includes("WEB_SERP"),
+    });
+  };
+
+  /**
+   * ============ §16 · A LEITURA ÚNICA DO PERFIL AMAZON ============
+   *
+   * Cabeçalho, corpo, tabela, barra de ação e próxima ação leem daqui. O perfil
+   * é fixado em "AMAZON" — e não derivado do seletor — porque esta leitura
+   * responde pelo painel da Amazon, que só é montado nesse modo.
+   */
+  const projecaoAmazon = (row: RadarItem | null): RadarResearchProfileProjection =>
+    radarResearchProfileStateOfAnalysis({
+      payload: row ? analiseCorrenteDe(row)?.payload || null : null,
+      profile: "AMAZON",
+    });
+
+  /**
+   * ===== §8 a §18 · A CONFIGURAÇÃO DO ALVO, POR ARTIGO =====
+   *
+   * Ela vive na tela até o START — é rascunho, e rascunho não ocupa banco. O que
+   * fica gravado é a configuração que ORIGINOU uma coleta, e quem a grava é o
+   * servidor, na mesma versão da corrida.
+   *
+   * Depois do START, a gravada MANDA: reabrir o artigo mostra o alvo que foi
+   * pesquisado, e não o que estava no formulário de alguém.
+   */
+
+  /**
+   * ===== 1.1 · §18 · A CONFIGURAÇÃO CONGELA COM A COLETA =====
+   *
+   * Depois de um START com coleta gravada, intenção, alvo, classe, marca e
+   * necessidade ficam travados para AQUELA corrida. Sem isto, trocar `TOP_BEST`
+   * por `TOP_VALUE` na tela produzia um blueprint novo sobre evidência velha —
+   * com a aparência de ter sido pesquisado assim.
+   *
+   * O caminho para mudar de ideia continua existindo e tem nome: zerar a
+   * investigação e coletar de novo.
+   */
+  const setupDoArtigo = (row: RadarItem | null) => {
+    if (!row) return { intent: null, target: null, rawInput: "", locked: false };
+    const analise = analiseCorrenteDe(row)?.payload;
+    const gravado = analise?.amazonEditorialSetup || null;
+    const corrida = analise?.amazonSearch || null;
+    const travado = Boolean(gravado && corrida);
+
+    const doGravado = gravado
+      ? {
+        intent: gravado.intent,
+        target: gravado.target,
+        rawInput: gravado.target.products.map(item => item.input).join("\n"),
+        locked: travado,
+      }
+      : { intent: null, target: null, rawInput: "", locked: false };
+
+    /* Travado: o rascunho não tem como discordar da evidência que já existe. */
+    if (travado) return doGravado;
+
+    const rascunho = amazonSetupPorArtigo[row.articleId];
+    return rascunho ? { ...rascunho, locked: false } : doGravado;
+  };
+
+  const alterarSetup = (row: RadarItem | null, patch: Partial<{
+    intent: RadarAmazonEditorialIntent | null;
+    target: RadarAmazonResearchTarget | null;
+    rawInput: string;
+  }>) => {
+    if (!row) return;
+    setAmazonSetupPorArtigo(atual => ({
+      ...atual,
+      [row.articleId]: { ...setupDoArtigo(row), ...patch },
+    }));
+  };
+
+  /**
+   * ===== 1.1 · §2, §10 e §16 · AS TRÊS CONTAGENS, DE UMA CADEIA SÓ =====
+   *
+   * `null` quando não há alvo declarado ou coleta: aí a tela continua dizendo o
+   * que sempre disse, e não inventa uma compatibilidade que ninguém configurou.
+   */
+  const contagensDaAmazon = (row: RadarItem | null) => {
+    const analise = row ? analiseCorrenteDe(row)?.payload : null;
+    const configuracao = analise?.amazonEditorialSetup || null;
+    const corrida = analise?.amazonSearch || null;
+    if (!configuracao || !corrida) return null;
+
+    const elegiveis = radarAmazonEligibleCandidates({
+      intent: configuracao.intent,
+      target: configuracao.target,
+      universe: corrida.universe,
+    });
+    const selecao = radarAmazonSelectCandidates({
+      intent: configuracao.intent,
+      universe: elegiveis.eligible,
+      observedCount: elegiveis.rawCount,
+      queryCount: corrida.queries.filter(item => item.executed).length,
+    });
+
+    return {
+      observed: elegiveis.rawCount,
+      eligible: elegiveis.eligible.length,
+      shortlist: selecao.candidates.length,
+    };
+  };
+
+  const planoAmazon = (row: RadarItem | null) => {
+    const contexto = row ? rowWorkbenchData(row).researchContext : null;
+    const configuracao = setupDoArtigo(row);
+    return buildRadarAmazonQueryPlan({
+      articleId: row?.articleId || "sem-artigo",
+      articleDnaVersionId: row?.articleDnaVersionId || "sem-dna",
+      /* §17 · sem keyword principal não há consulta — o título não substitui. */
+      primaryKeyword: contexto?.keywords.find(item => item.identity.role === "principal")?.identity.text || null,
+      /* §21 · quando há alvo declarado, é ele que monta a consulta. */
+      setup: configuracao.intent && configuracao.target
+        ? { intent: configuracao.intent, target: configuracao.target }
+        : null,
+    });
+  };
+
+  /**
+   * ===== §19 e §20 · UMA AÇÃO HUMANA, UMA CHAMADA =====
+   *
+   * Nada aqui roda no mount, no F5 ou ao digitar. A resolução por nome custa uma
+   * consulta à loja, e ela sai porque alguém clicou no botão que diz isso.
+   */
+  const resolverProdutoAmazon = async (row: RadarItem | null, entrada: RadarAmazonTargetProduct) => {
+    if (!row || amazonResolving) return;
+    setAmazonResolving(true);
+    setAmazonCandidates(null);
+    setNotice("");
+    try {
+      const resposta = await fetch("/api/editorial/radar-amazon-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          action: "resolve-product",
+          brandId: row.brandId,
+          articleId: row.articleId,
+          articleDnaVersionId: row.articleDnaVersionId,
+          queries: [{
+            queryId: radarAmazonQueryId(entrada.input),
+            text: entrada.input,
+            origin: "PRIMARY_KEYWORD",
+            reason: "Resolução de um produto informado por nome.",
+          }],
+        }),
+      });
+      const corpo = await resposta.json().catch(() => ({}));
+      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível localizar o produto na Amazon.");
+      setAmazonCandidates({ term: entrada.input, items: corpo.candidates || [] });
+      setNotice(corpo.headline || "");
+    } catch (erro) {
+      setNotice(erro instanceof Error ? erro.message : "Falha ao localizar o produto na Amazon.");
+    } finally {
+      setAmazonResolving(false);
+    }
+  };
+
+  /**
+   * §19 · A ESCOLHA HUMANA VIRA IDENTIDADE.
+   *
+   * O ASIN escolhido substitui a entrada por nome que o originou — e a lista
+   * continua deduplicada, para o mesmo produto escolhido duas vezes não virar
+   * dois lados de uma comparação.
+   */
+  const escolherCandidatoAmazon = (row: RadarItem | null, candidato: { asin: string; title: string; imageUrl: string | null }) => {
+    if (!row || !amazonCandidates) return;
+    const configuracao = setupDoArtigo(row);
+    const entradas = radarAmazonParseTargetInput(configuracao.rawInput).map(item =>
+      item.input === amazonCandidates.term && !item.resolvedAsin
+        ? { ...item, resolvedAsin: candidato.asin, resolvedTitle: candidato.title, resolvedImageUrl: candidato.imageUrl }
+        : item);
+
+    alterarSetup(row, {
+      target: configuracao.target
+        ? { ...configuracao.target, products: radarAmazonDedupeProducts(entradas) }
+        : null,
+    });
+    setAmazonCandidates(null);
+  };
+
+  /**
+   * ============ §1, §3 e §20 · UM START, UMA CHAMADA, UM AVISO ============
+   *
+   * O navegador manda a intenção e lê a resposta. O apoio do Google acontece
+   * DENTRO da mesma requisição, no servidor: encadeá-lo aqui, como o YouTube
+   * faz, faria uma coleta paga depender de a aba sobreviver entre as duas
+   * chamadas — fechar no meio deixava a principal cobrada e o apoio nunca
+   * feito.
+   *
+   * E o aviso final é UM: o que o servidor devolveu sobre o pacote que gravou.
+   */
+  const startAmazonSearch = async () => {
+    const target = activeRadarItem;
+    if (!target) { setNotice("Selecione um artigo antes de pesquisar na Amazon."); return; }
+    if (amazonEmVoo.current) { setNotice("A pesquisa Amazon deste artigo já está em andamento."); return; }
+
+    /* Cortesia, não autoridade: quem decide de novo é a rota, sobre o gravado. */
+    const compromisso = compromissoDeModo(target, "AMAZON");
+    if (!compromisso.canStart) { setNotice(compromisso.reason || "Este artigo já descreve outro universo."); return; }
+
+    /*
+     * §17 e §20 · NENHUMA CHAMADA PAGA ANTES DE O ALVO FECHAR.
+     *
+     * Cortesia de tela: o botão já fica desabilitado. Quem recusa de verdade é a
+     * rota, sobre o pedido que chegou — esta guarda existe para a mensagem ser
+     * específica em vez de virar "consulta ausente".
+     */
+    const configuracao = setupDoArtigo(target);
+    if (configuracao.intent) {
+      const validacao = radarAmazonValidateSetup({ intent: configuracao.intent, target: configuracao.target });
+      if (!validacao.valid) { setNotice(validacao.blockedReason || "A configuração do alvo está incompleta."); return; }
+    }
+
+    const plano = planoAmazon(target);
+    if (!plano.queries.length) { setNotice(plano.limitations[0] || "Não há consulta central para pesquisar na Amazon."); return; }
+
+    amazonEmVoo.current = target.articleId;
+    setAmazonBusy(true);
+    setNotice("");
+
+    try {
+      const resposta = await fetch("/api/editorial/radar-amazon-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          action: "collect",
+          brandId: target.brandId,
+          articleId: target.articleId,
+          articleDnaVersionId: target.articleDnaVersionId,
+          queries: plano.queries.map(consulta => ({
+            queryId: consulta.queryId, text: consulta.text, origin: consulta.origin, reason: consulta.reason,
+          })),
+          limitations: plano.limitations,
+          /* §18 · a configuração viaja com o START, e o servidor a valida e grava. */
+          editorialSetup: configuracao.intent && configuracao.target
+            ? { intent: configuracao.intent, target: configuracao.target }
+            : null,
+        }),
+      });
+      const corpo = await resposta.json().catch(() => ({}));
+      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível coletar a pesquisa da Amazon.");
+
+      /* O que a tela mostra é o que o banco confirmou, nunca o que enviamos. */
+      await pipeline.reloadRadarAnalysis(target.articleId);
+      setNotice(corpo.headline || "Pesquisa Amazon concluída.");
+    } catch (erro) {
+      /* Quem fecha a corrida como falha é o SERVIDOR. A tela só relê. */
+      await pipeline.reloadRadarAnalysis(target.articleId).catch(() => {});
+      setNotice(erro instanceof Error ? erro.message : "Falha na pesquisa Amazon.");
+    } finally {
+      setAmazonBusy(false);
+      amazonEmVoo.current = null;
+    }
+  };
+
+  /**
+   * §19 · A RETOMADA ALCANÇA SÓ O APOIO.
+   *
+   * Refazer a primária para corrigir o apoio cobraria de novo a coleta cara
+   * para arrumar a barata. A rota recusa (409) quando não há o que repetir — e
+   * essa recusa é dela, não desta tela.
+   */
+  const retryAmazonSupport = async () => {
+    const target = activeRadarItem;
+    if (!target) return;
+    if (amazonEmVoo.current) { setNotice("A pesquisa Amazon deste artigo já está em andamento."); return; }
+
+    const plano = planoAmazon(target);
+    amazonEmVoo.current = target.articleId;
+    setAmazonBusy(true);
+    try {
+      const resposta = await fetch("/api/editorial/radar-amazon-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          action: "retry-support",
+          brandId: target.brandId,
+          articleId: target.articleId,
+          articleDnaVersionId: target.articleDnaVersionId,
+          queries: plano.queries.length
+            ? plano.queries.map(consulta => ({ queryId: consulta.queryId, text: consulta.text, origin: consulta.origin, reason: consulta.reason }))
+            : [{ queryId: "apoio", text: target.articleId, origin: "PRIMARY_KEYWORD", reason: "Retomada do apoio do Google." }],
+        }),
+      });
+      const corpo = await resposta.json().catch(() => ({}));
+      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível repetir o apoio do Google.");
+      await pipeline.reloadRadarAnalysis(target.articleId);
+      setNotice(corpo.headline || "Apoio do Google coletado.");
+    } catch (erro) {
+      setNotice(erro instanceof Error ? erro.message : "Falha ao repetir o apoio do Google.");
+    } finally {
+      setAmazonBusy(false);
+      amazonEmVoo.current = null;
+    }
+  };
+
+  /**
+   * ============ §2 e §23 · AS AÇÕES QUE NÃO GASTAM NADA ============
+   *
+   * `analyze` e `finalize` derivam e congelam o que JÁ foi coletado e pago:
+   * provider calls = 0 nas duas. Elas compartilham o mesmo caminho porque
+   * têm a mesma forma — mandar a intenção, reler o banco, mostrar o que o
+   * servidor confirmou — e duplicá-lo criaria dois lugares para divergir.
+   */
+  const acaoAmazonSemProvider = async (action: "analyze" | "finalize", recusa: string) => {
+    const target = activeRadarItem;
+    if (!target) return;
+    if (amazonEmVoo.current) { setNotice("A pesquisa Amazon deste artigo já está em andamento."); return; }
+
+    amazonEmVoo.current = target.articleId;
+    setAmazonBusy(true);
+    try {
+      const resposta = await fetch("/api/editorial/radar-amazon-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          action,
+          brandId: target.brandId,
+          articleId: target.articleId,
+          articleDnaVersionId: target.articleDnaVersionId,
+        }),
+      });
+      const corpo = await resposta.json().catch(() => ({}));
+      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || recusa);
+
+      /* O que a tela mostra é o que o banco confirmou, nunca o que enviamos. */
+      await pipeline.reloadRadarAnalysis(target.articleId);
+      setNotice(corpo.headline || recusa);
+    } catch (erro) {
+      setNotice(erro instanceof Error ? erro.message : recusa);
+    } finally {
+      setAmazonBusy(false);
+      amazonEmVoo.current = null;
+    }
+  };
+
+  /**
+   * §27 · REABRIR TIRA DO CORRENTE — e é explícito.
+   *
+   * Zera a corrida, o pacote, o blueprint e a fotografia do perfil Amazon.
+   * Deixar qualquer um deles para trás produziria uma tela meio finalizada:
+   * uma fotografia sem coleta, ou um blueprint descrevendo uma prateleira
+   * que não está mais ali.
+   */
+  const resetAmazonSearch = async () => {
+    const target = activeRadarItem;
+    if (!target) return;
+    setAmazonBusy(true);
+    try {
+      await gravarYoutube(target, {
+        amazonSearch: null, amazonBlueprint: null, amazonFrozenInvestigation: null, researchPackage: null,
+      }, await versaoCorrenteNoServidor(target));
+      setNotice("Investigação Amazon zerada. Uma coleta nova custa outra chamada à Amazon.");
+    } catch (erro) {
+      setNotice(erro instanceof Error ? erro.message : "Não foi possível zerar a pesquisa Amazon.");
+    } finally {
+      setAmazonBusy(false);
+    }
+  };
+
+  /**
+   * ============ §24 · A MESMA AUTORIDADE DO BUILDER ============
+   *
+   * A tela NÃO decide elegibilidade por conta própria. `radarPrimaryProfileOfAnalysis`
+   * é a mesma função que o servidor chama para montar o dossiê: duplicar a
+   * regra em React é como o Relatório passou a dizer "pronto" ao lado de um
+   * pacote que o domínio recusaria — e ninguém descobre isso até a entrega.
+   */
+  /**
+   * ===== PORTABLE_EXPORT_1 · §3 e §17 · O DOSSIÊ PORTÁTIL =====
+   *
+   * ==================== O ESCOPO É O QUE A TELA MOSTRA ====================
+   *
+   * Havendo seleção, exporta o selecionado. Sem seleção, exporta os finalizados
+   * do filtro atual — e o servidor recusa, com motivo, o que não estiver pronto.
+   *
+   * ==================== QUEM MONTA É O SERVIDOR ====================
+   *
+   * §1 e §16: o dossiê exportado tem de ser o MESMO que vai ao Planejador, com
+   * o mesmo hash. Montá-lo aqui abriria uma segunda resolução — e a primeira
+   * divergência apareceria num artigo já escrito.
+   */
+  const exportarDossiesFinalizados = async () => {
+    if (exportando) return;
+    if (!selectedBrandId) { setNotice("Selecione uma marca antes de exportar."); return; }
+
+    const selecionados = [...selectedArticleIds];
+    const alvo = (selecionados.length
+      ? selecionados
+      : pipeline.radarItems.map(linha => linha.articleId)).filter(Boolean);
+    if (!alvo.length) { setNotice("Não há artigos nesta visão para exportar."); return; }
+
+    setExportando(true);
+    setNotice("");
+    try {
+      const resposta = await fetch("/api/editorial/radar-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ brandId: selectedBrandId, articleIds: alvo }),
+      });
+      const corpo = await resposta.json().catch(() => ({}));
+      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível exportar os dossiês.");
+
+      const url = URL.createObjectURL(new Blob([corpo.csv], { type: "text/csv;charset=utf-8" }));
+      const ancora = document.createElement("a");
+      ancora.href = url;
+      ancora.download = corpo.filename;
+      ancora.click();
+      URL.revokeObjectURL(url);
+
+      setNotice(corpo.headline || "Dossiês exportados.");
+    } catch (erro) {
+      setNotice(erro instanceof Error ? erro.message : "Falha ao exportar os dossiês.");
+    } finally {
+      setExportando(false);
+    }
+  };
+
+  const fronteiraDoPlanejador = (row: RadarItem | null) => {
+    const analise = row ? analiseCorrenteDe(row)?.payload || null : null;
+    const entregue = analise?.plannerBundle || null;
+    const perfil = radarPrimaryProfileOfAnalysis(analise);
+    /* A esteira responde pelo destino: o dossiê sozinho não prova importação. */
+    const noPlanejador = row ? row.state === "sent_planner" : false;
+
+    /*
+     * ===== 1.3 · §11 · RANKING SEM CANDIDATO NÃO ATRAVESSA A FRONTEIRA =====
+     *
+     * Um "Top 10" cujo alvo não encontrou produto compatível nenhum não é um
+     * artigo pronto: é uma configuração a corrigir. Deixá-lo seguir entregaria
+     * ao Planejador um ranking com lista vazia — e ele chegaria lá com o mesmo
+     * peso de uma investigação real.
+     *
+     * A recusa do ANALYZE (1.2 · §5) já impede a GRAVAÇÃO do blueprint; esta
+     * impede o ENVIO de uma investigação que tenha escapado por outro caminho.
+     */
+    const rankingSemCandidato = (() => {
+      const configuracao = analise?.amazonEditorialSetup || null;
+      const corrida = analise?.amazonSearch || null;
+      if (!configuracao || !corrida) return false;
+
+      const tipo = configuracao.intent.type;
+      if (tipo !== "TOP_BEST" && tipo !== "TOP_VALUE" && tipo !== "BEST_FOR_USE_CASE") return false;
+
+      return radarAmazonEligibleCandidates({
+        intent: configuracao.intent,
+        target: configuracao.target,
+        universe: corrida.universe,
+      }).eligible.length === 0;
+    })();
+
+    return {
+      /*
+       * §4 · DOSSIÊ GRAVADO COM ESTEIRA PARADA CONTINUA ELEGÍVEL.
+       *
+       * É a retomada: o servidor reconhece o dossiê e completa só a transição
+       * que falta, sem duplicar nada.
+       */
+      eligible: Boolean(perfil) && !(entregue && noPlanejador) && !rankingSemCandidato,
+      blockedReason: rankingSemCandidato
+        ? "Nenhum produto compatível com o alvo foi encontrado: revise o tipo de produto e o filtro de marca antes de enviar ao Planejador."
+        : perfil
+          ? entregue && !noPlanejador
+            ? "O dossiê está gravado, mas a transferência ao Planejador não foi concluída. Reenvie para completá-la."
+            : null
+          : "Finalize a investigação para enviar o dossiê ao Planejador.",
+      /*
+       * ============ §12 · A AUTORIDADE É REMOTA ============
+       *
+       * `plannerBundle` é a versão gravada da análise e `sent_planner` é o
+       * estado do item na esteira — os dois vêm do servidor. O estado React
+       * nunca prova importação: ele descreve o que esta aba acha que
+       * aconteceu, e duas pessoas veriam entregas diferentes do mesmo artigo.
+       */
+      sent: Boolean(entregue) && noPlanejador,
+      sentAt: entregue?.sentAt || null,
+      /*
+       * §4 · O ESTADO INTERMEDIÁRIO É DITO, não escondido.
+       *
+       * Dossiê gravado com a esteira parada é o desfecho de uma transição que
+       * falhou. Mostrar "enviado" ali mentiria; mostrar nada faria a pessoa
+       * clicar de novo sem saber o que esperar.
+       */
+      destinationLabel: noPlanejador ? "Disponível no Planejador" : null,
+      busy: plannerBusy,
+      onSend: () => void enviarAoPlanejador(),
+    };
+  };
+
+  /**
+   * §18 e §19 · A ENTREGA — e ela só é sucesso depois do readback remoto.
+   *
+   * A tela manda a intenção e relê o banco. Marcar "enviado" porque o clique
+   * aconteceu faria um artigo aparecer como entregue sem nunca ter chegado.
+   */
+  const enviarAoPlanejador = async () => {
+    const target = activeRadarItem;
+    if (!target) { setNotice("Selecione um artigo antes de enviar ao Planejador."); return; }
+
+    setPlannerBusy(true);
+    try {
+      /*
+       * §2 · A MESMA PORTA DO LOTE.
+       *
+       * Um artigo ou trinta atravessam por aqui. Um caminho próprio para o
+       * botão individual seria a segunda autoridade de novo, com outro nome.
+       */
+      const resultado = await postRadarPlannerHandoff({ brandId: target.brandId, articleId: target.articleId });
+      await pipeline.reloadRadarAnalysis(target.articleId);
+      setNotice(resultado.message);
+    } finally {
+      setPlannerBusy(false);
+    }
+  };
+
+  /**
+   * §4 e §5 · AS DUAS LEITURAS SOB DEMANDA — e nenhuma delas chama provider.
+   *
+   * A coleta foi paga uma vez e vive na versão corrente. Abrir um disclosure
+   * é uma ida ao BANCO; buscá-la no provider cobraria duas vezes pelo mesmo
+   * dado, e cobraria por um clique de curiosidade.
+   */
+  const chaveLazy = (row: RadarItem | null) => {
+    const analise = row ? analiseCorrenteDe(row) : null;
+    return row ? `${row.articleId}:${analise?.versionId || "sem-versao"}` : "";
+  };
+
+  /**
+   * A AMOSTRA ESTREITADA PELO DISCRIMINANTE, não por asserção.
+   *
+   * `researchMode` está no contrato das duas corridas. Um `as` aqui aceitaria
+   * calado a corrida do perfil errado — e o painel da Amazon pintaria vídeos.
+   */
+  const amostraDoPerfil = <M extends "AMAZON" | "YOUTUBE">(chave: string, modo: M) => {
+    const estado = lazyPesquisa[chave]?.sample;
+    const run = estado?.run && estado.run.researchMode === modo ? estado.run : null;
+    return {
+      state: estado?.state || ("IDLE" as const),
+      run: run as M extends "AMAZON" ? RadarAmazonSearchRun | null : RadarYoutubeSearchRun | null,
+      message: estado?.message || null,
+    };
+  };
+
+  /**
+   * 2.4 · §2 e §3 · A AMOSTRA DO GOOGLE — PÁGINAS, NÃO CORRIDA.
+   *
+   * O mesmo estado, lido pela outra ponta. As páginas já chegam resolvidas
+   * pelos ids congelados: aqui não há escolha a fazer sobre QUAIS mostrar, e é
+   * de propósito — decidir isso na tela abriria a porta para completar a
+   * amostra com extração corrente.
+   */
+  const amostraDoGoogle = (chave: string) => {
+    const estado = lazyPesquisa[chave]?.sample;
+    return {
+      state: estado?.state || ("IDLE" as const),
+      pages: (estado?.pages || []) as RadarExtractionPage[],
+      integrity: estado?.integrity || null,
+      message: estado?.message || null,
+    };
+  };
+
+  const carregarParteDaPesquisa = async (parte: "sample" | "provenance") => {
+    const target = activeRadarItem;
+    if (!target || !selectedBrandId) return;
+    const chave = chaveLazy(target);
+    const profile = radarPrimaryProfileOfAnalysis(analiseCorrenteDe(target)?.payload || null)
+      || radarProfileOfTarget(searchModeByArticle[target.articleId] || RADAR_DEFAULT_SEARCH_MODE);
+
+    setLazyPesquisa(atual => ({ ...atual, [chave]: { ...atual[chave], [parte]: parte === "sample"
+      ? { state: "LOADING" as const, run: null, pages: [], integrity: null, message: null }
+      : { state: "LOADING" as const, data: null, message: null } } }));
+
+    if (parte === "sample") {
+      const resultado = await loadRadarResearchSample({ brandId: selectedBrandId, articleId: target.articleId, profile });
+      setLazyPesquisa(atual => ({ ...atual, [chave]: { ...atual[chave], sample: resultado.ok
+        ? {
+          state: "READY",
+          run: (resultado.data.run as RadarAmazonSearchRun | RadarYoutubeSearchRun) || null,
+          /*
+           * §3 · AS PÁGINAS VÊM DA AUTORIDADE, INTEIRAS OU FALTANDO.
+           *
+           * Nada é completado aqui: `integrity` chega junto e diz o que não
+           * resolveu. Preencher a diferença com extração corrente faria a
+           * fotografia descrever outra investigação.
+           */
+          pages: (resultado.data.pages as RadarExtractionPage[]) || [],
+          integrity: resultado.data.integrity,
+          message: null,
+        }
+        : { state: "FAILED", run: null, pages: [], integrity: null, message: resultado.message } } }));
+      return;
+    }
+
+    const resultado = await loadRadarResearchProvenance({ brandId: selectedBrandId, articleId: target.articleId, profile });
+    setLazyPesquisa(atual => ({ ...atual, [chave]: { ...atual[chave], provenance: resultado.ok
+      ? { state: "READY", data: resultado.data, message: null }
+      : { state: "FAILED", data: null, message: resultado.message } } }));
+  };
+
+  const startYoutubeSearch = async () => {
+    const target = activeRadarItem;
+    const data = activeWorkbenchData;
+    if (!target || !data?.researchContext) { setNotice("Selecione um artigo antes de pesquisar no YouTube."); return; }
+    if (youtubeEmVoo.current) { setNotice("A coleta de YouTube deste artigo já está em andamento."); return; }
+
+    /*
+     * A GUARDA DE MODO AQUI É CORTESIA, NÃO AUTORIDADE — 1.4 · §3.
+     *
+     * Ela existe para a pessoa receber a recusa sem esperar a ida ao servidor.
+     * Quem decide é a rota, que relê o estado gravado: se esta checagem e a de
+     * lá discordarem, a de lá vence — e é por isso que as duas chamam a mesma
+     * função de domínio.
+     */
+    const compromisso = compromissoDeModo(target, "YOUTUBE");
+    if (!compromisso.canStart) { setNotice(compromisso.reason || "Este artigo já descreve outro universo."); return; }
+
+    const plano = buildRadarYoutubeQueryPlan({ context: data.researchContext });
+    if (!plano.queries.length) { setNotice(plano.limitations[0] || "Não há consulta central para pesquisar no YouTube."); return; }
+
+    youtubeEmVoo.current = target.articleId;
+    setYoutubeBusy(true);
+    setNotice("");
+
+    /*
+     * ============ O CLIENTE NÃO GRAVA MAIS NADA — 1.4 · §1 e §3 ============
+     *
+     * Até o 1.3 o navegador criava o contêiner, gravava o compromisso, chamava
+     * a rota e persistia o resultado. Isso fazia dado PAGO depender de a aba
+     * continuar viva: fechar entre a resposta e a gravação perdia uma coleta já
+     * cobrada.
+     *
+     * Agora existe uma chamada só. O servidor garante contexto, compromisso,
+     * corrida e persistência — e devolve o estado já relido do banco.
+     */
+    try {
+      const resposta = await fetch("/api/editorial/radar-youtube-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          action: "collect",
+          brandId: target.brandId,
+          articleId: target.articleId,
+          articleDnaVersionId: target.articleDnaVersionId,
+          queries: plano.queries.map(consulta => ({
+            queryId: consulta.queryId, text: consulta.text, origin: consulta.origin,
+            sourceRef: consulta.sourceRef, reason: consulta.reason,
+          })),
+          limitations: plano.limitations,
+        }),
+      });
+      const corpo = await resposta.json().catch(() => ({}));
+      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível coletar a SERP do YouTube.");
+
+      /* O que a tela mostra é o que o banco confirmou, nunca o que enviamos. */
+      await pipeline.reloadRadarAnalysis(target.articleId);
+      const run = RadarYoutubeSearchRunSchema.parse(corpo.run);
+      setNotice(radarYoutubeRunSummary(run)?.headline || "Coleta de YouTube concluída.");
+
+      /*
+       * ====== §2 e §14 · UM CLIQUE, UM PACOTE ======
+       *
+       * O apoio do Google entra AQUI, no mesmo START, e não atrás de um
+       * segundo botão. Ele é uma leitura só, sobre a keyword principal
+       * (§3): repetir o Google para as três consultas do YouTube
+       * triplicaria o custo e devolveria três vezes o mesmo bloco de
+       * perguntas.
+       *
+       * Ele nunca derruba a principal: a falha vira estado do pacote.
+       */
+      const apoio = await coletarApoioDoGoogle(target, run.runId);
+      await pipeline.reloadRadarAnalysis(target.articleId);
+
+      /*
+       * O AVISO DESCREVE O QUE ACABOU DE ACONTECER.
+       *
+       * Ler o pacote de `target` devolveria o estado do render ANTERIOR ao
+       * START: "0 consulta(s) · 0 resultado(s)" logo depois de uma coleta que
+       * trouxe dezenas. O que a função tem em mãos é a corrida que o servidor
+       * confirmou e o apoio que ela mesma gravou.
+       */
+      setNotice(buildRadarResearchPackage({
+        profile: radarProfileOfTarget(searchModeByArticle[target.articleId] || RADAR_DEFAULT_SEARCH_MODE),
+        primaryKeyword: plano.queries[0]?.text || null,
+        primaryRunning: run.state === "COLLECTING",
+        primaryCollected: run.state === "COLLECTED",
+        primaryFailed: run.state === "COLLECTION_FAILED",
+        primaryQueryCount: run.queries.filter(item => item.executed).length,
+        primaryResultCount: run.universe.length,
+        support: apoio,
+        webSerpCollected: Boolean(apoio?.collectedAt),
+      }).headline);
+    } catch (erro) {
+      /*
+       * §7 · quem fecha a corrida como falha é o SERVIDOR. A tela só relê: se
+       * a corrida virou COLLECTION_FAILED lá, é isso que ela vai mostrar.
+       */
+      await pipeline.reloadRadarAnalysis(target.articleId).catch(() => {});
+      setNotice(erro instanceof Error ? erro.message : "Falha na coleta de YouTube.");
+    } finally {
+      setYoutubeBusy(false);
+      youtubeEmVoo.current = null;
+    }
+  };
+
+  /** §8 · a curadoria: selecionar e desselecionar, gravado remotamente. */
+  const toggleYoutubeVideo = async (videoId: string) => {
+    const target = activeRadarItem;
+    const run = target ? analiseCorrenteDe(target)?.payload.youtubeSearch || null : null;
+    if (!target || !run) return;
+    const atual = new Set(run.selectedVideoIds);
+    if (atual.has(videoId)) atual.delete(videoId); else atual.add(videoId);
+    setYoutubeBusy(true);
+    try {
+      await gravarYoutube(target, {
+        youtubeSearch: { ...run, selectedVideoIds: radarYoutubeApplySelection({ universe: run.universe, selectedVideoIds: [...atual] }) },
+      });
+    } catch (erro) {
+      setNotice(erro instanceof Error ? erro.message : "Não foi possível gravar a seleção.");
+    } finally {
+      setYoutubeBusy(false);
+    }
+  };
+
+  /** §11 · o reset alcança SÓ a investigação de YouTube. */
+  /**
+   * §12 · FINALIZE — a fotografia, tirada por decisão humana.
+   *
+   * O blueprint é RECALCULADO aqui, na hora, e congelado junto da corrida. Não
+   * há chamada de provider, worker, transcrição ou IA: tudo sai do que a coleta
+   * já entregou.
+   *
+   * Congelar em vez de recalcular a cada abertura é o que impede uma melhoria
+   * no vocabulário de padrões de mudar conceitos e roteiro sob o mesmo carimbo
+   * de "finalizado".
+   */
+  const finalizeYoutubeInvestigation = async () => {
+    const target = activeRadarItem;
+    const data = activeWorkbenchData;
+    const run = target ? analiseCorrenteDe(target)?.payload.youtubeSearch || null : null;
+    if (!target || !run) { setNotice("Não há coleta de YouTube para finalizar."); return; }
+
+    setYoutubeBusy(true);
+    try {
+      /*
+       * ============ §9 · FINALIZE É IDEMPOTENTE ============
+       *
+       * Clicar de novo sobre uma investigação congelada tirava OUTRA fotografia:
+       * `finalizedAt` mudava, nascia mais uma versão da análise, e o Planejador
+       * veria duas investigações onde houve uma. A decisão sai da autoridade
+       * canônica, que já sabe se existe fotografia válida.
+       */
+      const decisao = radarYoutubeFinalizeDecision({
+        payload: analiseCorrenteDe(target)?.payload || null,
+        profile: radarProfileOfTarget(searchModeByArticle[target.articleId] || RADAR_DEFAULT_SEARCH_MODE),
+      });
+      if (!decisao.shouldFreeze) { setNotice(decisao.reason); return; }
+
+      const blueprint = buildRadarYoutubeBlueprint({
+        run,
+        declaredIntent: data?.researchContext ? radarDeclaredArticleIntent(data.researchContext.article) : null,
+        editorialTopics: data?.researchContext?.editorialTopics || [],
+        generatedAt: new Date().toISOString(),
+      });
+      /*
+       * §9 · O FINALIZE CONGELA A INVESTIGAÇÃO INTEIRA.
+       *
+       * Fontes usadas, cruzamento entre as SERPs, saída editorial e blueprint
+       * multiformato entram na MESMA fotografia. Congelar só a parte de YouTube
+       * deixaria a leitura multiformato recalculando a cada abertura, sob um
+       * carimbo que diz "finalizado".
+       */
+      const plano = planoDePesquisa(target);
+      const multimodal = multimodalDoArtigo(target);
+      const congelada = freezeRadarYoutubeInvestigation({
+        run, blueprint, finalizedBy: sessionId(session), finalizedAt: new Date().toISOString(),
+        multimodal: multimodal ? { blueprint: multimodal, researchSources: plano.sources } : null,
+      });
+      await gravarYoutube(target, { youtubeFrozenInvestigation: congelada }, await versaoCorrenteNoServidor(target));
+      /*
+       * §11 · UM EVENTO LÓGICO DE FINALIZAÇÃO, E ELE É ESTE.
+       *
+       * O readback que vem a seguir relê o que o banco confirmou; ele não é um
+       * segundo acontecimento e não emite aviso próprio.
+       */
+      setNotice(decisao.reason);
+    } catch (erro) {
+      setNotice(erro instanceof Error ? erro.message : "Não foi possível finalizar a investigação de YouTube.");
+    } finally {
+      setYoutubeBusy(false);
+    }
+  };
+
+  const resetYoutubeSearch = async () => {
+    const target = activeRadarItem;
+    if (!target) return;
+    setYoutubeBusy(true);
+    try {
+      await gravarYoutube(target, radarYoutubeResetPatch());
+      setNotice("Pesquisa de YouTube zerada. Google, Amazon, Vídeos e Especialista não foram tocados.");
+    } catch (erro) {
+      setNotice(erro instanceof Error ? erro.message : "Não foi possível zerar a pesquisa de YouTube.");
+    } finally {
+      setYoutubeBusy(false);
+    }
+  };
+
   const startDeepResearch = async () => {
     const target = activeRadarItem;
     if (!target) { setNotice("Selecione um artigo antes de iniciar a pesquisa profunda."); return; }
+    /*
+     * §1 · A TRAVA É SIMÉTRICA.
+     *
+     * Se ela valesse só do lado do YouTube, um artigo que nasceu de YouTube
+     * aceitaria a pesquisa do Google por cima e o mesmo problema voltaria
+     * espelhado. Um artigo descreve um universo só, nos dois sentidos.
+     */
+    const compromisso = compromissoDeModo(target, "WEB");
+    if (!compromisso.canStart) { setNotice(compromisso.reason || "Este artigo já descreve outro universo."); return; }
     if (pesquisaEmVooRef.current || collectingArticleIdRef.current || serpActionRef.current || serpAction || busyArticleId || reviewingArticleIdRef.current || reviewingArticleId) {
       setNotice("A pesquisa deste artigo já está em andamento. Aguarde a conclusão: cada clique é uma consulta paga ao provider.");
       return;
@@ -2524,7 +3938,13 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     if (operation === "report") return prepareReportBatch(eligible);
     if (operation === "specialist") return setNotice("Envio bloqueado: a fundação remota Telegram não foi atravessada nesta rodada.");
     if (operation === "reviewSpecialist") return reviewSpecialistSelected(eligible);
-    if (operation === "planner") { const result = sendToPlanner(eligible); setNotice(`${result.imported} item(ns) enviado(s); ${result.skipped} ignorado(s).`); }
+    if (operation === "planner") {
+      /*
+       * §8 · "8 enviados" sozinho, num lote de 11, esconderia três artigos que
+       * ninguém vai reabrir. As três contagens pedem ações diferentes.
+       */
+      return void sendToPlanner(eligible).then(resultados => setNotice(radarHandoffBatchSummary(resultados)));
+    }
   };
   const importable = approved.map(version => { const articleVersion = version as VersionEnvelope<ArticleDNA>; const suggestedSlug = String((articleVersion.payload as unknown as { suggestedSlug?: string }).suggestedSlug || ""); const alreadyImported = pipeline.radarItems.some(item => item.articleId === articleVersion.payload.articleId); return { ...articleVersion, payload: { ...articleVersion.payload, suggestedSlug }, suggestedSlug, id: articleVersion.versionId, alreadyImported, importStatus: alreadyImported ? "sent_radar" : "approved" }; });
   const renderTopbarActions = (grid: OperationalDataGridTopbarApi<RadarItem>) => {
@@ -2540,9 +3960,60 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       <button type="button" onClick={() => setPicker(true)} className={`${GLOBAL_TOPBAR_ACTION_CONTROL} text-positive-soft/85`} title="Importar artigos aprovados do Arquiteto">
         <Plus className="h-3.5 w-3.5" aria-hidden="true" /><span>Importar do Arquiteto</span>
       </button>
-      <button type="button" onClick={() => grid.exportRows(grid.queriedRows, "planilha")} className={GLOBAL_TOPBAR_ACTION_CONTROL} title="Exportar planilha filtrada">
-        <Download className="h-3.5 w-3.5" aria-hidden="true" /><span>Exportar</span>
-      </button>
+      {/*
+        * ===== 1.1 · §1, §2 e §23 · UM VERBO, DOIS PRODUTOS =====
+        *
+        * "Planilha atual" leva as COLUNAS DA TELA: operação, filtro, status.
+        * "Dossiês editoriais" leva o que se usa para ESCREVER fora daqui —
+        * ArticleDNA compacto, radiografia competitiva, estrutura, evidência,
+        * limitações e o brief.
+        *
+        * Os dois contratos não se misturam, e é por isso que eles não são um
+        * botão só com um formato configurável: são produtos distintos que
+        * compartilham o verbo.
+        *
+        * §3 · e nenhum dos dois dispara no FINALIZE. Finalizar produz o
+        * artefato; exportar é ação humana, porque o arquivo sai da máquina de
+        * quem clicou e vai para onde ele decidir.
+        */}
+      <div className="relative shrink-0">
+        <button
+          type="button"
+          onClick={() => setMenuDeExport(atual => !atual)}
+          disabled={exportando}
+          className={GLOBAL_TOPBAR_ACTION_CONTROL}
+          title="Exportar a planilha atual ou os dossiês editoriais"
+          aria-haspopup="menu"
+          aria-expanded={menuDeExport}
+          data-testid="radar-export-menu"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{exportando ? "Exportando…" : "Exportar"}</span>
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+        {menuDeExport ? <div role="menu" className="absolute right-0 top-full z-50 mt-1 w-64 rounded-md border border-divider bg-surface-elevated p-1 shadow-lg">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setMenuDeExport(false); grid.exportRows(grid.queriedRows, "planilha"); }}
+            className="block w-full rounded px-2 py-1.5 text-left text-xs text-foreground/85 hover:bg-surface-subtle"
+            data-testid="radar-export-grid"
+          >
+            <strong className="block font-semibold">Planilha atual</strong>
+            <span className="block text-text-muted">As colunas desta tela, com o filtro aplicado.</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setMenuDeExport(false); void exportarDossiesFinalizados(); }}
+            className="block w-full rounded px-2 py-1.5 text-left text-xs text-foreground/85 hover:bg-surface-subtle"
+            data-testid="radar-export-dossiers"
+          >
+            <strong className="block font-semibold">Dossiês editoriais finalizados (CSV)</strong>
+            <span className="block text-text-muted">O dossiê de escrita para usar fora da plataforma.</span>
+          </button>
+        </div> : null}
+      </div>
       <div className="relative shrink-0">
         <button type="button" onClick={grid.toggleColumns} className={GLOBAL_TOPBAR_ACTION_CONTROL} title="Exibir ou ocultar colunas" aria-label="Visualização">
           <Columns3 className="h-3.5 w-3.5" aria-hidden="true" /><span>Visualização</span>
@@ -2581,7 +4052,136 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     * `localStorage` derrubava do estado uma coleta que o DataForSEO já tinha
     * entregue e cobrado. A frase agora nomeia o navegador como responsável e
     * afirma, na mesma linha, que a pesquisa não precisa ser refeita.
-    */}{pipeline.localRecoveryWarning && <div className="shrink-0 border-b border-pending/40 bg-pending/10 px-4 py-2 text-sm text-foreground" role="status" data-testid="radar-local-recovery-warning">{pipeline.localRecoveryWarning}</div>}<RadarWorkbench model={activeWorkbenchData?.r3 || null} articleId={activeRadarItem?.articleId || null} onReloadLibrary={reloadVideoLibrary} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} videoSources={{ ...videoLibrary, briefs: videoBriefsDoArtigo.briefs, briefsUnavailableReason: videoBriefsDoArtigo.reason, investigationFinalized: videoBriefsDoArtigo.finalizada, frozenBriefCount: videoBriefsDoArtigo.frozenBriefCount, coverage: videoMatching.coverage, matching: videoMatching.running, matchingLoadFailed: videoMatching.loadFailed, matchingError: videoMatching.error }} onRunMatching={runVideoMatching} onRegisterVideoSources={registerVideoSources} onExtractVideoText={extractVideoText} onFetchVideoMetadata={fetchVideoMetadata} onProvideVideoTranscript={provideVideoTranscript} onUploadVideoMedia={uploadVideoMedia} onLibraryAction={runVideoLibraryAction} onReportGenerate={() => void generateReportForArticle()} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onStartDeepResearch={() => void startDeepResearch()} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} searchMode={activeRadarItem ? searchModeByArticle[activeRadarItem.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importable} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
+    */}{pipeline.localRecoveryWarning && <div className="shrink-0 border-b border-pending/40 bg-pending/10 px-4 py-2 text-sm text-foreground" role="status" data-testid="radar-local-recovery-warning">{pipeline.localRecoveryWarning}</div>}<RadarWorkbench model={activeWorkbenchData?.r3 || null} articleId={activeRadarItem?.articleId || null} onReloadLibrary={reloadVideoLibrary} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} brandId={selectedBrandId} videoSources={{ ...vistaDeVideos, briefs: videoBriefsDoArtigo.briefs, briefsUnavailableReason: videoBriefsDoArtigo.reason, investigationFinalized: videoBriefsDoArtigo.finalizada, frozenBriefCount: videoBriefsDoArtigo.frozenBriefCount }} onRunMatching={runVideoMatching} onRegisterVideoSources={registerVideoSources} onExtractVideoText={extractVideoText} onFetchVideoMetadata={fetchVideoMetadata} onProvideVideoTranscript={provideVideoTranscript} onUploadVideoMedia={uploadVideoMedia} onLibraryAction={runVideoLibraryAction} onReportGenerate={() => void generateReportForArticle()} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onStartDeepResearch={() => void startDeepResearch()} plannerHandoff={fronteiraDoPlanejador(activeRadarItem)} amazonSearch={{
+      run: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.amazonSearch || null : null,
+      plannedQueries: planoAmazon(activeRadarItem).queries.length,
+      busy: amazonBusy,
+      blockedReason: planoAmazon(activeRadarItem).limitations[0] || null,
+      pacote: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.researchPackage || null : null,
+      projecao: projecaoAmazon(activeRadarItem),
+      blueprintView: blueprintCanonico(activeRadarItem, "AMAZON"),
+      editorialModel: modeloEditorialDoPerfil(activeRadarItem, "AMAZON"),
+      frozen: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.amazonFrozenInvestigation || null : null,
+      /* §3 · o resumo substitui o conteúdo no payload inicial. */
+      sampleSummary: radarResearchSampleSummary({ payload: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload || null : null, profile: "AMAZON" }),
+      provenanceSummary: radarResearchProvenanceSummary(activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload || null : null),
+      lazySample: amostraDoPerfil(chaveLazy(activeRadarItem), "AMAZON"),
+      lazyProvenance: lazyPesquisa[chaveLazy(activeRadarItem)]?.provenance || { state: "IDLE" as const, data: null, message: null },
+      onLoadSample: () => void carregarParteDaPesquisa("sample"),
+      onLoadProvenance: () => void carregarParteDaPesquisa("provenance"),
+      /*
+       * §8 e §31 · A CONFIGURAÇÃO É MONTADA AQUI e desce como nó.
+       *
+       * O painel não conhece intenção nem alvo: ele conhece "a coisa que vem
+       * antes do START". É a mesma decisão do `evidenceExtras` — a casca não
+       * precisa aprender o contrato para posicionar o conteúdo.
+       */
+      targetSetup: <RadarAmazonTargetSetup
+        intent={setupDoArtigo(activeRadarItem).intent}
+        target={setupDoArtigo(activeRadarItem).target}
+        rawInput={setupDoArtigo(activeRadarItem).rawInput}
+        busy={amazonBusy}
+        resolving={amazonResolving}
+        locked={setupDoArtigo(activeRadarItem).locked}
+        candidates={amazonCandidates?.items || null}
+        candidatesFor={amazonCandidates?.term || null}
+        onIntentChange={tipo => alterarSetup(activeRadarItem, {
+          intent: { type: tipo, desiredCount: null, useCase: null, rankingCriteria: null },
+          /* Trocar a intenção troca o alvo: os campos da anterior não servem. */
+          target: radarAmazonEmptyTargetFor(tipo),
+          rawInput: "",
+        })}
+        onIntentDetailChange={patch => {
+          const atual = setupDoArtigo(activeRadarItem).intent;
+          if (atual) alterarSetup(activeRadarItem, { intent: { ...atual, ...patch } });
+        }}
+        onTargetChange={patch => {
+          const atual = setupDoArtigo(activeRadarItem).target;
+          if (atual) alterarSetup(activeRadarItem, { target: { ...atual, ...patch } });
+        }}
+        onRawInputChange={valor => {
+          const atual = setupDoArtigo(activeRadarItem).target;
+          alterarSetup(activeRadarItem, {
+            rawInput: valor,
+            /* A leitura é de FORMA e não custa nada: URL e ASIN já resolvem. */
+            target: atual ? { ...atual, products: radarAmazonParseTargetInput(valor) } : null,
+          });
+        }}
+        onResolveName={entrada => void resolverProdutoAmazon(activeRadarItem, entrada)}
+        onPickCandidate={candidato => escolherCandidatoAmazon(activeRadarItem, candidato)}
+      />,
+      /*
+       * ============ 1.1 · §16 · OS TRÊS NÚMEROS, LIDOS DE UMA VEZ ============
+       *
+       * Eles saem da mesma cadeia que alimenta o blueprint — bruto, compatível,
+       * shortlist —, e não de uma segunda contagem feita pela tela. Duas
+       * contagens da mesma coisa acabariam discordando.
+       */
+      counts: contagensDaAmazon(activeRadarItem),
+      onStart: () => void startAmazonSearch(),
+      onRetrySupport: () => void retryAmazonSupport(),
+      onFinalize: () => void acaoAmazonSemProvider("finalize", "Não foi possível finalizar a investigação Amazon."),
+      onReset: () => void resetAmazonSearch(),
+      /*
+       * §23 · O BOTÃO DEIXOU DE SER PLACEHOLDER.
+       *
+       * No 1.1 ele avisava que a análise viria depois. Agora ele analisa — e
+       * continua sem gastar: a derivação é determinística sobre a coleta que
+       * já foi paga.
+       */
+      onAnalyze: () => void acaoAmazonSemProvider("analyze", "Não foi possível analisar a pesquisa Amazon."),
+    }} youtubeSearch={{
+      run: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.youtubeSearch || null : null,
+      plannedQueries: activeWorkbenchData?.researchContext ? buildRadarYoutubeQueryPlan({ context: activeWorkbenchData.researchContext }).queries.length : 0,
+      busy: youtubeBusy,
+      /*
+       * A PRECONDIÇÃO É DITA, NÃO DESCOBERTA NO CLIQUE.
+       *
+       * A corrida é gravada como sucessora da versão de análise, e essa versão
+       * nasce de uma coleta. Sem nenhuma, não há o que suceder — e um START que
+       * falha depois de pagar a coleta seria o pior desfecho possível.
+       */
+      /*
+       * §12 · A REGRA ERRADA SAIU DAQUI.
+       *
+       * "Colete a SERP uma vez antes de pesquisar no YouTube" descrevia uma
+       * limitação do CONTÊINER como se fosse do fluxo — e tornava a pesquisa de
+       * YouTube impossível, porque a coleta do Google comprometeria o artigo
+       * com WEB. O contêiner agora nasce neutro no próprio START.
+       *
+       * O que resta bloquear é o que de fato bloqueia: não há artigo
+       * selecionado, ou o artigo já descreve outro universo (§9).
+       */
+      blockedReason: !activeRadarItem
+        ? "Selecione um artigo."
+        : compromissoDeModo(activeRadarItem, "YOUTUBE").reason,
+      frozen: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.youtubeFrozenInvestigation || null : null,
+      pacote: pacoteDePesquisa(activeRadarItem),
+      /* 2.2 · §1 · o resumo sustenta o rótulo; o conteúdo chega no clique. */
+      sampleSummary: radarResearchSampleSummary({ payload: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload || null : null, profile: "YOUTUBE" }),
+      provenanceSummary: radarResearchProvenanceSummary(activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload || null : null),
+      lazySample: amostraDoPerfil(chaveLazy(activeRadarItem), "YOUTUBE"),
+      lazyProvenance: lazyPesquisa[chaveLazy(activeRadarItem)]?.provenance || { state: "IDLE" as const, data: null, message: null },
+      onLoadSample: () => void carregarParteDaPesquisa("sample"),
+      onLoadProvenance: () => void carregarParteDaPesquisa("provenance"),
+      projecao: projecaoDePesquisa(activeRadarItem),
+      blueprintView: blueprintCanonico(activeRadarItem),
+      editorialModel: modeloEditorialDoPerfil(activeRadarItem, "YOUTUBE"),
+      multimodal: multimodalDoArtigo(activeRadarItem),
+      onRetrySupport: () => void repetirApoioDoGoogle(),
+      onStart: () => void startYoutubeSearch(),
+      onFinalize: () => void finalizeYoutubeInvestigation(),
+      onToggleVideo: (videoId: string) => void toggleYoutubeVideo(videoId),
+      onReset: () => void resetYoutubeSearch(),
+    }} googleResearch={{
+      /* 2.4 · §1 · a área Google na mesma gramática, pela mesma infra. */
+      sampleSummary: radarResearchSampleSummary({ payload: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload || null : null, profile: "GOOGLE" }),
+      provenanceSummary: radarResearchProvenanceSummary(activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload || null : null),
+      lazySample: amostraDoGoogle(chaveLazy(activeRadarItem)),
+      lazyProvenance: lazyPesquisa[chaveLazy(activeRadarItem)]?.provenance || { state: "IDLE" as const, data: null, message: null },
+      onLoadSample: () => void carregarParteDaPesquisa("sample"),
+      onLoadProvenance: () => void carregarParteDaPesquisa("provenance"),
+    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={activeRadarItem ? searchModeByArticle[activeRadarItem.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importable} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
 }
 
 function RadarProfile({ r3, articleHref, architectHref }: { r3: RadarR3Model; articleHref: string | null; architectHref: string | null }) {

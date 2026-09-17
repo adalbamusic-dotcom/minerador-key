@@ -31,15 +31,17 @@ export type RadarChainSnapshot = {
 
 export type RadarChainCuration = {
   curationVersionId: string;
-  snapshotId: string;
-  snapshotHash: string;
+  /* `null` quando a análise não descreve SERP nenhuma — 1.3 · §3. */
+  snapshotId: string | null;
+  snapshotHash: string | null;
   selectedResultIds: string[];
   fingerprint: string;
 };
 
 export type RadarChainAnalysis = {
   analysisVersionId: string;
-  snapshotId: string;
+  /* `null` quando a análise não descreve SERP nenhuma — 1.3 · §3. */
+  snapshotId: string | null;
   curationFingerprint: string;
   attemptedResultIds: string[];
   successfulResultIds: string[];

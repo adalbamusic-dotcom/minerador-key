@@ -1,5 +1,175 @@
 # Spec — Radar
 
+## Contrato canônico do fechamento da fase — 2026-09-17
+
+Regra permanente. Vale sobre toda seção anterior desta spec no que houver
+divergência. Não substitui o contrato da Fase 1 Google abaixo — o estende para
+os três perfis e para o dossiê entregue.
+
+### Perfil de pesquisa não é saída editorial
+
+O perfil descreve COMO se investigou. A saída descreve O QUE se produz.
+
+| Perfil | Universo observado | Saída |
+| --- | --- | --- |
+| `GOOGLE` | SERP orgânica | blueprint editorial + artigo-modelo |
+| `YOUTUBE` | SERP do próprio YouTube | blueprint audiovisual + roteiro-modelo |
+| `AMAZON` | Merchant / catálogo | blueprint comercial |
+
+Os três estão implementados. A seleção continua única por investigação, feita
+antes de começar, gravada e imutável no meio do caminho.
+
+Nenhum perfil decide o formato do que será publicado. Investigar no YouTube não
+transforma o artigo em vídeo.
+
+### Hierarquia de evidência
+
+A ordem é a de `RADAR_EVIDENCE_HIERARCHY`, em `lib/radar/evidence-authority.ts`,
+com nove níveis:
+
+```text
+1  ARTICLE_INVARIANT
+2  PRIMARY_FACTUAL_EVIDENCE
+3  QUALIFIED_SPECIALIST
+4  CURRENT_SUFFICIENT_SERP
+5  OTHER_RADAR_EVIDENCE
+6  ARTICLE_DNA_HYPOTHESIS
+7  AI_INTERPRETATION
+8  DETERMINISTIC_HEURISTIC
+9  GENERIC_EDITORIAL_SUGGESTION
+```
+
+SERP suficiente domina a leitura competitiva — o que o mercado cobre, o que
+repete, o que ignora — e **não** substitui fonte factual nem especialista em
+matéria de fato. Nenhum documento pode enunciar essa lista com outro número de
+níveis ou outra ordem: a lista do código é a autoridade.
+
+### Contexto de keyword
+
+O papel e a composição vêm do ArticleDNA (`keywordReferences[].role`). O texto
+vem da hidratação amarrada ao mesmo `articleDnaVersionId`.
+
+```text
+principal              1, do ArticleDNA
+secondary[]            do ArticleDNA
+narrativeReinforcements[]  do ArticleDNA
+resolution             ARTICLE_DNA_HYDRATION | UNRESOLVED
+```
+
+Proibido resolver a keyword principal por título, slug, consulta da SERP,
+promessa ou hierarquia. Proibido promover uma secundária a principal quando a
+principal não resolve: sem texto, o campo é `null` e `resolution = UNRESOLVED`.
+
+O contexto alcança os três perfis. Uma investigação no YouTube ou na Amazon
+carrega a mesma identidade de keyword que uma no Google.
+
+### Dossiê canônico — uma resolução, dois consumidores
+
+```text
+loadRadarCanonicalAuthorities  →  resolveRadarCanonicalDossier
+                                   ├→ sendRadarToPlanner
+                                   └→ export portátil
+```
+
+Paridade é **estrutural**, não asseverada: existe um caminho de código, não dois
+resultados comparados por teste. Quem precisar de evidência nova acrescenta na
+resolução canônica, nunca num dos dois lados.
+
+`writer_brief_md`, `writer_context_md` e `competitive_radiography_md` são read
+models portáteis: servem à escrita, não são autoridade factual e não viajam no
+handoff.
+
+Todo `evidenceRef` usado pelo blueprint final resolve a partir do dossiê
+ENTREGUE ao Planejador, e não apenas a partir do export.
+
+### Camadas de vídeo e especialista no dossiê
+
+`bundle.video` e `bundle.specialist` são preenchidos pela autoridade canônica.
+
+A omissão de identificador privado acontece **na origem**, ao montar a camada,
+não no consumidor:
+
+```text
+vídeo         sem id de worker, sem gs://, sem id de job
+especialista  sem id de Telegram, sem id de chat, sem id de ator
+```
+
+Ausência é `null`, nunca camada vazia. `null` diz "não houve". Uma camada com
+`items: []` e `notApproved: 3` diz "houve resposta e ninguém decidiu" — são
+estados diferentes e não podem colapsar num só.
+
+### Amazon
+
+Intenção editorial declarada antes da coleta e separada do alvo. Camadas:
+
+```text
+RAW_UNIVERSE → ELIGIBLE_CANDIDATES → EDITORIAL_SHORTLIST
+```
+
+O ASIN é a identidade canônica. `TOP_BEST` não é os primeiros N slots e
+`TOP_VALUE` não é o menor preço: são recortes editoriais com critério.
+
+Merchant Brasil: `language_code = pt_BR`, `location_code = 2076`. A grafia com
+underscore é da Merchant e não é a do Google (`pt-br`) nem a do YouTube
+(`pt-BR`). As três convivem e nenhuma normaliza a outra.
+
+Link promocional nasce da shortlist, com URL limpa
+`https://www.amazon.com.br/dp/{ASIN}`. O Radar **não** cria tag de afiliado: ele
+marca `affiliateReady`, fixa `relPolicy = sponsored nofollow` e exige a
+divulgação quando há link monetizado. A substituição por URL de afiliado é de
+etapa posterior e preserva o ASIN.
+
+### Export portátil
+
+É um dossiê editorial de escrita, não backup e não dump de banco.
+
+Não carrega: payload cru de provider, segredo, id privado, hash, UUID como
+conteúdo editorial, endereço interno de evidência (`section:*`, `concept:*`,
+`question:*`, `ytq:*`), fingerprint de rodada apresentado como data.
+
+Carrega: URL, título, domínio, posição, recorrência, força de evidência,
+perguntas, conceitos, lacunas, evidência de especialista e de vídeo — o que uma
+pessoa usa para escrever.
+
+A relação seção → evidência atravessa por **rótulo legível**, resolvível de
+volta pelo índice canônico. Fonte externa sem função editorial — privacidade,
+termos, login, carrinho, contato, busca — não é fonte e não entra.
+
+Frase que só repete a keyword não é afirmação utilizável e é descartada:
+`"Skin care noturno: skin care noturno"` não diz nada.
+
+### Metadados de SEO e plano visual
+
+`seoTitle`, `metaDescription`, Open Graph, Twitter, `robots` e schema **podem
+permanecer não definidos** na fase Radar. O Radar exporta direção e restrições,
+nomeia o campo ausente e não inventa decisão do Planejador ou do Redator.
+
+Plano visual canônico: **uma capa e duas ou três imagens de respiro**. FAQ não
+faz parte do padrão. Cada imagem declara função, seção e a origem da
+necessidade. Sem estrutura editorial não há plano visual.
+
+### Envio ao Planejador
+
+`sendRadarToPlanner` é a autoridade única de envio, nesta ordem:
+
+```text
+validate → canonical resolve → write bundle → readback
+        → identity/hash validation → workflow transition
+        → destination readback → success
+```
+
+`RadarEvidenceBundle` permanece **V3**. Extensão é aditiva e opcional: chave
+ausente não entra na serialização canônica, e por isso `bundleHash` de dossiê
+gravado antes da extensão continua válido. Não existe V4 e não existe envelope
+paralelo.
+
+### O defeito recorrente
+
+Mostrar a engenharia da decisão no lugar do produto da decisão. Id interno,
+hash, nome de função, contagem de rodada e vocabulário de pipeline são
+engenharia. O que a pessoa que escreve precisa ler é o produto. Toda superfície
+editorial do Radar é avaliada por esse critério.
+
 ## Contrato canônico da Pesquisa — Fase 1 Google — 2026-09-11
 
 Regra permanente. Substitui, para o fluxo operacional vigente, as seções

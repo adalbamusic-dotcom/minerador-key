@@ -49,17 +49,25 @@ remota, readback, concorrência otimista e bundle congelado preservado após F5.
 workflow antigo por abas Coleta/Concorrentes/Análise/Evidências/Revisão saiu do
 fluxo operacional.
 
-Modos competitivos da `Pesquisa`: Google (implementado e homologado), YouTube
-(engine `partial`, não homologada) e Amazon (engine `planned`, não
-implementada).
+Perfis competitivos da `Pesquisa`, os três implementados (2026-09-17): Google
+(homologado em runtime real), YouTube e Amazon (aguardando aceitação manual do
+USER). Perfil de pesquisa não é saída editorial — Google produz blueprint
+editorial, YouTube produz blueprint audiovisual, Amazon produz blueprint
+comercial.
 
 Entregues: `RadarCompetitiveObservedModel`, `SemanticConceptModel`,
-`AiDiscoveryContext`, `RadarEditorialBlueprint`, `SpecialistBriefs`,
-`VideoBriefs`, `RadarFrozenEvidenceBundle` e `PlannerHandoff v3`.
+`AiDiscoveryContext`, `RadarEditorialBlueprint`, blueprint audiovisual e
+comercial, `SpecialistBriefs`, `VideoBriefs`, `RadarVideoEvidenceLayer`,
+`RadarSpecialistEvidenceLayer`, `RadarFrozenEvidenceBundle`, `PlannerHandoff v3`
+e o dossiê editorial portátil (CSV).
 
-Próximas frentes, nenhuma iniciada: Vídeos (Gate 0 de persistência/infra),
-Especialista (workflow real + Telegram), Pesquisa YouTube, Pesquisa Amazon e
-consumo do handoff pelo Planejador.
+O dossiê canônico é resolvido uma vez — `loadRadarCanonicalAuthorities →
+resolveRadarCanonicalDossier` — e alimenta o envio ao Planejador e o export com
+o mesmo conteúdo semântico. `RadarEvidenceBundle` permanece V3.
+
+Em aberto: aceitação manual de YouTube, Amazon e export; consumo do handoff
+pelo Planejador; e as dívidas registradas no
+[backlog do Radar](../05-radar/backlog.md).
 
 ## Planejador
 ContentPlan determinístico possui implementação local relevante. Persistência remota e smoke autenticado completo devem permanecer separados de testes locais.

@@ -560,7 +560,7 @@ test("GATE 13 · R — a camada entra no dossiê serializável, amarrada ao fund
   const modelo = observado();
   const bundle = buildRadarEvidenceBundle({ observed: modelo, serp: { current: true, sufficient: true, valid: true } });
 
-  const camada = radarEvidenceBundleAiDiscovery(bundle);
+  const camada = radarEvidenceBundleAiDiscovery(bundle)!;
   assert.equal(camada.binding.articleId, bundle.binding.articleId);
   assert.equal(camada.binding.articleDnaVersionId, bundle.binding.articleDnaVersionId);
   assert.equal(camada.binding.articleDnaContentHash, bundle.binding.articleDnaContentHash);

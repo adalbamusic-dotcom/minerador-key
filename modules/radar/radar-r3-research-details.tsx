@@ -69,6 +69,19 @@ export function RadarR3ResearchDetails({ model, view }: { model: RadarR3Model; v
     })),
   });
 
+  /*
+   * §14 · HOUVE PIPELINE DO GOOGLE NESTA INVESTIGAÇÃO?
+   *
+   * A pergunta é sobre TRABALHO REALIZADO, não sobre o perfil: um artigo de
+   * vídeo que coletou o Google como apoio e um artigo comercial que fez o mesmo
+   * têm, os dois, zero consulta canônica e zero referência curada. Ler o
+   * trabalho — e não o perfil — é o que impede o bloco de mentir nos dois casos
+   * e de sumir onde ele é verdadeiro.
+   */
+  const houvePipelineDoGoogle = detalhes.collection.queriesExecuted > 0
+    || detalhes.collection.uniqueReferences > 0
+    || detalhes.collection.selectedReferences > 0;
+
   return <section className="space-y-2.5" aria-label="Detalhes da pesquisa" data-testid="radar-research-details" data-source={detalhes.source}>
     {/*
       * §4 — A COLETA NÃO PRECISA DE ABA.
@@ -77,7 +90,22 @@ export function RadarR3ResearchDetails({ model, view }: { model: RadarR3Model; v
       * canônicas, quantas auxiliares, quantas referências. Isso cabe em uma
       * linha de leitura. O resto era controle.
       */}
-    <div className={bloco} data-testid="radar-research-details-collection">
+    {/*
+      * ============ 1.2 · §14 · ZERO DO GOOGLE NÃO É ZERO DA PESQUISA ============
+      *
+      * Estes números descrevem o PIPELINE do Google: consultas canônicas,
+      * auxiliares, referências curadas. Num perfil Amazon eles são zero por
+      * construção — o Google entra ali como APOIO, que é uma consulta só e não
+      * passa por curadoria nenhuma.
+      *
+      * O resultado era a tela dizendo "0 consultas · 0 referências" dentro da
+      * evidência de uma investigação cujo apoio do Google tinha acabado de
+      * funcionar. Dois lugares, duas respostas, e a errada com cara de resumo.
+      *
+      * Quando não há pipeline do Google, este bloco não fala: quem responde
+      * pelo apoio é o card do pacote, que lê o estado real dele.
+      */}
+    {houvePipelineDoGoogle && <div className={bloco} data-testid="radar-research-details-collection">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold text-foreground">O que esta pesquisa reuniu</h3>
         <span className="text-sm text-text-muted" data-testid="radar-research-details-status">{detalhes.statusLabel}</span>
@@ -93,7 +121,7 @@ export function RadarR3ResearchDetails({ model, view }: { model: RadarR3Model; v
       {detalhes.frozen && <p className="mt-2 text-sm leading-6 text-text-muted" data-testid="radar-research-details-frozen-note">
         Estes números são os do pacote congelado {detalhes.frozen.bundleId} · hash {detalhes.frozen.bundleHash}. Eles não mudam mais.
       </p>}
-    </div>
+    </div>}
 
     {/*
       * §5 e §6 — CONCORRENTES COMO INFORMAÇÃO.

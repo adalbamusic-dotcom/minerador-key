@@ -309,9 +309,19 @@ test("VÍDEOS 2.3.2 · I e J — trocar contexto não chama nada, e o F5 sem art
   depois.destroy();
 
   /* A leitura que sustenta o F5 é por MARCA, e o artigo é opcional nela. */
-  assert.match(pagina(), /const loadVideoLibrary = useCallback\(async \(articleId: string \| null\) => \{/);
-  assert.match(pagina(), /if \(!selectedBrandId\) return;/);
-  assert.match(pagina(), /if \(articleId\) busca\.set\("articleId", articleId\);/);
+  /*
+   * A LEITURA DA MARCA SEM ARTIGO CONTINUA EXISTINDO — RADAR_LIVE_UX_2.2.
+   *
+   * Ela mudou de mecanismo: virou o read-model da área. O artigo segue
+   * OPCIONAL, e sua ausência entra como sentinela de chave em vez de desligar
+   * a leitura — que é o que faria a biblioteca sumir de quem ainda não abriu
+   * artigo nenhum.
+   */
+  assert.match(pagina(), /const carregarAreaVideos = useCallback\(async \(signal: AbortSignal\) => \{/);
+  assert.match(pagina(), /if \(!selectedBrandId\) throw new Error\("Nenhuma marca selecionada\."\);/);
+  assert.match(pagina(), /if \(videosArticleId\) busca\.set\("articleId", videosArticleId\);/);
+  assert.match(pagina(), /articleId: videosArticleId \|\| SEM_ARTIGO,/);
+  assert.match(pagina(), /enabled: Boolean\(selectedBrandId\),/, "a área lê com marca, com ou sem artigo");
 
   /*
    * E A PÁGINA NÃO CONDICIONA O PAINEL AO ARTIGO ATIVO.
@@ -322,7 +332,7 @@ test("VÍDEOS 2.3.2 · I e J — trocar contexto não chama nada, e o F5 sem art
    */
   const texto = pagina();
   /* O Gate 3 acrescentou a cobertura à vista; o que importa aqui é a ausência da condicional. */
-  assert.match(texto, /videoSources=\{\{ \.\.\.videoLibrary, briefs: videoBriefsDoArtigo\.briefs, briefsUnavailableReason: videoBriefsDoArtigo\.reason,/);
+  assert.match(texto, /videoSources=\{\{ \.\.\.vistaDeVideos, briefs: videoBriefsDoArtigo\.briefs, briefsUnavailableReason: videoBriefsDoArtigo\.reason,/);
   assert.ok(!/videoSources=\{activeRadarItem \?/.test(texto), "a vista não depende do artigo ativo");
 
   /* Nem o efeito: ele desiste por falta de MARCA, nunca por falta de artigo. */
@@ -421,7 +431,12 @@ test("VÍDEOS 2.3.2 · M — com artigo, o card acrescenta a linha do artigo", (
   const fonteDoResumo = workbench().slice(workbench().indexOf("function resumoDaBiblioteca"), workbench().indexOf("function AreaCard"));
   assert.ok(!fonteDoResumo.includes("existingContent"), "o card não conta mais o conteúdo local legado");
   assert.match(fonteDoResumo, /summarizeRadarVideoLibrary\(\{ sources, articleId, \.\.\.leitura \}\)/);
-  assert.match(workbench(), /copy=\{area === "videos" \? copyDeVideos : areaCopy\(area, model, searchMode\)\}/);
+  /*
+   * `areaCopy` ganhou a projeção canônica da pesquisa em
+   * RADAR_RESEARCH_PROFILES_1.1. A regra guardada aqui não mudou — Vídeos tem
+   * copy própria e não passa por ela —, só a assinatura da chamada ao lado.
+   */
+  assert.match(workbench(), /copy=\{area === "videos" \? copyDeVideos : areaCopy\(area, model, searchMode, researchProjection\)\}/);
 });
 
 /* ==========  N · O LAÇO  ======================================= */
@@ -436,31 +451,35 @@ test("VÍDEOS 2.3.2 · N — a leitura é tentada uma vez por contexto, e não e
    * inteiro. O teste então passava a falar de uma string vazia, que casa com
    * qualquer proibição e com nenhuma exigência.
    */
-  const inicio = texto.search(/ {2}useEffect\(\(\) => \{\r?\n {4}if \(!selectedBrandId\) return;/);
-  assert.ok(inicio >= 0, "o efeito da biblioteca foi encontrado");
-  const efeito = texto.slice(inicio);
-  const corpo = efeito.slice(0, efeito.indexOf("}, ["));
-  const deps = efeito.slice(efeito.indexOf("}, ["), efeito.indexOf("]);") + 3);
-
   /*
-   * A CAUSA DO PISCAR, NOMEADA.
+   * A GUARDA VIROU INFRAESTRUTURA — RADAR_LIVE_UX_2.2.
    *
-   * O efeito antigo tinha `videoSourcesByArticle` nas dependências e se guardava
-   * por `readbackConfirmed`. No caminho de ERRO os dois voltavam a falso, o
-   * efeito redisparava e a leitura entrava em laço.
+   * O laço existia porque a leitura era um efeito cujas dependências incluíam
+   * o próprio cache: no caminho de erro os dois voltavam a falso, o efeito
+   * redisparava, e a tela piscava. A guarda de "uma tentativa por contexto"
+   * resolvia isso ao preço de a área nunca mais se atualizar sozinha.
+   *
+   * Quem lê agora é `useRadarAreaLiveRead`, que tem cache por chave, uma
+   * leitura por chave e política de revalidação própria — já provada no
+   * Especialista. O que este teste protege continua o mesmo: o cache não pode
+   * alimentar a leitura que o escreve.
    */
-  assert.ok(!deps.includes("videoLibrary"), "o cache não é dependência do efeito que o escreve");
+  const leitura = texto.slice(texto.indexOf("const carregarAreaVideos = useCallback"), texto.indexOf("const videosPendenteRef"));
+  assert.ok(leitura.length > 0, "a leitura da área foi encontrada");
+  const deps = leitura.slice(leitura.lastIndexOf("}, ["), leitura.lastIndexOf("]);") + 3);
+
+  assert.ok(!deps.includes("leituraDeVideos"), "o cache não é dependência da leitura que o escreve");
+  assert.ok(!deps.includes("vistaDeVideos"), "nem a vista derivada dele");
   assert.ok(!deps.includes("videoSourcesByArticle"), "nem sob o nome antigo");
-  assert.ok(!corpo.includes("readbackConfirmed"), "a guarda não depende do resultado da leitura");
+  assert.ok(!leitura.includes("readbackConfirmed"), "a leitura não depende do resultado dela mesma");
 
-  /* A guarda é uma tentativa por marca+artigo, dê certo ou não. */
-  assert.match(corpo, /const chave = `\$\{selectedBrandId\}:\$\{articleId \|\| ""\}`;/);
-  assert.match(corpo, /if \(bibliotecaTentada\.current\.has\(chave\)\) return;/);
-  assert.match(corpo, /bibliotecaTentada\.current\.add\(chave\);/);
+  /* E não sobrou efeito nenhum lendo a biblioteca por fora do hook. */
+  for (const efeito of texto.match(/useEffect\([\s\S]*?\n {2}\}, \[[^\]]*\]\);/g) || []) {
+    assert.ok(!/radar-video-sources|radar-video-matching/.test(efeito), "nenhum efeito lê Vídeos por fora do read-model");
+  }
 
-  /* E o preço dela vem com a saída: repetir é decisão de quem opera. */
-  assert.match(texto, /const reloadVideoLibrary = useCallback\(\(articleId: string \| null\) => \{/);
-  assert.match(texto, /bibliotecaTentada\.current\.delete\(`\$\{selectedBrandId\}:\$\{articleId \|\| ""\}`\);/);
+  /* Repetir continua sendo decisão de quem opera, e relê SÓ a área. */
+  assert.match(texto, /const reloadVideoLibrary = useCallback\(\(\) => \{ leituraDeVideos\.refresh\(\); \}, \[leituraDeVideos\]\);/);
 });
 
 test("VÍDEOS 2.3.2 · N — a leitura nunca esvazia a lista enquanto carrega", async () => {
@@ -470,9 +489,19 @@ test("VÍDEOS 2.3.2 · N — a leitura nunca esvazia a lista enquanto carrega", 
    * troca — com os dados certos chegando logo depois.
    */
   const texto = pagina();
-  const carregar = texto.slice(texto.indexOf("const loadVideoLibrary = useCallback"), texto.indexOf("const reloadVideoLibrary"));
-  assert.match(carregar, /setVideoLibrary\(current => \(\{ \.\.\.current, loading: true, error: null \}\)\);/);
+  /*
+   * O MESMO PISCAR, PROIBIDO NO MECANISMO NOVO — §11 do RADAR_LIVE_UX_2.2.
+   *
+   * A leitura não escreve mais estado nenhum: ela devolve o read-model, e o
+   * hook só troca o valor quando o novo chega. Durante a revalidação a vista
+   * continua sendo o último estado VÁLIDO, e é isso que impede a área de
+   * voltar para "nenhuma fonte" a cada tique.
+   */
+  const carregar = texto.slice(texto.indexOf("const carregarAreaVideos = useCallback"), texto.indexOf("const videosPendenteRef"));
   assert.ok(!/sources: \[\]/.test(carregar), "carregar não zera as fontes");
+  assert.ok(!/setVideoAction/.test(carregar), "a leitura não escreve estado de ação");
+  assert.match(texto, /sources: leituraDeVideos\.data\?\.sources \|\| VIDEOS_SEM_FONTES,/);
+  assert.match(texto, /revalidating: leituraDeVideos\.revalidating,/, "revalidar é dito, não é apagar");
 
   /* E na tela: `loading` não apaga o que já está lá. */
   const tela = await montarRadar();

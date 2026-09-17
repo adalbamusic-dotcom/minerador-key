@@ -27,6 +27,12 @@ const versao = (numero: number, status: string, peso = 1_000) => ({
     status,
     extractions: Array.from({ length: peso }, (_, indice) => ({ id: `p-${indice}`, url: `https://exemplo.test/${indice}`, html: "x".repeat(200) })),
     competitiveReport: { needs: Array.from({ length: peso }, () => ({ title: "y".repeat(200) })) },
+    /*
+     * As corridas entraram na poda em RADAR_FINAL_2: elas são matéria-prima
+     * recalculável, e `amazonSearch` sozinho pesa 88,3% de uma versão real.
+     */
+    youtubeSearch: { universe: Array.from({ length: peso }, (_, indice) => ({ videoId: `v-${indice}` })) } as unknown as null,
+    amazonSearch: { universe: Array.from({ length: peso }, (_, indice) => ({ asin: `A-${indice}` })) } as unknown as null,
     deepResearch: { queries: 3 },
   },
 });
@@ -150,10 +156,41 @@ test("LIVE_UX · o registro remoto continua íntegro: a poda é de leitura", asy
 });
 
 test("LIVE_UX · os campos podados são os medidos, não uma lista arbitrária", () => {
-  assert.deepEqual([...RADAR_ANALYSIS_HEAVY_FIELDS], ["extractions", "competitiveReport"]);
+  /*
+   * ============ A LISTA CRESCEU EM RADAR_FINAL_2 ============
+   *
+   * Ela foi escrita quando só existia o pipeline do Google. YouTube e Amazon
+   * trouxeram a própria matéria-prima para dentro da versão de análise, e a
+   * medição de uma investigação Amazon real mostrou o custo: `amazonSearch`
+   * sozinho é 129,7 KB — 88,3% da versão inteira.
+   *
+   * A regra não mudou: continua sendo MATÉRIA-PRIMA RECALCULÁVEL, medida, e
+   * nunca conclusão. As fotografias congeladas ficam de fora da poda de
+   * propósito — elas são o que a tela abre.
+   */
+  assert.deepEqual([...RADAR_ANALYSIS_HEAVY_FIELDS], [
+    "extractions", "competitiveReport", "youtubeSearch", "amazonSearch",
+  ]);
 
-  /* Os dois valores vazios precisam ser aceitos pelo schema que valida a leitura. */
+  /* Os valores vazios precisam ser aceitos pelo schema que valida a leitura. */
   const podada = pruneRadarAnalysisHistory([versao(1, "draft"), versao(2, "draft")])[0];
   assert.ok(Array.isArray(podada.payload.extractions), "extractions continua array");
   assert.equal(podada.payload.competitiveReport, null, "competitiveReport continua nullable");
+  assert.equal(podada.payload.youtubeSearch, null, "a corrida de vídeo é nullable");
+  assert.equal(podada.payload.amazonSearch, null, "a corrida de produto é nullable");
+
+  /*
+   * E NENHUMA CONCLUSÃO ENTRA NA PODA.
+   *
+   * Podar a fotografia congelada faria a tela perder a leitura que ela existe
+   * para mostrar — e §24 é explícito: performance muda transporte, não
+   * semântica.
+   */
+  for (const conclusao of ["amazonFrozenInvestigation", "youtubeFrozenInvestigation", "finalizedBundle", "plannerBundle", "amazonBlueprint"]) {
+    assert.equal(
+      (RADAR_ANALYSIS_HEAVY_FIELDS as readonly string[]).includes(conclusao),
+      false,
+      `${conclusao} é conclusão e não pode ser podada`,
+    );
+  }
 });

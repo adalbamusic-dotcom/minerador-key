@@ -644,6 +644,33 @@ export function buildRadarReportSummary(input: {
    * pendência que ficaria aberta para sempre.
    */
   videos?: { registered: number; transcribed: number };
+  /**
+   * ====== §8 · A INVESTIGAÇÃO DE VÍDEO CONGELADA, QUANDO EXISTE ======
+   *
+   * O relatório perguntava "Pesquisa pronta?" e respondia contando PÁGINAS
+   * comparáveis extraídas. Num artigo cujo destino é vídeo esse número é zero
+   * por construção, e o relatório declarava pendente uma investigação que
+   * estava congelada — com consultas, universo, cruzamento e blueprint.
+   *
+   * O que entra aqui é evidência de verdade, e só ela: consultas executadas,
+   * vídeos no universo e se o blueprint multiformato congelou junto. Os demais
+   * checks — links, fontes, especialista — continuam falando de páginas
+   * extraídas, e NÃO são preenchidos a partir daqui. Um check verde que os
+   * dados não sustentam é pior do que um check pendente.
+   */
+  youtube?: { finalized: boolean; queries: number; videos: number; multimodalFrozen: boolean } | null;
+  /**
+   * ====== §33 · A INVESTIGAÇÃO AMAZON CONGELADA, QUANDO EXISTE ======
+   *
+   * Mesma razão do bloco acima, outra fonte: num artigo comercial as páginas
+   * comparáveis extraídas são zero por construção, e o relatório declararia
+   * pendente uma investigação congelada com produtos, faixas e blueprint.
+   *
+   * E, como no YouTube, ela preenche SÓ pesquisa e modelo. Evidência de
+   * review, especialista e atributo de produto continuam onde estavam —
+   * porque esta coleta não abriu nenhum dos três.
+   */
+  amazon?: { finalized: boolean; queries: number; products: number; supportCollected: boolean; blueprintFrozen: boolean } | null;
 }): RadarReportSummary {
   const observed = input.observed;
   /*
@@ -661,16 +688,35 @@ export function buildRadarReportSummary(input: {
   const blockers: string[] = [];
 
   const amostra = observed.sample.comparablePages;
-  const pesquisa: RadarReportCheck = amostra > 0
-    ? { id: "research", question: "Pesquisa pronta?", state: "READY", detail: `${amostra} página(s) comparável(is) em ${observed.sample.queriesExecuted} consulta(s).` }
-    : { id: "research", question: "Pesquisa pronta?", state: "PENDING", detail: "Nenhuma página comparável foi analisada nesta investigação." };
+  /* §8 · investigação de vídeo congelada responde por si. */
+  const videoCongelado = input.youtube?.finalized ? input.youtube : null;
+  /* §33 · a investigação comercial congelada também responde por si. */
+  const amazonCongelada = input.amazon?.finalized ? input.amazon : null;
+  const pesquisa: RadarReportCheck = amazonCongelada
+    ? {
+      id: "research", question: "Pesquisa pronta?", state: "READY",
+      detail: `${amazonCongelada.products} produto(s) comparável(is) em ${amazonCongelada.queries} consulta(s), congelados na investigação${amazonCongelada.supportCollected ? " · apoio comercial do Google incluído" : " · sem apoio do Google"}.`,
+    }
+    : videoCongelado
+    ? { id: "research", question: "Pesquisa pronta?", state: "READY", detail: `${videoCongelado.videos} vídeo(s) no universo competitivo em ${videoCongelado.queries} consulta(s), congelados na investigação.` }
+    : amostra > 0
+      ? { id: "research", question: "Pesquisa pronta?", state: "READY", detail: `${amostra} página(s) comparável(is) em ${observed.sample.queriesExecuted} consulta(s).` }
+      : { id: "research", question: "Pesquisa pronta?", state: "PENDING", detail: "Nenhuma página comparável foi analisada nesta investigação." };
   if (pesquisa.state === "PENDING") blockers.push("A investigação ainda não tem amostra comparável.");
 
-  const modelo: RadarReportCheck = amostra === 0
-    ? { id: "model", question: "Modelo competitivo pronto?", state: "PENDING", detail: "Depende da amostra." }
-    : observed.sufficiency.level === "GOOD"
-      ? { id: "model", question: "Modelo competitivo pronto?", state: "READY", detail: `${competitivo.recurrentConcepts} conceito(s) recorrente(s) · ${competitivo.gaps} lacuna(s) · ${competitivo.conflicts} conflito(s).` }
-      : { id: "model", question: "Modelo competitivo pronto?", state: "PARTIAL", detail: observed.sufficiency.reasons[0] || competitivo.sufficiency };
+  const modelo: RadarReportCheck = amazonCongelada
+    ? amazonCongelada.blueprintFrozen
+      ? { id: "model", question: "Modelo competitivo pronto?", state: "READY", detail: "Blueprint competitivo da Amazon congelado: observado, recomendação e saída editorial." }
+      : { id: "model", question: "Modelo competitivo pronto?", state: "PARTIAL", detail: "A fotografia da Amazon não trouxe blueprint competitivo." }
+    : videoCongelado
+    ? videoCongelado.multimodalFrozen
+      ? { id: "model", question: "Modelo competitivo pronto?", state: "READY", detail: "Blueprint multiformato congelado: leitura das duas SERPs, cruzamento e saída editorial." }
+      : { id: "model", question: "Modelo competitivo pronto?", state: "PARTIAL", detail: "Blueprint de vídeo congelado, sem a camada multiformato — não houve leitura do Google nesta investigação." }
+    : amostra === 0
+      ? { id: "model", question: "Modelo competitivo pronto?", state: "PENDING", detail: "Depende da amostra." }
+      : observed.sufficiency.level === "GOOD"
+        ? { id: "model", question: "Modelo competitivo pronto?", state: "READY", detail: `${competitivo.recurrentConcepts} conceito(s) recorrente(s) · ${competitivo.gaps} lacuna(s) · ${competitivo.conflicts} conflito(s).` }
+        : { id: "model", question: "Modelo competitivo pronto?", state: "PARTIAL", detail: observed.sufficiency.reasons[0] || competitivo.sufficiency };
   if (modelo.state === "PARTIAL") blockers.push("A leitura competitiva é parcial: a amostra não sustenta tudo o que o modelo descreve.");
 
   /*
@@ -1157,8 +1203,21 @@ export function radarOperationalRow(input: {
   running?: boolean;
   /** A frase antiga. Só sobrevive onde não existe investigação para descrever. */
   legacyNextAction: string;
+  /**
+   * ====== §8 e §9 · STATUS DO ARTIGO ≠ STATUS DA PESQUISA ======
+   *
+   * Esta coluna lê o pipeline do GOOGLE. Num artigo cujo perfil é YouTube ele
+   * nunca começou, e a linha anunciava "Não iniciado" ao lado de uma pesquisa
+   * congelada — negando um trabalho que terminou.
+   *
+   * O contrário também seria falso: "Finalizado" prometeria o Radar inteiro
+   * concluído quando o relatório ainda espera revisão. Pesquisa congelada
+   * significa PRONTO para a etapa seguinte, e é isso que entra aqui.
+   */
+  research?: { workflowStatusHint: "READY" | null; nextAction: { label: string } } | null;
 }): RadarOperationalRow {
   const view = input.view;
+  const pesquisaCongelada = input.research?.workflowStatusHint === "READY";
   /*
    * SEM INVESTIGAÇÃO, NADA A CONTRADIZER.
    *
@@ -1167,6 +1226,7 @@ export function radarOperationalRow(input: {
    * porque não há card dizendo outra coisa.
    */
   if (!view) {
+    if (pesquisaCongelada) return { status: "READY", statusLabel: RADAR_OPERATIONAL_STATUS_LABEL.READY, tone: "success", nextAction: input.research!.nextAction.label };
     return { status: "NOT_STARTED", statusLabel: RADAR_OPERATIONAL_STATUS_LABEL.NOT_STARTED, tone: "neutral", nextAction: input.legacyNextAction };
   }
 
@@ -1183,6 +1243,17 @@ export function radarOperationalRow(input: {
     : view.phase1.id !== "NONE"
       ? view.phase1.label
       : view.phase1.hint || view.phase1.blockedReason || estado.label;
+
+  /*
+   * A PESQUISA CONGELADA GANHA DO "não iniciado" DO PIPELINE DO GOOGLE.
+   *
+   * Só desse: qualquer estado que o Google tenha alcançado descreve trabalho
+   * real e continua valendo. O que não pode sobreviver é a negação de algo que
+   * aconteceu.
+   */
+  if (pesquisaCongelada && estado.status === "NOT_STARTED") {
+    return { status: "READY", statusLabel: RADAR_OPERATIONAL_STATUS_LABEL.READY, tone: "success", nextAction: input.research!.nextAction.label };
+  }
 
   return { status: estado.status, statusLabel: estado.label, tone: estado.tone, nextAction };
 }

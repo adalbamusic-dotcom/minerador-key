@@ -8,6 +8,8 @@ import { type RadarHydrationSnapshot } from "@/lib/radar/hydration";
 import { canonicalUuidCandidates, isCanonicalUuid } from "@/lib/radar/identifiers";
 import { resolvePrimaryKeyword } from "@/lib/radar/keyword-resolver";
 import { assertRadarEnvelopeMatchesArticle, assertRadarWorkflowIdentityMatchesEnvelope, assertRemoteKeywordMatchesEnvelope, RadarResolutionEnvelopeError, validateRadarSerpResolutionEnvelope, type RadarSerpResolutionEnvelope } from "@/lib/radar/resolution-envelope";
+import { RadarPrimaryModeConflictError } from "@/lib/radar/search-mode";
+import { resolveRadarResearchSource } from "@/lib/server/radar-primary-mode";
 import { SerpReviewSchema, type SerpResearchSnapshot, type SerpSearchInput } from "@/lib/radar/serp/contracts";
 import { RequestSchema } from "@/lib/radar/serp/request";
 import { ArtifactRepository, SerpSnapshotRepository, WorkflowRepository } from "@/lib/server/editorial-repositories";
@@ -19,6 +21,7 @@ import { DataForSeoSerpError } from "@/lib/minerador/dataforseo-serp-core";
 import { resolveDataForSeoCanonicalSerpCompatibilityConfig, DataForSeoCanonicalError } from "@/lib/server/dataforseo-canonical";
 import { collectDataForSeoSerpSnapshot } from "@/lib/server/dataforseo-serp-operation";
 import { IntegrationRuntimeError, integrationRuntimeErrorResponse, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
+import { radarSerpSnapshotSummary } from "@/lib/radar/serp-snapshot-summary";
 
 const SerpReviewReadbackQuerySchema = z.object({
   brandId: z.string().uuid(),
@@ -214,13 +217,15 @@ async function resolveAuxiliaryKeywordText(
   return null;
 }
 
-function summaryFromResearch(research: SerpResearchSnapshot) {
-  return SerpSnapshotSchema.parse({ schemaVersion: 1, keyword: research.query, location: research.location, capturedAt: research.collectedAt,
-    results: research.organicResults.map(result => ({ position: result.position, title: result.title, url: result.url, pageType: result.inferredType, format: result.inferredType, entities: research.diagnostic.frequentEntities })),
-    dominantIntent: research.diagnostic.dominantIntent || "indeterminada", formats: research.diagnostic.dominantFormats, entities: research.diagnostic.frequentEntities,
-    questions: research.peopleAlsoAsk.map(item => item.question), patterns: research.diagnostic.recurringTitlePatterns, gaps: research.diagnostic.possibleConflicts,
-    opportunities: research.diagnostic.opportunities });
-}
+/*
+ * 1.1 · §20 · O RESUMO MUDOU DE CASA, e não de comportamento.
+ *
+ * Ele estava correto e era inalcançável: morava dentro deste `route.ts`, e o
+ * apoio da Amazon — que precisava exatamente disto — acabou montando um
+ * parecido à mão. O parecido não tinha `schemaVersion`, `keyword` nem
+ * `location`, e derrubava a gravação DEPOIS da chamada paga.
+ */
+const summaryFromResearch = radarSerpSnapshotSummary;
 
 /**
  * Narrow, authenticated readback for the current SERP review. It intentionally
@@ -345,6 +350,34 @@ export async function POST(request: NextRequest) {
       const persisted = await new SerpSnapshotRepository().saveReview(input.brandId, review);
       return NextResponse.json({ review, persistenceMode: persisted ? "remote" : "local", readbackConfirmed: persisted });
     }
+    /*
+     * =========== A AUTORIDADE DE MODO, TAMBÉM AQUI — 1.2 · §3 ===========
+     *
+     * A SIMETRIA NÃO É SIMETRIA SE FICAR SÓ NA ROTA NOVA. Um artigo que nasceu
+     * de YouTube aceitando a SERP do Google por cima é a mesma violação, só que
+     * espelhada — e esta rota é a mais antiga das duas, então é justamente onde
+     * a falta passaria despercebida.
+     *
+     * Fica DEPOIS do `review` e ANTES dos dois caminhos que chamam o provider:
+     * revisar um snapshot que já existe não inicia investigação nenhuma, e
+     * bloquear isso recusaria uma decisão humana sobre trabalho já pago.
+     *
+     * É a mesma função da rota de YouTube, com o modo trocado. Reescrever a
+     * regra aqui criaria a segunda cópia que o §3 proíbe.
+     */
+    /*
+     * ======== 2.1 · PARTE B · O GOOGLE PODE SER APOIO ========
+     *
+     * ANTES: um artigo de YouTube recusava esta coleta com 409. Isso impedia o
+     * caso que o §6 descreve — usar a SERP do Google para ler intenção,
+     * perguntas e termos de um artigo cujo DESTINO é vídeo.
+     *
+     * AGORA a coleta passa e o ALVO NÃO MUDA (§7). Se o artigo é de YouTube,
+     * esta SERP entra como `WEB_SERP` de apoio; se o artigo não tem alvo, é
+     * ela que o declara como WEB.
+     */
+    await resolveRadarResearchSource({ brandId: input.brandId, articleId: input.articleId, source: "WEB_SERP" });
+
     const resolutionEnvelope = await validateRadarSerpResolutionEnvelope(input.resolutionEnvelope);
     const { article, resolved, hydration, resolutionMode, canonicalRemoteVerified } = await resolveArticle(profile, input.brandId, input.articleId, input.articleVersion, input.hydration, resolutionEnvelope);
     if (input.articleDnaVersionId && input.articleDnaVersionId !== article.versionId) throw new RadarResolutionEnvelopeError("transfer_conflict", "A versão do ArticleDNA enviada pelo Radar diverge da versão canônica.");
@@ -490,6 +523,8 @@ export async function POST(request: NextRequest) {
       const mapped = integrationRuntimeErrorResponse(error);
       return NextResponse.json({ code: mapped.code, error: mapped.message }, { status: mapped.status });
     }
+    /* §2 · o mesmo 409, com o mesmo código e o mesmo corpo das duas rotas. */
+    if (error instanceof RadarPrimaryModeConflictError) return NextResponse.json(error.body, { status: error.status });
     if (error instanceof RadarResolutionEnvelopeError) return NextResponse.json({ code: error.code, error: error.message }, { status: error.status });
     if (error instanceof PersistenceUnavailableError) return NextResponse.json({ code: error.code, reason: error.reason, error: error.message, recoverableLocally: true }, { status: 503 });
     const mapped = authzErrorResponse(error); const code = error instanceof AuthzError ? error.status === 401 ? "unauthenticated" : error.status === 403 ? "permission_denied" : "authorization_error" : "serp_error";

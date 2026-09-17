@@ -489,7 +489,15 @@ test("VÍDEOS 3 · K — o casamento vem do servidor, então sobrevive ao F5", (
   /* A tela NÃO calcula o casamento: ela recebe o que o servidor gravou. */
   assert.ok(!painel().includes("matchRadarVideoBriefs"), "o painel não casa nada");
   assert.ok(!texto.includes("matchRadarVideoBriefs"), "a página também não");
-  assert.match(texto, /const \[videoMatching, setVideoMatching\] = useState/);
+  /*
+   * O CASAMENTO DEIXOU DE MORAR EM ESTADO REACT — RADAR_LIVE_UX_2.2 · §7.
+   *
+   * Ele vem do read-model da área, junto das fontes: uma autoridade só. Guardar
+   * a resposta do POST num estado à parte criava uma segunda cópia, que
+   * envelhecia sozinha até o próximo F5 discordar do clique.
+   */
+  assert.ok(!texto.includes("const [videoMatching, setVideoMatching] = useState"), "o casamento não é mais estado próprio");
+  assert.match(texto, /coverage: casamentoLido \? \(casamento\.run/, "ele entra pelo read-model da área");
   assert.match(texto, /fetch\("\/api\/editorial\/radar-video-matching"/);
 
   /*
@@ -502,9 +510,11 @@ test("VÍDEOS 3 · K — o casamento vem do servidor, então sobrevive ao F5", (
   assert.match(rota(), /coverage: gravado\.coverage,/);
 
   /* E a tela LÊ o casamento gravado ao abrir: é isso que sobrevive ao F5. */
-  assert.match(texto, /const busca = new URLSearchParams\(\{ brandId: selectedBrandId, articleId \}\);/);
-  assert.match(texto, /fetch\(`\/api\/editorial\/radar-video-matching\?\$\{busca\.toString\(\)\}`, \{ cache: "no-store" \}\)/);
-  assert.match(texto, /void loadVideoMatching\(articleId\);/);
+  assert.match(texto, /new URLSearchParams\(\{ brandId: selectedBrandId, articleId: videosArticleId \}\)/);
+  assert.match(texto, /fetch\(`\/api\/editorial\/radar-video-matching\?\$\{new URLSearchParams/);
+  assert.match(texto, /cache: "no-store" as const, signal/, "a leitura da área nunca é servida de cache do navegador");
+  /* A leitura acontece junto da área, no mesmo read-model — 2.2 · §7. */
+  assert.match(texto, /load: carregarAreaVideos,/);
 
   /* Nenhum efeito de render casa pautas: a ação é humana. */
   for (const efeito of texto.match(/useEffect\([\s\S]*?\n {2}\}, \[[^\]]*\]\);/g) || []) {

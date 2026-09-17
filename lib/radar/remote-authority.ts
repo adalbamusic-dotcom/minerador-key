@@ -177,9 +177,10 @@ export type RadarResumableVersion = {
   versionNumber: number;
   payload: {
     articleDnaVersionId: string;
-    serpSnapshotId: string;
-    serpSnapshotVersion: number;
-    serpSnapshotHash: string;
+    /* Nulos no conteiner neutro: nao houve coleta a retomar — 1.3 · §3. */
+    serpSnapshotId: string | null;
+    serpSnapshotVersion: number | null;
+    serpSnapshotHash: string | null;
     extractions?: readonly unknown[];
   };
 };

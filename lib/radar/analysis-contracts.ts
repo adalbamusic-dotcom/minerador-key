@@ -8,6 +8,15 @@ import { RadarKgrStrategySchema, type RadarKgrStrategy } from "./strategy-contex
 import { RadarCompetitiveReportSchema } from "./competitive-report.ts";
 import { RadarDeepResearchRecordSchema, type RadarDeepResearchRecord } from "./deep-research.ts";
 import { RadarFrozenEvidenceBundleSchema } from "./investigation-finalization.ts";
+import { RadarYoutubeSearchRunSchema } from "./youtube-search-run.ts";
+import { RadarAmazonSearchRunSchema } from "./amazon-search-run.ts";
+import { RadarAmazonFrozenInvestigationSchema } from "./amazon-evidence.ts";
+import { RadarAmazonEditorialSetupSchema } from "./amazon-editorial-target.ts";
+import { RadarCompetitiveBlueprintSchema } from "./competitive-blueprint.ts";
+import { RadarResearchPackageRecordSchema } from "./research-package.ts";
+import { RadarYoutubeFrozenInvestigationSchema } from "./youtube-evidence.ts";
+import { RadarPrimarySearchModeSchema } from "./search-mode.ts";
+import { RadarSupportResearchRecordSchema } from "./research-profile.ts";
 
 export const RadarAnalysisModeSchema = z.enum(["kgr_light", "competitive_full"]);
 export type RadarAnalysisMode = z.infer<typeof RadarAnalysisModeSchema>;
@@ -192,6 +201,48 @@ export const RadarPlannerTransferSchema = z.object({
 }).strict();
 export type RadarPlannerTransfer = z.infer<typeof RadarPlannerTransferSchema>;
 
+/**
+ * ============ O DOSSIÊ V3 ENTREGUE AO PLANEJADOR — RADAR_FINAL_1 ============
+ *
+ * O `bundle` entra como `unknown` DE PROPÓSITO, e isso não é afrouxamento:
+ * ele é validado por `assertRadarEvidenceBundleIntegrity`, que RECALCULA o
+ * hash sobre o conteúdo inteiro. Uma checagem de forma aceitaria um dossiê
+ * com os campos certos e o conteúdo trocado; o hash não aceita.
+ *
+ * Os campos de fora existem para consultar sem desserializar o dossiê: a tela
+ * pergunta "foi enviado?" o tempo todo, e abrir o pacote para responder isso
+ * seria carregar a investigação inteira por causa de um booleano.
+ */
+export const RadarPlannerBundleRecordSchema = z.object({
+  bundleVersion: z.literal(3),
+  bundleId: z.string().min(1),
+  bundleHash: z.string().min(1),
+  primaryResearchProfile: z.enum(["GOOGLE", "YOUTUBE", "AMAZON"]),
+  binding: z.object({
+    brandId: z.string().min(1),
+    articleId: z.string().min(1),
+    articleDnaVersionId: z.string().min(1),
+    articleDnaContentHash: z.string().nullable(),
+  }).strict(),
+  /** §20 · sobe só quando o dossiê muda de verdade. Repetir não cria versão. */
+  handoffVersion: z.number().int().positive(),
+  sentAt: z.string().min(1),
+  sentBy: z.string().min(1),
+  /** A entrega anterior, quando o dossiê mudou. Nunca sobrescrita em silêncio. */
+  previousBundleHash: z.string().min(1).nullable().default(null),
+  /*
+   * §8 · AS INVARIANTES QUE VIAJAM COM O PACOTE.
+   *
+   * Elas viviam num envelope que nenhuma chamada runtime montava — governança
+   * declarada e nunca entregue. Aqui chegam ao Planejador junto da evidência.
+   *
+   * Aditivo com default: pacote gravado antes deste gate continua legível.
+   */
+  plannerMayNot: z.array(z.string().min(1)).default([]),
+  bundle: z.unknown(),
+}).strict();
+export type RadarPlannerBundleRecord = z.infer<typeof RadarPlannerBundleRecordSchema>;
+
 export const RadarStructuralDecisionSchema = z.object({
   key: z.string().min(1),
   label: z.string().min(1),
@@ -282,9 +333,23 @@ export const RadarAnalysisPayloadSchema = z.object({
   brandId: z.string().min(1),
   articleId: z.string().min(1),
   articleDnaVersionId: z.string().min(1),
-  serpSnapshotId: z.string().min(1),
-  serpSnapshotVersion: z.number().int().positive(),
-  serpSnapshotHash: z.string().min(1),
+  /*
+   * ====== A IDENTIDADE DA SERP É NULA QUANDO NÃO HOUVE SERP — 1.3 · §3 ======
+   *
+   * Estes três campos nasceram obrigatórios porque a única investigação que
+   * existia era a do Google: toda análise vinha de um snapshot. Com YouTube e
+   * Amazon podendo ser a PRIMEIRA investigação do artigo, exigi-los obrigava o
+   * contêiner do Radar a inventar uma identidade de snapshot que não existe —
+   * e um id inventado é pior que um campo vazio, porque todo leitor que compara
+   * `serpSnapshotId === record.id` passaria a comparar contra uma mentira.
+   *
+   * `null` é a resposta honesta: esta análise não descreve nenhuma SERP. As
+   * comparações existentes continuam corretas — `null === algumId` é `false`,
+   * que é exatamente "esta análise não é daquele snapshot".
+   */
+  serpSnapshotId: z.string().min(1).nullable().default(null),
+  serpSnapshotVersion: z.number().int().positive().nullable().default(null),
+  serpSnapshotHash: z.string().min(1).nullable().default(null),
   mode: RadarAnalysisModeSchema,
   modeRecommendation: RadarModeRecommendationSchema,
   modeHumanReason: z.string().max(2000),
@@ -377,6 +442,146 @@ export const RadarAnalysisPayloadSchema = z.object({
    */
   deepResearch: RadarDeepResearchRecordSchema.nullable().default(null),
   /*
+   * A INVESTIGAÇÃO DE YOUTUBE — YOUTUBE_SEARCH_1 · §1, e ela é PARALELA.
+   *
+   * Não é um modo de `deepResearch`: é outra pergunta sobre o mesmo artigo, com
+   * identidade, corrida, fingerprint e proveniência próprios. Enfiá-la no
+   * registro acima obrigaria a escolher entre dois universos no mesmo campo —
+   * rodar YouTube apagaria o Google, e um reset de um alcançaria o outro.
+   *
+   * Aditivo com `.default(null)`: toda análise já gravada continua legível.
+   */
+  /*
+   * O ALVO EDITORIAL DECLARADO — YOUTUBE_SEARCH_2.1 · Parte B.
+   *
+   * Antes, o alvo era INFERIDO de qual investigação existisse: gravou
+   * `deepResearch`, virou artigo de Google. Isso impedia o caso legítimo de
+   * coletar a SERP do Google como APOIO de um artigo cujo destino é vídeo.
+   *
+   * Com o alvo explícito, fonte e destino param de ser a mesma coisa: as fontes
+   * são aditivas, o alvo é imutável. Aditivo com `.default(null)` — artigo
+   * gravado antes deste gate continua sendo lido pela inferência legada.
+   */
+  researchTarget: z.object({
+    primaryTarget: RadarPrimarySearchModeSchema,
+    declaredAt: z.string().min(1),
+    declaredBy: z.string().min(1),
+    /** Por que este alvo. Vazio faria a decisão parecer automática. */
+    reason: z.string().max(500).default(""),
+  }).strict().nullable().default(null),
+  /*
+   * A COLETA DE APOIO — RADAR_RESEARCH_PROFILES_1 · §4 e §6.
+   *
+   * O perfil YouTube e o perfil Amazon disparam uma leitura do Google junto com
+   * a principal, no MESMO clique. Ela produz um snapshot igual ao de qualquer
+   * outra SERP — e é justamente por isso que o papel precisa ficar gravado: sem
+   * este registro, meses depois ninguém distingue "o Google foi a radiografia
+   * principal deste artigo" de "o Google sustentou um vídeo".
+   *
+   * `packageRunId` amarra o apoio à corrida principal que o pediu. É o que
+   * permite dizer que foi UM pacote, e não duas investigações concorrentes.
+   *
+   * Aditivo com `.default(null)`: análise gravada antes deste gate continua
+   * legível e declara ausência, que é a verdade sobre ela.
+   */
+  supportResearch: RadarSupportResearchRecordSchema.nullable().default(null),
+  /*
+   * A COLETA DA AMAZON — AMAZON_SEARCH_1 · §18.
+   *
+   * Campo PRÓPRIO, ao lado de `youtubeSearch`, pela mesma razão que separou
+   * YouTube de `deepResearch`: são universos diferentes, com identidade,
+   * corrida e proveniência próprias. Enfiar os dois no mesmo campo obrigaria a
+   * escolher entre eles, e rodar Amazon apagaria o vídeo.
+   *
+   * Aditivo com `.default(null)`: toda análise já gravada continua legível.
+   */
+  /*
+   * O PACOTE DE PESQUISA — AMAZON_SEARCH_1.1 · §6.
+   *
+   * Um clique produz UM pacote: a coleta principal, o apoio e o status dos
+   * dois, amarrados pelo mesmo `packageRunId`. É o que permite reabrir o
+   * artigo e saber que a primária foi paga e o apoio ficou pendente — sem
+   * precisar deduzir isso de dois campos que não se conhecem.
+   *
+   * Guarda CONTAGENS e referências; o universo continua na corrida.
+   *
+   * Aditivo com `.default(null)`: toda análise já gravada continua legível.
+   */
+  researchPackage: RadarResearchPackageRecordSchema.nullable().default(null),
+  /*
+   * ===== O ALVO EDITORIAL DA AMAZON — AMAZON_EDITORIAL_TARGET_1 · §18 =====
+   *
+   * QUE conteúdo comercial queremos produzir, e sobre QUAIS produtos. O
+   * ArticleDNA não responde nem uma nem outra: "skin care nivea" é um território
+   * legítimo e cabe num review, num X vs Y, num top 10 e num guia de compra.
+   *
+   * Vive AQUI, e não no ArticleDNA (§0 e §29): é configuração da investigação,
+   * não identidade do artigo. O link de um produto morre com a pesquisa; a
+   * keyword principal, o silo e o papel não.
+   *
+   * Uma tabela por intenção — oito delas — daria oito lugares para a mesma
+   * pergunta, e sete ficariam vazios em qualquer artigo. Aditivo com
+   * `.default(null)`: toda análise já gravada continua legível, e um artigo
+   * anterior a este gate simplesmente não tem alvo declarado.
+   */
+  amazonEditorialSetup: RadarAmazonEditorialSetupSchema.nullable().default(null),
+  amazonSearch: RadarAmazonSearchRunSchema.nullable().default(null),
+  /*
+   * ====== COMO ESTA CÓPIA CHEGOU ATÉ AQUI — RADAR_FINAL_2.1 · §2 e §9 ======
+   *
+   * `FULL` é a autoridade: o que o banco guarda e o que toda escrita sucede.
+   * `COMPACT` é uma cópia de LEITURA, com a matéria-prima da amostra retirada
+   * para não atravessar a rede num disclosure que está fechado.
+   *
+   * O campo existe porque a diferença é INVISÍVEL no objeto: uma cópia
+   * compacta tem exatamente a forma de uma investigação sem coleta. Sem o
+   * marcador, gravar uma sucessora a partir dela persistiria `amazonSearch:
+   * null` — e a coleta paga sumiria do banco sem que nada avisasse.
+   *
+   * `createRadarAnalysisSuccessor` RECUSA uma base `COMPACT`. A perda
+   * silenciosa vira erro alto.
+   */
+  researchTransport: z.enum(["FULL", "COMPACT"]).default("FULL"),
+  /*
+   * ====== O BLUEPRINT DA AMAZON, GRAVADO — AMAZON_SEARCH_2 · §23 ======
+   *
+   * A análise é determinística: a mesma coleta produz o mesmo blueprint. Isso
+   * tornaria tentador recalculá-lo a cada abertura — e é justamente o que
+   * faria uma melhoria no vocabulário de faixas mudar a recomendação sob uma
+   * página que a pessoa já leu, sem que nada anunciasse a mudança.
+   *
+   * Gravado, F5 e outra sessão mostram a MESMA leitura. E a ausência dele é o
+   * que separa "coleta pronta" de "análise feita" (§24).
+   *
+   * Aditivo com `.default(null)`: toda análise já gravada continua legível.
+   */
+  amazonBlueprint: RadarCompetitiveBlueprintSchema.nullable().default(null),
+  /*
+   * ====== A FOTOGRAFIA DA AMAZON — §25 e §26 ======
+   *
+   * Campo separado da corrida e do blueprint vivo, pela mesma razão do
+   * YouTube: congelar não reescreve o que foi coletado. E ela guarda
+   * REFERÊNCIA à corrida, nunca cópia — a auditoria já mediu 88% de uma
+   * fotografia sendo matéria-prima repetida.
+   */
+  amazonFrozenInvestigation: RadarAmazonFrozenInvestigationSchema.nullable().default(null),
+  youtubeSearch: RadarYoutubeSearchRunSchema.nullable().default(null),
+  /*
+   * A INVESTIGAÇÃO DE YOUTUBE CONGELADA — YOUTUBE_SEARCH_2 · §12.
+   *
+   * O blueprint é recalculável a partir da corrida, e é por isso mesmo que ele
+   * precisa ser congelado: recalcular a cada abertura faria uma melhoria no
+   * vocabulário de padrões mudar conceitos, lacunas e roteiro sob o mesmo
+   * carimbo de "finalizado".
+   *
+   * Campo separado de `youtubeSearch` de propósito: a corrida continua podendo
+   * receber curadoria enquanto não há congelamento, e o congelamento não
+   * reescreve a corrida — ele guarda uma cópia dela.
+   *
+   * Aditivo com `.default(null)`: toda análise já gravada continua legível.
+   */
+  youtubeFrozenInvestigation: RadarYoutubeFrozenInvestigationSchema.nullable().default(null),
+  /*
    * A INVESTIGAÇÃO CONGELADA — o que "finalizada" significa, provável depois.
    *
    * O registro acima diz QUEM finalizou e QUANDO. Ele não diz O QUÊ: a leitura
@@ -391,6 +596,16 @@ export const RadarAnalysisPayloadSchema = z.object({
   finalizedBundle: RadarFrozenEvidenceBundleSchema.nullable().default(null),
   plannerPackage: z.union([RadarPlannerHandoffSchema, RadarEvidencePackageSchema, LegacyRadarPlannerPackageSchema]).nullable(),
   plannerTransfer: RadarPlannerTransferSchema.nullable().default(null),
+  /*
+   * ====== O DOSSIÊ V3 ENTREGUE — RADAR_FINAL_1 · §18 ======
+   *
+   * Campo próprio, ao lado de `plannerPackage`. O legado descreve o pacote do
+   * pipeline do Google e continua legível; sobrescrevê-lo com um contrato de
+   * outra forma apagaria histórico de artigos já entregues.
+   *
+   * Aditivo com `.default(null)`: toda análise já gravada continua legível.
+   */
+  plannerBundle: RadarPlannerBundleRecordSchema.nullable().default(null),
   status: RadarAnalysisStatusSchema,
   humanNotes: z.array(z.string()),
   approvedAt: z.string().datetime().nullable(),
@@ -459,6 +674,86 @@ export function analysisApprovalIssues(analysis: RadarAnalysisVersion, kgrStrate
   return [...new Set(issues)];
 }
 
+/**
+ * ============ O CONTÊINER NEUTRO DO RADAR — 1.3 · §3 e §5 ============
+ *
+ * ===================== POR QUE ELE PRECISOU EXISTIR =====================
+ *
+ * `createRadarAnalysisVersion` exige `research: SerpResearchSnapshot`. Isso
+ * fazia a primeira versão de análise de QUALQUER artigo depender de uma coleta
+ * do Google — e como o primeiro START compromete o `primaryMode`, "colete a
+ * SERP uma vez antes" tornava a pesquisa de YouTube impossível: o Google
+ * viraria WEB e bloquearia o YouTube em seguida.
+ *
+ * O erro não era a mensagem. Era o contrato: o vaso da persistência do Radar
+ * estava amarrado a UMA das três investigações.
+ *
+ * ========================= O QUE ELE NÃO FAZ =========================
+ *
+ * Não chama provider, não cria SERP, não cria concorrentes, não define modo
+ * primário, não gera relatório e não toca no ArticleDNA. `deepResearch` e
+ * `youtubeSearch` nascem `null`, e é por isso que `radarPrimaryModeOfAnalysis`
+ * continua respondendo `null` depois dele: BOOTSTRAP_SETS_PRIMARY_MODE = NO.
+ *
+ * ===================== §5 · CONTÊINER NÃO É PESQUISA =====================
+ *
+ * Ele continua se chamando "versão de análise" porque é o versionamento que o
+ * Radar já tem, e renomear isso agora seria migração de dado, não correção de
+ * fluxo. O nome é técnico: ele NÃO significa "o Google já foi analisado", e a
+ * tela não expõe essa dependência interna.
+ */
+export async function createRadarAnalysisContext(input: {
+  brandId: string;
+  article: VersionEnvelope<ArticleDNA>;
+  actorId: string;
+  now?: string;
+}) {
+  const now = input.now || new Date().toISOString();
+  const payload = RadarAnalysisPayloadSchema.parse({
+    schemaVersion: 1,
+    brandId: input.brandId,
+    articleId: input.article.payload.articleId,
+    articleDnaVersionId: input.article.versionId,
+    /* NÃO HOUVE SERP. Os três campos ficam nulos, e isso é a verdade. */
+    serpSnapshotId: null,
+    serpSnapshotVersion: null,
+    serpSnapshotHash: null,
+    /*
+     * `kgr_light` É A PROFUNDIDADE MÍNIMA, não uma escolha sobre o Google.
+     *
+     * Ela não exige extração nem concorrentes — que é exatamente o estado de um
+     * contêiner sem investigação. `competitive_full` aqui criaria pendências de
+     * aprovação para um trabalho que ninguém começou.
+     */
+    mode: "kgr_light",
+    modeRecommendation: {
+      suggestedMode: "kgr_light",
+      reasons: ["Contêiner técnico do Radar criado sem investigação; a recomendação de modo é calculada quando houver dados."],
+      confidence: "low",
+      ruleSource: "minerador_kgr_strict",
+    },
+    modeHumanReason: "",
+    /* Nenhuma decisão de SERP, porque não há SERP sobre a qual decidir. */
+    serpDecisions: [],
+    selectedCompetitorIds: [], extractionIds: [], extractions: [], benchmark: null,
+    semanticTerms: [], structuralDecisions: [], competitiveness: null,
+    keywordDecisions: input.article.payload.keywordReferences.map(reference => ({ keywordId: reference.keywordId, decision: "keep", note: "" })),
+    competitiveReport: null, deepResearch: null, researchTarget: null, supportResearch: null, researchPackage: null, amazonEditorialSetup: null, amazonSearch: null, amazonBlueprint: null, amazonFrozenInvestigation: null, youtubeSearch: null, youtubeFrozenInvestigation: null, finalizedBundle: null,
+    plannerPackage: null, plannerTransfer: null, plannerBundle: null, researchTransport: "FULL", status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
+  });
+  const version = await createVersionEnvelope({
+    entityId: `radar-analysis:${input.article.payload.articleId}`,
+    versionNumber: 1,
+    previousVersionId: null,
+    origin: "human",
+    changeReason: "Contexto de trabalho do Radar criado para receber a primeira investigação.",
+    createdBy: input.actorId,
+    createdAt: now,
+    payload,
+  });
+  return VersionedRadarAnalysisSchema.parse(version);
+}
+
 export async function createRadarAnalysisVersion(input: {
   brandId: string;
   article: VersionEnvelope<ArticleDNA>;
@@ -493,14 +788,33 @@ export async function createRadarAnalysisVersion(input: {
     ],
     selectedCompetitorIds: [], extractionIds: [], extractions: [], benchmark: null, semanticTerms: [], structuralDecisions: [], competitiveness: null,
     keywordDecisions: input.article.payload.keywordReferences.map(reference => ({ keywordId: reference.keywordId, decision: "keep", note: "" })),
-    competitiveReport: null, deepResearch: input.deepResearch || null, finalizedBundle: null, plannerPackage: null, plannerTransfer: null, status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
+    competitiveReport: null, deepResearch: input.deepResearch || null, finalizedBundle: null, plannerPackage: null, plannerTransfer: null, plannerBundle: null, researchTransport: "FULL", status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
   });
   const entityId = input.previous?.entityId || `radar-analysis:${input.article.payload.articleId}`;
   const version = await createVersionEnvelope({ entityId, versionNumber: (input.previous?.versionNumber || 0) + 1, previousVersionId: input.previous?.versionId || null, origin: "human", changeReason: input.previous ? "Nova decisão humana na análise do Radar." : "Análise Radar criada após SERP real.", createdBy: input.actorId, createdAt: now, payload });
   return VersionedRadarAnalysisSchema.parse(version);
 }
 
+/**
+ * ============ §9 · A BASE DE UMA ESCRITA É SEMPRE A AUTORIDADE ============
+ *
+ * Uma cópia de leitura compacta tem a mesma FORMA de uma investigação sem
+ * coleta. Sucedê-la gravaria `amazonSearch: null` sobre uma coleta paga, e o
+ * banco aceitaria: nada no objeto denuncia a diferença.
+ *
+ * Por isso o erro acontece aqui, na montagem — e não depois, quando alguém
+ * abrir a amostra e ela estiver vazia.
+ */
+export class RadarCompactBaseError extends Error {
+  readonly code = "radar_compact_base_write";
+  constructor() {
+    super("Esta versão da análise é uma cópia de leitura compacta e não pode ser sucedida: releia a versão corrente do servidor antes de gravar.");
+    this.name = "RadarCompactBaseError";
+  }
+}
+
 export async function createRadarAnalysisSuccessor(previous: RadarAnalysisVersion, payloadPatch: Partial<RadarAnalysisPayload>, actorId: string, now = new Date().toISOString(), versionId?: string) {
+  if (previous.payload.researchTransport === "COMPACT") throw new RadarCompactBaseError();
   const targetStatus = payloadPatch.status || "draft";
   const payload = RadarAnalysisPayloadSchema.parse({ ...previous.payload, ...payloadPatch, status: targetStatus, approvedAt: targetStatus === "approved" ? payloadPatch.approvedAt || now : null, approvedBy: targetStatus === "approved" ? payloadPatch.approvedBy || actorId : null, plannerPackage: targetStatus === "approved" ? payloadPatch.plannerPackage ?? previous.payload.plannerPackage : null, plannerTransfer: payloadPatch.plannerTransfer ?? previous.payload.plannerTransfer });
   const version = await createVersionEnvelope({ entityId: previous.entityId, versionId, versionNumber: previous.versionNumber + 1, previousVersionId: previous.versionId, origin: "human", changeReason: "Atualização humana da curadoria/análise do Radar.", createdBy: actorId, createdAt: now, payload });
@@ -509,6 +823,15 @@ export async function createRadarAnalysisSuccessor(previous: RadarAnalysisVersio
 
 export function buildRadarPlannerPackage(payload: RadarAnalysisPayload): RadarAnalysisPayload["plannerPackage"] {
   if (!payload.benchmark && !payload.serpDecisions.length) return null;
+  /*
+   * SEM IDENTIDADE DE SNAPSHOT NÃO HÁ PACOTE — 1.3 · §3.
+   *
+   * O pacote do Planejador descreve uma investigação do Google e carrega a
+   * identidade do snapshot que a originou. Um contêiner neutro do Radar não
+   * tem snapshot, e montar o pacote com `null` ali entregaria ao Planejador uma
+   * proveniência que não aponta para lugar nenhum.
+   */
+  if (payload.serpSnapshotId === null || payload.serpSnapshotVersion === null || payload.serpSnapshotHash === null) return null;
   const included = payload.serpDecisions.filter(decision => decision.decision === "included").map(decision => decision.key);
   const requirements = payload.structuralDecisions.filter(decision => decision.level === "required").map(decision => decision.label);
   const recommendations = payload.structuralDecisions.filter(decision => decision.level === "recommended" || decision.level === "optional").map(decision => decision.label);

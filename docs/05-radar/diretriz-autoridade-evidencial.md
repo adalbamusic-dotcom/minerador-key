@@ -39,18 +39,25 @@ Implementado em `lib/radar/evidence-bundle.ts`.
 ## 2. A hierarquia congelada
 
 ```
-1. INVARIANTES E PROTEÇÕES DO ARTICLE   nunca violados automaticamente
-2. EVIDÊNCIA PRIMÁRIA / ESPECIALISTA    autoridade sobre verdade factual
-3. SERP VIGENTE E SUFICIENTE            autoridade sobre a realidade da busca
-4. OUTRAS EVIDÊNCIAS DO RADAR           Amazon, YouTube, vídeo, conforme o tipo
-5. ARTICLE DNA / HIPÓTESE EDITORIAL     contexto e contrato de formação
-6. IA                                   interpreta e correlaciona evidência
-7. HEURÍSTICA DETERMINÍSTICA            apoia quando falta evidência
-8. SUGESTÃO EDITORIAL GENÉRICA          último recurso
+1. ARTICLE_INVARIANT              invariantes e proteções do Article
+2. PRIMARY_FACTUAL_EVIDENCE       autoridade sobre verdade factual
+3. QUALIFIED_SPECIALIST           profissional, sobre o que ele pode sustentar
+4. CURRENT_SUFFICIENT_SERP        autoridade sobre a realidade da busca
+5. OTHER_RADAR_EVIDENCE           Amazon, YouTube, vídeo, conforme o tipo
+6. ARTICLE_DNA_HYPOTHESIS         contexto e contrato de formação
+7. AI_INTERPRETATION              interpreta e correlaciona evidência
+8. DETERMINISTIC_HEURISTIC        apoia quando falta evidência
+9. GENERIC_EDITORIAL_SUGGESTION   último recurso
 ```
 
-Implementada em `lib/radar/evidence-authority.ts` como dado ordenado, não como
-convenção de leitura.
+Implementada em `lib/radar/evidence-authority.ts` como dado ordenado
+(`RADAR_EVIDENCE_HIERARCHY`), não como convenção de leitura.
+
+**Correção de 2026-09-17.** Este documento listava oito níveis, com evidência
+primária e especialista fundidos numa linha. O código sempre teve NOVE, e a
+separação importa: o especialista qualificado sustenta o que ele pode sustentar
+— experiência, critério, ressalva — e não substitui fonte primária sobre fato
+verificável. A lista acima passou a ser a do código, nome por nome.
 
 ## 3. A SERP é evidência, não sugestão
 

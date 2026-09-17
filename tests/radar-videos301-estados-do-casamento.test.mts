@@ -257,7 +257,7 @@ test("VÍDEOS 3.0.1 · a mensagem e o botão leem a MESMA prontidão", () => {
    */
   const texto = pagina();
   assert.match(texto, /const finalizada = Boolean\(investigacao\?\.finalizedBundle\);/);
-  assert.match(texto, /investigationFinalized: videoBriefsDoArtigo\.finalizada, frozenBriefCount: videoBriefsDoArtigo\.frozenBriefCount,/);
+  assert.match(texto, /investigationFinalized: videoBriefsDoArtigo\.finalizada, frozenBriefCount: videoBriefsDoArtigo\.frozenBriefCount \}\}/);
   /* A pauta viva não entra na contagem que habilita o casamento. */
   assert.match(texto, /return \{ finalizada, frozenBriefCount: 0, briefs: vivas\.map/);
   assert.match(texto, /return \{ finalizada, frozenBriefCount: congelado\.length, briefs: congelado\.map/);

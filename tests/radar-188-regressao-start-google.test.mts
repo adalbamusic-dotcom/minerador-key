@@ -4,6 +4,7 @@ import test from "node:test";
 import { describeLocalRecoveryFailure, localRecoveryWarning, LOCAL_RECOVERY_SAVED } from "../lib/editorial/local-recovery.ts";
 import { recoverRadarSerpSnapshot } from "../lib/radar/serp-recovery.ts";
 import { radarPhase1Action } from "../lib/radar/serp-phase1.ts";
+import { radarSearchModeAvailability } from "../lib/radar/search-mode.ts";
 import type { SerpCollectionRecord } from "../lib/editorial/contracts.ts";
 import { comProductShell, montarRadar, React } from "./radar-dom-harness.mts";
 import { RadarR3Workbench } from "../modules/radar/radar-r3-workbench.tsx";
@@ -330,9 +331,21 @@ test("RADAR 18.8 · J — o START nomeia o destino e carrega o ⓘ; erro e estad
   assert.equal(semContexto.info, null, "ação indisponível não ganha explicação de ação disponível");
   assert.match(semContexto.blockedReason!, /contexto do artigo/);
 
+  /*
+   * PROFILES_2.1 · §8 · a Amazon deixou de ser o modo sem engine.
+   *
+   * A regra verificada continua a mesma — o modo chega ao texto, e a ação
+   * acompanha a engine declarada. O que mudou é qual dos dois ramos ela toma.
+   */
   const amazon = radarPhase1Action({ ...acaoBase, state: "NOT_STARTED", mode: "AMAZON" });
-  assert.equal(amazon.id, "NONE", "modo sem engine não oferece START");
-  assert.equal(amazon.info, null);
+  if (radarSearchModeAvailability("AMAZON").canStart) {
+    assert.equal(amazon.id, "START_RESEARCH");
+    assert.equal(amazon.label, "Iniciar Pesquisa Amazon", "o modo precisa CHEGAR ao texto");
+    assert.match(amazon.info!, /Amazon/);
+  } else {
+    assert.equal(amazon.id, "NONE", "modo sem engine não oferece START");
+    assert.equal(amazon.info, null);
+  }
 });
 
 /* ==========  K · UM BOTÃO PRIMÁRIO, DOIS LUGARES DE RENDER  =========== */

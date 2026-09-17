@@ -2,7 +2,7 @@ import { contentHash } from "../arquiteto/versioning.ts";
 import type { RadarCompetitiveReport } from "./competitive-report.ts";
 import { RadarPlannerHandoffSchema, type RadarAnalysisPayload, type RadarEvidencePackage, type RadarExpertEvidence, type RadarPlannerHandoff, type RadarPlannerHandoffDecision, type RadarProductEvidence } from "./analysis-contracts.ts";
 import type { InternalLinkGraphRef } from "../arquiteto/contracts.ts";
-import { assertRadarEvidenceProvenance, type RadarEvidenceBundle } from "./evidence-bundle.ts";
+import { assertRadarEvidenceBundleIntegrity, assertRadarEvidenceProvenance, radarEvidenceBundleMatchesArticle, type RadarEvidenceBundle } from "./evidence-bundle.ts";
 import type { RadarEditorialBlueprint } from "./editorial-blueprint.ts";
 import { assertRadarFrozenBundleIntegrity, radarFrozenBundleMatchesArticle, type RadarFrozenEvidenceBundle } from "./investigation-finalization.ts";
 
@@ -261,11 +261,74 @@ export function radarPlannerHandoffReadiness(input: {
   const bloquear = (code: RadarPlannerHandoffBlockCode, message: string, detail: string) =>
     blocks.push({ code, message, detail });
 
+  /*
+   * ============ §17 · O CONGELADO DO GOOGLE DEIXOU DE SER OBRIGATÓRIO ============
+   *
+   * Ele é a autoridade canônica DAQUELE pipeline, e continua sendo. O que
+   * mudou é que YouTube e Amazon congelam em outro lugar: exigir
+   * `RadarFrozenEvidenceBundle` deles obrigaria a fabricar um snapshot do
+   * Google — que é exatamente o que este gate proíbe.
+   *
+   * O que passou a ser exigido dos três é o mesmo: um dossiê V3 íntegro, com
+   * camada primária, amarrado ao fundamento corrente.
+   */
+  const dossieV3 = input.dossier || null;
   const frozen = input.frozen;
-  if (!frozen) {
+
+  /*
+   * §3 · CADA PERFIL TEM A PRÓPRIA AUTORIDADE CANÔNICA.
+   *
+   * No GOOGLE ela é o `finalizedBundle`, e continua obrigatória: um dossiê de
+   * páginas sem o congelado daquele pipeline descreveria uma leitura viva,
+   * recalculável, sob a aparência de fotografia.
+   *
+   * No YouTube e na Amazon a fotografia mora em outro campo — e exigir o
+   * congelado do Google deles obrigaria a fabricar um snapshot, que é o que
+   * §17 proíbe.
+   */
+  const perfilDoDossie = dossieV3?.primaryResearchProfile ?? "GOOGLE";
+  const exigeCongeladoDoGoogle = perfilDoDossie === "GOOGLE";
+
+  if (!frozen && (exigeCongeladoDoGoogle || !dossieV3)) {
     bloquear("NOT_FINALIZED", "Finalize a pesquisa antes de preparar o pacote.", "Nenhum RadarFrozenEvidenceBundle foi encontrado para este artigo.");
     return { ready: false, headline: "Pacote para planejamento bloqueado", blocks };
   }
+
+  if (!frozen && dossieV3) {
+    /* O caminho dos perfis que não passam pelo pipeline do Google. */
+    try {
+      assertRadarEvidenceBundleIntegrity(dossieV3);
+    } catch (erro) {
+      bloquear("BUNDLE_MUTATED", "O pacote de evidências falhou na verificação de integridade.", erro instanceof Error ? erro.message : String(erro));
+      return { ready: false, headline: "Pacote para planejamento bloqueado", blocks };
+    }
+
+    if (dossieV3.binding.brandId !== input.article.brandId) {
+      bloquear("BRAND_MISMATCH", "A investigação pertence a outra marca.", `Consolidada para ${dossieV3.binding.brandId}; o artigo corrente é de ${input.article.brandId}.`);
+    }
+
+    /* §2 · identidade conferida nos três campos, sem adaptação silenciosa. */
+    const vinculoV3 = radarEvidenceBundleMatchesArticle(dossieV3, input.article);
+    if (!vinculoV3.matches) {
+      const code: RadarPlannerHandoffBlockCode = dossieV3.binding.articleId !== input.article.articleId
+        ? "ARTICLE_MISMATCH"
+        : dossieV3.binding.articleDnaVersionId !== input.article.articleDnaVersionId
+          ? "ARTICLE_VERSION_MISMATCH"
+          : "ARTICLE_HASH_MISMATCH";
+      bloquear(code, "A investigação não corresponde mais à versão atual do Article.", vinculoV3.reason);
+    }
+
+    if (input.stale) {
+      bloquear("STALE", "A investigação não corresponde mais à versão atual do Article.", "Os fundamentos mudaram depois desta investigação; a leitura descreve outra versão do artigo.");
+    }
+
+    return blocks.length
+      ? { ready: false, headline: "Pacote para planejamento bloqueado", blocks }
+      : { ready: true, headline: "Pacote para planejamento pronto", blocks: [] };
+  }
+
+  /* Daqui para baixo é o caminho do GOOGLE, com o congelado dele em mãos. */
+  if (!frozen) return { ready: false, headline: "Pacote para planejamento bloqueado", blocks };
 
   /*
    * A INTEGRIDADE VEM ANTES DE QUALQUER COMPARAÇÃO.
@@ -340,6 +403,16 @@ export function radarDossierDivergesFromFrozen(dossier: RadarEvidenceBundle, fro
     divergencias.push(`O dossiê descreve a versão ${dossier.binding.articleDnaVersionId} e o congelado a versão ${frozen.binding.articleDnaVersionId}.`);
   }
 
+  /*
+   * ============ A COMPARAÇÃO É DO PERFIL GOOGLE ============
+   *
+   * O congelado do Google guarda contagens de PÁGINAS. Num artigo de vídeo ou
+   * de produto não existe nem o congelado nem a fotografia — e comparar
+   * ausência com ausência produziria divergência inventada, bloqueando um
+   * handoff legítimo.
+   */
+  if (!observado) return divergencias;
+
   const amostra = observado.sample;
   if (amostra.analyzedSuccess !== frozen.sample.analyzedSuccess) {
     divergencias.push(`Páginas lidas: ${amostra.analyzedSuccess} no dossiê, ${frozen.sample.analyzedSuccess} no congelado.`);
@@ -406,6 +479,39 @@ export const RADAR_PLANNER_MAY_NOT = [
   "decidir que a SERP não importa",
 ] as const;
 
+/**
+ * ============ §6 · DEPRECIADO — RADAR_FINAL_1.1 ============
+ *
+ * O CONTRATO RUNTIME DO HANDOFF É:
+ *
+ *   RadarEvidenceBundleV3  +  identidade do ArticleDNA
+ *
+ * gravado em `plannerBundle` por `sendRadarToPlanner`.
+ *
+ * Este envelope não se sustentou por duas razões concretas:
+ *
+ *   1. `frozen` é OBRIGATÓRIO e é o congelado do pipeline do GOOGLE. Um
+ *      artigo de vídeo ou de produto nunca o teve — materializá-lo
+ *      reintroduziria a exigência que o RADAR_FINAL_1 removeu, ou obrigaria
+ *      a fabricar um snapshot, que é o que §17 daquele gate proíbe.
+ *
+ *   2. Ele carrega `frozen` E `dossier` ao mesmo tempo. As duas camadas
+ *      descrevem a mesma rodada, e entregá-las juntas multiplicaria os
+ *      18.890 bytes do dossiê por nada.
+ *
+ * O que ele tinha de próprio e valia — `plannerMayNot` — foi CONECTADO: ele
+ * viaja agora dentro do registro gravado, que é o único lugar onde governança
+ * declarada vira governança entregue.
+ *
+ * `channels` e `areas` foram substituídos por evidência real: as camadas
+ * `research.{google,youtube,amazon}` e `video`/`specialist` do dossiê dizem o
+ * mesmo com procedência.
+ *
+ * Continua exportado porque testes de contrato e o round-trip de §24 do
+ * Gate 16 o exercitam. Nenhuma chamada runtime o monta.
+ *
+ * @deprecated Use `RadarEvidenceBundle` (V3) + `RadarPlannerBundleRecord`.
+ */
 export type RadarPlannerHandoffV3 = {
   contractVersion: typeof RADAR_PLANNER_CONTRACT_VERSION;
   /** Identidade PRÓPRIA. Não é a do ArticleDNA nem a do bundle. */
@@ -443,6 +549,18 @@ export type RadarPlannerHandoffV3 = {
    * anteriores, e cada item aponta para a evidência que o sustenta.
    */
   editorialBlueprint: RadarEditorialBlueprint;
+  /**
+   * ===== PROMOTION_LINK_PLAN_1 · §9 · HAVERÁ LINK MONETIZADO =====
+   *
+   * O Radar não redige o aviso de afiliado e não decide onde ele vai — isso é
+   * do Planejador/Redator. O que ele não pode fazer é entregar um artigo com
+   * links de produto e deixar a exigência implícita: quem recebe o pacote
+   * precisa saber que ela existe ANTES de montar a estrutura.
+   *
+   * Aditivo com `default(false)`: um handoff sem perfil comercial continua
+   * válido e simplesmente não exige aviso nenhum.
+   */
+  affiliateDisclosureRequired: boolean;
   previousHandoffId: string | null;
 };
 
@@ -501,6 +619,11 @@ export type RadarPlannerHandoffResult =
  * veio da investigação congelada, as limitações vieram da rodada. Este módulo
  * amarra, verifica e nomeia — e recusa quando não fecha.
  */
+/**
+ * @deprecated §6 · Use `sendRadarToPlanner`. Este builder exige o congelado do
+ * pipeline do Google e duplica a evidência; ele permanece para os testes de
+ * contrato do Gate 16 e não tem chamada runtime.
+ */
 export function buildRadarPlannerEvidenceHandoff(input: {
   article: RadarPlannerArticleFoundation;
   frozen: RadarFrozenEvidenceBundle | null;
@@ -514,6 +637,8 @@ export function buildRadarPlannerEvidenceHandoff(input: {
   areas?: Partial<RadarPlannerHandoffV3["areas"]>;
   /** A entrega anterior deste artigo, quando houver — §25 e §26. */
   previous?: Pick<RadarPlannerHandoffV3, "handoffId" | "handoffHash" | "handoffVersion"> | null;
+  /** §9 · o perfil comercial entregou links de produto nesta rodada. */
+  affiliateDisclosureRequired?: boolean;
 }): RadarPlannerHandoffResult {
   const readiness = radarPlannerHandoffReadiness({
     article: input.article, frozen: input.frozen, dossier: input.dossier, stale: input.stale,
@@ -546,7 +671,11 @@ export function buildRadarPlannerEvidenceHandoff(input: {
    * e mesmo ela só distingue "há requisitos preparados" de "não é exigido" —
    * jamais "revisado" ou "contribuído", que não aconteceram.
    */
-  const requisitos = input.dossier.observed.authorityEvidence.specialistReviewRequirements;
+  /*
+   * Os requisitos de especialista nascem da fotografia do Google. Sem ela, a
+   * resposta honesta é "não há requisito preparado" — não um array inventado.
+   */
+  const requisitos = input.dossier.observed?.authorityEvidence.specialistReviewRequirements || [];
   const handoff: RadarPlannerHandoffV3 = {
     contractVersion: RADAR_PLANNER_CONTRACT_VERSION,
     handoffId: identidade.handoffId,
@@ -585,6 +714,14 @@ export function buildRadarPlannerEvidenceHandoff(input: {
      */
     limitations: [...new Set([...frozen.limitations, ...input.dossier.limitations])],
     plannerMayNot: RADAR_PLANNER_MAY_NOT,
+    /*
+     * §9 · A EXIGÊNCIA VEM DO QUE FOI FINALIZADO, e não da intenção.
+     *
+     * Um artigo comercial que chegou ao handoff com produtos selecionados vai
+     * carregar links monetizados. Carimbar a exigência num pacote sem link
+     * nenhum ensinaria a ignorá-la.
+     */
+    affiliateDisclosureRequired: input.affiliateDisclosureRequired ?? false,
     previousHandoffId: anterior && change === "NEW_VERSION" ? anterior.handoffId : null,
   };
 

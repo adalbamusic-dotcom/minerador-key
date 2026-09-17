@@ -8,7 +8,22 @@ import { radarR4SerpStatusLabel, type RadarR4AmazonState } from "@/lib/radar/r4-
 import { radarSufficiencyLabel } from "@/lib/radar/investigation-sufficiency";
 import { RADAR_PHASE1_HANDLER } from "@/lib/radar/operational-actions";
 import { InfoHint } from "@/components/info-hint";
+import type { RadarYoutubeFrozenInvestigation } from "@/lib/radar/youtube-evidence";
+import type { RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
+import type { RadarResearchPackage } from "@/lib/radar/research-profile";
+import { radarYoutubeReportEvidence, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
+import type { RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
+import { RadarCompetitiveBlueprintSection } from "./radar-competitive-blueprint";
+import { RadarArticleModelExclusions, RadarArticleModelSection } from "./radar-article-model";
+import { RadarYoutubeSearchPanel, type RadarYoutubeSearchPanelProps } from "./radar-youtube-search-panel";
+import { RadarAmazonSearchPanel, type RadarAmazonSearchPanelProps } from "./radar-amazon-search-panel";
+import type { RadarAmazonSearchRun } from "@/lib/radar/amazon-search-run";
+import type { RadarResearchPackageRecord } from "@/lib/radar/research-package";
+import type { RadarAmazonFrozenInvestigation } from "@/lib/radar/amazon-evidence";
+import type { RadarYoutubeSearchRun } from "@/lib/radar/youtube-search-run";
 import type { RadarPhase1Action } from "@/lib/radar/serp-phase1";
+import type { RadarExtractionPage } from "@/lib/radar/analysis-contracts";
+import type { RadarResearchProvenancePayload } from "@/lib/radar/research-read-model";
 import {
   buildRadarArticleDnaSummary, buildRadarAuthoritySummary, buildRadarCompetitiveSummary,
   buildRadarDiscoverySummary, buildRadarInternalLinkSummary, buildRadarReportSummary,
@@ -83,6 +98,8 @@ type RadarR3WorkbenchProps = {
   onLibraryAction?: (articleId: string | null, action: "SELECT" | "UNSELECT" | "PROCESS_SELECTED" | "ARCHIVE" | "CLEAR_LIST", videoSourceIds: string[]) => void;
   /** O artigo ativo, quando existe. A camada da marca não depende dele. */
   articleId?: string | null;
+  /** Necessário para a busca sob demanda da transcrição — RADAR_LIVE_UX_2.2 · §8. */
+  brandId?: string | null;
   onReloadLibrary?: (articleId: string | null) => void;
   /** Casar pauta com conteúdo — Gate 3. Ação humana, sem provider. */
   onRunMatching?: (articleId: string | null) => void;
@@ -91,6 +108,14 @@ type RadarR3WorkbenchProps = {
   onReportGenerate?: () => void;
   /** As duas ações humanas da investigação profunda. Nada dispara sozinho. */
   onStartDeepResearch?: () => void;
+  /** A aba de Pesquisa → YouTube, quando o modo é esse — YOUTUBE_SEARCH_1. */
+  youtubeSearch?: RadarYoutubeSearchTab;
+  /** §8 · a aba da pesquisa Amazon, com a mesma forma da de YouTube. */
+  amazonSearch?: RadarAmazonSearchTab;
+  /** §25 · a fronteira com o Planejador, uma para os três perfis. */
+  plannerHandoff?: RadarPlannerHandoffTab;
+  /** 2.4 · §1 · a aba lazy da área Google — mesma infra dos outros dois. */
+  googleResearch?: RadarGoogleResearchTab;
   /** Traz para a tela a coleta real já gravada. É leitura: não consulta provider. */
   onRecoverSerp?: () => void;
   onFinalizeInvestigation?: () => void;
@@ -99,6 +124,15 @@ type RadarR3WorkbenchProps = {
   onResetInvestigation?: () => void;
   /** O modo da pesquisa principal e a troca, disponível antes de iniciar. */
   searchMode?: RadarPrimarySearchMode;
+  /**
+   * §3 · O ESTADO CANÔNICO DA PESQUISA, quando o perfil não é o Google.
+   *
+   * O card, o corpo e a tabela leem daqui. Deixá-lo opcional é o que permite
+   * o perfil Google seguir com a autoridade dele, intacta.
+   */
+  researchProjection?: RadarResearchProfileProjection | null;
+  /** §5 · o blueprint canônico do perfil corrente, quando há um. */
+  researchBlueprint?: RadarCompetitiveBlueprintView | null;
   onSearchModeChange?: (mode: RadarPrimarySearchMode) => void;
   onAmazonStateChange?: (articleId: string, state: RadarR4AmazonState) => void;
   expertContext?: RadarR6ExpertTopicContext | null;
@@ -140,8 +174,26 @@ function StatusMark({ tone, children }: { tone: StatusTone; children: React.Reac
  * técnica ou explicação de arquitetura: o card responde "como está", e quem
  * quiser saber "como funciona" abre.
  */
-function areaCopy(area: RadarR3Area, model: RadarR3Model, mode: RadarPrimarySearchMode): { lines: string[]; status: string; tone: StatusTone } {
+function areaCopy(area: RadarR3Area, model: RadarR3Model, mode: RadarPrimarySearchMode, researchProjection?: RadarResearchProfileProjection | null): { lines: string[]; status: string; tone: StatusTone } {
   if (area === "pesquisa") {
+    /*
+     * ======= §3 e §6 · A AUTORIDADE CANÔNICA VEM PRIMEIRO =======
+     *
+     * Este card lia `model.deepResearch` — o read-model do GOOGLE. Num artigo
+     * de vídeo ele nasce vazio, e o card anunciava "0 consulta(s) · 0
+     * referência(s) · Modelo competitivo: Não iniciado" ao lado de um corpo que
+     * dizia "3 consultas · 38 vídeos · Investigação finalizada".
+     *
+     * Não era um número errado: era a pergunta errada. Fora do perfil Google,
+     * quem responde é a projeção do perfil — e ela fala de VÍDEOS, não de
+     * "referências", que é vocabulário da SERP de páginas.
+     */
+    if (researchProjection && !researchProjection.ownedByGooglePipeline) {
+      const tomDoPerfil: StatusTone = researchProjection.state === "FINALIZED" ? "success"
+        : researchProjection.state === "FAILED" || researchProjection.state === "PARTIAL_SUPPORT_FAILED" ? "warning"
+          : researchProjection.state === "NOT_STARTED" ? "neutral" : "pending";
+      return { lines: researchProjection.lines, status: researchProjection.statusLabel, tone: tomDoPerfil };
+    }
     /*
      * A PESQUISA FALA DA INVESTIGAÇÃO INTEIRA — não da coleta de uma SERP.
      *
@@ -203,7 +255,7 @@ function areaCopy(area: RadarR3Area, model: RadarR3Model, mode: RadarPrimarySear
   if (area === "relatorio") {
     const observado = model.deepResearch?.observed || null;
     if (observado && model.deepResearch) {
-      const resumo = buildRadarReportSummary({ observed: observado, view: model.deepResearch });
+      const resumo = buildRadarReportSummary({ observed: observado, view: model.deepResearch, youtube: radarYoutubeReportEvidence(researchProjection) });
       const prontos = resumo.checks.filter(item => item.state === "READY").length;
       const exigidos = resumo.checks.filter(item => item.state !== "NOT_REQUIRED").length;
       return {
@@ -298,7 +350,181 @@ function ResearchUnavailable({ model }: { model: RadarR3Model }) {
  * Este bloco NÃO prescreve: não escreve outline, não define quantidade de link,
  * âncora final nem posição. Isso é do Planejador.
  */
-function DeepResearch({ view, busy, searchMode, onSearchModeChange, onStart, onAnalyze, onFinalize, onReset, onRecover }: { view: RadarDeepResearchView; busy: boolean; searchMode: RadarPrimarySearchMode; onSearchModeChange?: (mode: RadarPrimarySearchMode) => void; onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onReset?: () => void; onRecover?: () => void }) {
+
+/**
+ * O QUE A ABA PRECISA PARA MOSTRAR A PESQUISA DE YOUTUBE — YOUTUBE_SEARCH_1.
+ *
+ * A corrida vem PRONTA de quem a leu; a aba não a monta nem a coleta. Isso é o
+ * que mantém START como ação explícita: não existe caminho daqui até o
+ * provider que não passe por um clique.
+ */
+export type RadarYoutubeSearchTab = {
+  run: RadarYoutubeSearchRun | null;
+  plannedQueries: number;
+  busy: boolean;
+  blockedReason: string | null;
+  /** §12 · a investigação congelada, quando já houve FINALIZE. */
+  frozen: RadarYoutubeFrozenInvestigation | null;
+  /** §6 · o pacote de pesquisa: principal e apoio como UMA investigação. */
+  pacote: RadarResearchPackage;
+  /** 2.2 · §1 · a leitura sob demanda, com a MESMA forma da aba da Amazon. */
+  sampleSummary?: RadarYoutubeSearchPanelProps["sampleSummary"];
+  provenanceSummary?: RadarYoutubeSearchPanelProps["provenanceSummary"];
+  lazySample?: RadarYoutubeSearchPanelProps["lazySample"];
+  lazyProvenance?: RadarYoutubeSearchPanelProps["lazyProvenance"];
+  onLoadSample?: () => void;
+  onLoadProvenance?: () => void;
+  /** §3 · o estado canônico, o mesmo que o card e a tabela leem. */
+  projecao: RadarResearchProfileProjection;
+  /** §7 · o blueprint canônico, montado pela autoridade única. */
+  blueprintView: RadarCompetitiveBlueprintView;
+  /** PROFILES_2 · o roteiro-modelo — a superfície principal do perfil. */
+  editorialModel?: RadarYoutubeSearchPanelProps["editorialModel"];
+  multimodal: RadarMultimodalBlueprint | null;
+  /** §7 · retry que alcança só o apoio. */
+  onRetrySupport?: () => void;
+  onStart?: () => void;
+  onToggleVideo?: (videoId: string) => void;
+  onFinalize?: () => void;
+  onReset?: () => void;
+};
+
+/**
+ * O QUE A ABA PRECISA PARA MOSTRAR A PESQUISA AMAZON — AMAZON_SEARCH_1.1 · §8.
+ *
+ * Mesma forma da aba de YouTube, e pelo mesmo motivo: a corrida vem PRONTA de
+ * quem a leu. Não existe caminho daqui até o provider que não passe por um
+ * clique — e, neste perfil, por um clique só.
+ */
+export type RadarAmazonSearchTab = {
+  run: RadarAmazonSearchRun | null;
+  plannedQueries: number;
+  busy: boolean;
+  blockedReason: string | null;
+  /** §6 · o pacote gravado: principal e apoio amarrados ao mesmo clique. */
+  pacote: RadarResearchPackageRecord | null;
+  /** §16 · o estado canônico, o mesmo que o card e a tabela leem. */
+  projecao: RadarResearchProfileProjection;
+  /** §31 · o blueprint canônico, montado pela autoridade única. */
+  blueprintView: RadarCompetitiveBlueprintView;
+  /** PROFILES_2 · o modelo comercial — a superfície principal do perfil. */
+  editorialModel?: RadarAmazonSearchPanelProps["editorialModel"];
+  /** §8 e §31 · a configuração do alvo, montada pela página. */
+  targetSetup?: RadarAmazonSearchPanelProps["targetSetup"];
+  /** 1.1 · §16 · os três números da leitura do pacote. */
+  counts?: RadarAmazonSearchPanelProps["counts"];
+  /** §25 · a fotografia, quando já houve FINALIZE. */
+  frozen: RadarAmazonFrozenInvestigation | null;
+  /**
+   * ============ 2.1 · §3 · O RESUMO NO LUGAR DO CONTEÚDO ============
+   *
+   * Numa investigação congelada a corrida não vem no payload inicial. O
+   * resumo sustenta o rótulo do disclosure; o conteúdo chega no primeiro
+   * clique.
+   */
+  sampleSummary?: { count: number; available: boolean; unit: string };
+  provenanceSummary?: { available: boolean };
+  lazySample?: RadarAmazonSearchPanelProps["lazySample"];
+  lazyProvenance?: RadarAmazonSearchPanelProps["lazyProvenance"];
+  onLoadSample?: () => void;
+  onLoadProvenance?: () => void;
+  onStart?: () => void;
+  onRetrySupport?: () => void;
+  onAnalyze?: () => void;
+  onFinalize?: () => void;
+  onReset?: () => void;
+};
+
+/**
+ * ===== RADAR_FINAL_2.4 · §1 e §6 · A ÁREA GOOGLE NA MESMA GRAMÁTICA =====
+ *
+ * Mesma forma das abas da Amazon e do YouTube, e de propósito: o estado lazy, a
+ * rota e o cliente são os mesmos: só o conteúdo renderizado muda. A amostra do
+ * Google é uma lista de PÁGINAS, não uma corrida — e é por isso que `pages`
+ * aparece aqui onde os outros dois trazem `run`.
+ */
+export type RadarGoogleResearchTab = {
+  sampleSummary?: { count: number; available: boolean; unit: string };
+  provenanceSummary?: { available: boolean };
+  lazySample?: {
+    state: "IDLE" | "LOADING" | "READY" | "FAILED";
+    pages: RadarExtractionPage[];
+    /** §4 · a falta da referência congelada, dita — nunca substituída. */
+    integrity: { code: "FROZEN_SAMPLE_REFERENCE_MISSING"; missingIds: string[]; message: string } | null;
+    message: string | null;
+  };
+  lazyProvenance?: { state: "IDLE" | "LOADING" | "READY" | "FAILED"; data: RadarResearchProvenancePayload | null; message: string | null };
+  onLoadSample?: () => void;
+  onLoadProvenance?: () => void;
+};
+
+/**
+ * §25 · O ENVIO AO PLANEJADOR, NA TELA NORMAL.
+ *
+ * Uma ação e uma frase. `bundleId`, `bundleHash` e ids de coleta NÃO entram
+ * aqui: eles vivem na proveniência recolhida de cada painel, porque na visão
+ * normal só competem com a decisão.
+ */
+export type RadarPlannerHandoffTab = {
+  /** A investigação está finalizada e amarrada ao ArticleDNA corrente? */
+  eligible: boolean;
+  /** Por que ainda não dá. Nulo quando dá. */
+  blockedReason: string | null;
+  /**
+   * §10 · `true` SÓ depois do destino confirmado no Planejador.
+   *
+   * Marcar enviado ao gravar o dossiê diria "entregue" sobre uma esteira que
+   * ainda não se moveu — e ninguém voltaria para conferir.
+   */
+  sent: boolean;
+  sentAt: string | null;
+  /** §11 · o estado do destino, no vocabulário da esteira. */
+  destinationLabel: string | null;
+  busy: boolean;
+  onSend?: () => void;
+};
+
+function PlannerHandoff({ tab }: { tab: RadarPlannerHandoffTab }) {
+  if (tab.sent) {
+    /*
+     * §26 · O ESTADO VEM DO SERVIDOR, e é por isso que ele sobrevive ao F5.
+     *
+     * Nada disto é lembrado pelo navegador: a versão da análise guarda a
+     * entrega, e outra sessão lê a mesma coisa.
+     */
+    return <p className="mt-3 rounded-md border border-positive/30 bg-positive-soft/10 p-2 text-sm text-positive" role="status" data-testid="radar-planner-sent">
+      Enviado ao Planejador{tab.sentAt ? ` em ${new Date(tab.sentAt).toLocaleString("pt-BR")}` : ""}.
+      {tab.destinationLabel && <span className="mt-1 block text-text-muted" data-testid="radar-planner-destination">{tab.destinationLabel}</span>}
+    </p>;
+  }
+
+  if (!tab.eligible) {
+    return tab.blockedReason
+      ? <p className="mt-3 text-sm text-text-muted" role="status" data-testid="radar-planner-blocked">{tab.blockedReason}</p>
+      : null;
+  }
+
+  return <div className="mt-3">
+    <button
+      type="button"
+      className="inline-flex min-h-10 items-center justify-center rounded-md border border-context-accent bg-selected px-3 py-2 text-sm text-foreground transition-colors hover:text-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:text-text-muted"
+      disabled={tab.busy}
+      onClick={() => tab.onSend?.()}
+      data-testid="radar-planner-send"
+    >{tab.busy ? "Enviando…" : "Enviar ao Planejador"}</button>
+  </div>;
+}
+
+function DeepResearch({ view, busy, searchMode, researchProjection, researchBlueprint, onSearchModeChange, onStart, onAnalyze, onFinalize, onReset, onRecover, youtubeSearch, amazonSearch, plannerHandoff, googleResearch, evidenceExtras }: { view: RadarDeepResearchView; busy: boolean; searchMode: RadarPrimarySearchMode; researchProjection?: RadarResearchProfileProjection | null; researchBlueprint?: RadarCompetitiveBlueprintView | null; onSearchModeChange?: (mode: RadarPrimarySearchMode) => void; onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onReset?: () => void; onRecover?: () => void; youtubeSearch?: RadarYoutubeSearchTab; amazonSearch?: RadarAmazonSearchTab; plannerHandoff?: RadarPlannerHandoffTab; googleResearch?: RadarGoogleResearchTab; evidenceExtras?: React.ReactNode }) {
+  /*
+   * ====== 1.2 · §1 · O PERFIL MANDA NESTA SEÇÃO INTEIRA ======
+   *
+   * O badge, o seletor e a ação primária liam `view.state` — o estado do
+   * pipeline do GOOGLE. Num artigo de vídeo ele é NOT_STARTED por construção, e
+   * era daí que saíam "Não iniciada", Google/Amazon ainda clicáveis e
+   * "Iniciar Pesquisa YouTube" sobre uma investigação já congelada.
+   */
+  const doPerfil = researchProjection && !researchProjection.ownedByGooglePipeline ? researchProjection : null;
   /* A Fase 1 tem uma ação por vez: iniciar, analisar ou finalizar. */
   const acao = view.phase1;
   const resumo = view.summary;
@@ -317,6 +543,14 @@ function DeepResearch({ view, busy, searchMode, onSearchModeChange, onStart, onA
     if (handler === "FINALIZE") return onFinalize?.();
   };
 
+  /*
+   * A ÁREA DO GOOGLE, NOMEADA UMA VEZ.
+   *
+   * A mesma condição decide o corpo da área e onde a fronteira do Planejador
+   * renderiza: repeti-la faria as duas divergirem, e a fronteira apareceria
+   * duas vezes na mesma tela.
+   */
+  const areaGoogle = searchMode !== "YOUTUBE" && !(searchMode === "AMAZON" && amazonSearch);
   const observado = view.observed;
   const temAmostra = observado.sample.comparablePages > 0;
   const competitivo = buildRadarCompetitiveSummary(observado);
@@ -327,7 +561,7 @@ function DeepResearch({ view, busy, searchMode, onSearchModeChange, onStart, onA
   return <section className="mt-3 rounded-md border border-divider bg-surface-subtle p-3" data-testid="radar-deep-research" data-state={view.state}>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 className="text-base font-semibold text-foreground">Pesquisa {radarSearchModeLabel(searchMode)}</h2>
-      <span className="rounded-full border border-divider px-2.5 py-0.5 text-sm text-text-muted" data-testid="radar-deep-research-state">{deepResearchStateLabel(view.state)}</span>
+      <span className="rounded-full border border-divider px-2.5 py-0.5 text-sm text-text-muted" data-testid="radar-deep-research-state">{doPerfil ? doPerfil.statusLabel : deepResearchStateLabel(view.state)}</span>
     </div>
 
     {/*
@@ -343,11 +577,32 @@ function DeepResearch({ view, busy, searchMode, onSearchModeChange, onStart, onA
       <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Onde pesquisar">
         {(["WEB", "YOUTUBE", "AMAZON"] as const).map(modo => {
           const disponibilidade = radarSearchModeAvailability(modo);
-          const congelado = view.state !== "NOT_STARTED";
+          /*
+           * §3 · DEPOIS DO FREEZE O PERFIL NÃO É MAIS UMA OPÇÃO.
+           *
+           * Trocá-lo aqui trocaria o universo sob uma fotografia já assinada.
+           * O apoio interno do Google NÃO transforma Google num segundo perfil
+           * selecionável: ele é camada da investigação de vídeo, não alternativa
+           * a ela.
+           */
+          const travadoPeloPerfil = Boolean(doPerfil?.profileLocked);
+          /*
+           * §15 · UMA CORRIDA EM CURSO TAMBÉM SEGURA O SELETOR.
+           *
+           * `view.state` é o estado do pipeline do GOOGLE. Num artigo de
+           * produto ele fica NOT_STARTED por construção — e era por isso que
+           * trocar para YouTube no meio de uma coleta da Amazon continuava
+           * clicável, trocando o universo sob uma pesquisa paga em andamento,
+           * em silêncio.
+           */
+          const emCurso = Boolean(doPerfil && doPerfil.state !== "NOT_STARTED");
+          const congelado = travadoPeloPerfil || emCurso || view.state !== "NOT_STARTED";
           return <button key={modo} type="button" role="radio" aria-checked={searchMode === modo} data-testid={`radar-search-mode-${modo.toLowerCase()}`}
             className={`inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-60 ${searchMode === modo ? "border-context-accent bg-selected font-medium text-foreground" : "border-divider text-text-muted hover:border-module-accent/40 hover:text-foreground"}`}
             disabled={busy || congelado}
-            title={congelado ? "A investigação em curso foi feita no modo atual. Zere para trocar." : disponibilidade.reason || undefined}
+            title={travadoPeloPerfil
+              ? doPerfil!.lockReason || undefined
+              : congelado ? "A investigação em curso foi feita no modo atual. Zere para trocar." : disponibilidade.reason || undefined}
             onClick={() => onSearchModeChange(modo)}>
             <span aria-hidden="true">{searchMode === modo ? "●" : "○"}</span>
             {radarSearchModeLabel(modo)}
@@ -355,19 +610,143 @@ function DeepResearch({ view, busy, searchMode, onSearchModeChange, onStart, onA
           </button>;
         })}
       </div>
+      {/* O motivo do lock precisa ser legível sem passar o mouse. */}
+      {doPerfil?.profileLocked && <p className="mt-1.5 text-sm text-text-muted" role="status" data-testid="radar-profile-locked">{doPerfil.lockReason}</p>}
     </div>}
 
-    {/* O RESUMO PRIMEIRO. O detalhe atrás de quem pedir. */}
-    <dl className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6" data-testid="radar-research-summary">
-      <Meta label="Keywords" value={resumo.articleKeywords} />
-      <Meta label="Consultas" value={resumo.queriesExecuted || resumo.queriesPlanned} />
-      <Meta label="Referências" value={observado.sample.uniqueReferences} />
-      <Meta label="Páginas comparáveis" value={observado.sample.comparablePages} />
-      <Meta label="Intenção" value={observado.intent.observedInSerp || observado.intent.declared} />
-      <Meta label="Suficiência" value={radarSufficiencyLabel(view.sufficiency.level)} />
-    </dl>
+    {/*
+      * PESQUISA → YOUTUBE TEM O PRÓPRIO CICLO — YOUTUBE_SEARCH_1 · §2.
+      *
+      * O ciclo abaixo é o do Google: consultas por keyword, SERP canônica,
+      * páginas comparáveis, benchmark editorial. Nada disso descreve uma
+      * disputa de vídeo — e mostrar os dois ao mesmo tempo faria a aba somar
+      * números de universos diferentes.
+      *
+      * Quando o modo é YouTube, quem responde é o painel dele. O do Google
+      * continua intacto, guardado no mesmo artigo, esperando a volta do modo.
+      */}
+    {searchMode === "YOUTUBE" && youtubeSearch && <RadarYoutubeSearchPanel
+      run={youtubeSearch.run}
+      plannedQueries={youtubeSearch.plannedQueries}
+      busy={busy || youtubeSearch.busy}
+      blockedReason={youtubeSearch.blockedReason}
+      frozen={youtubeSearch.frozen}
+      pacote={youtubeSearch.pacote}
+      projecao={youtubeSearch.projecao}
+      sampleSummary={youtubeSearch.sampleSummary}
+      provenanceSummary={youtubeSearch.provenanceSummary}
+      lazySample={youtubeSearch.lazySample}
+      lazyProvenance={youtubeSearch.lazyProvenance}
+      onLoadSample={youtubeSearch.onLoadSample}
+      onLoadProvenance={youtubeSearch.onLoadProvenance}
+      blueprintView={youtubeSearch.blueprintView}
+      editorialModel={youtubeSearch.editorialModel}
+      evidenceExtras={evidenceExtras}
+      multimodal={youtubeSearch.multimodal}
+      onRetrySupport={youtubeSearch.onRetrySupport}
+      onStart={youtubeSearch.onStart}
+      onToggleVideo={youtubeSearch.onToggleVideo}
+      onFinalize={youtubeSearch.onFinalize}
+      onReset={youtubeSearch.onReset}
+    />}
 
-    {temAmostra && <div className="mt-3 grid gap-2.5 md:grid-cols-2 xl:grid-cols-4">
+    {/*
+      * PESQUISA → AMAZON TAMBÉM TEM O PRÓPRIO CICLO — AMAZON_SEARCH_1.1 · §8.
+      *
+      * O ciclo do Google mede páginas comparáveis e benchmark editorial. Nada
+      * disso descreve uma prateleira: mostrar os dois somaria produtos com
+      * páginas na mesma tabela.
+      */}
+    {searchMode === "AMAZON" && amazonSearch && <RadarAmazonSearchPanel
+      run={amazonSearch.run}
+      plannedQueries={amazonSearch.plannedQueries}
+      busy={busy || amazonSearch.busy}
+      blockedReason={amazonSearch.blockedReason}
+      pacote={amazonSearch.pacote}
+      projecao={amazonSearch.projecao}
+      blueprintView={amazonSearch.blueprintView}
+      editorialModel={amazonSearch.editorialModel}
+      evidenceExtras={evidenceExtras}
+      targetSetup={amazonSearch.targetSetup}
+      counts={amazonSearch.counts}
+      frozen={amazonSearch.frozen}
+      sampleSummary={amazonSearch.sampleSummary}
+      provenanceSummary={amazonSearch.provenanceSummary}
+      lazySample={amazonSearch.lazySample}
+      lazyProvenance={amazonSearch.lazyProvenance}
+      onLoadSample={amazonSearch.onLoadSample}
+      onLoadProvenance={amazonSearch.onLoadProvenance}
+      onStart={amazonSearch.onStart}
+      onRetrySupport={amazonSearch.onRetrySupport}
+      onAnalyze={amazonSearch.onAnalyze}
+      onFinalize={amazonSearch.onFinalize}
+      onReset={amazonSearch.onReset}
+    />}
+
+    {areaGoogle && <>
+
+    {/*
+      * ============ §16 e §19 · O ARTIGO-MODELO VEM PRIMEIRO ============
+      *
+      * A ordem anterior obrigava a atravessar um relatório competitivo inteiro
+      * — recorrências, lacunas, entidades, formatos — para chegar ao que a
+      * pessoa abriu a tela para fazer: produzir o artigo.
+      *
+      * A evidência não foi apagada; ela desceu para o disclosure abaixo, que é
+      * onde contexto deve ficar. Prioridade visual não é decoração: é o que
+      * decide o que vai ser lido.
+      */}
+    {view.articleModel.sections.length > 0 && <div className="mt-3">
+      <RadarArticleModelSection model={view.articleModel} />
+    </div>}
+
+    {/* §19 · a decisão, logo depois do que se decide. */}
+    {plannerHandoff && <PlannerHandoff tab={plannerHandoff} />}
+
+    {/*
+      * ============ §17 · A EVIDÊNCIA COMPETITIVA, RECOLHIDA ============
+      *
+      * Era o "Blueprint competitivo" na posição de produto principal. Ele prova
+      * o que a SERP mostrou e continua inteiro aqui dentro — modelo, perguntas,
+      * entidades, recorrências, lacunas, diferenciações, formatos. O que mudou
+      * é a prioridade: isto é contexto de auditoria, não material de escrita.
+      */}
+    <details className="mt-3 rounded-md border border-divider bg-surface p-3" data-testid="radar-competitive-evidence">
+      <summary className="cursor-pointer text-sm font-semibold text-foreground">Ver evidência competitiva</summary>
+      {/*
+        * 1.4 · §10 · A TELEMETRIA DA COLETA VEIO PARA CÁ.
+        *
+        * Keywords, consultas, referências, páginas comparáveis, intenção e
+        * suficiência abriam a área — antes do briefing. São números de
+        * auditoria: ninguém escreve um artigo melhor por saber que a pesquisa
+        * reuniu 17 referências.
+        */}
+      {/* O RESUMO PRIMEIRO. O detalhe atrás de quem pedir. */}
+      <dl className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6" data-testid="radar-research-summary">
+        <Meta label="Keywords" value={resumo.articleKeywords} />
+        <Meta label="Consultas" value={resumo.queriesExecuted || resumo.queriesPlanned} />
+        <Meta label="Referências" value={observado.sample.uniqueReferences} />
+        <Meta label="Páginas comparáveis" value={observado.sample.comparablePages} />
+        <Meta label="Intenção" value={observado.intent.observedInSerp || observado.intent.declared} />
+        <Meta label="Suficiência" value={radarSufficiencyLabel(view.sufficiency.level)} />
+      </dl>
+
+      {/* §16 · as decisões de exclusão moram aqui, e não antes do envio. */}
+      <RadarArticleModelExclusions model={view.articleModel} />
+
+      {/*
+        * ====== 1.2 · §10 · OS PAINÉIS SOLTOS FORAM ABSORVIDOS ======
+        *
+        * "Ver candidatos observados" e "Ver detalhes da pesquisa" viviam como
+        * irmãos da área, competindo com o artigo-modelo por atenção e
+        * oferecendo a mesma pergunta que este disclosure já faz. Nada foi
+        * apagado: eles entram aqui inteiros.
+        */}
+      {evidenceExtras}
+
+      {researchBlueprint?.blueprint && <div className="mt-3"><RadarCompetitiveBlueprintSection view={researchBlueprint}/></div>}
+
+      {temAmostra && <div className="mt-3 grid gap-2.5 md:grid-cols-2 xl:grid-cols-4">
       {/*
         * QUATRO PERGUNTAS, QUATRO RESUMOS.
         *
@@ -436,18 +815,120 @@ function DeepResearch({ view, busy, searchMode, onSearchModeChange, onStart, onA
           {(view.narrative.find(secao => secao.title === "Descoberta e compreensão")?.lines || []).map((linha, index) => <li key={index}>{linha}</li>)}
         </ul>
       </Resumo>
-    </div>}
+      </div>}
+    </details>
+
+    {/*
+      * ========= 2.4 · §1 e §2 · A AMOSTRA COMPETITIVA, SOB DEMANDA =========
+      *
+      * O rótulo vem do RESUMO — é ele que permite dizer "8 páginas" sem ter
+      * transportado 8 páginas. Numa investigação congelada o DTO inicial não
+      * traz `extractions`; o conteúdo chega no primeiro clique, do banco.
+      */}
+    {googleResearch?.sampleSummary?.available && <details
+      className="mt-3 rounded-md border border-divider bg-surface p-3"
+      onToggle={evento => {
+        /* Só o PRIMEIRO clique busca. Fechar e reabrir lê o que já chegou. */
+        if (!(evento.currentTarget as HTMLDetailsElement).open) return;
+        if (googleResearch.lazySample?.state !== "IDLE") return;
+        googleResearch.onLoadSample?.();
+      }}
+      data-testid="radar-google-sample"
+    >
+      <summary className="cursor-pointer text-sm font-semibold text-foreground">
+        Ver amostra competitiva · {googleResearch.sampleSummary.count} {googleResearch.sampleSummary.unit}
+      </summary>
+
+      {/*
+        * §11 · FECHADO NÃO TEM SPINNER; a primeira abertura tem.
+        *
+        * E a falha NÃO toca o estado FINALIZED: a fotografia continua válida e
+        * o Blueprint continua legível acima. O que falhou foi a consulta.
+        */}
+      {googleResearch.lazySample?.state === "LOADING" && <p className="mt-2 text-sm text-text-muted" role="status" data-testid="radar-google-sample-loading">
+        Carregando amostra…
+      </p>}
+      {googleResearch.lazySample?.state === "FAILED" && <div className="mt-2" data-testid="radar-google-sample-failed">
+        <p className="text-sm text-warning" role="status">{googleResearch.lazySample.message || "Não foi possível carregar a amostra."}</p>
+        <button type="button" data-testid="radar-google-sample-retry" className="mt-1 inline-flex min-h-9 items-center rounded-md border border-divider px-3 text-sm text-text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus" onClick={() => googleResearch.onLoadSample?.()}>Tentar novamente</button>
+      </div>}
+
+      {/*
+        * §4 · A FALTA É DITA, E A CONTAGEM NÃO ENCOLHE EM SILÊNCIO.
+        *
+        * Substituir a referência que não resolve por uma página parecida faria
+        * a fotografia descrever outra investigação sem que nada avisasse.
+        */}
+      {googleResearch.lazySample?.integrity && <p className="mt-2 text-sm leading-6 text-warning" role="status" data-testid="radar-google-sample-integrity">
+        Uma referência da amostra congelada não pôde ser resolvida: {googleResearch.lazySample.integrity.message} A investigação continua finalizada.
+      </p>}
+
+      {googleResearch.lazySample?.state === "READY" && <ul className="mt-2 space-y-2" data-testid="radar-google-sample-pages">
+        {googleResearch.lazySample.pages.map(pagina => <li key={pagina.id} className="rounded-md border border-divider bg-surface-subtle p-2.5" data-testid="radar-google-sample-page">
+          <a className="text-sm text-foreground underline-offset-2 hover:underline" href={pagina.url} target="_blank" rel="noreferrer">{pagina.title || pagina.url}</a>
+          <dl className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Meta label="Palavras" value={pagina.wordCount} />
+            <Meta label="Seções" value={pagina.h2.length} />
+            <Meta label="Listas e tabelas" value={pagina.listCount + pagina.tableCount} />
+            <Meta label="Leitura" value={pagina.status === "success" ? "completa" : pagina.status} />
+          </dl>
+        </li>)}
+      </ul>}
+    </details>}
 
     {/*
       * PROVENIÊNCIA TÉCNICA — um lugar só, sempre recolhido.
       *
       * Plano de consultas, fundamento congelado, versões e limitações técnicas.
       * Nada disso é operação cotidiana, e nada disso deixou de existir.
+      *
+      * 2.4 · §5 · A IDENTIDADE DA FOTOGRAFIA CHEGA SOB DEMANDA. O que já era
+      * barato — o plano de consultas, o fingerprint do fundamento — continua
+      * vindo no payload inicial e não virou uma segunda ida ao servidor.
       */}
-    <details className="mt-3 rounded-md border border-divider bg-surface p-3" data-testid="radar-technical-provenance">
+    <details
+      className="mt-3 rounded-md border border-divider bg-surface p-3"
+      onToggle={evento => {
+        if (!(evento.currentTarget as HTMLDetailsElement).open) return;
+        if (!googleResearch || googleResearch.lazyProvenance?.state !== "IDLE") return;
+        googleResearch.onLoadProvenance?.();
+      }}
+      data-testid="radar-technical-provenance"
+    >
       <summary className="cursor-pointer text-sm font-semibold text-foreground">Proveniência e detalhes técnicos</summary>
       <div className="mt-3 space-y-4">
         <p className="text-sm leading-6 text-text-muted">A pesquisa cobre a unidade editorial inteira — principal, secundárias e reforços — contra o que o ArticleDNA declara. A SERP da principal é a canônica do artigo: é ela que tem snapshot, revisão e aprovação; as demais são auxiliares e alimentam o universo competitivo. Nada é coletado por abrir a tela.</p>
+        {/*
+         * ====== 1.1 · §17 · O CARD VERDE VEIO PARA CÁ ======
+         *
+         * A seção "Investigação congelada" — amostra, links, especialista e
+         * carimbo — repetia um estado que a primeira camada já dá (Pesquisa =
+         * Finalizado) e ocupava, no fluxo principal, o espaço da arquitetura do
+         * artigo.
+         *
+         * Ele não foi apagado: é exatamente o tipo de dado que a proveniência
+         * existe para guardar.
+         */}
+        {view.finalizedBundle && <section className="mt-3 rounded-md border border-success/35 bg-success-soft/25 p-3" data-testid="radar-frozen-bundle">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Investigação congelada</h3>
+            <span className="text-sm text-text-muted">{new Date(view.finalizedBundle.frozenAt).toLocaleString("pt-BR")}</span>
+          </div>
+          {/*
+            * 2.4 · §5 · `bundleId` e `bundleHash` SAÍRAM daqui.
+            *
+            * Eles não foram apagados: moram na proveniência recolhida, junto dos
+            * outros ids técnicos. Aqui fica o que a pessoa decide olhando.
+            */}
+          <dl className="mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+            <Meta label="Amostra" value={`${view.finalizedBundle.sample.comparablePages} comparável(is)`} />
+            <Meta label="Links planejados" value={view.finalizedBundle.links.totalRecommendedLinks} />
+            <Meta label="Especialista" value={`${view.finalizedBundle.authority.specialistRequirements.length} ponto(s)`} />
+          </dl>
+          {view.finalizedBundle.acknowledgedInsufficiency && <p className="mt-2 text-sm leading-6 text-warning" data-testid="radar-frozen-insufficiency">Encerrada com insuficiência declarada: {view.finalizedBundle.acknowledgedInsufficiency}</p>}
+          <p className="mt-2 text-sm leading-6 text-text-muted">Esta versão não muda mais. Para pesquisar de novo, zere a investigação — o registro anterior permanece.</p>
+        </section>}
+
         {registro && <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Meta label="Iniciada em" value={new Date(registro.startedAt).toLocaleString("pt-BR")} />
           <Meta label="ArticleDNA" value={registro.fingerprint.articleDnaVersionId} />
@@ -473,6 +954,35 @@ function DeepResearch({ view, busy, searchMode, onSearchModeChange, onStart, onA
           </table>
         </div>
         {resumo.limitations.length > 0 && <div><h3 className="text-sm font-semibold text-foreground">O que esta investigação não pôde afirmar</h3><ul className="mt-1 space-y-1 text-sm leading-6 text-text-muted">{resumo.limitations.map(item => <li key={item}>{item}</li>)}</ul></div>}
+
+        {/*
+          * §5 · A IDENTIDADE DA FOTOGRAFIA — e ela mora AQUI, não no card.
+          *
+          * `bundleId` e `bundleHash` saíram da seção "Investigação congelada"
+          * para cá: id técnico não fica fora do disclosure. O card continua
+          * dizendo o que a pessoa decide olhando — quando congelou, que amostra,
+          * quantos links, quantos pontos de especialista.
+          */}
+        {googleResearch?.lazyProvenance?.state === "LOADING" && <p className="text-sm text-text-muted" role="status" data-testid="radar-google-provenance-loading">
+          Carregando proveniência…
+        </p>}
+        {googleResearch?.lazyProvenance?.state === "FAILED" && <div data-testid="radar-google-provenance-failed">
+          <p className="text-sm text-warning" role="status">{googleResearch.lazyProvenance.message || "Não foi possível carregar a proveniência."}</p>
+          <button type="button" data-testid="radar-google-provenance-retry" className="mt-1 inline-flex min-h-9 items-center rounded-md border border-divider px-3 text-sm text-text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus" onClick={() => googleResearch.onLoadProvenance?.()}>Tentar novamente</button>
+        </div>}
+        {googleResearch?.lazyProvenance?.data && <dl className="grid gap-1 text-sm text-text-muted sm:grid-cols-2" data-testid="radar-google-provenance-data">
+          <div><dt className="inline font-semibold">Coleta: </dt><dd className="inline">{googleResearch.lazyProvenance.data.runId || "não informada"}{googleResearch.lazyProvenance.data.runVersion ? ` (v${googleResearch.lazyProvenance.data.runVersion})` : ""}</dd></div>
+          <div><dt className="inline font-semibold">Assinatura do fundamento: </dt><dd className="inline">{googleResearch.lazyProvenance.data.fingerprint || "não informada"}</dd></div>
+          <div><dt className="inline font-semibold">Iniciada em: </dt><dd className="inline">{googleResearch.lazyProvenance.data.collectedAt || "não informada"}</dd></div>
+          {googleResearch.lazyProvenance.data.frozenAt && <div><dt className="inline font-semibold">Congelada em: </dt><dd className="inline">{googleResearch.lazyProvenance.data.frozenAt}</dd></div>}
+          {googleResearch.lazyProvenance.data.frozenId && <div><dt className="inline font-semibold">Evidências: </dt><dd className="inline">{googleResearch.lazyProvenance.data.frozenId}</dd></div>}
+          {googleResearch.lazyProvenance.data.frozenHash && <div><dt className="inline font-semibold">Hash do pacote: </dt><dd className="inline">{googleResearch.lazyProvenance.data.frozenHash}</dd></div>}
+          {googleResearch.lazyProvenance.data.supportSnapshotId && <div><dt className="inline font-semibold">Snapshot do apoio: </dt><dd className="inline">{googleResearch.lazyProvenance.data.supportSnapshotId}</dd></div>}
+        </dl>}
+        {googleResearch?.lazyProvenance?.data && googleResearch.lazyProvenance.data.limitations.length > 0 && <div data-testid="radar-google-provenance-limitations">
+          <h3 className="text-sm font-semibold text-foreground">Limitações técnicas registradas no congelamento</h3>
+          <ul className="mt-1 space-y-1 text-sm leading-6 text-text-muted">{googleResearch.lazyProvenance.data.limitations.map(item => <li key={item}>{item}</li>)}</ul>
+        </div>}
       </div>
     </details>
 
@@ -483,21 +993,6 @@ function DeepResearch({ view, busy, searchMode, onSearchModeChange, onStart, onA
       * sendo recalculada e ninguém conseguiria provar depois quais evidências
       * o Planejador recebeu. O hash é do CONTEÚDO congelado, não do ArticleDNA.
       */}
-    {view.finalizedBundle && <section className="mt-3 rounded-md border border-success/35 bg-success-soft/25 p-3" data-testid="radar-frozen-bundle">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-foreground">Investigação congelada</h3>
-        <span className="text-sm text-text-muted">{new Date(view.finalizedBundle.frozenAt).toLocaleString("pt-BR")}</span>
-      </div>
-      <dl className="mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
-        <Meta label="Evidências" value={view.finalizedBundle.bundleId} />
-        <Meta label="Hash do pacote" value={view.finalizedBundle.bundleHash} />
-        <Meta label="Amostra" value={`${view.finalizedBundle.sample.comparablePages} comparável(is)`} />
-        <Meta label="Links planejados" value={view.finalizedBundle.links.totalRecommendedLinks} />
-        <Meta label="Especialista" value={`${view.finalizedBundle.authority.specialistRequirements.length} ponto(s)`} />
-      </dl>
-      {view.finalizedBundle.acknowledgedInsufficiency && <p className="mt-2 text-sm leading-6 text-warning" data-testid="radar-frozen-insufficiency">Encerrada com insuficiência declarada: {view.finalizedBundle.acknowledgedInsufficiency}</p>}
-      <p className="mt-2 text-sm leading-6 text-text-muted">Esta versão não muda mais. Para pesquisar de novo, zere a investigação — o registro anterior permanece.</p>
-    </section>}
 
     <div className="mt-3 flex flex-wrap items-center justify-end gap-3 border-t border-divider pt-3">
       {(acao.blockedReason || acao.hint) && <p className="mr-auto max-w-3xl text-sm leading-6 text-text-muted" data-testid="radar-deep-research-reason">{acao.blockedReason || acao.hint}</p>}
@@ -516,6 +1011,31 @@ function DeepResearch({ view, busy, searchMode, onSearchModeChange, onStart, onA
       <RecoverSerpAction view={view} busy={busy} onRecover={onRecover} />
       {acao.id !== "NONE" && <Phase1Button acao={acao} busy={busy} onTrigger={disparar} />}
     </div>
+    </>}
+
+    {/*
+      * §25 · A FRONTEIRA COM O PLANEJADOR — UMA, PARA OS TRÊS PERFIS.
+      *
+      * Ela fica DEPOIS dos painéis porque é o passo seguinte a todos eles:
+      * um botão por perfil daria três fronteiras diferentes para a mesma
+      * entrega, e o Planejador aprenderia três dialetos da mesma pergunta.
+      */}
+    {plannerHandoff && !areaGoogle && <PlannerHandoff tab={plannerHandoff} />}
+
+    {/*
+      * ====== 2.1 · §25 · A EXCEÇÃO ACABOU, PORQUE O MOTIVO DELA ACABOU ======
+      *
+      * O 1.2 deixou estes disclosures soltos fora da área Google com uma razão
+      * honesta: naquele momento o YouTube e a Amazon não tinham "Ver evidência
+      * competitiva" para absorvê-los, e apagá-los teria custado a consulta.
+      *
+      * O PROFILES_2 deu os dois disclosures aos dois perfis. Manter a exceção
+      * depois disso devolveria a tela ao que o §25 descreve: painéis legados
+      * competindo, no mesmo nível, com as portas que respondem a mesma coisa.
+      *
+      * Eles não sumiram — são passados como `evidenceExtras` para dentro do
+      * disclosure de evidência de cada painel, logo acima.
+      */}
   </section>;
 }
 
@@ -671,10 +1191,23 @@ function RecoverSerpAction({ view, busy, onRecover }: { view: RadarDeepResearchV
   </span>;
 }
 
-function Phase1Slot({ view, busy, onStart, onAnalyze, onFinalize, onRecover }: {
+function Phase1Slot({ view, busy, researchProjection, onStart, onAnalyze, onFinalize, onRecover }: {
   view: RadarDeepResearchView; busy: boolean;
+  researchProjection?: RadarResearchProfileProjection | null;
   onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onRecover?: () => void;
 }) {
+  /*
+   * ====== §4 e §10 · A BARRA RECOLHIDA NÃO OFERECE START ======
+   *
+   * Ela mostrava "Iniciar Pesquisa YouTube" e "Recuperar pesquisa já paga"
+   * sobre uma investigação congelada — as duas frases vindas do pipeline do
+   * Google, que nesse artigo nunca começou. Recuperar era pior: convidava a
+   * "trazer de volta" o que já estava na tela.
+   */
+  const doPerfil = researchProjection && !researchProjection.ownedByGooglePipeline ? researchProjection : null;
+  if (doPerfil && !doPerfil.canStart) {
+    return <span className="text-sm text-text-muted" data-testid="radar-phase1-locked">Pesquisa {doPerfil.profile === "YOUTUBE" ? "YouTube" : "Amazon"} finalizada.</span>;
+  }
   const acao = view.phase1;
   /* Booleano, não o elemento: um JSX que renderiza `null` continua sendo truthy. */
   const podeRecuperar = Boolean(onRecover) && view.state === "NOT_STARTED";
@@ -761,7 +1294,7 @@ function ReportSummaryPanel({ model }: { model: RadarR3Model }) {
   </section>;
 }
 
-export function RadarR3Workbench({ videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportReview, onReportApprove, onReportGenerate, onStartDeepResearch, onRecoverSerp, onFinalizeInvestigation, onResetInvestigation, searchMode = RADAR_DEFAULT_SEARCH_MODE, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
+export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportReview, onReportApprove, onReportGenerate, onStartDeepResearch, youtubeSearch, amazonSearch, plannerHandoff, googleResearch, onRecoverSerp, onFinalizeInvestigation, onResetInvestigation, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection = null, researchBlueprint = null, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
   const [expandedArea, setExpandedArea] = useState<RadarR3Area | null>(null);
 
   /*
@@ -771,8 +1304,36 @@ export function RadarR3Workbench({ videoSources, onRegisterVideoSources, onExtra
    * sobre haver artigo. A pauta de apoio é do ARTIGO e só aparece quando existe
    * investigação — a ausência dela não leva a biblioteca junto.
    */
+  /**
+   * ===== 1.2 · §10 · O QUE ERA PAINEL SOLTO VIRA CONTEÚDO DA EVIDÊNCIA =====
+   *
+   * "Ver candidatos observados" e "Ver detalhes da pesquisa" eram irmãos da área
+   * de Pesquisa: dois disclosures a mais competindo com o artigo-modelo, cada um
+   * respondendo a mesma pergunta que "Ver evidência competitiva" já faz.
+   *
+   * Nada foi apagado — eles entram inteiros no disclosure que os cobre. Fora da
+   * área Google (YouTube, Amazon) eles continuam renderizando onde sempre
+   * estiveram: consolidar a superfície de um perfil não pode apagar a consulta
+   * dos outros.
+   */
+  const areaDeEvidencia = model && <>
+    {model.deepResearch && model.deepResearch.blueprint.sections.length > 0
+      && <details className="mt-3 rounded-md border border-divider bg-surface p-3" data-testid="radar-candidate-evidence">
+        <summary className="cursor-pointer text-sm font-semibold text-foreground">
+          Ver candidatos observados · {model.deepResearch.blueprint.sections.length}
+        </summary>
+        <div className="mt-3"><RadarBlueprintSummaryCard blueprint={model.deepResearch.blueprint} /></div>
+      </details>}
+    {model.deepResearch && <details className="mt-3 rounded-md border border-divider bg-surface p-3" data-testid="radar-research-details-disclosure">
+      <summary className="cursor-pointer text-sm text-context-accent">Ver detalhes da pesquisa</summary>
+      <div className="mt-2.5">
+        <RadarR3ResearchDetails model={model} view={model.deepResearch} />
+      </div>
+    </details>}
+  </>;
+
   const areaDeVideos = <div className="space-y-3">
-    <RadarR3VideosPanel articleId={articleId} videoSources={videoSources} onRegisterVideoSources={onRegisterVideoSources} onExtractVideoText={onExtractVideoText} onFetchVideoMetadata={onFetchVideoMetadata} onProvideVideoTranscript={onProvideVideoTranscript} onUploadVideoMedia={onUploadVideoMedia} onLibraryAction={onLibraryAction} onReloadLibrary={onReloadLibrary} onRunMatching={onRunMatching} />
+    <RadarR3VideosPanel articleId={articleId} brandId={brandId} videoSources={videoSources} onRegisterVideoSources={onRegisterVideoSources} onExtractVideoText={onExtractVideoText} onFetchVideoMetadata={onFetchVideoMetadata} onProvideVideoTranscript={onProvideVideoTranscript} onUploadVideoMedia={onUploadVideoMedia} onLibraryAction={onLibraryAction} onReloadLibrary={onReloadLibrary} onRunMatching={onRunMatching} />
     {/*
       * A PAUTA MUDOU DE COLUNA — VIDEOS 3.5 · §1.
       *
@@ -822,7 +1383,7 @@ export function RadarR3Workbench({ videoSources, onRegisterVideoSources, onExtra
       <h1 className="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">{model.title}</h1>
     </header>
     <ArticleContextBand model={model} />
-    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{RADAR_R3_AREAS.map(area => <AreaCard key={area} area={area} copy={area === "videos" ? copyDeVideos : areaCopy(area, model, searchMode)} expanded={expandedArea === area} onToggle={() => setExpandedArea(current => current === area ? null : area)} />)}</div>
+    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{RADAR_R3_AREAS.map(area => <AreaCard key={area} area={area} copy={area === "videos" ? copyDeVideos : areaCopy(area, model, searchMode, researchProjection)} expanded={expandedArea === area} onToggle={() => setExpandedArea(current => current === area ? null : area)} />)}</div>
     {/*
       * QUATRO ÁREAS, QUATRO DONOS — e nada operacional depois do switch.
       *
@@ -834,7 +1395,15 @@ export function RadarR3Workbench({ videoSources, onRegisterVideoSources, onExtra
     <div id={expandedArea ? `radar-r3-panel-${expandedArea}` : undefined} className="mt-3">
       {/* A CAMADA DO ARTIGO REMONTA POR ARTIGO. A key saiu do Workbench inteiro — ela apagava a biblioteca da marca a cada troca — e ficou onde sempre pertenceu: nos painéis cujo rascunho é de um artigo só. */}
       {expandedArea === "pesquisa" && <div key={model.articleId} className="space-y-3">
-        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} />}
+        {/*
+          * 1.2 · §10 · O QUE ERA SOLTO VIRA CONTEÚDO DO DISCLOSURE.
+          *
+          * A área Google recebe os dois painéis por dentro da evidência
+          * competitiva. Fora dela — YouTube, Amazon — eles continuam onde
+          * sempre estiveram: consolidar a superfície do Google não pode apagar
+          * a consulta dos outros perfis.
+          */}
+        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} plannerHandoff={plannerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} />}
         {/*
           * AMAZON NÃO É UM LUGAR SEPARADO — é um dos destinos da pesquisa.
           *
@@ -848,9 +1417,26 @@ export function RadarR3Workbench({ videoSources, onRegisterVideoSources, onExtra
           * fazer com o que foi encontrado. Ele só aparece quando existe amostra:
           * propor blocos narrativos sem evidência seria inventar estrutura.
           */}
-        {model.deepResearch && model.deepResearch.blueprint.sections.length > 0
-          && <RadarBlueprintSummaryCard blueprint={model.deepResearch.blueprint} />}
-        {searchMode === "AMAZON" && <RadarR3AmazonPanel model={model.amazon} state={model.r4?.amazon} onStateChange={state => onAmazonStateChange?.(model.articleId, state)} />}
+        {/*
+          * ====== §16 · ESTE CARD DEIXOU DE SER A SUPERFÍCIE PRINCIPAL ======
+          *
+          * Ele mostra os CANDIDATOS por conceito — vinte deles no artigo real,
+          * vários de uma página só, cada um repetindo "Por que entra", "Mercado"
+          * e a contagem de formulações. Isso é evidência, e evidência agora vive
+          * dentro do disclosure competitivo, junto do resto.
+          *
+          * Ele NÃO foi apagado (§26): quem audita continua alcançando a
+          * justificativa candidato a candidato. O que mudou é quem manda na
+          * primeira leitura — o artigo-modelo.
+          */}
+        {/*
+          * §8 · O PAINEL DE CRITÉRIOS SÓ APARECE SEM A ABA CANÔNICA.
+          *
+          * Os dois juntos dariam duas superfícies "Amazon" na mesma tela, e
+          * quem opera teria de descobrir qual delas descreve a coleta que
+          * acabou de pagar.
+          */}
+        {searchMode === "AMAZON" && !amazonSearch && <RadarR3AmazonPanel model={model.amazon} state={model.r4?.amazon} onStateChange={state => onAmazonStateChange?.(model.articleId, state)} />}
         {/*
           * O WORKFLOW LEGADO SAIU DAQUI — não foi escondido de novo.
           *
@@ -865,12 +1451,6 @@ export function RadarR3Workbench({ videoSources, onRegisterVideoSources, onExtra
           * páginas, evidências, histórico — e nenhum deles governa o processo:
           * `RadarR3ResearchDetails` não recebe um único handler.
           */}
-        {searchMode !== "AMAZON" && model.deepResearch && <details className="rounded-md border border-divider bg-surface p-3" data-testid="radar-research-details-disclosure">
-          <summary className="cursor-pointer text-sm text-context-accent">Ver detalhes da pesquisa</summary>
-          <div className="mt-2.5">
-            <RadarR3ResearchDetails model={model} view={model.deepResearch} />
-          </div>
-        </details>}
       </div>}
       {expandedArea === "videos" && areaDeVideos}
       {expandedArea === "especialista" && <div key={model.articleId} className="space-y-3">
@@ -909,6 +1489,7 @@ export function RadarR3Workbench({ videoSources, onRegisterVideoSources, onExtra
     {expandedArea !== "pesquisa" && model.deepResearch && <Phase1Slot
       view={model.deepResearch}
       busy={refreshing || reviewingSerp || serpAction !== null}
+      researchProjection={researchProjection}
       onStart={onStartDeepResearch}
       onRecover={onRecoverSerp}
       onAnalyze={onAnalyzeSerpSelection}

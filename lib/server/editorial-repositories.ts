@@ -1,4 +1,5 @@
 import { pruneRadarAnalysisHistory } from "@/lib/radar/analysis-history-pruning";
+import { compactRadarResearchForRead } from "@/lib/radar/research-read-model";
 import "server-only";
 import type { ArticleDNA, ContentDocument, ContentPlan, SiloDNA, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts";
 import { VersionedArticleDNASchema, VersionedContentPlanSchema, VersionedSiloDNASchema, VersionStatusEventSchema, ContentDocumentSchema } from "../arquiteto/contracts";
@@ -159,8 +160,31 @@ export class WorkflowRepository {
        */
       const bruto = row.payload as Record<string, unknown>;
       const historico = Array.isArray(bruto?.analysisVersions) ? bruto.analysisVersions : null;
-      const payload = historico
-        ? { ...bruto, analysisVersions: pruneRadarAnalysisHistory(historico as Parameters<typeof pruneRadarAnalysisHistory>[0]) }
+      /*
+       * ============ RADAR_FINAL_2.1 · §2 · A CÓPIA DE LEITURA ============
+       *
+       * A poda já tirava a matéria-prima das versões HISTÓRICAS. O que sobrava
+       * era a corrida da versão CORRENTE — 129,7 KB numa investigação Amazon —
+       * atravessando a rede para alimentar um disclosure fechado.
+       *
+       * A compactação só alcança investigação CONGELADA: antes do freeze o
+       * universo é a superfície de trabalho, e tirá-lo dali quebraria a
+       * curadoria para economizar bytes que a pessoa está olhando.
+       *
+       * Esta é a leitura da LISTAGEM. O readback por artigo continua devolvendo
+       * a versão corrente inteira — é dele que toda escrita nasce (§9).
+       */
+      const podado = historico
+        ? pruneRadarAnalysisHistory(historico as Parameters<typeof pruneRadarAnalysisHistory>[0])
+        : null;
+      const payload = podado
+        ? {
+          ...bruto,
+          analysisVersions: podado.map(versao => ({
+            ...versao,
+            payload: compactRadarResearchForRead(versao.payload as Record<string, unknown>),
+          })),
+        }
         : bruto;
       const base = { ...(payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: isoDate(row.created_at), updatedAt: isoDate(row.updated_at), origin: "real" };
       const schema = row.stage === "radar" ? RadarItemSchema : PlannerItemSchema;

@@ -37,7 +37,9 @@
     "test:real-db": "node tests/run-all.js",
     "test:arquiteto-backup": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/arquiteto-backup-e-export-editorial.test.mts",
     "test:arquiteto-backup-roundtrip": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-loader ./tests/integrations-runtime-loader.mjs --test tests/arquiteto-backup-roundtrip.test.mts",
-    "arquiteto:backup-homologation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-loader ./tests/integrations-runtime-loader.mjs scripts/arquiteto-backup-homologation.mts"
+    "arquiteto:backup-homologation": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-loader ./tests/integrations-runtime-loader.mjs scripts/arquiteto-backup-homologation.mts",
+    "youtube:smoke": "node --env-file-if-exists=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --experimental-loader ./tests/integrations-runtime-loader.mjs scripts/radar-youtube-smoke.mts",
+    "amazon:discovery": "node --env-file-if-exists=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/radar-amazon-discovery.mts"
   },
   "dependencies": {
     "@google-cloud/speech": "^8.0.1",

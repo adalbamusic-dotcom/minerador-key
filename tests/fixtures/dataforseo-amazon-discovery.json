@@ -1,0 +1,1951 @@
+{
+  "_fixture": "AMAZON_SEARCH_0 · payload real sanitizado. Credenciais e identificadores de conta removidos; estrutura preservada.",
+  "status_code": 20000,
+  "status_message": "Ok.",
+  "tasks": [
+    {
+      "id": "TASK_ID_REMOVIDO",
+      "status_code": 20000,
+      "status_message": "Ok.",
+      "time": "56.6164 sec.",
+      "result_count": 1,
+      "path": [
+        "v3",
+        "merchant",
+        "amazon",
+        "products",
+        "live",
+        "advanced"
+      ],
+      "data": {
+        "api": "merchant",
+        "function": "products",
+        "se": "amazon",
+        "keyword": "protetor solar facial",
+        "location_code": 2076,
+        "language_code": "pt_BR",
+        "depth": 20,
+        "tag": "TAG_REMOVIDA",
+        "se_type": "products",
+        "device": "desktop",
+        "os": "windows"
+      },
+      "result": [
+        {
+          "keyword": "protetor solar facial",
+          "type": "organic",
+          "se_domain": "amazon.com.br",
+          "location_code": 2076,
+          "language_code": "pt_BR",
+          "check_url": "https://www.amazon.com.br/s?k=protetor+solar+facial&crid=UWKOO8FNEK1N&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&language=pt_BR&ref=nb_sb_noss",
+          "datetime": "2026-09-15 02:27:59 +00:00",
+          "spell": null,
+          "item_types": [
+            "amazon_serp",
+            "amazon_paid",
+            "related_searches"
+          ],
+          "se_results_count": 3403,
+          "categories": null,
+          "items_count": 56,
+          "items": [
+            {
+              "type": "amazon_serp",
+              "rank_group": 1,
+              "rank_absolute": 1,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[3]",
+              "domain": "www.amazon.com.br",
+              "title": "EUCERIN Protetor Solar Facial Oil Control FPS 60 50ml, Antioleosidade, Rosto, Proteção UVA, UVB e Luz Visível",
+              "url": "https://www.amazon.com.br/Protetor-Solar-Oil-Control-Eucerin/dp/B079VW5KT6/ref=sr_1_1?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-1",
+              "image_url": "https://m.media-amazon.com/images/I/61qYczVq9hL._AC_UL320_.jpg",
+              "bought_past_month": 6,
+              "price_from": 62.92,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B079VW5KT6",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 5500,
+                "rating_max": 5
+              },
+              "is_amazon_choice": true,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: sex., 23 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 2,
+              "rank_absolute": 2,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[4]",
+              "domain": "www.amazon.com.br",
+              "title": "Protetor Facial Diário Helioderm Oil Free FPS 70 Sem Cor 50g",
+              "url": "https://www.amazon.com.br/Protetor-Facial-Di%C3%A1rio-Helioderm-Free/dp/B0BNP4NZMC/ref=sr_1_2?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-2",
+              "image_url": "https://m.media-amazon.com/images/I/41o86SHwSzL._AC_UL320_.jpg",
+              "bought_past_month": 3,
+              "price_from": null,
+              "price_to": null,
+              "currency": null,
+              "special_offers": null,
+              "data_asin": "B0BNP4NZMC",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 564,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": null,
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 3,
+              "rank_absolute": 3,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[5]",
+              "domain": "www.amazon.com.br",
+              "title": "Neutrogena Sun Fresh Bastão Efeito Make-up FPS 99 - Cor 2.0",
+              "url": "https://www.amazon.com.br/Neutrogena-Fresh-Bast%C3%A3o-Efeito-Make-up/dp/B0H9M5HJ9L/ref=sr_1_3?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-3&ufe=app_do%3Aamzn1.fos.45d70dca-64c9-4dda-a33f-ade433aacd08",
+              "image_url": "https://m.media-amazon.com/images/I/61ce7sxetTL._AC_UL320_.jpg",
+              "bought_past_month": null,
+              "price_from": 129.9,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 20,00",
+                "off"
+              ],
+              "data_asin": "B0H9M5HJ9L",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 5,
+                "votes_count": 4,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 4,
+              "rank_absolute": 4,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[6]/div[1]/div[1]/div[1]/span[2]/div[1]/div[1]/div[1]/div[1]/div[1]/div[1]/ol[1]/li[1]/div[1]",
+              "domain": "www.amazon.com.br",
+              "title": "Eucerin Sun Protetor Solar Hydro Fluid Facial Cor Clara FPS70 50ml",
+              "url": "https://www.amazon.com.br/sspa/click?ie=UTF8&spc=MTo2MjIyMjg3NDIxNzU1NTY5OjE3ODk0MzkyNzc6c3Bfc2VhcmNoX3RoZW1hdGljOjMwMTIyNDAzNjM3ODYwMjo6MDo6&url=%2FEucerin-Protetor-Solar-Hydro-Facial%2Fdp%2FB0F8PLBHYQ%2Fref%3Dsxin_13_pa_sp_search_thematic_sspa%3Fcontent-id%3Damzn1.sym.31f7e9c0-6409-440c-8b4f-5a95ecd40cab%253Aamzn1.sym.31f7e9c0-6409-440c-8b4f-5a95ecd40cab%26crid%3DUWKOO8FNEK1N%26cv_ct_cx%3Dprotetor%2Bsolar%2Bfacial%26keywords%3Dprotetor%2Bsolar%2Bfacial%26pd_rd_i%3DB0F8PLBHYQ%26pd_rd_r%3Db682ec95-e77f-49ca-ac5f-428cbfd83793%26pd_rd_w%3DFKIts%26pd_rd_wg%3DOeVkI%26pf_rd_p%3D31f7e9c0-6409-440c-8b4f-5a95ecd40cab%26pf_rd_r%3DVDFA6TVF5RJF5N69P31B%26qid%3D1789439277%26sbo%3DRZvfv%252F%252FHxDF%252BO5021pAnSA%253D%253D%26sprefix%3Dprotetor%252Bsolar%252Bfacial%252Caps%252C159%26sr%3D1-1-fc613efb-89a5-4ecc-a266-4feb7aba5db9-spons%26ufe%3Dapp_do%253Aamzn1.fos.2fb4d624-b7be-441e-af6d-3c953cfae5bf%26aref%3DiRQ3arGhDa%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9zZWFyY2hfdGhlbWF0aWM%26psc%3D1&aref=iRQ3arGhDa",
+              "image_url": "https://m.media-amazon.com/images/I/61RUzMzL4EL._AC_UL320_.jpg",
+              "bought_past_month": 600,
+              "price_from": 62.91,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0F8PLBHYQ",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.4,
+                "votes_count": 204,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": null,
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 5,
+              "rank_absolute": 5,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[6]/div[1]/div[1]/div[1]/span[2]/div[1]/div[1]/div[1]/div[1]/div[1]/div[1]/ol[1]/li[2]/div[1]",
+              "domain": "www.amazon.com.br",
+              "title": "NIVEA SUN Protetor Solar Facial UV Face Controle de Oleosidade FPS 60 50ml, Muito Alta Proteção UVA/UVB, Efeito Matte, Controle do Brilho, Cuidado Diário",
+              "url": "https://www.amazon.com.br/sspa/click?ie=UTF8&spc=MTo2MjIyMjg3NDIxNzU1NTY5OjE3ODk0MzkyNzc6c3Bfc2VhcmNoX3RoZW1hdGljOjMwMTM3MzEyNjE1MDEwMjo6MTo6&url=%2FProtetor-Beauty-Expert-Facial-Oleosa%2Fdp%2FB07YNFRZK9%2Fref%3Dsxin_13_pa_sp_search_thematic_sspa%3Fcontent-id%3Damzn1.sym.31f7e9c0-6409-440c-8b4f-5a95ecd40cab%253Aamzn1.sym.31f7e9c0-6409-440c-8b4f-5a95ecd40cab%26crid%3DUWKOO8FNEK1N%26cv_ct_cx%3Dprotetor%2Bsolar%2Bfacial%26keywords%3Dprotetor%2Bsolar%2Bfacial%26pd_rd_i%3DB07YNFRZK9%26pd_rd_r%3Db682ec95-e77f-49ca-ac5f-428cbfd83793%26pd_rd_w%3DFKIts%26pd_rd_wg%3DOeVkI%26pf_rd_p%3D31f7e9c0-6409-440c-8b4f-5a95ecd40cab%26pf_rd_r%3DVDFA6TVF5RJF5N69P31B%26qid%3D1789439277%26sbo%3DRZvfv%252F%252FHxDF%252BO5021pAnSA%253D%253D%26sprefix%3Dprotetor%252Bsolar%252Bfacial%252Caps%252C159%26sr%3D1-2-fc613efb-89a5-4ecc-a266-4feb7aba5db9-spons%26aref%3DhJXNWw4VYO%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9zZWFyY2hfdGhlbWF0aWM%26psc%3D1&aref=hJXNWw4VYO",
+              "image_url": "https://m.media-amazon.com/images/I/71Si-xvHdGL._AC_UL320_.jpg",
+              "bought_past_month": 900,
+              "price_from": 34.27,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B07YNFRZK9",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 3900,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": null,
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 6,
+              "rank_absolute": 6,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[6]/div[1]/div[1]/div[1]/span[2]/div[1]/div[1]/div[1]/div[1]/div[1]/div[1]/ol[1]/li[3]/div[1]",
+              "domain": "www.amazon.com.br",
+              "title": "Cicatricure Protetor Solar Facial FPS 50 Antissinais Toque Seco UVA/UVB Para Pele Oleosa, Resistente à Água e Suor, Efeito Matte, Hidratante Diário Skin Care 40 ml",
+              "url": "https://www.amazon.com.br/sspa/click?ie=UTF8&spc=MTo2MjIyMjg3NDIxNzU1NTY5OjE3ODk0MzkyNzc6c3Bfc2VhcmNoX3RoZW1hdGljOjMwMDc4NjA1NjQ5NDgwMjo6Mjo6&url=%2FCicatricure-Antissinais-fotoenvelhecimento-HIALUR%25C3%2594NICO-PR%25C3%2593-COL%25C3%2581GENO%2Fdp%2FB09PS4F7PS%2Fref%3Dsxin_13_pa_sp_search_thematic_sspa%3Fcontent-id%3Damzn1.sym.31f7e9c0-6409-440c-8b4f-5a95ecd40cab%253Aamzn1.sym.31f7e9c0-6409-440c-8b4f-5a95ecd40cab%26crid%3DUWKOO8FNEK1N%26cv_ct_cx%3Dprotetor%2Bsolar%2Bfacial%26keywords%3Dprotetor%2Bsolar%2Bfacial%26pd_rd_i%3DB09PS4F7PS%26pd_rd_r%3Db682ec95-e77f-49ca-ac5f-428cbfd83793%26pd_rd_w%3DFKIts%26pd_rd_wg%3DOeVkI%26pf_rd_p%3D31f7e9c0-6409-440c-8b4f-5a95ecd40cab%26pf_rd_r%3DVDFA6TVF5RJF5N69P31B%26qid%3D1789439277%26sbo%3DRZvfv%252F%252FHxDF%252BO5021pAnSA%253D%253D%26sprefix%3Dprotetor%252Bsolar%252Bfacial%252Caps%252C159%26sr%3D1-3-fc613efb-89a5-4ecc-a266-4feb7aba5db9-spons%26aref%3DosTy6BTa1M%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9zZWFyY2hfdGhlbWF0aWM%26psc%3D1&aref=osTy6BTa1M",
+              "image_url": "https://m.media-amazon.com/images/I/61-iDIvAH1L._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 37.98,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B09PS4F7PS",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 2600,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": null,
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 7,
+              "rank_absolute": 7,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[6]/div[1]/div[1]/div[1]/span[2]/div[1]/div[1]/div[1]/div[1]/div[1]/div[1]/ol[1]/li[4]/div[1]",
+              "domain": "www.amazon.com.br",
+              "title": "PRO STICK PROTETOR SOLAR MULTIFUNCIONAL FPS95 PRO10 14G",
+              "url": "https://www.amazon.com.br/sspa/click?ie=UTF8&spc=MTo2MjIyMjg3NDIxNzU1NTY5OjE3ODk0MzkyNzc6c3Bfc2VhcmNoX3RoZW1hdGljOjMwMTQ3MjY5ODk1MjUwMjo6Mzo6&url=%2FSTICK-PROTETOR-SOLAR-MULTIFUNCIONAL-FPS95%2Fdp%2FB0B3STWN1Z%2Fref%3Dsxin_13_pa_sp_search_thematic_sspa%3Fcontent-id%3Damzn1.sym.31f7e9c0-6409-440c-8b4f-5a95ecd40cab%253Aamzn1.sym.31f7e9c0-6409-440c-8b4f-5a95ecd40cab%26crid%3DUWKOO8FNEK1N%26cv_ct_cx%3Dprotetor%2Bsolar%2Bfacial%26keywords%3Dprotetor%2Bsolar%2Bfacial%26pd_rd_i%3DB0B3STWN1Z%26pd_rd_r%3Db682ec95-e77f-49ca-ac5f-428cbfd83793%26pd_rd_w%3DFKIts%26pd_rd_wg%3DOeVkI%26pf_rd_p%3D31f7e9c0-6409-440c-8b4f-5a95ecd40cab%26pf_rd_r%3DVDFA6TVF5RJF5N69P31B%26qid%3D1789439277%26sbo%3DRZvfv%252F%252FHxDF%252BO5021pAnSA%253D%253D%26sprefix%3Dprotetor%252Bsolar%252Bfacial%252Caps%252C159%26sr%3D1-4-fc613efb-89a5-4ecc-a266-4feb7aba5db9-spons%26ufe%3Dapp_do%253Aamzn1.fos.2fb4d624-b7be-441e-af6d-3c953cfae5bf%26aref%3DQKBZ3zdLYw%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9zZWFyY2hfdGhlbWF0aWM%26psc%3D1&aref=QKBZ3zdLYw",
+              "image_url": "https://m.media-amazon.com/images/I/51hd3pRS-DL._AC_UL320_.jpg",
+              "bought_past_month": 300,
+              "price_from": 98.9,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 20,00",
+                "off"
+              ],
+              "data_asin": "B0B3STWN1Z",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.6,
+                "votes_count": 656,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": null,
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 8,
+              "rank_absolute": 8,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[6]/div[1]/div[1]/div[1]/span[2]/div[1]/div[1]/div[1]/div[1]/div[1]/div[1]/ol[1]/li[5]/div[1]",
+              "domain": "www.amazon.com.br",
+              "title": "CARE Natural Beauty Protetor Solar Em Pó Suncare Powder Fps 30",
+              "url": "https://www.amazon.com.br/sspa/click?ie=UTF8&spc=MTo2MjIyMjg3NDIxNzU1NTY5OjE3ODk0MzkyNzc6c3Bfc2VhcmNoX3RoZW1hdGljOjMwMTUyMzEzOTAyODgwMjo6NDo6&url=%2FProtetor-Solar-SunCARE-Powder-FPS%2Fdp%2FB09WH9NDRS%2Fref%3Dsxin_13_pa_sp_search_thematic_sspa%3Fcontent-id%3Damzn1.sym.31f7e9c0-6409-440c-8b4f-5a95ecd40cab%253Aamzn1.sym.31f7e9c0-6409-440c-8b4f-5a95ecd40cab%26crid%3DUWKOO8FNEK1N%26cv_ct_cx%3Dprotetor%2Bsolar%2Bfacial%26keywords%3Dprotetor%2Bsolar%2Bfacial%26pd_rd_i%3DB09WH9NDRS%26pd_rd_r%3Db682ec95-e77f-49ca-ac5f-428cbfd83793%26pd_rd_w%3DFKIts%26pd_rd_wg%3DOeVkI%26pf_rd_p%3D31f7e9c0-6409-440c-8b4f-5a95ecd40cab%26pf_rd_r%3DVDFA6TVF5RJF5N69P31B%26qid%3D1789439277%26sbo%3DRZvfv%252F%252FHxDF%252BO5021pAnSA%253D%253D%26sprefix%3Dprotetor%252Bsolar%252Bfacial%252Caps%252C159%26sr%3D1-5-fc613efb-89a5-4ecc-a266-4feb7aba5db9-spons%26ufe%3Dapp_do%253Aamzn1.fos.45d70dca-64c9-4dda-a33f-ade433aacd08%26aref%3DJydgQ1ooBI%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9zZWFyY2hfdGhlbWF0aWM%26psc%3D1&aref=JydgQ1ooBI",
+              "image_url": "https://m.media-amazon.com/images/I/510t+rOl+hL._AC_UL320_.jpg",
+              "bought_past_month": 50,
+              "price_from": 143.2,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 20,00",
+                "off"
+              ],
+              "data_asin": "B09WH9NDRS",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.2,
+                "votes_count": 37,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": null,
+              "labels": null
+            },
+            {
+              "type": "amazon_paid",
+              "rank_group": 1,
+              "rank_absolute": 9,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[7]/div[1]/div[1]/span[1]/div[1]/div[1]/div[1]/div[1]/div[2]",
+              "domain": "www.amazon.com.br",
+              "title": "Vichy Capital Soleil UV-Clear Protetor Solar Facial Antioleosidade e Antiacne Sem Cor, Toque Seco FPS 60, com Niacinamida e Ácido Salicílico, Acabamento Invisível, 40g",
+              "url": "https://www.amazon.com.br/Antioleosidade-Niacinamida-Salic%C3%ADlico-Acabamento-Invis%C3%ADvel/dp/B0DB8TRNZX/ref=sxin_14_sbv_search_btf",
+              "image_url": "https://m.media-amazon.com/images/I/41vH3Hc1+7L._AC_UL640_QL65_.jpg",
+              "bought_past_month": 3,
+              "price_from": 67.02,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0DB8TRNZX",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.6,
+                "votes_count": 1100,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: sex., 9 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 9,
+              "rank_absolute": 10,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[10]",
+              "domain": "www.amazon.com.br",
+              "title": "Neutrogena Sun Fresh Protetor Solar Facial Derm Care, Pele Oleosa, Sem Cor, FPS 70, 40g",
+              "url": "https://www.amazon.com.br/Protetor-Solar-Facial-Oleosa-NEUTROGENA/dp/B08NVMP2YZ/ref=sr_1_4?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-4",
+              "image_url": "https://m.media-amazon.com/images/I/4172WubM1kL._AC_UL320_.jpg",
+              "bought_past_month": 10,
+              "price_from": 47.9,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B08NVMP2YZ",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 43200,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 10,
+              "rank_absolute": 11,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[11]",
+              "domain": "www.amazon.com.br",
+              "title": "VULT PROTETOR SOLAR FACIAL FPS 70 40ml",
+              "url": "https://www.amazon.com.br/VULT-PROTETOR-SOLAR-FACIAL-40ml/dp/B0C2ZP91XV/ref=sr_1_5?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-5",
+              "image_url": "https://m.media-amazon.com/images/I/51FkP-SzDUL._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 22.4,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0C2ZP91XV",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 766,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 11,
+              "rank_absolute": 12,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[12]",
+              "domain": "www.amazon.com.br",
+              "title": "Protetor Solar Facial com Cor FPS 70 Alta Cobertura - L'Oréal Paris Solar Expertise Efeito Make Up - Cor 2.0 30g",
+              "url": "https://www.amazon.com.br/Protetor-Facial-LOr%C3%A9al-Paris-Expertise/dp/B0FXM6MSHK/ref=sr_1_6?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-6",
+              "image_url": "https://m.media-amazon.com/images/I/61woE46PLxL._AC_UL320_.jpg",
+              "bought_past_month": 5,
+              "price_from": 37.2,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0FXM6MSHK",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 2500,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": true,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 12,
+              "rank_absolute": 13,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[13]",
+              "domain": "www.amazon.com.br",
+              "title": "ISDIN Protetor Solar Facial Fusion Water 5 Stars",
+              "url": "https://www.amazon.com.br/Protetor-Solar-Facial-ISDIN-Fusion/dp/B09SMBB1KN/ref=sr_1_7?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-7",
+              "image_url": "https://m.media-amazon.com/images/I/616A9KPmehL._AC_UL320_.jpg",
+              "bought_past_month": 6,
+              "price_from": 57.9,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B09SMBB1KN",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 11800,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 13,
+              "rank_absolute": 14,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[14]",
+              "domain": "www.amazon.com.br",
+              "title": "SKIN AQUA® Super Moisture Milk 40g - Protetor Solar Facial sem cor FPS50 com Ácido Hialurônico e Textura Leve",
+              "url": "https://www.amazon.com.br/SKIN-AQUA%C2%AE-Super-Moisture-Milk/dp/B0C9L4ZNZ8/ref=sr_1_8?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-8",
+              "image_url": "https://m.media-amazon.com/images/I/613CzYTCaOL._AC_UL320_.jpg",
+              "bought_past_month": 7,
+              "price_from": 49.9,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0C9L4ZNZ8",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 4400,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 14,
+              "rank_absolute": 15,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[15]",
+              "domain": "www.amazon.com.br",
+              "title": "Principia Protetor Solar 16,5% Mix de Filtros UV + 5% Niacinamida FPS 60 Principia Skincare PS-01 com 40ml",
+              "url": "https://www.amazon.com.br/Protetor-Solar-Principia-PS01-FPS60/dp/B0CTR4FL63/ref=sr_1_9?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-9",
+              "image_url": "https://m.media-amazon.com/images/I/61v1Sm8OlBL._AC_UL320_.jpg",
+              "bought_past_month": 10,
+              "price_from": 48.99,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0CTR4FL63",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 16800,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 15,
+              "rank_absolute": 16,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[16]",
+              "domain": "www.amazon.com.br",
+              "title": "NIVEA SUN Protetor Solar Facial UV Face Controle de Oleosidade FPS 60 50ml, Muito Alta Proteção UVA/UVB, Efeito Matte, Controle do Brilho, Cuidado Diário",
+              "url": "https://www.amazon.com.br/Protetor-Beauty-Expert-Facial-Oleosa/dp/B07YNFRZK9/ref=sr_1_10?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-10",
+              "image_url": "https://m.media-amazon.com/images/I/71Si-xvHdGL._AC_UL320_.jpg",
+              "bought_past_month": 900,
+              "price_from": 34.27,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B07YNFRZK9",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 3900,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: sex., 9 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 16,
+              "rank_absolute": 17,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[17]",
+              "domain": "www.amazon.com.br",
+              "title": "NIVEA SUN Protetor Solar Facial UV Face Controle de Oleosidade Cor Média FPS 60 50ml, Muito Alta Proteção UVA/UVB, Cobertura de Longa Duração, Efeito Matte, Cuidado Diário",
+              "url": "https://www.amazon.com.br/NIVEA-Protetor-Facial-Controle-Oleosidade/dp/B0CG9VXH4L/ref=sr_1_11?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-11",
+              "image_url": "https://m.media-amazon.com/images/I/71XfnKrDf0L._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 29.99,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0CG9VXH4L",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.5,
+                "votes_count": 686,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 22 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 17,
+              "rank_absolute": 18,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[18]",
+              "domain": "www.amazon.com.br",
+              "title": "Anasol Protetor Solar Facial FPS 70 Clareador - 60 g",
+              "url": "https://www.amazon.com.br/Protetor-Facial-Anasol-Clareador-Toque/dp/B08B5GFHZN/ref=sr_1_12?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-12",
+              "image_url": "https://m.media-amazon.com/images/I/51wZRC7vnPL._AC_UL320_.jpg",
+              "bought_past_month": 4,
+              "price_from": 39.51,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B08B5GFHZN",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 4500,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 18,
+              "rank_absolute": 19,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[19]",
+              "domain": "www.amazon.com.br",
+              "title": "Neostrata Minesol Protetor Solar Facial Oil Control, Sem Cor, FPS 70, 40g",
+              "url": "https://www.amazon.com.br/Neostrata-Minesol-Oil-Control-Fps/dp/B07Y2BK4GJ/ref=sr_1_13?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-13",
+              "image_url": "https://m.media-amazon.com/images/I/51eH9ipBcXL._AC_UL320_.jpg",
+              "bought_past_month": 7,
+              "price_from": 67.49,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B07Y2BK4GJ",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 15300,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 19,
+              "rank_absolute": 20,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[20]",
+              "domain": "www.amazon.com.br",
+              "title": "NIVEA SUN Protetor Solar Facial Toque Seco Antissinais FPS 70 40ml - Com muito alta proteção contra raios UVA/UVB, controla o brilho e previne o envelhecimento precoce",
+              "url": "https://www.amazon.com.br/NIVEA-Protetor-Solar-Facial-Antissinais/dp/B0BD6755LC/ref=sr_1_14?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-14",
+              "image_url": "https://m.media-amazon.com/images/I/613ze9ScETL._AC_UL320_.jpg",
+              "bought_past_month": 7,
+              "price_from": 40.75,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0BD6755LC",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 23000,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 20,
+              "rank_absolute": 21,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[21]",
+              "domain": "www.amazon.com.br",
+              "title": "La Roche-Posay Anthelios Airlicium",
+              "url": "https://www.amazon.com.br/Roche-Posay-Anthelios-Airlicium-Antioleosidade-Oleosidade/dp/B0BJ347WND/ref=sr_1_15?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-15&ufe=app_do%3Aamzn1.fos.2fb4d624-b7be-441e-af6d-3c953cfae5bf",
+              "image_url": "https://m.media-amazon.com/images/I/419Atx-XGTL._AC_UL320_.jpg",
+              "bought_past_month": 7,
+              "price_from": 76.93,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0BJ347WND",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 10000,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 21,
+              "rank_absolute": 22,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[22]",
+              "domain": "www.amazon.com.br",
+              "title": "EUCERIN Protetor Solar Facial Ultra Fluido FPS 60 50ml, Hydro Fluid, Antioleosidade, Antioxidante, Rosto, Proteção UVA, UVB e Luz Visível",
+              "url": "https://www.amazon.com.br/EUCERIN-Protetor-Ultrafluido-AntiOleosidade-Prote%C3%A7%C3%A3o/dp/B0C7Q4Q74P/ref=sr_1_16?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-16",
+              "image_url": "https://m.media-amazon.com/images/I/611v1PCMAbL._AC_UL320_.jpg",
+              "bought_past_month": 2,
+              "price_from": 62.91,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0C7Q4Q74P",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 1900,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 22 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 22,
+              "rank_absolute": 23,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[23]",
+              "domain": "www.amazon.com.br",
+              "title": "Vichy Capital Soleil UV-Clear Protetor Solar Facial Antioleosidade e Antiacne Sem Cor, Toque Seco FPS 60, com Niacinamida e Ácido Salicílico, Acabamento Invisível, 40g",
+              "url": "https://www.amazon.com.br/Antioleosidade-Niacinamida-Salic%C3%ADlico-Acabamento-Invis%C3%ADvel/dp/B0DB8TRNZX/ref=sr_1_17?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-17&ufe=app_do%3Aamzn1.fos.2fb4d624-b7be-441e-af6d-3c953cfae5bf",
+              "image_url": "https://m.media-amazon.com/images/I/41vH3Hc1+7L._AC_UL320_.jpg",
+              "bought_past_month": 3,
+              "price_from": 67.02,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0DB8TRNZX",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.6,
+                "votes_count": 1100,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: sex., 9 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 23,
+              "rank_absolute": 24,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[24]",
+              "domain": "www.amazon.com.br",
+              "title": "Anasol Protetor Solar Facial FPS 50-60g",
+              "url": "https://www.amazon.com.br/Anasol-Protetor-Solar-Facial-50-60g/dp/B08CNG76SS/ref=sr_1_18?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-18",
+              "image_url": "https://m.media-amazon.com/images/I/61wQwsePR0L._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 35.99,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B08CNG76SS",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 5400,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 24,
+              "rank_absolute": 25,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[25]",
+              "domain": "www.amazon.com.br",
+              "title": "Derma Chem - Protetor Solar Facial FPS 60 40g",
+              "url": "https://www.amazon.com.br/Protetor-Solar-Rosto-Fps-Dermachem/dp/B0BFCH7VFW/ref=sr_1_19?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-19",
+              "image_url": "https://m.media-amazon.com/images/I/51-0NDFFBjL._AC_UL320_.jpg",
+              "bought_past_month": 500,
+              "price_from": 23.53,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0BFCH7VFW",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 678,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: seg., 26 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 25,
+              "rank_absolute": 26,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[26]",
+              "domain": "www.amazon.com.br",
+              "title": "L'Oréal Paris Protetor Facial Solar Expertise Antioleosidade FPS 60, 40g",
+              "url": "https://www.amazon.com.br/Protetor-LOr%C3%A9al-Paris-Expertise-Antioleosidade/dp/B0B695DMC2/ref=sr_1_20?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-20",
+              "image_url": "https://m.media-amazon.com/images/I/81VO-Y6AgGL._AC_UL320_.jpg",
+              "bought_past_month": 5,
+              "price_from": 51.21,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0B695DMC2",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 15100,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 26,
+              "rank_absolute": 27,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[27]",
+              "domain": "www.amazon.com.br",
+              "title": "ISDIN Protetor Solar Facial Fusion Water 5 Stars Sem Cor FPS 60-50ml",
+              "url": "https://www.amazon.com.br/Fotoprotetor-Isdin-Fusion-Water-ISDIN/dp/B08F864LDD/ref=sr_1_21?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-21",
+              "image_url": "https://m.media-amazon.com/images/I/71HLVkFGbjL._AC_UL320_.jpg",
+              "bought_past_month": 7,
+              "price_from": 83.5,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 20,00",
+                "off"
+              ],
+              "data_asin": "B08F864LDD",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 17700,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: sex., 9 de out.",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 27,
+              "rank_absolute": 28,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[28]",
+              "domain": "www.amazon.com.br",
+              "title": "Neutrogena Sun Fresh Protetor Solar Facial, FPS 70, 40g",
+              "url": "https://www.amazon.com.br/Novo-Neutrogena-Sun-Fresh-Facial/dp/B08NVML21R/ref=sr_1_22?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-22",
+              "image_url": "https://m.media-amazon.com/images/I/51cb8j36uqL._AC_UL320_.jpg",
+              "bought_past_month": 3,
+              "price_from": 47.95,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B08NVML21R",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 18000,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 28,
+              "rank_absolute": 29,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[29]",
+              "domain": "www.amazon.com.br",
+              "title": "L'Oréal Paris Solar Expertise, Protetor Solar Facial The Invisible Fluido FPS60 com Ácido Hialurônico e Tecnologia NETLOCK, Alta Proteção Solar com Ação Anti-Idade, Sem Cor 40g",
+              "url": "https://www.amazon.com.br/LOr%C3%A9al-Paris-Protetor-Expertise-Invisible/dp/B0DB2N5TDW/ref=sr_1_23?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-23",
+              "image_url": "https://m.media-amazon.com/images/I/71e6z6nXh0L._AC_UL320_.jpg",
+              "bought_past_month": 900,
+              "price_from": 52.9,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0DB2N5TDW",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 1400,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: ter., 13 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 29,
+              "rank_absolute": 30,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[30]",
+              "domain": "www.amazon.com.br",
+              "title": "La Roche-Posay, Ultra Cover, Protetor Solar com Cor e Performance de Maquiagem, 12h de cobertura de base em uma única camada, Textura Fluida, Oil free, Toque Seco, FPS60, 30g",
+              "url": "https://www.amazon.com.br/ROCHE-POSAY-ULTRA-COVER-PROTETOR/dp/B0BLZVD5S5/ref=sr_1_24?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-24&ufe=app_do%3Aamzn1.fos.2fb4d624-b7be-441e-af6d-3c953cfae5bf",
+              "image_url": "https://m.media-amazon.com/images/I/41qWhEJxnaL._AC_UL320_.jpg",
+              "bought_past_month": 4,
+              "price_from": 71.99,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0BLZVD5S5",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 5100,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 15 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 30,
+              "rank_absolute": 31,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[31]",
+              "domain": "www.amazon.com.br",
+              "title": "Protetor Solar Facial com Cor FPS 70 Alta Cobertura - L'Oréal Paris Solar Expertise Efeito Make Up - Cor 3.0 30g",
+              "url": "https://www.amazon.com.br/Paris-Expertise-Protetor-Cobertura-Previne/dp/B0FXHG1C1Z/ref=sr_1_25?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-25",
+              "image_url": "https://m.media-amazon.com/images/I/61GVfV-k4-L._AC_UL320_.jpg",
+              "bought_past_month": 3,
+              "price_from": 37.2,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0FXHG1C1Z",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 2500,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": true,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 22 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 31,
+              "rank_absolute": 32,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[32]",
+              "domain": "www.amazon.com.br",
+              "title": "Sallve Protetor Solar Toque Seco Fps50 40G",
+              "url": "https://www.amazon.com.br/Protetor-Solar-Toque-Seco-FPS50/dp/B0C4RV19RH/ref=sr_1_26?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-26",
+              "image_url": "https://m.media-amazon.com/images/I/41LBgrPdJTL._AC_UL320_.jpg",
+              "bought_past_month": 3,
+              "price_from": 49.45,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0C4RV19RH",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 3300,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 32,
+              "rank_absolute": 33,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[33]",
+              "domain": "www.amazon.com.br",
+              "title": "Cicatricure Protetor Solar Facial FPS 50 Antissinais Toque Seco UVA/UVB Para Pele Oleosa, Resistente à Água e Suor, Efeito Matte, Hidratante Diário Skin Care 40 ml",
+              "url": "https://www.amazon.com.br/Cicatricure-Antissinais-fotoenvelhecimento-HIALUR%C3%94NICO-PR%C3%93-COL%C3%81GENO/dp/B09PS4F7PS/ref=sr_1_27?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-27",
+              "image_url": "https://m.media-amazon.com/images/I/61-iDIvAH1L._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 37.98,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B09PS4F7PS",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 2600,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 33,
+              "rank_absolute": 34,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[34]",
+              "domain": "www.amazon.com.br",
+              "title": "Protetor Solar Facial Dermachem FPS 85-40g - Alta Proteção para Pele Oleosa, Não Comedogênico, Custo-benefício",
+              "url": "https://www.amazon.com.br/Protetor-Solar-Facial-Dermachem-85-40g/dp/B0G2Y511LQ/ref=sr_1_28?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-28",
+              "image_url": "https://m.media-amazon.com/images/I/413lNzH9VRL._AC_UL320_.jpg",
+              "bought_past_month": 500,
+              "price_from": 27,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0G2Y511LQ",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.6,
+                "votes_count": 80,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 34,
+              "rank_absolute": 35,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[35]",
+              "domain": "www.amazon.com.br",
+              "title": "Protetor Solar Facial Para Pele Oleosa Neutrogena Sun Fresh Derm Care Pele Clara FPS 70, 40g",
+              "url": "https://www.amazon.com.br/Protetor-Facial-Oleosa-NEUTROGENA-FRESH%C2%AE/dp/B08NVNRH6H/ref=sr_1_29?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-29",
+              "image_url": "https://m.media-amazon.com/images/I/61dfcDLJpiL._AC_UL320_.jpg",
+              "bought_past_month": 3,
+              "price_from": 45.03,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B08NVNRH6H",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 13500,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": null,
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 35,
+              "rank_absolute": 36,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[36]",
+              "domain": "www.amazon.com.br",
+              "title": "La Roche-Posay Protetor Solar Facial FPS 60 Gel Creme Oil-Free com Ação Hidratante e Antioxidante UVA/UVB para Peles Oleosas Sem Cor, Anthelios XL Protect 40g",
+              "url": "https://www.amazon.com.br/Protetor-Facial-Roche-Anthelios-Protect/dp/B0917Q5FVH/ref=sr_1_30?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-30",
+              "image_url": "https://m.media-amazon.com/images/I/61o-e5TOO9L._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 66.78,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0917Q5FVH",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 3900,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 15 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 36,
+              "rank_absolute": 37,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[37]",
+              "domain": "www.amazon.com.br",
+              "title": "Neutrogena Sun Fresh Protetor Solar Facial Para Pele Oleosa Derm Care Pele Morena FPS 70,40g",
+              "url": "https://www.amazon.com.br/Neutrogena-Fresh-Oily-Skin-Morena/dp/B08NVGLYW1/ref=sr_1_31?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-31",
+              "image_url": "https://m.media-amazon.com/images/I/411YTVauFqL._AC_UL320_.jpg",
+              "bought_past_month": 2,
+              "price_from": 45.03,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B08NVGLYW1",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 11500,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": null,
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 37,
+              "rank_absolute": 38,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[38]",
+              "domain": "www.amazon.com.br",
+              "title": "Hidrabene - Protetor Solar Facial FPS 50-50 g",
+              "url": "https://www.amazon.com.br/Hidrabene-Protetor-Solar-Facial-50-50/dp/B0DNK6L5Q6/ref=sr_1_32_mod_primary_new?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sbo=RZvfv%2F%2FHxDF%2BO5021pAnSA%3D%3D&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-32",
+              "image_url": "https://m.media-amazon.com/images/I/51amdsXP5zL._AC_UL320_.jpg",
+              "bought_past_month": 500,
+              "price_from": 33.7,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0DNK6L5Q6",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.6,
+                "votes_count": 432,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 38,
+              "rank_absolute": 39,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[39]",
+              "domain": "www.amazon.com.br",
+              "title": "EUCERIN Protetor Solar Facial Antimanchas FPS 60 50ml, Pigment Control, Clareador, Proteção UVA, UVB e Luz Visível, Thiamidol",
+              "url": "https://www.amazon.com.br/Eucerin-Pigment-Control-Fluido-Protetor/dp/B08128RCWK/ref=sr_1_33?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-33",
+              "image_url": "https://m.media-amazon.com/images/I/617c-wSFEwL._AC_UL320_.jpg",
+              "bought_past_month": 2,
+              "price_from": 89.99,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 20,00",
+                "off"
+              ],
+              "data_asin": "B08128RCWK",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 9900,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: sex., 9 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 39,
+              "rank_absolute": 40,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[40]",
+              "domain": "www.amazon.com.br",
+              "title": "Anasol Protetor Solar FPS 50-120 g",
+              "url": "https://www.amazon.com.br/Anasol-Oil-Free-FPS-50/dp/B08XGMZLR8/ref=sr_1_34?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-34",
+              "image_url": "https://m.media-amazon.com/images/I/61Mo1f557tL._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 24.99,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B08XGMZLR8",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 1200,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: ter., 3 de nov. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 40,
+              "rank_absolute": 41,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[41]",
+              "domain": "www.amazon.com.br",
+              "title": "Photoage Water, Protetor Solar Incolor com FPS50 e PPD20, Fórmula Enriquecida com Hialuronato de Sódio e Tecnologia Double UV Protect, 40g",
+              "url": "https://www.amazon.com.br/Dermage-Photoage-Water-FPS-50/dp/B08STYKTB1/ref=sr_1_35?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-35&ufe=app_do%3Aamzn1.fos.6d798eae-cadf-45de-946a-f477d47705b9",
+              "image_url": "https://m.media-amazon.com/images/I/51iLIHGLEHL._AC_UL320_.jpg",
+              "bought_past_month": 3,
+              "price_from": 87.99,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 20,00",
+                "off"
+              ],
+              "data_asin": "B08STYKTB1",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 5600,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: sex., 2 de out.",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 41,
+              "rank_absolute": 42,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[42]",
+              "domain": "www.amazon.com.br",
+              "title": "Protetor Solar Facial L'Oréal Paris Solar Expertise Antirrugas Fps 60 Com Cor 40G",
+              "url": "https://www.amazon.com.br/Protetor-LOr%C3%A9al-Paris-Expertise-Antirrugas/dp/B08PGVW8FD/ref=sr_1_36?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-36",
+              "image_url": "https://m.media-amazon.com/images/I/81szE8mxxUL._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 47.9,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B08PGVW8FD",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 14400,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 42,
+              "rank_absolute": 43,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[43]",
+              "domain": "www.amazon.com.br",
+              "title": "La Roche-Posay, Anthelios Airlicium, Protetor Solar Facial Antioleosidade com Cor, Controle de Oleosidade, Efeito Matte, Toque limpo, Ação anti-transferência da cor, Cobertura",
+              "url": "https://www.amazon.com.br/Roche-Posay-Antioleosidade-Oleosidade-Anti-Transfer%C3%AAncia/dp/B0CCT3KQ3H/ref=sr_1_37?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-37&ufe=app_do%3Aamzn1.fos.2fb4d624-b7be-441e-af6d-3c953cfae5bf",
+              "image_url": "https://m.media-amazon.com/images/I/71XIHu8QjEL._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 76.99,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0CCT3KQ3H",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 1900,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: seg., 26 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 43,
+              "rank_absolute": 44,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[44]",
+              "domain": "www.amazon.com.br",
+              "title": "L'Oréal Paris Solar Expertise Antioleosidade, Protetor Solar Facial com FPS 60, 12h de Efeito Matte com Ácido Salicílico, Cor 1.0, 40g",
+              "url": "https://www.amazon.com.br/Protetor-LOr%C3%A9al-Paris-Expertise-Antioleosidade/dp/B0B694TZC9/ref=sr_1_38?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-38",
+              "image_url": "https://m.media-amazon.com/images/I/811jKj8SMlL._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 38.38,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0B694TZC9",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.5,
+                "votes_count": 5200,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 44,
+              "rank_absolute": 45,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[45]",
+              "domain": "www.amazon.com.br",
+              "title": "Sallve Protetor Solar em Bastão FPS60 15g",
+              "url": "https://www.amazon.com.br/Protetor-Solar-Bast%C3%A3o-FPS60-Sallve/dp/B0CRWRFHSC/ref=sr_1_39?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-39",
+              "image_url": "https://m.media-amazon.com/images/I/51tXlGWOXpL._AC_UL320_.jpg",
+              "bought_past_month": 2,
+              "price_from": 57.95,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0CRWRFHSC",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.4,
+                "votes_count": 1200,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 45,
+              "rank_absolute": 46,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[46]",
+              "domain": "www.amazon.com.br",
+              "title": "L'Oréal Paris, Protetor Facial Solar Expertise Antirrugas FPS 60, 40g",
+              "url": "https://www.amazon.com.br/Protetor-LOr%C3%A9al-Paris-Expertise-Antirrugas/dp/B08PGVNGRZ/ref=sr_1_40?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-40",
+              "image_url": "https://m.media-amazon.com/images/I/71bX26g-t+L._AC_UL320_.jpg",
+              "bought_past_month": 900,
+              "price_from": 48.96,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B08PGVNGRZ",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 12300,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 46,
+              "rank_absolute": 47,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[47]",
+              "domain": "www.amazon.com.br",
+              "title": "ISDIN Protetor Solar Facial Fusion Water 5 Stars",
+              "url": "https://www.amazon.com.br/Protetor-Solar-Facial-ISDIN-Fusion/dp/B0B765QNF1/ref=sr_1_41?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-41",
+              "image_url": "https://m.media-amazon.com/images/I/61AG29lt1DL._AC_UL320_.jpg",
+              "bought_past_month": 4,
+              "price_from": 90.79,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 20,00",
+                "off"
+              ],
+              "data_asin": "B0B765QNF1",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 7500,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 47,
+              "rank_absolute": 48,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[48]",
+              "domain": "www.amazon.com.br",
+              "title": "La Roche-Posay Anthelios Protetor Solar Facial",
+              "url": "https://www.amazon.com.br/Roche-Posay-Protetor-Solar-Facial-Anthelios/dp/B0FHMKHWFN/ref=sr_1_42?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-42&ufe=app_do%3Aamzn1.fos.2fb4d624-b7be-441e-af6d-3c953cfae5bf",
+              "image_url": "https://m.media-amazon.com/images/I/41ARP7V62UL._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 78.76,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 20,00",
+                "off"
+              ],
+              "data_asin": "B0FHMKHWFN",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 231,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 48,
+              "rank_absolute": 49,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[49]",
+              "domain": "www.amazon.com.br",
+              "title": "EUCERIN Protetor Solar Facial Oil Control Cor Clara FPS 70 50ml, Antioleosidade, Proteção UVA, UVB e Luz Visível, Pele Oleosa",
+              "url": "https://www.amazon.com.br/Protetor-Facial-Eucerin-Control-Tinted/dp/B0B8Q6VLRB/ref=sr_1_43?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-43",
+              "image_url": "https://m.media-amazon.com/images/I/61HYMfMvQDL._AC_UL320_.jpg",
+              "bought_past_month": 1,
+              "price_from": 66.48,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0B8Q6VLRB",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 448,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 22 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 49,
+              "rank_absolute": 50,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[50]",
+              "domain": "www.amazon.com.br",
+              "title": "Hidrabene Protetor Solar Facial Clareador FPS70 50g",
+              "url": "https://www.amazon.com.br/Hidrabene-Protetor-Solar-Facial-Clareador/dp/B0FJSRH733/ref=sr_1_44?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-44",
+              "image_url": "https://m.media-amazon.com/images/I/51DW+tekvvL._AC_UL320_.jpg",
+              "bought_past_month": 6,
+              "price_from": 49.97,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0FJSRH733",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 283,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 50,
+              "rank_absolute": 51,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[51]",
+              "domain": "www.amazon.com.br",
+              "title": "ISDIN Protetor Solar Facial Fusion Water Magic Color FPS 50 - Cor Média - 50ml",
+              "url": "https://www.amazon.com.br/Protetor-Isdin-Fusion-Control-Lo%C3%83%C2%A7%C3%83%C2%A3/dp/B07ML4WHQY/ref=sr_1_45?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-45",
+              "image_url": "https://m.media-amazon.com/images/I/619uIze4m1L._AC_UL320_.jpg",
+              "bought_past_month": 2,
+              "price_from": 87.94,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 20,00",
+                "off"
+              ],
+              "data_asin": "B07ML4WHQY",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 9600,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 51,
+              "rank_absolute": 52,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[52]",
+              "domain": "www.amazon.com.br",
+              "title": "BIODERMA Protetor Solar Facial Photoderm Antioleosidade FPS70 Sem cor",
+              "url": "https://www.amazon.com.br/BIODERMA-Protetor-Facial-Photoderm-Antioleosidade/dp/B0CTWPPNT6/ref=sr_1_46?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-46",
+              "image_url": "https://m.media-amazon.com/images/I/41tTvLiYeTL._AC_UL320_.jpg",
+              "bought_past_month": 600,
+              "price_from": 69.99,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0CTWPPNT6",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 1000,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 52,
+              "rank_absolute": 53,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[53]",
+              "domain": "www.amazon.com.br",
+              "title": "Darrow Actine Protetor Solar Fps 60 Sem Cor 40G",
+              "url": "https://www.amazon.com.br/Actine-Protetor-Solar-Fps-Darrow/dp/B084GXZ2V2/ref=sr_1_47?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-47&ufe=app_do%3Aamzn1.fos.2fb4d624-b7be-441e-af6d-3c953cfae5bf",
+              "image_url": "https://m.media-amazon.com/images/I/41t0JRbsFhL._AC_UL320_.jpg",
+              "bought_past_month": 700,
+              "price_from": 63.56,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B084GXZ2V2",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.7,
+                "votes_count": 3500,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_serp",
+              "rank_group": 53,
+              "rank_absolute": 54,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[54]",
+              "domain": "www.amazon.com.br",
+              "title": "EUDORA NIINA SKIN PROTETOR SOLAR FACIAL ANTIOLEOSIDADE FPS 70 REGULAR 40g",
+              "url": "https://www.amazon.com.br/NIINA-SKIN-PROTETOR-ANTIOLEOSIDADE-REGULAR/dp/B0CNY4T7QQ/ref=sr_1_48?crid=UWKOO8FNEK1N&dib=eyJ2IjoiMSJ9.w4dHDCO0TMxqGbS6Yq59LEvuxRGz6XJJaNkSvElFB-QzRb7zIjYy9ufVS4R-VPbGgUx6PtHybK_ZOhY8fARO5Xw7osUj65N58RIwk6MHc4Hxkdt2yM0hVEXi_RAZWl7d7kXtxNMd5-Rjcdk90rfaO8ZGp1WBNeiC7KY-8TaQNiYCJmtQ9PyJ7a75-EhZB_xK7nPbVswGaEhOVn9d3xXT1Thhs06jmZZWilQqcF-OujcfBrfLIiRvv6s-vhcACTNEJwmB3OmzLdYYpxS79F7kJ8sqNFmtDb2oIQybd364y68.5hw2prNL7coXk32ohWjEDze_T-tV8vNPyQfZrT1r6t0&dib_tag=se&keywords=protetor+solar+facial&qid=1789439277&sprefix=protetor%2Bsolar%2Bfacial%2Caps%2C159&sr=8-48",
+              "image_url": "https://m.media-amazon.com/images/I/61OP3FqyBxL._AC_UL320_.jpg",
+              "bought_past_month": 300,
+              "price_from": 53.92,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0CNY4T7QQ",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.6,
+                "votes_count": 388,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: qui., 8 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "amazon_paid",
+              "rank_group": 2,
+              "rank_absolute": 55,
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[55]/div[1]/div[1]/span[1]/div[1]/div[1]/div[1]/div[1]/div[2]",
+              "domain": "www.amazon.com.br",
+              "title": "Vichy Capital Soleil UV-Clear Protetor Solar Facial Antioleosidade e Antiacne Sem Cor, Toque Seco FPS 60, com Niacinamida e Ácido Salicílico, Acabamento Invisível, 40g",
+              "url": "https://www.amazon.com.br/Antioleosidade-Niacinamida-Salic%C3%ADlico-Acabamento-Invis%C3%ADvel/dp/B0DB8TRNZX/ref=sxbs_sbv_search_btf",
+              "image_url": "https://m.media-amazon.com/images/I/41vH3Hc1+7L._AC_UL640_QL65_.jpg",
+              "bought_past_month": 3,
+              "price_from": 67.02,
+              "price_to": null,
+              "currency": "BRL",
+              "special_offers": [
+                "R$ 10,00",
+                "off"
+              ],
+              "data_asin": "B0DB8TRNZX",
+              "rating": {
+                "type": "rating_element",
+                "position": "left",
+                "rating_type": "Max5",
+                "value": 4.6,
+                "votes_count": 1100,
+                "rating_max": 5
+              },
+              "is_amazon_choice": false,
+              "is_best_seller": false,
+              "delivery_info": {
+                "delivery_message": "Entrega GRÁTIS: sex., 9 de out. no seu primeiro pedido",
+                "delivery_price": null
+              },
+              "labels": null
+            },
+            {
+              "type": "related_searches",
+              "rank_group": 1,
+              "rank_absolute": 56,
+              "position": "left",
+              "xpath": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[56]/div[1]/div[1]/div[1]/div[1]/div[1]/div[2]/span[1]/div[1]/div[1]/div[1]/div[1]",
+              "items": [
+                {
+                  "type": "related_searches_element",
+                  "title": "protetor solar",
+                  "url": "https://www.amazon.com.br/s?k=protetor+solar&ref=rsl_sug_0_0&pd_rd_w=nsLhy&content-id=amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec:amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_p=92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_r=VDFA6TVF5RJF5N69P31B&pd_rd_wg=kYYE5&pd_rd_r=bb6a16db-9e64-4891-b539-04cf87976b01&qid=1789439277",
+                  "image_alt": null,
+                  "image_url": null
+                },
+                {
+                  "type": "related_searches_element",
+                  "title": "protetor solar facial com cor",
+                  "url": "https://www.amazon.com.br/s?k=protetor+solar+facial+com+cor&ref=rsl_sug_0_3&pd_rd_w=nsLhy&content-id=amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec:amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_p=92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_r=VDFA6TVF5RJF5N69P31B&pd_rd_wg=kYYE5&pd_rd_r=bb6a16db-9e64-4891-b539-04cf87976b01&qid=1789439277",
+                  "image_alt": null,
+                  "image_url": null
+                },
+                {
+                  "type": "related_searches_element",
+                  "title": "hidratante facial",
+                  "url": "https://www.amazon.com.br/s?k=hidratante+facial&ref=rsl_sug_0_1&pd_rd_w=nsLhy&content-id=amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec:amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_p=92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_r=VDFA6TVF5RJF5N69P31B&pd_rd_wg=kYYE5&pd_rd_r=bb6a16db-9e64-4891-b539-04cf87976b01&qid=1789439277",
+                  "image_alt": null,
+                  "image_url": null
+                },
+                {
+                  "type": "related_searches_element",
+                  "title": "protetor solar facial la roche-posay",
+                  "url": "https://www.amazon.com.br/s?k=protetor+solar+facial+la+roche-posay&ref=rsl_sug_0_4&pd_rd_w=nsLhy&content-id=amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec:amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_p=92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_r=VDFA6TVF5RJF5N69P31B&pd_rd_wg=kYYE5&pd_rd_r=bb6a16db-9e64-4891-b539-04cf87976b01&qid=1789439277",
+                  "image_alt": null,
+                  "image_url": null
+                },
+                {
+                  "type": "related_searches_element",
+                  "title": "sabonete facial",
+                  "url": "https://www.amazon.com.br/s?k=sabonete+facial&ref=rsl_sug_0_2&pd_rd_w=nsLhy&content-id=amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec:amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_p=92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_r=VDFA6TVF5RJF5N69P31B&pd_rd_wg=kYYE5&pd_rd_r=bb6a16db-9e64-4891-b539-04cf87976b01&qid=1789439277",
+                  "image_alt": null,
+                  "image_url": null
+                },
+                {
+                  "type": "related_searches_element",
+                  "title": "vitamina c facial",
+                  "url": "https://www.amazon.com.br/s?k=vitamina+c+facial&ref=rsl_sug_0_5&pd_rd_w=nsLhy&content-id=amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec:amzn1.sym.92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_p=92ae1778-8689-46e5-a9a7-d539e06f46ec&pf_rd_r=VDFA6TVF5RJF5N69P31B&pd_rd_wg=kYYE5&pd_rd_r=bb6a16db-9e64-4891-b539-04cf87976b01&qid=1789439277",
+                  "image_alt": null,
+                  "image_url": null
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

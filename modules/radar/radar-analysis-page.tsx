@@ -8,6 +8,7 @@ import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
 import type { RadarAnalysisVersion, RadarExpertEvidence } from "@/lib/radar/analysis-contracts";
 import { buildRadarBenchmark, createRadarAnalysisSuccessor, createRadarAnalysisVersion, suggestRadarAnalysisMode } from "@/lib/radar/analysis-contracts";
 import { isRadarPlannerHandoff } from "@/lib/radar/planner-handoff";
+import { postRadarPlannerHandoff } from "@/lib/radar/planner-handoff-client";
 import { approveRadarReport, radarReportApprovalIssues } from "@/lib/radar/report-approval";
 import { deriveRadarSerpReviewState } from "@/lib/radar/serp-review-state";
 import { selectedRadarOrganicDecisionKeys } from "@/lib/radar/serp-curation";
@@ -456,10 +457,21 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
     if (row.state !== "approved" && row.state !== "sent_planner") { setNotice("A aprovação do item no workflow ainda precisa ser registrada no Radar antes do envio ao Planejador."); return; }
     setBusy("send");
     try {
-      const result = pipeline.importApprovedToPlanner([row.id]);
-      const transferReceipt = await createRadarAnalysisSuccessor(analysis, { status: "approved", plannerTransfer: { sourceAnalysisVersionId: analysis.versionId, sourceAnalysisVersionNumber: analysis.versionNumber, sentAt: new Date().toISOString(), sentBy: actorId(session) } }, actorId(session));
-      await save(transferReceipt);
-      setNotice(result.imported ? "Evidências enviadas ao Planejador sem duplicar o artigo." : "Atualização de evidências registrada para o Planejador; nenhum artigo ou plano editorial foi duplicado.");
+      /*
+       * ============ §2 · A MESMA AUTORIDADE DO RADAR — 1.2 ============
+       *
+       * Aqui havia o TERCEIRO caminho para a mesma fronteira:
+       * `importApprovedToPlanner` movia a esteira e esta tela gravava o recibo
+       * de transferência por conta própria. Nenhum dossiê, nenhuma prontidão,
+       * nenhuma identidade de ArticleDNA — e o artigo chegava ao Planejador
+       * com um recibo de envio e nada atrás dele.
+       *
+       * O recibo (`plannerTransfer`) passou a ser gravado pelo servidor, dentro
+       * do handoff: escrevê-lo aqui produziria uma versão de análise dizendo
+       * "enviado" ao lado de uma esteira que pode não ter se movido.
+       */
+      const resultado = await postRadarPlannerHandoff({ brandId: selectedBrandId, articleId: row.articleId });
+      setNotice(resultado.message);
     } catch (error) { setNotice(error instanceof Error ? error.message : "Não foi possível registrar o envio ao Planejador."); } finally { setBusy(""); }
   };
 

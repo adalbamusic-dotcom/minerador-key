@@ -1,5 +1,65 @@
 # Estado atual — Radar
 
+## Fase Radar — FECHADA — 2026-09-17
+
+Os três perfis de pesquisa estão implementados e o dossiê canônico alimenta as
+duas saídas do módulo: o envio ao Planejador e o dossiê editorial portátil.
+
+O fechamento documental e o que ele auditou ficam no relatório datado:
+[relatório de fechamento](../00-produto/auditorias/relatorio-radar-governance-close-2026-09-17.md).
+As regras permanentes ficam na [spec](spec.md); a hierarquia de evidência, na
+[diretriz](diretriz-autoridade-evidencial.md); o que continua em aberto, no
+[backlog](backlog.md).
+
+```text
+RESEARCH_PROFILES        = GOOGLE · YOUTUBE · AMAZON
+CANONICAL_DOSSIER        = loadRadarCanonicalAuthorities → resolveRadarCanonicalDossier
+PLANNER_HANDOFF          = sendRadarToPlanner (autoridade única) · RadarEvidenceBundle V3
+PORTABLE_EXPORT          = dossiê editorial portátil (read model do mesmo dossiê)
+MANUAL_ACCEPTANCE        = pendente do USER
+```
+
+### Perfil de pesquisa não é saída editorial
+
+A distinção governa o módulo inteiro. O perfil descreve COMO investigamos; a
+saída descreve O QUE se produz a partir daquilo.
+
+| Perfil | O que ele lê | Saída editorial |
+| --- | --- | --- |
+| `GOOGLE` | SERP de páginas, com curadoria e extração | Blueprint editorial / artigo-modelo |
+| `YOUTUBE` | SERP de vídeo — título, canal, duração, posição | Blueprint audiovisual / roteiro-modelo |
+| `AMAZON` | prateleira da Merchant, por ASIN | Blueprint comercial |
+
+Um artigo investigado no YouTube continua sendo um artigo: o perfil não decide
+o formato do que será publicado.
+
+### A ordem canônica do dossiê
+
+```text
+autoridades do Radar
+       ↓
+loadRadarCanonicalAuthorities      lê uma vez: Google observado, biblioteca de
+       ↓                           vídeos, especialista, contexto de pesquisa
+resolveRadarCanonicalDossier       resolve uma vez: blueprint, bundle, prontidão
+       ↓
+  ├── sendRadarToPlanner           grava o bundle V3
+  └── portable export              projeta Markdown e CSV
+```
+
+`writer_brief_md`, `writer_context_md` e `competitive_radiography_md` são READ
+MODELS portáteis. Eles não são autoridade factual e não viajam no handoff: o
+que o Planejador recebe são as MESMAS evidências que permitem construí-los.
+
+### Homologação manual
+
+A homologação em runtime real é do USER e não é declarada por desenvolvimento.
+A Fase 1 do Google foi homologada em 2026-09-11
+([relatório](../00-produto/auditorias/relatorio-radar-google-fase1-homologacao-2026-09-11.md)).
+YouTube, Amazon, o export portátil e o envio com as camadas de vídeo e
+especialista aguardam aceitação manual.
+
+---
+
 ## Pesquisa Google — Fase 1 — HOMOLOGADA — 2026-09-11
 
 A Pesquisa Google do Radar concluiu a Fase 1 e foi validada em runtime real
@@ -9,14 +69,6 @@ pelo USER, com provider DataForSEO, no fluxo
 Esta seção descreve o que existe hoje. Os números da rodada usada na
 homologação ficam no relatório datado, não aqui:
 [relatório de homologação](../00-produto/auditorias/relatorio-radar-google-fase1-homologacao-2026-09-11.md).
-As regras permanentes ficam na [spec](spec.md); as próximas frentes, no
-[backlog](backlog.md).
-
-```text
-GOOGLE_SEARCH_PHASE_1 = HOMOLOGADA
-YOUTUBE_SEARCH = NÃO HOMOLOGADA — gate próprio
-AMAZON_SEARCH = NÃO IMPLEMENTADA como engine operacional
-```
 
 ### IMPLEMENTED — verificado no código
 
@@ -1234,3 +1286,186 @@ Executado via Supabase CLI 2.111.0, db query --linked, em transação única.
 - Validação nas duas sessões da interface: AINDA NÃO VERIFICADA nesta execução. Cache local não foi apagado. Não declarar sincronização visual homologada com base apenas neste SQL.
 - Script: supabase/scripts/2026-09-08-descarte-arquiteto-radar-care-glow.sql. Mantido em simulação por padrão. Ele aborta se grafos reaparecerem: não é reset universal para qualquer acervo futuro.
 - Nenhum commit, push ou deploy executado nesta entrega.
+
+---
+
+# Fechamento da fase — 2026-09-17
+
+O que esta seção registra é o estado final do módulo. Ela não repete o que as
+seções anteriores já descrevem sobre a Fase 1 do Google; ela acrescenta o que
+passou a existir depois dela.
+
+## Pesquisa YouTube — perfil audiovisual
+
+`YouTube Search` **não é** a Biblioteca de Vídeos. São duas coisas com nomes
+parecidos e naturezas opostas, e a confusão entre elas produz a pior afirmação
+possível — "o mercado diz X" sustentado por um vídeo que ninguém assistiu.
+
+| | YouTube Search | Biblioteca de Vídeos |
+| --- | --- | --- |
+| O que é | SERP competitiva de vídeo | ingestão deliberada de fontes |
+| Quem escolhe | a consulta | uma pessoa |
+| O que se lê | título, canal, duração, posição, data | o texto extraído da fonte |
+| Transcript | **não é exigido** | é a matéria-prima |
+| Afirma conteúdo? | **nunca** | sim, com trecho ancorado no tempo |
+
+Registrado no perfil:
+
+- o Google entra apenas como **apoio** (`role: SUPPORT`), nunca como camada
+  primária de um artigo de vídeo;
+- long-form e Shorts são contados **separados**; ausência de Short na SERP não
+  é proibição editorial — é ausência de sinal, e o blueprint diz isso;
+- nenhuma inferência sobre o conteúdo interno de um vídeo sem assistir ou
+  transcrever. A limitação viaja no dossiê como frase, não como silêncio.
+
+## Pesquisa Amazon — perfil comercial
+
+A intenção editorial é declarada ANTES da coleta e é separada do alvo:
+
+```text
+AmazonEditorialIntent   PRODUCT_REVIEW · PRODUCT_VS_PRODUCT · PRODUCT_COMPARISON
+                        TOP_BEST · TOP_VALUE · BEST_FOR_USE_CASE
+                        BUYING_GUIDE · BRAND_LINE_REVIEW
+
+AmazonResearchTarget    o que pesquisar: categoria, marca/linha, produtos
+                        declarados, classe de produto, filtro de marca
+```
+
+As três camadas, que não se confundem:
+
+```text
+RAW_UNIVERSE          tudo o que a prateleira devolveu, deduplicado por ASIN
+  → ELIGIBLE_CANDIDATES   o que é compatível com o alvo declarado
+    → EDITORIAL_SHORTLIST   o que entra no artigo
+```
+
+- **ASIN é a identidade canônica.** Posição não é identidade.
+- `TOP_BEST` **não é** os primeiros N slots da busca.
+- `TOP_VALUE` **não é** o menor preço.
+- Merchant Amazon Brasil: `language_code = pt_BR`, `location_code = 2076`,
+  `amazon.com.br`. A grafia com underscore é da Merchant e não é a mesma do
+  Google (`pt-br`) nem do YouTube (`pt-BR`).
+- O Google entra como apoio SEO/comercial.
+- Sem texto de avaliação inferido, sem PDP inventada, sem benefício não
+  verificado, sem reclamação inventada. O que a coleta não leu vira limitação
+  declarada — e limitação declarada é dado.
+
+## Links promocionais da Amazon
+
+Os links saem **somente da shortlist editorial**: um produto que o artigo não
+menciona não vira link.
+
+```text
+URL limpa       https://www.amazon.com.br/dp/{ASIN}
+affiliateReady  true — o produto está pronto para monetização
+relPolicy       sponsored nofollow
+disclosure      obrigatória quando existe link monetizado
+```
+
+**O Radar não cria tag de afiliado.** Quem troca `amazonUrl` por `affiliateUrl`
+é a etapa posterior, e o ASIN atravessa a troca intacto — é ele que garante que
+o link monetizado aponta para o produto que o artigo analisou.
+
+## Biblioteca de Vídeos e Especialista no dossiê
+
+`bundle.video` e `bundle.specialist` são campos do contrato V3 desde o Gate 16
+e, até 2026-09-17, sempre chegaram nulos: os construtores das duas camadas não
+tinham chamador de produção. Eles passaram a ser preenchidos pela autoridade
+canônica, e o Planejador recebe as duas.
+
+**Biblioteca de Vídeos** leva: a fonte selecionada, o papel dela no artigo, os
+trechos com âncora de tempo, o que cada trecho sustenta, a seção de aplicação e
+as limitações. **Não leva** id de worker, `gs://`, id de job nem metadado de
+infraestrutura.
+
+**Especialista** leva: a pergunta preparada, as perguntas enviadas, a
+contribuição, o estado da decisão humana, a seção sustentada, o que pode ser
+sustentado e as limitações. **Não leva** id de Telegram, id de chat nem
+metadado privado do canal — e a omissão acontece na ORIGEM, ao montar a camada,
+não ao formatar a saída.
+
+Ausência é `null`, nunca camada vazia. A diferença é de significado: `null` diz
+"não houve"; uma camada com `items: []` e `notApproved: 3` diz "houve resposta e
+ninguém decidiu" — e as duas pedem ações diferentes.
+
+## O dossiê canônico
+
+```text
+loadRadarCanonicalAuthorities   →   resolveRadarCanonicalDossier
+```
+
+O mesmo dossiê semântico alimenta `sendRadarToPlanner` e o export portátil. Não
+existem duas resoluções para comparar: existe uma, com duas serializações.
+
+Todo `evidenceRef` que o blueprint usa resolve a partir do dossiê ENTREGUE —
+não apenas a partir do export. A resolução é por rótulo observado, porque o id
+do candidato é um hash interno e não reversível, enquanto o rótulo é o mesmo nos
+dois lados e está dentro de `bundle.observed`.
+
+## Contexto de keyword
+
+O **papel** e a composição vêm do ArticleDNA (`keywordReferences[].role`). O
+**texto** vem da hidratação amarrada ao mesmo `articleDnaVersionId` — ele não
+existe no payload do ArticleDNA, e é importante que isso esteja escrito para
+ninguém procurá-lo no lugar errado.
+
+Nunca resolver a keyword principal por título, slug, consulta da SERP, promessa
+ou hierarquia. Se o texto não resolver, `resolution = UNRESOLVED` e a principal
+é `null` — e uma secundária **nunca** é promovida a principal.
+
+`bundle.keywordContext` é aditivo e opcional: o contrato continua V3, e dossiê
+gravado antes disso continua íntegro, resolvendo pelo fundamento que o vínculo
+identifica.
+
+## Dossiê editorial portátil
+
+O export **não é backup**. É um `PORTABLE EDITORIAL WRITING DOSSIER`: o que
+alguém — pessoa, GPT, Claude, CMS — precisa para produzir o artigo sem abrir o
+Radar.
+
+Ele inclui ArticleDNA compacto, DNA e contexto das keywords, blueprint,
+evidência da SERP, fontes, evidência por seção, pesquisa de vídeo, biblioteca de
+vídeos, especialista, links internos resolvidos, evidência da Amazon, links
+promocionais, identidade SEO, plano visual com capa e imagens de respiro,
+limitações, `writer_brief_md` e `writer_context_md`.
+
+Ele **não** inclui payload cru de provider, segredos, ids privados, dump de
+banco, nem hash/UUID como conteúdo editorial. Desde o polimento de 2026-09-17,
+também não inclui endereço interno de evidência: a relação seção → evidência
+atravessa por rótulo legível, e a consulta de vídeo sai pelo TEXTO buscado.
+
+A superfície é um botão só:
+
+```text
+Exportar ▾
+  ├ Planilha atual                        as colunas da tela, com filtro
+  └ Dossiês editoriais finalizados (CSV)  o dossiê de escrita
+```
+
+## SEO e plano visual
+
+`seoTitle`, `metaDescription`, Open Graph, Twitter, `robots` e schema **podem
+permanecer não definidos nesta fase** — eles pertencem ao Planejador e ao
+Redator. O Radar exporta a DIREÇÃO e as RESTRIÇÕES, com os campos nomeados em
+`notDefinedAtThisStage`, e não inventa decisão futura.
+
+O que o Radar tem e entrega: o H1 editorial do blueprint, a direção de
+titulação, o que a meta description precisa refletir, slug e canonical com o
+estado de proteção.
+
+Plano visual canônico: **1 capa + 2 ou 3 imagens de respiro**. FAQ não faz parte
+do padrão. Cada imagem declara função, conceito, seção, ALT, arquivo, prompt, o
+que evitar e a origem da necessidade.
+
+## Handoff
+
+`sendRadarToPlanner` continua sendo a autoridade única de envio, com a ordem
+inalterada:
+
+```text
+validate → canonical resolve → write bundle → readback
+        → identity/hash validation → workflow transition
+        → destination readback → success
+```
+
+`RadarEvidenceBundle` continua **V3**. Nenhum envelope paralelo foi criado.

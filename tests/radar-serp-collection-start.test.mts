@@ -66,7 +66,15 @@ test("o guard de duplo clique fecha antes do await, não por estado de render", 
   assert.match(workbench, /if \(collectingArticleIdRef\.current\) return "FAILED_RETRYABLE";/);
   const corpo = workbench.slice(workbench.indexOf("const collect = async"));
   const guard = corpo.indexOf("collectingArticleIdRef.current");
-  const primeiroAwait = corpo.indexOf("await pipeline.collectSerp");
+  /*
+   * A CHAMADA GANHOU NOME PRÓPRIO — RADAR_RESEARCH_PROFILES_1.
+   *
+   * `coletarSerpDoProvider` é a única porta até a SERP do Google, e passaram a
+   * usá-la dois fluxos: a investigação Google principal e o apoio do perfil
+   * YouTube/Amazon. A regra guardada aqui não mudou — o ref fecha ANTES do
+   * await —, só o que se procura no corpo.
+   */
+  const primeiroAwait = corpo.indexOf("await coletarSerpDoProvider");
   assert.ok(guard >= 0 && primeiroAwait > guard, "o ref precisa ser conferido antes do await");
   assert.match(corpo, /finally \{ collectingArticleIdRef\.current = null;/);
 });
