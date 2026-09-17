@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { classifyRadarVideoSourceBatch, RadarVideoSourceSchema, RadarVideoSourceTextSchema, type RadarVideoSource, type RadarVideoSourceText } from "@/lib/radar/video-source";
+import { classifyRadarVideoSourceBatch, radarVideoTextSummary, RadarVideoSourceSchema, RadarVideoSourceTextSchema, type RadarVideoSource, type RadarVideoSourceTextSummary } from "@/lib/radar/video-source";
 import { overlayRadarArticleSelection } from "@/lib/radar/video-library";
 import { PipelineRuntimeError, resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 
@@ -158,7 +158,7 @@ function falha(error: unknown) {
  * leitura devolve a corrente. Nada aqui reprocessa nem chama provider.
  */
 async function lerTextos(context: Awaited<ReturnType<typeof resolvePipelineContext>>, sources: RadarVideoSource[]) {
-  if (!sources.length) return [] as RadarVideoSourceText[];
+  if (!sources.length) return [] as RadarVideoSourceTextSummary[];
   const resultado = await context.supabase
     .from("radar_video_source_texts")
     .select(COLUNAS_TEXTO)
@@ -167,7 +167,7 @@ async function lerTextos(context: Awaited<ReturnType<typeof resolvePipelineConte
     .order("processing_version", { ascending: false });
   if (resultado.error) throw new PipelineRuntimeError("QUERY_FAILURE", `Não foi possível ler o texto das fontes: ${resultado.error.message}`, 503);
 
-  const correntes = new Map<string, RadarVideoSourceText>();
+  const correntes = new Map<string, ReturnType<typeof RadarVideoSourceTextSchema.parse>>();
   for (const linha of (resultado.data || []) as unknown as Array<Record<string, unknown>>) {
     const projetado = RadarVideoSourceTextSchema.parse({
       id: String(linha.id), videoSourceId: String(linha.video_source_id),
@@ -180,7 +180,17 @@ async function lerTextos(context: Awaited<ReturnType<typeof resolvePipelineConte
     /* A ordenação já traz a maior versão primeiro; a primeira vence. */
     if (!correntes.has(projetado.videoSourceId)) correntes.set(projetado.videoSourceId, projetado);
   }
-  return [...correntes.values()];
+  /*
+   * A LISTAGEM NÃO CARREGA O TRANSCRIPT — RADAR_LIVE_UX_2.2 · §8.
+   *
+   * Medido no acervo real: 420,7 KB por leitura, 94,9% deles em `transcript_text`
+   * e `segments` de transcrições que ninguém abriu. E isso ia de novo pela rede
+   * a CADA revalidação da área, que este gate torna automática.
+   *
+   * O texto inteiro continua a um clique: `GET /api/editorial/radar-video-text`
+   * devolve uma fonte por vez, quando alguém abre o disclosure.
+   */
+  return [...correntes.values()].map(radarVideoTextSummary);
 }
 
 export async function GET(request: Request) {

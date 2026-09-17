@@ -725,7 +725,7 @@ test("VÍDEOS 3.3 · a tela mostra evidência selecionada, e o transcript segue 
   assert.match(texto, /trecho\.answersTitle \? "Responde o objetivo da pauta" : "Enriquece a resposta"/);
 
   /* O transcript inteiro continua atrás do disclosure, como estava. */
-  assert.match(texto, /<summary[^>]*>Ver transcrição completa<\/summary>/);
+  assert.match(texto, /<summary[^>]*>Ver transcrição completa/);
 
   /*
    * §11 · A COPY QUE NEGAVA O CASAMENTO SAIU.

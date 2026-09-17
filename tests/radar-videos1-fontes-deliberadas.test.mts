@@ -352,9 +352,19 @@ test("VÍDEOS 1 · I — a lista vem do servidor, então sobrevive ao F5", () =>
    * este efeito é literalmente o mecanismo da sobrevivência.
    */
   /* Desde o §2.3.2 a leitura é da MARCA: o artigo, quando existe, só sobrepõe. */
-  assert.match(pagina, /void loadVideoLibrary\(articleId\);/, "existe leitura ao abrir a marca");
-  assert.match(pagina, /fetch\(`\/api\/editorial\/radar-video-sources\?\$\{busca\.toString\(\)\}`\)/, "e ela consulta a rota canônica");
-  assert.match(pagina, /const busca = new URLSearchParams\(\{ brandId: selectedBrandId \}\);\s*\r?\n\s*if \(articleId\) busca\.set\("articleId", articleId\);/);
+  /*
+   * A LEITURA MUDOU DE MECANISMO NO RADAR_LIVE_UX_2.2, e não de natureza.
+   *
+   * Era um efeito com guarda de "uma tentativa por contexto". Agora é o
+   * read-model da área, ligado ao `useRadarAreaLiveRead` — o mesmo já
+   * homologado no Especialista. O que este teste protege continua igual: a
+   * lista reaparece depois do F5 porque é LIDA do servidor, nunca porque
+   * sobrou em memória.
+   */
+  assert.match(pagina, /const carregarAreaVideos = useCallback\(async \(signal: AbortSignal\) => \{/, "existe leitura da área");
+  assert.match(pagina, /fetch\(`\/api\/editorial\/radar-video-sources\?\$\{busca\.toString\(\)\}`, opcoes\)/, "e ela consulta a rota canônica");
+  assert.match(pagina, /const busca = new URLSearchParams\(\{ brandId: selectedBrandId \}\);\s*\r?\n\s*if \(videosArticleId\) busca\.set\("articleId", videosArticleId\);/);
+  assert.match(pagina, /area: "videos",/, "e ela é uma ÁREA, com cache e revalidação próprios");
 
   /* O painel lê da prop remota, não de estado próprio. */
   const painel = readFileSync(new URL("../modules/radar/radar-r3-videos-panel.tsx", import.meta.url), "utf8");

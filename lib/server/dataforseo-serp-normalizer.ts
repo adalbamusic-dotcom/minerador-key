@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { buildRadarSerpFeatureIntelligence } from "../radar/serp-features.ts";
 import { z } from "zod";
 import {
   SerpDiagnosticSchema,
@@ -180,7 +181,7 @@ export function normalizeDataForSeoSerpResponse(body: unknown, input: SerpSearch
      return counts;
    }, {});
    const diagnostic = { ...diagnosticFor(input, organic, paa, related), rawItemTypeCounts };
-  return SerpResearchSnapshotSchema.parse({ id: `serp:${input.articleId}:${crypto.randomUUID()}`, brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId, keywordId: input.keywordId, keywordDnaVersionId: input.keywordDnaVersionId, query: input.keyword, country: "br", language: input.language, location: input.location, device: input.device, resultLimit: input.resultLimit, provider: "dataforseo", providerEndpoint: "/search", origin: "real", isMock: false, collectedAt, version: input.version, previousSnapshotId: input.previousSnapshotId, contentHash: hash({ query: input.keyword, locationCode: config.locationCode, languageCode: config.languageCode, device: input.device, organic, paa, related, knowledgeGraph: knowledgeGraphFrom(rawItems), diagnostic }), persistenceMode: "local", status: "needs_review", organicResults: organic, peopleAlsoAsk: paa, relatedSearches: related, knowledgeGraph: knowledgeGraphFrom(rawItems), diagnostic });
+  return SerpResearchSnapshotSchema.parse({ id: `serp:${input.articleId}:${crypto.randomUUID()}`, brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId, keywordId: input.keywordId, keywordDnaVersionId: input.keywordDnaVersionId, query: input.keyword, country: "br", language: input.language, location: input.location, device: input.device, resultLimit: input.resultLimit, provider: "dataforseo", providerEndpoint: "/search", origin: "real", isMock: false, collectedAt, version: input.version, previousSnapshotId: input.previousSnapshotId, contentHash: hash({ query: input.keyword, locationCode: config.locationCode, languageCode: config.languageCode, device: input.device, organic, paa, related, knowledgeGraph: knowledgeGraphFrom(rawItems), diagnostic }), persistenceMode: "local", status: "needs_review", organicResults: organic, peopleAlsoAsk: paa, relatedSearches: related, knowledgeGraph: knowledgeGraphFrom(rawItems), serpFeatures: buildRadarSerpFeatureIntelligence(body), diagnostic });
 }
 
 /** Compatibility name retained for the Arquiteto boundary and its fixtures. */

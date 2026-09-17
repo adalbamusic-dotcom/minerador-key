@@ -48,10 +48,21 @@ test("A · o modo padrão é WEB", () => {
   assert.equal(radarSearchModeLabel("YOUTUBE"), "YouTube");
   assert.equal(radarSearchModeLabel("AMAZON"), "Amazon");
 
-  /* GATE 2 · a casca reconhece os três, mas só oferece o que tem engine. */
+  /*
+   * GATE 2 · a casca reconhece os três, mas só oferece o que tem engine.
+   *
+   * PROFILES_2.1 · §8 · os TRÊS passaram a ter engine. A regra que este teste
+   * guarda não é "a Amazon é planejada": é que `canStart` segue a engine
+   * declarada, e que um modo sem engine explica por que não começa.
+   */
   assert.equal(radarSearchModeAvailability("WEB").canStart, true);
-  assert.equal(radarSearchModeAvailability("AMAZON").canStart, false);
-  assert.match(radarSearchModeAvailability("AMAZON").reason || "", /ainda não foi construída/);
+  assert.equal(radarSearchModeAvailability("AMAZON").canStart, true);
+  assert.equal(radarSearchModeAvailability("AMAZON").reason, null, "engine construída não tem ressalva");
+  for (const modo of ["WEB", "YOUTUBE", "AMAZON"] as const) {
+    const disponibilidade = radarSearchModeAvailability(modo);
+    assert.equal(disponibilidade.canStart, disponibilidade.engine !== "planned");
+    assert.equal(disponibilidade.engine === "planned", Boolean(disponibilidade.reason?.includes("ainda não foi construída")));
+  }
 });
 
 test("B e C · cada modo começa por clique, e trocar com investigação em curso avisa", () => {
@@ -60,8 +71,24 @@ test("B e C · cada modo começa por clique, e trocar com investigação em curs
   assert.ok(workbench.includes("radar-search-mode-${modo.toLowerCase()}"), "com um botão por modo");
   assert.ok(workbench.includes('(["WEB", "YOUTUBE", "AMAZON"] as const)'), "os três modos da casca");
   assert.ok(workbench.includes('role="radiogroup"'), "seleção única, nunca checkbox múltiplo");
-  /* A troca some depois de iniciar: o modo congela com a investigação. */
-  assert.ok(workbench.includes("const congelado = view.state !== \"NOT_STARTED\";"));
+  /*
+   * A troca some depois de iniciar: o modo congela com a investigação.
+   *
+   * Em RADAR_RESEARCH_PROFILES_1.2 a trava ganhou uma segunda origem. O estado
+   * da vista do Google continua travando o que é dele; o que ele nunca soube
+   * ver é uma investigação de VÍDEO congelada — e era por isso que Google e
+   * Amazon seguiam clicáveis depois do FINALIZE.
+   */
+  /*
+   * E em AMAZON_SEARCH_1.1 · §15 ganhou a terceira: a corrida EM CURSO.
+   *
+   * `view.state` é o pipeline do Google, NOT_STARTED por construção num
+   * artigo de produto — trocar de perfil no meio de uma coleta paga da Amazon
+   * continuava clicável, e trocava o universo sob ela em silêncio.
+   */
+  assert.ok(workbench.includes("const emCurso = Boolean(doPerfil && doPerfil.state !== \"NOT_STARTED\");"));
+  assert.ok(workbench.includes("const congelado = travadoPeloPerfil || emCurso || view.state !== \"NOT_STARTED\";"));
+  assert.ok(workbench.includes("const travadoPeloPerfil = Boolean(doPerfil?.profileLocked);"));
   assert.ok(workbench.includes("disabled={busy || congelado}"));
 
   const semInvestigacao = radarSearchModeChange({ current: "WEB", next: "YOUTUBE", hasInvestigation: false });

@@ -535,8 +535,8 @@ test("GATE 18.3 · T e U — o handoff expõe o blueprint, e o Planejador não o
    * O blueprint é PROJEÇÃO, não substituição: o Planejador pode conferir
    * qualquer recomendação contra o modelo que a originou.
    */
-  assert.ok(handoff.handoff.dossier.observed.concepts.all.length > 0, "o modelo bruto continua junto");
-  assert.ok(handoff.handoff.dossier.observed.aiDiscovery.answerableUnits.length > 0);
+  assert.ok(handoff.handoff.dossier.observed!.concepts.all.length > 0, "o modelo bruto continua junto");
+  assert.ok(handoff.handoff.dossier.observed!.aiDiscovery.answerableUnits.length > 0);
   assert.deepEqual(
     handoff.handoff.editorialBlueprint.sections.map(item => item.conceptId).sort(),
     [...new Set(view.observed.aiDiscovery.answerableUnits.map(unit => unit.concept.id))].sort(),

@@ -120,26 +120,39 @@ test("VÍDEOS 3.4.1 · a página lê o casamento ao abrir, e a leitura não casa
   const texto = pagina();
 
   /* A leitura existe, é GET, e declara que não quer cache (§8). */
-  assert.match(texto, /const loadVideoMatching = useCallback\(async \(articleId: string \| null\) => \{/);
-  assert.match(texto, /fetch\(`\/api\/editorial\/radar-video-matching\?\$\{busca\.toString\(\)\}`, \{ cache: "no-store" \}\)/);
+  /*
+   * A LEITURA MUDOU DE CASA NO RADAR_LIVE_UX_2.2 — §7 — e não de natureza.
+   *
+   * Era um `loadVideoMatching` próprio, chamado por um efeito com guarda. Agora
+   * ela é uma das três leituras paralelas do read-model da área, e continua
+   * sendo GET, continua declarando que não quer cache, e continua não casando
+   * nada.
+   */
+  assert.match(texto, /const carregarAreaVideos = useCallback\(async \(signal: AbortSignal\) => \{/);
+  assert.match(texto, /fetch\(`\/api\/editorial\/radar-video-matching\?\$\{new URLSearchParams/);
+  assert.match(texto, /cache: "no-store" as const, signal/);
 
   /*
    * E ELA É CHAMADA POR UM EFEITO — uma tentativa por marca + artigo. Sem isto
    * a função existiria e ninguém a usaria, que é a forma mais silenciosa deste
    * defeito voltar.
    */
-  assert.match(texto, /void loadVideoMatching\(articleId\);/);
-  assert.match(texto, /if \(casamentoTentado\.current\.has\(chave\)\) return;/);
+  /*
+   * E ELA É CHAMADA PELO HOOK DA ÁREA — que tem cache por chave e uma leitura
+   * por chave. A guarda de "uma tentativa por contexto" virou parte da
+   * infraestrutura; repeti-la aqui impediria a área de se atualizar sozinha.
+   */
+  assert.match(texto, /load: carregarAreaVideos,/);
+  assert.match(texto, /area: "videos",/);
 
   /*
    * §5 · O EFEITO LÊ E SÓ LÊ. Um POST aqui dentro criaria execução a cada
    * abertura de página — e o gate anterior gastou uma rodada inteira provando
    * que casar é ação humana.
    */
-  const efeitos = texto.match(/useEffect\(\(\) => \{[\s\S]*?\n {2}\}, \[[^\]]*\]\);/g) || [];
-  const oDoCasamento = efeitos.filter(item => item.includes("loadVideoMatching"));
-  assert.equal(oDoCasamento.length, 1, "há um efeito, e um só, que carrega o casamento");
-  assert.equal(/method: "POST"|runVideoMatching\(/.test(oDoCasamento[0]), false, "F5_CREATES_NEW_RUN = NO");
+  const leitura = texto.slice(texto.indexOf("const carregarAreaVideos = useCallback"), texto.indexOf("const videosPendenteRef"));
+  assert.ok(leitura.includes("radar-video-matching"), "a leitura do casamento está no read-model da área");
+  assert.equal(/method: "POST"|runVideoMatching\(/.test(leitura), false, "F5_CREATES_NEW_RUN = NO");
 });
 
 test("VÍDEOS 3.4.1 · nenhum hook da página fica depois do retorno antecipado", () => {
@@ -165,7 +178,7 @@ test("VÍDEOS 3.4.1 · nenhum hook da página fica depois do retorno antecipado"
   assert.deepEqual(hooksTardios, [], "todo hook do componente vive acima do retorno antecipado");
 
   /* E o efeito do casamento está entre os que vivem acima. */
-  assert.ok(texto.indexOf("void loadVideoMatching(articleId);") < corte, "a leitura do casamento roda em todo render");
+  assert.ok(texto.indexOf("const leituraDeVideos = useRadarAreaLiveRead({") < corte, "a leitura da área roda em todo render");
 });
 
 test("VÍDEOS 3.4.1 · o que o servidor devolve sobrevive à ida e volta sem perder nada", () => {
@@ -234,16 +247,22 @@ test("VÍDEOS 3.4.1 · material idêntico reutiliza a execução em vez de criar
 test("VÍDEOS 3.4.1 · erro de leitura não é exibido como 'ainda não foram casados'", () => {
   const texto = pagina();
 
-  /* A página separa as duas situações no estado… */
-  assert.match(texto, /loadFailed: boolean;/);
-  assert.match(texto, /error: error instanceof Error \? error\.message : "Não foi possível carregar o casamento salvo\.", loadFailed: true/);
+  /*
+   * A PÁGINA SEPARA AS DUAS SITUAÇÕES NO READ-MODEL…
+   *
+   * O RADAR_LIVE_UX_2.2 tirou o casamento do estado React e o pôs na leitura da
+   * área. A distinção que este teste protege continua idêntica: "ninguém casou
+   * ainda" e "existe e não consegui ler" não podem virar a mesma coisa.
+   */
+  assert.match(texto, /matchingLoadFailed: Boolean\(videosArticleId && !casamentoLido\),/);
+  assert.match(texto, /matchingError: videosArticleId && !casamentoLido \? \(casamento\?\.error \|\| "Não foi possível carregar o casamento salvo\."\) : null,/);
 
   /*
    * …e nunca engole o erro como ausência: sem execução, `coverage` fica `null`
    * com `loadFailed` falso; com falha de leitura, `null` com `loadFailed`
    * verdadeiro. Um só campo não conseguiria dizer as duas coisas.
    */
-  assert.match(texto, /coverage: corpo\.run \? corpo\.coverage \|\| \[\] : null, running: false, error: null, loadFailed: false/);
+  assert.match(texto, /coverage: casamentoLido \? \(casamento\.run \? \(casamento\.coverage \|\| \[\]\) as RadarBriefCoverage\[\] : null\) : null,/);
 
   /* E a tela escolhe a frase pela distinção, não pela ausência. */
   const tela = painel();

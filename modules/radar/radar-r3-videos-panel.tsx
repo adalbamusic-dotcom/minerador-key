@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { radarVideoSourceDisplay, type RadarVideoSourceInputVerdict, type RadarVideoSourceText } from "@/lib/radar/video-source";
+import { useCallback, useRef, useState } from "react";
+import { radarVideoSourceDisplay, type RadarVideoSourceInputVerdict, type RadarVideoSourceTextSummary } from "@/lib/radar/video-source";
 import {
   filterRadarVideoLibrary,
   RADAR_VIDEO_LIBRARY_FILTERS,
@@ -62,7 +62,8 @@ export type RadarVideoSourcesView = {
    * no único lugar onde não havia nada a corrigir.
    */
   worker?: { queued: number; processing: number; lastHeartbeatAt: string | null } | null;
-  texts: RadarVideoSourceText[];
+  /* RESUMO, não o texto inteiro — RADAR_LIVE_UX_2.2 · §8. */
+  texts: RadarVideoSourceTextSummary[];
   briefs: RadarVideoBriefView[];
   /** Declarado quando o artigo não tem investigação: não se inventa pauta. */
   briefsUnavailableReason: string | null;
@@ -97,6 +98,8 @@ export type RadarVideoSourcesView = {
   lastBatch: RadarVideoSourceEntryFeedback[] | null;
   error: string | null;
   readbackConfirmed: boolean;
+  /** Revalidando em segundo plano: a área diz isso sem apagar o que mostra — §11. */
+  revalidating?: boolean;
 };
 
 type RadarR3VideosPanelProps = {
@@ -109,6 +112,8 @@ type RadarR3VideosPanelProps = {
    * e some quando ele não existe em vez de fingir um artigo implícito.
    */
   articleId?: string | null;
+  /** Necessário para buscar a transcrição sob demanda — §8. */
+  brandId?: string | null;
   videoSources?: RadarVideoSourcesView;
   onRegisterVideoSources?: (articleId: string | null, raw: string) => void;
   onExtractVideoText?: (articleId: string | null, videoSourceId: string) => void;
@@ -158,13 +163,61 @@ const tempoLegivel = (ms: number) => {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 };
 
-export function RadarR3VideosPanel({ articleId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, onReloadLibrary, onRunMatching }: RadarR3VideosPanelProps) {
+export function RadarR3VideosPanel({ articleId = null, brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, onReloadLibrary, onRunMatching }: RadarR3VideosPanelProps) {
   const [raw, setRaw] = useState("");
   const [filtro, setFiltro] = useState<RadarVideoLibraryFilter>("ALL");
   /* Qual fonte está com o campo de transcrição aberto, e o que há nele. */
   /* Qual pauta está aberta na coluna da direita. Filtro de leitura, nada mais. */
   const [transcricaoDe, setTranscricaoDe] = useState<string | null>(null);
   const [transcricao, setTranscricao] = useState("");
+  /**
+   * AS TRANSCRIÇÕES BUSCADAS SOB DEMANDA — RADAR_LIVE_UX_2.2 · §8.
+   *
+   * Uma por fonte, buscada quando alguém abre o disclosure, e guardada pelo
+   * resto da sessão. FECHAR NÃO APAGA: reabrir a mesma transcrição não pode
+   * custar outra ida à rede — foi para isso que ela veio da primeira vez.
+   *
+   * A chave inclui a versão de processamento porque o texto é append-only: um
+   * reprocessamento cria outra versão, e o cache da anterior deixaria a tela
+   * mostrando o texto velho com o resumo novo ao lado.
+   */
+  const [transcricoes, setTranscricoes] = useState<Record<string, string>>({});
+  const [transcricoesComFalha, setTranscricoesComFalha] = useState<Record<string, string>>({});
+  const buscandoTranscricao = useRef(new Set<string>());
+
+  /**
+   * ABRIR O DISCLOSURE BUSCA O TEXTO — uma vez por fonte, e só na abertura.
+   *
+   * A guarda é uma `ref` e fecha antes do primeiro `await`: abrir e fechar
+   * depressa, ou dois disclosures da mesma fonte na tela, veriam o mesmo estado
+   * de render e disparariam duas buscas do mesmo transcript.
+   *
+   * ISTO NÃO É UMA AÇÃO EXTERNA — §13. É um GET de leitura: não enfileira, não
+   * extrai, não chama YouTube, Speech nem IA.
+   */
+  const carregarTranscricao = useCallback(async (videoSourceId: string) => {
+    if (!brandId) return;
+    if (transcricoes[videoSourceId] !== undefined) return;
+    if (buscandoTranscricao.current.has(videoSourceId)) return;
+    buscandoTranscricao.current.add(videoSourceId);
+    setTranscricoesComFalha(atual => { const proximo = { ...atual }; delete proximo[videoSourceId]; return proximo; });
+    try {
+      const busca = new URLSearchParams({ brandId, videoSourceId });
+      const resposta = await fetch(`/api/editorial/radar-video-text?${busca.toString()}`, { cache: "no-store" });
+      const corpo = await resposta.json().catch(() => ({}));
+      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível ler a transcrição desta fonte.");
+      /*
+       * SEM TEXTO É RESPOSTA, e ela precisa ficar no cache do mesmo jeito: senão
+       * cada reabertura do disclosure repetiria a ida à rede para ouvir de novo
+       * que não há nada preservado.
+       */
+      setTranscricoes(atual => ({ ...atual, [videoSourceId]: corpo.text?.transcriptText || "" }));
+    } catch (erro) {
+      setTranscricoesComFalha(atual => ({ ...atual, [videoSourceId]: erro instanceof Error ? erro.message : "Não foi possível ler a transcrição desta fonte." }));
+    } finally {
+      buscandoTranscricao.current.delete(videoSourceId);
+    }
+  }, [brandId, transcricoes]);
   const vista = videoSources;
   const registradas = vista?.sources || [];
   const visiveis = filterRadarVideoLibrary(registradas, filtro);
@@ -215,6 +268,22 @@ const leituraDoWorker = vista?.worker
     : null;
 
   return <section className="space-y-3" aria-label="Área Vídeos do Radar" data-testid="radar-videos-panel">
+
+    {/*
+      * A ÁREA SE ATUALIZA SOZINHA, E DIZ QUANDO ESTÁ FAZENDO ISSO — §10 e §11.
+      *
+      * "Atualizando…" NÃO substitui o conteúdo: durante a revalidação a tela
+      * mantém o último estado válido. Trocá-lo por um estado de carga faria a
+      * área piscar para "nenhum texto disponível" a cada tique, e quem estivesse
+      * lendo um resultado o perderia de vista.
+      *
+      * O botão atualiza SOMENTE Vídeos — nunca `router.refresh`, nunca recarga
+      * do workspace.
+      */}
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {vista?.revalidating && <span className="text-sm text-text-muted" role="status" data-testid="radar-videos-revalidating">Atualizando…</span>}
+      {onReloadLibrary && <button type="button" className={button} onClick={() => onReloadLibrary(articleId)} data-testid="radar-videos-refresh">Atualizar</button>}
+    </div>
 
     {/*
       * QUEM PROCESSA NÃO É ESTA TELA — USER_WORKER_1 · §7.
@@ -566,22 +635,36 @@ const leituraDoWorker = vista?.worker
                       <p className="mt-1 text-sm text-text-muted">
                         Idioma original: {texto.languageCode || "não informado"} ·{" "}
                         {/* §6 · declarado, nunca presumido. Nada é estimado. */}
-                        {texto.hasTimestamps ? `${texto.segments.length} trecho(s) com tempo` : "sem marcação de tempo"}
-                        {texto.hasTimestamps && texto.segments.length > 0 && ` · começa em ${tempoLegivel(texto.segments[0].startMs)}`}
-                        {texto.hasTimestamps && texto.segments.length > 0 && ` · termina em ${tempoLegivel(texto.segments[texto.segments.length - 1].endMs)}`}
+                        {texto.hasTimestamps ? `${texto.segmentCount} trecho(s) com tempo` : "sem marcação de tempo"}
+                        {texto.hasTimestamps && texto.startMs !== null && ` · começa em ${tempoLegivel(texto.startMs)}`}
+                        {texto.hasTimestamps && texto.endMs !== null && ` · termina em ${tempoLegivel(texto.endMs)}`}
                       </p>
                       {/*
-                        * A MATÉRIA-PRIMA RECOLHEU — VIDEOS 3.2.
+                        * A MATÉRIA-PRIMA RECOLHEU — VIDEOS 3.2 — E AGORA NEM VEM.
                         *
-                        * Setecentos e trinta e três segmentos abertos por padrão
-                        * empurravam o resultado editorial para fora da tela e
-                        * misturavam duas coisas: o que a fonte DISSE e o que o
-                        * casamento CONCLUIU. O transcript continua inteiro, a um
-                        * clique — e o clique não grava nada nem chama ninguém.
+                        * Recolher tirou os 733 segmentos da tela; o RADAR_LIVE_UX_2.2
+                        * tirou-os da REDE. A listagem manda resumo — idioma, número
+                        * de trechos, janela de tempo, começo do texto — e o
+                        * transcript inteiro só é buscado quando alguém abre isto.
+                        *
+                        * O clique continua não gravando nada e não chamando
+                        * provider nenhum: é um GET de leitura.
                         */}
-                      <details className="mt-2">
-                        <summary className="cursor-pointer text-sm text-context-accent" data-testid={`radar-videos-transcript-${fonte.id}`}>Ver transcrição completa</summary>
-                        <p className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-sm leading-6 text-foreground">{texto.transcriptText}</p>
+                      <details className="mt-2" onToggle={event => { if ((event.currentTarget as HTMLDetailsElement).open) void carregarTranscricao(fonte.id); }} data-testid={`radar-videos-transcript-details-${fonte.id}`}>
+                        <summary className="cursor-pointer text-sm text-context-accent" data-testid={`radar-videos-transcript-${fonte.id}`}>Ver transcrição completa{texto.characterCount ? ` (${Math.round(texto.characterCount / 1000)} mil caracteres)` : ""}</summary>
+                        {/*
+                          * O QUE SE MOSTRA ENQUANTO O TEXTO NÃO CHEGOU.
+                          *
+                          * O `preview` já veio na listagem e é o COMEÇO literal do
+                          * que foi preservado — não um resumo. Mostrá-lo enquanto o
+                          * inteiro carrega evita o disclosure abrir vazio, e deixa
+                          * claro que ainda falta texto.
+                          */}
+                        <p className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-sm leading-6 text-foreground" data-testid={`radar-videos-transcript-text-${fonte.id}`}>
+                          {transcricoes[fonte.id] ?? `${texto.preview}${texto.truncated ? "…" : ""}`}
+                        </p>
+                        {transcricoes[fonte.id] === undefined && !transcricoesComFalha[fonte.id] && <p className="mt-1 text-sm text-text-muted" role="status" data-testid={`radar-videos-transcript-loading-${fonte.id}`}>Carregando a transcrição completa…</p>}
+                        {transcricoesComFalha[fonte.id] && <p className="mt-1 text-sm text-warning" role="alert" data-testid={`radar-videos-transcript-error-${fonte.id}`}>{transcricoesComFalha[fonte.id]}</p>}
                       </details>
                     </>
                     : <p className="mt-1 text-sm text-text-muted">

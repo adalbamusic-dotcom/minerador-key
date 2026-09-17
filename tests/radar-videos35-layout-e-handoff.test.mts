@@ -97,11 +97,11 @@ test("VÍDEOS 3.5 · a pauta saiu do workbench e mantém a mesma autoridade", ()
 
 test("VÍDEOS 3.5 · o transcript bruto continua recolhido, na coluna de consulta", () => {
   const tela = painel();
-  const marca = tela.indexOf("Ver transcrição completa</summary>");
+  const marca = tela.indexOf("Ver transcrição completa");
   assert.ok(marca > 0, "o disclosure do transcript existe");
 
-  const bloco = tela.slice(marca - 400, marca + 300);
-  assert.match(bloco, /<details className="mt-2">/);
+  const bloco = tela.slice(marca - 700, marca + 300);
+  assert.match(bloco, /<details className="mt-2" onToggle=/);
   assert.equal(/<details[^>]*\bopen\b/.test(bloco), false, "RAW_TRANSCRIPT_COLLAPSED = YES");
 
   /* E ele vive na coluna da direita, não embaixo do resultado. */

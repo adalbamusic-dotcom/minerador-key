@@ -213,7 +213,7 @@ const montar = (patch: Partial<Parameters<typeof buildRadarPlannerEvidenceHandof
  */
 function dossieComEvidenciaFactual() {
   const base = dossie();
-  const claims = base.observed.authorityEvidence.claims;
+  const claims = base.observed!.authorityEvidence.claims;
   if (claims.length < 2) throw new Error("fixture precisa de ao menos duas afirmações");
 
   const evidencias: RadarFactualEvidence[] = [
@@ -236,8 +236,8 @@ function dossieComEvidenciaFactual() {
   return {
     ...base,
     observed: {
-      ...base.observed,
-      authorityEvidence: { ...base.observed.authorityEvidence, factualEvidence: evidencias },
+      ...base.observed!,
+      authorityEvidence: { ...base.observed!.authorityEvidence, factualEvidence: evidencias },
     },
   };
 }
@@ -411,7 +411,7 @@ test("GATE 16 · L, M e N — canônica, auxiliar, falhas e suficiência atraves
 
   /* M — falha final não some no caminho. */
   assert.equal(handoff.frozen.sample.failedFinal, origem.sample.failedFinal);
-  assert.equal(handoff.dossier.observed.sample.failedFinal, origem.sample.failedFinal);
+  assert.equal(handoff.dossier.observed!.sample.failedFinal, origem.sample.failedFinal);
 
   /* N — suficiência e limitações viajam. */
   assert.equal(handoff.sufficiency, origem.model.sufficiency);
@@ -426,8 +426,8 @@ test("GATE 16 · O e P — o plano de links atravessa sem mudar de significado",
   assert.equal(resultado.ok, true);
   if (!resultado.ok) return;
 
-  const plano = resultado.handoff.dossier.observed.internalLinkPlan;
-  const original = dossie().observed.internalLinkPlan;
+  const plano = resultado.handoff.dossier.observed!.internalLinkPlan;
+  const original = dossie().observed!.internalLinkPlan;
   assert.deepEqual(plano, original, "INTERNAL_LINK_PLAN_PRESERVED: idêntico, campo a campo");
 
   /*
@@ -449,7 +449,7 @@ test("GATE 16 · O e P — o plano de links atravessa sem mudar de significado",
 
 test("GATE 16 · §35 — relação exigida sem posicionamento continua exatamente isso", () => {
   const base = dossie();
-  const plano = base.observed.internalLinkPlan;
+  const plano = base.observed!.internalLinkPlan;
 
   /* Uma aplicação deliberadamente não resolvida, injetada na fotografia. */
   const naoResolvida = {
@@ -463,14 +463,14 @@ test("GATE 16 · §35 — relação exigida sem posicionamento continua exatamen
   const comRelacao = {
     ...base,
     observed: {
-      ...base.observed,
+      ...base.observed!,
       internalLinkPlan: { ...plano, outgoing: [naoResolvida, ...plano.outgoing.slice(1)] },
     },
   };
 
   const resultado = montar({ dossier: comRelacao, frozen: congelar() });
   if (!resultado.ok) return;
-  const atravessou = resultado.handoff.dossier.observed.internalLinkPlan.outgoing[0];
+  const atravessou = resultado.handoff.dossier.observed!.internalLinkPlan.outgoing[0];
   assert.equal(atravessou.structuralRequirement, "REQUIRED");
   assert.equal(atravessou.applicationStatus, "REQUIRED_RELATION_WITHOUT_SUPPORTED_PLACEMENT");
   assert.equal(atravessou.recommendedOccurrences, 0);
@@ -483,7 +483,7 @@ test("GATE 16 · Q — incoming e outgoing chegam separados, com a direção int
   assert.equal(resultado.ok, true);
   if (!resultado.ok) return;
 
-  const plano = resultado.handoff.dossier.observed.internalLinkPlan;
+  const plano = resultado.handoff.dossier.observed!.internalLinkPlan;
   assert.ok(plano.outgoing.length > 0 && plano.incoming.length > 0, "a fixture precisa das duas direções");
 
   /*
@@ -509,8 +509,8 @@ test("GATE 16 · Q — incoming e outgoing chegam separados, com a direção int
   }
 
   /* E as duas listas atravessam sem se misturar nem se reordenar. */
-  assert.deepEqual(plano.outgoing, dossie().observed.internalLinkPlan.outgoing);
-  assert.deepEqual(plano.incoming, dossie().observed.internalLinkPlan.incoming);
+  assert.deepEqual(plano.outgoing, dossie().observed!.internalLinkPlan.outgoing);
+  assert.deepEqual(plano.incoming, dossie().observed!.internalLinkPlan.incoming);
   const idsDeSaida = plano.outgoing.map(item => item.nodeId);
   for (const entrada of plano.incoming) {
     assert.ok(!idsDeSaida.includes(entrada.sourceNodeId) || plano.outgoing.length > 0, "origem e destino continuam endereçados separadamente");
@@ -524,8 +524,8 @@ test("GATE 16 · R e S — claims e YMYL atravessam, e INSUFFICIENT nunca vira S
   assert.equal(resultado.ok, true);
   if (!resultado.ok) return;
 
-  const autoridade = resultado.handoff.dossier.observed.authorityEvidence;
-  const original = dossie().observed.authorityEvidence;
+  const autoridade = resultado.handoff.dossier.observed!.authorityEvidence;
+  const original = dossie().observed!.authorityEvidence;
   assert.deepEqual(autoridade.claims, original.claims, "YMYL_CLAIMS_PRESERVED");
   assert.deepEqual(autoridade.ymylAssessment, original.ymylAssessment);
   assert.deepEqual(autoridade.marketVsFactConflicts, original.marketVsFactConflicts);
@@ -544,7 +544,7 @@ test("GATE 16 · R e S — claims e YMYL atravessam, e INSUFFICIENT nunca vira S
   assert.equal(entregue.ok, true);
   if (!entregue.ok) return;
 
-  const factual = entregue.handoff.dossier.observed.authorityEvidence.factualEvidence;
+  const factual = entregue.handoff.dossier.observed!.authorityEvidence.factualEvidence;
   assert.equal(factual.length, 2, "a fixture precisa das duas naturezas");
   const suportes = factual.map(item => item.supportType).sort();
   assert.deepEqual(suportes, ["INSUFFICIENT", "SUPPORTS"], "os dois estados atravessam como estavam");
@@ -563,8 +563,8 @@ test("GATE 16 · T — requisitos do especialista viajam como requisitos, nunca 
   assert.equal(resultado.ok, true);
   if (!resultado.ok) return;
 
-  const requisitos = resultado.handoff.dossier.observed.authorityEvidence.specialistReviewRequirements;
-  assert.deepEqual(requisitos, dossie().observed.authorityEvidence.specialistReviewRequirements);
+  const requisitos = resultado.handoff.dossier.observed!.authorityEvidence.specialistReviewRequirements;
+  assert.deepEqual(requisitos, dossie().observed!.authorityEvidence.specialistReviewRequirements);
 
   /*
    * §15 e §20 — ausência de contribuição não apaga a necessidade preparada, e
@@ -586,8 +586,8 @@ test("GATE 16 · U — AiDiscoveryContext atravessa inteiro e não vira nota", (
   assert.equal(resultado.ok, true);
   if (!resultado.ok) return;
 
-  const descoberta = resultado.handoff.dossier.observed.aiDiscovery;
-  assert.deepEqual(descoberta, dossie().observed.aiDiscovery, "AI_DISCOVERY_PRESERVED");
+  const descoberta = resultado.handoff.dossier.observed!.aiDiscovery;
+  assert.deepEqual(descoberta, dossie().observed!.aiDiscovery, "AI_DISCOVERY_PRESERVED");
   assert.ok(Array.isArray(descoberta.answerableUnits));
   assert.equal(descoberta.binding.articleId, ARTIGO.articleId, "amarrado ao mesmo fundamento");
 
@@ -745,7 +745,7 @@ test("GATE 16 · §34 — conceito recorrente na SERP atravessa mesmo quando a h
   assert.equal(resultado.ok, true);
   if (!resultado.ok) return;
 
-  const atravessou = resultado.handoff.dossier.observed.concepts.all.find(item => item.id === conceitoNaOrigem!.id);
+  const atravessou = resultado.handoff.dossier.observed!.concepts.all.find(item => item.id === conceitoNaOrigem!.id);
   assert.ok(atravessou, "o conceito continua presente");
   assert.deepEqual(atravessou, conceitoNaOrigem, "e idêntico: mesmo status, mesma contagem, mesmas páginas");
   assert.ok(resultado.handoff.frozen.model.conceptIds.includes(conceitoNaOrigem!.id), "e continua no congelado");

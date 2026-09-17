@@ -244,7 +244,14 @@ test("USER_WORKER_1 · a leitura vem do servidor e chega à tela sem virar polli
   const pagina = ler("modules/radar/radar-page.tsx");
   assert.match(pagina, /radar-worker-status\?brandId=\$\{encodeURIComponent\(brandId\)\}/);
   const leitura = pagina.slice(pagina.indexOf("const lerEstadoDoWorker"));
-  const fimDaLeitura = leitura.indexOf("const loadVideoLibrary");
+  /*
+   * O QUE VEM DEPOIS DELA MUDOU NO RADAR_LIVE_UX_2.2.
+   *
+   * `loadVideoLibrary` deu lugar a `carregarAreaVideos`, o read-model da área.
+   * A função da fila continua PRÓPRIA e separada — é essa a invariante, e é
+   * ela que mantém `radar-video-sources` livre da auditoria da fila.
+   */
+  const fimDaLeitura = leitura.indexOf("const carregarAreaVideos");
   assert.ok(fimDaLeitura > 0, "a função da fila existe e é própria");
   assert.match(leitura.slice(0, fimDaLeitura), /catch \{\s*\r?\n?\s*return null;/, "falha de fila devolve null, não estado inventado");
 });

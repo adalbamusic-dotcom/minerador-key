@@ -249,7 +249,21 @@ interface EditorialPipelineContextValue extends BrandWorkspace {
   importApprovedToRadar: (articleIds: string[], sourceKeywords?: RadarHydrationSourceKeyword[], serpAssessments?: Record<string, SerpFormationAssessment>, handoffContext?: Record<string, RadarArticleHandoffContext>, graphs?: readonly InternalLinkGraph[]) => Promise<{ imported: number; skipped: number; blocked: RadarHandoffBlocked[] }>;
   importApprovedSiloPagesToRadar: (siloPageIds: string[]) => { imported: number; skipped: number };
   updateRadarState: (ids: string[], target: RadarItem["state"]) => void;
-  importApprovedToPlanner: (radarIds: string[]) => { imported: number; skipped: number };
+  /*
+   * ============ `importApprovedToPlanner` FOI REMOVIDO — RADAR_FINAL_1.2 · §2 ============
+   *
+   * Ele movia a esteira do Radar para o Planejador e nada mais: sem dossiê,
+   * sem prontidão, sem identidade de ArticleDNA. Um artigo que saísse por ali
+   * chegaria ao Planejador SEM evidência atrás, e o item apareceria lá como
+   * qualquer outro.
+   *
+   * Depois que os três chamadores passaram a usar a autoridade única, ele
+   * ficou sem uso — e um caminho morto que ainda funciona é uma arma
+   * carregada: alguém o encontraria e voltaria a usá-lo.
+   *
+   * A fronteira inteira passa por `POST /api/editorial/radar-planner-handoff`,
+   * que grava o dossiê, relê, transiciona e relê o destino.
+   */
   preparePlannerItems: (ids: string[], actorId: string) => Promise<void>;
   savePlannerPlan: (plannerItemId: string, details: ContentPlanDetails, actorId: string) => Promise<{ created: boolean; versionId: string }>;
   approvePlannerItems: (ids: string[], actorId?: string) => void;
@@ -1101,14 +1115,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     updateRadarState: (ids, target) => { const expectedLocks = Object.fromEntries(workspace.radarItems.filter(item => ids.includes(item.id)).map(item => [item.id, item.lockVersion]));
       updateWorkspace(current => ({ ...current, radarItems: setRadarState(current.radarItems, ids, target) }));
       void sendWorkflowCommand({ action: "transition_radar", brandId: selectedBrandId, itemIds: ids, target, expectedLocks }, updateWorkspace); },
-    importApprovedToPlanner: radarIds => {
-      const candidates = workspace.radarItems.filter(item => radarIds.includes(item.id)); const before = workspace.plannerItems.length;
-      const next = importRadarToPlanner(workspace.plannerItems, candidates, selectedBrandId); const importedArticleIds = new Set(next.slice(before).map(item => item.articleId));
-      updateWorkspace(current => ({ ...current, plannerItems: next,
-        radarItems: current.radarItems.map(item => importedArticleIds.has(item.articleId) ? { ...item, state: "sent_planner" as const, updatedAt: new Date().toISOString() } : item) }));
-      void sendWorkflowCommand({ action: "import_planner", brandId: selectedBrandId, radarItemIds: candidates.map(item => item.id), expectedLocks: Object.fromEntries(candidates.map(item => [item.id, item.lockVersion])) }, updateWorkspace);
-      return { imported: next.length - before, skipped: radarIds.length - (next.length - before) };
-    },
+
     preparePlannerItems: async (ids, actorId) => {
       const prepared: Array<{ itemId: string; plan: VersionEnvelope<ContentPlan> }> = [];
       for (const item of workspace.plannerItems.filter(candidate => ids.includes(candidate.id))) {

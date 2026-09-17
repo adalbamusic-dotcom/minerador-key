@@ -192,7 +192,20 @@ test("R6 mantém DeepSeek/Telegram e mídia fora do render automático", () => {
   for (const efeito of page.match(/useEffect\([\s\S]*?\n {2}\}, \[[^\]]*\]\);/g) || []) {
     assert.equal(/collectSerp|pipeline\.collect/.test(efeito), false, "nenhum useEffect pode coletar SERP");
   }
+  /* O painel do Especialista continua sem rede e sem efeito: nada no render. */
   assert.doesNotMatch(panel, /fetch\(/);
+  assert.doesNotMatch(panel, /useEffect/);
+
+  /*
+   * E O DE VÍDEOS TEM UMA REDE SÓ — a transcrição sob demanda, §8 do 2.2.
+   *
+   * Ele também não tem efeito nenhum: a leitura só acontece quando alguém abre
+   * "Ver transcrição completa", nunca no render.
+   */
+  const painelDeVideos = readFileSync(new URL("../modules/radar/radar-r3-videos-panel.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(painelDeVideos, /useEffect/);
+  assert.equal((painelDeVideos.match(/\bfetch\(/g) || []).length, 1);
+  assert.match(painelDeVideos, /fetch\(`\/api\/editorial\/radar-video-text\?/);
 
   /*
    * GATE 14.1 · o registro de mídia foi para a área Vídeos.
@@ -211,5 +224,13 @@ test("R6 mantém DeepSeek/Telegram e mídia fora do render automático", () => {
   /* A frase por fonte ("Texto ainda não extraído") vem do domínio, não daqui. */
   assert.match(videos, /\{leitura\.textStatus\}/);
   assert.ok(!/LINK_REGISTERED|AWAITING_FILE/.test(videos), "os estados locais não sobreviveram");
-  assert.doesNotMatch(videos, /fetch\(/);
+  /*
+   * NENHUM DOWNLOAD NO PAINEL — e a única rede é a leitura da transcrição.
+   *
+   * O RADAR_LIVE_UX_2.2 tirou o transcript da listagem e passou a buscá-lo ao
+   * abrir o disclosure. Continua não havendo download de mídia, provider nem
+   * job partindo daqui.
+   */
+  assert.equal((videos.match(/\bfetch\(/g) || []).length, 1);
+  assert.match(videos, /fetch\(`\/api\/editorial\/radar-video-text\?/);
 });

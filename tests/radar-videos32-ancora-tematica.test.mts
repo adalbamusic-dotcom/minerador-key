@@ -250,17 +250,22 @@ test("VÍDEOS 3.2 · 5 — o transcript bruto não abre por padrão", () => {
    * pela primeira ocorrência recortava o pedaço errado do arquivo e a prova
    * falava de outro trecho de código.
    */
-  const marca = fonte.indexOf("Ver transcrição completa</summary>");
+  const marca = fonte.indexOf("Ver transcrição completa");
   assert.ok(marca > 0, "o disclosure existe");
-  const bloco = fonte.slice(marca - 400, marca + 300);
-  assert.match(bloco, /<details className="mt-2">/);
+  const bloco = fonte.slice(marca - 700, marca + 300);
+  assert.match(bloco, /<details className="mt-2" onToggle=/);
   assert.equal(/<details[^>]*\bopen\b/.test(bloco), false, "RAW_TRANSCRIPT_DEFAULT_COLLAPSED = YES");
   assert.match(fonte, /data-testid=\{`radar-videos-transcript-\$\{fonte\.id\}`\}/);
 
-  /* Duração e idioma continuam à vista, sem abrir o transcript. */
+  /*
+   * DURAÇÃO E IDIOMA CONTINUAM À VISTA, SEM ABRIR O TRANSCRIPT — e agora sem
+   * nem BAIXÁ-LO: o RADAR_LIVE_UX_2.2 tirou `transcriptText` e `segments` da
+   * listagem, e a janela de tempo passa a vir do resumo em vez do primeiro e do
+   * último segmento.
+   */
   assert.match(fonte, /Idioma original: \{texto\.languageCode \|\| "não informado"\}/);
-  assert.match(fonte, /começa em \$\{tempoLegivel\(texto\.segments\[0\]\.startMs\)\}/);
-  assert.match(fonte, /termina em \$\{tempoLegivel\(texto\.segments\[texto\.segments\.length - 1\]\.endMs\)\}/);
+  assert.match(fonte, /começa em \$\{tempoLegivel\(texto\.startMs\)\}/);
+  assert.match(fonte, /termina em \$\{tempoLegivel\(texto\.endMs\)\}/);
 });
 
 /* ==========  6 · O QUE ESTE GATE NÃO PODIA TOCAR  ================= */

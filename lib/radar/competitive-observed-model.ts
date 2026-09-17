@@ -364,6 +364,42 @@ const paginasDe = (concept: RadarSemanticConcept) =>
 /** Quantas páginas bastam para "a maioria faz". A mesma régua do resto do Radar. */
 const maioria = (sampleSize: number) => Math.max(2, Math.ceil(sampleSize / 2));
 
+/**
+ * ===== 1.3 · §3 · "7 DE 0" É ERRO DE PROJEÇÃO, NÃO CONTEÚDO =====
+ *
+ * Numerador positivo com denominador zero não é um número ruim: é a prova de
+ * que duas autoridades diferentes foram misturadas no mesmo render — a
+ * recorrência veio das referências, que o transporte compacto preserva, e a
+ * amostra veio das extrações, que ele remove.
+ *
+ * Esta varredura existe para o teste poder afirmar a ausência sobre a PROJEÇÃO
+ * INTEIRA, e não sobre as frases que alguém lembrou de conferir. Uma frase nova
+ * com o mesmo defeito cai aqui sem precisar ser prevista.
+ *
+ * Ela não esconde denominador: quem esconde transforma um erro visível num erro
+ * silencioso.
+ */
+export function radarZeroDenominatorOffenders(valor: unknown, limite = 20000): string[] {
+  const achados: string[] = [];
+  const vistos = new Set<unknown>();
+  const padrao = /\b([1-9]\d*)\s+de\s+0\b/g;
+
+  const visitar = (item: unknown) => {
+    if (achados.length >= limite || item === null || item === undefined) return;
+    if (typeof item === "string") {
+      for (const encontro of item.matchAll(padrao)) achados.push(encontro[0]);
+      return;
+    }
+    if (typeof item !== "object") return;
+    if (vistos.has(item)) return;
+    vistos.add(item);
+    for (const filho of Array.isArray(item) ? item : Object.values(item as Record<string, unknown>)) visitar(filho);
+  };
+
+  visitar(valor);
+  return achados;
+}
+
 function padrao(key: string, label: string, presence: RadarModelPresence | undefined): RadarObservedPattern | null {
   if (!presence) return null;
   const { present, sampleSize } = presence;
@@ -393,6 +429,23 @@ export function buildRadarCompetitiveObservedModel(input: {
   /** Quantos resultados a SERP canônica do artigo devolveu. Contexto, não amostra. */
   canonicalSerpResults?: number;
   /**
+   * ===== 1.3 · §2 · A FOTOGRAFIA MANDA NAS CONTAGENS =====
+   *
+   * Numa investigação FINALIZADA o transporte compacto entrega o payload SEM
+   * `extractions` — de propósito, porque são 37 KB de matéria-prima que quase
+   * ninguém abre. Só que este módulo derivava a amostra CONTANDO essas páginas:
+   * sem elas, `comparablePages` virava 0.
+   *
+   * O estrago não era só um número errado. Os numeradores continuavam vindo das
+   * referências, que o compacto não remove — e a tela passou a exibir "7 de 0
+   * páginas" ao lado de regras escritas sobre 10.
+   *
+   * Quando a fotografia existe, é ela que responde pelo tamanho da amostra:
+   * FROZEN > LIVE > TRANSPORTE. Reconstruir esse número contando o que foi
+   * deliberadamente removido do transporte é a definição do defeito.
+   */
+  frozenSample?: { comparablePages: number; analyzedSuccess: number; failedFinal: number } | null;
+  /**
    * Fontes verificadas e o que elas dizem — quando o USER acionou a análise.
    *
    * Chegam de fora porque verificar é navegação externa, e navegação externa
@@ -414,6 +467,14 @@ export function buildRadarCompetitiveObservedModel(input: {
   const references = [...(input.references || [])];
   const pages = [...(input.pages || [])];
   const comparaveis = pages.filter(isComparableRadarExtraction);
+  /*
+   * O DENOMINADOR DE TODA RAZÃO DESTE MODELO — §2 e §3.
+   *
+   * Uma constante só, e ela é a fotografia quando existe fotografia. Espalhar
+   * `comparaveis.length` por doze lugares foi o que permitiu que metade deles
+   * continuasse certa e a outra metade virasse zero no mesmo render.
+   */
+  const amostraComparavel = input.frozenSample ? input.frozenSample.comparablePages : comparaveis.length;
   const semantic = input.structural?.semantic || null;
   const limitations: string[] = [];
 
@@ -445,9 +506,9 @@ export function buildRadarCompetitiveObservedModel(input: {
     canonicalSerpResults: input.canonicalSerpResults ?? canonicas,
     uniqueReferences: references.length,
     selectedReferences: selecionadas.size,
-    analyzedSuccess: pages.filter(page => page.status === "success").length,
-    failedFinal: falhas.size,
-    comparablePages: comparaveis.length,
+    analyzedSuccess: input.frozenSample ? input.frozenSample.analyzedSuccess : pages.filter(page => page.status === "success").length,
+    failedFinal: input.frozenSample ? input.frozenSample.failedFinal : falhas.size,
+    comparablePages: amostraComparavel,
     recurrentReferences: references.filter(reference => reference.queryCount > 1).length,
     auxiliaryOnlyReferences: references.filter(reference => reference.principalRank === null && reference.appearances.length > 0).length,
   };
@@ -554,7 +615,17 @@ export function buildRadarCompetitiveObservedModel(input: {
     padrao("USES_EMPHASIS", "Usa destaques", acha("bold")),
   ].filter((item): item is RadarObservedPattern => Boolean(item));
 
-  const estruturaH2 = input.structural?.structure.find(item => item.key === "h2");
+  /*
+   * §15 · PADRÃO ESTRUTURAL SÓ EXISTE COM PÁGINA VIVA — e, sob fotografia, não
+   * existe em transporte nenhum.
+   *
+   * Estes dois contam páginas REAIS. Com a fotografia por autoridade, o
+   * denominador é o congelado e o numerador continuaria vindo das páginas de
+   * hoje: "12 de 10". Emiti-los num transporte e não no outro quebraria a
+   * paridade que §15 exige; emiti-los com denominadores diferentes seria o
+   * mesmo defeito que este gate veio consertar.
+   */
+  const estruturaH2 = input.frozenSample ? null : input.structural?.structure.find(item => item.key === "h2");
   if (estruturaH2 && estruturaH2.median !== null && estruturaH2.median >= 6) {
     patterns.push({
       key: "HEAVY_H2_STRUCTURE", label: "Estrutura extensa em H2",
@@ -569,7 +640,7 @@ export function buildRadarCompetitiveObservedModel(input: {
    * Se a amostra usa formulação interrogativa, o fato é esse: ela usa. Virar
    * "crie um FAQ" é prescrição, e prescrição é do Planejador.
    */
-  const paginasComPergunta = new Set((semantic?.rawObservations || []).filter(item => item.isQuestion && !item.noise).map(item => item.pageId));
+  const paginasComPergunta = new Set(input.frozenSample ? [] : (semantic?.rawObservations || []).filter(item => item.isQuestion && !item.noise).map(item => item.pageId));
   if (paginasComPergunta.size) {
     patterns.push({
       key: "QUESTION_STYLE_HEADINGS", label: "Títulos em forma de pergunta",
@@ -599,7 +670,7 @@ export function buildRadarCompetitiveObservedModel(input: {
       typeLabel: concept.typeLabel,
       status,
       sourceCount: concept.sourceCount,
-      sampleSize: concept.sampleSize,
+      sampleSize: input.frozenSample ? amostraComparavel : concept.sampleSize,
       queryCoverage: concept.queryCoverage,
       queries: concept.queries,
       keywordRoles: concept.keywordRoles,
@@ -648,7 +719,7 @@ export function buildRadarCompetitiveObservedModel(input: {
     const declarada = declaradoCobre(cluster.canonicalQuestion);
     const status: RadarObservedQuestionStatus = declarada
       ? "ARTICLE_QUESTION_CONFIRMED"
-      : cluster.pages >= maioria(comparaveis.length)
+      : cluster.pages >= maioria(amostraComparavel)
         ? "RECURRENT_QUESTION"
         : concept?.anchored ? "MARKET_QUESTION_UNDERCOVERED" : "ISOLATED_QUESTION";
     return {
@@ -658,12 +729,12 @@ export function buildRadarCompetitiveObservedModel(input: {
       conceptId: cluster.conceptId,
       conceptLabel: concept?.canonicalLabel || cluster.canonicalQuestion,
       pages: cluster.pages,
-      sampleSize: comparaveis.length,
+      sampleSize: amostraComparavel,
       queryCoverage: cluster.queryCoverage,
       sourceUrls: cluster.sourceUrls,
       status,
       declaredByArticle: declarada,
-      evidence: `${cluster.pages} de ${comparaveis.length} página(s) formulam esta necessidade, sob ${cluster.variants.length} formulação(ões).`,
+      evidence: `${cluster.pages} de ${amostraComparavel} página(s) formulam esta necessidade, sob ${cluster.variants.length} formulação(ões).`,
     };
   });
 
@@ -700,7 +771,7 @@ export function buildRadarCompetitiveObservedModel(input: {
         subject: row.subject,
         against: "ARTICLE_DNA" as const,
         pagesCovering: conceito?.sourceCount ?? row.sources.length,
-        sampleSize: conceito?.sampleSize ?? comparaveis.length,
+        sampleSize: conceito?.sampleSize ?? amostraComparavel,
         queryCoverage: conceito?.queryCoverage ?? 0,
         queries: conceito?.queries || [],
         sources: row.sources,
@@ -716,7 +787,7 @@ export function buildRadarCompetitiveObservedModel(input: {
       subject: row.subject,
       basis: row.articleDeclares ? ("ARTICLE_DECLARES" as const) : ("SERP_EVIDENCE" as const),
       pagesCovering: row.sources.length,
-      sampleSize: comparaveis.length,
+      sampleSize: amostraComparavel,
       sources: row.sources,
       evidence: row.evidence,
     }));
@@ -728,7 +799,7 @@ export function buildRadarCompetitiveObservedModel(input: {
       subject: conceito.canonicalLabel,
       basis: "SERP_EVIDENCE",
       pagesCovering: conceito.sourceCount,
-      sampleSize: conceito.sampleSize,
+      sampleSize: input.frozenSample ? amostraComparavel : conceito.sampleSize,
       sources: paginasDe((semantic?.concepts || []).find(item => item.id === conceito.id)!),
       evidence: `A busca evidencia a necessidade e apenas ${conceito.sourceCount} de ${conceito.sampleSize} página(s) a cobrem. ${conceito.evidence}`,
     });
@@ -809,7 +880,7 @@ export function buildRadarCompetitiveObservedModel(input: {
 
   const tentadas = sample.analyzedSuccess + sample.failedFinal;
   const signals: RadarObservedSufficiency["signals"] = {
-    comparablePages: comparaveis.length,
+    comparablePages: amostraComparavel,
     extractionSuccessRate: tentadas ? Number((sample.analyzedSuccess / tentadas).toFixed(2)) : null,
     queryCoverage: sample.queriesExecuted,
     domainDiversity: new Set(comparaveis.map(page => { try { return new URL(page.url).hostname; } catch { return page.url; } })).size,
@@ -826,12 +897,12 @@ export function buildRadarCompetitiveObservedModel(input: {
    */
   const razoes: string[] = [];
   let level: RadarObservedSufficiency["level"];
-  if (comparaveis.length < RADAR_MIN_COMPARABLE_SUFFICIENT) {
+  if (amostraComparavel < RADAR_MIN_COMPARABLE_SUFFICIENT) {
     level = "INSUFFICIENT";
-    razoes.push(`${comparaveis.length} página(s) comparável(is): abaixo de ${RADAR_MIN_COMPARABLE_SUFFICIENT} a leitura descreve páginas, não mercado.`);
+    razoes.push(`${amostraComparavel} página(s) comparável(is): abaixo de ${RADAR_MIN_COMPARABLE_SUFFICIENT} a leitura descreve páginas, não mercado.`);
   } else if (signals.domainDiversity >= 3 && signals.recurrentConcepts >= 2 && (signals.extractionSuccessRate ?? 1) >= 0.6) {
     level = "GOOD";
-    razoes.push(`${comparaveis.length} página(s) comparável(is) em ${signals.domainDiversity} domínio(s) distinto(s).`);
+    razoes.push(`${amostraComparavel} página(s) comparável(is) em ${signals.domainDiversity} domínio(s) distinto(s).`);
     razoes.push(`${signals.recurrentConcepts} conceito(s) recorrente(s) sustentam a leitura de cobertura.`);
   } else {
     level = "PARTIAL";
@@ -893,7 +964,7 @@ export function buildRadarCompetitiveObservedModel(input: {
     pages: comparaveis,
     sources: input.verifiedSources,
     factualEvidence: input.factualEvidence,
-    serp: input.serpStanding || { current: true, sufficient: comparaveis.length >= RADAR_MIN_COMPARABLE_SUFFICIENT, valid: true },
+    serp: input.serpStanding || { current: true, sufficient: amostraComparavel >= RADAR_MIN_COMPARABLE_SUFFICIENT, valid: true },
   });
 
   /*
@@ -912,7 +983,7 @@ export function buildRadarCompetitiveObservedModel(input: {
     entities,
     authority: authorityEvidence,
     presences,
-    sampleSize: comparaveis.length,
+    sampleSize: amostraComparavel,
     observedIntent: intent.observedInSerp || intent.declared,
     heuristicReadings: input.heuristicReadings,
     observedAt: input.observedAt,

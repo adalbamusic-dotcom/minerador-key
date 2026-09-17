@@ -79,7 +79,10 @@ SERP do Radar é investigativa, diferente da SERP de compatibilidade do Arquitet
 área `Conteúdo` não é área operacional.
 
 `Pesquisa` tem três modos competitivos — `Google`, `YouTube`, `Amazon` —, com
-seleção única por investigação. Somente Google está implementado e homologado.
+seleção única por investigação. Os três estão implementados; somente o Google
+foi homologado em runtime real (2026-09-11). Perfil de pesquisa não é saída
+editorial: Google produz blueprint editorial, YouTube produz blueprint
+audiovisual, Amazon produz blueprint comercial.
 
 Fluxo operacional vigente do modo Google, todo por ação explícita do USER:
 
@@ -119,6 +122,25 @@ O Radar também entrega `SpecialistBriefs` e `VideoBriefs` congelados. O
 Blueprint **não** é um `ContentPlan`: ele não fixa H2 final, título final,
 contagem de palavras nem ordem rígida. O Planejador não pesquisa de novo, não
 reinterpreta o Radar como investigação nova e não remonta o Blueprint do zero.
+
+Desde 2026-09-17, o envelope carrega também — pela mesma resolução canônica que
+alimenta o export portátil:
+
+- `bundle.video` — a biblioteca de vídeos casada com as pautas, com trecho
+  ancorado no tempo, seção de aplicação e limitações. Sem id de worker, `gs://`
+  nem id de job;
+- `bundle.specialist` — as contribuições com decisão humana ativa, com a
+  pergunta preparada, o que cada uma sustenta e as limitações. Sem id de
+  Telegram, de chat nem de ator;
+- `bundle.keywordContext` — principal, secundárias e reforços narrativos, com o
+  papel vindo do ArticleDNA e o texto da hidratação daquela versão. Aditivo e
+  opcional: dossiê gravado antes disso continua íntegro.
+
+Ausência é `null`, nunca camada vazia — `null` diz "não houve"; uma camada com
+`items: []` e `notApproved: 3` diz "houve resposta e ninguém decidiu".
+
+Todo `evidenceRef` do blueprint final resolve a partir deste envelope, e não
+apenas a partir do export.
 
 Não cria ContentPlan nem estrutura final do artigo.
 

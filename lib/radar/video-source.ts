@@ -312,3 +312,92 @@ export function radarVideoSourceDisplay(source: RadarVideoSource) {
     textStatusReason: source.textStateReason,
   };
 }
+
+/* ==================== a listagem sem o transcript bruto ==================== */
+
+/**
+ * O RESUMO DE UM TEXTO — RADAR_LIVE_UX_2.2 · §8.
+ *
+ * ======================== O QUE ESTAVA SENDO PAGO ========================
+ *
+ * A leitura da área devolvia `transcriptText` e `segments` INTEIROS de toda
+ * fonte da marca, a cada carregamento e a cada revalidação. Medido no acervo
+ * real desta marca: 420,7 KB por leitura, dos quais 399,1 KB — 94,9% — eram
+ * exatamente esses dois campos, de cinco transcrições que ninguém tinha aberto.
+ *
+ * A tela só precisa deles quando alguém clica em "Ver transcrição completa".
+ * Até lá, o que ela mostra é: existe texto, em que idioma, quantos segmentos,
+ * que trecho ele começa. Isso cabe em algumas centenas de bytes.
+ *
+ * ========================= O QUE O RESUMO NÃO É =========================
+ *
+ * NÃO é uma versão reduzida do texto: `preview` é o COMEÇO literal do que foi
+ * preservado, cortado por contagem de caracteres. Nada é resumido, traduzido ou
+ * reescrito — o original continua intocado no banco, e é ele que a busca sob
+ * demanda devolve.
+ */
+export const RADAR_VIDEO_TEXT_PREVIEW_CHARS = 280;
+
+export const RadarVideoSourceTextSummarySchema = z.object({
+  id: z.string().min(1),
+  videoSourceId: z.string().min(1),
+  sourceMethod: z.string().min(1),
+  provider: z.string().nullable().default(null),
+  languageCode: z.string().nullable().default(null),
+  /** Quantos segmentos existem. Substitui a lista inteira na listagem. */
+  segmentCount: z.number().int().nonnegative(),
+  /** O tamanho do texto preservado, para a tela poder dizer o que vai abrir. */
+  characterCount: z.number().int().nonnegative(),
+  /** O começo literal do texto. Corte por caractere, nunca síntese. */
+  preview: z.string(),
+  /** `true` quando `preview` não é o texto inteiro. */
+  truncated: z.boolean(),
+  /** A janela coberta pelos segmentos, quando há marcação de tempo. */
+  startMs: z.number().int().nonnegative().nullable().default(null),
+  endMs: z.number().int().nonnegative().nullable().default(null),
+  hasTimestamps: z.boolean().default(false),
+  processingVersion: z.number().int().positive(),
+  createdAt: z.string().min(1),
+}).strict();
+
+export type RadarVideoSourceTextSummary = z.infer<typeof RadarVideoSourceTextSummarySchema>;
+
+/**
+ * O PROJETOR — determinístico, e ele nunca lê o banco.
+ *
+ * Recebe o texto completo e devolve o que a listagem precisa. Vive no domínio
+ * para a rota e o teste concordarem sobre o que é "resumo": se cada um cortasse
+ * do seu jeito, o `characterCount` da tela descreveria outro texto.
+ */
+export function radarVideoTextSummary(text: RadarVideoSourceText): RadarVideoSourceTextSummary {
+  const inteiro = text.transcriptText || "";
+  const recorte = inteiro.slice(0, RADAR_VIDEO_TEXT_PREVIEW_CHARS);
+
+  return RadarVideoSourceTextSummarySchema.parse({
+    id: text.id,
+    videoSourceId: text.videoSourceId,
+    sourceMethod: text.sourceMethod,
+    provider: text.provider,
+    languageCode: text.languageCode,
+    segmentCount: text.segments.length,
+    characterCount: inteiro.length,
+    preview: recorte,
+    truncated: recorte.length < inteiro.length,
+    /*
+     * A JANELA SÓ EXISTE SE HOUVER SEGMENTO.
+     *
+     * Uma transcrição colada à mão não tem nenhum; devolver `0` ali faria a
+     * tela anunciar um vídeo que começa no instante zero e dura nada.
+     *
+     * Não há filtro por valor finito porque não pode haver: `segments` já
+     * passou pelo schema, e `z.number()` recusa NaN. Um filtro aqui seria
+     * código que nenhum dado alcança — e a bateria de mutação o apontou como
+     * tal, porque removê-lo não quebrava nada.
+     */
+    startMs: text.segments.length ? Math.min(...text.segments.map(item => item.startMs)) : null,
+    endMs: text.segments.length ? Math.max(...text.segments.map(item => item.endMs)) : null,
+    hasTimestamps: text.hasTimestamps,
+    processingVersion: text.processingVersion,
+    createdAt: text.createdAt,
+  });
+}

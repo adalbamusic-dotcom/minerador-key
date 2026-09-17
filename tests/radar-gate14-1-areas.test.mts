@@ -320,7 +320,22 @@ test("GATE 14.1 · Q, R e S — abrir, trocar de área ou renderizar não pesqui
   ]) {
     const fonte = ler(caminho);
     assert.doesNotMatch(fonte, /useEffect/, `${caminho}: nenhum efeito`);
-    assert.doesNotMatch(fonte, /\bfetch\(/, `${caminho}: nenhuma rede`);
+    /*
+     * A ÚNICA REDE DO PAINEL DE VÍDEOS É A TRANSCRIÇÃO SOB DEMANDA — §8 do 2.2.
+     *
+     * Proibir `fetch(` no arquivo era um PROXY para "nada acontece no render".
+     * O proxy deixou de valer quando a transcrição passou a ser buscada ao
+     * abrir o disclosure; a invariante não mudou, então ela passa a ser dita
+     * como é: uma leitura só, da nossa própria rota. Quem garante que nada sai
+     * sozinho continua sendo a ausência de efeito, verificada logo acima.
+     */
+    const redes = fonte.match(/\bfetch\(/g) || [];
+    if (caminho.endsWith("radar-r3-videos-panel.tsx")) {
+      assert.equal(redes.length, 1, `${caminho}: só a transcrição sob demanda`);
+      assert.match(fonte, /fetch\(`\/api\/editorial\/radar-video-text\?/, "e ela é a rota de leitura da transcrição");
+    } else {
+      assert.equal(redes.length, 0, `${caminho}: nenhuma rede`);
+    }
   }
 
   /* Trocar de área é setState, e mais nada. */

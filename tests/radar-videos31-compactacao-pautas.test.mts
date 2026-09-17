@@ -195,7 +195,16 @@ test("VÍDEOS 3.1 · 5 — nada além da apresentação mudou", () => {
    * proibição protege é o código, e é nele que ela continua valendo.
    */
   const codigo = fonte.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-  assert.equal(/fetch\(|dataforseo|supabase/i.test(codigo), false, "o painel não fala com o servidor");
+  /*
+   * O PAINEL GANHOU UMA LEITURA SÓ — RADAR_LIVE_UX_2.2 · §8.
+   *
+   * A transcrição deixou de vir na listagem e passa a ser buscada quando
+   * alguém abre o disclosure. O que continua proibido é o painel falar com
+   * provider ou com o banco: nem DataForSEO, nem Supabase direto.
+   */
+  assert.equal(/dataforseo|supabase/i.test(codigo), false, "o painel não fala com provider nem com o banco");
+  assert.equal((codigo.match(/\bfetch\(/g) || []).length, 1, "e a única rede é a transcrição sob demanda");
+  assert.match(codigo, /radar-video-text\?/);
   assert.equal(/matchRadarVideoBriefs|anchorRadarExtract/.test(fonte), false, "MATCHER_CHANGED = NO");
   assert.equal(/transcript.*extrair|readRadarPublicTranscript/i.test(fonte), false, "TRANSCRIPT_CHANGED = NO");
 

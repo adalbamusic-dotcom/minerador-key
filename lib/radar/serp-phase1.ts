@@ -89,6 +89,24 @@ export function radarPhase1Action(input: {
    */
   resumption?: Pick<RadarResearchResumption, "state" | "canonicalComplete" | "auxiliaryPending" | "auxiliaryFailed" | "auxiliaryExecuted" | "auxiliaryTotal"> | null;
   sufficiency?: Pick<RadarInvestigationSufficiency, "level" | "headline"> | null;
+  /**
+   * ====== RADAR_FINAL_2.3 · §15 · A FOTOGRAFIA ASSINADA MANDA NO BOTÃO ======
+   *
+   * `state` põe STALE ANTES de FINALIZED: quando o fundamento do artigo muda
+   * depois do congelamento, uma investigação assinada volta a oferecer
+   * "Refazer Pesquisa Google" HABILITADO. Clicá-lo recoletaria a SERP e
+   * reescreveria a composição competitiva sob um bundle já emitido.
+   *
+   * Desde 2.3 o servidor recusa essa escrita com 409 — mas §15 é explícito:
+   * não basta o servidor recusar depois. O controle não pode ser oferecido.
+   *
+   * A autoridade é a MESMA do lock de escrita: a presença do bundle congelado.
+   * Derivar isto de um segundo sinal produziria uma tela que oferece o que o
+   * servidor recusa, ou recusa o que o servidor aceita.
+   *
+   * Opcional para não mudar o comportamento de quem ainda não informa.
+   */
+  finalized?: boolean;
 }): RadarPhase1Action {
   const modo = input.mode || RADAR_DEFAULT_SEARCH_MODE;
   const ondePesquisa = radarSearchModeLabel(modo);
@@ -130,6 +148,29 @@ export function radarPhase1Action(input: {
    * sabia que o destino era o Google nem que existiam outros destinos. O modo
    * já estava resolvido aqui; ele só não chegava ao texto do botão.
    */
+  /*
+   * §15 · ANTES DE QUALQUER AÇÃO QUE MEXA NA COMPOSIÇÃO.
+   *
+   * Vem acima de NOT_STARTED e de STALE de propósito. Abaixo deles, o caso que
+   * esta trava existe para cobrir — congelada E com fundamento mudado — sairia
+   * por STALE com o botão habilitado, exatamente como antes.
+   *
+   * Zerar a investigação continua disponível, e continua sendo a única porta:
+   * o reset limpa o bundle, e é por isso que ele destrava sem um segundo
+   * mecanismo.
+   */
+  if (input.finalized) {
+    return {
+      id: "NONE",
+      label: "Pesquisa finalizada",
+      enabled: false,
+      blockedReason: null,
+      hint: input.state === "STALE"
+        ? "O fundamento do artigo mudou depois desta investigação, e ela já está congelada. Zere a investigação para pesquisar de novo."
+        : input.sufficiency?.headline || null,
+      info: null,
+    };
+  }
   if (input.state === "NOT_STARTED") {
     return { id: "START_RESEARCH", label: `Iniciar Pesquisa ${ondePesquisa}`, enabled: true, blockedReason: null, hint: "Pesquisa a principal, as secundárias e os reforços úteis, e monta o universo competitivo.", info: explicacaoDaPesquisa };
   }
@@ -137,7 +178,15 @@ export function radarPhase1Action(input: {
     return { id: "START_RESEARCH", label: `Refazer Pesquisa ${ondePesquisa}`, enabled: true, blockedReason: null, hint: "O fundamento do artigo mudou depois desta investigação.", info: explicacaoDaPesquisa };
   }
   if (input.state === "FINALIZED") {
-    return { id: "NONE", label: "Pesquisa finalizada", enabled: false, blockedReason: null, hint: input.sufficiency?.headline || null, info: null };
+    /*
+     * 1.4 · §9 · "AMOSTRA COMPETITIVA PARCIAL" DEIXOU DE FLUTUAR NA TELA.
+     *
+     * A manchete da suficiência aparecia solta ao lado de "Zerar investigação",
+     * depois do briefing inteiro, sem dizer a que se referia. Ela continua na
+     * leitura de suficiência e na evidência competitiva; o que ela não faz mais
+     * é competir com o artigo-modelo como texto órfão no rodapé da área.
+     */
+    return { id: "NONE", label: "Pesquisa finalizada", enabled: false, blockedReason: null, hint: null, info: null };
   }
 
   /*

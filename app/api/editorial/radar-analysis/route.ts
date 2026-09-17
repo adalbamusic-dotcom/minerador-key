@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { analysisApprovalIssues, VersionedRadarAnalysisSchema } from "@/lib/radar/analysis-contracts";
 import { WorkflowRepository } from "@/lib/server/editorial-repositories";
+import { pruneRadarAnalysisHistory } from "@/lib/radar/analysis-history-pruning";
+import { radarGoogleResearchWriteLock } from "@/lib/radar/google-research-write-lock";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { AuthzError, authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { OptimisticLockError, PersistenceUnavailableError } from "@/lib/server/editorial-db";
@@ -40,9 +42,27 @@ export async function GET(request: NextRequest) {
     if (current.marca_id !== input.brandId || current.article_id !== input.articleId) return NextResponse.json({ code: "radar_identity_mismatch", error: "O item Radar não corresponde à marca ou ao artigo solicitado." }, { status: 409 });
     const analyses = storedAnalyses(current.payload);
     const selected = input.versionId ? analyses.find(analysis => analysis.versionId === input.versionId) : analyses.at(-1);
+
+    /*
+     * ============ RADAR_FINAL_2 · §3 · O HISTÓRICO VIAJA PODADO ============
+     *
+     * A listagem do workspace já podava; este readback não, e ele REMONTAVA o
+     * histórico inteiro no navegador a cada gravação — desfazendo a poda para
+     * aquele artigo. Uma investigação Amazon carrega 129,7 KB de corrida por
+     * versão; dez gravações são 1,3 MB reconstruídos por clique.
+     *
+     * A versão CORRENTE e a última APROVADA continuam inteiras — e é sobre a
+     * corrente que toda escrita monta a sucessora. Podar a que se escreve
+     * apagaria a coleta do banco na gravação seguinte; podar as outras não
+     * apaga nada, porque ninguém sucede uma versão histórica.
+     *
+     * `selected` é devolvido ANTES da poda, inteiro: quem pede uma versão por
+     * `versionId` está pedindo justamente o conteúdo dela.
+     */
+    const history = pruneRadarAnalysisHistory(analyses as Parameters<typeof pruneRadarAnalysisHistory>[0]);
     if (input.versionId && !selected) return NextResponse.json({ code: "radar_analysis_not_found", error: "Versão da análise Radar não encontrada para este artigo." }, { status: 404 });
     const payloadRadarItemId = current.payload && typeof current.payload === "object" && !Array.isArray(current.payload) && typeof (current.payload as { id?: unknown }).id === "string" ? (current.payload as { id: string }).id : null;
-    return NextResponse.json({ persistenceMode: "remote", readbackConfirmed: true, brandId: input.brandId, articleId: input.articleId, radarItemId: current.id, workflowRowId: current.id, payloadRadarItemId, lockVersion: current.lock_version, analysis: selected || null, analyses });
+    return NextResponse.json({ persistenceMode: "remote", readbackConfirmed: true, brandId: input.brandId, articleId: input.articleId, radarItemId: current.id, workflowRowId: current.id, payloadRadarItemId, lockVersion: current.lock_version, analysis: selected || null, analyses: history });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ code: "invalid_readback_request", error: "Readback Radar inválido.", details: error.issues }, { status: 400 });
     if (error instanceof PersistenceUnavailableError) return NextResponse.json({ code: error.code, error: error.message }, { status: 503 });
@@ -60,7 +80,36 @@ export async function POST(request: NextRequest) {
       const issues = analysisApprovalIssues(input.analysis);
       if (issues.length) return NextResponse.json({ code: "approval_blocked", error: "A análise ainda possui pendências.", issues }, { status: 409 });
     }
-    const row = await new WorkflowRepository().appendRadarAnalysis(input.brandId, input.articleId, input.expectedLock, input.analysis, profile.userId);
+    /*
+     * ============ §2 e §4 · A FRONTEIRA DO GOOGLE FINALIZED ============
+     *
+     * Os três caminhos que alteram a amostra competitiva — curadoria, extração
+     * em lote e a tela de análise legada — convergem para ESTA gravação. A
+     * trava mora aqui porque é aqui que todos passam: escondida na tela, ela
+     * seria contornada por qualquer chamada direta à rota.
+     *
+     * A comparação é contra a versão CORRENTE lida do repositório, nunca
+     * contra o que o navegador mandou: um cliente que enviasse um payload sem
+     * `finalizedBundle` se destravaria sozinho.
+     */
+    const repositorio = new WorkflowRepository();
+    const itemAtual = await repositorio.findByArticle(input.brandId, input.articleId, "radar");
+    const correnteGravada = storedAnalyses(itemAtual?.payload).at(-1) || null;
+
+    const trava = radarGoogleResearchWriteLock({
+      current: correnteGravada?.payload || null,
+      next: input.analysis.payload,
+    });
+    if (!trava.allowed) {
+      return NextResponse.json({
+        code: trava.code,
+        error: trava.message,
+        /* Quem opera precisa saber O QUE a escrita tentava mudar. */
+        competitiveFields: trava.competitiveFields,
+      }, { status: 409 });
+    }
+
+    const row = await repositorio.appendRadarAnalysis(input.brandId, input.articleId, input.expectedLock, input.analysis, profile.userId);
     if (!row) throw new AuthzError(404, "Item Radar não encontrado para esta marca.");
     const payloadRadarItemId = row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) && typeof (row.payload as { id?: unknown }).id === "string" ? (row.payload as { id: string }).id : null;
     return NextResponse.json({ persistenceMode: "remote", versionId: input.analysis.versionId, lockVersion: row.lock_version, radarItemId: row.id, workflowRowId: row.id, payloadRadarItemId });

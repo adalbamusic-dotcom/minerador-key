@@ -9,7 +9,7 @@ O Minerador qualifica KGR/não KGR, métricas, intenção e publicação. O Arqu
 | Marca | perfil, marca, nicho, localização e silos | contexto de marca / BrandDNA | Verificado no código: rota de marcas e `BrandProvider` |
 | Minerador | listas e keywords | keywords qualificadas e KeywordDNA | Verificado no código: tela e tabelas legadas; a forma exata da transferência ainda não foi verificada ponta a ponta |
 | Arquiteto | keywords da marca | ArticleDNA, SiloDNA, SiloPage e InternalLinkGraph | Verificado no código: contratos, rotas e fundação persistente; validação funcional da aba Links Internos ainda pendente |
-| Radar | ArticleDNA aprovado | `RadarEvidenceBundle` → `RadarFrozenEvidenceBundle` → `PlannerHandoff v3` | Verificado no código e **homologado em runtime real** na Fase 1 do modo Google (2026-09-11): coleta autenticada DataForSEO, persistência remota, readback e congelamento. YouTube e Amazon permanecem frentes próprias. |
+| Radar | ArticleDNA aprovado | `RadarEvidenceBundle` → `RadarFrozenEvidenceBundle` → `PlannerHandoff v3`, e o dossiê editorial portátil | Verificado no código; a Fase 1 do modo Google foi **homologada em runtime real** (2026-09-11). Os três perfis — Google, YouTube e Amazon — estão implementados e resolvem pelo mesmo dossiê canônico desde 2026-09-17; a aceitação manual de YouTube, Amazon e export é do USER. |
 | Planejador | Radar aprovado | ContentPlan | Verificado no código: contrato, comandos e persistência prevista |
 | Redator | ContentPlan aprovado | ContentDocument | Verificado no código: Tiptap e criação de documento; aprovação final é parcial |
 | Publicações | documento aprovado | registro de publicação | Verificado no código: estrutura e importação; destino externo não verificado |
@@ -24,10 +24,15 @@ editorial nem a persistência remota confirmada.
 
 O Radar investiga o artigo já formado em quatro áreas operacionais —
 `Pesquisa`, `Vídeos`, `Especialista` e `Relatório` — e a `Pesquisa` tem três
-modos competitivos: `Google`, `YouTube` e `Amazon`. Modo de pesquisa não é
-área: `Pesquisa → YouTube` é motor de descoberta competitiva com SERP própria,
-enquanto a área `Vídeos` é ingestão deliberada de fontes que o USER escolhe,
-sem SERP. Hoje apenas o modo Google está implementado e homologado.
+perfis competitivos: `Google`, `YouTube` e `Amazon`, os três implementados.
+Perfil de pesquisa não é área: `Pesquisa → YouTube` é motor de descoberta
+competitiva com SERP própria, enquanto a área `Vídeos` é ingestão deliberada
+de fontes que o USER escolhe, sem SERP.
+
+Perfil de pesquisa também não é saída editorial. O perfil descreve COMO se
+investigou; a saída descreve o que se produz: Google entrega blueprint
+editorial e artigo-modelo, YouTube entrega blueprint audiovisual e
+roteiro-modelo, Amazon entrega blueprint comercial.
 
 O Radar não redefine o ArticleDNA: ele acrescenta evidência amarrada a
 `articleId + articleDnaVersionId + articleDnaContentHash`. O dossiê de trabalho

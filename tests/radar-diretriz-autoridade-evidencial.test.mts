@@ -277,10 +277,10 @@ test("DIRETRIZ · o dossiê fica amarrado a artigo, versão e hash do ArticleDNA
   assert.doesNotThrow(() => assertRadarEvidenceProvenance(bundle));
 
   /* E é a fotografia INTEIRA que viaja, não um resumo dela. */
-  assert.ok(bundle.observed.evidence.comparison, "o confronto com o ArticleDNA vai junto");
-  assert.ok(bundle.observed.evidence.structural, "a camada estrutural vai junto");
-  assert.ok(bundle.observed.evidence.semantic, "a camada conceitual vai junto");
-  assert.ok(bundle.observed.competitors.length >= 0 && bundle.observed.concepts.all.length > 0);
+  assert.ok(bundle.observed!.evidence.comparison, "o confronto com o ArticleDNA vai junto");
+  assert.ok(bundle.observed!.evidence.structural, "a camada estrutural vai junto");
+  assert.ok(bundle.observed!.evidence.semantic, "a camada conceitual vai junto");
+  assert.ok(bundle.observed!.competitors.length >= 0 && bundle.observed!.concepts.all.length > 0);
 });
 
 test("DIRETRIZ · dossiê sem vínculo com o ArticleDNA não é entregue", () => {
@@ -354,7 +354,24 @@ test("DIRETRIZ · a regra está escrita no código e no projeto, para não ser r
   assert.match(dossie, /O Radar NÃO reescreve o ArticleDNA/);
 
   const doc = readFileSync("docs/05-radar/diretriz-autoridade-evidencial.md", "utf8");
-  assert.match(doc, /SERP VIGENTE E SUFICIENTE\s+autoridade sobre a realidade da busca/);
+  /*
+   * ===== 2026-09-17 · O DOCUMENTO NOMEIA COMO O CÓDIGO NOMEIA =====
+   *
+   * O documento listava OITO níveis, com evidência primária e especialista
+   * fundidos numa linha, e chamava o nível 4 de "SERP VIGENTE E SUFICIENTE".
+   * O código sempre teve nove, com outros nomes. Este guardião olhava uma
+   * linha e por isso não viu a divergência.
+   *
+   * Agora ele olha a LISTA INTEIRA: perder um nível, trocar a ordem ou
+   * renomear um deles faz isto falhar.
+   */
+  assert.match(doc, /CURRENT_SUFFICIENT_SERP\s+autoridade sobre a realidade da busca/);
+  let posicaoAnterior = -1;
+  for (const nivel of RADAR_EVIDENCE_HIERARCHY) {
+    const posicao = doc.indexOf(nivel, posicaoAnterior + 1);
+    assert.ok(posicao > posicaoAnterior, `${nivel} precisa estar no documento, na ordem do código`);
+    posicaoAnterior = posicao;
+  }
   assert.match(doc, /A SERP não decide verdade factual/);
   assert.match(doc, /Planejador não pesquisa de novo/i);
   assert.match(doc, /Redator não redescobre nada/i);

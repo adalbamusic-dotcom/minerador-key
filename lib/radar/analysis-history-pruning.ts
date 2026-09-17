@@ -48,8 +48,30 @@ type VersaoPodavel = {
  * `extractions` é o conteúdo bruto das páginas analisadas; `competitiveReport`
  * é o relatório derivado delas. Juntos, respondiam por 96% do peso de uma
  * análise medida em produção.
+ *
+ * ============ RADAR_FINAL_2 · A LISTA ENVELHECEU ============
+ *
+ * Ela foi escrita quando só existia o pipeline do Google. YouTube e Amazon
+ * chegaram depois, e cada um trouxe a própria matéria-prima para dentro da
+ * versão de análise — sem entrar aqui.
+ *
+ * A medição de uma investigação Amazon real:
+ *
+ *   amazonSearch.results      63,2 KB   55 itens de página
+ *   amazonSearch.universe     65,2 KB   51 produtos
+ *   amazonSearch (corrida)   129,7 KB   88,3% da versão inteira
+ *   fotografia congelada      17,2 KB   as CONCLUSÕES
+ *
+ * Uma corrida é RECALCULÁVEL e tem autoridade própria; a fotografia aponta
+ * para ela por `runRef`. Carregar a corrida de uma versão que ninguém vai
+ * abrir é pagar 129,7 KB por versão histórica, a cada F5.
  */
-export const RADAR_ANALYSIS_HEAVY_FIELDS = ["extractions", "competitiveReport"] as const;
+export const RADAR_ANALYSIS_HEAVY_FIELDS = [
+  "extractions",
+  "competitiveReport",
+  "youtubeSearch",
+  "amazonSearch",
+] as const;
 
 /**
  * QUAIS VERSÕES FICAM INTEIRAS — e por que exatamente estas duas.
@@ -79,9 +101,25 @@ export function pruneRadarAnalysisHistory<T extends VersaoPodavel>(versions: rea
   const preservar = radarAnalysisVersionsToPreserve(versions);
   return versions.map(versao => {
     if (preservar.has(versao.versionId)) return versao;
+    /*
+     * ============ §24 · A PODA MUDA TRANSPORTE, NÃO SEMÂNTICA ============
+     *
+     * As corridas viram `null`, não somem — o schema já aceita `null`, e uma
+     * versão antiga sem a chave falharia a validação em vez de carregar leve.
+     *
+     * E NADA é apagado do banco. A fotografia daquela versão continua inteira
+     * ao lado, com `runRef` apontando para a coleta: quem precisar da corrida
+     * a busca por `versionId`.
+     */
     return {
       ...versao,
-      payload: { ...versao.payload, extractions: [], competitiveReport: null },
+      payload: {
+        ...versao.payload,
+        extractions: [],
+        competitiveReport: null,
+        youtubeSearch: null,
+        amazonSearch: null,
+      },
     };
   });
 }

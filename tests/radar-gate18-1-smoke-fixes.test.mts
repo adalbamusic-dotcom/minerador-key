@@ -8,6 +8,7 @@ import { radarResearchUniverseFingerprint } from "../lib/radar/research-curation
 import { autoDecideRadarReference } from "../lib/radar/research-auto-selection.ts";
 import { radarSufficiencyLabel } from "../lib/radar/investigation-sufficiency.ts";
 import { radarPhase1Action } from "../lib/radar/serp-phase1.ts";
+import { radarSearchModeAvailability } from "../lib/radar/search-mode.ts";
 import { buildRadarSourceVerificationPlan, radarSourceVerificationTargets, radarSourceId } from "../lib/radar/source-authority.ts";
 import { buildRadarExternalSourceResearch } from "../lib/radar/link-and-source-research.ts";
 import { buildRadarSemanticConceptModel } from "../lib/radar/semantic-concept-model.ts";
@@ -422,14 +423,28 @@ test("GATE 18.1 · K e L — o modo Web continua enxergando a própria SERP", ()
   assert.equal(gravadaEmWeb.record?.primarySearchMode, "WEB");
 });
 
-test("GATE 18.1 · M — Amazon sem engine não oferece START", () => {
-  const view = buildRadarDeepResearchView({
-    context: contexto(), record: null, snapshot: SNAPSHOT as never,
-    extractions: [], mode: "AMAZON", observedAt: "2026-09-10T12:00:00.000Z",
-  });
-  assert.equal(view.phase1.id, "NONE", "AMAZON_FALSE_START = NO");
-  assert.equal(view.phase1.enabled, false);
-  assert.ok(view.phase1.blockedReason, "e o motivo é dito, não escondido");
+test("GATE 18.1 · M — a vista segue a engine declarada do modo, nos dois sentidos", () => {
+  /*
+   * PROFILES_2.1 · §8 · a Amazon deixou de ser o exemplo de "modo sem engine".
+   *
+   * O que este teste sempre quis provar é que a VISTA não inventa ação: ela
+   * pergunta à disponibilidade. Verificar isso com um modo específico
+   * hardcodado fazia a asserção envelhecer junto com a tabela.
+   */
+  for (const modo of ["WEB", "YOUTUBE", "AMAZON"] as const) {
+    const view = buildRadarDeepResearchView({
+      context: contexto(), record: null, snapshot: SNAPSHOT as never,
+      extractions: [], mode: modo, observedAt: "2026-09-10T12:00:00.000Z",
+    });
+    const disponibilidade = radarSearchModeAvailability(modo);
+    if (disponibilidade.canStart) {
+      assert.notEqual(view.phase1.id, "NONE", `${modo} tem engine: a vista oferece ação`);
+    } else {
+      assert.equal(view.phase1.id, "NONE", `${modo}_FALSE_START = NO`);
+      assert.equal(view.phase1.enabled, false);
+      assert.ok(view.phase1.blockedReason, "e o motivo é dito, não escondido");
+    }
+  }
 });
 
 /* ==========  §13 · A CONTABILIDADE REAL NÃO É "CORRIGIDA"  ========= */

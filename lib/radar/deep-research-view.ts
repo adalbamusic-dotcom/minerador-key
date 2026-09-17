@@ -41,6 +41,7 @@ import {
   type RadarResearchFingerprint,
 } from "./deep-research.ts";
 import { buildRadarEditorialBlueprint, type RadarEditorialBlueprint } from "./editorial-blueprint.ts";
+import { buildRadarEditorialArticleModel, type RadarEditorialArticleModel } from "./editorial-article-model.ts";
 import { resolveRadarInvestigationSufficiency, type RadarInvestigationSufficiency } from "./investigation-sufficiency.ts";
 import { radarFinalizationReadiness, type RadarFinalizationReadiness, type RadarFrozenEvidenceBundle } from "./investigation-finalization.ts";
 import { radarSourceClassificationFromRecord } from "./source-authority.ts";
@@ -110,6 +111,17 @@ export type RadarDeepResearchView = {
    * evidência divergem no primeiro ajuste de ordenação.
    */
   blueprint: RadarEditorialBlueprint;
+  /**
+   * ===== RADAR_EDITORIAL_BLUEPRINT_1 · §16 · O ARTIGO-MODELO É O PRINCIPAL =====
+   *
+   * O `blueprint` acima continua sendo a EVIDÊNCIA: os candidatos por conceito,
+   * com recorrência e proveniência. Ele não some — vira contexto recolhido.
+   *
+   * Este é o produto editorial: a síntese que decide o que vira seção, agrupa as
+   * variantes da mesma necessidade e recusa o que a SERP mencionou mas o
+   * ArticleDNA não sustenta.
+   */
+  articleModel: RadarEditorialArticleModel;
 };
 
 export function buildRadarDeepResearchView(input: {
@@ -332,13 +344,28 @@ export function buildRadarDeepResearchView(input: {
     ? curadoriaDaPesquisa.confirmed && curadoriaDaPesquisa.selectedCount > 0
     : input.curationConfirmed !== false && (input.selectedReferences || 0) > 0;
 
+  /*
+   * ============ 1.3 · §2 e §5 · A FOTOGRAFIA É A AUTORIDADE ============
+   *
+   * Numa investigação FINALIZADA o transporte compacto entrega o payload sem
+   *  — e a leitura viva, que conta essas páginas, passou a dizer
+   * "0 páginas comparáveis" e "Análise insuficiente" sobre uma investigação que
+   * foi aceita com dez.
+   *
+   * A fotografia responde por tudo o que ela mesma congelou: quantas páginas,
+   * quantas analisadas, quantas falharam, e com que suficiência a pessoa
+   * encerrou. Recalcular isso a partir do que o transporte removeu de propósito
+   * é reconstruir a conclusão com metade do material.
+   */
+  const fotografia = input.finalizedBundle || null;
+
   const sufficiency = resolveRadarInvestigationSufficiency({
     hasSnapshot: Boolean(input.snapshot),
     curationConfirmed: curadoriaConfirmada,
-    selected: referenciasSelecionadas,
-    analyzed: extractions.length,
-    failed: input.extractionFailures || 0,
-    comparable: extractions.filter(isComparableRadarExtraction).length,
+    selected: fotografia ? fotografia.search.selectedReferences : referenciasSelecionadas,
+    analyzed: fotografia ? fotografia.sample.analyzedSuccess : extractions.length,
+    failed: fotografia ? fotografia.sample.failedFinal : input.extractionFailures || 0,
+    comparable: fotografia ? fotografia.sample.comparablePages : extractions.filter(isComparableRadarExtraction).length,
     intentEvidence: {
       declaredIntent: sinalComercial.expectsCommercialSerp
         ? sinalComercial.declaredIntents.join(" · ")
@@ -371,6 +398,8 @@ export function buildRadarDeepResearchView(input: {
     canonicalSerpResults: modoEfetivo === "WEB" ? input.snapshot?.organicResults.length ?? 0 : 0,
     verifiedSources: (input.verifiedSources || []).map(radarSourceClassificationFromRecord),
     observedAt: input.observedAt || fingerprint.value,
+    /* §2 · FROZEN > LIVE > TRANSPORTE — um denominador só para todas as razões. */
+    frozenSample: fotografia ? fotografia.sample : null,
   });
 
   /*
@@ -455,6 +484,14 @@ export function buildRadarDeepResearchView(input: {
      * assume que o pipeline terminou só porque há páginas na amostra.
      */
     analysisConfirmed: input.analysisConfirmed,
+    /*
+     * ====== RADAR_FINAL_2.3 · §15 · O MESMO SINAL QUE O SERVIDOR USA ======
+     *
+     * `radarGoogleResearchWriteLock` decide pela PRESENÇA do bundle congelado,
+     * não pelo carimbo do registro nem pelo fundamento. A tela lê daqui o
+     * mesmo sinal: se lesse outro, ofereceria o botão que a rota recusa.
+     */
+    finalized: Boolean(input.finalizedBundle),
     sufficiency,
   });
   /*
@@ -464,6 +501,15 @@ export function buildRadarDeepResearchView(input: {
    * declarada; sem página nenhuma não há o que congelar. A distinção é da
    * autoridade de finalização, e a tela apenas a lê.
    */
+  /*
+   * OS CANDIDATOS PRIMEIRO, A SÍNTESE DEPOIS — e nesta ordem de propósito.
+   *
+   * A síntese lê os candidatos: montá-la a partir de outra passagem sobre a
+   * evidência produziria duas leituras da mesma fotografia, que divergem no
+   * primeiro ajuste feito só numa delas.
+   */
+  const blueprintEditorial = buildRadarEditorialBlueprint({ context, observed, discovery: observed.aiDiscovery });
+
   const finalization = radarFinalizationReadiness({
     started: Boolean(record),
     stale: state === "STALE",
@@ -506,6 +552,8 @@ export function buildRadarDeepResearchView(input: {
     finalizedBundle: input.finalizedBundle || null,
     finalization,
     /* Derivado na mesma passagem, da mesma fotografia: uma leitura só. */
-    blueprint: buildRadarEditorialBlueprint({ context, observed, discovery: observed.aiDiscovery }),
+    blueprint: blueprintEditorial,
+    /* A síntese lê os CANDIDATOS do blueprint e o núcleo do ArticleDNA. */
+    articleModel: buildRadarEditorialArticleModel({ context, observed, blueprint: blueprintEditorial }),
   };
 }

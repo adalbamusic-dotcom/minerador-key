@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RadarSerpFeatureIntelligenceSchema } from "../serp-features.ts";
 
 export const SerpPersistenceModeSchema = z.enum(["remote", "local"]);
 export type SerpPersistenceMode = z.infer<typeof SerpPersistenceModeSchema>;
@@ -112,6 +113,20 @@ export const SerpResearchSnapshotSchema = z.object({
   peopleAlsoAsk: z.array(SerpPeopleAlsoAskSchema),
   relatedSearches: z.array(SerpRelatedSearchSchema),
   knowledgeGraph: SerpKnowledgeGraphSchema.nullable(),
+  /*
+   * ====== OS BLOCOS QUE A SERP JÁ DEVOLVIA E NÓS JOGÁVAMOS FORA ======
+   *
+   * RADAR_MULTIMODAL_1. A coleta recebia oito tipos de bloco — AI Overview,
+   * imagens, vídeos, Shorts, People Also Search, refinement chips e produtos —
+   * e a normalização guardava três. O resto morria na porta.
+   *
+   * ISTO NÃO REFAZ A COLETA: é a mesma chamada, o mesmo endpoint e o mesmo
+   * normalizador. O que muda é que os blocos param de ser descartados.
+   *
+   * Aditivo com `.default(null)`: snapshot gravado antes deste gate continua
+   * legível, e o campo nulo é ausência declarada — nunca leitura inventada.
+   */
+  serpFeatures: RadarSerpFeatureIntelligenceSchema.nullable().default(null),
   diagnostic: SerpDiagnosticSchema,
 }).strict();
 export type SerpResearchSnapshot = z.infer<typeof SerpResearchSnapshotSchema>;

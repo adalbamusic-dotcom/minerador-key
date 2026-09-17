@@ -1,0 +1,537 @@
+{
+  "_fixture": "RADAR_MULTIMODAL_1 — recorte SANITIZADO de uma coleta real do /v3/serp/google/organic/live/advanced para \"skin care noturno\". A coleta original trouxe 125 itens; aqui ficam os OITO tipos de bloco com amostra reduzida de cada, verbatim nos campos. Identificadores de tarefa neutralizados.",
+  "id": "00000000-0000-0000-0000-000000000000",
+  "status_code": 20000,
+  "status_message": "Ok.",
+  "cost": 0.01,
+  "data": {
+    "api": "serp",
+    "function": "live",
+    "se": "google",
+    "se_type": "organic",
+    "keyword": "skin care noturno",
+    "location_code": 2076,
+    "language_code": "pt-BR",
+    "device": "desktop",
+    "os": "windows",
+    "depth": 100
+  },
+  "result": [
+    {
+      "keyword": "skin care noturno",
+      "type": "organic",
+      "se_domain": "google.com",
+      "location_code": 2076,
+      "language_code": "pt-BR",
+      "check_url": "https://www.google.com/search?q=skin%20care%20noturno&hl=pt-BR&gl=BR&ie=UTF-8&uule=w+CAIQIFISCc8ozOvHWZwAEWM-KfIGFVop",
+      "datetime": "2026-09-14 22:13:04 +00:00",
+      "spell": null,
+      "refinement_chips": {
+        "type": "refinement_chips",
+        "xpath": "/html[1]/body[1]/div[4]/div[2]/div[1]/div[4]/div[1]/div[1]/div[2]/span[1]/div[1]/div[1]/div[1]/div[1]",
+        "items": [
+          {
+            "type": "refinement_chips_element",
+            "title": "Hidratantes faciais",
+            "url": "https://www.google.com/search?q=hidratantes+faciais+skin+care+noturno&hl=pt-BR&gl=BR&shoprs=GAkqEXNraW4gY2FyZSBub3R1cm5vMhcICRITSGlkcmF0YW50ZXMgZmFjaWFpc2AB&sa=X&ved=2ahUKEwiwwYXki--WAxV5KvsDHUkqO0o4ChCKngYoAXoECA4QBA",
+            "domain": "www.google.com",
+            "options": null
+          },
+          {
+            "type": "refinement_chips_element",
+            "title": "Abaixo de R$ 70",
+            "url": "https://www.google.com/search?q=skin+care+noturno+de+at%C3%A9+R$%C2%A070&hl=pt-BR&gl=BR&shoprs=Eg0SCxEAAAAAdrCQQRgBGAUqEXNraW4gY2FyZSBub3R1cm5vMikIBRIQQWJhaXhvIGRlIFIkwqA3MBgCIg0SCxEAAAAAdrCQQRgBKgIYAVj3qiBgAQ&sa=X&ved=2ahUKEwiwwYXki--WAxV5KvsDHUkqO0o4ChCKngYoAnoECA4QBQ",
+            "domain": "www.google.com",
+            "options": null
+          },
+          {
+            "type": "refinement_chips_element",
+            "title": "Retinol",
+            "url": "https://www.google.com/search?q=retinol+skin+care+noturno&hl=pt-BR&gl=BR&shoprs=GAEqEXNraW4gY2FyZSBub3R1cm5vMhcIARIHUmV0aW5vbDoKCMHbLRDC2y0wAFj3qiBgAQ&sa=X&ved=2ahUKEwiwwYXki--WAxV5KvsDHUkqO0o4ChCKngYoA3oECA4QBg",
+            "domain": "www.google.com",
+            "options": null
+          },
+          {
+            "type": "refinement_chips_element",
+            "title": "Formação de colágeno",
+            "url": "https://www.google.com/search?q=forma%C3%A7%C3%A3o+de+col%C3%A1geno+skin+care+noturno&hl=pt-BR&gl=BR&shoprs=GAEqEXNraW4gY2FyZSBub3R1cm5vMicIARIXRm9ybWHDp8OjbyBkZSBjb2zDoWdlbm86Cgjs4S0QxtstMABY96ogYAE&sa=X&ved=2ahUKEwiwwYXki--WAxV5KvsDHUkqO0o4ChCKngYoBXoECA4QGQ",
+            "domain": "www.google.com",
+            "options": null
+          },
+          {
+            "type": "refinement_chips_element",
+            "title": "Vitamina C",
+            "url": "https://www.google.com/search?q=vitamina+c+skin+care+noturno&hl=pt-BR&gl=BR&shoprs=GAEqEXNraW4gY2FyZSBub3R1cm5vMhoIARIKVml0YW1pbmEgQzoKCMHbLRC_rlEwAFj3qiBgAQ&sa=X&ved=2ahUKEwiwwYXki--WAxV5KvsDHUkqO0o4ChCKngYoBnoECA4QGg",
+            "domain": "www.google.com",
+            "options": null
+          },
+          {
+            "type": "refinement_chips_element",
+            "title": "Loção corporal",
+            "url": "https://www.google.com/search?q=lo%C3%A7%C3%A3o+corporal+skin+care+noturno&hl=pt-BR&gl=BR&shoprs=GAkqEXNraW4gY2FyZSBub3R1cm5vMhQICRIQTG_Dp8OjbyBjb3Jwb3JhbGAB&sa=X&ved=2ahUKEwiwwYXki--WAxV5KvsDHUkqO0o4ChCKngYoB3oECA4QGw",
+            "domain": "www.google.com",
+            "options": null
+          },
+          {
+            "type": "refinement_chips_element",
+            "title": "Para pele seca",
+            "url": "https://www.google.com/search?q=para+pele+seca+skin+care+noturno&hl=pt-BR&gl=BR&shoprs=GAEqEXNraW4gY2FyZSBub3R1cm5vMh4IARIOUGFyYSBwZWxlIHNlY2E6Cgiy-DsQs_g7MABY96ogYAE&sa=X&ved=2ahUKEwiwwYXki--WAxV5KvsDHUkqO0o4ChCKngYoCHoECA4QHA",
+            "domain": "www.google.com",
+            "options": null
+          },
+          {
+            "type": "refinement_chips_element",
+            "title": "Para bebês",
+            "url": "https://www.google.com/search?q=para+beb%C3%AAs+skin+care+noturno&hl=pt-BR&gl=BR&shoprs=GAEqEXNraW4gY2FyZSBub3R1cm5vMhsIARILUGFyYSBiZWLDqnM6CgjS2C0QsNstMANY96ogYAE&sa=X&ved=2ahUKEwiwwYXki--WAxV5KvsDHUkqO0o4ChCKngYoCXoECA4QHQ",
+            "domain": "www.google.com",
+            "options": null
+          }
+        ]
+      },
+      "item_types": [
+        "ai_overview",
+        "organic",
+        "people_also_ask",
+        "images",
+        "short_videos",
+        "video",
+        "people_also_search",
+        "popular_products"
+      ],
+      "se_results_count": 0,
+      "pages_count": 10,
+      "items_count": 125,
+      "items": [
+        {
+          "type": "ai_overview",
+          "rank_group": 1,
+          "rank_absolute": 1,
+          "page": 1,
+          "position": "left",
+          "xpath": "/html[1]/body[1]/div[4]/div[2]/div[1]/div[11]/div[3]/div[1]/div[1]/div[1]/div[1]",
+          "asynchronous_ai_overview": false,
+          "markdown": "A rotina de **skincare noturno** ideal `segue uma ordem do produto mais leve ao mais encorpado para garantir a renovação celular enquanto você dorme`.[[1]](https://www.boticario.com.br/dicas-de-beleza/conheca-quais-sao-as-etapas-do-skincare-noturno/)[[2]](https://www.avon.com.br/blog/pele/skincare-noturno)\n\n### Passo a Passo da Rotina Noturna\n\n- **1. Limpeza:** Remova maquiagem, poluição e resíduos do dia com um demaquilante ou cleansing oil, seguido de um sabonete facial específico para o seu tipo de pele. Você pode conferir dicas detalhadas no [O Boticário](https://www.boticario.com.br/dicas-de-beleza/conheca-quais-sao-as-etapas-do-skincare-noturno/).[[1]](https://www.boticario.com.br/dicas-de-beleza/conheca-quais-sao-as-etapas-do-skincare-noturno/)[[2]](https://www.avon.com.br/blog/pele/skincare-noturno)\n- **2. Tonificação (Opcional):** Aplique um tônico para equilibrar o pH da pele e prepará-la para receber os próximos passos.[[1]](https://www.avon.com.br/blog/pele/skincare-noturno)\n- **3. Tratamento:** É o momento de usar séruns ou ácidos de tratamento (como ácido hialurônico, vitamina C ou retinoides), focando nas principais necessidades da sua pele.[[1]](https://www.avon.com.br/blog/pele/skincare-noturno)\n- **4. Hidratação e Área dos Olhos:** Aplique um creme específico para a região dos olhos e, em seguida, finalize com um bom hidratante facial ou creme noturno para selar os produtos e reparar a barreira cutânea. Veja recomendações adicionais no guia da [Minha Farmalar](https://www.minhafarmalar.com.br/skincare-noturno-3-passos-indispensaveis-para-acordar-com-a-pele-mais-bonita-e-protegida).[[1]](https://www.boticario.com.br/dicas-de-beleza/conheca-quais-sao-as-etapas-do-skincare-noturno/)[[2]](https://www.minhafarmalar.com.br/skincare-noturno-3-passos-indispensaveis-para-acordar-com-a-pele-mais-bonita-e-protegida)[[3]](https://www.avon.com.br/blog/pele/skincare-noturno)\n\nSe quiser, me conte:\n\n- Qual é o seu **tipo de pele** (seca, oleosa, mista ou sensível)?\n- Qual é a sua **principal queixa** (acne, manchas, linhas finas ou ressecamento)?\n\nPosso indicar os melhores ativos e uma rotina personalizada para você.",
+          "items": null,
+          "references": [
+            {
+              "type": "ai_overview_reference",
+              "position": "right",
+              "source": "O Boticário",
+              "domain": "www.boticario.com.br",
+              "url": "https://www.boticario.com.br/dicas-de-beleza/conheca-quais-sao-as-etapas-do-skincare-noturno/",
+              "title": "Skincare noturno: confira o passo a passo - O Boticário",
+              "text": "Ordem do skincare noturno: passo a passo de cada etapa. Mulher sorridente em cabelo preso com coque aplicando creme facial na pele · 1 – Faça a limpeza da pele."
+            },
+            {
+              "type": "ai_overview_reference",
+              "position": "right",
+              "source": "Farmalar",
+              "domain": "www.minhafarmalar.com.br",
+              "url": "https://www.minhafarmalar.com.br/skincare-noturno-3-passos-indispensaveis-para-acordar-com-a-pele-mais-bonita-e-protegida",
+              "title": "3 passos indispensáveis para acordar com a pele mais bonita e protegida",
+              "text": "Resumo: os 3 passos indispensáveis do skincare noturno. Limpar – remover sujeira, suor, poluição, maquiagem e protetor. Tratar – usar o ativo certo para a princ..."
+            },
+            {
+              "type": "ai_overview_reference",
+              "position": "right",
+              "source": "Avon",
+              "domain": "www.avon.com.br",
+              "url": "https://www.avon.com.br/blog/pele/skincare-noturno",
+              "title": "Skincare noturno: o que usar e qual a melhor ordem? - Avon",
+              "text": "Skincare noturno: o que usar e qual a melhor ordem? Sabia que o skincare noturno ajuda na renovação celular? Descubra o que usar no rosto à noite e · 1. Limpeza..."
+            }
+          ],
+          "rectangle": null
+        },
+        {
+          "type": "organic",
+          "rank_group": 1,
+          "rank_absolute": 2,
+          "domain": "www.boticario.com.br",
+          "title": "Skincare noturno: confira o passo a passo",
+          "url": "https://www.boticario.com.br/dicas-de-beleza/conheca-quais-sao-as-etapas-do-skincare-noturno/",
+          "description": "19 de dez. de 2025 — Ordem do skincare noturno: passo a passo de cada etapa · 1 – Faça a limpeza da pele · 2 – Hidrate o rosto · 3 – Aplique o creme para olhos · 4 – ..."
+        },
+        {
+          "type": "organic",
+          "rank_group": 2,
+          "rank_absolute": 6,
+          "domain": "www.oceane.com.br",
+          "title": "Kit Skincare Noturno com Ácido Hialurônico e Máscara Labial",
+          "url": "https://www.oceane.com.br/kit-rotina-skincare-noturno-k1185/p?srsltid=AfmBOorLDHTdOU673bq5oEfZUPrwBz-VVdT-rMf-dpf8ASakkzC2dwWo",
+          "description": "O Kit Rotina de Skincare Noturna é ótimo para manter uma rotina de cuidados com a pele equilibrada e focada na hidratação. Vem conferir!"
+        },
+        {
+          "type": "organic",
+          "rank_group": 3,
+          "rank_absolute": 7,
+          "domain": "www.minhafarmalar.com.br",
+          "title": "3 passos indispensáveis para acordar com a pele mais bonita e protegida",
+          "url": "https://www.minhafarmalar.com.br/skincare-noturno-3-passos-indispensaveis-para-acordar-com-a-pele-mais-bonita-e-protegida",
+          "description": "Resumo: os 3 passos indispensáveis do skincare noturno · Limpar – remover sujeira, suor, poluição, maquiagem e protetor. · Tratar – usar o ativo ..."
+        },
+        {
+          "type": "organic",
+          "rank_group": 4,
+          "rank_absolute": 10,
+          "domain": "www.instagram.com",
+          "title": "A ordem do skincare noturno tb veio Respondendo duvidas sobre ...",
+          "url": "https://www.instagram.com/reel/DJpvU-5MLid/",
+          "description": "Sempre começar com a limpeza usar um sabonete de rosto, e usar tonico para remover resquícios de maquiagem e limpar a pele. 1. Limpeza 2."
+        },
+        {
+          "type": "organic",
+          "rank_group": 5,
+          "rank_absolute": 12,
+          "domain": "www.usebob.com.br",
+          "title": "Skincare noturno: saiba a ordem, melhores produtos e dicas essenciais",
+          "url": "https://www.usebob.com.br/blogs/news/skincare-noturno?srsltid=AfmBOopMpXeFuCiuSy62lVrFrZqi-VQX9H6VYmT5eyhCyzIwvHkBYY3n",
+          "description": "O skincare noturno é a sua rotina de cuidados com a pele à noite, antes de dormir. Assim como no começo do dia, o uso de produtos no rosto antes ..."
+        },
+        {
+          "type": "organic",
+          "rank_group": 6,
+          "rank_absolute": 13,
+          "domain": "www.sallve.com.br",
+          "title": "Rotina de skincare noturna: como montar a sua?",
+          "url": "https://www.sallve.com.br/blogs/sallve/rotina-de-skincare-noturna-o-que-precisa-ter",
+          "description": "Skincare noturna descomplicada: veja os passos e produtos essenciais para cuidar da sua pele antes de dormir."
+        },
+        {
+          "type": "people_also_ask",
+          "rank_group": 1,
+          "rank_absolute": 3,
+          "page": 1,
+          "position": "left",
+          "xpath": "/html[1]/body[1]/div[4]/div[2]/div[1]/div[11]/div[3]/div[1]/div[1]/div[5]/div[1]",
+          "items": [
+            {
+              "type": "people_also_ask_element",
+              "title": "Qual ordem de skincare à noite?",
+              "seed_question": null,
+              "expanded_element": null
+            },
+            {
+              "type": "people_also_ask_element",
+              "title": "Como fazer um skincare noturno?",
+              "seed_question": null,
+              "expanded_element": null
+            },
+            {
+              "type": "people_also_ask_element",
+              "title": "Qual a rotina de skincare noturna?",
+              "seed_question": null,
+              "expanded_element": null
+            },
+            {
+              "type": "people_also_ask_element",
+              "title": "O que devo usar no rosto à noite?",
+              "seed_question": null,
+              "expanded_element": null
+            }
+          ],
+          "rectangle": null
+        },
+        {
+          "type": "images",
+          "rank_group": 1,
+          "rank_absolute": 4,
+          "page": 1,
+          "position": "left",
+          "xpath": "/html[1]/body[1]/div[4]/div[2]/div[1]/div[11]/div[3]/div[1]/div[1]/div[7]",
+          "title": "Imagens",
+          "url": null,
+          "items": [
+            {
+              "type": "images_element",
+              "alt": "Cronograma skin care: a ordem certa que transforma sua pele ...",
+              "url": "https://modices.com.br/cronograma-skin-care/",
+              "image_url": "https://api.dataforseo.com/cdn/i/09142212-1985-0139-0000-bb636341de52:1"
+            },
+            {
+              "type": "images_element",
+              "alt": "Kit Rotina Skincare Noturno (5 Produtos)",
+              "url": "https://www.oceane.com.br/kit-rotina-skincare-noturno-k1185/p?srsltid=AfmBOoqCV105kRqTJB-bQbC2wXNUsF52nrMaAvMH7HdggL5s0ygyYwUK",
+              "image_url": "https://api.dataforseo.com/cdn/i/09142212-1985-0139-0000-bb636341de52:2"
+            },
+            {
+              "type": "images_element",
+              "alt": "Rotina de skincare: passo a passo ideal para iniciantes",
+              "url": "https://blog.lojasrenner.com.br/2024/04/rotina-de-skincare/",
+              "image_url": "https://api.dataforseo.com/cdn/i/09142212-1985-0139-0000-bb636341de52:3"
+            },
+            {
+              "type": "images_element",
+              "alt": "Uma rotina de skincare noturna pode transformar sua pele! Com ...",
+              "url": "https://www.instagram.com/p/DOeY8qiD9vB/",
+              "image_url": "https://api.dataforseo.com/cdn/i/09142212-1985-0139-0000-bb636341de52:4"
+            }
+          ],
+          "related_image_searches": [],
+          "rectangle": null
+        },
+        {
+          "type": "short_videos",
+          "rank_group": 1,
+          "rank_absolute": 5,
+          "page": 1,
+          "position": "left",
+          "xpath": "/html[1]/body[1]/div[4]/div[2]/div[1]/div[11]/div[3]/div[1]/div[1]/div[9]",
+          "title": "Vídeos curtos",
+          "items": [
+            {
+              "type": "short_videos_element",
+              "title": "SKINCARE NOITE | Ordem de aplicação dos produtos 🌑 ... enviado por RAISA LOPES em Instagram. Assistir em Instagram. 0:19",
+              "url": "https://www.instagram.com/reel/DYKYR7htpKW/",
+              "domain": "www.instagram.com",
+              "source": "RAISA LOPES"
+            },
+            {
+              "type": "short_videos_element",
+              "title": "Limpeza e Hidratação: A Base do Skincare Noturno (Minha rotina) ... enviado por Dra. Marina Hayashida em YouTube. Assistir em YouTube. 1:35",
+              "url": "https://www.youtube.com/shorts/Ce6RKljTA1c",
+              "domain": "www.youtube.com",
+              "source": "Dra. Marina Hayashida"
+            },
+            {
+              "type": "short_videos_element",
+              "title": "Qual a ordem do skincare noturno? Essa é uma ordem mais básica pra ... enviado por Thaíse Santos | Farmacêutica em Instagram. Assistir em Instagram. 0:56",
+              "url": "https://www.instagram.com/reel/DYsycpfv4c9/",
+              "domain": "www.instagram.com",
+              "source": "Thaíse Santos | Farmacêutica"
+            },
+            {
+              "type": "short_videos_element",
+              "title": "Meu ritual de skincare noturno que faz TOTAL diferença! enviado por Scarlleth Moura | Maquiadora Profissional  em YouTube. Assistir em YouTube. 1:21",
+              "url": "https://www.youtube.com/shorts/g7OIwU193fw",
+              "domain": "google.com",
+              "source": "Scarlleth Moura | Maquiadora Profissional"
+            },
+            {
+              "type": "short_videos_element",
+              "title": "Rotina de skincare NOTURNA 🌛 de uma CLT de 19 anos, que trabalhava ... enviado por RAISA LOPES em Instagram. Assistir em Instagram. 1:24",
+              "url": "https://www.instagram.com/reel/DbJkIqpRzN0/",
+              "domain": "www.instagram.com",
+              "source": "RAISA LOPES"
+            },
+            {
+              "type": "short_videos_element",
+              "title": "Ordem Correta Do Skincare Noturno: Dicas Essenciais enviado por lafernandesss em TikTok. Assistir em TikTok. 0:18",
+              "url": "https://www.tiktok.com/@lafernandesss/video/7469906708723289399",
+              "domain": "www.tiktok.com",
+              "source": "lafernandesss"
+            }
+          ],
+          "rectangle": null
+        },
+        {
+          "type": "video",
+          "rank_group": 1,
+          "rank_absolute": 8,
+          "page": 1,
+          "position": "left",
+          "xpath": "/html[1]/body[1]/div[4]/div[2]/div[1]/div[11]/div[3]/div[1]/div[1]/div[15]",
+          "items": [
+            {
+              "type": "video_element",
+              "source": "RAISA LOPES",
+              "title": "SKINCARE NOITE | Ordem de aplicação dos produtos  ...",
+              "timestamp": "2026-05-10 00:00:00 +00:00",
+              "url": "https://www.instagram.com/reel/DYKYR7htpKW/"
+            },
+            {
+              "type": "video_element",
+              "source": "Thaíse Santos | Farmacêutica",
+              "title": "Qual a ordem do skincare noturno? Essa é uma ordem mais básica pra ...",
+              "timestamp": "2026-05-23 00:00:00 +00:00",
+              "url": "https://www.instagram.com/reel/DYsycpfv4c9/"
+            },
+            {
+              "type": "video_element",
+              "source": "Dra. Marina Hayashida",
+              "title": "Limpeza e Hidratação: A Base do Skincare Noturno (Minha rotina) ...",
+              "timestamp": "2025-09-06 00:00:00 +00:00",
+              "url": "https://www.youtube.com/shorts/Ce6RKljTA1c"
+            }
+          ],
+          "rectangle": null
+        },
+        {
+          "type": "people_also_search",
+          "rank_group": 1,
+          "rank_absolute": 9,
+          "page": 1,
+          "position": "left",
+          "xpath": "/html[1]/body[1]/div[4]/div[2]/div[1]/div[11]/div[3]/div[1]/div[1]/div[17]",
+          "title": "Outras pessoas pesquisaram",
+          "items": [
+            "Skin care noturno ordem",
+            "Skincare noturno passo a passo",
+            "Skincare noturno creamy",
+            "Skincare noturno principia",
+            "Kit skincare noturno",
+            "Skincare noturno pele madura"
+          ],
+          "rectangle": null
+        },
+        {
+          "type": "popular_products",
+          "rank_group": 1,
+          "rank_absolute": 11,
+          "page": 1,
+          "position": "left",
+          "xpath": "/html[1]/body[1]/div[4]/div[2]/div[1]/div[11]/div[3]/div[1]/div[1]/div[20]",
+          "title": "Produtos mais procurados",
+          "items": [
+            {
+              "type": "popular_products_element",
+              "title": "Sérum Facial Noturno de Probióticos - Probiotic Night Serum 30ml",
+              "url": null,
+              "domain": null,
+              "description": "Océane",
+              "more_sellers": false,
+              "seller": "Océane",
+              "image_url": "https://encrypted-tbn0.gstatic.com/shopping?q=tbn:ANd9GcSmUJkEc50IpsRyY6CapOIuC1bXkvGAELwmLAs5GAsXyjrAQqofFkzSXu_0j5z65Vdl6FZ9lG_NHCtQY-Q7CM5AOeidMXzObkzCm2o9zX8",
+              "price": {
+                "current": 89.9,
+                "regular": null,
+                "max_value": null,
+                "currency": "BRL",
+                "is_price_range": false,
+                "displayed_price": "R$ 89,90 agora"
+              },
+              "rating": {
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 151,
+                "rating_max": 5
+              },
+              "product_identifiers": {
+                "product_id": null,
+                "data_docid": "4860710766846607090",
+                "gid": null
+              }
+            },
+            {
+              "type": "popular_products_element",
+              "title": "Creme Facial Retexturizador Noturno Sallve 30G",
+              "url": null,
+              "domain": null,
+              "description": "Época Cosméticos Perfumaria",
+              "more_sellers": false,
+              "seller": "Época Cosméticos Perfumaria",
+              "image_url": "https://encrypted-tbn3.gstatic.com/shopping?q=tbn:ANd9GcRuccb-UGl8xblR6UVeOSnSXEXFNSicgwymOCIgm7NjeEq8kuN9-exAlzh6BVgBykoeuSQyhHMH7UOcOXAeKcI_q9RWmL4-DFKN9cmt6s4tU_X2MZEtem6E",
+              "price": {
+                "current": 87.2,
+                "regular": null,
+                "max_value": 110,
+                "currency": "BRL",
+                "is_price_range": true,
+                "displayed_price": "R$ 87,20 R$ 110"
+              },
+              "rating": {
+                "rating_type": "Max5",
+                "value": 4.6,
+                "votes_count": 1200,
+                "rating_max": 5
+              },
+              "product_identifiers": {
+                "product_id": null,
+                "data_docid": "9908226823237557812",
+                "gid": null
+              }
+            },
+            {
+              "type": "popular_products_element",
+              "title": "Sérum Facial Noturno De Probióticos - Probiotic Night Serum 30Ml",
+              "url": null,
+              "domain": null,
+              "description": "Drogasil.com.br",
+              "more_sellers": false,
+              "seller": "Drogasil.com.br",
+              "image_url": "https://encrypted-tbn3.gstatic.com/shopping?q=tbn:ANd9GcSW1hpcQkeQifemojDABDIAI_kHqNXpMyh5EFnn9bDQmhephzkpbNTMpWLGRCfZPjv1lqiqeRjuXsLQqecbSBaBGrAqPfJ23tQotxcnsGWBG-i9fMV9bj_8hQ",
+              "price": {
+                "current": 89.91,
+                "regular": null,
+                "max_value": null,
+                "currency": "BRL",
+                "is_price_range": false,
+                "displayed_price": "R$ 89,91"
+              },
+              "rating": {
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 151,
+                "rating_max": 5
+              },
+              "product_identifiers": {
+                "product_id": null,
+                "data_docid": "16690766799123988999",
+                "gid": null
+              }
+            },
+            {
+              "type": "popular_products_element",
+              "title": "Creme Retexturizador Noturno Sallve",
+              "url": null,
+              "domain": null,
+              "description": "Maquiare",
+              "more_sellers": false,
+              "seller": "Maquiare",
+              "image_url": "https://encrypted-tbn0.gstatic.com/shopping?q=tbn:ANd9GcSvDN3BvjYS7BvOBhcyPQBpLvJ0uzZ4xEEceXrxUQuG0FOMLwsHY3V4uxSPQTG9Xd64ZwjrpdylCFzHSi7EaDvSyUklsc94qg14unZoDrNFItJTFLoFOodb50c",
+              "price": {
+                "current": 109.9,
+                "regular": null,
+                "max_value": null,
+                "currency": "BRL",
+                "is_price_range": false,
+                "displayed_price": "R$ 109,90 agora"
+              },
+              "rating": {
+                "rating_type": "Max5",
+                "value": 4.6,
+                "votes_count": 1200,
+                "rating_max": 5
+              },
+              "product_identifiers": {
+                "product_id": null,
+                "data_docid": "17605367216706362791",
+                "gid": null
+              }
+            },
+            {
+              "type": "popular_products_element",
+              "title": "Sérum Facial Noturno Océane De Probióticos 30ml",
+              "url": null,
+              "domain": null,
+              "description": "Panvel",
+              "more_sellers": false,
+              "seller": "Panvel",
+              "image_url": "https://encrypted-tbn3.gstatic.com/shopping?q=tbn:ANd9GcSDLFOTLWnd5HiZe-ZUkgan5TaoDhDqfnajBWs38U26DMz2BDyTK5otKTSIQCe_wjPxOAu1IZ1_hLuRvbECkwsxy-birzMHlChiRFWrpxf1SQvObzWZQymj",
+              "price": {
+                "current": 91.91,
+                "regular": null,
+                "max_value": null,
+                "currency": "BRL",
+                "is_price_range": false,
+                "displayed_price": "R$ 91,91"
+              },
+              "rating": {
+                "rating_type": "Max5",
+                "value": 4.8,
+                "votes_count": 151,
+                "rating_max": 5
+              },
+              "product_identifiers": {
+                "product_id": null,
+                "data_docid": "11814720952548372677",
+                "gid": null
+              }
+            }
+          ],
+          "rectangle": null
+        }
+      ]
+    }
+  ]
+}

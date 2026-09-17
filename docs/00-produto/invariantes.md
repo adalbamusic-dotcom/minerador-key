@@ -124,4 +124,69 @@ TELEGRAM_INBOUND_E2E = PENDING
     são fontes distintas. Falha HTTP legítima vira limitação declarada;
     `SOURCE_UNKNOWN` para id produzido pelo próprio pipeline é defeito.
 
+
+## Radar — fechamento da fase — 2026-09-17
+
+34. Perfil de pesquisa não é saída editorial. `GOOGLE` produz blueprint
+    editorial e artigo-modelo; `YOUTUBE` produz blueprint audiovisual e
+    roteiro-modelo; `AMAZON` produz blueprint comercial. O perfil descreve como
+    se investigou, nunca o que será publicado.
+35. A hierarquia de evidência é a de `RADAR_EVIDENCE_HIERARCHY`, nesta ordem:
+    `ARTICLE_INVARIANT`, `PRIMARY_FACTUAL_EVIDENCE`, `QUALIFIED_SPECIALIST`,
+    `CURRENT_SUFFICIENT_SERP`, `OTHER_RADAR_EVIDENCE`, `ARTICLE_DNA_HYPOTHESIS`,
+    `AI_INTERPRETATION`, `DETERMINISTIC_HEURISTIC`,
+    `GENERIC_EDITORIAL_SUGGESTION`. SERP suficiente domina a leitura
+    competitiva e **não** substitui fonte factual nem especialista em matéria
+    de fato.
+36. `YouTube Search` e Biblioteca de Vídeos são autoridades distintas. A
+    primeira lê título, canal, duração, posição e data, e **nunca** afirma o
+    conteúdo interno de um vídeo; a segunda carrega trecho ancorado no tempo de
+    fonte que uma pessoa escolheu. Transcript não é exigido pela primeira e é a
+    matéria-prima da segunda.
+37. Na Amazon, a intenção editorial é declarada antes da coleta e é separada do
+    alvo. As camadas são `RAW_UNIVERSE → ELIGIBLE_CANDIDATES →
+    EDITORIAL_SHORTLIST`, o ASIN é a identidade canônica, `TOP_BEST` não é os
+    primeiros N slots e `TOP_VALUE` não é o menor preço. A Merchant Brasil usa
+    `language_code = pt_BR` e `location_code = 2076`; a grafia com underscore é
+    dela e não é a do Google nem a do YouTube.
+38. Link promocional nasce da shortlist editorial, com URL limpa
+    `https://www.amazon.com.br/dp/{ASIN}`. O Radar **não** cria tag de afiliado:
+    ele marca `affiliateReady`, fixa `relPolicy = sponsored nofollow` e exige a
+    divulgação quando há link monetizado. A substituição por URL de afiliado é
+    de etapa posterior e preserva o ASIN.
+39. O dossiê canônico é resolvido uma vez —
+    `loadRadarCanonicalAuthorities → resolveRadarCanonicalDossier` — e alimenta
+    `sendRadarToPlanner` e o export portátil com o mesmo conteúdo semântico.
+    `writer_brief_md`, `writer_context_md` e `competitive_radiography_md` são
+    read models portáteis: não são autoridade factual e não viajam no handoff.
+40. Todo `evidenceRef` usado pelo blueprint final resolve a partir do dossiê
+    ENTREGUE ao Planejador, e não apenas a partir do export.
+41. O papel e a composição das keywords vêm do ArticleDNA
+    (`keywordReferences[].role`); o texto vem da hidratação amarrada ao mesmo
+    `articleDnaVersionId`. Nunca resolver a keyword principal por título, slug,
+    consulta da SERP, promessa ou hierarquia, e **nunca** promover uma
+    secundária a principal. Texto não resolvido é `null` com
+    `resolution = UNRESOLVED`.
+42. `bundle.video` e `bundle.specialist` são preenchidos pela autoridade
+    canônica. A biblioteca de vídeos não leva id de worker, `gs://` nem id de
+    job; o especialista não leva id de Telegram, de chat nem de ator. A omissão
+    acontece na origem, ao montar a camada. Ausência é `null`, nunca camada
+    vazia.
+43. O export portátil é um dossiê editorial de escrita, não backup. Ele não
+    carrega payload cru de provider, segredo, id privado, dump de banco, hash
+    ou UUID como conteúdo editorial, nem endereço interno de evidência: a
+    relação seção → evidência atravessa por rótulo legível.
+44. `seoTitle`, `metaDescription`, Open Graph, Twitter, `robots` e schema podem
+    permanecer não definidos na fase Radar. O Radar exporta direção e
+    restrições, com os campos ausentes nomeados, e não inventa decisão do
+    Planejador ou do Redator.
+45. O plano visual canônico é uma capa e duas ou três imagens de respiro. FAQ
+    não faz parte do padrão. Cada imagem declara função, seção e a origem da
+    necessidade; sem estrutura editorial não há plano visual.
+46. `sendRadarToPlanner` é a autoridade única de envio, com a ordem
+    `validate → canonical resolve → write bundle → readback → identity/hash
+    validation → workflow transition → destination readback → success`.
+    `RadarEvidenceBundle` permanece V3; extensão é aditiva e opcional, nunca um
+    envelope paralelo.
+
 Estas regras são canônicas. Uma exceção exige proposta SDD aprovada e atualização desta documentação quando permanente.
