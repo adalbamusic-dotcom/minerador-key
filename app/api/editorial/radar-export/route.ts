@@ -5,6 +5,7 @@ import { assertEditorialPermission } from "@/lib/server/editorial-authorization"
 import { ArtifactRepository, SerpSnapshotRepository } from "@/lib/server/editorial-repositories";
 import { radarStartPorts } from "@/lib/server/radar-youtube-start";
 import { resolveRadarCanonicalDossier } from "@/lib/server/radar-canonical-dossier";
+import { radarFrozenObservedAtOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
 import { buildRadarEditorialCommercialModel, buildRadarEditorialVideoModel } from "@/lib/radar/editorial-profile-model";
 import { loadRadarCanonicalAuthorities } from "@/lib/server/radar-canonical-authorities";
 import { radarPortableSpecialistContext, radarPortableVideoContext } from "@/lib/radar/portable-annex-context";
@@ -115,7 +116,8 @@ export async function POST(request: Request) {
       const canonico = resolveRadarCanonicalDossier({
         analysis: corrente,
         article: fundamento,
-        observedAt: exportedAt,
+        /* Mesmo instante do envio ao Redator: o do congelamento. Hash igual nos dois consumidores. */
+        observedAt: radarFrozenObservedAtOfAnalysis(corrente.payload) ?? exportedAt,
         authorities: autoridades,
       });
       if (!canonico.ok) {

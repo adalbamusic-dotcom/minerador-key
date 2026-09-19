@@ -258,6 +258,16 @@ Estas regras são canônicas. Uma exceção exige proposta SDD aprovada e atuali
     Uma bancada precisa nascer no estado REAL do fluxo vigente — foi uma linha
     de esteira `approved`, impossível na prática, que escondeu esta recusa de
     dezessete mutantes.
+59. A hora do clique não é identidade de evidência. `observedAt` entra no hash
+    do dossiê, e por isso é o instante do CONGELAMENTO (`finalizedAt` /
+    `frozenAt`), o mesmo no envio ao Redator e no export. Um dossiê resolvido
+    com a hora do envio muda de hash a cada clique e nunca é reconhecido.
+60. Quem aparece em "Importar do Radar" é quem FINALIZOU — perfil resolvido
+    da análise corrente — ou quem já foi entregue. O estado da esteira não
+    lista nem esconde artigo (consequência direta da 55).
+61. O modo de pesquisa de uma linha é o escolhido na sessão, senão o GRAVADO
+    na análise (alvo declarado ou fotografia congelada), e só então o padrão.
+    Nenhuma leitura da planilha pula do estado da sessão para o padrão.
 
 ## Remoção lógica do Planejador e árvore da plataforma — 2026-09-18
 

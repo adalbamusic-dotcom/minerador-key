@@ -53,6 +53,8 @@ test("MCP não anuncia poderes de aprovação ou publicação", () => {
   const route = readFileSync(new URL("../app/api/mcp/redator/route.ts", import.meta.url), "utf8");
   for (const forbidden of ["approve_writer_document", "publish_document", "delete_writer_document", "update_article_dna"])
     assert.equal(route.includes(`registerTool(\"${forbidden}\"`), false);
-  assert.match(route, /verifyWriterMcpBearer/);
+  // A autenticação (bearer de diagnóstico ou OAuth) é resolvida num único principal antes das ferramentas.
+  assert.match(route, /resolveWriterMcpPrincipal/);
+  assert.doesNotMatch(route, /verifyWriterMcpBearer\(/);
   assert.match(route, /assertEditorialPermission/);
 });

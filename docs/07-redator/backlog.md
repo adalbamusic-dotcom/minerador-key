@@ -53,6 +53,22 @@
 - **Próximo gate:** configurar `MCP_PUBLIC_BASE_URL` em HTTPS e homologar um
   cliente externo com OAuth/discovery habilitado. Até lá, `pending` é o estado
   correto e o bearer é de desenvolvimento controlado pela Agência.
+- **SDD proposta (2026-09-19):** `propostas/sdd-oauth-mcp-redator-2026-09-19.md`
+  troca o bearer manual por OAuth 2.1 com o Supabase OAuth Server como
+  servidor de autorização, tabela `writer_mcp_grants`, consentimento em
+  `/oauth/consent` e metadata `.well-known`. Aguardando aprovação; nada
+  implementado. Preflight de 2026-09-19: `oauthDiscovery = BLOCKED`.
+- **Fase 1 entregue localmente (2026-09-19):** ver `estado-atual.md`. Próximos
+  gates, na ordem: (0) usuário liga o OAuth Server no Supabase, path
+  `/oauth/consent`, registro dinâmico e chave ES256; (2) M7 já aplicada
+  em 2026-09-19 (post-verifier PASS); usuário define `MCP_OAUTH_ENABLED=true` e
+  `MCP_ALLOW_REMOTE_BEARER=false` na Vercel e faz deploy; preflight deve
+  passar com zero bloqueadores; (3) usuário homologa no ChatGPT e devolve o
+  readback de `writer_mcp_grants` e `writer_mcp_call_events`; (4) agente
+  entrega painel da Agência (estado OAuth, grants, revogação/reativação,
+  esconder bearer) e atualiza docs.
+- **Riscos a confirmar na fase 3:** R1 escopos `writer.*` pedidos pelo
+  ChatGPT; R2 parâmetro `resource` no `authorize` do Supabase. Plano B na SDD.
 
 1. A leitura autenticada, o protocolo e a revogação já passaram no localhost com uma credencial temporária. Falta testar escrita de rascunho com consentimento, conflito de lock e readback, sem alterar o documento de homologação do usuário; usar uma fixture isolada ou uma cópia de teste própria.
 2. Homologar roteiro, carrossel, prompts e upload com os botões reais em `localhost:3000`: salvar, F5, segunda sessão, origem/hash e mídia privada. A validação funcional da interface pertence ao usuário.

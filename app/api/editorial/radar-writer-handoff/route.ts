@@ -66,6 +66,20 @@ export async function POST(request: Request) {
       documentId: resultado.documentId,
     }, { headers: noStoreHeaders });
   } catch (error) {
+    /*
+     * ===== TODA RECUSA VAI PARA O LOG DO SERVIDOR =====
+     *
+     * As recusas de domínio saem como 409 e nunca eram registradas; uma
+     * exceção inesperada virava 500 com a mensagem crua, também sem registro.
+     * O resultado foi "um monte de falhas" na tela e nenhuma linha no log —
+     * e sem a linha, cada clique custa uma rodada de adivinhação.
+     *
+     * Sem credencial: código, mensagem e as primeiras molduras da pilha.
+     */
+    const pilha = error instanceof Error ? String(error.stack || "").split("\n").slice(1, 4).map(l => l.trim()).join(" | ") : "";
+    console.error("[writer-handoff]",
+      error instanceof RadarWriterSendError ? error.code : error instanceof Error ? error.name : "unknown",
+      error instanceof Error ? error.message : String(error), "::", pilha);
     if (error instanceof RadarWriterSendError) {
       return NextResponse.json({
         success: false,

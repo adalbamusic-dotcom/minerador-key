@@ -39,6 +39,7 @@
  */
 
 import { RadarWriterBundleRecordSchema, type RadarAnalysisVersion, type RadarWriterBundleRecord } from "../radar/analysis-contracts.ts";
+import { radarFrozenObservedAtOfAnalysis } from "../radar/evidence-bundle-runtime.ts";
 import { assertRadarEvidenceBundleIntegrity, radarEvidenceBundleMatchesArticle, type RadarEvidenceBinding, type RadarEvidenceBundle } from "../radar/evidence-bundle.ts";
 import type { RadarPlannerHandoffReadiness } from "../radar/planner-handoff.ts";
 import { ContentDocumentSchema, type ArticleDNA, type ContentDocument, type SiloDNA, type VersionEnvelope } from "../arquiteto/contracts.ts";
@@ -261,7 +262,19 @@ export async function sendRadarToWriter(entrada: {
    * pesquisa. SERP, Blueprint, contexto de keyword, vídeo, especialista e
    * shortlist da Amazon são LIDOS do que já está congelado.
    */
-  const canonico = resolveRadarCanonicalDossier({ analysis: corrente, article, observedAt: entrada.sentAt, authorities: autoridades });
+  /*
+   * ===== IDEMPOTÊNCIA DE VERDADE: O HASH NÃO PODE DEPENDER DA HORA DO CLIQUE =====
+   *
+   * `observedAt` entra no hash do dossiê. Resolver com `sentAt` fazia cada
+   * clique produzir um pacote "novo", e o segundo envio recusava com "já
+   * existe documento com pacote anterior" — sobre uma investigação idêntica.
+   *
+   * O instante da fotografia é o do congelamento. `sentAt` só entra quando
+   * não há congelamento nenhum — e aí a resolução recusa antes por
+   * `radar_research_not_finalized`, então o fallback nunca vira hash.
+   */
+  const observedAt = radarFrozenObservedAtOfAnalysis(corrente.payload) ?? entrada.sentAt;
+  const canonico = resolveRadarCanonicalDossier({ analysis: corrente, article, observedAt, authorities: autoridades });
   if (!canonico.ok) {
     throw new RadarWriterSendError(
       canonico.code,

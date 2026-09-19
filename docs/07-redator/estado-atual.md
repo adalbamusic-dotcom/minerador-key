@@ -1,5 +1,48 @@
 # Estado atual — Redator
 
+## OAuth 2.1 para o MCP do Redator — fase 1 implementada localmente, 2026-09-19
+
+- **SDD:** `propostas/sdd-oauth-mcp-redator-2026-09-19.md`, aprovada para
+  implementação com D1 = grant multi-Marca. D2 a D5 seguem as recomendações da
+  SDD (qualquer usuário com `redator:view` consente; bearer `mk_mcp_` só
+  atrás de `MCP_ALLOW_REMOTE_BEARER`; hook de `aud` e painel da Agência ficam
+  para a fase 4).
+- **Verificado no código:** metadata RFC 9728 em
+  `/.well-known/oauth-protected-resource[/api/mcp/redator]` (rewrite do
+  `next.config.ts` para `app/api/oauth/protected-resource`); 401 do MCP com
+  `WWW-Authenticate: Bearer resource_metadata=...` quando `MCP_OAUTH_ENABLED`;
+  verificação de JWT do Supabase (`lib/server/mcp-oauth.ts`, `getClaims` +
+  `iss` + `client_id`); principal único para bearer e OAuth
+  (`lib/server/writer-mcp-principal.ts`); grants por (usuário, cliente, Marca)
+  em `lib/server/writer-mcp-grants.ts`; página `/oauth/consent` com escolha
+  de Marcas e escopos gravada antes de `approveAuthorization`; autoatendimento
+  em `/conta` (seção Conexões de IA, `/api/oauth/grants`). As ferramentas
+  passam a resolver a Marca pelo documento ou por `brandId`;
+  `get_writer_connection_profile` lista as Marcas e devolve `consentUrl`
+  quando não há grant.
+- **Confirmado por teste:** `test:redator:mcp` 42/42 (token ES256 assinado no
+  teste com JWKS injetado, sem rede; metadata; boundary HTTP com e sem OAuth;
+  protocolo multi-Marca; preflight), `test:redator` 266/266, `test:mcp:runtime`
+  5/5; TypeScript sem erros; ESLint limpo nos arquivos tocados.
+- **Validado no dev server local (sem OAuth ligado):** `.well-known` responde
+  JSON `oauth_disabled` 404 pelo rewrite, `/oauth/consent` 404, POST
+  `initialize` sem token 401 com realm legado, `health` já expõe o issuer
+  derivado de `NEXT_PUBLIC_SUPABASE_URL`.
+- **Migration M7 aplicada remotamente em 2026-09-19** (`db query --linked -f` + `migration repair --status applied`; preflight 7/7 PASS, post-verifier 12/12 PASS, 0 grants, 6 eventos e 3 delegações preservados):
+  `20260919120000_m7_writer_mcp_oauth_grants.sql` (tabela `writer_mcp_grants`,
+  coluna `writer_mcp_call_events.grant_id`, CHECK de principal único), com
+  preflight e post-verifier em `supabase/scripts/2026-09-19-m7-*` e rollback
+  condicionado a tabela vazia em `supabase/rollback/`.
+- **Ainda não verificado:** OAuth Server do Supabase (fase 0; preflight das 09:01 UTC ainda devolve `feature_disabled`),
+  env na Vercel e deploy (fase 2), login e consentimento pelo ChatGPT com
+  readback de grant e eventos (fase 3), painel da Agência (fase 4).
+  `MCP_OAUTH_DISCOVERY = BLOCKED` (preflight 2026-09-19), `CHATGPT_CONNECTION`,
+  `AUTHENTICATED_READ_WRITE` e `MCP_GRANT_REVOCATION` = `PENDING`.
+- **Pré-existente, fora deste corte:** `check:visual-system` falha em
+  `modules/arquiteto/territorial-workspace-rows.tsx:181` (comentário com a
+  palavra proibida); `test:authz` mantém as 2 falhas estáticas do
+  `arquiteto-workspace.tsx` registradas na revisão de 2026-09-02.
+
 ## Biblioteca editorial unificada com Publicações — 2026-09-18
 
 - **Defeito encontrado na auditoria:** `publications-workspace.tsx` montava as

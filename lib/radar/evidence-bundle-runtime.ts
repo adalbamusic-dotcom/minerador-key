@@ -71,6 +71,31 @@ const inteiro = (valor: unknown): number =>
  * coletar nada — e o dossiê diria "primária: AMAZON" sobre uma investigação de
  * YouTube.
  */
+/**
+ * ===== O INSTANTE DO CONGELAMENTO — RADAR_MULTI_PROFILE_HANDOFF_1 =====
+ *
+ * O dossiê carrega `observedAt`, e `observedAt` entra no hash. Quem resolvia
+ * o dossiê com a HORA DO CLIQUE produzia um hash novo a cada clique — e o
+ * segundo envio do mesmo artigo dizia "já existe documento com pacote
+ * anterior", como se a investigação tivesse mudado. Ela não mudou; a hora
+ * mudou.
+ *
+ * O instante que descreve a fotografia é o do congelamento, e ele está
+ * gravado. Mesma precedência de `radarPrimaryProfileOfAnalysis`: o carimbo é
+ * do perfil que manda.
+ */
+export function radarFrozenObservedAtOfAnalysis(payload: unknown): string | null {
+  const analise = objeto(payload);
+  if (!analise) return null;
+  const amazon = objeto(analise.amazonFrozenInvestigation);
+  if (amazon && typeof amazon.finalizedAt === "string") return amazon.finalizedAt;
+  const youtube = objeto(analise.youtubeFrozenInvestigation);
+  if (youtube && typeof youtube.finalizedAt === "string") return youtube.finalizedAt;
+  const google = objeto(analise.finalizedBundle);
+  if (google && typeof google.frozenAt === "string") return google.frozenAt;
+  return null;
+}
+
 export function radarPrimaryProfileOfAnalysis(payload: unknown): RadarResearchProfile | null {
   const analise = objeto(payload);
   if (!analise) return null;

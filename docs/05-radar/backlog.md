@@ -52,6 +52,18 @@ interface, não correção de domínio.
   conteúdo assistido continuam fora do escopo: a SERP de vídeo não observa
   conteúdo interno.
 
+### 5. Deixado pelo `RADAR_MULTI_PROFILE_HANDOFF_1` — 2026-09-19
+
+- **Apoio do Google para YouTube e Amazon.** No banco, o artigo de YouTube tem
+  `serpSnapshotId` sem `deepResearch`/extrações/`supportResearch`; o de Amazon
+  não tem nada do Google. "Processado no Google" só pode aparecer depois de o
+  fluxo de apoio rodar — providers autorizados, clique do USER.
+- **Amazon TOP_BEST com `productClass` literal.** `lib/radar/amazon-eligibility.ts`
+  exige o termo da classe no título; com `skincare`, 0/48 candidatos passam.
+  Defeito de desenho: classe de produto não é token obrigatório de título.
+- **"Enviar ao Redator" para o artigo focado.** A barra de lote só aparece com
+  checkbox marcado. Melhoria de interface.
+
 ### Fechado — não reabrir como pendência
 
 Os itens abaixo aparecem em seções históricas deste arquivo e **não são mais

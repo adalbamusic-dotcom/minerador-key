@@ -32,6 +32,7 @@ import { newWriterDeliverable, WriterDeliverablePayloadSchema, type WriterDelive
 import { WriterMediaAnchorPanel } from "@/modules/redator/writer-media-anchor-panel";
 import { carouselAnchorTargets, mediaRowsToPanelAssets, scriptAnchorTargets } from "@/lib/redator/media-anchor-targets";
 import { adicionarCena, cenasEmOrdem, duplicarCena, editarCena, moverCena, novaCena, removerCena } from "@/lib/redator/script-scenes";
+import { describeActionFailure, progressMessage, type DeliverableAction, type FeedbackTone } from "@/lib/redator/action-feedback";
 
 type Kind = WriterDeliverablePayload["kind"];
 
@@ -49,6 +50,17 @@ export type WriterDeliverableBar = {
   estado: "none" | "draft" | "approved";
   ocupado: boolean;
   mensagem: string;
+  /**
+   * ===== CORTE 6A.8 · O TOM É O QUE TORNA A FALHA VISÍVEL =====
+   *
+   * Antes a barra só recebia texto, e o desenho pintava tudo de `muted`. Um 409
+   * em "Reabrir para edição" ficava indistinguível de "Sem alterações
+   * pendentes". O tom vem de `lib/redator/action-feedback.ts`, a mesma tabela
+   * que o Artigo usa — não uma segunda convenção.
+   */
+  tom: FeedbackTone;
+  /** Qual ação está em curso, para rotular o botão certo e travar só ele. */
+  acaoEmCurso: DeliverableAction | null;
   salvar: () => void;
   finalizar: () => void;
   reabrir: () => void;
@@ -71,6 +83,8 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
   const [sourceHash, setSourceHash] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [tom, setTom] = useState<FeedbackTone>("neutro");
+  const [acaoEmCurso, setAcaoEmCurso] = useState<DeliverableAction | null>(null);
   /** A cena aberta manda no painel de mídia. Sem ela, o painel não fala de nada. */
   const [cenaSelecionada, setCenaSelecionada] = useState("");
   const [metadadosAbertos, setMetadadosAbertos] = useState(false);
@@ -86,8 +100,10 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
       setSourceHash(body.sourceDocumentHash);
       setDraft(current?.payload || newWriterDeliverable(kind, { documentId, title, sourceDocumentHash: body.sourceDocumentHash }));
       setMedia(body.media || []);
-      setMessage("");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao ler entregáveis."); }
+    } catch (error) {
+      setTom("erro");
+      setMessage(error instanceof Error ? error.message : "Falha ao ler entregáveis.");
+    }
   }, [brandId, documentId, kind, title]);
 
   useEffect(() => { void Promise.resolve().then(load); }, [load]);
@@ -97,17 +113,35 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
   const save = async () => {
     if (!brandId || !documentId || !draft) return;
     const parsed = WriterDeliverablePayloadSchema.safeParse(draft);
-    if (!parsed.success) { setMessage(`Campo inválido: ${parsed.error.issues[0]?.path.join(".") || "entregável"}.`); return; }
-    setBusy(true);
+    if (!parsed.success) {
+      setTom("erro");
+      setMessage(`Campo inválido: ${parsed.error.issues[0]?.path.join(".") || "entregável"}.`);
+      return;
+    }
+    setBusy(true); setAcaoEmCurso("salvar"); setTom("progresso"); setMessage(progressMessage("salvar"));
     try {
       const response = await fetch("/api/redator/deliverables", { method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ brandId, documentId, payload: parsed.data, expectedLockVersion: stored?.lockVersion ?? null }) });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || body.code || "Falha ao salvar.");
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        /*
+         * O corpo do servidor NÃO é engolido: ele sabe o motivo exato
+         * (writer_lock_conflict, writer_approved_immutable, …). E nada de
+         * `load()` aqui — recarregar depois de uma falha escreveria por cima do
+         * rascunho que a pessoa ainda tem na tela.
+         */
+        const falha = describeActionFailure({ status: response.status, body });
+        setTom(falha.tone); setMessage(falha.mensagem);
+        return;
+      }
       await load();
-      setMessage(body.unchanged ? "Sem alterações." : "Rascunho salvo e confirmado no servidor.");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Falha ao salvar."); }
-    finally { setBusy(false); }
+      setTom("sucesso");
+      setMessage(body?.unchanged ? "Sem alterações a salvar." : "Rascunho salvo e confirmado no servidor.");
+    } catch (error) {
+      setTom("erro");
+      setMessage(error instanceof Error ? error.message : "Falha ao salvar.");
+    }
+    finally { setBusy(false); setAcaoEmCurso(null); }
   };
 
   /*
@@ -119,16 +153,30 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
    */
   const acao = async (action: "finalize" | "reopen") => {
     if (!brandId || !documentId || !stored) return;
-    setBusy(true);
+    const qual: DeliverableAction = action === "finalize" ? "finalizar" : "reabrir";
+    setBusy(true); setAcaoEmCurso(qual); setTom("progresso"); setMessage(progressMessage(qual));
     try {
       const corpo = action === "finalize"
         ? { action, brandId, documentId, kind, expectedLockVersion: stored.lockVersion }
         : { action, brandId, documentId, kind };
       const response = await fetch("/api/redator/deliverables", { method: "PATCH",
         headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || body.code || "Falha na operação.");
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        /*
+         * Conflito (409) e falha (401/5xx) pintam igual — para quem opera a
+         * diferença que importa é "não deu certo". O que os distingue é a
+         * mensagem, que vem do servidor e não é substituída por um texto genérico.
+         *
+         * O estado local NÃO é atualizado como sucesso, e o botão continua
+         * utilizável para nova tentativa.
+         */
+        const falha = describeActionFailure({ status: response.status, body });
+        setTom(falha.tone); setMessage(falha.mensagem);
+        return;
+      }
       await load();
+      setTom("sucesso");
       if (action === "reopen") {
         setMessage("Reaberto para edição. A última versão finalizada continua sendo a corrente.");
         return;
@@ -151,8 +199,11 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
       setMessage(body.retention?.status === "failed"
         ? `Finalizado como versão ${body.versionNumber}. A retenção da versão anterior não começou (${body.retention.code}); ela fica guardada por mais tempo.`
         : `Finalizado e confirmado no servidor como versão ${body.versionNumber}.`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Falha na operação."); }
-    finally { setBusy(false); }
+    } catch (error) {
+      setTom("erro");
+      setMessage(error instanceof Error ? error.message : "Falha na operação.");
+    }
+    finally { setBusy(false); setAcaoEmCurso(null); }
   };
 
   /* ====== AS OPERAÇÕES DE CENA PASSAM TODAS PELO MÓDULO PURO ====== */
@@ -201,11 +252,13 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
     estado: !stored ? "none" : stored.status === "approved" ? "approved" : "draft",
     ocupado: busy,
     mensagem: message,
+    tom,
+    acaoEmCurso,
     salvar: () => void save(),
     finalizar: () => void acao("finalize"),
     reabrir: () => void acao("reopen"),
   /* eslint-disable-next-line react-hooks/exhaustive-deps -- os gatilhos são recriados a cada render por desenho; o que governa é o estado abaixo. */
-  }), [kind, stored, busy, message, draft, brandId, documentId]);
+  }), [kind, stored, busy, message, tom, acaoEmCurso, draft, brandId, documentId]);
 
   useEffect(() => {
     onBarChange?.(barra);
@@ -255,6 +308,19 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
         * desabilitados. A cena continua clicável, e o painel abre para consulta.
         */}
       <fieldset className="m-0 min-w-0 flex-1 space-y-4 border-0 p-0">
+        {/*
+          * ===== CORTE 6A.8 · O MOTIVO INTEIRO, ONDE CABE =====
+          *
+          * A barra tem altura fixa e trunca. Aqui há largura e quebra de linha,
+          * então a mensagem aparece completa — sem DevTools, sem tooltip, sem
+          * depender de reticências.
+          */}
+        {tom === "erro" && message && <div role="alert" data-deliverable-erro
+          className="rounded border border-danger bg-danger/10 p-3 text-sm text-danger">
+          <strong className="block">A ação não foi concluída.</strong>
+          <span className="mt-1 block break-words">{message}</span>
+        </div>}
+
         <header className="border-b border-border pb-3">
           <input className="w-full bg-transparent text-2xl font-semibold outline-none" value={draft.title}
             readOnly={finalizado}

@@ -1,6 +1,8 @@
 /* eslint-disable jsx-a11y/alt-text -- lucide's Image icon is not an HTML img element. */
 "use client";
 
+import { radarWriterImportable } from "@/lib/redator/writer-handoff";
+import { radarPrimaryProfileOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -28,6 +30,8 @@ import { GuardianReportSchema, type GuardianReport, type RedatorImproveProposal,
 import { runGuardian } from "@/lib/redator/guardian";
 import { postRadarWriterHandoffBatch, radarWriterHandoffBatchSummary } from "@/lib/radar/writer-handoff-client";
 import { WriterDerivedEnvironment, type WriterDeliverableBar } from "@/modules/redator/writer-derived-environment";
+import { actionButtonLabel, feedbackClass, toneForSaveState } from "@/lib/redator/action-feedback";
+import { newlyArrivedIds, resolveActiveDocument, shouldPersistLastOpened } from "@/lib/redator/active-document";
 import { WriterMediaAnchorPanel } from "@/modules/redator/writer-media-anchor-panel";
 import { articleAnchorTargets, mediaRowsToPanelAssets, type PanelAsset } from "@/lib/redator/media-anchor-targets";
 /* CORTE 3.5 · `Conectar IA` saiu do Redator. A autoridade de integração é /agencias/{agencyRef}/integracoes. */
@@ -39,7 +43,16 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
   const pipeline = useEditorialPipeline(); const { selectedBrandId } = useBrand();
   const { actorUserId } = useSupabaseSession();
   const documents = Object.values(pipeline.documents); const preferred = initialDocumentId ? pipeline.documents[initialDocumentId] : documents.find(item => item.articleDnaRef.entityId === initialArticleId);
-  const [selectedId, setSelectedId] = useState(preferred?.id || pipeline.moduleState.redator?.selectedId || documents[0]?.id || "");
+  /*
+   * ===== CORTE 6A.9 · A SELEÇÃO COMEÇA VAZIA E É RESOLVIDA POR REGRA =====
+   *
+   * Isto nascia com `documents[0]?.id` dentro do `useState`. Como o inicializador
+   * roda UMA vez e a lista chega assíncrona, no primeiro render ele resolvia para
+   * `""` — e nunca era corrigido. Daí em diante quem mandava era o
+   * `|| documents[0]` lá embaixo, a cada render, sobre uma lista ordenada por
+   * `updated_at DESC`. Um handoff do Radar trocava o documento ativo em silêncio.
+   */
+  const [selectedId, setSelectedId] = useState("");
   const [leftOpen, setLeftOpen] = useState(true); const [rightOpen, setRightOpen] = useState(true); const [importOpen, setImportOpen] = useState(false);
   /*
    * A imagem é trabalhada na POSIÇÃO a que pertence, e a seleção da posição
@@ -59,7 +72,66 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
   const [deliverableBar, setDeliverableBar] = useState<WriterDeliverableBar | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null); const createVersionRef = useRef(false);
   /* `Salvar rascunho` reusa o autosave em vez de abrir um segundo caminho de gravação. */
-  const flushRef = useRef(false); const [savedAt, setSavedAt] = useState<string | null>(null); const selected = pipeline.documents[selectedId] || preferred || documents[0] || null;
+  const flushRef = useRef(false); const [savedAt, setSavedAt] = useState<string | null>(null);
+  /*
+   * A ordem é de AUTORIDADE: seleção da tela > URL > estado persistido > primeiro
+   * da lista. O passo 1 é o que impede o roubo — enquanto o documento escolhido
+   * existir, nada o tira de lá.
+   *
+   * O `|| documents[0]` que ficava aqui foi embora: ele era o fallback que
+   * decidia a cada render e deixava a ordenação mandar.
+   */
+  /*
+   * ===== CORTE 6A.10 · A CONTINUIDADE VEM DO QUE FOI ABERTO =====
+   *
+   * O 6A.9 usava `moduleState.redator.selectedId` como persistência. Ele não é:
+   * é estado React do contexto e volta a `{}` a cada F5, e por isso a resolução
+   * caía em `documents[0]` — o mais recente — e um handoff do Radar tomava o
+   * lugar do documento em edição.
+   *
+   * A autoridade que atravessa o recarregamento é `documentUserStates`, gravada
+   * pela própria tela, por usuário, e carregada do servidor no workspace.
+   *
+   * `updated_at DESC` volta a ser só ordenação de lista.
+   */
+  const documentIds = documents.map(item => item.id);
+  const ativo = resolveActiveDocument({
+    selectedId,
+    urlDocumentId: preferred?.id ?? initialDocumentId,
+    userStates: pipeline.documentUserStates,
+    availableIds: documentIds,
+  });
+  const selected = pipeline.documents[ativo.id] || null;
+
+  /*
+   * ===== A ESTABILIDADE NÃO PRECISA DE EFEITO NOVO =====
+   *
+   * A primeira versão disto fixava a resolução com um `setSelectedId` dentro de
+   * um efeito — e o lint estava certo em recusar: `set-state-in-effect` encadeia
+   * renders para sincronizar algo que já é derivável.
+   *
+   * O que segura a seleção é a persistência que o projeto JÁ tinha. O efeito
+   * logo abaixo grava `moduleState.redator.selectedId` sempre que o documento
+   * ativo muda; na volta, a regra encontra esse id e o mantém. A sequência:
+   *
+   *   lista vazia          → activeId ""            → nada selecionado
+   *   lista chega          → activeId = primeiro    → efeito grava no moduleState
+   *   handoff novo chega   → persistido ainda vale  → activeId NÃO muda
+   *   pessoa clica noutro  → selectedId vence       → e vira o novo persistido
+   *
+   * O passo 3 é o defeito fechado: a lista reordena, o documento ativo fica.
+   */
+
+  /*
+   * O que chegou DEPOIS que a tela abriu — para MARCAR na lista, nunca navegar.
+   *
+   * O inicializador preguiçoso roda uma vez, sem efeito e sem ref lido no
+   * render. Limitação assumida: se a lista ainda não tinha carregado na
+   * montagem, esta sessão não marca nada como novo. Preferi não marcar a marcar
+   * errado — um "novo" falso na tela inteira seria pior que nenhum.
+   */
+  const [conhecidos] = useState<ReadonlySet<string>>(() => new Set(Object.keys(pipeline.documents)));
+  const novos = newlyArrivedIds({ conhecidos, availableIds: documentIds });
   const publication = selected ? pipeline.operationalPublications.find(item => item.documentId === selected.id) : null; const published = publication?.state === "published";
   /*
    * ELEGÍVEL É O QUE O RADAR APROVOU — e `sent_writer` entra como já importado.
@@ -69,7 +141,8 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
    * erraria em silêncio se a esteira tivesse duas linhas para o mesmo artigo.
    */
   const availableRadarArticles = pipeline.radarItems
-    .filter(item => item.brandId === selectedBrandId && ["approved", "sent_writer"].includes(item.state))
+    /* A esteira não decide: a finalização canônica decide — RADAR_MULTI_PROFILE_HANDOFF_1. */
+    .filter(item => item.brandId === selectedBrandId && radarWriterImportable(item, radarPrimaryProfileOfAnalysis))
     .map(item => ({ ...item, id: item.articleId,
       alreadyImported: item.state === "sent_writer" || documents.some(document => document.articleDnaRef.entityId === item.articleId) }));
   const selectedRef = useRef(selected);
@@ -141,7 +214,19 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
       } catch { if (actorUserId !== actorAtStart) return; window.localStorage.setItem(recoveryKey, JSON.stringify(pending)); setSaveState("saved_local"); setSaveMessage("Sem conexão; recuperação local criada."); }
     }, flushRef.current ? 0 : 1200); return () => window.clearTimeout(timer); }, [actorUserId, pending, recoveryKey, selectedBrandId, pipeline]);
 
-  useEffect(() => { if (!selected) return; pipeline.setModuleState("redator", { selectedId: selected.id }); const timer = window.setTimeout(() => { void fetch("/api/editorial/documents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brandId: selectedBrandId, documentId: selected.id, cursorPosition: editor?.state.selection.from || null, scrollTop: scrollRef.current?.scrollTop || 0, leftPanelOpen: leftOpen, rightPanelOpen: rightOpen }) }); }, 500); return () => window.clearTimeout(timer); }, [selected?.id, leftOpen, rightOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  /*
+   * ===== A GRAVAÇÃO SÓ ACONTECE PARA SELEÇÃO LEGÍTIMA =====
+   *
+   * Este efeito escreve `last_opened_at = now()`. Era ele que contaminava a
+   * autoridade: quando a resolução caía no fallback por reordenação, o documento
+   * errado ganhava um "último aberto" que ele nunca teve — foi assim que
+   * "skin care noturno" apareceu como o mais recente às 07:14.
+   *
+   * Com o passo do `lastOpenedAt` na frente do fallback, o fallback só é
+   * alcançado quando não há o que preservar. `shouldPersistLastOpened` deixa
+   * essa condição explícita em vez de implícita na ordem dos ifs.
+   */
+  useEffect(() => { if (!selected || !shouldPersistLastOpened(ativo.origin)) return; pipeline.setModuleState("redator", { selectedId: selected.id }); const timer = window.setTimeout(() => { void fetch("/api/editorial/documents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brandId: selectedBrandId, documentId: selected.id, cursorPosition: editor?.state.selection.from || null, scrollTop: scrollRef.current?.scrollTop || 0, leftPanelOpen: leftOpen, rightPanelOpen: rightOpen }) }); }, 500); return () => window.clearTimeout(timer); }, [selected?.id, leftOpen, rightOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const choose = (id: string) => { setSelectedId(id); setPending(null); setGuardianReport(null); setSectionProposal(null); setImproveProposal(null); setSaveState("idle"); };
   const requestStatus = (status: "em_revisao" | "aprovado") => { if (!selected) return; if (status === "aprovado" && localGuardian?.blockingCount) { setSaveState("error"); setSaveMessage(`Aprovação bloqueada: ${localGuardian.blockingCount} achado(s) crítico(s) no Guardião.`); return; } history.capture(`Mudar status de ${selected.title} para ${status}`); const updated = ContentDocumentSchema.parse({ ...selected, status }); createVersionRef.current = true; setPending(updated); pipeline.updateDocumentLocal(updated); setSaveState("dirty"); setSaveMessage(status === "em_revisao" ? "Preparando envio para revisão…" : "Preparando versão aprovada…"); };
@@ -331,13 +416,30 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
             data-deliverable-topbar-status={deliverableBar.estado}>
             {deliverableBar.estado === "approved" ? "Finalizado" : "Em redação"}
           </span>
-          <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} min-w-0 max-w-64 truncate text-text-muted`} role="status">
+          {/*
+            * ===== CORTE 6A.8 · A FALHA PRECISA PARECER FALHA =====
+            *
+            * Isto usava sempre `text-text-muted`: um 409 em "Reabrir para edição"
+            * ficava igual a "Sem alterações pendentes". Agora a cor vem de
+            * `feedbackClass`, a MESMA tabela que a linha do artigo usa logo
+            * abaixo, e o `title` devolve o texto inteiro que a barra trunca.
+            *
+            * `role="alert"` no erro para que leitores de tela anunciem sem
+            * depender de foco; `role="status"` no resto, que é informativo.
+            */}
+          <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} ${feedbackClass(deliverableBar.tom)}`}
+            role={deliverableBar.tom === "erro" ? "alert" : "status"}
+            title={deliverableBar.mensagem || undefined}
+            data-deliverable-feedback={deliverableBar.tom}>
             {deliverableBar.mensagem || "Sem alterações pendentes"}
           </span>
           {deliverableBar.estado === "approved" ? <>
             <button type="button" className={GLOBAL_TOPBAR_ACTION_CONTROL} disabled={deliverableBar.ocupado}
               onClick={deliverableBar.reabrir}
-              title="Volta para rascunho sem perder a última versão finalizada.">Reabrir para edição</button>
+              title="Volta para rascunho sem perder a última versão finalizada.">
+              {actionButtonLabel({ action: "reabrir", emCurso: deliverableBar.acaoEmCurso,
+                rotuloParado: "Reabrir para edição" })}
+            </button>
             {/*
               * ===== A ENTREGA É DO ARTIGO, E O RÓTULO DIZ ISSO =====
               *
@@ -353,14 +455,18 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
           </> : <>
             <button type="button" className={GLOBAL_TOPBAR_ACTION_CONTROL} disabled={deliverableBar.ocupado}
               onClick={deliverableBar.salvar}
-              title="Persiste no servidor e confirma a leitura remota. Salvar rascunho não cria versão.">Salvar rascunho</button>
+              title="Persiste no servidor e confirma a leitura remota. Salvar rascunho não cria versão.">
+              {actionButtonLabel({ action: "salvar", emCurso: deliverableBar.acaoEmCurso,
+                rotuloParado: "Salvar rascunho" })}
+            </button>
             <button type="button" className={GLOBAL_TOPBAR_ACTION_CONTROL}
               disabled={deliverableBar.ocupado || deliverableBar.estado === "none"}
               onClick={deliverableBar.finalizar}
               title={deliverableBar.estado === "none"
                 ? "Salve o rascunho antes de finalizar."
                 : "Cria a versão final e marca como finalizado. Não publica."}>
-              {deliverableBar.kind === "video_script" ? "Finalizar roteiro" : "Finalizar carrossel"}
+              {actionButtonLabel({ action: "finalizar", emCurso: deliverableBar.acaoEmCurso,
+                rotuloParado: deliverableBar.kind === "video_script" ? "Finalizar roteiro" : "Finalizar carrossel" })}
             </button>
           </>}
         </div> : null)
@@ -369,7 +475,15 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
       {/* Decorativo perto do resto: some antes de qualquer controle colidir. */}
       <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} hidden shrink-0 tabular-nums text-text-muted xl:inline`} aria-label={`${wordCount} palavras`}>{wordCount} palavras</span>
       {/* Estado do save: pendente, salvando, ou o horário que o servidor confirmou. */}
-      <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} min-w-0 max-w-64 truncate ${saveState === "conflict" || saveState === "error" ? "text-danger" : saveState === "saved_server" ? "text-success" : "text-text-muted"}`} role="status">
+      {/*
+        * A convenção é a mesma do entregável, e agora vem do mesmo lugar. O
+        * ternário que morava aqui era a fonte original — repeti-lo do outro lado
+        * teria criado duas tabelas que divergiriam no primeiro ajuste.
+        */}
+      <span className={`${GLOBAL_TOPBAR_CONTROL_TYPOGRAPHY} ${feedbackClass(toneForSaveState(saveState))}`}
+        role={toneForSaveState(saveState) === "erro" ? "alert" : "status"}
+        title={saveMessage || undefined}
+        data-artigo-feedback={toneForSaveState(saveState)}>
         {saveState === "saved_server" && savedAt ? `Salvo no servidor às ${savedAt}` : saveMessage || "Sem alterações pendentes"}
       </span>
       <button type="button" className={GLOBAL_TOPBAR_ACTION_CONTROL} disabled={saveState === "saving"} onClick={saveDraftNow} title="Persiste no servidor e confirma a leitura remota.">Salvar rascunho</button>
@@ -402,7 +516,7 @@ export function ProfessionalWriter({ initialArticleId = null, initialDocumentId 
     {writingFormat === "article" ? <>
     <Toolbar editor={editor} addBlock={addBlock} promptLink={promptLink} onImprove={requestImproveProposal} aiBusy={aiBusy}/>
     <div className={`grid min-h-0 flex-1 ${leftOpen && rightOpen ? "grid-cols-[260px_minmax(0,1fr)_300px]" : leftOpen ? "grid-cols-[260px_minmax(0,1fr)]" : rightOpen ? "grid-cols-[minmax(0,1fr)_300px]" : "grid-cols-1"}`}>
-      {leftOpen && <aside className="min-h-0 overflow-auto border-r border-slate-850 bg-[#090a0e] p-3"><div className="flex items-center justify-between"><h2 className="text-[9px] font-bold uppercase text-slate-500">Rascunhos e fundamentos</h2><button className={tool} onClick={() => setLeftOpen(false)}><ChevronLeft className="h-3 w-3"/></button></div><div className="mt-2 space-y-1">{documents.map(item => <button key={item.id} onClick={() => choose(item.id)} className={`block w-full rounded border p-2 text-left text-[9px] ${item.id === selected?.id ? "border-module-accent/40 bg-surface-subtle text-white" : "border-slate-850 text-slate-500"}`}><strong className="block truncate">{item.title}</strong><span>{item.status}</span></button>)}</div>{!documents.length && <p className="mt-3 text-[10px] text-slate-600">Nenhum rascunho disponível. Envie uma investigação finalizada do Radar.</p>}<button type="button" onClick={() => setImportOpen(true)} className={`${tool} mt-3 w-full justify-center`} title="Lista os artigos aprovados no Radar e chama a mesma autoridade de entrega usada pelo botão do Radar."><Plus className="mr-1 h-2.5 w-2.5" aria-hidden="true"/>Importar do Radar</button>{selected && <><h3 className="mt-4 text-[9px] font-bold uppercase text-slate-600">Outline</h3>{selected.blocks.filter(block => block.type === "heading").map(block => <div key={block.id} className="mt-1 flex items-center gap-1"><button onClick={() => globalThis.document.querySelector(`[data-block-id="${block.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" })} className="min-w-0 flex-1 truncate text-left text-[9px] text-slate-400">{"level" in block ? `H${block.level}` : ""} {"text" in block ? block.text : ""}</button><button className={tool} disabled={aiBusy} onClick={() => void requestSectionProposal(block.id)} title="Propor escrita para esta seção"><Sparkles className="h-3 w-3"/></button></div>)}<div className="mt-4 space-y-1 text-[9px] text-slate-600"><p>{selected.schemaVersion === 2 ? `Origem: Radar · análise ${selected.radarOrigin.analysisVersionId}` : `Plano editorial: ${selected.contentPlanRef.versionId}`}</p><p>Definição do artigo: {selected.articleDnaRef.versionId}</p><p>Arquitetura do silo: {selected.siloDnaRef.versionId}</p><p>Perfis das keywords: {selected.keywordDnaRefs.length}</p></div></>}</aside>}
+      {leftOpen && <aside className="min-h-0 overflow-auto border-r border-slate-850 bg-[#090a0e] p-3"><div className="flex items-center justify-between"><h2 className="text-[9px] font-bold uppercase text-slate-500">Rascunhos e fundamentos</h2><button className={tool} onClick={() => setLeftOpen(false)}><ChevronLeft className="h-3 w-3"/></button></div><div className="mt-2 space-y-1">{documents.map(item => <button key={item.id} onClick={() => choose(item.id)} aria-current={item.id === selected?.id ? "true" : undefined} data-documento-ativo={item.id === selected?.id ? "sim" : undefined} className={`block w-full rounded border p-2 text-left text-[9px] ${item.id === selected?.id ? "border-module-accent/40 bg-surface-subtle text-white" : "border-slate-850 text-slate-500"}`}><strong className="block truncate">{item.title}</strong><span>{item.status}</span>{item.id === selected?.id && <span className="ml-1 font-bold text-module-accent">· em edição</span>}{novos.has(item.id) && item.id !== selected?.id && <span className="ml-1 rounded bg-context-accent/20 px-1 font-bold text-context-accent" data-documento-novo>novo</span>}</button>)}</div>{!documents.length && <p className="mt-3 text-[10px] text-slate-600">Nenhum rascunho disponível. Envie uma investigação finalizada do Radar.</p>}<button type="button" onClick={() => setImportOpen(true)} className={`${tool} mt-3 w-full justify-center`} title="Lista os artigos aprovados no Radar e chama a mesma autoridade de entrega usada pelo botão do Radar."><Plus className="mr-1 h-2.5 w-2.5" aria-hidden="true"/>Importar do Radar</button>{selected && <><h3 className="mt-4 text-[9px] font-bold uppercase text-slate-600">Outline</h3>{selected.blocks.filter(block => block.type === "heading").map(block => <div key={block.id} className="mt-1 flex items-center gap-1"><button onClick={() => globalThis.document.querySelector(`[data-block-id="${block.id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" })} className="min-w-0 flex-1 truncate text-left text-[9px] text-slate-400">{"level" in block ? `H${block.level}` : ""} {"text" in block ? block.text : ""}</button><button className={tool} disabled={aiBusy} onClick={() => void requestSectionProposal(block.id)} title="Propor escrita para esta seção"><Sparkles className="h-3 w-3"/></button></div>)}<div className="mt-4 space-y-1 text-[9px] text-slate-600"><p>{selected.schemaVersion === 2 ? `Origem: Radar · análise ${selected.radarOrigin.analysisVersionId}` : `Plano editorial: ${selected.contentPlanRef.versionId}`}</p><p>Definição do artigo: {selected.articleDnaRef.versionId}</p><p>Arquitetura do silo: {selected.siloDnaRef.versionId}</p><p>Perfis das keywords: {selected.keywordDnaRefs.length}</p></div></>}</aside>}
       <main ref={scrollRef} className="min-h-0 overflow-auto bg-[#17181d] p-5">{!leftOpen && <button className={`${tool} fixed left-12 top-24 z-20`} onClick={() => setLeftOpen(true)}><ChevronRight className="h-3 w-3"/></button>}<div className="mx-auto min-h-[calc(100vh-150px)] w-full max-w-[880px] bg-white px-14 py-12 text-slate-900 shadow-2xl">{sectionProposal && <div className="mb-5 rounded border border-action-accent/30 bg-action-accent/5 p-3 text-xs"><strong>Proposta de seção — revisão humana</strong><p className="mt-1 text-slate-600">{sectionProposal.paragraphs.length} parágrafo(s) aguardando aplicação.</p><div className="mt-2 flex gap-2"><button className="rounded bg-action-accent px-2 py-1 text-white" onClick={applySectionProposal}>Aplicar como texto editável</button><button className="rounded border border-slate-300 px-2 py-1" onClick={() => setSectionProposal(null)}>Descartar</button></div></div>}{improveProposal && <div className="mb-5 rounded border border-amber-200 bg-amber-50 p-3 text-xs"><strong>Melhoria de trecho — revisão humana</strong><p className="mt-1 text-slate-600">{improveProposal.replacementText}</p><div className="mt-2 flex gap-2"><button className="rounded bg-amber-600 px-2 py-1 text-white" onClick={applyImproveProposal}>Aplicar melhoria</button><button className="rounded border border-slate-300 px-2 py-1" onClick={() => setImproveProposal(null)}>Descartar</button></div></div>}{selected ? <EditorContent editor={editor} className="professional-editor"/> : <div className="flex min-h-[55vh] items-center justify-center text-center text-sm text-slate-400"><div><FileText className="mx-auto mb-3 h-8 w-8"/><p>Nenhum conteúdo de artigo disponível.</p><Link href="/radar" className="mt-3 inline-block text-action-accent underline">Abrir Radar</Link></div></div>}</div></main>
       {rightOpen && <aside className="min-h-0 overflow-auto border-l border-slate-850 bg-[#090a0e] p-3">{/*
         * A ENTREGA É CONTEXTUAL, E SÓ EXISTE DEPOIS DE FINALIZAR.
