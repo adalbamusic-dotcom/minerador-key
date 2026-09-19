@@ -4,7 +4,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isTenantId } from "@/lib/tenant-routing";
 import { getAgencyWorkspaceData } from "@/lib/server/agency-workspace";
 import { createCanonicalServiceClient } from "@/lib/server/canonical-authorization";
+import { matchMcpProviderKey, resolveMcpConnectionDisplayStatus, type McpConnectionDisplayStatus, type McpOAuthReadiness } from "@/lib/redator/mcp-connection-status";
+import { readMcpOAuthReadiness } from "@/lib/server/mcp-oauth";
 import { readMcpRuntimeConfig } from "@/lib/server/mcp-runtime-config";
+import { listWriterMcpGrantsForAgency, reactivateWriterMcpGrantForAgency, revokeWriterMcpGrantForAgency, type AgencyWriterMcpGrantRow } from "@/lib/server/writer-mcp-grants";
 
 type GovernanceClient = Pick<SupabaseClient, "from">;
 
@@ -75,11 +78,16 @@ export type AgencyMcpConnection = {
   environment: typeof ENVIRONMENT;
   endpoint: string;
   transport: "streamable_http";
-  authMode: "delegated_bearer";
+  authMode: "delegated_bearer" | "oauth_supabase";
+  /** Estado que a Agência vê: conectado só com grant ativo do provider. */
+  displayStatus: McpConnectionDisplayStatus;
+  activeGrantCount: number;
   scopes: AgencyMcpScope[];
   createdAt: string;
   updatedAt: string;
 };
+
+export type AgencyWriterMcpGrant = AgencyWriterMcpGrantRow;
 
 export type AgencyWriterMcpDelegation = {
   id: string;
@@ -103,6 +111,7 @@ export type AgencyWriterMcpCallEvent = {
   resultCode: string;
   requestId: string;
   occurredAt: string;
+  principal: "grant" | "delegation";
 };
 
 export type AgencyIntegrationWorkspace = {
@@ -114,7 +123,12 @@ export type AgencyIntegrationWorkspace = {
   brandBindings: AgencyIntegrationBrandBinding[];
   quotas: AgencyIntegrationQuota[];
   mcpEndpoint: string;
+  mcpMetadataUrl: string | null;
+  mcpConsentPath: string;
+  mcpOAuth: McpOAuthReadiness;
+  bearerDiagnosticsAllowed: boolean;
   mcpConnections: AgencyMcpConnection[];
+  writerMcpGrants: AgencyWriterMcpGrant[];
   writerMcpDelegations: AgencyWriterMcpDelegation[];
   writerMcpAuditEvents: AgencyWriterMcpCallEvent[];
 };
@@ -204,10 +218,18 @@ async function readAgencyMcpState(client: GovernanceClient, agencyId: string, br
   if (connectionsResult.error) remoteFailure("Não foi possível consultar as conexões MCP da Agência.");
 
   const providerById = new Map(providers.map((provider) => [provider.id, provider]));
+  const runtime = readMcpRuntimeConfig();
+  const mcpOAuth = await readMcpOAuthReadiness(runtime);
+  // Grants são a prova de conexão. Uma falha de leitura não derruba o painel: vira lista vazia.
+  let writerMcpGrants: AgencyWriterMcpGrant[] = [];
+  try { writerMcpGrants = await listWriterMcpGrantsForAgency(agencyId, brands); } catch { writerMcpGrants = []; }
+  const activeGrants = writerMcpGrants.filter((grant) => grant.status === "active");
   const connections: AgencyMcpConnection[] = ((connectionsResult.data || []) as Array<{ id: string; provider_id: string; environment: typeof ENVIRONMENT; lifecycle_status: AgencyMcpConnection["lifecycleStatus"]; metadata: Record<string, unknown>; created_at: string; updated_at: string }>).map((connection) => {
     const provider = providerById.get(connection.provider_id);
     const metadata = connection.metadata || {};
     const scopes = mcpScopes(metadata.scopes);
+    const providerKey = (provider?.provider_key || "custom_mcp") as AgencyMcpProviderKey;
+    const activeGrantCount = activeGrants.filter((grant) => grant.providerConnectionId === connection.id || (!grant.providerConnectionId && matchMcpProviderKey(grant.clientName) === providerKey)).length;
     return {
       id: connection.id,
       providerKey: (provider?.provider_key || "custom_mcp") as AgencyMcpProviderKey,
@@ -217,7 +239,9 @@ async function readAgencyMcpState(client: GovernanceClient, agencyId: string, br
       environment: connection.environment,
       endpoint: typeof metadata.endpoint === "string" && metadata.endpoint ? metadata.endpoint : publicMcpEndpoint(),
       transport: "streamable_http",
-      authMode: "delegated_bearer",
+      authMode: runtime.oauthEnabled ? "oauth_supabase" : "delegated_bearer",
+      displayStatus: resolveMcpConnectionDisplayStatus({ lifecycleStatus: connection.lifecycle_status, oauthStatus: mcpOAuth.status, hasActiveGrant: activeGrantCount > 0 }),
+      activeGrantCount,
       scopes,
       createdAt: connection.created_at,
       updatedAt: connection.updated_at,
@@ -244,13 +268,14 @@ async function readAgencyMcpState(client: GovernanceClient, agencyId: string, br
   }));
   const auditResult = brands.length
     ? await client.from("writer_mcp_call_events")
-      .select("id,marca_id,document_id,tool_name,result_code,request_id,occurred_at")
+      .select("id,marca_id,document_id,tool_name,result_code,request_id,occurred_at,grant_id,delegation_id")
       .in("marca_id", brands.map((brand) => brand.id))
       .order("occurred_at", { ascending: false })
       .limit(40)
     : { data: [], error: null };
   if (auditResult.error) remoteFailure("Não foi possível consultar a auditoria de chamadas MCP.");
-  const writerMcpAuditEvents: AgencyWriterMcpCallEvent[] = ((auditResult.data || []) as Array<{ id: string; marca_id: string; document_id: string | null; tool_name: string; result_code: string; request_id: string; occurred_at: string }>).map((event) => ({
+  const writerMcpAuditEvents: AgencyWriterMcpCallEvent[] = ((auditResult.data || []) as Array<{ id: string; marca_id: string; document_id: string | null; tool_name: string; result_code: string; request_id: string; occurred_at: string; grant_id?: string | null; delegation_id?: string | null }>).map((event) => ({
+    principal: event.grant_id ? "grant" as const : "delegation" as const,
     id: event.id,
     brandId: event.marca_id,
     brandName: brandNameById.get(event.marca_id) || "Marca não encontrada",
@@ -260,7 +285,17 @@ async function readAgencyMcpState(client: GovernanceClient, agencyId: string, br
     requestId: event.request_id,
     occurredAt: event.occurred_at,
   }));
-  return { mcpEndpoint: publicMcpEndpoint(), mcpConnections: connections, writerMcpDelegations, writerMcpAuditEvents };
+  return {
+    mcpEndpoint: publicMcpEndpoint(),
+    mcpMetadataUrl: runtime.oauthEnabled ? runtime.protectedResourceMetadataUrl : null,
+    mcpConsentPath: "/oauth/consent",
+    mcpOAuth,
+    bearerDiagnosticsAllowed: !runtime.production || runtime.remoteBearerAllowed,
+    mcpConnections: connections,
+    writerMcpGrants,
+    writerMcpDelegations,
+    writerMcpAuditEvents,
+  };
 }
 
 async function readDataForSeoCapability(client: GovernanceClient) {
@@ -439,7 +474,7 @@ export async function registerAgencyMcpClient(input: {
     client_name: clientName,
     endpoint: publicMcpEndpoint(),
     transport: "streamable_http",
-    auth_mode: "delegated_bearer",
+    auth_mode: readMcpRuntimeConfig().oauthEnabled ? "oauth_supabase" : "delegated_bearer",
     scopes,
     module: "redator",
   };
@@ -501,6 +536,37 @@ export async function revokeAgencyWriterMcpDelegation(input: { agencyRef: string
   if (result.error) remoteFailure("Não foi possível revogar a delegação MCP.");
   if (!result.data) throw new IntegrationGovernanceError(404, "MCP_DELEGATION_NOT_FOUND", "A delegação MCP não foi encontrada ou já foi revogada.");
   return { success: true, delegation: result.data };
+}
+
+export async function revokeAgencyWriterMcpGrant(input: { agencyRef: string; grantId: unknown }) {
+  const workspace = await getAgencyWorkspaceData(input.agencyRef);
+  if (!workspace.canManage) {
+    throw new IntegrationGovernanceError(403, "INTEGRATION_GOVERNANCE_FORBIDDEN", "Somente o owner ou um administrador da Agência pode revogar acessos MCP.");
+  }
+  const grantId = requiredId(input.grantId, "grantId");
+  try {
+    const revoked = await revokeWriterMcpGrantForAgency({ agencyId: workspace.agency.id, grantId, revokedByUserId: workspace.actorUserId });
+    return { success: true, grant: revoked };
+  } catch (error) {
+    if (error instanceof Error && error.message === "grant_not_found") throw new IntegrationGovernanceError(404, "MCP_GRANT_NOT_FOUND", "O acesso não foi encontrado ou já está revogado.");
+    remoteFailure("Não foi possível revogar o acesso MCP.");
+  }
+}
+
+export async function reactivateAgencyWriterMcpGrant(input: { agencyRef: string; grantId: unknown }) {
+  const workspace = await getAgencyWorkspaceData(input.agencyRef);
+  if (!workspace.canManage) {
+    throw new IntegrationGovernanceError(403, "INTEGRATION_GOVERNANCE_FORBIDDEN", "Somente o owner ou um administrador da Agência pode reativar acessos MCP.");
+  }
+  const grantId = requiredId(input.grantId, "grantId");
+  try {
+    const reactivated = await reactivateWriterMcpGrantForAgency({ agencyId: workspace.agency.id, grantId });
+    return { success: true, grant: reactivated };
+  } catch (error) {
+    if (error instanceof Error && error.message === "grant_not_found") throw new IntegrationGovernanceError(404, "MCP_GRANT_NOT_FOUND", "O acesso não foi encontrado ou não está revogado.");
+    if (error instanceof Error && error.message === "grant_conflict") throw new IntegrationGovernanceError(409, "MCP_GRANT_CONFLICT", "Já existe um acesso ativo deste usuário para o mesmo aplicativo e Marca.");
+    remoteFailure("Não foi possível reativar o acesso MCP.");
+  }
 }
 
 export async function revokeAgencyMcpClient(input: { agencyRef: string; connectionId: unknown }) {

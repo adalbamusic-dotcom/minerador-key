@@ -1,5 +1,21 @@
 # Estado atual — Redator
 
+## Fundamentos do Radar visíveis nos três ambientes — 2026-09-19
+
+- **Implementado:** `radarFoundationsOf` (`lib/redator/radar-foundations.ts`)
+  projeta `importedContext.dossier` para leitura humana; o painel
+  `WriterRadarFoundationsPanel` aparece no artigo (lado direito) e, no roteiro
+  e no carrossel, ocupa o painel direito enquanto nenhuma cena/slide está
+  selecionado. Recomendação editorial, razões, pesquisa YouTube (consultas,
+  vídeos, long-form × shorts), blueprint multimodal, SERP/evidências,
+  limitações, `writerMayNot` e `mustAnswer/mustCover` quando existirem.
+- **Fronteiras:** `editorialOutput` é recomendação, não gate; o dossiê não é
+  duplicado no entregável; sem provider, IA ou migration.
+- **Pendente:** homologação manual do USER (abrir o roteiro de "skin care
+  noturno" e conferir o painel). Semear cenas a partir do blueprint fica fora
+  deste corte. Relatório:
+  `auditorias/relatorio-redator-dossier-surface-2026-09-19.md`.
+
 ## OAuth 2.1 para o MCP do Redator — fase 1 implementada localmente, 2026-09-19
 
 - **SDD:** `propostas/sdd-oauth-mcp-redator-2026-09-19.md`, aprovada para
@@ -33,8 +49,10 @@
   coluna `writer_mcp_call_events.grant_id`, CHECK de principal único), com
   preflight e post-verifier em `supabase/scripts/2026-09-19-m7-*` e rollback
   condicionado a tabela vazia em `supabase/rollback/`.
-- **Ainda não verificado:** OAuth Server do Supabase (fase 0; preflight das 09:01 UTC ainda devolve `feature_disabled`),
-  env na Vercel e deploy (fase 2), login e consentimento pelo ChatGPT com
+- **Fase 2 concluída em 2026-09-19 (REMOTE VERIFIED por GET público):** após redeploy na Vercel com `MCP_OAUTH_ENABLED=true` e `MCP_ALLOW_REMOTE_BEARER=false`, `/.well-known/oauth-protected-resource/api/mcp/redator` responde 200 com `authorization_servers` = issuer do Supabase, o 401 do MCP traz `resource_metadata`, e o `health` mostra `authMode: oauth_supabase`, `oauthEnabled: true`, `remoteBearerAllowed: false`. Preflight: os três checks do recurso passam; restam só os sete do servidor de autorização.
+- **Fase 4 implementada localmente em 2026-09-19 (Verificado no código / Confirmado por teste):** painel "MCP do Redator" da Agência reescrito em `modules/conta/agency-mcp-panel.tsx`: estado medido `OAuth pronto / Pendente (motivo) / Desativado` a partir da discovery do Supabase (`readMcpOAuthReadiness`, cache 60 s), checklist da plataforma (HTTPS, metadata, servidor de autorização) com InfoHint, passo a passo para ChatGPT, Claude e outro cliente MCP com InfoHint nos termos, aplicativos registrados com `Conectado / Aguardando login / Aguardando OAuth / Removido`, tabela "Acessos autorizados" (grants) com revogar e reativar pela Agência, auditoria com origem OAuth ou bearer, e o bearer relegado a "Diagnóstico interno", oculto sem `MCP_ALLOW_REMOTE_BEARER` (a API responde `409 MCP_BEARER_DISABLED`). O consentimento passa a pré-marcar as permissões sugeridas pela Agência e liga o grant ao aplicativo registrado (`provider_connection_id`), tirando-o de `pending`. Testes: `test:redator:mcp` 46/46, `test:redator` 282/282. **Interface não validada manualmente**: a página exige sessão e a homologação em navegador é do usuário.
+- **Ainda não verificado:** OAuth Server do Supabase (fase 0; discovery continua `feature_disabled`),
+  login e consentimento pelo ChatGPT com
   readback de grant e eventos (fase 3), painel da Agência (fase 4).
   `MCP_OAUTH_DISCOVERY = BLOCKED` (preflight 2026-09-19), `CHATGPT_CONNECTION`,
   `AUTHENTICATED_READ_WRITE` e `MCP_GRANT_REVOCATION` = `PENDING`.

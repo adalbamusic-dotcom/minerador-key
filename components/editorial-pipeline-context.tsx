@@ -97,6 +97,26 @@ interface BrandWorkspace {
    */
   documentUpdatedAt: Record<string, string>;
   documentUserStates: Record<string, { cursorPosition: number | null; scrollTop: number; leftPanelOpen: boolean; rightPanelOpen: boolean; lastOpenedAt: string }>;
+  /**
+   * ===== CORTE 6A.12 · O MAPA ACIMA JÁ FOI PERGUNTADO? =====
+   *
+   * `documentUserStates` vazio tem dois significados opostos — ninguém abriu
+   * nada, ou a leitura ainda não voltou — e quem consome não tinha como
+   * distinguir. `loadDiagnostics` não serve: ele nasce em `empty_confirmed`,
+   * que AFIRMA "a consulta respondeu e não há registros", e os cinco
+   * `WORKSPACE_LOAD_STATES` não têm um "ainda não perguntei".
+   *
+   * A distinção importa porque a recuperação local restaura `documents` do
+   * navegador sem restaurar os user states: existe uma janela real com lista
+   * cheia e mapa vazio. Resolver o documento ativo ali dava o documento errado
+   * — e o Redator grava `last_opened_at` no que resolve.
+   *
+   * Vira `true` quando a leitura do workspace assenta, em qualquer desfecho:
+   * sucesso, falha ou exceção. Depois de uma falha os states continuam
+   * desconhecidos, mas manter `false` travaria a tela para sempre; o preço
+   * honesto é um fallback que a próxima leitura corrige.
+   */
+  documentUserStatesReady: boolean;
   moduleState: Record<string, { search?: string; selectedId?: string | null; expandedId?: string | null; scrollTop?: number }>;
   backgroundTasks: EditorialBackgroundTask[];
   aiReviewAnnotations: AIReviewAnnotation[];
@@ -105,7 +125,7 @@ interface BrandWorkspace {
 const emptyWorkspace = (): BrandWorkspace => ({ architectImportedKeywordIds: [], articleVersions: {}, siloVersions: {}, siloPageVersions: {}, versionEvents: [], serpRecords: [], serpReviews: [], serpMergeConflicts: [], serpPersistenceMode: "local_fallback", serpReviewReadbackSnapshotIds: [],
   productEvidence: [], contentPlans: {}, documents: {}, selectedEntityId: null, skills: [], prompts: [], materials: [],
   internalLinks: [], externalSources: [], guardianFindings: [], publications: [], radarItems: [], plannerItems: [],
-  operationalPublications: [], invitations: [], documentUpdatedAt: {}, persistenceMode: "local_fallback", localRecoveryWarning: null, localRecoveryRemoteConfirmed: false, loadDiagnostics: emptyLoadDiagnostics(), documentLocks: {}, documentUserStates: {}, moduleState: {}, backgroundTasks: [], aiReviewAnnotations: [] });
+  operationalPublications: [], invitations: [], documentUpdatedAt: {}, persistenceMode: "local_fallback", localRecoveryWarning: null, localRecoveryRemoteConfirmed: false, loadDiagnostics: emptyLoadDiagnostics(), documentLocks: {}, documentUserStates: {}, documentUserStatesReady: false, moduleState: {}, backgroundTasks: [], aiReviewAnnotations: [] });
 
 function latestRadarSnapshotFingerprint(workspace: BrandWorkspace, articleId: string) {
   const snapshot = workspace.serpRecords
@@ -416,6 +436,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         // tela convidava a importar como se a marca nao tivesse nada.
         const negado = response.status === 401 || response.status === 403;
         updateWorkspace(current => ({ ...current,
+          /* A leitura assentou, ainda que mal. Ver a nota em `BrandWorkspace`. */
+          documentUserStatesReady: true,
           persistenceMode: response.status === 503 ? "local_fallback" : "unavailable",
           loadDiagnostics: {
             state: negado ? "access_denied" : "read_failure",
@@ -478,10 +500,14 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         /* O `updated_at` remoto vinha na leitura e era descartado aqui. */
         documentUpdatedAt: { ...current.documentUpdatedAt, ...Object.fromEntries(persisted.documents.map(record => [record.document.id, record.updatedAt])) },
         documentUserStates: { ...current.documentUserStates, ...Object.fromEntries(persisted.documents.filter(record => record.userState).map(record => [record.document.id, record.userState!])) },
+        /* A autoridade chegou: daqui em diante um mapa vazio quer dizer vazio mesmo. */
+        documentUserStatesReady: true,
          operationalPublications: persisted.publications, invitations: persisted.invitations,
        }; });
     } catch (error) {
       updateWorkspace(current => ({ ...current, persistenceMode: "local_fallback",
+        /* Idem: assentou em exceção, e a tela não pode ficar esperando para sempre. */
+        documentUserStatesReady: true,
         loadDiagnostics: { state: "read_failure", loadedCount: 0, incompatible: [],
           message: "Nao foi possivel falar com o servidor. O que aparece aqui e recuperacao local." } }));
     }

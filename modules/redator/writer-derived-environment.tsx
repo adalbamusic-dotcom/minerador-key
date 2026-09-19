@@ -27,12 +27,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Copy, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Plus, Sparkles, Trash2 } from "lucide-react";
 import { newWriterDeliverable, WriterDeliverablePayloadSchema, type WriterDeliverablePayload } from "@/lib/redator/multiformat-contracts";
 import { WriterMediaAnchorPanel } from "@/modules/redator/writer-media-anchor-panel";
+import { WriterRadarFoundationsPanel } from "@/modules/redator/writer-radar-foundations-panel";
+import type { ContentDocument } from "@/lib/arquiteto/contracts";
 import { carouselAnchorTargets, mediaRowsToPanelAssets, scriptAnchorTargets } from "@/lib/redator/media-anchor-targets";
 import { adicionarCena, cenasEmOrdem, duplicarCena, editarCena, moverCena, novaCena, removerCena } from "@/lib/redator/script-scenes";
-import { describeActionFailure, progressMessage, type DeliverableAction, type FeedbackTone } from "@/lib/redator/action-feedback";
+import { actionButtonLabel, describeActionFailure, progressMessage, type DeliverableAction, type FeedbackTone } from "@/lib/redator/action-feedback";
+import { radarWriterDossierOfDocument } from "@/lib/redator/radar-foundations";
 
 type Kind = WriterDeliverablePayload["kind"];
 
@@ -76,8 +79,14 @@ const field = "w-full rounded border border-border bg-surface px-3 py-2 text-sm 
 const button = "rounded border border-border bg-surface px-3 py-2 text-sm text-text-primary hover:border-action-accent disabled:cursor-not-allowed disabled:opacity-50";
 const iconeCena = "inline-flex h-7 w-7 items-center justify-center rounded border border-border text-text-muted transition-colors hover:border-action-accent hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-30";
 
-export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onBarChange }: { kind: Kind; brandId: string | null; documentId: string | null; title: string; onBarChange?: (bar: WriterDeliverableBar | null) => void }) {
+export function WriterDerivedEnvironment({ kind, brandId, documentId, title, document = null, onBarChange }: { kind: Kind; brandId: string | null; documentId: string | null; title: string; /** O documento de origem: os fundamentos do Radar são lidos dele, nunca copiados para o entregável. */ document?: ContentDocument | null; onBarChange?: (bar: WriterDeliverableBar | null) => void }) {
   const [draft, setDraft] = useState<WriterDeliverablePayload | null>(null);
+  /*
+   * Sem dossiê não há de onde semear. O botão só existe quando o documento veio
+   * do Radar — oferecer "criar a partir deste contexto" sem contexto seria a
+   * mesma promessa falsa que este bloco já cometeu uma vez.
+   */
+  const temDossie = useMemo(() => Boolean(radarWriterDossierOfDocument(document)), [document]);
   const [stored, setStored] = useState<Stored | null>(null);
   const [media, setMedia] = useState<Media[]>([]);
   const [sourceHash, setSourceHash] = useState("");
@@ -110,9 +119,19 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
 
   const update = (name: string, value: string | number) => setDraft(current => current ? { ...current, [name]: value } as WriterDeliverablePayload : current);
 
-  const save = async () => {
-    if (!brandId || !documentId || !draft) return;
-    const parsed = WriterDeliverablePayloadSchema.safeParse(draft);
+  /*
+   * `override` existe para a semeadura: ela precisa gravar um payload que ainda
+   * não passou pelo `setDraft`. Ler o estado logo depois de agendá-lo devolveria
+   * o valor antigo, e o rascunho gerado se perderia entre dois renders.
+   *
+   * O caminho de gravação continua sendo UM só — este. Semear não ganha rota de
+   * escrita própria, então continua herdando a recusa de entregável finalizado e
+   * o conflito de lock sem reimplementá-los.
+   */
+  const save = async (override?: WriterDeliverablePayload, mensagemSucesso?: string) => {
+    const alvo = override ?? draft;
+    if (!brandId || !documentId || !alvo) return;
+    const parsed = WriterDeliverablePayloadSchema.safeParse(alvo);
     if (!parsed.success) {
       setTom("erro");
       setMessage(`Campo inválido: ${parsed.error.issues[0]?.path.join(".") || "entregável"}.`);
@@ -136,10 +155,57 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
       }
       await load();
       setTom("sucesso");
-      setMessage(body?.unchanged ? "Sem alterações a salvar." : "Rascunho salvo e confirmado no servidor.");
+      setMessage(mensagemSucesso ?? (body?.unchanged ? "Sem alterações a salvar." : "Rascunho salvo e confirmado no servidor."));
     } catch (error) {
       setTom("erro");
       setMessage(error instanceof Error ? error.message : "Falha ao salvar.");
+    }
+    finally { setBusy(false); setAcaoEmCurso(null); }
+  };
+
+  /*
+   * ===== SEMEAR A PARTIR DOS FUNDAMENTOS DO RADAR =====
+   *
+   * Dois passos e duas autoridades, de propósito: `/api/redator/seed` propõe um
+   * payload e não grava nada; `save` grava, pelo caminho que já existe. Se a
+   * geração falhar, não houve escrita — o estado anterior fica intacto, que é o
+   * que o enunciado pede.
+   *
+   * E gravar por `save` significa gravar RASCUNHO: nenhuma versão é criada,
+   * nenhuma retenção começa. Gerar não é finalizar.
+   */
+  const semear = async () => {
+    if (!brandId || !documentId || busy) return;
+    /* `kind` é prop e existe sempre; `ehRoteiro` só é declarado depois da guarda de `draft`. */
+    const roteiro = kind === "video_script";
+    const qual: DeliverableAction = roteiro ? "semear_roteiro" : "semear_carrossel";
+    setBusy(true); setAcaoEmCurso(qual); setTom("progresso"); setMessage(progressMessage(qual));
+    try {
+      const response = await fetch("/api/redator/seed", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brandId, documentId, kind }) });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        /*
+         * Aqui moram os estados operacionais: sem Connection de IA válida o
+         * servidor responde 409 com código e mensagem próprios. Eles sobem
+         * inteiros — inventar conteúdo seria pior do que não gerar.
+         */
+        const falha = describeActionFailure({ status: response.status, body });
+        setTom(falha.tone); setMessage(falha.mensagem);
+        return;
+      }
+      const proposto = WriterDeliverablePayloadSchema.safeParse(body?.payload);
+      if (!proposto.success) {
+        setTom("erro");
+        setMessage("O modelo devolveu um entregável fora do contrato. Nada foi gravado.");
+        return;
+      }
+      await save(proposto.data, roteiro
+        ? "Roteiro criado a partir dos Fundamentos do Radar."
+        : "Carrossel criado a partir dos Fundamentos do Radar.");
+    } catch (error) {
+      setTom("erro");
+      setMessage(error instanceof Error ? error.message : "Falha ao criar a partir do contexto.");
     }
     finally { setBusy(false); setAcaoEmCurso(null); }
   };
@@ -350,14 +416,30 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
         </header>
 
         {/*
-          * ESTADO VAZIO: um convite, não um formulário enorme em branco.
-          * Não ofereço "gerar estrutura inicial" porque não existe autoridade
-          * server-side de geração — botão sem back-end é promessa falsa.
+          * ===== ESTADO VAZIO: O CONTEXTO JÁ ESTÁ AQUI =====
+          *
+          * A versão anterior deste bloco dizia que não oferecia "gerar estrutura
+          * inicial" porque não havia autoridade server-side. Agora há:
+          * `/api/redator/seed`, no caminho canônico de IA da plataforma. O botão
+          * deixou de ser promessa falsa.
+          *
+          * Semear só aparece quando existe dossiê — sem contexto o botão não
+          * teria do que partir. E "Começar manualmente" continua ao lado, porque
+          * a geração é uma oferta, não o único caminho.
           */}
         {partes.length === 0 ? <div className="rounded border border-dashed border-border p-8 text-center" data-cenas-vazio>
           <p className="text-sm text-text-muted">Ainda não há {ehRoteiro ? "cenas" : "slides"}.</p>
-          <button className={`${button} mt-3`} disabled={finalizado} onClick={adicionar} data-adicionar-primeira>
-            <Plus className="mr-1 inline h-4 w-4" aria-hidden="true"/>Adicionar primeira {rotuloParte.toLowerCase()}
+          {temDossie && <>
+            <p className="mt-1 text-xs text-text-muted" data-contexto-disponivel>Contexto do Radar disponível.</p>
+            <button className={`${button} mt-3`} disabled={finalizado || busy} onClick={() => void semear()} data-semear>
+              <Sparkles className="mr-1 inline h-4 w-4" aria-hidden="true"/>
+              {actionButtonLabel({ action: ehRoteiro ? "semear_roteiro" : "semear_carrossel", emCurso: acaoEmCurso,
+                rotuloParado: `Criar ${ehRoteiro ? "roteiro" : "carrossel"} a partir deste contexto` })}
+            </button>
+          </>}
+          <button className={`${button} ${temDossie ? "mt-2" : "mt-3"}`} disabled={finalizado || busy} onClick={adicionar} data-adicionar-primeira>
+            <Plus className="mr-1 inline h-4 w-4" aria-hidden="true"/>
+            {temDossie ? "Começar manualmente" : `Adicionar primeira ${rotuloParte.toLowerCase()}`}
           </button>
         </div> : <>
           {partes.map((parte, indice) => {
@@ -473,9 +555,19 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
           ? <WriterMediaAnchorPanel brandId={brandId} documentId={documentId}
               targets={alvos.filter(alvo => alvo.ref === cenaSelecionada)}
               assets={mediaRowsToPanelAssets(media)} onChanged={load} readOnly={finalizado}/>
-          : <p className="rounded border border-dashed border-border p-3 text-xs text-text-muted">
-              Selecione uma {rotuloParte.toLowerCase()} para trabalhar a mídia dela.
-            </p>}
+          : <>
+              {/*
+                * ===== REDATOR_DOSSIER_SURFACE_1 · SEM CENA ABERTA, O PAINEL É O DOSSIÊ =====
+                *
+                * O roteiro nascia vazio ao lado de um dossiê que ninguém via. Enquanto
+                * nenhuma cena está selecionada, o painel direito mostra os fundamentos
+                * do Radar — lidos do documento de origem, não gravados no entregável.
+                */}
+              <p className="mb-3 rounded border border-dashed border-border p-3 text-xs text-text-muted">
+                Selecione uma {rotuloParte.toLowerCase()} para trabalhar a mídia dela.
+              </p>
+              <WriterRadarFoundationsPanel document={document} compact/>
+            </>}
       </aside>
     </div>
   </main>;

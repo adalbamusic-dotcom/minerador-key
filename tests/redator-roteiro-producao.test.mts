@@ -221,8 +221,14 @@ test("15 · o storyboard é da cena aberta, e não há galeria global", async ()
   /* O painel recebe SÓ a âncora da cena selecionada. */
   assert.match(codigo, /targets=\{alvos\.filter\(alvo => alvo\.ref === cenaSelecionada\)\}/);
   assert.match(codigo, /data-storyboard-lateral/);
-  /* Sem cena aberta, não há painel — logo, não há galeria solta. */
-  assert.match(codigo, /cenaSelecionada[\s\S]{0,120}: <p className="rounded border border-dashed/);
+  /*
+   * Sem cena aberta, não há painel DE MÍDIA — logo, não há galeria solta.
+   * REDATOR_DOSSIER_SURFACE_1: o que ocupa o lugar é o dossiê do Radar, que é
+   * leitura e não tem imagem nenhuma.
+   */
+  /* O comentário JSX removido deixa `{}` para trás; a janela curta tolera isso e nada mais. */
+  assert.match(codigo, /cenaSelecionada\s*\?\s*<WriterMediaAnchorPanel[\s\S]{0,400}: <>[\s{}]{0,40}<p className="mb-3 rounded border border-dashed/);
+  assert.equal((codigo.match(/<WriterMediaAnchorPanel/g) || []).length, 1, "o painel de mídia só existe sob a cena aberta");
   assert.doesNotMatch(codigo, /Prompts e imagens/);
 });
 

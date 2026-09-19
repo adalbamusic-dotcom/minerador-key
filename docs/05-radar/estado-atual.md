@@ -1548,3 +1548,30 @@ MODO_EFETIVO_DA_LINHA  = sessão → gravado → padrão
 MUTANTES               = 9/9 mortos · verde antes e depois
 GOOGLE_SUPPORT         = YouTube e Amazon SEM coleta de apoio do Google no banco
 ```
+
+### Seleção leve na planilha — 2026-09-19
+
+Selecionar uma linha recalculava o modelo inteiro de TODAS as linhas em ~20
+pontos por render (colunas, texto de busca do grid, workbench, cards). Os
+modelos da linha, a projeção de pesquisa e o blueprint passaram a ter cache
+de UM render (`cacheDaLinha`, `cacheDaProjecao`, `cacheDoBlueprint`) — sem
+`useMemo`, para nenhuma linha mostrar estado anterior. O card fechado tem o
+tamanho do card vazio (uma linha + marca); o resto aparece ao abrir a área.
+Medição em runtime é do USER; se persistir, o próximo passo é memoizar
+`columns` e virtualizar linhas. Relatório:
+[relatório datado](../00-produto/auditorias/relatorio-radar-selecao-leve-2026-09-19.md).
+
+### Planilha e Radar no contrato visual — 2026-09-19
+
+A planilha compartilhada (`operational-data-grid.tsx`), os helpers de tela
+(`operational-screen-shared.tsx`), a rota de análise, o painel do relatório
+competitivo e o detalhe legado da página passaram a consumir só tokens do
+sistema visual: hex cru, `slate-*` (inclusive `slate-850`, que não existe e
+deixava bordas sem renderizar), `teal/emerald/amber/orange/red` e fontes
+abaixo de 12px foram convertidos pelo significado (`color-contract.md`).
+Células em 14px, cabeçalho em `surface-subtle`, linha expandida com a faixa
+de `module-accent`. Guard estrito zerado nos arquivos do Radar; o guard global
+segue falhando por dívida que cresceu em 7 arquivos de outras sessões (o
+baseline não travou aumentos). Validação visual
+em DOM real é do USER. Relatório:
+[relatório datado](../00-produto/auditorias/relatorio-radar-visual-contract-2026-09-19.md).

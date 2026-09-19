@@ -118,12 +118,21 @@ export function feedbackClass(tone: FeedbackTone): string {
  * AÇÕES DO ENTREGÁVEL — o rótulo diz o que está acontecendo
  * ========================================================================== */
 
-export type DeliverableAction = "salvar" | "finalizar" | "reabrir";
+/*
+ * A semeadura entra como DUAS ações e não como uma "semear" genérica: o rótulo
+ * em curso é o que impede o segundo clique, e "Criando…" diria menos do que a
+ * pessoa precisa saber enquanto espera. O preço é uma linha a mais na tabela; a
+ * alternativa era a tela montar esse texto por fora, e aí passariam a existir
+ * dois lugares decidindo como uma ação em curso se chama.
+ */
+export type DeliverableAction = "salvar" | "finalizar" | "reabrir" | "semear_roteiro" | "semear_carrossel";
 
 const ROTULO_EM_CURSO: Readonly<Record<DeliverableAction, string>> = {
   salvar: "Salvando…",
   finalizar: "Finalizando…",
   reabrir: "Reabrindo…",
+  semear_roteiro: "Criando roteiro…",
+  semear_carrossel: "Criando carrossel…",
 };
 
 export function progressMessage(action: DeliverableAction): string {

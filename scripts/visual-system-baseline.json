@@ -2,7 +2,6 @@
   "comment": "Dívida visual tolerada por arquivo. Só pode diminuir. Roxo nunca entra aqui. Atualize com: node scripts/check-visual-system.mjs --update-baseline",
   "minimumFontSizePx": 12,
   "files": {
-    "app/(brand)/[brandRef]/radar/[articleId]/page.tsx": 1,
     "app/cadastro/page.tsx": 2,
     "app/login/page.tsx": 1,
     "app/onboarding/agencia/page.tsx": 2,
@@ -18,8 +17,6 @@
     "components/editorial/background-task-notice.tsx": 10,
     "components/editorial/dna-panels.tsx": 17,
     "components/editorial/history-controls.tsx": 15,
-    "components/editorial/operational-data-grid.tsx": 39,
-    "components/editorial/operational-screen-shared.tsx": 16,
     "components/editorial/pipeline-ui.tsx": 23,
     "components/editorial/professional-writer.tsx": 40,
     "components/editorial/workflow-status.tsx": 53,
@@ -32,9 +29,6 @@
     "modules/planejador/planner-page.tsx": 2,
     "modules/publicacoes/publications-page.tsx": 5,
     "modules/publicacoes/publications-workspace.tsx": 25,
-    "modules/radar/competitive-report-panel.tsx": 3,
-    "modules/radar/radar-analysis-page.tsx": 58,
-    "modules/radar/radar-page.tsx": 32,
     "modules/redator/writer-page.tsx": 18
   }
 }

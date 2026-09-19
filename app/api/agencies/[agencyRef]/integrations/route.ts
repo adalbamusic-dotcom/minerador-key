@@ -4,13 +4,16 @@ import {
   assertAgencyMcpBrand,
   createAgencyBrandDistribution,
   IntegrationGovernanceError,
+  reactivateAgencyWriterMcpGrant,
   registerAgencyMcpClient,
   readAgencyIntegrationWorkspace,
   revokeAgencyMcpClient,
   revokeAgencyWriterMcpDelegation,
+  revokeAgencyWriterMcpGrant,
   saveAgencyIntegrationQuota,
 } from "@/lib/server/integration-governance";
 import { requireCanonicalSessionProfile } from "@/lib/server/authz";
+import { readMcpRuntimeConfig } from "@/lib/server/mcp-runtime-config";
 import { issueWriterMcpDelegation } from "@/lib/server/writer-mcp-delegation";
 
 function errorResponse(error: unknown) {
@@ -41,6 +44,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ age
       return NextResponse.json(await registerAgencyMcpClient({ agencyRef, providerKey: body.providerKey, clientName: body.clientName, scopes: body.scopes }), { headers: { "Cache-Control": "no-store" } });
     }
     if (body.action === "create_writer_mcp_delegation") {
+      // Bearer é diagnóstico: em produção só existe com opt-in explícito da Plataforma.
+      const runtime = readMcpRuntimeConfig();
+      if (runtime.production && !runtime.remoteBearerAllowed) {
+        return NextResponse.json({ error: "O bearer de diagnóstico está desativado em produção. Conecte aplicativos por OAuth.", code: "MCP_BEARER_DISABLED" }, { status: 409 });
+      }
       const profile = await requireCanonicalSessionProfile();
       const { brandId } = await assertAgencyMcpBrand({ agencyRef, brandId: body.brandId });
       const delegation = await issueWriterMcpDelegation({
@@ -54,6 +62,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ age
     }
     if (body.action === "revoke_writer_mcp_delegation") {
       return NextResponse.json(await revokeAgencyWriterMcpDelegation({ agencyRef, delegationId: body.delegationId, brandId: body.brandId }), { headers: { "Cache-Control": "no-store" } });
+    }
+    if (body.action === "revoke_writer_mcp_grant") {
+      return NextResponse.json(await revokeAgencyWriterMcpGrant({ agencyRef, grantId: body.grantId }), { headers: { "Cache-Control": "no-store" } });
+    }
+    if (body.action === "reactivate_writer_mcp_grant") {
+      return NextResponse.json(await reactivateAgencyWriterMcpGrant({ agencyRef, grantId: body.grantId }), { headers: { "Cache-Control": "no-store" } });
     }
     if (body.action === "revoke_mcp_client") {
       return NextResponse.json(await revokeAgencyMcpClient({ agencyRef, connectionId: body.connectionId }), { headers: { "Cache-Control": "no-store" } });

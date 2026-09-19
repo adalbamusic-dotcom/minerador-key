@@ -249,7 +249,10 @@ NEW_HANDOFF_STEALS_SELECTION = NO
 PERSISTED_SELECTION_USES_LAST_OPENED_AT = YES
 URL_HAS_PRECEDENCE = YES sobre lastOpenedAt · NO sobre a escolha da sessão (§2.1)
 EPHEMERAL_MODULE_STATE_REQUIRED_FOR_RELOAD = NO
-FALSE_LAST_OPENED_WRITE = FIXED (§3)
+FALSE_LAST_OPENED_WRITE = PARCIAL ← CORRIGIDO pelo Corte 6A.12
+  o §3 fechou o fallback DEPOIS da hidratação; durante a carga assíncrona ele
+  continuava gravando, porque a recuperação local traz `documents` sem trazer os
+  user states. Ver corte-6a-12-hidratacao-documento-ativo-2026-09-19.md
 CONTAMINATED_LAST_OPENED_AT_REMAINS = YES — 07:14 no documento errado (§6.1)
 MIGRATION_REQUIRED = NO
 DATABASE_MODIFIED = NO

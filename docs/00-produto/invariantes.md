@@ -366,3 +366,11 @@ Estas regras são canônicas. Uma exceção exige proposta SDD aprovada e atuali
     as outras desaparecerem quando aquela superfície não renderiza — foi assim
     que `Fila`, `Publicados` e `Atualizações` ficaram inalcançáveis a partir da
     Biblioteca, que é a área padrão de Publicações.
+
+## Fundamentos do Radar no Redator — 2026-09-19
+
+78. O dossiê importado do Radar é LIDO pelo Redator, nunca copiado. Uma única
+    projeção (`radarFoundationsOf`) alimenta artigo, roteiro e carrossel a
+    partir de `importedContext.dossier`; `writer_deliverable.payload` contém só
+    o produto derivado. A recomendação editorial do Radar (`editorialOutput`) é
+    exibida como recomendação e não bloqueia formato derivado nenhum.
