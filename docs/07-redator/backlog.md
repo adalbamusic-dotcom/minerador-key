@@ -67,7 +67,11 @@
   readback de `writer_mcp_grants` e `writer_mcp_call_events`; (4) painel da
   Agência entregue localmente em 2026-09-19 (estado OAuth medido, passo a
   passo ChatGPT/Claude, grants, revogação/reativação, bearer só com opt-in);
-  falta validação manual do painel pelo usuário.
+  falta validação manual do painel pelo usuário. Fase 3 homologada em
+  2026-09-19 (ChatGPT → consentimento → grant → save com readback). Pendentes:
+  `MCP_GRANT_REVOCATION` (revogar na Agência e ver `grant_required` no chat),
+  chave ES256 no Supabase, remover o plugin duplicado no ChatGPT e validar o
+  Claude com o mesmo servidor.
 - **Riscos a confirmar na fase 3:** R1 escopos `writer.*` pedidos pelo
   ChatGPT; R2 parâmetro `resource` no `authorize` do Supabase. Plano B na SDD.
 
