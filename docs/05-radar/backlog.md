@@ -14,6 +14,7 @@ GOOGLE_PHASE_1        HOMOLOGADA em runtime real — 2026-09-11
 YOUTUBE               implementado · aguardando smoke real
 AMAZON                implementado · aguardando smoke real
 PORTABLE_EXPORT       implementado · aguardando aceitação visual
+ENTREGA_AO_REDATOR    implementada · aguardando envio real do USER
 VIDEO/SPECIALIST      no dossiê · aguardando envio real com as camadas
 ```
 
@@ -40,9 +41,13 @@ interface, não correção de domínio.
 - **Especialista — envio real.** O Radar prepara requisitos e pautas;
   `PREPARED != SENT` continua valendo. O envio por Telegram e o ciclo de
   contribuição são frente própria.
-- **Planejador — consumir o `PlannerHandoff v3`.** O envelope existe, inclui o
-  Blueprint e agora carrega vídeo, especialista e contexto de keyword. O
-  consumo é do módulo Planejador.
+- **Redator — consumir o dossiê canônico.** Desde 2026-09-17 o Radar entrega
+  direto ao Redator (`sendRadarToWriter`), e o documento nasce com a estrutura
+  inteira dentro. O que falta é do módulo Redator: usar o dossiê na fase de
+  planejamento e na escrita.
+- **Planejador — fora do fluxo operacional.** Não é etapa, gate nem destino. A
+  rota e os dados históricos permanecem para leitura; nenhum artigo é movido
+  automaticamente. Não reabrir como pendência.
 - **`YOUTUBE_SEARCH_2`.** Transcript de concorrente, hook e roteiro derivados de
   conteúdo assistido continuam fora do escopo: a SERP de vídeo não observa
   conteúdo interno.
@@ -60,6 +65,7 @@ paridade de keyword                 fechado
 paridade de vídeo e especialista    fechado
 export portátil                     fechado
 higiene do dossiê portátil          fechado
+destino do handoff (Redator)        fechado
 ```
 
 ---
@@ -148,8 +154,13 @@ identidade canônica, blueprint comercial e link promocional com
 
 **E. Planejador — consumir `PlannerHandoff v3`**
 
-O envelope existe e inclui o Blueprint. O consumo pelo Planejador é frente do
-módulo Planejador.
+~~O envelope existe e inclui o Blueprint. O consumo pelo Planejador é frente do
+módulo Planejador.~~
+
+**Superado pelo `RADAR_TO_WRITER_HANDOFF_1` (2026-09-17).** O Planejador saiu
+do fluxo operacional. O dossiê canônico passou a ser entregue ao REDATOR por
+`sendRadarToWriter`, e o consumo é do módulo Redator. Dados históricos do
+Planejador permanecem; nenhum artigo é movido automaticamente.
 
 ### Correção pós-homologação
 

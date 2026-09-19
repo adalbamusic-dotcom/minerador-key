@@ -77,14 +77,14 @@ const INTENT_MARKERS: Array<{ label: string; terms: string[] }> = [
   { label: "Local", terms: ["perto de mim", "clinica", "endereco", "agendar", "unidades", "atendimento em", "onde comprar"] },
   { label: "Transacional", terms: ["comprar", "preco", "loja", "frete", "carrinho", "desconto", "cupom", "promocao", "assine", "kit ", "oferta"] },
   { label: "Comercial", terms: ["melhor", "melhores", "review", "resenha", "comparativo", "vale a pena", "ranking", "testamos", "vs ", "qual escolher"] },
-  { label: "Informativa", terms: ["como", "o que e", "por que", "guia", "passo a passo", "para que serve", "beneficios", "dicas", "tudo sobre", "significa", "rotina", "receita"] },
+  { label: "Informativa", terms: ["como", "o que e", "por que", "guia", "passo a passo", "para que serve", "beneficios", "dicas", "tudo sobre", "significa", "rotina", "receita", "entenda", "conceito", "definicao", "aplicacoes", "funciona", "saiba"] },
 ];
 
 /** Sinais próprios do Funil. Não existe herança automática da Intenção. */
 const FUNNEL_MARKERS: Array<{ label: string; terms: string[] }> = [
   { label: "BOFU", terms: ["comprar", "preco", "orcamento", "agendar", "contratar", "assine", "frete", "cupom", "fale com", "kit ", "oferta"] },
   { label: "MOFU", terms: ["melhor", "melhores", "comparativo", "review", "resenha", "vale a pena", "alternativas", "qual escolher", "diferenca entre", "antes e depois"] },
-  { label: "TOFU", terms: ["o que e", "como", "por que", "guia", "passo a passo", "para que serve", "beneficios", "tipos de", "significa", "rotina"] },
+  { label: "TOFU", terms: ["o que e", "como", "por que", "guia", "passo a passo", "para que serve", "beneficios", "tipos de", "significa", "rotina", "entenda", "conceito", "definicao", "aplicacoes", "funciona", "saiba"] },
 ];
 
 function classify(markers: Array<{ label: string; terms: string[] }>, haystack: string): string | null {
@@ -94,7 +94,42 @@ function classify(markers: Array<{ label: string; terms: string[] }>, haystack: 
 
 /** Padrões de URL que denunciam página de produto/loja. */
 const PRODUCT_URL = /\/(produto|produtos|p|item|comprar|loja|shop|store|catalogo)\//i;
-const EDITORIAL_URL = /\/(blog|artigo|artigos|guia|guias|dicas|conteudo|magazine|revista)\//i;
+const EDITORIAL_URL = /\/(blog|artigo|artigos|noticia|noticias|guia|guias|dicas|tutorial|conteudo|magazine|revista|post|posts)\//i;
+
+/**
+ * Editorial também mora no SUBDOMÍNIO.
+ *
+ * `EDITORIAL_URL` só olhava o caminho, então `blog.exemplo.com.br/cnc/` passava
+ * batido enquanto `exemplo.com.br/blog/cnc/` era reconhecido. É a mesma página
+ * de blog, endereçada de outro jeito.
+ */
+const EDITORIAL_HOST = /^https?:\/\/(?:www\.)?(?:blog|noticias|revista|magazine)\./i;
+
+/**
+ * Referência enciclopédica é informativa por definição. Não há leitura
+ * comercial possível de uma entrada de dicionário ou de enciclopédia.
+ */
+const REFERENCE_HOST = /^https?:\/\/(?:[a-z0-9-]+\.)*(?:wikipedia\.org|wikiwand\.com|britannica\.com|dicio\.com\.br|significados\.com\.br|michaelis\.uol\.com\.br|priberam\.org)\//i;
+
+/**
+ * Perfil em rede social é presença de marca: quem chega ali estava navegando
+ * até alguém, não pesquisando uma necessidade. O eixo Funil fica de fora — um
+ * perfil não coloca o leitor em etapa nenhuma da jornada.
+ */
+const SOCIAL_PROFILE_HOST = /^https?:\/\/(?:[a-z0-9-]+\.)*(?:instagram\.com|facebook\.com|linkedin\.com|twitter\.com|x\.com|tiktok\.com|threads\.net|reclameaqui\.com\.br)\//i;
+
+/**
+ * Raiz de domínio ranqueando para o termo é sinal de navegação até a marca.
+ * É o sinal mais fraco do conjunto e só entra quando nada mais classificou.
+ */
+function isRootUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname === "/" || parsed.pathname === "";
+  } catch {
+    return false;
+  }
+}
 
 /** A força continua provisória: cobertura, dominância e mínimo observado. */
 const CONCLUSIVE_DOMINANCE = 0.6;
@@ -103,7 +138,7 @@ const MINIMUM_OBSERVED = 5;
 /** Abaixo desta cobertura, nenhuma dominância vira conclusão. */
 const CONCLUSIVE_COVERAGE = 0.5;
 const MINIMUM_COVERAGE = 0.3;
-export const SERP_DERIVATION_VERSION = "serp-semantic-derivation-v2";
+export const SERP_DERIVATION_VERSION = "serp-semantic-derivation-v3";
 
 type StructuralSignal = { signal: string; label: string; weight: number };
 
@@ -236,10 +271,24 @@ export function deriveSerpSemanticEvidence(input: {
       intentLabel = intentLabel || "Comercial";
       funnelLabel = funnelLabel || "MOFU";
     }
-    if (EDITORIAL_URL.test(url)) {
+    if (REFERENCE_HOST.test(url)) {
+      signals.push("referência enciclopédica");
+      intentLabel = intentLabel || "Informativa";
+      funnelLabel = funnelLabel || "TOFU";
+    }
+    if (EDITORIAL_URL.test(url) || EDITORIAL_HOST.test(url)) {
       signals.push("página editorial");
       intentLabel = intentLabel || "Informativa";
       funnelLabel = funnelLabel || "TOFU";
+    }
+    // Navegação não coloca ninguém em etapa de funil: só o eixo Intenção recebe.
+    if (SOCIAL_PROFILE_HOST.test(url)) {
+      signals.push("perfil em rede social");
+      intentLabel = intentLabel || "Navegacional";
+    }
+    if (isRootUrl(url)) {
+      signals.push("raiz do domínio");
+      intentLabel = intentLabel || "Navegacional";
     }
     if (item.is_featured_snippet === true) {
       signals.push("featured snippet");

@@ -6,7 +6,7 @@ import { buildRadarFlowProgress, deriveRadarReferenceRole, radarSemanticDecision
 const term = (value: string, overrides: Record<string, unknown> = {}) => ({ term: value, frequency: 1, pageCount: 1, pageIds: ["page-1"], sources: ["body" as const], relation: "observado", decision: "pending" as const, note: "", ...overrides });
 
 test("fluxo do Radar expõe seis etapas em ordem e identifica a etapa atual", () => {
-  const progress = buildRadarFlowProgress({ serpCollected: true, referencesSelected: true, pagesAnalyzed: false, reportGenerated: false, reportApproved: false, sentToPlanner: false });
+  const progress = buildRadarFlowProgress({ serpCollected: true, referencesSelected: true, pagesAnalyzed: false, reportGenerated: false, reportApproved: false, sentToWriter: false });
   assert.deepEqual(progress.map(item => item.label), ["SERP coletada", "Referências selecionadas", "Páginas analisadas", "Relatório gerado", "Relatório aprovado", "Enviado ao Planejador"]);
   assert.equal(progress[2].current, true);
   assert.equal(progress[1].done, true);

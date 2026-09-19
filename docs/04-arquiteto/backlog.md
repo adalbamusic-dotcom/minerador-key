@@ -1,3 +1,22 @@
+## Alinhamento com o pacote aprovado do Minerador — 2026-09-18
+
+Parecer completo em [parecer-formato-articledna-e-alinhamento-minerador-2026-09-18.md](parecer-formato-articledna-e-alinhamento-minerador-2026-09-18.md).
+
+Ordem **revisada** no adendo de 2026-09-19, depois da auditoria:
+
+- [ ] **1.** Comparar `keywordDnaVersionId`/`keywordDnaContentHash` **e alimentar `staleReasons`** de `canonicalRevisionState` — o mecanismo existe e está apagado: o único consumidor chama sem motivos.
+  - [x] Metade do Minerador entregue em 2026-09-19: `lib/minerador/package-freshness.ts`
+    devolve `fresh` / `in_review` / `stale` / `never_approved` / `unknown` e a
+    lista de `staleReasons` pronta. Falta gravar a referência na formação e
+    passar o resultado para `canonicalRevisionState`.
+- [ ] **2.** `KEYWORD_PACKAGE_STALE`, metade "keyword em revisão" — leitura viva do Território, não depende do passo 3.
+- [ ] **3.** `SiloDNA.keywordPackageRefs[]` — destrava a metade "pacote mais novo que o lido". `centralKeywordDnaRef` passa a ser derivado do array.
+- [ ] **4.** Propagação automática — **depende** de resolver a colisão com `articleEditorialDiff`, que hoje recusaria mudança só de medição como no-op.
+- [ ] **6.** Trocar `resolveKeywordDnaSignals` por `keywordDnaFromPackage` de `lib/minerador/keyword-dna.ts` (2026-09-19). O Minerador já entrega os treze campos normalizados e um valor por eixo com fonte declarada; `semPlaceholder`, `listaDeTexto` e `intentIsKnown` deixam de precisar existir aqui. Equivalência garantida por `tests/minerador-keyword-dna-fechado.test.mts`.
+- [ ] **5.** Estreitar `ArticleKeywordReference`. Escopo maior do que o parecer dizia: `strategicContribution`, `purpose`, `contribution` e `purposeRationale` são template por `role`; `overlapRisk` é literal; `requiredTopics`/`excludedTopics` são sempre vazios.
+- [ ] **Em aberto:** artigo publicado recebe marcador de insumo atualizado em vez de reescrita automática.
+
+
 ## Backup restaurável e export editorial — 2026-09-13
 
 - [x] Auditar os artefatos do Arquiteto e suas dependências antes do restore

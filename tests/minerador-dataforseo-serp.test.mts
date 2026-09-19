@@ -20,7 +20,7 @@ const request = { keyword: "marketing para clínicas", locationCode: 2076, langu
 
 test("monta allintitle, desktop, profundidade 10 e tag da operação", () => {
   const built = buildDataForSeoAllintitleRequest(request);
-  assert.equal(built.query, 'allintitle:"marketing para clínicas"');
+  assert.equal(built.query, 'allintitle:marketing para clínicas');
   assert.deepEqual(built.body[0], { keyword: built.query, location_code: 2076, language_code: "pt", device: "desktop", depth: 10, tag: request.operationRequestId });
 });
 

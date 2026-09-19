@@ -39,7 +39,6 @@ test("InfoHint acompanha as ações sem substituir handlers nem pré-condições
     ["Interpretar o significado da keyword", "handleQualifySelected"],
     ["Atualizar demanda de busca", "handleBatchQualify"],
     ["Medir concorrência orgânica", "handleBatchAllintitle"],
-    ["Apresentação contextual da keyword", "handleBatchContextualPresentation"],
     ["Confirmar as decisões do KeywordDNA", "handleOpenHumanReview"],
   ] as const) {
     const start = workspace.indexOf(`title="${title}"`);
@@ -74,8 +73,8 @@ test("processos e Descobrir mantêm glyph independente e triggers textuais sem g
   assert.match(discoveryTable, /title: "Valor comercial do clique"/);
 });
 
-test("os seis botões de processo preservam os glyphs existentes no cluster do label", () => {
-  for (const label of ["Conferir site", "Lógica", "Volume", "Resultados", "IA", "Revisar"]) {
+test("os botões de processo preservam os glyphs existentes no cluster do label", () => {
+  for (const label of ["Conferir site", "Lógica", "Volume", "Resultados", "Revisar"]) {
     assert.match(workspace, new RegExp(`label="${label}"`));
   }
   assert.equal((processAction.match(/<InfoHint title=\{title\}/g) || []).length, 1);

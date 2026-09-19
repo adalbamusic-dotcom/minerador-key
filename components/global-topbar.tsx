@@ -202,6 +202,17 @@ export function GlobalTopbar({ pageTabs, pageActions, moduleActions }: { pageTab
   const model = useMemo(() => topbarModel(pathname), [pathname]);
   const contextHelpArea = useMemo(() => resolveContextHelpArea(pathname), [pathname]);
   const arquitetoLayout = model.moduleId === "arquiteto";
+  /*
+   * Os três blocos da barra são `flex-1`, ou seja, um terço cada um
+   * independentemente do que carregam. No Redator isso desequilibra: a
+   * esquerda tem só o título e três ícones, e o centro tem os controles do
+   * documento, que precisam de mais que um terço. O resultado era um scroller
+   * horizontal dentro do centro.
+   *
+   * Aqui as laterais passam a ser dimensionadas pelo conteúdo (`flex-initial`,
+   * que não cresce mas ainda encolhe) e o centro fica com toda a folga.
+   */
+  const redatorLayout = model.moduleId === "redator";
   const { controls, pageControls } = useGlobalTopbarControlsRegistration();
   const moduleControls = model.moduleId && controls?.moduleId === model.moduleId ? controls : null;
   const moduleActionsContent = moduleControls?.actions ?? moduleActions;
@@ -210,7 +221,7 @@ export function GlobalTopbar({ pageTabs, pageActions, moduleActions }: { pageTab
   const registeredPageActions = pageControls?.actions !== undefined ? pageControls.actions : pageActions;
 
   return <header className={`sticky top-0 z-40 flex h-10 shrink-0 items-center border-b border-divider bg-background/95 pl-14 pr-2 backdrop-blur-sm lg:pl-3 ${model.moduleId === "minerador" ? "max-sm:pl-2" : ""}`} data-global-topbar data-topbar-mode={model.mode}>
-    <div className={`flex min-w-0 ${model.moduleId === "minerador" ? "max-sm:hidden" : ""} ${arquitetoLayout ? "flex-1 xl:flex-[0.6]" : "flex-1"} items-center gap-1.5`}>
+    <div className={`flex min-w-0 ${model.moduleId === "minerador" ? "max-sm:hidden" : ""} ${arquitetoLayout ? "flex-1 xl:flex-[0.6]" : redatorLayout ? "flex-initial" : "flex-1"} items-center gap-1.5`}>
       <div className={`flex min-w-0 items-center gap-2 ${model.mode === "page" ? "flex-1" : "shrink-0"}`}>
         <h1 className="truncate text-sm font-semibold uppercase text-context-accent">{model.title}</h1>
         {model.mode === "page" && registeredPageTabs ? <div className="min-w-0 flex-1 overflow-x-auto xl:overflow-visible" data-topbar-page-tabs>{registeredPageTabs}</div> : null}
@@ -241,7 +252,7 @@ export function GlobalTopbar({ pageTabs, pageActions, moduleActions }: { pageTab
       {model.mode === "page" ? <div className="pointer-events-auto w-fit">{registeredPageActions}</div> : moduleActionsContent}
     </div> : null}
 
-    <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-visible">
+    <div className={`flex min-w-0 ${redatorLayout ? "flex-initial" : "flex-1"} items-center justify-end gap-1 overflow-visible`}>
       {model.moduleId === "minerador" && moduleActionsContent ? <div className="min-w-0 flex-1 max-w-[min(52vw,52rem)] overflow-hidden" data-topbar-module-actions>{moduleActionsContent}</div> : null}
       {moduleTabsContent ? <div className="min-w-0 shrink-0" data-topbar-module-tabs>{moduleTabsContent}</div> : null}
       <NotificationBell />

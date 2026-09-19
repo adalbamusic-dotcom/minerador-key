@@ -15,8 +15,8 @@ export const PersistedDocumentSchema = z.object({
   document: ContentDocumentSchema,
   lockVersion: z.number().int().positive(),
   contentHash: z.string(),
-  updatedAt: z.string().datetime(),
-  userState: z.object({ cursorPosition: z.number().int().nonnegative().nullable(), scrollTop: z.number().int().nonnegative(), leftPanelOpen: z.boolean(), rightPanelOpen: z.boolean(), lastOpenedAt: z.string().datetime() }).nullable(),
+  updatedAt: z.string().datetime({ offset: true }),
+  userState: z.object({ cursorPosition: z.number().int().nonnegative().nullable(), scrollTop: z.number().int().nonnegative(), leftPanelOpen: z.boolean(), rightPanelOpen: z.boolean(), lastOpenedAt: z.string().datetime({ offset: true }) }).nullable(),
 });
 export type PersistedDocument = z.infer<typeof PersistedDocumentSchema>;
 
@@ -43,7 +43,7 @@ export const PersistedEditorialWorkspaceSchema = z.object({
    * "a consulta falhou" — e a interface escolhia a mais otimista.
    */
   loadDiagnostics: WorkspaceLoadDiagnosticsSchema.default(emptyLoadDiagnostics()),
-  loadedAt: z.string().datetime(),
+  loadedAt: z.string().datetime({ offset: true }),
 });
 export type PersistedEditorialWorkspace = z.infer<typeof PersistedEditorialWorkspaceSchema>;
 
@@ -68,7 +68,7 @@ export const LocalWorkflowRecoverySchema = z.object({
   documentLocks: z.record(z.string(), z.number().int().positive()),
   selectedEntityId: z.string().nullable(),
   aiReviewAnnotations: z.array(AIReviewAnnotationSchema).default([]),
-  savedAt: z.string().datetime(),
+  savedAt: z.string().datetime({ offset: true }),
 });
 export type LocalWorkflowRecovery = z.infer<typeof LocalWorkflowRecoverySchema>;
 
@@ -107,11 +107,29 @@ export const WorkflowCommandSchema = z.discriminatedUnion("action", [
       serpProvenance: z.unknown().nullable(),
     }).strict()).default({}) }),
   z.object({ action: z.literal("transition_radar"), brandId: z.string(), itemIds: z.array(z.string()), target: RadarItemSchema.shape.state, expectedLocks: z.record(z.string(), z.number().int().positive()) }),
-  z.object({ action: z.literal("import_planner"), brandId: z.string(), radarItemIds: z.array(z.string()), expectedLocks: z.record(z.string(), z.number().int().positive()) }),
-  z.object({ action: z.literal("prepare_plan"), brandId: z.string(), plannerItemId: z.string(), expectedLock: z.number().int().positive(), plan: VersionedContentPlanSchema }),
-  z.object({ action: z.literal("approve_plan"), brandId: z.string(), plannerItemIds: z.array(z.string()), expectedLocks: z.record(z.string(), z.number().int().positive()), versionEvents: z.array(VersionStatusEventSchema).default([]) }),
-  z.object({ action: z.literal("start_writing"), brandId: z.string(), plannerItemId: z.string(), expectedLock: z.number().int().positive(), articleVersion: VersionedArticleDNASchema, plan: VersionedContentPlanSchema, document: ContentDocumentSchema, publication: OperationalPublicationSchema }),
-  z.object({ action: z.literal("import_publications"), brandId: z.string(), publicationIds: z.array(z.string()), expectedLocks: z.record(z.string(), z.number().int().positive()) }),
+  /*
+   * ===== CORTE 2 · OS QUATRO CAMINHOS DE ESCRITA DO PLANEJADOR SAÍRAM =====
+   *
+   * `import_planner`, `prepare_plan`, `approve_plan` e `start_writing` não
+   * existem mais. Eram as únicas portas por onde um `PlannerItem` nascia, um
+   * `ContentPlan` virava exigência e um `publication_records` era criado.
+   *
+   * `start_writing` merece o registro: ele era a ÚNICA porta de Publicações, e
+   * exigia plano aprovado no Planejador. Quem o substitui é
+   * `sendWriterToPublications`, que tem rota própria em
+   * `/api/redator/publication-handoff` e autoridade em ContentDocument +
+   * origem Radar. Ele não entra aqui porque não é comando de esteira: é
+   * handoff com readback, e handoff com readback não pode ser disparado por um
+   * `void` sem espera, como esta união permite.
+   *
+   * O vocabulário de LEITURA continua: `plannerItemId`, `contentPlanVersionId`
+   * e `sent_planner` permanecem legíveis onde já foram gravados.
+   */
+  /*
+   * CORTE 3.5 · `import_publications` saiu junto com o caminho local-first que
+   * o chamava. Deixar a ação viva no servidor sem cliente é arma carregada:
+   * alguém a encontraria e voltaria a entrar em Publicações por fora do handoff.
+   */
 ]);
 export type WorkflowCommand = z.infer<typeof WorkflowCommandSchema>;
 

@@ -46,7 +46,7 @@ const payloadAmazon = JSON.parse(
 
 const fonteDoRuntime = await readFile(new URL("../lib/radar/evidence-bundle-runtime.ts", import.meta.url), "utf8");
 const fonteDoEnvio = await readFile(new URL("../lib/server/radar-planner-send.ts", import.meta.url), "utf8");
-const fonteDaRota = await readFile(new URL("../app/api/editorial/radar-planner-handoff/route.ts", import.meta.url), "utf8");
+const fonteDaRota = await readFile(new URL("../app/api/editorial/radar-writer-handoff/route.ts", import.meta.url), "utf8");
 const fonteDaWorkbench = await readFile(new URL("../modules/radar/radar-r3-workbench.tsx", import.meta.url), "utf8");
 const fonteDaPagina = await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
 
@@ -562,24 +562,32 @@ test("P · sem readback remoto não há sucesso", () => {
 
 /* ================================ Q ================================ */
 
-test("Q · F5 e outra sessão continuam vendo 'Enviado ao Planejador'", () => {
+test("Q · F5 e outra sessão continuam vendo 'Enviado ao Redator'", () => {
   const pagina = semComentarios(fonteDaPagina);
 
   /*
    * §26 · O ESTADO VEM DO SERVIDOR.
    *
-   * `analiseCorrenteDe(row).plannerBundle` é a versão gravada da análise: F5 a
+   * `analiseCorrenteDe(row).writerBundle` é a versão gravada da análise: F5 a
    * relê e outra sessão lê a mesma coisa. Guardar isso no navegador faria duas
    * pessoas verem entregas diferentes do mesmo artigo.
    */
-  assert.match(pagina, /const entregue = analise\?\.plannerBundle \|\| null;/);
-  assert.match(pagina, /sent: Boolean\(entregue\)/);
+  /*
+   * O RECIBO DEIXOU DE SER UMA VERSÃO DE ANÁLISE.
+   *
+   * Gravá-lo reescrevia ~9,77 MB a cada entrega, e o Postgres cancelava com
+   * 57014. Quem responde "foi entregue?" é a esteira, que o servidor move só
+   * depois de confirmar o documento no readback — continua sendo prova remota,
+   * e não estado desta aba.
+   */
+  assert.match(pagina, /const noRedator = row \? row\.state === "sent_writer" : false;/);
+  assert.match(pagina, /sent: noRedator,/);
 
-  const fatia = pagina.slice(pagina.indexOf("const fronteiraDoPlanejador"), pagina.indexOf("const enviarAoPlanejador"));
+  const fatia = pagina.slice(pagina.indexOf("const fronteiraDoRedator"), pagina.indexOf("const enviarAoRedator"));
   assert.equal(/localStorage|sessionStorage/.test(fatia), false, "§26 · sem armazenamento local");
 
   const workbench = semComentarios(fonteDaWorkbench);
-  assert.ok(workbench.includes('data-testid="radar-planner-sent"'));
+  assert.ok(workbench.includes('data-testid="radar-writer-sent"'));
   assert.equal(/localStorage/.test(workbench), false);
 });
 

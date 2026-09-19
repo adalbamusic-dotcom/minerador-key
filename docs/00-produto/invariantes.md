@@ -190,3 +190,169 @@ TELEGRAM_INBOUND_E2E = PENDING
     envelope paralelo.
 
 Estas regras são canônicas. Uma exceção exige proposta SDD aprovada e atualização desta documentação quando permanente.
+
+## Pipeline — o Redator recebe do Radar — 2026-09-17
+
+47. O pipeline operacional é `Marca → Minerador → Arquiteto → Radar → Redator →
+    Publicações`. O Planejador **não** é etapa, gate, destino de botão, condição
+    de prontidão nem parada de navegação, e desde 2026-09-18 está **removido do
+    pipeline**: `PLANEJADOR_STAGE = NONE`. Nenhum documento pode descrever
+    `Radar → Planejador → Redator` como fluxo vigente, e nenhum caminho de
+    escrita nova pode passar por ele. A rota `/planejador` continua respondendo
+    para leitura do histórico — remoção lógica não é apagar o passado.
+48. O Redator planeja e escreve. Ele decide estrutura final de H2/H3, sequência
+    narrativa, aplicação da evidência por seção, links, mídia, metadados de SEO
+    finais, CTA e instruções de redação, e pode montar um `ContentPlan` interno
+    antes de escrever. `ContentPlan` deixou de ser ETAPA; não deixou de existir.
+49. O Redator **não** pode trocar a keyword principal, reconfigurar o Silo,
+    remover cobertura obrigatória, alterar a intenção declarada, alterar slug ou
+    canonical protegidos, nem substituir a composição de secundárias por decisão
+    própria. A lista é `RADAR_WRITER_MAY_NOT` e viaja dentro do pacote entregue,
+    não apenas na documentação.
+50. O Radar não mudou de papel: ele continua dono da investigação, da evidência
+    e do Blueprint. O que este gate trocou foi DESTINO e RESPONSABILIDADE, nunca
+    pesquisa. Nenhum collector migra para o Redator.
+51. `sendRadarToWriter` é a autoridade única de entrega, com a ordem
+    `validate → canonical resolve → readiness → write receipt → readback →
+    identity/hash → create document → destination readback → workflow
+    transition`. O lote repete essa porta; ele não abre outra.
+
+    **Dois gatilhos, uma autoridade — 2026-09-18.** A entrega pode ser disparada
+    de duas pontas: pela ação no Radar e pelo botão "Importar do Radar" no
+    Redator. O gatilho do Redator **não** constitui segunda autoridade: ele
+    lista elegíveis — artigos da marca com `state = 'approved'` no estágio
+    `radar` — e chama o mesmo serviço, sem validação, aprovação, montagem de
+    documento ou escrita próprias. Não existe segunda aprovação entre Radar e
+    Redator, e a idempotência continua garantida pelo id determinístico do
+    documento.
+52. O Redator recebe a ESTRUTURA canônica do dossiê, não markdown.
+    `writer_context_md`, `writer_brief_md` e `competitive_radiography_md`
+    continuam sendo read models portáteis do CSV e não substituem o dossiê no
+    documento.
+53. `sendRadarToPlanner` é legado: sem rota, sem botão e sem transição. Ele
+    permanece no repositório porque define o que `plannerBundle` e
+    `sent_planner` significam nos registros já gravados. Dados históricos do
+    Planejador são preservados e nenhum artigo é movido automaticamente.
+54. A entrega ao Redator não exige migration. `editorial_workflow_items.stage`
+    já aceita `writer`, `state` é texto livre e
+    `content_documents.content_plan_version_id` é nulável na `0028`, que
+    prevaleceu sobre a `0002` — documento de origem Radar nasce sem plano, e
+    nenhum id de plano é fabricado para preencher a coluna.
+
+## Correção — a esteira não é autoridade de finalização — 2026-09-17
+
+55. `editorial_workflow_items.state` é o estado da ESTEIRA e **não** descreve a
+    investigação. O fluxo operacional vigente — `START → ANALYZE → FINALIZE` —
+    nunca o move: uma linha de Radar nasce `research_pending` e assim
+    permanece. `approved` só existia no fluxo antigo por abas. Nenhuma decisão
+    sobre prontidão editorial pode depender desse campo.
+56. A autoridade de "investigação concluída" é a prontidão canônica do dossiê:
+    perfil resolvido a partir da fotografia congelada, `RadarEvidenceBundle` V3
+    íntegro e vínculo com o ArticleDNA corrente. Ela responde para a tela, para
+    o lote e para o servidor — uma pergunta, uma resposta.
+57. Não existe segunda aprovação entre o Radar e o Redator. Quem coletou,
+    analisou e finalizou não precisa aprovar de novo, e artigo finalizado antes
+    da mudança de destino é reconhecido sem refinalizar. Evidência congelada
+    não é recriada para satisfazer um fluxo novo.
+58. Fixtura que descreve um estado que o produto não produz não protege nada.
+    Uma bancada precisa nascer no estado REAL do fluxo vigente — foi uma linha
+    de esteira `approved`, impossível na prática, que escondeu esta recusa de
+    dezessete mutantes.
+
+## Remoção lógica do Planejador e árvore da plataforma — 2026-09-18
+
+59. Os estágios são **identificadores declarados**, não índices de posição:
+    `MODULE_STAGE` em `lib/editorial/navigation.ts` é a fonte. Vale
+    `PLANEJADOR_STAGE = NONE`, `REDACTOR_STAGE = 6`, `PUBLICACOES_STAGE = 7` e
+    `CONTA_STAGE = 8`. A posição 5 fica **declarada e não atribuída**: derivar o
+    número de um índice obrigaria a existir algo ali, e alguém inventaria uma
+    etapa só para preencher o buraco.
+60. `PRODUCT_FLOW` é o pipeline editorial e por isso **não** inclui Conta, que é
+    estágio da árvore da plataforma e não etapa de produção. Quem precisa do
+    número lê `MODULE_STAGE`; quem precisa da esteira lê `PRODUCT_FLOW`.
+61. Rota registrada e rota oferecida são coisas diferentes. `historical: true`
+    em `PRODUCT_MODULES` marca o que continua **respondendo** e deixa de ser
+    **oferecido**. O Planejador some do menu e da esteira sem que o caminho para
+    os planos já aprovados seja apagado junto.
+62. Não se cria compatibilidade fictícia para o Planejador. O banco real
+    confirmou **zero** linhas de `ContentPlan`, `stage='planner'` e
+    `sent_planner`, e as tabelas `content_plans`/`planner_items` **não existem**.
+    Não há migração de conteúdo a fazer, e inventar uma seria trabalho sobre
+    dado inexistente. O que a remoção precisa impedir é **escrita nova**.
+63. Leitura de payload legado é preservada **apenas onde é necessária para parse
+    ou compatibilidade**: `plannerItemId`, `contentPlanVersionId`,
+    `contentPlanRef` e o valor `sent_planner` continuam legíveis. O que sai é a
+    transição e a exigência, nunca o vocabulário de leitura.
+64. Nenhum `ContentDocument` v1 novo é criado, e nenhum registro novo nasce por
+    caminho de Planejador. Documento novo é v2, com `radarOrigin`.
+
+## Retenção editorial — substituição confirmada, nunca idade — 2026-09-18
+
+65. `PURGE_BY_AGE_ONLY = NO`. Idade não apaga nada. Nenhum artefato entra em
+    janela de eliminação por ter envelhecido.
+66. `ONLY_AFTER_CONFIRMED_REPLACEMENT = YES`. A janela só abre quando um
+    sucessor foi **persistido e relido com sucesso**. Antes da substituição
+    confirmada **não existe `purge_after`** — e a marcação é ato próprio,
+    separado da gravação, porque o readback só existe depois do commit. Se o
+    readback falhar ou o processo morrer, nada é marcado e nada é apagado: o
+    modo de falha é guardar demais.
+67. `RECOVERY_WINDOW_AFTER_REPLACEMENT = 48H`, contada a partir de
+    `superseded_at`, nunca de `created_at`. Durante a janela o predecessor é
+    recuperável.
+68. `DNA_AND_RADAR_RETENTION = OUT_OF_SCOPE`. ArticleDNA, KeywordDNA, SiloDNA,
+    SiloPage, InternalLinkGraph, evidências e snapshots do Radar, trilhas de
+    auditoria e eventos MCP seguem a política do módulo dono e **não entram
+    nesta reforma**, salvo dependência técnica comprovada e autorização
+    posterior. Não é exceção à regra: é propriedade de outro módulo — sete
+    tabelas de módulos anteriores dependem de `editorial_artifact_versions` por
+    FK.
+69. Substituição de mídia só conta quando o **sucessor está confirmado no mesmo
+    anchor**. O vínculo (`anchor_kind` + `anchor_ref`) é transferido antes de o
+    predecessor ganhar janela, na mesma transação — nunca existe instante em que
+    o bloco ficou sem imagem enquanto o antigo já contava.
+
+## Versionamento e fronteira Redator → Publicações — 2026-09-18
+
+70. O ciclo de versão do Redator é:
+
+    ```text
+    Salvar rascunho              = NÃO cria versão histórica
+    Finalizar pela primeira vez  = cria a versão final
+    Refinalizar conteúdo alterado= cria sucessora
+    ```
+
+    Só **predecessora finalizada e substituída** entra na janela de 48h.
+    **Autosaves intermediários não entram no lifecycle de retenção** — eles são
+    estado corrente, não histórico. Guardar cada tecla digitada como versão
+    encheria a retenção de ruído e esconderia as substituições que importam.
+71. `ContentDocument.status = 'aprovado'` significa **finalizado no Redator** e
+    **não** significa recebido em Publicações. A autoridade de entrada é
+    `sendWriterToPublications → publication_record persistido → readback
+    confirmado`. Sem o registro, o conteúdo não pertence operacionalmente a
+    Publicações, por mais finalizado que esteja.
+72. Os três eixos são distintos e nenhum deriva do outro por conveniência:
+    **finalizado no Redator**, **recebido em Publicações** e **publicado
+    externamente**. A biblioteca mostra os dois primeiros lado a lado; o
+    terceiro vem do registro em `published`.
+73. A biblioteca de Publicações é **read model**: uma linha por `documentId`,
+    lendo `content_documents` para conteúdo e metadados e `PublicationRecord`
+    para prova de entrega e destino. Nenhuma tabela nova, nenhuma cópia, nenhuma
+    linha duplicada quando ambos existem.
+74. Não existe caminho local-first para entrar em Publicações. Estado de tela
+    gravado antes da confirmação do servidor não é entrada — é otimismo, e ele
+    já apareceu duas vezes neste produto com nomes diferentes.
+75. O escopo da **biblioteca de Publicações é a entrega**, não a produção. O
+    recorte padrão é `ENTREGUES`, e todos os recortes oferecidos pertencem ao
+    eixo de entrega. Estado do Redator — `RASCUNHO`, `FINALIZADO` — não pode ser
+    recorte de Publicações: usado assim, ele traz para a lista, como item
+    normal, documento que Publicações nunca recebeu. O eixo do Redator vive no
+    selo da linha, ao lado do selo de entrega.
+76. `NAO_ENTREGUE` **existe** no read model — a projeção não descarta documento
+    algum, sob pena de recriar a biblioteca paralela do §73 — e é alcançável por
+    um recorte que o nomeia. O que ele nunca faz é aparecer como item já
+    recebido, nem compor a lista normal da biblioteca.
+77. A navegação entre as áreas de um módulo **não pode depender de qual área
+    está aberta**. Registrá-la dentro do render de uma superfície específica faz
+    as outras desaparecerem quando aquela superfície não renderiza — foi assim
+    que `Fila`, `Publicados` e `Atualizações` ficaram inalcançáveis a partir da
+    Biblioteca, que é a área padrão de Publicações.

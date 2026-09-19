@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { applyGridQuery, defaultGridView, gridViewStorageKey, reorderIds, saveGridView, selectionState, selectAllVisible } from "../lib/editorial/data-grid.ts";
-import { articleApprovalIssues, createDevelopmentInvitation, createOperationalDocument, createOperationalPlan, createPublicationDraft,
+import { articleApprovalIssues, createDevelopmentInvitation, createWriterPublication,
   effectiveVersionStatus, importApprovedWriterItems, importArticlesToRadar, importRadarToPlanner, mergeVersionEvents, setRadarState, siloDnaPreflight, validateInvitationAccess } from "../lib/editorial/operational-flow.ts";
 import { assertNoImplicitSensitiveAccess, assertOperationalInvitationAccess } from "../lib/server/operational-permissions.ts";
 import { ContentDocumentSchema, type ArticleDNA, type SiloDNA, type VersionEnvelope } from "../lib/arquiteto/contracts.ts";
@@ -89,14 +89,53 @@ test("Radar exige revisão antes da aprovação e Planejador importa somente apr
   const planner = importRadarToPlanner([], radar, "brand-1"); assert.equal(planner.length, 1); assert.equal(importRadarToPlanner(planner, radar, "brand-1").length, 1);
 });
 
-test("Redigir cria ContentPlan, ContentDocument e rascunho vinculados", async () => {
-  const article = await articleVersion(); let radar = importArticlesToRadar([], [article], "brand-1"); radar = setRadarState(radar, [radar[0].id], "awaiting_approval"); radar = setRadarState(radar, [radar[0].id], "approved");
-  const item = importRadarToPlanner([], radar, "brand-1")[0]; const plan = await createOperationalPlan(item, article, undefined, "human");
-  const document = createOperationalDocument(plan, article, item); const publication = createPublicationDraft(item, plan, document, article);
-  assert.equal(document.articleDnaRef.versionId, article.versionId); assert.equal(publication.documentId, document.id); assert.equal(publication.state, "draft");
-  assert.deepEqual(plan.payload.keywordDnaRefs.map(reference => reference.versionId), article.payload.keywordReferences.map(reference => reference.keywordDnaVersionId));
-  assert.deepEqual(document.keywordDnaRefs, plan.payload.keywordDnaRefs); assert.deepEqual(document.siloDnaRef, plan.payload.siloDnaRef);
-  assert.equal(ContentDocumentSchema.safeParse(document).success, true);
+/*
+ * ===== CORTE 2 · A PUBLICAÇÃO NASCE DO DOCUMENTO, NÃO DO PLANO =====
+ *
+ * Os testes antigos exercitavam `createOperationalPlan`,
+ * `createOperationalDocument` e `createPublicationDraft` — as três pediam
+ * `PlannerItem`, e as duas últimas fabricavam artefato v1. Foram removidas com
+ * os comandos do Planejador.
+ *
+ * O que substitui não é um teste equivalente: é outro contrato. A origem
+ * declarada passou a ser `radarOrigin`, e o v2 é EXIGIDO em vez de assumido.
+ */
+const documentoV2 = (article: Awaited<ReturnType<typeof articleVersion>>, overrides: Record<string, unknown> = {}) =>
+  ContentDocumentSchema.parse({
+    schemaVersion: 2, id: `redator:brand-1:${article.payload.articleId}`, title: "Artigo do Radar", status: "aprovado",
+    brandDnaRef: { entityId: "brand-1", versionId: "brand-dna-v1", contentHash: "legacy:brand-dna" },
+    keywordDnaRefs: [{ entityId: "kw-1", versionId: "kw-v1", contentHash: "legacy:kw-1" }],
+    siloDnaRef: { entityId: "silo-1", versionId: "silo-v1", contentHash: "legacy:silo-1" },
+    articleDnaRef: { entityId: article.payload.articleId, versionId: article.versionId, contentHash: article.contentHash },
+    serpSnapshotRefs: [], evidenceRefs: [], sourceIds: [], linkMap: [], instructions: [], blocks: [], editorContent: null,
+    metadata: { slug: "artigo-do-radar", principalKeyword: "kw-1", metaTitle: "", metaDescription: "", socialTitle: "", socialDescription: "", canonical: null, indexationStatus: "noindex", plannedImages: [] },
+    radarOrigin: { radarItemId: "radar-1", articleId: article.payload.articleId, analysisVersionId: "analise-v3", analysisVersionNumber: 3,
+      evidenceBundleHash: "hash-bundle", articleDnaVersionId: article.versionId, articleDnaContentHash: article.contentHash,
+      siloDnaVersionId: "silo-v1", importedAt: "2026-09-18T00:00:00.000Z", importedBy: "human" },
+    importedContext: { source: "radar", capturedAt: "2026-09-18T00:00:00.000Z", dossier: null, editorialContext: [], visualGuidance: [], pendingDecisions: [] },
+    ...overrides,
+  });
+
+test("Publicação nasce do ContentDocument v2 e declara origem Radar, sem plano e sem item", async () => {
+  const article = await articleVersion();
+  const document = documentoV2(article);
+  const publication = createWriterPublication({ brandId: "brand-1", document, article });
+
+  assert.equal(publication.documentId, document.id);
+  assert.equal(publication.articleId, article.payload.articleId);
+  assert.equal(publication.state, "draft");
+  /* A origem é o Radar, e ela é a única que o registro novo declara. */
+  assert.equal(publication.plannerItemId, null);
+  assert.equal(publication.contentPlanVersionId, null);
+  assert.equal(publication.radarOrigin?.evidenceBundleHash, "hash-bundle");
+  /* `documentId` obrigatório no contrato, mesmo com a coluna nulável no banco. */
+  assert.ok(publication.documentId.length > 0);
+});
+
+test("documento v1 é recusado: publicação nova não nasce pelo caminho do Planejador", async () => {
+  const article = await articleVersion();
+  const v1 = { ...documentoV2(article), schemaVersion: 1 } as never;
+  assert.throws(() => createWriterPublication({ brandId: "brand-1", document: v1, article }), /v2 de origem Radar/);
 });
 
 test("status efetivo usa o último evento append-only", () => {
@@ -120,8 +159,9 @@ test("transições otimistas não recarregam automaticamente toda a área editor
 
 test("Publicações importa somente artigos aprovados no Redator", async () => {
   const article = await articleVersion(); let radar = importArticlesToRadar([], [article], "brand-1"); radar = setRadarState(radar, [radar[0].id], "awaiting_approval"); radar = setRadarState(radar, [radar[0].id], "approved");
-  const item = importRadarToPlanner([], radar, "brand-1")[0]; const plan = await createOperationalPlan(item, article, undefined, "human"); const document = createOperationalDocument(plan, article, item);
-  const draft = createPublicationDraft(item, plan, document, article); const approved = { ...draft, id: "publication:approved", articleId: "article-approved", state: "approved" as const };
+  void radar;
+  const draft = createWriterPublication({ brandId: "brand-1", document: documentoV2(article), article });
+  const approved = { ...draft, id: "publication:approved", articleId: "article-approved", state: "approved" as const };
   const result = importApprovedWriterItems([draft, approved], [draft.id, approved.id]);
   assert.equal(result[0].state, "draft"); assert.equal(result[1].state, "ready_to_export"); assert.equal(result[1].lockVersion, 2);
 });
@@ -133,12 +173,80 @@ test("convite respeita módulo, ação, expiração, revogação e ações sens�
   const expired = { ...invitation, expiresAt: new Date(Date.now() - 1000).toISOString() }; assert.equal(validateInvitationAccess(expired, "redator", "view"), false);
 });
 
+
+/**
+ * O PLANEJADOR SAIU DA ENTRADA PRINCIPAL DO REDATOR — e continua alcancavel.
+ *
+ * Com o Planejador fora do fluxo operacional, o botao dele ocupava a entrada
+ * primaria e o vazio mandava "concluir a aprovacao na etapa anterior": uma
+ * instrucao para uma etapa que o caminho atual nao atravessa. Quem abria o
+ * Redator sem rascunho era mandado ao lugar errado.
+ *
+ * A verificacao trava as tres coisas que a decisao mudou: o caminho historico
+ * existe, ele NAO esta na barra principal, e a entrada de verdade e nomeada.
+ */
+/*
+ * ===== CORTE 2 · A ENTRADA DO REDATOR É O RADAR =====
+ *
+ * Esta função exigia que o caminho do Planejador continuasse "alcançável e
+ * nomeado como histórico" DENTRO do Redator. Isso descrevia o Corte 1, onde o
+ * botão ainda existia como acesso secundário.
+ *
+ * O Corte 2 removeu o comando `start_writing` que aquele botão chamava. Manter
+ * a exigência obrigaria a tela a oferecer uma ação que o servidor recusa — e o
+ * teste estaria protegendo exatamente o defeito que o corte fechou.
+ *
+ * A rota `/planejador` continua respondendo; ela só não é mais oferecida aqui.
+ */
+function assertRadarIsTheOnlyWriterEntry(writer: string) {
+  assert.match(writer, /Importar do Radar/,
+    "o Redator precisa nomear a entrada atual");
+  assert.match(writer, /postRadarWriterHandoffBatch/,
+    "o botão precisa chamar a MESMA autoridade do Radar, e não um handoff próprio");
+  assert.doesNotMatch(writer, /Plano do Planejador|Importar do Planejador|startWriting/,
+    "nenhum caminho de escrita pelo Planejador pode voltar ao Redator");
+
+  /*
+   * A barra global do Redator deixou de ter ações. A versão anterior deste teste
+   * localizava a barra pelo marcador `data-redator-topbar-actions` para conferir
+   * que o Planejador não estava lá; com `actions: null`, a garantia ficou mais
+   * forte — não há barra de ações onde ele possa voltar.
+   *
+   * O que governa o documento mora na toolbar, e é lá que a checagem passou a
+   * olhar.
+   */
+  assert.match(writer, /data-redator-environment-tabs/, "as abas de ambiente moram na GlobalTopbar");
+  const inicio = writer.indexOf("data-redator-document-actions");
+  assert.ok(inicio > 0, "os controles do documento precisam ser localizáveis na GlobalTopbar");
+  const acoes = writer.slice(inicio, writer.indexOf("</div> : null,", inicio));
+  assert.doesNotMatch(acoes, /Planejador/,
+    "o Planejador não pode aparecer nos controles do documento");
+}
+
 test("interface operacional identifica mocks e usa o Redator Tiptap real", async () => {
   const source = await operationalModuleSources();
   const writer = await readFile(new URL("../components/editorial/professional-writer.tsx", import.meta.url), "utf8");
   const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
   assert.match(source, /Importar do Arquiteto/); assert.match(source, /Nenhum artigo importado do Radar/); assert.match(source, /Dados simulados/);
-  assert.match(source, /Importar do Redator/); assert.match(writer, /Importar do Planejador/); assert.match(writer, /Aprovar para Publicações/);
+  /*
+     * CORTE 3.5 · `Importar do Redator` era o botão local-first de Publicações.
+     * Ele gravava a tela antes da resposta do servidor. A entrada passou a ser
+     * `sendWriterToPublications`, com persistência e readback.
+     */
+    assert.doesNotMatch(source, /Importar do Redator/);
+    assertRadarIsTheOnlyWriterEntry(writer);
+  /* Aprovar o documento e entregá-lo a Publicações viraram dois atos. */
+  /*
+   * CORTE "biblioteca unificada": a aprovação virou **Finalizar artigo** e mudou
+   * de lugar — saiu do rodapé para a toolbar do documento. Manter os dois seria
+   * o controle concorrente que este corte veio eliminar.
+   *
+   * `Enviar a Publicações` continua no rodapé: finalizar e entregar são atos
+   * diferentes, e o rodapé é onde a entrega real mora.
+   */
+  assert.match(writer, /Finalizar artigo/); assert.match(writer, /Enviar a Publicações/);
+  assert.match(writer, /sendToPublications/);
+  assert.match(writer, /data-redator-document-actions/);
   assert.match(architect, /Importar do Minerador/); assert.match(architect, /WorkflowStatusBadge/);
   assert.match(writer, /useEditor/); assert.match(writer, /immediatelyRender: false/); assert.match(writer, /Salvo somente como recuperação local/); assert.match(writer, /expectedLockVersion/);
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")); assert.equal(Boolean(pkg.dependencies?.["@tiptap/react"]), true);
@@ -307,7 +415,9 @@ test("todos os popups mantêm aprovados antigos depois da importação", async (
   assert.match(pages, /approved/);
   assert.match(pages, /ready_to_export|queued|exported|published/);
   assert.match(writer, /approved/);
-  assert.match(pages, /importados (?:ficam )?bloqueados|importados permanecem vis/);
+  /* O diálogo de importação saiu com o caminho local-first; o que resta é a
+   * biblioteca projetando o documento e as abas lendo registros. */
+  assert.match(pages, /Biblioteca|projectEditorialLibrary/);
 });
 
 test("histórico de segurança cria snapshots independentes e pontos identificáveis", () => {

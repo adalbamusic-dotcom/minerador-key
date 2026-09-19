@@ -487,8 +487,8 @@ test("X e §22 · o handoff continua sendo o existente, sem contrato paralelo", 
   const workbench = await readFile(new URL("../modules/radar/radar-r3-workbench.tsx", import.meta.url), "utf8");
 
   /* A fronteira do Planejador continua sendo UMA, para os três perfis. */
-  assert.match(workbench, /\{plannerHandoff && <PlannerHandoff tab=\{plannerHandoff\} \/>\}/);
-  assert.match(workbench, /\{plannerHandoff && !areaGoogle && <PlannerHandoff/);
+  assert.match(workbench, /\{writerHandoff && <WriterHandoff tab=\{writerHandoff\} \/>\}/);
+  assert.match(workbench, /\{writerHandoff && !areaGoogle && <WriterHandoff/);
 
   /* E o modelo dos perfis é derivado do blueprint canônico — não um paralelo. */
   assert.match(page, /modeloEditorialDoPerfil/);

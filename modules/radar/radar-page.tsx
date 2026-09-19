@@ -51,7 +51,7 @@ import { radarAmazonSelectCandidates } from "@/lib/radar/amazon-candidate-select
 import { radarAmazonDedupeProducts, radarAmazonEmptyTargetFor, radarAmazonParseTargetInput, radarAmazonValidateSetup, type RadarAmazonEditorialIntent, type RadarAmazonEditorialIntentType, type RadarAmazonResearchTarget, type RadarAmazonTargetProduct } from "@/lib/radar/amazon-editorial-target";
 import { RadarAmazonTargetSetup } from "./radar-amazon-target-setup";
 import { radarAmazonEligibleCandidates } from "@/lib/radar/amazon-eligibility";
-import { postRadarPlannerHandoff, postRadarPlannerHandoffBatch, radarHandoffBatchSummary } from "@/lib/radar/planner-handoff-client";
+import { postRadarWriterHandoff, postRadarWriterHandoffBatch, radarWriterHandoffBatchSummary } from "@/lib/radar/writer-handoff-client";
 import { radarCompetitiveBlueprintViewOfAnalysis, type RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
 import { buildRadarMultimodalBlueprint, type RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
 import type { RadarSpecialistCounters } from "@/lib/radar/specialist-lifecycle";
@@ -511,8 +511,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     provenance?: { state: "IDLE" | "LOADING" | "READY" | "FAILED"; data: RadarResearchProvenancePayload | null; message: string | null };
   }>>({});
 
-  /* §25 · o semáforo da entrega ao Planejador, junto dos outros. */
-  const [plannerBusy, setPlannerBusy] = useState(false);
+  /* §25 · o semáforo da entrega ao Redator, junto dos outros. */
+  const [redatorBusy, setRedatorBusy] = useState(false);
 
   const analiseCorrenteDe = useCallback((row: RadarItem) =>
     row.analysisVersions.slice().sort((esquerda, direita) => direita.versionNumber - esquerda.versionNumber)[0] || null, []);
@@ -953,12 +953,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const localState = localStateFor(row.articleId);
     const legacyReportGenerated = Boolean(analysis?.payload.competitiveReport);
     const legacyReportApproved = analysis?.payload.status === "approved";
-    const sentToPlanner = row.state === "sent_planner" || Boolean(analysis?.payload.plannerTransfer);
+    const sentToWriter = row.state === "sent_writer" || Boolean(analysis?.payload.writerTransfer);
     const additionalEvidenceState: RadarAdditionalEvidenceState = analysis ? "not-started" : "not-needed";
     const referencesReviewed = Boolean(view?.organicResults.length) && referenceCounts.pending === 0;
     const article = pipeline.articleVersions[row.articleId];
     const publication = pipeline.operationalPublications.find(item => item.articleId === row.articleId);
-    const publicationLabel = publication?.state === "published" ? "Publicado e protegido" : publication?.state ? publication.state : row.state === "sent_planner" ? "Enviado ao Planejador" : "Ainda não publicado";
+    const publicationLabel = publication?.state === "published" ? "Publicado e protegido" : publication?.state ? publication.state : row.state === "sent_writer" ? "Enviado ao Redator" : "Ainda não publicado";
     const serpStatus = !view ? "Não coletada" : record?.isMock ? "Simulada · não aprovável" : "Coletada";
     const pagesAnalyzed = extractionPages.length;
     const normalizedReportState = normalizeRadarR6ReportState({ localState: localState.report, legacyGenerated: legacyReportGenerated, legacyApproved: legacyReportApproved });
@@ -995,7 +995,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       ...(view ? [{ label: "SERP disponível", detail: `v${view.version} · ${view.provider}`, at: view.capturedAt }] : []),
       ...(analysis ? [{ label: "Análise da amostra", detail: `${pagesAnalyzed} página(s) analisada(s)`, at: analysis.createdAt }] : []),
       ...(reportGenerated ? [{ label: "Relatório disponível", detail: radarR6ReportStateLabel(reportState), at: analysis?.createdAt || null }] : []),
-      ...(sentToPlanner ? [{ label: "Transferência registrada", detail: "Pacote disponível para o Planejador", at: analysis?.createdAt || null }] : []),
+      ...(sentToWriter ? [{ label: "Transferência registrada", detail: "Pacote disponível para o Redator", at: analysis?.createdAt || null }] : []),
     ];
     const activity = {
       /*
@@ -1011,13 +1011,13 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        */
       requestsSent: expertSummary?.counters.sent || 0,
       contributionsReceived: expertSummary?.contributionCount || 0,
-      pending: referenceCounts.pending + (reportGenerated && !reportApproved ? 1 : 0) + (r6Report?.pendingContributions.length || 0) + (reportApproved && !sentToPlanner ? 1 : 0),
+      pending: referenceCounts.pending + (reportGenerated && !reportApproved ? 1 : 0) + (r6Report?.pendingContributions.length || 0) + (reportApproved && !sentToWriter ? 1 : 0),
       lastUpdatedAt: view?.capturedAt || analysis?.createdAt || row.updatedAt || null,
       events: activityEvents,
       sourceLabel: expertSummary ? "Contribuições lidas do ExpertBrief remoto selecionado." : "Estado SERP/análise do artigo; contribuição remota ainda não foi lida.",
     };
-    const stages = buildRadarWorkbenchStages({ serpCollected: Boolean(view), serpResultCount: view?.organicResults.length || 0, referencesReviewed, referenceCounts, analysisStarted: Boolean(analysis), pagesAnalyzed, additionalEvidenceState, reportGenerated, reportApproved, sentToPlanner });
-    const baseR3 = buildRadarR3Model({ row, article: article || null, keyword: row.hydration?.principalKeyword?.keyword || resolveRowKeyword(row).keyword, silo: siloLabel(row), publication: publicationLabel, view, records, analysis: analysis || null, referenceCounts, references, analysisQueue, pagesAnalyzed, reportGenerated, reportApproved, sentToPlanner, serpStatus, latestSnapshotId: record?.id || null, reviewStatus: latestReview?.status || null, reviewNotes: latestReview?.notes || null, reviewCurrentness: reviewState.currentness, reviewedAt: latestReview?.reviewedAt || null, reviewHistory: pipeline.serpReviews.filter(review => review.articleId === row.articleId).sort((left, right) => Date.parse(right.reviewedAt) - Date.parse(left.reviewedAt)) });
+    const stages = buildRadarWorkbenchStages({ serpCollected: Boolean(view), serpResultCount: view?.organicResults.length || 0, referencesReviewed, referenceCounts, analysisStarted: Boolean(analysis), pagesAnalyzed, additionalEvidenceState, reportGenerated, reportApproved, sentToWriter });
+    const baseR3 = buildRadarR3Model({ row, article: article || null, keyword: row.hydration?.principalKeyword?.keyword || resolveRowKeyword(row).keyword, silo: siloLabel(row), publication: publicationLabel, view, records, analysis: analysis || null, referenceCounts, references, analysisQueue, pagesAnalyzed, reportGenerated, reportApproved, sentToWriter, serpStatus, latestSnapshotId: record?.id || null, reviewStatus: latestReview?.status || null, reviewNotes: latestReview?.notes || null, reviewCurrentness: reviewState.currentness, reviewedAt: latestReview?.reviewedAt || null, reviewHistory: pipeline.serpReviews.filter(review => review.articleId === row.articleId).sort((left, right) => Date.parse(right.reviewedAt) - Date.parse(left.reviewedAt)) });
     const contentRows = [
       ...baseR3.content.rows,
       ...(localState.topics.items.length ? [
@@ -1157,7 +1157,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       investigationApproved: reportApproved,
       serpCurationApproved: latestReview?.status === "approved",
       serpCurationCurrent: reviewState.currentness === "current",
-      sentToPlanner,
+      sentToWriter,
     });
     /*
      * A COLUNA "PRÓXIMA AÇÃO" FALA A LÍNGUA DA FASE 1.
@@ -1215,7 +1215,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       serp: { ...r3.serp, collection, investigation },
     };
 
-    return { article, view, analysis, latestSerpRecord: record, latestReview, reviewState, referenceCounts, analysisQueue, pagesAnalyzed, reportGenerated, reportApproved, reportState, r6Report, sentToPlanner, additionalEvidenceState, activity, nextAction: r3.nextAction, stages, publicationLabel, serpStatus, kgrStrategy, expertSummary, collection, editorialContext, researchContext, deepResearch, r3: r3Consolidado };
+    return { article, view, analysis, latestSerpRecord: record, latestReview, reviewState, referenceCounts, analysisQueue, pagesAnalyzed, reportGenerated, reportApproved, reportState, r6Report, sentToWriter, additionalEvidenceState, activity, nextAction: r3.nextAction, stages, publicationLabel, serpStatus, kgrStrategy, expertSummary, collection, editorialContext, researchContext, deepResearch, r3: r3Consolidado };
   };
   const resolvedActiveArticleId = resolveRadarWorkbenchArticleId({ selectedId: activeArticleId, rowIds: pipeline.radarItems.map(row => row.articleId) });
   const activeRadarItem = resolvedActiveArticleId ? pipeline.radarItems.find(row => row.articleId === resolvedActiveArticleId) || null : null;
@@ -1339,14 +1339,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * que a coluna responde agora é quantas verificações estão prontas e
      * quantos pontos seguem em aberto — a mesma leitura do card.
      */
-    { id: "report", header: "Relatório", value: row => rowWorkbenchData(row).reportState, width: 190, render: row => { const data = rowWorkbenchData(row); const localReport = data.reportState !== "NOT_STARTED"; const resumo = data.r3.deepResearch ? buildRadarReportSummary({ observed: data.r3.deepResearch.observed, view: data.r3.deepResearch, youtube: radarYoutubeReportEvidence(projecaoDePesquisa(row)), amazon: radarAmazonReportEvidence({ projecao: projecaoAmazon(row), payload: analiseCorrenteDe(row)?.payload || null }) }) : null; const exigidos = resumo?.checks.filter(item => item.state !== "NOT_REQUIRED").length || 0; return <div><strong className="block text-sm text-foreground">{localReport ? radarR6ReportStateLabel(data.reportState) : data.r3.report.status}</strong><span className="mt-1 block text-sm text-text-muted">{resumo ? `${resumo.checks.filter(item => item.state === "READY").length} de ${exigidos} pronta(s) · ${resumo.blockers.length} em aberto` : `${data.r3.report.needs} necessidade(s) · ${data.r3.report.sentToPlanner ? "Planejador" : "Não enviado"}`}</span></div>; } },
+    { id: "report", header: "Relatório", value: row => rowWorkbenchData(row).reportState, width: 190, render: row => { const data = rowWorkbenchData(row); const localReport = data.reportState !== "NOT_STARTED"; const resumo = data.r3.deepResearch ? buildRadarReportSummary({ observed: data.r3.deepResearch.observed, view: data.r3.deepResearch, youtube: radarYoutubeReportEvidence(projecaoDePesquisa(row)), amazon: radarAmazonReportEvidence({ projecao: projecaoAmazon(row), payload: analiseCorrenteDe(row)?.payload || null }) }) : null; const exigidos = resumo?.checks.filter(item => item.state !== "NOT_REQUIRED").length || 0; return <div><strong className="block text-sm text-foreground">{localReport ? radarR6ReportStateLabel(data.reportState) : data.r3.report.status}</strong><span className="mt-1 block text-sm text-text-muted">{resumo ? `${resumo.checks.filter(item => item.state === "READY").length} de ${exigidos} pronta(s) · ${resumo.blockers.length} em aberto` : `${data.r3.report.needs} necessidade(s) · ${data.r3.report.sentToWriter ? "Redator" : "Não enviado"}`}</span></div>; } },
     { id: "nextAction", header: "Próxima ação", value: row => operationalRowFor(row).nextAction, width: 235, render: row => <span className="block whitespace-normal text-sm leading-5 text-foreground">{operationalRowFor(row).nextAction}</span> },
     { id: "format", header: "Formato", value: row => row.format, filterOptions: [...new Set(pipeline.radarItems.map(item => item.format))].map(value => ({ label: value, value })), width: 110 },
     /*
      * §15 — O MESMO ESTADO NA PLANILHA E NO CARD.
      *
      * A coluna mostrava `row.state`: o estado do fluxo editorial persistido,
-     * que descreve a esteira Marca→Planejador e não a investigação. Daí a
+     * que descreve a esteira Marca→Redator e não a investigação. Daí a
      * linha dizer "Pesquisa pendente" enquanto o card, na mesma tela, dizia
      * "Finalizado". Os dois estavam certos sobre coisas diferentes — e quem
      * opera não tem como saber disso.
@@ -1363,7 +1363,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const data = rowWorkbenchData(row);
     const local = localStateFor(row.articleId);
     const topicCounts = radarR6TopicReviewCounts(local.topics.items, local.topics.reviewedIds);
-    return { articleId: row.articleId, keywordReady: resolveRowKeyword(row).ok, serpCollected: Boolean(data.latestSerpRecord?.origin === "real" && data.latestSerpRecord.research) || ["WAITING_REVIEW", "COMPLETED"].includes(local.serp.state || ""), serpReviewed: data.latestReview?.status === "approved" && data.reviewState.currentness === "current", analysisStarted: Boolean(data.analysis), reportGenerated: data.reportGenerated || data.reportState !== "NOT_STARTED", reportApproved: data.reportApproved, sentToPlanner: data.sentToPlanner, rowState: row.state, topicsState: local.topics.state, topicsReviewed: areRadarR5TopicsReviewed(local.topics.items, local.topics.reviewedIds), topicsTotal: topicCounts.total, topicsReviewedCount: topicCounts.reviewed, specialistState: local.specialist, serpQueueState: local.serp.state, amazonState: local.amazon };
+    return { articleId: row.articleId, keywordReady: resolveRowKeyword(row).ok, serpCollected: Boolean(data.latestSerpRecord?.origin === "real" && data.latestSerpRecord.research) || ["WAITING_REVIEW", "COMPLETED"].includes(local.serp.state || ""), serpReviewed: data.latestReview?.status === "approved" && data.reviewState.currentness === "current", analysisStarted: Boolean(data.analysis), reportGenerated: data.reportGenerated || data.reportState !== "NOT_STARTED", reportApproved: data.reportApproved, researchFinalized: Boolean(radarPrimaryProfileOfAnalysis(analiseCorrenteDe(row)?.payload || null)), sentToWriter: data.sentToWriter, rowState: row.state, topicsState: local.topics.state, topicsReviewed: areRadarR5TopicsReviewed(local.topics.items, local.topics.reviewedIds), topicsTotal: topicCounts.total, topicsReviewedCount: topicCounts.reviewed, specialistState: local.specialist, serpQueueState: local.serp.state, amazonState: local.amazon };
   };
   const selectedSnapshotsFor = (rows: RadarItem[]) => rows.map(bulkSnapshotFor);
   const setCollectionState = (articleId: string, state: RadarSerpCollectionState, blockedReason: string | null) =>
@@ -1385,7 +1385,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     if (id === "CONSOLIDATE_MODEL" || id === "GENERATE_REPORT") return void generateReportForArticle();
     if (id === "REVIEW_INVESTIGATION") return reviewReportForArticle();
     if (id === "APPROVE_INVESTIGATION") return void approveReportForArticle();
-    if (id === "PREPARE_PLANNER") { setNotice("Use a ação de envio ao Planejador na planilha para transferir a investigação aprovada."); return; }
+    if (id === "PREPARE_PLANNER") { setNotice("Use a ação de envio ao Redator na planilha para transferir a investigação aprovada."); return; }
   };
   /*
    * A COLETA É EXPLÍCITA E ÚNICA.
@@ -1457,18 +1457,18 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   /**
    * ============ §4 · O LOTE COORDENA N HANDOFFS ============
    *
-   * Ele chamava `importApprovedToPlanner`, que move a esteira e nada mais:
+   * Ele chamava `importApprovedToPlanner`, que movia a esteira e nada mais:
    * sem dossiê, sem prontidão, sem identidade de ArticleDNA. Um artigo que
-   * saía por ali chegava ao Planejador SEM evidência atrás, e o item aparecia
+   * saía por ali chegava ao destino SEM evidência atrás, e o item aparecia
    * lá como qualquer outro.
    *
    * Agora ele repete a MESMA porta do botão individual — e junta os
    * desfechos, um por artigo.
    */
-  const sendToPlanner = async (articleIds: string[]) => {
+  const sendToWriter = async (articleIds: string[]) => {
     if (!selectedBrandId) return [];
-    history.capture(`Enviar ${articleIds.length} artigo(s) ao Planejador`);
-    const resultados = await postRadarPlannerHandoffBatch({ brandId: selectedBrandId, articleIds });
+    history.capture(`Enviar ${articleIds.length} artigo(s) ao Redator`);
+    const resultados = await postRadarWriterHandoffBatch({ brandId: selectedBrandId, articleIds });
     /* A tela relê cada artigo: o estado de envio é do servidor. */
     for (const item of resultados) await pipeline.reloadRadarAnalysis(item.articleId).catch(() => {});
     return resultados;
@@ -1778,7 +1778,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   /**
    * ====== §7 e §19 · O BLUEPRINT CANÔNICO, MONTADO UMA VEZ ======
    *
-   * Área Pesquisa, cards, Relatório e o futuro handoff ao Planejador leem daqui.
+   * Área Pesquisa, cards, Relatório e o handoff ao Redator leem daqui.
    * Montá-lo dentro de componentes React repetiria, com um dado mais caro, o
    * defeito que o 1.1 fechou: quatro leituras divergindo sobre a mesma
    * investigação, cada uma defensável isolada.
@@ -2315,7 +2315,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    *
    * ==================== QUEM MONTA É O SERVIDOR ====================
    *
-   * §1 e §16: o dossiê exportado tem de ser o MESMO que vai ao Planejador, com
+   * §1 e §16: o dossiê exportado tem de ser o MESMO que vai ao Redator, com
    * o mesmo hash. Montá-lo aqui abriria uma segunda resolução — e a primeira
    * divergência apareceria num artigo já escrito.
    */
@@ -2355,19 +2355,30 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     }
   };
 
-  const fronteiraDoPlanejador = (row: RadarItem | null) => {
+  const fronteiraDoRedator = (row: RadarItem | null) => {
     const analise = row ? analiseCorrenteDe(row)?.payload || null : null;
-    const entregue = analise?.plannerBundle || null;
+    /*
+     * ===== O RECIBO É O DOCUMENTO, não uma versão de análise =====
+     *
+     * A tela lia `writerBundle` da análise. Esse recibo deixou de existir:
+     * gravá-lo obrigava a reescrever ~9,77 MB de histórico a cada entrega, e o
+     * Postgres cancelava a escrita.
+     *
+     * Quem responde "foi entregue?" agora é a esteira — `sent_writer` —, que o
+     * servidor move só depois de confirmar o documento no readback. Continua
+     * sendo prova remota, e não estado desta aba.
+     */
+    const entregue = analise?.writerBundle || null;
     const perfil = radarPrimaryProfileOfAnalysis(analise);
     /* A esteira responde pelo destino: o dossiê sozinho não prova importação. */
-    const noPlanejador = row ? row.state === "sent_planner" : false;
+    const noRedator = row ? row.state === "sent_writer" : false;
 
     /*
      * ===== 1.3 · §11 · RANKING SEM CANDIDATO NÃO ATRAVESSA A FRONTEIRA =====
      *
      * Um "Top 10" cujo alvo não encontrou produto compatível nenhum não é um
      * artigo pronto: é uma configuração a corrigir. Deixá-lo seguir entregaria
-     * ao Planejador um ranking com lista vazia — e ele chegaria lá com o mesmo
+     * ao Redator um ranking com lista vazia — e ele chegaria lá com o mesmo
      * peso de uma investigação real.
      *
      * A recusa do ANALYZE (1.2 · §5) já impede a GRAVAÇÃO do blueprint; esta
@@ -2395,24 +2406,22 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * É a retomada: o servidor reconhece o dossiê e completa só a transição
        * que falta, sem duplicar nada.
        */
-      eligible: Boolean(perfil) && !(entregue && noPlanejador) && !rankingSemCandidato,
+      eligible: Boolean(perfil) && !noRedator && !rankingSemCandidato,
       blockedReason: rankingSemCandidato
-        ? "Nenhum produto compatível com o alvo foi encontrado: revise o tipo de produto e o filtro de marca antes de enviar ao Planejador."
+        ? "Nenhum produto compatível com o alvo foi encontrado: revise o tipo de produto e o filtro de marca antes de enviar ao Redator."
         : perfil
-          ? entregue && !noPlanejador
-            ? "O dossiê está gravado, mas a transferência ao Planejador não foi concluída. Reenvie para completá-la."
-            : null
-          : "Finalize a investigação para enviar o dossiê ao Planejador.",
+          ? null
+          : "Finalize a investigação para enviar o dossiê ao Redator.",
       /*
        * ============ §12 · A AUTORIDADE É REMOTA ============
        *
-       * `plannerBundle` é a versão gravada da análise e `sent_planner` é o
+       * `writerBundle` é a versão gravada da análise e `sent_writer` é o
        * estado do item na esteira — os dois vêm do servidor. O estado React
        * nunca prova importação: ele descreve o que esta aba acha que
        * aconteceu, e duas pessoas veriam entregas diferentes do mesmo artigo.
        */
-      sent: Boolean(entregue) && noPlanejador,
-      sentAt: entregue?.sentAt || null,
+      sent: noRedator,
+      sentAt: entregue?.sentAt || (noRedator ? row?.updatedAt || null : null),
       /*
        * §4 · O ESTADO INTERMEDIÁRIO É DITO, não escondido.
        *
@@ -2420,9 +2429,9 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * falhou. Mostrar "enviado" ali mentiria; mostrar nada faria a pessoa
        * clicar de novo sem saber o que esperar.
        */
-      destinationLabel: noPlanejador ? "Disponível no Planejador" : null,
-      busy: plannerBusy,
-      onSend: () => void enviarAoPlanejador(),
+      destinationLabel: noRedator ? "Rascunho disponível no Redator" : null,
+      busy: redatorBusy,
+      onSend: () => void enviarAoRedator(),
     };
   };
 
@@ -2432,11 +2441,11 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * A tela manda a intenção e relê o banco. Marcar "enviado" porque o clique
    * aconteceu faria um artigo aparecer como entregue sem nunca ter chegado.
    */
-  const enviarAoPlanejador = async () => {
+  const enviarAoRedator = async () => {
     const target = activeRadarItem;
-    if (!target) { setNotice("Selecione um artigo antes de enviar ao Planejador."); return; }
+    if (!target) { setNotice("Selecione um artigo antes de enviar ao Redator."); return; }
 
-    setPlannerBusy(true);
+    setRedatorBusy(true);
     try {
       /*
        * §2 · A MESMA PORTA DO LOTE.
@@ -2444,11 +2453,11 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * Um artigo ou trinta atravessam por aqui. Um caminho próprio para o
        * botão individual seria a segunda autoridade de novo, com outro nome.
        */
-      const resultado = await postRadarPlannerHandoff({ brandId: target.brandId, articleId: target.articleId });
+      const resultado = await postRadarWriterHandoff({ brandId: target.brandId, articleId: target.articleId });
       await pipeline.reloadRadarAnalysis(target.articleId);
       setNotice(resultado.message);
     } finally {
-      setPlannerBusy(false);
+      setRedatorBusy(false);
     }
   };
 
@@ -2684,7 +2693,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * ============ §9 · FINALIZE É IDEMPOTENTE ============
        *
        * Clicar de novo sobre uma investigação congelada tirava OUTRA fotografia:
-       * `finalizedAt` mudava, nascia mais uma versão da análise, e o Planejador
+       * `finalizedAt` mudava, nascia mais uma versão da análise, e o destino
        * veria duas investigações onde houve uma. A decisão sai da autoridade
        * canônica, que já sabe se existe fotografia válida.
        */
@@ -3938,12 +3947,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     if (operation === "report") return prepareReportBatch(eligible);
     if (operation === "specialist") return setNotice("Envio bloqueado: a fundação remota Telegram não foi atravessada nesta rodada.");
     if (operation === "reviewSpecialist") return reviewSpecialistSelected(eligible);
-    if (operation === "planner") {
+    if (operation === "writer") {
       /*
        * §8 · "8 enviados" sozinho, num lote de 11, esconderia três artigos que
        * ninguém vai reabrir. As três contagens pedem ações diferentes.
        */
-      return void sendToPlanner(eligible).then(resultados => setNotice(radarHandoffBatchSummary(resultados)));
+      return void sendToWriter(eligible).then(resultados => setNotice(radarWriterHandoffBatchSummary(resultados)));
     }
   };
   const importable = approved.map(version => { const articleVersion = version as VersionEnvelope<ArticleDNA>; const suggestedSlug = String((articleVersion.payload as unknown as { suggestedSlug?: string }).suggestedSlug || ""); const alreadyImported = pipeline.radarItems.some(item => item.articleId === articleVersion.payload.articleId); return { ...articleVersion, payload: { ...articleVersion.payload, suggestedSlug }, suggestedSlug, id: articleVersion.versionId, alreadyImported, importStatus: alreadyImported ? "sent_radar" : "approved" }; });
@@ -4052,7 +4061,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     * `localStorage` derrubava do estado uma coleta que o DataForSEO já tinha
     * entregue e cobrado. A frase agora nomeia o navegador como responsável e
     * afirma, na mesma linha, que a pesquisa não precisa ser refeita.
-    */}{pipeline.localRecoveryWarning && <div className="shrink-0 border-b border-pending/40 bg-pending/10 px-4 py-2 text-sm text-foreground" role="status" data-testid="radar-local-recovery-warning">{pipeline.localRecoveryWarning}</div>}<RadarWorkbench model={activeWorkbenchData?.r3 || null} articleId={activeRadarItem?.articleId || null} onReloadLibrary={reloadVideoLibrary} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} brandId={selectedBrandId} videoSources={{ ...vistaDeVideos, briefs: videoBriefsDoArtigo.briefs, briefsUnavailableReason: videoBriefsDoArtigo.reason, investigationFinalized: videoBriefsDoArtigo.finalizada, frozenBriefCount: videoBriefsDoArtigo.frozenBriefCount }} onRunMatching={runVideoMatching} onRegisterVideoSources={registerVideoSources} onExtractVideoText={extractVideoText} onFetchVideoMetadata={fetchVideoMetadata} onProvideVideoTranscript={provideVideoTranscript} onUploadVideoMedia={uploadVideoMedia} onLibraryAction={runVideoLibraryAction} onReportGenerate={() => void generateReportForArticle()} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onStartDeepResearch={() => void startDeepResearch()} plannerHandoff={fronteiraDoPlanejador(activeRadarItem)} amazonSearch={{
+    */}{pipeline.localRecoveryWarning && <div className="shrink-0 border-b border-pending/40 bg-pending/10 px-4 py-2 text-sm text-foreground" role="status" data-testid="radar-local-recovery-warning">{pipeline.localRecoveryWarning}</div>}<RadarWorkbench model={activeWorkbenchData?.r3 || null} articleId={activeRadarItem?.articleId || null} onReloadLibrary={reloadVideoLibrary} expertContext={activeExpertContext} refreshing={Boolean(busyArticleId)} reviewingSerp={Boolean(reviewingArticleId)} serpAction={serpAction && serpAction.articleId === activeRadarItem?.articleId ? serpAction.kind : null} onAnalyzeSerpSelection={() => void analyzeSerpSelection()} onTopicChange={updateTopicForArticle} onTopicRemove={removeTopicForArticle} onTopicMove={moveTopicForArticle} onTopicAdd={addTopicForArticle} onTopicReview={reviewTopicForArticle} onTopicUndo={undoTopicsForArticle} onTopicRedo={redoTopicsForArticle} canUndoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.past.length)} canRedoTopics={Boolean(activeRadarItem && topicHistoryByArticle[activeRadarItem.articleId]?.future.length)} onTopicAdjacent={focusTopicAdjacent} topicQueuePosition={activeTopicQueuePosition && activeTopicQueuePosition > 0 ? activeTopicQueuePosition : undefined} topicQueueTotal={pendingTopicRows.length || undefined} brandId={selectedBrandId} videoSources={{ ...vistaDeVideos, briefs: videoBriefsDoArtigo.briefs, briefsUnavailableReason: videoBriefsDoArtigo.reason, investigationFinalized: videoBriefsDoArtigo.finalizada, frozenBriefCount: videoBriefsDoArtigo.frozenBriefCount }} onRunMatching={runVideoMatching} onRegisterVideoSources={registerVideoSources} onExtractVideoText={extractVideoText} onFetchVideoMetadata={fetchVideoMetadata} onProvideVideoTranscript={provideVideoTranscript} onUploadVideoMedia={uploadVideoMedia} onLibraryAction={runVideoLibraryAction} onReportGenerate={() => void generateReportForArticle()} onReportReview={reviewReportForArticle} onReportApprove={() => void approveReportForArticle()} onStartDeepResearch={() => void startDeepResearch()} writerHandoff={fronteiraDoRedator(activeRadarItem)} amazonSearch={{
       run: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.amazonSearch || null : null,
       plannedQueries: planoAmazon(activeRadarItem).queries.length,
       busy: amazonBusy,
@@ -4218,7 +4227,7 @@ export function LegacyRadarProfile({ row, article, pipeline, articleHref, archit
       <section className={profileSection}><h3 className="text-base font-semibold text-foreground">Análise SERP</h3>{analysis && serp ? <><dl className="mt-4 grid gap-3 sm:grid-cols-2"><Field label="Amostra" value={analysis.payload.extractions.length ? `${analysis.payload.extractions.length} página(s)` : "Ainda não analisada"}/><Field label="Intenção observada" value={serp.diagnostic?.dominantIntent || "Ainda não disponível"}/><Field label="Formatos dominantes" value={serp.diagnostic?.dominantFormats.join(" · ") || "Ainda não disponíveis"}/><Field label="Conflitos" value={serp.diagnostic?.possibleConflicts.join(" · ") || "Nenhum registrado"}/></dl>{report ? <><p className="mt-3 text-sm text-text-muted">Necessidades consolidadas: <strong className="text-foreground">{report.needs.length}</strong> · limitações registradas: {report.summary.limitations.length}.</p><p className="mt-2 text-sm text-text-muted">{report.summary.text}</p></> : <p className="mt-3 text-sm text-warning">A análise foi iniciada, mas o relatório SERP ainda aguarda a amostra.</p>}</> : <p className="mt-3 text-sm text-text-muted">Aguardando análise SERP. Necessidades e lacunas não são inferidas antes da amostra.</p>}</section>
       <section className={profileSection}><h3 className="text-base font-semibold text-foreground">Evidências adicionais</h3><p className="mt-1 text-sm text-text-muted">Fluxo opcional separado da análise SERP.</p><dl className="mt-4 grid gap-3 sm:grid-cols-2"><Field label="Especialista" value="Não selecionado"/><Field label="Canal" value="Telegram não consumido nesta visão"/><Field label="Conteúdo existente" value="Não utilizado"/><Field label="Contribuições" value="Não iniciadas"/></dl><p className="mt-4 text-sm text-text-muted">O painel com fixtures de especialista permanece na etapa Evidências adicionais da área detalhada. Nenhuma evidência é criada apenas por expandir a linha.</p></section>
     </div>
-    <section className={profileSection}><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-base font-semibold text-foreground">Relatório e decisão</h3><p className="mt-1 text-sm text-text-muted">Consolidação do Radar e disponibilidade para o Planejador.</p></div><span className="rounded-full border border-divider px-3 py-1 text-xs text-text-muted">{reportStatus}</span></div><dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="Relatório" value={report ? `v${analysis?.versionNumber}` : "Não gerado"}/><Field label="Aprovação" value={analysis?.payload.status === "approved" ? "Aprovado por decisão humana" : "Aguardando aprovação"}/><Field label="Planejador" value={pipeline.plannerItems.some(item => item.articleId === row.articleId) || row.state === "sent_planner" ? "Recebido" : "Não enviado"}/><Field label="Próxima ação" value={!serp ? "Coletar SERP" : !analysis ? "Iniciar análise SERP" : !report ? "Gerar relatório" : analysis.payload.status === "approved" ? "Consultar histórico" : "Revisar e aprovar"}/></dl></section>
+    <section className={profileSection}><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-base font-semibold text-foreground">Relatório e decisão</h3><p className="mt-1 text-sm text-text-muted">Consolidação do Radar e disponibilidade para o Redator.</p></div><span className="rounded-full border border-divider px-3 py-1 text-xs text-text-muted">{reportStatus}</span></div><dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="Relatório" value={report ? `v${analysis?.versionNumber}` : "Não gerado"}/><Field label="Aprovação" value={analysis?.payload.status === "approved" ? "Aprovado por decisão humana" : "Aguardando aprovação"}/><Field label="Redator" value={row.state === "sent_writer" ? "Recebido" : "Não enviado"}/><Field label="Próxima ação" value={!serp ? "Coletar SERP" : !analysis ? "Iniciar análise SERP" : !report ? "Gerar relatório" : analysis.payload.status === "approved" ? "Consultar histórico" : "Revisar e aprovar"}/></dl></section>
     <details className={profileSection}><summary className="cursor-pointer text-sm font-semibold text-foreground">Proveniência e IDs técnicos</summary><dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3"><Field label="brandId" value={row.brandId}/><Field label="RadarItem" value={row.id}/><Field label="articleId" value={row.articleId}/><Field label="articleDnaVersionId" value={row.articleDnaVersionId}/><Field label="SERP snapshot" value={record?.id || "Não disponível"}/><Field label="Provider" value={serp?.provider || "Não disponível"}/><Field label="Capturado em" value={serp?.capturedAt || "Não disponível"}/><Field label="Origem da linha" value={row.origin}/><Field label="Atualizado em" value={row.updatedAt}/></dl></details>
     <details className={profileSection}><summary className="cursor-pointer text-sm font-semibold text-foreground">Revisão completa do snapshot</summary><div className="mt-4"><RadarDetail row={row} article={article} pipeline={pipeline}/></div></details>
   </div>;

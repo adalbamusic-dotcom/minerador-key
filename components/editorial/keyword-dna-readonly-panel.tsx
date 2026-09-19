@@ -1,6 +1,5 @@
 "use client";
 
-import type { KeywordContextualPresentation } from "@/lib/minerador/keyword-contextual-presentation";
 import {
   projectKeywordDnaForArchitect,
   type KeywordDnaProjectionField,
@@ -69,15 +68,13 @@ function ProfileSection({ section }: { section: KeywordDnaProjectionSection }) {
 export function KeywordDnaReadonlyPanel({
   keyword,
   role,
-  presentation,
   headerExtra,
 }: {
   keyword: KeywordDnaProjectionInput;
   role?: string;
-  presentation?: KeywordContextualPresentation | null;
   headerExtra?: React.ReactNode;
 }) {
-  const projection = projectKeywordDnaForArchitect(keyword, presentation);
+  const projection = projectKeywordDnaForArchitect(keyword);
 
   return (
     <section
@@ -113,24 +110,6 @@ export function KeywordDnaReadonlyPanel({
           )}
 
           {projection.sections.map(item => <ProfileSection key={item.id} section={item} />)}
-
-          <section data-section="apresentacao-contextual" aria-label="Apresentação contextual da marca" className="border-t border-divider pt-3">
-            <p className="text-sm font-semibold uppercase tracking-wide text-foreground">Apresentação contextual da marca</p>
-            {projection.presentation.available ? (
-              <>
-                <p className="mt-1 text-sm text-text-muted">
-                  {projection.presentation.versionNumber !== null ? `Apresentação contextual · v${projection.presentation.versionNumber}` : "Apresentação contextual recebida"}
-                  {projection.presentation.brandVoiceApplied ? " · Voz da Marca aplicada" : ""}
-                </p>
-                {projection.presentation.text
-                  ? <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">{projection.presentation.text}</p>
-                  : <p className="mt-2 text-sm leading-6 text-text-muted">{projection.presentation.note}</p>}
-                <ProfileFields fields={projection.presentation.provenance} />
-              </>
-            ) : (
-              <p className="mt-1 text-sm leading-6 text-text-muted">{projection.presentation.note}</p>
-            )}
-          </section>
 
           {projection.technical.length > 0 && (
             <details data-section="proveniencia-tecnica" className="border-t border-divider pt-3">

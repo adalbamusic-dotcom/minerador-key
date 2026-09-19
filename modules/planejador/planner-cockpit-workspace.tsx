@@ -1,13 +1,20 @@
 "use client";
 
+import type { ContentDocumentV1 } from "@/lib/arquiteto/contracts";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";
 import { VersionedBrandDNASchema } from "@/lib/arquiteto/contracts";
 import type { ContentPlan, ContentPlanDetails, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import type { PlannerItem } from "@/lib/editorial/operational-flow";
-import { contentPlanApprovalIssues } from "@/lib/editorial/operational-flow";
+/*
+ * CORTE 2 · import direto do módulo dono, e não pelo núcleo do pipeline.
+ *
+ * Isto chegava aqui por um re-export em `lib/editorial/operational-flow.ts`, e
+ * era o último fio que fazia o NÚCLEO do pipeline depender de `lib/planejador`.
+ * A função continua sendo usada — para VALIDAR e exibir, nunca para gravar.
+ */
+import { contentPlanApprovalIssues } from "@/lib/planejador/content-plan";
 import { useBrand } from "@/components/brand-context";
 import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
 import { hydratePlanner, UNHYDRATED_REFERENCE } from "@/lib/planejador/hydration";
@@ -72,13 +79,11 @@ function KeywordStrategyPanel({ strategy, hydration }: { strategy: ReturnType<ty
 export function PlannerCockpitWorkspace({ contentPlanId }: { contentPlanId: string }) {
   const { selectedBrandId, activeBrandRef } = useBrand();
   const pipeline = useEditorialPipeline();
-  const { data: session } = useSession();
   const plan = useMemo(() => findPlan(pipeline.contentPlans, decodeURIComponent(contentPlanId)), [contentPlanId, pipeline.contentPlans]);
   const item = useMemo(() => plan ? findItem(pipeline.plannerItems, plan) : null, [pipeline.plannerItems, plan]);
   const [step, setStep] = useState<CockpitStep>("context");
   const [draft, setDraft] = useState<ContentPlanDetails | null>(null);
   const [notice, setNotice] = useState("");
-  const [saving, setSaving] = useState(false);
   useNoticeBridge({ notice, module: "planejador", area: "Cockpit do Planejador", title: "Planejador · Cockpit", fallbackSeverity: "INFO" });
   const [brandDna, setBrandDna] = useState<PlannerBrandDnaEnvelope | null>(null);
   const [brandDnaLoading, setBrandDnaLoading] = useState(false);
@@ -113,7 +118,9 @@ export function PlannerCockpitWorkspace({ contentPlanId }: { contentPlanId: stri
   const article = item ? pipeline.articleVersions[item.articleId] || null : null;
   const silo = item?.siloId ? pipeline.siloVersions[item.siloId] || null : null;
   const siloPage = item?.unitType === "silo_page" ? pipeline.siloPageVersions[item.articleId] || null : null;
-  const document = item ? Object.values(pipeline.documents).find(candidate => candidate.articleDnaRef.entityId === item.articleId) || null : null;
+  // O Planejador so enxerga documento de origem PLANO. Documento vindo do
+  // Radar nao tem plano, e mostra-lo aqui sugeriria um vinculo que nao existe.
+  const document = item ? Object.values(pipeline.documents).find((candidate): candidate is ContentDocumentV1 => candidate.schemaVersion === 1 && candidate.articleDnaRef.entityId === item.articleId) || null : null;
   const publication = item ? pipeline.operationalPublications.find(candidate => candidate.articleId === item.articleId) || null : null;
   const radar = item ? pipeline.radarItems.find(candidate => candidate.id === item.radarItemId || candidate.articleId === item.articleId) || null : null;
   const legacyBriefing = item ? pipeline.snapshot?.briefings.find(candidate => candidate.id === item.articleId) || null : null;
@@ -132,9 +139,17 @@ export function PlannerCockpitWorkspace({ contentPlanId }: { contentPlanId: stri
   const updateStrategy = (patch: Partial<ContentPlanDetails["strategy"]>) => setDraft(current => current ? { ...current, strategy: { ...current.strategy, ...patch } } : current);
   const updateCta = (patch: Partial<ContentPlanDetails["cta"]>) => setDraft(current => current ? { ...current, cta: { ...current.cta, ...patch } } : current);
   const applyBrandContext = () => { if (!draft || !strategicContext) return; setDraft(current => current ? applyStrategicContext({ details: current, context: strategicContext, selectedSourceIds: selectedContextSourceIds }) : current); setNotice("Contexto da marca aplicado à cópia de trabalho. Revise as decisões antes de salvar."); };
-  const save = async () => { setSaving(true); try { const result = await pipeline.savePlannerPlan(item.id, draft, session?.user?.email || session?.user?.id || "usuario-local"); setNotice(result.created ? "Sucessora salva e aguardando revisão humana." : "Nenhuma mudança material; a versão ativa foi preservada."); } catch (error) { setNotice(error instanceof Error ? error.message : "Não foi possível salvar o plano."); } finally { setSaving(false); } };
-  const approve = () => { if (!view.canApprove) { setStep("review"); setNotice(`Não é possível aprovar. Resolva ${view.alertCounts.bloqueios} pendência(s) obrigatória(s).`); return; } pipeline.approvePlannerItems([item.id], session?.user?.email || "human"); setNotice("A aprovação humana foi solicitada para a versão ativa."); };
-  const sendWriter = async () => { try { const result = await pipeline.startWriting(item.id); setNotice(`Conteúdo do artigo ${result.documentId} disponível no Redator.`); } catch (error) { setNotice(error instanceof Error ? error.message : "Não foi possível enviar ao Redator."); } };
+  /*
+   * ===== CORTE 2 · O COCKPIT É SOMENTE LEITURA =====
+   *
+   * `save`, `approve` e `sendWriter` chamavam `savePlannerPlan`,
+   * `approvePlannerItems` e `startWriting`. Os três comandos saíram do contrato
+   * e da rota; os botões saíram junto. O cockpit continua abrindo o plano já
+   * gravado — ele não cria sucessora, não aprova e não abre o Redator.
+   *
+   * A entrada do Redator é "Importar do Radar", no próprio Redator, e ela chama
+   * `sendRadarToWriter`: a mesma autoridade que o botão do Radar usa.
+   */
   const goNext = () => { const index = steps.findIndex(current => current.id === step); setStep(steps[Math.min(index + 1, steps.length - 1)].id); };
   const goAction = (target: CockpitStep = view.nextAction.step) => setStep(target);
   const radarEvidence = readPlannerRadarEvidence(view.details.radar);
@@ -143,7 +158,7 @@ export function PlannerCockpitWorkspace({ contentPlanId }: { contentPlanId: stri
     <header className="sticky top-0 z-30 mb-4 border-b border-divider bg-background/95 pb-4 backdrop-blur">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div><Link href={plannerHref} className="text-sm font-semibold text-context-accent">← Planejador</Link><h1 className="mt-2 text-2xl font-bold text-foreground">Cockpit editorial · {item.unitType === "silo_page" ? "Página do silo" : "Artigo"}</h1><p className="mt-1 text-sm text-text-muted">{item.title} · versão {plan.versionNumber}</p></div>
-        <div className="flex flex-wrap gap-2"><button type="button" className={button} disabled={saving} onClick={() => void save()}>{saving ? "Salvando…" : "Salvar cópia"}</button><button type="button" className={button} onClick={() => setStep("review")}>Validar plano</button><button type="button" className={button} disabled={!view.canApprove} onClick={approve}>Aprovar versão</button>{["approved", "sent_writer"].includes(item.state) && <button type="button" className={button} onClick={() => void sendWriter()}>{document ? "Abrir no Redator" : "Enviar ao Redator"}</button>}</div>
+        <div className="flex flex-wrap gap-2"><button type="button" className={button} onClick={() => setStep("review")}>Validar plano</button><span className="self-center text-sm text-text-muted">Somente leitura: o Planejador saiu do pipeline e não grava mais.</span></div>
       </div>
       <nav className="mt-4 flex gap-2 overflow-x-auto" aria-label="Etapas do cockpit">{steps.map(current => <button type="button" key={current.id} className={`min-w-[170px] rounded-md border px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${step === current.id ? "border-context-accent bg-selected text-foreground" : "border-divider bg-surface-subtle text-text-muted hover:bg-surface-elevated"}`} onClick={() => setStep(current.id)}><span className="block text-sm font-bold">{current.label}</span><span className="mt-1 block text-sm">{current.description}</span></button>)}</nav>
     </header>

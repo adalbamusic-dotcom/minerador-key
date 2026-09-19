@@ -5,7 +5,6 @@ import {
   processorKgrStateLabel,
   processorMetricStateLabel,
 } from "../lib/minerador/processor-revalidation.ts";
-import { buildSemanticReviewContext } from "../lib/minerador/semantic-review.ts";
 
 const discoverySemantic = {
   dna_origem: "preliminar_discovery",
@@ -111,26 +110,21 @@ test("KGR só fica calculável quando os dois providers têm medição do Proces
   assert.equal(derived.kgr.score, 2.5455);
 });
 
-test("R5 recebe o estado de revalidação e não apresenta KGR importado como fato atual", () => {
-  const context = buildSemanticReviewContext({
-    keyword: "portaria remota para condomínio pequeno",
-    intent: "Informativo",
-    volume_search: 90,
-    results_allintitle: 336,
-    kgr_score: 3.7333,
-    analise_semantica: discoverySemantic,
+test("métrica importada não é apresentada como fato atual e não gera KGR", () => {
+  // Este caso nasceu como asserção sobre o contexto do R5. O R5 foi removido;
+  // a invariante que importava nunca foi dele, e sim da revalidação: volume e
+  // resultado vindos da Descoberta permanecem "importados" e não produzem KGR.
+  const derived = deriveProcessorRevalidation({
+    semantic: discoverySemantic,
+    volumeSearch: 90,
+    resultsAllintitle: 336,
   });
 
-  assert.equal(context.googleAds.valid, false);
-  assert.equal(context.googleAds.validationState, "imported");
-  assert.equal(context.googleAds.source, "discovery");
-  assert.equal(context.googleAds.volume, 90);
-  assert.equal(context.dataForSeo.valid, false);
-  assert.equal(context.dataForSeo.validationState, "imported");
-  assert.equal(context.dataForSeo.source, "discovery");
-  assert.equal(context.dataForSeo.allintitle, 336);
-  assert.equal(context.dataForSeo.keywordDifficulty, 38);
-  assert.equal(context.kgr.score, null);
-  assert.equal(context.kgr.persistedScore, 3.7333);
-  assert.equal(context.kgr.inputSource, "imported");
+  assert.equal(derived.discoveryImported, true);
+  assert.equal(derived.volume.state, "imported");
+  assert.equal(derived.volume.value, 90);
+  assert.equal(derived.results.state, "imported");
+  assert.equal(derived.results.value, 336);
+  assert.equal(derived.kgr.ready, false);
+  assert.equal(derived.kgr.score, null, "KGR importado não vira fato atual");
 });

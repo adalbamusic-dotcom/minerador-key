@@ -177,6 +177,9 @@ export function articleKeywordReference(keyword: ArchitectKeyword, role: Article
     ...(keyword.keywordUrlRelation ? { keywordUrlRelation: keyword.keywordUrlRelation } : {}),
     ...(keyword.urlEvidence ? { urlEvidence: keyword.urlEvidence } : {}),
     keywordDnaSnapshot: snapshot,
+    // Sobre qual pacote APROVADO esta keyword entrou: só quando o handoff o
+    // entregou. `null` (em revisão) e ausente (pré-pacote) não viram ref.
+    ...(keyword.approvedPackageRef ? { approvedPackageRef: keyword.approvedPackageRef } : {}),
     /*
      * A qualificação viaja igual para principal, secundária e reforço: o
      * envelope do fundamento não muda com o papel.

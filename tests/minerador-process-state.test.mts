@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildLogicalOutputContract, buildLogicalProcessorMetadata } from "../lib/minerador/logical-processor.ts";
 import { mineradorProcessPresentation, resolveMineradorProcessState } from "../lib/minerador/process-state.ts";
-import { buildSemanticReviewContext, semanticReviewInputHash } from "../lib/minerador/semantic-review.ts";
 
 const logicalInput = {
   keywordId: "keyword-1",
@@ -49,14 +48,9 @@ function row(attempts?: Parameters<typeof resolveMineradorProcessState>[0]["atte
 function rowWithCurrentAi() {
   const current = row();
   const semantic = current.analise_semantica as Record<string, unknown>;
-  const inputHash = semanticReviewInputHash(buildSemanticReviewContext({
-    keyword: current.keyword,
-    intent: current.intent,
-    volume_search: current.volume_search,
-    results_allintitle: current.results_allintitle,
-    kgr_score: null,
-    analise_semantica: semantic,
-  }));
+  // Hash literal: o R5 não existe mais para calculá-lo e o estado de processo
+  // não compara mais esse valor — ele só precisa estar presente.
+  const inputHash = "r5-fnv1a-legado01";
   semantic.ai_review = {
     schemaVersion: "r5",
     status: "completed",
@@ -77,7 +71,6 @@ test("resolver confirma artefatos atuais e KGR automático sem depender de prese
   assert.equal(states.results.complete, true);
   assert.equal(states.kgr.complete, true);
   assert.equal(states.kgr.artifactState, "current_valid");
-  assert.equal(states.ai.complete, false);
   assert.equal(states.review.complete, false);
 });
 
@@ -99,9 +92,7 @@ test("mudança da Lógica não propaga stale para IA, Revisão, Volume, Resultad
   assert.equal(states.volume.artifactState, "current_valid");
   assert.equal(states.results.artifactState, "current_valid");
   assert.equal(states.kgr.artifactState, "current_valid");
-  assert.equal(states.ai.artifactState, "current_valid");
   assert.equal(states.review.artifactState, "current_valid");
-  assert.equal(mineradorProcessPresentation(states.ai), "current");
   assert.equal(mineradorProcessPresentation(states.review), "current");
 });
 
@@ -118,7 +109,6 @@ test("reprocessar Volume ou Resultados preserva IA e Revisão e recalcula soment
   assert.equal(volumeStates.volume.artifactState, "current_valid");
   assert.equal(volumeStates.results.artifactState, "current_valid");
   assert.equal(volumeStates.kgr.artifactState, "current_valid");
-  assert.equal(volumeStates.ai.artifactState, "current_valid");
   assert.equal(volumeStates.review.artifactState, "current_valid");
 
   const resultsChanged = rowWithCurrentAi();
@@ -133,21 +123,7 @@ test("reprocessar Volume ou Resultados preserva IA e Revisão e recalcula soment
   assert.equal(resultsStates.volume.artifactState, "current_valid");
   assert.equal(resultsStates.results.artifactState, "current_valid");
   assert.equal(resultsStates.kgr.artifactState, "current_valid");
-  assert.equal(resultsStates.ai.artifactState, "current_valid");
   assert.equal(resultsStates.review.artifactState, "current_valid");
-});
-
-test("reprocessar IA preserva a Revisão humana concluída", () => {
-  const current = rowWithCurrentAi();
-  const semantic = current.analise_semantica as Record<string, unknown>;
-  semantic.ai_review = {
-    ...(semantic.ai_review as Record<string, unknown>),
-    inputHash: "r5-fnv1a-new-snapshot",
-  };
-  const states = resolveMineradorProcessState(current);
-  assert.equal(states.ai.artifactState, "current_valid");
-  assert.equal(states.review.artifactState, "current_valid");
-  assert.equal(states.review.complete, true);
 });
 
 test("tentativa lógica falha sem tornar stale a IA e a revisão já atuais", () => {
@@ -157,51 +133,11 @@ test("tentativa lógica falha sem tornar stale a IA e a revisão já atuais", ()
     attempts: { logic: { state: "failed" } },
   });
   assert.equal(states.logic.artifactState, "current_valid");
-  assert.equal(states.ai.artifactState, "current_valid");
   assert.equal(states.review.artifactState, "current_valid");
   assert.equal(failed.logic.artifactState, "current_valid");
   assert.equal(failed.logic.complete, true);
-  assert.equal(failed.ai.artifactState, "current_valid");
   assert.equal(failed.review.artifactState, "current_valid");
   assert.equal(mineradorProcessPresentation(failed.logic), "failed");
-});
-
-test("tentativa da IA falha preservando a IA anterior e a Revisão anterior", () => {
-  const failed = resolveMineradorProcessState({
-    ...rowWithCurrentAi(),
-    attempts: { ai: { state: "failed" } },
-  });
-  assert.equal(failed.ai.artifactState, "current_valid");
-  assert.equal(failed.ai.complete, true);
-  assert.equal(failed.review.artifactState, "current_valid");
-  assert.equal(failed.review.complete, true);
-  assert.equal(mineradorProcessPresentation(failed.ai), "failed");
-});
-
-test("decisão humana não altera a entrada corrente da IA nem torna R5 stale", () => {
-  const current = rowWithCurrentAi();
-  const semantic = current.analise_semantica as Record<string, unknown>;
-  semantic.intencao_humana = "Comercial";
-  semantic.intencao_revisada = "Comercial";
-  semantic.nicho_humano = "Varejo";
-  semantic.funnel_humano = "BOFU";
-  semantic.human_review = {
-    status: "completed",
-    decision: "completed",
-    overrides: { intent: "Comercial", niche: "Varejo", funnel: "BOFU" },
-    fieldDecisions: [
-      { field: "intent", canonicalField: "intent", selectedValue: "Comercial", decision: "accept_ai" },
-      { field: "niche", canonicalField: "niche", selectedValue: "Varejo", decision: "edit" },
-      { field: "funnel", canonicalField: "funnel", selectedValue: "BOFU", decision: "edit" },
-    ],
-    aiInputHash: (semantic.ai_review as Record<string, unknown>).inputHash,
-  };
-
-  const states = resolveMineradorProcessState(current);
-  assert.equal(states.ai.artifactState, "current_valid");
-  assert.equal(states.ai.complete, true);
-  assert.equal(states.review.artifactState, "current_valid");
-  assert.equal(states.review.complete, true);
 });
 
 test("valor zero de Resultado é uma medição válida e não vira ausência", () => {

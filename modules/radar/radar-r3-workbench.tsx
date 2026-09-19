@@ -112,8 +112,8 @@ type RadarR3WorkbenchProps = {
   youtubeSearch?: RadarYoutubeSearchTab;
   /** §8 · a aba da pesquisa Amazon, com a mesma forma da de YouTube. */
   amazonSearch?: RadarAmazonSearchTab;
-  /** §25 · a fronteira com o Planejador, uma para os três perfis. */
-  plannerHandoff?: RadarPlannerHandoffTab;
+  /** §25 · a fronteira com o Redator, uma para os três perfis. */
+  writerHandoff?: RadarWriterHandoffTab;
   /** 2.4 · §1 · a aba lazy da área Google — mesma infra dos outros dois. */
   googleResearch?: RadarGoogleResearchTab;
   /** Traz para a tela a coleta real já gravada. É leitura: não consulta provider. */
@@ -264,7 +264,7 @@ function areaCopy(area: RadarR3Area, model: RadarR3Model, mode: RadarPrimarySear
         tone: model.report.approved ? "success" : resumo.blockers.length ? "pending" : "success",
       };
     }
-    return { lines: [model.report.status], status: model.report.sentToPlanner ? "Enviado ao Planejador" : "Aguardando investigação", tone: model.report.approved ? "success" : "neutral" };
+    return { lines: [model.report.status], status: model.report.sentToWriter ? "Enviado ao Redator" : "Aguardando investigação", tone: model.report.approved ? "success" : "neutral" };
   }
 
   /*
@@ -348,7 +348,7 @@ function ResearchUnavailable({ model }: { model: RadarR3Model }) {
  * links e fontes. O detalhe técnico fica recolhido; a síntese vem primeiro.
  *
  * Este bloco NÃO prescreve: não escreve outline, não define quantidade de link,
- * âncora final nem posição. Isso é do Planejador.
+ * âncora final nem posição. Isso é decisão de quem escreve.
  */
 
 /**
@@ -465,13 +465,13 @@ export type RadarGoogleResearchTab = {
  * aqui: eles vivem na proveniência recolhida de cada painel, porque na visão
  * normal só competem com a decisão.
  */
-export type RadarPlannerHandoffTab = {
+export type RadarWriterHandoffTab = {
   /** A investigação está finalizada e amarrada ao ArticleDNA corrente? */
   eligible: boolean;
   /** Por que ainda não dá. Nulo quando dá. */
   blockedReason: string | null;
   /**
-   * §10 · `true` SÓ depois do destino confirmado no Planejador.
+   * §10 · `true` SÓ depois do documento confirmado no Redator.
    *
    * Marcar enviado ao gravar o dossiê diria "entregue" sobre uma esteira que
    * ainda não se moveu — e ninguém voltaria para conferir.
@@ -484,7 +484,7 @@ export type RadarPlannerHandoffTab = {
   onSend?: () => void;
 };
 
-function PlannerHandoff({ tab }: { tab: RadarPlannerHandoffTab }) {
+function WriterHandoff({ tab }: { tab: RadarWriterHandoffTab }) {
   if (tab.sent) {
     /*
      * §26 · O ESTADO VEM DO SERVIDOR, e é por isso que ele sobrevive ao F5.
@@ -492,15 +492,15 @@ function PlannerHandoff({ tab }: { tab: RadarPlannerHandoffTab }) {
      * Nada disto é lembrado pelo navegador: a versão da análise guarda a
      * entrega, e outra sessão lê a mesma coisa.
      */
-    return <p className="mt-3 rounded-md border border-positive/30 bg-positive-soft/10 p-2 text-sm text-positive" role="status" data-testid="radar-planner-sent">
-      Enviado ao Planejador{tab.sentAt ? ` em ${new Date(tab.sentAt).toLocaleString("pt-BR")}` : ""}.
-      {tab.destinationLabel && <span className="mt-1 block text-text-muted" data-testid="radar-planner-destination">{tab.destinationLabel}</span>}
+    return <p className="mt-3 rounded-md border border-positive/30 bg-positive-soft/10 p-2 text-sm text-positive" role="status" data-testid="radar-writer-sent">
+      Enviado ao Redator{tab.sentAt ? ` em ${new Date(tab.sentAt).toLocaleString("pt-BR")}` : ""}.
+      {tab.destinationLabel && <span className="mt-1 block text-text-muted" data-testid="radar-writer-destination">{tab.destinationLabel}</span>}
     </p>;
   }
 
   if (!tab.eligible) {
     return tab.blockedReason
-      ? <p className="mt-3 text-sm text-text-muted" role="status" data-testid="radar-planner-blocked">{tab.blockedReason}</p>
+      ? <p className="mt-3 text-sm text-text-muted" role="status" data-testid="radar-writer-blocked">{tab.blockedReason}</p>
       : null;
   }
 
@@ -510,12 +510,12 @@ function PlannerHandoff({ tab }: { tab: RadarPlannerHandoffTab }) {
       className="inline-flex min-h-10 items-center justify-center rounded-md border border-context-accent bg-selected px-3 py-2 text-sm text-foreground transition-colors hover:text-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:text-text-muted"
       disabled={tab.busy}
       onClick={() => tab.onSend?.()}
-      data-testid="radar-planner-send"
-    >{tab.busy ? "Enviando…" : "Enviar ao Planejador"}</button>
+      data-testid="radar-writer-send"
+    >{tab.busy ? "Enviando…" : "Enviar ao Redator"}</button>
   </div>;
 }
 
-function DeepResearch({ view, busy, searchMode, researchProjection, researchBlueprint, onSearchModeChange, onStart, onAnalyze, onFinalize, onReset, onRecover, youtubeSearch, amazonSearch, plannerHandoff, googleResearch, evidenceExtras }: { view: RadarDeepResearchView; busy: boolean; searchMode: RadarPrimarySearchMode; researchProjection?: RadarResearchProfileProjection | null; researchBlueprint?: RadarCompetitiveBlueprintView | null; onSearchModeChange?: (mode: RadarPrimarySearchMode) => void; onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onReset?: () => void; onRecover?: () => void; youtubeSearch?: RadarYoutubeSearchTab; amazonSearch?: RadarAmazonSearchTab; plannerHandoff?: RadarPlannerHandoffTab; googleResearch?: RadarGoogleResearchTab; evidenceExtras?: React.ReactNode }) {
+function DeepResearch({ view, busy, searchMode, researchProjection, researchBlueprint, onSearchModeChange, onStart, onAnalyze, onFinalize, onReset, onRecover, youtubeSearch, amazonSearch, writerHandoff, googleResearch, evidenceExtras }: { view: RadarDeepResearchView; busy: boolean; searchMode: RadarPrimarySearchMode; researchProjection?: RadarResearchProfileProjection | null; researchBlueprint?: RadarCompetitiveBlueprintView | null; onSearchModeChange?: (mode: RadarPrimarySearchMode) => void; onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onReset?: () => void; onRecover?: () => void; youtubeSearch?: RadarYoutubeSearchTab; amazonSearch?: RadarAmazonSearchTab; writerHandoff?: RadarWriterHandoffTab; googleResearch?: RadarGoogleResearchTab; evidenceExtras?: React.ReactNode }) {
   /*
    * ====== 1.2 · §1 · O PERFIL MANDA NESTA SEÇÃO INTEIRA ======
    *
@@ -546,7 +546,7 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
   /*
    * A ÁREA DO GOOGLE, NOMEADA UMA VEZ.
    *
-   * A mesma condição decide o corpo da área e onde a fronteira do Planejador
+   * A mesma condição decide o corpo da área e onde a fronteira do Redator
    * renderiza: repeti-la faria as duas divergirem, e a fronteira apareceria
    * duas vezes na mesma tela.
    */
@@ -701,7 +701,7 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
     </div>}
 
     {/* §19 · a decisão, logo depois do que se decide. */}
-    {plannerHandoff && <PlannerHandoff tab={plannerHandoff} />}
+    {writerHandoff && <WriterHandoff tab={writerHandoff} />}
 
     {/*
       * ============ §17 · A EVIDÊNCIA COMPETITIVA, RECOLHIDA ============
@@ -991,7 +991,7 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
       *
       * Sem isto, "finalizada" era um carimbo de data: a leitura continuava
       * sendo recalculada e ninguém conseguiria provar depois quais evidências
-      * o Planejador recebeu. O hash é do CONTEÚDO congelado, não do ArticleDNA.
+      * o Redator recebeu. O hash é do CONTEÚDO congelado, não do ArticleDNA.
       */}
 
     <div className="mt-3 flex flex-wrap items-center justify-end gap-3 border-t border-divider pt-3">
@@ -1018,9 +1018,9 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
       *
       * Ela fica DEPOIS dos painéis porque é o passo seguinte a todos eles:
       * um botão por perfil daria três fronteiras diferentes para a mesma
-      * entrega, e o Planejador aprenderia três dialetos da mesma pergunta.
+      * entrega, e o Redator aprenderia três dialetos da mesma pergunta.
       */}
-    {plannerHandoff && !areaGoogle && <PlannerHandoff tab={plannerHandoff} />}
+    {writerHandoff && !areaGoogle && <WriterHandoff tab={writerHandoff} />}
 
     {/*
       * ====== 2.1 · §25 · A EXCEÇÃO ACABOU, PORQUE O MOTIVO DELA ACABOU ======
@@ -1294,7 +1294,7 @@ function ReportSummaryPanel({ model }: { model: RadarR3Model }) {
   </section>;
 }
 
-export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportReview, onReportApprove, onReportGenerate, onStartDeepResearch, youtubeSearch, amazonSearch, plannerHandoff, googleResearch, onRecoverSerp, onFinalizeInvestigation, onResetInvestigation, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection = null, researchBlueprint = null, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
+export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportReview, onReportApprove, onReportGenerate, onStartDeepResearch, youtubeSearch, amazonSearch, writerHandoff, googleResearch, onRecoverSerp, onFinalizeInvestigation, onResetInvestigation, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection = null, researchBlueprint = null, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
   const [expandedArea, setExpandedArea] = useState<RadarR3Area | null>(null);
 
   /*
@@ -1403,7 +1403,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
           * sempre estiveram: consolidar a superfície do Google não pode apagar
           * a consulta dos outros perfis.
           */}
-        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} plannerHandoff={plannerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} />}
+        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} />}
         {/*
           * AMAZON NÃO É UM LUGAR SEPARADO — é um dos destinos da pesquisa.
           *

@@ -3,32 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { projectKeywordDnaForArchitect } from "../lib/arquiteto/keyword-dna-projection.ts";
 import { readArticleKgrDecision } from "../lib/arquiteto/article-kgr-decision.ts";
-import type { KeywordContextualPresentation } from "../lib/minerador/keyword-contextual-presentation.ts";
-
-const presentationText = "A Care Glow deve apresentar o cleansing oil da Hada Labo como um tema de cuidado com a pele que merece contexto antes de qualquer indicação.";
-
-const presentation = {
-  schemaVersion: "v1",
-  id: "kcp-1",
-  brandId: "brand-1",
-  keywordId: "kw-main",
-  input: {
-    keyword: "cleansing oil hada labo",
-    inputKeywordDnaRef: null,
-    brandDnaVersionRef: null,
-    appliedSkillRefs: [{ definitionKey: "voz-da-marca", versionId: "skill-1", versionNumber: 3, contentHash: "skill-hash", lifecycleStatus: "approved" }],
-  },
-  output: { text: presentationText },
-  provenance: {
-    provider: "deepseek",
-    model: "deepseek-chat",
-    operationRequestId: "op-1",
-    executionRequestId: null,
-    generatedAt: "2026-08-28T22:59:00.000Z",
-    actorUserId: "user-1",
-  },
-  lifecycle: { version: 2, contentHash: "presentation-hash-0001", createdAt: "2026-08-28T22:59:00.000Z", createdBy: "user-1", supersedesVersionId: null },
-} as KeywordContextualPresentation;
 
 const readyKeyword = {
   id: "kw-main",
@@ -56,7 +30,7 @@ const readyKeyword = {
     state: "received",
     payload: {
       semanticQualification: { versionId: "ksq-1", contentHash: "hash-1", intent: "transacional", funnel: null, semanticState: "non_conclusive", collectedAt: "2026-08-29T00:00:00.000Z" },
-      contextualPresentation: { versionId: "kcp-1", versionNumber: 2, contentHash: "presentation-hash-0001", keywordId: "kw-main", brandId: "brand-1", generatedAt: "2026-08-28T22:59:00.000Z" },
+
     },
   },
 };
@@ -70,7 +44,7 @@ const legacyIncompleteKeyword = {
   results_allintitle: null,
   kgr_score: null,
   analise_semantica: { entidade_central: "keyword legada" },
-  canonicalWorkflow: { payload: { semanticQualification: null, contextualPresentation: null } },
+  canonicalWorkflow: { payload: { semanticQualification: null } },
 };
 
 const readonlyPanel = readFileSync("components/editorial/keyword-dna-readonly-panel.tsx", "utf8");
@@ -78,7 +52,7 @@ const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf
 const sectionIds = (keyword: typeof readyKeyword) => new Set(projectKeywordDnaForArchitect(keyword).sections.map(item => item.id));
 
 test("o resumo horizontal mostra volume, resultados, intenção, funil, KGR e aplicabilidade", () => {
-  const projection = projectKeywordDnaForArchitect(readyKeyword, presentation);
+  const projection = projectKeywordDnaForArchitect(readyKeyword);
   const primary = projection.summaryPrimary.map(item => item.label);
   const byLabel = new Map(projection.summaryPrimary.map(item => [item.label, item.value]));
 
@@ -90,7 +64,7 @@ test("o resumo horizontal mostra volume, resultados, intenção, funil, KGR e ap
 });
 
 test("a segunda linha traz CPC, KD, tendência, entidade, confiança e revisão quando existem", () => {
-  const projection = projectKeywordDnaForArchitect(readyKeyword, presentation);
+  const projection = projectKeywordDnaForArchitect(readyKeyword);
   const labels = projection.summarySecondary.map(item => item.label);
 
   assert.ok(labels.includes("Entidade"));
@@ -107,7 +81,7 @@ test("o perfil completo mantém todas as seções do KeywordDNA recebido", () =>
 });
 
 test("leitura lógica, KGR e revisão do Minerador chegam com os valores recebidos", () => {
-  const projection = projectKeywordDnaForArchitect(readyKeyword, presentation);
+  const projection = projectKeywordDnaForArchitect(readyKeyword);
   const logic = new Map((projection.sections.find(item => item.id === "leitura-logica")?.fields || []).map(item => [item.label, item.value]));
   const kgr = new Map((projection.sections.find(item => item.id === "kgr-keyword")?.fields || []).map(item => [item.label, item.value]));
   const review = new Map((projection.sections.find(item => item.id === "revisao-upstream")?.fields || []).map(item => [item.label, item.value]));
@@ -124,33 +98,8 @@ test("leitura lógica, KGR e revisão do Minerador chegam com os valores recebid
   assert.equal(qualification.get("Intenção consolidada"), "transacional");
 });
 
-test("a Apresentação Contextual preserva texto integral, versão, hash e proveniência", () => {
-  const projection = projectKeywordDnaForArchitect(readyKeyword, presentation);
-
-  assert.equal(projection.presentation.available, true);
-  assert.equal(projection.presentation.text, presentationText);
-  assert.equal(projection.presentation.versionNumber, 2);
-  assert.equal(projection.presentation.contentHash, "presentation-hash-0001");
-  assert.equal(projection.presentation.brandVoiceApplied, true);
-  const provenance = new Map(projection.presentation.provenance.map(item => [item.label, item.value]));
-  assert.equal(provenance.get("Origem"), "Minerador");
-  assert.equal(provenance.get("Modelo"), "deepseek-chat");
-  assert.match(readonlyPanel, /Apresentação contextual da marca/);
-  assert.match(readonlyPanel, /whitespace-pre-wrap/);
-});
-
-test("sem apresentação no handoff, o Arquiteto informa a ausência sem chamar IA nem criar fallback", () => {
-  const projection = projectKeywordDnaForArchitect(legacyIncompleteKeyword);
-
-  assert.equal(projection.presentation.available, false);
-  assert.equal(projection.presentation.text, null);
-  assert.equal(projection.presentation.note, "Não disponível para esta versão da KeywordDNA.");
-  assert.equal(readonlyPanel.includes("regenerate"), false);
-  assert.equal(readonlyPanel.includes("generatePresentation"), false);
-});
-
 test("projeção lossless: campo recebido sem seção própria continua acessível na proveniência técnica", () => {
-  const projection = projectKeywordDnaForArchitect(readyKeyword, presentation);
+  const projection = projectKeywordDnaForArchitect(readyKeyword);
   const technicalLabels = projection.technical.map(item => item.label);
 
   assert.ok(technicalLabels.includes("campo_legado_sem_secao"));
@@ -174,7 +123,6 @@ test("o painel readonly não possui nenhum controle de edição da KeywordDNA", 
 test("Principal e apoio usam o mesmo componente readonly, empilhados", () => {
   assert.match(workspace, /role="Principal"/);
   assert.match(workspace, /art\.supportKeywords\.map\(\(keyword, index\) => <KeywordDnaReadonlyPanel/);
-  assert.match(workspace, /presentation=\{keywordPresentations\[String\(keyword\.id\)\] \|\| null\}/);
   assert.match(readonlyPanel, /break-words/);
   assert.equal(readonlyPanel.includes("break-all"), false);
 });
@@ -197,7 +145,7 @@ test("keyword aprovada com dimensões indeterminadas permanece legível e sem er
 test("KGR da keyword e KGR do artigo continuam separados", () => {
   const article = readArticleKgrDecision({ principal: readyKeyword, principalKeywordId: readyKeyword.id });
   const before = JSON.stringify(readyKeyword);
-  const projection = projectKeywordDnaForArchitect(readyKeyword, presentation);
+  const projection = projectKeywordDnaForArchitect(readyKeyword);
 
   assert.equal(article.decision, "YES");
   assert.equal(article.source, "FULL_KGR_RULE");
@@ -209,7 +157,7 @@ test("KGR da keyword e KGR do artigo continuam separados", () => {
 });
 
 test("qualificação inconclusiva viaja como informação readonly, não como bloqueio", () => {
-  const projection = projectKeywordDnaForArchitect(readyKeyword, presentation);
+  const projection = projectKeywordDnaForArchitect(readyKeyword);
   const qualification = new Map((projection.sections.find(item => item.id === "qualificacao-semantica")?.fields || []).map(item => [item.label, item.value]));
 
   assert.equal(qualification.get("Estado da evidência"), "Não conclusiva");

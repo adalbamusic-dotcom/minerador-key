@@ -1,4 +1,4 @@
-export const MINERADOR_EDITORIAL_STATUSES = ["bruto", "aprovado", "rejeitado"] as const;
+export const MINERADOR_EDITORIAL_STATUSES = ["bruto", "em_revisao", "aprovado", "rejeitado"] as const;
 
 export type EditorialKeywordStatus = typeof MINERADOR_EDITORIAL_STATUSES[number];
 
@@ -18,6 +18,7 @@ export type EditorialKeywordStatusResolution =
 
 const STATUS_LABELS: Record<EditorialKeywordStatus, string> = {
   bruto: "Bruto",
+  em_revisao: "Em revisão",
   aprovado: "Aprovado",
   rejeitado: "Rejeitado",
 };
@@ -49,4 +50,37 @@ export function isEditorialKeywordStatus(value: unknown): value is EditorialKeyw
   return resolveEditorialKeywordStatus(value).kind === "resolved"
     && typeof value === "string"
     && MINERADOR_EDITORIAL_STATUSES.includes(value.trim().toLowerCase() as EditorialKeywordStatus);
+}
+
+/**
+ * Status EFETIVO da keyword.
+ *
+ * A coluna `status` guarda a última escolha do humano; ela não é a autoridade
+ * sozinha. Uma keyword aprovada que foi mexida depois volta a ser
+ * `em_revisao`, e isso é DERIVADO da divergência do pacote — não depende de
+ * nenhum writer lembrar de rebaixar. Writer esquece; a derivação não.
+ *
+ * Enquanto está em revisão, o Arquiteto continua consumindo o pacote aprovado
+ * anterior. Só uma nova aprovação troca o que ele vê.
+ */
+export function resolveEffectiveKeywordStatus(input: {
+  status: unknown;
+  diverged: boolean | null;
+}): EditorialKeywordStatusResolution & { divergedFromApproval: boolean } {
+  const base = resolveEditorialKeywordStatus(input.status);
+  if (base.kind !== "resolved" || base.status !== "aprovado" || input.diverged !== true) {
+    return { ...base, divergedFromApproval: false };
+  }
+  return {
+    kind: "resolved",
+    status: "em_revisao",
+    label: STATUS_LABELS.em_revisao,
+    rawStatus: base.rawStatus,
+    divergedFromApproval: true,
+  };
+}
+
+/** Só keyword efetivamente aprovada entrega pacote novo ao Arquiteto. */
+export function isApprovedForArchitect(input: { status: unknown; diverged: boolean | null }): boolean {
+  return resolveEffectiveKeywordStatus(input).status === "aprovado";
 }

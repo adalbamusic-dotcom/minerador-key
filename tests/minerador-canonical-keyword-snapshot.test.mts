@@ -3,7 +3,6 @@ import test from "node:test";
 import { applyHumanReviewField, isHumanReviewConfirmationValid } from "../lib/minerador/human-review.ts";
 import { resolveCanonicalKeywordSnapshot } from "../lib/minerador/canonical-keyword-snapshot.ts";
 import { buildLogicalOutputContract, buildLogicalProcessorMetadata } from "../lib/minerador/logical-processor.ts";
-import { buildSemanticReviewContext, semanticReviewInputHash } from "../lib/minerador/semantic-review.ts";
 
 const completedAiReview = {
   schemaVersion: "r5",
@@ -57,14 +56,9 @@ function measuredSemantic(metadataInput?: { keywordId: string; keyword: string; 
   semantic.logical_output_contract = buildLogicalOutputContract({ semantic, intent: "Comercial investigativa", niche: "Estética", funnel: "BOFU" });
   if (metadataInput) {
     Object.assign(semantic, buildLogicalProcessorMetadata(metadataInput, "2026-08-20T09:59:00.000Z"));
-    const inputHash = semanticReviewInputHash(buildSemanticReviewContext({
-      keyword: metadataInput.keyword,
-      intent: "Comercial investigativa",
-      volume_search: 260,
-      results_allintitle: 336,
-      kgr_score: null,
-      analise_semantica: semantic,
-    }));
+    // Hash literal: o R5 não existe mais para calculá-lo e o estado de
+    // processo não compara mais esse valor — ele só precisa estar presente.
+    const inputHash = "r5-fnv1a-legado01";
     semantic.ai_review = { ...completedAiReview, inputHash };
     semantic.human_review = { ...(semantic.human_review as Record<string, unknown>), aiInputHash: inputHash };
   }
@@ -118,9 +112,9 @@ test("indeterminado explicitamente confirmado é estado resolvido sem inventar v
     dna_origem: "logico_deterministico",
     ai_review: completedAiReview,
   };
-  const intent = applyHumanReviewField({ semantic: base, intent: null, field: "intent", logicalValue: null, aiSuggestion: null, decision: "keep_logic", actorId: "human-1", decidedAt: "2026-08-20T11:00:00.000Z" }).semantic;
-  const niche = applyHumanReviewField({ semantic: intent, intent: null, field: "niche", logicalValue: null, aiSuggestion: null, decision: "keep_logic", actorId: "human-1", decidedAt: "2026-08-20T11:00:01.000Z" }).semantic;
-  const resolved = applyHumanReviewField({ semantic: niche, intent: null, field: "funnel", logicalValue: null, aiSuggestion: null, decision: "keep_logic", actorId: "human-1", decidedAt: "2026-08-20T11:00:02.000Z" }).semantic;
+  const intent = applyHumanReviewField({ semantic: base, intent: null, field: "intent", logicalValue: null, decision: "keep_logic", actorId: "human-1", decidedAt: "2026-08-20T11:00:00.000Z" }).semantic;
+  const niche = applyHumanReviewField({ semantic: intent, intent: null, field: "niche", logicalValue: null, decision: "keep_logic", actorId: "human-1", decidedAt: "2026-08-20T11:00:01.000Z" }).semantic;
+  const resolved = applyHumanReviewField({ semantic: niche, intent: null, field: "funnel", logicalValue: null, decision: "keep_logic", actorId: "human-1", decidedAt: "2026-08-20T11:00:02.000Z" }).semantic;
   const snapshot = resolveCanonicalKeywordSnapshot({ intent: null, analise_semantica: resolved });
 
   assert.equal(snapshot.semantic.intentState, "confirmed_unknown");
@@ -138,8 +132,7 @@ test("alteração posterior invalida a confirmação anterior e permite reabrir 
     intent: "Comercial investigativa",
     field: "nicho",
     logicalValue: "Estética",
-    aiSuggestion: "Beleza",
-    decision: "accept_ai",
+    decision: "keep_logic",
     actorId: "human-2",
     decidedAt: "2026-08-20T11:10:00.000Z",
   }).semantic;

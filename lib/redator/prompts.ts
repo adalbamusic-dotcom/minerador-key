@@ -1,3 +1,4 @@
+import { documentContentPlanRef } from "../arquiteto/contracts.ts";
 import type { ContentDocument } from "../arquiteto/contracts.ts";
 import { RedatorPromptContextSchema, type RedatorPromptContext } from "./contracts.ts";
 
@@ -17,7 +18,9 @@ export function createSectionPromptContext(document: ContentDocument, sectionId:
     documentId: document.id,
     sectionId,
     sectionLabel,
-    contentPlanRef: document.contentPlanRef,
+    // Documento de origem Radar nao tem plano. O pedido de secao carrega a
+    // ausencia declarada em vez de uma referencia inventada.
+    contentPlanRef: documentContentPlanRef(document),
     articleDnaRef: document.articleDnaRef,
     siloDnaRef: document.siloDnaRef,
     keywordDnaRefs: document.keywordDnaRefs,

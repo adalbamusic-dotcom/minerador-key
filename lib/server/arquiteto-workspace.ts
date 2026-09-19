@@ -6,8 +6,8 @@ import { listArquitetoArtifacts } from "./arquiteto-persistence";
 import { readBrandSiloCatalog } from "@/lib/arquiteto/territorial-landscape";
 import { isFullyConsolidatedQualification, qualificationConsolidatedAxes, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
 import { readCurrentKeywordSemanticQualifications } from "./keyword-semantic-qualification-store";
-import { readCurrentKeywordContextualPresentations } from "./keyword-contextual-presentation-store";
-import type { KeywordContextualPresentation } from "@/lib/minerador/keyword-contextual-presentation";
+import { approvedPackageDiverged, buildApprovedPackage } from "@/lib/minerador/approved-package";
+import { isApprovedForArchitect } from "@/lib/minerador/editorial-status";
 import {
   buildMineradorArquitetoHandoffPlan,
   MINERADOR_ARQUITETO_RECEIVED_STATE,
@@ -82,7 +82,29 @@ async function listBrandKeywords(context: PipelineContext) {
   return (result.data || []) as Array<Record<string, unknown> & { id: string; brand_id: string; keyword: string }>;
 }
 
-function sourceFromKeyword(keyword: Record<string, unknown> & { id: string; brand_id: string }, qualification?: KeywordSemanticQualification | null, presentation?: KeywordContextualPresentation | null): MineradorKeywordHandoffSource {
+function approvedPackageInput(keyword: Record<string, unknown> & { id: string; brand_id: string }) {
+  return {
+    keywordId: keyword.id,
+    brandId: keyword.brand_id,
+    keyword: typeof keyword.keyword === "string" ? keyword.keyword : "",
+    intent: keyword.intent,
+    volumeSearch: keyword.volume_search,
+    resultsAllintitle: keyword.results_allintitle,
+    kgrScore: keyword.kgr_score,
+    listaId: keyword.lista_id,
+    semantic: (keyword.analise_semantica || null) as Record<string, unknown> | null,
+  };
+}
+
+/** Status efetivo: aprovada que foi mexida depois já não entrega pacote novo. */
+function keywordIsApproved(keyword: Record<string, unknown> & { id: string; brand_id: string }) {
+  return isApprovedForArchitect({
+    status: keyword.status,
+    diverged: approvedPackageDiverged(approvedPackageInput(keyword)),
+  });
+}
+
+function sourceFromKeyword(keyword: Record<string, unknown> & { id: string; brand_id: string }, qualification?: KeywordSemanticQualification | null): MineradorKeywordHandoffSource {
   const sourceVersionId = ["keywordDnaVersionId", "keyword_dna_version_id", "sourceVersionId", "source_version_id"]
     .map(key => keyword[key])
     .find(value => typeof value === "string" && value.trim());
@@ -105,15 +127,8 @@ function sourceFromKeyword(keyword: Record<string, unknown> & { id: string; bran
         collectedAt: qualification.source.collectedAt,
       }
       : null,
-    // Apresentação Contextual é contexto opcional: viaja quando existe.
-    contextualPresentation: presentation
-      ? {
-        versionId: presentation.id,
-        versionNumber: presentation.lifecycle.version,
-        contentHash: presentation.lifecycle.contentHash,
-        generatedAt: presentation.provenance.generatedAt,
-      }
-      : null,
+    // O DNA inteiro, congelado na aprovação. Nada do KeywordDNA fica de fora.
+    approvedDna: buildApprovedPackage(approvedPackageInput(keyword)),
   };
 }
 
@@ -140,7 +155,10 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
     throw new PipelineRuntimeError("NOT_AUTHORIZED", "Uma ou mais keywords não pertencem à Brand autorizada.", 403);
   }
 
-  const eligibleKeywords = keywords.filter(keyword => isCanonicalHandoffStatus(typeof keyword.status === "string" ? keyword.status : null));
+  // Aprovada de verdade: coluna aprovada E pacote não divergente. Keyword
+  // mexida depois da aprovação fica em revisão e não reabastece o Arquiteto.
+  const eligibleKeywords = keywords.filter(keyword =>
+    isCanonicalHandoffStatus(typeof keyword.status === "string" ? keyword.status : null) && keywordIsApproved(keyword));
   // Leitura opcional: a Qualificação Semântica enriquece o pacote quando existe.
   // Ausência, evidência mista ou insuficiente não bloqueiam o handoff — o
   // pacote transporta honestamente o que há, sem inventar Intenção nem Funil.
@@ -148,11 +166,6 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
     brandId: context.brandId,
     keywordIds: eligibleKeywords.map(keyword => keyword.id),
   }).catch(() => new Map<string, KeywordSemanticQualification>());
-  // Apresentação Contextual: leitura opcional, sem gerar bloqueio nem IA.
-  const presentations = await readCurrentKeywordContextualPresentations({
-    brandId: context.brandId,
-    keywordIds: eligibleKeywords.map(keyword => keyword.id),
-  }).catch(() => new Map<string, KeywordContextualPresentation>());
   const articleIds = articleDnaKeywordIds(artifacts, context.brandId);
   const workflowByKeywordId = new Map<string, WorkflowRow>();
   for (const workflow of workflowItems) {
@@ -169,13 +182,23 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
   const existingKeywordIds = new Set(eligibleKeywords
     .filter(keyword => articleIds.has(keyword.id) || workflowByKeywordId.get(keyword.id)?.state === MINERADOR_ARQUITETO_RECEIVED_STATE)
     .map(keyword => keyword.id));
+  // O que cada item já recebido carrega hoje: é a comparação que decide se a
+  // reaprovação tem o que propagar.
+  const receivedApprovedHashById = new Map<string, string | null>(
+    [...workflowByKeywordId.entries()].map(([keywordId, row]) => {
+      const payload = (row.payload || {}) as Record<string, unknown>;
+      const approved = payload.approvedDna && typeof payload.approvedDna === "object" ? payload.approvedDna as Record<string, unknown> : null;
+      return [keywordId, typeof approved?.contentHash === "string" ? approved.contentHash : null];
+    }),
+  );
   // Sem segundo gate semântico: aprovado no Minerador é condição suficiente.
   // A Qualificação Semântica viaja integralmente como informação readonly.
-  const sources = eligibleKeywords.map(keyword => sourceFromKeyword(keyword, qualifications.get(keyword.id) || null, presentations.get(keyword.id) || null));
+  const sources = eligibleKeywords.map(keyword => sourceFromKeyword(keyword, qualifications.get(keyword.id) || null));
   const plan = buildMineradorArquitetoHandoffPlan({
     brandId: context.brandId,
     keywords: sources,
     existingKeywordIds,
+    receivedApprovedHashById,
   });
   return {
     plan,
@@ -184,12 +207,31 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
 }
 
 async function persistCanonicalHandoff(context: PipelineContext, prepared: Awaited<ReturnType<typeof prepareCanonicalHandoff>>) {
-  if (!prepared.plan.rows.length) return;
-  const result = await context.supabase.from("editorial_workflow_items").upsert(
-    prepared.plan.rows.map(row => ({ ...row, created_by: context.actorUserId, updated_by: context.actorUserId })),
-    { onConflict: "marca_id,subject_type,subject_id,stage", ignoreDuplicates: true },
-  );
-  if (result.error) readFailure(result.error);
+  if (prepared.plan.rows.length) {
+    const result = await context.supabase.from("editorial_workflow_items").upsert(
+      prepared.plan.rows.map(row => ({ ...row, created_by: context.actorUserId, updated_by: context.actorUserId })),
+      { onConflict: "marca_id,subject_type,subject_id,stage", ignoreDuplicates: true },
+    );
+    if (result.error) readFailure(result.error);
+  }
+
+  // Reaprovação de keyword já recebida reescreve o pacote no lugar. O trigger
+  // `pipeline_editorial_touch_lock_version` incrementa a versão sozinho, então
+  // a cadeia fica auditável sem tabela nova.
+  for (const update of prepared.plan.updates) {
+    const result = await context.supabase.from("editorial_workflow_items")
+      .update({
+        payload: update.payload,
+        source_version_id: update.sourceVersionId,
+        source_content_hash: update.sourceContentHash,
+        updated_by: context.actorUserId,
+      })
+      .eq("marca_id", context.brandId)
+      .eq("subject_type", "keyword")
+      .eq("subject_id", update.keywordId)
+      .eq("stage", "architect");
+    if (result.error) readFailure(result.error);
+  }
 }
 
 export async function loadCanonicalArquitetoWorkspace(context: PipelineContext) {
@@ -216,10 +258,6 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext) 
   const articleDnas = latestByEntity(artifacts.articleDnas).filter(version =>
     version.payload.keywordReferences.some(reference => keywordIds.has(reference.keywordId)),
   );
-  const workspacePresentations = await readCurrentKeywordContextualPresentations({
-    brandId: context.brandId,
-    keywordIds: keywords.map(keyword => keyword.id),
-  }).catch(() => new Map<string, KeywordContextualPresentation>());
   // A elegibilidade é estrutural: status canônico, Brand, lifecycle e
   // duplicação. Nenhuma dimensão semântica participa desta decisão.
   const importEligibility = resolveCanonicalMineradorArquitetoImportEligibility({
@@ -264,9 +302,6 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext) 
     importEligibility,
     keywords,
     availableKeywords,
-    // Apresentação Contextual persistida no Minerador: viaja somente leitura
-    // para o perfil da keyword no Arquiteto. Não é regenerada nem editada aqui.
-    keywordPresentations: [...workspacePresentations.values()],
     articleDnas,
     siloDnas,
     siloPages,

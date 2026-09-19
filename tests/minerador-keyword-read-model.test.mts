@@ -47,8 +47,8 @@ test("decisão humana de intenção, nicho e funil vira a projeção atual sem a
     intent: "Informativa",
     field: "intenção",
     logicalValue: "Informativa",
-    aiSuggestion: "Comercial investigativa",
-    decision: "accept_ai",
+    decision: "edit",
+    editedValue: "Comercial investigativa",
     actorId: "human-1",
     decidedAt: "2026-08-19T12:00:00.000Z",
   }).semantic;
@@ -57,8 +57,8 @@ test("decisão humana de intenção, nicho e funil vira a projeção atual sem a
     intent: "Comercial investigativa",
     field: "nicho",
     logicalValue: "Serviços",
-    aiSuggestion: "Estética",
-    decision: "accept_ai",
+    decision: "edit",
+    editedValue: "Estética",
     actorId: "human-1",
     decidedAt: "2026-08-19T12:00:01.000Z",
   }).semantic;
@@ -67,8 +67,8 @@ test("decisão humana de intenção, nicho e funil vira a projeção atual sem a
     intent: "Comercial investigativa",
     field: "funil",
     logicalValue: "TOFU",
-    aiSuggestion: "BOFU",
-    decision: "accept_ai",
+    decision: "edit",
+    editedValue: "BOFU",
     actorId: "human-1",
     decidedAt: "2026-08-19T12:00:02.000Z",
   }).semantic;

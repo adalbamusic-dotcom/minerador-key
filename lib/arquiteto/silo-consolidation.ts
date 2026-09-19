@@ -231,6 +231,25 @@ export function buildConsolidatedSiloDnaPayload(input: SiloConsolidationInput): 
     || input.copy.name;
   const base = deterministicSiloDnaPayload(input.copy.id, input.copy.name, articles, { brandId: input.copy.brandId, centralEntity });
   const articleReferences = refsForCopy(input.copy);
+  /*
+   * PROVENIÊNCIA DE INSUMO — derivada dos artigos, uma fonte só.
+   *
+   * Cada ArticleDNA já diz sobre qual pacote aprovado cada keyword entrou. O
+   * Silo agrega essa lista, sem reler o Minerador: ler de outro lugar criaria
+   * a segunda resposta para "sobre o que este Silo foi fechado". Keyword
+   * repetida em dois artigos entra uma vez; pré-pacote não entra — ausência
+   * não vira ref.
+   */
+  const keywordPackageRefs = [...new Map(
+    articles.flatMap(article => article.payload.keywordReferences)
+      .filter(reference => reference.approvedPackageRef)
+      .map(reference => [reference.keywordId, {
+        keywordId: reference.keywordId,
+        version: reference.approvedPackageRef!.version,
+        contentHash: reference.approvedPackageRef!.contentHash,
+        approvedAt: reference.approvedPackageRef!.approvedAt,
+      }] as const),
+  ).values()].sort((left, right) => left.keywordId.localeCompare(right.keywordId));
   const pillarArticleId = input.copy.pillarCandidateArticleId;
   const supportArticleIds = input.copy.supportArticleIds;
   const articleRoles = articleReferences.map(reference => ({
@@ -263,6 +282,7 @@ export function buildConsolidatedSiloDnaPayload(input: SiloConsolidationInput): 
     dominantIntent: input.territory?.macroIntent?.trim() || previous?.dominantIntent?.trim() || base.dominantIntent,
     pillarArticleId,
     supportArticleIds,
+    ...(keywordPackageRefs.length ? { keywordPackageRefs } : {}),
     articleReferences,
     articleRoles,
     narrativeOrder,

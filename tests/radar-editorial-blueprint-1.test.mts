@@ -500,7 +500,7 @@ test("§7, §26 e 1.1·§16 · o que NÃO entrou saiu do Blueprint e continua in
 test("§16, §17 e §19 · o artigo-modelo vem antes da evidência, que fica recolhida", async () => {
   const fonte = await readFile(new URL("../modules/radar/radar-r3-workbench.tsx", import.meta.url), "utf8");
   const inicio = fonte.indexOf("{areaGoogle && <>");
-  const fim = fonte.indexOf("{plannerHandoff && !areaGoogle && <PlannerHandoff", inicio);
+  const fim = fonte.indexOf("{writerHandoff && !areaGoogle && <WriterHandoff", inicio);
   assert.ok(inicio > 0 && fim > inicio, "a área do Google foi localizada");
   const area = fonte.slice(inicio, fim);
 
@@ -521,9 +521,9 @@ test("§16, §17 e §19 · o artigo-modelo vem antes da evidência, que fica rec
   assert.equal(/open=\{/.test(emUmaLinha), false);
 
   /* §19 · a decisão fica junto do que se decide, e a fronteira é UMA. */
-  const handoff = area.indexOf("<PlannerHandoff");
+  const handoff = area.indexOf("<WriterHandoff");
   assert.ok(artigo < handoff && handoff < evidencia, "enviar ao Planejador vem logo depois do artigo-modelo");
-  assert.match(fonte, /\{plannerHandoff && !areaGoogle && <PlannerHandoff/, "e ela não renderiza duas vezes");
+  assert.match(fonte, /\{writerHandoff && !areaGoogle && <WriterHandoff/, "e ela não renderiza duas vezes");
 });
 
 /* ============================== §28 · M e N ============================== */
@@ -762,7 +762,7 @@ test("1.1·G e H · recorrência não garante H2; cobertura exigida não exige H
 test("1.1·J e §17 · o card técnico da investigação congelada saiu do fluxo principal", async () => {
   const fonte = await readFile(new URL("../modules/radar/radar-r3-workbench.tsx", import.meta.url), "utf8");
   const inicio = fonte.indexOf("{areaGoogle && <>");
-  const fim = fonte.indexOf("{plannerHandoff && !areaGoogle && <PlannerHandoff", inicio);
+  const fim = fonte.indexOf("{writerHandoff && !areaGoogle && <WriterHandoff", inicio);
   const area = fonte.slice(inicio, fim);
 
   const congelado = area.indexOf('data-testid="radar-frozen-bundle"');
@@ -995,7 +995,7 @@ test("1.2·G · o link mostra um título útil, nunca o identificador", async ()
 test("1.2·H · não sobrou painel solto na área FINALIZED", async () => {
   const fonte = await readFile(new URL("../modules/radar/radar-r3-workbench.tsx", import.meta.url), "utf8");
   const inicio = fonte.indexOf("{areaGoogle && <>");
-  const fim = fonte.indexOf("{plannerHandoff && !areaGoogle && <PlannerHandoff", inicio);
+  const fim = fonte.indexOf("{writerHandoff && !areaGoogle && <WriterHandoff", inicio);
   const area = fonte.slice(inicio, fim);
 
   /*
@@ -1724,7 +1724,7 @@ test("1.4·G · MUST_COVER continua preservado dentro do bloco", () => {
 test("1.4·H · nenhum texto solto sobra na área FINALIZED", async () => {
   const fonte = await readFile(new URL("../modules/radar/radar-r3-workbench.tsx", import.meta.url), "utf8");
   const inicio = fonte.indexOf("{areaGoogle && <>");
-  const fim = fonte.indexOf("{plannerHandoff && !areaGoogle && <PlannerHandoff", inicio);
+  const fim = fonte.indexOf("{writerHandoff && !areaGoogle && <WriterHandoff", inicio);
   const area = fonte.slice(inicio, fim);
 
   /*

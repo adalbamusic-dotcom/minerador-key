@@ -39,6 +39,18 @@ aguardam ação manual autorizada.
 
 ## Regra permanente do R5 — leitura semântica independente antes da comparação — 2026-08-21
 
+> **REVOGADA EM 2026-09-18.** O R5 não existe mais no Minerador. O
+> orquestrador, as três fases, o cliente DeepSeek do R5, o aviso de execução
+> e as rotas `/api/process-intent-niche`, `/api/analyze`, `/api/clusterize` e
+> `/api/generate-briefing` foram removidos por estarem **sem chamador**: os
+> handlers `handleBatchAnalyze` e `handleBatchSemanticReview` já não eram
+> acionados por nenhum botão, o painel já forçava `aiReview = null` e nenhuma
+> das 103 keywords do banco carregava payload `ai_review`. A ação `IA` da
+> barra do Processador é, e já era, a Apresentação Contextual.
+>
+> O texto abaixo permanece como registro do contrato que vigorou até essa
+> data. Não descreve comportamento atual.
+
 O R5 deve formar uma interpretação independente da keyword original antes de
 consultar a interpretação da Lógica. A keyword original é o objeto primário
 (`R5_PRIMARY_OBJECT = RAW_KEYWORD`); os valores da Lógica são hipóteses
@@ -71,6 +83,15 @@ prompt. A leitura intermediária não cria campos de banco; mudanças permanente
 no comportamento do R5 devem atualizar esta seção da spec.
 
 ## Regra permanente do R6 — divergência real separada de decisão pendente — 2026-08-21
+
+> **Adendo 2026-09-18.** Com o R5 removido, `CORREÇÕES PROPOSTAS` deixou de
+> ter fonte: não existe mais sugestão de IA para divergir da Lógica. O que
+> permanece vivo desta regra é a outra metade — campo estratégico sem leitura
+> consolidada é `DECISÃO PENDENTE`, com ação humana explícita. O read-model
+> que renderiza divergências ainda existe no código e sai no corte da
+> Apresentação Contextual — **o que aconteceu em 2026-09-18**. Hoje a Revisão
+> Humana tem só decisões pendentes e a aplicabilidade do KGR.
+> Apresentação Contextual.
 
 `CORREÇÕES PROPOSTAS` é reservado a uma divergência semântica acionável: valor
 atual diferente de sugestão concreta, evidência suficiente e delta aceito pelo
@@ -569,6 +590,17 @@ O front aprovado nesta etapa é somente uma cópia de trabalho: preview local e 
 
 ## 59. IA do Minerador — Apresentação Contextual da keyword para a Marca — 2026-08-28
 
+> **REVOGADA EM 2026-09-18.** Não existe mais IA no Minerador. A Apresentação
+> Contextual, o processo `ai` e a rota `ia/brief-apresentacao` foram
+> removidos: a camada não alimentava decisão nenhuma — o texto gerado ia
+> apenas para um painel somente-leitura do Arquiteto, nunca para prompt,
+> ArticleDNA, SiloDNA ou Redator. `MINERADOR_PROCESSES = 6`.
+>
+> Os 252 artifacts `keyword_contextual_presentation` **permanecem no banco**:
+> `editorial_artifact_versions` é append-only por trigger, e o CHECK de
+> `artifact_type` continua aceitando o tipo. O texto abaixo é registro do
+> contrato que vigorou até essa data.
+
 A IA do Minerador é uma camada **opcional** de **Apresentação Contextual da keyword para a Marca**. A pergunta operacional que ela responde é "Como esta Marca deve apresentar este tema?", nunca "Qual é a intenção desta busca?". Nenhum processo do Minerador depende da sua execução.
 
 A apresentação pode consumir a keyword/tema original, o contexto autorizado da Marca, a Voz da Marca disponível, o BrandDNA aprovado quando existir e outros contextos editoriais autorizados conforme seus contratos forem disponibilizados. Contexto ausente é declarado como lacuna e nunca inventado.
@@ -606,3 +638,63 @@ A Revisão Humana deixa de ser gate e passa a existir apenas quando há decisão
 O handoff transporta honestamente o que existe: quando a SERP não conclui, `intent` e `funnel` viajam nulos com `semanticState = non_conclusive`; quando conclui, viajam preenchidos com `semanticState = conclusive`. Nenhum valor é inventado para liberar o fluxo.
 
 Restaurar qualquer um desses gates exige nova decisão explícita de produto.
+
+> **Superado em parte pelo §61 (2026-09-18).** A decisão explícita de produto veio: aprovar passou a exigir Lógica, Volume, Resultados e aplicabilidade do KGR quando calculável. SERP e revisão continuam **não** exigidas.
+
+## 61. Aprovação versionada e pacote fechado para o Arquiteto — 2026-09-18
+
+Decisão de produto: **quando o status é `aprovado`, a keyword está pronta para o Arquiteto, e chega lá fechada**. Nada pode chegar pela metade.
+
+**Trava na aprovação** (`resolveApprovalReadiness`): Lógica processada, Volume validado, Resultados validado e aplicabilidade do KGR decidida quando calculável. SERP não conclusiva **não** trava, e revisão humana **não** é gate. `APPROVAL_ALWAYS_AVAILABLE = NO` · `SERP_REQUIRED_FOR_APPROVAL = NO` · `REVIEW_REQUIRED_FOR_APPROVAL = NO` · `KGR_DECISION_REQUIRED_WHEN_CALCULABLE = YES`.
+
+**Registro de aprovação** (`analise_semantica.aprovacao`): `contentHash` (SHA-256), `signature` (FNV-1a síncrona), `approvedAt`, `approvedBy`, `version` (incrementa a cada aprovação). O conteúdo assinado é o pacote inteiro — semântica completa, intenção, volume, resultados, KGR — menos `brandId`, `listaId` e o próprio registro.
+
+**Status `em_revisao` é derivado, nunca gravado.** A coluna `status` guarda a proveniência da última escolha humana; `resolveEffectiveKeywordStatus` devolve `em_revisao` quando a assinatura atual diverge da aprovada. Mexer em keyword aprovada muda o status efetivo sozinho; reaprovar grava versão nova. `minerador_keywords.status` é `text` sem CHECK — sem migration.
+
+**Pacote** (`ApprovedKeywordPackage`, `buildApprovedPackage`): o KeywordDNA inteiro congelado na aprovação, transportado em `payload.approvedDna` do item de workflow. Linha divergente **não produz pacote** — montar a partir dela devolveria conteúdo novo com carimbo antigo. O Arquiteto continua na última versão aprovada enquanto o Minerador prepara a próxima.
+
+**Handoff sem fluxo explícito para reaprovação:** o envio explícito vale só para keyword nova. Keyword já recebida tem o item reescrito quando o `contentHash` aprovado muda (`plan.updates`). Frescor a jusante: `lib/minerador/package-freshness.ts` (`fresh | in_review | stale | never_approved | unknown`; só `stale` impede).
+
+## 62. KeywordDNA fechado — contrato tipado exportado pelo Minerador — 2026-09-19
+
+Até aqui o "KeywordDNA" era um saco de chaves soltas em `analise_semantica` mais quatro colunas. O Arquiteto lia treze chaves pelo nome interno (`intencao_principal`, `modificadores`, `dna_confianca`, `problema_percebido`…) com normalização própria: Minerador vazando por dentro de outro módulo. E a intenção tinha duas respostas: a tabela mostrava a Lógica; o Arquiteto preferia a SERP.
+
+`lib/minerador/keyword-dna.ts` é a única fronteira. `KeywordDnaSchema` (zod, `strict`) define o formato; `keywordDnaFromRow` lê a linha viva; `keywordDnaFromPackage` lê o pacote aprovado que viaja no workflow. Ninguém fora do Minerador precisa conhecer nome de chave.
+
+**Uma resposta por eixo, com a fonte declarada.** `axes.intent`, `axes.funnel` e `axes.niche` carregam `value`, `label`, `state` e `source ∈ {serp, human, logic, null}`. Ordem de autoridade (SDD consolidação, adendo A.2): SERP conclusiva fecha o eixo e **nem a decisão humana a substitui**; sem SERP conclusiva, decisão humana; sem decisão, Lógica como hipótese; sem nada, `value = null` com `state` honesto. Nicho não tem evidência SERP.
+
+**Ausência declarada não vira dado.** `Pendente`, `Nenhum…`, `A confirmar` e `…não determinad…` no meio da frase viram `null` na origem — as mesmas regras que o Arquiteto aplicava por conta própria, e por isso pode parar de aplicar. `modificadores` (string separada por vírgula) vira array; `dna_confianca` (string) vira número 0..1.
+
+**Blocos:** `identity`, `axes`, `serp` (estado, força por eixo, versão, hash, coleta), `logical` (os treze campos normalizados), `metrics` (volume, resultados, KGR com aplicabilidade), `humanReview`, `maturity`, `status` (efetivo + `divergedFromApproval`), `approval` (versão vigente).
+
+**Equivalência garantida por teste** (`tests/minerador-keyword-dna-fechado.test.mts`): sobre a mesma fixture, `keywordDnaFromRow` devolve campo a campo o que `resolveKeywordDnaSignals` do Arquiteto lê hoje. O teste importa o módulo do Arquiteto; a lib do Minerador **não**. Pacote aprovado reconstrói o mesmo DNA e nunca se lê como `em_revisao`.
+
+Nada mudou no formato do pacote nem no handoff: o DNA tipado é uma **vista derivada**, sem bump de schema. A troca de `resolveKeywordDnaSignals` por `keywordDnaFromPackage` é decisão do Arquiteto e está no backlog dele.
+
+> **Complementado pelo §63 (2026-09-19):** a SERP conclusiva passou a morar na própria linha e a leitura canônica da tabela passou a respeitá-la. O item de backlog "tabela e Perfil ainda mostram a Lógica" foi resolvido por essa via.
+
+## 63. SERP como evidência forte — a SERP conclusiva muda a Lógica na origem — 2026-09-19
+
+Decisão de produto: **a SERP tem mais preferência e pode mudar os dados da Lógica; isso é evidência forte.** A autoridade já estava declarada (§58, adendo A.2) mas nunca chegava à linha da keyword: a tabela mostrava a hipótese da Lógica com a SERP concluída.
+
+**Registro `analise_semantica.evidencia_serp`** (`lib/minerador/serp-evidence-record.ts`): projeção da versão vigente de `keyword_semantic_qualification`, gravada pela rota Resultados imediatamente após o write confirmado do artifact. Carrega `versionId`, `version`, `contentHash`, `collectedAt`, `derivationVersion`, `semanticState`, e por eixo `{ value, strength }` — **valor só quando conclusivo**; mista, fraca e insuficiente registram a força e nada mais. `peso: "forte"`. Só keyword oficial recebe.
+
+**A hipótese da Lógica não é sobrescrita.** `intencao_principal`, `funnel` e `logical_output_contract` continuam como o motor gravou; a SERP muda a resposta canônica, e a proveniência de quem propôs o quê continua legível.
+
+**Leitura canônica** (`readCanonicalKeywordDna`), por eixo: SERP conclusiva não invalidada → decisão humana → Lógica → `null` com estado honesto. O read model ganhou `intentSource`, `funnelSource`, `nicheSource` (`serp | human | logic | null`). Nicho não tem eixo SERP. `{ includeSerpEvidence: false }` devolve a hipótese pura — é o que a coluna "Lógica" do painel de consolidação mostra.
+
+**Humano invalida, não substitui.** `HUMAN_CAN_OVERRIDE_VALID_CONCLUSIVE_SERP = NO` continua. `invalidateSerpEvidence` exige motivo e devolve a leitura para humano > Lógica até nova coleta; a nova coleta substitui o registro inteiro, invalidação inclusive. A UI da invalidação ainda não existe.
+
+**Assinatura v2 do pacote aprovado.** `evidencia_serp` sai da assinatura crua e entra a **leitura canônica** (`canonical: { intent, funnel, niche }`). Efeito: SERP conclusiva que muda a intenção ou o funil rebaixa para `em_revisao` e exige nova aprovação; SERP que não conclui nada, ou que confirma a Lógica, não gera ruído. Registros v1 (`fnv1a:`) continuam verificáveis e migram para v2 (`fnv1a-v2:`) sem mudar versão, autor ou instante — só os que ainda batem em v1; v1 divergente é revisão de verdade.
+
+**Backfill** `npm run minerador:backfill-evidencia-serp` (dry-run; `--apply` grava): passo 0 re-assina v1→v2; depois projeta a versão vigente de cada Qualificação. Dry-run de 2026-09-19: 103 keywords com Qualificação, 60 com eixo conclusivo, **23 aprovadas cairão em revisão** porque a SERP discorda da Lógica.
+
+```text
+SERP_CONCLUSIVE_IS_STRONG_EVIDENCE = YES
+SERP_EVIDENCE_LIVES_IN_KEYWORD_ROW = YES
+SERP_OVERWRITES_LOGIC_HYPOTHESIS = NO
+HUMAN_CAN_OVERRIDE_VALID_CONCLUSIVE_SERP = NO
+HUMAN_CAN_INVALIDATE_BAD_SERP_EVIDENCE = YES
+NEW_CONCLUSIVE_SERP_AFTER_APPROVAL_REQUIRES_REAPPROVAL = YES
+NON_CONCLUSIVE_SERP_DOWNGRADES_APPROVAL = NO
+```

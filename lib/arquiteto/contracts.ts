@@ -48,6 +48,24 @@ export type ArticleIntentProfile = z.infer<typeof ArticleIntentProfileSchema>;
 
 export const VersionStatusSchema = z.enum(["draft", "proposed", "approved", "rejected", "superseded"]);
 export const ContentHashSchema = z.string().regex(/^(sha256:[a-f0-9]{64}|legacy:[a-z0-9-]+)$/);
+/**
+ * O PACOTE APROVADO DA KEYWORD — a referência que o Arquiteto guarda.
+ *
+ * O Minerador passou a entregar o KeywordDNA congelado no ato da aprovação:
+ * `version` e `contentHash` só mudam com nova aprovação. Isto é o que o
+ * ArticleDNA e o SiloDNA gravam para responder, depois, "sobre qual pacote eu
+ * fui formado?" — e é o que permite comparar sem opinião.
+ *
+ * NÃO é `VersionReference`: aquele aponta para `editorial_artifact_versions`;
+ * este aponta para `analise_semantica.aprovacao`, que mora na keyword.
+ */
+export const ApprovedPackageRefSchema = z.object({
+  version: z.number().int().positive(),
+  contentHash: z.string().min(1),
+  approvedAt: z.string().min(1),
+}).strict();
+export type ApprovedPackageRef = z.infer<typeof ApprovedPackageRefSchema>;
+
 export const VersionReferenceSchema = z.object({
   entityId: z.string().min(1),
   versionId: z.string().min(1),
@@ -430,6 +448,14 @@ export const ArchitectKeywordSchema = z.object({
   hierarquia: z.string().nullable().optional(),
   analise_semantica: SemanticAnalysisSchema,
   keywordDnaRef: VersionReferenceSchema.optional(),
+  /**
+   * O pacote aprovado que o handoff entregou para esta keyword.
+   *
+   * `null` é informação: o Minerador não entregou pacote — a keyword está em
+   * revisão, ou nunca foi aprovada. Ausente (`undefined`) é item anterior ao
+   * pacote versionado, e o Arquiteto não finge saber.
+   */
+  approvedPackageRef: ApprovedPackageRefSchema.nullable().optional(),
   publishedUrl: z.string().url().nullable().optional(),
   canonical: z.string().url().nullable().optional(),
   url: z.string().url().nullable().optional(),
@@ -764,6 +790,17 @@ export const ArticleKeywordReferenceSchema = z.object({
   keywordId: z.string().min(1),
   keywordDnaVersionId: z.string().min(1),
   keywordDnaContentHash: ContentHashSchema,
+  /**
+   * Sobre qual PACOTE APROVADO esta keyword entrou no artigo.
+   *
+   * `keywordDnaVersionId`/`keywordDnaContentHash` apontam para a Qualificação
+   * Semântica persistida — a proveniência do transporte. Este campo aponta
+   * para a aprovação do Minerador, que é outra pergunta: "o humano aprovou
+   * de novo depois que este artigo nasceu?". Aditivo e opcional: o acervo
+   * anterior ao pacote versionado não o tem, e a leitura diz "desconhecido"
+   * em vez de inventar alinhamento.
+   */
+  approvedPackageRef: ApprovedPackageRefSchema.optional(),
   role: z.enum(["principal", "secundaria", "reforco_narrativo"]),
   strategicContribution: z.string().min(1),
   coveredIntentions: z.array(z.string()).min(1),
@@ -1020,6 +1057,21 @@ export const SiloDNASchema = z.object({
   centralEntity: z.string(),
   centralEntitySource: z.enum(["manual", "keyword_dna"]).optional(),
   centralKeywordDnaRef: VersionReferenceSchema.optional(),
+  /**
+   * Proveniência de INSUMO: sobre quais pacotes aprovados o Silo foi fechado.
+   *
+   * O SiloDNA tinha proveniência de processo (`territoryRef`,
+   * `workingCopyRef`) e nenhuma de insumo. Sem isto, "este Silo está
+   * desatualizado" era opinião; com isto, é comparação de hash. Derivado dos
+   * `approvedPackageRef` dos ArticleDNA que o compõem — uma fonte só.
+   * Aditivo, opcional, sem migration.
+   */
+  keywordPackageRefs: z.array(z.object({
+    keywordId: z.string().min(1),
+    version: z.number().int().positive(),
+    contentHash: z.string().min(1),
+    approvedAt: z.string().min(1),
+  }).strict()).optional(),
   objective: z.string(),
   audience: z.string(),
   macroProblem: z.string(),
@@ -1706,12 +1758,16 @@ export const ContentBlockSchema = z.discriminatedUnion("type", [
   BlockBaseSchema.extend({ type: z.literal("comparison"), title: z.string(), columns: z.array(z.string()).min(2), rows: z.array(z.array(z.string())) }),
 ]);
 
-export const ContentDocumentSchema = z.object({
-  schemaVersion: z.literal(1),
+/**
+ * O QUE TODO DOCUMENTO TEM, VENHA DE ONDE VIER.
+ *
+ * Separado das duas versões porque o que muda entre elas é a ORIGEM, não o
+ * documento. Repetir estes campos nos dois ramos convidaria a divergirem.
+ */
+const contentDocumentSharedShape = {
   id: z.string().min(1),
   title: z.string(),
   status: z.enum(["planejado", "escrevendo", "em_revisao", "aprovado"]),
-  contentPlanRef: VersionReferenceSchema,
   brandDnaRef: VersionReferenceSchema,
   keywordDnaRefs: z.array(VersionReferenceSchema).min(1),
   siloDnaRef: VersionReferenceSchema,
@@ -1723,13 +1779,140 @@ export const ContentDocumentSchema = z.object({
   instructions: z.array(z.string()),
   blocks: z.array(ContentBlockSchema),
   editorContent: z.object({ type: z.literal("doc"), content: z.array(z.unknown()).optional() }).passthrough().nullable().default(null),
-  writingBrief: z.object({ planVersionId: z.string().min(1), details: ContentPlanDetailsSchema, guardianInstructions: z.array(z.string()), alerts: z.array(z.string()), provenance: ProvenanceSchema }).strict().optional(),
   metadata: z.object({
     slug: z.string(), principalKeyword: z.string(), metaTitle: z.string(), metaDescription: z.string(), socialTitle: z.string(), socialDescription: z.string(),
     canonical: z.string().url().nullable(), indexationStatus: z.enum(["noindex", "index"]), plannedImages: z.array(z.string()),
   }).default({ slug: "", principalKeyword: "", metaTitle: "", metaDescription: "", socialTitle: "", socialDescription: "", canonical: null, indexationStatus: "noindex", plannedImages: [] }),
-}).strict();
+} as const;
 
+/** v1 — nasceu de plano aprovado no Planejador. O plano é obrigatório. */
+export const ContentDocumentV1Schema = z.object({
+  ...contentDocumentSharedShape,
+  schemaVersion: z.literal(1),
+  contentPlanRef: VersionReferenceSchema,
+  writingBrief: z.object({ planVersionId: z.string().min(1), details: ContentPlanDetailsSchema, guardianInstructions: z.array(z.string()), alerts: z.array(z.string()), provenance: ProvenanceSchema }).strict().optional(),
+}).strict();
+export type ContentDocumentV1 = z.infer<typeof ContentDocumentV1Schema>;
+
+/**
+ * A PROCEDÊNCIA DO PACOTE DO RADAR.
+ *
+ * `evidenceBundleHash` é o que amarra o documento ao pacote DAQUELA rodada.
+ * Sem ele, uma análise nova do mesmo artigo seria indistinguível da que
+ * originou o texto — e é justamente essa distinção que sustenta
+ * "Atualização disponível" sem sobrescrever o que alguém escreveu.
+ */
+export const RadarDocumentOriginSchema = z.object({
+  radarItemId: z.string().min(1),
+  articleId: z.string().min(1),
+  analysisVersionId: z.string().min(1),
+  analysisVersionNumber: z.number().int().positive(),
+  evidenceBundleHash: z.string().min(1),
+  articleDnaVersionId: z.string().min(1),
+  articleDnaContentHash: z.string().min(1),
+  siloDnaVersionId: z.string().min(1).nullable(),
+  importedAt: z.string().min(1),
+  importedBy: z.string().min(1),
+}).strict();
+export type RadarDocumentOrigin = z.infer<typeof RadarDocumentOriginSchema>;
+
+/**
+ * CONTEXTO IMPORTADO — com proveniência, e fora do texto.
+ *
+ * Nunca entra em `blocks` nem em `editorContent`. Quem escreve precisa
+ * distinguir, olhando, o que veio da investigação do que ele mesmo redigiu;
+ * misturar os dois faria o autosave gravar evidência como se fosse redação.
+ */
+/**
+ * ===== A ESTRUTURA CANÔNICA QUE CHEGA AO REDATOR — §9 do handoff =====
+ *
+ * Markdown é read model: serve para colar em outra ferramenta e é ótimo nisso.
+ * Um Redator que recebesse SÓ markdown teria de reinterpretar prosa para saber
+ * qual evidência sustenta qual seção — e reinterpretar é exatamente o que
+ * produz afirmação sem lastro.
+ *
+ * `bundle` entra como registro opaco de propósito. Ele É a estrutura canônica
+ * do Radar, verificada por hash na origem; redeclará-la aqui criaria uma
+ * segunda definição do mesmo dossiê em outro módulo, e as duas divergiriam no
+ * primeiro campo novo que o Radar acrescentasse.
+ */
+export const RadarWriterDossierSchema = z.object({
+  bundleId: z.string().min(1),
+  bundleHash: z.string().min(1),
+  researchProfile: z.enum(["GOOGLE", "YOUTUBE", "AMAZON"]),
+  keywordContext: z.object({
+    principal: z.string().nullable(),
+    secondary: z.array(z.string()).default([]),
+    narrativeReinforcements: z.array(z.string()).default([]),
+    resolution: z.string().min(1),
+  }).strict(),
+  /** §12 · o que o Redator não pode redefinir, junto do que ele vai usar. */
+  writerMayNot: z.array(z.string().min(1)).min(1),
+  bundle: z.record(z.string(), z.unknown()),
+}).strict();
+export type RadarWriterDossier = z.infer<typeof RadarWriterDossierSchema>;
+
+export const ImportedRadarContextSchema = z.object({
+  source: z.literal("radar"),
+  capturedAt: z.string().min(1),
+  /*
+   * §9 · O DOSSIÊ CANÔNICO, e não um resumo dele.
+   *
+   * Aditivo com `.default(null)`: documento v2 gravado antes deste gate
+   * continua legível, e a ausência é dita em vez de fingida.
+   */
+  dossier: RadarWriterDossierSchema.nullable().default(null),
+  editorialContext: z.array(z.string()).default([]),
+  visualGuidance: z.array(z.string()).default([]),
+  /** Pendências recebidas. Viajam COMO pendências, nunca como resolvidas. */
+  pendingDecisions: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    blocking: z.boolean(),
+    reason: z.string().min(1),
+  }).strict()).default([]),
+}).strict();
+export type ImportedRadarContext = z.infer<typeof ImportedRadarContextSchema>;
+
+/**
+ * v2 — nasceu do pacote canônico do Radar. NÃO tem ContentPlan.
+ *
+ * `.strict()` recusa `contentPlanRef` aqui de propósito: um documento sem
+ * plano que carregasse uma referência inventada mentiria para todo consumidor
+ * a jusante. Ausência declarada é melhor que id fictício.
+ */
+export const ContentDocumentV2Schema = z.object({
+  ...contentDocumentSharedShape,
+  schemaVersion: z.literal(2),
+  radarOrigin: RadarDocumentOriginSchema,
+  importedContext: ImportedRadarContextSchema,
+}).strict();
+export type ContentDocumentV2 = z.infer<typeof ContentDocumentV2Schema>;
+
+/**
+ * UNIÃO DISCRIMINADA, e não campo opcional.
+ *
+ * Tornar `contentPlanRef` opcional deixaria um documento v1 SEM plano passar
+ * no schema. O plano é obrigatório na origem Planejador e inexistente na
+ * origem Radar; um schema que aceita os dois estados em qualquer origem não
+ * descreve nenhuma das duas.
+ */
+export const ContentDocumentSchema = z.discriminatedUnion("schemaVersion", [
+  ContentDocumentV1Schema,
+  ContentDocumentV2Schema,
+]);
+
+/** O plano, quando existe. Evita `schemaVersion === 1` espalhado por aí. */
+export const documentContentPlanRef = (document: ContentDocument): VersionReference | null =>
+  document.schemaVersion === 1 ? document.contentPlanRef : null;
+
+/** Origem Radar, quando for o caso. Guard para o consumidor narrar sozinho. */
+export const isRadarOriginDocument = (document: ContentDocument): document is ContentDocumentV2 =>
+  document.schemaVersion === 2;
+
+/** O briefing do plano, quando existe. O v2 não tem — e não finge ter. */
+export const documentWritingBrief = (document: ContentDocument) =>
+  document.schemaVersion === 1 ? document.writingBrief : undefined;
 export type ContentDocument = z.infer<typeof ContentDocumentSchema>;
 
 export const SectionWritingRequestSchema = z.object({

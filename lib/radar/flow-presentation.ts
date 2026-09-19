@@ -54,9 +54,9 @@ export function buildRadarFlowProgress(input: {
   pagesAnalyzed: boolean;
   reportGenerated: boolean;
   reportApproved: boolean;
-  sentToPlanner: boolean;
+  sentToWriter: boolean;
 }): RadarFlowProgress {
-  const done = [input.serpCollected, input.referencesSelected, input.pagesAnalyzed, input.reportGenerated, input.reportApproved, input.sentToPlanner];
+  const done = [input.serpCollected, input.referencesSelected, input.pagesAnalyzed, input.reportGenerated, input.reportApproved, input.sentToWriter];
   const firstOpen = done.findIndex(value => !value);
   return RADAR_FLOW_STEPS.map((label, index) => ({ label, done: done[index], current: index === (firstOpen === -1 ? done.length - 1 : firstOpen) }));
 }

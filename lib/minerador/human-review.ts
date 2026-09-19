@@ -1,16 +1,22 @@
-import { isCompletedSemanticReview, reviewFields } from "./semantic-review.ts";
 import { readKgrApplicability, setKgrApplicability, type KgrApplicability } from "./kgr-applicability.ts";
 import { readCanonicalKeywordDna } from "./logical-read-model.ts";
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 
-export type HumanReviewFieldDecisionType = "keep_logic" | "accept_ai" | "edit" | "confirm_unknown";
-export type HumanReviewEnrichmentDecisionType = "include" | "ignore";
+/**
+ * Revisão Humana do KeywordDNA.
+ *
+ * Desde 2026-09-18 não existe IA no Minerador. O que era comparação entre a
+ * Lógica e uma sugestão de IA virou o que sempre foi de fato: o humano decide
+ * sobre a leitura determinística — mantém, edita ou confirma que é
+ * desconhecida. `accept_ai`, `aiSuggestion`, os enriquecimentos e o
+ * `aiInputHash` saíram do contrato; nenhuma das 27 revisões persistidas no
+ * banco usava qualquer um deles.
+ */
 
-export type HumanReviewFieldState = "agreement" | "divergence";
+export type HumanReviewFieldDecisionType = "keep_logic" | "edit" | "confirm_unknown";
 
 export type HumanReviewAction =
-  | { type: "field"; field: string; logicalValue: unknown; aiSuggestion: unknown; decision: HumanReviewFieldDecisionType; editedValue?: unknown }
-  | { type: "enrichment"; field: string; value: unknown; decision: HumanReviewEnrichmentDecisionType }
+  | { type: "field"; field: string; logicalValue: unknown; decision: HumanReviewFieldDecisionType; editedValue?: unknown }
   | { type: "kgr"; applicability: KgrApplicability }
   | { type: "reopen" }
   | { type: "cancel" }
@@ -21,18 +27,8 @@ export type HumanReviewFieldDecision = {
   canonicalField: string | null;
   decision: HumanReviewFieldDecisionType;
   logicalValue: unknown;
-  aiSuggestion: unknown;
   selectedValue: unknown;
-  source: "logical" | "ai" | "human";
-  actorId: string;
-  decidedAt: string;
-};
-
-export type HumanReviewEnrichmentDecision = {
-  field: string;
-  value: unknown;
-  decision: HumanReviewEnrichmentDecisionType;
-  source: "ai";
+  source: "logical" | "human";
   actorId: string;
   decidedAt: string;
 };
@@ -40,14 +36,11 @@ export type HumanReviewEnrichmentDecision = {
 export type HumanReviewRecord = {
   schemaVersion: "r6";
   status: "in_progress" | "completed";
-  decision: "pending" | "keep_logic" | "accept_ai" | "edited" | "confirm_unknown" | "mixed" | "completed";
+  decision: "pending" | "keep_logic" | "edited" | "confirm_unknown" | "mixed" | "completed";
   fieldDecisions: HumanReviewFieldDecision[];
-  enrichmentDecisions?: HumanReviewEnrichmentDecision[];
   overrides?: Record<string, unknown>;
   kgrApplicability?: KgrApplicability;
   kgrDecisionReviewed?: boolean;
-  /** R5 input hash that the human actually reviewed. */
-  aiInputHash?: string;
   completedAt?: string;
   completedBy?: string;
   pendingFields?: string[];
@@ -82,12 +75,6 @@ function normalize(value: string): string {
   return value.trim().toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[._-]+/g, " ").replace(/\s+/g, " ");
 }
 
-function normalizeVerdict(value: unknown): string {
-  return typeof value === "string"
-    ? value.trim().toLocaleUpperCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    : "";
-}
-
 function comparableValue(value: unknown): unknown {
   if (typeof value === "string") return normalize(value);
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -102,39 +89,6 @@ function comparableValue(value: unknown): unknown {
 function materiallyEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(comparableValue(left)) === JSON.stringify(comparableValue(right));
 }
-
-export function classifyHumanReviewField(field: Record<string, unknown>): HumanReviewFieldState {
-  const verdict = normalizeVerdict(field.verdict);
-  if (verdict === "CONCORDA") return "agreement";
-  if (verdict === "CONCORDA PARCIALMENTE" && materiallyEqual(field.logicalValue, field.aiSuggestion)) return "agreement";
-  return "divergence";
-}
-
-const enrichmentLabels: Record<string, string> = {
-  searchNeed: "Necessidade implícita",
-  probableObjective: "Objetivo provável",
-  semanticContext: "Contexto semântico",
-  userExpectation: "Expectativa do usuário",
-  entityModifierRelation: "Relação entidade/modificador",
-  remainingAmbiguities: "Ambiguidades remanescentes",
-  suitability: "Adequação",
-  observations: "Observações",
-  gaps: "Lacunas",
-};
-
-function meaningfulReviewValue(value: unknown): boolean {
-  if (value === null || value === undefined || value === "") return false;
-  if (Array.isArray(value)) return value.length > 0;
-  if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
-  return true;
-}
-
-export type HumanReviewEnrichmentRow = {
-  field: string;
-  label: string;
-  value: unknown;
-  decision: HumanReviewEnrichmentDecision | null;
-};
 
 const fieldAliases: Record<string, string> = {
   intent: "intent",
@@ -198,15 +152,8 @@ function readHumanReviewRecord(semantic: Semantic | null | undefined): HumanRevi
   const fieldDecisions = Array.isArray(existing?.fieldDecisions)
     ? existing.fieldDecisions.filter(entry => entry && typeof entry === "object") as HumanReviewFieldDecision[]
     : [];
-  const enrichmentDecisions = Array.isArray(existing?.enrichmentDecisions)
-    ? existing.enrichmentDecisions.filter(entry => {
-      if (!entry || typeof entry !== "object") return false;
-      const item = entry as Record<string, unknown>;
-      return typeof item.field === "string" && (item.decision === "include" || item.decision === "ignore");
-    }) as HumanReviewEnrichmentDecision[]
-    : [];
   const rawOverrides = asRecord(existing?.overrides) || {};
-  const decision = ["keep_logic", "accept_ai", "edited", "confirm_unknown", "mixed", "completed"].includes(String(existing?.decision))
+  const decision = ["keep_logic", "edited", "confirm_unknown", "mixed", "completed"].includes(String(existing?.decision))
     ? existing?.decision as HumanReviewRecord["decision"]
     : "pending";
   return {
@@ -214,13 +161,11 @@ function readHumanReviewRecord(semantic: Semantic | null | undefined): HumanRevi
     status: existing?.status === "completed" ? "completed" : "in_progress",
     decision,
     fieldDecisions,
-    ...(enrichmentDecisions.length > 0 ? { enrichmentDecisions } : {}),
     ...(Object.keys(rawOverrides).length > 0 ? { overrides: rawOverrides } : {}),
     ...(existing?.kgrApplicability === "pending" || existing?.kgrApplicability === "applicable" || existing?.kgrApplicability === "not_applicable"
       ? { kgrApplicability: existing.kgrApplicability }
       : {}),
     ...(existing?.kgrDecisionReviewed === true ? { kgrDecisionReviewed: true } : {}),
-    ...(typeof existing?.aiInputHash === "string" && existing.aiInputHash.trim() ? { aiInputHash: existing.aiInputHash.trim() } : {}),
     ...(typeof existing?.completedAt === "string" ? { completedAt: existing.completedAt } : {}),
     ...(typeof existing?.completedBy === "string" ? { completedBy: existing.completedBy } : {}),
     ...(Array.isArray(existing?.pendingFields) ? { pendingFields: existing.pendingFields.filter(value => typeof value === "string") } : {}),
@@ -231,36 +176,15 @@ export function humanReviewRecord(semantic: Semantic | null | undefined): HumanR
   return readHumanReviewRecord(semantic);
 }
 
-export function humanReviewFieldDecision(semantic: Semantic | null | undefined, field: unknown, current?: { logicalValue?: unknown; aiSuggestion?: unknown }): HumanReviewFieldDecision | null {
+export function humanReviewFieldDecision(semantic: Semantic | null | undefined, field: unknown, current?: { logicalValue?: unknown }): HumanReviewFieldDecision | null {
   if (typeof field !== "string") return null;
   const canonical = canonicalHumanReviewField(field);
   const key = normalizedFieldKey(field, canonical);
   const decision = readHumanReviewRecord(semantic).fieldDecisions.find(entry => normalizedFieldKey(entry.field, entry.canonicalField) === key) || null;
   if (!decision || !current) return decision;
-  return materiallyEqual(decision.logicalValue, current.logicalValue)
-    && materiallyEqual(decision.aiSuggestion, current.aiSuggestion)
-    ? decision
-    : null;
-}
-
-export function humanReviewEnrichmentDecision(semantic: Semantic | null | undefined, field: unknown): HumanReviewEnrichmentDecision | null {
-  if (typeof field !== "string" || !field.trim()) return null;
-  return readHumanReviewRecord(semantic).enrichmentDecisions?.find(entry => entry.field === field) || null;
-}
-
-export function humanReviewEnrichmentRows(semantic: Semantic | null | undefined, review: unknown): HumanReviewEnrichmentRow[] {
-  const enrichment = asRecord(asRecord(review)?.semanticEnrichment) || {};
-  return Object.entries(enrichmentLabels)
-    .map(([field, label]) => ({
-      field,
-      label,
-      value: enrichment[field],
-      decision: (() => {
-        const decision = humanReviewEnrichmentDecision(semantic, field);
-        return decision && materiallyEqual(decision.value, enrichment[field]) ? decision : null;
-      })(),
-    }))
-    .filter(row => meaningfulReviewValue(row.value));
+  // A decisão vale para o valor lógico que o humano viu. Se a Lógica mudou, a
+  // decisão anterior não responde mais pelo campo.
+  return materiallyEqual(decision.logicalValue, current.logicalValue) ? decision : null;
 }
 
 function decisionSummary(decisions: HumanReviewFieldDecision[]): HumanReviewRecord["decision"] {
@@ -297,30 +221,28 @@ function invalidateHumanConfirmation(semantic: Semantic): void {
   delete semantic.dna_revisao_humana_em;
 }
 
-function valueForDecision(input: { decision: HumanReviewFieldDecisionType; logicalValue: unknown; aiSuggestion: unknown; editedValue?: unknown }): { value: unknown; source: HumanReviewFieldDecision["source"] } {
+function valueForDecision(input: { decision: HumanReviewFieldDecisionType; logicalValue: unknown; editedValue?: unknown }): { value: unknown; source: HumanReviewFieldDecision["source"] } {
   if (input.decision === "keep_logic") return { value: input.logicalValue, source: "logical" };
-  if (input.decision === "accept_ai") return { value: input.aiSuggestion, source: "ai" };
   if (input.decision === "confirm_unknown") return { value: null, source: "human" };
   return { value: input.editedValue ?? null, source: "human" };
 }
 
 /**
  * Applies only a semantic decision. It never accepts metric/provider fields,
- * and it keeps the logical/AI layers available for audit.
+ * and it keeps the logical layer available for audit.
  */
 export function applyHumanReviewField(input: {
   semantic: Semantic | null | undefined;
   intent: string | null | undefined;
   field: string;
   logicalValue: unknown;
-  aiSuggestion: unknown;
   decision: HumanReviewFieldDecisionType;
   editedValue?: unknown;
   actorId: string;
   decidedAt: string;
 }): { semantic: Semantic; intent: string | null; selectedValue: unknown; record: HumanReviewRecord } {
   const canonicalField = canonicalHumanReviewField(input.field);
-  const selected = valueForDecision({ decision: input.decision, logicalValue: input.logicalValue, aiSuggestion: input.aiSuggestion, editedValue: input.editedValue });
+  const selected = valueForDecision({ decision: input.decision, logicalValue: input.logicalValue, editedValue: input.editedValue });
   const current = { ...(input.semantic || {}) };
   invalidateHumanConfirmation(current);
   const existingRecord = readHumanReviewRecord(current);
@@ -329,7 +251,6 @@ export function applyHumanReviewField(input: {
     canonicalField,
     decision: input.decision,
     logicalValue: input.logicalValue,
-    aiSuggestion: input.aiSuggestion,
     selectedValue: selected.value,
     source: selected.source,
     actorId: input.actorId,
@@ -397,39 +318,6 @@ export function applyHumanReviewField(input: {
   return { semantic: current, intent: nextIntent, selectedValue: selected.value, record: nextRecord };
 }
 
-export function applyHumanReviewEnrichment(input: {
-  semantic: Semantic | null | undefined;
-  field: string;
-  value: unknown;
-  decision: HumanReviewEnrichmentDecisionType;
-  actorId: string;
-  decidedAt: string;
-}): { semantic: Semantic; record: HumanReviewRecord } {
-  const current = { ...(input.semantic || {}) };
-  invalidateHumanConfirmation(current);
-  const existingRecord = readHumanReviewRecord(current);
-  const enrichmentDecisions = (existingRecord.enrichmentDecisions || []).filter(entry => entry.field !== input.field);
-  enrichmentDecisions.push({
-    field: input.field,
-    value: input.value,
-    decision: input.decision,
-    source: "ai",
-    actorId: input.actorId,
-    decidedAt: input.decidedAt,
-  });
-  const nextRecord: HumanReviewRecord = {
-    ...existingRecord,
-    status: "in_progress",
-    decision: existingRecord.fieldDecisions.length > 0 ? decisionSummary(existingRecord.fieldDecisions) : "pending",
-    enrichmentDecisions,
-    pendingFields: [],
-    completedAt: undefined,
-    completedBy: undefined,
-  };
-  current.human_review = nextRecord;
-  return { semantic: current, record: nextRecord };
-}
-
 export function applyHumanReviewKgrApplicability(input: {
   semantic: Semantic | null | undefined;
   applicability: KgrApplicability;
@@ -458,49 +346,29 @@ function kgrIsCalculable(semantic: Semantic | null | undefined): boolean {
 }
 
 /**
- * The AI review is contextual enrichment, not a precondition: a human can
- * consolidate the DNA without it. The KGR applicability stays a human
- * decision of its own, reported as pending instead of disabling the command.
+ * O que pode ficar pendente hoje é campo estratégico sem leitura consolidada
+ * e a aplicabilidade do KGR. A aplicabilidade continua sendo decisão humana
+ * própria, reportada como pendente em vez de desabilitar o comando.
  */
-export function canCompleteHumanReview(semantic: Semantic | null | undefined, options: { hasOpenEdit?: boolean; intent?: string | null } = {}): { ok: boolean; pendingFields: string[]; pendingEnrichments?: string[]; pendingKgrDecision?: boolean; reason?: string } {
-  const review = [semantic?.ai_review, semantic?.ia_revisao, semantic?.revisao_ia, semantic?.semantic_review]
-    .map(asRecord)
-    .find(Boolean) || null;
-  const aiReview = isCompletedSemanticReview(review) ? review : null;
+export function canCompleteHumanReview(semantic: Semantic | null | undefined, options: { hasOpenEdit?: boolean; intent?: string | null } = {}): { ok: boolean; pendingFields: string[]; pendingKgrDecision?: boolean; reason?: string } {
   const pendingKgrDecision = kgrIsCalculable(semantic) && readKgrApplicability(semantic) === "pending";
 
-  const pendingFields = reviewFields(aiReview)
-    .filter(field => classifyHumanReviewField(field) === "divergence")
-    .filter(field => !humanReviewFieldDecision(semantic, field.field, field))
-    .map(field => String(field.field || "Campo sem nome"));
-  const pendingEnrichments = humanReviewEnrichmentRows(semantic, aiReview)
-    .filter(row => !row.decision)
-    .map(row => row.label);
-  const pendingDivergenceCanonicalFields = new Set(
-    reviewFields(aiReview)
-      .filter(field => classifyHumanReviewField(field) === "divergence")
-      .map(field => canonicalHumanReviewField(String(field.field || "")))
-      .filter((field): field is string => Boolean(field)),
-  );
-  const pendingStrategicFields = humanReviewStrategicFields(semantic, options.intent)
+  const pendingFields = humanReviewStrategicFields(semantic, options.intent)
     .filter(field => !field.logicalValue)
-    .filter(field => !humanReviewFieldDecision(semantic, field.field, { logicalValue: field.logicalValue, aiSuggestion: null }))
-    .filter(field => !pendingDivergenceCanonicalFields.has(field.field))
+    .filter(field => !humanReviewFieldDecision(semantic, field.field, { logicalValue: field.logicalValue }))
     .map(field => `${field.label} (confirmar desconhecido)`);
-  const allPendingFields = [...pendingFields, ...pendingStrategicFields];
 
   // Pending items are intentionally returned for the checklist/read-model,
   // but they are not a completion blocker. The explicit completion command
   // records conservative defaults for every unresolved item.
   return {
     ok: true,
-    pendingFields: allPendingFields,
-    pendingEnrichments,
+    pendingFields,
     ...(pendingKgrDecision ? { pendingKgrDecision } : {}),
     ...(pendingKgrDecision
       ? { reason: "Trate a aplicabilidade do KGR para concluir a revisão humana." }
-      : allPendingFields.length > 0 || pendingEnrichments.length > 0
-        ? { reason: "Você pode concluir agora: divergências sem decisão manterão a Lógica, enriquecimentos serão ignorados e campos sem evidência permanecerão desconhecidos." }
+      : pendingFields.length > 0
+        ? { reason: "Você pode concluir agora: campos sem evidência permanecerão desconhecidos." }
         : {}),
   };
 }
@@ -511,58 +379,25 @@ function applyHumanReviewCompletionDefaults(input: {
   actorId: string;
   decidedAt: string;
 }): { semantic: Semantic; intent: string | null } {
-  const review = [input.semantic.ai_review, input.semantic.ia_revisao, input.semantic.revisao_ia, input.semantic.semantic_review]
-    .map(asRecord)
-    .find(Boolean) || null;
-  if (!review) return { semantic: input.semantic, intent: input.intent };
-
   let semantic = input.semantic;
   let intent = input.intent;
 
-  for (const field of reviewFields(review)) {
-    if (classifyHumanReviewField(field) !== "divergence") continue;
-    if (humanReviewFieldDecision(semantic, field.field, field)) continue;
-    const result = applyHumanReviewField({
-      semantic,
-      intent,
-      field: String(field.field || "Campo sem nome"),
-      logicalValue: field.logicalValue,
-      aiSuggestion: field.aiSuggestion,
-      decision: "keep_logic",
-      actorId: input.actorId,
-      decidedAt: input.decidedAt,
-    });
-    semantic = result.semantic;
-    intent = result.intent;
-  }
-
+  // Default conservador: campo estratégico sem leitura da Lógica é registrado
+  // como desconhecido confirmado, nunca preenchido por conta própria.
   for (const field of humanReviewStrategicFields(semantic, intent)) {
     if (field.logicalValue) continue;
-    if (humanReviewFieldDecision(semantic, field.field, { logicalValue: field.logicalValue, aiSuggestion: null })) continue;
+    if (humanReviewFieldDecision(semantic, field.field, { logicalValue: field.logicalValue })) continue;
     const result = applyHumanReviewField({
       semantic,
       intent,
       field: field.field,
       logicalValue: null,
-      aiSuggestion: null,
       decision: "confirm_unknown",
       actorId: input.actorId,
       decidedAt: input.decidedAt,
     });
     semantic = result.semantic;
     intent = result.intent;
-  }
-
-  for (const row of humanReviewEnrichmentRows(semantic, review)) {
-    if (row.decision) continue;
-    semantic = applyHumanReviewEnrichment({
-      semantic,
-      field: row.field,
-      value: row.value,
-      decision: "ignore",
-      actorId: input.actorId,
-      decidedAt: input.decidedAt,
-    }).semantic;
   }
 
   return { semantic, intent };
@@ -593,9 +428,6 @@ export function completeHumanReview(input: {
     decision: "completed",
     kgrApplicability: applicability,
     kgrDecisionReviewed: record.kgrDecisionReviewed === true || !kgrIsCalculable(defaults.semantic) || applicability !== "pending",
-    ...(typeof asRecord(defaults.semantic.ai_review)?.inputHash === "string"
-      ? { aiInputHash: String(asRecord(defaults.semantic.ai_review)?.inputHash) }
-      : {}),
     pendingFields: [],
     completedAt: input.completedAt,
     completedBy: input.actorId,

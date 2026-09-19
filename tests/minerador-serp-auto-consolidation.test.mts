@@ -129,9 +129,9 @@ test("G · a IA não altera Intenção nem Funil, presente ou ausente", () => {
 });
 
 test("H · a Revisão Humana não confirma semântica, mas mantém a decisão de KGR", () => {
-  // O R5 segue neutralizado: nenhum bloco de confirmação de Intenção/Funil.
-  assert.ok(humanReview.includes("const aiReview: ProfileRecord | null = null"));
-  assert.ok(humanReview.includes("const strategicUnknownRows = aiReview"), "as linhas estratégicas dependem do R5 desligado");
+  // O R5 não existe mais: nenhum bloco de confirmação de Intenção/Funil.
+  assert.ok(!humanReview.includes("aiReview"), "nenhum vestígio de IA na Revisão Humana");
+  assert.ok(!humanReview.includes("strategicUnknownRows"));
   // A aplicabilidade do KGR continua sendo decisão humana própria.
   assert.ok(humanReview.includes('aria-label="Aplicabilidade do KGR na revisão humana"'));
   assert.ok(humanReview.includes('onAction?.({ type: "kgr"'));

@@ -139,6 +139,12 @@ export class WorkflowRepository extends ContextBoundRepository {
     return readMany(result.data as PipelineRow[] | null, result.error);
   }
 
+  /** Leitura estreitada por etapa: quem sabe a etapa não varre a Marca inteira. */
+  async listByStage(stage: string): Promise<PipelineReadResult<readonly PipelineRow[]>> {
+    const result = await this.client.from("editorial_workflow_items").select("*").eq("marca_id", this.brandId).eq("stage", stage).order("updated_at", { ascending: false });
+    return readMany(result.data as PipelineRow[] | null, result.error);
+  }
+
   async find(id: string): Promise<PipelineReadResult<PipelineRow>> {
     const result = await this.client.from("editorial_workflow_items").select("*").eq("id", id).eq("marca_id", this.brandId).maybeSingle();
     return readOne(result.data as PipelineRow | null, result.error);

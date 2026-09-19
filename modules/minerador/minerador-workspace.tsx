@@ -17,7 +17,6 @@ import {
   FileSpreadsheet,
   Brain,
   Search,
-  Sparkles,
   ChevronDown,
   ChevronRight,
   Building2,
@@ -30,7 +29,7 @@ import { useBrand } from "@/components/brand-context";
 import { AppMenu } from "@/components/app-menu";
 import { InfoHint } from "@/components/info-hint";
 import { InlineLabelCluster } from "@/components/inline-label-cluster";
-import { KeywordDnaPanel, type KeywordPresentationBrief } from "@/components/editorial/dna-panels";
+import { KeywordDnaPanel } from "@/components/editorial/dna-panels";
 import { useGlobalTopbarControlsRegistration, type GlobalTopbarModuleControls } from "@/components/global-topbar";
 import { MineradorLastOrganizationRestorer } from "./last-organization-restorer";
 import { DeleteConfirmation, PublishedDeleteConfirmation, RecoveryAction } from "@/components/lifecycle/delete-confirmation";
@@ -49,7 +48,7 @@ import { buildMineradorSiteSyncPlan, loadMineradorSiteSyncSnapshot, uniqueSiteSy
 import { classifyKgrMeasurement, kgrApplicabilityLabel, kgrDecisionLabel, kgrMeasurementLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";
 import { describeKgrApplicabilityBatch, planKgrApplicabilityBatch } from "@/lib/minerador/kgr-applicability-batch";
 import { describeHumanReviewCompletionBatch, planHumanReviewCompletionBatch } from "@/lib/minerador/human-review-completion-batch";
-import { applyHumanReviewEnrichment, applyHumanReviewField, applyHumanReviewKgrApplicability, canCompleteHumanReview, completeHumanReview, humanReviewRecord, isHumanReviewCompleted, type HumanReviewAction } from "@/lib/minerador/human-review";
+import { applyHumanReviewField, applyHumanReviewKgrApplicability, canCompleteHumanReview, completeHumanReview, humanReviewRecord, isHumanReviewCompleted, type HumanReviewAction } from "@/lib/minerador/human-review";
 import { evaluateMineradorArquitetoHandoffBatch } from "@/lib/minerador/arquiteto-handoff-gates";
 import { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";
 import { assessVolumeKgrConsistency, hasExplicitZeroMeasurement, volumeKgrConsistencyLabel, type VolumeKgrConsistency } from "@/lib/minerador/volume-kgr-consistency";
@@ -63,17 +62,16 @@ import { buildLogicalOutputContract, buildLogicalProcessorMetadata, hasCompleteL
 import { readCanonicalKeywordDna, readLogicalIntentLabel, readLogicalNiche } from "@/lib/minerador/logical-read-model";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { resolveMineradorProcessState, type MineradorAttemptState, type MineradorProcessAttempt, type MineradorProcessName } from "@/lib/minerador/process-state";
-import { resolveSemanticReviewNotice } from "@/lib/minerador/semantic-review-notice";
 import { type SemanticConsolidationDraft } from "@/lib/minerador/semantic-consolidation-draft";
 import { isConclusiveSerpEvidence, type SerpSemanticEvidence } from "@/lib/minerador/serp-semantic-evidence";
 import { KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE, parseKeywordSemanticQualification, semanticDraftFromQualification, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
-import { KEYWORD_CONTEXTUAL_PRESENTATION_ARTIFACT_TYPE, brandVoiceAppliedInPresentation, parseKeywordContextualPresentation } from "@/lib/minerador/keyword-contextual-presentation";
 import { applyPublicationLinkAction, readPublicationLink, readSiteOrigin, type PublicationLinkEvidence } from "@/lib/minerador/publication-link";
 import {
   keywordRecoveryRemainingLabel,
   resolveKeywordPublication,
 } from "@/lib/minerador/keyword-lifecycle";
 import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus, type EditorialKeywordStatus } from "@/lib/minerador/editorial-status";
+import { applyApproval, resolveApprovalReadiness } from "@/lib/minerador/approved-package";
 import type { KeywordTableOrderMode } from "@/lib/minerador/manual-order";
 import { manualImportListaId, resolveLegacyCsvSilo } from "@/lib/minerador/legacy-import";
 import { KeywordTableBulkBarShell } from "./keyword-table/keyword-table-bulk-bar-shell";
@@ -252,7 +250,7 @@ function funnelLabelFor(item: KeywordItem): string {
 
 const formatMetricInteger = (value: number) => new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(value);
 
-type BulkProgressStep = "site" | "logic" | "volume" | "results" | "ai" | "review";
+type BulkProgressStep = "site" | "logic" | "volume" | "results" | "review";
 type BulkProgressStatus = "idle" | "processing" | "success" | "error";
 type BulkProgressState = {
   status: BulkProgressStatus;
@@ -306,13 +304,6 @@ const bulkProgressStepMeta: Record<BulkProgressStep, {
     barClass: "bg-context-accent",
     activeClass: "border-context-accent bg-context-accent/10 text-context-accent",
     cardClass: "border-context-accent/35 bg-context-accent/10",
-  },
-  ai: {
-    processingLabel: "Executando revisão IA...",
-    textClass: "text-positive-soft",
-    barClass: "bg-positive-soft",
-    activeClass: "border-positive-soft bg-positive-soft/10 text-positive-soft",
-    cardClass: "border-positive-soft/35 bg-positive-soft/10",
   },
   review: {
     processingLabel: "Aplicando revisão...",
@@ -377,11 +368,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const [serpCollectionFailures, setSerpCollectionFailures] = useState<Record<string, boolean>>({});
   // Aporte contextual da IA: working copy explícita, nunca persistida no registro
   // canônico e nunca resolvida no carregamento da página.
-  const [presentationBriefs, setPresentationBriefs] = useState<Record<string, KeywordPresentationBrief>>({});
   // Tentativa gerada mas não persistida: fica separada da versão canônica para
   // nunca substituí-la silenciosamente. F5 descarta a tentativa e mantém vN.
-  const [presentationAttempts, setPresentationAttempts] = useState<Record<string, KeywordPresentationBrief>>({});
-  const [presentationBriefLoadingId, setPresentationBriefLoadingId] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const discoverySourceControlsRef = useRef<DiscoverySourceControlsHandle>(null);
@@ -503,54 +491,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       const parsed = parseKeywordSemanticQualification(row.payload);
       if (!parsed || parsed.brandId !== brandId || parsed.keywordId !== keywordId) continue;
       current[keywordId] = parsed;
-    }
-    return current;
-  }, [supabase]);
-
-  /**
-   * Lê a Apresentação Contextual persistida das próprias keywords da Marca.
-   * Nenhuma chamada de IA acontece aqui: é leitura do artifact canônico.
-   */
-  const loadContextualPresentations = useCallback(async (brandId: string, keywordIds: readonly string[]) => {
-    const ids = [...new Set(keywordIds.filter(Boolean))];
-    if (!brandId || ids.length === 0) return {} as Record<string, KeywordPresentationBrief>;
-    const rows = await withSupabaseSelectRetry(async () => {
-      const { data, error } = await supabase
-        .from("editorial_artifact_versions")
-        .select("entity_id,version_number,payload")
-        .eq("marca_id", brandId)
-        .eq("artifact_type", KEYWORD_CONTEXTUAL_PRESENTATION_ARTIFACT_TYPE)
-        .in("entity_id", ids)
-        .order("version_number", { ascending: false });
-      if (error) throw error;
-      return data || [];
-    });
-    const current: Record<string, KeywordPresentationBrief> = {};
-    for (const row of rows as Array<{ entity_id?: unknown; payload?: unknown }>) {
-      const keywordId = typeof row.entity_id === "string" ? row.entity_id : "";
-      if (!keywordId || current[keywordId]) continue;
-      const parsed = parseKeywordContextualPresentation(row.payload);
-      if (!parsed || parsed.brandId !== brandId || parsed.keywordId !== keywordId) continue;
-      current[keywordId] = {
-        contextualPresentation: {
-          text: parsed.output.text,
-          generatedAt: parsed.provenance.generatedAt,
-          provider: parsed.provenance.provider as KeywordPresentationBrief["contextualPresentation"]["provider"],
-          model: parsed.provenance.model,
-          status: "generated",
-          inputKeywordDnaRef: {
-            entityId: parsed.input.inputKeywordDnaRef?.entityId || keywordId,
-            versionId: parsed.input.inputKeywordDnaRef?.versionId || "",
-            contentHash: parsed.input.inputKeywordDnaRef?.contentHash || "",
-          },
-          appliedSkillRefs: parsed.input.appliedSkillRefs,
-        },
-        brandVoiceApplied: brandVoiceAppliedInPresentation(parsed),
-        appliedSkillRefs: parsed.input.appliedSkillRefs,
-        generatedAt: parsed.provenance.generatedAt,
-        persisted: true,
-        version: parsed.lifecycle.version,
-      };
     }
     return current;
   }, [supabase]);
@@ -1080,18 +1020,14 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       // tela uma Qualificação remota válida.
       const persistedQualifications = await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)))
         .catch(() => null);
-      // A Apresentação Contextual persistida reidrata pelo mesmo princípio:
-      // artifact remoto > working copy > estado vazio, e falha não apaga nada.
-      const persistedPresentations = await loadContextualPresentations(selectedBrandId, loadedKeywords.map(item => String(item.id)))
-        .catch(() => null);
-      if (persistedPresentations) setPresentationBriefs(current => ({ ...current, ...persistedPresentations }));
       if (persistedQualifications) {
         setSemanticQualifications(current => ({ ...current, ...persistedQualifications }));
         setSemanticConsolidationDrafts(current => {
           const next = { ...current };
           for (const [keywordId, qualification] of Object.entries(persistedQualifications)) {
             const keyword = loadedKeywords.find(item => String(item.id) === keywordId);
-            const logic = keyword ? readCanonicalKeywordDna(keyword) : null;
+            // A coluna "Lógica" do painel é a hipótese, não a resposta canônica.
+            const logic = keyword ? readCanonicalKeywordDna(keyword, { includeSerpEvidence: false }) : null;
             next[keywordId] = semanticDraftFromQualification(qualification, { intent: logic?.intent ?? null, funnel: logic?.funnel ?? null });
           }
           return next;
@@ -1446,216 +1382,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     URL.revokeObjectURL(url);
 
     showNotification("success", `Exportadas ${selectedKeywords.length} palavras no arquivo "${finalFileName}"!`);
-  };
-
-  // FunÃ§Ã£o para executar a fila de processamento semÃ¢ntico da IA (DeepSeek)
-  const handleBatchAnalyze = async () => {
-    if (selectedIds.size === 0) return;
-    setQueueProcessing(true);
-    setQueueProgress(0);
-    setUpdating(true);
-
-    const selectedKeywords = keywords.filter(k => selectedIds.has(k.id));
-    let successCount = 0;
-    let failCount = 0;
-
-    try {
-      let count = 0;
-      for (const item of selectedKeywords) {
-        count++;
-        setQueueProgress(count);
-        try {
-          const res = await fetch("/api/analyze", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ brandId: selectedBrandId, keywordId: item.id, keyword: item.keyword })
-          });
-          const resData = await res.json();
-          if (!res.ok || !resData.success) {
-            console.error(`Erro ao analisar keyword "${item.keyword}":`, resData.error);
-            failCount++;
-          } else {
-            successCount++;
-            // Atualiza a palavra-chave no estado local reativamente com o JSON retornado do DeepSeek
-            setKeywords(prev => prev.map(k => k.id === item.id ? { 
-              ...k, 
-              analise_semantica: resData.data
-            } : k));
-          }
-        } catch (err) {
-          console.error(`Falha na requisiÃ§Ã£o para a palavra "${item.keyword}":`, err);
-          failCount++;
-        }
-      }
-
-      if (failCount === 0) {
-        showNotification("success", `Análise Semântica de todas as ${successCount} palavras concluída!`);
-      } else {
-        showNotification("success", `Análise concluída: ${successCount} com sucesso e ${failCount} falhas.`);
-      }
-    } catch (err: any) {
-      console.error(err);
-      showNotification("error", "Erro ao executar a fila de processamento semÃ¢ntico.");
-    } finally {
-      setQueueProcessing(false);
-      setUpdating(false);
-    }
-  };
-
-  const readSemanticReviewResponse = useCallback(async (response: Response, keywordIndex: number, totalKeywords: number): Promise<Record<string, unknown>> => {
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("application/x-ndjson") || !response.body) {
-      return await response.json() as Record<string, unknown>;
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let result: Record<string, unknown> | null = null;
-    const consumeLine = (line: string) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      const event = JSON.parse(trimmed) as Record<string, unknown>;
-      if (event.type === "progress" && typeof event.phaseNumber === "number") {
-        const phaseNumber = Math.min(3, Math.max(1, event.phaseNumber));
-        const label = typeof event.label === "string" ? event.label : "IA";
-        updateBulkProgress(
-          keywordIndex + phaseNumber / 3,
-          totalKeywords,
-          `${label} · fase ${phaseNumber}/3`,
-          `${event.retry === true ? "tentativa 2 · " : ""}keyword ${keywordIndex + 1} de ${totalKeywords} · fase ${phaseNumber}/3`,
-        );
-      } else if (event.type === "result") {
-        result = event;
-      }
-    };
-
-    while (true) {
-      const chunk = await reader.read();
-      buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
-      let newlineIndex = buffer.indexOf("\n");
-      while (newlineIndex >= 0) {
-        consumeLine(buffer.slice(0, newlineIndex));
-        buffer = buffer.slice(newlineIndex + 1);
-        newlineIndex = buffer.indexOf("\n");
-      }
-      if (chunk.done) break;
-    }
-    if (buffer.trim()) consumeLine(buffer);
-    if (!result) throw new Error("A revisão IA encerrou sem devolver o resultado final.");
-    return result;
-  }, [updateBulkProgress]);
-
-  // Ação em lote: revisa o contexto R1-R4 sem sobrescrever o DNA lógico.
-  const handleBatchSemanticReview = async () => {
-    if (selectedIds.size === 0) return;
-    const selectedKeywords = keywords.filter(k => selectedIds.has(k.id));
-    const executionRequestId = crypto.randomUUID();
-    if (selectedKeywords.length === 0 || !startBulkProgress("ai", selectedKeywords.length, selectedKeywords.map(item => item.id), executionRequestId)) return;
-    setQueueProcessing(true);
-    setQueueProgress(0);
-    setUpdating(true);
-
-    let successCount = 0;
-    let failCount = 0;
-    let outcome: "success" | "error" = "success";
-    const failedKeywords: string[] = [];
-    const failedDetails: Array<{ keyword: string; code?: string; stage?: string; message?: string; diagnostic?: Record<string, unknown> }> = [];
-
-    try {
-      let count = 0;
-      for (const item of selectedKeywords) {
-        count++;
-        try {
-          const res = await fetch("/api/process-intent-niche", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ brandId: selectedBrandId, keywordId: item.id, mode: "semantic_review", userInitiated: true, executionRequestId })
-          });
-           const resData = await readSemanticReviewResponse(res, count - 1, selectedKeywords.length);
-          if (!res.ok || !resData.success) {
-            console.warn(`Revisão semântica sem resposta válida para "${item.keyword}":`, resData.error);
-            failCount++;
-            failedKeywords.push(item.keyword);
-            failedDetails.push({
-              keyword: item.keyword,
-              code: typeof resData.code === "string" ? resData.code : undefined,
-              stage: typeof resData.stage === "string" ? resData.stage : undefined,
-              message: typeof resData.error === "string" ? resData.error.slice(0, 240) : undefined,
-              diagnostic: resData.diagnostic && typeof resData.diagnostic === "object" && !Array.isArray(resData.diagnostic)
-                ? resData.diagnostic as Record<string, unknown>
-                : undefined,
-            });
-          } else {
-            const persistedById = await readCanonicalKeywordRows([item.id]);
-            const readbackItem = persistedById.get(item.id);
-            const aiState = readbackItem ? resolveMineradorProcessState(readbackItem).ai : null;
-            if (!readbackItem || !aiState?.complete) {
-              const error = new Error("A revisão IA foi retornada, mas o readback do KeywordDNA atual não foi confirmado.") as Error & { code?: string; stage?: string };
-              error.code = "PROCESSOR_READBACK_FAILED";
-              error.stage = "ai_canonical_readback";
-              throw error;
-            }
-            successCount++;
-            setProcessAttempt([item.id], "ai", "success", executionRequestId);
-            // A revisão é aditiva: nenhuma coluna lógica ou métrica é substituída.
-            setKeywords(prev => prev.map(k => k.id === item.id ? readbackItem : k));
-          }
-        } catch (err) {
-          console.warn(`Falha na revisão semântica para a palavra "${item.keyword}":`, err);
-          setProcessAttempt([item.id], "ai", "failed", executionRequestId);
-          failCount++;
-          failedKeywords.push(item.keyword);
-          failedDetails.push({
-            keyword: item.keyword,
-            code: "AI_REQUEST_FAILED",
-            stage: "request",
-            message: err instanceof Error ? err.message.slice(0, 240) : "Falha na requisição da IA.",
-          });
-        }
-        setQueueProgress(count);
-        updateBulkProgress(count, selectedKeywords.length);
-      }
-
-      if (failCount === 0) {
-        showNotification("success", `Revisão semântica de todas as ${successCount} palavras concluída!`, {
-          metadata: { executionRequestId },
-        });
-      } else {
-        outcome = "error";
-        const firstFailure = failedDetails[0];
-        const notice = resolveSemanticReviewNotice({
-          successCount,
-          failCount,
-          failures: failedDetails,
-        });
-        showNotification("info", notice.message, {
-          code: firstFailure?.code || "AI_RUNTIME_ERROR",
-          stage: firstFailure?.stage || "runtime",
-          persistent: true,
-          diagnostic: {
-            failedKeywords: failedKeywords.slice(0, 10),
-            failedCount: failCount,
-            failures: failedDetails.slice(0, 10),
-            providerDiagnostic: firstFailure?.diagnostic ? { ...firstFailure.diagnostic } : undefined,
-          },
-          metadata: { executionRequestId },
-        });
-      }
-    } catch (err: any) {
-      outcome = "error";
-      console.error(err);
-      setProcessAttempt(selectedKeywords.map(item => item.id), "ai", "failed", executionRequestId);
-      showNotification("error", "Erro ao executar a revisão semântica com IA.", {
-        code: "AI_REVIEW_EXECUTION_FAILED",
-        stage: "execution",
-        metadata: { executionRequestId },
-      });
-    } finally {
-      setQueueProcessing(false);
-      setUpdating(false);
-      finishBulkProgress(outcome);
-    }
   };
 
   // Memo para identificar grupos de palavras-chave duplicadas
@@ -2202,11 +1928,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         showNotification("error", "Publicado é um vínculo de publicação, não um status editorial ativo.");
         return;
       }
-      // Aprovar/rejeitar é decisão humana sobre o estado atual da keyword.
-      // Nenhum processo editorial — Lógica, Volume, Resultados, SERP, KGR, IA
-      // ou Revisão — pode vetar essa decisão. SERP mista continua mista; o
-      // humano apenas assume a keyword como está. A única proteção mantida é a
-      // do vínculo de publicação legado, tratada logo abaixo.
       const idsToUpdate = rawIds.filter(wordId => {
         const item = keywords.find(k => k.id === wordId);
         return !isLegacyPublishedStatus(item?.status);
@@ -2217,19 +1938,97 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         showNotification("error", "Status publicado e bloqueado e nao pode ser rebaixado.");
         return;
       }
+
+      /*
+       * APROVAR É FECHAR O PACOTE.
+       *
+       * O Arquiteto passou a consumir o que foi aprovado, e não a linha viva.
+       * Por isso a aprovação exige processo executado — Lógica, Volume,
+       * Resultados e a aplicabilidade do KGR quando ele é calculável.
+       *
+       * O que NÃO entra na trava: Intenção e Funil consolidados. SERP mista é
+       * resultado legítimo da análise; exigir conclusão tornaria impossível
+       * aprovar uma keyword cuja evidência está genuinamente dividida.
+       */
+      if (normalizedStatus === "aprovado") {
+        const incompletas = idsToUpdate
+          .map(wordId => ({ wordId, item: keywords.find(k => k.id === wordId) }))
+          .filter(({ item }) => !resolveApprovalReadiness({
+            semantic: item?.analise_semantica || null,
+            intent: item?.intent,
+            volumeSearch: item?.volume_search,
+            resultsAllintitle: item?.results_allintitle,
+          }).ok);
+        if (incompletas.length) {
+          const primeira = incompletas[0].item;
+          const motivo = resolveApprovalReadiness({
+            semantic: primeira?.analise_semantica || null,
+            intent: primeira?.intent,
+            volumeSearch: primeira?.volume_search,
+            resultsAllintitle: primeira?.results_allintitle,
+          }).reason;
+          showNotification("error", incompletas.length === 1
+            ? `"${primeira?.keyword || "keyword"}" ainda não pode ser aprovada. ${motivo}`
+            : `${incompletas.length} keyword(s) ainda não podem ser aprovadas. ${motivo}`, {
+            code: "APPROVAL_INCOMPLETE",
+            stage: "approval_gate",
+            persistent: true,
+            diagnostic: { pendentes: incompletas.map(({ item }) => item?.keyword).filter(Boolean).slice(0, 10) },
+          });
+          return;
+        }
+      }
       pushKeywordsHistory(keywords, `Alterar status de ${idsToUpdate.length} keyword(s) para ${status}`);
 
-      const { error } = await supabase
-          .from("minerador_keywords")
-        .update({ status: normalizedStatus })
-        .in("id", idsToUpdate)
-        .eq("brand_id", selectedBrandId)
-        .is("deleted_at", null);
+      /*
+       * Aprovar grava o registro do pacote junto com o status: hash, assinatura,
+       * autor, data e versão. É esse registro que distingue depois "mexeram na
+       * keyword" de "reexecutaram e deu igual".
+       */
+      const aprovadoEm = new Date().toISOString();
+      const semanticaPorId = new Map<string, KeywordSemantic>();
+      if (normalizedStatus === "aprovado") {
+        for (const wordId of idsToUpdate) {
+          const item = keywords.find(k => k.id === wordId);
+          if (!item || !selectedBrandId) continue;
+          semanticaPorId.set(wordId, await applyApproval({
+            keywordId: wordId,
+            brandId: selectedBrandId,
+            keyword: item.keyword,
+            intent: item.intent,
+            volumeSearch: item.volume_search,
+            resultsAllintitle: item.results_allintitle,
+            kgrScore: item.kgr_score,
+            listaId: item.lista_id,
+            semantic: item.analise_semantica || null,
+            approvedAt: aprovadoEm,
+            approvedBy: session?.user?.id || "usuario",
+          }) as KeywordSemantic);
+        }
+        for (const [wordId, semantica] of semanticaPorId) {
+          const { error: approvalError } = await supabase
+            .from("minerador_keywords")
+            .update({ status: normalizedStatus, analise_semantica: semantica })
+            .eq("id", wordId)
+            .eq("brand_id", selectedBrandId)
+            .is("deleted_at", null);
+          if (approvalError) throw approvalError;
+        }
+      } else {
+        const { error } = await supabase
+            .from("minerador_keywords")
+          .update({ status: normalizedStatus })
+          .in("id", idsToUpdate)
+          .eq("brand_id", selectedBrandId)
+          .is("deleted_at", null);
 
-      if (error) throw error;
+        if (error) throw error;
+      }
 
       const idSet = new Set(idsToUpdate);
-      setKeywords(prev => prev.map(k => idSet.has(k.id) ? { ...k, status: normalizedStatus } : k));
+      setKeywords(prev => prev.map(k => idSet.has(k.id)
+        ? { ...k, status: normalizedStatus, ...(semanticaPorId.has(k.id) ? { analise_semantica: semanticaPorId.get(k.id) } : {}) }
+        : k));
       showNotification("success", `Status atualizado para ${idsToUpdate.length} palavra(s). ${protectedCount > 0 ? `${protectedCount} publicada(s) preservada(s).` : ""}`);
     } catch (err: any) {
       console.error(err);
@@ -2490,15 +2289,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
             return decision;
           });
         }
-        if (Array.isArray(review.enrichmentDecisions)) {
-          review.enrichmentDecisions = review.enrichmentDecisions.map(entry => {
-            if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
-            const decision = { ...(entry as Record<string, unknown>) };
-            delete decision.actorId;
-            delete decision.decidedAt;
-            return decision;
-          });
-        }
       }
       return next;
     };
@@ -2540,7 +2330,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         intent: currentIntent,
         field: action.field,
         logicalValue: action.logicalValue,
-        aiSuggestion: action.aiSuggestion,
         decision: action.decision,
         editedValue: action.editedValue,
         actorId,
@@ -2548,15 +2337,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       });
       nextSemantic = result.semantic;
       nextIntent = result.intent;
-    } else if (action.type === "enrichment") {
-      nextSemantic = applyHumanReviewEnrichment({
-        semantic: currentSemantic,
-        field: action.field,
-        value: action.value,
-        decision: action.decision,
-        actorId,
-        decidedAt: now,
-      }).semantic;
     } else if (action.type === "kgr") {
       nextSemantic = applyHumanReviewKgrApplicability({ semantic: currentSemantic, applicability: action.applicability, actorId, decidedAt: now });
     } else if (action.type === "complete") {
@@ -2638,133 +2418,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   };
 
   /** Somente por ação explícita do usuário: nunca em mount, F5 ou background. */
-  /**
-   * Execução do processo IA para uma keyword: Apresentação Contextual.
-   * Uma ação explícita = uma execução de provider = um usage event.
-   */
-  const runContextualPresentation = async (keywordId: string, executionRequestId: string): Promise<{ ok: boolean; code?: string; error?: string }> => {
-    if (!selectedBrandId) return { ok: false, code: "BRAND_REQUIRED", error: "Selecione uma Marca antes de executar a IA." };
-    setPresentationBriefLoadingId(keywordId);
-    try {
-      const response = await fetch(`/api/minerador/marcas/${selectedBrandId}/ia/brief-apresentacao`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywordId, executionRequestId }),
-      });
-      const payload = await response.json().catch(() => null) as null | {
-        success?: boolean;
-        contextualPresentation?: KeywordPresentationBrief["contextualPresentation"];
-        brandVoiceApplied?: boolean;
-        appliedSkillRefs?: KeywordPresentationBrief["appliedSkillRefs"];
-        code?: string;
-        error?: string;
-        stage?: string;
-        persisted?: boolean;
-        presentationVersion?: number | null;
-      };
-      if (!payload) {
-        // Resposta sem JSON (ex.: 500 da rota): reporta o status real em vez de
-        // uma mensagem genérica que esconde a etapa que quebrou.
-        return { ok: false, code: "AI_PRESENTATION_INVALID_RESPONSE", error: `A rota da apresentação respondeu ${response.status} sem JSON utilizável.` };
-      }
-      if (!response.ok || !payload.success || !payload.contextualPresentation) {
-        // Falha da apresentação afeta só esta tentativa: nenhum fallback para o
-        // R5 legado e nenhum processo anterior alterado.
-        return { ok: false, code: payload.code, error: payload.error || `A rota da apresentação falhou (${response.status}${payload.stage ? ` · etapa ${payload.stage}` : ""}).` };
-      }
-      const contextualPresentation = payload.contextualPresentation;
-      const generatedBrief: KeywordPresentationBrief = {
-        contextualPresentation,
-        brandVoiceApplied: payload.brandVoiceApplied ?? contextualPresentation.appliedSkillRefs.some(ref => ref.definitionKey === "brand_voice"),
-        appliedSkillRefs: payload.appliedSkillRefs || contextualPresentation.appliedSkillRefs,
-        generatedAt: contextualPresentation.generatedAt,
-        // Só é "persistida" quando o write do artifact foi confirmado pela rota.
-        persisted: payload.persisted === true,
-        version: payload.presentationVersion ?? null,
-      };
-      if (generatedBrief.persisted) {
-        setPresentationBriefs(current => ({ ...current, [keywordId]: generatedBrief }));
-        setPresentationAttempts(current => {
-          if (!current[keywordId]) return current;
-          const next = { ...current };
-          delete next[keywordId];
-          return next;
-        });
-        return { ok: true };
-      }
-      // Write não confirmado: a versão persistida anterior continua canônica e a
-      // tentativa aparece separada, declarada como não persistida.
-      setPresentationAttempts(current => ({ ...current, [keywordId]: generatedBrief }));
-      setPresentationBriefs(current => current[keywordId]?.persisted ? current : { ...current, [keywordId]: generatedBrief });
-      return { ok: true, code: "AI_PRESENTATION_NOT_PERSISTED" };
-    } catch (error) {
-      console.error("Erro ao gerar a apresentação contextual:", error);
-      return { ok: false, code: "AI_REQUEST_FAILED", error: "Não foi possível gerar a apresentação contextual." };
-    } finally {
-      setPresentationBriefLoadingId(null);
-    }
-  };
-
-  /**
-   * Ação IA do Processador. Só o clique humano dispara; nunca mount/F5.
-   * A reexecução pelo painel usa este mesmo caminho, então um clique produz
-   * uma execução por keyword e uma única notificação final.
-   */
-  const handleBatchContextualPresentation = async (requestedIds?: readonly string[]) => {
-    if (presentationBriefLoadingId) return;
-    const scope = requestedIds && requestedIds.length > 0 ? new Set(requestedIds) : selectedIds;
-    if (scope.size === 0) return;
-    const targets = keywords.filter(item => scope.has(item.id));
-    const executionRequestId = crypto.randomUUID();
-    if (targets.length === 0 || !startBulkProgress("ai", targets.length, targets.map(item => item.id), executionRequestId)) return;
-    setQueueProcessing(true);
-    setQueueProgress(0);
-    let successCount = 0;
-    // Persistência e geração são relatadas separadamente: sucesso de provider
-    // nunca é anunciado como sucesso de persistência.
-    let persistedCount = 0;
-    let unpersistedCount = 0;
-    const failures: Array<{ keyword: string; error?: string }> = [];
-    try {
-      let processed = 0;
-      for (const item of targets) {
-        setProcessAttempt([item.id], "ai", "running", executionRequestId);
-        const result = await runContextualPresentation(item.id, executionRequestId);
-        if (result.ok) {
-          successCount++;
-          if (result.code === "AI_PRESENTATION_NOT_PERSISTED") unpersistedCount++;
-          else persistedCount++;
-          // A execução acontece em background visual: nenhuma linha é expandida,
-          // nem o foco, o scroll ou a seleção do usuário são alterados.
-          setProcessAttempt([item.id], "ai", "success", executionRequestId);
-        } else {
-          setProcessAttempt([item.id], "ai", "failed", executionRequestId);
-          failures.push({ keyword: item.keyword, error: result.error });
-        }
-        processed++;
-        setQueueProgress(processed);
-        updateBulkProgress(processed, targets.length);
-      }
-      if (failures.length === 0 && unpersistedCount === 0) {
-        showNotification("success", `Apresentação contextual gerada e persistida para ${persistedCount} keyword(s).`, { metadata: { executionRequestId } });
-      } else if (failures.length === 0) {
-        // Geração PASS + persistência FAIL: severidade INFO e origem workflow.
-        showNotification("info", `Apresentação contextual gerada para ${successCount} keyword(s), mas não foi possível persistir ${unpersistedCount}.`, {
-          code: "AI_PRESENTATION_NOT_PERSISTED",
-          stage: "contextual_presentation_persistence",
-          metadata: { executionRequestId, persistidas: persistedCount, naoPersistidas: unpersistedCount },
-        });
-      } else {
-        showNotification("error", failures[0].error || "Não foi possível gerar a apresentação contextual.", {
-          persistent: true,
-          metadata: { executionRequestId, falhas: failures.map(failure => failure.keyword).join(", ") },
-        });
-      }
-    } finally {
-      setQueueProcessing(false);
-      finishBulkProgress(failures.length === 0 ? "success" : "error");
-    }
-  };
   const handleOpenHumanReview = () => {
     const firstSelectedId = Array.from(selectedIds)[0];
     if (!firstSelectedId) return;
@@ -2843,7 +2496,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           const next = { ...current };
           for (const [keywordId, qualification] of Object.entries(refreshed)) {
             const keyword = keywords.find(item => item.id === keywordId);
-            const logic = keyword ? readCanonicalKeywordDna(keyword) : null;
+            const logic = keyword ? readCanonicalKeywordDna(keyword, { includeSerpEvidence: false }) : null;
             next[keywordId] = semanticDraftFromQualification(qualification, { intent: logic?.intent ?? null, funnel: logic?.funnel ?? null });
           }
           return next;
@@ -3666,9 +3319,13 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                         </div>
                       </td>
 
-                      {/* Resultados */}
+                      {/* Resultados — mesma grafia do Volume: a contagem do
+                          allintitle é um número grande e sem separador ela é
+                          lida errada de relance. */}
                       <td className="w-[128px] border-r border-divider/70 px-3 py-1 text-center font-mono text-text-muted">
-                        {resultValue !== null ? resultValue : "-"}
+                        {resultValue !== null
+                          ? <span className="text-context-accent" title="Páginas com todas as palavras no título, medidas pelo provedor.">{formatMetricInteger(resultValue)}</span>
+                          : "-"}
                       </td>
 
                       {/* Volume */}
@@ -3708,7 +3365,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             ? <span className={kgrColor}>{kgrText}</span>
                             : kgrState
                               ? <span className={`${kgrTextBadge} ${kgrState.className}`}>{kgrState.label}</span>
-                              : <span className="text-[10px] text-text-muted">Não calculável</span>}
+                              : <span className="text-text-muted">Não calculável</span>}
                           <select
                             value={kgrApplicability}
                             onChange={(event) => void handleHumanReviewAction(item.id, { type: "kgr", applicability: event.target.value as KgrApplicability })}
@@ -3813,12 +3470,15 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             className={`w-full cursor-pointer rounded border border-divider bg-surface-subtle px-1.5 py-0.5 text-center text-[10px] font-bold focus:border-module-accent focus:outline-none ${
                               editorialStatus.status === "aprovado"
                                 ? "text-success border-success/50 bg-success-soft"
+                                : editorialStatus.status === "em_revisao"
+                                ? "text-warning border-warning/50 bg-warning-soft"
                                 : editorialStatus.status === "rejeitado"
                                 ? "text-danger border-danger/50 bg-danger-soft"
                                 : "text-text-muted"
                             }`}
                           >
                             <option value="bruto">Bruto</option>
+                            <option value="em_revisao">Em revisão</option>
                             <option value="aprovado">Aprovado</option>
                             <option value="rejeitado">Rejeitado</option>
                           </select>
@@ -3867,12 +3527,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             onWorkflowStatusChange={(status) => handleUpdateStatus(item.id, status)}
                             onHumanReviewAction={(action) => handleHumanReviewAction(item.id, action)}
                             processAttempts={processAttemptsByKeywordId[item.id]}
-                            presentationBrief={presentationBriefs[item.id]}
-                            presentationBriefLoading={presentationBriefLoadingId === item.id}
                             reviewDraftActive={Boolean(humanReviewDrafts[item.id])}
                             semanticConsolidationDraft={semanticConsolidationDrafts[item.id]}
                             semanticQualification={semanticQualifications[item.id] || null}
-                            presentationAttempt={presentationAttempts[item.id] || null}
                             serpCollecting={allintitleMeasuring && selectedIds.has(item.id)}
                             serpFailed={Boolean(serpCollectionFailures[item.id])}
                             humanReviewOpen={humanReviewOpenId === item.id}
@@ -3949,16 +3606,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               onClick={handleBatchAllintitle}
               disabled={bulkActionProcessing || updating || volumeMeasuring || allintitleMeasuring || selectedIds.size === 0}
               activeClassName={bulkActionStateClass("results")}
-            />
-            <MineradorProcessAction
-              title="Apresentação contextual da keyword"
-              description="Gera ou reexecuta a apresentação contextual da keyword usando o contexto aprovado da Marca e sua Voz da Marca. Cria uma nova versão do próprio artefato e não altera nenhum outro processo, nem a aprovação."
-              label="IA"
-              ariaLabel="IA"
-              icon={queueProcessing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />}
-              onClick={() => void handleBatchContextualPresentation()}
-              disabled={bulkActionProcessing || updating || queueProcessing || dnaProcessing || selectedIds.size === 0}
-              activeClassName={bulkActionStateClass("ai")}
             />
             <MineradorProcessAction
               title="Confirmar as decisões do KeywordDNA"

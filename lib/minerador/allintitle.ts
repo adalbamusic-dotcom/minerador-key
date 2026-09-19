@@ -152,8 +152,20 @@ export function normalizeAllintitleKeyword(value: unknown): string {
     : "";
 }
 
+/**
+ * A CONSULTA DO KGR NÃO LEVA ASPAS.
+ *
+ * `allintitle:cnc` pergunta quantas páginas têm todas as palavras no título —
+ * que é a definição do Resultado no KGR. `allintitle:"cnc"` pergunta outra
+ * coisa: a FRASE exata no título. Para termo de uma palavra o Google chega a
+ * degenerar a consulta — medição real de 2026-09-18: `allintitle:"cnc"`
+ * devolveu 1 resultado e `allintitle:cnc` devolveu 1.720.
+ *
+ * Aspas e barras invertidas continuam sendo removidas do termo: elas quebram o
+ * operador em vez de restringi-lo.
+ */
 export function buildAllintitleQuery(keyword: string): string {
-  return `allintitle:"${keyword.replace(/["\\]/g, " ").replace(/\s+/g, " ").trim()}"`;
+  return `allintitle:${keyword.replace(/["\\]/g, " ").replace(/\s+/g, " ").trim()}`;
 }
 
 export function isPersistableAllintitleResult(result: AllintitleMeasurementResult): boolean {
@@ -178,9 +190,19 @@ export function classifyAllintitleText(text: string, expectedQuery: string): Pic
   if (/recaptcha|unusual traffic|not a robot|detected unusual traffic/i.test(normalized)) return { status: "captcha", errorCode: "captcha_detected", message: "CAPTCHA ou desafio humano detectado." };
   if (/before you continue|consent\.google|consentimento|consent to/i.test(normalized)) return { status: "blocked", errorCode: "consent_required", message: "Consentimento do Google é necessário." };
   if (/access denied|temporarily blocked|automated queries|sorry\/?index/i.test(normalized)) return { status: "blocked", errorCode: "google_blocked", message: "O Google bloqueou ou recusou a consulta." };
+  /*
+   * A PÁGINA CONFIRMA A CONSULTA POR CONTER, NÃO POR EXTRAIR.
+   *
+   * Extrair `allintitle:` até a próxima aspa funcionava enquanto a consulta
+   * era aspeada. Sem aspas — que é a forma correta do operador — o recorte
+   * engoliria o resto do texto da página e toda medição viraria
+   * `query_mismatch`. Conferir a presença responde a mesma pergunta sem
+   * depender de onde a frase termina.
+   */
   const expected = normalizeAllintitleKeyword(expectedQuery);
-  const foundQuery = normalizeAllintitleKeyword(normalized.match(/(?:allintitle\s*:\s*["“]?[^"”]+["”]?)/i)?.[0]);
-  if (foundQuery && expected && foundQuery !== expected) return { status: "unavailable", errorCode: "query_mismatch", message: "A página não confirmou a consulta solicitada." };
+  if (expected && normalizedForMatching.includes("allintitle:") && !normalizedForMatching.includes(expected)) {
+    return { status: "unavailable", errorCode: "query_mismatch", message: "A página não confirmou a consulta solicitada." };
+  }
   if (/no results(?: found)?|nenhum resultado(?: encontrado)?|nao foram encontrados resultados|sem resultados/i.test(normalizedForMatching)) return { status: "zero_results", resultsAllintitle: 0 };
   const value = parseAllintitleCountText(normalized);
   if (value === null) return { status: "unavailable", errorCode: "result_count_not_found", message: ALLINTITLE_COUNT_UNAVAILABLE_MESSAGE, stage: "google_result_extraction" };

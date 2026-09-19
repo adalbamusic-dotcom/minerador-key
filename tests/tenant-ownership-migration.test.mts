@@ -275,16 +275,12 @@ test("consumidores do Minerador exigem tenant canônico após a migration", asyn
   const minerador = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
   const siteImport = await readFile(new URL("../app/api/marca/site/import/keywords/route.ts", import.meta.url), "utf8");
   const sitePreview = await readFile(new URL("../app/api/marca/site/import/keywords/preview/route.ts", import.meta.url), "utf8");
-  const analyze = await readFile(new URL("../app/api/analyze/route.ts", import.meta.url), "utf8");
-  const intent = await readFile(new URL("../app/api/process-intent-niche/route.ts", import.meta.url), "utf8");
   assert.match(minerador, /\.from\("minerador_keywords"\)/);
   assert.match(minerador, /\.eq\("brand_id", selectedBrandId\)/);
   assert.match(minerador, /brand_id: selectedBrandId/);
   assert.match(siteImport, /insert\(\{ \.\.\.payload, brand_id: brandId \}/);
   assert.match(siteImport, /\.eq\("brand_id", brandId\)/);
   assert.match(sitePreview, /\.eq\("brand_id", brand\.brandId\)/);
-  assert.match(analyze, /assertCanAccessMarca/);
-  assert.match(analyze, /\.eq\("brand_id", existingWord\.brand_id\)/);
-  assert.match(intent, /assertCanAccessMarca/);
-  assert.match(intent, /\.eq\("brand_id", existingWord\.brand_id\)/);
+  // `/api/analyze` e `/api/process-intent-niche` eram consumidores do R5 e
+  // foram removidos com ele; não há rota de IA do Minerador para verificar.
 });

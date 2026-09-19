@@ -79,7 +79,7 @@ export type RadarInvestigationInput = {
   /** Aprovação da curadoria SERP — histórica, e distinta da investigação. */
   serpCurationApproved: boolean;
   serpCurationCurrent: boolean;
-  sentToPlanner: boolean;
+  sentToWriter: boolean;
 };
 
 export type RadarInvestigationView = {
@@ -190,7 +190,7 @@ export function buildRadarInvestigationView(input: RadarInvestigationInput): Rad
                   : !relatorioOk ? acao("GENERATE_REPORT", "Gerar relatório competitivo")
                     : !input.investigationReviewed ? acao("REVIEW_INVESTIGATION", "Revisar investigação")
                       : !input.investigationApproved ? acao("APPROVE_INVESTIGATION", "Aprovar investigação")
-                        : input.sentToPlanner ? acao("NONE", "Investigação entregue ao Planejador", false, null)
+                        : input.sentToWriter ? acao("NONE", "Investigação entregue ao Planejador", false, null)
                           : acao("PREPARE_PLANNER", "Preparar para o Planejador");
 
   /* ------------------------- o estado do card ----------------------------- */

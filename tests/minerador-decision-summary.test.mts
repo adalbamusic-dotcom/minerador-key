@@ -11,8 +11,6 @@ test("o resumo para decisão reúne somente sinais disponíveis e preserva zero 
     kgr: 0.006,
     keywordDifficulty: 42,
     intent: "Comercial",
-    aiExecuted: true,
-    aiVerdict: "Concorda parcialmente",
     dnaMaturity: "CONFIRMADA",
     kgrApplicability: "Não aplicável",
   });
@@ -26,7 +24,6 @@ test("o resumo para decisão reúne somente sinais disponíveis e preserva zero 
     { key: "intent", label: "Intenção", value: "Comercial" },
   ]);
   assert.deepEqual(summary.states, [
-    { key: "ai", label: "IA", value: "Concorda parcialmente" },
     { key: "dna", label: "DNA", value: "Confirmada" },
     { key: "kgrApplicability", label: "KGR", value: "Não aplicável" },
   ]);
@@ -40,7 +37,6 @@ test("campos ausentes são omitidos, sem inventar KD ou valores de fallback", ()
     kgr: 0,
     keywordDifficulty: null,
     intent: null,
-    aiExecuted: false,
     dnaMaturity: "PARCIAL",
     kgrApplicability: "Pendente",
   });
@@ -50,8 +46,9 @@ test("campos ausentes são omitidos, sem inventar KD ou valores de fallback", ()
     { key: "kgr", label: "KGR", value: "0,00" },
   ]);
   assert.equal(summary.metrics.some(metric => metric.key === "keywordDifficulty"), false);
-  // A IA é opcional: sem execução o resumo diz "Opcional", nunca "Pendente".
-  assert.equal(summary.states[0]?.value, "Opcional");
+  // Sem IA, o primeiro estado do cockpit é a maturidade do DNA.
+  assert.equal(summary.states[0]?.key, "dna");
+  assert.equal(summary.states[0]?.value, "Parcial");
 });
 
 test("R6.2 organiza o cockpit em demanda, competição SEO, semântica e revisão", () => {
@@ -70,11 +67,8 @@ test("R6.2 organiza o cockpit em demanda, competição SEO, semântica e revisã
     backlinks: 1.4,
     niche: "Estética",
     funnel: "BOFU",
-    aiExecuted: true,
-    aiVerdict: "Concorda parcialmente",
     dnaMaturity: "COMPLETA PARA REVISÃO",
     kgrApplicability: "Aplicável",
-    divergenceCount: 0,
     includeSections: true,
   });
 
@@ -85,7 +79,6 @@ test("R6.2 organiza o cockpit em demanda, competição SEO, semântica e revisã
   assert.deepEqual(summary.groups?.find(group => group.key === "seoCompetition")?.metrics.map(metric => [metric.label, metric.value]), [
     ["Resultado", "359"], ["KD", "0"], ["KGR", "0,011"], ["Ref. Domains", "0,5"], ["Backlinks", "1,4"],
   ]);
-  assert.deepEqual(summary.states.find(state => state.key === "divergences"), { key: "divergences", label: "Divergências", value: "0" });
 });
 
 test("KeywordDNA usa o resumo como read-model e mantém o status final humano", async () => {
@@ -93,7 +86,7 @@ test("KeywordDNA usa o resumo como read-model e mantém o status final humano", 
   const keywordPanel = panel.slice(panel.indexOf("export function KeywordDnaPanel"));
   const decision = keywordPanel.slice(keywordPanel.indexOf("data-keyword-human-decision"));
 
-  for (const label of ["RESUMO PARA DECISÃO", "Volume", "CPC", "Resultado", "KGR", "Intenção", "IA", "DNA"]) {
+  for (const label of ["RESUMO PARA DECISÃO", "Volume", "CPC", "Resultado", "KGR", "Intenção", "DNA"]) {
     assert.match(panel, new RegExp(label));
   }
   const summarySource = await readFile(new URL("../lib/minerador/keyword-decision-summary.ts", import.meta.url), "utf8");

@@ -50,6 +50,12 @@ export interface OperationalDataGridTopbar<T extends { id: string }> {
   moduleId: string;
   history?: NonNullable<GlobalTopbarModuleControls["history"]>;
   renderActions: (api: OperationalDataGridTopbarApi<T>) => React.ReactNode;
+  /**
+   * Navegação entre as áreas do módulo. Não depende da API do grid porque não é
+   * um controle da planilha — é o que decide qual superfície está aberta, e
+   * precisa continuar disponível quando a superfície aberta não é uma planilha.
+   */
+  tabs?: React.ReactNode;
 }
 
 export interface OperationalDataGridProps<T extends { id: string }> {
@@ -162,7 +168,7 @@ export function OperationalDataGrid<T extends { id: string }>({ module, userId, 
   const topbarActions = topbar?.renderActions(topbarApi);
 
   return <section className="flex min-h-0 flex-1 flex-col overflow-hidden border-y border-slate-850 bg-[#08090c]" aria-label={`Planilha ${module}`}>
-    {topbar ? <OperationalDataGridTopbarBridge moduleId={topbar.moduleId} search={search} setSearch={setSearchValue} history={topbar.history} actions={topbarActions} /> : null}
+    {topbar ? <OperationalDataGridTopbarBridge moduleId={topbar.moduleId} search={search} setSearch={setSearchValue} history={topbar.history} actions={topbarActions} tabs={topbar.tabs} /> : null}
     <CompactSavedViews userId={userId} brandId={brandId} module={module} values={{ search, filters: JSON.stringify(filters), sort: JSON.stringify(sort), hidden: JSON.stringify([...hidden]), widths: JSON.stringify(widths), pageSize: String(pageSize), orderMode, manualOrder: JSON.stringify(manualOrder) }} onApply={applyLastConfiguration}/>
     {!topbar ? <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-slate-850 bg-[#0a0b0f] p-2">
       {title && <div className="mr-2 min-w-36 shrink-0"><h1 className="text-[11px] font-bold uppercase tracking-wider text-white">{title}</h1>{description && <p className="max-w-56 truncate text-[8px] text-slate-600">{description}</p>}</div>}
@@ -191,20 +197,23 @@ export function OperationalDataGrid<T extends { id: string }>({ module, userId, 
   </section>;
 }
 
-function OperationalDataGridTopbarBridge({ moduleId, search, setSearch, history, actions }: {
+function OperationalDataGridTopbarBridge({ moduleId, search, setSearch, history, actions, tabs }: {
   moduleId: string;
   search: string;
   setSearch: (value: string) => void;
   history?: NonNullable<GlobalTopbarModuleControls["history"]>;
   actions: React.ReactNode;
+  /** Navegação da área, quando o módulo tiver mais de uma. Vive fora das ações. */
+  tabs?: React.ReactNode;
 }) {
   const { registerControls, unregisterControls } = useGlobalTopbarControlsRegistration();
   const controls = useMemo<GlobalTopbarModuleControls>(() => ({
     moduleId,
     search: { getValue: () => search, setValue: setSearch },
     ...(history ? { history } : {}),
+    ...(tabs !== undefined ? { tabs } : {}),
     actions: <div className="flex min-w-0 max-w-full items-center gap-1 overflow-x-auto xl:overflow-visible" data-operational-topbar-actions>{actions}</div>,
-  }), [actions, history, moduleId, search, setSearch]);
+  }), [actions, history, moduleId, search, setSearch, tabs]);
 
   useEffect(() => {
     registerControls(controls);

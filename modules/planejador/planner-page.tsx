@@ -1,9 +1,10 @@
 "use client";
 
+import type { ContentDocumentV1 } from "@/lib/arquiteto/contracts";
 import Link from "next/link";
 import { useState } from "react";
 import { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";
-import { Columns3, Download, FilePenLine } from "lucide-react";
+import { Columns3, Download } from "lucide-react";
 import { useBrand } from "@/components/brand-context";
 import { OperationalDataGrid, type OperationalDataGridTopbarApi, type OperationalGridColumn, type OperationalGridOrderMode, type OperationalGridPageSize } from "@/components/editorial/operational-data-grid";
 import { WorkflowStatusBadge } from "@/components/editorial/workflow-status";
@@ -12,15 +13,15 @@ import type { PlannerItem } from "@/lib/editorial/operational-flow";
 import { hydratePlanner } from "@/lib/planejador/hydration";
 import { resolvePlannerPublicationIdentity } from "@/lib/planejador/publication-identity";
 import { buildRadarArticleHref, radarCanonicalRouteKey } from "@/lib/radar/route-resolution";
-import { Field, btn, sessionId, useOperationalRouter, useReadyPipeline } from "@/components/editorial/operational-screen-shared";
+import { Field, btn, sessionId, useReadyPipeline } from "@/components/editorial/operational-screen-shared";
 import { useNoticeBridge } from "@/components/global-notice-center";
 
 export function PlannerPage() {
-  const { data: session } = useSession(); const { selectedBrandId, activeBrandRef } = useBrand(); const router = useOperationalRouter(); const { pipeline, state } = useReadyPipeline(); const [notice, setNotice] = useState("");
+  const { data: session } = useSession(); const { selectedBrandId, activeBrandRef } = useBrand(); const { pipeline, state } = useReadyPipeline(); const [notice] = useState("");
   useNoticeBridge({ notice, module: "planejador", area: "Planejador", title: "Planejador", fallbackSeverity: "INFO" });
   if (state) return state;
   const planFor = (row: PlannerItem) => Object.values(pipeline.contentPlans).find(plan => plan.versionId === row.contentPlanVersionId) || pipeline.contentPlans[`plan:${row.articleId}`] || null;
-  const hydrateRow = (row: PlannerItem) => { if (!selectedBrandId) return null; const plan = planFor(row); const radar = pipeline.radarItems.find(candidate => candidate.id === row.radarItemId || candidate.articleId === row.articleId) || null; const publication = pipeline.operationalPublications.find(candidate => candidate.articleId === row.articleId) || null; const legacyBriefing = pipeline.snapshot?.briefings.find(candidate => candidate.id === row.articleId) || null; const publicationIdentity = resolvePlannerPublicationIdentity({ brandId: selectedBrandId, brandName: pipeline.snapshot?.brand.nome, articleId: row.articleId, operational: publication, legacyBriefing }); return hydratePlanner({ brandId: selectedBrandId, snapshot: pipeline.snapshot, item: row, plan, article: pipeline.articleVersions[row.articleId] || null, silo: row.siloId ? pipeline.siloVersions[row.siloId] || null : null, siloPage: row.unitType === "silo_page" ? pipeline.siloPageVersions[row.articleId] || null : null, serpRecords: pipeline.serpRecords, serpReviews: pipeline.serpReviews, document: Object.values(pipeline.documents).find(document => document.articleDnaRef.entityId === row.articleId) || null, radarHydration: radar?.hydration, publicationIdentity }); };
+  const hydrateRow = (row: PlannerItem) => { if (!selectedBrandId) return null; const plan = planFor(row); const radar = pipeline.radarItems.find(candidate => candidate.id === row.radarItemId || candidate.articleId === row.articleId) || null; const publication = pipeline.operationalPublications.find(candidate => candidate.articleId === row.articleId) || null; const legacyBriefing = pipeline.snapshot?.briefings.find(candidate => candidate.id === row.articleId) || null; const publicationIdentity = resolvePlannerPublicationIdentity({ brandId: selectedBrandId, brandName: pipeline.snapshot?.brand.nome, articleId: row.articleId, operational: publication, legacyBriefing }); return hydratePlanner({ brandId: selectedBrandId, snapshot: pipeline.snapshot, item: row, plan, article: pipeline.articleVersions[row.articleId] || null, silo: row.siloId ? pipeline.siloVersions[row.siloId] || null : null, siloPage: row.unitType === "silo_page" ? pipeline.siloPageVersions[row.articleId] || null : null, serpRecords: pipeline.serpRecords, serpReviews: pipeline.serpReviews, document: Object.values(pipeline.documents).find((document): document is ContentDocumentV1 => document.schemaVersion === 1 && document.articleDnaRef.entityId === row.articleId) || null, radarHydration: radar?.hydration, publicationIdentity }); };
   const columns: OperationalGridColumn<PlannerItem>[] = [
     { id: "unit", header: "Unidade / título", value: row => `${row.unitType === "silo_page" ? "Página do silo" : "Artigo"} · ${row.title}`, pinned: "left", sortable: true, width: 290 },
     { id: "keyword", header: "Keyword principal", value: row => hydrateRow(row)?.primaryKeyword.label || "Referência não hidratada", width: 190 },
@@ -35,9 +36,16 @@ export function PlannerPage() {
     { id: "publication", header: "Publicação", value: row => hydrateRow(row)?.publicationStatus || "não iniciada", width: 110 },
     { id: "transfer", header: "Transferência", value: row => hydrateRow(row)?.transferStatus || "não enviada", width: 110 },
   ];
-  const prepare = async (row: PlannerItem) => { try { await pipeline.preparePlannerItems([row.id], sessionId(session)); setNotice("Plano editorial preparado e disponível para revisão."); } catch (error) { setNotice(error instanceof Error ? error.message : "Não foi possível preparar o plano."); } };
-  const approve = (row: PlannerItem) => { pipeline.approvePlannerItems([row.id], sessionId(session)); setNotice("A aprovação foi registrada para a versão ativa, se o gate estiver apto."); };
-  const write = async (row: PlannerItem) => { try { const result = await pipeline.startWriting(row.id); router.push(`/redator?articleId=${encodeURIComponent(result.articleId)}`); } catch (error) { setNotice(error instanceof Error ? error.message : "Não foi possível abrir o Redator."); } };
+  /*
+   * ===== CORTE 2 · ESTA TELA É SOMENTE LEITURA =====
+   *
+   * `prepare`, `approve` e `write` chamavam `prepare_plan`, `approve_plan` e
+   * `start_writing`, que não existem mais. Manter os botões deixaria a tela
+   * oferecendo três ações que o servidor recusa — pior que não oferecer.
+   *
+   * A rota continua respondendo para LEITURA do histórico. Ela não cria
+   * PlannerItem, não cria ContentPlan e não abre documento.
+   */
   const renderTopbarActions = (grid: OperationalDataGridTopbarApi<PlannerItem>) => <>
     <button type="button" onClick={() => grid.exportRows(grid.queriedRows, "planilha")} className={GLOBAL_TOPBAR_ACTION_CONTROL} title="Exportar planilha filtrada">
       <Download className="h-3.5 w-3.5" aria-hidden="true" /><span>Exportar</span>
@@ -57,5 +65,5 @@ export function PlannerPage() {
       {[25, 50, 100, 200].map(size => <option key={size}>{size}</option>)}<option value="all">Todos</option>
     </select>
   </>;
-  return <div className="flex h-screen min-h-0 flex-col">{notice && <div className="border-b border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-[10px] text-amber-300">{notice}</div>}<OperationalDataGrid module="planejador" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.plannerItems} columns={columns} topbar={{ moduleId: "planejador", renderActions: renderTopbarActions }} emptyTitle="Nenhum artigo importado do Radar." renderActions={row => { const radar = pipeline.radarItems.find(candidate => candidate.id === row.radarItemId || candidate.articleId === row.articleId) || null; const radarHref = radar ? buildRadarArticleHref({ brandRef: activeBrandRef, articleId: radarCanonicalRouteKey(radar) }) : null; const plan = planFor(row); const cockpitHref = activeBrandRef && plan ? `/${activeBrandRef}/planejador/${encodeURIComponent(plan.versionId)}` : null; return <div className="flex flex-wrap justify-end gap-1">{row.state === "draft" && <button className={btn} onClick={() => void prepare(row)}>Preparar plano</button>}{cockpitHref ? <Link className={btn} href={cockpitHref}>Abrir cockpit</Link> : plan ? <button className={btn} disabled title="Contexto da marca não disponível">Abrir cockpit</button> : null}{row.state === "awaiting_review" && <button className={btn} onClick={() => approve(row)}>Aprovar</button>}{["approved", "sent_writer"].includes(row.state) && <button className={btn} onClick={() => void write(row)}><FilePenLine className="mr-1 h-3 w-3"/>Redator</button>}{radarHref ? <Link className={btn} href={radarHref}>Radar</Link> : <button className={btn} disabled title="Contexto da marca não disponível">Radar</button>}</div>; }} renderExpanded={row => { const value = hydrateRow(row); return <div className="grid gap-3 md:grid-cols-4"><Field label="Keyword principal" tone="keyword" value={value?.primaryKeyword.label}/><Field label="Silo" value={value?.silo.label}/><Field label="Radar" value={value?.radar.status}/><Field label="Plano editorial" value={value?.plan.label}/><Field label="Conflitos" value={value?.conflicts.length}/><Field label="Pendências" value={value?.pending.length}/><Field label="Origem keyword" value={value?.primaryKeyword.technical.origin}/><Field label="Diagnóstico" value={value?.primaryKeyword.technical.reason}/></div>; }}/></div>;
+  return <div className="flex h-screen min-h-0 flex-col">{notice && <div className="border-b border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-[10px] text-amber-300">{notice}</div>}<OperationalDataGrid module="planejador" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.plannerItems} columns={columns} topbar={{ moduleId: "planejador", renderActions: renderTopbarActions }} emptyTitle="Nenhum artigo importado do Radar." renderActions={row => { const radar = pipeline.radarItems.find(candidate => candidate.id === row.radarItemId || candidate.articleId === row.articleId) || null; const radarHref = radar ? buildRadarArticleHref({ brandRef: activeBrandRef, articleId: radarCanonicalRouteKey(radar) }) : null; const plan = planFor(row); const cockpitHref = activeBrandRef && plan ? `/${activeBrandRef}/planejador/${encodeURIComponent(plan.versionId)}` : null; return <div className="flex flex-wrap justify-end gap-1">{cockpitHref ? <Link className={btn} href={cockpitHref}>Abrir cockpit</Link> : plan ? <button className={btn} disabled title="Contexto da marca não disponível">Abrir cockpit</button> : null}{radarHref ? <Link className={btn} href={radarHref}>Radar</Link> : <button className={btn} disabled title="Contexto da marca não disponível">Radar</button>}</div>; }} renderExpanded={row => { const value = hydrateRow(row); return <div className="grid gap-3 md:grid-cols-4"><Field label="Keyword principal" tone="keyword" value={value?.primaryKeyword.label}/><Field label="Silo" value={value?.silo.label}/><Field label="Radar" value={value?.radar.status}/><Field label="Plano editorial" value={value?.plan.label}/><Field label="Conflitos" value={value?.conflicts.length}/><Field label="Pendências" value={value?.pending.length}/><Field label="Origem keyword" value={value?.primaryKeyword.technical.origin}/><Field label="Diagnóstico" value={value?.primaryKeyword.technical.reason}/></div>; }}/></div>;
 }

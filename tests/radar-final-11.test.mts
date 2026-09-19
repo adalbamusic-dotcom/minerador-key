@@ -43,7 +43,7 @@ const payloadAmazon = JSON.parse(
 );
 
 const fonteDoEnvio = await readFile(new URL("../lib/server/radar-planner-send.ts", import.meta.url), "utf8");
-const fonteDaRota = await readFile(new URL("../app/api/editorial/radar-planner-handoff/route.ts", import.meta.url), "utf8");
+const fonteDaRota = await readFile(new URL("../app/api/editorial/radar-writer-handoff/route.ts", import.meta.url), "utf8");
 const fonteDaPagina = await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
 const fonteDoEnvelope = await readFile(new URL("../lib/radar/planner-handoff.ts", import.meta.url), "utf8");
 
@@ -478,18 +478,28 @@ test("L e M · o estado entregue vive no servidor, não no navegador", () => {
   /*
    * §12 · DUAS PROVAS REMOTAS, E AS DUAS PRECISAM BATER.
    *
-   * `plannerBundle` é a análise gravada; `sent_planner` é o item na esteira. O
-   * dossiê sozinho não prova importação — foi exatamente esse o estado que a
-   * transição falha deixava.
+   * `sent_writer` é o item na esteira, e o servidor só o move depois de
+   * confirmar o documento no readback. É prova remota: F5 relê, outra sessão
+   * lê a mesma coisa.
    */
-  assert.match(pagina, /const noPlanejador = row \? row\.state === "sent_planner" : false;/);
-  assert.match(pagina, /sent: Boolean\(entregue\) && noPlanejador,/);
+  assert.match(pagina, /const noRedator = row \? row\.state === "sent_writer" : false;/);
+  assert.match(pagina, /sent: noRedator,/);
 
-  const fatia = pagina.slice(pagina.indexOf("const fronteiraDoPlanejador"), pagina.indexOf("const enviarAoPlanejador"));
+  const fatia = pagina.slice(pagina.indexOf("const fronteiraDoRedator"), pagina.indexOf("const enviarAoRedator"));
   assert.equal(/localStorage|sessionStorage/.test(fatia), false);
 
-  /* §4 · o estado intermediário é dito, não escondido. */
-  assert.match(fatia, /a transferência ao Planejador não foi concluída/);
+  /*
+   * ===== O ESTADO INTERMEDIÁRIO DEIXOU DE EXISTIR =====
+   *
+   * Havia "dossiê gravado, documento ausente" — e a tela tinha de explicá-lo.
+   * Ele nascia da escrita do recibo na análise, que este gate removeu: agora
+   * ou o documento existe, ou não existe.
+   *
+   * Some o estado, some a frase. O que não pode voltar é a frase sem o estado,
+   * descrevendo uma situação impossível.
+   */
+  assert.equal(/o documento no Redator não foi criado/.test(fatia), false,
+    "a tela voltou a explicar um estado que não existe mais");
 });
 
 /* ================================ N ================================ */
@@ -501,18 +511,18 @@ test("N · a UI chama UMA autoridade, e não a esteira por fora", () => {
    * §2 e §3 · UMA AÇÃO, UM SERVIÇO.
    *
    * O RADAR_FINAL_1.2 levou a URL para um módulo compartilhado: a tela chama
-   * `postRadarPlannerHandoff` e não conhece mais o endereço da fronteira. A
+   * `postRadarWriterHandoff` e não conhece mais o endereço da fronteira. A
    * garantia ficou mais forte — não existe onde escrever um segundo caminho.
    */
-  const fatia = pagina.slice(pagina.indexOf("const enviarAoPlanejador"), pagina.indexOf("const startYoutubeSearch"));
-  assert.match(fatia, /postRadarPlannerHandoff\(\{/);
+  const fatia = pagina.slice(pagina.indexOf("const enviarAoRedator"), pagina.indexOf("const startYoutubeSearch"));
+  assert.match(fatia, /postRadarWriterHandoff\(\{/);
   assert.equal(/importApprovedToPlanner/.test(fatia), false, "o envio não duplica a esteira por fora");
   assert.equal(/"\/api\/editorial\//.test(fatia), false, "a tela não conhece o endereço: quem o conhece é a porta única");
 
   /* E a rota tem uma porta só para dentro. */
   const rota = semComentarios(fonteDaRota);
-  assert.equal((rota.match(/sendRadarToPlanner\(/g) || []).length, 1);
-  assert.equal(/importRadarToPlanner|WorkflowRepository/.test(rota), false, "a rota não conhece a esteira: quem a move é o serviço");
+  assert.equal((rota.match(/sendRadarToWriter\(/g) || []).length, 1);
+  assert.equal(/importRadarToPlanner|WorkflowRepository|ContentDocumentRepository/.test(rota), false, "a rota não conhece a esteira: quem a move é o serviço");
 });
 
 /* ======================= §6 · a decisão canônica ======================= */

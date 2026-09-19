@@ -2,24 +2,28 @@
 
 import { blockedByIncompleteDependencies, emptyLoadDiagnostics, type WorkspaceLoadDiagnostics } from "@/lib/editorial/partial-read";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ArticleDNA, ContentDocument, ContentPlan, ContentPlanDetails, ProductEvidenceDNA, SiloDNA, SiloPage, VersionEnvelope, VersionStatusEvent } from "@/lib/arquiteto/contracts";
+import type { ArticleDNA, ContentDocument, ContentPlan, ProductEvidenceDNA, SiloDNA, SiloPage, VersionEnvelope, VersionStatusEvent } from "@/lib/arquiteto/contracts";
 import { EditorialSnapshotSchema, SerpCollectionRecordSchema, SerpReviewRecordSchema, type EditorialSnapshot, type SerpCollectionRecord, type SerpReviewRecord } from "@/lib/editorial/contracts";
-import { createMockPlanAndDocument, mockProductEvidenceProvider, mockSerpProvider } from "@/lib/editorial/providers";
+import { mockProductEvidenceProvider, mockSerpProvider } from "@/lib/editorial/providers";
 import { createMockOperationalBundle } from "@/lib/editorial/providers";
 import type { AIReviewAnnotation, BrandMaterial, BrandPrompt, BrandSkill, ExternalSourceSuggestion, GuardianFinding, InternalLinkAssignment, PublicationRecord } from "@/lib/editorial/operational-contracts";
 import type { BrandInvitation, OperationalPublication, PlannerItem, RadarArticleHandoffContext, RadarItem } from "@/lib/editorial/operational-flow";
 import { buildRadarHandoffContexts, type RadarHandoffBlocked } from "@/lib/arquiteto/radar-handoff-context";
 import type { InternalLinkGraph } from "@/lib/arquiteto/contracts";
-import { RadarItemSchema, approvedArticleVersions, approvedSiloPageVersions, createDevelopmentInvitation, createOperationalDocument, createOperationalPlan, createPublicationDraft,
-  contentPlanApprovalIssues, importApprovedWriterItems, importArticlesToRadar, importRadarToPlanner, importSiloPagesToRadar, mergeVersionEvents, setRadarState } from "@/lib/editorial/operational-flow";
-import { createContentPlanSuccessor } from "@/lib/planejador/content-plan";
-import { publicationSourceIssues, publishedIdentityReferenceIssues, resolvePlannerPublicationIdentity } from "@/lib/planejador/publication-identity";
-import { hasMaterialPlanChange } from "@/lib/planejador/outline";
-import { createStatusEvent } from "@/lib/arquiteto/versioning";
+import { OperationalPublicationSchema, RadarItemSchema, approvedArticleVersions, approvedSiloPageVersions, createDevelopmentInvitation,
+  importApprovedWriterItems, importArticlesToRadar, importSiloPagesToRadar, mergeVersionEvents, setRadarState } from "@/lib/editorial/operational-flow";
+/*
+ * CORTE 2 · o contexto não importa mais nada de `lib/planejador`.
+ *
+ * Eram quatro símbolos — `createContentPlanSuccessor`, `hasMaterialPlanChange`,
+ * `resolvePlannerPublicationIdentity`, `publicationSourceIssues` e
+ * `publishedIdentityReferenceIssues` — e todos serviam aos métodos que saíram.
+ * Com eles, some o último acoplamento de produção entre o pipeline e o módulo.
+ */
 import { useBrand } from "./brand-context";
 import { useSupabaseSession } from "./auth/supabase-session-context";
 import { updateBrandWorkspace } from "@/lib/editorial/workspace";
-import { describeLocalRecoveryFailure, localRecoveryWarning, LOCAL_RECOVERY_SAVED, type LocalRecoveryOutcome } from "@/lib/editorial/local-recovery";
+import { describeLocalRecoveryFailure, localRecoveryNoticeAfterCanonicalRead, localRecoveryWarning, LOCAL_RECOVERY_SAVED, type LocalRecoveryOutcome } from "@/lib/editorial/local-recovery";
 import { LocalWorkflowRecoverySchema, PersistedEditorialWorkspaceSchema, workflowRecoveryStorageKey, type PersistenceMode, type WorkflowCommand, type LocalWorkflowRecovery } from "@/lib/editorial/persistence-contracts";
 import { createRadarHydrationSnapshot, reconcileRadarItems, type RadarHydrationSnapshot, type RadarHydrationSourceKeyword } from "@/lib/radar/hydration";
 import type { SerpFormationAssessment } from "@/lib/arquiteto/serp-formation";
@@ -33,7 +37,6 @@ import { radarPersistedOperationIsFeminine, radarPersistedOperationLabel } from 
 import { radarStripUnconfirmedClaims } from "@/lib/radar/remote-authority";
 import { beginRadarAnalysisReadback, beginRadarAnalysisWrite, canApplyRadarAnalysisReadback, EMPTY_RADAR_ANALYSIS_SYNC_STATE, finishRadarAnalysisWrite, radarAnalysisReadbackFingerprint, type RadarAnalysisSyncState } from "@/lib/radar/analysis-readback";
 import { beginRadarSerpReviewReadback, beginRadarSerpReviewWrite, canApplyRadarSerpReviewReadback, EMPTY_RADAR_SERP_REVIEW_SYNC_STATE, finishRadarSerpReviewWrite, radarSerpReviewReadbackFingerprint, type RadarSerpReviewSyncState } from "@/lib/radar/serp-review-readback";
-import { radarPlannerPackageToContentPlanInput } from "@/lib/radar/planner-handoff";
 import { latestRadarR5SerpRecord } from "@/lib/radar/r5-sequential";
 import { mergeRadarItemsPreservingLocalState } from "@/lib/radar/workspace-merge";
 import { mergeSerpRecordsPreservingPayload, type SerpMergeConflict } from "@/lib/radar/serp-merge";
@@ -59,6 +62,13 @@ interface BrandWorkspace {
    * derrubar o resultado que o provider ja entregou.
    */
   localRecoveryWarning: string | null;
+  /**
+   * O trabalho já estava no servidor quando o aviso nasceu?
+   *
+   * Sem isto os dois avisos são a mesma string, e a limpeza automática
+   * apagaria também o que avisa "isto existe só nesta aba".
+   */
+  localRecoveryRemoteConfirmed: boolean;
   productEvidence: ProductEvidenceDNA[];
   contentPlans: Record<string, VersionEnvelope<ContentPlan>>;
   documents: Record<string, ContentDocument>;
@@ -78,6 +88,14 @@ interface BrandWorkspace {
   /** Como a ultima leitura remota terminou. Vazio confirmado != falha. */
   loadDiagnostics: WorkspaceLoadDiagnostics;
   documentLocks: Record<string, number>;
+  /**
+   * `updated_at` remoto por documento.
+   *
+   * A leitura do servidor sempre trouxe este campo em `PersistedDocumentSchema`; o
+   * contexto o descartava. Publicações precisa dele para ordenar a biblioteca, e o
+   * Redator para dizer a que horas o servidor confirmou o último save.
+   */
+  documentUpdatedAt: Record<string, string>;
   documentUserStates: Record<string, { cursorPosition: number | null; scrollTop: number; leftPanelOpen: boolean; rightPanelOpen: boolean; lastOpenedAt: string }>;
   moduleState: Record<string, { search?: string; selectedId?: string | null; expandedId?: string | null; scrollTop?: number }>;
   backgroundTasks: EditorialBackgroundTask[];
@@ -87,7 +105,7 @@ interface BrandWorkspace {
 const emptyWorkspace = (): BrandWorkspace => ({ architectImportedKeywordIds: [], articleVersions: {}, siloVersions: {}, siloPageVersions: {}, versionEvents: [], serpRecords: [], serpReviews: [], serpMergeConflicts: [], serpPersistenceMode: "local_fallback", serpReviewReadbackSnapshotIds: [],
   productEvidence: [], contentPlans: {}, documents: {}, selectedEntityId: null, skills: [], prompts: [], materials: [],
   internalLinks: [], externalSources: [], guardianFindings: [], publications: [], radarItems: [], plannerItems: [],
-  operationalPublications: [], invitations: [], persistenceMode: "local_fallback", localRecoveryWarning: null, loadDiagnostics: emptyLoadDiagnostics(), documentLocks: {}, documentUserStates: {}, moduleState: {}, backgroundTasks: [], aiReviewAnnotations: [] });
+  operationalPublications: [], invitations: [], documentUpdatedAt: {}, persistenceMode: "local_fallback", localRecoveryWarning: null, localRecoveryRemoteConfirmed: false, loadDiagnostics: emptyLoadDiagnostics(), documentLocks: {}, documentUserStates: {}, moduleState: {}, backgroundTasks: [], aiReviewAnnotations: [] });
 
 function latestRadarSnapshotFingerprint(workspace: BrandWorkspace, articleId: string) {
   const snapshot = workspace.serpRecords
@@ -124,6 +142,7 @@ function saveLocalSerpRecovery(actorUserId: string, brandId: string, workspace: 
       serpMergeConflicts: workspace.serpMergeConflicts,
       operationalPublications: workspace.operationalPublications,
       documentLocks: workspace.documentLocks,
+      documentUpdatedAt: workspace.documentUpdatedAt,
       selectedEntityId: workspace.selectedEntityId,
       aiReviewAnnotations: workspace.aiReviewAnnotations,
       savedAt: new Date().toISOString(),
@@ -154,6 +173,7 @@ function saveLocalRadarAnalysisRecovery(actorUserId: string, brandId: string, wo
       serpMergeConflicts: workspace.serpMergeConflicts,
       operationalPublications: workspace.operationalPublications,
       documentLocks: workspace.documentLocks,
+      documentUpdatedAt: workspace.documentUpdatedAt,
       selectedEntityId: workspace.selectedEntityId,
       aiReviewAnnotations: workspace.aiReviewAnnotations,
       savedAt: new Date().toISOString(),
@@ -231,7 +251,9 @@ interface EditorialPipelineContextValue extends BrandWorkspace {
   }>;
   reviewSerp: (articleId: string, snapshotId: string, status: "approved" | "rejected", notes: string) => Promise<{ persistenceMode: "remote" | "local"; readbackConfirmed: boolean; review: SerpReviewRecord }>;
   simulateProductEvidence: (articleId: string, query: string, location: string) => Promise<void>;
-  simulatePlanAndDocument: () => Promise<void>;
+  /* CORTE 2 · `simulatePlanAndDocument` saiu: era a última fábrica de
+   * ContentPlan + ContentDocument v1 alcançável pelo contexto, e nenhuma tela
+   * a chamava. Código morto que ainda sabia criar v1 é pior que código morto. */
   simulateOperationalSkeleton: (articleId?: string, targetArticleId?: string) => void;
   importApprovedKeywordsToArchitect: (keywordIds: string[]) => { imported: number; allIds: string[] };
   setArchitectImportedKeywordIds: (keywordIds: string[]) => void;
@@ -250,25 +272,35 @@ interface EditorialPipelineContextValue extends BrandWorkspace {
   importApprovedSiloPagesToRadar: (siloPageIds: string[]) => { imported: number; skipped: number };
   updateRadarState: (ids: string[], target: RadarItem["state"]) => void;
   /*
-   * ============ `importApprovedToPlanner` FOI REMOVIDO — RADAR_FINAL_1.2 · §2 ============
+   * ============ O PLANEJADOR NÃO TEM MAIS CAMINHO AQUI — CORTE 2 ============
    *
-   * Ele movia a esteira do Radar para o Planejador e nada mais: sem dossiê,
-   * sem prontidão, sem identidade de ArticleDNA. Um artigo que saísse por ali
-   * chegaria ao Planejador SEM evidência atrás, e o item apareceria lá como
-   * qualquer outro.
+   * `importApprovedToPlanner`, `preparePlannerItems`, `savePlannerPlan`,
+   * `approvePlannerItems` e `startWriting` foram removidos. Nenhum deles tem
+   * substituto: o Planejador saiu do pipeline operacional em 2026-09-18, e a
+   * M1 fechou `'planner'` no CHECK de `editorial_workflow_items.stage`.
    *
-   * Depois que os três chamadores passaram a usar a autoridade única, ele
-   * ficou sem uso — e um caminho morto que ainda funciona é uma arma
-   * carregada: alguém o encontraria e voltaria a usá-lo.
-   *
-   * A fronteira inteira passa por `POST /api/editorial/radar-planner-handoff`,
-   * que grava o dossiê, relê, transiciona e relê o destino.
+   * A rota `POST /api/editorial/radar-planner-handoff` que a versão anterior
+   * deste comentário citava **não existe mais**. A fronteira Radar → Redator
+   * passa por `POST /api/editorial/radar-writer-handoff`, que chama
+   * `sendRadarToWriter` — autoridade única, disparada de duas pontas: a ação no
+   * Radar e o botão "Importar do Radar" no Redator.
    */
-  preparePlannerItems: (ids: string[], actorId: string) => Promise<void>;
-  savePlannerPlan: (plannerItemId: string, details: ContentPlanDetails, actorId: string) => Promise<{ created: boolean; versionId: string }>;
-  approvePlannerItems: (ids: string[], actorId?: string) => void;
-  startWriting: (plannerItemId: string) => Promise<{ articleId: string; documentId: string }>;
-  importApprovedToPublications: (publicationIds: string[]) => { imported: number; skipped: number };
+  /**
+   * CORTE 2 · Redator → Publicações, sem PlannerItem e sem ContentPlan.
+   *
+   * Devolve `ALREADY_SENT` quando o registro já existe: repetir o envio não
+   * duplica. E lança quando o servidor não confirma o readback — a tela nunca
+   * mostra sucesso sobre uma entrega que Publicações não recebeu.
+   */
+  sendToPublications: (documentId: string) => Promise<{ publicationId: string; change: "CREATED" | "ALREADY_SENT" }>;
+  /*
+   * CORTE 3.5 · `importApprovedToPublications` saiu.
+   *
+   * Ele gravava o estado local e disparava o comando sem esperar: a tela dizia
+   * "importado" antes de qualquer confirmação do servidor. Era uma segunda
+   * autoridade de entrada em Publicações, concorrendo com
+   * `sendWriterToPublications`, que persiste e relê antes de responder.
+   */
   createInvitation: (input: Omit<BrandInvitation, "id" | "brandId" | "createdAt" | "delivery" | "tokenId" | "status">) => BrandInvitation;
   addInvitation: (invitation: BrandInvitation) => void;
   updateInvitationStatus: (id: string, status: BrandInvitation["status"]) => void;
@@ -409,7 +441,31 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         const incomingRadar = persisted.radarItems.length ? mergeRadarItemsPreservingLocalState(persisted.radarItems, current.radarItems) : current.radarItems;
         const radarItems = reconcileRadarItems(incomingRadar, articleVersions, selectedBrandId, sourceSnapshot?.keywords || snapshots[workspaceKey]?.keywords || [], siloVersions);
         const serpMerge = persisted.serpRecords.length ? mergeSerpRecordsPreservingPayload(persisted.serpRecords, current.serpRecords) : { records: current.serpRecords, conflicts: current.serpMergeConflicts };
+        /*
+         * ===== LIFECYCLE_1 · O AVISO SUPERADO SAI AQUI =====
+         *
+         * A leitura canônica acabou de ver o estado no servidor. Um aviso que
+         * nasceu dizendo "o servidor tem, o navegador não conseguiu guardar"
+         * está respondido — mantê-lo seria pedir atenção para um problema que
+         * não existe mais, e aviso que nunca sai deixa de ser lido.
+         *
+         * O aviso que diz "isto existe só nesta aba" NÃO sai: a leitura não
+         * encontra o que nunca foi enviado, e apagá-lo esconderia risco real
+         * de perda. Ele espera confirmação remota explícita.
+         *
+         * Nada é apagado do snapshot local nem do payload de recuperação: o
+         * que muda é um campo de aviso em memória.
+         */
+        const avisoVigente = localRecoveryNoticeAfterCanonicalRead(
+          current.localRecoveryWarning
+            ? { message: current.localRecoveryWarning, remoteConfirmed: current.localRecoveryRemoteConfirmed }
+            : null,
+          { ok: true, remoteConfirmed: persisted.mode === "server" },
+        );
+
         return { ...current, persistenceMode: persisted.mode, loadDiagnostics: persisted.loadDiagnostics, serpPersistenceMode: persisted.serpPersistenceMode,
+        localRecoveryWarning: avisoVigente?.message ?? null,
+        localRecoveryRemoteConfirmed: avisoVigente?.remoteConfirmed ?? false,
         radarItems, plannerItems: persisted.plannerItems.length ? persisted.plannerItems : current.plannerItems,
         serpRecords: serpMerge.records, serpMergeConflicts: serpMerge.conflicts,
         serpReviews: persisted.serpReviews.length ? [...current.serpReviews.filter(review => !persisted.serpReviews.some(incoming => incoming.id === review.id)), ...persisted.serpReviews] : current.serpReviews,
@@ -419,6 +475,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         contentPlans: { ...current.contentPlans, ...persistedPlans },
         documents: { ...current.documents, ...Object.fromEntries(persisted.documents.map(record => [record.document.id, record.document])) },
         documentLocks: { ...current.documentLocks, ...Object.fromEntries(persisted.documents.map(record => [record.document.id, record.lockVersion])) },
+        /* O `updated_at` remoto vinha na leitura e era descartado aqui. */
+        documentUpdatedAt: { ...current.documentUpdatedAt, ...Object.fromEntries(persisted.documents.map(record => [record.document.id, record.updatedAt])) },
         documentUserStates: { ...current.documentUserStates, ...Object.fromEntries(persisted.documents.filter(record => record.userState).map(record => [record.document.id, record.userState!])) },
          operationalPublications: persisted.publications, invitations: persisted.invitations,
        }; });
@@ -722,7 +780,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         ? saveLocalSerpRecovery(actorUserId, selectedBrandId, workspace, record)
         : { saved: false, reason: "a sessão não tem ator identificado neste navegador" };
       updateWorkspace(current => ({ ...current, serpRecords: [...current.serpRecords.filter(item => item.id !== record.id), record], serpPersistenceMode: body.persistenceMode === "remote" ? "server" : "local_fallback",
-        localRecoveryWarning: recuperacao.saved ? null : localRecoveryWarning({ operation: "A coleta real da SERP", reason: recuperacao.reason || "causa não identificada", remoteConfirmed: body.persistenceMode === "remote" }) }));
+        localRecoveryWarning: recuperacao.saved ? null : localRecoveryWarning({ operation: "A coleta real da SERP", reason: recuperacao.reason || "causa não identificada", remoteConfirmed: body.persistenceMode === "remote" }),
+        localRecoveryRemoteConfirmed: body.persistenceMode === "remote" }));
       return record;
     },
     collectAuxiliarySerp: async (articleId, keywordId, location, articleDnaVersionId) => {
@@ -896,7 +955,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
          * E aqui o remoto NAO confirmou: este ramo so roda quando a escrita
          * remota falhou ou ficou indisponivel.
          */
-        localRecoveryWarning: recuperacaoDaAnalise.saved ? null : localRecoveryWarning({ operation: radarPersistedOperationLabel(parsed.payload), operationFeminine: radarPersistedOperationIsFeminine(parsed.payload), reason: recuperacaoDaAnalise.reason || "causa não identificada", remoteConfirmed: false }) }));
+        localRecoveryWarning: recuperacaoDaAnalise.saved ? null : localRecoveryWarning({ operation: radarPersistedOperationLabel(parsed.payload), operationFeminine: radarPersistedOperationIsFeminine(parsed.payload), reason: recuperacaoDaAnalise.reason || "causa não identificada", remoteConfirmed: false }),
+        localRecoveryRemoteConfirmed: false }));
       return { persistenceMode: "local" as const, readbackConfirmed: false, unconfirmedClaims: semAutoridade.stripped };
       } finally {
         const currentSync = radarAnalysisSyncRef.current.get(syncKey) || writeState;
@@ -980,7 +1040,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
           ? saveLocalSerpRecovery(actorUserId, selectedBrandId, workspace, null, review)
           : { saved: false, reason: "a sessão não tem ator identificado neste navegador" };
         updateWorkspace(current => ({ ...current, serpReviews: [...current.serpReviews.filter(item => item.snapshotId !== review.snapshotId), review], serpPersistenceMode: "local_fallback", serpReviewReadbackSnapshotIds: current.serpReviewReadbackSnapshotIds.filter(currentSnapshotId => currentSnapshotId !== review.snapshotId),
-          localRecoveryWarning: recuperacaoDaRevisao.saved ? null : localRecoveryWarning({ operation: "A revisão da SERP", reason: recuperacaoDaRevisao.reason || "causa não identificada", remoteConfirmed: false }) }));
+          localRecoveryWarning: recuperacaoDaRevisao.saved ? null : localRecoveryWarning({ operation: "A revisão da SERP", reason: recuperacaoDaRevisao.reason || "causa não identificada", remoteConfirmed: false }),
+          localRecoveryRemoteConfirmed: false }));
         return { persistenceMode: "local" as const, readbackConfirmed: false, review };
       } finally {
         const currentSync = serpReviewSyncRef.current.get(syncKey) || writeState;
@@ -990,12 +1051,6 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     simulateProductEvidence: async (articleId, query, location) => {
       const evidence = await mockProductEvidenceProvider.collect({ articleId, productQuery: query, marketplace: "marketplace-simulado", location: location || "Brasil" });
       updateWorkspace(current => ({ ...current, productEvidence: [...current.productEvidence.filter(item => item.evidenceId !== evidence.evidenceId), evidence] }));
-    },
-    simulatePlanAndDocument: async () => {
-      if (!selectedBrandId) return;
-      const bundle = await createMockPlanAndDocument(selectedBrandId);
-      updateWorkspace(current => ({ ...current, contentPlans: { ...current.contentPlans, [bundle.plan.entityId]: bundle.plan },
-        documents: { ...current.documents, [bundle.document.id]: bundle.document } }));
     },
     simulateOperationalSkeleton: (articleId, targetArticleId) => {
       if (!selectedBrandId) return;
@@ -1116,72 +1171,42 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       updateWorkspace(current => ({ ...current, radarItems: setRadarState(current.radarItems, ids, target) }));
       void sendWorkflowCommand({ action: "transition_radar", brandId: selectedBrandId, itemIds: ids, target, expectedLocks }, updateWorkspace); },
 
-    preparePlannerItems: async (ids, actorId) => {
-      const prepared: Array<{ itemId: string; plan: VersionEnvelope<ContentPlan> }> = [];
-      for (const item of workspace.plannerItems.filter(candidate => ids.includes(candidate.id))) {
-        const article = workspace.articleVersions[item.articleId]; if (!article) continue;
-        const existing = workspace.contentPlans[`plan:${item.articleId}`];
-        const radar = workspace.radarItems.find(candidate => candidate.id === item.radarItemId || candidate.articleId === item.articleId);
-        const approvedAnalysis = radar?.analysisVersions.filter(version => version.payload.status === "approved").sort((a, b) => b.versionNumber - a.versionNumber).at(0);
-        const approvedSerp = workspace.serpRecords.find(record => record.input.articleId === item.articleId && record.origin === "real" && record.research && workspace.serpReviews.some(review => review.snapshotId === record.id && review.status === "approved"));
-        const serpEvidenceRefs = approvedSerp?.research ? [{ artifactId: approvedSerp.id, artifactType: "serp_snapshot" as const, contentHash: approvedSerp.research.contentHash }] : [];
-        const rawPackageData = approvedAnalysis?.payload.plannerPackage;
-        const packageData = radarPlannerPackageToContentPlanInput(item.radarHandoff || rawPackageData || null);
-        const radarAnalysisPackage = approvedAnalysis && packageData ? { analysisVersionId: approvedAnalysis.versionId, packageHash: approvedAnalysis.contentHash, ...packageData } : undefined;
-        const plan = existing || await createOperationalPlan(item, article, item.siloId ? workspace.siloVersions[item.siloId] : undefined, actorId, serpEvidenceRefs, radarAnalysisPackage);
-        prepared.push({ itemId: item.id, plan: plan as VersionEnvelope<ContentPlan> });
+    /*
+     * ===== CORTE 2 · OS QUATRO MÉTODOS DO PLANEJADOR SAÍRAM DAQUI =====
+     *
+     * `preparePlannerItems`, `savePlannerPlan`, `approvePlannerItems` e
+     * `startWriting` eram os consumidores de `prepare_plan`, `approve_plan` e
+     * `start_writing`. Removidos os comandos, manter os métodos deixaria a tela
+     * chamando uma rota que recusa — e o usuário veria "não foi possível" sem
+     * saber que o caminho acabou.
+     *
+     * `startWriting` era o único lugar que criava `OperationalPublication`, e
+     * criava a partir de `PlannerItem` + `ContentPlan`. Quem o substitui é
+     * `sendToPublications`, com autoridade em ContentDocument + origem Radar.
+     */
+    sendToPublications: async documentId => {
+      if (!selectedBrandId) throw new Error("Selecione uma marca antes de enviar a Publicações.");
+      const resposta = await fetch("/api/redator/publication-handoff", {
+        method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ brandId: selectedBrandId, documentId }),
+      });
+      const corpo = await resposta.json().catch(() => ({} as Record<string, unknown>));
+      /*
+       * O ESTADO LOCAL SÓ MUDA DEPOIS DO READBACK DO SERVIDOR.
+       *
+       * O caminho antigo gravava a tela primeiro e disparava `void` para o
+       * servidor. Falha de rede deixava a tela dizendo que o artigo estava em
+       * Publicações enquanto Publicações nunca o recebeu.
+       */
+      if (!resposta.ok || corpo?.success !== true || corpo?.readbackConfirmed !== true) {
+        throw new Error(typeof corpo?.error === "string" ? corpo.error : "O servidor não confirmou a entrega a Publicações.");
       }
+      const publication = OperationalPublicationSchema.parse(corpo.publication);
       updateWorkspace(current => ({ ...current,
-        contentPlans: { ...current.contentPlans, ...Object.fromEntries(prepared.map(entry => [entry.plan.entityId, entry.plan])) },
-        plannerItems: current.plannerItems.map(item => { const entry = prepared.find(candidate => candidate.itemId === item.id); return entry ? { ...item, contentPlanVersionId: entry.plan.versionId, state: "awaiting_review" as const, updatedAt: new Date().toISOString() } : item; }),
-      }));
-      for (const entry of prepared) { const item = workspace.plannerItems.find(candidate => candidate.id === entry.itemId); if (item) void sendWorkflowCommand({ action: "prepare_plan", brandId: selectedBrandId, plannerItemId: item.id, expectedLock: item.lockVersion, plan: entry.plan }, updateWorkspace); }
-    },
-    savePlannerPlan: async (plannerItemId, details, actorId) => {
-      if (!selectedBrandId) throw new Error("Selecione uma marca antes de salvar o plano.");
-      const item = workspace.plannerItems.find(candidate => candidate.id === plannerItemId);
-      if (!item?.contentPlanVersionId) throw new Error("Prepare o plano editorial antes de editá-lo.");
-      const current = workspace.contentPlans[item.contentPlanVersionId] || Object.values(workspace.contentPlans).find(plan => plan.entityId === `plan:${item.articleId}`);
-      if (!current) throw new Error("Versão ativa do plano editorial não encontrada.");
-      if (current.payload.planning && !hasMaterialPlanChange(current.payload.planning, details)) return { created: false, versionId: current.versionId };
-      const legacyBriefing = snapshots[workspaceKey]?.briefings.find(candidate => candidate.id === item.articleId) || null;
-      const operationalPublication = workspace.operationalPublications.find(candidate => candidate.articleId === item.articleId) || null;
-      const publicationIdentity = resolvePlannerPublicationIdentity({ brandId: selectedBrandId, brandName: snapshots[workspaceKey]?.brand.nome, articleId: item.articleId, article: workspace.articleVersions[item.articleId]?.payload || null, operational: operationalPublication, legacyBriefing });
-      const articleIdentityIssues = workspace.articleVersions[item.articleId]?.payload ? publishedIdentityReferenceIssues(workspace.articleVersions[item.articleId].payload, publicationIdentity) : [];
-      if (articleIdentityIssues.length) throw new Error(articleIdentityIssues.join(" "));
-      const successor = await createContentPlanSuccessor(current, details, actorId, undefined, { publicationIdentity });
-      updateWorkspace(state => ({ ...state,
-        contentPlans: { ...state.contentPlans, [successor.versionId]: successor, [successor.entityId]: successor },
-        plannerItems: state.plannerItems.map(candidate => candidate.id === item.id ? { ...candidate, contentPlanVersionId: successor.versionId, state: "awaiting_review" as const, updatedAt: new Date().toISOString(), lockVersion: candidate.lockVersion + 1 } : candidate),
-      }));
-      void sendWorkflowCommand({ action: "prepare_plan", brandId: selectedBrandId, plannerItemId: item.id, expectedLock: item.lockVersion, plan: successor }, updateWorkspace);
-      return { created: true, versionId: successor.versionId };
-    },
-    approvePlannerItems: (ids, actorId = "human") => { const eligible = workspace.plannerItems.filter(item => ids.includes(item.id) && item.state === "awaiting_review" && item.contentPlanVersionId);
-      const approvable = eligible.filter(item => { const plan = workspace.contentPlans[item.contentPlanVersionId!]; if (!plan) return false; const legacyBriefing = snapshots[workspaceKey]?.briefings.find(candidate => candidate.id === item.articleId) || null; const operationalPublication = workspace.operationalPublications.find(candidate => candidate.articleId === item.articleId) || null; const publicationIdentity = resolvePlannerPublicationIdentity({ brandId: selectedBrandId, brandName: snapshots[workspaceKey]?.brand.nome, articleId: item.articleId, article: workspace.articleVersions[item.articleId]?.payload || null, operational: operationalPublication, legacyBriefing }); const articleIdentityIssues = workspace.articleVersions[item.articleId] ? publishedIdentityReferenceIssues(workspace.articleVersions[item.articleId].payload, publicationIdentity) : []; return contentPlanApprovalIssues(plan, selectedBrandId).length === 0 && publicationIdentity.state !== "conflict" && publicationSourceIssues(plan.payload.planning!, publicationIdentity).length === 0 && articleIdentityIssues.length === 0; });
-      const events = approvable.flatMap(item => { const plan = workspace.contentPlans[item.contentPlanVersionId!]; return plan ? [createStatusEvent(plan.versionId, "approved", actorId, "ContentPlan aprovado no Planejador.")] : []; });
-      updateWorkspace(current => ({ ...current, versionEvents: mergeVersionEvents(current.versionEvents, events), plannerItems: current.plannerItems.map(item => approvable.some(candidate => candidate.id === item.id) ? { ...item, state: "approved" as const, updatedAt: new Date().toISOString(), lockVersion: item.lockVersion + 1 } : item) }));
-      void sendWorkflowCommand({ action: "approve_plan", brandId: selectedBrandId, plannerItemIds: approvable.map(item => item.id), expectedLocks: Object.fromEntries(approvable.map(item => [item.id, item.lockVersion])), versionEvents: events }, updateWorkspace); },
-    startWriting: async plannerItemId => {
-      const item = workspace.plannerItems.find(candidate => candidate.id === plannerItemId);
-      if (!item || (item.state !== "approved" && item.state !== "sent_writer")) throw new Error("Apenas planos editoriais aprovados podem seguir para o Redator.");
-      const article = workspace.articleVersions[item.articleId]; if (!article) throw new Error("Definição do artigo não encontrada.");
-      const plan = Object.values(workspace.contentPlans).find(candidate => candidate.versionId === item.contentPlanVersionId);
-      if (!plan) throw new Error("Plano editorial aprovado não encontrado.");
-      const document = Object.values(workspace.documents).find(candidate => candidate.articleDnaRef.entityId === article.entityId) || createOperationalDocument(plan, article, item);
-      const publication = workspace.operationalPublications.find(candidate => candidate.articleId === item.articleId) || createPublicationDraft(item, plan, document, article);
-      updateWorkspace(current => ({ ...current, documents: { ...current.documents, [document.id]: document },
-        operationalPublications: current.operationalPublications.some(candidate => candidate.articleId === item.articleId) ? current.operationalPublications : [...current.operationalPublications, publication],
-        plannerItems: current.plannerItems.map(candidate => candidate.id === item.id ? { ...candidate, state: "sent_writer" as const, updatedAt: new Date().toISOString() } : candidate), selectedEntityId: item.articleId }));
-      void sendWorkflowCommand({ action: "start_writing", brandId: selectedBrandId, plannerItemId: item.id, expectedLock: item.lockVersion, articleVersion: article, plan, document, publication }, updateWorkspace);
-      return { articleId: item.articleId, documentId: document.id };
-    },
-    importApprovedToPublications: publicationIds => {
-      const eligible = workspace.operationalPublications.filter(item => publicationIds.includes(item.id) && item.state === "approved");
-      const next = importApprovedWriterItems(workspace.operationalPublications, eligible.map(item => item.id));
-      updateWorkspace(current => ({ ...current, operationalPublications: importApprovedWriterItems(current.operationalPublications, eligible.map(item => item.id)) }));
-      void sendWorkflowCommand({ action: "import_publications", brandId: selectedBrandId, publicationIds: eligible.map(item => item.articleId), expectedLocks: Object.fromEntries(eligible.map(item => [item.articleId, item.lockVersion])) }, updateWorkspace);
-      return { imported: next.filter(item => eligible.some(candidate => candidate.id === item.id) && item.state === "ready_to_export").length, skipped: publicationIds.length - eligible.length };
+        operationalPublications: current.operationalPublications.some(item => item.id === publication.id)
+          ? current.operationalPublications.map(item => item.id === publication.id ? publication : item)
+          : [...current.operationalPublications, publication] }));
+      return { publicationId: publication.id, change: corpo.change === "ALREADY_SENT" ? "ALREADY_SENT" as const : "CREATED" as const };
     },
     createInvitation: input => {
       if (!selectedBrandId) throw new Error("Selecione uma marca.");

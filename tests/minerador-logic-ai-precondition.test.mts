@@ -8,7 +8,6 @@ import {
   resolveLogicalProcessReadiness,
 } from "../lib/minerador/logical-processor.ts";
 import { resolveMineradorProcessState } from "../lib/minerador/process-state.ts";
-import { resolveSemanticReviewNotice } from "../lib/minerador/semantic-review-notice.ts";
 
 const logicalInput: {
   keywordId: string;
@@ -130,39 +129,13 @@ test("o perfil e a precondição da IA usam o mesmo estado de readback", () => {
   assert.equal(remoteInvalid.logic.artifactState, "stale");
 });
 
-test("precondição da lógica não é apresentada como revisão concluída", () => {
-  const notice = resolveSemanticReviewNotice({
-    successCount: 0,
-    failCount: 2,
-    failures: [
-      { code: "AI_REVIEW_LOGIC_REQUIRED", stage: "precondition" },
-      { code: "AI_REVIEW_LOGIC_REQUIRED", stage: "precondition" },
-    ],
-  });
-  assert.equal(notice.kind, "logic_precondition");
-  assert.equal(notice.message, "IA não iniciada: atualize a Lógica desta keyword antes da revisão.");
-  assert.doesNotMatch(notice.message, /Revisão concluída/);
-
-  const runtime = resolveSemanticReviewNotice({
-    successCount: 0,
-    failCount: 1,
-    failures: [{ code: "AI_PROVIDER_INVALID_RESPONSE", stage: "provider_request" }],
-  });
-  assert.equal(runtime.kind, "runtime");
-  assert.match(runtime.message, /Revisão concluída/);
-});
-
-test("a rota bloqueia antes da resolução do provider e preserva o diagnóstico da precondição", async () => {
-  const route = await readFile(new URL("../app/api/process-intent-niche/route.ts", import.meta.url), "utf8");
+test("o readback confirmado é o que promove o artefato lógico", async () => {
+  // O R5 foi removido: a rota, o aviso e o gate de precondição da IA já não
+  // existem. A regra que sobrevive é do Processador — só o readback do
+  // registro canônico promove a Lógica, nunca a resposta da requisição.
   const workspace = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
-  const semanticBranch = route.indexOf('if (mode === "semantic_review")');
-  const logicGate = route.indexOf("if (!processState.logic.complete)", semanticBranch);
-  const providerResolution = route.indexOf("resolveDeepSeekCanonicalConfig", semanticBranch);
-  assert.ok(semanticBranch >= 0);
-  assert.ok(logicGate > semanticBranch);
-  assert.ok(providerResolution > logicGate);
-  assert.match(route, /apiRequestStarted,\s*source: "canonical",/);
-  assert.match(route, /precondition: err\.diagnostic/);
   assert.match(workspace, /for \(const expected of updatedItems\)/);
   assert.match(workspace, /persistedById\.get\(expected\.id\)/);
+  assert.doesNotMatch(workspace, /process-intent-niche/, "a rota do R5 não pode voltar pela porta dos fundos");
+  assert.doesNotMatch(workspace, /handleBatchSemanticReview/);
 });

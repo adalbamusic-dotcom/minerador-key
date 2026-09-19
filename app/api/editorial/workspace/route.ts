@@ -141,7 +141,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ requestId, data: parsed.data });
   } catch (error) {
     if (error instanceof PersistenceUnavailableError) {
-      return NextResponse.json({ requestId, code: error.code, error: error.message }, { status: 503 });
+      /* O erro do driver já vinha preservado no objeto e nunca era lido. */
+      console.error("[workspace:read]", requestId, error.reason, error.driver?.code || "", error.driver?.message || "");
+      return NextResponse.json({ requestId, code: error.code, error: error.message, details: { reason: error.reason, driver: error.driver } }, { status: 503 });
     }
     const mapped = authzErrorResponse(error);
     return NextResponse.json({ requestId, error: mapped.message }, { status: mapped.status });

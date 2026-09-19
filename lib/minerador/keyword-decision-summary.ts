@@ -1,5 +1,5 @@
 export type DecisionSummaryMetricKey = "volume" | "cpc" | "allintitle" | "kgr" | "keywordDifficulty" | "intent" | "trend" | "adsCompetition" | "competitionIndex" | "externalIntent" | "referringDomains" | "backlinks" | "niche" | "funnel";
-export type DecisionSummaryStateKey = "ai" | "dna" | "kgrApplicability" | "divergences";
+export type DecisionSummaryStateKey = "dna" | "kgrApplicability";
 export type DecisionSummaryGroupKey = "demand" | "seoCompetition" | "semantic";
 
 export type KeywordDecisionSummaryMetric = {
@@ -84,11 +84,8 @@ export function buildKeywordDecisionSummary(input: {
   backlinks?: unknown;
   niche?: unknown;
   funnel?: unknown;
-  aiExecuted: boolean;
-  aiVerdict?: unknown;
   dnaMaturity?: unknown;
   kgrApplicability?: unknown;
-  divergenceCount?: unknown;
   includeSections?: boolean;
 }): KeywordDecisionSummary {
   const metrics: KeywordDecisionSummaryMetric[] = [];
@@ -113,12 +110,6 @@ export function buildKeywordDecisionSummary(input: {
 
   const states: KeywordDecisionSummaryState[] = [
     {
-      key: "ai",
-      label: "IA",
-      // A IA é uma camada opcional: sem execução ela é "Opcional", nunca uma pendência obrigatória.
-      value: nonEmptyString(input.aiVerdict) || (input.aiExecuted ? "Executada" : "Opcional"),
-    },
-    {
       key: "dna",
       label: "DNA",
       value: dnaMaturityDisplayLabel(input.dnaMaturity) || "Pendente",
@@ -129,15 +120,6 @@ export function buildKeywordDecisionSummary(input: {
       value: nonEmptyString(input.kgrApplicability) || "Pendente",
     },
   ];
-
-  if (input.divergenceCount !== undefined) {
-    const count = finiteNonNegative(input.divergenceCount);
-    states.splice(2, 0, {
-      key: "divergences",
-      label: "Divergências",
-      value: count === null ? "Pendente" : formatInteger(count) || "0",
-    });
-  }
 
   const summary: KeywordDecisionSummary = { metrics, states };
   if (input.includeSections) {

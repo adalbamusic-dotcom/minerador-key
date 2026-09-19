@@ -13,7 +13,7 @@ test("seleção e expansão resolvem o contexto ativo sem misturar artigos", () 
 test("Workbench representa as seis etapas e não bloqueia o fluxo por evidência adicional opcional", () => {
   const references = summarizeRadarReferenceCounts([{ role: "primary" }, { role: "support" }, { role: "pending" }]);
   assert.deepEqual(references, { total: 3, primary: 1, support: 1, format: 0, pending: 1, excluded: 0, own: 0 });
-  const stages = buildRadarWorkbenchStages({ serpCollected: true, serpResultCount: 8, referencesReviewed: true, referenceCounts: references, analysisStarted: true, pagesAnalyzed: 3, additionalEvidenceState: "not-needed", reportGenerated: false, reportApproved: false, sentToPlanner: false });
+  const stages = buildRadarWorkbenchStages({ serpCollected: true, serpResultCount: 8, referencesReviewed: true, referenceCounts: references, analysisStarted: true, pagesAnalyzed: 3, additionalEvidenceState: "not-needed", reportGenerated: false, reportApproved: false, sentToWriter: false });
   assert.deepEqual(stages.map(stage => stage.label), ["SERP", "Referências", "Análise SERP", "Evidências adicionais", "Relatório", "Aprovação / Planejador"]);
   assert.equal(stages[2].state, "done");
   assert.equal(stages[3].state, "optional");
@@ -21,7 +21,7 @@ test("Workbench representa as seis etapas e não bloqueia o fluxo por evidência
 });
 
 test("próxima ação respeita a sequência e só considera a consolidação depois da amostra", () => {
-  const base = { identityReady: true, serpCollected: true, referencesPending: 0, analysisStarted: true, analysisQueue: 0, pagesAnalyzed: 0, reportGenerated: true, reportApproved: true, sentToPlanner: false, additionalEvidenceState: "not-started" as const };
+  const base = { identityReady: true, serpCollected: true, referencesPending: 0, analysisStarted: true, analysisQueue: 0, pagesAnalyzed: 0, reportGenerated: true, reportApproved: true, sentToWriter: false, additionalEvidenceState: "not-started" as const };
   assert.match(deriveRadarNextAction(base), /formar a amostra/);
   assert.match(deriveRadarNextAction({ ...base, pagesAnalyzed: 2, reportGenerated: false }), /gere a prévia/);
   assert.match(deriveRadarNextAction({ ...base, pagesAnalyzed: 2, reportGenerated: true, reportApproved: true }), /Planejador/);

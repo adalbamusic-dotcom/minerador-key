@@ -79,6 +79,33 @@ test("SERP mista não consolida e não deixa a Lógica virar canônica", () => {
   assert.equal(semanticConsolidationBySerp(mixed), resolveSemanticAxis(mixed.funnel).status === "serp_consolidated");
 });
 
+test("leitura unânime que não fechou o eixo não é relatada como divergência", () => {
+  // Quatro leituras iguais em dez resultados: a cobertura não fecha o eixo,
+  // mas dizer "necessidades diferentes" afirmaria o contrário do observado.
+  const unanime = applySerpSemanticEvidence(draft(), evidenceFrom([
+    ...informational.slice(0, 4),
+    ...Array.from({ length: 6 }, (_, index) => ({ title: `Marca ${index}`, description: "linha" })),
+  ]));
+  assert.equal(unanime.intent.serpStrength, "mixed", "a força continua sendo a medida da cobertura");
+  assert.equal(unanime.intent.serpLabelCount, 1, "um único rótulo saiu da leitura");
+  const resolution = resolveSemanticAxis(unanime.intent);
+  assert.equal(resolution.status, "serp_inconclusive");
+  assert.equal(resolution.value, null);
+  assert.doesNotMatch(resolution.reason || "", /necessidades diferentes/);
+  assert.match(resolution.reason || "", /poucos resultados/);
+
+  // E a SERP que realmente diverge continua dizendo que diverge.
+  const divergente = applySerpSemanticEvidence(draft(), evidenceFrom([
+    { title: "Comprar sérum noturno", description: "preco" },
+    { title: "Melhor sérum noturno", description: "comparativo" },
+    { title: "O que é sérum noturno", description: "guia" },
+    { title: "Clinica perto de mim", description: "agendar" },
+    { title: "Kit noturno com desconto", description: "cupom" },
+  ]));
+  assert.ok((divergente.intent.serpLabelCount || 0) > 1);
+  assert.match(resolveSemanticAxis(divergente.intent).reason || "", /necessidades diferentes/);
+});
+
 test("SERP insuficiente é declarada como insuficiente, não como não coletada", () => {
   const scarce = applySerpSemanticEvidence(draft(), evidenceFrom(informational.slice(0, 3)));
   assert.equal(scarce.intent.serpStrength, "insufficient");

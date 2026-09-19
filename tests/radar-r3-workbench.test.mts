@@ -25,7 +25,7 @@ test("R3 mantém as quatro áreas centrais na ordem operacional", () => {
 });
 
 test("R3 usa os dados reais disponíveis da SERP no Workbench, tabela e perfil", () => {
-  const model = buildRadarR3Model({ row, article, keyword: "keyword principal", silo: "Silo principal", publication: "Ainda não publicado", view, records: [], analysis: null, referenceCounts: counts, references: [{ key: "organic:1:https://example.com/artigo", position: 1, title: "Resultado", domain: "example.com", url: "https://example.com/artigo", role: "primary", state: "included" }], analysisQueue: 0, pagesAnalyzed: 0, reportGenerated: false, reportApproved: false, sentToPlanner: false, serpStatus: "Coletada" });
+  const model = buildRadarR3Model({ row, article, keyword: "keyword principal", silo: "Silo principal", publication: "Ainda não publicado", view, records: [], analysis: null, referenceCounts: counts, references: [{ key: "organic:1:https://example.com/artigo", position: 1, title: "Resultado", domain: "example.com", url: "https://example.com/artigo", role: "primary", state: "included" }], analysisQueue: 0, pagesAnalyzed: 0, reportGenerated: false, reportApproved: false, sentToWriter: false, serpStatus: "Coletada" });
   assert.equal(model.serp.provider, "dataforseo");
   assert.equal(model.serp.resultCount, 1);
   assert.equal(model.serp.references[0].role, "primary");
@@ -36,7 +36,7 @@ test("R3 usa os dados reais disponíveis da SERP no Workbench, tabela e perfil",
 });
 
 test("próxima ação R3 respeita a sequência e não bloqueia por Amazon ou especialista opcionais", () => {
-  const input = { identityReady: true, serpCollected: true, referencesPending: 0, analysisStarted: true, analysisQueue: 0, pagesAnalyzed: 2, amazonStatus: "not_applicable" as const, amazonNeedsReview: false, specialistSelected: false, specialistPending: 0, reportGenerated: true, reportApproved: false, sentToPlanner: false };
+  const input = { identityReady: true, serpCollected: true, referencesPending: 0, analysisStarted: true, analysisQueue: 0, pagesAnalyzed: 2, amazonStatus: "not_applicable" as const, amazonNeedsReview: false, specialistSelected: false, specialistPending: 0, reportGenerated: true, reportApproved: false, sentToWriter: false };
   // R9.4B: o verbo final passou a nomear a investigação, não o objeto relatório.
   assert.match(deriveRadarR3NextAction(input), /aprove a investigação/i);
   assert.match(deriveRadarR3NextAction({ ...input, reportGenerated: false }), /Gere o relatório competitivo/i);
@@ -76,7 +76,7 @@ test("R3.1 remove o detalhe global e a faixa Área ativa sem remover os handlers
 });
 
 test("R3.1 apresenta semântica editorial no Conteúdo e recolhe IDs na proveniência", () => {
-  const model = buildRadarR3Model({ row, article, keyword: "keyword principal", silo: "Manicure", publication: "Ainda não publicado", view, records: [], analysis: null, referenceCounts: counts, references: [{ key: "organic:1:https://example.com/artigo", position: 1, title: "Resultado", domain: "example.com", url: "https://example.com/artigo", role: "primary", state: "included" }], analysisQueue: 0, pagesAnalyzed: 0, reportGenerated: false, reportApproved: false, sentToPlanner: false, serpStatus: "Coletada" });
+  const model = buildRadarR3Model({ row, article, keyword: "keyword principal", silo: "Manicure", publication: "Ainda não publicado", view, records: [], analysis: null, referenceCounts: counts, references: [{ key: "organic:1:https://example.com/artigo", position: 1, title: "Resultado", domain: "example.com", url: "https://example.com/artigo", role: "primary", state: "included" }], analysisQueue: 0, pagesAnalyzed: 0, reportGenerated: false, reportApproved: false, sentToWriter: false, serpStatus: "Coletada" });
   assert.equal(model.content.rows.find(item => item.data === "Silo")?.value, "Manicure");
   assert.equal(model.content.rows.find(item => item.data === "SiloDNA")?.value, "Preservado");
   assert.equal(model.content.technical.siloId, "silo-1");
@@ -172,7 +172,7 @@ test("R3.2 deriva contexto independente para artigos com estágios diferentes", 
     pagesAnalyzed: 0,
     reportGenerated,
     reportApproved: false,
-    sentToPlanner: false,
+    sentToWriter: false,
     serpStatus: resultCount ? "Coletada" : "Não coletada",
   });
   const modelA = makeModel("article-a", "keyword A", "Silo A", 2, false);
