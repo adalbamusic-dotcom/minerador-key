@@ -8,6 +8,7 @@ import { assertEditorialPermission } from "@/lib/server/editorial-authorization"
 import { getOperationalClient, mapPersistenceError, OptimisticLockError } from "@/lib/server/editorial-db";
 import { listWriterDeliverables, listWriterMedia, registerWriterMediaBrief, saveWriterArticleDraft, saveWriterDeliverable, uploadWriterMediaAsset, WriterDeliverableError } from "@/lib/server/writer-deliverables";
 import { recordWriterMcpCall, verifyWriterMcpBearer, WriterMcpAuthError, type WriterMcpScope } from "@/lib/server/writer-mcp-delegation";
+import { mcpRuntimeFailure, readMcpRuntimeConfig } from "@/lib/server/mcp-runtime-config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -129,8 +130,10 @@ export function createWriterServer(delegation: Awaited<ReturnType<typeof verifyW
 
 async function handle(request: NextRequest) {
   try {
-    const configuredHosts = process.env.MCP_ALLOWED_HOSTS?.split(",").map(host => host.trim()).filter(Boolean) || ["localhost:3000", "127.0.0.1:3000"];
-    if (!configuredHosts.includes(request.headers.get("host") || "")) return Response.json({ error: "host_not_allowed" }, { status: 403 });
+    const runtime = readMcpRuntimeConfig();
+    const configurationFailure = mcpRuntimeFailure(runtime);
+    if (configurationFailure) throw new WriterMcpAuthError(configurationFailure.code, 503);
+    if (!runtime.allowedHosts.includes(request.headers.get("host") || "")) return Response.json({ error: "host_not_allowed" }, { status: 403 });
     const delegation = await verifyWriterMcpBearer(request.headers.get("authorization"));
     if (request.headers.get("origin")) return Response.json({ error: "browser_origin_not_allowed" }, { status: 403 });
     const handler = createMcpHandler(() => createWriterServer(delegation));

@@ -73,7 +73,7 @@ documento, request id e data); nenhum token ou payload editorial é exibido.
 
 - Catálogo remoto: confirmado pelo responsável; quatro providers `active`.
 - `pnpm run test:redator:mcp`: 2/2.
-- `pnpm run test:redator`: 217/217.
+- `pnpm run test:redator`: 224/224.
 - `npx tsc --noEmit`: passou.
 - ESLint direcionado: sem erros nos arquivos alterados.
 
@@ -81,3 +81,27 @@ Ainda não é homologação de cliente externo: OAuth remoto/discovery continua
 desabilitado no projeto e o endpoint de produção precisa de HTTPS e
 `MCP_PUBLIC_BASE_URL`. O registro da conexão permanece `pending` até essa
 configuração operacional.
+
+## Pré-voo Vercel — 2026-09-19
+
+O endpoint recebeu uma checagem de runtime em
+`/api/mcp/redator/health`. Em produção, `MCP_PUBLIC_BASE_URL` precisa ser uma
+URL HTTPS e o smoke test bearer precisa ser habilitado explicitamente por
+`MCP_ALLOW_REMOTE_BEARER=true`. Sem esses valores, o servidor responde um
+diagnóstico nomeado e não tenta autenticar uma credencial remota. O passo a
+passo está em `docs/07-redator/mcp-vercel-preflight-2026-09-19.md`.
+
+Isso prepara o deploy e o teste privado do transporte. Não altera a conclusão
+anterior: OAuth remoto do ChatGPT/Claude/Gemini continua não homologado.
+
+### Evidência do pré-voo
+
+- `pnpm run test:mcp:runtime`: 3/3.
+- `pnpm run test:redator:mcp`: 2/2.
+- `pnpm run build`: passou; a rota `/api/mcp/redator/health` entrou no inventário
+  de produção.
+- `GET http://localhost:3000/api/mcp/redator/health`: HTTP 200 com transporte,
+  endpoint e modo de autenticação identificados.
+- `pnpm run test:redator`: 240/241 no working tree atual; a única falha é a
+  asserção estrutural preexistente sobre `fieldset disabled={finalizado}` em
+  `redator-finalizacao-entregavel.test.mts`, fora do código deste pré-voo.

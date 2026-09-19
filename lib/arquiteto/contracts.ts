@@ -48,6 +48,24 @@ export type ArticleIntentProfile = z.infer<typeof ArticleIntentProfileSchema>;
 
 export const VersionStatusSchema = z.enum(["draft", "proposed", "approved", "rejected", "superseded"]);
 export const ContentHashSchema = z.string().regex(/^(sha256:[a-f0-9]{64}|legacy:[a-z0-9-]+)$/);
+/**
+ * O PACOTE APROVADO DA KEYWORD — a referência que o Arquiteto guarda.
+ *
+ * O Minerador passou a entregar o KeywordDNA congelado no ato da aprovação:
+ * `version` e `contentHash` só mudam com nova aprovação. Isto é o que o
+ * ArticleDNA e o SiloDNA gravam para responder, depois, "sobre qual pacote eu
+ * fui formado?" — e é o que permite comparar sem opinião.
+ *
+ * NÃO é `VersionReference`: aquele aponta para `editorial_artifact_versions`;
+ * este aponta para `analise_semantica.aprovacao`, que mora na keyword.
+ */
+export const ApprovedPackageRefSchema = z.object({
+  version: z.number().int().positive(),
+  contentHash: z.string().min(1),
+  approvedAt: z.string().min(1),
+}).strict();
+export type ApprovedPackageRef = z.infer<typeof ApprovedPackageRefSchema>;
+
 export const VersionReferenceSchema = z.object({
   entityId: z.string().min(1),
   versionId: z.string().min(1),
@@ -430,6 +448,14 @@ export const ArchitectKeywordSchema = z.object({
   hierarquia: z.string().nullable().optional(),
   analise_semantica: SemanticAnalysisSchema,
   keywordDnaRef: VersionReferenceSchema.optional(),
+  /**
+   * O pacote aprovado que o handoff entregou para esta keyword.
+   *
+   * `null` é informação: o Minerador não entregou pacote — a keyword está em
+   * revisão, ou nunca foi aprovada. Ausente (`undefined`) é item anterior ao
+   * pacote versionado, e o Arquiteto não finge saber.
+   */
+  approvedPackageRef: ApprovedPackageRefSchema.nullable().optional(),
   publishedUrl: z.string().url().nullable().optional(),
   canonical: z.string().url().nullable().optional(),
   url: z.string().url().nullable().optional(),
@@ -764,6 +790,17 @@ export const ArticleKeywordReferenceSchema = z.object({
   keywordId: z.string().min(1),
   keywordDnaVersionId: z.string().min(1),
   keywordDnaContentHash: ContentHashSchema,
+  /**
+   * Sobre qual PACOTE APROVADO esta keyword entrou no artigo.
+   *
+   * `keywordDnaVersionId`/`keywordDnaContentHash` apontam para a Qualificação
+   * Semântica persistida — a proveniência do transporte. Este campo aponta
+   * para a aprovação do Minerador, que é outra pergunta: "o humano aprovou
+   * de novo depois que este artigo nasceu?". Aditivo e opcional: o acervo
+   * anterior ao pacote versionado não o tem, e a leitura diz "desconhecido"
+   * em vez de inventar alinhamento.
+   */
+  approvedPackageRef: ApprovedPackageRefSchema.optional(),
   role: z.enum(["principal", "secundaria", "reforco_narrativo"]),
   strategicContribution: z.string().min(1),
   coveredIntentions: z.array(z.string()).min(1),
@@ -1020,6 +1057,21 @@ export const SiloDNASchema = z.object({
   centralEntity: z.string(),
   centralEntitySource: z.enum(["manual", "keyword_dna"]).optional(),
   centralKeywordDnaRef: VersionReferenceSchema.optional(),
+  /**
+   * Proveniência de INSUMO: sobre quais pacotes aprovados o Silo foi fechado.
+   *
+   * O SiloDNA tinha proveniência de processo (`territoryRef`,
+   * `workingCopyRef`) e nenhuma de insumo. Sem isto, "este Silo está
+   * desatualizado" era opinião; com isto, é comparação de hash. Derivado dos
+   * `approvedPackageRef` dos ArticleDNA que o compõem — uma fonte só.
+   * Aditivo, opcional, sem migration.
+   */
+  keywordPackageRefs: z.array(z.object({
+    keywordId: z.string().min(1),
+    version: z.number().int().positive(),
+    contentHash: z.string().min(1),
+    approvedAt: z.string().min(1),
+  }).strict()).optional(),
   objective: z.string(),
   audience: z.string(),
   macroProblem: z.string(),

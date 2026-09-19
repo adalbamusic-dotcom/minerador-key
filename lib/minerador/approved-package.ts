@@ -2,6 +2,8 @@ import { canonicalJson, contentHash } from "../arquiteto/versioning.ts";
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 import { hasCompleteLogicalOutputContract } from "./logical-processor.ts";
 import { readKgrApplicability } from "./kgr-applicability.ts";
+import { readCanonicalKeywordDna } from "./logical-read-model.ts";
+import { SERP_EVIDENCE_RECORD_KEY } from "./serp-evidence-record.ts";
 
 /**
  * Pacote aprovado da keyword — o retrato que o Arquiteto consome.
@@ -163,15 +165,59 @@ export function approvedPackageContent(input: ApprovedPackageInput): Record<stri
  * conteúdo. Um campo que a tabela não conhece faria a keyword parecer
  * divergente só porque quem perguntou sabia menos.
  */
-function signatureContent(input: ApprovedPackageInput): Record<string, unknown> {
+/**
+ * Esquema v1 (2026-09-18): a semântica inteira, crua. Mantido só para
+ * reconhecer registros gravados antes da SERP virar evidência na linha.
+ */
+function legacySignatureContent(input: ApprovedPackageInput): Record<string, unknown> {
   const content = approvedPackageContent(input);
   delete content.brandId;
   delete content.listaId;
   return content;
 }
 
+/**
+ * Esquema v2 (2026-09-19): a SERP entra pela LEITURA, não pelo registro.
+ *
+ * `evidencia_serp` é projeção da Qualificação persistida; gravá-la de novo
+ * com força "mista" não muda nada do que o Arquiteto recebe. O que muda o
+ * pacote é a resposta canônica — e é ela que entra na assinatura. Assim uma
+ * SERP conclusiva que discorda da Lógica rebaixa para `em_revisao` (a
+ * evidência forte exige nova aprovação), e uma coleta que não conclui nada
+ * não gera ruído.
+ */
+function signatureContent(input: ApprovedPackageInput): Record<string, unknown> {
+  const content = legacySignatureContent(input);
+  const semantic = { ...(content.analiseSemantica as Record<string, unknown>) };
+  delete semantic[SERP_EVIDENCE_RECORD_KEY];
+  const canonical = readCanonicalKeywordDna({ intent: input.intent as string | null | undefined, analise_semantica: input.semantic || {} });
+  return {
+    ...content,
+    analiseSemantica: semantic,
+    canonical: { intent: canonical.intent, funnel: canonical.funnel, niche: canonical.niche },
+  };
+}
+
+export const APPROVAL_SIGNATURE_SCHEME = "fnv1a-v2" as const;
+const LEGACY_SIGNATURE_SCHEME = "fnv1a";
+
 export async function approvedPackageHash(input: ApprovedPackageInput): Promise<string> {
   return contentHash(signatureContent(input));
+}
+
+function fnv1a(serialized: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/** Assinatura no esquema que o registro declara — v1 continua verificável. */
+function signatureForScheme(input: ApprovedPackageInput, scheme: string): string {
+  if (scheme === LEGACY_SIGNATURE_SCHEME) return `${LEGACY_SIGNATURE_SCHEME}:${fnv1a(canonicalJson(legacySignatureContent(input)))}`;
+  return approvedPackageSignature(input);
 }
 
 /**
@@ -183,13 +229,37 @@ export async function approvedPackageHash(input: ApprovedPackageInput): Promise<
  * SHA-256 continua sendo a identidade do pacote para o Arquiteto.
  */
 export function approvedPackageSignature(input: ApprovedPackageInput): string {
-  const serialized = canonicalJson(signatureContent(input));
-  let hash = 2166136261;
-  for (let index = 0; index < serialized.length; index += 1) {
-    hash ^= serialized.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `fnv1a:${(hash >>> 0).toString(36)}`;
+  return `${APPROVAL_SIGNATURE_SCHEME}:${fnv1a(canonicalJson(signatureContent(input)))}`;
+}
+
+function recordMatches(record: ApprovalRecord, input: ApprovedPackageInput): boolean {
+  const scheme = record.signature.split(":")[0] || APPROVAL_SIGNATURE_SCHEME;
+  return record.signature === signatureForScheme(input, scheme);
+}
+
+/**
+ * Migra um registro v1 para v2 sem mudar versão, autor ou instante.
+ *
+ * Só re-assina o que ainda bate no esquema antigo: um registro v1 que já
+ * diverge é uma keyword em revisão de verdade, e re-assiná-la esconderia isso.
+ * Devolve `null` quando não há o que migrar (sem registro, ou já em v2).
+ */
+export async function resignApprovalRecord(input: ApprovedPackageInput): Promise<{ semantic: Semantic; previousSignature: string } | { semantic: null; reason: "no_record" | "already_current" | "diverged" }> {
+  const record = readApprovalRecord(input.semantic);
+  if (!record) return { semantic: null, reason: "no_record" };
+  if (record.signature.startsWith(`${APPROVAL_SIGNATURE_SCHEME}:`)) return { semantic: null, reason: "already_current" };
+  if (!recordMatches(record, input)) return { semantic: null, reason: "diverged" };
+  return {
+    previousSignature: record.signature,
+    semantic: {
+      ...(input.semantic || {}),
+      aprovacao: {
+        ...record,
+        contentHash: await approvedPackageHash(input),
+        signature: approvedPackageSignature(input),
+      },
+    },
+  };
 }
 
 /** Leitura defensiva do registro de aprovação gravado em `analise_semantica`. */
@@ -217,7 +287,7 @@ export function readApprovalRecord(semantic: Semantic | null | undefined): Appro
 export function approvedPackageDiverged(input: ApprovedPackageInput): boolean | null {
   const record = readApprovalRecord(input.semantic);
   if (!record) return null;
-  return record.signature !== approvedPackageSignature(input);
+  return !recordMatches(record, input);
 }
 
 /**
@@ -227,6 +297,10 @@ export function approvedPackageDiverged(input: ApprovedPackageInput): boolean | 
 export function buildApprovedPackage(input: ApprovedPackageInput): ApprovedKeywordPackage | null {
   const record = readApprovalRecord(input.semantic);
   if (!record) return null;
+  // Linha mexida depois da aprovação não é o pacote aprovado: montar a partir
+  // dela devolveria conteúdo novo com o carimbo da versão antiga. Sem
+  // snapshot armazenado, a resposta honesta é "não há pacote a entregar".
+  if (!recordMatches(record, input)) return null;
   const content = approvedPackageContent(input);
   return {
     schemaVersion: "v1",

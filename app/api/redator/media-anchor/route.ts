@@ -70,6 +70,8 @@ const BodySchema = z.discriminatedUnion("action", [AnchorSchema, ReplaceSchema, 
 /** Recusa é 409: o pedido é legítimo, o ESTADO é que não permite. */
 const STATUS_POR_DESFECHO: Record<string, number> = {
   unavailable: 503, not_found: 404, refused: 409, failed: 502, readback_failed: 502,
+  /* Entregável finalizado: a recusa é de estado, não de erro. */
+  finalized: 409,
   /* Ativo sem arquivo não é erro do servidor: não há o que assinar. */
   no_file: 409,
 };

@@ -241,9 +241,23 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
     <div className="mx-auto flex max-w-6xl gap-6 p-4">
 
       {/* ===== O DOCUMENTO: LEITURA VERTICAL, CENA A CENA ===== */}
-      <fieldset className="m-0 min-w-0 flex-1 space-y-4 border-0 p-0" disabled={finalizado}>
+      {/*
+        * ===== CORTE 6A.7 · SELECIONAR NÃO É EDITAR =====
+        *
+        * Havia um `fieldset disabled={finalizado}` aqui, e ele desabilitava TUDO
+        * dentro — inclusive o mecanismo de seleção da cena. Elemento desabilitado
+        * não dispara foco, então `cenaSelecionada` nunca era preenchida, o painel
+        * de mídia nunca recebia alvo, e a tela pedia "selecione uma cena" sem
+        * oferecer forma de selecionar. Beco sem saída silencioso.
+        *
+        * Agora: os campos de CONTEÚDO ficam `readOnly` (ainda focáveis,
+        * selecionáveis, copiáveis) e os botões que MUDAM estrutura ficam
+        * desabilitados. A cena continua clicável, e o painel abre para consulta.
+        */}
+      <fieldset className="m-0 min-w-0 flex-1 space-y-4 border-0 p-0">
         <header className="border-b border-border pb-3">
           <input className="w-full bg-transparent text-2xl font-semibold outline-none" value={draft.title}
+            readOnly={finalizado}
             onChange={event => update("title", event.target.value)} aria-label="Título do roteiro"
             placeholder={ehRoteiro ? "Roteiro sem título" : "Carrossel sem título"}/>
           <p className="mt-1 text-xs text-text-muted">
@@ -256,13 +270,16 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
             {stored ? ` · v${stored.lockVersion}` : " · novo rascunho"}
           </p>
           {finalizado && <p className="mt-2 rounded border border-border bg-surface p-2 text-xs text-text-muted" data-finalizado-aviso>
-            Este {ehRoteiro ? "roteiro" : "carrossel"} está finalizado e não aceita edição.
+            Este {ehRoteiro ? "roteiro" : "carrossel"} está finalizado: o conteúdo está em
+            somente leitura e a mídia não aceita alteração. Você ainda pode abrir cada
+            {" "}{rotuloParte.toLowerCase()} e consultar o briefing, o texto alternativo e a imagem.
             Use <strong>Reabrir para edição</strong> na barra superior para voltar a trabalhar nele —
             a última versão finalizada continua guardada.
           </p>}
           {draft.sourceDocumentHash !== sourceHash && <div className="mt-3 rounded border border-warning p-3 text-sm">
             O artigo de origem mudou. Confira a nova versão antes de atualizar a base deste {ehRoteiro ? "roteiro" : "carrossel"}.
-            <button className={`${button} ml-3`} onClick={() => setDraft(current => current ? { ...current, sourceDocumentHash: sourceHash } : current)}>Atualizar base após revisão</button>
+            <button className={`${button} ml-3`} disabled={finalizado}
+              onClick={() => setDraft(current => current ? { ...current, sourceDocumentHash: sourceHash } : current)}>Atualizar base após revisão</button>
           </div>}
         </header>
 
@@ -273,57 +290,65 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
           */}
         {partes.length === 0 ? <div className="rounded border border-dashed border-border p-8 text-center" data-cenas-vazio>
           <p className="text-sm text-text-muted">Ainda não há {ehRoteiro ? "cenas" : "slides"}.</p>
-          <button className={`${button} mt-3`} onClick={adicionar} data-adicionar-primeira>
+          <button className={`${button} mt-3`} disabled={finalizado} onClick={adicionar} data-adicionar-primeira>
             <Plus className="mr-1 inline h-4 w-4" aria-hidden="true"/>Adicionar primeira {rotuloParte.toLowerCase()}
           </button>
         </div> : <>
           {partes.map((parte, indice) => {
             const aberta = cenaSelecionada === parte.id;
+            /*
+             * Clique E foco selecionam. O clique é o que funciona com o conteúdo
+             * em somente leitura; o foco é o que funciona pelo teclado. Depender
+             * só de um deixaria metade das pessoas de fora.
+             */
             return <section key={parte.id} data-cena={parte.id}
+              onPointerDown={() => setCenaSelecionada(parte.id)}
               onFocusCapture={() => setCenaSelecionada(parte.id)}
-              className={`rounded border p-4 transition-colors ${aberta ? "border-action-accent bg-surface" : "border-border bg-surface/60"}`}>
+              aria-current={aberta ? "true" : undefined}
+              className={`cursor-pointer rounded border p-4 transition-colors ${aberta ? "border-action-accent bg-surface" : "border-border bg-surface/60"}`}>
 
               <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-border pb-2">
                 <span className="text-xs font-bold uppercase tracking-wide text-text-muted">{rotuloParte} {indice + 1}</span>
                 <input className="min-w-0 flex-1 bg-transparent text-sm font-semibold outline-none"
+                  readOnly={finalizado}
                   value={ehRoteiro ? texto(parte.title) : texto(parte.heading)}
                   onChange={event => editar(parte.id, ehRoteiro ? "title" : "heading", event.target.value)}
                   aria-label={`Identificação da ${rotuloParte.toLowerCase()} ${indice + 1}`}
                   placeholder={ehRoteiro ? "Identificação da cena" : "Título do slide"}/>
                 {/* Reordenar NÃO troca id: a mídia continua ancorada onde estava. */}
-                <button className={iconeCena} disabled={indice === 0} onClick={() => mover(parte.id, -1)}
+                <button className={iconeCena} disabled={finalizado || indice === 0} onClick={() => mover(parte.id, -1)}
                   aria-label={`Mover ${rotuloParte.toLowerCase()} ${indice + 1} para cima`}><ArrowUp className="h-3.5 w-3.5"/></button>
-                <button className={iconeCena} disabled={indice === partes.length - 1} onClick={() => mover(parte.id, 1)}
+                <button className={iconeCena} disabled={finalizado || indice === partes.length - 1} onClick={() => mover(parte.id, 1)}
                   aria-label={`Mover ${rotuloParte.toLowerCase()} ${indice + 1} para baixo`}><ArrowDown className="h-3.5 w-3.5"/></button>
-                <button className={iconeCena} onClick={() => duplicar(parte.id)}
+                <button className={iconeCena} disabled={finalizado} onClick={() => duplicar(parte.id)}
                   aria-label={`Duplicar ${rotuloParte.toLowerCase()} ${indice + 1}`}><Copy className="h-3.5 w-3.5"/></button>
-                <button className={iconeCena} onClick={() => remover(parte.id)}
+                <button className={iconeCena} disabled={finalizado} onClick={() => remover(parte.id)}
                   aria-label={`Excluir ${rotuloParte.toLowerCase()} ${indice + 1}`}><Trash2 className="h-3.5 w-3.5"/></button>
               </div>
 
               {ehRoteiro ? <div className="space-y-3">
                 <label className="block text-sm">Fala ou narração
-                  <textarea className={`${field} mt-1 min-h-24`} value={texto(parte.narration)}
+                  <textarea readOnly={finalizado} className={`${field} mt-1 min-h-24`} value={texto(parte.narration)}
                     onChange={event => editar(parte.id, "narration", event.target.value)}/></label>
                 <label className="block text-sm">Texto na tela
-                  <textarea className={`${field} mt-1 min-h-16`} value={texto(parte.onScreenText)}
+                  <textarea readOnly={finalizado} className={`${field} mt-1 min-h-16`} value={texto(parte.onScreenText)}
                     onChange={event => editar(parte.id, "onScreenText", event.target.value)}
                     placeholder="Legenda, lettering ou card que aparece escrito"/></label>
                 <label className="block text-sm">Direção visual
-                  <textarea className={`${field} mt-1 min-h-16`} value={texto(parte.visualDirection)}
+                  <textarea readOnly={finalizado} className={`${field} mt-1 min-h-16`} value={texto(parte.visualDirection)}
                     onChange={event => editar(parte.id, "visualDirection", event.target.value)}/></label>
                 <details className="text-sm">
                   <summary className="cursor-pointer text-text-muted">Observação e duração</summary>
                   <label className="mt-2 block">Observação
-                    <textarea className={`${field} mt-1`} value={texto(parte.technicalDirection)}
+                    <textarea readOnly={finalizado} className={`${field} mt-1`} value={texto(parte.technicalDirection)}
                       onChange={event => editar(parte.id, "technicalDirection", event.target.value)}
                       placeholder="Instrução técnica, nota de gravação, lembrete"/></label>
                   <label className="mt-2 block">Duração em segundos
-                    <input type="number" min="0" className={`${field} mt-1`} value={Number(parte.durationSeconds ?? 0)}
+                    <input type="number" min="0" readOnly={finalizado} className={`${field} mt-1`} value={Number(parte.durationSeconds ?? 0)}
                       onChange={event => editar(parte.id, "durationSeconds", Number(event.target.value))}/></label>
                 </details>
               </div> : <label className="block text-sm">Conteúdo do slide
-                <textarea className={`${field} mt-1 min-h-24`} value={texto(parte.body)}
+                <textarea readOnly={finalizado} className={`${field} mt-1 min-h-24`} value={texto(parte.body)}
                   onChange={event => editar(parte.id, "body", event.target.value)}/></label>}
 
               <p className="mt-3 text-xs text-text-muted">
@@ -332,7 +357,7 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
             </section>;
           })}
 
-          <button className={button} onClick={adicionar} data-adicionar-cena>
+          <button className={button} disabled={finalizado} onClick={adicionar} data-adicionar-cena>
             <Plus className="mr-1 inline h-4 w-4" aria-hidden="true"/>Adicionar {rotuloParte.toLowerCase()}
           </button>
         </>}
@@ -351,21 +376,21 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
           <summary className="cursor-pointer text-sm text-text-muted">Metadados opcionais</summary>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className="text-sm">Canal <span className="text-text-muted">(opcional)</span>
-              <input className={`${field} mt-1`} value={draft.channel} onChange={event => update("channel", event.target.value)}/></label>
+              <input readOnly={finalizado} className={`${field} mt-1`} value={draft.channel} onChange={event => update("channel", event.target.value)}/></label>
             <label className="text-sm">Público
-              <input className={`${field} mt-1`} value={draft.audience} onChange={event => update("audience", event.target.value)}/></label>
+              <input readOnly={finalizado} className={`${field} mt-1`} value={draft.audience} onChange={event => update("audience", event.target.value)}/></label>
             <label className="text-sm md:col-span-2">Objetivo
-              <textarea className={`${field} mt-1`} value={draft.objective} onChange={event => update("objective", event.target.value)}/></label>
+              <textarea readOnly={finalizado} className={`${field} mt-1`} value={draft.objective} onChange={event => update("objective", event.target.value)}/></label>
             {draft.kind === "video_script" && <>
               <label className="text-sm">Duração total em segundos
-                <input type="number" min="0" className={`${field} mt-1`} value={draft.durationSeconds} onChange={event => update("durationSeconds", Number(event.target.value))}/></label>
+                <input type="number" min="0" readOnly={finalizado} className={`${field} mt-1`} value={draft.durationSeconds} onChange={event => update("durationSeconds", Number(event.target.value))}/></label>
               <label className="text-sm">Abertura
-                <input className={`${field} mt-1`} value={draft.openingHook} onChange={event => update("openingHook", event.target.value)}/></label>
+                <input readOnly={finalizado} className={`${field} mt-1`} value={draft.openingHook} onChange={event => update("openingHook", event.target.value)}/></label>
             </>}
             {draft.kind === "carousel" && <label className="text-sm md:col-span-2">Legenda
-              <textarea className={`${field} mt-1`} value={draft.caption} onChange={event => update("caption", event.target.value)}/></label>}
+              <textarea readOnly={finalizado} className={`${field} mt-1`} value={draft.caption} onChange={event => update("caption", event.target.value)}/></label>}
             <label className="text-sm md:col-span-2">Chamada final
-              <textarea className={`${field} mt-1`} value={draft.closingCta} onChange={event => update("closingCta", event.target.value)}/></label>
+              <textarea readOnly={finalizado} className={`${field} mt-1`} value={draft.closingCta} onChange={event => update("closingCta", event.target.value)}/></label>
           </div>
         </details>
 
@@ -381,7 +406,7 @@ export function WriterDerivedEnvironment({ kind, brandId, documentId, title, onB
         {cenaSelecionada
           ? <WriterMediaAnchorPanel brandId={brandId} documentId={documentId}
               targets={alvos.filter(alvo => alvo.ref === cenaSelecionada)}
-              assets={mediaRowsToPanelAssets(media)} onChanged={load}/>
+              assets={mediaRowsToPanelAssets(media)} onChanged={load} readOnly={finalizado}/>
           : <p className="rounded border border-dashed border-border p-3 text-xs text-text-muted">
               Selecione uma {rotuloParte.toLowerCase()} para trabalhar a mídia dela.
             </p>}

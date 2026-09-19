@@ -55,6 +55,72 @@ export { RECOVERY_WINDOW_HOURS, recoveryWindowEnd };
  * `article_break` (respiro) está DELIBERADAMENTE fora — ver `BREATH_BLOCKED`.
  */
 export const MEDIA_ANCHOR_KINDS = ["article_cover", "article_block", "script_scene", "carousel_slide"] as const;
+
+/* ==========================================================================
+ * CORTE 6A.7 · DE QUEM É ESTA MÍDIA
+ *
+ * `writer_media_assets.deliverable_id` está NULL em todos os ativos, e esta
+ * rodada não o preenche. Não precisa: a identidade já é garantida pelo banco.
+ *
+ *   UNIQUE (document_id, kind)               em writer_deliverables
+ *   CHECK  kind IN ('video_script','carousel')
+ *
+ * E o mapa abaixo é TOTAL e FIXO — cena só existe em roteiro, slide só existe em
+ * carrossel. Logo (document_id, kind) resolve exatamente um entregável. Isso não
+ * é heurística: é a mesma relação que a tela já usa para carregar o entregável
+ * da aba aberta.
+ *
+ * `article_cover` e `article_block` devolvem `null` de propósito: o artigo
+ * tem lifecycle próprio e não é assunto desta guarda.
+ * ========================================================================== */
+
+export type DeliverableKindForMedia = "video_script" | "carousel";
+
+/** A âncora, quando já existe. */
+export const DELIVERABLE_KIND_BY_ANCHOR: Readonly<Record<string, DeliverableKindForMedia>> = {
+  script_scene: "video_script",
+  carousel_slide: "carousel",
+};
+
+/** O papel do briefing, que existe ANTES da âncora. */
+export const DELIVERABLE_KIND_BY_ROLE: Readonly<Record<string, DeliverableKindForMedia>> = {
+  storyboard: "video_script",
+  slide: "carousel",
+};
+
+/**
+ * A âncora manda quando existe; o papel resolve enquanto ela não existe. É o que
+ * permite a mesma guarda valer no briefing, no upload e na ancoragem.
+ */
+export function deliverableKindForMedia(input: {
+  role?: string | null;
+  anchorKind?: string | null;
+}): DeliverableKindForMedia | null {
+  if (input.anchorKind && DELIVERABLE_KIND_BY_ANCHOR[input.anchorKind]) {
+    return DELIVERABLE_KIND_BY_ANCHOR[input.anchorKind];
+  }
+  if (input.role && DELIVERABLE_KIND_BY_ROLE[input.role]) return DELIVERABLE_KIND_BY_ROLE[input.role];
+  return null;
+}
+
+export type MediaMutationGate =
+  | { allowed: true }
+  | { allowed: false; refusal: "writer_deliverable_finalized" };
+
+/**
+ * ===== LER PODE SEMPRE; ALTERAR, NÃO =====
+ *
+ * Só `approved` recusa. `draft` e `in_review` seguem, e um entregável
+ * que ainda não existe também — a mídia pode nascer antes dele.
+ */
+export function gateMediaMutation(input: {
+  deliverableKind: DeliverableKindForMedia | null;
+  deliverableStatus: string | null;
+}): MediaMutationGate {
+  if (!input.deliverableKind) return { allowed: true };
+  if (input.deliverableStatus !== "approved") return { allowed: true };
+  return { allowed: false, refusal: "writer_deliverable_finalized" };
+}
 export type MediaAnchorKind = (typeof MEDIA_ANCHOR_KINDS)[number];
 
 /**

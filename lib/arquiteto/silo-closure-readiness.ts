@@ -54,6 +54,13 @@ export const SILO_CLOSURE_BLOCKERS = [
   "FORMATION_BLOCKED",
   /** O Silo já é canônico: fechar de novo criaria um segundo par. */
   "ALREADY_CONSOLIDATED",
+  /**
+   * O insumo está em movimento: keyword do Território em revisão no
+   * Minerador, ou reaprovada depois da formação. Fechar agora congelaria um
+   * Silo que já nasce velho — e é mais barato impedir aqui do que propagar
+   * por três camadas depois. Nenhum dos outros cinco olha para o insumo.
+   */
+  "KEYWORD_PACKAGE_STALE",
 ] as const;
 export type SiloClosureBlocker = (typeof SILO_CLOSURE_BLOCKERS)[number];
 
@@ -134,6 +141,8 @@ export function resolveSiloClosureReadiness(input: {
   blockedFormations?: readonly { label: string; reason: string }[];
   /** O Silo já produziu o par canônico? */
   alreadyConsolidated?: boolean;
+  /** Keywords do Território em revisão ou reaprovadas — vindas de `keywordPackageClosureIssues`. */
+  keywordPackageIssues?: readonly { label: string; reason: string }[];
 }): SiloClosureReadiness {
   const blockers: SiloClosureReadiness["blockers"] = [];
   const concluidos = new Set(input.concludedCandidateRefs);
@@ -162,6 +171,9 @@ export function resolveSiloClosureReadiness(input: {
       code: "CANNIBALIZATION_UNRESOLVED",
       detail: `"${par.leftLabel}" e "${par.rightLabel}" ainda disputam o mesmo assunto.`,
     });
+  }
+  for (const insumo of input.keywordPackageIssues || []) {
+    blockers.push({ code: "KEYWORD_PACKAGE_STALE", detail: `"${insumo.label}" ${insumo.reason}` });
   }
   for (const bloqueada of input.blockedFormations || []) {
     blockers.push({ code: "FORMATION_BLOCKED", detail: `${bloqueada.label}: ${bloqueada.reason}` });

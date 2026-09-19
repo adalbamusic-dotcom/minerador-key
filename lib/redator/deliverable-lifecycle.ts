@@ -335,6 +335,45 @@ export function finalizationDecisionFromReceipt(receipt: FinalizationReceipt | n
  * para esse caso — ninguém entra em retenção.
  */
 
+/* ==========================================================================
+ * CORTE 6A.5 · FINALIZAR O ARTIGO DUAS VEZES NÃO PODE CRIAR DUAS VERSÕES
+ *
+ * O Artigo não tem RPC de finalização — o versionamento mora no TypeScript.
+ * Então a idempotência precisa ser decidida aqui, antes de qualquer escrita,
+ * e a decisão precisa ser exercitável sem banco.
+ *
+ * As TRÊS condições têm que valer juntas para reusar. Cada uma cobre um jeito
+ * diferente de o mundo já ter mudado:
+ *
+ *   status igual ao alvo        → ninguém reabriu nem mudou de estado
+ *   hash do documento igual     → ninguém salvou rascunho por cima depois
+ *   hash da versão corrente igual→ a corrente é MESMO esta finalização
+ *
+ * Faltando qualquer uma, o plano é CRIAR. É o lado certo do erro: criar versão
+ * a mais gera duplicata visível; reusar indevidamente engoliria uma finalização
+ * de verdade, e o trabalho da pessoa não viraria versão nenhuma.
+ * ========================================================================== */
+
+export type ArticleFinalizationPlan =
+  | { action: "reuse_current"; versionId: string }
+  | { action: "create_version" };
+
+export function planArticleFinalization(input: {
+  document: { status: string; contentHash: string; currentVersionId: string | null } | null;
+  /** Hash da versão apontada por `current_version_id`, lido do servidor. */
+  currentVersionContentHash: string | null;
+  incomingContentHash: string;
+  /** O status que esta finalização quer deixar gravado, já na grafia da coluna. */
+  targetStatus: string;
+}): ArticleFinalizationPlan {
+  const { document, currentVersionContentHash, incomingContentHash, targetStatus } = input;
+  if (!document || !document.currentVersionId) return { action: "create_version" };
+  if (document.status !== targetStatus) return { action: "create_version" };
+  if (document.contentHash !== incomingContentHash) return { action: "create_version" };
+  if (currentVersionContentHash !== incomingContentHash) return { action: "create_version" };
+  return { action: "reuse_current", versionId: document.currentVersionId };
+}
+
 export type FinalizationReadbackFailure =
   | "not_found"
   | "status_not_approved"

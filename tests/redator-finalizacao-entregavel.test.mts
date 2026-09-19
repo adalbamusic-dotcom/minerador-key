@@ -310,8 +310,25 @@ test("15 · ESTRUTURAL · os controles moram na GlobalTopbar e não se repetem n
   /* Ele publica estado e gatilhos para quem desenha. */
   assert.match(ambiente, /onBarChange\?\.\(barra\)/);
   assert.match(ambiente, /estado: !stored \? "none" : stored\.status === "approved" \? "approved" : "draft"/);
-  /* Finalizado é somente leitura na tela, como já é no servidor. */
-  assert.match(ambiente, /<fieldset[^>]*disabled=\{finalizado\}/);
+  /*
+   * Finalizado é somente leitura na tela, como já é no servidor.
+   *
+   * ATUALIZADO no Corte 6A.7. Esta asserção exigia `<fieldset disabled>`, e
+   * isso ERA o defeito: desabilitar o fieldset apagava os eventos de foco das
+   * cenas, `cenaSelecionada` nunca era preenchida, e o painel de mídia — que
+   * vive fora dele — ficava inalcançável. Um teste pedindo o defeito é pior que
+   * teste nenhum.
+   *
+   * A leitura-somente agora vem de `readOnly` no conteúdo (que continua focável,
+   * selecionável e copiável) e `disabled` nos botões que mudam ESTRUTURA. É
+   * isso que este teste cobra.
+   */
+  assert.doesNotMatch(ambiente, /<fieldset[^>]*disabled=/,
+    "desabilitar o fieldset torna a cena inalcançável");
+  assert.ok(ambiente.split("readOnly={finalizado}").length - 1 >= 13,
+    "todo campo de conteúdo em somente leitura");
+  assert.ok(ambiente.split("disabled={finalizado").length - 1 >= 6,
+    "botões que mudam estrutura desabilitados");
 
   /* A barra desenha os três, e não cria faixa nova. */
   assert.match(barra, /data-redator-deliverable-actions/);

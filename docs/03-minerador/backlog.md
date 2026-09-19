@@ -1,5 +1,25 @@
 # Backlog — Minerador
 
+## KeywordDNA fechado — 2026-09-19
+
+- [x] Contrato tipado `lib/minerador/keyword-dna.ts`: um valor por eixo com
+  fonte declarada (SERP > humano > Lógica), treze campos normalizados na
+  origem, equivalência com o leitor do Arquiteto garantida por teste. Spec §62.
+- [x] `buildApprovedPackage` recusa linha divergente da assinatura aprovada.
+- [x] Tabela e Perfil passaram a mostrar a SERP conclusiva: ela agora mora na
+  linha (`evidencia_serp`) e `readCanonicalKeywordDna` a lê antes de tudo.
+  Spec §63.
+
+## SERP como evidência forte — 2026-09-19
+
+- [x] `evidencia_serp` gravado pela rota Resultados após o write do artifact.
+- [x] Leitura canônica SERP > humano > Lógica, com fonte declarada por eixo.
+- [x] Assinatura v2 do pacote sobre a leitura canônica; v1 migra sem mudar versão.
+- [x] `invalidateSerpEvidence` (contrato; humano invalida, não substitui).
+- [ ] **Backfill pendente de autorização:** `npm run minerador:backfill-evidencia-serp -- --apply`.
+  Dry-run: 29 re-assinaturas, 103 projeções, 23 aprovadas caem em revisão.
+- [ ] UI de invalidação da evidência SERP (motivo obrigatório, pede recoleta).
+
 ## Aprovação versionada e pacote fechado — 2026-09-18
 
 - [x] Trava na aprovação: Lógica, Volume, Resultados e aplicabilidade do KGR

@@ -107,6 +107,7 @@ import { detectCandidateOverlap, detectSlugCollisions, reservedForSiloPage, unre
 import { describeRadarReadback, verifyRadarHandoffReadback } from "@/lib/arquiteto/radar-handoff-readback";
 import { articleRunRowsFromGates, buildArticleRunReadout, formatArticleRunBlockers, formatArticleRunReadout } from "@/lib/arquiteto/process-observability";
 import { describeFormationConclusionOutcome, resolveFormationLedger, resolveSiloClosureReadiness } from "@/lib/arquiteto/silo-closure-readiness";
+import { keywordPackageClosureIssues, resolveArticleKeywordAlignment, type KeywordPackageState } from "@/lib/arquiteto/keyword-package-alignment";
 import { buildCanonicalSiloClosurePlan, resolveCanonicalClosureResumption, verifyCanonicalSiloClosure, type CanonicalSiloClosurePlan, type CanonicalSiloClosureVerification } from "@/lib/arquiteto/silo-composition-from-formations";
 import { readFormationConclusionState } from "@/lib/arquiteto/formation-conclusion-state";
 import {
@@ -5666,6 +5667,36 @@ export default function ArquitetoPage() {
    * faria a mesa declarar concluído um item cujo par não existe — e a retomada
    * concluir que não há o que retomar.
    */
+  /**
+   * O PACOTE APROVADO DE CADA KEYWORD, COMO O HANDOFF O GRAVOU.
+   *
+   * Uma leitura só, para a linha do artigo, o portão do Silo e a retomada.
+   * Vem do item de workflow — o que o Minerador entregou —, nunca da linha
+   * viva: é exatamente essa leitura que o pacote versionado substitui.
+   */
+  const keywordPackageStateById = useMemo(() => new Map<string, KeywordPackageState>(
+    masterList
+      .filter(keyword => keyword.approvedPackageRef !== undefined)
+      .map(keyword => [String(keyword.id), { keywordId: String(keyword.id), current: keyword.approvedPackageRef ?? null }]),
+  ), [masterList]);
+  const keywordLabelById = useMemo(
+    () => new Map(masterList.map(keyword => [String(keyword.id), String(keyword.keyword || keyword.id)])),
+    [masterList],
+  );
+  /** O pacote sobre o qual cada keyword já entrou em ArticleDNA aprovado. */
+  const recordedPackageByKeywordId = useMemo(() => new Map(
+    Object.values(acceptedArticleDnas)
+      .flatMap(version => version.payload.keywordReferences)
+      .filter(reference => reference.approvedPackageRef)
+      .map(reference => [reference.keywordId, reference.approvedPackageRef!] as const),
+  ), [acceptedArticleDnas]);
+  const keywordPackageIssuesFor = useCallback((keywordIds: readonly string[]) => keywordPackageClosureIssues({
+    keywordIds,
+    currentByKeywordId: keywordPackageStateById,
+    recordedByKeywordId: recordedPackageByKeywordId,
+    labels: keywordLabelById,
+  }), [keywordLabelById, keywordPackageStateById, recordedPackageByKeywordId]);
+
   const canonicalSiloPairFor = useCallback((territoryRef: string | null | undefined) => {
     if (!territoryRef) return { siloDna: null, siloPage: null, complete: false };
     const siloDna = Object.values(acceptedSiloDnas).find(version => version.payload.territoryRef === territoryRef) || null;
@@ -11493,6 +11524,8 @@ export default function ArquitetoPage() {
           rightLabel: candidateGuards.rotuloDoCandidato.get(item.right) || item.right,
         })),
         alreadyConsolidated: par.complete,
+        // Insumo em movimento barra a retomada igual ao gatilho: uma regra.
+        keywordPackageIssues: keywordPackageIssuesFor(doSilo.flatMap(item => item.members.map(member => member.keywordId))),
       });
       const plano = buildCanonicalSiloClosurePlan({
         formations: doSilo.map(item => ({
@@ -11813,6 +11846,18 @@ export default function ArquitetoPage() {
            * estado que ele mesmo tinha deixado pela metade.
            */
           alreadyConsolidated: canonicalSiloPairFor(siloRef).complete,
+          /*
+           * KEYWORD_PACKAGE_STALE — o insumo precisa estar parado para fechar.
+           *
+           * Lê as keywords das formações congeladas DESTE Silo no marcador que
+           * o remoto acabou de confirmar. Keyword em revisão ou reaprovada
+           * depois da formação barra o fechamento — não a formação.
+           */
+          keywordPackageIssues: keywordPackageIssuesFor(
+            (marcador.concludedFormations || [])
+              .filter(item => item.territoryRef === siloRef)
+              .flatMap(item => item.members.map(member => member.keywordId)),
+          ),
         });
         /*
          * §2 — O GATILHO. Nenhum botão novo: o plano é construído aqui, sobre
@@ -14561,7 +14606,24 @@ export default function ArquitetoPage() {
                     * sobre um artigo aprovado que ganhou uma proposta.
                     */
                    const articleAuthority = articleDnaEntryFor({ articleId: articleEntityId, candidateRef: art.candidateRef });
+                   /*
+                    * ACENDER `staleReasons`: o mecanismo já existia, apagado.
+                    *
+                    * `canonicalRevisionState` separa "revisão em andamento" de
+                    * "aprovada invalidada" e expõe `usableDownstream` — mas este
+                    * era o único chamador, e chamava sem motivos. `canonicalIsStale`
+                    * nunca foi verdadeiro. "Pacote mais novo que o lido" é
+                    * exatamente uma staleReason; revisão em andamento NÃO é.
+                    */
+                   const alinhamento = articleDnaVersion
+                     ? resolveArticleKeywordAlignment({
+                       article: articleDnaVersion.payload,
+                       currentByKeywordId: keywordPackageStateById,
+                       labels: keywordLabelById,
+                     })
+                     : null;
                    const articleRevision = canonicalRevisionState({
+                     staleReasons: alinhamento?.staleReasons ?? [],
                      authority: {
                        canonical: articleAuthority.canonical,
                        workingProposal: articleAuthority.workingProposal,

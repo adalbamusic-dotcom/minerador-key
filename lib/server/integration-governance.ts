@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { isTenantId } from "@/lib/tenant-routing";
 import { getAgencyWorkspaceData } from "@/lib/server/agency-workspace";
 import { createCanonicalServiceClient } from "@/lib/server/canonical-authorization";
+import { readMcpRuntimeConfig } from "@/lib/server/mcp-runtime-config";
 
 type GovernanceClient = Pick<SupabaseClient, "from">;
 
@@ -161,10 +162,7 @@ function connectionReady(row: { lifecycle_status: string; secret_ref: string | n
 }
 
 function publicMcpEndpoint() {
-  const configured = process.env.MCP_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_APP_URL;
-  const base = (configured || (process.env.NODE_ENV === "production" ? "" : "http://localhost:3000")).trim().replace(/\/$/, "");
-  if (!base) return "/api/mcp/redator";
-  return `${base}/api/mcp/redator`;
+  return readMcpRuntimeConfig().endpoint || "/api/mcp/redator";
 }
 
 function requiredMcpClientName(value: unknown) {

@@ -7,6 +7,7 @@ import { ArticleFormationMarkerPayloadSchema, type ArticleFormationMarkerInput, 
 import { ArticleKgrIdentitySchema, SiloCandidateMarkSchema, VersionedArticleDNASchema, VersionedSiloDNASchema, VersionedSiloPageSchema, type ArticleDNA, type ArchitectKeyword, type SiloDNA, type SiloPage, type VersionEnvelope } from "./contracts.ts";
 import { VersionedArticleArchitectureAiReviewSchema, type VersionedArticleArchitectureAiReview } from "./article-ai-review.ts";
 import { buildKeywordDnaProvenanceSnapshot } from "./adapters.ts";
+import { readApprovedPackageRef } from "./keyword-package-alignment.ts";
 import { adaptKeywordIdentityContext } from "./identity-context.ts";
 import { TerritoryCandidateSchema, type TerritoryCandidate } from "./territory.ts";
 import { resolveArticleFormationState } from "./article-formation-decision.ts";
@@ -478,6 +479,14 @@ export function buildCanonicalWorkflowWorkspaceItems(
       canonicalWorkflow: item,
       ...(assignedKgrIdentity ? { kgrIdentity: assignedKgrIdentity } : {}),
       keywordDnaRef: keywordDnaSnapshot.versionReference,
+      /*
+       * O pacote aprovado que o handoff gravou no item. Três estados, e os
+       * três dizem coisas diferentes: ref = aprovada e vigente; `null` = o
+       * Minerador não entregou pacote (em revisão); ausente = item anterior
+       * ao pacote versionado. Achatar os dois últimos em `null` faria o
+       * acervo antigo inteiro parecer "em revisão".
+       */
+      ...("approvedDna" in item.payload ? { approvedPackageRef: readApprovedPackageRef(item.payload) } : {}),
       keywordDnaSnapshot,
       ...adaptKeywordIdentityContext(keyword),
       computedSlug: assignedSlug === undefined ? stringValue(keyword.computedSlug) || stringValue(keyword.slug_sugerido) || undefined : assignedSlug,

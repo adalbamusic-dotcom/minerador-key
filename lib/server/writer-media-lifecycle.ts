@@ -48,6 +48,7 @@
 
 import "server-only";
 import { getOperationalClient } from "./editorial-db";
+import { checkAssetTargetEditable } from "./writer-media-guard";
 
 /*
  * As REGRAS moram em `lib/redator/media-anchor.ts` — puras, sem `server-only`,
@@ -105,6 +106,15 @@ export async function writerMediaAnchorAvailable(): Promise<boolean> {
 
 const CAMPOS_COM_ANCHOR = "id,marca_id,document_id,deliverable_id,status,storage_path,file_hash,anchor_kind,anchor_ref,superseded_at,replaced_by_asset_id";
 
+/*
+ * ===== CORTE 6A.7 · A GUARDA DE ENTREGÁVEL FINALIZADO =====
+ *
+ * Mutação de mídia de roteiro ou carrossel exige entregável editável. Ler e
+ * pré-visualizar continuam livres — ver `signWriterMediaPreview`, que não
+ * chama esta guarda de propósito.
+ */
+type DesfechoFinalizado = { status: "finalized"; deliverableKind: "video_script" | "carousel" };
+
 /**
  * Lê um ativo já ESCOPADO pela marca.
  *
@@ -138,6 +148,7 @@ async function readAssetState(brandId: string, assetId: string): Promise<MediaAs
  * ========================================================================== */
 
 export type ReplacementOutcome =
+  | DesfechoFinalizado
   | { status: "unavailable" }
   | { status: "not_found"; which: "predecessor" | "successor" }
   | { status: "refused"; refusal: ReplacementRefusal }
@@ -174,6 +185,11 @@ export async function replaceWriterMediaAsset(input: {
   if (!predecessor) return { status: "not_found", which: "predecessor" };
   const successor = await readAssetState(input.brandId, input.successorAssetId);
   if (!successor) return { status: "not_found", which: "successor" };
+
+  /* Substituir é mutação: o entregável dono da posição precisa estar editável. */
+  const portao = await checkAssetTargetEditable({
+    brandId: input.brandId, assetId: input.predecessorAssetId });
+  if (!portao.editable) return { status: "finalized", deliverableKind: portao.deliverableKind };
 
   const plano = planMediaReplacement({ predecessor, successor, brandId: input.brandId });
   if (!plano.allowed) return { status: "refused", refusal: plano.refusal };
@@ -283,6 +299,7 @@ export async function signWriterMediaPreview(input: {
  * ========================================================================== */
 
 export type BriefUpdateOutcome =
+  | DesfechoFinalizado
   | { status: "unavailable" }
   | { status: "not_found" }
   | { status: "refused"; refusal: "superseded" }
@@ -308,6 +325,11 @@ export async function updateWriterMediaBrief(input: {
 
   const asset = await readAssetState(input.brandId, input.assetId);
   if (!asset) return { status: "not_found" };
+
+  /* Alt text e briefing são conteúdo: entregável finalizado não os aceita. */
+  const portao = await checkAssetTargetEditable({ brandId: input.brandId, assetId: input.assetId });
+  if (!portao.editable) return { status: "finalized", deliverableKind: portao.deliverableKind };
+
   if (asset.supersededAt) return { status: "refused", refusal: "superseded" };
 
   const campos: Record<string, string> = { updated_by: input.actorId };
@@ -338,6 +360,7 @@ export async function updateWriterMediaBrief(input: {
  * ========================================================================== */
 
 export type AnchorOutcome =
+  | DesfechoFinalizado
   | { status: "unavailable" }
   | { status: "not_found" }
   | { status: "refused"; refusal: "file_unconfirmed" | "already_anchored" | "anchor_taken" }
@@ -365,6 +388,11 @@ export async function anchorWriterMediaAsset(input: {
 
   const asset = await readAssetState(input.brandId, input.assetId);
   if (!asset) return { status: "not_found" };
+
+  const portao = await checkAssetTargetEditable({
+    brandId: input.brandId, assetId: input.assetId, anchorKind: input.anchor.kind });
+  if (!portao.editable) return { status: "finalized", deliverableKind: portao.deliverableKind };
+
   if (asset.anchor) return { status: "refused", refusal: "already_anchored" };
   if (!mediaFileConfirmed(asset)) return { status: "refused", refusal: "file_unconfirmed" };
 

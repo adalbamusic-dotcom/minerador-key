@@ -3021,3 +3021,107 @@ Gravar a referência do pacote no momento da formação e alimentar
 mecanismo do Arquiteto existe e está apagado: o único consumidor chama sem
 motivos. Detalhe no adendo do
 [parecer](../04-arquiteto/parecer-formato-articledna-e-alinhamento-minerador-2026-09-18.md).
+
+## KeywordDNA fechado e compatibilização com o Arquiteto — 2026-09-19
+
+### O PROBLEMA
+
+O Arquiteto lia treze chaves de `analise_semantica` pelo nome interno, com
+`semPlaceholder`, `listaDeTexto` e `intentIsKnown` reimplementados lá — regras
+do Minerador morando em outro módulo. E a intenção tinha duas respostas para a
+mesma keyword: `readCanonicalKeywordDna` (a tabela) resolve humano > Lógica e
+nunca inclui a SERP; `resolveKeywordDnaSignals` (o Arquiteto) prefere a SERP.
+A autoridade declarada em 2026-08-28 é SERP conclusiva > humano > Lógica.
+
+### O CONTRATO
+
+`lib/minerador/keyword-dna.ts` — `KeywordDnaSchema` (zod `strict`),
+`keywordDnaFromRow` (linha viva) e `keywordDnaFromPackage` (pacote do
+workflow). Cada eixo sai com `value`, `state` e `source` declarado
+(`serp | human | logic | null`). Os treze campos que o Arquiteto lê saem
+normalizados na origem, com os mesmos placeholders anulados. Spec §62.
+
+Escolha deliberada: **vista derivada, sem bump de schema.** O pacote aprovado e
+o handoff não mudaram; o Arquiteto pode trocar de leitor quando quiser, e o
+teste de equivalência garante que vai ler a mesma coisa.
+
+### ENDURECIMENTO
+
+`buildApprovedPackage` passou a devolver `null` quando a linha diverge da
+assinatura aprovada. Antes montava o pacote a partir da linha atual e só
+conferia se existia registro: conteúdo novo com carimbo de versão antiga. Era
+inofensivo porque os chamadores filtram por status efetivo, mas era mentira
+latente.
+
+### VALIDAÇÃO
+
+`tests/minerador-keyword-dna-fechado.test.mts` = 9/9: Lógica como hipótese;
+SERP conclusiva fecha o eixo; SERP fraca devolve o eixo a quem tinha resposta;
+humano acima da Lógica e abaixo da SERP; placeholders anulados; **equivalência
+campo a campo com `resolveKeywordDnaSignals`** na mesma fixture; pacote
+reconstrói o mesmo DNA e nunca se lê como em revisão; linha divergente não
+produz pacote; schema `strict` recusa chave desconhecida.
+
+`TypeScript = 0 erros`. `ESLint` limpo nos dois módulos. `tests/minerador-*` =
+612 · 584 pass · 28 fail — as mesmas 28 do baseline. `pnpm test:arquiteto` =
+2010 · 2008 · 2, idêntico ao baseline. `test:editorial` = 64 · 60 · 4, falhas de
+rotas/layout sem relação com estes arquivos.
+
+### NÃO TOCADO
+
+Nenhum arquivo fora de `lib/minerador`, `tests` e `docs`. O Arquiteto
+continua lendo por `resolveKeywordDnaSignals`; a troca está no backlog dele.
+
+## SERP como evidência forte — 2026-09-19
+
+### O QUE MUDOU
+
+A SERP conclusiva passou a morar na própria keyword (`analise_semantica.evidencia_serp`)
+e a leitura canônica — tabela, Perfil, Decisão, filtros — passou a respeitá-la
+antes da decisão humana e da Lógica. Até aqui a Qualificação ficava só no
+artifact e na working copy; a tabela mostrava a hipótese da Lógica com a SERP
+concluída. Spec §63; SDD
+[sdd-serp-como-evidencia-forte-2026-09-19](propostas/sdd-serp-como-evidencia-forte-2026-09-19.md).
+
+A hipótese da Lógica **não** é sobrescrita: a SERP muda a resposta, a
+proveniência continua legível. O read model declara a fonte por eixo
+(`intentSource`, `funnelSource`, `nicheSource`).
+
+### ASSINATURA V2 — POR QUE FOI PRECISO
+
+O primeiro dry-run mostrou o defeito: gravar o registro SERP em keyword
+aprovada mudava a assinatura crua e **as 29 aprovadas cairiam em revisão** —
+inclusive as com SERP mista ou fraca, que não mudam nada do que o Arquiteto
+recebe. A assinatura passou a cobrir a **leitura canônica** em vez do registro
+bruto. Segundo dry-run: **23 caem em revisão**, todas por SERP conclusiva que
+discorda da Lógica; 6 ficam porque a SERP não concluiu ou confirmou.
+
+Registros v1 continuam verificáveis; o backfill os migra para v2 sem mudar
+versão, autor ou instante — e só os que ainda batem. `fnv1a:` → `fnv1a-v2:`.
+
+### O QUE FOI TOCADO
+
+`lib/minerador/serp-evidence-record.ts` (novo), `logical-read-model.ts`,
+`keyword-dna.ts`, `approved-package.ts`, a rota
+`dataforseo/allintitle` (grava o registro após o write confirmado do
+artifact, relendo a linha), e duas linhas de `minerador-workspace.tsx` (a
+coluna "Lógica" do painel pede a hipótese pura). Script
+`scripts/minerador-backfill-evidencia-serp.mts`. Nada fora do Minerador.
+
+### VALIDAÇÃO
+
+`tests/minerador-evidencia-serp-forte.test.mts` = 6/6 ·
+`tests/minerador-assinatura-v2-do-pacote.test.mts` = 4/4 ·
+`minerador-keyword-dna-fechado` = 9/9. `TypeScript = 0 erros`. ESLint limpo
+nos arquivos novos e nos módulos tocados; o workspace tem os mesmos 20
+problemas do HEAD. `tests/minerador-*` = 622 · 594 · 28 — as mesmas 28.
+`pnpm test:arquiteto` = 2028 · 2026 · 2, os mesmos 2.
+
+### PENDENTE — DO USUÁRIO
+
+- **Aplicar o backfill** (`npm run minerador:backfill-evidencia-serp -- --apply`).
+  Grava 29 re-assinaturas e 103 projeções; 23 aprovadas passam a `em_revisao`
+  e precisam de reaprovação para o Arquiteto receber a intenção da SERP.
+- Homologação manual: uma keyword com SERP conclusiva divergente deve mostrar
+  o valor da SERP na tabela e a Lógica como hipótese no painel.
+- UI de invalidação da evidência SERP (contrato pronto, sem botão).

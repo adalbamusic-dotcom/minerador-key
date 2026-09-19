@@ -62,13 +62,25 @@ const TEXTO_DA_ETAPA: Record<Etapa, string> = {
 
 export type { MediaAnchorTarget, PanelAsset };
 
-export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, onChanged }: {
+export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, onChanged, readOnly = false }: {
   brandId: string | null;
   documentId: string | null;
   /** As posições deste ambiente: capa e blocos, ou cenas, ou slides. */
   targets: readonly MediaAnchorTarget[];
   assets: readonly PanelAsset[];
   onChanged: () => void | Promise<void>;
+  /**
+   * ===== CORTE 6A.7 · CONSULTAR SIM, ALTERAR NÃO =====
+   *
+   * Entregável finalizado continua abrindo o painel: dá para ver a imagem,
+   * o briefing e o texto alternativo. O que some são as ações que MUDAM —
+   * anexar, substituir, editar alt, editar briefing — e no lugar delas fica
+   * dito o que fazer para voltar a poder.
+   *
+   * Isto é a camada de cortesia, não a de segurança: o servidor recusa as
+   * mesmas mutações por conta própria, em `writer-media-guard.ts`.
+   */
+  readOnly?: boolean;
 }) {
   const [selecionado, setSelecionado] = useState("");
   const [etapa, setEtapa] = useState<Etapa>("parado");
@@ -308,22 +320,33 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
 
       {/* ===== BRIEFING ===== */}
       {(!ocupada || editandoBriefing) && <div className="mt-2 space-y-1">
-        <input className={campo} placeholder="Objetivo da imagem" value={objetivo}
+        <input className={campo} placeholder="Objetivo da imagem" value={objetivo} readOnly={readOnly}
           onChange={event => setObjetivo(event.target.value)} aria-label="Objetivo da imagem"/>
-        <textarea className={`${campo} min-h-16 py-1`} placeholder="Prompt" value={prompt}
+        <textarea className={`${campo} min-h-16 py-1`} placeholder="Prompt" value={prompt} readOnly={readOnly}
           onChange={event => setPrompt(event.target.value)} aria-label="Prompt"/>
-        <input className={campo} placeholder="Proporção" value={proporcao}
+        <input className={campo} placeholder="Proporção" value={proporcao} readOnly={readOnly}
           onChange={event => setProporcao(event.target.value)} aria-label="Proporção"/>
       </div>}
 
       {/* ===== TEXTO ALTERNATIVO ===== */}
       {(ocupada || !ocupada) && <div className="mt-1">
-        <input className={campo} placeholder="Texto alternativo" value={alt}
+        <input className={campo} placeholder="Texto alternativo" value={alt} readOnly={readOnly}
           onChange={event => setAlt(event.target.value)} aria-label="Texto alternativo"/>
       </div>}
 
-      {/* ===== AÇÕES ===== */}
-      <div className="mt-2 flex flex-wrap gap-1">
+      {/* =====
+        * AÇÕES — somem inteiras quando o entregável está finalizado.
+        *
+        * Desabilitar em vez de esconder deixaria quatro botões cinzas sem dizer
+        * por quê. O aviso abaixo diz.
+        * ===== */}
+      {readOnly && <p className="mt-2 rounded border border-divider bg-surface-subtle p-1.5 text-[9px] text-text-muted"
+        data-media-somente-leitura>
+        Entregável finalizado: a mídia está em consulta.
+        <strong> Reabra para edição</strong> para alterar a imagem, o briefing ou o texto alternativo.
+      </p>}
+
+      {!readOnly && <div className="mt-2 flex flex-wrap gap-1">
         {acoes.includes("registrar_briefing") && <button type="button" className={botao} disabled={ocupado}
           onClick={() => void registrarBriefing()} data-media-registrar>Registrar briefing</button>}
 
@@ -341,7 +364,7 @@ export function WriterMediaAnchorPanel({ brandId, documentId, targets, assets, o
           onClick={() => editandoBriefing ? void salvarBriefing() : setEditandoBriefing(true)} data-media-briefing>
           {editandoBriefing ? "Salvar briefing" : "Editar briefing"}
         </button>}
-      </div>
+      </div>}
 
       {/* ===== PROGRESSO E ERRO ===== */}
       {ocupado && <p className="mt-2 text-[9px] text-context-accent" role="status" data-media-progresso>{TEXTO_DA_ETAPA[etapa]}</p>}

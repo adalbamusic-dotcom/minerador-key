@@ -12,6 +12,7 @@ Ordem **revisada** no adendo de 2026-09-19, depois da auditoria:
 - [ ] **2.** `KEYWORD_PACKAGE_STALE`, metade "keyword em revisão" — leitura viva do Território, não depende do passo 3.
 - [ ] **3.** `SiloDNA.keywordPackageRefs[]` — destrava a metade "pacote mais novo que o lido". `centralKeywordDnaRef` passa a ser derivado do array.
 - [ ] **4.** Propagação automática — **depende** de resolver a colisão com `articleEditorialDiff`, que hoje recusaria mudança só de medição como no-op.
+- [ ] **6.** Trocar `resolveKeywordDnaSignals` por `keywordDnaFromPackage` de `lib/minerador/keyword-dna.ts` (2026-09-19). O Minerador já entrega os treze campos normalizados e um valor por eixo com fonte declarada; `semPlaceholder`, `listaDeTexto` e `intentIsKnown` deixam de precisar existir aqui. Equivalência garantida por `tests/minerador-keyword-dna-fechado.test.mts`.
 - [ ] **5.** Estreitar `ArticleKeywordReference`. Escopo maior do que o parecer dizia: `strategicContribution`, `purpose`, `contribution` e `purposeRationale` são template por `role`; `overlapRisk` é literal; `requiredTopics`/`excludedTopics` são sempre vazios.
 - [ ] **Em aberto:** artigo publicado recebe marcador de insumo atualizado em vez de reescrita automática.
 

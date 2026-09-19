@@ -3,7 +3,8 @@ import type { ContentDocument } from "../arquiteto/contracts.ts";
 import { ContentDocumentRepository } from "./editorial-repositories";
 import { markArticlePredecessorSuperseded } from "./writer-retention";
 import {
-  finalizationDecisionFromReceipt, planRetentionAfterFinalization, verifyFinalizationReadback,
+  finalizationDecisionFromReceipt, planArticleFinalization, planRetentionAfterFinalization,
+  verifyFinalizationReadback,
 } from "../redator/deliverable-lifecycle.ts";
 
 /**
@@ -58,10 +59,12 @@ export type ArticleFinalizationResult = {
    * bate em conflito logo depois de finalizar.
    */
   lockVersion: number | null;
+  /** true quando nada foi criado: a versão devolvida já era a corrente. */
+  reused: boolean;
   /** O que aconteceu com a predecessora. Visível, nunca engolido. */
   retention:
     | Awaited<ReturnType<typeof markArticlePredecessorSuperseded>>
-    | { status: "skipped"; reason: "no_predecessor" | "readback_failed" | "unchanged_finalization" | "no_material_change" };
+    | { status: "skipped"; reason: "no_predecessor" | "readback_failed" | "unchanged_finalization" | "no_material_change" | "already_current" };
 };
 
 /**
@@ -71,6 +74,60 @@ export type ArticleFinalizationResult = {
  * Enviar para revisão também cria versão e grava `in_review`; exigir `approved`
  * ali faria a conferência reprovar uma gravação correta.
  */
+/**
+ * ===== CORTE 6A.5 · A FINALIZAÇÃO JÁ FEITA SE RECONHECE =====
+ *
+ * Devolve a versão corrente quando a finalização pedida JÁ está persistida, e
+ * `null` quando há trabalho a fazer. Nada é escrito aqui.
+ *
+ * Serve dois momentos, e é por isso que é função separada:
+ *
+ *   ANTES do save     clique duplicado ou retry cujo lock ainda é válido
+ *   DEPOIS de um 409  retry cujo lock ficou para trás porque a primeira
+ *                     requisição venceu — o caso do timeout, em que o cliente
+ *                     nunca soube que deu certo
+ *
+ * No segundo caso, recusar com 409 seria dizer "falhou" para algo que está
+ * gravado exatamente como foi pedido. Isso não é esconder concorrência: a
+ * escrita aconteceu UMA vez, e o que se reconhece é que o estado desejado já é
+ * o estado persistido. Se o que está gravado for OUTRO conteúdo, o plano devolve
+ * `create_version` e o 409 do chamador continua valendo.
+ */
+export async function reuseFinalizedArticleVersion(input: {
+  brandId: string;
+  documentId: string;
+  contentHash: string;
+  targetStatusColumn: string;
+}): Promise<(ArticleFinalizationResult & { updatedAt: string }) | null> {
+  const repository = new ContentDocumentRepository();
+  const documento = await repository.readFinalizationState(input.brandId, input.documentId);
+  const corrente = documento?.currentVersionId
+    ? await repository.versionSummary(input.documentId, documento.currentVersionId)
+    : null;
+
+  const plano = planArticleFinalization({
+    document: documento
+      ? { status: documento.status, contentHash: documento.contentHash,
+          currentVersionId: documento.currentVersionId }
+      : null,
+    currentVersionContentHash: corrente?.contentHash ?? null,
+    incomingContentHash: input.contentHash,
+    targetStatus: input.targetStatusColumn,
+  });
+  if (plano.action !== "reuse_current" || !corrente || !documento) return null;
+
+  /*
+   * Nenhuma escrita: o lock devolvido é o que está no banco agora. É o que a
+   * próxima gravação do cliente precisa para não bater em conflito por causa de
+   * uma finalização que ele já tinha feito.
+   */
+  return {
+    versionId: corrente.versionId, versionNumber: corrente.versionNumber,
+    lockVersion: documento.lockVersion, updatedAt: documento.updatedAt, reused: true,
+    retention: { status: "skipped", reason: "already_current" },
+  };
+}
+
 export async function finalizeArticleVersion(input: {
   brandId: string;
   documentId: string;
@@ -105,12 +162,12 @@ export async function finalizeArticleVersion(input: {
    * certo. O que não acontece é a retenção — falha fechada.
    */
   if (!conferencia.ok) {
-    return { ...version, lockVersion: lido?.lockVersion ?? null,
+    return { ...version, lockVersion: lido?.lockVersion ?? null, reused: false,
       retention: { status: "skipped", reason: "readback_failed" } };
   }
   /* Depois de conferencia.ok, lido é necessariamente não-nulo. */
   if (!lido) {
-    return { ...version, lockVersion: null,
+    return { ...version, lockVersion: null, reused: false,
       retention: { status: "skipped", reason: "readback_failed" } };
   }
 
@@ -121,7 +178,7 @@ export async function finalizeArticleVersion(input: {
     createdVersionId: version.versionId,
   });
   if (!passo.mark) {
-    return { ...version, lockVersion: lido.lockVersion,
+    return { ...version, lockVersion: lido.lockVersion, reused: false,
       retention: { status: "skipped", reason: passo.reason } };
   }
 
@@ -136,9 +193,10 @@ export async function finalizeArticleVersion(input: {
    * condenaria uma versão boa à exclusão por causa de um ato que não produziu
    * nada. A guarda é o lado conservador do erro: na dúvida, não retém.
    */
-  const predecessorHash = await repository.versionContentHash(input.documentId, passo.predecessorVersionId);
+  const predecessor = await repository.versionSummary(input.documentId, passo.predecessorVersionId);
+  const predecessorHash = predecessor?.contentHash ?? null;
   if (predecessorHash !== null && predecessorHash === input.contentHash) {
-    return { ...version, lockVersion: lido.lockVersion,
+    return { ...version, lockVersion: lido.lockVersion, reused: false,
       retention: { status: "skipped", reason: "no_material_change" } };
   }
 
@@ -153,5 +211,5 @@ export async function finalizeArticleVersion(input: {
    * o lock do documento não muda por causa dela, então o lido acima continua
    * valendo.
    */
-  return { ...version, lockVersion: lido.lockVersion, retention };
+  return { ...version, lockVersion: lido.lockVersion, reused: false, retention };
 }

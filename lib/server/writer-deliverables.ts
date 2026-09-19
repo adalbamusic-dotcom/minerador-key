@@ -10,6 +10,7 @@ import {
   verifyFinalizationReadback, verifyReopenReadback,
 } from "../redator/deliverable-lifecycle.ts";
 import { writerMediaAnchorAvailable } from "./writer-media-lifecycle";
+import { checkAssetTargetEditable, checkMediaTargetEditable, MENSAGEM_ENTREGAVEL_FINALIZADO } from "./writer-media-guard";
 
 export class WriterDeliverableError extends Error {
   readonly code: string;
@@ -412,6 +413,19 @@ export async function listWriterMedia(brandId: string, documentId: string) {
 export async function registerWriterMediaBrief(input: unknown, actorId: string) {
   const brief = WriterMediaBriefSchema.parse(input);
   await documentForBrand(brief.brandId, brief.documentId);
+
+  /*
+   * ===== CORTE 6A.7 · ENTREGÁVEL FINALIZADO NÃO RECEBE MÍDIA NOVA =====
+   *
+   * O papel do briefing já diz de quem é a mídia antes de existir âncora:
+   * o papel storyboard é de roteiro e o papel slide é de carrossel. É aqui que
+   * começa, então é aqui que ela para.
+   */
+  const portao = await checkMediaTargetEditable({
+    brandId: brief.brandId, documentId: brief.documentId, role: brief.role });
+  if (!portao.editable) {
+    throw new WriterDeliverableError("writer_deliverable_finalized", MENSAGEM_ENTREGAVEL_FINALIZADO, 409);
+  }
   const { data, error } = await getOperationalClient().from("writer_media_assets").insert({
     marca_id: brief.brandId, document_id: brief.documentId, deliverable_id: brief.deliverableId,
     role: brief.role, status: "prompt_ready", objective: brief.objective, prompt: brief.prompt,
@@ -431,6 +445,12 @@ function verifiedImageMime(bytes: Buffer): "image/png" | "image/jpeg" | "image/w
 
 export async function uploadWriterMediaAsset(input: { brandId: string; documentId: string; assetId: string; bytes: Buffer; actorId: string }) {
   await documentForBrand(input.brandId, input.documentId);
+
+  /* Anexar bytes é mutação, e o ativo já existe: o veredito vem dele. */
+  const portao = await checkAssetTargetEditable({ brandId: input.brandId, assetId: input.assetId });
+  if (!portao.editable) {
+    throw new WriterDeliverableError("writer_deliverable_finalized", MENSAGEM_ENTREGAVEL_FINALIZADO, 409);
+  }
   if (!input.bytes.length || input.bytes.length > 10 * 1024 * 1024) throw new WriterDeliverableError("invalid_size", "Imagem deve ter até 10 MB.");
   const mime = verifiedImageMime(input.bytes);
   if (!mime) throw new WriterDeliverableError("invalid_image", "Formato de imagem não aceito.");

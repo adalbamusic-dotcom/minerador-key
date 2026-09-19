@@ -11,6 +11,7 @@ import { executeDataForSeoSerpOperation } from "@/lib/server/dataforseo-serp-ope
 import { deriveSerpSemanticEvidence, type SerpSemanticEvidence } from "@/lib/minerador/serp-semantic-evidence";
 import { buildKeywordSemanticQualification, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
 import { KeywordSemanticQualificationPersistenceError, persistKeywordSemanticQualification, readCurrentKeywordSemanticQualifications } from "@/lib/server/keyword-semantic-qualification-store";
+import { applySerpEvidenceRecord } from "@/lib/minerador/serp-evidence-record";
 import { classifyQualificationPersistenceError } from "@/lib/minerador/keyword-semantic-qualification-row";
 import { DataForSeoTargetingError, resolveDataForSeoTargeting } from "@/lib/minerador/dataforseo-targeting";
 import { IntegrationRuntimeError, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
@@ -340,6 +341,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         });
         currentQualifications.set(target.keywordId, qualification);
         semanticQualifications.push({ keywordId: target.keywordId, versionId: qualification.id, version: qualification.lifecycle.version, persisted: true, error: null, failure: null });
+        // A versão confirmada vira evidência forte na própria keyword: é o que
+        // a tabela lê antes da Lógica e o que entra na assinatura do pacote
+        // aprovado. Reler a linha evita sobrescrever o que a medição gravou.
+        if (target.targetKind === "keyword") {
+          const latestRow = await profile.supabase.from("minerador_keywords").select("analise_semantica").eq("id", target.keywordId).eq("brand_id", context.brandId).is("deleted_at", null).maybeSingle();
+          if (latestRow.error || !latestRow.data) throw new Error("A keyword não foi encontrada para registrar a evidência SERP.");
+          const withEvidence = applySerpEvidenceRecord(asObject(latestRow.data.analise_semantica), qualification);
+          const evidenceUpdate = await profile.supabase.from("minerador_keywords").update({ analise_semantica: withEvidence }).eq("id", target.keywordId).eq("brand_id", context.brandId).is("deleted_at", null);
+          if (evidenceUpdate.error) throw evidenceUpdate.error;
+          if (target.keywordRow) target.keywordRow = { ...target.keywordRow, analise_semantica: withEvidence };
+        }
       } catch (error) {
         // Write não confirmado nunca vira sucesso: a versão anterior permanece.
         // O diagnóstico técnico real é preservado; a mensagem ao usuário segue

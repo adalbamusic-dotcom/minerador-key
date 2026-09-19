@@ -1026,7 +1026,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           const next = { ...current };
           for (const [keywordId, qualification] of Object.entries(persistedQualifications)) {
             const keyword = loadedKeywords.find(item => String(item.id) === keywordId);
-            const logic = keyword ? readCanonicalKeywordDna(keyword) : null;
+            // A coluna "Lógica" do painel é a hipótese, não a resposta canônica.
+            const logic = keyword ? readCanonicalKeywordDna(keyword, { includeSerpEvidence: false }) : null;
             next[keywordId] = semanticDraftFromQualification(qualification, { intent: logic?.intent ?? null, funnel: logic?.funnel ?? null });
           }
           return next;
@@ -2495,7 +2496,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           const next = { ...current };
           for (const [keywordId, qualification] of Object.entries(refreshed)) {
             const keyword = keywords.find(item => item.id === keywordId);
-            const logic = keyword ? readCanonicalKeywordDna(keyword) : null;
+            const logic = keyword ? readCanonicalKeywordDna(keyword, { includeSerpEvidence: false }) : null;
             next[keywordId] = semanticDraftFromQualification(qualification, { intent: logic?.intent ?? null, funnel: logic?.funnel ?? null });
           }
           return next;

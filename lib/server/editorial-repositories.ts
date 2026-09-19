@@ -392,6 +392,20 @@ export class DecisionEventRepository {
   }
 }
 
+/**
+ * A grafia do status na COLUNA, a partir da grafia do contrato.
+ *
+ * Existia só dentro de `save`. A finalização idempotente precisa saber qual
+ * status a requisição quer deixar gravado ANTES de gravar, e duas cópias desta
+ * tradução divergiriam no primeiro estado novo.
+ */
+export function documentStatusColumn(status: string) {
+  if (status === "planejado") return "planned";
+  if (status === "escrevendo") return "writing";
+  if (status === "em_revisao") return "in_review";
+  return "approved";
+}
+
 export class ContentDocumentRepository {
   async list(marcaId: string, userId: string) {
     const { data, error } = await client().from("content_documents").select("id,payload,content_hash,lock_version,updated_at").eq("marca_id", marcaId).order("updated_at", { ascending: false });
@@ -439,7 +453,7 @@ export class ContentDocumentRepository {
   }
 
   async save(documentId: string, expectedLock: number, document: ContentDocument, hash: string, actorId: string) {
-    const status = document.status === "planejado" ? "planned" : document.status === "escrevendo" ? "writing" : document.status === "em_revisao" ? "in_review" : "approved";
+    const status = documentStatusColumn(document.status);
     const { data, error } = await client().from("content_documents").update({ payload: document, content_hash: hash, status, updated_by: actorId }).eq("id", documentId).eq("lock_version", expectedLock).select("*").maybeSingle();
     if (error) mapPersistenceError(error); if (!data) throw new OptimisticLockError(); return data;
   }
@@ -485,21 +499,25 @@ export class ContentDocumentRepository {
    */
   async readFinalizationState(marcaId: string, documentId: string) {
     const { data, error } = await client().from("content_documents")
-      .select("status,content_hash,current_version_id,lock_version")
+      .select("status,content_hash,current_version_id,lock_version,updated_at")
       .eq("id", documentId).eq("marca_id", marcaId).maybeSingle();
     if (error) mapPersistenceError(error);
     if (!data) return null;
     return { status: data.status as string, contentHash: data.content_hash as string,
       currentVersionId: (data.current_version_id as string | null) ?? null,
-      lockVersion: data.lock_version as number };
+      lockVersion: data.lock_version as number,
+      updatedAt: isoDate(data.updated_at) };
   }
 
-  /** Hash da versão indicada, para reconhecer finalização sem mudança material. */
-  async versionContentHash(documentId: string, versionId: string) {
+  /** Identidade e hash da versão indicada, lidos do servidor. */
+  async versionSummary(documentId: string, versionId: string) {
     const { data, error } = await client().from("content_document_versions")
-      .select("content_hash").eq("document_id", documentId).eq("version_id", versionId).maybeSingle();
+      .select("version_id,version_number,content_hash")
+      .eq("document_id", documentId).eq("version_id", versionId).maybeSingle();
     if (error) mapPersistenceError(error);
-    return (data?.content_hash as string | null) ?? null;
+    if (!data) return null;
+    return { versionId: data.version_id as string, versionNumber: data.version_number as number,
+      contentHash: data.content_hash as string };
   }
 
   async saveUserState(documentId: string, userId: string, state: { cursorPosition: number | null; scrollTop: number; leftPanelOpen: boolean; rightPanelOpen: boolean }) {

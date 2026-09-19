@@ -1,5 +1,6 @@
 import { canonicalIntentLabel, externalIntentLabel, normalizeIntentKey } from "./intent-taxonomy.ts";
 import { readLogicalOutputContract, type LogicalOutputFieldState } from "./logical-processor.ts";
+import { readSerpEvidenceRecord, serpEvidenceAxisValue } from "./serp-evidence-record.ts";
 
 export type LogicalReadItem = {
   intent?: string | null;
@@ -10,16 +11,22 @@ export type LogicalReadItem = {
 
 export type CanonicalFieldResolution = "resolved" | "confirmed_unknown" | "unresolved";
 
+/** Quem fechou o valor canônico. `null` quando não há valor. */
+export type CanonicalFieldSource = "serp" | "human" | "logic" | null;
+
 export type CanonicalKeywordReadModel = {
   intent: string | null;
   intentLabel: string;
   intentState: CanonicalFieldResolution;
+  intentSource: CanonicalFieldSource;
   niche: string | null;
   nicheLabel: string;
   nicheState: CanonicalFieldResolution;
+  nicheSource: CanonicalFieldSource;
   funnel: string | null;
   funnelLabel: string;
   funnelState: CanonicalFieldResolution;
+  funnelSource: CanonicalFieldSource;
   externalIntent: string | null;
   externalIntentLabel: string | null;
 };
@@ -123,10 +130,15 @@ function humanFunnelValue(semantic: Record<string, unknown>): string | null {
  */
 export function readCanonicalKeywordDna(
   item: LogicalReadItem,
-  options: { includeHumanDecisions?: boolean } = {},
+  options: { includeHumanDecisions?: boolean; includeSerpEvidence?: boolean } = {},
 ): CanonicalKeywordReadModel {
   const semantic = item.analise_semantica || {};
   const includeHumanDecisions = options.includeHumanDecisions !== false;
+  // SERP conclusiva e não invalidada fecha o eixo antes de qualquer outra
+  // fonte (spec §58, A.2). Quem quer a hipótese lógica pura desliga isto.
+  const serpRecord = options.includeSerpEvidence === false ? null : readSerpEvidenceRecord(semantic);
+  const serpIntent = serpEvidenceAxisValue(serpRecord, "intent");
+  const serpFunnel = serpEvidenceAxisValue(serpRecord, "funnel");
   const logicalContract = readLogicalOutputContract(semantic);
   const contractIntent = logicalContract?.fields.intent;
   const contractNiche = logicalContract?.fields.niche;
@@ -139,11 +151,10 @@ export function readCanonicalKeywordDna(
       ? item.intent.trim()
       : null;
   const intentHasHumanDecision = includeHumanDecisions && hasHumanFieldDecision(semantic, "intent");
-  const intent = intentHasHumanDecision
-    ? humanIntentValue(semantic)
-    : includeHumanDecisions
-      ? humanIntentValue(semantic) || logicalIntent
-      : logicalIntent;
+  const humanIntent = includeHumanDecisions ? humanIntentValue(semantic) : null;
+  const intent = serpIntent
+    || (intentHasHumanDecision ? humanIntent : humanIntent || logicalIntent);
+  const intentSource: CanonicalFieldSource = serpIntent ? "serp" : intent ? (humanIntent === intent ? "human" : "logic") : null;
   const intentState: CanonicalFieldResolution = intent
     ? "resolved"
     : intentHasHumanDecision
@@ -154,28 +165,24 @@ export function readCanonicalKeywordDna(
     : [semantic.nicho_override, semantic.nicho, item.nicho, item.niche]
       .find(value => meaningful(value) && value.trim().toLocaleLowerCase("pt-BR") !== "geral");
   const nicheHasHumanDecision = includeHumanDecisions && hasHumanFieldDecision(semantic, "niche");
+  const humanNiche = includeHumanDecisions ? humanNicheValue(semantic) : null;
   const niche = nicheHasHumanDecision
-    ? humanNicheValue(semantic)
-    : includeHumanDecisions
-      ? humanNicheValue(semantic) || (meaningful(logicalNiche) ? logicalNiche.trim() : null)
-      : meaningful(logicalNiche)
-        ? logicalNiche.trim()
-        : null;
+    ? humanNiche
+    : humanNiche || (meaningful(logicalNiche) ? logicalNiche.trim() : null);
+  const nicheSource: CanonicalFieldSource = niche ? (humanNiche === niche ? "human" : "logic") : null;
   const nicheState: CanonicalFieldResolution = niche
     ? "resolved"
     : nicheHasHumanDecision
       ? "confirmed_unknown"
       : "unresolved";
   const funnelHasHumanDecision = includeHumanDecisions && hasHumanFieldDecision(semantic, "funnel");
-  const funnel = funnelHasHumanDecision
-    ? humanFunnelValue(semantic)
-    : includeHumanDecisions
-      ? humanFunnelValue(semantic) || (contractFunnel
-        ? contractFunnel.state === "value" ? contractFunnel.value : null
-        : funnelValue(semantic.funnel))
-      : contractFunnel
-        ? contractFunnel.state === "value" ? contractFunnel.value : null
-        : funnelValue(semantic.funnel);
+  const humanFunnel = includeHumanDecisions ? humanFunnelValue(semantic) : null;
+  const logicalFunnel = contractFunnel
+    ? contractFunnel.state === "value" ? contractFunnel.value : null
+    : funnelValue(semantic.funnel);
+  const funnel = funnelValue(serpFunnel)
+    || (funnelHasHumanDecision ? humanFunnel : humanFunnel || logicalFunnel);
+  const funnelSource: CanonicalFieldSource = funnelValue(serpFunnel) ? "serp" : funnel ? (humanFunnel === funnel ? "human" : "logic") : null;
   const funnelExplicitUnknown = !funnel
     && !funnelHasHumanDecision
     && contractFunnel?.state === "explicit_unknown";
@@ -205,11 +212,13 @@ export function readCanonicalKeywordDna(
         ? canonicalIntentLabel(intent)
         : unresolvedLabel(contractIntent?.state, canonicalIntentLabel(intent)),
     intentState,
+    intentSource,
     niche,
     nicheLabel: nicheState === "confirmed_unknown"
       ? "Indeterminado"
       : niche || unresolvedLabel(contractNiche?.state, "Não informado"),
     nicheState,
+    nicheSource,
     funnel: canonicalFunnel,
     funnelLabel: funnelState === "confirmed_unknown"
       ? "Indeterminado"
@@ -217,6 +226,7 @@ export function readCanonicalKeywordDna(
         ? "Indefinido"
       : canonicalFunnel || unresolvedLabel(contractFunnel?.state, "—", "funnel"),
     funnelState,
+    funnelSource,
     externalIntent,
     externalIntentLabel: externalIntentLabel(externalIntent),
   };

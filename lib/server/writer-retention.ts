@@ -196,6 +196,12 @@ function outcomeFromRpcError(message: string): SupersedeOutcome {
  * rodada que cuidar do lifecycle do Artigo. Corrigi-lo aqui seria alterar a
  * finalização do Artigo, o que o Corte 6A.3 proibiu explicitamente.
  *
+ * ATUALIZAÇÃO (Corte 6A.4): ela voltou a ter chamador. Quem a chama agora é
+ * `finalizeArticleVersion` em `lib/server/article-finalization.ts`, depois do
+ * readback confirmar que a nova versão virou a corrente. O buraco descrito
+ * acima está fechado: versões de artigo entram em retenção de novo, e só pelo
+ * caminho da finalização.
+ *
  * A função fica porque é a autoridade correta para esse dia — não porque esteja
  * em uso. Ver docs/00-produto/auditorias/corte-6a-3-homologacao-e-mcp-draft-2026-09-19.md
  */

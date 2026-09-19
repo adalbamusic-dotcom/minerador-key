@@ -6,6 +6,13 @@
 
 `http://localhost:3000/api/mcp/redator` aceita Streamable HTTP (GET/POST/DELETE). O servidor exige `Authorization: Bearer <credencial delegada>`, valida usuário, agência, marca, escopo e permissão atual em cada chamada, e registra a ferramenta e o resultado. Sem token responde 401. O `Host` padrão aceita somente `localhost:3000` e `127.0.0.1:3000`; outros hosts exigem configuração explícita de `MCP_ALLOWED_HOSTS`. Origem de navegador não é cliente MCP autorizado.
 
+O pré-voo sem segredo está em
+`/api/mcp/redator/health`. Em produção ele exige `MCP_PUBLIC_BASE_URL` em
+HTTPS e o opt-in explícito `MCP_ALLOW_REMOTE_BEARER=true` para o smoke test
+privado. Esse bearer é uma ponte temporária de homologação; não é OAuth e não
+deve ser apresentado como conexão ChatGPT/Claude/Gemini pronta. O procedimento
+completo está em `mcp-vercel-preflight-2026-09-19.md`.
+
 A gestão agora fica em `/agencias/{agencyRef}/integracoes`. A Agência registra o cliente (ChatGPT, Claude, Gemini ou outro), vê o endpoint e emite a credencial por Marca. O Redator não deve ser usado para criar credenciais. O valor não é salvo em `localStorage`; o banco guarda somente o hash. Para testar leitura sem modificar artigos, conceder apenas `writer.read`. Nunca colar a credencial em um documento, issue, captura de tela ou log. A credencial usada na prova de 2026-09-18 foi revogada.
 
 Ferramentas de leitura: perfil da conexão, lista de documentos, documento, dossiê do Radar, Guardião e entregáveis. Ferramentas de escrita: salvar rascunho de artigo, salvar roteiro/carrossel, registrar prompt e anexar imagem. Nenhuma ferramenta aprova, publica, exclui ou altera DNA. O artigo continua em `ContentDocument`; roteiro e carrossel são derivados com versões e lock próprios.

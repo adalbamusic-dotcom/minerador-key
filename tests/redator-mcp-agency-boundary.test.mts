@@ -11,6 +11,7 @@ test("a emissão e a revogação MCP pertencem à Agência, não ao Redator", ()
   assert.match(redatorRoute, /MCP_DELEGATION_AGENCY_ONLY/);
   assert.match(agencyRoute, /create_writer_mcp_delegation/);
   assert.match(agencyRoute, /revoke_writer_mcp_delegation/);
+  assert.match(agencyRoute, /revoke_mcp_client/);
 });
 
 test("a rota legada do Redator conserva somente a leitura compatível", () => {

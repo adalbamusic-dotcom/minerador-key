@@ -26,7 +26,8 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { DocumentSaveInputSchema } from "../lib/editorial/persistence-contracts.ts";
 import {
-  finalizationDecisionFromReceipt, planRetentionAfterFinalization, verifyFinalizationReadback,
+  finalizationDecisionFromReceipt, planArticleFinalization, planRetentionAfterFinalization,
+  verifyFinalizationReadback,
 } from "../lib/redator/deliverable-lifecycle.ts";
 
 const fonte = (caminho: string) => readFile(new URL(caminho, import.meta.url), "utf8");
@@ -35,6 +36,7 @@ const COMPONENTE = "../components/editorial/professional-writer.tsx";
 const SERVIDOR = "../lib/server/writer-deliverables.ts";
 const M6 = "../supabase/migrations/20260919050000_m6_writer_mcp_article_draft_no_history.sql";
 const ORQUESTRACAO = "../lib/server/article-finalization.ts";
+const REPOSITORIO = "../lib/server/editorial-repositories.ts";
 
 /** Comentário que explica uma ausência casa com a busca pela ausência. */
 const semComentarios = (src: string) =>
@@ -340,7 +342,9 @@ test("14 · ESTRUTURAL · só a finalização marca; o save não", async () => {
   /* A orquestração só roda sob `createVersion`. */
   assert.match(rota, /const version = input\.createVersion\s*\?\s*await finalizeArticleVersion\(/);
   assert.equal(rota.split("finalizeArticleVersion(").length - 1, 1, "chamada em um lugar só");
-  assert.match(rota, /import \{ finalizeArticleVersion \} from "@\/lib\/server\/article-finalization";/);
+  /* O 6A.5 acrescentou o reconhecimento de finalização já feita ao mesmo import. */
+  assert.match(rota, /import \{[^}]*finalizeArticleVersion[^}]*\} from "@\/lib\/server\/article-finalization";/);
+  assert.match(rota, /import \{[^}]*reuseFinalizedArticleVersion[^}]*\} from "@\/lib\/server\/article-finalization";/);
   /* A rota em si não conhece retenção. */
   assert.doesNotMatch(rota, /markArticlePredecessorSuperseded|superseded|purge_after/);
 
@@ -360,9 +364,175 @@ test("15 · ESTRUTURAL · finalizar sem mudança material não retém a predeces
    * registrado, não corrigido aqui. O que NÃO pode acontecer é ela condenar uma
    * versão boa à exclusão: se a predecessora tem hash idêntico, não se marca.
    */
-  assert.match(src, /versionContentHash\(input\.documentId, passo\.predecessorVersionId\)/);
+  assert.match(src, /versionSummary\(input\.documentId, passo\.predecessorVersionId\)/);
   assert.match(src, /predecessorHash === input\.contentHash/);
   assert.match(src, /no_material_change/);
   assert.ok(src.indexOf("no_material_change") < src.indexOf("markArticlePredecessorSuperseded"),
     "a guarda vem antes da marcação");
+});
+
+test("16 · ESTRUTURAL · o lock devolvido é o de DEPOIS do movimento do ponteiro", async () => {
+  /*
+   * Mover `current_version_id` é um UPDATE em `content_documents`, e o trigger
+   * `content_documents_touch_trg` incrementa `lock_version` em qualquer update.
+   *
+   * Devolver ao cliente o lock que o `save` retornou faria ele guardar um
+   * número já vencido — e a próxima gravação do usuário bateria em conflito
+   * logo depois de finalizar, que é o pior momento possível.
+   */
+  const rota = semComentarios(await fonte(ROTA_TELA));
+  const repo = semComentarios(await fonte(REPOSITORIO));
+  const corpo = trecho(semComentarios(await fonte(ORQUESTRACAO)),
+    "export async function finalizeArticleVersion");
+
+  assert.match(rota, /lockVersion: version\?\.lockVersion \?\? saved\.lock_version/,
+    "a resposta prefere o lock pós-finalização");
+  /*
+   * O readback precisa trazer o lock. A asserção é pela COLUNA, não pela lista
+   * inteira: o 6A.5 acrescentou `updated_at` ali, e casar a string exata faria
+   * este teste quebrar a cada coluna nova sem que nada de errado tivesse
+   * acontecido.
+   */
+  const selectReadback = trecho(repo, "async readFinalizationState", "async versionSummary");
+  assert.match(selectReadback, /\.select\("[^"]*lock_version[^"]*"\)/, "o readback precisa trazer o lock");
+  assert.match(selectReadback, /\.select\("[^"]*current_version_id[^"]*"\)/);
+
+  /* TODO caminho de retorno carrega o lock — inclusive os de recusa. */
+  const retornos = corpo.split("return { ...version").length - 1;
+  assert.ok(retornos >= 4, `esperava vários retornos, achei ${retornos}`);
+  assert.equal(corpo.split("lockVersion:").length - 1, retornos,
+    "todo retorno da orquestração carrega o lock");
+});
+
+/* =============================================================================
+ * CORTE 6A.5 · FINALIZAR DUAS VEZES NÃO CRIA DUAS VERSÕES
+ * ========================================================================== */
+
+const doc = (o: Partial<{ status: string; contentHash: string; currentVersionId: string | null }> = {}) => ({
+  status: "approved", contentHash: "hash-A", currentVersionId: "A", ...o,
+});
+
+test("17 · COMPORTAMENTAL · o plano só reusa quando as TRÊS condições valem", () => {
+  const base = {
+    document: doc(), currentVersionContentHash: "hash-A",
+    incomingContentHash: "hash-A", targetStatus: "approved",
+  };
+  assert.deepEqual(planArticleFinalization(base), { action: "reuse_current", versionId: "A" });
+
+  /* Cada condição, sozinha, derruba o reuso — e o padrão é CRIAR. */
+  assert.deepEqual(planArticleFinalization({ ...base, document: doc({ status: "writing" }) }),
+    { action: "create_version" }, "alguém reabriu ou mudou de estado");
+  assert.deepEqual(planArticleFinalization({ ...base, document: doc({ contentHash: "hash-outro" }) }),
+    { action: "create_version" }, "alguém salvou rascunho por cima depois");
+  assert.deepEqual(planArticleFinalization({ ...base, currentVersionContentHash: "hash-outro" }),
+    { action: "create_version" }, "a corrente não é esta finalização");
+  assert.deepEqual(planArticleFinalization({ ...base, document: doc({ currentVersionId: null }) }),
+    { action: "create_version" }, "nunca houve finalização");
+  assert.deepEqual(planArticleFinalization({ ...base, document: null }),
+    { action: "create_version" }, "documento ausente falha para o lado de criar");
+  assert.deepEqual(planArticleFinalization({ ...base, targetStatus: "in_review" }),
+    { action: "create_version" }, "o alvo é outro estado");
+});
+
+test("18 · COMPORTAMENTAL · o ciclo inteiro: primeira, idêntica, mudança, idêntica", () => {
+  /* 1. Nunca finalizado: cria A. */
+  assert.deepEqual(planArticleFinalization({
+    document: doc({ status: "writing", currentVersionId: null }), currentVersionContentHash: null,
+    incomingContentHash: "hash-A", targetStatus: "approved",
+  }), { action: "create_version" });
+
+  /* 2. Finalizar de novo, idêntico (clique duplicado ou retry): devolve A. */
+  const aposA = { document: doc(), currentVersionContentHash: "hash-A", targetStatus: "approved" };
+  assert.deepEqual(planArticleFinalization({ ...aposA, incomingContentHash: "hash-A" }),
+    { action: "reuse_current", versionId: "A" });
+
+  /* 3. Mudança material: cria B. */
+  assert.deepEqual(planArticleFinalization({
+    document: doc({ status: "writing", contentHash: "hash-B" }), currentVersionContentHash: "hash-A",
+    incomingContentHash: "hash-B", targetStatus: "approved",
+  }), { action: "create_version" });
+
+  /* 4. Finalizar B de novo, idêntico: devolve B, nenhuma C. */
+  assert.deepEqual(planArticleFinalization({
+    document: doc({ contentHash: "hash-B", currentVersionId: "B" }), currentVersionContentHash: "hash-B",
+    incomingContentHash: "hash-B", targetStatus: "approved",
+  }), { action: "reuse_current", versionId: "B" });
+});
+
+test("19 · ESTRUTURAL · a rota pergunta antes de escrever, e de novo depois do conflito", async () => {
+  const rota = semComentarios(await fonte(ROTA_TELA));
+
+  /* Duas consultas de reuso: a preventiva e a do retry que perdeu o lock. */
+  assert.equal(rota.split("reuseFinalizedArticleVersion({").length - 1, 2);
+
+  /* A preventiva vem ANTES do save. */
+  const primeiroReuso = rota.indexOf("reuseFinalizedArticleVersion({");
+  const save = rota.indexOf("repository.save(");
+  assert.ok(primeiroReuso < save, "perguntar antes de escrever");
+
+  /* A segunda só vale para finalização e só para conflito de lock. */
+  assert.match(rota, /if \(input\.createVersion && erro instanceof OptimisticLockError\)/);
+  assert.match(rota, /throw erro;/, "conteúdo divergente mantém o conflito");
+  assert.ok(rota.lastIndexOf("reuseFinalizedArticleVersion({") > save);
+
+  /* Ambas as consultas são condicionadas a createVersion: o save puro não muda. */
+  assert.match(rota, /if \(input\.createVersion\) \{\s*const jaFeito/);
+});
+
+test("20 · ESTRUTURAL · reconhecer finalização já feita não escreve nada", async () => {
+  const corpo = trecho(semComentarios(await fonte(ORQUESTRACAO)),
+    "export async function reuseFinalizedArticleVersion",
+    "export async function finalizeArticleVersion");
+
+  assert.match(corpo, /readFinalizationState/);
+  assert.match(corpo, /versionSummary/);
+  assert.match(corpo, /planArticleFinalization/);
+
+  /* Nenhuma escrita, nenhuma retenção, nenhuma versão. */
+  assert.doesNotMatch(corpo, /createVersion|promoteVersionToCurrent|\.update\(|\.insert\(/,
+    "reconhecer não é escrever");
+  assert.doesNotMatch(corpo, /markArticlePredecessorSuperseded/,
+    "reusar não inicia retenção");
+  assert.match(corpo, /already_current/);
+  assert.match(corpo, /reused: true/);
+});
+
+test("21 · ESTRUTURAL · a concorrência é barrada pelo banco, não por comparação em TS", async () => {
+  const repo = semComentarios(await fonte(REPOSITORIO));
+  const save = trecho(repo, "  async save(", "  async createVersion(");
+
+  /*
+   * A garantia de que duas finalizações concorrentes não criam duas versões não
+   * é o plano em TypeScript — é este UPDATE condicional. A segunda requisição
+   * bloqueia na linha, reavalia depois do commit da primeira, não casa mais com
+   * `lock_version`, e vira conflito ANTES de qualquer INSERT de versão.
+   *
+   * O gatilho `content_documents_touch_trg` não tem cláusula WHEN: ele
+   * incrementa o lock em TODO update, inclusive um que não mudasse valor algum.
+   */
+  assert.match(save, /\.eq\("lock_version", expectedLock\)/);
+  assert.match(save, /if \(!data\) throw new OptimisticLockError\(\);/);
+
+  /* E a criação de versão só acontece depois do save ter passado. */
+  const rota = semComentarios(await fonte(ROTA_TELA));
+  assert.ok(rota.indexOf("repository.save(") < rota.indexOf("finalizeArticleVersion({"),
+    "nenhuma versão nasce antes do lock ser vencido");
+});
+
+test("22 · ESTRUTURAL · todo caminho devolve o lock corrente e diz se reusou", async () => {
+  const orq = semComentarios(await fonte(ORQUESTRACAO));
+  const rota = semComentarios(await fonte(ROTA_TELA));
+  const componente = semComentarios(await fonte(COMPONENTE));
+
+  /* Reuso não escreve, então o lock devolvido é o que está no banco. */
+  const reuso = trecho(orq, "export async function reuseFinalizedArticleVersion",
+    "export async function finalizeArticleVersion");
+  assert.match(reuso, /lockVersion: documento\.lockVersion/);
+
+  /* Os dois retornos de reuso na rota carregam lock e updatedAt lidos. */
+  assert.equal(rota.split("lockVersion: version.lockVersion, updatedAt,").length - 1, 2);
+
+  /* A tela não pode dizer "criada" quando nada foi criado. */
+  assert.match(componente, /body\.version\.reused \?/);
+  assert.match(componente, /já estava finalizada; nada foi criado/);
 });
