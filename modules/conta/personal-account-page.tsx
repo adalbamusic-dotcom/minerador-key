@@ -1,9 +1,11 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
-import { LockKeyhole, ShieldCheck, Store, UserRound } from "lucide-react";
+import { Bot, LockKeyhole, ShieldCheck, Store, UserRound } from "lucide-react";
 import { WorkspaceFrame, type WorkspaceAgencyLink, type WorkspaceBrandLink } from "@/components/workspace-frame";
 import { buildTenantPath } from "@/lib/tenant-routing";
+import { AiConnectionsPanel, type AiConnectionsInitialState } from "@/modules/conta/ai-connections-panel";
 import { ProfileIdentityEditor } from "@/modules/conta/profile-identity-editor";
 
 type PersonalAccountPageProps = {
@@ -11,11 +13,12 @@ type PersonalAccountPageProps = {
   brands: WorkspaceBrandLink[];
   agencies: WorkspaceAgencyLink[];
   isPlatformAdmin: boolean;
+  aiConnections: AiConnectionsInitialState;
 };
 
 const panel = "rounded-xl border border-foreground/15 bg-foreground/5 p-5";
 
-export function PersonalAccountPage({ identity, brands, agencies, isPlatformAdmin }: PersonalAccountPageProps) {
+export function PersonalAccountPage({ identity, brands, agencies, isPlatformAdmin, aiConnections }: PersonalAccountPageProps) {
   return <WorkspaceFrame brands={brands} agencies={agencies}>
     <div className="mx-auto max-w-5xl space-y-6 p-5 sm:p-8">
       <header>
@@ -69,6 +72,14 @@ export function PersonalAccountPage({ identity, brands, agencies, isPlatformAdmi
             {brands.length ? <ul className="mt-2 space-y-2">{brands.map((brand) => <li key={brand.id}><Link href={buildTenantPath({ brandId: brand.id, brandName: brand.nome, module: "marca" })} className="text-sm font-semibold text-context-accent hover:underline">{brand.nome}</Link></li>)}</ul> : <p className="mt-2 text-sm text-foreground/60">Nenhuma Brand editorial vinculada.</p>}
           </div>
         </div>
+      </section>
+
+      <section id="conexoes-ia" className={panel} aria-labelledby="personal-ai-connections">
+        <div className="flex items-center gap-3">
+          <Bot className="h-5 w-5 shrink-0 text-context-accent" aria-hidden="true" />
+          <div><h2 id="personal-ai-connections" className="text-lg font-semibold">Conexões de IA</h2><p className="mt-2 leading-7 text-foreground/70">Aplicativos como o ChatGPT que você autorizou a operar o Redator em seu nome. Cada acesso vale para Marcas e permissões específicas e pode ser revogado aqui.</p></div>
+        </div>
+        <div className="mt-4"><Suspense fallback={<p className="text-sm text-foreground/60">Carregando conexões…</p>}><AiConnectionsPanel initial={aiConnections} /></Suspense></div>
       </section>
     </div>
   </WorkspaceFrame>;

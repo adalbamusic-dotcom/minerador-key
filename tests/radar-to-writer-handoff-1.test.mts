@@ -19,6 +19,7 @@ import { freezeRadarAmazonInvestigation } from "../lib/radar/amazon-evidence.ts"
 import { ContentDocumentV2Schema, type ContentDocument } from "../lib/arquiteto/contracts.ts";
 import { RADAR_WRITER_MAY_NOT, radarWriterPhaseOfStatus } from "../lib/redator/writer-handoff.ts";
 import { radarDocumentId } from "../lib/redator/radar-import.ts";
+import { radarFrozenObservedAtOfAnalysis } from "../lib/radar/evidence-bundle-runtime.ts";
 import type { RadarEvidenceBundle } from "../lib/radar/evidence-bundle.ts";
 import type { RadarExtractionPage, RadarObservedLink } from "../lib/radar/analysis-contracts.ts";
 import type { RadarArticleResearchContext } from "../lib/radar/article-research-context.ts";
@@ -361,6 +362,8 @@ async function enviar(opcoes: {
   criarFalha?: boolean;
   fundamentoDepois?: typeof FUNDAMENTO;
   displayedAnalysisVersionId?: string | null;
+  /** A hora do clique. Ela NÃO pode entrar no hash. */
+  sentAt?: string;
 } = {}) {
   const perfil = opcoes.perfil || "YOUTUBE";
   const inicial = analiseDoArtigo(perfil, { finalizada: opcoes.finalizada });
@@ -404,7 +407,7 @@ async function enviar(opcoes: {
 
   const resultado = await sendRadarToWriter({
     brandId: "marca-1", articleId: "artigo-1", actorId: "user-1",
-    sentAt: "2026-09-17T12:00:00.000Z",
+    sentAt: opcoes.sentAt || "2026-09-17T12:00:00.000Z",
     displayedAnalysisVersionId: opcoes.displayedAnalysisVersionId ?? null,
   }, portas);
 
@@ -945,4 +948,61 @@ test("§18 · o documento nasce em planejamento, com os nomes que já existem", 
 
 test("PROVIDER_CALLS = 0 · AI_CALLS = 0", () => {
   assert.deepEqual(idasAoServidor, [], `houve rede: ${idasAoServidor.join(" · ")}`);
+});
+
+/* ================= S · RADAR_MULTI_PROFILE_HANDOFF_1 · a hora do clique não é o pacote ================= */
+
+const CONGELAMENTO: Record<Perfil, string> = {
+  GOOGLE: "2026-09-10T13:00:00.000Z",
+  YOUTUBE: "2026-09-14T10:00:00.000Z",
+  AMAZON: congeladaAmazon().finalizedAt,
+};
+
+for (const perfil of ["YOUTUBE", "AMAZON"] as const) {
+  test(`S · ${perfil} · o segundo clique, em outra hora, reconhece o MESMO pacote`, async () => {
+    /*
+     * O DEFEITO VISTO NA TELA: "Pacote entregue ao Redator." e, no clique
+     * seguinte, "Já existe documento deste artigo com pacote anterior" — sobre
+     * uma investigação que ninguém tocou. `observedAt` entra no hash, e o
+     * serviço resolvia o dossiê com a hora do clique.
+     */
+    const primeiro = await enviar({ perfil, sentAt: "2026-09-19T01:00:00.000Z" });
+    assert.equal(primeiro.resultado.change, "CREATED");
+    const segundo = await enviar({ perfil, sentAt: "2026-09-19T02:30:00.000Z", documentoExistente: primeiro.documento });
+    assert.equal(segundo.resultado.change, "ALREADY_IMPORTED", "o mesmo Radar virou 'pacote anterior' só porque a hora mudou");
+    assert.equal(segundo.resultado.record.bundleHash, primeiro.resultado.record.bundleHash);
+    assert.equal(segundo.chamadas.includes("createDocument"), false);
+  });
+
+  test(`S · ${perfil} · o instante do pacote é o do congelamento, não o do clique`, async () => {
+    const envio = await enviar({ perfil, sentAt: "2026-09-19T01:00:00.000Z" });
+    assert.equal(envio.writerBundle.bundle.observedAt, CONGELAMENTO[perfil]);
+    assert.notEqual(envio.writerBundle.bundle.observedAt, "2026-09-19T01:00:00.000Z");
+  });
+}
+
+test("S · GOOGLE · dois cliques em horas diferentes resolvem o MESMO dossiê", () => {
+  /*
+   * A bancada não envia GOOGLE (o congelado da fixtura é um stub), então a
+   * prova é feita onde o hash nasce: a resolução do dossiê com o instante
+   * que o serviço passa a usar — o do congelamento.
+   */
+  const analise = analiseDoArtigo("GOOGLE");
+  const congelado = radarFrozenObservedAtOfAnalysis(analise.payload);
+  assert.equal(congelado, "2026-09-10T13:00:00.000Z");
+  const resolver = () => resolveRadarCanonicalDossier({
+    analysis: analise as never, article: FUNDAMENTO, observedAt: congelado!, authorities: autoridadesCheias(),
+  });
+  const primeiro = resolver(); const segundo = resolver();
+  assert.equal(primeiro.ok && segundo.ok, true);
+  if (!primeiro.ok || !segundo.ok) return;
+  assert.equal(primeiro.dossier.bundle.bundleHash, segundo.dossier.bundle.bundleHash);
+  assert.equal(primeiro.dossier.bundle.observedAt, "2026-09-10T13:00:00.000Z");
+
+  /* E com a hora do clique, o hash mudaria — é exatamente o defeito que S fecha. */
+  const noClique = resolveRadarCanonicalDossier({
+    analysis: analise as never, article: FUNDAMENTO, observedAt: "2026-09-19T02:30:00.000Z", authorities: autoridadesCheias(),
+  });
+  assert.equal(noClique.ok, true);
+  if (noClique.ok) assert.notEqual(noClique.dossier.bundle.bundleHash, primeiro.dossier.bundle.bundleHash, "o instante deixou de entrar no hash? então esta prova perdeu o sentido");
 });

@@ -1527,3 +1527,24 @@ canônica.
 
 Artigo finalizado ANTES da mudança de destino é reconhecido sem refinalizar, e
 nenhuma evidência congelada foi recriada.
+
+### Três perfis no mesmo handoff — 2026-09-19
+
+Com um artigo de cada perfil na mesma marca, três leituras discordavam: o
+segundo clique de "Enviar ao Redator" acusava "pacote anterior" sobre uma
+investigação intocada; o diálogo "Importar do Radar" só listava o Google; a
+planilha mostrava YouTube e Amazon como "Iniciar Pesquisa Google".
+
+As três causas eram de leitura, não de investigação: a hora do clique entrava
+no hash do dossiê (`observedAt = sentAt`); o diálogo filtrava pela esteira; a
+planilha caía no modo padrão para toda linha não aberta na sessão. Nenhuma
+evidência foi recriada. Regras permanentes: invariantes 59–61. Detalhe:
+[relatório datado](../00-produto/auditorias/relatorio-radar-multi-profile-handoff-2026-09-19.md).
+
+```text
+OBSERVED_AT            = instante do congelamento (envio e export)
+IMPORTAVEL_NO_REDATOR  = radarWriterImportable (finalização canônica ou sent_writer)
+MODO_EFETIVO_DA_LINHA  = sessão → gravado → padrão
+MUTANTES               = 9/9 mortos · verde antes e depois
+GOOGLE_SUPPORT         = YouTube e Amazon SEM coleta de apoio do Google no banco
+```

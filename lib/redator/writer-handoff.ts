@@ -70,3 +70,24 @@ export type RadarWriterPhase = (typeof RADAR_WRITER_PHASES)[number];
  */
 export const radarWriterPhaseOfStatus = (status: string): RadarWriterPhase =>
   status === "planejado" ? "planning" : "writing";
+
+/**
+ * ===== QUEM APARECE EM "IMPORTAR DO RADAR" — RADAR_MULTI_PROFILE_HANDOFF_1 =====
+ *
+ * O diálogo filtrava por `state ∈ {approved, sent_writer}` — o estado da
+ * ESTEIRA, que START/ANALYZE/FINALIZE nunca movem. Um artigo de YouTube ou de
+ * Amazon finalizado fica em `research_pending` para sempre, e por isso só o
+ * Google aparecia na lista: ele já tinha sido enviado.
+ *
+ * A autoridade é a finalização canônica, lida da análise corrente. Quem já foi
+ * entregue continua listado, marcado como importado, para que repetir não
+ * duplique.
+ */
+export function radarWriterImportable(item: {
+  state: string;
+  analysisVersions?: ReadonlyArray<{ versionNumber: number; payload: unknown }>;
+}, primaryProfileOf: (payload: unknown) => string | null): boolean {
+  if (item.state === "sent_writer") return true;
+  const corrente = (item.analysisVersions || []).slice().sort((a, b) => b.versionNumber - a.versionNumber)[0];
+  return Boolean(corrente && primaryProfileOf(corrente.payload));
+}

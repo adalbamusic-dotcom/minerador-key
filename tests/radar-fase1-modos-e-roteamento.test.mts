@@ -98,9 +98,14 @@ test("B e C · cada modo começa por clique, e trocar com investigação em curs
   assert.equal(comInvestigacao.requiresReset, true);
   assert.match(comInvestigacao.message || "", /descarta o resultado vigente/);
 
-  /* E a página só inicia por ação humana, com o modo escolhido antes. */
+  /*
+   * E a página só inicia por ação humana, com o modo escolhido antes.
+   * RADAR_MULTI_PROFILE_HANDOFF_1: a escolha da sessão continua em primeiro;
+   * na falta dela vale o modo GRAVADO na análise, e só então o padrão.
+   */
   const page = readFileSync("modules/radar/radar-page.tsx", "utf8");
-  assert.match(page, /const modoDaPesquisa = searchModeByArticle\[target\.articleId\] \|\| RADAR_DEFAULT_SEARCH_MODE/);
+  assert.match(page, /const modoDaPesquisa = modoEfetivoDe\(target\)/);
+  assert.match(page, /return searchModeByArticle\[row\.articleId\]\s*\|\| radarResearchPlanOfAnalysis\(analiseCorrenteDe\(row\)\?\.payload \|\| null\)\.primaryTarget\s*\|\| RADAR_DEFAULT_SEARCH_MODE/);
   assert.match(page, /primarySearchMode: modoDaPesquisa/);
 });
 

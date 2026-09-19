@@ -203,6 +203,11 @@ test("16 · o botão do Redator chama a mesma autoridade, sem handoff próprio",
   assert.equal(/radar-writer-handoff"/.test(writer), false, "a tela não pode chamar a rota diretamente");
   assert.equal(/buildRadarDocument|resolveRadarImportEligibility/.test(writer), false,
     "a tela não pode montar documento nem decidir elegibilidade");
-  /* Elegível é o que o Radar aprovou. */
-  assert.match(writer, /\["approved", "sent_writer"\]\.includes\(item\.state\)/);
+  /*
+   * Elegível é o que o Radar FINALIZOU — RADAR_MULTI_PROFILE_HANDOFF_1.
+   * O estado da esteira não move com a finalização; filtrar por ele escondia
+   * YouTube e Amazon do diálogo.
+   */
+  assert.match(writer, /radarWriterImportable\(item, radarPrimaryProfileOfAnalysis\)/);
+  assert.equal(/\["approved", "sent_writer"\]\.includes\(item\.state\)/.test(writer), false, "a esteira voltou a decidir o diálogo");
 });

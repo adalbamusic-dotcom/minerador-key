@@ -1,11 +1,12 @@
 import "server-only";
 import { randomBytes, createHash } from "node:crypto";
+import { WRITER_MCP_SCOPES, type WriterMcpScope } from "@/lib/redator/mcp-consent-domain";
 import { canonicalProfileForVerifiedUser, type CanonicalSessionProfile } from "./authz";
 import { requireAgencyAccessToBrand } from "./agency-context";
 import { getOperationalClient, mapPersistenceError } from "./editorial-db";
 
-export type WriterMcpScope = "writer.read" | "writer.draft.write" | "writer.media.brief";
-const allowedScopes: WriterMcpScope[] = ["writer.read", "writer.draft.write", "writer.media.brief"];
+export type { WriterMcpScope };
+const allowedScopes: readonly WriterMcpScope[] = WRITER_MCP_SCOPES;
 const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 
 export class WriterMcpAuthError extends Error {
@@ -73,9 +74,25 @@ export async function verifyWriterMcpBearer(authorization: string | null) {
     actorId: data.actor_user_id as string, scopes: data.scopes as WriterMcpScope[], profile };
 }
 
-export async function recordWriterMcpCall(input: { delegationId: string; brandId: string; documentId?: string; toolName: string; resultCode: string; requestId: string }) {
+/**
+ * Trilha de chamadas. Exatamente um principal por evento: a delegação bearer
+ * ou o grant OAuth. `grant_id` só entra no insert quando existe, para que o
+ * caminho bearer continue gravando num banco anterior à migration M7.
+ */
+export async function recordWriterMcpCall(input: {
+  delegationId?: string | null;
+  grantId?: string | null;
+  brandId: string;
+  documentId?: string;
+  toolName: string;
+  resultCode: string;
+  requestId: string;
+}) {
+  if (!input.delegationId && !input.grantId) throw new WriterMcpAuthError("audit_principal_missing", 500);
   const { error } = await getOperationalClient().from("writer_mcp_call_events").insert({
-    delegation_id: input.delegationId, marca_id: input.brandId, document_id: input.documentId || null,
+    delegation_id: input.delegationId || null,
+    ...(input.grantId ? { grant_id: input.grantId } : {}),
+    marca_id: input.brandId, document_id: input.documentId || null,
     tool_name: input.toolName, result_code: input.resultCode, request_id: input.requestId,
   });
   if (error) mapPersistenceError(error);

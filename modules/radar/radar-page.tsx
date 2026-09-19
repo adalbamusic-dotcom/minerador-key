@@ -516,6 +516,23 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
 
   const analiseCorrenteDe = useCallback((row: RadarItem) =>
     row.analysisVersions.slice().sort((esquerda, direita) => direita.versionNumber - esquerda.versionNumber)[0] || null, []);
+  /**
+   * ===== O MODO EFETIVO DA LINHA — RADAR_MULTI_PROFILE_HANDOFF_1 =====
+   *
+   * `searchModeByArticle` só existe para o artigo que a pessoa abriu NESTA
+   * sessão. Toda outra linha caía no padrão (Google) — e a planilha perguntava
+   * ao pipeline do Google sobre um artigo congelado no YouTube: "Não iniciado",
+   * "Iniciar Pesquisa Google", ao lado de uma investigação concluída.
+   *
+   * A escolha da sessão vale; na falta dela, vale o que está GRAVADO — o alvo
+   * declarado ou a fotografia congelada —; só então o padrão.
+   */
+  const modoEfetivoDe = useCallback((row: RadarItem | null): RadarPrimarySearchMode => {
+    if (!row) return RADAR_DEFAULT_SEARCH_MODE;
+    return searchModeByArticle[row.articleId]
+      || radarResearchPlanOfAnalysis(analiseCorrenteDe(row)?.payload || null).primaryTarget
+      || RADAR_DEFAULT_SEARCH_MODE;
+  }, [searchModeByArticle, analiseCorrenteDe]);
 
   /**
    * §1 · A QUE UNIVERSO ESTE ARTIGO JÁ SE COMPROMETEU.
@@ -1127,7 +1144,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       /* O que o servidor já guardou desta análise — Gate 18.10.1 · §2. */
       persistedAnalysis: analysis?.payload || null,
       researchDraft: researchDraftByArticle[row.articleId],
-      mode: searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE,
+      mode: modoEfetivoDe(row),
       /* As fontes que o ANALYZE verificou, lidas de volta da versão gravada. */
       verifiedSources: analysis?.payload.verifiedSources || [],
       /*
@@ -1176,7 +1193,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      */
     const projecaoDoPerfil = radarResearchProfileStateOfAnalysis({
       payload: analiseCorrenteDe(row)?.payload || null,
-      profile: radarProfileOfTarget(searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE),
+      profile: radarProfileOfTarget(modoEfetivoDe(row)),
     });
     r3.nextAction = collection.state === "STRUCTURAL_BLOCK" ? r3.nextAction
       : !projecaoDoPerfil.ownedByGooglePipeline ? projecaoDoPerfil.nextAction.label
@@ -1310,7 +1327,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * estado vem de `radarOperationalStatus`: a planilha não pode ter uma
      * verdade diferente da do Workbench sobre a mesma investigação.
      */
-    { id: "research", header: "Pesquisa", value: row => { const data = rowWorkbenchData(row); return `${data.r3.serp.provider} ${data.r3.serp.resultCount} ${data.r3.serp.pendingCount} ${data.r3.r4?.serp.state || ""}`; }, width: 200, render: row => { const data = rowWorkbenchData(row).r3; const modo = searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE;
+    { id: "research", header: "Pesquisa", value: row => { const data = rowWorkbenchData(row); return `${data.r3.serp.provider} ${data.r3.serp.resultCount} ${data.r3.serp.pendingCount} ${data.r3.r4?.serp.state || ""}`; }, width: 200, render: row => { const data = rowWorkbenchData(row).r3; const modo = modoEfetivoDe(row);
       /*
        * ======== §7 · A LINHA LÊ A MESMA AUTORIDADE QUE O CARD ========
        *
@@ -1687,7 +1704,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    */
   const coletarApoioDoGoogle = async (target: RadarItem, packageRunId: string): Promise<RadarSupportResearchRecord | null> => {
     const data = rowWorkbenchData(target);
-    const perfil = radarProfileOfTarget(searchModeByArticle[target.articleId] || RADAR_DEFAULT_SEARCH_MODE);
+    const perfil = radarProfileOfTarget(modoEfetivoDe(target));
     const principal = data.researchContext?.keywords.find(item => item.identity.role === "principal")?.identity.text || null;
     const apoio = radarProfileSupportPlan({ profile: perfil, primaryKeyword: principal });
     if (!apoio) return null;
@@ -1772,7 +1789,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   const projecaoDePesquisa = (row: RadarItem | null): RadarResearchProfileProjection =>
     radarResearchProfileStateOfAnalysis({
       payload: row ? analiseCorrenteDe(row)?.payload || null : null,
-      profile: radarProfileOfTarget(row ? searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE),
+      profile: radarProfileOfTarget(modoEfetivoDe(row)),
     });
 
   /**
@@ -1799,7 +1816,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const gravadoAmazon = analise?.amazonBlueprint || null;
 
     return radarCompetitiveBlueprintViewOfAnalysis({
-      profile: perfil || radarProfileOfTarget(row ? searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE),
+      profile: perfil || radarProfileOfTarget(modoEfetivoDe(row)),
       /* A Amazon entra PRONTA: o adapter roda no servidor e o resultado é gravado. */
       amazonFrozen: analise?.amazonFrozenInvestigation || null,
       amazonBlueprint: gravadoAmazon?.profile === "AMAZON" ? gravadoAmazon : null,
@@ -1909,7 +1926,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   };
 
   const pacoteDePesquisa = (row: RadarItem | null): RadarResearchPackage => {
-    const perfil = radarProfileOfTarget(row ? searchModeByArticle[row.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE);
+    const perfil = radarProfileOfTarget(modoEfetivoDe(row));
     const analise = row ? analiseCorrenteDe(row)?.payload || null : null;
     const contexto = row ? rowWorkbenchData(row).researchContext : null;
     const plano = radarResearchPlanOfAnalysis(analise);
@@ -2512,7 +2529,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     if (!target || !selectedBrandId) return;
     const chave = chaveLazy(target);
     const profile = radarPrimaryProfileOfAnalysis(analiseCorrenteDe(target)?.payload || null)
-      || radarProfileOfTarget(searchModeByArticle[target.articleId] || RADAR_DEFAULT_SEARCH_MODE);
+      || radarProfileOfTarget(modoEfetivoDe(target));
 
     setLazyPesquisa(atual => ({ ...atual, [chave]: { ...atual[chave], [parte]: parte === "sample"
       ? { state: "LOADING" as const, run: null, pages: [], integrity: null, message: null }
@@ -2627,7 +2644,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * confirmou e o apoio que ela mesma gravou.
        */
       setNotice(buildRadarResearchPackage({
-        profile: radarProfileOfTarget(searchModeByArticle[target.articleId] || RADAR_DEFAULT_SEARCH_MODE),
+        profile: radarProfileOfTarget(modoEfetivoDe(target)),
         primaryKeyword: plano.queries[0]?.text || null,
         primaryRunning: run.state === "COLLECTING",
         primaryCollected: run.state === "COLLECTED",
@@ -2699,7 +2716,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        */
       const decisao = radarYoutubeFinalizeDecision({
         payload: analiseCorrenteDe(target)?.payload || null,
-        profile: radarProfileOfTarget(searchModeByArticle[target.articleId] || RADAR_DEFAULT_SEARCH_MODE),
+        profile: radarProfileOfTarget(modoEfetivoDe(target)),
       });
       if (!decisao.shouldFreeze) { setNotice(decisao.reason); return; }
 
@@ -2809,7 +2826,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * competitivos diferentes, e trocar no meio faria a leitura descrever um
      * universo que não foi o pesquisado.
      */
-    const modoDaPesquisa = searchModeByArticle[target.articleId] || RADAR_DEFAULT_SEARCH_MODE;
+    const modoDaPesquisa = modoEfetivoDe(target);
     const consultaCentral = investigacao.plan.primary;
 
     /*
@@ -2982,7 +2999,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       if (investigacao.resumption.canonicalComplete) { setNotice(resultado.reason); return; }
       if (!claimSerpAction({ articleId: target.articleId, kind: "start" })) return;
       try {
-        const modoDaPesquisa = searchModeByArticle[target.articleId] || RADAR_DEFAULT_SEARCH_MODE;
+        const modoDaPesquisa = modoEfetivoDe(target);
         /*
          * Registro existente é preservado; só nasce um novo quando não há
          * nenhum. Sobrescrever apagaria auxiliares já executadas e faria a
@@ -4190,7 +4207,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       lazyProvenance: lazyPesquisa[chaveLazy(activeRadarItem)]?.provenance || { state: "IDLE" as const, data: null, message: null },
       onLoadSample: () => void carregarParteDaPesquisa("sample"),
       onLoadProvenance: () => void carregarParteDaPesquisa("provenance"),
-    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={activeRadarItem ? searchModeByArticle[activeRadarItem.articleId] || RADAR_DEFAULT_SEARCH_MODE : RADAR_DEFAULT_SEARCH_MODE} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importable} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
+    }} onRecoverSerp={() => void recuperarPesquisaPaga()} onFinalizeInvestigation={() => void finalizeInvestigation()} onResetInvestigation={() => void resetRadarInvestigation()} researchProjection={projecaoDePesquisa(activeRadarItem)} researchBlueprint={blueprintCanonico(activeRadarItem)} searchMode={modoEfetivoDe(activeRadarItem)} onSearchModeChange={modo => activeRadarItem && setSearchModeByArticle(current => ({ ...current, [activeRadarItem.articleId]: modo }))} onAmazonStateChange={setAmazonStateForArticle} onOpenArticle={openActiveArticle} onOpenDetail={openDetail} onExpertEvidenceChange={handleExpertEvidenceChange}/><HistoryControls entries={history.entries} canUndo={history.canUndo} canRedo={history.canRedo} onUndo={history.undo} onRedo={history.redo} onRestore={history.restore} moduleId="radar" showHistory={false} showUndoRedo={false}/><div className="flex min-h-0 flex-1 flex-col" data-radar-r4-focused-id={activeArticleId || undefined} data-radar-r4-selected-count={selectedArticleIds.length} data-radar-r4-serp-batch-id={r4SerpQueue?.id || undefined}><RadarR5QueueProgress queue={r4SerpQueue} onView={focusQueueView}/><div className="shrink-0 border-b border-divider bg-background px-4 py-2" data-testid="radar-r4-spreadsheet-heading"><h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">Planilha</h2>{diagnostico.incompatible.length > 0 && <p className="mt-1 text-sm text-warning" role="status">{loadStateSummary(diagnostico)} · {diagnostico.incompatible.map(registro => `${registro.stage || registro.kind} ${registro.id}${registro.paths.length ? ` (${registro.paths.join(", ")})` : ""}`).join(" · ")} <button type="button" className="underline" onClick={() => void pipeline.reloadOperational()}>Tentar carregar novamente</button></p>}</div><OperationalDataGrid module="radar" userId={sessionId(session)} brandId={selectedBrandId} rows={pipeline.radarItems} columns={columns} expandedRowId={expandedRadarId} onExpandedRowChange={handleExpandedChange} bulkSelectedRowIds={bulkSelectedRowIds} onBulkSelectionChange={handleBulkSelectionChange} activeRowId={activeRadarRowId} activeRowClassName="border-l-2 border-l-context-accent bg-surface-subtle/55" bulkSelectedRowClassName="bg-positive-soft/10" onRowActivate={handleRowActivate} topbar={{ moduleId: "radar", history: { getCount: () => history.entries.length, canUndo: () => history.canUndo, canRedo: () => history.canRedo, undo: history.undo, redo: history.redo, open: () => window.dispatchEvent(new CustomEvent("global-topbar-history", { detail: { module: "radar" } })) }, renderActions: renderTopbarActions }} emptyTitle={radarEmptyTitle} renderBulkBar={rows => <RadarR4BulkOperationsBar selectedRows={selectedSnapshotsFor(rows)} onAction={handleBulkAction}/>} renderExpanded={row => <RadarProfile r3={rowWorkbenchData(row).r3} articleHref={buildRadarArticleHref({ brandRef, articleId: radarCanonicalRouteKey(row) })} architectHref={buildRadarArchitectHref({ brandRef, articleId: row.articleId })}/>} /></div>{picker && <ImportPanel title="Importar artigos aprovados" rows={importable} label={version => `${version.payload.promise} · /${version.suggestedSlug} · ${radarDeclaredArticleIntent(version.payload) || RADAR_INTENT_NOT_CONCLUDED}`} onClose={() => setPicker(false)} onImport={ids => { const selectedVersions = importable.filter(version => ids.includes(version.id)); history.capture(`Importar ${selectedVersions.length} artigos do Arquiteto`); void (async () => { const graphs = await loadInternalLinkGraphs(selectedBrandId).catch(() => []); const result = await pipeline.importApprovedToRadar(selectedVersions.map(version => version.payload.articleId), [], {}, {}, graphs); const partes = [`${result.imported} item(ns) enviado(s)`]; if (result.skipped) partes.push(`${result.skipped} já existente(s)`); for (const item of result.blocked) partes.push(`${item.label} bloqueado: ${item.reasons.join(" ")}`); setNotice(partes.join(" · ")); })(); setPicker(false); }}/>}</div>;
 }
 
 function RadarProfile({ r3, articleHref, architectHref }: { r3: RadarR3Model; articleHref: string | null; architectHref: string | null }) {

@@ -18,6 +18,18 @@ export function normalizeMcpBaseUrl(value: string | undefined) {
   }
 }
 
+/**
+ * O issuer OAuth é o Auth do próprio projeto Supabase: `<url>/auth/v1`.
+ * Deriva de `NEXT_PUBLIC_SUPABASE_URL`; `MCP_OAUTH_ISSUER` só existe para
+ * apontar um issuer diferente em ambiente de teste.
+ */
+export function resolveMcpOAuthIssuer(env: RuntimeEnv = process.env) {
+  const explicit = normalizeMcpBaseUrl(env.MCP_OAUTH_ISSUER);
+  if (explicit) return explicit;
+  const supabase = normalizeMcpBaseUrl(env.NEXT_PUBLIC_SUPABASE_URL);
+  return supabase ? `${supabase}/auth/v1` : null;
+}
+
 export function readMcpRuntimeConfig(env: RuntimeEnv = process.env) {
   const publicBaseUrl = normalizeMcpBaseUrl(env.MCP_PUBLIC_BASE_URL || env.NEXT_PUBLIC_APP_URL);
   const explicitHosts = (env.MCP_ALLOWED_HOSTS || "")
@@ -34,7 +46,13 @@ export function readMcpRuntimeConfig(env: RuntimeEnv = process.env) {
   const endpoint = endpointBase ? `${endpointBase}/api/mcp/redator` : null;
   const remoteBearerAllowed = truthy(env.MCP_ALLOW_REMOTE_BEARER);
   const httpsConfigured = publicBaseUrl ? new URL(publicBaseUrl).protocol === "https:" : false;
-  const validProductionConfig = !production || Boolean(publicBaseUrl && httpsConfigured && remoteBearerAllowed);
+  const oauthEnabled = truthy(env.MCP_OAUTH_ENABLED);
+  const oauthIssuer = resolveMcpOAuthIssuer(env);
+  // O metadata do recurso protegido vive no mesmo host do MCP, no caminho RFC 9728.
+  const protectedResourceMetadataUrl = endpointBase ? `${endpointBase}/.well-known/oauth-protected-resource/api/mcp/redator` : null;
+  const oauthReady = oauthEnabled && Boolean(oauthIssuer) && Boolean(endpoint);
+  const validProductionConfig = !production
+    || Boolean(publicBaseUrl && httpsConfigured && (oauthEnabled ? oauthReady : remoteBearerAllowed));
 
   return {
     production,
@@ -43,9 +61,15 @@ export function readMcpRuntimeConfig(env: RuntimeEnv = process.env) {
     allowedHosts,
     remoteBearerAllowed,
     httpsConfigured,
+    oauthEnabled,
+    oauthIssuer,
+    oauthReady,
+    protectedResourceMetadataUrl,
     validProductionConfig,
   } as const;
 }
+
+export type McpRuntimeConfig = ReturnType<typeof readMcpRuntimeConfig>;
 
 export function mcpRuntimeFailure(config = readMcpRuntimeConfig()) {
   if (config.production && !config.publicBaseUrl) {
@@ -54,8 +78,11 @@ export function mcpRuntimeFailure(config = readMcpRuntimeConfig()) {
   if (config.production && !config.httpsConfigured) {
     return { code: "mcp_https_required", message: "O endpoint MCP de produção precisa usar HTTPS." } as const;
   }
-  if (config.production && !config.remoteBearerAllowed) {
-    return { code: "mcp_remote_bearer_disabled", message: "A autenticação bearer remota está desativada. Habilite-a apenas para o smoke test privado ou configure OAuth antes de conectar um cliente remoto." } as const;
+  if (config.oauthEnabled && !config.oauthIssuer) {
+    return { code: "mcp_oauth_issuer_missing", message: "MCP_OAUTH_ENABLED exige NEXT_PUBLIC_SUPABASE_URL (ou MCP_OAUTH_ISSUER) para derivar o issuer OAuth." } as const;
+  }
+  if (config.production && !config.oauthEnabled && !config.remoteBearerAllowed) {
+    return { code: "mcp_remote_bearer_disabled", message: "Nenhum modo de autenticação remota está ativo. Habilite MCP_OAUTH_ENABLED para clientes como ChatGPT ou, somente para diagnóstico privado, MCP_ALLOW_REMOTE_BEARER." } as const;
   }
   return null;
 }
