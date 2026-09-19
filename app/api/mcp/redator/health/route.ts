@@ -11,11 +11,11 @@ export async function GET(request: NextRequest) {
     return Response.json({ ok: false, code: "host_not_allowed" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const failure = mcpRuntimeFailure(config);
-  // `chatgptLoginReady` só muda por homologação manual registrada em docs, nunca por inferência aqui.
-  const blockers = [
-    ...(config.oauthEnabled ? [] : ["oauth_disabled"]),
-    ...(config.oauthEnabled ? ["chatgpt_login_not_homologated"] : []),
-  ];
+  // Homologado em 2026-09-19 (docs/07-redator/estado-atual.md): login OAuth pelo ChatGPT,
+  // consentimento, grant e save_writer_draft com readback. Só é verdadeiro com o OAuth ligado;
+  // a data da homologação é registro documental, não inferência de runtime.
+  const chatgptLoginReady = config.oauthEnabled;
+  const blockers = config.oauthEnabled ? [] : ["oauth_disabled"];
   const payload = {
     ok: !failure,
     service: "minerador-key-redator-mcp",
@@ -33,8 +33,8 @@ export async function GET(request: NextRequest) {
       bearerTransportConfigured: !failure,
       oauthImplemented: true,
       oauthEnabled: config.oauthEnabled,
-      chatgptLoginReady: false,
-      authenticatedRoundTrip: "not_verified",
+      chatgptLoginReady,
+      authenticatedRoundTrip: config.oauthEnabled ? "homologated_2026-09-19" : "not_verified",
       blockers,
       verificationScope: "runtime_configuration_only",
     },

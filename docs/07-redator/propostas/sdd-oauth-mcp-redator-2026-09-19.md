@@ -1,6 +1,6 @@
 # SDD — OAuth 2.1 para o MCP do Redator (ChatGPT, Claude e outros clientes remotos)
 
-**Estado:** aprovada em 2026-09-19 para implementação (D1 = multi-Marca; D2 a D5 conforme recomendado). Fase 1 implementada localmente no mesmo dia; fases 0, 2 e 3 pertencem ao usuário e não foram executadas; fase 4 pendente. Evidência em `docs/07-redator/estado-atual.md`.
+**Estado:** aprovada em 2026-09-19 para implementação (D1 = multi-Marca; D2 a D5 conforme recomendado). Fases 0 a 4 concluídas em 2026-09-19: OAuth Server ligado, M7 aplicada, deploy, painel da Agência no ar e homologação pelo ChatGPT com readback (`CHATGPT_CONNECTION = PASS`, `AUTHENTICATED_READ_WRITE = PASS`). Pendente: `MCP_GRANT_REVOCATION` e chave ES256. Evidência em `docs/07-redator/estado-atual.md`.
 **Módulo proprietário:** Redator (servidor MCP do Redator). Superfícies compartilhadas tocadas: autenticação (página de consentimento sobre a sessão Supabase existente), Integrações da Agência (painel MCP) e Conta (conexões de IA do usuário).
 **Data:** 2026-09-19.
 **Responsável humano pela aprovação:** owner da plataforma.

@@ -141,7 +141,7 @@ test("health preserva HTTP 200 e ok legado sem afirmar login ChatGPT ou round-tr
   });
 });
 
-test("health com OAuth ligado expõe issuer e metadata, mas continua sem afirmar o login do ChatGPT", async context => {
+test("health com OAuth ligado expõe issuer e metadata e reflete a homologação do login do ChatGPT", async context => {
   await withRuntime(context, oauthRuntime, async () => {
     const response = await healthGet(request("GET", publicHost, "/api/mcp/redator/health"));
     assert.equal(response.status, 200);
@@ -152,8 +152,9 @@ test("health com OAuth ligado expõe issuer e metadata, mas continua sem afirmar
     assert.equal(payload.oauth.configured, true);
     assert.equal(payload.oauth.issuer, `${supabaseUrl}/auth/v1`);
     assert.equal(payload.oauth.protectedResourceMetadataUrl, metadataUrl);
-    assert.equal(payload.readiness.chatgptLoginReady, false);
-    assert.deepEqual(payload.readiness.blockers, ["chatgpt_login_not_homologated"]);
+    assert.equal(payload.readiness.chatgptLoginReady, true);
+    assert.equal(payload.readiness.authenticatedRoundTrip, "homologated_2026-09-19");
+    assert.deepEqual(payload.readiness.blockers, []);
   });
 });
 
