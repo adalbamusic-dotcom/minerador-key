@@ -19,7 +19,7 @@ export const SavedGridViewSchema = z.object({
   orderMode: GridOrderModeSchema,
   manualOrder: z.array(z.string()),
   isDefault: z.boolean(),
-  updatedAt: z.string().datetime(),
+  updatedAt: z.string().datetime({ offset: true }),
 });
 export const SavedGridViewListSchema = z.array(SavedGridViewSchema);
 export type SavedGridView = z.infer<typeof SavedGridViewSchema>;

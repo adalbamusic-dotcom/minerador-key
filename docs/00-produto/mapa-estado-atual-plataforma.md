@@ -58,22 +58,23 @@ comercial.
 Entregues: `RadarCompetitiveObservedModel`, `SemanticConceptModel`,
 `AiDiscoveryContext`, `RadarEditorialBlueprint`, blueprint audiovisual e
 comercial, `SpecialistBriefs`, `VideoBriefs`, `RadarVideoEvidenceLayer`,
-`RadarSpecialistEvidenceLayer`, `RadarFrozenEvidenceBundle`, `PlannerHandoff v3`
-e o dossiê editorial portátil (CSV).
+`RadarSpecialistEvidenceLayer`, `RadarFrozenEvidenceBundle`, o dossiê canônico
+entregue ao Redator e o dossiê editorial portátil (CSV).
 
 O dossiê canônico é resolvido uma vez — `loadRadarCanonicalAuthorities →
-resolveRadarCanonicalDossier` — e alimenta o envio ao Planejador e o export com
-o mesmo conteúdo semântico. `RadarEvidenceBundle` permanece V3.
+resolveRadarCanonicalDossier` — e alimenta o envio ao Redator
+(`sendRadarToWriter`) e o export com o mesmo conteúdo semântico.
+`RadarEvidenceBundle` permanece V3.
 
-Em aberto: aceitação manual de YouTube, Amazon e export; consumo do handoff
-pelo Planejador; e as dívidas registradas no
+Em aberto: aceitação manual de YouTube, Amazon, do export e da entrega ao
+Redator; e as dívidas registradas no
 [backlog do Radar](../05-radar/backlog.md).
 
-## Planejador
-ContentPlan determinístico possui implementação local relevante. Persistência remota e smoke autenticado completo devem permanecer separados de testes locais.
+## Planejador — fora do fluxo operacional (2026-09-17)
+Não é etapa entre o Radar e o Redator. O `ContentPlan` determinístico e a rota `/planejador` permanecem para leitura do histórico; nenhum artigo novo passa por aqui e nada é movido automaticamente.
 
 ## Redator
-Responsável por executar ContentPlan em ContentDocument com Tiptap, save, versionamento, revisão e aprovação. Não deve reabrir estratégia.
+Recebe o dossiê canônico do Radar e é responsável por PLANEJAR e ESCREVER: estrutura final, sequência, evidência por seção, links, mídia, metadados de SEO, CTA e o texto, com Tiptap, save, versionamento, revisão e aprovação. Pode montar um `ContentPlan` interno. Não reabre a estratégia nem redefine o que o Article é.
 
 ## Publicações
 Responsável por PublicationRecord, URL, slug, canonical, versão, histórico e exportação/publicação.

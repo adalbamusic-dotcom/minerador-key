@@ -1,8 +1,6 @@
 import { resolveCanonicalKeywordSnapshot, type CanonicalKeywordSnapshotInput } from "../minerador/canonical-keyword-snapshot.ts";
 import { deriveGoogleAdsDemandTrend, formatGoogleAdsCpcTableValue, googleAdsDemandTrendLabel } from "../minerador/google-ads-demand.ts";
 import { readDataForSeoKeywordOverview } from "../minerador/dataforseo-keyword-overview-core.ts";
-import type { KeywordContextualPresentation } from "../minerador/keyword-contextual-presentation.ts";
-import { readMineradorHandoffPresentationRef } from "./minerador-handoff.ts";
 import { readPrincipalKgrScore } from "./article-kgr-decision.ts";
 
 /**
@@ -30,17 +28,6 @@ export type KeywordDnaProjectionSection = {
   emptyNote?: string;
 };
 
-export type KeywordDnaPresentationProjection = {
-  available: boolean;
-  versionNumber: number | null;
-  contentHash: string | null;
-  generatedAt: string | null;
-  brandVoiceApplied: boolean;
-  text: string | null;
-  provenance: KeywordDnaProjectionField[];
-  note: string | null;
-};
-
 export type KeywordDnaReadonlyProjection = {
   keywordId: string | null;
   keyword: string | null;
@@ -49,7 +36,6 @@ export type KeywordDnaReadonlyProjection = {
   /** Linha 2 do resumo horizontal, apenas com o que existe upstream. */
   summarySecondary: KeywordDnaProjectionField[];
   sections: KeywordDnaProjectionSection[];
-  presentation: KeywordDnaPresentationProjection;
   /** Campos técnicos e qualquer chave recebida sem seção própria. */
   technical: KeywordDnaProjectionField[];
   /** Status canônico recebido do Minerador; "Aprovado" é o estado normal. */
@@ -133,7 +119,6 @@ function handoffPayload(keyword: KeywordDnaProjectionInput): Record<string, unkn
 /** Converte a KeywordDNA recebida em projeção somente leitura para o Arquiteto. */
 export function projectKeywordDnaForArchitect(
   keyword: KeywordDnaProjectionInput,
-  presentation?: KeywordContextualPresentation | null,
 ): KeywordDnaReadonlyProjection {
   const snapshot = resolveCanonicalKeywordSnapshot(keyword);
   const semantic = asRecord(keyword.analise_semantica);
@@ -307,38 +292,6 @@ export function projectKeywordDnaForArchitect(
     field("Política da principal", textValue((keyword as { primaryKeywordPolicy?: unknown }).primaryKeywordPolicy)),
   ], "Sem identidade publicada recebida.");
 
-  const presentationRef = readMineradorHandoffPresentationRef(payload);
-  const presentationProjection: KeywordDnaPresentationProjection = presentation || presentationRef
-    ? {
-      available: true,
-      versionNumber: presentation?.lifecycle.version ?? presentationRef?.versionNumber ?? null,
-      contentHash: presentation?.lifecycle.contentHash ?? presentationRef?.contentHash ?? null,
-      generatedAt: presentation?.provenance.generatedAt ?? presentationRef?.generatedAt ?? null,
-      brandVoiceApplied: Boolean(presentation?.input.appliedSkillRefs.length),
-      text: presentation?.output.text ?? null,
-      provenance: compact([
-        field("Origem", "Minerador"),
-        field("Provider", textValue(presentation?.provenance.provider)),
-        field("Modelo", textValue(presentation?.provenance.model)),
-        field("Requisição", textValue(presentation?.provenance.operationRequestId)),
-        field("Gerada em", dateLabel(presentation?.provenance.generatedAt ?? presentationRef?.generatedAt)),
-        field("Versão", presentation ? String(presentation.lifecycle.version) : presentationRef ? String(presentationRef.versionNumber) : null),
-        field("Hash", presentation?.lifecycle.contentHash ?? presentationRef?.contentHash ?? null),
-        field("Skills aplicadas", presentation?.input.appliedSkillRefs.map(ref => ref.definitionKey).join(" · ") || null),
-      ]),
-      note: presentation ? null : "Referência recebida no handoff; o texto integral não foi carregado nesta sessão.",
-    }
-    : {
-      available: false,
-      versionNumber: null,
-      contentHash: null,
-      generatedAt: null,
-      brandVoiceApplied: false,
-      text: null,
-      provenance: [],
-      note: "Não disponível para esta versão da KeywordDNA.",
-    };
-
   const remainingSemantic = compact(Object.entries(semantic || {})
     .filter(([key]) => !usedSemanticKeys.has(key))
     .map(([key, value]) => field(key, serialize(value), { wide: true })));
@@ -365,7 +318,6 @@ export function projectKeywordDnaForArchitect(
     summaryPrimary,
     summarySecondary,
     sections: [identity, logic, googleAds, dataForSeo, semanticQualification, kgr, mineradorReview, publication],
-    presentation: presentationProjection,
     technical,
     upstreamStatusLabel: snapshot.status.label,
     upstreamApproved: snapshot.status.status === "aprovado" || String(keyword.status || "").toLocaleLowerCase("pt-BR") === "publicado",

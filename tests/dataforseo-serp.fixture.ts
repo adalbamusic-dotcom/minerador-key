@@ -8,14 +8,14 @@ export const dataForSeoSuccessFixture = {
     status_code: 20000,
     cost: 0.003,
     result: [{
-      keyword: 'allintitle:"marketing para clínicas"',
+      keyword: 'allintitle:marketing para clínicas',
       location_code: 2076,
       language_code: "pt",
       datetime: "2026-08-04T12:00:00+00:00",
       se_results_count: 60500,
       items_count: 10,
       items: [{ type: "organic", rank_group: 1 }],
-      check_url: "https://www.google.com/search?q=allintitle%3A%22marketing%20para%20cl%C3%ADnicas%22",
+      check_url: "https://www.google.com/search?q=allintitle%3Amarketing%20para%20cl%C3%ADnicas",
     }],
   }],
 };

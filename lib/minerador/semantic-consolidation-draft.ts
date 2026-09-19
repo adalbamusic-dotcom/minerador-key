@@ -15,6 +15,15 @@ export type SemanticConsolidationAxisDraft = {
   serpStrength: SemanticSerpStrength;
   /** Cobertura, dominância e reforços — o porquê da força observada. */
   rationale?: string | null;
+  /**
+   * Quantos rótulos distintos a SERP produziu neste eixo.
+   *
+   * Existe para o motivo não mentir. "Mista" é a força quando a cobertura não
+   * fecha o eixo, e isso acontece tanto com leituras que se contradizem quanto
+   * com leituras unânimes que o classificador leu pouco. Dizer "necessidades
+   * diferentes" no segundo caso é afirmar o contrário do dado.
+   */
+  serpLabelCount?: number | null;
 };
 
 export type SemanticSerpSnapshotPreview = {
@@ -66,6 +75,14 @@ const INCONCLUSIVE_REASON: Record<Exclude<SerpEvidenceStrength, "conclusive">, s
   insufficient: "SERP insuficiente: resultados observados de menos para concluir.",
 };
 
+/** Leitura unânime que não fechou o eixo foi falta de cobertura, não conflito. */
+const UNANIMOUS_LOW_COVERAGE_REASON = "SERP unânime, mas lida em poucos resultados: a cobertura não alcançou o mínimo para concluir.";
+
+function inconclusiveReason(strength: Exclude<SerpEvidenceStrength, "conclusive">, labelCount: number | null | undefined): string {
+  if (strength !== "insufficient" && typeof labelCount === "number" && labelCount === 1) return UNANIMOUS_LOW_COVERAGE_REASON;
+  return INCONCLUSIVE_REASON[strength];
+}
+
 /**
  * Evidência conclusiva fecha o eixo. Qualquer outra leitura mantém o eixo não
  * consolidado: a Lógica não vira canônica por fallback, a IA não decide e o
@@ -77,7 +94,7 @@ export function resolveSemanticAxis(axis: SemanticConsolidationAxisDraft): Seman
     return { value: clean(axis.serp), status: "serp_consolidated", reason: null };
   }
   // Coleta real sem conclusão continua sendo coleta: nunca vira "não coletada".
-  return { value: null, status: "serp_inconclusive", reason: INCONCLUSIVE_REASON[axis.serpStrength === "conclusive" ? "insufficient" : axis.serpStrength] };
+  return { value: null, status: "serp_inconclusive", reason: inconclusiveReason(axis.serpStrength === "conclusive" ? "insufficient" : axis.serpStrength, axis.serpLabelCount) };
 }
 
 /** Patch da leitura observada. Não existe patch de decisão humana. */
@@ -97,6 +114,8 @@ export function applySerpSemanticEvidence(draft: SemanticConsolidationDraft, evi
     // A força vem do read-model da evidência, sem tradução paralela.
     serpStrength: signal.strength,
     rationale: serpEvidenceRationale(signal),
+    // Quantos rótulos a leitura produziu: separa divergência de pouca cobertura.
+    serpLabelCount: signal.distribution.length,
   });
   return {
     ...draft,

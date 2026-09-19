@@ -578,8 +578,8 @@ test("P, Q, R e S · uma porta para a evidência, um botão de handoff", async (
    * Um botão por perfil daria três fronteiras para a mesma entrega, e o
    * Planejador aprenderia três dialetos da mesma pergunta.
    */
-  assert.equal((workbench.match(/<PlannerHandoff tab=/g) || []).length, 2, "os dois ramos do mesmo componente");
-  assert.equal((workbench.match(/data-testid="radar-planner-send"/g) || []).length, 1, "DUPLICATE_HANDOFF_BUTTON = NO");
+  assert.equal((workbench.match(/<WriterHandoff tab=/g) || []).length, 2, "os dois ramos do mesmo componente");
+  assert.equal((workbench.match(/data-testid="radar-writer-send"/g) || []).length, 1, "DUPLICATE_HANDOFF_BUTTON = NO");
   for (const arquivo of [painel, await readFile(new URL("../modules/radar/radar-amazon-search-panel.tsx", import.meta.url), "utf8"), await readFile(new URL("../modules/radar/radar-profile-blueprint.tsx", import.meta.url), "utf8")]) {
     assert.equal(/Enviar ao Planejador/.test(arquivo), false, "nenhum painel cria a própria fronteira");
   }

@@ -1,4 +1,18 @@
 # Spec — Planejador
+
+> **REMOVIDO DO PIPELINE OPERACIONAL EM 2026-09-18.** `PLANEJADOR_STAGE = NONE`.
+> O fluxo vigente é `Marca → Minerador → Arquiteto → Radar → Redator →
+> Publicações`. Este documento descreve um módulo **fora do pipeline**: ele
+> permanece legível e a rota `/planejador` continua respondendo para o
+> histórico, mas **não existe caminho de escrita nova por ele** e nada aqui
+> descreve o fluxo atual.
+>
+> As funções úteis de planejamento serão transferidas para uma aba da Marca,
+> como planejamento inicial de projeto, produto, serviço ou campanha. Até lá,
+> este arquivo é referência histórica.
+>
+> Base: `docs/00-produto/auditorias/auditoria-remocao-planejador-2026-09-18.md`
+> e `docs/00-produto/propostas/sdd-remocao-planejador-e-retencao-48h-2026-09-18.md`.
 ## 25. Estratégia KGR, volume e cobertura de keywords
 
 O Planejador consome a principal, as keywords de apoio, o KGR, o volume e a hierarquia já consolidados no ArticleDNA. Não reagrupa keywords, não escolhe a principal, não recalcula KGR, não altera ArticleDNA/KeywordDNA/SiloDNA e não muda slug, canonical, URL, marca ou hierarquia.

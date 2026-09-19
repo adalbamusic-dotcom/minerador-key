@@ -26,7 +26,7 @@ function snapshot(articleId: string, overrides: Partial<RadarR4BulkArticleSnapsh
     analysisStarted: false,
     reportGenerated: false,
     reportApproved: false,
-    sentToPlanner: false,
+    sentToWriter: false,
     rowState: "research_pending",
     topicsState: "NOT_PREPARED",
     topicsReviewed: false,

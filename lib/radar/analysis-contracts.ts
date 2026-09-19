@@ -243,6 +243,42 @@ export const RadarPlannerBundleRecordSchema = z.object({
 }).strict();
 export type RadarPlannerBundleRecord = z.infer<typeof RadarPlannerBundleRecordSchema>;
 
+/**
+ * ====== O RECIBO DA ENTREGA AO REDATOR — RADAR_TO_WRITER_HANDOFF_1 · §5 ======
+ *
+ * A MESMA FORMA, e isso é deliberado: o dossiê entregue não muda porque mudou
+ * o destinatário. O que muda é o campo onde o recibo mora e a lista de
+ * invariantes que viaja com ele — o Redator pode decidir muito mais que o
+ * Planejador decidia, e muito menos do que ele gostaria.
+ *
+ * `writerMayNot` existe em lugar de `plannerMayNot` porque as duas listas
+ * respondem perguntas diferentes. Reaproveitar a do Planejador entregaria ao
+ * Redator a proibição de "consultar a SERP novamente" como se fosse o mesmo
+ * fato que "não trocar a keyword principal" — e só a segunda protege o artigo.
+ */
+export const RadarWriterBundleRecordSchema = z.object({
+  bundleVersion: z.literal(3),
+  bundleId: z.string().min(1),
+  bundleHash: z.string().min(1),
+  primaryResearchProfile: z.enum(["GOOGLE", "YOUTUBE", "AMAZON"]),
+  binding: z.object({
+    brandId: z.string().min(1),
+    articleId: z.string().min(1),
+    articleDnaVersionId: z.string().min(1),
+    articleDnaContentHash: z.string().nullable(),
+  }).strict(),
+  handoffVersion: z.number().int().positive(),
+  sentAt: z.string().min(1),
+  sentBy: z.string().min(1),
+  previousBundleHash: z.string().min(1).nullable().default(null),
+  /** §12 · o que o Redator NÃO pode redefinir. Viaja junto da evidência. */
+  writerMayNot: z.array(z.string().min(1)).default([]),
+  /** O documento criado no Redator. É o destino relido que prova a entrega. */
+  documentId: z.string().min(1),
+  bundle: z.unknown(),
+}).strict();
+export type RadarWriterBundleRecord = z.infer<typeof RadarWriterBundleRecordSchema>;
+
 export const RadarStructuralDecisionSchema = z.object({
   key: z.string().min(1),
   label: z.string().min(1),
@@ -606,6 +642,22 @@ export const RadarAnalysisPayloadSchema = z.object({
    * Aditivo com `.default(null)`: toda análise já gravada continua legível.
    */
   plannerBundle: RadarPlannerBundleRecordSchema.nullable().default(null),
+  /*
+   * ====== O DOSSIÊ ENTREGUE AO REDATOR — RADAR_TO_WRITER_HANDOFF_1 ======
+   *
+   * Campo PRÓPRIO, ao lado de `plannerBundle`. A tentação era reaproveitar o
+   * campo antigo: mesma forma, mesmo hash, menos código. Ela apagaria a única
+   * coisa que interessa a quem lê o histórico — PARA ONDE o artigo foi.
+   *
+   * Um artigo entregue ao Planejador em agosto e ao Redator hoje tem duas
+   * entregas reais, com destinos diferentes. Um campo só as faria parecer a
+   * mesma, e a idempotência do envio novo aceitaria como "já enviado" um
+   * pacote que o Redator nunca recebeu.
+   *
+   * Aditivo com `.default(null)`: toda análise já gravada continua legível.
+   */
+  writerBundle: RadarWriterBundleRecordSchema.nullable().default(null),
+  writerTransfer: RadarPlannerTransferSchema.nullable().default(null),
   status: RadarAnalysisStatusSchema,
   humanNotes: z.array(z.string()),
   approvedAt: z.string().datetime().nullable(),

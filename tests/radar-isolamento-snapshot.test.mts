@@ -65,7 +65,7 @@ const analysis = (currentView: RadarSerpView, incluidas: number[], extraidas: nu
     extractionIds: extraidas.map(position => `page-${position}`),
     extractions: extraidas.map(pagina), extractionFailures: [], verifiedSources: [], sourceVerificationFailures: [], deepResearch: null, researchTarget: null, supportResearch: null, researchPackage: null, amazonEditorialSetup: null, amazonSearch: null, amazonBlueprint: null, amazonFrozenInvestigation: null, youtubeSearch: null, youtubeFrozenInvestigation: null, finalizedBundle: null,
     benchmark: null, semanticTerms: [], structuralDecisions: [], competitiveness: null, keywordDecisions: [],
-    competitiveReport: null, plannerPackage: null, plannerTransfer: null, plannerBundle: null, researchTransport: "FULL",
+    competitiveReport: null, plannerPackage: null, plannerTransfer: null, plannerBundle: null, writerBundle: null, writerTransfer: null, researchTransport: "FULL",
     mode: "competitive_full", modeRecommendation: { suggestedMode: "competitive_full", reasons: ["fixture"], confidence: "high", ruleSource: "minerador_kgr_strict" },
     modeHumanReason: "", status: "draft", humanNotes: [], approvedAt: null, approvedBy: null, analysisCompletedAt: null,
   },

@@ -1469,3 +1469,61 @@ validate → canonical resolve → write bundle → readback
 ```
 
 `RadarEvidenceBundle` continua **V3**. Nenhum envelope paralelo foi criado.
+
+## O destino do Radar passou a ser o Redator — 2026-09-17
+
+```text
+ANTES   Radar → Planejador → Redator
+AGORA   Radar → Redator
+```
+
+`sendRadarToWriter` (`lib/server/radar-writer-send.ts`) é a autoridade única de
+entrega. Ela resolve o MESMO dossiê canônico de sempre —
+`loadRadarCanonicalAuthorities → resolveRadarCanonicalDossier` — e cria o
+documento do Redator com a estrutura inteira dentro:
+
+```text
+validate → canonical resolve → readiness
+        → write receipt (writerBundle) → readback
+        → identity/hash → create document → destination readback
+        → workflow transition (approved → sent_writer)
+```
+
+O Radar **não** mudou de papel: nenhum collector migrou, nenhuma lógica de
+SERP, Blueprint, qualificação ou formação foi reaberta. O que mudou foi para
+onde a evidência vai e quem decide o que fazer com ela.
+
+O Redator recebe a ESTRUTURA — `importedContext.dossier` carrega o bundle
+inteiro, o contexto de keyword e `writerMayNot`. `writer_context_md` continua
+sendo read model portátil do CSV, e o export não mudou.
+
+`sendRadarToPlanner` virou legado: sem rota, sem botão e sem transição. Ele
+permanece porque define o que `plannerBundle` e `sent_planner` significam nos
+registros já gravados.
+
+Nenhuma migration foi necessária: `stage` já aceitava `writer`, `state` e
+`event_type` são texto livre e `content_plan_version_id` sempre foi nulo.
+
+Detalhe da rodada:
+[relatório datado](../00-produto/auditorias/relatorio-radar-to-writer-handoff-2026-09-17.md).
+
+**Aceitação manual pendente** — o envio real ao Redator é ato do USER.
+
+### Correção do readiness da entrega — 2026-09-17
+
+O primeiro clique real em "Enviar ao Redator" recusou artigos **finalizados**,
+mandando aprovar o Radar. A recusa vinha de uma condição sobre
+`editorial_workflow_items.state`, copiada do caminho do Planejador: ela exigia
+`approved`, e o fluxo vigente — `START → ANALYZE → FINALIZE` — nunca produz
+esse estado.
+
+A autoridade passou a ser, sozinha, a prontidão canônica do dossiê. A esteira
+segue o fato: move-se para `sent_writer` depois de o documento ser confirmado,
+a partir de qualquer estado.
+
+O mesmo defeito existia na barra de lote, que decidia por `reportApproved` — a
+aprovação do relatório do fluxo antigo. Ela passou a perguntar pela finalização
+canônica.
+
+Artigo finalizado ANTES da mudança de destino é reconhecido sem refinalizar, e
+nenhuma evidência congelada foi recriada.

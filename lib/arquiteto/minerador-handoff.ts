@@ -1,3 +1,5 @@
+import type { ApprovedKeywordPackage } from "../minerador/approved-package.ts";
+
 export const MINERADOR_ARQUITETO_RECEIVED_STATE = "received";
 
 export const CANONICAL_IMPORTABILITY = {
@@ -43,15 +45,13 @@ export type MineradorKeywordHandoffSource = {
     collectedAt: string;
   } | null;
   /**
-   * Referência da Apresentação Contextual persistida, quando existir.
-   * É contexto upstream opcional: ausência nunca bloqueia o handoff.
+   * Pacote aprovado: o KeywordDNA inteiro, congelado no ato da aprovação.
+   *
+   * É ele que o Arquiteto consome. Ler a linha viva do Minerador faria
+   * qualquer edição vazar para lá sem aprovação — exatamente o que este
+   * contrato existe para impedir.
    */
-  contextualPresentation?: {
-    versionId: string;
-    versionNumber: number;
-    contentHash: string;
-    generatedAt: string;
-  } | null;
+  approvedDna?: ApprovedKeywordPackage | null;
 };
 
 export type MineradorArquitetoHandoffRow = {
@@ -70,14 +70,33 @@ export type MineradorArquitetoHandoffRow = {
     source: "MINERADOR";
     decision: string | null;
     state: "received";
+    semanticQualification: MineradorKeywordHandoffSource["semanticQualification"];
+    /** O KeywordDNA aprovado que o Arquiteto vai consumir. */
+    approvedDna: ApprovedKeywordPackage | null;
   };
+};
+
+/**
+ * Reaprovação de keyword já recebida: o pacote do item existente é reescrito.
+ *
+ * O fluxo explícito de envio vale só para keyword nova. Uma keyword que já
+ * está no Arquiteto e foi reaprovada atualiza sozinha — era exatamente isso
+ * que faltava, e por isso o pacote congelava para sempre.
+ */
+export type MineradorArquitetoHandoffUpdate = {
+  keywordId: string;
+  sourceVersionId: string | null;
+  sourceContentHash: string | null;
+  payload: MineradorArquitetoHandoffRow["payload"];
 };
 
 export type MineradorArquitetoHandoffPlan = {
   rows: MineradorArquitetoHandoffRow[];
+  updates: MineradorArquitetoHandoffUpdate[];
   importedKeywordIds: string[];
   createdKeywordIds: string[];
   existingKeywordIds: string[];
+  refreshedKeywordIds: string[];
   status: "PERSISTED" | "UNCHANGED";
 };
 
@@ -128,14 +147,47 @@ export function buildMineradorArquitetoHandoffPlan(input: {
   brandId: string;
   keywords: readonly MineradorKeywordHandoffSource[];
   existingKeywordIds: ReadonlySet<string>;
+  /**
+   * Hash do pacote aprovado que cada item já recebido carrega hoje. Quando
+   * informado, keyword reaprovada com hash diferente entra em `updates`.
+   */
+  receivedApprovedHashById?: ReadonlyMap<string, string | null>;
 }): MineradorArquitetoHandoffPlan {
   const keywords = [...new Map(
     input.keywords
       .filter(keyword => keyword.brandId === input.brandId && keyword.id.trim())
       .map(keyword => [keyword.id, keyword]),
   ).values()];
-  const existingKeywordIds = keywords.filter(keyword => input.existingKeywordIds.has(keyword.id)).map(keyword => keyword.id);
+  const existing = keywords.filter(keyword => input.existingKeywordIds.has(keyword.id));
+  const existingKeywordIds = existing.map(keyword => keyword.id);
   const newKeywords = keywords.filter(keyword => !input.existingKeywordIds.has(keyword.id));
+
+  const payloadOf = (keyword: MineradorKeywordHandoffSource): MineradorArquitetoHandoffRow["payload"] => ({
+    brandId: input.brandId,
+    keywordId: keyword.id,
+    source: "MINERADOR",
+    decision: keyword.status ?? null,
+    state: MINERADOR_ARQUITETO_RECEIVED_STATE,
+    semanticQualification: keyword.semanticQualification ?? null,
+    approvedDna: keyword.approvedDna ?? null,
+  });
+
+  const updates: MineradorArquitetoHandoffUpdate[] = input.receivedApprovedHashById
+    ? existing
+      .filter(keyword => {
+        // Sem pacote aprovado não há o que propagar: a keyword está em revisão
+        // e o Arquiteto tem que continuar com o que foi aprovado antes.
+        if (!keyword.approvedDna) return false;
+        const received = input.receivedApprovedHashById!.get(keyword.id) ?? null;
+        return received !== keyword.approvedDna.contentHash;
+      })
+      .map(keyword => ({
+        keywordId: keyword.id,
+        sourceVersionId: keyword.semanticQualification?.versionId ?? keyword.sourceVersionId ?? null,
+        sourceContentHash: keyword.semanticQualification?.contentHash ?? keyword.contentHash ?? null,
+        payload: payloadOf(keyword),
+      }))
+    : [];
 
   return {
     rows: newKeywords.map(keyword => ({
@@ -150,51 +202,14 @@ export function buildMineradorArquitetoHandoffPlan(input: {
       // Semântica é a referência canônica do que sustenta este handoff.
       source_version_id: keyword.semanticQualification?.versionId ?? keyword.sourceVersionId ?? null,
       source_content_hash: keyword.semanticQualification?.contentHash ?? keyword.contentHash ?? null,
-      payload: {
-        brandId: input.brandId,
-        keywordId: keyword.id,
-        source: "MINERADOR",
-        decision: keyword.status ?? null,
-        state: MINERADOR_ARQUITETO_RECEIVED_STATE,
-        semanticQualification: keyword.semanticQualification ?? null,
-        // Opcional por contrato: null quando a keyword não tem apresentação.
-        contextualPresentation: keyword.contextualPresentation
-          ? { ...keyword.contextualPresentation, keywordId: keyword.id, brandId: input.brandId }
-          : null,
-      },
+      payload: payloadOf(keyword),
     })),
+    updates,
     importedKeywordIds: keywords.map(keyword => keyword.id),
     createdKeywordIds: newKeywords.map(keyword => keyword.id),
     existingKeywordIds,
-    status: newKeywords.length ? "PERSISTED" : "UNCHANGED",
+    refreshedKeywordIds: updates.map(update => update.keywordId),
+    status: newKeywords.length || updates.length ? "PERSISTED" : "UNCHANGED",
   };
 }
 
-/**
- * Leitura da Apresentação Contextual transportada no handoff.
- * O Arquiteto consome a referência versionada do Minerador: nunca regenera,
- * nunca altera o artifact e nunca a usa para decidir Intenção ou Funil.
- */
-export function readMineradorHandoffPresentationRef(payload: unknown): {
-  versionId: string;
-  versionNumber: number;
-  contentHash: string;
-  keywordId: string;
-  brandId: string;
-  generatedAt: string;
-} | null {
-  const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : null;
-  const ref = record?.contextualPresentation;
-  const item = ref && typeof ref === "object" && !Array.isArray(ref) ? ref as Record<string, unknown> : null;
-  if (!item) return null;
-  const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
-  if (!text(item.versionId) || !text(item.keywordId) || !text(item.brandId)) return null;
-  return {
-    versionId: text(item.versionId),
-    versionNumber: typeof item.versionNumber === "number" ? item.versionNumber : 0,
-    contentHash: text(item.contentHash),
-    keywordId: text(item.keywordId),
-    brandId: text(item.brandId),
-    generatedAt: text(item.generatedAt),
-  };
-}

@@ -117,3 +117,44 @@ export function localRecoveryWarning(input: {
   }
   return `${input.operation} foi ${concluida} e está ${feminino ? "aplicada" : "aplicado"} nesta aba, mas não foi ${feminino ? "confirmada" : "confirmado"} no servidor nem na cópia de recuperação do navegador: ${input.reason}. Recarregar a página pode ${perdela}.`;
 }
+
+/**
+ * ===== O CICLO DE VIDA DO AVISO — RADAR_RECOVERY_WARNING_LIFECYCLE_1 =====
+ *
+ * ==================== POR QUE ISTO EXISTE ====================
+ *
+ * O aviso nascia e ficava. Nenhuma leitura canônica bem-sucedida o apagava, e
+ * só duas operações específicas o zeravam. O efeito é um aviso de trabalho não
+ * confirmado ocupando o topo da tela muito depois de o servidor já ter
+ * confirmado tudo — e um aviso que nunca sai deixa de ser lido.
+ *
+ * ==================== POR QUE NÃO BASTA "LEU, LIMPOU" ====================
+ *
+ * Os dois avisos parecem o mesmo e não são:
+ *
+ *   remoteConfirmed = true    o servidor TEM o trabalho; o que falhou foi a
+ *                             cópia de recuperação do navegador
+ *   remoteConfirmed = false   o trabalho existe SÓ nesta aba
+ *
+ * Uma leitura do servidor confirma o primeiro — ela acabou de ver o dado lá.
+ * Ela não confirma o segundo: o que nunca foi enviado não aparece na leitura, e
+ * apagar esse aviso porque "a leitura deu certo" esconderia risco real de perda
+ * bem no momento em que a pessoa poderia agir.
+ *
+ * Por isso o segundo só sai por confirmação remota EXPLÍCITA — a mesma que as
+ * operações já registram quando gravam e releem.
+ */
+export type LocalRecoveryNotice = {
+  message: string;
+  remoteConfirmed: boolean;
+};
+
+export function localRecoveryNoticeAfterCanonicalRead(
+  notice: LocalRecoveryNotice | null,
+  read: { ok: boolean; remoteConfirmed: boolean },
+): LocalRecoveryNotice | null {
+  if (!notice) return null;
+  /* Leitura que falhou, ou que veio de recuperação local, não confirma nada. */
+  if (!read.ok || !read.remoteConfirmed) return notice;
+  return notice.remoteConfirmed ? null : notice;
+}

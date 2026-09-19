@@ -20,7 +20,7 @@ const base = (patch: Partial<RadarInvestigationInput> = {}): RadarInvestigationI
   selectedReferences: 0, pendingExtractions: 0, analyzedPages: 0, comparablePages: 0,
   modelReady: false, modelStale: false, reportReady: false, reportStale: false,
   investigationReviewed: false, investigationApproved: false,
-  serpCurationApproved: false, serpCurationCurrent: false, sentToPlanner: false,
+  serpCurationApproved: false, serpCurationCurrent: false, sentToWriter: false,
   ...patch,
 });
 

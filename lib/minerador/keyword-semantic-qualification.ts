@@ -267,8 +267,8 @@ export function semanticDraftFromQualification(qualification: KeywordSemanticQua
   });
   return {
     ...base,
-    intent: { ...base.intent, serp: qualification.intent.observedValue, serpStrength: qualification.intent.strength, rationale: axisRationale(qualification.intent) },
-    funnel: { ...base.funnel, serp: qualification.funnel.observedValue, serpStrength: qualification.funnel.strength, rationale: axisRationale(qualification.funnel) },
+    intent: { ...base.intent, serp: qualification.intent.observedValue, serpStrength: qualification.intent.strength, rationale: axisRationale(qualification.intent), serpLabelCount: qualification.intent.distribution.length },
+    funnel: { ...base.funnel, serp: qualification.funnel.observedValue, serpStrength: qualification.funnel.strength, rationale: axisRationale(qualification.funnel), serpLabelCount: qualification.funnel.distribution.length },
     serpSnapshotRef: {
       id: qualification.source.providerRequestId || qualification.source.operationRequestId,
       label: `SERP DataForSEO · ${qualification.evidence.observedResults} resultado(s) observados`,

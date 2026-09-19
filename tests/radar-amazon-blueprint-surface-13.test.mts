@@ -197,7 +197,7 @@ test("§11 · ranking sem candidato não permite Enviar ao Planejador", async ()
   const pagina = await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
 
   assert.match(pagina, /const rankingSemCandidato = \(\(\) => \{/);
-  assert.match(pagina, /eligible: Boolean\(perfil\) && !\(entregue && noPlanejador\) && !rankingSemCandidato/);
+  assert.match(pagina, /eligible: Boolean\(perfil\) && !noRedator && !rankingSemCandidato/);
 
   /* §11 · e a recusa diz o que corrigir, em vez de só apagar o botão. */
   assert.match(pagina, /revise o tipo de produto e o filtro de marca antes de enviar/i);

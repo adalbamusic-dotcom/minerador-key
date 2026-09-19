@@ -217,7 +217,6 @@ import type { AIReviewAnnotation } from "@/lib/editorial/operational-contracts";
 import { useEditorialPipeline } from "@/components/editorial-pipeline-context";
 import { ArticleDnaReadonlyPanel } from "@/components/editorial/article-dna-readonly-panel";
 import { KeywordDnaReadonlyPanel } from "@/components/editorial/keyword-dna-readonly-panel";
-import type { KeywordContextualPresentation } from "@/lib/minerador/keyword-contextual-presentation";
 import { InfoHint } from "@/components/info-hint";
 import { CompactSavedViews } from "@/components/editorial/compact-saved-views";
 import { WorkflowImportDialog, WorkflowStatusBadge } from "@/components/editorial/workflow-status";
@@ -624,11 +623,22 @@ export default function ArquitetoPage() {
    */
   const architectureKeywordSignals = useMemo<KeywordDnaSignals[]>(() => masterList.map(keyword => {
     const payload = (keyword.canonicalWorkflow as { payload?: Record<string, unknown> } | undefined)?.payload || {};
+    /*
+     * O DNA VEM DO PACOTE APROVADO, NÃO DA LINHA VIVA.
+     *
+     * Ler `analise_semantica` direto fazia qualquer edição no Minerador vazar
+     * para cá sem aprovação. O pacote é o retrato do que o humano aprovou; a
+     * linha viva só entra como fallback para keyword que ainda não tem pacote.
+     */
+    const aprovado = payload.approvedDna && typeof payload.approvedDna === "object" ? payload.approvedDna as Record<string, unknown> : null;
+    const dnaAprovado = aprovado?.analiseSemantica && typeof aprovado.analiseSemantica === "object"
+      ? aprovado.analiseSemantica as Record<string, unknown>
+      : null;
     return resolveKeywordDnaSignals({
       keywordId: String(keyword.id),
-      text: String(keyword.keyword || ""),
+      text: String(aprovado?.keyword || keyword.keyword || ""),
       semanticQualification: (payload.semanticQualification || null) as Record<string, unknown> | null,
-      semantic: (keyword.analise_semantica || null) as Record<string, unknown> | null,
+      semantic: dnaAprovado || ((keyword.analise_semantica || null) as Record<string, unknown> | null),
     });
   }), [masterList]);
 
@@ -684,7 +694,6 @@ export default function ArquitetoPage() {
   const [keywordImportError, setKeywordImportError] = useState<string | null>(null);
   const [canonicalReceivedKeywordIds, setCanonicalReceivedKeywordIds] = useState<string[]>([]);
   // Apresentação Contextual recebida do Minerador: leitura para o perfil da keyword.
-  const [keywordPresentations, setKeywordPresentations] = useState<Record<string, KeywordContextualPresentation>>({});
   const [databaseSources, setDatabaseSources] = useState<ArchitectDatabaseSources>({ silos: [], keywords: [], briefings: [], capturedAt: "" });
   const [recoverySnapshot, setRecoverySnapshot] = useState<ArchitectRecoverySnapshot | null>(null);
   const [recoveryAudit, setRecoveryAudit] = useState<ArchitectRecoveryAudit | null>(null);
@@ -1251,7 +1260,6 @@ export default function ArquitetoPage() {
         // Site indisponível não derruba o Arquiteto: a aba continua funcional.
         .catch(() => { if (!cancelled) setBrandSiteSnapshot(null); });
       const canonicalSilos = canonicalSiloOptions(canonical.siloDnas, canonical.siloPages);
-      setKeywordPresentations(Object.fromEntries(canonical.keywordPresentations.map(item => [item.keywordId, item])));
       const workflowItems = buildCanonicalWorkflowWorkspaceItems(canonical.workflowItems, canonical.keywords, brandId);
       setCanonicalReceivedKeywordIds(canonical.workflowItems
         .filter(item => item.marcaId === brandId && item.subjectType === "keyword" && item.stage === "architect" && item.state === "received")
@@ -15052,7 +15060,6 @@ export default function ArquitetoPage() {
                                     {art.mainKeywordObj && <KeywordDnaReadonlyPanel
                                       keyword={art.mainKeywordObj}
                                       role="Principal"
-                                      presentation={keywordPresentations[String(art.mainKeywordObj.id)] || null}
                                     />}
                                     {art.supportKeywords.length === 0
                                       ? <section className="rounded-md border border-divider bg-surface-subtle p-3"><p className="text-sm font-semibold text-foreground">Secundárias e reforços</p><p className="mt-2 text-sm text-text-muted">Nenhuma keyword de apoio vinculada.</p></section>
@@ -15073,7 +15080,6 @@ export default function ArquitetoPage() {
                                          * não passa pelo formador.
                                          */
                                         role={`${MANUAL_KEYWORD_ROLE_LABELS[formationRoleFor(art, keyword)]} ${index + 1}`}
-                                        presentation={keywordPresentations[String(keyword.id)] || null}
                                         headerExtra={<select value={manualKeywordRoleFor(keyword)} onChange={event => handleManualKeywordRoleChange(art, keyword, event.target.value as ManualKeywordRole)} disabled={art.isPublished} aria-label={`Definir papel de ${keyword.keyword} no artigo`} className={`${ARCHITECT_UI.control} min-h-8 text-sm disabled:cursor-not-allowed disabled:opacity-50`}>{(Object.keys(MANUAL_KEYWORD_ROLE_LABELS) as ManualKeywordRole[]).filter(role => role !== "principal" || !art.isPublished).map(role => <option key={role} value={role}>{MANUAL_KEYWORD_ROLE_LABELS[role]}</option>)}</select>}
                                       />)}
                                     <section className="rounded-md border border-divider bg-surface-subtle p-3"><p className="text-sm font-semibold text-foreground">Silo</p><p className="mt-1 text-sm text-text-muted">{art.siloId && siloDnaVersion ? `${art.siloName || "Silo"} · ${art.hierarquia} · v${siloDnaVersion.versionNumber}` : articleSiloReadiness.state === "ready" ? "Pronto para Silos; nenhum silo é criado por este painel." : articleSiloReadiness.reasons.join(" ") || "Não iniciado."}</p></section>

@@ -55,6 +55,11 @@ async function buildCanonicalSessionProfile(identity: { userId: string }): Promi
   };
 }
 
+/** Use only after an independent server-side credential verification. */
+export async function canonicalProfileForVerifiedUser(userId: string): Promise<CanonicalSessionProfile> {
+  return buildCanonicalSessionProfile({ userId });
+}
+
 /**
  * Exige sessao valida e carrega somente o papel global persistido do ator.
  * Lanca AuthzError(401) se nao houver sessao.

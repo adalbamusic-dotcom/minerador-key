@@ -118,7 +118,8 @@ export type CanonicalRestoreState = {
 };
 
 export async function readCanonicalRestoreState(context: PipelineContext): Promise<CanonicalRestoreState> {
-  const workflow = await new WorkflowRepository(context).list();
+  // Estreitada por etapa: a restauração só trata itens do Arquiteto.
+  const workflow = await new WorkflowRepository(context).listByStage("architect");
   const [artifacts, territories, siloWorkingCopies, territorialSerp, articleFormationSerp, territorialAi, architectureMarker, articleFormationMarker, graphs] = await Promise.all([
     listArquitetoArtifacts(context),
     listTerritoryWorkflowItems(context),

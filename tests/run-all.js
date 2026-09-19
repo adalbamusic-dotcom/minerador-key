@@ -169,10 +169,9 @@ async function expect401(name, apiPath, body) {
 }
 
 async function testApi401() {
-  await expect401('7. /api/analyze sem sessao retorna 401', '/api/analyze', { keywordId: 'x', keyword: 'x' });
-  await expect401('8. /api/process-intent-niche sem sessao retorna 401', '/api/process-intent-niche', { keywordId: 'x', keyword: 'x' });
-  await expect401('9. /api/generate-briefing sem sessao retorna 401', '/api/generate-briefing', { keywords: [] });
-  await expect401('10. /api/clusterize sem sessao retorna 401', '/api/clusterize', { keywords: [] });
+  // As rotas de IA do Minerador (/api/analyze, /api/process-intent-niche,
+  // /api/generate-briefing e /api/clusterize) foram removidas em 2026-09-18
+  // junto com o R5; nao ha mais autorizacao a verificar nelas.
   await expect401('11. /api/revalidate-structure sem sessao retorna 401', '/api/revalidate-structure', { structure: {} });
   await expect401('12. /api/volume sem sessao retorna 401', '/api/volume', { keywords: ['x'] });
 }

@@ -113,7 +113,7 @@ export function deriveRadarNextAction(input: {
   pagesAnalyzed: number;
   reportGenerated: boolean;
   reportApproved: boolean;
-  sentToPlanner: boolean;
+  sentToWriter: boolean;
   additionalEvidenceState: RadarAdditionalEvidenceState;
 }): string {
   if (!input.identityReady) return "Confira a identidade recebida do Arquiteto antes de continuar.";
@@ -124,7 +124,7 @@ export function deriveRadarNextAction(input: {
   if (input.pagesAnalyzed === 0) return "Selecione referências comparáveis para formar a amostra.";
   if (!input.reportGenerated) return "Revise a análise SERP e gere a prévia do relatório.";
   if (!input.reportApproved) return "Revise as necessidades e aprove o relatório.";
-  if (!input.sentToPlanner) return "Envie as evidências aprovadas ao Planejador quando fizer sentido.";
+  if (!input.sentToWriter) return "Envie as evidências aprovadas ao Planejador quando fizer sentido.";
   if (input.additionalEvidenceState === "in-progress") return "Revise as evidências adicionais antes de encerrar o Radar.";
   return "Investigação consolidada; histórico e proveniência permanecem disponíveis.";
 }
@@ -139,7 +139,7 @@ export function buildRadarWorkbenchStages(input: {
   additionalEvidenceState: RadarAdditionalEvidenceState;
   reportGenerated: boolean;
   reportApproved: boolean;
-  sentToPlanner: boolean;
+  sentToWriter: boolean;
 }): RadarWorkbenchStageModel[] {
   const current = !input.serpCollected
     ? "serp"
@@ -147,7 +147,7 @@ export function buildRadarWorkbenchStages(input: {
       ? "referencias"
       : !input.analysisStarted || input.pagesAnalyzed === 0
         ? "analise-serp"
-        : !input.reportGenerated || !input.reportApproved || !input.sentToPlanner
+        : !input.reportGenerated || !input.reportApproved || !input.sentToWriter
           ? "relatorio"
           : "aprovacao-planejador";
 
@@ -161,7 +161,7 @@ export function buildRadarWorkbenchStages(input: {
           ? input.additionalEvidenceState === "reviewed"
           : stage === "relatorio"
             ? input.reportGenerated
-            : input.reportApproved && input.sentToPlanner;
+            : input.reportApproved && input.sentToWriter;
 
   return RADAR_WORKBENCH_STAGES.map(stage => {
     const state: RadarWorkbenchStageState = stage === "evidencias-adicionais" && input.additionalEvidenceState === "not-needed"
@@ -181,7 +181,7 @@ export function buildRadarWorkbenchStages(input: {
             ? input.additionalEvidenceState === "not-needed" ? "Opcional · não necessária" : input.additionalEvidenceState === "reviewed" ? "Revisadas" : input.additionalEvidenceState === "in-progress" ? "Em andamento" : "Não iniciadas"
             : stage === "relatorio"
               ? input.reportGenerated ? "Prévia disponível" : "Aguardando análise"
-              : input.sentToPlanner ? "Enviado ao Planejador" : input.reportApproved ? "Aprovado · pronto para envio" : "Aguardando aprovação";
+              : input.sentToWriter ? "Enviado ao Planejador" : input.reportApproved ? "Aprovado · pronto para envio" : "Aguardando aprovação";
     return { id: stage, label: RADAR_WORKBENCH_STAGE_LABELS[stage], state, detail };
   });
 }

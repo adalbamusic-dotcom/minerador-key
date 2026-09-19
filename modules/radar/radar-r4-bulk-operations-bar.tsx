@@ -21,7 +21,7 @@ const actionCopy: Array<{ operation: RadarR4BulkOperation; label: string }> = [
   { operation: "specialist", label: "Enviar ao especialista" },
   { operation: "reviewSpecialist", label: "Revisar contribuição" },
   { operation: "report", label: "Gerar relatório" },
-  { operation: "planner", label: "Enviar ao Planejador" },
+  { operation: "writer", label: "Enviar ao Redator" },
 ];
 
 function Count({ label, value }: { label: string; value: number }) {

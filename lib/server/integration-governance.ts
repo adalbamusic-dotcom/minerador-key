@@ -60,6 +60,50 @@ export type AgencyIntegrationQuota = {
   periodEndsAt: string | null;
 };
 
+export const AGENCY_MCP_PROVIDER_KEYS = ["chatgpt", "claude", "gemini", "custom_mcp"] as const;
+export type AgencyMcpProviderKey = typeof AGENCY_MCP_PROVIDER_KEYS[number];
+export const AGENCY_MCP_SCOPES = ["writer.read", "writer.draft.write", "writer.media.brief"] as const;
+export type AgencyMcpScope = typeof AGENCY_MCP_SCOPES[number];
+
+export type AgencyMcpConnection = {
+  id: string;
+  providerKey: AgencyMcpProviderKey;
+  providerName: string;
+  clientName: string;
+  lifecycleStatus: "draft" | "pending" | "ready" | "error" | "disabled" | "revoked";
+  environment: typeof ENVIRONMENT;
+  endpoint: string;
+  transport: "streamable_http";
+  authMode: "delegated_bearer";
+  scopes: AgencyMcpScope[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgencyWriterMcpDelegation = {
+  id: string;
+  brandId: string;
+  brandName: string;
+  clientName: string;
+  tokenPrefix: string;
+  scopes: AgencyMcpScope[];
+  expiresAt: string;
+  revokedAt: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+};
+
+export type AgencyWriterMcpCallEvent = {
+  id: string;
+  brandId: string;
+  brandName: string;
+  documentId: string | null;
+  toolName: string;
+  resultCode: string;
+  requestId: string;
+  occurredAt: string;
+};
+
 export type AgencyIntegrationWorkspace = {
   agency: { id: string; name: string; agencyRef: string };
   canManage: boolean;
@@ -68,6 +112,10 @@ export type AgencyIntegrationWorkspace = {
   platformGrants: AgencyIntegrationGrant[];
   brandBindings: AgencyIntegrationBrandBinding[];
   quotas: AgencyIntegrationQuota[];
+  mcpEndpoint: string;
+  mcpConnections: AgencyMcpConnection[];
+  writerMcpDelegations: AgencyWriterMcpDelegation[];
+  writerMcpAuditEvents: AgencyWriterMcpCallEvent[];
 };
 
 export class IntegrationGovernanceError extends Error {
@@ -112,6 +160,111 @@ function connectionReady(row: { lifecycle_status: string; secret_ref: string | n
   return Boolean(row && row.lifecycle_status === "ready" && row.secret_ref?.trim());
 }
 
+function publicMcpEndpoint() {
+  const configured = process.env.MCP_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_APP_URL;
+  const base = (configured || (process.env.NODE_ENV === "production" ? "" : "http://localhost:3000")).trim().replace(/\/$/, "");
+  if (!base) return "/api/mcp/redator";
+  return `${base}/api/mcp/redator`;
+}
+
+function requiredMcpClientName(value: unknown) {
+  if (typeof value !== "string" || !value.trim() || value.trim().length > 120) {
+    throw new IntegrationGovernanceError(400, "INTEGRATION_GOVERNANCE_INVALID_INPUT", "O nome do cliente MCP é obrigatório.");
+  }
+  return value.trim();
+}
+
+function mcpScopes(value: unknown): AgencyMcpScope[] {
+  const values = value === undefined ? ["writer.read"] : value;
+  if (!Array.isArray(values) || !values.length) {
+    throw new IntegrationGovernanceError(400, "INTEGRATION_GOVERNANCE_INVALID_INPUT", "Escolha pelo menos um escopo MCP.");
+  }
+  const unique = [...new Set(values.filter((item): item is string => typeof item === "string"))];
+  if (!unique.length || unique.some((item) => !(AGENCY_MCP_SCOPES as readonly string[]).includes(item))) {
+    throw new IntegrationGovernanceError(400, "INTEGRATION_GOVERNANCE_INVALID_INPUT", "Escopo MCP inválido.");
+  }
+  return unique as AgencyMcpScope[];
+}
+
+async function readAgencyMcpState(client: GovernanceClient, agencyId: string, brands: Array<{ id: string; name: string }>) {
+  const providersResult = await client.from("integration_providers")
+    .select("id,provider_key,display_name,status")
+    .in("provider_key", [...AGENCY_MCP_PROVIDER_KEYS]);
+  if (providersResult.error) remoteFailure("Não foi possível consultar o catálogo de clientes MCP.");
+
+  const providers = (providersResult.data || []) as Array<{ id: string; provider_key: string; display_name: string; status: string }>;
+  const providerIds = providers.map((provider) => provider.id);
+  const connectionsResult = providerIds.length
+    ? await client.from("integration_connections")
+      .select("id,provider_id,environment,lifecycle_status,metadata,created_at,updated_at")
+      .eq("owner_scope_type", "agency")
+      .eq("owner_agency_id", agencyId)
+      .eq("environment", ENVIRONMENT)
+      .in("provider_id", providerIds)
+      .order("updated_at", { ascending: false })
+    : { data: [], error: null };
+  if (connectionsResult.error) remoteFailure("Não foi possível consultar as conexões MCP da Agência.");
+
+  const providerById = new Map(providers.map((provider) => [provider.id, provider]));
+  const connections: AgencyMcpConnection[] = ((connectionsResult.data || []) as Array<{ id: string; provider_id: string; environment: typeof ENVIRONMENT; lifecycle_status: AgencyMcpConnection["lifecycleStatus"]; metadata: Record<string, unknown>; created_at: string; updated_at: string }>).map((connection) => {
+    const provider = providerById.get(connection.provider_id);
+    const metadata = connection.metadata || {};
+    const scopes = mcpScopes(metadata.scopes);
+    return {
+      id: connection.id,
+      providerKey: (provider?.provider_key || "custom_mcp") as AgencyMcpProviderKey,
+      providerName: provider?.display_name || "Cliente MCP",
+      clientName: typeof metadata.client_name === "string" ? metadata.client_name : "Cliente MCP do Redator",
+      lifecycleStatus: connection.lifecycle_status,
+      environment: connection.environment,
+      endpoint: typeof metadata.endpoint === "string" && metadata.endpoint ? metadata.endpoint : publicMcpEndpoint(),
+      transport: "streamable_http",
+      authMode: "delegated_bearer",
+      scopes,
+      createdAt: connection.created_at,
+      updatedAt: connection.updated_at,
+    };
+  });
+
+  const delegationsResult = await client.from("writer_mcp_delegations")
+    .select("id,marca_id,client_name,token_prefix,scopes,expires_at,revoked_at,last_used_at,created_at")
+    .eq("agency_id", agencyId)
+    .order("created_at", { ascending: false });
+  if (delegationsResult.error) remoteFailure("Não foi possível consultar as delegações MCP do Redator.");
+  const brandNameById = new Map(brands.map((brand) => [brand.id, brand.name]));
+  const writerMcpDelegations: AgencyWriterMcpDelegation[] = ((delegationsResult.data || []) as Array<{ id: string; marca_id: string; client_name: string; token_prefix: string; scopes: unknown; expires_at: string; revoked_at: string | null; last_used_at: string | null; created_at: string }>).map((delegation) => ({
+    id: delegation.id,
+    brandId: delegation.marca_id,
+    brandName: brandNameById.get(delegation.marca_id) || "Marca não encontrada",
+    clientName: delegation.client_name,
+    tokenPrefix: delegation.token_prefix,
+    scopes: mcpScopes(delegation.scopes),
+    expiresAt: delegation.expires_at,
+    revokedAt: delegation.revoked_at,
+    lastUsedAt: delegation.last_used_at,
+    createdAt: delegation.created_at,
+  }));
+  const auditResult = brands.length
+    ? await client.from("writer_mcp_call_events")
+      .select("id,marca_id,document_id,tool_name,result_code,request_id,occurred_at")
+      .in("marca_id", brands.map((brand) => brand.id))
+      .order("occurred_at", { ascending: false })
+      .limit(40)
+    : { data: [], error: null };
+  if (auditResult.error) remoteFailure("Não foi possível consultar a auditoria de chamadas MCP.");
+  const writerMcpAuditEvents: AgencyWriterMcpCallEvent[] = ((auditResult.data || []) as Array<{ id: string; marca_id: string; document_id: string | null; tool_name: string; result_code: string; request_id: string; occurred_at: string }>).map((event) => ({
+    id: event.id,
+    brandId: event.marca_id,
+    brandName: brandNameById.get(event.marca_id) || "Marca não encontrada",
+    documentId: event.document_id,
+    toolName: event.tool_name,
+    resultCode: event.result_code,
+    requestId: event.request_id,
+    occurredAt: event.occurred_at,
+  }));
+  return { mcpEndpoint: publicMcpEndpoint(), mcpConnections: connections, writerMcpDelegations, writerMcpAuditEvents };
+}
+
 async function readDataForSeoCapability(client: GovernanceClient) {
   const result = await client.from("integration_capabilities")
     .select("id,capability_key,operation_kind,environment,unit_name,status")
@@ -130,6 +283,7 @@ export async function readAgencyIntegrationWorkspace(agencyRef: string): Promise
   const client = createGovernanceClient();
   const capability = await readDataForSeoCapability(client);
   const brands = workspace.brands.map((brand) => ({ id: brand.id, name: brand.name, status: brand.status }));
+  const mcpState = await readAgencyMcpState(client, workspace.agency.id, brands);
 
   if (!capability) {
     return {
@@ -140,6 +294,7 @@ export async function readAgencyIntegrationWorkspace(agencyRef: string): Promise
       platformGrants: [],
       brandBindings: [],
       quotas: [],
+      ...mcpState,
     };
   }
 
@@ -249,8 +404,134 @@ export async function readAgencyIntegrationWorkspace(agencyRef: string): Promise
       status: quota.status,
       periodStartedAt: quota.period_started_at,
       periodEndsAt: quota.period_ends_at,
-    })),
+      })),
+    ...mcpState,
   };
+}
+
+export async function registerAgencyMcpClient(input: {
+  agencyRef: string;
+  providerKey: unknown;
+  clientName: unknown;
+  scopes?: unknown;
+}) {
+  const workspace = await getAgencyWorkspaceData(input.agencyRef);
+  if (!workspace.canManage) {
+    throw new IntegrationGovernanceError(403, "INTEGRATION_GOVERNANCE_FORBIDDEN", "Somente o owner ou um administrador da Agência pode registrar clientes MCP.");
+  }
+  const providerKey = requiredEnum(input.providerKey, AGENCY_MCP_PROVIDER_KEYS, "providerKey");
+  const clientName = requiredMcpClientName(input.clientName);
+  const scopes = mcpScopes(input.scopes);
+  if (process.env.NODE_ENV === "production" && !(process.env.MCP_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_APP_URL)?.trim()) {
+    throw new IntegrationGovernanceError(409, "MCP_PUBLIC_ENDPOINT_NOT_CONFIGURED", "Configure MCP_PUBLIC_BASE_URL ou NEXT_PUBLIC_APP_URL antes de registrar um cliente MCP em produção.");
+  }
+  const client = createGovernanceClient();
+  const providerResult = await client.from("integration_providers")
+    .select("id,provider_key,display_name,status")
+    .eq("provider_key", providerKey)
+    .maybeSingle();
+  if (providerResult.error) remoteFailure("Não foi possível consultar o provider MCP.");
+  const provider = providerResult.data as { id: string; provider_key: AgencyMcpProviderKey; display_name: string; status: string } | null;
+  if (!provider || provider.status !== "active") {
+    throw new IntegrationGovernanceError(409, "MCP_PROVIDER_NOT_CONFIGURED", "Este cliente MCP ainda não foi habilitado no catálogo da plataforma. Aplique a migration do catálogo antes de registrar a conexão.");
+  }
+
+  const metadata = {
+    kind: "writer_mcp_client",
+    client_name: clientName,
+    endpoint: publicMcpEndpoint(),
+    transport: "streamable_http",
+    auth_mode: "delegated_bearer",
+    scopes,
+    module: "redator",
+  };
+  const existingResult = await client.from("integration_connections")
+    .select("id,lifecycle_status")
+    .eq("provider_id", provider.id)
+    .eq("owner_scope_type", "agency")
+    .eq("owner_agency_id", workspace.agency.id)
+    .eq("environment", ENVIRONMENT)
+    .neq("lifecycle_status", "revoked")
+    .maybeSingle();
+  if (existingResult.error) remoteFailure("Não foi possível consultar a conexão MCP existente.");
+  const existing = existingResult.data as { id: string; lifecycle_status: AgencyMcpConnection["lifecycleStatus"] } | null;
+  if (existing) {
+    const updateResult = await client.from("integration_connections")
+      .update({ lifecycle_status: "pending", metadata, updated_at: new Date().toISOString() })
+      .eq("id", existing.id)
+      .select("id,lifecycle_status,metadata,created_at,updated_at")
+      .single();
+    if (updateResult.error || !updateResult.data) remoteFailure("Não foi possível atualizar a conexão MCP da Agência.");
+    return { success: true, changed: true, connectionId: existing.id, endpoint: publicMcpEndpoint(), providerKey, status: "pending" as const };
+  }
+
+  const insertResult = await client.from("integration_connections").insert({
+    provider_id: provider.id,
+    owner_scope_type: "agency",
+    owner_agency_id: workspace.agency.id,
+    owner_brand_id: null,
+    environment: ENVIRONMENT,
+    lifecycle_status: "pending",
+    secret_ref: null,
+    metadata,
+    created_by_user_id: workspace.actorUserId,
+  }).select("id,lifecycle_status,metadata,created_at,updated_at").single();
+  resultError(insertResult, "Não foi possível registrar o cliente MCP da Agência.");
+  if (!insertResult.data) remoteFailure("Não foi possível confirmar a conexão MCP da Agência.");
+  return { success: true, changed: true, connectionId: insertResult.data.id, endpoint: publicMcpEndpoint(), providerKey, status: "pending" as const };
+}
+
+export async function revokeAgencyWriterMcpDelegation(input: { agencyRef: string; delegationId: unknown; brandId: unknown }) {
+  const workspace = await getAgencyWorkspaceData(input.agencyRef);
+  if (!workspace.canManage) {
+    throw new IntegrationGovernanceError(403, "INTEGRATION_GOVERNANCE_FORBIDDEN", "Somente o owner ou um administrador da Agência pode revogar delegações MCP.");
+  }
+  const delegationId = requiredId(input.delegationId, "delegationId");
+  const brandId = requiredId(input.brandId, "brandId");
+  if (!workspace.brands.some((brand) => brand.id === brandId)) {
+    throw new IntegrationGovernanceError(403, "INTEGRATION_GOVERNANCE_BRAND_SCOPE", "A Marca não pertence a esta Agência ativa.");
+  }
+  const client = createGovernanceClient();
+  const result = await client.from("writer_mcp_delegations")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("id", delegationId)
+    .eq("agency_id", workspace.agency.id)
+    .eq("marca_id", brandId)
+    .is("revoked_at", null)
+    .select("id,revoked_at")
+    .maybeSingle();
+  if (result.error) remoteFailure("Não foi possível revogar a delegação MCP.");
+  if (!result.data) throw new IntegrationGovernanceError(404, "MCP_DELEGATION_NOT_FOUND", "A delegação MCP não foi encontrada ou já foi revogada.");
+  return { success: true, delegation: result.data };
+}
+
+export async function revokeAgencyMcpClient(input: { agencyRef: string; connectionId: unknown }) {
+  const workspace = await getAgencyWorkspaceData(input.agencyRef);
+  if (!workspace.canManage) {
+    throw new IntegrationGovernanceError(403, "INTEGRATION_GOVERNANCE_FORBIDDEN", "Somente o owner ou um administrador da Agência pode revogar clientes MCP.");
+  }
+  const connectionId = requiredId(input.connectionId, "connectionId");
+  const client = createGovernanceClient();
+  const result = await client.from("integration_connections")
+    .update({ lifecycle_status: "revoked", updated_at: new Date().toISOString() })
+    .eq("id", connectionId)
+    .eq("owner_scope_type", "agency")
+    .eq("owner_agency_id", workspace.agency.id)
+    .eq("environment", ENVIRONMENT)
+    .neq("lifecycle_status", "revoked")
+    .select("id,lifecycle_status")
+    .maybeSingle();
+  if (result.error) remoteFailure("Não foi possível revogar o cliente MCP da Agência.");
+  if (!result.data) throw new IntegrationGovernanceError(404, "MCP_CONNECTION_NOT_FOUND", "O cliente MCP não foi encontrado ou já foi revogado.");
+  return { success: true, connection: result.data };
+}
+
+export async function assertAgencyMcpBrand(input: { agencyRef: string; brandId: unknown }) {
+  const workspace = await getAgencyWorkspaceData(input.agencyRef);
+  if (!workspace.canManage) throw new IntegrationGovernanceError(403, "INTEGRATION_GOVERNANCE_FORBIDDEN", "Apenas administradores da Agência podem criar delegações MCP.");
+  const brandId = requiredId(input.brandId, "brandId");
+  if (!workspace.brands.some((brand) => brand.id === brandId)) throw new IntegrationGovernanceError(403, "INTEGRATION_GOVERNANCE_BRAND_SCOPE", "A Marca não pertence a esta Agência ativa.");
+  return { workspace, brandId };
 }
 
 export async function createAgencyBrandDistribution(input: { agencyRef: string; brandId: unknown; grantId: unknown }) {

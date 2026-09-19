@@ -4,9 +4,9 @@ import { humanReviewRecord } from "./human-review.ts";
 import { resolveLogicalProcessReadiness } from "./logical-processor.ts";
 import { readSiteOrigin } from "./publication-link.ts";
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
-import { isCompletedSemanticReview } from "./semantic-review.ts";
 
-export type MineradorProcessName = "site" | "logic" | "volume" | "results" | "kgr" | "ai" | "review";
+/** Seis processos desde 2026-09-18: a IA saiu do Minerador. */
+export type MineradorProcessName = "site" | "logic" | "volume" | "results" | "kgr" | "review";
 export type MineradorAttemptState = "not_run" | "running" | "success" | "failed";
 /** Freshness of this process's own persisted artifact; never an upstream cascade. */
 export type MineradorArtifactState = "missing" | "current_valid" | "stale" | "invalid";
@@ -97,12 +97,6 @@ export function mineradorProcessPresentation(state: MineradorProcessState): Mine
   return "missing";
 }
 
-function readReview(semantic: Record<string, unknown>): Record<string, unknown> | null {
-  return [semantic.ai_review, semantic.ia_revisao, semantic.revisao_ia, semantic.semantic_review]
-    .map(asRecord)
-    .find(Boolean) || null;
-}
-
 function hasPreviousMeasurement(value: unknown, importedValue: unknown): boolean {
   return value !== null && value !== undefined || importedValue !== null && importedValue !== undefined;
 }
@@ -140,14 +134,9 @@ export function resolveMineradorProcessState(input: MineradorProcessStateInput):
     semantic,
   });
   const logicCurrent = logicReadiness.state === "current_valid";
-  const aiReview = readReview(semantic);
-  // The AI artifact is valid by its own persisted R5 contract. Its inputHash
-  // records the snapshot consumed at execution time; it is provenance, not a
-  // cross-process invalidation key.
-  const aiCurrent = isCompletedSemanticReview(aiReview);
   const reviewRecord = humanReviewRecord(semantic);
-  // Human review is an independent persisted artifact. A new AI, Logic,
-  // Volume or Resultados artifact does not erase or stale a completed review.
+  // Human review is an independent persisted artifact. A new Logic, Volume or
+  // Resultados artifact does not erase or stale a completed review.
   const reviewCompleted = reviewRecord.status === "completed";
   const reviewCurrent = reviewCompleted;
 
@@ -192,12 +181,6 @@ export function resolveMineradorProcessState(input: MineradorProcessStateInput):
     attempt: input.attempts?.site,
     currentReason: "Conferência do site persistida e confirmada no registro canônico.",
   });
-  const ai = currentState({
-    current: aiCurrent,
-    previous: Boolean(aiReview),
-    attempt: input.attempts?.ai,
-    currentReason: "As três fases da IA foram concluídas, o JSON foi validado e o artefato foi persistido no snapshot consumido.",
-  });
   const review = currentState({
     current: reviewCurrent,
     previous: reviewCompleted,
@@ -205,5 +188,5 @@ export function resolveMineradorProcessState(input: MineradorProcessStateInput):
     currentReason: "Revisão humana concluída e persistida para o snapshot revisado.",
   });
 
-  return { site, logic, volume, results, kgr, ai, review };
+  return { site, logic, volume, results, kgr, review };
 }

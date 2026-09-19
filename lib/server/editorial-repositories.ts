@@ -226,6 +226,22 @@ export class WorkflowRepository {
     return unwrap(existing, existingError);
   }
 
+  /**
+   * ===== A TRANSIÇÃO QUE NÃO REESCREVE O HISTÓRICO — §5 =====
+   *
+   * `transition` manda o payload de volta na mesma instrução. Para a linha do
+   * Radar isso significa subir ~9,77 MB de `analysisVersions` só para trocar
+   * uma palavra na coluna `state` — e foi essa escrita que o Postgres cancelou
+   * com 57014.
+   *
+   * Aqui só o estado viaja. O payload não muda, então não precisa ir: a trava
+   * otimista continua sendo a mesma, e o que se grava é o que se quis gravar.
+   */
+  async transitionState(id: string, expectedLock: number, state: string, actorId: string) {
+    const { data, error } = await client().from("editorial_workflow_items").update({ state, updated_by: actorId }).eq("id", id).eq("lock_version", expectedLock).select("id,state,lock_version").maybeSingle();
+    if (error) mapPersistenceError(error); if (!data) throw new OptimisticLockError(); return data;
+  }
+
   async transition(id: string, expectedLock: number, state: string, payload: object, actorId: string) {
     const { data, error } = await client().from("editorial_workflow_items").update({ state, payload, updated_by: actorId }).eq("id", id).eq("lock_version", expectedLock).select("*").maybeSingle();
     if (error) mapPersistenceError(error); if (!data) throw new OptimisticLockError(); return data;
@@ -301,7 +317,17 @@ export class SerpSnapshotRepository {
       });
       return { records, available: true };
     } catch (error) {
-      if (error instanceof PersistenceUnavailableError) return { records: [] as SerpCollectionRecord[], available: false };
+      if (error instanceof PersistenceUnavailableError) {
+        /*
+         * ===== "available: false" NÃO PODE SER MUDO =====
+         *
+         * A leitura degrada em silêncio e a tela mostra "coleta local
+         * disponível". Sem isto, o motivo — projeto inalcançável, timeout,
+         * tabela ausente — morre aqui e nunca chega a quem corrige.
+         */
+        console.error("[serp-records:read]", error.reason, error.driver?.code || "", error.driver?.message || "");
+        return { records: [] as SerpCollectionRecord[], available: false };
+      }
       throw error;
     }
   }
@@ -349,7 +375,10 @@ export class SerpSnapshotRepository {
       const reviews = (data || []).map(row => parseStoredSerpReviewPayload(row.payload, row as unknown as SerpReviewPersistenceRow));
       return { reviews, available: true };
     } catch (error) {
-      if (error instanceof PersistenceUnavailableError) return { reviews: [] as SerpReviewRecord[], available: false };
+      if (error instanceof PersistenceUnavailableError) {
+        console.error("[serp-reviews:read]", error.reason, error.driver?.code || "", error.driver?.message || "");
+        return { reviews: [] as SerpReviewRecord[], available: false };
+      }
       throw error;
     }
   }
@@ -369,13 +398,40 @@ export class ContentDocumentRepository {
     unwrap(data, error); const ids = (data || []).map(row => row.id);
     const states = ids.length ? await client().from("content_document_user_states").select("*").eq("user_id", userId).in("document_id", ids) : { data: [], error: null };
     unwrap(states.data, states.error); const stateMap = new Map((states.data || []).map(row => [row.document_id, row]));
-    return (data || []).map(row => { const state = stateMap.get(row.id); return { document: ContentDocumentSchema.parse(row.payload), contentHash: row.content_hash, lockVersion: row.lock_version, updatedAt: row.updated_at,
-      userState: state ? { cursorPosition: state.cursor_position, scrollTop: state.scroll_top, leftPanelOpen: state.left_panel_open, rightPanelOpen: state.right_panel_open, lastOpenedAt: state.last_opened_at } : null }; });
+    return (data || []).map(row => { const state = stateMap.get(row.id); return { document: ContentDocumentSchema.parse(row.payload), contentHash: row.content_hash, lockVersion: row.lock_version, updatedAt: isoDate(row.updated_at),
+      userState: state ? { cursorPosition: state.cursor_position, scrollTop: state.scroll_top, leftPanelOpen: state.left_panel_open, rightPanelOpen: state.right_panel_open, lastOpenedAt: isoDate(state.last_opened_at) } : null }; });
   }
 
-  async create(marcaId: string, document: ContentDocument, articleId: string, planVersionId: string, articleVersionId: string, slug: string, hash: string, actorId: string) {
+  /**
+   * ===== RADAR_TO_WRITER_HANDOFF_1 · O DOCUMENTO PODE NASCER SEM PLANO =====
+   *
+   * `planVersionId` passou a aceitar `null`. A coluna sempre aceitou — o que
+   * exigia plano era esta assinatura, escrita quando o único caminho até o
+   * Redator passava pelo Planejador.
+   *
+   * O `upsert` com `ignoreDuplicates` continua sendo a idempotência: repetir a
+   * entrega do mesmo artigo devolve o documento existente em vez de criar um
+   * segundo, e nada do que já foi escrito é sobrescrito.
+   */
+  async findByArticle(marcaId: string, articleId: string): Promise<ContentDocument | null> {
+    const { data, error } = await client().from("content_documents").select("payload").eq("marca_id", marcaId).eq("article_id", articleId).maybeSingle();
+    if (error) mapPersistenceError(error);
+    if (!data) return null;
+    return ContentDocumentSchema.parse(data.payload);
+  }
+
+  async create(marcaId: string, document: ContentDocument, articleId: string, planVersionId: string | null, articleVersionId: string, slug: string, hash: string, actorId: string) {
+    /*
+     * §18 · O ESTADO DA LINHA SEGUE O DO DOCUMENTO.
+     *
+     * Estava fixo em `writing` porque o único documento que nascia aqui vinha
+     * de plano aprovado — já em escrita. O documento de origem Radar nasce em
+     * `planejado`: carimbá-lo como `writing` faria a fase de planejamento do
+     * Redator desaparecer do banco no instante em que ela começa.
+     */
+    const status = document.status === "planejado" ? "planned" : document.status === "em_revisao" ? "in_review" : document.status === "aprovado" ? "approved" : "writing";
     const { data, error } = await client().from("content_documents").upsert({ id: document.id, marca_id: marcaId, article_id: articleId, content_plan_version_id: planVersionId,
-      article_dna_version_id: articleVersionId, status: "writing", title: document.title, slug, payload: document, content_hash: hash, created_by: actorId, updated_by: actorId },
+      article_dna_version_id: articleVersionId, status, title: document.title, slug, payload: document, content_hash: hash, created_by: actorId, updated_by: actorId },
       { onConflict: "marca_id,article_id", ignoreDuplicates: true }).select("*").maybeSingle();
     if (error) mapPersistenceError(error); if (data) return data;
     const { data: existing, error: existingError } = await client().from("content_documents").select("*").eq("marca_id", marcaId).eq("article_id", articleId).single();
@@ -396,6 +452,56 @@ export class ContentDocumentRepository {
     if (error) mapPersistenceError(error); return { versionId, versionNumber };
   }
 
+  /**
+   * ===== CORTE 6A.4 · A VERSÃO FINALIZADA VIRA A CORRENTE =====
+   *
+   * `createVersion` insere a linha e para. Ninguém movia
+   * `content_documents.current_version_id` — antes da M6 quem o escrevia era o
+   * save do MCP, e ele o fazia na hora errada. Com o ponteiro sempre nulo, a
+   * guarda `retention_successor_not_current` da RPC de retenção nunca podia
+   * passar, e versão de artigo nenhuma entrava na janela de 48h.
+   *
+   * Isto move o ponteiro, e só ele. É escrita de coluna na mesma tabela que
+   * `save` já atualiza — não é autoridade nova: o versionamento do artigo
+   * sempre morou aqui, do lado TypeScript.
+   */
+  async promoteVersionToCurrent(marcaId: string, documentId: string, versionId: string) {
+    const { data, error } = await client().from("content_documents")
+      .update({ current_version_id: versionId })
+      .eq("id", documentId).eq("marca_id", marcaId).select("current_version_id").maybeSingle();
+    if (error) mapPersistenceError(error);
+    return (data?.current_version_id as string | null) ?? null;
+  }
+
+  /**
+   * Leitura de volta do que a finalização precisa conferir — com o
+   * `lock_version` junto.
+   *
+   * O lock vem porque `promoteVersionToCurrent` é um UPDATE, e
+   * `content_documents_touch_trg` incrementa o lock em QUALQUER update. Quem
+   * chamou precisa devolver ao cliente o lock de DEPOIS do movimento do
+   * ponteiro; devolver o de antes faria a próxima gravação do usuário bater em
+   * conflito logo após finalizar.
+   */
+  async readFinalizationState(marcaId: string, documentId: string) {
+    const { data, error } = await client().from("content_documents")
+      .select("status,content_hash,current_version_id,lock_version")
+      .eq("id", documentId).eq("marca_id", marcaId).maybeSingle();
+    if (error) mapPersistenceError(error);
+    if (!data) return null;
+    return { status: data.status as string, contentHash: data.content_hash as string,
+      currentVersionId: (data.current_version_id as string | null) ?? null,
+      lockVersion: data.lock_version as number };
+  }
+
+  /** Hash da versão indicada, para reconhecer finalização sem mudança material. */
+  async versionContentHash(documentId: string, versionId: string) {
+    const { data, error } = await client().from("content_document_versions")
+      .select("content_hash").eq("document_id", documentId).eq("version_id", versionId).maybeSingle();
+    if (error) mapPersistenceError(error);
+    return (data?.content_hash as string | null) ?? null;
+  }
+
   async saveUserState(documentId: string, userId: string, state: { cursorPosition: number | null; scrollTop: number; leftPanelOpen: boolean; rightPanelOpen: boolean }) {
     const { error } = await client().from("content_document_user_states").upsert({ document_id: documentId, user_id: userId, cursor_position: state.cursorPosition, scroll_top: state.scrollTop,
       left_panel_open: state.leftPanelOpen, right_panel_open: state.rightPanelOpen, last_opened_at: new Date().toISOString() }, { onConflict: "document_id,user_id" });
@@ -410,7 +516,7 @@ export class PublicationProtectionError extends Error {
 export class PublicationRepository {
   async list(marcaId: string) {
     const { data, error } = await client().from("publication_records").select("payload,status,lock_version,updated_at").eq("marca_id", marcaId);
-    unwrap(data, error); return (data || []).map(row => OperationalPublicationSchema.parse({ ...(row.payload as object), state: row.status, lockVersion: row.lock_version, updatedAt: row.updated_at }));
+    unwrap(data, error); return (data || []).map(row => OperationalPublicationSchema.parse({ ...(row.payload as object), state: row.status, lockVersion: row.lock_version, updatedAt: isoDate(row.updated_at) }));
   }
   async create(marcaId: string, publication: OperationalPublication, actorId: string) {
     const { data, error } = await client().from("publication_records").upsert({ marca_id: marcaId, article_id: publication.articleId, content_plan_version_id: publication.contentPlanVersionId,
@@ -424,7 +530,7 @@ export class PublicationRepository {
     if (!row) return null;
     return {
       rowId: row.id as string,
-      publication: OperationalPublicationSchema.parse({ ...(row.payload as object), state: row.status, lockVersion: row.lock_version, updatedAt: row.updated_at }),
+      publication: OperationalPublicationSchema.parse({ ...(row.payload as object), state: row.status, lockVersion: row.lock_version, updatedAt: isoDate(row.updated_at) }),
     };
   }
   async updateOperational(marcaId: string, publicationId: string, expectedLock: number, publication: OperationalPublication, actorId: string) {
@@ -440,7 +546,7 @@ export class PublicationRepository {
       .eq("id", current.rowId).eq("marca_id", marcaId).eq("lock_version", expectedLock).select("id,status,payload,lock_version,updated_at").maybeSingle();
     if (error) mapPersistenceError(error);
     if (!data) throw new OptimisticLockError("A publicação foi alterada por outra sessão.");
-    return OperationalPublicationSchema.parse({ ...(data.payload as object), state: data.status, lockVersion: data.lock_version, updatedAt: data.updated_at });
+    return OperationalPublicationSchema.parse({ ...(data.payload as object), state: data.status, lockVersion: data.lock_version, updatedAt: isoDate(data.updated_at) });
   }
   async syncDocumentStatus(documentId: string, documentStatus: ContentDocument["status"], actorId: string) {
     const { data: current, error: currentError } = await client().from("publication_records").select("id,payload,lock_version").eq("document_id", documentId).maybeSingle();
@@ -467,7 +573,7 @@ export class PublicationRepository {
 export class ViewPreferenceRepository {
   async list(marcaId: string, userId: string) {
     const { data, error } = await client().from("editorial_saved_views").select("id,name,module,settings,is_default,updated_at").eq("marca_id", marcaId).eq("user_id", userId);
-    unwrap(data, error); return (data || []).map(row => SavedGridViewSchema.parse({ ...(row.settings as object), id: row.id, name: row.name, module: row.module, brandId: marcaId, userId, isDefault: row.is_default, updatedAt: row.updated_at }));
+    unwrap(data, error); return (data || []).map(row => SavedGridViewSchema.parse({ ...(row.settings as object), id: row.id, name: row.name, module: row.module, brandId: marcaId, userId, isDefault: row.is_default, updatedAt: isoDate(row.updated_at) }));
   }
   async save(view: SavedGridView, userId: string) {
     if (view.isDefault) await client().from("editorial_saved_views").update({ is_default: false }).eq("marca_id", view.brandId).eq("user_id", userId).eq("module", view.module);
@@ -495,7 +601,7 @@ export class InvitationRepository {
     const row = unwrap(inserted.data, inserted.error)!;
     const permissions = input.permissions.flatMap(permission => permission.actions.map(action => ({ invitation_id: row.id, module: permission.module, action })));
     if (permissions.length) { const { error } = await client().from("brand_invitation_permissions").insert(permissions); if (error) mapPersistenceError(error); }
-    return BrandInvitationSchema.parse({ ...input, id: row.id, status: "pending", createdAt: row.created_at, createdBy: actorId, delivery: "not_sent", tokenId: `persisted:${row.id}` });
+    return BrandInvitationSchema.parse({ ...input, id: row.id, status: "pending", createdAt: isoDate(row.created_at), createdBy: actorId, delivery: "not_sent", tokenId: `persisted:${row.id}` });
   }
 
   async updateStatus(id: string, status: "cancelled" | "expired") {
@@ -508,7 +614,7 @@ export class InvitationRepository {
     unwrap(data, error); return (data || []).map(row => { const roleRelation = row.brand_roles as unknown as { slug?: string } | null; const permissionsRows = row.brand_invitation_permissions as unknown as Array<{ module: string; action: string }>;
       const grouped = new Map<string, string[]>(); for (const permission of permissionsRows || []) grouped.set(permission.module, [...(grouped.get(permission.module) || []), permission.action]);
       return BrandInvitationSchema.parse({ id: row.id, brandId: row.marca_id, email: row.email, role: roleRelation?.slug || "viewer", permissions: [...grouped].map(([module, actions]) => ({ module, actions })), status: row.status,
-        expiresAt: row.expires_at, createdAt: row.created_at, createdBy: row.created_by, delivery: "not_sent", tokenId: `persisted:${row.id}` }); });
+        expiresAt: isoDate(row.expires_at), createdAt: isoDate(row.created_at), createdBy: row.created_by, delivery: "not_sent", tokenId: `persisted:${row.id}` }); });
   }
 }
 

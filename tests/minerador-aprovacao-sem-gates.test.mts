@@ -129,7 +129,6 @@ test("C · keyword crua, sem nenhum processo, já é enviável pelo humano", () 
   assert.equal(gate.volumeValidated, false);
   assert.equal(gate.resultsValidated, false);
   assert.equal(gate.kgrReady, false);
-  assert.equal(gate.aiCompleted, false);
   assert.equal(gate.humanReviewCompleted, false);
   assert.equal(gate.serpEvidencePersisted, false);
   assert.equal(gate.semanticAxesConsolidated, false);
@@ -218,27 +217,6 @@ test("I · o pacote transporta honestamente a SERP não conclusiva", async () =>
   assert.ok(serverHandoff.includes('semanticState: isFullyConsolidatedQualification(qualification) ? "conclusive" : "non_conclusive"'));
 });
 
-test("J · reexecutar a IA não invalida Lógica, Volume, Resultados, KGR nem Revisão", () => {
-  const semantic = reviewedSemantic();
-  const before = resolveMineradorProcessState(keywordRow(semantic));
-  const afterAiRerun = resolveMineradorProcessState({ ...keywordRow(semantic), attempts: { ai: { state: "success" } } });
-  const afterAiFailure = resolveMineradorProcessState({ ...keywordRow(semantic), attempts: { ai: { state: "failed" } } });
-  for (const process of ["volume", "results", "kgr", "review"] as const) {
-    assert.equal(before[process].complete, true, `${process} começa completo`);
-    assert.equal(afterAiRerun[process].complete, true, `a IA não pode invalidar ${process}`);
-    assert.equal(afterAiFailure[process].complete, true, `a falha da IA não pode invalidar ${process}`);
-  }
-  // Lógica pode estar incompleta por conta própria; o que a IA não pode é
-  // alterar esse estado em nenhuma direção.
-  assert.deepEqual(afterAiRerun.logic, before.logic);
-  assert.deepEqual(afterAiFailure.logic, before.logic);
-  // A rota da IA grava o próprio artefato e nada mais.
-  const aiRunner = workspace.slice(workspace.indexOf("const runContextualPresentation"), workspace.indexOf("const handleBatchContextualPresentation"));
-  for (const forbidden of ["setKeywords", "setHumanReviewDrafts", "setSemanticQualifications", "setSemanticConsolidationDrafts", "handleUpdateStatus"]) {
-    assert.ok(!aiRunner.includes(forbidden), `a IA não pode chamar ${forbidden}`);
-  }
-});
-
 test("K · reexecutar SERP/Resultados não invalida Revisão, IA nem Status", () => {
   const semantic = reviewedSemantic();
   const running = resolveMineradorProcessState({ ...keywordRow(semantic), attempts: { results: { state: "running" } } });
@@ -265,11 +243,15 @@ test("L · Volume e Resultado continuam podendo recalcular o KGR — a única de
 
 test("M · aprovação e seleção sobrevivem à reexecução", () => {
   // Nenhum caminho de reprocesso rebaixa status: só handleUpdateStatus escreve.
+  // São dois writes porque aprovar grava o pacote junto, mas os dois moram
+  // dentro do mesmo handler — é isso que o caso guarda.
   const writes = workspace.split(".update({ status:").length - 1;
-  assert.equal(writes, 1, "existe um único ponto de escrita de status");
+  assert.equal(writes, 2, "status é escrito só no caminho da decisão humana");
+  assert.equal(statusHandler.split(".update({ status:").length - 1, writes, "todo write de status vive em handleUpdateStatus");
   assert.ok(statusHandler.includes(".update({ status: normalizedStatus })"));
+  assert.ok(statusHandler.includes(".update({ status: normalizedStatus, analise_semantica: semantica })"));
   // Seleção e linha expandida só mudam por ação do usuário ou troca de Marca.
-  for (const handler of ["const handleBatchContextualPresentation", "const handleBatchQualify", "const handleQualifySelected"]) {
+  for (const handler of ["const handleBatchQualify", "const handleQualifySelected"]) {
     const start = workspace.indexOf(handler);
     assert.ok(start > 0, `${handler} existe`);
     const body = workspace.slice(start, workspace.indexOf("\n  };", start));
@@ -294,7 +276,7 @@ test("O · KGR pendente é decisão humana real e aparece como disponível", () 
   assert.equal(deriveHumanReviewUiState({ completed: false, pendingDecisions: 1 }), "decision_available");
   assert.ok(panel.includes("completion.pendingKgrDecision ? 1 : 0"));
   // Concluída, a revisão é registro — não volta a pendente por outro processo.
-  const reviewed = resolveMineradorProcessState({ ...keywordRow(reviewedSemantic()), attempts: { ai: { state: "failed" }, results: { state: "failed" } } });
+  const reviewed = resolveMineradorProcessState({ ...keywordRow(reviewedSemantic()), attempts: { results: { state: "failed" } } });
   assert.equal(reviewed.review.complete, true);
   assert.equal(deriveHumanReviewUiState({ completed: reviewed.review.complete }), "decisions_recorded");
 });
@@ -305,7 +287,6 @@ test("P · regressão 'retinol principia antes e depois': SERP mista, aprovaçã
   assert.equal(isFullyConsolidatedQualification(mixed), false);
   // Sem IA, sem revisão e com SERP mista, a decisão continua sendo do humano.
   const gate = evaluateMineradorArquitetoHandoff(keywordRow(measuredSemantic), BRAND, mixed);
-  assert.equal(gate.aiCompleted, false);
   assert.equal(gate.humanReviewCompleted, false);
   assert.equal(gate.semanticAxesConsolidated, false);
   assert.equal(gate.ok, true);

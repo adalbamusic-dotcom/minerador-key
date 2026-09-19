@@ -24,7 +24,7 @@ const base = (patch: Partial<RadarInvestigationInput> = {}): RadarInvestigationI
   investigationApproved: false,
   serpCurationApproved: false,
   serpCurationCurrent: false,
-  sentToPlanner: false,
+  sentToWriter: false,
   ...patch,
 });
 
@@ -84,7 +84,7 @@ test("a aprovação humana é o único caminho para concluído", () => {
   assert.equal(aprovado.headline, "Investigação competitiva aprovada");
   assert.equal(aprovado.completedCount, aprovado.stages.length);
   assert.equal(aprovado.action.id, "PREPARE_PLANNER");
-  assert.equal(buildRadarInvestigationView({ ...pronto, investigationApproved: true, sentToPlanner: true }).action.id, "NONE");
+  assert.equal(buildRadarInvestigationView({ ...pronto, investigationApproved: true, sentToWriter: true }).action.id, "NONE");
 });
 
 test("aprovar antes do relatório não existe como caminho: a etapa final permanece bloqueada", () => {

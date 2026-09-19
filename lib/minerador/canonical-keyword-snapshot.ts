@@ -1,9 +1,10 @@
 import { readDataForSeoKeywordDifficultyEvidence, type DataForSeoKeywordDifficultyEvidence } from "./dataforseo-keyword-overview-core.ts";
-import { resolveEditorialKeywordStatus } from "./editorial-status.ts";
+import { resolveEffectiveKeywordStatus } from "./editorial-status.ts";
+import { approvedPackageDiverged, readApprovalRecord } from "./approved-package.ts";
 import { canCompleteHumanReview, humanReviewRecord, type HumanReviewRecord } from "./human-review.ts";
 import { kgrApplicabilityLabel, readKgrApplicability, type KgrApplicability } from "./kgr-applicability.ts";
 import { readCanonicalKeywordDna, type CanonicalFieldResolution, type CanonicalKeywordReadModel, type LogicalReadItem } from "./logical-read-model.ts";
-import { deriveDnaMaturity, type DnaMaturity } from "./semantic-review.ts";
+import { deriveDnaMaturity, type DnaMaturity } from "./dna-maturity.ts";
 import { deriveProcessorRevalidation, type ProcessorRevalidation } from "./processor-revalidation.ts";
 import { readPublicationLink, readSiteOrigin, type PublicationLinkView } from "./publication-link.ts";
 import { readGoogleAdsCpcEvidence, type GoogleAdsCpcEvidence } from "./google-ads-demand.ts";
@@ -67,10 +68,11 @@ export type CanonicalKeywordSnapshot = {
     confirmationValid: boolean;
     canComplete: ReturnType<typeof canCompleteHumanReview>;
     pendingFields: string[];
-    pendingEnrichments: string[];
   };
   maturity: DnaMaturity;
-  status: ReturnType<typeof resolveEditorialKeywordStatus>;
+  status: ReturnType<typeof resolveEffectiveKeywordStatus>;
+  /** Registro da aprovação vigente; null enquanto ninguém aprovou. */
+  approval: ReturnType<typeof readApprovalRecord>;
   vinculo: PublicationLinkView;
   processor: ProcessorRevalidation;
   process: MineradorProcessStates;
@@ -110,7 +112,6 @@ export function resolveCanonicalKeywordSnapshot(input: CanonicalKeywordSnapshotI
     .filter(field => field.state === "unresolved")
     .map(field => field.label);
   const pendingFields = [...new Set([...(canComplete.pendingFields || []), ...pendingStrategicFields])];
-  const pendingEnrichments = canComplete.pendingEnrichments || [];
   const process = resolveMineradorProcessState(input);
   // The review artifact has its own validity. Its provenance points to the
   // snapshot that was reviewed, but a later AI or provider run does not make
@@ -123,7 +124,6 @@ export function resolveCanonicalKeywordSnapshot(input: CanonicalKeywordSnapshotI
     googleAdsValid: processor.volume.validated,
     dataForSeoValid: processor.results.validated,
     kgrTreated: !processor.kgr.ready || kgrApplicability !== "pending" || review.kgrDecisionReviewed === true,
-    aiReviewCompleted: process.ai.complete,
     humanConfirmed: humanCompleted,
     humanReviewCompleted: process.review.complete && canComplete.ok,
   });
@@ -174,10 +174,23 @@ export function resolveCanonicalKeywordSnapshot(input: CanonicalKeywordSnapshotI
       confirmationValid,
       canComplete,
       pendingFields,
-      pendingEnrichments,
     },
     maturity,
-    status: resolveEditorialKeywordStatus(input.status),
+    // Status EFETIVO: aprovada que foi mexida depois aparece como Em revisão
+    // em todo lugar, porque tabela, Perfil e barra leem deste snapshot.
+    status: resolveEffectiveKeywordStatus({
+      status: input.status,
+      diverged: approvedPackageDiverged({
+        keywordId: typeof input.id === "string" ? input.id : "",
+        keyword: typeof input.keyword === "string" ? input.keyword : "",
+        intent: input.intent,
+        volumeSearch: input.volume_search,
+        resultsAllintitle: input.results_allintitle,
+        kgrScore: input.kgr_score,
+        semantic,
+      }),
+    }),
+    approval: readApprovalRecord(semantic),
     vinculo: readPublicationLink({ status: input.status, evidence: siteOrigin }),
     processor,
     process,

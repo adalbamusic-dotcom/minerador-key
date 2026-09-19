@@ -183,7 +183,7 @@ export type RadarR3Model = {
     needs: number;
     summary: string;
     approved: boolean;
-    sentToPlanner: boolean;
+    sentToWriter: boolean;
     updatedAt: string | null;
   };
   nextAction: string;
@@ -212,7 +212,7 @@ export function deriveRadarR3NextAction(input: {
   specialistPending: number;
   reportGenerated: boolean;
   reportApproved: boolean;
-  sentToPlanner: boolean;
+  sentToWriter: boolean;
 }): string {
   if (!input.identityReady) return "Confira a identidade recebida do Arquiteto antes de continuar.";
   if (!input.serpCollected) return "Colete ou recupere a SERP deste artigo.";
@@ -228,7 +228,7 @@ export function deriveRadarR3NextAction(input: {
   if (input.specialistSelected && input.specialistPending > 0) return "Revise as contribuições pendentes do especialista.";
   if (!input.reportGenerated) return "Gere o relatório competitivo desta versão da análise.";
   if (!input.reportApproved) return "Revise o relatório competitivo e aprove a investigação.";
-  if (!input.sentToPlanner) return "Envie as evidências aprovadas ao Planejador quando fizer sentido.";
+  if (!input.sentToWriter) return "Envie as evidências aprovadas ao Planejador quando fizer sentido.";
   return "Investigação consolidada; histórico e proveniência permanecem disponíveis.";
 }
 
@@ -253,7 +253,7 @@ export function buildRadarR3Model(input: {
   pagesAnalyzed: number;
   reportGenerated: boolean;
   reportApproved: boolean;
-  sentToPlanner: boolean;
+  sentToWriter: boolean;
   serpStatus: string;
   latestSnapshotId?: string | null;
   reviewStatus?: "approved" | "rejected" | null;
@@ -320,7 +320,7 @@ export function buildRadarR3Model(input: {
     specialistPending: specialist.pending,
     reportGenerated: input.reportGenerated,
     reportApproved: input.reportApproved,
-    sentToPlanner: input.sentToPlanner,
+    sentToWriter: input.sentToWriter,
   });
   const lastActivity = input.view?.capturedAt || input.analysis?.createdAt || input.row.updatedAt || null;
   return {
@@ -382,7 +382,7 @@ export function buildRadarR3Model(input: {
       needs: report?.needs.length || 0,
       summary: report?.summary.text || "O relatório consolidado será formado a partir da SERP e da análise da amostra.",
       approved: input.reportApproved,
-      sentToPlanner: input.sentToPlanner,
+      sentToWriter: input.sentToWriter,
       updatedAt: report?.provenance.generatedAt || input.analysis?.createdAt || null,
     },
     nextAction,

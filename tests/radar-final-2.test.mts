@@ -292,7 +292,7 @@ test("§21 · nada crítico do Radar depende de localStorage", () => {
    * pessoas verem investigações diferentes do mesmo artigo.
    */
   const trechosCriticos = [
-    pagina.slice(pagina.indexOf("const fronteiraDoPlanejador"), pagina.indexOf("const enviarAoPlanejador")),
+    pagina.slice(pagina.indexOf("const fronteiraDoRedator"), pagina.indexOf("const enviarAoRedator")),
     pagina.slice(pagina.indexOf("const projecaoAmazon"), pagina.indexOf("const planoAmazon")),
   ];
   for (const trecho of trechosCriticos) {
@@ -349,7 +349,7 @@ test("§16 · um evento de domínio, no máximo uma notificação", () => {
    * a mesma coleta que a tela do 1.1 aprendeu a discordar de si mesma.
    */
   const handlers: Array<[string, string, string]> = [
-    ["enviarAoPlanejador", "const enviarAoPlanejador", "const startYoutubeSearch"],
+    ["enviarAoRedator", "const enviarAoRedator", "const startYoutubeSearch"],
     ["acaoAmazonSemProvider", "const acaoAmazonSemProvider", "const resetAmazonSearch"],
   ];
   for (const [nome, inicio, fim] of handlers) {

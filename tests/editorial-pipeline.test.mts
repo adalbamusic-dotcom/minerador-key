@@ -33,7 +33,10 @@ test("menu oficial restringe Admin e não expõe Inteligência Editorial", () =>
   assert.equal(client.some(item => item.id === "admin"), false);
   assert.equal(admin.some(item => item.id === "admin" && item.href === "/admin"), true);
   assert.equal(client.some(item => item.label.includes("Inteligência")), false);
-  assert.deepEqual(client.filter(item => !["conta"].includes(item.id)).map(item => item.href), ["/marca", "/minerador", "/arquiteto", "/radar", "/planejador", "/redator", "/publicacoes"]);
+  assert.deepEqual(client.filter(item => !["conta"].includes(item.id)).map(item => item.href), ["/marca", "/minerador", "/arquiteto", "/radar", "/redator", "/publicacoes"]);
+  /* REMOÇÃO LÓGICA DO PLANEJADOR: o menu não o oferece mais. A rota continua
+   * registrada em PRODUCT_MODULES como `historical` — ver o teste do handoff. */
+  assert.equal(client.some(item => item.id === "planejador"), false, "o Planejador voltou ao menu");
 });
 
 test("estado local permanece isolado por marca", () => {
@@ -46,7 +49,11 @@ test("estado local permanece isolado por marca", () => {
 test("estados do pipeline não contam mocks como progresso", () => {
   const states = derivePipelineStates({ hasBrand: true, legacyKeywordCount: 1, articleApproved: 0, articleProposed: 0, siloApproved: 0, conflicts: 0 });
   assert.equal(states.marca, "in_progress"); assert.equal(states.minerador, "in_progress");
-  assert.equal(states.radar, "blocked"); assert.equal(states.planejador, "blocked");
+  assert.equal(states.radar, "blocked");
+  /* O Planejador deixou de ser etapa: não tem estado no pipeline, nem mesmo
+   * "blocked". Um estado ainda o desenharia na esteira. */
+  assert.equal(Object.hasOwn(states, "planejador"), false, "o Planejador voltou a ter estado de pipeline");
+  assert.equal(states.redator, "blocked");
 });
 
 test("rotas técnicas antigas possuem destino operacional único", () => {

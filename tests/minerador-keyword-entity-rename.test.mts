@@ -57,7 +57,6 @@ test("0036 usa o próximo número livre após 0035 e tem preflight/verifier/roll
 
 test("consumidores ativos usam a nomenclatura canônica e preservam KGR como atributo", async () => {
   const paths = [
-    "app/api/analyze/route.ts",
     "app/api/editorial/serp/route.ts",
     "app/api/inteligencia/route.ts",
     "app/api/marca/site/import/keywords/preview/route.ts",
@@ -67,7 +66,6 @@ test("consumidores ativos usam a nomenclatura canônica e preservam KGR como atr
     "app/api/minerador/marcas/[brandId]/dataforseo/allintitle/route.ts",
     "app/api/minerador/marcas/[brandId]/google-ads/descobrir-keywords/route.ts",
     "app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts",
-    "app/api/process-intent-niche/route.ts",
     "lib/minerador/keyword-import-core.ts",
     "lib/server/authz.ts",
     "lib/server/arquiteto-workspace.ts",

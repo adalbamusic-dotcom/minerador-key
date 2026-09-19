@@ -4,7 +4,6 @@ import test from "node:test";
 import { canCompleteHumanReview, completeHumanReview, humanReviewRecord } from "../lib/minerador/human-review.ts";
 import { buildLogicalOutputContract, buildLogicalProcessorMetadata } from "../lib/minerador/logical-processor.ts";
 import { mineradorProcessPresentation, resolveMineradorProcessState } from "../lib/minerador/process-state.ts";
-import { buildSemanticReviewContext, semanticReviewInputHash } from "../lib/minerador/semantic-review.ts";
 
 const logicalInput = {
   keywordId: "keyword-r6",
@@ -40,14 +39,9 @@ function currentRow() {
       kgr_aplicabilidade: "applicable",
     } as Record<string, unknown>,
   };
-  const inputHash = semanticReviewInputHash(buildSemanticReviewContext({
-    keyword: row.keyword,
-    intent: row.intent,
-    volume_search: row.volume_search,
-    results_allintitle: row.results_allintitle,
-    kgr_score: null,
-    analise_semantica: row.analise_semantica,
-  }));
+  // Hash literal: o R5 não existe mais para calculá-lo e o estado de processo
+  // não compara mais esse valor — ele só precisa estar presente.
+  const inputHash = "r5-fnv1a-legado01";
   row.analise_semantica.ai_review = {
     schemaVersion: "r5",
     status: "completed",
@@ -79,7 +73,7 @@ const panel = readFileSync(new URL("../components/editorial/dna-panels.tsx", imp
 
 test("R6 mantém cada processo independente: refazer Lógica não altera nenhum outro artefato", () => {
   const row = currentRow();
-  const validated = { site: "missing", logic: "current_valid", volume: "current_valid", results: "current_valid", kgr: "current_valid", ai: "current_valid", review: "current_valid" };
+  const validated = { site: "missing", logic: "current_valid", volume: "current_valid", results: "current_valid", kgr: "current_valid", review: "current_valid" };
   const before = resolveMineradorProcessState(row);
   assert.deepEqual(Object.fromEntries(Object.entries(before).map(([name, state]) => [name, state.artifactState])), validated);
 
@@ -90,32 +84,19 @@ test("R6 mantém cada processo independente: refazer Lógica não altera nenhum 
   assert.deepEqual(Object.fromEntries(Object.entries(after).map(([name, state]) => [name, state.artifactState])), validated);
   const updateBadges = Object.values(after).filter(state => mineradorProcessPresentation(state) === "stale").length;
   assert.equal(updateBadges, 0);
-  assert.equal(after.ai.complete, true);
   assert.equal(after.review.complete, true);
-});
-
-test("R6 mantém IA e Revisão validadas quando IA é reexecutada sobre outro snapshot", () => {
-  const row = currentRow();
-  row.analise_semantica.ai_review = { ...(row.analise_semantica.ai_review as Record<string, unknown>), inputHash: "r5-fnv1a-novo-snapshot" };
-  const states = resolveMineradorProcessState(row);
-  assert.equal(states.ai.artifactState, "current_valid");
-  assert.equal(states.review.artifactState, "current_valid");
-  assert.equal(states.review.complete, true);
-  assert.equal(mineradorProcessPresentation(states.review), "current");
 });
 
 test("R6 preserva tudo quando uma tentativa falha e nunca invalida dependentes pelo candidate", () => {
   const row = currentRow();
-  const states = resolveMineradorProcessState({ ...row, attempts: { logic: { state: "failed" }, ai: { state: "failed" } } });
+  const states = resolveMineradorProcessState({ ...row, attempts: { logic: { state: "failed" } } });
   assert.equal(states.logic.artifactState, "current_valid");
   assert.equal(states.logic.complete, true);
   assert.equal(states.volume.artifactState, "current_valid");
   assert.equal(states.results.artifactState, "current_valid");
   assert.equal(states.kgr.artifactState, "current_valid");
-  assert.equal(states.ai.artifactState, "current_valid");
   assert.equal(states.review.artifactState, "current_valid");
   assert.equal(mineradorProcessPresentation(states.logic), "failed");
-  assert.equal(mineradorProcessPresentation(states.ai), "failed");
 });
 
 test("R6 recalcula o KGR somente com Volume e Resultado promovidos", () => {
@@ -126,7 +107,6 @@ test("R6 recalcula o KGR somente com Volume e Resultado promovidos", () => {
   assert.equal(volumeStates.kgr.complete, true);
   assert.equal(volumeStates.logic.artifactState, "current_valid");
   assert.equal(volumeStates.results.artifactState, "current_valid");
-  assert.equal(volumeStates.ai.artifactState, "current_valid");
   assert.equal(volumeStates.review.artifactState, "current_valid");
 
   const logicRerun = resolveMineradorProcessState(rerunLogic(currentRow(), "2026-08-24T12:30:00.000Z"));
@@ -138,17 +118,15 @@ test("R6 reprojeta os mesmos estados após reload, sem tentativa local persistid
   const row = currentRow();
   row.keyword = "gestao de condominio digital com app";
   rerunLogic(row, "2026-08-24T13:00:00.000Z");
-  const running = resolveMineradorProcessState({ ...row, attempts: { ai: { state: "running" } } });
+  const running = resolveMineradorProcessState({ ...row, attempts: { logic: { state: "running" } } });
   const reloaded = resolveMineradorProcessState(row);
-  for (const name of ["site", "logic", "volume", "results", "kgr", "ai", "review"] as const) {
+  for (const name of ["site", "logic", "volume", "results", "kgr", "review"] as const) {
     assert.equal(reloaded[name].artifactState, running[name].artifactState);
     assert.equal(reloaded[name].attemptState, "not_run");
   }
   assert.equal(reloaded.volume.artifactState, "current_valid");
-  assert.equal(reloaded.ai.artifactState, "current_valid");
   assert.equal(reloaded.review.artifactState, "current_valid");
   assert.equal(Object.values(reloaded).filter(state => mineradorProcessPresentation(state) === "stale").length, 0);
-  assert.equal(mineradorProcessPresentation(running.ai), "running");
 });
 
 test("R6 mantém Concluir revisão acionável com pendências e aplica defaults conservadores", () => {
@@ -159,29 +137,17 @@ test("R6 mantém Concluir revisão acionável com pendências e aplica defaults 
     volume_measurement: { provider: "google_ads", averageMonthlySearches: 90, measuredAt: "2026-08-24T10:01:00.000Z" },
     allintitle_measurement: { provider: "dataforseo", resultsAllintitle: 12, measuredAt: "2026-08-24T10:02:00.000Z" },
     kgr_aplicabilidade: "applicable",
-    ai_review: {
-      schemaVersion: "r5",
-      status: "completed",
-      reviewStatus: "completed",
-      overallVerdict: "DIVERGE",
-      fieldReviews: [{ field: "intenção", logicalValue: "Informativa", aiSuggestion: "Comercial", verdict: "DIVERGE", rationale: "Sinal comercial.", evidenceUsed: ["logical"] }],
-      semanticEnrichment: { searchNeed: "Comparar alternativas." },
-    },
   };
   const completion = canCompleteHumanReview(semantic, { intent: "Informativa" });
   assert.equal(completion.ok, true);
   assert.ok(completion.pendingFields.length > 0);
-  assert.ok((completion.pendingEnrichments || []).length > 0);
 
   const completed = completeHumanReview({ semantic, intent: "Informativa", actorId: "human-1", completedAt: "2026-08-24T14:00:00.000Z" });
   const record = humanReviewRecord(completed);
   assert.equal(record.status, "completed");
-  assert.equal(record.fieldDecisions.find(entry => entry.field === "intenção")?.decision, "keep_logic");
   assert.equal(record.fieldDecisions.find(entry => entry.field === "niche")?.decision, "confirm_unknown");
-  assert.equal(record.enrichmentDecisions?.find(entry => entry.field === "searchNeed")?.decision, "ignore");
   // Conservative defaults never accept the AI suggestion nor invent a value.
   assert.equal((completed as Record<string, unknown>).intencao_principal, "Informativa");
-  assert.equal((completed as Record<string, unknown>).intencao_humana, "Informativa");
   assert.equal((completed as Record<string, unknown>).nicho_humano, undefined);
   assert.equal((completed as Record<string, unknown>).nicho_override, undefined);
 });

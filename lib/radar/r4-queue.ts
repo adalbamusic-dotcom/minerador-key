@@ -159,7 +159,7 @@ export type RadarR4SerpQueue = {
   items: Record<string, RadarR4SerpQueueItem>;
 };
 
-export type RadarR4BulkOperation = "serp" | "refreshSerp" | "review" | "approve" | "topics" | "approveTopics" | "specialist" | "reviewSpecialist" | "report" | "planner";
+export type RadarR4BulkOperation = "serp" | "refreshSerp" | "review" | "approve" | "topics" | "approveTopics" | "specialist" | "reviewSpecialist" | "report" | "writer";
 
 export type RadarR4BulkArticleSnapshot = {
   articleId: string;
@@ -169,7 +169,19 @@ export type RadarR4BulkArticleSnapshot = {
   analysisStarted: boolean;
   reportGenerated: boolean;
   reportApproved: boolean;
-  sentToPlanner: boolean;
+  /**
+   * ===== READINESS_FIX_1 · A FINALIZAÇÃO CANÔNICA, e não a aprovação legada =====
+   *
+   * O lote decidia a entrega ao Redator por `reportApproved`, que é a aprovação
+   * do relatório do fluxo ANTIGO por abas. Um artigo finalizado pelo fluxo
+   * vigente — `START → ANALYZE → FINALIZE` — nunca a tem, e aparecia bloqueado
+   * na barra enquanto o botão individual o aceitava.
+   *
+   * Aditivo e opcional: quem ainda não informa continua caindo na leitura
+   * anterior, e nenhuma bancada existente muda de resposta por causa disto.
+   */
+  researchFinalized?: boolean;
+  sentToWriter: boolean;
   rowState: string;
   topicsState: RadarR4TopicState;
   topicsReviewed: boolean;
@@ -280,7 +292,7 @@ export function getRadarR4BulkEligibility(snapshots: RadarR4BulkArticleSnapshot[
     }
     if (operation === "approve") {
       if (!snapshot.serpReviewed) bucket("blocked");
-      else if (snapshot.reportApproved || snapshot.sentToPlanner || snapshot.rowState === "approved" || snapshot.rowState === "sent_planner") bucket("alreadyDone");
+      else if (snapshot.reportApproved || snapshot.sentToWriter || snapshot.rowState === "approved" || snapshot.rowState === "sent_writer") bucket("alreadyDone");
       else bucket("eligible");
       continue;
     }
@@ -318,8 +330,14 @@ export function getRadarR4BulkEligibility(snapshots: RadarR4BulkArticleSnapshot[
       else bucket("eligible");
       continue;
     }
-    if (snapshot.sentToPlanner) bucket("alreadyDone");
-    else if (snapshot.reportApproved) bucket("eligible");
+    /*
+     * A ENTREGA AO REDATOR — e ela pergunta pela FINALIZAÇÃO.
+     *
+     * A prontidão de verdade é a do servidor. O que a barra precisa acertar é
+     * não oferecer o que será recusado nem esconder o que passaria.
+     */
+    if (snapshot.sentToWriter) bucket("alreadyDone");
+    else if (snapshot.researchFinalized ?? snapshot.reportApproved) bucket("eligible");
     else bucket("blocked");
   }
   return result;
@@ -336,7 +354,7 @@ export function availableBulkActions(snapshots: RadarR4BulkArticleSnapshot[]): R
     specialist: getRadarR4BulkEligibility(snapshots, "specialist"),
     reviewSpecialist: getRadarR4BulkEligibility(snapshots, "reviewSpecialist"),
     report: getRadarR4BulkEligibility(snapshots, "report"),
-    planner: getRadarR4BulkEligibility(snapshots, "planner"),
+    writer: getRadarR4BulkEligibility(snapshots, "writer"),
   };
 }
 

@@ -16,7 +16,17 @@ export function useKeywordTableSelection(visibleIds: string[]) {
 
   const onClick = useCallback((id: string, event: MouseEvent<HTMLButtonElement>) => {
     if (suppressClickRef.current) { suppressClickRef.current = false; return; }
-    const result = applyKeywordSelectionClick({ selectedIds, visibleIds, id, anchorId: anchorRef.current, shiftKey: event.shiftKey, additiveKey: event.ctrlKey || event.metaKey });
+    const result = applyKeywordSelectionClick({
+      selectedIds,
+      visibleIds,
+      id,
+      anchorId: anchorRef.current,
+      shiftKey: event.shiftKey,
+      additiveKey: event.ctrlKey || event.metaKey,
+      // `detail === 0` é ativação por teclado: o clique do mouse sempre traz
+      // contagem. Sem isso, Espaço na caixa de seleção limparia o resto.
+      keyboard: event.detail === 0,
+    });
     setSelectedIds(result.selectedIds);
     anchorRef.current = result.anchorId;
   }, [selectedIds, visibleIds]);
@@ -25,6 +35,15 @@ export function useKeywordTableSelection(visibleIds: string[]) {
     if (event.button !== 0) return;
     if (suppressClickTimerRef.current) clearTimeout(suppressClickTimerRef.current);
     suppressClickRef.current = false;
+    /*
+     * COM MODIFICADOR, QUEM MANDA É O CLIQUE.
+     *
+     * Shift e Ctrl descrevem intervalo e alternância, e a pintura por arraste
+     * não sabe nada disso: ela repinta a partir da linha pressionada. Um
+     * Shift+clique com 4px de tremor virava pintura, o intervalo sumia e o
+     * clique real era engolido pelo supressor.
+     */
+    if (event.shiftKey || event.ctrlKey || event.metaKey) { dragRef.current = null; return; }
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { id, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, mode: selectedIds.has(id) ? "deselect" : "select", initial: new Set(selectedIds), currentId: null, moved: false };
   }, [selectedIds]);
@@ -40,6 +59,9 @@ export function useKeywordTableSelection(visibleIds: string[]) {
       const drag = dragRef.current;
       dragRef.current = null;
       if (!drag?.moved) return;
+      // O trecho pintado deixa a âncora onde ele começou: o Shift+clique
+      // seguinte estica a partir dali, e não de onde o arraste parou.
+      anchorRef.current = drag.id;
       suppressClickRef.current = true;
       suppressClickTimerRef.current = setTimeout(() => {
         suppressClickRef.current = false;

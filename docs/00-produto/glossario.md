@@ -59,3 +59,14 @@
 - **dossiê editorial portátil** — o CSV que leva o contexto de escrita para fora da plataforma. Não é backup, não é dump de banco e não carrega id interno.
 - **writer_brief_md** — a decisão editorial condensada. Read model portátil, não autoridade factual.
 - **writer_context_md** — o contexto completo de escrita, para colar inteiro em outra ferramenta. Read model portátil.
+
+## Pipeline — Radar → Redator (2026-09-17)
+
+- **`sendRadarToWriter`** — a autoridade única de entrega do Radar ao Redator. Valida, resolve o dossiê canônico, grava o recibo, relê, confere identidade, cria o documento, relê o destino e só então move a esteira.
+- **`RadarWriterBundleRecord`** — o recibo da entrega, gravado na análise em `writerBundle`. Mesma forma do recibo do Planejador, campo próprio: o destino faz parte do fato.
+- **`RadarWriterDossier`** — a estrutura canônica que viaja DENTRO do documento do Redator: perfil, contexto de keyword, o bundle inteiro e as invariantes. Não é markdown.
+- **`RADAR_WRITER_MAY_NOT`** — o que o Redator não pode redefinir: keyword principal, Silo, cobertura obrigatória, intenção, slug e canonical protegidos, composição de secundárias. Viaja com o pacote.
+- **`RADAR_WRITER_MAY_DECIDE`** — o que ele decide: estrutura final, sequência, evidência por seção, links, mídia, metadados de SEO, CTA e instruções de redação.
+- **fase de planejamento do Redator** — `ContentDocument.status = "planejado"`. A escrita começa em `escrevendo`. `ContentPlan` pode existir aí dentro como artefato interno; ele deixou de ser etapa.
+- **`sent_writer`** — o estado do item do Radar depois da entrega. `sent_planner` continua legível no enum porque existe no banco; o fluxo novo não o produz.
+- **documento de origem Radar** — `ContentDocumentV2`, nasce sem `ContentPlan`, com `radarOrigin` (identidade e hash do pacote) e `importedContext.dossier` (a estrutura canônica).

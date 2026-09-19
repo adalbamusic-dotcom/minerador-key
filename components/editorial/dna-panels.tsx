@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useId, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { ArticleDNA, SiloDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { legacyVersionReference } from "@/lib/arquiteto/versioning";
 import { useBrand } from "@/components/brand-context";
@@ -13,26 +13,14 @@ import { deriveGoogleAdsDemandTrend, formatGoogleAdsCpcTableValue, googleAdsDema
 import { dataForSeoKeywordDifficultyStateLabel, readDataForSeoKeywordDifficultyEvidence } from "@/lib/minerador/dataforseo-keyword-overview-core";
 import { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";
 import { calculateKgrFromMetrics, kgrDecisionLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";
-import type { ContextualPresentation } from "@/lib/minerador/presentation-brief";
-import { contextualPresentationDecisionLabel, contextualPresentationProcessState, contextualPresentationStatePill, contextualPresentationStateSummary, deriveContextualPresentationUiState, type ContextualPresentationUiState } from "@/lib/minerador/contextual-presentation-ui-state";
 import { serpCollectionLabel, serpEvidenceStrengthPresentation } from "@/lib/minerador/serp-semantic-evidence";
 import { qualificationVersionLabel, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
 
-/** Working copy da apresentação contextual; não é artefato persistido do KeywordDNA. */
-export type KeywordPresentationBrief = {
-  contextualPresentation: ContextualPresentation;
-  brandVoiceApplied: boolean;
-  appliedSkillRefs: ContextualPresentation["appliedSkillRefs"];
-  generatedAt: string;
-  /** true quando o artifact remoto foi confirmado; sessão sem write fica false. */
-  persisted: boolean;
-  version?: number | null;
-};
-import { canCompleteHumanReview, canonicalHumanReviewField, classifyHumanReviewField, humanReviewEnrichmentRows, humanReviewFieldDecision, humanReviewRecord, humanReviewStrategicFields, type HumanReviewAction } from "@/lib/minerador/human-review";
+import { canCompleteHumanReview, humanReviewRecord, type HumanReviewAction } from "@/lib/minerador/human-review";
 import { deriveHumanReviewUiState, humanReviewStatePill, humanReviewStateSummary } from "@/lib/minerador/human-review-ui-state";
 import { buildKeywordDecisionSummary, type KeywordDecisionSummary, type KeywordDecisionSummaryState } from "@/lib/minerador/keyword-decision-summary";
 import { processorKgrStateLabel, processorMetricStateLabel } from "@/lib/minerador/processor-revalidation";
-import { dnaMaturityLabel, isCompletedSemanticReview, reviewEnrichment, reviewEvidenceReferences, reviewFields, semanticReviewDivergenceCount, semanticReviewVerdictLabel } from "@/lib/minerador/semantic-review";
+import { dnaMaturityLabel } from "@/lib/minerador/dna-maturity";
 import { volumeEligibilityLabel, type VolumeEligibilityStatus } from "@/lib/minerador/volume-eligibility";
 import { readSiteOrigin } from "@/lib/minerador/publication-link";
 import { isLegacyPublishedStatus } from "@/lib/minerador/editorial-status";
@@ -317,158 +305,6 @@ function MonthlyHistoryDetails({ value }: { value: unknown }) {
   </details>;
 }
 
-function semanticReviewTone(value: string): keyof typeof profileToneClasses {
-  if (value === "Diverge") return "warning";
-  if (value === "Evidência insuficiente") return "pending";
-  if (value === "Concorda") return "success";
-  return "accent";
-}
-
-function semanticReviewFieldLabel(value: unknown): string {
-  if (typeof value !== "string" || !value.trim()) return "Campo sem nome";
-  const normalized = value.trim().toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[_.-]+/g, " ").replace(/\s+/g, " ");
-  return ({
-    intent: "Intenção",
-    intencao: "Intenção",
-    secondaryintent: "Intenção secundária",
-    "secondary intent": "Intenção secundária",
-    "intencao secundaria": "Intenção secundária",
-    niche: "Nicho",
-    nicho: "Nicho",
-    funnel: "Funil",
-    funil: "Funil",
-    centralentity: "Entidade central",
-    "central entity": "Entidade central",
-    "entidade central": "Entidade central",
-    modifiers: "Modificadores",
-    modificadores: "Modificadores",
-    audience: "Audiência",
-    audiencia: "Audiência",
-    perceivedproblem: "Problema percebido",
-    "perceived problem": "Problema percebido",
-    "problema percebido": "Problema percebido",
-    desiredresult: "Resultado desejado",
-    "desired result": "Resultado desejado",
-    "resultado desejado": "Resultado desejado",
-    jobtobedone: "Job to be done",
-    "job to be done": "Job to be done",
-    journey: "Jornada",
-    jornada: "Jornada",
-    awareness: "Consciência",
-    consciencia: "Consciência",
-    editorialtype: "Tipo editorial",
-    "editorial type": "Tipo editorial",
-    expectedformat: "Formato esperado",
-    "expected format": "Formato esperado",
-    logicalcommercialpotential: "Potencial comercial lógico",
-    localintent: "Intenção local",
-    "local intent": "Intenção local",
-    implicitobjection: "Objeção implícita",
-    "implicit objection": "Objeção implícita",
-    urgency: "Urgência/tempo",
-    urgencia: "Urgência/tempo",
-    dominantemotion: "Emoção dominante",
-    "dominant emotion": "Emoção dominante",
-    ambiguity: "Ambiguidade",
-    ambiguidade: "Ambiguidade",
-  } as Record<string, string>)[normalized] || value;
-}
-
-function semanticEvidenceLabel(value: string): string {
-  return ({
-    logical: "Lógica",
-    googleAds: "Google Ads",
-    dataForSeo: "DataForSEO",
-    kgr: "KGR",
-  } as Record<string, string>)[value] || value;
-}
-
-function semanticReviewDisplayValue(field: unknown, value: unknown): string {
-  const fieldLabel = semanticReviewFieldLabel(field).toLocaleLowerCase("pt-BR");
-  if (fieldLabel === "funil" && normalizeProfileMarker(String(value || "")) === "nao classificavel") return "Indefinido";
-  return displayValue(value);
-}
-
-function semanticEvidenceDisplayValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(item => semanticEvidenceDisplayValue(item));
-  if (typeof value !== "string") return value;
-  const match = value.match(/^(logical|googleAds|dataForSeo|kgr)(?:\.(.*))?$/);
-  if (!match) return value.startsWith("phase") ? "Revisão semântica IA" : value;
-  const source = semanticEvidenceLabel(match[1]);
-  const path = match[2];
-  if (!path) return source;
-  const field = path.startsWith("fields.") ? path.slice("fields.".length) : path;
-  return `${source} · ${semanticReviewFieldLabel(field)}`;
-}
-
-function semanticReviewSummaryLabel(review: ProfileRecord | null): string {
-  if (!isCompletedSemanticReview(review)) return "Pendente";
-  if (semanticReviewDivergenceCount(review) > 0) return "Correções sugeridas";
-  if (semanticReviewVerdictLabel(review.overallVerdict) === "Evidência insuficiente") return "Revisão necessária";
-  return "Coerente";
-}
-
-function SemanticReviewDetails({ review, embedded = false }: { review: ProfileRecord | null; embedded?: boolean }) {
-  if (!isCompletedSemanticReview(review)) return null;
-  const fields = reviewFields(review);
-  const enrichment = reviewEnrichment(review);
-  const evidence = reviewEvidenceReferences(review);
-  const enrichmentFields: ProfileFieldDefinition[] = [
-    { label: "Necessidade implícita", value: enrichment.searchNeed, wide: true },
-    { label: "Objetivo provável", value: enrichment.probableObjective, wide: true },
-    { label: "Contexto semântico", value: enrichment.semanticContext, wide: true },
-    { label: "Expectativa do usuário", value: enrichment.userExpectation, wide: true },
-    { label: "Relação entidade/modificador", value: enrichment.entityModifierRelation, wide: true },
-    { label: "Ambiguidades remanescentes", value: enrichment.remainingAmbiguities, wide: true },
-    { label: "Adequação", value: enrichment.suitability, wide: true },
-    { label: "Observações", value: enrichment.observations, wide: true },
-    { label: "Lacunas", value: enrichment.gaps, wide: true },
-  ];
-  const evidenceFields: ProfileFieldDefinition[] = Object.entries(evidence).map(([key, value]) => ({
-    label: semanticEvidenceLabel(key),
-    value,
-    mono: true,
-  }));
-  const reviewContent = <div className="mt-2 min-w-0 space-y-3 border-t border-divider pt-2">
-      {fields.length > 0 && <section aria-label="Comparação campo a campo">
-        <p className="text-sm font-semibold text-foreground">Comparação campo a campo</p>
-        <div className="mt-1.5 min-w-0 space-y-2">
-          {fields.map((field, index) => {
-            const verdict = semanticReviewVerdictLabel(field.verdict);
-            return <article key={`${semanticReviewFieldLabel(field.field)}:${index}`} className="min-w-0 border-b border-divider/70 pb-2 last:border-b-0 last:pb-0">
-              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                <p className="min-w-0 break-words text-sm font-semibold text-foreground">{semanticReviewFieldLabel(field.field)}</p>
-                <ProfilePill label={verdict} tone={semanticReviewTone(verdict)} />
-              </div>
-              <div className="mt-1.5 min-w-0">
-                <ProfileFields fields={[
-                  { label: "Valor lógico", value: semanticReviewDisplayValue(field.field, field.logicalValue), wide: true },
-                  { label: "Sugestão IA", value: semanticReviewDisplayValue(field.field, field.aiSuggestion), wide: true },
-                  { label: "Motivo", value: field.rationale, wide: true },
-                  { label: "Evidências", value: semanticEvidenceDisplayValue(field.evidenceUsed), mono: true, wide: true },
-                ]} compact layout="rows" />
-              </div>
-            </article>;
-          })}
-        </div>
-      </section>}
-      {enrichmentFields.some(field => isMeaningfulProfileValue(field.value)) && <section aria-label="Enriquecimentos semânticos">
-        <p className="text-sm font-semibold text-foreground">Enriquecimentos semânticos</p>
-        <div className="mt-1.5 min-w-0"><ProfileFields fields={enrichmentFields} compact layout="rows" /></div>
-      </section>}
-      {evidenceFields.some(field => isMeaningfulProfileValue(field.value)) && <section aria-label="Evidências consideradas">
-        <p className="text-sm font-semibold text-foreground">Evidências consideradas</p>
-        <div className="mt-1.5 min-w-0"><ProfileFields fields={evidenceFields} compact layout="rows" /></div>
-      </section>}
-    </div>;
-  return embedded
-    ? <div data-keyword-ai-review-details className="min-w-0">{reviewContent}</div>
-    : <details data-keyword-ai-review-details className="mt-2 rounded-md border border-divider bg-surface px-2.5 py-1.5">
-      <summary className="cursor-pointer text-sm font-semibold text-text-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent/30">Ver revisão completa</summary>
-      {reviewContent}
-    </details>;
-}
-
 const kgrToneClasses = {
   success: "border-success/50 bg-success-soft text-success",
   warning: "border-warning/50 bg-warning-soft text-warning",
@@ -478,18 +314,11 @@ const kgrToneClasses = {
 
 function decisionSummaryTone(state: KeywordDecisionSummaryState): keyof typeof profileToneClasses {
   const marker = normalizeProfileMarker(state.value);
-  if (state.key === "ai") {
-    if (marker === "pendente") return "pending";
-    if (marker.includes("diverge")) return "warning";
-    if (marker === "concorda") return "success";
-    return "accent";
-  }
   if (state.key === "dna") {
     if (marker === "confirmada") return "success";
     if (marker === "completa para revisao") return "accent";
     return "pending";
   }
-  if (state.key === "divergences") return marker === "0" ? "success" : "warning";
   if (marker === "aplicavel") return "success";
   if (marker === "nao aplicavel") return "neutral";
   return "pending";
@@ -515,10 +344,6 @@ function DecisionSummary({ summary, kgrTone }: { summary: KeywordDecisionSummary
       </div>)}
     </div>}
   </section>;
-}
-
-function humanReviewDecisionLabel(value: unknown): string {
-  return ({ keep_logic: "Manteve lógica", accept_ai: "Aceitou IA", edit: "Editou", confirm_unknown: "Confirmou desconhecido" } as Record<string, string>)[String(value)] || "Pendente";
 }
 
 // Camada somente de leitura: a consolidação vem da evidência, não de ação humana.
@@ -572,8 +397,8 @@ function SemanticConsolidationPanel({ draft, qualification = null, serpCollectin
           : "SERP analisada. A evidência conclusiva consolidou Intenção e/ou Funil automaticamente.";
   const consolidatedBySerp = semanticConsolidationBySerp(draft);
   return <section data-keyword-semantic-consolidation className="min-w-0 rounded-md border border-context-accent/35 bg-surface-subtle p-2.5" aria-label="Qualificação semântica">
-    <header className="flex min-w-0 flex-wrap items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-1.5"><h3 className="text-base font-semibold tracking-tight text-foreground">QUALIFICAÇÃO SEMÂNTICA</h3><InfoHint title="Consolidação semântica" description="A Lógica é hipótese inicial. A SERP real é evidência externa: quando conclusiva, ela fecha Intenção e Funil automaticamente, sem confirmação humana e sem participação da IA." /></div><ProfilePill label={serpCollectionLabel(serpState)} tone={serpState === "analyzed" ? "success" : serpState === "failed" ? "danger" : serpState === "collecting" ? "accent" : "pending"} /></header>
-    <p className="mt-1 text-sm text-text-muted">Esta camada é uma working copy local: não altera Lógica, IA, métricas, KGR, revisão persistida nem o runtime do Arquiteto.</p>
+    <header className="flex min-w-0 flex-wrap items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-1.5"><h3 className="text-base font-semibold tracking-tight text-foreground">QUALIFICAÇÃO SEMÂNTICA</h3><InfoHint title="Consolidação semântica" description="A Lógica é hipótese inicial. A SERP real é evidência externa: quando conclusiva, ela fecha Intenção e Funil automaticamente, sem confirmação humana." /></div><ProfilePill label={serpCollectionLabel(serpState)} tone={serpState === "analyzed" ? "success" : serpState === "failed" ? "danger" : serpState === "collecting" ? "accent" : "pending"} /></header>
+    <p className="mt-1 text-sm text-text-muted">Esta camada é uma working copy local: não altera Lógica, métricas, KGR, revisão persistida nem o runtime do Arquiteto.</p>
     <div className="mt-2 grid min-w-0 gap-2 xl:grid-cols-2">{axisPanel("intent", "INTENÇÃO", draft.intent, intentResolution)}{axisPanel("funnel", "FUNIL", draft.funnel, funnelResolution)}</div>
     <p data-semantic-consolidation-serp-state className="mt-2 border-t border-divider pt-2 text-sm text-text-muted">{serpStateDescription}</p>
     {draft.serpSnapshotRef && <details data-semantic-consolidation-evidence className="mt-2 border-t border-divider pt-1.5"><summary className="cursor-pointer text-sm font-semibold text-text-muted hover:text-foreground">Ver evidências</summary><p className="mt-1 text-sm text-text-muted">{`${draft.serpSnapshotRef.label} (${draft.serpSnapshotRef.id})`}</p></details>}
@@ -583,7 +408,6 @@ function SemanticConsolidationPanel({ draft, qualification = null, serpCollectin
 
 function HumanReviewPanel({
   semantic,
-  aiReview: legacyAiReview,
   intent,
   volume,
   allintitle,
@@ -597,13 +421,8 @@ function HumanReviewPanel({
   open,
   onOpenChange,
   reviewDraftActive = false,
-  presentationBrief,
-  presentationAttempt = null,
-  presentationState = "not_executed" as ContextualPresentationUiState,
-  presentationBriefLoading = false,
 }: {
   semantic: ProfileRecord;
-  aiReview: ProfileRecord | null;
   intent?: string | null;
   volume: unknown;
   allintitle: unknown;
@@ -617,160 +436,47 @@ function HumanReviewPanel({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   reviewDraftActive?: boolean;
-  presentationBrief?: KeywordPresentationBrief | null;
-  /** Tentativa gerada nesta sessão cujo write falhou; nunca é canônica. */
-  presentationAttempt?: KeywordPresentationBrief | null;
-  /** Estado canônico da IA: "falhou" nunca pode virar "não executada". */
-  presentationState?: ContextualPresentationUiState;
-  presentationBriefLoading?: boolean;
 }) {
-  // R5 legado: o ai_review persistido continua no KeywordDNA como histórico,
-  // mas a IA do Processador não é mais uma revisão semântica. A Revisão Humana
-  // não deriva concordâncias, divergências, enriquecimentos nem decisões dele.
-  void legacyAiReview;
-  const aiReview: ProfileRecord | null = null;
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
-  const [editingField, setEditingField] = useState<string | null>(null);
-  const [editedValues, setEditedValues] = useState<Record<string, string>>({});
   const [editingReview, setEditingReview] = useState(false);
-  const reviewInstanceId = useId();
   const isOpen = open ?? uncontrolledOpen;
   const humanReview = humanReviewRecord(semantic);
-  // The review badge reflects the review artifact itself. Execution gates
-  // (IA/KGR) apply when opening or concluding a review, not retroactively to
-  // a completed snapshot after another process is re-run.
+  // The review badge reflects the review artifact itself. The KGR gate applies
+  // when opening or concluding a review, not retroactively to a completed
+  // snapshot after another process is re-run.
   const reviewCompleted = humanReview.status === "completed";
   const reviewEditing = reviewDraftActive || editingReview;
   const reviewLocked = reviewCompleted && !reviewEditing;
-  const fields = aiReview ? reviewFields(aiReview) : [];
-  const fieldRows = fields.map((field, index) => {
-    const fieldName = String(field.field || `campo-${index}`);
-    const key = `${fieldName}:${index}`;
-    return {
-      field,
-      index,
-      fieldName,
-      key,
-      state: classifyHumanReviewField(field),
-      decision: humanReviewFieldDecision(semantic, fieldName, field),
-      synthetic: false,
-    };
-  });
-  const existingCanonicalFields = new Set(fieldRows.map(row => canonicalHumanReviewField(row.fieldName)).filter((field): field is string => Boolean(field)));
-  const strategicUnknownRows = aiReview
-    ? humanReviewStrategicFields(semantic, intent)
-      .filter(field => !field.logicalValue && !humanReviewFieldDecision(semantic, field.field, { logicalValue: field.logicalValue, aiSuggestion: null }))
-      .filter(field => !existingCanonicalFields.has(field.field))
-      .map((field, index) => ({
-        field: {
-          field: field.field,
-          logicalValue: null,
-          aiSuggestion: null,
-          verdict: "EVIDÊNCIA INSUFICIENTE",
-          rationale: "O processo lógico não encontrou evidência suficiente para consolidar este campo.",
-          evidenceUsed: ["logical.fields." + field.field],
-        },
-        index: fields.length + index,
-        fieldName: field.field,
-        key: `strategic-unknown:${field.field}`,
-        state: "unresolved" as const,
-        decision: null,
-        synthetic: true,
-      }))
-    : [];
-  // Strategic fields without a consolidated reading are human decisions,
-  // not AI corrections. Keep them out of the divergence bucket so an
-  // unknown -> unknown placeholder can never be presented as a proposal.
-  const allFieldRows = fieldRows;
-  const agreementRows = allFieldRows.filter(row => row.state === "agreement");
-  const divergenceRows = allFieldRows.filter(row => row.state === "divergence");
-  const pendingDivergenceRows = divergenceRows.filter(row => !row.decision);
-  const pendingStrategicRows = strategicUnknownRows.filter(row => !row.decision);
-  const enrichmentRows = aiReview ? humanReviewEnrichmentRows(semantic, aiReview) : [];
-  const pendingEnrichmentRows = enrichmentRows.filter(row => !row.decision);
   const kgrApplicability = readKgrApplicability(semantic);
   const kgrTone = kgrTechnicalTone(kgrScore, kgrVolume);
   const kgrText = typeof kgrScore === "number" && Number.isFinite(kgrScore)
     ? kgrScore.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 3 })
     : "Não calculável";
-  // O veredito R5 permanece disponível no artefato legado, mas não é mais
-  // apresentado como resultado corrente da IA.
-  void semanticReviewSummaryLabel;
-  const completion = canCompleteHumanReview(semantic, { hasOpenEdit: editingField !== null, intent });
+  const completion = canCompleteHumanReview(semantic, { intent });
   // Decisão humana disponível é decisão concreta esperando escolha — nunca a
   // ausência de clique. Sem nada a decidir, o painel se declara de leitura.
-  const pendingHumanDecisions = pendingDivergenceRows.length + pendingStrategicRows.length + pendingEnrichmentRows.length + (completion.pendingKgrDecision ? 1 : 0);
+  const pendingHumanDecisions = completion.pendingFields.length + (completion.pendingKgrDecision ? 1 : 0);
   const reviewUiState = deriveHumanReviewUiState({ completed: reviewCompleted, pendingDecisions: pendingHumanDecisions });
   const setOpen = (next: boolean) => {
     if (open === undefined) setUncontrolledOpen(next);
     onOpenChange?.(next);
   };
 
-  const submitField = (field: ProfileRecord, decision: "keep_logic" | "accept_ai" | "edit" | "confirm_unknown", index: number) => {
-    const fieldName = String(field.field || `campo-${index}`);
-    const key = `${fieldName}:${index}`;
-    const editedValue = editedValues[key] ?? String(displayValue(field.aiSuggestion, ""));
-    void onAction?.({
-      type: "field",
-      field: fieldName,
-      logicalValue: field.logicalValue,
-      aiSuggestion: field.aiSuggestion,
-      decision,
-      ...(decision === "edit" ? { editedValue } : {}),
-    });
-    setEditingField(null);
-  };
-
-  const submitEnrichment = (field: string, value: unknown, decision: "include" | "ignore") => {
-    void onAction?.({ type: "enrichment", field, value, decision });
-  };
-
   return <section data-keyword-human-review className="min-w-0 rounded-md border border-context-accent/35 bg-surface-subtle p-2.5" aria-label="Revisão humana">
     <header className="flex min-w-0 flex-wrap items-center justify-between gap-2">
       <div className="flex min-w-0 items-baseline gap-2">
         <h3 className="min-w-0 break-words text-base font-semibold tracking-tight text-foreground">REVISÃO HUMANA</h3>
-        <span className="text-sm font-medium text-text-muted">{contextualPresentationStateSummary(presentationState, Boolean(presentationBrief?.persisted), presentationBrief?.version ?? null)}</span>
         <span data-human-review-state className="text-sm font-medium text-text-muted">{humanReviewStateSummary(reviewUiState, pendingHumanDecisions)}</span>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <ProfilePill label={contextualPresentationStatePill(presentationState).label} tone={contextualPresentationStatePill(presentationState).tone} />
         <ProfilePill label={humanReviewStatePill(reviewUiState).label} tone={humanReviewStatePill(reviewUiState).tone} />
       </div>
     </header>
 
     <section aria-label="Resumo da revisão humana" data-human-review-summary className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-divider bg-surface px-2.5 py-2 text-sm">
-      <span className={presentationBrief ? "font-semibold text-success" : presentationState === "failed_without_result" ? "font-semibold text-warning" : "text-text-muted"}>IA: {contextualPresentationStateSummary(presentationState, Boolean(presentationBrief?.persisted), presentationBrief?.version ?? null)}</span>
-      <span className="text-text-muted">Resultado IA: <strong className="font-semibold text-foreground">{presentationBrief ? "Apresentação contextual" : contextualPresentationDecisionLabel(presentationState)}</strong></span>
-      {agreementRows.length > 0 && <details data-human-review-agreements className="min-w-0">
-        <summary className="cursor-pointer list-inside text-sm font-semibold text-success focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success/30"><span className="sr-only">Concordâncias: </span>CONCORDÂNCIAS · {agreementRows.length}</summary>
-        <p className="mt-1 text-sm text-success">✓ {agreementRows.length} campos confirmados pela IA</p>
-      </details>}
-      {aiReview && divergenceRows.length === 0 && pendingStrategicRows.length === 0 && enrichmentRows.length === 0 ? <span data-human-review-semantic-clean className="font-semibold text-success">Sem correções semânticas relevantes.</span> : <>
-        {divergenceRows.length > 0 && <span className={pendingDivergenceRows.length > 0 ? "font-semibold text-warning" : "text-text-muted"}>Divergências pendentes: {pendingDivergenceRows.length}</span>}
-        {pendingStrategicRows.length > 0 && <span className="font-semibold text-warning">Decisões pendentes: {pendingStrategicRows.length}</span>}
-        {enrichmentRows.length > 0 && <span className={pendingEnrichmentRows.length > 0 ? "font-semibold text-context-accent" : "text-text-muted"}>Enriquecimentos: {enrichmentRows.length}</span>}
-      </>}
-    </section>
-
-    <section data-keyword-contextual-presentation aria-label="Apresentação contextual da IA" className="mt-2 min-w-0 rounded-md border border-divider bg-surface px-2.5 py-2">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0"><p className="text-sm font-semibold text-foreground">IA · Apresentação contextual</p><p className="text-sm text-text-muted">{presentationBrief ? `${presentationBrief.brandVoiceApplied ? "Voz da Marca aplicada" : "Nenhuma Voz da Marca ativa"} · ${presentationBrief.persisted ? "apresentação persistida" : "gerada nesta sessão · não foi possível persistir"}.` : presentationState === "failed_without_result" ? "A última tentativa falhou. A IA é opcional e não bloqueia nenhuma etapa; execute novamente pela barra do Processador." : "Não executada. Use o processo IA na barra do Processador para gerar."}</p></div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {presentationBriefLoading && <ProfilePill label="Gerando..." tone="pending" />}
-          {!presentationBrief && !presentationBriefLoading && presentationState === "failed_without_result" && <ProfilePill label="Última tentativa falhou" tone="warning" />}
-          {presentationBrief && !presentationBriefLoading && <ProfilePill label={presentationBrief.persisted ? `Apresentação persistida${presentationBrief.version ? ` · v${presentationBrief.version}` : ""}` : "Gerada nesta sessão · não persistida"} tone={presentationBrief.persisted ? "success" : "neutral"} />}
-        </div>
-      </div>
-      {presentationAttempt && presentationBrief?.persisted && <details data-keyword-contextual-presentation-attempt className="mt-1.5 border-t border-warning/40 pt-1.5">
-        <summary className="cursor-pointer text-sm font-semibold text-warning hover:text-foreground">Nova tentativa não persistida</summary>
-        <p className="mt-1 whitespace-normal break-words text-sm leading-5 text-foreground [overflow-wrap:anywhere]">{presentationAttempt.contextualPresentation.text}</p>
-        <p className="mt-1 text-sm text-text-muted">{`Gerada nesta sessão · não persistida. A versão canônica continua sendo a v${presentationBrief.version || 1}; um F5 descarta esta tentativa.`}</p>
-      </details>}
-      {presentationBrief && <details data-keyword-contextual-presentation-content className="mt-1.5 border-t border-divider pt-1.5">
-        <summary className="cursor-pointer text-sm font-semibold text-text-muted hover:text-foreground">Ver apresentação</summary>
-        <p data-keyword-contextual-presentation-text className="mt-1 whitespace-normal break-words text-sm leading-5 text-foreground [overflow-wrap:anywhere]">{presentationBrief.contextualPresentation.text}</p>
-        <p className="mt-1 text-sm text-text-muted">Baseada no tema da keyword e no contexto disponível da Marca. O KeywordDNA permanece inalterado.</p>
-      </details>}
+      {pendingHumanDecisions > 0
+        ? <span className="font-semibold text-warning">Decisões pendentes: {pendingHumanDecisions}</span>
+        : <span data-human-review-semantic-clean className="font-semibold text-success">Nenhuma decisão humana pendente.</span>}
     </section>
 
     <section aria-label="Fatos medidos somente leitura" className="mt-2 min-w-0 rounded-md border border-divider bg-surface px-2.5 py-2">
@@ -801,7 +507,7 @@ function HumanReviewPanel({
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         {reviewLocked ? <button type="button" onClick={() => { setEditingReview(true); setOpen(true); void onAction?.({ type: "reopen" }); }} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-context-accent/50 px-3 text-sm font-semibold text-context-accent transition-colors hover:bg-context-accent/10 disabled:cursor-not-allowed disabled:opacity-50">Revisar novamente</button> : <>
           <button type="button" onClick={() => { setEditingReview(false); void onAction?.({ type: "complete" }); }} disabled={statusUpdating || !onAction} title={completion.reason || "Concluir revisão com os defaults conservadores para itens sem decisão."} className="min-h-9 rounded-md border border-success/50 bg-success-soft px-3 text-sm font-semibold text-success transition-colors hover:bg-success/15 disabled:cursor-not-allowed disabled:opacity-50">Concluir revisão</button>
-          {reviewEditing && <button type="button" onClick={() => { setEditingReview(false); setEditingField(null); setOpen(false); void onAction?.({ type: "cancel" }); }} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:border-context-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">Cancelar</button>}
+          {reviewEditing && <button type="button" onClick={() => { setEditingReview(false); setOpen(false); void onAction?.({ type: "cancel" }); }} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:border-context-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">Cancelar</button>}
         </>}
       </div>
     </div>
@@ -814,95 +520,13 @@ function HumanReviewPanel({
             <p className="text-sm font-semibold text-foreground">KGR · detalhes técnicos</p>
             <div className="mt-1.5 min-w-0"><ProfileFields fields={kgrDetails} compact layout="rows" /></div>
           </section>}
-          {aiReview ? <SemanticReviewDetails review={aiReview} embedded /> : <p className="rounded-md border border-divider bg-surface px-2.5 py-2 text-sm text-text-muted">Execute a etapa IA antes de revisar sugestões.</p>}
         </div>
-        {aiReview && <section aria-label="Comparação entre lógica e IA" className="min-w-0 rounded-md border border-divider bg-surface p-2.5">
-          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-foreground">LÓGICA × IA</p><span className="text-sm text-text-muted">{completion.ok ? "Pronta para conclusão" : `${pendingDivergenceRows.length + pendingStrategicRows.length + pendingEnrichmentRows.length} pendência(s)`}</span></div>
-
-          {agreementRows.length > 0 && <section aria-label="Concordâncias resolvidas automaticamente" className="mt-1.5 min-w-0 space-y-1">
-            {agreementRows.map(row => <details key={row.key} data-human-review-row="agreement" data-human-review-auto-resolved="true" className="rounded border border-success/25 bg-success-soft/40 px-2 py-1.5">
-              <summary className="cursor-pointer list-inside text-sm font-semibold text-foreground"><span className="mr-1 text-success" aria-hidden="true">✓</span>{semanticReviewFieldLabel(row.fieldName)} <span className="ml-1 font-medium text-success">IA concorda com a lógica</span></summary>
-              <dl className="mt-1.5 grid min-w-0 gap-x-4 gap-y-1.5 border-t border-success/20 pt-1.5 sm:grid-cols-2">
-                <div className="min-w-0"><dt className="text-sm text-text-muted">Lógica</dt><dd className="break-words text-sm text-foreground">{semanticReviewDisplayValue(row.fieldName, row.field.logicalValue)}</dd></div>
-                <div className="min-w-0"><dt className="text-sm text-text-muted">IA</dt><dd className="break-words text-sm text-foreground">{semanticReviewDisplayValue(row.fieldName, row.field.aiSuggestion)}</dd></div>
-              </dl>
-            </details>)}
-          </section>}
-
-          {divergenceRows.length > 0 && <section aria-label="Divergências que exigem decisão" className="mt-2 min-w-0 space-y-1">
-            <p className="text-sm font-semibold tracking-tight text-warning">CORREÇÕES PROPOSTAS · {divergenceRows.length}</p>
-            {divergenceRows.map(row => {
-              const verdict = semanticReviewVerdictLabel(row.field.verdict);
-              const editing = editingField === row.key;
-              return <details key={row.key} data-human-review-row="divergence" data-human-review-resolved={row.decision ? "true" : "false"} open={editing} className="rounded border border-warning/35 bg-warning-soft/35 px-2 py-1.5">
-                <summary className="cursor-pointer list-inside text-sm font-semibold text-foreground"><span className="mr-1 text-warning" aria-hidden="true">!</span>{semanticReviewFieldLabel(row.fieldName)} <span className="ml-1 font-medium text-warning">{row.decision ? `✓ ${humanReviewDecisionLabel(row.decision.decision)}` : "Revisão necessária"}</span></summary>
-                <div className="mt-1.5 min-w-0 border-t border-warning/20 pt-1.5">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2"><ProfilePill label={`IA: ${verdict}`} tone={semanticReviewTone(verdict)} />{row.decision && <span className="text-sm text-success">Decisão humana registrada</span>}</div>
-                  <dl className="mt-1.5 grid min-w-0 gap-x-4 gap-y-1.5 sm:grid-cols-2">
-                    <div className="min-w-0"><dt className="text-sm text-text-muted">Valor lógico</dt><dd className="break-words text-sm text-foreground">{semanticReviewDisplayValue(row.fieldName, row.field.logicalValue)}</dd></div>
-                    <div className="min-w-0"><dt className="text-sm text-text-muted">Sugestão IA</dt><dd className="break-words text-sm text-foreground">{semanticReviewDisplayValue(row.fieldName, row.field.aiSuggestion)}</dd></div>
-                    <div className="min-w-0 sm:col-span-2"><dt className="text-sm text-text-muted">Motivo/evidência</dt><dd className="break-words text-sm text-foreground">{displayValue(row.field.rationale || semanticEvidenceDisplayValue(row.field.evidenceUsed))}</dd></div>
-                  </dl>
-                  {!reviewLocked && <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
-                    {row.synthetic ? <button type="button" onClick={() => submitField(row.field, "confirm_unknown", row.index)} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-divider px-2.5 text-sm font-semibold text-foreground transition-colors hover:border-context-accent hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-50">Confirmar desconhecido</button> : <>
-                      <button type="button" onClick={() => submitField(row.field, "keep_logic", row.index)} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-divider px-2.5 text-sm font-semibold text-foreground transition-colors hover:border-context-accent hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-50">Manter lógica</button>
-                      <button type="button" onClick={() => submitField(row.field, "accept_ai", row.index)} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-context-accent/50 px-2.5 text-sm font-semibold text-context-accent transition-colors hover:bg-context-accent/10 disabled:cursor-not-allowed disabled:opacity-50">Aceitar IA</button>
-                    </>}
-                    {editing ? <>
-                      <input aria-label={`Editar ${row.fieldName}`} value={editedValues[row.key] ?? String(displayValue(row.field.aiSuggestion, ""))} onChange={event => setEditedValues(current => ({ ...current, [row.key]: event.target.value }))} className="min-h-9 min-w-[12rem] flex-1 rounded-md border border-divider bg-surface-subtle px-2 text-sm text-foreground outline-none focus:border-context-accent" />
-                      <button type="button" onClick={() => submitField(row.field, "edit", row.index)} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-success/50 px-2.5 text-sm font-semibold text-success hover:bg-success-soft disabled:cursor-not-allowed disabled:opacity-50">Salvar edição</button>
-                    </> : <button type="button" onClick={() => { setEditingField(row.key); setEditedValues(current => ({ ...current, [row.key]: String(displayValue(row.field.aiSuggestion, "")) })); }} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-divider px-2.5 text-sm font-semibold text-text-muted hover:border-context-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">Editar</button>}
-                  </div>}
-                </div>
-              </details>;
-              })}
-          </section>}
-
-          {pendingStrategicRows.length > 0 && <section aria-label="Decisões e ambiguidades pendentes" data-human-review-pending-decisions className="mt-2 min-w-0 space-y-1">
-            <p className="text-sm font-semibold tracking-tight text-warning">DECISÕES PENDENTES · {pendingStrategicRows.length}</p>
-            <p className="text-sm text-text-muted">Campos sem leitura consolidada não são correções propostas. Confirme o desconhecido ou registre uma decisão humana.</p>
-            {pendingStrategicRows.map(row => {
-              const editing = editingField === row.key;
-              return <details key={row.key} data-human-review-row="unresolved" data-human-review-resolved="false" open={editing} className="rounded border border-warning/35 bg-warning-soft/35 px-2 py-1.5">
-                <summary className="cursor-pointer list-inside text-sm font-semibold text-foreground"><span className="mr-1 text-warning" aria-hidden="true">!</span>{semanticReviewFieldLabel(row.fieldName)} <span className="ml-1 font-medium text-warning">Decisão necessária</span></summary>
-                <div className="mt-1.5 min-w-0 border-t border-warning/20 pt-1.5">
-                  <p className="text-sm text-text-muted">A evidência disponível não permite consolidar uma leitura única para este campo.</p>
-                  {!reviewLocked && <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
-                    <button type="button" onClick={() => submitField(row.field, "confirm_unknown", row.index)} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-divider px-2.5 text-sm font-semibold text-foreground transition-colors hover:border-context-accent hover:bg-surface-elevated disabled:cursor-not-allowed disabled:opacity-50">Confirmar desconhecido</button>
-                    {editing ? <>
-                      <input aria-label={`Editar ${row.fieldName}`} value={editedValues[row.key] ?? ""} onChange={event => setEditedValues(current => ({ ...current, [row.key]: event.target.value }))} className="min-h-9 min-w-[12rem] flex-1 rounded-md border border-divider bg-surface-subtle px-2 text-sm text-foreground outline-none focus:border-context-accent" />
-                      <button type="button" onClick={() => submitField(row.field, "edit", row.index)} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-success/50 px-2.5 text-sm font-semibold text-success hover:bg-success-soft disabled:cursor-not-allowed disabled:opacity-50">Salvar edição</button>
-                    </> : <button type="button" onClick={() => { setEditingField(row.key); setEditedValues(current => ({ ...current, [row.key]: "" })); }} disabled={statusUpdating || !onAction} className="min-h-9 rounded-md border border-divider px-2.5 text-sm font-semibold text-text-muted hover:border-context-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">Editar</button>}
-                  </div>}
-                </div>
-              </details>;
-            })}
-          </section>}
-
-          {enrichmentRows.length > 0 && <section aria-label="Enriquecimentos semânticos para decisão" data-human-review-enrichments className="mt-2 min-w-0 rounded border border-context-accent/25 bg-context-accent/5 px-2 py-1.5">
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-foreground">ENRIQUECIMENTOS ÚTEIS</p><span className="text-sm text-text-muted">Sugestões da IA · {pendingEnrichmentRows.length ? `${pendingEnrichmentRows.length} pendente(s)` : "todos tratados"}</span></div>
-            <div className="mt-1.5 min-w-0 space-y-1 border-t border-context-accent/15 pt-1.5">
-              {enrichmentRows.map(row => {
-                const decision = row.decision?.decision;
-                const groupName = `${reviewInstanceId}-enrichment-${row.field}`;
-                return <div key={row.field} data-human-review-row="enrichment" data-human-review-decision={decision || "pending"} className="flex min-w-0 flex-wrap items-start justify-between gap-2 rounded border border-divider/70 bg-surface px-2 py-1.5">
-                  <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-foreground"><span className="mr-1 text-context-accent" aria-hidden="true">＋</span>{row.label}</p><p className="mt-0.5 break-words text-sm text-foreground">{displayValue(row.value)}</p><p className="mt-0.5 text-sm text-text-muted">Fonte: sugestão da IA{decision ? ` · ${decision === "include" ? "incluído" : "ignorado"} por decisão humana` : ""}</p></div>
-                  <fieldset className="flex shrink-0 items-center gap-2" disabled={statusUpdating || reviewLocked || !onAction}>
-                    <legend className="sr-only">Decisão para {row.label}</legend>
-                    <label className="inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-foreground"><input type="radio" name={groupName} value="include" checked={decision === "include"} onChange={() => submitEnrichment(row.field, row.value, "include")} />Incluir</label>
-                    <label className="inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-text-muted"><input type="radio" name={groupName} value="ignore" checked={decision === "ignore"} onChange={() => submitEnrichment(row.field, row.value, "ignore")} />Ignorar</label>
-                  </fieldset>
-                </div>;
-              })}
-            </div>
-          </section>}
-        </section>}
       </div>
     </details>
   </section>;
 }
 
-function TechnicalDetails({ semantic, reference, showProvenance, googleAdsValidated, dataForSeoValidated, aiReview, kgrHistory }: { semantic: ProfileRecord; reference: ReturnType<typeof legacyVersionReference>; showProvenance: boolean; googleAdsValidated: boolean; dataForSeoValidated: boolean; aiReview: ProfileRecord | null; kgrHistory?: ProfileRecord[] }) {
+function TechnicalDetails({ semantic, reference, showProvenance, googleAdsValidated, dataForSeoValidated, kgrHistory }: { semantic: ProfileRecord; reference: ReturnType<typeof legacyVersionReference>; showProvenance: boolean; googleAdsValidated: boolean; dataForSeoValidated: boolean; kgrHistory?: ProfileRecord[] }) {
   if (!showProvenance) return null;
   const siteOrigin = firstRecord(semantic.site_origin);
   const dataForSeoMeasurement = dataForSeoRecordValue(semantic.allintitle_measurement);
@@ -910,14 +534,12 @@ function TechnicalDetails({ semantic, reference, showProvenance, googleAdsValida
   const dataForSeoOverview = keywordDifficultyEvidence.measurement;
   const dataForSeoLastError = dataForSeoRecordValue(semantic.allintitle_last_error);
   const dataForSeoOverviewLastError = dataForSeoRecordValue(semantic.dataforseo_keyword_overview_last_error);
-  const aiProvider = aiReview ? [aiReview.provider, aiReview.model || aiReview.modelId].filter(value => isMeaningfulProfileValue(value)).join(" · ") : null;
   const provenanceSummaryFields: ProfileFieldDefinition[] = [
     { label: "Origem do DNA", value: semantic.dna_origem, mono: true },
     { label: "Modelo do DNA", value: semantic.dna_modelo, mono: true },
     { label: "Google Ads", value: googleAdsValidated ? "Validado no Processador" : null },
     { label: "DataForSEO", value: dataForSeoValidated ? "Validado no Processador" : null },
     { label: "KD DataForSEO", value: dataForSeoOverview ? dataForSeoKeywordDifficultyStateLabel(keywordDifficultyEvidence.state, keywordDifficultyEvidence.value) : null },
-    { label: "IA", value: aiProvider, mono: true },
     { label: "Última atualização", value: profileDate(semantic.updated_at || semantic.processed_at || semantic.created_at) },
     { label: "Hash/versão", value: reference.contentHash, mono: true },
   ];
@@ -1006,9 +628,6 @@ export function KeywordDnaPanel({
   serpFailed = false,
   profile,
   processAttempts,
-  presentationBrief,
-  presentationAttempt = null,
-  presentationBriefLoading = false,
   showProvenance = true,
   allowPublishedWorkflowStatus = true,
 }: {
@@ -1030,9 +649,6 @@ export function KeywordDnaPanel({
   serpFailed?: boolean;
   profile?: KeywordProfileData;
   processAttempts?: Partial<Record<MineradorProcessName, MineradorProcessAttempt>>;
-  presentationBrief?: KeywordPresentationBrief | null;
-  presentationAttempt?: KeywordPresentationBrief | null;
-  presentationBriefLoading?: boolean;
   showProvenance?: boolean;
   allowPublishedWorkflowStatus?: boolean;
 }) {
@@ -1067,21 +683,6 @@ export function KeywordDnaPanel({
   const cpcDecisionValue = cpcEvidence.source === "none" ? null : formatGoogleAdsCpcTableValue(cpcEvidence);
   const googleAdsTrend = deriveGoogleAdsDemandTrend(googleAdsDisplayMeasurement?.monthlySearchVolumes);
   const kgr = profile?.kgr;
-  const aiReviewCandidate = firstRecord(semantic.ai_review, semantic.ia_revisao, semantic.revisao_ia, semantic.semantic_review);
-  // Preserve a completed AI artifact and the snapshot it consumed. A later
-  // process run does not make this independent artifact stale.
-  const aiReview = isCompletedSemanticReview(aiReviewCandidate) ? aiReviewCandidate : null;
-  // O R5 permanece disponível como histórico e não define o estado corrente.
-  void processStates.ai;
-  // Fonte visual única da Apresentação Contextual: a working copy da sessão.
-  // O ai_review R5 persistido segue histórico e não alimenta este estado.
-  const contextualPresentationUiState = deriveContextualPresentationUiState({
-    hasPersistedPresentation: Boolean(presentationBrief?.persisted),
-    hasSessionPresentation: Boolean(presentationBrief),
-    running: presentationBriefLoading,
-    lastAttemptFailed: processAttempts?.ai?.state === "failed",
-  });
-  const aiSessionState = contextualPresentationProcessState(contextualPresentationUiState);
   const humanReviewCompleted = processStates.review.complete;
   // Mesma fonte canônica do painel: sem decisão concreta esperando escolha, o
   // Perfil não anuncia pendência de revisão.
@@ -1147,14 +748,10 @@ export function KeywordDnaPanel({
     ? String(logicalFunnelRawValue)
     : null;
   const canonicalFunnelDisplayValue = funnelPresentationValue(keywordReadModel.funnelLabel);
-  const aiAxisValue = (axis: SemanticConsolidationAxis): string | null => {
-    const field = aiReview ? reviewFields(aiReview).find(candidate => canonicalHumanReviewField(String(candidate.field || "")) === axis) : null;
-    return typeof field?.aiSuggestion === "string" && field.aiSuggestion.trim() ? field.aiSuggestion.trim() : null;
-  };
   const semanticConsolidation = semanticConsolidationDraft || createSemanticConsolidationDraft({
     keywordId: keyword.id, brandId: canonicalSnapshot.identity.brandId,
-    intent: { logic: logicalIntentValue ? canonicalIntentLabel(logicalIntentValue) : null, ai: aiAxisValue("intent") },
-    funnel: { logic: logicalFunnelDisplayValue, ai: aiAxisValue("funnel") },
+    intent: { logic: logicalIntentValue ? canonicalIntentLabel(logicalIntentValue) : null, ai: null },
+    funnel: { logic: logicalFunnelDisplayValue, ai: null },
   });
   // O card da Qualificação Semântica é parte estável do Perfil: sem coleta ele
   // mostra "SERP · Não coletada" em vez de desaparecer.
@@ -1215,11 +812,8 @@ export function KeywordDnaPanel({
     backlinks: dataForSeoOverview?.avgBacklinks ?? dataForSeoOverview?.avg_backlinks,
     niche: keywordReadModel.nicheState === "confirmed_unknown" ? keywordReadModel.nicheLabel : keywordReadModel.niche,
     funnel: funnelPresentationValue(keywordReadModel.funnel || (keywordReadModel.funnelState === "resolved" || keywordReadModel.funnelState === "confirmed_unknown" ? keywordReadModel.funnelLabel : null)),
-    aiExecuted: contextualPresentationUiState !== "not_executed",
-    aiVerdict: contextualPresentationDecisionLabel(contextualPresentationUiState),
     dnaMaturity: dnaMaturityLabel(dnaMaturity),
     kgrApplicability: kgrApplicabilityValue,
-    divergenceCount: aiReview ? reviewFields(aiReview).filter(field => classifyHumanReviewField(field) === "divergence").length : undefined,
     includeSections: true,
   });
   const finalStatusLabel = !allowPublishedWorkflowStatus && editorialStatus.kind === "legacyEditorialStatusUnresolved"
@@ -1240,7 +834,6 @@ export function KeywordDnaPanel({
     { label: "Volume", complete: googleAdsStageComplete, state: processStates.volume },
     { label: "Resultados", complete: dataForSeoStageComplete, state: processStates.results },
     { label: "KGR", complete: processStates.kgr.complete, value: processStates.kgr.complete ? kgrScore : null, state: processStates.kgr },
-    { label: "IA", complete: aiSessionState.complete, state: aiSessionState, title: aiSessionState.reason },
     { label: "Revisão", complete: humanReviewCompleted, state: processStates.review },
   ];
   return <section data-keyword-profile="bento" className="mb-3 w-full min-w-0 whitespace-normal rounded-lg border border-context-accent/35 bg-surface p-2.5">
@@ -1299,7 +892,6 @@ export function KeywordDnaPanel({
       <div className="min-w-0 xl:col-span-2" data-keyword-profile-stage="human-review">
         <HumanReviewPanel
           semantic={semantic}
-          aiReview={aiReview}
           intent={keyword.intent}
           volume={processorRevalidation.volume.value}
           allintitle={dataForSeoResult}
@@ -1313,10 +905,6 @@ export function KeywordDnaPanel({
           open={humanReviewOpen}
           onOpenChange={onHumanReviewOpenChange}
           reviewDraftActive={reviewDraftActive}
-          presentationBrief={presentationBrief}
-          presentationAttempt={presentationAttempt}
-          presentationState={contextualPresentationUiState}
-          presentationBriefLoading={presentationBriefLoading}
         />
       </div>
 
@@ -1342,7 +930,7 @@ export function KeywordDnaPanel({
             </select>
             <span className="text-sm text-text-muted">{primaryPolicyLabel || "Principal travada"}</span>
           </div>}
-          {showProvenance && <TechnicalDetails semantic={semantic} reference={reference} showProvenance={showProvenance} googleAdsValidated={googleAdsStageComplete} dataForSeoValidated={dataForSeoStageComplete} aiReview={aiReview} kgrHistory={kgr?.history} />}
+          {showProvenance && <TechnicalDetails semantic={semantic} reference={reference} showProvenance={showProvenance} googleAdsValidated={googleAdsStageComplete} dataForSeoValidated={dataForSeoStageComplete} kgrHistory={kgr?.history} />}
         </section>
       </div>
     </div>

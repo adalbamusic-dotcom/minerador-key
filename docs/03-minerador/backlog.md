@@ -1,5 +1,81 @@
 # Backlog — Minerador
 
+## Aprovação versionada e pacote fechado — 2026-09-18
+
+- [x] Trava na aprovação: Lógica, Volume, Resultados e aplicabilidade do KGR
+  quando calculável. SERP não conclusiva **não** trava.
+- [x] Status `em_revisao`, derivado por assinatura do pacote — sem migration,
+  porque `minerador_keywords.status` é `text` sem CHECK.
+- [x] O pacote leva o KeywordDNA aprovado inteiro; o Arquiteto lê dele.
+- [x] Reaprovação reescreve o pacote do item já recebido, sem fluxo explícito.
+- [x] **Backfill aplicado em 2026-09-19:** as 29 keywords aprovadas antes do
+  contrato ganharam registro. Readback do script e conferência SQL: 29/29, e
+  0 divergentes ao recalcular contra o estado atual.
+- [x] Contrato de frescor (`lib/minerador/package-freshness.ts`): o Minerador
+  responde se o artefato a jusante leu a versão vigente, no vocabulário de
+  `staleReasons` do Arquiteto. Keyword em revisão declara, mas não impede.
+- [ ] Propagação para ArticleDNA já formado: o `ArticleKeywordReference` copia
+  volume, resultado, KGR e intenção, então atualizar artigo formado cria versão
+  nova do ArticleDNA. Decidido que é automático; ainda não implementado.
+
+## IA do Minerador — corte 3: remoção da Apresentação Contextual — 2026-09-18
+
+- [x] Remover a Apresentação Contextual: UI, handler, rota, `presentation-brief`,
+  contratos, store e o bloco somente-leitura do Arquiteto.
+- [x] `MineradorProcessName` de 7 para 6 processos; `aiCompleted` fora do gate;
+  `aiReviewCompleted` fora da maturidade; `semantic-review.ts` apagado.
+- [x] Revisão Humana sem `accept_ai`, `aiSuggestion`, enriquecimentos e
+  `aiInputHash` — nenhuma das 27 revisões persistidas usava qualquer um deles.
+- [x] `deriveDnaMaturity` mudou para `lib/minerador/dna-maturity.ts` sem o termo
+  da IA, o que **destravou** a escada de maturidade.
+- [~] **Não aplicável:** apagar os 252 artifacts e estreitar o CHECK. O trigger
+  `editorial_artifact_versions_append_only_trg` recusa DELETE, e o SDD de
+  2026-08-28 proíbe desabilitá-lo.
+
+## IA do Minerador — corte 1: remoção do código morto — 2026-09-18
+
+- [x] Remover o R5 inteiro: `deepseek-r5.ts`, `semantic-review-phases.ts`,
+  `semantic-review-orchestrator.ts`, `semantic-review-notice.ts`,
+  `intent-niche-response.ts` e o leitor de resposta em streaming.
+- [x] Remover os handlers sem chamador `handleBatchAnalyze` e
+  `handleBatchSemanticReview` do Processador.
+- [x] Remover as rotas `/api/process-intent-niche`, `/api/analyze`,
+  `/api/clusterize` e `/api/generate-briefing`.
+- [x] Encolher `semantic-review.ts` ao leitor defensivo do payload legado.
+- [~] **Cancelado:** `R5_SEMANTIC_QUALITY_SMOKE = PENDING` e o smoke
+  autenticado do R5. Não há mais R5 para homologar.
+- [~] **Cancelado:** `DATAFORSEO_PARTIAL_RESULTS` por suboperação dentro do
+  R5.2. O diagnóstico de allintitle × Keyword Overview segue vivo no
+  Processador, fora da IA.
+- [ ] **Corte 3 (depende de SDD):** remover a Apresentação Contextual, o
+  processo `ai`, o bloco do KeywordDNA no Arquiteto, os 252 artifacts
+  `keyword_contextual_presentation` e estreitar o CHECK de `artifact_type`.
+- [ ] Fora deste escopo, por decisão do usuário: a Voz da Marca no Redator
+  está sendo desenvolvida na área do Redator.
+
+## SERP e exclusão — 2026-09-18
+
+- [x] Remover as aspas da consulta allintitle e confirmar a consulta na página
+  por conteúdo em vez de recorte.
+- [ ] **Remedir o acervo:** as 27 keywords com `results_allintitle` medido
+  entre 364 e 473 carregam valor da consulta errada, e o `kgr_score` derivado
+  também. Exige chamadas pagas e decisão do usuário.
+- [ ] Decidir `DATAFORSEO_LANGUAGE_CODE`: o padrão é `pt` e a `check_url` sai
+  com `hl=pt`, enquanto a referência do usuário e o playground usam `pt-BR`.
+- [ ] Decidir a profundidade da SERP semântica: hoje `depth = 20`; o playground
+  que trouxe evidência rica usou 100. Mais cobertura, mais custo.
+- [ ] **Exclusão deixa órfãos:** `lifecycle_delete_minerador_keywords` nunca
+  toca `editorial_artifact_versions`. Nesta Marca sobraram 34 entidades de
+  `keyword_semantic_qualification` e 32 de `keyword_contextual_presentation`
+  sem keyword viva. Corrigir exige alterar a RPC, logo SDD e autorização.
+- [ ] **Soft delete de publicada não limpa vínculo:** o caminho recuperável só
+  marca `deleted_at`/`purge_after` e pula a limpeza que o caminho definitivo
+  faz, inclusive o vínculo em `minerador_discovery_candidates`. A keyword some
+  da mesa e a candidata segue presa a ela.
+- [ ] **Soft delete expirado trava:** passado o `purge_after` sem purga, uma
+  nova tentativa de exclusão levanta `KEYWORD_DELETE_TRANSACTION_FAILED` e a
+  keyword fica sem saída.
+
 ## Correção de build do funil lógico — 2026-09-12
 
 - [x] Normalizar `logicalFunnelDisplayValue` na origem para `string | null`,

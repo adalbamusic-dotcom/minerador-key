@@ -6,14 +6,13 @@ async function readProcessor() {
   return readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
 }
 
-test("bulk bar expõe área acessível de progresso para as seis etapas", async () => {
+test("bulk bar expõe área acessível de progresso para as etapas", async () => {
   const page = await readProcessor();
   const labels = [
     "Conferindo site...",
     "Processando lógica...",
     "Medindo volume...",
     "Medindo resultados...",
-    "Executando revisão IA...",
     "Aplicando revisão...",
   ];
 
@@ -24,11 +23,10 @@ test("bulk bar expõe área acessível de progresso para as seis etapas", async 
   for (const label of labels) assert.match(page, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
-test("progresso por item é alimentado por Lógica e IA e as demais etapas usam fallback indeterminado", async () => {
+test("progresso por item é alimentado pela Lógica e as demais etapas usam fallback indeterminado", async () => {
   const page = await readProcessor();
 
   assert.match(page, /updateBulkProgress\(index \+ 1, sourceKeywords\.length\)/);
-  assert.match(page, /updateBulkProgress\(count, selectedKeywords\.length\)/);
   assert.match(page, /startBulkProgress\("site"/);
   assert.match(page, /startBulkProgress\("volume"/);
   assert.match(page, /startBulkProgress\("results"/);
@@ -42,7 +40,7 @@ test("lock local impede concorrência, bloqueia os controles e destaca a etapa a
   assert.match(page, /bulkProgressLockRef/);
   assert.match(page, /if \(bulkProgressLockRef\.current\) return false/);
   assert.match(page, /const bulkActionProcessing = bulkProgress\.status === "processing"/);
-  for (const step of ["site", "logic", "volume", "results", "ai", "review"]) {
+  for (const step of ["site", "logic", "volume", "results", "review"]) {
     assert.match(page, new RegExp(`bulkActionStateClass\\("${step}"\\)`));
   }
   assert.match(page, /disabled=\{bulkActionProcessing \|\| updating/);

@@ -1,5 +1,135 @@
 # Spec — Radar
 
+## Contrato canônico do destino — Radar → Redator — 2026-09-17
+
+Regra permanente. Substitui, no fluxo operacional, toda seção anterior que
+descreva o Planejador como etapa entre o Radar e o Redator.
+
+### O pipeline
+
+```text
+MINERADOR → ARQUITETO → RADAR → REDATOR
+```
+
+O Planejador **saiu do fluxo operacional**. Ele não é etapa, não é gate, não é
+destino de botão e não aparece em prontidão nem em navegação. O que ele fazia —
+transformar evidência em especificação executável — passou a ser a fase de
+planejamento DENTRO do Redator.
+
+Dados históricos do Planejador permanecem. Artigo que já está lá continua lá, e
+nada é movido automaticamente.
+
+### O que o Redator recebe
+
+O `RadarCanonicalDossier`, com estrutura — não markdown:
+
+```text
+ArticleDNA (identidade, versão, hash)
+keywordContext        principal · secundárias · reforços · resolution
+researchProfile       GOOGLE | YOUTUBE | AMAZON
+competitiveBlueprint
+observed              a fotografia competitiva
+research              google · youtube · amazon
+video                 a biblioteca casada com as pautas
+specialist            as contribuições com decisão humana
+internalLinkPlan · sources · visual guidance · SEO direction
+limitations
+writerMayNot
+```
+
+`writer_context_md`, `writer_brief_md` e `competitive_radiography_md`
+continuam existindo como read models portáteis do CSV. Eles **não** são o que o
+Redator interno recebe: um documento que carregasse só markdown obrigaria quem
+escreve a reinterpretar prosa para saber qual evidência sustenta qual seção.
+
+### O que o Redator decide, e o que ele não decide
+
+Ele planeja e escreve. Decide estrutura final de H2/H3, sequência narrativa,
+aplicação da evidência por seção, links, mídia, metadados de SEO finais, CTA e
+instruções de redação. Pode montar um `ContentPlan` interno antes de escrever —
+`RADAR_WRITER_MAY_DECIDE`.
+
+Ele **não** pode — `RADAR_WRITER_MAY_NOT`, e a lista viaja com o pacote:
+
+```text
+trocar a keyword principal
+reconfigurar o Silo
+remover uma cobertura obrigatória
+alterar a intenção declarada do artigo
+alterar slug protegido
+alterar canonical protegido
+substituir a composição de secundárias por decisão própria
+```
+
+Ele decide COMO executar. Não redefine O QUE o Article é.
+
+A hierarquia de evidência continua sendo a de `RADAR_EVIDENCE_HIERARCHY`, com
+os nove níveis. Ela vale no planejamento e na escrita.
+
+### A autoridade de envio
+
+`sendRadarToWriter`, em `lib/server/radar-writer-send.ts`, nesta ordem:
+
+```text
+validate → canonical resolve → readiness
+        → write receipt → readback receipt
+        → identity/hash validation
+        → create document → destination readback
+        → workflow transition → success
+```
+
+A prontidão continua sendo a do Radar: ArticleDNA válido, investigação
+finalizada, dossiê canônico íntegro, Blueprint válido, evidências obrigatórias
+satisfeitas, sem bloqueios. Passagem pelo Planejador **não** é exigida.
+
+**O estado da esteira não entra nessa conta.**
+`editorial_workflow_items.state` registra importação, aprovação do relatório
+legado e envio; ele NÃO registra `START`, `ANALYZE` nem `FINALIZE`. Uma linha
+nasce `research_pending` e continua `research_pending` depois de uma
+investigação inteira finalizada — exigir `approved` ali é pedir um botão que o
+fluxo atual não tem.
+
+A esteira **segue** o fato: ela se move para `sent_writer` depois de o
+documento ser confirmado no readback, a partir de qualquer estado. Quem já está
+em `sent_writer` não é transicionado de novo.
+
+Não existe segunda aprovação. Quem coletou, analisou e finalizou não aprova de
+novo, e artigo finalizado antes da mudança de destino é reconhecido sem
+refinalizar.
+
+Falha parcial não vira sucesso: documento não confirmado no readback devolve
+erro, o recibo fica gravado e a repetição completa só o que falta.
+
+O lote usa a mesma autoridade do botão individual. Um caminho próprio para o
+lote foi o defeito que o `RADAR_FINAL_1.2` fechou.
+
+### Os estados
+
+```text
+radar     approved → sent_writer
+documento planejado → escrevendo → em_revisao → aprovado
+```
+
+`sent_planner` continua legível no enum porque existe no banco. O fluxo novo
+nunca o produz.
+
+### O dossiê canônico continua com dois consumidores
+
+```text
+loadRadarCanonicalAuthorities  →  resolveRadarCanonicalDossier
+                                   ├→ sendRadarToWriter
+                                   └→ export portátil
+```
+
+O export não mudou. Ele continua sendo a segunda saída da mesma resolução, e
+não conhece o handoff.
+
+### `sendRadarToPlanner`
+
+LEGADO. Sem rota, sem botão, sem transição. Permanece como definição do que os
+registros `plannerBundle` e `sent_planner` significam — apagá-lo apagaria a
+capacidade de interpretar o histórico.
+
 ## Contrato canônico do fechamento da fase — 2026-09-17
 
 Regra permanente. Vale sobre toda seção anterior desta spec no que houver
@@ -148,9 +278,14 @@ Plano visual canônico: **uma capa e duas ou três imagens de respiro**. FAQ nã
 faz parte do padrão. Cada imagem declara função, seção e a origem da
 necessidade. Sem estrutura editorial não há plano visual.
 
-### Envio ao Planejador
+### Envio ao Planejador — superado
 
-`sendRadarToPlanner` é a autoridade única de envio, nesta ordem:
+> **Superado pelo `RADAR_TO_WRITER_HANDOFF_1` (2026-09-17).** A autoridade
+> vigente é `sendRadarToWriter`, descrita no contrato do destino, no topo deste
+> arquivo. A ordem abaixo continua valendo — ela protege a fronteira, não o
+> Planejador.
+
+`sendRadarToPlanner` foi a autoridade única de envio, nesta ordem:
 
 ```text
 validate → canonical resolve → write bundle → readback
@@ -196,8 +331,11 @@ ArticleDNA + RadarEvidenceBundle
 Ao finalizar:
 
 ```text
-RadarFrozenEvidenceBundle + ArticleDNA → PlannerHandoff v3
+RadarFrozenEvidenceBundle + ArticleDNA → RadarCanonicalDossier → Redator
 ```
+
+> Até 2026-09-17 este dossiê era chamado `PlannerHandoff v3` e ia para o
+> Planejador. O CONTEÚDO não mudou; o destino, sim.
 
 ### Áreas operacionais
 
@@ -379,7 +517,7 @@ Limpa apenas a pesquisa corrente. Preserva `ArticleDNA`, `KeywordDNA`,
 deliberadamente registrados e as contribuições reais do especialista. `RESET`
 não inicia pesquisa nova.
 
-### PlannerHandoff v3
+### PlannerHandoff v3 — renomeado para o dossiê canônico entregue ao Redator
 
 Fonte: ArticleDNA aprovado + `RadarFrozenEvidenceBundle` íntegro + o dossiê de
 evidência correspondente. O envelope inclui o Blueprint diretamente.

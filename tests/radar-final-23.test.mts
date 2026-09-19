@@ -492,7 +492,7 @@ test("Z · a área Google não oferece extrair sobre a fotografia, e a leitura c
    * renderiza. A fatia é a mesma área; só o nome da porta mudou.
    */
   const inicio = fonte.indexOf("{areaGoogle && <>");
-  const fim = fonte.indexOf("{plannerHandoff && !areaGoogle && <PlannerHandoff", inicio);
+  const fim = fonte.indexOf("{writerHandoff && !areaGoogle && <WriterHandoff", inicio);
   assert.ok(inicio > 0 && fim > inicio, "a área do Google foi localizada");
   const area = fonte.slice(inicio, fim);
 

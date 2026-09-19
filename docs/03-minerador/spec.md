@@ -39,6 +39,18 @@ aguardam ação manual autorizada.
 
 ## Regra permanente do R5 — leitura semântica independente antes da comparação — 2026-08-21
 
+> **REVOGADA EM 2026-09-18.** O R5 não existe mais no Minerador. O
+> orquestrador, as três fases, o cliente DeepSeek do R5, o aviso de execução
+> e as rotas `/api/process-intent-niche`, `/api/analyze`, `/api/clusterize` e
+> `/api/generate-briefing` foram removidos por estarem **sem chamador**: os
+> handlers `handleBatchAnalyze` e `handleBatchSemanticReview` já não eram
+> acionados por nenhum botão, o painel já forçava `aiReview = null` e nenhuma
+> das 103 keywords do banco carregava payload `ai_review`. A ação `IA` da
+> barra do Processador é, e já era, a Apresentação Contextual.
+>
+> O texto abaixo permanece como registro do contrato que vigorou até essa
+> data. Não descreve comportamento atual.
+
 O R5 deve formar uma interpretação independente da keyword original antes de
 consultar a interpretação da Lógica. A keyword original é o objeto primário
 (`R5_PRIMARY_OBJECT = RAW_KEYWORD`); os valores da Lógica são hipóteses
@@ -71,6 +83,15 @@ prompt. A leitura intermediária não cria campos de banco; mudanças permanente
 no comportamento do R5 devem atualizar esta seção da spec.
 
 ## Regra permanente do R6 — divergência real separada de decisão pendente — 2026-08-21
+
+> **Adendo 2026-09-18.** Com o R5 removido, `CORREÇÕES PROPOSTAS` deixou de
+> ter fonte: não existe mais sugestão de IA para divergir da Lógica. O que
+> permanece vivo desta regra é a outra metade — campo estratégico sem leitura
+> consolidada é `DECISÃO PENDENTE`, com ação humana explícita. O read-model
+> que renderiza divergências ainda existe no código e sai no corte da
+> Apresentação Contextual — **o que aconteceu em 2026-09-18**. Hoje a Revisão
+> Humana tem só decisões pendentes e a aplicabilidade do KGR.
+> Apresentação Contextual.
 
 `CORREÇÕES PROPOSTAS` é reservado a uma divergência semântica acionável: valor
 atual diferente de sugestão concreta, evidência suficiente e delta aceito pelo
@@ -568,6 +589,17 @@ As três utilizações de SERP permanecem separadas: qualificação individual n
 O front aprovado nesta etapa é somente uma cópia de trabalho: preview local e layout não equivalem a SERP real, consolidação persistida, versão imutável ou handoff real. O contrato estrutural, a persistência e o rollout correspondente continuam sujeitos à SDD e ao adendo específico.
 
 ## 59. IA do Minerador — Apresentação Contextual da keyword para a Marca — 2026-08-28
+
+> **REVOGADA EM 2026-09-18.** Não existe mais IA no Minerador. A Apresentação
+> Contextual, o processo `ai` e a rota `ia/brief-apresentacao` foram
+> removidos: a camada não alimentava decisão nenhuma — o texto gerado ia
+> apenas para um painel somente-leitura do Arquiteto, nunca para prompt,
+> ArticleDNA, SiloDNA ou Redator. `MINERADOR_PROCESSES = 6`.
+>
+> Os 252 artifacts `keyword_contextual_presentation` **permanecem no banco**:
+> `editorial_artifact_versions` é append-only por trigger, e o CHECK de
+> `artifact_type` continua aceitando o tipo. O texto abaixo é registro do
+> contrato que vigorou até essa data.
 
 A IA do Minerador é uma camada **opcional** de **Apresentação Contextual da keyword para a Marca**. A pergunta operacional que ela responde é "Como esta Marca deve apresentar este tema?", nunca "Qual é a intenção desta busca?". Nenhum processo do Minerador depende da sua execução.
 

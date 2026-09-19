@@ -435,7 +435,7 @@ const modelo = (deepResearch: ReturnType<typeof vista>): RadarR3Model => ({
   amazon: { state: "AMAZON_NOT_APPLICABLE", note: "" },
   content: { articleDnaVersion: "v1", principal: "skincare para pele oleosa", needs: 0, evidenceCount: 0, sourceCount: 0, rows: [], technical: { brandId: "b", articleId: "a", articleDnaVersionId: "dna-188", siloId: null, snapshotId: null, provider: null, articleDnaEntityId: null, articleDnaHash: null } },
   specialist: { expert: "Não selecionado", specialty: "", status: "Não iniciado", channel: "", requestsSent: 0, contributionsReceived: 0, reviewedEvidence: 0, pending: 0, existingContent: "Nenhum material" },
-  report: { status: "Aguardando", version: null, needs: 0, summary: "", approved: false, sentToPlanner: false, updatedAt: null },
+  report: { status: "Aguardando", version: null, needs: 0, summary: "", approved: false, sentToWriter: false, updatedAt: null },
   nextAction: "", lastActivity: null,
   provenance: { brandId: "b", articleId: "a", articleDnaVersionId: "dna-188", siloId: null, snapshotId: null, provider: null },
 } as unknown as RadarR3Model);

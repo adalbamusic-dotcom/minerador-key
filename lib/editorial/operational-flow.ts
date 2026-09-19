@@ -1,19 +1,36 @@
 import { z } from "zod";
-import type { ArticleDNA, ContentDocument, ContentPlan, SiloDNA, SiloPage, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts.ts";
-import { ArticleArchitectureStatusSchema, ArticleControlContextSchema, ArticleKeywordReferenceSchema, ArticleKgrIdentitySchema, ContentDocumentSchema, EditorialUnitTypeSchema, KeywordUrlRelationshipSchema, VersionedContentPlanSchema, VersionedSiloPageSchema } from "../arquiteto/contracts.ts";
+import type { ArticleDNA, ContentDocument, SiloDNA, SiloPage, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts.ts";
+import { ArticleArchitectureStatusSchema, ArticleControlContextSchema, ArticleKeywordReferenceSchema, ArticleKgrIdentitySchema, EditorialUnitTypeSchema, KeywordUrlRelationshipSchema, VersionedContentPlanSchema, VersionedSiloPageSchema } from "../arquiteto/contracts.ts";
 import { SerpFormationAssessmentSchema } from "../arquiteto/serp-formation.ts";
 import type { ArticleInternalLinks, ResolvedSiloContext } from "../arquiteto/radar-handoff-context.ts";
 import type { ArchitectSerpProvenance } from "../arquiteto/radar-handoff-gate.ts";
-import { toVersionReference } from "../arquiteto/versioning.ts";
 import { isArticleKeywordCountValid } from "../arquiteto/domain-rules.ts";
-import { contentPlanApprovalIssues, createDefinitiveContentPlan } from "../planejador/content-plan.ts";
+/*
+ * ===== CORTE 2 · O NÚCLEO DO PIPELINE NÃO IMPORTA MAIS `lib/planejador` =====
+ *
+ * `createDefinitiveContentPlan` saiu junto com `createOperationalPlan`. E
+ * `contentPlanApprovalIssues` deixou de ser re-exportada daqui: quem ainda a
+ * usa — o cockpit, para VALIDAR e exibir, nunca para gravar — passou a
+ * importá-la do módulo dono. Era o último fio da dependência.
+ */
 import { RadarHydrationSnapshotSchema, createRadarHydrationSnapshot, type RadarHydrationSnapshot, type RadarHydrationSourceKeyword } from "../radar/hydration.ts";
 import { RadarPlannerHandoffSchema, VersionedRadarAnalysisSchema, type RadarPlannerHandoff } from "../radar/analysis-contracts.ts";
 import { buildArticleControlContext } from "../arquiteto/strategic-context.ts";
 
 export const WorkflowOriginSchema = z.enum(["real", "local"]);
 export const ArchitectWorkflowStateSchema = z.enum(["draft", "analyzing", "conflicts", "awaiting_approval", "approved", "blocked", "sent_radar"]);
-export const RadarWorkflowStateSchema = z.enum(["imported", "research_pending", "researching", "needs_review", "conflicts", "awaiting_approval", "approved", "sent_planner"]);
+/*
+ * ===== RADAR_TO_WRITER_HANDOFF_1 · §18 · O DESTINO MUDOU DE NOME =====
+ *
+ * `sent_writer` entra ao lado de `sent_planner`, e não no lugar dele. Itens
+ * enviados ao Planejador antes deste gate existem no banco com aquele estado;
+ * retirá-lo do enum faria a leitura recusar a linha inteira e o artigo sumiria
+ * da planilha de quem opera.
+ *
+ * O fluxo NOVO nunca produz `sent_planner`: ele é histórico legível, não
+ * destino disponível.
+ */
+export const RadarWorkflowStateSchema = z.enum(["imported", "research_pending", "researching", "needs_review", "conflicts", "awaiting_approval", "approved", "sent_planner", "sent_writer"]);
 export const PlannerWorkflowStateSchema = z.enum(["draft", "planning", "pending", "awaiting_review", "approved", "sent_writer"]);
 export const PublicationWorkflowStateSchema = z.enum(["draft", "writing", "awaiting_review", "in_review", "approved", "ready_to_export", "queued", "exported", "published", "update_due", "blocked", "archived"]);
 export const PublicationHistoryEntrySchema = z.object({
@@ -35,7 +52,7 @@ export const RadarItemSchema = z.object({
   // O Radar só recebe unidade estruturalmente completa: Silo é obrigatório no
   // handoff, que é posterior a Silos e Links Internos.
   title: z.string(), slug: z.string(), siloId: z.string(), hierarchy: z.string(), principalKeywordId: z.string(), format: z.string(),
-  intent: z.string(), state: RadarWorkflowStateSchema, importedAt: z.string().datetime(), updatedAt: z.string().datetime(), origin: WorkflowOriginSchema, lockVersion: z.number().int().positive().default(1),
+  intent: z.string(), state: RadarWorkflowStateSchema, importedAt: z.string().datetime({ offset: true }), updatedAt: z.string().datetime({ offset: true }), origin: WorkflowOriginSchema, lockVersion: z.number().int().positive().default(1),
   unitType: EditorialUnitTypeSchema.default("article"), hydration: RadarHydrationSnapshotSchema.nullable().default(null), analysisVersions: z.array(VersionedRadarAnalysisSchema).default([]),
   arquitetoKeywordDnaReferences: z.array(ArticleKeywordReferenceSchema).optional(),
   arquitetoKeywordUrlRelations: z.record(z.string(), KeywordUrlRelationshipSchema).optional(),
@@ -78,13 +95,39 @@ export const RadarItemSchema = z.object({
 });
 export const PlannerItemSchema = z.object({
   id: z.string(), brandId: z.string(), articleId: z.string(), radarItemId: z.string(), title: z.string(), slug: z.string(), siloId: z.string(),
-  format: z.string(), intent: z.string(), state: PlannerWorkflowStateSchema, contentPlanVersionId: z.string().nullable(), importedAt: z.string().datetime(), updatedAt: z.string().datetime(), origin: WorkflowOriginSchema, lockVersion: z.number().int().positive().default(1),
+  format: z.string(), intent: z.string(), state: PlannerWorkflowStateSchema, contentPlanVersionId: z.string().nullable(), importedAt: z.string().datetime({ offset: true }), updatedAt: z.string().datetime({ offset: true }), origin: WorkflowOriginSchema, lockVersion: z.number().int().positive().default(1),
   unitType: EditorialUnitTypeSchema.default("article"), radarHandoff: RadarPlannerHandoffSchema.optional(),
 });
 export const OperationalPublicationSchema = z.object({
-  id: z.string(), brandId: z.string(), articleId: z.string(), plannerItemId: z.string(), contentPlanVersionId: z.string(), documentId: z.string(),
+  id: z.string(), brandId: z.string(), articleId: z.string(),
+  /**
+   * ORIGEM PLANEJADOR — nula quando o documento veio do Radar.
+   *
+   * Eram obrigatorios, e isso impedia documento de origem Radar de entrar em
+   * Publicacoes. O banco ja aceitava nulo (`content_plan_version_id` nulavel,
+   * e `planner_item_id` nem existe como coluna): o bloqueio era so aqui.
+   *
+   * Aditivo: registro antigo com os dois preenchidos continua valido.
+   */
+  plannerItemId: z.string().nullable().default(null),
+  contentPlanVersionId: z.string().nullable().default(null),
+  /** ORIGEM RADAR — a analise que produziu o documento, quando for o caso. */
+  radarOrigin: z.object({
+    analysisVersionId: z.string().min(1),
+    evidenceBundleHash: z.string().min(1),
+  }).strict().nullable().default(null),
+  /**
+   * CORTE 2 · OBRIGATÓRIO NO CONTRATO, mesmo com a coluna nulável no banco.
+   *
+   * O preflight mostrou `publication_records.document_id` nulável no schema
+   * efetivo: um registro órfão passa no banco. Ele não passa aqui. Publicação
+   * sem documento não tem o que exportar nem o que revisar, e ninguém saberia
+   * que conteúdo ela representa. `.min(1)` é aditivo — não há linha existente
+   * com o campo vazio.
+   */
+  documentId: z.string().min(1),
   title: z.string(), slug: z.string(), siloId: z.string(), hierarchy: z.string(), state: PublicationWorkflowStateSchema,
-  responsible: z.string().nullable(), destination: z.string().nullable(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), origin: WorkflowOriginSchema,
+  responsible: z.string().nullable(), destination: z.string().nullable(), createdAt: z.string().datetime({ offset: true }), updatedAt: z.string().datetime({ offset: true }), origin: WorkflowOriginSchema,
   lockVersion: z.number().int().positive().default(1),
   unitType: EditorialUnitTypeSchema.default("article"),
   destinationUrl: z.string().url().nullable().default(null),
@@ -97,6 +140,21 @@ export const OperationalPublicationSchema = z.object({
   updateRequested: z.boolean().default(false),
   updateRequestedAt: z.string().datetime().nullable().default(null),
   history: z.array(PublicationHistoryEntrySchema).default([]),
+}).superRefine((publication, context) => {
+  /*
+   * TODO REGISTRO DECLARA UMA ORIGEM.
+   *
+   * A obrigatoriedade do plano garantia isso por acidente. Removida ela, o
+   * que sustenta a garantia e esta regra: plano OU Radar. Nenhuma das duas e
+   * registro orfao — ninguem saberia de onde o conteudo veio.
+   */
+  if (!publication.contentPlanVersionId && !publication.radarOrigin) {
+    context.addIssue({
+      code: "custom",
+      path: ["radarOrigin"],
+      message: "O registro precisa declarar uma origem: plano editorial ou pacote do Radar.",
+    });
+  }
 });
 /**
  * O que o Arquiteto resolveu para este Article antes de entregá-lo.
@@ -118,10 +176,19 @@ export const PermissionModuleSchema = z.enum(["marca", "minerador", "arquiteto",
 export const PermissionActionSchema = z.enum(["view", "comment", "create", "edit", "review", "approve", "export", "publish", "manage"]);
 export const CollaboratorRoleSchema = z.enum(["owner", "brand_admin", "strategist", "analyst", "planner", "writer", "editor", "reviewer", "eeat_specialist", "medical_reviewer", "publisher", "viewer", "external_collaborator"]);
 export const ModulePermissionSchema = z.object({ module: PermissionModuleSchema, actions: z.array(PermissionActionSchema) });
+/*
+ * DATA DE COLUNA ACEITA DESLOCAMENTO — e não só "Z".
+ *
+ * O PostgREST devolve `timestamptz` como `2026-09-18T03:51:49.236599+00:00`.
+ * `z.string().datetime()` recusa esse formato, e a recusa não ficava no campo:
+ * derrubava a validação da mesa inteira, apagando da tela o Radar que estava
+ * íntegro. A normalização acontece no leitor (`isoDate`); isto aqui é a rede
+ * para quem ler uma coluna nova e esquecer dela.
+ */
 export const BrandInvitationSchema = z.object({
   id: z.string(), brandId: z.string(), email: z.string().email(), role: CollaboratorRoleSchema, permissions: z.array(ModulePermissionSchema),
-  status: z.enum(["pending", "accepted", "expired", "cancelled", "suspended", "revoked"]), expiresAt: z.string().datetime(),
-  createdAt: z.string().datetime(), createdBy: z.string(), delivery: z.enum(["development_adapter", "provider_sent", "not_sent"]), tokenId: z.string(),
+  status: z.enum(["pending", "accepted", "expired", "cancelled", "suspended", "revoked"]), expiresAt: z.string().datetime({ offset: true }),
+  createdAt: z.string().datetime({ offset: true }), createdBy: z.string(), delivery: z.enum(["development_adapter", "provider_sent", "not_sent"]), tokenId: z.string(),
 });
 export type BrandInvitation = z.infer<typeof BrandInvitationSchema>;
 
@@ -245,7 +312,18 @@ export function setRadarState(items: RadarItem[], ids: string[], target: RadarIt
   const allowed: Record<RadarItem["state"], RadarItem["state"][]> = {
     imported: ["research_pending"], research_pending: ["researching", "awaiting_approval"], researching: ["needs_review", "conflicts"],
     needs_review: ["awaiting_approval", "conflicts"], conflicts: ["needs_review"], awaiting_approval: ["approved", "needs_review"],
-    approved: ["sent_planner", "needs_review"], sent_planner: ["approved"],
+    /*
+     * §18 · `approved → sent_writer` é a transição do fluxo vigente.
+     *
+     * CORTE 2 · `approved → sent_planner` SAIU. O valor continua no enum
+     * porque linha antiga precisa fazer parse, e `sent_planner → approved`
+     * continua existindo pela mesma razão: um artigo entregue ao Planejador no
+     * fluxo antigo precisa conseguir seguir pelo novo. O que deixou de existir
+     * é o caminho de ENTRADA — nada mais chega a `sent_planner`.
+     */
+    approved: ["sent_writer", "needs_review"],
+    sent_planner: ["approved"],
+    sent_writer: ["approved"],
   };
   return items.map(item => ids.includes(item.id) && allowed[item.state].includes(target) ? { ...item, state: target, updatedAt: now, lockVersion: item.lockVersion + 1 } : item);
 }
@@ -269,28 +347,47 @@ export function importRadarToPlanner(existing: PlannerItem[], radarItems: RadarI
   return [...existing, ...additions];
 }
 
-export async function createOperationalPlan(item: PlannerItem, article: VersionEnvelope<ArticleDNA>, silo: VersionEnvelope<SiloDNA> | undefined, actorId: string, serpEvidenceRefs: Array<{ artifactId: string; artifactType: "serp_snapshot"; contentHash: string }> = [], radarAnalysisPackage?: Parameters<typeof createDefinitiveContentPlan>[0]["radarAnalysisPackage"]) {
-  return createDefinitiveContentPlan({ brandId: item.brandId, editorialUnitType: item.unitType, editorialUnitId: item.articleId, article, silo, serpEvidenceRefs, radarAnalysisPackage }, actorId);
-}
-
-export function createOperationalDocument(plan: VersionEnvelope<ContentPlan>, article: VersionEnvelope<ArticleDNA>, item: PlannerItem) {
-  const provenance = { keywordDnaRefs: plan.payload.keywordDnaRefs, evidenceRefs: [...plan.payload.serpEvidenceRefs, ...plan.payload.productEvidenceRefs], sourceIds: [] as string[] };
-  return ContentDocumentSchema.parse({
-    schemaVersion: 1, id: `document:${item.articleId}`, title: item.title, status: "planejado", contentPlanRef: toVersionReference(plan),
-    brandDnaRef: plan.payload.brandDnaRef, keywordDnaRefs: plan.payload.keywordDnaRefs, siloDnaRef: plan.payload.siloDnaRef,
-    articleDnaRef: toVersionReference(article), serpSnapshotRefs: plan.payload.serpEvidenceRefs, evidenceRefs: plan.payload.productEvidenceRefs,
-    sourceIds: [], linkMap: [], instructions: plan.payload.writingInstructions,
-    blocks: [{ id: `heading:${item.articleId}`, type: "heading", level: 1, text: item.title, provenance }, ...plan.payload.approvedOutline.map(section => ({ id: section.id, type: "heading" as const, level: 2 as const, text: section.heading, provenance }))],
-    editorContent: null, writingBrief: plan.payload.planning ? { planVersionId: plan.versionId, details: plan.payload.planning, guardianInstructions: plan.payload.planning.guardianInstructions, alerts: plan.payload.planning.alerts, provenance } : undefined, metadata: { slug: article.payload.suggestedSlug, principalKeyword: article.payload.principalKeywordId, metaTitle: "", metaDescription: "", socialTitle: "", socialDescription: "",
-      canonical: article.payload.canonical, indexationStatus: "noindex", plannedImages: [] },
+/**
+ * ===== CORTE 2 · A PUBLICAÇÃO NASCE DO DOCUMENTO =====
+ *
+ * `createOperationalPlan`, `createOperationalDocument` e `createPublicationDraft`
+ * saíram juntas. As três pediam `PlannerItem` e as duas últimas fabricavam
+ * artefato v1: documento com `contentPlanRef` obrigatório e registro de
+ * publicação amarrado a um plano. Nenhuma tinha dado a preservar — o banco real
+ * mostrou zero `content_plan`, zero `planner` e zero `publication_records`.
+ *
+ * A autoridade agora é ContentDocument + origem Radar + estado atual.
+ *
+ * `plannerItemId` e `contentPlanVersionId` continuam no schema, **nulos**. Eles
+ * descrevem registro antigo; não são exigência de registro novo. A invariante
+ * "todo registro declara alguma origem" continua valendo — pelo `radarOrigin`.
+ *
+ * O v2 é EXIGIDO, não assumido: um documento v1 chegando aqui significaria que
+ * alguém reabriu o caminho do Planejador, e o erro precisa dizer isso em vez de
+ * fabricar uma publicação sem origem declarável.
+ */
+export function createWriterPublication(input: { brandId: string; document: ContentDocument; article: VersionEnvelope<ArticleDNA> }, now = new Date().toISOString()) {
+  const { brandId, document, article } = input;
+  if (document.schemaVersion !== 2) throw new Error("Publicação nova exige documento v2 de origem Radar.");
+  const articleId = document.articleDnaRef.entityId;
+  return OperationalPublicationSchema.parse({
+    id: `publication:${articleId}`, brandId, articleId,
+    plannerItemId: null, contentPlanVersionId: null,
+    /*
+     * PROJEÇÃO, e não repasse do objeto inteiro.
+     *
+     * `RadarDocumentOrigin` tem dez campos; `OperationalPublication.radarOrigin`
+     * é `.strict()` e quer dois. Passar o objeto todo parece inofensivo e é
+     * recusado no parse — e seria pior se passasse: o registro de publicação
+     * viraria uma segunda cópia da origem, livre para divergir do documento.
+     */
+    radarOrigin: { analysisVersionId: document.radarOrigin.analysisVersionId, evidenceBundleHash: document.radarOrigin.evidenceBundleHash },
+    documentId: document.id, title: document.title,
+    slug: document.metadata.slug || article.payload.suggestedSlug,
+    siloId: document.siloDnaRef.entityId, hierarchy: article.payload.hierarchy,
+    state: "draft", responsible: null, destination: null,
+    createdAt: now, updatedAt: now, origin: "local", lockVersion: 1,
   });
-}
-
-export function createPublicationDraft(item: PlannerItem, plan: VersionEnvelope<ContentPlan>, document: ContentDocument, article: VersionEnvelope<ArticleDNA>, now = new Date().toISOString()) {
-  return OperationalPublicationSchema.parse({ id: `publication:${item.articleId}`, brandId: item.brandId, articleId: item.articleId,
-    plannerItemId: item.id, contentPlanVersionId: plan.versionId, documentId: document.id, title: item.title, slug: item.slug,
-    siloId: item.siloId, hierarchy: article.payload.hierarchy, state: "draft", responsible: null, destination: null,
-    createdAt: now, updatedAt: now, origin: "local", lockVersion: 1 });
 }
 
 export function importApprovedWriterItems(items: OperationalPublication[], ids: string[], now = new Date().toISOString()) {
@@ -310,7 +407,6 @@ export function createDevelopmentInvitation(input: Omit<BrandInvitation, "id" | 
 }
 
 export function parseOperationalPlan(value: unknown) { return VersionedContentPlanSchema.parse(value); }
-export { contentPlanApprovalIssues };
 
 // --- Reconciliacao do workspace do Arquiteto ---
 import { ArchitectArticleDnaRecoverySchema, architectArticleDnaRecoveryKey } from "./architect-recovery.ts";

@@ -326,7 +326,20 @@ export async function GET(request: NextRequest) {
       readbackConfirmed: true,
     });
   } catch (error) {
-    if (error instanceof PersistenceUnavailableError) return NextResponse.json({ code: error.code, error: error.message }, { status: 503 });
+    if (error instanceof PersistenceUnavailableError) {
+      /*
+       * ===== O ERRO REAL VAI PARA O LOG DO SERVIDOR =====
+       *
+       * A frase que a pessoa lê é a mesma para timeout de statement, socket
+       * derrubado, projeto inalcançável e RLS. Ela é correta para quem opera e
+       * inútil para quem corrige — e o erro do driver já vinha preservado no
+       * objeto, sem ninguém nunca o ler.
+       *
+       * Nada de credencial aqui: só razão, código do Postgres e a mensagem.
+       */
+      console.error("[serp:readback]", error.reason, error.driver?.code || "", error.driver?.message || "");
+      return NextResponse.json({ code: error.code, error: error.message }, { status: 503 });
+    }
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Parâmetros de readback inválidos." }, { status: 400 });
     const mapped = authzErrorResponse(error); return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
@@ -526,7 +539,10 @@ export async function POST(request: NextRequest) {
     /* §2 · o mesmo 409, com o mesmo código e o mesmo corpo das duas rotas. */
     if (error instanceof RadarPrimaryModeConflictError) return NextResponse.json(error.body, { status: error.status });
     if (error instanceof RadarResolutionEnvelopeError) return NextResponse.json({ code: error.code, error: error.message }, { status: error.status });
-    if (error instanceof PersistenceUnavailableError) return NextResponse.json({ code: error.code, reason: error.reason, error: error.message, recoverableLocally: true }, { status: 503 });
+    if (error instanceof PersistenceUnavailableError) {
+      console.error("[serp:collect]", error.reason, error.driver?.code || "", error.driver?.message || "");
+      return NextResponse.json({ code: error.code, reason: error.reason, error: error.message, recoverableLocally: true, details: { reason: error.reason, driver: error.driver } }, { status: 503 });
+    }
     const mapped = authzErrorResponse(error); const code = error instanceof AuthzError ? error.status === 401 ? "unauthenticated" : error.status === 403 ? "permission_denied" : "authorization_error" : "serp_error";
     return NextResponse.json({ code, error: mapped.message }, { status: mapped.status });
   }

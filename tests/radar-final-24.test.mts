@@ -204,7 +204,7 @@ const modelo = (deepResearch: ReturnType<typeof vista>): RadarR3Model => ({
   amazon: { state: "AMAZON_NOT_APPLICABLE", note: "" },
   content: { articleDnaVersion: "v1", principal: "skincare para pele oleosa", needs: 0, evidenceCount: 0, sourceCount: 0, rows: [], technical: { brandId: ARTIGO.brandId, articleId: ARTIGO.articleId, articleDnaVersionId: ARTIGO.articleDnaVersionId, siloId: null, snapshotId: null, provider: null, articleDnaEntityId: null, articleDnaHash: null } },
   specialist: { expert: "Não selecionado", specialty: "", status: "Não iniciado", channel: "Telegram não consumido nesta visão", requestsSent: 0, contributionsReceived: 0, reviewedEvidence: 0, pending: 0, existingContent: "Nenhum material" },
-  report: { status: "Aguardando", version: null, needs: 0, summary: "", approved: false, sentToPlanner: false, updatedAt: null },
+  report: { status: "Aguardando", version: null, needs: 0, summary: "", approved: false, sentToWriter: false, updatedAt: null },
   nextAction: "", lastActivity: null,
   provenance: { brandId: ARTIGO.brandId, articleId: ARTIGO.articleId, articleDnaVersionId: ARTIGO.articleDnaVersionId, siloId: null, snapshotId: null, provider: null },
 } as unknown as RadarR3Model);
@@ -248,7 +248,7 @@ async function montarArea(opcoes: {
         model: modelo(estado.view || vista()), refreshing: false,
         onOpenArticle: () => {}, onOpenDetail: () => {},
         onResetInvestigation: () => {},
-        plannerHandoff: {
+        writerHandoff: {
           eligible: true, blockedReason: null, sent: false, sentAt: null,
           destinationLabel: null, busy: false,
           onSend: () => { chamadas.send += 1; },
@@ -441,7 +441,7 @@ test("I · erro da leitura lazy não toca FINALIZED, e o retry é local", async 
 
   /* O que a falha NÃO faz. */
   assert.ok(tela.query("radar-frozen-bundle"), "FINALIZED_PRESERVED_ON_LAZY_ERROR");
-  assert.ok(tela.query("radar-planner-handoff") || tela.text().includes("Planejador"), "o handoff continua oferecido");
+  assert.ok(tela.query("radar-writer-send") || tela.text().includes("Redator"), "o handoff continua oferecido");
   tela.destroy();
 });
 
@@ -452,8 +452,8 @@ test("K · o handoff não exige abrir amostra nem proveniência", async () => {
   await abrirPesquisa(tela);
 
   const botao = [...tela.container.querySelectorAll("button")]
-    .find(item => /Planejador/i.test(item.textContent || "")) as HTMLButtonElement;
-  assert.ok(botao, "a fronteira do Planejador está na tela");
+    .find(item => /Redator/i.test(item.textContent || "")) as HTMLButtonElement;
+  assert.ok(botao, "a fronteira do Redator está na tela");
 
   await tela.click(botao);
   assert.equal(chamadas.send, 1, "enviar funciona com os dois disclosures fechados");

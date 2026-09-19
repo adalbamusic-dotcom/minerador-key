@@ -17,13 +17,10 @@ ARQUITETO
 ArticleDNA + SiloDNA + SiloPage + InternalLinkGraph
   ↓
 RADAR
-RadarEvidenceBundle → RadarFrozenEvidenceBundle → PlannerHandoff v3
-  ↓
-PLANEJADOR
-ContentPlan
+RadarEvidenceBundle → RadarFrozenEvidenceBundle → RadarCanonicalDossier
   ↓
 REDATOR
-ContentDocument
+plano interno → ContentDocument
   ↓
 PUBLICAÇÕES
 PublicationRecord
@@ -110,21 +107,18 @@ Evidence registra o que sustenta, o que não sustenta, limites, conflitos, decis
 
 Especialista: Need → ExpertBrief → ExpertContribution → transcrição/fidelidade → organização → revisão → ExpertEvidence.
 
-Entrega ao Planejador: `PlannerHandoff v3`
-(`RADAR_PLANNER_CONTRACT_VERSION = 3`), formado por ArticleDNA aprovado +
-`RadarFrozenEvidenceBundle` íntegro + o dossiê de evidência correspondente. O
-envelope inclui o `RadarEditorialBlueprint` diretamente, além de brandId,
-articleId, articleDnaVersionId, SiloContext/InternalLinkGraph ref, evidências,
-necessidades, lacunas, conflitos, decisões humanas, proveniência e
-versão/hash.
+Entrega ao Redator: o **dossiê canônico** resolvido por
+`loadRadarCanonicalAuthorities → resolveRadarCanonicalDossier` e entregue por
+`sendRadarToWriter`. Ele inclui ArticleDNA aprovado (identidade, versão e
+hash), `RadarEvidenceBundle` V3 íntegro, `RadarEditorialBlueprint`,
+SiloContext/InternalLinkGraph ref, evidências, necessidades, lacunas,
+conflitos, decisões humanas, proveniência e versão/hash.
 
-O Radar também entrega `SpecialistBriefs` e `VideoBriefs` congelados. O
-Blueprint **não** é um `ContentPlan`: ele não fixa H2 final, título final,
-contagem de palavras nem ordem rígida. O Planejador não pesquisa de novo, não
-reinterpreta o Radar como investigação nova e não remonta o Blueprint do zero.
+Desde 2026-09-17 o destino é o REDATOR. O Planejador saiu do fluxo operacional:
+ele não é etapa, gate, destino de botão nem parada de navegação. Dados
+históricos dele são preservados e nenhum artigo é movido automaticamente.
 
-Desde 2026-09-17, o envelope carrega também — pela mesma resolução canônica que
-alimenta o export portátil:
+O envelope carrega também:
 
 - `bundle.video` — a biblioteca de vídeos casada com as pautas, com trecho
   ancorado no tempo, seção de aplicação e limitações. Sem id de worker, `gs://`
@@ -133,8 +127,12 @@ alimenta o export portátil:
   pergunta preparada, o que cada uma sustenta e as limitações. Sem id de
   Telegram, de chat nem de ator;
 - `bundle.keywordContext` — principal, secundárias e reforços narrativos, com o
-  papel vindo do ArticleDNA e o texto da hidratação daquela versão. Aditivo e
-  opcional: dossiê gravado antes disso continua íntegro.
+  papel vindo do ArticleDNA e o texto da hidratação daquela versão;
+- `writerMayNot` — o que o Redator não pode redefinir.
+
+O Radar também entrega `SpecialistBriefs` e `VideoBriefs` congelados. O
+Blueprint **não** é um `ContentPlan`: ele não fixa H2 final, título final,
+contagem de palavras nem ordem rígida.
 
 Ausência é `null`, nunca camada vazia — `null` diz "não houve"; uma camada com
 `items: []` e `notApproved: 3` diz "houve resposta e ninguém decidiu".
@@ -142,29 +140,66 @@ Ausência é `null`, nunca camada vazia — `null` diz "não houve"; uma camada 
 Todo `evidenceRef` do blueprint final resolve a partir deste envelope, e não
 apenas a partir do export.
 
+O Redator recebe a ESTRUTURA canônica, não markdown. `writer_context_md`,
+`writer_brief_md` e `competitive_radiography_md` continuam sendo read models
+portáteis do CSV.
+
 Não cria ContentPlan nem estrutura final do artigo.
 
-## Planejador
+## Planejador — removido do pipeline em 2026-09-18
 
-Papel: compilar inteligência aprovada em especificação executável.
+`PLANEJADOR_STAGE = NONE`. Não é etapa, gate, destino de botão, condição de
+prontidão nem parada de navegação, não aparece no menu e não tem estado de
+pipeline. Nenhum artigo novo passa por aqui e **nenhum caminho de escrita nova
+existe por ele**.
 
-Recebe BrandDNA/contexto autorizado, KeywordDNAs, ArticleDNA, SiloDNA/SiloPage, InternalLinkGraph, publicationContext, `PlannerHandoff v3`, evidências, necessidades, gaps, conflitos, perguntas, entidades, fontes, decisões e versões.
+O que ele fazia — compilar inteligência aprovada em especificação executável —
+é hoje a fase de planejamento DENTRO do Redator. As funções de planejamento
+inicial de projeto, produto, serviço e campanha serão transferidas para uma aba
+da Marca, onde fazem sentido.
 
-Entrega ContentPlan aprovado/versionado com identidade, estratégia, gabarito global, SectionSpecs, palavras/ranges, H1/H2/H3, parágrafos, distribuição de keywords, perguntas, entidades, objeções, claims, Evidence Map, links internos, anchorConcepts, links externos, CTA, plano visual, instruções, restrições e proveniência.
+Dados históricos permanecem legíveis: `ContentPlan`, `PlannerItem` e o estado
+`sent_planner` continuam no vocabulário de leitura, e nenhum artigo é movido
+automaticamente. A rota `/planejador` continua respondendo.
 
-Princípio: liberdade de escrita, não liberdade de estratégia.
-
-Não recalcula KGR, não forma ArticleDNA, não pesquisa SERP novamente, não escolhe fontes arbitrariamente e não escreve o artigo final.
+**Não há migração de conteúdo.** O banco real confirmou zero linhas de
+`ContentPlan`, zero `stage='planner'`, zero `sent_planner`, e as tabelas
+`content_plans`/`planner_items` não existem. Remoção lógica aqui significa
+fechar caminho de escrita, não converter dado.
 
 ## Redator
 
-Papel: executar ContentPlan em ContentDocument.
+Papel: transformar o dossiê do Radar em artigo — planejando e escrevendo.
 
-Decide formulação, sintaxe, ritmo, coesão e transições dentro das restrições.
+```text
+RadarCanonicalDossier → planejamento → escrita → ContentDocument
+```
 
-Não reinventa estratégia, Evidence, arquitetura, links ou claims.
+Recebe BrandDNA/contexto autorizado, KeywordDNAs, ArticleDNA, SiloDNA/SiloPage,
+InternalLinkGraph, publicationContext e o dossiê canônico do Radar com
+evidências, necessidades, lacunas, conflitos, perguntas, entidades, fontes,
+decisões e versões — como ESTRUTURA, não markdown.
 
-Responsabilidades: Tiptap, salvamento, versionamento, revisão, aprovação e materialização dos links/imagens especificados.
+Decide: estrutura final de H2/H3, sequência narrativa, aplicação da evidência
+por seção, links internos e externos, plano de mídia, metadados de SEO finais,
+CTA, instruções de redação, formulação, sintaxe, ritmo e coesão. Pode montar um
+`ContentPlan` interno antes de escrever — ele é artefato de quem escreve, não
+etapa do fluxo.
+
+Não pode: trocar a keyword principal, reconfigurar o Silo, remover cobertura
+obrigatória, alterar a intenção declarada, alterar slug ou canonical
+protegidos, nem substituir a composição de secundárias por decisão própria. A
+lista viaja dentro do pacote entregue.
+
+Não pesquisa de novo, não reinterpreta o Radar como investigação nova e não
+remonta o Blueprint do zero.
+
+A hierarquia de evidência do Radar vale no planejamento e na escrita.
+
+Princípio: liberdade de escrita, não liberdade de estratégia.
+
+Responsabilidades: Tiptap, salvamento, versionamento, revisão, aprovação e
+materialização dos links/imagens especificados.
 
 ## Publicações
 

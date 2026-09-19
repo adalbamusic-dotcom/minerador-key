@@ -1,5 +1,26 @@
 /**
- * ===== A AUTORIDADE ÚNICA DO HANDOFF — RADAR_FINAL_1.1 · §2 =====
+ * ============ LEGADO — RADAR_TO_WRITER_HANDOFF_1 · §6 ============
+ *
+ * ESTE CAMINHO NÃO É MAIS OPERACIONAL.
+ *
+ * O Planejador saiu do pipeline: o Radar entrega ao Redator, por
+ * `lib/server/radar-writer-send.ts`. Nenhum botão, rota ou transição do fluxo
+ * vigente chama o que está abaixo — a rota `radar-planner-handoff` foi
+ * removida junto com o gate.
+ *
+ * ================== POR QUE ELE NÃO FOI APAGADO ==================
+ *
+ * Artigos entregues ao Planejador antes deste gate têm `plannerBundle` gravado
+ * na análise e `sent_planner` no workflow. Apagar o serviço apagaria também a
+ * definição do que aqueles registros significam, e um histórico que ninguém
+ * consegue mais interpretar é histórico perdido.
+ *
+ * Ele permanece como DEFINIÇÃO, não como porta. Chamá-lo de novo em fluxo novo
+ * reabriria os dois destinos que §6 fechou.
+ *
+ * @deprecated Use `sendRadarToWriter`.
+ *
+ * ===== (histórico) A AUTORIDADE ÚNICA DO HANDOFF — RADAR_FINAL_1.1 · §2 =====
  *
  * ==================== UMA AÇÃO, UM SERVIÇO, SETE PASSOS ====================
  *

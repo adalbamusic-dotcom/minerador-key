@@ -118,9 +118,9 @@ test("N/O · leitura, F5 e mount não acionam provider", () => {
   assert.ok(!workspace.includes('sessionStorage.setItem("semanticQualifications'));
 });
 
-test("F/G · IA segue opcional e a decisão de KGR segue humana", () => {
+test("F/G · sem IA, a decisão de KGR segue humana", () => {
   const humanReview = panel.slice(panel.indexOf("function HumanReviewPanel"));
-  assert.ok(humanReview.includes("const aiReview: ProfileRecord | null = null"));
+  assert.ok(!humanReview.includes("aiReview"), "nenhum vestígio de IA na Revisão Humana");
   assert.ok(humanReview.includes('aria-label="Aplicabilidade do KGR na revisão humana"'));
   assert.equal(readKgrApplicability({}), "pending");
   // KGR inalterado: fórmula e faixa visual.

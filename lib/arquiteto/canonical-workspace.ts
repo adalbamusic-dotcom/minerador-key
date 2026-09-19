@@ -8,7 +8,6 @@ import { ArticleKgrIdentitySchema, SiloCandidateMarkSchema, VersionedArticleDNAS
 import { VersionedArticleArchitectureAiReviewSchema, type VersionedArticleArchitectureAiReview } from "./article-ai-review.ts";
 import { buildKeywordDnaProvenanceSnapshot } from "./adapters.ts";
 import { adaptKeywordIdentityContext } from "./identity-context.ts";
-import { parseKeywordContextualPresentation, type KeywordContextualPresentation } from "../minerador/keyword-contextual-presentation.ts";
 import { TerritoryCandidateSchema, type TerritoryCandidate } from "./territory.ts";
 import { resolveArticleFormationState } from "./article-formation-decision.ts";
 import { SiloWorkingCopyStateSchema, type SiloWorkingCopyState } from "./silo-working-copy-record.ts";
@@ -70,7 +69,6 @@ export type CanonicalWorkspaceSnapshot = {
   keywords: CanonicalWorkspaceKeyword[];
   availableKeywords: CanonicalWorkspaceKeyword[];
   /** Apresentação Contextual persistida no Minerador; somente leitura. */
-  keywordPresentations: KeywordContextualPresentation[];
   articleDnas: VersionEnvelope<ArticleDNA>[];
   siloDnas: VersionEnvelope<SiloDNA>[];
   siloPages: VersionEnvelope<SiloPage>[];
@@ -196,7 +194,6 @@ const SnapshotResponseSchema = z.object({
     })),
     keywords: z.array(KeywordSchema),
     availableKeywords: z.array(KeywordSchema),
-    keywordPresentations: z.array(z.unknown()).default([]),
     articleDnas: z.array(z.unknown()),
     siloDnas: z.array(z.unknown()),
     siloPages: z.array(z.unknown()),
@@ -283,9 +280,6 @@ export async function loadCanonicalArquitetoWorkspace(brandId: string): Promise<
     importEligibility: body.data.importEligibility,
     keywords: body.data.keywords,
     availableKeywords: body.data.availableKeywords,
-    keywordPresentations: body.data.keywordPresentations
-      .map(item => parseKeywordContextualPresentation(item))
-      .filter((item): item is KeywordContextualPresentation => Boolean(item)),
     articleDnas: body.data.articleDnas.map(item => VersionedArticleDNASchema.parse(item)) as VersionEnvelope<ArticleDNA>[],
     siloDnas: body.data.siloDnas.map(item => VersionedSiloDNASchema.parse(item)) as VersionEnvelope<SiloDNA>[],
     siloPages: body.data.siloPages.map(item => VersionedSiloPageSchema.parse(item)) as VersionEnvelope<SiloPage>[],

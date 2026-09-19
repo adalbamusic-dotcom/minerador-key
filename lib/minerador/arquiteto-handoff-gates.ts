@@ -1,5 +1,4 @@
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
-import { isCompletedSemanticReview } from "./semantic-review.ts";
 import { isHumanReviewCompleted } from "./human-review.ts";
 import { hasCompleteLogicalOutputContract } from "./logical-processor.ts";
 import { resolveMineradorProcessState } from "./process-state.ts";
@@ -23,7 +22,6 @@ export type MineradorArquitetoHandoffGate = {
   volumeValidated: boolean;
   resultsValidated: boolean;
   kgrReady: boolean;
-  aiCompleted: boolean;
   humanReviewCompleted: boolean;
   /** Evidência SERP persistida; working copy de sessão não conta. */
   serpEvidencePersisted: boolean;
@@ -45,7 +43,7 @@ function normalizedStatus(value: unknown): string {
 
 /**
  * Estado de processo é informação, nunca veto editorial. Lógica, Volume,
- * Resultados, KGR, IA, Revisão e a conclusividade da SERP continuam no
+ * Resultados, KGR, Revisão e a conclusividade da SERP continuam no
  * read-model para leitura e proveniência, mas não bloqueiam o envio: quem
  * decide enviar é o humano, sobre o estado que a keyword tem hoje.
  *
@@ -85,12 +83,6 @@ export function evaluateMineradorArquitetoHandoff(
         analise_semantica: semantic,
       })
     : null;
-  const aiCompleted = currentProcess
-    ? currentProcess.ai.complete
-    : isCompletedSemanticReview(semantic.ai_review)
-      || isCompletedSemanticReview(semantic.ia_revisao)
-      || isCompletedSemanticReview(semantic.revisao_ia)
-      || isCompletedSemanticReview(semantic.semantic_review);
   const humanReviewCompleted = currentProcess
     ? currentProcess.review.complete
     : isHumanReviewCompleted(semantic);
@@ -102,7 +94,6 @@ export function evaluateMineradorArquitetoHandoff(
     volumeValidated,
     resultsValidated,
     kgrReady,
-    aiCompleted,
     humanReviewCompleted,
     // Fonte única: o artifact remoto. Não existe mais atalho por blob de sessão.
     serpEvidencePersisted: Boolean(qualification),

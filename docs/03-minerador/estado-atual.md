@@ -1,5 +1,43 @@
 # Estado atual — Minerador
 
+## Allintitle media a consulta errada — corrigido — 2026-09-18
+
+```text
+ALLINTITLE_QUERY_QUOTED = NO (era YES)
+ALLINTITLE_STORED_VALUES_VALID = NO · exigem nova medição
+DELETE_LEAVES_ORPHANS = YES · 34 + 32 entidades nesta Marca
+MIGRATIONS_ADDED = 0 · PAID_CALLS = 0
+```
+
+- **Causa provada.** `buildAllintitleQuery` montava `allintitle:"<termo>"`. A
+  aspa muda a pergunta: em vez de "quantas páginas têm todas as palavras no
+  título", que é a definição do Resultado no KGR, ela pergunta pela FRASE
+  exata. Para termo de uma palavra o Google chega a degenerar a consulta.
+- **Medição real de 2026-09-18.** A `check_url` gravada na keyword `cnc` é
+  `...q=allintitle%3A%22cnc%22&hl=pt&gl=BR`. Abrindo essa URL o Google devolve
+  **1 resultado**; `allintitle:cnc` devolve **1.720**. O valor persistido era
+  `results_allintitle = 1`, exatamente o que a consulta errada produziu.
+- **A distribuição confirma.** Das 27 keywords aprovadas da Marca, todas as
+  medições caíram entre 364 e 473 — faixa estreita demais para contagens reais
+  de allintitle, que variam por ordens de grandeza. Eram contagens de frase
+  exata, não de todas-as-palavras.
+- **`se_results_count` não é o problema.** O contrato já recusa `items_count` e
+  `organic.length`, e o campo devolveu fielmente o total do Google para a
+  consulta que foi enviada. O defeito estava na consulta, não na leitura.
+- **Corrigido:** a consulta perdeu as aspas e o termo continua saneado de aspas
+  e barras, que quebram o operador. A confirmação da consulta na página passou
+  a ser por conteúdo em vez de recorte até a próxima aspa — sem aspas, o
+  recorte engoliria o resto do texto e toda medição viraria `query_mismatch`.
+- **Consequência nos dados:** todo `results_allintitle` e todo `kgr_score`
+  derivado dele foram medidos com a consulta errada e precisam de nova medição.
+  Nada foi reescrito automaticamente; nenhuma chamada paga foi executada.
+- **Intenção/Funil não é o mesmo defeito.** `clamper` e `cnc` são marca e sigla,
+  com SERP heterogênea; "evidência insuficiente" é a recusa projetada de
+  inventar eixo, não uma falha. A cobertura usa `depth = 20` contra os 100 do
+  playground — aumentar é decisão de custo, ainda aberta.
+- **Confirmado por teste:** 73 casos nas suítes de allintitle, DataForSEO SERP,
+  revalidação, revisão semântica e KGR. TypeScript e ESLint limpos.
+
 ## Normalização do funil lógico no painel KeywordDNA — 2026-09-12
 
 - **Verificado no código:** `components/editorial/dna-panels.tsx` normaliza o
@@ -2435,6 +2473,40 @@ A força combina cobertura, dominância, reforço estrutural compatível com o r
 
 `SERP_THRESHOLDS_STATUS = PROVISIONAL_HEURISTIC` — os valores atuais funcionaram nos smokes, mas **não** são regra permanente de produto e não sobem para a spec nesta rodada. Recalibrar exige amostra maior de SERPs reais.
 
+### DERIVAÇÃO V3 — ALCANCE DO CLASSIFICADOR (2026-09-18)
+
+`DERIVATION_VERSION = serp-semantic-derivation-v3`
+
+Os thresholds **não** mudaram. O que mudou foi o quanto da SERP o classificador consegue ler: resultado não interpretado vira `indefinido`, derruba a cobertura e mata o eixo mesmo quando a SERP é óbvia para um humano. Cada regra nova saiu de uma SERP real em que isso aconteceu.
+
+| regra nova | leitura | eixo |
+| --- | --- | --- |
+| host de referência enciclopédica (Wikipedia, Britannica, Dicio, Significados, Michaelis, Priberam) | Informativa / TOFU | ambos |
+| subdomínio editorial (`blog.`, `noticias.`, `revista.`, `magazine.`) | Informativa / TOFU | ambos |
+| perfil em rede social (Instagram, Facebook, LinkedIn, X, TikTok, Threads, Reclame Aqui) | Navegacional | **só Intenção** |
+| raiz de domínio ranqueando para o termo | Navegacional | **só Intenção** |
+| marcadores de explicação técnica: `entenda`, `conceito`, `definicao`, `aplicacoes`, `funciona`, `saiba` | Informativa / TOFU | ambos |
+
+Navegação não posiciona ninguém em etapa de jornada: perfil e raiz de domínio alimentam Intenção e deixam o Funil sem leitura, de propósito. Todas as regras são **fallback**: texto explícito no resultado continua vencendo o palpite estrutural.
+
+Medição antes/depois em quatro SERPs reais (`advanced`, `location_code 2076`, `language_code pt`, depth 20, 4 chamadas pagas a US$ 0,0035):
+
+| keyword | Intenção antes | Intenção depois | Funil antes | Funil depois |
+| --- | --- | --- | --- | --- |
+| `cnc` | mista 41% | **conclusiva Informativa 94%** | mista 35% | mista 47% |
+| `skin care noturno` | conclusiva Informativa 81% | conclusiva Informativa 88% | conclusiva TOFU 81% | conclusiva TOFU 81% |
+| `hidratante facial pele oleosa barato` | mista 41% | fraca 47% | mista 35% | mista 35% |
+| `retinol da creamy` | conclusiva Transacional 81% | conclusiva Transacional 88% | fraca 81% | fraca 88% |
+
+Nenhum eixo que já era conclusivo trocou de valor. `Navegacional` dispara pouco em cauda longa, então a regra da raiz de domínio não está sobre-classificando.
+
+### MOTIVO HONESTO QUANDO O EIXO NÃO FECHA
+
+A força `mixed` mede **cobertura insuficiente**, não divergência. A tela dizia "SERP mista: os resultados observados mostram necessidades diferentes" mesmo quando a leitura era unânime e só faltou alcance — afirmando o contrário do dado.
+
+`SemanticConsolidationAxisDraft` passou a carregar `serpLabelCount` (quantos rótulos distintos a leitura produziu). Com um único rótulo, o motivo exibido vira "SERP unânime, mas lida em poucos resultados: a cobertura não alcançou o mínimo para concluir". Com mais de um, o texto de divergência permanece. O campo é derivado da `distribution` que já existia no read-model e no artifact persistido — **nenhuma mudança de schema**.
+
+
 ### EVIDÊNCIA REAL OBSERVADA
 
 Casos **conclusivos** (UI autenticada, keywords da Care Glow):
@@ -2611,3 +2683,341 @@ DataForSEO advanced na CALL 3, `serp-semantic-derivation-v2` e seus thresholds p
 - **Não** transformar estado de processo (SERP, IA, Revisão, KGR) em pré-condição de decisão humana.
 - **Não** exigir exclusão de keyword para repetir teste: os artifacts são versionados e append-only.
 - **Não** invalidar processo alheio ao reprocessar — exceto o KGR, que deriva de Volume e Resultado.
+
+## Seleção da planilha, coluna Resultados e alcance da SERP - correção local - 2026-09-18
+
+### SELEÇÃO — CLIQUE COMUM TROCA, SHIFT ESTICA
+
+Dois defeitos relatados na planilha do Processador, ambos confirmados em runtime autenticado (Care Glow) e corrigidos:
+
+1. **Clique comum somava** como se Ctrl estivesse preso. `applyKeywordSelectionClick` passou a **substituir** a seleção no clique simples; Ctrl/Cmd continua alternando e o teclado também (detectado por `event.detail === 0`, para que Espaço no `role="checkbox"` não limpe a seleção de quem navega sem mouse).
+2. **Shift não pegava o intervalo** e virava pintura. O `onPointerDown` agora recusa iniciar arraste quando há modificador (`shift`/`ctrl`/`meta`), porque 4px de tremor comiam o Shift+clique. A âncora deixou de se mover no Shift, então o intervalo estica e encolhe a partir da origem; a pintura estaciona a âncora onde o traço começou.
+
+Verificado no navegador, na tabela real: clique simples em `creamy skincare preço` largou `clamper` e deixou só uma linha; Shift+clique quatro linhas abaixo marcou as quatro do intervalo; Shift+clique mais abaixo esticou para sete a partir da **mesma** âncora, não da última linha; Ctrl+clique somou sem limpar. `tests/minerador-keyword-selection.test.mts` = 8/8.
+
+### COLUNA RESULTADOS
+
+Número formatado em `pt-BR` com separador de milhar e pintado com o token `--context-accent`. Medido no runtime: `rgb(18, 161, 224)` = `#12A1E0`. Nenhum hex novo entrou no código — o token já existia em `app/globals.css`.
+
+### DERIVAÇÃO V3
+
+Registrada na seção **DERIVAÇÃO V3 — ALCANCE DO CLASSIFICADOR** acima: cinco regras novas de leitura, thresholds intactos, medição antes/depois em quatro SERPs reais e o motivo honesto quando o eixo não fecha por falta de cobertura.
+
+### VALIDAÇÃO TÉCNICA
+
+`tests/minerador-*` = 719 total · 687 pass · 32 fail. As 32 falhas são **o mesmo conjunto**, nome por nome, que já falha no commit `653b8f6` — comparado em worktree separado do HEAD, não por inspeção. São asserções de UI defasadas (por exemplo `R6 mantém KGR automático e sem ação humana na bulk bar`, que cobra o comportamento que o próprio pedido de produto substituiu). Nenhuma delas cita símbolo tocado nesta rodada.
+
+`TypeScript = 0 erros`. `ESLint` em `modules/minerador/minerador-workspace.tsx` = 22 problemas (13 erros, 9 avisos), **idêntico** ao HEAD medido via `--stdin`: nada novo entrou. `check-visual-system --files` nos arquivos do Minerador = 169 violações (baseline 168 + 1: o seletor de KGR no `text-[10px]` que espelha o seletor de Status).
+
+O guard completo do repositório para em `modules/arquiteto/territorial-workspace-rows.tsx:181` com `ROXO PROIBIDO`. O arquivo está **idêntico ao HEAD** e a linha é um comentário que enuncia a própria regra (`nada de roxo/violeta/índigo`): é falso positivo pré-existente, fora desta rodada e fora do Minerador.
+
+Nenhuma migration, nenhum SQL remoto e nenhuma alteração de schema nesta rodada. Quatro chamadas pagas de SERP (US$ 0,0035 cada) foram gastas apenas para medir o classificador antes/depois, com autorização explícita.
+
+### PENDENTE
+
+- Remedir os 27 `results_allintitle` aprovados com a consulta corrigida: os valores atuais e os `kgr_score` derivados continuam inválidos. Nenhum dado foi reescrito sem decisão.
+- Decidir `pt` × `pt-BR` no `language_code` e a profundidade da SERP semântica (20 hoje, 100 no playground).
+- Migration do RPC de exclusão (resíduo em `editorial_artifact_versions` e no soft delete) — depende de SDD e autorização.
+- Limpar o baseline de 32 asserções de UI defasadas, que é anterior a esta rodada.
+
+## IA do Minerador — corte 1: remoção do código morto — 2026-09-18
+
+Primeiro dos três cortes da retirada da IA do Minerador. Este não muda
+comportamento nenhum: só apaga o que já não tinha chamador.
+
+### O QUE O LEVANTAMENTO MEDIU ANTES DE APAGAR
+
+| medição no banco remoto | valor |
+| --- | --- |
+| keywords em `minerador_keywords` | 103 |
+| com `ai_review` / `ia_revisao` / `revisao_ia` / `semantic_review` | **0** |
+| `dna_origem` das 103 | `logico_deterministico` |
+| `dna_modelo` das 103 | `keyword-concept-ptbr-v1` (determinístico, não LLM) |
+| artifacts `keyword_contextual_presentation` | 252 versões, 237 keywords |
+| ArticleDNA que referenciam a apresentação | 0 |
+
+Ou seja: **todo o KeywordDNA em produção veio da Lógica e da SERP**. A IA não
+assinou um campo sequer. E 237 keywords com apresentação contra 103 vivas
+confirma o resíduo de exclusão já registrado no backlog.
+
+### O QUE SAIU
+
+O R5 estava morto por dois caminhos ao mesmo tempo: `handleBatchAnalyze` e
+`handleBatchSemanticReview` não eram chamados por botão nenhum (o ESLint já
+os acusava como `never used`) e o painel forçava `aiReview = null`. O botão
+`IA` da barra chamava — e continua chamando — a Apresentação Contextual.
+
+| removido | linhas |
+| --- | --- |
+| `lib/minerador/semantic-review.ts` encolhido ao leitor do payload legado | 995 → 90 |
+| `semantic-review-phases.ts` | 726 |
+| `semantic-review-orchestrator.ts` | 553 |
+| `deepseek-r5.ts` | 426 |
+| `semantic-review-notice.ts` + `intent-niche-response.ts` | 72 |
+| bloco morto no Processador (dois handlers + leitor NDJSON) | 211 |
+| rotas `/api/process-intent-niche`, `/api/analyze`, `/api/clusterize`, `/api/generate-briefing` | 814 |
+| 5 arquivos de teste exclusivos do R5 (38 casos) | — |
+
+Total: cerca de **3.700 linhas** de código de produção.
+
+### O QUE FICOU DE PROPÓSITO
+
+`semantic-review.ts` sobrevive como leitor defensivo do payload legado:
+`isCompletedSemanticReview`, `reviewFields`, `reviewEnrichment`,
+`reviewEvidenceReferences`, `semanticReviewVerdictLabel`,
+`semanticReviewDivergenceCount`, `deriveDnaMaturity` e `dnaMaturityLabel`
+ainda são importados pelo estado de processo, pelo gate de handoff, pela
+Revisão Humana e pelo painel de DNA. Eles saem no corte 3, junto com o
+processo `ai`. Nada neste arquivo executa IA, monta prompt ou fala com
+provider.
+
+Os providers compartilhados — `deepseek-provider.ts`, `deepseek-canonical.ts`,
+`ai-provider-config.ts`, `structured-ai.ts` e o painel de Integrações —
+**não foram tocados**: Arquiteto, Radar e Redator dependem deles. A IA saiu
+do Minerador, não da plataforma.
+
+`/api/mine` e `/api/inteligencia` também **não** foram tocadas: apesar do
+nome, nenhuma das duas é IA.
+
+### VALIDAÇÃO TÉCNICA
+
+`TypeScript = 0 erros`. `tests/minerador-*` = 696 total · 668 pass · 28 fail,
+contra 719 · 687 · **32** antes do corte. O diff das falhas nome por nome só
+tem remoções: nenhuma falha nova. Duas das que sumiram eram asserções que
+cobravam o R5 ligado e foram reescritas para descrever o que existe; duas
+eram arquivos inteiros do R5.
+
+`ESLint` em `modules/minerador` = 18 problemas (11 erros, 7 avisos), contra
+22 (13 erros, 9 avisos) antes — os dois handlers órfãos eram dois dos avisos.
+`check-visual-system --files` no Processador = 169, inalterado.
+
+Nenhuma migration, nenhum SQL remoto, nenhuma alteração de schema e nenhuma
+chamada de provider nesta rodada. Nenhum dado foi apagado do banco: os 252
+artifacts de Apresentação Contextual continuam lá, intactos, para o corte 3.
+
+### PRÓXIMOS CORTES
+
+- **Corte 2 — fora deste escopo por decisão do usuário:** a Voz da Marca no
+  Redator está sendo desenvolvida na área do Redator. Registrado aqui só
+  para que a ordem não se perca: hoje a Voz da Marca só é efetivamente
+  aplicada na Apresentação Contextual do Minerador, então derrubá-la antes
+  do Redator assumir deixa a plataforma sem governança de marca aplicada.
+- **Corte 3 — exige SDD:** Apresentação Contextual, processo `ai`, bloco do
+  KeywordDNA no Arquiteto, os 252 artifacts e o estreitamento do CHECK de
+  `artifact_type`. Mexe em contrato canônico e em dado remoto.
+
+## IA do Minerador — corte 3: a Apresentação Contextual saiu — 2026-09-18
+
+Segundo e último corte de código da retirada da IA. Executado sob o
+[SDD do corte 3](propostas/sdd-remocao-ia-do-minerador-corte-3-2026-09-18.md).
+
+### FLAGS DE ACEITE
+
+| flag | resultado |
+| --- | --- |
+| `AI_IN_MINERADOR` | NONE |
+| `MINERADOR_PROCESSES` | 6 (`site`, `logic`, `volume`, `results`, `kgr`, `review`) |
+| `MIGRATION` / `SQL_REMOTO` / `DADO_ALTERADO` | NONE |
+| `ARTIFACTS_PRESERVADOS` | 252, relidos no banco depois do corte |
+| `CHECK_ARTIFACT_TYPE` | INALTERADO |
+| `PROVIDERS_COMPARTILHADOS` | INTOCADOS |
+| `TYPESCRIPT` | 0 erros |
+| `TESTES_MINERADOR` | 588 · 560 pass · 28 fail — **as mesmas 28 do corte 1**, nome por nome |
+| `DNA_MATURITY_DESTRAVADA` | YES, verificado na tela |
+| `REAL_PROVIDER_CALLS` | 0 |
+| `MANUAL_UI_VALIDATED` | pendente — é do usuário |
+
+### O QUE SAIU
+
+`presentation-brief.ts`, `keyword-contextual-presentation.ts` e `-row.ts`,
+`contextual-presentation-ui-state.ts`, `keyword-contextual-presentation-store.ts`,
+`semantic-review.ts` (o leitor legado que o corte 1 preservou) e a rota
+`ia/brief-apresentacao`. No Processador: o botão `IA`, o handler, a leitura do
+artifact e o passo `ai` da barra de progresso. No painel: a seção da
+apresentação, a comparação Lógica × IA, concordâncias, correções propostas e
+enriquecimentos. No Arquiteto: o bloco "Apresentação" do KeywordDNA
+somente-leitura e o transporte da referência no handoff.
+
+Contratos: `MineradorProcessName` perdeu `"ai"`; `aiCompleted` saiu do gate de
+handoff; `aiReviewCompleted` saiu do snapshot canônico; a Revisão Humana perdeu
+`accept_ai`, `aiSuggestion`, os enriquecimentos e o `aiInputHash`. O cockpit de
+decisão perdeu os estados `ai` e `divergences`.
+
+Mudança de shape em dado persistido? Nenhuma que orfane registro: das 103
+keywords, 27 têm `human_review` e **nenhuma** carrega `accept_ai`,
+`aiSuggestion` ou `aiInputHash`.
+
+### A MATURIDADE DESTRAVOU
+
+`deriveDnaMaturity` exigia `aiReviewCompleted`, que vinha de `process.ai.complete`
+e nunca era verdadeiro. A escada estava presa em `PARCIAL` para a plataforma
+inteira. Agora ela mora em `lib/minerador/dna-maturity.ts` sem esse termo.
+
+Verificado na tela autenticada: `eauthermale avene`, com Volume e Resultados
+validados, KGR tratado e revisão concluída, passou a exibir
+**Maturidade do DNA = CONFIRMADA**. Antes do corte, nenhuma keyword conseguia
+sair de `PARCIAL`.
+
+### RUNTIME CONFERIDO
+
+Planilha da Care Glow carrega as 33 linhas sem erro. Selecionar uma keyword
+abre a barra com **Lógica · Volume · Resultados · Revisar** — sem `IA`. A faixa
+do Perfil mostra Lógica ✓ · Volume ✓ · Resultados ✓ · KGR · Revisão ✓. A Revisão
+Humana abre com estado, "Decisões pendentes: N" vindo da própria conclusão,
+FATOS MEDIDOS, aplicabilidade do KGR e Concluir revisão. Nenhum vestígio de
+apresentação, concordância, correção proposta ou enriquecimento.
+
+> O dev server serviu bundle defasado durante a edição e mostrou erros de import
+> já corrigidos. Foi preciso forçar recompilação antes de confiar na tela.
+
+### O QUE NÃO FOI TOCADO
+
+`deepseek-provider.ts`, `deepseek-canonical.ts`, `ai-provider-config.ts`,
+`structured-ai.ts` e o painel de Integrações: Arquiteto, Radar e Redator
+dependem deles. A Voz da Marca no Redator é de outra frente, por decisão do
+usuário. E os 252 artifacts continuam no banco, relidos depois do corte.
+
+### ACHADO FORA DO CORTE
+
+O guard `list() sem estreitamento não pode ganhar chamador` acusou
+`lib/server/arquiteto-backup-restore.ts`, criado na rodada do backup. A
+restauração lia todos os itens de workflow da Marca e filtrava `architect` em
+memória. Corrigido na origem: `WorkflowRepository.listByStage("architect")`.
+
+## Aprovação versionada e pacote fechado para o Arquiteto — 2026-09-18
+
+Executado sob o [SDD de aprovação versionada](propostas/sdd-aprovacao-versionada-e-pacote-fechado-2026-09-18.md).
+Fecha três buracos medidos no contrato de entrega.
+
+### O QUE ESTAVA ABERTO
+
+1. `handleUpdateStatus` não tinha trava: dava para aprovar sem Lógica, sem
+   Volume e sem Resultados.
+2. O pacote era fotografia que nunca se atualizava — `buildMineradorArquitetoHandoffPlan`
+   só criava linha para keyword nova, e reenviar era no-op.
+3. O pacote não carregava o KeywordDNA: o Arquiteto lia a **linha viva** de
+   `minerador_keywords`, então qualquer edição vazava para lá sem aprovação.
+
+### O CONTRATO AGORA
+
+| regra | onde |
+| --- | --- |
+| Aprovar exige Lógica, Volume, Resultados e KGR tratado quando calculável | `lib/minerador/approved-package.ts` |
+| SERP não conclusiva **não** trava | mesmo arquivo, deliberado |
+| `em_revisao` é derivado da assinatura, não escrito por writer | `editorial-status.ts` + `canonical-keyword-snapshot.ts` |
+| Reexecutar e obter o mesmo valor não rebaixa | assinatura sobre o conteúdo, não sobre o timestamp |
+| O pacote leva o `analise_semantica` integral | `minerador-handoff.ts` |
+| Reaprovar reescreve o pacote do item recebido | `arquiteto-workspace.ts` |
+| O Arquiteto lê o DNA do pacote, não da linha viva | `arquiteto-workspace.tsx` |
+
+`minerador_keywords.status` é `text` **sem CHECK** — `em_revisao` entrou sem
+migration. `editorial_workflow_items` é atualizável e tem trigger
+`pipeline_editorial_touch_lock_version`, então a cadeia de versões do pacote
+é auditável sem tabela nova.
+
+### RUNTIME CONFERIDO
+
+Na planilha autenticada da Care Glow, com `hidratante corporal`:
+
+1. Aprovar com KGR pendente foi **recusado**: *"ainda não pode ser aprovada.
+   Aprovar exige aplicabilidade do KGR. O Arquiteto recebe o pacote fechado:
+   nada pode chegar lá pela metade."* A coluna continuou `bruto`.
+2. Tratada a aplicabilidade, aprovar passou e gravou o registro no banco:
+   versão 1, hash `sha256:4ad8791916c3216…`, assinatura `fnv1a:z2nc7k`, autor.
+3. Mexer na keyword depois (aplicabilidade para `not_applicable`) fez a tela
+   mostrar **Em revisão** enquanto a coluna seguia `aprovado` — exatamente o
+   desenho: a coluna é proveniência, a derivação é a autoridade.
+
+A keyword foi **restaurada** ao estado anterior ao teste: `bruto`, KGR
+`pending`, sem registro de aprovação.
+
+### BURACO ENCONTRADO NO ACERVO
+
+**29 keywords já estão `aprovado` sem registro de aprovação** — foram
+aprovadas antes deste contrato. Elas não produzem pacote: `buildApprovedPackage`
+devolve `null` e o Arquiteto voltaria à linha viva.
+
+`npm run minerador:backfill-aprovacao` faz o dry-run. Ele congela o estado
+atual como "o que foi aprovado" — afirmação verdadeira por construção, já que
+é isso que o Arquiteto vinha lendo. Duas dessas 29 não passariam na trava de
+hoje (`Hidratante facial pele oleosa barato` sem KGR tratado, `Pele Oleosa e
+Acne` sem Volume) e são preenchidas assim mesmo: o backfill registra o
+passado, não o julga. Desaprovar decisão que o humano já tomou não é do Dev.
+
+**Nada foi gravado.** Depende de autorização.
+
+### VALIDAÇÃO TÉCNICA
+
+`TypeScript = 0 erros`. `tests/minerador-*` = 597 · 569 pass · 28 fail — as
+mesmas 28 do baseline, nome por nome. `test:arquiteto` = 2010 · 2008 · 2, as
+duas pré-existentes já conferidas contra o HEAD. `ESLint` no Processador = 20
+problemas, idêntico ao pós-corte 3. `check-visual-system` = 169, inalterado.
+
+Nenhuma migration. A única escrita em dado de produção foi o teste em uma
+keyword, desfeito em seguida.
+
+### PENDENTE
+
+- Backfill das 29, aguardando autorização.
+- Propagação automática para ArticleDNA já formado. `ArticleKeywordReference`
+  **copia** volume, resultado, KGR e intenção em vez de referenciar, então
+  atualizar artigo formado cria versão nova do ArticleDNA. Decidido que é
+  automático e sem fluxo explícito; falta implementar.
+
+## Backfill da aprovação e contrato de frescor — 2026-09-19
+
+### BACKFILL APLICADO
+
+As 29 keywords aprovadas antes do contrato ganharam registro de aprovação.
+`npm run minerador:backfill-aprovacao -- --apply` gravou as 29 e o readback do
+próprio script confirmou zero aprovadas sem registro. Conferência independente
+por SQL depois: 29 aprovadas, 29 com registro, 29 marcadas como
+`backfill:aprovacao-versionada-2026-09-18`.
+
+Recalculei a divergência das 29 contra o estado atual: **0 divergentes, 0 sem
+pacote**. Nenhuma nasceu em revisão por efeito do próprio backfill — o que
+seria o defeito óbvio de um backfill que hasheia o que acabou de ler.
+
+Duas foram preenchidas sem passar na trava de hoje — `Hidratante facial pele
+oleosa barato` (sem KGR tratado) e `Pele Oleosa e Acne` (sem Volume). O
+backfill registra o passado; desaprovar decisão que o humano já tomou não é
+do Dev.
+
+### CONTRATO DE FRESCOR
+
+`lib/minerador/package-freshness.ts` responde a pergunta que o Arquiteto vai
+fazer: *o artefato a jusante está lendo a versão vigente do pacote?* Quem
+define o que é pacote aprovado é o Minerador, então a comparação mora aqui e
+o consumidor não a reimplementa.
+
+| estado | significa |
+| --- | --- |
+| `fresh` | consumiu a versão vigente; nenhum motivo declarado |
+| `in_review` | a keyword está sendo mexida; **a versão aprovada continua válida** |
+| `stale` | existe pacote aprovado que o artefato não conhece |
+| `never_approved` | formado sobre registro vivo, sem pacote |
+| `unknown` | o artefato não declarou sobre qual pacote foi formado |
+
+O vocabulário de saída é o de `canonicalRevisionState` do Arquiteto, de
+propósito: `staleReasons` é lista de motivos declarados e `usableDownstream`
+só cai em `stale`. **Keyword em revisão não impede o Arquiteto de trabalhar** —
+é exatamente o contrato pedido: ele segue na última aprovada enquanto o
+Minerador prepara a próxima.
+
+`unknown` entra nos motivos declarados de propósito: silêncio não pode passar
+por frescor.
+
+`tests/minerador-frescor-do-pacote.test.mts` = 6/6.
+
+### VALIDAÇÃO
+
+`TypeScript = 0 erros`. `tests/minerador-*` = 603 · 575 pass · 28 fail — as
+mesmas 28 do baseline, nome por nome. `ESLint` em `lib/minerador` limpo.
+
+### O QUE FALTA, E É DO ARQUITETO
+
+Gravar a referência do pacote no momento da formação e alimentar
+`staleReasons` de `canonicalRevisionState` com o resultado deste módulo. O
+mecanismo do Arquiteto existe e está apagado: o único consumidor chama sem
+motivos. Detalhe no adendo do
+[parecer](../04-arquiteto/parecer-formato-articledna-e-alinhamento-minerador-2026-09-18.md).

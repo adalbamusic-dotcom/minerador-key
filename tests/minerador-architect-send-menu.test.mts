@@ -121,7 +121,6 @@ test("keyword revisada e aprovada libera o handoff canônico", () => {
   assert.equal(gate.volumeValidated, true);
   assert.equal(gate.resultsValidated, true);
   assert.equal(gate.kgrReady, true);
-  assert.equal(gate.aiCompleted, true);
   assert.equal(gate.humanReviewCompleted, true);
   assert.equal(gate.serpEvidencePersisted, true);
   assert.equal(gate.statusAllowed, true);
@@ -202,8 +201,8 @@ test("o menu secundário expõe apenas o handoff canônico, sem a ação semânt
   assert.doesNotMatch(menu, /\/api\/analyze/);
   assert.doesNotMatch(primaryBar, /Enviar ao Arquiteto/);
 
-  // O código legado permanece por compatibilidade, mas já não é uma ação visível do menu.
-  assert.match(workspace, /const handleBatchAnalyze = async/);
-  assert.match(workspace, /fetch\("\/api\/analyze"/);
+  // O código legado não é mais nem invisível: saiu do arquivo com o R5.
+  assert.doesNotMatch(workspace, /const handleBatchAnalyze = async/);
+  assert.doesNotMatch(workspace, /fetch\("\/api\/analyze"/);
   assert.match(workspace, /persistMineradorArquitetoHandoff/);
 });

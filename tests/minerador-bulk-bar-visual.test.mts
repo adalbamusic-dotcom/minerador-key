@@ -34,7 +34,7 @@ test("bulk bar organiza contexto, workflow, secundárias, destrutivo e progresso
   const start = page.indexOf("{/* FOOTER BATCH ACTIONS BAR */}");
   const end = page.indexOf("</KeywordTableBulkBarShell>", start);
   const bulkBar = page.slice(start, end);
-  const order = ["ariaLabel=\"Conferir site\"", "ariaLabel=\"Lógica\"", "ariaLabel=\"Volume\"", "ariaLabel=\"Resultados\"", "ariaLabel=\"IA\"", "ariaLabel=\"Revisar\"", "aria-label=\"Status\"", "aria-label=\"Mais ações\"", "aria-label=\"Excluir\""];
+  const order = ["ariaLabel=\"Conferir site\"", "ariaLabel=\"Lógica\"", "ariaLabel=\"Volume\"", "ariaLabel=\"Resultados\"", "ariaLabel=\"Revisar\"", "aria-label=\"Status\"", "aria-label=\"Mais ações\"", "aria-label=\"Excluir\""];
   let previous = -1;
   for (const label of order) {
     const current = bulkBar.indexOf(label);
@@ -48,7 +48,6 @@ test("bulk bar organiza contexto, workflow, secundárias, destrutivo e progresso
   assert.match(bulkBar, /ml-auto min-w-0 w-28 shrink-0 rounded border px-2 py-0\.5 sm:w-44 lg:w-56/);
   assert.match(bulkBar, /BarChart3/);
   assert.match(bulkBar, /Search/);
-  assert.match(bulkBar, /Sparkles/);
   assert.match(bulkBar, /Check/);
   assert.doesNotMatch(page, /data-minerador-qualification-results/);
   assert.doesNotMatch(page, /Resultado do processamento lógico/);

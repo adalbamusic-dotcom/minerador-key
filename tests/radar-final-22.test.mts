@@ -235,12 +235,12 @@ test("H · o handoff não exige a amostra aberta no cliente", () => {
   /*
    * A FATIA É O CORPO DO HANDLER, não a região do arquivo.
    *
-   * `carregarParteDaPesquisa` é DEFINIDA logo abaixo de `enviarAoPlanejador`;
+   * `carregarParteDaPesquisa` é DEFINIDA logo abaixo de `enviarAoRedator`;
    * uma fatia que fosse até `startYoutubeSearch` acusaria a definição vizinha em
    * vez de uma dependência real.
    */
-  const inicio = pagina.indexOf("const enviarAoPlanejador");
-  const fatia = pagina.slice(inicio, pagina.indexOf("  };", pagina.indexOf("setPlannerBusy(false);", inicio)));
+  const inicio = pagina.indexOf("const enviarAoRedator");
+  const fatia = pagina.slice(inicio, pagina.indexOf("  };", pagina.indexOf("setRedatorBusy(false);", inicio)));
 
   /*
    * §11 · O SERVIDOR RESOLVE AS PRÓPRIAS AUTORIDADES.
@@ -250,7 +250,7 @@ test("H · o handoff não exige a amostra aberta no cliente", () => {
    */
   assert.ok(fatia.length > 0);
   assert.equal(/lazySample|carregarParteDaPesquisa|onLoadSample/.test(fatia), false);
-  assert.match(fatia, /postRadarPlannerHandoff\(\{/);
+  assert.match(fatia, /postRadarWriterHandoff\(\{/);
 });
 
 /* ============================= I, L e M · Google ============================= */

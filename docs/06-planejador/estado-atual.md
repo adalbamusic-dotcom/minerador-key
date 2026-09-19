@@ -1,5 +1,18 @@
 # Estado atual — Planejador
 
+> **REMOVIDO DO PIPELINE OPERACIONAL EM 2026-09-18.** `PLANEJADOR_STAGE = NONE`.
+> Saiu do menu, da esteira e da definição de fluxo. A rota `/planejador`
+> continua respondendo para leitura do histórico.
+>
+> **Não houve migração de dados, porque não havia dado.** Leitura somente-leitura
+> do banco real em 2026-09-18: `editorial_artifact_versions` com
+> `artifact_type='content_plan'` = **0** de 531 linhas; `editorial_workflow_items`
+> com `stage='planner'` = **0** de 28; `state='sent_planner'` = **0**; tabelas
+> `content_plans` e `planner_items` **não existem**.
+>
+> Os registros abaixo descrevem o módulo enquanto ele era etapa. Permanecem como
+> história verificável, não como descrição do fluxo atual.
+
 ## ContentPlan determinístico e cockpit editorial — 2026-08-27
 
 - **Implementado localmente:** `lib/planejador/deterministic-plan.ts` interpreta o pacote Radar sem criar uma segunda fonte de verdade, distribui referências por seção, preserva perguntas/entidades/objeções, mantém lacunas de fontes e links explícitas e constrói o gabarito a partir de métricas observadas quando disponíveis.
