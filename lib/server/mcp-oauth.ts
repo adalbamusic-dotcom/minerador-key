@@ -1,8 +1,59 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isUuid, WRITER_MCP_OIDC_SCOPES } from "@/lib/redator/mcp-consent-domain";
+import { resolveMcpOAuthReadiness, type McpOAuthReadiness } from "@/lib/redator/mcp-connection-status";
 import { readMcpRuntimeConfig, type McpRuntimeConfig } from "./mcp-runtime-config";
 import { WriterMcpAuthError } from "./writer-mcp-delegation";
+
+/*
+ * PRONTIDÃO DO OAUTH, MEDIDA E NÃO INFERIDA.
+ *
+ * O painel da Agência precisa dizer se um cliente pode conectar agora. Isso
+ * depende de algo fora da plataforma: a discovery do OAuth Server do Supabase.
+ * A leitura é um GET público, com cache curto em memória para não repetir a
+ * cada carregamento de página.
+ */
+const DISCOVERY_CACHE_MS = 60_000;
+const DISCOVERY_TIMEOUT_MS = 3_000;
+let discoveryCache: { key: string; at: number; status: number | null; body: unknown } | null = null;
+
+export function mcpAuthorizationServerDiscoveryUrl(issuer: string) {
+  const url = new URL(issuer);
+  return `${url.origin}/.well-known/oauth-authorization-server${url.pathname.replace(/\/$/, "")}`;
+}
+
+export async function readMcpOAuthReadiness(
+  config: McpRuntimeConfig = readMcpRuntimeConfig(),
+  deps: { fetchImpl?: typeof fetch; now?: () => number } = {},
+): Promise<McpOAuthReadiness> {
+  const now = deps.now ?? Date.now;
+  const metadataUrl = config.oauthEnabled ? config.protectedResourceMetadataUrl : null;
+  if (!config.oauthEnabled || !config.oauthIssuer) {
+    return resolveMcpOAuthReadiness({ oauthEnabled: config.oauthEnabled, issuer: config.oauthIssuer, metadataUrl, discoveryStatus: null, discovery: null });
+  }
+  const key = mcpAuthorizationServerDiscoveryUrl(config.oauthIssuer);
+  if (!discoveryCache || discoveryCache.key !== key || now() - discoveryCache.at > DISCOVERY_CACHE_MS) {
+    let status: number | null = null;
+    let body: unknown = null;
+    try {
+      const response = await (deps.fetchImpl ?? fetch)(key, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS) });
+      status = response.status;
+      body = await response.json().catch(() => null);
+    } catch {
+      status = null;
+    }
+    discoveryCache = { key, at: now(), status, body };
+  }
+  return resolveMcpOAuthReadiness({
+    oauthEnabled: true, issuer: config.oauthIssuer, metadataUrl,
+    discoveryStatus: discoveryCache.status, discovery: discoveryCache.body, checkedAt: new Date(discoveryCache.at).toISOString(),
+  });
+}
+
+/** Só para testes: esquece a discovery memorizada. */
+export function resetMcpOAuthReadinessCache() {
+  discoveryCache = null;
+}
 
 /*
  * SERVIDOR DE RECURSO, NÃO DE AUTORIZAÇÃO.

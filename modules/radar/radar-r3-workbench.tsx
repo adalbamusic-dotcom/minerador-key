@@ -1134,7 +1134,18 @@ function AreaCard({ area, copy, expanded, onToggle }: { area: RadarR3Area; copy:
   const Icon = areaIcon[area];
   return <button type="button" data-testid={`radar-r3-card-${area}`} aria-controls={`radar-r3-panel-${area}`} aria-expanded={expanded} onClick={onToggle} className={`min-w-0 rounded-md border p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${expanded ? "border-context-accent bg-selected" : "border-divider bg-surface-subtle hover:border-module-accent/40"}`}>
     <span className="flex items-center justify-between gap-3"><span className="flex min-w-0 items-center gap-2"><Icon className={`h-4 w-4 shrink-0 ${expanded ? "text-context-accent" : "text-text-muted"}`} aria-hidden="true" /><span className="text-sm font-semibold text-foreground">{areaLabel[area]}</span></span><ChevronDown className={`h-4 w-4 shrink-0 text-text-muted transition-transform ${expanded ? "rotate-180" : ""}`} aria-hidden="true" /></span>
-    {copy.lines.map((linha, index) => <span key={index} className={`mt-1 block truncate text-sm leading-5 ${index === 0 ? "text-foreground" : "text-text-muted"}`}>{linha}</span>)}
+    {/*
+      * ===== RADAR_SELECTION_LIGHT_1 · FECHADO, O CARD É DO TAMANHO DO CARD VAZIO =====
+      *
+      * Selecionar um artigo fazia os quatro cards crescerem de uma linha para
+      * três ou quatro, cada um cheio de dados que ninguém tinha pedido ainda. O
+      * card sem seleção tem título, uma linha e a marca de estado; o card
+      * fechado passa a ter exatamente isso — o essencial numa linha só. O resto
+      * aparece quando a área é aberta, junto do conteúdo que ele resume.
+      */}
+    {expanded
+      ? copy.lines.map((linha, index) => <span key={index} className={`mt-1 block truncate text-sm leading-5 ${index === 0 ? "text-foreground" : "text-text-muted"}`}>{linha}</span>)
+      : <span className="mt-1 block truncate text-sm leading-5 text-foreground" data-testid={`radar-r3-card-${area}-resumo`}>{copy.lines.filter(Boolean).slice(0, 2).join(" · ") || "\u00a0"}</span>}
     <StatusMark tone={copy.tone}>{copy.status}</StatusMark>
   </button>;
 }

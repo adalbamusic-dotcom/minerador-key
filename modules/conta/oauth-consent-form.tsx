@@ -11,13 +11,15 @@ type OAuthConsentFormProps = {
   redirectUri: string;
   userEmail: string | null;
   brands: ConsentBrandOption[];
+  /** Permissões sugeridas pela Agência ao registrar o aplicativo; sem sugestão, as três. */
+  defaultScopes?: readonly WriterMcpScope[] | null;
 };
 
 const checkbox = "mt-1 h-4 w-4 shrink-0 accent-action-accent";
 
-export function OAuthConsentForm({ authorizationId, client, redirectUri, userEmail, brands }: OAuthConsentFormProps) {
-  const [brandIds, setBrandIds] = useState<string[]>([]);
-  const [scopes, setScopes] = useState<WriterMcpScope[]>([...WRITER_MCP_SCOPES]);
+export function OAuthConsentForm({ authorizationId, client, redirectUri, userEmail, brands, defaultScopes }: OAuthConsentFormProps) {
+  const [brandIds, setBrandIds] = useState<string[]>(() => (brands.length === 1 ? [brands[0].brandId] : []));
+  const [scopes, setScopes] = useState<WriterMcpScope[]>(() => [...(defaultScopes?.length ? defaultScopes : WRITER_MCP_SCOPES)]);
   const [pending, setPending] = useState<"approve" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
 

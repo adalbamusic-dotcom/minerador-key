@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { canonicalProfileForVerifiedUser } from "@/lib/server/authz";
 import { readMcpRuntimeConfig } from "@/lib/server/mcp-runtime-config";
-import { listWriterConsentBrandOptions } from "@/lib/server/writer-mcp-grants";
+import { defaultWriterConsentScopes, listWriterConsentBrandOptions } from "@/lib/server/writer-mcp-grants";
 import { createServerSupabaseClient } from "@/lib/supabase/server-client";
 import { OAuthConsentForm } from "@/modules/conta/oauth-consent-form";
 
@@ -50,6 +50,7 @@ export default async function OAuthConsentPage({ searchParams }: { searchParams:
 
   const profile = await canonicalProfileForVerifiedUser(userData.user.id);
   const brands = await listWriterConsentBrandOptions(profile);
+  const defaultScopes = await defaultWriterConsentScopes(brands.map((brand) => brand.agencyId), details.data.client.name);
 
   return <Shell title="Autorizar acesso ao Redator">
     <OAuthConsentForm
@@ -58,6 +59,7 @@ export default async function OAuthConsentPage({ searchParams }: { searchParams:
       redirectUri={details.data.redirect_uri}
       userEmail={details.data.user.email || userData.user.email || null}
       brands={brands}
+      defaultScopes={defaultScopes}
     />
   </Shell>;
 }

@@ -178,7 +178,7 @@ export function TerritorialWorkspaceHeader({ selectAll = null }: {
  *
  * É a raiz do universo, não um artigo nem uma keyword: por isso ganha badge e
  * superfície próprias. Usa os tokens do design system; nenhuma paleta nova, e
- * nada de roxo/violeta/índigo.
+ * nenhuma cor vetada pela Regra 0 do sistema visual.
  */
 /**
  * Alvos que não são um silo existente. Sentinelas explícitas porque string

@@ -161,8 +161,17 @@ test("07 · ESTRUTURAL · uma convenção só: o Artigo usa a mesma tabela", asy
 test("08 · ESTRUTURAL · toda ação produz estado, e a falha não vira sucesso", async () => {
   const src = semComentarios(await fonte(AMBIENTE));
 
+  /*
+   * As ações que a tela dispara. `semear` entrou no corte da semeadura e passou
+   * a contar aqui — as contagens abaixo são POR AÇÃO, então elas se derivam
+   * desta lista em vez de repetir um número solto que ninguém sabe de onde veio.
+   */
+  const ACOES = ["salvar", "finalizar", "reabrir", "semear"] as const;
+  /** `salvar`, `acao` e `semear` — três blocos com o mesmo par de linhas. */
+  const BLOCOS_COM_FALHA = 3;
+
   /* Progresso antes de sair, tom e mensagem em cada desfecho. */
-  for (const acao of ["salvar", "finalizar", "reabrir"]) {
+  for (const acao of ACOES) {
     assert.ok(src.includes(`progressMessage("${acao}")`) || src.includes("progressMessage(qual)"),
       `${acao} precisa anunciar progresso`);
   }
@@ -180,21 +189,21 @@ test("08 · ESTRUTURAL · toda ação produz estado, e a falha não vira sucesso
    * foi exatamente o mutante que sobreviveu à primeira versão deste teste.
    */
   const falhas = src.split("describeActionFailure({ status: response.status, body });").length - 1;
-  assert.equal(falhas, 2, "save e ação traduzem a falha do servidor");
+  assert.equal(falhas, BLOCOS_COM_FALHA, "toda ação traduz a falha do servidor");
 
   const retornosAposFalha =
     src.split(/setTom\(falha\.tone\); setMessage\(falha\.mensagem\);\s*\n\s*return;/).length - 1;
-  assert.equal(retornosAposFalha, 2,
-    "os DOIS caminhos precisam retornar antes de load() e de qualquer sucesso");
+  assert.equal(retornosAposFalha, BLOCOS_COM_FALHA,
+    "TODOS os caminhos precisam retornar antes de load() e de qualquer sucesso");
 
   /* O corpo de erro é lido sem derrubar a tela se não for JSON. */
-  assert.equal(src.split("await response.json().catch(() => null)").length - 1, 2);
+  assert.equal(src.split("await response.json().catch(() => null)").length - 1, BLOCOS_COM_FALHA);
 
   /* Trava de clique duplo nos dois caminhos, não em um. */
-  assert.equal(src.split("finally { setBusy(false); setAcaoEmCurso(null); }").length - 1, 2,
-    "save e ação precisam liberar a trava");
-  assert.equal(src.split("setAcaoEmCurso(").length - 1, 4,
-    "duas marcações de início e duas de liberação");
+  assert.equal(src.split("finally { setBusy(false); setAcaoEmCurso(null); }").length - 1, BLOCOS_COM_FALHA,
+    "toda ação precisa liberar a trava");
+  assert.equal(src.split("setAcaoEmCurso(").length - 1, BLOCOS_COM_FALHA * 2,
+    "cada ação marca o início e libera no finally");
 });
 
 test("09 · ESTRUTURAL · o motivo inteiro aparece sem DevTools", async () => {

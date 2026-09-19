@@ -12,6 +12,10 @@ test("a emissão e a revogação MCP pertencem à Agência, não ao Redator", ()
   assert.match(agencyRoute, /create_writer_mcp_delegation/);
   assert.match(agencyRoute, /revoke_writer_mcp_delegation/);
   assert.match(agencyRoute, /revoke_mcp_client/);
+  // Fase 4: acessos OAuth são revogados/reativados pela Agência; bearer só com opt-in da Plataforma.
+  assert.match(agencyRoute, /revoke_writer_mcp_grant/);
+  assert.match(agencyRoute, /reactivate_writer_mcp_grant/);
+  assert.match(agencyRoute, /MCP_BEARER_DISABLED/);
 });
 
 test("a rota legada do Redator conserva somente a leitura compatível", () => {

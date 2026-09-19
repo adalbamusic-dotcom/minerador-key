@@ -64,9 +64,10 @@
   em 2026-09-19 (post-verifier PASS); usuário define `MCP_OAUTH_ENABLED=true` e
   `MCP_ALLOW_REMOTE_BEARER=false` na Vercel e faz deploy; preflight deve
   passar com zero bloqueadores; (3) usuário homologa no ChatGPT e devolve o
-  readback de `writer_mcp_grants` e `writer_mcp_call_events`; (4) agente
-  entrega painel da Agência (estado OAuth, grants, revogação/reativação,
-  esconder bearer) e atualiza docs.
+  readback de `writer_mcp_grants` e `writer_mcp_call_events`; (4) painel da
+  Agência entregue localmente em 2026-09-19 (estado OAuth medido, passo a
+  passo ChatGPT/Claude, grants, revogação/reativação, bearer só com opt-in);
+  falta validação manual do painel pelo usuário.
 - **Riscos a confirmar na fase 3:** R1 escopos `writer.*` pedidos pelo
   ChatGPT; R2 parâmetro `resource` no `authorize` do Supabase. Plano B na SDD.
 
@@ -187,9 +188,12 @@ Tratar criação mock como documento aprovado.
 
 ## Próximo corte de preparação para MCP — proposta, 2026-09-18
 
-- Exibir o dossiê canônico do Radar, suas evidências e pendências em leitura
-  humana estruturada no Redator. O mesmo adaptador deve alimentar as futuras
-  ferramentas MCP, sem reescrever o contrato do Radar.
+- ~~Exibir o dossiê canônico do Radar, suas evidências e pendências em leitura
+  humana estruturada no Redator.~~ **Entregue em 2026-09-19
+  (`REDATOR_DOSSIER_SURFACE_1`):** `radarFoundationsOf` é o adaptador; o
+  painel lê dele nos três ambientes. As ferramentas MCP podem consumir a mesma
+  projeção sem reescrever o contrato do Radar. Pendências de decisão
+  (`pendingDecisions`) ainda não estão no painel.
 - Corrigir a legibilidade da estação do Redator conforme o sistema visual
   compartilhado: há textos essenciais de 8–10 px na UI atual.
 - Distinguir `carregando` de `vazio confirmado` na lista de rascunhos; hoje ela
