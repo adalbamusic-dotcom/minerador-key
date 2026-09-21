@@ -15,9 +15,23 @@ import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 
 export type HumanReviewFieldDecisionType = "keep_logic" | "edit" | "confirm_unknown";
 
+import type { KeywordPageType } from "./keyword-page-type.ts";
+
 export type HumanReviewAction =
   | { type: "field"; field: string; logicalValue: unknown; decision: HumanReviewFieldDecisionType; editedValue?: unknown }
   | { type: "kgr"; applicability: KgrApplicability }
+  /**
+   * Posto de principal: esta keyword pode perder a vaga de primária da
+   * publicação, ou está travada nela junto com o slug/URL? É decisão humana
+   * concreta, como a aplicabilidade do KGR — e por isso mora na Revisão.
+   */
+  | { type: "primary_policy"; policy: "locked" | "reviewable" }
+  /**
+   * Tipo de página: Silo, Artigo, Landing page ou Página de serviço. Sem
+   * publicação é potencial; com publicação é o que está no ar. Nunca
+   * obrigatório — informa o Arquiteto, não trava o Minerador.
+   */
+  | { type: "page_type"; pageType: KeywordPageType }
   | { type: "reopen" }
   | { type: "cancel" }
   | { type: "complete" };
@@ -350,8 +364,16 @@ function kgrIsCalculable(semantic: Semantic | null | undefined): boolean {
  * e a aplicabilidade do KGR. A aplicabilidade continua sendo decisão humana
  * própria, reportada como pendente em vez de desabilitar o comando.
  */
-export function canCompleteHumanReview(semantic: Semantic | null | undefined, options: { hasOpenEdit?: boolean; intent?: string | null } = {}): { ok: boolean; pendingFields: string[]; pendingKgrDecision?: boolean; reason?: string } {
+export function canCompleteHumanReview(semantic: Semantic | null | undefined, options: { hasOpenEdit?: boolean; intent?: string | null; status?: string | null } = {}): { ok: boolean; pendingFields: string[]; pendingKgrDecision?: boolean; reason?: string } {
   const pendingKgrDecision = kgrIsCalculable(semantic) && readKgrApplicability(semantic) === "pending";
+
+  /*
+   * O posto de principal NÃO é decisão pendente.
+   *
+   * Ele sempre tem resposta: "Livre" enquanto não há publicação, "Travado ao
+   * slug" assim que há. Default é resposta — cobrar declaração de quem já tem
+   * uma seria inventar pendência.
+   */
 
   const pendingFields = humanReviewStrategicFields(semantic, options.intent)
     .filter(field => !field.logicalValue)

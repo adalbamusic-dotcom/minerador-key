@@ -7,10 +7,24 @@ export type DataForSeoSerpOperationInput = {
   locationCode: number;
   languageCode: string;
   device: "desktop" | "mobile";
+  /**
+   * O sistema da lente. Ausente = o provider decide, como sempre decidiu.
+   *
+   * Sem ele no corpo do pedido, duas lentes do mesmo dispositivo produziriam a
+   * MESMA consulta e o snapshot registraria um sistema que ninguém observou —
+   * a divergência entre lentes viraria zero por construção.
+   */
+  operatingSystem?: "windows" | "macos" | "android" | "ios" | null;
   resultLimit: number;
   operationRequestId: string;
   /** `regular` continua o padrão; `advanced` é opt-in por operação. */
   payloadDepth?: "regular" | "advanced";
+};
+
+/** O que a DataForSEO aceita em cada dispositivo. Par inválido é recusado. */
+const SISTEMAS_POR_DISPOSITIVO: Record<"desktop" | "mobile", readonly string[]> = {
+  desktop: ["windows", "macos"],
+  mobile: ["android", "ios"],
 };
 
 export type DataForSeoSerpProviderDiagnostic = {
@@ -62,6 +76,18 @@ export function buildDataForSeoSerpOperationRequest(input: DataForSeoSerpOperati
   if (!/^[a-z]{2,3}(?:-[a-z]{2})?$/i.test(input.languageCode.trim())) throw new DataForSeoSerpError("dataforseo_invalid_response", "O idioma da consulta SERP é inválido.", 400);
   if (!Number.isSafeInteger(input.resultLimit) || input.resultLimit < 1 || input.resultLimit > 100) throw new DataForSeoSerpError("dataforseo_invalid_response", "O limite da consulta SERP é inválido.", 400);
   if (!input.operationRequestId.trim()) throw new DataForSeoSerpError("dataforseo_invalid_response", "A operação SERP não possui identificador válido.", 400);
+  /*
+   * Par dispositivo/sistema inválido é RECUSADO, não corrigido: enviar
+   * `windows` num pedido mobile devolveria uma SERP que não é a lente pedida, e
+   * a observação ficaria rotulada com um contexto que não foi observado.
+   */
+  if (input.operatingSystem && !SISTEMAS_POR_DISPOSITIVO[input.device].includes(input.operatingSystem)) {
+    throw new DataForSeoSerpError(
+      "dataforseo_invalid_response",
+      `A lente ${input.device}/${input.operatingSystem} não existe: ${input.device} aceita ${SISTEMAS_POR_DISPOSITIVO[input.device].join(" ou ")}.`,
+      400,
+    );
+  }
   return {
     query: keyword,
     body: [{
@@ -69,6 +95,8 @@ export function buildDataForSeoSerpOperationRequest(input: DataForSeoSerpOperati
       location_code: input.locationCode,
       language_code: input.languageCode.trim().toLowerCase(),
       device: input.device,
+      // Omitido quando não há lente declarada: o pedido continua idêntico ao de antes.
+      ...(input.operatingSystem ? { os: input.operatingSystem } : {}),
       depth: input.resultLimit,
       tag: input.operationRequestId.trim(),
     }],
@@ -118,15 +146,37 @@ export async function executeDataForSeoSerpOperation(
 
 export async function collectDataForSeoSerpSnapshot(
   input: SerpSearchInput,
-  options: { config: DataForSeoSerpConfig; operationRequestId: string; fetchImpl?: typeof fetch; onRequestBuilt?: () => void; onRequestStarted?: () => void; onHttpResponse?: (status: number) => void; onProviderResponse?: (diagnostic: DataForSeoSerpProviderDiagnostic) => void; onNormalizationSucceeded?: () => void },
+  options: {
+    config: DataForSeoSerpConfig;
+    operationRequestId: string;
+    /**
+     * `regular` continua o padrão de quem já chamava; `advanced` é opt-in.
+     *
+     * Medido no provider em 2026-09-20 para "skincare facial": o `regular`
+     * devolveu 8 domínios e ZERO perguntas do People Also Ask, com
+     * `people_also_ask` listado em `item_types`. O `advanced`, na mesma
+     * keyword e na mesma lente, devolveu 13 domínios e 4 perguntas. A
+     * diferença são os blocos que o `regular` anuncia e não entrega — entre
+     * eles as citações do AI Overview.
+     */
+    payloadDepth?: "regular" | "advanced";
+    fetchImpl?: typeof fetch;
+    onRequestBuilt?: () => void;
+    onRequestStarted?: () => void;
+    onHttpResponse?: (status: number) => void;
+    onProviderResponse?: (diagnostic: DataForSeoSerpProviderDiagnostic) => void;
+    onNormalizationSucceeded?: () => void;
+  },
 ): Promise<SerpResearchSnapshot> {
   const result = await executeDataForSeoSerpOperation({
     keyword: input.keyword,
     locationCode: options.config.locationCode,
     languageCode: options.config.languageCode,
     device: input.device,
+    operatingSystem: input.operatingSystem ?? null,
     resultLimit: input.resultLimit,
     operationRequestId: options.operationRequestId,
+    payloadDepth: options.payloadDepth,
   }, options);
   options.onProviderResponse?.(result.diagnostic);
   const snapshot = normalizeDataForSeoSerpResponse(result.body, input, options.config, new Date().toISOString(), result.providerRequestId);

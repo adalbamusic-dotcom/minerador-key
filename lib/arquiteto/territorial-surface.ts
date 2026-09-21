@@ -203,7 +203,20 @@ export function buildTerritorialSurface(input: {
     });
   }
 
-  for (const territory of [...landscape.candidateTerritories, ...landscape.confirmedTerritories]) {
+  /*
+   * TODO território entra na mesa — inclusive os que saíram do ciclo.
+   *
+   * Consolidado, rejeitado, substituído e arquivado ficavam de fora, e com
+   * eles sumiam TODAS as keywords associadas: a paisagem projetava o
+   * território em `otherTerritories`, mas a superfície não montava grupo, e a
+   * keyword não estava nem sob um silo nem em "Sem silo". Foi o que engoliu as
+   * 9 keywords do lote anterior em 2026-09-21, logo depois de o silo delas ser
+   * consolidado.
+   *
+   * O estado real vai junto em `lifecycleStatus`: a mesa mostra "Consolidado"
+   * ou "Rejeitado" em vez de disfarçar de candidato.
+   */
+  for (const territory of [...landscape.candidateTerritories, ...landscape.confirmedTerritories, ...landscape.otherTerritories]) {
     groups.push({
       kind: "territories",
       header: {
@@ -274,7 +287,9 @@ export function buildTerritorialSurface(input: {
       unassigned: unassignedRows.length,
       ambiguous: ambiguousRows.length,
       structures: landscape.existingStructures.length + siteOnly.length,
-      territories: landscape.candidateTerritories.length + landscape.confirmedTerritories.length,
+      // A contagem acompanha os grupos: o cabeçalho e a mesa não podem
+      // discordar sobre quantos silos existem.
+      territories: landscape.candidateTerritories.length + landscape.confirmedTerritories.length + landscape.otherTerritories.length,
       inconsistencies: landscape.consistency.issues.length,
     },
   };

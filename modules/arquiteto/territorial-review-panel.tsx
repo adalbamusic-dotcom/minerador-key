@@ -80,6 +80,10 @@ export function TerritorialReviewPanel({
             {view.current.lifecycleStatus === "confirmed" ? "Silo confirmado" : "Silo candidato"}
             {view.current.isPublished ? " · página publicada protegida" : ""}
           </p>
+          {/* A identidade eleita do Silo, com a origem sempre visível. */}
+          <p className={view.current.primaryKeyword ? "text-foreground" : "text-text-muted"} data-testid="architect-review-primary-keyword">
+            {view.current.primaryKeyword?.note || "Este Silo ainda não tem keyword primária eleita."}
+          </p>
           {view.current.slug && <p className="text-text-muted">{view.current.slug}</p>}
           {view.current.decision && (
             <p className="text-text-muted">

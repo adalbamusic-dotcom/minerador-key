@@ -144,8 +144,9 @@ aliases semânticos em `app/globals.css`:
 
 | Papel | Alias | Token base | Valor | Onde se aplica |
 | --- | --- | --- | --- | --- |
-| identidade nova | `identity-new` | `module-accent` | `#10DDE0` | slug, link e canonical de conteúdo ainda não publicado |
-| identidade publicada | `identity-published` | `action-accent` | `#193cb8` | slug, link e canonical **somente** quando o status é publicado |
+| identidade nova | `identity-new` | `module-accent` | `#10DDE0` | endereço de conteúdo ainda não publicado |
+| identidade publicada | `identity-published` | `action-accent` | `#193cb8` | **link e URL** de conteúdo declarado como publicado |
+| identidade do slug | `identity-slug` | `context-accent` | `#12A1E0` | **slug e canonical**, em qualquer estado |
 | keyword | `keyword` | — (valor próprio) | `#e0fbff` | toda keyword renderizada: planilha, cards, painéis, listas e detalhes |
 
 Regras:
@@ -154,7 +155,12 @@ Regras:
   `text-keyword`; nenhum componente repete o valor bruto;
 - a distinção entre identidade nova e publicada é obrigatória: as duas cores
   nunca podem ser trocadas entre si, e `identity-published` só vale quando o
-  status do item é publicado — slug protegido por outro motivo continua novo;
+  status do item é publicado — endereço protegido por outro motivo continua novo;
+- **endereço e identidade SEO são papéis diferentes.** O link para onde a
+  página vive usa `identity-new`/`identity-published` conforme o estado; o
+  **slug** e o **canonical** usam `identity-slug` sempre, porque não mudam de
+  natureza quando o conteúdo é publicado — mudam de imutabilidade, e isso é
+  comunicado por selo, não recolorindo o dado;
 - keyword mantém a mesma cor em qualquer módulo — o papel é da keyword, não da
   tela onde ela aparece.
 

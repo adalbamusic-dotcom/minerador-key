@@ -197,9 +197,33 @@ export function buildTerritorialLandscape(input: TerritorialLandscapeInput): Ter
   const sourceByKeyword = new Map<string, KeywordTerritoryAssignment["source"]>();
   const assignedKeywordIds = new Set<string>();
   const unassignedKeywords: UnassignedKeywordEntry[] = [];
+  /*
+   * OS SILOS QUE EXISTEM DE VERDADE NESTA PAISAGEM.
+   *
+   * Uma decisão pode apontar para um `territoryRef` que não está mais aqui —
+   * silo descartado, reprocessado, ou de outra Brand. Sem esta conferência a
+   * keyword entrava em `assignedKeywordIds`, saía de `unassignedKeywords` por
+   * já estar "decidida", e não tinha território que a projetasse: sumia da
+   * mesa inteira, em silêncio. Foi o que esvaziou a aba Silos em 2026-09-21.
+   */
+  const knownTerritoryRefs = new Set(territories.map(territory => territory.territoryRef));
   for (const assignment of assignments) {
     if (!assignment.territoryRef) {
       unassignedKeywords.push({ keywordId: assignment.keywordId, state: assignment.state, reason: assignment.reason, source: assignment.source });
+      continue;
+    }
+    if (!knownTerritoryRefs.has(assignment.territoryRef)) {
+      /*
+       * Volta a ser pendente, com o motivo REAL. Dizer "ainda sem decisão"
+       * mentiria sobre o histórico, e fabricar o território que falta criaria
+       * um silo que ninguém decidiu.
+       */
+      unassignedKeywords.push({
+        keywordId: assignment.keywordId,
+        state: "unassigned",
+        reason: `A decisão anterior aponta para um silo que não está nesta leitura (${assignment.territoryRef}).`,
+        source: assignment.source,
+      });
       continue;
     }
     assignedKeywordIds.add(assignment.keywordId);

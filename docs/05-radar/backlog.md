@@ -3523,3 +3523,85 @@ mantém intacto o hash de todo pacote que não tem keyword resolvida.
 TESTS = tests/radar-canonical-keyword-context-1.test.mts · 12 pass / 0 fail
 MUTANTS = 15 · mortos 15 · verde antes e no fim: sim
 REGRESSÃO = test:radar 2172 pass / 0 fail · tsc limpo · eslint 0 erros
+
+## Radar — Aplicar a listagem de workflow sem corridas — 2026-09-21
+
+1. ~~Aplicar `20260921060000`~~ — **FEITA**, aplicada e registrada.
+2. ~~Medir view contra tabela~~ — **FEITO**: 10 MB → 3400 kB, corte de
+   **67,9%**, com as 3 versões correntes intactas e nenhuma versão perdida.
+
+### FEITA — compactar também a corrente congelada
+
+`20260921070000_listagem_workflow_compacta_congelada.sql`. A trava de escrita
+foi tratada: a view marca `researchTransport: "COMPACT"` junto com a perda, e
+só quando há perda. Um teste deriva da própria função TS quais campos ela
+compacta e exige que o SQL trate exatamente esses, mais os dois casos de
+borda — não congelada, e congelada sem nada a perder.
+
+O texto abaixo explica por que o cuidado era necessário.
+
+
+As 3 versões correntes estão CONGELADAS, e 1061 kB dos seus 2037 kB é
+exatamente o que `compactRadarResearchForRead` descarta logo depois do
+download. Levar isso para a view baixaria de 3400 kB para ~2340 kB.
+
+**Não foi feito, e o motivo é uma trava de escrita.** A compactação marca
+`researchTransport: "COMPACT"`, e `analysis-contracts.ts:869` recusa construir
+uma versão nova a partir de base com essa marca — é o que impede uma escrita
+nascer de leitura incompleta. Reproduzir isso no SQL exige a condição exata
+do TS: compacta só se congelada E se houver corrida ou amostra a tirar, e
+marca junto.
+
+Errar para um lado recusa escrita legítima; para o outro, deixa uma escrita
+nascer de base lossy. Precisa de decisão explícita antes de mexer.
+
+### EM ABERTO — o resto do objeto de versão
+
+Dos 10,45 MB, ~1,46 MB não estão nos quatro campos pesados nem na
+compactação: estão no resto de cada objeto de versão. Vale medir por dentro
+antes de decidir se compensa outra rodada.
+
+## Radar — Corridas brutas em tabela própria (arrumação estrutural) — 2026-09-21
+
+O crescimento do payload é decisão de esquema, e o próprio código já dizia
+isso em `appendRadarAnalysis`: *"Isto NÃO resolve o crescimento do payload —
+só para de pagar duas vezes por ele."* Esta é a decisão.
+
+**O problema, medido:** a maior linha de `editorial_workflow_items` tem
+8032 kB; a média das três de estágio `radar`, 3528 kB. As views
+(`20260921060000`, `20260921070000`) resolveram a LISTAGEM. O caminho de
+escrita continua intacto: `appendRadarAnalysis` lê a linha inteira,
+acrescenta uma versão e regrava tudo — ~8 MB de descida mais ~8 MB de subida
+por análise nova, crescendo a cada rodada.
+
+**O desenho:** os quatro campos pesados de cada versão saem para
+`radar_analysis_runs`. São os MESMOS que `pruneRadarAnalysisHistory` já
+trata como descartáveis — não é critério novo. O contrato em TS não muda de
+forma; a reidratação acontece na fronteira do repositório, e os ~20 módulos
+que leem `amazonSearch` e companhia seguem sem alteração.
+
+### ETAPA 1 — FEITA (a aplicar)
+
+`20260921080000_corridas_radar_em_tabela_propria.sql` cria a tabela e nada
+mais: nada escreve nela, nada lê dela. **Não muda comportamento.**
+
+Junto vêm `lib/radar/analysis-run-storage.ts` (separar/reidratar, com a
+mesma semântica de vazio da poda) e 5 testes, incluindo o que amarra a lista
+de campos à da poda.
+
+### ETAPA 2 — CONCLUÍDA em 2026-09-21
+
+1. Script de preenchimento: copiar as corridas das versões existentes para a
+   tabela, com readback conferindo que a fusão devolve a versão idêntica.
+2. `appendRadarAnalysis`: separar na escrita — INSERT da corrida, e o payload
+   do workflow recebe só a versão leve. **É aqui que está o ganho**: a leitura
+   e a regravação passam de ~8 MB para ~1,4 MB.
+3. `findByArticle`: reidratar TODAS as versões por padrão. Conservador de
+   propósito — nenhum consumidor muda, e o custo dessa rota continua igual ao
+   de hoje. Trocar por hidratação seletiva é etapa 3, rota a rota.
+4. Só então esvaziar as corridas do payload das linhas existentes.
+
+### ETAPA 3 — mais tarde
+
+Hidratação seletiva por rota (cada uma sabe de qual versão precisa), o que
+transforma o readback de operação de ~8 MB em ~1,4 MB mais uma corrida.

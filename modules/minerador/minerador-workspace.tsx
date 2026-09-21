@@ -55,14 +55,18 @@ import { assessVolumeKgrConsistency, hasExplicitZeroMeasurement, volumeKgrConsis
 import { deriveMineradorTableRows } from "@/lib/minerador/table-view";
 import { mineradorLastOrganizationKey, mineradorOrganizationButtonSummary, mineradorOrganizationLabels, type MineradorOrganizationValues } from "@/lib/minerador/last-organization";
 import { primaryKeywordPolicyLabel, readPrimaryKeywordPolicy, setPrimaryKeywordPolicy, type PrimaryKeywordPolicy } from "@/lib/minerador/primary-keyword-policy";
+import { keywordPageTypeLabel, setKeywordPageType } from "@/lib/minerador/keyword-page-type";
+import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
 import { applyFunnelQualification, classifyKeywordFunnel } from "@/lib/minerador/keyword-qualification";
 import { readVolumeEligibility, volumeEligibilityLabel } from "@/lib/minerador/volume-eligibility";
 import { formatGoogleAdsCpcTableValue } from "@/lib/minerador/google-ads-demand";
 import { buildLogicalOutputContract, buildLogicalProcessorMetadata, hasCompleteLogicalOutputContract, hasCurrentLogicalProcessorMetadata, logicalSemanticRecordsEqual, validateLogicalKeywordOutput } from "@/lib/minerador/logical-processor";
+import { MINERADOR_KEYWORDS_TABLE, MINERADOR_LISTING_VIEW, withMeasurementSeries } from "@/lib/minerador/listing-payload";
 import { readCanonicalKeywordDna, readLogicalIntentLabel, readLogicalNiche } from "@/lib/minerador/logical-read-model";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { resolveMineradorProcessState, type MineradorAttemptState, type MineradorProcessAttempt, type MineradorProcessName } from "@/lib/minerador/process-state";
 import { type SemanticConsolidationDraft } from "@/lib/minerador/semantic-consolidation-draft";
+import { candidateFromCatalogMatch, deriveSitePageStructure, matchKeywordToCatalog, sitePageRoleLabel, type SiteCatalogEntryLike } from "@/lib/minerador/site-catalog-match";
 import { isConclusiveSerpEvidence, type SerpSemanticEvidence } from "@/lib/minerador/serp-semantic-evidence";
 import { KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE, parseKeywordSemanticQualification, semanticDraftFromQualification, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
 import { applyPublicationLinkAction, readPublicationLink, readSiteOrigin, type PublicationLinkEvidence } from "@/lib/minerador/publication-link";
@@ -70,7 +74,7 @@ import {
   keywordRecoveryRemainingLabel,
   resolveKeywordPublication,
 } from "@/lib/minerador/keyword-lifecycle";
-import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus, type EditorialKeywordStatus } from "@/lib/minerador/editorial-status";
+import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS, MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus, type EditorialKeywordStatus } from "@/lib/minerador/editorial-status";
 import { applyApproval, resolveApprovalReadiness } from "@/lib/minerador/approved-package";
 import type { KeywordTableOrderMode } from "@/lib/minerador/manual-order";
 import { manualImportListaId, resolveLegacyCsvSilo } from "@/lib/minerador/legacy-import";
@@ -228,6 +232,9 @@ function candidateFromStoredSiteEvidence(item: KeywordItem, brandId: string): Mi
     declaredCanonicalUrl: evidence.declaredCanonicalUrl || null,
     lastCheckedAt: evidence.lastCheckedAt || null,
     catalogTitle: null,
+    siteRole: typeof evidence.siteRole === "string" ? evidence.siteRole as MineradorSiteSyncCandidate["siteRole"] : undefined,
+    siloPath: typeof evidence.siloPath === "string" ? evidence.siloPath : null,
+    mineradorKeywordId: item.id,
   };
 }
 const mineradorTableSelectClass = "border border-divider bg-surface-subtle rounded px-1.5 py-0.5 text-[10px] font-bold focus:outline-none cursor-pointer w-full truncate focus:border-module-accent";
@@ -327,6 +334,28 @@ const toSlug = (text: string) => {
     .replace(/\-\-+/g, "-");
 };
 
+/**
+ * De onde a listagem lê: a view podada, com recuo para a tabela.
+ *
+ * O recuo existe porque código e banco não sobem juntos aqui — as migrations
+ * são aplicadas à mão. Sem ele, publicar esta tela antes de aplicar a
+ * migration deixaria o Minerador sem listagem nenhuma. O recuo é definitivo
+ * na sessão: uma vez que a view falte, não se insiste a cada carregamento.
+ *
+ * Fora do componente de propósito: a decisão vale para a aba inteira, não
+ * para uma montagem.
+ */
+let fonteDaListagem: string = MINERADOR_LISTING_VIEW;
+
+/** A view ainda não existe no banco? (PostgREST não a acha no cache do schema.) */
+function viewDeListagemAusente(error: { code?: string | null; message?: string | null } | null): boolean {
+  if (!error) return false;
+  const code = String(error.code || "");
+  return code === "42P01"
+    || code === "PGRST205"
+    || String(error.message || "").includes(MINERADOR_LISTING_VIEW);
+}
+
 export default function Home({ brandRef, sectionTabs }: { brandRef: string; sectionTabs?: ReactNode }) {
   const { data: session, status: sessionStatus } = useSession();
   const { selectedBrandId, brands, userRole } = useBrand();
@@ -361,6 +390,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const [humanReviewOpenId, setHumanReviewOpenId] = useState<string | null>(null);
   const [humanReviewDrafts, setHumanReviewDrafts] = useState<Record<string, HumanReviewDraft>>({});
   const [semanticConsolidationDrafts, setSemanticConsolidationDrafts] = useState<Record<string, SemanticConsolidationDraft>>({});
+  // Catálogo remoto do Site da Marca, lido na última conferência: é contra
+  // ele que a URL manual descobre se é Silo ou artigo.
+  const siteCatalogRef = useRef<SiteCatalogEntryLike[]>([]);
+  const manualSiteCheckRef = useRef<HTMLElement | null>(null);
   // Qualificação Semântica persistida por keyword: fonte canônica reidratada do
   // servidor em todo carregamento (F5, nova aba, outro navegador).
   const [semanticQualifications, setSemanticQualifications] = useState<Record<string, KeywordSemanticQualification>>({});
@@ -376,6 +409,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const fetchDataInFlightRef = useRef<string | null>(null);
   const fetchDataLoadedKeyRef = useRef<string | null>(null);
   const fetchDataActiveKeyRef = useRef<string | null>(null);
+  /** Keywords cujas séries de medição já foram buscadas sob demanda. */
+  const hydratedKeywordIdsRef = useRef<Set<string>>(new Set());
   
   // Estados de Filtros e OrdenaÃ§Ã£o
   const [searchQuery, setSearchQuery] = useState("");
@@ -971,21 +1006,29 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       // 2. Carrega as keywords pertencentes a estes silos ou sem silo (lista_id is null)
       const loadedKeywords = await withSupabaseSelectRetry(async () => {
         const allowedListIds = loadedLists.map(l => l.id);
-        let query = supabase
-          .from("minerador_keywords")
-           .select("*")
-           .eq("brand_id", selectedBrandId)
-           .is("deleted_at", null)
-           .order("created_at", { ascending: false });
+        const lerDe = async (fonte: string) => {
+          let query = supabase
+            .from(fonte)
+             .select("*")
+             .eq("brand_id", selectedBrandId)
+             .is("deleted_at", null)
+             .order("created_at", { ascending: false });
 
-        if (allowedListIds.length > 0) {
-          const orFilter = `lista_id.is.null,${allowedListIds.map(id => `lista_id.eq.${id}`).join(",")}`;
-          query = query.or(orFilter);
-        } else {
-          query = query.is("lista_id", null);
+          if (allowedListIds.length > 0) {
+            const orFilter = `lista_id.is.null,${allowedListIds.map(id => `lista_id.eq.${id}`).join(",")}`;
+            query = query.or(orFilter);
+          } else {
+            query = query.is("lista_id", null);
+          }
+          return query;
+        };
+
+        let { data: keywordsData, error: keywordsError } = await lerDe(fonteDaListagem);
+        if (keywordsError && fonteDaListagem !== MINERADOR_KEYWORDS_TABLE && viewDeListagemAusente(keywordsError)) {
+          // Migration ainda não aplicada: a tela funciona, só sem a economia.
+          fonteDaListagem = MINERADOR_KEYWORDS_TABLE;
+          ({ data: keywordsData, error: keywordsError } = await lerDe(MINERADOR_KEYWORDS_TABLE));
         }
-
-        const { data: keywordsData, error: keywordsError } = await query;
         if (keywordsError) throw keywordsError;
         return keywordsData || [];
       });
@@ -1012,6 +1055,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       if (fetchDataActiveKeyRef.current !== fetchKey) return;
       // A qualificação de keywords é sempre explícita; o carregamento não deriva nem persiste DNA ou Funil.
       setKeywords(loadedKeywords);
+      // As linhas voltaram podadas: o que já fora hidratado não vale mais.
+      hydratedKeywordIdsRef.current = new Set();
       setProcessAttemptsByKeywordId({});
       setHumanReviewDrafts({});
       // Reidratação server-side: a Qualificação Semântica sobrevive a F5, nova
@@ -1058,6 +1103,35 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
   };
 
+  /**
+   * Abre a conferência por link para UMA keyword.
+   *
+   * Limpa a prévia aberta de propósito: o formulário era renderizado com
+   * `!siteSyncPlan`, então uma prévia anterior escondia o campo e a ação
+   * parecia não ter acontecido.
+   */
+  const openManualSiteCheck = (keyword: KeywordItem) => {
+    const evidence = readSiteOrigin(keyword.analise_semantica);
+    setSiteSyncPlan(null);
+    setManualSiteCheckKeywordId(keyword.id);
+    setManualSiteCheckUrl(evidence?.resolvedUrl || evidence?.sourceUrl || evidence?.declaredCanonicalUrl || activeBrand?.site_url || "");
+  };
+
+  // O formulário fica acima da tabela; sem isto a ação disparada de uma linha
+  // lá embaixo não mostra nada na tela.
+  useEffect(() => {
+    if (manualSiteCheckKeywordId) manualSiteCheckRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [manualSiteCheckKeywordId]);
+
+  const loadRemoteSiteCatalog = async (brandId: string): Promise<SiteCatalogEntryLike[]> => {
+    const response = await fetch(`/api/marca/site/sitemap?brandId=${encodeURIComponent(brandId)}`, { cache: "no-store" });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body?.error || "Catálogo Site/Sitemap remoto indisponível.");
+    const catalog = Array.isArray(body?.snapshot?.catalog) ? body.snapshot.catalog as SiteCatalogEntryLike[] : [];
+    siteCatalogRef.current = catalog;
+    return catalog;
+  };
+
   const handleCheckWithSite = async (singleKeywordId?: string) => {
     const effectiveSelectedIds = singleKeywordId ? new Set([singleKeywordId]) : selectedIds;
     if (effectiveSelectedIds.size === 0) { showNotification("error", "Selecione pelo menos uma keyword antes de conferir o site."); return; }
@@ -1068,22 +1142,33 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     setSiteSyncLoading(true);
     try {
       if (!session?.user?.id) { showNotification("error", "Sessão não disponível para ler o Site/Sitemap local."); return; }
-      const snapshot = await loadMineradorSiteSyncSnapshot(session.user.id, selectedBrandId);
+      // O catálogo canônico é o remoto (brand_site_catalog_entries). A cópia
+      // local do navegador é complemento: pode não existir nesta máquina.
+      const remoteCatalog = await loadRemoteSiteCatalog(selectedBrandId);
+      const snapshot = await loadMineradorSiteSyncSnapshot(session.user.id, selectedBrandId).catch(() => null);
       const selectedItems = keywords.filter(item => effectiveSelectedIds.has(item.id));
       const selectedTexts = new Set(selectedItems.map(item => item.keyword.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()));
-      const catalogCandidates = uniqueSiteSyncCandidates(snapshot.candidates).filter(candidate => selectedTexts.has((candidate.normalizedText || candidate.text).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()));
+      const localCandidates = uniqueSiteSyncCandidates(snapshot?.candidates || []).filter(candidate => selectedTexts.has((candidate.normalizedText || candidate.text).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()));
+      // Casamento pelo que a página declara: H1, slug, título.
+      const remoteCandidates = selectedItems.flatMap(item => matchKeywordToCatalog(item.keyword, remoteCatalog)
+        .slice(0, 1)
+        .map(match => candidateFromCatalogMatch({ keyword: item.keyword, brandId: selectedBrandId, match, catalog: remoteCatalog, candidateId: crypto.randomUUID(), mineradorKeywordId: item.id })));
       const storedEvidenceCandidates = selectedItems.map(item => candidateFromStoredSiteEvidence(item, selectedBrandId)).filter((candidate): candidate is MineradorSiteSyncCandidate => Boolean(candidate));
-      const candidates = uniqueSiteSyncCandidates([...catalogCandidates, ...storedEvidenceCandidates]);
+      const candidates = uniqueSiteSyncCandidates([...remoteCandidates, ...localCandidates, ...storedEvidenceCandidates]).map(candidate => {
+        if (candidate.siteRole) return candidate;
+        const structure = deriveSitePageStructure(candidate.resolvedUrl || candidate.sourceUrl, remoteCatalog);
+        return { ...candidate, siteRole: structure.role, siloPath: structure.siloPath };
+      });
       if (candidates.length === 0) {
         if (effectiveSelectedIds.size !== 1) {
         showNotification("info", "Para conferir uma URL informada manualmente, selecione somente uma keyword.", { metadata: { executionRequestId } });
           return;
         }
         const keywordId = [...effectiveSelectedIds][0];
-        setManualSiteCheckKeywordId(keywordId);
-        setManualSiteCheckUrl(activeBrand?.site_url || "");
+        const target = keywords.find(item => item.id === keywordId);
+        if (target) openManualSiteCheck(target);
         outcome = "success";
-        showNotification("info", "Nenhuma URL foi localizada no catálogo. Informe a página da marca para conferir este vínculo.", { metadata: { executionRequestId } });
+        showNotification("info", `Nenhuma página do catálogo declara "${target?.keyword || "esta keyword"}". Informe o link abaixo para conferir o vínculo.`, { metadata: { executionRequestId } });
         return;
       }
       const checkedAt = new Date().toISOString();
@@ -1158,9 +1243,43 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         declaredCanonicalUrl: null,
         catalogTitle: null,
       }, body, new Date().toISOString());
-      setSiteSyncPlan(buildMineradorSiteSyncPlan([candidate], keywords, targetListId || null));
+      // A URL manual também ganha papel: a página do Silo pode não estar no
+      // sitemap, mas os artigos abaixo dela estão — e é isso que a torna Silo.
+      const catalogForStructure = siteCatalogRef.current.length ? siteCatalogRef.current : await loadRemoteSiteCatalog(selectedBrandId).catch(() => []);
+      const structure = deriveSitePageStructure(candidate.resolvedUrl || candidate.sourceUrl, catalogForStructure);
+      const conferida = { ...candidate, siteRole: structure.role, siloPath: structure.siloPath, mineradorKeywordId: keyword.id };
+      const plan = buildMineradorSiteSyncPlan([conferida], keywords, targetListId || null);
+      const planned = plan.items[0];
+      if (!["new", "evidence_updated", "no_change"].includes(planned.outcome)) {
+        // Recusa tem motivo: mostrar a prévia é o único jeito de explicá-lo.
+        setSiteSyncPlan(plan);
+        setManualSiteCheckKeywordId(null);
+        showNotification("error", planned.reason || "A conferência não pôde ser aplicada a esta keyword.");
+        return;
+      }
+      // O ato explícito foi colar a URL e conferir. Segurar a evidência atrás
+      // de um "Salvar" no topo da tela só escondia o resultado: a linha
+      // continuava "Livre" e parecia que nada tinha acontecido.
+      const gravada = await persistSiteSyncCandidates([conferida], {
+        scopeIds: [keyword.id],
+        successMessage: `Página conferida como ${sitePageRoleLabel(structure.role)}.`,
+      });
       setManualSiteCheckKeywordId(null);
-      showNotification("success", "URL conferida. Nada será publicado até uma confirmação humana explícita.");
+      if (!gravada) return;
+      setSiteSyncPlan(null);
+      /*
+       * Colar a URL de uma página que está no ar e mandar conferir É a
+       * declaração. Exigir um segundo clique dentro do card DECISÃO fazia o
+       * humano confirmar duas vezes a mesma coisa — e a linha ficava
+       * "Verificada" parecendo que faltava algo.
+       */
+      const { data: conferido, error: conferidoErro } = await supabase
+        .from("minerador_keywords").select("*").eq("id", keyword.id).eq("brand_id", selectedBrandId).is("deleted_at", null).maybeSingle();
+      if (conferidoErro || !conferido) {
+        showNotification("info", "Página conferida. Declare a publicação pelo card DECISÃO.");
+        return;
+      }
+      await handlePublicationLinkAction(conferido as KeywordItem, "confirm", "", { skipPrompt: true });
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "Não foi possível conferir a URL informada.");
     } finally {
@@ -1168,12 +1287,18 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
   };
 
-  const handleConfirmSiteSync = async () => {
-    if (!siteSyncPlan || !selectedBrandId) return;
-    const candidates = siteSyncPlan.items.filter(item => ["new", "evidence_updated", "no_change"].includes(item.outcome)).map(item => item.candidate);
-    if (!candidates.length) { showNotification("error", "A prévia não possui itens válidos para persistir."); return; }
+  /**
+   * Grava a conferência. Um caminho só: a prévia do catálogo e a URL informada
+   * à mão passam por aqui.
+   */
+  const persistSiteSyncCandidates = async (
+    candidates: MineradorSiteSyncCandidate[],
+    options: { scopeIds?: string[]; successMessage?: string } = {},
+  ): Promise<boolean> => {
+    if (!selectedBrandId || !candidates.length) return false;
     const executionRequestId = crypto.randomUUID();
-    if (!startBulkProgress("site", candidates.length, selectedIds.size ? [...selectedIds] : undefined, executionRequestId)) return;
+    const scopeIds = options.scopeIds ?? (selectedIds.size ? [...selectedIds] : undefined);
+    if (!startBulkProgress("site", candidates.length, scopeIds, executionRequestId)) return false;
     let outcome: "success" | "error" = "error";
     const batchId = crypto.randomUUID();
     setSiteSyncPersisting(true);
@@ -1208,19 +1333,34 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         }
         return next;
       });
-      showNotification("success", body.status === "partial" ? "Conferência persistida parcialmente; revise os itens com falha." : "Conferência Site/Sitemap persistida no Minerador.", { metadata: { executionRequestId } });
-      setSiteSyncPlan(null);
+      showNotification("success", body.status === "partial" ? "Conferência persistida parcialmente; revise os itens com falha." : options.successMessage || "Conferência Site/Sitemap persistida no Minerador.", { metadata: { executionRequestId } });
+      return outcome === "success";
     } catch (error) {
       console.error("Erro ao persistir conferência Site/Sitemap:", error);
-      setProcessAttempt(selectedIds.size ? [...selectedIds] : [], "site", "failed", executionRequestId);
+      setProcessAttempt(scopeIds || [], "site", "failed", executionRequestId);
       showNotification("error", error instanceof Error ? error.message : "Falha ao persistir a conferência Site/Sitemap.", { metadata: { executionRequestId } });
+      return false;
     } finally {
       setSiteSyncPersisting(false);
       finishBulkProgress(outcome);
     }
   };
 
-  const handlePublicationLinkAction = async (item: KeywordItem, action: "confirm" | "correct_legacy" | "unlink", requestedEditorialStatus: EditorialKeywordStatus | "" = "") => {
+  const handleConfirmSiteSync = async () => {
+    if (!siteSyncPlan) return;
+    const candidates = siteSyncPlan.items.filter(item => ["new", "evidence_updated", "no_change"].includes(item.outcome)).map(item => item.candidate);
+    if (!candidates.length) { showNotification("error", "A prévia não possui itens válidos para persistir."); return; }
+    if (await persistSiteSyncCandidates(candidates)) setSiteSyncPlan(null);
+  };
+
+  const handlePublicationLinkAction = async (
+    item: KeywordItem,
+    action: "confirm" | "correct_legacy" | "unlink",
+    requestedEditorialStatus: EditorialKeywordStatus | "" = "",
+    // Quem colou a URL e mandou declarar já respondeu à pergunta; repetir o
+    // `confirm` do navegador seria pedir a mesma confirmação duas vezes.
+    options: { skipPrompt?: boolean } = {},
+  ) => {
     if (!selectedBrandId || !session?.user?.id) return;
     const currentView = readPublicationLink({ status: item.status, evidence: readSiteOrigin(item.analise_semantica) });
     if (action === "correct_legacy" && (!requestedEditorialStatus || !mineradorWorkflowStatuses.includes(requestedEditorialStatus))) {
@@ -1233,7 +1373,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       : action === "correct_legacy"
         ? `Corrigir a marcação legada de “${item.keyword}”?\n\nO status editorial ficará como “${requestedStatusLabel}”. A URL, o canonical e o histórico serão preservados; apenas a promoção não verificada será removida.`
         : `Desvincular a publicação de “${item.keyword}”?\n\nA URL, o canonical e o histórico serão preservados.`;
-    if (!window.confirm(confirmation)) return;
+    if (!options.skipPrompt && !window.confirm(confirmation)) return;
     if (action === "confirm" && currentView.state !== "verified") return;
     if (action === "correct_legacy" && currentView.state !== "legacy_unverified") return;
     if (action === "unlink" && currentView.state !== "published") return;
@@ -1272,6 +1412,43 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       setLoading(false);
     }
   }, [selectedBrandId, sessionStatus, supabase]);
+
+  /**
+   * Expandir traz as séries de medição desta keyword — e só dela.
+   *
+   * A listagem chega sem os dois históricos e as duas séries mensais (209 kB
+   * na marca inteira). O painel do DNA precisa deles para o gráfico de 12
+   * meses e para as listas de histórico, então a linha é completada quando o
+   * humano a abre: uma keyword por vez, uma vez por carregamento.
+   *
+   * A mesclagem é aditiva e o estado corrente da tela é quem manda — hidratar
+   * não pode ressuscitar decisão que mudou desde que a lista foi carregada.
+   */
+  useEffect(() => {
+    const keywordId = expandedRowId;
+    if (!keywordId || !selectedBrandId) return;
+    // Sem poda não há o que hidratar.
+    if (fonteDaListagem === MINERADOR_KEYWORDS_TABLE) return;
+    if (hydratedKeywordIdsRef.current.has(keywordId)) return;
+    let cancelado = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from(MINERADOR_KEYWORDS_TABLE)
+        .select("id,analise_semantica")
+        .eq("id", keywordId)
+        .eq("brand_id", selectedBrandId)
+        .is("deleted_at", null)
+        .maybeSingle();
+      // Falha de rede não apaga nada da tela: o painel segue com o que tem.
+      if (cancelado || error || !data) return;
+      hydratedKeywordIdsRef.current.add(keywordId);
+      const completo = (data.analise_semantica || null) as KeywordSemantic | null;
+      setKeywords(current => current.map(item => item.id === keywordId
+        ? { ...item, analise_semantica: withMeasurementSeries(item.analise_semantica, completo) as KeywordSemantic }
+        : item));
+    })();
+    return () => { cancelado = true; };
+  }, [expandedRowId, selectedBrandId, supabase]);
 
   // Redireciona o Admin para /marcas apenas se NENHUMA marca estiver selecionada
   useEffect(() => {
@@ -2236,7 +2413,11 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
   const handlePrimaryKeywordPolicyChange = async (item: KeywordItem, policy: Extract<PrimaryKeywordPolicy, "locked" | "reviewable">) => {
     if (!keywordPublicationProtected(item)) return;
-    const currentPolicy = readPrimaryKeywordPolicy({ status: item.status, semantic: item.analise_semantica });
+    const currentPolicy = readPrimaryKeywordPolicy({
+      publicationDeclared: readPublicationLink({ status: item.status, evidence: readSiteOrigin(item.analise_semantica) }).state === "published",
+      status: item.status,
+      semantic: item.analise_semantica,
+    });
     if (currentPolicy === policy) return;
     const policyLabel = primaryKeywordPolicyLabel(policy);
     if (!window.confirm(`${policyLabel}. A URL, o slug, o canonical e a keyword atual permanecerão protegidos. Confirmar política?`)) return;
@@ -2294,6 +2475,44 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     };
     const draft = humanReviewDrafts[keywordId];
     const baseSemantic = item.analise_semantica || {};
+
+    if (action.type === "page_type") {
+      // Declaração livre: informa o Arquiteto, não trava o Minerador.
+      const evidence = readSiteOrigin(item.analise_semantica);
+      const applied = setKeywordPageType(item.analise_semantica, {
+        pageType: action.pageType,
+        actorId: session?.user?.id || "usuario",
+        changedAt: new Date().toISOString(),
+        siteRole: evidence?.siteRole,
+        published: readPublicationLink({ status: item.status, evidence }).state === "published",
+      });
+      if (!applied.changed) {
+        if (applied.reason) showNotification("error", applied.reason);
+        return;
+      }
+      setUpdating(true);
+      try {
+        const { error } = await supabase.from("minerador_keywords").update({ analise_semantica: applied.semantic }).eq("id", item.id).eq("brand_id", selectedBrandId).is("deleted_at", null);
+        if (error) throw error;
+        const { data: readback, error: readbackError } = await supabase.from("minerador_keywords").select("id,brand_id,analise_semantica").eq("id", item.id).eq("brand_id", selectedBrandId).is("deleted_at", null).maybeSingle();
+        if (readbackError) throw readbackError;
+        if (!readback || readback.brand_id !== selectedBrandId) throw new Error("A declaração não pertence à marca ativa após o salvamento.");
+        setKeywords(current => current.map(keyword => keyword.id === item.id ? { ...keyword, analise_semantica: readback.analise_semantica as KeywordSemantic } : keyword));
+        showNotification("success", `Tipo de página declarado: ${keywordPageTypeLabel(action.pageType)}.`);
+      } catch (error) {
+        showNotification("error", error instanceof Error ? error.message : "Não foi possível declarar o tipo de página.");
+      } finally {
+        setUpdating(false);
+      }
+      return;
+    }
+
+    if (action.type === "primary_policy") {
+      // O posto é declaração sobre a publicação, não campo do DNA: vai pelo
+      // mesmo caminho da ação de vínculo, com histórico e readback próprios.
+      await handlePrimaryKeywordPolicyChange(item, action.policy);
+      return;
+    }
 
     if (action.type === "reopen") {
       setHumanReviewDrafts(current => ({
@@ -2820,7 +3039,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
             <label className="flex min-w-[150px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
               Status
               <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
-                <option value="Todos">Todos</option><option value="bruto">Bruto</option><option value="aprovado">Aprovado</option><option value="rejeitado">Rejeitado</option><option value="publicado">Publicado (legado)</option>
+                <option value="Todos">Todos</option>{MINERADOR_EDITORIAL_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label className="flex min-w-[180px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
@@ -2848,9 +3067,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               </select>
             </label>
             <label className="flex min-w-[160px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
-              Publicação no site
+              Vínculo
               <select value={filterSitePublication} onChange={(e) => setFilterSitePublication(e.target.value)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
-                <option value="Todos">Todas</option><option value="published">Publicada</option><option value="not_confirmed">Não confirmada</option><option value="not_found">Não localizada</option><option value="redirected">Redirecionada</option><option value="canonical_conflict">Conflito canonical</option>
+                <option value="Todos">Todas</option><option value="free">Livre</option><option value="candidate">Candidata</option><option value="verified">Verificada</option><option value="published">Publicada</option><option value="legacy_unverified">Publicação não verificada</option>
               </select>
             </label>
             <label className="flex min-w-[170px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
@@ -2903,6 +3122,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                  <span className="text-slate-500">URL: {item.candidate.urlSituation}</span>
                  {item.candidate.lastCheckedAt && <span className="text-slate-500">Conferida: {new Date(item.candidate.lastCheckedAt).toLocaleString("pt-BR")}</span>}
                  <span className="text-slate-500">{siteArchitectureLabel(item.candidate.architectureStatus)}</span>
+                 <span className="rounded border border-slate-800 px-1.5 py-0.5 text-slate-300" title={item.candidate.siloPath ? `Silo: ${item.candidate.siloPath}` : undefined}>{sitePageRoleLabel(item.candidate.siteRole)}{item.candidate.siteRole === "article" && item.candidate.siloPath ? ` · ${item.candidate.siloPath}` : ""}</span>
                 <span className={item.outcome === "new" ? "text-success" : item.outcome === "evidence_updated" ? "text-context-accent" : item.outcome === "no_change" ? "text-text-muted" : "text-warning"}>{siteSyncOutcomeLabel(item.outcome)}</span>
                 {item.mineradorKeywordId && <span className="font-mono text-[10px] text-slate-600">{item.mineradorKeywordId}</span>}
                 <a href={item.candidate.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-context-accent hover:text-foreground">Origem</a>
@@ -2919,14 +3139,14 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
          </section>
        )}
 
-      {manualSiteCheckKeywordId && !siteSyncPlan && (
-        <section className="shrink-0 border-b border-divider bg-surface-subtle px-4 py-3 font-sans" aria-label="Conferir URL manualmente">
+      {manualSiteCheckKeywordId && (
+        <section ref={manualSiteCheckRef} className="shrink-0 border-b border-divider bg-surface-subtle px-4 py-3 font-sans" aria-label="Conferir URL manualmente">
           <form onSubmit={handleManualSiteCheck} className="flex flex-wrap items-end gap-3">
             <div className="min-w-0 flex-1">
               <label htmlFor="minerador-manual-site-url" className="block text-sm font-semibold text-foreground">URL da página da marca</label>
               <p className="mt-1 text-sm text-text-muted">Keyword: <span className="font-medium text-foreground">{manualSiteCheckKeyword?.keyword || "—"}</span></p>
               <p className="text-sm text-text-muted">Site da Marca: <span className="font-medium text-foreground">{activeBrand?.site_url || "não configurado"}</span></p>
-              <p className="mt-1 text-sm text-text-muted">O catálogo Site/Sitemap já foi consultado. A página será apenas conferida no domínio autorizado; nenhuma publicação é criada automaticamente.</p>
+              <p className="mt-1 text-sm text-text-muted">Vale para Silo e para artigo: a página do Silo costuma ficar fora do sitemap, e o link informado aqui é conferido do mesmo jeito. A página é apenas lida no domínio autorizado; nenhuma publicação é criada automaticamente.</p>
               <input id="minerador-manual-site-url" type="url" value={manualSiteCheckUrl} onChange={event => setManualSiteCheckUrl(event.target.value)} placeholder="https://sua-marca.com/pagina" className="mt-2 min-h-9 w-full rounded border border-divider bg-surface px-3 py-1.5 text-sm text-foreground outline-none focus:border-context-accent focus:ring-2 focus:ring-context-accent/30" required />
             </div>
             <div className="flex items-center gap-2">
@@ -3190,7 +3410,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                 const publicationProtected = keywordPublicationProtected(item);
                 const editorialStatus = canonicalSnapshot.status;
                 const recoveryStatus = legacyEditorialRecovery?.keywordId === item.id ? legacyEditorialRecovery.status : "";
-                const primaryKeywordPolicy = readPrimaryKeywordPolicy({ status: item.status, semantic: item.analise_semantica });
+                // A coluna REFLETE o que a Revisão Humana decidiu.
+                const vinculo = resolveKeywordVinculo({ status: item.status, semantic: item.analise_semantica });
+                const primaryKeywordPolicy = readPrimaryKeywordPolicy({ publicationDeclared: publicationLink.state === "published", status: item.status, semantic: item.analise_semantica });
                 const selectedListName = lists.find(list => list.id === item.lista_id)?.nome || "Sem Silo/Categoria";
                 const keywordReadModel = canonicalSnapshot.semantic;
                 const intentLabel = keywordReadModel.intentLabel;
@@ -3242,8 +3464,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                       className={`transition-colors ${
                         keywordOrder.draggingId === item.id
                           ? "bg-surface-elevated opacity-70"
-                          : publicationProtected
-                          ? "border-l-2 border-l-danger bg-danger-soft hover:bg-surface-elevated"
                           : isSelected
                           ? "bg-selected hover:bg-surface-elevated"
                           : isExpanded
@@ -3284,36 +3504,62 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             >
                               {item.keyword}
                             </div>
-                            {publicationProtected && (
-                              <div
-                                className="mt-0.5 block max-w-full truncate select-text font-mono text-[10px] text-identity-published"
-                                title="Canonical publicado fixo: slug e URL nao podem ser alterados ou removidos."
+                            {/* O endereço mora ao lado da palavra-chave, inteiro e
+                                com cor própria: é a identidade da página, não um
+                                detalhe do vínculo. Aparece assim que há URL
+                                conferida, não só depois de publicada. */}
+                            {(publicationLink.url || publicationProtected) && (
+                              <a
+                                href={publicationLink.canonicalUrl || publicationLink.url || getCanonicalUrl(item) || undefined}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                data-keyword-page-url
+                                className={"mt-0.5 block max-w-full break-all select-text font-mono text-[10px] hover:underline " + (
+                                  publicationLink.state === "published" ? "text-identity-published" : "text-identity-new"
+                                )}
+                                title={publicationLink.canonicalUrl
+                                  ? "Canônico declarado na publicação: slug e URL não podem ser alterados ou removidos."
+                                  : "Página conferida. Ainda sem canônico declarado."}
                               >
-                                {getCanonicalUrl(item) || "URL publicada não lida"}
-                              </div>
+                                {publicationLink.canonicalUrl || publicationLink.url || getCanonicalUrl(item) || "URL publicada não lida"}
+                              </a>
                             )}
                           </div>
                         </div>
                       </td>
 
-                      {/* Vínculo de publicação: separado do status editorial. */}
+                      {/* Vínculo: as DUAS DECLARAÇÕES do humano — o posto desta keyword
+                          numa publicação e o que a página é (ou viria a ser).
+                          Conferir e confirmar são dados, não declarações: vivem
+                          no card DECISÃO. As duas se declaram na Revisão Humana. */}
                       <td className="w-[120px] border-r border-divider/70 px-2 py-1 text-center whitespace-nowrap">
                         <div className="flex min-w-0 flex-col items-center gap-1">
                           <span
-                            className={`inline-flex max-w-full rounded border px-1.5 py-0.5 text-[10px] font-semibold ${publicationLink.state === "published" ? "border-success/50 bg-success-soft text-success" : publicationLink.state === "verified" ? "border-context-accent/50 bg-context-accent/10 text-context-accent" : publicationLink.state === "candidate" ? "border-pending/50 bg-pending-soft text-pending" : publicationLink.state === "legacy_unverified" ? "border-warning/50 bg-warning-soft text-warning" : "border-divider bg-surface-subtle text-text-muted"}`}
-                            title={publicationLink.url || "Nenhuma página real vinculada a esta keyword."}
+                            className={"inline-flex max-w-full items-center whitespace-normal rounded border px-1.5 py-0.5 text-[10px] font-semibold " + (
+                              vinculo.postLockedToSlug
+                                ? "border-context-accent/50 bg-context-accent/10 text-context-accent"
+                                : "border-divider bg-surface-subtle text-text-muted"
+                            )}
+                            title={vinculo.postLockedToSlug
+                              ? "Travado ao slug: esta keyword é a primária desta URL e não se solta dela."
+                              : "Livre: pode ser primária ou secundária de qualquer página, e pode perder a vaga."}
                           >
-                            {publicationLink.label}
+                            {vinculo.postLabel}
                           </span>
-                          {publicationLink.url && <a href={publicationLink.url} target="_blank" rel="noopener noreferrer" className="max-w-full truncate text-[10px] text-context-accent hover:text-foreground" title={publicationLink.url}>Página</a>}
-                          {publicationLink.state === "legacy_unverified" && (
-                            <button type="button" onClick={() => void handleCheckWithSite(item.id)} disabled={updating || siteSyncLoading || siteSyncPersisting} className="min-h-7 max-w-full rounded border border-context-accent/50 px-1.5 py-0.5 text-[10px] font-medium text-context-accent hover:border-context-accent hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-context-accent disabled:cursor-wait disabled:opacity-50">
-                              Conferir página
-                            </button>
-                          )}
-                          {publicationLink.action && item.id && (
-                            <button type="button" onClick={() => void handlePublicationLinkAction(item, publicationLink.action!, publicationLink.action === "correct_legacy" ? recoveryStatus : "")} disabled={updating} className="min-h-7 max-w-full rounded border border-divider px-1.5 py-0.5 text-[10px] font-medium text-text-muted hover:border-context-accent/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-context-accent disabled:cursor-wait disabled:opacity-50">
-                              {publicationLink.action === "confirm" ? "Confirmar publicada" : publicationLink.action === "correct_legacy" ? "Corrigir marcação" : "Desvincular publicação"}
+                          <span
+                            className={"inline-flex max-w-full items-center whitespace-normal rounded px-1 py-0.5 text-[9px] font-semibold " + (
+                              vinculo.pageType.declared
+                                ? "border border-context-accent/50 bg-context-accent/10 text-context-accent"
+                                : "border border-dashed border-divider text-text-muted"
+                            )}
+                            title={vinculo.pageTypeLabel
+                              + (vinculo.pageType.source === "human" ? " — escolhido por alguém desta marca." : vinculo.pageType.source === "site" ? " — veio do papel observado na página." : " — padrão do Minerador.")}
+                          >
+                            {vinculo.pageTypeLabel}
+                          </span>
+                          {publicationLink.action === "correct_legacy" && item.id && (
+                            <button type="button" onClick={() => void handlePublicationLinkAction(item, "correct_legacy", recoveryStatus)} disabled={updating} className="min-h-7 max-w-full rounded border border-divider px-1.5 py-0.5 text-[10px] font-medium text-text-muted hover:border-context-accent hover:text-context-accent disabled:cursor-not-allowed disabled:opacity-50">
+                              Corrigir marcação
                             </button>
                           )}
                         </div>
@@ -3442,7 +3688,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                         </select>
                       </td>
 
-                      {/* Status Dropdown */}
+                      {/* Status — leitura: a classificação atual, escrita na barra e no DNA. */}
                       <td className="relative w-[108px] border-r border-divider/70 px-3 py-0.5 text-center">
                         {editorialStatus.kind === "legacyEditorialStatusUnresolved" ? (
                           <div className="flex min-w-0 flex-col items-center gap-1">
@@ -3457,31 +3703,38 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                                 className="w-full rounded border border-divider bg-surface-subtle px-1 py-1 text-center text-[10px] font-medium text-foreground focus:border-module-accent focus:outline-none"
                               >
                                 <option value="">Escolher status</option>
-                                <option value="bruto">Bruto</option>
-                                <option value="aprovado">Aprovado</option>
-                                <option value="rejeitado">Rejeitado</option>
+                                {MINERADOR_EDITORIAL_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                               </select>
                             )}
                           </div>
                         ) : (
-                          <select
-                            value={editorialStatus.status}
-                            onChange={(e) => handleUpdateStatus(item.id, e.target.value)}
-                            className={`w-full cursor-pointer rounded border border-divider bg-surface-subtle px-1.5 py-0.5 text-center text-[10px] font-bold focus:border-module-accent focus:outline-none ${
-                              editorialStatus.status === "aprovado"
-                                ? "text-success border-success/50 bg-success-soft"
-                                : editorialStatus.status === "em_revisao"
-                                ? "text-warning border-warning/50 bg-warning-soft"
-                                : editorialStatus.status === "rejeitado"
-                                ? "text-danger border-danger/50 bg-danger-soft"
-                                : "text-text-muted"
-                            }`}
-                          >
-                            <option value="bruto">Bruto</option>
-                            <option value="em_revisao">Em revisão</option>
-                            <option value="aprovado">Aprovado</option>
-                            <option value="rejeitado">Rejeitado</option>
-                          </select>
+                          /* Informação, não comando: a classificação é escrita
+                             na barra do rodapé (em lote ou uma a uma) e no card
+                             do DNA. Aqui só se lê o estado atual. */
+                          <div className="flex min-w-0 flex-col items-center gap-0.5">
+                            <span
+                              className={"inline-flex w-full items-center justify-center rounded border px-1.5 py-0.5 text-[10px] font-bold " + (
+                                editorialStatus.status === "aprovado"
+                                  ? "text-success border-success/50 bg-success-soft"
+                                  : editorialStatus.status === "em_revisao"
+                                  ? "text-warning border-warning/50 bg-warning-soft"
+                                  : editorialStatus.status === "rejeitado"
+                                  ? "text-danger border-danger/50 bg-danger-soft"
+                                  : "border-divider bg-surface-subtle text-text-muted"
+                              )}
+                              title="Classificação atual. Para alterar, use a barra do rodapé ou o card do DNA."
+                            >
+                              {editorialStatus.label}
+                            </span>
+                            {publicationLink.state === "published" && (
+                              <span
+                                className="inline-flex w-full items-center justify-center rounded border border-danger/50 bg-danger-soft px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-danger"
+                                title="Há página declarada no ar. Publicar não aprova: a keyword continua percorrendo os processos até ser aprovada."
+                              >
+                                Publicado
+                              </span>
+                            )}
+                          </div>
                         )}
                         <KeywordTableRowResizeHandle rowId={item.id} enabled onStart={rowResize.startResize} />
                       </td>
@@ -3522,6 +3775,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             }}
                             primaryPolicy={primaryKeywordPolicy}
                             primaryPolicyLabel={primaryKeywordPolicyLabel(primaryKeywordPolicy)}
+                            publication={{
+                              label: publicationLink.label,
+                              url: publicationLink.url,
+                              canonicalUrl: publicationLink.canonicalUrl,
+                              checkedAt: readSiteOrigin(item.analise_semantica)?.lastCheckedAt ?? null,
+                              canConfirm: publicationLink.action === "confirm",
+                              canUnlink: publicationLink.action === "unlink",
+                            }}
+                            onCheckByLink={() => openManualSiteCheck(item)}
+                            onPublicationAction={(action) => handlePublicationLinkAction(item, action)}
                             allowPublishedWorkflowStatus={false}
                             statusUpdating={updating}
                             onWorkflowStatusChange={(status) => handleUpdateStatus(item.id, status)}
@@ -3534,7 +3797,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             serpFailed={Boolean(serpCollectionFailures[item.id])}
                             humanReviewOpen={humanReviewOpenId === item.id}
                             onHumanReviewOpenChange={(open) => setHumanReviewOpenId(open ? item.id : null)}
-                            onPrimaryPolicyChange={(policy) => void handlePrimaryKeywordPolicyChange(item, policy)}
                           />
 
                         </td>
@@ -3653,9 +3915,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               title="Definir o status operacional das keywords selecionadas"
             >
               <option value="">Status</option>
-              <option value="bruto">Bruto</option>
-              <option value="aprovado">Aprovado</option>
-              <option value="rejeitado">Rejeitado</option>
+              {MINERADOR_EDITORIAL_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
 
             <div ref={moreActionsRef} className="relative shrink-0">
@@ -3687,9 +3947,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                     className="min-h-9 min-w-24 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50"
                   >
                     <option value="">Selecionar</option>
-                    <option value="bruto">Bruto</option>
-                    <option value="aprovado">Aprovado</option>
-                    <option value="rejeitado">Rejeitado</option>
+                    {MINERADOR_EDITORIAL_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </label>
                 <label className="flex items-center justify-between gap-3 rounded px-3 py-2 text-sm font-medium text-text-muted sm:hidden">
@@ -3969,9 +4227,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                     onChange={(e) => setManualStatus(e.target.value)}
                     className="w-full cursor-pointer rounded border border-divider bg-surface-subtle px-2 py-1.5 text-xs font-semibold text-text-muted focus:border-module-accent focus:outline-none"
                   >
-                    <option value="bruto">Bruto</option>
-                    <option value="aprovado">Aprovado</option>
-                    <option value="rejeitado">Rejeitado</option>
+                    {MINERADOR_EDITORIAL_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </div>
               </div>

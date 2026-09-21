@@ -412,6 +412,44 @@ export const ArticleControlContextSchema = z.object({
 }).strict();
 export type ArticleControlContext = z.infer<typeof ArticleControlContextSchema>;
 
+/**
+ * O QUE A KEYWORD É — OU O QUE ELA PODE SER.
+ *
+ * O campo [Vínculo] do Minerador declara duas coisas que o Arquiteto não tinha
+ * como saber, e elas NÃO são a mesma coisa:
+ *
+ *   POTENCIAL  · keyword nova, ainda sem página. É previsão: "isto daria um
+ *                Silo" ou "isto daria um Artigo". Pode ser revista.
+ *   DECLARADO  · keyword de página publicada. É FATO observado no site, com
+ *                endereço e canonical. Não se adivinha e não se revisa aqui.
+ *
+ * Colapsar os dois num campo só faria uma previsão sobre keyword nova pesar o
+ * mesmo que a leitura de uma página no ar — e é justamente essa diferença que
+ * separa a origem 1 (SERP elege) da origem 2 (a declaração já decidiu).
+ *
+ * `siloCandidate` continua respondendo outra pergunta: ele mede OPORTUNIDADE
+ * por volume, entidade ampla e capacidade. Este campo diz NATUREZA.
+ */
+export const EditorialUnitDeclarationSchema = z.discriminatedUnion("source", [
+  z.object({
+    source: z.literal("potential"),
+    /** Previsão para keyword nova: o que ela daria se virasse página. */
+    unit: z.enum(["silo", "article"]),
+    confidence: ConfidenceSchema.nullable().default(null),
+    reasons: z.array(z.string().min(1)).default([]),
+  }).strict(),
+  z.object({
+    source: z.literal("published"),
+    /** Fato: o que a página publicada É. */
+    unit: z.enum(["silo", "article", "landing_page", "service_page", "category_page", "other"]),
+    /** O endereço que veio junto com a declaração; nada é fabricado aqui. */
+    url: z.string().min(1).nullable().default(null),
+    canonical: z.string().min(1).nullable().default(null),
+    observedAt: z.string().min(1).nullable().default(null),
+  }).strict(),
+]);
+export type EditorialUnitDeclaration = z.infer<typeof EditorialUnitDeclarationSchema>;
+
 export const SiloCandidateMarkSchema = z.object({
   status: z.enum(["candidate", "not_candidate"]),
   origin: z.enum(["deterministic", "human"]),
@@ -456,6 +494,11 @@ export const ArchitectKeywordSchema = z.object({
    * pacote versionado, e o Arquiteto não finge saber.
    */
   approvedPackageRef: ApprovedPackageRefSchema.nullable().optional(),
+  /**
+   * A declaração do [Vínculo]. Ausente = o Minerador ainda não declarou, e o
+   * Arquiteto NÃO adivinha: a keyword segue sem natureza definida.
+   */
+  editorialUnitDeclaration: EditorialUnitDeclarationSchema.optional(),
   publishedUrl: z.string().url().nullable().optional(),
   canonical: z.string().url().nullable().optional(),
   url: z.string().url().nullable().optional(),

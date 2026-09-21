@@ -120,12 +120,17 @@ test("não há URL reconstruída nem provider real no vínculo", async () => {
 
 test("Publicado não é opção ativa e sinais CSV não promovem publicação", async () => {
   const workspace = await import("node:fs/promises").then(fs => fs.readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8"));
-  const statusCell = workspace.slice(workspace.indexOf("{/* Status Dropdown */}"), workspace.indexOf("<KeywordTableRowResizeHandle", workspace.indexOf("{/* Status Dropdown */}")));
+  // Prefixo estável: o comentário já mudou de "Dropdown" para "leitura" e
+  // levou a fatia junto, passando o teste por engano num arquivo inteiro.
+  const statusCellStart = workspace.indexOf("{/* Status");
+  const statusCell = workspace.slice(statusCellStart, workspace.indexOf("<KeywordTableRowResizeHandle", statusCellStart));
   assert.doesNotMatch(statusCell, /value=\"publicado\"/);
   assert.match(workspace, /allowPublishedWorkflowStatus=\{false\}/);
   assert.doesNotMatch(workspace, /handleBatchPublish/);
   assert.match(workspace, /if \(isLegacyPublishedStatus\(s\)\) publicationSignal = \"published\"/);
   assert.doesNotMatch(workspace, /statusVal = s;/);
-  assert.match(workspace, /Conferir página/);
+  // A conferência saiu da coluna e virou botão do card DECISÃO (spec §67);
+  // o handler em lote continua onde estava.
+  assert.match(workspace, /onCheckByLink=\{\(\) => openManualSiteCheck\(item\)\}/);
   assert.match(workspace, /handleCheckWithSite = async \(singleKeywordId\?\: string\)/);
 });

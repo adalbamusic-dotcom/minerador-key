@@ -939,3 +939,54 @@ histórico, diagnóstico, relatório detalhado e evidências adicionais. Nenhuma
 função necessária ao fluxo SERP normal pode exigir a navegação para essa rota;
 isso não altera o contrato do Planejador, Arquiteto, ArticleDNA, schema,
 migrations, RLS ou providers.
+
+## A listagem do workflow não baixa corridas históricas — 2026-09-21
+
+### O QUE FOI MEDIDO
+
+Bytes de fio (`length(::text)`, que é o que o PostgREST serializa):
+
+| tabela / estágio | linhas | peso |
+| --- | --- | --- |
+| `editorial_workflow_items`, `radar` | 3 | **10 MB (96,1%)** |
+| `editorial_workflow_items`, `architect` | 47 | 427 kB |
+
+Dentro do payload radar, `analysisVersions` é **98,7%**. As 62 versões das 3
+linhas somam 10,45 MB, dos quais **8,99 MB em quatro campos**:
+`extractions`, `competitiveReport`, `youtubeSearch`, `amazonSearch`.
+
+### POR QUE A PODA QUE JÁ EXISTIA NÃO RESOLVIA
+
+`WorkflowRepository.list` já poda (`pruneRadarAnalysisHistory`) e compacta
+(`compactRadarResearchForRead`) — mas **depois do download**. Esse código roda
+no servidor Next: quando a poda começa, os 10 MB já atravessaram a saída da
+Supabase. A economia era de banda do navegador, não de egresso.
+
+O corte precisa acontecer na consulta, e é o que a view
+`editorial_workflow_items_listagem` faz.
+
+### CONSERVADORA DE PROPÓSITO
+
+A regra em TS preserva a versão **corrente** e a **última aprovada**. A view
+preserva a corrente e **todas** as aprovadas — um superconjunto. Versão sem
+`versionNumber` legível também é preservada: sem saber ordenar, não se decide
+o que é histórico.
+
+A propriedade que sustenta o desenho: **a view nunca tira o que a poda em TS
+preservaria.** Se as duas regras divergirem, o resultado lido continua
+correto — só deixa de economizar. O inverso seria perda de dado na leitura.
+
+Por isso a poda em TS **continua rodando** depois da view. Não é redundância:
+é ela quem decide, e a view é só otimização.
+
+### O QUE NÃO MUDA
+
+Os campos viram `[]` e `null`, não somem — o schema aceita esses valores, e
+uma versão sem a chave falharia a validação em vez de carregar leve. Nada é
+apagado do banco: o readback por artigo (`byArticle`) continua lendo a tabela
+completa, e é dele que nasce toda escrita.
+
+Um teste amarra as duas pontas: ele roda `pruneRadarAnalysisHistory` sobre uma
+fixture, descobre quais campos ela esvazia, e exige que a view esvazie
+**exatamente** esse conjunto. Um quinto campo pesado adicionado ao TS acusa a
+view desatualizada em vez de deixar o egresso voltar em silêncio.

@@ -394,7 +394,7 @@ export function mergeLogicalKeywordSemantic(
   existing: Record<string, unknown> | null | undefined,
   logical: KeywordSemanticRecord,
   options: { forceLogical?: boolean } = {},
-): KeywordSemanticRecord {
+): Record<string, unknown> {
   const current = { ...(existing || {}) };
   const forceLogical = options.forceLogical === true;
   const previouslyOwned = new Set(
@@ -431,7 +431,26 @@ export function mergeLogicalKeywordSemantic(
   }
   current.dna_campos_logicos = [...owned].sort().join(",");
 
-  return Object.fromEntries(Object.entries(current).map(([key, value]) => [key, typeof value === "string" ? value : JSON.stringify(value)]));
+  /*
+   * O MOTOR SÓ SERIALIZA O QUE É DELE.
+   *
+   * Antes esta linha aplicava `JSON.stringify` a **toda** chave não-string do
+   * `analise_semantica`. Como o jsonb guarda muito mais do que os campos
+   * lógicos, um único "Processar lógica" transformava `site_origin`,
+   * `site_origins`, `aprovacao`, `human_review`, `evidencia_serp`, as
+   * medições e os históricos em string JSON. Nenhum leitor reconhece isso:
+   * `readSiteOrigin`, `readApprovalRecord` e companhia checam
+   * `typeof === "object"` e devolvem `null`. Na tela, a publicação declarada
+   * simplesmente sumia — com o dado intacto no banco, ilegível.
+   *
+   * Os campos do motor são texto por natureza (`KeywordSemanticRecord` é
+   * `Record<string, string>`); o resto é de outros donos e sai como entrou.
+   */
+  const logicalKeys = new Set<string>(LOGICAL_FIELD_KEYS);
+  return Object.fromEntries(Object.entries(current).map(([key, value]) => [
+    key,
+    logicalKeys.has(key) && typeof value !== "string" ? JSON.stringify(value) : value,
+  ]));
 }
 
 export function semanticRecordsEqual(left: Record<string, unknown> | null | undefined, right: Record<string, unknown>) {

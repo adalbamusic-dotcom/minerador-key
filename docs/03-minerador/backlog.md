@@ -1,5 +1,114 @@
 # Backlog — Minerador
 
+## Integridade do jsonb — 2026-09-21
+
+- [x] A Lógica parou de serializar chave que não é do motor. Spec §70.
+- [x] **Reparo aplicado em 2026-09-21:** 104 linhas, readback 0, conferido
+  pelos leitores reais. A publicação declarada e a proteção contra exclusão
+  voltaram; 92 de 102 overviews com KD legível (os 10 sem KD são ausência
+  real do provedor).
+- [ ] Deduplicação: havendo repetidas, permanece a publicada e sai a não
+  publicada.
+- [x] A rota de exclusão recusa keyword publicada (409) antes de escrever.
+- [x] `readSiteOrigin` tolera o jsonb serializado: a trava não desliga por
+  mudança de formato.
+- [ ] **Aplicar a migration** `20260921020000_publicada_nunca_e_apagada.sql`
+  (leitura resiliente + assert no banco) — pendente de autorização.
+- [ ] Ligar o assert dentro de `lifecycle_delete_minerador_keywords`: exige
+  ler a definição viva do banco antes de substituir a função.
+- [ ] Trava explícita do slug de keyword publicada.
+
+## Papel de cor do slug — 2026-09-20
+
+- [x] `identity-slug` (`#12A1E0`, alias de `context-accent`) para slug e
+  canonical; `identity-published` fica com link e URL. Spec §69 e
+  `sistema-visual.md` §5.0.1.
+- [x] Card DECISÃO separa endereço e canônico em duas linhas.
+- [x] Cabeçalho do Perfil só fala quando há publicação; sem ela, nada de
+  selos anunciando ausência.
+- [ ] Homologação visual das duas cores lado a lado.
+
+## Resolvedor único do Vínculo — 2026-09-20
+
+- [x] `lib/minerador/keyword-vinculo.ts`: a Revisão Humana decide, coluna e
+  cabeçalho refletem. Teste recusa derivação por fora.
+- [x] Cinco props mortas removidas dos dois componentes.
+
+## Declaração no link e cores — 2026-09-20
+
+- [x] Colar o link confere e declara a publicação num ato só; o lote segue
+  sem declarar. Spec §68.
+- [x] `identity-published` restrita a slug/link/canonical; badges passam a
+  `context-accent`; selo `PUBLICADO` em `danger`; linha volta à cor normal.
+- [x] Default do posto segue o fato: publicada nasce `Travado ao slug`. O
+  posto saiu do gate da revisão — default é resposta.
+- [x] Cabeçalho do perfil: `Publicada` em `danger` e o par do Vínculo ao lado.
+- [ ] Homologação manual: colar link → a linha deve ficar `Publicado` sem
+  abrir o card, e o perfil deve mostrar os três selos.
+
+## Duas declarações do Vínculo — 2026-09-20
+
+- [x] Tipo de página (`article` · `silo` · `landing_page` · `service_page`),
+  padrão Artigo, nunca obrigatório. Spec §67.
+- [x] Publicada, o tipo é **declaração** (`Silo · declarado`); nova, é
+  potencial. Muda o rótulo, não o direito: a seleção é livre sempre.
+- [x] Posto com dois rótulos — `Livre` e `Travado ao slug`; `Posto a declarar`
+  saiu da coluna.
+- [x] Posto e tipo declarados na Revisão Humana; conferência e confirmação no
+  card DECISÃO; endereço inteiro ao lado da palavra-chave.
+- [ ] Homologação manual dos quatro pontos (roteiro no estado-atual).
+- [ ] Levar `keyword_page_type` ao pacote aprovado e ao handoff: é o dado que
+  diz ao Arquiteto se a keyword vira SiloPage ou ArticleDNA. Hoje fica só na
+  linha.
+
+## Três eixos e posto de principal — 2026-09-20
+
+- [x] Vínculo é o posto na publicação, não o eixo da publicação. Colisão de
+  "Livre" desfeita. Spec §66.
+- [x] Coluna Status virou leitura; `Publicado` é marcador empilhado.
+- [x] Posto de principal saiu da DECISÃO e virou decisão pendente da Revisão
+  Humana, junto do KGR.
+- [ ] Homologação manual dos três pontos (roteiro no estado-atual).
+- [ ] `setPrimaryKeywordPolicy` ainda exige publicação confirmada para gravar;
+  conferir se a mensagem de recusa aparece quando o humano tenta declarar o
+  posto antes de confirmar a publicação.
+
+## Dois eixos de status — 2026-09-20
+
+- [x] Uma lista de status editorial nas três telas; `publicado` fora dos
+  seletores (zero linhas no banco). Spec §65.
+- [x] Filtros de Status e de Vínculo passam a ler o estado derivado, o mesmo
+  que a coluna mostra.
+- [x] Confirmar publicação congela `site_origin.canonicalUrl`.
+- [x] A coluna Vínculo mostra o papel (Silo/Artigo) e o link rotulado como
+  `Canônico` ou `Página`.
+- [x] Os sete seletores de status editorial passam a renderizar uma lista só
+  (`MINERADOR_EDITORIAL_STATUS_OPTIONS`); teste recusa `<option>` à mão.
+
+## Conferir site e papel Silo/Artigo — 2026-09-20
+
+- [x] Conferência lê o catálogo remoto e casa por H1/slug/título; URL manual
+  continua como fallback. Spec §64.
+- [x] `site_origin.siteRole`/`siloPath` derivados do caminho (Silo pelos filhos
+  no catálogo, artigo pelo ancestral). Prévia mostra o papel.
+- [x] Candidata declara `mineradorKeywordId`: com Silo de destino selecionado,
+  a conferência atualizava a linha errada — criava duplicada em vez de achar a
+  keyword sem lista. Medido no banco real e corrigido em 2026-09-20.
+- [x] "Conferir por link" como ação explícita na linha, para Silo e artigo: o
+  formulário manual era escondido por uma prévia aberta (`!siteSyncPlan`).
+- [x] Conferir por link grava a evidência na hora: a prévia no topo da tela
+  escondia o passo "Salvar conferência" e a linha seguia `Livre`.
+- [ ] Homologação manual nas duas keywords do Care Glow (roteiro no estado-atual).
+- [ ] **Coleta do sitemap parada desde 2026-09-03.** A última execução falhou
+  em `sitemap-que-nao-existe.xml` (URL de teste) e o cadastro ficou
+  `status = error`. O catálogo tem 41 páginas de 17 dias atrás — por isso
+  `/rotina-skincare-facial` não casa. Rodar a sincronização na aba Site da
+  Marca resolve; até lá, o link manual cobre.
+- [ ] Coluna Vínculo da tabela ainda não mostra o papel; `readPublicationLink`
+  já expõe `siteRole` — falta só o render.
+- [ ] Processo melhor de keywords publicadas na aba Site da Marca (declarado
+  pelo usuário como etapa posterior).
+
 ## KeywordDNA fechado — 2026-09-19
 
 - [x] Contrato tipado `lib/minerador/keyword-dna.ts`: um valor por eixo com
@@ -1613,3 +1722,62 @@ Pendências operacionais desta frente:
 
 - [ ] Validação manual na UI autenticada: aprovar keyword com SERP mista, sem IA e sem revisão; reprocessar IA e SERP e confirmar que seleção, linha expandida, aprovação e revisão sobrevivem.
 - [ ] Revisar se a Revisão Humana deve ganhar novas decisões humanas reais além da aplicabilidade do KGR — hoje o painel é majoritariamente leitura.
+
+## Minerador — Aplicar a poda da listagem e resolver as 29 aprovações — 2026-09-21
+
+1. ~~Aplicar `20260921030000`~~ — **FEITA**. Aplicada e registrada; corte
+   medido de 21,3% (1 034 kB → 813 kB), zero séries vazadas.
+2. **Re-aprovação das 29** divergentes. Não é re-assinatura: o conteúdo
+   mudou de verdade e o humano precisa reaprovar. Ver estado-atual 2026-09-21.
+3. `npm run minerador:backfill-evidencia-serp -- --apply` — hoje projetaria
+   `evidencia_serp` em 103 linhas e re-assinaria 0 aprovações.
+4. **Egresso do workflow** (fora do Minerador, maior item já diagnosticado):
+   estágio `radar` de `editorial_workflow_items` são 2,5 MB em 3 linhas;
+   remover `analysisVersions` da leitura corta 94%.
+5. **Redundância de armazenamento**, que infla toda leitura: `targeting`
+   repetido em três blocos de medição (60 kB) e `evidencias_logicas`
+   duplicado dentro de `logical_output_contract.fields.evidence`.
+
+## Minerador — Aplicar a recusa de exclusão no banco — 2026-09-21
+
+Corrige a entrada anterior: a migration `20260921020000` **está aplicada** (as
+funções existem no banco e `lifecycle_keyword_is_published` já usa o leitor
+tolerante). O que faltava era ninguém chamar a trava.
+
+**CONCLUÍDO em 2026-09-21.** A migration `20260921040000` foi aplicada, as
+duas migrations foram registradas no histórico, e o readback no banco mais um
+smoke contra dado real confirmaram as três garantias (publicada recusada,
+livre passa, lote misto recusado inteiro). Ver estado-atual 2026-09-21.
+
+Fica em aberto, na mesma frente: a **trava explícita do slug** da keyword
+publicada. Hoje o canônico é congelado na confirmação, mas nada no banco
+impede um UPDATE de reescrevê-lo.
+
+## Minerador — Aplicar a trava de identidade da publicada — 2026-09-21
+
+1. ~~Aplicar `20260921050000`~~ — **FEITA**, aplicada e registrada.
+2. ~~Smoke contra dado real~~ — **FEITO**: `canonicalUrl` congelado, tentativa
+   registrada, e slug de keyword livre continua editável. Ver estado-atual
+   2026-09-21 — inclusive o limite "congela o que existe".
+3. **Código morto em `protect_published_keyword`**: os ramos de `slug` e
+   `canonical` referem colunas que não existem em `minerador_keywords`.
+   Inofensivos (a guarda `old_json ? 'slug'` nunca é verdadeira), mas induzem
+   a leitura errada de que o slug já estava protegido. Limpar quando houver
+   outra razão para tocar naquela função — mexer nela só por isso arrisca as
+   proteções que ela de fato exerce.
+
+## Minerador — De onde vem o slug de uma keyword já publicada — 2026-09-21
+
+A trava de identidade (`20260921050000`) está aplicada e verificada, mas
+congela **o que existe**: `CONTINUE WHEN antes IS NULL`. Numa publicada sem
+`slug_sugerido` — o caso da única publicada de hoje — a primeira escrita
+passa e só então fica travada.
+
+O endereço está protegido (o `canonicalUrl` existe e congela). O que fica em
+aberto é que o Arquiteto lê `slug_sugerido || "published-identity"` como slug
+da identidade publicada (`lib/arquiteto/adapters.ts:240`).
+
+Fechar isso é decisão de desenho, não de trava: numa keyword já publicada o
+slug deveria ser **derivado do canônico congelado** em vez de escrito. Enquanto
+não se decide, recusar a introdução do campo poderia bloquear uma derivação
+legítima.

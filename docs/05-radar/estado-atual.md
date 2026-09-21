@@ -1575,3 +1575,141 @@ segue falhando por dívida que cresceu em 7 arquivos de outras sessões (o
 baseline não travou aumentos). Validação visual
 em DOM real é do USER. Relatório:
 [relatório datado](../00-produto/auditorias/relatorio-radar-visual-contract-2026-09-19.md).
+
+## Listagem do workflow sem corridas históricas — 2026-09-21
+
+`20260921060000_listagem_workflow_sem_corridas.sql` **aplicada e verificada**.
+
+| medida | valor |
+| --- | --- |
+| payload radar na tabela | 10 MB (3 linhas) |
+| pela view de listagem | 3400 kB |
+| corte | **67,9%** |
+| versões correntes intactas | 3 de 3 |
+| versões perdidas | nenhuma (contagens iguais) |
+
+A poda e a compactação em TS continuam rodando depois da view: a view é
+otimização, elas é que decidem. O readback por artigo (`byArticle`) segue
+lendo a tabela completa — é dele que nasce toda escrita, e é por isso que
+compactar a listagem não compromete a gravação.
+
+### CORREÇÃO DE ATRIBUIÇÃO DO EGRESSO
+
+Esta era a maior fonte, não o Minerador. 10 MB por carregamento contra 1 MB
+da listagem de keywords: ~570 aberturas para os 5,7 GB, contra ~5 700.
+
+A conta anterior dizia 2,5 MB para este estágio porque vinha de
+`pg_column_size`, que mede o disco COMPRIMIDO. Em bytes de fio são 10 MB.
+
+## Compactação da investigação congelada — 2026-09-21
+
+`20260921070000_listagem_workflow_compacta_congelada.sql` **aplicada e
+verificada**. Acumulado das duas migrations:
+
+| medida | valor |
+| --- | --- |
+| payload radar na tabela | 10 MB |
+| pela view, só com a poda | 3400 kB (67,9%) |
+| pela view, com a compactação | **2339 kB (77,9%)** |
+
+### A TRAVA DE ESCRITA, CONFERIDA NO DADO REAL
+
+`researchTransport: "COMPACT"` não é rótulo: `analysis-contracts.ts:869`
+recusa construir versão nova a partir de base marcada
+(`RadarCompactBaseError`). É o que impede uma escrita nascer de leitura
+incompleta. Por isso a conferência foi pelos dois erros possíveis:
+
+| conferência | resultado |
+| --- | --- |
+| versão corrente preservada | 3 de 3 |
+| perdeu conteúdo **e** marcou | 3 |
+| marcou **sem** perder — recusaria escrita legítima | **0** |
+| perdeu **sem** marcar — deixaria escrita nascer de base lossy | **0** |
+| `competitiveReport` intacto (é da poda, não da compactação) | 3 de 3 |
+
+O segundo erro é o grave: esvaziar sem marcar seria pior do que não
+economizar, porque a base ficaria incompleta e a trava não dispararia.
+
+## Corridas brutas em tabela própria — etapa 2 — 2026-09-21
+
+Tabela `radar_analysis_runs` aplicada. O código já opera com ela; falta mover
+os dados.
+
+### A FRONTEIRA
+
+A troca acontece no repositório, não nos consumidores. Os ~20 módulos que
+leem `amazonSearch` e companhia recebem a versão inteira, como sempre.
+
+| método | comportamento |
+| --- | --- |
+| `find`, `findByArticle` | **reidratam** todas as versões |
+| `findByArticleRaw` (novo, privado) | lê a linha como está gravada |
+| `appendRadarAnalysis` | lê cru e separa a versão nova |
+| `transition` | **desidrata** antes de gravar |
+
+`transition` desidratar é o que impede a arrumação de se desfazer sozinha: o
+payload que chega pode ter vindo reidratado de `find`, e gravá-lo como está
+devolveria as corridas para dentro da linha, uma transição por vez.
+
+A reidratação é de TODAS as versões, de propósito conservador — o custo dessa
+rota continua igual ao de hoje. O ganho desta etapa está na escrita.
+
+### O GUARDA DE PERDA DE DADO FOI ATUALIZADO, NÃO AFROUXADO
+
+`radar-live-ux-1-payload.test.mts` exigia que a escrita lesse por
+`findByArticle`, porque ler PODADO e regravar apagaria `extractions` das
+versões antigas no banco. O caminho cru agora tem nome próprio
+(`findByArticleRaw`) e o teste passou a exigir esse — mais a negativa de que
+a escrita **não** usa a leitura que reidrata, que é o erro simétrico.
+
+O invariante é o mesmo, e mais explícito: nem podado, nem reidratado —
+verbatim. Regravar o que se leu verbatim é lossless por construção.
+
+### FALTAM DOIS PASSOS, NESTA ORDEM
+
+```
+npm run radar:mover-corridas -- --apply      copia (dado nos dois lugares)
+npm run radar:mover-corridas -- --esvaziar   esvazia o payload
+```
+
+Entre um e outro o dado fica duplicado e a reidratação vira no-op: é
+reversível por construção. O readback do primeiro passo não confere se
+gravou — confere se a FUSÃO devolve a versão idêntica, campo a campo. E o
+segundo só esvazia versão que já tem linha na tabela.
+
+Dry-run de hoje: 3 linhas, 62 versões, **31 com corrida no payload**.
+
+## Corridas movidas — resultado — 2026-09-21
+
+Os dois passos rodaram. 31 corridas copiadas e conferidas pela fusão, 3
+linhas esvaziadas, sem falhas.
+
+| linha | antes | depois |
+| --- | --- | --- |
+| …0a32e64c | 1171 kB | 104 kB |
+| …010c6b13 | 1279 kB | 579 kB |
+| …e42cd892 | 7620 kB | 840 kB |
+
+### CONSERVAÇÃO E INTEGRIDADE, LIDAS NO BANCO
+
+| conferência | resultado |
+| --- | --- |
+| corridas guardadas | 31 · 8989 kB |
+| payload das linhas | 1597 kB (era 10 MB) |
+| soma | ≈ os 10 MB originais — nada se perdeu |
+| versões ainda com corrida embutida | **0** |
+| corridas sem versão correspondente | **0** |
+| corridas vazias | **0** |
+| corridas órfãs (sem item) | **0** |
+
+### O QUE ISSO MUDA NA PRÁTICA
+
+**Listagem:** 10 MB → 1597 kB (84%). Melhor que os 2339 kB que as views
+alcançavam, e agora a view devolve o mesmo peso da tabela — ela não tem mais
+o que podar nestas linhas. As duas continuam valendo: se uma corrida voltar a
+nascer embutida, elas seguem cortando.
+
+**Escrita, que era o alvo desta etapa:** `appendRadarAnalysis` lia a linha
+inteira e regravava tudo. No artigo maior isso eram 7620 kB de descida mais
+7620 kB de subida por análise nova. Agora são 840 kB de cada lado — cerca de
+13,5 MB a menos por versão acrescentada, e sem crescer com o histórico.

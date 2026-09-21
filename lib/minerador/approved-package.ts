@@ -1,4 +1,6 @@
 import { canonicalJson, contentHash } from "../arquiteto/versioning.ts";
+import { withoutMeasurementSeries } from "./listing-payload.ts";
+import { PUBLICATION_IDENTITY_LOCK_HISTORY_KEY } from "./publication-link.ts";
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 import { hasCompleteLogicalOutputContract } from "./logical-processor.ts";
 import { readKgrApplicability } from "./kgr-applicability.ts";
@@ -186,7 +188,7 @@ function legacySignatureContent(input: ApprovedPackageInput): Record<string, unk
  * evidência forte exige nova aprovação), e uma coleta que não conclui nada
  * não gera ruído.
  */
-function signatureContent(input: ApprovedPackageInput): Record<string, unknown> {
+function v2SignatureContent(input: ApprovedPackageInput): Record<string, unknown> {
   const content = legacySignatureContent(input);
   const semantic = { ...(content.analiseSemantica as Record<string, unknown>) };
   delete semantic[SERP_EVIDENCE_RECORD_KEY];
@@ -198,7 +200,36 @@ function signatureContent(input: ApprovedPackageInput): Record<string, unknown> 
   };
 }
 
-export const APPROVAL_SIGNATURE_SCHEME = "fnv1a-v2" as const;
+/**
+ * Esquema v3 (2026-09-21): medição não assina significado.
+ *
+ * O v2 cobria o `analise_semantica` inteiro, e com ele as duas séries mensais
+ * de volume e os dois históricos de medição — 209 kB por carregamento que a
+ * tabela nunca lê. Enquanto estivessem na assinatura, a listagem não podia
+ * deixar de baixá-los: um leitor podado assinaria diferente e as aprovadas
+ * apareceriam divergentes.
+ *
+ * Tirá-los não afrouxa nada. `volumeSearch`, `resultsAllintitle` e
+ * `kgrScore` são campos próprios do conteúdo assinado: uma medição que mude o
+ * que importa continua rebaixando a aprovação. O que deixa de acontecer é uma
+ * remedição de rotina invalidar a aprovação do SIGNIFICADO da keyword só
+ * porque chegou mais um mês na série.
+ *
+ * v1 e v2 seguem verificáveis: cada registro é conferido no esquema que ele
+ * mesmo declara, e a migração só re-assina o que ainda batia.
+ */
+function signatureContent(input: ApprovedPackageInput): Record<string, unknown> {
+  const content = v2SignatureContent(input);
+  const semantic = withoutMeasurementSeries(content.analiseSemantica as Record<string, unknown>);
+  // Tentativa de sobrescrita BLOQUEADA nao mudou nada na keyword. Se entrasse
+  // aqui, uma rotina externa insistindo em mexer no endereco derrubaria a
+  // aprovacao humana sem que nada tivesse mudado de fato.
+  delete semantic[PUBLICATION_IDENTITY_LOCK_HISTORY_KEY];
+  return { ...content, analiseSemantica: semantic };
+}
+
+export const APPROVAL_SIGNATURE_SCHEME = "fnv1a-v3" as const;
+const V2_SIGNATURE_SCHEME = "fnv1a-v2";
 const LEGACY_SIGNATURE_SCHEME = "fnv1a";
 
 export async function approvedPackageHash(input: ApprovedPackageInput): Promise<string> {
@@ -217,6 +248,7 @@ function fnv1a(serialized: string): string {
 /** Assinatura no esquema que o registro declara — v1 continua verificável. */
 function signatureForScheme(input: ApprovedPackageInput, scheme: string): string {
   if (scheme === LEGACY_SIGNATURE_SCHEME) return `${LEGACY_SIGNATURE_SCHEME}:${fnv1a(canonicalJson(legacySignatureContent(input)))}`;
+  if (scheme === V2_SIGNATURE_SCHEME) return `${V2_SIGNATURE_SCHEME}:${fnv1a(canonicalJson(v2SignatureContent(input)))}`;
   return approvedPackageSignature(input);
 }
 
@@ -238,11 +270,12 @@ function recordMatches(record: ApprovalRecord, input: ApprovedPackageInput): boo
 }
 
 /**
- * Migra um registro v1 para v2 sem mudar versão, autor ou instante.
+ * Migra um registro antigo (v1 ou v2) para o esquema atual sem mudar versão,
+ * autor ou instante.
  *
- * Só re-assina o que ainda bate no esquema antigo: um registro v1 que já
- * diverge é uma keyword em revisão de verdade, e re-assiná-la esconderia isso.
- * Devolve `null` quando não há o que migrar (sem registro, ou já em v2).
+ * Só re-assina o que ainda bate no esquema que o registro declara: um
+ * registro que já diverge é uma keyword em revisão de verdade, e re-assiná-la
+ * esconderia isso. Devolve `null` quando não há o que migrar.
  */
 export async function resignApprovalRecord(input: ApprovedPackageInput): Promise<{ semantic: Semantic; previousSignature: string } | { semantic: null; reason: "no_record" | "already_current" | "diverged" }> {
   const record = readApprovalRecord(input.semantic);

@@ -23,7 +23,10 @@ import { processorKgrStateLabel, processorMetricStateLabel } from "@/lib/minerad
 import { dnaMaturityLabel } from "@/lib/minerador/dna-maturity";
 import { volumeEligibilityLabel, type VolumeEligibilityStatus } from "@/lib/minerador/volume-eligibility";
 import { readSiteOrigin } from "@/lib/minerador/publication-link";
-import { isLegacyPublishedStatus } from "@/lib/minerador/editorial-status";
+import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS } from "@/lib/minerador/editorial-status";
+import { primaryPostLabel } from "@/lib/minerador/primary-keyword-policy";
+import { KEYWORD_PAGE_TYPES, keywordPageTypeStanding } from "@/lib/minerador/keyword-page-type";
+import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { mineradorProcessPresentation, type MineradorProcessAttempt, type MineradorProcessName, type MineradorProcessState } from "@/lib/minerador/process-state";
 import { createSemanticConsolidationDraft, resolveSemanticAxis, semanticConsolidationBySerp, type SemanticAxisResolution, type SemanticConsolidationAxis, type SemanticConsolidationAxisDraft, type SemanticConsolidationDraft, type SemanticSerpStrength } from "@/lib/minerador/semantic-consolidation-draft";
@@ -409,6 +412,8 @@ function SemanticConsolidationPanel({ draft, qualification = null, serpCollectin
 function HumanReviewPanel({
   semantic,
   intent,
+  status,
+  keywordId = "keyword",
   volume,
   allintitle,
   cpc,
@@ -436,6 +441,8 @@ function HumanReviewPanel({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   reviewDraftActive?: boolean;
+  status?: string | null;
+  keywordId?: string;
 }) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [editingReview, setEditingReview] = useState(false);
@@ -452,7 +459,9 @@ function HumanReviewPanel({
   const kgrText = typeof kgrScore === "number" && Number.isFinite(kgrScore)
     ? kgrScore.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 3 })
     : "Não calculável";
-  const completion = canCompleteHumanReview(semantic, { intent });
+  const completion = canCompleteHumanReview(semantic, { intent, status });
+  // Aqui se decide. Coluna e cabeçalho leem exatamente este mesmo resultado.
+  const vinculo = resolveKeywordVinculo({ status, semantic });
   // Decisão humana disponível é decisão concreta esperando escolha — nunca a
   // ausência de clique. Sem nada a decidir, o painel se declara de leitura.
   const pendingHumanDecisions = completion.pendingFields.length + (completion.pendingKgrDecision ? 1 : 0);
@@ -497,6 +506,64 @@ function HumanReviewPanel({
         <option value="applicable">Aplicável</option>
         <option value="not_applicable">Não aplicável</option>
       </select>
+    </section>
+
+    <section aria-label="Vínculo da keyword" className="mt-2 min-w-0 rounded-md border border-divider bg-surface px-2.5 py-2">
+      <p className="text-sm font-semibold text-foreground">Vínculo</p>
+      <p className="text-sm text-text-muted">{vinculo.publicationDeclared
+        ? "Esta keyword pertence a uma publicação. Diga se ela está travada ao slug e o que a página é."
+        : "Nenhuma publicação declarada: a keyword está livre e o tipo é potencial. Nada aqui é obrigatório, e nada trava a escolha."}</p>
+
+      <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <label className="text-sm font-medium text-text-muted" htmlFor={`review-primary-post-${keywordId}`}>Posto de principal</label>
+        <select
+          id={`review-primary-post-${keywordId}`}
+          aria-label="Posto de principal na revisão humana"
+          value={vinculo.postSelectValue}
+          disabled={statusUpdating || reviewLocked || !onAction}
+          onChange={event => { const value = event.target.value; if (value === "locked" || value === "reviewable") void onAction?.({ type: "primary_policy", policy: value }); }}
+          className="h-8 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60"
+          title="Livre: a keyword pode ser primária ou secundária de qualquer página, e pode perder a vaga. Travado ao slug: ela é a primária desta URL e não se solta dela."
+        >
+          <option value="reviewable">{primaryPostLabel("free")}</option>
+          <option value="locked">{primaryPostLabel("locked")}</option>
+        </select>
+      </div>
+
+      <div className="mt-1.5 flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <label className="text-sm font-medium text-text-muted" htmlFor={`review-page-type-${keywordId}`}>
+          {vinculo.publicationDeclared ? "A página publicada é" : "Potencial de página"}
+        </label>
+        <select
+          id={`review-page-type-${keywordId}`}
+          aria-label="Tipo de página na revisão humana"
+          value={vinculo.pageType.type}
+          disabled={statusUpdating || reviewLocked || !onAction}
+          onChange={event => void onAction?.({ type: "page_type", pageType: event.target.value as typeof KEYWORD_PAGE_TYPES[number] })}
+          className="h-8 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60"
+          title="Enquanto a keyword é nova, o tipo é potencial; com publicação declarada, passa a ser declaração. A escolha continua sua nos dois casos."
+        >
+          {/* O peso vem da publicação, não da opção: escolher Silo numa
+              keyword nova é "Silo · potencial"; na publicada é "Silo ·
+              declarado". Mostrar só "Silo" escondia metade da frase. */}
+          {KEYWORD_PAGE_TYPES.map(value => (
+            <option key={value} value={value}>
+              {keywordPageTypeStanding(value, { declared: vinculo.publicationDeclared })}
+            </option>
+          ))}
+        </select>
+      </div>
+      <p className="mt-1 text-sm text-text-muted">
+        <span className="font-semibold text-foreground">{vinculo.postLabel}</span>
+        {" · "}
+        <span className="font-semibold text-foreground">{vinculo.pageTypeLabel}</span>
+        {" — "}
+        {vinculo.pageType.source === "human"
+          ? "escolhido por alguém desta marca."
+          : vinculo.pageType.source === "site"
+            ? "veio do papel observado na página publicada."
+            : "padrão do Minerador. Marque Silo se esta keyword deve abrir um universo novo."}
+      </p>
     </section>
 
     <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -621,7 +688,9 @@ export function KeywordDnaPanel({
   canonicalUrl,
   primaryPolicy,
   primaryPolicyLabel,
-  onPrimaryPolicyChange,
+  publication,
+  onCheckByLink,
+  onPublicationAction,
   semanticConsolidationDraft,
   semanticQualification,
   serpCollecting = false,
@@ -642,7 +711,20 @@ export function KeywordDnaPanel({
   canonicalUrl?: string | null;
   primaryPolicy?: string | null;
   primaryPolicyLabel?: string;
-  onPrimaryPolicyChange?: (policy: "locked" | "reviewable") => void | Promise<void>;
+  /**
+   * Conferência da página: onde ela está, se foi lida e o que falta declarar.
+   * Saiu da coluna Vínculo — lá ficam as declarações, aqui os dados.
+   */
+  publication?: {
+    label: string;
+    url: string | null;
+    canonicalUrl: string | null;
+    checkedAt: string | null;
+    canConfirm: boolean;
+    canUnlink: boolean;
+  };
+  onCheckByLink?: () => void;
+  onPublicationAction?: (action: "confirm" | "unlink") => void | Promise<void>;
   semanticConsolidationDraft?: SemanticConsolidationDraft;
   semanticQualification?: KeywordSemanticQualification | null;
   serpCollecting?: boolean;
@@ -797,6 +879,10 @@ export function KeywordDnaPanel({
     { label: "Estado no Processador", value: processorMetricStateLabel(processorRevalidation.volume.state, processorRevalidation.volume.value !== null), wide: true },
   ];
   const dnaMaturity = canonicalSnapshot.maturity;
+  // O cabeçalho REFLETE o que a Revisão Humana decidiu — mesmo resolvedor,
+  // nenhuma derivação própria. Foi assim que a coluna passou a discordar do
+  // painel: cada tela calculava o seu.
+  const headerVinculo = resolveKeywordVinculo({ status: keyword.status, semantic });
   const decisionSummary = buildKeywordDecisionSummary({
     volume: processorRevalidation.volume.value,
     cpc: cpcDecisionValue,
@@ -846,7 +932,18 @@ export function KeywordDnaPanel({
         />
         <h2 className="mt-0.5 min-w-0 break-words text-xl font-semibold tracking-tight text-keyword [overflow-wrap:anywhere]">{keyword.keyword}</h2>
         </div>
-        <ProfilePill label={published ? "Publicada" : "Livre"} tone={published ? "success" : "neutral"} />
+        {/* Só há o que anunciar quando existe publicação: aí o endereço, o
+            posto e o tipo são fatos. Antes disso não há URL nem vaga a
+            perder, e o par do Vínculo continua visível na coluna. */}
+        {published && (
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {/* Publicada é ALERTA, não troféu: dali em diante exclusão e
+                edição estrutural ficam bloqueadas (sistema-visual §5.1). */}
+            <ProfilePill label="Publicada" tone="danger" />
+            <ProfilePill label={headerVinculo.postLabel} tone={headerVinculo.postLockedToSlug ? "accent" : "neutral"} />
+            <ProfilePill label={headerVinculo.pageTypeLabel} tone={headerVinculo.pageType.declared ? "accent" : "neutral"} />
+          </div>
+        )}
       </div>
       <ProfileStepStrip steps={profileSteps} />
     </header>
@@ -905,6 +1002,8 @@ export function KeywordDnaPanel({
           open={humanReviewOpen}
           onOpenChange={onHumanReviewOpenChange}
           reviewDraftActive={reviewDraftActive}
+          status={keyword.status}
+          keywordId={keyword.id}
         />
       </div>
 
@@ -918,18 +1017,63 @@ export function KeywordDnaPanel({
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <label className="text-sm font-semibold text-text-muted" htmlFor={`status-${keyword.id}`}>Status final</label>
               {onWorkflowStatusChange && !(legacyPublishedStatus && !allowPublishedWorkflowStatus) ? <select id={`status-${keyword.id}`} aria-label={`Status da keyword ${keyword.keyword}`} value={editorialStatus.status || "bruto"} onChange={event => void onWorkflowStatusChange(event.target.value)} disabled={statusUpdating || legacyPublishedStatus} className="h-8 rounded-md border border-divider bg-surface px-2 text-sm font-semibold text-foreground outline-none hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60">
-                <option value="bruto">Bruto</option><option value="aprovado">Aprovado</option><option value="rejeitado">Rejeitado</option>{allowPublishedWorkflowStatus && <option value="publicado">Publicado</option>}
+                {/* Mesma lista da coluna Status da tabela: o status editorial
+                    é um eixo só. "Publicado" saiu daqui — publicação é o outro
+                    eixo, declarado no Vínculo, e nenhuma linha do banco usava
+                    esse valor. */}
+                {MINERADOR_EDITORIAL_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select> : <span className="text-sm font-semibold text-foreground">{finalStatusLabel}</span>}
             </div>
           </div>
           <DecisionSummary summary={decisionSummary} kgrTone={kgrTechnicalTone(kgrScoreValue, kgrVolumeNumber)} />
-          {published && onPrimaryPolicyChange && <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2 border-t border-divider pt-1.5">
-            <label className="text-sm font-semibold text-text-muted" htmlFor={`primary-policy-${keyword.id}`}>Política da principal</label>
-            <select id={`primary-policy-${keyword.id}`} value={primaryPolicy || "locked"} disabled={statusUpdating} onChange={event => void onPrimaryPolicyChange(event.target.value as "locked" | "reviewable")} className="h-8 rounded-md border border-divider bg-surface px-2 text-sm font-semibold text-foreground outline-none focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:opacity-60">
-              <option value="locked">Travada</option><option value="reviewable">Revisável</option>
-            </select>
-            <span className="text-sm text-text-muted">{primaryPolicyLabel || "Principal travada"}</span>
-          </div>}
+          {publication && (
+            <section aria-label="Página publicada" className="mt-1.5 min-w-0 border-t border-divider pt-1.5">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-text-muted">Página</span>
+                <span className="text-sm font-semibold text-foreground">{publication.label}</span>
+                {publication.checkedAt && <span className="text-sm text-text-muted">Conferida em {new Date(publication.checkedAt).toLocaleString("pt-BR")}</span>}
+              </div>
+              {publication.url && (
+                <a
+                  href={publication.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={"mt-0.5 block max-w-full truncate font-mono text-sm hover:underline " + (publication.canonicalUrl ? "text-identity-published" : "text-identity-new")}
+                  title={publication.canonicalUrl ? "Endereço da página publicada." : "Página conferida; ainda sem canônico declarado."}
+                >
+                  {publication.url}
+                </a>
+              )}
+              {publication.canonicalUrl && (
+                /* Canônico é identidade SEO, não endereço: cor própria
+                   (`identity-slug`) em qualquer estado. */
+                <p className="mt-0.5 min-w-0 text-sm text-text-muted">
+                  Canônico{" "}
+                  <span className="max-w-full break-all font-mono text-identity-slug" title="Canônico declarado na publicação: imutável enquanto o vínculo existir.">
+                    {publication.canonicalUrl}
+                  </span>
+                </p>
+              )}
+              <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2">
+                {onCheckByLink && (
+                  <button type="button" onClick={onCheckByLink} disabled={statusUpdating} className="min-h-8 rounded-md border border-divider px-2 py-1 text-sm font-medium text-text-muted hover:border-context-accent hover:text-context-accent disabled:cursor-not-allowed disabled:opacity-60">
+                    Conferir por link
+                  </button>
+                )}
+                {publication.canConfirm && onPublicationAction && (
+                  <button type="button" onClick={() => void onPublicationAction("confirm")} disabled={statusUpdating} className="min-h-8 rounded-md border border-success/50 bg-success-soft px-2 py-1 text-sm font-semibold text-success hover:border-success disabled:cursor-not-allowed disabled:opacity-60">
+                    Confirmar publicada
+                  </button>
+                )}
+                {publication.canUnlink && onPublicationAction && (
+                  <button type="button" onClick={() => void onPublicationAction("unlink")} disabled={statusUpdating} className="min-h-8 rounded-md border border-divider px-2 py-1 text-sm font-medium text-text-muted hover:border-danger hover:text-danger disabled:cursor-not-allowed disabled:opacity-60">
+                    Desvincular publicação
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 text-sm text-text-muted">Conferir lê a página no domínio autorizado. Declarar a publicação é ação humana e não aprova a keyword.</p>
+            </section>
+          )}
           {showProvenance && <TechnicalDetails semantic={semantic} reference={reference} showProvenance={showProvenance} googleAdsValidated={googleAdsStageComplete} dataForSeoValidated={dataForSeoStageComplete} kgrHistory={kgr?.history} />}
         </section>
       </div>

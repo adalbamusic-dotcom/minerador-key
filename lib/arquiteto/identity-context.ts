@@ -1,3 +1,4 @@
+import { readEditorialUnitDeclaration } from "./editorial-unit-declaration.ts";
 import {
   ArticleKgrIdentitySchema,
   PrimaryKeywordPolicyHistoryEntrySchema,
@@ -138,7 +139,7 @@ function explicitKgrIdentity(source: RecordLike, semantic: RecordLike | null): A
 }
 
 /** Converte aliases legados/propostos em um único contexto do Arquiteto. */
-export function adaptKeywordIdentityContext(source: RecordLike): Pick<ArchitectKeyword, "keywordUrlRelation" | "architectureStatus" | "urlEvidence" | "kgrIdentity" | "primaryKeywordPolicy" | "primaryKeywordPolicyContext"> {
+export function adaptKeywordIdentityContext(source: RecordLike): Pick<ArchitectKeyword, "keywordUrlRelation" | "architectureStatus" | "urlEvidence" | "kgrIdentity" | "primaryKeywordPolicy" | "primaryKeywordPolicyContext" | "editorialUnitDeclaration"> {
   const semantic = asRecord(source.analise_semantica);
   const records = [source, semantic];
   const explicitRelation = normalizedRelation(first(records, ["keywordUrlRelation", "keyword_url_relation", "urlRelation", "url_relation", "relacaoUrl", "relacao_url"]));
@@ -167,11 +168,36 @@ export function adaptKeywordIdentityContext(source: RecordLike): Pick<ArchitectK
     ...(sourceHash !== undefined && sourceHash !== null ? { sourceHash: String(sourceHash) } : {}),
     ...(history.length ? { history } : {}),
   };
+  /*
+   * A DECLARAÇÃO DO [VÍNCULO] — `siteRole` finalmente chega ao Arquiteto.
+   *
+   * O Minerador já derivava o papel da página publicada e o expunha em
+   * `readPublicationLink().siteRole`, mas `siteRole` não aparecia uma vez em
+   * `lib/arquiteto/`. Sem ele, a origem 2 precisava inferir o que já estava
+   * declarado — e inferir o que é fato é como se cria divergência.
+   *
+   * Lido das mesmas fontes toleradas pelo resto do adapter, com os apelidos
+   * que o Minerador usa. Ausente continua ausente: nada vira "article" por
+   * padrão.
+   */
+  const publicado = String(source.status || "").toLocaleLowerCase("pt-BR") === "publicado";
+  const editorialUnitDeclaration = readEditorialUnitDeclaration({
+    siteRole: first([...records, evidence], ["siteRole", "site_role", "papelNoSite", "papel_no_site"]),
+    url: first([...records, evidence], ["publishedUrl", "published_url", "url", "resolvedUrl", "resolved_url"]),
+    canonical: first([...records, evidence], ["canonicalUrl", "canonical_url", "canonical", "normalizedCanonicalUrl"]),
+    observedAt: first([...records, evidence], ["observedAt", "observed_at", "lastSeenAt", "last_seen_at"]),
+    potentialUnit: first(records, ["editorialUnitPotential", "editorial_unit_potential", "potencialUnidade", "potencial_unidade"]),
+    potentialConfidence: first(records, ["editorialUnitPotentialConfidence", "editorial_unit_potential_confidence"]),
+    potentialReasons: first(records, ["editorialUnitPotentialReasons", "editorial_unit_potential_reasons"]),
+    published: publicado,
+  });
+
   return {
     ...(relation ? { keywordUrlRelation: relation } : {}),
     ...(architectureStatus ? { architectureStatus } : {}),
     ...(evidence ? { urlEvidence: evidence } : {}),
     ...(kgrIdentity ? { kgrIdentity } : {}),
+    ...(editorialUnitDeclaration ? { editorialUnitDeclaration } : {}),
     primaryKeywordPolicy,
     primaryKeywordPolicyContext: policyContext,
   };

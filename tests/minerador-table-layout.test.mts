@@ -38,7 +38,7 @@ test("tabela do Minerador preserva a ordem operacional das colunas", async () =>
 test("keyword ocupa a maior coluna, com URL real abaixo e vínculo separado", async () => {
   const page = await readTablePage();
   const keywordCellStart = page.indexOf("{/* Palavra */}");
-  const vinculoCellStart = page.indexOf("{/* Vínculo de publicação", keywordCellStart);
+  const vinculoCellStart = page.indexOf("{/* Vínculo", keywordCellStart);
   const keywordCell = page.slice(keywordCellStart, vinculoCellStart);
 
   assert.match(keywordCell, /break-words/);
@@ -79,8 +79,10 @@ test("qualificação mantém o contador separado e o select de silo compacto", a
   assert.doesNotMatch(page, /appearance-none rounded opacity-0/);
   assert.match(page, /aria-label="Silo\/Categoria"/);
   assert.match(page, /onChange=\{\(e\) => handleUpdateKeywordList\(item\.id, e\.target\.value\)\}/);
-  assert.match(page, /onChange=\{\(e\) => handleUpdateStatus\(item\.id, e\.target\.value\)\}/);
-  assert.match(page, /<td className="w-\[168px\][\s\S]*?<\/td>[\s\S]*?Status Dropdown/);
+  // A coluna Status informa; escrever é papel da barra do rodapé e do card
+  // do DNA (SDD dos três eixos, 2026-09-20). O select de Silo continua.
+  assert.doesNotMatch(page, /onChange=\{\(e\) => handleUpdateStatus\(item\.id, e\.target\.value\)\}/);
+  assert.match(page, /<td className="w-\[168px\][\s\S]*?<\/td>[\s\S]*?Status — leitura/);
 });
 
 test("estado de funil sem dado permanece neutro e não é inferido", async () => {

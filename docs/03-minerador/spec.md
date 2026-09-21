@@ -698,3 +698,437 @@ HUMAN_CAN_INVALIDATE_BAD_SERP_EVIDENCE = YES
 NEW_CONCLUSIVE_SERP_AFTER_APPROVAL_REQUIRES_REAPPROVAL = YES
 NON_CONCLUSIVE_SERP_DOWNGRADES_APPROVAL = NO
 ```
+
+## 64. Conferir site contra o catálogo remoto e papel da página — 2026-09-20
+
+**Defeito:** "Conferir site" lia o catálogo do **navegador** (`loadBrandSiteWorkspace` → IndexedDB) e só casava keyword com candidata **extraída** de texto igual. O catálogo do Site da Marca passou a viver no remoto (`brand_site_catalog_entries`), então a resposta era sempre "Nenhuma URL foi localizada no catálogo" — mesmo com a página lá, H1 idêntico à keyword.
+
+**Contrato:** a fonte canônica é o catálogo remoto (`GET /api/marca/site/sitemap`, o mesmo que o Arquiteto lê). A cópia local é complemento e pode não existir. O casamento é pelo que a página **declara** (`lib/minerador/site-catalog-match.ts`): H1 igual (forte) → slug igual (forte) → título contendo a keyword inteira, só para keyword de duas palavras ou mais (fraco). Pedaço de palavra nunca casa. Entrada removida ou ignorada do catálogo não conta.
+
+**Papel da página** (`deriveSitePageStructure`): derivado da posição no caminho, com as mesmas regras de `lib/arquiteto/published-site-architecture.ts` — home; institucional; profundidade ≥ 2 é **artigo** com `siloPath = /primeiro-segmento`; primeiro nível com páginas abaixo no catálogo é **Silo**; primeiro nível sem filhos fica `unresolved` (humano decide). A URL conferida **não precisa estar no catálogo**: a página do Silo do Care Glow não está no sitemap, mas os artigos abaixo dela estão — é isso que a torna Silo. Vale para a URL manual também.
+
+**Evidência:** `site_origin` ganha `siteRole` e `siloPath` (aditivos, opcionais; contrato de importação da Marca estendido sem quebrar o existente). `readPublicationLink` expõe os dois. A prévia da conferência mostra o papel por item.
+
+O que **não** mudou: verificação técnica (`/api/marca/site/page/verify`), persistência por `/api/marca/site/import/keywords`, confirmação humana antes de `published`, desvinculação. Keyword nova continua exigindo Silo/Categoria de destino para ser criada.
+
+**Conferência por link é ação explícita, por keyword.** Ela existe no vínculo de cada keyword ainda não publicada, e não só como queda do catálogo. É o caminho normal do **Silo**: a página de Silo costuma não estar no sitemap, então nunca vai casar no catálogo. Abrir a conferência manual fecha a prévia aberta — antes o formulário era renderizado com `!siteSyncPlan`, de modo que uma prévia anterior escondia o campo e a mensagem apontava para um formulário invisível. A URL já conhecida da keyword vem preenchida; sem ela, o site da marca.
+
+**A URL informada à mão grava a evidência na hora.** A prévia com "Salvar conferência" existe para o lote vindo do catálogo, onde há o que revisar. Para uma URL digitada para **uma** keyword ela era um passo invisível: a prévia fica no topo da tela, a linha continuava `Livre` e o resultado parecia não ter acontecido. O ato explícito é colar a URL e conferir; a partir daí o vínculo fica `Verificada`. **Publicar continua sendo outra ação** — `Confirmar publicada` na coluna Vínculo. Persistência num caminho só (`persistSiteSyncCandidates`), usado pelos dois.
+
+**Origem declarada da candidata.** A candidata nascida de uma linha existente carrega `mineradorKeywordId`, e a evidência volta para **essa** linha. Antes, a conferência reencontrava a keyword por texto *dentro do Silo de destino*: uma keyword sem lista — o caso de todas as 38 do Care Glow — não era achada e virava "nova", criando linha duplicada em vez de atualizar a que o humano selecionou. O Silo de destino volta ao seu único papel: **criar** keyword nova. Sem origem declarada (importação a partir da aba Site da Marca), o casamento por texto continua valendo.
+
+Consumo pelo Arquiteto: ele já reconstrói a árvore publicada pelo catálogo; `siteRole`/`siloPath` na evidência da keyword são o mesmo fato do lado da keyword, para o caso em que a página do Silo não está no sitemap. Ler isso em `adaptKeywordIdentityContext` é decisão do Arquiteto (backlog dele).
+
+## 65. Dois eixos: status editorial e vínculo de publicação — 2026-09-20
+
+**Status editorial** (`bruto · em_revisao · aprovado · rejeitado`) responde: *a keyword passou pelos processos do Minerador e foi aprovada?* **Vínculo** (`free · candidate · verified · published · legacy_unverified`) responde: *esta keyword tem uma página real publicada?* São independentes.
+
+**Publicada no site e crua no Minerador é estado legítimo e comum** — toda keyword importada de um site existente nasce assim. Declarar publicação **não** aprova; aprovar **não** publica.
+
+**Uma lista por eixo.** Havia **sete** seletores de status editorial escritos à mão — coluna da tabela, recuperação de marcação legada, filtro do topo, "Status final" na Decisão, lote na barra de ações, lote no menu compacto e "Status Inicial" da criação manual. Só a coluna tinha os quatro estados; as outras seis não tinham `em_revisao`, e duas ofereciam `publicado`. Todas passam a renderizar `MINERADOR_EDITORIAL_STATUS_OPTIONS`, derivada de `MINERADOR_EDITORIAL_STATUSES` com os rótulos oficiais. Divergência entre telas não se conserta conferindo as sete; conserta-se tendo uma — e um teste recusa qualquer `<option>` de status escrito à mão. Medido: `publicado` não existe em nenhuma linha do banco (80 `bruto` + 29 `aprovado`, e mais nada). Ele sai dos seletores; `isLegacyPublishedStatus` e `legacy_unverified` continuam reconhecendo o legado na leitura.
+
+**Filtro lê o estado derivado, não o valor cru.** `deriveMineradorTableRows` filtrava status por `item.status` — a coluna crua com a última escolha humana — enquanto a tela mostra o efetivo. Filtrar por "Em revisão" nunca devolvia nada, e "Aprovado" trazia keyword que a própria tela mostrava em revisão. O mesmo valia para o vínculo: filtro em `publicationStatus` cru, coluna no derivado. Agora os dois filtram pelo que a coluna mostra, e o rótulo do filtro é **Vínculo**.
+
+**A coluna Vínculo mostra o que sabe.** Além do estado (`Livre`, `Candidata`, `Verificada`, `Publicada`, `Publicação não verificada`), ela exibe o **papel da página** (Silo/Artigo, com o Silo no título) e o link — rotulado `Canônico` quando há canônico declarado, `Página` enquanto é só conferência. Os dois dados já saíam de `readPublicationLink`; faltava o render.
+
+**Canônico declarado.** Confirmar a publicação congela `site_origin.canonicalUrl` com a URL declarada (`declaredCanonicalUrl` → `resolvedUrl` → `sourceUrl`). O canonical lido da página pode mudar depois; o que a marca declarou como endereço da keyword, não.
+
+SDD: [sdd-dois-eixos-status-editorial-e-vinculo-2026-09-20](propostas/sdd-dois-eixos-status-editorial-e-vinculo-2026-09-20.md).
+
+## 66. Três eixos e o papel de cada tela — 2026-09-20
+
+Corrige o §65, que tratou o Vínculo como o eixo da publicação. Ele não é: **o Vínculo declara o posto desta keyword numa publicação** — se ela é livre para ser primária/secundária em qualquer lugar, ou se pertence a uma publicação e está atrelada ao slug/URL, podendo ou não perder essa vaga.
+
+**A colisão que gerava a confusão:** "Livre" queria dizer duas coisas na mesma tela — `PublicationLinkState.free` ("não há URL conferida") e `PrimaryKeywordPolicy.free` ("não está presa a nenhuma publicação"). Duas perguntas, uma resposta na tela.
+
+| eixo | pergunta | valores | quem escreve |
+| --- | --- | --- | --- |
+| Status editorial | passou pelos processos e foi aprovada? | `bruto` · `em_revisao` · `aprovado` · `rejeitado` | barra do rodapé (lote e uma a uma) e card do DNA |
+| Publicação | existe página real no ar? | conferência técnica → declaração humana | Vínculo: "Conferir por link" → "Confirmar publicada" |
+| Posto de principal | pode perder a vaga de primária? | `free` · `locked` · `reviewable` | **Revisão Humana**, junto da aplicabilidade do KGR |
+
+**Papel de cada tela.** A barra do rodapé classifica em grupo e serve para uma a uma; o card do DNA classifica uma a uma — e as duas usam a mesma lista. A **coluna Status só informa**: deixou de ser `<select>`. Os filtros mostram e organizam por tipo de classificação.
+
+**`Publicado` volta como marcador, não como valor do enum.** Era preciso ver na coluna que a keyword já está no ar — sem isso uma página publicada parece idêntica a uma recém-importada. Mas dizer que ela é "publicada" no eixo editorial seria afirmar que passou pelos processos. A coluna informativa mostra os dois fatos empilhados: a classificação (`Bruto`) e o selo `Publicado`. O enum que se escreve continua com quatro valores.
+
+**Posto de principal é decisão da Revisão Humana.** `canCompleteHumanReview` ganha `pendingPrimaryPolicy`: havendo publicação declarada e posto ainda `free`, existe decisão humana concreta esperando escolha — contada junto da aplicabilidade do KGR. Sem publicação declarada a pergunta não existe: não há vaga a perder. O seletor duplicado saiu do card DECISÃO.
+
+SDD: [sdd-tres-eixos-status-publicacao-posto-2026-09-20](propostas/sdd-tres-eixos-status-publicacao-posto-2026-09-20.md).
+
+## 67. As duas declarações do Vínculo e o endereço na palavra-chave — 2026-09-20
+
+Amplia o §66. O Vínculo passa a carregar **duas declarações humanas**, e só elas.
+
+### 1. Posto de principal
+
+`free` · `locked` · `reviewable` (`lib/minerador/primary-keyword-policy.ts`). Sem publicação declarada a keyword é **Livre** — livre para ser primária ou secundária de qualquer coisa. Com publicação, o humano declara se ela pode perder a vaga (`Revisável`) ou está presa ao slug/URL (`Travada`).
+
+### 2. Tipo de página
+
+`article` · `silo` · `landing_page` · `service_page` (`lib/minerador/keyword-page-type.ts`). **Um enum só, com sentido dependente do contexto:** sem publicação é *potencial* ("viria a ser um Silo"); com publicação é *fato* ("o que está no ar é uma Landing page"). Dois campos separados fariam a declaração se perder no dia da publicação.
+
+**Padrão `article`**, porque é o que a maioria vira; declarar Silo é a exceção que o humano marca quando a keyword deve abrir um universo novo. A resolução tem três origens declaradas: `human` (alguém escolheu) > `site` (papel observado no catálogo) > `default`. **Nunca é obrigatório** — informa o Arquiteto, não entra no gate da revisão.
+
+**Potencial só existe enquanto a keyword é nova.** Declarada a publicação, o tipo deixa de ser aposta e passa a ser **declaração**. O que muda é o peso da palavra, **não o direito de escolher**: a resolução devolve `determined` (há valor — declarado por alguém ou observado na página) e `declared` (`published && determined`), e `declared` governa o rótulo, nunca o `disabled`.
+
+```text
+nova         Artigo · potencial      seleção livre
+publicada    Silo · declarado        seleção livre
+```
+
+**Nada trava a seleção.** Quem sabe o que a página é continua sendo o humano — inclusive para corrigir uma declaração errada sem precisar desfazer a publicação. Um `select` desabilitado transformaria um engano em trabalho de desvinculação.
+
+### Vocabulário das duas declarações
+
+A tela mostra exatamente três coisas, no mesmo lugar na coluna e no DNA:
+
+```text
+Livre  ·  ou  ·  Travado ao slug
+Artigo   · potencial ou declarado
+Silo     · potencial ou declarado
+```
+
+O posto tem **três valores internos e duas respostas visíveis**: `free` (sem publicação) e `reviewable` (com publicação, podendo perder a vaga) dizem a mesma coisa para quem olha — ela pode sair —, então os dois aparecem como **Livre**. Só `locked` prende a keyword ao endereço, e aparece como **Travado ao slug** (`primaryPostLabel`). **Não existe "posto a declarar":** o padrão é Livre, e o padrão é uma resposta.
+
+### Onde cada coisa vive
+
+| item | lugar | por quê |
+| --- | --- | --- |
+| Posto de principal | **Revisão Humana** | é decisão, como a aplicabilidade do KGR |
+| Tipo de página | **Revisão Humana** | idem, e a origem da resolução fica escrita ali |
+| Estado da conferência, link, "Conferir por link", "Confirmar publicada" | **card DECISÃO** | são **dados de confirmação**, não declarações |
+| As duas declarações, resumidas | **coluna Vínculo** | a coluna informa o que foi declarado |
+| **Endereço da página, inteiro** | **ao lado da palavra-chave** | é a identidade da página, não um detalhe do vínculo |
+
+**O endereço** aparece na coluna da palavra-chave, completo, em `font-mono` com a cor `text-identity-published` — a mesma cor que marca publicação em toda a plataforma. Surge assim que há URL conferida, não só depois de declarada; o `title` distingue "canônico declarado" de "página conferida". Marcado com `data-keyword-page-url` para os guardas visuais.
+
+A coluna Vínculo mostra o posto (com cor por estado) e o tipo (borda tracejada quando ainda é o padrão, sólida quando declarado ou observado). Nada mais.
+
+## 68. Declaração no ato do link e as cores do vínculo — 2026-09-20
+
+### Colar o link declara
+
+Colar a URL de uma página que está no ar e mandar conferir **é** a declaração de publicação. `handleManualSiteCheck` confere, persiste a evidência e declara, num ato só. Exigir um segundo clique em "Confirmar publicada" dentro do card DECISÃO pedia a mesma confirmação duas vezes, e deixava a linha em `Verificada` parecendo que faltava algo.
+
+`handlePublicationLinkAction` ganhou `{ skipPrompt }` **exclusivamente** para esse caminho — um teste garante que nenhum outro o usa. O botão avulso continua no card DECISÃO, para a keyword conferida por outro caminho.
+
+**A conferência em lote pelo catálogo continua sem declarar.** São muitas keywords de uma vez, e declarar publicação em massa não é decisão que se toma por engano num botão de prévia.
+
+### A Revisão Humana decide; coluna e cabeçalho refletem
+
+Os dois `select` mostram exatamente a frase que a coluna e o cabeçalho vão repetir, incluindo o peso:
+
+| situação | posto | tipo |
+| --- | --- | --- |
+| keyword nova | `Livre` | `Artigo · potencial` |
+| publicação declarada | `Travado ao slug` | `Artigo · declarado` |
+
+O peso vem da **publicação**, não da opção escolhida: escolher Silo numa keyword nova dá `Silo · potencial`; na publicada, `Silo · declarado`. Oferecer só "Silo" no `select` escondia metade da frase que a própria tela mostrava uma linha abaixo.
+
+`lib/minerador/keyword-vinculo.ts` resolve o Vínculo **uma vez** e devolve tudo pronto: `post`, `postLabel`, `postSelectValue`, `pageType`, `pageTypeLabel`, `publicationDeclared`, `url`, `canonicalUrl`.
+
+As três telas chamam esse resolvedor e **nenhuma deriva nada por conta própria**:
+
+| tela | papel |
+| --- | --- |
+| Revisão Humana (card DNA) | **decide** — é onde os dois `select` vivem, com os defaults |
+| Coluna Vínculo | **reflete** |
+| Cabeçalho do Perfil | **reflete** |
+
+Antes cada uma calculava o seu par, e a divergência apareceu em tela: a Revisão dizia **Livre** para uma keyword publicada enquanto a coluna já dizia **Travado ao slug**. Um teste conta as chamadas de `resolveKeywordVinculo` (1 no workspace, 2 no card) e recusa qualquer `resolveKeywordPageType` ou `readPrimaryKeywordPolicy` nas telas.
+
+### Default do posto segue o fato
+
+| situação | default | por quê |
+| --- | --- | --- |
+| sem publicação | `Livre` | não há vaga a perder |
+| **com publicação declarada** | **`Travado ao slug`** | ela já é a primária de um endereço que está no ar |
+
+`readPrimaryKeywordPolicy` aceita `publicationDeclared` e devolve `locked` por padrão quando há publicação. Soltar continua sendo escolha humana (`Livre` → grava `reviewable`), e a escolha explícita sempre vence o default.
+
+**O posto deixou de ser decisão pendente.** Ele sempre tem resposta dos dois lados; cobrar declaração de quem já tem uma seria inventar pendência. `pendingPrimaryPolicy` saiu de `canCompleteHumanReview`.
+
+### Cabeçalho do perfil
+
+O cabeçalho do PERFIL DA KEYWORD **só fala quando há publicação**. Havendo, mostra os três fatos na mesma ordem da coluna Vínculo: **Publicada** (tom `danger` — é alerta, não troféu: dali em diante exclusão e edição estrutural ficam bloqueadas), **Travado ao slug** ou **Livre**, e o tipo **declarado**.
+
+Sem publicação o cabeçalho fica limpo. Keyword nova não tem URL nem vaga a perder, e dois selos acabavam dizendo "Livre" pela mesma ausência — repetir ausência não é informação. O par do Vínculo continua visível na coluna, sempre.
+
+### Cores — `docs/compartilhado/sistema-visual.md`
+
+| elemento | token | por quê |
+| --- | --- | --- |
+| endereço da página, publicada | `identity-published` | §5.0.1: link e URL de conteúdo declarado como publicado |
+| endereço da página, apenas conferida | `identity-new` | mesma regra, pelo avesso: sem publicação é identidade nova |
+| **slug e canonical** | `identity-slug` | §5.0.1: identidade SEO, papel próprio em qualquer estado |
+| selo `PUBLICADO` na coluna Status | `danger` | §5.1: publicação **bloqueia** exclusão e edição estrutural |
+| `Travado ao slug` / tipo `declarado` | `context-accent` | §5.1 `INFO`: informação de contexto, não resultado de operação |
+| `Livre` / tipo `potencial` | `text-muted` + borda tracejada | ausência de declaração não é estado colorido |
+
+Duas correções de contrato visual:
+
+1. **A linha publicada deixou de ser vermelha.** `bg-danger-soft` na `<tr>` inteira pintava a linha toda; o sinal passou para o selo, que é onde o fato é dito. Menos ruído, mesma informação.
+2. **`identity-published` saiu dos badges.** Eu a tinha usado no posto e no tipo — exatamente o uso que §5.0.1 proíbe, porque ela é reservada a slug, link e canonical. Um teste conta as ocorrências e recusa mais de uma.
+
+## 69. Endereço e identidade SEO são papéis de cor diferentes — 2026-09-20
+
+Diretriz da marca, registrada em `docs/compartilhado/sistema-visual.md` §5.0.1:
+
+| papel | token | valor | onde |
+| --- | --- | --- | --- |
+| endereço publicado | `identity-published` | `#193cb8` | link e URL de conteúdo declarado como publicado |
+| endereço novo | `identity-new` | `#10DDE0` | link e URL de conteúdo ainda não publicado |
+| **identidade SEO** | `identity-slug` | `#12A1E0` | **slug e canonical**, em qualquer estado |
+
+Antes `identity-new`/`identity-published` cobriam "slug, link e canonical" juntos, e o estado da publicação recolorava os três. **Slug e canonical não mudam de natureza quando o conteúdo é publicado** — mudam de imutabilidade, e isso se comunica por selo, não recolorindo o dado. Por isso ganharam papel próprio.
+
+`identity-slug` é alias de `context-accent`: o hex já existia na paleta, o que faltava era o nome do papel. Nenhum valor bruto entrou em componente — um teste recusa os três hexes fora de `app/globals.css`, inclusive em comentário.
+
+No Minerador: o card DECISÃO passou a mostrar **duas linhas** — o endereço, clicável, na cor do estado; e o canônico, abaixo, em `identity-slug`. Antes um elemento só fazia os dois papéis com uma cor só.
+
+**Fora do Minerador ainda há consumidores da regra antiga** — `arquiteto-workspace` pinta o slug com `identity-new`/`identity-published`, e os painéis somente-leitura do Arquiteto mapeiam os dois papéis. Migrá-los é trabalho do Arquiteto, registrado no backlog dele.
+
+## 70. A Lógica não serializa o que não é dela — 2026-09-21
+
+**Defeito de integridade, medido.** `mergeLogicalKeywordSemantic` terminava com
+
+```ts
+typeof value === "string" ? value : JSON.stringify(value)
+```
+
+aplicado a **toda** chave de `analise_semantica`, não só aos campos do motor. Um clique em "Processar lógica" transformava `site_origin`, `site_origins`, `aprovacao`, `human_review`, `evidencia_serp`, as medições e os históricos em **string JSON**. Nenhum leitor reconhece isso — todos checam `typeof === "object"` e devolvem `null`.
+
+O dado continuava no banco, intacto e ilegível. Na tela: a publicação declarada sumia, junto com a proteção contra exclusão, que depende da mesma leitura.
+
+**Contrato:** o motor é dono dos campos de `LOGICAL_FIELD_KEYS` e só serializa esses. Todo o resto do jsonb pertence a outros donos e sai do merge como entrou. O retorno deixou de ser `KeywordSemanticRecord` (`Record<string, string>`) e passou a `Record<string, unknown>` — o tipo antigo prometia o que a função não podia cumprir sem destruir dado alheio.
+
+**Duas chaves são string por desenho** e ficam de fora do reparo: `kgr_decisao_historico` e `primary_keyword_policy_history`, gravadas com `JSON.stringify` e relidas por `parseHistory` próprio.
+
+**Alcance medido em 2026-09-21** (109 keywords vivas, duas marcas):
+
+| chave | linhas |
+| --- | --- |
+| `discovery_import` | 104 |
+| `allintitle_measurement` + histórico | 21 |
+| `dataforseo_keyword_overview` + histórico | 21 |
+| `site_origin` / `site_origins` | 1 |
+
+Reparo: `npm run minerador:reparar-semantica` (dry-run; `--apply` grava, com readback).
+
+## 71. Página publicada não é apagada — 2026-09-21
+
+**Auditoria das três camadas, medida.** Nada foi apagado: `deleted_at` está nulo em todas as keywords das duas marcas. Mas a proteção não era o que o contrato pede.
+
+| camada | o que fazia | veredito |
+| --- | --- | --- |
+| tela | filtrava a publicada fora da seleção (`keywordPublicationProtected`) | protegia — e só a tela |
+| rota `keywords/delete` | repassava os ids à RPC, sem checar | **buraco**: chamada direta passava reto |
+| RPC `lifecycle_delete_minerador_keywords` | publicada → **soft delete** de 24h; não publicada → DELETE físico em cascata | não recusa: adia |
+
+E havia o agravante: a pergunta "está publicada?" era feita por `p_semantic #>> '{site_origin,publicationStatus}'`. Com `site_origin` serializado pela Lógica (§70), o caminho devolvia NULL, `is_published` virava `false` e a keyword publicada caía no ramo do **DELETE físico**. A trava se desligava sozinha porque o dado mudou de forma.
+
+**Contrato:** nenhuma métrica é motivo. Volume baixo, KGR ausente, zero resultados — nada justifica apagar uma página que está no ar. Publicada percorre os mesmos processos que qualquer outra, sem que seus vínculos sejam alterados. Para desfazer existe ação própria: **Desvincular publicação**.
+
+**Entregue:**
+
+1. `readSiteOrigin` aceita objeto **e** string JSON. Uma trava que se desliga por mudança de formato não é trava; ler as duas formas não repara o banco, só se recusa a confundir "ilegível" com "não existe".
+2. A rota recusa antes de qualquer escrita, com `KEYWORD_DELETE_PUBLICATION_PROTECTED` e HTTP 409, nomeando as keywords. **O lote inteiro é recusado** — apagar as outras e avisar depois deixaria o humano sem saber o que aconteceu com o quê.
+3. Migration `20260921020000_publicada_nunca_e_apagada.sql`: leitura resiliente no banco e `lifecycle_assert_keywords_not_published`. **Não aplicada** — mudança de banco é decisão do usuário.
+
+**Pendente:** ligar o assert dentro de `lifecycle_delete_minerador_keywords`. Exige substituir a função inteira, e a definição viva deve ser lida do banco antes — reconstruí-la a partir da migration 0047 seria supor que nada a alterou desde então.
+
+## 72. Medição não assina significado — 2026-09-21
+
+A listagem do Minerador baixava o `analise_semantica` inteiro de cada keyword
+da marca. Medido em bytes de fio (`length(::text)`, que é o que o PostgREST
+serializa): **1 034 kB por carregamento** em 109 linhas, com **98,3% do peso
+numa coluna só**. Podar colunas não rende nada; o peso está todo no jsonb.
+
+Dentro dele, quatro arrays somam **209 kB (20%)** e **nenhum é lido pela
+tabela** — só o painel do DNA os abre, uma keyword por vez:
+
+| caminho | peso |
+| --- | --- |
+| `discovery_import.sourceSnapshot.metrics.monthlySearchVolumes` | 69 kB |
+| `volume_measurement.monthlySearchVolumes` | 64 kB |
+| `dataforseo_keyword_overview_history` | 42 kB |
+| `allintitle_measurement_history` | 34 kB |
+
+### POR QUE NÃO BASTAVA PODAR
+
+`approvedPackageContent` punha o `analise_semantica` INTEIRO no conteúdo
+assinado. Uma listagem podada é um leitor que sabe menos, e o próprio
+contrato já dizia o que aconteceria: *"um campo que a tabela não conhece
+faria a keyword parecer divergente só porque quem perguntou sabia menos."*
+As 29 aprovadas cairiam todas para `em_revisao` e `buildApprovedPackage`
+passaria a devolver `null`, quebrando a entrega ao Arquiteto.
+
+A saída não foi contornar a assinatura e sim corrigi-la.
+
+### ESQUEMA v3
+
+O conteúdo assinado passa a excluir as quatro séries. Isso **não afrouxa
+nada**: `volumeSearch`, `resultsAllintitle` e `kgrScore` já são campos
+próprios do conteúdo assinado, e a média dentro do bloco de medição continua
+assinada. Uma medição que mude o que importa continua rebaixando a aprovação.
+O que deixa de acontecer é uma remedição de rotina invalidar a aprovação do
+SIGNIFICADO da keyword só porque chegou mais um mês na série.
+
+v1 e v2 seguem verificáveis: cada registro é conferido no esquema que ele
+mesmo declara, e `resignApprovalRecord` só re-assina o que ainda batia — um
+registro divergente é revisão de verdade, e re-assiná-lo esconderia isso.
+
+### A FONTE ÚNICA
+
+`MEASUREMENT_SERIES_PATHS`, em `lib/minerador/listing-payload.ts`, é a lista
+canônica dos quatro caminhos. Dela saem a assinatura v3, a view de listagem e
+a hidratação ao expandir — e um teste recusa que a view pode mais caminhos do
+que o módulo declara, porque uma trilha a mais devolveria a divergência que o
+v3 resolveu.
+
+### A TRAVA QUE TORNA A PODA SEGURA
+
+Há ~20 caminhos de escrita de `analise_semantica` no workspace, vários no
+formato `{...item.analise_semantica, ...}`. Gravar a partir de uma linha
+podada apagaria a série do banco — a mesma classe de perda silenciosa que a
+Lógica causou ao serializar `site_origin` (§70).
+
+Em vez de auditar os vinte, o banco se recusa a perder: o gatilho
+`minerador_keywords_preserva_series` **recoloca** a trilha que um UPDATE
+omitir. Substituir continua permitido (uma remedição traz a série nova); só
+omitir é revertido. Quando o bloco pai inteiro falta, nada é restaurado — a
+folha não inventa estrutura que o escritor não mandou.
+
+### LEITURA E HIDRATAÇÃO
+
+A listagem lê `minerador_keywords_listagem`, view `security_invoker` com a
+mesma forma de linha da tabela, montada a partir do catálogo para não ficar
+para trás quando a tabela ganhar coluna. Se a view não existir — as
+migrations são aplicadas à mão —, o cliente recua para a tabela completa e a
+tela funciona sem a economia.
+
+Expandir uma linha busca o `analise_semantica` completo daquela keyword e
+mescla as séries de volta. A mesclagem é aditiva e o estado corrente da tela
+é quem manda: hidratar não ressuscita decisão que mudou desde o carregamento.
+
+## 73. A recusa no caminho real de exclusão — 2026-09-21
+
+§71 estabeleceu que página publicada não se apaga, e criou
+`lifecycle_assert_keywords_not_published` para recusar o lote. A função foi
+aplicada no banco — e **nenhuma função a chamava**. A trava estava escrita,
+correta, e morta.
+
+O caminho real continuava como antes: `lifecycle_delete_minerador_keywords`
+fazia SOFT DELETE de 24 horas na keyword publicada. Some da operação,
+recuperável até `purge_after`, e depois some de vez.
+
+A única proteção viva era a guarda na rota, que cobre os cliques da tela.
+Uma chamada direta à RPC — outro caminho de código, um job, o painel do
+Supabase — passava reto.
+
+### DUAS BARREIRAS
+
+1. `PERFORM lifecycle_assert_keywords_not_published(p_brand_id, target_ids)`
+   antes de qualquer mutação, recusando o **lote inteiro**. Recusar o lote é
+   deliberado: apagar "as outras" e falar da publicada depois deixaria o
+   humano sem saber o que aconteceu com o quê.
+2. O ramo do publicado deixa de soft-deletar e passa a **abortar**. Não pode
+   virar `CONTINUE` nem cair adiante, porque logo abaixo começa o DELETE
+   físico em cascata: se essa linha for alcançada, a primeira barreira
+   falhou, e o certo é derrubar a transação.
+
+Com a guarda de rota, são três camadas. A da rota continua respondendo
+primeiro porque é dela que sai a mensagem com o **nome** das keywords
+protegidas; a do banco é o que vale para quem não passa pela rota.
+
+### O CÓDIGO PRECISA CHEGAR À TELA
+
+`lifecycleErrorCode` casa o código por substring na mensagem do banco. Sem
+registrar `KEYWORD_DELETE_PUBLICATION_PROTECTED` no mapa de status, a recusa
+chegaria como `KEYWORD_DELETE_TRANSACTION_FAILED` 422 — falha genérica, sem
+dizer que o motivo foi uma página no ar. Agora é 409, com mensagem própria.
+
+O handler final da RPC reergue `raise_exception` (P0001) sem traduzir, então
+a recusa atravessa intacta.
+
+### A LEITURA QUE SUSTENTA TUDO
+
+`lifecycle_keyword_is_published` chama `minerador_keyword_is_published`, que
+usa `minerador_keyword_site_origin` — o leitor que tolera `site_origin` como
+objeto E como string JSON (§70). Isso importa: uma trava que se desliga
+porque o dado mudou de forma não é trava.
+
+### O QUE FOI SUPERADO
+
+A migration histórica 0046 afirma o soft delete de 24 horas para a
+publicada. Continua verdadeira **sobre aquele arquivo** — história não muda —
+mas não descreve mais o comportamento. O teste que a cobre foi anotado para
+não induzir a leitura errada.
+
+## 74. O endereço da publicada não se mexe — 2026-09-21
+
+§71 e §73 trataram de apagar. Falta a outra metade do que o contrato diz
+sobre a publicada: **não se mexe no slug**.
+
+### A PROTEÇÃO QUE NÃO PEGAVA
+
+`protect_published_keyword` já recusa, na keyword publicada, mudança de
+`status`, `keyword`, `lista_id` e `location`. Ela tenta proteger slug e
+canônico também:
+
+```
+OR (old_json ? 'slug'      AND new_json->>'slug'      IS DISTINCT FROM ...)
+OR (old_json ? 'canonical' AND new_json->>'canonical' IS DISTINCT FROM ...)
+```
+
+Só que `minerador_keywords` **não tem coluna `slug` nem `canonical`**. A
+guarda `old_json ? 'slug'` é sempre falsa: os dois ramos são código morto,
+escritos para um esquema que não é este. O slug e o canônico moram dentro de
+`analise_semantica`, que aquele gatilho não olha.
+
+### CONGELAR E REGISTRAR, EM VEZ DE RECUSAR
+
+Quem escreve `analise_semantica` é o Minerador, as rotas de medição e o
+import de site da Marca. O Arquiteto só **lê** essa tabela — os
+`slug_sugerido` que ele calcula vão para artefatos próprios.
+
+É o import que decide o desenho. Se a página publicada mudar de endereço no
+site, uma recusa derrubaria o import inteiro e o sistema **nunca aprenderia o
+endereço novo**. Então o declarado permanece, a tentativa é registrada em
+`publication_identity_lock_history`, e o humano decide. É o mesmo espírito do
+`urlSituation = 'canonical_conflict'` que o código já usa: divergência entre
+o declarado e o lido é sinal, não acidente.
+
+Difere de propósito do gatilho de séries (§72), que restaura o que um UPDATE
+**omite**. Aqui não é omissão, é sobrescrita ativa — por isso fica registro,
+e não apenas a restauração silenciosa.
+
+### O QUE CONGELA
+
+| caminho |
+| --- |
+| `slug_sugerido` |
+| `site_origin.canonicalUrl` |
+| `site_origin.declaredCanonicalUrl` |
+| `site_origin.resolvedUrl` |
+| `site_origin.sourceUrl` |
+
+As três URLs, não só o canônico: o endereço que a tela mostra sai de
+`declaredCanonicalUrl || resolvedUrl || sourceUrl`, então mexer numa delas
+moveria o endereço exibido com o `canonicalUrl` intacto — a trava pareceria
+funcionar sem funcionar.
+
+Desvincular e corrigir legado continuam livres: nenhuma das duas ações toca
+esses campos. Depois de desvinculada, a keyword deixa de ser publicada e o
+endereço volta a ser editável, que é o correto.
+
+### A TENTATIVA BLOQUEADA NÃO REBAIXA A APROVAÇÃO
+
+`publication_identity_lock_history` fica **fora** do conteúdo assinado. Numa
+tentativa bloqueada nada mudou na keyword; deixá-la entrar na assinatura
+faria uma rotina externa insistente derrubar a aprovação humana sem que nada
+tivesse mudado de fato — exatamente o problema que o esquema v3 (§72) existe
+para resolver. Mudança **real** do slug continua rebaixando.
+
+O histórico tem teto de 50 entradas: é sinal para o humano, não arquivo, e a
+linha inteira viaja na listagem.

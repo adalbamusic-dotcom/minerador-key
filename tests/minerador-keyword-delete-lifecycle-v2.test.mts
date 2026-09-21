@@ -60,6 +60,16 @@ test("a trigger impede novos processamentos durante a janela recuperável", () =
   assert.match(workspace, /\.is\("deleted_at", null\)/);
 });
 
+/**
+ * ATENÇÃO — este teste descreve a migration 0046, que é HISTÓRICA.
+ *
+ * O soft delete de 24 horas para a keyword publicada, afirmado abaixo, foi
+ * SUPERADO em 2026-09-21 pela migration
+ * `20260921040000_exclusao_recusa_publicada.sql`: publicada passou a ser
+ * RECUSADA, não soft-deletada. As asserções continuam válidas sobre o
+ * arquivo 0046 — história não muda —, mas não descrevem o comportamento
+ * atual. Ver `minerador-exclusao-recusa-publicada.test.mts`.
+ */
 test("delete, restore e purge mantêm os gates temporais e a atomicidade", () => {
   assert.match(migration, /IF current_keyword\.deleted_at IS NOT NULL[\s\S]{0,260}KEYWORD_DELETE_TRANSACTION_FAILED/);
   assert.match(migration, /IF current_keyword\.deleted_at IS NULL AND is_published AND NOT p_allow_recoverable[\s\S]{0,120}KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW/);

@@ -5,6 +5,7 @@ import { applyManualOrder, type KeywordTableOrderMode } from "./manual-order.ts"
 import { readGoogleAdsCpcEvidence } from "./google-ads-demand.ts";
 import { readDataForSeoKeywordDifficultyEvidence } from "./dataforseo-keyword-overview-core.ts";
 import { resolveCanonicalKeywordSnapshot } from "./canonical-keyword-snapshot.ts";
+import { readPublicationLink, readSiteOrigin } from "./publication-link.ts";
 
 export type MineradorTableRow = {
   id: string;
@@ -55,7 +56,16 @@ export function deriveMineradorTableRows(
 ): MineradorTableRow[] {
   let result = [...keywords];
 
-  if (filters.status !== "Todos") result = result.filter(item => (item.status || "").toLowerCase() === filters.status.toLowerCase());
+  /*
+   * FILTRO LÊ O MESMO ESTADO QUE A COLUNA MOSTRA.
+   *
+   * Lia `item.status` — a coluna crua, que guarda a última escolha humana.
+   * Mas a tela mostra o status EFETIVO: uma keyword aprovada e depois mexida
+   * aparece como "Em revisão" sem que ninguém grave isso. Resultado: filtrar
+   * por "Em revisão" não devolvia nada nunca, e "Aprovado" trazia keywords
+   * que a própria tela mostrava em revisão.
+   */
+  if (filters.status !== "Todos") result = result.filter(item => resolveCanonicalKeywordSnapshot(item).status.status === filters.status);
   if (filters.intent !== "Todos") result = result.filter(item => {
     const canonical = resolveCanonicalKeywordSnapshot(item).semantic;
     return filters.intent === "unknown"
@@ -65,7 +75,13 @@ export function deriveMineradorTableRows(
   if (filters.listId !== "Todos") result = result.filter(item => item.lista_id === filters.listId);
   if (filters.siteRelation !== "Todos") result = result.filter(item => siteField(item, "keywordUrlRelation") === filters.siteRelation);
   if (filters.siteArchitecture !== "Todos") result = result.filter(item => siteField(item, "architectureStatus") === filters.siteArchitecture);
-  if (filters.sitePublication !== "Todos") result = result.filter(item => siteField(item, "publicationStatus") === filters.sitePublication);
+  // Mesmo motivo: a coluna Vínculo mostra Livre/Candidata/Verificada/
+  // Publicada, derivados de URL + verificação técnica + confirmação humana.
+  // O filtro oferecia os valores crus de `publicationStatus` e discordava da
+  // própria linha.
+  if (filters.sitePublication !== "Todos") {
+    result = result.filter(item => readPublicationLink({ status: item.status, evidence: readSiteOrigin(item.analise_semantica) }).state === filters.sitePublication);
+  }
   if (filters.kgrApplicability !== "Todos") result = result.filter(item => resolveCanonicalKeywordSnapshot(item).metrics.kgr.applicability === filters.kgrApplicability);
   if (filters.kgrMeasurement !== "Todos") result = result.filter(item => {
     const snapshot = resolveCanonicalKeywordSnapshot(item);

@@ -96,6 +96,18 @@ export const SerpResearchSnapshotSchema = z.object({
   language: z.string().min(2),
   location: z.string().min(1),
   device: z.enum(["desktop", "mobile"]),
+  /**
+   * O SISTEMA OPERACIONAL DA COLETA.
+   *
+   * A SERP do Google muda por dispositivo E por sistema: o mesmo termo devolve
+   * blocos diferentes no Windows e no Android. Coletar só  deixava a
+   * evidência cega para metade do público — e a doutrina do produto é que a
+   * SERP é a autoridade, então ela precisa ser observada onde o leitor está.
+   *
+   * Opcional e com default: snapshot anterior continua válido e declara a
+   * ausência em vez de fingir que foi coletado no Windows.
+   */
+  operatingSystem: z.enum(["windows", "macos", "android", "ios"]).nullable().default(null),
   resultLimit: z.number().int().positive().max(100),
   provider: z.string().min(1),
   providerEndpoint: z.literal("/search"),
@@ -153,6 +165,7 @@ export type SerpSearchInput = {
   location: string;
   language: string;
   device: "desktop" | "mobile";
+  operatingSystem?: "windows" | "macos" | "android" | "ios" | null;
   expectedIntent: string;
   expectedFormat: string;
   requiredTopics: string[];

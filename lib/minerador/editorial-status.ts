@@ -46,6 +46,23 @@ export function resolveEditorialKeywordStatus(value: unknown): EditorialKeywordS
   return { kind: "legacyEditorialStatusUnresolved", status: null, label: "Status a definir", rawStatus };
 }
 
+/**
+ * As opções que TODO seletor de status editorial renderiza.
+ *
+ * Existiam quatro listas escritas à mão — coluna da tabela, recuperação de
+ * legado, filtro do topo e "Status final" na Decisão — e três delas tinham
+ * conteúdo diferente: faltava `em_revisao` e sobrava `publicado`, um valor
+ * que nenhuma linha do banco usa. Divergência entre telas não se conserta
+ * conferindo as quatro; conserta-se tendo uma.
+ */
+export const MINERADOR_EDITORIAL_STATUS_OPTIONS: ReadonlyArray<{ value: EditorialKeywordStatus; label: string }> =
+  MINERADOR_EDITORIAL_STATUSES.map(value => ({ value, label: STATUS_LABELS[value] }));
+
+/** Rótulo do status editorial. Uma lista, um rótulo, quatro telas. */
+export function editorialKeywordStatusLabel(status: EditorialKeywordStatus): string {
+  return STATUS_LABELS[status];
+}
+
 export function isEditorialKeywordStatus(value: unknown): value is EditorialKeywordStatus {
   return resolveEditorialKeywordStatus(value).kind === "resolved"
     && typeof value === "string"
