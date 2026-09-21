@@ -4042,3 +4042,156 @@ Junto, uma correção na assinatura v3: `publication_identity_lock_history` fica
 fora do conteúdo assinado. Sem isso, uma rotina externa insistindo em
 sobrescrever o endereço derrubaria a aprovação humana — e nesse caso nada
 mudou na keyword, a tentativa foi barrada.
+
+## Defeito introduzido e corrigido: gatilho sem SECURITY DEFINER — 2026-09-21
+
+A trava de identidade (`20260921050000`) foi criada **sem** `SECURITY DEFINER`.
+Ela chama `minerador_keyword_is_published`, cuja ACL é `postgres=X/postgres`
+— só o dono executa. Com o usuário da tela:
+
+```
+42501 · permission denied for function minerador_keyword_is_published
+```
+
+### O ALCANCE ERA MAIOR QUE O SINTOMA
+
+A tela acusou numa keyword publicada, mas a checagem acontece **antes** do
+retorno antecipado. Então qualquer UPDATE de `analise_semantica`, em qualquer
+keyword, falhava. O caminho de escrita inteiro do Minerador ficou parado
+entre a aplicação de `050000` e a correção.
+
+Nada foi corrompido: o erro derruba a gravação inteira. As duas publicadas
+foram conferidas byte a byte contra a fotografia anterior — 14 751 e 5 489,
+idênticas.
+
+### O PADRÃO JÁ ESTAVA AO LADO
+
+`protect_published_keyword` convive com a mesma ACL restrita há muito tempo
+porque **é** `SECURITY DEFINER`. Era só ter seguido o vizinho. Não olhei.
+
+### A CORREÇÃO
+
+`20260921090000_gatilhos_rodam_como_dono.sql` põe `SECURITY DEFINER` nos
+dois gatilhos. O de séries não estava quebrado — `minerador_restaura_serie`
+ficou aberta a PUBLIC —, mas depender disso é depender de acidente: se
+aquela função for restringida um dia, o mesmo 42501 volta, e no caminho de
+escrita. Vai junto.
+
+É seguro: são gatilhos BEFORE UPDATE que só transformam `NEW`. Rodar como
+dono não contorna a RLS do UPDATE, que continua sendo avaliada para quem
+chamou; muda apenas a permissão de executar as funções auxiliares de leitura.
+O `search_path` já estava fixo nas duas, que é o cuidado que
+`SECURITY DEFINER` exige.
+
+### DUAS LIÇÕES QUE VIRARAM TESTE
+
+`minerador-gatilhos-security-definer.test.mts` procura a **última** definição
+de cada gatilho entre as migrations e exige `SECURITY DEFINER` mais
+`search_path` fixo. Migration antiga não é punida por ter sido corrigida
+depois.
+
+E a falha só foi diagnosticável depois de consertar a observabilidade: o
+workspace guardava só o id em `failedIds` e descartava o `reason` do
+`Promise.allSettled`. A primeira tentativa disse "1 falharam ao salvar" e
+mais nada, e custou uma rodada inteira de hipóteses. Agora a notificação
+nomeia a keyword, diz se caiu na escrita ou no readback, e traz a mensagem
+do banco — foi assim que o `42501` apareceu na segunda tentativa.
+
+## Contrato de exclusão: eu tinha entendido errado — 2026-09-21
+
+O dono do produto corrigiu: publicada **pode** ser apagada, com janela de
+24 horas e restauração. Eu havia implementado recusa total.
+
+O estrago: o diálogo "Remover keywords publicadas por 24 horas" falharia
+antes de chegar ao banco, pela guarda 409 que pus na rota. Não apareceu em
+teste porque nunca houve keyword apagada.
+
+Verifiquei a suspeita de que faltava o resgate — **não falta**. Rotas
+`recoverable`, `restore` e `purge` existem, as RPCs estão no banco
+(`lifecycle_restore_minerador_keywords`, `lifecycle_purge_minerador_keywords`)
+e a tela chama as duas primeiras (linhas 981 e 1711). Nunca foi visto porque
+o painel de recuperáveis fica vazio quando não há nada a recuperar.
+
+`20260921100000_exclusao_publicada_exige_declaracao.sql` — **escrita, não
+aplicada**. Traz de volta o `p_allow_recoverable` que a migration 0046 tinha,
+e o corpo vem da definição viva lida do banco ANTES de `040000`, com o soft
+delete intacto.
+
+### A LIÇÃO
+
+"Não pode apagar de jeito nenhum" e "pode apagar com 24 horas de janela" não
+se contradizem: uma fala de **acidente**, a outra de **intenção**. Eu li a
+primeira como absoluta e removi um caminho contratado sem procurar se ele
+existia — e ele estava ali, com nome e código de erro próprios, na migration
+0046.
+
+## Publicada não podia ser aprovada — 2026-09-21
+
+Encontrado no teste de fluxo, depois que Lógica, Volume, SERP e revisão
+humana passaram na `skincare facial`: mudar o status para `aprovado`
+respondia "Falha ao salvar status", com o console mostrando `{}`.
+
+Medido no banco, com rollback:
+
+| caso | resultado |
+| --- | --- |
+| status sozinho, publicada | `PUBLICADO_PROTEGIDO` |
+| status + semântica, publicada | `PUBLICADO_PROTEGIDO` |
+| só semântica, publicada | OK — por isso os três processos passaram |
+| status, não publicada | OK |
+
+`protect_published_keyword` trata `status` como campo estrutural. O gatilho é
+de quando `publicado` era **valor** da coluna: congelá-la protegia o
+marcador. Com os três eixos (§66/§67) a publicação virou marcador próprio em
+`site_origin`, e congelar `status` deixou de proteger qualquer coisa — só
+bloqueia o eixo editorial numa página no ar.
+
+`20260921110000_status_nao_e_estrutural.sql` — **escrita, não aplicada**.
+Mantém barrada a despromoção de linha legada (status ainda `publicado`), que
+apagaria o único sinal daquela linha; nenhuma existe hoje (80 bruto, 29
+aprovado), mas cobre importação antiga. `keyword`, `lista_id` e `location`
+seguem congelados.
+
+De carona, saiu o código morto de `slug` e `canonical`: eram comparações
+sobre COLUNAS que a tabela não tem, sempre falsas, e induziam a leitura de
+que o endereço estava protegido ali. Quem protege é
+`minerador_keywords_trava_identidade_publicada` (§74), dentro do
+`analise_semantica`.
+
+### PENDÊNCIA QUE ISTO EXPÔS
+
+`lista_id` continua congelado numa publicada — mas a assinatura do pacote
+aprovado exclui `listaId` de propósito, com o argumento de que "mover a
+keyword de Silo é organização do Minerador, não mudança do DNA". Os dois não
+combinam: o contrato diz que mover Silo é organização legítima, e o gatilho
+proíbe numa publicada. Não mexi; é decisão de produto.
+
+## A poda e a assinatura v3 concordam — verificado — 2026-09-21
+
+Prova cruzada, depois que um lote de 4 keywords percorreu Lógica, Volume,
+SERP e aprovação.
+
+O Minerador assina sobre a linha **podada** — a listagem vem da view desde
+`20260921030000`, sem as séries de medição. O Arquiteto lê a linha
+**completa** da tabela. Se a exclusão do v3 não fosse exata, tudo o que o
+Minerador aprova chegaria lá como divergente.
+
+| conferência | resultado |
+| --- | --- |
+| aprovadas no total | 35 |
+| assinadas em v3 | 6 |
+| em esquema antigo | 29 |
+| as 6 batem lendo a linha COMPLETA | 6 de 6 |
+| as 6 batem lendo a linha PODADA | 6 de 6 |
+
+Podado e completo concordam em todas. A exclusão é exata.
+
+### O QUE ISSO FECHA
+
+Era a última incógnita da mudança de egresso. A poda da listagem (21,3%) e o
+esquema v3 foram desenhados juntos, mas nunca tinham sido testados contra o
+consumidor real — o Arquiteto — com uma aprovação nascida depois da poda.
+Agora foram.
+
+As 29 antigas seguem divergentes, como já registrado: o conteúdo mudou no
+ciclo de corrupção e reparo, e a re-aprovação é humana.

@@ -27,6 +27,7 @@ import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS } from "@/l
 import { primaryPostLabel } from "@/lib/minerador/primary-keyword-policy";
 import { KEYWORD_PAGE_TYPES, keywordPageTypeStanding } from "@/lib/minerador/keyword-page-type";
 import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
+import { keywordUrlRelationLabel } from "@/lib/minerador/publication-link";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { mineradorProcessPresentation, type MineradorProcessAttempt, type MineradorProcessName, type MineradorProcessState } from "@/lib/minerador/process-state";
 import { createSemanticConsolidationDraft, resolveSemanticAxis, semanticConsolidationBySerp, type SemanticAxisResolution, type SemanticConsolidationAxis, type SemanticConsolidationAxisDraft, type SemanticConsolidationDraft, type SemanticSerpStrength } from "@/lib/minerador/semantic-consolidation-draft";
@@ -774,7 +775,10 @@ export function KeywordDnaPanel({
   const publishedContextFields: ProfileFieldDefinition[] = [
     { label: "URL", value: published ? semantic.published_url || semantic.url_publicada || semantic.url || publicationLink.url : null, mono: true },
     { label: "Canonical", value: published ? semantic.canonical_url || semantic.canonicalUrl || semantic.canonical || siteOrigin?.declaredCanonicalUrl || canonicalUrl || publicationLink.url : null, mono: true },
-    { label: "Papel atual", value: published ? semantic.papel_atual || semantic.keyword_role || semantic.primary_keyword_role || semantic.papel || siteOrigin?.keywordUrlRelation : null },
+    // O último elo é a relação keyword/URL, e ela vem do contrato com valores
+    // de fio — inclusive o literal "undefined", que é um valor válido ali e
+    // aparecia cru na tela. Rótulo, ou nada.
+    { label: "Papel atual", value: published ? semantic.papel_atual || semantic.keyword_role || semantic.primary_keyword_role || semantic.papel || keywordUrlRelationLabel(siteOrigin?.keywordUrlRelation as string | null | undefined) : null },
     { label: "Política da principal", value: published ? primaryPolicyText : null },
     { label: "Lista/Silo atual", value: published ? profile?.listName : null },
   ].filter(field => isMeaningfulProfileValue(field.value));

@@ -1132,3 +1132,119 @@ para resolver. Mudança **real** do slug continua rebaixando.
 
 O histórico tem teto de 50 entradas: é sinal para o humano, não arquivo, e a
 linha inteira viaja na listagem.
+
+## 75. Publicada sai por decisão declarada — corrige §71 e §73 — 2026-09-21
+
+§71 e §73 afirmam que página publicada **não se apaga**. Está errado, e a
+correção vem do dono do produto: o contrato prevê a exclusão de publicada —
+ela sai da operação, fica **restaurável por 24 horas** e só então é purgada.
+
+### O QUE A LEITURA ERRADA CUSTOU
+
+Interpretei "não pode apagar de jeito nenhum qualquer keyword publicado" como
+recusa total. Troquei o soft delete contratado por um `RAISE` na RPC
+(`20260921040000`) e pus uma guarda 409 na rota.
+
+O diálogo **"Remover keywords publicadas por 24 horas"** continuou na tela
+oferecendo exatamente o que as duas camadas passaram a negar. Ninguém
+esbarrou nisso porque nunca houve uma linha com `deleted_at` — a
+funcionalidade estava quebrada e invisível.
+
+O mecanismo de resgate **existe inteiro**: rotas `recoverable`, `restore` e
+`purge`, RPCs correspondentes, e a tela chamando as duas primeiras.
+
+### A DISTINÇÃO QUE RECONCILIA
+
+As duas falas não se contradizem quando se separa intenção de acidente:
+
+| caso | desfecho |
+| --- | --- |
+| apagar de propósito, com confirmação | permitido, janela de 24 h |
+| sumir por dedupe, processamento, volume baixo | **recusado** |
+
+A diferença é a **declaração**. O chamador precisa dizer que sabe que há
+publicada no lote e que quer a janela; na tela, isso é o diálogo que exige
+digitar o nome da keyword.
+
+Esse desenho já existiu aqui: a migration histórica 0046 tinha
+`p_allow_recoverable` e o código `KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW`.
+Em algum momento o parâmetro sumiu e a RPC passou a soft-deletar sempre, sem
+pedir declaração nenhuma — que é o que permitiu o susto original.
+
+### COMO FICA
+
+`p_allow_recoverable boolean DEFAULT false` na RPC. Sem ele, o lote inteiro é
+recusado, nomeando as keywords. Com ele, a publicada entra na janela de 24 h.
+
+O `DEFAULT` importa: acrescentar parâmetro cria **sobrecarga**, não
+substituição, então a migration derruba a versão de três argumentos antes de
+criar a de quatro — e a chamada antiga continua resolvendo enquanto o código
+novo não sobe.
+
+A rota **não repete a decisão**. Ter duas fontes de verdade foi o defeito:
+a rota negava antes do banco, e a tela oferecia o que a rota negava. Ela
+declara o fluxo e deixa o banco decidir.
+
+### O QUE PERMANECE DE §71 E §73
+
+Tudo o mais. A trava continua existindo, chamada quando não há declaração; o
+endereço da publicada continua congelado (§74); e nenhuma métrica — volume,
+KGR, resultados — entra na decisão de apagar.
+
+## 76. A planilha não organiza silo — 2026-09-21
+
+A coluna **Silo/Categoria** saiu da tabela de keywords.
+
+Silo é decisão de **arquitetura**, tomada no Arquiteto sobre o conjunto
+aprovado. Um editor por linha no Minerador competia com aquela etapa: a
+pessoa escolhia silo antes de existir arquitetura, e a planilha ficava
+sugerindo uma organização que o Arquiteto depois refaz.
+
+### O QUE SAIU E O QUE FICOU
+
+Saiu o **editor por linha**: cabeçalho, célula, alça de redimensionamento,
+largura, e o handler `handleUpdateKeywordList`, que só ele chamava. A classe
+`mineradorTableSelectClass` ficou órfã junto e saiu também.
+
+`lista_id` **não saiu**, e não deveria: ele filtra o carregamento da marca, é
+destino da importação e alimenta o movimento em lote (`handleBatchMove`) —
+organização de trabalho, não arquitetura. O painel do DNA continua mostrando
+"Lista/Silo atual" no contexto publicado.
+
+### A LINHA EXPANDIDA ACOMPANHA
+
+O Perfil atravessa a tabela inteira por `colSpan`. Uma coluna a menos exige
+14 no lugar de 15, ou o painel desalinha. Um teste passa a comparar o
+`colSpan` com a contagem real de células da linha, em vez de fixar o número.
+
+### UMA ARMADILHA ENCONTRADA NO CAMINHO
+
+Os testes de layout fatiavam o cabeçalho com `page.indexOf("</thead>")` — e a
+tabela usa `<KeywordTableHeader>`, não `<thead>`. O `indexOf` devolvia `-1`, a
+fatia virava o arquivo quase inteiro, e a asserção media outra coisa. Passava
+por acaso. As fatias novas usam `</KeywordTableHeader>` e conferem que o
+marcador foi mesmo encontrado.
+
+### 76.1 O lote do rodapé saiu junto — 2026-09-21
+
+"Mover para Silo" também foi removido da barra do rodapé, pela mesma razão:
+*aqui não se mexe em silo, só se declara o tipo de página que a keyword é ou
+pode vir a ser*.
+
+Saíram o controle (rótulo, select e botão), o handler `handleBatchMove` e o
+comentário que o anunciava. O menu secundário fica com o handoff ao Arquiteto
+como única ação estrutural.
+
+#### CONSEQUÊNCIA QUE PRECISA DE DECISÃO
+
+Aquele select era o **único lugar onde um humano escolhia `targetListId`** — e
+`targetListId` não serve só ao movimento: é o **destino da importação** (site
+e CSV). Os outros escritores são programáticos: a primeira lista da marca no
+carregamento, e a limpeza ao trocar de marca.
+
+Com o controle removido, a importação passa a usar sempre a primeira lista,
+sem como escolher outra. O modal continua **dizendo** qual é ("A lista de
+destino é X"), então não é silencioso — mas deixou de ser selecionável.
+
+O lugar certo para esse seletor é o próprio modal de importação, onde a
+escolha tem contexto. Não foi feito aqui porque é UI nova, não remoção.

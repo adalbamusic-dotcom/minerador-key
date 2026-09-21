@@ -20,7 +20,6 @@ test("Minerador aplica InfoHint aos conceitos do primeiro lote", () => {
     'title="Leitura de intenção da busca" description="Intenção canônica atual do KeywordDNA, considerando a lógica e as decisões humanas já consolidadas."',
     'title="Contexto de mercado" description="Contexto de mercado identificado para a keyword."',
     'title="Etapa provável da jornada" description="TOFU é o topo do funil: descoberta e buscas amplas. MOFU é o meio: consideração e comparação de alternativas. BOFU é o fundo: busca mais próxima de contratar, comprar, agendar ou realizar outra ação."',
-    'title="Organização editorial" description="Organização editorial à qual a keyword está associada."',
     'title="Decisão editorial da keyword" description="Mostra o estado de decisão da keyword no Minerador. Não representa publicação: o vínculo com conteúdo publicado aparece separadamente em Vínculo."',
   ]) {
     assert.match(workspace, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

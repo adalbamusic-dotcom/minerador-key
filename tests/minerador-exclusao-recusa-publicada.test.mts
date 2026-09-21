@@ -3,89 +3,108 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 /**
- * A recusa existe no caminho REAL de exclusão, não só na tela.
+ * Página no ar sai por decisão DECLARADA — nunca por efeito colateral.
  *
- * Havia três camadas e um buraco no meio. A tela filtrava a seleção; a rota
- * ganhou guarda em 2026-09-21; e o banco continuava fazendo SOFT DELETE de 24
- * horas na keyword publicada. Pior: `lifecycle_assert_keywords_not_published`
- * tinha sido criada no mesmo dia e NENHUMA função a chamava — a trava estava
- * escrita, correta, e morta.
+ * Duas coisas que pareciam a mesma:
  *
- * Qualquer chamada direta à RPC (outro caminho de código, um job, o painel do
- * Supabase) passava reto. REAL_PROVIDER_CALLS_IN_TESTS = 0.
+ *   apagar de propósito, com confirmação ...... permitido, janela de 24h
+ *   sumir por dedupe/processamento ............ recusado
+ *
+ * Em 2026-09-21 eu li a segunda e implementei a recusa total, trocando o soft
+ * delete contratado por um RAISE. O diálogo "Remover keywords publicadas por
+ * 24 horas" continuava na tela oferecendo o que o banco passou a negar — e a
+ * rota ainda ganhou uma guarda 409 própria, negando antes mesmo do banco.
+ *
+ * A diferença entre as duas é a DECLARAÇÃO (`p_allow_recoverable`), desenho
+ * que já existiu na migration 0046 e se perdeu. Este teste guarda os dois
+ * lados: o caminho legítimo não pode ser bloqueado, e o acidental não pode
+ * passar. REAL_PROVIDER_CALLS_IN_TESTS = 0.
  */
 
-function sqlSemComentarios(caminho: string): string {
-  // O cabeçalho da migration cita os dois símbolos que este teste procura.
-  // Sem limpar, o teste casaria com a própria explicação.
-  return readFileSync(new URL(caminho, import.meta.url), "utf8").replace(/^\s*--.*$/gm, "");
-}
+const migration = readFileSync(
+  new URL("../supabase/migrations/20260921100000_exclusao_publicada_exige_declaracao.sql", import.meta.url),
+  "utf8",
+).replace(/^[ \t]*--.*$/gm, "");
 
-const migration = sqlSemComentarios("../supabase/migrations/20260921040000_exclusao_recusa_publicada.sql");
+test("sem declaração, o lote com publicada é recusado inteiro", () => {
+  // A trava roda só quando o chamador NÃO declarou o fluxo recuperável.
+  assert.match(
+    migration,
+    /IF NOT coalesce\(p_allow_recoverable, false\) THEN\s*PERFORM public\.lifecycle_assert_keywords_not_published\(p_brand_id, target_ids\);\s*END IF;/,
+    "a recusa é condicional à falta de declaração",
+  );
 
-test("a trava é chamada antes de qualquer mutação", () => {
-  const chamada = migration.indexOf("PERFORM public.lifecycle_assert_keywords_not_published(p_brand_id, target_ids)");
-  assert.ok(chamada > 0, "a RPC chama a trava");
+  // O lote inteiro, não uma por vez: apagar "as outras" e avisar depois
+  // deixaria o humano sem saber o que aconteceu com o quê.
+  assert.match(migration, /lifecycle_assert_keywords_not_published\(p_brand_id, target_ids\)/);
 
-  // Recusar depois de apagar não é recusar. Tudo que escreve vem depois.
+  // Recusar depois de apagar não é recusar.
+  const trava = migration.indexOf("lifecycle_assert_keywords_not_published(p_brand_id, target_ids)");
   for (const mutacao of [
     "PERFORM set_config('lifecycle.keyword_operation', 'internal', true)",
     "DELETE FROM public.minerador_keywords ",
-    "DELETE FROM public.minerador_keyword_metric_measurements",
-    "DELETE FROM public.editorial_workflow_items",
     "UPDATE public.minerador_discovery_candidates",
   ]) {
     const indice = migration.indexOf(mutacao);
-    assert.ok(indice > 0, `a RPC ainda contém: ${mutacao}`);
-    assert.ok(chamada < indice, `a trava vem antes de: ${mutacao}`);
+    assert.ok(indice > 0 && trava < indice, `a trava vem antes de: ${mutacao}`);
   }
-
-  // O lote inteiro, não uma keyword por vez: apagar "as outras" e avisar
-  // depois deixaria o humano sem saber o que aconteceu com o quê.
-  assert.match(migration, /lifecycle_assert_keywords_not_published\(p_brand_id, target_ids\)/);
 });
 
-test("publicada é recusada, não soft-deletada", () => {
-  // Era isto que existia no ramo do publicado, e é isto que não pode voltar.
-  assert.doesNotMatch(migration, /interval '24 hours'/, "o soft delete de 24h saiu do ramo do publicado");
-
+test("com declaração, a publicada vai para a janela de 24 horas", () => {
+  // Isto é contrato, não concessão: a publicada sai da operação, fica
+  // restaurável e só então é purgada. Foi o que a recusa total quebrou.
   assert.match(
     migration,
-    /IF public\.lifecycle_keyword_is_published\(p_brand_id, current_keyword\.id\) THEN\s*RAISE EXCEPTION 'KEYWORD_DELETE_PUBLICATION_PROTECTED/,
-    "o ramo do publicado aborta",
+    /IF public\.lifecycle_keyword_is_published\(p_brand_id, current_keyword\.id\) THEN\s*UPDATE public\.minerador_keywords/,
+    "o ramo do publicado volta a soft-deletar",
   );
+  assert.match(migration, /purge_after = current_timestamp \+ interval '24 hours'/, "a janela é de 24 horas");
+  assert.match(migration, /recoverable_ids := array_append\(recoverable_ids, current_keyword\.id\)/, "e entra como recuperável");
 
-  // Não pode virar CONTINUE nem cair adiante: logo abaixo começa o DELETE
-  // físico em cascata.
-  const ramo = migration.slice(migration.indexOf("IF public.lifecycle_keyword_is_published"));
-  const fimDoRamo = ramo.indexOf("END IF;");
-  assert.ok(fimDoRamo > 0);
-  assert.doesNotMatch(ramo.slice(0, fimDoRamo), /CONTINUE/, "o ramo não segue adiante");
+  // O parâmetro tem default: a chamada antiga de três argumentos continua
+  // resolvendo, então a rota não quebra enquanto o código novo não sobe.
+  assert.match(migration, /p_allow_recoverable boolean DEFAULT false/);
+
+  // DROP antes do CREATE: acrescentar parâmetro cria SOBRECARGA, e as duas
+  // conviventes deixariam a chamada de três argumentos ambígua.
+  const drop = migration.indexOf("DROP FUNCTION IF EXISTS public.lifecycle_delete_minerador_keywords(uuid, uuid[], uuid)");
+  const create = migration.indexOf("CREATE OR REPLACE FUNCTION public.lifecycle_delete_minerador_keywords(");
+  assert.ok(drop > 0 && create > drop, "o DROP vem antes do CREATE");
 });
 
-test("a recusa do banco chega à rota com código próprio", () => {
-  const lifecycle = readFileSync(new URL("../lib/server/minerador-keyword-lifecycle.ts", import.meta.url), "utf8");
-  const limpo = lifecycle.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+test("a recusa fala a língua certa: exige o fluxo, não proíbe o ato", () => {
+  assert.match(migration, /RAISE EXCEPTION 'KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW: %', protegidas/);
+  assert.match(migration, /string_agg\(k\.keyword/, "e nomeia as keywords");
 
-  // `lifecycleErrorCode` casa o código por substring na mensagem do banco.
-  // Sem a entrada no mapa, a recusa viraria um 422 genérico.
-  assert.match(limpo, /KEYWORD_DELETE_PUBLICATION_PROTECTED: 409/, "o código está registrado como 409");
-  assert.match(limpo, /code === "KEYWORD_DELETE_PUBLICATION_PROTECTED"/, "e tem mensagem própria");
-
-  // A mensagem genérica não diz o que fazer; esta diz.
-  assert.match(limpo, /Desvincule a publicação antes/);
+  // "PUBLICATION_PROTECTED" dizia que publicada nunca sai. Não é o contrato.
+  assert.doesNotMatch(migration, /KEYWORD_DELETE_PUBLICATION_PROTECTED/, "o código antigo não sobrevive");
 });
 
-test("a guarda da rota continua existindo: as duas camadas, não uma", () => {
-  const rota = readFileSync(new URL("../app/api/minerador/marcas/[brandId]/keywords/delete/route.ts", import.meta.url), "utf8");
+test("a rota declara o fluxo e não duplica a decisão", () => {
+  const rota = readFileSync(
+    new URL("../app/api/minerador/marcas/[brandId]/keywords/delete/route.ts", import.meta.url),
+    "utf8",
+  );
   const limpa = rota.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-  // O banco passou a recusar, mas a rota continua respondendo antes — é dela
-  // que sai a mensagem com o NOME das keywords protegidas.
-  assert.match(limpa, /isKeywordPublished\(/);
-  assert.match(limpa, /KEYWORD_DELETE_PUBLICATION_PROTECTED/);
-  assert.ok(
-    limpa.indexOf("KEYWORD_DELETE_PUBLICATION_PROTECTED") < limpa.indexOf("lifecycle_delete_minerador_keywords"),
-    "a rota recusa antes de chamar a RPC",
+  assert.match(limpa, /allowRecoverable: z\.boolean\(\)\.optional\(\)\.default\(false\)/, "ausente é false");
+  assert.match(limpa, /p_allow_recoverable: input\.allowRecoverable/, "a declaração chega ao banco");
+
+  // Uma guarda própria aqui recusaria o fluxo legítimo antes do banco — foi
+  // exatamente o que aconteceu, e a tela ficou oferecendo o que a rota negava.
+  assert.doesNotMatch(limpa, /isKeywordPublished\(/, "a rota não repete a decisão do banco");
+  assert.doesNotMatch(limpa, /status: 409/, "nem inventa recusa própria");
+});
+
+test("a tela só declara quando o humano confirmou uma publicada", () => {
+  const ws = readFileSync(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
+  const limpo = ws.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  // `publishedIds` vem do preview do servidor; não vazio significa que o
+  // diálogo de 24 horas foi mostrado e o nome foi digitado.
+  assert.match(
+    limpo,
+    /allowRecoverable: review\.publishedIds\.length > 0/,
+    "a declaração nasce da confirmação, não de um default",
   );
 });

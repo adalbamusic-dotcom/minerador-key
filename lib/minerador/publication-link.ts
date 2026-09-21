@@ -124,6 +124,30 @@ export function readSiteOrigin(semantic: Record<string, unknown> | null | undefi
   return null;
 }
 
+/**
+ * Rótulo da relação entre a keyword e a URL publicada.
+ *
+ * `"undefined"` é valor LEGÍTIMO do contrato (`KeywordUrlRelationshipSchema`):
+ * quer dizer "relação não definida", e o Arquiteto o consome assim. Não é
+ * vazamento de `undefined` do JavaScript, e trocá-lo por `null` na gravação
+ * mudaria o que o Arquiteto recebe.
+ *
+ * O que não pode é chegar à tela como está. Em 2026-09-21 o Perfil mostrava
+ * "Papel atual: undefined" para as duas publicadas, porque interpolava o
+ * valor de fio. Sem rótulo, devolve `null` e o campo simplesmente não
+ * aparece — que é o certo quando não há relação a declarar.
+ */
+export function keywordUrlRelationLabel(relation: string | null | undefined): string | null {
+  switch (relation) {
+    case "confirmed_primary": return "Principal confirmada";
+    case "confirmed_secondary": return "Secundária confirmada";
+    case "candidate_primary": return "Principal candidata";
+    case "likely_support": return "Apoio provável";
+    case "mentioned_in_content": return "Mencionada no conteúdo";
+    default: return null;
+  }
+}
+
 export function readPublicationLink(input: { status?: string | null; evidence?: PublicationLinkEvidence | null }): PublicationLinkView {
   const evidence = input.evidence || null;
   return {

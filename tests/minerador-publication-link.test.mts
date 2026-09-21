@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyPublicationLinkAction, isPublicationProtected, readPublicationLink, type PublicationLinkEvidence } from "../lib/minerador/publication-link.ts";
+import { readFileSync } from "node:fs";
+import { applyPublicationLinkAction, isPublicationProtected, keywordUrlRelationLabel, readPublicationLink, type PublicationLinkEvidence } from "../lib/minerador/publication-link.ts";
 
 const baseEvidence: PublicationLinkEvidence = {
   brandId: "00000000-0000-4000-8000-000000000001",
@@ -133,4 +134,39 @@ test("Publicado não é opção ativa e sinais CSV não promovem publicação", 
   // o handler em lote continua onde estava.
   assert.match(workspace, /onCheckByLink=\{\(\) => openManualSiteCheck\(item\)\}/);
   assert.match(workspace, /handleCheckWithSite = async \(singleKeywordId\?\: string\)/);
+});
+
+test('"undefined" é valor de contrato, mas não é texto de tela', () => {
+  /*
+   * `KeywordUrlRelationshipSchema` aceita "undefined" de propósito: quer
+   * dizer relação não definida, e o Arquiteto consome assim. Não é
+   * vazamento de JavaScript, e trocá-lo por null na gravação mudaria o que
+   * o Arquiteto recebe.
+   *
+   * O defeito era outro: em 2026-09-21 o Perfil mostrava "Papel atual:
+   * undefined" nas duas publicadas, interpolando o valor de fio.
+   */
+  assert.equal(keywordUrlRelationLabel("undefined"), null, "sem rótulo, o campo some da tela");
+  assert.equal(keywordUrlRelationLabel(null), null);
+  assert.equal(keywordUrlRelationLabel(undefined), null);
+  assert.equal(keywordUrlRelationLabel("valor_que_nao_existe"), null);
+
+  assert.equal(keywordUrlRelationLabel("confirmed_primary"), "Principal confirmada");
+  assert.equal(keywordUrlRelationLabel("candidate_primary"), "Principal candidata");
+  assert.equal(keywordUrlRelationLabel("likely_support"), "Apoio provável");
+  assert.equal(keywordUrlRelationLabel("mentioned_in_content"), "Mencionada no conteúdo");
+
+  // Nenhum rótulo pode ser o próprio valor de fio.
+  for (const valor of ["confirmed_primary", "candidate_primary", "likely_support", "mentioned_in_content"]) {
+    assert.notEqual(keywordUrlRelationLabel(valor), valor);
+  }
+});
+
+test("o Perfil não interpola a relação crua", () => {
+  const painel = readFileSync(new URL("../components/editorial/dna-panels.tsx", import.meta.url), "utf8");
+  const campo = painel.slice(painel.indexOf('label: "Papel atual"'));
+  const linha = campo.slice(0, campo.indexOf("\n"));
+
+  assert.match(linha, /keywordUrlRelationLabel\(/, "a relação passa por rótulo");
+  assert.ok(!linha.includes("|| siteOrigin?.keywordUrlRelation :"), "e não entra crua no campo");
 });

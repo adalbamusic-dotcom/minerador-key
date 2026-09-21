@@ -245,9 +245,9 @@ const PROCESSOR_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "processar-tabela",
     title: "Usar a planilha para tomar decisões",
-    summary: "A planilha resume vínculo, métricas, leitura canônica, organização e status.",
-    description: "Keyword, Vínculo, Resultados, Volume, KGR, CPC, KD, Intenção, Nicho, Funil, Silo/Categoria e Status ajudam na triagem. As colunas de leitura são informativas; Silo/Categoria e Status são os campos operacionais editáveis da linha.",
-    keywords: ["tabela", "planilha", "colunas", "vínculo", "resultados", "volume", "kgr", "cpc", "kd", "intenção", "nicho", "funil", "silo", "status"],
+    summary: "A planilha resume vínculo, métricas, leitura canônica e status.",
+    description: "Keyword, Vínculo, Resultados, Volume, KGR, CPC, KD, Intenção, Nicho, Funil e Status ajudam na triagem. As colunas de leitura são informativas; o Status é o campo operacional da linha. Silo não aparece aqui: a estrutura de silos é formada no Arquiteto, e uma coluna de silo na planilha só competia com ela.",
+    keywords: ["tabela", "planilha", "colunas", "vínculo", "resultados", "volume", "kgr", "cpc", "kd", "intenção", "nicho", "funil", "status"],
   },
   {
     id: "processar-selecao",
@@ -336,10 +336,10 @@ const PROCESSOR_TOPICS: readonly ContextHelpTopic[] = [
   },
   {
     id: "processar-silo",
-    title: "Silo/Categoria",
-    summary: "Silo/Categoria organiza a keyword editorialmente e é um dos campos operacionais da linha.",
-    description: "Escolha ou mova a keyword para uma lista existente quando a organização editorial estiver definida. A alteração de organização não reescreve a leitura lógica nem os fatos medidos.",
-    keywords: ["silo", "categoria", "lista", "organização editorial", "mover"],
+    title: "Onde o Silo é formado",
+    summary: "O Minerador não organiza silos: a estrutura é formada no Arquiteto.",
+    description: "A planilha teve uma coluna Silo/Categoria por linha, removida em 2026-09-21. Silo é decisão de arquitetura, tomada no Arquiteto sobre o conjunto aprovado; editar por linha aqui competia com aquela etapa e confundia a triagem. A lista de destino continua existindo na importação e no movimento em lote, que é organização de trabalho, não arquitetura.",
+    keywords: ["silo", "categoria", "lista", "arquiteto", "organização editorial", "mover"],
   },
   {
     id: "processar-status",

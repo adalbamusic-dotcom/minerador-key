@@ -237,15 +237,14 @@ function candidateFromStoredSiteEvidence(item: KeywordItem, brandId: string): Mi
     mineradorKeywordId: item.id,
   };
 }
-const mineradorTableSelectClass = "border border-divider bg-surface-subtle rounded px-1.5 py-0.5 text-[10px] font-bold focus:outline-none cursor-pointer w-full truncate focus:border-module-accent";
 const processorColumnWidths = {
   drag: 32, index: 32, selection: 34, keyword: 460, vinculo: 120, results: 128, volume: 120,
-  kgr: 108, cpc: 96, kd: 70, intent: 168, niche: 168, funnel: 80, silo: 168, status: 108,
+  kgr: 108, cpc: 96, kd: 70, intent: 168, niche: 168, funnel: 80, status: 108,
 };
 const processorColumnConstraints = {
   drag: { min: 28, max: 48 }, index: { min: 28, max: 56 }, selection: { min: 30, max: 56 }, keyword: { min: 240, max: 1200, flexible: true },
   vinculo: { min: 84, max: 320 }, results: { min: 104, max: 260, priority: "protected" as const }, volume: { min: 96, max: 260, priority: "protected" as const }, kgr: { min: 68, max: 200 }, cpc: { min: 72, max: 220 }, kd: { min: 56, max: 180 },
-  intent: { min: 104, max: 420, flexible: true }, niche: { min: 104, max: 420, flexible: true }, funnel: { min: 56, max: 200 }, silo: { min: 116, max: 420, flexible: true }, status: { min: 88, max: 280 },
+  intent: { min: 104, max: 420, flexible: true }, niche: { min: 104, max: 420, flexible: true }, funnel: { min: 56, max: 200 }, status: { min: 88, max: 280 },
 };
 /** Só abaixo desta largura a barra horizontal do Processador é necessária. */
 const processorTableMinimumWidth = keywordTableMinimumWidth(processorColumnConstraints, Object.keys(processorColumnWidths));
@@ -821,6 +820,18 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
     let failed = 0;
     const failedIds: string[] = [];
+    /*
+     * POR QUE A RAZÃO É GUARDADA.
+     *
+     * Em 2026-09-21 uma falha de `canonical_readback` chegou à tela como
+     * "1 falharam ao salvar" e mais nada: nem a keyword, nem se foi a escrita
+     * ou a conferência, nem a mensagem do banco. Diagnosticar exigiu tentar
+     * reproduzir a escrita por fora, e ainda assim por hipótese.
+     *
+     * Uma falha que não diz o que falhou custa mais que a falha.
+     */
+    const failureReasons: Array<{ id: string; keyword: string; stage: "write" | "readback"; reason: string }> = [];
+    const keywordNameById = new Map(sourceKeywords.map(item => [item.id, item.keyword]));
     if (options.persist) {
       for (let offset = 0; offset < pendingUpdates.length; offset += 20) {
         const chunk = pendingUpdates.slice(offset, offset + 20);
@@ -837,7 +848,15 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         results.forEach((result, index) => {
           if (result.status === "rejected") {
             failed += 1;
-            failedIds.push(chunk[index].id);
+            const id = chunk[index].id;
+            failedIds.push(id);
+            const causa = result.reason as { message?: unknown; code?: unknown; details?: unknown } | null;
+            failureReasons.push({
+              id,
+              keyword: keywordNameById.get(id) || id,
+              stage: "write",
+              reason: [causa?.code, causa?.message, causa?.details].filter(Boolean).join(" · ") || "erro sem mensagem",
+            });
           }
         });
       }
@@ -868,6 +887,13 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           failed += 1;
           failedIds.push(expected.id);
           failedIdSet.add(expected.id);
+          // Qual das quatro condições caiu — sem isto, "não confere" não diz nada.
+          const porque = !source ? "a keyword de origem sumiu do lote"
+            : !readback ? "o readback não devolveu a linha"
+            : readback.intent !== expected.intent ? `intent divergiu: gravado ${JSON.stringify(readback.intent)}, esperado ${JSON.stringify(expected.intent)}`
+            : !hasCompleteLogicalOutputContract({ semantic: readback.analise_semantica, intent: expected.intent }) ? "o contrato de saída voltou incompleto"
+            : "o carimbo do processador não voltou atual";
+          failureReasons.push({ id: expected.id, keyword: source?.keyword || expected.id, stage: "readback", reason: porque });
         }
       }
     }
@@ -876,7 +902,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       if (failedSet.has(item.id)) return sourceById.get(item.id) || item;
       return persistedById?.get(item.id) || item;
     });
-    return { items: persistedItems, changed: logicalChangedIds.length, failed, failedIds, logicalChangedIds };
+    return { items: persistedItems, changed: logicalChangedIds.length, failed, failedIds, logicalChangedIds, failureReasons };
   };
 
   const handleQualifySelected = async () => {
@@ -924,10 +950,11 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       setKeywords(current => current.map(item => byId.get(item.id) || item));
       if (result.failed > 0) {
         outcome = "error";
-        showNotification("error", `${result.changed - result.failed} processadas; ${result.failed} falharam ao salvar.`, {
+        const primeira = result.failureReasons[0];
+        showNotification("error", `${result.changed - result.failed} processadas; ${result.failed} falharam ao salvar.${primeira ? ` [${primeira.keyword}] ${primeira.reason}` : ""}`, {
           code: "LOGIC_PARTIAL_RESULTS",
-          stage: "canonical_readback",
-          metadata: { executionRequestId },
+          stage: result.failureReasons.every(item => item.stage === "write") ? "persist" : "canonical_readback",
+          metadata: { executionRequestId, failures: result.failureReasons },
         });
       } else {
         showNotification("success", `${targets.length} keyword(s) processadas; leitura lógica atualizada para revisão humana.`, {
@@ -1620,7 +1647,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/keywords/delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywordIds: review.ids }),
+        // A declaracao do fluxo recuperavel: o humano viu o dialogo "Remover
+        // keywords publicadas por 24 horas" e digitou o nome. Sem ela o banco
+        // recusa o lote — que e o que impede uma publicada sumir sozinha.
+        body: JSON.stringify({ keywordIds: review.ids, allowRecoverable: review.publishedIds.length > 0 }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || body?.success !== true) {
@@ -2053,47 +2083,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   };
 
   // AtualizaÃ§Ã£o direta da lista/grupo pertencente na cÃ©lula (com suporte a aplicaÃ§Ã£o em massa)
-  const handleUpdateKeywordList = async (id: string, listId: string) => {
-    try {
-      if (!selectedBrandId) {
-        showNotification("error", "Selecione uma marca antes de mover keywords.");
-        return;
-      }
-      if (listId && !lists.some(list => list.id === listId && list.marca_id === selectedBrandId)) {
-        showNotification("error", "A lista de destino não pertence à marca ativa.");
-        return;
-      }
-      // Se a palavra alterada fizer parte da seleÃ§Ã£o atual, aplica a mudanÃ§a em massa
-      const rawIds = selectedIds.has(id) ? Array.from(selectedIds) : [id];
-      const idsToUpdate = rawIds.filter(wordId => {
-        const item = keywords.find(k => k.id === wordId);
-        return item ? !keywordPublicationProtected(item) : false;
-      });
-      const protectedCount = rawIds.length - idsToUpdate.length;
-
-      if (idsToUpdate.length === 0) {
-        showNotification("error", "Silo de keyword publicada e bloqueado e nao pode ser alterado.");
-        return;
-      }
-      pushKeywordsHistory(keywords, `Mover ${idsToUpdate.length} keyword(s) de silo/categoria`);
-
-      const { error } = await supabase
-        .from("minerador_keywords")
-        .update({ lista_id: listId || null })
-        .in("id", idsToUpdate)
-        .eq("brand_id", selectedBrandId)
-        .is("deleted_at", null);
-
-      if (error) throw error;
-
-      const idSet = new Set(idsToUpdate);
-      setKeywords(prev => prev.map(k => idSet.has(k.id) ? { ...k, lista_id: listId || null } : k));
-      showNotification("success", `Silo/Categoria atualizado para ${idsToUpdate.length} palavra(s). ${protectedCount > 0 ? `${protectedCount} publicada(s) preservada(s).` : ""}`);
-    } catch (err: any) {
-      console.error(err);
-      showNotification("error", "Falha ao mover palavra-chave.");
-    }
-  };
 
   // AtualizaÃ§Ã£o direta do status na cÃ©lula da tabela (com suporte a aplicaÃ§Ã£o em massa)
   const handleUpdateStatus = async (id: string | null, status: string) => {
@@ -2337,48 +2326,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     setQualificationResults([]);
   };
 
-  // AÃ§Ã£o em Lote: Mover para Lista
-  const handleBatchMove = async () => {
-    if (selectedIds.size === 0 || !targetListId || !selectedBrandId) return;
-    if (!lists.some(list => list.id === targetListId && list.marca_id === selectedBrandId)) {
-      showNotification("error", "A lista de destino não pertence à marca ativa.");
-      return;
-    }
-    const selectedItems = keywords.filter(item => selectedIds.has(item.id));
-    const movableIds = selectedItems
-      .filter(item => !keywordPublicationProtected(item))
-      .map(item => item.id);
-    const protectedCount = selectedItems.length - movableIds.length;
-
-    if (movableIds.length === 0) {
-      showNotification("error", "Nada foi movido: publicados nao podem trocar de Silo/Categoria.");
-      return;
-    }
-    pushKeywordsHistory(keywords, `Mover ${movableIds.length} keyword(s) em lote`);
-
-    setUpdating(true);
-    try {
-      const { error } = await supabase
-        .from("minerador_keywords")
-        .update({ lista_id: targetListId })
-        .in("id", movableIds)
-        .eq("brand_id", selectedBrandId)
-        .is("deleted_at", null);
-
-      if (error) throw error;
-
-      const movableSet = new Set(movableIds);
-      setKeywords(prev => prev.map(item => 
-        movableSet.has(item.id) ? { ...item, lista_id: targetListId } : item
-      ));
-      showNotification("success", `Palavras nao-publicadas movidas com sucesso. ${protectedCount > 0 ? `${protectedCount} publicada(s) preservada(s).` : ""}`);
-    } catch (err: any) {
-      console.error(err);
-      showNotification("error", "Erro ao mover palavras de lista.");
-    } finally {
-      setUpdating(false);
-    }
-  };
 
   const handleBatchSendToArchitect = async () => {
     if (!selectedBrandId || selectedIds.size === 0) return;
@@ -3330,16 +3277,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                   />
                   <KeywordTableColumnResizeHandle columnId="funnel" label="Funil" onStart={columnResize.startResize} />
                 </th>
-                <th
-                  className="relative w-[168px] border-r border-divider/70 px-3 py-2 cursor-pointer whitespace-nowrap transition-colors hover:bg-surface-elevated"
-                  onClick={() => handleSort("lista")}
-                >
-                  <InlineLabelCluster
-                    label={<InfoHint title="Organização editorial" description="Organização editorial à qual a keyword está associada."><span tabIndex={0} onClick={(event) => event.stopPropagation()} className="cursor-help rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40">Silo/Categoria</span></InfoHint>}
-                    trailing={renderSortIcon("lista")}
-                  />
-                  <KeywordTableColumnResizeHandle columnId="silo" label="Silo/Categoria" onStart={columnResize.startResize} />
-                </th>
                 <th className="relative w-[108px] px-3 py-2 text-center whitespace-nowrap">
                   <InlineLabelCluster
                     label="Status"
@@ -3671,23 +3608,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                         </span>
                       </td>
 
-                      {/* Silo/Categoria (Lista Pertencente) */}
-                      <td className="w-[168px] border-r border-divider/70 px-3 py-0.5">
-                        <select
-                          value={item.lista_id || ""}
-                          onChange={(e) => handleUpdateKeywordList(item.id, e.target.value)}
-                          disabled={publicationProtected}
-                          title={selectedListName}
-                          aria-label="Silo/Categoria"
-                          className={`${mineradorTableSelectClass} text-center text-foreground/80 disabled:cursor-not-allowed disabled:opacity-50`}
-                        >
-                          <option value="">Sem Silo/Categoria</option>
-                          {lists.map(list => (
-                            <option key={list.id} value={list.id}>{list.nome}</option>
-                          ))}
-                        </select>
-                      </td>
-
                       {/* Status — leitura: a classificação atual, escrita na barra e no DNA. */}
                       <td className="relative w-[108px] border-r border-divider/70 px-3 py-0.5 text-center">
                         {editorialStatus.kind === "legacyEditorialStatusUnresolved" ? (
@@ -3743,7 +3663,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                     {/* Acordeom ExpansÃ­vel com AnÃ¡lise SemÃ¢ntica DinÃ¢mica em JSONB */}
                     {isExpanded && (
                       <tr className="border-b border-divider bg-surface">
-                        <td id={`keyword-dna-${item.id}`} colSpan={15} className="min-w-0 max-w-full whitespace-normal [overflow-wrap:anywhere] border-r border-l-2 border-l-module-accent border-divider px-3 py-3">
+                        <td id={`keyword-dna-${item.id}`} colSpan={14} className="min-w-0 max-w-full whitespace-normal [overflow-wrap:anywhere] border-r border-l-2 border-l-module-accent border-divider px-3 py-3">
                           <KeywordDnaPanel
                             keyword={item}
                             visualPosition={index + 1}
@@ -3965,13 +3885,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                     <option value="not_applicable">Não aplicável</option>
                   </select>
                 </label>
-                <div className="flex items-center gap-1 rounded px-2 py-1">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-muted">Mover para Silo</span>
-                  <select value={targetListId} onChange={(event) => { setTargetListId(event.target.value); }} className="max-w-28 min-w-0 truncate bg-transparent text-sm font-medium text-foreground focus:outline-none" aria-label="Selecionar silo para mover keywords">
-                    {lists.map(list => <option key={list.id} value={list.id}>{list.nome}</option>)}
-                  </select>
-                  <button type="button" role="menuitem" onClick={() => { setMoreActionsOpen(false); void handleBatchMove(); }} disabled={bulkActionProcessing || updating || !targetListId} className="min-h-9 min-w-9 rounded p-1 text-context-accent hover:bg-surface-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-context-accent disabled:opacity-50" title="Mover keywords para o silo selecionado"><ArrowRight className="h-4 w-4" aria-hidden="true" /></button>
-                </div>
                 <InfoHint title="Enviar ao Arquiteto" description="Envia as keywords aprovadas para a etapa de formação de artigos.">
                   <button
                     type="button"

@@ -129,24 +129,22 @@ test("a proteção não se desliga porque o dado mudou de forma", () => {
   assert.equal(readSiteOrigin({}), null);
 });
 
-test("a recusa existe no servidor, não só na tela", () => {
+test("a rota declara o fluxo; quem recusa é o banco", () => {
   const rota = readFileSync(new URL("../app/api/minerador/marcas/[brandId]/keywords/delete/route.ts", import.meta.url), "utf8");
   const limpa = rota.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
   /*
-   * Havia um buraco entre as duas pontas: a tela filtrava a seleção e o
-   * banco fazia soft delete de 24h. Uma chamada direta à rota passava reto,
-   * e com `site_origin` serializado o próprio banco deixava passar para o
-   * DELETE físico em cascata.
+   * Apagar publicada É permitido — com a janela de 24 horas e restauração.
+   * O que não pode é ela sumir por efeito colateral, e a diferença entre as
+   * duas é a DECLARAÇÃO do fluxo recuperável.
+   *
+   * Entre 2026-09-21 e a correção, esta rota teve guarda própria recusando
+   * toda publicada. Recusava o fluxo legítimo antes mesmo do banco, com a
+   * tela oferecendo o que a rota negava. Duas fontes de verdade.
    */
-  assert.match(limpa, /isKeywordPublished\(/, "a rota pergunta se está publicada");
-  assert.match(limpa, /KEYWORD_DELETE_PUBLICATION_PROTECTED/, "e recusa com código próprio");
-  assert.match(limpa, /status: 409/, "recusa, não sucesso silencioso");
-  // A checagem vem ANTES da RPC: recusar depois de apagar não é recusar.
-  assert.ok(
-    limpa.indexOf("KEYWORD_DELETE_PUBLICATION_PROTECTED") < limpa.indexOf("lifecycle_delete_minerador_keywords"),
-    "a recusa acontece antes de qualquer escrita",
-  );
+  assert.match(limpa, /allowRecoverable: z\.boolean\(\)\.optional\(\)\.default\(false\)/, "ausente é false");
+  assert.match(limpa, /p_allow_recoverable: input\.allowRecoverable/, "a declaração chega ao banco");
+  assert.doesNotMatch(limpa, /isKeywordPublished\(/, "a rota não repete a decisão");
 
   // Nenhuma métrica justifica apagar: a decisão não olha volume nem KGR.
   assert.doesNotMatch(limpa, /volume_search|kgr_score|results_allintitle/, "nenhuma métrica entra na decisão");
