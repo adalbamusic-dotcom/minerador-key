@@ -192,7 +192,10 @@ test("o menu secundário expõe apenas o handoff canônico, sem a ação semânt
 
   assert.ok(menuStart >= 0, "menu secundário deve existir");
   assert.ok(menuEnd > menuStart, "limite do menu secundário deve existir");
-  assert.match(menu, /Mover para Silo/);
+  // "Mover para Silo" saiu do menu em 2026-09-21: silo e decisao do
+  // Arquiteto, e aqui so se declara o tipo de pagina. O menu ficou com o
+  // handoff canonico como unica acao estrutural.
+  assert.doesNotMatch(menu, /Mover para Silo/);
   assert.doesNotMatch(menu, /Marcar como publicado/);
   assert.match(menu, /Enviar ao Arquiteto/);
   assert.match(menu, /handleBatchSendToArchitect/);

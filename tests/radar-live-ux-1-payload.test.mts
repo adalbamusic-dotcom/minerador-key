@@ -123,16 +123,25 @@ test("LIVE_UX · a escrita nunca reusa a leitura podada", async () => {
    * caminho podado, cada análise nova apagaria `extractions` e
    * `competitiveReport` das versões antigas NO BANCO — e não haveria volta.
    *
-   * A separação é estrutural: `list()` poda porque alimenta a tela;
-   * `findByArticle()` faz `select("*")` e devolve o payload cru, que é o que a
-   * escrita usa.
+   * A separação é estrutural: `list()` poda porque alimenta a tela; a escrita
+   * lê a linha COMO ESTÁ GRAVADA, e regravar o que se leu verbatim é lossless
+   * por construção.
+   *
+   * 2026-09-21: o caminho cru ganhou nome próprio, `findByArticleRaw`. As
+   * corridas passaram a morar em `radar_analysis_runs`, e `findByArticle`
+   * agora as REIDRATA para os consumidores. Reidratar na escrita seria o erro
+   * simétrico do que este teste sempre travou: devolveria as corridas para
+   * dentro da linha, desfazendo a arrumação uma análise por vez.
+   *
+   * O invariante não mudou — nem podado, nem reidratado: verbatim.
    */
   const fonte = await readFile(new URL("../lib/server/editorial-repositories.ts", import.meta.url), "utf8");
   const semComentarios = fonte.replace(/\/\*[\s\S]*?\*\//g, "");
 
   const escrita = semComentarios.slice(semComentarios.indexOf("async appendRadarAnalysis"));
   const corpo = escrita.slice(0, escrita.indexOf("async ", 10));
-  assert.ok(corpo.includes("this.findByArticle("), "a escrita lê pelo caminho não podado");
+  assert.ok(corpo.includes("this.findByArticleRaw("), "a escrita lê a linha como está gravada");
+  assert.ok(!corpo.includes("this.findByArticle("), "e não pela leitura que reidrata as corridas");
   assert.ok(!corpo.includes("pruneRadarAnalysisHistory"), "a escrita não passa pela poda");
   assert.ok(!corpo.includes("this.list("), "a escrita não reusa a listagem da tela");
 

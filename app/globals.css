@@ -12,8 +12,10 @@
   /*
    * Papéis semânticos fixos da plataforma.
    *
-   * identity-new       → slug, link e canonical ainda NÃO publicados
-   * identity-published → slug, link e canonical de conteúdo já publicado no site
+   * identity-new       → endereço de conteúdo ainda NÃO publicado
+   * identity-published → endereço de conteúdo já publicado no site
+   * identity-slug      → slug e canonical, em qualquer estado: são a
+   *                      identidade SEO da página, não o endereço dela
    * keyword            → toda keyword renderizada, em qualquer superfície
    *
    * `--keyword` é valor próprio da paleta (#e0fbff), não alias de outro papel:
@@ -22,6 +24,7 @@
    */
   --identity-new: var(--module-accent);
   --identity-published: var(--action-accent);
+  --identity-slug: var(--context-accent);
   --keyword: #e0fbff;
   --success: #1fcb0a;
   --warning: #f79001;
@@ -72,6 +75,7 @@
   --color-highlight: var(--highlight);
   --color-identity-new: var(--identity-new);
   --color-identity-published: var(--identity-published);
+  --color-identity-slug: var(--identity-slug);
   --color-keyword: var(--keyword);
   --color-success: var(--success);
   --color-warning: var(--warning);

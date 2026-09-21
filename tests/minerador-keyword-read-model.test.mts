@@ -85,12 +85,18 @@ test("decisão humana de intenção, nicho e funil vira a projeção atual sem a
   assert.equal((consolidated as Record<string, unknown>).intencao_principal, "Informativa");
 });
 
-test("a linha não oferece editor para intenção, nicho ou funil; somente silo/status continuam graváveis", async () => {
+test("a linha não oferece editor semântico; o Status é o que resta de operacional", async () => {
+  /*
+   * A coluna Silo/Categoria saiu em 2026-09-21: silo é decisão de
+   * arquitetura, formada no Arquiteto. Antes disto o teste exigia
+   * `handleUpdateKeywordList` presente — hoje exige o contrário.
+   */
   const page = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(page, /handleUpdateNiche/);
   assert.doesNotMatch(page, /<option value="">Não informado<\/option>/);
-  assert.match(page, /handleUpdateKeywordList/);
+  assert.doesNotMatch(page, /handleUpdateKeywordList/, "o editor de silo por linha não volta");
   assert.match(page, /handleUpdateStatus/);
-  const semanticReadOnlySlice = page.slice(page.indexOf("Nicho de mercado —"), page.indexOf("Silo\/Categoria (Lista Pertencente)"));
+  const semanticReadOnlySlice = page.slice(page.indexOf("Nicho de mercado —"), page.indexOf("Status — leitura"));
+  assert.ok(semanticReadOnlySlice.length > 0, "a fatia entre Nicho e Status foi localizada");
   assert.doesNotMatch(semanticReadOnlySlice, /<select|onChange=/);
 });

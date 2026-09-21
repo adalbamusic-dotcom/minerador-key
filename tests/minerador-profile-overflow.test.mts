@@ -21,7 +21,7 @@ const workspace = readFileSync(new URL("../modules/minerador/minerador-workspace
 
 test("a célula do Perfil expandido reseta o nowrap herdado da tabela", () => {
   assert.match(workspace, /<table data-keyword-table="processor"[^>]*whitespace-nowrap/);
-  const cell = workspace.slice(workspace.indexOf("<td id={`keyword-dna-"), workspace.indexOf("colSpan={15}") + 400);
+  const cell = workspace.slice(workspace.indexOf("<td id={`keyword-dna-"), workspace.indexOf("colSpan={14}") + 400);
   assert.ok(cell.includes("whitespace-normal"), "sem o reset, um id de versão longo alarga o scrollWidth");
   assert.ok(cell.includes("[overflow-wrap:anywhere]"), "tokens técnicos precisam de ponto de quebra");
   assert.ok(cell.includes("min-w-0") && cell.includes("max-w-full"));

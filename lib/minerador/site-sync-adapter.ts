@@ -39,13 +39,18 @@ function siteEvidenceKey(value: Record<string, unknown> | null | undefined): str
 
 export function buildMineradorSiteSyncPlan(candidates: MineradorSiteSyncCandidate[], existingRows: ExistingKeyword[], targetListId: string | null): MineradorSiteSyncPlan {
   const existingByText = new Map(existingRows.filter(row => !targetListId || row.lista_id === targetListId).map(row => [row.keyword.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim(), row]));
+  // A candidata que nasceu de uma linha existente aponta para ela. O Silo de
+  // destino só serve para CRIAR keyword nova; nunca para deixar de encontrar
+  // a que o humano selecionou e duplicá-la.
+  const existingById = new Map(existingRows.map(row => [row.id, row]));
   const seen = new Set<string>();
   const items = candidates.map(candidate => {
     const text = candidate.text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
     if (!text || !candidate.sourceUrl) return { candidate, outcome: "invalid" as const, mineradorKeywordId: null, reason: "Candidata sem texto ou URL de origem válida." };
     if (seen.has(text)) return { candidate, outcome: "duplicate_in_batch" as const, mineradorKeywordId: null, reason: "Keyword duplicada dentro da conferência." };
     seen.add(text);
-    const existing = existingByText.get(text);
+    const declared = candidate.mineradorKeywordId ? existingById.get(candidate.mineradorKeywordId) : undefined;
+    const existing = declared || existingByText.get(text);
     if (!existing) {
       if (!targetListId) {
         return {

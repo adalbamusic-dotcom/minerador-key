@@ -1,6 +1,6 @@
 import { emptyTerritoryDiscovery, emptyTerritoryLineage } from "./territory.ts";
 import { emptyTerritoryNarrative } from "./territory-narrative.ts";
-import type { KeywordTerritoryDecision } from "./territory.ts";
+import type { KeywordTerritoryDecision, TerritoryPrimaryKeyword } from "./territory.ts";
 import type { TerritorialLandscape } from "./territorial-landscape.ts";
 
 /**
@@ -276,8 +276,17 @@ export function resolveSiloAssignmentOutcome(input: {
  * outra decisão.
  *
  * Sai sem `territoryRef` e sem `brandId`: o servidor emite os dois.
+ *
+ * `primaryKeyword` é o único campo de semântica que pode entrar aqui, e só
+ * porque não é palpite: ela vem de uma origem declarada — a página publicada
+ * que o Minerador marcou como Silo, ou a eleição por SERP, ou a decisão
+ * humana. Ausente, o campo não aparece, e o Silo segue sem identidade eleita.
  */
-export function manualSiloCandidateDraft(input: { name: string; slug: string | null }): Record<string, unknown> {
+export function manualSiloCandidateDraft(input: {
+  name: string;
+  slug: string | null;
+  primaryKeyword?: TerritoryPrimaryKeyword | null;
+}): Record<string, unknown> {
   const name = input.name.trim();
   const slug = input.slug?.trim() || null;
   return {
@@ -285,6 +294,7 @@ export function manualSiloCandidateDraft(input: { name: string; slug: string | n
     existingSiloRef: null,
     name,
     centralEntity: "",
+    ...(input.primaryKeyword ? { primaryKeyword: input.primaryKeyword } : {}),
     macroIntent: "",
     boundary: { includes: [], excludes: [] },
     narrative: emptyTerritoryNarrative(),

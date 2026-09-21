@@ -17,6 +17,8 @@
 
 import type { TerritorialSerpAssessment } from "./territorial-serp.ts";
 import type { TerritorialAiProposal } from "./territorial-ai.ts";
+import { describeSiloPrimaryKeyword } from "./silo-primary-keyword.ts";
+import type { TerritoryPrimaryKeyword } from "./territory.ts";
 
 /** Estado de cada fonte. Ausência e falha são estados legíveis, não vazio. */
 export type TerritorialProcessPresence =
@@ -81,6 +83,13 @@ export type TerritorialReviewView = {
     isPublished: boolean;
     slug: string | null;
     canonical: string | null;
+    /**
+     * A identidade eleita do Silo, com a origem sempre dita.
+     *
+     * `null` quando nenhuma origem elegeu: a mesa mostra a ausência em vez de
+     * exibir a entidade central como se fosse uma keyword real.
+     */
+    primaryKeyword: { keywordId: string; label: string | null; electedBy: string; note: string } | null;
   };
   logic: TerritorialReviewLogic;
   serp: TerritorialReviewSerp;
@@ -180,6 +189,15 @@ type ReviewTerritory = {
   isPublished: boolean;
   slug: string | null;
   canonical: string | null;
+  /**
+   * A keyword primária oficial, quando alguma origem já elegeu uma.
+   *
+   * `centralEntity` é o NOME do universo, texto livre; esta é a IDENTIDADE.
+   * Ausente enquanto ninguém elegeu — e a mesa diz a ausência.
+   */
+  primaryKeyword?: TerritoryPrimaryKeyword | null;
+  /** O texto da keyword primária, para a mesa não mostrar um id cru. */
+  primaryKeywordLabel?: string | null;
   /** Blockers de confirmação, já resolvidos por quem chama. */
   confirmationBlockers: readonly string[];
   confirmationReady: boolean;
@@ -268,6 +286,14 @@ export function buildTerritorialReviewView(input: {
       isPublished: territory.isPublished,
       slug: territory.slug,
       canonical: territory.canonical,
+      primaryKeyword: territory.primaryKeyword
+        ? {
+          keywordId: territory.primaryKeyword.keywordId,
+          label: territory.primaryKeywordLabel ?? null,
+          electedBy: territory.primaryKeyword.electedBy,
+          note: describeSiloPrimaryKeyword(territory.primaryKeyword, territory.primaryKeywordLabel),
+        }
+        : null,
     },
     logic: input.logic,
     serp: input.serp,

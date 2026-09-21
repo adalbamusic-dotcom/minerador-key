@@ -338,6 +338,58 @@ export type TerritoryProvenance = z.infer<typeof TerritoryProvenanceSchema>;
 
 /* -------------------------------- território ----------------------------- */
 
+/**
+ * A KEYWORD OFICIAL E PRIMÁRIA DO SILO — UMA VARIANTE POR ORIGEM.
+ *
+ * O Território tinha `centralEntity` (texto livre) e sugestões em `discovery`,
+ * mas nada registrava QUAL keyword foi eleita, por que evidência e por quem.
+ * Sem isso, "o Silo nasceu de qual decisão?" não tinha resposta no acervo.
+ *
+ * As origens elegem de maneiras diferentes, e por isso são variantes — não um
+ * campo genérico com `evidence` frouxo:
+ *
+ *   serp                   · lista nova: a SERP mostra qual compete de verdade
+ *   published_declaration  · publicado: o [Vínculo] já declarou, com endereço
+ *   human                  · cadastro manual: a pessoa elege e diz por quê
+ *
+ * Cada uma carrega SÓ a evidência que aquela origem produz. Nenhuma finge ter
+ * a evidência de outra, e isso é o que impede um Silo manual parecer
+ * sustentado por SERP.
+ *
+ * Aditivo e opcional num payload jsonb: território anterior continua válido e
+ * declara a ausência em vez de ganhar uma primária inventada.
+ */
+export const TerritoryPrimaryKeywordSchema = z.discriminatedUnion("electedBy", [
+  z.object({
+    electedBy: z.literal("serp"),
+    keywordId: z.string().min(1),
+    /** A força medida na SERP que sustentou a eleição. */
+    evidence: z.object({
+      competitorOverlap: z.number().int().nonnegative(),
+      devicesAgreeing: z.number().int().nonnegative(),
+      devicesObserved: z.number().int().nonnegative(),
+      score: z.number(),
+    }).strict(),
+    electedAt: z.string().min(1),
+  }).strict(),
+  z.object({
+    electedBy: z.literal("published_declaration"),
+    keywordId: z.string().min(1),
+    /** O que o Minerador declarou, com o endereço que veio junto. */
+    url: z.string().min(1).nullable(),
+    canonical: z.string().min(1).nullable(),
+    electedAt: z.string().min(1),
+  }).strict(),
+  z.object({
+    electedBy: z.literal("human"),
+    keywordId: z.string().min(1),
+    actorUserId: z.string().min(1),
+    reason: z.string().min(1),
+    electedAt: z.string().min(1),
+  }).strict(),
+]);
+export type TerritoryPrimaryKeyword = z.infer<typeof TerritoryPrimaryKeywordSchema>;
+
 export const TerritoryCandidateSchema = z.object({
   schemaVersion: z.literal(1),
   territoryRef: TerritoryRefSchema,
@@ -358,6 +410,14 @@ export const TerritoryCandidateSchema = z.object({
 
   name: z.string().min(1).nullable(),
   centralEntity: z.string(),
+  /**
+   * A keyword eleita como primária oficial deste Silo.
+   *
+   * `centralEntity` é o NOME do universo, texto livre. Este campo é a
+   * IDENTIDADE: uma keyword real, com KeywordDNA, eleita por uma origem
+   * declarada. Ausente enquanto ninguém elegeu.
+   */
+  primaryKeyword: TerritoryPrimaryKeywordSchema.nullable().optional(),
   macroIntent: z.string(),
   boundary: z.object({
     includes: z.array(z.string().min(1)),

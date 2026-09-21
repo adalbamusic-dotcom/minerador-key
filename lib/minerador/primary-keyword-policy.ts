@@ -13,9 +13,18 @@ export type PrimaryKeywordPolicyHistoryEntry = {
   reason?: string;
 };
 
-export function readPrimaryKeywordPolicy(input: { status?: string | null; semantic?: Semantic }): PrimaryKeywordPolicy {
+export function readPrimaryKeywordPolicy(input: { status?: string | null; semantic?: Semantic; publicationDeclared?: boolean }): PrimaryKeywordPolicy {
   const explicit = input.semantic?.primary_keyword_policy;
   if (PrimaryKeywordPolicies.includes(explicit as PrimaryKeywordPolicy)) return explicit as PrimaryKeywordPolicy;
+  /*
+   * O default segue o fato, não o otimismo.
+   *
+   * Uma keyword com publicação declarada já é a primária de um endereço que
+   * está no ar: o default dela é **travada ao slug**. "Livre" é o default de
+   * quem ainda não publicou — aí não há vaga a perder. Soltar uma publicada
+   * continua sendo uma escolha, feita na Revisão Humana.
+   */
+  if (input.publicationDeclared === true) return "locked";
   return isLegacyPublishedStatus(input.status) ? "locked" : "free";
 }
 
@@ -28,6 +37,23 @@ function readHistory(value: unknown): PrimaryKeywordPolicyHistoryEntry[] {
 
 export function primaryKeywordPolicyLabel(policy: PrimaryKeywordPolicy): string {
   return ({ locked: "Principal travada", reviewable: "Principal revisável", free: "Keyword livre" } as const)[policy];
+}
+
+/**
+ * O posto como a tela pergunta: a keyword é **livre**, ou está **travada ao
+ * slug** desta publicação?
+ *
+ * Três valores internos, duas respostas visíveis. `free` (sem publicação) e
+ * `reviewable` (com publicação, mas podendo perder a vaga) respondem a mesma
+ * coisa para quem olha: ela pode sair. Só `locked` prende a keyword ao
+ * endereço.
+ */
+export function primaryPostLabel(policy: PrimaryKeywordPolicy): string {
+  return policy === "locked" ? "Travado ao slug" : "Livre";
+}
+
+export function isPostLockedToSlug(policy: PrimaryKeywordPolicy): boolean {
+  return policy === "locked";
 }
 
 export function setPrimaryKeywordPolicy(

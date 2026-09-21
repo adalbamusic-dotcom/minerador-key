@@ -36,6 +36,10 @@ export interface SiteKeywordEvidence {
   contentType?: string | null;
   pageTitle?: string | null;
   pageH1?: string | null;
+  /** Papel da página na árvore publicada, derivado do caminho (Minerador). */
+  siteRole?: "home" | "silo" | "article" | "institutional" | "unresolved";
+  /** Caminho do Silo que contém a página; o próprio quando é Silo. */
+  siloPath?: string | null;
   relationConfirmedBy: string | null;
   relationConfirmedAt: string | null;
   siloId?: string;
@@ -69,9 +73,20 @@ export type SiteKeywordMineradorCandidateInput = Omit<Pick<SiteKeywordCandidate,
   contentType?: string | null;
   pageTitle?: string | null;
   pageH1?: string | null;
+  siteRole?: "home" | "silo" | "article" | "institutional" | "unresolved";
+  siloPath?: string | null;
+  /**
+   * Keyword de origem, quando a candidata nasceu de uma linha existente —
+   * é o caso do "Conferir site" do Minerador, que parte da seleção do humano.
+   * Declarada, a evidência vai para ESSA linha, esteja ela no Silo de destino
+   * ou não. Ausente, o casamento por texto dentro do Silo continua valendo.
+   */
+  mineradorKeywordId?: string | null;
 };
 
 export interface SiteKeywordMineradorRepository {
+  /** Linhas por id, ignorando o Silo. Opcional: sem ela, nada muda. */
+  findByIds?(brandId: string, ids: readonly string[]): Promise<SiteKeywordMineradorExisting[]>;
   validateDestination(brandId: string, targetListId: string | null): Promise<void>;
   findByList(brandId: string, targetListId: string | null): Promise<SiteKeywordMineradorExisting[]>;
   insertKeyword(payload: SiteKeywordMineradorInsert): Promise<{ id: string; brand_id: string; keyword: string }>;
@@ -190,6 +205,7 @@ function buildEvidence(candidate: SiteKeywordMineradorCandidateInput, normalized
     contentType: candidate.contentType ?? null,
     pageTitle: candidate.pageTitle ?? null,
     pageH1: candidate.pageH1 ?? null,
+    ...(candidate.siteRole ? { siteRole: candidate.siteRole, siloPath: candidate.siloPath ?? null } : {}),
     relationConfirmedBy: candidate.relationConfirmedBy ?? null,
     relationConfirmedAt: candidate.relationConfirmedAt ?? null,
     siloId: destination.siloId || undefined,
@@ -240,6 +256,13 @@ export async function importSiteKeywordsToMinerador(input: {
     if (normalized && !existingByText.has(normalized)) existingByText.set(normalized, row);
   }
 
+  // Linhas declaradas pela candidata: buscadas por id, fora do filtro de Silo.
+  const declaredIds = [...new Set(input.candidates.map(candidate => candidate.mineradorKeywordId).filter((value): value is string => Boolean(value)))];
+  const existingById = new Map<string, SiteKeywordMineradorExisting>();
+  if (declaredIds.length && input.repository.findByIds) {
+    for (const row of await input.repository.findByIds(input.brandId, declaredIds)) existingById.set(row.id, row);
+  }
+
   const seen = new Set<string>();
   const items: SiteKeywordImportItem[] = [];
   const inserted: SiteKeywordImportResult["inserted"] = [];
@@ -268,7 +291,8 @@ export async function importSiteKeywordsToMinerador(input: {
     }
     seen.add(normalizedText);
 
-    const current = existingByText.get(normalizedText);
+    const declared = candidate.mineradorKeywordId ? existingById.get(candidate.mineradorKeywordId) : undefined;
+    const current = declared || existingByText.get(normalizedText);
     if (current) {
       const evidence = buildEvidence(candidate, normalizedText, input.importBatchId, input.requestedBy, importedAt, { siloId: input.targetListId, siloName: input.targetListName });
       const merged = mergeSiteEvidence(current.analise_semantica, evidence);

@@ -53,6 +53,8 @@ import { buildKeywordUniverse, reservedSiloPageHeadIds } from "@/lib/arquiteto/k
 import { buildSiteStructureReading } from "@/lib/arquiteto/site-structure-evidence";
 import { buildTerritorialSurface, deriveTerritorialProcessAvailability } from "@/lib/arquiteto/territorial-surface";
 import { manualSiloCandidateDraft, planSiloAssignment, planSiteStructurePromotion, resolveSiloAssignmentOutcome } from "@/lib/arquiteto/silo-assignment";
+import { stampPublishedPrimary } from "@/lib/arquiteto/silo-primary-keyword";
+import type { EditorialUnitDeclaration } from "@/lib/arquiteto/contracts";
 import { validateManualSiloSlug, type SlugSubject } from "@/lib/arquiteto/slug-architecture";
 import { TerritorialWorkspaceHeader, TerritorialWorkspaceRows, type KeywordDnaInspection } from "./territorial-workspace-rows";
 import { ArticleFormationPanel } from "./article-formation-panel";
@@ -148,6 +150,9 @@ import { ARCHITECTURE_MARKER_CONTRACT_VERSION, ARCHITECTURE_SCENARIO_LABELS, res
 import { buildPublishedSiteArchitecture } from "@/lib/arquiteto/published-site-architecture";
 import { resolveTerritoryConfirmationReadiness, siloIsHumanDecided } from "@/lib/arquiteto/territory";
 import { TerritorialReviewPanel } from "./territorial-review-panel";
+import { PublishedSerpPanel } from "./published-serp-panel";
+import { readPublishedGroupFromSerp, type PublishedKeywordReadout } from "@/lib/arquiteto/published-keyword-readout";
+import type { SerpCompetitiveObservation } from "@/lib/arquiteto/silo-primary-keyword";
 import { buildTerritorialAiBase, territorialAiBaseHash } from "@/lib/arquiteto/territorial-ai-record";
 import { architectAreaHref, readArchitectAreaFromLocation, resolveArchitectArea, resolveArchitectDeepLink, sameStringSet } from "@/lib/arquiteto/deep-link";
 import { deterministicArticleDnaPayload, deterministicSiloPagePayload } from "@/lib/arquiteto/adapters";
@@ -8791,6 +8796,18 @@ export default function ArquitetoPage() {
           isPublished: territory.publicationProtection === "protected",
           slug: territory.slugState.publishedSlug || territory.slugState.confirmed,
           canonical: territory.slugState.publishedCanonical,
+          /*
+           * A IDENTIDADE ELEITA, não a entidade central.
+           *
+           * `centralEntity` é o nome do universo em texto livre; a primária é
+           * uma keyword real, com origem declarada. O rótulo vem do lote, e
+           * fica `null` quando a keyword não está na lista aberta — id cru na
+           * mesa seria pior que dizer que o texto não está à mão.
+           */
+          primaryKeyword: territory.primaryKeyword ?? null,
+          primaryKeywordLabel: territory.primaryKeyword
+            ? String(masterList.find(kw => String(kw.id) === territory.primaryKeyword?.keywordId)?.keyword || "") || null
+            : null,
           confirmationBlockers: readiness.blockers.map(blocker => blocker.detail || blocker.code),
           confirmationReady: readiness.state === "ready",
         },
@@ -8827,6 +8844,105 @@ export default function ArquitetoPage() {
     });
   }, [territorialSurface, territorialSerpQuestions, territorialSerpAssessments, territorialAiProposals,
     territorialSerpBaseHashes, territorialAiBaseHashes, territorialSerpBaseOf, territorialAiBaseHashOf, masterList]);
+
+  /**
+   * A SERP DAS KEYWORDS DO GRUPO — o insumo que nunca existiu na fase Silos.
+   *
+   * A SERP territorial consulta o TEXTO da entidade central, no máximo duas
+   * consultas, e guarda só o parecer. Por isso as candidatas nunca foram
+   * comparadas entre si: o dado para compará-las não era coletado.
+   *
+   * Aqui a coleta é por keyword e por lente, e o que fica é a observação
+   * competitiva. Nada disso decide: o que sai é evidência e pendência.
+   */
+  const [keywordSerpByScope, setKeywordSerpByScope] = useState<Map<string, {
+    observations: SerpCompetitiveObservation[];
+    gaps: { keywordId: string; lens: string; reason: string }[];
+  }>>(new Map());
+  const [keywordSerpBusyScope, setKeywordSerpBusyScope] = useState<string | null>(null);
+
+  /** As keywords do território, na lista aberta. */
+  const keywordsOfTerritory = useCallback((territoryRef: string) => masterList
+    .filter(kw => (typeof kw.territoryRef === "string" ? kw.territoryRef : null) === territoryRef), [masterList]);
+
+  const collectKeywordSerp = async (territoryRef: string) => {
+    const doTerritorio = keywordsOfTerritory(territoryRef);
+    if (!doTerritorio.length || !selectedBrandId) return;
+    setKeywordSerpBusyScope(territoryRef);
+    try {
+      const response = await fetch("/api/arquiteto/keyword-serp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brandId: selectedBrandId,
+          scopeId: territoryRef,
+          territoryRef,
+          // O teto da rota é 12; o lote vem da seleção humana, não de varredura.
+          keywords: doTerritorio.slice(0, 12).map(kw => ({ keywordId: String(kw.id), keyword: String(kw.keyword || "") })),
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível coletar a SERP das keywords.");
+      /*
+       * Só entra o que voltou do READBACK. Coleta que falha não apaga
+       * observação boa anterior — evidência é patrimônio.
+       */
+      setKeywordSerpByScope(previous => {
+        const proximo = new Map(previous);
+        proximo.set(territoryRef, {
+          observations: Array.isArray(body.data?.observations) ? body.data.observations : [],
+          gaps: Array.isArray(body.data?.gaps) ? body.data.gaps : [],
+        });
+        return proximo;
+      });
+    } catch (error) {
+      showNotification("error", error instanceof Error ? error.message : "Não foi possível coletar a SERP das keywords.");
+    } finally {
+      setKeywordSerpBusyScope(null);
+    }
+  };
+
+  /**
+   * A leitura do grupo publicado, uma por território.
+   *
+   * Sem primária eleita não há leitura: comparar as secundárias entre si
+   * responderia outra pergunta. Sem coleta, também não — e as duas ausências
+   * são ditas na tela em vez de virarem um painel vazio que parece conclusivo.
+   */
+  const publishedSerpReadouts = useMemo(() => {
+    const mapa = new Map<string, PublishedKeywordReadout>();
+    for (const view of territorialReviewViews) {
+      const territoryRef = view.current.territoryRef;
+      const primaria = view.current.primaryKeyword;
+      const coletado = territoryRef ? keywordSerpByScope.get(territoryRef) : null;
+      if (!territoryRef || !primaria || !coletado) continue;
+
+      const doTerritorio = keywordsOfTerritory(territoryRef);
+      const primariaKw = doTerritorio.find(kw => String(kw.id) === primaria.keywordId);
+      if (!primariaKw) continue;
+
+      mapa.set(territoryRef, readPublishedGroupFromSerp({
+        primary: {
+          keywordId: primaria.keywordId,
+          keywordDnaId: dnaSignalsByKeyword.get(primaria.keywordId)?.dnaVersionId ?? null,
+          keyword: String(primariaKw.keyword || primaria.keywordId),
+          volumeSearch: typeof primariaKw.volume_search === "number" ? primariaKw.volume_search : null,
+          policy: primariaKw.primaryKeywordPolicy || "unknown",
+        },
+        secondaries: doTerritorio
+          .filter(kw => String(kw.id) !== primaria.keywordId)
+          .map(kw => ({
+            keywordId: String(kw.id),
+            keywordDnaId: dnaSignalsByKeyword.get(String(kw.id))?.dnaVersionId ?? null,
+            keyword: String(kw.keyword || ""),
+            volumeSearch: typeof kw.volume_search === "number" ? kw.volume_search : null,
+          })),
+        observations: coletado.observations,
+        currentKeywordCount: doTerritorio.length,
+      }));
+    }
+    return mapa;
+  }, [territorialReviewViews, keywordSerpByScope, keywordsOfTerritory, dnaSignalsByKeyword]);
 
   /**
    * Despacho da decisão humana para os WRITERS CANÔNICOS já existentes.
@@ -8975,6 +9091,25 @@ export default function ArquitetoPage() {
    * Nada é inventado: campo ausente vira `null`, e a base declarada da
    * proposta só cita o sinal que existe.
    */
+  /**
+   * ORIGEM 2 — O QUE O MINERADOR DECLAROU NO [VÍNCULO].
+   *
+   * `siteRole` sempre esteve no handoff e nunca foi lido aqui: não aparecia
+   * uma vez sequer em `lib/arquiteto/`. Por isso o teste com lista publicada
+   * não tinha como acertar a primária — o dado chegava e ninguém abria.
+   *
+   * Só entra keyword que tem declaração: ausência não vira entrada no mapa,
+   * e um lote sem publicados produz exatamente a proposta de antes.
+   */
+  const architectureKeywordDeclarations = useMemo(() => {
+    const mapa = new Map<string, EditorialUnitDeclaration>();
+    for (const keyword of masterList) {
+      const declaracao = adaptKeywordIdentityContext(keyword).editorialUnitDeclaration;
+      if (declaracao) mapa.set(String(keyword.id), declaracao);
+    }
+    return mapa;
+  }, [masterList]);
+
   const architectureProposal = useMemo(() => buildArchitectureWorkingProposal({
     analysis: architectureAnalysis,
     existingSilos: [
@@ -8989,8 +9124,9 @@ export default function ArquitetoPage() {
       intent: intentIsKnown(territory.macroIntent) ? territory.macroIntent : null,
     })),
     keywords: architectureKeywordSignals,
+    declarations: architectureKeywordDeclarations,
     slugOf: normalizeManualSiloPageSlug,
-  }), [architectureAnalysis, territorialSurface, architectureKeywordSignals]);
+  }), [architectureAnalysis, territorialSurface, architectureKeywordSignals, architectureKeywordDeclarations]);
 
   /**
    * Itens canônicos das keywords, para as edições escreverem com `expectedLock`.
@@ -11989,7 +12125,17 @@ export default function ArquitetoPage() {
         if (silo.territoryRef) { refPorChave.set(silo.key, silo.territoryRef); continue; }
         const created = await createRemoteSiloCandidate({
           brandId: selectedBrandId,
-          draft: manualSiloCandidateDraft({ name: silo.name, slug: silo.slug }),
+          draft: manualSiloCandidateDraft({
+            name: silo.name,
+            slug: silo.slug,
+            /*
+             * ORIGEM 2 — a proposta já leu QUEM a declaração aponta; aqui, que
+             * é onde há escrita, entra o QUANDO. A decisão não é retomada.
+             */
+            primaryKeyword: silo.primaryKeywordDeclaration
+              ? stampPublishedPrimary(silo.primaryKeywordDeclaration, new Date().toISOString())
+              : null,
+          }),
         });
         refPorChave.set(silo.key, created.territoryRef);
         criados.push(created);
@@ -13899,12 +14045,26 @@ export default function ArquitetoPage() {
                   {territorialReviewViews.filter(view => view.status === "decision_recorded").length} com decisão registrada
                 </p>
                 {territorialReviewViews.map(view => (
-                  <TerritorialReviewPanel
-                    key={view.subject.ref}
-                    view={view}
-                    busyAction={reviewBusyAction}
-                    onAction={action => { void applyReviewAction(action); }}
-                  />
+                  <React.Fragment key={view.subject.ref}>
+                    <TerritorialReviewPanel
+                      view={view}
+                      busyAction={reviewBusyAction}
+                      onAction={action => { void applyReviewAction(action); }}
+                    />
+                    {/* A SERP do grupo é outra pergunta, e por isso é outro painel. */}
+                    {view.current.territoryRef && (
+                      <PublishedSerpPanel
+                        label={view.subject.label}
+                        readout={publishedSerpReadouts.get(view.current.territoryRef) ?? null}
+                        gaps={keywordSerpByScope.get(view.current.territoryRef)?.gaps ?? []}
+                        busy={keywordSerpBusyScope === view.current.territoryRef}
+                        disabledReason={view.current.primaryKeyword
+                          ? null
+                          : "Este Silo ainda não tem keyword primária eleita: sem ela não há com o que comparar as secundárias."}
+                        onCollect={() => { void collectKeywordSerp(view.current.territoryRef!); }}
+                      />
+                    )}
+                  </React.Fragment>
                 ))}
               </div>
             )}

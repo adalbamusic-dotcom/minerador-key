@@ -23,6 +23,8 @@
 
 import type { ArchitectureAnalysis, ClusterAnalysis } from "./architecture-analysis";
 import { intentComparisonKey, intentIsKnown, type KeywordDnaSignals } from "./keyword-dna-signals.ts";
+import { selectPublishedSiloDeclaration, type PublishedSiloDeclaration } from "./silo-primary-keyword.ts";
+import type { EditorialUnitDeclaration } from "./contracts.ts";
 
 export type ProposalSiloSource = "reused" | "proposed";
 
@@ -35,6 +37,15 @@ export type ProposalSilo = {
   slug: string;
   /** A keyword que deu origem à identidade do Silo. */
   seedKeywordId: string | null;
+  /**
+   * ORIGEM 2 — a primária que a declaração do [Vínculo] aponta.
+   *
+   * `null` quando nenhuma keyword do grupo está publicada como Silo: aí a
+   * identidade ainda não foi decidida, e inventar uma seria pior que admitir
+   * a ausência. Sem carimbo de tempo — a proposta é derivada, e o `electedAt`
+   * é dado na materialização.
+   */
+  primaryKeywordDeclaration: Extract<PublishedSiloDeclaration, { state: "FOUND" }> | null;
   source: ProposalSiloSource;
   reason: string;
 };
@@ -217,6 +228,13 @@ export function buildArchitectureWorkingProposal(input: {
   existingSilos: readonly ExistingSilo[];
   /** §3 — o KeywordDNA canônico de cada keyword do lote. */
   keywords: readonly KeywordDnaSignals[];
+  /**
+   * ORIGEM 2 — o que o Minerador declarou no [Vínculo] de cada keyword.
+   *
+   * Opcional: lote sem declaração nenhuma continua produzindo a mesma
+   * proposta de antes, só que sem primária eleita.
+   */
+  declarations?: ReadonlyMap<string, EditorialUnitDeclaration>;
   /** Normalizador de slug do próprio módulo; injetado para o domínio ficar puro. */
   slugOf: (value: string) => string;
 }): ArchitectureWorkingProposal {
@@ -239,6 +257,7 @@ export function buildArchitectureWorkingProposal(input: {
       name: nome,
       slug: silo.slug || input.slugOf(nome),
       seedKeywordId: null,
+      primaryKeywordDeclaration: null,
       source: "reused",
       reason: "Silo já existente no acervo desta Brand.",
     });
@@ -257,15 +276,38 @@ export function buildArchitectureWorkingProposal(input: {
     return [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
   };
 
+  /**
+   * ORIGEM 2 — a declaração publicada do grupo, quando existe uma.
+   *
+   * Não é palpite sobre o grupo: é leitura do que o site já tem no ar. Quando
+   * uma keyword do cluster é uma página publicada declarada Silo, ela é a
+   * identidade — e passa a ser também a SEMENTE, no lugar da cabeça léxica que
+   * a análise escolheu por proximidade de texto.
+   */
+  const declaracaoDoGrupo = (cluster: ClusterAnalysis) => {
+    if (!input.declarations?.size) return null;
+    const selecionada = selectPublishedSiloDeclaration(cluster.memberKeywordIds.map(keywordId => ({
+      keywordId,
+      declaration: input.declarations?.get(keywordId),
+      label: keywordTexts.get(keywordId) || keywordId,
+    })));
+    return selecionada.state === "FOUND" ? selecionada : null;
+  };
+
   const propor = (cluster: ClusterAnalysis, motivo: string): string => {
     const nome = rotuloDoCluster(cluster);
     const slug = input.slugOf(nome);
     const key = `proposed:${slug}`;
     if (!silos.has(key)) {
+      const declarada = declaracaoDoGrupo(cluster);
       silos.set(key, {
         key, territoryRef: null, name: nome, slug,
-        seedKeywordId: cluster.headKeywordId,
-        source: "proposed", reason: motivo,
+        seedKeywordId: declarada?.keywordId ?? cluster.headKeywordId,
+        primaryKeywordDeclaration: declarada,
+        source: "proposed",
+        reason: declarada
+          ? `${motivo} A primária é "${declarada.label}": já publicada e declarada Silo pelo Minerador.`
+          : motivo,
       });
       nucleoDoSilo.set(key, identityCore(nome));
       intencaoDoSilo.set(key, intencaoDoGrupo(cluster));

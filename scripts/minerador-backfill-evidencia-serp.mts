@@ -8,9 +8,11 @@
  * `analise_semantica.evidencia_serp` a cada coleta; este script projeta a
  * versão vigente para as keywords coletadas antes disso.
  *
- * Passo 0 — re-assinatura: os registros de aprovação gravados no esquema v1
- * (semântica crua) migram para v2 (leitura canônica) sem mudar versão, autor
- * ou instante. Só migra o que ainda bate em v1; registro já divergente é
+ * Passo 0 — re-assinatura: os registros de aprovação gravados em esquema
+ * antigo (v1, semântica crua; v2, leitura canônica) migram para o esquema
+ * atual sem mudar versão, autor ou instante. O esquema atual é o v3
+ * (2026-09-21), que exclui as séries de medição do conteúdo assinado. Só
+ * migra o que ainda bate no esquema que declara; registro já divergente é
  * revisão de verdade e fica como está.
  *
  * Efeito colateral declarado: keyword APROVADA cuja SERP conclusiva muda a
@@ -84,7 +86,7 @@ for (const row of todas) {
   if (result.semantic) reassinaturas.push({ row, semantic: result.semantic });
   else if (result.reason === "diverged") divergentesV1.push(row);
 }
-console.log(`registros de aprovação a migrar de v1 para v2: ${reassinaturas.length} · v1 já divergentes (ficam em revisão): ${divergentesV1.length}`);
+console.log(`registros de aprovação a migrar para o esquema atual: ${reassinaturas.length} · já divergentes (ficam em revisão): ${divergentesV1.length}`);
 for (const row of divergentesV1.slice(0, 10)) console.log(`  · em revisão: ${row.keyword}`);
 
 if (APPLY) {

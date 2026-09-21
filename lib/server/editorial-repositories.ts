@@ -1,4 +1,5 @@
 import { pruneRadarAnalysisHistory } from "@/lib/radar/analysis-history-pruning";
+import { hasInlineAnalysisRun, mergeAnalysisRun, splitAnalysisRun } from "@/lib/radar/analysis-run-storage";
 import { compactRadarResearchForRead } from "@/lib/radar/research-read-model";
 import "server-only";
 import type { ArticleDNA, ContentDocument, ContentPlan, SiloDNA, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts";
@@ -135,9 +136,54 @@ export class ArtifactRepository {
 }
 
 type WorkflowStage = "radar" | "planner";
+
+const WORKFLOW_TABELA = "editorial_workflow_items";
+const WORKFLOW_VIEW_LISTAGEM = "editorial_workflow_items_listagem";
+
+/**
+ * De onde a LISTAGEM le: a view sem as corridas historicas.
+ *
+ * O recuo para a tabela existe porque codigo e banco nao sobem juntos aqui —
+ * as migrations sao aplicadas a mao. Sem ele, publicar antes de aplicar a
+ * migration deixaria o workspace editorial inteiro sem leitura. E definitivo
+ * na vida do processo: uma vez que a view falte, nao se insiste a cada carga.
+ */
+let fonteDaListagemWorkflow: string = WORKFLOW_VIEW_LISTAGEM;
+
+function viewDeWorkflowAusente(error: { code?: string | null; message?: string | null } | null): boolean {
+  if (!error) return false;
+  const code = String(error.code || "");
+  return code === "42P01" || code === "PGRST205" || String(error.message || "").includes(WORKFLOW_VIEW_LISTAGEM);
+}
+
 export class WorkflowRepository {
   async list(marcaId: string) {
-    const { data, error } = await client().from("editorial_workflow_items").select("id,marca_id,article_id,stage,state,payload,lock_version,created_at,updated_at").eq("marca_id", marcaId).in("stage", ["radar", "planner"]);
+    /*
+     * A CONSULTA E QUE PRECISA CORTAR — nao a poda logo abaixo.
+     *
+     * Medido em 2026-09-21: 10 MB em 3 linhas de estagio 'radar', 98,7% em
+     * `analysisVersions`. A poda e a compactacao que este metodo aplica rodam
+     * no SERVIDOR, depois do download: economizavam banda do navegador, nao
+     * egresso da Supabase. Os 10 MB ja tinham saido.
+     *
+     * A view esvazia os quatro campos pesados das versoes historicas com a
+     * mesma semantica da poda em TS, e preserva um SUPERCONJUNTO do que ela
+     * preservaria — a poda abaixo continua sendo a autoridade e estreita o
+     * resultado. Por isso ela permanece rodando: nao e redundancia, e quem
+     * decide.
+     */
+    const lerDe = async (fonte: string) => client()
+      .from(fonte)
+      .select("id,marca_id,article_id,stage,state,payload,lock_version,created_at,updated_at")
+      .eq("marca_id", marcaId)
+      .in("stage", ["radar", "planner"]);
+
+    let { data, error } = await lerDe(fonteDaListagemWorkflow);
+    if (error && fonteDaListagemWorkflow !== WORKFLOW_TABELA && viewDeWorkflowAusente(error)) {
+      // Migration ainda nao aplicada: a tela funciona, so sem a economia.
+      fonteDaListagemWorkflow = WORKFLOW_TABELA;
+      ({ data, error } = await lerDe(WORKFLOW_TABELA));
+    }
     unwrap(data, error); const radar: RadarItem[] = []; const planner: PlannerItem[] = []; const incompatible: IncompatibleRecord[] = [];
     for (const row of data || []) {
       /*
@@ -206,14 +252,88 @@ export class WorkflowRepository {
     return { radar, planner, incompatible };
   }
 
+  /*
+   * ===== AS CORRIDAS MORAM FORA DA LINHA =====
+   *
+   * Os quatro campos pesados de cada versao vivem em `radar_analysis_runs`
+   * (20260921080000). A troca acontece AQUI, na fronteira do repositorio: os
+   * ~20 modulos que leem `amazonSearch` e companhia recebem a versao inteira,
+   * como sempre receberam, e nao sabem da tabela.
+   *
+   * A reidratacao e de TODAS as versoes, de proposito. E o comportamento de
+   * hoje, sem economia nesta rota -- o ganho desta etapa esta na ESCRITA, que
+   * deixa de reler e regravar ~8 MB para acrescentar uma versao. Hidratar so
+   * a versao pedida e etapa propria, rota a rota, porque exige saber qual e.
+   */
+  private async corridasDoItem(itemId: string): Promise<Map<string, Record<string, unknown>>> {
+    const { data, error } = await client().from("radar_analysis_runs").select("version_id,payload").eq("workflow_item_id", itemId);
+    if (error) mapPersistenceError(error);
+    return new Map((data || []).map(linha => [String((linha as { version_id: unknown }).version_id), ((linha as { payload: unknown }).payload || {}) as Record<string, unknown>]));
+  }
+
+  private async reidratarCorridas<T>(linha: T): Promise<T> {
+    const registro = linha && typeof linha === "object" ? linha as Record<string, unknown> : null;
+    const payload = registro?.payload && typeof registro.payload === "object" && !Array.isArray(registro.payload)
+      ? registro.payload as Record<string, unknown>
+      : null;
+    const versoes = Array.isArray(payload?.analysisVersions) ? payload.analysisVersions as Record<string, unknown>[] : null;
+    if (!registro || !payload || !versoes || versoes.length === 0) return linha;
+
+    const corridas = await this.corridasDoItem(String(registro.id));
+    if (corridas.size === 0) return linha;
+
+    return {
+      ...registro,
+      payload: {
+        ...payload,
+        analysisVersions: versoes.map(versao => {
+          const versionId = typeof versao.versionId === "string" ? versao.versionId : null;
+          const corrida = versionId ? corridas.get(versionId) : undefined;
+          return corrida ? mergeAnalysisRun(versao, corrida) : versao;
+        }),
+      },
+    } as T;
+  }
+
+  /**
+   * Guarda as corridas das versoes e devolve as versoes leves.
+   *
+   * A corrida vai PRIMEIRO. Se a gravacao do payload falhar depois (trava
+   * otimista), sobra uma corrida sem versao correspondente -- inofensiva, a
+   * fusao so alcanca versao presente, e a cascata a leva junto com o item. A
+   * ordem inversa e que seria perda: payload leve gravado sem a corrida ter
+   * chegado.
+   */
+  private async guardarCorridas(input: { itemId: string; marcaId: string; articleId: string | null; versoes: Record<string, unknown>[]; actorId: string }): Promise<Record<string, unknown>[]> {
+    const linhas: Array<Record<string, unknown>> = [];
+    const leves = input.versoes.map(versao => {
+      const versionId = typeof versao.versionId === "string" ? versao.versionId : null;
+      if (!versionId || !hasInlineAnalysisRun(versao)) return versao;
+      const { light, run, hasRun } = splitAnalysisRun(versao);
+      if (!hasRun) return versao;
+      linhas.push({ workflow_item_id: input.itemId, version_id: versionId, marca_id: input.marcaId, article_id: input.articleId, payload: run, updated_by: input.actorId, updated_at: new Date().toISOString() });
+      return light;
+    });
+    if (linhas.length === 0) return input.versoes;
+
+    const { error } = await client().from("radar_analysis_runs").upsert(linhas, { onConflict: "workflow_item_id,version_id" });
+    if (error) mapPersistenceError(error);
+    return leves;
+  }
+
   async find(id: string) {
     const { data, error } = await client().from("editorial_workflow_items").select("*").eq("id", id).maybeSingle();
+    return this.reidratarCorridas(unwrap(data, error));
+  }
+
+  /** Leitura CRUA, sem reidratar: para quem so precisa acrescentar. */
+  private async findByArticleRaw(marcaId: string, articleId: string, stage: WorkflowStage) {
+    const { data, error } = await client().from("editorial_workflow_items").select("*").eq("marca_id", marcaId).eq("article_id", articleId).eq("stage", stage).maybeSingle();
     return unwrap(data, error);
   }
 
   async findByArticle(marcaId: string, articleId: string, stage: WorkflowStage = "radar") {
-    const { data, error } = await client().from("editorial_workflow_items").select("*").eq("marca_id", marcaId).eq("article_id", articleId).eq("stage", stage).maybeSingle();
-    return unwrap(data, error);
+    return this.reidratarCorridas(await this.findByArticleRaw(marcaId, articleId, stage));
   }
 
   async importItem(input: { marcaId: string; articleId: string; stage: WorkflowStage; state: string; sourceEntityId: string; sourceVersionId: string | null; sourceContentHash: string | null; payload: object; actorId: string }) {
@@ -243,19 +363,61 @@ export class WorkflowRepository {
   }
 
   async transition(id: string, expectedLock: number, state: string, payload: object, actorId: string) {
-    const { data, error } = await client().from("editorial_workflow_items").update({ state, payload, updated_by: actorId }).eq("id", id).eq("lock_version", expectedLock).select("*").maybeSingle();
+    /*
+     * O payload que chega pode vir REIDRATADO -- veio de `find` ou
+     * `findByArticle`, que repoem as corridas. Grava-lo como esta devolveria
+     * as corridas para dentro da linha e desfaria a arrumacao em silencio, uma
+     * transicao de cada vez.
+     */
+    const aGravar = await this.desidratarPayload(id, payload, actorId);
+    const { data, error } = await client().from("editorial_workflow_items").update({ state, payload: aGravar, updated_by: actorId }).eq("id", id).eq("lock_version", expectedLock).select("*").maybeSingle();
     if (error) mapPersistenceError(error); if (!data) throw new OptimisticLockError(); return data;
   }
 
+  private async desidratarPayload(itemId: string, payload: object, actorId: string): Promise<object> {
+    const registro = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : null;
+    const versoes = Array.isArray(registro?.analysisVersions) ? registro.analysisVersions as Record<string, unknown>[] : null;
+    if (!registro || !versoes || !versoes.some(versao => hasInlineAnalysisRun(versao))) return payload;
+
+    // A corrida precisa da marca; sao duas colunas, nao a linha.
+    const { data, error } = await client().from("editorial_workflow_items").select("marca_id,article_id").eq("id", itemId).maybeSingle();
+    if (error) mapPersistenceError(error);
+    if (!data) return payload;
+
+    const leves = await this.guardarCorridas({
+      itemId,
+      marcaId: String((data as { marca_id: unknown }).marca_id),
+      articleId: (data as { article_id: unknown }).article_id === null ? null : String((data as { article_id: unknown }).article_id),
+      versoes,
+      actorId,
+    });
+    return { ...registro, analysisVersions: leves };
+  }
+
   async appendRadarAnalysis(marcaId: string, articleId: string, expectedLock: number, analysis: RadarAnalysisVersion, actorId: string) {
-    const current = await this.findByArticle(marcaId, articleId, "radar");
+    /*
+     * Leitura CRUA: acrescentar nao precisa das corridas das versoes antigas.
+     *
+     * Era aqui que se pagava mais caro. A linha inteira descia (8032 kB na
+     * maior), uma versao era acrescentada, e tudo subia de volta -- e crescia
+     * a cada rodada. Sem as corridas, desce e sobe o payload leve.
+     */
+    const current = await this.findByArticleRaw(marcaId, articleId, "radar");
     if (!current) return null;
     if (current.marca_id !== marcaId || current.article_id !== articleId) return null;
     const radar = RadarItemSchema.parse({ ...(current.payload as object), id: current.id, brandId: current.marca_id, articleId: current.article_id, state: current.state, lockVersion: current.lock_version, importedAt: isoDate(current.created_at), updatedAt: isoDate(current.updated_at), origin: "real" });
     if (analysis.payload.brandId !== marcaId || analysis.payload.articleId !== articleId) throw new Error("A análise Radar não corresponde ao artigo ou à marca.");
     const alreadySaved = radar.analysisVersions.some(version => version.versionId === analysis.versionId);
     if (alreadySaved) return current;
-    const payload = { ...(current.payload as object), analysisVersions: [...radar.analysisVersions, analysis] };
+    // A corrida da versao nova vai para a tabela; no payload entra a leve.
+    const [leve] = await this.guardarCorridas({
+      itemId: current.id as string,
+      marcaId,
+      articleId,
+      versoes: [analysis as unknown as Record<string, unknown>],
+      actorId,
+    });
+    const payload = { ...(current.payload as object), analysisVersions: [...radar.analysisVersions, leve] };
     /*
      * A VOLTA NÃO PRECISA DA LINHA INTEIRA.
      *

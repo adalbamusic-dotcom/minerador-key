@@ -1,5 +1,16 @@
 import { isLegacyPublishedStatus } from "./editorial-status.ts";
 
+/**
+ * Registro das tentativas de sobrescrever o endereco de uma publicada.
+ *
+ * Gravado pelo gatilho `minerador_keywords_trava_identidade_publicada`
+ * (20260921050000), que congela slug e URLs da keyword publicada e anota o
+ * que se tentou escrever. Fica FORA da assinatura do pacote aprovado: numa
+ * tentativa bloqueada nada mudou, e derrubar a aprovacao por causa dela
+ * repetiria o problema que o esquema v3 existe para resolver.
+ */
+export const PUBLICATION_IDENTITY_LOCK_HISTORY_KEY = "publication_identity_lock_history" as const;
+
 export type PublicationLinkState = "free" | "candidate" | "verified" | "published" | "legacy_unverified";
 
 export type PublicationLinkAction = "confirm" | "correct_legacy" | "unlink";
@@ -22,6 +33,15 @@ export type PublicationLinkEvidence = Record<string, unknown> & {
   publicationCorrectedAt?: string | null;
   publicationUnlinkedBy?: string | null;
   publicationUnlinkedAt?: string | null;
+  siteRole?: string | null;
+  siloPath?: string | null;
+  /**
+   * URL congelada como canônica no ato da declaração de publicação.
+   *
+   * O canonical lido da página pode mudar depois; o que a marca declarou
+   * como endereço desta keyword, não. Só é gravado ao confirmar.
+   */
+  canonicalUrl?: string | null;
 };
 
 export type PublicationLinkView = {
@@ -31,6 +51,11 @@ export type PublicationLinkView = {
   relation: string | null;
   technicalVerification: boolean;
   action: Extract<PublicationLinkAction, "confirm" | "correct_legacy" | "unlink"> | null;
+  /** `silo` | `article` | … quando a conferência derivou o papel da página. */
+  siteRole: string | null;
+  siloPath: string | null;
+  /** Canônico declarado na confirmação; `null` enquanto não há publicação. */
+  canonicalUrl: string | null;
 };
 
 const TECHNICALLY_VERIFIED_URL_STATES = new Set([
@@ -72,14 +97,68 @@ function actualUrl(evidence: PublicationLinkEvidence | null | undefined): string
   return text(evidence?.declaredCanonicalUrl) || text(evidence?.resolvedUrl) || text(evidence?.sourceUrl);
 }
 
+/**
+ * Lê a evidência de publicação tolerando o formato serializado.
+ *
+ * Em 2026-09-21 descobriu-se que "Processar lógica" gravava `site_origin`
+ * como **string JSON**. Esta função devolvia `null`, e com ela caíam a
+ * publicação na tela, o canônico e — o que importa de verdade — a proteção
+ * contra exclusão, que pergunta por aqui se a keyword está publicada.
+ *
+ * O motor foi corrigido e há script de reparo, mas a leitura passa a aceitar
+ * as duas formas de propósito: **uma trava que se desliga porque o dado
+ * mudou de forma não é trava.** Ler não repara nada no banco; só se recusa a
+ * confundir "ilegível" com "não existe".
+ */
 export function readSiteOrigin(semantic: Record<string, unknown> | null | undefined): PublicationLinkEvidence | null {
   const origin = semantic?.site_origin;
-  return origin && typeof origin === "object" && !Array.isArray(origin)
-    ? origin as PublicationLinkEvidence
-    : null;
+  if (origin && typeof origin === "object" && !Array.isArray(origin)) return origin as PublicationLinkEvidence;
+  if (typeof origin === "string" && origin.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(origin);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as PublicationLinkEvidence;
+    } catch {
+      // Texto que não volta a ser objeto não vira evidência inventada.
+    }
+  }
+  return null;
+}
+
+/**
+ * Rótulo da relação entre a keyword e a URL publicada.
+ *
+ * `"undefined"` é valor LEGÍTIMO do contrato (`KeywordUrlRelationshipSchema`):
+ * quer dizer "relação não definida", e o Arquiteto o consome assim. Não é
+ * vazamento de `undefined` do JavaScript, e trocá-lo por `null` na gravação
+ * mudaria o que o Arquiteto recebe.
+ *
+ * O que não pode é chegar à tela como está. Em 2026-09-21 o Perfil mostrava
+ * "Papel atual: undefined" para as duas publicadas, porque interpolava o
+ * valor de fio. Sem rótulo, devolve `null` e o campo simplesmente não
+ * aparece — que é o certo quando não há relação a declarar.
+ */
+export function keywordUrlRelationLabel(relation: string | null | undefined): string | null {
+  switch (relation) {
+    case "confirmed_primary": return "Principal confirmada";
+    case "confirmed_secondary": return "Secundária confirmada";
+    case "candidate_primary": return "Principal candidata";
+    case "likely_support": return "Apoio provável";
+    case "mentioned_in_content": return "Mencionada no conteúdo";
+    default: return null;
+  }
 }
 
 export function readPublicationLink(input: { status?: string | null; evidence?: PublicationLinkEvidence | null }): PublicationLinkView {
+  const evidence = input.evidence || null;
+  return {
+    ...readPublicationLinkBase(input),
+    siteRole: text(evidence?.siteRole),
+    siloPath: text(evidence?.siloPath),
+    canonicalUrl: text(evidence?.canonicalUrl),
+  };
+}
+
+function readPublicationLinkBase(input: { status?: string | null; evidence?: PublicationLinkEvidence | null }): Omit<PublicationLinkView, "siteRole" | "siloPath" | "canonicalUrl"> {
   const evidence = input.evidence || null;
   const publicationStatus = String(evidence?.publicationStatus || "").toLowerCase();
   const technicallyVerified = isTechnicalVerification(evidence);
@@ -224,7 +303,7 @@ export function applyPublicationLinkAction(
     keywordUrlRelation: nextRelation,
     publication_link_history: history,
     ...(input.action === "confirm"
-      ? { publicationConfirmedBy: input.actorId, publicationConfirmedAt: input.changedAt, relationConfirmedBy: input.actorId, relationConfirmedAt: input.changedAt }
+      ? { publicationConfirmedBy: input.actorId, publicationConfirmedAt: input.changedAt, relationConfirmedBy: input.actorId, relationConfirmedAt: input.changedAt, canonicalUrl: actualUrl(origin) }
       : input.action === "correct_legacy"
         ? { publicationCorrectedBy: input.actorId, publicationCorrectedAt: input.changedAt, publicationConfirmedBy: null, publicationConfirmedAt: null, relationConfirmedBy: null, relationConfirmedAt: null }
         : { publicationUnlinkedBy: input.actorId, publicationUnlinkedAt: input.changedAt, publicationConfirmedBy: null, publicationConfirmedAt: null, relationConfirmedBy: null, relationConfirmedAt: null }),

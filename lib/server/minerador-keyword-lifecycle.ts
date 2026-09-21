@@ -10,6 +10,10 @@ export const KEYWORD_LIFECYCLE_ERROR_STATUS: Record<string, number> = {
   KEYWORD_DELETE_UNAUTHORIZED: 403,
   KEYWORD_DELETE_BRAND_MISMATCH: 403,
   KEYWORD_DELETE_TRANSACTION_FAILED: 422,
+  // A RPC recusa o lote inteiro quando ha publicada. Sem esta entrada, a
+  // recusa cairia no fallback e chegaria a tela como falha generica de
+  // transacao -- o humano nao saberia que o motivo foi uma pagina no ar.
+  KEYWORD_DELETE_PUBLICATION_PROTECTED: 409,
   KEYWORD_DELETE_REQUIRES_RECOVERABLE_FLOW: 409,
   KEYWORD_RECOVERABLE_DELETE_FAILED: 422,
   KEYWORD_RESTORE_WINDOW_EXPIRED: 409,
@@ -60,7 +64,10 @@ export function lifecycleErrorResponse(error: unknown, fallbackCode = "KEYWORD_D
   return NextResponse.json({
     success: false,
     code,
-    message: "A operação do ciclo de vida da keyword não foi concluída. Nenhuma alteração parcial foi confirmada.",
+    // A recusa por publicacao diz o que fazer; a generica nao teria como.
+    message: code === "KEYWORD_DELETE_PUBLICATION_PROTECTED"
+      ? "Página publicada não é apagada. Desvincule a publicação antes, se for mesmo o caso."
+      : "A operação do ciclo de vida da keyword não foi concluída. Nenhuma alteração parcial foi confirmada.",
     // A mensagem acima continua amigável; a causa técnica deixa de ser descartada.
     diagnostic: lifecycleErrorDiagnostic(error, { stage: "repository", httpStatus: status, code }),
   }, { status });

@@ -166,11 +166,29 @@ export function normalizeDataForSeoSerpResponse(body: unknown, input: SerpSearch
       return question ? SerpPeopleAlsoAskSchema.parse({ position: index + childIndex + 1, question, answer: textFrom(questionItem.description) || null, sourceTitle: textFrom(questionItem.title) || null, sourceUrl: validUrl(questionItem.url)?.toString() || null, classification: null, notes: "" }) : null;
     }).filter((item): item is z.infer<typeof SerpPeopleAlsoAskSchema> => Boolean(item));
   });
-  const related = rawItems.map(raw => {
+  /*
+   * OS TERMOS RELACIONADOS MORAM EM `items[]`, NÃO NO TOPO DO BLOCO.
+   *
+   * A leitura anterior era `item.title || item.keyword` no bloco — e o bloco
+   * `related_searches` da DataForSEO não tem nenhum dos dois: ele traz
+   * `items: ["Produtos de skincare baratos", "Skincare o que é", ...]`, um
+   * array de STRINGS. Resultado: toda busca relacionada virava zero, em
+   * silêncio, e o campo `relatedSearches` do contrato chegava vazio sempre.
+   *
+   * Agora desce para os filhos e aceita as duas formas — string solta e objeto
+   * com `title`/`keyword` —, porque o provider usa as duas dependendo do bloco.
+   */
+  const related = rawItems.flatMap(raw => {
     const item = recordOf(raw);
-    const term = item && /related_search/.test(clean(item.type).toLowerCase()) ? textFrom(item.title) || textFrom(item.keyword) : "";
-    return term ? SerpRelatedSearchSchema.parse({ term, classification: null, notes: "" }) : null;
-  }).filter((item): item is z.infer<typeof SerpRelatedSearchSchema> => Boolean(item));
+    if (!item || !/related_search/.test(clean(item.type).toLowerCase())) return [];
+    const filhos = Array.isArray(item.items) && item.items.length ? item.items : [item];
+    return filhos.map(filho => {
+      const termo = typeof filho === "string"
+        ? clean(filho)
+        : textFrom(recordOf(filho)?.title) || textFrom(recordOf(filho)?.keyword) || "";
+      return termo ? SerpRelatedSearchSchema.parse({ term: termo, classification: null, notes: "" }) : null;
+    }).filter((entry): entry is z.infer<typeof SerpRelatedSearchSchema> => Boolean(entry));
+  });
   /*
     * A conta que explica a cardinalidade: quantos itens de cada tipo o provider
     * devolveu, antes do filtro que mantém apenas organic e video.
@@ -181,7 +199,7 @@ export function normalizeDataForSeoSerpResponse(body: unknown, input: SerpSearch
      return counts;
    }, {});
    const diagnostic = { ...diagnosticFor(input, organic, paa, related), rawItemTypeCounts };
-  return SerpResearchSnapshotSchema.parse({ id: `serp:${input.articleId}:${crypto.randomUUID()}`, brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId, keywordId: input.keywordId, keywordDnaVersionId: input.keywordDnaVersionId, query: input.keyword, country: "br", language: input.language, location: input.location, device: input.device, resultLimit: input.resultLimit, provider: "dataforseo", providerEndpoint: "/search", origin: "real", isMock: false, collectedAt, version: input.version, previousSnapshotId: input.previousSnapshotId, contentHash: hash({ query: input.keyword, locationCode: config.locationCode, languageCode: config.languageCode, device: input.device, organic, paa, related, knowledgeGraph: knowledgeGraphFrom(rawItems), diagnostic }), persistenceMode: "local", status: "needs_review", organicResults: organic, peopleAlsoAsk: paa, relatedSearches: related, knowledgeGraph: knowledgeGraphFrom(rawItems), serpFeatures: buildRadarSerpFeatureIntelligence(body), diagnostic });
+  return SerpResearchSnapshotSchema.parse({ id: `serp:${input.articleId}:${crypto.randomUUID()}`, brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: input.articleDnaVersionId, keywordId: input.keywordId, keywordDnaVersionId: input.keywordDnaVersionId, query: input.keyword, country: "br", language: input.language, location: input.location, device: input.device, operatingSystem: input.operatingSystem ?? null, resultLimit: input.resultLimit, provider: "dataforseo", providerEndpoint: "/search", origin: "real", isMock: false, collectedAt, version: input.version, previousSnapshotId: input.previousSnapshotId, contentHash: hash({ query: input.keyword, locationCode: config.locationCode, languageCode: config.languageCode, device: input.device, operatingSystem: input.operatingSystem ?? null, organic, paa, related, knowledgeGraph: knowledgeGraphFrom(rawItems), diagnostic }), persistenceMode: "local", status: "needs_review", organicResults: organic, peopleAlsoAsk: paa, relatedSearches: related, knowledgeGraph: knowledgeGraphFrom(rawItems), serpFeatures: buildRadarSerpFeatureIntelligence(body), diagnostic });
 }
 
 /** Compatibility name retained for the Arquiteto boundary and its fixtures. */

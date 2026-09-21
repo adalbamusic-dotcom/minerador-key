@@ -8,6 +8,7 @@ import {
   type TerritorialLandscapeInput,
 } from "../lib/arquiteto/territorial-landscape.ts";
 import type { KeywordTerritoryAssignment, TerritoryCandidate } from "../lib/arquiteto/territory.ts";
+import { buildTerritorialSurface } from "../lib/arquiteto/territorial-surface.ts";
 
 const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
 const landscapeSource = readFileSync("lib/arquiteto/territorial-landscape.ts", "utf8");
@@ -299,4 +300,102 @@ test("a SERP de silo existe e é own, nunca a SERP de Article reaproveitada", ()
   assert.doesNotMatch(workspace, /workspaceMode === "silos" \? handleValidateSerp/);
   // Bloqueio, quando existir, precisa dizer o motivo funcional.
   assert.match(workspace, /territorialSerpBlockedReason/);
+});
+
+test("keyword atribuída a um silo que não existe mais continua na mesa (INV-T2)", () => {
+  /*
+   * O CASO REAL DA MESA VAZIA.
+   *
+   * Reportado em 2026-09-21 com o lote de 9 keywords: a aba Silos mostrava
+   * UMA estrutura existente e nenhuma keyword — nem sob o silo, nem soltas.
+   *
+   * A decisão anterior apontava para um `territoryRef` que não está mais na
+   * paisagem (silo descartado, reprocessado ou não carregado). A keyword
+   * entrava em `assignedKeywordIds`, saía de `unassignedKeywords` por já estar
+   * "decidida", e o território dela não existia para projetá-la. Resultado:
+   * sumia da mesa inteira, sem uma linha dizendo por quê.
+   */
+  const resultado = landscape({
+    keywords: [keyword("kw-1"), keyword("kw-orfa")],
+    territories: [territory("territory:a")],
+    assignments: [assignment("kw-1", "territory:a"), assignment("kw-orfa", "territory:sumiu")],
+  });
+
+  const orfa = resultado.unassignedKeywords.find(entry => entry.keywordId === "kw-orfa");
+  assert.ok(orfa, "INV-T2: keyword com silo inexistente não pode sumir da paisagem");
+  assert.equal(orfa.state, "unassigned");
+  // O motivo diz o que aconteceu; "ainda sem decisão" mentiria sobre o histórico.
+  assert.match(orfa.reason, /não está nesta leitura/i);
+
+  // A contagem acompanha: a keyword volta a ser pendente, não some da soma.
+  assert.equal(resultado.counts.keywordsInScope, 2);
+  assert.equal(resultado.counts.keywordsAssigned, 1);
+  assert.equal(resultado.counts.keywordsUnassigned, 1);
+  // E nenhum território é fabricado para acomodá-la.
+  assert.deepEqual(resultado.candidateTerritories.map(item => item.territoryRef), ["territory:a"]);
+});
+
+test("a mesa de Silos mostra as keywords soltas junto das estruturas existentes", () => {
+  /*
+   * A mesma tela vazia por outro ângulo: com estrutura existente e keywords
+   * sem silo, os dois grupos precisam existir na superfície. Antes, a keyword
+   * órfã não chegava nem a `unassigned`, e a seção "Sem silo" não nascia.
+   */
+  const resultado = landscape({
+    keywords: [keyword("kw-solta"), keyword("kw-orfa")],
+    territories: [],
+    assignments: [assignment("kw-orfa", "territory:sumiu")],
+  });
+
+  const soltas = resultado.unassignedKeywords.map(entry => entry.keywordId).sort();
+  assert.deepEqual(soltas, ["kw-orfa", "kw-solta"]);
+});
+
+test("silo consolidado continua na mesa com as keywords dele (INV-T2)", () => {
+  /*
+   * A SEGUNDA METADE DA MESA VAZIA.
+   *
+   * Reportado em 2026-09-21: 29 keywords no lote, 20 em "Sem silo", nenhuma
+   * sob os silos — 9 sumidas. Elas pertenciam ao silo do lote anterior, que já
+   * havia sido CONFIRMADO/consolidado.
+   *
+   * A paisagem projetava o território corretamente em `otherTerritories`, mas a
+   * superfície só montava grupo para `candidateTerritories` e
+   * `confirmedTerritories`. Consolidado, rejeitado, superseded e arquivado não
+   * viravam grupo — e toda keyword associada a eles desaparecia da mesa, sem
+   * uma linha dizendo onde estava.
+   */
+  const consolidado = buildTerritorialSurface({
+    landscape: landscape({
+      keywords: [keyword("kw-viva"), keyword("kw-consolidada")],
+      territories: [
+        territory("territory:viva"),
+        territory("territory:fechada", {
+          lifecycleStatus: "consolidated",
+          decisionState: "confirmed",
+          consolidation: {
+            siloDnaVersionRef: { entityId: "silo-1", versionId: "v1", contentHash: `sha256:${"a".repeat(64)}` },
+            siloPageVersionRef: { entityId: "page-1", versionId: "v1", contentHash: `sha256:${"b".repeat(64)}` },
+            consolidatedAt: "2026-09-20T12:00:00.000Z",
+            actorUserId: "user-1",
+          },
+        } as never),
+      ],
+      assignments: [assignment("kw-viva", "territory:viva"), assignment("kw-consolidada", "territory:fechada")],
+    }),
+  });
+
+  const grupos = consolidado.groups.filter(group => group.kind === "territories");
+  const refs = grupos.map(group => group.header?.ref).sort();
+  assert.deepEqual(refs, ["territory:fechada", "territory:viva"], "silo consolidado precisa continuar na mesa");
+
+  const fechada = grupos.find(group => group.header?.ref === "territory:fechada");
+  assert.deepEqual(fechada?.rows.map(row => row.keywordId), ["kw-consolidada"]);
+  // O estado real aparece: consolidado não se disfarça de candidato.
+  assert.equal(fechada?.header?.lifecycleStatus, "consolidated");
+
+  // E nenhuma keyword do lote fica fora de algum grupo.
+  const visiveis = new Set(consolidado.groups.flatMap(group => group.rows.map(row => row.keywordId)));
+  assert.equal(visiveis.has("kw-viva"), true);
+  assert.equal(visiveis.has("kw-consolidada"), true);
 });
