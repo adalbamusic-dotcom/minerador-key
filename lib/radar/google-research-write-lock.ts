@@ -81,11 +81,55 @@ export function radarGoogleResearchIsFinalized(payload: unknown): boolean {
   return Boolean(objeto(objeto(payload)?.finalizedBundle));
 }
 
+export const RADAR_GOOGLE_SERP_FINALIZED_MESSAGE =
+  "A investigação está finalizada: a SERP congelada não é atualizada nem recoletada. Reabra a investigação antes de coletar de novo.";
+
+export type RadarGoogleSerpWriteDecision = {
+  state: RadarGoogleWriteState;
+  allowed: boolean;
+  code: typeof RADAR_GOOGLE_RESEARCH_FINALIZED | null;
+  message: string | null;
+};
+
+/**
+ * ===== A COLETA DA SERP SOB A FOTOGRAFIA — SDD do Radar, R1b =====
+ *
+ * Toda coleta nova — "Atualizar SERP", a pesquisa auxiliar, a recoleta paga e,
+ * quando existir, a que viria inteira do cache — escreve uma SERP que a
+ * investigação congelada não leu. A pergunta é a mesma de
+ * `radarGoogleResearchIsFinalized`, sobre a versão CORRENTE gravada; não há
+ * outro critério de congelamento.
+ */
+export function radarGoogleSerpWriteLock(current: unknown): RadarGoogleSerpWriteDecision {
+  if (!radarGoogleResearchIsFinalized(current)) return { state: "OPEN", allowed: true, code: null, message: null };
+  return { state: "FINALIZED_LOCKED", allowed: false, code: RADAR_GOOGLE_RESEARCH_FINALIZED, message: RADAR_GOOGLE_SERP_FINALIZED_MESSAGE };
+}
+
+export const RADAR_GOOGLE_FROZEN_BUNDLE_MESSAGE =
+  "A fotografia congelada não é reescrita. Reabra a investigação antes de congelar de novo.";
+
+/**
+ * A FOTOGRAFIA GRAVADA É A MESMA QUE A ESCRITA CARREGA?
+ *
+ * Comparação por conteúdo, com as chaves ordenadas: a linha do banco e o corpo
+ * do pedido podem trazer as mesmas chaves em ordem diferente, e isso não é
+ * reescrita.
+ */
+function serializacaoEstavel(valor: unknown): string {
+  if (valor === null || typeof valor !== "object") return JSON.stringify(valor) ?? "null";
+  if (Array.isArray(valor)) return `[${valor.map(serializacaoEstavel).join(",")}]`;
+  const registro = valor as Record<string, unknown>;
+  return `{${Object.keys(registro).filter(chave => registro[chave] !== undefined).sort()
+    .map(chave => `${JSON.stringify(chave)}:${serializacaoEstavel(registro[chave])}`).join(",")}}`;
+}
+
 export type RadarGoogleWriteDecision = {
   state: RadarGoogleWriteState;
   allowed: boolean;
   /** Os campos competitivos que ESTA escrita toca. Vazio quando não toca nenhum. */
   competitiveFields: RadarGoogleCompetitiveField[];
+  /** A escrita troca a própria fotografia congelada, sem reabrir? */
+  frozenBundleRewritten: boolean;
   code: typeof RADAR_GOOGLE_RESEARCH_FINALIZED | null;
   message: string | null;
 };
@@ -116,7 +160,7 @@ export function radarGoogleResearchWriteLock(input: {
   const competitiveFields = RADAR_GOOGLE_COMPETITIVE_FIELDS.filter(mudou);
 
   if (!radarGoogleResearchIsFinalized(atual)) {
-    return { state: "OPEN", allowed: true, competitiveFields, code: null, message: null };
+    return { state: "OPEN", allowed: true, competitiveFields, frozenBundleRewritten: false, code: null, message: null };
   }
 
   /*
@@ -126,18 +170,38 @@ export function radarGoogleResearchWriteLock(input: {
    * a investigação para sempre: a única saída exigiria a trava que a impede.
    */
   if (!radarGoogleResearchIsFinalized(proximo)) {
-    return { state: "OPEN", allowed: true, competitiveFields, code: null, message: null };
+    return { state: "OPEN", allowed: true, competitiveFields, frozenBundleRewritten: false, code: null, message: null };
+  }
+
+  /*
+   * ===== A FOTOGRAFIA TAMBÉM NÃO É REESCRITA — SDD do Radar, R1 =====
+   *
+   * O standing da SERP é avaliado UMA vez, no congelamento, e mora dentro da
+   * fotografia. Uma escrita que chegasse com outra fotografia — sem o standing,
+   * com outro standing, com outro hash — trocaria o que o dossiê entrega sem
+   * reabrir nada. Congelar de novo exige reabrir antes.
+   */
+  if (serializacaoEstavel(atual?.finalizedBundle) !== serializacaoEstavel(proximo?.finalizedBundle)) {
+    return {
+      state: "FINALIZED_LOCKED",
+      allowed: false,
+      competitiveFields,
+      frozenBundleRewritten: true,
+      code: RADAR_GOOGLE_RESEARCH_FINALIZED,
+      message: RADAR_GOOGLE_FROZEN_BUNDLE_MESSAGE,
+    };
   }
 
   if (!competitiveFields.length) {
-    /* Aprovar, anotar, congelar, registrar o envio: nada disso troca a amostra. */
-    return { state: "FINALIZED_LOCKED", allowed: true, competitiveFields: [], code: null, message: null };
+    /* Aprovar, anotar, registrar o envio: nada disso troca a amostra. */
+    return { state: "FINALIZED_LOCKED", allowed: true, competitiveFields: [], frozenBundleRewritten: false, code: null, message: null };
   }
 
   return {
     state: "FINALIZED_LOCKED",
     allowed: false,
     competitiveFields,
+    frozenBundleRewritten: false,
     code: RADAR_GOOGLE_RESEARCH_FINALIZED,
     message: RADAR_GOOGLE_FINALIZED_MESSAGE,
   };

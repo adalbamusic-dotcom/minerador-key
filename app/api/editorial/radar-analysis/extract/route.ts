@@ -55,10 +55,22 @@ export async function POST(request: NextRequest) {
      * Sem leitura remota não há referência de pesquisa: a recusa é declarada,
      * e o caminho canônico segue como sempre.
      */
+    /*
+     * A LINHA COMO ESTÁ GRAVADA, SEM AS CORRIDAS.
+     *
+     * O portão e os alvos leem brandId, articleId, serpSnapshotId,
+     * serpSnapshotHash, serpDecisions e deepResearch.researchCuration — nenhum
+     * dos quatro campos de corrida (extractions, competitiveReport,
+     * youtubeSearch, amazonSearch) —, e a resposta só leva as páginas recém-
+     * extraídas. A rota não grava nada. Reidratar era pagar por lixo, e em
+     * laço: o cliente chama esta rota uma vez por lote de 5 páginas. Medido em
+     * 2026-09-23 no item mais pesado: 8,22 MB por lote, dos quais 7,32 MB de
+     * corridas que ninguém lia; agora 0,90 MB.
+     */
     let autoridade = input;
     let remotaDisponivel = false;
     try {
-      const linha = await new WorkflowRepository().findByArticle(input.brandId, input.articleId, "radar");
+      const linha = await new WorkflowRepository().findByArticleWithoutRuns(input.brandId, input.articleId, "radar");
       if (linha && linha.marca_id === input.brandId && linha.article_id === input.articleId) {
         const versoes = storedRadarAnalyses(linha.payload);
         const persistida = versoes.find(version => version.versionId === input.analysis.versionId) || versoes.at(-1) || null;

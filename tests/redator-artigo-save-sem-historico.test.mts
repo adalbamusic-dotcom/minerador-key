@@ -536,3 +536,34 @@ test("22 · ESTRUTURAL · todo caminho devolve o lock corrente e diz se reusou",
   assert.match(componente, /body\.version\.reused \?/);
   assert.match(componente, /já estava finalizada; nada foi criado/);
 });
+
+/* =============================================================================
+ * FASE 0 DO LEITOR DE EVIDÊNCIAS · O READBACK DO SAVE LÊ POR CAMINHO
+ *
+ * docs/07-redator/propostas/sdd-leitor-evidencias-redator-2026-09-23.md §8 e
+ * R16. A prova de comportamento, com PostgREST falso, mora em
+ * tests/redator-mcp-alvo-sem-payload.test.mts.
+ * ========================================================================== */
+
+test("23 · ESTRUTURAL · Fase 0 · só o `before` do save lê o payload inteiro; o readback lê blocos, hash, lock e ponteiro", async () => {
+  const save = trecho(semComentarios(await fonte(SERVIDOR)), "export async function saveWriterArticleDraft",
+    "export async function listWriterDeliverables");
+  const selects = [...save.matchAll(/\.select\("([^"]*)"\)/g)].map(match => match[1]);
+  assert.deepEqual(selects, ["id,payload,lock_version", "content_hash,lock_version,current_version_id,blocks:payload->blocks"]);
+  const colunasInteiras = (select: string) => select.split(",").filter(coluna => !coluna.includes(":"));
+  assert.deepEqual(selects.map(select => colunasInteiras(select).includes("payload")), [true, false],
+    "o payload inteiro só entra no before, que o hash exige");
+
+  /* As duas leituras filtram documento e Marca. */
+  assert.equal(save.split('.eq("id", input.documentId).eq("marca_id", input.brandId).maybeSingle()').length - 1, 2);
+
+  /* A conferência continua a mesma, agora sobre o caminho. */
+  assert.match(save, /canonicalJson\(ContentBlockSchema\.array\(\)\.parse\(readback\.data\.blocks\)\) !== canonicalJson\(blocks\)/);
+  assert.match(save, /readback\.data\.content_hash !== hash/);
+  assert.match(save, /readback\.data\.lock_version !== receipt\.lockVersion/);
+  assert.doesNotMatch(save, /readback\.data\.payload/);
+
+  /* O hash continua calculado sobre o documento inteiro: é por isso que o before fica. */
+  assert.match(save, /const hash = await contentHash\(next\);/);
+  assert.match(save, /p_payload: next/);
+});

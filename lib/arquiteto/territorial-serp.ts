@@ -15,6 +15,14 @@
 
 import { z } from "zod";
 import type { SerpResearchSnapshot } from "../radar/serp/contracts.ts";
+import {
+  SERP_LENS_DATES_DIVERGE_DAYS,
+  SERP_LENS_DIGEST_NOTE,
+  SerpLensesMarkerSchema,
+  collectedAtSpreadDays,
+  lensAgreementLabel,
+  type SerpLensesMarker,
+} from "./serp-lens-plan.ts";
 
 /* ------------------------------- perguntas ------------------------------- */
 
@@ -81,6 +89,12 @@ export const TerritorialSerpAssessmentSchema = z.object({
   /** Snapshots que sustentam o parecer; a evidência fica rastreável. */
   snapshotIds: z.array(z.string()),
   collectedAt: z.string().min(1),
+  /**
+   * O marcador das quatro lentes (adendo A5): pedidas, observadas, faltantes,
+   * a sobreposição e os blocos por lente, a concordância e o portão de datas.
+   * Opcional: parecer gravado antes das quatro lentes continua válido.
+   */
+  lenses: SerpLensesMarkerSchema.optional(),
 }).strict();
 export type TerritorialSerpAssessment = z.infer<typeof TerritorialSerpAssessmentSchema>;
 
@@ -234,32 +248,182 @@ const competitionOf = (snapshot: SerpResearchSnapshot): "high" | "medium" | "low
   return dominios >= total - 1 ? "low" : "medium";
 };
 
+type OverlapLevel = "low" | "medium" | "high" | "unknown";
+
+/** A sobreposição entre duas listas de URLs de uma MESMA lente. */
+export function territorialOverlapOfUrls(primaryUrls: readonly string[], comparisonUrls: readonly string[]): OverlapLevel {
+  const urls = new Set(primaryUrls);
+  if (!urls.size || !comparisonUrls.length) return "unknown";
+  const compartilhados = comparisonUrls.filter(url => urls.has(url)).length;
+  const proporcao = compartilhados / Math.min(urls.size, comparisonUrls.length);
+  if (proporcao >= 0.5) return "high";
+  if (proporcao >= 0.2) return "medium";
+  return "low";
+}
+
 const overlapOf = (primary: SerpResearchSnapshot, comparison: SerpResearchSnapshot | null) => {
   if (!comparison) return null;
-  const urls = new Set(primary.organicResults.map(result => result.url));
-  if (!urls.size || !comparison.organicResults.length) return "unknown" as const;
-  const compartilhados = comparison.organicResults.filter(result => urls.has(result.url)).length;
-  const proporcao = compartilhados / Math.min(urls.size, comparison.organicResults.length);
-  if (proporcao >= 0.5) return "high" as const;
-  if (proporcao >= 0.2) return "medium" as const;
-  return "low" as const;
+  return territorialOverlapOfUrls(primary.organicResults.map(result => result.url), comparison.organicResults.map(result => result.url));
 };
+
+/**
+ * Uma lente EXTRA da pergunta territorial (adendo das 4 lentes, A4): as URLs do
+ * top 10 orgânico de cada consulta, lidas do digest. `null` = a consulta não
+ * foi observada nesta lente.
+ */
+export type TerritorialLensReading = {
+  lens: string;
+  primaryUrls: readonly string[] | null;
+  comparisonUrls: readonly string[] | null;
+  /** Os blocos não orgânicos que a SERP desta lente mostrou (formatos por aparelho). */
+  blocks?: readonly string[];
+  /** Quando cada consulta desta lente foi observada. */
+  collectedAt: readonly string[];
+  /**
+   * Quando a consulta principal e a de comparação foram observadas NESTA
+   * lente. Opcionais (2026-09-23): o portão de datas compara as lentes de uma
+   * MESMA consulta, nunca a principal com a comparação. Ausentes, valem as
+   * posições de `collectedAt` (principal primeiro), a ordem em que a rota lê.
+   */
+  primaryCollectedAt?: string | null;
+  comparisonCollectedAt?: string | null;
+};
+
+/** As datas desta lente, separadas por consulta. */
+const datasPorConsulta = (reading: TerritorialLensReading) => ({
+  primary: reading.primaryCollectedAt !== undefined ? reading.primaryCollectedAt : reading.primaryUrls ? reading.collectedAt[0] ?? null : null,
+  comparison: reading.comparisonCollectedAt !== undefined
+    ? reading.comparisonCollectedAt
+    : reading.comparisonUrls ? reading.collectedAt[reading.primaryUrls ? 1 : 0] ?? null : null,
+});
+
+export type TerritorialLensContext = {
+  primaryLens: string;
+  requested: readonly string[];
+  primaryBlocks?: readonly string[];
+  extras: readonly TerritorialLensReading[];
+  missing: SerpLensesMarker["missing"];
+};
+
+/**
+ * A sobreposição agregada pelas lentes em que as DUAS consultas foram
+ * observadas (A4).
+ *
+ *   `high`       só com `high` na MAIORIA (mais da metade) das lentes, e em
+ *                pelo menos duas;
+ *   fronteira    `high` em alguma lente sem ser maioria: nunca vira
+ *                `usar_silo_existente` — vai para decisão humana;
+ *   `medium`     em pelo menos metade das lentes;
+ *   `low`        no resto.
+ *
+ * Com uma lente só (ou nenhuma extra com as duas consultas), vale a da lente
+ * principal: o parecer de hoje.
+ */
+export function aggregateTerritorialOverlap(levels: readonly OverlapLevel[]): { level: OverlapLevel; frontier: { high: number; observed: number } | null } {
+  const votantes = levels.filter(level => level !== "unknown");
+  if (votantes.length <= 1) return { level: levels[0] ?? "unknown", frontier: null };
+  const n = votantes.length;
+  const altas = votantes.filter(level => level === "high").length;
+  if (altas >= 2 && altas > n / 2) return { level: "high", frontier: null };
+  if (altas >= 1) return { level: "medium", frontier: { high: altas, observed: n } };
+  const medias = votantes.filter(level => level === "medium").length;
+  return { level: medias >= n / 2 ? "medium" : "low", frontier: null };
+}
+
+/** Os blocos não orgânicos de um snapshot normalizado, na ordem das contagens. */
+const blocksOf = (blocks: readonly string[] | undefined) => (blocks && blocks.length ? [...blocks] : undefined);
+
+function territorialLensesMarker(input: {
+  context: TerritorialLensContext;
+  primary: SerpResearchSnapshot | null;
+  comparison: SerpResearchSnapshot | null;
+  primaryLevel: OverlapLevel | null;
+  extraLevels: readonly { lens: string; level: OverlapLevel | null }[];
+  aggregated: OverlapLevel | null;
+}): SerpLensesMarker {
+  const { context } = input;
+  const datasPrincipal = [input.primary?.collectedAt, input.comparison?.collectedAt].filter((date): date is string => Boolean(date));
+  const perLens: SerpLensesMarker["perLens"] = [
+    {
+      lens: context.primaryLens,
+      observedQueries: [input.primary, input.comparison].filter(Boolean).length,
+      oldestCollectedAt: datasPrincipal.length ? [...datasPrincipal].sort()[0] : null,
+      newestCollectedAt: datasPrincipal.length ? [...datasPrincipal].sort().at(-1)! : null,
+      verdict: input.primaryLevel,
+      ...(blocksOf(context.primaryBlocks) ? { blocks: blocksOf(context.primaryBlocks) } : {}),
+    },
+    ...context.extras.map(reading => {
+      const datas = [...reading.collectedAt].sort();
+      return {
+        lens: reading.lens,
+        observedQueries: [reading.primaryUrls, reading.comparisonUrls].filter(Boolean).length,
+        oldestCollectedAt: datas[0] ?? null,
+        newestCollectedAt: datas.at(-1) ?? null,
+        verdict: input.extraLevels.find(item => item.lens === reading.lens)?.level ?? null,
+        ...(blocksOf(reading.blocks) ? { blocks: blocksOf(reading.blocks) } : {}),
+      };
+    }),
+  ];
+  const observed = perLens.filter((line, index) => index === 0 ? Boolean(input.primary) : Boolean(context.extras[index - 1]?.primaryUrls)).map(line => line.lens);
+  const votos = [input.primaryLevel, ...input.extraLevels.map(item => item.level)].filter((level): level is OverlapLevel => Boolean(level) && level !== "unknown");
+  const agreement = input.comparison && votos.length
+    ? lensAgreementLabel(votos.filter(level => level === input.aggregated).length, votos.length)
+    : "sem comparação";
+  /*
+   * O PORTÃO DE DATAS É POR CONSULTA, como no plano (`dateGroup` = texto da
+   * consulta) e na formação (por keyword): as lentes da principal entre si, as
+   * da comparação entre si, e vale a maior diferença. Um silo confirmado em
+   * cache há 20 dias comparado com um silo novo pago agora NÃO é "lentes de
+   * datas diferentes" quando as quatro lentes de cada um são da mesma época.
+   */
+  const porConsulta = context.extras.map(datasPorConsulta);
+  const spread = Math.max(
+    collectedAtSpreadDays([input.primary?.collectedAt, ...porConsulta.map(item => item.primary)]),
+    collectedAtSpreadDays([input.comparison?.collectedAt, ...porConsulta.map(item => item.comparison)]),
+  );
+  return {
+    requested: [...context.requested],
+    observed,
+    missing: [...context.missing],
+    perLens,
+    agreement,
+    collectedAtSpreadDays: spread,
+    datesDiverge: spread > SERP_LENS_DATES_DIVERGE_DAYS,
+    ...(context.extras.length ? { note: SERP_LENS_DIGEST_NOTE } : {}),
+  };
+}
 
 /**
  * Converte snapshots em parecer arquitetural.
  *
  * Nenhum caminho aqui altera silo: o retorno é leitura. Sem resultado
  * suficiente, o parecer diz `evidencia_insuficiente` em vez de arriscar.
+ *
+ * Com `lenses`, a sobreposição é votada nas quatro lentes (A4). Amplitude,
+ * competição, tipo dominante e perguntas continuam saindo da lente principal:
+ * o digest das extras não traz o People Also Ask.
  */
 export function assessTerritorialSerp(input: {
   question: TerritorialSerpQuestion;
   snapshots: readonly SerpResearchSnapshot[];
   collectedAt?: string;
+  lenses?: TerritorialLensContext;
 }): TerritorialSerpAssessment {
   const { question } = input;
   const primary = input.snapshots[0] ?? null;
   const comparison = input.snapshots[1] ?? null;
   const collectedAt = input.collectedAt || primary?.collectedAt || new Date().toISOString();
+  const primaryLevel = primary ? overlapOf(primary, comparison) : null;
+  const extraLevels = (input.lenses?.extras || []).map(reading => ({
+    lens: reading.lens,
+    level: comparison && reading.primaryUrls && reading.comparisonUrls ? territorialOverlapOfUrls(reading.primaryUrls, reading.comparisonUrls) : null,
+  }));
+  const agregado = primaryLevel === null
+    ? { level: null, frontier: null }
+    : aggregateTerritorialOverlap([primaryLevel, ...extraLevels.map(item => item.level).filter((level): level is OverlapLevel => level !== null)]);
+  const marcador = input.lenses
+    ? territorialLensesMarker({ context: input.lenses, primary, comparison, primaryLevel, extraLevels, aggregated: agregado.level })
+    : null;
   const base = {
     questionId: question.questionId,
     kind: question.kind,
@@ -267,6 +431,7 @@ export function assessTerritorialSerp(input: {
     comparedTerritoryRef: question.comparedTerritoryRef,
     snapshotIds: input.snapshots.map(snapshot => snapshot.id),
     collectedAt,
+    ...(marcador ? { lenses: marcador } : {}),
   };
 
   if (!primary || !primary.organicResults.length) {
@@ -283,7 +448,8 @@ export function assessTerritorialSerp(input: {
   const dominantType = dominantTypeOf(primary);
   const breadth = breadthOf(primary);
   const competition = competitionOf(primary);
-  const overlap = overlapOf(primary, comparison);
+  // A sobreposição votada nas lentes; com uma lente só, é a de hoje.
+  const overlap = agregado.level;
   const observedIntent = primary.diagnostic.dominantIntent;
   const conflicts = [...primary.diagnostic.possibleConflicts];
   const pareceHub = dominantType ? HUB_TYPES.has(dominantType) : false;
@@ -296,7 +462,25 @@ export function assessTerritorialSerp(input: {
       compatibility: "incompativel",
       observedIntent, dominantType, overlap, breadth, competition, conflicts,
       recommendation: "usar_silo_existente",
-      reason: "Forte sobreposição com o silo comparado: a evidência aponta para um único universo. A decisão continua humana.",
+      reason: agregado.frontier === null && (marcador?.observed.length ?? 1) > 1
+        ? "Forte sobreposição com o silo comparado na maioria das lentes: a evidência aponta para um único universo. A decisão continua humana."
+        : "Forte sobreposição com o silo comparado: a evidência aponta para um único universo. A decisão continua humana.",
+    });
+  }
+
+  /*
+   * FRONTEIRA ENTRE LENTES (A4): sobreposição alta em alguma lente, mas não na
+   * maioria. Uma lente sozinha nunca recomenda juntar os silos; a divergência
+   * vira conflito dito e decisão humana.
+   */
+  if (agregado.frontier) {
+    conflicts.push(`Sobreposição alta em ${agregado.frontier.high} de ${agregado.frontier.observed} lentes.`);
+    return TerritorialSerpAssessmentSchema.parse({
+      ...base,
+      compatibility: "parcialmente_coerente",
+      observedIntent, dominantType, overlap, breadth, competition, conflicts,
+      recommendation: "manter_silo",
+      reason: `A SERP dos dois silos se sobrepõe fortemente em ${agregado.frontier.high} de ${agregado.frontier.observed} lentes, sem maioria: a fronteira entre eles fica para decisão humana.`,
     });
   }
 

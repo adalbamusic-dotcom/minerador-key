@@ -1,5 +1,35 @@
 # Backlog — Redator
 
+## Leitor de evidências — 2026-09-23
+
+- [x] Fase 0: leituras estreitas.
+- [x] Fase 1: leitor, 4 ferramentas MCP novas, pacote da IA interna, divergências e Guardião.
+- [ ] **Aplicar a migration (usuário):** `npx supabase db query --linked -f supabase/migrations/20260923150000_writer_evidence_reader.sql`, depois `npx supabase migration repair --status applied 20260923150000 --linked`, depois a consulta de verificação comentada no fim do arquivo. Nunca `db push`.
+- [ ] **Homologar:**
+  - sessão real no ChatGPT: manifesto → fundamentos → fatias, e registrar uma divergência;
+  - IA interna numa seção de documento do Radar;
+  - Guardião com divergência bloqueante;
+  - readback agregado dos bytes.
+- [ ] Painel humano das divergências (status e bloqueante), mais o cache IndexedDB.
+- [ ] Fase 2: dossiê fora do payload. Resolve o `before` de ~4,5 MB por salvamento e o teto de CPU da listagem (E1).
+- [ ] `app/api/editorial/documents/route.ts`: a aprovação deve considerar as divergências bloqueantes (arquivo do Radar).
+- [ ] `writer-publication-handoff` ainda lê o documento inteiro.
+- [ ] Emenda à invariante 78: duas projeções de leitura do dossiê.
+
+## E1, E2 e leitor de evidências — 2026-09-23
+
+- [x] E1: listagem sem dossiê, detalhe ao abrir, duas garantias contra perda do dossiê.
+- [x] E2: mesa lida só quando um consumidor pede.
+- [ ] **Homologar:**
+  - F5 no Redator: na aba Rede, `/api/editorial/workspace` traz `documents` com `bundleOmitted`, e `GET /api/editorial/documents` traz o documento inteiro;
+  - editar e salvar um documento do Radar, e conferir no banco que o dossiê continua lá;
+  - F5 em `/admin` e `/minerador`: nenhuma chamada a `/api/inteligencia` nem a `/api/editorial/workspace`.
+- [ ] **Pré-requisito antes de ~5 documentos v2 com dossiê:** coluna gerada ou view da listagem (migration com SDD, aplicada pelo usuário), ou dossiê fora do payload (Fase 2 do leitor). O teste 22 fixa os 29 seletores.
+- [ ] `lib/server/radar-writer-send.ts` ainda lê o documento inteiro (~4,5 MB) a cada envio do Radar.
+- [ ] F5 com documento do Radar aberto ainda custa ~6,8 MB (mesa + detalhe) até existir cache do detalhe pelo hash.
+- [ ] **Decidir** a [SDD do leitor de evidências](propostas/sdd-leitor-evidencias-redator-2026-09-23.md) (seção 11). A Fase 0 dela é localizada e entra logo: readback estreito do salvamento, Guardião e seed lendo só o que usam.
+- [ ] A home da marca (`modules/marca/brand-page.tsx`) ainda lê a mesa inteira para 4 contadores (módulo Marca).
+
 ## Remoção do Planejador e retenção — estado em 2026-09-18
 
 - **Concluído:** Corte 1 (navegação, estágios declarados, documentação), Corte 2
@@ -207,3 +237,17 @@ Tratar criação mock como documento aprovado.
 - Submeter `docs/compartilhado/sdd-proposta-mcp-redator-2026-09-18.md` à
   decisão global sobre identidade, delegação e gateway. Nenhum endpoint MCP ou
   migration está autorizado por este item do backlog.
+
+## Egress — pendências do Redator — 2026-09-23
+
+Ver SDD de [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md).
+
+1. **E1 — `ContentDocument` fora da carga da mesa** (estrutural, aguarda
+   autorização). A carga fria da mesa traz os documentos completos, ~4,5 MB
+   hoje. **Risco crítico:** o autosave reenvia o documento inteiro; editar uma
+   cópia sem o bundle **apagaria o bundle no banco**. Exige fusão de
+   `importedContext` no servidor ou carga do detalhe antes de editar.
+2. **Readback de `save_writer_draft`** (`lib/server/writer-deliverables.ts`):
+   estreitar para `payload->blocks` tira ~4,48 MB por chamada, mas perde o
+   `ContentDocumentSchema.parse` do payload relido. Decidir se esse parse é
+   garantia exigida.

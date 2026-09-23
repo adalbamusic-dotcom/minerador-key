@@ -44,12 +44,26 @@ test("MCP inicializa e anuncia ferramentas com anotações de leitura/escrita", 
   const tools = listed.result?.tools as Array<{ name: string; annotations?: { readOnlyHint?: boolean } }>;
   assert.ok(Array.isArray(tools), JSON.stringify(listed));
   const byName = new Map(tools.map(tool => [tool.name, tool]));
-  for (const name of ["get_writer_connection_profile", "list_writer_documents", "get_writer_brief", "get_writer_document", "get_writer_guardian", "get_writer_deliverables"])
+  for (const name of ["get_writer_connection_profile", "list_writer_documents", "get_writer_brief", "get_writer_document", "get_writer_guardian", "get_writer_deliverables",
+    "get_writer_evidence_manifest", "get_writer_foundations", "read_writer_evidence"])
     assert.equal(byName.get(name)?.annotations?.readOnlyHint, true, name);
-  for (const name of ["save_writer_draft", "save_writer_deliverable", "register_media_brief", "attach_media_asset"])
+  for (const name of ["save_writer_draft", "save_writer_deliverable", "register_media_brief", "attach_media_asset", "record_writer_divergence"])
     assert.equal(byName.get(name)?.annotations?.readOnlyHint, false, name);
-  for (const name of ["approve_writer_document", "publish_document", "delete_writer_document"])
+  for (const name of ["approve_writer_document", "publish_document", "delete_writer_document", "update_article_dna", "resolve_writer_divergence"])
     assert.equal(byName.has(name), false, name);
+  assert.equal(tools.length, 14, "as 10 ferramentas de antes e as 4 do leitor de evidências");
+});
+
+test("a instrução do servidor ensina manifesto → fundamentos → fatias e leva as guardas (sem FAQ, terceiros, DNA)", async () => {
+  const send = harness(createWriterServer(principal([brandA])));
+  const initialized = await send(10, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "redator-test", version: "1" } });
+  const instructions = String(initialized.result?.instructions || "");
+  const ordem = ["get_writer_evidence_manifest", "get_writer_foundations", "read_writer_evidence"].map(name => instructions.indexOf(name));
+  assert.ok(ordem.every(posicao => posicao >= 0) && ordem[0] < ordem[1] && ordem[1] < ordem[2], instructions);
+  assert.match(instructions, /Não gere nem sugira FAQ/);
+  assert.match(instructions, /terceiros/);
+  assert.match(instructions, /record_writer_divergence/);
+  assert.match(instructions, /dos dois lados/);
 });
 
 test("MCP recusa escrita sem lock e não expõe ferramenta de publicação", async () => {

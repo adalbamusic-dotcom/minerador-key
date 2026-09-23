@@ -10,18 +10,22 @@ import { resolvePrimaryKeyword } from "@/lib/radar/keyword-resolver";
 import { assertRadarEnvelopeMatchesArticle, assertRadarWorkflowIdentityMatchesEnvelope, assertRemoteKeywordMatchesEnvelope, RadarResolutionEnvelopeError, validateRadarSerpResolutionEnvelope, type RadarSerpResolutionEnvelope } from "@/lib/radar/resolution-envelope";
 import { RadarPrimaryModeConflictError } from "@/lib/radar/search-mode";
 import { resolveRadarResearchSource } from "@/lib/server/radar-primary-mode";
+import { radarGoogleSerpWriteLock } from "@/lib/radar/google-research-write-lock";
+import { RADAR_SERP_FINALIZED_DURING_COLLECTION_MESSAGE, radarGoogleSerpWriteLockAtSave, readRadarCurrentAnalysisForSerp } from "@/lib/server/radar-serp-write-lock";
 import { SerpReviewSchema, type SerpResearchSnapshot, type SerpSearchInput } from "@/lib/radar/serp/contracts";
 import { RequestSchema } from "@/lib/radar/serp/request";
 import { ArtifactRepository, SerpSnapshotRepository, WorkflowRepository } from "@/lib/server/editorial-repositories";
 import { recoverRadarSerpSnapshot } from "@/lib/radar/serp-recovery";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { AuthzError, authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
-import { PersistenceUnavailableError, mapPersistenceError } from "@/lib/server/editorial-db";
-import { DataForSeoSerpError } from "@/lib/minerador/dataforseo-serp-core";
+import { PersistenceUnavailableError, getOperationalClient, mapPersistenceError } from "@/lib/server/editorial-db";
+import { DataForSeoSerpError, readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
 import { resolveDataForSeoCanonicalSerpCompatibilityConfig, DataForSeoCanonicalError } from "@/lib/server/dataforseo-canonical";
-import { collectDataForSeoSerpSnapshot } from "@/lib/server/dataforseo-serp-operation";
 import { IntegrationRuntimeError, integrationRuntimeErrorResponse, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import { radarSerpSnapshotSummary } from "@/lib/radar/serp-snapshot-summary";
+import { SERP_CACHE_CANONICAL_LENS } from "@/lib/editorial/serp-cache";
+import { RADAR_SERP_MAX_AGE_MS, RADAR_SERP_SNAPSHOT_DEPTH } from "@/lib/radar/serp/lens-set";
+import { collectRadarSerpLensSnapshot, readRadarKeywordTargetCodes } from "@/lib/server/radar-serp-lenses";
 
 const SerpReviewReadbackQuerySchema = z.object({
   brandId: z.string().uuid(),
@@ -389,7 +393,29 @@ export async function POST(request: NextRequest) {
      * esta SERP entra como `WEB_SERP` de apoio; se o artigo não tem alvo, é
      * ela que o declara como WEB.
      */
-    await resolveRadarResearchSource({ brandId: input.brandId, articleId: input.articleId, source: "WEB_SERP" });
+    /*
+     * ======== R1b · A SERP CONGELADA NÃO É ATUALIZADA — SDD do Radar ========
+     *
+     * "Atualizar SERP" abria versão nova a cada clique, inclusive com a
+     * investigação finalizada: esta rota nunca perguntava pela trava. Um
+     * snapshot novo sob uma fotografia congelada troca o que a curadoria e a
+     * extração dizem ter lido.
+     *
+     * A pergunta vem ANTES de tudo o que lê cache, resolve credencial ou chama
+     * o provider — inclusive quando tudo viria do cache. Revisar (acima)
+     * continua livre: anota, não troca a amostra. Reabrir, que limpa a
+     * fotografia, destrava sem segundo mecanismo.
+     *
+     * A leitura é a MESMA que a autoridade de fonte logo abaixo já fazia; ela
+     * só passou a acontecer uma vez e mais cedo, e reidrata só a versão
+     * corrente, a única que a trava e o plano de fonte leem.
+     */
+    const analiseCorrente = await readRadarCurrentAnalysisForSerp(input.brandId, input.articleId);
+    const travaDaSerp = radarGoogleSerpWriteLock(analiseCorrente);
+    if (!travaDaSerp.allowed) {
+      return NextResponse.json({ code: travaDaSerp.code, state: travaDaSerp.state, error: travaDaSerp.message }, { status: 409 });
+    }
+    await resolveRadarResearchSource({ brandId: input.brandId, articleId: input.articleId, source: "WEB_SERP" }, { loadAnalysisPayload: async () => analiseCorrente });
 
     const resolutionEnvelope = await validateRadarSerpResolutionEnvelope(input.resolutionEnvelope);
     const { article, resolved, hydration, resolutionMode, canonicalRemoteVerified } = await resolveArticle(profile, input.brandId, input.articleId, input.articleVersion, input.hydration, resolutionEnvelope);
@@ -447,31 +473,51 @@ export async function POST(request: NextRequest) {
          * registrar, e inventar uma produziria a lacuna que este gate remove.
          */
         || "";
-      const queryInput = SerpQueryInputSchema.parse({ keyword: auxiliar.keyword, articleId: input.articleId, location: input.location, language: input.language, device: input.device });
+      /*
+       * ===== R4 · A AUXILIAR PELO MESMO NÚCLEO DAS QUATRO LENTES =====
+       *
+       * Cache primeiro, só as lentes faltantes pagas, canônica em 20 e extras
+       * em 10, gravadas como `radar` — a mesma regra da SERP do artigo, sem
+       * uma segunda cópia. O `device` do pedido não é lido.
+       *
+       * Os `organicResults` saem SÓ da Desktop · Windows; as outras três vivem
+       * no `lensSet`. O universo competitivo junta consultas por posição, e
+       * somar posições de aparelhos diferentes misturaria lentes. Continua fora
+       * de `serpRecords`: sem snapshot anterior, sem "sem mudança", sem versão.
+       */
+      const queryInput = SerpQueryInputSchema.parse({ keyword: auxiliar.keyword, articleId: input.articleId, location: input.location, language: input.language, device: SERP_CACHE_CANONICAL_LENS.device });
       const searchInput: SerpSearchInput = {
         brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: article.versionId,
         keywordId: reference.keywordId, keywordDnaVersionId: reference.keywordDnaVersionId,
-        keyword: queryInput.keyword, location: queryInput.location, language: queryInput.language, device: queryInput.device,
+        keyword: queryInput.keyword, location: queryInput.location, language: queryInput.language,
+        device: SERP_CACHE_CANONICAL_LENS.device, operatingSystem: SERP_CACHE_CANONICAL_LENS.operatingSystem,
         expectedIntent: intencao, expectedFormat: article.payload.hierarchy,
         requiredTopics: reference.requiredTopics.length ? reference.requiredTopics : article.payload.requiredTopics,
         articleEntities: article.payload.entities,
-        resultLimit: Number.parseInt(process.env.SERP_DEFAULT_RESULTS || "10", 10) || 10,
+        resultLimit: RADAR_SERP_SNAPSHOT_DEPTH,
         /* Versão 1 e sem antecessor: a cadeia de versões pertence à SERP canônica. */
         version: 1, previousSnapshotId: null,
       };
-      const dataForSeoAuxiliar = await resolveDataForSeoCanonicalSerpCompatibilityConfig({ actorUserId: profile.userId, brandId: input.brandId, quotaUnits: 1 });
-      const auxiliaryRequestId = crypto.randomUUID();
-      const auxiliaryResearch = await collectDataForSeoSerpSnapshot(searchInput, { config: dataForSeoAuxiliar.config, operationRequestId: auxiliaryRequestId });
-      await recordIntegrationUsage({
-        resource: dataForSeoAuxiliar.resource,
-        operation: "module_operation",
-        module: "radar",
-        resultStatus: "succeeded",
-        units: 1,
-        idempotencyKey: `dataforseo:radar:serp-auxiliar:${auxiliaryRequestId}:${input.articleId}`,
-        providerReference: null,
-        metadata: { operationKind: "serp_auxiliary", articleId: input.articleId, keywordId: reference.keywordId, snapshotId: auxiliaryResearch.id },
+      const clienteDaAuxiliar = getOperationalClient();
+      const alvoDaAuxiliar = await readRadarKeywordTargetCodes(clienteDaAuxiliar, input.brandId, reference.keywordId, readDataForSeoTargetCodes());
+      const lentesDaAuxiliar = await collectRadarSerpLensSnapshot({
+        context: { supabase: clienteDaAuxiliar, brandId: input.brandId, actorUserId: profile.userId },
+        searchInput,
+        codes: alvoDaAuxiliar.codes,
+        codesSource: alvoDaAuxiliar.source,
+        cacheKeywordId: alvoDaAuxiliar.cacheKeywordId,
+        previous: null,
+        recollect: false,
+        now: new Date(),
+        maxAgeMs: RADAR_SERP_MAX_AGE_MS,
+        operationRequestId: crypto.randomUUID(),
+        purpose: "auxiliary",
+        usageMetadata: { keywordId: reference.keywordId },
+      }, {
+        resolveConfig: quotaUnits => resolveDataForSeoCanonicalSerpCompatibilityConfig({ actorUserId: profile.userId, brandId: input.brandId, quotaUnits }),
+        recordUsage: recordIntegrationUsage,
       });
+      const auxiliaryResearch = lentesDaAuxiliar.research;
       return NextResponse.json({
         serpClass: "auxiliary_research",
         keywordId: reference.keywordId,
@@ -479,6 +525,14 @@ export async function POST(request: NextRequest) {
         resolvedKeyword: auxiliar.keyword,
         keywordSource: auxiliar.source,
         research: { ...auxiliaryResearch, resolutionMode, canonicalRemoteVerified },
+        lensCoverage: {
+          observed: auxiliaryResearch.lensSet?.lenses.filter(lente => lente.status === "observed").length ?? 0,
+          total: auxiliaryResearch.lensSet?.lenses.length ?? 0,
+          paidCalls: lentesDaAuxiliar.paidCalls,
+          cacheHits: lentesDaAuxiliar.cacheHits,
+          codesSource: alvoDaAuxiliar.source,
+          cacheReadFailed: lentesDaAuxiliar.cacheReadFailed,
+        },
         /* Dito em voz alta: nada foi gravado como snapshot do artigo. */
         persistenceMode: "not_persisted_as_article_snapshot",
         note: "Pesquisa auxiliar: alimenta o universo competitivo da investigação e não substitui a SERP canônica do artigo.",
@@ -501,30 +555,78 @@ export async function POST(request: NextRequest) {
      */
     const intencaoCanonica = radarDeclaredArticleIntent(article.payload)
       || "";
-    const queryInput = SerpQueryInputSchema.parse({ keyword: resolved.keyword, articleId: input.articleId, location: input.location, language: input.language, device: input.device });
+    /*
+     * ======== R2 · AS QUATRO LENTES, CACHE PRIMEIRO — SDD do Radar ========
+     *
+     * A lente, o endpoint e a janela são do SERVIDOR: a canônica é a
+     * desktop-windows do produto, e o `device` que o cliente ainda mande não é
+     * lido. A janela do snapshot é fixa em 10 — sem ela o mesmo corpo em 20 e
+     * em 10 daria hashes diferentes.
+     *
+     * Os códigos de local e idioma são os do ALVO da keyword, pela função do
+     * Minerador: é o que faz a SERP que ele já pagou servir aqui de graça.
+     */
+    const queryInput = SerpQueryInputSchema.parse({ keyword: resolved.keyword, articleId: input.articleId, location: input.location, language: input.language, device: SERP_CACHE_CANONICAL_LENS.device });
     const searchInput: SerpSearchInput = { brandId: input.brandId, articleId: input.articleId, articleDnaVersionId: article.versionId, keywordId: resolved.keywordId, keywordDnaVersionId: resolved.keywordDnaVersionId,
-      keyword: queryInput.keyword, location: queryInput.location, language: queryInput.language, device: queryInput.device, expectedIntent: intencaoCanonica, expectedFormat: article.payload.hierarchy,
-      requiredTopics: article.payload.requiredTopics, articleEntities: article.payload.entities, resultLimit: Number.parseInt(process.env.SERP_DEFAULT_RESULTS || "10", 10) || 10, version: lastVersion + 1, previousSnapshotId: previous?.id || null };
-    const dataForSeo = await resolveDataForSeoCanonicalSerpCompatibilityConfig({ actorUserId: profile.userId, brandId: input.brandId, quotaUnits: 1 });
+      keyword: queryInput.keyword, location: queryInput.location, language: queryInput.language, device: SERP_CACHE_CANONICAL_LENS.device, operatingSystem: SERP_CACHE_CANONICAL_LENS.operatingSystem, expectedIntent: intencaoCanonica, expectedFormat: article.payload.hierarchy,
+      requiredTopics: article.payload.requiredTopics, articleEntities: article.payload.entities, resultLimit: RADAR_SERP_SNAPSHOT_DEPTH, version: lastVersion + 1, previousSnapshotId: previous?.id || null };
+    const cliente = getOperationalClient();
+    const alvo = await readRadarKeywordTargetCodes(cliente, input.brandId, resolved.keywordId, readDataForSeoTargetCodes());
     const operationRequestId = crypto.randomUUID();
-    const research = await collectDataForSeoSerpSnapshot(searchInput, { config: dataForSeo.config, operationRequestId });
+    /*
+     * O núcleo lê o cache ANTES de resolver credencial e quota, paga só as
+     * lentes faltantes (ou as quatro, com "Recoletar agora (pago)" confirmado)
+     * e registra um uso por chamada paga. Um acerto não registra uso.
+     */
+    const lentes = await collectRadarSerpLensSnapshot({
+      context: { supabase: cliente, brandId: input.brandId, actorUserId: profile.userId },
+      searchInput,
+      codes: alvo.codes,
+      codesSource: alvo.source,
+      cacheKeywordId: alvo.cacheKeywordId,
+      previous: previous?.research ?? null,
+      recollect: input.recollect?.confirmed === true,
+      now: new Date(),
+      maxAgeMs: RADAR_SERP_MAX_AGE_MS,
+      operationRequestId,
+    }, {
+      resolveConfig: quotaUnits => resolveDataForSeoCanonicalSerpCompatibilityConfig({ actorUserId: profile.userId, brandId: input.brandId, quotaUnits }),
+      recordUsage: recordIntegrationUsage,
+    });
+    const coberturaDasLentes = {
+      observed: lentes.research.lensSet?.lenses.filter(lente => lente.status === "observed").length ?? 0,
+      total: lentes.research.lensSet?.lenses.length ?? 0,
+      paidCalls: lentes.paidCalls,
+      cacheHits: lentes.cacheHits,
+      codesSource: alvo.source,
+      cacheReadFailed: lentes.cacheReadFailed,
+      reusedLensGaps: lentes.reusedLensGaps,
+    };
+    /*
+     * SEM MUDANÇA, SEM VERSÃO. O mesmo conteúdo nas quatro lentes devolve o
+     * snapshot gravado — nada é gravado, a curadoria presa ao hash não é
+     * invalidada, e a idade exibida continua a da versão gravada (D10).
+     */
+    if (lentes.unchanged && previous) {
+      return NextResponse.json({ record: previous, resolvedKeyword: resolved.keyword, persistenceMode: previous.persistenceMode, unchanged: true, unchangedBy: lentes.unchangedBy, lensCoverage: coberturaDasLentes });
+    }
+    const research = lentes.research;
     const resolvedResearch = { ...research, resolutionMode, canonicalRemoteVerified };
     const summary = summaryFromResearch(resolvedResearch);
-    await recordIntegrationUsage({
-      resource: dataForSeo.resource,
-      operation: "module_operation",
-      module: "radar",
-      resultStatus: "succeeded",
-      units: 1,
-      idempotencyKey: `dataforseo:radar:serp:${operationRequestId}:${input.articleId}`,
-      providerReference: null,
-      metadata: { operationKind: "serp", articleId: input.articleId, snapshotId: research.id },
-    });
     let record = SerpCollectionRecordSchema.parse({ id: research.id, input: queryInput, status: "needs_review", provider: "dataforseo", origin: "real", isMock: false, snapshot: summary, research: resolvedResearch, persistenceMode: "local", resolutionMode, canonicalRemoteVerified, cost: null, error: null,
       dnaIntent: radarDeclaredArticleIntent(article.payload), conflictReason: research.diagnostic.possibleConflicts[0] || null, humanDecisionRequired: true });
+    /*
+     * A TRAVA DE NOVO, NA GRAVAÇÃO. Um FINALIZE gravado durante a coleta, por
+     * outra aba ou outro dispositivo, não recebe uma SERP nova por baixo. O
+     * gasto já aconteceu e está no uso; o snapshot não é gravado.
+     */
+    const travaNaGravacao = await radarGoogleSerpWriteLockAtSave(input.brandId, input.articleId);
+    if (!travaNaGravacao.allowed) {
+      return NextResponse.json({ code: travaNaGravacao.code, state: travaNaGravacao.state, error: RADAR_SERP_FINALIZED_DURING_COLLECTION_MESSAGE, collected: true, persisted: false }, { status: 409 });
+    }
     const persisted = await repository.save(input.brandId, record, profile.userId);
     if (persisted) record = SerpCollectionRecordSchema.parse({ ...record, persistenceMode: "remote", research: { ...resolvedResearch, persistenceMode: "remote" } });
-    return NextResponse.json({ record, resolvedKeyword: resolved.keyword, persistenceMode: persisted ? "remote" : "local" });
+    return NextResponse.json({ record, resolvedKeyword: resolved.keyword, persistenceMode: persisted ? "remote" : "local", unchanged: false, unchangedBy: null, lensCoverage: coberturaDasLentes });
   } catch (error) {
     if (error instanceof z.ZodError) {
       const issue = error.issues[0];

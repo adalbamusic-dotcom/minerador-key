@@ -53,10 +53,13 @@ import { buildKeywordUniverse, reservedSiloPageHeadIds } from "@/lib/arquiteto/k
 import { buildSiteStructureReading } from "@/lib/arquiteto/site-structure-evidence";
 import { buildTerritorialSurface, deriveTerritorialProcessAvailability } from "@/lib/arquiteto/territorial-surface";
 import { manualSiloCandidateDraft, planSiloAssignment, planSiteStructurePromotion, resolveSiloAssignmentOutcome } from "@/lib/arquiteto/silo-assignment";
-import { stampPublishedPrimary } from "@/lib/arquiteto/silo-primary-keyword";
+import { proposeSiloPrimaryFromSerp, serpPrimaryAcceptanceOf, stampPublishedPrimary, type SiloPrimarySerpProposal } from "@/lib/arquiteto/silo-primary-keyword";
+import { acceptRemoteSiloPrimaryProposal } from "@/lib/arquiteto/canonical-workspace";
+import { readArchitectKeywordVinculo, editorialUnitDeclarationFromVinculo, headsSilo } from "@/lib/arquiteto/editorial-unit-declaration";
+import { planSiloDecisionBatch, chunkBatch, resolveSiloBatchOutcome, type BatchSiloDecision, type BatchSiloWrite } from "@/lib/arquiteto/silo-decision-batch";
 import type { EditorialUnitDeclaration } from "@/lib/arquiteto/contracts";
 import { validateManualSiloSlug, type SlugSubject } from "@/lib/arquiteto/slug-architecture";
-import { TerritorialWorkspaceHeader, TerritorialWorkspaceRows, type KeywordDnaInspection } from "./territorial-workspace-rows";
+import { TerritorialWorkspaceHeader, TerritorialWorkspaceRows, type KeywordDnaInspection, type KeywordVinculoLine } from "./territorial-workspace-rows";
 import { ArticleFormationPanel } from "./article-formation-panel";
 import { ArticleSiloPageRow } from "./article-silo-rows";
 import { buildArticleSiloViews, filterArticleSiloViews, summarizeArticleSiloViews } from "@/lib/arquiteto/article-silo-view";
@@ -132,6 +135,8 @@ import { challengesRequiringSiloReview, describeSiloReconsideration, resolveSilo
 import { partitionMaterializedArticles, summarizeLegacyArticles } from "@/lib/arquiteto/formation-materialization";
 import { observedFromArticleDna, readbackMaterializedArticles, type MaterializationReadback, type MaterializedArticleExpectation } from "@/lib/arquiteto/article-materialization-readback";
 import { articleSerpParecerFromAssessment } from "@/lib/arquiteto/article-serp-interpretation";
+import { SERP_LENS_LABELS, describeQualificationLenses, describeSerpLensesMarker, describeSerpLensesMissing, mergeSerpPaidPlans, type SerpPaidPlan, type SerpPaidPlanChoice } from "@/lib/arquiteto/serp-lens-plan";
+import { SerpPaidPlanDialog } from "./serp-paid-plan-dialog";
 import { ARTICLE_SERP_STATE_LABELS, articleSerpBaseHash, articleSerpBaseOf, resolveArticleFormationSerpState, serpWasExecutedFor, summarizeArticleSerpGate, type ArticleSerpGateState } from "@/lib/arquiteto/article-serp-gate";
 import { comparePrincipalCandidates, simulateScenarioChange, type ScenarioChange, type ScenarioKeyword } from "@/lib/arquiteto/formation-scenario";
 import { ArticleFormationReviewPanel, type EvidenceState } from "./article-formation-review";
@@ -151,6 +156,7 @@ import { buildPublishedSiteArchitecture } from "@/lib/arquiteto/published-site-a
 import { resolveTerritoryConfirmationReadiness, siloIsHumanDecided } from "@/lib/arquiteto/territory";
 import { TerritorialReviewPanel } from "./territorial-review-panel";
 import { PublishedSerpPanel } from "./published-serp-panel";
+import { SiloPrimaryProposalPanel } from "./silo-primary-proposal-panel";
 import { readPublishedGroupFromSerp, type PublishedKeywordReadout } from "@/lib/arquiteto/published-keyword-readout";
 import type { SerpCompetitiveObservation } from "@/lib/arquiteto/silo-primary-keyword";
 import { buildTerritorialAiBase, territorialAiBaseHash } from "@/lib/arquiteto/territorial-ai-record";
@@ -729,6 +735,30 @@ export default function ArquitetoPage() {
   const [siloCandidateSerpEvidence, setSiloCandidateSerpEvidence] = useState<SerpSiloCandidateAssessment[]>([]);
   const [publicationVerifications, setPublicationVerifications] = useState<SerpPublicationVerification[]>([]);
   const [serpBusy, setSerpBusy] = useState(false);
+  /*
+   * O PLANO DE CHAMADAS PAGAS aguardando a escolha da pessoa (adendo das 4
+   * lentes, A6). Enquanto ele existe, nada foi pago; `resolve(null)` cancela.
+   */
+  const [serpPaidPlanPrompt, setSerpPaidPlanPrompt] = useState<{
+    title: string;
+    plan: SerpPaidPlan;
+    allowPrimaryOnly: boolean;
+    resolve: (choice: SerpPaidPlanChoice | null) => void;
+  } | null>(null);
+  /**
+   * Mostra o plano e espera a escolha. Sem nada a pagar e sem lente antiga a
+   * oferecer, segue direto: não há o que confirmar.
+   */
+  const askSerpPaidPlan = useCallback((title: string, plan: SerpPaidPlan, allowPrimaryOnly = true): Promise<SerpPaidPlanChoice | null> => {
+    if (plan.paidQueries === 0 && plan.recollectableQueries === 0) {
+      return Promise.resolve({ authorizedPaidQueries: 0, payMissingExtraLenses: plan.payMissingExtraLenses, recollectStaleLenses: false });
+    }
+    // Uma prévia nova nunca deixa a anterior pendurada: a anterior é cancelada, sem pagar.
+    return new Promise(resolve => setSerpPaidPlanPrompt(anterior => {
+      anterior?.resolve(null);
+      return { title, plan, allowPrimaryOnly, resolve };
+    }));
+  }, []);
   // Estado da SERP por Article: falha específica carrega estágio, código e se
   // a execução daquela unidade pode ser repetida.
   const [serpExecution, setSerpExecution] = useState<Record<string, { status: "processing" | "ready" | "error"; queryCount: number; completed: number; message?: string; stage?: string; code?: string; retryable?: boolean; lastAttemptFailed?: boolean }>>({});
@@ -1279,7 +1309,9 @@ export default function ArquitetoPage() {
       setMasterList(workspaceItems);
       setProvisionalGroups(describeAssignedGroups(workspaceItems as Parameters<typeof describeAssignedGroups>[0]));
       setSiloOptions(canonicalSilos);
-      setDatabaseSources(current => ({ ...current, silos: canonicalSilos, keywords: canonical.availableKeywords, capturedAt: new Date().toISOString() }));
+      // `keywords` das fontes de recuperação vem só de readArchitectDatabaseSources
+      // (detalhe completo): o índice da montagem não tem analise_semantica.
+      setDatabaseSources(current => ({ ...current, silos: canonicalSilos, capturedAt: new Date().toISOString() }));
       const eligibilityByKeywordId = new Map(canonical.importEligibility.map(item => [item.keywordId, item]));
       setKeywordImportPool(canonical.availableKeywords.flatMap(keyword => {
         const eligibility = eligibilityByKeywordId.get(keyword.id);
@@ -1504,7 +1536,9 @@ export default function ArquitetoPage() {
     if (sessionStatus !== "authenticated" || !selectedBrandId) {
       return { silos: [], keywords: [], briefings: [], capturedAt: new Date().toISOString() };
     }
-    const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+    // O ponto de recuperação copia a linha inteira de cada keyword: pede o
+    // detalhe completo, que a montagem da mesa não baixa mais.
+    const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId, { keywordDetail: "full" });
     return {
       silos: canonicalSiloOptions(canonical.siloDnas, canonical.siloPages),
       keywords: canonical.availableKeywords,
@@ -3556,10 +3590,13 @@ export default function ArquitetoPage() {
   /** Falha específica de um Article devolvida pelo route da SERP. */
   type ArticleSerpFailure = { articleId: string; principalKeywordId: string; stage: string; code: string; message: string; retryable: boolean };
 
-  const confirmSerpValidation = async (requestedGroups: ProvisionalArticleGroup[]) => {
-    if (!requestedGroups.length || !brandContext) return;
+  /**
+   * Devolve o que aconteceu: `cancelled` quando a pessoa recusou o plano de
+   * chamadas pagas — quem chamou não pode anunciar SERP coletada.
+   */
+  const confirmSerpValidation = async (requestedGroups: ProvisionalArticleGroup[]): Promise<"completed" | "cancelled" | "failed"> => {
+    if (!requestedGroups.length || !brandContext) return "failed";
     const requestedArticleIds = requestedGroups.map(group => group.publishedAnchorId || group.id);
-    setSerpExecution(current => ({ ...current, ...Object.fromEntries(requestedGroups.map(group => [group.publishedAnchorId || group.id, { status: "processing" as const, queryCount: group.keywords.length, completed: 0 }])) }));
     setSerpBusy(true);
     try {
       const previousAssessments = Object.fromEntries(requestedGroups.map(group => {
@@ -3572,21 +3609,39 @@ export default function ArquitetoPage() {
         const version = acceptedArticleDnas[articleId];
         return [articleId, version?.versionId || `work:${articleId}`];
       }));
-      const result = await callStrategicApi<{
-        assessments: SerpFormationAssessment[];
-        failures?: ArticleSerpFailure[];
-        summary?: { requestedArticles: number; completedArticles: number; failedArticles: number };
-        siloCandidateEvidence?: SerpSiloCandidateAssessment[];
-        queryCount: number;
-      }>("/api/arquiteto/serp", {
-        brandId: brandContext.id, groups: requestedGroups, siloCandidates: siloCandidateKeywords, location: "Brasil", language: "pt-br", device: "desktop",
+      /*
+       * AS QUATRO LENTES, COM O PLANO ANTES DE PAGAR (adendo A3 e A6).
+       *
+       * O pedido leva as quatro lentes do produto. Primeiro vem o plano —
+       * quantas consultas faltam e quanto custam —, e só a escolha da pessoa
+       * libera a execução, com o número exato de chamadas autorizadas.
+       * Cancelar não paga nada; tudo em cache segue sem perguntar.
+       */
+      const serpRequest = {
+        brandId: brandContext.id, groups: requestedGroups, siloCandidates: siloCandidateKeywords, location: "Brasil", language: "pt-br", lenses: [...SERP_LENS_LABELS],
         articleDnaVersionIds, previousAssessments,
         // A evidência nasce carimbada com a composição que observou: é o que
         // permite provar depois que ela ainda descreve o artigo de agora.
         formationBaseHashes: Object.fromEntries(requestedGroups
           .map(group => [group.publishedAnchorId || group.id, articleSerpGates.get(group.publishedAnchorId || group.id)?.expectedBaseHash])
           .filter((entry): entry is [string, string] => Boolean(entry[1]))),
-      }, "serp");
+      };
+      const planned = await callStrategicApi<{ plan: SerpPaidPlan }>("/api/arquiteto/serp", { ...serpRequest, mode: "plan" }, "serp");
+      const choice = await askSerpPaidPlan("Validar SERP · plano de chamadas pagas", planned.plan);
+      if (!choice) {
+        showNotification("warning", "Validação da SERP cancelada: nenhuma chamada foi paga.");
+        return "cancelled";
+      }
+      setSerpExecution(current => ({ ...current, ...Object.fromEntries(requestedGroups.map(group => [group.publishedAnchorId || group.id, { status: "processing" as const, queryCount: group.keywords.length, completed: 0 }])) }));
+      const result = await callStrategicApi<{
+        assessments: SerpFormationAssessment[];
+        failures?: ArticleSerpFailure[];
+        summary?: { requestedArticles: number; completedArticles: number; failedArticles: number };
+        siloCandidateEvidence?: SerpSiloCandidateAssessment[];
+        queryCount: number;
+        paidQueries?: number;
+        lenses?: string[];
+      }>("/api/arquiteto/serp", { ...serpRequest, mode: "execute", ...choice }, "serp");
       // Validação por Article: um assessment incompleto vira falha daquela
       // unidade e não invalida os assessments válidos do restante do lote.
       const parsedAssessments = result.assessments.map(assessment => SerpFormationAssessmentSchema.parse(assessment));
@@ -3690,8 +3745,10 @@ export default function ArquitetoPage() {
       }
       showNotification(failures.length ? "error" : "success", failures.length
         ? `SERP parcial: ${completedCount} de ${requestedCount} artigo(s) concluído(s) · ${failures.length} com erro. ${failures.map(failure => `${failure.articleId}: ${failure.message}`).join(" ")}`
-        : `SERP concluída: ${completedCount} de ${requestedCount} artigo(s) avaliado(s) · ${result.queryCount} snapshot(s). `
+        : `SERP concluída: ${completedCount} de ${requestedCount} artigo(s) avaliado(s) · ${result.queryCount} snapshot(s)`
+          + ` · ${result.lenses?.length || 1} lente(s) · ${result.paidQueries ?? 0} chamada(s) paga(s). `
           + `${confirmadosNoRemoto.size} parecer(es) confirmados no acervo remoto.`);
+      return "completed";
     } catch (error) {
       // O erro real já vem sanitizado do servidor (estágio, HTTP, código) ou de
       // uma validação local. Engolir tudo em uma frase genérica escondia a causa.
@@ -3713,6 +3770,7 @@ export default function ArquitetoPage() {
       showNotification("error", requestedGroups.length > 1
         ? `${message} Nenhum artigo do lote foi avaliado nesta execução; os assessments já confirmados anteriormente permanecem.`
         : message);
+      return "failed";
     } finally { setSerpBusy(false); }
   };
 
@@ -8205,13 +8263,24 @@ export default function ArquitetoPage() {
     }
     setTerritorialSerpBusy(true);
     try {
-      const response = await fetch("/api/arquiteto/territorial-serp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brandId: selectedBrandId, questions: perguntas }),
-      });
-      const body = await response.json();
-      if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível validar a SERP dos silos.");
+      // As quatro lentes; o plano vem antes e só a escolha da pessoa libera o pagamento.
+      const pedir = async (extra: Record<string, unknown>) => {
+        const response = await fetch("/api/arquiteto/territorial-serp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brandId: selectedBrandId, questions: perguntas, lenses: [...SERP_LENS_LABELS], ...extra }),
+        });
+        const body = await response.json();
+        if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível validar a SERP dos silos.");
+        return body;
+      };
+      const plano = await pedir({ mode: "plan" });
+      const escolha = await askSerpPaidPlan("Validar SERP dos silos · plano de chamadas pagas", plano.data.plan as SerpPaidPlan);
+      if (!escolha) {
+        showNotification("warning", "SERP dos silos cancelada: nenhuma chamada foi paga. Nada foi aplicado.");
+        return;
+      }
+      const body = await pedir({ mode: "execute", ...escolha });
       const assessments = Array.isArray(body.data?.assessments) ? body.data.assessments : [];
       setTerritorialSerpAssessments(previous => {
         const porPergunta = new Map(previous.map(item => [item.questionId, item]));
@@ -8640,6 +8709,83 @@ export default function ArquitetoPage() {
    * inteiro era `territory:9da03dd0-…` para uma operação que não tinha nada
    * de errado.
    */
+  /**
+   * A MESMA DECISÃO DE SILO, PARA O LOTE INTEIRO.
+   *
+   * `applySiloDecision` continua sendo o caminho de UMA keyword — a decisão
+   * manual na linha. Para o Confirmar, que decide o lote todo, ele fazia uma
+   * gravação e uma recarga completa do workspace POR KEYWORD. Com 200
+   * keywords: 200 gravações, 200 recargas do lote inteiro e 200 notificações.
+   *
+   * Aqui o plano é o mesmo (`planSiloDecisionBatch` usa `planSiloAssignment`),
+   * o lock é por item, e o desfecho de cada keyword sai de UMA releitura.
+   */
+  const applySiloDecisionsInBatch = async (
+    decisions: readonly BatchSiloDecision[],
+  ): Promise<{ applied: string[]; unchanged: string[]; refused: string[] }> => {
+    if (!selectedBrandId) return { applied: [], unchanged: [], refused: decisions.map(item => item.keywordId) };
+
+    const porId = new Map(masterList.map(entry => [String(entry.id), entry as Record<string, unknown>]));
+    const plano = planSiloDecisionBatch({
+      brandId: selectedBrandId,
+      landscape: territorialSurface.landscape,
+      keywordOf: keywordId => {
+        const item = porId.get(keywordId);
+        const workflow = item?.canonicalWorkflow as { id?: unknown; lockVersion?: unknown } | undefined;
+        if (!item || !workflow?.id || !Number.isInteger(workflow.lockVersion)) return null;
+        return {
+          keywordId,
+          brandId: String(item.brand_id || selectedBrandId),
+          workflowItemId: String(workflow.id),
+          expectedLock: Number(workflow.lockVersion),
+          currentTerritoryRef: typeof item.territoryRef === "string" ? item.territoryRef : null,
+          isPublished: Boolean(item.isPublished),
+        };
+      },
+      decisions,
+      decidedAt: new Date().toISOString(),
+    });
+
+    const paraGravar = (lote: readonly BatchSiloWrite[]) => lote.map(write => ({
+      workflowItemId: write.workflowItemId,
+      expectedLock: write.expectedLock,
+      assignment: write.assignment as Record<string, unknown>,
+    }));
+
+    for (const lote of chunkBatch(plano.writes)) {
+      try {
+        await persistArchitectWorkingCopy({ brandId: selectedBrandId, updates: paraGravar(lote) });
+      } catch {
+        /*
+         * O servidor para no primeiro item que falha. Reenvia o lote item a
+         * item para que um ruim não arraste os vizinhos. Quem já gravou é
+         * recusado pelo lock (nada é sobrescrito); a releitura diz o resto.
+         */
+        for (const write of lote) {
+          try { await persistArchitectWorkingCopy({ brandId: selectedBrandId, updates: paraGravar([write]) }); }
+          catch { /* o veredito é da releitura, não desta resposta */ }
+        }
+      }
+    }
+
+    // UMA releitura remota decide o desfecho de todas.
+    const readback = new Map<string, string | null>();
+    if (plano.writes.length) {
+      const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+      for (const entry of buildCanonicalWorkflowWorkspaceItems(canonical.workflowItems, canonical.keywords, selectedBrandId)) {
+        const value = (entry as Record<string, unknown>).territoryRef;
+        readback.set(String((entry as Record<string, unknown>).id), typeof value === "string" ? value : null);
+      }
+    }
+    const veredito = resolveSiloBatchOutcome({ writes: plano.writes, readbackTerritoryRefByKeyword: readback });
+
+    return {
+      applied: veredito.applied,
+      unchanged: plano.unchanged,
+      refused: [...plano.refused.map(item => item.keywordId), ...veredito.refused],
+    };
+  };
+
   const applySiloDecision = async (
     keywordId: string,
     target: { kind: "territory"; territoryRef: string } | { kind: "existing_structure"; siloId: string } | { kind: "unassigned" },
@@ -8858,6 +9004,8 @@ export default function ArquitetoPage() {
   const [keywordSerpByScope, setKeywordSerpByScope] = useState<Map<string, {
     observations: SerpCompetitiveObservation[];
     gaps: { keywordId: string; lens: string; reason: string }[];
+    /** Da última coleta deste Silo: quantas lentes vieram do cache e quantas foram pagas agora. */
+    origin: { reused: number; collected: number };
   }>>(new Map());
   const [keywordSerpBusyScope, setKeywordSerpBusyScope] = useState<string | null>(null);
 
@@ -8870,31 +9018,79 @@ export default function ArquitetoPage() {
     if (!doTerritorio.length || !selectedBrandId) return;
     setKeywordSerpBusyScope(territoryRef);
     try {
-      const response = await fetch("/api/arquiteto/keyword-serp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          brandId: selectedBrandId,
-          scopeId: territoryRef,
-          territoryRef,
-          // O teto da rota é 12; o lote vem da seleção humana, não de varredura.
-          keywords: doTerritorio.slice(0, 12).map(kw => ({ keywordId: String(kw.id), keyword: String(kw.keyword || "") })),
-        }),
-      });
-      const body = await response.json();
-      if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível coletar a SERP das keywords.");
       /*
-       * Só entra o que voltou do READBACK. Coleta que falha não apaga
-       * observação boa anterior — evidência é patrimônio.
+       * O SILO INTEIRO, EM LOTES — nada é cortado.
+       *
+       * Antes o cliente mandava `slice(0, 12)`: num Silo de 20 keywords, oito
+       * ficavam sem coleta e ninguém era avisado. Agora vai tudo, em lotes de
+       * 6 (6 × 4 lentes = 24 consultas por requisição).
        */
-      setKeywordSerpByScope(previous => {
-        const proximo = new Map(previous);
-        proximo.set(territoryRef, {
-          observations: Array.isArray(body.data?.observations) ? body.data.observations : [],
-          gaps: Array.isArray(body.data?.gaps) ? body.data.gaps : [],
+      const LOTE_DE_KEYWORDS = 6;
+      const todas = doTerritorio.map(kw => ({ keywordId: String(kw.id), keyword: String(kw.keyword || "") }));
+      const pedirLote = async (keywords: typeof todas, extra: Record<string, unknown>) => {
+        const response = await fetch("/api/arquiteto/keyword-serp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brandId: selectedBrandId, scopeId: territoryRef, territoryRef, keywords, ...extra }),
         });
-        return proximo;
-      });
+        const body = await response.json();
+        if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível coletar a SERP das keywords.");
+        return body;
+      };
+      /*
+       * O PLANO ANTES DE PAGAR (adendo A6): cada lote diz quantas lentes
+       * faltam, a soma vai para uma confirmação só, e cada lote executa com o
+       * número exato que o plano dele mostrou. Cancelar não paga nada.
+       */
+      const lotes: { keywords: typeof todas; plan: SerpPaidPlan }[] = [];
+      for (let inicio = 0; inicio < todas.length; inicio += LOTE_DE_KEYWORDS) {
+        const keywords = todas.slice(inicio, inicio + LOTE_DE_KEYWORDS);
+        const planoDoLote = await pedirLote(keywords, { mode: "plan" });
+        lotes.push({ keywords, plan: planoDoLote.data.plan as SerpPaidPlan });
+      }
+      const escolha = await askSerpPaidPlan("Consultar nas 4 lentes · plano de chamadas pagas", mergeSerpPaidPlans(lotes.map(lote => lote.plan)), false);
+      if (!escolha) {
+        showNotification("warning", "Consulta nas 4 lentes cancelada: nenhuma chamada foi paga.");
+        return;
+      }
+      // A origem conta a coleta DESTE clique, somando os lotes.
+      const origem = { reused: 0, collected: 0 };
+      for (const lote of lotes) {
+        const body = await pedirLote(lote.keywords, { mode: "execute", authorizedPaidQueries: lote.plan.paidQueries });
+        /*
+         * A MESCLA É DAQUI. A rota devolve só o lote — a persistência dela é o
+         * cache, uma entrada por keyword × lente, e não há mais registro do
+         * Silo inteiro para reler. Sem mesclar, o segundo lote apagaria o
+         * primeiro da tela.
+         *
+         * A identidade é keyword + lente. Observação nova substitui a antiga
+         * do mesmo par e fecha a lacuna dele; lacuna nova só entra onde não há
+         * observação — uma lente que falhou agora não apaga o que já foi
+         * observado nesta sessão (estado vazio não substitui estado válido).
+         */
+        const doLote: SerpCompetitiveObservation[] = Array.isArray(body.data?.observations) ? body.data.observations : [];
+        const lacunasDoLote: { keywordId: string; lens: string; reason: string }[] = Array.isArray(body.data?.gaps) ? body.data.gaps : [];
+        origem.reused += typeof body.data?.reused === "number" ? body.data.reused : 0;
+        origem.collected += typeof body.data?.collected === "number" ? body.data.collected : 0;
+        const origemAgora = { ...origem };
+        setKeywordSerpByScope(previous => {
+          const par = (item: { keywordId: string; lens: string }) => `${item.keywordId}\u0000${item.lens}`;
+          const anterior = previous.get(territoryRef);
+          const observacoes = new Map((anterior?.observations ?? []).map(item => [par(item), item] as const));
+          for (const item of doLote) observacoes.set(par(item), item);
+          const lacunas = new Map((anterior?.gaps ?? []).map(item => [par(item), item] as const));
+          for (const item of lacunasDoLote) lacunas.set(par(item), item);
+          for (const chave of observacoes.keys()) lacunas.delete(chave);
+
+          const proximo = new Map(previous);
+          proximo.set(territoryRef, {
+            observations: [...observacoes.values()],
+            gaps: [...lacunas.values()],
+            origin: origemAgora,
+          });
+          return proximo;
+        });
+      }
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "Não foi possível coletar a SERP das keywords.");
     } finally {
@@ -8943,6 +9139,80 @@ export default function ArquitetoPage() {
     }
     return mapa;
   }, [territorialReviewViews, keywordSerpByScope, keywordsOfTerritory, dnaSignalsByKeyword]);
+
+  /**
+   * ORIGEM 1 · LISTA NOVA — a SERP das quatro lentes PROPÕE a primária.
+   *
+   * Derivada das observações que "Coletar nas 4 lentes" trouxe (cache primeiro,
+   * nada pago sem o plano confirmado) e da primária gravada no território. Sem
+   * coleta não há proposta: a mesa não lê a SERP sozinha. Nada daqui é gravado:
+   * a primária só muda por `acceptSiloPrimaryProposal`, no clique de uma pessoa.
+   */
+  const siloPrimaryProposals = useMemo(() => {
+    const mapa = new Map<string, SiloPrimarySerpProposal>();
+    for (const view of territorialReviewViews) {
+      const territoryRef = view.current.territoryRef;
+      const coletado = territoryRef ? keywordSerpByScope.get(territoryRef) : null;
+      if (!territoryRef || !coletado) continue;
+      const territorio = remoteTerritories.find(item => item.territoryRef === territoryRef)?.territory ?? null;
+      const atual = territorio?.primaryKeyword ?? null;
+      const doTerritorio = keywordsOfTerritory(territoryRef);
+      const politicaAtual = atual ? doTerritorio.find(kw => String(kw.id) === atual.keywordId)?.primaryKeywordPolicy ?? null : null;
+      mapa.set(territoryRef, proposeSiloPrimaryFromSerp({
+        current: atual,
+        candidates: doTerritorio.map(kw => ({
+          keywordId: String(kw.id),
+          label: String(kw.keyword || "") || null,
+          volumeSearch: typeof kw.volume_search === "number" ? kw.volume_search : null,
+        })),
+        observations: coletado.observations,
+        currentPolicy: typeof politicaAtual === "string" ? politicaAtual : null,
+        territory: territorio
+          ? { publicationProtection: territorio.publicationProtection, territoryKind: territorio.territoryKind }
+          : null,
+      }));
+    }
+    return mapa;
+  }, [territorialReviewViews, keywordSerpByScope, keywordsOfTerritory, remoteTerritories]);
+  const [siloPrimaryBusyRef, setSiloPrimaryBusyRef] = useState<string | null>(null);
+
+  /**
+   * O ACEITE — a única porta pela qual a proposta da SERP vira primária.
+   *
+   * O corpo leva a keyword, a primária sobre a qual a proposta foi calculada e
+   * a evidência; ator e hora são do servidor. Sucesso só com readback.
+   */
+  const acceptSiloPrimaryProposal = async (territoryRef: string) => {
+    if (!selectedBrandId) { showNotification("error", "Selecione uma marca ativa."); return; }
+    const proposta = siloPrimaryProposals.get(territoryRef);
+    const aceite = proposta ? serpPrimaryAcceptanceOf(proposta) : null;
+    if (!proposta?.proposed || !aceite) { showNotification("error", "Não há proposta da SERP que possa ser aceita para este Silo."); return; }
+    const remote = remoteTerritories.find(item => item.territoryRef === territoryRef);
+    if (!remote) { showNotification("error", "Silo não está no snapshot remoto; recarregue o workspace."); return; }
+
+    setSiloPrimaryBusyRef(territoryRef);
+    try {
+      const updated = await acceptRemoteSiloPrimaryProposal({
+        brandId: selectedBrandId,
+        territoryRef,
+        expectedLock: remote.lockVersion,
+        territory: remote.territory as unknown as Record<string, unknown>,
+        acceptance: aceite,
+      });
+      showNotification("success", `Primária do Silo registrada: "${proposta.proposed.label}". A SERP propôs; a decisão foi sua.`);
+      setRemoteTerritories(previous => [...previous.filter(item => item.territoryRef !== territoryRef), updated]);
+      setCanonicalWorkspaceReload(current => current + 1);
+    } catch (error) {
+      const failure = error as { message?: unknown; code?: unknown } | null;
+      const message = typeof failure?.message === "string" ? failure.message : "Não foi possível registrar a primária do Silo.";
+      showNotification("error", /lock/i.test(String(failure?.code ?? message))
+        ? "O estado vigente mudou desde a leitura; recarregando sem sobrescrever."
+        : message);
+      setCanonicalWorkspaceReload(current => current + 1);
+    } finally {
+      setSiloPrimaryBusyRef(null);
+    }
+  };
 
   /**
    * Despacho da decisão humana para os WRITERS CANÔNICOS já existentes.
@@ -9101,14 +9371,40 @@ export default function ArquitetoPage() {
    * Só entra keyword que tem declaração: ausência não vira entrada no mapa,
    * e um lote sem publicados produz exatamente a proposta de antes.
    */
+  /*
+   * O VÍNCULO DE CADA KEYWORD, LIDO UMA VEZ.
+   *
+   * Pela autoridade do Minerador (`resolveKeywordVinculo`), a partir do pacote
+   * aprovado. Dele saem as duas coisas que a aba Silos usa: a declaração que
+   * a lógica compara e a frase que a linha mostra. Duas leituras separadas do
+   * mesmo Vínculo seria a mesma receita de divergência que o Minerador já
+   * corrigiu do lado dele.
+   */
+  const architectureKeywordVinculos = useMemo(
+    () => new Map(masterList.map(keyword => [String(keyword.id), readArchitectKeywordVinculo(keyword)])),
+    [masterList],
+  );
+
   const architectureKeywordDeclarations = useMemo(() => {
     const mapa = new Map<string, EditorialUnitDeclaration>();
-    for (const keyword of masterList) {
-      const declaracao = adaptKeywordIdentityContext(keyword).editorialUnitDeclaration;
-      if (declaracao) mapa.set(String(keyword.id), declaracao);
+    for (const [keywordId, vinculo] of architectureKeywordVinculos) {
+      const declaracao = editorialUnitDeclarationFromVinculo(vinculo);
+      if (declaracao) mapa.set(keywordId, declaracao);
     }
     return mapa;
-  }, [masterList]);
+  }, [architectureKeywordVinculos]);
+
+  /** A frase do Vínculo por keyword, pronta para a linha da mesa. */
+  const territorialVinculoLines = useMemo(() => {
+    const mapa = new Map<string, KeywordVinculoLine>();
+    for (const [keywordId, vinculo] of architectureKeywordVinculos) {
+      mapa.set(keywordId, {
+        summary: vinculo.summary,
+        silo: headsSilo(architectureKeywordDeclarations.get(keywordId)),
+      });
+    }
+    return mapa;
+  }, [architectureKeywordVinculos, architectureKeywordDeclarations]);
 
   const architectureProposal = useMemo(() => buildArchitectureWorkingProposal({
     analysis: architectureAnalysis,
@@ -10470,6 +10766,7 @@ export default function ArquitetoPage() {
           // pendência. Esconder o valor faria a tela e o dado divergirem.
           ...linha("Intenção", sinal.intent || (intencaoBruta ? `${intencaoBruta} · sem intenção canônica` : "")),
           ...linha("Funil", sinal.funnel),
+          ...linha("Lentes da SERP", describeQualificationLenses(qualificacao)),
           ...linha("Confiança", sinal.confidence),
           ...linha("KGR", keyword?.kgr_score),
           ...linha("Aplicabilidade KGR", semantica.kgr_aplicabilidade),
@@ -10889,8 +11186,12 @@ export default function ArquitetoPage() {
         return;
       }
       showNotification("success", `Formação processada: ${resumoDaFormacao.candidates} artigo(s) candidato(s) selecionado(s). Coletando SERP de ${pendentes.length} artigo(s) sem evidência vigente.`);
-      await confirmSerpValidation(pendentes);
-      const coletadosAgora = new Set(resumoSerp.needsCollection);
+      const resultadoDaSerp = await confirmSerpValidation(pendentes);
+      /*
+       * Plano de chamadas recusado: nada foi coletado, e o readout não pode
+       * contar esses artigos como "coletados agora".
+       */
+      const coletadosAgora = resultadoDaSerp === "cancelled" ? new Set<string>() : new Set(resumoSerp.needsCollection);
       showNotification("success", readoutDaExecucao(coletadosAgora, escopo.candidateRefs));
       anunciarBloqueios(coletadosAgora, escopo.candidateRefs);
     } catch (error) {
@@ -12099,18 +12400,19 @@ export default function ArquitetoPage() {
     setArchitectureBusy(true);
     try {
       /*
-       * §5 — a SERP entra DENTRO do processamento.
+       * A PRIMEIRA ETAPA É SÓ LÓGICA — nenhum provider aqui.
        *
-       * Ela é insumo da proposta, não uma terceira aprovação: "pareceres
-       * prontos para revisão humana" virava uma etapa que ninguém pediu.
-       * Varrer o lote inteiro seria gastar consulta onde não há pergunta.
+       * Decisão do produto em 2026-09-23, revertendo o §5 anterior ("a SERP
+       * entra DENTRO do processamento"). Cada keyword chega do Minerador com o
+       * DNA inteiro — tipo de página, posto, publicação, intenção — e isso já
+       * basta para separar quem é cabeça de Silo de quem vai para os artigos.
+       * SERP e IA confirmam depois, como etapas explícitas.
+       *
+       * E a chamada antiga nem influenciava este clique: `architectureProposal`
+       * não depende de estado da SERP, então a proposta materializada abaixo
+       * já estava calculada antes de o provider responder. Era custo sem
+       * efeito no resultado.
        */
-      const pendentes = territorialSerpQuestions.filter(question => {
-        const gravado = territorialSerpBaseHashes.get(question.questionId);
-        return !gravado || gravado !== territorialSerpBaseHash(territorialSerpBaseOf(question));
-      });
-      if (pendentes.length) await validateTerritorialSerp(true);
-
       const proposta = architectureProposal;
 
       /*
@@ -12463,6 +12765,15 @@ export default function ArquitetoPage() {
         else if (veredito === "unchanged") inalteradas.push(keywordId);
         else falhas.push(keywordId);
       };
+      /*
+       * A MEMBERSHIP DO LOTE, EM LOTE.
+       *
+       * Antes: um `await applySiloDecision` por keyword, cada um com uma
+       * recarga completa do workspace. Agora o mesmo plano, lotes de 25 por
+       * requisição e UMA releitura decide o desfecho de todas. Os três
+       * desfechos continuam os mesmos.
+       */
+      const decisoes: BatchSiloDecision[] = [];
       for (const assignment of architectureProposal.assignments) {
         const territoryRef = refDoSilo(assignment.siloKey);
         if (!territoryRef) {
@@ -12470,14 +12781,19 @@ export default function ArquitetoPage() {
           falhas.push(assignment.keywordId);
           continue;
         }
-        try {
-          registrar(await applySiloDecision(assignment.keywordId, { kind: "territory", territoryRef }), assignment.keywordId);
-        } catch { falhas.push(assignment.keywordId); }
+        decisoes.push({ keywordId: assignment.keywordId, target: { kind: "territory", territoryRef } });
       }
       for (const item of architectureProposal.unassigned) {
-        try {
-          registrar(await applySiloDecision(item.keywordId, { kind: "unassigned" }), item.keywordId);
-        } catch { falhas.push(item.keywordId); }
+        decisoes.push({ keywordId: item.keywordId, target: { kind: "unassigned" } });
+      }
+      try {
+        const lote = await applySiloDecisionsInBatch(decisoes);
+        for (const keywordId of lote.applied) registrar("applied", keywordId);
+        for (const keywordId of lote.unchanged) registrar("unchanged", keywordId);
+        for (const keywordId of lote.refused) registrar("refused", keywordId);
+      } catch {
+        // A releitura falhou: sem ela nada pode ser anunciado como aplicado.
+        for (const decisao of decisoes) falhas.push(decisao.keywordId);
       }
       for (const territoryRef of plan.confirmTerritoryRefs) {
         try {
@@ -14057,11 +14373,31 @@ export default function ArquitetoPage() {
                         label={view.subject.label}
                         readout={publishedSerpReadouts.get(view.current.territoryRef) ?? null}
                         gaps={keywordSerpByScope.get(view.current.territoryRef)?.gaps ?? []}
+                        origin={keywordSerpByScope.get(view.current.territoryRef)?.origin ?? null}
                         busy={keywordSerpBusyScope === view.current.territoryRef}
-                        disabledReason={view.current.primaryKeyword
+                        /*
+                         * Sem primária a coleta continua valendo: é ela que
+                         * alimenta a proposta da SERP (origem 1, lista nova).
+                         */
+                        disabledReason={keywordsOfTerritory(view.current.territoryRef).length
                           ? null
-                          : "Este Silo ainda não tem keyword primária eleita: sem ela não há com o que comparar as secundárias."}
+                          : "Nenhuma keyword está neste Silo ainda: sem candidatas não há SERP a comparar."}
+                        emptyNote={view.current.primaryKeyword
+                          ? null
+                          : keywordSerpByScope.get(view.current.territoryRef)
+                            ? "Este Silo ainda não tem primária: a leitura do grupo começa depois da sua decisão sobre a proposta da SERP, logo abaixo."
+                            : "Este Silo ainda não tem primária. A coleta nas 4 lentes lê o cache antes de qualquer chamada paga e alimenta a proposta da SERP para a primária; nada é gravado sem a sua decisão."}
                         onCollect={() => { void collectKeywordSerp(view.current.territoryRef!); }}
+                      />
+                    )}
+                    {/* A primária pela SERP: proposta, nunca aplicada sem aceite. */}
+                    {view.current.territoryRef && siloPrimaryProposals.get(view.current.territoryRef) && (
+                      <SiloPrimaryProposalPanel
+                        proposal={siloPrimaryProposals.get(view.current.territoryRef)!}
+                        busy={siloPrimaryBusyRef === view.current.territoryRef}
+                        buttonClassName={ARCHITECT_UI.toolbarButton}
+                        primaryButtonClassName={ARCHITECT_UI.primaryButton}
+                        onAccept={() => { void acceptSiloPrimaryProposal(view.current.territoryRef!); }}
                       />
                     )}
                   </React.Fragment>
@@ -14549,6 +14885,7 @@ export default function ArquitetoPage() {
                       }),
                     }}
                     surface={scopedTerritorialSurface}
+                    vinculoByKeywordId={territorialVinculoLines}
                     keywordLabelFor={keywordId => masterList.find(item => String(item.id) === keywordId)?.keyword || keywordId}
                   />
                 )}
@@ -15401,7 +15738,7 @@ export default function ArquitetoPage() {
                                                                             // campo legível — é derivado dos MESMOS snapshots que já vieram do
                                                                             // remoto: ler o que já está gravado é melhor que cobrar do provider
                                                                             // uma coleta que não traria nada novo.
-                                                                            const remoto = registro?.interpretation || (registro ? articleSerpParecerFromAssessment(registro, revisao.candidate, id => formationKeywordLabels.get(id) || id) : null); const parecer = remoto ? { principalVerdict: remoto.principalVerdict, principalAlternative: remoto.principalAlternativeKeywordId ? (formationKeywordLabels.get(remoto.principalAlternativeKeywordId) || remoto.principalAlternativeKeywordId) : null, principalReason: remoto.principalReason, groupVerdict: remoto.groupVerdict, groupReason: remoto.groupReason, outsiders: remoto.outsiders, observedIntent: remoto.observedIntent, dominantType: remoto.dominantType, viabilityText: remoto.viabilityText, distinctDomains: remoto.distinctDomains, recommendation: remoto.recommendation } : null; return gate ? { state: gate.state, label: gate.label, reason: gate.reason, blocksConclusion: gate.blocksConclusion, awaitsHuman: gate.requiresHumanDecision, parecer } : { state: "missing", label: ARTICLE_SERP_STATE_LABELS.missing, reason: "Este artigo ainda não foi confrontado com a SERP.", blocksConclusion: true, awaitsHuman: false, parecer: null }; })()}
+                                                                            const remoto = registro?.interpretation || (registro ? articleSerpParecerFromAssessment(registro, revisao.candidate, id => formationKeywordLabels.get(id) || id) : null); const parecer = remoto ? { principalVerdict: remoto.principalVerdict, principalAlternative: remoto.principalAlternativeKeywordId ? (formationKeywordLabels.get(remoto.principalAlternativeKeywordId) || remoto.principalAlternativeKeywordId) : null, principalReason: remoto.principalReason, groupVerdict: remoto.groupVerdict, groupReason: remoto.groupReason, outsiders: remoto.outsiders, observedIntent: remoto.observedIntent, dominantType: remoto.dominantType, viabilityText: remoto.viabilityText, distinctDomains: remoto.distinctDomains, recommendation: remoto.recommendation, lenses: "lenses" in remoto ? describeSerpLensesMarker(remoto.lenses) : null, lensesMissing: "lenses" in remoto ? describeSerpLensesMissing(remoto.lenses) : null } : null; return gate ? { state: gate.state, label: gate.label, reason: gate.reason, blocksConclusion: gate.blocksConclusion, awaitsHuman: gate.requiresHumanDecision, parecer } : { state: "missing", label: ARTICLE_SERP_STATE_LABELS.missing, reason: "Este artigo ainda não foi confrontado com a SERP.", blocksConclusion: true, awaitsHuman: false, parecer: null }; })()}
                                       materialized={articleDnaVersion ? { versionNumber: articleDnaVersion.versionNumber, statusLabel: serpWasExecutedFor(articleSerpGates.get(revisao.candidate.candidateRef)?.state || "missing") ? (articleDnaStatus === "approved" ? "consolidado" : "em revisão") : "homologação anterior ao gate SERP", siloLabel: siloLabelByRef.get(revisao.candidate.siloRef) || art.siloName || "Silo sem nome", slug: articleDnaVersion.payload.suggestedSlug ?? null, evidence: { logic: evidencia(articleProcess.logic.state), serp: evidencia(articleProcess.serp.state), ai: evidencia(articleProcess.ai.state), human: revisao.candidate.origin === "human" ? 1 : 0 } } : null}
                                       conclusion={revisao.conclusion}
                                       keywords={revisao.keywords}
@@ -15863,6 +16200,20 @@ export default function ArquitetoPage() {
       {dangerApproval && <DangerApprovalDialog open title={dangerApproval.title} description={dangerApproval.description}
         impact={dangerApproval.impact} verificationPhrase={dangerApproval.phrase} confirmLabel={dangerApproval.label}
         onCancel={() => setPendingDangerAction(null)} onConfirm={confirmDangerAction}/>}
+
+      {/* PLANO DE CHAMADAS PAGAS — nada foi pago até aqui. A escolha vira a
+          autorização exata da execução; cancelar não paga nada. */}
+      {serpPaidPlanPrompt && (
+        <SerpPaidPlanDialog
+          title={serpPaidPlanPrompt.title}
+          plan={serpPaidPlanPrompt.plan}
+          allowPrimaryOnly={serpPaidPlanPrompt.allowPrimaryOnly}
+          buttonClassName={ARCHITECT_UI.toolbarButton}
+          primaryButtonClassName={ARCHITECT_UI.primaryButton}
+          onChoose={choice => { serpPaidPlanPrompt.resolve(choice); setSerpPaidPlanPrompt(null); }}
+          onCancel={() => { serpPaidPlanPrompt.resolve(null); setSerpPaidPlanPrompt(null); }}
+        />
+      )}
 
       {/* PRÉVIA DA RESTAURAÇÃO — nenhuma escrita aconteceu até aqui.
           O plano é leitura: diz o que entraria, o que já está igual, o que

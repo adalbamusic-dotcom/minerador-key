@@ -46,14 +46,20 @@ const evidenceInput = {
   collectedAt: "2026-08-28T18:00:00.000Z",
 };
 
+// Uma URL por resultado: desde a derivação v4 (R8) a mesma URL conta uma vez,
+// e oito linhas com o mesmo endereço seriam UM resultado observado.
 const informational = Array.from({ length: 8 }, (_, index) => ({
   title: `O que é rotina noturna de skin care ${index + 1}`,
   description: "Guia passo a passo para entender a rotina.",
-  url: "https://exemplo.com.br/guia",
+  url: `https://exemplo.com.br/guia-${index + 1}`,
 }));
 
 test("A/D/E · a terceira chamada usa a keyword natural e a primeira segue com allintitle", () => {
-  assert.ok(route.includes("const serp = await executeDataForSeoSerpOperation({"), "a CALL 3 usa a operação SERP compartilhada");
+  // Mudou em 2026-09-23: a CALL 3 passou a consultar o cache de SERP da marca
+  // antes do provider, e a falta paga pela operação compartilhada via
+  // `collectAndCacheSerp` (que chama `executeDataForSeoSerpOperation` por
+  // dentro). A guarda continua sendo "uma operação SERP compartilhada".
+  assert.ok(route.includes("const collected = await collectAndCacheSerp("), "a CALL 3 paga pela operação SERP compartilhada, com cache");
   assert.ok(route.includes("collectSemanticSerp({ keyword: target.keyword,"), "a CALL 3 recebe a keyword natural do alvo");
   assert.match(route, /measureDataForSeoAllintitle\(\{ keyword: target\.keyword/);
   // A evidência só aceita a resposta da própria keyword natural.
@@ -179,16 +185,26 @@ test("A/B/C · depois do preflight as três finalidades são independentes", () 
 
   // CALL 2 falhou: só o erro do overview é guardado; a medição e a SERP seguem.
   assert.ok(route.includes("keywordOverviewError = { code: mapped.code"));
-  assert.ok(route.indexOf("const semanticSerp = await collectSemanticSerp") > route.indexOf("keywordOverviewError = { code: mapped.code"));
+  // Desde 2026-09-23 (adendo das 4 lentes) a CALL 3 devolve a canônica, e a
+  // leitura sai de `readAcrossLenses` logo depois: a ordem que importa é a mesma.
+  assert.ok(route.indexOf("const canonicalSerp = await collectSemanticSerp") > route.indexOf("keywordOverviewError = { code: mapped.code"));
+  assert.ok(route.indexOf("const semanticSerp = await readAcrossLenses(canonicalSerp, lensOutcomes, serpEvidenceInvalidated(target));") > route.indexOf("const canonicalSerp = await collectSemanticSerp"));
 
   // CALL 3 falhou: Resultado, KD e persistência seguem intactos.
   assert.ok(route.indexOf("await persistSuccess(") > route.indexOf("const serpError = semanticSerp.error;"));
   assert.ok(route.includes("keywordDifficulty: keywordOverview?.keywordDifficulty ?? null"));
 
-  // Teto de três chamadas técnicas por keyword: um ponto de coleta por caminho.
+  // Três chamadas técnicas na cadeia da keyword: um ponto de coleta por caminho.
+  // Desde 2026-09-23 (decisão do usuário, quatro lentes) a rota paga também as
+  // outras três lentes da SERP, só para o cache, por um único ponto por alvo.
   const count = (needle: string) => route.split(needle).length - 1;
   assert.equal(count("collectSemanticSerp({"), 2, "uma coleta por caminho, nunca duas no mesmo alvo");
-  assert.equal(count("executeDataForSeoSerpOperation({"), 1);
+  // A lente canônica continua com UMA chamada SERP paga por alvo: um único
+  // ponto de coleta paga, nenhum provider direto na rota. As outras três vêm
+  // de `lensCoverage.ensure`, que paga pelo mesmo `collectAndCacheSerp`.
+  assert.equal(count("await collectAndCacheSerp("), 1);
+  assert.equal(count("lensCoverage.ensure("), 1, "as três lentes extras: um único ponto por alvo");
+  assert.equal(count("executeDataForSeoSerpOperation("), 0, "a rota não chama o provider SERP sem passar pelo cache");
   assert.equal(count("await measureDataForSeoAllintitle("), 1);
   assert.equal(count("await measureDataForSeoKeywordOverview("), 1);
 });

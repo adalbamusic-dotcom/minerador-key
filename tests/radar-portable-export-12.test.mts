@@ -942,12 +942,24 @@ test("O · o ArticleDNA não é mutado por nada deste caminho", async () => {
 
 /* ============================== §29 · a UI ============================== */
 
-test("§29 · continua um único botão Exportar, com os dois produtos dentro", async () => {
+test("§29 · continua um único botão Exportar, com os produtos dentro", async () => {
   const pagina = await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
   const barra = pagina.slice(pagina.indexOf("const renderTopbarActions"), pagina.indexOf("const openDetail"));
 
+  /*
+   * 2026-09-23 · QUATRO MARCAS, E CONTINUA SENDO UM BOTÃO SÓ.
+   *
+   * O menu ganhou o export por silo ("Silos completos · um CSV por silo"),
+   * recomendado pelo dono do produto: o botão da barra é o mesmo, e os três
+   * produtos moram DENTRO dele. O que esta trava protege — nenhum segundo
+   * caminho de export na barra — é conferido pelo único botão fora do menu.
+   */
   const botoes = [...barra.matchAll(/data-testid="radar-export-[a-z-]+"/g)].map(item => item[0]);
-  assert.equal(botoes.length, 3, "§29 · a barra voltou a ter mais de um caminho de export");
+  assert.equal(botoes.length, 4, "§29 · a barra voltou a ter mais de um caminho de export");
+  const foraDoMenu = barra.slice(0, barra.indexOf('role="menu"'));
+  assert.deepEqual([...foraDoMenu.matchAll(/data-testid="radar-export-[a-z-]+"/g)].map(item => item[0]), ['data-testid="radar-export-menu"'],
+    "§29 · um item de export saiu do menu para a barra");
+  assert.match(barra, /Silos completos · um CSV por silo/);
   assert.match(barra, /Planilha atual/);
   assert.match(barra, /Dossiês editoriais finalizados \(CSV\)/);
 });

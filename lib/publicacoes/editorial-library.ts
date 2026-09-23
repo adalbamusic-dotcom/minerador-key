@@ -115,7 +115,12 @@ export function deliveryStatusOf(publicationState: OperationalPublication["state
  */
 export function projectEditorialLibrary(input: {
   brandId: string;
-  documents: ContentDocument[];
+  /*
+   * Só os campos que a linha lê. A mesa entrega o documento sem o pacote do
+   * Radar (E1); a projeção nunca precisou dele, e continua aceitando o
+   * documento completo como antes.
+   */
+  documents: ReadonlyArray<Pick<ContentDocument, "id" | "title" | "status" | "schemaVersion" | "articleDnaRef" | "metadata">>;
   publications: OperationalPublication[];
   /** `updated_at` remoto por documento, quando a leitura o trouxer. */
   updatedAtByDocument?: Record<string, string | undefined>;

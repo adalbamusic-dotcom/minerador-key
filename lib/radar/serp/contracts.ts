@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RadarSerpFeatureIntelligenceSchema } from "../serp-features.ts";
+import { RadarSerpCacheProvenanceSchema, RadarSerpLensSetSchema } from "./lens-set.ts";
 
 export const SerpPersistenceModeSchema = z.enum(["remote", "local"]);
 export type SerpPersistenceMode = z.infer<typeof SerpPersistenceModeSchema>;
@@ -140,6 +141,24 @@ export const SerpResearchSnapshotSchema = z.object({
    */
   serpFeatures: RadarSerpFeatureIntelligenceSchema.nullable().default(null),
   diagnostic: SerpDiagnosticSchema,
+  /*
+   * ====== AS QUATRO LENTES — SDD do Radar, R2 (2026-09-23) ======
+   *
+   * Todos OPCIONAIS e sem default: o snapshot gravado antes continua legível
+   * e, relido, não ganha chave nenhuma — a serialização de quem não mudou não
+   * muda, e nenhum `contentHash` gravado é recalculado.
+   *
+   *   payloadDepth     o endpoint do provider (`advanced` nas quatro lentes).
+   *   providerDepth    a profundidade da entrada usada (a janela é sempre 10).
+   *   cacheProvenance  de onde veio a canônica — cache ou paga agora —, quem
+   *                    pagou e quando. Cópia, sem id de entrada de cache.
+   *   lensSet          as quatro lentes COPIADAS, sem digest. Com ele, o
+   *                    `contentHash` cobre as lentes.
+   */
+  payloadDepth: z.enum(["regular", "advanced"]).optional(),
+  providerDepth: z.number().int().positive().max(100).optional(),
+  cacheProvenance: RadarSerpCacheProvenanceSchema.optional(),
+  lensSet: RadarSerpLensSetSchema.optional(),
 }).strict();
 export type SerpResearchSnapshot = z.infer<typeof SerpResearchSnapshotSchema>;
 

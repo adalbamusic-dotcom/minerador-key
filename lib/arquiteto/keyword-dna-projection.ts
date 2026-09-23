@@ -2,6 +2,7 @@ import { resolveCanonicalKeywordSnapshot, type CanonicalKeywordSnapshotInput } f
 import { deriveGoogleAdsDemandTrend, formatGoogleAdsCpcTableValue, googleAdsDemandTrendLabel } from "../minerador/google-ads-demand.ts";
 import { readDataForSeoKeywordOverview } from "../minerador/dataforseo-keyword-overview-core.ts";
 import { readPrincipalKgrScore } from "./article-kgr-decision.ts";
+import { describeQualificationLenses } from "./serp-lens-plan.ts";
 
 /**
  * Projeção somente leitura e sem perda da KeywordDNA recebida.
@@ -250,6 +251,9 @@ export function projectKeywordDnaForArchitect(
     field("Intenção consolidada", textValue(qualification?.intent)),
     field("Funil consolidado", textValue(qualification?.funnel)),
     field("Estado da evidência", qualification ? (qualification.semanticState === "conclusive" ? "Conclusiva" : "Não conclusiva") : null),
+    // Aditivo (A10): as lentes da leitura do Minerador. Qualificação legada de
+    // uma lente não traz o campo, e a linha simplesmente não aparece.
+    field("Lentes da SERP", describeQualificationLenses(qualification)),
     field("Versão", textValue(qualification?.versionId)),
     field("Hash", textValue(qualification?.contentHash)),
     field("Coletada em", dateLabel(qualification?.collectedAt)),

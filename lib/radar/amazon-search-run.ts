@@ -182,6 +182,17 @@ export const RadarAmazonProvenanceSchema = z.object({
   languageCode: z.string().nullable().default(null),
   seDomain: z.string().nullable().default(null),
   depth: z.number().int().positive().nullable().default(null),
+  /**
+   * R5 · O APARELHO QUE O PROVIDER ECOOU — lente única, declarada.
+   *
+   * O pedido não manda aparelho; a DataForSEO devolve o que executou
+   * (`desktop`/`windows` por padrão). É o eco, não uma escolha nossa e não a
+   * prova de que o aparelho muda a prateleira. OPCIONAL, sem default: corrida
+   * gravada antes não ganha chave, e `null` numa corrida nova diz que a
+   * resposta não declarou.
+   */
+  device: z.string().nullable().optional(),
+  os: z.string().nullable().optional(),
   queriesRequested: z.number().int().nonnegative(),
   queriesSucceeded: z.number().int().nonnegative(),
   queriesFailed: z.number().int().nonnegative(),

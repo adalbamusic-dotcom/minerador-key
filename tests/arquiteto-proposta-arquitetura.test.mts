@@ -319,10 +319,30 @@ test("§1 — Processar materializa a proposta e não aprova nada", async () => 
   }
 });
 
-test("§5 — a SERP dentro do processamento não anuncia revisão humana", async () => {
+test("a primeira etapa é só lógica: Processar arquitetura não chama a SERP", async () => {
+  /*
+   * REVERTE O §5 ANTERIOR, por decisão do produto em 2026-09-23.
+   *
+   * Antes: "a SERP entra DENTRO do processamento", e este teste exigia a
+   * chamada `validateTerritorialSerp(true)` no corpo de Processar. Agora a
+   * primeira etapa da aba Silos é só lógica — o DNA de cada keyword já separa
+   * Silo de artigo — e SERP/IA são etapas explícitas posteriores.
+   *
+   * Havia ainda um agravante medido no código: `architectureProposal` não
+   * depende de estado da SERP, então a chamada automática gastava crédito sem
+   * mudar a proposta materializada naquele mesmo clique.
+   */
   const source = await workspaceSource();
-  assert.ok(source.includes("validateTerritorialSerp(true)"), "o processamento não marca a SERP como insumo");
-  assert.ok(source.includes("dentroDoProcessamento"), "a SERP não distingue de onde foi chamada");
+  const inicio = source.indexOf("const processArchitecture = async");
+  assert.ok(inicio >= 0, "Processar arquitetura não foi encontrado");
+  const corpo = source.slice(inicio, source.indexOf("\n  };\n", inicio))
+    .split("\n")
+    .filter(linha => !/^\s*(\/\/|\*|\/\*)/.test(linha))
+    .join("\n");
+
+  assert.equal(corpo.includes("validateTerritorialSerp("), false, "Processar voltou a chamar a SERP na primeira etapa");
+  // A SERP continua existindo como etapa própria, chamada por quem pede.
+  assert.ok(source.includes("const validateTerritorialSerp = async"), "a etapa de SERP sumiu do workspace");
 });
 
 test("§6/§7 — confirmar é um clique, e plano vencido manda processar de novo", async () => {

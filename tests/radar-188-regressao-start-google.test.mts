@@ -136,7 +136,7 @@ test("RADAR 18.8 · B — o aviso diz que a coleta NÃO precisa ser refeita", ()
 /* ==========  C e D · MEMÓRIA PRIMEIRO, CACHE DEPOIS  ================== */
 
 test("RADAR 18.8 · C — a coleta entra no estado ANTES da cópia local", () => {
-  const corpo = trecho(contextoDoPipeline(), "collectSerp: async (articleId, location, articleDnaVersionId) => {", "collectAuxiliarySerp:");
+  const corpo = trecho(contextoDoPipeline(), "collectSerp: async (articleId, location, articleDnaVersionId", "collectAuxiliarySerp:");
 
   const ondeGravaEstado = corpo.indexOf("updateWorkspace(current => ({ ...current, serpRecords:");
   const ondeSalvaCache = corpo.indexOf("saveLocalSerpRecovery(");

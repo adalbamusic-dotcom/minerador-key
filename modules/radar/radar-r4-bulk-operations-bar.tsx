@@ -1,6 +1,7 @@
 import type { RadarR4BulkArticleSnapshot, RadarR4BulkOperation, RadarR4BulkEligibility, RadarR4SerpQueue } from "@/lib/radar/r4-queue";
 import { availableBulkActions } from "@/lib/radar/r4-queue";
 import { buildRadarR5QueueProgress } from "@/lib/radar/r5-sequential";
+import { radarSerpBatchButtonLabel } from "./radar-serp-collect-notices";
 
 type RadarR4BulkOperationsBarProps = {
   selectedRows: RadarR4BulkArticleSnapshot[];
@@ -13,7 +14,7 @@ const button = "inline-flex min-h-10 items-center justify-center rounded-md bord
 
 const actionCopy: Array<{ operation: RadarR4BulkOperation; label: string }> = [
   { operation: "serp", label: "Iniciar lote SERP" },
-  { operation: "refreshSerp", label: "Atualizar SERP selecionada" },
+  { operation: "refreshSerp", label: "Atualizar SERP selecionada (cache primeiro)" },
   { operation: "review", label: "Revisar SERP" },
   { operation: "approve", label: "Aprovar SERP" },
   { operation: "topics", label: "Preparar pautas" },
@@ -23,6 +24,8 @@ const actionCopy: Array<{ operation: RadarR4BulkOperation; label: string }> = [
   { operation: "report", label: "Gerar relatório" },
   { operation: "writer", label: "Enviar ao Redator" },
 ];
+
+const SERP_PAID_OPERATIONS: readonly RadarR4BulkOperation[] = ["serp", "refreshSerp"];
 
 function Count({ label, value }: { label: string; value: number }) {
   return <span className="text-sm text-text-muted"><span className="font-semibold text-foreground">{value}</span> {label}</span>;
@@ -49,7 +52,9 @@ export function RadarR4BulkOperationsBar({ selectedRows, onAction }: RadarR4Bulk
       const blockedByTelegram = operation === "specialist" && specialistBlocked;
       const disabled = eligibility.eligible.length === 0;
       if (disabled && !blockedByTelegram) return null;
-      const buttonLabel = blockedByTelegram ? `${label} · fundação Telegram bloqueada` : `${label} (${eligibility.eligible.length})`;
+      const buttonLabel = blockedByTelegram
+        ? `${label} · fundação Telegram bloqueada`
+        : SERP_PAID_OPERATIONS.includes(operation) ? radarSerpBatchButtonLabel(label, eligibility.eligible.length) : `${label} (${eligibility.eligible.length})`;
       return <button key={operation} type="button" className={button} disabled={disabled} title={blockedByTelegram ? "A migration/adapter remoto do Telegram não foi autorizado nesta rodada." : undefined} onClick={() => onAction(operation, eligibility.eligible)}>{buttonLabel}</button>;
     })}
     <div className="flex flex-wrap items-center gap-2" aria-label="Elegibilidade das operações"><Count label="Pautas prontas" value={topicsReady}/><Count label="Pautas revisadas" value={topicsReviewed}/><Count label="Pautas ainda pendentes" value={topicsPending}/><Count label="elegíveis SERP" value={actions.serp.eligible.length}/><Count label="bloqueados" value={actions.serp.blocked.length}/><Count label="não aplicáveis" value={actions.specialist.notApplicable.length}/>{(actions.serp.alreadyDone.length > 0 || actions.review.alreadyDone.length > 0) && <Count label="já processados" value={actions.serp.alreadyDone.length + actions.review.alreadyDone.length}/>}</div>

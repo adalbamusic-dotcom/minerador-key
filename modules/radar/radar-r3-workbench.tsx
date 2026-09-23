@@ -42,6 +42,16 @@ import { RadarR3ResearchDetails } from "./radar-r3-research-details";
 import { RadarR3SpecialistPanel } from "./radar-r3-specialist-panel";
 import type { RadarSpecialistPanelSummary } from "./radar-expert-brief-panel";
 import { RadarR6ReportPanel } from "./radar-r6-report-panel";
+import type { SerpResearchSnapshot } from "@/lib/radar/serp/contracts";
+import { buildRadarSerpLensCoverage } from "@/lib/radar/serp-lens-coverage";
+import { radarAuxiliaryLensLabel, radarCanonicalLensLabel, radarFrozenLensView } from "./radar-serp-lens-view";
+
+/** A cobertura de lentes da SERP canônica viva, para a linha da consulta central. */
+function lenteDaCanonica(research: SerpResearchSnapshot | null | undefined) {
+  if (!research) return null;
+  const label = radarCanonicalLensLabel(buildRadarSerpLensCoverage(research));
+  return label ? { snapshotId: research.id, label } : null;
+}
 
 type RadarR3WorkbenchProps = {
   model: RadarR3Model | null;
@@ -515,7 +525,7 @@ function WriterHandoff({ tab }: { tab: RadarWriterHandoffTab }) {
   </div>;
 }
 
-function DeepResearch({ view, busy, searchMode, researchProjection, researchBlueprint, onSearchModeChange, onStart, onAnalyze, onFinalize, onReset, onRecover, youtubeSearch, amazonSearch, writerHandoff, googleResearch, evidenceExtras }: { view: RadarDeepResearchView; busy: boolean; searchMode: RadarPrimarySearchMode; researchProjection?: RadarResearchProfileProjection | null; researchBlueprint?: RadarCompetitiveBlueprintView | null; onSearchModeChange?: (mode: RadarPrimarySearchMode) => void; onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onReset?: () => void; onRecover?: () => void; youtubeSearch?: RadarYoutubeSearchTab; amazonSearch?: RadarAmazonSearchTab; writerHandoff?: RadarWriterHandoffTab; googleResearch?: RadarGoogleResearchTab; evidenceExtras?: React.ReactNode }) {
+function DeepResearch({ view, busy, searchMode, researchProjection, researchBlueprint, onSearchModeChange, onStart, onAnalyze, onFinalize, onReset, onRecover, youtubeSearch, amazonSearch, writerHandoff, googleResearch, evidenceExtras, canonicalLens = null }: { canonicalLens?: { snapshotId: string; label: string } | null; view: RadarDeepResearchView; busy: boolean; searchMode: RadarPrimarySearchMode; researchProjection?: RadarResearchProfileProjection | null; researchBlueprint?: RadarCompetitiveBlueprintView | null; onSearchModeChange?: (mode: RadarPrimarySearchMode) => void; onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onReset?: () => void; onRecover?: () => void; youtubeSearch?: RadarYoutubeSearchTab; amazonSearch?: RadarAmazonSearchTab; writerHandoff?: RadarWriterHandoffTab; googleResearch?: RadarGoogleResearchTab; evidenceExtras?: React.ReactNode }) {
   /*
    * ====== 1.2 · §1 · O PERFIL MANDA NESTA SEÇÃO INTEIRA ======
    *
@@ -924,6 +934,7 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
             <Meta label="Amostra" value={`${view.finalizedBundle.sample.comparablePages} comparável(is)`} />
             <Meta label="Links planejados" value={view.finalizedBundle.links.totalRecommendedLinks} />
             <Meta label="Especialista" value={`${view.finalizedBundle.authority.specialistRequirements.length} ponto(s)`} />
+            <Meta label="Lentes da SERP" value={radarFrozenLensView(view.finalizedBundle)?.shortLabel} />
           </dl>
           {view.finalizedBundle.acknowledgedInsufficiency && <p className="mt-2 text-sm leading-6 text-warning" data-testid="radar-frozen-insufficiency">Encerrada com insuficiência declarada: {view.finalizedBundle.acknowledgedInsufficiency}</p>}
           <p className="mt-2 text-sm leading-6 text-text-muted">Esta versão não muda mais. Para pesquisar de novo, zere a investigação — o registro anterior permanece.</p>
@@ -939,15 +950,24 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
         <div className="overflow-x-auto rounded-md border border-divider">
           <table className="w-full min-w-[720px] border-collapse text-left text-sm">
             <caption className="sr-only">Plano de consultas da investigação</caption>
-            <thead className="bg-surface-subtle text-xs uppercase tracking-wide text-text-muted"><tr><th scope="col" className="px-3 py-2">Keyword</th><th scope="col" className="px-3 py-2">Papel</th><th scope="col" className="px-3 py-2">SERP</th><th scope="col" className="px-3 py-2">Decisão</th><th scope="col" className="px-3 py-2">Motivo</th></tr></thead>
+            <thead className="bg-surface-subtle text-xs uppercase tracking-wide text-text-muted"><tr><th scope="col" className="px-3 py-2">Keyword</th><th scope="col" className="px-3 py-2">Papel</th><th scope="col" className="px-3 py-2">SERP</th><th scope="col" className="px-3 py-2">Decisão</th><th scope="col" className="px-3 py-2">Lentes</th><th scope="col" className="px-3 py-2">Motivo</th></tr></thead>
             <tbody>{view.plan.queries.map(query => {
               const execucao = registro?.queries.find(item => item.queryId === query.queryId) || null;
               const classe = execucao?.serpClass || (query.role === "principal" ? "canonical" : "auxiliary");
+              /*
+               * A cobertura de lentes de CADA consulta executada (R4): a auxiliar
+               * guarda as quatro na própria evidência; a canônica, no snapshot.
+               * Evidência anterior às lentes é uma lente só, e é dito assim.
+               */
+              const lentes = !execucao?.evidence ? null
+                : classe === "canonical" ? (canonicalLens && canonicalLens.snapshotId === execucao.evidence.snapshotId ? canonicalLens.label : null)
+                  : radarAuxiliaryLensLabel(execucao.evidence.lenses) ?? "1 lente (anterior às quatro lentes)";
               return <tr key={query.queryId} className="border-t border-divider align-top first:border-t-0">
                 <td className="px-3 py-2 text-foreground">{query.keyword || "Texto não resolvido nesta versão"}</td>
                 <td className="px-3 py-2 text-text-muted">{roleLabel(query.role)}</td>
                 <td className="px-3 py-2 text-text-muted">{classe === "canonical" ? "Canônica do artigo" : "Auxiliar de pesquisa"}</td>
                 <td className="px-3 py-2 text-text-muted">{execucao ? radarQueryExecutionLabel(execucao.execution) : radarQueryDispositionLabel(query.disposition)}</td>
+                <td className="px-3 py-2 text-text-muted" data-testid="radar-query-lenses" data-query-id={query.queryId}>{lentes || "—"}</td>
                 <td className="px-3 py-2 text-text-muted">{execucao?.reason || query.reason}</td>
               </tr>;
             })}</tbody>
@@ -1414,7 +1434,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
           * sempre estiveram: consolidar a superfície do Google não pode apagar
           * a consulta dos outros perfis.
           */}
-        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} />}
+        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} canonicalLens={lenteDaCanonica(model.serp.view?.record.research)} />}
         {/*
           * AMAZON NÃO É UM LUGAR SEPARADO — é um dos destinos da pesquisa.
           *

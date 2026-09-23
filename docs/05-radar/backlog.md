@@ -1,5 +1,83 @@
 # Backlog — Radar
 
+## Export portátil com SERP, paridade com o Redator e export por silo — 2026-09-23
+
+Feito (verificado no código e confirmado por teste; sem homologação):
+
+- [x] Colunas `serp_observed_md/_json` com a SERP que o dossiê referencia, curadoria só na SERP principal, SERPs auxiliares das secundárias, trechos de terceiro em até 300 caracteres e marcados, e aviso de coleta posterior.
+- [x] Colunas `serp_lenses_md/_json` com o cache de SERP da marca nas quatro lentes, numa leitura `observation` por lote; falha de leitura vira aviso na coluna.
+- [x] Colunas `research_status_md`, `authority_requirements_md` e `competitors_structure_json` (prontidão pela regra do Redator, datas, autoridade, descoberta por IA, estrutura e posições dos concorrentes).
+- [x] Proibições do Redator que faltavam ("reconfigurar o Silo", "substituir a composição de secundárias") nas regras de `writer_context_md` e `writer_brief_md`, sem repetição.
+- [x] Resumo "SERP OBSERVADA" em `writer_context_md`, sem trecho de terceiro.
+- [x] `groupBy: "silo"` na rota: um CSV por silo, na ordem do silo, `-parcial` com os faltantes pelo título, "sem silo" em arquivo próprio.
+- [x] Menu `Exportar ▾` com "Silos completos · um CSV por silo" (Recomendado) em primeiro; 1 silo → CSV, 2+ → um `.zip` sem compressão montado no navegador.
+- [x] `refused` do export avulso mostrado pelo título; recomendação do silo completo quando um silo foi selecionado só em parte.
+- [x] Revisão adversarial, corrigido e preso por teste (24 mutantes numa cópia da árvore, 24 mortos):
+  - CSV do lote fora da resposta por silo (a mesma linha saía duas vezes);
+  - chave das lentes igual à do cache (acento mantido, espaço colapsado nos dois lados);
+  - códigos do alvo da keyword na leitura das lentes (A8);
+  - data de congelamento da SERP de apoio;
+  - revisão "não se aplica" na SERP de apoio;
+  - curadoria só "registrada" com decisão real;
+  - motivo neutro para a coleta auxiliar que falhou (invariante 43);
+  - coleta posterior avisada também em `research_status_md`;
+  - `radarPortableExportRows` com o plano real;
+  - recusas nomeadas no aviso por silo;
+  - faixa do aviso pela severidade;
+  - teto de 500 conferido antes do pedido.
+
+Pendente:
+
+- [ ] Homologação do usuário: baixar um silo, vários silos (zip) e um silo parcial; abrir o `.zip` no Explorador do Windows; conferir o aviso e as colunas numa planilha real.
+- [ ] Coleta do Radar ainda no modo `regular`, sem PAA nem citações do AI Overview: as colunas declaram a limitação, mas o dado não existe. Decidir o `advanced` na coleta do Radar exige custo e gate próprios.
+- [ ] E4 da SDD de egress: o export ainda lê o item do Radar e reidrata as corridas por artigo (estado + autoridades). Desenho próprio, fora desta tarefa.
+- [ ] SiloPage sem dossiê do Radar: hoje entra só como contexto do silo, pela dica da hidratação. Ler as versões `silo_page` ou dar dossiê à SiloPage é mudança estrutural (SDD).
+- [ ] A versão do ArticleDNA na rota de export (e no envio ao Redator) ainda é escolhida por `.find` sem ordem; com mais de uma versão, pode vir a antiga e derrubar a curadoria do `observed`.
+- [ ] Medir o tamanho real das células com dados de produção (o teto de 24 mil caracteres por célula foi provado com a maior coleta de fixture) e o egress da leitura das lentes em lotes grandes.
+- [x] Teto do corpo de resposta, levantado na revisão adversarial:
+  - A linha completa passou de ~59 KB para ~133 KB.
+  - Mesmo sem a duplicação, "Silos completos" sem seleção manda todos os silos num pedido só.
+  - O limite de 4,5 MB da Vercel foi conferido na documentação dela (413 `FUNCTION_PAYLOAD_TOO_LARGE`): o teto seria ~31 artigos.
+  - **Feito em 2026-09-23:** a resposta de sucesso sai em fluxo (`lib/radar/portable-export-response.ts`), o caminho que a Vercel indica sem esse teto. Continua uma leitura da marca por lote. Um pedido por silo foi descartado porque relê artefatos e snapshots a cada silo.
+- [ ] Homologar o fluxo no deploy: exportar uma marca com mais de ~35 artigos finalizados e confirmar que o arquivo chega (a documentação da Vercel diz que fluxo não tem o teto; não foi testado no deploy).
+- [ ] Paridade com o Redator ainda parcial. Registrar a decisão ou fechar cada item:
+  - links internos de ENTRADA saem só como contagem;
+  - fontes externas saem só como candidatas a evidência, sem `observedLinks`, `recurrentDomains`, `conceptAlignments`, padrões, links comerciais nem limitações;
+  - `observed.evidence.semantic/structural` fica de fora;
+  - o slug diverge: o CSV usa o publicado; a importação do Redator, `suggestedSlug`.
+- [ ] Alinhar a leitura das lentes do export com a do Redator (`writer-evidence-sources.ts`, em andamento em outra sessão). Pontos que divergem:
+  - chave pela consulta da Qualificação × alvo A8;
+  - vencida legível com rótulo × "venceu a validade" (hoje `lookupSerpCache` não devolve a observação vencida);
+  - reforços narrativos lidos × não lidos.
+- [ ] Quando o snapshot do Radar ganhar `lensSet` e `payloadDepth` (trabalho paralelo, ainda não integrado):
+  - preferir `snapshot.lensSet` às lentes do cache vivo em `serp_lenses_*`;
+  - usar `payloadDepth` na frase de ausência de bloco.
+- [ ] Egress do escopo "silo inteiro":
+  - Os irmãos não finalizados passam pelo laço E4 só para serem recusados (payload inteiro e depois as autoridades).
+  - Proposta: recusar antes das autoridades quando `radarPrimaryProfileOfAnalysis(corrente.payload)` for nulo, porque a recusa é a mesma e o silo do recusado vem da composição.
+  - Alternativa: a tela mandar esses irmãos só como membros.
+- [ ] `listReviews(brandId)` lê todas as revisões da marca a cada export. O export só usa `snapshotId`, `status` e `reviewedAt` dos artigos pedidos. Estreitar a leitura por `article_id` do lote (prioridade baixa).
+- [ ] Teto de célula para o contexto do silo:
+  - `silo_context_md/_json` crescem com o silo (~150 a 200 caracteres por membro). Com ~150 membros, passam de 32.767 caracteres, e o Excel trunca sem aviso.
+  - Aplicar o mesmo corte declarado das outras colunas e `membersOmitted` no JSON.
+- [ ] Rótulos da recusa:
+  - Toda recusa vira "não finalizado" no plano do silo e no `headline` do avulso, inclusive "ArticleDNA não encontrado" e "pacote indisponível".
+  - O aviso já mostra o motivo; falta um `statusLabel` próprio para a recusa que não é de finalização.
+- [ ] Colunas novas no meio da linha: `research_status_md` e `silo_context_md` vêm depois de `must_cover`. Se aparecer consumidor que lê o CSV por posição, levá-las para o fim.
+
+## Egress Supabase — auditoria de 2026-09-23
+
+- [x] Conferir por leitura remota as migrations/views de 21/09, o volume das corridas separadas e a pressão de egress mostrada nas capturas.
+- [x] Filtrar no código local os tipos realmente consumidos por `ArtifactRepository.list`, preservando saída e consumidores.
+- [x] Ler no painel autenticado a composição de 19–22/09: PostgREST responde por 93,8–97,4% dos dias amostrados.
+- [x] Consultar *Top Paths* no Logs Explorer: no plano Free só há um dia de retenção; a consulta mostrou frequência por rota, sem bytes nem dados dos dias de pico.
+- [ ] Publicar manualmente o filtro e acompanhar o egress diário/por serviço após o reset de 26/09; a taxa futura segue não verificada.
+- [ ] Preparar SDD da leitura enxuta de `ContentDocument` no workspace, com hidratação por documento, F5, readback, isolamento por marca e regressão do Redator.
+- [ ] Preparar SDD da hidratação seletiva de corridas em `findByArticle`, consumidor por consumidor.
+- [ ] Medir bytes dos endpoints de polling por área antes de mudar o intervalo.
+
+Relatório: [auditoria-egress-supabase-2026-09-23.md](auditoria-egress-supabase-2026-09-23.md).
+
 ## Dívidas abertas — fonte única — 2026-09-17
 
 Esta seção é a **resposta canônica** para "o que continua aberto no Radar".
@@ -3605,3 +3683,24 @@ de campos à da poda.
 
 Hidratação seletiva por rota (cada uma sabe de qual versão precisa), o que
 transforma o readback de operação de ~8 MB em ~1,4 MB mais uma corrida.
+
+## Egress — pendências do Radar — 2026-09-23
+
+Ver SDD de [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md).
+
+1. **E3 — Realtime e polling** (estrutural). A publicação `supabase_realtime`
+   tem **zero tabelas**; o sinal vira "ao vivo" por falso positivo e, por
+   acaso, mantém o polling desligado. Não consertar o sinal antes de baratear
+   o disparo (R12): ligaria um poll de 3 a 10 s com o custo atual.
+2. **E4 — export e envios** (~24 MB por ação, reidratação tripla) e **volta à
+   aba** (~8,5 MB por `visibilitychange`, sem coalescer). Correção proposta
+   recusada pelo revisor; precisa de desenho.
+3. **Outros consumidores de `findByArticle`** que ainda reidratam tudo:
+   rota `serp` (`serp/route.ts:66`), `radar-canonical-authorities.ts:282`,
+   envio ao Planejador e ao Redator, `radar-primary-mode`, início de coleta
+   YouTube/Amazon. Migrar rota a rota para os métodos novos.
+4. **Guardas antigas mais fracas do que parecem:** as regex de prefixo
+   `/new WorkflowRepository\(\)\.findByArticle/` em
+   `radar-checkpoint-gates-3-7.test.mts:594` e
+   `radar-r10-2d-ponte-multi-query.test.mts:350` também casam com os métodos
+   novos. O teste novo fixa o método exato de cada rota, o que cobre a lacuna.

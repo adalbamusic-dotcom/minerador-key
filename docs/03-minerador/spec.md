@@ -1248,3 +1248,41 @@ destino é X"), então não é silencioso — mas deixou de ser selecionável.
 
 O lugar certo para esse seletor é o próprio modal de importação, onde a
 escolha tem contexto. Não foi feito aqui porque é UI nova, não remoção.
+
+## 77. SERP nas 4 lentes e derivação v4 da intenção e do funil — 2026-09-23
+
+Decisão do usuário: as 4 lentes (desktop-windows, desktop-macos, mobile-android, mobile-ios) valem em todo ponto de SERP orgânica, desde a primeira coleta, e a intenção e o funil passam a ser lidos nelas. Escopo e revisões no [adendo](propostas/adendo-derivacao-v4-quatro-lentes-2026-09-23.md).
+
+**Coleta.** A rota de Resultados (Processador e "Medir resultados" da Descoberta) garante as 4 lentes no cache da marca. Paga só as que faltam, com quota parcial e lacuna sem derrubar o alvo.
+- Canônica: corpo em depth 20.
+- Extras: meta, observação e `payload.digest` (top 10 com os campos que o classificador lê) em depth 10, sem corpo.
+
+**Classificador v4** (`serp-semantic-derivation-v4`, mesmos limiares):
+- **R1:** palavra inteira, com plural simples (s/es); o termo que a v3 já escrevia exato segue exato.
+- **R2:** placar por campo. O título pesa 2; descrição ou snippet, pre/extended snippet e o **rótulo humano** do breadcrumb pesam 1. **Tokens de URL e o `website_name` pesam 0**: a URL não decide intenção (invariante 13).
+- **R4:** conteúdo em rede social não é perfil nem produto.
+- **R5:** varejista do bloco de produtos da mesma SERP, por igualdade exata normalizada, só para resultado mudo.
+- **R6:** título de lista numerada preenche Informativa/TOFU.
+- **R7:** `short_videos`, `top_stories` e `scholarly_articles` reforçam Informativa/TOFU; avaliações, perspectivas e fóruns são registrados com peso 0.
+- **R8:** URL distinta; em `/watch` o parâmetro `v` identifica a página.
+- A amostra guarda os orgânicos distintos com o placar.
+
+**Nas 4 lentes.**
+- Cada URL distinta conta uma vez, com a máscara das lentes, e recebe o rótulo da maioria das lentes que a leram.
+- Com duas ou mais lentes lidas, um bloco só reforça se aparecer em duas ou mais.
+- Concordância e `deviceSplit` são registro, não reforço.
+- Lente sem digest conta como faltante.
+- Datas com mais de 7 dias de diferença são só marcadas; a recoleta é manual.
+- A Qualificação ganha `lensEvidence`, e o `evidencia_serp` ganha `lentes` e, nos eixos mistos, os rótulos e a cobertura, com teto de 700 B.
+
+**Tela.** Quando a Lógica diria "Ambíguo" e a SERP vigente está mista com cobertura ≥ 0,5, a tela mostra "Misto na SERP (A × B)". O valor canônico e a assinatura não mudam. O painel da Qualificação mostra "SERP · K de 4 lentes", a concordância e a divergência entre aparelhos.
+
+**Continua valendo a §63.** SERP conclusiva prevalece sobre a Lógica e sobre a decisão humana; o humano invalida, não substitui. Leitura nova conclusiva que muda o canônico rebaixa a aprovada. As lentes também podem **tirar** conclusão: um bloco visto só na canônica deixa de reforçar.
+
+```text
+SERP_LENSES_EVERYWHERE = YES (decisão do usuário)
+MINERADOR_INTENT_FUNNEL_FROM_4_LENSES = YES
+LENS_AGREEMENT_IS_REINFORCEMENT = NO
+URL_TOKENS_DECIDE_INTENT = NO
+AUTOMATIC_RECOLLECTION = NO
+```

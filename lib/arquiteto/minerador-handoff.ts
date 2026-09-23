@@ -43,6 +43,16 @@ export type MineradorKeywordHandoffSource = {
     /** Honestidade explícita do que a evidência concluiu. */
     semanticState: "conclusive" | "non_conclusive";
     collectedAt: string;
+    /**
+     * Aditivo e opcional (adendo das 4 lentes, §4): quantas lentes a leitura
+     * usou e quantas concordam, por eixo, com o rótulo que lidera. Ausente na
+     * Qualificação legada de uma lente. É registro, nunca força: o Arquiteto
+     * não decide nada por ele.
+     */
+    lenses?: {
+      observadas: number;
+      concordancia: { intent: number; funnel: number };
+    };
   } | null;
   /**
    * Pacote aprovado: o KeywordDNA inteiro, congelado no ato da aprovação.

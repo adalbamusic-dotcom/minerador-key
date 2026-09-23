@@ -1,6 +1,6 @@
 import { canonicalIntentLabel, externalIntentLabel, normalizeIntentKey } from "./intent-taxonomy.ts";
 import { readLogicalOutputContract, type LogicalOutputFieldState } from "./logical-processor.ts";
-import { readSerpEvidenceRecord, serpEvidenceAxisValue } from "./serp-evidence-record.ts";
+import { readSerpEvidenceRecord, serpEvidenceAxisValue, serpEvidenceMixedLabels } from "./serp-evidence-record.ts";
 
 export type LogicalReadItem = {
   intent?: string | null;
@@ -29,17 +29,50 @@ export type CanonicalKeywordReadModel = {
   funnelSource: CanonicalFieldSource;
   externalIntent: string | null;
   externalIntentLabel: string | null;
+  /**
+   * Aditivo · Só quando a R9 vale no eixo: a forma curta de "Misto na SERP
+   * (A × B)" para células estreitas (a tabela do Minerador). O rótulo inteiro
+   * continua em `intentLabel`/`funnelLabel` — título, Perfil e CSV.
+   */
+  intentCompactLabel?: string;
+  funnelCompactLabel?: string;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-function unresolvedLabel(state: LogicalOutputFieldState | null | undefined, fallback: string, field?: "funnel"): string {
-  if (state === "ambiguous") return "Ambíguo";
+/**
+ * R9 (adendo das 4 lentes, §4) — quando a Lógica ficou ambígua e a SERP
+ * vigente MOSTROU mistura (eixo misto, cobertura ≥ 0,5), a tela diz o que a
+ * SERP viu: "Misto na SERP (A × B)". É só o rótulo: o valor canônico continua
+ * `null`, o estado continua `unresolved`, e a assinatura do pacote aprovado
+ * (que cobre `canonical.intent`, não o rótulo) não muda.
+ */
+function unresolvedLabel(state: LogicalOutputFieldState | null | undefined, fallback: string, field?: "funnel", serpMixed?: [string, string] | null): string {
+  if (state === "ambiguous") return serpMixed ? `Misto na SERP (${serpMixed[0]} × ${serpMixed[1]})` : "Ambíguo";
   if (state === "pending") return "Pendente";
   if (state === "explicit_unknown") return field === "funnel" ? "Indefinido" : "Indeterminado";
   return fallback;
+}
+
+const INTENT_ABBREVIATIONS: Record<string, string> = {
+  Informativa: "Info",
+  Comercial: "Com",
+  Transacional: "Trans",
+  Navegacional: "Nav",
+};
+
+/**
+ * A forma curta da R9, para quando "Misto na SERP (A × B)" não cabe: a
+ * intenção abrevia os rótulos ("Misto: Nav × Trans"); o funil, que tem a
+ * coluna mais estreita, fica em "Misto". Nunca muda valor nem estado.
+ */
+function compactMixedLabel(state: LogicalOutputFieldState | null | undefined, serpMixed: [string, string] | null, axis: "intent" | "funnel"): string | undefined {
+  if (state !== "ambiguous" || !serpMixed) return undefined;
+  if (axis === "funnel") return "Misto";
+  const [first, second] = serpMixed.map(label => INTENT_ABBREVIATIONS[label] || label);
+  return `Misto: ${first} × ${second}`;
 }
 
 function meaningful(value: unknown): value is string {
@@ -204,13 +237,19 @@ export function readCanonicalKeywordDna(
       .find(meaningful) || null
     : null;
 
+  const serpMixedIntent = serpEvidenceMixedLabels(serpRecord, "intent");
+  const serpMixedFunnel = serpEvidenceMixedLabels(serpRecord, "funnel");
+  // A forma curta só existe onde o rótulo inteiro da R9 aparece.
+  const intentCompactLabel = intentState !== "confirmed_unknown" && !intent ? compactMixedLabel(contractIntent?.state, serpMixedIntent, "intent") : undefined;
+  const funnelCompactLabel = funnelState !== "confirmed_unknown" && !funnelExplicitUnknown && !canonicalFunnel ? compactMixedLabel(contractFunnel?.state, serpMixedFunnel, "funnel") : undefined;
+
   return {
     intent,
     intentLabel: intentState === "confirmed_unknown"
       ? "Indeterminado"
       : intent
         ? canonicalIntentLabel(intent)
-        : unresolvedLabel(contractIntent?.state, canonicalIntentLabel(intent)),
+        : unresolvedLabel(contractIntent?.state, canonicalIntentLabel(intent), undefined, serpMixedIntent),
     intentState,
     intentSource,
     niche,
@@ -224,11 +263,13 @@ export function readCanonicalKeywordDna(
       ? "Indeterminado"
       : funnelExplicitUnknown
         ? "Indefinido"
-      : canonicalFunnel || unresolvedLabel(contractFunnel?.state, "—", "funnel"),
+      : canonicalFunnel || unresolvedLabel(contractFunnel?.state, "—", "funnel", serpMixedFunnel),
     funnelState,
     funnelSource,
     externalIntent,
     externalIntentLabel: externalIntentLabel(externalIntent),
+    ...(intentCompactLabel ? { intentCompactLabel } : {}),
+    ...(funnelCompactLabel ? { funnelCompactLabel } : {}),
   };
 }
 

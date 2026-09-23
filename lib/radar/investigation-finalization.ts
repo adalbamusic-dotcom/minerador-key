@@ -37,6 +37,7 @@
 
 import { z } from "zod";
 import { assertRadarEvidenceAuthority, type RadarEvidenceResolution } from "./evidence-authority.ts";
+import { RadarFrozenSerpLensBlockSchema, type RadarFrozenSerpLensBlock } from "./serp/frozen-lenses.ts";
 
 import type { RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
 import type { RadarDeepResearchRecord } from "./deep-research.ts";
@@ -143,6 +144,14 @@ const FrozenSearchSchema = z.object({
   selectedReferences: z.number().int().nonnegative(),
   recurrentReferences: z.number().int().nonnegative(),
   auxiliaryOnlyReferences: z.number().int().nonnegative(),
+  /**
+   * R3 · AS QUATRO LENTES, COPIADAS NO FINALIZE — nunca ponteiro para o cache.
+   *
+   * Montado no servidor, na escrita que congela, a partir do snapshot que a
+   * análise leu e das auxiliares da rodada. AUSENTE, nunca nulo, quando a
+   * rodada não tem lentes: o hash dos bundles anteriores não muda.
+   */
+  lenses: RadarFrozenSerpLensBlockSchema.optional(),
 }).strict();
 
 const FrozenSampleSchema = z.object({
@@ -326,6 +335,49 @@ const FrozenDiscoverySchema = z.object({
   }).strict(),
 }).strict();
 
+/*
+ * ===== O STANDING DA SERP, AVALIADO UMA VEZ — SDD do Radar nas 4 lentes, R1 =====
+ *
+ * O dossiê entregue ao Planejador diz se a SERP tem precedência sobre o
+ * terreno competitivo. Até aqui essa resposta era um padrão fixo, remontado a
+ * cada entrega: toda SERP saía "vigente, suficiente e válida".
+ *
+ * Calcular o standing NA LEITURA (idade, revisão, snapshot corrente) faria um
+ * artigo já finalizado entregar outra conclusão e outro hash com o tempo — é o
+ * que as invariantes 30, 57 e 59 proíbem. Por isso ele é avaliado UMA vez, no
+ * congelamento, e gravado aqui como cópia. Depois disso só a cópia é lida.
+ *
+ * A chave é OPCIONAL e, quando não foi avaliada, AUSENTE — nunca `null`. O
+ * `bundleHash` cobre todas as chaves presentes: gravá-la nula mudaria a
+ * identidade de todo bundle congelado antes desta mudança.
+ */
+export const RADAR_SERP_STANDING_INVALID_REASONS = [
+  "SNAPSHOT_NOT_BOUND",
+  "SNAPSHOT_NOT_FOUND",
+  "SNAPSHOT_NOT_REAL",
+  "SNAPSHOT_HASH_MISMATCH",
+  "ARTICLE_DNA_MISMATCH",
+  "SNAPSHOT_REJECTED",
+] as const;
+
+export const RadarFrozenSerpStandingSchema = z.object({
+  authoritative: z.boolean(),
+  current: z.boolean(),
+  sufficient: z.boolean(),
+  valid: z.boolean(),
+  reason: z.string().min(1),
+  /** O que foi olhado no instante do congelamento — para a conclusão ser auditável. */
+  basis: z.object({
+    snapshotId: z.string().nullable(),
+    snapshotHash: z.string().nullable(),
+    reviewStatus: z.string().nullable(),
+    sufficiencyLevel: z.string().min(1),
+    invalidReasons: z.array(z.enum(RADAR_SERP_STANDING_INVALID_REASONS)),
+  }).strict(),
+}).strict();
+
+export type RadarFrozenSerpStanding = z.infer<typeof RadarFrozenSerpStandingSchema>;
+
 export const RadarFrozenEvidenceBundleSchema = z.object({
   /** Identidade PRÓPRIA do bundle. Não é o id do artigo nem o da análise. */
   bundleId: z.string().min(1),
@@ -353,6 +405,8 @@ export const RadarFrozenEvidenceBundleSchema = z.object({
   /** O dossiê editorial da rodada. Aditivo: bundles antigos não o têm. */
   blueprint: FrozenBlueprintSchema.nullable().default(null),
   limitations: z.array(z.string()),
+  /** R1 · avaliado no congelamento. Ausente nos bundles anteriores, nunca nulo. */
+  serpStanding: RadarFrozenSerpStandingSchema.optional(),
 }).strict();
 
 export type RadarFrozenEvidenceBundle = z.infer<typeof RadarFrozenEvidenceBundleSchema>;
@@ -627,6 +681,71 @@ export function assertRadarFrozenBundleIntegrity(bundle: RadarFrozenEvidenceBund
   if (!bundle.binding.articleDnaVersionId.trim()) throw new Error("RADAR_FROZEN_BUNDLE_WITHOUT_ARTICLE_DNA_VERSION");
   const { bundleHash, ...conteudo } = bundle;
   if (radarFrozenBundleHash(conteudo) !== bundleHash) throw new Error("RADAR_FROZEN_BUNDLE_MUTATED");
+}
+
+/**
+ * GRAVA O STANDING NO BUNDLE QUE ESTÁ SENDO CONGELADO — e só nele.
+ *
+ * Quem chama é a escrita do FINALIZE, no servidor, antes de gravar. O bundle
+ * que chega precisa estar íntegro: recalcular o hash sobre um conteúdo que já
+ * não batia com o próprio hash lavaria a adulteração. Um standing que viesse
+ * do navegador é descartado — ele é avaliado aqui, não declarado por quem pede.
+ */
+export function radarStampFrozenSerpStanding(bundle: RadarFrozenEvidenceBundle, standing: RadarFrozenSerpStanding): RadarFrozenEvidenceBundle {
+  assertRadarFrozenBundleIntegrity(bundle);
+  const conteudo = Object.fromEntries(Object.entries(bundle).filter(([chave]) => chave !== "bundleHash" && chave !== "serpStanding")) as Omit<RadarFrozenEvidenceBundle, "bundleHash" | "serpStanding">;
+  const semHash: Omit<RadarFrozenEvidenceBundle, "bundleHash"> = { ...conteudo, serpStanding: RadarFrozenSerpStandingSchema.parse(standing) };
+  return RadarFrozenEvidenceBundleSchema.parse({ ...semHash, bundleHash: radarFrozenBundleHash(semHash) });
+}
+
+/**
+ * O STANDING QUE O DOSSIÊ ENTREGA, LIDO DA CÓPIA CONGELADA.
+ *
+ * Devolve a forma do dossiê (os cinco campos de `RadarSerpStanding`), copiada
+ * sem recalcular nem a frase: o que foi congelado é o que viaja. `null` quando
+ * o bundle é anterior a esta mudança — e aí quem monta o dossiê mantém o
+ * comportamento legado, byte a byte.
+ */
+export function radarFrozenSerpStandingOf(bundle: unknown): { authoritative: boolean; current: boolean; sufficient: boolean; valid: boolean; reason: string } | null {
+  if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) return null;
+  const gravado = RadarFrozenSerpStandingSchema.safeParse((bundle as { serpStanding?: unknown }).serpStanding);
+  if (!gravado.success) return null;
+  const { authoritative, current, sufficient, valid, reason } = gravado.data;
+  return { authoritative, current, sufficient, valid, reason };
+}
+
+/**
+ * GRAVA AS LENTES NO BUNDLE QUE ESTÁ SENDO CONGELADO — R3, e só nele.
+ *
+ * A mesma disciplina do standing: quem chama é a escrita do FINALIZE, no
+ * servidor; o bundle precisa chegar íntegro; o que o navegador declarou em
+ * `search.lenses` é descartado. `null` remove a chave — rodada sem lentes
+ * não ganha bloco vazio.
+ */
+export function radarStampFrozenSerpLenses(bundle: RadarFrozenEvidenceBundle, lenses: RadarFrozenSerpLensBlock | null): RadarFrozenEvidenceBundle {
+  assertRadarFrozenBundleIntegrity(bundle);
+  const busca = Object.fromEntries(Object.entries(bundle.search).filter(([chave]) => chave !== "lenses")) as Omit<RadarFrozenEvidenceBundle["search"], "lenses">;
+  const conteudo = Object.fromEntries(Object.entries(bundle).filter(([chave]) => chave !== "bundleHash")) as Omit<RadarFrozenEvidenceBundle, "bundleHash">;
+  const semHash: Omit<RadarFrozenEvidenceBundle, "bundleHash"> = {
+    ...conteudo,
+    search: lenses ? { ...busca, lenses: RadarFrozenSerpLensBlockSchema.parse(lenses) } : busca,
+  };
+  return RadarFrozenEvidenceBundleSchema.parse({ ...semHash, bundleHash: radarFrozenBundleHash(semHash) });
+}
+
+/**
+ * AS LENTES QUE O DOSSIÊ ENTREGA, LIDAS DA CÓPIA CONGELADA.
+ *
+ * Nada é recalculado nem buscado: o bloco que o FINALIZE gravou é o que
+ * viaja. `null` quando o bundle é anterior às lentes — e o dossiê fica sem a
+ * chave, byte a byte como antes.
+ */
+export function radarFrozenSerpLensesOf(bundle: unknown): RadarFrozenSerpLensBlock | null {
+  if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) return null;
+  const busca = (bundle as { search?: unknown }).search;
+  if (!busca || typeof busca !== "object" || Array.isArray(busca)) return null;
+  const gravado = RadarFrozenSerpLensBlockSchema.safeParse((busca as { lenses?: unknown }).lenses);
+  return gravado.success ? gravado.data : null;
 }
 
 /**

@@ -387,9 +387,29 @@ export async function persistSiloPairAtomic(
   return { status: "PERSISTED", atomicity: "TRANSACTIONAL_RPC", siloDna: canonicalDna as VersionEnvelope<SiloDNA>, siloPage: canonicalPage as VersionEnvelope<SiloPage>, source: "CANONICAL_REMOTE" };
 }
 
+/*
+ * Os únicos tipos que o laço de listArquitetoArtifacts monta (e cujo status
+ * entra em `statuses`). Qualquer outro tipo que a consulta devolvesse seria
+ * descartado sem efeito, então pedi-lo ao banco era só egress: ~1 MB por
+ * chamada na marca 09762023 e ~1,5 MB na 4a737e74 (medido em 2026-09-23),
+ * multiplicado pela carga do workspace, pelos readbacks e pelas leituras
+ * duplas do handoff e do POST de silos. Um tipo novo tratado no laço TEM de
+ * entrar aqui, senão nunca chega do banco; o teste
+ * arquiteto-artefatos-filtrados-na-consulta deriva os tipos do laço e acusa a
+ * divergência.
+ */
+export const ARQUITETO_LISTED_ARTIFACT_TYPES = [
+  "article_dna",
+  "silo_dna",
+  "silo_page",
+  ARTICLE_AI_REVIEW_ARTIFACT_TYPE,
+] as const satisfies readonly ArquitetoArtifactType[];
+
 export async function listArquitetoArtifacts(context: PipelineContext) {
   const repository = new ArtifactVersionRepository(context);
-  const result = await repository.list();
+  // A numeração de rowIndex nas mensagens de diagnóstico passa a contar só as
+  // linhas destes tipos; é o único efeito observável do filtro além do egress.
+  const result = await repository.list(undefined, undefined, ARQUITETO_LISTED_ARTIFACT_TYPES);
   if (result.status === "NO_DATA") {
     return { articleDnas: [], siloDnas: [], siloPages: [], aiReviews: [], statuses: [], source: "CANONICAL_REMOTE" as const };
   }

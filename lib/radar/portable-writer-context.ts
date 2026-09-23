@@ -46,6 +46,12 @@ export type RadarWriterContextInput = {
   radiography: string;
   strategy: string;
   serpEvidence: string;
+  /**
+   * A SERP que a investigação analisou, em resumo curto (top 10, perguntas,
+   * relacionadas, citados no AI Overview; sem trecho de terceiro). Opcional:
+   * sem ela, o contexto é o de antes. O detalhe vive em `serp_observed_md`.
+   */
+  serpObserved?: string;
   sectionEvidence: string;
   sources: string;
   internalLinks: string;
@@ -76,6 +82,16 @@ export function radarWriterContextMarkdown(input: RadarWriterContextInput): stri
     ...secao("RADIOGRAFIA COMPETITIVA", incorporar(input.radiography), true),
     ...secao("ESTRATÉGIA PARA SUPERAR A SERP", incorporar(input.strategy)),
     ...secao("EVIDÊNCIAS", incorporar(input.serpEvidence), true),
+    /*
+     * A SERP COMO O GOOGLE A MOSTROU, e não só digerida.
+     *
+     * "Evidências" é a leitura das páginas extraídas. Quem escreve fora da
+     * plataforma também precisa ver a busca — quem ocupa o top 10, o que as
+     * pessoas perguntam, o que o AI Overview cita. Não é obrigatória: um
+     * dossiê sem SERP vinculada não ganha uma seção vazia aqui, e a coluna
+     * `serp_observed_md` diz por quê.
+     */
+    ...secao("SERP OBSERVADA", incorporar(input.serpObserved || "")),
     ...secao("EVIDÊNCIA POR SEÇÃO", incorporar(input.sectionEvidence), true),
     ...secao("FONTES", incorporar(input.sources), true),
     ...secao("LINKS INTERNOS", incorporar(input.internalLinks), true),

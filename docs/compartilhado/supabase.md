@@ -99,3 +99,16 @@ session.supabaseAuth = {
 O access token Supabase só é copiado para `session.accessToken` quando `status = ready`; refresh token, tokens Google, JWTs, cookies e Authorization nunca são expostos. A tela de login bloqueia o redirecionamento ao workspace quando `supabaseAuth.status` não é `ready` e oferece novo login.
 
 Credentials permanece compatível: o access token e refresh token emitidos pelo Supabase Auth são validados e persistidos no JWT Auth.js; resposta incompleta também interrompe o login.
+
+## Uso e orçamento de egress — 2026-09-23
+
+O plano Free estourou a cota de egress no ciclo 26/08–26/09 (5,758 GB de 5 GB), com o PostgREST respondendo por 94% a 97% do tráfego. As **regras de uso vigentes** e o plano de correção estão em [sdd-uso-supabase-orcamento-egress-2026-09-23.md](sdd-uso-supabase-orcamento-egress-2026-09-23.md). O resumo operacional:
+
+- Orçamento: 161 MB/dia é o teto do plano; a meta interna é **100 MB/dia**.
+- Tamanho de fio se mede com `length(coluna::text)`, nunca com `pg_column_size`.
+- Toda consulta filtra por `brand_id` na própria consulta, **mesmo com service role**, que ignora RLS.
+- Nada de `select("*")` em tabela com payload JSON em caminho quente; escrita devolve só o que o chamador lê.
+- Listagem lê projeção ou view; o detalhe é hidratado sob demanda. Reidratação só das versões que a resposta usa.
+- Escrita lê a linha verbatim, nunca podada nem reidratada.
+- Gatilho recorrente (poll, foco, visibilidade, Realtime, autosave) custa kB por disparo, não MB.
+- Consulta de auditoria devolve só agregados.

@@ -30,6 +30,8 @@ import { CompetitiveReportPanel } from "./competitive-report-panel";
 import { RadarExpertBriefPanel } from "./radar-expert-brief-panel";
 import { RadarAnalysisSignals } from "./radar-analysis-signals";
 import { RadarSerpScreen } from "./radar-serp-screen";
+import { radarSerpCollectReading } from "./radar-serp-collect-notices";
+import type { RadarSerpCollectOutcome } from "@/lib/radar/serp/request";
 import { useNoticeBridge } from "@/components/global-notice-center";
 
 const tabs: RadarTab[] = ["resumo", "serp", "referencias", "analise-serp", "evidencias-adicionais", "relatorio", "historico"];
@@ -296,15 +298,16 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
       setNotice(saved.persistenceMode === "remote" && saved.readbackConfirmed ? "Investigação continuada usando o snapshot existente. Nenhuma nova SERP foi coletada; write remoto e readback confirmados." : "A investigação foi aplicada na recuperação local; a persistência remota não foi confirmada.");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Não foi possível continuar a investigação."); } finally { setBusy(""); }
   };
-  const collectCurrentSerp = async () => {
+  const collectCurrentSerp = async (recollect = false) => {
     if (busy || !selectedBrandId || !identity.principalKeyword) {
       if (!identity.principalKeyword) setNotice("A keyword principal não está hidratada para esta coleta.");
       return;
     }
-    setBusy("collect-serp"); setNotice("");
+    setBusy(recollect ? "recollect-serp" : "collect-serp"); setNotice("");
     try {
-      const record = await pipeline.collectSerp(articleId, pipeline.snapshot?.brand.localizacao || "Brasil", row.articleDnaVersionId);
-      setNotice(`SERP real v${record.research?.version || 1} coletada: ${record.research?.organicResults.length || 0} resultado(s).`);
+      const capturado: { outcome: RadarSerpCollectOutcome | null } = { outcome: null };
+      const record = await pipeline.collectSerp(articleId, pipeline.snapshot?.brand.localizacao || "Brasil", row.articleDnaVersionId, { recollect, onOutcome: resultado => { capturado.outcome = resultado; } });
+      setNotice(radarSerpCollectReading({ record, outcome: capturado.outcome, reviews: pipeline.serpReviews, recollect }).notice);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Não foi possível atualizar a SERP real.");
     } finally {
@@ -632,7 +635,7 @@ export function RadarAnalysisPage({ brandRef, articleId: routeKey }: { brandRef:
       <div className="flex-1 overflow-auto p-5"><div className="mx-auto max-w-7xl space-y-5">
         {tab === "resumo" && renderFlowProgress()}
         {tab === "resumo" && renderOverview()}
-        {tab === "serp" && <RadarSerpScreen view={serpView} records={pipeline.serpRecords.filter(record => record.input.articleId === articleId)} keyword={identity.principalKeyword} articleDnaVersionId={row.articleDnaVersionId} refreshing={busy === "collect-serp"} onRefresh={() => void collectCurrentSerp()} onOpenReferences={() => setTab("referencias")} />}
+        {tab === "serp" && <RadarSerpScreen view={serpView} records={pipeline.serpRecords.filter(record => record.input.articleId === articleId)} keyword={identity.principalKeyword} articleDnaVersionId={row.articleDnaVersionId} refreshing={busy === "collect-serp"} onRefresh={() => void collectCurrentSerp()} onOpenReferences={() => setTab("referencias")} recollecting={busy === "recollect-serp"} onRecollect={() => void collectCurrentSerp(true)} recollectBlockedReason={latestAnalysis?.payload.finalizedBundle ? "A investigação deste artigo foi finalizada: a SERP canônica não é recoletada sem reabrir a investigação." : null} />}
         {tab === "referencias" && renderAdvancedSelection()}
         {tab === "analise-serp" && <RadarAnalysisSignals needs={analysis?.payload.competitiveReport?.needs.map(need => `${need.title} · prioridade ${need.priority}`) || []} gaps={[...(comparison?.topics.missing || []), ...(analysis?.payload.competitiveReport?.profile.limitations || [])]} conflicts={[...(serpView?.diagnostic?.possibleConflicts || []), ...conflicts.map(conflict => conflict.reason)]} opportunities={serpView?.diagnostic?.opportunities || []} sources={[...extractionPages.map(page => page.url), ...(analysis?.payload.competitiveReport?.competitors.map(competitor => competitor.url) || [])]} />}
         {tab === "analise-serp" && renderSample()}

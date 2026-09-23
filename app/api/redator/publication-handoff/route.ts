@@ -20,6 +20,7 @@ import { z } from "zod";
 import { authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { PersistenceUnavailableError } from "@/lib/server/editorial-db";
+import { WriterEvidenceError } from "@/lib/server/writer-evidence-document";
 import { sendWriterToPublications, WriterPublicationError } from "@/lib/server/writer-publication-handoff";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +69,10 @@ export async function POST(request: Request) {
         { status: 400, headers: noStoreHeaders });
     }
     if (error instanceof WriterPublicationError) {
+      return NextResponse.json({ success: false, code: error.code, error: error.message },
+        { status: error.status, headers: noStoreHeaders });
+    }
+    if (error instanceof WriterEvidenceError) {
       return NextResponse.json({ success: false, code: error.code, error: error.message },
         { status: error.status, headers: noStoreHeaders });
     }

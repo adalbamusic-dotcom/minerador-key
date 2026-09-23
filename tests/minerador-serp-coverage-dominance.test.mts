@@ -150,7 +150,8 @@ test("a força é explicável em uma linha e a versão da derivação é declara
   const rationale = serpEvidenceRationale(evidence.intent);
   assert.match(rationale, /100% de cobertura \(8\/8\)/);
   assert.match(rationale, /100% de dominância/);
-  assert.equal(SERP_DERIVATION_VERSION, "serp-semantic-derivation-v3");
+  // v4 (2026-09-23): mesmos limiares, nova leitura por resultado (adendo da derivação v4).
+  assert.equal(SERP_DERIVATION_VERSION, "serp-semantic-derivation-v4");
   assert.equal(serpEvidenceStrengthPresentation("conclusive").label, "Evidência forte");
   assert.equal(serpEvidenceStrengthPresentation("weak").label, "Evidência fraca");
   assert.equal(serpEvidenceStrengthPresentation("insufficient").label, "Evidência insuficiente");

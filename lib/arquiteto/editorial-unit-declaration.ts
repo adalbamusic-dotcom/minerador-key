@@ -1,109 +1,146 @@
 /**
  * A LEITURA DO [VÍNCULO] — o que o Minerador declarou sobre a keyword.
  *
- * O campo [Vínculo] já existe do outro lado (`readPublicationLink`) e já
- * carrega `siteRole` — `"silo"`, `"article"` e afins — com `url` e
- * `canonicalUrl`. O que faltava era o Arquiteto LER: `siteRole` não aparecia
- * uma vez sequer em `lib/arquiteto/`.
+ * UMA AUTORIDADE SÓ: `resolveKeywordVinculo`, do próprio Minerador.
  *
- * Duas naturezas, e elas não se misturam:
+ * A primeira versão deste módulo lia nomes paralelos (`siteRole`,
+ * `editorialUnitPotential`, `potencialUnidade`) que o Minerador nunca grava.
+ * Auditado em 2026-09-23 contra o código do Minerador, isso tinha dois
+ * efeitos silenciosos:
  *
- *   PUBLICADO  a página está no ar. `siteRole` é FATO observado, com endereço.
- *              A origem 2 elege a primária do Silo lendo isto — sem SERP,
- *              sem heurística, sem ambiguidade.
- *   NOVO       não há página. O que vem é POTENCIAL: previsão de que a keyword
- *              daria um Silo ou um Artigo. A origem 1 confere na SERP.
+ *   1. o tipo de página declarado pelo humano mora em
+ *      `analise_semantica.keyword_page_type` — e não era lido. Nenhum
+ *      "potencial de Silo" marcado no Minerador chegava ao Arquiteto;
+ *   2. `analise_semantica.site_origin` pode estar gravado como TEXTO JSON, e o
+ *      leitor paralelo só aceitava objeto. A declaração de publicado se perdia.
  *
- * Nada é preenchido por conveniência: sem declaração, o resultado é `undefined`
- * e a keyword segue sem natureza definida. Inventar "article" como padrão faria
- * todo o acervo antigo parecer declarado.
+ * O Minerador já resolveu as duas coisas num lugar só, justamente porque três
+ * telas dele derivavam o mesmo fato e passaram a discordar. Uma quarta
+ * derivação aqui no Arquiteto seria a mesma receita de divergência — então
+ * este módulo não deriva: ele pergunta ao Minerador e traduz a resposta.
+ *
+ * O que continua sendo decisão do Arquiteto é só a TRADUÇÃO: potencial e
+ * declarado viram `EditorialUnitDeclaration`, que é o que a eleição da
+ * primária e a proposta de Silos sabem comparar.
  *
  * Domínio puro: sem React, sem storage, sem rede.
  */
 
+import { resolveKeywordVinculo, keywordVinculoSummary } from "../minerador/keyword-vinculo.ts";
+import type { KeywordPageType } from "../minerador/keyword-page-type.ts";
+import type { PrimaryKeywordPolicy as MineradorPost } from "../minerador/primary-keyword-policy.ts";
 import { EditorialUnitDeclarationSchema, type EditorialUnitDeclaration } from "./contracts.ts";
 
-const texto = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+type RecordLike = Record<string, unknown>;
+
+const asRecord = (value: unknown): RecordLike | null => {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as RecordLike;
+  // `analise_semantica` já chegou como texto em linhas antigas: lido, não descartado.
+  if (typeof value === "string" && value.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as RecordLike : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
 
 /**
- * `siteRole` chega como texto livre do Minerador. Só os papéis que o contrato
- * editorial conhece viram declaração; o resto vira `other`, que é honesto —
- * a página existe e o papel dela não é um dos nossos.
- */
-const PAPEIS_PUBLICADOS = new Map<string, Extract<EditorialUnitDeclaration, { source: "published" }>["unit"]>([
-  ["silo", "silo"],
-  ["silopage", "silo"],
-  ["silo_page", "silo"],
-  ["article", "article"],
-  ["artigo", "article"],
-  ["post", "article"],
-  ["landing_page", "landing_page"],
-  ["landingpage", "landing_page"],
-  ["service_page", "service_page"],
-  ["servicepage", "service_page"],
-  ["category_page", "category_page"],
-  ["categorypage", "category_page"],
-]);
-
-const PAPEIS_POTENCIAIS = new Map<string, "silo" | "article">([
-  ["silo", "silo"],
-  ["article", "article"],
-  ["artigo", "article"],
-]);
-
-const normalizar = (value: string) => value.toLocaleLowerCase("pt-BR").replace(/[\s-]+/g, "_");
-
-/**
- * Lê a declaração a partir do que o handoff transportou.
+ * O DNA que vale para o Arquiteto: o PACOTE APROVADO, não a linha viva.
  *
- * `published` ganha precedência sobre `potential` quando os dois vêm: uma
- * página no ar é fato, e previsão não sobrescreve fato.
+ * Mesma regra de `architectureKeywordSignals`: uma edição no Minerador depois
+ * da aprovação não vaza para cá sem aprovação nova. A linha viva só entra
+ * quando a keyword ainda não tem pacote.
  */
-export function readEditorialUnitDeclaration(input: {
-  /** `vinculo.siteRole` do Minerador, quando a keyword é publicada. */
-  siteRole?: unknown;
-  url?: unknown;
-  canonical?: unknown;
-  observedAt?: unknown;
-  /** Potencial declarado para keyword NOVA. */
-  potentialUnit?: unknown;
-  potentialConfidence?: unknown;
-  potentialReasons?: unknown;
-  /** A keyword está publicada? Decide qual natureza vale. */
-  published?: boolean;
-}): EditorialUnitDeclaration | undefined {
-  const papel = texto(input.siteRole);
-  if (papel) {
-    const unit = PAPEIS_PUBLICADOS.get(normalizar(papel)) || "other";
+function semanticOf(keyword: RecordLike): RecordLike | null {
+  const workflow = asRecord(keyword.canonicalWorkflow);
+  const payload = asRecord(workflow?.payload);
+  const aprovado = asRecord(payload?.approvedDna);
+  return asRecord(aprovado?.analiseSemantica) ?? asRecord(keyword.analise_semantica);
+}
+
+export type ArchitectKeywordVinculo = {
+  /** Que página a keyword é, ou viria a ser. */
+  pageType: KeywordPageType;
+  /** Alguém declarou, ou o site mostrou. `false` = é só o padrão `article`. */
+  pageTypeDetermined: boolean;
+  /** Publicada E determinada: é declaração, não aposta. */
+  pageTypeDeclared: boolean;
+  pageTypeSource: "human" | "site" | "default";
+  /** O posto: pode perder a vaga de primária? */
+  post: MineradorPost;
+  postLockedToSlug: boolean;
+  publicationDeclared: boolean;
+  url: string | null;
+  canonicalUrl: string | null;
+  /** A frase que o Minerador mostra — repetida aqui, nunca recalculada. */
+  summary: string;
+};
+
+/**
+ * Lê o Vínculo de uma keyword do lote, pela autoridade do Minerador.
+ *
+ * Recebe a linha como o Arquiteto a tem (`masterList`), com o pacote aprovado
+ * dentro de `canonicalWorkflow`. Nada é preenchido por conveniência: os
+ * padrões são os do Minerador, e `pageTypeDetermined` diz quando é só padrão.
+ */
+export function readArchitectKeywordVinculo(keyword: RecordLike): ArchitectKeywordVinculo {
+  const vinculo = resolveKeywordVinculo({
+    status: typeof keyword.status === "string" ? keyword.status : null,
+    semantic: semanticOf(keyword),
+  });
+  return {
+    pageType: vinculo.pageType.type,
+    pageTypeDetermined: vinculo.pageType.determined,
+    pageTypeDeclared: vinculo.pageType.declared,
+    pageTypeSource: vinculo.pageType.source,
+    post: vinculo.post,
+    postLockedToSlug: vinculo.postLockedToSlug,
+    publicationDeclared: vinculo.publicationDeclared,
+    url: vinculo.url,
+    canonicalUrl: vinculo.canonicalUrl,
+    summary: keywordVinculoSummary(vinculo),
+  };
+}
+
+/**
+ * A tradução para o que a eleição e a proposta comparam.
+ *
+ * O padrão NÃO vira declaração. O Minerador põe `article` em toda keyword que
+ * ninguém marcou — tratar isso como "o humano disse que é artigo" faria o
+ * acervo inteiro parecer declarado, e a lógica deixaria de propor Silo onde o
+ * léxico ainda poderia sustentar um.
+ */
+export function editorialUnitDeclarationFromVinculo(vinculo: ArchitectKeywordVinculo): EditorialUnitDeclaration | undefined {
+  if (!vinculo.pageTypeDetermined) return undefined;
+
+  if (vinculo.pageTypeDeclared) {
     const parsed = EditorialUnitDeclarationSchema.safeParse({
       source: "published",
-      unit,
-      url: texto(input.url),
-      canonical: texto(input.canonical),
-      observedAt: texto(input.observedAt),
+      unit: vinculo.pageType,
+      url: vinculo.url,
+      canonical: vinculo.canonicalUrl,
+      observedAt: null,
     });
-    if (parsed.success) return parsed.data;
+    return parsed.success ? parsed.data : undefined;
   }
-
-  /*
-   * Potencial só vale para keyword NOVA. Uma potencial sobre keyword publicada
-   * seria previsão discordando do que já está no ar — e o fato vence.
-   */
-  if (input.published) return undefined;
-  const potencial = texto(input.potentialUnit);
-  if (!potencial) return undefined;
-  const unit = PAPEIS_POTENCIAIS.get(normalizar(potencial));
-  if (!unit) return undefined;
 
   const parsed = EditorialUnitDeclarationSchema.safeParse({
     source: "potential",
-    unit,
-    confidence: typeof input.potentialConfidence === "number" ? input.potentialConfidence : null,
-    reasons: Array.isArray(input.potentialReasons)
-      ? input.potentialReasons.map(item => texto(item)).filter((item): item is string => Boolean(item))
-      : [],
+    unit: vinculo.pageType,
+    confidence: null,
+    reasons: [vinculo.pageTypeSource === "human"
+      ? "Declarado pelo humano no Minerador."
+      : "Sugerido pelo papel observado no site; a publicação ainda não foi declarada."],
   });
   return parsed.success ? parsed.data : undefined;
+}
+
+/** Atalho: a keyword do lote, direto para a declaração. */
+export function readEditorialUnitDeclaration(keyword: RecordLike): EditorialUnitDeclaration | undefined {
+  return editorialUnitDeclarationFromVinculo(readArchitectKeywordVinculo(keyword));
 }
 
 /** A keyword foi declarada Silo por uma página que já está no ar? */
@@ -117,6 +154,37 @@ export function suggestsSiloPotential(declaration: EditorialUnitDeclaration | un
 }
 
 /**
+ * A keyword lidera um Silo — declarado no ar ou marcado como potencial.
+ *
+ * É a pergunta que a lógica da aba Silos faz primeiro: quem é cabeça de Silo
+ * e quem vai para os artigos. As duas naturezas respondem SIM aqui; o que
+ * muda entre elas é se a primária já está eleita (publicado) ou ainda precisa
+ * da confirmação da SERP (potencial).
+ */
+export function headsSilo(declaration: EditorialUnitDeclaration | undefined): boolean {
+  return declaration?.unit === "silo";
+}
+
+/**
+ * O humano declarou que a keyword NÃO é Silo — artigo, landing ou serviço.
+ *
+ * Essa keyword nunca vira semente de Silo, por mais que o léxico a aponte
+ * como cabeça do grupo. Ausência de declaração NÃO entra aqui.
+ */
+export function declaredNotSilo(declaration: EditorialUnitDeclaration | undefined): boolean {
+  return Boolean(declaration) && declaration!.unit !== "silo";
+}
+
+const PAPEL: Record<string, string> = {
+  silo: "Silo",
+  article: "Artigo",
+  landing_page: "Landing page",
+  service_page: "Página de serviço",
+  category_page: "Página de categoria",
+  other: "outra unidade",
+};
+
+/**
  * O que a declaração diz para a mesa, em uma frase.
  *
  * Fato e previsão têm palavras diferentes de propósito: quem lê precisa saber
@@ -124,15 +192,11 @@ export function suggestsSiloPotential(declaration: EditorialUnitDeclaration | un
  */
 export function describeEditorialUnitDeclaration(declaration: EditorialUnitDeclaration | undefined): string {
   if (!declaration) return "O Minerador ainda não declarou a natureza desta keyword.";
+  const papel = PAPEL[declaration.unit] || "outra unidade";
   if (declaration.source === "published") {
-    const papel = declaration.unit === "silo" ? "Silo"
-      : declaration.unit === "article" ? "Artigo"
-        : declaration.unit === "landing_page" ? "Landing page"
-          : declaration.unit === "service_page" ? "Página de serviço"
-            : declaration.unit === "category_page" ? "Página de categoria" : "outra unidade";
     return `Publicada: o site declara que esta página é ${papel}${declaration.url ? ` (${declaration.url})` : ""}.`;
   }
   return declaration.unit === "silo"
-    ? "Nova: tem potencial de Silo — a SERP confirma ou recusa."
-    : "Nova: tem potencial de Artigo.";
+    ? "Nova: tem potencial de Silo — a SERP confirma ou recusa na etapa seguinte."
+    : `Nova: tem potencial de ${papel}.`;
 }

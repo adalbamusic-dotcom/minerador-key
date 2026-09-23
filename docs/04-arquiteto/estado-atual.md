@@ -1,3 +1,203 @@
+## As 4 lentes no Arquiteto — 2026-09-23
+
+```text
+FORMACAO_E_TERRITORIAL = 4 lentes (canônica em corpo, extras pelo digest) · voto por lente · marcador de lentes no parecer
+PLANO_ANTES_DE_PAGAR = SIM · "Validar SERP", "Validar SERP dos silos" e "Consultar nas 4 lentes" mostram N chamadas e só pagam confirmadas
+CANONICA_GRAVADA_EM = depth 20 (o Minerador não paga de novo)
+KGR_LEVE = secundária sem consulta fica "não observada" (não vira "de fora")
+PRIMARIA_DO_SILO_PELA_SERP = proposta, gravada só com aceite humano · só na origem "lista nova"
+MIGRATIONS_ADDED = 0 · CHAMADAS_PAGAS_EM_TESTE = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste.** A autorização foi a diretriz do usuário de 2026-09-23 ("4 lentes em todas as áreas"; "pode continuar em todas"). Documentos:
+- [adendo das 4 lentes](propostas/adendo-quatro-lentes-arquiteto-2026-09-23.md);
+- [SDD do veredito de artigo de uma keyword](propostas/sdd-veredito-artigo-uma-keyword-2026-09-23.md), proposta ainda não implementada.
+
+- **A1 — KGR leve:** `splitArticleSerpMembers` passa a separar as buscas sem SERP como "não observadas". Antes, o parecer saía DIVERGENCE/SPLIT_RECOMMENDED; agora sai INCONCLUSIVE, com a busca citada pelo nome. `articleSerpParecerFromAssessment` também deixou de lançar TypeError em registro sem `interpretation`.
+- **A2 — profundidade:** toda coleta da lente desktop-windows pelo Arquiteto (formação, territorial, SERP por keyword) grava 20 resultados e recorta o corpo antes de normalizar. O parecer não muda. A contrapartida: uma falta da canônica paga pelo Arquiteto sobe de ~US$ 0,002 (NÃO MEDIDO) para US$ 0,0035, e a CALL 3 do Minerador deixa de pagar e regravar. As consultas territoriais são por texto e também gravam 20.
+- **A3/A4/A5 — lentes nos pareceres:**
+  - **Formação:** um par só converge com sobreposição em 2 lentes ou mais; é "de fora" só sem sobreposição em todas e com intenção divergente na maioria.
+  - **Territorial:** "alta" só com a maioria das lentes; lentes em desacordo viram fronteira para decisão humana.
+  - **Nos dois pareceres:** linha "SERP · K de 4 lentes · concordância x/y". As extras só são lidas ou pagas onde há par.
+- **A6 — plano de chamadas:** nada é pago no clique. A prévia mostra:
+  - "Até N chamada(s) paga(s)", com o custo em faixa;
+  - uma tabela por lente;
+  - os botões "Pagar só a lente principal", "Recoletar as lentes antigas (pago)" e "Pagar N chamada(s) e validar".
+
+  A rota recusa pagar além do autorizado (`SERP_PAID_NOT_AUTHORIZED`).
+- **A7 — SERP por keyword:** as lentes extras deixam de gravar corpo. `aiOverviewDomains` e `relatedSearches` saem à parte e opcionais; `competitorDomains` continua sendo orgânicos mais citados (D5). A concordância só conta em dobro com pelo menos 3 lentes observadas (`MIN_LENSES_FOR_DIVERGENCE_CREDIT = 3`, restringe a regra de 2026-09-20; D4 pendente de confirmação).
+- **A8 — datas e targeting:** lentes com mais de 7 dias de diferença ficam marcadas, e a recoleta é só manual. O cache usa os códigos de local e idioma do Minerador (`lib/arquiteto/serp-lens-targeting.ts`).
+- **A9 — primária do Silo pela SERP (Silos › Revisão):** o painel "Primária do Silo · proposta da SERP" aparece. "Aceitar como primária do Silo" grava só a primária, com ator e hora do servidor, e só depois do readback mostra sucesso. A primária humana ou publicada nunca é trocada por essa porta. A porta genérica de território recusa criar, trocar ou apagar primária de SERP sem aceite.
+- **A10 — tela:** as lentes que o Minerador envia no handoff aparecem no KeywordDNA do Arquiteto.
+- **Testes:**
+  - `test:arquiteto` 2256/2258, com as mesmas 2 falhas de base;
+  - `test:arquiteto:lentes` (novo) 31/31;
+  - `test:arquiteto:servidor` 18/18;
+  - `test:serp-cache` 34/34.
+
+  As lentes extras são testadas com fixtures sintéticas: faltam 3 SERPs reais (D7).
+
+## Leitura estreita das keywords da marca — 2026-09-23
+
+```text
+MONTAGEM = índice sem analise_semantica para todas + linha inteira só das recebidas
+HANDOFF = só os ids pedidos, nas duas passagens · PATCH = só os itens editados
+VALVULA = ?keywordDetail=full reproduz a leitura antiga (só a recuperação usa)
+MIGRATIONS_ADDED = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste** (`test:arquiteto:servidor`, 18/18; `test:arquiteto` com as mesmas 2 falhas da base).
+
+- **Montagem** (`loadCanonicalArquitetoWorkspace`, `lib/server/arquiteto-workspace.ts`): o índice de todas as keywords vivas leva as colunas de `minerador_keywords` menos `analise_semantica` e alimenta `availableKeywords` e `importEligibility`. A linha inteira vai só para as recebidas, por `.in("id")` em lotes de 100. MEDIDO: 441 → 328 kB na Care Glow (29 recebidas), 712 → 29 kB e 738 → 67 kB nas marcas sem aprovadas. O 409 continua igual para a recebida apagada, de outra marca ou com id fora do formato.
+- **Handoff** (`prepareCanonicalHandoff`): lê só os ids pedidos e mantém o 403.
+- **PATCH** (`app/api/arquiteto/workspace/route.ts`, `readArchitectPatchKeywords`): lê `id,status` dos itens editados, e `kgr_score`/`analise_semantica` só de quem tem decisão de KGR. Isso era ~430 a 690 kB da marca inteira por chamada; agora são ~1,6 kB para 10 itens.
+- **Consumidores:** `setKeywordImportPool` e a elegibilidade usam campos do índice. `buildCanonicalWorkflowWorkspaceItems` recebe a linha inteira das recebidas. A recuperação (`readArchitectDatabaseSources`) pede `keywordDetail=full`. A coluna `content_hash` que a elegibilidade lia não existe em `minerador_keywords`: sempre foi null.
+- **Qualificação vigente:** o handoff se beneficia da leitura nova do store do Minerador (só a vigente).
+
+## Cache temporário de SERP nas rotas do Arquiteto — 2026-09-23
+
+```text
+SERP_CACHE = ligado em formação, territorial e SERP por keyword
+CHAVE = keyword × localidade × idioma × lente explícita × endpoint · validade 30 dias
+REAPROVEITA_O_MINERADOR = SIM (desktop-windows, advanced, 20 atende pedido de 10)
+FORMACAO_E_TERRITORIAL = regular → advanced, com os explícito (MUDANÇA DE COMPORTAMENTO)
+REGISTRO_POR_ESCOPO_keyword_serp_observations = REMOVIDO · o cache é a persistência
+MIGRATIONS_ADDED = 0 · CHAMADAS_PAGAS_EM_TESTE = 0
+MANUAL_UI_VALIDATED = NO — homologação do usuário
+```
+
+**Verificado no código e confirmado por teste.** Contrato, medições e passos de
+homologação na SDD [cache temporário de SERP](../compartilhado/sdd-cache-serp-temporario-2026-09-23.md), seção 8.
+
+- **Uma SERP paga serve todos os módulos da marca por 30 dias.** As três
+  rotas do Arquiteto consultam o cache antes de credencial e quota, pagam só o
+  que falta e gravam o que pagaram. A qualificação do Minerador já deixa a
+  lente canônica desktop-windows gravada; a formação e a territorial a
+  reaproveitam.
+- **As 4 lentes.** A SERP por keyword grava e relê as quatro
+  (desktop-windows, desktop-macos, mobile-android, mobile-ios); a lente faz
+  parte da chave, então nenhuma serve pela outra.
+- **Quem agrupa lê só a observação** (~1 KB: domínios, blocos, perguntas,
+  citações do AI Overview), nunca o corpo. A formação lê o corpo só de quem vai
+  normalizar, em lote.
+- **Formação e territorial mudaram de endpoint** — `regular` → `advanced`. O
+  parecer passa a receber o People Also Ask e as citações do AI Overview;
+  vereditos podem mudar em relação a pareceres antigos. Detalhes na SDD §8.2.
+- **SERP por keyword:** `lib/server/arquiteto-keyword-serp-store.ts` removido;
+  `lib/arquiteto/keyword-serp-record.ts` reexporta as lentes do cache. A mescla
+  dos lotes de 6 passou da rota para o cliente (por keyword + lente: lente que
+  falha não apaga o que já foi visto). O painel diz quantas lentes vieram do
+  cache e quantas foram pagas agora; o botão passou a "Consultar de novo nas 4
+  lentes", porque o clique repetido reaproveita o que está válido. Lente paga e
+  recusada pelo provider vira lacuna com o código e a mensagem da task (um
+  40501 diz que o defeito foi o pedido).
+- **Formação — quota das faltas:** `createFormationSerpQuotaLedger` reavalia a
+  quota quando um acerto degrada em falta (entrada sumiu, leitura do corpo
+  falhou), antes de pagar — nunca com 1 unidade fixa.
+
+**Corrige o registro anterior desta mesma data** (seção abaixo): a rota
+`keyword-serp` não mescla mais os lotes (o cliente mescla), o store
+`arquiteto-keyword-serp-store.ts` não existe mais, e `lib/minerador/` passou a
+ter dois arquivos alterados, aditivos: `dataforseo-serp-core.ts`
+(`readDataForSeoTargetCodes`) e `keyword-semantic-qualification.ts`
+(`repeatsCurrentSemanticQualification`).
+
+**Arquivos compartilhados novos:** `lib/editorial/serp-cache.ts` (puro),
+`lib/server/serp-cache.ts`, `lib/server/serp-cache-store.ts`,
+`lib/server/serp-cache-observation.ts`. Consumidores preservados: o Radar não
+foi tocado (suíte 2.313/2.313). O núcleo e o store têm teste que os **executa**
+(`npm run test:serp-cache`, 14 casos, banco em memória e `fetch` falso),
+incluído no `npm test`.
+
+**Limitações:** ver backlog de 2026-09-23 (cache de SERP).
+
+## Aba Silos: lógica primeiro, Vínculo do Minerador e listas de ~200 — 2026-09-23
+
+```text
+VINCULO_AUTORIDADE = resolveKeywordVinculo (Minerador) · leitura paralela REMOVIDA
+KEYWORD_PAGE_TYPE_CONSUMIDO = SIM · SITE_ORIGIN_TEXTO_JSON = LIDO
+LOGICA_SEPARA_SILO_ARTIGO = SIM, pela declaração · SEM_DECLARACAO = léxico, inalterado
+PRIMEIRA_ETAPA_PROVIDER_CALLS = 0 · Processar não chama mais a SERP
+CONFIRMAR_EM_LOTE = SIM · 200 keywords → 8 gravações + 1 releitura
+SERP_POR_KEYWORD = em lotes de 6, mesclados por Silo · sem corte em 12
+PIPELINE_LOGICO_200_KEYWORDS ≈ 28 ms · 400 ≈ 47 ms (linear)
+MANUAL_UI_VALIDATED = NO — homologação do usuário
+MIGRATIONS_ADDED = 0
+```
+
+**Verificado no código e confirmado por teste.** Nada aqui foi validado na
+interface real; a homologação é do usuário.
+
+- **O Vínculo passou a ter uma autoridade só.** `lib/arquiteto/editorial-unit-declaration.ts`
+  deixou de ler nomes paralelos (`siteRole` solto, `editorialUnitPotential`,
+  `potencialUnidade`) que o Minerador nunca grava, e agora pergunta a
+  `resolveKeywordVinculo` (`lib/minerador/keyword-vinculo.ts`). Dois efeitos
+  silenciosos da leitura antiga, auditados contra o código do Minerador:
+  o `keyword_page_type` marcado pelo humano **não chegava** ao Arquiteto, e
+  `site_origin` gravado como **texto JSON** (caso real, registrado no próprio
+  Minerador em 2026-09-21) derrubava a declaração de publicado. O DNA lido é o
+  do pacote aprovado; a linha viva só entra sem pacote.
+- **O padrão `article` não é declaração.** O Minerador põe `article` em toda
+  keyword que ninguém marcou (`determined: false`). Tratar isso como decisão
+  humana faria o acervo inteiro parecer declarado.
+- **A lógica separa Silo × Artigo pela declaração, antes do léxico**
+  (`lib/arquiteto/architecture-working-proposal.ts`). Declarada Silo — publicada
+  ou potencial — vira cabeça do próprio Silo; publicada traz a primária pela
+  declaração, potencial deixa a primária provisória para a SERP confirmar.
+  Declarada Artigo/Landing/Serviço nunca vira semente de Silo. Os vizinhos de
+  grupo de um Silo declarado vão para ele. Grupo inteiro declarado não-Silo não
+  inventa Silo. Silo declarado com slug já existente no acervo se junta a ele.
+  **Lote sem declaração produz exatamente a proposta de antes** (teste N6).
+- **A primeira etapa não chama provider.** `processArchitecture` chamava
+  `validateTerritorialSerp(true)` antes de materializar — revertendo o §5
+  anterior por decisão do produto. Medido no código: `architectureProposal` não
+  depende de estado da SERP, então aquela chamada gastava crédito sem mudar a
+  proposta daquele mesmo clique. A SERP segue como etapa explícita.
+- **Confirmar em lote** (`lib/arquiteto/silo-decision-batch.ts`). O Confirmar
+  fazia, por keyword, uma gravação e uma recarga **completa** do workspace como
+  releitura. Agora: o mesmo `planSiloAssignment`, lock por item, lotes de 25 por
+  requisição, e **uma** releitura decide o desfecho de cada keyword pelo mesmo
+  `resolveSiloAssignmentOutcome`. O servidor aplica item a item sem transação;
+  um lote que falha é reenviado item a item, e quem já gravou é recusado pelo
+  lock — nada é sobrescrito.
+- **Coleta de SERP por keyword sem corte.** O cliente mandava `slice(0, 12)`:
+  num Silo de 20, oito ficavam sem coleta, em silêncio. Agora vai o Silo
+  inteiro em lotes de 6, e a rota `keyword-serp` mescla cada lote com os
+  anteriores do mesmo escopo.
+- **A mesa mostra o Vínculo** em cada linha de keyword da aba Silos, na frase
+  do próprio Minerador (`Livre · Silo · potencial`, `Travado ao slug · Artigo ·
+  declarado`), com destaque para quem lidera Silo.
+
+**Também desta rodada, antes não registrado (2026-09-20 → 09-21):**
+
+- Eleição da primária do Silo por origem — `lib/arquiteto/silo-primary-keyword.ts`,
+  `TerritoryPrimaryKeywordSchema` em `territory.ts`; primária visível no painel
+  de revisão.
+- Matriz de quatro lentes e SERP por keyword — rota `app/api/arquiteto/keyword-serp`,
+  registro `lib/arquiteto/keyword-serp-record.ts`, store
+  `lib/server/arquiteto-keyword-serp-store.ts`, painel
+  `modules/arquiteto/published-serp-panel.tsx`, smoke pago
+  `npm run arquiteto:lentes-smoke`. Medido no provider: o `os` precisa ir no
+  corpo do pedido; `/live/regular` anuncia `people_also_ask` e não entrega (0
+  perguntas contra 4 no `advanced`).
+- Reforço de publicado e troca de primária como **pendência**, nunca aplicada —
+  `lib/arquiteto/primary-substitution.ts`, `published-keyword-readout.ts`.
+- Mesa sem keyword sumida: decisão apontando para silo fora da leitura volta a
+  "Sem silo" com o motivo (`territorial-landscape.ts`); silo consolidado,
+  rejeitado ou arquivado volta a ter grupo (`territorial-surface.ts`).
+
+**Arquivos compartilhados, todos aditivos:**
+
+- `lib/server/dataforseo-serp-operation.ts` e `lib/radar/serp/contracts.ts`
+  (Radar): `operatingSystem` e `payloadDepth` opcionais; sem eles o pedido é o
+  de antes. Suíte do Radar verde.
+- `lib/server/dataforseo-serp-normalizer.ts`: `related_searches` lido de
+  `items[]`; `operatingSystem` no snapshot e no hash.
+- `lib/minerador/*`: **nenhum arquivo alterado** — só importado.
+- `lib/arquiteto/contracts.ts`: potencial aceita `landing_page` e `service_page`.
+
+**Limitações e pendências:** ver backlog de 2026-09-23.
+
 ## Homologação remota preparada e KeywordDNA de produção — 2026-09-13
 
 ```text
@@ -4431,3 +4631,33 @@ Executado via Supabase CLI 2.111.0, db query --linked, em transação única.
 - Validação nas duas sessões da interface: AINDA NÃO VERIFICADA nesta execução. Cache local não foi apagado. Não declarar sincronização visual homologada com base apenas neste SQL.
 - Script: supabase/scripts/2026-09-08-descarte-arquiteto-radar-care-glow.sql. Mantido em simulação por padrão. Ele aborta se grafos reaparecerem: não é reset universal para qualquer acervo futuro.
 - Nenhum commit, push ou deploy executado nesta entrega.
+
+## Artefatos filtrados na consulta — 2026-09-23
+
+**Confirmado por teste; ainda não verificado manualmente.**
+
+`listArquitetoArtifacts` baixava **todas** as versões de
+`editorial_artifact_versions` da marca — inclusive as do Minerador — e montava
+só quatro tipos. É a mesma classe de defeito já corrigida em
+`ArtifactRepository.list` (regra R7 da SDD de
+[uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md)).
+
+- **Correção:** parâmetro opcional `artifactTypes` em
+  `ArtifactVersionRepository.list` (`lib/server/pipeline-repositories.ts`) —
+  ausente ou vazio, a consulta é idêntica à anterior — e a constante
+  `ARQUITETO_LISTED_ARTIFACT_TYPES` em `lib/server/arquiteto-persistence.ts`
+  com os quatro tipos que o laço consome (`article_dna`, `silo_dna`,
+  `silo_page`, revisão de IA), verificada contra o tipo com `satisfies`.
+- **Economia por chamada:** ~825 kB na Care Glow (−81%), ~1,55 MB e ~212 kB
+  nas outras duas marcas. O handoff e o POST de silos chamam duas vezes cada.
+- **Consumidores preservados:** chamadas sem argumento e com
+  `(entityId, artifactType)` fazem a mesma consulta de antes; workspace,
+  artefatos, silos e handoff recebem o mesmo retorno.
+- **Efeito colateral declarado:** a numeração `row=N` nas mensagens de
+  diagnóstico do readback canônico passa a contar só as linhas dos quatro
+  tipos. Muda mensagem, não comportamento.
+- **Atenção para o futuro:** tipo novo tratado no laço precisa entrar na
+  constante, ou nunca chegará do banco. O teste
+  `tests/arquiteto-artefatos-filtrados-na-consulta.test.mts` acusa isso,
+  desde que a comparação seja escrita como `type === ...`. Registrado em
+  `test:arquiteto`.

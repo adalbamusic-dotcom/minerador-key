@@ -68,7 +68,8 @@ import { resolveMineradorProcessState, type MineradorAttemptState, type Minerado
 import { type SemanticConsolidationDraft } from "@/lib/minerador/semantic-consolidation-draft";
 import { candidateFromCatalogMatch, deriveSitePageStructure, matchKeywordToCatalog, sitePageRoleLabel, type SiteCatalogEntryLike } from "@/lib/minerador/site-catalog-match";
 import { isConclusiveSerpEvidence, type SerpSemanticEvidence } from "@/lib/minerador/serp-semantic-evidence";
-import { KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE, parseKeywordSemanticQualification, semanticDraftFromQualification, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
+import { KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE, semanticDraftFromQualification, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
+import { createIndexedDbQualificationVersionCacheStorage, qualificationVersionCachePruneForListing, resolveCurrentKeywordSemanticQualificationsWithCache, type QualificationVersionCachePrune } from "@/lib/minerador/semantic-qualification-version-cache";
 import { applyPublicationLinkAction, readPublicationLink, readSiteOrigin, type PublicationLinkEvidence } from "@/lib/minerador/publication-link";
 import {
   keywordRecoveryRemainingLabel,
@@ -356,11 +357,13 @@ function viewDeListagemAusente(error: { code?: string | null; message?: string |
 }
 
 export default function Home({ brandRef, sectionTabs }: { brandRef: string; sectionTabs?: ReactNode }) {
-  const { data: session, status: sessionStatus } = useSession();
+  const { data: session, status: sessionStatus, actorUserId } = useSession();
   const { selectedBrandId, brands, userRole } = useBrand();
   const { publishNotice } = useNoticeCenter();
   const router = useRouter();
   const supabase = useMemo(() => createAuthenticatedBrowserClient(), []);
+  // Cache das versões imutáveis da Qualificação (E8), em banco IndexedDB próprio.
+  const qualificationVersionCache = useMemo(() => createIndexedDbQualificationVersionCacheStorage(), []);
   const activeBrand = brands.find(b => b.id === selectedBrandId) || null;
 
 
@@ -504,13 +507,14 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
    * Lê a Qualificação Semântica persistida das próprias keywords da Marca ativa.
    * Nenhuma chamada de provider acontece aqui: é leitura do artifact canônico.
    */
-  const loadSemanticQualifications = useCallback(async (brandId: string, keywordIds: readonly string[]) => {
+  const loadSemanticQualifications = useCallback(async (brandId: string, keywordIds: readonly string[], cachePrune: QualificationVersionCachePrune = "loaded-entities") => {
     const ids = [...new Set(keywordIds.filter(Boolean))];
     if (!brandId || ids.length === 0) return {} as Record<string, KeywordSemanticQualification>;
-    const rows = await withSupabaseSelectRetry(async () => {
+    // Etapa 1: só metadados das versões, sem payload (E7, correção 3).
+    const metadata = await withSupabaseSelectRetry(async () => {
       const { data, error } = await supabase
         .from("editorial_artifact_versions")
-        .select("entity_id,version_number,payload")
+        .select("version_id,entity_id,version_number")
         .eq("marca_id", brandId)
         .eq("artifact_type", KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE)
         .in("entity_id", ids)
@@ -518,16 +522,31 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       if (error) throw error;
       return data || [];
     });
-    const current: Record<string, KeywordSemanticQualification> = {};
-    for (const row of rows as Array<{ entity_id?: unknown; payload?: unknown }>) {
-      const keywordId = typeof row.entity_id === "string" ? row.entity_id : "";
-      if (!keywordId || current[keywordId]) continue;
-      const parsed = parseKeywordSemanticQualification(row.payload);
-      if (!parsed || parsed.brandId !== brandId || parsed.keywordId !== keywordId) continue;
-      current[keywordId] = parsed;
-    }
-    return current;
-  }, [supabase]);
+    // Etapa 2: payload só da versão vigente; a anterior só quando a vigente
+    // falhar na validação de parse, Marca e keyword. O payload de uma versão
+    // imutável vem do cache do navegador quando válido (E8); a vigente é sempre
+    // a dos metadados acima, e qualquer falha do cache cai para o servidor.
+    const { qualifications: current, maintenance } = await resolveCurrentKeywordSemanticQualificationsWithCache({
+      brandId,
+      actorUserId,
+      metadata,
+      storage: qualificationVersionCache,
+      prune: cachePrune,
+      readRemotePayloads: versionIds => withSupabaseSelectRetry(async () => {
+        const { data, error } = await supabase
+          .from("editorial_artifact_versions")
+          .select("version_id,payload")
+          .eq("marca_id", brandId)
+          .eq("artifact_type", KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE)
+          .in("version_id", versionIds);
+        if (error) throw error;
+        return data || [];
+      }),
+    });
+    // Guardar as vigentes lidas do servidor e podar o resto não segura a tela.
+    void maintenance;
+    return Object.fromEntries(current) as Record<string, KeywordSemanticQualification>;
+  }, [supabase, actorUserId, qualificationVersionCache]);
 
   const readCanonicalKeywordRows = useCallback(async (ids: readonly string[]): Promise<Map<string, KeywordItem>> => {
     if (!selectedBrandId) throw new Error("Marca ativa ausente para o readback do Processador.");
@@ -1090,8 +1109,15 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       // aba e outro navegador, sem nenhuma chamada DataForSEO.
       // A leitura do artifact é tolerante: uma falha de rede não pode apagar da
       // tela uma Qualificação remota válida.
-      const persistedQualifications = await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)))
+      // A carga do Perfil cobre todas as keywords vivas da Marca: a poda do
+      // cache pode tirar tudo que não é vigente deste actor+Marca. Se a
+      // listagem bateu no teto de linhas do PostgREST, ela pode ter vindo
+      // cortada, e a poda fica restrita às keywords desta carga.
+      const persistedQualifications = await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)), qualificationVersionCachePruneForListing(loadedKeywords.length))
         .catch(() => null);
+      // A Marca pode ter mudado durante a leitura: a Qualificação de uma Marca
+      // nunca entra no estado de outra.
+      if (fetchDataActiveKeyRef.current !== fetchKey) return;
       if (persistedQualifications) {
         setSemanticQualifications(current => ({ ...current, ...persistedQualifications }));
         setSemanticConsolidationDrafts(current => {
@@ -3590,7 +3616,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                           title={intentLabel}
                           className={`inline-flex max-w-full rounded border px-1.5 py-0.5 text-[9px] font-bold leading-snug ${intentIsPending ? "border-divider bg-surface-subtle text-text-muted" : "border-divider bg-surface-subtle text-foreground/80"}`}
                         >
-                          <span className="truncate">{intentLabel}</span>
+                          {/* R9: na célula, a forma curta ("Misto: Nav × Trans"); o título mostra o rótulo inteiro. */}
+                          <span className="truncate">{keywordReadModel.intentCompactLabel || intentLabel}</span>
                         </span>
                       </td>
 
@@ -3603,8 +3630,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
                       {/* Funil */}
                       <td className="w-[80px] border-r border-divider/70 px-3 py-1 text-center font-mono text-text-muted">
-                        <span className="inline-flex min-w-12 justify-center rounded border border-divider bg-surface-subtle px-1.5 py-0.5 text-[10px] font-bold text-foreground/80" title={keywordReadModel.funnel || "Funil ainda não informado"}>
-                          {keywordReadModel.funnelLabel}
+                        <span className="inline-flex min-w-12 max-w-full justify-center rounded border border-divider bg-surface-subtle px-1.5 py-0.5 text-[10px] font-bold text-foreground/80" title={keywordReadModel.funnel || (keywordReadModel.funnelLabel !== "—" ? keywordReadModel.funnelLabel : "Funil ainda não informado")}>
+                          {/* "Misto na SERP (A × B)" (R9) não cabe na coluna: a célula diz "Misto", e o título mostra inteiro. */}
+                          <span className="truncate">{keywordReadModel.funnelCompactLabel || keywordReadModel.funnelLabel}</span>
                         </span>
                       </td>
 

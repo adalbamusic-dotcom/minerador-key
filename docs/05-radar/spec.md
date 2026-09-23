@@ -268,6 +268,8 @@ termos, login, carrinho, contato, busca — não é fonte e não entra.
 Frase que só repete a keyword não é afirmação utilizável e é descartada:
 `"Skin care noturno: skin care noturno"` não diz nada.
 
+Desde 2026-09-23 o export leva, por artigo, os mesmos dados que o Redator recebe mais a SERP que o dossiê referencia (nunca "a mais recente"), com trecho de terceiro em até 300 caracteres e marcado "não copiar", e a recomendação de export é o **silo completo**: um CSV por silo, na ordem do silo, parcial dito no nome e no aviso (detalhes em [estado-atual](estado-atual.md)).
+
 ### Metadados de SEO e plano visual
 
 `seoTitle`, `metaDescription`, Open Graph, Twitter, `robots` e schema **podem

@@ -41,6 +41,7 @@ import { assertRadarSpecialistEvidenceLayer, type RadarSpecialistEvidenceLayer }
 import type { RadarCompetitiveBlueprint, RadarResearchRef } from "./competitive-blueprint.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
 import type { RadarResearchSource } from "./search-mode.ts";
+import type { RadarFrozenSerpLensBlock } from "./serp/frozen-lenses.ts";
 
 /* ============================== o vínculo =============================== */
 
@@ -206,6 +207,17 @@ export type RadarEvidenceBundle = {
    * e quem os lê resolve pelo fundamento que o vínculo do dossiê identifica.
    */
   keywordContext?: RadarKeywordContext | null;
+  /**
+   * ===== AS QUATRO LENTES DA SERP — SDD do Radar, R3 =====
+   *
+   * A cópia que o FINALIZE gravou no bundle congelado, entregue como está: o
+   * Planejador e o Redator leem o que cada aparelho observou sem chamar
+   * provider nem ler cache (invariante 50). Sem digest bruto.
+   *
+   * ADITIVO E OPCIONAL, como `keywordContext`: ausente quando a investigação
+   * congelada não tem lentes, e o hash de todo dossiê anterior não muda.
+   */
+  serpLenses?: RadarFrozenSerpLensBlock;
 };
 
 /* ============================ as invariantes ============================ */

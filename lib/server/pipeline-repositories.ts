@@ -61,10 +61,26 @@ export type ArtifactVersionAppendInput = {
 };
 
 export class ArtifactVersionRepository extends ContextBoundRepository {
-  async list(entityId?: string, artifactType?: ArtifactType): Promise<PipelineReadResult<readonly PipelineRow[]>> {
+  /*
+   * `artifactTypes` é opcional e aditivo: sem ele (ou vazio) a consulta é
+   * idêntica à de antes, porque há chamadores que filtram só por entidade/tipo
+   * único. Ele existe porque a tabela é compartilhada com o Minerador
+   * (keyword_semantic_qualification, keyword_contextual_presentation,
+   * brand_skill), cujo payload domina o volume: medido em 2026-09-23, a marca
+   * 09762023 devolvia 1.016.913 B por chamada sem filtro, dos quais só
+   * 191.794 B eram de tipos que o Arquiteto monta; a 4a737e74 devolvia
+   * 1.549.490 B com 0 B úteis. Filtrar no banco evita o egress; filtrar no
+   * laço do chamador, não.
+   */
+  async list(
+    entityId?: string,
+    artifactType?: ArtifactType,
+    artifactTypes?: readonly ArtifactType[],
+  ): Promise<PipelineReadResult<readonly PipelineRow[]>> {
     let query = this.client.from("editorial_artifact_versions").select("*").eq("marca_id", this.brandId);
     if (entityId) query = query.eq("entity_id", entityId);
     if (artifactType) query = query.eq("artifact_type", artifactType);
+    if (artifactTypes && artifactTypes.length > 0) query = query.in("artifact_type", [...artifactTypes]);
     const result = await query.order("version_number", { ascending: true });
     return readMany(result.data as PipelineRow[] | null, result.error);
   }

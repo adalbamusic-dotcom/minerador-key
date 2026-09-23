@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { SerpFormationAssessment } from "./serp-formation.ts";
+import { SerpLensesMarkerSchema } from "./serp-lens-plan.ts";
 
 /**
  * A EVIDÊNCIA SERP DA FORMAÇÃO VIRA ARTEFATO REMOTO.
@@ -102,6 +103,21 @@ export const ArticleFormationSerpPayloadSchema = z.object({
     converging: z.number().int().nonnegative(),
     total: z.number().int().nonnegative(),
     recommendation: z.string().min(1),
+    /**
+     * Buscas do grupo SEM SERP nesta avaliação (KGR leve com Principal clara:
+     * só ela é consultada). Fora de `total` e de `outsiders`: ausência de
+     * observação não é divergência. Opcional e aditivo — registro antigo e
+     * avaliação com todas observadas não o têm.
+     */
+    notObserved: z.array(z.object({ keywordId: z.string().min(1), keyword: z.string().min(1), reason: z.string().min(1) })).optional(),
+    /**
+     * O marcador das quatro lentes (adendo A5): pedidas, observadas, faltantes
+     * com o motivo, o voto de cada par por lente, a concordância e o portão de
+     * datas. Ausente = parecer legado de uma lente só. Opcional e aditivo; como
+     * `interpretation` não é `.strict()`, um leitor antigo o descartaria em
+     * silêncio — schema e escrita entram no mesmo deploy.
+     */
+    lenses: SerpLensesMarkerSchema.optional(),
   }).nullable().default(null),
   /** Resolução humana registrada CONTRA esta base; nunca genérica. */
   humanResolution: ArticleSerpHumanResolutionSchema.nullable().default(null),

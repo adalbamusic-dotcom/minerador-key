@@ -49,8 +49,11 @@ const responseFixture = {
 test("a rota SERP do Radar usa apenas o DataForSEO canônico", async () => {
   const route = await readFile(new URL("../app/api/editorial/serp/route.ts", import.meta.url), "utf8");
   assert.match(route, /resolveDataForSeoCanonicalSerpCompatibilityConfig/);
-  assert.match(route, /collectDataForSeoSerpSnapshot/);
-  assert.doesNotMatch(route, /collectSerperSnapshot|\bSerper\b|\bRapidAPI\b/i);
+  assert.match(route, /collectRadarSerpLensSnapshot/);
+  const nucleo = await readFile(new URL("../lib/server/radar-serp-lenses.ts", import.meta.url), "utf8");
+  assert.match(nucleo, /collectAndCacheSerp\(/);
+  assert.match(nucleo, /from "\.\.\/minerador\/dataforseo-serp-core\.ts"/);
+  for (const fonte of [route, nucleo]) assert.doesNotMatch(fonte, /collectSerperSnapshot|\bSerper\b|\bRapidAPI\b/i);
   assert.match(route, /RadarItemSchema\.safeParse\(\{ \.\.\.\(workflow\.payload as object\), id: workflow\.id \}\)/);
 });
 

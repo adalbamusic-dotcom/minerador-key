@@ -5,23 +5,31 @@ import { createCanonicalServiceClient } from "@/lib/server/canonical-authorizati
 import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
-import { RedatorImproveRequestSchema, RedatorImproveProposalSchema } from "@/lib/redator/contracts";
-import { buildImprovePrompt, IMPROVE_SYSTEM_PROMPT } from "@/lib/redator/prompts";
+import { RedatorImproveRequestSchema } from "@/lib/redator/contracts";
+import { WriterImproveProviderSchema } from "@/lib/redator/writer-section-evidence";
+import { runWriterImproveProposal } from "@/lib/server/writer-evidence-ai";
+import { WriterEvidenceError } from "@/lib/server/writer-evidence-document";
 
-const ProviderImproveSchema = z.object({ replacementText: z.string().trim().min(1).max(12000), alerts: z.array(z.string().trim().min(1).max(1000)).max(20).default([]) });
-
+/* Mesma regra da seção: evidência lida no servidor pela Marca; alertas viram divergências. */
 export async function POST(request: NextRequest) {
   try {
     const profile = await requireCanonicalSessionProfile();
     const input = RedatorImproveRequestSchema.parse(await request.json());
     await assertEditorialPermission(profile, input.brandId, "redator", "edit");
     const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: profile.userId, brandId: input.brandId, client: createCanonicalServiceClient() });
-    const generated = await generateStructuredAI({ provider, system: IMPROVE_SYSTEM_PROMPT, user: buildImprovePrompt(input.document, input.selectedText, input.humanInstruction), schema: ProviderImproveSchema, maxTokens: 2200 });
-    const proposal = RedatorImproveProposalSchema.parse({ ...generated, humanDecisionRequired: true, origin: "ai" });
-    return NextResponse.json({ proposal });
+    const result = await runWriterImproveProposal({
+      context: { brandId: input.brandId },
+      actorUserId: profile.userId,
+      document: input.document,
+      selectedText: input.selectedText,
+      humanInstruction: input.humanInstruction,
+      generate: ({ system, user }) => generateStructuredAI({ provider, system, user, schema: WriterImproveProviderSchema, maxTokens: 2200 }),
+    });
+    return NextResponse.json(result);
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Pedido de melhoria inválido.", details: error.issues }, { status: 400 });
     if (error instanceof StructuredAIError) return NextResponse.json({ error: error.message, code: error.code, issues: error.issues }, { status: error.status });
+    if (error instanceof WriterEvidenceError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     const mapped = authzErrorResponse(error); return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 }

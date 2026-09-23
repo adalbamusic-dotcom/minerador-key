@@ -115,7 +115,8 @@ test("C/D · SERP fraca ou insuficiente persiste e não volta para 'não coletad
   assert.equal(semanticDraftFromQualification(scarce).intent.serpStrength, "insufficient");
   assert.equal(isFullyConsolidatedQualification(scarce), false);
   // Persistir evidência não conclusiva é obrigatório: a rota grava toda coleta.
-  assert.ok(route.includes("if (serpEvidence) await persistQualification(target, serpEvidence);"));
+  // A origem da SERP (paga ou do cache) vai junto só para não versionar um acerto repetido.
+  assert.ok(route.includes("if (serpEvidence) await persistQualification(target, serpEvidence, serpSource, semanticSerp.lensesCollectedNow);"));
   assert.ok(!route.includes("if (serpEvidence && isConclusive"), "não existe filtro de conclusividade na escrita");
 });
 
@@ -152,7 +153,8 @@ test("G/H · leitura e F5 não chamam provider", () => {
     assert.ok(!loader.includes(forbidden), `a reidratação não pode acionar ${forbidden}`);
   }
   // O carregamento do Perfil reidrata a partir do artifact, não da sessão.
-  assert.ok(workspace.includes("const persistedQualifications = await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)))"));
+  // O terceiro argumento só escolhe a poda do cache de versões imutáveis (E8).
+  assert.ok(workspace.includes("const persistedQualifications = await loadSemanticQualifications(selectedBrandId, loadedKeywords.map(item => String(item.id)), qualificationVersionCachePruneForListing(loadedKeywords.length))"));
   assert.ok(!workspace.includes('localStorage.setItem("semanticQualifications'));
   assert.ok(!workspace.includes('sessionStorage.setItem("semanticQualifications'));
 });
@@ -160,11 +162,15 @@ test("G/H · leitura e F5 não chamam provider", () => {
 test("I · leitura é por brandId + keywordId, sem cross-brand", () => {
   assert.ok(store.includes('.eq("marca_id", input.brandId)'));
   assert.ok(store.includes('.in("entity_id", ids)'));
-  assert.ok(store.includes("parsed.brandId !== input.brandId || parsed.keywordId !== entityId"));
+  // A conferência do payload contra a linha mudou para a seleção em duas etapas (E7, correção 3).
+  const currentSelection = readFileSync(new URL("../lib/minerador/keyword-semantic-qualification-current.ts", import.meta.url), "utf8");
+  assert.ok(currentSelection.includes("parsed.brandId === input.brandId && parsed.keywordId === entityId"));
+  assert.ok(store.includes("resolveCurrentKeywordSemanticQualifications({"));
   assert.ok(store.includes("A Qualificação Semântica não pertence à Marca/keyword do write."));
   const loader = workspace.slice(workspace.indexOf("const loadSemanticQualifications"), workspace.indexOf("const readCanonicalKeywordRows"));
   assert.ok(loader.includes('.eq("marca_id", brandId)'));
-  assert.ok(loader.includes("parsed.brandId !== brandId || parsed.keywordId !== keywordId"));
+  // Mesma seleção, com o payload das versões imutáveis vindo do cache quando válido (E8).
+  assert.ok(loader.includes("resolveCurrentKeywordSemanticQualificationsWithCache({"));
   for (const forbidden of ["slug", "owner", "keyword_original", "ilike"]) {
     assert.ok(!loader.includes(forbidden), `resolver por ${forbidden} é proibido`);
   }

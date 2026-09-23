@@ -4,15 +4,71 @@ import { requireCanonicalSessionProfile, authzErrorResponse, AuthzError } from "
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { ContentDocumentRepository, PublicationRepository, documentStatusColumn } from "@/lib/server/editorial-repositories";
 import { finalizeArticleVersion, reuseFinalizedArticleVersion } from "@/lib/server/article-finalization";
-import { DocumentSaveInputSchema, DocumentUserStateInputSchema } from "@/lib/editorial/persistence-contracts";
+import { DocumentSaveInputSchema, DocumentUserStateInputSchema, PersistedDocumentDetailSchema } from "@/lib/editorial/persistence-contracts";
 import { OptimisticLockError, PersistenceUnavailableError } from "@/lib/server/editorial-db";
 import { runGuardian } from "@/lib/redator/guardian";
+import { contentHash } from "@/lib/arquiteto/versioning";
+import { isPartialContentDocument } from "@/lib/editorial/content-document-listing";
+
+const DetailQuerySchema = z.object({ brandId: z.string().uuid(), documentId: z.string().min(1).max(200) });
+
+/**
+ * ===== E1 · O DETALHE DO DOCUMENTO ABERTO =====
+ *
+ * A listagem da mesa (`/api/editorial/workspace`) deixou de trazer o pacote do
+ * Radar (`importedContext.dossier.bundle`, 99,8% do payload). Quem precisa do
+ * documento inteiro pede UM, por aqui: o Redator ao abrir, antes de liberar a
+ * edição, e Publicações ao exportar.
+ *
+ * A permissão é a mesma da listagem (`marca`/`view`): quem lia a mesa recebia
+ * este mesmo payload inteiro, e Publicações exporta sem precisar do Redator.
+ * A consulta filtra pela marca pedida (R4). Leitura por requisição: Route
+ * Handler não é cacheado por padrão no Next 16
+ * (node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md:51).
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const profile = await requireCanonicalSessionProfile();
+    const consulta = DetailQuerySchema.safeParse({
+      brandId: request.nextUrl.searchParams.get("brandId"),
+      documentId: request.nextUrl.searchParams.get("documentId"),
+    });
+    if (!consulta.success) return NextResponse.json({ code: "invalid_request", error: "Marca ou documento inválidos." }, { status: 400 });
+    const { brandId, documentId } = consulta.data;
+    await assertEditorialPermission(profile, brandId, "marca", "view");
+    const detalhe = await new ContentDocumentRepository().findDetail(brandId, documentId);
+    if (!detalhe) return NextResponse.json({ code: "document_not_found", error: "Documento não encontrado nesta marca." }, { status: 404 });
+    return NextResponse.json({ data: PersistedDocumentDetailSchema.parse({ brandId, ...detalhe }) });
+  } catch (error) {
+    /* Dado GRAVADO fora do contrato não é pedido inválido. */
+    if (error instanceof z.ZodError) return NextResponse.json({ code: "persisted_data_invalid", error: "O documento gravado não corresponde ao contrato vigente." }, { status: 502 });
+    if (error instanceof PersistenceUnavailableError) return NextResponse.json({ code: error.code, error: error.message }, { status: 503 });
+    const mapped = authzErrorResponse(error); return NextResponse.json({ error: mapped.message }, { status: mapped.status });
+  }
+}
 
 export async function PATCH(request: NextRequest) {
   try { const profile = await requireCanonicalSessionProfile(); const input = DocumentSaveInputSchema.parse(await request.json()); await assertEditorialPermission(profile, input.brandId, "redator", "edit");
-    if (input.document.status === "aprovado") { const report = runGuardian(input.document, input.contentHash); if (report.blockingCount > 0) throw new AuthzError(409, `Documento bloqueado pelo Guardião: ${report.blockingCount} achado(s) crítico(s).`); }
     if (input.document.id !== input.documentId) throw new AuthzError(400, "O identificador do documento não coincide com o payload enviado.");
     const repository = new ContentDocumentRepository();
+
+    /*
+     * ===== E1 · A CÓPIA SEM O PACOTE DO RADAR NUNCA APAGA O PACOTE =====
+     *
+     * A listagem da mesa entrega o documento sem `importedContext.dossier.bundle`,
+     * marcado como parcial. O Redator só edita depois de ler o detalhe, então o
+     * caminho normal manda o documento completo e passa direto por aqui.
+     *
+     * Se uma cópia parcial chegar mesmo assim, ela não é gravada como está: o
+     * bundle é lido verbatim da linha desta marca e devolvido ao documento, e o
+     * hash é recalculado sobre o documento que de fato vai ser gravado — o do
+     * cliente descreveria outro conteúdo. Tudo abaixo usa este documento.
+     */
+    const document = isPartialContentDocument(input.document)
+      ? await repository.completeWithStoredBundle(input.brandId, input.documentId, input.document)
+      : input.document;
+    const hash = document === input.document ? input.contentHash : await contentHash(document);
+    if (document.status === "aprovado") { const report = runGuardian(document, hash); if (report.blockingCount > 0) throw new AuthzError(409, `Documento bloqueado pelo Guardião: ${report.blockingCount} achado(s) crítico(s).`); }
 
     /*
      * ===== CORTE 6A.5 · FINALIZAR DUAS VEZES NÃO CRIA DUAS VERSÕES =====
@@ -25,21 +81,21 @@ export async function PATCH(request: NextRequest) {
      * Isso cobre o clique duplicado. O retry depois de um timeout cai no bloco
      * de captura abaixo, porque o lock do cliente ficou para trás.
      */
-    const alvo = documentStatusColumn(input.document.status);
+    const alvo = documentStatusColumn(document.status);
     if (input.createVersion) {
       const jaFeito = await reuseFinalizedArticleVersion({
         brandId: input.brandId, documentId: input.documentId,
-        contentHash: input.contentHash, targetStatusColumn: alvo });
+        contentHash: hash, targetStatusColumn: alvo });
       if (jaFeito) {
         const { updatedAt, ...version } = jaFeito;
         return NextResponse.json({ lockVersion: version.lockVersion, updatedAt,
-          contentHash: input.contentHash, version });
+          contentHash: hash, version });
       }
     }
 
     let saved;
     try {
-      saved = await repository.save(input.documentId, input.expectedLockVersion, input.document, input.contentHash, profile.userId);
+      saved = await repository.save(input.documentId, input.expectedLockVersion, document, hash, profile.userId, input.brandId);
     } catch (erro) {
       /*
        * ===== O RETRY QUE PERDEU O LOCK PORQUE A PRIMEIRA REQUISIÇÃO VENCEU =====
@@ -58,11 +114,11 @@ export async function PATCH(request: NextRequest) {
       if (input.createVersion && erro instanceof OptimisticLockError) {
         const jaFeito = await reuseFinalizedArticleVersion({
           brandId: input.brandId, documentId: input.documentId,
-          contentHash: input.contentHash, targetStatusColumn: alvo });
+          contentHash: hash, targetStatusColumn: alvo });
         if (jaFeito) {
           const { updatedAt, ...version } = jaFeito;
           return NextResponse.json({ lockVersion: version.lockVersion, updatedAt,
-            contentHash: input.contentHash, version });
+            contentHash: hash, version });
         }
       }
       throw erro;
@@ -79,12 +135,12 @@ export async function PATCH(request: NextRequest) {
      */
     const version = input.createVersion
       ? await finalizeArticleVersion({
-          brandId: input.brandId, documentId: input.documentId, document: input.document,
-          contentHash: input.contentHash, changeReason: input.changeReason, actorId: profile.userId,
+          brandId: input.brandId, documentId: input.documentId, document,
+          contentHash: hash, changeReason: input.changeReason, actorId: profile.userId,
           expectedStatusColumn: saved.status as string,
         })
       : null;
-    await new PublicationRepository().syncDocumentStatus(input.documentId, input.document.status, profile.userId);
+    await new PublicationRepository().syncDocumentStatus(input.documentId, document.status, profile.userId);
     /*
      * ===== O LOCK DEVOLVIDO É O DE DEPOIS DA FINALIZAÇÃO =====
      *

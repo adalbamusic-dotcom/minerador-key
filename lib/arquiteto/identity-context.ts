@@ -169,28 +169,15 @@ export function adaptKeywordIdentityContext(source: RecordLike): Pick<ArchitectK
     ...(history.length ? { history } : {}),
   };
   /*
-   * A DECLARAÇÃO DO [VÍNCULO] — `siteRole` finalmente chega ao Arquiteto.
+   * A DECLARAÇÃO DO [VÍNCULO], pela autoridade do Minerador.
    *
-   * O Minerador já derivava o papel da página publicada e o expunha em
-   * `readPublicationLink().siteRole`, mas `siteRole` não aparecia uma vez em
-   * `lib/arquiteto/`. Sem ele, a origem 2 precisava inferir o que já estava
-   * declarado — e inferir o que é fato é como se cria divergência.
-   *
-   * Lido das mesmas fontes toleradas pelo resto do adapter, com os apelidos
-   * que o Minerador usa. Ausente continua ausente: nada vira "article" por
-   * padrão.
+   * Não há leitura própria aqui: `readEditorialUnitDeclaration` pergunta a
+   * `resolveKeywordVinculo`, que é onde o Minerador resolve tipo de página,
+   * posto e publicação — inclusive `site_origin` gravado como texto JSON e o
+   * `keyword_page_type` que o humano marca. O padrão `article` não vira
+   * declaração: ausente continua ausente.
    */
-  const publicado = String(source.status || "").toLocaleLowerCase("pt-BR") === "publicado";
-  const editorialUnitDeclaration = readEditorialUnitDeclaration({
-    siteRole: first([...records, evidence], ["siteRole", "site_role", "papelNoSite", "papel_no_site"]),
-    url: first([...records, evidence], ["publishedUrl", "published_url", "url", "resolvedUrl", "resolved_url"]),
-    canonical: first([...records, evidence], ["canonicalUrl", "canonical_url", "canonical", "normalizedCanonicalUrl"]),
-    observedAt: first([...records, evidence], ["observedAt", "observed_at", "lastSeenAt", "last_seen_at"]),
-    potentialUnit: first(records, ["editorialUnitPotential", "editorial_unit_potential", "potencialUnidade", "potencial_unidade"]),
-    potentialConfidence: first(records, ["editorialUnitPotentialConfidence", "editorial_unit_potential_confidence"]),
-    potentialReasons: first(records, ["editorialUnitPotentialReasons", "editorial_unit_potential_reasons"]),
-    published: publicado,
-  });
+  const editorialUnitDeclaration = readEditorialUnitDeclaration(source);
 
   return {
     ...(relation ? { keywordUrlRelation: relation } : {}),

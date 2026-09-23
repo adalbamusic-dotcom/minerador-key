@@ -5,14 +5,16 @@ import { createCanonicalServiceClient } from "@/lib/server/canonical-authorizati
 import { resolveDeepSeekCanonicalConfig } from "@/lib/server/deepseek-canonical";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
-import { RedatorSectionRequestSchema, RedatorSectionProposalSchema } from "@/lib/redator/contracts";
-import { buildSectionWritingPrompt, createSectionPromptContext, SECTION_WRITING_SYSTEM_PROMPT } from "@/lib/redator/prompts";
+import { RedatorSectionRequestSchema } from "@/lib/redator/contracts";
+import { WriterSectionProviderSchema } from "@/lib/redator/writer-section-evidence";
+import { runWriterSectionProposal } from "@/lib/server/writer-evidence-ai";
+import { WriterEvidenceError } from "@/lib/server/writer-evidence-document";
 
-const ProviderSectionSchema = z.object({
-  paragraphs: z.array(z.string().trim().min(1).max(4000)).min(1).max(8),
-  alerts: z.array(z.string().trim().min(1).max(1000)).max(20).default([]),
-});
-
+/*
+ * A evidência vem do SERVIDOR, pela linha do documento na Marca autorizada
+ * (lib/server/writer-evidence-ai.ts). Do navegador só entram os blocos em
+ * edição e o id; os alertas da IA viram divergências para decisão humana.
+ */
 export async function POST(request: NextRequest) {
   try {
     const profile = await requireCanonicalSessionProfile();
@@ -20,21 +22,20 @@ export async function POST(request: NextRequest) {
     await assertEditorialPermission(profile, input.brandId, "redator", "edit");
     const section = input.document.blocks.find(block => block.id === input.sectionId && block.type === "heading");
     if (!section) throw new AuthzError(422, "A seção solicitada não pertence ao documento.");
-    const context = createSectionPromptContext(input.document, input.sectionId, input.humanInstruction);
     const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: profile.userId, brandId: input.brandId, client: createCanonicalServiceClient() });
-    const generated = await generateStructuredAI({
-      provider,
-      system: SECTION_WRITING_SYSTEM_PROMPT,
-      user: buildSectionWritingPrompt(context),
-      schema: ProviderSectionSchema,
-      maxTokens: 2400,
+    const result = await runWriterSectionProposal({
+      context: { brandId: input.brandId },
+      actorUserId: profile.userId,
+      document: input.document,
+      sectionId: input.sectionId,
+      humanInstruction: input.humanInstruction,
+      generate: ({ system, user }) => generateStructuredAI({ provider, system, user, schema: WriterSectionProviderSchema, maxTokens: 2400 }),
     });
-    const proposal = RedatorSectionProposalSchema.parse({ documentId: input.document.id, sectionId: input.sectionId, paragraphs: generated.paragraphs, alerts: generated.alerts,
-      humanDecisionRequired: true, origin: "ai" });
-    return NextResponse.json({ proposal });
+    return NextResponse.json(result);
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Pedido de escrita inválido.", details: error.issues }, { status: 400 });
     if (error instanceof StructuredAIError) return NextResponse.json({ error: error.message, code: error.code, issues: error.issues }, { status: error.status });
+    if (error instanceof WriterEvidenceError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     const mapped = authzErrorResponse(error); return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 }

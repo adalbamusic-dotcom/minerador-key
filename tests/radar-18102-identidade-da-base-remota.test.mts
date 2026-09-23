@@ -178,8 +178,17 @@ test("RADAR 18.10.2 · C e D — leitura, prova e só então o endpoint", () => 
 test("RADAR 18.10.2 · §4 — o endpoint continua lendo do banco, e não do cliente", () => {
   const rota = rotaDeFontes();
 
-  /* A proteção que NÃO pode ser afrouxada para 'resolver' o erro. */
-  assert.match(rota, /new WorkflowRepository\(\)\.findByArticle\(input\.brandId, input\.articleId, "radar"\)/);
+  /*
+   * A proteção que NÃO pode ser afrouxada para 'resolver' o erro.
+   *
+   * A leitura trocou de método em 2026-09-23 (egress: 8,22 MB por lote para
+   * usar uma corrida só), mas a garantia é a mesma: a linha vem do BANCO, por
+   * marca e artigo, e a versão pedida volta REIDRATADA — as extractions dela
+   * são a matéria-prima do plano. Pedir outra versão, ou nenhuma, daria plano
+   * vazio sem erro nenhum.
+   */
+  assert.match(rota, /new WorkflowRepository\(\)\.findByArticleHydratingVersions\(input\.brandId, input\.articleId, "radar", \(\) => \[input\.analysisVersionId\]\)/);
+  assert.equal(/findByArticleWithoutRuns/.test(rota), false, "a leitura sem corridas perderia as extractions");
   assert.match(rota, /versoes\.find\(version => version\.versionId === input\.analysisVersionId\)/);
   assert.match(rota, /RADAR_SOURCE_VERIFICATION_ERROR\.ANALYSIS_UNKNOWN/);
   assert.match(rota, /persistida\.payload\.articleDnaVersionId !== input\.articleDnaVersionId/, "o fundamento continua conferido");

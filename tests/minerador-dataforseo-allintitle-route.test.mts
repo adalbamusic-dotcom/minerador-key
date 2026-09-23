@@ -23,7 +23,9 @@ test("rota usa upsert para a projeção atual da candidata e não bloqueia confl
 test("rota reserva quota por alvo e registra consumo após o provider iniciar", async () => {
   const route = await readFile(new URL("../app/api/minerador/marcas/[brandId]/dataforseo/allintitle/route.ts", import.meta.url), "utf8");
   const overviewCore = await readFile(new URL("../lib/minerador/dataforseo-keyword-overview-core.ts", import.meta.url), "utf8");
-  assert.match(route, /quotaUnits: targets\.length/);
+  // Mudou em 2026-09-23 (decisão do usuário, quatro lentes): a quota continua
+  // por alvo e soma uma unidade por lente extra da SERP que falta no cache.
+  assert.match(route, /await resolveConfig\(targets\.length \+ lensPlan\.missingQueries\)/);
   assert.match(route, /operation: "module_operation"/);
   assert.match(route, /module: "minerador"/);
   assert.match(route, /units: 1/);

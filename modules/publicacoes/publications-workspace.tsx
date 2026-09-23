@@ -16,6 +16,7 @@ import type { OperationalPublication } from "@/lib/editorial/operational-flow";
 import { applyPublicationAction } from "@/lib/publicacoes/domain";
 import type { PublicationAction, PublicationActionRequest } from "@/lib/publicacoes/contracts";
 import { createPublicationExport, createPublicationsCsv } from "@/lib/publicacoes/export";
+import { isPartialContentDocument } from "@/lib/editorial/content-document-listing";
 import { useNoticeBridge } from "@/components/global-notice-center";
 import Link from "next/link";
 import { PUBLICATIONS_LIBRARY_DEFAULT_FILTER, PUBLICATIONS_LIBRARY_FILTERS, PUBLICATIONS_LIBRARY_FILTER_LABELS, filterEditorialLibrary, projectEditorialLibrary, writerHrefForRow, type EditorialLibraryFilter } from "@/lib/publicacoes/editorial-library";
@@ -93,9 +94,15 @@ export function PublicationsWorkspace() {
   };
 
   const exportPublication = async (publication: OperationalPublication, format: "markdown" | "json") => {
-    const document = pipeline.documents[publication.documentId]; if (!document) { setNotice("O conteúdo do artigo não está disponível para exportação."); return; }
+    const listado = pipeline.documents[publication.documentId]; if (!listado) { setNotice("O conteúdo do artigo não está disponível para exportação."); return; }
     setBusyId(publication.id); setNotice("");
     try {
+      /*
+       * E1 · a mesa entrega o documento sem o pacote do Radar. A exportação e o
+       * `documentHash` são do documento COMPLETO, como antes: a cópia parcial
+       * busca o detalhe no servidor antes de exportar.
+       */
+      const document = isPartialContentDocument(listado) ? await pipeline.loadDocumentDetail(listado.id) : listado;
       const artifact = await createPublicationExport(publication, document, format); downloadFile(artifact.fileName, artifact.mimeType, artifact.content);
       await runAction(publication, { action: "record_export", exportFileName: artifact.fileName, exportFormat: format, documentHash: artifact.documentHash });
     } catch (error) { setNotice(error instanceof Error ? error.message : "Não foi possível exportar."); setBusyId(null); }

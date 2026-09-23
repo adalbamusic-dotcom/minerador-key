@@ -129,8 +129,52 @@ export function radarWriterDossierOfDocument(document: ContentDocument | null | 
   return objeto(document.importedContext.dossier);
 }
 
+/**
+ * ===== O QUE ESTA PROJEÇÃO LÊ DO BUNDLE — E NADA MAIS =====
+ *
+ * Fase 0 do leitor de evidências (docs/07-redator/propostas/
+ * sdd-leitor-evidencias-redator-2026-09-23.md §8): a semeadura da IA interna
+ * lê do banco só estes caminhos do bundle, e não o documento inteiro. Medido
+ * em 2026-09-23 no documento GOOGLE: 74.877 B contra 4.502.936 B.
+ *
+ * A lista mora AQUI, ao lado de quem lê, para as duas evoluírem juntas. Um
+ * teste percorre `radarFoundationsOfDossier` com um Proxy e reprova qualquer
+ * leitura do bundle que não esteja coberta por um destes caminhos.
+ *
+ * Os campos do dossiê FORA do bundle (bundleId, bundleHash, researchProfile,
+ * keywordContext, writerMayNot) não entram: quem lê pelo banco os traz
+ * inteiros e os valida com `RadarWriterDossierSchema`. Por isso também ficam
+ * de fora `bundle.bundleId`, `bundle.bundleHash` e
+ * `bundle.primaryResearchProfile` — são reserva para um dossiê sem os campos
+ * próprios, e o contrato do dossiê os exige.
+ */
+export const RADAR_FOUNDATIONS_BUNDLE_PATHS: readonly (readonly string[])[] = [
+  ["research"],
+  ["competitiveBlueprint"],
+  ["crossSerp"],
+  ["editorialOutputs"],
+  ["observed", "questions"],
+  ["observed", "concepts", "recurrent"],
+  ["observed", "sample"],
+  ["video", "summary"],
+  ["specialist"],
+  ["observedAt"],
+  ["researchSources"],
+  ["serpStanding"],
+  ["limitations"],
+];
+
 export function radarFoundationsOf(document: ContentDocument | null | undefined): RadarFoundations | null {
-  const dossier = radarWriterDossierOfDocument(document);
+  return radarFoundationsOfDossier(radarWriterDossierOfDocument(document));
+}
+
+/**
+ * A mesma projeção, a partir do dossiê em si. Existe para quem não tem o
+ * documento inteiro na mão: a semeadura monta um dossiê só com os caminhos de
+ * `RADAR_FOUNDATIONS_BUNDLE_PATHS` e chega aqui sem baixar o pacote do Radar.
+ */
+export function radarFoundationsOfDossier(valor: unknown): RadarFoundations | null {
+  const dossier = objeto(valor);
   if (!dossier) return null;
   const bundle = objeto(dossier.bundle) || {};
 

@@ -303,7 +303,7 @@ test("§2 · PROVIDER_CALL_BEFORE_MODE_CHECK = NO — nas duas rotas pagas", asy
   const guardaSerp = rotaSerp.slice(rotaSerp.indexOf("export async function POST")).indexOf("resolveRadarResearchSource(");
   assert.ok(guardaSerp > 0, "a rota do Google tem a guarda dentro do POST");
   const posPost = rotaSerp.slice(rotaSerp.indexOf("export async function POST"));
-  for (const gasto of ["collectDataForSeoSerpSnapshot(", "resolveDataForSeoCanonicalSerpCompatibilityConfig(", "recordIntegrationUsage("]) {
+  for (const gasto of ["collectRadarSerpLensSnapshot(", "resolveDataForSeoCanonicalSerpCompatibilityConfig(", "recordUsage: recordIntegrationUsage"]) {
     assert.ok(posPost.indexOf(gasto) > guardaSerp, `no Google, a guarda vem depois de ${gasto}`);
   }
 

@@ -1,5 +1,79 @@
 # Estado atual — Minerador
 
+## Qualificação vigente, cache de versões no navegador e Descoberta com SERP travada — 2026-09-23
+
+```text
+QUALIFICACAO_NA_MONTAGEM = metadados de todas as versões + payload só da vigente · recuo para a anterior preservado
+CACHE_DE_VERSOES = IndexedDB "minerador-qualificacao-versoes" · por actor + marca · só vigentes · poda ao fim da carga
+DESCOBERTA_RESULTADO_E_KD = "Sem medição" por padrão · "Medir resultados" só com um deles ativado
+MIGRATIONS_ADDED = 0 (20260923140000 escrita, NÃO aplicada) · CHAMADAS_PAGAS_EM_TESTE = 0
+MANUAL_UI_VALIDATED = NO — homologação do usuário
+```
+
+**Verificado no código e confirmado por teste.** Registro completo na seção 8 da [SDD de egress](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md).
+
+- **Leitura da Qualificação.** `lib/minerador/keyword-semantic-qualification-current.ts` (novo) faz a leitura em duas etapas: primeiro os metadados sem payload, depois o payload da maior versão por entidade, por `version_id`, em lotes de 50. Uma entidade cuja versão mais nova não passa na validação recebe a anterior, buscada sob demanda. O resultado é idêntico ao de antes: há teste de equivalência com 150 entradas aleatórias contra uma cópia da seleção antiga. A montagem (`modules/minerador/minerador-workspace.tsx`) e o store do servidor (`lib/server/keyword-semantic-qualification-store.ts`, usado pela rota de Resultados e pelo handoff) usam a leitura nova. MEDIDO: 1.030 → 584 kB por rodada nas 3 marcas.
+- **Cache de versões imutáveis.** `lib/minerador/semantic-qualification-version-cache.ts` (novo) guarda no navegador o payload das versões vigentes, pelo `version_id`. `editorial_artifact_versions` é append-only por gatilho, então uma versão guardada nunca fica errada. Qualquer falha do IndexedDB cai para a leitura remota, e o cache nunca vira "sem Qualificação". MEDIDO com cache quente: 584 → 53,5 kB, só metadados. Não há limpeza no logout (ver a política na SDD).
+- **Descoberta.** Resultado e KD começam em "Sem medição" e voltam a esse padrão em restauração, Buscar, Manual/CSV e Limpar filtros. "Medir resultados" (allintitle, KD e SERP completa) fica desabilitado, com a mensagem "Ative o filtro Resultado ou KD para medir com a DataForSEO", até um dos dois sair de "Sem medição". A função que dispara a medição também recusa. Depois de medir, o filtro que ficou em "Sem medição" passa para "Todos", para as medidas não sumirem, e a tabela informa quantas candidatas estão ocultas pelos filtros SEO. O bloqueio é só de interface: a rota é compartilhada com o Processador. Arquivos: `lib/minerador/discovery-seo-filters.ts`, `modules/minerador/discovery/discovery-keywords-page.tsx`, `discovery-table-placeholder.tsx` e `discovery-filter-row.tsx`.
+- **Testes:** `tests/minerador-qualificacao-vigente.test.mts` 10/10, `tests/minerador-qualificacao-cache-versoes.test.mts` 20/20 e `tests/minerador-discovery-serp-gate.test.mts` 12/12, todos no glob `tests/minerador-*.test.mts`. A suíte do Minerador continua com as mesmas 28 falhas da base, conferidas por nome. `tsc` sem erros.
+- **Propostas escritas, aguardando autorização:**
+  - [Descoberta temporária no navegador](propostas/sdd-descoberta-temporaria-local-2026-09-23.md): as tabelas da Descoberta são 57% do banco, e só 1,9% das candidatas foram importadas; 11 decisões.
+  - [Cache conferido das keywords vivas](../compartilhado/sdd-cache-local-keywords-conferido-2026-09-23.md), com a migration `supabase/migrations/20260923140000_minerador_keywords_row_version.sql`, **não aplicada**.
+- **Decisão do usuário (2026-09-23):** a SERP vai ao cache desde a primeira vez, sempre nas 4 lentes, e a intenção e o funil passam a usar as 4 lentes.
+  - **Coleta implementada:** a rota de Resultados garante as 4 lentes no cache, pagando só as que faltam. A canônica fica com corpo em depth 20; as outras 3 com meta e observação em depth 10. Há quota parcial, e lacunas não derrubam o alvo. A resposta traz o campo aditivo `serpLensCoverage`. Módulo novo: `lib/server/minerador-serp-lens-coverage.ts`. Detalhes no adendo da [SDD do cache](../compartilhado/sdd-cache-serp-temporario-2026-09-23.md).
+  - **Intenção e funil pelas 4 lentes e classificador v4:** implementados e confirmados por teste; validação manual pendente. Regra na §77 da [spec](spec.md); desvios, medições e efeitos no [adendo](propostas/adendo-derivacao-v4-quatro-lentes-2026-09-23.md), seção 8.
+    - **Onde muda:** `lib/minerador/serp-semantic-evidence.ts` (v4 e `deriveSerpSemanticEvidenceAcrossLenses`), `keyword-semantic-qualification.ts` (`lensEvidence`), `serp-evidence-record.ts` (`lentes`, rótulos e cobertura com teto de 700 B), `logical-read-model.ts` ("Misto na SERP (A × B)"), a rota de Resultados, `minerador-serp-lens-coverage.ts` e `lib/editorial/serp-cache.ts` (`payload.digest` e modo `digest`). Na tela: `components/editorial/dna-panels.tsx` e o Minerador. No handoff: `lenses` opcional.
+    - **Testes:** `tests/minerador-serp-derivacao-v4.test.mts` e `tests/minerador-serp-quatro-lentes.test.mts`, pelo glob; `test:serp-cache` 34/34.
+    - **Efeito real ainda não medido:** não há SERP real mobile nem macOS. Nas vigentes, nada muda até a próxima execução de Resultados.
+
+## CALL 3 consulta o cache de SERP da marca — 2026-09-23
+
+```text
+SERP_SEMANTICA = cache primeiro · desktop-windows · advanced · 20
+ACERTO = custo 0, sem referência de consumo, proveniência da coleta original
+QUALIFICACAO_REPETIDA = sem versão nova (AGENTS §9)
+EVIDENCIA_INVALIDADA = pula o cache e paga SERP nova
+QUOTA_DA_ROTA = inalterada (allintitle e Keyword Overview continuam pagos por alvo)
+MIGRATIONS_ADDED = 0 · CHAMADAS_PAGAS_EM_TESTE = 0
+MANUAL_UI_VALIDATED = NO — homologação do usuário
+```
+
+**Verificado no código e confirmado por teste.** O Minerador é o dono do dado
+do cache: é quem primeiro paga a SERP de cada keyword. Contrato na SDD
+[cache temporário de SERP](../compartilhado/sdd-cache-serp-temporario-2026-09-23.md).
+
+- **A CALL 3 do processo Resultados lê o cache antes de pagar**
+  (`collectSemanticSerp` em `app/api/minerador/marcas/[brandId]/dataforseo/allintitle/route.ts`).
+  Num acerto, a evidência semântica sai do corpo gravado com a data e o pedido
+  da coleta original; custo 0 e nenhuma referência de provider no consumo. Na
+  falta, paga como antes e grava para os próximos — do Minerador e do Arquiteto.
+- **O pedido ganhou lente explícita** (`os: windows`). O eco da DataForSEO
+  prova que `desktop` sem `os` já era servido como windows: a SERP é a mesma, o
+  rótulo gravado é que passou a ser o enviado.
+- **Acerto não vira versão nova da Qualificação.** Se a SERP reaproveitada é a
+  mesma coleta que a versão vigente já registrou
+  (`repeatsCurrentSemanticQualification`) ou é **mais velha** que ela
+  (`predatesCurrentSemanticQualification`), ambas em
+  `lib/minerador/keyword-semantic-qualification.ts`, nada é gravado; a vigente
+  segue como resposta (`unchanged: true`, `semanticQualificationUnchangedCount`).
+  A comparação é do conteúdo gravado em JSON canônico (o jsonb reordena as
+  chaves) e ignora a caixa do texto (keyword e candidata dividem a entrada).
+  Para as datas baterem, a coleta paga grava a Qualificação com a data do cache.
+- **O ramo sem versão nova corrige a projeção.** Se `evidencia_serp` da keyword
+  não aponta para a vigente — vigente gravada pela Descoberta, que não projeta,
+  ou projeção que falhou —, ela é regravada a partir da vigente. A projeção
+  virou um helper só (`projectSerpEvidenceRecord`), usado pelos dois caminhos.
+- **Evidência SERP invalidada por humano pede SERP nova**, nunca a do cache:
+  a do cache seria justamente a recusada, e gravá-la limparia a invalidação.
+- **Resposta:** `serpSource` (`COLLECTED`/`REUSED`) por alvo e
+  `serpReusedCount`. A quota da rota não mudou.
+- **Arquivos:** a rota, `lib/minerador/dataforseo-serp-core.ts`
+  (`readDataForSeoTargetCodes`, extraído sem mudar comportamento) e
+  `lib/minerador/keyword-semantic-qualification.ts` (duas funções novas).
+  Testes: `tests/minerador-serp-cache.test.mts` (18, registrado em
+  `test:editorial`); `tests/minerador-semantic-qualification-persistence.test.mts`
+  teve a âncora C/D atualizada para a nova assinatura.
+
 ## Allintitle media a consulta errada — corrigido — 2026-09-18
 
 ```text
@@ -4195,3 +4269,34 @@ Agora foram.
 
 As 29 antigas seguem divergentes, como já registrado: o conteúdo mudou no
 ciclo de corrupção e reparo, e a re-aprovação é humana.
+
+## Keywords de outras marcas chegavam à mesa — 2026-09-23
+
+**Confirmado por teste; ainda não verificado manualmente.**
+
+A auditoria de egress (SDD [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md))
+achou uma violação de isolamento por marca, não só de consumo:
+`app/api/inteligencia/route.ts` lia `minerador_keywords` com
+`.or("lista_id.is.null, …")` **sem filtro de marca**. A rota usa service role,
+que ignora RLS — então o `.or` sozinho deixava passar toda keyword sem lista
+de **qualquer** marca.
+
+Medido: **267 linhas de 3 marcas** chegavam ao snapshot da Care Glow, que tem
+**39**. Custava 1,84 MB por carga fria da mesa editorial, em qualquer página.
+
+- **Correção:** `.eq("brand_id", marcaId)` na consulta, mantendo o `.or` de
+  lista, o `.is("deleted_at", null)` e o gate `siloIds.length`.
+- **Conferido no banco antes:** `brand_id` é NOT NULL, 0 keywords sem marca,
+  0 keywords em lista de outra marca, 0 referências a keyword de outra marca
+  nos dados editoriais persistidos (673 linhas conferidas).
+- **Economia:** 1,84 MB → ~0,43 MB por carga (76%).
+- **Consumidores preservados:** formato do `EditorialSnapshot` e projeção
+  inalterados; marcas sem lista continuam sem consultar keywords nesta rota.
+- **Teste:** `tests/editorial-inteligencia-isolamento-marca.test.mts`
+  (3 casos, mutantes sem o filtro morrem), registrado em `test:editorial`.
+
+### MUDANÇA VISÍVEL — NÃO É REGRESSÃO
+
+A métrica **Keywords** da página da Marca (`modules/marca/brand-page.tsx:155`,
+`pipeline.snapshot.keywords.length`) **cai de 267 para 39** na Care Glow. O
+número antigo contava keywords de outras duas marcas. O novo é o correto.

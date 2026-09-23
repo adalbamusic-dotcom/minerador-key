@@ -41,6 +41,7 @@ const semComentarios = (fonte: string) =>
   fonte.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 const fonteDaRota = await readFile(new URL("../app/api/editorial/radar-analysis/route.ts", import.meta.url), "utf8");
+const fonteDoRepositorio = await readFile(new URL("../lib/server/editorial-repositories.ts", import.meta.url), "utf8");
 const fonteDaRotaLazy = await readFile(new URL("../app/api/editorial/radar-research-part/route.ts", import.meta.url), "utf8");
 const fonteDoModelo = await readFile(new URL("../lib/radar/research-read-model.ts", import.meta.url), "utf8");
 const fonteDaTrava = await readFile(new URL("../lib/radar/google-research-write-lock.ts", import.meta.url), "utf8");
@@ -163,8 +164,16 @@ test("E · a trava mora no SERVIDOR, e compara contra a versão gravada", () => 
    * mandou: um cliente que enviasse um payload sem `finalizedBundle` se
    * destravaria sozinho.
    */
-  assert.match(rota, /const correnteGravada = storedAnalyses\(itemAtual\?\.payload\)\.at\(-1\) \|\| null;/);
+  /*
+   * Desde 2026-09-23 a corrente chega por um método próprio do repositório
+   * (egress: a leitura do item inteiro reidratava 8,22 MB para a trava usar
+   * uma versão). A autoridade continua sendo a versão GRAVADA, e continua
+   * passando pelo mesmo schema antes de entrar na trava.
+   */
+  assert.match(rota, /const versaoCorrente = await repositorio\.findCurrentRadarAnalysisForWriteLock\(input\.brandId, input\.articleId\);/);
+  assert.match(rota, /const correnteGravada = versaoCorrente \? VersionedRadarAnalysisSchema\.parse\(versaoCorrente\) : null;/);
   assert.match(rota, /current: correnteGravada\?\.payload \|\| null,/);
+  assert.equal(/current: input\./.test(rota), false, "a corrente nunca sai do corpo do pedido");
   assert.ok(rota.indexOf("radarGoogleResearchWriteLock") < rota.indexOf("appendRadarAnalysis(input.brandId"), "a trava vem ANTES da escrita");
 });
 
@@ -334,11 +343,29 @@ test("Q e R · o servidor resolve a autoridade FULL, e a compactação não apag
   /*
    * §14 · A ESCRITA NUNCA USA O DTO QUE VEIO DO NAVEGADOR COMO AUTORIDADE.
    *
-   * A trava lê `findByArticle` — o repositório —, que não compacta. Comparar
-   * contra o payload recebido deixaria o próprio cliente decidir se está
-   * travado.
+   * A trava lê do REPOSITÓRIO, que não compacta. Comparar contra o payload
+   * recebido deixaria o próprio cliente decidir se está travado.
+   *
+   * Até 2026-09-23 a leitura era `findByArticle`, que reidrata TODAS as
+   * corridas do item (8,22 MB no maior) para a trava usar só a corrente. O
+   * método novo lê a mesma linha crua do repositório e devolve SÓ a versão
+   * corrente, com a corrida DELA reidratada inteira quando a investigação está
+   * finalizada — que é quando a trava compara `extractions`. A intenção desta
+   * asserção não mudou: repositório, corrente completa, nada compactado. Por
+   * isso ela exige, além do nome, o corpo do método.
    */
-  assert.match(rota, /repositorio\.findByArticle\(input\.brandId, input\.articleId, "radar"\)/);
+  assert.match(rota, /repositorio\.findCurrentRadarAnalysisForWriteLock\(input\.brandId, input\.articleId\)/);
+  assert.equal(/\.findByArticle\(|findByArticleWithoutRuns/.test(rota.slice(rota.indexOf("export async function POST"))), false, "a gravação não lê o item inteiro nem a linha leve");
+
+  const repositorio = semComentarios(fonteDoRepositorio);
+  const metodo = repositorio.slice(repositorio.indexOf("async findCurrentRadarAnalysisForWriteLock("), repositorio.indexOf("async importItem("));
+  assert.match(metodo, /this\.findByArticleRaw\(marcaId, articleId, "radar"\)/, "lê a linha do repositório");
+  assert.match(metodo, /versoes\[versoes\.length - 1\]/, "a corrente é a última do array, como no `.at(-1)` da trava");
+  assert.match(metodo, /if \(!radarGoogleResearchIsFinalized\(corrente\.payload\)\) return corrente;/, "só dispensa a corrida quando a trava abre sem comparar");
+  assert.match(metodo, /\.eq\("workflow_item_id", String\(registro\.id\)\)\.eq\("version_id", versionId\)/, "a corrida é só a da corrente");
+  assert.match(metodo, /mergeAnalysisRun\(corrente,/, "e volta inteira, pela mesma fusão da reidratação");
+  assert.equal(/compactRadarResearchForRead|pruneRadarAnalysisHistory/.test(metodo), false, "nada é compactado nem podado");
+  assert.equal(/return linha|return registro|\.\.\.registro/.test(metodo), false, "devolve a versão, nunca a linha");
   assert.equal(/compactRadarResearchForRead/.test(rota), false, "o readback de escrita não compacta");
 
   /* §7 · e a compactação é de LEITURA: o banco continua completo. */

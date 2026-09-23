@@ -1,15 +1,27 @@
 import type { NextRequest } from "next/server";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { ContentDocumentSchema, ContentBlockSchema } from "@/lib/arquiteto/contracts";
+import { ContentBlockSchema } from "@/lib/arquiteto/contracts";
 import { runGuardian } from "@/lib/redator/guardian";
 import { WriterDeliverablePayloadSchema, WriterMediaBriefSchema } from "@/lib/redator/multiformat-contracts";
+import { WRITER_EVIDENCE_GUARDS, WRITER_EVIDENCE_LIMITS, writerEvidenceJsonBytes } from "@/lib/redator/writer-evidence-catalog";
+import { WriterDivergenceRequestSchema } from "@/lib/redator/writer-evidence-divergence";
+import {
+  WRITER_BRIEF_SELECT,
+  WRITER_DOCUMENT_VIEW_SELECT,
+  WRITER_GUARDIAN_SELECT,
+  writerBriefFromRow,
+  writerDocumentViewFromRow,
+  writerGuardianViewFromRow,
+} from "@/lib/redator/writer-document-reads";
 import { requireAgencyAccessToBrand } from "@/lib/server/agency-context";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { getOperationalClient, mapPersistenceError, OptimisticLockError } from "@/lib/server/editorial-db";
 import { mcpBearerChallenge } from "@/lib/server/mcp-oauth";
 import { mcpRuntimeFailure, readMcpRuntimeConfig } from "@/lib/server/mcp-runtime-config";
 import { listWriterDeliverables, listWriterMedia, registerWriterMediaBrief, saveWriterArticleDraft, saveWriterDeliverable, uploadWriterMediaAsset, WriterDeliverableError } from "@/lib/server/writer-deliverables";
+import { readWriterGuardianContext, recordWriterDivergenceFromMcp } from "@/lib/server/writer-evidence-divergences";
+import { readWriterEvidence, readWriterEvidenceManifest, readWriterFoundations, WriterEvidenceError } from "@/lib/server/writer-evidence-reader";
 import { recordWriterMcpCall, WriterMcpAuthError, type WriterMcpScope } from "@/lib/server/writer-mcp-delegation";
 import { resolveWriterMcpPrincipal, type WriterMcpBrandAccess, type WriterMcpPrincipal } from "@/lib/server/writer-mcp-principal";
 
@@ -25,30 +37,126 @@ class ToolFailure extends Error {
   constructor(code: string, details: Record<string, unknown> = {}) { super(code); this.code = code; this.details = details; }
 }
 
-type DocumentRow = { id: string; marca_id: string; article_id: string; payload: unknown; content_hash: string; lock_version: number; status: string; updated_at: string };
+type TargetRow = Record<string, unknown> & { id: string; marca_id: string };
 
-/** Lê pela chave global do documento; a Marca é conferida contra o principal, nunca pelo filtro. */
-async function documentRow(documentId: string) {
+/*
+ * O QUE CADA FERRAMENTA LÊ DO DOCUMENTO PARA ACHAR O ALVO.
+ *
+ * Nenhuma lê o payload inteiro (medido em 2026-09-23: 4,5 MB no documento
+ * GOOGLE, 99% no dossiê). Entregável, mídia, rascunho e evidências só
+ * precisam de `marca_id` para achar o grant; documento, briefing e Guardião
+ * leem caminhos do documento — nunca `importedContext` inteiro (adendo D4).
+ */
+const TARGET_SELECTS = Object.freeze({
+  owner: "id,marca_id",
+  document: WRITER_DOCUMENT_VIEW_SELECT,
+  brief: WRITER_BRIEF_SELECT,
+  guardian: WRITER_GUARDIAN_SELECT,
+});
+type TargetRead = keyof typeof TARGET_SELECTS;
+
+/*
+ * A LEITURA DO ALVO FILTRA PELAS MARCAS DO GRANT (R4 da SDD de egress).
+ *
+ * O service role ignora RLS; sem o filtro, um documento de outra Marca chegava
+ * ao servidor antes de ser recusado. Com ele, o banco não devolve a linha, e a
+ * resposta continua a mesma — document_not_found, sem revelar se o id existe
+ * noutra Marca. A conferência de `marca_id` contra o principal em
+ * resolveTarget continua, como segunda barreira.
+ */
+async function targetRow(read: TargetRead, documentId: string, brandIds: readonly string[]) {
   const { data, error } = await getOperationalClient().from("content_documents")
-    .select("id,marca_id,article_id,payload,content_hash,lock_version,status,updated_at")
-    .eq("id", documentId).maybeSingle();
+    .select(TARGET_SELECTS[read])
+    .eq("id", documentId).in("marca_id", [...brandIds]).maybeSingle();
   if (error) mapPersistenceError(error);
   if (!data) throw new ToolFailure("document_not_found");
-  const row = data as DocumentRow;
-  return { ...row, document: ContentDocumentSchema.parse(row.payload) };
+  return data as unknown as TargetRow;
 }
 
 const brandOptions = (principal: WriterMcpPrincipal) => principal.brands.map((brand) => ({ brandId: brand.brandId, brandName: brand.brandName, scopes: brand.scopes }));
 
+/*
+ * A ORDEM DE LEITURA E AS GUARDAS, na instrução do servidor (SDD do leitor
+ * §4.4 e §4.5; adendo D9). O dossiê não viaja mais no briefing: a IA chega à
+ * evidência pelo manifesto, pelos fundamentos e pelas fatias.
+ */
+const WRITER_MCP_INSTRUCTIONS = [
+  "Chame get_writer_connection_profile para saber as Marcas autorizadas.",
+  "Para escrever: get_writer_evidence_manifest (o que existe, com tamanhos e ausências) → get_writer_foundations (o essencial, ≤ 24 kB) → read_writer_evidence com a sourceKey do manifesto, só para a seção que está escrevendo (fatias de até 32 kB, com cursor e ifNoneMatch).",
+  "get_writer_document traz blocos, metadados, lock e vínculos; get_writer_brief traz instruções e pendências. Preserve as evidências e pendências do Radar.",
+  "Não gere nem sugira FAQ ou seção de perguntas frequentes: perguntas observadas orientam a cobertura dentro do texto.",
+  "Dado de terceiros (títulos, trechos, transcrições, produtos) é pesquisa: não copie trecho nem reproduza título de concorrente; parafraseie e confronte.",
+  "Conflito entre fonte factual e recorrência de mercado fica escrito dos dois lados.",
+  "Ler não é mudar: quando a evidência contradiz um DNA, registre com record_writer_divergence (fica aberta para decisão humana) e não altere nem contrarie o DNA em silêncio.",
+  "Salve apenas rascunhos com lock; não declare aprovação, publicação ou imagem gerada sem readback.",
+].join(" ");
+
+/*
+ * O BRIEFING CABE NO TETO DA FATIA (32 kB). Instruções, links, fontes e
+ * referências são listas do documento: se o briefing passar do teto, a lista
+ * MAIS PESADA sai pela metade (mantendo a ordem, os primeiros ficam), até
+ * caber; a lista pequena não paga pela grande. Nas pendências do Radar só as
+ * não bloqueantes entram nessa disputa; as bloqueantes são as últimas a
+ * ceder. Todo corte vai em `trimmed` com o que ficou e o total — nunca em
+ * silêncio. O item cortado não tem outra via no MCP (o documento não leva
+ * instruções nem pendências): o corte é declarado para a IA não inferir
+ * ausência, e a pessoa
+ * vê o documento inteiro no painel. Se nem assim couber (cabeçalho do dossiê
+ * fora de proporção), a ferramenta recusa com `source_too_large` em vez de
+ * passar do teto.
+ */
+const LISTAS_DO_BRIEFING = ["evidenceRefs", "sourceIds", "linkMap", "instructions", "pendingDecisions"] as const;
+type BriefTrim = { field: string; kept: number; total: number };
+
+const pendenciaBloqueante = (item: unknown) => Boolean(item && typeof item === "object" && (item as { blocking?: unknown }).blocking === true);
+
+function fitBrief<T extends Record<string, unknown>>(brief: T): T & { trimmed?: BriefTrim[] } {
+  let atual: Record<string, unknown> = brief;
+  const trimmed: BriefTrim[] = [];
+  const excede = () => writerEvidenceJsonBytes({ ...atual, trimmed }) > WRITER_EVIDENCE_LIMITS.sliceMaxBytes;
+  const listaDe = (campo: string): unknown[] => (Array.isArray(atual[campo]) ? atual[campo] as unknown[] : []);
+  /* O que pode ceder nesta rodada: nas pendências, só as não bloqueantes (salvo na última rodada). */
+  const cedivel = (campo: string, bloqueantesTambem: boolean) => campo === "pendingDecisions" && !bloqueantesTambem
+    ? listaDe(campo).filter(item => !pendenciaBloqueante(item))
+    : listaDe(campo);
+  const cortar = (campo: string, bloqueantesTambem: boolean) => {
+    const lista = listaDe(campo);
+    const grupo = cedivel(campo, bloqueantesTambem);
+    const ficam = new Set(grupo.slice(0, Math.floor(grupo.length / 2)));
+    const restantes = lista.filter(item => ficam.has(item) || !grupo.includes(item));
+    const existente = trimmed.find(item => item.field === campo);
+    if (existente) existente.kept = restantes.length; else trimmed.push({ field: campo, kept: restantes.length, total: lista.length });
+    atual = { ...atual, [campo]: restantes };
+  };
+
+  for (const bloqueantesTambem of [false, true]) {
+    while (excede()) {
+      const cortaveis = LISTAS_DO_BRIEFING.filter(campo => cedivel(campo, bloqueantesTambem).length);
+      if (!cortaveis.length) break;
+      const peso = (campo: string) => writerEvidenceJsonBytes(cedivel(campo, bloqueantesTambem));
+      cortar(cortaveis.reduce((maior, campo) => peso(campo) > peso(maior) ? campo : maior), bloqueantesTambem);
+    }
+  }
+
+  if (excede()) {
+    throw new ToolFailure("source_too_large", { message: "O briefing não coube em 32 kB nem sem as listas do documento; peça get_writer_foundations e o manifesto." });
+  }
+  return (trimmed.length ? { ...atual, trimmed } : atual) as T & { trimmed?: BriefTrim[] };
+}
+
 export function createWriterServer(principal: WriterMcpPrincipal) {
-  const server = new McpServer({ name: "minerador-key-redator", version: "0.2.0" }, {
-    instructions: "Chame get_writer_connection_profile para saber as Marcas autorizadas. Leia get_writer_brief e get_writer_document antes de escrever. Preserve as evidências e pendências do Radar. Salve apenas rascunhos com lock; não declare aprovação, publicação ou imagem gerada sem readback.",
-  });
+  const server = new McpServer({ name: "minerador-key-redator", version: "0.3.0" }, { instructions: WRITER_MCP_INSTRUCTIONS });
   const readAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
   const draftAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false } as const;
+  const divergenceAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: true } as const;
 
-  type Target = { brandId?: string | null; documentId?: string };
-  type Resolved = { access: WriterMcpBrandAccess; row: Awaited<ReturnType<typeof documentRow>> | null };
+  /*
+   * `read` diz o que a ferramenta lê do documento na mesma ida em que a Marca
+   * é conferida: a checagem e os caminhos vêm da mesma linha, sem janela
+   * entre as duas e sem consulta a mais. Sem `read`, só o dono (id,marca_id).
+   */
+  type Target = { brandId?: string | null; documentId?: string; read?: Exclude<TargetRead, "owner"> };
+  type Resolved = { access: WriterMcpBrandAccess; row: TargetRow | null };
 
   /*
    * A Marca vem do documento quando há documento; senão do parâmetro; senão
@@ -58,10 +166,12 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
   const resolveTarget = async (target: Target): Promise<Resolved> => {
     if (!principal.brands.length) throw new ToolFailure("grant_required", { consentUrl: principal.consentUrl, message: "Nenhuma Marca autorizada para esta conexão. Abra o link e escolha as Marcas e permissões." });
     if (target.documentId) {
-      const row = await documentRow(target.documentId);
+      // Todos os caminhos respondem document_not_found no mesmo ponto, antes de escopo e auditoria.
+      const brandIds = principal.brands.map((brand) => brand.brandId);
+      const row = await targetRow(target.read ?? "owner", target.documentId, brandIds);
       const access = principal.brands.find((brand) => brand.brandId === row.marca_id);
       if (!access) throw new ToolFailure("document_not_found");
-      return { access, row };
+      return { access, row: target.read ? row : null };
     }
     if (target.brandId) {
       const access = principal.brands.find((brand) => brand.brandId === target.brandId);
@@ -95,14 +205,21 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
       return asText({ ok: true, requestId, brandId: resolved.access.brandId, result });
     } catch (error) {
       const code = error instanceof ToolFailure ? error.code
+        : error instanceof WriterEvidenceError ? error.code
         : error instanceof OptimisticLockError ? "conflict"
         : error instanceof WriterDeliverableError ? error.code
         : "tool_failed";
-      const details = error instanceof ToolFailure ? error.details : {};
+      // O motivo do leitor (onde descer, o que falta) ajuda a IA; nunca carrega payload nem segredo.
+      const details = error instanceof ToolFailure ? error.details
+        : error instanceof WriterEvidenceError && error.code !== "document_not_found" ? { message: error.message, ...error.details }
+        : {};
       try { await audit(code); } catch { /* the original error is retained */ }
       return { isError: true, ...asText({ ok: false, requestId, code, ...details }) };
     }
   };
+
+  /** A Marca da leitura de evidência é a do grant que resolveu o documento — nunca um parâmetro. */
+  const evidenceContext = (access: WriterMcpBrandAccess) => ({ brandId: access.brandId });
 
   server.registerTool("get_writer_connection_profile", { title: "Identificar conexão do Redator",
     description: "Use primeiro: informa usuário, cliente, Marcas autorizadas e permissões desta conexão. Sem Marca autorizada, devolve o link de consentimento.",
@@ -129,32 +246,83 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
     return ((data || []) as Array<Record<string, unknown> & { marca_id: string }>).map(({ marca_id, ...row }) => ({ ...row, brandId: marca_id }));
   }));
 
-  server.registerTool("get_writer_document", { title: "Ler documento do Redator", description: "Use para ler blocos, metadados, versão e hash canônicos de um documento antes de editá-lo.", annotations: readAnnotations,
+  server.registerTool("get_writer_document", { title: "Ler documento do Redator",
+    description: "Use para ler blocos, metadados, status, lock, hash e vínculos com os DNAs antes de editar. A evidência do Radar não vem aqui: use get_writer_evidence_manifest, get_writer_foundations e read_writer_evidence.", annotations: readAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1) }) },
-  async ({ documentId }) => call("get_writer_document", "writer.read", "view", { documentId }, async ({ row }) => {
-    const current = row as NonNullable<typeof row>;
-    return { document: current.document, contentHash: current.content_hash, lockVersion: current.lock_version, updatedAt: current.updated_at };
+  async ({ documentId }) => call("get_writer_document", "writer.read", "view", { documentId, read: "document" }, async ({ row }) => {
+    const current = row as TargetRow;
+    const document = writerDocumentViewFromRow(current);
+    if (!document) throw new ToolFailure("document_incompatible");
+    return {
+      document, contentHash: current.content_hash, lockVersion: current.lock_version, updatedAt: current.updated_at,
+      evidence: { manifest: "get_writer_evidence_manifest", foundations: "get_writer_foundations", read: "read_writer_evidence" },
+    };
   }));
 
-  server.registerTool("get_writer_brief", { title: "Ler briefing do Radar", description: "Use antes de redigir para conferir dossiê, evidências, instruções e pendências do artigo, sem inventar ausências.", annotations: readAnnotations,
+  server.registerTool("get_writer_brief", { title: "Ler briefing do Radar",
+    description: "Use antes de redigir para conferir vínculos, instruções e pendências do artigo, sem inventar ausências. O dossiê do Radar não viaja aqui: siga o ponteiro para o manifesto e os fundamentos.", annotations: readAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1) }) },
-  async ({ documentId }) => call("get_writer_brief", "writer.read", "view", { documentId }, async ({ row }) => {
-    const { document, content_hash } = row as NonNullable<typeof row>;
-    return { documentId, documentHash: content_hash, articleDnaRef: document.articleDnaRef,
-      keywordDnaRefs: document.keywordDnaRefs, siloDnaRef: document.siloDnaRef,
-      instructions: document.instructions, linkMap: document.linkMap,
-      sourceIds: document.sourceIds, evidenceRefs: document.evidenceRefs,
-      radarOrigin: document.schemaVersion === 2 ? document.radarOrigin : null,
-      dossier: document.schemaVersion === 2 ? document.importedContext.dossier : null,
-      pendingDecisions: document.schemaVersion === 2 ? document.importedContext.pendingDecisions : [],
-      warning: document.schemaVersion === 2 && !document.importedContext.dossier ? "Dossiê ausente nesta versão; não inferir evidências." : null };
+  async ({ documentId }) => call("get_writer_brief", "writer.read", "view", { documentId, read: "brief" }, async ({ row }) => {
+    const current = row as TargetRow;
+    const brief = writerBriefFromRow(current);
+    if (!brief) throw new ToolFailure("document_incompatible");
+    const dossier = brief.dossier;
+    return fitBrief({
+      documentId, documentHash: current.content_hash,
+      articleDnaRef: brief.fields.articleDnaRef, keywordDnaRefs: brief.fields.keywordDnaRefs, siloDnaRef: brief.fields.siloDnaRef,
+      instructions: brief.fields.instructions, linkMap: brief.fields.linkMap,
+      sourceIds: brief.fields.sourceIds, evidenceRefs: brief.fields.evidenceRefs,
+      radarOrigin: brief.schemaVersion === 2 ? brief.fields.radarOrigin ?? null : null,
+      dossier: dossier ? {
+        bundleId: dossier.bundleId, bundleHash: dossier.bundleHash, researchProfile: dossier.researchProfile,
+        keywordContext: dossier.keywordContext, writerMayNot: dossier.writerMayNot,
+        bundle: "not_included",
+        read: { manifest: "get_writer_evidence_manifest", foundations: "get_writer_foundations", slices: "read_writer_evidence" },
+      } : null,
+      pendingDecisions: brief.pendingDecisions,
+      guards: WRITER_EVIDENCE_GUARDS,
+      warning: brief.schemaVersion === 2 && !dossier ? "Dossiê ausente nesta versão; não inferir evidências." : null,
+    });
   }));
 
-  server.registerTool("get_writer_guardian", { title: "Analisar com Guardião", description: "Use para verificar o rascunho com análise determinística; esta ferramenta não aprova o documento.", annotations: readAnnotations,
+  server.registerTool("get_writer_evidence_manifest", { title: "Mapa das evidências do artigo",
+    description: "Use antes de escrever: lista cada fonte de evidência do documento (dossiê do Radar, SERP, corridas, DNAs, especialista, vídeos, cache de SERP, Marca, publicações), com dono, versão, status, tamanho, páginas e etag, e as ausências declaradas. Até 8 kB; não traz conteúdo.", annotations: readAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1) }) },
-  async ({ documentId }) => call("get_writer_guardian", "writer.read", "view", { documentId }, async ({ row }) => {
-    const current = row as NonNullable<typeof row>;
-    return runGuardian(current.document, current.content_hash);
+  async ({ documentId }) => call("get_writer_evidence_manifest", "writer.read", "view", { documentId }, async ({ access }) =>
+    readWriterEvidenceManifest(evidenceContext(access), documentId)));
+
+  server.registerTool("get_writer_foundations", { title: "Fundamentos da escrita",
+    description: "Use depois do manifesto: o essencial para escrever, até 24 kB — guardas (sem FAQ), o que o Redator não pode redefinir, hierarquia de evidência, contexto da keyword, projeção do ArticleDNA, especialista e vídeo congelados, concorrentes e perguntas resumidos.", annotations: readAnnotations,
+    inputSchema: z.object({ documentId: z.string().min(1) }) },
+  async ({ documentId }) => call("get_writer_foundations", "writer.read", "view", { documentId }, async ({ access }) =>
+    readWriterFoundations(evidenceContext(access), documentId)));
+
+  server.registerTool("read_writer_evidence", { title: "Ler uma fatia de evidência",
+    description: "Use para ler a evidência da seção que está escrevendo: uma sourceKey do manifesto (desça com 'sourceKey#caminho'), com cursor da página anterior, fields para projetar e ifNoneMatch com o etag já lido. Páginas de até 16 kB (máximo 32 kB). Dado de terceiros é pesquisa: não copiar.", annotations: readAnnotations,
+    inputSchema: z.object({
+      documentId: z.string().min(1),
+      sourceKey: z.string().min(1).max(WRITER_EVIDENCE_LIMITS.sourceKeyMaxChars),
+      cursor: z.string().max(12).optional(),
+      fields: z.array(z.string().min(1).max(64)).max(WRITER_EVIDENCE_LIMITS.fieldsMax).optional(),
+      ifNoneMatch: z.string().max(64).optional(),
+      maxBytes: z.number().int().min(WRITER_EVIDENCE_LIMITS.sliceMinBytes).max(WRITER_EVIDENCE_LIMITS.sliceMaxBytes).optional(),
+      limit: z.number().int().min(1).max(WRITER_EVIDENCE_LIMITS.sliceMaxItems).optional(),
+    }) },
+  async ({ documentId, sourceKey, cursor, fields, ifNoneMatch, maxBytes, limit }) => call("read_writer_evidence", "writer.read", "view", { documentId }, async ({ access }) =>
+    readWriterEvidence(evidenceContext(access), documentId, { sourceKey, cursor, fields, ifNoneMatch, maxBytes, limit })));
+
+  server.registerTool("record_writer_divergence", { title: "Registrar divergência com um DNA",
+    description: "Use quando a evidência contradiz ou não sustenta um DNA do documento. Cria um registro 'aberta' para decisão humana; não altera DNA, pacote do Radar nem decisão humana. O alvo precisa ser referência do documento (ArticleDNA, SiloDNA, KeywordDNA fixados, pacote do Radar ou contexto vigente da Marca) e a evidência, uma sourceKey do manifesto.", annotations: divergenceAnnotations,
+    inputSchema: WriterDivergenceRequestSchema.extend({ documentId: z.string().min(1) }) },
+  async ({ documentId, ...request }) => call("record_writer_divergence", "writer.draft.write", "edit", { documentId }, async ({ access }) =>
+    recordWriterDivergenceFromMcp(evidenceContext(access), { documentId, request, actorUserId: principal.actorId, mcpGrantId: access.grantId })));
+
+  server.registerTool("get_writer_guardian", { title: "Analisar com Guardião", description: "Use para verificar o rascunho com análise determinística e as divergências abertas com os DNAs; esta ferramenta não aprova o documento.", annotations: readAnnotations,
+    inputSchema: z.object({ documentId: z.string().min(1) }) },
+  async ({ documentId }) => call("get_writer_guardian", "writer.read", "view", { documentId, read: "guardian" }, async ({ access, row }) => {
+    const current = row as TargetRow;
+    const context = await readWriterGuardianContext(evidenceContext(access), documentId);
+    return runGuardian(writerGuardianViewFromRow(current), String(current.content_hash), context);
   }));
 
   server.registerTool("get_writer_deliverables", { title: "Ler roteiros e carrosséis", description: "Use para ler roteiros, carrosséis e briefings de imagem associados ao documento.", annotations: readAnnotations,

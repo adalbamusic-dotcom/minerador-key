@@ -3,15 +3,27 @@ import { SerpCollectionRecordSchema } from "../../editorial/contracts.ts";
 import { RadarHydrationSnapshotSchema } from "../hydration.ts";
 import { RadarSerpResolutionEnvelopeSchema } from "../resolution-envelope.ts";
 
+/**
+ * O PEDIDO DA SERP CANÔNICA — SDD do Radar nas quatro lentes, R2.
+ *
+ * O cliente não escolhe lente, endpoint nem profundidade: o servidor consulta
+ * as quatro lentes do produto, cache primeiro. `device` deixou de ser lido; um
+ * cliente antigo que ainda o manda continua aceito (ver `CollectRequestSchema`).
+ *
+ * `recollect` é o "Recoletar agora (pago)": só ele paga uma lente presente e
+ * válida no cache, e só com a confirmação explícita.
+ */
 export function buildRadarSerpCollectPayload(input: {
   brandId: string;
   articleId: string;
   articleDnaVersionId: string;
   location: string;
   language: string;
-  device: "desktop" | "mobile";
+  /** Aceito por compatibilidade e ignorado pelo servidor. */
+  device?: "desktop" | "mobile";
   articleVersion?: unknown;
   resolutionEnvelope: z.infer<typeof RadarSerpResolutionEnvelopeSchema>;
+  recollect?: boolean;
 }) {
   const articleDnaVersionId = input.articleDnaVersionId.trim();
   if (!articleDnaVersionId) throw new Error("A versão do ArticleDNA deste item do Radar não está disponível.");
@@ -22,9 +34,57 @@ export function buildRadarSerpCollectPayload(input: {
     articleDnaVersionId,
     location: input.location,
     language: input.language,
-    device: input.device,
+    ...(input.device ? { device: input.device } : {}),
     articleVersion: input.articleVersion,
     resolutionEnvelope: input.resolutionEnvelope,
+    ...(input.recollect ? { recollect: { confirmed: true as const } } : {}),
+  };
+}
+
+/**
+ * O que a coleta da SERP canônica respondeu, além do registro.
+ *
+ * `unchanged`: o conteúdo nas quatro lentes é o do snapshot gravado, e o
+ * registro devolvido é ELE — nenhuma versão nova. `paidCalls` diz quantas
+ * chamadas foram pagas (0 quando tudo veio do cache). Resposta de servidor
+ * anterior às lentes não traz os campos: tudo fica nulo e `unchanged` falso.
+ */
+export type RadarSerpCollectOutcome = {
+  record: z.infer<typeof SerpCollectionRecordSchema>;
+  unchanged: boolean;
+  unchangedBy: "cache_meta" | "content_hash" | null;
+  paidCalls: number | null;
+  cacheHits: number | null;
+  observedLenses: number | null;
+  totalLenses: number | null;
+  /** O cache estava indisponível: as lentes foram pagas sem consultar o que já existia. */
+  cacheReadFailed: boolean | null;
+  /** Lacunas definitivas recentes copiadas do snapshot anterior, sem nova chamada. */
+  reusedLensGaps: number | null;
+};
+
+export type RadarSerpCollectOptions = {
+  /** "Recoletar agora (pago)", depois da confirmação com o número de chamadas. */
+  recollect?: boolean;
+  /** Recebe o resultado completo da coleta: sem mudança, chamadas pagas, lentes. */
+  onOutcome?: (outcome: RadarSerpCollectOutcome) => void;
+};
+
+const inteiroOuNulo = (valor: unknown) => (typeof valor === "number" && Number.isInteger(valor) && valor >= 0 ? valor : null);
+
+export function radarSerpCollectOutcome(body: unknown, record: z.infer<typeof SerpCollectionRecordSchema>): RadarSerpCollectOutcome {
+  const corpo = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const cobertura = corpo.lensCoverage && typeof corpo.lensCoverage === "object" && !Array.isArray(corpo.lensCoverage) ? corpo.lensCoverage as Record<string, unknown> : {};
+  return {
+    record,
+    unchanged: corpo.unchanged === true,
+    unchangedBy: corpo.unchangedBy === "cache_meta" || corpo.unchangedBy === "content_hash" ? corpo.unchangedBy : null,
+    paidCalls: inteiroOuNulo(cobertura.paidCalls),
+    cacheHits: inteiroOuNulo(cobertura.cacheHits),
+    observedLenses: inteiroOuNulo(cobertura.observed),
+    totalLenses: inteiroOuNulo(cobertura.total),
+    cacheReadFailed: typeof cobertura.cacheReadFailed === "boolean" ? cobertura.cacheReadFailed : null,
+    reusedLensGaps: inteiroOuNulo(cobertura.reusedLensGaps),
   };
 }
 
@@ -47,7 +107,8 @@ export function buildRadarSerpAuxiliaryPayload(input: {
   keywordId: string;
   location: string;
   language: string;
-  device: "desktop" | "mobile";
+  /** Aceito por compatibilidade e ignorado pelo servidor (R4): as lentes são as quatro do produto. */
+  device?: "desktop" | "mobile";
   articleVersion?: unknown;
   resolutionEnvelope: z.infer<typeof RadarSerpResolutionEnvelopeSchema>;
 }) {
@@ -62,7 +123,7 @@ export function buildRadarSerpAuxiliaryPayload(input: {
     keywordId: input.keywordId,
     location: input.location,
     language: input.language,
-    device: input.device,
+    ...(input.device ? { device: input.device } : {}),
     articleVersion: input.articleVersion,
     resolutionEnvelope: input.resolutionEnvelope,
   };
@@ -85,7 +146,14 @@ export const CollectRequestSchema = z.object({
   articleId: z.string().min(1),
   location: z.string().min(1).max(160),
   language: z.string().min(2).max(20),
-  device: z.enum(["desktop", "mobile"]),
+  /**
+   * ACEITO E IGNORADO (R2). As lentes são as quatro do produto, decididas no
+   * servidor. Continua no contrato durante a transição para um cliente antigo
+   * não receber 400; `device: "mobile"` não muda a lente.
+   */
+  device: z.enum(["desktop", "mobile"]).optional(),
+  /** "Recoletar agora (pago)". Sem ele, nenhuma lente presente e válida é paga. */
+  recollect: z.object({ confirmed: z.literal(true) }).strict().optional(),
   ...LocalArticleContextSchema.shape,
 });
 
@@ -97,7 +165,8 @@ export const CollectAuxiliaryRequestSchema = z.object({
   keywordId: z.string().min(1),
   location: z.string().min(1).max(160),
   language: z.string().min(2).max(20),
-  device: z.enum(["desktop", "mobile"]),
+  /** ACEITO E IGNORADO (R4), como na canônica: a auxiliar lê as quatro lentes do produto. */
+  device: z.enum(["desktop", "mobile"]).optional(),
   ...LocalArticleContextSchema.shape,
 });
 

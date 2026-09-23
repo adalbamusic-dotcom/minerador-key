@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useGlobalTopbarControlsRegistration, type GlobalTopbarModuleControls } from "@/components/global-topbar";
 import { useNoticeBridge, useNoticeCenter } from "@/components/global-notice-center";
 import { applyDiscoveryFilters, type DiscoveryFilterSummary } from "@/lib/minerador/discovery-persistence";
-import { discoverySeoPresetRange, parseDiscoverySeoBound, readDiscoveryKeywordDifficulty, readDiscoveryResult, type DiscoveryKeywordDifficultyPreset, type DiscoveryResultPreset, type DiscoverySeoFilters } from "@/lib/minerador/discovery-seo-filters";
+import { DISCOVERY_SEO_DEFAULT_PRESET, discoverySeoPresetsAfterMeasurement, discoverySeoPresetRange, isDiscoverySerpMeasurementEnabled, parseDiscoverySeoBound, readDiscoveryKeywordDifficulty, readDiscoveryResult, type DiscoveryKeywordDifficultyPreset, type DiscoveryResultPreset, type DiscoverySeoFilters } from "@/lib/minerador/discovery-seo-filters";
 import type { DiscoveryCandidate } from "@/lib/minerador/discovery-keywords";
 import type { DiscoveryCandidateCurrentMetrics } from "@/lib/minerador/discovery-current-metrics";
 import { DiscoveryFilterRow } from "./discovery-filter-row";
@@ -81,10 +81,10 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
   const [includeAdultKeywords, setIncludeAdultKeywords] = useState(initialDraft.includeAdultKeywords);
   const [volume, setVolume] = useState<DiscoveryVolumeRange>(initialDraft.volumeFilter);
   const [cpc, setCpc] = useState<DiscoveryCpcFilter>(initialDraft.cpcFilter);
-  const [resultPreset, setResultPreset] = useState<DiscoveryResultPreset>("all");
+  const [resultPreset, setResultPreset] = useState<DiscoveryResultPreset>(DISCOVERY_SEO_DEFAULT_PRESET);
   const [resultMin, setResultMin] = useState("");
   const [resultMax, setResultMax] = useState("");
-  const [keywordDifficultyPreset, setKeywordDifficultyPreset] = useState<DiscoveryKeywordDifficultyPreset>("all");
+  const [keywordDifficultyPreset, setKeywordDifficultyPreset] = useState<DiscoveryKeywordDifficultyPreset>(DISCOVERY_SEO_DEFAULT_PRESET);
   const [keywordDifficultyMin, setKeywordDifficultyMin] = useState("");
   const [keywordDifficultyMax, setKeywordDifficultyMax] = useState("");
   const [includeTerms, setIncludeTerms] = useState(initialDraft.includeTerms);
@@ -100,6 +100,10 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
     result: discoverySeoPresetRange(resultPreset, parseDiscoverySeoBound(resultMin), parseDiscoverySeoBound(resultMax)),
     keywordDifficulty: discoverySeoPresetRange(keywordDifficultyPreset, parseDiscoverySeoBound(keywordDifficultyMin), parseDiscoverySeoBound(keywordDifficultyMax)),
   }), [resultPreset, resultMin, resultMax, keywordDifficultyPreset, keywordDifficultyMin, keywordDifficultyMax]);
+  const serpMeasurementEnabled = isDiscoverySerpMeasurementEnabled(seoFilters);
+  // Presets vigentes para o ajuste pós-medição, que roda depois do await.
+  const seoPresetsRef = useRef({ result: resultPreset, keywordDifficulty: keywordDifficultyPreset });
+  useEffect(() => { seoPresetsRef.current = { result: resultPreset, keywordDifficulty: keywordDifficultyPreset }; }, [resultPreset, keywordDifficultyPreset]);
   const hasSeoData = useMemo(() => Boolean(executedSearch?.acceptedCandidates.some(candidate => readDiscoveryResult(candidate) !== null || readDiscoveryKeywordDifficulty(candidate) !== null)), [executedSearch]);
 
   const searchDraft = useMemo<DiscoverySearchDraft>(() => ({ seed, relationshipMode: relation, preliminaryIntent, preliminaryFunnel, language, countryCode: "BR", selectedStates: states, volumeFilter: volume, cpcFilter: cpc, includeTerms, excludeTerms, includeAdultKeywords, discoveryMode, discoveryFocus }), [seed, relation, preliminaryIntent, preliminaryFunnel, language, states, volume, cpc, includeTerms, excludeTerms, includeAdultKeywords, discoveryMode, discoveryFocus]);
@@ -124,7 +128,7 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
         if (!active || !response.ok || !payload.success || !payload.restored || !payload.draft || !Array.isArray(payload.candidates) || payload.targeting === undefined) return;
         const draft = payload.draft;
         setDiscoveryMode(draft.discoveryMode === "customer_discovery" ? "customer_discovery" : "keyword"); setDiscoveryFocus(draft.discoveryFocus === "hire" ? "hire" : "all_customer"); setSeed(draft.seed); setRelation(draft.relationshipMode); setPreliminaryIntent(draft.preliminaryIntent); setPreliminaryFunnel(draft.preliminaryFunnel); setLanguage(draft.language); setStates(draft.selectedStates); setVolume(draft.volumeFilter); setCpc(draft.cpcFilter); setIncludeTerms(draft.includeTerms); setExcludeTerms(draft.excludeTerms); setIncludeAdultKeywords(draft.includeAdultKeywords);
-        setResultPreset("all"); setResultMin(""); setResultMax(""); setKeywordDifficultyPreset("all"); setKeywordDifficultyMin(""); setKeywordDifficultyMax("");
+        setResultPreset(DISCOVERY_SEO_DEFAULT_PRESET); setResultMin(""); setResultMax(""); setKeywordDifficultyPreset(DISCOVERY_SEO_DEFAULT_PRESET); setKeywordDifficultyMin(""); setKeywordDifficultyMax("");
         const applied = applyDiscoveryFilters(payload.candidates, draft);
         setExecutedSearch({ source: payload.source || "google_ads", operationRequestId: payload.operationRequestId || crypto.randomUUID(), executedAt: payload.executedAt || new Date().toISOString(), config: draft, targeting: payload.targeting, rawCandidates: payload.candidates, acceptedCandidates: applied.acceptedCandidates, summary: applied.summary });
       } catch {
@@ -155,7 +159,7 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
       }
       const applied = applyDiscoveryFilters(payload.candidates, requestDraft);
       const executedAt = new Date().toISOString();
-      setResultPreset("all"); setResultMin(""); setResultMax(""); setKeywordDifficultyPreset("all"); setKeywordDifficultyMin(""); setKeywordDifficultyMax("");
+      setResultPreset(DISCOVERY_SEO_DEFAULT_PRESET); setResultMin(""); setResultMax(""); setKeywordDifficultyPreset(DISCOVERY_SEO_DEFAULT_PRESET); setKeywordDifficultyMin(""); setKeywordDifficultyMax("");
       setExecutedSearch({ source: "google_ads", operationRequestId, executedAt, config: requestDraft, targeting: payload.targeting, rawCandidates: payload.candidates, acceptedCandidates: applied.acceptedCandidates, summary: applied.summary });
       publishNotice({ severity: payload.partial ? "WARNING" : "SUCCESS", title: payload.partial ? "Descoberta salva com aviso" : "Descoberta concluída", message: payload.partial ? payload.warning || "A pesquisa foi salva, mas uma etapa posterior não foi concluída." : `${applied.acceptedCandidates.length} keywords aprovadas na Descoberta.`, metadata: { summary: discoverySummaryText(payload.candidates.length, applied.acceptedCandidates.length, applied.summary), source: "Google Ads", executedAt, targeting: discoveryTargetingLabel(payload.targeting), providerMetrics: "confirmadas por Google Ads" }, source: "persistence", confirmed: !payload.partial, details: payload.partial ? discoveryProviderDiagnostic(payload.diagnostic) : undefined, copyPayload: payload.partial ? payload.diagnostic : undefined, module: "minerador", area: "Descoberta de keywords" });
     } catch (error) {
@@ -166,7 +170,7 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
 
   const acceptSourceResult = (payload: DiscoverySourceResponse) => {
     const config = { ...initialDraft, seed: "", preliminaryIntent, preliminaryFunnel, discoveryMode: "keyword" as const, discoveryFocus: "all_customer" as const };
-    setResultPreset("all"); setResultMin(""); setResultMax(""); setKeywordDifficultyPreset("all"); setKeywordDifficultyMin(""); setKeywordDifficultyMax("");
+    setResultPreset(DISCOVERY_SEO_DEFAULT_PRESET); setResultMin(""); setResultMax(""); setKeywordDifficultyPreset(DISCOVERY_SEO_DEFAULT_PRESET); setKeywordDifficultyMin(""); setKeywordDifficultyMax("");
     setDiscoveryMode(config.discoveryMode); setDiscoveryFocus(config.discoveryFocus); setSeed(""); setRelation(config.relationshipMode); setPreliminaryIntent(config.preliminaryIntent); setPreliminaryFunnel(config.preliminaryFunnel); setLanguage(config.language); setStates(config.selectedStates); setVolume(config.volumeFilter); setCpc(config.cpcFilter); setIncludeTerms(config.includeTerms); setExcludeTerms(config.excludeTerms); setIncludeAdultKeywords(config.includeAdultKeywords);
     setExecutedSearch({ source: payload.source, operationRequestId: payload.operationRequestId, executedAt: payload.executedAt, config, targeting: null, rawCandidates: payload.candidates, acceptedCandidates: payload.candidates, summary: { relation: 0, volume: 0, cpc: 0, include: 0, exclude: 0 } });
     const count = payload.summary.approved;
@@ -189,13 +193,23 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
     });
   };
 
-  const clearFilters = () => { setDiscoveryMode(initialDraft.discoveryMode || "keyword"); setDiscoveryFocus(initialDraft.discoveryFocus || "all_customer"); setSeed(initialDraft.seed); setRelation(initialDraft.relationshipMode); setPreliminaryIntent(initialDraft.preliminaryIntent); setPreliminaryFunnel(initialDraft.preliminaryFunnel); setLanguage(initialDraft.language); setStates(initialDraft.selectedStates); setVolume(initialDraft.volumeFilter); setCpc(initialDraft.cpcFilter); setResultPreset("all"); setResultMin(""); setResultMax(""); setKeywordDifficultyPreset("all"); setKeywordDifficultyMin(""); setKeywordDifficultyMax(""); setIncludeTerms(initialDraft.includeTerms); setExcludeTerms(initialDraft.excludeTerms); setIncludeAdultKeywords(initialDraft.includeAdultKeywords); setNotice(null); };
+  // A medição só roda com um dos filtros ativo; o outro, se ficou em
+  // "Sem medição", esconderia as candidatas recém-medidas. Lê os presets da
+  // hora da resposta: se o usuário voltou os dois a "Sem medição", nada muda.
+  const keepMeasuredCandidatesVisible = () => {
+    const next = discoverySeoPresetsAfterMeasurement(seoPresetsRef.current);
+    if (!next) return false;
+    setResultPreset(next.result); setKeywordDifficultyPreset(next.keywordDifficulty);
+    return true;
+  };
+
+  const clearFilters = () => { setDiscoveryMode(initialDraft.discoveryMode || "keyword"); setDiscoveryFocus(initialDraft.discoveryFocus || "all_customer"); setSeed(initialDraft.seed); setRelation(initialDraft.relationshipMode); setPreliminaryIntent(initialDraft.preliminaryIntent); setPreliminaryFunnel(initialDraft.preliminaryFunnel); setLanguage(initialDraft.language); setStates(initialDraft.selectedStates); setVolume(initialDraft.volumeFilter); setCpc(initialDraft.cpcFilter); setResultPreset(DISCOVERY_SEO_DEFAULT_PRESET); setResultMin(""); setResultMax(""); setKeywordDifficultyPreset(DISCOVERY_SEO_DEFAULT_PRESET); setKeywordDifficultyMin(""); setKeywordDifficultyMax(""); setIncludeTerms(initialDraft.includeTerms); setExcludeTerms(initialDraft.excludeTerms); setIncludeAdultKeywords(initialDraft.includeAdultKeywords); setNotice(null); };
 
   return <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-x-clip px-0 py-5" aria-label="Descobrir Keywords" aria-busy={loading}>
     <DiscoverySourceControls ref={sourceControlsRef} brandRef={brandRef} preliminaryIntent={preliminaryIntent} preliminaryFunnel={preliminaryFunnel} onComplete={acceptSourceResult} />
     <DiscoverySearchRow discoveryMode={discoveryMode} setDiscoveryMode={setDiscoveryMode} discoveryFocus={discoveryFocus} setDiscoveryFocus={setDiscoveryFocus} seed={seed} setSeed={setSeed} relation={relation} setRelation={setRelation} intent={preliminaryIntent} setIntent={setPreliminaryIntent} funnel={preliminaryFunnel} setFunnel={setPreliminaryFunnel} language={language} setLanguage={setLanguage} states={states} setStates={setStates} onSubmit={discover} />
-    <DiscoveryFilterRow discoveryMode={discoveryMode} volume={volume} setVolume={setVolume} cpc={cpc} setCpc={setCpc} resultPreset={resultPreset} setResultPreset={setResultPreset} resultMin={resultMin} setResultMin={setResultMin} resultMax={resultMax} setResultMax={setResultMax} keywordDifficultyPreset={keywordDifficultyPreset} setKeywordDifficultyPreset={setKeywordDifficultyPreset} keywordDifficultyMin={keywordDifficultyMin} setKeywordDifficultyMin={setKeywordDifficultyMin} keywordDifficultyMax={keywordDifficultyMax} setKeywordDifficultyMax={setKeywordDifficultyMax} hasSeoData={hasSeoData} includeTerms={includeTerms} setIncludeTerms={setIncludeTerms} excludeTerms={excludeTerms} setExcludeTerms={setExcludeTerms} includeAdultKeywords={includeAdultKeywords} setIncludeAdultKeywords={setIncludeAdultKeywords} activeFilterPopover={activeFilterPopover} setActiveFilterPopover={setActiveFilterPopover} onDiscover={discover} onClear={clearFilters} loading={loading} canSubmit={seed.trim().length >= 2} />
+    <DiscoveryFilterRow discoveryMode={discoveryMode} volume={volume} setVolume={setVolume} cpc={cpc} setCpc={setCpc} resultPreset={resultPreset} setResultPreset={setResultPreset} resultMin={resultMin} setResultMin={setResultMin} resultMax={resultMax} setResultMax={setResultMax} keywordDifficultyPreset={keywordDifficultyPreset} setKeywordDifficultyPreset={setKeywordDifficultyPreset} keywordDifficultyMin={keywordDifficultyMin} setKeywordDifficultyMin={setKeywordDifficultyMin} keywordDifficultyMax={keywordDifficultyMax} setKeywordDifficultyMax={setKeywordDifficultyMax} hasSeoData={hasSeoData} serpMeasurementEnabled={serpMeasurementEnabled} includeTerms={includeTerms} setIncludeTerms={setIncludeTerms} excludeTerms={excludeTerms} setExcludeTerms={setExcludeTerms} includeAdultKeywords={includeAdultKeywords} setIncludeAdultKeywords={setIncludeAdultKeywords} activeFilterPopover={activeFilterPopover} setActiveFilterPopover={setActiveFilterPopover} onDiscover={discover} onClear={clearFilters} loading={loading} canSubmit={seed.trim().length >= 2} />
     {notice && <p className="mt-3 rounded border border-danger/45 bg-danger-soft px-3 py-2 text-sm leading-6 text-danger" role="alert">{notice}</p>}
-    <DiscoveryTablePlaceholder candidates={executedSearch?.acceptedCandidates || []} seoFilters={seoFilters} seed={executedSearch?.config.seed || ""} intent={executedSearch?.config.preliminaryIntent} funnel={executedSearch?.config.preliminaryFunnel} discoveryMode={executedSearch?.config.discoveryMode || "keyword"} discoveryFocus={executedSearch?.config.discoveryFocus || "all_customer"} brandRef={brandRef} onCandidatesPatched={patchCandidates} />
+    <DiscoveryTablePlaceholder candidates={executedSearch?.acceptedCandidates || []} seoFilters={seoFilters} seed={executedSearch?.config.seed || ""} intent={executedSearch?.config.preliminaryIntent} funnel={executedSearch?.config.preliminaryFunnel} discoveryMode={executedSearch?.config.discoveryMode || "keyword"} discoveryFocus={executedSearch?.config.discoveryFocus || "all_customer"} brandRef={brandRef} onCandidatesPatched={patchCandidates} onSerpMeasured={keepMeasuredCandidatesVisible} />
   </main>;
 }

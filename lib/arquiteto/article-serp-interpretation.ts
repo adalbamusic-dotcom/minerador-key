@@ -30,6 +30,14 @@
  * Domínio puro: sem storage, sem fetch, sem provider.
  */
 
+import {
+  SERP_LENS_DATES_DIVERGE_DAYS,
+  SERP_LENS_DIGEST_NOTE,
+  collectedAtSpreadDays,
+  lensAgreementLabel,
+  type SerpLensesMarker,
+} from "./serp-lens-plan.ts";
+
 export type SerpResultFact = {
   position: number;
   title: string;
@@ -45,6 +53,85 @@ export type KeywordSerpFacts = {
   role: "principal" | "secundaria" | "reforco";
   results: readonly SerpResultFact[];
 };
+
+/* ------------------ quem foi observado nesta avaliação ------------------- */
+
+/**
+ * Uma keyword do grupo SEM SERP nesta avaliação — não é membro vazio.
+ *
+ * No perfil KGR leve com Principal clara, só a Principal é consultada. Antes,
+ * a secundária não consultada entrava no parecer com `results: []`: o par com
+ * a Principal dava sobreposição `nenhuma` e intenção `indefinido`, diferente
+ * da dela, e a busca virava "de fora". O parecer recomendava dividir o artigo
+ * por FALTA de dado, não por evidência. Ausência de observação não diverge de
+ * nada: a busca fica registrada como não observada e sai da conta.
+ */
+export type UnobservedKeyword = {
+  keywordId: string;
+  keyword: string;
+  role: KeywordSerpFacts["role"];
+  reason: string;
+};
+
+export const NOT_OBSERVED_REASON = "Sem SERP consultada nesta validação: não conta como convergente nem como de fora.";
+
+/** O recorte de um resultado orgânico que o parecer lê. Estrutural, não o tipo inteiro. */
+type ObservedResultLike = {
+  position?: unknown;
+  title?: unknown;
+  url?: unknown;
+  domain?: unknown;
+  snippet?: unknown;
+  inferredType?: unknown;
+  manualType?: unknown;
+};
+
+type ObservedSnapshotLike = {
+  keywordId?: string;
+  organicResults?: ReadonlyArray<ObservedResultLike>;
+};
+
+/** A mesma leitura de resultado na rota e na reconstrução de um registro antigo. */
+const factOf = (result: ObservedResultLike): SerpResultFact => ({
+  position: Number(result.position) || 0,
+  title: String(result.title || ""),
+  url: String(result.url || ""),
+  domain: String(result.domain || ""),
+  snippet: String(result.snippet || ""),
+  inferredType: String(result.manualType || result.inferredType || "other"),
+});
+
+/**
+ * Separa as keywords do grupo entre OBSERVADAS e NÃO OBSERVADAS.
+ *
+ * Só é membro quem tem snapshot nesta avaliação. Quem não tem vira
+ * `notObserved` com o motivo, e não conta em `total` nem em `outsiders`.
+ * Um snapshot presente e sem resultados continua membro: a SERP foi
+ * consultada e voltou vazia, e isso é observação.
+ */
+export function splitArticleSerpMembers(input: {
+  keywords: readonly { keywordId: string; keyword: string; role: KeywordSerpFacts["role"] }[];
+  snapshots: readonly ObservedSnapshotLike[];
+}): { members: KeywordSerpFacts[]; notObserved: UnobservedKeyword[] } {
+  const members: KeywordSerpFacts[] = [];
+  const notObserved: UnobservedKeyword[] = [];
+  for (const item of input.keywords) {
+    const snapshot = input.snapshots.find(candidate => candidate.keywordId === item.keywordId);
+    if (!snapshot) {
+      notObserved.push({ keywordId: item.keywordId, keyword: item.keyword, role: item.role, reason: NOT_OBSERVED_REASON });
+      continue;
+    }
+    members.push({
+      keywordId: item.keywordId,
+      keyword: item.keyword,
+      role: item.role,
+      results: (snapshot.organicResults || []).map(factOf),
+    });
+  }
+  return { members, notObserved };
+}
+
+const nomesDe = (items: readonly { keyword: string }[]) => items.map(item => `"${item.keyword}"`).join(", ");
 
 /* ----------------------- intenção observada na SERP ---------------------- */
 
@@ -177,9 +264,12 @@ export function resolvePrincipalVerdict(input: {
   members: readonly KeywordSerpFacts[];
   principalKeywordId: string;
   overlaps: readonly PairwiseOverlap[];
+  /** Buscas do grupo sem SERP nesta avaliação: não disputam a cabeceira. */
+  notObserved?: readonly UnobservedKeyword[];
 }): PrincipalVerdict {
   const outros = input.members.filter(item => item.keywordId !== input.principalKeywordId);
   const total = outros.length;
+  const naoObservadas = input.notObserved || [];
 
   const alcance = (keywordId: string) => input.overlaps.filter(item =>
     (item.leftKeywordId === keywordId || item.rightKeywordId === keywordId)
@@ -191,12 +281,25 @@ export function resolvePrincipalVerdict(input: {
     total,
   }));
 
+  // Sem a SERP da Principal não há cabeceira a confirmar nem a contestar.
+  if (!input.members.some(item => item.keywordId === input.principalKeywordId)) {
+    return {
+      kind: "PRINCIPAL_INCONCLUSIVE",
+      principalKeywordId: input.principalKeywordId,
+      principalAlternativeKeywordId: null,
+      reason: "A Principal não tem SERP observada nesta validação; não há cabeceira a confirmar.",
+      coverage,
+    };
+  }
+
   if (!total) {
     return {
       kind: "PRINCIPAL_SUPPORTED",
       principalKeywordId: input.principalKeywordId,
       principalAlternativeKeywordId: null,
-      reason: "O artigo tem uma busca só; ela é a cabeceira por definição.",
+      reason: naoObservadas.length
+        ? `Só a Principal foi consultada nesta validação; ${nomesDe(naoObservadas)} ${naoObservadas.length > 1 ? "ficaram" : "ficou"} sem SERP, e nenhuma alternativa pode ser apontada.`
+        : "O artigo tem uma busca só; ela é a cabeceira por definição.",
       coverage,
     };
   }
@@ -264,16 +367,35 @@ export function resolveGroupVerdict(input: {
   members: readonly KeywordSerpFacts[];
   principalKeywordId: string;
   overlaps: readonly PairwiseOverlap[];
+  /** Buscas do grupo sem SERP nesta avaliação: nem convergem, nem são de fora. */
+  notObserved?: readonly UnobservedKeyword[];
 }): GroupVerdict {
   const outros = input.members.filter(item => item.keywordId !== input.principalKeywordId);
   const total = outros.length;
+  const naoObservadas = input.notObserved || [];
+  // Dito na explicação, para a tela não mostrar "0 de 0" sem dizer por quê.
+  const semSerp = naoObservadas.length
+    ? ` ${naoObservadas.length} busca(s) do grupo sem SERP nesta validação (${nomesDe(naoObservadas)}) não entram na conta.`
+    : "";
+
+  if (!input.members.some(item => item.keywordId === input.principalKeywordId)) {
+    return {
+      kind: "INCONCLUSIVE",
+      outsiders: [],
+      converging: 0,
+      total,
+      reason: `Sem a SERP da Principal, não há com o que comparar as buscas de apoio.${semSerp}`,
+    };
+  }
   if (!total) {
     return {
       kind: "INCONCLUSIVE",
       outsiders: [],
       converging: 0,
       total: 0,
-      reason: "Uma busca sozinha não permite dizer se o agrupamento se sustenta; a SERP não tem par para comparar.",
+      reason: naoObservadas.length
+        ? `Só a Principal foi observada nesta validação; sem par observado, a SERP não sustenta nem rejeita o agrupamento.${semSerp}`
+        : "Uma busca sozinha não permite dizer se o agrupamento se sustenta; a SERP não tem par para comparar.",
     };
   }
 
@@ -306,7 +428,7 @@ export function resolveGroupVerdict(input: {
       outsiders,
       converging,
       total,
-      reason: `${converging} de ${total} busca(s) convergem com a Principal; ${outsiders.length} apresentam SERP distinta.`,
+      reason: `${converging} de ${total} busca(s) convergem com a Principal; ${outsiders.length} apresentam SERP distinta.${semSerp}`,
     };
   }
   if (outsiders.length >= total) {
@@ -315,7 +437,7 @@ export function resolveGroupVerdict(input: {
       outsiders,
       converging,
       total,
-      reason: "Nenhuma das buscas de apoio compartilha o padrão de resultados da Principal.",
+      reason: `Nenhuma das buscas de apoio compartilha o padrão de resultados da Principal.${semSerp}`,
     };
   }
   if (!converging) {
@@ -324,7 +446,7 @@ export function resolveGroupVerdict(input: {
       outsiders: [],
       converging,
       total,
-      reason: "Os resultados variam demais entre as buscas para sustentar ou rejeitar o agrupamento.",
+      reason: `Os resultados variam demais entre as buscas para sustentar ou rejeitar o agrupamento.${semSerp}`,
     };
   }
   return {
@@ -332,7 +454,7 @@ export function resolveGroupVerdict(input: {
     outsiders: [],
     converging,
     total,
-    reason: `${converging} de ${total} busca(s) de apoio compartilham resultados com a Principal.`,
+    reason: `${converging} de ${total} busca(s) de apoio compartilham resultados com a Principal.${semSerp}`,
   };
 }
 
@@ -380,12 +502,17 @@ export type ArticleSerpInterpretation = {
   verdict: "COMPATIBLE" | "INCONCLUSIVE" | "DIVERGENCE";
   recommendation: string;
   reason: string;
+  /** Buscas do grupo sem SERP nesta avaliação. Vazio quando todas foram observadas. */
+  notObserved: readonly UnobservedKeyword[];
 };
 
 export function interpretArticleSerp(input: {
   candidateRef: string;
+  /** Só as buscas COM SERP nesta avaliação (`splitArticleSerpMembers`). */
   members: readonly KeywordSerpFacts[];
   principalKeywordId: string;
+  /** As do grupo sem SERP: registradas, fora da conta. */
+  notObserved?: readonly UnobservedKeyword[];
 }): ArticleSerpInterpretation {
   const overlaps: PairwiseOverlap[] = [];
   for (let i = 0; i < input.members.length; i += 1) {
@@ -393,9 +520,28 @@ export function interpretArticleSerp(input: {
       overlaps.push(pairwiseOverlap(input.members[i], input.members[j]));
     }
   }
+  return interpretFromOverlaps({ ...input, overlaps });
+}
 
-  const principal = resolvePrincipalVerdict({ members: input.members, principalKeywordId: input.principalKeywordId, overlaps });
-  const group = resolveGroupVerdict({ members: input.members, principalKeywordId: input.principalKeywordId, overlaps });
+/**
+ * O parecer a partir das sobreposições JÁ decididas — de uma lente só, ou do
+ * voto agregado das quatro. As duas perguntas, a viabilidade e o mercado
+ * observado são sempre os da lente principal: os limiares de viabilidade
+ * (≥ 8 domínios, ≥ 25 resultados) foram calibrados em uma lente, e a união das
+ * quatro os inflaria.
+ */
+function interpretFromOverlaps(input: {
+  candidateRef: string;
+  members: readonly KeywordSerpFacts[];
+  principalKeywordId: string;
+  notObserved?: readonly UnobservedKeyword[];
+  overlaps: readonly PairwiseOverlap[];
+}): ArticleSerpInterpretation {
+  const notObserved = [...(input.notObserved || [])];
+  const overlaps = [...input.overlaps];
+
+  const principal = resolvePrincipalVerdict({ members: input.members, principalKeywordId: input.principalKeywordId, overlaps, notObserved });
+  const group = resolveGroupVerdict({ members: input.members, principalKeywordId: input.principalKeywordId, overlaps, notObserved });
 
   const todos = input.members.flatMap(item => item.results);
   const viability = resolveCompetitiveViability({
@@ -433,6 +579,178 @@ export function interpretArticleSerp(input: {
     verdict,
     recommendation,
     reason: `${group.reason} ${principal.reason}`.trim(),
+    notObserved,
+  };
+}
+
+/* ----------------------------- as quatro lentes --------------------------- */
+
+/**
+ * As buscas observadas numa lente. Na principal, os fatos vêm do corpo
+ * normalizado; nas extras, do digest orgânico normalizado pela mesma regra.
+ * Só entram as buscas que a lente de fato observou.
+ */
+export type LensKeywordFacts = { lens: string; members: readonly KeywordSerpFacts[] };
+
+const converge = (level: OverlapLevel) => level === "forte" || level === "parcial";
+
+/**
+ * O voto de um par de buscas nas lentes em que as DUAS foram observadas
+ * (adendo das 4 lentes, A3 item 5). A primeira sobreposição é a da lente
+ * principal; os números compartilhados exibidos são os dela.
+ *
+ *   converge   — sobreposição forte ou parcial em PELO MENOS DUAS lentes;
+ *   de fora    — sobreposição nenhuma em TODAS as lentes observadas e intenção
+ *                observada diferente na MAIORIA (mais da metade) delas;
+ *   nenhum dos dois — o par não converge nem é de fora ("baixa"), e a
+ *                divergência entre lentes fica registrada no marcador.
+ *
+ * Com UMA lente observada, o voto é exatamente o de hoje. A concordância entre
+ * lentes não é reforço: as lentes compartilham a maior parte do top 10
+ * (divergência medida 0,061 e 0,174) e não são amostras independentes.
+ */
+export function aggregatePairAcrossLenses(votes: readonly PairwiseOverlap[]): PairwiseOverlap {
+  if (!votes.length) throw new Error("Par sem lente observada.");
+  if (votes.length === 1) return votes[0];
+  const [principal] = votes;
+  const n = votes.length;
+  const mesmaIntencao = votes.filter(vote => vote.sameIntent).length;
+  const intencaoDaMaioria = mesmaIntencao > n / 2;
+  const convergentes = votes.filter(vote => converge(vote.level));
+  const base = { leftKeywordId: principal.leftKeywordId, rightKeywordId: principal.rightKeywordId, sharedUrls: principal.sharedUrls, sharedDomains: principal.sharedDomains };
+  if (convergentes.length >= 2) {
+    const fortes = votes.filter(vote => vote.level === "forte").length;
+    return { ...base, level: fortes >= 2 ? "forte" : "parcial", sameIntent: intencaoDaMaioria };
+  }
+  if (votes.every(vote => vote.level === "nenhuma")) {
+    const intencaoDiferente = n - mesmaIntencao;
+    return { ...base, level: "nenhuma", sameIntent: !(intencaoDiferente > n / 2) };
+  }
+  return { ...base, level: "baixa", sameIntent: intencaoDaMaioria };
+}
+
+export type ArticleSerpLensReading = {
+  lens: string;
+  observedKeywords: number;
+  /** O veredito que esta lente sozinha daria; `null` quando a Principal não foi observada nela. */
+  verdict: ArticleSerpInterpretation["verdict"] | null;
+  pairs: { left: string; right: string; level: OverlapLevel }[];
+};
+
+export type ArticleSerpLensesInterpretation = ArticleSerpInterpretation & {
+  lensReadings: ArticleSerpLensReading[];
+  /** Lentes em que a Principal foi observada. */
+  observedLenses: string[];
+  /** Das observadas, quantas dão sozinhas o mesmo veredito do agregado. */
+  agreeingLenses: number;
+};
+
+/**
+ * O parecer de formação nas quatro lentes.
+ *
+ * Os membros, a viabilidade, a intenção e o tipo dominante continuam os da
+ * lente principal — o snapshot do ArticleDNA sai dela, como antes. O que muda
+ * é o voto de cada par: agregado pelas lentes em que as duas buscas foram
+ * observadas. Lente faltante nunca vira "de fora": ela só não vota.
+ */
+export function interpretArticleSerpAcrossLenses(input: {
+  candidateRef: string;
+  primary: LensKeywordFacts;
+  extras: readonly LensKeywordFacts[];
+  principalKeywordId: string;
+  notObserved?: readonly UnobservedKeyword[];
+}): ArticleSerpLensesInterpretation {
+  const members = input.primary.members;
+  const lentes = [input.primary, ...input.extras];
+  const porLente = lentes.map(lente => ({ lente, porId: new Map(lente.members.map(member => [member.keywordId, member])) }));
+  const pares = new Map(lentes.map(lente => [lente.lens, [] as { left: string; right: string; level: OverlapLevel }[]]));
+
+  const overlaps: PairwiseOverlap[] = [];
+  for (let i = 0; i < members.length; i += 1) {
+    for (let j = i + 1; j < members.length; j += 1) {
+      const votos: PairwiseOverlap[] = [];
+      for (const { lente, porId } of porLente) {
+        const esquerda = porId.get(members[i].keywordId);
+        const direita = porId.get(members[j].keywordId);
+        if (!esquerda || !direita) continue;
+        const voto = pairwiseOverlap(esquerda, direita);
+        votos.push(voto);
+        pares.get(lente.lens)?.push({ left: voto.leftKeywordId, right: voto.rightKeywordId, level: voto.level });
+      }
+      overlaps.push(aggregatePairAcrossLenses(votos));
+    }
+  }
+
+  const parecer = interpretFromOverlaps({
+    candidateRef: input.candidateRef,
+    members,
+    principalKeywordId: input.principalKeywordId,
+    notObserved: input.notObserved,
+    overlaps,
+  });
+
+  const lensReadings: ArticleSerpLensReading[] = porLente.map(({ lente, porId }) => {
+    const observada = porId.has(input.principalKeywordId);
+    return {
+      lens: lente.lens,
+      observedKeywords: lente.members.length,
+      verdict: observada
+        ? interpretArticleSerp({ candidateRef: input.candidateRef, members: lente.members, principalKeywordId: input.principalKeywordId }).verdict
+        : null,
+      pairs: pares.get(lente.lens) || [],
+    };
+  });
+  const observadas = lensReadings.filter(reading => reading.verdict !== null);
+  return {
+    ...parecer,
+    lensReadings,
+    observedLenses: observadas.map(reading => reading.lens),
+    agreeingLenses: observadas.filter(reading => reading.verdict === parecer.verdict).length,
+  };
+}
+
+/** Os fatos que o parecer lê de um snapshot normalizado — a mesma leitura da rota. */
+export const serpResultFactsOf = (snapshot: ObservedSnapshotLike): SerpResultFact[] =>
+  (snapshot.organicResults || []).map(factOf);
+
+/**
+ * O marcador de lentes do parecer de formação (A5), a partir do parecer nas
+ * quatro lentes e das datas de cada leitura usada.
+ *
+ * `collectedAtByKeyword`: por keyword, a data de cada lente lida. O portão de
+ * datas é POR KEYWORD (a diferença entre as lentes da mesma busca); o parecer
+ * marca a maior delas.
+ */
+export function formationLensesMarkerOf(input: {
+  requested: readonly string[];
+  interpretation: Pick<ArticleSerpLensesInterpretation, "lensReadings" | "observedLenses" | "agreeingLenses">;
+  collectedAtByLens: ReadonlyMap<string, readonly string[]>;
+  collectedAtByKeyword: ReadonlyMap<string, readonly string[]>;
+  missing: SerpLensesMarker["missing"];
+  withExtras: boolean;
+}): SerpLensesMarker {
+  const perLens = input.interpretation.lensReadings.map(reading => {
+    const datas = [...(input.collectedAtByLens.get(reading.lens) || [])].sort();
+    return {
+      lens: reading.lens,
+      observedQueries: reading.observedKeywords,
+      oldestCollectedAt: datas[0] ?? null,
+      newestCollectedAt: datas.at(-1) ?? null,
+      verdict: reading.verdict,
+      pairs: reading.pairs.map(pair => ({ ...pair })),
+    };
+  });
+  let spread = 0;
+  for (const datas of input.collectedAtByKeyword.values()) spread = Math.max(spread, collectedAtSpreadDays(datas));
+  return {
+    requested: [...input.requested],
+    observed: [...input.interpretation.observedLenses],
+    missing: input.missing.map(item => ({ ...item })),
+    perLens,
+    agreement: lensAgreementLabel(input.interpretation.agreeingLenses, input.interpretation.observedLenses.length),
+    collectedAtSpreadDays: spread,
+    datesDiverge: spread > SERP_LENS_DATES_DIVERGE_DAYS,
+    ...(input.withExtras ? { note: SERP_LENS_DIGEST_NOTE } : {}),
   };
 }
 
@@ -453,35 +771,36 @@ export function articleSerpParecerFromAssessment(
   },
   candidate: {
     principalKeywordId: string;
-    keywords: readonly { keywordId: string; role: string }[];
+    keywords?: readonly { keywordId: string; role: string }[];
+    /**
+     * Só os ids, sem papel: um chamador da mesa passa a composição aprovada
+     * assim. Sem esta leitura, `keywords` ausente derrubava a reconstrução.
+     */
+    keywordIds?: readonly string[];
   },
   labelOf?: (keywordId: string) => string,
 ) {
-  const snapshots = (registro.assessment.snapshots || []) as ReadonlyArray<{
-    keywordId?: string;
-    organicResults?: ReadonlyArray<Record<string, unknown>>;
-  }>;
+  const snapshots = (registro.assessment.snapshots || []) as ReadonlyArray<ObservedSnapshotLike>;
   if (!snapshots.length) return null;
 
-  const members: KeywordSerpFacts[] = candidate.keywords.map(item => ({
-    keywordId: item.keywordId,
-    keyword: labelOf?.(item.keywordId) || item.keywordId,
-    role: item.role === "principal" ? "principal" : item.role === "reforco" ? "reforco" : "secundaria",
-    results: (snapshots.find(snapshot => snapshot.keywordId === item.keywordId)?.organicResults || []).map(result => ({
-      position: Number(result.position) || 0,
-      title: String(result.title || ""),
-      url: String(result.url || ""),
-      domain: String(result.domain || ""),
-      snippet: String(result.snippet || ""),
-      inferredType: String(result.manualType || result.inferredType || "other"),
+  const composicao = candidate.keywords
+    || (candidate.keywordIds || []).map(keywordId => ({ keywordId, role: keywordId === candidate.principalKeywordId ? "principal" : "secundaria" }));
+  // A mesma regra da rota: keyword sem snapshot no registro não vira membro vazio.
+  const { members, notObserved } = splitArticleSerpMembers({
+    keywords: composicao.map(item => ({
+      keywordId: item.keywordId,
+      keyword: labelOf?.(item.keywordId) || item.keywordId,
+      role: item.role === "principal" ? "principal" as const : item.role === "reforco" ? "reforco" as const : "secundaria" as const,
     })),
-  }));
+    snapshots,
+  });
   if (!members.length) return null;
 
   const parecer = interpretArticleSerp({
     candidateRef: registro.candidateRef,
     members,
     principalKeywordId: candidate.principalKeywordId,
+    notObserved,
   });
 
   return {
@@ -499,5 +818,11 @@ export function articleSerpParecerFromAssessment(
     converging: parecer.group.converging,
     total: parecer.group.total,
     recommendation: parecer.recommendation,
+    ...(parecer.notObserved.length ? { notObserved: notObservedRecordOf(parecer.notObserved) } : {}),
   };
+}
+
+/** O que o registro guarda de cada busca não observada: identidade e motivo. */
+export function notObservedRecordOf(items: readonly UnobservedKeyword[]) {
+  return items.map(item => ({ keywordId: item.keywordId, keyword: item.keyword || item.keywordId, reason: item.reason }));
 }
