@@ -5,6 +5,12 @@ import { RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS } from "./competitive-blueprint.ts
 import { radarCompetitorClassLabel, type RadarCompetitorClass } from "./competitor-universe.ts";
 import { RADAR_EVIDENCE_LABEL, type RadarEvidenceResolution, type RadarSerpStanding } from "./evidence-authority.ts";
 import { RADAR_EDITORIAL_OUTPUT_LABELS } from "./multimodal-blueprint.ts";
+import {
+  radarPortableFrozenLensesState,
+  radarPortableFrozenLensesSummary,
+  type RadarPortableFrozenLensesInput,
+  type RadarPortableNewerSerpCollection,
+} from "./portable-serp-observed.ts";
 import { RADAR_WRITING_RULES } from "./portable-writer-context.ts";
 import { radarNormalizedUrl } from "./research-reference.ts";
 import { radarResearchSourceLabel, type RadarResearchSource } from "./search-mode.ts";
@@ -13,7 +19,7 @@ import { RADAR_SOURCE_AUTHORITY_LABEL } from "./source-authority.ts";
 import type { RadarAiDiscoveryContext, RadarDiscoveryApplicability, RadarRetrievabilityKind, RadarConceptRelationKind } from "./ai-discovery-context.ts";
 import type { RadarAuthorityEvidence, RadarEeatDimension, RadarEeatSignalState, RadarSpecialistReviewKind } from "./authority-evidence.ts";
 import type { RadarCompetitiveObservedModel, RadarObservedCompetitor } from "./competitive-observed-model.ts";
-import type { RadarBundleCrossSerp, RadarBundleEditorialOutput, RadarResearchLayer } from "./evidence-bundle.ts";
+import type { RadarBundleCrossSerp, RadarBundleEditorialOutput, RadarEvidenceBundle, RadarResearchLayer } from "./evidence-bundle.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
 
 /**
@@ -35,6 +41,21 @@ import type { RadarResearchProfile } from "./research-profile.ts";
  *   3. a ESTRUTURA DE CADA CONCORRENTE — melhor posição, todas as posições,
  *      recorrência, classificação e a estrutura medida da página;
  *   4. duas das sete PROIBIÇÕES do Redator, que as regras do CSV não diziam.
+ *
+ * A conferência foi refeita contra o dossiê V3 com as quatro lentes
+ * (adendos R1 e R3, 2026-09-23). O V3 ganhou duas coisas que o Redator recebe:
+ *
+ *   5. `serpLenses` — a CÓPIA das quatro lentes congelada no pacote. O CSV só
+ *      tinha a leitura do cache no momento do export. A cópia entra em
+ *      `serp_lenses_*` antes do cache (e o cache passa a ser observação fora
+ *      do pacote), e a situação dela entra em `research_status_md`;
+ *   6. `serpStanding` congelado no FINALIZE — já estava coberto: a situação
+ *      diz se a SERP tem precedência e se o valor foi avaliado no
+ *      congelamento ou é o padrão de um pacote anterior a ele.
+ *
+ * `RADAR_PORTABLE_DOSSIER_V3_COVERAGE` é a conferência escrita, chave a
+ * chave: o tipo exige todas as chaves do dossiê, e um teste confere que cada
+ * coluna citada existe na linha. Uma chave nova no V3 não compila sem destino.
  *
  * ==================== O QUE ELE NÃO FAZ ====================
  *
@@ -262,8 +283,18 @@ export type RadarPortableResearchStatusInput = {
    * colunas de evidência derivadas dele (fontes, evidência, concorrentes,
    * autoridade) podem descrever a coleta nova, sem curadoria — e só a coluna
    * da SERP dizia isso. Ausente ou `null`: nada a avisar.
+   *
+   * `openedAt` (quando a versão foi aberta) vem só do snapshot que o gravou;
+   * com ele, a linha diz as duas datas, porque a SERP da versão nova pode ter
+   * sido observada antes da que a investigação leu.
    */
-  newerSerpCollection?: { collectedAt: string | null } | null;
+  newerSerpCollection?: RadarPortableNewerSerpCollection | null;
+  /**
+   * As lentes da SERP no pacote: `bundle.serpLenses` e o instante do
+   * congelamento. Ausente ou `null`: a célula não diz nada sobre lentes,
+   * como antes.
+   */
+  frozenLenses?: Pick<RadarPortableFrozenLensesInput, "profile" | "block" | "frozenAt"> | null;
 };
 
 /* ------------------------ a prontidão para o Redator ------------------------ */
@@ -485,9 +516,17 @@ export function radarPortableResearchStatusMarkdown(input: RadarPortableResearch
   } else {
     linhas.push("- Origem: não informada ao export; os valores acima não foram conferidos contra o congelamento.");
   }
+  if (input.frozenLenses) {
+    const congeladas = radarPortableFrozenLensesState(input.frozenLenses) === "frozen";
+    linhas.push(`- Lentes da SERP: ${radarPortableFrozenLensesSummary(input.frozenLenses)}${congeladas ? " O detalhe por lente está em serp_lenses_md." : ""}`);
+  }
   if (input.newerSerpCollection) {
     const posterior = instante(input.newerSerpCollection.collectedAt);
-    linhas.push(`- Há coleta de SERP posterior à investigação${posterior ? ` (${posterior})` : ""}, não usada por ela. As colunas de evidência montadas sobre a leitura observada (serp_sources_json, serp_evidence_json, competitors_structure_json e authority_requirements_md) partem da coleta mais recente do artigo e podem não descrever a SERP que a investigação analisou; essa está em serp_observed_md.`);
+    const aberta = instante(input.newerSerpCollection.openedAt);
+    const quando = aberta
+      ? ` (versão aberta em ${aberta}; SERP observada em ${posterior || "data não gravada"})`
+      : posterior ? ` (${posterior})` : "";
+    linhas.push(`- Há coleta de SERP posterior à investigação${quando}, não usada por ela. As colunas de evidência montadas sobre a leitura observada (serp_sources_json, serp_evidence_json, competitors_structure_json e authority_requirements_md) partem da coleta mais recente do artigo e podem não descrever a SERP que a investigação analisou; essa está em serp_observed_md.`);
   }
 
   /* ---- o sinal cruzado ---- */
@@ -1218,6 +1257,41 @@ export function radarWritingRulesWithWriterParity(
     ? [...rules.slice(0, -1), ...faltantes, ultima]
     : [...rules, ...faltantes];
 }
+
+/* ================= 5 · a conferência do dossiê V3, chave a chave ================= */
+
+/** O que não sai do export, e por quê: identidade técnica fica no banco (invariante 43). */
+export const RADAR_PORTABLE_NOT_EXPORTED = "não exportado";
+
+/**
+ * ===== ONDE CADA CHAVE DO DOSSIÊ V3 SAI NO CSV =====
+ *
+ * O Redator recebe o `RadarEvidenceBundle` inteiro; o CSV projeta. Esta é a
+ * conferência "o Redator tem, o CSV tem?" escrita chave a chave. O tipo exige
+ * TODAS as chaves do dossiê, inclusive as opcionais: uma chave nova no V3 não
+ * compila até alguém dizer onde ela sai — ou por que não sai.
+ */
+export const RADAR_PORTABLE_DOSSIER_V3_COVERAGE: Readonly<Record<keyof RadarEvidenceBundle, string>> = {
+  bundleVersion: `${RADAR_PORTABLE_NOT_EXPORTED}: versão do contrato, identidade técnica`,
+  bundleId: `${RADAR_PORTABLE_NOT_EXPORTED}: identidade técnica do pacote (invariante 43)`,
+  bundleHash: `${RADAR_PORTABLE_NOT_EXPORTED}: assinatura do pacote (invariante 43)`,
+  binding: `${RADAR_PORTABLE_NOT_EXPORTED}: ids e assinatura do ArticleDNA; o artigo sai por keyword_principal, slug e canonical, e a identidade incompleta sai como bloqueio em research_status_md`,
+  observedAt: "research_status_md (Datas: investigação congelada em)",
+  primaryResearchProfile: "research_profile e research_status_md (Camadas de pesquisa)",
+  researchSources: "research_status_md (Camadas de pesquisa: fontes lidas)",
+  research: "research_status_md (Camadas de pesquisa: papel, datas, contagens e limitações de cada camada)",
+  competitiveBlueprint: "competitive_radiography_md, serp_outperformance_strategy_md, outline_md, writer_brief_md, seo_requirements_md",
+  crossSerp: "research_status_md (Sinal cruzado YouTube × Google)",
+  editorialOutputs: "research_status_md (Saídas editoriais recomendadas pelo Radar)",
+  observed: "serp_evidence_json, serp_sources_json, competitors_structure_json, authority_requirements_md, external_sources_json, internal_links_resolved_json",
+  serpStanding: "research_status_md (Situação da SERP: precedência, vigência, suficiência, validade e se foi avaliada no congelamento)",
+  conflicts: "research_status_md (Divergências registradas no dossiê)",
+  limitations: "limitations_md",
+  video: "video_context_md e video_context_json",
+  specialist: "specialist_context_md e specialist_context_json",
+  keywordContext: "keyword_principal, secondary_keywords e keywords_context_md",
+  serpLenses: "serp_lenses_md e serp_lenses_json (pacote congelado, antes do cache) e research_status_md (Situação da SERP: lentes da SERP)",
+};
 
 /* ============================ as três colunas ============================ */
 

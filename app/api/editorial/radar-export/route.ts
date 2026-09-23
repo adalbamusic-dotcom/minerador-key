@@ -4,6 +4,7 @@ import { authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { ArtifactRepository, SerpSnapshotRepository } from "@/lib/server/editorial-repositories";
 import { radarStartPorts } from "@/lib/server/radar-youtube-start";
+import { radarExportArticleReads } from "./_leitura-do-artigo";
 import { resolveRadarCanonicalDossier } from "@/lib/server/radar-canonical-dossier";
 import { radarFrozenObservedAtOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
 import { buildRadarEditorialCommercialModel, buildRadarEditorialVideoModel } from "@/lib/radar/editorial-profile-model";
@@ -30,8 +31,10 @@ import { radarPortableExportStreamResponse } from "@/lib/radar/portable-export-r
 import {
   radarPortableExportDossierGapsInput,
   radarPortableExportEmptySilos,
+  radarPortableExportFrozenLensesInput,
   radarPortableExportLensKeywords,
   radarPortableExportReadLenses,
+  radarPortableExportResearchLimitations,
   radarPortableExportRows,
   radarPortableExportSerpObservedInput,
   radarPortableExportSiloFiles,
@@ -78,8 +81,18 @@ import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
  * Leituras novas, todas por LOTE e filtradas pela marca: as revisões da SERP
  * (uma consulta, colunas explícitas) e o cache de SERP em modo `observation`
  * (~1 KB por entrada, sem corpo). Nenhuma coleta: o cache é lido, nunca pago.
- * A leitura por artigo (E4 da SDD de egress) não foi tocada — ela tem desenho
- * próprio.
+ *
+ * A leitura por artigo (E4 da SDD de egress): a análise corrente passou a vir
+ * com só a corrida dela (`_leitura-do-artigo.ts`). As autoridades
+ * (`loadRadarCanonicalAuthorities`) ainda releem o item com todas as corridas,
+ * e a camada de vídeo relê a linha: as duas moram em `lib/server` e são
+ * compartilhadas com o envio ao Planejador e ao Redator. Cortá-las pede
+ * mudança lá, não aqui.
+ *
+ * Com as quatro lentes (adendo R3), a coluna de lentes abre pela CÓPIA
+ * congelada no pacote (`bundle.serpLenses`) e deixa o cache como observação
+ * fora dele, rotulada como o leitor do Redator a rotula. Pacote sem a cópia
+ * declara a ausência. Nenhuma leitura a mais: o bundle já está em memória.
  *
  * `groupBy: "silo"` (opcional) devolve UM CSV POR SILO, EM VEZ do CSV do
  * lote, com os artigos na ordem do silo e o contexto do silo em cada linha.
@@ -163,8 +176,15 @@ export async function POST(request: Request) {
         continue;
       }
 
-      const estado = await radarStartPorts.loadRadarState({ brandId: input.brandId, articleId });
-      const corrente = estado?.analyses.slice().sort((esquerda, direita) => direita.versionNumber - esquerda.versionNumber)[0] || null;
+      /*
+       * E4 · A ANÁLISE CORRENTE SEM AS CORRIDAS DAS OUTRAS VERSÕES.
+       *
+       * A mesma versão de antes (a de maior número), agora lida com só a
+       * corrida dela: no item mais pesado, 8,22 MB viraram 2,50 MB. A regra
+       * de escolha é a antiga, provada em `portable-export-reading`, e o CSV
+       * sai byte a byte igual (`tests/radar-export-leitura-por-artigo`).
+       */
+      const corrente = await radarExportArticleReads.currentAnalysis({ brandId: input.brandId, articleId });
       if (!corrente) {
         recusados.push({ articleId, code: "radar_item_not_found", reason: "Não há investigação gravada para este artigo." });
         itensDoSilo.push(faltante(articleId, "Não há investigação gravada para este artigo.", article));
@@ -336,7 +356,8 @@ export async function POST(request: Request) {
         internalLinks: (contexto?.internalLinks?.edges || [])
           .filter(aresta => aresta.direction === "outbound")
           .map(aresta => `${aresta.relationType}: ${aresta.anchorConcepts.join(", ") || aresta.targetNodeId}`),
-        researchLimitations: bundle.limitations,
+        /* As do congelamento das lentes saem sem o motivo cru da coleta; as outras, como estão. */
+        researchLimitations: radarPortableExportResearchLimitations(bundle),
         serpObserved: serpObservada,
         /* O que o Redator lê do dossiê e o CSV não dizia: prontidão, datas, autoridade, concorrentes. */
         dossierGaps: radarPortableExportDossierGapsInput({
@@ -355,6 +376,15 @@ export async function POST(request: Request) {
         articleId,
         entrada,
         lentes: radarPortableExportLensKeywords({ keywordContext: keywords, researchContext: contexto }),
+        /*
+         * 2026-09-23 · AS LENTES DO PACOTE ANTES DAS DO CACHE.
+         *
+         * A cópia congelada (`bundle.serpLenses`, a mesma que o Redator
+         * recebe) é a fonte de verdade da coluna; o cache, lido depois do
+         * laço, entra como observação fora do pacote. Nenhuma leitura nova:
+         * o bundle e os snapshots já estão em memória.
+         */
+        lentesCongeladas: radarPortableExportFrozenLensesInput({ profile: perfil, bundle, analysis: payload, records: snapshots.records }),
       });
 
       identificacao.push({

@@ -1,5 +1,23 @@
 # Backlog — Radar
 
+## 4 lentes, tela e export — 2026-09-23
+
+- [x] R1 standing congelado e trava; R2 4 lentes com cache primeiro; R3 a R5 lentes congeladas, auxiliar e apoio; tela das lentes; lentes congeladas no export; export com leitura por artigo (−31%).
+- [ ] **Homologar:**
+  - aba SERP de um artigo: "Lentes da SERP", "Recoletar agora (pago)" com confirmação, e "sem mudança" ao repetir;
+  - finalizar uma investigação e conferir a frase com o hash gravado;
+  - exportar o Silo e ver `serp_lenses_md` com o pacote congelado.
+- [ ] **D6 — ledger e quota:** o gasto de DataForSEO do Radar é descartado do registro de uso porque falta a capability `dataforseo.serp_compatibility`. O SQL e o rollback estão no [adendo R1](propostas/adendo-r1-standing-congelado-e-ledger-2026-09-23.md); o usuário executa.
+- [ ] "Recoletar agora (pago)" só existe na aba SERP da rota do artigo, e o Workbench não linka para ela. Levar ao Workbench exige um handler novo no contrato congelado pelo Gate 15.3: decisão.
+- [ ] Egress do export: cortar as releituras de autoridades (R2, −10,85 MB) e da camada de vídeo (R3, −1,64 MB). Chegaria a ~3,8 MB (−84%). A de autoridades pede decisão sobre corrida antiga fora do contrato. Envios ao Planejador e ao Redator e volta à aba continuam na E4.
+- [ ] **D11:** com o cache indisponível, pagar as 4 lentes (hoje) ou só a canônica.
+- [ ] **D8:** medir device/os no YouTube e na Amazon (1 a 4 chamadas autorizadas) antes de adotar lentes.
+- [ ] Apoio Google de YouTube e Amazon: confirmação com o teto de chamadas antes de pagar.
+- [ ] Aviso "standing não avaliado" em bundle anterior a 2026-09-23 (D3).
+- [ ] Regra de suficiência do modelo observado alinhada com a D2 congelada: hoje o dossiê tem duas leituras de standing.
+- [ ] `app/api/editorial/documents/route.ts`: a aprovação do documento deve considerar as divergências bloqueantes do Redator (`checkOpenBlockingWriterDivergence`).
+- [ ] O Minerador deve mostrar `collectedBy` na proveniência da Qualificação quando a SERP veio do Radar (D9).
+
 ## Export portátil com SERP, paridade com o Redator e export por silo — 2026-09-23
 
 Feito (verificado no código e confirmado por teste; sem homologação):

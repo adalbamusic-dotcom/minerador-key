@@ -14,7 +14,10 @@ import type { RadarAnalysisVersion } from "./analysis-contracts.ts";
 import type { RadarDeepResearchQuery, RadarQueryEvidence } from "./deep-research.ts";
 import type { RadarResearchLayer } from "./evidence-bundle.ts";
 import { latestRadarR5SerpRecord } from "./r5-sequential.ts";
+import { radarResearchProfileLabel, type RadarResearchProfile } from "./research-profile.ts";
 import type { SerpResearchSnapshot, SerpReview, SerpResultKind } from "./serp/contracts.ts";
+import type { RadarFrozenSerpLens, RadarFrozenSerpLensBlock } from "./serp/frozen-lenses.ts";
+import { RADAR_SERP_NO_ORGANIC_REASON } from "./serp/lens-set.ts";
 
 /**
  * ===== A SERP OBSERVADA E A SERP POR LENTE — duas colunas do export portátil =====
@@ -38,6 +41,17 @@ import type { SerpResearchSnapshot, SerpReview, SerpResultKind } from "./serp/co
  *                             keywords do artigo nas quatro lentes. Não é
  *                             investigação congelada: é o que o cache sabe no
  *                             momento da exportação, com a data de cada lente.
+ *
+ * ==================== AS LENTES DO PACOTE VÊM ANTES DO CACHE ====================
+ *
+ * Desde o adendo R3 o FINALIZE copia as quatro lentes para o bundle congelado,
+ * e o dossiê V3 as entrega ao Redator em `serpLenses`. Quando a rota informa
+ * essa cópia (`frozen`), `serp_lenses_*` passa a abrir com ela — a fonte de
+ * verdade do pacote (invariante 30) — e o cache vem depois, rotulado como o
+ * leitor do Redator o rotula: observação datada, fora do pacote, que não o
+ * substitui, com cada lente dizendo se é posterior ao congelamento. Pacote
+ * sem a cópia diz por quê (anterior às lentes, sem SERP conferida, ou perfil
+ * que não congela lentes). Sem `frozen`, a coluna sai exatamente como antes.
  *
  * ==================== O QUE NUNCA ATRAVESSA — invariante 43 ====================
  *
@@ -367,7 +381,7 @@ const localidade = (valor: unknown): string | null => {
 export type RadarPortableSerpSnapshot = Pick<SerpResearchSnapshot,
   | "query" | "country" | "language" | "location" | "device" | "collectedAt" | "status"
   | "organicResults" | "peopleAlsoAsk" | "relatedSearches" | "knowledgeGraph" | "diagnostic"
-> & Partial<Pick<SerpResearchSnapshot, "operatingSystem" | "serpFeatures">>;
+> & Partial<Pick<SerpResearchSnapshot, "operatingSystem" | "serpFeatures" | "cacheProvenance">>;
 
 type DecisaoGravada = RadarAnalysisVersion["payload"]["serpDecisions"][number];
 
@@ -398,8 +412,18 @@ export type RadarPortableSerpObservedInput = {
   /** `deepResearch.queries` da mesma versão. Só as auxiliares viram SERP auxiliar. */
   deepResearchQueries?: readonly RadarPortableAuxiliaryQuery[];
   /** A coleta mais recente do artigo quando ela NÃO é a vinculada (`radarPortableNewerSerpCollection`). */
-  newerCollection?: { collectedAt: string | null } | null;
+  newerCollection?: RadarPortableNewerSerpCollection | null;
 };
+
+/**
+ * A coleta posterior à investigação.
+ *
+ * `collectedAt` é quando o Google foi OBSERVADO; `openedAt`, quando a versão
+ * foi aberta. Com o cache (adendo R2, §10), uma versão nova pode trazer SERP
+ * observada ANTES da que a investigação leu — por isso a data da versão vem
+ * à parte, e só quando o snapshot a gravou.
+ */
+export type RadarPortableNewerSerpCollection = { collectedAt: string | null; openedAt?: string | null };
 
 /* ==================== as pontes do integrador, puras ==================== */
 
@@ -435,16 +459,23 @@ export function radarPortableLinkedSerpRecord<T extends Pick<SerpCollectionRecor
  * A mesma regra de "mais recente" que o `observed` usa (`latestRadarR5SerpRecord`).
  * Quando ela aponta para outro registro, a SERP da coluna é a da investigação,
  * e quem lê precisa saber que existe uma mais nova que não foi usada.
+ *
+ * `openedAt` só aparece quando o snapshot gravou a data da versão
+ * (`cacheProvenance.snapshotOpenedAt`): a coleta anterior a ela sai como antes.
  */
 export function radarPortableNewerSerpCollection(
   records: readonly SerpCollectionRecord[],
   articleId: string,
   linked: Pick<SerpCollectionRecord, "id"> | null,
-): { collectedAt: string | null } | null {
+): RadarPortableNewerSerpCollection | null {
   if (!linked) return null;
   const maisRecente = latestRadarR5SerpRecord([...records], articleId);
   if (!maisRecente || maisRecente.id === linked.id) return null;
-  return { collectedAt: instante(maisRecente.research?.collectedAt) || instante(maisRecente.snapshot?.capturedAt) };
+  const aberta = instante(maisRecente.research?.cacheProvenance?.snapshotOpenedAt);
+  return {
+    collectedAt: instante(maisRecente.research?.collectedAt) || instante(maisRecente.snapshot?.capturedAt),
+    ...(aberta ? { openedAt: aberta } : {}),
+  };
 }
 
 /* ============================ a SERP observada ============================ */
@@ -459,7 +490,10 @@ export type RadarPortableSerpObserved = {
   location: string | null;
   device: string | null;
   operatingSystem: string | null;
+  /** Quando o Google foi observado. Com cache, pode ser anterior à abertura da versão. */
   collectedAt: string | null;
+  /** Quando esta versão da SERP foi aberta. Só existe no snapshot que a gravou (adendo R2, §10). */
+  versionOpenedAt?: string;
   frozenAt: string | null;
   review: { status: string; at: string | null };
   curation: string;
@@ -541,7 +575,7 @@ export type RadarPortableSerpObserved = {
   /** Quantos itens de cada lista ficaram fora desta célula. Zero não aparece. */
   omitted: Record<string, number>;
   absent: string[];
-  newerCollectionNotUsed: { collectedAt: string | null; statement: string } | null;
+  newerCollectionNotUsed: { collectedAt: string | null; openedAt?: string; statement: string } | null;
   cellLimitNotice: string | null;
   /** Vale para todo campo `thirdPartyExcerpt` desta coluna. */
   thirdPartyNotice: string;
@@ -692,6 +726,29 @@ function decisaoDe(
   };
 }
 
+/*
+ * A COLETA POSTERIOR, COM AS DUAS DATAS QUANDO EXISTEM.
+ *
+ * "Posterior" é a VERSÃO: com o cache, a SERP dela pode ter sido observada
+ * antes da que a investigação leu. Uma data só deixava parecer que o Google
+ * mudou depois da investigação quando só a versão é mais nova.
+ */
+function avisoDeColetaPosterior(coleta: RadarPortableNewerSerpCollection): RadarPortableSerpObserved["newerCollectionNotUsed"] {
+  const observada = instante(coleta.collectedAt);
+  const aberta = instante(coleta.openedAt);
+  if (!aberta) {
+    return {
+      collectedAt: observada,
+      statement: `Há coleta posterior à investigação (${dataLegivel(observada)}), não usada. Esta coluna descreve a SERP que a investigação analisou.`,
+    };
+  }
+  return {
+    collectedAt: observada,
+    openedAt: aberta,
+    statement: `Há coleta posterior à investigação (versão aberta em ${dataLegivel(aberta)}; SERP observada em ${dataLegivel(observada)}), não usada. Esta coluna descreve a SERP que a investigação analisou.`,
+  };
+}
+
 const SEM_SERP = "A investigação não referencia uma coleta de SERP do Google gravada; não há SERP observada a exportar.";
 
 /**
@@ -702,12 +759,7 @@ export function radarPortableSerpObserved(input: RadarPortableSerpObservedInput,
   const l = NIVEIS_DA_SERP[Math.min(Math.max(0, nivel), NIVEIS_DA_SERP.length - 1)];
   const omitted: Record<string, number> = {};
   const contar = (chave: string, n: number) => { if (n > 0) omitted[chave] = (omitted[chave] || 0) + n; };
-  const posterior = input.newerCollection
-    ? {
-      collectedAt: instante(input.newerCollection.collectedAt),
-      statement: `Há coleta posterior à investigação (${dataLegivel(instante(input.newerCollection.collectedAt))}), não usada. Esta coluna descreve a SERP que a investigação analisou.`,
-    }
-    : null;
+  const posterior = input.newerCollection ? avisoDeColetaPosterior(input.newerCollection) : null;
 
   const s = input.snapshot;
   if (!s) {
@@ -892,6 +944,7 @@ export function radarPortableSerpObserved(input: RadarPortableSerpObservedInput,
   });
 
   const revisao = revisaoDe(input, s);
+  const versaoAberta = instante(s.cacheProvenance?.snapshotOpenedAt);
   return {
     available: true,
     unavailableReason: null,
@@ -903,6 +956,7 @@ export function radarPortableSerpObserved(input: RadarPortableSerpObservedInput,
     device: DISPOSITIVO[s.device] || s.device,
     operatingSystem: s.operatingSystem ? SISTEMA[s.operatingSystem] || s.operatingSystem : null,
     collectedAt: instante(s.collectedAt),
+    ...(versaoAberta ? { versionOpenedAt: versaoAberta } : {}),
     frozenAt: instante(input.frozenAt),
     review: revisao,
     /*
@@ -979,7 +1033,9 @@ export function radarPortableSerpObservedMarkdown(serp: RadarPortableSerpObserve
     serp.role ? `Papel: ${serp.role}` : "",
     `País: ${serp.country || "não registrado"} · Idioma: ${serp.language || "não registrado"} · Local: ${serp.location || "não registrado"}`,
     `Dispositivo: ${serp.device || "não registrado"} · Sistema: ${serp.operatingSystem || "não registrado nesta coleta"}`,
-    `Coleta: ${dataLegivel(serp.collectedAt)}`,
+    serp.versionOpenedAt
+      ? `SERP observada em: ${dataLegivel(serp.collectedAt)} · versão aberta em: ${dataLegivel(serp.versionOpenedAt)}`
+      : `Coleta: ${dataLegivel(serp.collectedAt)}`,
     `Congelamento da investigação: ${serp.frozenAt ? dataLegivel(serp.frozenAt) : "não registrado"}`,
     `Revisão humana da SERP: ${serp.review.status}${serp.review.at ? ` em ${dataLegivel(serp.review.at)}` : ""}`,
     `Curadoria humana item a item: ${serp.curation}`,
@@ -1136,7 +1192,7 @@ export function radarPortableSerpObservedBriefMarkdown(serp: RadarPortableSerpOb
   return [
     cabecalho,
     "",
-    `Consulta: ${serp.query || "não registrada"} · ${serp.device || "dispositivo não registrado"}${serp.operatingSystem ? ` · ${serp.operatingSystem}` : ""} · coleta ${dataLegivel(serp.collectedAt)}.`,
+    `Consulta: ${serp.query || "não registrada"} · ${serp.device || "dispositivo não registrado"}${serp.operatingSystem ? ` · ${serp.operatingSystem}` : ""} · ${serp.versionOpenedAt ? "SERP observada em" : "coleta"} ${dataLegivel(serp.collectedAt)}.`,
     `Somente para pesquisa: não copiar títulos nem termos de terceiros como texto do artigo. Trechos, curadoria, blocos da página, SERPs auxiliares e ausências estão em serp_observed_md.`,
     ...(serp.newerCollectionNotUsed ? ["", `> ${serp.newerCollectionNotUsed.statement}`] : []),
     "",
@@ -1204,7 +1260,9 @@ export function radarPortableSerpObservedColumns(
    */
   const enxuto = radarPortableSerpObserved(input, NIVEIS_DA_SERP.length - 1);
   const esqueleto = {
-    available: enxuto.available, query: enxuto.query, collectedAt: enxuto.collectedAt, frozenAt: enxuto.frozenAt,
+    available: enxuto.available, query: enxuto.query, collectedAt: enxuto.collectedAt,
+    ...(enxuto.versionOpenedAt ? { versionOpenedAt: enxuto.versionOpenedAt } : {}),
+    frozenAt: enxuto.frozenAt,
     device: enxuto.device, operatingSystem: enxuto.operatingSystem, review: enxuto.review,
     organic: enxuto.organic.map(item => ({ position: item.position, domain: item.domain, url: item.url })),
     absent: enxuto.absent.slice(0, 5),
@@ -1296,6 +1354,12 @@ export type RadarPortableSerpLensesInput = {
   /** A leitura do cache falhou: toda lente vira "não lida", nunca "sem coleta". */
   readFailed?: boolean;
   lenses?: readonly SerpCacheLens[];
+  /**
+   * A cópia das lentes congelada no pacote (`bundle.serpLenses`), ou o motivo
+   * de ela não existir. Informada, ela abre a coluna e o cache passa a ser
+   * observação FORA do pacote. Ausente, a coluna sai como antes.
+   */
+  frozen?: RadarPortableFrozenLensesInput | null;
 };
 
 export type RadarPortableSerpLensReading = {
@@ -1315,11 +1379,25 @@ export type RadarPortableSerpLensReading = {
   commercialSignals: boolean | null;
   blocks: string[];
   missing: string | null;
+  /**
+   * Só com o pacote informado: a lente do cache foi observada DEPOIS do
+   * congelamento? `null` sem data para comparar. É a mesma régua do leitor do
+   * Redator (`posteriorAoPacote`): posterior não substitui o pacote.
+   */
+  afterPackage?: boolean | null;
+  /**
+   * Só com o pacote informado e só na consulta canônica: a lente do cache é a
+   * MESMA coleta que o pacote congelou (mesma data de observação)? `null`
+   * quando não há lente congelada para comparar.
+   */
+  sameAsFrozen?: boolean | null;
 };
 
 export type RadarPortableSerpLenses = {
   source: string;
   note: string;
+  /** A cópia congelada no pacote — só quando a rota a informa. Vem antes do cache. */
+  frozenPackage?: RadarPortableFrozenLenses;
   lenses: string[];
   keywords: Array<{
     keyword: string;
@@ -1341,13 +1419,17 @@ export type RadarPortableSerpLenses = {
   usage: typeof RADAR_PORTABLE_SERP_USAGE;
 };
 
-type LimitesDasLentes = { keywords: number; dominios: number; perguntas: number; relacionadas: number; citados: number; exclusivos: number; texto: number };
+type LimitesDasLentes = {
+  keywords: number; dominios: number; perguntas: number; relacionadas: number; citados: number; exclusivos: number; texto: number;
+  /* Só o pacote congelado: limitações escritas no congelamento e o tamanho de cada uma. */
+  limitacoes: number; textoDaLimitacao: number;
+};
 
 const NIVEIS_DAS_LENTES: readonly LimitesDasLentes[] = [
-  { keywords: 8, dominios: 10, perguntas: 8, relacionadas: 8, citados: 10, exclusivos: 10, texto: 200 },
-  { keywords: 8, dominios: 10, perguntas: 5, relacionadas: 5, citados: 5, exclusivos: 6, texto: 150 },
-  { keywords: 6, dominios: 6, perguntas: 3, relacionadas: 3, citados: 3, exclusivos: 4, texto: 120 },
-  { keywords: 6, dominios: 3, perguntas: 0, relacionadas: 0, citados: 0, exclusivos: 2, texto: 100 },
+  { keywords: 8, dominios: 10, perguntas: 8, relacionadas: 8, citados: 10, exclusivos: 10, texto: 200, limitacoes: 12, textoDaLimitacao: 400 },
+  { keywords: 8, dominios: 10, perguntas: 5, relacionadas: 5, citados: 5, exclusivos: 6, texto: 150, limitacoes: 8, textoDaLimitacao: 300 },
+  { keywords: 6, dominios: 6, perguntas: 3, relacionadas: 3, citados: 3, exclusivos: 4, texto: 120, limitacoes: 6, textoDaLimitacao: 240 },
+  { keywords: 6, dominios: 3, perguntas: 0, relacionadas: 0, citados: 0, exclusivos: 2, texto: 100, limitacoes: 3, textoDaLimitacao: 200 },
 ];
 
 /**
@@ -1375,8 +1457,306 @@ function motivoDaFalta(motivo: string | null, leituraFalhou: boolean): string {
   return `sem observação válida no cache: ${traducao[texto] || textoPortatil(texto, 120) || "motivo não registrado"}`;
 }
 
-export function radarPortableSerpLenses(input: RadarPortableSerpLensesInput, nivel = 0): RadarPortableSerpLenses {
-  const l = NIVEIS_DAS_LENTES[Math.min(Math.max(0, nivel), NIVEIS_DAS_LENTES.length - 1)];
+/* ===================== as lentes congeladas no pacote ===================== */
+
+/**
+ * O dia em que o FINALIZE passou a copiar as lentes (adendo R3) — o mesmo de
+ * `RADAR_FROZEN_LENSES_SINCE` da tela, conferido por teste. Pacote congelado
+ * antes dele não tem a cópia, e isso é dito como anterior às lentes.
+ */
+export const RADAR_PORTABLE_FROZEN_LENSES_SINCE = "2026-09-23";
+
+/** O que a rota informa sobre as lentes do pacote. Nada aqui lê cache nem snapshot. */
+export type RadarPortableFrozenLensesInput = {
+  /** Só a investigação de páginas do Google congela lentes. */
+  profile: RadarResearchProfile;
+  /** `bundle.serpLenses` do dossiê — o que o Redator recebe. `null` quando o pacote não a traz. */
+  block: RadarFrozenSerpLensBlock | null;
+  /** O instante do congelamento (`radarFrozenObservedAtOfAnalysis`): a régua de "posterior ao pacote". */
+  frozenAt: string | null;
+  /** O texto da consulta canônica congelada, quando a coleta dela foi achada entre as gravadas. */
+  canonicalQuery?: string | null;
+  /** A SERP canônica congelada é a mesma descrita em `serp_observed_md`? `null`: não conferido. */
+  sameSerpAsObserved?: boolean | null;
+};
+
+/**
+ * `frozen`: há a cópia; `legacy`: pacote congelado antes das lentes;
+ * `absent`: a partir do dia delas, sem cópia gravada — a causa não é afirmada
+ * (SERP sem as quatro lentes conferidas, ou congelamento anterior ao deploy
+ * que passou a copiá-las: o bundle não guarda marcador que as distinga);
+ * `not_applicable`: perfil de vídeo ou de produto, que não congela lentes.
+ */
+export type RadarPortableFrozenLensesState = "frozen" | "legacy" | "absent" | "not_applicable";
+
+export type RadarPortableFrozenLensReading = {
+  lens: string;
+  label: string;
+  observed: boolean;
+  /** "Cache · pago pelo Minerador" ou "Pago na coleta da investigação · Radar". */
+  origin: string | null;
+  collectedAt: string | null;
+  organicCount: number | null;
+  competitorDomains: string[];
+  omittedCompetitorDomains: number;
+  questions: string[];
+  omittedQuestions: number;
+  aiOverviewDomains: string[];
+  omittedAiOverviewDomains: number;
+  commercialSignals: boolean | null;
+  blocks: string[];
+  missing: string | null;
+};
+
+export type RadarPortableFrozenLenses = {
+  state: RadarPortableFrozenLensesState;
+  statement: string;
+  frozenAt: string | null;
+  canonical: {
+    query: string | null;
+    sameSerpAsObserved: boolean | null;
+    observedLenses: number;
+    totalLenses: number;
+    readings: RadarPortableFrozenLensReading[];
+    datesSpreadDays: number | null;
+  } | null;
+  auxiliary: Array<{ keyword: string | null; observedLenses: number; totalLenses: number; missingLenses: string[] }>;
+  omittedAuxiliary: number;
+  limitations: string[];
+  omittedLimitations: number;
+  /** O que a cópia congelada NÃO guarda, dito — para a falta não parecer da página. */
+  notCopied: string | null;
+};
+
+const TOTAL_DE_LENTES = SERP_CACHE_LENSES.length;
+const LENTE_POR_ROTULO = new Map(SERP_CACHE_LENSES.map(lens => [serpCacheLensLabel(lens), lens] as const));
+const rotuloLegivelDaLente = (rotulo: string): string => {
+  const lens = LENTE_POR_ROTULO.get(rotulo);
+  return lens ? radarPortableLensLabel(lens) : limpo(rotulo).replace(/-/g, " · ");
+};
+
+const QUEM_COLETOU: Record<string, string> = { minerador: "Minerador", arquiteto: "Arquiteto", radar: "Radar" };
+
+function origemDaLenteCongelada(lente: RadarFrozenSerpLens): string | null {
+  if (lente.status !== "observed") return null;
+  const quem = lente.collectedBy ? QUEM_COLETOU[lente.collectedBy] || limpo(lente.collectedBy) : "origem não declarada";
+  return lente.source === "paid" ? `Pago na coleta da investigação · ${quem}` : `Cache · pago pelo ${quem}`;
+}
+
+const semPontoFinal = (texto: string): string => texto.replace(/[.;:\s]+$/, "");
+const FALHA_DE_REDE = /\b(fetch|network|socket|dns)\b/i;
+
+/**
+ * POR QUE A LENTE CONGELADA FALTOU — sem o texto cru da coleta.
+ *
+ * O motivo gravado é o do núcleo das lentes: pode trazer o código e a
+ * mensagem do fornecedor ("(provider 40501: …)") ou o erro de rede. O
+ * sentido atravessa; o vocabulário de infraestrutura, não (invariante 43).
+ */
+function motivoDaLenteCongelada(motivo: unknown, limite: number): string {
+  const texto = limpo(motivo);
+  if (!texto) return "lente não observada";
+  if (/\(provider 4\d{4}\b/.test(texto)) return "o serviço de coleta recusou esta lente para esta consulta e este local";
+  if (texto === RADAR_SERP_NO_ORGANIC_REASON) return "a lente voltou sem nenhum resultado orgânico (pode ser resposta vazia transitória)";
+  if (VOCABULARIO_DE_INFRAESTRUTURA.test(texto) || FALHA_DE_REDE.test(texto) || /dataforseo/i.test(texto)) {
+    return "a coleta desta lente falhou; o detalhe técnico da falha não é exportado";
+  }
+  return semPontoFinal(textoPortatil(texto, limite) || "lente não observada");
+}
+
+const LACUNA_DA_CANONICA = /^(.+?) não foi observada na SERP canônica congelada: ([\s\S]+)$/;
+const AUXILIAR_SEM_TEXTO = "consulta auxiliar sem texto registrado";
+
+/**
+ * UMA LIMITAÇÃO DO BLOCO CONGELADO, PORTÁTIL.
+ *
+ * O texto é o que o congelamento escreveu, com duas trocas: o motivo cru de
+ * uma lente faltante vira o motivo portátil, e a auxiliar sem texto — que o
+ * bloco nomeia pelo id — vira "consulta auxiliar sem texto registrado".
+ */
+function limitacaoCongeladaPortatil(texto: string, bloco: RadarFrozenSerpLensBlock, limite: number): string | null {
+  let frase = limpo(texto);
+  for (const auxiliar of bloco.auxiliary) {
+    if (limpo(auxiliar.keyword)) continue;
+    for (const id of [auxiliar.keywordId, auxiliar.queryId]) {
+      if (id) frase = frase.split(`"${id}"`).join(`"${AUXILIAR_SEM_TEXTO}"`);
+    }
+  }
+  const lacuna = frase.match(LACUNA_DA_CANONICA);
+  if (lacuna) frase = `${lacuna[1]} não foi observada na SERP canônica congelada: ${motivoDaLenteCongelada(lacuna[2], limite)}.`;
+  return textoPortatil(frase, limite);
+}
+
+/** Em que situação estão as lentes do pacote. Só lê o que a rota informou. */
+export function radarPortableFrozenLensesState(input: Pick<RadarPortableFrozenLensesInput, "profile" | "block" | "frozenAt">): RadarPortableFrozenLensesState {
+  if (input.profile !== "GOOGLE") return "not_applicable";
+  if (input.block) return "frozen";
+  const congelado = Date.parse(limpo(input.frozenAt));
+  return Number.isFinite(congelado) && congelado < Date.parse(`${RADAR_PORTABLE_FROZEN_LENSES_SINCE}T00:00:00.000Z`) ? "legacy" : "absent";
+}
+
+/**
+ * A FRASE DAS LENTES DO PACOTE — a mesma em `serp_lenses_*` e em
+ * `research_status_md`, para as duas colunas não se contradizerem.
+ */
+export function radarPortableFrozenLensesSummary(input: Pick<RadarPortableFrozenLensesInput, "profile" | "block" | "frozenAt">): string {
+  const estado = radarPortableFrozenLensesState(input);
+  if (estado === "not_applicable") {
+    return `Não se aplicam a este pacote: a cópia das quatro lentes da SERP existe só na investigação de páginas do Google, e este artigo foi investigado pelo perfil ${radarResearchProfileLabel(input.profile) || input.profile}.`;
+  }
+  if (estado === "legacy") {
+    return `Não congeladas: a investigação foi finalizada antes de ${RADAR_PORTABLE_FROZEN_LENSES_SINCE}, quando o pacote ainda não copiava as quatro lentes. Nenhuma lente pode ser atribuída a este pacote.`;
+  }
+  if (estado === "absent" || !input.block) {
+    return "Não congeladas neste pacote: o congelamento não gravou cópia das lentes (a SERP lida não trazia as quatro lentes conferidas, ou o pacote foi finalizado antes de o congelamento passar a copiá-las). Nenhuma lente pode ser atribuída a este pacote.";
+  }
+  const bloco = input.block;
+  if (bloco.canonicalSnapshotId === null) {
+    return `Congeladas só nas pesquisas auxiliares (${bloco.auxiliary.length}): a SERP canônica que a investigação leu é anterior às quatro lentes e observou um aparelho só.`;
+  }
+  const observadas = bloco.lenses.filter(lente => lente.status === "observed").length;
+  const faltantes = bloco.lenses.filter(lente => lente.status !== "observed").map(lente => rotuloLegivelDaLente(lente.lens));
+  const auxiliares = bloco.auxiliary.length ? `, e ${bloco.auxiliary.length} pesquisa(s) auxiliar(es) com as lentes contadas` : "";
+  return `Congeladas no pacote: ${observadas} de ${TOTAL_DE_LENTES} na SERP canônica${faltantes.length ? ` (faltou ${faltantes.join(", ")})` : ""}${auxiliares}. É a fonte de verdade do pacote; o cache de SERP da marca é só observação fora dele.`;
+}
+
+const NAO_COPIADO = "A cópia congelada guarda, por lente, domínios, citados pelo AI Overview, perguntas, blocos da página e sinal comercial. Buscas relacionadas, títulos e trechos não são copiados por lente: os da SERP canônica estão em serp_observed_md.";
+
+/**
+ * A CÓPIA CONGELADA, PROJETADA — nada é recalculado.
+ *
+ * Os valores são os que o FINALIZE copiou; aqui só se traduz o vocabulário
+ * (blocos, lente, origem) e se aplica o teto da célula, com o corte contado.
+ * Divergência entre aparelhos não é recalculada: vale a que o congelamento
+ * escreveu nas limitações, "registro, não reforço".
+ */
+function lentesDoPacote(input: RadarPortableFrozenLensesInput, l: LimitesDasLentes): RadarPortableFrozenLenses {
+  const estado = radarPortableFrozenLensesState(input);
+  const base = {
+    state: estado,
+    statement: radarPortableFrozenLensesSummary(input),
+    frozenAt: instante(input.frozenAt),
+  };
+  const bloco = estado === "frozen" ? input.block : null;
+  if (!bloco) {
+    return { ...base, canonical: null, auxiliary: [], omittedAuxiliary: 0, limitations: [], omittedLimitations: 0, notCopied: null };
+  }
+
+  const comCanonica = bloco.canonicalSnapshotId !== null;
+  const readings: RadarPortableFrozenLensReading[] = bloco.lenses.map(lente => {
+    const observada = lente.status === "observed";
+    const dominios = recorte(unicos(lente.competitorDomains), l.dominios);
+    const perguntas = recorte(unicos(lente.questions), l.perguntas);
+    const citados = recorte(unicos(lente.aiOverviewDomains), l.citados);
+    return {
+      lens: limpo(lente.lens),
+      label: rotuloLegivelDaLente(lente.lens),
+      observed: observada,
+      origin: origemDaLenteCongelada(lente),
+      collectedAt: instante(lente.collectedAt),
+      organicCount: lente.organicCount,
+      competitorDomains: dominios.itens,
+      omittedCompetitorDomains: dominios.omitidos,
+      questions: perguntas.itens.map(pergunta => deTerceiro(pergunta, l.texto) || pergunta),
+      omittedQuestions: perguntas.omitidos,
+      aiOverviewDomains: citados.itens,
+      omittedAiOverviewDomains: citados.omitidos,
+      commercialSignals: lente.commercialSignals,
+      blocks: unicos(lente.itemTypes.map(limpo)).map(radarPortableSerpBlockLabel),
+      missing: observada ? null : motivoDaLenteCongelada(lente.missingReason, l.texto),
+    };
+  });
+
+  const auxiliares = recorte(bloco.auxiliary, l.keywords);
+  const limitacoes = recorte(
+    unicos(bloco.limitations.map(texto => limitacaoCongeladaPortatil(texto, bloco, l.textoDaLimitacao) || "")),
+    l.limitacoes,
+  );
+  return {
+    ...base,
+    canonical: comCanonica
+      ? {
+        query: limpo(input.canonicalQuery) || null,
+        sameSerpAsObserved: input.sameSerpAsObserved ?? null,
+        observedLenses: readings.filter(item => item.observed).length,
+        totalLenses: TOTAL_DE_LENTES,
+        readings,
+        datesSpreadDays: bloco.datesSpreadDays,
+      }
+      : null,
+    auxiliary: auxiliares.itens.map(item => ({
+      keyword: limpo(item.keyword) || null,
+      observedLenses: item.lensesObserved,
+      totalLenses: TOTAL_DE_LENTES,
+      missingLenses: item.missingLenses.map(rotuloLegivelDaLente),
+    })),
+    omittedAuxiliary: auxiliares.omitidos,
+    limitations: limitacoes.itens,
+    omittedLimitations: limitacoes.omitidos,
+    notCopied: comCanonica ? NAO_COPIADO : null,
+  };
+}
+
+/**
+ * AS LIMITAÇÕES DO DOSSIÊ, COM AS DAS LENTES JÁ PORTÁTEIS.
+ *
+ * O dossiê soma às próprias limitações as que o congelamento escreveu sobre
+ * as lentes (adendo R3), e elas seguem para `limitations_md`, o brief e o
+ * contexto completo. Uma lente faltante leva ali o motivo cru da coleta, com
+ * o código do fornecedor. Só essas frases — as do bloco, conferidas por
+ * igualdade — são traduzidas; toda outra limitação passa como estava, e um
+ * pacote sem lentes sai idêntico.
+ */
+export function radarPortableResearchLimitations(
+  limitations: readonly string[],
+  block: RadarFrozenSerpLensBlock | null | undefined,
+): string[] {
+  if (!block) return [...limitations];
+  const doBloco = new Set(block.limitations);
+  return limitations.map(texto => (doBloco.has(texto) ? limitacaoCongeladaPortatil(texto, block, 1000) || texto : texto));
+}
+
+/** A nota do cache quando o pacote está informado: a mesma régua do leitor do Redator. */
+const NOTA_DO_CACHE_FORA_DO_PACOTE = "Observação do cache de SERP da marca no momento da exportação, datada e não revisada pelo Radar. Não faz parte do pacote congelado e não o substitui: a fonte de verdade das lentes é a cópia congelada no pacote. Cada lente diz se foi observada depois do congelamento (posterior ao pacote).";
+
+/* Pacote sem a cópia: o cache continua fora dele, e nada do que ele diz vira lente do pacote. */
+const NOTA_DO_CACHE_SEM_COPIA = "Observação do cache de SERP da marca no momento da exportação, datada e não revisada pelo Radar. Não faz parte do pacote congelado e não o substitui: o pacote desta investigação não tem cópia das lentes, e nada desta leitura pode ser atribuído a ele. Cada lente diz se foi observada depois do congelamento (posterior ao pacote).";
+
+/**
+ * A LENTE DO CACHE DIANTE DO PACOTE.
+ *
+ * `afterPackage` é a régua do leitor do Redator: observada depois do
+ * congelamento é posterior ao pacote e não o substitui. `sameAsFrozen` só
+ * existe na consulta canônica, onde há lente congelada para comparar: mesma
+ * data de observação é a mesma coleta; lente que o pacote não observou nunca
+ * é "a mesma".
+ */
+function relacaoComOPacote(pacote: RadarPortableFrozenLensesInput) {
+  const momento = Date.parse(limpo(pacote.frozenAt));
+  const bloco = radarPortableFrozenLensesState(pacote) === "frozen" && pacote.block?.canonicalSnapshotId ? pacote.block : null;
+  const canonica = bloco ? normalizeSerpCacheKeyword(limpo(pacote.canonicalQuery)) : "";
+  const congeladas = new Map<string, RadarFrozenSerpLens>((bloco?.lenses || []).map(lente => [lente.lens, lente]));
+  return (keyword: string, leitura: RadarPortableSerpLensReading): Pick<RadarPortableSerpLensReading, "afterPackage" | "sameAsFrozen"> => {
+    if (!leitura.observed) return { afterPackage: null, sameAsFrozen: null };
+    const coletada = Date.parse(leitura.collectedAt || "");
+    const congelada = canonica && normalizeSerpCacheKeyword(limpo(keyword)) === canonica ? congeladas.get(leitura.lens) : undefined;
+    return {
+      afterPackage: Number.isFinite(momento) && Number.isFinite(coletada) ? coletada > momento : null,
+      sameAsFrozen: congelada ? congelada.status === "observed" && instante(congelada.collectedAt) === leitura.collectedAt : null,
+    };
+  };
+}
+
+const nivelDasLentes = (nivel: number): LimitesDasLentes => NIVEIS_DAS_LENTES[Math.min(Math.max(0, nivel), NIVEIS_DAS_LENTES.length - 1)];
+
+/*
+ * O corte do cache e o do pacote são independentes: o pacote é a fonte de
+ * verdade (invariante 30) e o cache só observação fora dele, então o volume
+ * do cache nunca tira dado do pacote. `nivelDoPacote` só sobe depois que o
+ * cache já está no nível mais enxuto (ver `radarPortableSerpLensesColumns`).
+ */
+export function radarPortableSerpLenses(input: RadarPortableSerpLensesInput, nivel = 0, nivelDoPacote = 0): RadarPortableSerpLenses {
+  const l = nivelDasLentes(nivel);
   const lentes = input.lenses || SERP_CACHE_LENSES;
   const limitations: string[] = [];
 
@@ -1401,9 +1781,12 @@ export function radarPortableSerpLenses(input: RadarPortableSerpLensesInput, niv
   });
   const corteDeKeywords = recorte(keywordsValidas, l.keywords);
 
+  const pacote = input.frozen ? lentesDoPacote(input.frozen, nivelDasLentes(nivelDoPacote)) : null;
+  const relacao = input.frozen ? relacaoComOPacote(input.frozen) : null;
+
   const keywords = corteDeKeywords.itens.map(item => {
     const texto = limpo(item.keyword);
-    const readings: RadarPortableSerpLensReading[] = lentes.map(lens => {
+    const lidas: RadarPortableSerpLensReading[] = lentes.map(lens => {
       const tecnico = serpCacheLensLabel(lens);
       const consulta = leituras.get(`${normalizeSerpCacheKeyword(texto)}|${tecnico}`);
       const obs = consulta?.hit?.observation;
@@ -1441,6 +1824,7 @@ export function radarPortableSerpLenses(input: RadarPortableSerpLensesInput, niv
         missing: null,
       };
     });
+    const readings = relacao ? lidas.map(leitura => ({ ...leitura, ...relacao(texto, leitura) })) : lidas;
 
     /*
      * A DIVERGÊNCIA É CALCULADA SOBRE AS LISTAS INTEIRAS, não sobre o recorte
@@ -1505,14 +1889,27 @@ export function radarPortableSerpLenses(input: RadarPortableSerpLensesInput, niv
 
   return {
     source: "cache de SERP da marca",
-    note: "Leitura do cache de SERP da marca no momento da exportação, só com observações dentro da validade. Não faz parte da investigação congelada: cada lente tem a própria data de coleta, que pode ser anterior ou posterior à investigação.",
+    note: pacote
+      ? pacote.state === "frozen" ? NOTA_DO_CACHE_FORA_DO_PACOTE : NOTA_DO_CACHE_SEM_COPIA
+      : "Leitura do cache de SERP da marca no momento da exportação, só com observações dentro da validade. Não faz parte da investigação congelada: cada lente tem a própria data de coleta, que pode ser anterior ou posterior à investigação.",
+    ...(pacote ? { frozenPackage: pacote } : {}),
     lenses: lentes.map(serpCacheLensLabel),
     keywords,
     omittedKeywords: corteDeKeywords.omitidos,
     limitations: unicos(limitations),
-    cellLimitNotice: nivel > 0 ? "Listas reduzidas para caber numa célula de planilha; cada corte está declarado." : null,
+    cellLimitNotice: avisoDeCorte(Boolean(pacote), nivel, nivelDoPacote),
     usage: RADAR_PORTABLE_SERP_USAGE,
   };
+}
+
+const AVISO_DE_CORTE = "Listas reduzidas para caber numa célula de planilha; cada corte está declarado.";
+
+/* Sem o pacote, o aviso de sempre. Com ele, diz se o corte ficou só no cache. */
+function avisoDeCorte(comPacote: boolean, nivel: number, nivelDoPacote: number): string | null {
+  if (!comPacote) return nivel > 0 ? AVISO_DE_CORTE : null;
+  if (nivelDoPacote > 0) return "Listas do cache e do pacote congelado reduzidas para caber numa célula de planilha: o cache já estava no mínimo. Cada corte está declarado.";
+  if (nivel > 0) return "Listas do cache reduzidas para caber numa célula de planilha; o pacote congelado não foi reduzido. Cada corte está declarado.";
+  return null;
 }
 
 const listaCurtaMd = (rotulo: string, itens: readonly string[], omitidos: number): string =>
@@ -1520,7 +1917,123 @@ const listaCurtaMd = (rotulo: string, itens: readonly string[], omitidos: number
     ? `- ${rotulo}: ${itens.join(" · ")}${omitidos ? ` (mais ${omitidos} omitido(s) nesta célula)` : ""}`
     : `- ${rotulo}: ${omitidos ? `${omitidos} omitido(s) nesta célula` : "nenhum(a)"}`;
 
+/* A lente do cache diante do pacote, na linha do título. Sem o pacote informado, nada. */
+function relacaoComOPacoteMd(leitura: RadarPortableSerpLensReading): string {
+  if (leitura.afterPackage === undefined && leitura.sameAsFrozen === undefined) return "";
+  if (leitura.sameAsFrozen === true) return " · a mesma coleta que o pacote congelou";
+  if (leitura.afterPackage === true) return " · posterior ao pacote: não o substitui";
+  if (leitura.afterPackage === false) {
+    return leitura.sameAsFrozen === false
+      ? " · anterior ao congelamento, mas não é a coleta que o pacote congelou"
+      : " · anterior ao congelamento do pacote";
+  }
+  return " · sem data para comparar com o congelamento do pacote";
+}
+
+/* As keywords lidas no cache. `nivel` é o nível do título da keyword: 2 sozinho, 3 abaixo do pacote. */
+function keywordsDoCacheMd(lentes: RadarPortableSerpLenses, nivel: number): string[] {
+  const titulo = "#".repeat(nivel);
+  const subtitulo = "#".repeat(nivel + 1);
+  return lentes.keywords.flatMap(item => [
+    "",
+    `${titulo} ${item.keyword} (${item.role})`,
+    ...item.readings.flatMap(leitura => leitura.observed
+      ? [
+        "",
+        `${subtitulo} ${leitura.lens} (${leitura.label}) — coletada em ${dataLegivel(leitura.collectedAt)}${relacaoComOPacoteMd(leitura)}`,
+        "",
+        listaCurtaMd("Domínios concorrentes (top 10 orgânico e citados pela IA)", leitura.competitorDomains, leitura.omittedCompetitorDomains),
+        listaCurtaMd("Perguntas (PAA e expansões)", leitura.questions, leitura.omittedQuestions),
+        listaCurtaMd("Buscas relacionadas", leitura.relatedSearches, leitura.omittedRelatedSearches),
+        listaCurtaMd("Citados no AI Overview", leitura.aiOverviewDomains, leitura.omittedAiOverviewDomains),
+        `- Sinais comerciais: ${leitura.commercialSignals ? "sim" : "não"}`,
+        `- Blocos da página: ${leitura.blocks.length ? leitura.blocks.join(" · ") : "não registrados"}`,
+      ]
+      : ["", `${subtitulo} ${leitura.lens} (${leitura.label}) — ${leitura.missing}`]),
+    "",
+    `${subtitulo} Divergência entre lentes`,
+    "",
+    `- ${item.divergence.statement}`,
+    ...(item.divergence.sharedByAllLenses.length ? [`- Em todas as lentes observadas: ${item.divergence.sharedByAllLenses.join(" · ")}${item.divergence.omittedSharedByAllLenses ? ` (mais ${item.divergence.omittedSharedByAllLenses} omitido(s) nesta célula)` : ""}`] : []),
+    ...item.divergence.onlyInOneLens.map(exclusivo => `- Só em ${exclusivo.lens}: ${exclusivo.domains.join(" · ")}${exclusivo.omitted ? ` (mais ${exclusivo.omitted} omitido(s) nesta célula)` : ""}`),
+    ...item.divergence.blocksOnlyInOneLens.map(exclusivo => `- Blocos só em ${exclusivo.lens}: ${exclusivo.blocks.join(" · ")}`),
+  ]);
+}
+
+/* A cópia congelada, primeiro: é ela que o pacote entrega ao Redator. */
+function pacoteCongeladoMd(pacote: RadarPortableFrozenLenses): string[] {
+  const canonica = pacote.canonical;
+  const mesmaSerp = canonica?.sameSerpAsObserved === true
+    ? " (a mesma SERP descrita em serp_observed_md)"
+    : canonica?.sameSerpAsObserved === false ? " (não é a SERP descrita em serp_observed_md)" : "";
+  return [
+    "",
+    "## Pacote congelado · lentes da SERP (fonte de verdade)",
+    "",
+    pacote.statement,
+    "",
+    `- Congelamento do pacote: ${pacote.frozenAt ? dataLegivel(pacote.frozenAt) : "instante não registrado"}`,
+    ...(canonica
+      ? [
+        `- Consulta canônica: ${canonica.query || "não identificada entre as coletas gravadas da marca"}${mesmaSerp}`,
+        `- Lentes observadas: ${canonica.observedLenses} de ${canonica.totalLenses}${canonica.datesSpreadDays !== null ? ` · datas das lentes com até ${canonica.datesSpreadDays} dia(s) de diferença` : ""}`,
+        ...(pacote.notCopied ? [`- ${pacote.notCopied}`] : []),
+        ...canonica.readings.flatMap(leitura => leitura.observed
+          ? [
+            "",
+            `### ${leitura.lens} (${leitura.label}) — ${leitura.origin || "origem não declarada"} · coletada em ${dataLegivel(leitura.collectedAt)}`,
+            "",
+            listaCurtaMd("Domínios concorrentes (top 10 orgânico e citados pela IA)", leitura.competitorDomains, leitura.omittedCompetitorDomains),
+            listaCurtaMd("Perguntas (PAA e expansões)", leitura.questions, leitura.omittedQuestions),
+            listaCurtaMd("Citados no AI Overview", leitura.aiOverviewDomains, leitura.omittedAiOverviewDomains),
+            `- Resultados orgânicos: ${leitura.organicCount ?? "não registrado"}`,
+            `- Sinais comerciais: ${leitura.commercialSignals ? "sim" : "não"}`,
+            `- Blocos da página: ${leitura.blocks.length ? leitura.blocks.join(" · ") : "não registrados"}`,
+          ]
+          : ["", `### ${leitura.lens} (${leitura.label}) — faltou: ${leitura.missing}`]),
+      ]
+      : []),
+    ...(pacote.auxiliary.length || pacote.omittedAuxiliary
+      ? [
+        "",
+        "### Pesquisas auxiliares congeladas",
+        "",
+        ...pacote.auxiliary.map(item => `- ${item.keyword ? `"${item.keyword}"` : AUXILIAR_SEM_TEXTO}: ${item.observedLenses} de ${item.totalLenses} lentes${item.missingLenses.length ? ` · faltou ${item.missingLenses.join(", ")}` : ""}`),
+        ...(pacote.omittedAuxiliary ? [`- Mais ${pacote.omittedAuxiliary} pesquisa(s) auxiliar(es) omitida(s) nesta célula.`] : []),
+      ]
+      : []),
+    ...(pacote.limitations.length || pacote.omittedLimitations
+      ? [
+        "",
+        "### Limitações escritas no congelamento",
+        "",
+        ...listaMd(pacote.limitations),
+        ...(pacote.omittedLimitations ? [`- Mais ${pacote.omittedLimitations} limitação(ões) omitida(s) nesta célula; todas estão em limitations_md.`] : []),
+      ]
+      : []),
+  ];
+}
+
 export function radarPortableSerpLensesMarkdown(lentes: RadarPortableSerpLenses): string {
+  if (lentes.frozenPackage) {
+    return [
+      "# SERP por lente",
+      "",
+      "Duas leituras, nesta ordem: as lentes do pacote congelado da investigação, que são a fonte de verdade, e o cache de SERP da marca, só como observação fora do pacote.",
+      "",
+      `Lentes: ${lentes.lenses.join(" · ")}. Somente para pesquisa: não copiar títulos nem termos como texto do artigo.`,
+      ...(lentes.cellLimitNotice ? ["", `> ${lentes.cellLimitNotice}`] : []),
+      ...pacoteCongeladoMd(lentes.frozenPackage),
+      "",
+      "## Cache da marca · observação fora do pacote",
+      "",
+      lentes.note,
+      ...(lentes.keywords.length ? [] : ["", "Nenhuma keyword do artigo foi consultada no cache."]),
+      ...keywordsDoCacheMd(lentes, 3),
+      ...(lentes.omittedKeywords ? ["", `- Mais ${lentes.omittedKeywords} keyword(s) omitida(s) nesta célula.`] : []),
+      ...(lentes.limitations.length ? ["", "### Limitações da leitura do cache", "", ...listaMd(lentes.limitations)] : []),
+    ].join("\n").trim();
+  }
   return [
     "# SERP por lente (cache da marca)",
     "",
@@ -1529,30 +2042,7 @@ export function radarPortableSerpLensesMarkdown(lentes: RadarPortableSerpLenses)
     `Lentes: ${lentes.lenses.join(" · ")}. Somente para pesquisa: não copiar títulos nem termos como texto do artigo.`,
     ...(lentes.cellLimitNotice ? ["", `> ${lentes.cellLimitNotice}`] : []),
     ...(lentes.keywords.length ? [] : ["", "Nenhuma keyword do artigo foi consultada no cache."]),
-    ...lentes.keywords.flatMap(item => [
-      "",
-      `## ${item.keyword} (${item.role})`,
-      ...item.readings.flatMap(leitura => leitura.observed
-        ? [
-          "",
-          `### ${leitura.lens} (${leitura.label}) — coletada em ${dataLegivel(leitura.collectedAt)}`,
-          "",
-          listaCurtaMd("Domínios concorrentes (top 10 orgânico e citados pela IA)", leitura.competitorDomains, leitura.omittedCompetitorDomains),
-          listaCurtaMd("Perguntas (PAA e expansões)", leitura.questions, leitura.omittedQuestions),
-          listaCurtaMd("Buscas relacionadas", leitura.relatedSearches, leitura.omittedRelatedSearches),
-          listaCurtaMd("Citados no AI Overview", leitura.aiOverviewDomains, leitura.omittedAiOverviewDomains),
-          `- Sinais comerciais: ${leitura.commercialSignals ? "sim" : "não"}`,
-          `- Blocos da página: ${leitura.blocks.length ? leitura.blocks.join(" · ") : "não registrados"}`,
-        ]
-        : ["", `### ${leitura.lens} (${leitura.label}) — ${leitura.missing}`]),
-      "",
-      "### Divergência entre lentes",
-      "",
-      `- ${item.divergence.statement}`,
-      ...(item.divergence.sharedByAllLenses.length ? [`- Em todas as lentes observadas: ${item.divergence.sharedByAllLenses.join(" · ")}${item.divergence.omittedSharedByAllLenses ? ` (mais ${item.divergence.omittedSharedByAllLenses} omitido(s) nesta célula)` : ""}`] : []),
-      ...item.divergence.onlyInOneLens.map(exclusivo => `- Só em ${exclusivo.lens}: ${exclusivo.domains.join(" · ")}${exclusivo.omitted ? ` (mais ${exclusivo.omitted} omitido(s) nesta célula)` : ""}`),
-      ...item.divergence.blocksOnlyInOneLens.map(exclusivo => `- Blocos só em ${exclusivo.lens}: ${exclusivo.blocks.join(" · ")}`),
-    ]),
+    ...keywordsDoCacheMd(lentes, 2),
     ...(lentes.omittedKeywords ? ["", `- Mais ${lentes.omittedKeywords} keyword(s) omitida(s) nesta célula.`] : []),
     ...(lentes.limitations.length ? ["", "## Limitações", "", ...listaMd(lentes.limitations)] : []),
   ].join("\n").trim();
@@ -1560,19 +2050,95 @@ export function radarPortableSerpLensesMarkdown(lentes: RadarPortableSerpLenses)
 
 export type RadarPortableSerpLensesColumns = { serp_lenses_md: string; serp_lenses_json: string };
 
+/**
+ * O ÚLTIMO RECURSO COM O PACOTE: nem o cache no mínimo nem o pacote reduzido
+ * couberam. A ordem de autoridade continua valendo — o que sai primeiro é o
+ * cache: o resumo por lente do pacote fica, as keywords do cache só entram se
+ * couberem ao lado dele. No Markdown, o pacote inteiro é mantido quando cabe
+ * antes do ponto de corte.
+ */
+function esqueletoComPacote(
+  input: RadarPortableSerpLensesInput,
+  enxuto: RadarPortableSerpLenses,
+  ultimo: RadarPortableSerpLensesColumns | null,
+  orcamento: number,
+): RadarPortableSerpLensesColumns {
+  const pacote = enxuto.frozenPackage!;
+  const situacao = { state: pacote.state, statement: pacote.statement, frozenAt: pacote.frozenAt };
+  const resumo = {
+    ...situacao,
+    canonical: pacote.canonical
+      ? {
+        query: pacote.canonical.query,
+        sameSerpAsObserved: pacote.canonical.sameSerpAsObserved,
+        observedLenses: pacote.canonical.observedLenses,
+        totalLenses: pacote.canonical.totalLenses,
+        readings: pacote.canonical.readings.map(leitura => ({
+          lens: leitura.lens, label: leitura.label, observed: leitura.observed, origin: leitura.origin,
+          collectedAt: leitura.collectedAt, missing: leitura.missing,
+        })),
+      }
+      : null,
+    auxiliary: pacote.auxiliary,
+    omittedAuxiliary: pacote.omittedAuxiliary,
+  };
+  const comum = { source: enxuto.source, lenses: enxuto.lenses };
+  const candidatos = [
+    {
+      ...comum,
+      frozenPackage: resumo,
+      keywords: enxuto.keywords.map(item => ({ keyword: item.keyword, role: item.role, statement: item.divergence.statement })),
+      cellLimitNotice: "As lentes não couberam numa célula de planilha nem reduzidas: saem o resumo por lente do pacote congelado e, do cache, só as keywords e a síntese da divergência. O Markdown ao lado traz o restante até o ponto do corte.",
+      usage: RADAR_PORTABLE_SERP_USAGE,
+    },
+    {
+      ...comum,
+      frozenPackage: resumo,
+      keywords: [],
+      omittedKeywords: enxuto.keywords.length + enxuto.omittedKeywords,
+      cellLimitNotice: "As lentes não couberam numa célula de planilha nem reduzidas: sai só o resumo por lente do pacote congelado; as keywords do cache ficaram de fora. O Markdown ao lado traz o restante até o ponto do corte.",
+      usage: RADAR_PORTABLE_SERP_USAGE,
+    },
+    {
+      ...comum,
+      frozenPackage: situacao,
+      keywords: [],
+      omittedKeywords: enxuto.keywords.length + enxuto.omittedKeywords,
+      cellLimitNotice: "As lentes não couberam numa célula de planilha nem reduzidas: sai só a situação do pacote congelado. O Markdown ao lado traz o restante até o ponto do corte.",
+      usage: RADAR_PORTABLE_SERP_USAGE,
+    },
+  ];
+  const json = candidatos.map(item => JSON.stringify(item)).find(texto => texto.length <= orcamento)
+    ?? JSON.stringify({ cellLimitNotice: candidatos[candidatos.length - 1].cellLimitNotice, usage: RADAR_PORTABLE_SERP_USAGE });
+
+  const comPacoteInteiro = radarPortableSerpLensesMarkdown(radarPortableSerpLenses(input, NIVEIS_DAS_LENTES.length - 1, 0));
+  const fimDoPacote = comPacoteInteiro.indexOf("\n## Cache da marca");
+  const cortado = cortarMarkdown(comPacoteInteiro, orcamento);
+  const md = fimDoPacote > 0 && cortado.startsWith(comPacoteInteiro.slice(0, fimDoPacote))
+    ? cortado
+    : cortarMarkdown(ultimo?.serp_lenses_md || radarPortableSerpLensesMarkdown(enxuto), orcamento);
+  return { serp_lenses_md: md, serp_lenses_json: json };
+}
+
 /** As duas colunas das lentes, do mesmo nível de corte e já ajustadas à célula. */
 export function radarPortableSerpLensesColumns(
   input: RadarPortableSerpLensesInput,
   orcamento = RADAR_PORTABLE_SERP_CELL_BUDGET,
 ): RadarPortableSerpLensesColumns {
+  const ultimoNivel = NIVEIS_DAS_LENTES.length - 1;
+  /* Primeiro o cache desce todos os níveis com o pacote intacto; só então o pacote desce. */
+  const tentativas: Array<[number, number]> = NIVEIS_DAS_LENTES.map((_, nivel) => [nivel, 0]);
+  if (input.frozen) for (let nivelDoPacote = 1; nivelDoPacote <= ultimoNivel; nivelDoPacote += 1) tentativas.push([ultimoNivel, nivelDoPacote]);
+
   let ultimo: RadarPortableSerpLensesColumns | null = null;
-  for (let nivel = 0; nivel < NIVEIS_DAS_LENTES.length; nivel += 1) {
-    const lentes = radarPortableSerpLenses(input, nivel);
+  for (const [nivel, nivelDoPacote] of tentativas) {
+    const lentes = radarPortableSerpLenses(input, nivel, nivelDoPacote);
     const colunas = { serp_lenses_md: radarPortableSerpLensesMarkdown(lentes), serp_lenses_json: JSON.stringify(lentes) };
     if (colunas.serp_lenses_md.length <= orcamento && colunas.serp_lenses_json.length <= orcamento) return colunas;
     ultimo = colunas;
   }
-  const enxuto = radarPortableSerpLenses(input, NIVEIS_DAS_LENTES.length - 1);
+  const enxuto = radarPortableSerpLenses(input, ultimoNivel, ultimoNivel);
+  if (enxuto.frozenPackage) return esqueletoComPacote(input, enxuto, ultimo, orcamento);
   const esqueleto = {
     source: enxuto.source,
     lenses: enxuto.lenses,

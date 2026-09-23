@@ -428,10 +428,11 @@ A recuperação local só aplica o rascunho sobre o mesmo pacote do Radar.
 - [x] E1 — `ContentDocument` fora da carga da mesa: implementada em 2026-09-23, com o pré-requisito da view ou coluna gerada antes de ~5 documentos grandes. Validação manual pendente.
 - [x] E2 — provider editorial só onde é usado: implementada em 2026-09-23, opção (b). Validação manual pendente.
 - [ ] E3 — Realtime e polling do Radar.
-- [ ] E4 — export, envios e volta à aba no Radar.
+- [ ] E4 — export, envios e volta à aba no Radar. **Parcial em 2026-09-23:** o export lê por artigo e só a versão usada, com CSV byte a byte igual: ~23,6 → ~16,3 MB por export na Care Glow. Faltam as releituras de autoridades e da camada de vídeo (chegaria a ~3,8 MB), os envios e a volta à aba. Ver o backlog do Radar.
 - [ ] E5 — Supabase local para desenvolvimento.
 - [ ] E6 — deploy na Vercel.
 - [x] E7 — SERP nas 4 lentes: decidido pelo usuário em 2026-09-23 (4 lentes em todo ponto de SERP, cache desde a primeira coleta). Correção 3 implementada; a coleta nas 4 lentes e a intenção e o funil pelas 4 lentes estão em implementação.
 - [ ] E8 — cache do DNA: correção do Arquiteto e cache de versões imutáveis **implementados**; cache conferido das keywords vivas com SDD e migration **escritas, aguardando aprovação e aplicação pelo usuário**.
-- [ ] E9 — Redator: leitor de evidências para a IA que escreve. SDD própria em [`docs/07-redator/propostas/sdd-leitor-evidencias-redator-2026-09-23.md`](../07-redator/propostas/sdd-leitor-evidencias-redator-2026-09-23.md). Uma sessão MCP de escrita custa hoje ~58 MB por artigo (`(2 + g + 2s) · P`, P = 4,48 MB MEDIDO); com o dossiê fora do payload, ~1 MB.
+- [x] E9 — Redator: leitor de evidências (Fases 0 e 1 implementadas em 2026-09-23, migration `20260923150000` aplicada pelo usuário e verificada; Fase 2 planejada). Sessão MCP ~58,5 → ~23 MB.
+- [ ] E9 (histórico) — Redator: leitor de evidências para a IA que escreve. SDD própria em [`docs/07-redator/propostas/sdd-leitor-evidencias-redator-2026-09-23.md`](../07-redator/propostas/sdd-leitor-evidencias-redator-2026-09-23.md). Uma sessão MCP de escrita custa hoje ~58 MB por artigo (`(2 + g + 2s) · P`, P = 4,48 MB MEDIDO); com o dossiê fora do payload, ~1 MB.
 - Decisão, data e aprovador:

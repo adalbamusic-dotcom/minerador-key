@@ -55,6 +55,7 @@ import { RadarAmazonTargetSetup } from "./radar-amazon-target-setup";
 import { radarAmazonEligibleCandidates } from "@/lib/radar/amazon-eligibility";
 import { postRadarWriterHandoff, postRadarWriterHandoffBatch, radarWriterHandoffBatchSummary } from "@/lib/radar/writer-handoff-client";
 import { RadarExportRefusedError, radarDossierExportNotice, radarExportFailureNotice, radarPartiallySelectedSilos, radarSiloExportNotice, radarSiloExportPreview, radarSiloExportScope, radarSiloExportScopeLimitNotice, type RadarExportNotice, type RadarSiloExportResponseView } from "@/lib/radar/portable-silo-scope";
+import { radarSiloExportSizeNotice } from "@/lib/radar/portable-export-estimate";
 import { RADAR_STORED_ZIP_MIME, radarStoredZipOfTexts } from "@/lib/radar/stored-zip";
 import { radarCompetitiveBlueprintViewOfAnalysis, type RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
 import { buildRadarMultimodalBlueprint, type RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
@@ -4199,6 +4200,19 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       <option value="">{label}: Todos</option>
       {column.filterOptions?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
     </select>;
+    /*
+     * E4 · "TODOS OS SILOS" É A MARCA INTEIRA.
+     *
+     * Sem seleção, o export lê do banco cada artigo do Radar, com o item e as
+     * corridas. Quando a estimativa passa de um quinto da meta do dia, o
+     * tamanho aparece no próprio item do menu, antes do clique.
+     */
+    const avisoDeTamanhoDoExport = menuDeExport
+      ? radarSiloExportSizeNotice({
+        scope: radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds, siloVersions: pipeline.siloVersions }),
+        finalizedArticleIds: pipeline.radarItems.filter(row => radarPrimaryProfileOfAnalysis(analiseCorrenteDe(row)?.payload || null)).map(row => row.articleId),
+      })
+      : null;
     return <>
       {formatColumn ? filter(formatColumn, "Formato") : null}
       {statusColumn ? filter(statusColumn, "Status") : null}
@@ -4262,6 +4276,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
             </span>
             <span className="mt-0.5 block text-text-muted">Todos os artigos finalizados de cada silo, na ordem do silo, com a SERP de cada um.</span>
             <span className="mt-0.5 block text-text-muted">{radarSiloExportPreview(radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds, siloVersions: pipeline.siloVersions }))}</span>
+            {avisoDeTamanhoDoExport ? <span className="mt-1 block" data-testid="radar-silos-size-estimate"><strong className="font-semibold text-warning">{avisoDeTamanhoDoExport.title}:</strong> {avisoDeTamanhoDoExport.message}</span> : null}
           </button>
           <button
             type="button"

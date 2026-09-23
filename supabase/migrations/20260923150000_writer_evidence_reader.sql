@@ -1126,7 +1126,7 @@ COMMIT;
 -- VERIFICACAO (so agregado; nenhum valor de payload; rodar depois de aplicar)
 --
 -- SELECT jsonb_build_object(
---   'funcoes', (SELECT jsonb_agg(p.proname || ' secdef=' || p.prosecdef || ' vol=' || p.provolatile ORDER BY p.proname)
+--   'funcoes', (SELECT jsonb_agg(p.proname || ' secdef=' || p.prosecdef::text || ' vol=' || p.provolatile::text ORDER BY p.proname)
 --                 FROM pg_proc AS p
 --                WHERE p.pronamespace = 'public'::regnamespace AND p.proname LIKE 'writer_evidence_%'),
 --   'manifest_anon', has_function_privilege('anon', 'public.writer_evidence_manifest(uuid, text)', 'EXECUTE'),

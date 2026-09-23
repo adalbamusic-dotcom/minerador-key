@@ -1054,8 +1054,13 @@ test("H · a rota liga as colunas novas com leituras por LOTE, sem coleta e sem 
   assert.equal(/executeDataForSeo|collectDataForSeo|collectAndCacheSerp|collectRadarGoogleSupport/.test(rota), false);
   assert.equal(/\.insert\(|\.update\(|\.upsert\(|\.delete\(|select\("\*"\)/.test(rota), false);
 
-  /* O padrão E4 (estado + autoridades por artigo) é o de antes: uma chamada de cada. */
-  assert.equal((rota.match(/radarStartPorts\.loadRadarState\(/g) || []).length, 1);
+  /*
+   * E4 (2026-09-23): a análise corrente sai da leitura estreita do export, uma
+   * por artigo, e as autoridades continuam uma chamada por artigo. O estado
+   * inteiro não é mais lido pela rota (ver radar-export-leitura-por-artigo).
+   */
+  assert.equal((rota.match(/radarStartPorts\.loadRadarState\(/g) || []).length, 0);
+  assert.equal((rota.match(/radarExportArticleReads\.currentAnalysis\(/g) || []).length, 1);
   assert.equal((rota.match(/loadRadarCanonicalAuthorities\(\{/g) || []).length, 1);
 });
 

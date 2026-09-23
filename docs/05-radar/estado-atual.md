@@ -1,5 +1,54 @@
 # Estado atual — Radar
 
+## As 4 lentes no Radar, standing congelado, tela das lentes e export — 2026-09-23
+
+```text
+SERP_DO_RADAR = 4 lentes, advanced, cache primeiro (paga só a faltante; collectedBy radar)
+CANONICA = desktop-windows depth 20 com corpo · extras depth 10 com digest
+ATUALIZAR_SERP_SEM_MUDANCA = mesma versão (unchanged) · RECOLETAR_AGORA = pago, com confirmação e o número antes
+FINALIZE = serpStanding e search.lenses congelados no servidor · dossiê V3 ganha serpLenses (cópia)
+DEPOIS_DO_FINALIZE = "Atualizar SERP" e auxiliar recusados (FINALIZED_LOCKED), inclusive por cache
+BUNDLES_E_DOSSIES_JA_ENTREGUES = byte a byte iguais (hashes dourados conferidos)
+MIGRATIONS_ADDED = 0 · CHAMADAS_PAGAS_EM_TESTE = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste** (`test:radar` 2563/2563). Documentos em `propostas/`:
+- a [SDD das 4 lentes](propostas/sdd-radar-quatro-lentes-cache-2026-09-23.md);
+- os adendos [R1](propostas/adendo-r1-standing-congelado-e-ledger-2026-09-23.md), [R2](propostas/adendo-r2-quatro-lentes-cache-2026-09-23.md) e [R3 a R5](propostas/adendo-r3-r4-r5-lentes-congeladas-auxiliar-apoio-2026-09-23.md).
+
+- **R1 — standing congelado.**
+  - O FINALIZE calcula `serpStanding` uma vez, no servidor, e o grava no bundle.
+  - "Válida" significa não rejeitada na revisão; `needs_review` conta como válida.
+  - Níveis suficientes: SUFFICIENT, PARTIAL_BUT_USABLE e CONFLICTING_SEARCH_INTENT.
+  - Bundle antigo mantém o padrão legado sem reescrita.
+  - A trava recusa reescrever a `finalizedBundle` congelada.
+  - A rota da SERP consulta a trava antes do cache e do provider.
+- **R2 — 4 lentes.**
+  - O snapshot leva o `lensSet` (cópia, sem digest), e o hash cobre as lentes.
+  - A primeira atualização de um artigo antigo abre uma versão nova, uma vez, porque a fórmula mudou.
+  - As SERPs pagas pelo Radar ficam no cache e servem ao Minerador e ao Arquiteto.
+- **R3 a R5.**
+  - O bundle ganha `search.lenses`, e o dossiê V3, `serpLenses`. As lacunas e divergências entre aparelhos entram nas `limitations`.
+  - A pesquisa auxiliar e o apoio Google da Amazon passam pelo mesmo núcleo: até 4 chamadas cada, sem cache.
+  - YouTube e Amazon Merchant ficam em lente única, com o eco de device/os gravado na proveniência.
+- **Tela.**
+  - Aba SERP da rota do artigo: seção "Lentes da SERP" ("SERP · K de 4 lentes", origem por aparelho, "Apareceu em um aparelho só", "SERP observada em") e botão "Recoletar agora (pago)" com a confirmação "Pagar até 4 chamadas".
+  - Avisos: "A SERP não mudou… Nenhuma versão nova foi aberta".
+  - Workbench:
+    - coluna "Lentes" no plano de consultas;
+    - "Lentes da SERP" no card congelado e em "Ver detalhes da pesquisa";
+    - aviso discreto para bundle anterior a 2026-09-23.
+  - A barra de lote virou "Atualizar SERP selecionada (cache primeiro)".
+  - A frase do FINALIZE cita o hash gravado, lido no readback.
+- **Export por Silo.**
+  - `serp_lenses_md` e `serp_lenses_json` abrem com as lentes do **pacote congelado (fonte de verdade)**. O cache vem depois, como observação fora do pacote.
+  - A "Situação da SERP" ganha a linha das lentes.
+  - As limitações saem sem código de provider.
+  - Saída dourada sem a entrada nova: idêntica.
+- **Egress do export** (E4, parcial).
+  - Leitura por artigo com reidratação só da versão usada: CSV byte a byte igual, ~23,6 → ~16,3 MB por export na Care Glow (−31%).
+  - "Silos completos" sem seleção mostra a estimativa quando passa de 20 MB.
+
 ## Export portátil: a SERP, os dados do Redator e o export por silo — 2026-09-23
 
 Pedido do dono do produto: o CSV do Radar é a saída final para escrever com

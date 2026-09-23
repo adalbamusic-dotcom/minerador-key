@@ -18,6 +18,9 @@ import {
 import {
   radarPortableLinkedSerpRecord,
   radarPortableNewerSerpCollection,
+  radarPortableResearchLimitations,
+  type RadarPortableFrozenLensesInput,
+  type RadarPortableNewerSerpCollection,
   type RadarPortableSerpLensKeyword,
   type RadarPortableSerpLensLookup,
   type RadarPortableSerpObservedInput,
@@ -148,7 +151,7 @@ export function radarPortableExportDossierGapsInput(input: {
    * `observed`, que é montado sobre a coleta MAIS RECENTE — e a célula da
    * situação precisa dizer isso, não só a coluna da SERP.
    */
-  newerSerpCollection?: { collectedAt: string | null } | null;
+  newerSerpCollection?: RadarPortableNewerSerpCollection | null;
 }): RadarPortableDossierGapsInput {
   return {
     status: {
@@ -159,9 +162,63 @@ export function radarPortableExportDossierGapsInput(input: {
       serpStandingFrozen: input.profile === "GOOGLE" ? radarFrozenSerpStandingOf(input.analysis.finalizedBundle) !== null : false,
       exportedAt: input.exportedAt,
       newerSerpCollection: input.newerSerpCollection ?? null,
+      /* As lentes do pacote: o mesmo dossiê, a mesma régua de `serp_lenses_*`. */
+      frozenLenses: {
+        profile: input.profile,
+        block: input.profile === "GOOGLE" ? input.bundle.serpLenses ?? null : null,
+        frozenAt: radarFrozenObservedAtOfAnalysis(input.analysis),
+      },
     },
     observed: input.bundle.observed,
   };
+}
+
+/* ============================ as lentes do pacote ============================ */
+
+/**
+ * ===== AS LENTES QUE O PACOTE ENTREGA AO REDATOR, PARA A COLUNA DE LENTES =====
+ *
+ * A cópia é a do DOSSIÊ (`bundle.serpLenses`): o mesmo bloco que o Planejador
+ * e o Redator recebem, lido do bundle congelado só no perfil Google. Nada de
+ * cache nem de snapshot vivo — o cache entra na mesma coluna, depois, como
+ * observação fora do pacote.
+ *
+ * Os snapshots já lidos pela rota servem só para dar NOME à consulta canônica
+ * congelada (o bloco guarda o id dela, que não sai) e para dizer se ela é a
+ * mesma SERP de `serp_observed_md`. A coleta só vale quando id E assinatura
+ * batem com o bloco: registro com o mesmo id e outro conteúdo não é a SERP
+ * que o pacote congelou.
+ */
+export function radarPortableExportFrozenLensesInput(input: {
+  profile: RadarResearchProfile;
+  bundle: Pick<RadarEvidenceBundle, "serpLenses" | "research">;
+  /** O payload da análise corrente: o instante do congelamento sai dele. */
+  analysis: unknown;
+  records?: readonly SerpCollectionRecord[];
+}): RadarPortableFrozenLensesInput {
+  const block = input.profile === "GOOGLE" ? input.bundle.serpLenses ?? null : null;
+  const base = { profile: input.profile, block, frozenAt: radarFrozenObservedAtOfAnalysis(input.analysis) };
+  if (!block?.canonicalSnapshotId) return base;
+
+  const ehACongelada = (registro: SerpCollectionRecord | null | undefined): registro is SerpCollectionRecord & { research: NonNullable<SerpCollectionRecord["research"]> } =>
+    Boolean(registro?.research
+      && (registro.id === block.canonicalSnapshotId || registro.research.id === block.canonicalSnapshotId)
+      && registro.research.contentHash === block.canonicalSnapshotHash);
+  const congelada = (input.records || []).find(ehACongelada) ?? null;
+  const vinculada = radarPortableLinkedSerpRecord(input.records || [], input.bundle.research.google).record;
+  return {
+    ...base,
+    canonicalQuery: congelada?.research.query ?? null,
+    sameSerpAsObserved: vinculada ? ehACongelada(vinculada) : null,
+  };
+}
+
+/**
+ * As limitações do dossiê para o CSV: as que o congelamento escreveu sobre as
+ * lentes saem portáteis (sem o motivo cru da coleta); as outras, como estão.
+ */
+export function radarPortableExportResearchLimitations(bundle: Pick<RadarEvidenceBundle, "limitations" | "serpLenses">): string[] {
+  return radarPortableResearchLimitations(bundle.limitations, bundle.serpLenses);
 }
 
 /* ============================== a SERP por lente ============================== */
@@ -275,6 +332,12 @@ export type RadarPortableExportAssembledArticle = {
   articleId: string;
   entrada: RadarPortableExportInput;
   lentes: readonly RadarPortableSerpLensKeyword[];
+  /**
+   * As lentes congeladas no pacote (`radarPortableExportFrozenLensesInput`).
+   * Com elas, `serp_lenses_*` abre pela cópia congelada e rotula o cache como
+   * observação fora do pacote. Sem elas, a coluna sai como antes.
+   */
+  lentesCongeladas?: RadarPortableFrozenLensesInput | null;
 };
 
 /**
@@ -299,7 +362,12 @@ export function radarPortableExportRows(input: {
   for (const artigo of input.articles) {
     linhas.set(artigo.articleId, buildRadarPortableExportRow({
       ...artigo.entrada,
-      serpLenses: { keywords: artigo.lentes, lookups: lentesDe(artigo.lentes), readFailed: input.lenses.readFailed },
+      serpLenses: {
+        keywords: artigo.lentes,
+        lookups: lentesDe(artigo.lentes),
+        readFailed: input.lenses.readFailed,
+        ...(artigo.lentesCongeladas ? { frozen: artigo.lentesCongeladas } : {}),
+      },
       siloContext: input.plan?.contextByArticleId[artigo.articleId] ?? null,
     }));
   }

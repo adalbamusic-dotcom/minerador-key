@@ -347,3 +347,10 @@ Custo das 600 SERP extras: até ~US$ 2,10 por lista (ESTIMADO; o preço em depth
 - **Tamanho:** de 2,8 a 5,7 kB por lente extra, contra ~26,5 kB do corpo em depth 10.
 - **Entrada sem digest:** uma entrada extra gravada antes desta revisão conta como lente faltante (`missing_digest`) até ser recoletada.
 - Regra e efeitos: §77 da spec do Minerador e seção 8 do [adendo](../03-minerador/propostas/adendo-derivacao-v4-quatro-lentes-2026-09-23.md).
+
+### Revisão — consumidores ligados (onda 2 e 3, 2026-09-23)
+
+- **Arquiteto:** formação, territorial e SERP por keyword leem a canônica em corpo e as extras pelo modo `digest`. Todo coletor da canônica grava em depth 20. O plano de chamadas lê só em modo `meta` e é mostrado antes de pagar. Ver o [adendo das 4 lentes do Arquiteto](../04-arquiteto/propostas/adendo-quatro-lentes-arquiteto-2026-09-23.md).
+- **Radar:** a SERP do artigo, a pesquisa auxiliar e o apoio Google da Amazon usam cache primeiro nas 4 lentes, com `collectedBy: radar`. As entradas pagas pelo Radar servem ao Minerador e ao Arquiteto (D9: a proveniência na Qualificação ainda não mostra `collectedBy`). Ver a [SDD do Radar](../05-radar/propostas/sdd-radar-quatro-lentes-cache-2026-09-23.md).
+- **Redator:** o leitor de evidências só lê, nunca coleta: modo `observation` e `digest` nas extras, e o corpo da canônica sob demanda.
+- **Pendente do dono do cache:** o digest ainda não traz itens `video` com título e URL próprios e usa `rank_group`. A diferença fica declarada no marcador de lentes.

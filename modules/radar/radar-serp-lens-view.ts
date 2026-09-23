@@ -26,7 +26,7 @@ const QUEM_PAGOU: Record<string, string> = { minerador: "Minerador", arquiteto: 
 export type RadarFrozenLensRow = { lens: string; name: string; observed: boolean; detail: string };
 
 export type RadarFrozenLensView = {
-  /** `frozen`: há cópia; `legacy`: finalizada antes das lentes; `absent`: depois, sem SERP conferida. */
+  /** `frozen`: há cópia; `legacy`: finalizada antes das lentes; `absent`: depois, sem cópia gravada (causa não afirmada). */
   state: "frozen" | "legacy" | "absent";
   label: string;
   /** A versão curta, para um campo de card. */
@@ -87,7 +87,7 @@ export function radarFrozenLensView(bundle: { frozenAt?: string | null } | null 
       }
       : {
         state: "absent",
-        label: "Lentes não congeladas nesta investigação: a SERP que ela leu não trazia as quatro lentes conferidas no FINALIZE.",
+        label: "Lentes não congeladas nesta investigação: o FINALIZE não gravou cópia das lentes (a SERP lida não trazia as quatro lentes conferidas, ou a investigação foi finalizada antes de o FINALIZE copiá-las).",
         shortLabel: "Não congeladas",
         rows: [], auxiliary: [], notes: [],
       };
