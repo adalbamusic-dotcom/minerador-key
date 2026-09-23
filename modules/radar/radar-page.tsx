@@ -55,7 +55,16 @@ import { RadarAmazonTargetSetup } from "./radar-amazon-target-setup";
 import { radarAmazonEligibleCandidates } from "@/lib/radar/amazon-eligibility";
 import { postRadarWriterHandoff, postRadarWriterHandoffBatch, radarWriterHandoffBatchSummary } from "@/lib/radar/writer-handoff-client";
 import { RadarExportRefusedError, radarDossierExportNotice, radarExportFailureNotice, radarPartiallySelectedSilos, radarSiloExportNotice, radarSiloExportPreview, radarSiloExportScope, radarSiloExportScopeLimitNotice, type RadarExportNotice, type RadarSiloExportResponseView } from "@/lib/radar/portable-silo-scope";
-import { radarSiloExportSizeNotice } from "@/lib/radar/portable-export-estimate";
+import {
+  RADAR_EXPORT_EXCEL_HINT,
+  RADAR_EXPORT_MODES,
+  RADAR_EXPORT_MODE_DEFAULT,
+  RADAR_EXPORT_MODE_STORAGE_KEY,
+  radarExportModeLabel,
+  radarExportModeOf,
+  radarSiloExportSizeNotice,
+  type RadarExportMode,
+} from "@/lib/radar/portable-export-estimate";
 import { RADAR_STORED_ZIP_MIME, radarStoredZipOfTexts } from "@/lib/radar/stored-zip";
 import { radarCompetitiveBlueprintViewOfAnalysis, type RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
 import { buildRadarMultimodalBlueprint, type RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
@@ -501,6 +510,35 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * dossiê editorial. Um menu diz isso; dois botões escondem.
    */
   const [menuDeExport, setMenuDeExport] = useState(false);
+  /**
+   * ===== 2026-09-23 · O FORMATO DO CSV: "Para escrever" (padrão) ou "Completo (técnico)" =====
+   *
+   * O dono do produto achou o CSV inútil para escrever: 61 a 63 colunas, pares
+   * Markdown + JSON, telemetria. O padrão passou a ser o formato "Para
+   * escrever" (13 colunas); o de antes continua disponível para auditoria.
+   *
+   * A escolha é lembrada no navegador só como conveniência de apresentação
+   * (AGENTS §10): quem decide o conteúdo é o servidor, e sem a lembrança a
+   * tela volta ao padrão. A leitura é depois da montagem — ler no primeiro
+   * render divergiria do HTML do servidor —, e as duas pontas são protegidas:
+   * janela privada ou armazenamento bloqueado não derrubam o menu.
+   */
+  const [modoDoExport, setModoDoExport] = useState<RadarExportMode>(RADAR_EXPORT_MODE_DEFAULT);
+  useEffect(() => {
+    try {
+      setModoDoExport(radarExportModeOf(window.localStorage.getItem(RADAR_EXPORT_MODE_STORAGE_KEY)));
+    } catch {
+      /* Sem armazenamento, fica o padrão. */
+    }
+  }, []);
+  const escolherModoDoExport = (modo: RadarExportMode) => {
+    setModoDoExport(modo);
+    try {
+      window.localStorage.setItem(RADAR_EXPORT_MODE_STORAGE_KEY, modo);
+    } catch {
+      /* A escolha vale para esta sessão da tela, e isso basta. */
+    }
+  };
   /**
    * ===== 2026-09-23 · O AVISO DO EXPORT TEM SEVERIDADE PRÓPRIA =====
    *
@@ -2462,7 +2500,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const resposta = await fetch("/api/editorial/radar-export", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ brandId: selectedBrandId, articleIds: alvo }),
+        body: JSON.stringify({ brandId: selectedBrandId, articleIds: alvo, mode: modoDoExport }),
       });
       const corpo = await resposta.json().catch(() => ({}));
       if (!resposta.ok || !corpo?.success) throw new RadarExportRefusedError(corpo?.error || "Não foi possível exportar os dossiês.", corpo?.refused);
@@ -2551,7 +2589,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const resposta = await fetch("/api/editorial/radar-export", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ brandId: selectedBrandId, articleIds: escopo.articleIds, groupBy: "silo" }),
+        body: JSON.stringify({ brandId: selectedBrandId, articleIds: escopo.articleIds, groupBy: "silo", mode: modoDoExport }),
       });
       const corpo = await resposta.json().catch(() => ({}));
       if (!resposta.ok || !corpo?.success) {
@@ -4250,7 +4288,31 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
           <span>{exportando ? "Exportando…" : "Exportar"}</span>
           <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
-        {menuDeExport ? <div role="menu" className="absolute right-0 top-full z-50 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-md border border-divider bg-surface-elevated p-1 shadow-lg">
+        {menuDeExport ? <div role="menu" className="absolute right-0 top-full z-50 mt-1 w-96 max-w-[calc(100vw-2rem)] rounded-md border border-divider bg-surface-elevated p-1 shadow-lg">
+          {/*
+            * ===== 2026-09-23 · O FORMATO VEM ANTES DO QUE EXPORTAR =====
+            *
+            * "Para escrever (recomendado)" primeiro, "Completo (técnico)" depois,
+            * como escolha única: vale para o silo completo e para os dossiês
+            * avulsos. Rádio nativo, 14px, tokens do sistema visual; a dica do
+            * Excel fica logo abaixo, uma vez.
+            */}
+          <fieldset className="mb-1 border-b border-divider px-1 pb-2 pt-1" data-testid="radar-modo-do-export">
+            <legend className="px-1 pb-1 text-sm font-semibold text-foreground/85">Formato do CSV</legend>
+            <div role="radiogroup" aria-label="Formato do CSV" className="grid gap-1">
+              {RADAR_EXPORT_MODES.map(opcao => {
+                const escolhido = modoDoExport === opcao.mode;
+                return <label key={opcao.mode} className={`flex cursor-pointer items-start gap-2 rounded px-2 py-2 text-sm ${escolhido ? "bg-context-accent/10 text-foreground" : "text-foreground/85 hover:bg-surface-subtle"}`}>
+                  <input type="radio" name="radar-modo-do-export" value={opcao.mode} checked={escolhido} onChange={() => escolherModoDoExport(opcao.mode)} className="mt-1 shrink-0 accent-context-accent focus-visible:ring-2 focus-visible:ring-context-accent/40" />
+                  <span className="block min-w-0">
+                    <strong className="block font-semibold">{opcao.label}</strong>
+                    <span className="block text-text-muted">{opcao.helper}</span>
+                  </span>
+                </label>;
+              })}
+            </div>
+            <p className="mt-1 px-2 text-sm text-text-muted">{RADAR_EXPORT_EXCEL_HINT}</p>
+          </fieldset>
           {/*
             * ===== 2026-09-23 · O EXPORT RECOMENDADO VEM PRIMEIRO =====
             *
@@ -4275,6 +4337,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
               <span className="shrink-0 rounded border border-context-accent/35 px-1.5 py-0.5 text-sm font-semibold text-context-accent">Recomendado</span>
             </span>
             <span className="mt-0.5 block text-text-muted">Todos os artigos finalizados de cada silo, na ordem do silo, com a SERP de cada um.</span>
+            <span className="mt-0.5 block text-text-muted" data-testid="radar-silos-formato">Formato: {radarExportModeLabel(modoDoExport)}</span>
             <span className="mt-0.5 block text-text-muted">{radarSiloExportPreview(radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds, siloVersions: pipeline.siloVersions }))}</span>
             {avisoDeTamanhoDoExport ? <span className="mt-1 block" data-testid="radar-silos-size-estimate"><strong className="font-semibold text-warning">{avisoDeTamanhoDoExport.title}:</strong> {avisoDeTamanhoDoExport.message}</span> : null}
           </button>
@@ -4282,7 +4345,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
             type="button"
             role="menuitem"
             onClick={() => { setMenuDeExport(false); grid.exportRows(grid.queriedRows, "planilha"); }}
-            className="block w-full rounded px-2 py-1.5 text-left text-xs text-foreground/85 hover:bg-surface-subtle"
+            className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle"
             data-testid="radar-export-grid"
           >
             <strong className="block font-semibold">Planilha atual</strong>
@@ -4292,11 +4355,11 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
             type="button"
             role="menuitem"
             onClick={() => { setMenuDeExport(false); void exportarDossiesFinalizados(); }}
-            className="block w-full rounded px-2 py-1.5 text-left text-xs text-foreground/85 hover:bg-surface-subtle"
+            className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle"
             data-testid="radar-export-dossiers"
           >
             <strong className="block font-semibold">Dossiês editoriais finalizados (CSV)</strong>
-            <span className="block text-text-muted">O dossiê de escrita para usar fora da plataforma.</span>
+            <span className="block text-text-muted">Os artigos selecionados, sem o contexto do silo. Formato: {radarExportModeLabel(modoDoExport)}.</span>
           </button>
         </div> : null}
       </div>

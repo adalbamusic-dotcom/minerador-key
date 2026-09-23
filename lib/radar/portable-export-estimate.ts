@@ -109,3 +109,54 @@ export function radarSiloExportSizeNotice(input: {
     ].join(" "),
   };
 }
+
+/* ======================= 2026-09-23 · o formato do CSV ======================= */
+
+/**
+ * ===== DOIS FORMATOS, UMA ESCOLHA =====
+ *
+ * "Para escrever" é o padrão da tela: 13 colunas fixas, o que uma IA ou um
+ * redator precisa (`lib/radar/portable-writing-export.ts`). "Completo
+ * (técnico)" é o formato de antes, sem mudança, para auditoria. A LEITURA do
+ * banco é a mesma nos dois — o que muda é o arquivo.
+ *
+ * Os tamanhos por artigo são os medidos no arquivo real do usuário (formato
+ * completo: 180 a 280 mil caracteres por artigo, 61 a 63 colunas) e na amostra
+ * offline do formato novo (8 a 14 mil). Estimativa, rotulada como tal.
+ */
+export type RadarExportMode = "writing" | "full";
+
+export const RADAR_EXPORT_MODE_DEFAULT: RadarExportMode = "writing";
+
+/** Chave de preferência de apresentação no navegador. Nunca fonte de verdade. */
+export const RADAR_EXPORT_MODE_STORAGE_KEY = "minerador-key.radar.export-mode";
+
+export const RADAR_EXPORT_MODES: ReadonlyArray<{ mode: RadarExportMode; label: string; helper: string; columns: string; charsPerArticle: string }> = [
+  {
+    mode: "writing",
+    label: "Para escrever (recomendado)",
+    helper: "O que a IA ou o redator precisa: 13 colunas, cerca de 10 mil caracteres por artigo.",
+    columns: "13 colunas",
+    charsPerArticle: "cerca de 10 mil caracteres por artigo",
+  },
+  {
+    mode: "full",
+    label: "Completo (técnico)",
+    helper: "Tudo o que o Radar gravou, para auditoria. Não use para escrever: 61 a 63 colunas, 180 mil caracteres ou mais por artigo, e o Excel corta células acima de 32.767 caracteres.",
+    columns: "61 a 63 colunas",
+    charsPerArticle: "180 mil caracteres ou mais por artigo",
+  },
+];
+
+/** A dica de abertura: o Excel em português separa por ";", e o arquivo usa ",". */
+export const RADAR_EXPORT_EXCEL_HINT = "No Excel em português, abra por Dados > De Texto/CSV (o arquivo usa vírgula). Google Sheets e IAs leem direto.";
+
+/** Qualquer valor que não seja "full" é o padrão: preferência gravada corrompida não muda o formato. */
+export function radarExportModeOf(valor: unknown): RadarExportMode {
+  return valor === "full" ? "full" : RADAR_EXPORT_MODE_DEFAULT;
+}
+
+/** O rótulo curto do formato escolhido, para o item do menu. */
+export function radarExportModeLabel(mode: RadarExportMode): string {
+  return mode === "full" ? "completo (técnico)" : "para escrever";
+}

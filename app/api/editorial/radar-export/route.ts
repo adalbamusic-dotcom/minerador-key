@@ -42,6 +42,8 @@ import {
   radarSiloMemberDescriptorsWithTitles,
   type RadarPortableExportAssembledArticle,
 } from "@/lib/radar/portable-export-batch";
+import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
+import type { RadarWritingPublication } from "@/lib/radar/portable-writing-export";
 import type { RadarCanonicalItemIdentity } from "@/lib/server/radar-canonical-authorities";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 
@@ -106,6 +108,12 @@ const CorpoSchema = z.object({
   articleIds: z.array(z.string().trim().min(1).max(256)).min(1).max(RADAR_EXPORT_MAX_ARTICLES),
   /** Aditivo: sem ele, a resposta é a de antes (um CSV para o lote). */
   groupBy: z.literal("silo").optional(),
+  /**
+   * 2026-09-23 · Aditivo: o formato do CSV. Sem ele, a resposta é a de antes
+   * ("full", o formato completo/técnico): quem chamava continua recebendo as
+   * mesmas colunas. A tela manda "writing", o padrão dela.
+   */
+  mode: z.enum(["writing", "full"]).optional(),
 }).strict();
 
 const noStoreHeaders = { "Cache-Control": "no-store" };
@@ -143,6 +151,14 @@ export async function POST(request: Request) {
     const recusados: Array<{ articleId: string; code: string; reason: string }> = [];
     /* O que o plano por silo precisa saber de CADA artigo pedido — finalizado ou não. */
     const itensDoSilo: RadarSiloExportItem[] = [];
+    /*
+     * 2026-09-23 · A PÁGINA PUBLICADA, PARA O FORMATO "PARA ESCREVER".
+     *
+     * Sai do ArticleDNA que o laço JÁ leu (mesma marca, mesmo artigo): URL
+     * publicada, canonical, slug e a política da principal. Nenhuma leitura
+     * nova; o formato completo não usa este mapa.
+     */
+    const publicacoes = new Map<string, RadarWritingPublication>();
 
     /*
      * O ARTIGO RECUSADO CONTINUA SENDO MEMBRO DO SILO.
@@ -392,6 +408,14 @@ export async function POST(request: Request) {
         keyword: keywords.principal,
       });
 
+      publicacoes.set(articleId, {
+        published: fundamentoDoArtigo.published,
+        publishedUrl: fundamentoDoArtigo.publishedUrl,
+        canonical: fundamentoDoArtigo.canonical,
+        slug: fundamentoDoArtigo.slug,
+        principalPolicy: fundamentoDoArtigo.principalPolicy,
+      });
+
       /*
        * A CHAVE DO SILO É `RadarItem.siloId`: é o silo já resolvido na
        * importação, inclusive para ArticleDNA antigo que não o declara. Só
@@ -477,6 +501,49 @@ export async function POST(request: Request) {
         memberDescriptors: radarSiloMemberDescriptorsWithTitles(artefatos.articles, input.brandId),
       })
       : null;
+
+    /*
+     * ===== 2026-09-23 · O FORMATO "PARA ESCREVER" =====
+     *
+     * As MESMAS entradas (`montadas`), as MESMAS lentes e o MESMO plano do
+     * formato completo — só a projeção muda: 13 colunas fixas, com uma linha
+     * de topo por arquivo. Nenhuma leitura a mais: tudo o que a ponte usa já
+     * está em memória. Sem `mode`, nada disto roda e a resposta é a de antes.
+     */
+    if (input.mode === "writing") {
+      if (!montadas.length) {
+        return NextResponse.json({
+          success: false,
+          code: "radar_export_empty",
+          error: "Nenhum dos artigos selecionados tem investigação finalizada para exportar.",
+          refused: recusados,
+          ...(plano ? { warnings: plano.warnings, emptySilos: radarPortableExportEmptySilos(plano) } : {}),
+        }, { status: 409, headers: noStoreHeaders });
+      }
+      const escrita = radarPortableWritingExport({ articles: montadas, lenses: lentes, plan: plano, publications: publicacoes, today: exportedAt });
+      const bloqueados = escrita.blocked ? ` ${escrita.blocked} com bloqueio para escrever: veja a coluna pode_escrever.` : "";
+      return radarPortableExportStreamResponse({
+        success: true,
+        mode: "writing",
+        ...(plano ? {} : { csv: escrita.csv, filename: escrita.filename }),
+        exported: escrita.exported,
+        blocked: escrita.blocked,
+        refused: recusados,
+        headline: recusados.length
+          ? `${escrita.exported} artigo(s) exportado(s) para escrever; ${recusados.length} artigo(s) ficaram de fora por não estarem finalizados.${bloqueados}`
+          : `${escrita.exported} artigo(s) exportado(s) para escrever.${bloqueados}`,
+        exportedAt,
+        serpCacheReadFailed: lentes.readFailed,
+        ...(plano
+          ? {
+            files: escrita.files,
+            archiveFilename: escrita.archiveFilename,
+            emptySilos: radarPortableExportEmptySilos(plano),
+            warnings: plano.warnings,
+          }
+          : {}),
+      }, { headers: noStoreHeaders });
+    }
 
     /* As lentes e o contexto do silo entram na linha pela ponte pura, testada com o plano real. */
     const linhaPorArtigo = radarPortableExportRows({ articles: montadas, lenses: lentes, plan: plano });
@@ -633,6 +700,9 @@ function identidadeDoArticleDna(payload: unknown) {
     audience: texto(dna.audience),
     promise: texto(dna.promise),
     published,
+    /* 2026-09-23 · só o formato "Para escrever" lê estes dois; ausentes, ele diz "estado desconhecido". */
+    publishedUrl: texto(publicada.publishedUrl),
+    principalPolicy: texto(dna.primaryKeywordPolicy),
     /*
      * PUBLICADO TRAVA SLUG E CANONICAL, mesmo sem a lista declarada.
      *
