@@ -224,7 +224,7 @@ test("Radar não confunde identidade técnica da linha com identidade editorial 
   assert.match(page, /return \{ articleId: row\.articleId,/);
   assert.match(page, /const radarItemForArticleId = \(articleId: string\) => pipeline\.radarItems\.find\(row => row\.articleId === articleId\)/);
   assert.match(page, /const rows = ids\.map\(id => radarItemForArticleId\(id\)\)/);
-  assert.match(page, /pipeline\.collectSerp\(row\.articleId, [\s\S]*row\.articleDnaVersionId\)/);
+  assert.match(page, /pipeline\.collectSerp\(row\.articleId, [^;]*row\.articleDnaVersionId(?:, options)?\)/);
   assert.match(page, /topicSuggestionsToRadarTopics\(row\.articleId, suggestions\)/);
   assert.match(page, /canUndoTopics=\{Boolean\(activeRadarItem && topicHistoryByArticle\[activeRadarItem\.articleId\]/);
 });

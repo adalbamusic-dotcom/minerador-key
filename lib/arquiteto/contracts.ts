@@ -433,8 +433,14 @@ export type ArticleControlContext = z.infer<typeof ArticleControlContextSchema>;
 export const EditorialUnitDeclarationSchema = z.discriminatedUnion("source", [
   z.object({
     source: z.literal("potential"),
-    /** Previsão para keyword nova: o que ela daria se virasse página. */
-    unit: z.enum(["silo", "article"]),
+    /**
+     * Previsão para keyword nova: o que ela daria se virasse página.
+     *
+     * Os mesmos quatro tipos que o Minerador grava em `keyword_page_type`.
+     * Aceitar só silo/artigo aqui descartaria em silêncio a keyword que o
+     * humano marcou como landing page ou página de serviço.
+     */
+    unit: z.enum(["silo", "article", "landing_page", "service_page"]),
     confidence: ConfidenceSchema.nullable().default(null),
     reasons: z.array(z.string().min(1)).default([]),
   }).strict(),

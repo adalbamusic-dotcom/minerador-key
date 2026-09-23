@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { loadCanonicalArquitetoWorkspace } from "@/lib/server/arquiteto-workspace";
+import { architectPatchKeywordReadInput, loadCanonicalArquitetoWorkspace, readArchitectPatchKeywords } from "@/lib/server/arquiteto-workspace";
 import { pipelineArtifactErrorResponse } from "@/lib/server/arquiteto-persistence";
 import { resolvePipelineContext, PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
 import { WorkflowRepository } from "@/lib/server/pipeline-repositories";
@@ -16,8 +16,21 @@ import { readArchitectureMarker } from "@/lib/server/arquiteto-architecture-mark
 import { createSiloWorkingCopy, listSiloWorkingCopies, updateSiloWorkingCopy } from "@/lib/server/arquiteto-silo-working-copy-store";
 import { SiloWorkingCopyRefSchema } from "@/lib/arquiteto/silo-working-copy-record";
 import { readArticleKgrDecision } from "@/lib/arquiteto/article-kgr-decision";
+import {
+  SerpPrimaryAcceptanceSchema,
+  acceptSerpPrimaryProposal,
+  readKeywordTerritoryRef,
+  readTerritoryPrimaryKeyword,
+  territoryCreatePrimaryRefusal,
+  territoryPrimaryChangeRefusal,
+} from "@/lib/arquiteto/silo-primary-acceptance";
 
 const QuerySchema = z.object({ brandId: z.string().uuid() });
+// Parâmetro aditivo: só "full" tem efeito. Valor desconhecido é ignorado, como
+// qualquer outro parâmetro da URL antes dele, e não vira 400.
+function keywordDetailOf(searchParams: URLSearchParams) {
+  return searchParams.get("keywordDetail") === "full" ? "full" as const : undefined;
+}
 const AssignmentSchema = z.object({
   workingArticleId: z.string().min(1).nullable().optional(),
   clusterId: z.string().min(1).nullable().optional(),
@@ -71,6 +84,14 @@ const PatchSchema = z.object({
     expectedLock: z.number().int().positive(),
     territory: TerritoryDraftSchema,
   }).strict()).max(100).optional(),
+  // Aceite humano da proposta da SERP para a primária do Silo (adendo das 4
+  // lentes, A9). O corpo não traz ator nem hora: os dois são do servidor.
+  territoryPrimaryAcceptances: z.array(z.object({
+    territoryRef: TerritoryRefSchema,
+    expectedLock: z.number().int().positive(),
+    territory: TerritoryDraftSchema,
+    acceptance: SerpPrimaryAcceptanceSchema,
+  }).strict()).max(20).optional(),
   // Working copy de Silo: operações de EDIÇÃO da cópia de trabalho. Consolidar
   // o Silo é outro ato, e não passa por aqui.
   siloWorkingCopyCreates: z.array(z.object({
@@ -86,6 +107,7 @@ const PatchSchema = z.object({
     body.updates?.length
     || body.territoryCreates?.length
     || body.territoryUpdates?.length
+    || body.territoryPrimaryAcceptances?.length
     || body.siloWorkingCopyCreates?.length
     || body.siloWorkingCopyUpdates?.length,
   ),
@@ -94,12 +116,13 @@ const PatchSchema = z.object({
 
 export async function GET(request: Request) {
   try {
-    const query = QuerySchema.parse({ brandId: new URL(request.url).searchParams.get("brandId") || "" });
+    const searchParams = new URL(request.url).searchParams;
+    const query = QuerySchema.parse({ brandId: searchParams.get("brandId") || "" });
     const context = await resolvePipelineContext({ brandId: query.brandId, module: "arquiteto", action: "view" });
     // Hidratação é LEITURA: o boot devolve o parecer já gravado e nunca
     // dispara consulta nova ao provider.
     const [workspace, territories, siloWorkingCopies, territorialSerp, articleFormationSerp, territorialAi, architectureMarker, articleFormationMarker] = await Promise.all([
-      loadCanonicalArquitetoWorkspace(context),
+      loadCanonicalArquitetoWorkspace(context, { keywordDetail: keywordDetailOf(searchParams) }),
       listTerritoryWorkflowItems(context),
       listSiloWorkingCopies(context),
       listTerritorialSerpAssessments(context),
@@ -123,9 +146,9 @@ export async function PATCH(request: Request) {
     const parsed = PatchSchema.parse(await request.json());
     const context = await resolvePipelineContext({ brandId: parsed.brandId, module: "arquiteto", action: "edit" });
     const repository = new WorkflowRepository(context);
-    const keywordResult = await context.supabase.from("minerador_keywords").select("id,status,kgr_score,analise_semantica").eq("brand_id", context.brandId);
-    if (keywordResult.error) throw keywordResult.error;
-    const keywordById = new Map((keywordResult.data || []).map(row => [String(row.id), row]));
+    // Só as keywords dos itens enviados, lidas antes de qualquer gravação, como
+    // antes; a marca é filtrada e `deleted_at` continua sem filtro.
+    const keywordById = await readArchitectPatchKeywords(context, architectPatchKeywordReadInput(parsed.updates || []));
     const protectedKeys = new Set(["clusterId", "provisionalGroupId", "siloId", "silo_id", "siloName", "computedSlug", "slug_sugerido", "principalKeywordId", "role"]);
     const updated = [];
     for (const update of parsed.updates || []) {
@@ -162,14 +185,55 @@ export async function PATCH(request: Request) {
       if ("territoryRef" in create.territory) {
         throw new PipelineRuntimeError("CONFLICT", "O territoryRef é emitido pelo servidor e não pode ser declarado na criação.", 409);
       }
+      // Primária de SERP ou humana não nasce na criação: só a declaração publicada.
+      const primariaNaCriacao = territoryCreatePrimaryRefusal(create.territory);
+      if (primariaNaCriacao) throw new PipelineRuntimeError("CONFLICT", primariaNaCriacao, 409);
       territories.push(await createTerritoryWorkflowItem(context, create.territory));
     }
+    // A primária vigente e a origem do Silo, lidas estreitas e filtradas pela
+    // marca. Falha fecha: a trava abaixo não escreve sem saber o que está gravado.
+    const territorioVigente = async (territoryRef: string) => {
+      const lida = await readTerritoryPrimaryKeyword(context.supabase, context.brandId, territoryRef);
+      if (lida.state === "read_failed") throw new PipelineRuntimeError("QUERY_FAILURE", "Não foi possível ler a primária vigente do Silo; nada foi gravado.", 503);
+      if (lida.state === "missing") throw new PipelineRuntimeError("CONFLICT", "O território não existe nesta Brand.", 409);
+      return lida;
+    };
+    const primariaVigente = async (territoryRef: string) => (await territorioVigente(territoryRef)).primaryKeyword;
     for (const update of parsed.territoryUpdates || []) {
       const declaredRef = update.territory.territoryRef;
       if (declaredRef !== undefined && declaredRef !== update.territoryRef) {
         throw new PipelineRuntimeError("CONFLICT", "A identidade do território é imutável.", 409);
       }
+      // A edição genérica não troca nem apaga a primária do Silo (AGENTS §9, §11).
+      const primariaAlterada = territoryPrimaryChangeRefusal(await primariaVigente(update.territoryRef), update.territory);
+      if (primariaAlterada) throw new PipelineRuntimeError("CONFLICT", primariaAlterada, 409);
       territories.push(await updateTerritoryWorkflowItem(context, update.territoryRef, update.expectedLock, update.territory));
+    }
+    for (const acceptance of parsed.territoryPrimaryAcceptances || []) {
+      const declaredRef = acceptance.territory.territoryRef;
+      if (declaredRef !== undefined && declaredRef !== acceptance.territoryRef) {
+        throw new PipelineRuntimeError("CONFLICT", "A identidade do território é imutável.", 409);
+      }
+      // A SERP propôs; a pessoa da sessão aceita. Ator e hora são do servidor,
+      // e a precedência humano > publicado > SERP vale também aqui. A origem
+      // do Silo e a membership da keyword vêm do banco, não do corpo.
+      const vigente = await territorioVigente(acceptance.territoryRef);
+      const daKeyword = await readKeywordTerritoryRef(context.supabase, context.brandId, acceptance.acceptance.keywordId);
+      if (daKeyword.state === "read_failed") throw new PipelineRuntimeError("QUERY_FAILURE", "Não foi possível ler o Silo da keyword aceita; nada foi gravado.", 503);
+      const aceite = acceptSerpPrimaryProposal({
+        current: vigente.primaryKeyword,
+        acceptance: acceptance.acceptance,
+        actorUserId: context.actorUserId,
+        confirmedAt: new Date().toISOString(),
+        territoryRef: acceptance.territoryRef,
+        territory: vigente.origin,
+        keywordTerritoryRef: daKeyword.state === "found" ? daKeyword.territoryRef : null,
+      });
+      if (!aceite.ok) throw new PipelineRuntimeError("CONFLICT", aceite.reason, 409);
+      territories.push(await updateTerritoryWorkflowItem(context, acceptance.territoryRef, acceptance.expectedLock, {
+        ...acceptance.territory,
+        primaryKeyword: aceite.primary,
+      }));
     }
     const siloWorkingCopies = [];
     for (const create of parsed.siloWorkingCopyCreates || []) {

@@ -51,6 +51,12 @@ test("o consumidor do Arquiteto usa a SERP orgânica normal e não allintitle", 
     onProviderResponse: (diagnostic) => { providerDiagnostic = diagnostic; },
   });
   assert.equal(requestStarted, true);
+  /*
+   * Isto fixa o PADRÃO do utilitário `collectDataForSeoCompatibilitySnapshot`
+   * (`regular`, sem `os`), não mais a rota de formação: desde 2026-09-23 a
+   * rota `/api/arquiteto/serp` paga pelo cache de SERP, em `advanced` e com a
+   * lente explícita — guardado em tests/arquiteto-serp-cache-formacao.test.mts.
+   */
   assert.equal(requestedUrl, "https://api.dataforseo.test/v3/serp/google/organic/live/regular");
   assert.equal(DATAFORSEO_SERP_COMPATIBILITY_STATUS, "AVAILABLE_FROM_GLOBAL_DATAFORSEO");
   assert.equal(snapshot.provider, "dataforseo");

@@ -48,6 +48,6 @@ test("pacote histórico Serper válido e aprovado gera handoff sem perder a prov
 
 test("nova coleta SERP não expõe chamada Serper", async () => {
   const route = await readFile(new URL("../app/api/editorial/serp/route.ts", import.meta.url), "utf8");
-  assert.match(route, /collectDataForSeoSerpSnapshot/);
+  assert.match(route, /collectRadarSerpLensSnapshot/);
   assert.doesNotMatch(route, /collectSerperSnapshot|SERPER_API_KEY|\bSerper\b|RapidAPI/i);
 });

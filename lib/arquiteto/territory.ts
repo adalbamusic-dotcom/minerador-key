@@ -371,6 +371,21 @@ export const TerritoryPrimaryKeywordSchema = z.discriminatedUnion("electedBy", [
       score: z.number(),
     }).strict(),
     electedAt: z.string().min(1),
+    /**
+     * QUEM ACEITOU A PROPOSTA DA SERP, E QUANDO (adendo das 4 lentes, A9).
+     *
+     * A SERP propõe; a primária só existe depois que uma pessoa aceita. O
+     * servidor carimba o ator da sessão e a hora — o navegador não declara
+     * nenhum dos dois. `replacedKeywordId` guarda a primária anterior quando o
+     * aceite trocou uma primária que já tinha sido aceita.
+     *
+     * Aditivo e opcional: território antigo sem o campo continua válido.
+     */
+    confirmedBy: z.object({
+      actorUserId: z.string().min(1),
+      confirmedAt: z.string().min(1),
+      replacedKeywordId: z.string().min(1).optional(),
+    }).strict().optional(),
   }).strict(),
   z.object({
     electedBy: z.literal("published_declaration"),

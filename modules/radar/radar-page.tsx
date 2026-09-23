@@ -27,6 +27,8 @@ import { buildRadarEditorialContext, radarPrincipalHydrated } from "@/lib/radar/
 import { buildRadarArticleResearchContext } from "@/lib/radar/article-research-context";
 import { buildRadarDeepResearchView } from "@/lib/radar/deep-research-view";
 import type { SerpResearchSnapshot } from "@/lib/radar/serp/contracts";
+import type { RadarSerpCollectOptions, RadarSerpCollectOutcome } from "@/lib/radar/serp/request";
+import { emptyRadarSerpBatchTally, radarFinalizeReadbackNotice, radarFinalizeSuccessMessage, radarSerpBatchQueueState, radarSerpBatchStartNotice, radarSerpBatchSummary, radarSerpCollectReading, radarStartOnRejectedSerpWarning, tallyRadarSerpBatch, type RadarFinalizeReadbackWatch, type RadarSerpCollectReading, type RadarSerpCollectStatus } from "./radar-serp-collect-notices";
 import { startRadarDeepResearch, settleRadarDeepResearchQuery, finalizeRadarDeepResearch, radarQueryEvidenceFrom, type RadarDeepResearchRecord } from "@/lib/radar/deep-research";
 import { radarCanonicalReusePlan, radarResearchResumption } from "@/lib/radar/research-resumption";
 import { radarResumableRemoteAnalysis, radarUnconfirmedClaimsNotice, type RadarRemoteOnlyClaim } from "@/lib/radar/remote-authority";
@@ -52,6 +54,9 @@ import { radarAmazonDedupeProducts, radarAmazonEmptyTargetFor, radarAmazonParseT
 import { RadarAmazonTargetSetup } from "./radar-amazon-target-setup";
 import { radarAmazonEligibleCandidates } from "@/lib/radar/amazon-eligibility";
 import { postRadarWriterHandoff, postRadarWriterHandoffBatch, radarWriterHandoffBatchSummary } from "@/lib/radar/writer-handoff-client";
+import { RadarExportRefusedError, radarDossierExportNotice, radarExportFailureNotice, radarPartiallySelectedSilos, radarSiloExportNotice, radarSiloExportPreview, radarSiloExportScope, radarSiloExportScopeLimitNotice, type RadarExportNotice, type RadarSiloExportResponseView } from "@/lib/radar/portable-silo-scope";
+import { radarSiloExportSizeNotice } from "@/lib/radar/portable-export-estimate";
+import { RADAR_STORED_ZIP_MIME, radarStoredZipOfTexts } from "@/lib/radar/stored-zip";
 import { radarCompetitiveBlueprintViewOfAnalysis, type RadarCompetitiveBlueprintView } from "@/lib/radar/competitive-blueprint-view";
 import { buildRadarMultimodalBlueprint, type RadarMultimodalBlueprint } from "@/lib/radar/multimodal-blueprint";
 import type { RadarSpecialistCounters } from "@/lib/radar/specialist-lifecycle";
@@ -175,6 +180,20 @@ const TOM_DA_LINHA: Record<RadarOperationalTone, string> = {
   warning: "border-warning text-warning",
 };
 
+/*
+ * A FAIXA DO AVISO DE EXPORT SEGUE A SEVERIDADE (sistema visual §5.1).
+ *
+ * Ela saía sempre na cor de atenção, com `role="status"`: o silo completo
+ * (INFO) parecia parcial, e a falha (ERROR) parecia só um alerta. O toast já
+ * respeitava a severidade; a faixa inline passou a respeitar também, com os
+ * tokens existentes — e a falha é anunciada como alerta.
+ */
+const TOM_DO_AVISO_DE_EXPORT: Record<RadarExportNotice["type"], string> = {
+  info: "border-context-accent/40 bg-context-accent/10 text-context-accent",
+  warning: "border-warning/40 bg-warning-soft/30 text-warning",
+  error: "border-danger/40 bg-danger/10 text-danger",
+};
+
 export function RadarPage({ brandRef }: { brandRef: string }) {
   const { data: session } = useSession(); const router = useRouter(); const { selectedBrandId } = useBrand(); const { pipeline, state } = useReadyPipeline(); const [picker, setPicker] = useState(false); const [notice, setNotice] = useState(""); const [busyArticleId, setBusyArticleId] = useState<string | null>(null); const [reviewingArticleId, setReviewingArticleId] = useState<string | null>(null); const [serpAction, setSerpAction] = useState<RadarSerpAction | null>(null); const serpActionRef = useRef<RadarSerpAction | null>(null); const reviewingArticleIdRef = useRef<string | null>(null); const [expandedRadarId, setExpandedRadarId] = useState<string | null>(null); const [spreadsheetSelection, setSpreadsheetSelection] = useState(createRadarSpreadsheetSelection); const { activeArticleId, selectedArticleIds } = spreadsheetSelection; const [r4LocalByArticle, setR4LocalByArticle] = useState<Record<string, RadarR4LocalArticleState>>({}); const [r4SerpQueue, setR4SerpQueue] = useState<RadarR4SerpQueue | null>(null); const [topicHistoryByArticle, setTopicHistoryByArticle] = useState<Record<string, RadarR5TopicHistory>>({}); const [expertEvidenceByArticle, setExpertEvidenceByArticle] = useState<Record<string, RadarR6ExpertEvidenceInput[]>>({}); const [canonicalExpertEvidenceByArticle, setCanonicalExpertEvidenceByArticle] = useState<Record<string, RadarExpertEvidence[]>>({}); const [expertContributionSummaryByArticle, setExpertContributionSummaryByArticle] = useState<Record<string, { contributionCount: number; pendingCount: number; blockedEvidenceCount: number; remote: true; articleDnaVersionId: string; counters: RadarSpecialistCounters }>>({}); const approvingArticleIdRef = useRef<string | null>(null); const collectingArticleIdRef = useRef<string | null>(null); const generatingReportIdRef = useRef<string | null>(null); const [collectionByArticle, setCollectionByArticle] = useState<Record<string, { state: RadarSerpCollectionState; blockedReason: string | null }>>({});
   /*
@@ -221,7 +240,15 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * o estado derivado no mesmo tique traria o snapshot anterior; o registro da
    * chamada é a única fonte honesta nesse intervalo.
    */
-  const ultimaColetaRef = useRef<{ articleId: string; research: SerpResearchSnapshot | null } | null>(null);
+  const ultimaColetaRef = useRef<{ articleId: string; research: SerpResearchSnapshot | null; reading: RadarSerpCollectReading | null } | null>(null);
+  /*
+   * O FINALIZE ESPERA O READBACK PARA DIZER O HASH — adendo R1, risco 1.
+   *
+   * O servidor carimba standing e lentes no bundle e recalcula o hash. A frase
+   * com o hash sai da versão RELIDA, quando ela chega ao workspace; até lá, a
+   * frase de sucesso não cita hash nenhum.
+   */
+  const [finalizeReadback, setFinalizeReadback] = useState<RadarFinalizeReadbackWatch | null>(null);
   /*
    * A PORTA DA PESQUISA INTEIRA — §6.
    *
@@ -474,6 +501,15 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * dossiê editorial. Um menu diz isso; dois botões escondem.
    */
   const [menuDeExport, setMenuDeExport] = useState(false);
+  /**
+   * ===== 2026-09-23 · O AVISO DO EXPORT TEM SEVERIDADE PRÓPRIA =====
+   *
+   * O `notice` da página é texto e chega ao centro de avisos como INFO. Um
+   * silo que saiu parcial, ou um artigo recusado, é ATENÇÃO — e dizer isso
+   * com a mesma cor de "exportado" seria esconder o faltante. O aviso do
+   * export usa o mesmo mecanismo (`useNoticeBridge`), com o tipo junto.
+   */
+  const [avisoDeExport, setAvisoDeExport] = useState<RadarExportNotice | null>(null);
   const [amazonCandidates, setAmazonCandidates] = useState<{
     term: string;
     items: Array<{ asin: string; title: string; imageUrl: string | null }>;
@@ -902,6 +938,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   const handleExpandedChange = useCallback((id: string | null) => { const rowArticleId = id ? pipeline.radarItems.find(row => row.id === id)?.articleId : null; if ((serpActionRef.current && id && rowArticleId !== serpActionRef.current.articleId) || (reviewingArticleIdRef.current && id && rowArticleId !== reviewingArticleIdRef.current) || (serpAction && id && rowArticleId !== serpAction.articleId) || (reviewingArticleId && id && rowArticleId !== reviewingArticleId)) return; setExpandedRadarId(id); }, [pipeline.radarItems, reviewingArticleId, serpAction]);
   const handleExpertEvidenceChange = useCallback((articleId: string, evidence: RadarR6ExpertEvidenceInput[], summary: RadarSpecialistPanelSummary) => { setExpertEvidenceByArticle(current => ({ ...current, [articleId]: evidence })); setCanonicalExpertEvidenceByArticle(current => ({ ...current, [articleId]: summary.canonicalEvidence })); setExpertContributionSummaryByArticle(current => ({ ...current, [articleId]: { contributionCount: summary.contributionCount, pendingCount: summary.pendingCount, blockedEvidenceCount: summary.blockedEvidenceCount, remote: true, articleDnaVersionId: summary.articleDnaVersionId, counters: summary.counters } })); }, []);
   useNoticeBridge({ notice, module: "radar", area: "Radar", title: "Radar", fallbackSeverity: "INFO" });
+  useNoticeBridge({ notice: avisoDeExport, module: "radar", area: "Radar · Exportação", title: "Radar · Exportação", fallbackSeverity: "INFO" });
   const radarReadbackScopeKey = useMemo(() => {
     if (!selectedBrandId) return null;
     const snapshots = pipeline.serpRecords
@@ -930,6 +967,13 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    */
 
   if (state || !pipeline.snapshot) return state;
+  /*
+   * A versão relida do FINALIZE chegou ao workspace: a frase passa a citar o
+   * hash GRAVADO. Ajuste de estado no render, condicionado e de uma vez só —
+   * o mesmo padrão do rascunho da curadoria —, sem efeito nem leitura nova.
+   */
+  const avisoDoReadback = finalizeReadback ? radarFinalizeReadbackNotice(finalizeReadback, pipeline.radarItems) : null;
+  if (finalizeReadback && avisoDoReadback !== null) { setFinalizeReadback(null); setNotice(avisoDoReadback); }
   const approved = approvedArticleVersions(pipeline.articleVersions, pipeline.versionEvents);
   const resolveRowKeyword = (row: RadarItem) => {
     const article = pipeline.articleVersions[row.articleId]?.payload;
@@ -1447,10 +1491,18 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * YouTube/Amazon, que coleta e PARA (§5). A chamada é a mesma; o que cada um
    * faz com o snapshot é que muda.
    */
-  const coletarSerpDoProvider = (row: RadarItem) =>
-    pipeline.collectSerp(row.articleId, pipeline.snapshot!.brand.localizacao || "Brasil", row.articleDnaVersionId);
+  const coletarSerpDoProvider = (row: RadarItem, options?: RadarSerpCollectOptions) =>
+    pipeline.collectSerp(row.articleId, pipeline.snapshot!.brand.localizacao || "Brasil", row.articleDnaVersionId, options);
 
-  const collect = async (row: RadarItem): Promise<"WAITING_REVIEW" | "FAILED_RETRYABLE" | "FAILED_FINAL"> => {
+  /*
+   * O RESULTADO DECIDE A FRASE E O ESTADO — adendo R2, §10 (achado 5).
+   *
+   * "Atualizar SERP" é cache primeiro: pode voltar sem mudança, com o registro
+   * já gravado e nenhuma versão nova. Nesse caso a tela não anuncia "SERP real
+   * vN coletada" nem reabre a revisão — o estado volta a ser o do snapshot
+   * gravado, e a coleta devolve `UNCHANGED`.
+   */
+  const collect = async (row: RadarItem): Promise<RadarSerpCollectStatus> => {
     if (collectingArticleIdRef.current) return "FAILED_RETRYABLE";
     const resolved = resolveRowKeyword(row);
     if (!resolved.ok) {
@@ -1466,14 +1518,16 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     setBusyArticleId(row.articleId); setNotice("Validando o artigo antes de falar com o DataForSEO…");
     try {
       setCollectionState(row.articleId, "COLLECTING", null);
-      setNotice("Pesquisando a SERP real via DataForSEO…");
-      const record = await coletarSerpDoProvider(row);
-      ultimaColetaRef.current = { articleId: row.articleId, research: record.research || null };
+      setNotice("Pesquisando a SERP real via DataForSEO: cache primeiro, só as lentes que faltam são pagas…");
+      const capturado: { outcome: RadarSerpCollectOutcome | null } = { outcome: null };
+      const record = await coletarSerpDoProvider(row, { onOutcome: resultado => { capturado.outcome = resultado; } });
+      const leitura = radarSerpCollectReading({ record, outcome: capturado.outcome, reviews: pipeline.serpReviews });
+      ultimaColetaRef.current = { articleId: row.articleId, research: record.research || null, reading: leitura };
       setCollectionState(row.articleId, "PERSISTING", null);
-      updateLocalState(row.articleId, current => ({ ...current, serp: { ...current.serp, state: "WAITING_REVIEW", position: current.serp.position || 1, total: current.serp.total || 1, error: null } }));
+      updateLocalState(row.articleId, current => ({ ...current, serp: { ...current.serp, state: leitura.serpState, position: current.serp.position || 1, total: current.serp.total || 1, error: leitura.serpError } }));
       setCollectionState(row.articleId, "SUCCESS", null);
-      setNotice(`SERP real v${record.research?.version || 1} coletada: ${record.research?.organicResults.length || 0} resultado(s). ${record.persistenceMode === "remote" ? "Persistência remota confirmada." : "Coleta concluída, mas a persistência remota não foi confirmada."}`);
-      return "WAITING_REVIEW";
+      setNotice(leitura.notice);
+      return leitura.status;
     } catch (error) {
       /*
        * Vínculo quebrado não é retry.
@@ -1521,19 +1575,30 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
     const queue = createRadarR4SerpQueue(eligible);
     if (!queue.articleIds.length) return;
     setR4SerpQueue(queue);
-    setNotice(mode === "explicit_refresh" ? `Refresh explícito iniciado para ${queue.articleIds.length} artigo(s).` : `Lote SERP iniciado para ${queue.articleIds.length} artigo(s), em sequência.`);
+    /*
+     * O LOTE É CACHE PRIMEIRO, INCLUSIVE O "REFRESH EXPLÍCITO" — adendo R2, §10.
+     *
+     * Nenhum dos dois modos manda `recollect`: pagar de novo uma SERP válida é
+     * "Recoletar agora (pago)", um artigo por vez e com confirmação. O aviso
+     * de início diz o teto de chamadas; o de fim, quantas foram pagas e quantos
+     * artigos voltaram sem mudança.
+     */
+    setNotice(radarSerpBatchStartNotice({ mode, articles: queue.articleIds.length }));
     queue.articleIds.forEach((articleId, index) => updateLocalState(articleId, current => ({ ...current, serp: { state: "QUEUED", position: index + 1, total: queue.articleIds.length, error: null } })));
-    const outcomes: Record<"WAITING_REVIEW" | "FAILED_RETRYABLE" | "FAILED_FINAL", number> = { WAITING_REVIEW: 0, FAILED_RETRYABLE: 0, FAILED_FINAL: 0 };
+    let contagem = emptyRadarSerpBatchTally();
     for (const id of queue.articleIds) {
       const row = radarItemForArticleId(id);
       if (!row) continue;
       setR4SerpQueue(current => current ? updateRadarR4SerpQueueItem(current, id, "RUNNING") : current);
       updateLocalState(row.articleId, current => ({ ...current, serp: { ...current.serp, state: "RUNNING", position: queue.items[id].position, total: queue.items[id].total, error: null } }));
       const outcome = await collect(row);
-      outcomes[outcome] += 1;
-      setR4SerpQueue(current => current ? updateRadarR4SerpQueueItem(current, id, outcome, outcome === "WAITING_REVIEW" ? null : "A coleta falhou; o item pode ser tentado novamente.") : current);
+      const ultima = ultimaColetaRef.current;
+      const leitura = (outcome === "WAITING_REVIEW" || outcome === "UNCHANGED") && ultima?.articleId === row.articleId ? ultima.reading : null;
+      contagem = tallyRadarSerpBatch(contagem, outcome, leitura?.paidCalls ?? null);
+      const estadoNaFila = radarSerpBatchQueueState(outcome, leitura?.serpState ?? null);
+      setR4SerpQueue(current => current ? updateRadarR4SerpQueueItem(current, id, estadoNaFila, outcome === "WAITING_REVIEW" || outcome === "UNCHANGED" ? null : "A coleta falhou; o item pode ser tentado novamente.") : current);
     }
-    setNotice(`Lote SERP concluído: ${outcomes.WAITING_REVIEW} aguardando revisão, ${outcomes.FAILED_RETRYABLE} retry disponível e ${outcomes.FAILED_FINAL} falha(s) final(is).`);
+    setNotice(radarSerpBatchSummary(contagem));
   };
   const reviewSelected = (ids: string[]) => {
     const rows = pipeline.radarItems.filter(row => ids.includes(row.articleId));
@@ -2392,6 +2457,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
 
     setExportando(true);
     setNotice("");
+    setAvisoDeExport(null);
     try {
       const resposta = await fetch("/api/editorial/radar-export", {
         method: "POST",
@@ -2399,18 +2465,116 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         body: JSON.stringify({ brandId: selectedBrandId, articleIds: alvo }),
       });
       const corpo = await resposta.json().catch(() => ({}));
-      if (!resposta.ok || !corpo?.success) throw new Error(corpo?.error || "Não foi possível exportar os dossiês.");
+      if (!resposta.ok || !corpo?.success) throw new RadarExportRefusedError(corpo?.error || "Não foi possível exportar os dossiês.", corpo?.refused);
 
-      const url = URL.createObjectURL(new Blob([corpo.csv], { type: "text/csv;charset=utf-8" }));
-      const ancora = document.createElement("a");
-      ancora.href = url;
-      ancora.download = corpo.filename;
-      ancora.click();
-      URL.revokeObjectURL(url);
+      baixarArquivoDoExport(new Blob([corpo.csv], { type: "text/csv;charset=utf-8" }), corpo.filename);
 
-      setNotice(corpo.headline || "Dossiês exportados.");
+      /*
+       * 2026-09-23 · A RECUSA DEIXOU DE SER IGNORADA.
+       *
+       * O servidor sempre devolveu `refused` com o motivo de cada artigo; a
+       * tela mostrava só a contagem. Agora cada um aparece pelo título — e o
+       * silo selecionado pela metade ganha a recomendação do export por silo.
+       */
+      setAvisoDeExport(radarDossierExportNotice({
+        headline: corpo.headline,
+        refused: corpo.refused,
+        titleOf: tituloDoArtigoExportado,
+        partialSilos: radarPartiallySelectedSilos({ items: pipeline.radarItems, selectedArticleIds: selecionados, siloVersions: pipeline.siloVersions }),
+        serpCacheReadFailed: Boolean(corpo.serpCacheReadFailed),
+      }));
     } catch (erro) {
-      setNotice(erro instanceof Error ? erro.message : "Falha ao exportar os dossiês.");
+      setAvisoDeExport(avisoDeFalhaDoExport(erro, "Falha ao exportar os dossiês."));
+    } finally {
+      setExportando(false);
+    }
+  };
+
+  /** O título que a tela conhece para um artigo recusado: título, slug — nunca o id. */
+  const tituloDoArtigoExportado = (articleId: string): string | null => {
+    const linha = pipeline.radarItems.find(item => item.articleId === articleId);
+    return linha?.title?.trim() || linha?.slug?.trim() || null;
+  };
+
+  /**
+   * O download é ENTREGUE AO NAVEGADOR — e é só isso que a tela sabe. Ele
+   * pode pedir permissão, ser bloqueado ou salvar em outra pasta; por isso
+   * nenhum aviso daqui diz "sucesso confirmado".
+   */
+  const baixarArquivoDoExport = (arquivo: Blob, nome: string) => {
+    const url = URL.createObjectURL(arquivo);
+    const ancora = document.createElement("a");
+    ancora.href = url;
+    ancora.download = nome;
+    ancora.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const avisoDeFalhaDoExport = (erro: unknown, padrao: string): RadarExportNotice =>
+    radarExportFailureNotice(erro, padrao, tituloDoArtigoExportado);
+
+  /**
+   * ===== 2026-09-23 · SILOS COMPLETOS · UM CSV POR SILO — o export recomendado =====
+   *
+   * O CSV é a saída final para escrever com outra ferramenta ou outra IA, e
+   * um artigo de silo escrito sozinho não sabe quem é o Pilar, em que ponto da
+   * ordem ele entra nem o que os irmãos cobrem. Por isso a recomendação é
+   * exportar o SILO: cada arquivo leva os artigos finalizados na ordem do
+   * silo, com a SERP de cada um e o contexto do silo em cada linha.
+   *
+   * ==================== O ESCOPO É O SILO INTEIRO ====================
+   *
+   * Com seleção, os silos das linhas selecionadas — inteiros, porque metade de
+   * um silo é o que este export existe para evitar. Sem seleção, todos os
+   * silos do Radar. Quem monta, ordena e diz o que falta é o servidor.
+   *
+   * ==================== UM ARQUIVO, SEMPRE ====================
+   *
+   * Um silo baixa o CSV direto. Dois ou mais baixam UM .zip, montado aqui sem
+   * compressão e sem dependência nova — vários downloads seguidos esbarrariam
+   * na permissão do navegador para baixar múltiplos arquivos.
+   */
+  const exportarSilosCompletos = async () => {
+    if (exportando) return;
+    if (!selectedBrandId) { setNotice("Selecione uma marca antes de exportar."); return; }
+
+    const escopo = radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds, siloVersions: pipeline.siloVersions });
+    if (!escopo.articleIds.length) { setAvisoDeExport({ type: "warning", message: "Não há artigos do Radar nos silos escolhidos para exportar." }); return; }
+    /* Acima do teto do servidor o pedido voltaria 400 genérico: o aviso diz antes o que fazer. */
+    const acimaDoTeto = radarSiloExportScopeLimitNotice(escopo);
+    if (acimaDoTeto) { setAvisoDeExport(acimaDoTeto); return; }
+
+    setExportando(true);
+    setNotice("");
+    setAvisoDeExport(null);
+    try {
+      const resposta = await fetch("/api/editorial/radar-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ brandId: selectedBrandId, articleIds: escopo.articleIds, groupBy: "silo" }),
+      });
+      const corpo = await resposta.json().catch(() => ({}));
+      if (!resposta.ok || !corpo?.success) {
+        throw new RadarExportRefusedError(corpo?.error || "Não foi possível exportar os silos.", corpo?.refused, corpo?.emptySilos);
+      }
+
+      const arquivos: Array<{ filename: string; csv: string }> = Array.isArray(corpo.files) ? corpo.files : [];
+      let entregue: { filename: string; files: number } | null = null;
+      if (arquivos.length === 1) {
+        baixarArquivoDoExport(new Blob([arquivos[0].csv], { type: "text/csv;charset=utf-8" }), arquivos[0].filename);
+        entregue = { filename: arquivos[0].filename, files: 1 };
+      } else if (arquivos.length > 1) {
+        const nome = corpo.archiveFilename || `radar-silos-${String(corpo.exportedAt || new Date().toISOString()).slice(0, 10)}.zip`;
+        const pacote = radarStoredZipOfTexts(arquivos.map(arquivo => ({ name: arquivo.filename, text: arquivo.csv })), {
+          modifiedAt: corpo.exportedAt ? new Date(corpo.exportedAt) : new Date(),
+        });
+        baixarArquivoDoExport(new Blob([pacote.slice().buffer as ArrayBuffer], { type: RADAR_STORED_ZIP_MIME }), nome);
+        entregue = { filename: nome, files: arquivos.length };
+      }
+
+      setAvisoDeExport(radarSiloExportNotice({ response: corpo as RadarSiloExportResponseView, delivered: entregue, titleOf: tituloDoArtigoExportado }));
+    } catch (erro) {
+      setAvisoDeExport(avisoDeFalhaDoExport(erro, "Falha ao exportar os silos."));
     } finally {
       setExportando(false);
     }
@@ -2903,17 +3067,19 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * 1. A SERP CANÔNICA — coletada quando falta, reaproveitada quando existe.
      */
     let research: SerpResearchSnapshot | null = null;
+    let avisoDeRejeicao: string | null = null;
     if (reaproveitarCanonica) {
       research = data.latestSerpRecord?.research || null;
       setNotice(`SERP principal reaproveitada do que já está gravado (v${research?.version || 1}). ${planoDeReaproveitamento.reason}`);
     } else {
       const status = await collect(target);
       const coletado = ultimaColetaRef.current;
-      research = status === "WAITING_REVIEW" && coletado?.articleId === target.articleId ? coletado.research : null;
+      research = (status === "WAITING_REVIEW" || status === "UNCHANGED") && coletado?.articleId === target.articleId ? coletado.research : null;
       if (!research) {
         registro = settleRadarDeepResearchQuery(registro, consultaCentral.queryId, { execution: "NOT_EXECUTED", reason: "A coleta da SERP não foi concluída; a consulta central não chegou a ser executada." });
         return;
       }
+      avisoDeRejeicao = radarStartOnRejectedSerpWarning(coletado?.reading);
       registro = settleRadarDeepResearchQuery(registro, consultaCentral.queryId, {
         execution: "EXECUTED",
         reason: `SERP canônica do artigo: ${research.organicResults.length} resultado(s) observados. Ela é a que vai à revisão e à aprovação.`,
@@ -2993,7 +3159,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * amarra decisões, hash e versão do snapshot corrente.
        */
       const next = await curationVersionFor(target, data.article, research, registro);
-      await persistSerpAnalysis(target.articleId, next, aviso);
+      await persistSerpAnalysis(target.articleId, next, avisoDeRejeicao ? `${aviso} ${avisoDeRejeicao}` : aviso);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Não foi possível iniciar a pesquisa profunda.");
     } finally { releaseSerpAction(target.articleId, "start"); }
@@ -3143,12 +3309,22 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
        * saída era tentar de novo às cegas. Aqui a falha sobe com HTTP e code.
        */
       const gravado = await pipeline.saveRadarAnalysis(target.articleId, next, { requireRemote: true });
+      /*
+       * O HASH DA FRASE É O GRAVADO — adendo R1, risco 1; R3, risco 4.
+       *
+       * O servidor carimba standing e lentes e recalcula o hash: o que este
+       * navegador calculou em `congelamento` não é o que ficou no banco. A
+       * frase sai sem hash e é trocada pela do readback quando a versão relida
+       * chega ao workspace (`finalizeReadback`).
+       */
+      const suficiencia = radarSufficiencyLabel(investigacao.sufficiency.level);
       const desfecho = radarActionOutcome({
         action: "FINALIZE",
         persistence: gravado,
-        successMessage: `Investigação finalizada e congelada: ${radarSufficiencyLabel(investigacao.sufficiency.level)}. Evidências ${congelamento.bundle.bundleId} · hash ${congelamento.bundle.bundleHash}. Persistência remota e readback confirmados.`,
+        successMessage: radarFinalizeSuccessMessage({ sufficiencyLabel: suficiencia, stored: null }),
       });
       setNotice(desfecho.message);
+      if (desfecho.status === "SUCCEEDED") setFinalizeReadback({ articleId: target.articleId, versionId: next.versionId, sufficiencyLabel: suficiencia });
     } catch (error) {
       setNotice(radarActionOutcome({ action: "FINALIZE", error }).message);
     } finally { releaseSerpAction(target.articleId, "decision"); }
@@ -4024,6 +4200,19 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       <option value="">{label}: Todos</option>
       {column.filterOptions?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
     </select>;
+    /*
+     * E4 · "TODOS OS SILOS" É A MARCA INTEIRA.
+     *
+     * Sem seleção, o export lê do banco cada artigo do Radar, com o item e as
+     * corridas. Quando a estimativa passa de um quinto da meta do dia, o
+     * tamanho aparece no próprio item do menu, antes do clique.
+     */
+    const avisoDeTamanhoDoExport = menuDeExport
+      ? radarSiloExportSizeNotice({
+        scope: radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds, siloVersions: pipeline.siloVersions }),
+        finalizedArticleIds: pipeline.radarItems.filter(row => radarPrimaryProfileOfAnalysis(analiseCorrenteDe(row)?.payload || null)).map(row => row.articleId),
+      })
+      : null;
     return <>
       {formatColumn ? filter(formatColumn, "Formato") : null}
       {statusColumn ? filter(statusColumn, "Status") : null}
@@ -4061,7 +4250,34 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
           <span>{exportando ? "Exportando…" : "Exportar"}</span>
           <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
-        {menuDeExport ? <div role="menu" className="absolute right-0 top-full z-50 mt-1 w-64 rounded-md border border-divider bg-surface-elevated p-1 shadow-lg">
+        {menuDeExport ? <div role="menu" className="absolute right-0 top-full z-50 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-md border border-divider bg-surface-elevated p-1 shadow-lg">
+          {/*
+            * ===== 2026-09-23 · O EXPORT RECOMENDADO VEM PRIMEIRO =====
+            *
+            * O CSV é a saída final para escrever fora da plataforma, e um
+            * artigo de silo escrito sozinho perde a ordem, o Pilar e os irmãos.
+            * Por isso o primeiro item é o silo inteiro — um CSV por silo, com a
+            * SERP de cada artigo —, com o selo "Recomendado" no mesmo padrão do
+            * selo "Em foco" da planilha, em 14px.
+            *
+            * A prévia conta pelo `siloId` do item e pelo SiloDNA — nunca pelo
+            * rótulo de silo da planilha, que procura nas listas do Minerador.
+            */}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setMenuDeExport(false); void exportarSilosCompletos(); }}
+            className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle"
+            data-testid="radar-export-silos"
+          >
+            <span className="flex flex-wrap items-center gap-2">
+              <strong className="font-semibold">Silos completos · um CSV por silo</strong>
+              <span className="shrink-0 rounded border border-context-accent/35 px-1.5 py-0.5 text-sm font-semibold text-context-accent">Recomendado</span>
+            </span>
+            <span className="mt-0.5 block text-text-muted">Todos os artigos finalizados de cada silo, na ordem do silo, com a SERP de cada um.</span>
+            <span className="mt-0.5 block text-text-muted">{radarSiloExportPreview(radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds, siloVersions: pipeline.siloVersions }))}</span>
+            {avisoDeTamanhoDoExport ? <span className="mt-1 block" data-testid="radar-silos-size-estimate"><strong className="font-semibold text-warning">{avisoDeTamanhoDoExport.title}:</strong> {avisoDeTamanhoDoExport.message}</span> : null}
+          </button>
           <button
             type="button"
             role="menuitem"
@@ -4115,7 +4331,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   const radarEmptyTitle = diagnostico.state === "complete" || diagnostico.state === "empty_confirmed"
     ? "Nenhum artigo importado. Use “Importar do Arquiteto”."
     : loadStateSummary(diagnostico);
-  return <div className="flex min-h-screen flex-col bg-background">{notice && <div className="shrink-0 border-b border-warning/40 bg-warning-soft/30 px-4 py-2 text-sm text-warning" role="status">{notice}</div>}{/*
+  return <div className="flex min-h-screen flex-col bg-background">{notice && <div className="shrink-0 border-b border-warning/40 bg-warning-soft/30 px-4 py-2 text-sm text-warning" role="status">{notice}</div>}{avisoDeExport && <div className={`shrink-0 border-b px-4 py-2 text-sm ${TOM_DO_AVISO_DE_EXPORT[avisoDeExport.type]}`} role={avisoDeExport.type === "error" ? "alert" : "status"} data-testid="radar-export-notice">{avisoDeExport.message}</div>}{/*
     * O NAVEGADOR FALHOU — E DIZ ISSO SEM ACUSAR A OPERAÇÃO.
     *
     * Este aviso nasceu de um defeito real: a falha da cópia de recuperação no

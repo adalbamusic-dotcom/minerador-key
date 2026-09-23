@@ -7,11 +7,16 @@ import { buildDataForSeoKeywordFailureSemantic, buildDataForSeoKeywordMeasuremen
 import { resolveDataForSeoCanonicalConfig, DataForSeoCanonicalError } from "@/lib/minerador/dataforseo-canonical";
 import { measureDataForSeoAllintitle, type DataForSeoAllintitleMeasurement, DataForSeoSerpError } from "@/lib/minerador/dataforseo-serp";
 import { measureDataForSeoKeywordOverview, DataForSeoKeywordOverviewError, type DataForSeoKeywordOverviewMeasurement } from "@/lib/minerador/dataforseo-keyword-overview";
-import { executeDataForSeoSerpOperation } from "@/lib/server/dataforseo-serp-operation";
-import { deriveSerpSemanticEvidence, type SerpSemanticEvidence } from "@/lib/minerador/serp-semantic-evidence";
-import { buildKeywordSemanticQualification, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
+import { collectAndCacheSerp, lookupSerpCache, type SerpCacheRequest } from "@/lib/server/serp-cache";
+import type { SerpCacheContext } from "@/lib/server/serp-cache-store";
+import { SERP_CACHE_CANONICAL_LENS, SERP_CACHE_LENSES, serpCacheLensLabel } from "@/lib/editorial/serp-cache";
+import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core";
+import { SERP_LENS_COVERAGE_DEPTH, countSerpLensOutcomes, createSerpLensCoverage, planSerpLensCoverage, serpLensDerivationInputs, type SerpLensCoverageTarget, type SerpLensOutcome } from "@/lib/server/minerador-serp-lens-coverage";
+import { getOperationalClient } from "@/lib/server/editorial-db";
+import { deriveSerpSemanticEvidence, deriveSerpSemanticEvidenceAcrossLenses, type SerpLensSource, type SerpSemanticEvidence } from "@/lib/minerador/serp-semantic-evidence";
+import { buildKeywordSemanticQualification, predatesCurrentSemanticQualification, repeatsCurrentSemanticQualification, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
 import { KeywordSemanticQualificationPersistenceError, persistKeywordSemanticQualification, readCurrentKeywordSemanticQualifications } from "@/lib/server/keyword-semantic-qualification-store";
-import { applySerpEvidenceRecord } from "@/lib/minerador/serp-evidence-record";
+import { applySerpEvidenceRecord, readSerpEvidenceRecord } from "@/lib/minerador/serp-evidence-record";
 import { classifyQualificationPersistenceError } from "@/lib/minerador/keyword-semantic-qualification-row";
 import { DataForSeoTargetingError, resolveDataForSeoTargeting } from "@/lib/minerador/dataforseo-targeting";
 import { IntegrationRuntimeError, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
@@ -58,6 +63,8 @@ type TargetSuccess = {
   /** Evidência semântica da SERP natural; independente do Resultado e do KGR. */
   serpEvidence: SerpSemanticEvidence | null;
   serpError: { code: string; message: string; providerRequestId: string | null } | null;
+  /** SERP paga agora ou reaproveitada do cache da marca; null sem SERP. */
+  serpSource: SemanticSerpOutcome["serpSource"];
 };
 
 type TargetFailure = {
@@ -133,14 +140,42 @@ function usageKey(operationRequestId: string, target: LoadedTarget) {
 type SemanticSerpOutcome = {
   evidence: SerpSemanticEvidence | null;
   error: { code: string; message: string; providerRequestId: string | null } | null;
+  /**
+   * O pedido pago NESTA operação — é o que entra na referência do consumo.
+   * Num reaproveitamento é null: nenhuma chamada foi feita agora. A
+   * proveniência da observação reaproveitada vai na própria evidência.
+   */
   providerRequestId: string | null;
   cost: number | null;
+  /**
+   * De onde veio a SERP: paga agora ou reaproveitada do cache da marca.
+   * null quando a chamada ao provider falhou antes de haver SERP.
+   */
+  serpSource: "COLLECTED" | "REUSED" | null;
+  /**
+   * A lente canônica como entrada da leitura nas quatro lentes: o corpo (cru na
+   * coleta, podado no acerto — dão a mesma leitura) e a proveniência. null
+   * quando não há evidência da canônica.
+   */
+  canonical: (SerpLensSource & { body: unknown }) | null;
+  /**
+   * Depois da leitura nas quatro lentes: quantas lentes extras LIDAS foram
+   * pagas nesta requisição. É o que o motivo da versão diz além da canônica.
+   */
+  lensesCollectedNow?: number;
 };
+
+/** A leitura semântica sempre pediu 20 resultados; o cache serve igual ou menos. */
+const SEMANTIC_SERP_DEPTH = 20;
 
 /**
  * CALL 3 — SERP orgânica da keyword natural. Depois do preflight comum, é
  * independente das outras duas finalidades: pode rodar mesmo quando a medição
  * allintitle ou o Keyword Overview falharem, e falhar aqui não invalida nada.
+ *
+ * Consulta o cache de SERP da marca ANTES do provider. A quota da rota não
+ * muda: ela é resolvida antes do laço porque cobre o allintitle e o Keyword
+ * Overview de cada alvo, que continuam sempre pagos.
  */
 async function collectSemanticSerp(input: {
   keyword: string;
@@ -149,43 +184,146 @@ async function collectSemanticSerp(input: {
   operationRequestId: string;
   config: Awaited<ReturnType<typeof resolveDataForSeoCanonicalConfig>>["config"];
   onRequestStarted: () => void;
+  /** Candidata de descoberta sem keyword oficial entra com null. */
+  keywordId: string | null;
+  serpCache: SerpCacheContext;
+  /** O mesmo instante da requisição inteira: validade e coleta contam dele. */
+  now: Date;
+  /**
+   * Pula o cache e paga SERP nova. É o caso da evidência invalidada por
+   * decisão humana: o cache devolveria justamente a SERP recusada.
+   */
+  refresh: boolean;
 }): Promise<SemanticSerpOutcome> {
+  /*
+   * A chave usa os códigos do targeting do alvo, que são exatamente os que vão
+   * ao provider: esta rota nunca envia os da config. Por isso não há
+   * divergência config × chave a conferir aqui (ao contrário do Arquiteto).
+   *
+   * Lente explícita desktop/windows. Antes o pedido ia `desktop` sem `os`; o
+   * eco da DataForSEO (tests/fixtures/dataforseo-eco-desktop-sem-os.json)
+   * mostra que `desktop` sem `os` é servido como `windows` — a SERP é a mesma,
+   * só que agora o rótulo gravado é o que de fato foi enviado.
+   */
+  const request: SerpCacheRequest = {
+    query: {
+      keyword: input.keyword,
+      locationCode: input.locationCode,
+      languageCode: input.languageCode,
+      lens: SERP_CACHE_CANONICAL_LENS,
+      // A leitura semântica precisa da SERP completa: blocos de feature e campos
+      // estruturais (preço, rating, PAA) que o `regular` não devolve.
+      endpoint: "advanced",
+    },
+    depth: SEMANTIC_SERP_DEPTH,
+    keywordId: input.keywordId,
+  };
+
+  // Leitura do cache: banco fora nunca derruba a coleta — segue pagando como antes.
+  let reused: { body: Record<string, unknown>; collectedAt: string; providerRequestId: string | null; collectedBy: string } | null = null;
   try {
-    const serp = await executeDataForSeoSerpOperation({
+    const [lookup] = await lookupSerpCache(input.serpCache, [request], { mode: "body", now: input.now, refresh: input.refresh });
+    if (lookup?.hit?.body) reused = { body: lookup.hit.body, collectedAt: lookup.hit.meta.collectedAt, providerRequestId: lookup.hit.meta.providerRequestId, collectedBy: lookup.hit.meta.collectedBy };
+  } catch (error) {
+    console.warn("[minerador] serp_cache_read_failed", {
+      operationRequestId: input.operationRequestId,
+      brandId: input.serpCache.brandId,
+      message: error instanceof Error ? error.message.slice(0, 240) : "falha desconhecida",
+    });
+  }
+
+  if (reused) {
+    // Proveniência honesta: a evidência diz quando e por qual pedido a SERP
+    // foi observada, não quando foi relida.
+    const evidence = deriveSerpSemanticEvidence({
+      body: reused.body,
       keyword: input.keyword,
       locationCode: input.locationCode,
       languageCode: input.languageCode,
       device: "desktop",
-      // A leitura semântica precisa da SERP completa: blocos de feature e campos
-      // estruturais (preço, rating, PAA) que o `regular` não devolve.
-      resultLimit: 20,
-      payloadDepth: "advanced",
+      providerRequestId: reused.providerRequestId,
       operationRequestId: input.operationRequestId,
-    }, { config: input.config, onRequestStarted: input.onRequestStarted });
-    const task = serp.body && typeof serp.body === "object" && !Array.isArray(serp.body) && Array.isArray((serp.body as { tasks?: unknown[] }).tasks)
-      ? (serp.body as { tasks: unknown[] }).tasks[0] as JsonObject | undefined
+      collectedAt: reused.collectedAt,
+    });
+    // Nenhuma chamada: custo zero e nenhuma referência de provider no consumo.
+    if (evidence) return { evidence, error: null, providerRequestId: null, cost: 0, serpSource: "REUSED", canonical: { lens: serpCacheLensLabel(SERP_CACHE_CANONICAL_LENS), body: reused.body, collectedAt: reused.collectedAt, providerRequestId: reused.providerRequestId, collectedBy: reused.collectedBy } };
+    // Entrada gravada que não vira evidência não bloqueia: paga como antes.
+    console.warn("[minerador] serp_cache_hit_unusable", { operationRequestId: input.operationRequestId, brandId: input.serpCache.brandId });
+  }
+
+  try {
+    const collected = await collectAndCacheSerp(input.serpCache, request, {
+      config: input.config,
+      operationRequestId: input.operationRequestId,
+      collectedBy: "minerador",
+      now: input.now,
+      provider: { onRequestStarted: input.onRequestStarted },
+    });
+    if (collected.writeError) {
+      console.warn("[minerador] serp_cache_write_failed", { operationRequestId: input.operationRequestId, brandId: input.serpCache.brandId, message: collected.writeError.slice(0, 240) });
+    }
+    // Daqui em diante, o corpo CRU — exatamente o que a rota lia antes do cache.
+    const task = collected.body && typeof collected.body === "object" && !Array.isArray(collected.body) && Array.isArray((collected.body as { tasks?: unknown[] }).tasks)
+      ? (collected.body as { tasks: unknown[] }).tasks[0] as JsonObject | undefined
       : undefined;
     const cost = task && typeof task.cost === "number" && Number.isFinite(task.cost) ? task.cost : null;
     const evidence = deriveSerpSemanticEvidence({
-      body: serp.body,
+      body: collected.body,
       keyword: input.keyword,
       locationCode: input.locationCode,
       languageCode: input.languageCode,
       device: "desktop",
-      providerRequestId: serp.providerRequestId,
+      providerRequestId: collected.providerRequestId,
       operationRequestId: input.operationRequestId,
-      collectedAt: new Date().toISOString(),
+      /*
+       * A data gravada no cache. Assim a versão da Qualificação feita agora e
+       * um acerto futuro da mesma entrada dizem a MESMA coleta — e o acerto
+       * não vira versão nova (ver `repeatsCurrentSemanticQualification`).
+       */
+      collectedAt: collected.meta.collectedAt,
     });
     return {
       evidence,
-      error: evidence ? null : { code: "dataforseo_serp_unusable", message: "A SERP natural retornou sem resultados aproveitáveis para a evidência semântica.", providerRequestId: serp.providerRequestId },
-      providerRequestId: serp.providerRequestId,
+      error: evidence ? null : { code: "dataforseo_serp_unusable", message: "A SERP natural retornou sem resultados aproveitáveis para a evidência semântica.", providerRequestId: collected.providerRequestId },
+      providerRequestId: collected.providerRequestId,
       cost,
+      serpSource: "COLLECTED",
+      canonical: evidence ? { lens: serpCacheLensLabel(SERP_CACHE_CANONICAL_LENS), body: collected.body, collectedAt: collected.meta.collectedAt, providerRequestId: collected.providerRequestId, collectedBy: collected.meta.collectedBy } : null,
     };
   } catch (error) {
     const mapped = mapProviderError(error);
-    return { evidence: null, error: { code: mapped.code, message: mapped.message, providerRequestId: mapped.providerRequestId }, providerRequestId: mapped.providerRequestId, cost: null };
+    return { evidence: null, error: { code: mapped.code, message: mapped.message, providerRequestId: mapped.providerRequestId }, providerRequestId: mapped.providerRequestId, cost: null, serpSource: null, canonical: null };
   }
+}
+
+/**
+ * Os alvos das TRÊS LENTES EXTRAS (as quatro do produto menos a canônica, que
+ * é a CALL 3), com o targeting que o laço vai resolver.
+ *
+ * O laço resolve o targeting com `config.locationCode`, e a config tira esse
+ * código de `readDataForSeoTargetCodes` — lido aqui sem tocar credencial,
+ * porque o plano vem ANTES da quota. Alvo cujo targeting falha fica fora: o
+ * laço registra a falha dele como antes, sem lente nenhuma.
+ */
+function lensCoverageTargets(targets: readonly LoadedTarget[]): SerpLensCoverageTarget[] {
+  let locationCode: number;
+  try {
+    locationCode = readDataForSeoTargetCodes().locationCode;
+  } catch {
+    // Config inválida: a resolução da credencial recusa a rota como antes.
+    return [];
+  }
+  const alvos: SerpLensCoverageTarget[] = [];
+  // `carregado`, não `target`: guardas estruturais localizam o laço do POST pelo nome da variável.
+  for (const carregado of targets) {
+    try {
+      const targeting = resolveDataForSeoTargeting({ ...targetingInput(carregado), locationCode });
+      alvos.push({ targetId: carregado.targetId, keyword: carregado.keyword, keywordId: carregado.keywordId, locationCode: targeting.locationCode, languageCode: targeting.languageCode });
+    } catch {
+      continue;
+    }
+  }
+  return alvos;
 }
 
 async function recordTargetUsage(input: {
@@ -302,56 +440,138 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       targets.push({ targetKind: "discovery_candidate", targetId: candidateId, candidateId, keywordId, keyword: String(row.keyword_original || ""), keywordRow: keywordId ? officialById.get(keywordId) || null : null, candidateRow: row, currentRow });
     }
 
-    const canonicalDataForSeo = await resolveDataForSeoCanonicalConfig({
+    // Um único instante por requisição: o cache conta validade e coleta dele.
+    const now = new Date();
+    const startedAt = now.toISOString();
+    /*
+     * Cache de SERP da marca, no mesmo cliente service role que grava a
+     * Qualificação Semântica (`getOperationalClient`). O getter adia a criação:
+     * sem a chave de serviço, a leitura lança e a coleta segue paga, e a
+     * gravação falha dentro de `collectAndCacheSerp`, que não lança — o cache
+     * fora nunca derruba a medição.
+     */
+    const serpCache: SerpCacheContext = {
+      get supabase() { return getOperationalClient(); },
+      brandId: context.brandId,
+      actorUserId: profile.userId,
+    };
+
+    /*
+     * AS QUATRO LENTES (decisão do usuário, 2026-09-23): a SERP paga vai para o
+     * cache desde a primeira vez que é acionada, no Processador ou na
+     * Descoberta, e nas quatro lentes — não só no desktop.
+     *
+     * A canônica segue na CALL 3 (corpo, 20 resultados). As outras três são
+     * planejadas AQUI, antes de credencial e quota, em modo `digest` (meta e o
+     * digest que a leitura das quatro lentes usa): só o que falta ou venceu é
+     * pago, e a quota conta essas faltas.
+     */
+    const lensPlan = await planSerpLensCoverage(serpCache, lensCoverageTargets(targets), { now });
+    if (lensPlan.readFailed) {
+      console.warn("[minerador] serp_lens_cache_read_failed", { operationRequestId: input.operationRequestId, brandId: context.brandId, message: lensPlan.readFailed });
+    }
+    const resolveConfig = (quotaUnits: number) => resolveDataForSeoCanonicalConfig({
       actorUserId: profile.userId,
       agencyId: context.agencyId || null,
       brandId: context.brandId,
-      quotaUnits: targets.length,
+      quotaUnits,
     });
+    /*
+     * Uma unidade por alvo cobre allintitle, KD e a lente canônica, como antes;
+     * cada lente extra que falta soma uma. Se a quota não cobre as lentes
+     * extras, o resto segue com a quota de antes: lente extra nunca impede o
+     * Resultado nem o KD. O saldo que a quota ainda tem além dos alvos paga as
+     * lentes que couberem, na ordem dos alvos; as outras viram lacuna.
+     */
+    let lensQuotaCovered = true;
+    const canonicalDataForSeo = await resolveConfig(targets.length + lensPlan.missingQueries).catch(async (error: unknown) => {
+      if (!lensPlan.missingQueries || !(error instanceof IntegrationRuntimeError) || error.code !== "INTEGRATION_QUOTA_EXHAUSTED") throw error;
+      lensQuotaCovered = false;
+      return resolveConfig(targets.length);
+    });
+    const lensQuota = canonicalDataForSeo.resource?.quota;
+    const lensQuotaBudget = lensQuotaCovered
+      ? lensPlan.missingQueries
+      : lensQuota?.limited && typeof lensQuota.remainingUnits === "number" && Number.isFinite(lensQuota.remainingUnits)
+        ? Math.max(0, Math.min(lensPlan.missingQueries, Math.floor(lensQuota.remainingUnits) - targets.length))
+        : 0;
+    if (!lensQuotaCovered) {
+      console.warn("[minerador] serp_lens_quota_exhausted", { brandId: context.brandId, missingLensQueries: lensPlan.missingQueries, lensQuotaBudget });
+    }
     const config = canonicalDataForSeo.config;
-    const startedAt = new Date().toISOString();
+    const lensCoverage = createSerpLensCoverage(serpCache, lensPlan, {
+      config,
+      operationRequestId: input.operationRequestId,
+      now,
+      quotaCovered: lensQuotaCovered,
+      quotaBudget: lensQuotaBudget,
+      provider: { onRequestStarted: () => { apiRequestStarted = true; } },
+    });
     const successes: TargetSuccess[] = [];
     const failures: TargetFailure[] = [];
     const targetingDiagnostics: JsonObject[] = [];
     // Evidência semântica por alvo: existe mesmo quando a medição falha.
-    const semanticEvidences: Array<{ targetKind: TargetKind; targetId: string; keywordId: string | null; serpEvidence: SerpSemanticEvidence | null; serpError: { code: string; message: string; providerRequestId: string | null } | null }> = [];
+    const semanticEvidences: Array<{ targetKind: TargetKind; targetId: string; keywordId: string | null; serpSource: SemanticSerpOutcome["serpSource"]; serpEvidence: SerpSemanticEvidence | null; serpError: { code: string; message: string; providerRequestId: string | null } | null }> = [];
     // Qualificação Semântica persistida por keyword: a working copy da sessão
     // deixou de ser a fonte. Cada coleta bem-sucedida grava a próxima versão.
-    const semanticQualifications: Array<{ keywordId: string; versionId: string; version: number; persisted: boolean; error: string | null; failure: { classification: string; code: string; constraint: string | null; column: string | null } | null }> = [];
+    // `unchanged`: a SERP reaproveitada repetia a versão vigente, que continua sendo a resposta.
+    const semanticQualifications: Array<{ keywordId: string; versionId: string; version: number; persisted: boolean; unchanged?: boolean; error: string | null; failure: { classification: string; code: string; constraint: string | null; column: string | null } | null }> = [];
     const currentQualifications = await readCurrentKeywordSemanticQualifications({
       brandId: context.brandId,
       keywordIds: targets.map(target => target.keywordId).filter((value): value is string => Boolean(value)),
     }).catch(() => new Map<string, KeywordSemanticQualification>());
     const semanticOperationRequestId = input.operationRequestId;
-    const persistQualification = async (target: LoadedTarget, evidence: SerpSemanticEvidence) => {
+    /** Evidência SERP invalidada por decisão humana pede SERP nova, nunca a do cache. */
+    const serpEvidenceInvalidated = (target: LoadedTarget) => Boolean(readSerpEvidenceRecord(asObject(target.keywordRow?.analise_semantica))?.invalidada);
+    // A versão confirmada vira evidência forte na própria keyword: é o que
+    // a tabela lê antes da Lógica e o que entra na assinatura do pacote
+    // aprovado. Reler a linha evita sobrescrever o que a medição gravou.
+    const projectSerpEvidenceRecord = async (target: LoadedTarget, qualification: KeywordSemanticQualification) => {
+      if (target.targetKind !== "keyword" || !target.keywordId) return;
+      const latestRow = await profile.supabase.from("minerador_keywords").select("analise_semantica").eq("id", target.keywordId).eq("brand_id", context.brandId).is("deleted_at", null).maybeSingle();
+      if (latestRow.error || !latestRow.data) throw new Error("A keyword não foi encontrada para registrar a evidência SERP.");
+      const withEvidence = applySerpEvidenceRecord(asObject(latestRow.data.analise_semantica), qualification);
+      const evidenceUpdate = await profile.supabase.from("minerador_keywords").update({ analise_semantica: withEvidence }).eq("id", target.keywordId).eq("brand_id", context.brandId).is("deleted_at", null);
+      if (evidenceUpdate.error) throw evidenceUpdate.error;
+      if (target.keywordRow) target.keywordRow = { ...target.keywordRow, analise_semantica: withEvidence };
+    };
+    const persistQualification = async (target: LoadedTarget, evidence: SerpSemanticEvidence, serpSource: SemanticSerpOutcome["serpSource"], lensesCollectedNow = 0) => {
       if (!target.keywordId) return;
       try {
+        const previous = currentQualifications.get(target.keywordId) || null;
         const qualification = await buildKeywordSemanticQualification({
           brandId: context.brandId,
           keywordId: target.keywordId,
           evidence,
           createdBy: profile.userId,
-          previous: currentQualifications.get(target.keywordId) || null,
+          previous,
         });
+        /*
+         * Acerto do cache que não traz nada novo: é a mesma coleta que a versão
+         * vigente já registrou, ou uma coleta MAIS VELHA que ela (duas execuções
+         * em paralelo, gravação no cache que falhou). Nenhuma versão nova
+         * (AGENTS §9) — a vigente segue como resposta. Só a projeção na keyword
+         * é conferida: se a vigente foi gravada por um caminho que não projeta
+         * (candidata da Descoberta) ou a projeção falhou, é aqui que ela se
+         * corrige, sem esperar o cache vencer.
+         */
+        if (serpSource === "REUSED" && previous && (repeatsCurrentSemanticQualification(previous, qualification) || predatesCurrentSemanticQualification(previous, qualification))) {
+          if (readSerpEvidenceRecord(asObject(target.keywordRow?.analise_semantica))?.versionId !== previous.id) await projectSerpEvidenceRecord(target, previous);
+          semanticQualifications.push({ keywordId: target.keywordId, versionId: previous.id, version: previous.lifecycle.version, persisted: true, unchanged: true, error: null, failure: null });
+          return;
+        }
         await persistKeywordSemanticQualification({
           brandId: context.brandId,
           keywordId: target.keywordId,
           qualification,
-          changeReason: `SERP orgânica coletada pelo processo Resultados (${semanticOperationRequestId}).`,
+          // A origem é a da canônica; lente extra paga agora é dita à parte — é ela que muda a versão.
+          changeReason: serpSource === "REUSED"
+            ? `SERP orgânica reaproveitada do cache da marca (coleta de ${evidence.collectedAt})${lensesCollectedNow ? `, com ${lensesCollectedNow} lente(s) extra(s) coletada(s) agora,` : ""} pelo processo Resultados (${semanticOperationRequestId}).`
+            : `SERP orgânica coletada pelo processo Resultados (${semanticOperationRequestId}).`,
         });
         currentQualifications.set(target.keywordId, qualification);
         semanticQualifications.push({ keywordId: target.keywordId, versionId: qualification.id, version: qualification.lifecycle.version, persisted: true, error: null, failure: null });
-        // A versão confirmada vira evidência forte na própria keyword: é o que
-        // a tabela lê antes da Lógica e o que entra na assinatura do pacote
-        // aprovado. Reler a linha evita sobrescrever o que a medição gravou.
-        if (target.targetKind === "keyword") {
-          const latestRow = await profile.supabase.from("minerador_keywords").select("analise_semantica").eq("id", target.keywordId).eq("brand_id", context.brandId).is("deleted_at", null).maybeSingle();
-          if (latestRow.error || !latestRow.data) throw new Error("A keyword não foi encontrada para registrar a evidência SERP.");
-          const withEvidence = applySerpEvidenceRecord(asObject(latestRow.data.analise_semantica), qualification);
-          const evidenceUpdate = await profile.supabase.from("minerador_keywords").update({ analise_semantica: withEvidence }).eq("id", target.keywordId).eq("brand_id", context.brandId).is("deleted_at", null);
-          if (evidenceUpdate.error) throw evidenceUpdate.error;
-          if (target.keywordRow) target.keywordRow = { ...target.keywordRow, analise_semantica: withEvidence };
-        }
+        await projectSerpEvidenceRecord(target, qualification);
       } catch (error) {
         // Write não confirmado nunca vira sucesso: a versão anterior permanece.
         // O diagnóstico técnico real é preservado; a mensagem ao usuário segue
@@ -382,6 +602,96 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
     };
 
+    /*
+     * INTENÇÃO E FUNIL PELAS QUATRO LENTES (adendo `docs/03-minerador/
+     * propostas/adendo-derivacao-v4-quatro-lentes-2026-09-23.md`, §3). A CALL 3
+     * traz a canônica; as três extras vêm da cobertura, que correu em paralelo
+     * com a cadeia do alvo. A Qualificação só é derivada DEPOIS que as lentes
+     * assentam — esperar aqui custa só o que a cobertura passar da cadeia.
+     * Cada extra entra pelo digest (na coleta, montado do corpo em memória; no
+     * acerto, lido do cache) ou como lente faltante. Sem evidência da
+     * canônica, nada muda: a falha dela segue como antes.
+     */
+    const readAcrossLenses = async (semantic: SemanticSerpOutcome, lensOutcomes: Promise<SerpLensOutcome[]>, evidenceInvalidated: boolean): Promise<SemanticSerpOutcome> => {
+      if (!semantic.evidence || !semantic.canonical) return semantic;
+      /*
+       * Allintitle, KD e a CALL 3 já foram pagos aqui: uma falha na leitura das
+       * lentes nunca derruba o alvo. Ela volta à leitura da canônica, que já é
+       * a de uma lente, e só avisa.
+       */
+      try {
+        const outcomes = await lensOutcomes;
+        const evidence = deriveSerpSemanticEvidenceAcrossLenses({
+          keyword: semantic.evidence.query,
+          locationCode: semantic.evidence.locationCode,
+          languageCode: semantic.evidence.languageCode,
+          operationRequestId: semantic.evidence.operationRequestId,
+          canonical: semantic.canonical,
+          // Evidência invalidada: a lente extra do cache é da coleta recusada e fica fora.
+          extras: serpLensDerivationInputs(outcomes, { invalidatedBefore: evidenceInvalidated ? startedAt : null }),
+        });
+        if (!evidence) return semantic;
+        const lidas = new Set((evidence.lensEvidence?.readings || []).map(reading => reading.lens));
+        return { ...semantic, evidence, lensesCollectedNow: outcomes.filter(outcome => outcome.source === "collected" && lidas.has(outcome.lens)).length };
+      } catch (error) {
+        console.warn("[minerador] serp_lens_derivation_failed", { operationRequestId: semanticOperationRequestId, brandId: context.brandId, keyword: semantic.evidence.query, message: error instanceof Error ? error.message.slice(0, 240) : "falha desconhecida" });
+        return semantic;
+      }
+    };
+
+    /*
+     * AS TRÊS LENTES EXTRAS DE CADA ALVO: pagas só quando faltam no cache. A
+     * liquidação abaixo só registra o uso — a leitura delas vai à Qualificação
+     * por `readAcrossLenses`, nunca por aqui.
+     */
+    const lensOperationRequestId = input.operationRequestId;
+    const lensResults: Array<{ targetKind: TargetKind; targetId: string; keywordId: string | null; outcomes: SerpLensOutcome[] }> = [];
+    let lensUsageRecordFailedCount = 0;
+    const settleLensCoverage = async (target: LoadedTarget, outcomes: SerpLensOutcome[]) => {
+      lensResults.push({ targetKind: target.targetKind, targetId: target.targetId, keywordId: target.keywordId, outcomes });
+      for (const lacuna of outcomes.filter(item => !item.stored)) {
+        console.warn("[minerador] serp_lens_gap", { operationRequestId: lensOperationRequestId, brandId: context.brandId, targetId: target.targetId, lens: lacuna.lens, reason: lacuna.reason });
+      }
+      /*
+       * O uso vale para cada chamada paga: um registro por alvo com uma unidade
+       * por lente paga, custo e referências de cada uma. Um registro por
+       * chamada triplicaria as idas à Auth que `recordIntegrationUsage` faz.
+       * Falhar aqui não desfaz nada do alvo: a lente já está no cache.
+       * A quota soma só o uso `succeeded`: nele entram só as lentes que
+       * voltaram como SERP. As que falharam ficam em `metadata.failed` — como
+       * no registro do alvo, onde a falha vai como `failed` e não conta.
+       */
+      const pagas = outcomes.filter(item => item.paid);
+      if (!pagas.length) return;
+      const coletadas = pagas.filter(item => item.source === "collected");
+      const custos = pagas.map(item => item.cost).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+      try {
+        await recordIntegrationUsage({
+          resource: canonicalDataForSeo.resource,
+          operation: "module_operation",
+          module: "minerador",
+          resultStatus: coletadas.length ? "succeeded" : "failed",
+          units: coletadas.length ? coletadas.length : pagas.length,
+          costAmount: custos.length ? custos.reduce((total, value) => total + value, 0) : null,
+          providerReference: pagas.map(item => item.providerRequestId).filter((value): value is string => Boolean(value)).join(",") || null,
+          errorCode: coletadas.length ? null : "SERP_LENS_FAILED",
+          idempotencyKey: `${usageKey(lensOperationRequestId, target)}:serp-lenses`,
+          metadata: {
+            operationRequestId: lensOperationRequestId,
+            operationKind: "serp_lens_coverage",
+            targetKind: target.targetKind,
+            targetId: target.targetId,
+            lenses: pagas.map(item => item.lens).join(","),
+            collected: coletadas.length,
+            failed: pagas.length - coletadas.length,
+          },
+        });
+      } catch (error) {
+        lensUsageRecordFailedCount += 1;
+        console.warn("[minerador] serp_lens_usage_recording_failed", { operationRequestId: lensOperationRequestId, brandId: context.brandId, targetId: target.targetId, message: error instanceof Error ? error.message.slice(0, 240) : "falha desconhecida" });
+      }
+    };
+
     for (const target of targets) {
       let targeting: ReturnType<typeof resolveDataForSeoTargeting>;
       try {
@@ -403,6 +713,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         failures.push({ targetKind: target.targetKind, targetId: target.targetId, code: mapped.code, message: mapped.message, providerRequestId: null });
         continue;
       }
+      /*
+       * As três lentes extras correm JUNTO com a cadeia do alvo (allintitle →
+       * KD → CALL 3), com concorrência limitada: a duração do alvo continua a
+       * da cadeia. `ensure` nunca rejeita — lente que falha é lacuna. A leitura
+       * das quatro lentes espera por elas logo depois da CALL 3, e o `finally`
+       * ainda as liquida antes do próximo alvo em qualquer caminho.
+       */
+      const lensOutcomes = lensCoverage.ensure(target.targetId, { locationCode: targeting.locationCode, languageCode: targeting.languageCode });
       try {
         let measurement: DataForSeoAllintitleMeasurement;
         try {
@@ -411,12 +729,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           const mapped = mapProviderError(error);
           // As finalidades são independentes depois do preflight: a SERP natural
           // continua sendo coletada mesmo quando o allintitle falha.
-          const semanticSerpAfterFailure = await collectSemanticSerp({ keyword: target.keyword, locationCode: targeting.locationCode, languageCode: targeting.languageCode, operationRequestId: input.operationRequestId, config, onRequestStarted: () => { apiRequestStarted = true; } });
+          const canonicalSerpAfterFailure = await collectSemanticSerp({ keyword: target.keyword, locationCode: targeting.locationCode, languageCode: targeting.languageCode, operationRequestId: input.operationRequestId, config, onRequestStarted: () => { apiRequestStarted = true; }, keywordId: target.keywordId, serpCache, now, refresh: serpEvidenceInvalidated(target) });
+          const semanticSerpAfterFailure = await readAcrossLenses(canonicalSerpAfterFailure, lensOutcomes, serpEvidenceInvalidated(target));
           if (semanticSerpAfterFailure.evidence) {
-            semanticEvidences.push({ targetKind: target.targetKind, targetId: target.targetId, keywordId: target.keywordId, serpEvidence: semanticSerpAfterFailure.evidence, serpError: null });
-            await persistQualification(target, semanticSerpAfterFailure.evidence);
+            semanticEvidences.push({ targetKind: target.targetKind, targetId: target.targetId, keywordId: target.keywordId, serpSource: semanticSerpAfterFailure.serpSource, serpEvidence: semanticSerpAfterFailure.evidence, serpError: null });
+            await persistQualification(target, semanticSerpAfterFailure.evidence, semanticSerpAfterFailure.serpSource, semanticSerpAfterFailure.lensesCollectedNow);
           }
-          else semanticEvidences.push({ targetKind: target.targetKind, targetId: target.targetId, keywordId: target.keywordId, serpEvidence: null, serpError: semanticSerpAfterFailure.error });
+          else semanticEvidences.push({ targetKind: target.targetKind, targetId: target.targetId, keywordId: target.keywordId, serpSource: semanticSerpAfterFailure.serpSource, serpEvidence: null, serpError: semanticSerpAfterFailure.error });
           let usageError = false;
           try {
             await recordTargetUsage({
@@ -449,15 +768,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         }
         // CALL 3 — SERP orgânica da keyword natural. É a evidência semântica e
         // não participa do Resultado nem do KGR: falhar aqui preserva as duas
-        // medições anteriores.
-        const semanticSerp = await collectSemanticSerp({ keyword: target.keyword, locationCode: targeting.locationCode, languageCode: targeting.languageCode, operationRequestId: input.operationRequestId, config, onRequestStarted: () => { apiRequestStarted = true; } });
+        // medições anteriores. A leitura sai das quatro lentes (`readAcrossLenses`).
+        const canonicalSerp = await collectSemanticSerp({ keyword: target.keyword, locationCode: targeting.locationCode, languageCode: targeting.languageCode, operationRequestId: input.operationRequestId, config, onRequestStarted: () => { apiRequestStarted = true; }, keywordId: target.keywordId, serpCache, now, refresh: serpEvidenceInvalidated(target) });
+        const semanticSerp = await readAcrossLenses(canonicalSerp, lensOutcomes, serpEvidenceInvalidated(target));
         const serpEvidence = semanticSerp.evidence;
         const serpError = semanticSerp.error;
         const serpProviderRequestId = semanticSerp.providerRequestId;
         const serpCost = semanticSerp.cost;
-        semanticEvidences.push({ targetKind: target.targetKind, targetId: target.targetId, keywordId: target.keywordId, serpEvidence, serpError });
+        const serpSource = semanticSerp.serpSource;
+        semanticEvidences.push({ targetKind: target.targetKind, targetId: target.targetId, keywordId: target.keywordId, serpSource, serpEvidence, serpError });
         // Persistência da Qualificação antes de qualquer relato de sucesso.
-        if (serpEvidence) await persistQualification(target, serpEvidence);
+        if (serpEvidence) await persistQualification(target, serpEvidence, serpSource, semanticSerp.lensesCollectedNow);
         try {
           const providerReference = [measurement.providerRequestId, keywordOverview?.providerRequestId, serpProviderRequestId].filter((value): value is string => Boolean(value)).join(",") || null;
           const costs = [measurement.cost, keywordOverview?.cost ?? null, serpCost].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
@@ -473,14 +794,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const latestTarget: LoadedTarget = target.targetKind === "keyword" ? { ...target, keywordRow: latest.data as JsonObject } : { ...target, currentRow: latest.data as JsonObject };
         if (isStale(latestTarget, startedAt, input.operationRequestId)) throw { code: "dataforseo_stale_result", message: "A medição atual é mais recente e o resultado atrasado foi preservado.", status: 409, providerRequestId: measurement.providerRequestId };
         await persistSuccess({ profile, brandId: context.brandId, actorUserId: profile.userId, target: latestTarget, measurement, overview: keywordOverview, overviewError: keywordOverviewError, operationRequestId: input.operationRequestId, targeting: targetingRecord });
-        successes.push({ targetKind: target.targetKind, targetId: target.targetId, candidateId: target.candidateId, keywordId: target.keywordId, resultsAllintitle: measurement.resultsAllintitle, measuredAt: measurement.measuredAt, provider: "dataforseo", providerVersion: "v3", measurementKind, keywordDifficulty: keywordOverview?.keywordDifficulty ?? null, keywordOverview, keywordOverviewError, serpEvidence, serpError });
+        successes.push({ targetKind: target.targetKind, targetId: target.targetId, candidateId: target.candidateId, keywordId: target.keywordId, resultsAllintitle: measurement.resultsAllintitle, measuredAt: measurement.measuredAt, provider: "dataforseo", providerVersion: "v3", measurementKind, keywordDifficulty: keywordOverview?.keywordDifficulty ?? null, keywordOverview, keywordOverviewError, serpSource, serpEvidence, serpError });
       } catch (error) {
         const mapped = mapProviderError(error);
         await persistFailure({ profile, brandId: context.brandId, actorUserId: profile.userId, target, operationRequestId: input.operationRequestId, targeting: targetingRecord, error: mapped });
         failures.push({ targetKind: target.targetKind, targetId: target.targetId, code: mapped.code, message: mapped.message, providerRequestId: mapped.providerRequestId });
+      } finally {
+        await settleLensCoverage(target, await lensOutcomes);
       }
     }
 
+    /*
+     * Contagens ADITIVAS por lente: nenhum campo anterior muda. A canônica vem
+     * da CALL 3; as outras três, do cache que esta requisição garantiu.
+     */
+    const lensOutcomesAll = lensResults.flatMap(item => item.outcomes);
+    const serpLensCoverage = {
+      lenses: SERP_CACHE_LENSES.map(serpCacheLensLabel),
+      depth: { canonical: SEMANTIC_SERP_DEPTH, others: SERP_LENS_COVERAGE_DEPTH },
+      byLens: {
+        [serpCacheLensLabel(SERP_CACHE_CANONICAL_LENS)]: {
+          paid: semanticEvidences.filter(item => item.serpSource === "COLLECTED").length,
+          cached: semanticEvidences.filter(item => item.serpSource === "REUSED").length,
+          failed: semanticEvidences.filter(item => item.serpError).length,
+          skipped: 0,
+        },
+        ...countSerpLensOutcomes(lensOutcomesAll),
+      },
+      paidCount: lensOutcomesAll.filter(item => item.paid).length,
+      cachedCount: lensOutcomesAll.filter(item => item.source === "cache").length,
+      gapCount: lensOutcomesAll.filter(item => !item.stored).length,
+      gaps: lensResults.flatMap(item => item.outcomes.filter(outcome => !outcome.stored).map(outcome => ({ targetKind: item.targetKind, targetId: item.targetId, keywordId: item.keywordId, lens: outcome.lens, source: outcome.source, reason: outcome.reason }))),
+      quotaCovered: lensQuotaCovered,
+      quotaBudget: lensQuotaBudget,
+      cacheReadFailed: Boolean(lensPlan.readFailed),
+      usageRecordFailedCount: lensUsageRecordFailedCount,
+    };
     const partial = failures.length > 0;
     const firstMeasurements = successes.filter(item => item.measurementKind === "first").length;
     const updatedMeasurements = successes.filter(item => item.measurementKind === "updated").length;
@@ -491,7 +840,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       : firstMeasurements && !updatedMeasurements
         ? `${firstMeasurements} resultado(s) allintitle medido(s) e refletido(s) na tabela.`
         : `${firstMeasurements} primeira(s) medição(ões) e ${updatedMeasurements} resultado(s) allintitle atualizado(s) e refletido(s) na tabela.`;
-    const response = { success: successes.length > 0, operationRequestId: input.operationRequestId, requestedCount: targets.length, persistedCount: successes.length, firstMeasurements, updatedMeasurements, failedCount: failures.length, overviewFailedCount: overviewFailures.length, code: partial ? "DATAFORSEO_PARTIAL_RESULTS" : overviewPartial ? "DATAFORSEO_OVERVIEW_PARTIAL" : null, stage: partial || overviewPartial ? "response_normalization" : null, message: successes.length === targets.length ? `${successMessage}${overviewPartial ? ` ${overviewFailures.length} KD(s) não retornaram dado; o allintitle foi preservado.` : ""}` : `${successMessage} ${failures.length} alvo(s) não retornaram uma medição confirmada.`, projections: successes, failures, overviewFailures, semanticEvidences, semanticQualifications, semanticQualificationPersistedCount: semanticQualifications.filter(item => item.persisted).length, semanticQualificationFailedCount: semanticQualifications.filter(item => !item.persisted).length, serpFailures: semanticEvidences.filter(item => item.serpError).map(item => ({ targetKind: item.targetKind, targetId: item.targetId, keywordId: item.keywordId, ...item.serpError })), serpFailedCount: semanticEvidences.filter(item => item.serpError).length, diagnostic: { apiRequestStarted, provider: "dataforseo", providerVersion: "v3", endpoint: "/v3/serp/google/organic/live/regular", overviewEndpoint: "/v3/dataforseo_labs/google/keyword_overview/live", semanticSerpEndpoint: "/v3/serp/google/organic/live/advanced", targeting: targetingDiagnostics } };
+    const response = { success: successes.length > 0, operationRequestId: input.operationRequestId, requestedCount: targets.length, persistedCount: successes.length, firstMeasurements, updatedMeasurements, failedCount: failures.length, overviewFailedCount: overviewFailures.length, code: partial ? "DATAFORSEO_PARTIAL_RESULTS" : overviewPartial ? "DATAFORSEO_OVERVIEW_PARTIAL" : null, stage: partial || overviewPartial ? "response_normalization" : null, message: successes.length === targets.length ? `${successMessage}${overviewPartial ? ` ${overviewFailures.length} KD(s) não retornaram dado; o allintitle foi preservado.` : ""}` : `${successMessage} ${failures.length} alvo(s) não retornaram uma medição confirmada.`, projections: successes, failures, overviewFailures, semanticEvidences, semanticQualifications, semanticQualificationPersistedCount: semanticQualifications.filter(item => item.persisted).length, semanticQualificationUnchangedCount: semanticQualifications.filter(item => item.unchanged).length, semanticQualificationFailedCount: semanticQualifications.filter(item => !item.persisted).length, serpFailures: semanticEvidences.filter(item => item.serpError).map(item => ({ targetKind: item.targetKind, targetId: item.targetId, keywordId: item.keywordId, ...item.serpError })), serpFailedCount: semanticEvidences.filter(item => item.serpError).length, serpReusedCount: semanticEvidences.filter(item => item.serpSource === "REUSED").length, serpLensCoverage, diagnostic: { apiRequestStarted, provider: "dataforseo", providerVersion: "v3", endpoint: "/v3/serp/google/organic/live/regular", overviewEndpoint: "/v3/dataforseo_labs/google/keyword_overview/live", semanticSerpEndpoint: "/v3/serp/google/organic/live/advanced", targeting: targetingDiagnostics } };
     return NextResponse.json(response, { status: successes.length ? 200 : 502 });
   } catch (error) {
     if (error instanceof ZodError) return responseFailure("DATAFORSEO_INVALID_REQUEST", "argument_validation", "A solicitação de medição allintitle é inválida.", 400, { apiRequestStarted: false, issues: error.issues.map(issue => ({ path: issue.path, code: issue.code })) });

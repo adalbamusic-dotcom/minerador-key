@@ -156,6 +156,28 @@ test("KGR da keyword e KGR do artigo continuam separados", () => {
   assert.match(workspace, /articleKgr\.requiresHumanDecision && <label/);
 });
 
+test("A10 · as lentes da Qualificação chegam à seção do Minerador, e a legada continua sem a linha", () => {
+  const comLentes = {
+    ...readyKeyword,
+    canonicalWorkflow: {
+      ...readyKeyword.canonicalWorkflow,
+      payload: {
+        semanticQualification: {
+          ...readyKeyword.canonicalWorkflow.payload.semanticQualification,
+          lenses: { observadas: 4, concordancia: { intent: 3, funnel: 2 } },
+        },
+      },
+    },
+  };
+  const secao = (keyword: typeof readyKeyword) => new Map((projectKeywordDnaForArchitect(keyword).sections
+    .find(item => item.id === "qualificacao-semantica")?.fields || []).map(item => [item.label, item.value]));
+
+  assert.equal(secao(comLentes).get("Lentes da SERP"), "4 lentes · intenção 3/4 · funil 2/4");
+  // A linha nova não tira nada do que já estava lá.
+  assert.equal(secao(comLentes).get("Intenção consolidada"), "transacional");
+  assert.equal(secao(readyKeyword).has("Lentes da SERP"), false);
+});
+
 test("qualificação inconclusiva viaja como informação readonly, não como bloqueio", () => {
   const projection = projectKeywordDnaForArchitect(readyKeyword);
   const qualification = new Map((projection.sections.find(item => item.id === "qualificacao-semantica")?.fields || []).map(item => [item.label, item.value]));

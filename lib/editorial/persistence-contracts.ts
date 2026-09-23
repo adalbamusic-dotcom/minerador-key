@@ -6,19 +6,38 @@ import { SavedGridViewSchema } from "./data-grid.ts";
 import { AIReviewAnnotationSchema } from "./operational-contracts.ts";
 import { SerpCollectionRecordSchema, SerpReviewRecordSchema } from "./contracts.ts";
 import { RadarHydrationSnapshotSchema } from "../radar/hydration.ts";
+import { ListedContentDocumentSchema } from "./content-document-listing.ts";
 import { SerpMergeConflictSchema } from "../radar/serp-merge.ts";
 
 export const PersistenceModeSchema = z.enum(["server", "local_fallback", "unavailable"]);
 export type PersistenceMode = z.infer<typeof PersistenceModeSchema>;
 
+/*
+ * E1 · a listagem da mesa devolve o documento v2 com dossiê SEM o bundle, na
+ * forma parcial marcada (`lib/editorial/content-document-listing.ts`). O
+ * documento completo continua aceito do jeito de antes.
+ */
 export const PersistedDocumentSchema = z.object({
-  document: ContentDocumentSchema,
+  document: ListedContentDocumentSchema,
   lockVersion: z.number().int().positive(),
   contentHash: z.string(),
   updatedAt: z.string().datetime({ offset: true }),
   userState: z.object({ cursorPosition: z.number().int().nonnegative().nullable(), scrollTop: z.number().int().nonnegative(), leftPanelOpen: z.boolean(), rightPanelOpen: z.boolean(), lastOpenedAt: z.string().datetime({ offset: true }) }).nullable(),
 });
 export type PersistedDocument = z.infer<typeof PersistedDocumentSchema>;
+
+/**
+ * E1 · o detalhe de UM documento — sempre completo. É o que o Redator precisa
+ * ter antes de liberar edição e autosave.
+ */
+export const PersistedDocumentDetailSchema = z.object({
+  brandId: z.string().min(1),
+  document: ContentDocumentSchema,
+  lockVersion: z.number().int().positive(),
+  contentHash: z.string(),
+  updatedAt: z.string().datetime({ offset: true }),
+});
+export type PersistedDocumentDetail = z.infer<typeof PersistedDocumentDetailSchema>;
 
 export const PersistedEditorialWorkspaceSchema = z.object({
   mode: PersistenceModeSchema,
@@ -58,7 +77,12 @@ export const LocalWorkflowRecoverySchema = z.object({
   siloPageVersions: z.record(z.string(), VersionedSiloPageSchema).default({}),
   versionEvents: z.array(VersionStatusEventSchema),
   contentPlans: z.record(z.string(), VersionedContentPlanSchema),
-  documents: z.record(z.string(), ContentDocumentSchema),
+  /*
+   * E1 · a cópia local guarda os documentos na forma de LISTAGEM: sem o bundle,
+   * com o marcador. Cópia antiga, com o documento completo, continua legível.
+   * O Redator nunca edita a partir daqui: a edição espera o detalhe do servidor.
+   */
+  documents: z.record(z.string(), ListedContentDocumentSchema),
   radarItems: z.array(RadarItemSchema),
   plannerItems: z.array(PlannerItemSchema),
   serpRecords: z.array(SerpCollectionRecordSchema).default([]),
@@ -133,8 +157,13 @@ export const WorkflowCommandSchema = z.discriminatedUnion("action", [
 ]);
 export type WorkflowCommand = z.infer<typeof WorkflowCommandSchema>;
 
+/*
+ * E1 · `document` aceita também a cópia PARCIAL. A rota nunca a grava como
+ * está: completa com o bundle gravado na linha (`completeWithStoredBundle`) e
+ * recalcula o hash. O caminho normal do Redator continua mandando o completo.
+ */
 export const DocumentSaveInputSchema = z.object({
-  brandId: z.string(), documentId: z.string(), expectedLockVersion: z.number().int().positive(), document: ContentDocumentSchema,
+  brandId: z.string(), documentId: z.string(), expectedLockVersion: z.number().int().positive(), document: ListedContentDocumentSchema,
   contentHash: z.string(), createVersion: z.boolean().default(false), changeReason: z.string().default("Autosave editorial."),
 });
 

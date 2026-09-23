@@ -3,6 +3,9 @@
 import { buildRadarResearchDetails, type RadarResearchDetailsView } from "@/lib/radar/operational-view";
 import type { RadarDeepResearchView } from "@/lib/radar/deep-research-view";
 import type { RadarR3Model } from "@/lib/radar/r3-workbench";
+import { buildRadarSerpLensCoverage } from "@/lib/radar/serp-lens-coverage";
+import { RadarFrozenLensSummary, RadarSerpLensCoverageView } from "./radar-serp-lens-coverage";
+import { radarFrozenLensView } from "./radar-serp-lens-view";
 
 /**
  * OS DETALHES DA PESQUISA — LEITURA, E SOMENTE LEITURA.
@@ -82,6 +85,19 @@ export function RadarR3ResearchDetails({ model, view }: { model: RadarR3Model; v
     || detalhes.collection.uniqueReferences > 0
     || detalhes.collection.selectedReferences > 0;
 
+  /*
+   * AS LENTES DA SERP — adendos R2 e R3.
+   *
+   * Congelada, a investigação mostra a CÓPIA do bundle (ou diz, numa linha,
+   * que ele não tem cópia); aberta, a SERP viva do snapshot. Nunca as duas: a
+   * SERP viva pode ter mudado depois do FINALIZE, e a fotografia não muda.
+   */
+  const lentesCongeladas = radarFrozenLensView(view.finalizedBundle);
+  const lentesVivas = lentesCongeladas ? null : buildRadarSerpLensCoverage(model.serp.view?.record.research);
+  const resumoDasLentes = lentesCongeladas?.state === "frozen" ? lentesCongeladas.shortLabel
+    : lentesVivas && lentesVivas.state !== "none" ? lentesVivas.label
+      : null;
+
   return <section className="space-y-2.5" aria-label="Detalhes da pesquisa" data-testid="radar-research-details" data-source={detalhes.source}>
     {/*
       * §4 — A COLETA NÃO PRECISA DE ABA.
@@ -121,7 +137,17 @@ export function RadarR3ResearchDetails({ model, view }: { model: RadarR3Model; v
       {detalhes.frozen && <p className="mt-2 text-sm leading-6 text-text-muted" data-testid="radar-research-details-frozen-note">
         Estes números são os do pacote congelado {detalhes.frozen.bundleId} · hash {detalhes.frozen.bundleHash}. Eles não mudam mais.
       </p>}
+      {lentesCongeladas && lentesCongeladas.state !== "frozen" && <div className="mt-1"><RadarFrozenLensSummary view={lentesCongeladas} /></div>}
     </div>}
+
+    {houvePipelineDoGoogle && resumoDasLentes && <details className={secao} data-testid="radar-research-details-lenses">
+      <summary className="cursor-pointer text-sm font-semibold text-foreground">
+        Lentes da SERP <span className="font-normal text-text-muted">· {resumoDasLentes}</span>
+      </summary>
+      <div className="mt-3">
+        {lentesCongeladas ? <RadarFrozenLensSummary view={lentesCongeladas} /> : lentesVivas && <RadarSerpLensCoverageView coverage={lentesVivas} />}
+      </div>
+    </details>}
 
     {/*
       * §5 e §6 — CONCORRENTES COMO INFORMAÇÃO.

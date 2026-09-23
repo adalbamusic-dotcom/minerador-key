@@ -23,7 +23,8 @@
 
 import type { ArchitectureAnalysis, ClusterAnalysis } from "./architecture-analysis";
 import { intentComparisonKey, intentIsKnown, type KeywordDnaSignals } from "./keyword-dna-signals.ts";
-import { selectPublishedSiloDeclaration, type PublishedSiloDeclaration } from "./silo-primary-keyword.ts";
+import type { PublishedSiloDeclaration } from "./silo-primary-keyword.ts";
+import { declaredNotSilo, headsSilo } from "./editorial-unit-declaration.ts";
 import type { EditorialUnitDeclaration } from "./contracts.ts";
 
 export type ProposalSiloSource = "reused" | "proposed";
@@ -276,38 +277,40 @@ export function buildArchitectureWorkingProposal(input: {
     return [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
   };
 
+  /** O que o Minerador declarou sobre a keyword. Ausente = só o padrão. */
+  const declaracaoDe = (keywordId: string) => input.declarations?.get(keywordId);
+
   /**
-   * ORIGEM 2 — a declaração publicada do grupo, quando existe uma.
+   * A SEMENTE LÉXICA de um grupo, respeitando o que o humano declarou.
    *
-   * Não é palpite sobre o grupo: é leitura do que o site já tem no ar. Quando
-   * uma keyword do cluster é uma página publicada declarada Silo, ela é a
-   * identidade — e passa a ser também a SEMENTE, no lugar da cabeça léxica que
-   * a análise escolheu por proximidade de texto.
+   * A cabeça do cluster é escolhida por proximidade de texto — e o texto não
+   * sabe que o humano marcou aquela keyword como Artigo. Keyword declarada
+   * não-Silo (artigo, landing, serviço) nunca vira semente: a semente passa
+   * para a primeira que ninguém declarou. Se TODAS foram declaradas não-Silo,
+   * o grupo não sustenta Silo nenhum, e isto devolve `null`.
    */
-  const declaracaoDoGrupo = (cluster: ClusterAnalysis) => {
-    if (!input.declarations?.size) return null;
-    const selecionada = selectPublishedSiloDeclaration(cluster.memberKeywordIds.map(keywordId => ({
-      keywordId,
-      declaration: input.declarations?.get(keywordId),
-      label: keywordTexts.get(keywordId) || keywordId,
-    })));
-    return selecionada.state === "FOUND" ? selecionada : null;
+  const sementeLexica = (cluster: ClusterAnalysis): string | null => {
+    const livre = (keywordId: string) => !declaredNotSilo(declaracaoDe(keywordId));
+    if (cluster.headKeywordId && livre(cluster.headKeywordId)) return cluster.headKeywordId;
+    return cluster.memberKeywordIds.find(livre) ?? null;
   };
 
-  const propor = (cluster: ClusterAnalysis, motivo: string): string => {
-    const nome = rotuloDoCluster(cluster);
+  const propor = (cluster: ClusterAnalysis, motivo: string): string | null => {
+    const semente = sementeLexica(cluster);
+    if (!semente) return null;
+    // O nome segue a semente quando a cabeça léxica foi recusada: um Silo
+    // não pode levar o nome de uma keyword que o humano disse ser artigo.
+    const nome = semente === cluster.headKeywordId ? rotuloDoCluster(cluster) : (keywordTexts.get(semente) || rotuloDoCluster(cluster));
     const slug = input.slugOf(nome);
     const key = `proposed:${slug}`;
     if (!silos.has(key)) {
-      const declarada = declaracaoDoGrupo(cluster);
       silos.set(key, {
         key, territoryRef: null, name: nome, slug,
-        seedKeywordId: declarada?.keywordId ?? cluster.headKeywordId,
-        primaryKeywordDeclaration: declarada,
+        seedKeywordId: semente,
+        // Silo léxico não tem primária eleita: quem elege é a SERP, depois.
+        primaryKeywordDeclaration: null,
         source: "proposed",
-        reason: declarada
-          ? `${motivo} A primária é "${declarada.label}": já publicada e declarada Silo pelo Minerador.`
-          : motivo,
+        reason: motivo,
       });
       nucleoDoSilo.set(key, identityCore(nome));
       intencaoDoSilo.set(key, intencaoDoGrupo(cluster));
@@ -323,6 +326,8 @@ export function buildArchitectureWorkingProposal(input: {
     via: Contribuicao,
   ) => {
     for (const keywordId of cluster.memberKeywordIds) {
+      // Cabeça de Silo declarado já tem destino: é a identidade do Silo dela.
+      if (resolvidasPorDeclaracao.has(keywordId)) continue;
       const dna = dnaPorKeyword.get(keywordId) ?? null;
       assignments.push({
         keywordId, siloKey, reason: motivo, membershipState,
@@ -332,6 +337,87 @@ export function buildArchitectureWorkingProposal(input: {
         dnaContentHash: dna?.dnaContentHash ?? null,
       });
     }
+  };
+
+  /**
+   * PRIMEIRO, O QUE O MINERADOR JÁ DECLAROU.
+   *
+   * A lógica da aba Silos começa pelo DNA: cada keyword chega com o tipo de
+   * página que o humano marcou — Silo, Artigo, Landing, Serviço — e, quando
+   * publicada, com o endereço. Isso separa quem é cabeça de Silo de quem vai
+   * para os artigos ANTES de o léxico agrupar qualquer coisa, e sem provider:
+   * a SERP confirma na etapa seguinte, não decide aqui.
+   *
+   *   Silo publicado   cabeça de Silo, com a primária já eleita pela
+   *                    declaração (origem 2). Endereço vem junto.
+   *   Silo potencial   cabeça de Silo, primária ainda PROVISÓRIA: a SERP
+   *                    confirma ou elege outra (origem 1).
+   *   não-Silo         nunca vira semente — vai para os artigos, como membro.
+   *   sem declaração   o léxico decide, como sempre decidiu.
+   *
+   * Cada keyword declarada Silo ganha o PRÓPRIO Silo: duas páginas no ar
+   * declaradas Silo são dois Silos, não uma ambiguidade a resolver fundindo.
+   */
+  const resolvidasPorDeclaracao = new Set<string>();
+  const siloDaCabeca = new Map<string, string>();
+  const slugsExistentes = new Map([...silos.values()].map(silo => [silo.slug, silo.key]));
+
+  for (const keywordId of keywordTexts.keys()) {
+    const declaracao = declaracaoDe(keywordId);
+    if (!headsSilo(declaracao)) continue;
+
+    const nome = keywordTexts.get(keywordId) || keywordId;
+    const slug = input.slugOf(nome);
+    const publicada = declaracao!.source === "published";
+    const dna = dnaPorKeyword.get(keywordId) ?? null;
+
+    /*
+     * O Silo declarado pode já existir no acervo com o mesmo endereço. Aí a
+     * cabeça se junta a ele em vez de nascer um segundo Silo para a mesma
+     * página — duplicar estrutura publicada é o erro que esta checagem evita.
+     */
+    let key = slugsExistentes.get(slug) ?? null;
+    if (!key) {
+      key = `proposed:${slug}`;
+      if (!silos.has(key)) {
+        silos.set(key, {
+          key, territoryRef: null, name: nome, slug,
+          seedKeywordId: keywordId,
+          primaryKeywordDeclaration: publicada
+            ? { state: "FOUND", keywordId, label: nome, declaration: declaracao as Extract<EditorialUnitDeclaration, { source: "published" }> }
+            : null,
+          source: "proposed",
+          reason: publicada
+            ? `"${nome}" já está publicada e o Minerador a declara Silo: a primária vem da declaração.`
+            : `O Minerador marcou "${nome}" com potencial de Silo: a primária é provisória até a SERP confirmar.`,
+        });
+        nucleoDoSilo.set(key, identityCore(nome));
+        intencaoDoSilo.set(key, intentComparisonKey(dna?.intent ?? null));
+      }
+    }
+
+    resolvidasPorDeclaracao.add(keywordId);
+    siloDaCabeca.set(keywordId, key);
+    assignments.push({
+      keywordId,
+      siloKey: key,
+      reason: publicada
+        ? "Cabeça do Silo: página publicada declarada Silo pelo Minerador."
+        : "Cabeça do Silo: potencial de Silo declarado no Minerador.",
+      membershipState: silos.get(key)?.source === "proposed" ? "new_silo_candidate" : "existing_silo_match",
+      basis: [publicada ? "Declaração de Silo publicado no Vínculo" : "Potencial de Silo declarado no Vínculo"],
+      dnaVersionId: dna?.dnaVersionId ?? null,
+      dnaContentHash: dna?.dnaContentHash ?? null,
+    });
+  }
+
+  /** O Silo declarado dentro do grupo, se houver: é ele que atrai os vizinhos. */
+  const siloDeclaradoDoGrupo = (cluster: ClusterAnalysis): string | null => {
+    for (const keywordId of cluster.memberKeywordIds) {
+      const key = siloDaCabeca.get(keywordId);
+      if (key) return key;
+    }
+    return null;
   };
 
   /**
@@ -459,7 +545,8 @@ export function buildArchitectureWorkingProposal(input: {
   );
   if (!silos.size && semDestinoProprio) {
     const semente = grupoSemente(input.analysis.clusters);
-    const guardaChuva = termoGuardaChuva(keywordTexts);
+    // O termo guarda-chuva não pode ser uma keyword que o humano declarou artigo.
+    const guardaChuva = termoGuardaChuva(new Map([...keywordTexts].filter(([keywordId]) => !declaredNotSilo(declaracaoDe(keywordId)))));
     if (semente && guardaChuva) {
       propor(
         { ...semente, label: guardaChuva.texto, headKeywordId: guardaChuva.keywordId },
@@ -471,6 +558,21 @@ export function buildArchitectureWorkingProposal(input: {
   }
 
   for (const cluster of input.analysis.clusters) {
+    /*
+     * O Silo declarado no Minerador atrai os vizinhos de grupo.
+     *
+     * O léxico juntou estas keywords com uma que o humano marcou como Silo:
+     * elas são o universo dele. A sugestão léxica de "fortalecer outro Silo"
+     * perde para a declaração — quem sabe o que a página é continua sendo o
+     * humano.
+     */
+    const declarado = siloDeclaradoDoGrupo(cluster);
+    if (declarado) {
+      const estado = silos.get(declarado)?.source === "proposed" ? "new_silo_candidate" : "existing_silo_match";
+      atribuir(cluster, declarado, `Agrupada com o Silo declarado no Minerador: ${cluster.reason}`, estado, TEMA_DO_ANALISADOR);
+      continue;
+    }
+
     if (cluster.destination === "strengthen_existing_silo" && cluster.suggestedTerritoryRef) {
       const key = cluster.suggestedTerritoryRef;
       if (!silos.has(key)) {
@@ -488,8 +590,16 @@ export function buildArchitectureWorkingProposal(input: {
 
     if (cluster.destination === "new_silo_candidate") {
       const key = propor(cluster, `Grupo com profundidade própria: ${cluster.reason}`);
-      atribuir(cluster, key, `Silo proposto a partir deste grupo: ${cluster.reason}`, "new_silo_candidate", TEMA_DO_ANALISADOR);
-      continue;
+      if (key) {
+        atribuir(cluster, key, `Silo proposto a partir deste grupo: ${cluster.reason}`, "new_silo_candidate", TEMA_DO_ANALISADOR);
+        continue;
+      }
+      /*
+       * Todas as keywords do grupo foram declaradas não-Silo pelo humano: o
+       * léxico via profundidade, mas o Minerador diz que são artigos. Nenhum
+       * Silo é inventado — o grupo segue para o Silo de maior afinidade, ou
+       * fica sem Silo, como qualquer grupo sem profundidade.
+       */
     }
 
     const { melhor, vetado } = siloMaisProximo(cluster);

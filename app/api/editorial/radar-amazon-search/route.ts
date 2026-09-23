@@ -20,6 +20,7 @@ import { RadarStartError, radarStartPorts } from "@/lib/server/radar-youtube-sta
 import { finishRadarAmazonRun, startRadarAmazonRun } from "@/lib/server/radar-amazon-start";
 import { recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import { collectRadarGoogleSupport, type RadarSupportCollectionOutcome } from "@/lib/server/radar-support-research";
+import { radarProviderDeviceEchoRecorder } from "@/lib/server/radar-provider-echo";
 import {
   RadarResearchPackageRecordSchema,
   radarAmazonPrimaryCounts,
@@ -305,7 +306,11 @@ export async function POST(request: Request) {
  */
 async function consultarProdutosAmazon(
   entrada: { keyword: string; depth: number; operationRequestId: string; queryId: string },
-  deps: { config: Parameters<typeof executeDataForSeoAmazonQuery>[1]["config"] },
+  deps: {
+    config: Parameters<typeof executeDataForSeoAmazonQuery>[1]["config"];
+    /* R5 · o gravador do eco do aparelho: a MESMA resposta, lida de uma cópia. */
+    fetchImpl?: Parameters<typeof executeDataForSeoAmazonQuery>[1]["fetchImpl"];
+  },
 ) {
   return executeDataForSeoAmazonQuery({
     keyword: entrada.keyword,
@@ -315,7 +320,7 @@ async function consultarProdutosAmazon(
     depth: entrada.depth,
     operationRequestId: entrada.operationRequestId,
     queryId: entrada.queryId,
-  }, { config: deps.config });
+  }, { config: deps.config, ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}) });
 }
 
 type ColetaEmCurso = {
@@ -362,6 +367,11 @@ async function executarColeta({ input, profile, inicio }: ColetaEmCurso) {
   const failures: Array<{ queryId: string; reason: string }> = [];
   const executadas: Array<{ queryId: string; resultCount: number; checkUrl: string | null; seResultsCount: number | null; itemsCount: number | null }> = [];
   let eco: RadarAmazonQuerySearchMetadata | null = null;
+  /*
+   * R5 · A AMAZON CONTINUA EM LENTE ÚNICA — e o aparelho que o provider
+   * ecoou fica gravado. O pedido não muda: nenhum `device` ou `os` é enviado.
+   */
+  const ecoDoAparelho = radarProviderDeviceEchoRecorder();
   const collectedAt = new Date().toISOString();
 
   /*
@@ -384,7 +394,7 @@ async function executarColeta({ input, profile, inicio }: ColetaEmCurso) {
         depth: input.depth,
         operationRequestId: `${input.articleId}:${consulta.queryId}`,
         queryId: consulta.queryId,
-      }, { config });
+      }, { config, fetchImpl: ecoDoAparelho.fetchImpl });
 
       results.push(...normalizada.results);
       relatedSearches.push(...normalizada.relatedSearches);
@@ -435,6 +445,9 @@ async function executarColeta({ input, profile, inicio }: ColetaEmCurso) {
       languageCode: eco?.languageCode || null,
       seDomain: eco?.seDomain || null,
       depth: input.depth,
+      /* O eco, não o palpite: `null` quando a resposta não declarou aparelho. */
+      device: ecoDoAparelho.echo()?.device ?? null,
+      os: ecoDoAparelho.echo()?.os ?? null,
       queriesRequested: input.queries.length,
       queriesSucceeded: executadas.length,
       queriesFailed: failures.length,

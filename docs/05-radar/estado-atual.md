@@ -1,5 +1,325 @@
 # Estado atual — Radar
 
+## As 4 lentes no Radar, standing congelado, tela das lentes e export — 2026-09-23
+
+```text
+SERP_DO_RADAR = 4 lentes, advanced, cache primeiro (paga só a faltante; collectedBy radar)
+CANONICA = desktop-windows depth 20 com corpo · extras depth 10 com digest
+ATUALIZAR_SERP_SEM_MUDANCA = mesma versão (unchanged) · RECOLETAR_AGORA = pago, com confirmação e o número antes
+FINALIZE = serpStanding e search.lenses congelados no servidor · dossiê V3 ganha serpLenses (cópia)
+DEPOIS_DO_FINALIZE = "Atualizar SERP" e auxiliar recusados (FINALIZED_LOCKED), inclusive por cache
+BUNDLES_E_DOSSIES_JA_ENTREGUES = byte a byte iguais (hashes dourados conferidos)
+MIGRATIONS_ADDED = 0 · CHAMADAS_PAGAS_EM_TESTE = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste** (`test:radar` 2563/2563). Documentos em `propostas/`:
+- a [SDD das 4 lentes](propostas/sdd-radar-quatro-lentes-cache-2026-09-23.md);
+- os adendos [R1](propostas/adendo-r1-standing-congelado-e-ledger-2026-09-23.md), [R2](propostas/adendo-r2-quatro-lentes-cache-2026-09-23.md) e [R3 a R5](propostas/adendo-r3-r4-r5-lentes-congeladas-auxiliar-apoio-2026-09-23.md).
+
+- **R1 — standing congelado.**
+  - O FINALIZE calcula `serpStanding` uma vez, no servidor, e o grava no bundle.
+  - "Válida" significa não rejeitada na revisão; `needs_review` conta como válida.
+  - Níveis suficientes: SUFFICIENT, PARTIAL_BUT_USABLE e CONFLICTING_SEARCH_INTENT.
+  - Bundle antigo mantém o padrão legado sem reescrita.
+  - A trava recusa reescrever a `finalizedBundle` congelada.
+  - A rota da SERP consulta a trava antes do cache e do provider.
+- **R2 — 4 lentes.**
+  - O snapshot leva o `lensSet` (cópia, sem digest), e o hash cobre as lentes.
+  - A primeira atualização de um artigo antigo abre uma versão nova, uma vez, porque a fórmula mudou.
+  - As SERPs pagas pelo Radar ficam no cache e servem ao Minerador e ao Arquiteto.
+- **R3 a R5.**
+  - O bundle ganha `search.lenses`, e o dossiê V3, `serpLenses`. As lacunas e divergências entre aparelhos entram nas `limitations`.
+  - A pesquisa auxiliar e o apoio Google da Amazon passam pelo mesmo núcleo: até 4 chamadas cada, sem cache.
+  - YouTube e Amazon Merchant ficam em lente única, com o eco de device/os gravado na proveniência.
+- **Tela.**
+  - Aba SERP da rota do artigo: seção "Lentes da SERP" ("SERP · K de 4 lentes", origem por aparelho, "Apareceu em um aparelho só", "SERP observada em") e botão "Recoletar agora (pago)" com a confirmação "Pagar até 4 chamadas".
+  - Avisos: "A SERP não mudou… Nenhuma versão nova foi aberta".
+  - Workbench:
+    - coluna "Lentes" no plano de consultas;
+    - "Lentes da SERP" no card congelado e em "Ver detalhes da pesquisa";
+    - aviso discreto para bundle anterior a 2026-09-23.
+  - A barra de lote virou "Atualizar SERP selecionada (cache primeiro)".
+  - A frase do FINALIZE cita o hash gravado, lido no readback.
+- **Export por Silo.**
+  - `serp_lenses_md` e `serp_lenses_json` abrem com as lentes do **pacote congelado (fonte de verdade)**. O cache vem depois, como observação fora do pacote.
+  - A "Situação da SERP" ganha a linha das lentes.
+  - As limitações saem sem código de provider.
+  - Saída dourada sem a entrada nova: idêntica.
+- **Egress do export** (E4, parcial).
+  - Leitura por artigo com reidratação só da versão usada: CSV byte a byte igual, ~23,6 → ~16,3 MB por export na Care Glow (−31%).
+  - "Silos completos" sem seleção mostra a estimativa quando passa de 20 MB.
+
+## Export portátil: a SERP, os dados do Redator e o export por silo — 2026-09-23
+
+Pedido do dono do produto: o CSV do Radar é a saída final para escrever com
+outra ferramenta ou outra IA, então precisa levar a SERP e os mesmos dados que
+o Redator tem por artigo; e a recomendação de export passa a ser o silo
+completo, um CSV por silo.
+
+```text
+PORTABLE_EXPORT_SERP           = IMPLEMENTADO · verificado no código · confirmado por teste com coletas reais
+PORTABLE_EXPORT_WRITER_PARITY  = IMPLEMENTADO · prontidão, datas, autoridade, concorrentes e proibições do Redator
+PORTABLE_EXPORT_BY_SILO        = IMPLEMENTADO · groupBy "silo" · 1 silo → CSV · 2+ → um .zip sem compressão
+EXPORT_MENU                    = "Silos completos · um CSV por silo" (Recomendado) é o primeiro item
+PROVIDER_CALLS_ON_EXPORT       = 0 · o cache de SERP é só LIDO (modo observation), nunca pago
+RADAR_EVIDENCE_BUNDLE          = V3 inalterado · hash inalterado
+MANUAL_UI_VALIDATED            = NO — homologação do usuário
+```
+
+### O que mudou
+
+- **A linha do CSV** (`lib/radar/portable-export.ts`) ganhou entradas
+  OPCIONAIS — `serpObserved`, `serpLenses`, `dossierGaps`, `siloContext`. Sem
+  elas, as colunas novas não existem; a linha só difere da de antes nas regras
+  de paridade com o Redator (`writer_context_md` e `writer_brief_md`), que
+  entram sempre. A rota passa todas.
+- **A SERP da coluna é a que o DOSSIÊ referencia** (`research.google.refs`),
+  nunca "a mais recente"; no YouTube e na Amazon, o snapshot de apoio. Quando
+  há coleta posterior à investigação, a coluna diz a data e que ela não foi
+  usada. A curadoria humana (`serpDecisions`) só atravessa na SERP principal da
+  própria análise: numa SERP de apoio, a chave posicional apontaria outra
+  página.
+- **As proibições do Redator que faltavam** ("reconfigurar o Silo",
+  "substituir a composição de secundárias") entram nas regras de
+  `writer_context_md` e de `writer_brief_md`, importadas de
+  `RADAR_WRITER_MAY_NOT` e sem repetir as que já estavam cobertas.
+- **`writer_context_md`** ganhou a seção curta "SERP OBSERVADA": top 10
+  (título · domínio · URL), perguntas, buscas relacionadas e domínios citados no
+  AI Overview — sem trecho de terceiro; o detalhe fica em `serp_observed_md`.
+- **Export por silo**: `POST /api/editorial/radar-export` aceita
+  `groupBy: "silo"` (opcional; o schema continua estrito). Nesse modo a
+  resposta traz `files[{ filename, csv, silo: { name, kind, partial,
+  exported, total, pending[{ title, status, reason }], warnings } }]`,
+  `archiveFilename`, `emptySilos` e `warnings` **em vez de** `csv`/`filename`
+  do lote (revisão adversarial: mandar os dois dobrava a resposta, e a tela só
+  lê `files`). O dossiê avulso continua com `csv` e `filename`. `exportedAt` e
+  `serpCacheReadFailed` saem em toda resposta. Uma chamada só para o lote.
+- **Tela** (`modules/radar/radar-page.tsx`): novo primeiro item do menu
+  `Exportar ▾`, `data-testid="radar-export-silos"`, com o selo "Recomendado"
+  no padrão do selo "Em foco" (14px) e a prévia de contagem pelo `siloId` do
+  item e pelo SiloDNA. Escopo: com seleção, os silos das linhas selecionadas
+  inteiros; sem seleção, todos os silos do Radar; a SiloPage nunca vai no
+  pedido. 1 arquivo baixa o CSV; 2+ baixam um `.zip` montado no navegador por
+  `lib/radar/stored-zip.ts`. O aviso usa `useNoticeBridge` com severidade:
+  WARNING para parcial, recusa, silo vazio ou cache ilegível, com os faltantes
+  pelo TÍTULO; nenhum aviso diz "sucesso confirmado" para um download. O item
+  "Dossiês editoriais finalizados" passou a mostrar os recusados (`refused`,
+  antes ignorado) pelo título e a recomendar o silo completo quando um silo foi
+  selecionado só em parte. "Planilha atual" não mudou.
+
+### Colunas novas
+
+| Coluna | O que leva | Origem |
+| --- | --- | --- |
+| `research_status_md` | prontidão para o Redator (pela regra dele), datas do congelamento e da coleta, camadas, situação da SERP, sinal cruzado YouTube × Google, saídas editoriais | `portable-dossier-gaps` |
+| `silo_context_md` / `silo_context_json` | silo, posição "N de T", papel, objetivo, público, problema, intenção, tópicos, fronteira, ordem narrativa com a situação de cada membro, SiloPage como contexto | `portable-silo-export` (só no export por silo) |
+| `serp_observed_md` / `serp_observed_json` | a SERP da investigação: ficha, orgânicos com trecho de até 300 caracteres marcado "trecho de terceiro — referência, não copiar", PAA, relacionadas, painel, blocos, diagnóstico, SERPs auxiliares das secundárias, curadoria e ausências ditas | `portable-serp-observed` |
+| `serp_lenses_md` / `serp_lenses_json` | a leitura do cache de SERP da marca nas quatro lentes, com a data de cada uma e a divergência entre elas | `portable-serp-observed` |
+| `competitors_structure_json` | estrutura, melhor posição, todas as posições e recorrência de cada concorrente; cruza com `serp_sources_json` pela URL | `portable-dossier-gaps` |
+| `authority_requirements_md` | YMYL, afirmações que pedem prova, E-E-A-T, pontos do especialista, requisitos de descoberta por IA | `portable-dossier-gaps` |
+
+Contagem na linha completa: JSON continua ≤ Markdown (5 `_md` e 4 `_json`
+novas), e nenhuma coluna nova fica sem sufixo.
+
+### Leituras novas (SDD de egress)
+
+- `SerpSnapshotRepository.listReviews(brandId)`: **uma** consulta por lote,
+  colunas explícitas, filtro de marca. Se falhar, a coluna diz "revisão não
+  lida nesta exportação" e o arquivo sai.
+- `lookupSerpCache(..., { mode: "observation" })`: **uma** leitura por lote
+  para principal + secundárias de todos os artigos, nas 4 lentes de
+  `SERP_CACHE_LENSES`, endpoint `advanced`, profundidade 10. Os códigos de
+  local e idioma são os do **alvo de cada keyword** (regra A8, a mesma do
+  Arquiteto e do Minerador): `readMineradorKeywordTargetCodes` de
+  `lib/arquiteto/serp-lens-targeting.ts` lê, por lote de 100 ids, só o
+  targeting da última medição (`minerador_keywords`, filtro de marca, coluna
+  estreita); sem alvo resolvível ou com essa leitura falha, valem os de
+  `readDataForSeoTargetCodes()`. Se a leitura do cache lançar, vira "a leitura
+  do cache falhou nesta exportação" em cada lente; o export não cai.
+- O padrão de leitura por artigo (`loadRadarState` + autoridades, item E4 da
+  SDD de egress) **não foi tocado**.
+
+### Revisão adversarial — o que foi corrigido (2026-09-23)
+
+Três revisores (dados e paridade, higiene e egress, silo e tela). Cada
+correção tem teste que fica vermelho sem ela: 24 mutantes, um por correção,
+rodados numa CÓPIA da árvore no scratchpad (nenhum arquivo do repositório foi
+mutado) — 24 mortos, com as suítes de base verdes.
+
+- **Egress (must-fix):** com `groupBy: "silo"`, o CSV do lote não sai mais
+  junto de `files[].csv`. Medida da revisão: a linha passou de ~59 KB para
+  ~133 KB com a SERP; 20 artigos davam 2,89 MB no avulso e 5,78 MB no modo
+  silo.
+- **Lentes:** a deduplicação usa a chave do cache (acentos mantidos), então
+  "oleo de rosa mosqueta" não some mais atrás de "óleo de rosa mosqueta". O
+  espaço interno é colapsado nos dois lados do índice: antes, "rosa  mosqueta"
+  era lida e acertada, mas saía "nenhuma coleta". Os códigos são os do alvo da
+  keyword (A8), como descrito acima.
+- **SERP de apoio (YouTube/Amazon):** "Congelamento da investigação" vem de
+  `radarFrozenObservedAtOfAnalysis`, a mesma data de `research_status_md`, e
+  não mais da data da coleta de apoio. A revisão humana diz "não se aplica" em
+  vez de "aguardando revisão humana".
+- **Curadoria:** "registrada" só quando há pelo menos uma decisão que não é
+  `pending`. Com todos os itens pendentes: "iniciada, com todos os itens ainda
+  pendentes".
+- **Higiene (invariante 43):** o motivo da consulta auxiliar que falhou levava
+  o erro cru do servidor ("binding … provider", "secret store"). Agora sai
+  numa frase neutra. Os motivos de planejamento saem como estão.
+- **Coleta posterior:** `research_status_md` também avisa que as colunas de
+  evidência (`serp_sources_json`, `serp_evidence_json`,
+  `competitors_structure_json`, `authority_requirements_md`) partem da coleta
+  mais recente.
+- **Silo, a ligação:** as linhas do lote saem de `radarPortableExportRows`
+  (ponte pura, testada com o plano real). Antes, uma rota sem o contexto do
+  silo passava a suíte inteira. O teste da rota também exige
+  `itensDoSilo.push(faltante(…))` nos três ramos de recusa.
+- **Aviso por silo:** nomeia cada recusa pelo título e com o motivo do
+  servidor, inclusive o artigo sem silo que antes só era contado. A faixa
+  inline segue a severidade (INFO → `context-accent`, WARNING → `warning`,
+  ERROR → `danger` com `role="alert"`).
+- **Teto de 500 artigos:** a constante `RADAR_EXPORT_MAX_ARTICLES` é a mesma
+  na rota e na tela. "Silos completos" acima dela avisa antes do pedido, em
+  vez de receber um 400 genérico.
+- **Comentários:** o contrato da linha deixou de dizer "exatamente a de
+  antes" (as regras de paridade entram sempre).
+
+### Arquivos
+
+- Criados nesta integração: `lib/radar/portable-export-batch.ts` (pontes puras
+  entre a rota e os módulos), `lib/radar/portable-silo-scope.ts` (escopo,
+  prévia e avisos da tela), `tests/radar-portable-export-integracao-serp-silo.test.mts`.
+- Criados nas partes anteriores da mesma tarefa: `lib/radar/portable-serp-observed.ts`,
+  `lib/radar/portable-dossier-gaps.ts`, `lib/radar/portable-silo-export.ts`,
+  `lib/radar/stored-zip.ts` e as suítes deles.
+- Alterados: `app/api/editorial/radar-export/route.ts`,
+  `lib/radar/portable-export.ts`, `lib/radar/portable-writer-context.ts`
+  (seção opcional), `lib/radar/portable-serp-observed.ts` (resumo para o
+  contexto completo), `modules/radar/radar-page.tsx`,
+  `tests/radar-portable-export-11.test.mts`, `tests/radar-portable-export-12.test.mts`.
+- **Compartilhado, mudança aditiva:** `lib/server/radar-canonical-authorities.ts`
+  ganhou o campo opcional `radarItem { siloId, title, slug, unitType }`. A
+  resolução canônica não o lê: bundle e hash iguais (provado em teste).
+  Consumidores preservados: `radar-writer-send.ts`, `radar-planner-send.ts`
+  (`RADAR_NO_AUTHORITIES` continua válido) e a rota de export.
+- Leitura de outro módulo, sem alterá-lo: `lib/radar` passa a importar
+  `RADAR_WRITER_MAY_NOT` de `lib/redator/writer-handoff.ts`.
+- Revisão adversarial: alterados `lib/radar/portable-export-batch.ts`
+  (chave das lentes, data de congelamento, `radarPortableExportRows`, coleta
+  posterior para a situação), `lib/radar/portable-serp-observed.ts`
+  (`codesFor`, motivo neutro da auxiliar, revisão da SERP de apoio, rótulo da
+  curadoria), `lib/radar/portable-dossier-gaps.ts` (campo opcional
+  `newerSerpCollection`), `lib/radar/portable-silo-scope.ts` (`titleOf` no
+  aviso por silo, `RADAR_EXPORT_MAX_ARTICLES`,
+  `radarSiloExportScopeLimitNotice`), a rota, `modules/radar/radar-page.tsx`
+  (tom da faixa, teto, títulos), os comentários de `portable-export.ts` e de
+  `radar-portable-export-11`, e `tests/radar-portable-serp-observed.test.mts`
+  (a SERP de apoio deixou de "aguardar revisão"; a principal continua
+  aguardando, provado no mesmo teste).
+- Leitura de outro módulo, sem alterá-lo: a rota importa
+  `readMineradorKeywordTargetCodes` e `serpTargetCodesFor` de
+  `lib/arquiteto/serp-lens-targeting.ts` (regra A8). Os consumidores dele (três
+  rotas do Arquiteto e a suíte `arquiteto-serp-cache-formacao`) não mudaram.
+
+### Testes
+
+- Novos: `radar-portable-export-integracao-serp-silo` (16) — colunas novas a
+  partir de coletas reais, SERP vinculada × posterior, curadoria só na SERP
+  principal, higiene separando id nosso de URL de terceiro (UUID legítimo na URL
+  de um concorrente sai intacto; nenhum id nosso sai, nem dentro de URL),
+  paridade das regras sem repetição, leitura do cache que lança, `files` por
+  silo na ordem do silo e parcial, silo vazio como aviso, escopo e avisos da
+  tela, menu com o item recomendado primeiro, hash inalterado, fiação da rota.
+- Atualizados, com o porquê no comentário: `radar-portable-export-11` (o menu
+  passou de 3 para 4 marcas `data-testid`, com a ordem; e o §19 passou a
+  conferir também a linha completa) e `radar-portable-export-12` (§29: 4
+  marcas, e só o botão do menu fora dele). Nenhuma guarda foi apagada.
+- `npm run test:radar`: 2446/2446. `npx tsc --noEmit -p .`: nenhum erro nos
+  arquivos desta tarefa (o único erro restante está em
+  `lib/server/writer-evidence-sources.ts`, arquivo novo de outra sessão).
+  ESLint sem erro nos arquivos alterados; `git diff --check` limpo.
+- Depois da revisão adversarial: `radar-portable-export-integracao-serp-silo`
+  passou de 16 para 26 testes (SERP de apoio, curadoria pendente, coleta
+  posterior na situação, variante sem acento e espaço duplo, códigos do alvo,
+  motivo neutro da auxiliar, linhas com o plano real, aviso por silo com as
+  recusas, teto de 500, faixa por severidade, e o H com A8, a ligação
+  plano → linha, os três ramos de recusa e o CSV do lote só no avulso).
+  `npm run test:radar`: 2465/2465. `npx tsc --noEmit -p .`: 0 erros no
+  projeto inteiro. ESLint: 0 erros; só os avisos `no-unused-vars` que já
+  existiam em `radar-page.tsx`. `scripts/check-visual-system.mjs` não acusa
+  `radar-page.tsx`. `git diff --check` limpo.
+- Resposta em fluxo: `radar-portable-export-response` (4) — corpo de ~1,2 MB
+  sai em vários pedaços e volta como o MESMO JSON, inclusive por
+  `resposta.json()`; acento partido entre pedaços chega inteiro; JSON UTF-8,
+  `no-store` preservado e sem `Content-Length`; a rota responde o sucesso só
+  pelo fluxo. `npm run test:radar`: 2491/2491 (a contagem inclui suítes de
+  outras sessões).
+
+### Limitações
+
+- A coleta do Radar continua no modo `regular`, sem PAA nem citações do AI
+  Overview: as colunas dizem "o Google exibiu o bloco, mas a coleta não trouxe"
+  quando `itemTypes` prova a exibição, e nunca "o Google não mostrou".
+- As lentes mostram o cache no momento do export (validade de 30 dias), não a
+  investigação congelada; cada lente traz a própria data.
+- A SiloPage não tem dossiê: entra só como contexto do silo, pela dica da
+  hidratação (a rota não lê as versões `silo_page`).
+- A versão do ArticleDNA ainda é escolhida por `.find` sem ordem na rota, como
+  no envio ao Redator (anterior a esta tarefa).
+- Artigo recusado antes de o item do Radar ser lido (sem ArticleDNA ou sem
+  investigação) tem o silo deduzido pela composição do SiloDNA; se nenhum
+  SiloDNA o lista, vai para "sem silo".
+- `research_status_md` depende de `radarFrozenSerpStandingOf`, que existe na
+  árvore de trabalho junto do registro da situação congelada da SERP (ainda não
+  commitado).
+- O download do `.zip` e a abertura dele no Explorador do Windows não foram
+  validados na tela; `unzip -t` e `Expand-Archive` aceitaram um pacote de
+  amostra no scratchpad.
+- **"Os mesmos dados do Redator" ainda não é paridade total.** Levantado na
+  revisão adversarial e conferido no código:
+  - Links internos de ENTRADA saem só como contagem (`inboundRelations`).
+  - Das fontes externas do `observed`, só as candidatas a evidência saem
+    (`evidenceCandidates`, por desenho: §14). `observedLinks`,
+    `recurrentDomains`, `conceptAlignments`, padrões, links comerciais e as
+    limitações das fontes ficam de fora.
+  - `observed.evidence.semantic/structural` ficou de fora de propósito.
+  - O slug diverge: o CSV usa o publicado (e, sem ele, o sugerido); a
+    importação do Redator usa `suggestedSlug`.
+- **A leitura das lentes difere da do Redator** (`writer-evidence-sources.ts`,
+  em andamento em outra sessão). O Redator monta a chave pela consulta fixada
+  na Qualificação, mantém a entrada vencida legível e rotulada e lê os
+  reforços. O export usa o alvo da keyword (A8), trata a vencida como "venceu
+  a validade" (é o que `lookupSerpCache` devolve) e não lê reforços.
+- **Tamanho da resposta — tratado em fluxo.** A linha completa tem ~133 KB,
+  e a função da Vercel recusa corpo de resposta acima de 4,5 MB (413
+  `FUNCTION_PAYLOAD_TOO_LARGE`, conferido na documentação da Vercel em
+  2026-09-23): o export quebraria com uns 31 artigos. A resposta de sucesso
+  passou a sair em FLUXO (`lib/radar/portable-export-response.ts`), que a
+  própria Vercel indica como o caminho sem esse teto; o Next 16 aceita
+  `new Response(ReadableStream)` no route handler. Continua UMA leitura de
+  artefatos, snapshots e revisões por lote — um pedido por silo relê a marca
+  inteira a cada silo. A tela não mudou: `resposta.json()` junta os pedaços.
+  **Não verificado no deploy:** que a Vercel entregue o fluxo acima de 4,5 MB
+  é o que a documentação dela afirma; a prova é exportar uma marca com mais
+  de ~35 artigos finalizados na homologação.
+- **Ordem das colunas:** `research_status_md` e `silo_context_md` entram logo
+  depois de `must_cover`. Isso desloca as colunas antigas para quem lê o CSV
+  por posição; quem lê pelo cabeçalho não é afetado. Nenhum consumidor por
+  posição foi encontrado no repositório.
+- Toda recusa entra no plano do silo como "não finalizado", inclusive
+  "ArticleDNA não encontrado" e "pacote indisponível". O aviso da tela mostra
+  o motivo real de cada uma, mas o `silo_context_md` do CSV continua com o
+  rótulo único.
+- A regra A8 depende de `lib/arquiteto/serp-lens-targeting.ts`, arquivo novo
+  de outra sessão, ainda não commitado. `radarFrozenSerpStandingOf` está na
+  mesma situação.
+
+## Auditoria de egress da Supabase — 2026-09-23
+
+- **Verificado remotamente por SQL somente leitura e painel autenticado:** migrations de listagem de 21/09 presentes, views com `security_invoker=true`, 31 corridas separadas sem linha vazia/órfã; a listagem Radar permanece em ~1,64 MB de texto para 3 itens. O ciclo atual está em 5,758/5 GB de egress; nos dias 19–22/09 amostrados, PostgREST respondeu por 93,8–97,4% do tráfego exibido. A taxa mensal futura ainda não foi comprovada.
+- **Implementado localmente:** `ArtifactRepository.list` filtra os três tipos consumidos na consulta; os demais 607/613 artefatos remotos somam ~2,13 MB de payload no projeto, com economia por carga isolada por marca (~0,17–1,26 MB nos dados atuais) após deploy. Contrato de resposta e consumidores preservados.
+- **Testado:** TypeScript, lint direcionado e `git diff --check` passaram; 21 testes direcionados das leituras passaram. A suíte conjunta teve quatro falhas preexistentes em `editorial-pipeline.test.mts`, fora da alteração. Sem deploy ou validação manual da UI.
+- **Pendente:** acompanhar o próximo ciclo de egress e medir bytes por rota; o Logs Explorer Free só reteve um dia e a consulta *Top Paths* revelou frequência, não volume. Publicar manualmente o filtro e desenhar em SDD a listagem enxuta de documentos e a hidratação seletiva de corridas. Diagnóstico, cálculos e alternativas locais em [auditoria-egress-supabase-2026-09-23.md](auditoria-egress-supabase-2026-09-23.md).
+
 ## Fase Radar — FECHADA — 2026-09-17
 
 Os três perfis de pesquisa estão implementados e o dossiê canônico alimenta as
@@ -1713,3 +2033,79 @@ nascer embutida, elas seguem cortando.
 inteira e regravava tudo. No artigo maior isso eram 7620 kB de descida mais
 7620 kB de subida por análise nova. Agora são 840 kB de cada lado — cerca de
 13,5 MB a menos por versão acrescentada, e sem crescer com o histórico.
+
+## Leituras e ações do Radar reidratam só o que usam — 2026-09-23
+
+**Confirmado por teste; ainda não verificado manualmente.** Ver SDD de
+[uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md),
+regras R9 e R10.
+
+`WorkflowRepository.find` e `findByArticle` reidratam **todas** as corridas do
+item. Era o conservador certo na etapa 2 da separação das corridas, mas as
+rotas usavam uma ou duas versões e descartavam o resto. Medido no item mais
+pesado (`fd91b97b`), uma leitura completa custa ~8,2 MB.
+
+### Três métodos novos, `find` e `findByArticle` intocados
+
+| Método | Devolve | Para quem |
+| --- | --- | --- |
+| `findByArticleHydratingVersions(…, pick)` | a linha, com corrida só nas versões escolhidas | rotas de leitura que servem versões específicas |
+| `findByArticleWithoutRuns(…)` | a linha como gravada, versões com os 4 campos vazios | portões que não leem corrida |
+| `findCurrentRadarAnalysisForWriteLock(…)` | **só a versão corrente**, nunca a linha | a trava de gravação |
+
+O terceiro devolve uma versão e não uma linha de propósito: uma linha meio
+hidratada poderia ser regravada por engano e perder conteúdo.
+
+`pick` recebe as versões **leves** — `versionId`, `versionNumber` e `status`
+não saem da linha, porque `splitAnalysisRun` só move os quatro campos de
+corrida. E o método filtra os ids para os que a própria linha tem: o
+`versionId` da requisição chegava cru a `.in("version_id", …)`, e o
+`postgrest-js` não escapa aspas embutidas — `a"b(` virava PGRST100 e a rota
+respondia 500 onde antes respondia 404.
+
+### Economia medida no item mais pesado
+
+| Porta | Antes | Depois |
+| --- | ---: | ---: |
+| montagem do Radar (3 itens) | ~10,84 MB | ~3,5 MB |
+| `reloadRadarAnalysis` após ação | ~8,2 MB | ~2,5 MB |
+| área Vídeos, por GET | ~8,23 MB | ~0,90 MB |
+| Casar vídeos (lê duas vezes) | ~16,5 MB | ~1,8 MB |
+| amostra ou proveniência da pesquisa | ~8,23 MB | ~2,5 MB |
+| extração da concorrência, **por lote** | ~8,22 MB | ~0,90 MB |
+| verificação de fontes, por lote | ~8,22 MB | até ~2,57 MB |
+| trava da gravação | ~8,22 MB | ~2,50 MB finalizada, ~0,90 MB aberta |
+
+"Analisar concorrência" roda em **laço de lotes de 5 páginas**: numa análise
+de 20 páginas a releitura caía de ~33 MB para ~3,6 MB.
+
+### A verificação adversarial errou num ponto — e a implementação pegou
+
+A auditoria concluiu, e as duas lentes confirmaram, que a verificação de
+fontes não lia campos de corrida. **Lê:** `persistida.payload.extractions`
+(`verify-sources/route.ts:95`). Com a leitura sem corridas, o plano sairia
+vazio e **toda** fonte receberia 422 `SOURCE_UNKNOWN`. O implementador provou
+com teste de sensibilidade e usou `findByArticleHydratingVersions` só com a
+versão pedida. Verificação por leitura de código não substitui teste que
+exercita a rota.
+
+### Mudanças de comportamento aceitas
+
+- **Só em dado corrompido:** se a corrida de uma versão **não** escolhida
+  estiver malformada, antes o parse falhava e a rota dava 500; agora a rota
+  responde normalmente.
+- **Gravação:** o POST passava todas as versões reidratadas pelo schema, e
+  uma versão antiga inválida dava 400 antes da trava. Agora só a corrente é
+  validada ali.
+
+### Testes
+
+- `tests/radar-reidratacao-seletiva.test.mts` (18) e
+  `tests/radar-acoes-sem-reidratar-tudo.test.mts` (27), com PostgREST
+  simulado e o caminho antigo como oráculo: respostas idênticas byte a byte.
+- Atualizados, com a razão em comentário: `tests/radar-final-23.test.mts`
+  (a trava continua exigindo leitura do repositório, não compactada — agora
+  pelo método novo) e `tests/radar-18102-identidade-da-base-remota.test.mts`.
+- Guarda `tests/radar-live-ux-1-payload.test.mts` intacta: escrita segue lendo
+  verbatim.
+- Suíte Radar: **2313/2313**.

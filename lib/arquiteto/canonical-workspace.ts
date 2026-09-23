@@ -14,6 +14,7 @@ import { resolveArticleFormationState } from "./article-formation-decision.ts";
 import { SiloWorkingCopyStateSchema, type SiloWorkingCopyState } from "./silo-working-copy-record.ts";
 import type { SiloConsolidationRequestBody } from "./silo-consolidation-operation.ts";
 import type { CanonicalImportability } from "./minerador-handoff.ts";
+import type { SerpPrimaryAcceptance } from "./silo-primary-acceptance.ts";
 
 export type CanonicalWorkflowItem = {
   id: string;
@@ -272,8 +273,15 @@ async function readResponse(response: Response) {
   return body;
 }
 
-export async function loadCanonicalArquitetoWorkspace(brandId: string): Promise<CanonicalWorkspaceSnapshot> {
-  const response = await fetch(`/api/arquiteto/workspace?brandId=${encodeURIComponent(brandId)}`, { cache: "no-store" });
+/**
+ * `availableKeywords` chega sem `analise_semantica` por padrão: a mesa só lê
+ * dela id, keyword, status, intent, volume e lista. `keywords` (as recebidas)
+ * continua com a linha inteira. `keywordDetail: "full"` pede a linha inteira
+ * de todas, e fica reservado ao ponto de recuperação.
+ */
+export async function loadCanonicalArquitetoWorkspace(brandId: string, options: { keywordDetail?: "full" } = {}): Promise<CanonicalWorkspaceSnapshot> {
+  const detail = options.keywordDetail === "full" ? "&keywordDetail=full" : "";
+  const response = await fetch(`/api/arquiteto/workspace?brandId=${encodeURIComponent(brandId)}${detail}`, { cache: "no-store" });
   const body = SnapshotResponseSchema.parse(await readResponse(response));
   return {
     source: body.data.source,
@@ -743,6 +751,44 @@ export async function updateRemoteTerritoryContext(input: {
   const body = WorkingCopyResponseSchema.parse(await readResponse(response));
   const updated = body.data.territories.find(item => item.territoryRef === input.territoryRef);
   if (!updated) throw new CanonicalWorkspaceError("QUERY_FAILURE", "O contexto do silo não foi confirmado pelo readback canônico.");
+  return updated;
+}
+
+/**
+ * ACEITA a proposta da SERP para a primária do Silo (adendo das 4 lentes, A9).
+ *
+ * A proposta nunca é gravada sozinha: este é o único caminho, e ele só roda
+ * pelo clique de uma pessoa. O corpo leva a keyword proposta, a primária
+ * sobre a qual a proposta foi calculada e a evidência mostrada; o ator e a
+ * hora são carimbados pelo servidor. O sucesso só existe com o readback
+ * trazendo a primária aceita.
+ */
+export async function acceptRemoteSiloPrimaryProposal(input: {
+  brandId: string;
+  territoryRef: string;
+  expectedLock: number;
+  territory: Record<string, unknown>;
+  acceptance: SerpPrimaryAcceptance;
+}): Promise<CanonicalTerritory> {
+  const response = await fetch("/api/arquiteto/workspace", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      brandId: input.brandId,
+      territoryPrimaryAcceptances: [{
+        territoryRef: input.territoryRef,
+        expectedLock: input.expectedLock,
+        territory: input.territory,
+        acceptance: input.acceptance,
+      }],
+    }),
+  });
+  const body = WorkingCopyResponseSchema.parse(await readResponse(response));
+  const updated = body.data.territories.find(item => item.territoryRef === input.territoryRef);
+  const primaria = updated?.territory.primaryKeyword;
+  if (!updated || primaria?.electedBy !== "serp" || primaria.keywordId !== input.acceptance.keywordId || !primaria.confirmedBy) {
+    throw new CanonicalWorkspaceError("QUERY_FAILURE", "O aceite da primária do Silo não foi confirmado pelo readback canônico.");
+  }
   return updated;
 }
 

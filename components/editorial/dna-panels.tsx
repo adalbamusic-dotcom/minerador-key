@@ -13,7 +13,7 @@ import { deriveGoogleAdsDemandTrend, formatGoogleAdsCpcTableValue, googleAdsDema
 import { dataForSeoKeywordDifficultyStateLabel, readDataForSeoKeywordDifficultyEvidence } from "@/lib/minerador/dataforseo-keyword-overview-core";
 import { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";
 import { calculateKgrFromMetrics, kgrDecisionLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";
-import { serpCollectionLabel, serpEvidenceStrengthPresentation } from "@/lib/minerador/serp-semantic-evidence";
+import { serpCollectionLabel, serpEvidenceStrengthPresentation, serpLensEvidencePresentation } from "@/lib/minerador/serp-semantic-evidence";
 import { qualificationVersionLabel, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
 
 import { canCompleteHumanReview, humanReviewRecord, type HumanReviewAction } from "@/lib/minerador/human-review";
@@ -354,6 +354,9 @@ function DecisionSummary({ summary, kgrTone }: { summary: KeywordDecisionSummary
 function SemanticConsolidationPanel({ draft, qualification = null, serpCollecting = false, serpFailed = false }: { draft: SemanticConsolidationDraft; qualification?: KeywordSemanticQualification | null; serpCollecting?: boolean; serpFailed?: boolean }) {
   const intentResolution = resolveSemanticAxis(draft.intent);
   const funnelResolution = resolveSemanticAxis(draft.funnel);
+  // Quatro lentes: só registro — quantas foram lidas, se concordam, se desktop
+  // e mobile divergem. Qualificação legada (uma lente) não mostra nada disso.
+  const lensView = qualification?.lensEvidence ? serpLensEvidencePresentation(qualification.lensEvidence) : null;
   // Rótulo da força vem do read-model da evidência: um único vocabulário para
   // cabeçalho e cards. `null` é ausência de coleta, não força fraca.
   const strength = (value: SemanticSerpStrength) => value
@@ -379,6 +382,8 @@ function SemanticConsolidationPanel({ draft, qualification = null, serpCollectin
         </div>
         {!consolidated && resolution.reason && <p className="mt-1 text-sm text-text-muted">Motivo: {resolution.reason}</p>}
         {value.rationale && <p data-semantic-consolidation-rationale className="mt-1 text-sm text-text-muted">{value.rationale}</p>}
+        {lensView && <p data-semantic-consolidation-lens-agreement className="mt-1 text-sm text-text-muted">{lensView[axis].agreement}</p>}
+        {lensView?.[axis].deviceSplit && <p data-semantic-consolidation-device-split className="mt-1 text-sm text-text-muted">{lensView[axis].deviceSplit}</p>}
       </div>
     </section>;
   };
@@ -401,11 +406,13 @@ function SemanticConsolidationPanel({ draft, qualification = null, serpCollectin
           : "SERP analisada. A evidência conclusiva consolidou Intenção e/ou Funil automaticamente.";
   const consolidatedBySerp = semanticConsolidationBySerp(draft);
   return <section data-keyword-semantic-consolidation className="min-w-0 rounded-md border border-context-accent/35 bg-surface-subtle p-2.5" aria-label="Qualificação semântica">
-    <header className="flex min-w-0 flex-wrap items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-1.5"><h3 className="text-base font-semibold tracking-tight text-foreground">QUALIFICAÇÃO SEMÂNTICA</h3><InfoHint title="Consolidação semântica" description="A Lógica é hipótese inicial. A SERP real é evidência externa: quando conclusiva, ela fecha Intenção e Funil automaticamente, sem confirmação humana." /></div><ProfilePill label={serpCollectionLabel(serpState)} tone={serpState === "analyzed" ? "success" : serpState === "failed" ? "danger" : serpState === "collecting" ? "accent" : "pending"} /></header>
+    <header className="flex min-w-0 flex-wrap items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-1.5"><h3 className="text-base font-semibold tracking-tight text-foreground">QUALIFICAÇÃO SEMÂNTICA</h3><InfoHint title="Consolidação semântica" description="A Lógica é hipótese inicial. A SERP real é evidência externa: quando conclusiva, ela fecha Intenção e Funil automaticamente, sem confirmação humana." /></div><div className="inline-flex min-w-0 flex-wrap items-center gap-1.5">{lensView && <span data-semantic-consolidation-lenses className="inline-flex items-center gap-1"><ProfilePill label={lensView.headline} /><InfoHint title="Quatro lentes" description="A SERP é lida em desktop Windows, desktop macOS, mobile Android e mobile iOS. Cada página conta uma vez; a concordância entre lentes e a diferença entre desktop e mobile ficam registradas, mas não aumentam a força da evidência." /></span>}<ProfilePill label={serpCollectionLabel(serpState)} tone={serpState === "analyzed" ? "success" : serpState === "failed" ? "danger" : serpState === "collecting" ? "accent" : "pending"} /></div></header>
     <p className="mt-1 text-sm text-text-muted">Esta camada é uma working copy local: não altera Lógica, métricas, KGR, revisão persistida nem o runtime do Arquiteto.</p>
     <div className="mt-2 grid min-w-0 gap-2 xl:grid-cols-2">{axisPanel("intent", "INTENÇÃO", draft.intent, intentResolution)}{axisPanel("funnel", "FUNIL", draft.funnel, funnelResolution)}</div>
     <p data-semantic-consolidation-serp-state className="mt-2 border-t border-divider pt-2 text-sm text-text-muted">{serpStateDescription}</p>
-    {draft.serpSnapshotRef && <details data-semantic-consolidation-evidence className="mt-2 border-t border-divider pt-1.5"><summary className="cursor-pointer text-sm font-semibold text-text-muted hover:text-foreground">Ver evidências</summary><p className="mt-1 text-sm text-text-muted">{`${draft.serpSnapshotRef.label} (${draft.serpSnapshotRef.id})`}</p></details>}
+    {lensView?.missing && <p data-semantic-consolidation-lenses-missing className="mt-1 text-sm text-text-muted">{lensView.missing}</p>}
+    {lensView?.dates && <p data-semantic-consolidation-lens-dates className="mt-1 text-sm text-warning">{lensView.dates}</p>}
+    {draft.serpSnapshotRef && <details data-semantic-consolidation-evidence className="mt-2 border-t border-divider pt-1.5"><summary className="cursor-pointer text-sm font-semibold text-text-muted hover:text-foreground">Ver evidências</summary><p className="mt-1 text-sm text-text-muted">{`${draft.serpSnapshotRef.label} (${draft.serpSnapshotRef.id})`}</p>{lensView && <ul data-semantic-consolidation-lens-readings className="mt-1 space-y-1">{lensView.lenses.map(line => <li key={line} className="text-sm text-text-muted">{line}</li>)}</ul>}{lensView?.blocks && <p className="mt-1 text-sm text-text-muted">{lensView.blocks}</p>}</details>}
     <section data-semantic-consolidation-handoff-preview className="mt-2 rounded-md border border-divider bg-surface px-2.5 py-2" aria-label="Prévia do KeywordDNA"><p className="text-sm font-semibold text-foreground">PRÉVIA DO KEYWORDDNA</p><dl className="mt-1.5 grid min-w-0 gap-x-3 gap-y-1.5 sm:grid-cols-2"><div><dt className="text-sm text-text-muted">Intenção</dt><dd className="text-sm font-semibold text-foreground">{intentResolution.status === "serp_consolidated" ? displayValue(intentResolution.value, "Indeterminado") : "Não consolidada"}</dd></div><div><dt className="text-sm text-text-muted">Funil</dt><dd className="text-sm font-semibold text-foreground">{funnelResolution.status === "serp_consolidated" ? displayValue(funnelResolution.value, "Indefinido") : "Não consolidado"}</dd></div><div><dt className="text-sm text-text-muted">Evidência</dt><dd className="text-sm font-semibold text-foreground">{consolidatedBySerp ? "SERP forte / conclusiva" : serpState === "not_collected" ? "SERP ainda não coletada" : "SERP não conclusiva"}</dd></div><div><dt className="text-sm text-text-muted">Versão</dt><dd className="text-sm font-semibold text-foreground">{qualification ? qualificationVersionLabel(qualification) : "Prévia local · ainda não persistida"}</dd></div></dl></section>
   </section>;
 }

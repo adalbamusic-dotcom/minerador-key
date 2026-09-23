@@ -168,6 +168,14 @@ export function ArticleFormationReviewPanel({
       viabilityText: string;
       distinctDomains: number;
       recommendation: string;
+      /**
+       * As lentes do parecer em uma frase ("SERP · 3 de 4 lentes · concordância
+       * 3/3 · lentes de datas diferentes (9 dias)"). Ausente no parecer legado
+       * de uma lente só — e então nada aparece.
+       */
+      lenses?: string | null;
+      /** As lentes que ficaram fora do parecer, com o motivo. Ausente = nenhuma. */
+      lensesMissing?: string | null;
     } | null;
     /** A pessoa precisa decidir: a evidência existe e não é conclusiva. */
     awaitsHuman: boolean;
@@ -368,6 +376,12 @@ export function ArticleFormationReviewPanel({
       {serp.parecer && (
         <div className="mt-3 rounded-md border border-divider bg-surface-subtle p-2" data-testid="architect-review-serp-parecer">
           <p className="text-sm font-semibold text-foreground">Parecer da SERP</p>
+          {serp.parecer.lenses && (
+            <p className="text-sm leading-6 text-text-muted" data-testid="architect-review-serp-lenses">{serp.parecer.lenses}</p>
+          )}
+          {serp.parecer.lensesMissing && (
+            <p className="text-sm leading-6 text-text-muted" data-testid="architect-review-serp-lenses-missing">{serp.parecer.lensesMissing}</p>
+          )}
 
           <p className="mt-2 text-sm leading-6 text-text-muted">Principal</p>
           <p className="text-sm leading-6 text-foreground">

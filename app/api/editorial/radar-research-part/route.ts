@@ -61,7 +61,21 @@ export async function GET(request: NextRequest) {
     });
     await assertEditorialPermission(profile, input.brandId, "radar", "view");
 
-    const item = await new WorkflowRepository().findByArticle(input.brandId, input.articleId, "radar");
+    /*
+     * SÓ A CORRIDA DA VERSÃO QUE ESTA ROTA SERVE.
+     *
+     * A resposta usa apenas a corrente. Reidratar todas custava, medido em
+     * 2026-09-23 no item mais pesado, 8,23 MB por abertura de disclosure
+     * contra ~2,5 MB necessários (linha mais a corrida corrente).
+     *
+     * A escolha é o PRÓPRIO `correnteDe`, aplicado às versões leves — o
+     * versionNumber não sai da linha. Um critério diferente do que a resposta
+     * usa reidrataria uma versão e devolveria outra, com a amostra vazia.
+     */
+    const item = await new WorkflowRepository().findByArticleHydratingVersions(input.brandId, input.articleId, "radar", versoes => {
+      const escolhida = correnteDe({ analysisVersions: versoes });
+      return [escolhida?.versionId];
+    });
     if (!item) {
       return NextResponse.json({ code: "radar_item_not_found", error: "Item Radar não encontrado." }, { status: 404, headers: noStoreHeaders });
     }

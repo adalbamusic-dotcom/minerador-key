@@ -1,5 +1,6 @@
 import { pruneRadarAnalysisHistory } from "@/lib/radar/analysis-history-pruning";
 import { hasInlineAnalysisRun, mergeAnalysisRun, splitAnalysisRun } from "@/lib/radar/analysis-run-storage";
+import { radarGoogleResearchIsFinalized } from "@/lib/radar/google-research-write-lock";
 import { compactRadarResearchForRead } from "@/lib/radar/research-read-model";
 import "server-only";
 import type { ArticleDNA, ContentDocument, ContentPlan, SiloDNA, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts";
@@ -9,6 +10,7 @@ import { BrandInvitationSchema, OperationalPublicationSchema, PlannerItemSchema,
 import type { SavedGridView } from "../editorial/data-grid";
 import { SavedGridViewSchema } from "../editorial/data-grid";
 import { firstIssueMessage, rejectedPaths, type IncompatibleRecord } from "../editorial/partial-read.ts";
+import { completeWithStoredBundle, CONTENT_DOCUMENT_LISTING_SELECT, listedContentDocumentFromRow, type PartialContentDocument } from "../editorial/content-document-listing.ts";
 import { getOperationalClient, mapPersistenceError, OptimisticLockError } from "./editorial-db";
 import { contentHash } from "../arquiteto/versioning";
 import type { SerpCollectionRecord, SerpReviewRecord } from "../editorial/contracts";
@@ -81,7 +83,7 @@ export class ArtifactRepository {
   }
 
   async list(marcaId: string) {
-    const { data, error } = await client().from("editorial_artifact_versions").select("artifact_type,payload,version_id,entity_id,version_number,previous_version_id,content_hash,origin,change_reason,created_by,created_at").eq("marca_id", marcaId);
+    const { data, error } = await client().from("editorial_artifact_versions").select("artifact_type,payload,version_id,entity_id,version_number,previous_version_id,content_hash,origin,change_reason,created_by,created_at").eq("marca_id", marcaId).in("artifact_type", ["article_dna", "silo_dna", "content_plan"]);
     unwrap(data, error);
     const articles: VersionEnvelope<ArticleDNA>[] = []; const silos: VersionEnvelope<SiloDNA>[] = []; const plans: VersionEnvelope<ContentPlan>[] = [];
     const incompatible: IncompatibleRecord[] = [];
@@ -336,6 +338,155 @@ export class WorkflowRepository {
     return this.reidratarCorridas(await this.findByArticleRaw(marcaId, articleId, stage));
   }
 
+  /*
+   * ===== LEITURA SEM AS CORRIDAS — so para quem PROVA que nao as le =====
+   *
+   * A linha como esta gravada: as versoes vem LEVES, com `extractions: []` e
+   * `competitiveReport`, `youtubeSearch` e `amazonSearch` nulos (os campos de
+   * ANALYSIS_RUN_FIELDS). O nome diz o que falta de proposito: um consumidor
+   * que precisasse de um desses campos leria vazio sem perceber, e vazio aqui
+   * nao e "nao coletou", e "nao foi buscado".
+   *
+   * Existe porque a area Videos le so `finalizedBundle`, que nunca sai da
+   * linha, e pagava a reidratacao inteira para descarta-la. Medido em
+   * 2026-09-23 no item mais pesado: 0,90 MB da linha mais 7,32 MB de corridas
+   * por chamada, para usar ate 3,8 kB de `videoBriefSnapshots`.
+   *
+   * `findByArticleRaw` continua privado: a escrita (appendRadarAnalysis) o usa
+   * verbatim, e este metodo e so um nome publico e honesto para a leitura.
+   */
+  async findByArticleWithoutRuns(marcaId: string, articleId: string, stage: WorkflowStage = "radar") {
+    return this.findByArticleRaw(marcaId, articleId, stage);
+  }
+
+  /*
+   * ===== REIDRATAR SO AS VERSOES QUE A LEITURA VAI USAR =====
+   *
+   * `findByArticle` reidrata TODAS as versoes (ver o comentario de
+   * `corridasDoItem`). As rotas de leitura do Radar usam uma ou duas e
+   * descartavam o resto: medido em 2026-09-23, a montagem do Radar lia
+   * ~10,8 MB e a propria rota jogava fora ~7,4 MB na poda do historico.
+   *
+   * QUEM ESCOLHE AS VERSOES E A ROTA, nao este metodo. As regras de "versao
+   * corrente" divergem entre rotas (ultima do array num lugar, maior
+   * versionNumber no outro), e um criterio escondido aqui reidrataria uma
+   * versao e deixaria a rota devolver outra, vazia, sem erro nenhum.
+   *
+   * `pick` recebe as versoes LEVES. Isso basta para escolher: versionId,
+   * versionNumber e status continuam na parte leve, porque splitAnalysisRun
+   * so move os quatro campos de corrida.
+   *
+   * Sem id escolhido, nao ha consulta a `radar_analysis_runs`. E a fusao e a
+   * mesma de `reidratarCorridas` (mergeAnalysisRun por versionId): para as
+   * versoes escolhidas o resultado e identico; as demais saem leves.
+   *
+   * SO PARA LEITURA. A escrita continua em findByArticleRaw/findByArticle.
+   */
+  async findByArticleHydratingVersions(
+    marcaId: string,
+    articleId: string,
+    stage: WorkflowStage,
+    pick: (versoesLeves: ReadonlyArray<Record<string, unknown>>) => Iterable<string | null | undefined>,
+  ) {
+    const linha = await this.findByArticleRaw(marcaId, articleId, stage);
+    const registro = linha && typeof linha === "object" ? linha as Record<string, unknown> : null;
+    const payload = registro?.payload && typeof registro.payload === "object" && !Array.isArray(registro.payload)
+      ? registro.payload as Record<string, unknown>
+      : null;
+    const versoes = Array.isArray(payload?.analysisVersions) ? payload.analysisVersions as Record<string, unknown>[] : null;
+    if (!registro || !payload || !versoes || versoes.length === 0) return linha;
+
+    /*
+     * So entram ids de versoes que a PROPRIA linha tem.
+     *
+     * O `pick` pode devolver o versionId que veio na requisicao, e ele ia
+     * direto para `.in("version_id", ...)`. O postgrest-js so poe aspas em
+     * valor com `,`, `(` ou `)` e nunca escapa `"` embutida: um id como
+     * `a"b(` virava filtro malformado, o PostgREST recusava com PGRST100 e a
+     * rota respondia 500 onde antes respondia 404. Nao vazava entre itens —
+     * `workflow_item_id` continua filtrando —, mas era texto do usuario
+     * chegando cru a um filtro.
+     *
+     * Restringir aqui nao muda resultado nenhum: um id que a linha nao tem
+     * nunca casaria com corrida, porque a fusao so alcanca versao presente.
+     */
+    const existentes = new Set(versoes.map(versao => versao.versionId).filter((id): id is string => typeof id === "string"));
+    const ids = [...new Set([...pick(versoes)].filter((id): id is string => typeof id === "string" && id.length > 0 && existentes.has(id)))];
+    if (ids.length === 0) return linha;
+
+    const { data, error } = await client().from("radar_analysis_runs").select("version_id,payload").eq("workflow_item_id", String(registro.id)).in("version_id", ids);
+    if (error) mapPersistenceError(error);
+    const corridas = new Map((data || []).map(corrida => [String((corrida as { version_id: unknown }).version_id), ((corrida as { payload: unknown }).payload || {}) as Record<string, unknown>]));
+    if (corridas.size === 0) return linha;
+
+    return {
+      ...registro,
+      payload: {
+        ...payload,
+        analysisVersions: versoes.map(versao => {
+          const versionId = typeof versao.versionId === "string" ? versao.versionId : null;
+          const corrida = versionId ? corridas.get(versionId) : undefined;
+          return corrida ? mergeAnalysisRun(versao, corrida) : versao;
+        }),
+      },
+    } as typeof linha;
+  }
+
+  /*
+   * ===== A VERSAO CORRENTE PARA A TRAVA DE ESCRITA — e SO ela =====
+   *
+   * A gravacao do Radar (POST radar-analysis) consulta a trava da pesquisa
+   * Google ANTES de acrescentar. A trava so olha a versao CORRENTE, a ultima
+   * do array `analysisVersions`, e a rota lia a linha com `findByArticle`,
+   * que reidrata TODAS as corridas. Medido em 2026-09-23 no item mais pesado:
+   * 0,90 MB da linha + 7,32 MB de corridas = 8,22 MB por gravacao, dos quais
+   * 5,72 MB eram corridas de versoes antigas jogadas fora. Com este metodo:
+   * 2,50 MB (linha + corrida da corrente, 1,60 MB) quando a investigacao esta
+   * finalizada, 0,90 MB quando nao esta.
+   *
+   * DEVOLVE A VERSAO, NUNCA A LINHA. Uma linha com uma versao reidratada e as
+   * outras leves pareceria completa; quem a regravasse (transition) perderia
+   * dado sem erro nenhum. Uma versao solta nao serve de base para isso.
+   *
+   * A ordem e a da propria trava (google-research-write-lock.ts):
+   * 1. le a linha CRUA (o repositorio, nunca o DTO do navegador; nada e
+   *    compactado aqui) e pega a ultima versao do array;
+   * 2. se a corrente NAO esta finalizada, a trava responde OPEN antes de
+   *    comparar qualquer campo competitivo, e a rota so expoe esses campos na
+   *    recusa. `finalizedBundle` mora na parte leve (splitAnalysisRun so move
+   *    os quatro campos de corrida), entao a decisao sai igual sem buscar
+   *    corrida nenhuma. Neste caso a versao volta LEVE: extractions [] e os
+   *    outros tres nulos querem dizer "nao foi buscado";
+   * 3. finalizada, a trava compara `extractions`, que e campo de corrida: a
+   *    corrida DESTA versao e reidratada inteira (mergeAnalysisRun, a mesma
+   *    fusao de `reidratarCorridas`), e o resultado e identico ao da versao
+   *    que `findByArticle` devolveria.
+   *
+   * SO PARA A TRAVA. A escrita (appendRadarAnalysis) continua lendo a linha
+   * crua por conta propria, e `findByArticle` nao muda.
+   */
+  async findCurrentRadarAnalysisForWriteLock(marcaId: string, articleId: string): Promise<Record<string, unknown> | null> {
+    const linha = await this.findByArticleRaw(marcaId, articleId, "radar");
+    const registro = linha && typeof linha === "object" ? linha as Record<string, unknown> : null;
+    const payload = registro?.payload && typeof registro.payload === "object" && !Array.isArray(registro.payload)
+      ? registro.payload as Record<string, unknown>
+      : null;
+    const versoes = Array.isArray(payload?.analysisVersions) ? payload.analysisVersions as Record<string, unknown>[] : null;
+    if (!registro || !versoes || versoes.length === 0) return null;
+
+    const corrente = versoes[versoes.length - 1];
+    if (!corrente || typeof corrente !== "object" || Array.isArray(corrente)) return corrente ?? null;
+    if (!radarGoogleResearchIsFinalized(corrente.payload)) return corrente;
+
+    const versionId = typeof corrente.versionId === "string" && corrente.versionId.length > 0 ? corrente.versionId : null;
+    if (!versionId) return corrente;
+
+    const { data, error } = await client().from("radar_analysis_runs").select("version_id,payload").eq("workflow_item_id", String(registro.id)).eq("version_id", versionId);
+    if (error) mapPersistenceError(error);
+    const corrida = (data || []).find(item => String((item as { version_id: unknown }).version_id) === versionId) as { payload?: unknown } | undefined;
+    return corrida ? mergeAnalysisRun(corrente, (corrida.payload || {}) as Record<string, unknown>) : corrente;
+  }
+
   async importItem(input: { marcaId: string; articleId: string; stage: WorkflowStage; state: string; sourceEntityId: string; sourceVersionId: string | null; sourceContentHash: string | null; payload: object; actorId: string }) {
     const { data, error } = await client().from("editorial_workflow_items").upsert({ marca_id: input.marcaId, subject_type: "article", subject_id: input.articleId, article_id: input.articleId, stage: input.stage, state: input.state,
       source_entity_id: input.sourceEntityId, source_version_id: input.sourceVersionId, source_content_hash: input.sourceContentHash, payload: input.payload,
@@ -569,13 +720,72 @@ export function documentStatusColumn(status: string) {
 }
 
 export class ContentDocumentRepository {
+  /**
+   * ===== E1 · A LISTAGEM SAI SEM O PACOTE DO RADAR =====
+   *
+   * `payload` inteiro custava 4,50 MB por carga da mesa com 2 documentos —
+   * 4,49 MB eram `importedContext.dossier.bundle` (medido em 2026-09-23).
+   * A projeção pede cada campo por seletor de caminho e deixa só o bundle no
+   * banco: 7,4 kB de valores para os mesmos 2 documentos.
+   *
+   * O documento v2 com dossiê volta na forma PARCIAL, com o marcador
+   * `bundleOmitted` (ver `lib/editorial/content-document-listing.ts`). O
+   * detalhe completo é `findDetail`, para o documento aberto.
+   */
   async list(marcaId: string, userId: string) {
-    const { data, error } = await client().from("content_documents").select("id,payload,content_hash,lock_version,updated_at").eq("marca_id", marcaId).order("updated_at", { ascending: false });
-    unwrap(data, error); const ids = (data || []).map(row => row.id);
+    const { data, error } = await client().from("content_documents").select(`id,content_hash,lock_version,updated_at,${CONTENT_DOCUMENT_LISTING_SELECT}`).eq("marca_id", marcaId).order("updated_at", { ascending: false });
+    unwrap(data, error); const rows = (data || []) as unknown as Array<Record<string, unknown> & { id: string; content_hash: string; lock_version: number; updated_at: string }>;
+    const ids = rows.map(row => row.id);
     const states = ids.length ? await client().from("content_document_user_states").select("*").eq("user_id", userId).in("document_id", ids) : { data: [], error: null };
     unwrap(states.data, states.error); const stateMap = new Map((states.data || []).map(row => [row.document_id, row]));
-    return (data || []).map(row => { const state = stateMap.get(row.id); return { document: ContentDocumentSchema.parse(row.payload), contentHash: row.content_hash, lockVersion: row.lock_version, updatedAt: isoDate(row.updated_at),
+    return rows.map(row => { const state = stateMap.get(row.id); return { document: listedContentDocumentFromRow(row), contentHash: row.content_hash, lockVersion: row.lock_version, updatedAt: isoDate(row.updated_at),
       userState: state ? { cursorPosition: state.cursor_position, scrollTop: state.scroll_top, leftPanelOpen: state.left_panel_open, rightPanelOpen: state.right_panel_open, lastOpenedAt: isoDate(state.last_opened_at) } : null }; });
+  }
+
+  /**
+   * E1 · O DETALHE: um documento, inteiro, da marca pedida.
+   *
+   * É a leitura que o Redator faz ao abrir o documento e Publicações ao
+   * exportar. Filtra por marca na própria consulta (R4): o id sozinho não
+   * prova de que marca o documento é.
+   */
+  async findDetail(marcaId: string, documentId: string) {
+    const { data, error } = await client().from("content_documents").select("id,payload,content_hash,lock_version,updated_at").eq("marca_id", marcaId).eq("id", documentId).maybeSingle();
+    if (error) mapPersistenceError(error);
+    if (!data) return null;
+    return { document: ContentDocumentSchema.parse(data.payload), contentHash: data.content_hash as string,
+      lockVersion: data.lock_version as number, updatedAt: isoDate(data.updated_at as string) };
+  }
+
+  /**
+   * E1 · A GRAVAÇÃO NÃO APAGA O BUNDLE QUE A CÓPIA NÃO TROUXE.
+   *
+   * Recebe a cópia PARCIAL e devolve o documento completo, com o bundle lido
+   * VERBATIM da linha gravada (R10): sem reidratar, sem podar — o seletor de
+   * caminho devolve o JSON como está no banco.
+   *
+   * A trava de concorrência continua sendo a do `save`: todo UPDATE
+   * incrementa o lock (`content_documents_touch_trg`) e o `save` grava com
+   * `WHERE lock_version = esperado`. Se a linha mudar entre esta leitura e a
+   * gravação, o `save` não casa e nada é escrito. Não há checagem de lock
+   * aqui de propósito: a finalização repetida depois de um timeout (lock já
+   * avançado) precisa chegar ao reuso da rota, como chega com o documento
+   * completo.
+   *
+   * Pacote diferente do declarado pela cópia (`bundleId`/`bundleHash`) é
+   * conflito: completar um dossiê com o bundle de outro gravaria um documento
+   * incoerente.
+   */
+  async completeWithStoredBundle(marcaId: string, documentId: string, document: PartialContentDocument) {
+    const { data, error } = await client().from("content_documents")
+      .select("id,bundleId:payload->importedContext->dossier->bundleId,bundleHash:payload->importedContext->dossier->bundleHash,bundle:payload->importedContext->dossier->bundle")
+      .eq("marca_id", marcaId).eq("id", documentId).maybeSingle();
+    if (error) mapPersistenceError(error);
+    const linha = data as { bundleId?: unknown; bundleHash?: unknown; bundle?: unknown } | null;
+    if (!linha) throw new OptimisticLockError();
+    const completo = completeWithStoredBundle(document, { bundleId: linha.bundleId, bundleHash: linha.bundleHash, bundle: linha.bundle });
+    if (!completo) throw new OptimisticLockError("O pacote do Radar gravado não corresponde ao documento enviado. Recarregue o documento antes de salvar.");
+    return completo;
   }
 
   /**
@@ -614,9 +824,28 @@ export class ContentDocumentRepository {
     return unwrap(existing, existingError);
   }
 
-  async save(documentId: string, expectedLock: number, document: ContentDocument, hash: string, actorId: string) {
+  /*
+   * `marcaId` é opcional só para não quebrar quem já chamava sem ela; a rota da
+   * tela passa a marca. Com ela, o UPDATE casa por id E marca (R4): o id
+   * sozinho deixava gravar documento de outra marca com a permissão desta.
+   */
+  async save(documentId: string, expectedLock: number, document: ContentDocument, hash: string, actorId: string, marcaId?: string) {
     const status = documentStatusColumn(document.status);
-    const { data, error } = await client().from("content_documents").update({ payload: document, content_hash: hash, status, updated_by: actorId }).eq("id", documentId).eq("lock_version", expectedLock).select("*").maybeSingle();
+    /*
+     * A VOLTA DO AUTOSAVE NAO TRAZ O DOCUMENTO.
+     *
+     * `select("*")` devolvia a linha inteira a cada pausa de 1,2 s na
+     * digitacao: medido em 2026-09-23, 4,48 MB por save no documento grande
+     * (quase tudo `payload.importedContext`), para o texto escrito ter 1 kB.
+     *
+     * O unico chamador (app/api/editorial/documents/route.ts) le do retorno
+     * apenas status, lock_version, updated_at e content_hash. O lock que volta
+     * continua sendo o de depois do trigger: RETURNING reflete a linha pos
+     * BEFORE UPDATE com qualquer lista de colunas. E o conflito continua vindo
+     * do `data` nulo: o WHERE lock_version nao casa, zero linhas voltam.
+     */
+    const alvo = client().from("content_documents").update({ payload: document, content_hash: hash, status, updated_by: actorId }).eq("id", documentId).eq("lock_version", expectedLock);
+    const { data, error } = await (marcaId ? alvo.eq("marca_id", marcaId) : alvo).select("id,status,content_hash,lock_version,updated_at").maybeSingle();
     if (error) mapPersistenceError(error); if (!data) throw new OptimisticLockError(); return data;
   }
 

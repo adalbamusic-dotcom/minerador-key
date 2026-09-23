@@ -51,9 +51,23 @@ export async function POST(request: NextRequest) {
      * O corpo do pedido não carrega páginas nem links: ele carrega a
      * identidade da versão. Tudo o que vira destino sai daqui.
      */
+    /*
+     * SÓ A CORRIDA DA VERSÃO PEDIDA.
+     *
+     * Esta rota LÊ `extractions` — é delas que o plano de fontes nasce —, e
+     * `extractions` mora na corrida. Então a leitura sem corridas daria plano
+     * vazio e 422 SOURCE_UNKNOWN em toda fonte. Mas só a versão
+     * `analysisVersionId` é usada: as corridas das outras eram descartadas.
+     * Medido em 2026-09-23 no item mais pesado: 8,22 MB por lote de 12 fontes
+     * (~9-10 MB com a corrida da amostra recém-gravada), contra no máximo
+     * 0,90 MB da linha + 1,67 MB da maior corrida agora.
+     *
+     * Id que a linha não tem nem chega ao filtro (o repositório restringe), e
+     * a versão continua não encontrada: 404, como antes.
+     */
     let persistida: z.infer<typeof VersionedRadarAnalysisSchema> | null = null;
     try {
-      const linha = await new WorkflowRepository().findByArticle(input.brandId, input.articleId, "radar");
+      const linha = await new WorkflowRepository().findByArticleHydratingVersions(input.brandId, input.articleId, "radar", () => [input.analysisVersionId]);
       if (linha && linha.marca_id === input.brandId && linha.article_id === input.articleId) {
         const versoes = storedRadarAnalyses(linha.payload);
         persistida = versoes.find(version => version.versionId === input.analysisVersionId) || null;

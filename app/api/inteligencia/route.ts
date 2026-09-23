@@ -20,8 +20,14 @@ export async function GET(request: NextRequest) {
     if (silosError) throw silosError;
     const siloIds = (silos || []).map(silo => silo.id);
 
+    // Correção de isolamento de marca (AGENTS.md seção 5), não só de egress: esta rota usa service role, então a RLS
+    // não filtra nada, e o .or() de lista sozinho deixava passar toda keyword sem lista de QUALQUER marca. Medido em
+    // 2026-09-23 para a marca 09762023: 267 linhas de 3 marcas (228 de outras), 1,84 MB por carga fria da mesa
+    // editorial; com o filtro, 39 linhas e ~0,43 MB. brand_id é NOT NULL e nenhuma keyword aponta para lista de outra
+    // marca, então o filtro só remove linhas alheias. O .or() e o gate de siloIds ficam como estavam: marca sem listas
+    // continua sem carregar keywords aqui, para não aumentar o egress nem mudar o que o snapshot já entregava.
     const [keywordResult, briefingResult] = siloIds.length ? await Promise.all([
-      profile.supabase.from("minerador_keywords").select("id,keyword,intent,volume_search,kgr_score,lista_id,status,analise_semantica,created_at").is("deleted_at", null).or(`lista_id.is.null,${siloIds.map(id => `lista_id.eq.${id}`).join(",")}`),
+      profile.supabase.from("minerador_keywords").select("id,keyword,intent,volume_search,kgr_score,lista_id,status,analise_semantica,created_at").eq("brand_id", marcaId).is("deleted_at", null).or(`lista_id.is.null,${siloIds.map(id => `lista_id.eq.${id}`).join(",")}`),
       profile.supabase.from("briefings_artigos").select("id,silo_id,keyword_principal,keywords_secundarias,slug_sugerido,hierarquia,status,meta_title,meta_description,diretrizes_estrategicas,created_at").in("silo_id", siloIds),
     ]) : [{ data: [], error: null }, { data: [], error: null }];
     if (keywordResult.error) throw keywordResult.error;

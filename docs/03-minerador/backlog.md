@@ -1,5 +1,44 @@
 # Backlog — Minerador
 
+## Egress, Descoberta e 4 lentes — 2026-09-23
+
+- [x] Montagem e store leem só a Qualificação vigente, com recuo preservado (correção 3 do E7).
+- [x] Cache no navegador das versões imutáveis da Qualificação.
+- [x] Descoberta: Resultado e KD em "Sem medição" por padrão; "Medir resultados" só com um deles ativado.
+- [ ] **Homologar:**
+  - abrir o Minerador duas vezes em cada marca: na segunda abertura, só 1 requisição a `editorial_artifact_versions`, e os mesmos cards e vN;
+  - rodar uma recoleta e ver a versão nova;
+  - na Descoberta, conferir o padrão, o botão travado com a mensagem, a liberação pelo filtro e a contagem de ocultas.
+- [x] Coleta nas 4 lentes na rota de Resultados (Processador e Descoberta), com cache primeiro por lente. Adendo na [SDD do cache](../compartilhado/sdd-cache-serp-temporario-2026-09-23.md).
+- [ ] **Homologar as 4 lentes:** 4 linhas `serp_cache_entry` por texto; na reexecução, `serpLensCoverage.paidCount = 0`; excluir uma keyword de teste remove as 4.
+- [x] Intenção e funil pelas 4 lentes e classificador v4 (§77 da spec; adendo, seção 8).
+- [ ] **Antes da primeira execução de Resultados com a v4, decidir:**
+  - rodar o backfill em dry-run para re-assinar as 29 aprovadas v1 (senão todas vão para `em_revisao` na primeira projeção);
+  - aceitar que as 7 decisões humanas de intenção podem ser superadas por leitura conclusiva (§63).
+- [ ] Dry-run de aprovadas que rebaixariam e sinal "decisão humana superada pela SERP" na tela (adendo §5).
+- [ ] Fixtures reais mobile e macOS (3 chamadas pagas, por autorização) para medir o efeito real das lentes.
+- [ ] Recoleta das 134 keywords (~US$ 4,2 a 4,8 com allintitle e KD), por ação do usuário.
+- [ ] Enxugar a resposta da rota (amostra e `lensEvidence` vão inteiros ao navegador) e ler o digest só depois da quota.
+- [ ] Decidir: R6 sobrepõe ou só preenche; pesos de `google_reviews` e `third_party_reviews`; `search_intent_info` do Labs como corroboração.
+- [ ] **Decidir** a [SDD da Descoberta temporária](propostas/sdd-descoberta-temporaria-local-2026-09-23.md) (D1-D11) e atualizá-la com a decisão das 4 lentes (a seção 4.7 religa só a lente canônica).
+- [ ] **Decidir e aplicar** a [SDD do cache conferido](../compartilhado/sdd-cache-local-keywords-conferido-2026-09-23.md) e a migration `20260923140000_minerador_keywords_row_version.sql`, pelo usuário.
+- [ ] **Decidir** se o cache de versões limpa no logout (hoje não; limpar é autorização do `AGENTS.md` §10).
+- [ ] Bloqueio da SERP da Descoberta no servidor: hoje é só interface (D8 da SDD da Descoberta).
+
+## Cache de SERP na CALL 3 — 2026-09-23
+
+SDD: [cache temporário de SERP](../compartilhado/sdd-cache-serp-temporario-2026-09-23.md).
+
+- [x] CALL 3 consulta o cache antes de pagar; grava o que paga.
+- [x] Acerto que repete ou precede a Qualificação vigente não gera versão nova, e corrige a projeção na keyword.
+- [x] Evidência invalidada por humano pula o cache.
+- [x] `tests/minerador-serp-cache.test.mts` registrado em `test:editorial`.
+- [ ] **Homologar**: processar Resultados duas vezes nas mesmas keywords; na segunda, `serpReusedCount > 0`, `semanticQualificationUnchangedCount > 0` e nenhuma versão nova no banco.
+- [ ] Ligar `invalidateSerpEvidence` a uma rota/UI — a guarda do cache já espera por ela. Quando ligar: a candidata da Descoberta também precisa reprojetar o registro (hoje só o alvo keyword projeta, como antes do cache).
+- [ ] Reexecução sem ler o corpo: ler `meta` em lote e pular o corpo quando a coleta bate com a vigente (~7 MB a menos por 200 keywords). Mexe no formato da resposta — frente própria.
+- [ ] Leitura das Qualificações vigentes que falha é engolida sem log (`.catch(() => new Map())`); num lote de acertos isso aparece como conflito de versão, e a causa se perde. Anterior ao cache.
+- [ ] Os demais testes do Minerador seguem sem script: rodam por `node --test tests/minerador-*.test.mts` (28 falhas de tela na linha de base).
+
 ## Integridade do jsonb — 2026-09-21
 
 - [x] A Lógica parou de serializar chave que não é do motor. Spec §70.
@@ -1781,3 +1820,21 @@ Fechar isso é decisão de desenho, não de trava: numa keyword já publicada o
 slug deveria ser **derivado do canônico congelado** em vez de escrito. Enquanto
 não se decide, recusar a introdução do campo poderia bloquear uma derivação
 legítima.
+
+## Egress — pendências do Minerador — 2026-09-23
+
+Ver SDD de [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md).
+
+1. **`keyword-import-core` lê a marca inteira para deduplicar** (localizada,
+   ~668 kB por importação, verificada como segura). **Adiada:** a suíte desse
+   núcleo já está vermelha na linha de base ("núcleo cria como bruto…",
+   "núcleo isola…", "núcleo devolve código…"), então não haveria rede de
+   proteção. Corrigir os testes primeiro.
+2. **Montagem da Descoberta** baixa candidatas com `select("*")` (~1,2 MB) e o
+   readback pós-descoberta relê completo (~870 kB). O revisor recusou a
+   correção como proposta: precisa mapear os consumidores antes.
+3. **Qualificação semântica lê todas as versões** na montagem do Processar
+   (~600–750 kB). Correção recusada como proposta pelo mesmo motivo.
+4. **`analise_semantica` no snapshot da mesa** (`/api/inteligencia`): tirá-la
+   cortaria ~96% do que sobrou, mas muda o DTO da hidratação global —
+   estrutural.

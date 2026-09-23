@@ -8,6 +8,11 @@ import {
 } from "../lib/arquiteto/article-serp-record.ts";
 import {
   COMPETITIVE_VIABILITY_TEXT,
+  NOT_OBSERVED_REASON,
+  aggregatePairAcrossLenses,
+  formationLensesMarkerOf,
+  interpretArticleSerpAcrossLenses,
+  articleSerpParecerFromAssessment,
   dominantTypeOf,
   interpretArticleSerp,
   observedIntentOf,
@@ -15,6 +20,7 @@ import {
   resolveCompetitiveViability,
   resolveGroupVerdict,
   resolvePrincipalVerdict,
+  splitArticleSerpMembers,
   type KeywordSerpFacts,
   type SerpResultFact,
 } from "../lib/arquiteto/article-serp-interpretation.ts";
@@ -225,6 +231,178 @@ test("Principal sustentada e grupo a dividir são perguntas diferentes", () => {
   assert.match(parecer.recommendation, /Separar/);
 });
 
+/* ------ A1 · KGR leve: secundária não consultada é "não observada" ------- */
+
+/*
+ * No perfil KGR leve com Principal clara, só a Principal é consultada. A rota
+ * montava o parecer com TODAS as keywords do grupo, e a secundária sem
+ * snapshot entrava com `results: []`: sobreposição `nenhuma`, intenção
+ * `indefinido` — e a busca virava "de fora". Confirmado offline em
+ * 2026-09-23: DIVERGENCE / SPLIT_RECOMMENDED por ausência de dado.
+ */
+
+const principalClara = [
+  resultado(1, "a.com", "/skincare", "Skincare facial: guia completo", "article"),
+  resultado(2, "b.com", "/rotina", "Como montar a rotina de skincare", "article"),
+  resultado(3, "c.com", "/passo", "Passo a passo do skincare", "article"),
+  resultado(4, "d.com", "/dicas", "Dicas de skincare facial", "article"),
+  resultado(5, "e.com", "/guia", "Guia de cuidados com a pele", "article"),
+  resultado(6, "f.com", "/o-que-e", "O que é skincare", "article"),
+  resultado(7, "g.com", "/tutorial", "Tutorial de skincare", "article"),
+  resultado(8, "h.com", "/como", "Como cuidar da pele do rosto", "article"),
+];
+
+const snapshotDe = (keywordId: string, results: SerpResultFact[]) => ({ keywordId, organicResults: results.map(item => ({ ...item, manualType: null })) });
+
+const composicaoKgrLeve = [
+  { keywordId: "p", keyword: "skincare facial", role: "principal" as const },
+  { keywordId: "s1", keyword: "skincare facial rotina", role: "secundaria" as const },
+];
+
+test("A1 · o defeito, fixado: membro vazio vira 'de fora' e o parecer recomenda dividir", () => {
+  // A construção ANTIGA da rota, preservada aqui só como prova do defeito.
+  const antigo = interpretArticleSerp({
+    candidateRef: "cand",
+    members: [busca("p", "skincare facial", principalClara, "principal"), busca("s1", "skincare facial rotina", [])],
+    principalKeywordId: "p",
+  });
+  assert.equal(antigo.verdict, "DIVERGENCE");
+  assert.equal(antigo.group.kind, "SPLIT_RECOMMENDED");
+  assert.equal(antigo.group.outsiders.length, 1);
+});
+
+test("A1 · secundária sem snapshot é NÃO OBSERVADA: fora de total e de outsiders, nunca DIVERGENCE", () => {
+  const { members, notObserved } = splitArticleSerpMembers({
+    keywords: composicaoKgrLeve,
+    snapshots: [snapshotDe("p", principalClara)],
+  });
+  assert.deepEqual(members.map(item => item.keywordId), ["p"]);
+  assert.deepEqual(notObserved, [{ keywordId: "s1", keyword: "skincare facial rotina", role: "secundaria", reason: NOT_OBSERVED_REASON }]);
+
+  const parecer = interpretArticleSerp({ candidateRef: "cand", members, notObserved, principalKeywordId: "p" });
+  assert.notEqual(parecer.verdict, "DIVERGENCE");
+  assert.equal(parecer.verdict, "INCONCLUSIVE");
+  assert.equal(parecer.group.kind, "INCONCLUSIVE");
+  assert.notEqual(parecer.group.kind, "SPLIT_RECOMMENDED");
+  assert.deepEqual(parecer.group.outsiders, []);
+  assert.equal(parecer.group.total, 0);
+  // Cai no caso de "uma busca só" (a SDD do artigo de uma keyword decide o veredito próprio).
+  assert.equal(parecer.principal.kind, "PRINCIPAL_SUPPORTED");
+  assert.equal(parecer.principal.principalAlternativeKeywordId, null);
+  // A tela diz POR QUE o grupo tem 0 de 0, com o nome da busca não observada.
+  assert.match(parecer.group.reason, /Só a Principal foi observada nesta validação/);
+  assert.match(parecer.group.reason, /"skincare facial rotina"/);
+  assert.match(parecer.principal.reason, /Só a Principal foi consultada nesta validação/);
+  assert.doesNotMatch(parecer.recommendation, /Separar/);
+  assert.deepEqual(parecer.notObserved.map(item => item.keywordId), ["s1"]);
+  // O mercado observado continua o da Principal.
+  assert.equal(parecer.observedIntent, observedIntentOf(principalClara));
+});
+
+test("A1 · secundária CONSULTADA e de fato distinta continua sendo 'de fora'", () => {
+  const distinta = [
+    resultado(1, "loja.com", "/comprar", "Comprar kit skincare com desconto", "product", "preço e frete"),
+    resultado(2, "loja2.com", "/oferta", "Oferta kit skincare", "product", "cupom de desconto"),
+  ];
+  const { members, notObserved } = splitArticleSerpMembers({
+    keywords: composicaoKgrLeve,
+    snapshots: [snapshotDe("p", principalClara), snapshotDe("s1", distinta)],
+  });
+  assert.equal(notObserved.length, 0);
+  const parecer = interpretArticleSerp({ candidateRef: "cand", members, notObserved, principalKeywordId: "p" });
+  assert.equal(parecer.verdict, "DIVERGENCE");
+  assert.deepEqual(parecer.group.outsiders.map(item => item.keywordId), ["s1"]);
+  assert.deepEqual(parecer.notObserved, []);
+  // Com todas observadas, a explicação é a de antes: nada sobre busca sem SERP.
+  assert.doesNotMatch(parecer.group.reason, /sem SERP/);
+});
+
+test("A1 · snapshot presente e vazio continua membro: foi consultada e voltou vazia", () => {
+  const { members, notObserved } = splitArticleSerpMembers({
+    keywords: composicaoKgrLeve,
+    snapshots: [snapshotDe("p", principalClara), snapshotDe("s1", [])],
+  });
+  assert.deepEqual(members.map(item => item.keywordId), ["p", "s1"]);
+  assert.deepEqual(notObserved, []);
+});
+
+test("A1 · a leitura de resultado é a mesma da rota: tipo manual vence o inferido", () => {
+  const { members } = splitArticleSerpMembers({
+    keywords: [composicaoKgrLeve[0]],
+    snapshots: [{ keywordId: "p", organicResults: [{ position: 3, title: "T", url: "https://a.com/x", domain: "a.com", snippet: "S", inferredType: "article", manualType: "product" }] }],
+  });
+  assert.deepEqual(members[0].results, [{ position: 3, title: "T", url: "https://a.com/x", domain: "a.com", snippet: "S", inferredType: "product" }]);
+});
+
+test("A1 · grupo parcialmente observado: a conta é só das observadas, e a explicação diz quem ficou de fora", () => {
+  const convergente = principalClara.slice(0, 4);
+  const { members, notObserved } = splitArticleSerpMembers({
+    keywords: [...composicaoKgrLeve, { keywordId: "r1", keyword: "skincare facial barato", role: "reforco" as const }],
+    snapshots: [snapshotDe("p", principalClara), snapshotDe("s1", convergente)],
+  });
+  const parecer = interpretArticleSerp({ candidateRef: "cand", members, notObserved, principalKeywordId: "p" });
+  assert.equal(parecer.group.kind, "SUPPORTED");
+  assert.equal(parecer.group.total, 1);
+  assert.equal(parecer.group.converging, 1);
+  assert.match(parecer.group.reason, /1 busca\(s\) do grupo sem SERP nesta validação \("skincare facial barato"\) não entram na conta\./);
+});
+
+test("A1 · sem a SERP da Principal, nada converge nem é de fora", () => {
+  const { members, notObserved } = splitArticleSerpMembers({
+    keywords: composicaoKgrLeve,
+    snapshots: [snapshotDe("s1", principalClara)],
+  });
+  const parecer = interpretArticleSerp({ candidateRef: "cand", members, notObserved, principalKeywordId: "p" });
+  assert.equal(parecer.verdict, "INCONCLUSIVE");
+  assert.equal(parecer.principal.kind, "PRINCIPAL_INCONCLUSIVE");
+  assert.match(parecer.principal.reason, /A Principal não tem SERP observada nesta validação/);
+  assert.equal(parecer.group.kind, "INCONCLUSIVE");
+  assert.deepEqual(parecer.group.outsiders, []);
+  assert.match(parecer.group.reason, /Sem a SERP da Principal/);
+});
+
+test("A1 · registro legado reconstruído segue a mesma regra", () => {
+  const registro = { candidateRef: "cand", assessment: { snapshots: [snapshotDe("p", principalClara)] } };
+  const candidato = { principalKeywordId: "p", keywords: [{ keywordId: "p", role: "principal" }, { keywordId: "s1", role: "secundaria" }] };
+  const rotulos = new Map(composicaoKgrLeve.map(item => [item.keywordId, item.keyword]));
+  const parecer = articleSerpParecerFromAssessment(registro, candidato, id => rotulos.get(id) || id);
+  assert.ok(parecer);
+  assert.equal(parecer.groupVerdict, "INCONCLUSIVE");
+  assert.deepEqual(parecer.outsiders, []);
+  assert.equal(parecer.total, 0);
+  assert.deepEqual(parecer.notObserved, [{ keywordId: "s1", keyword: "skincare facial rotina", reason: NOT_OBSERVED_REASON }]);
+
+  // A mesa também passa só os ids da composição aprovada: a reconstrução não pode lançar.
+  const soIds = articleSerpParecerFromAssessment(registro, { principalKeywordId: "p", keywordIds: ["p", "s1"] });
+  assert.ok(soIds);
+  assert.equal(soIds.groupVerdict, "INCONCLUSIVE");
+  assert.deepEqual(soIds.notObserved?.map(item => item.keywordId), ["s1"]);
+
+  // Todas observadas: o objeto é o de antes, sem a chave nova.
+  const completo = articleSerpParecerFromAssessment(
+    { candidateRef: "cand", assessment: { snapshots: [snapshotDe("p", principalClara), snapshotDe("s1", principalClara.slice(0, 4))] } },
+    candidato,
+  );
+  assert.ok(completo);
+  assert.equal("notObserved" in completo, false);
+});
+
+test("A1 · a rota monta os membros pelos snapshots, não pelo grupo inteiro", () => {
+  const route = readFileSync("app/api/arquiteto/serp/route.ts", "utf8")
+    .split("\n")
+    .filter(line => {
+      const trimmed = line.trimStart();
+      return !trimmed.startsWith("*") && !trimmed.startsWith("//") && !trimmed.startsWith("/*");
+    })
+    .join("\n");
+  assert.match(route, /const \{ members, notObserved \} = splitArticleSerpMembers\(\{/);
+  assert.match(route, /snapshots: assessment\.snapshots,/);
+  assert.match(route, /interpretArticleSerp\(\{\s*candidateRef: assessment\.articleId,\s*members,\s*notObserved,/);
+  // O membro vazio da construção antiga não volta.
+  assert.doesNotMatch(route, /\?\.organicResults \|\| \[\]\)/);
+  assert.match(route, /\.\.\.\(interpretation\.notObserved\.length \? \{ notObserved: notObservedRecordOf\(interpretation\.notObserved\) \} : \{\}\)/);
+});
+
 /* ------------------- §8 viabilidade sem promessa de ROI ------------------ */
 
 test("a viabilidade descreve o observado e nunca promete resultado", () => {
@@ -353,6 +531,33 @@ test("resolução humana de outra composição é recusada na leitura", () => {
   assert.ok(lido.issues.includes("RESOLUTION_BASE_MISMATCH"));
 });
 
+test("A1 · o registro guarda as buscas não observadas, e o registro antigo continua legível", () => {
+  const interpretacao = {
+    principalVerdict: "PRINCIPAL_SUPPORTED", principalAlternativeKeywordId: null,
+    principalReason: "Só a Principal foi consultada.", groupVerdict: "INCONCLUSIVE", groupReason: "Só a Principal foi observada.",
+    outsiders: [], observedIntent: "informacional", dominantType: "article", viability: "inconclusivo",
+    viabilityText: "Os resultados variam demais.", distinctDomains: 8, converging: 0, total: 0,
+    recommendation: "Decidir explicitamente.",
+  };
+  const base = {
+    candidateRef: "cand", territoryRef: "territory:t1", formationBaseHash: "serpbase:aaa", verdict: "INCONCLUSIVE" as const,
+    assessment: { ...assessmentFalso, snapshots: [snapshotFalso] as never }, operationRequestId: "op-1",
+  };
+
+  const comNaoObservada = buildArticleFormationSerpRow({
+    ...base,
+    interpretation: { ...interpretacao, notObserved: [{ keywordId: "s1", keyword: "skincare facial rotina", reason: NOT_OBSERVED_REASON }] },
+  });
+  const lido = parseArticleFormationSerpRow(comNaoObservada);
+  assert.equal(lido.ok, true);
+  assert.deepEqual(lido.payload?.interpretation?.notObserved, [{ keywordId: "s1", keyword: "skincare facial rotina", reason: NOT_OBSERVED_REASON }]);
+
+  // Registro gravado antes do campo: continua válido e sem a chave.
+  const antigo = parseArticleFormationSerpRow(buildArticleFormationSerpRow({ ...base, interpretation: interpretacao }));
+  assert.equal(antigo.ok, true);
+  assert.equal(antigo.payload?.interpretation && "notObserved" in antigo.payload.interpretation, false);
+});
+
 test("não existe decisão genérica de ignorar a SERP", () => {
   const source = readFileSync("lib/arquiteto/article-serp-record.ts", "utf8");
   assert.doesNotMatch(source, /"ignore_serp"|"skip_serp"|"dismiss"/);
@@ -417,4 +622,214 @@ test("o painel mostra as duas perguntas e o mercado observado", () => {
   }
   assert.match(review, /data-testid="architect-review-serp-outsiders"/);
   assert.match(review, /data-testid="architect-review-serp-recommendation"/);
+});
+
+/* ========== A3 · formação nas quatro lentes: o voto de cada par ========== */
+
+/*
+ * Adendo `docs/04-arquiteto/propostas/adendo-quatro-lentes-arquiteto-2026-09-23.md`,
+ * A3 item 5. Um par converge com sobreposição forte ou parcial em PELO MENOS
+ * DUAS lentes; é "de fora" só sem sobreposição em TODAS as lentes observadas e
+ * com intenção diferente na MAIORIA delas. Com uma lente, o parecer de hoje.
+ */
+
+const informativos = (prefixo: string, n = 5) => Array.from({ length: n }, (_, i) =>
+  resultado(i + 1, `${prefixo}${i}.com`, `/guia-${i}`, `Guia: como cuidar da pele ${i}`, "article"));
+const transacionais = (prefixo: string, n = 5) => Array.from({ length: n }, (_, i) =>
+  resultado(i + 1, `${prefixo}${i}.com`, `/comprar-${i}`, `Comprar kit ${i} com desconto`, "product", "preço e frete"));
+const comuns = informativos("comum");
+const P = (results = comuns) => busca("p", "skincare facial", results, "principal");
+const S_JUNTO = () => busca("s", "rotina skincare", comuns.slice(0, 4));
+const S_OUTRO_MESMA_INTENCAO = () => busca("s", "rotina skincare", informativos("outro"));
+const S_TRANSACIONAL = () => busca("s", "rotina skincare", transacionais("loja"));
+const lente = (lens: string, members: KeywordSerpFacts[]) => ({ lens, members });
+const EXTRAS = ["desktop-macos", "mobile-android", "mobile-ios"] as const;
+
+test("A3 · uma lente só dá EXATAMENTE o parecer de hoje", () => {
+  for (const membros of [[P(), S_JUNTO()], [P(), S_TRANSACIONAL()], [P(), S_OUTRO_MESMA_INTENCAO()], [P()]]) {
+    const hoje = interpretArticleSerp({ candidateRef: "c", members: membros, principalKeywordId: "p" });
+    const quatro = interpretArticleSerpAcrossLenses({ candidateRef: "c", primary: lente("desktop-windows", membros), extras: [], principalKeywordId: "p" });
+    for (const campo of ["verdict", "principal", "group", "overlaps", "viability", "observedIntent", "dominantType", "recommendation", "reason"] as const) {
+      assert.deepEqual(quatro[campo], hoje[campo], campo);
+    }
+    // Extras sem o par (só a Principal observada nelas) também não mudam nada.
+    const semPar = interpretArticleSerpAcrossLenses({ candidateRef: "c", primary: lente("desktop-windows", membros), extras: EXTRAS.map(l => lente(l, [P()])), principalKeywordId: "p" });
+    assert.deepEqual(semPar.overlaps, hoje.overlaps);
+    assert.equal(semPar.verdict, hoje.verdict);
+  }
+  // O voto de uma lente é devolvido como veio.
+  const voto = pairwiseOverlap(P(), S_JUNTO());
+  assert.equal(aggregatePairAcrossLenses([voto]), voto);
+  assert.throws(() => aggregatePairAcrossLenses([]));
+});
+
+test("A3 · par convergente em 1 de 4 lentes NÃO converge", () => {
+  const primaria = lente("desktop-windows", [P(), S_JUNTO()]);
+  const extras = EXTRAS.map(l => lente(l, [P(), S_OUTRO_MESMA_INTENCAO()]));
+  const quatro = interpretArticleSerpAcrossLenses({ candidateRef: "c", primary: primaria, extras, principalKeywordId: "p" });
+  assert.equal(quatro.overlaps[0].level, "baixa", "nem converge, nem é de fora");
+  assert.equal(quatro.group.converging, 0);
+  assert.deepEqual(quatro.group.outsiders, []);
+  assert.equal(quatro.verdict, "INCONCLUSIVE");
+  // Só na principal o mesmo par convergia: é exatamente o que as quatro lentes corrigem.
+  assert.equal(interpretArticleSerp({ candidateRef: "c", members: primaria.members, principalKeywordId: "p" }).verdict, "COMPATIBLE");
+  // Os votos por lente ficam registrados; 3 das 4 lentes, sozinhas, dizem o mesmo que o agregado.
+  assert.deepEqual(quatro.lensReadings.map(item => item.pairs[0]?.level), ["forte", "nenhuma", "nenhuma", "nenhuma"]);
+  assert.deepEqual(quatro.observedLenses, ["desktop-windows", ...EXTRAS]);
+  assert.equal(quatro.agreeingLenses, 3);
+});
+
+test("A3 · par convergente em 2 de 4 lentes converge", () => {
+  const quatro = interpretArticleSerpAcrossLenses({
+    candidateRef: "c", principalKeywordId: "p",
+    primary: lente("desktop-windows", [P(), S_JUNTO()]),
+    extras: [lente("desktop-macos", [P(), S_JUNTO()]), lente("mobile-android", [P(), S_OUTRO_MESMA_INTENCAO()]), lente("mobile-ios", [P(), S_OUTRO_MESMA_INTENCAO()])],
+  });
+  assert.equal(quatro.overlaps[0].level, "forte");
+  assert.equal(quatro.group.kind, "SUPPORTED");
+  assert.equal(quatro.verdict, "COMPATIBLE");
+  assert.equal(quatro.agreeingLenses, 2);
+});
+
+test("A3 · 'de fora' exige sobreposição NENHUMA em todas as lentes e intenção diferente na maioria", () => {
+  // Sem sobreposição e com intenção diferente nas quatro: é de fora.
+  const fora = interpretArticleSerpAcrossLenses({
+    candidateRef: "c", principalKeywordId: "p",
+    primary: lente("desktop-windows", [P(), S_TRANSACIONAL()]),
+    extras: EXTRAS.map(l => lente(l, [P(), S_TRANSACIONAL()])),
+  });
+  assert.equal(fora.overlaps[0].level, "nenhuma");
+  assert.equal(fora.overlaps[0].sameIntent, false);
+  assert.deepEqual(fora.group.outsiders.map(item => item.keywordId), ["s"]);
+  assert.equal(fora.verdict, "DIVERGENCE");
+
+  // Um domínio em comum numa lente só já tira o "de fora": não é nenhuma em TODAS.
+  const umDominio = busca("s", "rotina skincare", [resultado(1, "comum0.com", "/outra-pagina", "Comprar kit com desconto", "product", "preço"), ...transacionais("loja", 4)]);
+  const quase = interpretArticleSerpAcrossLenses({
+    candidateRef: "c", principalKeywordId: "p",
+    primary: lente("desktop-windows", [P(), S_TRANSACIONAL()]),
+    extras: [lente("desktop-macos", [P(), umDominio]), lente("mobile-android", [P(), S_TRANSACIONAL()]), lente("mobile-ios", [P(), S_TRANSACIONAL()])],
+  });
+  assert.equal(quase.overlaps[0].level, "baixa");
+  assert.deepEqual(quase.group.outsiders, []);
+  assert.equal(quase.verdict, "INCONCLUSIVE");
+
+  // Nenhuma em todas, mas intenção diferente em só 2 de 4: não é maioria, não é de fora.
+  const empate = interpretArticleSerpAcrossLenses({
+    candidateRef: "c", principalKeywordId: "p",
+    primary: lente("desktop-windows", [P(), S_TRANSACIONAL()]),
+    extras: [lente("desktop-macos", [P(), S_TRANSACIONAL()]), lente("mobile-android", [P(), S_OUTRO_MESMA_INTENCAO()]), lente("mobile-ios", [P(), S_OUTRO_MESMA_INTENCAO()])],
+  });
+  assert.equal(empate.overlaps[0].level, "nenhuma");
+  assert.equal(empate.overlaps[0].sameIntent, true);
+  assert.deepEqual(empate.group.outsiders, []);
+  assert.equal(empate.verdict, "INCONCLUSIVE");
+});
+
+test("A3 · lente faltante nunca vira 'de fora': ela só não vota", () => {
+  // A secundária não foi observada nas extras: o voto é o da principal.
+  const faltando = interpretArticleSerpAcrossLenses({
+    candidateRef: "c", principalKeywordId: "p",
+    primary: lente("desktop-windows", [P(), S_JUNTO()]),
+    extras: EXTRAS.map(l => lente(l, [P()])),
+  });
+  assert.equal(faltando.verdict, "COMPATIBLE");
+  assert.deepEqual(faltando.lensReadings.slice(1).map(item => item.pairs.length), [0, 0, 0]);
+  // Lente sem a Principal não é observada: não entra na concordância.
+  const semPrincipal = interpretArticleSerpAcrossLenses({
+    candidateRef: "c", principalKeywordId: "p",
+    primary: lente("desktop-windows", [P(), S_JUNTO()]),
+    extras: [lente("desktop-macos", [S_TRANSACIONAL()])],
+  });
+  assert.equal(semPrincipal.lensReadings[1].verdict, null);
+  assert.deepEqual(semPrincipal.observedLenses, ["desktop-windows"]);
+  assert.equal(semPrincipal.verdict, "COMPATIBLE");
+});
+
+test("A3 · viabilidade, intenção e tipo dominante vêm SÓ da lente principal", () => {
+  // As extras convergem também, mas trazem 20 domínios a mais: a união inflaria a viabilidade.
+  const muitosDominios = busca("s", "rotina skincare", [...comuns.slice(0, 4), ...informativos("extra", 20)]);
+  const hoje = interpretArticleSerp({ candidateRef: "c", members: [P(), S_JUNTO()], principalKeywordId: "p" });
+  const quatro = interpretArticleSerpAcrossLenses({
+    candidateRef: "c", principalKeywordId: "p",
+    primary: lente("desktop-windows", [P(), S_JUNTO()]),
+    extras: EXTRAS.map(l => lente(l, [P([...comuns, ...transacionais("x", 9)]), muitosDominios])),
+  });
+  assert.equal(quatro.verdict, hoje.verdict);
+  assert.equal(quatro.viability.distinctDomains, hoje.viability.distinctDomains);
+  assert.equal(quatro.viability.level, hoje.viability.level);
+  assert.equal(quatro.observedIntent, hoje.observedIntent);
+  assert.equal(quatro.dominantType, hoje.dominantType);
+});
+
+/* ================= A5 · o marcador de lentes no parecer ================= */
+
+test("A5 · o marcador: pedidas, observadas, faltantes, pares por lente e o portão de datas por keyword", () => {
+  const quatro = interpretArticleSerpAcrossLenses({
+    candidateRef: "c", principalKeywordId: "p",
+    primary: lente("desktop-windows", [P(), S_JUNTO()]),
+    extras: [lente("desktop-macos", [P(), S_JUNTO()]), lente("mobile-android", [P(), S_JUNTO()])],
+  });
+  const faltante = { lens: "mobile-ios", keywordId: "s", reason: "não paga" as const, detail: "Fora do plano de chamadas autorizado." };
+  const marcador = formationLensesMarkerOf({
+    requested: ["desktop-windows", ...EXTRAS],
+    interpretation: quatro,
+    // Dentro de uma lente, as buscas diferem 3 dias; isso NÃO é o portão, que é por keyword.
+    collectedAtByLens: new Map([["desktop-windows", ["2026-09-20T00:00:00.000Z", "2026-09-17T00:00:00.000Z"]], ["desktop-macos", ["2026-09-20T00:00:00.000Z"]]]),
+    // A keyword "p": principal em 10/09, extra em 20/09 → 10 dias entre as lentes da MESMA busca.
+    collectedAtByKeyword: new Map([["p", ["2026-09-10T00:00:00.000Z", "2026-09-20T00:00:00.000Z"]], ["s", ["2026-09-20T00:00:00.000Z", "2026-09-21T00:00:00.000Z"]]]),
+    missing: [faltante],
+    withExtras: true,
+  });
+  assert.deepEqual(marcador.requested, ["desktop-windows", ...EXTRAS]);
+  assert.deepEqual(marcador.observed, ["desktop-windows", "desktop-macos", "mobile-android"]);
+  assert.deepEqual(marcador.missing, [faltante]);
+  assert.equal(marcador.agreement, "3/3");
+  assert.equal(marcador.collectedAtSpreadDays, 10);
+  assert.equal(marcador.datesDiverge, true);
+  assert.equal(marcador.perLens[0].oldestCollectedAt, "2026-09-17T00:00:00.000Z");
+  assert.equal(marcador.perLens[0].newestCollectedAt, "2026-09-20T00:00:00.000Z");
+  assert.deepEqual(marcador.perLens.map(linha => linha.pairs?.[0]?.level), ["forte", "forte", "forte"]);
+  assert.ok(marcador.note, "a assimetria do digest é declarada");
+
+  // Até 7 dias entre as lentes: nada a marcar.
+  const perto = formationLensesMarkerOf({ requested: ["desktop-windows"], interpretation: quatro, collectedAtByLens: new Map(), collectedAtByKeyword: new Map([["p", ["2026-09-10T00:00:00.000Z", "2026-09-17T00:00:00.000Z"]]]), missing: [], withExtras: false });
+  assert.equal(perto.datesDiverge, false);
+  assert.equal("note" in perto, false);
+});
+
+test("A5 · o parser preserva o marcador, e a linha antiga sem ele continua legível", () => {
+  const quatro = interpretArticleSerpAcrossLenses({
+    candidateRef: "c", principalKeywordId: "p",
+    primary: lente("desktop-windows", [P(), S_JUNTO()]),
+    extras: [lente("desktop-macos", [P(), S_JUNTO()])],
+  });
+  const lenses = formationLensesMarkerOf({
+    requested: ["desktop-windows", ...EXTRAS], interpretation: quatro,
+    collectedAtByLens: new Map([["desktop-windows", ["2026-09-20T08:30:00+00:00"]]]),
+    collectedAtByKeyword: new Map(), missing: [{ lens: "mobile-ios", keywordId: null, reason: "sem par", detail: "Só uma busca observada." }], withExtras: true,
+  });
+  const interpretacao = {
+    principalVerdict: "PRINCIPAL_SUPPORTED", principalAlternativeKeywordId: null, principalReason: "ok", groupVerdict: "SUPPORTED", groupReason: "ok",
+    outsiders: [], observedIntent: "informacional", dominantType: "article", viability: "consistente", viabilityText: "ok",
+    distinctDomains: 5, converging: 1, total: 1, recommendation: "Manter a composição como está.",
+  };
+  const base = {
+    candidateRef: "cand", territoryRef: "territory:t1", formationBaseHash: "serpbase:aaa", verdict: "COMPATIBLE" as const,
+    assessment: { ...assessmentFalso, snapshots: [snapshotFalso] as never }, operationRequestId: "op-1",
+  };
+  const lido = parseArticleFormationSerpRow(buildArticleFormationSerpRow({ ...base, interpretation: { ...interpretacao, lenses } }));
+  assert.equal(lido.ok, true);
+  // O readback devolve o bloco gravado, inteiro — inclusive a data com deslocamento.
+  assert.deepEqual(lido.payload?.interpretation?.lenses, lenses);
+  const antigo = parseArticleFormationSerpRow(buildArticleFormationSerpRow({ ...base, interpretation: interpretacao }));
+  assert.equal(antigo.ok, true);
+  assert.equal(antigo.payload?.interpretation && "lenses" in antigo.payload.interpretation, false);
+  // Marcador malformado não passa: o motivo da falta é do vocabulário fechado.
+  const torto = parseArticleFormationSerpRow(buildArticleFormationSerpRow({ ...base, interpretation: interpretacao }));
+  assert.ok(torto.ok);
+  const payload = structuredClone(torto.payload) as Record<string, unknown> & { interpretation: Record<string, unknown> };
+  payload.interpretation.lenses = { ...lenses, missing: [{ lens: "mobile-ios", keywordId: null, reason: "qualquer" }] };
+  const recusado = parseArticleFormationSerpRow({ ...buildArticleFormationSerpRow({ ...base, interpretation: interpretacao }), payload });
+  assert.equal(recusado.ok, false);
 });

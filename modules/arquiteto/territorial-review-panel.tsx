@@ -3,6 +3,7 @@
 import React from "react";
 import type { TerritorialReviewAction, TerritorialReviewView } from "@/lib/arquiteto/territorial-review";
 import { HIGH_IMPACT_ACTIONS } from "@/lib/arquiteto/territorial-review";
+import { describeSerpLensesMarker, describeSerpLensesMissing } from "@/lib/arquiteto/serp-lens-plan";
 
 /**
  * Painel da Revisão humana.
@@ -104,6 +105,13 @@ export function TerritorialReviewPanel({
                 compatibilidade {view.serp.assessment.compatibility} · amplitude {view.serp.assessment.breadth}
                 {view.serp.assessment.overlap ? ` · sobreposição ${view.serp.assessment.overlap}` : ""}
               </p>
+              {/* As lentes do parecer; ausente no parecer legado de uma lente só. */}
+              {view.serp.assessment.lenses && (
+                <p className="text-text-muted" data-testid="architect-territorial-serp-lenses">{describeSerpLensesMarker(view.serp.assessment.lenses)}</p>
+              )}
+              {describeSerpLensesMissing(view.serp.assessment.lenses) && (
+                <p className="text-text-muted" data-testid="architect-territorial-serp-lenses-missing">{describeSerpLensesMissing(view.serp.assessment.lenses)}</p>
+              )}
             </>
           ) : (
             <p className="text-text-muted">Sem parecer de SERP para esta dúvida.</p>

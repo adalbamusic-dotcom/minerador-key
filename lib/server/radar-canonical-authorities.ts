@@ -69,6 +69,28 @@ export type RadarCanonicalAuthorities = {
   specialist: RadarSpecialistEvidenceLayer | null;
   /** §8 · o contexto resolvido — é dele que sai o DNA das keywords. */
   researchContext: RadarArticleResearchContext | null;
+  /**
+   * ===== A IDENTIDADE DO ITEM DO RADAR — só para quem AGRUPA, opcional =====
+   *
+   * O export por silo agrupa pelo `RadarItem.siloId`: é o único silo que já vem
+   * resolvido para ArticleDNA antigo (`operational-flow.ts`, na importação).
+   * `article.payload.siloId` é nulo justamente nesses artigos, e o id da
+   * hidratação pode ter vindo de uma lista do Minerador.
+   *
+   * O item já é lido aqui; expor quatro campos dele evita uma segunda leitura
+   * da mesma linha. O campo é OPCIONAL e fica FORA do dossiê: a resolução
+   * canônica não o lê, então nem o bundle nem o hash mudam — o envio ao Redator
+   * e ao Planejador continuam byte a byte como eram.
+   */
+  radarItem?: RadarCanonicalItemIdentity | null;
+};
+
+/** O recorte do `RadarItem` que o export por silo usa. Nenhum id além do silo. */
+export type RadarCanonicalItemIdentity = {
+  siloId: string | null;
+  title: string | null;
+  slug: string | null;
+  unitType: string | null;
 };
 
 export const RADAR_NO_AUTHORITIES: RadarCanonicalAuthorities = {
@@ -316,5 +338,14 @@ export async function loadRadarCanonicalAuthorities(input: {
     }),
   ]);
 
-  return { google, video, specialist, researchContext };
+  const radarItem: RadarCanonicalItemIdentity | null = lido?.success
+    ? {
+      siloId: texto(lido.data.siloId),
+      title: texto(lido.data.title),
+      slug: texto(lido.data.slug),
+      unitType: texto(lido.data.unitType),
+    }
+    : null;
+
+  return { google, video, specialist, researchContext, radarItem };
 }

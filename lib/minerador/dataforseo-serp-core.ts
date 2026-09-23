@@ -94,6 +94,21 @@ function parseMeasuredAt(value: unknown): string | null {
   return Number.isNaN(timestamp.getTime()) ? null : timestamp.toISOString();
 }
 
+/**
+ * Localidade e idioma REAIS enviados ao provider, sem precisar de credencial.
+ *
+ * Vêm do ambiente técnico, não do Secret Store. O cache de SERP precisa deles
+ * ANTES de resolver a credencial: é a chave da consulta, e a quota recusa zero
+ * unidade — com tudo em cache, nem a credencial é lida.
+ */
+export function readDataForSeoTargetCodes(env: NodeJS.ProcessEnv = process.env): { locationCode: number; languageCode: string } {
+  const locationCode = readPositiveInteger(env.DATAFORSEO_LOCATION_CODE || String(DATAFORSEO_DEFAULT_LOCATION_CODE));
+  if (locationCode === null || locationCode < 1) throw new DataForSeoSerpError("dataforseo_configuration", "O código de localidade da DataForSEO é inválido.", 503);
+  const languageCode = env.DATAFORSEO_LANGUAGE_CODE?.trim().toLowerCase() || DATAFORSEO_DEFAULT_LANGUAGE_CODE;
+  if (!/^[a-z]{2,3}(?:-[a-z]{2})?$/.test(languageCode)) throw new DataForSeoSerpError("dataforseo_configuration", "O código de idioma da DataForSEO é inválido.", 503);
+  return { locationCode, languageCode };
+}
+
 export function buildDataForSeoSerpConfig(credentials: DataForSeoSerpCredentials, env: NodeJS.ProcessEnv = process.env): DataForSeoSerpConfig {
   const login = credentials.login.trim();
   const password = credentials.password.trim();
@@ -102,10 +117,7 @@ export function buildDataForSeoSerpConfig(credentials: DataForSeoSerpCredentials
   const rawBaseUrl = env.DATAFORSEO_BASE_URL?.trim() || "https://api.dataforseo.com";
   let baseUrl: URL;
   try { baseUrl = new URL(rawBaseUrl); } catch { throw new DataForSeoSerpError("dataforseo_configuration", "A URL-base da DataForSEO é inválida.", 503); }
-  const locationCode = readPositiveInteger(env.DATAFORSEO_LOCATION_CODE || String(DATAFORSEO_DEFAULT_LOCATION_CODE));
-  if (locationCode === null || locationCode < 1) throw new DataForSeoSerpError("dataforseo_configuration", "O código de localidade da DataForSEO é inválido.", 503);
-  const languageCode = env.DATAFORSEO_LANGUAGE_CODE?.trim().toLowerCase() || DATAFORSEO_DEFAULT_LANGUAGE_CODE;
-  if (!/^[a-z]{2,3}(?:-[a-z]{2})?$/.test(languageCode)) throw new DataForSeoSerpError("dataforseo_configuration", "O código de idioma da DataForSEO é inválido.", 503);
+  const { locationCode, languageCode } = readDataForSeoTargetCodes(env);
   const parsedTimeout = readPositiveInteger(env.DATAFORSEO_TIMEOUT_MS || "30000");
   const timeoutMs = Math.min(120_000, Math.max(1_000, parsedTimeout ?? 30_000));
   return { login, password, baseUrl: baseUrl.toString().replace(/\/$/, ""), timeoutMs, locationCode, languageCode };

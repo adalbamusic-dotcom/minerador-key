@@ -25,7 +25,6 @@ import { resolveDeepSeekCanonicalConfig, DeepSeekCanonicalError } from "@/lib/se
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
 import { PersistenceUnavailableError } from "@/lib/server/editorial-db";
 import { newWriterDeliverable, VideoScriptPayloadSchema, CarouselPayloadSchema } from "@/lib/redator/multiformat-contracts";
-import { radarFoundationsOf } from "@/lib/redator/radar-foundations";
 import {
   buildCarouselSeedPrompt, buildScriptSeedPrompt, carouselPayloadFromSeed, finalArticleText,
   ProviderCarouselSeedSchema, ProviderScriptSeedSchema, scriptPayloadFromSeed,
@@ -46,8 +45,8 @@ export async function POST(request: NextRequest) {
     /* Semear escreve um rascunho, então exige permissão de edição, não de leitura. */
     await assertEditorialPermission(profile, input.brandId, "redator", "edit");
 
-    const { document, contentHash } = await writerSeedDocument(input.brandId, input.documentId);
-    const foundations = radarFoundationsOf(document);
+    /* Os fundamentos já vêm projetados: a leitura traz só os caminhos que eles usam. */
+    const { document, foundations, contentHash } = await writerSeedDocument(input.brandId, input.documentId);
     if (!foundations) {
       throw new AuthzError(422, "Este documento não veio do Radar com dossiê. Não há contexto para semear.");
     }

@@ -51,6 +51,59 @@ export const EMPTY_DISCOVERY_SEO_FILTERS: DiscoverySeoFilters = {
   keywordDifficulty: { min: null, max: null },
 };
 
+/**
+ * Padrão da Descoberta: Resultado e KD começam em "Sem medição". Nesse estado a
+ * SERP (DataForSEO) fica desligada; volume e intenção vêm antes.
+ */
+export const DISCOVERY_SEO_DEFAULT_PRESET = "missing" as const;
+
+export const DEFAULT_DISCOVERY_SEO_FILTERS: DiscoverySeoFilters = {
+  result: { min: null, max: null, mode: "missing" },
+  keywordDifficulty: { min: null, max: null, mode: "missing" },
+};
+
+export const DISCOVERY_SERP_GATE_MESSAGE = "Ative o filtro Resultado ou KD para medir com a DataForSEO.";
+
+/**
+ * "Medir resultados" só fica liberado quando o usuário escolhe, em Resultado
+ * ou em KD, qualquer opção diferente de "Sem medição". Lê as faixas já
+ * derivadas dos presets, então vale para a tela e para a função que dispara.
+ */
+export function isDiscoverySerpMeasurementEnabled(filters: DiscoverySeoFilters | null | undefined): boolean {
+  if (!filters) return false;
+  return filters.result.mode !== "missing" || filters.keywordDifficulty.mode !== "missing";
+}
+
+/**
+ * Depois de uma medição concluída, um filtro que ficou em "Sem medição"
+ * esconderia as candidatas recém-medidas. Ele passa para "Todos"; os demais
+ * presets escolhidos pelo usuário ficam como estão.
+ */
+export function discoverySeoPresetAfterMeasurement<P extends DiscoveryResultPreset | DiscoveryKeywordDifficultyPreset>(preset: P): P | "all" {
+  return preset === DISCOVERY_SEO_DEFAULT_PRESET ? "all" : preset;
+}
+
+export type DiscoverySeoPresets = {
+  result: DiscoveryResultPreset;
+  keywordDifficulty: DiscoveryKeywordDifficultyPreset;
+};
+
+/**
+ * Decide o ajuste pós-medição sobre os presets VIGENTES na hora da resposta.
+ * Devolve null quando não há o que trocar: nenhum filtro em "Sem medição", ou
+ * os dois em "Sem medição" (o usuário fechou a medição durante a chamada; o
+ * ajuste não pode reabri-la sozinho).
+ */
+export function discoverySeoPresetsAfterMeasurement(presets: DiscoverySeoPresets): DiscoverySeoPresets | null {
+  const resultMissing = presets.result === DISCOVERY_SEO_DEFAULT_PRESET;
+  const keywordDifficultyMissing = presets.keywordDifficulty === DISCOVERY_SEO_DEFAULT_PRESET;
+  if (resultMissing === keywordDifficultyMissing) return null;
+  return {
+    result: discoverySeoPresetAfterMeasurement(presets.result),
+    keywordDifficulty: discoverySeoPresetAfterMeasurement(presets.keywordDifficulty),
+  };
+}
+
 export type DiscoverySeoFilterSummary = {
   result: number;
   keywordDifficulty: number;
@@ -123,6 +176,13 @@ function matchesRange(value: number | null, range: DiscoverySeoRange): boolean {
 export function candidateMatchesDiscoverySeoFilters(candidate: DiscoveryCandidate, filters: DiscoverySeoFilters): boolean {
   return matchesRange(readDiscoveryResult(candidate), filters.result)
     && matchesRange(readDiscoveryKeywordDifficulty(candidate), filters.keywordDifficulty);
+}
+
+/** Quantas candidatas os filtros Resultado/KD tiram da tabela (inclusive por "Sem medição"). */
+export function countDiscoveryCandidatesHiddenBySeoFilters(candidates: DiscoveryCandidate[], filters: DiscoverySeoFilters): number {
+  let hidden = 0;
+  for (const candidate of candidates) if (!candidateMatchesDiscoverySeoFilters(candidate, filters)) hidden += 1;
+  return hidden;
 }
 
 export function applyDiscoverySeoFilters(candidates: DiscoveryCandidate[], filters: DiscoverySeoFilters) {

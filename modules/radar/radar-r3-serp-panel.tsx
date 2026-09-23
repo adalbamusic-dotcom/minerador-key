@@ -19,12 +19,16 @@ import type { RadarDeepResearchView } from "@/lib/radar/deep-research-view";
 import { radarResearchDecisionLabel, type RadarResearchDecision } from "@/lib/radar/research-curation";
 import { radarReferenceAppearanceSummary, radarReferenceOrigin, radarReferenceOriginLabel } from "@/lib/radar/research-reference";
 import { radarCompetitorClassLabel } from "@/lib/radar/competitor-universe";
+import { buildRadarSerpLensCoverage } from "@/lib/radar/serp-lens-coverage";
+import { RadarSerpLensCoverageView, RadarSerpRecollectAction } from "./radar-serp-lens-coverage";
 
 // Seleção de concorrentes e referências permanece restrita à subaba Concorrentes.
 // Revisão e aprovação da SERP permanece restrita à subaba Revisão.
 type SerpCurationRole = "primary" | "support" | "format" | "excluded" | "pending";
 type Props = {
   model: RadarR3Model["serp"]; scope: RadarSerpSelectionScope; refreshing: boolean; onRefresh: () => void;
+  /** "Recoletar agora (pago)" — chamado só DEPOIS da confirmação com o número de chamadas (adendo R2). */
+  onRecollect?: () => void;
   onFocusAdjacent?: (direction: "previous" | "next") => void; pendingReviewCount?: number; reviewing?: boolean;
   onReview?: (status: "approved" | "rejected") => void; queueState?: RadarR4SerpQueueState | null;
   action?: "start" | "decision" | "extract" | null; onStartAnalysis?: () => void;
@@ -243,7 +247,7 @@ function AnalysisDetails({ model, summary }: { model: RadarR3Model["serp"]; summ
   return <section className={section} aria-label="Leitura da análise da amostra"><h3 className="text-base font-semibold text-foreground">Leitura da análise da amostra</h3><p className="mt-1 text-sm text-text-muted">{summary.selectedCompetitors} página(s) selecionada(s) · {summary.needs} necessidade(s) · {summary.gaps} lacuna(s) · {summary.conflicts} conflito(s).</p><p className="mt-3 text-sm leading-6 text-text-muted">Intenção: {report?.dnaComparison.observedIntent || diagnostic?.dominantIntent || "Não classificada"}. Formatos: {diagnostic?.dominantFormats.join(" · ") || "Não observados"}. A leitura é observacional e não cria metas editoriais.</p></section>;
 }
 
-export function RadarR3SerpPanel({ model, scope, refreshing, onRefresh, onFocusAdjacent, pendingReviewCount = 0, reviewing = false, onReview, queueState = null, action = null, onStartAnalysis, onConfirmCuration, onAnalyzeSelected, approvalBlockedReason = null, reviewRemoteConfirmed = false, onInvestigationAction, researchContext, deepResearch, onResearchDecision, onConfirmResearchCuration, finalized = false }: Props) {
+export function RadarR3SerpPanel({ model, scope, refreshing, onRefresh, onRecollect, onFocusAdjacent, pendingReviewCount = 0, reviewing = false, onReview, queueState = null, action = null, onStartAnalysis, onConfirmCuration, onAnalyzeSelected, approvalBlockedReason = null, reviewRemoteConfirmed = false, onInvestigationAction, researchContext, deepResearch, onResearchDecision, onConfirmResearchCuration, finalized = false }: Props) {
   const reasonInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const view = model.view;
   const analysis = model.analysis;
@@ -376,7 +380,7 @@ export function RadarR3SerpPanel({ model, scope, refreshing, onRefresh, onFocusA
   const collectionLabel = refreshing
     ? (collectionAction?.isFirstCollection ? "Coletando SERP…" : "Coletando…")
     : collectionAction?.actionLabel ?? (queueState === "FAILED_RETRYABLE" ? "Tentar novamente" : "Atualizar SERP");
-  const collection = <div className={section}><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-base font-semibold text-foreground">Coleta da SERP</h3><p className="mt-1 text-sm text-text-muted">Provider canônico: {model.provider}. Abrir esta subaba não dispara chamada; coletar é sempre explícito.</p></div></div>{collectionBlocked ? <div className="mt-4 rounded-md border border-warning bg-warning-soft/30 p-3" data-testid="radar-serp-structural-block"><p className="text-sm font-semibold text-foreground">Coleta bloqueada</p><p className="mt-1 text-sm leading-6 text-foreground">{collectionAction?.detail}</p><p className="mt-2 text-sm text-text-muted">Corrija o vínculo da keyword antes de coletar. Nenhuma chamada DataForSEO foi iniciada.</p></div> : !view ? <p className="mt-4 rounded-md border border-pending bg-pending-soft p-3 text-sm text-foreground">{collectionAction?.detail || "Nenhum snapshot disponível. A coleta DataForSEO é explícita e só acontece por esta ação."}</p> :<dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><Meta label="Consulta principal" value={view.query} /><Meta label="Snapshot" value={"v" + view.version} /><Meta label="Provider" value={view.provider} /><Meta label="Capturado em" value={dateLabel(view.capturedAt)} /><Meta label="Resultados orgânicos" value={view.organicResults.length} /></dl>}</div>;
+  const collection = <div className={section}><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-base font-semibold text-foreground">Coleta da SERP</h3><p className="mt-1 text-sm text-text-muted">Provider canônico: {model.provider}. Abrir esta subaba não dispara chamada; coletar é sempre explícito.</p></div></div>{collectionBlocked ? <div className="mt-4 rounded-md border border-warning bg-warning-soft/30 p-3" data-testid="radar-serp-structural-block"><p className="text-sm font-semibold text-foreground">Coleta bloqueada</p><p className="mt-1 text-sm leading-6 text-foreground">{collectionAction?.detail}</p><p className="mt-2 text-sm text-text-muted">Corrija o vínculo da keyword antes de coletar. Nenhuma chamada DataForSEO foi iniciada.</p></div> : !view ? <p className="mt-4 rounded-md border border-pending bg-pending-soft p-3 text-sm text-foreground">{collectionAction?.detail || "Nenhum snapshot disponível. A coleta DataForSEO é explícita e só acontece por esta ação."}</p> :<><dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><Meta label="Consulta principal" value={view.query} /><Meta label="Snapshot" value={"v" + view.version} /><Meta label="Provider" value={view.provider} /><Meta label="SERP observada em" value={dateLabel(view.capturedAt)} /><Meta label="Resultados orgânicos" value={view.organicResults.length} /></dl><div className={inset + " mt-4"} data-testid="radar-serp-panel-lenses"><div className="flex flex-wrap items-start justify-between gap-3"><RadarSerpLensCoverageView coverage={buildRadarSerpLensCoverage(view.record.research)} />{onRecollect && !finalized && view.origin === "real" && <RadarSerpRecollectAction onConfirm={onRecollect} busy={busy} />}</div></div></>}</div>;
 
   /*
    * A CURADORIA DO UNIVERSO PESQUISADO.

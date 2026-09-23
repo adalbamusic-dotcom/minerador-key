@@ -33,6 +33,7 @@ import { createWriterPublication } from "../editorial/operational-flow.ts";
 import { runGuardian } from "../redator/guardian.ts";
 import { getOperationalClient, mapPersistenceError } from "./editorial-db";
 import { PublicationRepository } from "./editorial-repositories";
+import { checkOpenBlockingWriterDivergence } from "./writer-evidence-divergences";
 
 export class WriterPublicationError extends Error {
   readonly code: string;
@@ -110,6 +111,19 @@ export async function sendWriterToPublications(input: {
   if (criticos.length) {
     throw new WriterPublicationError("writer_publication_guardian_blocked",
       `O Guardião encontrou ${criticos.length} achado(s) bloqueante(s). A análise não aprova, mas ela impede entregar.`);
+  }
+
+  /*
+   * Divergência com DNA que uma PESSOA marcou como bloqueante aparece como
+   * `blocked` no Guardião — e barra a entrega pela mesma regra. Conferida no
+   * banco, pela Marca e pelo documento, sem o teto da leitura de exibição.
+   * Sem a migration não há registro (nem bloqueante); erro de leitura lança e
+   * a entrega não acontece.
+   */
+  const divergencia = await checkOpenBlockingWriterDivergence({ brandId: input.brandId }, input.documentId);
+  if (divergencia.blocking) {
+    throw new WriterPublicationError("writer_publication_divergence_blocking",
+      "Há divergência com DNA marcada como bloqueante e ainda aberta. Resolva ou descarte antes de enviar a Publicações.");
   }
 
   if (document.status !== "aprovado") {

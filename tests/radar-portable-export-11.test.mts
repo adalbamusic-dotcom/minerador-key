@@ -10,8 +10,10 @@ import {
   buildRadarPortableExportRow,
   radarPortableActionableLimitations,
   radarPortableExportCsv,
+  type RadarPortableExportInput,
   type RadarPortableExportRow,
 } from "../lib/radar/portable-export.ts";
+import { radarPortableExportDossierGapsInput } from "../lib/radar/portable-export-batch.ts";
 import type { RadarExtractionPage, RadarObservedLink } from "../lib/radar/analysis-contracts.ts";
 import type { RadarArticleResearchContext } from "../lib/radar/article-research-context.ts";
 import type { RadarEditorialProfileModel } from "../lib/radar/editorial-profile-model.ts";
@@ -113,7 +115,13 @@ const vistaCompetitivaDoGoogle = () => radarCompetitiveBlueprintViewOfAnalysis({
   generatedAt: "2026-09-17T12:00:00.000Z",
 });
 
-const linhaDoGoogle = (): RadarPortableExportRow => {
+/*
+ * `extra` (2026-09-23): as entradas opcionais das colunas novas. Sem elas, as
+ * colunas novas não existem e a linha só difere da de antes nas regras de
+ * paridade com o Redator (em `writer_context_md` e `writer_brief_md`), que
+ * entram sempre — é o resto que as travas abaixo continuam provando.
+ */
+const linhaDoGoogle = (extra: Partial<RadarPortableExportInput> = {}): RadarPortableExportRow => {
   const vista = vistaDoGoogle();
   return buildRadarPortableExportRow({
     profile: "GOOGLE",
@@ -134,6 +142,7 @@ const linhaDoGoogle = (): RadarPortableExportRow => {
     googleObserved: vista.observed,
     internalLinks: ["suporta: rotina de skincare"],
     researchLimitations: vista.observed.limitations,
+    ...extra,
   });
 };
 
@@ -265,11 +274,26 @@ test("§1 e §23 · a barra tem UM botão Exportar, com os dois produtos dentro"
    * dois produtos, deixando o outro parecendo um formato alternativo.
    */
   const botoesDeExport = [...barra.matchAll(/data-testid="radar-export-[a-z-]+"/g)].map(item => item[0]);
+  /*
+   * 2026-09-23 · O MENU GANHOU UM TERCEIRO PRODUTO, E ELE VEM PRIMEIRO.
+   *
+   * O dono do produto pediu o export por SILO como recomendação: o CSV é a
+   * saída final para escrever fora da plataforma, e um artigo de silo escrito
+   * sozinho perde a ordem, o Pilar e os irmãos. A trava continua sendo "um
+   * botão Exportar, com os produtos dentro" — o que mudou foi a contagem de
+   * produtos (3 itens + o menu), e não a regra de um botão só na barra.
+   */
   assert.deepEqual(botoesDeExport.sort(), [
     'data-testid="radar-export-dossiers"',
     'data-testid="radar-export-grid"',
     'data-testid="radar-export-menu"',
-  ], "§23 · o menu e os dois itens, e nada além disso");
+    'data-testid="radar-export-silos"',
+  ], "§23 · o menu e os três itens, e nada além disso");
+  const itensDoMenu = botoesDeExport.filter(item => item !== 'data-testid="radar-export-menu"');
+  assert.equal(itensDoMenu.length, 3, "§23 · cada item aparece uma vez só");
+  const ordemNoMenu = [...barra.slice(barra.indexOf('data-testid="radar-export-menu"')).matchAll(/data-testid="(radar-export-(?:silos|grid|dossiers))"/g)].map(item => item[1]);
+  assert.deepEqual(ordemNoMenu, ["radar-export-silos", "radar-export-grid", "radar-export-dossiers"],
+    "2026-09-23 · o export recomendado (silos completos) é o PRIMEIRO item do menu");
 
   /* O rótulo antigo não sobreviveu como botão de topo. */
   assert.equal(/CSV · Dossiês finalizados/.test(barra), false, "§1 · o botão separado continua na barra");
@@ -364,6 +388,50 @@ test("§19 · o dossiê cabe numa tela, e cada coluna tem finalidade", () => {
     "funnel", "intent", "keyword_principal", "must_cover", "reader_promise",
     "research_profile", "secondary_keywords", "silo", "slug", "suggested_title",
   ], "§19 · coluna sem finalidade editorial nem de automação");
+
+  /*
+   * ===== 2026-09-23 · AS COLUNAS NOVAS: TODAS COM SUFIXO, E O JSON NÃO VIRA PRODUTO =====
+   *
+   * O CSV passou a levar a SERP da investigação, a SERP por lente, a situação
+   * da investigação, a autoridade, a estrutura dos concorrentes e o contexto
+   * do silo. A regra desta trava não mudou — o que mudou é que ela precisa
+   * olhar também a linha COMPLETA, e não só a de antes. Com todas as entradas
+   * novas, o conjunto sem sufixo é o MESMO, e o JSON continua sem passar do
+   * Markdown.
+   */
+  const dossie = resolveRadarCanonicalDossier({
+    analysis: { versionId: "v3", versionNumber: 3, payload: { finalizedBundle: { frozenAt: "2026-09-10T13:00:00.000Z", limitations: [] }, serpSnapshotId: "serp-9" } } as never,
+    article: { brandId: "b", articleId: "a1", articleDnaVersionId: "d1", articleDnaContentHash: "hash" },
+    observedAt: "2026-09-17T12:00:00.000Z",
+    authorities: { google: vistaDoGoogle(), video: null, specialist: null, researchContext: null },
+  });
+  assert.equal(dossie.ok, true);
+  if (!dossie.ok) return;
+  const completa = linhaDoGoogle({
+    serpObserved: { snapshot: null, unavailableReason: "A coleta referenciada não está entre as coletas gravadas da marca." },
+    serpLenses: { keywords: [{ keyword: "skincare para pele oleosa", role: "principal" }], lookups: [], readFailed: true },
+    dossierGaps: radarPortableExportDossierGapsInput({
+      analysis: { finalizedBundle: { frozenAt: "2026-09-10T13:00:00.000Z" } },
+      profile: "GOOGLE",
+      bundle: dossie.dossier.bundle,
+      readiness: dossie.dossier.readiness,
+      article: { articleDnaVersionId: "d1", articleDnaContentHash: "hash" },
+      exportedAt: "2026-09-17T12:00:00.000Z",
+    }),
+    siloContext: { silo_context_md: "# Contexto do silo\n\nSilo: skincare", silo_context_json: JSON.stringify({ silo: "skincare" }) },
+  });
+  const colunasCompletas = Object.keys(completa);
+  const novas = colunasCompletas.filter(item => !comuns.includes(item));
+  assert.deepEqual(novas.sort(), [
+    "authority_requirements_md", "competitors_structure_json", "research_status_md",
+    "serp_lenses_json", "serp_lenses_md", "serp_observed_json", "serp_observed_md",
+    "silo_context_json", "silo_context_md",
+  ], "2026-09-23 · as colunas novas são estas nove, e só aparecem com a entrada delas");
+  assert.deepEqual(colunasCompletas.filter(item => !item.endsWith("_md") && !item.endsWith("_json")).sort(), semSufixo.sort(),
+    "2026-09-23 · coluna nova sem sufixo _md/_json");
+  const markdownCompleto = colunasCompletas.filter(item => item.endsWith("_md")).length;
+  const jsonCompleto = colunasCompletas.filter(item => item.endsWith("_json")).length;
+  assert.ok(jsonCompleto <= markdownCompleto, `§18 · na linha completa, ${jsonCompleto} colunas de JSON contra ${markdownCompleto} de texto`);
 });
 
 /* ================================ §7 ================================ */

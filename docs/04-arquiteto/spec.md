@@ -370,3 +370,15 @@ A indisponibilidade de SERP ou IA não bloqueia a planilha nem as ações manuai
 autorizadas: mover artigos e silos, reorganizar keywords, definir principal,
 secundária, reforço, Pilar/Suporte e confirmar a arquitetura quando os gates
 editoriais estiverem atendidos continuam independentes.
+
+## 31. SERP nas 4 lentes — 2026-09-23
+
+Decisão do usuário: as 4 lentes (desktop-windows, desktop-macos, mobile-android, mobile-ios) valem em todo ponto de SERP orgânica. No Arquiteto:
+- Formação e territorial leem a canônica em corpo e as extras pelo digest do cache. Cada lente vota, e o parecer grava um marcador de lentes.
+- Um par converge só com sobreposição em 2 lentes ou mais.
+- Nada é pago no clique: a tela mostra o plano de chamadas, e a rota recusa pagar além do autorizado.
+- A lente canônica é gravada com 20 resultados.
+- A concordância entre lentes conta em dobro só com 3 lentes observadas ou mais.
+- A primária do Silo pela SERP é sempre proposta e só é gravada com aceite humano, na origem "lista nova".
+
+Regras e itens no [adendo](propostas/adendo-quatro-lentes-arquiteto-2026-09-23.md).

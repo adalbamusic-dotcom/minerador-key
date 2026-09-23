@@ -1,5 +1,9 @@
 # Backlog — Marca
 
+## Egress da home da marca — 2026-09-23
+
+- [ ] A home da marca (`modules/marca/brand-page.tsx`, visão) ainda lê a mesa editorial inteira (~2,36 MB na Care Glow, depois da E1) para mostrar 4 contadores e convites. Costuma ser a página de entrada depois de escolher a marca. Trocar por contagens estreitas. Registro na seção 8 da [SDD de egress](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md).
+
 ## Skills — fundação remota fechada e convergência local — 2026-08-28
 
 - [x] Primeira BrandSkill real persistida e confirmada por readback

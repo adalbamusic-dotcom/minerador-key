@@ -55,6 +55,20 @@ import {
   radarCannotAssertFrom,
   radarWriterContextMarkdown,
 } from "./portable-writer-context.ts";
+import {
+  radarPortableSerpLensesColumns,
+  radarPortableSerpObserved,
+  radarPortableSerpObservedBriefMarkdown,
+  radarPortableSerpObservedColumns,
+  type RadarPortableSerpLensesInput,
+  type RadarPortableSerpObservedInput,
+} from "./portable-serp-observed.ts";
+import {
+  radarPortableDossierGapColumns,
+  radarWritingRulesWithWriterParity,
+  type RadarPortableDossierGapsInput,
+} from "./portable-dossier-gaps.ts";
+import type { RadarSiloExportRowContext } from "./portable-silo-export.ts";
 import type { RadarAmazonUniverseEntry } from "./amazon-search-model.ts";
 import type { RadarArticleResearchContext } from "./article-research-context.ts";
 import type { RadarYoutubeUniverseEntry } from "./youtube-search-model.ts";
@@ -580,8 +594,15 @@ export function radarWriterBriefMarkdown(input: RadarWriterBriefInput): string {
    * Elas não descrevem este artigo: descrevem o contrato de escrever a partir
    * de um dossiê do Radar. Variá-las por artigo faria cada brief ensinar uma
    * disciplina diferente.
+   *
+   * PARIDADE COM O REDATOR (2026-09-23): o Redator recebe, junto do dossiê, as
+   * proibições de `RADAR_WRITER_MAY_NOT`; o brief é o contrato de quem escreve
+   * FORA da plataforma (o prompt externo aponta para ele), e não dizia que o
+   * silo, o slug, o canonical e a composição de secundárias não se trocam. As
+   * que faltam entram antes da regra que fecha a lista — e só as que faltam:
+   * a função é idempotente, então nada se repete.
    */
-  const regras = lista([
+  const regras = lista(radarWritingRulesWithWriterParity([
     "não copiar concorrentes — a radiografia é insumo, nunca modelo de texto;",
     "não inventar evidência, número, data, preço, benefício ou citação;",
     "preservar a intenção declarada e a keyword principal;",
@@ -592,7 +613,7 @@ export function radarWriterBriefMarkdown(input: RadarWriterBriefInput): string {
     "aplicar somente os links internos planejados;",
     "respeitar as limitações — o que a coleta não alcançou não vira afirmação;",
     "sinalizar qualquer dependência que continue sem resolução.",
-  ]);
+  ]));
 
   return [
     ...secao("MISSÃO", missao),
@@ -674,6 +695,26 @@ export type RadarPortableExportInput = {
   internalLinks?: readonly string[];
   /** As limitações da investigação congelada, que valem para os três perfis. */
   researchLimitations?: readonly string[];
+
+  /*
+   * ===== AS ENTRADAS DE 2026-09-23 — "o CSV tem os mesmos dados do Redator" =====
+   *
+   * Todas OPCIONAIS, e cada uma liga um par de colunas: sem elas, as colunas
+   * novas não existem. A linha NÃO é idêntica à de antes em dois pontos, de
+   * propósito: `writer_context_md` e `writer_brief_md` ganham as regras de
+   * paridade com o Redator em toda linha; e, com as entradas, `research_status_md`
+   * e `silo_context_md` entram logo depois de `must_cover`, o que desloca as
+   * colunas seguintes para quem lê o CSV por posição (quem lê pelo cabeçalho
+   * não percebe). Quem as preenche é a rota de export, a partir do que ela já lê.
+   */
+  /** A SERP que o dossiê referencia → `serp_observed_md` / `serp_observed_json` e o resumo em `writer_context_md`. */
+  serpObserved?: RadarPortableSerpObservedInput | null;
+  /** A leitura do cache de SERP da marca por lente → `serp_lenses_md` / `serp_lenses_json`. */
+  serpLenses?: RadarPortableSerpLensesInput | null;
+  /** O que o Redator lê do dossiê e o CSV não dizia → `research_status_md`, `authority_requirements_md`, `competitors_structure_json`. */
+  dossierGaps?: RadarPortableDossierGapsInput | null;
+  /** O contexto do silo, só no export por silo → `silo_context_md` / `silo_context_json`. */
+  siloContext?: RadarSiloExportRowContext | null;
 };
 
 /**
@@ -922,6 +963,26 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     amazonEnrichmentGaps: amazon?.requiresEnrichment || [],
   });
 
+  /*
+   * ===== 2026-09-23 · A SERP, AS LENTES, AS LACUNAS DO DOSSIÊ E O SILO =====
+   *
+   * O CSV é a saída final de quem escreve com outra ferramenta ou outra IA, e
+   * precisa carregar, por artigo, o que o Redator da plataforma recebe — mais
+   * a SERP que a investigação analisou. Cada bloco é montado pelo módulo que o
+   * sabe projetar (`portable-serp-observed`, `portable-dossier-gaps`,
+   * `portable-silo-export`); aqui só se decide ONDE ele entra na linha.
+   *
+   * Entrada ausente não vira coluna vazia: a coluna simplesmente não existe
+   * (a linha só difere da de antes nas regras de paridade com o Redator, que
+   * entram sempre). Quando a entrada existe mas o dado não, é a coluna que
+   * diz por quê — ausência dita, não escondida.
+   */
+  const serpObservada = input.serpObserved ? radarPortableSerpObservedColumns(input.serpObserved) : null;
+  const serpResumo = input.serpObserved ? radarPortableSerpObservedBriefMarkdown(radarPortableSerpObserved(input.serpObserved)) : "";
+  const serpLentes = input.serpLenses ? radarPortableSerpLensesColumns(input.serpLenses) : null;
+  const lacunas = input.dossierGaps ? radarPortableDossierGapColumns(input.dossierGaps) : null;
+  const contextoDoSilo = input.siloContext ?? null;
+
   const contexto = radarWriterContextMarkdown({
     articleIdentity: identidadeMd,
     seoMetadata: seoMetadataMd,
@@ -935,6 +996,7 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     radiography: radiografia,
     strategy: estrategia,
     serpEvidence: serpEvidenciaMd,
+    serpObserved: serpResumo,
     sectionEvidence: secaoEvidenciaMd,
     sources: fontesMd,
     internalLinks: linksMd,
@@ -945,7 +1007,12 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     commercial: comercial,
     limitations: limitacoes,
     cannotAssert: naoAfirmar,
-    writingRules: RADAR_WRITING_RULES,
+    /*
+     * As proibições do Redator que as regras do CSV não diziam (reconfigurar o
+     * Silo, trocar a composição de secundárias) entram aqui — importadas do
+     * Redator, não copiadas, e sem repetir as que já estavam cobertas.
+     */
+    writingRules: radarWritingRulesWithWriterParity(RADAR_WRITING_RULES),
   });
 
   const linha: RadarPortableExportRow = {
@@ -966,6 +1033,17 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     alternate_titles: emLinha(editorial.alternateTitles),
     reader_promise: texto(editorial.readerPromise),
     must_cover: emLinha(dna.mustCover),
+
+    /*
+     * ===== 2026-09-23 · a situação da investigação e o silo, logo depois da identidade =====
+     *
+     * A prontidão para o Redator decide como o resto da linha é lido — um
+     * artigo que a plataforma recusaria continua saindo, mas rotulado. E no
+     * export por silo, o contexto do silo diz em que ponto da ordem este
+     * artigo entra e o que os irmãos cobrem.
+     */
+    ...(lacunas ? { research_status_md: lacunas.research_status_md } : {}),
+    ...(contextoDoSilo ? { silo_context_md: contextoDoSilo.silo_context_md } : {}),
 
     /* ===== 1.2A · a identidade da página ===== */
     article_identity_md: identidadeMd,
@@ -998,6 +1076,15 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     keywords_dna_json: json(keywords),
     serp_evidence_json: json(serp),
     serp_sources_json: json(serpSources),
+    /*
+     * 2026-09-23 · a SERP como a página a mostrou (a da investigação, e a do
+     * cache por lente), a estrutura de cada concorrente — que se cruza com
+     * `serp_sources_json` pela URL, com o mesmo `role` — e os requisitos de
+     * autoridade e de descoberta por IA que o Redator lê do dossiê.
+     */
+    ...(serpObservada ? serpObservada : {}),
+    ...(serpLentes ? serpLentes : {}),
+    ...(lacunas ? { competitors_structure_json: lacunas.competitors_structure_json, authority_requirements_md: lacunas.authority_requirements_md } : {}),
     section_evidence_json: json(sectionEvidence),
     external_sources_json: json(externalSources),
     internal_links_resolved_json: json(internalLinks),
@@ -1013,6 +1100,7 @@ export function buildRadarPortableExportRow(input: RadarPortableExportInput): Ra
     /* §18 do 1.1 · o apoio de automação. */
     article_dna_compact_json: json(dna),
     outline_json: json(editorial.sections),
+    ...(contextoDoSilo ? { silo_context_json: contextoDoSilo.silo_context_json } : {}),
 
     exported_at: input.exportedAt,
   };

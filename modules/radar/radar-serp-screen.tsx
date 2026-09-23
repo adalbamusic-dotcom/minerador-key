@@ -4,6 +4,9 @@ import { ExternalLink, GitCompareArrows, History, RefreshCw } from "lucide-react
 import { useMemo, useState } from "react";
 import type { SerpCollectionRecord } from "@/lib/editorial/contracts";
 import { buildRadarSerpView, type RadarSerpView } from "@/lib/radar/snapshot-view";
+import { buildRadarSerpLensCoverage } from "@/lib/radar/serp-lens-coverage";
+import { RADAR_SERP_RECOLLECT_CALLS } from "@/lib/radar/serp/lens-set";
+import { RadarSerpLensCoverageView, RadarSerpRecollectAction } from "./radar-serp-lens-coverage";
 
 type RadarSerpScreenProps = {
   view: RadarSerpView | null;
@@ -13,6 +16,11 @@ type RadarSerpScreenProps = {
   refreshing: boolean;
   onRefresh: () => void;
   onOpenReferences: () => void;
+  /** "Recoletar agora (pago)": só é chamado DEPOIS da confirmação com o número de chamadas. */
+  onRecollect?: () => void;
+  recollecting?: boolean;
+  /** Por que a recoleta não está disponível (ex.: investigação finalizada). */
+  recollectBlockedReason?: string | null;
 };
 
 const button = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-divider px-3 py-2 text-sm font-medium text-foreground transition-colors hover:border-context-accent hover:text-context-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50";
@@ -53,7 +61,7 @@ function Comparison({ left, right }: { left: RadarSerpView | null; right: RadarS
   </div>;
 }
 
-export function RadarSerpScreen({ view, records, keyword, articleDnaVersionId, refreshing, onRefresh, onOpenReferences }: RadarSerpScreenProps) {
+export function RadarSerpScreen({ view, records, keyword, articleDnaVersionId, refreshing, onRefresh, onOpenReferences, onRecollect, recollecting = false, recollectBlockedReason = null }: RadarSerpScreenProps) {
   const orderedRecords = useMemo(() => [...records].sort((left, right) => (buildRadarSerpView(left).version - buildRadarSerpView(right).version)), [records]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -69,6 +77,8 @@ export function RadarSerpScreen({ view, records, keyword, articleDnaVersionId, r
   const right = rightView ? buildRadarSerpView(rightView) : null;
   const targeting = view?.record.research || null;
   const types = resultTypes(view);
+  const lentes = buildRadarSerpLensCoverage(view?.record.research);
+  const coletando = refreshing || recollecting;
 
   return <section className="space-y-5" aria-labelledby="radar-serp-screen-title">
     <header className={section}>
@@ -77,9 +87,10 @@ export function RadarSerpScreen({ view, records, keyword, articleDnaVersionId, r
           <p className="text-sm font-semibold uppercase tracking-wide text-module-accent">Processo operacional</p>
           <h2 id="radar-serp-screen-title" className="mt-1 text-2xl font-semibold text-foreground">SERP</h2>
           <p className="mt-2 max-w-3xl text-base leading-6 text-text-muted">Consulte o snapshot atual, a proveniência e o histórico da coleta. Abrir esta tela não executa nova chamada; a atualização permanece explícita.</p>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-text-muted" data-testid="radar-serp-refresh-cost">“Atualizar SERP” é cache primeiro: paga só as lentes que faltam, no máximo {RADAR_SERP_RECOLLECT_CALLS} chamadas DataForSEO.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={button} onClick={onRefresh} disabled={refreshing}>{refreshing ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-4 w-4" aria-hidden="true" />}{refreshing ? "Atualizando…" : "Atualizar SERP"}</button>
+          <button type="button" className={button} onClick={onRefresh} disabled={coletando}>{refreshing ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-4 w-4" aria-hidden="true" />}{refreshing ? "Atualizando…" : "Atualizar SERP"}</button>
           <button type="button" className={button} onClick={() => setHistoryOpen(current => !current)} disabled={!orderedRecords.length}><History className="h-4 w-4" aria-hidden="true" />{historyOpen ? "Ocultar histórico" : "Ver histórico"}</button>
           <button type="button" className={button} onClick={() => setCompareOpen(current => !current)} disabled={orderedRecords.length < 2}><GitCompareArrows className="h-4 w-4" aria-hidden="true" />Comparar snapshots</button>
         </div>
@@ -91,8 +102,19 @@ export function RadarSerpScreen({ view, records, keyword, articleDnaVersionId, r
     {view && <>
       <section className={section} aria-label="Snapshot SERP atual">
         <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-lg font-semibold text-foreground">Snapshot atual</h3><p className="mt-1 text-base text-text-muted">{view.query} · {view.provider} · {view.origin === "real" ? "Coleta real" : "Snapshot legado ou simulado"}</p></div><span className={`rounded-full border px-3 py-1 text-sm ${view.persistenceMode === "remote" ? "border-success/60 text-success" : "border-pending/60 text-pending"}`}>{view.persistenceMode === "remote" ? "Persistência remota confirmada" : "Persistência local/fallback"}</span></div>
-        <dl className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><MetaField label="Keyword principal" value={keyword || view.query}/><MetaField label="Provider" value={view.provider || "DataForSEO"}/><MetaField label="ArticleDNA" value={view.record.research?.articleDnaVersionId || articleDnaVersionId}/><MetaField label="Versão" value={`v${view.version}`}/><MetaField label="Capturado em" value={formatDate(view.capturedAt)}/><MetaField label="Resultados" value={view.organicResults.length}/><MetaField label="Tipos encontrados" value={types.join(" · ") || "Não classificados"}/><MetaField label="Previous snapshot" value={previousSnapshotId || "Nenhum"}/></dl>
+        <dl className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><MetaField label="Keyword principal" value={keyword || view.query}/><MetaField label="Provider" value={view.provider || "DataForSEO"}/><MetaField label="ArticleDNA" value={view.record.research?.articleDnaVersionId || articleDnaVersionId}/><MetaField label="Versão" value={`v${view.version}`}/><MetaField label="SERP observada em" value={formatDate(view.capturedAt)}/><MetaField label="Resultados" value={view.organicResults.length}/><MetaField label="Tipos encontrados" value={types.join(" · ") || "Não classificados"}/><MetaField label="Previous snapshot" value={previousSnapshotId || "Nenhum"}/></dl>
       </section>
+
+      {lentes.state !== "none" && <section className={section} aria-label="Lentes da SERP" data-testid="radar-serp-lenses">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 max-w-3xl">
+            <h3 className="text-lg font-semibold text-foreground">Lentes da SERP</h3>
+            <p className="mt-1 text-base leading-6 text-text-muted">“Atualizar SERP” lê as quatro lentes com o cache primeiro e paga só as que faltam. A recoleta paga as quatro de novo, mesmo válidas no cache, e só depois de confirmar.</p>
+          </div>
+          {onRecollect && view.origin === "real" && <RadarSerpRecollectAction onConfirm={onRecollect} busy={coletando} running={recollecting} blockedReason={recollectBlockedReason} />}
+        </div>
+        <div className="mt-4"><RadarSerpLensCoverageView coverage={lentes} /></div>
+      </section>}
 
       <section className={section} aria-label="Targeting da SERP">
         <h3 className="text-lg font-semibold text-foreground">Targeting</h3>

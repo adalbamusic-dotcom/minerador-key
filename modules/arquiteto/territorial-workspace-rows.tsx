@@ -460,6 +460,7 @@ function KeywordRow({
   proposed,
   selection,
   dna,
+  vinculo = null,
   expandida = false,
   onToggleExpand,
 }: {
@@ -471,6 +472,8 @@ function KeywordRow({
   proposed?: ProposedDestination | null;
   selection?: KeywordSelectionControls | null;
   dna?: KeywordDnaInspection | null;
+  /** O Vínculo como o Minerador o diz — posto e tipo de página. */
+  vinculo?: KeywordVinculoLine | null;
   expandida?: boolean;
   onToggleExpand?: (keywordId: string) => void;
 }) {
@@ -535,6 +538,17 @@ function KeywordRow({
           {/* Status da própria keyword. O "publicado" do silo é do silo. */}
           <Cell value={statusLabel(row.keywordStatus)} />
         </div>
+        {/*
+          * O VÍNCULO que o Minerador declarou: posto e tipo de página.
+          * A frase é a do Minerador, repetida — nunca recalculada aqui, senão
+          * as duas telas passam a discordar sobre a mesma keyword.
+          */}
+        {vinculo && (
+          <p className="mt-1 text-sm leading-6" data-testid="architect-keyword-vinculo">
+            <span className="text-text-muted">Vínculo: </span>
+            <span className={vinculo.silo ? "font-semibold text-module-accent" : "text-foreground"}>{vinculo.summary}</span>
+          </p>
+        )}
         {/* Vínculo e hipótese saem da linha principal: uma linha, uma leitura. */}
         {(hasMembership || hypothesis) && (
           <p className="mt-1 text-sm leading-6 text-text-muted" data-testid="architect-keyword-detail">
@@ -615,6 +629,12 @@ export type KeywordSelectionControls = {
  * para a pessoa CONFERIR em que dado a proposta se apoiou; dado errado é
  * problema upstream, e se resolve no Minerador.
  */
+/**
+ * O Vínculo pronto para a linha: a frase do Minerador e se a keyword lidera
+ * Silo. O componente não interpreta o DNA — recebe a resposta pronta.
+ */
+export type KeywordVinculoLine = { summary: string; silo: boolean };
+
 export type KeywordDnaInspection = {
   identidade: { label: string; value: string }[];
   estrategia: { label: string; value: string }[];
@@ -687,6 +707,7 @@ export function TerritorialWorkspaceRows({
   proposedByKeywordId = null,
   selection = null,
   dnaByKeywordId = null,
+  vinculoByKeywordId = null,
 }: {
   surface: TerritorialSurface;
   /** Texto da KeywordDNA; o componente não vai buscar dado por conta própria. */
@@ -701,6 +722,8 @@ export function TerritorialWorkspaceRows({
   selection?: KeywordSelectionControls | null;
   /** §9 — o KeywordDNA de cada keyword, para o painel expandido. */
   dnaByKeywordId?: ReadonlyMap<string, KeywordDnaInspection> | null;
+  /** O Vínculo de cada keyword, na frase do Minerador. */
+  vinculoByKeywordId?: ReadonlyMap<string, KeywordVinculoLine> | null;
   /** Ação de confirmar o silo. */
   confirmControls?: SiloConfirmationControls | null;
   /** Estados dos quatro processos por silo; read-model de UI. */
@@ -795,6 +818,7 @@ export function TerritorialWorkspaceRows({
                       proposed={proposedByKeywordId?.get(row.keywordId) ?? null}
                       selection={selection}
                       dna={dnaByKeywordId?.get(row.keywordId) ?? null}
+                      vinculo={vinculoByKeywordId?.get(row.keywordId) ?? null}
                       expandida={expandidas.has(row.keywordId)}
                       onToggleExpand={alternarExpansao}
                     />

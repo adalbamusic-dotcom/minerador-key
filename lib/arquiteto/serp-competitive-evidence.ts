@@ -21,7 +21,9 @@
  * Domínio puro: sem React, sem storage, sem rede.
  */
 
-import { lensDivergenceOf, type SerpCompetitiveObservation } from "./silo-primary-keyword.ts";
+import { MIN_LENSES_FOR_DIVERGENCE_CREDIT, lensDatesSpreadDays as lensDatesSpreadDaysOf, lensDivergenceOf, type SerpCompetitiveObservation } from "./silo-primary-keyword.ts";
+import { SERP_LENS_DATES_DIVERGE_DAYS } from "./serp-lens-plan.ts";
+import { serpCacheLensLabel, type SerpCacheLens, type SerpCacheObservation } from "../editorial/serp-cache.ts";
 
 /** O recorte do snapshot que interessa aqui. Estrutural, não o tipo inteiro. */
 export type SerpSnapshotLike = {
@@ -54,6 +56,9 @@ const unico = (values: readonly string[]) => [...new Set(values.filter(Boolean))
  * sobreposição".
  */
 const dominio = (value: unknown) => texto(value).toLowerCase().replace(/^www\./, "");
+
+/** A mesma regra, para quem monta observação fora daqui (o cache de SERP). */
+export const normalizeCompetitorDomain = dominio;
 
 /**
  * A LENTE da observação: dispositivo + sistema.
@@ -96,6 +101,34 @@ export function observationFromSnapshot(snapshot: SerpSnapshotLike): SerpCompeti
   };
 }
 
+/**
+ * A observação competitiva a partir da observação COMPACTA do cache (~1 KB).
+ *
+ * É o que a SERP por keyword devolve para cada keyword × lente. O `keywordId`
+ * é o do PEDIDO, não o gravado na entrada: a mesma consulta pode ter sido paga
+ * pelo Minerador, e o que a tela cruza é o id que ela mandou. A lente é a que
+ * foi ENVIADA ao provider.
+ *
+ * `aiOverviewDomains` e `relatedSearches` vêm da observação do cache, que já
+ * os tinha — antes eram descartados aqui. Os citados pela IA ficam só na lista
+ * própria; `competitorDomains` não os recebe de novo.
+ */
+export function competitiveObservationFromCache(keywordId: string, lens: SerpCacheLens, observation: SerpCacheObservation, collectedAt?: string | null): SerpCompetitiveObservation {
+  return {
+    keywordId,
+    lens: serpCacheLensLabel(lens),
+    competitorDomains: [...observation.competitorDomains],
+    organicCount: observation.organicCount,
+    itemTypes: [...observation.itemTypes],
+    questions: [...observation.questions],
+    commercialSignals: observation.commercialSignals,
+    aiOverviewDomains: unico(observation.aiOverviewDomains.map(dominio)),
+    relatedSearches: unico(observation.relatedSearches.map(texto)),
+    // Quando a lente foi observada: é o que marca lentes de datas diferentes.
+    ...(collectedAt ? { collectedAt } : {}),
+  };
+}
+
 /* ------------------------- a afinidade entre duas ------------------------- */
 
 export type KeywordAffinity = {
@@ -109,6 +142,8 @@ export type KeywordAffinity = {
   sharedFormats: number;
   /** Em quantas lentes a sobreposição se repete. */
   lensesAgreeing: number;
+  /** Em quantas lentes as DUAS foram observadas — só nelas a concordância é medida. */
+  lensesCompared: number;
   /**
    * Quanto as lentes discordam entre si sobre este par.
    *
@@ -117,6 +152,11 @@ export type KeywordAffinity = {
    * contexto entre dispositivos, e isso é informação editorial.
    */
   lensDivergence: number;
+  /**
+   * Maior diferença de datas entre as lentes de uma mesma keyword do par (0
+   * sem datas). Acima de 7 dias a divergência não conta em dobro.
+   */
+  lensDatesSpreadDays?: number;
   score: number;
   /** A SERP sustenta juntá-las no mesmo artigo? */
   supportsGrouping: boolean;
@@ -128,6 +168,11 @@ export type AffinityThresholds = {
   minLensesAgreeing: number;
   /** Acima disto as lentes são universos distintos, não repetições. */
   minLensDivergenceToCount: number;
+  /**
+   * Lentes em que as duas foram observadas, no mínimo, para a divergência
+   * contar em dobro. Ausente = `MIN_LENSES_FOR_DIVERGENCE_CREDIT` (3).
+   */
+  minLensesForDivergenceCredit?: number;
 };
 
 /**
@@ -189,6 +234,7 @@ export function measureKeywordAffinity(input: {
     const direita = porLenteDireita.get(esquerda.lens);
     return direita ? intersecao([...esquerda.competitorDomains], [...direita.competitorDomains]).length > 0 : false;
   }).length;
+  const lensesCompared = unico(input.left.map(item => item.lens)).filter(lens => porLenteDireita.has(lens)).length;
 
   /*
    * A DIVERGÊNCIA DAS LENTES, sobre o par inteiro.
@@ -197,9 +243,21 @@ export function measureKeywordAffinity(input: {
    * sobreposição se repita em duas lentes reprovaria justamente as buscas mais
    * sensíveis a contexto — e partiria em quatro um universo que é um só. Acima
    * do limiar, sustentar-se numa lente divergente conta como a evidência que é.
+   *
+   * Mas só com lentes bastantes: com 2 lentes comparáveis, a dobra fazia UMA
+   * lente concordante atingir o mínimo de duas sozinha.
    */
   const lensDivergence = lensDivergenceOf([...input.left, ...input.right]);
-  const efetivaPorLente = lensDivergence >= limiares.minLensDivergenceToCount
+  const lentesParaDobra = limiares.minLensesForDivergenceCredit ?? MIN_LENSES_FOR_DIVERGENCE_CREDIT;
+  const divergenciaAlta = lensDivergence >= limiares.minLensDivergenceToCount;
+  /*
+   * E só com lentes da MESMA época: mais de 7 dias entre as lentes de uma
+   * keyword e a divergência pode ser só o tempo, não o dispositivo.
+   */
+  const lensDatesSpreadDays = lensDatesSpreadDaysOf([...input.left, ...input.right]);
+  const datasDivergem = lensDatesSpreadDays > SERP_LENS_DATES_DIVERGE_DAYS;
+  const creditoDaDivergencia = divergenciaAlta && lensesCompared >= lentesParaDobra && !datasDivergem;
+  const efetivaPorLente = creditoDaDivergencia
     ? lensesAgreeing * 2
     : lensesAgreeing;
 
@@ -207,16 +265,21 @@ export function measureKeywordAffinity(input: {
     && efetivaPorLente >= limiares.minLensesAgreeing;
 
   return {
-    leftKeywordId, rightKeywordId, sharedDomains, sharedQuestions, sharedFormats, lensesAgreeing, lensDivergence,
+    leftKeywordId, rightKeywordId, sharedDomains, sharedQuestions, sharedFormats, lensesAgreeing, lensesCompared, lensDivergence,
+    lensDatesSpreadDays,
     score: sharedDomains * 3 + sharedQuestions * 2 + sharedFormats,
     supportsGrouping,
-    reason: supportsGrouping
-      ? lensDivergence >= limiares.minLensDivergenceToCount
+    reason: `${supportsGrouping
+      ? creditoDaDivergencia
         ? `A SERP devolve ${sharedDomains} domínio(s) em comum e as duas se mantêm juntas em ${lensesAgreeing} lente(s) mesmo com o universo mudando entre dispositivos (divergência ${lensDivergence.toFixed(2)}).`
         : `A SERP devolve ${sharedDomains} domínio(s) em comum em ${lensesAgreeing} lente(s): as duas disputam o mesmo universo.`
       : sharedDomains < limiares.minSharedDomains
         ? `Só ${sharedDomains} domínio(s) em comum; o mínimo para sustentar o agrupamento é ${limiares.minSharedDomains}.`
-        : `A sobreposição aparece em ${lensesAgreeing} lente(s); o mínimo é ${limiares.minLensesAgreeing}.`,
+        : divergenciaAlta && !creditoDaDivergencia && !datasDivergem
+          ? `A sobreposição aparece em ${lensesAgreeing} lente(s); o mínimo é ${limiares.minLensesAgreeing}. O universo muda entre dispositivos (divergência ${lensDivergence.toFixed(2)}), mas com ${lensesCompared} lente(s) comparável(is) a divergência não conta em dobro: o mínimo é ${lentesParaDobra}.`
+          : `A sobreposição aparece em ${lensesAgreeing} lente(s); o mínimo é ${limiares.minLensesAgreeing}.`}${datasDivergem
+      ? ` Lentes de datas diferentes (${lensDatesSpreadDays} dias entre as lentes da mesma keyword): a divergência entre elas pode ser só o tempo e não conta em dobro.`
+      : ""}`,
   };
 }
 

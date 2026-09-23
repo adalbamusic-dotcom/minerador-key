@@ -37,6 +37,7 @@ import {
   type RadarResearchLayer,
 } from "./evidence-bundle.ts";
 import { radarSerpEvidenceStanding } from "./evidence-authority.ts";
+import { radarFrozenSerpLensesOf, radarFrozenSerpStandingOf } from "./investigation-finalization.ts";
 import type { RadarCompetitiveBlueprint, RadarResearchRef } from "./competitive-blueprint.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
 import type { RadarResearchSource } from "./search-mode.ts";
@@ -409,6 +410,16 @@ export function buildRadarEvidenceBundleFromAnalysis(input: {
    */
   if (input.competitiveBlueprint) limitacoes.push(...input.competitiveBlueprint.limitations);
 
+  /*
+   * ===== R3 · AS LENTES CONGELADAS VIAJAM COMO FORAM GRAVADAS =====
+   *
+   * Só a fotografia do Google as tem, e só quando o FINALIZE as copiou. As
+   * lacunas e divergências entre aparelhos que o bloco escreveu entram nas
+   * limitações do dossiê: quem planeja lê o que faltou sem abrir o bloco.
+   */
+  const lentesCongeladas = perfil === "GOOGLE" ? radarFrozenSerpLensesOf(analise.finalizedBundle) : null;
+  if (lentesCongeladas) limitacoes.push(...lentesCongeladas.limitations);
+
   const bundle = buildRadarEvidenceBundleV3({
     binding: input.article,
     observedAt: input.observedAt,
@@ -422,7 +433,19 @@ export function buildRadarEvidenceBundleFromAnalysis(input: {
       ? saidasDoMultimodal(multimodal)
       : saidasDoBlueprint(input.competitiveBlueprint),
     observed: perfil === "GOOGLE" ? input.googleObserved || null : null,
-    serpStanding: radarSerpEvidenceStanding(input.serp || { current: true, sufficient: true, valid: true }),
+    /*
+     * ===== R1 · O STANDING CONGELADO VENCE, E NADA É CALCULADO AQUI =====
+     *
+     * Quando a fotografia do Google foi congelada com o standing avaliado, é
+     * essa cópia que viaja — inteira, com a frase que foi gravada. Um `serp`
+     * vivo passado por quem chama não a sobrepõe: tempo, snapshot novo e
+     * revisão posterior não mudam o que foi entregue.
+     *
+     * Fotografia anterior a esta mudança não tem a chave, e o dossiê sai
+     * exatamente como antes — o hash de todo pacote já entregue é o mesmo.
+     */
+    serpStanding: (perfil === "GOOGLE" ? radarFrozenSerpStandingOf(analise.finalizedBundle) : null)
+      || radarSerpEvidenceStanding(input.serp || { current: true, sufficient: true, valid: true }),
     conflicts: [...(input.conflicts || [])],
     limitations: [...new Set(limitacoes)],
     video: input.video || null,
@@ -436,6 +459,8 @@ export function buildRadarEvidenceBundleFromAnalysis(input: {
      * pacotes que não mudaram em nada.
      */
     ...(input.keywordContext ? { keywordContext: input.keywordContext } : {}),
+    /* Ausente sem lentes congeladas: o hash de todo dossiê anterior é o mesmo. */
+    ...(lentesCongeladas ? { serpLenses: lentesCongeladas } : {}),
   });
 
   return { ok: true, bundle };

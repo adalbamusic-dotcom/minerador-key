@@ -54,7 +54,7 @@ export type SeedSource = {
  * refinalizá-lo amanhã deixaria o derivado citando uma versão que não existe
  * mais. Aprovado é o único estado em que o artigo é fonte narrativa.
  */
-export function finalArticleText(document: ContentDocument | null | undefined): string | null {
+export function finalArticleText(document: Pick<ContentDocument, "status" | "blocks"> | null | undefined): string | null {
   if (!document || document.status !== "aprovado") return null;
   const linhas: string[] = [];
   for (const bloco of document.blocks) {
@@ -131,6 +131,7 @@ const REGRAS_COMUNS = [
   "As conclusões do Radar são agregadas. Não atribua fala a nenhum vídeo, canal ou página específicos.",
   "Respeite integralmente a lista 'O Redator NÃO pode'.",
   "As limitações declaradas são reais: não afirme com certeza o que a investigação não sustenta.",
+  "Não gere nem sugira FAQ ou bloco de perguntas frequentes (AGENTS.md §13): perguntas observadas orientam a cobertura.",
   "Escreva em português do Brasil.",
 ].join("\n");
 

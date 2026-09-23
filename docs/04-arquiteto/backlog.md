@@ -1,3 +1,56 @@
+## 4 lentes no Arquiteto — 2026-09-23
+
+- [x] A1 kgr_light; A2 canônica em depth 20; A3–A6 formação e territorial nas 4 lentes com plano antes de pagar; A7 SERP por keyword; A8 datas e targeting; A9 primária do Silo como proposta com aceite; A10 lentes na tela.
+- [ ] **Homologar:**
+  - "Validar SERP" mostra a prévia e só paga confirmada; cancelar não paga nada;
+  - o parecer mostra a linha de lentes;
+  - "Aceitar como primária do Silo" grava com readback.
+- [ ] **Confirmar D4:** concordância em dobro só com pelo menos 3 lentes (voltar a 2 é trocar a constante).
+- [ ] **Decidir D5:** `competitorDomains` só com orgânicos; depende do dono do cache e de recalibrar a afinidade.
+- [ ] **Decidir D6:** [veredito de artigo de uma keyword](propostas/sdd-veredito-artigo-uma-keyword-2026-09-23.md); hoje 4 de 5 pareceres saem INCONCLUSIVE por construção.
+- [ ] **D7:** 3 chamadas pagas para SERPs reais de mobile-android, mobile-ios e desktop-macos.
+- [ ] Territorial: restringir a depth 20 às consultas com keyword do acervo (as consultas por texto pagam 20 sem reaproveitamento).
+- [ ] Acerto que degrada entre o plano e a execução prende o artigo em `SERP_PAID_NOT_AUTHORIZED`: reabrir a prévia com as faltas novas.
+- [ ] Levar a trava da primária e a checagem de membership para `lib/server/arquiteto-territory-store.ts`; recalcular no servidor a evidência do aceite pelo cache.
+- [ ] Resolução humana do parecer de formação é preservada só pela `formationBaseHash` (`lib/server/arquiteto-article-serp-store.ts:136-139`).
+- [ ] Pedido ao dono do normalizador: exportar `classifyResult`. Ao dono do cache: o digest com itens `video` e a mesma numeração da SERP completa.
+
+## Leitura estreita das keywords — 2026-09-23
+
+- [x] Montagem, handoff e PATCH sem ler a marca inteira com o DNA.
+- [ ] **Homologar:** abrir o Arquiteto nas 3 marcas e ver o pool de importação e a mesa iguais; editar a cópia de trabalho; enviar do Minerador.
+- [ ] A linha inteira das recebidas ainda pesa 311 kB por montagem na Care Glow (~96% `analise_semantica`) e se repete nas releituras. Mapear o que a mesa lê do DNA espalhado no item; candidata ao cache de versões ou a uma projeção.
+- [ ] `lib/server/arquiteto-workspace.ts` engole o erro do store da Qualificação com `.catch(() => new Map())`: registrar ou propagar.
+- [ ] A montagem faz um fetch próprio de `/api/editorial/workspace` além do provider (`modules/arquiteto/arquiteto-workspace.tsx` ~4543): a mesa é lida duas vezes (R13). O readback do handoff também baixa a mesa inteira.
+- [ ] Quando a migration de `row_version` for aplicada, incluir a coluna na lista explícita de colunas (hoje o teste estrutural fixa as 16 colunas).
+- [ ] **4 lentes em todos os pontos de SERP do Arquiteto** (diretriz do usuário, 2026-09-23): plano em elaboração.
+
+## Cache de SERP — 2026-09-23
+
+SDD: [cache temporário de SERP](../compartilhado/sdd-cache-serp-temporario-2026-09-23.md) (passos de homologação na §8.5).
+
+- [x] Formação, territorial e SERP por keyword consultam o cache antes da quota e pagam só as faltas.
+- [x] Registro por escopo `keyword_serp_observations` substituído pelo cache; store removido.
+- [ ] **Homologar** com o Minerador primeiro (paga e grava) e o Arquiteto depois (reaproveita): conferir `serp_cache_entry` no banco, `cacheHits`/`paidQueries` na formação e a linha "do cache · coletada agora" no painel.
+- [ ] **Decidir se a UI oferece recoleta forçada.** Hoje "Validar SERP" e "Consultar de novo" reaproveitam por até 30 dias, como pedido. Se precisar, é um parâmetro de pedido até `lookupSerpCache({ refresh })`.
+- [ ] Mostrar a idade da lente reaproveitada na SERP por keyword (`meta.collectedAt` já existe).
+- [ ] Rever pareceres de formação antigos (`regular`) à luz do `advanced`: `breadth` e vereditos podem mudar.
+- [ ] Deduplicar faltas pela chave dentro da requisição (keyword em grupo e em candidatas a Silo paga duas vezes — já era assim).
+- [ ] Na SERP por keyword, com quota recusada e acertos parciais, devolver os acertos e declarar as faltas como lacunas (hoje a rota inteira falha, como antes).
+- [ ] Remover `collectDataForSeoCompatibilitySnapshot` (sem consumidor em `app/`) numa tarefa própria.
+- [ ] Linhas remotas `keyword_serp_observations` inertes: limpeza é operação do usuário, se desejada.
+
+## Aba Silos: lógica primeiro e listas de ~200 — 2026-09-23
+
+Estado em [estado-atual.md](estado-atual.md). Homologação manual pendente, do usuário.
+
+- [ ] **Homologar com o próximo lote**: keywords marcadas Silo/Artigo, posto livre/travado e publicadas declaradas. Conferir na mesa a linha `Vínculo:` de cada keyword, as cabeças de Silo e o que foi para "Sem silo".
+- [ ] **Decidir o padrão do posto de publicada sem posto explícito.** O Minerador responde `locked` (travado ao slug); `adaptKeywordIdentityContext.primaryKeywordPolicy`, que a fase Artigos consome, responde `unknown`. Só divergem quando o posto não foi marcado. Não unifiquei porque mudaria o comportamento da fase Artigos, e o AGENTS.md §11 pede "desconhecido/conflito" nesse caso — a decisão é do produto.
+- [ ] **Eleger a primária do Silo potencial pela SERP na UI.** A coleta e a leitura existem (`keyword-serp`, `readPublishedGroupFromSerp`); `electPrimaryFromSerp` ainda não tem chamador. Hoje a primária de Silo potencial fica provisória até isso.
+- [ ] **`siloPath`** do item 7 — pai do artigo publicado.
+- [ ] `validateTerritorialSerp(dentroDoProcessamento)`: o parâmetro ficou sem quem passe `true`. Remover quando a etapa de SERP for redesenhada.
+- [ ] Limiares de lente/afinidade/substituição medidos em só duas keywords reais (divergência 0,061 e 0,174 contra limiar 0,5). Recalibrar com o acervo.
+
 ## Alinhamento com o pacote aprovado do Minerador — 2026-09-18
 
 Parecer completo em [parecer-formato-articledna-e-alinhamento-minerador-2026-09-18.md](parecer-formato-articledna-e-alinhamento-minerador-2026-09-18.md).
@@ -13,8 +66,8 @@ Ordem **revisada** no adendo de 2026-09-19, depois da auditoria:
 - [ ] **3.** `SiloDNA.keywordPackageRefs[]` — destrava a metade "pacote mais novo que o lido". `centralKeywordDnaRef` passa a ser derivado do array.
 - [ ] **4.** Propagação automática — **depende** de resolver a colisão com `articleEditorialDiff`, que hoje recusaria mudança só de medição como no-op.
 - [ ] **9.** Migrar o slug para `identity-slug` (2026-09-20). A diretriz da marca passou a separar endereço (`identity-published`/`identity-new`) de identidade SEO (`identity-slug`, `#12A1E0`). `modules/arquiteto/arquiteto-workspace.tsx` pinta o slug com os papéis antigos, e `keyword-dna-readonly-panel`/`article-dna-readonly-panel` mapeiam os dois. Ver `sistema-visual.md` §5.0.1.
-- [ ] **8.** Consumir `keyword_page_type` (2026-09-20): o Minerador passou a registrar se a keyword é — ou viria a ser — Silo, Artigo, Landing page ou Página de serviço, declarado por humano na Revisão Humana. É o dado que decide se ela vira SiloPage ou ArticleDNA. Spec do Minerador §67; falta transportá-lo no pacote.
-- [ ] **7.** Ler `site_origin.siteRole`/`siloPath` em `adaptKeywordIdentityContext` (2026-09-20). O Minerador passou a gravar se a página conferida é Silo ou artigo e sob qual Silo — cobre o caso em que a página do Silo não está no sitemap e a árvore publicada do catálogo não a enxerga (Care Glow: `/rotina-skincare-facial`). Spec do Minerador §64.
+- [x] **8.** Consumir `keyword_page_type` (2026-09-20). **Feito em 2026-09-23**: lido por `resolveKeywordVinculo` a partir do pacote aprovado — `analiseSemantica` já viaja integral, então não faltou transporte. A lógica da aba Silos usa o tipo para separar cabeça de Silo de artigo.
+- [~] **7.** Ler `site_origin.siteRole`/`siloPath` em `adaptKeywordIdentityContext` (2026-09-20). **`siteRole` feito em 2026-09-23**, inclusive `site_origin` gravado como texto JSON. **`siloPath` ainda não**: `resolveKeywordVinculo` não o expõe, e é ele que diria sob qual Silo um artigo publicado está.
 - [ ] **6.** Trocar `resolveKeywordDnaSignals` por `keywordDnaFromPackage` de `lib/minerador/keyword-dna.ts` (2026-09-19). O Minerador já entrega os treze campos normalizados e um valor por eixo com fonte declarada; `semPlaceholder`, `listaDeTexto` e `intentIsKnown` deixam de precisar existir aqui. Equivalência garantida por `tests/minerador-keyword-dna-fechado.test.mts`.
 - [ ] **5.** Estreitar `ArticleKeywordReference`. Escopo maior do que o parecer dizia: `strategicContribution`, `purpose`, `contribution` e `purposeRationale` são template por `role`; `overlapRisk` é literal; `requiredTopics`/`excludedTopics` são sempre vazios.
 - [ ] **Em aberto:** artigo publicado recebe marcador de insumo atualizado em vez de reescrita automática.
@@ -2001,3 +2054,19 @@ Executado via Supabase CLI 2.111.0, db query --linked, em transação única.
 - Validação nas duas sessões da interface: AINDA NÃO VERIFICADA nesta execução. Cache local não foi apagado. Não declarar sincronização visual homologada com base apenas neste SQL.
 - Script: supabase/scripts/2026-09-08-descarte-arquiteto-radar-care-glow.sql. Mantido em simulação por padrão. Ele aborta se grafos reaparecerem: não é reset universal para qualquer acervo futuro.
 - Nenhum commit, push ou deploy executado nesta entrega.
+
+## Egress — pendências do Arquiteto — 2026-09-23
+
+Ver SDD de [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md).
+Todas confirmadas pela lente de gatilho; a correção proposta de cada uma foi
+**recusada** pelo revisor, então precisam de desenho antes de código.
+
+1. **Handoff prepara duas vezes** (~3,3 MB por importação de keywords).
+2. **Recarga do workspace inteiro para atualizar uma fatia** (~1,9 MB por
+   `updateArticleSilo` e similares, 24 pontos de recarga).
+3. **Patch de keywords relê a marca inteira** (~420 kB por edição da working
+   copy).
+4. **`/api/arquiteto/workspace` lê `minerador_keywords` da tabela**, com
+   `analise_semantica` completa (~430 kB). Poderia ler
+   `minerador_keywords_listagem` — a assinatura v3 foi verificada idêntica em
+   linha podada e completa —, mas o revisor classificou como estrutural.

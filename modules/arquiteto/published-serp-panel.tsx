@@ -21,6 +21,8 @@ export function PublishedSerpPanel({
   busy,
   disabledReason,
   onCollect,
+  origin = null,
+  emptyNote = null,
 }: {
   label: string;
   readout: PublishedKeywordReadout | null;
@@ -29,6 +31,16 @@ export function PublishedSerpPanel({
   /** Por que o botão não pode ser usado agora. `null` = pode. */
   disabledReason: string | null;
   onCollect: () => void;
+  /**
+   * Da última coleta: lentes reaproveitadas do cache de SERP e lentes pagas
+   * agora. `null` = ainda não houve coleta nesta sessão.
+   */
+  origin?: { reused: number; collected: number } | null;
+  /**
+   * O que dizer quando não há leitura do grupo. Sem primária eleita a leitura
+   * não existe mesmo depois da coleta — e "nenhuma coleta" seria falso.
+   */
+  emptyNote?: string | null;
 }) {
   return (
     <section
@@ -40,20 +52,27 @@ export function PublishedSerpPanel({
         <button
           type="button"
           disabled={busy || Boolean(disabledReason)}
-          title={disabledReason || undefined}
+          title={disabledReason || "Lente observada há menos de 30 dias vem do cache de SERP, sem nova chamada paga."}
           onClick={onCollect}
           className="rounded border border-divider px-2 py-1 text-xs text-foreground disabled:opacity-50"
           data-testid="architect-collect-keyword-serp"
         >
-          {busy ? "Coletando…" : readout ? "Recoletar nas 4 lentes" : "Coletar nas 4 lentes"}
+          {/* "Recoletar" prometeria SERP nova: com o cache, o clique repetido reaproveita o que está válido. */}
+          {busy ? "Coletando…" : readout ? "Consultar de novo nas 4 lentes" : "Coletar nas 4 lentes"}
         </button>
       </div>
 
       {disabledReason && <p className="mt-1 text-sm text-text-muted">{disabledReason}</p>}
 
+      {origin && (origin.reused > 0 || origin.collected > 0) && (
+        <p className="mt-1 text-sm text-text-muted" data-testid="architect-serp-origin">
+          {origin.reused} lente(s) do cache · {origin.collected} coletada(s) agora
+        </p>
+      )}
+
       {!readout ? (
         <p className="mt-2 text-sm text-text-muted">
-          Nenhuma coleta para este grupo ainda. Sem SERP, o reforço e a troca de primária seriam palpite.
+          {emptyNote || "Nenhuma coleta para este grupo ainda. Sem SERP, o reforço e a troca de primária seriam palpite."}
         </p>
       ) : (
         <div className="mt-2 grid gap-2 text-sm leading-6 text-foreground">

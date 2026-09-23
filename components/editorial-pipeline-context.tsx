@@ -24,11 +24,12 @@ import { useBrand } from "./brand-context";
 import { useSupabaseSession } from "./auth/supabase-session-context";
 import { updateBrandWorkspace } from "@/lib/editorial/workspace";
 import { describeLocalRecoveryFailure, localRecoveryNoticeAfterCanonicalRead, localRecoveryWarning, LOCAL_RECOVERY_SAVED, type LocalRecoveryOutcome } from "@/lib/editorial/local-recovery";
-import { LocalWorkflowRecoverySchema, PersistedEditorialWorkspaceSchema, workflowRecoveryStorageKey, type PersistenceMode, type WorkflowCommand, type LocalWorkflowRecovery } from "@/lib/editorial/persistence-contracts";
+import { LocalWorkflowRecoverySchema, PersistedDocumentDetailSchema, PersistedEditorialWorkspaceSchema, workflowRecoveryStorageKey, type PersistenceMode, type WorkflowCommand, type LocalWorkflowRecovery } from "@/lib/editorial/persistence-contracts";
+import { isPartialContentDocument, keepLoadedBundles, toListingForms, type ListedContentDocument } from "@/lib/editorial/content-document-listing";
 import { createRadarHydrationSnapshot, reconcileRadarItems, type RadarHydrationSnapshot, type RadarHydrationSourceKeyword } from "@/lib/radar/hydration";
 import type { SerpFormationAssessment } from "@/lib/arquiteto/serp-formation";
 import { createRadarSerpResolutionEnvelope } from "@/lib/radar/resolution-envelope";
-import { buildRadarSerpAuxiliaryPayload, buildRadarSerpCollectPayload } from "@/lib/radar/serp/request";
+import { buildRadarSerpAuxiliaryPayload, buildRadarSerpCollectPayload, radarSerpCollectOutcome, type RadarSerpCollectOptions } from "@/lib/radar/serp/request";
 import { SerpResearchSnapshotSchema, type SerpResearchSnapshot } from "@/lib/radar/serp/contracts";
 import type { BackgroundTaskInput, EditorialBackgroundTask } from "@/lib/editorial/background-tasks";
 import type { EditorialHistoryModule } from "@/lib/editorial/history";
@@ -71,7 +72,12 @@ interface BrandWorkspace {
   localRecoveryRemoteConfirmed: boolean;
   productEvidence: ProductEvidenceDNA[];
   contentPlans: Record<string, VersionEnvelope<ContentPlan>>;
-  documents: Record<string, ContentDocument>;
+  /**
+   * E1 · a listagem da mesa traz o documento v2 com dossiê SEM o pacote do
+   * Radar, na forma parcial marcada (`isPartialContentDocument`). O documento
+   * completo entra aqui por `loadDocumentDetail`, e só ele pode ser editado.
+   */
+  documents: Record<string, ListedContentDocument>;
   selectedEntityId: string | null;
   skills: BrandSkill[];
   prompts: BrandPrompt[];
@@ -154,7 +160,8 @@ function saveLocalSerpRecovery(actorUserId: string, brandId: string, workspace: 
       siloPageVersions: workspace.siloPageVersions,
       versionEvents: workspace.versionEvents,
       contentPlans: workspace.contentPlans,
-      documents: workspace.documents,
+      /* E1 · a cópia local nunca guarda o pacote do Radar: forma de listagem. */
+      documents: toListingForms(workspace.documents),
       radarItems: workspace.radarItems,
       plannerItems: workspace.plannerItems,
       serpRecords: record ? [...workspace.serpRecords.filter(item => item.id !== record.id), record] : workspace.serpRecords,
@@ -185,7 +192,8 @@ function saveLocalRadarAnalysisRecovery(actorUserId: string, brandId: string, wo
       siloPageVersions: workspace.siloPageVersions,
       versionEvents: workspace.versionEvents,
       contentPlans: workspace.contentPlans,
-      documents: workspace.documents,
+      /* E1 · idem: forma de listagem. */
+      documents: toListingForms(workspace.documents),
       radarItems: workspace.radarItems,
       plannerItems: workspace.plannerItems,
       serpRecords: workspace.serpRecords,
@@ -217,7 +225,14 @@ interface EditorialPipelineContextValue extends BrandWorkspace {
   addVersionEvents: (events: VersionStatusEvent[]) => void;
   setSelectedEntityId: (id: string | null) => void;
   simulateSerp: (articleId: string, keyword: string, location: string) => Promise<void>;
-  collectSerp: (articleId: string, location: string, articleDnaVersionId: string) => Promise<SerpCollectionRecord>;
+  /**
+   * A SERP canônica do artigo, nas quatro lentes, cache primeiro (SDD do Radar, R2).
+   *
+   * Devolve o registro gravado — ou o ANTERIOR, quando nada mudou: aí nenhuma
+   * versão nova é aberta. `options.recollect` é o "Recoletar agora (pago)";
+   * `options.onOutcome` recebe se mudou e quantas chamadas foram pagas.
+   */
+  collectSerp: (articleId: string, location: string, articleDnaVersionId: string, options?: RadarSerpCollectOptions) => Promise<SerpCollectionRecord>;
   /**
    * A SERP auxiliar de pesquisa de uma secundária ou do reforço.
    *
@@ -325,6 +340,12 @@ interface EditorialPipelineContextValue extends BrandWorkspace {
   addInvitation: (invitation: BrandInvitation) => void;
   updateInvitationStatus: (id: string, status: BrandInvitation["status"]) => void;
   updateDocumentLocal: (document: ContentDocument, lockVersion?: number) => void;
+  /**
+   * E1 · o documento COMPLETO, lido do servidor, de um documento da marca
+   * ativa. A listagem da mesa não traz o pacote do Radar; editar, salvar ou
+   * exportar exige o completo. Rejeita quando a leitura falha.
+   */
+  loadDocumentDetail: (documentId: string, options?: { minLockVersion?: number }) => Promise<ContentDocument>;
   setModuleState: (module: string, state: BrandWorkspace["moduleState"][string]) => void;
   runBackgroundTask: <TResult>(input: BackgroundTaskInput<TResult>) => string | null;
   consumeBackgroundTask: (id: string) => void;
@@ -334,6 +355,17 @@ interface EditorialPipelineContextValue extends BrandWorkspace {
 }
 
 const EditorialPipelineContext = createContext<EditorialPipelineContextValue | null>(null);
+/**
+ * E2 · o registro de quem usa a mesa. Contexto separado para não mudar o
+ * contrato de `EditorialPipelineContextValue`: devolve a função de saída.
+ */
+const EditorialPipelineDemandContext = createContext<(() => () => void) | null>(null);
+/*
+ * Quanto a trava da leitura automática da mesa segura a chave `actor:brand`.
+ * Folgado de propósito: a mesa inteira em conexão lenta leva dezenas de
+ * segundos, e soltar cedo pagaria a mesa duas vezes (R13).
+ */
+const LEITURA_AUTOMATICA_PRAZO_MS = 120_000;
 
 export function EditorialPipelineProvider({ children }: { children: React.ReactNode }) {
   const { selectedBrandId } = useBrand();
@@ -356,6 +388,31 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
    */
   const radarAnalysisLockRef = useRef(new Map<string, number>());
   const serpReviewSyncRef = useRef(new Map<string, RadarSerpReviewSyncState>());
+  /*
+   * ===== E2 · A MESA SÓ LÊ QUANDO ALGUÉM A USA =====
+   *
+   * O provider mora no layout raiz, e por isso toda carga fria — `/admin`,
+   * `/conta`, `/agencias`, o Minerador — pagava ~8 MB de `/api/inteligencia`
+   * e `/api/editorial/workspace` para uma mesa que ninguém ia ler.
+   *
+   * O provider continua na raiz: mudá-lo de layout deixaria consumidor sem
+   * provider ou perderia o estado entre navegações. O que muda é o gatilho.
+   * Cada `useEditorialPipeline()` montado se registra aqui; a leitura remota e
+   * a recuperação local só começam com pelo menos um consumidor vivo, e o que
+   * já foi lido fica em memória para a próxima tela editorial.
+   */
+  const [consumidoresDaMesa, setConsumidoresDaMesa] = useState(0);
+  const mesaDemandada = consumidoresDaMesa > 0;
+  /*
+   * A leitura automática em voo, por `actor:brand` — R13: montagem idempotente.
+   * Guarda quando a leitura começou: uma leitura pendurada além do prazo deixa
+   * de travar a chave, e a próxima chegada de consumidor tenta de novo.
+   */
+  const leituraAutomaticaEmVoo = useRef(new Map<string, { desde: number }>());
+  const registrarConsumidorDaMesa = useCallback(() => {
+    setConsumidoresDaMesa(total => total + 1);
+    return () => setConsumidoresDaMesa(total => Math.max(0, total - 1));
+  }, []);
   const actorKey = actorUserId || "unauthenticated";
   const workspaceKey = selectedBrandId ? `${actorKey}:${selectedBrandId}` : "";
   const workspace = workspaceKey ? workspaces[workspaceKey] || emptyWorkspace() : emptyWorkspace();
@@ -419,7 +476,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
     if (module === "arquiteto") return { ...current, articleVersions: snapshot.articleVersions ?? current.articleVersions, siloVersions: snapshot.siloVersions ?? current.siloVersions, siloPageVersions: snapshot.siloPageVersions ?? current.siloPageVersions, versionEvents: snapshot.versionEvents ?? current.versionEvents, aiReviewAnnotations: snapshot.aiReviewAnnotations ?? current.aiReviewAnnotations };
     if (module === "radar") return { ...current, radarItems: snapshot.radarItems ?? current.radarItems, serpRecords: snapshot.serpRecords ?? current.serpRecords, serpReviews: snapshot.serpReviews ?? current.serpReviews, serpMergeConflicts: snapshot.serpMergeConflicts ?? current.serpMergeConflicts, productEvidence: snapshot.productEvidence ?? current.productEvidence };
     if (module === "planejador") return { ...current, plannerItems: snapshot.plannerItems ?? current.plannerItems, contentPlans: snapshot.contentPlans ?? current.contentPlans, internalLinks: snapshot.internalLinks ?? current.internalLinks, externalSources: snapshot.externalSources ?? current.externalSources };
-    if (module === "redator") return { ...current, documents: snapshot.documents ?? current.documents, guardianFindings: snapshot.guardianFindings ?? current.guardianFindings, operationalPublications: snapshot.operationalPublications ?? current.operationalPublications };
+    /* E1 · desfazer não rebaixa a parcial o documento que a memória tem completo, com o mesmo pacote. */
+    if (module === "redator") return { ...current, documents: snapshot.documents ? keepLoadedBundles(snapshot.documents, current.documents) : current.documents, guardianFindings: snapshot.guardianFindings ?? current.guardianFindings, operationalPublications: snapshot.operationalPublications ?? current.operationalPublications };
     if (module === "publicacoes") return { ...current, operationalPublications: snapshot.operationalPublications ?? current.operationalPublications };
     return current;
   }), [updateWorkspace]);
@@ -495,7 +553,12 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         siloVersions,
         versionEvents: mergeVersionEvents(current.versionEvents, persisted.versionEvents),
         contentPlans: { ...current.contentPlans, ...persistedPlans },
-        documents: { ...current.documents, ...Object.fromEntries(persisted.documents.map(record => [record.document.id, record.document])) },
+        /*
+         * E1 · a listagem chega sem o pacote do Radar. O documento que a memória
+         * já tem completo, com o MESMO pacote, continua completo: rebaixá-lo a
+         * cada releitura desmontaria o editor aberto no Redator.
+         */
+        documents: keepLoadedBundles({ ...current.documents, ...Object.fromEntries(persisted.documents.map(record => [record.document.id, record.document])) }, current.documents),
         documentLocks: { ...current.documentLocks, ...Object.fromEntries(persisted.documents.map(record => [record.document.id, record.lockVersion])) },
         /* O `updated_at` remoto vinha na leitura e era descartado aqui. */
         documentUpdatedAt: { ...current.documentUpdatedAt, ...Object.fromEntries(persisted.documents.map(record => [record.document.id, record.updatedAt])) },
@@ -533,7 +596,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
   }, [actorUserId, selectedBrandId, sessionEpoch, reloadOperational, workspaceKey]);
 
   useEffect(() => {
-    if (!selectedBrandId || !actorUserId || recoveredBrands.current.has(workspaceKey)) return;
+    /* E2: sem consumidor, nem a cópia local é aberta — ela só serve à mesa. */
+    if (!mesaDemandada || !selectedBrandId || !actorUserId || recoveredBrands.current.has(workspaceKey)) return;
     try {
       const raw = window.localStorage.getItem(workflowRecoveryStorageKey(actorUserId, selectedBrandId));
       if (!raw) { recoveredBrands.current.add(workspaceKey); return; }
@@ -567,22 +631,35 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       }
       const timer = window.setTimeout(() => {
         recoveredBrands.current.add(workspaceKey);
+        /*
+         * E2: a recuperação agora roda na chegada do primeiro consumidor, não
+         * na abertura do app. Um consumidor que já gravou versões canônicas na
+         * memória antes deste timer (o bootstrap do Arquiteto, por exemplo)
+         * não pode perdê-las para a cópia local: a memória vence por chave, e
+         * a cópia local só completa o que a memória ainda não tem.
+         */
         setWorkspaces(previous => updateBrandWorkspace(previous, workspaceKey, emptyWorkspace, current => ({
           ...current,
           architectImportedKeywordIds: recovered.architectImportedKeywordIds,
-          articleVersions: recovered.articleVersions,
-          siloVersions: recovered.siloVersions,
-          siloPageVersions: recovered.siloPageVersions,
+          articleVersions: { ...recovered.articleVersions, ...current.articleVersions },
+          siloVersions: { ...recovered.siloVersions, ...current.siloVersions },
+          siloPageVersions: { ...recovered.siloPageVersions, ...current.siloPageVersions },
           versionEvents: recovered.versionEvents,
           serpRecords: recovered.serpRecords,
           serpReviews: recovered.serpReviews,
           serpMergeConflicts: recovered.serpMergeConflicts,
           contentPlans: recovered.contentPlans,
-          documents: recovered.documents,
+          /*
+           * E1 · o documento restaurado entra na forma de LISTAGEM, mesmo de
+           * cópia antiga que ainda o guardava inteiro: o bundle local nunca vira
+           * base de edição. E o documento que a memória já tem (o detalhe lido
+           * do servidor) vence por chave, com o seu lock.
+           */
+          documents: { ...toListingForms(recovered.documents), ...current.documents },
           radarItems: recovered.radarItems,
           plannerItems: recovered.plannerItems,
           operationalPublications: recovered.operationalPublications,
-          documentLocks: recovered.documentLocks,
+          documentLocks: { ...recovered.documentLocks, ...current.documentLocks },
           selectedEntityId: recovered.selectedEntityId,
           aiReviewAnnotations: recovered.aiReviewAnnotations,
           serpPersistenceMode: "local_fallback",
@@ -594,7 +671,7 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       // NUNCA apagamos o localStorage. O parse pode falhar por mudanca de schema.
       console.error("[pipeline] recovery parse falhou, mantendo localStorage intacto");
     }
-  }, [actorUserId, selectedBrandId, workspaceKey]);
+  }, [actorUserId, mesaDemandada, selectedBrandId, workspaceKey]);
 
   /*
    * A CÓPIA DE CONTINUIDADE SAIU DO CAMINHO DO CLIQUE.
@@ -639,7 +716,12 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         serpReviews: current.serpReviews,
         serpMergeConflicts: current.serpMergeConflicts,
         contentPlans: current.contentPlans,
-        documents: current.documents,
+        /*
+         * E1 · a cópia de continuidade guarda a forma de LISTAGEM: sem o pacote
+         * do Radar (até 4,5 MB por documento aberto) e marcada como parcial. O
+         * que o Redator edita vem do detalhe do servidor, nunca daqui.
+         */
+        documents: toListingForms(current.documents),
         radarItems: current.radarItems,
         plannerItems: current.plannerItems,
         operationalPublications: current.operationalPublications,
@@ -659,10 +741,81 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
   }, [actorUserId, selectedBrandId, workspaces, workspaceKey]);
 
   useEffect(() => {
-    if (!selectedBrandId || !actorUserId || snapshots[workspaceKey]) return;
-    const timer = window.setTimeout(() => void reload(), 0);
+    /* E2: a carga fria da mesa espera o primeiro consumidor. */
+    if (!mesaDemandada || !selectedBrandId || !actorUserId || snapshots[workspaceKey]) return;
+    /*
+     * Consumidor que sai e outro que entra enquanto a leitura voa (navegar do
+     * Arquiteto ao Radar, ou o Strict Mode montando duas vezes) re-executa
+     * este efeito sem snapshot ainda: sem a trava, pagaria a mesa duas vezes.
+     */
+    const chaveDaLeitura = workspaceKey;
+    const emVoo = () => {
+      const trava = leituraAutomaticaEmVoo.current.get(chaveDaLeitura);
+      return Boolean(trava && Date.now() - trava.desde < LEITURA_AUTOMATICA_PRAZO_MS);
+    };
+    if (emVoo()) return;
+    const timer = window.setTimeout(() => {
+      if (emVoo()) return;
+      const trava = { desde: Date.now() };
+      leituraAutomaticaEmVoo.current.set(chaveDaLeitura, trava);
+      /* Só a própria leitura solta a própria trava: a vencida não apaga a nova. */
+      void reload().finally(() => {
+        if (leituraAutomaticaEmVoo.current.get(chaveDaLeitura) === trava) leituraAutomaticaEmVoo.current.delete(chaveDaLeitura);
+      });
+    }, 0);
     return () => window.clearTimeout(timer);
-  }, [actorUserId, reload, selectedBrandId, snapshots, workspaceKey]);
+  }, [actorUserId, mesaDemandada, reload, selectedBrandId, snapshots, workspaceKey]);
+
+  /*
+   * ===== E1 · O DOCUMENTO INTEIRO, SÓ DO QUE FOI ABERTO =====
+   *
+   * A listagem traz a cópia parcial (sem o pacote do Radar). Quem precisa do
+   * documento completo — o Redator antes de liberar edição e autosave,
+   * Publicações ao exportar — pede o detalhe aqui.
+   *
+   * - Uma leitura por documento em voo (R13): o Strict Mode e dois
+   *   consumidores pedindo juntos pagam uma vez só.
+   * - Grava no workspace da marca e do ator DO PEDIDO, mesmo que a tela tenha
+   *   trocado de marca enquanto a leitura voava: nada cai em outra marca.
+   * - Não sobrescreve documento que a memória já tem completo: ele pode ter
+   *   edição ainda não salva. O lock vem junto com o documento que ele descreve.
+   * - O LOCK NÃO ANDA PARA TRÁS. Se, enquanto o detalhe voava, uma releitura
+   *   da mesa trouxe a cópia parcial com lock maior (outra aba salvou), o
+   *   detalhe atrasado é descartado: aplicá-lo abriria texto antigo e o
+   *   próximo autosave levaria um 409 falso. Quem pede passa o lock que já
+   *   conhece (`minLockVersion`); ele entra na chave em voo, então o lock
+   *   novo gera uma leitura nova em vez de reaproveitar a atrasada.
+   */
+  const detalhesEmVoo = useRef(new Map<string, Promise<ContentDocument>>());
+  const loadDocumentDetail = useCallback((documentId: string, options?: { minLockVersion?: number }): Promise<ContentDocument> => {
+    if (!selectedBrandId || !actorUserId) return Promise.reject(new Error("Selecione uma marca antes de abrir o documento."));
+    const brandId = selectedBrandId;
+    const chaveDoWorkspace = `${actorUserId}:${brandId}`;
+    const lockMinimo = options?.minLockVersion ?? 0;
+    const chave = `${chaveDoWorkspace}:${documentId}:${lockMinimo}`;
+    const emVoo = detalhesEmVoo.current.get(chave);
+    if (emVoo) return emVoo;
+    const leitura = (async () => {
+      const response = await fetch(`/api/editorial/documents?brandId=${encodeURIComponent(brandId)}&documentId=${encodeURIComponent(documentId)}`, { cache: "no-store", headers: { Accept: "application/json" } });
+      const body = await response.json().catch(() => null) as { data?: unknown; error?: unknown } | null;
+      if (!response.ok) throw new Error(typeof body?.error === "string" && body.error ? body.error : `A leitura do documento falhou (HTTP ${response.status}).`);
+      const detalhe = PersistedDocumentDetailSchema.parse(body?.data);
+      if (detalhe.brandId !== brandId || detalhe.document.id !== documentId) throw new Error("O servidor devolveu outro documento; nada foi aplicado.");
+      if (detalhe.lockVersion < lockMinimo) throw new Error("O servidor devolveu uma versão mais antiga que a da lista; nada foi aplicado.");
+      setWorkspaces(previous => updateBrandWorkspace(previous, chaveDoWorkspace, emptyWorkspace, current => {
+        const naMemoria = current.documents[documentId];
+        if (naMemoria && !isPartialContentDocument(naMemoria)) return current;
+        if ((current.documentLocks[documentId] ?? 0) > detalhe.lockVersion) return current;
+        return { ...current,
+          documents: { ...current.documents, [documentId]: detalhe.document },
+          documentLocks: { ...current.documentLocks, [documentId]: detalhe.lockVersion },
+          documentUpdatedAt: { ...current.documentUpdatedAt, [documentId]: detalhe.updatedAt } };
+      }));
+      return detalhe.document;
+    })().finally(() => { detalhesEmVoo.current.delete(chave); });
+    detalhesEmVoo.current.set(chave, leitura);
+    return leitura;
+  }, [actorUserId, selectedBrandId]);
 
   const reloadRadarAnalysis = useCallback(async (articleId: string) => {
     if (!selectedBrandId || !actorUserId) return;
@@ -758,7 +911,14 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
   }, [selectedBrandId, snapshots, workspace, workspaceKey]);
 
   const value = useMemo<EditorialPipelineContextValue>(() => ({
-    ...workspace, snapshot: snapshots[workspaceKey] || null, loading, error, reload, reloadOperational, reloadRadarAnalysis, reloadSerpReview,
+    ...workspace, snapshot: snapshots[workspaceKey] || null,
+    /*
+     * E2: quem lê o contexto é, por definição, quem pediu a mesa. Entre o
+     * pedido e o início da leitura não há snapshot nem erro — isso é carga,
+     * não "marca sem dados" (AGENTS.md §10: vazio não substitui válido).
+     */
+    loading: loading || (Boolean(selectedBrandId && actorUserId) && !snapshots[workspaceKey] && !error),
+    error, reload, reloadOperational, reloadRadarAnalysis, reloadSerpReview,
     setArticleVersions: update => updateWorkspace(current => ({ ...current, articleVersions: typeof update === "function" ? update(current.articleVersions) : update })),
     setSiloVersions: update => updateWorkspace(current => ({ ...current, siloVersions: typeof update === "function" ? update(current.siloVersions) : update })),
     setSiloPageVersions: update => updateWorkspace(current => ({ ...current, siloPageVersions: typeof update === "function" ? update(current.siloPageVersions) : update })),
@@ -768,11 +928,12 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       const record = await mockSerpProvider.collectSnapshot({ articleId, keyword, location: location || "Brasil", language: "pt-BR", device: "desktop" });
       updateWorkspace(current => ({ ...current, serpRecords: [...current.serpRecords.filter(item => item.id !== record.id), record] }));
     },
-    collectSerp: async (articleId, location, articleDnaVersionId) => {
+    collectSerp: async (articleId, location, articleDnaVersionId, options) => {
       if (!selectedBrandId) throw new Error("Selecione uma marca antes de pesquisar a SERP.");
       const articleVersion = workspace.articleVersions[articleId];
       const resolutionEnvelope = await createSerpResolutionEnvelope(articleId, articleDnaVersionId);
-      const response = await fetch("/api/editorial/serp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildRadarSerpCollectPayload({ brandId: selectedBrandId, articleId, articleDnaVersionId, location: location || "Brasil", language: "pt-BR", device: "desktop", articleVersion, resolutionEnvelope })) });
+      /* As lentes são do servidor: o pedido não manda aparelho. */
+      const response = await fetch("/api/editorial/serp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildRadarSerpCollectPayload({ brandId: selectedBrandId, articleId, articleDnaVersionId, location: location || "Brasil", language: "pt-BR", articleVersion, resolutionEnvelope, recollect: options?.recollect === true })) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         /*
@@ -808,13 +969,20 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       updateWorkspace(current => ({ ...current, serpRecords: [...current.serpRecords.filter(item => item.id !== record.id), record], serpPersistenceMode: body.persistenceMode === "remote" ? "server" : "local_fallback",
         localRecoveryWarning: recuperacao.saved ? null : localRecoveryWarning({ operation: "A coleta real da SERP", reason: recuperacao.reason || "causa não identificada", remoteConfirmed: body.persistenceMode === "remote" }),
         localRecoveryRemoteConfirmed: body.persistenceMode === "remote" }));
+      /*
+       * "Sem mudança" devolve o MESMO registro (mesmo id): a troca acima é
+       * idempotente e nenhuma versão entra na cadeia. Quem clicou fica sabendo
+       * pelo resultado, não por uma versão fantasma.
+       */
+      options?.onOutcome?.(radarSerpCollectOutcome(body, record));
       return record;
     },
     collectAuxiliarySerp: async (articleId, keywordId, location, articleDnaVersionId) => {
       if (!selectedBrandId) throw new Error("Selecione uma marca antes de pesquisar a SERP auxiliar.");
       const articleVersion = workspace.articleVersions[articleId];
       const resolutionEnvelope = await createSerpResolutionEnvelope(articleId, articleDnaVersionId);
-      const response = await fetch("/api/editorial/serp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildRadarSerpAuxiliaryPayload({ brandId: selectedBrandId, articleId, articleDnaVersionId, keywordId, location: location || "Brasil", language: "pt-BR", device: "desktop", articleVersion, resolutionEnvelope })) });
+      /* R4 · as lentes da auxiliar também são do servidor: o pedido não manda aparelho. */
+      const response = await fetch("/api/editorial/serp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildRadarSerpAuxiliaryPayload({ brandId: selectedBrandId, articleId, articleDnaVersionId, keywordId, location: location || "Brasil", language: "pt-BR", articleVersion, resolutionEnvelope })) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw Object.assign(new Error(body.error || "Não foi possível coletar a SERP auxiliar desta keyword."), {
@@ -1247,15 +1415,18 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         operationalPublications: current.operationalPublications.map(item => item.documentId === document.id && item.state !== "published" ? { ...item, state: publicationState, updatedAt: new Date().toISOString() } : item),
         documentLocks: lockVersion ? { ...current.documentLocks, [document.id]: lockVersion } : current.documentLocks };
     }),
+    loadDocumentDetail,
     setModuleState: (module, state) => updateWorkspace(current => ({ ...current, moduleState: { ...current.moduleState, [module]: { ...current.moduleState[module], ...state } } })),
     runBackgroundTask,
     consumeBackgroundTask,
     dismissBackgroundTask,
     addAiReviewAnnotations,
     restoreOperationalSnapshot,
-  }), [actorUserId, workspaceKey, workspace, snapshots, selectedBrandId, loading, error, reload, reloadOperational, reloadRadarAnalysis, reloadSerpReview, updateWorkspace, runBackgroundTask, consumeBackgroundTask, dismissBackgroundTask, addAiReviewAnnotations, restoreOperationalSnapshot, createSerpResolutionEnvelope]);
+  }), [actorUserId, workspaceKey, workspace, snapshots, selectedBrandId, loading, error, reload, reloadOperational, reloadRadarAnalysis, reloadSerpReview, updateWorkspace, runBackgroundTask, consumeBackgroundTask, dismissBackgroundTask, addAiReviewAnnotations, restoreOperationalSnapshot, createSerpResolutionEnvelope, loadDocumentDetail]);
 
-  return <EditorialPipelineContext.Provider value={value}>{children}</EditorialPipelineContext.Provider>;
+  return <EditorialPipelineDemandContext.Provider value={registrarConsumidorDaMesa}>
+    <EditorialPipelineContext.Provider value={value}>{children}</EditorialPipelineContext.Provider>
+  </EditorialPipelineDemandContext.Provider>;
 }
 
 /**
@@ -1339,6 +1510,9 @@ async function sendWorkflowCommand(
 }
 
 export function useEditorialPipeline() {
+  /* E2: montar um consumidor é o que pede a leitura da mesa; desmontar libera. */
+  const registrarConsumidorDaMesa = useContext(EditorialPipelineDemandContext);
+  useEffect(() => registrarConsumidorDaMesa?.(), [registrarConsumidorDaMesa]);
   const value = useContext(EditorialPipelineContext);
   if (!value) throw new Error("useEditorialPipeline deve ser usado dentro de EditorialPipelineProvider.");
   return value;

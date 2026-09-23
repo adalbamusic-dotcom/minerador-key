@@ -414,7 +414,13 @@ test("19 · ESTRUTURAL · o fallback silencioso continua fora e o ativo é visí
 
   assert.doesNotMatch(src, /const selected = pipeline\.documents\[[^\]]*\] \|\| preferred \|\| documents\[0\]/,
     "o documento ativo não pode cair no primeiro da lista a cada render");
-  assert.match(src, /const selected = pipeline\.documents\[ativo\.id\] \|\| null;/);
+  /*
+   * E1 · o documento vem da regra (`ativo.id`); o editável é ESSE MESMO
+   * documento quando está completo, e nulo enquanto é a cópia parcial da
+   * listagem — nunca outro documento da lista.
+   */
+  assert.match(src, /const listado = pipeline\.documents\[ativo\.id\] \|\| null;/);
+  assert.match(src, /const selected = listado && !isPartialContentDocument\(listado\) \? listado : null;/);
   assert.match(src, /const \[selectedId, setSelectedId\] = useState\(""\);/);
   assert.doesNotMatch(src, /localStorage\.[gs]etItem\([^)]*selectedId/i,
     "a seleção não vira estado de navegador");

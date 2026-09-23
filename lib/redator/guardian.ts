@@ -4,14 +4,66 @@ import { GuardianReportSchema, type GuardianReport } from "./contracts.ts";
 
 type ContentBlock = import("zod").infer<typeof ContentBlockSchema>;
 
+/**
+ * O que o Guardião lê do documento: identidade, blocos e metadados. Nada do
+ * contexto importado. O MCP lê só estes três caminhos do banco (Fase 0 da SDD
+ * do leitor de evidências); quem já tem o documento inteiro continua passando
+ * o documento inteiro.
+ */
+export type GuardianDocument = Pick<ContentDocument, "id" | "blocks" | "metadata">;
+
+/**
+ * UMA DIVERGÊNCIA NÃO ENCERRADA entre evidência e DNA (tabela
+ * `writer_evidence_divergences`; SDD do leitor de evidências §5). O Guardião
+ * só a mostra: não resolve, não muda DNA e não inventa base — sem divergência
+ * registrada, nenhum achado de intenção, evidência ou canibalização sai daqui.
+ */
+export type GuardianDivergence = {
+  id: string;
+  status: string;
+  severity: "info" | "alerta" | "bloqueante";
+  targetKind: string;
+  dnaClaimPath: string;
+  dnaClaimSummary: string;
+  evidenceSourceKey: string;
+};
+
+/**
+ * O que o chamador acrescenta à análise determinística: as divergências
+ * abertas que leu e os avisos de leitura (por exemplo, migration pendente).
+ */
+export type GuardianContext = {
+  divergences?: readonly GuardianDivergence[];
+  notices?: readonly string[];
+};
+
+const DIVERGENCIA_ENCERRADA = new Set(["resolvida", "descartada"]);
+const CAMINHO_DE_CANIBALIZACAO = /(cannibal|canibal|nearbyarticle|excludedsubject)/i;
+const FONTE_DE_CANIBALIZACAO = /^(graph\.article|publication\.|brand\.site\.catalog)/;
+const CAMINHO_DE_INTENCAO = /(intent|intenc|journey|jornada|promise|promessa|angle|angulo|audience|publico|problem|desiredresult)/i;
+
+/** A categoria do enum do Guardião que a divergência sustenta. */
+export function guardianDivergenceCategory(divergence: Pick<GuardianDivergence, "dnaClaimPath" | "evidenceSourceKey">): "intent" | "cannibalization" | "evidence" {
+  if (CAMINHO_DE_CANIBALIZACAO.test(divergence.dnaClaimPath) || FONTE_DE_CANIBALIZACAO.test(divergence.evidenceSourceKey)) return "cannibalization";
+  if (CAMINHO_DE_INTENCAO.test(divergence.dnaClaimPath)) return "intent";
+  return "evidence";
+}
+
+const ALVO_DA_DIVERGENCIA: Record<string, string> = {
+  article_dna: "ArticleDNA", keyword_dna: "KeywordDNA", silo_dna: "SiloDNA", brand_dna: "contexto da Marca", radar_bundle: "pacote do Radar",
+};
+
+/** Bloqueante só quando uma pessoa marcou; a IA registra no máximo `alerta`. */
+const SEVERIDADE_DA_DIVERGENCIA = { info: "info", alerta: "warning", bloqueante: "blocked" } as const;
+
 const textOf = (block: ContentBlock) => "text" in block ? block.text.trim() : "";
 const now = () => new Date().toISOString();
 
-function finding(document: ContentDocument, sectionId: string, category: GuardianFinding["category"], severity: "info" | "warning" | "blocked", message: string, suggestion: string | null) {
+function finding(document: GuardianDocument, sectionId: string, category: GuardianFinding["category"], severity: "info" | "warning" | "blocked", message: string, suggestion: string | null) {
   return GuardianFindingSchema.parse({ id: `guardian:${document.id}:${sectionId}:${category}:${severity}:${message.slice(0, 24)}`, documentId: document.id, sectionId, category, severity, message, suggestion, humanDecisionRequired: true });
 }
 
-function sectionReviews(document: ContentDocument, findings: ReturnType<typeof finding>[]) {
+function sectionReviews(document: GuardianDocument, findings: ReturnType<typeof finding>[]) {
   const headings = document.blocks.filter(block => block.type === "heading");
   return headings.map((heading, index) => {
     const sectionFindings = findings.filter(item => item.sectionId === heading.id);
@@ -24,7 +76,7 @@ function sectionReviews(document: ContentDocument, findings: ReturnType<typeof f
   });
 }
 
-export function runGuardian(document: ContentDocument, contentHash: string): GuardianReport {
+export function runGuardian(document: GuardianDocument, contentHash: string, context: GuardianContext = {}): GuardianReport {
   const findings: GuardianFinding[] = [];
   const headings = document.blocks.filter(block => block.type === "heading");
   const h1 = headings.filter(block => block.level === 1);
@@ -58,12 +110,25 @@ export function runGuardian(document: ContentDocument, contentHash: string): Gua
 
   if (!document.metadata.slug.trim() || !document.metadata.principalKeyword.trim()) findings.push(finding(document, "document", "metadata", "blocked", "Slug e keyword principal são obrigatórios para o documento.", "Complete os metadados estruturais."));
   if (!document.metadata.metaTitle.trim() || !document.metadata.metaDescription.trim()) findings.push(finding(document, "document", "metadata", "warning", "Meta title e meta description ainda não estão completos.", "Revise os metadados antes da transferência."));
+
+  const vistas = new Set<string>();
+  for (const divergence of context.divergences ?? []) {
+    if (DIVERGENCIA_ENCERRADA.has(divergence.status) || vistas.has(divergence.id)) continue;
+    vistas.add(divergence.id);
+    const alvo = ALVO_DA_DIVERGENCIA[divergence.targetKind] ?? divergence.targetKind;
+    findings.push(finding(document, "document", guardianDivergenceCategory(divergence), SEVERIDADE_DA_DIVERGENCIA[divergence.severity],
+      `[${divergence.id.slice(0, 8)}] Divergência ${divergence.status} com o ${alvo} (${divergence.dnaClaimPath}): ${divergence.dnaClaimSummary} — evidência ${divergence.evidenceSourceKey}.`,
+      "Decisão humana: reconhecer, enviar ao dono ou descartar. O texto não redefine o DNA; a mudança é do dono, com nova versão."));
+  }
+
   const sections = sectionReviews(document, findings);
   const blockingCount = findings.filter(item => item.severity === "blocked").length;
   const warningCount = findings.filter(item => item.severity === "warning").length;
-  return GuardianReportSchema.parse({ documentId: document.id, contentHash, status: blockingCount ? "blocked" : warningCount ? "warnings" : "ready_for_human_review", findings, sections, blockingCount, warningCount, humanDecisionRequired: true, origin: "rule_engine", generatedAt: now() });
+  const notices = (context.notices ?? []).filter(item => item.trim()).slice(0, 10).map(item => item.slice(0, 500));
+  return GuardianReportSchema.parse({ documentId: document.id, contentHash, status: blockingCount ? "blocked" : warningCount ? "warnings" : "ready_for_human_review", findings, sections, blockingCount, warningCount, humanDecisionRequired: true, origin: "rule_engine", generatedAt: now(),
+    ...(notices.length ? { notices } : {}) });
 }
 
-export function guardianHasBlockingFindings(document: ContentDocument, contentHash: string) {
-  return runGuardian(document, contentHash).blockingCount > 0;
+export function guardianHasBlockingFindings(document: GuardianDocument, contentHash: string, context: GuardianContext = {}) {
+  return runGuardian(document, contentHash, context).blockingCount > 0;
 }

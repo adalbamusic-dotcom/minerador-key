@@ -35,6 +35,24 @@ export async function writerSourceHash(brandId: string, documentId: string) {
 export async function saveWriterArticleDraft(input: { brandId: string; documentId: string; expectedLockVersion: number; blocks: unknown; actorId: string }) {
   const blocks = ContentBlockSchema.array().max(500).parse(input.blocks);
   const client = getOperationalClient();
+  /*
+   * ===== O `before` CONTINUA INTEIRO, PORQUE O HASH EXIGE =====
+   *
+   * Fase 0 da SDD do leitor de evidências. Esta é a única leitura do payload
+   * inteiro que sobra no save, e não por descuido:
+   *
+   *   1. `content_hash` é `contentHash(next)`, SHA-256 do JSON canônico do
+   *      documento INTEIRO (lib/arquiteto/versioning.ts). Sem o dossiê não há
+   *      como calcular o mesmo hash.
+   *   2. A RPC recebe o documento inteiro e recusa com
+   *      `writer_draft_scope_invalid` se, tirando blocks, editorContent e
+   *      status, ele diferir do gravado (M6). É o que prova que o MCP só mexeu
+   *      no que podia.
+   *
+   * Medido em 2026-09-23: 4.502.936 B por save no documento GOOGLE. Tirar isto
+   * exige hash e comparação no banco, ou o dossiê fora do payload (Fase 2):
+   * mudança estrutural, com SDD própria. O readback abaixo é que ficou estreito.
+   */
   const before = await client.from("content_documents")
     .select("id,payload,lock_version").eq("id", input.documentId).eq("marca_id", input.brandId).maybeSingle();
   if (before.error) mapPersistenceError(before.error);
@@ -55,7 +73,20 @@ export async function saveWriterArticleDraft(input: { brandId: string; documentI
   }
   const receipt = data as { id?: string; contentHash?: string; lockVersion?: number; versionId?: string; unchanged?: boolean } | null;
   if (!receipt?.id || receipt.contentHash !== hash) throw new WriterDeliverableError("readback_failed", "Gravação sem recibo remoto coerente.", 502);
-  const readback = await client.from("content_documents").select("payload,content_hash,lock_version,current_version_id")
+  /*
+   * ===== READBACK POR CAMINHO =====
+   *
+   * Lê só o que confere: hash, lock, ponteiro e os blocos. Medido em
+   * 2026-09-23: ~1,2 kB no documento GOOGLE, contra 4,5 MB do payload inteiro.
+   *
+   * O que saiu foi só a revalidação do documento inteiro na volta, e ela não
+   * provava nada novo: o hash cobre o documento inteiro, a RPC grava `payload`
+   * e `content_hash` no mesmo UPDATE, e o hash foi calculado aqui sobre o
+   * `next` já validado pelo schema. Hash igual prova que a linha é a que este
+   * save gravou (ou uma idêntica); os blocos conferem o que o cliente mandou,
+   * como antes.
+   */
+  const readback = await client.from("content_documents").select("content_hash,lock_version,current_version_id,blocks:payload->blocks")
     .eq("id", input.documentId).eq("marca_id", input.brandId).maybeSingle();
   if (readback.error) mapPersistenceError(readback.error);
   /*
@@ -67,7 +98,7 @@ export async function saveWriterArticleDraft(input: { brandId: string; documentI
    */
   if (!readback.data || readback.data.content_hash !== hash || readback.data.lock_version !== receipt.lockVersion ||
       readback.data.current_version_id !== receipt.versionId ||
-      canonicalJson(ContentDocumentSchema.parse(readback.data.payload).blocks) !== canonicalJson(blocks)) {
+      canonicalJson(ContentBlockSchema.array().parse(readback.data.blocks)) !== canonicalJson(blocks)) {
     throw new WriterDeliverableError("readback_mismatch", "O rascunho salvo diverge da leitura remota.", 502);
   }
   /*

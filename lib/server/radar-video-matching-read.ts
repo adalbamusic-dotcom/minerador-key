@@ -72,11 +72,18 @@ export function radarMatcherVersionOfFingerprint(fingerprint: string | null | un
  *
  * A escolhida é a análise MAIS RECENTE que tenha bundle congelado: uma análise
  * posterior sem congelamento não apaga a evidência da anterior.
+ *
+ * SEM AS CORRIDAS. Daqui só se lê `finalizedBundle` (bundleId, bundleHash e
+ * blueprint.videoBriefSnapshots), e ele nunca sai da linha: `splitAnalysisRun`
+ * só move extractions, competitiveReport, youtubeSearch e amazonSearch. A
+ * leitura reidratante custava, medido em 2026-09-23 no item mais pesado,
+ * 0,90 MB de linha mais 7,32 MB de corridas descartadas por chamada — e esta
+ * função roda a cada volta da aba ao Radar com um artigo em foco.
  */
 export async function readRadarFrozenVideoBriefs(brandId: string, articleId: string): Promise<{
   briefs: RadarFrozenBriefInput[]; frozenBundleId: string; frozenBundleHash: string;
 } | null> {
-  const item = await new WorkflowRepository().findByArticle(brandId, articleId, "radar");
+  const item = await new WorkflowRepository().findByArticleWithoutRuns(brandId, articleId, "radar");
   if (!item) return null;
 
   const payload = item.payload as { analysisVersions?: Array<{ payload?: Record<string, unknown> }> } | null;

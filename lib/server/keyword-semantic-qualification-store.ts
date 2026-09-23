@@ -3,9 +3,9 @@ import "server-only";
 import { getOperationalClient } from "./editorial-db";
 import {
   KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE,
-  parseKeywordSemanticQualification,
   type KeywordSemanticQualification,
 } from "@/lib/minerador/keyword-semantic-qualification";
+import { resolveCurrentKeywordSemanticQualifications } from "@/lib/minerador/keyword-semantic-qualification-current";
 import {
   buildKeywordSemanticQualificationRow,
   classifyQualificationPersistenceError,
@@ -44,24 +44,32 @@ export async function readCurrentKeywordSemanticQualifications(input: {
 }): Promise<Map<string, KeywordSemanticQualification>> {
   const ids = [...new Set(input.keywordIds.filter(Boolean))];
   if (!input.brandId || ids.length === 0) return new Map();
-  const result = await getOperationalClient()
+  const client = getOperationalClient();
+  // Etapa 1: só metadados, sem payload (E7, correção 3).
+  const metadata = await client
     .from("editorial_artifact_versions")
-    .select("version_id,entity_id,version_number,payload")
+    .select("version_id,entity_id,version_number")
     .eq("marca_id", input.brandId)
     .eq("artifact_type", KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE)
     .in("entity_id", ids)
     .order("version_number", { ascending: false });
-  if (result.error) throw result.error;
-  const current = new Map<string, KeywordSemanticQualification>();
-  for (const row of result.data || []) {
-    const entityId = typeof row.entity_id === "string" ? row.entity_id : "";
-    if (!entityId || current.has(entityId)) continue;
-    const parsed = parseKeywordSemanticQualification(row.payload);
-    // Tenant defensivo: o payload precisa concordar com a linha consultada.
-    if (!parsed || parsed.brandId !== input.brandId || parsed.keywordId !== entityId) continue;
-    current.set(entityId, parsed);
-  }
-  return current;
+  if (metadata.error) throw metadata.error;
+  // Etapa 2: payload só da versão vigente; a anterior só quando a vigente
+  // falhar na validação de parse, Marca e keyword.
+  return resolveCurrentKeywordSemanticQualifications({
+    brandId: input.brandId,
+    metadata: metadata.data || [],
+    readPayloads: async versionIds => {
+      const payloads = await client
+        .from("editorial_artifact_versions")
+        .select("version_id,payload")
+        .eq("marca_id", input.brandId)
+        .eq("artifact_type", KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE)
+        .in("version_id", versionIds);
+      if (payloads.error) throw payloads.error;
+      return payloads.data || [];
+    },
+  });
 }
 
 /**

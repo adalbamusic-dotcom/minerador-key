@@ -1,5 +1,46 @@
 # Estado atual — Redator
 
+## Leitor de evidências, MCP com 14 ferramentas e divergências — 2026-09-23
+
+- **Implementado e confirmado por teste. Validação manual pendente. Migration `20260923150000_writer_evidence_reader.sql` escrita e NÃO aplicada.** Registro completo na seção 9 do [adendo de decisões](propostas/adendo-leitor-evidencias-decisoes-2026-09-23.md) e na [SDD do leitor](propostas/sdd-leitor-evidencias-redator-2026-09-23.md).
+- **A IA que escreve recebe:**
+  - um índice de todas as fontes do artigo (manifesto ≤ 8 kB);
+  - fundamentos ≤ 24 kB;
+  - fatias sob demanda.
+
+  As fontes são: SERP em 4 lentes (cache, snapshot, Arquiteto, Minerador), dossiê do Radar, especialista, vídeo e transcrições, YouTube, Amazon, DNAs, métricas, grafo, site e publicações. Dado posterior ao pacote sai rotulado e nunca substitui o congelado.
+- **O que muda para o ChatGPT e o Claude:**
+  - quatro ferramentas novas;
+  - `get_writer_document` e `get_writer_brief` deixam de trazer o dossiê de 4,5 MB e passam a ~4 kB e ~3 kB;
+  - a instrução proíbe FAQ e manda confrontar o dado com os DNAs e registrar a divergência.
+- **IA interna (seção e melhoria):** pacote de até 24 kB montado no servidor, com os alertas virando divergências. Antes, a seção de documento vindo do Radar dava 400; agora funciona.
+- **Divergências:** a IA só abre. Uma bloqueante barra o envio a Publicações, e o Guardião mostra os achados de intenção, evidência e canibalização. Sem a migration, tudo responde "migration pendente".
+- **Fase 0:** o readback do salvamento cai de 4,5 MB para 1,2 kB, o Guardião para 1,8 kB e o seed para 75 kB. Uma sessão típica de escrita passa de ~58 MB para ~23 MB. O que resta é a leitura do documento antes de cada salvamento, que só a Fase 2 remove.
+- **Testes:**
+  - `test:redator` 335/335, `test:redator:mcp` 111/111, `test:redator:dom` 14/14;
+  - `test:editorial` com as mesmas 4 falhas de base.
+
+  Os testes novos (`writer-evidence-*`) rodam por import dentro dessas suítes.
+
+## Documento sem dossiê na mesa (E1) e mesa sob demanda (E2) — 2026-09-23
+
+- **Implementado e confirmado por teste; validação manual pendente.** Registro completo na seção 8 da [SDD de egress](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md).
+- **E1 — listagem:** a listagem de documentos da mesa usa uma projeção sem `importedContext.dossier.bundle` (`lib/editorial/content-document-listing.ts`). O documento v2 com dossiê sai marcado como parcial. MEDIDO: 4.497.354 → 9.138 B por carga da mesa.
+- **E1 — detalhe:** o completo vem de `GET /api/editorial/documents`, filtrado por id e marca, ao abrir o documento no Redator.
+- **Duas garantias contra perda do dossiê:**
+  - o PATCH sem dossiê preserva o dossiê gravado, lendo a linha verbatim, recalculando o hash e respeitando o lock;
+  - o Redator só libera edição e autosave com o detalhe completo carregado.
+  - A recuperação local só aplica o rascunho sobre o mesmo pacote do Radar; se o pacote for outro, avisa e não apaga o rascunho.
+- **O que o usuário vê:**
+  - ao abrir um documento do Radar, "Carregando o documento completo…" até o detalhe chegar, sem ações nem outline;
+  - se falhar, "Tentar de novo";
+  - a primeira exportação de um documento do Radar em Publicações demora um pouco mais.
+  - Depois de um F5 sem conexão, não dá mais para editar um documento do Radar.
+- **Limite medido (pré-requisito):** a projeção custa ~0,8 s de CPU no banco por documento v2 grande. Por volta de 8 a 9 documentos grandes, a lista de documentos da mesa estoura o `statement_timeout` de 8 s. Antes de ~5 documentos grandes, é preciso uma coluna gerada ou view da listagem (migration), ou tirar o dossiê do payload.
+- **E2:** o provider da mesa continua na raiz, mas só lê quando o primeiro consumidor pede. Páginas sem mesa (Admin, Conta, Agências, Minerador, login) deixam de ler ~6,85 MB. Nas telas editoriais, a carga fria cai para ~2,36 MB com a E1.
+- **Testes:** `tests/editorial-documento-sem-bundle.test.mts` 23/23 e `tests/editorial-mesa-rotas.test.mts` 33/33, em `test:editorial`; `test:redator:dom` 14/14 e `test:editorial:dom` 12/12, scripts novos no `npm test`. `test:redator` 296/296 e `test:redator:mcp` 51/51.
+- **Proposta, aguardando autorização:** [leitor de evidências do Redator](propostas/sdd-leitor-evidencias-redator-2026-09-23.md). Toda a SERP (4 lentes), especialista, Amazon, YouTube e todos os DNAs ficam disponíveis para a IA que escreve, lidos sob demanda, com registro de divergência sem mudar DNA. Uma sessão MCP custa hoje ~58 MB por artigo.
+
 ## Fundamentos do Radar visíveis nos três ambientes — 2026-09-19
 
 - **Implementado:** `radarFoundationsOf` (`lib/redator/radar-foundations.ts`)
@@ -431,3 +472,49 @@
 - **Testes desta rodada:** `test:redator` 23/23, TypeScript sem erros,
   ESLint no arquivo do Redator sem erros (1 aviso preexistente de dependência
   do `useMemo`).
+
+## Autosave e MCP param de devolver o documento inteiro — 2026-09-23
+
+**Confirmado por teste; ainda não verificado manualmente.**
+
+Duas leituras do `ContentDocument` completo (~4,48 MB, dos quais 99,8% é
+`importedContext.dossier.bundle`) saíram de caminhos que não usavam o corpo.
+Ver SDD de [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-2026-09-23.md), regras R5 e R6.
+
+### Autosave
+
+`ContentDocumentRepository.save` fazia `update(...).select("*")`: cada pausa
+de 1,2 s na digitação devolvia o documento inteiro. Agora devolve
+`id,status,content_hash,lock_version,updated_at` — os únicos campos que a rota
+`app/api/editorial/documents` lê do retorno. O `OptimisticLockError`
+continua vindo de `data` nulo.
+
+### MCP
+
+`resolveTarget` em `app/api/mcp/redator/route.ts` lia o payload completo para
+**toda** ferramenta com documento. Agora usa `documentOwner` (`id,marca_id`);
+só `get_writer_document`, `get_writer_brief` e `get_writer_guardian` — as que
+leem o corpo — pedem a linha completa, numa única ida ao banco.
+
+- **Economia:** ~4,48 MB por chamada de `get_writer_deliverables`,
+  `save_writer_draft`, `save_writer_deliverable`, `register_media_brief` e
+  `attach_media_asset`; `save_writer_draft` cai de ~13,4 MB para ~9 MB.
+- **Honestidade sobre o impacto:** houve **uma** chamada dessas ferramentas
+  no ciclo inteiro. O ganho é preventivo, para quando clientes de IA usarem o
+  MCP de verdade.
+- **Troca aceita:** as cinco ferramentas de grant não validam mais o payload
+  com `ContentDocumentSchema.parse` antes do trabalho. Todo escritor de
+  `content_documents` valida antes de gravar, e `save_writer_draft` continua
+  validando no `before` de `saveWriterArticleDraft`.
+- **Isolamento:** documento fora do grant continua `document_not_found`, no
+  mesmo ponto, e agora sem baixar o payload antes.
+- **Teste:** `tests/redator-mcp-alvo-sem-payload.test.mts`, registrado em
+  `test:redator:mcp` (51/51).
+
+### PENDENTE
+
+`lib/server/writer-deliverables.ts` ainda lê o documento completo duas vezes
+em `save_writer_draft`: o `before` (exigido enquanto a RPC pede `p_payload`
+inteiro) e o readback. Estreitar o readback para `payload->blocks` tiraria
+mais ~4,48 MB, mas perde o `ContentDocumentSchema.parse` do payload relido —
+é decisão a tomar, não a assumir.

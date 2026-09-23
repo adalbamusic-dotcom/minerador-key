@@ -28,6 +28,8 @@ import type { RadarQueryDisposition, RadarResearchQueryPlan } from "./research-q
 import type { RadarInvestigationSufficiency } from "./investigation-sufficiency.ts";
 import { RadarResearchCurationSchema } from "./research-curation.ts";
 import { RADAR_DEFAULT_SEARCH_MODE, RadarPrimarySearchModeSchema, type RadarPrimarySearchMode } from "./search-mode.ts";
+import { RadarFrozenSerpLensListSchema, radarFrozenSerpLensesFromLensSet } from "./serp/frozen-lenses.ts";
+import type { RadarSerpLensSet } from "./serp/lens-set.ts";
 
 /* ------------------------------ a impressão ----------------------------- */
 
@@ -133,6 +135,19 @@ export const RadarQueryEvidenceSchema = z.object({
     domain: z.string(),
     inferredType: z.string().nullable().default(null),
   }).strict()).default([]),
+  /**
+   * R4 · AS QUATRO LENTES DA AUXILIAR, COPIADAS — SDD do Radar nas 4 lentes.
+   *
+   * A auxiliar não vira snapshot: esta evidência é o único lugar onde ela
+   * persiste, e é daqui que o FINALIZE copia o que ela observou. Os
+   * `results` acima continuam sendo SÓ os da Desktop · Windows: o universo
+   * competitivo junta consultas por posição, e posições de aparelhos
+   * diferentes não se somam.
+   *
+   * Ausente na canônica (o snapshot dela é a cópia) e em evidência gravada
+   * antes das lentes, que continua legível sem ganhar chave.
+   */
+  lenses: RadarFrozenSerpLensListSchema.optional(),
 }).strict();
 export type RadarQueryEvidence = z.infer<typeof RadarQueryEvidenceSchema>;
 
@@ -305,6 +320,8 @@ export function radarQueryEvidenceFrom(input: {
     contentHash: string;
     organicResults: ReadonlyArray<{ position: number; url: string; title: string; domain: string; inferredType?: string | null; manualType?: string | null }>;
     diagnostic?: { dominantIntent: string | null };
+    /** As quatro lentes que a coleta copiou, quando ela é nas quatro lentes. */
+    lensSet?: RadarSerpLensSet | null;
   };
   limit?: number;
 }): RadarQueryEvidence {
@@ -326,6 +343,9 @@ export function radarQueryEvidenceFrom(input: {
       domain: result.domain,
       inferredType: result.manualType || result.inferredType || null,
     })),
+    ...(input.serpClass === "auxiliary" && input.research.lensSet
+      ? { lenses: radarFrozenSerpLensesFromLensSet(input.research.lensSet) }
+      : {}),
   });
 }
 

@@ -93,7 +93,10 @@ test("D · cross-brand e keyword de outra Marca são recusados antes do insert",
   assert.ok(store.includes("input.qualification.brandId !== input.brandId || input.qualification.keywordId !== input.keywordId"));
   assert.ok(store.includes("A Qualificação Semântica não pertence à Marca/keyword do write."));
   assert.ok(store.includes('.eq("marca_id", input.brandId)'));
-  assert.ok(store.includes("parsed.brandId !== input.brandId || parsed.keywordId !== entityId"));
+  // A conferência do payload contra a linha mudou para a seleção em duas etapas (E7, correção 3).
+  assert.ok(store.includes("resolveCurrentKeywordSemanticQualifications({"));
+  const currentSelection = readFileSync(new URL("../lib/minerador/keyword-semantic-qualification-current.ts", import.meta.url), "utf8");
+  assert.ok(currentSelection.includes("parsed.brandId === input.brandId && parsed.keywordId === entityId"));
 });
 
 test("E · payload inválido falha na montagem, antes de tocar o banco", async () => {

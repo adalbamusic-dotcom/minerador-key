@@ -1,4 +1,4 @@
-import { isFullyConsolidatedQualification, qualificationConsolidatedAxes, type KeywordSemanticQualification } from "./keyword-semantic-qualification.ts";
+import { isFullyConsolidatedQualification, qualificationConsolidatedAxes, qualificationLensSummary, type KeywordSemanticQualification, type KeywordSemanticQualificationAxis } from "./keyword-semantic-qualification.ts";
 import type { SerpEvidenceStrength } from "./serp-semantic-evidence.ts";
 
 /**
@@ -24,7 +24,45 @@ export type SerpEvidenceAxisRecord = {
   /** Preenchido só quando o eixo é conclusivo. */
   value: string | null;
   strength: SerpEvidenceStrength;
+  /**
+   * Só no eixo MISTO (aditivo, adendo das 4 lentes §4): os dois rótulos que
+   * lideram a distribuição e a cobertura, arredondada a 2 casas. É o que a
+   * tabela precisa para dizer "Misto na SERP (A × B)" (R9) sem baixar a
+   * Qualificação. Não é valor: o eixo continua sem conclusão.
+   */
+  rotulos?: [string, string];
+  cobertura?: number;
 };
+
+/**
+ * O resumo das lentes na linha: `lidas` é quantas lentes a leitura usou;
+ * `intent` e `funnel` são quantas delas lideram, naquele eixo, com o rótulo do
+ * agregado (a concordância). Plano e com chaves curtas por causa do teto: é a
+ * mesma informação que o handoff leva como `{ observadas, concordancia }`.
+ */
+export type SerpEvidenceLensSummary = {
+  lidas: number;
+  intent: number;
+  funnel: number;
+};
+
+/**
+ * TETO da projeção na linha. A listagem do Minerador lê `analise_semantica`
+ * de toda keyword (R8 da SDD de egress): o registro não pode crescer sem
+ * limite. Fixado por teste com o pior caso.
+ */
+export const SERP_EVIDENCE_RECORD_MAX_BYTES = 700;
+
+/**
+ * TETO da invalidação humana (`invalidada`), que o teto da projeção não cobre:
+ * ela troca o `null` por `{ por, em, motivo }`. O registro invalidado fica, no
+ * pior caso, em `SERP_EVIDENCE_RECORD_MAX_BYTES + SERP_EVIDENCE_INVALIDATION_MAX_BYTES`
+ * (fixado por teste). Motivo longo demais é RECUSADO, nunca truncado: é texto
+ * de decisão humana (AGENTS §9).
+ */
+export const SERP_EVIDENCE_INVALIDATION_MAX_BYTES = 300;
+
+const bytesDoJson = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
 
 export type SerpEvidenceInvalidation = {
   por: string;
@@ -46,6 +84,8 @@ export type SerpEvidenceRecord = {
   funnel: SerpEvidenceAxisRecord;
   /** Decisão humana sobre a evidência (A.2): invalida, nunca substitui. */
   invalidada: SerpEvidenceInvalidation | null;
+  /** Aditivo · Só quando a Qualificação foi lida nas quatro lentes. */
+  lentes?: SerpEvidenceLensSummary;
 };
 
 type Semantic = Record<string, unknown>;
@@ -60,18 +100,55 @@ function texto(value: unknown): string | null {
 
 const STRENGTHS: readonly SerpEvidenceStrength[] = ["conclusive", "mixed", "weak", "insufficient"];
 
+const contagem = (value: unknown): number | null => typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+
 function axisRecord(value: unknown): SerpEvidenceAxisRecord | null {
   const item = asRecord(value);
   const strength = item?.strength;
   if (!item || typeof strength !== "string" || !STRENGTHS.includes(strength as SerpEvidenceStrength)) return null;
-  return { value: texto(item.value), strength: strength as SerpEvidenceStrength };
+  const rotulos = Array.isArray(item.rotulos) && item.rotulos.length === 2 ? item.rotulos.map(texto) : null;
+  const cobertura = typeof item.cobertura === "number" && Number.isFinite(item.cobertura) && item.cobertura >= 0 && item.cobertura <= 1 ? item.cobertura : null;
+  return {
+    value: texto(item.value),
+    strength: strength as SerpEvidenceStrength,
+    // Os dois campos do eixo misto só voltam juntos e válidos.
+    ...(strength === "mixed" && rotulos?.[0] && rotulos[1] && cobertura !== null ? { rotulos: [rotulos[0], rotulos[1]] as [string, string], cobertura } : {}),
+  };
+}
+
+function lensSummary(value: unknown): SerpEvidenceLensSummary | null {
+  const item = asRecord(value);
+  const lidas = contagem(item?.lidas);
+  const intent = contagem(item?.intent);
+  const funnel = contagem(item?.funnel);
+  return lidas !== null && intent !== null && funnel !== null ? { lidas, intent, funnel } : null;
+}
+
+/**
+ * A cobertura na linha, com 2 casas, TRUNCADA: arredondar poderia levar 0,497
+ * a 0,50 e ligar a R9 abaixo do limiar. O epsilon só absorve o erro do float.
+ */
+const coberturaNaLinha = (coverage: number) => Math.floor(coverage * 100 + 1e-9) / 100;
+
+/** O eixo como vai para a linha. O misto leva os dois rótulos da frente e a cobertura (R9). */
+function projectedAxis(axis: KeywordSemanticQualificationAxis, value: string | null): SerpEvidenceAxisRecord {
+  const [first, second] = axis.distribution;
+  const mixedLabels = axis.strength === "mixed" && first?.label && second?.label ? [first.label, second.label] as [string, string] : null;
+  return {
+    value: texto(value),
+    strength: axis.strength,
+    ...(mixedLabels ? { rotulos: mixedLabels, cobertura: coberturaNaLinha(axis.coverage) } : {}),
+  };
 }
 
 /** Projeta a versão vigente da Qualificação no formato gravado na linha. */
 export function serpEvidenceRecordFromQualification(qualification: KeywordSemanticQualification): SerpEvidenceRecord {
   // A mesma regra que monta a referência do handoff: eixo só leva valor
-  // quando conclusivo. Mista, fraca ou insuficiente registram a força e nada mais.
+  // quando conclusivo. Mista, fraca ou insuficiente registram a força — e a
+  // mista, os dois rótulos que disputam, nunca como valor.
   const axes = qualificationConsolidatedAxes(qualification);
+  const resumo = qualificationLensSummary(qualification);
+  const lentes = resumo ? { lidas: resumo.observadas, intent: resumo.concordancia.intent, funnel: resumo.concordancia.funnel } : null;
   return {
     schemaVersion: SERP_EVIDENCE_SCHEMA_VERSION,
     peso: "forte",
@@ -82,9 +159,10 @@ export function serpEvidenceRecordFromQualification(qualification: KeywordSemant
     derivationVersion: qualification.derivation.derivationVersion,
     thresholdsVersion: qualification.derivation.thresholdsVersion,
     semanticState: isFullyConsolidatedQualification(qualification) ? "conclusive" : "non_conclusive",
-    intent: { value: texto(axes.intent), strength: qualification.intent.strength },
-    funnel: { value: texto(axes.funnel), strength: qualification.funnel.strength },
+    intent: projectedAxis(qualification.intent, axes.intent),
+    funnel: projectedAxis(qualification.funnel, axes.funnel),
     invalidada: null,
+    ...(lentes ? { lentes } : {}),
   };
 }
 
@@ -98,6 +176,7 @@ export function readSerpEvidenceRecord(semantic: Semantic | null | undefined): S
   const collectedAt = texto(item.collectedAt);
   if (!intent || !funnel || !versionId || !contentHash || !collectedAt) return null;
   const invalidada = asRecord(item.invalidada);
+  const lentes = lensSummary(item.lentes);
   return {
     schemaVersion: SERP_EVIDENCE_SCHEMA_VERSION,
     peso: "forte",
@@ -113,7 +192,21 @@ export function readSerpEvidenceRecord(semantic: Semantic | null | undefined): S
     invalidada: invalidada && texto(invalidada.por) && texto(invalidada.em)
       ? { por: texto(invalidada.por) as string, em: texto(invalidada.em) as string, motivo: texto(invalidada.motivo) || "" }
       : null,
+    // Aditivo: preservado na releitura e, por ela, na invalidação.
+    ...(lentes ? { lentes } : {}),
   };
+}
+
+/**
+ * R9 — o eixo que a SERP mostrou MISTO, com cobertura suficiente para a
+ * mistura ser leitura e não cegueira: os dois rótulos que disputam. `null`
+ * quando não se aplica (conclusivo, fraco, cobertura baixa, invalidada, ou
+ * projeção anterior a estes campos).
+ */
+export function serpEvidenceMixedLabels(record: SerpEvidenceRecord | null, axis: "intent" | "funnel"): [string, string] | null {
+  if (!record || record.invalidada) return null;
+  const item = record[axis];
+  return item.strength === "mixed" && item.rotulos && typeof item.cobertura === "number" && item.cobertura >= 0.5 ? item.rotulos : null;
 }
 
 /**
@@ -135,9 +228,13 @@ export function invalidateSerpEvidence(semantic: Semantic | null | undefined, in
   if (!record) throw new Error("Não há evidência SERP registrada para invalidar.");
   const motivo = texto(input.motivo);
   if (!motivo) throw new Error("Invalidar a evidência SERP exige motivo.");
+  const invalidada = { por: input.por, em: input.em, motivo };
+  if (bytesDoJson(invalidada) > SERP_EVIDENCE_INVALIDATION_MAX_BYTES) {
+    throw new Error("O motivo da invalidação da evidência SERP é longo demais: resuma em uma frase.");
+  }
   return {
     ...(semantic || {}),
-    [SERP_EVIDENCE_RECORD_KEY]: { ...record, invalidada: { por: input.por, em: input.em, motivo } },
+    [SERP_EVIDENCE_RECORD_KEY]: { ...record, invalidada },
   };
 }
 

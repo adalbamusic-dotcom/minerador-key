@@ -161,8 +161,16 @@ test("B) confirmar arquitetura calcula impacto antes de escrever", () => {
   assert.ok(workspace.includes("if (architectureIsStale) {"), "confirmar precisa recusar cenário vencido");
   assert.match(workspace, /setArchitectureImpactAck\(impactoEstrutural\)/);
   // E o cálculo acontece ANTES de qualquer escrita.
+  /*
+   * Em 2026-09-23 a escrita do Confirmar deixou de ser um
+   * `await applySiloDecision(...)` por keyword e passou a ser UM
+   * `applySiloDecisionsInBatch(...)` para o lote — com 200 keywords o caminho
+   * antigo fazia 200 gravações e 200 recargas completas do workspace. A âncora
+   * segue a escrita real; a invariante guardada é a mesma.
+   */
   const posImpacto = workspace.indexOf("const impactoEstrutural = resolveTerritoryChangeImpact");
-  const posEscrita = workspace.indexOf("await applySiloDecision(assignment.keywordId");
+  const posEscrita = workspace.indexOf("await applySiloDecisionsInBatch(decisoes)");
+  assert.ok(posEscrita > 0, "a escrita em lote do Confirmar não foi encontrada");
   assert.ok(posImpacto > 0 && posImpacto < posEscrita, "o impacto precisa preceder a escrita");
 });
 
