@@ -135,6 +135,35 @@ export type RadarSiloExportMember = {
   reason: string | null;
 };
 
+/**
+ * ===== O SILO ESTRUTURADO, PARA O EXPORT "PARA ESCREVER" (2026-09-23) =====
+ *
+ * O formato completo recebe o silo já em texto (`silo_context_md`), repetido
+ * em cada linha. O formato "Para escrever" põe o silo UMA vez, numa linha
+ * própria no topo, e precisa dos campos — não do Markdown — para montar a
+ * ordem narrativa e resolver o destino dos links pelo slug do irmão.
+ *
+ * Aditivo: nada no formato completo lê este campo. `articleId` dos membros é
+ * endereço interno, para casar membro e linha; nunca vai para o arquivo.
+ */
+export type RadarSiloExportWritingContext = {
+  kind: "silo" | "no_silo";
+  label: string;
+  partial: boolean;
+  draft: boolean;
+  centralEntity: string | null;
+  objective: string | null;
+  audience: string | null;
+  macroProblem: string | null;
+  dominantIntent: string | null;
+  whyTogether: string | null;
+  boundary: string | null;
+  includedTopics: string[];
+  excludedTopics: string[];
+  siloPage: { slug: string | null; canonical: string | null; publishedUrl: string | null; status: string } | null;
+  members: Array<Pick<RadarSiloExportMember, "articleId" | "position" | "title" | "principalKeyword" | "slug" | "role" | "statusLabel" | "inThisFile" | "reason">>;
+};
+
 export type RadarSiloExportFile = {
   filename: string;
   kind: "silo" | "no_silo";
@@ -149,6 +178,8 @@ export type RadarSiloExportFile = {
   /** Membros que não viraram linha deste arquivo, na ordem do silo. */
   pending: RadarSiloExportMember[];
   warnings: string[];
+  /** O silo em campos, para o formato "Para escrever". O formato completo não o lê. */
+  writing?: RadarSiloExportWritingContext;
 };
 
 export type RadarSiloExportRowContext = {
@@ -466,6 +497,44 @@ function contextoDoSiloJson(grupo: Grupo, membro: RadarSiloExportMember): string
   });
 }
 
+/**
+ * O silo em campos, para a linha "Silo" do formato "Para escrever".
+ *
+ * Os mesmos campos do `silo_context_md`, sem o texto de preenchimento
+ * ("não declarado no SiloDNA"): quem monta a linha decide o que omitir. Os
+ * tópicos passam pelo mesmo teto da célula completa.
+ */
+function contextoDeEscrita(grupo: Grupo): RadarSiloExportWritingContext {
+  const dna = grupo.silo.payload;
+  return {
+    kind: "silo",
+    label: grupo.label,
+    partial: grupo.parcial,
+    draft: dna.formationStatus === "draft",
+    centralEntity: ouNulo(dna.centralEntity),
+    objective: ouNulo(dna.objective),
+    audience: ouNulo(dna.audience),
+    macroProblem: ouNulo(dna.macroProblem),
+    dominantIntent: ouNulo(dna.dominantIntent),
+    whyTogether: ouNulo(dna.territoryNarrative?.statement),
+    boundary: ouNulo(dna.boundary),
+    includedTopics: cortar(dna.includedTopics).listados,
+    excludedTopics: cortar(dna.excludedTopics).listados,
+    siloPage: grupo.pagina ? { ...grupo.pagina } : null,
+    members: grupo.membros.map(membro => ({
+      articleId: membro.articleId,
+      position: membro.position,
+      title: membro.title,
+      principalKeyword: membro.principalKeyword,
+      slug: membro.slug,
+      role: membro.role,
+      statusLabel: membro.statusLabel,
+      inThisFile: membro.inThisFile,
+      reason: membro.reason,
+    })),
+  };
+}
+
 type MotivoSemSilo = "sem_silo" | "silo_dna_ausente";
 
 const MOTIVO_SEM_SILO: Record<MotivoSemSilo, string> = {
@@ -685,6 +754,7 @@ export function planRadarSiloExport(input: RadarSiloExportInput): RadarSiloExpor
       total: grupo.membros.length,
       pending: pendentes,
       warnings: avisos,
+      writing: contextoDeEscrita(grupo),
     });
     warnings.push(...avisos);
   }
@@ -731,6 +801,23 @@ export function planRadarSiloExport(input: RadarSiloExportInput): RadarSiloExpor
         total: semSilo.length,
         pending: pendentes,
         warnings: avisos,
+        writing: {
+          kind: "no_silo",
+          label: "Sem silo",
+          partial: false,
+          draft: false,
+          centralEntity: null, objective: null, audience: null, macroProblem: null,
+          dominantIntent: null, whyTogether: null, boundary: null,
+          includedTopics: [], excludedTopics: [],
+          siloPage: null,
+          members: finalizados.map((entrada, indice) => {
+            const articleId = texto(entrada.item.articleId);
+            return {
+              articleId, position: indice + 1, ...descrever(articleId),
+              role: "sem silo", statusLabel: RADAR_SILO_MEMBER_STATUS_LABEL.finalized, inThisFile: true, reason: null,
+            };
+          }),
+        },
       });
     } else {
       avisos.push(`${pendentes.length} artigo(s) sem silo resolvido não estão finalizados; nada foi exportado deles.`);
