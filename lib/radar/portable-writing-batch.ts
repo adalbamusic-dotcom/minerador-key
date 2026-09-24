@@ -12,6 +12,7 @@ import {
   radarWritingExportBatchFilename,
   radarWritingExportCsv,
   radarWritingExportSiloFilename,
+  radarWritingShareVisualAvoid,
   type RadarWritingExportArticle,
   type RadarWritingPublication,
 } from "./portable-writing-export.ts";
@@ -83,11 +84,12 @@ export function radarPortableWritingExport(input: {
 
   if (!input.plan) {
     const artigos = input.articles.map((artigo, indice) => montar(artigo, "Marca", indice + 1, null));
-    const topo = buildRadarWritingTopRow({ label: "Marca", silo: null, articles: artigos, siteUrl: enderecoDoSite(input.articles, null) });
+    const compartilhado = radarWritingShareVisualAvoid(artigos.map(item => item.row));
+    const topo = buildRadarWritingTopRow({ label: "Marca", silo: null, articles: artigos, siteUrl: enderecoDoSite(input.articles, null), sharedVisualAvoid: compartilhado.shared });
     return {
       exported: artigos.length,
       blocked: artigos.filter(item => item.verdict === "Não").length,
-      csv: artigos.length ? radarWritingExportCsv([topo, ...artigos.map(item => item.row)]) : "",
+      csv: artigos.length ? radarWritingExportCsv([topo, ...compartilhado.rows]) : "",
       filename: radarWritingExportBatchFilename({
         articles: input.articles.map(item => ({ slug: item.entrada.article.slug, keyword: item.entrada.article.principalKeyword })),
         today: input.today,
@@ -108,15 +110,17 @@ export function radarPortableWritingExport(input: {
     const artigos = doArquivo.map((artigo, indice) => montar(artigo, topo, indice + 1, silo));
     exportados += artigos.length;
     bloqueados += artigos.filter(item => item.verdict === "Não").length;
+    const compartilhado = radarWritingShareVisualAvoid(artigos.map(item => item.row));
     const linhaDeTopo = buildRadarWritingTopRow({
       label: topo,
-      silo: arquivo.kind === "silo" ? silo : null,
+      silo,
       articles: artigos,
       siteUrl: enderecoDoSite(doArquivo, silo),
+      sharedVisualAvoid: compartilhado.shared,
     });
     return {
       filename: radarWritingExportSiloFilename(arquivo.filename),
-      csv: radarWritingExportCsv([linhaDeTopo, ...artigos.map(item => item.row)]),
+      csv: radarWritingExportCsv([linhaDeTopo, ...compartilhado.rows]),
       silo: {
         name: arquivo.siloLabel,
         kind: arquivo.kind,

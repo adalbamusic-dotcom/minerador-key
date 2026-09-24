@@ -195,6 +195,8 @@ export type RadarSiloExportResponseView = {
   emptySilos?: ReadonlyArray<{ name: string; pending: readonly RadarSiloExportPendingView[] }>;
   warnings?: readonly string[];
   serpCacheReadFailed?: boolean;
+  /** Só no formato "Para escrever": artigos com `pode_escrever` = "Não". O completo não envia. */
+  blocked?: number;
 };
 
 const entreAspas = (valor: string) => `"${valor}"`;
@@ -268,6 +270,9 @@ const AVISO_DO_CACHE = "A leitura do cache de SERP falhou nesta exportação: as
  * e "não finalizado" cobria também "ArticleDNA não encontrado" e "pacote
  * indisponível". A tela mostrava ATENÇÃO sem dizer quem saiu. Agora cada
  * recusa aparece pelo título, com o motivo do servidor, como no avulso.
+ *
+ * No formato "Para escrever" a resposta traz `blocked`: artigo exportado com
+ * `pode_escrever` = "Não" também vira WARNING, com a contagem dita.
  */
 export function radarSiloExportNotice(input: {
   response: RadarSiloExportResponseView;
@@ -278,6 +283,7 @@ export function radarSiloExportNotice(input: {
   const r = input.response;
   const vazios = (r.emptySilos || []).filter(silo => silo.pending.length);
   const recusados = radarRefusedLabels(r.refused, input.titleOf);
+  const bloqueados = typeof r.blocked === "number" && r.blocked > 0 ? r.blocked : 0;
   const linhas = [
     input.delivered
       ? `Arquivo entregue ao navegador para download: ${input.delivered.filename} (${input.delivered.files} CSV, ${r.exported ?? 0} dossiê(s)). Confira se ele foi salvo na sua pasta de downloads.`
@@ -286,9 +292,10 @@ export function radarSiloExportNotice(input: {
     ...vazios.map(silo => `Faltam em ${entreAspas(silo.name)}: ${faltantesEmTexto(silo.pending)}.`),
     ...(recusados.length ? [`Ficaram de fora: ${recusados.join("; ")}.`] : []),
     ...(r.serpCacheReadFailed ? [AVISO_DO_CACHE] : []),
+    ...(input.delivered && bloqueados ? [`${bloqueados} artigo(s) com bloqueio para escrever: veja a coluna pode_escrever.`] : []),
   ];
   const alerta = !input.delivered
-    || Boolean((r.warnings || []).length || vazios.length || (r.refused || []).length || r.serpCacheReadFailed
+    || Boolean((r.warnings || []).length || vazios.length || (r.refused || []).length || r.serpCacheReadFailed || bloqueados
       || (r.files || []).some(arquivo => arquivo.silo.partial));
   return { type: !input.delivered ? "error" : alerta ? "warning" : "info", message: linhas.join(" ") };
 }

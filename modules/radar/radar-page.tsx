@@ -4249,6 +4249,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       ? radarSiloExportSizeNotice({
         scope: radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds, siloVersions: pipeline.siloVersions }),
         finalizedArticleIds: pipeline.radarItems.filter(row => radarPrimaryProfileOfAnalysis(analiseCorrenteDe(row)?.payload || null)).map(row => row.articleId),
+        exportMode: modoDoExport,
       })
       : null;
     return <>
@@ -4288,7 +4289,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
           <span>{exportando ? "Exportando…" : "Exportar"}</span>
           <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
-        {menuDeExport ? <div role="menu" className="absolute right-0 top-full z-50 mt-1 w-96 max-w-[calc(100vw-2rem)] rounded-md border border-divider bg-surface-elevated p-1 shadow-lg">
+        {menuDeExport ? <div className="absolute right-0 top-full z-50 mt-1 w-96 max-w-[calc(100vw-2rem)] rounded-md border border-divider bg-surface-elevated p-1 shadow-lg">
           {/*
             * ===== 2026-09-23 · O FORMATO VEM ANTES DO QUE EXPORTAR =====
             *
@@ -4296,6 +4297,10 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
             * como escolha única: vale para o silo completo e para os dossiês
             * avulsos. Rádio nativo, 14px, tokens do sistema visual; a dica do
             * Excel fica logo abaixo, uma vez.
+            *
+            * O seletor fica FORA do papel ARIA de menu: um menu só contém itens de
+            * menu, e um radiogroup dentro dele é anunciado mal por leitor de
+            * tela. O popover é o mesmo; o menu começa logo abaixo do seletor.
             */}
           <fieldset className="mb-1 border-b border-divider px-1 pb-2 pt-1" data-testid="radar-modo-do-export">
             <legend className="px-1 pb-1 text-sm font-semibold text-foreground/85">Formato do CSV</legend>
@@ -4313,6 +4318,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
             </div>
             <p className="mt-1 px-2 text-sm text-text-muted">{RADAR_EXPORT_EXCEL_HINT}</p>
           </fieldset>
+          <div role="menu" aria-label="Exportar">
           {/*
             * ===== 2026-09-23 · O EXPORT RECOMENDADO VEM PRIMEIRO =====
             *
@@ -4361,6 +4367,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
             <strong className="block font-semibold">Dossiês editoriais finalizados (CSV)</strong>
             <span className="block text-text-muted">Os artigos selecionados, sem o contexto do silo. Formato: {radarExportModeLabel(modoDoExport)}.</span>
           </button>
+          </div>
         </div> : null}
       </div>
       <div className="relative shrink-0">

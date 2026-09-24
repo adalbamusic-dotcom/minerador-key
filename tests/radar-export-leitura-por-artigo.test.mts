@@ -372,7 +372,7 @@ test("E4 · acima do teto de artigos o clique não lê nada, e o aviso de tamanh
 test("E4 · o menu mostra o tamanho no item recomendado, em 14px e na cor de atenção, sem mexer no resto", async () => {
   const pagina = (await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   const barra = semComentarios(pagina.slice(pagina.indexOf("const renderTopbarActions"), pagina.indexOf("const openDetail")));
-  assert.match(barra, /const avisoDeTamanhoDoExport = menuDeExport\s*\?\s*radarSiloExportSizeNotice\(\{\s*scope: radarSiloExportScope\(\{ items: pipeline\.radarItems, selectedArticleIds, siloVersions: pipeline\.siloVersions \}\),\s*finalizedArticleIds: pipeline\.radarItems\.filter\(row => radarPrimaryProfileOfAnalysis\(analiseCorrenteDe\(row\)\?\.payload \|\| null\)\)\.map\(row => row\.articleId\),\s*\}\)\s*:\s*null;/);
+  assert.match(barra, /const avisoDeTamanhoDoExport = menuDeExport\s*\?\s*radarSiloExportSizeNotice\(\{\s*scope: radarSiloExportScope\(\{ items: pipeline\.radarItems, selectedArticleIds, siloVersions: pipeline\.siloVersions \}\),\s*finalizedArticleIds: pipeline\.radarItems\.filter\(row => radarPrimaryProfileOfAnalysis\(analiseCorrenteDe\(row\)\?\.payload \|\| null\)\)\.map\(row => row\.articleId\),\s*exportMode: modoDoExport,\s*\}\)\s*:\s*null;/);
 
   const menu = barra.slice(barra.indexOf('role="menu"'));
   const primeiroItem = menu.slice(menu.indexOf("<button"), menu.indexOf("</button>") + "</button>".length);

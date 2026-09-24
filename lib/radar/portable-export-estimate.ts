@@ -33,6 +33,12 @@ export const RADAR_EXPORT_READ_BYTES_PER_FINALIZED = 11_700_000;
 export const RADAR_EXPORT_READ_BYTES_PER_OPEN = 2_200_000;
 export const RADAR_EXPORT_READ_BYTES_PER_BATCH = 300_000;
 export const RADAR_EXPORT_FILE_BYTES_PER_DOSSIER = 133_000;
+/**
+ * O arquivo do formato "Para escrever": ~14 kB por artigo (a amostra offline
+ * de 2026-09-23 mediu de 4 a 14 mil caracteres por artigo, mais a linha de
+ * topo). A LEITURA do banco é a mesma nos dois formatos; só o arquivo muda.
+ */
+export const RADAR_EXPORT_WRITING_FILE_BYTES_PER_DOSSIER = 14_000;
 
 /** A meta diária de egress da SDD (seção 1). */
 export const RADAR_DAILY_EGRESS_TARGET_BYTES = 100_000_000;
@@ -52,6 +58,8 @@ export type RadarSiloExportEstimate = {
 export function radarSiloExportEstimate(input: {
   articleIds: readonly string[];
   finalizedArticleIds: Iterable<string>;
+  /** O formato do arquivo. Omitido, é o completo — a conta de antes. */
+  exportMode?: RadarExportMode;
 }): RadarSiloExportEstimate {
   const finalizados = new Set(input.finalizedArticleIds);
   const pedidos = [...new Set(input.articleIds)];
@@ -63,7 +71,7 @@ export function radarSiloExportEstimate(input: {
     readBytes: pedidos.length
       ? RADAR_EXPORT_READ_BYTES_PER_BATCH + finalized * RADAR_EXPORT_READ_BYTES_PER_FINALIZED + open * RADAR_EXPORT_READ_BYTES_PER_OPEN
       : 0,
-    fileBytes: finalized * RADAR_EXPORT_FILE_BYTES_PER_DOSSIER,
+    fileBytes: finalized * (input.exportMode === "writing" ? RADAR_EXPORT_WRITING_FILE_BYTES_PER_DOSSIER : RADAR_EXPORT_FILE_BYTES_PER_DOSSIER),
   };
 }
 
@@ -93,17 +101,19 @@ export type RadarSiloExportSizeNotice = { title: string; message: string };
 export function radarSiloExportSizeNotice(input: {
   scope: Pick<RadarSiloExportScope, "mode" | "articleIds">;
   finalizedArticleIds: Iterable<string>;
+  /** O formato escolhido na tela. Omitido, o aviso cita o arquivo do formato completo, como antes. */
+  exportMode?: RadarExportMode;
 }): RadarSiloExportSizeNotice | null {
   if (input.scope.mode !== "all" || !input.scope.articleIds.length) return null;
   if (radarSiloExportScopeLimitNotice(input.scope)) return null;
-  const estimativa = radarSiloExportEstimate({ articleIds: input.scope.articleIds, finalizedArticleIds: input.finalizedArticleIds });
+  const estimativa = radarSiloExportEstimate({ articleIds: input.scope.articleIds, finalizedArticleIds: input.finalizedArticleIds, exportMode: input.exportMode });
   if (estimativa.readBytes < RADAR_EXPORT_LARGE_READ_BYTES) return null;
   return {
     title: "Exportação grande",
     message: [
       `Estimativa de ~${radarExportMegabytes(estimativa.readBytes)} MB lidos do banco`,
       `(a meta de leitura é ${radarExportMegabytes(RADAR_DAILY_EGRESS_TARGET_BYTES)} MB por dia)`,
-      `e arquivo de ~${radarExportMegabytes(estimativa.fileBytes)} MB,`,
+      `e arquivo de ~${radarExportMegabytes(estimativa.fileBytes)} MB${input.exportMode === "writing" ? " no formato para escrever" : ""},`,
       `com ${estimativa.finalized} artigo(s) finalizado(s) e ${estimativa.open} ainda em investigação.`,
       "Para ler menos, selecione alguns silos na planilha e exporte em partes.",
     ].join(" "),
