@@ -253,7 +253,10 @@ function textoLimpo(valor: string): string {
     .replace(INSTANTE_ISO, "")
     .replace(CODIGO_NO_TEXTO, codigo => CODIGOS[codigo] || codigo)
     .replace(/\(\s*\)/g, "")
-    .replace(/[ \t]{2,}/g, " ");
+    .replace(/[ \t]{2,}/g, " ")
+    /* O que sobrou da remoção: " , , " vira ", ". */
+    .replace(/[ \t]+([,;])/g, "$1")
+    .replace(/([,;])(?:[ \t]*[,;])+/g, "$1");
 }
 
 const URL_NO_TEXTO = /https?:\/\/[^\s"'<>]+/g;
@@ -559,6 +562,8 @@ type LinkDeEscrita = {
   ancora: string;
   destino: string;
   onde: string | null;
+  /** Outras âncoras aceitas para o mesmo destino: alternativa de texto, não lugar. */
+  alternativas: string[];
   direcao: string | null;
   secao: string | null;
 };
@@ -623,6 +628,7 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
       ancora: link.suggestedAnchor,
       destino: codigo === "ARTICLE_TO_SILO_PAGE" ? destinoDaPagina : destinoDoMembro(membro, link.targetTitle, link.targetSlug),
       onde: secao ? `seção "${secao.heading}"` : util(link.placement) ? cortar(link.placement, 140) : null,
+      alternativas: [],
       direcao: DIRECAO[codigo] || null,
       secao: secao?.heading ?? null,
     });
@@ -645,7 +651,8 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
     registrar({
       ancora: ancoras[0],
       destino: codigo === "ARTICLE_TO_SILO_PAGE" ? destinoDaPagina : destinoDoMembro(membro, ancoras[0], null),
-      onde: ancoras.length > 1 ? `âncoras alternativas: ${ancoras.slice(1, 4).join(" · ")}` : null,
+      onde: null,
+      alternativas: ancoras.slice(1, 4),
       direcao: DIRECAO[codigo] || null,
       secao: null,
     });
@@ -684,7 +691,7 @@ function temaSensivel(p: Projecoes): boolean {
  * são duas conclusões gravadas. O export não decide qual vale (invariante 30):
  * diz as duas, e manda tratar pela mais restritiva até o Radar resolver.
  */
-function conflitoDeYmyl(p: Projecoes): string | null {
+function conflitoDeYmylDetalhado(p: Projecoes): { texto: string; nomeadas: string[] } | null {
   const ymyl = p.autoridade?.ymylAssessment;
   if (!ymyl || YMYL_SENSIVEL.has(ymyl.relevance)) return null;
   const sensiveis = [
@@ -694,8 +701,14 @@ function conflitoDeYmyl(p: Projecoes): string | null {
   const unicas = unicosPorChave(sensiveis, radarWritingCompareKey);
   if (!unicas.length) return null;
   const quantas = unicas.length === 1 ? "uma afirmação sensível que pede fonte" : `${unicas.length} afirmações sensíveis que pedem fonte`;
-  return `o pacote registra YMYL ${YMYL[ymyl.relevance] || ymyl.relevance} e também ${quantas} (${unicas.slice(0, 2).map(entreAspas).join(", ")}); trate como tema sensível até o Radar resolver`;
+  const nomeadas = unicas.slice(0, 2);
+  return {
+    texto: `o pacote registra YMYL ${YMYL[ymyl.relevance] || ymyl.relevance} e também ${quantas} (${nomeadas.map(entreAspas).join(", ")}); trate como tema sensível até o Radar resolver`,
+    nomeadas: nomeadas.map(radarWritingCompareKey),
+  };
 }
+
+const conflitoDeYmyl = (p: Projecoes): string | null => conflitoDeYmylDetalhado(p)?.texto ?? null;
 
 /* ============================== o especialista ============================== */
 
@@ -880,7 +893,8 @@ function colunaTitulo(input: RadarPortableExportInput, p: Projecoes): { celula: 
   const tituloInutil = Boolean(p.editorial.title) && !titulo;
   const alternativas = p.editorial.alternateTitles.filter(item => radarWritingTitleIsUsable(item, principal)).slice(0, 2);
   const direcao = util(p.blueprint?.profile === "GOOGLE" ? p.blueprint.recommended.titleDirection?.statement : null) || util(p.seo.seoTitleDirection);
-  const restricoes = p.seo.metaDescriptionDirection.constraints.filter(item => !ehPreenchimento(item));
+  const restricoes = unicosPorChave(p.seo.metaDescriptionDirection.constraints.filter(item => !ehPreenchimento(item)), radarWritingCompareKey);
+  const restricaoFalaDaPromessa = restricoes.some(item => /promessa/i.test(item));
   const slug = texto(input.article.slug);
   const linhas = [
     titulo
@@ -891,7 +905,7 @@ function colunaTitulo(input: RadarPortableExportInput, p: Projecoes): { celula: 
     p.seo.seoTitle ? `SEO title: ${p.seo.seoTitle}` : "SEO title: a definir; cerca de 60 caracteres, com a keyword principal, sem copiar título de concorrente.",
     p.seo.metaDescription
       ? `Meta description: ${p.seo.metaDescription}`
-      : `Meta description: a definir; cerca de 155 caracteres, refletindo a promessa${restricoes.length ? `. ${restricoes.map(semPontoFinal).join("; ")}` : ""}.`,
+      : `Meta description: a definir; cerca de 155 caracteres${restricaoFalaDaPromessa ? "" : ", refletindo a promessa"}${restricoes.length ? `. ${restricoes.map(semPontoFinal).join("; ")}` : ""}.`,
     ...(slug ? [`Slug (conferir o alinhamento com a principal): ${slug}`] : []),
   ];
   return { celula: linhas.join("\n"), tituloInutil };
@@ -911,7 +925,6 @@ function colunaEstrutura(
 ): { celula: string; faqOmitidas: number } {
   const secoes = p.editorial.sections;
   if (!secoes.length) return { celula: "", faqOmitidas: 0 };
-  const descobertaAplicavel = Boolean(p.descoberta?.applicable);
   let faqOmitidas = 0;
 
   const escrever = (secao: RadarPortableSection): string[] => {
@@ -930,7 +943,6 @@ function colunaEstrutura(
       `${"#".repeat(secao.level)} ${secao.heading}`,
       pergunta ? `- Responde: ${pergunta}` : `- Objetivo: ${comPontoFinal(secao.objective)}`,
       ...(pontos.length ? [`- Cobrir: ${pontos.join(" · ")}`] : []),
-      ...(secao.level === 2 && descobertaAplicavel ? ["- Abre com a resposta direta, nomeando o termo (sem pronome), compreensível fora da página."] : []),
       ...(obrigatoria ? [`- Obrigatória pelo ArticleDNA${motivosProprios.length ? `: ${motivosProprios.map(semPontoFinal).join("; ")}` : ""}.`] : []),
       ...(secao.sourceNeeded ? [`- Precisa de fonte: a afirmação central (${entreAspas(pergunta || secao.heading)}) só entra com uma das fontes listadas; sem fonte, escreva de forma qualificada ou omita.`] : []),
       ...(secao.specialistRequired ? ["- Revisão profissional: uma afirmação desta seção pede revisão antes de publicar."] : []),
@@ -1150,9 +1162,17 @@ function colunaSerp(input: RadarPortableExportInput, p: Projecoes): string {
   const lugar = texto(serp.location).replace(/\s*\(c[oó]digo[^)]*\)/i, "") || texto(serp.country);
   const local = [lugar, serp.language, serp.device].filter(Boolean).join(" · ");
   const data = radarWritingDate(serp.collectedAt);
-  const organicos = serp.organic.slice(0, RADAR_WRITING_EXPORT_LIMITS.organicResults).map(item => {
+  /*
+   * A ORDEM ORGÂNICA, E NÃO A POSIÇÃO NA PÁGINA.
+   *
+   * `position` conta também os recursos da SERP (AI Overview, vídeos, PAA): o
+   * topo parecia começar no 7 e ter buracos. A lista numera 1, 2, 3… entre os
+   * orgânicos e mantém a posição na página como informação secundária.
+   */
+  const organicos = serp.organic.slice(0, RADAR_WRITING_EXPORT_LIMITS.organicResults).map((item, indice) => {
     const trecho = item.snippet?.thirdPartyExcerpt ? ` · “${cortar(item.snippet.thirdPartyExcerpt, RADAR_WRITING_EXPORT_LIMITS.thirdPartyExcerptChars)}”` : "";
-    return `- pos. ${item.position} · ${cortar(item.title || item.domain, RADAR_WRITING_EXPORT_LIMITS.titleChars)} · ${item.domain}${item.type && item.type !== "outro" ? ` · ${item.type}` : ""}${trecho}`;
+    const naPagina = typeof item.position === "number" && item.position !== indice + 1 ? ` · posição ${item.position} na página` : "";
+    return `${indice + 1}. ${cortar(item.title || item.domain, RADAR_WRITING_EXPORT_LIMITS.titleChars)} · ${item.domain}${item.type && item.type !== "outro" ? ` · ${item.type}` : ""}${naPagina}${trecho}`;
   });
   const formatos = (serp.diagnostic?.dominantFormats || []).filter(item => item && item !== "outro");
   const aiOverview = serp.features?.aiOverview || null;
@@ -1165,7 +1185,7 @@ function colunaSerp(input: RadarPortableExportInput, p: Projecoes): string {
     cabecalho,
     `Consulta: ${consulta || "não registrada"}${local ? ` · ${local}` : ""}${data ? ` · coleta de ${data}` : ""}`,
     ...(consulta && principal && radarWritingCompareKey(consulta) !== principal ? [`Atenção: a consulta difere da keyword principal ("${input.article.principalKeyword}").`] : []),
-    ...(organicos.length ? ["Topo orgânico:", ...organicos] : []),
+    ...(organicos.length ? ["Topo orgânico, na ordem entre os orgânicos (a posição na página conta também os recursos da SERP):", ...organicos] : []),
     ...(formatos.length ? [`Formatos dominantes: ${formatos.join(" · ")}`] : []),
     ...(aiOverview
       ? [aiOverview.shown
@@ -1239,13 +1259,35 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
 
 /* ------------------------------ links, visual e produtos ------------------------------ */
 
-function colunaLinks(links: readonly LinkDeEscrita[]): string {
-  if (!links.length) return "";
+/**
+ * A FALTA DE LINK É DITA, E NÃO PREENCHIDA.
+ *
+ * Um artigo do Silo sem plano de links sairia isolado do Pilar e da SiloPage
+ * sem ninguém perceber — e o prompt proíbe criar links. O export não inventa
+ * o link (invariante 30): declara a falta na célula e no veredito.
+ */
+const SEM_PLANO_DE_LINKS = "Nenhum link: o pacote não traz plano de links para este artigo (nem para o Pilar, nem para a SiloPage). Não crie links; o plano é do Arquiteto.";
+const SEM_LINK_PARA_A_SILOPAGE = "Nenhum link para a SiloPage no pacote: não crie um; o plano é do Arquiteto.";
+
+const artigoDeSilo = (contexto: RadarWritingArticleContext): boolean => contexto.silo?.kind === "silo";
+
+function colunaLinks(links: readonly LinkDeEscrita[], contexto: RadarWritingArticleContext): string {
+  if (!links.length) return artigoDeSilo(contexto) ? SEM_PLANO_DE_LINKS : "";
+  const semPagina = artigoDeSilo(contexto) && !links.some(link => link.direcao === DIRECAO.ARTICLE_TO_SILO_PAGE);
   return [
     "Aplique somente estes links, com a âncora indicada (pode ajustar concordância), distribuídos pelas seções:",
-    ...links.map(link => `${link.rotulo} · âncora "${link.ancora}" → ${link.destino}${link.onde ? ` · onde: ${link.onde}` : ""}${link.direcao ? ` · ${link.direcao}` : ""}`),
+    ...links.map(link => [
+      `${link.rotulo} · âncora "${link.ancora}"`,
+      ...(link.alternativas.length ? [` (ou ${link.alternativas.map(item => `"${item}"`).join(", ")})`] : []),
+      ` → ${link.destino}`,
+      ...(link.onde ? [` · onde: ${link.onde}`] : []),
+      ...(link.direcao ? [` · ${link.direcao}`] : []),
+    ].join("")),
+    ...(semPagina ? [SEM_LINK_PARA_A_SILOPAGE] : []),
   ].join("\n");
 }
+
+const EVITAR = "Evitar: ";
 
 function colunaVisual(input: RadarPortableExportInput, p: Projecoes): { celula: string; imagens: Map<string, string> } {
   const imagens = new Map<string, string>();
@@ -1259,22 +1301,33 @@ function colunaVisual(input: RadarPortableExportInput, p: Projecoes): { celula: 
    * leitor sabe…"). Isso não descreve imagem nenhuma. O export não reescreve:
    * omite o campo e diz uma vez que ele precisa ser escrito.
    */
+  /*
+   * A PERGUNTA DA SEÇÃO, O CABEÇALHO E OS PONTOS DE COBERTURA TAMBÉM SÃO MOLDURA.
+   *
+   * O caso real trazia "ALT: Qual a ordem dos produtos" — um ponto de
+   * cobertura, sem relação com a imagem — e ALTs iguais ao cabeçalho. Um ALT
+   * idêntico a um desses textos não descreve imagem; um prompt que só os
+   * repete como "assunto" também não.
+   */
+  const daEstrutura = p.secoes.flatMap(secao => [secao.readerQuestion || "", ...secao.coveragePoints]);
   const molduras = new Set([
     ...p.secoes.flatMap(secao => [secao.objective, secao.keyMessage || ""]),
+    ...daEstrutura,
     p.editorial.readerPromise || "",
     p.editorial.objective || "",
     input.article.promise || "",
   ].map(radarWritingCompareKey).filter(chave => chave.length >= 6));
+  const cabecalhos = new Set(p.secoes.map(secao => radarWritingCompareKey(secao.heading)).filter(chave => chave.length >= 6));
   const ehMoldura = (valor: string | null | undefined): boolean => {
     const chave = radarWritingCompareKey(valor);
-    return ehPreenchimento(valor) || /^ao final\b/.test(chave) || molduras.has(chave);
+    return ehPreenchimento(valor) || /^ao final\b/.test(chave) || molduras.has(chave) || cabecalhos.has(chave);
   };
   const promptComMoldura = (valor: string): boolean => {
     const chave = radarWritingCompareKey(valor);
     return ehPreenchimento(valor) || /cobrir com clareza o tema|ao final o leitor/.test(chave)
       || [...molduras].some(moldura => moldura.length >= 20 && chave.includes(moldura));
   };
-  let preenchimento = false;
+  const aEscrever: string[] = [];
   const linhas = [`Plano visual do pacote (o Planejador confirma): ${p.visual.cover ? "uma capa" : "sem capa"} e ${p.visual.respite.slice(0, 3).length} respiro(s).`];
   let respiro = 0;
   for (const imagem of plano) {
@@ -1285,7 +1338,8 @@ function colunaVisual(input: RadarPortableExportInput, p: Projecoes): { celula: 
     const alt = ehMoldura(imagem.altTextSuggestion) ? null : texto(imagem.altTextSuggestion);
     const legenda = ehMoldura(imagem.captionSuggestion) ? null : texto(imagem.captionSuggestion);
     const prompt = !ehMoldura(imagem.concept) && !promptComMoldura(imagem.generationPrompt) ? texto(imagem.generationPrompt) : null;
-    if (!alt || !legenda || !prompt) preenchimento = true;
+    const faltam = [!alt ? "ALT" : null, !legenda ? "legenda" : null, !prompt ? "prompt" : null].filter(Boolean);
+    if (faltam.length) aEscrever.push(`${nome} (${faltam.join(", ")})`);
     linhas.push([
       `${nome} · ${capa ? "topo, junto do H1" : `seção "${imagem.section}"`} · ${imagem.recommendedAspectRatio}`,
       `função: ${semPontoFinal(imagem.purpose)}`,
@@ -1294,10 +1348,9 @@ function colunaVisual(input: RadarPortableExportInput, p: Projecoes): { celula: 
       ...(prompt ? [`prompt: ${cortar(prompt, 300)}`] : []),
     ].join(" · "));
   }
-  if (preenchimento) linhas.push("ALT, legenda ou prompt do pacote eram texto de preenchimento e ficaram de fora: escreva-os a partir do conteúdo real da seção.");
+  if (aEscrever.length) linhas.push(`A escrever a partir do conteúdo real da seção (o pacote não trazia texto utilizável): ${aEscrever.join("; ")}.`);
   const evitar = unicosPorChave(plano.flatMap(imagem => imagem.negativeGuidance), radarWritingCompareKey).map(semPontoFinal);
-  if (evitar.length) linhas.push(`Evitar: ${evitar.join("; ")}.`);
-  linhas.push("Tom visual: editorial e direto, fotografia ou ilustração de contexto real; a imagem serve à compreensão, não à decoração.");
+  if (evitar.length) linhas.push(`${EVITAR}${evitar.join("; ")}.`);
   return { celula: linhas.join("\n"), imagens };
 }
 
@@ -1334,31 +1387,54 @@ function colunaProdutos(input: RadarPortableExportInput): string {
 
 /* ------------------------------ o prompt ------------------------------ */
 
+/**
+ * O PROMPT DA LINHA É CURTO: o específico do artigo, e as regras pela linha de topo.
+ *
+ * As regras gerais moram UMA vez na linha "Silo"/"Marca". Repeti-las inteiras
+ * em cada artigo era o mesmo volume repetido de que o dono do produto
+ * reclamou. Ficam aqui só as guardas que não podem se perder quando alguém
+ * copia uma linha sozinha: sem FAQ, terceiros são pesquisa, nada inventado.
+ *
+ * Linha BLOQUEADA não recebe instrução de escrever: um "Não escreva" seguido
+ * de "Escreva em português…" se contradiz.
+ */
 function colunaPrompt(contexto: RadarWritingArticleContext, especificas: readonly string[], bloqueio: string | null): string {
+  if (bloqueio) {
+    return `Não escreva este artigo antes de resolver o bloqueio: ${comPontoFinal(bloqueio)} Depois de resolvido, exporte de novo para receber o prompt de escrita.`;
+  }
   const topo = contexto.topRowLabel;
   return [
-    ...(bloqueio ? [`Não escreva este artigo antes de resolver o bloqueio: ${comPontoFinal(bloqueio)}`, ""] : []),
-    `Escreva em português do Brasil o artigo descrito nesta linha, para a marca e com as regras gerais da linha "${topo}" deste arquivo. Use a estrutura sugerida como ponto de partida: a estrutura final e a extensão são decisão do Planejador. Use a keyword principal no H1, no primeiro parágrafo e com naturalidade no corpo, e as complementares como indicado. Cada seção começa respondendo a pergunta dela, nomeando o termo, de forma compreensível fora da página. Responda as perguntas dentro das seções, sem seção de perguntas frequentes. Não invente fatos, números, estudos, produtos, autores, depoimentos nem URLs; onde faltar experiência própria da marca, deixe o marcador [RELATO DA MARCA — preencher]. Afirmação marcada "precisa de fonte" só entra com uma das fontes listadas; sem fonte, escreva de forma qualificada ou omita. Conflito entre fonte e mercado fica escrito dos dois lados. A SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos. Insira os links internos com as âncoras e os destinos dados (L1, L2…), sem criar outros. Marque as imagens no ponto indicado. Entregue H1, SEO title, meta description e o texto em Markdown, com a data de atualização visível.`,
+    `Escreva em português do Brasil o artigo descrito nesta linha, com as regras gerais da linha "${topo}" deste arquivo (leve as duas linhas juntas para a IA). Em resumo: a estrutura é sugestão, e a estrutura final e a extensão são decisão do Planejador; keyword principal no H1, no primeiro parágrafo e com naturalidade no corpo; cada seção abre respondendo a pergunta dela; sem seção de perguntas frequentes; a SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos; não invente fatos, fontes, depoimentos nem URLs; só os links L1, L2… indicados. Entregue H1, SEO title, meta description e o texto em Markdown, com a data de atualização visível.`,
     ...(especificas.length ? ["Neste artigo:", ...especificas.map(item => `- ${comPontoFinal(item)}`)] : []),
   ].join("\n");
 }
 
 /* ============================== o veredito ============================== */
 
+/** O nome curto de um motivo: o trecho antes da primeira explicação (":" ou ";"). */
+const motivoCurto = (valor: string): string => cortar(semPontoFinal(valor.split(/[:;]/)[0] || valor), 80);
+
+/**
+ * O VEREDITO: até quatro motivos por inteiro, e o resto pelo NOME.
+ *
+ * "(+2 ressalva(s) nas colunas desta linha)" escondia, no caso real, que o
+ * título do pacote era inutilizável. O excedente agora aparece pelo nome
+ * curto de cada motivo, e o motivo repetido (mesma frase) entra uma vez só.
+ */
 function veredito(bloqueios: readonly string[], ressalvas: readonly string[]): { verdict: RadarWritingVerdict; celula: string; primeira: string | null } {
   const limite = RADAR_WRITING_EXPORT_LIMITS.verdictReasons;
-  const todos = [...bloqueios, ...ressalvas];
+  const todos = unicosPorChave([...bloqueios, ...ressalvas], radarWritingCompareKey);
   if (!todos.length) return { verdict: "Sim", celula: "Sim", primeira: null };
   const verdict: RadarWritingVerdict = bloqueios.length ? "Não" : "Com ressalva";
   const mostrados = todos.slice(0, limite);
-  const resto = todos.length - mostrados.length;
+  const resto = todos.slice(limite);
   return {
     verdict,
     primeira: mostrados[0],
     celula: [
       `${verdict}: ${comPontoFinal(mostrados[0])}`,
       ...mostrados.slice(1).map(item => `- ${comPontoFinal(item)}`),
-      ...(resto ? [`- (+${resto} ressalva(s) nas colunas desta linha.)`] : []),
+      ...(resto.length ? [`- Também: ${resto.map(motivoCurto).join("; ")} (detalhes nas colunas desta linha).`] : []),
     ].join("\n"),
   };
 }
@@ -1457,9 +1533,12 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   }
   if (!p.editorial.sections.length) bloqueios.push("a investigação não produziu estrutura para este artigo");
 
-  const conflitoYmyl = conflitoDeYmyl(p);
-  if (conflitoYmyl) ressalvas.push(conflitoYmyl);
-  const semFonte = unicosPorChave(afirmacoesSemFonte(p.autoridade, p.serp), item => radarWritingCompareKey(item.afirmacao));
+  const conflitoYmyl = conflitoDeYmylDetalhado(p);
+  if (conflitoYmyl) ressalvas.push(conflitoYmyl.texto);
+  /* A afirmação que o conflito já nomeia não vira um segundo motivo com a mesma frase. */
+  const jaNoConflito = new Set(conflitoYmyl?.nomeadas || []);
+  const semFonte = unicosPorChave(afirmacoesSemFonte(p.autoridade, p.serp), item => radarWritingCompareKey(item.afirmacao))
+    .filter(item => !jaNoConflito.has(radarWritingCompareKey(item.afirmacao)));
   const sensivel = temaSensivel(p);
   if (semFonte.length) {
     const varias = semFonte.length > 1;
@@ -1478,7 +1557,19 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   if (!util(p.editorial.readerPromise) && input.profile !== "YOUTUBE") ressalvas.push("promessa ao leitor não definida no pacote");
   for (const item of especialista) if (item.aviso) ressalvas.push(`especialista ${item.rotulo}: ${item.aviso}`);
   ressalvas.push(...cobrir.conflitos);
+  if (artigoDeSilo(contexto) && !links.length && input.profile !== "YOUTUBE") {
+    ressalvas.push("sem links internos no pacote: o artigo sai isolado do Silo (sem link para o Pilar nem para a SiloPage) até o Arquiteto definir o plano de links");
+  }
   const decisao = veredito(bloqueios, ressalvas);
+  /*
+   * BLOQUEIO DE PERFIL: a pesquisa foi feita para vídeo, não para texto.
+   *
+   * Roteiro, SERP de vídeo e plano visual de roteiro não servem para escrever
+   * o artigo — e a linha ficava com ~4 mil caracteres que não devem ser
+   * usados. Ela se reduz à ordem, ao veredito e à identidade do artigo. O
+   * formato completo continua com tudo, para auditoria.
+   */
+  const soIdentidade = input.profile === "YOUTUBE";
 
   /* ---- as linhas específicas do prompt: o bloqueio, o publicado e o comercial ---- */
   const especificas = [
@@ -1490,19 +1581,20 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     ...(input.profile === "AMAZON" && input.commercial?.disclosureRequired ? ["Coloque o aviso de afiliado antes do primeiro link de produto"] : []),
   ].slice(0, publicado ? 4 : 3);
 
+  const conteudo = (celula: () => string): string => (soIdentidade ? "" : celula());
   const linha: RadarWritingExportRow = {
     ordem: `${posicao} · ${papel || "Artigo"}`,
     pode_escrever: decisao.celula,
     artigo: colunaArtigo(input, p, contexto, papel),
-    promessa_e_leitor: colunaPromessa(input, p, contexto, perguntaDeAbertura),
-    titulo_e_seo: titulo.celula,
-    estrutura: estrutura.celula,
-    cobrir_e_superar: cobrir.celula,
-    serp_resumida: colunaSerp(input, p),
-    fontes_e_especialista: colunaFontes(p, especialista, videos),
-    links_internos: colunaLinks(links),
-    plano_visual: visual.celula,
-    produtos: colunaProdutos(input),
+    promessa_e_leitor: conteudo(() => colunaPromessa(input, p, contexto, perguntaDeAbertura)),
+    titulo_e_seo: conteudo(() => titulo.celula),
+    estrutura: conteudo(() => estrutura.celula),
+    cobrir_e_superar: conteudo(() => cobrir.celula),
+    serp_resumida: conteudo(() => colunaSerp(input, p)),
+    fontes_e_especialista: conteudo(() => colunaFontes(p, especialista, videos)),
+    links_internos: conteudo(() => colunaLinks(links, contexto)),
+    plano_visual: conteudo(() => visual.celula),
+    produtos: conteudo(() => colunaProdutos(input)),
     prompt: colunaPrompt(contexto, especificas, decisao.verdict === "Não" ? decisao.primeira : null),
   };
 
@@ -1523,14 +1615,15 @@ export function buildRadarWritingExportRow(input: RadarPortableExportInput, cont
 /* ============================== a linha de topo ============================== */
 
 export const RADAR_WRITING_GENERAL_RULES = [
-  "Escreva em português do Brasil, na voz aprovada da marca (ela não faz parte deste arquivo).",
+  "Escreva em português do Brasil, na voz da marca. A voz não faz parte deste arquivo: cole-a junto antes de pedir o texto a uma IA.",
   "Sem seção de perguntas frequentes (FAQ): as perguntas são respondidas dentro das seções. Em artigo publicado que já tenha FAQ, mantenha a seção como está, sem ampliar nem remover.",
   "Dado de terceiros é pesquisa: não copie frases, títulos, trechos, transcrições nem avaliações.",
-  "Não invente fatos, números, estudos, preços, produtos, autores, credenciais, depoimentos nem URLs.",
+  "Não invente fatos, números, estudos, preços, produtos, autores, credenciais, depoimentos nem URLs; onde faltar experiência própria da marca, deixe o marcador [RELATO DA MARCA — preencher].",
   "Afirmação marcada \"precisa de fonte\" só entra com uma das fontes listadas; sem fonte, escreva de forma qualificada ou omita. Tema de saúde pede autor e revisor reais.",
   "Conflito entre fonte factual e o que o mercado repete fica escrito dos dois lados.",
   "Cada seção abre respondendo a pergunta dela, nomeando o termo, de forma compreensível fora da página.",
-  "Imagens: uma capa e dois ou três respiros, no ponto indicado em cada artigo.",
+  "Imagens: uma capa e dois ou três respiros, no ponto indicado em cada artigo. Tom visual: editorial e direto, fotografia ou ilustração de contexto real; a imagem serve à compreensão, não à decoração.",
+  "Links internos: só os indicados em cada artigo (L1, L2…), com a âncora e o destino dados; sem criar outros.",
   "A estrutura e a extensão de cada artigo são sugestões: a decisão final é do Planejador.",
   "Ler não é mudar: se o que você apurar divergir da definição do artigo, registre a divergência para decisão humana; o texto não redefine keyword, intenção nem Silo.",
 ] as const;
@@ -1541,6 +1634,8 @@ export type RadarWritingTopRowInput = {
   articles: ReadonlyArray<Pick<RadarWritingExportArticle, "label" | "verdict" | "firstReason" | "healthTopic" | "published">>;
   /** Um endereço da marca já lido (SiloPage ou canonical), só para dizer o site. */
   siteUrl: string | null;
+  /** A lista "Evitar" das imagens, quando é a mesma em todos os artigos do arquivo. */
+  sharedVisualAvoid?: string | null;
 };
 
 /**
@@ -1596,7 +1691,9 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
       }),
     ].join("\n")
     : [
-      "Artigos avulsos, sem o contexto do Silo: exporte o Silo completo para ter a ordem narrativa e os destinos dos links.",
+      input.silo?.kind === "no_silo"
+        ? "Artigos sem silo resolvido no Radar: escreva cada um sem pressupor ordem narrativa, papel no Silo nem artigos irmãos."
+        : "Artigos avulsos, sem o contexto do Silo: exporte o Silo completo para ter a ordem narrativa e os destinos dos links.",
       "Artigos neste arquivo:",
       ...artigos.map((item, indice) => `${indice + 1} · ${item.label}${item.published ? " · publicado" : ""}`),
     ].join("\n");
@@ -1604,7 +1701,7 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
   const audiencia = silo && util(silo.audience) ? silo.audience : null;
   const marca = [
     `Marca: ${site ? `site ${site}` : "site não registrado neste arquivo"}.`,
-    "Voz, tom, autor e revisor: aprovados na Marca, fora deste arquivo. Não invente autor, credencial nem depoimento.",
+    "Voz, tom, autor e revisor: não fazem parte deste arquivo; cole-os antes de pedir o texto a uma IA. Não invente autor, credencial nem depoimento.",
     ...(audiencia ? [`Público do Silo: ${comPontoFinal(audiencia)}`] : []),
   ].join("\n");
 
@@ -1612,6 +1709,7 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
     `Regras gerais para todos os artigos deste arquivo (valem para cada linha abaixo):`,
     ...RADAR_WRITING_GENERAL_RULES.map((regra, indice) => `${indice + 1}. ${regra}`),
     `${RADAR_WRITING_GENERAL_RULES.length + 1}. Não altere: ${naoAltere(false).join("; ")}.`,
+    ...(texto(input.sharedVisualAvoid) ? [`${RADAR_WRITING_GENERAL_RULES.length + 2}. Imagens, em todos os artigos deste arquivo — ${texto(input.sharedVisualAvoid).replace(/^Evitar: /, "evitar: ")}`] : []),
   ].join("\n");
 
   return finalizarLinha({
@@ -1629,6 +1727,26 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
     produtos: "",
     prompt: regras,
   });
+}
+
+/**
+ * A LISTA "EVITAR" DAS IMAGENS, QUANDO É A MESMA EM TODOS OS ARTIGOS, SOBE PARA O TOPO.
+ *
+ * O plano visual traz as mesmas restrições em cada artigo (~350 caracteres
+ * repetidos por linha). Se todas as linhas com plano visual trazem a MESMA
+ * lista, ela sai delas e vai uma vez para as regras da linha de topo. Se uma
+ * só for diferente, nada muda: cada artigo continua com a sua.
+ */
+export function radarWritingShareVisualAvoid(rows: readonly RadarWritingExportRow[]): { rows: RadarWritingExportRow[]; shared: string | null } {
+  const linhaEvitar = (celula: string): string | null => celula.split("\n").find(linha => linha.startsWith(EVITAR)) ?? null;
+  const comPlano = rows.filter(row => row.plano_visual);
+  const listas = comPlano.map(row => linhaEvitar(row.plano_visual));
+  const comum = listas[0] ?? null;
+  if (comPlano.length < 2 || !comum || listas.some(item => item !== comum)) return { rows: [...rows], shared: null };
+  return {
+    rows: rows.map(row => (row.plano_visual ? { ...row, plano_visual: row.plano_visual.split("\n").filter(linha => linha !== comum).join("\n") } : row)),
+    shared: comum,
+  };
 }
 
 /* ============================== o arquivo ============================== */

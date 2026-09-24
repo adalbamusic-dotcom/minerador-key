@@ -518,6 +518,8 @@ export function entradaGoogleSaude(extra: Partial<RadarPortableExportInput> = {}
       ...observado.questions,
       { canonicalQuestion: "COMO &Eacute; A PELE OLEOSA?", status: "ARTICLE_QUESTION_CONFIRMED", pages: 1, sampleSize: 12, declaredByArticle: true, evidence: "1 de 12" },
       { canonicalQuestion: "Como é a pele oleosa?", status: "MARKET_QUESTION_UNDERCOVERED", pages: 2, sampleSize: 12, declaredByArticle: false, evidence: "2 de 12" },
+      { canonicalQuestion: "Como e a pele oleosa ?", status: "MARKET_QUESTION_UNDERCOVERED", pages: 1, sampleSize: 12, declaredByArticle: false, evidence: "1 de 12" },
+      { canonicalQuestion: "QUAIS S&Atilde;O OS TIPOS DE ACNE?", status: "MARKET_QUESTION_UNDERCOVERED", pages: 3, sampleSize: 12, declaredByArticle: false, evidence: "3 de 12" },
       { canonicalQuestion: "Cabelo virgem: o que é e como cuidar?", status: "ISOLATED_QUESTION", pages: 1, sampleSize: 12, declaredByArticle: false, evidence: "1 de 12" },
     ],
     gaps: [

@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { RADAR_WRITER_MAY_NOT } from "../lib/redator/writer-handoff.ts";
 import { buildRadarPortableExportRow, radarPortableExportCsv } from "../lib/radar/portable-export.ts";
 import { radarPortableExportRows, radarPortableExportSiloFiles } from "../lib/radar/portable-export-batch.ts";
+import { planRadarSiloExport } from "../lib/radar/portable-silo-export.ts";
 import {
   RADAR_WRITING_EXPORT_COLUMNS,
   RADAR_WRITING_EXPORT_LIMITS,
@@ -14,13 +15,22 @@ import {
   radarWritingExportBatchFilename,
   radarWritingExportCsv,
   radarWritingExportSiloFilename,
+  radarWritingShareVisualAvoid,
   radarWritingSpreadsheetSafe,
   radarWritingTitleIsUsable,
   type RadarWritingArticleContext,
   type RadarWritingExportRow,
 } from "../lib/radar/portable-writing-export.ts";
 import { radarPortableWritingExport } from "../lib/radar/portable-writing-batch.ts";
-import { RADAR_EXPORT_MODES, radarExportModeOf } from "../lib/radar/portable-export-estimate.ts";
+import {
+  RADAR_EXPORT_FILE_BYTES_PER_DOSSIER,
+  RADAR_EXPORT_MODES,
+  RADAR_EXPORT_WRITING_FILE_BYTES_PER_DOSSIER,
+  radarExportModeOf,
+  radarSiloExportEstimate,
+  radarSiloExportSizeNotice,
+} from "../lib/radar/portable-export-estimate.ts";
+import { radarSiloExportNotice } from "../lib/radar/portable-silo-scope.ts";
 import {
   ARTIGO,
   ARTIGO_AMAZON,
@@ -147,6 +157,32 @@ test("A · 13 colunas FIXAS, na ordem do desenho, em todo arquivo — com a linh
   assert.ok(csv.endsWith("\"\r\n"));
 });
 
+test("A · o cabeçalho é fixo: uma linha montada em outra ordem, ou sem uma chave, não muda o arquivo", () => {
+  const linha = buildRadarWritingExportArticle(entradaGoogle(), contextoAvulso()).row;
+  const invertida = Object.fromEntries(Object.entries(linha).reverse()) as RadarWritingExportRow;
+  const semProdutos = { ...linha } as Partial<RadarWritingExportRow>;
+  delete semProdutos.produtos;
+  const cabecalho = RADAR_WRITING_EXPORT_COLUMNS.map(coluna => `"${coluna}"`).join(",");
+  assert.equal(lerCsv(radarWritingExportCsv([invertida]))[0].join(","), RADAR_WRITING_EXPORT_COLUMNS.join(","));
+  assert.equal(radarWritingExportCsv([invertida]), radarWritingExportCsv([linha]));
+  assert.ok(radarWritingExportCsv([semProdutos as RadarWritingExportRow]).startsWith(`﻿${cabecalho}\r\n`));
+  assert.equal(lerCsv(radarWritingExportCsv([semProdutos as RadarWritingExportRow]))[1].length, 13, "a célula ausente sai vazia, na posição dela");
+});
+
+test("A · artigo sem silo resolvido: arquivo próprio, linha 'Marca' no topo, sem ordem narrativa inventada", () => {
+  const plano = planRadarSiloExport({
+    today: EXPORTADO_EM, brandId: MARCA, siloVersions: [],
+    items: [{ articleId: ARTIGO, siloId: "", status: "finalized", title: "Skincare facial passo a passo", principalKeyword: "skincare facial", slug: "skincare-facial" }],
+  });
+  const saida = radarPortableWritingExport({ articles: [montadasDoSilo()[0]], lenses: LEITURA_DAS_LENTES, plan: plano, today: EXPORTADO_EM });
+  assert.equal(saida.files?.[0].filename, "sem-silo-para-escrever-2026-09-23.csv");
+  const { dados } = linhasDe(saida.files![0].csv);
+  assert.deepEqual(dados.map(linha => linha.ordem), ["Marca", "1 · Pilar"]);
+  assert.match(dados[0].artigo, /^Artigos sem silo resolvido no Radar: escreva cada um sem pressupor ordem narrativa/);
+  assert.equal(/Ordem narrativa/.test(dados[0].artigo), false);
+  assert.match(dados[1].prompt, /linha "Marca" deste arquivo/);
+});
+
 test("A · a linha de topo do silo: ordem narrativa inteira, faltas ditas uma vez, e só as quatro colunas dela", () => {
   const { dados } = linhasDe(EXPORT_DO_SILO().files![0].csv);
   const topo = dados[0];
@@ -206,6 +242,22 @@ test("B · nenhum id, hash, data ISO, código cru, preenchimento ou rastreio em 
   }
 });
 
+test("B · quando o PACOTE traz endereço interno, instante ISO ou código cru no texto, a célula não os carrega", () => {
+  const google = entradaGoogle();
+  const modelo = google.articleModel as unknown as { conclusion: Record<string, unknown> };
+  const sujo = `Fechar pela resposta (question:c580aef1) do artigo ${ARTIGO}, sha256:${"b".repeat(64)}, observada em 2026-09-20T13:00:00.000Z pela relação PILLAR_TO_SUPPORT e INFORMATIONAL`;
+  const linha = buildRadarWritingExportArticle(
+    { ...google, articleModel: { ...modelo, conclusion: { ...modelo.conclusion, synthesis: sujo } } as never },
+    contextoAvulso(),
+  ).row;
+  assert.match(linha.promessa_e_leitor, /^Promessa: /);
+  assert.match(linha.promessa_e_leitor, /Fechamento: Fechar pela resposta do artigo, observada em pela relação Pilar → Suporte e Informacional\./,
+    "o endereço, o UUID, o hash e o instante saem; o código vira rótulo");
+  for (const [padrao, oQue] of PROIBIDO_NA_CELULA) {
+    for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) assert.equal(linha[coluna].match(padrao), null, `${oQue} em ${coluna}`);
+  }
+});
+
 test("B · a URL de terceiro perde o rastreio e mantém o caminho — inclusive o UUID dela", () => {
   const limpa = radarWritingCleanUrl(URL_DE_TERCEIRO);
   assert.ok(limpa.includes(UUID_DE_TERCEIRO), "o caminho do concorrente foi alterado");
@@ -228,6 +280,11 @@ test("C · as guardas no topo e em cada artigo: sem FAQ, e dado de terceiros é 
   assert.match(pilar.prompt, /sem seção de perguntas frequentes/);
   assert.match(pilar.prompt, /não copie frases nem títulos/);
   assert.match(pilar.prompt, /linha "Silo" deste arquivo/);
+
+  /* As lentes: o cache sai rotulado como fora do pacote; sem leitura, a falta é dita, nunca um consenso inventado. */
+  assert.match(pilar.serp_resumida, /Lentes \(cache da marca, fora do pacote, observado a partir de 22\/09\/2026; 2 de 4 observadas\)/);
+  const semLentes = buildRadarWritingExportArticle(entradaGoogle(), contextoAvulso()).row;
+  assert.match(semLentes.serp_resumida, /^Lentes: não conferidas neste pacote; o topo acima é da coleta principal\.$/m);
 
   /* Trecho de terceiro: no máximo 160 caracteres, entre aspas tipográficas. */
   for (const trecho of pilar.serp_resumida.matchAll(/“([^”]*)”/g)) {
@@ -275,7 +332,7 @@ test("D · a contribuição ACEITA do especialista não some: sai com o aviso de
   const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
   assert.match(pilar.fontes_e_especialista, /E1 · Pergunta: "O que causa acne" · Resposta aprovada: "Todo mundo fala de protetor solar/);
   assert.match(pilar.fontes_e_especialista, /Atenção: aceita, mas a resposta não trata de "O que causa acne"; conferir antes de usar; sem ponto de aplicação definido/);
-  assert.match(pilar.pode_escrever, /especialista E1: aceita, mas a resposta não trata|\(\+\d+ ressalva\(s\) nas colunas desta linha\.\)/);
+  assert.match(pilar.pode_escrever, /especialista E1: aceita, mas a resposta não trata|- Também: .*especialista E1/);
 });
 
 /* ================================ E ================================ */
@@ -328,7 +385,8 @@ test("G · limpeza: pergunta duplicada por caixa e entidade vira uma, isolada e 
   const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
   const perguntas = pilar.cobrir_e_superar.split("\n").filter(linha => /pele oleosa\?/i.test(linha));
   assert.equal(perguntas.length, 1, `a mesma pergunta saiu duas vezes: ${perguntas.join(" | ")}`);
-  assert.equal(/COMO É|&Eacute;/.test(pilar.cobrir_e_superar), false);
+  assert.equal(/COMO É|&Eacute;|QUAIS SÃO/.test(pilar.cobrir_e_superar), false);
+  assert.match(pilar.cobrir_e_superar, /^- Quais são os tipos de acne\?/m, "a pergunta em caixa alta de cabeçalho vira frase");
   assert.equal(/Cabelo virgem/.test(pilar.cobrir_e_superar), false, "pergunta isolada atravessou");
   assert.match(pilar.cobrir_e_superar, /Não cobrir:\n- "As melhores ofertas de skincare": A intenção declarada é Informacional; este assunto pertence a uma intenção comercial\./);
   /* A lacuna de 1 página achada por keyword auxiliar não é instrução. */
@@ -351,7 +409,9 @@ test("G · fontes: a de menu não classificada fica fora, a científica sai limp
 
 test("G · plano visual: uma capa e até três respiros, e ALT de preenchimento não atravessa", () => {
   const { dados } = linhasDe(EXPORT_DO_SILO().files![0].csv);
-  for (const linha of dados.slice(1)) {
+  const comPlano = dados.slice(1).filter(linha => linha.plano_visual);
+  assert.ok(comPlano.length >= 2, "as linhas que servem para escrever trazem o plano visual");
+  for (const linha of comPlano) {
     assert.match(linha.plano_visual, /^Plano visual do pacote \(o Planejador confirma\): uma capa e [0-3] respiro\(s\)\./);
     assert.equal(/ALT: (Ao final|Cobrir com clareza|Reunir o que|Declarar o critério|Capturar a intenção)/.test(linha.plano_visual), false, `${linha.ordem}: ALT de preenchimento`);
     assert.equal(/legenda: (Bloco comercial|Gancho)\b/.test(linha.plano_visual), false);
@@ -365,7 +425,9 @@ test("H · links pelo silo: destino pelo slug do irmão, SiloPage, e o rótulo L
   assert.match(pilar.links_internos, /L1 · âncora "skin care noturno" → Suporte "skin care noturno" → \/skin-care-noturno/);
   assert.match(pilar.links_internos, /âncora "produtos nivea para a pele" → Suporte "skin care nivea" → \/skin-care-nivea/);
   assert.match(pilar.links_internos, /âncora "guia de cuidados com a pele" → SiloPage "Cuidados com a Pele" → https:\/\/careglow\.com\.br\/cuidados-com-a-pele/);
-  assert.match(pilar.links_internos, /âncora "cuidados com máscara facial" → Suporte "máscara facial" → \/mascara-facial/);
+  assert.match(pilar.links_internos, /âncora "cuidados com máscara facial" \(ou "máscara facial de skincare"\) → Suporte "máscara facial" → \/mascara-facial/,
+    "âncora alternativa é texto, e não lugar");
+  assert.equal(/onde: âncoras alternativas/.test(pilar.links_internos), false);
   assert.match(pilar.links_internos, /Pilar → Suporte/);
   assert.match(pilar.estrutura, /## Como montar a rotina de skincare facial no dia a dia\?[\s\S]*?- Links: L1\./);
   assert.equal(/territory|node|article-candidate/.test(pilar.links_internos), false);
@@ -534,9 +596,14 @@ test("K · a tela: 'Para escrever (recomendado)' primeiro, o técnico depois, em
 
   const pagina = (await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   const barra = pagina.slice(pagina.indexOf("const renderTopbarActions"), pagina.indexOf("const openDetail"));
-  const menu = barra.slice(barra.indexOf("role=\"menu\""));
-  const grupo = menu.slice(menu.indexOf("<fieldset"), menu.indexOf("</fieldset>"));
-  assert.ok(menu.indexOf("<fieldset") >= 0 && menu.indexOf("<fieldset") < menu.indexOf("<button"), "o formato vem antes dos itens");
+  const semComentariosDaBarra = semComentarios(barra);
+  const menu = semComentariosDaBarra.slice(semComentariosDaBarra.indexOf("role=\"menu\""));
+  const antesDoMenu = semComentariosDaBarra.slice(semComentariosDaBarra.indexOf("{menuDeExport ?"), semComentariosDaBarra.indexOf("role=\"menu\""));
+  const grupo = antesDoMenu.slice(antesDoMenu.indexOf("<fieldset"), antesDoMenu.indexOf("</fieldset>"));
+  assert.ok(antesDoMenu.indexOf("<fieldset") >= 0 && antesDoMenu.indexOf("</fieldset>") > antesDoMenu.indexOf("<fieldset"), "o formato vem antes dos itens, no mesmo popover");
+  assert.equal(/<fieldset|role="radiogroup"|type="radio"/.test(menu.slice(0, menu.indexOf("</button>", menu.lastIndexOf("data-testid=\"radar-export-dossiers\"")))), false,
+    "o rádio fica FORA do role=menu: um menu só contém itens de menu");
+  assert.match(menu, /^role="menu" aria-label="Exportar">/);
   assert.match(grupo, /role="radiogroup" aria-label="Formato do CSV"/);
   assert.match(grupo, /type="radio"/);
   assert.match(grupo, /RADAR_EXPORT_MODES\.map/);
@@ -577,5 +644,141 @@ test("K · as linhas avulsas do Amazon com produto e do YouTube", () => {
   assert.match(amazon.produtos, /Aviso de afiliado: obrigatório antes do primeiro link de produto\./);
   assert.equal(/tag=|ref=/.test(amazon.produtos), false, "tag de afiliado atravessou");
   const youtube = buildRadarWritingExportArticle(entradaYoutube(), contextoAvulso({ articleId: ARTIGO_YOUTUBE })).row;
-  assert.match(youtube.estrutura, /^Estrutura do roteiro de vídeo \(não é estrutura de artigo\)/);
+  assert.match(youtube.pode_escrever, /^Não: a investigação deste artigo foi feita para vídeo do YouTube/);
+  assert.match(youtube.artigo, /Formato: Roteiro de vídeo/);
+  for (const coluna of ["promessa_e_leitor", "titulo_e_seo", "estrutura", "cobrir_e_superar", "serp_resumida", "fontes_e_especialista", "links_internos", "plano_visual", "produtos"] as const) {
+    assert.equal(youtube[coluna], "", `o roteiro de vídeo não serve para escrever o artigo: ${coluna} saiu`);
+  }
+  assert.equal(/Escreva em português/.test(youtube.prompt), false, "linha bloqueada com instrução de escrever");
+});
+
+/* ================================ L · as correções da revisão ================================ */
+
+test("L · artigo do Silo sem plano de links: a falta é dita na célula e no veredito, e nenhum link é inventado", () => {
+  const saude = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados;
+  const suporte = saude[2];
+  assert.equal(suporte.ordem, "2 · Suporte");
+  assert.equal(suporte.links_internos, "Nenhum link: o pacote não traz plano de links para este artigo (nem para o Pilar, nem para a SiloPage). Não crie links; o plano é do Arquiteto.");
+  assert.match(suporte.pode_escrever, /sem links internos no pacote: o artigo sai isolado do Silo \(sem link para o Pilar nem para a SiloPage\) até o Arquiteto definir o plano de links/);
+  assert.match(linhasDe(EXPORT_DO_SILO().files![0].csv).dados[2].links_internos, /^Nenhum link: /, "o bloqueado também diz a falta");
+  assert.equal(/Nenhum link/.test(saude[1].links_internos), false, "o Pilar tem plano de links");
+
+  const avulso = linhasDe(radarPortableWritingExport({ articles: montadasDoSilo(), lenses: LEITURA_DAS_LENTES, plan: null, today: EXPORTADO_EM }).csv || "").dados[2];
+  assert.equal(avulso.links_internos, "", "sem silo não há plano de links a cobrar");
+  assert.equal(/sem links internos/.test(avulso.pode_escrever), false);
+
+  const semPagina = buildRadarWritingExportArticle({ ...entradaGoogleSaude(), internalLinks: [] }, {
+    topRowLabel: "Silo", filePosition: 1, silo: planoDoSilo().files[0].writing!, articleId: ARTIGO, publication: null,
+  }).row;
+  assert.match(semPagina.links_internos, /^L1 · /m);
+  assert.equal(/Artigo → SiloPage/.test(semPagina.links_internos), false);
+  assert.match(semPagina.links_internos, /\nNenhum link para a SiloPage no pacote: não crie um; o plano é do Arquiteto\.$/);
+});
+
+test("L · a linha de topo não afirma aprovação da Marca que não leu", () => {
+  const topo = linhasDe(EXPORT_DO_SILO().files![0].csv).dados[0];
+  assert.equal(/aprovad/i.test(`${topo.promessa_e_leitor}\n${topo.prompt}`), false);
+  assert.match(topo.promessa_e_leitor, /Voz, tom, autor e revisor: não fazem parte deste arquivo; cole-os antes de pedir o texto a uma IA\./);
+  assert.match(topo.prompt, /1\. Escreva em português do Brasil, na voz da marca\. A voz não faz parte deste arquivo: cole-a junto/);
+});
+
+test("L · o que se repetia em cada linha mora uma vez na linha de topo", () => {
+  const { dados } = linhasDe(EXPORT_DO_SILO_SAUDE(true).files![0].csv);
+  const [topo, ...artigos] = dados;
+  assert.match(topo.prompt, /Tom visual: editorial e direto/);
+  assert.match(topo.prompt, /Imagens, em todos os artigos deste arquivo — evitar: sem texto sobreposto na imagem/);
+  assert.match(topo.prompt, /Links internos: só os indicados em cada artigo \(L1, L2…\)/);
+  assert.match(topo.prompt, /\[RELATO DA MARCA — preencher\]/);
+  for (const linha of artigos) {
+    assert.equal(/Abre com a resposta direta/.test(linha.estrutura), false, `${linha.ordem}: a regra de cada H2 voltou a se repetir`);
+    assert.equal(/Tom visual|^Evitar: /m.test(linha.plano_visual), false, `${linha.ordem}: o plano visual repete a regra geral`);
+    assert.equal(/Conflito entre fonte e mercado|Afirmação marcada "precisa de fonte"|Marque as imagens/.test(linha.prompt), false, `${linha.ordem}: o prompt repete as regras gerais`);
+    assert.ok(linha.prompt.length <= 1_300, `${linha.ordem}: prompt com ${linha.prompt.length} caracteres`);
+  }
+  const meta = artigos[0].titulo_e_seo.split("\n").find(linha => linha.startsWith("Meta description:")) || "";
+  assert.equal((meta.match(/promessa/gi) || []).length, 1, `a meta description repete a promessa: ${meta}`);
+});
+
+test("L · a lista 'Evitar' só sobe quando é a mesma em todos os artigos", () => {
+  const linha = (plano: string) => ({ ...Object.fromEntries(RADAR_WRITING_EXPORT_COLUMNS.map(coluna => [coluna, ""])), plano_visual: plano } as RadarWritingExportRow);
+  const igual = radarWritingShareVisualAvoid([linha("Plano visual: capa\nEvitar: a; b."), linha("Plano visual: capa\nEvitar: a; b."), linha("")]);
+  assert.equal(igual.shared, "Evitar: a; b.");
+  assert.deepEqual(igual.rows.map(item => item.plano_visual), ["Plano visual: capa", "Plano visual: capa", ""]);
+  const diferente = radarWritingShareVisualAvoid([linha("Plano visual: capa\nEvitar: a; b."), linha("Plano visual: capa\nEvitar: c.")]);
+  assert.equal(diferente.shared, null);
+  assert.deepEqual(diferente.rows.map(item => item.plano_visual), ["Plano visual: capa\nEvitar: a; b.", "Plano visual: capa\nEvitar: c."]);
+  assert.equal(radarWritingShareVisualAvoid([linha("Plano visual: capa\nEvitar: a.")]).shared, null, "um artigo só não tem o que compartilhar");
+});
+
+test("L · o topo orgânico numera 1, 2, 3… entre os orgânicos, e a posição na página fica como informação", () => {
+  const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
+  assert.equal(/\bpos\. \d/.test(pilar.serp_resumida), false);
+  const numeros = [...pilar.serp_resumida.matchAll(/^(\d+)\. /gm)].map(item => Number(item[1]));
+  assert.ok(numeros.length >= 3);
+  assert.deepEqual(numeros, numeros.map((_, indice) => indice + 1));
+  assert.match(pilar.serp_resumida, /^1\. .* · posição 7 na página · “/m);
+});
+
+test("L · ALT, legenda e prompt que só repetem a pergunta, o cabeçalho ou um ponto de cobertura ficam de fora, com o nome da imagem", () => {
+  const pilar = linhasDe(EXPORT_DO_SILO_SAUDE().files![0].csv).dados[1];
+  assert.equal(/ALT: (Qual a ordem dos produtos|Como montar a rotina de skincare facial|Skincare facial para pele oleosa)\b/.test(pilar.plano_visual), false);
+  assert.equal(/assunto: qual a ordem dos produtos/i.test(pilar.plano_visual), false, "prompt de molde atravessou");
+  assert.match(pilar.plano_visual, /A escrever a partir do conteúdo real da seção \(o pacote não trazia texto utilizável\): Capa \([^)]*\); Respiro 1 \(ALT/);
+  assert.equal(/ficaram de fora: escreva-os/.test(pilar.plano_visual), false);
+});
+
+test("L · o veredito não repete a mesma afirmação e diz o excedente pelo nome", () => {
+  const pilar = linhasDe(EXPORT_DO_SILO_SAUDE(true).files![0].csv).dados[1];
+  assert.equal((pilar.pode_escrever.match(/O que causa acne/g) || []).length, 1, "a afirmação do conflito voltou como segundo motivo");
+  assert.equal(/\(\+\d+ ressalva/.test(pilar.pode_escrever), false, "o excedente voltou a ser só um número");
+  assert.match(pilar.pode_escrever, /título de trabalho do pacote não utilizável/);
+  assert.match(pilar.pode_escrever, /\n- Também: especialista E1 \(detalhes nas colunas desta linha\)\.$/);
+});
+
+test("L · um artigo sem pendência sai 'Sim', e o prompt não traz o bloco 'Neste artigo'", () => {
+  const google = entradaGoogle();
+  const limpo = buildRadarWritingExportArticle({
+    ...google,
+    articleModel: { ...(google.articleModel as unknown as Record<string, unknown>), titleSuggestion: "Skincare facial: como montar a rotina passo a passo" } as never,
+  }, contextoAvulso());
+  assert.equal(limpo.verdict, "Sim");
+  assert.equal(limpo.row.pode_escrever, "Sim");
+  assert.equal(limpo.firstReason, null);
+  assert.match(limpo.row.titulo_e_seo, /^H1 de trabalho: Skincare facial: como montar a rotina passo a passo$/m);
+  assert.match(limpo.row.prompt, /^Escreva em português do Brasil o artigo descrito nesta linha/);
+  assert.equal(/Neste artigo:|Não escreva/.test(limpo.row.prompt), false);
+});
+
+test("L · linha bloqueada: o prompt diz só o bloqueio, sem a instrução de escrever logo depois", () => {
+  const amazon = linhasDe(EXPORT_DO_SILO().files![0].csv).dados[2];
+  assert.match(amazon.pode_escrever, /^Não: /);
+  assert.match(amazon.prompt, /^Não escreva este artigo antes de resolver o bloqueio: .*Depois de resolvido, exporte de novo para receber o prompt de escrita\.$/);
+  assert.equal(/Escreva em português|\n/.test(amazon.prompt), false);
+  assert.match(amazon.produtos, /nenhum produto selecionado/, "o bloqueio comercial mantém o que explica o bloqueio");
+});
+
+test("L · o aviso depois do export por silo diz quantos saíram bloqueados, e isso é atenção", () => {
+  const resposta = { exported: 3, files: [{ filename: "silo.csv", silo: { name: "Cuidados com a Pele", partial: false, exported: 3, total: 3, pending: [] } }] };
+  const entregue = { filename: "silo.csv", files: 1 };
+  const sem = radarSiloExportNotice({ response: resposta, delivered: entregue, titleOf: () => null });
+  assert.equal(sem.type, "info");
+  assert.equal(/bloqueio/.test(sem.message), false, "o formato completo não envia 'blocked' e nada muda para ele");
+  assert.equal(radarSiloExportNotice({ response: { ...resposta, blocked: 0 }, delivered: entregue, titleOf: () => null }).type, "info");
+  const com = radarSiloExportNotice({ response: { ...resposta, blocked: 2 }, delivered: entregue, titleOf: () => null });
+  assert.equal(com.type, "warning");
+  assert.match(com.message, /2 artigo\(s\) com bloqueio para escrever: veja a coluna pode_escrever\./);
+});
+
+test("L · o aviso de tamanho cita o arquivo do formato escolhido; a leitura do banco é a mesma", () => {
+  const ids = Array.from({ length: 6 }, (_, indice) => `artigo-${indice}`);
+  const finalizados = ids.slice(0, 2);
+  assert.equal(radarSiloExportEstimate({ articleIds: ids, finalizedArticleIds: finalizados }).fileBytes, 2 * RADAR_EXPORT_FILE_BYTES_PER_DOSSIER);
+  assert.equal(radarSiloExportEstimate({ articleIds: ids, finalizedArticleIds: finalizados, exportMode: "writing" }).fileBytes, 2 * RADAR_EXPORT_WRITING_FILE_BYTES_PER_DOSSIER);
+  assert.equal(radarSiloExportEstimate({ articleIds: ids, finalizedArticleIds: finalizados, exportMode: "writing" }).readBytes,
+    radarSiloExportEstimate({ articleIds: ids, finalizedArticleIds: finalizados }).readBytes);
+  const antes = radarSiloExportSizeNotice({ scope: { mode: "all", articleIds: ids }, finalizedArticleIds: finalizados });
+  assert.deepEqual(radarSiloExportSizeNotice({ scope: { mode: "all", articleIds: ids }, finalizedArticleIds: finalizados, exportMode: "full" }), antes, "o técnico mantém a frase de antes");
+  const escrita = radarSiloExportSizeNotice({ scope: { mode: "all", articleIds: ids }, finalizedArticleIds: finalizados, exportMode: "writing" });
+  assert.match(escrita!.message, /^Estimativa de ~33 MB lidos do banco .* e arquivo de ~0,1 MB no formato para escrever, com 2 artigo\(s\) finalizado\(s\)/);
+  assert.ok(RADAR_EXPORT_WRITING_FILE_BYTES_PER_DOSSIER * 5 < RADAR_EXPORT_FILE_BYTES_PER_DOSSIER);
 });
