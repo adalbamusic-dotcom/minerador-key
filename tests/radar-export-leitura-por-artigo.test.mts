@@ -372,17 +372,31 @@ test("E4 · acima do teto de artigos o clique não lê nada, e o aviso de tamanh
 test("E4 · o menu mostra o tamanho no item recomendado, em 14px e na cor de atenção, sem mexer no resto", async () => {
   const pagina = (await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   const barra = semComentarios(pagina.slice(pagina.indexOf("const renderTopbarActions"), pagina.indexOf("const openDetail")));
-  assert.match(barra, /const avisoDeTamanhoDoExport = menuDeExport\s*\?\s*radarSiloExportSizeNotice\(\{\s*scope: radarSiloExportScope\(\{ items: pipeline\.radarItems, selectedArticleIds, siloVersions: pipeline\.siloVersions \}\),\s*finalizedArticleIds: pipeline\.radarItems\.filter\(row => radarPrimaryProfileOfAnalysis\(analiseCorrenteDe\(row\)\?\.payload \|\| null\)\)\.map\(row => row\.articleId\),\s*exportMode: modoDoExport,\s*\}\)\s*:\s*null;/);
+  /*
+   * 2026-09-23 · O card "Exportar para escrever": o escopo e os prontos são
+   * contados uma vez, e o aviso sai na opção "Silo completo" (formato para
+   * escrever) e no item técnico do Avançado (formato completo). A leitura
+   * estimada é a mesma; só o arquivo muda.
+   */
+  assert.match(barra, /const escopoDoSilo = menuDeExport \? radarSiloExportScope\(\{ items: pipeline\.radarItems, selectedArticleIds, siloVersions: pipeline\.siloVersions \}\) : null;/);
+  assert.match(barra, /const prontosDoExport = menuDeExport \? pipeline\.radarItems\.filter\(row => radarPrimaryProfileOfAnalysis\(analiseCorrenteDe\(row\)\?\.payload \|\| null\)\)\.map\(row => row\.articleId\) : \[\];/);
+  assert.match(barra, /const avisoDeTamanhoDoExport = escopoDoSilo \? radarSiloExportSizeNotice\(\{ scope: escopoDoSilo, finalizedArticleIds: prontosDoExport, exportMode: "writing" \}\) : null;/);
+  assert.match(barra, /const avisoDeTamanhoDoExportTecnico = escopoDoSilo && avancadoDoExport \? radarSiloExportSizeNotice\(\{ scope: escopoDoSilo, finalizedArticleIds: prontosDoExport, exportMode: "full" \}\) : null;/);
 
-  const menu = barra.slice(barra.indexOf('role="menu"'));
-  const primeiroItem = menu.slice(menu.indexOf("<button"), menu.indexOf("</button>") + "</button>".length);
-  assert.match(primeiroItem, /data-testid="radar-export-silos"/);
-  assert.match(primeiroItem, /\{avisoDeTamanhoDoExport \? <span className="mt-1 block" data-testid="radar-silos-size-estimate"><strong className="font-semibold text-warning">\{avisoDeTamanhoDoExport\.title\}:<\/strong> \{avisoDeTamanhoDoExport\.message\}<\/span> : null\}/);
-  assert.match(primeiroItem, /className="block w-full rounded px-2 py-2 text-left text-sm text-foreground\/85 /, "o item deixou de ter 14px no texto do item");
-  assert.equal(/text-xs|#[0-9a-f]{3,6}\b|rgb\(/i.test(primeiroItem), false);
-  assert.equal((primeiroItem.match(/text-warning/g) || []).length, 1, "só o título vai na cor de atenção; a mensagem fica no texto do item");
-  assert.equal((barra.match(/avisoDeTamanhoDoExport/g) || []).length, 4, "o aviso aparece só no item recomendado");
-  assert.match(primeiroItem, /void exportarSilosCompletos\(\)/, "o clique continua exportando direto");
+  const card = barra.slice(barra.indexOf('role="dialog"'), barra.indexOf("onClick={grid.toggleColumns}"));
+  const opcaoDoSilo = card.slice(card.indexOf("<label"), card.indexOf("</label>") + "</label>".length);
+  assert.match(opcaoDoSilo, /data-testid="radar-export-escopo-silo"/);
+  assert.match(opcaoDoSilo, /\{avisoDeTamanhoDoExport \? <span className="mt-1 block" data-testid="radar-silos-size-estimate"><strong className="font-semibold text-warning">\{avisoDeTamanhoDoExport\.title\}:<\/strong> \{avisoDeTamanhoDoExport\.message\}<\/span> : null\}/);
+  assert.match(opcaoDoSilo, /className=\{`flex cursor-pointer items-start gap-2 rounded px-2 py-2 text-sm /, "a opção deixou de ter 14px no texto");
+  assert.equal(/text-xs|#[0-9a-f]{3,6}\b|rgb\(/i.test(card), false);
+  assert.equal((opcaoDoSilo.match(/text-warning/g) || []).length, 1, "só o título vai na cor de atenção; a mensagem fica no texto da opção");
+
+  const itemTecnico = card.slice(card.lastIndexOf("<button", card.indexOf('data-testid="radar-export-silos-tecnico"')), card.indexOf("</button>", card.indexOf('data-testid="radar-export-silos-tecnico"')));
+  assert.match(itemTecnico, /\{avisoDeTamanhoDoExportTecnico \? <span className="mt-1 block" data-testid="radar-silos-size-estimate-tecnico"><strong className="font-semibold text-warning">\{avisoDeTamanhoDoExportTecnico\.title\}:<\/strong> \{avisoDeTamanhoDoExportTecnico\.message\}<\/span> : null\}/);
+  assert.match(itemTecnico, /void exportarSilosCompletos\("full"\)/);
+  assert.equal((barra.match(/avisoDeTamanhoDoExport\b/g) || []).length, 4, "o aviso do formato para escrever aparece só na opção do silo");
+  assert.equal((barra.match(/avisoDeTamanhoDoExportTecnico\b/g) || []).length, 4, "o aviso técnico aparece só no item técnico do silo");
+  assert.match(card, /exportarSilosCompletos\("writing"\)/, "o clique continua exportando direto");
 });
 
 /* ======================= sentinelas ======================= */

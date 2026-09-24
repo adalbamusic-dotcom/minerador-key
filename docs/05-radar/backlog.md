@@ -1,5 +1,23 @@
 # Backlog — Radar
 
+## Export "Para escrever" — 2026-09-23
+
+- [x] Formato "Para escrever" com 13 colunas, linha de topo Silo/Marca, veredito `pode_escrever`, limpeza e limites; o formato técnico ficou byte a byte igual.
+- [x] Card "Exportar para escrever": duas opções, um botão e "Avançado (auditoria)" fechado com o técnico e a planilha.
+- [ ] **Homologar o card:**
+  - abrir e fechar com Esc;
+  - Tab nos rádios, no botão e no Avançado;
+  - foco de volta ao botão depois do download;
+  - largura de 360px;
+  - contraste do botão no tema claro.
+- [ ] **Voz, tom, autor e revisor do BrandDNA** na linha de topo. É o dado indispensável que mais falta para escrever fora da plataforma. Exige leitura nova do módulo Marca: autorização.
+- [ ] **Homologar** com um artigo novo de ponta a ponta:
+  - exportar o Silo;
+  - colar o CSV numa IA externa;
+  - conferir se o texto sai sem pedir dado que faltou.
+- [ ] Bateria de mutantes das correções da revisão: as 11 asserções novas cobrem cada ramo, mas os mortos não foram medidos.
+- [ ] "Copiar para IA" por artigo (opcional no desenho): não implementado.
+
 ## 4 lentes, tela e export — 2026-09-23
 
 - [x] R1 standing congelado e trava; R2 4 lentes com cache primeiro; R3 a R5 lentes congeladas, auxiliar e apoio; tela das lentes; lentes congeladas no export; export com leitura por artigo (−31%).

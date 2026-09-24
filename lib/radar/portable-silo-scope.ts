@@ -132,6 +132,33 @@ export function radarSiloExportPreview(escopo: RadarSiloExportScope): string {
 }
 
 /**
+ * ===== 2026-09-23 · O RESUMO CURTO DO CARD "Exportar para escrever" =====
+ *
+ * Uma linha: quantos silos o escopo leva e quantos dos artigos estão prontos
+ * — "Seleção: 1 silo · 3 de 5 artigos prontos". O escopo é o MESMO de
+ * `radarSiloExportScope` (nenhuma regra nova); "pronto" é o que a tela já
+ * chama de finalizado na estimativa de tamanho. Quem recusa o que não estiver
+ * pronto continua sendo o servidor: é contagem, não promessa de arquivo.
+ */
+export function radarSiloExportReadySummary(input: {
+  scope: RadarSiloExportScope;
+  finalizedArticleIds: Iterable<string>;
+}): string {
+  const escopo = input.scope;
+  if (!escopo.articleIds.length) return "Nenhum artigo do Radar neste escopo.";
+  const prontosDaTela = new Set([...input.finalizedArticleIds].map(texto).filter(Boolean));
+  const total = escopo.articleIds.length;
+  const prontos = escopo.articleIds.filter(id => prontosDaTela.has(id)).length;
+  const silos = escopo.silos.length;
+  const partes = [
+    `${escopo.mode === "selection" ? "Seleção" : "Sem seleção, todos os silos"}: ${silos} ${silos === 1 ? "silo" : "silos"}`,
+    `${prontos} de ${total} ${total === 1 ? "artigo pronto" : "artigos prontos"}`,
+    ...(escopo.withoutSilo ? [`${escopo.withoutSilo} sem silo`] : []),
+  ];
+  return partes.join(" · ");
+}
+
+/**
  * ===== O TETO DE ARTIGOS POR PEDIDO — o MESMO do schema da rota =====
  *
  * `POST /api/editorial/radar-export` recusa mais de 500 `articleIds` com 400

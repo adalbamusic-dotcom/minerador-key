@@ -1,5 +1,59 @@
 # Estado atual — Radar
 
+## Export "Para escrever" — 2026-09-23
+
+Pedido do dono do produto: o CSV por silo tinha muitas colunas técnicas que
+não servem para escrever. Agora ele leva só o que é indispensável para
+escrever o artigo com outra ferramenta ou outra IA.
+
+```text
+FORMATO_PADRAO         = "Para escrever" · 13 colunas fixas · ~10 mil caracteres por artigo
+FORMATO_TECNICO        = "Completo (técnico)" · byte a byte igual ao anterior (saída dourada J)
+ROTA                   = POST /api/editorial/radar-export · mode "writing" | "full" opcional · sem mode = resposta de antes
+LEITURAS_NOVAS         = 0 · mesmas montadas, lentes e plano do formato completo (teste da rota sobre PostgREST simulado)
+CHAMADAS_PAGAS         = 0 · MIGRATIONS = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste** (`test:radar` 2615/2615, tsc limpo).
+
+- **Colunas, sempre nesta ordem:** `ordem`, `pode_escrever`, `artigo`, `promessa_e_leitor`, `titulo_e_seo`, `estrutura`, `cobrir_e_superar`, `serp_resumida`, `fontes_e_especialista`, `links_internos`, `plano_visual`, `produtos`, `prompt`.
+- **Linha de topo:**
+  - "Silo" no export por silo: ordem narrativa inteira, SiloPage, tema, fronteira e regras gerais;
+  - "Marca" no avulso e no arquivo sem silo.
+- **`pode_escrever`:** Sim, Com ressalva ou Não, com o motivo.
+  - A linha bloqueada leva só o prompt do bloqueio.
+  - O roteiro de vídeo sai só com ordem, veredito, artigo e prompt.
+- **Guardas:**
+  - não gera título, ALT, legenda nem prompt de imagem: sai o que foi gravado, ou a falta com o motivo;
+  - sem FAQ (AGENTS 13);
+  - terceiros são pesquisa;
+  - a estrutura e a extensão são decisão do Planejador;
+  - conteúdo publicado leva URL, canonical e estado da principal; sem política, "estado desconhecido — não trocar até decisão humana";
+  - Silo sem plano de links diz isso e não inventa link.
+- **Limpeza:** sem UUID, hash, instante ISO, código cru, provider nem rastreio de URL. A Amazon perde tag e ref. Toda célula tem guarda contra fórmula do Excel.
+- **Limites:** célula até 6.000 caracteres (estrutura 8.000), artigo até 20.000. O corte começa por `serp_resumida` e é sempre declarado.
+- **Aviso de tamanho e bloqueados:** o aviso de tamanho usa a conta do formato escolhido. O aviso do silo conta os artigos bloqueados.
+- **Nomes:** `silo-<nome>-para-escrever-<data>[-parcial].csv`, `sem-silo-para-escrever-<data>.csv`, `artigos-para-escrever-<data>.csv` e `silos-para-escrever-<data>.zip`. Os nomes do formato técnico não mudaram.
+- **Arquivos:**
+  - novos: `lib/radar/portable-writing-export.ts`, `lib/radar/portable-writing-batch.ts`, `tests/radar-portable-writing-export.test.mts`, `tests/radar-export-escrita-rota.test.mts` e `tests/radar-portable-writing-fixtures.mts` (fora do glob);
+  - acréscimos compatíveis: `lib/radar/portable-silo-export.ts` (campo `writing` opcional), `portable-export-estimate.ts` (modos, `exportMode` opcional), `portable-silo-scope.ts` (`blocked` opcional) e a rota (`mode` opcional);
+  - `tests/radar-export-leitura-por-artigo.test.mts`: a regex do E4 aceita a linha `exportMode`.
+- **Card "Exportar para escrever"** (pedido: "só os que realmente são úteis"; opção escolhida "2 opções + Avançado fechado"):
+  - o botão Exportar abre um diálogo não modal. O `role="menu"` saiu;
+  - duas opções de rádio, ambas no formato para escrever:
+    - "Silo completo (recomendado)", o padrão, com a contagem de prontos pelo escopo do silo;
+    - "Só os artigos selecionados"; sem seleção, vão todos os prontos do Radar, a regra de antes;
+  - um botão "Exportar CSV";
+  - "Avançado (auditoria)" fechado no rodapé, com "Silo completo · técnico", "Artigos selecionados · técnico", "Planilha atual" e a dica do Excel;
+  - saíram o seletor "Formato do CSV", os textos longos, o selo e o item "Dossiês editoriais finalizados";
+  - Esc fecha, e o foco volta ao botão, inclusive depois do download;
+  - a preferência de formato antiga não é mais lida nem gravada. A chave que já existir no navegador não é apagada (AGENTS §10);
+  - arquivos: `modules/radar/radar-page.tsx`, `lib/radar/portable-silo-scope.ts` (`radarSiloExportReadySummary`, aditiva) e `portable-export-estimate.ts` (dica do Excel encurtada). Testes 11, 12, integração serp-silo, leitura-por-artigo e writing-export atualizados, com o inventário exato de 13 `radar-export-*` e 4 caminhos de export.
+- **Limitações:**
+  - card não validado na tela: servidor não subiu nesta tarefa;
+  - voz, tom, autor e revisor não saem no arquivo. A linha de topo pede para colá-los. Ler do BrandDNA seria leitura nova de outro módulo: pendência no backlog.
+  - Os artigos testados pelo usuário ainda usavam os processos antigos. O formato com artigo novo de ponta a ponta não foi homologado.
+
 ## As 4 lentes no Radar, standing congelado, tela das lentes e export — 2026-09-23
 
 ```text

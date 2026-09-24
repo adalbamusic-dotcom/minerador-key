@@ -138,7 +138,15 @@ export type RadarExportMode = "writing" | "full";
 
 export const RADAR_EXPORT_MODE_DEFAULT: RadarExportMode = "writing";
 
-/** Chave de preferência de apresentação no navegador. Nunca fonte de verdade. */
+/**
+ * Chave de preferência de apresentação no navegador. Nunca fonte de verdade.
+ *
+ * 2026-09-23 · O card "Exportar para escrever" deixou de ter seletor de
+ * formato: o botão principal é sempre "para escrever" e o técnico mora em
+ * "Avançado (auditoria)". A tela parou de LER e de GRAVAR esta chave; o valor
+ * que já estiver no navegador fica onde está (AGENTS §10: não se limpa
+ * armazenamento local sem autorização).
+ */
 export const RADAR_EXPORT_MODE_STORAGE_KEY = "minerador-key.radar.export-mode";
 
 export const RADAR_EXPORT_MODES: ReadonlyArray<{ mode: RadarExportMode; label: string; helper: string; columns: string; charsPerArticle: string }> = [
@@ -159,7 +167,7 @@ export const RADAR_EXPORT_MODES: ReadonlyArray<{ mode: RadarExportMode; label: s
 ];
 
 /** A dica de abertura: o Excel em português separa por ";", e o arquivo usa ",". */
-export const RADAR_EXPORT_EXCEL_HINT = "No Excel em português, abra por Dados > De Texto/CSV (o arquivo usa vírgula). Google Sheets e IAs leem direto.";
+export const RADAR_EXPORT_EXCEL_HINT = "No Excel em português, abra por Dados > De Texto/CSV.";
 
 /** Qualquer valor que não seja "full" é o padrão: preferência gravada corrompida não muda o formato. */
 export function radarExportModeOf(valor: unknown): RadarExportMode {
