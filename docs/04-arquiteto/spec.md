@@ -1,3 +1,76 @@
+## 33. Assunto declarado no ArticleDNA e no SiloDNA — 2026-09-24
+
+Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md),
+aprovada em 2026-09-24, e [ADR-022](../00-produto/decisoes/ADR-022-assunto-tronco-editorial.md).
+Estado da implementação em [estado-atual.md](estado-atual.md).
+
+O **Assunto** é a frase que o humano declarou no Minerador como tronco do
+artigo, mesmo sem volume de busca. As **keywords de sustentação** são as buscas
+reais que trazem o leitor e fazem a virada para ele. A **principal** continua
+sendo uma keyword com busca, dona do slug, do KGR e do H1; o Assunto entra no H1
+como complemento ou num H2/H3, conforme a SERP.
+
+### 33.1 Contrato (vigente no código desde a fase A)
+
+- `subject` é campo **opcional** do `ArticleDNA` e do `SiloDNA`, no formato
+  `DeclaredSubjectSchema` (`.strict()`): `keywordId`, `approvedPackageRef`,
+  `phrase`, `note` (1 a 280 caracteres, ou `null`), `destinationUrl` (URL, ou
+  `null`), `attachedBy` e `attachedAt`.
+- A frase, a nota e o destino viajam como snapshot. O Radar e o Redator não
+  hidratam outra keyword para saber qual é o tronco.
+- **Não é referência:** o Assunto fica fora de `keywordReferences` e do teto de
+  6. Não existe papel "Assunto" em `role`, e nenhum enum muda.
+- **Um Assunto por artigo; o mesmo Assunto pode sustentar vários artigos,
+  landings ou um Silo inteiro.** Vale para qualquer unidade do ArticleDNA,
+  inclusive `landing_page` e `service_page`.
+- O `superRefine` do ArticleDNA recusa:
+  - `subject.keywordId` entre as secundárias ou os reforços do mesmo artigo;
+  - `subject.phrase` igual, por keyword normalizada, a um item de
+    `excludedSubjects` do mesmo artigo. O tronco não pode ser tema excluído.
+- O Assunto igual à principal **não** é decidido no schema, porque o ArticleDNA
+  não carrega o Volume. A regra fica no gate de conclusão (33.2).
+- No SiloDNA, `centralEntity` **não** recebe a frase do Assunto: a SiloPage tira
+  H1 e title de lá, e isso contrariaria a regra da principal. A primária do
+  Silo continua eleita pelas origens atuais.
+- `excludedSubjects` ("assuntos excluídos") é outra coisa: os temas que o
+  artigo não cobre. Na tela, o termo novo aparece como "Assunto · declarado" ou
+  "Assunto (tronco)".
+
+### 33.2 Regras da fase B (Planejado)
+
+- O Assunto só pode ser a própria principal com **Volume validado** no pacote
+  aprovado. Um Assunto aprovado pela exceção do Minerador, sem Volume, nunca é
+  principal nem dá slug.
+- Assunto sem Volume validado fica fora da formação automática e da eleição da
+  principal e do slug. Entra num artigo só como `subject`, ou como membro por
+  ato humano explícito.
+- **Conservação:** o vínculo do tronco é um campo do artigo na cópia de
+  trabalho (`subjectKeywordId`), não `clusterId`. Tronco ancorado conta como
+  incorporado e fica fora de `NO_DUPLICATED_KEYWORD`, de `DUPLICATE_KEYWORD` e
+  do teto. Assunto sem artigo fica em "Keywords não agrupadas" com o selo
+  "Assunto · aguardando sustentação". Nenhuma keyword some.
+- **Formação em torno do Assunto:** sugestões determinísticas só sobre as
+  keywords já recebidas, sem leitura nova e sem provider; o humano escolhe as
+  sustentações; a principal sai entre elas pela regra atual; a SERP das
+  sustentações, nas 4 lentes com cache, valida o artigo. A SERP da frase é
+  opcional, sob pedido, pela rota Resultados do Minerador, e não entra na trava
+  de SERP do artigo.
+- IA só propõe; aceitar é ato humano.
+- O texto da trava `NO_UNRESOLVED_CANNIBALIZATION` passa de "disputam o mesmo
+  assunto" para "disputam o mesmo tema", para não confundir com o Assunto
+  declarado.
+
+### 33.3 Duas fases e rollback
+
+- **Fase A:** o schema aceita `subject`, e nenhum caminho grava.
+- **Fase B:** a interface e a formação passam a gravar, só depois da fase A no
+  ar e homologada.
+- Depois do deploy da fase A, **nenhum rollback volta para antes dela**. O
+  ArticleDNA é lido com `.strict()`: um artefato com `subject` lido por código
+  anterior derruba o readback do Arquiteto da marca com 503 e tira o artigo do
+  Radar.
+- O Radar e o Redator só usam o campo depois da fase B homologada.
+
 ## 32. Exportação: dois contratos independentes
 
 Salvar o sistema e usar o conhecimento produzido por ele são finalidades

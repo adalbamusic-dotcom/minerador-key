@@ -22,6 +22,12 @@ type CanonicalClient = Pick<SupabaseClient, "from" | "rpc">;
 
 export const DATAFORSEO_ALLINTITLE_CAPABILITY_KEY = "dataforseo.allintitle" as const;
 export const DATAFORSEO_SERP_COMPATIBILITY_CAPABILITY_KEY = "dataforseo.serp_compatibility" as const;
+/**
+ * Pesquisa por Assunto (SDD 2026-09-24, F1b.8): UMA capability para todas as
+ * chamadas DataForSEO da pesquisa — os três endpoints Labs e a SERP da frase.
+ * O endpoint vai no `metadata` do evento, um evento por chamada.
+ */
+export const DATAFORSEO_KEYWORD_RESEARCH_CAPABILITY_KEY = "dataforseo.keyword_research" as const;
 
 export type DataForSeoCanonicalErrorCode =
   | "DATAFORSEO_PROVIDER_MISMATCH"
@@ -49,7 +55,11 @@ export type DataForSeoCanonicalResolution = {
   credentialSource: "connection";
 };
 
-type DataForSeoCanonicalOperation = "allintitle" | "serp_compatibility";
+type DataForSeoCanonicalOperation = "allintitle" | "serp_compatibility" | "keyword_research";
+type DataForSeoCanonicalCapabilityKey =
+  | typeof DATAFORSEO_ALLINTITLE_CAPABILITY_KEY
+  | typeof DATAFORSEO_SERP_COMPATIBILITY_CAPABILITY_KEY
+  | typeof DATAFORSEO_KEYWORD_RESEARCH_CAPABILITY_KEY;
 
 function parseSecretPayload(payload: string): DataForSeoSerpCredentials {
   let parsed: unknown;
@@ -90,7 +100,7 @@ async function resolveDataForSeoCanonicalOperationConfig(input: {
   environment?: IntegrationEnvironment;
   technicalEnvironment?: NodeJS.ProcessEnv;
   quotaUnits?: number;
-}, operation: DataForSeoCanonicalOperation, capabilityKey: typeof DATAFORSEO_ALLINTITLE_CAPABILITY_KEY | typeof DATAFORSEO_SERP_COMPATIBILITY_CAPABILITY_KEY): Promise<DataForSeoCanonicalResolution> {
+}, operation: DataForSeoCanonicalOperation, capabilityKey: DataForSeoCanonicalCapabilityKey): Promise<DataForSeoCanonicalResolution> {
   const client = input.client || createCanonicalServiceClient();
   const technicalEnvironment = input.technicalEnvironment || process.env;
   const environment = input.environment || resolveDataForSeoIntegrationEnvironment(technicalEnvironment);
@@ -170,4 +180,23 @@ export async function resolveDataForSeoCanonicalSerpCompatibilityConfig(input: {
   quotaUnits?: number;
 }): Promise<DataForSeoCanonicalResolution> {
   return resolveDataForSeoCanonicalOperationConfig(input, "serp_compatibility", DATAFORSEO_SERP_COMPATIBILITY_CAPABILITY_KEY);
+}
+
+/**
+ * Resolve a capability da Pesquisa por Assunto (Labs + SERP da frase). Só o
+ * EXECUTE chama: resolve Connection e lê o Secret Store. O plano nunca passa
+ * por aqui — ele lê só a linha do catálogo, por `findCapability`.
+ */
+export async function resolveDataForSeoCanonicalKeywordResearchConfig(input: {
+  actorUserId: string;
+  agencyId?: string | null;
+  brandId: string;
+  client?: CanonicalClient;
+  secretStore?: IntegrationSecretStore;
+  runtimeDependencies?: IntegrationRuntimeDependencies;
+  environment?: IntegrationEnvironment;
+  technicalEnvironment?: NodeJS.ProcessEnv;
+  quotaUnits?: number;
+}): Promise<DataForSeoCanonicalResolution> {
+  return resolveDataForSeoCanonicalOperationConfig(input, "keyword_research", DATAFORSEO_KEYWORD_RESEARCH_CAPABILITY_KEY);
 }

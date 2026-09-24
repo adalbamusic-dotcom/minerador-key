@@ -22,6 +22,8 @@ export const INTEGRATION_CAPABILITY_OPERATIONS = [
   "youtube_video_metadata",
   "telegram_message_send",
   "telegram_file_fetch",
+  // Pesquisa por Assunto (SDD 2026-09-24, F1b.8): Labs e a SERP da frase no mesmo evento técnico.
+  "keyword_research",
 ] as const;
 export type IntegrationCapabilityOperation = typeof INTEGRATION_CAPABILITY_OPERATIONS[number];
 
@@ -34,6 +36,7 @@ export const INTEGRATION_CAPABILITY_PROVIDER_REQUIREMENTS: Record<string, Integr
   google_ads_keyword_metrics: "google_ads",
   "dataforseo.allintitle": "dataforseo",
   "dataforseo.serp_compatibility": "dataforseo",
+  "dataforseo.keyword_research": "dataforseo",
   ai_generation: "deepseek",
   "google_cloud.speech_transcription": "google_cloud",
   "google_cloud.storage_media": "google_cloud",
@@ -54,6 +57,9 @@ export const INTEGRATION_RESOURCE_BY_OPERATION: Partial<Record<IntegrationCapabi
   // SERP consumes the same global DataForSEO resource. The capability row is
   // technical ledger metadata; it is not a module/Brand entitlement gate.
   serp_compatibility: "dataforseo",
+  // Pesquisa por Assunto: Labs (related_keywords, keyword_ideas, ranked_keywords)
+  // e a SERP da frase, todos no recurso global DataForSEO. Metadado de ledger.
+  keyword_research: "dataforseo",
   speech_transcription: "google_cloud",
   storage_media: "google_cloud",
   youtube_video_metadata: "youtube_data",

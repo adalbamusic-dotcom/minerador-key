@@ -1,5 +1,671 @@
 # Estado atual — Minerador
 
+## Pesquisa por Assunto (F1b) e conserto do import da Descoberta — 2026-09-24
+
+```text
+PESQUISA_POR_ASSUNTO = modo "Por Assunto" no Descobrir · Camada 1 · sem IA · sem provider novo
+ROTAS = POST .../subject-discovery/search (plan | execute) · POST .../subject-discovery/import
+FONTES = Google Ads (frase; frase + página) · DataForSEO Labs related_keywords, keyword_ideas, ranked_keywords
+TETO_POR_PESQUISA = US$ 0,20 (SUBJECT_DISCOVERY_MAX_COST_USD) · pior plano = US$ 0,182
+CANDIDATAS_NO_BANCO = 0 · lista local IndexedDB "minerador-pesquisa-assunto" (Q12: 30 dias, 10 buscas)
+PROVENIENCIA = analise_semantica.subject_discovery · provenanceVerified: false (Q10, Q11)
+CONSERTO_DESCOBERTA = aprovada não é mais rebaixada no reimport · confirmado por teste
+MIGRATION = 20260924120000_dataforseo_keyword_research_operation.sql · escrita, NÃO aplicada · aplicar ANTES do deploy
+CHAMADAS_PAGAS_EM_TESTE = 0 · SQL_REMOTO = 0
+MANUAL_UI_VALIDATED = NO — homologação F1b.12 do usuário, pendente
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+Nenhuma pesquisa real foi feita, e o custo real ainda não foi conferido
+contra o painel do DataForSEO. O contrato está na
+[SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md),
+fatia F1b; os desvios em relação ao desenho estão na seção 11.4 dela. Nada
+disso vale como concluído antes da migration aplicada e da homologação.
+
+### O que entrou
+
+- **Modo "Por Assunto" no Descobrir.** O radiogroup "Tipo de descoberta" ganhou
+  a terceira opção. A lista `DISCOVERY_SEARCH_KINDS = [...DISCOVERY_MODES, "subject"]`
+  existe só na tela (`modules/minerador/discovery/discovery-types.ts`).
+  `DISCOVERY_MODES` e o `z.enum` da rota do Google Ads não mudaram, e o modo
+  "subject" nunca chega à rota antiga.
+  - **Campos:** Assunto (obrigatório, de 1 a 200), Nota (até 280) e Página de
+    destino (opcional). O select "Usar um Assunto declarado" preenche os três e
+    os deixa só leitura.
+  - **Disparo:** Enter e Pesquisar só montam o plano, que não paga nada. A
+    ajuda diz "Enter mostra o custo antes de pesquisar.".
+  - **Texto da regra, visível no modo:** "O Google Ads e o DataForSEO Labs
+    devolvem as candidatas; o Minerador não fabrica termos." Os outros modos
+    mantêm o texto de antes.
+  - **Local e idioma:** a tela mostra o aviso do servidor ("Brasil inteiro. A
+    UF vale só para o Google Ads.") e, ao lado, "O idioma escolhido também vale
+    só para o Google Ads; o DataForSEO e os resultados do Google usam sempre
+    português.".
+  - `includeAdultKeywords` vai sempre `false` neste modo, porque o controle
+    fica na linha de filtros da Descoberta, que não aparece aqui.
+- **Fontes e tetos** (`lib/minerador/subject-discovery-plan.ts`):
+
+  | Fonte | Chamada | Teto | Origem |
+  | --- | --- | --- | --- |
+  | Google Ads, frase | `keywordSeed` | `pageSize` 300, grátis | `ads_keyword_seed` |
+  | Google Ads, frase + página | `keywordAndUrlSeed`, **só** com destino `ACCEPTED`, revalidado contra o `site_url` atual | `pageSize` 300, grátis | `ads_url_seed` |
+  | Labs, pesquisas relacionadas | `related_keywords/live`, `depth` 2 | `limit` 100 | `labs_related` |
+  | Labs, mesma categoria | `keyword_ideas/live` | `limit` 100 | `labs_category` |
+  | Labs, o que o topo da SERP ranqueia | `ranked_keywords/live`, orgânico, `rank_group <= 20` | até 5 URLs × `limit` 100 | `labs_ranked` |
+
+  O Labs usa sempre `location_code` 2076 e `language_code` `"pt"`; a UF é
+  recusada, e o normalizador exige o mesmo eco. A dedupe usa `normalizeKeyword`,
+  a mesma do import, e a candidata guarda **todas** as origens. O corte é em
+  600 candidatas, com o total informado ("600 de N"). "Já existe" lê
+  `id,keyword` das vivas da marca, paginado. A frase recebe o selo "É o
+  Assunto". A falha de uma fonte não derruba as outras.
+- **Plano e autorização no servidor.** `mode: "plan"` monta o plano sem
+  materializar credencial: lê a declaração do Assunto, o `site_url`, o cache
+  de SERP em modo `meta` e a capability do ledger por `findCapability`, sem
+  Connection nem Secret Store. O `planHash` (sha256) cobre marca, frase
+  normalizada, `subjectKeywordId`, destino aceito, targeting do Google Ads,
+  lentes em falta, linhas (endpoint, chamadas, `limit`, `depth`, preços) e
+  tetos. `mode: "execute"` recalcula o plano e exige `authorizedPlan: { planHash, maxCostUsd }`:
+  - sem autorização → `PAID_PLAN_REQUIRED`;
+  - hash diferente ou custo acima do autorizado → `PAID_PLAN_CHANGED`, com o
+    plano novo;
+  - plano acima de US$ 0,20 → `SUBJECT_DISCOVERY_PLAN_ABOVE_CAP` (422);
+  - nos três casos, nada é pago.
+
+  O diálogo de custo mostra o plano inteiro e não deixa desligar fonte. Só
+  "Confirmar e pesquisar" executa, com um `operationRequestId` novo por plano.
+- **Orçamento em dólares.** As contas são em micro-dólares. Preços no módulo,
+  consultados em 2026-09-24 (fonte externa, não medida): Labs a US$ 0,012 por
+  task e US$ 0,00012 por item; SERP com teto de US$ 0,0035 por lente. Antes de
+  cada chamada paga, se o gasto real mais o máximo da próxima passar do
+  autorizado, ela não é feita, e a fonte volta como "não executada por
+  orçamento". Cada chamada liquida pelo `cost` informado pela task, ou pelo
+  máximo quando a task não informa. A SERP é reservada como unidade. O
+  diálogo mostra o preço por item com até 6 casas ("US$ 0,00012").
+- **SERP da frase: cache primeiro, nas 4 lentes.** Mesmos parâmetros do
+  Resultados do Processador: canônica `advanced` com profundidade 20 e corpo;
+  extras com profundidade 10 e digest. O plano paga só as lentes em falta, como
+  unidade, e o que é pago vai para o cache da marca (30 dias). Hit ou miss (e
+  portanto o `planHash`) são decididos **sempre pelo modo `meta`**, no plan e no
+  execute. O corpo da canônica e o digest das extras só são lidos **depois** de
+  autorizar, travar a instância, abrir a execução e conferir o ledger, só nas
+  lentes que o `meta` deu como hit e só quando a fonte 5 está no plano. Uma
+  canônica em cache sem corpo conta como cache, sem URL e sem pagamento. As até
+  5 URLs da fonte 5 vêm da união das 4 lentes; uma extra antiga sem digest fica
+  fora. Sem SERP, não há fonte 5.
+- **Proteção contra repetição.** Antes de qualquer chamada paga, o execute lê
+  no ledger as chaves de **todas** as chamadas DataForSEO planejadas (até 11,
+  em paralelo). Se qualquer uma existir, a resposta é `OPERATION_ALREADY_EXECUTED`
+  e nada é pago. Há também a trava do `operationRequestId` em curso na mesma
+  instância (`OPERATION_IN_PROGRESS`). Falha ou conflito do ledger **depois** de
+  pagar vira `ledgerWarning` e não descarta o resultado.
+- **Chaves do ledger.** DataForSEO: `dataforseo:{op}:keyword_research:{serp|related_keywords|keyword_ideas|ranked_keywords}:{n}`,
+  uma por chamada, na capability `dataforseo.keyword_research`. Google Ads:
+  `google_ads:{op}:keyword_discovery:keyword_seed` e `…:url_seed`. Sem o sufixo
+  novo, a chave e o evento do Descobrir de hoje ficam byte a byte iguais.
+- **Lista local, fora do banco.** O resultado volta ao navegador. A pesquisa não
+  grava run, candidata, métrica atual nem histórico, e não chama tabela nem RPC
+  da Descoberta. No banco entram só o ledger e a SERP da frase no cache.
+  - IndexedDB **próprio**, `minerador-pesquisa-assunto` (store `buscas`), com a
+    chave `actorUserId:brandId:searchId`, prazo de 2 s por operação e adaptador
+    que só toca o `indexedDB` na primeira operação
+    (`modules/minerador/discovery/subject-search-local-store.ts`).
+  - **Política Q12, autorizada pelo dono:** validade de 30 dias e no máximo 10
+    buscas por ator e marca. Saem sozinhas só a vencida e a mais antiga do
+    próprio escopo. Registro de outro ator, de outra marca, adulterado ou
+    ilegível é ignorado e nunca apagado. "Descartar esta busca" é ato humano,
+    uma busca por vez.
+  - Se o armazenamento falhar, a lista fica em memória, com aviso. A tela diz
+    que a lista vive só neste navegador e que só o envio ao Processador salva
+    no banco.
+  - É estado de apresentação e recuperação, nunca canônico (`AGENTS.md` §10).
+- **Volume.** A coluna Volume e o filtro "Com volume" leem só o Google Ads. A
+  estimativa do Labs aparece numa coluna própria, "Estimativa DataForSEO", e
+  nenhum campo da candidata se chama `volume`. Nada disso é importado.
+- **Envio ao Processador** (`lib/minerador/subject-discovery-import.ts`):
+  - A rota exige `minerador:create`, como `/discovery/import`. O corpo é
+    `.strict()`, aceita até 600 itens e recusa com 400 qualquer métrica, marca
+    ou ator. Os itens levam só keyword, origens e evidência.
+  - **Keyword nova:** entra como `bruto`, com `lista_id`, `volume_search` e
+    `results_allintitle` nulos, e com o bloco `analise_semantica.subject_discovery`.
+  - **Bloco `subject_discovery`:** `version: 1`; janela das 5 buscas mais
+    recentes, cada uma com `searchId`, `importRequestId`, `importedAt`,
+    `actorId`, `subjectKeywordId`, `subjectPhrase`, origens, até 3 evidências e
+    `provenanceVerified: false` (Q11); e `subjectKeywordIds` com até 10 ids
+    distintos, que não saem pela janela. A mesma `searchId` não regrava.
+  - **Existente (Q10, opção c):** só recebe o bloco se não tiver registro de
+    aprovação. O passo 1 lê `id,status,aprovacao:analise_semantica->aprovacao`;
+    das elegíveis, no máximo 50 por envio têm a coluna inteira lida. O update
+    exige id, marca, `deleted_at` nulo, `analise_semantica->aprovacao` nulo e o
+    status lido, e pede o `id` de volta. Com 0 linhas afetadas, a linha volta
+    "alterada no envio". Aprovada, acima do limite, alterada no envio ou criada
+    ao mesmo tempo têm rótulos próprios na tela.
+  - **`subjectKeywordId`** é validado no servidor: mesma marca, viva e
+    declarada. Outra marca e inexistente viram `null` com o mesmo motivo;
+    retirado vira `null` com outro motivo. Quando vem preenchido, a frase do
+    Assunto sai dos itens.
+  - Falha de insert: as vivas da marca são relidas no máximo uma vez por envio,
+    e só com `23505` (corrida). Outros códigos viram `failed` sem releitura.
+  - O núcleo não chama `setKeywordSubject`, não toca a Descoberta e não usa
+    `fetch` nem provider.
+- **Q14, respondida pelo dono.** Quando a pesquisa não partiu de um Assunto
+  declarado, o diálogo de envio oferece "Declarar também "<frase>" como
+  Assunto, com a nota e a página informadas". Vem marcada quando a frase ainda
+  não existe na marca (`phraseExistingKeywordId` nulo) e desmarcada quando já
+  existe. Marcada, o navegador chama primeiro a rota da F1.3 (`subjects/import`,
+  prévia e depois apply) e só então o import da F1b, com o id devolvido. Se a
+  declaração falhar, nada é importado. Desmarcada, a tela diz: "Para ligar
+  estas keywords a um Assunto, declare-o antes, aqui ou no Processador."
+- **"Buscar sustentação"** aparece na linha do Processador quando a keyword tem
+  Assunto declarado e abre `/{brandRef}/minerador/descobrir?modo=assunto&assunto=<uuid>`;
+  a URL leva só o UUID. O Descobrir lê o parâmetro no cliente
+  (`window.location`, depois de montar), sem mexer em `page.tsx`. Se a lista de
+  Assuntos declarados falhar ou o id estiver além das 1000 linhas lidas, a tela
+  lê só esse id, na marca da rota.
+- **Resultado legível sem hover.** Origens e Evidência aparecem em lista, uma
+  por linha. A evidência do `labs_ranked` ("ranqueia em #N em …") vem sempre
+  primeiro e nunca é cortada. As lentes aparecem como "Desktop · Windows",
+  "Desktop · macOS", "Celular · Android" e "Celular · iOS". Os dois diálogos
+  recebem o foco ao abrir, prendem o Tab e devolvem o foco ao gatilho; com o
+  diálogo aberto, Enter no campo de trás não remonta o plano.
+
+### Conserto do rebaixamento no import da Descoberta
+
+- **Defeito, confirmado por teste antes do conserto:** reimportar pela
+  Descoberta uma keyword aprovada regravava `discovery_import.lastSeenAt`,
+  mudava a assinatura do pacote e a levava para Em revisão em silêncio.
+- **Conserto** (`lib/minerador/keyword-import-core.ts`):
+  - `importKeywordsWithCore` não escreve mais em existente com registro de
+    aprovação, nem no caminho normal nem no da corrida. Ela volta como
+    `existing`, `metadataUpdated: false`, `reason: "approval_record_preserved"`.
+  - A função nova exportada `hasKeywordApprovalRecord` é a mesma regra usada
+    pelo import da F1b.
+  - Na existente **sem** registro de aprovação, a evidência continua sendo
+    gravada como antes, mas o update agora é condicionado a
+    `analise_semantica->aprovacao` nulo e pede o `id` de volta. Uma aprovação
+    feita entre a leitura e a escrita não é apagada; a linha volta com
+    `reason: "changed_during_import"`.
+  - A assinatura de `importKeywordsWithCore` não mudou, e a rota
+    `/discovery/import` também não: a linha continua como "já existia", e a
+    origem continua ligada nas tabelas à parte.
+- **Grau:** confirmado por teste com cliente falso que avalia o caminho JSON
+  (`tests/minerador-import-descoberta-aprovada-preservada.test.mts`, 7/7). O
+  filtro `.is("analise_semantica->aprovacao", null)` no **PostgREST real** é
+  **Ainda não verificado**. Se o PostgREST real o recusar, a existente sem
+  aprovação volta como `failed` (`existing_evidence_update_failed`) na
+  Descoberta, e nada é gravado errado. Isso entra na homologação.
+
+### Aliases do CSV de Assuntos
+
+Com `subjectColumns`, isto é, só na lista marcada como Assunto no Processador,
+a coluna da frase também atende por `assunto`, `assuntos`, `tema`, `titulo` e
+`título` (`lib/minerador/discovery-sources.ts`). `keyword`, `termo` e `query`
+continuam com prioridade, e "Assunto nota" continua sendo a nota. Numa lista
+de uma coluna, um cabeçalho com esses nomes não vira frase. Sem
+`subjectColumns`, a saída é idêntica à de antes (conferido por `deepEqual`).
+Isso substitui o limite "Cabeçalho 'Assunto' no CSV" da entrada da F1.
+
+### Migration 20260924120000 — NÃO aplicada
+
+Arquivo: `supabase/migrations/20260924120000_dataforseo_keyword_research_operation.sql`.
+
+- **O que faz, numa transação:** remove todo CHECK de `operation_kind` de
+  `public.integration_capabilities` e recria um só, com os 11 valores vigentes
+  mais `keyword_research`; insere a capability `dataforseo.keyword_research`
+  (`production`, `request`, `active`) com `ON CONFLICT (capability_key) DO NOTHING`.
+  Não muda tabela, coluna, RLS, credencial nem dado de keyword.
+- **Ordem: aplicar ANTES do deploy.** Com o código no ar e sem a migration, o
+  bootstrap do Admin tenta inserir a capability nova, o CHECK recusa com
+  `23514` e o bootstrap aborta.
+- **Como aplicar (usuário), nunca `db push`:**
+  ```text
+  npx supabase db query --linked -f supabase/migrations/20260924120000_dataforseo_keyword_research_operation.sql
+  npx supabase migration repair --status applied 20260924120000 --linked
+  ```
+- **Verificação, só leitura:** as duas consultas do cabeçalho do arquivo.
+  Esperado: uma linha `dataforseo.keyword_research` / `keyword_research` /
+  `production` / `request` / `active`, e **um** CHECK de `operation_kind` com
+  `keyword_research` entre os 12 valores.
+- **Rollback, só depois do rollback do código:** a capability passa a
+  `disabled` (UPDATE do cabeçalho), **nunca** é apagada, porque os eventos
+  append-only apontam para ela por `capability_id`. O CHECK ampliado fica e é
+  inofensivo.
+- **Antes da migration (Q13):** a pesquisa funciona, mas o custo fica fora do
+  ledger. O plano volta com `ledgerRecording: false`, e o diálogo avisa com o
+  nome da migration. Nesse estado, a leitura do ledger nunca acha evento, e só
+  a trava da instância barra a repetição. Permitido só até a homologação.
+
+### Arquivos
+
+- **Novos, servidor:** `lib/minerador/dataforseo-labs-keyword-research-core.ts`,
+  `subject-discovery-plan.ts`, `subject-discovery-search.ts`,
+  `subject-discovery-import.ts` e as rotas
+  `app/api/minerador/marcas/[brandId]/subject-discovery/search/route.ts` e
+  `.../subject-discovery/import/route.ts` (ambas `force-dynamic`, `params` como
+  `Promise`).
+- **Novos, tela:** em `modules/minerador/discovery/`, `subject-search-model.ts`,
+  `subject-search-local-store.ts`, `use-subject-search.ts`,
+  `subject-search-fields.tsx`, `subject-search-results.tsx` e
+  `subject-search-dialogs.tsx`.
+- **Alterados no Minerador:** `keyword-import-core.ts` (conserto),
+  `discovery-sources.ts` (aliases), `discovery-types.ts`,
+  `discovery-search-row.tsx`, `discovery-keywords-page.tsx`,
+  `minerador-workspace.tsx` (botão da linha e `onSubjectSearch` na Revisão),
+  `context-help.ts` (entrada `descobrir-por-assunto`) e
+  `discovery-table-placeholder.tsx` (`aria-label` e `title` do "Limpar
+  seleção").
+- **Compartilhados, de forma aditiva:** `lib/server/integrations-runtime.ts`,
+  `lib/server/platform-integrations-admin.ts` e `lib/server/dataforseo-canonical.ts`
+  (operação `keyword_research`, capability e resolver próprio);
+  `lib/minerador/google-ads-discovery-usage.ts` (sufixo opcional da chave).
+  As operações atuais não mudam.
+- **Compartilhado, de forma aditiva:** `components/editorial/dna-panels.tsx`.
+  Motivo: "Buscar sustentação" na Revisão Humana (F1b.1). Prop opcional
+  `onSubjectSearch?: () => void` em `HumanReviewPanel` e em `KeywordDnaPanel`,
+  que só a repassa. O painel não monta rota: o botão só aparece com a prop e
+  com o Assunto declarado. Consumidor em runtime: só
+  `modules/minerador/minerador-workspace.tsx`, que passa o mesmo
+  `subjectSearchLinkHref(brandRef, item.id)` da linha do Processador (grep em
+  `app`, `modules`, `components` e `lib`). Quem não passa a prop renderiza como
+  antes. Teste: `tests/minerador-assunto-fechamento-f1b.test.mts`.
+- **Admin, de forma aditiva:** `modules/admin/platform-integrations-panel.tsx`.
+  `keyword_research` entra no fim de `capabilityOperations`; as 11 operações
+  anteriores e a ordem delas não mudam, e `ai_generation` continua a primeira.
+  A lista fica igual às 12 de `INTEGRATION_CAPABILITY_OPERATIONS`.
+- **Consumidores preservados:** a rota `google-ads/descobrir-keywords`,
+  `DISCOVERY_MODES`, os drafts da Descoberta, a tabela e os rótulos da
+  Descoberta, `/discovery/import` (mesma assinatura do núcleo), a rota
+  `subjects/import` da F1.3 (só chamada pelo navegador) e a assinatura do pacote
+  aprovado (função inalterada).
+- **Desvio da SDD:** a F1b.7 dizia que a F1b não tocava `keyword-import-core.ts`.
+  O conserto acrescentou `hasKeywordApprovalRecord` e os desvios da aprovada,
+  sem mudar a assinatura pública.
+
+### Egress
+
+| Gatilho | Leitura |
+| --- | --- |
+| Plano | cache de SERP das 4 lentes em modo `meta` + declaração do Assunto, se houver (`id,keyword,keyword_subject`) + `marcas.site_url` + capability por `findCapability`; nenhum segredo |
+| Execute recusado (plano, autorização, repetição, trava) | as mesmas leituras do plano; **nunca** corpo nem digest |
+| Execute | leitura do ledger de até 11 chaves (~0,3 kB cada) + corpo da canônica em cache (26,5 a 33,9 KB) e digests das extras, só nas lentes em cache e só com a fonte 5 + `id,keyword` das vivas da marca, paginado |
+| Import | `id,keyword` das vivas, paginado + `id,status,aprovacao` das que casaram + `analise_semantica` inteira só das elegíveis, até 50 + validação do Assunto + insert e update devolvendo `id`; releitura das vivas no máximo uma vez, só com `23505` |
+| Lista de Assuntos no navegador | `id,keyword,keyword_subject` das vivas declaradas, até 1000 linhas; fallback de uma linha por id |
+| Lista local | nenhuma leitura do banco |
+
+Valores de tamanho da SDD (F1b.10), ESTIMADO; nenhum foi medido em runtime.
+
+### Testes
+
+Rodados de novo nesta data, arquivo a arquivo, sem rede: **130/130**.
+
+| Arquivo | Testes |
+| --- | --- |
+| `tests/minerador-assunto-pesquisa-labs.test.mts` | 10 |
+| `tests/minerador-assunto-pesquisa-plano.test.mts` | 12 |
+| `tests/minerador-assunto-pesquisa-busca.test.mts` | 25 |
+| `tests/minerador-assunto-pesquisa-catalogo.test.mts` | 10 |
+| `tests/minerador-assunto-pesquisa-import.test.mts` | 20 |
+| `tests/minerador-assunto-pesquisa-import-rota.test.mts` | 7 |
+| `tests/minerador-assunto-pesquisa-import-csv-aliases.test.mts` | 6 |
+| `tests/minerador-import-descoberta-aprovada-preservada.test.mts` | 7 |
+| `tests/minerador-assunto-pesquisa-tela.test.mts` | 11 |
+| `tests/minerador-assunto-pesquisa-tela-local.test.mts` | 22 |
+
+Mais 2 testes em `tests/minerador-google-ads-discovery-usage.test.mts` (sufixo)
+e 2 em `tests/minerador-dataforseo-canonical.test.mts` (resolver), que rodam
+com o loader de integrações. O `fetch` global e a abertura de credencial falham
+o teste; timestamps usam `+00:00`; os estruturais removem comentários.
+
+**Suítes no fim da rodada de correção**, comparadas por nome com a base:
+
+- Minerador (`node --test "tests/minerador-*.test.mts"`): 1046 testes, 1018
+  pass, 28 falhas, todas da base.
+- Integrações (`node --experimental-loader ./tests/integrations-runtime-loader.mjs --test "tests/integrations-*.test.mts" "tests/platform-integrations-*.test.mts"`):
+  68 pass e 1 falha da base ("DataForSEO probe makes one minimal mocked request
+  and sanitizes failures").
+- Falhas da base, nenhuma nova: `test:arquiteto` (2), `test:editorial` (4),
+  `test:authz` (2), `test:operational` (10), `test:visual-system` (5).
+- Verdes: `test:marca` 106, `test:redator` 335, `test:serp-cache` 34,
+  `test:arquiteto:servidor` 29, `test:arquiteto:lentes` 31, `test:radar` 2616.
+- `tsc --noEmit` sem erros; ESLint sem problemas nos 9 arquivos de código da
+  correção; guard visual estrito PASS nas telas da F1b; `git diff --check`
+  limpo; fim de linha preservado por arquivo, sem arquivo misto (contagem pelo
+  Node): `minerador-workspace.tsx` e `dna-panels.tsx` estão em CRLF na cópia de
+  trabalho; os demais arquivos tocados, em LF. O blob do HEAD é sempre LF,
+  porque o repositório normaliza com `core.autocrlf=true`.
+
+**Suítes após o fechamento da F1b** (itens da frente paralela conferidos,
+abaixo), comparadas por nome com a base; os números acima ficam como
+histórico:
+
+- Minerador: 1051 testes, 1023 pass, 28 falhas, os mesmos nomes da base.
+- Integrações: 69 testes, 68 pass, 1 falha da base ("DataForSEO probe makes
+  one minimal mocked request and sanitizes failures").
+- `tests/minerador-assunto-fechamento-f1b.test.mts`: 5/5.
+- `tsc --noEmit` sem erros.
+
+### Limites declarados
+
+- **Repetição entre instâncias.** Dois executes simultâneos com o mesmo id, em
+  instâncias diferentes, podem passar os dois pela leitura do ledger. Antes da
+  migration, só a trava da instância protege.
+- **Execução sequencial**, com até 11 chamadas pagas de até 30 s cada, e
+  nenhuma rota define `maxDuration`. Numa hospedagem com limite curto, o
+  resultado de uma pesquisa lenta pode se perder depois de pagar parte das
+  chamadas; o ledger registra cada chamada. Paralelizar ou definir
+  `maxDuration` exige decisão.
+- **Labs com frase sem busca:** supõe-se que a task volta 20000 com `items`
+  nulo, tratado como lista vazia, e que `ranked_keywords` aceita URL absoluta.
+  O eco do `seed_keyword` compara sem acento e sem caixa, mas com pontuação:
+  se o Labs normalizar símbolos, a fonte cai em `result_mismatch` e a task é
+  cobrada mesmo assim. **Ainda não verificado** contra o provider.
+- **Preços do Labs** são fonte externa, não medida. O orçamento soma o `cost`
+  real de cada task, então o risco fica limitado ao teto de US$ 0,20.
+- **`planHash`** cobre a frase normalizada; o provider recebe a frase crua.
+  Uma troca só de caixa ou acento entre plan e execute passa com o mesmo hash,
+  sem mudar o custo.
+- **Import sobre existentes:** uma chave gravada por outra rota entre a leitura
+  e a escrita ainda se perde (só `row_version` fecha). Acima de 50 elegíveis,
+  as excedentes voltam "acima do limite" mesmo se já tiverem a busca. Sem
+  índice único, dois envios em instâncias diferentes podem duplicar uma nova
+  (Q8).
+- **Filtros por caminho JSON** (`analise_semantica->aprovacao` no import da F1b
+  e na Descoberta; `->>keyword_subject` na lista do navegador): **Ainda não
+  verificados** no PostgREST real.
+- **Rotas** fazem o parse do corpo antes de autenticar: quem não está
+  autenticado recebe 400 do zod em vez de 401. Vaza só o schema.
+- **Lista local** depende do navegador: janela anônima, limpeza de dados ou
+  outro dispositivo a perdem. "Já existe" e "importada" são indicativos.
+
+### Fechamento da F1b (frente paralela, conferida)
+
+**Verificado no código e confirmado por teste**
+(`tests/minerador-assunto-fechamento-f1b.test.mts`, 5/5). **Validado
+manualmente: não.**
+
+- Ajuda de contexto do modo Por Assunto: entrada `descobrir-por-assunto` em
+  `modules/minerador/context-help.ts` (fontes, custo antes, lista no navegador
+  e a regra de não fabricar termos).
+- "Limpar seleção" da Descoberta com `aria-label` e `title` em
+  `discovery-table-placeholder.tsx`, igual ao da Pesquisa por Assunto (dívida
+  antiga, fechada).
+- "Buscar sustentação" na Revisão Humana (`components/editorial/dna-panels.tsx`),
+  só com o Assunto declarado e com `onSubjectSearch` recebido do workspace.
+- `keyword_research` na lista de operações do painel do Admin
+  (`modules/admin/platform-integrations-panel.tsx`).
+
+### Pendências, fora desta rodada
+
+- Re-export opcional do resolver `keyword_research` em
+  `lib/minerador/dataforseo-canonical.ts`, se algum consumidor do Minerador
+  precisar.
+- Linha de `dataforseo.keyword_research` na tabela de capabilities da SDD de
+  integrações e em `docs/01-admin/estado-atual.md` (SDD do Assunto, seção 8).
+- Validação manual dos quatro itens do fechamento: o botão da Revisão, o texto
+  da ajuda, o nome acessível do "Limpar seleção" e o select do Admin.
+
+### Homologação F1b.12 (usuário), pendente
+
+1. Aplicar a migration **antes do deploy** e fazer o readback (capability
+   presente; CHECK aceita `keyword_research`).
+2. Pesquisar "SEO para clínicas", com nota e destino no site da marca;
+   conferir o plano no diálogo e confirmar.
+3. Pesquisar um Assunto longo e sem busca ("estratégias tráfego pago clínica
+   estética 2026 leads qualificados") e registrar **aqui** o que cada fonte
+   devolveu e quanto custou, seja qual for o resultado.
+4. Conferir no ledger um evento por chamada, com as chaves distintas do Google
+   Ads, e comparar o total com o painel do DataForSEO. Nenhuma pesquisa pode
+   passar de US$ 0,20.
+5. Recarregar a página: a lista volta do IndexedDB, sem leitura do banco.
+6. Repetir a pesquisa: as 4 lentes da frase aparecem em cache, com 0 pagas.
+7. Importar 5 candidatas com "Declarar também" marcada e conferir por readback:
+   a frase vira Assunto pela F1.3; as candidatas entram como `bruto`, sem volume
+   e com o bloco; `subjectKeywordIds` aponta para ela; uma existente aprovada
+   **não** vai para Em revisão. Conferir o mesmo reimportando uma aprovada pela
+   Descoberta.
+8. Abrir o Descobrir por "Buscar sustentação", pela linha do Processador e
+   pela Revisão Humana; conferir a ajuda do modo, o "Limpar seleção" abaixo de
+   `xl` e `keyword_research` no select do painel do Admin.
+9. Validação visual em 360, 768, 1024 e 1440 px e no dark mode, incluindo a
+   altura das linhas com origens e evidências em lista e o teclado nos
+   diálogos.
+
+A homologação só vira PASS depois de o readback achar no banco os eventos do
+ledger, as entradas da frase no cache e as keywords importadas, e com o passo 3
+registrado.
+
+## Assunto declarado — F1 no código e trava de aprovação no envio — 2026-09-24
+
+```text
+ASSUNTO = analise_semantica.keyword_subject* · só humano · ator = auth.users.id (UUID)
+IMPORT_DE_ASSUNTO = rota própria POST /api/minerador/marcas/[brandId]/subjects/import · prévia + aplicar
+APROVACAO_COM_ASSUNTO = só a Lógica · dispensa Volume, Resultados e KGR (D2)
+TRAVA_NO_ENVIO = SERVER_APPROVAL_GATE_SINCE = 2026-09-24T00:00:00-03:00 · anteriores passam com alerta
+DESTINO_DO_ASSUNTO = conferido de novo no servidor, no envio, contra marcas.site_url · 409 fora do domínio
+MIGRATIONS_ADDED = 0 · SQL_REMOTO = 0 · CHAMADAS_PAGAS_EM_TESTE = 0
+MANUAL_UI_VALIDATED = NO — homologação do usuário, pendente
+F1b (Pesquisa por Assunto no Descobrir) = Planejado · fora desta entrada
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+Contrato na [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md),
+fatia F1; os desvios em relação ao desenho estão na seção 11 dela. Nada
+disso vale como concluído antes da homologação do usuário.
+
+### O que a F1 entregou
+
+- **Declaração do Assunto** (`lib/minerador/keyword-subject.ts`, novo). Cinco
+  chaves em `analise_semantica`: `keyword_subject` (`declared`, `note`,
+  `destinationUrl`, `destinationCheck`, ou `null` depois de retirada),
+  `keyword_subject_actor`, `keyword_subject_at`, `keyword_subject_origin`
+  (`import` · `review` · `batch`) e `keyword_subject_history`, que só cresce,
+  inclusive na retirada. Leitura única por `resolveKeywordSubject`. Nota de
+  até 280 caracteres numa linha só. O ator precisa ser UUID: e-mail,
+  `"local-user"` e `"usuario"` são recusados. `setKeywordSubject` devolve
+  `changed: false` quando nota e destino não mudam.
+- **Página de destino** (`lib/minerador/subject-destination.ts`, novo): `https`
+  e host do site da marca, obrigatórios; fora do domínio é recusada. Marca sem
+  `site_url` aceita o Assunto **sem** destino, com aviso. O catálogo do site é
+  só informativo.
+- **Vínculo com três declarações** (`lib/minerador/keyword-vinculo.ts`):
+  `subject` e `subjectLabel` ("Assunto · declarado" ou "Assunto sem nota") só
+  aparecem com declaração. Sem Assunto, o objeto e a frase de
+  `keywordVinculoSummary` ficam byte a byte iguais aos de antes (snapshot
+  capturado do código anterior). `KEYWORD_PAGE_TYPES` e o
+  `EditorialUnitDeclarationSchema` do Arquiteto não mudaram.
+- **Aprovação com Assunto (D2)**: `resolveApprovalReadiness` só exige a Lógica,
+  com o motivo "Assunto declarado: dispensa Volume, Resultados e KGR; a Lógica
+  continua exigida." As chaves `keyword_subject*` entram na assinatura v3:
+  declarar ou retirar numa aprovada a leva para Em revisão.
+- **Trava de aprovação no envio ao Arquiteto** (`resolveHandoffApprovalGate`,
+  em `lib/minerador/approved-package.ts`). A mesma função serve à tela
+  (`lib/minerador/arquiteto-handoff-gates.ts`) e ao servidor
+  (`prepareCanonicalHandoff`, em `lib/server/arquiteto-workspace.ts`).
+  - **Constante:** `SERVER_APPROVAL_GATE_SINCE = "2026-09-24T00:00:00-03:00"`.
+  - **Justificativa da data:** a tela aplica `resolveApprovalReadiness` desde o
+    §61 (2026-09-18), então toda aprovação feita pela tela desde então já
+    passou pela mesma trava. Ligar o servidor a partir do dia da aprovação da
+    SDD não revoga nenhuma decisão tomada sob outra regra, e a exceção do
+    Assunto entra no mesmo dia, nos dois lados.
+  - **Aprovada a partir da constante sem prontidão:** 409 `CONFLICT` no lote
+    inteiro, sem gravar nada, com o motivo da trava.
+  - **Passam com alerta:** aprovação anterior à constante, aprovada sem
+    registro, registro ilegível e registro do backfill (`approvedBy`
+    `"backfill:…"`) **anterior** à constante. Um `"backfill:"` com data igual
+    ou posterior cai na regra normal.
+  - **Já recebida pelo Arquiteto:** só alerta, e não sai de lá (`AGENTS.md` §10).
+  - O comentário "Estado de processo é informação, nunca veto" do gate da tela
+    foi emendado.
+- **Destino conferido de novo no servidor, no envio.** A declaração sai do
+  navegador por RLS, então o `destinationCheck` gravado não vale como
+  garantia. `prepareCanonicalHandoff` relê `marcas.site_url` e passa cada
+  destino por `validateSubjectDestination`, ignorando o `hostMatchesBrand`
+  gravado. Fora do domínio, sem `https`, ou marca sem site com destino
+  gravado: 409 no lote. Já recebida: só alerta (`scope: "destination"`).
+  Consequência: se a Marca trocar o `site_url`, o envio de Assuntos com o
+  destino antigo passa a ser recusado até o humano corrigir o destino.
+- **Import de Assuntos pelo Processador** (rota nova
+  `app/api/minerador/marcas/[brandId]/subjects/import/route.ts` e
+  `importSubjectsWithCore` em `lib/minerador/keyword-import-core.ts`). A rota
+  exige `minerador:edit` na marca do caminho, e o ator vem de
+  `context.actorUserId`; o corpo não aceita marca, ator nem métrica.
+  - **Prévia sem escrita.** Classifica cada linha em nova, existente sem
+    Assunto, já Assunto (igual ou diferente), publicada ou inválida, e avisa
+    quando há versão apagada restaurável.
+  - **Aplicar.** Cria as novas como `bruto` já declaradas (origem `import`) e
+    declara nas existentes só os ids marcados. A já-Assunto com nota ou
+    destino diferentes mantém o que está gravado. Reaplicar não escreve.
+  - **Proteções.** Apply sem `importRequestId` é recusado, e o mesmo
+    `importRequestId` em curso também (trava em memória, só na instância). Se
+    o DNA atual de uma existente não foi lido, a linha termina como `failed`
+    e nada é gravado.
+  - `importKeywordsWithCore` e `/discovery/import` não mudaram.
+  - CSV com colunas opcionais `nota` e `pagina`, e lista colada, uma frase por
+    linha (`lib/minerador/discovery-sources.ts`). Sem a opção nova, o parser
+    devolve o mesmo que antes.
+- **Tela** (`modules/minerador/discovery/discovery-source-controls.tsx`,
+  `components/editorial/dna-panels.tsx`, `modules/minerador/minerador-workspace.tsx`):
+  - **Import:** o select "Esta lista é" (Assunto/Keyword, padrão Assunto)
+    aparece só no Processador; o Descobrir não recebe a prop. Com Keyword,
+    segue para `/discovery/sources` como antes.
+  - **Revisão Humana:** controle "Assunto" (Não/Declarado), com nota,
+    contador e destino opcional. Nada é gravado no `onChange`. Numa aprovada,
+    o aviso da F1.5 aparece antes de confirmar.
+  - **Coluna Vínculo e cabeçalho do Perfil:** selo por
+    `vinculo.subjectLabel`, com os tokens `context-accent` e `text-sm`.
+  - **Rodapé:** o select "Vínculo das selecionadas" fica depois do KGR e
+    também em "Mais ações", com os grupos Assunto, Tipo de página e Posto (o
+    posto só vale em publicadas). A confirmação usa `planVinculoBatch` e diz
+    o que grava, o que pula e quantas aprovadas vão para Em revisão. Na
+    declaração, nota e destino são iguais para o lote. O diálogo recebe o
+    foco, fecha com Escape e devolve o foco a quem o abriu.
+  - **Ficaram fora do rodapé (Q5):** reabrir a revisão, conferir por link e
+    confirmar publicada.
+  - **Lógica automática (F1.7b):** depois de declarar na Revisão, em grupo ou
+    pelo import, roda a mesma rotina do botão Lógica nas keywords que ainda
+    não a têm. Não aprova nada. Sem seleção, os alvos passam a ser a seleção,
+    para a barra de progresso aparecer.
+- **KeywordDNA** (`lib/minerador/keyword-dna.ts`): bloco opcional `subject`,
+  só com declaração. **Revisão Humana** (`lib/minerador/human-review.ts`):
+  ação `{ type: "subject" }`.
+- **P4 (só o humano declara).** Um teste estrutural fecha a lista de quem
+  pode chamar cada porta de gravação:
+  - `setKeywordSubject`: import-core, vinculo-batch e workspace;
+  - `withdrawKeywordSubject`: vinculo-batch e workspace;
+  - `planVinculoBatch`: só o workspace;
+  - `importSubjectsWithCore`: só a rota do import.
+
+  Nenhum caminho de IA ou MCP chama essas funções.
+
+### Arquivos
+
+- **Novos:** `lib/minerador/keyword-subject.ts`, `subject-destination.ts`,
+  `vinculo-batch.ts`, `vinculo-screen.ts` e a rota
+  `app/api/minerador/marcas/[brandId]/subjects/import/route.ts`.
+- **Alterados no Minerador:** `keyword-vinculo.ts`, `approved-package.ts`,
+  `arquiteto-handoff-gates.ts`, `human-review.ts`, `keyword-dna.ts`,
+  `keyword-import-core.ts`, `discovery-sources.ts`,
+  `modules/minerador/minerador-workspace.tsx` e
+  `modules/minerador/discovery/discovery-source-controls.tsx`.
+- **Compartilhados, de forma aditiva:** `components/editorial/dna-panels.tsx`
+  (prop opcional `approvedForArchitect`), `lib/server/arquiteto-workspace.ts`
+  (trava, destino e `approvalAlerts` opcional na resposta) e `package.json`
+  (registro de `tests/arquiteto-assunto-trava-servidor.test.mts` em
+  `test:arquiteto:servidor` e de `tests/arquiteto-assunto-schema.test.mts`
+  em `test:arquiteto`, F2·A).
+- **Consumidores preservados:** `/discovery/import` e
+  `importKeywordsWithCore`; o Descobrir sem o select; o Vínculo lido pelo
+  Arquiteto, igual sem Assunto; o enum de tipos de página. Os hashes dourados
+  do Radar seguem verdes.
+
+### Egress
+
+| Gatilho | Leitura |
+| --- | --- |
+| Prévia do import | `id,keyword,status,lista_id` das vivas da marca, paginadas de 1000 em 1000 (`max_rows`); `analise_semantica` **só** das que casaram, por id, em blocos de 200 |
+| Aviso de versão apagada | `id,keyword` das apagadas restauráveis, só na prévia |
+| Catálogo do destino | `normalized_url,page_type,title,h1`, só para URL já aceita |
+| Aplicar o import | insert e update devolvendo só `id` |
+| Releitura depois do import | pela view de listagem, sem as séries de medição, em blocos de 200 ids |
+| Revisão Humana e lote do Vínculo | readback estreito (`VINCULO_BATCH_READBACK_COLUMNS`), em blocos de 200 no lote |
+| Trava de aprovação no envio | 0 extra: `analise_semantica` já vinha na leitura por ids |
+| Destino no envio | uma leitura de `marcas.site_url` (~100 B), só quando alguma elegível tem destino |
+| Lógica automática | a mesma do botão Lógica |
+
+Nenhuma chamada paga.
+
+### Testes
+
+- `tests/minerador-assunto-dominio.test.mts` 15, `-vinculo` 5, `-aprovacao`
+  12, `-lote` 10, `-import-parser` 5, `-import-core` 15, `-import-rota` 7,
+  `-tela-lote` 10 e `-tela-estrutura` 8. Rodados de novo nesta data com
+  `tests/arquiteto-assunto-schema.test.mts` (16, fase A da F2): 103/103.
+- `tests/arquiteto-assunto-trava-servidor.test.mts` (11), em
+  `npm run test:arquiteto:servidor`: 29/29 nesta data.
+- **Suítes no fim da implementação:** Minerador (`node --test "tests/minerador-*.test.mts"`)
+  com 916 testes e as mesmas 28 falhas da base, conferidas por nome, nenhuma
+  nova. As falhas de `test:arquiteto` (2), `test:authz` (2), `test:editorial`
+  (4), `test:operational` (10) e `test:visual-system` (5) também são as da
+  base. Verdes: `test:marca` 106, `test:redator` 335, `test:serp-cache` 34,
+  `test:arquiteto:lentes` 31 e `test:radar` 2616.
+- `tsc --noEmit` limpo e ESLint sem erro novo. O guard visual estrito não
+  acusou violação nova: 186 antes e 186 depois nas duas telas CRLF, e PASS em
+  `discovery-source-controls.tsx`. `git diff --check` limpo.
+
+### Limites declarados
+
+- **Escrita concorrente.** A Revisão, o lote do Vínculo e o import sobre
+  existentes regravam o `analise_semantica` inteiro. Uma chave gravada por
+  outra aba ou rota no intervalo se perde, e o readback das três chaves não
+  percebe. Só `row_version` fecha.
+- **Duplicata no import entre instâncias.** A trava por `importRequestId` vale
+  só na mesma instância. A garantia real é o índice único (Q8).
+- **A tela não mostra os alertas do servidor.** O `HandoffResponseSchema` de
+  `lib/arquiteto/canonical-workspace.ts` descarta o `approvalAlerts` da
+  resposta. A tela mostra só os alertas que ela mesma calcula, e os de
+  destino e de já recebida não aparecem.
+- **O gate da tela não confere o destino.** Um destino que o servidor recusa
+  passa na tela, e o 409 chega pela notificação de erro.
+- **O gate da tela não sabe quais keywords já foram recebidas.** Ele não
+  recebe `alreadyReceivedKeywordIds`. Na prática o caso é quase inalcançável,
+  porque a prontidão só muda com a assinatura.
+- **A trava pode recusar uma aprovada cuja prontidão mudou sem mudar a
+  assinatura.** Exemplo: a revalidação do Volume por série de medição, que
+  fica fora da assinatura v3.
+- **Forjar o `approvedAt`** pelo navegador continua possível. Só a rota de
+  aprovação no servidor (Q3) fecha isso.
+- **Aviso de aprovada no import.** O `approvalWarning` usa o status bruto
+  `aprovado`, não o efetivo.
+- **Lógica automática.** Se o contrato de saída de uma keyword não fechar,
+  `processLogicalKeywordDna` aborta a rodada inteira. A declaração fica, e o
+  botão Lógica continua disponível.
+- **Cabeçalho "Assunto" no CSV.** Não é reconhecido como coluna da frase.
+  Numa lista de uma coluna, a primeira linha "Assunto" vem desmarcada. Num CSV
+  com várias colunas, todas as linhas são rejeitadas. A ajuda diz que a coluna
+  precisa se chamar Keyword ou Termo.
+- **Revisão concluída.** Ela trava o controle Assunto até "Revisar
+  novamente", mas o rodapé declara sem reabrir.
+- **Comentário desatualizado.** O cabeçalho de `lib/minerador/keyword-vinculo.ts`
+  ainda fala em "duas declarações". É um ajuste cosmético, pendente.
+
+### Homologação (usuário), pendente
+
+1. Importar Assuntos por CSV e por lista colada, conferir a prévia, aplicar e
+   conferir o readback no banco. Conferir também que o Descobrir continua sem
+   o select.
+2. Declarar e retirar na Revisão Humana, inclusive numa aprovada, e conferir o
+   aviso.
+3. Vínculo em grupo com destino dentro e fora do site, conferindo o foco e o
+   Escape do diálogo.
+4. Ver a Lógica automática na barra e a coluna com "Assunto sem nota".
+5. Aprovar com volume `null`.
+6. Enviar ao Arquiteto:
+   - uma aprovada depois da ativação, sem processo: deve dar 409;
+   - uma aprovada antes: deve passar com alerta;
+   - um Assunto com destino fora do site: deve dar 409.
+
+A homologação só vira PASS depois de o readback achar o traço no banco.
+
 ## Qualificação vigente, cache de versões no navegador e Descoberta com SERP travada — 2026-09-23
 
 ```text

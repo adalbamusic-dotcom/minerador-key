@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import type { ArticleDNA, SiloDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { legacyVersionReference } from "@/lib/arquiteto/versioning";
 import { useBrand } from "@/components/brand-context";
@@ -27,6 +27,8 @@ import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS } from "@/l
 import { primaryPostLabel } from "@/lib/minerador/primary-keyword-policy";
 import { KEYWORD_PAGE_TYPES, keywordPageTypeStanding } from "@/lib/minerador/keyword-page-type";
 import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
+import { KEYWORD_SUBJECT_NOTE_MAX, type KeywordSubjectResolution } from "@/lib/minerador/keyword-subject";
+import { subjectReviewWarning } from "@/lib/minerador/vinculo-screen";
 import { keywordUrlRelationLabel } from "@/lib/minerador/publication-link";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { mineradorProcessPresentation, type MineradorProcessAttempt, type MineradorProcessName, type MineradorProcessState } from "@/lib/minerador/process-state";
@@ -434,6 +436,8 @@ function HumanReviewPanel({
   open,
   onOpenChange,
   reviewDraftActive = false,
+  approvedForArchitect = false,
+  onSubjectSearch,
 }: {
   semantic: ProfileRecord;
   intent?: string | null;
@@ -449,6 +453,10 @@ function HumanReviewPanel({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   reviewDraftActive?: boolean;
+  /** Aprovada de fato (status efetivo): gravar ou retirar o Assunto a leva para Em revisão (F1.5). */
+  approvedForArchitect?: boolean;
+  /** F1b.1: com o Assunto declarado, abre o Descobrir no modo Por Assunto pelo mesmo link da linha do Processador. */
+  onSubjectSearch?: () => void;
   status?: string | null;
   keywordId?: string;
 }) {
@@ -561,10 +569,37 @@ function HumanReviewPanel({
           ))}
         </select>
       </div>
+
+      <ReviewSubjectControl
+        key={`${vinculo.subject?.declared ? "declared" : "none"}|${vinculo.subject?.note ?? ""}|${vinculo.subject?.destinationUrl ?? ""}`}
+        keywordId={keywordId}
+        subject={vinculo.subject ?? null}
+        approved={approvedForArchitect}
+        disabled={statusUpdating || reviewLocked || !onAction}
+        onAction={onAction}
+      />
+
+      {/* F1b.1: "Buscar sustentação" também na Revisão; a URL leva só o id. */}
+      {vinculo.subjectLabel && onSubjectSearch ? (
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center justify-between gap-2">
+          <p className="min-w-0 flex-1 text-sm text-text-muted">Pesquisa keywords que sustentam este Assunto. Nada é pago antes de você confirmar o custo.</p>
+          <button
+            type="button"
+            data-review-subject-search-link
+            onClick={onSubjectSearch}
+            className="min-h-9 shrink-0 rounded-md border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:border-context-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent/30"
+            title="Abre o Descobrir no modo Por Assunto com este Assunto. Nada é pago antes de você confirmar o custo."
+          >
+            Buscar sustentação
+          </button>
+        </div>
+      ) : null}
+
       <p className="mt-1 text-sm text-text-muted">
         <span className="font-semibold text-foreground">{vinculo.postLabel}</span>
         {" · "}
         <span className="font-semibold text-foreground">{vinculo.pageTypeLabel}</span>
+        {vinculo.subjectLabel ? <>{" · "}<span data-review-subject-label className="font-semibold text-context-accent">{vinculo.subjectLabel}</span></> : null}
         {" — "}
         {vinculo.pageType.source === "human"
           ? "escolhido por alguém desta marca."
@@ -599,6 +634,116 @@ function HumanReviewPanel({
       </div>
     </details>
   </section>;
+}
+
+/**
+ * ASSUNTO NA REVISÃO HUMANA (SDD 2026-09-24, F1.4 e F1.5): a terceira
+ * declaração do Vínculo. Não / Declarado, com a nota (até 280 caracteres, uma
+ * linha) e a página de destino, ambas opcionais.
+ *
+ * Nada é gravado ao mudar o select: a escolha fica aqui até o humano gravar,
+ * e numa aprovada o aviso de rebaixamento aparece ANTES da confirmação. Quem
+ * grava é a tela do Processador, com o `auth.users.id` da sessão e origem
+ * `review`. A IA nunca chega aqui (P4).
+ */
+function ReviewSubjectControl({
+  keywordId,
+  subject,
+  approved,
+  disabled,
+  onAction,
+}: {
+  keywordId?: string;
+  subject: KeywordSubjectResolution | null;
+  approved: boolean;
+  disabled: boolean;
+  onAction?: (action: HumanReviewAction) => void | Promise<void>;
+}) {
+  const selectId = useId();
+  const declared = subject?.declared === true;
+  const savedNote = subject?.note ?? "";
+  const savedDestination = subject?.destinationUrl ?? "";
+  const [choice, setChoice] = useState<"none" | "declared">(declared ? "declared" : "none");
+  const [note, setNote] = useState(savedNote);
+  const [destination, setDestination] = useState(savedDestination);
+  const nextDeclared = choice === "declared";
+  const dirty = nextDeclared !== declared
+    || (nextDeclared && (note.trim() !== savedNote || destination.trim() !== savedDestination));
+  const warning = dirty ? subjectReviewWarning({ approved, currentlyDeclared: declared, nextDeclared }) : null;
+  const reset = () => {
+    setChoice(declared ? "declared" : "none");
+    setNote(savedNote);
+    setDestination(savedDestination);
+  };
+  const save = () => {
+    if (!onAction || !dirty) return;
+    void onAction(nextDeclared
+      ? { type: "subject", declared: true, note: note.trim() || null, destinationUrl: destination.trim() || null }
+      : { type: "subject", declared: false });
+  };
+  const inputClass = "mt-1 h-8 w-full min-w-0 rounded-md border border-divider bg-surface-subtle px-2 text-sm text-foreground outline-none placeholder:text-text-muted hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60";
+
+  return <div data-review-subject data-keyword-id={keywordId} className="mt-1.5 min-w-0">
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+      <label className="text-sm font-medium text-text-muted" htmlFor={selectId}>Assunto</label>
+      <select
+        id={selectId}
+        value={choice}
+        disabled={disabled}
+        onChange={event => setChoice(event.target.value === "declared" ? "declared" : "none")}
+        className="h-8 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60"
+        title="Assunto é a frase que você declara como tronco de um ou mais artigos. Pode não ter busca: na aprovação dispensa Volume, Resultados e KGR, mas não a Lógica."
+      >
+        <option value="none">Não</option>
+        <option value="declared">Declarado</option>
+      </select>
+    </div>
+
+    {nextDeclared && (
+      <div className="mt-1.5 grid min-w-0 gap-2 sm:grid-cols-2">
+        <label className="block min-w-0 text-sm font-medium text-text-muted">
+          Nota: o que é, para quem
+          <input
+            type="text"
+            value={note}
+            maxLength={KEYWORD_SUBJECT_NOTE_MAX}
+            disabled={disabled}
+            onChange={event => setNote(event.target.value)}
+            placeholder="Opcional"
+            className={inputClass}
+          />
+          <span className="mt-0.5 block text-sm text-text-muted">{note.trim().length}/{KEYWORD_SUBJECT_NOTE_MAX} caracteres</span>
+        </label>
+        <label className="block min-w-0 text-sm font-medium text-text-muted">
+          Página de destino
+          <input
+            type="url"
+            inputMode="url"
+            value={destination}
+            disabled={disabled}
+            onChange={event => setDestination(event.target.value)}
+            placeholder="https://"
+            className={inputClass}
+          />
+          <span className="mt-0.5 block text-sm text-text-muted">Opcional. Precisa estar no site da marca.</span>
+        </label>
+      </div>
+    )}
+
+    {dirty && (
+      <div role="group" aria-label="Gravar o Assunto" className="mt-1.5 flex min-w-0 flex-wrap items-center justify-between gap-2">
+        {warning
+          ? <p role="note" data-subject-demotion-warning className="min-w-0 flex-1 text-sm text-warning">{warning}</p>
+          : <p className="min-w-0 flex-1 text-sm text-text-muted">{nextDeclared ? "A Lógica roda sozinha depois de gravar, se ainda faltar. Nada é aprovado." : "Retirar mantém o histórico da declaração."}</p>}
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          <button type="button" onClick={reset} disabled={disabled} className="min-h-9 rounded-md border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:border-context-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">Descartar</button>
+          <button type="button" onClick={save} disabled={disabled || !onAction} className="min-h-9 rounded-md border border-context-accent/50 px-3 text-sm font-semibold text-context-accent transition-colors hover:bg-context-accent/10 disabled:cursor-not-allowed disabled:opacity-50">
+            {warning ? "Confirmar e gravar" : nextDeclared ? "Gravar Assunto" : "Retirar Assunto"}
+          </button>
+        </div>
+      </div>
+    )}
+  </div>;
 }
 
 function TechnicalDetails({ semantic, reference, showProvenance, googleAdsValidated, dataForSeoValidated, kgrHistory }: { semantic: ProfileRecord; reference: ReturnType<typeof legacyVersionReference>; showProvenance: boolean; googleAdsValidated: boolean; dataForSeoValidated: boolean; kgrHistory?: ProfileRecord[] }) {
@@ -707,12 +852,15 @@ export function KeywordDnaPanel({
   processAttempts,
   showProvenance = true,
   allowPublishedWorkflowStatus = true,
+  onSubjectSearch,
 }: {
   keyword: { id: string; keyword: string; intent?: string | null; status?: string | null; volume_search?: number | null; results_allintitle?: number | null; kgr_score?: number | null; volume_source?: string | null; analise_semantica?: ProfileRecord | null };
   onWorkflowStatusChange?: (status: string) => void | Promise<void>;
   onHumanReviewAction?: (action: HumanReviewAction) => void | Promise<void>;
   humanReviewOpen?: boolean;
   onHumanReviewOpenChange?: (open: boolean) => void;
+  /** Assunto declarado: o workspace passa o mesmo `router.push(subjectSearchLinkHref(...))` da linha. */
+  onSubjectSearch?: () => void;
   reviewDraftActive?: boolean;
   statusUpdating?: boolean;
   visualPosition?: number;
@@ -943,6 +1091,16 @@ export function KeywordDnaPanel({
         />
         <h2 className="mt-0.5 min-w-0 break-words text-xl font-semibold tracking-tight text-keyword [overflow-wrap:anywhere]">{keyword.keyword}</h2>
         </div>
+        {/* O Assunto é declaração, não fato da publicação: aparece com ou
+            sem página publicada, pelo mesmo resolvedor da coluna. */}
+        {headerVinculo.subjectLabel && (
+          <span
+            data-profile-subject-label
+            className="inline-flex max-w-full items-center whitespace-normal rounded border border-context-accent/50 bg-context-accent/10 px-1 py-0.5 text-sm font-semibold leading-tight text-context-accent"
+          >
+            {headerVinculo.subjectLabel}
+          </span>
+        )}
         {/* Só há o que anunciar quando existe publicação: aí o endereço, o
             posto e o tipo são fatos. Antes disso não há URL nem vaga a
             perder, e o par do Vínculo continua visível na coluna. */}
@@ -1013,6 +1171,8 @@ export function KeywordDnaPanel({
           open={humanReviewOpen}
           onOpenChange={onHumanReviewOpenChange}
           reviewDraftActive={reviewDraftActive}
+          approvedForArchitect={editorialStatus.kind === "resolved" && editorialStatus.status === "aprovado"}
+          onSubjectSearch={onSubjectSearch}
           status={keyword.status}
           keywordId={keyword.id}
         />

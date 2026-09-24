@@ -49,6 +49,7 @@ export type PlatformAccessPolicy = typeof PLATFORM_ACCESS_POLICY;
 export const PLATFORM_CAPABILITY_CATALOG = [
   { capabilityKey: "dataforseo.allintitle", providerKey: "dataforseo", operationKind: "allintitle", unitName: "request" },
   { capabilityKey: "dataforseo.serp_compatibility", providerKey: "dataforseo", operationKind: "serp_compatibility", unitName: "request" },
+  { capabilityKey: "dataforseo.keyword_research", providerKey: "dataforseo", operationKind: "keyword_research", unitName: "request" },
   { capabilityKey: "google_ads_keyword_discovery", providerKey: "google_ads", operationKind: "keyword_discovery", unitName: "request" },
   { capabilityKey: "google_ads_keyword_metrics", providerKey: "google_ads", operationKind: "keyword_metrics", unitName: "request" },
   { capabilityKey: "ai_generation", providerKey: "deepseek", operationKind: "ai_generation", unitName: "request" },

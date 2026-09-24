@@ -80,6 +80,23 @@ const DISCOVERY_TOPICS: readonly ContextHelpTopic[] = [
     keywords: ["como clientes me encontram", "cliente provável", "perspectiva", "comportamento de cliente", "contratar"],
   },
   {
+    id: "descobrir-por-assunto",
+    title: "Buscar keywords que sustentam um Assunto",
+    summary: "O modo Por Assunto parte da frase do Assunto e reúne keywords reais que podem sustentá-lo, mostrando o custo antes de qualquer consulta paga.",
+    description: "O Google Ads e o DataForSEO Labs devolvem as candidatas; o Minerador não fabrica termos. Escreva o Assunto ou escolha um já declarado; o botão Buscar sustentação, na linha do Processador e na Revisão Humana, abre este modo com o Assunto preenchido.",
+    sections: [
+      { heading: "Fontes", body: "Google Ads pela frase, e pela frase com a página de destino quando houver; DataForSEO Labs com pesquisas relacionadas, mesma categoria e o que o topo da SERP ranqueia; e os resultados do Google para a frase, reaproveitados do cache quando já existem." },
+      { heading: "Custo", body: "Antes de pesquisar, o diálogo mostra cada fonte, o custo máximo e o que já está em cache. Nada é pago antes de você confirmar." },
+      { heading: "Onde a lista fica", body: "O resultado fica neste navegador. Só vai ao banco quando você envia as selecionadas ao Processador, sem métrica: o volume é medido de novo lá." },
+    ],
+    howToUse: [
+      "Selecione Por Assunto em Tipo de descoberta.",
+      "Escreva o Assunto ou escolha um declarado e confira o custo.",
+      "Selecione as candidatas e envie ao Processador.",
+    ],
+    keywords: ["por assunto", "assunto", "buscar sustentação", "sustentação", "DataForSEO Labs", "Google Ads", "custo", "tronco editorial"],
+  },
+  {
     id: "descobrir-modo-enfoque",
     title: "Controlar o tipo de oportunidade procurada",
     summary: "Tipo de descoberta e Enfoque mudam a forma de organizar a pesquisa, não a origem dos dados.",

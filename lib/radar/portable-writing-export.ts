@@ -57,8 +57,9 @@ import type { RadarSiloExportWritingContext } from "./portable-silo-export.ts";
  *
  * ==================== O QUE ELE NÃO DECIDE ====================
  *
- * Estrutura final, número de H2, contagem de palavras e ordem rígida são do
- * Planejador (invariante 32): a estrutura sai como "ordem sugerida", e a
+ * Estrutura final, número de H2, contagem de palavras e ordem rígida são de
+ * quem redige (invariantes 32 e 48: o Planejador saiu do pipeline em
+ * 2026-09-18 e quem escreve também planeja): a estrutura sai como "ordem sugerida", e a
  * medida dos concorrentes sai rotulada como referência da SERP, nunca meta.
  * O export também não escreve texto: título, ALT e resposta de especialista
  * saem como foram gravados, ou são omitidos com o motivo dito uma vez.
@@ -958,8 +959,8 @@ function colunaEstrutura(
   const corpo = secoes.flatMap(escrever);
   const cabecalho = [
     input.profile === "YOUTUBE"
-      ? "Estrutura do roteiro de vídeo (não é estrutura de artigo). Ordem sugerida; a decisão final é do Planejador."
-      : "Ordem sugerida: a estrutura final e a extensão são decisão do Planejador.",
+      ? "Estrutura do roteiro de vídeo (não é estrutura de artigo). Ordem sugerida; a decisão final é de quem redige."
+      : "Ordem sugerida: a estrutura final e a extensão são decisão de quem redige.",
     ...(medida && typeof medida.median === "number"
       ? [`Referência da SERP, não meta: os concorrentes comparáveis têm mediana de ${numeroBr(medida.median)} palavras${medida.centralRange ? ` (faixa central de ${numeroBr(medida.centralRange[0])} a ${numeroBr(medida.centralRange[1])})` : ""}.`]
       : []),
@@ -1328,7 +1329,7 @@ function colunaVisual(input: RadarPortableExportInput, p: Projecoes): { celula: 
       || [...molduras].some(moldura => moldura.length >= 20 && chave.includes(moldura));
   };
   const aEscrever: string[] = [];
-  const linhas = [`Plano visual do pacote (o Planejador confirma): ${p.visual.cover ? "uma capa" : "sem capa"} e ${p.visual.respite.slice(0, 3).length} respiro(s).`];
+  const linhas = [`Plano visual do pacote (quem redige confirma): ${p.visual.cover ? "uma capa" : "sem capa"} e ${p.visual.respite.slice(0, 3).length} respiro(s).`];
   let respiro = 0;
   for (const imagem of plano) {
     const capa = imagem.imageRole === "COVER";
@@ -1404,7 +1405,7 @@ function colunaPrompt(contexto: RadarWritingArticleContext, especificas: readonl
   }
   const topo = contexto.topRowLabel;
   return [
-    `Escreva em português do Brasil o artigo descrito nesta linha, com as regras gerais da linha "${topo}" deste arquivo (leve as duas linhas juntas para a IA). Em resumo: a estrutura é sugestão, e a estrutura final e a extensão são decisão do Planejador; keyword principal no H1, no primeiro parágrafo e com naturalidade no corpo; cada seção abre respondendo a pergunta dela; sem seção de perguntas frequentes; a SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos; não invente fatos, fontes, depoimentos nem URLs; só os links L1, L2… indicados. Entregue H1, SEO title, meta description e o texto em Markdown, com a data de atualização visível.`,
+    `Escreva em português do Brasil o artigo descrito nesta linha, com as regras gerais da linha "${topo}" deste arquivo (leve as duas linhas juntas para a IA). Em resumo: a estrutura é sugestão, e a estrutura final e a extensão são decisão de quem redige; keyword principal no H1, no primeiro parágrafo e com naturalidade no corpo; cada seção abre respondendo a pergunta dela; sem seção de perguntas frequentes; a SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos; não invente fatos, fontes, depoimentos nem URLs; só os links L1, L2… indicados. Entregue H1, SEO title, meta description e o texto em Markdown, com a data de atualização visível.`,
     ...(especificas.length ? ["Neste artigo:", ...especificas.map(item => `- ${comPontoFinal(item)}`)] : []),
   ].join("\n");
 }
@@ -1624,7 +1625,7 @@ export const RADAR_WRITING_GENERAL_RULES = [
   "Cada seção abre respondendo a pergunta dela, nomeando o termo, de forma compreensível fora da página.",
   "Imagens: uma capa e dois ou três respiros, no ponto indicado em cada artigo. Tom visual: editorial e direto, fotografia ou ilustração de contexto real; a imagem serve à compreensão, não à decoração.",
   "Links internos: só os indicados em cada artigo (L1, L2…), com a âncora e o destino dados; sem criar outros.",
-  "A estrutura e a extensão de cada artigo são sugestões: a decisão final é do Planejador.",
+  "A estrutura e a extensão de cada artigo são sugestões: a decisão final é de quem redige.",
   "Ler não é mudar: se o que você apurar divergir da definição do artigo, registre a divergência para decisão humana; o texto não redefine keyword, intenção nem Silo.",
 ] as const;
 

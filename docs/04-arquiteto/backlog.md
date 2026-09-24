@@ -1,3 +1,27 @@
+## Assunto declarado: fase A da F2 — 2026-09-24
+
+SDD: [Assunto, o tronco editorial declarado](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md) · [ADR-022](../00-produto/decisoes/ADR-022-assunto-tronco-editorial.md). Estado em [estado-atual.md](estado-atual.md).
+
+- [x] **Fase A:** `DeclaredSubjectSchema` `.strict()` como `subject` opcional no `ArticleDNASchema` e no `SiloDNASchema`, com as duas regras do `superRefine` do ArticleDNA (nem secundária nem reforço; fora de `excludedSubjects`). Nenhum caminho grava. Hashes de ArticleDNA e SiloDNA sem `subject` iguais aos de antes.
+- [x] Trava de aprovação no envio (F1.7) e conferência do destino do Assunto contra `marcas.site_url` em `prepareCanonicalHandoff`, com 409 no lote e `approvalAlerts` aditivo.
+- [ ] **Deploy da fase A sozinha e homologação (usuário):** o Arquiteto e o Radar das marcas abrem normalmente; enviar do Minerador uma aprovada depois da ativação sem processo (409), uma aprovada antes (passa) e um Assunto com destino fora do site (409).
+- [ ] **Regra, até a fase B estar homologada:** depois do deploy da fase A, nenhum rollback volta para antes dela. Um artefato com `subject` lido por código anterior derruba o Arquiteto da marca com 503 e tira o artigo do Radar.
+- [ ] **Fase B (Planejado; só depois da fase A no ar e homologada):**
+  - gate de conclusão (`lib/arquiteto/article-formation-confirmation.ts`): Assunto igual à principal só com Volume validado no pacote aprovado (Q7);
+  - conservação: `subjectKeywordId` como campo do artigo na cópia de trabalho, sem `clusterId`, e o predicado `isAnchoredSubject` nos cálculos da SDD F2.3 (elegibilidade no servidor, não agrupadas, cenário, sobras da formação, motor legado, território e proposta, duplicidade e teto);
+  - Assunto sem Volume validado fora da formação automática e da eleição da principal e do slug;
+  - `Assunto · declarado` no `WorkflowImportDialog` e na linha "Vínculo:" da mesa; filtro "Assuntos" com a contagem de artigos; selo "Assunto · aguardando sustentação" em não agrupadas;
+  - sugestões determinísticas de sustentação, só sobre as keywords já recebidas (F2.4), sem leitura nova e sem provider;
+  - SERP opcional da frase pela rota Resultados do Minerador, sob pedido, nas 4 lentes com cache;
+  - IA só como proposta ("Pedir proposta"); aceitar é ato humano;
+  - Assunto no SiloDNA, com sugestão aos artigos novos do Silo;
+  - trocar "disputam o mesmo assunto" por "disputam o mesmo tema" na trava `NO_UNRESOLVED_CANNIBALIZATION` (`:476`);
+  - testes da SDD F2.6.
+- [ ] Radar (F3) e Redator (F4) só ligam o campo depois da fase B homologada.
+- [ ] `approvalAlerts` opcional no `HandoffResponseSchema` (`lib/arquiteto/canonical-workspace.ts`), mudança aditiva: hoje o parse descarta os alertas do servidor (destino e já recebida), e a tela do Minerador não os mostra.
+- [ ] **Decisão do dono:** o SiloDNA deve ter a mesma regra do ArticleDNA, recusando `subject.phrase` em `excludedTopics` do Silo? A SDD não pede, e a fase A não a criou. Se sim, adendo.
+- [ ] A normalização do Assunto no contrato é cópia local da `normalizeKeyword` do Minerador. O teste de equivalência só cobre os casos dele: se o Minerador mudar a regra, rever as duas.
+
 ## 4 lentes no Arquiteto — 2026-09-23
 
 - [x] A1 kgr_light; A2 canônica em depth 20; A3–A6 formação e territorial nas 4 lentes com plano antes de pagar; A7 SERP por keyword; A8 datas e targeting; A9 primária do Silo como proposta com aceite; A10 lentes na tela.

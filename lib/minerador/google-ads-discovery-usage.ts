@@ -28,8 +28,18 @@ function safeCauseCode(error: unknown) {
   return /^[A-Za-z0-9_-]{1,80}$/.test(value) ? value : null;
 }
 
-export function googleAdsDiscoveryUsageKey(operationRequestId: string) {
-  return `google_ads:${operationRequestId}:keyword_discovery`;
+/**
+ * Sufixo opcional por chamada (SDD 2026-09-24, F1b.8): a Pesquisa por Assunto
+ * faz DUAS chamadas Google Ads na mesma operação (`keyword_seed` e `url_seed`),
+ * e a chave fixa colidiria no índice único do ledger. Sem sufixo, a string é
+ * idêntica à de antes — o Descobrir de hoje não muda.
+ */
+export const GOOGLE_ADS_DISCOVERY_USAGE_KEY_SUFFIXES = ["keyword_seed", "url_seed"] as const;
+export type GoogleAdsDiscoveryUsageKeySuffix = typeof GOOGLE_ADS_DISCOVERY_USAGE_KEY_SUFFIXES[number];
+
+export function googleAdsDiscoveryUsageKey(operationRequestId: string, usageKeySuffix?: GoogleAdsDiscoveryUsageKeySuffix | null) {
+  const base = `google_ads:${operationRequestId}:keyword_discovery`;
+  return usageKeySuffix ? `${base}:${usageKeySuffix}` : base;
 }
 
 export async function recordGoogleAdsDiscoveryUsage(input: {
@@ -45,6 +55,8 @@ export async function recordGoogleAdsDiscoveryUsage(input: {
   normalizedCount?: number;
   approvedCount?: number;
   filteredCount?: number;
+  /** Ausente: a chave de hoje. Com sufixo: uma chave por chamada da mesma operação. */
+  usageKeySuffix?: GoogleAdsDiscoveryUsageKeySuffix | null;
   environment?: IntegrationEnvironment;
   dependencies: IntegrationRuntimeDependencies;
 }): Promise<IntegrationUsageEvent> {
@@ -71,7 +83,7 @@ export async function recordGoogleAdsDiscoveryUsage(input: {
       units: 1,
       providerReference: input.providerReference || null,
       errorCode: input.errorCode || null,
-      idempotencyKey: googleAdsDiscoveryUsageKey(input.operationRequestId),
+      idempotencyKey: googleAdsDiscoveryUsageKey(input.operationRequestId, input.usageKeySuffix),
       metadata: {
         operationRequestId: input.operationRequestId,
         discoveryRunId: input.discoveryRunId || null,
@@ -81,6 +93,8 @@ export async function recordGoogleAdsDiscoveryUsage(input: {
         normalizedCount: input.normalizedCount ?? null,
         approvedCount: input.approvedCount ?? null,
         filteredCount: input.filteredCount ?? null,
+        // Só com sufixo: sem ele, o metadata é byte a byte o de antes.
+        ...(input.usageKeySuffix ? { seedKind: input.usageKeySuffix } : {}),
       },
     }, input.dependencies);
 

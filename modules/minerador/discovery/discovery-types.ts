@@ -15,6 +15,13 @@ export const DISCOVERY_VOLUME_RANGES = ["Todos", "Com volume", "Sem média dispo
 
 export const DISCOVERY_MODES = ["keyword", "customer_discovery"] as const;
 export type DiscoveryMode = typeof DISCOVERY_MODES[number];
+/**
+ * Opções do radiogroup "Tipo de descoberta" (SDD 2026-09-24, F1b.1). Lista SÓ
+ * de tela: "subject" (Por Assunto) nunca entra em `DISCOVERY_MODES`, que
+ * alimenta o `z.enum` da rota do Google Ads e o `source_data` da run.
+ */
+export const DISCOVERY_SEARCH_KINDS = [...DISCOVERY_MODES, "subject"] as const;
+export type DiscoverySearchKind = typeof DISCOVERY_SEARCH_KINDS[number];
 export const DISCOVERY_CUSTOMER_FOCUSES = ["all_customer", "hire"] as const;
 export type DiscoveryCustomerFocus = typeof DISCOVERY_CUSTOMER_FOCUSES[number];
 

@@ -340,13 +340,13 @@ test("D · a contribuição ACEITA do especialista não some: sai com o aviso de
 test("E · invariante 32: a estrutura é ordem SUGERIDA e a medida dos concorrentes é referência, nunca meta", () => {
   const { dados } = linhasDe(EXPORT_DO_SILO().files![0].csv);
   const pilar = dados[1];
-  assert.match(pilar.estrutura, /^Ordem sugerida: a estrutura final e a extensão são decisão do Planejador\./);
+  assert.match(pilar.estrutura, /^Ordem sugerida: a estrutura final e a extensão são decisão de quem redige\./);
   assert.match(pilar.estrutura, /Referência da SERP, não meta: os concorrentes comparáveis têm mediana de [\d.]+ palavras/);
   for (const linha of dados) {
     const tudo = RADAR_WRITING_EXPORT_COLUMNS.map(coluna => linha[coluna]).join("\n");
     assert.equal(/~\s?\d+ palavras|\d+ H2\b|com as extensões indicadas|palavras por seção/i.test(tudo), false, `${linha.ordem}: meta de extensão ou de H2 imposta`);
   }
-  assert.match(pilar.prompt, /a estrutura final e a extensão são decisão do Planejador/);
+  assert.match(pilar.prompt, /a estrutura final e a extensão são decisão de quem redige/);
 });
 
 test("E · o título gravado sai como foi, ou é omitido com o motivo — nunca reescrito", () => {
@@ -412,7 +412,7 @@ test("G · plano visual: uma capa e até três respiros, e ALT de preenchimento 
   const comPlano = dados.slice(1).filter(linha => linha.plano_visual);
   assert.ok(comPlano.length >= 2, "as linhas que servem para escrever trazem o plano visual");
   for (const linha of comPlano) {
-    assert.match(linha.plano_visual, /^Plano visual do pacote \(o Planejador confirma\): uma capa e [0-3] respiro\(s\)\./);
+    assert.match(linha.plano_visual, /^Plano visual do pacote \(quem redige confirma\): uma capa e [0-3] respiro\(s\)\./);
     assert.equal(/ALT: (Ao final|Cobrir com clareza|Reunir o que|Declarar o critério|Capturar a intenção)/.test(linha.plano_visual), false, `${linha.ordem}: ALT de preenchimento`);
     assert.equal(/legenda: (Bloco comercial|Gancho)\b/.test(linha.plano_visual), false);
   }

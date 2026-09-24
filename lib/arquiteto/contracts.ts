@@ -66,6 +66,44 @@ export const ApprovedPackageRefSchema = z.object({
 }).strict();
 export type ApprovedPackageRef = z.infer<typeof ApprovedPackageRefSchema>;
 
+/**
+ * O ASSUNTO DECLARADO: o tronco editorial de um ArticleDNA ou de um SiloDNA.
+ *
+ * Fonte: `docs/compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md`, F2.1.
+ * É uma frase que o HUMANO declarou no Minerador como tronco, mesmo sem volume
+ * de busca. Não é keyword do artigo: fica fora de `keywordReferences` e do teto
+ * de `MAX_KEYWORDS_PER_ARTICLE`, e não existe papel "Assunto" em `role`. A
+ * frase, a nota e o destino viajam como snapshot, para o Radar e o Redator não
+ * hidratarem outra keyword. A principal continua dona do slug, do KGR e do H1.
+ *
+ * FASE A: o contrato só TOLERA o campo; nenhum caminho o grava. Depois do
+ * deploy desta fase, rollback de código nunca volta para antes dela: um único
+ * artefato gravado com `subject` derrubaria a leitura `.strict()` do Arquiteto
+ * e tiraria o artigo do Radar.
+ */
+export const DeclaredSubjectSchema = z.object({
+  /** A keyword declarada Assunto no Minerador. */
+  keywordId: z.string().min(1),
+  /** Versão e hash do pacote aprovado em que a declaração foi lida. */
+  approvedPackageRef: ApprovedPackageRefSchema,
+  phrase: z.string().min(1),
+  note: z.string().min(1).max(280).nullable(),
+  destinationUrl: z.string().url().nullable(),
+  /** Humano (`auth.users.id`). Proposta de IA só entra aqui depois de aceita. */
+  attachedBy: z.string().min(1),
+  attachedAt: z.string().min(1),
+}).strict();
+export type DeclaredSubject = z.infer<typeof DeclaredSubjectSchema>;
+
+/**
+ * Keyword normalizada, pela mesma regra do Minerador (`normalizeKeyword`, em
+ * `lib/minerador/keyword-import-core.ts`): sem acento, sem caixa, espaços
+ * colapsados. Cópia local para o contrato não depender do núcleo de import;
+ * `tests/arquiteto-assunto-schema.test.mts` confere a equivalência.
+ */
+const normalizeSubjectKeyword = (value: string) =>
+  value.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLocaleLowerCase("pt-BR").replace(/\s+/g, " ");
+
 export const VersionReferenceSchema = z.object({
   entityId: z.string().min(1),
   versionId: z.string().min(1),
@@ -964,6 +1002,15 @@ export const ArticleDNASchema = z.object({
   secondaryKeywordIds: z.array(z.string().min(1)).max(5),
   narrativeReinforcementIds: z.array(z.string().min(1)),
   keywordReferences: z.array(ArticleKeywordReferenceSchema).min(1).max(MAX_KEYWORDS_PER_ARTICLE),
+  /**
+   * Tronco editorial declarado pelo humano. OPCIONAL: ausência = artigo sem
+   * Assunto, com parse e hash idênticos aos de antes. Vale para qualquer
+   * unidade (artigo, landing page, página de serviço). Fora de
+   * `keywordReferences` e do teto; o mesmo Assunto pode ser o tronco de vários
+   * artigos. Se ele pode ser a própria principal é decisão do gate de
+   * conclusão (exige Volume validado), não deste schema.
+   */
+  subject: DeclaredSubjectSchema.optional(),
   siloId: z.string().nullable(),
   /**
    * Território de origem no fluxo Silo-first. OPCIONAL por retrocompatibilidade:
@@ -1048,6 +1095,19 @@ export const ArticleDNASchema = z.object({
   if (expectedIds.length > MAX_KEYWORDS_PER_ARTICLE || expectedIds.filter(id => id !== article.principalKeywordId).length > 5) {
     context.addIssue({ code: "custom", path: ["keywordReferences"], message: "Um ArticleDNA aceita uma principal e no maximo cinco keywords de apoio." });
   }
+  // O Assunto é tronco, não apoio. Estas regras só olham o próprio artigo:
+  // o mesmo Assunto em vários artigos é permitido (D3), e o Assunto como
+  // principal é decidido no gate de conclusão, que conhece o Volume.
+  if (article.subject) {
+    const supportIds = new Set([...article.secondaryKeywordIds, ...article.narrativeReinforcementIds]);
+    if (supportIds.has(article.subject.keywordId)) {
+      context.addIssue({ code: "custom", path: ["subject", "keywordId"], message: "O Assunto declarado não pode ser secundária nem reforço do mesmo artigo." });
+    }
+    const phrase = normalizeSubjectKeyword(article.subject.phrase);
+    if (article.excludedSubjects.some(excluded => normalizeSubjectKeyword(excluded) === phrase)) {
+      context.addIssue({ code: "custom", path: ["subject", "phrase"], message: "O Assunto declarado não pode estar entre os assuntos excluídos do mesmo artigo." });
+    }
+  }
 });
 
 export type ArticleDNA = z.infer<typeof ArticleDNASchema>;
@@ -1106,6 +1166,12 @@ export const SiloDNASchema = z.object({
   centralEntity: z.string(),
   centralEntitySource: z.enum(["manual", "keyword_dna"]).optional(),
   centralKeywordDnaRef: VersionReferenceSchema.optional(),
+  /**
+   * Tronco editorial declarado pelo humano para o Silo. OPCIONAL, como no
+   * ArticleDNA. `centralEntity` NÃO recebe a frase do Assunto: a SiloPage tira
+   * H1 e title de lá, e a principal continua dona do H1 (D1).
+   */
+  subject: DeclaredSubjectSchema.optional(),
   /**
    * Proveniência de INSUMO: sobre quais pacotes aprovados o Silo foi fechado.
    *

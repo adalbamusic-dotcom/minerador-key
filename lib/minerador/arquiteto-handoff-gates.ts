@@ -3,12 +3,15 @@ import { isHumanReviewCompleted } from "./human-review.ts";
 import { hasCompleteLogicalOutputContract } from "./logical-processor.ts";
 import { resolveMineradorProcessState } from "./process-state.ts";
 import { isFullyConsolidatedQualification, type KeywordSemanticQualification } from "./keyword-semantic-qualification.ts";
+import { resolveHandoffApprovalGate, type HandoffApprovalGate } from "./approved-package.ts";
 
 export type MineradorHandoffKeyword = {
   id: string;
   keyword?: string;
   brand_id?: string | null;
   status?: string | null;
+  /** Intenção da coluna: a Lógica completa a considera, como na aprovação. */
+  intent?: string | null;
   volume_search?: number | null;
   results_allintitle?: number | null;
   analise_semantica?: Record<string, unknown> | null;
@@ -28,6 +31,11 @@ export type MineradorArquitetoHandoffGate = {
   /** Intenção e Funil fechados por evidência conclusiva persistida. */
   semanticAxesConsolidated: boolean;
   statusAllowed: boolean;
+  /**
+   * Trava de aprovação no envio (SDD 2026-09-24, F1.7), o MESMO veredito do
+   * servidor. `null` quando o status ou a marca já impedem o envio.
+   */
+  approvalGate: HandoffApprovalGate | null;
 };
 
 export type MineradorArquitetoHandoffBatchGate = {
@@ -35,6 +43,8 @@ export type MineradorArquitetoHandoffBatchGate = {
   reason: string;
   evaluations: MineradorArquitetoHandoffGate[];
   blocked: MineradorArquitetoHandoffGate[];
+  /** Passam, mas a trava de aprovação tem o que dizer (anteriores à ativação ou já recebidas). */
+  approvalAlerts?: MineradorArquitetoHandoffGate[];
 };
 
 function normalizedStatus(value: unknown): string {
@@ -42,16 +52,21 @@ function normalizedStatus(value: unknown): string {
 }
 
 /**
- * Estado de processo é informação, nunca veto editorial. Lógica, Volume,
- * Resultados, KGR, Revisão e a conclusividade da SERP continuam no
- * read-model para leitura e proveniência, mas não bloqueiam o envio: quem
- * decide enviar é o humano, sobre o estado que a keyword tem hoje.
+ * Estado de processo é informação: Revisão e a conclusividade da SERP seguem
+ * no read-model para leitura e proveniência, sem vetar o envio.
  *
- * Resta apenas integridade técnica: a keyword pertence à Brand ativa e o
+ * EMENDA (SDD 2026-09-24, F1.7): a trava de APROVAÇÃO — Lógica, Volume,
+ * Resultados e KGR, ou só a Lógica para Assunto declarado — passa a valer no
+ * envio para aprovações registradas a partir de `SERVER_APPROVAL_GATE_SINCE`.
+ * As anteriores passam com alerta; a já recebida pelo Arquiteto também. O
+ * veredito sai de `resolveHandoffApprovalGate`, o mesmo do servidor.
+ *
+ * Fora isso, resta integridade técnica: a keyword pertence à Brand ativa e o
  * status editorial permite o envio.
  */
 function gateReason(input: Omit<MineradorArquitetoHandoffGate, "keywordId" | "ok" | "reason">): string | undefined {
   if (!input.statusAllowed) return "O status precisa permitir o envio ao Arquiteto.";
+  if (input.approvalGate?.verdict === "refuse") return input.approvalGate.reason || undefined;
   return undefined;
 }
 
@@ -59,6 +74,7 @@ export function evaluateMineradorArquitetoHandoff(
   keyword: MineradorHandoffKeyword,
   brandId: string | null | undefined,
   qualification?: KeywordSemanticQualification | null,
+  options: { alreadyReceived?: boolean } = {},
 ): MineradorArquitetoHandoffGate {
   const semantic = keyword.analise_semantica || {};
   const processor = deriveProcessorRevalidation({
@@ -99,6 +115,15 @@ export function evaluateMineradorArquitetoHandoff(
     serpEvidencePersisted: Boolean(qualification),
     semanticAxesConsolidated: isFullyConsolidatedQualification(qualification),
     statusAllowed: statusAllowed && brandMatches,
+    approvalGate: statusAllowed && brandMatches
+      ? resolveHandoffApprovalGate({
+        semantic,
+        intent: keyword.intent,
+        volumeSearch: keyword.volume_search,
+        resultsAllintitle: keyword.results_allintitle,
+        alreadyReceived: options.alreadyReceived === true,
+      })
+      : null,
   };
   const reason = !brandMatches
     ? "A keyword não pertence à Brand ativa."
@@ -115,6 +140,8 @@ export function evaluateMineradorArquitetoHandoffBatch(input: {
   keywords: readonly MineradorHandoffKeyword[];
   brandId: string | null | undefined;
   qualifications?: Readonly<Record<string, KeywordSemanticQualification>>;
+  /** Ids que o Arquiteto já recebeu, quando a tela os conhece: só alerta. */
+  alreadyReceivedKeywordIds?: ReadonlySet<string>;
 }): MineradorArquitetoHandoffBatchGate {
   if (!input.brandId) {
     return { ok: false, reason: "A Brand ativa é necessária para enviar ao Arquiteto.", evaluations: [], blocked: [] };
@@ -122,14 +149,20 @@ export function evaluateMineradorArquitetoHandoffBatch(input: {
   if (!input.keywords.length) {
     return { ok: false, reason: "Selecione ao menos uma keyword para enviar ao Arquiteto.", evaluations: [], blocked: [] };
   }
-  const evaluations = input.keywords.map(keyword => evaluateMineradorArquitetoHandoff(keyword, input.brandId, input.qualifications?.[keyword.id] || null));
+  const evaluations = input.keywords.map(keyword => evaluateMineradorArquitetoHandoff(keyword, input.brandId, input.qualifications?.[keyword.id] || null, {
+    alreadyReceived: input.alreadyReceivedKeywordIds?.has(keyword.id) === true,
+  }));
   const blocked = evaluations.filter(evaluation => !evaluation.ok);
-  if (blocked.length === 0) return { ok: true, reason: "Pronto para enviar ao Arquiteto.", evaluations, blocked };
+  const alerts = evaluations.filter(evaluation => evaluation.ok && evaluation.approvalGate?.verdict === "alert");
+  // Aditivo: só aparece quando há alerta, para o objeto de hoje não mudar.
+  const approvalAlerts = alerts.length ? { approvalAlerts: alerts } : {};
+  if (blocked.length === 0) return { ok: true, reason: "Pronto para enviar ao Arquiteto.", evaluations, blocked, ...approvalAlerts };
   const firstReason = blocked.find(evaluation => evaluation.reason)?.reason || "O envio exige status aprovado na Brand ativa.";
   return {
     ok: false,
     reason: blocked.length === 1 ? firstReason : `${blocked.length} keyword(s) ainda não podem ser enviadas. ${firstReason}`,
     evaluations,
     blocked,
+    ...approvalAlerts,
   };
 }

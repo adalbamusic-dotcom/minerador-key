@@ -57,6 +57,19 @@ import { mineradorLastOrganizationKey, mineradorOrganizationButtonSummary, miner
 import { primaryKeywordPolicyLabel, readPrimaryKeywordPolicy, setPrimaryKeywordPolicy, type PrimaryKeywordPolicy } from "@/lib/minerador/primary-keyword-policy";
 import { keywordPageTypeLabel, setKeywordPageType } from "@/lib/minerador/keyword-page-type";
 import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
+import { isKeywordSubjectActorId, KEYWORD_SUBJECT_NOTE_MAX, setKeywordSubject, withdrawKeywordSubject } from "@/lib/minerador/keyword-subject";
+import { subjectDestinationCatalogKey, validateSubjectDestination, type SubjectDestinationCatalogHit } from "@/lib/minerador/subject-destination";
+import { planVinculoBatch, VINCULO_BATCH_READBACK_COLUMNS, type VinculoBatchReadbackRow } from "@/lib/minerador/vinculo-batch";
+import {
+  describeVinculoBatchConfirmation,
+  describeVinculoBatchResult,
+  isSubjectDeclareChoice,
+  keywordsWithoutLogic,
+  pickKeywordSubjectKeys,
+  VINCULO_BATCH_CHOICE_GROUPS,
+  vinculoBatchActionFromChoice,
+  vinculoReadbackConfirmed,
+} from "@/lib/minerador/vinculo-screen";
 import { applyFunnelQualification, classifyKeywordFunnel } from "@/lib/minerador/keyword-qualification";
 import { readVolumeEligibility, volumeEligibilityLabel } from "@/lib/minerador/volume-eligibility";
 import { formatGoogleAdsCpcTableValue } from "@/lib/minerador/google-ads-demand";
@@ -93,6 +106,7 @@ import { KeywordTableColumnResizeHandle, KeywordTableRowResizeHandle, useKeyword
 import { MineradorProcessAction } from "./minerador-process-action";
 import { DiscoverySourceControls, type DiscoverySourceControlsHandle, type DiscoverySourceResponse } from "./discovery/discovery-source-controls";
 import { DiscoverySourceTopbarActions } from "./discovery/discovery-source-topbar-actions";
+import { subjectSearchLinkHref } from "./discovery/subject-search-model";
 import {
   createAuthenticatedBrowserClient,
   getCurrentSupabaseToken,
@@ -347,6 +361,12 @@ const toSlug = (text: string) => {
  */
 let fonteDaListagem: string = MINERADOR_LISTING_VIEW;
 
+/** Teto de ids por leitura `.in("id", ...)`: a lista vai na URL do PostgREST. */
+const KEYWORD_READBACK_ID_CHUNK = 200;
+
+/** Instante fixo da prévia do Vínculo em grupo: a prévia não grava, e a gravação usa o instante real. */
+const VINCULO_BATCH_PREVIEW_AT = "1970-01-01T00:00:00+00:00";
+
 /** A view ainda não existe no banco? (PostgREST não a acha no cache do schema.) */
 function viewDeListagemAusente(error: { code?: string | null; message?: string | null } | null): boolean {
   if (!error) return false;
@@ -548,20 +568,28 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     return Object.fromEntries(current) as Record<string, KeywordSemanticQualification>;
   }, [supabase, actorUserId, qualificationVersionCache]);
 
-  const readCanonicalKeywordRows = useCallback(async (ids: readonly string[]): Promise<Map<string, KeywordItem>> => {
+  const readCanonicalKeywordRows = useCallback(async (ids: readonly string[], options: { source?: string } = {}): Promise<Map<string, KeywordItem>> => {
     if (!selectedBrandId) throw new Error("Marca ativa ausente para o readback do Processador.");
     const uniqueIds = [...new Set(ids)];
     if (uniqueIds.length === 0) return new Map();
-    const rows = await withSupabaseSelectRetry(async () => {
-      const { data, error } = await supabase
-        .from("minerador_keywords")
-        .select("*")
-        .eq("brand_id", selectedBrandId)
-        .is("deleted_at", null)
-        .in("id", uniqueIds);
-      if (error) throw error;
-      return (data || []) as KeywordItem[];
-    });
+    const source = options.source || MINERADOR_KEYWORDS_TABLE;
+    const rows: KeywordItem[] = [];
+    // Os ids viajam na URL do PostgREST: blocos de 200, como o núcleo do
+    // import. A completude continua conferida sobre o total.
+    for (let start = 0; start < uniqueIds.length; start += KEYWORD_READBACK_ID_CHUNK) {
+      const chunk = uniqueIds.slice(start, start + KEYWORD_READBACK_ID_CHUNK);
+      const chunkRows = await withSupabaseSelectRetry(async () => {
+        const { data, error } = await supabase
+          .from(source)
+          .select("*")
+          .eq("brand_id", selectedBrandId)
+          .is("deleted_at", null)
+          .in("id", chunk);
+        if (error) throw error;
+        return (data || []) as KeywordItem[];
+      });
+      rows.push(...chunkRows);
+    }
     const byId = new Map(rows.map(row => [String(row.id), row]));
     if (byId.size !== uniqueIds.length) {
       throw new Error("O readback canônico do Processador não retornou todas as keywords do lote.");
@@ -600,6 +628,35 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const [volumeMeasuring, setVolumeMeasuring] = useState(false);
   const [allintitleMeasuring, setAllintitleMeasuring] = useState(false);
   const [moreActionsOpen, setMoreActionsOpen] = useState(false);
+  // Vínculo em grupo (SDD 2026-09-24, F1.6): a escolha fica aberta numa
+  // confirmação até o humano gravar; nota e destino só para "Declarar".
+  const [vinculoBatchDialog, setVinculoBatchDialog] = useState<{ choice: string; note: string; destination: string } | null>(null);
+  // Foco da confirmação: entra no diálogo ao abrir e volta ao select que a
+  // abriu ao fechar; Escape fecha pelo document, como o DeleteConfirmation.
+  const vinculoBatchTriggerRef = useRef<HTMLElement | null>(null);
+  const vinculoBatchDialogRef = useRef<HTMLElement | null>(null);
+  // O select de "Mais ações" some com o menu: o foco volta ao botão do menu.
+  const moreActionsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const vinculoBatchDialogOpen = vinculoBatchDialog !== null;
+  const vinculoBatchDeclareOpen = vinculoBatchDialog ? isSubjectDeclareChoice(vinculoBatchDialog.choice) : false;
+  useEffect(() => {
+    if (!vinculoBatchDialogOpen) return;
+    // "Declarar" foca a nota (autoFocus); as outras escolhas focam o diálogo.
+    if (!vinculoBatchDeclareOpen) vinculoBatchDialogRef.current?.focus();
+    return () => {
+      const trigger = vinculoBatchTriggerRef.current;
+      vinculoBatchTriggerRef.current = null;
+      if (trigger?.isConnected) trigger.focus();
+    };
+  }, [vinculoBatchDialogOpen, vinculoBatchDeclareOpen]);
+  useEffect(() => {
+    if (!vinculoBatchDialogOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !updating) setVinculoBatchDialog(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [vinculoBatchDialogOpen, updating]);
   const [architectHandoffSending, setArchitectHandoffSending] = useState(false);
   const moreActionsRef = useRef<HTMLDivElement>(null);
   const bulkProgressLockRef = useRef(false);
@@ -930,8 +987,28 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       showNotification("error", "Selecione pelo menos uma keyword para processar a lógica.");
       return;
     }
+    await runLogicalProcess(targets);
+  };
+
+  /*
+   * A ROTINA DO BOTÃO LÓGICA, UMA SÓ.
+   *
+   * O botão a usa sobre a seleção; a Lógica automática do Assunto (SDD
+   * 2026-09-24, F1.7b) a usa sobre as keywords recém-declaradas que ainda não
+   * têm Lógica. Mesmo motor (`processLogicalKeywordDna`), mesmo progresso,
+   * mesma escrita e mesmo readback: não existe caminho paralelo.
+   *
+   * Os itens chegam com o `analise_semantica` que está no banco — inclusive a
+   * declaração recém-gravada —, porque a Lógica regrava o JSONB inteiro. A
+   * rotina nunca aprova nada.
+   */
+  const runLogicalProcess = async (targets: KeywordItem[], options: { automatic?: boolean } = {}) => {
+    if (targets.length === 0) return;
     const executionRequestId = crypto.randomUUID();
-    if (!startBulkProgress("logic", targets.length, targets.map(item => item.id), executionRequestId)) return;
+    if (!startBulkProgress("logic", targets.length, targets.map(item => item.id), executionRequestId)) {
+      if (options.automatic) showNotification("info", "A Lógica automática não começou porque outro processo está em curso. Use o botão Lógica nas keywords declaradas.");
+      return;
+    }
 
     let outcome: "success" | "error" = "success";
     try {
@@ -976,7 +1053,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           metadata: { executionRequestId, failures: result.failureReasons },
         });
       } else {
-        showNotification("success", `${targets.length} keyword(s) processadas; leitura lógica atualizada para revisão humana.`, {
+        showNotification("success", options.automatic
+          ? `Lógica automática do Assunto: ${targets.length} keyword(s) processadas. Nada foi aprovado; a aprovação continua sendo sua.`
+          : `${targets.length} keyword(s) processadas; leitura lógica atualizada para revisão humana.`, {
           metadata: { executionRequestId },
         });
       }
@@ -985,7 +1064,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       setProcessAttempt(targets.map(item => item.id), "logic", "failed", executionRequestId);
       console.error("Erro ao processar lógica das keywords:", error);
       setDnaProcessing(false);
-      showNotification("error", "Não foi possível qualificar as keywords selecionadas.", {
+      showNotification("error", options.automatic
+        ? `A Lógica automática não completou${error instanceof Error && error.message ? `: ${error.message}` : "."} A declaração do Assunto foi mantida; use o botão Lógica para tentar de novo.`
+        : "Não foi possível qualificar as keywords selecionadas.", {
         code: "LOGIC_OUTPUT_CONTRACT_FAILED",
         stage: "required_output_contract",
         metadata: { executionRequestId },
@@ -993,6 +1074,275 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     } finally {
       finishBulkProgress(outcome);
     }
+  };
+
+  /*
+   * ASSUNTO NO PROCESSADOR (SDD 2026-09-24, F1.4, F1.5, F1.6 e F1.7b).
+   *
+   * Três portas declaram: o import com "Assunto" (rota própria, outra parte),
+   * a Revisão Humana e o select "Vínculo" do rodapé. As três gravam pelo
+   * domínio (`setKeywordSubject` / `withdrawKeywordSubject` /
+   * `planVinculoBatch`) com o `auth.users.id` da sessão — nunca e-mail, nunca
+   * "local-user"; sem ele, nada é gravado. A marca é a ativa da rota.
+   */
+
+  /** Lógica automática depois de declarar: só nas que ainda não a têm. */
+  const runAutomaticSubjectLogic = async (declaredItems: KeywordItem[]) => {
+    const targets = keywordsWithoutLogic(declaredItems);
+    if (targets.length === 0) return;
+    // O progresso vive na barra do rodapé, que só aparece com seleção: sem
+    // seleção (o import não seleciona), os alvos passam a ser a seleção, para
+    // o humano ver o mesmo progresso do botão Lógica. Seleção existente fica.
+    if (selectedIds.size === 0) setSelectedIds(new Set(targets.map(item => item.id)));
+    await runLogicalProcess(targets, { automatic: true });
+  };
+
+  /**
+   * Catálogo do site, informativo: uma linha, colunas estreitas, pela chave
+   * canônica da marca. Falha de leitura não bloqueia a declaração.
+   */
+  const lookupSubjectDestinationCatalog = async (rawUrl: string | null | undefined): Promise<SubjectDestinationCatalogHit | null> => {
+    if (!selectedBrandId) return null;
+    const key = subjectDestinationCatalogKey(activeBrand?.site_url || null, rawUrl);
+    if (!key) return null;
+    try {
+      const { data, error } = await supabase
+        .from("brand_site_catalog_entries")
+        .select("normalized_url,page_type,title,h1")
+        .eq("marca_id", selectedBrandId)
+        .eq("normalized_url", key)
+        .maybeSingle();
+      if (error || !data) return null;
+      const entry = data as { page_type?: string | null; title?: string | null; h1?: string | null };
+      return { pageType: (entry.page_type || null) as SubjectDestinationCatalogHit["pageType"], title: entry.title || entry.h1 || null };
+    } catch {
+      return null;
+    }
+  };
+
+  const handleSubjectReviewAction = async (item: KeywordItem, action: Extract<HumanReviewAction, { type: "subject" }>) => {
+    if (!selectedBrandId) return;
+    const actorId = actorUserId;
+    if (!isKeywordSubjectActorId(actorId)) {
+      showNotification("error", "Declarar ou retirar o Assunto exige o usuário autenticado. Entre de novo e repita.", { code: "SUBJECT_ACTOR_REQUIRED" });
+      return;
+    }
+    const changedAt = new Date().toISOString();
+    let destinationNotice: string | null = null;
+    let written;
+    if (action.declared) {
+      const catalog = await lookupSubjectDestinationCatalog(action.destinationUrl);
+      const destination = validateSubjectDestination({ rawUrl: action.destinationUrl, brandSiteUrl: activeBrand?.site_url || null, checkedAt: changedAt, catalog });
+      if (!destination.ok) {
+        showNotification("error", destination.reason, { code: destination.code });
+        return;
+      }
+      destinationNotice = destination.notice;
+      written = setKeywordSubject(item.analise_semantica, {
+        note: action.note ?? null,
+        destinationUrl: destination.destinationUrl,
+        destinationCheck: destination.destinationCheck,
+        actorId,
+        changedAt,
+        origin: "review",
+      });
+    } else {
+      written = withdrawKeywordSubject(item.analise_semantica, { actorId, changedAt, origin: "review" });
+    }
+    if (!written.ok) {
+      showNotification("error", written.reason, { code: written.code });
+      return;
+    }
+    if (!written.changed) {
+      showNotification("info", action.declared ? "Nada mudou: o Assunto já está declarado com esta nota e este destino." : "Nada mudou: esta keyword não tem Assunto declarado.");
+      return;
+    }
+    const semantic = written.semantic as KeywordSemantic;
+    setUpdating(true);
+    let persisted = false;
+    try {
+      const { error } = await supabase
+        .from("minerador_keywords")
+        .update({ analise_semantica: semantic })
+        .eq("id", item.id)
+        .eq("brand_id", selectedBrandId)
+        .is("deleted_at", null);
+      if (error) throw error;
+      // Readback estreito: só as três declarações, nunca a linha inteira.
+      const { data: readback, error: readbackError } = await supabase
+        .from("minerador_keywords")
+        .select(VINCULO_BATCH_READBACK_COLUMNS)
+        .eq("id", item.id)
+        .eq("brand_id", selectedBrandId)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (readbackError) throw readbackError;
+      const update = { id: item.id, brandId: selectedBrandId, keyword: item.keyword, semantic, demotesApproval: false };
+      if (!vinculoReadbackConfirmed(update, readback as VinculoBatchReadbackRow | null)) {
+        throw new Error("O Assunto foi enviado, mas o readback não confirmou a declaração nesta marca.");
+      }
+      persisted = true;
+      pushKeywordsHistory(keywords, action.declared ? `Declarar Assunto em ${item.keyword}` : `Retirar Assunto de ${item.keyword}`);
+      setKeywords(current => current.map(keyword => keyword.id === item.id ? { ...keyword, analise_semantica: semantic } : keyword));
+      // Uma revisão aberta guarda a própria cópia do DNA: leva a declaração
+      // para ela, senão concluir a revisão a apagaria.
+      setHumanReviewDrafts(current => current[item.id]
+        ? { ...current, [item.id]: { ...current[item.id], semantic: { ...current[item.id].semantic, ...pickKeywordSubjectKeys(semantic) } as KeywordSemantic } }
+        : current);
+      showNotification("success", [
+        action.declared ? "Assunto declarado e conferido." : "Assunto retirado; o histórico da declaração foi mantido.",
+        destinationNotice,
+      ].filter(Boolean).join(" "));
+    } catch (error) {
+      showNotification("error", error instanceof Error ? error.message : "Não foi possível gravar o Assunto.", { code: "SUBJECT_REVIEW_WRITE_FAILED" });
+    } finally {
+      setUpdating(false);
+    }
+    if (persisted && action.declared) await runAutomaticSubjectLogic([{ ...item, analise_semantica: semantic }]);
+  };
+
+  /*
+   * VÍNCULO EM GRUPO (F1.6). Mesmo padrão do lote de KGR — plano puro, update
+   * por id + brand_id + deleted_at is null, progresso —, mas com readback
+   * estreito das três declarações e o ator da sessão. O estado local recebe o
+   * `analise_semantica` escrito; o readback só confirma.
+   */
+  const handleBatchVinculo = async (dialog: { choice: string; note: string; destination: string }) => {
+    if (!selectedBrandId || selectedIds.size === 0) return;
+    const actorId = actorUserId;
+    if (!isKeywordSubjectActorId(actorId)) {
+      showNotification("error", "Aplicar o Vínculo em grupo exige o usuário autenticado. Entre de novo e repita.", { code: "VINCULO_ACTOR_REQUIRED" });
+      return;
+    }
+    const action = vinculoBatchActionFromChoice(dialog.choice, { note: dialog.note, destinationUrl: dialog.destination });
+    if (!action) {
+      showNotification("error", "Escolha uma ação do Vínculo.");
+      return;
+    }
+    const changedAt = new Date().toISOString();
+    const destinationCatalog = action.kind === "subject_declare" && action.destinationUrl
+      ? await lookupSubjectDestinationCatalog(action.destinationUrl)
+      : null;
+    const plan = planVinculoBatch({
+      keywords: keywords.filter(item => selectedIds.has(item.id)),
+      brandId: selectedBrandId,
+      action,
+      actorId,
+      changedAt,
+      brandSiteUrl: activeBrand?.site_url || null,
+      destinationCatalog,
+    });
+    if (!plan.ok) {
+      showNotification("error", plan.reason, { code: plan.code });
+      return;
+    }
+    setVinculoBatchDialog(null);
+    if (plan.updates.length === 0) {
+      showNotification("info", describeVinculoBatchConfirmation(plan).summary);
+      return;
+    }
+    const executionRequestId = crypto.randomUUID();
+    const targetIds = plan.updates.map(update => update.id);
+    if (!startBulkProgress("review", plan.updates.length, targetIds, executionRequestId)) return;
+    pushKeywordsHistory(keywords, `${plan.actionLabel} em ${plan.updates.length} keyword(s)`);
+    setUpdating(true);
+    let outcome: "success" | "error" = "success";
+    const persistedIds: string[] = [];
+    const confirmedIds: string[] = [];
+    try {
+      for (const update of plan.updates) {
+        const { error } = await supabase
+          .from("minerador_keywords")
+          .update({ analise_semantica: update.semantic })
+          .eq("id", update.id)
+          .eq("brand_id", update.brandId)
+          .is("deleted_at", null);
+        if (error) throw error;
+        persistedIds.push(update.id);
+        updateBulkProgress(persistedIds.length, plan.updates.length, `Vínculo ${persistedIds.length}/${plan.updates.length}`);
+      }
+      // Readback em blocos de 200 ids: a lista vai na URL do PostgREST.
+      const readbackRows: VinculoBatchReadbackRow[] = [];
+      for (let start = 0; start < persistedIds.length; start += KEYWORD_READBACK_ID_CHUNK) {
+        const readbackChunk = persistedIds.slice(start, start + KEYWORD_READBACK_ID_CHUNK);
+        const chunkRows = await withSupabaseSelectRetry(async () => {
+          const { data, error } = await supabase
+            .from("minerador_keywords")
+            .select(VINCULO_BATCH_READBACK_COLUMNS)
+            .eq("brand_id", selectedBrandId)
+            .is("deleted_at", null)
+            .in("id", readbackChunk);
+          if (error) throw error;
+          return (data || []) as VinculoBatchReadbackRow[];
+        });
+        readbackRows.push(...chunkRows);
+      }
+      const rowById = new Map(readbackRows.map(row => [String(row.id), row]));
+      for (const update of plan.updates) {
+        if (persistedIds.includes(update.id) && vinculoReadbackConfirmed(update, rowById.get(update.id))) confirmedIds.push(update.id);
+      }
+      const writtenById = new Map(plan.updates.filter(update => persistedIds.includes(update.id)).map(update => [update.id, update.semantic as KeywordSemantic]));
+      setKeywords(current => current.map(item => writtenById.has(item.id) ? { ...item, analise_semantica: writtenById.get(item.id) } : item));
+      setHumanReviewDrafts(current => {
+        let changed = false;
+        const next = { ...current };
+        for (const [id, semantic] of writtenById) {
+          if (!next[id]) continue;
+          changed = true;
+          next[id] = { ...next[id], semantic: { ...next[id].semantic, ...pickKeywordSubjectKeys(semantic), keyword_page_type: semantic.keyword_page_type, primary_keyword_policy: semantic.primary_keyword_policy } as KeywordSemantic };
+        }
+        return changed ? next : current;
+      });
+      const unconfirmed = persistedIds.length - confirmedIds.length;
+      if (unconfirmed > 0) throw new Error(`O Vínculo foi enviado, mas o readback não confirmou ${unconfirmed} keyword(s).`);
+      setProcessAttempt(confirmedIds, "review", "success", executionRequestId);
+      showNotification("success", describeVinculoBatchResult(plan, confirmedIds.length), { metadata: { executionRequestId } });
+    } catch (error) {
+      outcome = "error";
+      const failedIds = targetIds.filter(id => !confirmedIds.includes(id));
+      if (confirmedIds.length > 0) setProcessAttempt(confirmedIds, "review", "success", executionRequestId);
+      if (failedIds.length > 0) setProcessAttempt(failedIds, "review", "failed", executionRequestId);
+      console.error("Erro ao aplicar o Vínculo em grupo:", error);
+      showNotification("error", `${error instanceof Error ? error.message : "Não foi possível aplicar o Vínculo."} ${confirmedIds.length} de ${plan.updates.length} keyword(s) foram gravadas e conferidas.`, { metadata: { executionRequestId } });
+    } finally {
+      setUpdating(false);
+      finishBulkProgress(outcome);
+    }
+    if (action.kind === "subject_declare" && confirmedIds.length > 0) {
+      const byId = new Map(keywords.map(item => [item.id, item]));
+      const declaredItems = plan.updates
+        .filter(update => confirmedIds.includes(update.id) && byId.has(update.id))
+        .map(update => ({ ...byId.get(update.id)!, analise_semantica: update.semantic as KeywordSemantic }));
+      await runAutomaticSubjectLogic(declaredItems);
+    }
+  };
+
+  /**
+   * Import de Assuntos aplicado (a rota grava; esta tela só relê e segue).
+   * Lê as linhas criadas e declaradas da marca ativa e roda a Lógica
+   * automática nas que ainda não a têm (F1.7b).
+   */
+  const handleSubjectsImported = async (result: { createdIds: string[]; declaredIds: string[] }) => {
+    const ids = [...new Set([...(result.createdIds || []), ...(result.declaredIds || [])].filter(Boolean))];
+    if (ids.length === 0 || !selectedBrandId) return;
+    let rows: KeywordItem[] = [];
+    try {
+      // Pela fonte da listagem (a view sem as séries de medição), como a
+      // tabela carrega as linhas: a existente declarada não traz ~9,5 kB.
+      const byId = await readCanonicalKeywordRows(ids, { source: fonteDaListagem });
+      rows = ids.map(id => byId.get(id)).filter((row): row is KeywordItem => Boolean(row));
+    } catch (error) {
+      showNotification("error", `Os Assuntos foram importados, mas a tabela não conseguiu relê-los: ${error instanceof Error ? error.message : "erro desconhecido"}. Recarregue a página.`, { code: "SUBJECT_IMPORT_READBACK_FAILED" });
+      return;
+    }
+    const rowById = new Map(rows.map(row => [row.id, row]));
+    setKeywords(current => {
+      const known = new Set(current.map(item => item.id));
+      const fresh = rows.filter(row => !known.has(row.id));
+      return [...fresh, ...current.map(item => rowById.get(item.id) || item)];
+    });
+    showNotification("success", `${result.createdIds.length} Assunto(s) criado(s) e ${result.declaredIds.length} keyword(s) existente(s) declarada(s) no Processador.`);
+    await runAutomaticSubjectLogic(rows);
   };
 
   const loadRecoverableKeywords = useCallback(async (brandId: string): Promise<KeywordItem[]> => {
@@ -2369,10 +2719,15 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         brandId: selectedBrandId,
         keywordIds: [...selectedIds],
       });
+      // F1.7: aprovação anterior à trava de envio passa, com alerta informativo.
+      const approvalAlerts = architectHandoffGate.approvalAlerts || [];
+      const approvalAlertText = approvalAlerts.length
+        ? ` ${approvalAlerts.length === 1 ? "1 keyword passou" : `${approvalAlerts.length} keywords passaram`} com alerta de aprovação: ${approvalAlerts[0].approvalGate?.reason || "aprovação anterior à trava de envio."}`
+        : "";
       if (result.persistence === "UNCHANGED") {
-        showNotification("success", "As keywords selecionadas já estavam no workspace canônico do Arquiteto.");
+        showNotification("success", `As keywords selecionadas já estavam no workspace canônico do Arquiteto.${approvalAlertText}`);
       } else {
-        showNotification("success", `${result.createdKeywordIds.length} keyword(s) enviada(s) ao Arquiteto.`);
+        showNotification("success", `${result.createdKeywordIds.length} keyword(s) enviada(s) ao Arquiteto.${approvalAlertText}`);
       }
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "Não foi possível enviar as keywords ao Arquiteto.", {
@@ -2417,7 +2772,14 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     const item = keywords.find(keyword => keyword.id === keywordId);
     if (!item || !selectedBrandId) return;
 
-    const cloneSemantic = (source: KeywordSemantic): KeywordSemantic => JSON.parse(JSON.stringify(source)) as KeywordSemantic;
+    if (action.type === "subject") {
+      // Terceira declaração do Vínculo: grava direto, como o tipo de página,
+      // com readback estreito e o ator da sessão.
+      await handleSubjectReviewAction(item, action);
+      return;
+    }
+
+    const cloneSemantic =(source: KeywordSemantic): KeywordSemantic => JSON.parse(JSON.stringify(source)) as KeywordSemantic;
     const materialSemantic = (source: KeywordSemantic): KeywordSemantic => {
       const next = cloneSemantic(source);
       delete next.dna_revisao_humana;
@@ -2964,6 +3326,22 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
   const bulkProgressMeta = bulkProgress.step ? bulkProgressStepMeta[bulkProgress.step] : null;
   const bulkActionProcessing = bulkProgress.status === "processing";
+  // Prévia do Vínculo em grupo: o mesmo plano puro que grava, sem escrever
+  // nada. O catálogo do destino só é consultado ao confirmar.
+  const vinculoBatchDialogAction = vinculoBatchDialog
+    ? vinculoBatchActionFromChoice(vinculoBatchDialog.choice, { note: vinculoBatchDialog.note, destinationUrl: vinculoBatchDialog.destination })
+    : null;
+  const vinculoBatchPreview = vinculoBatchDialogAction
+    ? planVinculoBatch({
+      keywords: keywords.filter(item => selectedIds.has(item.id)),
+      brandId: selectedBrandId,
+      action: vinculoBatchDialogAction,
+      actorId: actorUserId,
+      changedAt: VINCULO_BATCH_PREVIEW_AT,
+      brandSiteUrl: activeBrand?.site_url || null,
+    })
+    : null;
+  const vinculoBatchPreviewText = vinculoBatchPreview?.ok ? describeVinculoBatchConfirmation(vinculoBatchPreview, { includeCatalogNotice: false }) : null;
   const bulkProgressPercentage = bulkProgress.total
     ? Math.min(100, Math.round((bulkProgress.current / bulkProgress.total) * 100))
     : null;
@@ -3003,7 +3381,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       <input type="file" ref={fileInputRef} accept=".csv" onChange={handleImportCSV} className="hidden" />
       <HistoryControls moduleId="minerador" showHistory={false} showUndoRedo={false} entries={keywordHistory.entries} canUndo={keywordHistory.canUndo} canRedo={keywordHistory.canRedo}
         onUndo={undoKeywords} onRedo={redoKeywords} onRestore={keywordHistory.restore} compact presentation="popover"/>
-      <DiscoverySourceControls ref={discoverySourceControlsRef} brandRef={brandRef} preliminaryIntent="Informativa" preliminaryFunnel="TOFU" onComplete={handleDiscoverySourceComplete} />
+      {/* Só o Processador passa `subjectEntry`: o select "Esta lista é"
+          (Assunto / Keyword) não entra no Descobrir (SDD 2026-09-24, F1.3). */}
+      <DiscoverySourceControls ref={discoverySourceControlsRef} brandRef={brandRef} preliminaryIntent="Informativa" preliminaryFunnel="TOFU" onComplete={handleDiscoverySourceComplete} subjectEntry onSubjectsImported={result => void handleSubjectsImported(result)} />
       
       {organizeOpen && (
         <section className="shrink-0 border-b border-slate-900 bg-[#0b0c10] px-4 py-3 font-sans" aria-label="Filtros de organização">
@@ -3520,6 +3900,31 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                           >
                             {vinculo.pageTypeLabel}
                           </span>
+                          {/* A terceira declaração: o Assunto, só quando
+                              declarado, pelo mesmo resolvedor da coluna. */}
+                          {vinculo.subjectLabel ? (
+                            <span
+                              data-keyword-subject-label
+                              className="inline-flex max-w-full items-center whitespace-normal rounded border border-context-accent/50 bg-context-accent/10 px-1 py-0.5 text-sm font-semibold leading-tight text-context-accent"
+                              title={vinculo.subject?.note
+                                ? `${vinculo.subjectLabel}: ${vinculo.subject.note}`
+                                : `${vinculo.subjectLabel}: complete a nota na Revisão Humana.`}
+                            >
+                              {vinculo.subjectLabel}
+                            </span>
+                          ) : null}
+                          {/* F1b: abre o Descobrir no modo Por Assunto; a URL leva só o id. */}
+                          {vinculo.subjectLabel && item.id ? (
+                            <button
+                              type="button"
+                              data-subject-search-link
+                              onClick={() => router.push(subjectSearchLinkHref(brandRef, item.id))}
+                              className="inline-flex min-h-8 max-w-full items-center rounded border border-divider px-1.5 py-0.5 text-sm font-medium text-text-muted transition-colors hover:border-module-accent/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40"
+                              title="Abre o Descobrir no modo Por Assunto com este Assunto. Nada é pago antes de você confirmar o custo."
+                            >
+                              Buscar sustentação
+                            </button>
+                          ) : null}
                           {publicationLink.action === "correct_legacy" && item.id && (
                             <button type="button" onClick={() => void handlePublicationLinkAction(item, "correct_legacy", recoveryStatus)} disabled={updating} className="min-h-7 max-w-full rounded border border-divider px-1.5 py-0.5 text-[10px] font-medium text-text-muted hover:border-context-accent hover:text-context-accent disabled:cursor-not-allowed disabled:opacity-50">
                               Corrigir marcação
@@ -3732,6 +4137,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                               canUnlink: publicationLink.action === "unlink",
                             }}
                             onCheckByLink={() => openManualSiteCheck(item)}
+                            onSubjectSearch={item.id ? () => router.push(subjectSearchLinkHref(brandRef, item.id)) : undefined}
                             onPublicationAction={(action) => handlePublicationLinkAction(item, action)}
                             allowPublishedWorkflowStatus={false}
                             statusUpdating={updating}
@@ -3843,7 +4249,24 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               <option value="applicable">Aplicável</option>
               <option value="not_applicable">Não aplicável</option>
             </select>
-            {/* Ordem do fluxo humano: decidir KGR → concluir revisão → definir status. */}
+            {/* Vínculo em grupo (F1.6): Assunto, tipo de página e posto. Reabrir
+                revisão, conferir por link e confirmar publicada ficam fora (Q5). */}
+            <select
+              defaultValue=""
+              disabled={bulkActionProcessing || updating}
+              aria-label="Vínculo das selecionadas"
+              onChange={(event) => { const choice = event.target.value; event.currentTarget.value = ""; if (choice) { vinculoBatchTriggerRef.current = event.currentTarget; setVinculoBatchDialog({ choice, note: "", destination: "" }); } }}
+              className="hidden min-h-9 w-20 shrink-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-sm font-medium text-foreground outline-none transition-colors hover:border-module-accent/45 hover:bg-surface-subtle focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 sm:block sm:w-24 sm:px-2"
+              title="Declarar ou retirar o Assunto, o tipo de página ou o posto das keywords selecionadas. A confirmação diz quantas aprovadas vão para Em revisão."
+            >
+              <option value="">Vínculo</option>
+              {VINCULO_BATCH_CHOICE_GROUPS.map(group => (
+                <optgroup key={group.key} label={group.label}>
+                  {group.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </optgroup>
+              ))}
+            </select>
+            {/* Ordem do fluxo humano: decidir KGR → Vínculo → concluir revisão → definir status. */}
             <MineradorProcessAction
               title="Concluir a revisão humana das selecionadas"
               description="Conclui a Revisão Humana de cada keyword selecionada com os defaults conservadores: divergências sem decisão mantêm a Lógica, enriquecimentos não selecionados são ignorados e campos sem evidência permanecem desconhecidos. Exige a Aplicabilidade do KGR decidida quando o cálculo é possível. Não altera status, aprovação nem métricas."
@@ -3868,6 +4291,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
             <div ref={moreActionsRef} className="relative shrink-0">
               <button
+              ref={moreActionsButtonRef}
               type="button"
               onClick={() => setMoreActionsOpen(current => !current)}
                 disabled={bulkActionProcessing}
@@ -3911,6 +4335,23 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                     <option value="pending">Pendente</option>
                     <option value="applicable">Aplicável</option>
                     <option value="not_applicable">Não aplicável</option>
+                  </select>
+                </label>
+                <label className="flex items-center justify-between gap-3 rounded px-3 py-2 text-sm font-medium text-text-muted sm:hidden">
+                  <span>Vínculo</span>
+                  <select
+                    defaultValue=""
+                    disabled={bulkActionProcessing || updating}
+                    aria-label="Vínculo das selecionadas"
+                    onChange={(event) => { const choice = event.target.value; event.currentTarget.value = ""; if (choice) { vinculoBatchTriggerRef.current = moreActionsButtonRef.current; setMoreActionsOpen(false); setVinculoBatchDialog({ choice, note: "", destination: "" }); } }}
+                    className="min-h-9 min-w-24 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50"
+                  >
+                    <option value="">Selecionar</option>
+                    {VINCULO_BATCH_CHOICE_GROUPS.map(group => (
+                      <optgroup key={group.key} label={group.label}>
+                        {group.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </optgroup>
+                    ))}
                   </select>
                 </label>
                 <InfoHint title="Enviar ao Arquiteto" description="Envia as keywords aprovadas para a etapa de formação de artigos.">
@@ -3986,6 +4427,88 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
             </div>
           )}
         </KeywordTableBulkBarShell>
+      )}
+
+      {/* Confirmação do Vínculo em grupo (F1.6): o que será gravado, o que
+          será pulado e quantas aprovadas vão para Em revisão. Nada é gravado
+          antes do clique em Confirmar. */}
+      {vinculoBatchDialog && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/75 px-4 py-8" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !updating) setVinculoBatchDialog(null); }}>
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="minerador-vinculo-batch-title"
+            aria-describedby="minerador-vinculo-batch-summary"
+            data-vinculo-batch-dialog
+            ref={vinculoBatchDialogRef}
+            tabIndex={-1}
+            className="w-full max-w-lg overflow-hidden rounded-lg border border-divider bg-surface-elevated text-foreground shadow-xl outline-none"
+          >
+            <header className="border-b border-divider px-5 py-4">
+              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-text-muted">Vínculo das selecionadas</p>
+              <h2 id="minerador-vinculo-batch-title" className="mt-1 text-lg font-semibold text-foreground">
+                {vinculoBatchPreview?.ok ? vinculoBatchPreview.actionLabel : "Vínculo em grupo"}
+              </h2>
+            </header>
+            <div className="space-y-4 p-5">
+              {isSubjectDeclareChoice(vinculoBatchDialog.choice) && (
+                <div className="grid min-w-0 gap-3">
+                  <label className="block min-w-0 text-sm font-medium text-foreground">
+                    Nota do Assunto: o que é, para quem
+                    <input
+                      type="text"
+                      value={vinculoBatchDialog.note}
+                      maxLength={KEYWORD_SUBJECT_NOTE_MAX}
+                      onChange={event => setVinculoBatchDialog(current => current ? { ...current, note: event.target.value } : current)}
+                      placeholder="Opcional, igual para todas as selecionadas"
+                      className="mt-1 h-10 w-full rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none placeholder:text-text-muted focus:border-module-accent focus-visible:ring-2 focus-visible:ring-module-accent/40"
+                      autoFocus
+                    />
+                    <span className="mt-1 block text-sm text-text-muted">Em branco, a coluna marca &quot;Assunto sem nota&quot; até você completar na Revisão Humana.</span>
+                  </label>
+                  <label className="block min-w-0 text-sm font-medium text-foreground">
+                    Página de destino
+                    <input
+                      type="url"
+                      inputMode="url"
+                      value={vinculoBatchDialog.destination}
+                      onChange={event => setVinculoBatchDialog(current => current ? { ...current, destination: event.target.value } : current)}
+                      placeholder="https://"
+                      className="mt-1 h-10 w-full rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none placeholder:text-text-muted focus:border-module-accent focus-visible:ring-2 focus-visible:ring-module-accent/40"
+                    />
+                    <span className="mt-1 block text-sm text-text-muted">Opcional, igual para o lote. Precisa ser https:// e estar no site da marca.</span>
+                  </label>
+                </div>
+              )}
+              {vinculoBatchPreview && !vinculoBatchPreview.ok && (
+                <p role="alert" className="text-sm leading-6 text-danger">{vinculoBatchPreview.reason}</p>
+              )}
+              {vinculoBatchPreviewText && (
+                <div id="minerador-vinculo-batch-summary" className="space-y-1.5 text-sm leading-6">
+                  <p className="font-semibold text-foreground">{vinculoBatchPreviewText.summary}</p>
+                  {vinculoBatchPreviewText.details.map(detail => <p key={detail} className="text-text-muted">{detail}</p>)}
+                  {vinculoBatchPreviewText.warning && (
+                    <p role="note" data-vinculo-demotion-warning className="font-semibold text-warning">{vinculoBatchPreviewText.warning}</p>
+                  )}
+                  {isSubjectDeclareChoice(vinculoBatchDialog.choice) && (
+                    <p className="text-text-muted">Depois de gravar, a Lógica roda sozinha nas que ainda não a têm. Nada é aprovado.</p>
+                  )}
+                </div>
+              )}
+              <div className="flex flex-col-reverse justify-end gap-2 border-t border-divider pt-4 sm:flex-row">
+                <button type="button" onClick={() => setVinculoBatchDialog(null)} disabled={updating} className="inline-flex h-9 items-center justify-center rounded border border-divider bg-surface px-3 text-sm font-semibold text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40 disabled:cursor-not-allowed disabled:opacity-50">Cancelar</button>
+                <button
+                  type="button"
+                  onClick={() => void handleBatchVinculo(vinculoBatchDialog)}
+                  disabled={updating || bulkActionProcessing || !vinculoBatchPreview?.ok || vinculoBatchPreview.counts.updates === 0}
+                  className="inline-flex h-9 items-center justify-center rounded border border-action-accent bg-action-accent px-3 text-sm font-semibold text-foreground transition-colors hover:bg-action-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
       )}
 
       <DeleteConfirmation open={deleteSimpleOpen} title="Excluir keywords não publicadas?"

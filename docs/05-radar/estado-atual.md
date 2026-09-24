@@ -27,7 +27,7 @@ CHAMADAS_PAGAS         = 0 · MIGRATIONS = 0 · MANUAL_UI_VALIDATED = NO
   - não gera título, ALT, legenda nem prompt de imagem: sai o que foi gravado, ou a falta com o motivo;
   - sem FAQ (AGENTS 13);
   - terceiros são pesquisa;
-  - a estrutura e a extensão são decisão do Planejador;
+  - a estrutura e a extensão são decisão de quem redige (invariante 48: o Planejador saiu do pipeline e quem escreve também planeja);
   - conteúdo publicado leva URL, canonical e estado da principal; sem política, "estado desconhecido — não trocar até decisão humana";
   - Silo sem plano de links diz isso e não inventa link.
 - **Limpeza:** sem UUID, hash, instante ISO, código cru, provider nem rastreio de URL. A Amazon perde tag e ref. Toda célula tem guarda contra fórmula do Excel.

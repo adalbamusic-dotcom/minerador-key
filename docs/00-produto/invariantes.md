@@ -374,3 +374,30 @@ Estas regras são canônicas. Uma exceção exige proposta SDD aprovada e atuali
     partir de `importedContext.dossier`; `writer_deliverable.payload` contém só
     o produto derivado. A recomendação editorial do Radar (`editorialOutput`) é
     exibida como recomendação e não bloqueia formato derivado nenhum.
+
+## Assunto — tronco editorial declarado — 2026-09-24
+
+Fonte: `docs/compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md`, aprovada
+em 2026-09-24, e ADR-022. A aplicação no código é por fatias; o que já vale em
+cada módulo está no `estado-atual.md` dele.
+
+79. A keyword principal é a **âncora de busca** do artigo: uma keyword com
+    demanda, dona do slug, do KGR e do H1. Um Assunto só pode ser a principal
+    quando tem Volume validado no pacote aprovado; aprovado sem Volume, nunca é
+    principal nem dá slug.
+80. O **Assunto**, quando declarado, é o tronco do artigo: um por artigo, podendo
+    sustentar vários artigos, landings ou um Silo inteiro. Ele entra no H1 como
+    complemento ou num H2/H3, conforme a SERP; as keywords de sustentação levam
+    o leitor até ele. Declarar Assunto numa keyword publicada não muda URL,
+    slug, canonical nem principal.
+81. **Só o humano declara Assunto**, com autor (`auth.users.id`) e data. A IA
+    nunca declara nem prende Assunto em artigo: uma proposta de IA só vale
+    depois de aceita por ato humano.
+82. **O Radar não troca, não promove e não rebaixa o Assunto.** Quando as
+    buscas de sustentação não o sustentam, ele alerta e devolve ao Arquiteto,
+    para decisão humana. O Redator também não troca nem remove o Assunto.
+83. O Assunto **não conta** no teto de 6 keywords do ArticleDNA e não é
+    referência em `keywordReferences`: fica em campo próprio, fora dos papéis
+    principal, secundária e reforço, e nunca é secundária nem reforço do mesmo
+    artigo. Nenhuma keyword declarada Assunto some: sem artigo, ela fica em
+    "Keywords não agrupadas".

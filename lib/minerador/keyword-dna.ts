@@ -4,6 +4,7 @@ import type { CanonicalFieldResolution, CanonicalFieldSource } from "./logical-r
 import { readSerpEvidenceRecord } from "./serp-evidence-record.ts";
 import { isFullyConsolidatedQualification, qualificationConsolidatedAxes, type KeywordSemanticQualification } from "./keyword-semantic-qualification.ts";
 import { approvedPackageSignature, type ApprovedKeywordPackage } from "./approved-package.ts";
+import { KEYWORD_SUBJECT_ORIGINS, resolveKeywordSubject } from "./keyword-subject.ts";
 
 /**
  * KEYWORDDNA FECHADO — o contrato que o Minerador exporta.
@@ -107,6 +108,19 @@ export const KeywordDnaSchema = z.object({
     approvedAt: z.string(),
     approvedBy: z.string(),
   }).strict().nullable(),
+  /**
+   * Assunto declarado (SDD 2026-09-24, F1.1). Opcional e só presente com
+   * declaração: sem Assunto, a vista é a de sempre. A vista não é persistida
+   * (§62), então não há dado a migrar nem risco de rollback.
+   */
+  subject: z.object({
+    declared: z.literal(true),
+    note: z.string().nullable(),
+    destinationUrl: z.string().nullable(),
+    declaredBy: z.string().nullable(),
+    declaredAt: z.string().nullable(),
+    origin: z.enum(KEYWORD_SUBJECT_ORIGINS).nullable(),
+  }).strict().optional(),
 }).strict();
 
 export type KeywordDna = z.infer<typeof KeywordDnaSchema>;
@@ -321,6 +335,17 @@ export function keywordDnaFromRow(input: KeywordDnaRowInput): KeywordDna {
       ? { version: snapshot.approval.version, contentHash: snapshot.approval.contentHash, approvedAt: snapshot.approval.approvedAt, approvedBy: snapshot.approval.approvedBy }
       : null,
   };
+  const subject = resolveKeywordSubject(semantic);
+  if (subject.declared) {
+    dna.subject = {
+      declared: true,
+      note: subject.note,
+      destinationUrl: subject.destinationUrl,
+      declaredBy: subject.actorId,
+      declaredAt: subject.declaredAt,
+      origin: subject.origin,
+    };
+  }
   return KeywordDnaSchema.parse(dna);
 }
 

@@ -1,3 +1,49 @@
+## Assunto declarado: fase A da F2 e trava no envio — 2026-09-24
+
+```text
+SUBJECT_NO_CONTRATO = DeclaredSubjectSchema opcional em ArticleDNA e SiloDNA · nenhum caminho grava
+F2_FASE_A = no código · deploy e homologação pendentes (usuário)
+F2_FASE_B = PLANEJADA · só começa depois da fase A no ar e homologada
+ROLLBACK_ABAIXO_DA_FASE_A = PROIBIDO depois do deploy dela
+HANDOFF = trava de aprovação (F1.7) + destino do Assunto conferido no servidor · 409 no lote
+MIGRATIONS_ADDED = 0 · CHAMADAS_PAGAS_EM_TESTE = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), aprovada pelo dono do produto em 2026-09-24, e o [ADR-022](../00-produto/decisoes/ADR-022-assunto-tronco-editorial.md). O Assunto é a frase que o humano declara no Minerador como tronco do artigo, mesmo sem busca. A principal continua dona do slug, do KGR e do H1 (D1).
+
+**Fase A: o contrato só aceita o campo.** Verificado no código e confirmado por teste.
+
+- `DeclaredSubjectSchema` (`lib/arquiteto/contracts.ts:84`), `.strict()`. Obrigatórios: `keywordId`, `approvedPackageRef` (o `ApprovedPackageRefSchema` que já existia, `:62`), `phrase`, `attachedBy` e `attachedAt`. `note` tem de 1 a 280 caracteres ou é `null`; `destinationUrl` é URL ou `null`.
+- `subject` entrou como campo **opcional** no `ArticleDNASchema` (`:1013`) e no `SiloDNASchema` (`:1174`).
+- O `superRefine` do ArticleDNA ganhou duas regras, que só olham o próprio artigo (`:1098-1110`):
+  - `subject.keywordId` não pode ser secundária nem reforço (erro em `subject.keywordId`);
+  - `subject.phrase` não pode coincidir com um item de `excludedSubjects`, comparando por keyword normalizada (erro em `subject.phrase`).
+- A normalização é uma cópia local da `normalizeKeyword` do Minerador (`normalizeSubjectKeyword`, `:104`), para o contrato não depender do núcleo de import. O teste confere que as duas dão o mesmo resultado.
+- **O schema não decide** se o Assunto pode ser a própria principal: ele aceita esse caso, e a regra "só com Volume validado" (Q7) fica para o gate de conclusão da fase B. Também não impede o mesmo Assunto em vários artigos (D3).
+- O Assunto fica fora de `keywordReferences` e do teto de 6. Nenhum enum mudou. `centralEntity` do SiloDNA não recebe a frase.
+- **Nenhum caminho grava `subject`.** `DeclaredSubjectSchema` só aparece em `lib/arquiteto/contracts.ts` e em `tests/arquiteto-assunto-schema.test.mts`. Adapters, formação, persistência, telas, Radar e Redator não foram tocados.
+- **Compatibilidade:** os hashes de um ArticleDNA e de um SiloDNA sem `subject` foram capturados antes da mudança e fixados no teste. Depois dela, o parse devolve a mesma saída, sem chave `subject`, e os hashes são iguais no payload cru, no lido e no envelope versionado. Os hashes dourados do Radar seguem verdes.
+
+**Regra de rollback, obrigatória (SDD seção 6, item 1).** Depois do deploy da fase A, **nenhum rollback de código volta para antes dela**. O ArticleDNA é lido com `.strict()`: um único artefato gravado com `subject` faria a leitura canônica do Arquiteto da marca inteira lançar `INVALID_ARTIFACT` 503 (`lib/server/arquiteto-persistence.ts:216-231`) e tiraria o artigo do Radar, que o manda para `incompatible` (`lib/server/editorial-repositories.ts:96-100`). Versões consolidadas são imutáveis (invariante 9): não dá para tirar o campo dos registros. Rollback permitido: até a fase A, nunca abaixo.
+
+**Trava no envio ao Arquiteto (F1 do Minerador, no servidor do Arquiteto).** Verificado no código e confirmado por teste.
+
+- `prepareCanonicalHandoff` (`lib/server/arquiteto-workspace.ts`) aplica `resolveHandoffApprovalGate`, o mesmo veredito do gate da tela. Aprovação registrada a partir de `SERVER_APPROVAL_GATE_SINCE = 2026-09-24T00:00:00-03:00` (`lib/minerador/approved-package.ts:132`) sem Lógica, Volume, Resultados ou KGR (no Assunto declarado, sem Lógica) recusa o **lote inteiro** com 409, sem gravar nada.
+- Passam com alerta: aprovação sem registro de data, aprovação registrada antes da constante (inclusive a do backfill) e keyword já recebida, que não sai do Arquiteto (`AGENTS.md` §10). Um registro do backfill com data igual ou posterior à constante cai na regra normal.
+- A página de destino do Assunto é conferida de novo contra o `marcas.site_url` atual, com uma leitura estreita (`marcas.select("site_url")`) só quando alguma elegível tem destino. O `destinationCheck` gravado pelo navegador não vale como garantia. Fora do domínio, sem https ou marca sem site com destino gravado: 409 no lote. Já recebida: alerta com `scope: "destination"`.
+- A resposta ganhou `approvalAlerts`, de forma aditiva. **Limite:** o `HandoffResponseSchema` de `lib/arquiteto/canonical-workspace.ts` não tem o campo e o descarta no parse; a tela do Minerador mostra só os alertas que ela mesma calcula (pendência no backlog).
+- Custo de leitura da trava: zero, porque `analise_semantica` já vinha na linha das keywords pedidas. A conferência do destino lê uma linha de `marcas`.
+
+**Testes (fixtures, sem rede e sem chamada paga):**
+
+- `tests/arquiteto-assunto-schema.test.mts` 16/16, reexecutado em 2026-09-24 na redação desta entrada;
+- `tests/arquiteto-assunto-trava-servidor.test.mts` 11/11, reexecutado na mesma data; `test:arquiteto:servidor` 29/29, segundo o relatório da implementação;
+- `test:arquiteto` 2272/2274, com as mesmas 2 falhas de base; `test:arquiteto:lentes` 31/31; `test:radar` 2616/2616, com os hashes dourados; `test:redator` 335/335; `npx tsc --noEmit` limpo. Estes números são do relatório da implementação.
+
+**Não feito: fase B (Planejado).** Gate de conclusão com a principal igual ao Assunto só com Volume validado; `subjectKeywordId` na cópia de trabalho e `isAnchoredSubject` nos cálculos de conservação; Assunto sem Volume validado fora da formação automática; selos, filtro "Assuntos" e listas; sugestões de sustentação; prender o Assunto em artigo e Silo; o texto "disputam o mesmo assunto" da trava de canibalização (`lib/arquiteto/article-formation-confirmation.ts:476`) continua como está. Radar (F3) e Redator (F4) ignoram o campo.
+
+**Validado manualmente: NÃO.** A homologação é do usuário: deploy da fase A sozinha; abrir o Arquiteto e o Radar das marcas e conferir que carregam normalmente; enviar ao Arquiteto uma aprovada depois da ativação sem processo (espera-se 409), uma aprovada antes (passa) e um Assunto com destino fora do site (409). A F1b (Pesquisa por Assunto) é do Minerador e não faz parte desta entrada.
+
 ## As 4 lentes no Arquiteto — 2026-09-23
 
 ```text

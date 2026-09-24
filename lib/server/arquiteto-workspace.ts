@@ -6,8 +6,10 @@ import { listArquitetoArtifacts } from "./arquiteto-persistence";
 import { readBrandSiloCatalog } from "@/lib/arquiteto/territorial-landscape";
 import { isFullyConsolidatedQualification, qualificationConsolidatedAxes, qualificationLensSummary, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
 import { readCurrentKeywordSemanticQualifications } from "./keyword-semantic-qualification-store";
-import { approvedPackageDiverged, buildApprovedPackage } from "@/lib/minerador/approved-package";
+import { approvedPackageDiverged, buildApprovedPackage, resolveHandoffApprovalGate, type HandoffApprovalGateScope } from "@/lib/minerador/approved-package";
 import { isApprovedForArchitect } from "@/lib/minerador/editorial-status";
+import { resolveKeywordSubject } from "@/lib/minerador/keyword-subject";
+import { validateSubjectDestination } from "@/lib/minerador/subject-destination";
 import {
   buildMineradorArquitetoHandoffPlan,
   MINERADOR_ARQUITETO_RECEIVED_STATE,
@@ -319,6 +321,85 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
   const existingKeywordIds = new Set(eligibleKeywords
     .filter(keyword => articleIds.has(keyword.id) || workflowByKeywordId.get(keyword.id)?.state === MINERADOR_ARQUITETO_RECEIVED_STATE)
     .map(keyword => keyword.id));
+
+  /*
+   * TRAVA DE APROVAÇÃO NO ENVIO (SDD 2026-09-24, F1.7 e P10). O mesmo veredito
+   * que o gate da tela (`resolveHandoffApprovalGate`): aprovação registrada a
+   * partir de `SERVER_APPROVAL_GATE_SINCE` sem Lógica, Volume, Resultados ou
+   * KGR — ou sem Lógica, no Assunto declarado — é recusada. Anterior à
+   * ativação passa com alerta; já recebida pelo Arquiteto só alerta e não sai
+   * de lá (AGENTS.md §10). Custo de leitura zero: `analise_semantica` já veio
+   * na linha inteira das keywords pedidas.
+   */
+  const approvalGates = eligibleKeywords.map(keyword => ({
+    keyword,
+    gate: resolveHandoffApprovalGate({
+      semantic: (keyword.analise_semantica || null) as Record<string, unknown> | null,
+      intent: keyword.intent,
+      volumeSearch: keyword.volume_search,
+      resultsAllintitle: keyword.results_allintitle,
+      alreadyReceived: existingKeywordIds.has(keyword.id),
+    }),
+  }));
+  const refusedByApproval = approvalGates.filter(entry => entry.gate.verdict === "refuse");
+  if (refusedByApproval.length) {
+    const first = refusedByApproval[0];
+    const reason = `"${first.keyword.keyword}": ${first.gate.reason}`;
+    throw new PipelineRuntimeError(
+      "CONFLICT",
+      refusedByApproval.length === 1
+        ? `A aprovação desta keyword está incompleta para o envio ao Arquiteto. ${reason}`
+        : `${refusedByApproval.length} keywords têm aprovação incompleta para o envio ao Arquiteto. ${reason}`,
+      409,
+    );
+  }
+  const approvalAlerts: HandoffApprovalAlert[] = approvalGates
+    .filter(entry => entry.gate.verdict === "alert")
+    .map(entry => ({ keywordId: entry.keyword.id, keyword: entry.keyword.keyword, scope: entry.gate.scope, reason: entry.gate.reason || "" }));
+
+  /*
+   * PÁGINA DE DESTINO DO ASSUNTO, CONFERIDA DE NOVO (SDD 2026-09-24, F1.2).
+   * A declaração sai do navegador por RLS, e o `destinationCheck` gravado é do
+   * cliente: aqui ele não vale como garantia. O host é conferido contra o
+   * `marcas.site_url` atual, com uma leitura estreita e só quando alguma
+   * elegível tem destino. Fora do domínio, sem https ou marca sem site com
+   * destino gravado: recusa o lote (409), como a trava de aprovação. Já
+   * recebida só alerta e não sai do Arquiteto (AGENTS.md §10).
+   */
+  const withDestination = eligibleKeywords
+    .map(keyword => ({ keyword, destinationUrl: resolveKeywordSubject((keyword.analise_semantica || null) as Record<string, unknown> | null).destinationUrl }))
+    .filter((entry): entry is { keyword: typeof entry.keyword; destinationUrl: string } => typeof entry.destinationUrl === "string" && entry.destinationUrl.length > 0);
+  if (withDestination.length) {
+    const brandSite = await context.supabase.from("marcas").select("site_url").eq("id", context.brandId).maybeSingle();
+    if (brandSite.error) readFailure(brandSite.error);
+    const brandSiteUrl = typeof (brandSite.data as { site_url?: unknown } | null)?.site_url === "string"
+      ? (brandSite.data as { site_url: string }).site_url
+      : null;
+    const checkedAt = new Date().toISOString();
+    const destinationProblems = withDestination.flatMap(({ keyword, destinationUrl }) => {
+      const check = validateSubjectDestination({ rawUrl: destinationUrl, brandSiteUrl, checkedAt });
+      if (check.ok && check.code === "ACCEPTED") return [];
+      const reason = check.ok
+        ? "A página de destino do Assunto não pode ser conferida: a marca não tem site cadastrado. Cadastre o site na Marca ou retire o destino na Revisão Humana."
+        : `A página de destino do Assunto foi recusada: ${check.reason}`;
+      return [{ keyword, reason }];
+    });
+    const refusedByDestination = destinationProblems.filter(entry => !existingKeywordIds.has(entry.keyword.id));
+    if (refusedByDestination.length) {
+      const first = refusedByDestination[0];
+      const reason = `"${first.keyword.keyword}": ${first.reason}`;
+      throw new PipelineRuntimeError(
+        "CONFLICT",
+        refusedByDestination.length === 1
+          ? `A página de destino desta keyword impede o envio ao Arquiteto. ${reason}`
+          : `${refusedByDestination.length} keywords têm página de destino que impede o envio ao Arquiteto. ${reason}`,
+        409,
+      );
+    }
+    for (const entry of destinationProblems) {
+      approvalAlerts.push({ keywordId: entry.keyword.id, keyword: entry.keyword.keyword, scope: "destination", reason: `Já recebida pelo Arquiteto e mantida lá. ${entry.reason}` });
+    }
+  }
   // O que cada item já recebido carrega hoje: é a comparação que decide se a
   // reaprovação tem o que propagar.
   const receivedApprovedHashById = new Map<string, string | null>(
@@ -340,8 +421,21 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
   return {
     plan,
     eligibleKeywordIds: eligibleKeywords.map(keyword => keyword.id),
+    approvalAlerts,
   };
 }
+
+/**
+ * Keyword que passou pela trava de aprovação com alerta (anterior à ativação
+ * ou já recebida), ou já recebida com a página de destino do Assunto que não
+ * passa mais na conferência do servidor (`destination`).
+ */
+export type HandoffApprovalAlert = {
+  keywordId: string;
+  keyword: string;
+  scope: HandoffApprovalGateScope | "destination";
+  reason: string;
+};
 
 async function persistCanonicalHandoff(context: PipelineContext, prepared: Awaited<ReturnType<typeof prepareCanonicalHandoff>>) {
   if (prepared.plan.rows.length) {
@@ -480,5 +574,7 @@ export async function createMineradorArquitetoHandoff(context: PipelineContext, 
     importedKeywordIds: prepared.plan.importedKeywordIds,
     createdKeywordIds: prepared.plan.createdKeywordIds,
     existingKeywordIds: prepared.plan.existingKeywordIds,
+    // Aditivo: só aparece quando a trava de aprovação tem alerta.
+    ...(prepared.approvalAlerts.length ? { approvalAlerts: prepared.approvalAlerts } : {}),
   };
 }
