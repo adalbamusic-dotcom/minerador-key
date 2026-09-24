@@ -10,6 +10,7 @@ import { approvedPackageDiverged, buildApprovedPackage, resolveHandoffApprovalGa
 import { isApprovedForArchitect } from "@/lib/minerador/editorial-status";
 import { resolveKeywordSubject } from "@/lib/minerador/keyword-subject";
 import { validateSubjectDestination } from "@/lib/minerador/subject-destination";
+import { articleDnaIncorporatedKeywordIds } from "@/lib/arquiteto/declared-subject";
 import {
   buildMineradorArquitetoHandoffPlan,
   MINERADOR_ARQUITETO_RECEIVED_STATE,
@@ -266,10 +267,16 @@ function sourceFromKeyword(keyword: Record<string, unknown> & { id: string; bran
   };
 }
 
+/*
+ * Incorporada = referência OU tronco (SDD 2026-09-24, F2.3). O Assunto preso a
+ * um ArticleDNA não é referência, mas também não está "pendente": sem ele
+ * aqui, o tronco ancorado voltaria a parecer keyword sem artigo. Custo de
+ * leitura zero: o `subject` já vem no payload lido.
+ */
 function articleDnaKeywordIds(artifacts: Awaited<ReturnType<typeof listArquitetoArtifacts>>, brandId: string) {
   return new Set(latestByEntity(artifacts.articleDnas)
     .filter(version => version.payload.brandId === brandId)
-    .flatMap(version => version.payload.keywordReferences.map(reference => reference.keywordId)));
+    .flatMap(version => articleDnaIncorporatedKeywordIds(version.payload)));
 }
 
 function isCanonicalHandoffStatus(status: string | null | undefined) {
@@ -523,7 +530,7 @@ export async function loadCanonicalArquitetoWorkspace(context: PipelineContext, 
     })),
     articleDnaKeywordIds: new Set(artifacts.articleDnas
       .filter(version => version.payload.brandId === context.brandId)
-      .flatMap(version => version.payload.keywordReferences.map(reference => reference.keywordId))),
+      .flatMap(version => articleDnaIncorporatedKeywordIds(version.payload))),
   });
   // O criador manual grava o par canônico antes de existir ArticleDNA. Se o
   // readback dependesse apenas de artigos associados, um F5 esconderia o

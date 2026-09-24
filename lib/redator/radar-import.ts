@@ -1,6 +1,7 @@
 import type { ArticleDNA, ContentDocument, ContentDocumentV2, RadarDocumentOrigin, RadarWriterDossier, SiloDNA, VersionEnvelope, VersionReference } from "../arquiteto/contracts.ts";
 import { legacyVersionReference, toVersionReference } from "../arquiteto/versioning.ts";
-import { RADAR_WRITER_MAY_NOT } from "./writer-handoff.ts";
+import { radarWriterMayNotFor } from "./writer-handoff.ts";
+import { radarWriterSubjectOf, radarWriterSubjectTurnLines } from "./radar-subject-turn.ts";
 import type { RadarCanonicalDossier } from "../server/radar-canonical-dossier.ts";
 
 /**
@@ -176,6 +177,14 @@ export type BuildRadarDocumentInput = {
   keywordDnaRefs: ContentDocumentV2["keywordDnaRefs"];
   actorUserId: string;
   now: string;
+  /**
+   * ===== O ASSUNTO DO ArticleDNA FIXADO — SDD do Assunto, F4.1 =====
+   *
+   * `ArticleDNA.subject` da MESMA versão que o documento fixa (quem envia o
+   * lê junto da identidade). Opcional: sem ele, o documento sai byte a byte
+   * como antes — `writerMayNot` de sempre e `editorialContext` vazio.
+   */
+  subject?: ArticleDNA["subject"] | null;
 };
 
 /**
@@ -226,7 +235,7 @@ export function radarWriterDocumentIdentity(input: {
  * existindo como read model portátil; ele serve para colar em outra
  * ferramenta, e não para ser a única coisa que o Redator interno recebe.
  */
-export function radarWriterDossierOf(dossier: RadarCanonicalDossier): RadarWriterDossier {
+export function radarWriterDossierOf(dossier: RadarCanonicalDossier, subject?: unknown): RadarWriterDossier {
   return {
     bundleId: dossier.bundle.bundleId,
     bundleHash: dossier.bundle.bundleHash,
@@ -237,7 +246,13 @@ export function radarWriterDossierOf(dossier: RadarCanonicalDossier): RadarWrite
       narrativeReinforcements: [...dossier.keywordContext.narrativeReinforcements],
       resolution: dossier.keywordContext.resolution,
     },
-    writerMayNot: [...RADAR_WRITER_MAY_NOT],
+    /*
+     * SDD do Assunto, F4.1 · com Assunto, a proibição "trocar ou remover o
+     * Assunto declarado" é GRAVADA aqui, e todas as ferramentas do Redator
+     * (fundamentos, material por seção, fatias, briefing, painel) leem a
+     * mesma lista. Sem Assunto, a lista de sempre, com o mesmo hash.
+     */
+    writerMayNot: [...radarWriterMayNotFor(radarWriterSubjectOf(subject))],
     bundle: dossier.bundle as unknown as Record<string, unknown>,
   };
 }
@@ -294,8 +309,20 @@ export function buildRadarDocument(input: BuildRadarDocumentInput): ContentDocum
        * sustente uma frase. Quem escreve teria de voltar ao Radar para saber o
        * que a SERP observou — e quem não voltasse escreveria sem evidência.
        */
-      dossier: radarWriterDossierOf(dossier),
-      editorialContext: [],
+      dossier: radarWriterDossierOf(dossier, input.subject),
+      /*
+       * SDD do Assunto, F4.1 · ONDE VIRAR E A DIREÇÃO DO H1.
+       *
+       * A sugestão do Radar mora no artigo-modelo, que não viaja no dossiê
+       * (o bundle é `.strict()` e tem hash). Vão só linhas curtas, derivadas
+       * dele e do Assunto do ArticleDNA fixado — o dossiê continua lido, não
+       * copiado (invariante 78). Sem Assunto, `[]`, como sempre foi.
+       */
+      editorialContext: radarWriterSubjectTurnLines({
+        subject: input.subject,
+        turn: dossier.authorities?.google?.articleModel?.declaredSubject ?? null,
+        principal: dossier.keywordContext.principal,
+      }),
       visualGuidance: [],
       pendingDecisions: [],
     },

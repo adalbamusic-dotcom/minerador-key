@@ -1,5 +1,6 @@
 import { ContentBlockSchema, type ContentDocument } from "../arquiteto/contracts.ts";
 import { GuardianFindingSchema, SectionReviewSchema, type GuardianFinding } from "../editorial/operational-contracts.ts";
+import { radarSemanticStems } from "../radar/semantic-concept-model.ts";
 import { GuardianReportSchema, type GuardianReport } from "./contracts.ts";
 
 type ContentBlock = import("zod").infer<typeof ContentBlockSchema>;
@@ -35,7 +36,14 @@ export type GuardianDivergence = {
 export type GuardianContext = {
   divergences?: readonly GuardianDivergence[];
   notices?: readonly string[];
+  /**
+   * O Assunto declarado no ArticleDNA fixado (SDD do Assunto, F4.2). Ausente
+   * ou `null` sem Assunto: aí nenhuma conferência nova roda.
+   */
+  subject?: GuardianSubject | null;
 };
+
+export type GuardianSubject = { phrase: string; destinationUrl: string | null };
 
 const DIVERGENCIA_ENCERRADA = new Set(["resolvida", "descartada"]);
 const CAMINHO_DE_CANIBALIZACAO = /(cannibal|canibal|nearbyarticle|excludedsubject)/i;
@@ -57,6 +65,50 @@ const ALVO_DA_DIVERGENCIA: Record<string, string> = {
 const SEVERIDADE_DA_DIVERGENCIA = { info: "info", alerta: "warning", bloqueante: "blocked" } as const;
 
 const textOf = (block: ContentBlock) => "text" in block ? block.text.trim() : "";
+
+/* ======================= o Assunto declarado · F4.2 ======================= */
+
+const semAcento = (valor: string) => valor.toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * A FRASE OU OS TERMOS DO ASSUNTO num H2/H3 ou parágrafo. O critério é o do
+ * Radar, por palavras (raízes de 4 letras ou mais): a frase inteira, ou todas
+ * as raízes dela no mesmo bloco. Sentido próximo sem as palavras não conta, e
+ * isso é dito no aviso.
+ */
+function guardianSubjectCovered(document: GuardianDocument, phrase: string): boolean {
+  const frase = semAcento(phrase);
+  const raizes = radarSemanticStems(phrase);
+  return document.blocks.some(block => {
+    if (!(block.type === "paragraph" || (block.type === "heading" && (block.level === 2 || block.level === 3)))) return false;
+    const texto = textOf(block);
+    if (!texto) return false;
+    if (frase && ` ${semAcento(texto)} `.includes(` ${frase} `)) return true;
+    if (!raizes.length) return false;
+    const doBloco = new Set(radarSemanticStems(texto));
+    return raizes.every(raiz => doBloco.has(raiz));
+  });
+}
+
+/** O endereço comparável: sem protocolo, sem `www.`, sem fragmento e sem barra final. */
+const enderecoComparavel = (valor: string) => valor.trim().toLowerCase()
+  .replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/#.*$/, "").replace(/\/+(?=\?|$)/, "");
+
+const URL_NO_TEXTO = /https?:\/\/[^\s"'<>()[\]]+/gi;
+
+/** Existe link para o destino do Assunto: URL no texto (Markdown ou crua), numa fonte ou num link interno. */
+function guardianLinksTo(document: GuardianDocument, destinationUrl: string): boolean {
+  const alvo = enderecoComparavel(destinationUrl);
+  if (!alvo) return false;
+  const confere = (valor: string | null | undefined) => Boolean(valor) && enderecoComparavel((valor as string).replace(/[.,;:!?]+$/, "")) === alvo;
+  return document.blocks.some(block => {
+    if (block.type === "external_source") return confere(block.url);
+    if (block.type === "internal_link") return confere(block.targetArticleId);
+    const textos = block.type === "list" ? block.items : block.type === "table" ? [...block.headers, ...block.rows.flat()] : [textOf(block)];
+    return textos.some(texto => [...texto.matchAll(URL_NO_TEXTO)].some(achado => confere(achado[0])));
+  });
+}
+
 const now = () => new Date().toISOString();
 
 function finding(document: GuardianDocument, sectionId: string, category: GuardianFinding["category"], severity: "info" | "warning" | "blocked", message: string, suggestion: string | null) {
@@ -110,6 +162,27 @@ export function runGuardian(document: GuardianDocument, contentHash: string, con
 
   if (!document.metadata.slug.trim() || !document.metadata.principalKeyword.trim()) findings.push(finding(document, "document", "metadata", "blocked", "Slug e keyword principal são obrigatórios para o documento.", "Complete os metadados estruturais."));
   if (!document.metadata.metaTitle.trim() || !document.metadata.metaDescription.trim()) findings.push(finding(document, "document", "metadata", "warning", "Meta title e meta description ainda não estão completos.", "Revise os metadados antes da transferência."));
+
+  /*
+   * O ASSUNTO DECLARADO (SDD do Assunto, F4.2; Q6). Dois AVISOS, nunca
+   * bloqueio: onde e como fazer a virada é decisão de quem escreve
+   * (invariante 48). Sem Assunto, nada roda.
+   */
+  const assunto = context.subject && typeof context.subject.phrase === "string" && context.subject.phrase.trim() ? context.subject : null;
+  if (assunto) {
+    const frase = assunto.phrase.trim();
+    if (!guardianSubjectCovered(document, frase)) {
+      findings.push(finding(document, "document", "coverage", "warning",
+        `O Assunto declarado “${frase}” não aparece em nenhum H2/H3 nem parágrafo (critério por palavras: a frase ou todas as raízes dela no mesmo bloco).`,
+        "Faça a virada para o Assunto onde a estrutura pedir; a seção e a forma são decisão de quem escreve. Aviso, não bloqueio."));
+    }
+    const destino = typeof assunto.destinationUrl === "string" ? assunto.destinationUrl.trim() : "";
+    if (destino && !guardianLinksTo(document, destino)) {
+      findings.push(finding(document, "document", "cta", "warning",
+        `Nenhum link para o destino do Assunto (${destino}).`,
+        "Leve o leitor ao destino com um link no texto ou na chamada final, sem trocar a chamada observada. Aviso, não bloqueio."));
+    }
+  }
 
   const vistas = new Set<string>();
   for (const divergence of context.divergences ?? []) {

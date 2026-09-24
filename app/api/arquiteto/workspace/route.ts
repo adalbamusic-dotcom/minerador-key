@@ -7,6 +7,8 @@ import { WorkflowRepository } from "@/lib/server/pipeline-repositories";
 import { ArticleKgrIdentitySchema, SiloCandidateMarkSchema } from "@/lib/arquiteto/contracts";
 import { KeywordTerritoryDecisionSchema, TerritoryRefSchema } from "@/lib/arquiteto/territory";
 import { ArticleFormationDecisionSchema, ArticleFormationRefSchema } from "@/lib/arquiteto/article-formation-decision";
+import { WorkingSubjectAnchorSchema } from "@/lib/arquiteto/declared-subject-guard";
+import { assertWorkingSubjectAnchorAssignment } from "@/lib/server/arquiteto-subject-guard";
 import { createTerritoryWorkflowItem, listTerritoryWorkflowItems, updateTerritoryWorkflowItem } from "@/lib/server/arquiteto-territory-store";
 import { listTerritorialSerpAssessments } from "@/lib/server/arquiteto-territorial-serp-store";
 import { listArticleFormationSerpAssessments } from "@/lib/server/arquiteto-article-serp-store";
@@ -63,6 +65,11 @@ const AssignmentSchema = z.object({
   // Aditivo no mesmo payload jsonb: nenhuma coluna, nenhuma migration.
   articleFormationRef: ArticleFormationRefSchema.nullable().optional(),
   articleFormationDecision: ArticleFormationDecisionSchema.nullable().optional(),
+  // Assunto preso numa formação que ainda não tem Definição do artigo (SDD do
+  // Assunto, F2 fase B). Opcional e aditivo no mesmo payload jsonb: mora no
+  // item da principal da formação, chaveado pelo candidateRef. Sem Assunto o
+  // campo não é enviado e o payload fica igual ao de antes.
+  articleSubjectAnchor: WorkingSubjectAnchorSchema.nullable().optional(),
 }).strict();
 // O draft territorial NÃO declara identidade nem tenant: `territoryRef` é
 // emitido pelo servidor e `brandId` vem do contexto autenticado. O
@@ -164,6 +171,9 @@ export async function PATCH(request: Request) {
         throw new PipelineRuntimeError("CONFLICT", "A identidade publicada deste artigo está protegida contra alteração manual.", 409);
       }
       const currentPayload = current.payload && typeof current.payload === "object" && !Array.isArray(current.payload) ? current.payload as Record<string, unknown> : {};
+      // Prender o Assunto: ator da requisição e keyword viva, da marca,
+      // recebida e declarada no pacote aprovado. Soltar sempre passa.
+      await assertWorkingSubjectAnchorAssignment(context, currentPayload, update.assignment);
       const { articleKgrDecision, ...assignment } = update.assignment;
       const parsedKgrIdentity = ArticleKgrIdentitySchema.safeParse(currentPayload.kgrIdentity);
       let kgrIdentity = parsedKgrIdentity.success ? parsedKgrIdentity.data : undefined;

@@ -1372,6 +1372,168 @@ test("limites · o teto pedido chega ao envelope e o limite de itens chega às l
   conferirMarca(brandA);
 });
 
+/* ============ SDD do Assunto, F4.1 · fundamentos com e sem Assunto ============ */
+
+test("F4.1 · fundamentos: sem Assunto nada muda; com Assunto, subject na projeção (≤ ~1,6 kB) e a proibição dele em writerMayNot", async () => {
+  const { RADAR_WRITER_MAY_NOT_SUBJECT } = await import("../lib/redator/writer-handoff.ts");
+  const { WRITER_ARTICLE_DNA_FOUNDATION_FIELDS, WRITER_ARTICLE_DNA_FOUNDATION_MAX_BYTES } = await import("../lib/redator/writer-evidence-catalog.ts");
+  assert.ok(WRITER_ARTICLE_DNA_FOUNDATION_FIELDS.includes("subject"));
+
+  reiniciar("pendente");
+  const sem = await readWriterFoundations(contexto(), documentId);
+  assert.equal(Object.keys(sem.article?.fields ?? {}).includes("subject"), false, "ausente não vira null");
+  assert.deepEqual([...sem.writerMayNot], [...RADAR_WRITER_MAY_NOT]);
+  const selecaoDoDna = registros.find(registro => registro.table === "editorial_artifact_versions" && (registro.select || "").includes("a_promise:payload->promise"));
+  assert.ok(selecaoDoDna && (selecaoDoDna.select || "").split(",").includes("a_subject:payload->subject"), "o campo é pedido por caminho, como os outros");
+
+  const subject = {
+    keywordId: kw2,
+    approvedPackageRef: { version: 3, contentHash: HASH("p"), approvedAt: "2026-09-24T10:00:00+00:00" },
+    phrase: "Consulta dermatológica online para pele oleosa",
+    note: "n".repeat(280),
+    destinationUrl: `https://careglow.com.br/${"consulta-online/".repeat(8)}agendar`,
+    attachedBy: atorMcp,
+    attachedAt: "2026-09-24T12:00:00+00:00",
+  };
+  const comAssunto = ArticleDNASchema.parse({ ...articleDna, secondaryKeywordIds: [], keywordReferences: [referenciaDeKeyword(kw1, 2)], subject });
+  await comBancoAlterado(atual => {
+    const linha = atual.editorial_artifact_versions.find(item => item.version_id === articleVersion)!;
+    linha.payload = comAssunto;
+  }, async () => {
+    reiniciar("pendente");
+    const com = await readWriterFoundations(contexto(), documentId);
+    /* Validado inteiro, entregue reduzido: sem keywordId, approvedPackageRef nem attachedBy (auth.users.id). */
+    assert.deepEqual(com.article?.fields.subject, { phrase: subject.phrase, note: subject.note, destinationUrl: subject.destinationUrl });
+    assert.equal(JSON.stringify(com).includes(atorMcp), false, "o id de quem anexou não sai nos fundamentos");
+    assert.deepEqual(com.article?.invalidFields, []);
+    assert.deepEqual([...com.writerMayNot], [...RADAR_WRITER_MAY_NOT, RADAR_WRITER_MAY_NOT_SUBJECT]);
+    const projecao = writerEvidenceJsonBytes(com.article?.fields);
+    assert.ok(projecao <= WRITER_ARTICLE_DNA_FOUNDATION_MAX_BYTES, `projeção com Assunto: ${projecao} B`);
+    assert.ok(writerEvidenceJsonBytes(com) <= WRITER_EVIDENCE_LIMITS.foundationsMaxBytes, `${writerEvidenceJsonBytes(com)} B`);
+    conferirMarca(brandA);
+  });
+});
+
+/* ===== SDD do Assunto, F4.1 · a MESMA lista em todas as ferramentas, e onde virar ===== */
+
+test("F4.1 · com Assunto gravado no envio: fundamentos, material por seção, pacote, fatia e cabeçalho dizem a MESMA writerMayNot; as linhas da virada chegam aos fundamentos e ao pacote; sem Assunto, nada muda", async () => {
+  const { RADAR_WRITER_MAY_NOT_SUBJECT } = await import("../lib/redator/writer-handoff.ts");
+  const { readWriterSectionMaterial } = await import("../lib/server/writer-evidence-reader.ts");
+  const { readWriterEvidenceHead } = await import("../lib/server/writer-evidence-document.ts");
+  const { buildWriterSectionEvidencePackage } = await import("../lib/redator/writer-section-evidence.ts");
+  const foco = { kind: "section" as const, id: "b1", label: "Rotina da noite" };
+
+  /* Sem Assunto: nenhuma chave nova, e a lista de sempre em todas as leituras. */
+  reiniciar("pendente");
+  const semFundamentos = await readWriterFoundations(contexto(), documentId);
+  assert.equal("editorialContext" in semFundamentos, false);
+  const semMaterial = await readWriterSectionMaterial(contexto(), await readWriterEvidenceHead(contexto(), documentId));
+  assert.equal("editorialContext" in semMaterial, false);
+  assert.equal("editorialContext" in (buildWriterSectionEvidencePackage(semMaterial, foco) || {}), false);
+  const semFatia = await readWriterEvidence(contexto(), documentId, { sourceKey: "radar.bundle.specialist" });
+  assert.ok("writerMayNot" in semFatia);
+  assert.equal(registros.some(registro => (registro.select || "").includes("editorialContext")), false, "sem Assunto, as linhas não são pedidas por ninguém");
+  for (const lista of [semFundamentos.writerMayNot, semMaterial.writerMayNot, semFatia.writerMayNot]) assert.deepEqual([...lista], [...RADAR_WRITER_MAY_NOT]);
+
+  const subject = {
+    keywordId: kw2, approvedPackageRef: { version: 3, contentHash: HASH("p"), approvedAt: "2026-09-24T10:00:00+00:00" },
+    phrase: "Consulta dermatológica online", note: "A marca atende por teleconsulta.", destinationUrl: "https://careglow.com.br/consulta-online",
+    attachedBy: atorMcp, attachedAt: "2026-09-24T12:00:00+00:00",
+  };
+  const GRAVADA = [...RADAR_WRITER_MAY_NOT, RADAR_WRITER_MAY_NOT_SUBJECT];
+  const LINHAS = [
+    "Tronco (Assunto): Consulta dermatológica online — A marca atende por teleconsulta.",
+    "Virada: onde quem redige decidir (sem sinal na SERP), levar o leitor de rotina pele oleosa a Consulta dermatológica online; destino: https://careglow.com.br/consulta-online.",
+    "Assunto no H1: sem sinal na SERP, quem redige decide. O H1 é da principal.",
+    "Destino da chamada: Levar o leitor a https://careglow.com.br/consulta-online.",
+  ];
+  await comBancoAlterado(atual => {
+    const dna = atual.editorial_artifact_versions.find(item => item.version_id === articleVersion)!;
+    dna.payload = ArticleDNASchema.parse({ ...articleDna, secondaryKeywordIds: [], keywordReferences: [referenciaDeKeyword(kw1, 2)], subject });
+    const documento = atual.content_documents.find(item => item.id === documentId)!;
+    const payload = structuredClone(documento.payload) as Linha & { importedContext: Linha & { dossier: Linha } };
+    payload.importedContext.dossier.writerMayNot = GRAVADA;
+    payload.importedContext.editorialContext = LINHAS;
+    documento.payload = ContentDocumentV2Schema.parse(payload);
+  }, async () => {
+    reiniciar("pendente");
+    const fundamentos = await readWriterFoundations(contexto(), documentId);
+    const leiturasDasLinhas = () => registros.filter(registro => registro.table === "content_documents" && (registro.select || "").includes("editorialContext"));
+    const [dosFundamentos, ...outrasDosFundamentos] = leiturasDasLinhas();
+    assert.equal(outrasDosFundamentos.length, 0, "os fundamentos pedem as linhas uma vez");
+    assert.equal(dosFundamentos.select, "c_editorialContext:payload->importedContext->editorialContext", "um caminho só");
+    assert.equal(dosFundamentos.params.get("marca_id"), `eq.${brandA}`, "na Marca do contexto");
+    assert.ok(dosFundamentos.responseBytes < 2_048, `${dosFundamentos.responseBytes} B`);
+    const head = await readWriterEvidenceHead(contexto(), documentId);
+    assert.equal("editorialContext" in head, false, "o cabeçalho comum não traz as linhas");
+    const material = await readWriterSectionMaterial(contexto(), head);
+    const pacote = buildWriterSectionEvidencePackage(material, foco);
+    const fatia = await readWriterEvidence(contexto(), documentId, { sourceKey: "radar.bundle.specialist" });
+    assert.ok(pacote && "writerMayNot" in fatia);
+    for (const [nome, lista] of [["fundamentos", fundamentos.writerMayNot], ["material", material.writerMayNot], ["pacote", pacote.writerMayNot], ["fatia", fatia.writerMayNot], ["cabeçalho", head.dossier?.writerMayNot ?? []]] as const) {
+      assert.deepEqual([...lista], GRAVADA, `${nome}: a proibição do Assunto uma vez, no fim`);
+    }
+    assert.deepEqual(fundamentos.editorialContext, LINHAS);
+    assert.deepEqual(material.editorialContext, LINHAS);
+    assert.deepEqual(pacote.editorialContext, LINHAS);
+    assert.deepEqual(fundamentos.article?.fields.subject, { phrase: subject.phrase, note: subject.note, destinationUrl: subject.destinationUrl });
+    assert.ok(writerEvidenceJsonBytes(fundamentos) <= WRITER_EVIDENCE_LIMITS.foundationsMaxBytes);
+    assert.equal(leiturasDasLinhas().length, 2, "fundamentos e material: uma leitura estreita cada");
+    /* Egress: o cabeçalho comum não pede as linhas; manifesto e fatias do read_writer_evidence não as baixam. */
+    assert.equal(WRITER_EVIDENCE_HEAD_SELECT.includes("editorialContext"), false);
+    reiniciar("pendente");
+    await readWriterEvidenceManifest(contexto(), documentId);
+    await readWriterEvidence(contexto(), documentId, { sourceKey: "radar.bundle.specialist" });
+    assert.equal(leiturasDasLinhas().length, 0, "manifesto e fatia não leem editorialContext");
+    conferirMarca(brandA);
+  });
+});
+
+test("F4.2 · contexto do Guardião: o Assunto sai de UM caminho do ArticleDNA fixado, na Marca; sem referência ou com referência legada, nada é lido", async () => {
+  const { readWriterGuardianContext } = await import("../lib/server/writer-evidence-divergences.ts");
+  const leiturasDoDna = () => registros.filter(registro => registro.table === "editorial_artifact_versions");
+  const subject = {
+    keywordId: kw2, approvedPackageRef: { version: 3, contentHash: HASH("p"), approvedAt: "2026-09-24T10:00:00+00:00" },
+    phrase: "Consulta dermatológica online", note: null, destinationUrl: "https://careglow.com.br/consulta-online",
+    attachedBy: atorMcp, attachedAt: "2026-09-24T12:00:00+00:00",
+  };
+
+  reiniciar("pendente");
+  const semReferencia = await readWriterGuardianContext(contexto(), documentId);
+  assert.equal("subject" in semReferencia, false, "sem referência, o contexto de antes");
+  assert.equal(leiturasDoDna().length, 0);
+
+  reiniciar("pendente");
+  const legada = await readWriterGuardianContext(contexto(), documentId, { articleDnaRef: { entityId: articleId, versionId: `legacy:article:${articleId}:v1`, contentHash: "legacy:x" } });
+  assert.equal("subject" in legada, false);
+  assert.equal(leiturasDoDna().length, 0, "referência legada não aponta para versão real: nada é lido");
+
+  reiniciar("pendente");
+  const semAssunto = await readWriterGuardianContext(contexto(), documentId, { articleDnaRef: refs.articleDnaRef });
+  assert.equal("subject" in semAssunto, false, "ArticleDNA sem Assunto: nenhuma conferência nova");
+  assert.equal(leiturasDoDna().length, 1);
+
+  await comBancoAlterado(atual => {
+    atual.editorial_artifact_versions.find(item => item.version_id === articleVersion)!.payload =
+      ArticleDNASchema.parse({ ...articleDna, secondaryKeywordIds: [], keywordReferences: [referenciaDeKeyword(kw1, 2)], subject });
+  }, async () => {
+    reiniciar("pendente");
+    const comAssunto = await readWriterGuardianContext(contexto(), documentId, { articleDnaRef: refs.articleDnaRef });
+    assert.deepEqual(comAssunto.subject, { phrase: subject.phrase, destinationUrl: subject.destinationUrl });
+    const [leitura] = leiturasDoDna();
+    assert.deepEqual((leitura.select || "").split(",").filter(coluna => coluna.includes("payload")),
+      ["a_subject:payload->subject", "e_subject:payload->payload->subject", "e_brandId:payload->payload->brandId", "a_brandId:payload->brandId"]);
+    assert.ok(leitura.responseBytes < 1_024, `${leitura.responseBytes} B`);
+    conferirMarca(brandA);
+
+    /* A mesma versão, lida por outra Marca: nada volta. */
+    reiniciar("pendente");
+    const outraMarca = await readWriterGuardianContext(contexto(brandB), documentId, { articleDnaRef: refs.articleDnaRef });
+    assert.equal("subject" in outraMarca, false);
+    conferirMarca(brandB);
+  });
+});
+
 /* ============ etapa B2 · o mesmo falso, para os consumidores do leitor ============ */
 
 /** `true`: a tabela de divergências existe (migration aplicada), vazia; `false`: PGRST205. */

@@ -6,6 +6,8 @@ import {
   type RadarR6ConsolidatedReport,
   type RadarR6ExpertTopicContext,
 } from "./r6-sequential.ts";
+import { radarSubjectReaderQuestionText, radarTextCoversStems } from "./declared-subject.ts";
+import { radarSemanticStems } from "./semantic-concept-model.ts";
 
 export const RADAR_R7_VALIDATION_CLASSIFICATIONS = [
   "REAL_VALIDATED",
@@ -183,6 +185,14 @@ function hasRelatedNeed(context: RadarR6ExpertTopicContext, suggestion: RadarR7T
     context.articleDna.desiredResult,
     ...context.articleDna.requiredTopics,
     ...context.articleDna.knownQuestions,
+    /*
+     * O Assunto é necessidade real do contexto (F3.1): a frase e a nota. O
+     * `request` fica de fora — é instrução para a IA, e as palavras dele
+     * ("leitor", "precisa", "entender") deixariam passar qualquer pauta.
+     */
+    ...(context.articleDna.subject
+      ? [context.articleDna.subject.phrase, context.articleDna.subject.note || ""]
+      : []),
     ...context.serpNeeds,
     ...context.openGaps,
     ...context.conflicts,
@@ -212,7 +222,39 @@ export function parseRadarR7TopicResponse(context: RadarR6ExpertTopicContext, ra
       throw new Error("A necessidade da pauta não está relacionada ao contexto do artigo.");
     }
   }
-  return validateRadarR6TopicSuggestions(context, parsed.topics);
+  const validas = validateRadarR6TopicSuggestions(context, parsed.topics);
+  const doAssunto = radarR7SubjectTopic(context);
+  if (!doAssunto) return validas;
+  const raizes = radarSemanticStems(context.articleDna.subject?.phrase);
+  const coberto = validas.some(item => radarTextCoversStems(`${item.text} ${item.need}`, raizes));
+  return coberto ? validas : [...validas, doAssunto];
+}
+
+/**
+ * A PAUTA DO ASSUNTO NÃO DEPENDE DA IA — SDD do Assunto, F3.1.
+ *
+ * Com Assunto declarado, a pauta do especialista precisa pedir para aprofundá-lo
+ * e aprofundar a virada. Quando nenhuma pauta da IA cobre as raízes da frase,
+ * esta entra no fim da fila, montada só com o que o ArticleDNA declara: nenhum
+ * fato novo, origem e referência da proveniência recebida. Como as outras, ela
+ * exige revisão humana individual. Sem Assunto, `null` e nada muda.
+ *
+ * O `text` vira pergunta numerada ao especialista externo sem edição: por isso
+ * é a pergunta simples sobre o leitor, sem "Assunto", "virada" nem "tronco".
+ * O pedido interno da SDD (`subject.request`) fica fora do texto da pauta.
+ */
+export function radarR7SubjectTopic(context: RadarR6ExpertTopicContext): RadarR7TopicSuggestion | null {
+  const subject = context.articleDna.subject;
+  const reference = context.provenance.find(source => source.sourceType === "ArticleDNA")?.label || null;
+  if (!subject || !reference) return null;
+  return {
+    text: radarSubjectReaderQuestionText(subject.phrase),
+    origin: "ArticleDNA",
+    origins: ["ArticleDNA"],
+    justification: `O ArticleDNA declara "${subject.phrase}" como Assunto: o artigo leva o leitor desta busca até ele, e a virada precisa do aprofundamento do especialista.`,
+    need: subject.note ? `${subject.phrase}: ${subject.note}` : subject.phrase,
+    reference,
+  };
 }
 
 export function preserveRadarR7TopicsOnFailure(

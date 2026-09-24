@@ -41,6 +41,19 @@
 
 import { radarSemanticStems } from "./semantic-concept-model.ts";
 import { radarDeclaredArticleIntent } from "./editorial-identity.ts";
+import {
+  RADAR_SUBJECT_CRITERION,
+  RADAR_SUBJECT_H1_FLOOR,
+  RADAR_SUBJECT_MUST_COVER_REASON,
+  RADAR_SUBJECT_NO_SIGNAL,
+  radarIsSubjectTurnSection,
+  radarSubjectCtaDirection,
+  radarSubjectStems,
+  radarSubjectTurnSectionId,
+  radarSubjectTurnTitle,
+  readRadarDeclaredSubjectInPages,
+  type RadarDeclaredSubjectSampleReading,
+} from "./declared-subject.ts";
 
 import type { RadarArticleResearchContext } from "./article-research-context.ts";
 import type { RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
@@ -144,6 +157,67 @@ export type RadarEditorialSection = {
   reason: string;
 };
 
+/**
+ * ===== O ASSUNTO NO ARTIGO-MODELO — SDD do Assunto, F3.1 =====
+ *
+ * O contrato que a F4 (export "Para escrever" e Redator) lê. Só existe com
+ * Assunto declarado. Nada aqui decide a estrutura final: é a sugestão do
+ * Radar, com a contagem ao lado, e o Redator decide (invariante 48).
+ */
+export type RadarEditorialSubjectTurn = {
+  phrase: string;
+  note: string | null;
+  destinationUrl: string | null;
+  criterion: typeof RADAR_SUBJECT_CRITERION;
+  criterionLabel: string;
+  /** As raízes procuradas na amostra: frase e nota, sem as da principal. */
+  stems: string[];
+  /**
+   * A seção que carrega a virada. `OBSERVED_GROUP`: um bloco da amostra já
+   * cobre o Assunto. `SYNTHETIC`: "Virada para <Assunto>", exigida sem
+   * página. `placement` diz onde ela ficou: H3 de um anfitrião, ponto a cobrir
+   * dentro de uma seção, H2 (só o bloco observado que a arquitetura manteve
+   * como eixo) ou `ALONE` (a amostra não deu seção nenhuma para hospedá-la).
+   */
+  turnSection: {
+    id: string;
+    heading: string;
+    source: "OBSERVED_GROUP" | "SYNTHETIC";
+    pages: number;
+    sampleSize: number;
+    placement: "H2" | "H3" | "COVERAGE_POINT" | "ALONE";
+    hostSectionId: string | null;
+    hostHeading: string | null;
+    mustCoverReason: string;
+  };
+  /**
+   * Depois de qual seção a virada tende a caber. `null` sem sinal na SERP.
+   * `SECTION_STEMS`: a seção do artigo-modelo que mais toca as raízes do
+   * Assunto. `SAMPLE_ORDER`: o bloco que, nas páginas, vem logo antes do
+   * cabeçalho que trata o Assunto.
+   */
+  suggestedPosition: {
+    afterSectionId: string;
+    afterHeading: string;
+    pages: number;
+    sampleSize: number;
+    basis: "SECTION_STEMS" | "SAMPLE_ORDER";
+  } | null;
+  suggestedPositionLabel: string;
+  /**
+   * O complemento do H1. A principal continua dona do H1 (D1). `headingPages`
+   * conta as páginas que tratam o Assunto em H2/H3: sem elas não há sinal para
+   * dizer "Assunto em H2/H3", e a decisão volta a quem redige.
+   */
+  h1Complement: { suggested: boolean; complement: string | null; titlePages: number | null; headingPages: number | null; sampleSize: number; label: string };
+  /** "aparece em N de M páginas", sobre a amostra lida. */
+  sampleLabel: string;
+  /** O alerta quando a sustentação não segura o Assunto. Também em `limitations`. */
+  alert: string | null;
+  /** "Levar o leitor a <destino>." — ao lado da chamada observada, nunca no lugar. */
+  ctaDirection: string | null;
+};
+
 export type RadarEditorialArticleModel = {
   articleIdentity: {
     articleId: string;
@@ -164,7 +238,11 @@ export type RadarEditorialArticleModel = {
   readerPromise: string;
   opening: { hookDirection: string; promise: string; initialAnswer: string; transition: string };
   sections: RadarEditorialSection[];
-  conclusion: { synthesis: string; nextStep: string; callToAction: string };
+  /**
+   * `destinationDirection` só existe com Assunto que declara destino: é a
+   * direção "levar o leitor a <destino>", AO LADO da chamada observada.
+   */
+  conclusion: { synthesis: string; nextStep: string; callToAction: string; destinationDirection?: string };
   internalLinkApplications: RadarEditorialLinkApplication[];
   evidenceNeeds: Array<{ subject: string; requirement: string }>;
   specialistNeeds: Array<{ subject: string; requirement: string }>;
@@ -176,6 +254,8 @@ export type RadarEditorialArticleModel = {
   /** §22 · "Parcial" precisa dizer POR QUÊ. */
   readiness: { state: "READY" | "PARTIAL"; label: string; reasons: string[] };
   limitations: string[];
+  /** Ausente sem Assunto: o modelo de quem não o tem fica byte a byte igual. */
+  declaredSubject?: RadarEditorialSubjectTurn;
 };
 
 /* ============================== ferramentas ============================== */
@@ -252,9 +332,20 @@ function territorioDoArtigo(context: RadarArticleResearchContext) {
    */
   const genericas = new Set(radarSemanticStems(principal?.identity.text || context.article.promise || ""));
 
-  const exigidos = context.editorialTopics
+  const exigidos: Array<{ texto: string; raizes: string[]; assunto?: true }> = context.editorialTopics
     .map(texto => ({ texto, raizes: radarSemanticStems(texto).filter(raiz => !genericas.has(raiz)) }))
     .filter(item => item.raizes.length > 0);
+
+  /*
+   * O ASSUNTO DECLARADO TAMBÉM É EXIGIDO — SDD do Assunto, F3.1.
+   *
+   * Pelas raízes distintivas da frase, como os tópicos. Um bloco da amostra que
+   * as cobre todas ganha `dnaRequired` pelo caminho de sempre, com motivo
+   * próprio. Frase sem raiz distintiva não entra: `every` sobre lista vazia
+   * marcaria TODO candidato como exigido.
+   */
+  const assunto = radarSubjectStems(context);
+  if (assunto?.phrase.length) exigidos.push({ texto: assunto.subject.phrase, raizes: assunto.phrase, assunto: true });
 
   return { principal, raizes, exigidos, genericas };
 }
@@ -389,6 +480,10 @@ type Grupo = {
   candidatos: RadarSectionCandidate[];
   pages: number;
   dnaRequired: boolean;
+  /** Exigido por um tópico declarado (requiredTopics/coverage). */
+  topicRequired: boolean;
+  /** Exigido pelo Assunto declarado — o motivo é outro (F3.1). */
+  subjectRequired: boolean;
 };
 
 /**
@@ -404,7 +499,7 @@ type Grupo = {
  */
 function agrupar(
   candidatos: RadarSectionCandidate[],
-  exigidos: Array<{ raizes: string[] }>,
+  exigidos: Array<{ raizes: string[]; assunto?: true }>,
   genericas: Set<string>,
 ): Grupo[] {
   const grupos: Grupo[] = [];
@@ -437,13 +532,17 @@ function agrupar(
     });
 
     /* A exigência é pelas raízes DISTINTIVAS do tópico, e todas elas. */
-    const exigidoPeloDna = exigidos.some(item => item.raizes.every(raiz => raizes.has(raiz)));
+    const exigidoPeloTopico = exigidos.some(item => !item.assunto && item.raizes.every(raiz => raizes.has(raiz)));
+    const exigidoPeloAssunto = exigidos.some(item => item.assunto && item.raizes.every(raiz => raizes.has(raiz)));
+    const exigidoPeloDna = exigidoPeloTopico || exigidoPeloAssunto;
 
     if (alvo) {
       alvo.candidatos.push(candidato);
       for (const raiz of raizes) alvo.raizes.add(raiz);
       alvo.pages = Math.max(alvo.pages, candidato.marketEvidence.pages);
       alvo.dnaRequired = alvo.dnaRequired || exigidoPeloDna;
+      alvo.topicRequired = alvo.topicRequired || exigidoPeloTopico;
+      alvo.subjectRequired = alvo.subjectRequired || exigidoPeloAssunto;
       continue;
     }
 
@@ -453,6 +552,8 @@ function agrupar(
       raizes, candidatos: [candidato],
       pages: candidato.marketEvidence.pages,
       dnaRequired: exigidoPeloDna,
+      topicRequired: exigidoPeloTopico,
+      subjectRequired: exigidoPeloAssunto,
     });
   }
 
@@ -956,6 +1057,207 @@ const ROTULO_FACTUAL: Record<RadarFactualSupportStatus, string | null> = {
   NOT_REQUIRED: null,
 };
 
+/**
+ * ===== A VIRADA PARA O ASSUNTO — SDD do Assunto, F3.1 =====
+ *
+ * `MUST_COVER ≠ MUST_BE_H2`, também aqui. A seção da virada é exigida — mesmo
+ * sem página nenhuma da amostra — e o lugar dela segue a regra do que o DNA
+ * exige (§5 e §6 do 1.2): H3 do anfitrião do mesmo tema, ou ponto a cobrir no
+ * eixo compatível. A diferença é uma só, e declarada: a virada nunca fica como
+ * H2 por falta de anfitrião enquanto existir seção onde ela caiba, porque um
+ * eixo próprio para o tronco seria decreto, não arquitetura.
+ *
+ * O anfitrião é a seção que mais toca as raízes do Assunto — a mesma que a
+ * posição sugerida nomeia —, para a estrutura e a sugestão dizerem a mesma
+ * coisa. Sem toque, a virada vira ponto do eixo prático.
+ *
+ * Nada aqui toca principal, papéis ou o ArticleDNA: é leitura, não decisão.
+ */
+function viradaDoAssunto(input: {
+  context: RadarArticleResearchContext;
+  observed: RadarCompetitiveObservedModel;
+  sections: readonly RadarEditorialSection[];
+  arvore: RadarEditorialSection[];
+  pontos: Map<string, string>;
+  raizesPorSecao: Map<string, Set<string>>;
+  paginasPorSecao: Map<string, number>;
+  secoesDoAssunto: ReadonlyArray<{ id: string; pages: number }>;
+  candidates: readonly RadarEditorialCandidate[];
+  amostra: number;
+  principal: string | null;
+}): { arvore: RadarEditorialSection[]; turn: RadarEditorialSubjectTurn; limitations: string[] } | null {
+  const raizes = radarSubjectStems(input.context);
+  if (!raizes) return null;
+  const { subject } = raizes;
+  const leitura: RadarDeclaredSubjectSampleReading = input.observed.declaredSubject
+    || readRadarDeclaredSubjectInPages({ context: input.context, pages: [] })!;
+  const procuradas = new Set(raizes.reading);
+  const limitations: string[] = leitura.alert ? [leitura.alert] : [];
+  const amostra = input.amostra;
+
+  const paiDe = new Map<string, RadarEditorialSection>();
+  for (const secao of input.arvore) for (const filho of secao.childSections) paiDe.set(filho.id, secao);
+  const todas = input.arvore.flatMap(secao => [secao, ...secao.childSections]);
+  const porId = new Map([...input.sections, ...todas].map(secao => [secao.id, secao]));
+
+  const forca = (secao: RadarEditorialSection) =>
+    (secao.evidenceStrength === "STRONG" ? 2 : secao.evidenceStrength === "MODERATE" ? 1 : 0);
+  const toque = (secao: RadarEditorialSection) =>
+    [...(input.raizesPorSecao.get(secao.id) || [])].filter(raiz => procuradas.has(raiz)).length;
+
+  type Posicao = { secao: RadarEditorialSection; pages: number; sampleSize: number; basis: "SECTION_STEMS" | "SAMPLE_ORDER" };
+
+  /* A seção da amostra que mais toca as raízes do Assunto, com as páginas dela. */
+  const porRaizes = (excluir: string | null): Posicao | null => {
+    const melhor = todas
+      .filter(secao => secao.id !== excluir && !radarIsSubjectTurnSection(secao.id))
+      .map(secao => ({ secao, toque: toque(secao), pages: input.paginasPorSecao.get(secao.id) ?? 0 }))
+      .filter(item => item.toque > 0)
+      .sort((esquerda, direita) => direita.toque - esquerda.toque || direita.pages - esquerda.pages)[0] || null;
+    return melhor ? { secao: melhor.secao, pages: melhor.pages, sampleSize: amostra, basis: "SECTION_STEMS" } : null;
+  };
+
+  /*
+   * Sem seção que toque o Assunto, a ORDEM das páginas ainda fala: o bloco que
+   * vem logo antes do cabeçalho do Assunto. A formulação é do concorrente e só
+   * serve para achar a seção do artigo-modelo que a absorveu.
+   */
+  const pelaOrdem = (excluir: string | null): Posicao | null => {
+    const sinal = leitura.placementSignal;
+    if (!sinal) return null;
+    const chave = normalizar(sinal.precedingHeading);
+    const alvo = input.candidates.find(item => item.sectionId && normalizar(item.observedLabel) === chave)?.sectionId || null;
+    const secao = alvo ? todas.find(item => item.id === alvo && item.id !== excluir) || null : null;
+    return secao ? { secao, pages: sinal.pages, sampleSize: leitura.sampleSize, basis: "SAMPLE_ORDER" } : null;
+  };
+
+  const maisProxima = (excluir: string | null) => porRaizes(excluir) || pelaOrdem(excluir);
+
+  let arvore = input.arvore;
+  let turnSection: RadarEditorialSubjectTurn["turnSection"];
+  const observada = [...input.secoesDoAssunto].sort((esquerda, direita) => direita.pages - esquerda.pages)[0] || null;
+
+  if (observada) {
+    /* A amostra já cobre o Assunto: é esse bloco que carrega a virada, sem duplicata. */
+    const noTopo = input.arvore.find(secao => secao.id === observada.id) || null;
+    const pai = paiDe.get(observada.id) || null;
+    const hospedeiroId = noTopo || pai ? null : input.pontos.get(observada.id) || null;
+    const hospedeiro = pai || (hospedeiroId ? porId.get(hospedeiroId) || null : null);
+    turnSection = {
+      id: observada.id,
+      heading: porId.get(observada.id)?.headingSuggestion || radarSubjectTurnTitle(subject.phrase),
+      source: "OBSERVED_GROUP",
+      pages: observada.pages,
+      sampleSize: amostra,
+      placement: noTopo ? "H2" : pai ? "H3" : hospedeiroId ? "COVERAGE_POINT" : "H2",
+      hostSectionId: hospedeiro?.id || null,
+      hostHeading: hospedeiro?.headingSuggestion || null,
+      mustCoverReason: RADAR_SUBJECT_MUST_COVER_REASON,
+    };
+  } else {
+    const id = radarSubjectTurnSectionId(subject.phrase);
+    const virada: RadarEditorialSection = {
+      id,
+      level: 3,
+      parentId: null,
+      editorialFunction: "COVERAGE",
+      headingDirection: `Fazer a virada: levar o leitor de ${input.principal || "a busca dele"} a ${subject.phrase}, sem trocar a promessa do artigo.`,
+      headingSuggestion: radarSubjectTurnTitle(subject.phrase),
+      objective: `Mostrar ao leitor desta busca o que ele precisa entender para chegar a ${subject.phrase}.`,
+      readerQuestion: `O que o leitor desta busca precisa entender para chegar a ${subject.phrase}?`,
+      keyMessage: null,
+      coveragePoints: [`virada para ${subject.phrase}`, ...(subject.note ? [`${subject.phrase}: ${subject.note}`] : [])],
+      mustCoverReasons: [RADAR_SUBJECT_MUST_COVER_REASON],
+      childSections: [],
+      evidenceStrength: "DNA_REQUIRED",
+      evidenceRefs: [],
+      factualSupport: "NOT_REQUIRED",
+      factualRequirement: null,
+      specialistRequirement: null,
+      internalLinks: [],
+      mediaOpportunity: [],
+      reason: `O ArticleDNA declara "${subject.phrase}" como tronco e nenhuma página da amostra o trata como bloco próprio (0 de ${amostra}): a seção é exigida mesmo assim, e a arquitetura decide onde.`,
+    };
+
+    const proxima = maisProxima(null);
+    const base = { id, heading: virada.headingSuggestion, source: "SYNTHETIC" as const, pages: 0, sampleSize: amostra, mustCoverReason: RADAR_SUBJECT_MUST_COVER_REASON };
+
+    if (proxima) {
+      /* H3 do anfitrião do mesmo tema: a seção que mais toca o Assunto, ou o H2 dela. */
+      const anfitriao = paiDe.get(proxima.secao.id) || proxima.secao;
+      arvore = input.arvore.map(secao => secao === anfitriao
+        ? { ...secao, childSections: [...secao.childSections, { ...virada, level: 3 as const, parentId: secao.id }] }
+        : secao);
+      turnSection = { ...base, placement: "H3", hostSectionId: anfitriao.id, hostHeading: anfitriao.headingSuggestion };
+    } else if (input.arvore.length) {
+      /* Sem tema em comum: ponto a cobrir no eixo prático, ou na seção mais sustentada. */
+      const praticas = input.arvore
+        .filter(secao => secao.editorialFunction === "APPLICATION" || secao.editorialFunction === "SELECTION")
+        .sort((esquerda, direita) => forca(direita) - forca(esquerda));
+      const eixo = praticas[0] || input.arvore.find(secao => forca(secao) === 2) || input.arvore[input.arvore.length - 1];
+      arvore = input.arvore.map(secao => secao === eixo
+        ? {
+          ...secao,
+          coveragePoints: [...secao.coveragePoints, ...virada.coveragePoints],
+          mustCoverReasons: [...secao.mustCoverReasons, ...virada.mustCoverReasons],
+        }
+        : secao);
+      turnSection = { ...base, placement: "COVERAGE_POINT", hostSectionId: eixo.id, hostHeading: eixo.headingSuggestion };
+    } else {
+      arvore = [{ ...virada, level: 2, parentId: null }];
+      turnSection = { ...base, placement: "ALONE", hostSectionId: null, hostHeading: null };
+      limitations.push("A amostra não produziu seção para hospedar a virada: ela fica como a única seção exigida, e o lugar é do Redator.");
+    }
+  }
+
+  const posicao = maisProxima(turnSection.source === "OBSERVED_GROUP" ? turnSection.id : null);
+  const suggestedPosition = posicao
+    ? { afterSectionId: posicao.secao.id, afterHeading: posicao.secao.headingSuggestion, pages: posicao.pages, sampleSize: posicao.sampleSize, basis: posicao.basis }
+    : null;
+
+  const titulo = leitura.titlePagesTouching;
+  const piso = Math.min(RADAR_SUBJECT_H1_FLOOR, Math.max(1, leitura.sampleSize));
+  const sugereH1 = leitura.basis === "PAGES" && titulo !== null && titulo >= piso;
+
+  return {
+    arvore,
+    limitations,
+    turn: {
+      phrase: subject.phrase,
+      note: subject.note,
+      destinationUrl: subject.destinationUrl,
+      criterion: leitura.criterion,
+      criterionLabel: leitura.criterionLabel,
+      stems: [...leitura.stems],
+      turnSection,
+      suggestedPosition,
+      suggestedPositionLabel: !suggestedPosition
+        ? turnSection.source === "OBSERVED_GROUP"
+          /* O bloco observado JÁ é a virada: a amostra dá o lugar, e isso não é "sem sinal". */
+          ? `Na seção "${turnSection.heading}": é o bloco da amostra que já trata o Assunto (em ${turnSection.pages} de ${turnSection.sampleSize} página(s)).`
+          : RADAR_SUBJECT_NO_SIGNAL
+        : suggestedPosition.basis === "SECTION_STEMS"
+          ? `Depois de "${suggestedPosition.afterHeading}": a seção da amostra que mais traz palavras do Assunto (aparece em ${suggestedPosition.pages} de ${suggestedPosition.sampleSize} página(s)).`
+          : `Depois de "${suggestedPosition.afterHeading}": é depois deste bloco que a amostra trata o Assunto (em ${suggestedPosition.pages} de ${suggestedPosition.sampleSize} página(s)).`,
+      h1Complement: {
+        suggested: sugereH1,
+        complement: sugereH1 ? subject.phrase : null,
+        titlePages: titulo,
+        headingPages: leitura.headingPagesTouching,
+        sampleSize: leitura.sampleSize,
+        label: sugereH1
+          ? `Complemento do H1: ${input.principal ? `${input.principal} + ` : ""}"${subject.phrase}" — palavras do Assunto aparecem no título de ${titulo} de ${leitura.sampleSize} página(s).`
+          : (leitura.headingPagesTouching ?? 0) > 0
+            ? `Assunto em H2/H3 — o H1 é da principal: palavras do Assunto aparecem em H2/H3 de ${leitura.headingPagesTouching} de ${leitura.sampleSize} página(s).`
+            : RADAR_SUBJECT_NO_SIGNAL,
+      },
+      sampleLabel: leitura.label,
+      alert: leitura.alert,
+      ctaDirection: subject.destinationUrl ? radarSubjectCtaDirection(subject.destinationUrl) : null,
+    },
+  };
+}
+
 export function buildRadarEditorialArticleModel(input: {
   context: RadarArticleResearchContext;
   observed: RadarCompetitiveObservedModel;
@@ -992,12 +1294,20 @@ export function buildRadarEditorialArticleModel(input: {
     return texto.length > 3 ? texto : null;
   })();
 
-  const grupos = agrupar(blueprint.sections, territorio.exigidos, territorio.genericas);
+  /*
+   * A seção da virada que o blueprint propôs NÃO é candidato observado: ela
+   * não entra no agrupamento nem nas formulações da amostra (F3.1).
+   */
+  const observados = blueprint.sections.filter(item => !radarIsSubjectTurnSection(item.id));
+  const grupos = agrupar(observados, territorio.exigidos, territorio.genericas);
 
   const candidates: RadarEditorialCandidate[] = [];
   const sections: RadarEditorialSection[] = [];
   /* As raízes próprias de cada seção — a chave do agrupamento por tema (§10). */
   const raizesPorSecao = new Map<string, Set<string>>();
+  /* Quantas páginas sustentam cada seção, e quais carregam o Assunto (F3.1). */
+  const paginasPorSecao = new Map<string, number>();
+  const secoesDoAssunto: Array<{ id: string; pages: number }> = [];
 
   for (const grupo of grupos) {
     const lider = [...grupo.candidatos].sort((esquerda, direita) =>
@@ -1050,6 +1360,8 @@ export function buildRadarEditorialArticleModel(input: {
     const distintivasDaSecao = new Set([...grupo.raizes].filter(raiz =>
       !territorio.genericas.has(raiz) && !VERBOS_SEM_ASSUNTO.has(raiz)));
     raizesPorSecao.set(sectionId, distintivasDaSecao);
+    paginasPorSecao.set(sectionId, grupo.pages);
+    if (grupo.subjectRequired) secoesDoAssunto.push({ id: sectionId, pages: grupo.pages });
     const tipoLabel = lider.conceptTypeLabel;
     const funcaoDaSecao = funcaoEditorial(lider.workingTitle);
     const cabecalho = direcaoDeCabecalho({
@@ -1164,7 +1476,10 @@ export function buildRadarEditorialArticleModel(input: {
       keyMessage: mensagemEditorial(lider.differentiation),
       coveragePoints,
       mustCoverReasons: grupo.dnaRequired
-        ? [`O ArticleDNA declara este assunto: ele precisa ser coberto, e a arquitetura decide onde.`]
+        ? [
+          ...(grupo.topicRequired ? [`O ArticleDNA declara este assunto: ele precisa ser coberto, e a arquitetura decide onde.`] : []),
+          ...(grupo.subjectRequired ? [RADAR_SUBJECT_MUST_COVER_REASON] : []),
+        ]
         : [],
       childSections: [],
       evidenceStrength: grupo.dnaRequired && grupo.pages < PISO_DE_EVIDENCIA ? "DNA_REQUIRED"
@@ -1179,7 +1494,9 @@ export function buildRadarEditorialArticleModel(input: {
         .filter((valor): valor is string => Boolean(valor))
         .map(() => "Vídeo de apoio recomendado para esta seção."),
       reason: grupo.dnaRequired
-        ? `O ArticleDNA declara este assunto; a amostra o confirma em ${grupo.pages} de ${amostra} página(s).`
+        ? grupo.subjectRequired && !grupo.topicRequired
+          ? `O ArticleDNA declara este Assunto como tronco; a amostra o toca em ${grupo.pages} de ${amostra} página(s).`
+          : `O ArticleDNA declara este assunto; a amostra o confirma em ${grupo.pages} de ${amostra} página(s).`
         : `Observado em ${grupo.pages} de ${amostra} página(s) comparável(is), dentro do território que o ArticleDNA declara.${
           absorvidas.length ? ` Esta seção também responde: ${absorvidas.map(item => `"${item}"`).join(", ")}.` : ""
         }`,
@@ -1246,7 +1563,7 @@ export function buildRadarEditorialArticleModel(input: {
    * recomendação — a mesma trava do cabeçalho vale para o título.
    */
   const observadasNoArtigo = new Set(
-    blueprint.sections.flatMap(item => [item.workingTitle, ...(variantesPorConceito.get(item.conceptId) || [])]).map(normalizar),
+    observados.flatMap(item => [item.workingTitle, ...(variantesPorConceito.get(item.conceptId) || [])]).map(normalizar),
   );
 
   /* ============ 1.4 · §2 e §3 · título, estratégia e promessa ============ */
@@ -1358,7 +1675,7 @@ export function buildRadarEditorialArticleModel(input: {
    * frase em todo artigo — e frase que serve para todos não orienta nenhum. O
    * objetivo retoma a resposta principal; a chamada aponta para o eixo.
    */
-  const conclusion = {
+  const conclusion: RadarEditorialArticleModel["conclusion"] = {
     synthesis: definicional || arvore[0]
       ? `Retomar a resposta principal: ${nucleoDeAcao((definicional || arvore[0]).headingSuggestion)}.`
       : `Retomar o que o artigo respondeu sobre ${principal || "o assunto"}.`,
@@ -1369,6 +1686,19 @@ export function buildRadarEditorialArticleModel(input: {
       ? `Levar o leitor a ${acaoDoEixo}.`
       : `Levar o leitor a aplicar o que leu sobre ${principal || "o assunto"}.`,
   };
+
+  /*
+   * ============ O ASSUNTO DECLARADO — SDD do Assunto, F3.1 ============
+   *
+   * Depois do título, da promessa e do fecho de propósito: a virada não muda
+   * o que a amostra diz sobre o artigo. Ela entra na ESTRUTURA — como bloco
+   * observado que já cobria o Assunto ou como a seção "Virada para <Assunto>"
+   * — e a chamada final ganha a direção para o destino ao lado da observada.
+   */
+  const assunto = viradaDoAssunto({
+    context, observed, sections, arvore, pontos, raizesPorSecao, paginasPorSecao, secoesDoAssunto, candidates, amostra, principal,
+  });
+  if (assunto?.turn.ctaDirection) conclusion.destinationDirection = assunto.turn.ctaDirection;
 
   /* ------------------------- dependências declaradas ------------------------ */
 
@@ -1445,7 +1775,7 @@ export function buildRadarEditorialArticleModel(input: {
     editorialAngle,
     readerPromise,
     opening,
-    sections: arvore,
+    sections: assunto ? assunto.arvore : arvore,
     conclusion,
     internalLinkApplications: todasAsSecoes.flatMap(item => item.internalLinks),
     evidenceNeeds,
@@ -1454,9 +1784,16 @@ export function buildRadarEditorialArticleModel(input: {
     mediaSummary,
     candidates,
     readiness,
-    limitations: [
-      ...(abertura?.directives.length ? [] : ["A amostra não mostrou padrão de abertura dominante."]),
-      ...context.limitations,
-    ],
+    limitations: assunto
+      ? [...new Set([
+        ...(abertura?.directives.length ? [] : ["A amostra não mostrou padrão de abertura dominante."]),
+        ...context.limitations,
+        ...assunto.limitations,
+      ])]
+      : [
+        ...(abertura?.directives.length ? [] : ["A amostra não mostrou padrão de abertura dominante."]),
+        ...context.limitations,
+      ],
+    ...(assunto ? { declaredSubject: assunto.turn } : {}),
   };
 }

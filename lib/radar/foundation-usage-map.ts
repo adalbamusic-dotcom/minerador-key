@@ -64,6 +64,19 @@ export const RADAR_FOUNDATION_USAGE_MAP: RadarFoundationEntry[] = [
     note: "Pilar e Suporte mudam o que se espera das relações internas, não a consulta.",
   },
   {
+    field: "article.subject",
+    usage: ["CONTENT_COMPARISON_INPUT", "RESEARCH_QUERY_INPUT", "REPORT_CONTEXT"],
+    consumers: [
+      "editorial-article-model (seção exigida da virada, posição sugerida e complemento do H1)",
+      "editorial-blueprint (seção da virada em blueprint.sections, congelada no FINALIZE)",
+      "competitive-observed-model (leitura por raízes na amostra e alerta em limitations)",
+      "youtube-search-queries (DECLARED_SUBJECT, dentro do teto)",
+      "r6-sequential (pauta do especialista: aprofundar o Assunto e a virada)",
+      "portable-read-model (direção da chamada final para o destino)",
+    ],
+    note: "O tronco declarado pelo humano e fixado pelo Arquiteto. O Radar lê e nunca troca, promove nem rebaixa (P8); as consultas Google não mudam.",
+  },
+  {
     field: "editorialTopics",
     usage: ["CONTENT_COMPARISON_INPUT"],
     consumers: ["competitive-model (editorialTopics)", "topic-classification"],

@@ -1,7 +1,8 @@
-import { RADAR_WRITER_MAY_NOT } from "../redator/writer-handoff.ts";
+import { RADAR_WRITER_MAY_NOT_SUBJECT, radarWriterMayNotFor } from "../redator/writer-handoff.ts";
 import { WRITER_EVIDENCE_LIMITS } from "../redator/writer-evidence-catalog.ts";
 import { RADAR_AMAZON_INTENT_LABELS, type RadarAmazonEditorialIntentType } from "./amazon-editorial-target.ts";
 import { radarClaimNeedsFactualSupport } from "./claim-evidence.ts";
+import { RADAR_SUBJECT_MUST_COVER_REASON, radarSubjectCtaDirection, radarSubjectTurnTitle } from "./declared-subject.ts";
 import { RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS } from "./competitive-blueprint.ts";
 import { RADAR_EDITORIAL_OUTPUT_LABELS } from "./multimodal-blueprint.ts";
 import { radarPortableSpecialistContext, radarPortableVideoContext } from "./portable-annex-context.ts";
@@ -27,6 +28,7 @@ import { radarPortableSerpLenses, radarPortableSerpObserved, type RadarPortableS
 
 import type { RadarAiDiscoveryContext } from "./ai-discovery-context.ts";
 import type { RadarAuthorityEvidence } from "./authority-evidence.ts";
+import type { RadarEditorialSubjectTurn } from "./editorial-article-model.ts";
 import type { RadarSiloExportWritingContext } from "./portable-silo-export.ts";
 
 /**
@@ -522,6 +524,35 @@ function projecoes(input: RadarPortableExportInput) {
     blueprint, editorial, dna, serp, fontesExternas, linksDoPlano, keywords, seo, visual,
     video, especialista, serpObservada, lentes, concorrentes, autoridade, descoberta, prontidao, limitacoes,
     secoes: radarPortableFlatSections(editorial.sections),
+    assunto: assuntoDe(input, editorial),
+  };
+}
+
+/**
+ * ===== O ASSUNTO DECLARADO — SDD do Assunto, F4.3 (P9) =====
+ *
+ * O tronco vem do ArticleDNA pelo contexto de pesquisa, e a virada (seção,
+ * posição e complemento do H1) vem do artigo-modelo do Radar, como veio. O
+ * export não recalcula nem decide nada: diz. Sem Assunto, `null`, e nenhuma
+ * célula muda.
+ */
+type AssuntoDeEscrita = {
+  phrase: string;
+  note: string | null;
+  destinationUrl: string | null;
+  turn: RadarEditorialSubjectTurn | null;
+};
+
+function assuntoDe(input: RadarPortableExportInput, editorial: RadarPortableEditorial): AssuntoDeEscrita | null {
+  const turn = editorial.subjectTurn ?? null;
+  const doContexto = input.researchContext?.article.subject ?? null;
+  const phrase = texto(turn?.phrase) || texto(doContexto?.phrase);
+  if (!phrase) return null;
+  return {
+    phrase,
+    note: texto(turn ? turn.note : doContexto?.note) || null,
+    destinationUrl: texto(turn ? turn.destinationUrl : doContexto?.destinationUrl) || null,
+    turn,
   };
 }
 
@@ -783,6 +814,7 @@ function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: R
 
   const linhas = [
     `Keyword principal: ${principal || "não resolvida no pacote"}`,
+    ...(p.assunto ? [`Assunto (tronco): ${p.assunto.phrase}`] : []),
     ...(complementares.length
       ? ["Keywords complementares:", ...complementares.map(item => {
         const volume = volumes.get(radarWritingCompareKey(item.keyword))?.volume;
@@ -819,16 +851,17 @@ function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: R
     linhas.push(`Canonical: ${texto(input.article.canonical)}`);
   }
 
-  linhas.push(`Não altere: ${naoAltere(publicado).join("; ")}.`);
+  linhas.push(`Não altere: ${naoAltere(publicado, p.assunto).join("; ")}.`);
   return linhas.join("\n");
 }
 
 /**
  * AS DECISÕES PROTEGIDAS — as mesmas proibições que o Redator recebe
  * (`RADAR_WRITER_MAY_NOT`), em frase curta. A lista vem de lá: uma proibição
- * nova no Redator aparece aqui sem ninguém lembrar de copiar.
+ * nova no Redator aparece aqui sem ninguém lembrar de copiar. Com Assunto
+ * declarado, a lista é a de `radarWriterMayNotFor`, com a proibição dele.
  */
-function naoAltere(publicado: boolean): string[] {
+function naoAltere(publicado: boolean, assunto: Pick<AssuntoDeEscrita, "phrase"> | null = null): string[] {
   const curtas: Record<string, string> = {
     "trocar a keyword principal": "a keyword principal",
     "reconfigurar o Silo": "a configuração do Silo",
@@ -837,8 +870,9 @@ function naoAltere(publicado: boolean): string[] {
     "alterar slug protegido": "o slug",
     "alterar canonical protegido": "o canonical",
     "substituir a composição de secundárias por decisão própria": "a composição de keywords complementares",
+    [RADAR_WRITER_MAY_NOT_SUBJECT]: "o Assunto declarado (não troque nem remova)",
   };
-  const itens = RADAR_WRITER_MAY_NOT.map(proibicao => curtas[proibicao] || proibicao);
+  const itens = radarWriterMayNotFor(assunto).map(proibicao => curtas[proibicao] || proibicao);
   return [...itens.slice(0, 1), "o papel no Silo", ...itens.slice(1), ...(publicado ? ["a URL publicada"] : [])];
 }
 
@@ -860,13 +894,76 @@ function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto:
   const linhas = [
     ...(promessa ? [`Promessa: ${comPontoFinal(promessa)}`] : []),
     ...(leitor ? [`Leitor: ${comPontoFinal(leitor)}`] : []),
+    ...linhasDoTronco(p),
     ...(perguntaDeAbertura ? [`Abertura: responder ${entreAspas(perguntaDeAbertura)} logo no primeiro parágrafo, de forma direta, antes de contextualizar.`] : []),
     ...(direcaoDaAbertura ? [`Direção da abertura: ${comPontoFinal(direcaoDaAbertura)}`] : []),
     ...(fechamento ? [`Fechamento: ${comPontoFinal(fechamento)}`] : []),
     ...(chamada ? [`Chamada final: ${comPontoFinal(chamada)}`] : []),
+    ...linhaDoDestino(p),
     ...(depois.length ? [`Próximo passo do leitor: ${depois.join(" ou ")}.`] : []),
   ];
   return linhas.join("\n");
+}
+
+/**
+ * O TRONCO E A VIRADA (F4.3), antes da abertura. O lugar diz o mesmo que a
+ * coluna `estrutura`: o bloco da amostra que já trata o Assunto, a posição
+ * que o Radar sugeriu, ou o anfitrião onde a virada ficou como ponto a cobrir.
+ * Só sem nada disso a posição fica com quem redige, e isso é dito.
+ */
+function linhasDoTronco(p: Projecoes): string[] {
+  const assunto = p.assunto;
+  if (!assunto) return [];
+  const principal = texto(p.dna.principalKeyword);
+  const posicao = assunto.turn?.suggestedPosition ?? null;
+  const secao = assunto.turn?.turnSection ?? null;
+  const contagem = secao ? `${secao.pages} de ${secao.sampleSize} página(s)` : "";
+  const onde = secao?.source === "OBSERVED_GROUP"
+    ? secao.placement === "COVERAGE_POINT" && secao.hostHeading
+      ? `em ${entreAspas(secao.hostHeading)}, como ponto a cobrir (a amostra trata o Assunto em ${contagem})`
+      : `na seção ${entreAspas(secao.heading)} (a amostra já trata o Assunto em ${contagem})`
+    : posicao
+      ? `depois de ${entreAspas(posicao.afterHeading)}`
+      : secao?.placement === "COVERAGE_POINT" && secao.hostHeading
+        ? `como ponto a cobrir em ${entreAspas(secao.hostHeading)} (lugar deixado pelo Radar sem sinal na SERP; quem redige pode mudar)`
+        : "onde quem redige decidir (sem sinal na SERP)";
+  return [
+    comPontoFinal(`Tronco (Assunto): ${assunto.phrase}${assunto.note ? ` — ${semPontoFinal(assunto.note)}` : ""}`),
+    `Virada: ${onde}, levar o leitor ${principal ? `de ${principal}` : "da keyword principal"} a ${assunto.phrase}${assunto.destinationUrl ? `; destino: ${assunto.destinationUrl}` : ""}.`,
+  ];
+}
+
+/** Sem sinal na SERP, a linha do H1 devolve a decisão a quem redige. */
+export const RADAR_WRITING_SUBJECT_H1_NO_SIGNAL = "Assunto no H1: sem sinal na SERP, quem redige decide. O H1 é da principal.";
+
+/**
+ * A DIREÇÃO DO H1 COM ASSUNTO (F4.3), conforme a sugestão do Radar: o
+ * complemento só quando a amostra põe o Assunto nos títulos; "H2/H3" só quando
+ * a amostra o trata em H2/H3 de pelo menos uma página; em todo o resto (sem
+ * leitura, ou 0 de N), a decisão volta a quem redige — "sem sinal" nunca vira
+ * "Assunto em H2/H3" (F3.1). A principal continua dona do H1 em todos os casos.
+ */
+function linhaDoH1(p: Projecoes): string[] {
+  const assunto = p.assunto;
+  if (!assunto) return [];
+  const complemento = assunto.turn?.h1Complement ?? null;
+  const principal = texto(p.dna.principalKeyword) || "keyword principal";
+  if (complemento?.suggested) {
+    return [`Direção do H1: ${principal} + complemento "${semPontoFinal(complemento.complement || assunto.phrase)}" (sugestão do Radar; a decisão é de quem redige).`];
+  }
+  if ((complemento?.headingPages ?? 0) > 0) return ["Assunto em H2/H3 — o H1 é da principal."];
+  return [RADAR_WRITING_SUBJECT_H1_NO_SIGNAL];
+}
+
+/**
+ * A DIREÇÃO PARA O DESTINO, AO LADO DA CHAMADA FINAL (F3.1): a chamada
+ * observada continua como veio, e o destino declarado do Assunto fica na linha
+ * de baixo — o link é do fecho, não só da virada.
+ */
+function linhaDoDestino(p: Projecoes): string[] {
+  const destino = p.assunto?.destinationUrl;
+  if (!destino) return [];
+  return [`Destino da chamada: ${comPontoFinal(p.editorial.ctaDestination || radarSubjectCtaDirection(destino))}`];
 }
 
 /**
@@ -902,6 +999,7 @@ function colunaTitulo(input: RadarPortableExportInput, p: Projecoes): { celula: 
       ? `H1 de trabalho: ${titulo}`
       : `H1 de trabalho: não definido — formule a partir da promessa e da estrutura, com a keyword principal${principal ? ` ("${principal}")` : ""}.`,
     ...(alternativas.length ? [`Alternativas: ${alternativas.join(" · ")}`] : []),
+    ...linhaDoH1(p),
     ...(direcao ? [`Direção de título: ${comPontoFinal(direcao)}`] : []),
     p.seo.seoTitle ? `SEO title: ${p.seo.seoTitle}` : "SEO title: a definir; cerca de 60 caracteres, com a keyword principal, sem copiar título de concorrente.",
     p.seo.metaDescription
@@ -915,6 +1013,17 @@ function colunaTitulo(input: RadarPortableExportInput, p: Projecoes): { celula: 
 /* ------------------------------ a estrutura ------------------------------ */
 
 const OBRIGATORIO_PADRAO = /o articledna declara/i;
+
+/*
+ * O motivo do Assunto começa como o padrão ("O ArticleDNA declara…"), mas é
+ * PRÓPRIO: diz por que a seção é exigida. Ele sai na marcação, e o ponto
+ * "virada para <Assunto>" vai à frente dos outros pontos da seção.
+ */
+/** "Virada para <Assunto>" é o nome da seção no Radar, não um título para publicar. */
+export const RADAR_WRITING_SUBJECT_WORKING_TITLE = "- Título de trabalho do Radar: reescreva para o leitor antes de publicar.";
+
+const motivoProprio = (motivo: string) => motivo === RADAR_SUBJECT_MUST_COVER_REASON || !OBRIGATORIO_PADRAO.test(motivo);
+const VIRADA = /^virada para /i;
 
 function colunaEstrutura(
   input: RadarPortableExportInput,
@@ -932,16 +1041,22 @@ function colunaEstrutura(
     if (EH_FAQ.test(secao.heading)) { faqOmitidas += 1; return []; }
     const pergunta = util(secao.readerQuestion);
     const chaveDoTitulo = radarWritingCompareKey(secao.heading);
-    const pontos = unicosPorChave(secao.coveragePoints.filter(item => !ehPreenchimento(item)), radarWritingCompareKey)
+    const daVirada = secao.mustCoverReasons.includes(RADAR_SUBJECT_MUST_COVER_REASON);
+    const candidatos = daVirada
+      ? [...secao.coveragePoints.filter(item => VIRADA.test(item)), ...secao.coveragePoints.filter(item => !VIRADA.test(item))]
+      : secao.coveragePoints;
+    const pontos = unicosPorChave(candidatos.filter(item => !ehPreenchimento(item)), radarWritingCompareKey)
       .filter(item => radarWritingCompareKey(item) !== radarWritingCompareKey(pergunta) && radarWritingCompareKey(item) !== chaveDoTitulo)
       .slice(0, 4);
     const obrigatoria = secao.mustCoverReasons.length > 0;
-    const motivosProprios = secao.mustCoverReasons.filter(item => !OBRIGATORIO_PADRAO.test(item));
+    const motivosProprios = secao.mustCoverReasons.filter(motivoProprio);
     const linksDaSecao = links.filter(link => link.secao === secao.heading).map(link => link.rotulo);
     const doEspecialista = especialista.filter(item => item.secao === secao.heading).map(item => item.rotulo);
+    const deTrabalho = Boolean(p.assunto) && secao.heading === radarSubjectTurnTitle(p.assunto!.phrase);
     const linhas = [
       "",
       `${"#".repeat(secao.level)} ${secao.heading}`,
+      ...(deTrabalho ? [RADAR_WRITING_SUBJECT_WORKING_TITLE] : []),
       pergunta ? `- Responde: ${pergunta}` : `- Objetivo: ${comPontoFinal(secao.objective)}`,
       ...(pontos.length ? [`- Cobrir: ${pontos.join(" · ")}`] : []),
       ...(obrigatoria ? [`- Obrigatória pelo ArticleDNA${motivosProprios.length ? `: ${motivosProprios.map(semPontoFinal).join("; ")}` : ""}.`] : []),

@@ -77,6 +77,14 @@ export type ArchitectKeywordVinculo = {
   canonicalUrl: string | null;
   /** A frase que o Minerador mostra — repetida aqui, nunca recalculada. */
   summary: string;
+  /**
+   * Assunto declarado (SDD 2026-09-24, F2.2): `Assunto · declarado` ou
+   * `Assunto sem nota`, o mesmo rótulo do Minerador. Aditivo e presente só
+   * com declaração: sem Assunto, o objeto é o de antes.
+   */
+  subjectLabel?: string;
+  subjectNote?: string | null;
+  subjectDestinationUrl?: string | null;
 };
 
 /**
@@ -102,6 +110,9 @@ export function readArchitectKeywordVinculo(keyword: RecordLike): ArchitectKeywo
     url: vinculo.url,
     canonicalUrl: vinculo.canonicalUrl,
     summary: keywordVinculoSummary(vinculo),
+    ...(vinculo.subject?.declared && vinculo.subjectLabel
+      ? { subjectLabel: vinculo.subjectLabel, subjectNote: vinculo.subject.note, subjectDestinationUrl: vinculo.subject.destinationUrl }
+      : {}),
   };
 }
 

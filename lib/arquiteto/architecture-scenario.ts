@@ -87,6 +87,12 @@ export const ArticleScenarioSchema = z.object({
     role: ScenarioStructuralRoleSchema,
   }).strict()).min(1),
   protections: ScenarioArticleProtectionsSchema,
+  /**
+   * Assunto preso ao artigo (SDD 2026-09-24, F2.3). Tronco, não membro: fica
+   * fora de `keywords`, do limite e da duplicidade, e conta como coberto na
+   * partição. O mesmo Assunto pode estar em vários artigos (D3).
+   */
+  subjectKeywordId: z.string().min(1).optional(),
 }).strict();
 export type ArticleScenario = z.infer<typeof ArticleScenarioSchema>;
 
@@ -351,6 +357,8 @@ export function validateArchitectureScenario(
 
   const groupedBy = new Map<string, string[]>();
   const seenContainerRefs = new Set<string>();
+  /** Troncos ancorados: cobertos pela partição, nunca membros (F2.3). */
+  const anchoredSubjects = new Set<string>();
 
   if (scenario.level === "article") {
     for (const article of scenario.articles) {
@@ -358,6 +366,7 @@ export function validateArchitectureScenario(
         issues.push({ code: "DUPLICATE_ARTICLE_KEY", articleRef: article.articleRef });
       }
       seenContainerRefs.add(article.articleRef);
+      if (article.subjectKeywordId) anchoredSubjects.add(article.subjectKeywordId);
 
       if (article.keywords.length > MAX_KEYWORDS_PER_ARTICLE) {
         issues.push({ code: "ARTICLE_OVER_KEYWORD_LIMIT", articleRef: article.articleRef, detail: String(article.keywords.length) });
@@ -416,9 +425,10 @@ export function validateArchitectureScenario(
   }
 
   // Só a partição completa precisa cobrir o universo. `partial` declara ausência.
+  // O tronco ancorado conta como coberto: ele não é membro nem sobra.
   if (scenario.capability === "complete") {
     for (const keywordId of universe) {
-      if (!groupedBy.has(keywordId) && !ungrouped.has(keywordId)) {
+      if (!groupedBy.has(keywordId) && !ungrouped.has(keywordId) && !anchoredSubjects.has(keywordId)) {
         issues.push({ code: "KEYWORD_MISSING_FROM_COMPLETE_SCENARIO", keywordId });
       }
     }

@@ -30,6 +30,11 @@ import type { RadarArticleResearchContext } from "./article-research-context.ts"
 export const RADAR_YOUTUBE_QUERY_ORIGINS = [
   /** A keyword principal, verbatim. A consulta que não pode faltar. */
   "PRIMARY_KEYWORD",
+  /**
+   * O Assunto declarado no ArticleDNA — SDD do Assunto, F3.1. Só existe com
+   * Assunto, e toma o lugar da última da fila: o teto não cresce.
+   */
+  "DECLARED_SUBJECT",
   /** A principal com o enquadramento que o YouTube premia: como, rotina, resenha. */
   "AUDIOVISUAL_FRAMING",
   /** Um tópico editorial que o artigo precisa cobrir, buscado como vídeo. */
@@ -163,17 +168,31 @@ export function buildRadarYoutubeQueryPlan(input: {
   const principalKeyword = keywords.find(item => item.identity.role === "principal") || null;
   const principal = texto(principalKeyword?.identity.text);
 
-  const queries: RadarYoutubeQuery[] = [];
-  const vistos = new Set<string>();
+  type Candidato = { text: string; origin: RadarYoutubeQueryOrigin; sourceRef: string | null; reason: string };
 
-  const acrescentar = (candidato: { text: string; origin: RadarYoutubeQueryOrigin; sourceRef: string | null; reason: string }) => {
-    const limpo = texto(candidato.text);
-    if (!limpo) return;
-    const chave = radarYoutubeQueryKey(limpo);
-    if (!chave || vistos.has(chave)) return;
-    if (queries.length >= limite) return;
-    vistos.add(chave);
-    queries.push({ queryId: radarYoutubeQueryId(limpo), text: limpo, origin: candidato.origin, sourceRef: candidato.sourceRef, reason: candidato.reason });
+  /*
+   * A FILA INTEIRA PRIMEIRO, O TETO DEPOIS.
+   *
+   * Deduplicar e depois cortar é o mesmo que cortar enquanto se acrescenta — e
+   * é o que permite pôr o Assunto logo depois da principal SEM crescer o
+   * plano: o corte usa o tamanho que a fila teria sem ele.
+   */
+  const fila: Candidato[] = [];
+  const acrescentar = (candidato: Candidato) => { fila.push(candidato); };
+
+  const deduplicada = (candidatos: readonly Candidato[], teto: number): RadarYoutubeQuery[] => {
+    const saida: RadarYoutubeQuery[] = [];
+    const vistos = new Set<string>();
+    for (const candidato of candidatos) {
+      const limpo = texto(candidato.text);
+      if (!limpo) continue;
+      const chave = radarYoutubeQueryKey(limpo);
+      if (!chave || vistos.has(chave)) continue;
+      if (saida.length >= teto) break;
+      vistos.add(chave);
+      saida.push({ queryId: radarYoutubeQueryId(limpo), text: limpo, origin: candidato.origin, sourceRef: candidato.sourceRef, reason: candidato.reason });
+    }
+    return saida;
   };
 
   /*
@@ -247,6 +266,38 @@ export function buildRadarYoutubeQueryPlan(input: {
 
   if (!editorialTopics.length) {
     limitations.push("A investigação não declarou tópicos editoriais; o plano não incluiu consultas por tópico.");
+  }
+
+  const semAssunto = deduplicada(fila, limite);
+
+  /*
+   * ============ O ASSUNTO DECLARADO — SDD do Assunto, F3.1 ============
+   *
+   * Entra logo depois da principal e TOMA O LUGAR DA ÚLTIMA DA FILA: o plano
+   * sai com o mesmo número de consultas que teria sem ele, e nenhuma chamada
+   * paga a mais. Sem Assunto, este bloco não existe e o plano é o de sempre.
+   */
+  const assunto = texto(article.subject?.phrase);
+  if (!assunto) {
+    return { articleId: article.articleId, articleDnaVersionId: article.articleDnaVersionId, queries: semAssunto, limitations };
+  }
+
+  const [primeira, ...resto] = fila;
+  const queries = deduplicada([
+    primeira,
+    {
+      text: assunto,
+      origin: "DECLARED_SUBJECT",
+      sourceRef: null,
+      reason: "O Assunto declarado no ArticleDNA: procura quem já explicou em vídeo o tronco para onde o artigo faz a virada.",
+    },
+    ...resto,
+  ], semAssunto.length);
+
+  const chavesComAssunto = new Set(queries.map(item => radarYoutubeQueryKey(item.text)));
+  const deslocadas = semAssunto.filter(item => !chavesComAssunto.has(radarYoutubeQueryKey(item.text)));
+  if (deslocadas.length) {
+    limitations.push(`A consulta do Assunto tomou o lugar de ${deslocadas.map(item => `"${item.text}"`).join(", ")}, a última da fila, para o plano continuar com ${queries.length} consulta(s).`);
   }
 
   return { articleId: article.articleId, articleDnaVersionId: article.articleDnaVersionId, queries, limitations };

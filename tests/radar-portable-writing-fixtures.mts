@@ -156,6 +156,19 @@ export const vistaDoGoogle = () => buildRadarDeepResearchView({
   observedAt: "2026-09-20T12:00:00.000Z",
 });
 
+/*
+ * SDD do Assunto, F4.4 · a mesma vista do Pilar sobre um contexto dado (por
+ * exemplo, com `article.subject`). `vistaDoGoogle` continua como era: as
+ * saídas douradas não passam por aqui.
+ */
+export const vistaDoGoogleSobre = (context: RadarArticleResearchContext) => buildRadarDeepResearchView({
+  context,
+  snapshot: { query: "skincare facial", organicResults: PAGINAS.map((item, indice) => ({ position: indice + 1, title: item.title, domain: `d${indice}.com`, url: item.url })) } as never,
+  extractions: PAGINAS,
+  selectedReferences: PAGINAS.length,
+  observedAt: "2026-09-20T12:00:00.000Z",
+});
+
 export const DOSSIE = buildRadarEvidenceBundle({
   observed: vistaDoGoogle().observed,
   serp: { current: true, sufficient: true, valid: true },

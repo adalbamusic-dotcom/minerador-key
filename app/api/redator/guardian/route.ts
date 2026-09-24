@@ -18,7 +18,8 @@ export async function POST(request: NextRequest) {
     const profile = await requireCanonicalSessionProfile();
     const input = RedatorGuardianRequestSchema.parse(await request.json());
     await assertEditorialPermission(profile, input.brandId, "redator", "review");
-    const context = await readWriterGuardianContext({ brandId: input.brandId }, input.document.id);
+    /* SDD do Assunto, F4.2 · o Assunto do ArticleDNA fixado, lido na Marca autorizada, liga os avisos da virada e do destino. */
+    const context = await readWriterGuardianContext({ brandId: input.brandId }, input.document.id, { articleDnaRef: input.document.articleDnaRef });
     return NextResponse.json({ report: runGuardian(input.document, input.contentHash, context) });
   } catch (error) {
     if (error instanceof z.ZodError) return NextResponse.json({ error: "Pedido de análise inválido.", details: error.issues }, { status: 400 });

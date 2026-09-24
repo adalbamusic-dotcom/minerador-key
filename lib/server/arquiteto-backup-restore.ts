@@ -595,7 +595,10 @@ export async function applyArquitetoRestore(context: PipelineContext, backup: Ba
     const artifactType = artifactTypeOf(record.recordType);
     if (artifactType) {
       const version = forRestore(envelopeFor(artifactType, payload));
-      const persisted = await appendArquitetoArtifact(context, artifactType, version, artifactStatus(record.status));
+      // O Assunto restaurado é o ato humano de então: o autor gravado continua
+      // sendo exigido como pessoa (auth.users.id), mas não precisa ser quem
+      // restaura. Pacote e marca são conferidos como em qualquer gravação.
+      const persisted = await appendArquitetoArtifact(context, artifactType, version, artifactStatus(record.status), { subjectActor: "restored" });
       result.restoredVersionId = persisted.version.versionId;
       result.restoredKey = persisted.version.entityId;
       if (version.versionId !== persisted.version.versionId) identity.set(version.versionId, persisted.version.versionId);

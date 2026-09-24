@@ -265,6 +265,15 @@ export function buildConsolidatedSiloDnaPayload(input: SiloConsolidationInput): 
   return SiloDNASchema.parse({
     ...base,
     ...previous,
+    /*
+     * O ASSUNTO PRESO SEGUE O SILO (SDD do Assunto, F2 fase B).
+     *
+     * A consolidação versiona SiloDNA e SiloPage juntos; o Assunto é decisão
+     * humana e não é refeito aqui. Ele vem da versão anterior do SiloDNA, sem
+     * troca: `centralEntity` continua da decisão do Silo, e a SiloPage não lê
+     * o Assunto (H1 e title seguem da entidade central, D1).
+     */
+    ...(previous?.subject ? { subject: previous.subject } : {}),
     schemaVersion: 1,
     formationStatus: "formed",
     siloId: input.copy.id,

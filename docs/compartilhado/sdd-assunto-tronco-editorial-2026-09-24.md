@@ -1229,3 +1229,72 @@ Mais 2 testes em `tests/minerador-google-ads-discovery-usage.test.mts` e 2 em `t
 **Outras conferências:** `tsc --noEmit` sem erros; ESLint sem problemas nos 9 arquivos de código da correção; guard visual estrito PASS nas telas da F1b (o `minerador-workspace.tsx` segue com as mesmas violações do HEAD, nenhuma nas linhas novas); `git diff --check` limpo; fim de linha preservado por arquivo, sem arquivo misto: `minerador-workspace.tsx` e `dna-panels.tsx` em CRLF na cópia de trabalho, os demais em LF (o blob do HEAD é sempre LF, pela normalização com `core.autocrlf=true`).
 
 **Nada disso é homologação.** Falta a validação visual em 360, 768, 1024 e 1440 px e no dark mode, e o roteiro F1b.12 inteiro, que é do usuário.
+
+### 11.5 Revisão de implementação — F2 fase B, F3 e F4 (2026-09-24)
+
+**Estado:** verificado no código e confirmado por teste. Não commitado quando este texto foi escrito; o commit segue o da F1/F1b/F2·A (`cf9735e`). **Validado manualmente: não.** Nenhum ArticleDNA real tem `subject` ainda, então Radar e Redator só mostram o Assunto depois que o Arquiteto gravar o primeiro.
+
+**Ordem de deploy (seção 6):** este commit só vai ao ar depois que o `cf9735e` estiver no ar e o usuário conferir que o Arquiteto e o Radar abrem normalmente. Depois disso, o rollback nunca volta para antes da fase A.
+
+#### F2 fase B (Arquiteto)
+
+Entregue conforme a F2.1 a F2.6, com estes desvios e acréscimos:
+
+| Ponto | O que foi feito |
+| --- | --- |
+| Domínio | `lib/arquiteto/declared-subject.ts`. `subject` montado a partir do pacote aprovado, pelo resolver do Minerador. Prender e soltar em artigo, landing, página de serviço e Silo. Silo só **sugere** o Assunto aos artigos. |
+| Conservação (§10) | Predicado único `isAnchoredSubject` e uma lista só de troncos em todos os cálculos da F2.3. Vínculo da sessão só vale com candidato vivo. |
+| Formação | Assunto sem Volume validado fica fora do automático e nunca é principal. Gate Q7 com o código `SUBJECT_PRINCIPAL_REQUIRES_VOLUME`. Trava de canibalização diz "o mesmo tema". |
+| Troca silenciosa | `ANOTHER_SUBJECT_ATTACHED`: unidade que já tem outro Assunto recusa o novo. |
+| **Guarda no servidor** (acréscimo, obrigatório pela invariante 81) | Em `appendArquitetoArtifact`, `persistSiloPairAtomic`, no PATCH da cópia de trabalho e no adaptador da consolidação do Silo. Quando o `subject` é novo ou mudou: `attachedBy` é o `auth.users.id` do ator, a keyword é viva, da marca, recebida e declarada no pacote aprovado, e os campos batem com o pacote. Q7 também vale para quem carrega o Assunto. Códigos: 403 (ator, outra marca) e 409 (resto), `SUBJECT_DROPPED` quando a consolidação some com o Assunto. Leitura estreita, só com Assunto. |
+| Vínculo da formação | Campo opcional `articleSubjectAnchor` na cópia de trabalho, com readback. Sobrevive ao recarregar. |
+| Silo consolidado | Carrega o `subject` da versão anterior. Silo com SiloPage recusa Assunto novo (`SUBJECT_SILO_PAGE_BOUND`), porque uma versão avulsa do SiloDNA desalinharia a página. |
+| Diff de versão | `subject` em `EDITORIAL_DECISION_FIELDS`; `attachedAt`/`attachedBy` como carimbos. |
+| Sugestões | Determinísticas, só sobre keywords recebidas: `subject_discovery.subjectKeywordIds` primeiro, depois frase, entidade central, lista, intenção/funil e termos da nota. Zero leitura nova. |
+
+**Limites registrados no backlog do Arquiteto:** a restauração de backup confere o autor só pelo formato; as rotas de IA do Arquiteto criam versões sem `subject` (hoje só grupos novos); Silo com página ainda não recebe Assunto novo; "Pedir proposta" à IA não foi implementado; botões `min-h-8` herdados.
+
+#### F3 (Radar)
+
+Entregue conforme a F3.1, com estes ajustes:
+
+- **YouTube:** o plano sai com o mesmo número de consultas que teria sem Assunto; a consulta do Assunto toma o lugar da última, e isso vai para as limitações.
+- **Especialista:** o r7 garante uma pauta sobre o Assunto quando a IA não gera nenhuma. O especialista humano **vê** o Assunto no painel e no Telegram.
+- **Texto ao especialista externo (adendo):** o pedido literal da F3.1 ("aprofundar o Assunto e a virada…") continua na pauta interna e no prompt. Para quem é de fora da plataforma, a mensagem usa linguagem simples: "Tema a aprofundar: <frase>" e "Pergunta: o que o leitor desta busca precisa entender para chegar a <frase>?", sem as palavras Assunto, tronco, virada ou ArticleDNA.
+- **Telas:** a seção sintética aparece como "Exigida pelo Assunto" e não conta como bloco observado. A contagem na amostra diz "Palavras do Assunto aparecem em N de M página(s)".
+- O bundle congelado não mudou de schema; a seção da virada congela em `blueprint.sections`.
+
+#### F4 (Redator e CSV) e adendo técnico da entrega
+
+**A virada e a direção do H1 não chegam pelo dossiê** (a F4.1 dizia isso). O bundle V3 não leva o artigo-modelo nem as seções do blueprint, e mudar o bundle quebraria o schema `.strict()` e o hash. O caminho adotado, dentro da invariante 78 (dossiê lido, nunca copiado):
+
+1. No envio ao Redator, **só com Assunto**, o documento recebe linhas curtas em `importedContext.editorialContext`, que já existia e ia vazio: Tronco, Virada, Seção da virada, Direção do H1, Destino da chamada e Alerta (`lib/redator/radar-subject-turn.ts`). O texto é o mesmo do CSV "Para escrever". Sem Assunto, o documento é igual ao de antes (snapshot conferido).
+2. Essas linhas chegam a quem redige pela **projeção única** `radarFoundationsOf`: painel do Redator (bloco no topo com o Assunto, a nota, onde virar, o H1, o destino e o alerta), semeadura de roteiro e carrossel, `get_writer_foundations`, `get_writer_brief` e o material por seção.
+3. **Leituras novas, todas estreitas e só com Assunto** (a F4.4 dizia "nenhuma"): o caminho `editorialContext` do documento (< 2 kB) e, no guardião, `articleDnaRef` na mesma consulta mais `payload->subject` da versão fixada (< 1 kB).
+4. **Guardião ligado** no MCP e no painel: avisa virada ausente e link ao destino ausente, nunca bloqueia pelo Assunto (Q6). Se a leitura falhar, diz "Não foi possível ler o Assunto". O painel passou a contar pelo relatório do servidor.
+5. **`writerMayNot`**: com Assunto, "trocar ou remover o Assunto declarado" é gravado no envio e aparece igual em todas as ferramentas. Nos fundamentos, o `subject` sai reduzido a `{ phrase, note, destinationUrl }`.
+
+**Pendências registradas:** o `get_writer_foundations` ainda soma `editorialContext` por um caminho próprio, fora de `radarFoundationsOfDossier`, e precisa ser unificado; a lista "Achados por seção" do guardião segue em 9 px (dívida do painel inteiro).
+
+#### Suítes na conclusão (comparadas por nome com a base de 2026-09-24)
+
+| Suíte | Testes | Falhas | Novas |
+| --- | --- | --- | --- |
+| Minerador (`tests/minerador-*`) | 1051 | 28 (base) | 0 |
+| `test:arquiteto` | 2354 | 2 (base) | 0 |
+| `test:arquiteto:servidor` | 52 | 0 | 0 |
+| `test:arquiteto:lentes` | 31 | 0 | 0 |
+| `test:arquiteto-backup-roundtrip` | 8 | 0 | 0 |
+| `test:radar` | 2685 | 0 | 0 |
+| `test:redator` | 358 | 0 | 0 |
+| `test:redator:mcp` | 117 | 0 | 0 |
+| `test:redator:dom` | 19 | 0 | 0 |
+| `test:editorial` | 174 | 4 (base) | 0 |
+| `test:editorial:dom` | 12 | 0 | 0 |
+| Integrações | 69 | 1 (antiga) | 0 |
+| `test:authz`, `test:operational`, `test:visual-system` | 33, 51, 28 | 2, 10, 5 (base) | 0 |
+| `test:marca`, `test:serp-cache` | 106, 34 | 0 | 0 |
+
+`tsc --noEmit` sem erros e `git diff --check` limpo.
+
+**Nada disso é homologação.** O roteiro de validação na tela das fatias F2·B, F3 e F4 é do usuário, depois do deploy.

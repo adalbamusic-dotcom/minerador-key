@@ -139,8 +139,8 @@ const contextoSemPrincipal = (): RadarArticleResearchContext => {
   } as unknown as RadarArticleResearchContext;
 };
 
-const vistaDoGoogle = () => buildRadarDeepResearchView({
-  context: contexto(),
+const vistaDoGoogle = (context: RadarArticleResearchContext = contexto()) => buildRadarDeepResearchView({
+  context,
   snapshot: { query: PRINCIPAL, organicResults: PAGINAS.map((item, indice) => ({ position: indice + 1, title: item.title, domain: `d${indice}.com`, url: item.url })) } as never,
   extractions: PAGINAS,
   selectedReferences: PAGINAS.length,
@@ -364,6 +364,8 @@ async function enviar(opcoes: {
   displayedAnalysisVersionId?: string | null;
   /** A hora do clique. Ela NÃO pode entrar no hash. */
   sentAt?: string;
+  /** SDD do Assunto, F4.1 · o ArticleDNA que a identidade devolve (padrão: sem Assunto). */
+  artigo?: typeof ARTICLE_DNA;
 } = {}) {
   const perfil = opcoes.perfil || "YOUTUBE";
   const inicial = analiseDoArtigo(perfil, { finalizada: opcoes.finalizada });
@@ -393,7 +395,7 @@ async function enviar(opcoes: {
       leiturasDoFundamento += 1;
       return leiturasDoFundamento > 1 && opcoes.fundamentoDepois ? opcoes.fundamentoDepois : FUNDAMENTO;
     },
-    loadArticleIdentity: async () => ({ article: ARTICLE_DNA as never, silo: null }),
+    loadArticleIdentity: async () => ({ article: (opcoes.artigo || ARTICLE_DNA) as never, silo: null }),
     findWorkflowItem: async () => radar as never,
     findDocument: async () => { chamadas.push("findDocument"); return documento; },
     createDocument: async ({ document }) => {
@@ -905,6 +907,64 @@ test("§12 · as invariantes do Redator viajam com o pacote e com o documento", 
   for (const proibicao of ["keyword principal", "Silo", "cobertura obrigatória", "intenção", "slug", "canonical", "secundárias"]) {
     assert.ok(texto.includes(proibicao), `a lista não fala de ${proibicao}`);
   }
+});
+
+/* ============== SDD do Assunto, F4.1 · o envio com e sem Assunto ============== */
+
+test("Assunto · o envio GRAVA a proibição do Assunto no recibo e no documento, e as linhas da virada em editorialContext; sem Assunto, nada muda", async () => {
+  const ASSUNTO = {
+    keywordId: "kw-assunto",
+    approvedPackageRef: { version: 3, contentHash: `sha256:${"p".repeat(64)}`, approvedAt: "2026-09-24T10:00:00+00:00" },
+    phrase: "Consulta dermatológica online", note: "A marca atende por teleconsulta.", destinationUrl: "https://careglow.com.br/consulta-online",
+    attachedBy: "user-1", attachedAt: "2026-09-24T12:00:00+00:00",
+  };
+  const contextoComAssunto = (): RadarArticleResearchContext => {
+    const base = contexto();
+    return { ...base, article: { ...base.article, subject: { phrase: ASSUNTO.phrase, note: ASSUNTO.note, destinationUrl: ASSUNTO.destinationUrl } } } as RadarArticleResearchContext;
+  };
+  const { radarWriterSubjectTurnLines } = await import("../lib/redator/radar-subject-turn.ts");
+  const { RADAR_WRITER_MAY_NOT_SUBJECT } = await import("../lib/redator/writer-handoff.ts");
+
+  /*
+   * O envio de GOOGLE exige um congelado íntegro que esta bancada não monta (ver C);
+   * o serviço é cego ao perfil, então o envio exercitado é o de YOUTUBE, com a
+   * fotografia do Google nas autoridades carregando a virada calculada pela F3.
+   */
+  /* Sem Assunto: a lista de sempre e nenhuma linha. */
+  const sem = await enviar();
+  assert.deepEqual(sem.writerBundle.writerMayNot, [...RADAR_WRITER_MAY_NOT]);
+  assert.deepEqual(dossieDoDocumento(sem.documento).writerMayNot, [...RADAR_WRITER_MAY_NOT]);
+  assert.deepEqual(ContentDocumentV2Schema.parse(sem.documento).importedContext.editorialContext, []);
+
+  /* Com Assunto no ArticleDNA fixado e a virada calculada pela F3 sobre a mesma amostra. */
+  const autoridades: RadarCanonicalAuthorities = { ...autoridadesCheias(), google: vistaDoGoogle(contextoComAssunto()), researchContext: contextoComAssunto() };
+  const artigo = { ...ARTICLE_DNA, payload: { ...ARTICLE_DNA.payload, subject: ASSUNTO } };
+  const com = await enviar({ autoridades, artigo: artigo as typeof ARTICLE_DNA });
+  const gravada = [...RADAR_WRITER_MAY_NOT, RADAR_WRITER_MAY_NOT_SUBJECT];
+  assert.deepEqual(com.writerBundle.writerMayNot, gravada, "o recibo");
+  const documento = ContentDocumentV2Schema.parse(com.documento);
+  assert.deepEqual(documento.importedContext.dossier?.writerMayNot, gravada, "o documento: a mesma lista do recibo");
+
+  const turn = autoridades.google!.articleModel.declaredSubject;
+  assert.ok(turn, "a F3 monta a virada no artigo-modelo");
+  const linhas = documento.importedContext.editorialContext;
+  assert.deepEqual(linhas, radarWriterSubjectTurnLines({ subject: ASSUNTO, turn, principal: PRINCIPAL }));
+  for (const prefixo of ["Tronco (Assunto): ", "Virada: ", "Seção da virada: ", "Destino da chamada: "]) {
+    assert.ok(linhas.some(item => item.startsWith(prefixo)), `${prefixo} não chegou ao Redator`);
+  }
+  assert.ok(linhas.some(item => /^(Direção do H1: |Assunto em H2\/H3|Assunto no H1: )/.test(item)), "a direção do H1 não chegou ao Redator");
+
+  /* O dossiê é o que o Radar congelou: o bundle entregue é o do recibo, sem o artigo-modelo dentro. */
+  assert.deepEqual(documento.importedContext.dossier?.bundle, JSON.parse(JSON.stringify(com.writerBundle.bundle)));
+  assert.equal("articleModel" in (documento.importedContext.dossier?.bundle || {}), false);
+  assert.equal("declaredSubject" in (documento.importedContext.dossier?.bundle || {}), false);
+
+  /* Sem a fotografia do Google (o caso real de YOUTUBE e AMAZON), as linhas devolvem a decisão, sem inventar lugar. */
+  const semFoto = await enviar({ autoridades: { ...autoridades, google: null }, artigo: artigo as typeof ARTICLE_DNA });
+  const linhasSemFoto = ContentDocumentV2Schema.parse(semFoto.documento).importedContext.editorialContext;
+  assert.deepEqual(linhasSemFoto, radarWriterSubjectTurnLines({ subject: ASSUNTO, turn: null, principal: PRINCIPAL }));
+  assert.ok(linhasSemFoto.some(item => item.startsWith("Virada: onde quem redige decidir (sem sinal na SERP)")));
+  assert.deepEqual(semFoto.writerBundle.writerMayNot, gravada);
 });
 
 /* ========================= §9 · estrutura, não markdown ========================= */

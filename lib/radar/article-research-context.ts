@@ -151,6 +151,20 @@ export type RadarArticleResearchContext = {
       /** Por que o Arquiteto concluiu assim. Nunca um carimbo sem motivo. */
       reason: string | null;
     } | null;
+    /*
+     * O ASSUNTO DECLARADO — SDD do Assunto, F3.1.
+     *
+     * O tronco que o humano declarou e o Arquiteto fixou. Só a frase, a nota e
+     * o destino: o Radar não hidrata outra keyword para saber o que é o tronco.
+     * AUSENTE quando o ArticleDNA não o tem — nem `null`, nem chave vazia —,
+     * para o contexto de quem não tem Assunto continuar byte a byte igual.
+     * O Radar lê; nunca troca, promove ou rebaixa (P8).
+     */
+    subject?: {
+      phrase: string;
+      note: string | null;
+      destinationUrl: string | null;
+    };
   };
   keywords: RadarResearchKeyword[];
   /** Tópicos editoriais declarados. Alimenta a classificação de lacuna. */
@@ -214,6 +228,19 @@ function classificacaoTerminal(dna: ArticleDNA | null) {
     funnelLabel: funnel ? FUNIL_TERMINAL[funnel] || funnel : null,
     reason: texto(bruto.funnel?.reason) || texto(bruto.intent?.reason),
   };
+}
+
+/**
+ * O ASSUNTO, COPIADO COMO SNAPSHOT — e ausente quando ausente.
+ *
+ * Só frase, nota e destino. O `keywordId`, o pacote e quem prendeu ficam no
+ * ArticleDNA: o Radar não precisa deles para investigar e não os devolve.
+ */
+function assuntoDeclarado(dna: ArticleDNA | null): { subject: NonNullable<RadarArticleResearchContext["article"]["subject"]> } | Record<string, never> {
+  const bruto = dna?.subject;
+  const phrase = texto(bruto?.phrase);
+  if (!bruto || !phrase) return {};
+  return { subject: { phrase, note: texto(bruto.note), destinationUrl: texto(bruto.destinationUrl) } };
 }
 
 function estrategiaDe(reference: ArticleKeywordReference | null): RadarResearchKeywordStrategy {
@@ -400,6 +427,7 @@ export function buildRadarArticleResearchContext(input: {
       mainIntent: texto(dna?.mainIntent) || texto(item.intent),
       hierarchy: texto(item.hierarchy) || texto(dna?.hierarchy),
       classification: classificacaoTerminal(dna),
+      ...assuntoDeclarado(dna),
     },
     keywords,
     editorialTopics,

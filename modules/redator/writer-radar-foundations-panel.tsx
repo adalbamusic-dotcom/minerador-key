@@ -9,11 +9,15 @@
  *
  * SOMENTE LEITURA. Nada aqui grava, chama provider ou IA. A recomendação
  * editorial é exibida como recomendação — ela não decide qual aba existe.
+ *
+ * SDD do Assunto, F4.2 · com Assunto, o primeiro bloco é o tronco: a nota,
+ * onde virar, a seção da virada, a direção do H1, o destino e o alerta, lidos
+ * das linhas do envio pela mesma projeção. Sem Assunto, o bloco não existe.
  */
 
 import { useMemo } from "react";
 import type { ContentDocument } from "@/lib/arquiteto/contracts";
-import { radarFoundationsOf, type RadarFoundations } from "@/lib/redator/radar-foundations";
+import { radarFoundationsOf, radarFoundationsSubjectOf, type RadarFoundations, type RadarFoundationsSubject } from "@/lib/redator/radar-foundations";
 
 const titulo = "text-[12px] font-bold uppercase text-text-muted";
 const bloco = "mt-3 rounded border border-divider p-2 text-[12px] leading-5 text-foreground/85";
@@ -32,8 +36,43 @@ function Secao({ nome, children, testid }: { nome: string; children: React.React
   </section>;
 }
 
+function CampoDoAssunto({ rotulo: nome, children, testid }: { rotulo: string; children: React.ReactNode; testid: string }) {
+  return <div data-radar-subject-field={testid}>
+    <dt className="font-semibold text-foreground">{nome}</dt>
+    <dd>{children}</dd>
+  </div>;
+}
+
+/*
+ * O TRONCO NO TOPO. Texto de leitura, então 14px (sistema visual §3), e o
+ * mesmo desenho do bloco do Assunto no artigo-modelo do Radar.
+ */
+function AssuntoDoArtigo({ assunto }: { assunto: RadarFoundationsSubject }) {
+  return <section className="mt-3 rounded border border-divider p-2 text-sm leading-6 text-foreground/85" data-radar-foundations-section="subject">
+    <h3 className="text-sm font-semibold text-foreground">Assunto (tronco){assunto.phrase ? `: ${assunto.phrase}` : ""}</h3>
+    {assunto.note && <p className="text-text-muted" data-radar-subject-field="note">{assunto.note}</p>}
+    <dl className="mt-1.5 space-y-1.5">
+      {assunto.turn && <CampoDoAssunto rotulo="Onde fazer a virada" testid="turn">{assunto.turn}</CampoDoAssunto>}
+      {assunto.section && <CampoDoAssunto rotulo="Seção da virada" testid="section">
+        {assunto.section}
+        {assunto.sectionIsWorkingTitle && <span className="mt-0.5 block text-warning" data-radar-subject-working-title="">
+          Esse título é de trabalho do Radar: reescreva-o para o leitor antes de usá-lo no artigo.
+        </span>}
+      </CampoDoAssunto>}
+      {assunto.h1 && <CampoDoAssunto rotulo="Direção do H1" testid="h1">{assunto.h1}</CampoDoAssunto>}
+      {assunto.destination && <CampoDoAssunto rotulo="Destino da chamada" testid="destination">{assunto.destination}</CampoDoAssunto>}
+    </dl>
+    {assunto.alert && <p className="mt-1.5 text-warning" data-radar-subject-field="alert">Alerta do Radar: {assunto.alert}</p>}
+    {assunto.others.length > 0 && <ul className="mt-1.5 list-disc space-y-0.5 pl-4" data-radar-subject-field="others">
+      {assunto.others.map((linha, indice) => <li key={`${indice}:${linha.slice(0, 24)}`}>{linha}</li>)}
+    </ul>}
+    <p className="mt-1.5 text-text-muted">Onde virar é sugestão do Radar; a decisão é de quem redige. O artigo faz a virada da principal para o Assunto, sem trocá-lo nem removê-lo.</p>
+  </section>;
+}
+
 export function WriterRadarFoundationsPanel({ document, compact = false }: { document: ContentDocument | null | undefined; compact?: boolean }) {
   const fundamentos: RadarFoundations | null = useMemo(() => radarFoundationsOf(document), [document]);
+  const assunto = useMemo(() => radarFoundationsSubjectOf(fundamentos), [fundamentos]);
 
   if (!fundamentos) {
     return <div data-radar-foundations="ausente" className="rounded border border-dashed border-divider p-3 text-[12px] text-text-muted">
@@ -49,6 +88,8 @@ export function WriterRadarFoundationsPanel({ document, compact = false }: { doc
       Investigação {fundamentos.profileLabel}
       {fundamentos.observedAt ? ` · congelada em ${new Date(fundamentos.observedAt).toLocaleString("pt-BR")}` : ""}
     </p>
+
+    {assunto && <AssuntoDoArtigo assunto={assunto}/>}
 
     {/* ===== A RECOMENDAÇÃO É RECOMENDAÇÃO — NÃO GATE ===== */}
     <Secao nome="Recomendação editorial" testid="recommendation">

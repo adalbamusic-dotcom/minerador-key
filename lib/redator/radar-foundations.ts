@@ -30,6 +30,7 @@ import type { ContentDocument } from "../arquiteto/contracts.ts";
 import { RADAR_EDITORIAL_OUTPUT_LABELS } from "../radar/multimodal-blueprint.ts";
 import { RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS } from "../radar/competitive-blueprint.ts";
 import { radarResearchProfileLabel, type RadarResearchProfile } from "../radar/research-profile.ts";
+import { RADAR_WRITER_SUBJECT_LINE_PREFIXES } from "./radar-subject-turn.ts";
 
 export type RadarFoundationsRecommendation = {
   output: string;
@@ -97,6 +98,15 @@ export type RadarFoundations = {
   mustCover: string[];
   limitations: string[];
   writerMayNot: string[];
+  /**
+   * SDD do Assunto, F4.2 · as linhas curtas que o envio grava em
+   * `importedContext.editorialContext` quando o artigo tem Assunto (tronco,
+   * virada, seção da virada, direção do H1, destino, alerta —
+   * `lib/redator/radar-subject-turn.ts`). Moram FORA do dossiê; entram aqui
+   * para que painel, roteiro e carrossel as leiam pela MESMA projeção.
+   * Ausente quando não há linha: sem Assunto, a projeção sai idêntica.
+   */
+  editorialContext?: string[];
 };
 
 /* ============================== leitura defensiva ============================== */
@@ -165,15 +175,23 @@ export const RADAR_FOUNDATIONS_BUNDLE_PATHS: readonly (readonly string[])[] = [
 ];
 
 export function radarFoundationsOf(document: ContentDocument | null | undefined): RadarFoundations | null {
-  return radarFoundationsOfDossier(radarWriterDossierOfDocument(document));
+  const dossier = radarWriterDossierOfDocument(document);
+  const editorialContext = dossier && document?.schemaVersion === 2 ? document.importedContext.editorialContext : undefined;
+  return radarFoundationsOfDossier(dossier, { editorialContext });
 }
+
+/** O que a projeção lê do documento FORA do dossiê. Hoje, só as linhas do envio (F4.2). */
+export type RadarFoundationsDocumentContext = { editorialContext?: unknown };
 
 /**
  * A mesma projeção, a partir do dossiê em si. Existe para quem não tem o
  * documento inteiro na mão: a semeadura monta um dossiê só com os caminhos de
  * `RADAR_FOUNDATIONS_BUNDLE_PATHS` e chega aqui sem baixar o pacote do Radar.
+ *
+ * `contexto` traz o que mora no documento fora do dossiê (as linhas do envio,
+ * F4.2); a semeadura o lê pelo mesmo cabeçalho estreito.
  */
-export function radarFoundationsOfDossier(valor: unknown): RadarFoundations | null {
+export function radarFoundationsOfDossier(valor: unknown, contexto: RadarFoundationsDocumentContext = {}): RadarFoundations | null {
   const dossier = objeto(valor);
   if (!dossier) return null;
   const bundle = objeto(dossier.bundle) || {};
@@ -266,7 +284,7 @@ export function radarFoundationsOfDossier(valor: unknown): RadarFoundations | nu
   const resumoDeVideo = objeto(video?.summary);
   const amostra = objeto(observado?.sample);
 
-  return {
+  const fundamentos: RadarFoundations = {
     profile,
     profileLabel: radarResearchProfileLabel(profile),
     observedAt: texto(bundle.observedAt),
@@ -297,4 +315,94 @@ export function radarFoundationsOfDossier(valor: unknown): RadarFoundations | nu
     limitations: [...new Set([...textos(bundle.limitations), ...research.flatMap(camada => camada.limitations)])],
     writerMayNot: textos(dossier.writerMayNot),
   };
+  /* A chave só nasce com linha: sem Assunto, o objeto é o mesmo de antes, chave por chave. */
+  const linhasDoEnvio = textos(contexto.editorialContext);
+  return linhasDoEnvio.length ? { ...fundamentos, editorialContext: linhasDoEnvio } : fundamentos;
+}
+
+/* ================= o Assunto, lido das linhas da projeção ================= */
+
+/**
+ * ===== O ASSUNTO NO PAINEL — SDD do Assunto, F4.2 =====
+ *
+ * A mesma projeção, arrumada para a tela: cada linha do envio vai para o seu
+ * lugar pelo prefixo que `radarWriterSubjectTurnLines` escreveu. Não há
+ * segunda fonte: o texto mostrado é o texto da linha, sem o prefixo.
+ *
+ * Linha que nenhum prefixo reconhece não some: vai para `others`, na ordem.
+ * Sem a linha do tronco não há Assunto a mostrar: `null`, e o painel fica
+ * como era (o envio só grava linhas com Assunto, e sempre começa pelo tronco).
+ */
+export type RadarFoundationsSubject = {
+  /** A frase do Assunto, como o envio a gravou. */
+  phrase: string | null;
+  note: string | null;
+  turn: string | null;
+  section: string | null;
+  /** A seção da virada é título de trabalho do Radar (sem página na amostra): reescrever para o leitor. */
+  sectionIsWorkingTitle: boolean;
+  h1: string | null;
+  destination: string | null;
+  alert: string | null;
+  others: string[];
+};
+
+/** O texto que a linha sintética da seção da virada carrega (`radar-subject-turn.ts`). */
+const TITULO_DE_TRABALHO = /o título é de trabalho do Radar/i;
+
+const semPrefixo = (linha: string, prefixo: string): string | null =>
+  linha.startsWith(prefixo) ? linha.slice(prefixo.length).trim() || null : null;
+
+export function radarFoundationsSubjectOf(fundamentos: Pick<RadarFoundations, "editorialContext"> | null | undefined): RadarFoundationsSubject | null {
+  const linhas = fundamentos?.editorialContext ?? [];
+  if (!linhas.length) return null;
+  const P = RADAR_WRITER_SUBJECT_LINE_PREFIXES;
+  const assunto: RadarFoundationsSubject = {
+    phrase: null, note: null, turn: null, section: null, sectionIsWorkingTitle: false, h1: null, destination: null, alert: null, others: [],
+  };
+  let tronco: string | null = null;
+  for (const linha of linhas) {
+    const doTronco = semPrefixo(linha, P.trunk);
+    if (doTronco !== null && tronco === null) { tronco = doTronco; continue; }
+    const virada = semPrefixo(linha, P.turn);
+    if (virada !== null && assunto.turn === null) { assunto.turn = virada; continue; }
+    const secao = semPrefixo(linha, P.section);
+    if (secao !== null && assunto.section === null) {
+      assunto.section = secao;
+      assunto.sectionIsWorkingTitle = TITULO_DE_TRABALHO.test(secao);
+      continue;
+    }
+    if (assunto.h1 === null && P.h1.some(prefixo => linha.startsWith(prefixo))) {
+      assunto.h1 = semPrefixo(linha, P.h1[0]) ?? linha;
+      continue;
+    }
+    const destino = semPrefixo(linha, P.destination);
+    if (destino !== null && assunto.destination === null) { assunto.destination = destino; continue; }
+    const alerta = semPrefixo(linha, P.alert);
+    if (alerta !== null && assunto.alert === null) { assunto.alert = alerta; continue; }
+    assunto.others.push(linha);
+  }
+  if (tronco === null) return null;
+  const { frase, nota } = fraseENotaDoTronco(tronco, assunto.turn);
+  assunto.phrase = frase;
+  assunto.note = nota;
+  return assunto;
+}
+
+/**
+ * "frase — nota." A linha do tronco não marca onde a frase acaba, e tanto a
+ * frase quanto a nota podem ter travessão. A linha da virada termina em
+ * "a <frase>." ou "a <frase>; destino: ...": o corte certo é o que deixa à
+ * esquerda uma frase que a virada repete. Sem virada ou sem casamento, vale
+ * o primeiro travessão (a frase costuma ser curta; a nota é texto livre).
+ */
+function fraseENotaDoTronco(tronco: string, virada: string | null): { frase: string; nota: string | null } {
+  const cortes: number[] = [];
+  for (let indice = tronco.indexOf(" — "); indice >= 0; indice = tronco.indexOf(" — ", indice + 1)) cortes.push(indice);
+  /* Sem nota, o ponto final é o acabamento da linha, não da frase. */
+  if (!cortes.length) return { frase: tronco.replace(/\.$/, "").trim() || tronco, nota: null };
+  const repetidaNaVirada = (frase: string) =>
+    Boolean(virada && frase && (virada.endsWith(` a ${frase}.`) || virada.includes(` a ${frase}; destino: `)));
+  const corte = cortes.find(indice => repetidaNaVirada(tronco.slice(0, indice).trim())) ?? cortes[0];
+  return { frase: tronco.slice(0, corte).trim() || tronco, nota: tronco.slice(corte + 3).trim() || null };
 }

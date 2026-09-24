@@ -38,6 +38,14 @@
 
 import { RADAR_CONCEPT_TYPE_LABEL, type RadarConceptType } from "./semantic-concept-model.ts";
 import { radarConclusiveIntent, radarDeclaredArticleIntent } from "./editorial-identity.ts";
+import {
+  RADAR_SUBJECT_MUST_COVER_REASON,
+  radarIsSubjectTurnSection,
+  radarSubjectStems,
+  radarSubjectTurnSectionId,
+  radarSubjectTurnTitle,
+  radarTextCoversStems,
+} from "./declared-subject.ts";
 
 import type { RadarAiDiscoveryContext, RadarAnswerableUnit, RadarFactualSupportStatus } from "./ai-discovery-context.ts";
 import type { RadarArticleResearchContext } from "./article-research-context.ts";
@@ -341,6 +349,61 @@ export const RADAR_SPECIALIST_CONTRIBUTION_BY_KIND: Record<string, Array<"VALIDA
 };
 
 /**
+ * ===== A SEÇÃO DA VIRADA — SDD do Assunto, F3.1 =====
+ *
+ * Com Assunto declarado, o artigo precisa de uma parte que faça a virada para
+ * ele, mesmo que nenhuma página concorrente fale dele. Quando a amostra JÁ traz
+ * um bloco que cobre as raízes da frase, é esse bloco que carrega a virada (o
+ * modelo editorial lhe dá o motivo próprio) e nada nasce aqui: seção duplicada
+ * seria a mesma necessidade duas vezes.
+ *
+ * Quando não traz, nasce este bloco — sem página, sem pergunta, sem evidência
+ * de mercado inventada. Ele entra em `sections` como qualquer bloco, e é assim
+ * que o FINALIZE o congela sem campo novo no bundle. Onde ele fica no artigo é
+ * decisão da arquitetura do artigo-modelo, e nunca H2 por decreto.
+ */
+function secaoDaVirada(
+  context: RadarArticleResearchContext,
+  observados: readonly RadarSectionCandidate[],
+  amostra: number,
+  alerta: string | null,
+): RadarSectionCandidate | null {
+  const raizes = radarSubjectStems(context);
+  if (!raizes) return null;
+  if (raizes.phrase.length && observados.some(secao => radarTextCoversStems(secao.workingTitle, raizes.phrase))) return null;
+
+  const phrase = raizes.subject.phrase;
+  const id = radarSubjectTurnSectionId(phrase);
+  return {
+    id,
+    conceptId: id,
+    workingTitle: radarSubjectTurnTitle(phrase),
+    conceptTypeLabel: "Assunto declarado",
+    purpose: RADAR_SUBJECT_MUST_COVER_REASON,
+    priority: "ESSENTIAL",
+    placement: "FLEXIBLE",
+    placementReason: "Exigida pelo Assunto declarado: o lugar é da arquitetura do artigo-modelo e, no fim, do Redator.",
+    questions: [],
+    definitions: [],
+    entities: { primary: null, related: [] },
+    marketEvidence: {
+      pages: 0,
+      sampleSize: amostra,
+      statement: `Nenhuma página da amostra trata o Assunto como bloco próprio (0 de ${amostra}); a seção é exigida pelo ArticleDNA.`,
+    },
+    factualStatus: "NOT_REQUIRED",
+    factualNote: "",
+    specialistRequirementIds: [],
+    internalLinks: [],
+    videoOpportunityId: null,
+    differentiation: null,
+    limitations: alerta ? [alerta] : [],
+    provenance: [{ source: "ARTICLE_DNA", detail: `Assunto declarado no ArticleDNA: "${phrase}".` }],
+    confidence: "LOW",
+  };
+}
+
+/**
  * O BLUEPRINT, DERIVADO — nunca recalculado.
  *
  * Tudo aqui já foi concluído por alguma autoridade anterior. Este módulo agrupa
@@ -619,6 +682,9 @@ export function buildRadarEditorialBlueprint(input: {
       ? { state: "PARTIAL", reason: `${sections.length} bloco(s) propostos, com pendências declaradas de evidência ou de amostra.` }
       : { state: "READY", reason: `${sections.length} bloco(s) propostos, cada um sustentado pela amostra.` };
 
+  /* Depois de abertura, fecho e prontidão: a virada não muda a leitura da amostra. */
+  const virada = secaoDaVirada(input.context, sections, observed.sample?.comparablePages ?? 0, observed.declaredSubject?.alert || null);
+
   return {
     article: {
       title: input.articleTitle || input.context.article.promise,
@@ -630,7 +696,7 @@ export function buildRadarEditorialBlueprint(input: {
       siloRole: input.context.silo?.articleRole || input.context.article.hierarchy,
     },
     opening,
-    sections,
+    sections: virada ? [...sections, virada] : sections,
     closing,
     essentialQuestions: essenciais,
     entities: {
@@ -663,7 +729,8 @@ export type RadarBlueprintSummary = {
 export function buildRadarBlueprintSummary(blueprint: RadarEditorialBlueprint): RadarBlueprintSummary {
   return {
     objective: blueprint.article.objective,
-    sections: blueprint.sections.length,
+    /* A seção da virada do Assunto é exigida, não observada: não conta como bloco da amostra (F3.1). */
+    sections: blueprint.sections.filter(secao => !radarIsSubjectTurnSection(secao.id)).length,
     essentialQuestions: blueprint.essentialQuestions.length,
     plannedLinks: blueprint.sections.reduce((total, secao) => total + secao.internalLinks.reduce((soma, link) => soma + link.occurrences, 0), 0),
     specialistPoints: blueprint.specialistBriefs.length,

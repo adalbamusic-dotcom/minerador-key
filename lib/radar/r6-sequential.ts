@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ArticleDNA, ProductEvidenceDNA, SiloDNA, VersionEnvelope } from "../arquiteto/contracts.ts";
 import { RADAR_INTENT_NOT_CONCLUDED, radarDeclaredArticleIntent } from "./editorial-identity.ts";
+import { radarSubjectDeepeningRequest } from "./declared-subject.ts";
 import type { RadarCompetitiveReport } from "./competitive-report.ts";
 import type {
   RadarR4AmazonState,
@@ -57,6 +58,18 @@ export const RadarR6ExpertTopicContextSchema = z.object({
     desiredResult: z.string().min(1),
     requiredTopics: z.array(z.string()),
     knownQuestions: z.array(z.string()),
+    /*
+     * O ASSUNTO DECLARADO — SDD do Assunto, F3.1. Ausente sem Assunto.
+     *
+     * `principal` continua sendo a promessa: o Assunto é para onde o artigo
+     * faz a virada, e `request` é o pedido que a pauta leva ao especialista.
+     */
+    subject: z.object({
+      phrase: z.string().min(1),
+      note: z.string().nullable(),
+      destinationUrl: z.string().nullable(),
+      request: z.string().min(1),
+    }).strict().optional(),
   }).strict(),
   keywordDnas: z.array(z.object({
     keywordId: z.string().min(1),
@@ -208,6 +221,14 @@ export function buildExpertTopicContext(articleId: string, input: RadarR6TopicCo
       desiredResult: article.desiredResult,
       requiredTopics: unique([...article.requiredTopics, ...article.coverage]),
       knownQuestions: articleQuestions,
+      ...(article.subject?.phrase?.trim() ? {
+        subject: {
+          phrase: article.subject.phrase.trim(),
+          note: article.subject.note?.trim() || null,
+          destinationUrl: article.subject.destinationUrl?.trim() || null,
+          request: radarSubjectDeepeningRequest(article.subject.phrase.trim()),
+        },
+      } : {}),
     },
     keywordDnas,
     siloDna: silo ? {

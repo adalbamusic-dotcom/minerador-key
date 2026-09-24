@@ -1,5 +1,28 @@
 # Spec — Radar
 
+## Assunto declarado — o tronco editorial no Radar — 2026-09-24
+
+Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), aprovada em 2026-09-24 (F3, F4.3, seções 6 e 7). Estado da implementação em `estado-atual.md`, mesma data.
+
+### O que é
+
+O Assunto é o tronco editorial que o humano declara no Minerador e o Arquiteto fixa em `ArticleDNA.subject` (`phrase`, `note`, `destinationUrl`). A keyword principal continua dona do slug, do KGR e do H1; o Assunto é para onde o artigo faz a virada. Ele é opcional: artigo sem Assunto segue todas as regras anteriores, byte a byte.
+
+### O que o Radar faz e o que não faz
+
+- **P8 — o Radar não troca, não promove e não rebaixa o Assunto.** Não grava `subject` no ArticleDNA, não mexe em principal nem em papéis (`AGENTS.md` §7). Diagnóstico sobre o Assunto é alerta; mudança volta ao Arquiteto, por decisão humana.
+- **Contexto de pesquisa:** `article.subject = { phrase, note, destinationUrl }` só existe com Assunto; sem ele, a chave não é emitida. `article.subject` consta no `RADAR_FOUNDATION_USAGE_MAP`.
+- **Consultas Google não mudam.** Saem das keywords, como antes.
+- **YouTube dentro do teto de 6:** com Assunto e camada de vídeo, a origem `DECLARED_SUBJECT` entra logo depois de `PRIMARY_KEYWORD` e toma o lugar da última da fila. Nenhuma consulta a mais; a consulta deslocada é dita em `limitations`.
+- **Especialista:** a pauta recebe o pedido de aprofundar o Assunto e a virada. `principal` continua sendo a promessa. A pauta de aprofundamento nasce só do que o ArticleDNA declara e passa pela revisão humana individual.
+- **Seção exigida da virada:** o Assunto entra no modelo editorial como cobertura exigida (`DNA_REQUIRED`), com motivo próprio. Se a amostra traz grupo que cobre as raízes do Assunto, esse grupo é a seção exigida; se não traz, nasce a seção sintética "Virada para <Assunto>", com 0 páginas e sem evidência. **Exigir cobertura não é exigir H2 (`MUST_COVER ≠ MUST_BE_H2`):** a virada vira H3 de um anfitrião ou ponto a cobrir. Só vira nível 2 quando a amostra não gera seção nenhuma, e isso é dito em `limitations`.
+- **Onde o Assunto cabe na SERP:** leitura determinística sobre a amostra já coletada, com contagem ("N de M páginas"): posição sugerida da virada, complemento do H1 (só com as raízes nos títulos do topo) e "Assunto em H2/H3" só com sinal real em H2/H3. Sem sinal: "sem sinal na SERP: o Redator decide".
+- **Critério declarado:** a leitura desta fatia é **lexical** (raízes de 4 letras ou mais, `radarSemanticStems`), não semântica. O critério é dito no alerta e nos rótulos. A leitura por sentido é melhoria registrada no backlog.
+- **Alerta sem bloqueio:** se nenhuma raiz do Assunto toca a amostra, o Radar registra em `limitations` que não há coincidência de termos pelo critério por palavras. O alerta não bloqueia o FINALIZE e não altera o ArticleDNA.
+- **FINALIZE:** o `subject` **não** é copiado para o bundle; o schema `.strict()` do bundle não muda. O bundle leva do Assunto só a seção sintética da virada, em `blueprint.sections`, e o alerta, em `limitations`. `binding.articleDnaContentHash` já amarra o bundle ao ArticleDNA que contém o Assunto.
+- **CTA:** com `destinationUrl`, a conclusão ganha a direção "Levar o leitor a <destino>." **ao lado** da chamada observada, que não é substituída. A promessa continua vindo da SERP.
+- **Export "Para escrever":** com Assunto, linhas próprias em `artigo`, `promessa_e_leitor` e `titulo_e_seo`; em `estrutura`, só a seção vinda do modelo do Radar ("Obrigatória pelo ArticleDNA: …"), sem linha inventada pelo export. A estrutura final é de quem redige (invariante 48). Sem Assunto, as 13 colunas e o modo técnico (J) são idênticos.
+
 ## Contrato canônico do destino — Radar → Redator — 2026-09-17
 
 Regra permanente. Substitui, no fluxo operacional, toda seção anterior que

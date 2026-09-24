@@ -39,6 +39,9 @@ export const EDITORIAL_DECISION_FIELDS = [
   "serpAssessmentRef",
   "kgrIdentity",
   "publishedIdentityRef",
+  // O Assunto preso (tronco) é decisão editorial: prender, soltar ou ler de
+  // um pacote aprovado novo é revisão real. Quem prendeu e quando, não.
+  "subject",
 ] as const;
 
 /**
@@ -49,6 +52,7 @@ const CARIMBOS = new Set([
   "confirmedAt", "confirmedBy", "decidedAt", "decidedBy", "changedAt", "changedBy",
   "processedAt", "updatedAt", "createdAt", "lastVerifiedAt", "checkedAt",
   "actorId", "actorUserId", "history",
+  "attachedAt", "attachedBy",
 ]);
 
 const normalizar = (valor: unknown): unknown => {

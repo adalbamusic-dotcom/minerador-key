@@ -36,27 +36,70 @@ como complemento ou num H2/H3, conforme a SERP.
   artigo não cobre. Na tela, o termo novo aparece como "Assunto · declarado" ou
   "Assunto (tronco)".
 
-### 33.2 Regras da fase B (Planejado)
+### 33.2 Regras da fase B (no código desde 2026-09-24; homologação pendente)
 
+Vigentes no código, salvo os itens marcados **Planejado**. Implementação em
+`lib/arquiteto/declared-subject.ts` e, na gravação,
+`lib/arquiteto/declared-subject-guard.ts` com
+`lib/server/arquiteto-subject-guard.ts`; detalhes e limites no
+[estado-atual.md](estado-atual.md).
+
+- **Prender é ato humano.** O `subject` é montado do pacote aprovado, lido
+  pelo resolver do Minerador, com `attachedBy` humano. Só uma keyword recebida
+  pelo Arquiteto, da mesma marca e declarada Assunto pode ser presa. Uma
+  unidade com outro Assunto recusa a troca (`ANOTHER_SUBJECT_ATTACHED`).
+  Assunto retirado ou reaprovado no Minerador gera aviso, e nada é trocado.
+- **O servidor confere a regra na gravação**, e não só a tela: no writer de
+  ArticleDNA e SiloDNA, no par SiloDNA+SiloPage, na consolidação do Silo e no
+  PATCH da cópia de trabalho. A conferência roda quando o `subject` é novo ou
+  mudou em relação à versão vigente, campo a campo; o mesmo Assunto relido
+  passa sem conferência. Exige `attachedBy` igual ao ator da requisição,
+  keyword viva, da marca, recebida e declarada, e `approvedPackageRef`,
+  `phrase`, `note` e `destinationUrl` iguais aos do pacote aprovado. Recusa
+  com código `SUBJECT_*`: 403 para ator e outra marca, 409 para o resto.
+- Na restauração de backup, o autor gravado não precisa ser quem restaura, mas
+  precisa ser um `auth.users.id`; o resto é conferido igual, e IA nunca prende.
 - O Assunto só pode ser a própria principal com **Volume validado** no pacote
   aprovado. Um Assunto aprovado pela exceção do Minerador, sem Volume, nunca é
-  principal nem dá slug.
+  principal nem dá slug. Gate de conclusão `SUBJECT_PRINCIPAL_REQUIRES_VOLUME`;
+  no servidor, `SUBJECT_PRINCIPAL_WITHOUT_VOLUME`, inclusive quando o Assunto
+  já preso passa a ser a principal.
 - Assunto sem Volume validado fica fora da formação automática e da eleição da
   principal e do slug. Entra num artigo só como `subject`, ou como membro por
   ato humano explícito.
 - **Conservação:** o vínculo do tronco é um campo do artigo na cópia de
   trabalho (`subjectKeywordId`), não `clusterId`. Tronco ancorado conta como
   incorporado e fica fora de `NO_DUPLICATED_KEYWORD`, de `DUPLICATE_KEYWORD` e
-  do teto. Assunto sem artigo fica em "Keywords não agrupadas" com o selo
-  "Assunto · aguardando sustentação". Nenhuma keyword some.
+  do teto. Todos os cálculos usam o mesmo predicado, `isAnchoredSubject`.
+  Assunto sem artigo fica em "Keywords não agrupadas" com o selo
+  "Assunto · aguardando sustentação"; o ancorado aparece como
+  "Assunto · tronco de N artigo(s)". Nenhuma keyword some.
+- **Vínculo antes da Definição:** numa formação que ainda não tem ArticleDNA,
+  o Assunto preso é gravado em `articleSubjectAnchor`, campo opcional do item
+  de workflow da principal, chaveado por `candidateRef`, e sobrevive ao
+  recarregar. Vai com a formação quando o ref do artigo muda e passa ao
+  ArticleDNA ao concluir a formação. Soltar sempre é aceito.
 - **Formação em torno do Assunto:** sugestões determinísticas só sobre as
-  keywords já recebidas, sem leitura nova e sem provider; o humano escolhe as
+  keywords já recebidas, sem leitura nova e sem provider. O primeiro sinal é
+  `subject_discovery.subjectKeywordIds` do pacote. O humano escolhe as
   sustentações; a principal sai entre elas pela regra atual; a SERP das
   sustentações, nas 4 lentes com cache, valida o artigo. A SERP da frase é
   opcional, sob pedido, pela rota Resultados do Minerador, e não entra na trava
   de SERP do artigo.
-- IA só propõe; aceitar é ato humano.
-- O texto da trava `NO_UNRESOLVED_CANNIBALIZATION` passa de "disputam o mesmo
+- **Silo:** o Assunto preso ao SiloDNA vira sugestão aos artigos do Silo, e
+  cada artigo confirma. Um Silo que já tem SiloPage não recebe Assunto novo
+  por versão avulsa do SiloDNA (`SUBJECT_SILO_PAGE_BOUND`), porque isso
+  desalinharia o `siloDnaRef` da página. A consolidação do Silo versiona o par
+  junto e carrega o Assunto da versão vigente, sem tocar `centralEntity`;
+  consolidar sem o Assunto vigente é recusado (`SUBJECT_DROPPED`), porque
+  soltar é ação própria. Escolher Assunto novo para um Silo com página é
+  **Planejado**.
+- **Versão:** `subject` é decisão editorial no diff de versão
+  (`EDITORIAL_DECISION_FIELDS`). Prender, soltar e pacote novo são revisão;
+  `attachedBy` e `attachedAt` são carimbos.
+- IA só propõe; aceitar é ato humano. O botão "Pedir proposta" da IA é
+  **Planejado** e exige adendo.
+- O texto da trava `NO_UNRESOLVED_CANNIBALIZATION` passou de "disputam o mesmo
   assunto" para "disputam o mesmo tema", para não confundir com o Assunto
   declarado.
 
@@ -69,6 +112,9 @@ como complemento ou num H2/H3, conforme a SERP.
   ArticleDNA é lido com `.strict()`: um artefato com `subject` lido por código
   anterior derruba o readback do Arquiteto da marca com 503 e tira o artigo do
   Radar.
+- A fase B não cria formato novo de ArticleDNA nem de SiloDNA além do schema
+  da fase A. Os campos novos de rota (`articleSubjectAnchor` no PATCH da cópia
+  de trabalho e `subjectCode` na resposta de erro) são opcionais e aditivos.
 - O Radar e o Redator só usam o campo depois da fase B homologada.
 
 ## 32. Exportação: dois contratos independentes

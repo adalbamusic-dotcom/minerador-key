@@ -55,6 +55,7 @@ import { assessRadarYmylRelevance } from "./editorial-policy.ts";
 import { RADAR_MIN_COMPARABLE_SUFFICIENT } from "./investigation-sufficiency.ts";
 
 import type { RadarExtractionPage } from "./analysis-contracts.ts";
+import { readRadarDeclaredSubjectInPages, type RadarDeclaredSubjectSampleReading } from "./declared-subject.ts";
 import type { RadarArticleResearchContext } from "./article-research-context.ts";
 import type { RadarCompetitorClass, RadarCompetitorUniverse } from "./competitor-universe.ts";
 import type { RadarEditorialComparison, RadarComparisonRow } from "./editorial-comparison.ts";
@@ -343,6 +344,14 @@ export type RadarCompetitiveObservedModel = {
   aiDiscovery: RadarAiDiscoveryContext;
   sufficiency: RadarObservedSufficiency;
   limitations: string[];
+  /**
+   * O ASSUNTO DECLARADO, LIDO NA AMOSTRA — SDD do Assunto, F3.1.
+   *
+   * Onde as raízes da frase e da nota aparecem em títulos e H2/H3, com
+   * contagem, e o alerta quando não aparecem em página nenhuma. AUSENTE sem
+   * Assunto: o modelo de quem não tem Assunto continua byte a byte igual.
+   */
+  declaredSubject?: RadarDeclaredSubjectSampleReading;
   /** A evidência bruta continua alcançável a partir do modelo, sem recalcular. */
   evidence: {
     semantic: RadarSemanticConceptModel | null;
@@ -1002,6 +1011,16 @@ export function buildRadarCompetitiveObservedModel(input: {
   limitations.push(...(input.comparison.limitations || []));
   limitations.push(...(input.universe?.limitations || []));
 
+  /*
+   * O ASSUNTO, SÓ QUANDO EXISTE — e sobre as páginas COMPARÁVEIS lidas.
+   *
+   * O alerta vai para `limitations`: é por aí que ele chega ao relatório e ao
+   * bundle do FINALIZE sem campo novo. Ele não bloqueia nada e não toca o
+   * ArticleDNA, a principal nem os papéis.
+   */
+  const declaredSubject = readRadarDeclaredSubjectInPages({ context: input.context, pages: comparaveis });
+  if (declaredSubject?.alert) limitations.push(declaredSubject.alert);
+
   return {
     identity,
     sample,
@@ -1022,6 +1041,7 @@ export function buildRadarCompetitiveObservedModel(input: {
     aiDiscovery,
     sufficiency: { level, reasons: razoes, signals },
     limitations: [...new Set(limitations)],
+    ...(declaredSubject ? { declaredSubject } : {}),
     evidence: { semantic, comparison: input.comparison, structural: input.structural || null },
   };
 }

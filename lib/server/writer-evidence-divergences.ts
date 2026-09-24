@@ -22,7 +22,9 @@ import "server-only";
  * nunca pela ausência de linhas. Não há gravação alternativa.
  */
 
-import type { GuardianContext } from "@/lib/redator/guardian";
+import type { VersionReference } from "@/lib/arquiteto/contracts";
+import type { GuardianContext, GuardianSubject } from "@/lib/redator/guardian";
+import { radarWriterSubjectOf } from "@/lib/redator/radar-subject-turn";
 import {
   WRITER_DIVERGENCE_OPEN_STATUSES,
   WRITER_DIVERGENCE_SELECT,
@@ -36,6 +38,7 @@ import {
 } from "@/lib/redator/writer-evidence-divergence";
 import {
   WriterEvidenceError,
+  isLegacyVersionReference,
   readWriterEvidenceHead,
   writerEvidenceClient,
   writerEvidenceDatabaseFailure,
@@ -44,7 +47,7 @@ import {
   type WriterEvidenceHead,
 } from "@/lib/server/writer-evidence-document";
 import { describeWriterEvidenceSource } from "@/lib/server/writer-evidence-reader";
-import { readWriterBrandContextVersions } from "@/lib/server/writer-evidence-sources";
+import { readWriterArticleProjection, readWriterBrandContextVersions } from "@/lib/server/writer-evidence-sources";
 
 const TABELA = "writer_evidence_divergences";
 const MIGRATION = "20260923150000_writer_evidence_reader";
@@ -217,8 +220,27 @@ function codigoDoErro(erro: unknown): string {
  * `notices` e as regras determinísticas seguem. Quem DECIDE com as divergências
  * (a entrega a Publicações) usa `checkOpenBlockingWriterDivergence`, que não
  * engole erro.
+ *
+ * SDD do Assunto, F4.2 · com `articleDnaRef` (a referência que o PRÓPRIO
+ * documento fixa), o contexto também traz o Assunto do ArticleDNA: UMA
+ * leitura estreita, só `payload->subject` daquela versão, na Marca do
+ * contexto (< 1 kB). É ele que liga os dois avisos do Guardião (virada e link
+ * para o destino), que nunca bloqueiam (Q6). Sem a referência, ou referência
+ * legada, nada é lido e o contexto é o de antes. Falha dessa leitura também
+ * vira aviso: o Guardião segue sem a conferência do Assunto.
  */
-export async function readWriterGuardianContext(context: WriterEvidenceContext, documentId: string): Promise<GuardianContext> {
+export async function readWriterGuardianContext(
+  context: WriterEvidenceContext,
+  documentId: string,
+  opcoes: { articleDnaRef?: VersionReference | null } = {},
+): Promise<GuardianContext> {
+  const [base, assunto] = await Promise.all([lerContextoDasDivergencias(context, documentId), lerAssuntoDoGuardiao(context, opcoes.articleDnaRef ?? null)]);
+  if (!assunto) return base;
+  if ("notice" in assunto) return { ...base, notices: [...(base.notices ?? []), assunto.notice] };
+  return { ...base, subject: assunto.subject };
+}
+
+async function lerContextoDasDivergencias(context: WriterEvidenceContext, documentId: string): Promise<GuardianContext> {
   try {
     return writerGuardianContextOf(await readOpenWriterDivergences(context, documentId));
   } catch (erro) {
@@ -226,6 +248,26 @@ export async function readWriterGuardianContext(context: WriterEvidenceContext, 
       divergences: [],
       notices: [`divergencias_nao_lidas (${codigoDoErro(erro)}): as divergências registradas não puderam ser lidas agora; o Guardião emitiu só as análises determinísticas.`],
     };
+  }
+}
+
+/** O Assunto declarado no ArticleDNA fixado, ou `null` quando não há (nem referência lida). */
+export async function readWriterGuardianSubject(context: WriterEvidenceContext, articleDnaRef: VersionReference | null): Promise<GuardianSubject | null> {
+  if (!articleDnaRef || isLegacyVersionReference(articleDnaRef)) return null;
+  const projecao = await readWriterArticleProjection(context, { refs: { articleDnaRef } }, ["subject"]);
+  const assunto = radarWriterSubjectOf(projecao?.fields.subject);
+  return assunto ? { phrase: assunto.phrase, destinationUrl: assunto.destinationUrl } : null;
+}
+
+async function lerAssuntoDoGuardiao(
+  context: WriterEvidenceContext,
+  articleDnaRef: VersionReference | null,
+): Promise<{ subject: GuardianSubject } | { notice: string } | null> {
+  try {
+    const subject = await readWriterGuardianSubject(context, articleDnaRef);
+    return subject ? { subject } : null;
+  } catch (erro) {
+    return { notice: `assunto_nao_lido (${codigoDoErro(erro)}): o Assunto do ArticleDNA não pôde ser lido agora; o Guardião não conferiu a virada nem o link para o destino.` };
   }
 }
 

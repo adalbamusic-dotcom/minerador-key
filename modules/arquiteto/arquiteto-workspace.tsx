@@ -13,6 +13,7 @@ import { commitManualArchitecture, manualMoveTargets, requestManualArchitecture,
 import type {
   ArticleDNA,
   ArchitectKeyword,
+  DeclaredSubject,
   EditorialArticleUnitType,
   EditorialUnitClassification,
   LandingPagePurpose,
@@ -128,7 +129,7 @@ import { buildLinkRelationRows, resolveArticleLinkProjection, resolveSiloHierarc
 import { newFormationRef, planKeywordRole, planMergeCandidates, planMoveKeyword, planPrincipalChange, planSplitKeyword, type FormationKeywordLike, type FormationPlan } from "@/lib/arquiteto/article-formation-editing";
 import { resolveArticleFormationState } from "@/lib/arquiteto/article-formation-decision";
 import { buildArticleFormationConfirmationPlan, summarizeConfirmationPlan, validateFormationConclusion, type ConclusionGate, type ConfirmationEntry } from "@/lib/arquiteto/article-formation-confirmation";
-import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, buildArticleFormationUniverse, siloThemeTokens, suggestPrincipal, summarizeArticleFormation, type ArticleCandidate } from "@/lib/arquiteto/article-formation";
+import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, automaticFormationHoldouts, buildArticleFormationUniverse, siloThemeTokens, suggestPrincipal, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
 import { buildSemanticSignature, deriveSemanticNuclei, siloContextTokens, splitNucleusIfEditorialBoundary } from "@/lib/arquiteto/semantic-nucleus";
 import { resolveCandidateBoundaries, type CandidateSerpEvidence } from "@/lib/arquiteto/candidate-serp-boundary";
 import { challengesRequiringSiloReview, describeSiloReconsideration, resolveSiloBoundaryChallenge, type SiloBoundaryChallenge } from "@/lib/arquiteto/silo-boundary-challenge";
@@ -157,6 +158,46 @@ import { resolveTerritoryConfirmationReadiness, siloIsHumanDecided } from "@/lib
 import { TerritorialReviewPanel } from "./territorial-review-panel";
 import { PublishedSerpPanel } from "./published-serp-panel";
 import { SiloPrimaryProposalPanel } from "./silo-primary-proposal-panel";
+import {
+  attachSubjectToArticleDna,
+  attachSubjectToSiloDna,
+  countSubjectAnchors,
+  detachSubjectFromArticleDna,
+  detachSubjectFromSiloDna,
+  planSubjectAttachment,
+  sameDeclaredSubject,
+  splitUngroupedBySubjectAnchor,
+  subjectConservationLabel,
+  suggestSubjectFromSilo,
+  suggestSubjectSupport,
+  trunkAnchoredKeywordIds,
+  type SubjectAnchorCarrier,
+} from "@/lib/arquiteto/declared-subject";
+import { SubjectAttachDialog, SubjectConservationBadge, SubjectFilterPanel, SubjectSupportDialog, type SubjectAnchorView, type SubjectSiloSuggestionView } from "./subject-panels";
+import {
+  attachedSubjectWarning,
+  buildSubjectFilterEntries,
+  filterBySubject,
+  heldOutSubjectIds,
+  liveWorkingSubjectAnchors,
+  migrateWorkingSubjectAnchors,
+  planSubjectSupportFormation,
+  readSubjectStandings,
+  siloSubjectTerritories,
+  subjectAttachOptions,
+  subjectUnitLabel,
+  workingSubjectCarriers,
+  SUBJECT_LEGACY_DEFINITION_NOTE,
+  SUBJECT_SILO_PAGE_GUARD,
+  type SubjectAttachOption,
+  type SubjectAttachTargetInput,
+} from "./subject-workspace-model";
+import {
+  mergeWorkingSubjectAnchors,
+  persistedWorkingSubjectAnchors,
+  planWorkingSubjectAnchorWrites,
+  workingSubjectAnchorMigrationAssignments,
+} from "@/lib/arquiteto/declared-subject-guard";
 import { readPublishedGroupFromSerp, type PublishedKeywordReadout } from "@/lib/arquiteto/published-keyword-readout";
 import type { SerpCompetitiveObservation } from "@/lib/arquiteto/silo-primary-keyword";
 import { buildTerritorialAiBase, territorialAiBaseHash } from "@/lib/arquiteto/territorial-ai-record";
@@ -302,6 +343,8 @@ interface KeywordImportCandidate {
   siloName: string | null;
   importability: CanonicalImportability;
   workflowState: string | null;
+  /** "Assunto · declarado" pelo resolver do Minerador, quando a linha traz a declaração. */
+  subjectLabel?: string | null;
 }
 
 function importabilityReason(candidate: KeywordImportCandidate) {
@@ -714,6 +757,18 @@ export default function ArquitetoPage() {
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const canonicalReceivedKeywordSignature = useMemo(() => [...canonicalReceivedKeywordIds].sort().join("|"), [canonicalReceivedKeywordIds]);
   const [keywordImportOpen, setKeywordImportOpen] = useState(false);
+  /*
+   * ASSUNTO (SDD 2026-09-24, F2.2 a F2.4). O vínculo da formação ainda sem
+   * Definição do artigo é GRAVADO na cópia de trabalho (`articleSubjectAnchor`
+   * no item da principal) e vai para o ArticleDNA ao concluir a formação. Aqui
+   * fica só o que o servidor já confirmou e a releitura ainda não trouxe; vale
+   * enquanto a mesa for a mesma (`base`). A Definição gravada responde por si.
+   */
+  const [workingSubjectAnchorState, setWorkingSubjectAnchorState] = useState<{ brandId: string | null; base: unknown; anchors: Map<string, string | null> }>({ brandId: null, base: null, anchors: new Map() });
+  const [subjectFilterKeywordId, setSubjectFilterKeywordId] = useState<string | null>(null);
+  const [subjectAttachOpen, setSubjectAttachOpen] = useState(false);
+  const [subjectSupportOpen, setSubjectSupportOpen] = useState(false);
+  const [subjectBusy, setSubjectBusy] = useState(false);
   const [provisionalGroups, setProvisionalGroups] = useState<ProvisionalArticleGroup[]>([]);
   const [serpAssessments, setSerpAssessments] = useState<SerpFormationAssessment[]>([]);
   /**
@@ -1326,6 +1381,7 @@ export default function ArquitetoPage() {
           siloName: null,
           importability: eligibility.importability,
           workflowState: eligibility.workflowState,
+          subjectLabel: readArchitectKeywordVinculo(keyword).subjectLabel ?? null,
         }];
       })
         .sort((left, right) => left.status.localeCompare(right.status) || left.keyword.localeCompare(right.keyword, "pt-BR")));
@@ -2082,7 +2138,11 @@ export default function ArquitetoPage() {
       execute: async update => {
         update({ message: "Analisando perfis das keywords e priorizando publicados...", current: 0, total: 1 });
         await new Promise(resolve => window.setTimeout(resolve, 0));
-        const architecture = buildDeterministicArticleArchitecture(source);
+        // F2.3 — Assunto sem Volume validado fora dos grupos; tronco ancorado fora das sobras.
+        const architecture = buildDeterministicArticleArchitecture(source, {
+          heldOutKeywordIds: subjectSets.heldOut,
+          anchoredKeywordIds: subjectSets.anchored,
+        });
         // A lógica forma somente grupos de Artigos. Um vínculo de Silo
         // existente em um publicado é proteção de identidade; nenhuma
         // hipótese nova de Silo atravessa esta fronteira.
@@ -5109,6 +5169,63 @@ export default function ArquitetoPage() {
     [architectureKeywordSignals],
   );
 
+  /*
+   * O ASSUNTO DE CADA KEYWORD, LIDO UMA VEZ, pelo pacote aprovado
+   * (`readArchitectSubjectStanding`). Custo de leitura zero: a mesa já tem a
+   * linha inteira das keywords recebidas.
+   */
+  const subjectStandings = useMemo(() => readSubjectStandings(masterList), [masterList]);
+  const persistedSubjectAnchors = useMemo(
+    () => persistedWorkingSubjectAnchors(masterList as Record<string, unknown>[]),
+    [masterList],
+  );
+  const workingSubjectAnchors = useMemo(
+    () => mergeWorkingSubjectAnchors(
+      persistedSubjectAnchors,
+      workingSubjectAnchorState.brandId === selectedBrandId && workingSubjectAnchorState.base === masterList
+        ? workingSubjectAnchorState.anchors
+        : new Map<string, string | null>(),
+    ),
+    [persistedSubjectAnchors, workingSubjectAnchorState, selectedBrandId, masterList],
+  );
+  const subjectHeldOut = useMemo(() => heldOutSubjectIds(subjectStandings), [subjectStandings]);
+  /*
+   * OS TRONCOS, UMA LISTA SÓ (F2.3). A última Definição de cada artigo
+   * gravada — inclusive a que o cenário não descreve mais, que continua
+   * gravada com o Assunto — mais o vínculo da formação desta sessão cujo
+   * candidato existe agora. A formação lê a mesma lista: as Definições
+   * chegam como `subjectAnchored` e o vínculo da sessão por
+   * `subjectByCandidateRef`, que o domínio só conta quando casa com um
+   * candidato vivo. Mesa, filtro, Vínculo, motor e proposta leem
+   * `subjectAnchorCarriers`, montada depois da formação com a mesma regra.
+   */
+  const subjectDnaCarriers = useMemo<SubjectAnchorCarrier[]>(() => Object.values(acceptedArticleDnas).map(version => ({
+    subject: version.payload.subject ?? null,
+    principalKeywordId: String(version.payload.principalKeywordId),
+  })), [acceptedArticleDnas]);
+  const subjectFormationTrunks = useMemo(() => trunkAnchoredKeywordIds(subjectDnaCarriers), [subjectDnaCarriers]);
+  /*
+   * Assunto de cada Silo, pela última Arquitetura do silo gravada (F2.4
+   * passo 6). A consolidada declara o território; a da revisão de Silos o
+   * herda dos artigos que referencia.
+   */
+  const siloSubjectByTerritoryRef = useMemo(() => {
+    const territorioDoArtigo = new Map(Object.values(acceptedArticleDnas).map(version => [
+      String(version.payload.articleId),
+      version.payload.territoryRef ? String(version.payload.territoryRef) : null,
+    ]));
+    return siloSubjectTerritories({
+      silos: Object.values(acceptedSiloDnas).map(version => ({
+        siloId: String(version.payload.siloId),
+        name: version.payload.name ?? null,
+        territoryRef: version.payload.territoryRef ? String(version.payload.territoryRef) : null,
+        articleReferences: version.payload.articleReferences ?? [],
+        subject: version.payload.subject ?? null,
+      })),
+      articleTerritoryOf: articleId => territorioDoArtigo.get(articleId) ?? null,
+    });
+  }, [acceptedSiloDnas, acceptedArticleDnas]);
+
   /**
    * §19 — A FORMAÇÃO E A EXPLICAÇÃO NASCEM DO MESMO CÁLCULO.
    *
@@ -5201,6 +5318,10 @@ export default function ArquitetoPage() {
           // vira agrupamento: ele volta para a lógica e a incoerência aparece.
           humanFormationRef: resolveArticleFormationState(keyword).formationRef,
           humanRole: resolveArticleFormationState(keyword).decision?.role ?? null,
+          // F2.3 — Assunto sem Volume validado fica fora da formação automática;
+          // tronco ancorado não volta como sobra. Sem Assunto, os dois somem.
+          ...(subjectHeldOut.has(String(keyword.id)) ? { subjectHeldOut: true } : {}),
+          ...(subjectFormationTrunks.has(String(keyword.id)) ? { subjectAnchored: true } : {}),
           };
         });
 
@@ -5236,7 +5357,12 @@ export default function ArquitetoPage() {
        * uma heurística.
        */
       const publicadas = universoKeywords.filter(keyword => keyword.isPublished);
-      const emFormacao = universoKeywords.filter(keyword => !keyword.isPublished);
+      const foraDaAutomatica = automaticFormationHoldouts({
+        siloRef: territory.territoryRef,
+        keywords: universoKeywords,
+        subjectByCandidateRef: workingSubjectAnchors,
+      });
+      const emFormacao = universoKeywords.filter(keyword => !keyword.isPublished && !foraDaAutomatica.has(keyword.keywordId));
 
       const assinaturas = emFormacao.map(keyword => buildSemanticSignature({
         dna: dnaSignalsByKeyword.get(keyword.keywordId)
@@ -5313,10 +5439,12 @@ export default function ArquitetoPage() {
         siloContext,
         keywords: universoKeywords,
         publishedArticles,
+        ...(workingSubjectAnchors.size ? { subjectByCandidateRef: workingSubjectAnchors } : {}),
+        ...(siloSubjectByTerritoryRef.get(territory.territoryRef) ? { siloSubjectKeywordId: siloSubjectByTerritoryRef.get(territory.territoryRef)?.subject.keywordId } : {}),
       });
     });
     return { universes, nucleusByKeywordId, separationByKeywordId };
-  }, [masterList, confirmedTerritoryRefs, reservedSiloHeadIds, remoteTerritories, brandSiteSnapshot, dnaSignalsByKeyword]);
+  }, [masterList, confirmedTerritoryRefs, reservedSiloHeadIds, remoteTerritories, brandSiteSnapshot, dnaSignalsByKeyword, subjectHeldOut, subjectFormationTrunks, workingSubjectAnchors, siloSubjectByTerritoryRef]);
 
   const articleFormationUniverses = articleFormation.universes;
 
@@ -5364,6 +5492,33 @@ export default function ArquitetoPage() {
     () => new Set(materializationPartition.legacy.map(item => item.articleId)),
     [materializationPartition],
   );
+
+  /*
+   * OS TRONCOS (F2.3), a lista única: as Definições gravadas e o vínculo da
+   * sessão cujo candidato existe agora e ainda não virou Definição. Vínculo
+   * velho não ancora nada; um artigo responde por um lado só.
+   */
+  const liveSubjectCandidates = useMemo(() => new Map(articleFormationUniverses.flatMap(universe =>
+    universe.candidates.map(candidate => [candidate.candidateRef, candidate.principalKeywordId] as const))), [articleFormationUniverses]);
+  const liveSubjectAnchors = useMemo(
+    () => liveWorkingSubjectAnchors({ workingAnchors: workingSubjectAnchors, liveCandidates: liveSubjectCandidates }),
+    [workingSubjectAnchors, liveSubjectCandidates],
+  );
+  const subjectAnchorCarriers = useMemo<SubjectAnchorCarrier[]>(() => [
+    ...subjectDnaCarriers,
+    ...workingSubjectCarriers({ workingAnchors: workingSubjectAnchors, materializedRefs: materializationPartition.current, liveCandidates: liveSubjectCandidates }),
+  ], [subjectDnaCarriers, workingSubjectAnchors, materializationPartition, liveSubjectCandidates]);
+  const subjectSets = useMemo(
+    () => ({ heldOut: subjectHeldOut, anchored: trunkAnchoredKeywordIds(subjectAnchorCarriers) }),
+    [subjectHeldOut, subjectAnchorCarriers],
+  );
+
+  /** O filtro "Assuntos": cada Assunto recebido e quantos artigos ele sustenta. */
+  const subjectFilterEntries = useMemo(
+    () => selectedBrandId ? buildSubjectFilterEntries({ brandId: selectedBrandId, standings: subjectStandings, anchors: subjectAnchorCarriers }) : [],
+    [selectedBrandId, subjectStandings, subjectAnchorCarriers],
+  );
+  const activeSubjectFilter = subjectFilterEntries.some(entry => entry.keywordId === subjectFilterKeywordId) ? subjectFilterKeywordId : null;
 
   /**
    * ArticleDNA que a mesa pode exibir — uma chave só para a fase inteira.
@@ -5654,6 +5809,21 @@ export default function ArquitetoPage() {
       articleDnaEntryFor({ articleId, candidateRef }).version,
     [articleDnaEntryFor],
   );
+
+  /**
+   * O Assunto preso a uma linha da mesa (F2.3). A Definição gravada responde
+   * por ela; sem Definição, responde a formação desta sessão.
+   */
+  const articleSubjectFor = useCallback((article: (typeof articlesList)[number]): { keywordId: string; subject: DeclaredSubject | null; persisted: boolean } | null => {
+    const { version } = articleDnaEntryFor({ articleId: articleEntityIdFor(article), candidateRef: article.candidateRef });
+    if (version) {
+      const subject = version.payload.subject ?? null;
+      return subject ? { keywordId: subject.keywordId, subject, persisted: true } : null;
+    }
+    const working = article.candidateRef ? liveSubjectAnchors.get(article.candidateRef) : undefined;
+    return working ? { keywordId: working, subject: null, persisted: false } : null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [articleDnaEntryFor, liveSubjectAnchors]);
 
   /**
    * A ÚNICA leitura de "quais conflitos estruturais este artigo ainda carrega".
@@ -6176,7 +6346,7 @@ export default function ArquitetoPage() {
 
   // ── Filtros aplicados sobre a lista de artigos
   const filteredArticles = useMemo(() => {
-    return articlesList.filter(art => {
+    const porCampos = articlesList.filter(art => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesMain = art.keywordPrincipal.toLowerCase().includes(q) || art.slug.toLowerCase().includes(q);
@@ -6195,7 +6365,9 @@ export default function ArquitetoPage() {
       if (filterStatus !== "Todos" && globalWorkflowStatus(remoteWorkflowStatus.get(articleEntityIdFor(art))?.status) !== filterStatus) return false;
       return true;
     });
-  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus, remoteWorkflowStatus, workspaceMode]);
+    // Filtro "Assuntos" (F2.2): só os artigos que o Assunto escolhido sustenta.
+    return filterBySubject(porCampos, workspaceMode === "articles" ? activeSubjectFilter : null, art => articleSubjectFor(art)?.keywordId ?? null);
+  }, [articlesList, searchQuery, filterHierarquia, filterStatus, articleWorkflowStatus, remoteWorkflowStatus, workspaceMode, activeSubjectFilter, articleSubjectFor]);
 
   const ungroupedKeywords = useMemo(
     () => masterList.filter(keyword => keyword.clusterId === null || keyword.clusterId === undefined || keyword.clusterId === "" || keyword.clusterId === 0),
@@ -6211,6 +6383,30 @@ export default function ArquitetoPage() {
     () => ungroupedKeywords.filter(keyword => keyword.siloCandidate?.status !== "candidate" && !reservedSiloHeadIds.has(String(keyword.id))),
     [ungroupedKeywords, reservedSiloHeadIds],
   );
+
+  /*
+   * F2.3 — "KEYWORDS NÃO AGRUPADAS" COM O ASSUNTO, pelo predicado do domínio.
+   * O tronco ancorado sai da lista e aparece como "tronco de N artigo(s)"; o
+   * Assunto sem artigo fica nela com o selo "aguardando sustentação". Nenhuma
+   * keyword some: só muda de lista.
+   */
+  const ungroupedSubjectView = useMemo(() => splitUngroupedBySubjectAnchor({
+    ungroupedKeywordIds: ungroupedArticleKeywords.map(keyword => String(keyword.id)),
+    articles: subjectAnchorCarriers,
+    isDeclaredSubject: keywordId => subjectStandings.get(keywordId)?.declared === true,
+  }), [ungroupedArticleKeywords, subjectAnchorCarriers, subjectStandings]);
+  const ungroupedSubjectLabels = useMemo(
+    () => new Map(ungroupedSubjectView.ungrouped.map(item => [item.keywordId, item.label])),
+    [ungroupedSubjectView],
+  );
+  const visibleUngroupedArticleKeywords = useMemo(
+    () => ungroupedArticleKeywords.filter(keyword => ungroupedSubjectLabels.has(String(keyword.id))),
+    [ungroupedArticleKeywords, ungroupedSubjectLabels],
+  );
+  const anchoredSubjectRows = useMemo(() => ungroupedSubjectView.anchored.map(item => ({
+    ...item,
+    phrase: subjectStandings.get(item.keywordId)?.phrase || String(masterList.find(keyword => String(keyword.id) === item.keywordId)?.keyword || item.keywordId),
+  })), [ungroupedSubjectView, subjectStandings, masterList]);
 
   /** Transparência: a cabeceira reservada é mostrada, sem virar artigo falso. */
   const reservedSiloHeadKeywords = useMemo(
@@ -9398,13 +9594,21 @@ export default function ArquitetoPage() {
   const territorialVinculoLines = useMemo(() => {
     const mapa = new Map<string, KeywordVinculoLine>();
     for (const [keywordId, vinculo] of architectureKeywordVinculos) {
+      // F2.2 — "Assunto · declarado" já vem na frase do Minerador; aqui só o
+      // selo de conservação: tronco de N artigos, ou "aguardando sustentação"
+      // só quando a keyword está de fato em Keywords não agrupadas. Membro ou
+      // principal de artigo não leva selo de espera.
+      const trunkCount = countSubjectAnchors(keywordId, subjectAnchorCarriers);
+      const aguardando = Boolean(vinculo.subjectLabel) && Boolean(ungroupedSubjectLabels.get(keywordId));
+      const subjectLabel = subjectConservationLabel({ declared: aguardando, anchoredArticleCount: trunkCount });
       mapa.set(keywordId, {
         summary: vinculo.summary,
         silo: headsSilo(architectureKeywordDeclarations.get(keywordId)),
+        ...(subjectLabel ? { subject: { label: subjectLabel, tone: trunkCount > 0 ? "trunk" as const : "awaiting" as const } } : {}),
       });
     }
     return mapa;
-  }, [architectureKeywordVinculos, architectureKeywordDeclarations]);
+  }, [architectureKeywordVinculos, architectureKeywordDeclarations, subjectAnchorCarriers, ungroupedSubjectLabels]);
 
   const architectureProposal = useMemo(() => buildArchitectureWorkingProposal({
     analysis: architectureAnalysis,
@@ -9422,7 +9626,9 @@ export default function ArquitetoPage() {
     keywords: architectureKeywordSignals,
     declarations: architectureKeywordDeclarations,
     slugOf: normalizeManualSiloPageSlug,
-  }), [architectureAnalysis, territorialSurface, architectureKeywordSignals, architectureKeywordDeclarations]);
+    // F2.3 — o tronco ancorado não é "sem Silo": o artigo o sustenta.
+    ...(subjectSets.anchored.size ? { anchoredSubjectKeywordIds: subjectSets.anchored } : {}),
+  }), [architectureAnalysis, territorialSurface, architectureKeywordSignals, architectureKeywordDeclarations, subjectSets]);
 
   /**
    * Itens canônicos das keywords, para as edições escreverem com `expectedLock`.
@@ -9864,13 +10070,36 @@ export default function ArquitetoPage() {
    * sucesso, sucesso é o remoto devolver o que foi gravado. Nenhum ArticleDNA
    * é criado aqui — isto é working state.
    */
-  const applyFormationPlan = useCallback(async (plan: FormationPlan, acao: string) => {
+  const applyFormationPlan = useCallback(async (
+    plan: FormationPlan,
+    acao: string,
+    subjectReservedRefs: readonly string[] = [],
+    extraAssignments: ReadonlyMap<string, Record<string, unknown>> = new Map(),
+  ) => {
     if (!selectedBrandId) return false;
     if (plan.refusals.length) {
       showNotification("error", plan.refusals.map(refusal => refusal.detail).join(" "));
       return false;
     }
     if (!plan.patches.length) return false;
+
+    /*
+     * O Assunto preso acompanha o artigo quando o ref muda — e vai NA MESMA
+     * escrita da formação, no item da principal do ref novo, para o vínculo
+     * sobreviver ao recarregar.
+     */
+    const candidatosAntes = articleFormationUniverses.flatMap(universe => universe.candidates.map(candidate => ({
+      candidateRef: candidate.candidateRef,
+      principalKeywordId: candidate.principalKeywordId,
+      keywordIds: candidate.keywords.map(item => item.keywordId),
+    })));
+    const vinculosDepois = workingSubjectAnchors.size
+      ? migrateWorkingSubjectAnchors({ anchors: workingSubjectAnchors, candidates: candidatosAntes, patches: plan.patches, reservedRefs: new Set(subjectReservedRefs) })
+      : workingSubjectAnchors;
+    const actorId = authenticatedArchitectActor({ sessionStatus, actorUserId: session?.user?.id, brandId: selectedBrandId });
+    const vinculoNaEscrita: ReadonlyMap<string, Record<string, unknown>> = actorId && workingSubjectAnchors.size
+      ? workingSubjectAnchorMigrationAssignments({ before: workingSubjectAnchors, after: vinculosDepois, patches: plan.patches, persisted: persistedSubjectAnchors, actorUserId: actorId, attachedAt: new Date().toISOString() })
+      : new Map<string, Record<string, unknown>>();
 
     setFormationBusy(true);
     try {
@@ -9879,7 +10108,7 @@ export default function ArquitetoPage() {
         updates: plan.patches.map(patch => ({
           workflowItemId: patch.workflowItemId,
           expectedLock: patch.expectedLock,
-          assignment: patch.assignment,
+          assignment: { ...patch.assignment, ...(vinculoNaEscrita.get(patch.keywordId) || {}), ...(extraAssignments.get(patch.keywordId) || {}) },
         })),
       });
       // Gravar não é sucesso: sucesso é o remoto devolver o que foi gravado.
@@ -9897,6 +10126,13 @@ export default function ArquitetoPage() {
         showNotification("error", `${acao}: o readback não confirmou ${naoConfirmadas.length} keyword(s).`);
         return false;
       }
+      // Depois do readback: a mesa mostra o vínculo que acompanhou o artigo
+      // até a releitura trazer o que foi gravado.
+      if (workingSubjectAnchors.size) {
+        const confirmados = new Map<string, string | null>();
+        for (const ref of new Set([...workingSubjectAnchors.keys(), ...vinculosDepois.keys()])) confirmados.set(ref, vinculosDepois.get(ref) ?? null);
+        setWorkingSubjectAnchorState({ brandId: selectedBrandId, base: masterList, anchors: confirmados });
+      }
       showNotification("success", `${acao}: ${plan.patches.length} keyword(s) confirmadas no readback.`);
       return true;
     } catch (error) {
@@ -9905,7 +10141,7 @@ export default function ArquitetoPage() {
     } finally {
       setFormationBusy(false);
     }
-  }, [selectedBrandId, showNotification]);
+  }, [selectedBrandId, showNotification, articleFormationUniverses, workingSubjectAnchors, persistedSubjectAnchors, sessionStatus, session?.user?.id, masterList]);
 
   /** Silo da keyword/candidato aberto — as edições valem dentro de um Silo. */
   const universeOfCandidate = useCallback((candidateRef: string) =>
@@ -9966,6 +10202,484 @@ export default function ArquitetoPage() {
       decidedAt: new Date().toISOString(),
     }), "Principal trocada");
   }, [universeOfCandidate, formationKeywordItems, applyFormationPlan, masterList]);
+
+  /* ------------------------------------------------------------------------
+   * O ASSUNTO NA MESA (SDD 2026-09-24, F2.2 a F2.4).
+   *
+   * Prender e soltar são atos humanos. Na Definição do artigo gravada, cada
+   * ato é uma versão nova em revisão, confirmada pelo remoto; na formação
+   * ainda sem Definição, o vínculo fica nesta sessão e vai para o ArticleDNA
+   * ao concluir a formação. A IA não prende nada.
+   * ---------------------------------------------------------------------- */
+
+  const selectedSubjectRow = useMemo(
+    () => activeSubjectFilter ? masterList.find(keyword => String(keyword.id) === activeSubjectFilter) ?? null : null,
+    [activeSubjectFilter, masterList],
+  );
+  const selectedSubjectEntry = useMemo(
+    () => subjectFilterEntries.find(entry => entry.keywordId === activeSubjectFilter) ?? null,
+    [subjectFilterEntries, activeSubjectFilter],
+  );
+
+  const candidateByRef = useMemo(() => {
+    const mapa = new Map<string, { candidate: ArticleCandidate; siloRef: string }>();
+    for (const universe of articleFormationUniverses) {
+      for (const candidate of universe.candidates) mapa.set(candidate.candidateRef, { candidate, siloRef: universe.siloRef });
+    }
+    return mapa;
+  }, [articleFormationUniverses]);
+
+  /** Membros de artigo DECIDIDO: Definição gravada ou formação revisada por humano. */
+  const subjectSupportMemberIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const version of Object.values(acceptedArticleDnas)) {
+      if (legacyArticleDnaIds.has(String(version.payload.articleId))) continue;
+      for (const reference of version.payload.keywordReferences) ids.add(String(reference.keywordId));
+    }
+    for (const keyword of masterList) {
+      if (resolveArticleFormationState(keyword).formationRef) ids.add(String(keyword.id));
+    }
+    return ids;
+  }, [acceptedArticleDnas, legacyArticleDnaIds, masterList]);
+
+  const siloPageSiloIds = useMemo(
+    () => new Set(Object.values(acceptedSiloPages).map(version => String(version.payload.siloId))),
+    [acceptedSiloPages],
+  );
+
+  const selectedSubjectAnchors = useMemo<SubjectAnchorView[]>(() => {
+    if (!activeSubjectFilter) return [];
+    const vistas: SubjectAnchorView[] = [];
+    const representadas = new Set<string>();
+    for (const article of articlesList) {
+      const entry = articleDnaEntryFor({ articleId: articleEntityIdFor(article), candidateRef: article.candidateRef });
+      if (entry.key) representadas.add(entry.key);
+      const anchor = articleSubjectFor(article);
+      if (anchor?.keywordId !== activeSubjectFilter) continue;
+      const version = entry.version;
+      const payload = version?.payload;
+      vistas.push({
+        ref: article.id,
+        kind: "article",
+        label: article.keywordPrincipal || article.slug || article.id,
+        unitLabel: subjectUnitLabel(payload?.unitClassification?.type ?? payload?.unitPurpose?.unitType ?? null),
+        persisted: anchor.persisted,
+        warning: attachedSubjectWarning({ subject: anchor.subject, subjectKeywordId: anchor.keywordId, keyword: selectedSubjectRow }).warning,
+      });
+    }
+    for (const [key, version] of Object.entries(acceptedArticleDnas)) {
+      const subject = version.payload.subject;
+      if (!subject || representadas.has(key) || subject.keywordId !== activeSubjectFilter) continue;
+      const principal = masterList.find(keyword => String(keyword.id) === String(version.payload.principalKeywordId));
+      vistas.push({
+        ref: `dna:${key}`,
+        kind: "article",
+        label: String(principal?.keyword || version.payload.principalKeywordId),
+        unitLabel: subjectUnitLabel(version.payload.unitClassification?.type ?? version.payload.unitPurpose?.unitType ?? null),
+        persisted: true,
+        warning: [SUBJECT_LEGACY_DEFINITION_NOTE, attachedSubjectWarning({ subject, subjectKeywordId: subject.keywordId, keyword: selectedSubjectRow }).warning].filter(Boolean).join(" "),
+      });
+    }
+    for (const version of Object.values(acceptedSiloDnas)) {
+      const subject = version.payload.subject;
+      if (subject?.keywordId !== activeSubjectFilter) continue;
+      vistas.push({
+        ref: String(version.payload.siloId),
+        kind: "silo",
+        label: version.payload.name || String(version.payload.siloId),
+        unitLabel: "Silo",
+        persisted: true,
+        warning: attachedSubjectWarning({ subject, subjectKeywordId: subject.keywordId, keyword: selectedSubjectRow }).warning,
+      });
+    }
+    return vistas;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSubjectFilter, articlesList, articleSubjectFor, articleDnaEntryFor, acceptedArticleDnas, acceptedSiloDnas, selectedSubjectRow, masterList]);
+
+  /** O Silo tem o Assunto e o artigo ainda não: sugestão, que o artigo confirma. */
+  const selectedSubjectSiloSuggestions = useMemo<SubjectSiloSuggestionView[]>(() => {
+    if (!activeSubjectFilter) return [];
+    const sugestoes: SubjectSiloSuggestionView[] = [];
+    for (const article of articlesList) {
+      if (!article.candidateRef || articleSubjectFor(article)) continue;
+      const entrada = candidateByRef.get(article.candidateRef);
+      if (entrada?.candidate.suggestedSubjectKeywordId !== activeSubjectFilter) continue;
+      const doSilo = siloSubjectByTerritoryRef.get(entrada.siloRef) ?? null;
+      const silo = doSilo ? { name: doSilo.name, subject: doSilo.subject } : null;
+      const sugestao = suggestSubjectFromSilo({ silo, article: { subjectKeywordId: null } });
+      if (!sugestao || sugestao.keywordId !== activeSubjectFilter) continue;
+      sugestoes.push({ ref: article.id, label: article.keywordPrincipal || article.id, reason: `${article.keywordPrincipal || "Artigo"}: ${sugestao.reason}` });
+    }
+    return sugestoes;
+  }, [activeSubjectFilter, articlesList, articleSubjectFor, candidateByRef, siloSubjectByTerritoryRef]);
+
+  /** Onde o Assunto escolhido pode ser preso, e por que não, em cada unidade. */
+  const subjectAttachChoices = useMemo<SubjectAttachOption[]>(() => {
+    if (!subjectAttachOpen || !selectedBrandId || !selectedSubjectRow) return [];
+    const actor = authenticatedArchitectActor({ sessionStatus, actorUserId: session?.user?.id, brandId: selectedBrandId });
+    const alvos: SubjectAttachTargetInput[] = articlesList.map(article => {
+      const version = articleDnaEntryFor({ articleId: articleEntityIdFor(article), candidateRef: article.candidateRef }).version;
+      const candidate = article.candidateRef ? candidateByRef.get(article.candidateRef)?.candidate ?? null : null;
+      const payload = version?.payload;
+      return {
+        ref: article.id,
+        kind: "article" as const,
+        label: article.keywordPrincipal || article.slug || article.id,
+        unitType: payload?.unitClassification?.type ?? payload?.unitPurpose?.unitType ?? null,
+        principalKeywordId: payload?.principalKeywordId ?? candidate?.principalKeywordId ?? (article.mainKeywordObj ? String(article.mainKeywordObj.id) : null),
+        keywords: payload
+          ? payload.keywordReferences.map(reference => ({ keywordId: String(reference.keywordId), role: String(reference.role) }))
+          : candidate?.keywords.map(item => ({ keywordId: item.keywordId, role: String(item.role) })) ?? [],
+        excludedSubjects: payload?.excludedSubjects ?? [],
+        currentSubjectKeywordId: articleSubjectFor(article)?.keywordId ?? null,
+        blockedReason: !version && !candidate ? "Esta linha ainda não tem formação nem Definição do artigo: processe os artigos antes de prender o Assunto." : null,
+        persisted: Boolean(version),
+      };
+    });
+    const silos: SubjectAttachTargetInput[] = Object.values(acceptedSiloDnas).map(version => ({
+      ref: String(version.payload.siloId),
+      kind: "silo" as const,
+      label: version.payload.name || String(version.payload.siloId),
+      principalKeywordId: null,
+      currentSubjectKeywordId: version.payload.subject?.keywordId ?? null,
+      blockedReason: siloPageSiloIds.has(String(version.payload.siloId)) ? SUBJECT_SILO_PAGE_GUARD : null,
+      persisted: true,
+    }));
+    return subjectAttachOptions({
+      brandId: selectedBrandId,
+      subjectKeyword: selectedSubjectRow,
+      actorUserId: actor,
+      attachedAt: new Date().toISOString(),
+      targets: [...alvos, ...silos],
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subjectAttachOpen, selectedBrandId, selectedSubjectRow, articlesList, articleDnaEntryFor, candidateByRef, articleSubjectFor, acceptedSiloDnas, siloPageSiloIds, sessionStatus, session?.user?.id]);
+
+  /** Sugestões de sustentação: só keywords já recebidas, pela ordem do domínio. */
+  const subjectSupportSuggestions = useMemo(
+    () => subjectSupportOpen && selectedBrandId && selectedSubjectRow
+      ? suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword: selectedSubjectRow, keywords: masterList, memberKeywordIds: subjectSupportMemberIds, limit: 40 })
+      : [],
+    [subjectSupportOpen, selectedBrandId, selectedSubjectRow, masterList, subjectSupportMemberIds],
+  );
+
+  /** O Silo confirmado de cada sugestão: a formação recusa sem Silo ou com Silos diferentes. */
+  const subjectSupportSiloLabels = useMemo(() => {
+    const nomes = new Map(remoteTerritories.map(item => [item.territoryRef, item.territory.name || item.territory.centralEntity || "Silo sem nome"]));
+    const mapa = new Map<string, string | null>();
+    for (const suggestion of subjectSupportSuggestions) {
+      const ref = masterList.find(keyword => String(keyword.id) === suggestion.keywordId)?.territoryRef;
+      mapa.set(suggestion.keywordId, typeof ref === "string" && confirmedTerritoryRefs.has(ref) ? nomes.get(ref) ?? "Silo sem nome" : null);
+    }
+    return mapa;
+  }, [subjectSupportSuggestions, masterList, confirmedTerritoryRefs, remoteTerritories]);
+
+  /** Grava uma versão nova da Definição do artigo, em revisão, e confirma pelo remoto. */
+  const persistArticleSubjectVersion = useCallback(async (input: {
+    articleKey: string;
+    current: VersionEnvelope<ArticleDNA>;
+    payload: ArticleDNA;
+    actorId: string;
+    changeReason: string;
+  }) => {
+    const successor = await createVersionEnvelope({
+      entityId: input.current.payload.articleId,
+      versionNumber: input.current.versionNumber + 1,
+      previousVersionId: input.current.versionId,
+      origin: "human",
+      changeReason: input.changeReason,
+      createdBy: input.actorId,
+      payload: input.payload,
+    });
+    const persisted = await persistArquitetoArtifact({ brandId: selectedBrandId, artifactType: "article_dna", action: "edit", version: successor, status: "proposed" });
+    const canonico = persisted.version as VersionEnvelope<ArticleDNA>;
+    setAcceptedArticleDnas(previous => ({ ...previous, [input.articleKey]: canonico }));
+    addVersionEvents([createStatusEvent(canonico.versionId, "proposed", input.actorId, `${input.changeReason} A aprovação editorial continua independente.`)]);
+    return persisted.persistence;
+  }, [selectedBrandId, setAcceptedArticleDnas, addVersionEvents]);
+
+  /** Grava uma versão nova da Arquitetura do silo, em revisão. */
+  const persistSiloSubjectVersion = useCallback(async (input: {
+    current: VersionEnvelope<SiloDNA>;
+    payload: SiloDNA;
+    actorId: string;
+    changeReason: string;
+  }) => {
+    const successor = await createVersionEnvelope({
+      entityId: input.current.entityId,
+      versionNumber: input.current.versionNumber + 1,
+      previousVersionId: input.current.versionId,
+      origin: "human",
+      changeReason: input.changeReason,
+      createdBy: input.actorId,
+      payload: input.payload,
+    });
+    const persisted = await persistArquitetoArtifact({ brandId: selectedBrandId, artifactType: "silo_dna", action: "edit", version: successor, status: "proposed" });
+    const canonico = persisted.version as VersionEnvelope<SiloDNA>;
+    setAcceptedSiloDnas(previous => ({ ...previous, [String(canonico.payload.siloId)]: canonico }));
+    addVersionEvents([createStatusEvent(canonico.versionId, "proposed", input.actorId, `${input.changeReason} A aprovação continua independente.`)]);
+    return persisted.persistence;
+  }, [selectedBrandId, setAcceptedSiloDnas, addVersionEvents]);
+
+  /** O que o servidor já confirmou, enquanto a releitura não chega. */
+  const setWorkingSubjectAnchor = useCallback((candidateRef: string, subjectKeywordId: string | null) => {
+    setWorkingSubjectAnchorState(previous => {
+      const anchors = new Map(previous.brandId === selectedBrandId && previous.base === masterList ? previous.anchors : []);
+      anchors.set(candidateRef, subjectKeywordId);
+      return { brandId: selectedBrandId, base: masterList, anchors };
+    });
+  }, [selectedBrandId, masterList]);
+
+  /**
+   * Grava (ou solta) o vínculo do Assunto numa formação sem Definição, no item
+   * da principal, e só dá como feito depois do readback. O servidor confere o
+   * ator e a keyword; sem item com lock, nada é gravado.
+   */
+  const persistWorkingSubjectAnchor = useCallback(async (input: { candidateRef: string; subjectKeywordId: string | null; holderKeywordId: string | null; actorId: string }) => {
+    if (!selectedBrandId) return false;
+    const plano = planWorkingSubjectAnchorWrites({
+      candidateRef: input.candidateRef,
+      subjectKeywordId: input.subjectKeywordId,
+      holderKeywordId: input.holderKeywordId,
+      items: formationKeywordItems,
+      persisted: persistedSubjectAnchors,
+      actorUserId: input.actorId,
+      attachedAt: new Date().toISOString(),
+    });
+    if (!plano.ok) throw new Error(plano.reason);
+    if (plano.writes.length) {
+      await persistArchitectWorkingCopy({
+        brandId: selectedBrandId,
+        updates: plano.writes.map(write => ({ workflowItemId: write.workflowItemId, expectedLock: write.expectedLock, assignment: write.assignment })),
+      });
+      const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+      const relidos = persistedWorkingSubjectAnchors(buildCanonicalWorkflowWorkspaceItems(canonical.workflowItems, canonical.keywords, selectedBrandId) as Record<string, unknown>[]);
+      setCanonicalWorkspaceReload(current => current + 1);
+      const confirmado = input.subjectKeywordId
+        ? relidos.get(input.candidateRef)?.subjectKeywordId === input.subjectKeywordId
+        : !relidos.has(input.candidateRef);
+      if (!confirmado) throw new Error("O vínculo do Assunto não voltou no readback da cópia de trabalho: nada foi confirmado.");
+    }
+    setWorkingSubjectAnchor(input.candidateRef, input.subjectKeywordId);
+    return true;
+  }, [selectedBrandId, formationKeywordItems, persistedSubjectAnchors, setWorkingSubjectAnchor]);
+
+  const attachSubjectToUnit = useCallback(async (option: { ref: string; kind: "article" | "silo" }) => {
+    if (!selectedBrandId || !selectedSubjectRow) return;
+    const actorId = authenticatedArchitectActor({ sessionStatus, actorUserId: session?.user?.id, brandId: selectedBrandId });
+    if (!actorId) {
+      showNotification("error", "Prender o Assunto é ato humano e exige a sessão autenticada.");
+      return;
+    }
+    const standing = subjectStandings.get(String(selectedSubjectRow.id));
+    const attachedAt = new Date().toISOString();
+    setSubjectBusy(true);
+    try {
+      if (option.kind === "silo") {
+        const current = acceptedSiloDnas[option.ref];
+        if (!current) throw new Error("A Arquitetura do silo não está mais na mesa.");
+        if (siloPageSiloIds.has(option.ref)) throw new Error(SUBJECT_SILO_PAGE_GUARD);
+        const plan = planSubjectAttachment({ brandId: selectedBrandId, keyword: selectedSubjectRow, actorUserId: actorId, attachedAt, target: null });
+        if (!plan.ok) throw new Error(plan.reason);
+        const result = attachSubjectToSiloDna(current.payload, plan.subject);
+        if (!result.ok) throw new Error(result.reason);
+        if (!result.changed) {
+          showNotification("warning", "Este Silo já tem este Assunto, do mesmo pacote aprovado. Nenhuma versão nova foi criada.");
+          return;
+        }
+        await persistSiloSubjectVersion({ current, payload: result.value, actorId, changeReason: `Assunto "${plan.subject.phrase}" preso ao Silo por decisão humana.` });
+        showNotification("success", `Assunto "${plan.subject.phrase}" preso ao Silo em nova versão da Arquitetura do silo, confirmada pelo servidor. Os artigos deste Silo passam a receber a sugestão, e cada um confirma.`);
+        return;
+      }
+
+      const article = articlesList.find(item => item.id === option.ref);
+      if (!article) throw new Error("O artigo não está mais na mesa.");
+      const entry = articleDnaEntryFor({ articleId: articleEntityIdFor(article), candidateRef: article.candidateRef });
+      if (entry.version && entry.key) {
+        const payload = entry.version.payload;
+        const plan = planSubjectAttachment({
+          brandId: selectedBrandId, keyword: selectedSubjectRow, actorUserId: actorId, attachedAt,
+          target: {
+            principalKeywordId: payload.principalKeywordId,
+            keywords: payload.keywordReferences.map(reference => ({ keywordId: String(reference.keywordId), role: String(reference.role) })),
+            excludedSubjects: payload.excludedSubjects,
+          },
+        });
+        if (!plan.ok) throw new Error(plan.reason);
+        const result = attachSubjectToArticleDna(payload, plan.subject, { principalVolumeValidated: standing?.volumeValidated === true });
+        if (!result.ok) throw new Error(result.reason);
+        if (!result.changed) {
+          showNotification("warning", "Esta unidade já tem este Assunto, do mesmo pacote aprovado. Nenhuma versão nova foi criada.");
+          return;
+        }
+        await persistArticleSubjectVersion({ articleKey: entry.key, current: entry.version, payload: result.value, actorId, changeReason: `Assunto "${plan.subject.phrase}" preso por decisão humana.` });
+        showNotification("success", `Assunto "${plan.subject.phrase}" preso em nova versão da Definição do artigo, confirmada pelo servidor. Ela aguarda aprovação; a versão aprovada continua no histórico.`);
+        return;
+      }
+
+      const candidate = article.candidateRef ? candidateByRef.get(article.candidateRef)?.candidate ?? null : null;
+      if (!candidate) throw new Error("Esta linha ainda não tem formação: processe os artigos antes de prender o Assunto.");
+      const plan = planSubjectAttachment({
+        brandId: selectedBrandId, keyword: selectedSubjectRow, actorUserId: actorId, attachedAt,
+        target: { principalKeywordId: candidate.principalKeywordId, keywords: candidate.keywords.map(item => ({ keywordId: item.keywordId, role: String(item.role) })) },
+      });
+      if (!plan.ok) throw new Error(plan.reason);
+      await persistWorkingSubjectAnchor({ candidateRef: candidate.candidateRef, subjectKeywordId: plan.subjectKeywordId, holderKeywordId: candidate.principalKeywordId, actorId });
+      showNotification("success", `Assunto "${plan.subject.phrase}" preso na formação e gravado na cópia de trabalho, confirmado pelo servidor. Vai para a Definição do artigo quando a formação for concluída.`);
+    } catch (error) {
+      showNotification("error", error instanceof Error ? error.message : "O Assunto não pôde ser preso.");
+    } finally {
+      setSubjectBusy(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBrandId, selectedSubjectRow, sessionStatus, session?.user?.id, subjectStandings, acceptedSiloDnas, siloPageSiloIds, articlesList, articleDnaEntryFor, candidateByRef, persistSiloSubjectVersion, persistArticleSubjectVersion, persistWorkingSubjectAnchor, showNotification]);
+
+  const detachSubjectAnchor = useCallback(async (anchor: SubjectAnchorView) => {
+    if (!selectedBrandId) return;
+    const actorId = authenticatedArchitectActor({ sessionStatus, actorUserId: session?.user?.id, brandId: selectedBrandId });
+    if (!actorId) {
+      showNotification("error", "Soltar o Assunto é ato humano e exige a sessão autenticada.");
+      return;
+    }
+    setSubjectBusy(true);
+    try {
+      if (anchor.kind === "silo") {
+        const current = acceptedSiloDnas[anchor.ref];
+        if (!current) throw new Error("A Arquitetura do silo não está mais na mesa.");
+        if (siloPageSiloIds.has(anchor.ref)) throw new Error(SUBJECT_SILO_PAGE_GUARD);
+        const result = detachSubjectFromSiloDna(current.payload);
+        if (!result.changed) return;
+        await persistSiloSubjectVersion({ current, payload: result.value, actorId, changeReason: "Assunto solto do Silo por decisão humana." });
+        showNotification("success", "Assunto solto do Silo em nova versão da Arquitetura do silo, confirmada pelo servidor.");
+        return;
+      }
+      if (anchor.ref.startsWith("dna:")) {
+        const key = anchor.ref.slice("dna:".length);
+        const current = acceptedArticleDnas[key];
+        if (!current) throw new Error("A Definição do artigo não está mais na mesa.");
+        const result = detachSubjectFromArticleDna(current.payload);
+        if (!result.changed) return;
+        await persistArticleSubjectVersion({ articleKey: key, current, payload: result.value, actorId, changeReason: "Assunto solto por decisão humana." });
+        showNotification("success", "Assunto solto em nova versão da Definição do artigo, confirmada pelo servidor.");
+        return;
+      }
+      const article = articlesList.find(item => item.id === anchor.ref);
+      if (!article) throw new Error("O artigo não está mais na mesa.");
+      const entry = articleDnaEntryFor({ articleId: articleEntityIdFor(article), candidateRef: article.candidateRef });
+      if (entry.version && entry.key) {
+        const result = detachSubjectFromArticleDna(entry.version.payload);
+        if (article.candidateRef) await persistWorkingSubjectAnchor({ candidateRef: article.candidateRef, subjectKeywordId: null, holderKeywordId: null, actorId });
+        if (!result.changed) return;
+        await persistArticleSubjectVersion({ articleKey: entry.key, current: entry.version, payload: result.value, actorId, changeReason: "Assunto solto por decisão humana." });
+        showNotification("success", "Assunto solto em nova versão da Definição do artigo, confirmada pelo servidor. Ele volta para Keywords não agrupadas se não sustentar outro artigo.");
+        return;
+      }
+      if (article.candidateRef) {
+        await persistWorkingSubjectAnchor({ candidateRef: article.candidateRef, subjectKeywordId: null, holderKeywordId: null, actorId });
+        showNotification("success", "Assunto solto da formação, confirmado no readback da cópia de trabalho.");
+      }
+    } catch (error) {
+      showNotification("error", error instanceof Error ? error.message : "O Assunto não pôde ser solto.");
+    } finally {
+      setSubjectBusy(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBrandId, sessionStatus, session?.user?.id, acceptedArticleDnas, acceptedSiloDnas, siloPageSiloIds, articlesList, articleDnaEntryFor, persistSiloSubjectVersion, persistArticleSubjectVersion, persistWorkingSubjectAnchor, showNotification]);
+
+  const confirmSiloSubjectSuggestion = useCallback(async (articleRef: string) => {
+    await attachSubjectToUnit({ ref: articleRef, kind: "article" });
+  }, [attachSubjectToUnit]);
+
+  /**
+   * As sustentações marcadas viram um artigo novo em torno do Assunto
+   * (F2.4 passo 2). A principal sai entre as marcadas, pela regra da
+   * formação; o Assunto fica como tronco, fora de `clusterId` e do teto.
+   */
+  const confirmSubjectSupport = useCallback(async (keywordIds: string[]) => {
+    if (!selectedBrandId || !selectedSubjectRow) return;
+    const actorId = authenticatedArchitectActor({ sessionStatus, actorUserId: session?.user?.id, brandId: selectedBrandId });
+    if (!actorId) {
+      showNotification("error", "Formar o artigo em torno do Assunto é ato humano e exige a sessão autenticada.");
+      return;
+    }
+    const subjectKeywordId = String(selectedSubjectRow.id);
+    const marcadas: ArticleFormationKeyword[] = keywordIds.flatMap(keywordId => {
+      const row = masterList.find(keyword => String(keyword.id) === keywordId);
+      if (!row) return [];
+      const dna = dnaSignalsByKeyword.get(keywordId);
+      return [{
+        keywordId,
+        keyword: String(row.keyword || ""),
+        intent: dna?.intent ?? null,
+        volume: row.volume_search ?? null,
+        kgr: row.kgr ?? null,
+        entity: dna?.centralEntity ?? null,
+        problem: row.analise_semantica?.problema_percebido || null,
+        semanticState: dna?.semanticState ?? null,
+        modifiers: dna?.modifiers ?? [],
+        confidence: dna?.confidence ?? null,
+        dnaVersionId: dna?.dnaVersionId ?? null,
+        dnaContentHash: dna?.dnaContentHash ?? null,
+        isPublished: Boolean(row.isPublished),
+        ...(subjectSets.heldOut.has(keywordId) ? { subjectHeldOut: true } : {}),
+      }];
+    });
+    const siloRefOf = (keywordId: string) => {
+      const ref = masterList.find(keyword => String(keyword.id) === keywordId)?.territoryRef;
+      return typeof ref === "string" && confirmedTerritoryRefs.has(ref) ? ref : null;
+    };
+    const territorio = remoteTerritories.find(item => item.territoryRef === siloRefOf(keywordIds[0] || ""))?.territory ?? null;
+    const siloSlug = territorio ? territorio.slugState.publishedSlug || territorio.slugState.confirmed || territorio.slugState.proposals?.[0]?.slug || null : null;
+    const plano = planSubjectSupportFormation({
+      subjectKeywordId,
+      marked: marcadas,
+      siloRefOf,
+      keywords: formationKeywordItems,
+      memberKeywordIds: subjectSupportMemberIds,
+      siloTokens: territorio
+        ? siloContextTokens({ name: territorio.name || territorio.centralEntity || "", centralEntity: territorio.centralEntity, slug: siloSlug ? (siloSlug.startsWith("/") ? siloSlug : `/${siloSlug}`) : null })
+        : undefined,
+      mintUuid: crypto.randomUUID(),
+      decidedAt: new Date().toISOString(),
+    });
+    if (!plano.ok) {
+      showNotification("error", plano.reason);
+      return;
+    }
+    // O Assunto precisa caber no artigo ANTES de gravar a formação.
+    const assunto = planSubjectAttachment({
+      brandId: selectedBrandId, keyword: selectedSubjectRow, actorUserId: actorId, attachedAt: new Date().toISOString(),
+      target: {
+        principalKeywordId: plano.principalKeywordId,
+        keywords: plano.patches.map(patch => ({ keywordId: patch.keywordId, role: patch.assignment.articleFormationDecision.role })),
+      },
+    });
+    if (!assunto.ok) {
+      showNotification("error", assunto.reason);
+      return;
+    }
+    // O vínculo vai na MESMA escrita da formação, no item da principal: ou os
+    // dois são gravados, ou nenhum.
+    const vinculo = planWorkingSubjectAnchorWrites({
+      candidateRef: plano.formationRef,
+      subjectKeywordId: assunto.subjectKeywordId,
+      holderKeywordId: plano.principalKeywordId,
+      items: formationKeywordItems,
+      persisted: persistedSubjectAnchors,
+      actorUserId: actorId,
+      attachedAt: new Date().toISOString(),
+    });
+    if (!vinculo.ok) {
+      showNotification("error", vinculo.reason);
+      return;
+    }
+    const vinculoNaFormacao = new Map(vinculo.writes.map(write => [write.keywordId, write.assignment as Record<string, unknown>]));
+    const gravado = await applyFormationPlan({ patches: plano.patches, refusals: [] }, "Artigo formado em torno do Assunto", [plano.formationRef], vinculoNaFormacao);
+    if (!gravado) return;
+    setWorkingSubjectAnchor(plano.formationRef, assunto.subjectKeywordId);
+    setSubjectSupportOpen(false);
+    showNotification("success", `O artigo foi formado em torno do Assunto "${assunto.subject.phrase}", e o vínculo foi gravado com a formação. O Assunto vai para a Definição do artigo quando a formação for concluída.`);
+  }, [selectedBrandId, selectedSubjectRow, sessionStatus, session?.user?.id, masterList, dnaSignalsByKeyword, subjectSets, confirmedTerritoryRefs, remoteTerritories, formationKeywordItems, subjectSupportMemberIds, persistedSubjectAnchors, applyFormationPlan, setWorkingSubjectAnchor, showNotification]);
 
   /**
    * Secundária ↔ reforço narrativo — sem mover a busca de artigo.
@@ -11402,8 +12116,54 @@ export default function ArquitetoPage() {
          * marcador, e a materialização espera o Silo. Nada é inventado: o
          * ArticleDNA simplesmente não nasce ainda.
          */
+        /*
+         * F2.3 — O ASSUNTO VAI JUNTO, e nunca some em silêncio.
+         *
+         * Preso na formação desta sessão: o `subject` é montado pelo pacote
+         * aprovado (`planSubjectAttachment`), com o humano como autor. Já
+         * gravado na última Definição e não solto: segue a mesma snapshot.
+         * O payload acima é montado do zero, então sem este passo reconcluir
+         * apagaria o Assunto.
+         */
+        let artigoDaFormacao: ArticleDNA = { ...confirmado, classification: classificacao };
+        const assuntoPreso = aprovado.subjectKeywordId ?? null;
+        const assuntoGravado = acceptedArticleDnas[articleId]?.payload.subject ?? null;
+        if (assuntoPreso || assuntoGravado) {
+          let subject = assuntoGravado;
+          if (assuntoPreso && assuntoGravado?.keywordId !== assuntoPreso) {
+            const linhaDoAssunto = masterList.find(item => String(item.id) === assuntoPreso);
+            const plano = linhaDoAssunto
+              ? planSubjectAttachment({
+                brandId: selectedBrandId,
+                keyword: linhaDoAssunto,
+                actorUserId: actorId,
+                attachedAt: new Date().toISOString(),
+                target: {
+                  principalKeywordId: artigoDaFormacao.principalKeywordId,
+                  keywords: artigoDaFormacao.keywordReferences.map(reference => ({ keywordId: String(reference.keywordId), role: String(reference.role) })),
+                  excludedSubjects: artigoDaFormacao.excludedSubjects,
+                },
+              })
+              : null;
+            if (!plano?.ok) {
+              showNotification("warning", `Um artigo não foi concluído: o Assunto preso não pôde ir para a Definição do artigo (${plano ? plano.reason : "a keyword do Assunto não está mais na mesa"}). Solte o Assunto ou resolva no Minerador.`);
+              continue;
+            }
+            subject = plano.subject;
+          }
+          if (subject) {
+            const comAssunto = attachSubjectToArticleDna(artigoDaFormacao, subject, {
+              principalVolumeValidated: subjectStandings.get(subject.keywordId)?.volumeValidated === true,
+            });
+            if (!comAssunto.ok) {
+              showNotification("warning", `Um artigo não foi concluído: ${comAssunto.reason}`);
+              continue;
+            }
+            artigoDaFormacao = comAssunto.value;
+          }
+        }
         const vinculo = bindArticleParentForMaterialization({
-          article: { ...confirmado, classification: classificacao },
+          article: artigoDaFormacao,
           siloVersions: Object.values(acceptedSiloDnas),
           stage: estagio,
         });
@@ -11442,9 +12202,14 @@ export default function ArquitetoPage() {
          */
         const canonicaAprovada = articleVersionAuthorities.get(articleId)?.canonical ?? null;
         const diffEditorial = articleEditorialDiff({ canonical: canonicaAprovada?.payload ?? null, candidate: payload });
+        // O Assunto ainda não está na lista de decisões do diff: prendê-lo ou
+        // soltá-lo também é revisão real, pela comparação do próprio domínio.
+        const assuntoMudou = !sameDeclaredSubject(canonicaAprovada?.payload.subject ?? null, payload.subject ?? null);
         if (!diffEditorial.substantive) {
-          semDiff.push({ articleId, reason: diffEditorial.reason });
-          continue;
+          if (!assuntoMudou) {
+            semDiff.push({ articleId, reason: diffEditorial.reason });
+            continue;
+          }
         }
 
         // Reconfirmar não é criar de novo: se este agrupamento já virou
@@ -11513,7 +12278,7 @@ export default function ArquitetoPage() {
         : `${semDiff.length} artigo(s) já representados pelo ArticleDNA aprovado: nenhuma versão nova foi necessária.`);
     }
     return { criados, aguardandoSilo };
-  }, [selectedBrandId, sessionStatus, session?.user?.id, masterList, acceptedArticleDnas, acceptedSiloDnas, articleVersionAuthorities, addVersionEvents, showNotification]);
+  }, [selectedBrandId, sessionStatus, session?.user?.id, masterList, acceptedArticleDnas, acceptedSiloDnas, articleVersionAuthorities, addVersionEvents, showNotification, subjectStandings]);
 
   /**
    * Confirmar formação — registra a decisão humana sobre o agrupamento.
@@ -12085,6 +12850,9 @@ export default function ArquitetoPage() {
             reasons: par.reasons,
           })),
         serpGates: articleSerpGates,
+        // Q7 — Assunto como principal só com Volume validado no pacote aprovado.
+        subjectVolumeValidated: new Map([...subjectStandings].map(([keywordId, standing]) => [keywordId, standing.volumeValidated])),
+        subjectLabels: new Map([...subjectStandings].filter(([, standing]) => standing.declared).map(([keywordId, standing]) => [keywordId, standing.phrase])),
       });
       setConclusionGates(portaria.gates);
       if (!portaria.ok) {
@@ -12371,7 +13139,7 @@ export default function ArquitetoPage() {
     } finally {
       setFormationBusy(false);
     }
-  }, [selectedBrandId, articleFormationMarker, articleFormationUniverses, articleFormationBase, articleSerpGates, candidateGuards, unresolvedClassificationsByCandidate, materializeApprovedArticleDnas, materializeLegacyArticleSiloIds, masterList, showNotification]);
+  }, [selectedBrandId, articleFormationMarker, articleFormationUniverses, articleFormationBase, articleSerpGates, candidateGuards, unresolvedClassificationsByCandidate, materializeApprovedArticleDnas, materializeLegacyArticleSiloIds, masterList, showNotification, subjectStandings]);
 
 
   /**
@@ -13014,7 +13782,7 @@ export default function ArquitetoPage() {
   }, [acceptedSiloDnas, activeLogicalTask, articlePhaseProcessStates, confirmArticleFormation, generatingStrategic, handleRevalidateStructure, handleValidateSerp, linksApprovedGraph, linksIsDirty, linksLoading, linksWorkingCopy, pendingSiloReview, selectedArticleIds.size, serpProgress, siloConsolidating, siloReviewBusy, siloWorkingCopies.length, territorialAvailability, workspaceMode]);
   const contextSummary = workspaceMode === "articles"
     ? activeProcess === "logic"
-      ? activeLogicalTask ? `${activeLogicalTask.message || "Processando grupos"} · ${activeLogicalTask.current ?? 0}/${activeLogicalTask.total ?? masterList.length}` : [`${ungroupedArticleKeywords.length} keyword(s) sem grupo`, `${siloCandidateKeywords.length} candidata(s) a Silo reservada(s)`, `${articlePipeline.counts.eligible} elegível(is)`, `${articlePipeline.counts.awaiting_silo_confirmation} aguardando confirmação do Silo`, `${articlePipeline.counts.awaiting_silo} aguardando definição de Silo`, `${articlePipeline.counts.reserved_silo_head} reservada(s) para a página do Silo`].join(" · ")
+      ? activeLogicalTask ? `${activeLogicalTask.message || "Processando grupos"} · ${activeLogicalTask.current ?? 0}/${activeLogicalTask.total ?? masterList.length}` : [`${visibleUngroupedArticleKeywords.length} keyword(s) sem grupo`, `${siloCandidateKeywords.length} candidata(s) a Silo reservada(s)`, `${articlePipeline.counts.eligible} elegível(is)`, `${articlePipeline.counts.awaiting_silo_confirmation} aguardando confirmação do Silo`, `${articlePipeline.counts.awaiting_silo} aguardando definição de Silo`, `${articlePipeline.counts.reserved_silo_head} reservada(s) para a página do Silo`].join(" · ")
       : activeProcess === "serp"
         ? serpBusy ? `SERP em andamento · ${serpProgress || "consultas iniciadas"}` : `${serpAssessments.length} avaliação(ões) observacional(is) concluída(s) · ${serpConflictCount} conflito(s) registrado(s)`
         : activeProcess === "ai"
@@ -14557,19 +15325,55 @@ export default function ArquitetoPage() {
             </div>
           </section>
         )}
-        {workspaceMode === "articles" && ungroupedArticleKeywords.length > 0 && (
+        {workspaceMode === "articles" && (subjectFilterEntries.length > 0 || anchoredSubjectRows.length > 0) && (
+          <SubjectFilterPanel
+            entries={subjectFilterEntries}
+            selectedKeywordId={activeSubjectFilter}
+            anchors={selectedSubjectAnchors}
+            siloSuggestions={selectedSubjectSiloSuggestions}
+            busy={subjectBusy || formationBusy}
+            buttonClassName={ARCHITECT_UI.toolbarButton}
+            primaryButtonClassName={ARCHITECT_UI.primaryButton}
+            onSelect={setSubjectFilterKeywordId}
+            onOpenAttach={() => setSubjectAttachOpen(true)}
+            onOpenSupport={() => setSubjectSupportOpen(true)}
+            onDetach={anchor => { void detachSubjectAnchor(anchor); }}
+            onConfirmSiloSuggestion={ref => { void confirmSiloSubjectSuggestion(ref); }}
+          />
+        )}
+        {workspaceMode === "articles" && anchoredSubjectRows.length > 0 && (
+          <section className="border-b border-context-accent/30 bg-surface-subtle px-4 py-3" data-testid="architect-anchored-subjects">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-bold uppercase tracking-widest text-context-accent">Assuntos como tronco · {anchoredSubjectRows.length}</span>
+              <span className="text-sm text-text-muted">Não são keywords não agrupadas: os artigos já os sustentam</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {anchoredSubjectRows.map(item => (
+                <div key={item.keywordId} className="flex flex-wrap items-center gap-2 rounded-md border border-divider bg-surface px-3 py-2 text-sm">
+                  <span className="font-medium text-keyword">{item.phrase}</span>
+                  <SubjectConservationBadge label={item.label} tone="trunk" testId="architect-subject-trunk" />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        {workspaceMode === "articles" && visibleUngroupedArticleKeywords.length > 0 && (
           <section className="border-b border-warning/35 bg-warning/10 px-4 py-4">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-bold uppercase tracking-widest text-warning">Keywords não agrupadas · {ungroupedArticleKeywords.length}</span>
+              <span className="text-sm font-bold uppercase tracking-widest text-warning">Keywords não agrupadas · {visibleUngroupedArticleKeywords.length}</span>
               <span className="text-sm text-text-muted">Sem agrupamento inferido durante a recuperação</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {ungroupedArticleKeywords.map(keyword => (
-                <div key={String(keyword.id)} className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
-                  <span className="font-medium text-keyword" title="Keyword preservada sem vínculo recuperável com artigo ou grupo">{keyword.keyword}</span>
-                  {keyword.siloCandidate?.status !== "candidate" && <button type="button" onClick={() => updateSiloCandidateDecision(keyword, "candidate", "Humano marcou a keyword como candidata a Silo.")} className="rounded border border-warning/50 px-2 py-1 text-xs font-semibold text-warning hover:bg-warning/15">Reservar como candidata</button>}
-                </div>
-              ))}
+              {visibleUngroupedArticleKeywords.map(keyword => {
+                const selo = ungroupedSubjectLabels.get(String(keyword.id)) ?? null;
+                return (
+                  <div key={String(keyword.id)} className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
+                    <span className="font-medium text-keyword" title="Keyword preservada sem vínculo recuperável com artigo ou grupo">{keyword.keyword}</span>
+                    {selo && <SubjectConservationBadge label={selo} tone="awaiting" testId="architect-subject-awaiting" />}
+                    {keyword.siloCandidate?.status !== "candidate" && <button type="button" onClick={() => updateSiloCandidateDecision(keyword, "candidate", "Humano marcou a keyword como candidata a Silo.")} className="rounded border border-warning/50 px-2 py-1 text-xs font-semibold text-warning hover:bg-warning/15">Reservar como candidata</button>}
+                  </div>
+                );
+              })}
             </div>
           </section>
         )}
@@ -16177,7 +16981,7 @@ export default function ArquitetoPage() {
         description="A elegibilidade é verificada no estado canônico da Brand. Keywords aprovadas e publicadas protegidas podem entrar uma única vez no novo fluxo."
         rows={keywordImportPool}
         label={keyword => keyword.keyword}
-        details={keyword => <span className="mt-1 block text-slate-500">{keyword.intent || "Intenção não informada"} · volume {keyword.volume_search == null ? "—" : keyword.volume_search.toLocaleString("pt-BR")} · {keyword.siloName || "Sem silo/categoria"}{(keyword.importability === CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED || !canEnterCanonicalArchitectWorkflow(keyword)) && <span className="mt-1 block text-amber-300">{importabilityReason(keyword)}</span>}</span>}
+        details={keyword => { const assunto = keyword.subjectLabel || architectureKeywordVinculos.get(String(keyword.id))?.subjectLabel || null; return <span className="mt-1 block text-text-muted">{keyword.intent || "Intenção não informada"} · volume {keyword.volume_search == null ? "—" : keyword.volume_search.toLocaleString("pt-BR")} · {keyword.siloName || "Sem silo/categoria"}{assunto && <span className="mt-1 block text-sm font-medium text-context-accent" data-testid="architect-import-subject">{assunto}</span>}{(keyword.importability === CANONICAL_IMPORTABILITY.PUBLISHED_PROTECTED || !canEnterCanonicalArchitectWorkflow(keyword)) && <span className="mt-1 block text-warning">{importabilityReason(keyword)}</span>}</span>; }}
         disabled={keyword => !canEnterCanonicalArchitectWorkflow(keyword)}
         disabledReason={keyword => importabilityReason(keyword)}
         status={keyword => importabilityStatus(keyword)}
@@ -16187,6 +16991,32 @@ export default function ArquitetoPage() {
         onClose={() => setKeywordImportOpen(false)}
         onImport={importApprovedKeywords}
       />
+      {subjectAttachOpen && selectedSubjectEntry && (
+        <SubjectAttachDialog
+          open
+          subjectPhrase={selectedSubjectEntry.phrase}
+          options={subjectAttachChoices}
+          busy={subjectBusy}
+          buttonClassName={ARCHITECT_UI.toolbarButton}
+          primaryButtonClassName={ARCHITECT_UI.primaryButton}
+          onAttach={option => { void attachSubjectToUnit(option); }}
+          onClose={() => setSubjectAttachOpen(false)}
+        />
+      )}
+      {subjectSupportOpen && selectedSubjectEntry && (
+        <SubjectSupportDialog
+          open
+          subjectPhrase={selectedSubjectEntry.phrase}
+          subjectNote={selectedSubjectEntry.note}
+          suggestions={subjectSupportSuggestions}
+          siloLabels={subjectSupportSiloLabels}
+          busy={subjectBusy || formationBusy}
+          buttonClassName={ARCHITECT_UI.toolbarButton}
+          primaryButtonClassName={ARCHITECT_UI.primaryButton}
+          onConfirm={keywordIds => { void confirmSubjectSupport(keywordIds); }}
+          onClose={() => setSubjectSupportOpen(false)}
+        />
+      )}
       <DeleteConfirmation open={keywordDeleteSimpleOpen} title="Excluir keywords não publicadas?"
         description="Esta ação excluirá definitivamente as KeywordDNAs selecionadas e os dados operacionais não publicados que pertencem a elas. Versões e eventos canônicos permanecem preservados."
         confirmationName={keywordDeleteReview?.confirmationName || ""} impact={keywordDeleteReview?.impact || []} confirmLabel="Excluir definitivamente"

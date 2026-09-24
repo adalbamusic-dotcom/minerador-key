@@ -1,5 +1,6 @@
 import type { RadarR6ExpertTopicContext } from "./r6-sequential.ts";
 import type { RadarR7TopicSuggestion } from "./r7-sequential.ts";
+import { radarSubjectDeepeningRequest, radarSubjectReaderQuestion, radarSubjectReaderQuestionText } from "./declared-subject.ts";
 
 export const RADAR_EXPERT_BRIEF_STATUS_LABELS = {
   draft: "Rascunho",
@@ -102,10 +103,13 @@ export function buildRadarExpertBriefTelegramMessage(input: { title: string; que
     ? context.article as Record<string, unknown>
     : {};
   const principal = textValue(article.principal);
+  const assunto = radarExpertBriefSubjectOf(article);
+  const perguntaJaNumerada = assunto ? questions.some(question => mesmaPergunta(question, assunto.question)) : false;
   const lines = [
     "Olá! Você foi convidado(a) a contribuir com uma pauta do Radar.",
     `Pauta: ${title.slice(0, 240)}`,
     ...(principal ? [`Tema: ${principal.slice(0, 240)}`] : []),
+    ...(assunto ? radarExpertBriefSubjectLines(assunto, { withQuestion: !perguntaJaNumerada }) : []),
     "",
     "Responda às perguntas abaixo com sua experiência prática. Se alguma não se aplicar, sinalize isso.",
     ...questions.map((question, index) => `${index + 1}. ${question}`),
@@ -113,6 +117,96 @@ export function buildRadarExpertBriefTelegramMessage(input: { title: string; que
     "Obrigado(a)! Sua resposta será revisada antes de entrar no relatório.",
   ];
   return lines.join("\n").slice(0, 3900);
+}
+
+/* ===================== O ASSUNTO PARA O ESPECIALISTA ===================== */
+
+/**
+ * O ASSUNTO QUE O ESPECIALISTA PRECISA VER — SDD do Assunto, F3.1.
+ *
+ * Com Assunto declarado no ArticleDNA, a pauta não pede só a principal: pede
+ * que o especialista aprofunde o Assunto e a virada que leva o leitor até ele.
+ * A mesma leitura serve o painel (contexto vivo, `articleDna`) e a mensagem
+ * do Telegram (contexto persistido na pauta, `radarContext.article`).
+ *
+ * Sem frase não há Assunto: `null`, e tudo fica como era. A nota e o destino
+ * são lidos só para quem opera; ao especialista vão a frase e uma pergunta.
+ *
+ * O ESPECIALISTA É DE FORA, E O TEXTO É SIMPLES. "Tronco", "virada" e
+ * "ArticleDNA" são palavras da casa: ao especialista vão "Tema a aprofundar"
+ * e a pergunta sobre o leitor. O `request` (texto da SDD) continua para quem
+ * opera por dentro: o prompt das pautas. A pauta do r7 leva no `text` a
+ * mesma pergunta simples, porque ela vira item numerado sem edição.
+ */
+export const RADAR_EXPERT_SUBJECT_LABEL = "Tema a aprofundar";
+
+export const RADAR_EXPERT_SUBJECT_QUESTION_LABEL = "Pergunta";
+
+/** A pergunta ao especialista, sem jargão: só a frase do Assunto. */
+export const radarExpertSubjectQuestion = (phrase: string) => radarSubjectReaderQuestion(phrase);
+
+export type RadarExpertBriefSubject = {
+  phrase: string;
+  note: string | null;
+  request: string;
+  question: string;
+};
+
+export function radarExpertBriefSubjectOf(article: unknown): RadarExpertBriefSubject | null {
+  const registro = article && typeof article === "object" && !Array.isArray(article) ? article as Record<string, unknown> : null;
+  const bruto = registro?.subject && typeof registro.subject === "object" && !Array.isArray(registro.subject)
+    ? registro.subject as Record<string, unknown>
+    : null;
+  const phrase = textValue(bruto?.phrase);
+  if (!phrase) return null;
+  return {
+    phrase,
+    note: textValue(bruto?.note) || null,
+    request: textValue(bruto?.request) || radarSubjectDeepeningRequest(phrase),
+    question: radarExpertSubjectQuestion(phrase.slice(0, 240)),
+  };
+}
+
+const semCaixaNemEspaco = (valor: string) => valor.replace(/\s+/g, " ").trim().toLowerCase();
+
+/** A pergunta do Assunto já está na lista numerada? Então ela não se repete no cabeçalho. */
+const mesmaPergunta = (texto: string, pergunta: string) => semCaixaNemEspaco(texto) === semCaixaNemEspaco(pergunta);
+
+/**
+ * As linhas da mensagem ao especialista: o tema e a pergunta, nada técnico.
+ * Quando a pergunta já vai numerada (a pauta do Assunto aprovada sem edição),
+ * o cabeçalho leva só o tema: a mesma pergunta não aparece duas vezes.
+ */
+export function radarExpertBriefSubjectLines(subject: RadarExpertBriefSubject, options: { withQuestion?: boolean } = {}): string[] {
+  return [
+    `${RADAR_EXPERT_SUBJECT_LABEL}: ${subject.phrase.slice(0, 240)}`,
+    ...(options.withQuestion === false ? [] : [`${RADAR_EXPERT_SUBJECT_QUESTION_LABEL}: ${subject.question}`]),
+  ];
+}
+
+/**
+ * O PEDIDO DO ASSUNTO NO PROMPT DAS PAUTAS — rota `radar-topics`.
+ *
+ * O contexto em JSON já leva `articleDna.subject`, e isso não basta: um campo a
+ * mais no JSON não diz à IA o que fazer com ele. Estas linhas citam a frase e a
+ * nota e pedem pautas que aprofundem o Assunto e a virada. A garantia continua
+ * no domínio (`parseRadarR7TopicResponse` acrescenta a pauta do Assunto quando
+ * nenhuma o cobre); o prompt é o pedido, não a garantia.
+ *
+ * Sem Assunto, lista vazia: o prompt do sistema fica byte a byte igual.
+ */
+export function radarExpertTopicsSubjectPromptLines(context: { articleDna: { subject?: unknown } }): string[] {
+  const assunto = radarExpertBriefSubjectOf(context.articleDna);
+  if (!assunto) return [];
+  return [
+    `O ArticleDNA declara um Assunto (tronco editorial): "${assunto.phrase.slice(0, 240)}".`,
+    ...(assunto.note ? [`Nota do Assunto: "${assunto.note.slice(0, 500)}".`] : []),
+    "A principal continua sendo a promessa do artigo; o Assunto e para onde o artigo faz a virada e leva o leitor.",
+    `Inclua pautas que aprofundem o Assunto e a virada para ele: ${assunto.request.slice(0, 500)}`,
+    `O campo text de cada pauta vai a um especialista externo, sem edicao: escreva em linguagem simples, sem as palavras Assunto, tronco, virada ou ArticleDNA. Exemplo: "${radarSubjectReaderQuestionText(assunto.phrase.slice(0, 240))}"`,
+    "Essas pautas usam origin ArticleDNA, need ligado a frase ou a nota do Assunto e reference com o rotulo do ArticleDNA presente na proveniencia.",
+    "Nao troque a principal pelo Assunto, nao reescreva o Assunto e nao invente fatos sobre ele.",
+  ];
 }
 
 export function questionFromRadarSuggestion(suggestion: RadarR7TopicSuggestion, index = 0): RadarExpertBriefQuestion {

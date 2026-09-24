@@ -143,6 +143,7 @@ export const WRITER_EVIDENCE_HEAD_SELECT = [
 
 const DossieSemBundleSchema = RadarWriterDossierSchema.omit({ bundle: true });
 const PendenciasSchema = ImportedRadarContextSchema.shape.pendingDecisions;
+const ContextoEditorialSchema = ImportedRadarContextSchema.shape.editorialContext;
 const PosicaoDaSerpSchema = z.object({
   authoritative: z.boolean(),
   current: z.boolean(),
@@ -254,6 +255,38 @@ export async function readWriterEvidenceHead(context: WriterEvidenceContext, doc
       "O documento está gravado fora do contrato atual; as evidências não são servidas sobre ele.");
   }
   return head;
+}
+
+/* ================== as linhas da virada (SDD do Assunto) ================== */
+
+/**
+ * AS LINHAS DA VIRADA que o envio grava com Assunto em
+ * `importedContext.editorialContext` (SDD do Assunto, F4.1; adendo F4.4):
+ * tronco, onde virar, seção da virada, direção do H1, destino e alerta.
+ * Fora do dossiê (invariante 78): o artigo-modelo não viaja no bundle.
+ *
+ * NÃO estão no cabeçalho comum: manifesto, fatias do `read_writer_evidence` e
+ * divergências leem o cabeçalho e não usam as linhas. Só quem as ENTREGA ao
+ * redator (fundamentos e material por seção) chama esta leitura, e só quando
+ * o ArticleDNA fixado tem Assunto — sem Assunto, nenhuma consulta a mais.
+ * Um caminho, na Marca do contexto: `[]` (2 B) em documento enviado antes, e
+ * < 2 kB com Assunto (nota de 280 caracteres e destino longo).
+ */
+export const WRITER_EDITORIAL_CONTEXT_SELECT = "c_editorialContext:payload->importedContext->editorialContext";
+
+export async function readWriterEditorialContext(context: WriterEvidenceContext, head: Pick<WriterEvidenceHead, "documentId" | "schemaVersion">): Promise<z.infer<typeof ContextoEditorialSchema>> {
+  if (head.schemaVersion !== 2) return [];
+  const { data, error } = await writerEvidenceClient(context).from("content_documents")
+    .select(WRITER_EDITORIAL_CONTEXT_SELECT)
+    .eq("id", head.documentId).eq("marca_id", context.brandId).maybeSingle();
+  if (error) writerEvidenceDatabaseFailure(error);
+  if (!data) throw new WriterEvidenceError("document_not_found", "Documento não encontrado nesta Marca.");
+  const lido = ContextoEditorialSchema.safeParse((data as unknown as Record<string, unknown>).c_editorialContext ?? undefined);
+  if (!lido.success) {
+    throw new WriterEvidenceError("document_incompatible",
+      "O documento está gravado fora do contrato atual; as evidências não são servidas sobre ele.");
+  }
+  return lido.data;
 }
 
 /* ======================= seções do dossiê por caminho ==================== */

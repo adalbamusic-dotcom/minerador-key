@@ -586,6 +586,8 @@ export function radarWriterBriefMarkdown(input: RadarWriterBriefInput): string {
     ...(editorial.openingOrHook ? ["", `Abertura: ${editorial.openingOrHook}`] : []),
     ...(editorial.conclusion ? ["", `Fechamento: ${editorial.conclusion}`] : []),
     ...(editorial.cta ? [`Chamada final: ${editorial.cta}`] : []),
+    /* SDD do Assunto, F3.1 · a direção para o destino, ao lado da chamada observada. */
+    ...(editorial.ctaDestination ? [`Destino da chamada: ${editorial.ctaDestination}`] : []),
   ];
 
   /*

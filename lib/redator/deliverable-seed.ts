@@ -35,7 +35,7 @@
 import type { ContentDocument } from "../arquiteto/contracts.ts";
 import { z } from "zod";
 import { novaCena } from "./script-scenes.ts";
-import type { RadarFoundations } from "./radar-foundations.ts";
+import { radarFoundationsSubjectOf, type RadarFoundations } from "./radar-foundations.ts";
 import type { WriterDeliverablePayload } from "./multiformat-contracts.ts";
 
 /* ============================== a fonte ============================== */
@@ -72,6 +72,12 @@ export function finalArticleText(document: Pick<ContentDocument, "status" | "blo
 const secao = (nome: string, itens: readonly string[]): string[] =>
   itens.length ? [`${nome}:`, ...itens.map(item => `- ${item}`)] : [];
 
+/** O cabeçalho das linhas do Assunto no contexto da semeadura (F4.2). */
+export const SEED_SUBJECT_SECTION_TITLE =
+  "Assunto (tronco) e virada — faça a virada da principal para o Assunto; onde virar é sugestão do Radar, a decisão é de quem redige; não troque nem remova o Assunto";
+/** Linhas do envio sem a do tronco: entram, mas não se apresentam como Assunto. */
+export const SEED_EDITORIAL_CONTEXT_SECTION_TITLE = "Contexto editorial do envio do Radar";
+
 /**
  * O contexto de produção, em linhas. Texto e não JSON de propósito: o modelo lê
  * melhor, e o que sai daqui aparece inteiro no log quando alguém precisar
@@ -87,6 +93,15 @@ export function seedContextLines(source: SeedSource): string[] {
   if (f.keyword.principal) linhas.push(`Keyword principal: ${f.keyword.principal}`);
   if (f.keyword.secondary.length) linhas.push(`Keywords secundárias: ${f.keyword.secondary.join(" · ")}`);
   if (f.keyword.reinforcements.length) linhas.push(`Reforços narrativos: ${f.keyword.reinforcements.join(" · ")}`);
+
+  /*
+   * SDD do Assunto, F4.2 · as linhas do envio, pela MESMA projeção que o
+   * painel mostra. Roteiro e carrossel também fazem a virada da principal
+   * para o Assunto. Sem Assunto, a projeção não traz a chave e o contexto
+   * sai como era, linha por linha.
+   */
+  const linhasDoEnvio = f.editorialContext ?? [];
+  linhas.push(...secao(radarFoundationsSubjectOf(f) ? SEED_SUBJECT_SECTION_TITLE : SEED_EDITORIAL_CONTEXT_SECTION_TITLE, linhasDoEnvio));
 
   linhas.push(...secao("Recomendação editorial do Radar (recomendação, não obrigação)",
     f.recommendations.map(item => [item.label, item.objective, item.reason && `razão: ${item.reason}`]

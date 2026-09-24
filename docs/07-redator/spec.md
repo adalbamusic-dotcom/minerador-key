@@ -59,3 +59,14 @@ Esta é a regra de destino aprovada em 2026-09-18 e substitui a interpretação 
 - Prompts, imagens, retoques e texto devem estar vinculados ao artigo, bloco, cena ou slide correspondente.
 - O destino é Publicações e pós-produção. Não há integração de publicação direta em redes sociais neste escopo.
 - A implementação deve ser aditiva, preservar versões atuais e diferenciar `VERIFICADO_NO_CODIGO`, `CONFIRMADO_POR_TESTE`, `PERSISTENCIA_REMOTA`, `VALIDADO_MANUALMENTE`, `PENDENTE` e `BLOQUEADO`.
+
+## 23. Assunto declarado — 2026-09-24
+
+Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), F4.1 e F4.2, aprovada em 2026-09-24. Estado da implementação em `estado-atual.md`, mesma data.
+
+- O Assunto é o tronco que o humano declarou e o Arquiteto fixou em `ArticleDNA.subject` (`phrase`, `note`, `destinationUrl`). A keyword principal continua dona do slug, do KGR e do H1.
+- **Fundamentos:** com Assunto, a projeção do ArticleDNA leva `subject`, pela mesma leitura, sem cópia do dossiê (invariante 78). Sem Assunto, a projeção não muda.
+- **Estrutura:** o Redator decide onde fazer a virada e se o H1 leva o complemento do Assunto (invariante 48). As sugestões do Radar são sugestões.
+- **`writerMayNot`:** só com Assunto, ganha "trocar ou remover o Assunto declarado". Sem Assunto, a lista e o hash ficam iguais.
+- **Guardião:** com Assunto, avisa quando a frase ou os termos não aparecem em nenhum H2/H3 ou parágrafo e, havendo destino, quando falta link para ele. **Aviso, nunca bloqueio** (Q6). O resumo do Guardião no painel conta pelo relatório do servidor, que lê o Assunto. Estado da implementação em `estado-atual.md`.
+- **Painel e semeadura:** com Assunto, quem redige vê no painel dos fundamentos o Assunto, a virada sugerida, a direção do H1, o destino e o alerta. Roteiro e carrossel recebem as mesmas linhas, pela mesma projeção dos fundamentos (invariante 78). Sem Assunto, painel e semeadura não mudam.

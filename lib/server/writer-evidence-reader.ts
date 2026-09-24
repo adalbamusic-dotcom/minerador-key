@@ -68,7 +68,7 @@ import {
   type WriterManifestSourceRow,
   type WriterSliceRow,
 } from "@/lib/redator/writer-evidence-catalog";
-import { RADAR_WRITER_MAY_NOT } from "@/lib/redator/writer-handoff";
+import { RADAR_WRITER_MAY_NOT, radarWriterMayNotWithSubject } from "@/lib/redator/writer-handoff";
 import { WRITER_SECTION_BUNDLE_PATHS, type WriterSectionMaterial } from "@/lib/redator/writer-section-evidence";
 import {
   WriterEvidenceError,
@@ -76,6 +76,7 @@ import {
   callWriterEvidenceSliceRpc,
   isLegacyVersionReference,
   readWriterBundlePaths,
+  readWriterEditorialContext,
   readWriterEvidenceHead,
   writerEvidenceNow,
   type WriterEvidenceContext,
@@ -148,8 +149,16 @@ function posterior(head: WriterEvidenceHead, quando: string | null | undefined):
   return Number.isFinite(a) && Number.isFinite(b) && a > b;
 }
 
-const writerMayNotOf = (head: WriterEvidenceHead): readonly string[] =>
-  head.dossier?.writerMayNot?.length ? head.dossier.writerMayNot : RADAR_WRITER_MAY_NOT;
+/*
+ * SDD do Assunto, F4.1 · com o Assunto no ArticleDNA fixado (lido na projeção
+ * que já é feita), a proibição de trocá-lo ou removê-lo entra na lista. Sem
+ * Assunto, ou sem projeção, a lista é a de sempre.
+ */
+const writerMayNotOf = (head: WriterEvidenceHead, subject?: unknown): readonly string[] =>
+  radarWriterMayNotWithSubject(
+    head.dossier?.writerMayNot?.length ? head.dossier.writerMayNot : RADAR_WRITER_MAY_NOT,
+    subject && typeof subject === "object" ? subject as { phrase?: unknown } : null,
+  );
 
 function navegar(valor: unknown, caminho: readonly string[]): unknown {
   let atual: unknown = valor;
@@ -533,6 +542,12 @@ export type WriterFoundations = {
   conflicts: unknown[];
   limitations: unknown[];
   article: { versionId: string; contentHash: string | null; status: string | null; fields: Linha; invalidFields: string[] } | null;
+  /**
+   * SDD do Assunto, F4.1 · as linhas que o envio gravou com Assunto: onde
+   * virar, a seção da virada, a direção do H1, o destino e o alerta — a
+   * sugestão do Radar, com a decisão de quem escreve. Ausente sem elas.
+   */
+  editorialContext?: string[];
   specialist: unknown;
   video: { summary: unknown; sources: unknown[]; results: unknown[] } | null;
   competitors: Array<{ url: string | null; domain: string | null; title: string | null; bestRank: number | null; classification: string | null }>;
@@ -570,6 +585,8 @@ export async function readWriterFoundations(context: WriterEvidenceContext, docu
     ? await readWriterBundlePaths(context, head, [["conflicts"], ["limitations"], ["specialist"], ["video"], ["observed", "competitors"], ["observed", "questions"]])
     : new Map<string, unknown>();
   const projecao = await readWriterArticleProjection(context, head);
+  /* As linhas da virada só existem com Assunto: sem ele, nenhuma consulta a mais. */
+  const linhasDaVirada = projecao?.fields.subject ? await readWriterEditorialContext(context, head) : [];
   const ausentes: WriterFoundations["absent"] = [];
 
   const concorrentes = lista(lidos.get("observed.competitors")).map(registro).filter((item): item is Linha => Boolean(item))
@@ -610,7 +627,7 @@ export async function readWriterFoundations(context: WriterEvidenceContext, docu
     brandId: head.brandId,
     documentHash: head.contentHash,
     guards: WRITER_EVIDENCE_GUARDS,
-    writerMayNot: writerMayNotOf(head),
+    writerMayNot: writerMayNotOf(head, projecao?.fields.subject),
     hierarchy: WRITER_EVIDENCE_HIERARCHY,
     keywordContext: head.dossier?.keywordContext ?? null,
     radarOrigin: head.radarOrigin,
@@ -625,6 +642,8 @@ export async function readWriterFoundations(context: WriterEvidenceContext, docu
     article: projecao
       ? { versionId: projecao.meta.versionId, contentHash: projecao.meta.contentHash, status: projecao.meta.status, fields: projecao.fields, invalidFields: projecao.invalidFields }
       : null,
+    /* Só quando o envio gravou linhas: sem Assunto, os fundamentos ficam byte a byte como eram. */
+    ...(linhasDaVirada.length ? { editorialContext: [...linhasDaVirada] } : {}),
     specialist: lidos.get("specialist") ?? null,
     video: projecaoDoVideo,
     competitors: concorrentes,
@@ -1208,6 +1227,7 @@ export async function describeWriterEvidenceSource(
 export async function readWriterSectionMaterial(context: WriterEvidenceContext, head: WriterEvidenceHead): Promise<WriterSectionMaterial> {
   const lidos = head.dossier ? await readWriterBundlePaths(context, head, WRITER_SECTION_BUNDLE_PATHS) : new Map<string, unknown>();
   const projecao = await readWriterArticleProjection(context, head);
+  const linhasDaVirada = projecao?.fields.subject ? await readWriterEditorialContext(context, head) : [];
   const ausentes: WriterSectionMaterial["absent"][number][] = [];
   if (!head.dossier) ausentes.push({ field: "bundle", reason: head.schemaVersion === 1 ? "documento do Planejador (v1): sem dossiê do Radar" : "documento sem dossiê: não inferir evidências" });
   else if (head.dossier.researchProfile !== "GOOGLE") ausentes.push({ field: "questions/gaps/entities/claims", reason: `fotografia do Google ausente no perfil ${head.dossier.researchProfile}` });
@@ -1221,12 +1241,13 @@ export async function readWriterSectionMaterial(context: WriterEvidenceContext, 
     documentId: head.documentId,
     articleId: head.articleId,
     documentHash: head.contentHash,
-    writerMayNot: writerMayNotOf(head),
+    writerMayNot: writerMayNotOf(head, projecao?.fields.subject),
     keywordContext: head.dossier?.keywordContext ?? null,
     bundle: head.dossier
       ? { bundleId: head.dossier.bundleId, bundleHash: head.dossier.bundleHash, researchProfile: head.dossier.researchProfile, observedAt: head.bundleObservedAt, serpAuthoritative: head.serpStanding?.authoritative ?? null }
       : null,
     article: projecao ? { versionId: projecao.meta.versionId, contentHash: projecao.meta.contentHash, fields: projecao.fields } : null,
+    ...(linhasDaVirada.length ? { editorialContext: [...linhasDaVirada] } : {}),
     pendingDecisions: head.pendingDecisions,
     sections: Object.fromEntries(lidos),
     absent: ausentes,
