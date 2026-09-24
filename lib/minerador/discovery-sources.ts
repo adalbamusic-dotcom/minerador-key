@@ -19,6 +19,19 @@ export type DiscoverySourceEntryInput = {
   importedMetrics?: Partial<DiscoveryImportedMetrics> | null;
   recognizedFields?: string[];
   ignoredFields?: string[];
+  /**
+   * Só no import de Assunto (SDD 2026-09-24, F1.3): colunas opcionais `nota` e
+   * `pagina`. O parser só as preenche com `subjectColumns: true`; o Descobrir
+   * nunca pede isso e continua recebendo exatamente o que recebia.
+   */
+  note?: unknown;
+  destinationUrl?: unknown;
+};
+
+/** Opções do parser de CSV. Sem opções, a saída é a de sempre. */
+export type DiscoveryCsvParseOptions = {
+  /** Reconhece as colunas `nota` e `pagina` do import de Assunto. */
+  subjectColumns?: boolean;
 };
 
 export type NormalizedDiscoverySourceEntry = {
@@ -118,6 +131,14 @@ export function parseManualKeywords(value: string): DiscoverySourceEntryInput[] 
   return value.split(/[\n,;]+/).map(keyword => ({ keyword, recognizedFields: ["keyword"] }));
 }
 
+/**
+ * Lista colada de Assuntos: um por linha. Vírgula e ponto e vírgula não
+ * separam, porque o Assunto é uma frase ("SEO para clínicas, em São Paulo").
+ */
+export function parseManualSubjects(value: string): DiscoverySourceEntryInput[] {
+  return value.split(/\r?\n/).filter(line => line.trim()).map(keyword => ({ keyword, recognizedFields: ["keyword"] }));
+}
+
 function normalizeHeader(value: string) {
   return value.replace(/^\uFEFF/, "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -135,6 +156,24 @@ const aliases = {
   results: ["results", "resultados", "allintitle", "resultados allintitle"],
 } as const;
 
+/** Colunas do import de Assunto (F1.3). Só lidas com `subjectColumns: true`. */
+const subjectAliases = {
+  note: ["nota", "assunto nota", "para quem"],
+  destination: ["pagina", "pagina destino", "destino", "landing"],
+} as const;
+
+/**
+ * No import de Assunto, a coluna da frase também atende pelos nomes que uma
+ * lista de pautas costuma usar. Os aliases de keyword vêm primeiro: numa
+ * planilha com "Keyword" e "Tema", vale "Keyword". Sem `subjectColumns`, o
+ * Descobrir continua reconhecendo só `aliases.keyword`.
+ */
+const subjectPhraseAliases = [...aliases.keyword, "assunto", "assuntos", "tema", "titulo", "título"] as const;
+
+function phraseAliases(options: DiscoveryCsvParseOptions): readonly string[] {
+  return options.subjectColumns ? subjectPhraseAliases : aliases.keyword;
+}
+
 function findField(record: Record<string, unknown>, keys: readonly string[]) {
   const normalized = new Map(Object.keys(record).map(key => [normalizeHeader(key), key]));
   for (const alias of keys) {
@@ -144,13 +183,13 @@ function findField(record: Record<string, unknown>, keys: readonly string[]) {
   return null;
 }
 
-export function parseDiscoveryCsvRecords(records: Array<Record<string, unknown>>) {
+export function parseDiscoveryCsvRecords(records: Array<Record<string, unknown>>, options: DiscoveryCsvParseOptions = {}) {
   const entries: DiscoverySourceEntryInput[] = [];
   const recognized = new Set<string>();
   const ignored = new Set<string>();
   for (const record of records) {
     if (!record || typeof record !== "object" || Array.isArray(record)) continue;
-    const keywordField = findField(record, aliases.keyword);
+    const keywordField = findField(record, phraseAliases(options));
     const listField = findField(record, aliases.lista);
     const locationField = findField(record, aliases.location);
     const intentField = findField(record, aliases.intent);
@@ -160,7 +199,9 @@ export function parseDiscoveryCsvRecords(records: Array<Record<string, unknown>>
     const competitionField = findField(record, aliases.competition);
     const competitionIndexField = findField(record, aliases.competitionIndex);
     const resultsField = findField(record, aliases.results);
-    const fields = [keywordField, listField, locationField, intentField, funnelField, volumeField, cpcField, competitionField, competitionIndexField, resultsField].filter((field): field is { key: string; value: unknown } => Boolean(field));
+    const noteField = options.subjectColumns ? findField(record, subjectAliases.note) : null;
+    const destinationField = options.subjectColumns ? findField(record, subjectAliases.destination) : null;
+    const fields = [keywordField, listField, locationField, intentField, funnelField, volumeField, cpcField, competitionField, competitionIndexField, resultsField, noteField, destinationField].filter((field): field is { key: string; value: unknown } => Boolean(field));
     fields.forEach(field => recognized.add(field.key));
     Object.keys(record).filter(key => !fields.some(field => field.key === key)).forEach(key => ignored.add(key));
     entries.push({
@@ -178,6 +219,7 @@ export function parseDiscoveryCsvRecords(records: Array<Record<string, unknown>>
       },
       recognizedFields: fields.map(field => field.key),
       ignoredFields: Object.keys(record).filter(key => !fields.some(field => field.key === key)),
+      ...(options.subjectColumns ? { note: noteField?.value, destinationUrl: destinationField?.value } : {}),
     });
   }
   return { entries, recognizedFields: [...recognized], ignoredFields: [...ignored] };
@@ -194,14 +236,14 @@ export function parseDiscoveryCsvRecords(records: Array<Record<string, unknown>>
  * is treated as a header only when the file has more than one column, or when
  * the single column explicitly uses a recognized keyword header.
  */
-export function parseDiscoveryCsvRows(rows: unknown[][]) {
+export function parseDiscoveryCsvRows(rows: unknown[][], options: DiscoveryCsvParseOptions = {}) {
   const nonEmptyRows = rows.filter(row => Array.isArray(row) && row.some(value => text(value)));
   if (!nonEmptyRows.length) return { entries: [], recognizedFields: [], ignoredFields: [], rowCount: 0 };
 
   const isSingleColumn = nonEmptyRows.every(row => row.length <= 1 || row.slice(1).every(value => !text(value)));
   if (isSingleColumn) {
     const firstValue = text(nonEmptyRows[0]?.[0]);
-    const hasKeywordHeader = aliases.keyword.some(alias => normalizeHeader(alias) === normalizeHeader(firstValue));
+    const hasKeywordHeader = phraseAliases(options).some(alias => normalizeHeader(alias) === normalizeHeader(firstValue));
     const dataRows = hasKeywordHeader ? nonEmptyRows.slice(1) : nonEmptyRows;
     const entries: DiscoverySourceEntryInput[] = dataRows.map(row => ({ keyword: row[0], recognizedFields: ["Keyword"] }));
     return {
@@ -215,7 +257,7 @@ export function parseDiscoveryCsvRows(rows: unknown[][]) {
   const [headerRow, ...dataRows] = nonEmptyRows;
   const headers = headerRow.map((value, index) => text(value) || `Coluna ${index + 1}`);
   const records = dataRows.map(row => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])));
-  const parsed = parseDiscoveryCsvRecords(records);
+  const parsed = parseDiscoveryCsvRecords(records, options);
   return { ...parsed, rowCount: dataRows.length };
 }
 

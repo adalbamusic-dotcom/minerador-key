@@ -68,5 +68,10 @@ export async function writerSeedDocument(brandId: string, documentId: string): P
     throw new WriterDeliverableError("document_changed",
       "O pacote do Radar deste documento mudou durante a leitura. Tente de novo.", 409);
   }
-  return { document: head.document, foundations: radarFoundationsOfDossier(dossier), contentHash: head.contentHash };
+  /* As linhas do envio (Assunto, F4.2) vêm do cabeçalho, pela mesma projeção do painel. */
+  return {
+    document: head.document,
+    foundations: radarFoundationsOfDossier(dossier, { editorialContext: head.editorialContext }),
+    contentHash: head.contentHash,
+  };
 }

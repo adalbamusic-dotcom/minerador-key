@@ -44,7 +44,7 @@ import { assertRadarEvidenceBundleIntegrity, radarEvidenceBundleMatchesArticle, 
 import type { RadarPlannerHandoffReadiness } from "../radar/planner-handoff.ts";
 import { ContentDocumentSchema, type ArticleDNA, type ContentDocument, type SiloDNA, type VersionEnvelope } from "../arquiteto/contracts.ts";
 import { buildRadarDocument, radarDocumentId, radarWriterDocumentIdentity, resolveRadarImportEligibility, type RadarImportOutcome } from "../redator/radar-import.ts";
-import { RADAR_WRITER_MAY_NOT } from "../redator/writer-handoff.ts";
+import { radarWriterMayNotFor } from "../redator/writer-handoff.ts";
 import { RadarStartError, radarStartPorts } from "./radar-youtube-start.ts";
 import { resolveRadarCanonicalDossier } from "./radar-canonical-dossier.ts";
 import { RADAR_NO_AUTHORITIES, loadRadarCanonicalAuthorities, type RadarCanonicalAuthorities } from "./radar-canonical-authorities.ts";
@@ -349,8 +349,12 @@ export async function sendRadarToWriter(entrada: {
     sentAt: entregueAntes?.importedAt || entrada.sentAt,
     sentBy: entregueAntes?.importedBy || entrada.actorId,
     previousBundleHash: null,
-    /* §12 · as invariantes viajam com o pacote, não só no documento. */
-    writerMayNot: [...RADAR_WRITER_MAY_NOT],
+    /*
+     * §12 · as invariantes viajam com o pacote, não só no documento. Com
+     * Assunto no ArticleDNA fixado (SDD do Assunto, F4.1), a proibição de
+     * trocá-lo ou removê-lo vai junto — a MESMA lista gravada no documento.
+     */
+    writerMayNot: [...radarWriterMayNotFor(identidade.article.payload.subject ?? null)],
     documentId,
     bundle,
   });
@@ -455,6 +459,8 @@ export async function sendRadarToWriter(entrada: {
     keywordDnaRefs: partes.keywordDnaRefs,
     actorUserId: entrada.actorId,
     now: entrada.sentAt,
+    /* O Assunto da MESMA versão do ArticleDNA que a identidade fixa (F4.1). */
+    subject: identidade.article.payload.subject ?? null,
   }));
 
   await portas.createDocument({

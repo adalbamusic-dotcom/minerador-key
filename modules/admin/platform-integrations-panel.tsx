@@ -6,7 +6,7 @@ import type { IntegrationAdminHealthCheck, PlatformIntegrationsSnapshot } from "
 import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL } from "@/lib/deepseek-model-config";
 import { useNoticeBridge } from "@/components/global-notice-center";
 
-const capabilityOperations = ["ai_generation", "keyword_discovery", "keyword_metrics", "allintitle", "serp_compatibility", "transactional_email", "speech_transcription", "storage_media", "youtube_video_metadata", "telegram_message_send", "telegram_file_fetch"] as const;
+const capabilityOperations = ["ai_generation", "keyword_discovery", "keyword_metrics", "allintitle", "serp_compatibility", "transactional_email", "speech_transcription", "storage_media", "youtube_video_metadata", "telegram_message_send", "telegram_file_fetch", "keyword_research"] as const;
 const environments = ["development", "test", "staging", "production"] as const;
 type IntegrationView = "overview" | "connections" | "agencies" | "usage";
 type SupportedProviderKey = "google_ads" | "dataforseo" | "deepseek" | "google_cloud" | "youtube_data" | "telegram";

@@ -6,6 +6,7 @@ import {
   RADAR_SPECIALIST_CONTRIBUTION_LABEL,
   type RadarEditorialBlueprint, type RadarSpecialistBrief, type RadarVideoBrief,
 } from "@/lib/radar/editorial-blueprint";
+import { RADAR_SUBJECT_TURN_SCREEN_LABEL, radarObservedSectionNumbers } from "./radar-subject-turn-view";
 
 /**
  * O DOSSIÊ EDITORIAL, EM LINGUAGEM DE REUNIÃO.
@@ -72,6 +73,8 @@ export function RadarBlueprintSummaryCard({ blueprint }: { blueprint: RadarEdito
 
 /** O blueprint aberto — §22. Leitura corrida, sem identificadores. */
 export function RadarBlueprintDetail({ blueprint }: { blueprint: RadarEditorialBlueprint }) {
+  /* A virada do Assunto não ganha número: é exigida, não um bloco da amostra (F3.1). */
+  const numeros = radarObservedSectionNumbers(blueprint.sections);
   return <div className="space-y-2.5" data-testid="radar-blueprint-detail">
     <div className={bloco}>
       <dl className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
@@ -97,13 +100,15 @@ export function RadarBlueprintDetail({ blueprint }: { blueprint: RadarEditorialB
       * "Por que entra" é o campo que transforma um sumário em decisão editorial
       * auditável: alguém pode discordar dele com evidência.
       */}
-    {blueprint.sections.map((item, index) => <div key={item.id} className={bloco} data-testid="radar-blueprint-section">
+    {blueprint.sections.map((item, index) => <div key={item.id} className={bloco} data-testid={numeros[index] === null ? "radar-blueprint-subject-turn" : "radar-blueprint-section"}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h4 className="text-sm font-semibold text-foreground">{index + 1}. {item.workingTitle}</h4>
-        <span className="text-xs text-text-muted">
-          <span className={TOM[item.priority]}>{RADAR_SECTION_PRIORITY_LABEL[item.priority]}</span>
-          {" · "}{RADAR_SECTION_PLACEMENT_LABEL[item.placement]}
-        </span>
+        <h4 className="text-sm font-semibold text-foreground">{numeros[index] === null ? item.workingTitle : <>{numeros[index]}. {item.workingTitle}</>}</h4>
+        {numeros[index] === null
+          ? <span className="text-sm font-medium text-context-accent" data-testid="radar-blueprint-subject-turn-label">{RADAR_SUBJECT_TURN_SCREEN_LABEL}</span>
+          : <span className="text-xs text-text-muted">
+            <span className={TOM[item.priority]}>{RADAR_SECTION_PRIORITY_LABEL[item.priority]}</span>
+            {" · "}{RADAR_SECTION_PLACEMENT_LABEL[item.placement]}
+          </span>}
       </div>
 
       <p className="mt-1 text-sm leading-6 text-text-muted">Por que entra: {item.purpose}</p>

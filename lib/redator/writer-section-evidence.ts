@@ -55,6 +55,12 @@ export type WriterSectionMaterial = {
   keywordContext: unknown;
   bundle: { bundleId: string; bundleHash: string; researchProfile: string; observedAt: string | null; serpAuthoritative: boolean | null } | null;
   article: { versionId: string; contentHash: string | null; fields: Linha } | null;
+  /**
+   * SDD do Assunto, F4.1 · as linhas que o envio gravou com Assunto (onde
+   * virar, seção da virada, direção do H1, destino, alerta). Opcional: sem
+   * elas, o pacote sai byte a byte como antes.
+   */
+  editorialContext?: readonly string[];
   pendingDecisions: readonly unknown[];
   /** Seções do dossiê pelo caminho pontuado de `WRITER_SECTION_BUNDLE_PATHS`. */
   sections: Readonly<Record<string, unknown>>;
@@ -76,6 +82,8 @@ export type WriterSectionEvidencePackage = {
   writerMayNot: readonly string[];
   keywordContext: unknown;
   article: { sourceKey: string; versionId: string; fields: Linha } | null;
+  /** As linhas do Assunto gravadas no envio (F4.1). Ausente sem elas. */
+  editorialContext?: string[];
   bundle: { bundleId: string; bundleHash: string; researchProfile: string; observedAt: string | null; serpAuthoritative: boolean | null } | null;
   sources: WriterSectionSource[];
   questions: Array<{ id: string | null; question: string; pages: number | null; status: string | null; declaredByArticle: boolean | null; matchesSection: boolean }>;
@@ -306,6 +314,7 @@ export function buildWriterSectionEvidencePackage(material: WriterSectionMateria
     writerMayNot: [...material.writerMayNot],
     keywordContext: material.keywordContext ?? null,
     article: material.article ? { sourceKey: `dna.article/${material.article.versionId}`, versionId: material.article.versionId, fields: material.article.fields } : null,
+    ...(material.editorialContext?.length ? { editorialContext: [...material.editorialContext] } : {}),
     bundle: material.bundle,
     sources: fontes,
     questions: perguntas,

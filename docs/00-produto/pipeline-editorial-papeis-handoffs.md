@@ -34,6 +34,8 @@ Responsabilidades: BrandDNA, estratégia, produtos/serviços, materiais, site/si
 
 Não faz KeywordDNA, arquitetura, SERP investigativa, ContentPlan ou redação.
 
+A Marca continua sem cadastro de ofertas ou serviços. A página de destino de um Assunto vem da declaração feita no Minerador; `marcas.site_url` e o catálogo do site só são consultados para conferi-la, sem escrita na Marca.
+
 ## Minerador
 
 Papel: transformar demanda bruta em conhecimento editorial individual qualificado.
@@ -43,6 +45,8 @@ Pergunta: “o que é esta keyword, o que sabemos sobre ela e por que ela está 
 Entrega: KeywordDNA com brandId, keyword original, origem, intenção, entidade, modificadores, nicho, funil, localidade, ambiguidade, confiança, volume, CPC, concorrência, resultados, KD quando houver, KGR/aplicabilidade, revisão IA, decisão humana, publicationContext quando houver, versão/hash/proveniência.
 
 Não faz ArticleDNA, principal/secundárias/reforços, Silo ou links internos.
+
+**Assunto (ADR-022): o Minerador declara.** O humano pode declarar uma keyword como Assunto, o tronco editorial de um ou mais artigos, com nota curta e página de destino opcional no site da marca. A declaração é por keyword, com autor e data, e a IA nunca declara. Declarado o Assunto, a aprovação dispensa Volume, Resultados e KGR, mas continua exigindo a Lógica. O Minerador não escolhe em que artigo o Assunto entra nem quais keywords o sustentam.
 
 Keyword enviada ao Arquiteto deve permanecer em ArticleDNA ou “Não agrupadas”.
 
@@ -64,11 +68,17 @@ Entrega ao Radar: ArticleDNA aprovado/versionado, KeywordDNA refs, intenção/co
 
 Radar não pode reabrir silenciosamente agrupamento, Principal, Silo, slug, canonical, URL ou Brand.
 
+**Assunto (ADR-022): o Arquiteto fixa o tronco.** Ele prende no ArticleDNA ou no SiloDNA, por ato humano, um Assunto declarado no Minerador, em campo próprio (`subject`), fora de `keywordReferences` e do teto de 6. As keywords de sustentação formam o artigo, a principal sai entre elas e dá o slug, e a SERP delas valida a composição. Um Assunto aprovado sem Volume validado nunca é principal.
+
+Estado em 2026-09-24: a declaração no Minerador (F1) e o campo opcional no contrato do Arquiteto (F2, fase A, sem nenhum caminho que grave) estão no código, sem homologação manual. Fixar o tronco no artigo (F2, fase B), o uso no Radar (F3) e no Redator (F4) são planejados.
+
 ## Radar
 
 Papel: investigação, evidência e validação da realidade externa.
 
 Recebe unidade editorial já formada.
+
+**Assunto (ADR-022): o Radar não troca o tronco.** Ele recebe o Assunto já fixado no ArticleDNA e investiga em torno dele. Não troca, não promove e não rebaixa o Assunto; se as buscas de sustentação não o sustentam, alerta e devolve ao Arquiteto, para decisão humana. O Redator também não troca nem remove o Assunto. (Planejado: F3 e F4 da SDD.)
 
 SERP do Radar é investigativa, diferente da SERP de compatibilidade do Arquiteto.
 

@@ -228,6 +228,8 @@ Importar, filtrar, selecionar e exportar não misturam marcas e retornam confirm
 
 A mesma `brand_id + operation_request_id` é idempotente. Após recarregar a rota, a última execução concluída ou parcial pode ser restaurada sem nova chamada ao Google Ads; o rascunho da próxima pesquisa e a organização/seleção local continuam independentes do snapshot executado. Falhas de provider ou persistência preservam a última pesquisa válida e não transformam ausência em zero.
 
+**Exceção da Pesquisa por Assunto — emenda de 2026-09-24** ([SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), F1b.5). O modo **Por Assunto** do Descobrir **não** persiste execução nem candidatas: não grava run, candidata, métrica atual nem histórico, e não chama as tabelas nem as RPCs da Descoberta. O resultado volta ao navegador e fica numa lista local própria (IndexedDB `minerador-pesquisa-assunto`, por ator e marca), que é estado de apresentação e recuperação, nunca canônico. A lista vale 30 dias, com no máximo 10 buscas por ator e marca; a vencida e a mais antiga saem sozinhas, só no próprio escopo (Q12, autorizada pelo dono). Na pesquisa, o banco recebe só o ledger de uso e a SERP da frase no cache da marca; no envio, só as keywords importadas. Os outros modos seguem esta seção até a [SDD da Descoberta temporária](propostas/sdd-descoberta-temporaria-local-2026-09-23.md) ser decidida.
+
 ## 17. Fora do escopo atual
 Importação da Descoberta ao Processador, exclusão/retenção de histórico e execução remota da migration.
 ## 17. Arquivos pertencentes ao módulo
@@ -407,6 +409,14 @@ Descoberta não é qualificação editorial. Google Ads Keyword Ideas é sua fon
 
 A Extensão não é mais necessária para descobrir ou importar keywords. Ela permanece como executor produtivo de allintitle, agora consumido pelo Processador para keywords oficiais e pela Descoberta para candidatas, incluindo background, bridge, CAPTCHA, pausa, retomada e notificações. Não duplicar esse executor nem remover a Extensão enquanto o Processador ou a Descoberta dependerem dele.
 
+**Modo Por Assunto — emenda de 2026-09-24** ([SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), F1b.1 a F1b.6). A partir de um Assunto escrito, ou de um Assunto declarado, o Descobrir busca as keywords que o sustentam. As fontes são o Google Ads com a frase e com a frase mais a página de destino aceita, e o DataForSEO Labs `related_keywords`, `keyword_ideas` e `ranked_keywords` (o que o topo da SERP da frase já ranqueia). Cada candidata guarda todas as origens. Regras:
+
+- **Candidata só vem de provider.** Neste modo, a regra aparece na tela como "O Google Ads e o DataForSEO Labs devolvem as candidatas; o Minerador não fabrica termos." O DataForSEO Labs é outro provider, com base própria, e não é atribuído ao Google. Nenhum caminho de IA monta candidata. Os outros modos mantêm o texto de antes.
+- **O Google Ads continua a fonte canônica de volume.** O `search_volume` do Labs aparece só numa coluna própria, **"Estimativa DataForSEO"**, e nunca vira volume: não preenche a coluna Volume nem o filtro "Com volume", e nunca é importado.
+- **Nada é pago sem confirmar.** A pesquisa monta primeiro um plano, sem custo, e só executa depois de o humano confirmar o plano inteiro no diálogo de custo. O servidor recalcula o plano, confere a autorização e mantém um teto rígido de US$ 0,20 por pesquisa.
+- **A SERP da frase segue a regra da plataforma:** cache primeiro, sempre nas 4 lentes, e o que é pago vai para o cache da marca.
+- Os outros modos continuam só com keyword, na rota de hoje.
+
 ## 50. Fase 8 — métricas atuais e allintitle nas duas áreas — implementação autorizada localmente
 
 O contrato estrutural desta fase foi implementado no checkout local. `minerador_discovery_candidate_current_metrics` representa a projeção operacional atual da candidata e `minerador_discovery_candidate_metric_history` preserva o histórico append-only; o snapshot da DiscoveryRun não é sobrescrito. A migration aditiva `0013_minerador_discovery_candidate_current_metrics.sql` ainda não foi executada.
@@ -437,6 +447,21 @@ A Extensao preserva seu payload e contrato de resposta. A Descoberta acrescenta 
 
 Keywords existentes recebem apenas evidencia aditiva e vinculo de origem; status, lista, silo, publicacao, KGR e decisoes humanas permanecem preservados. A RPC historica da Descoberta e seus patches SQL permanecem legados ate eventual remocao autorizada, sem novos consumidores produtivos e sem migration nova nesta fase.
 
+**Import de Assunto por rota própria — emenda de 2026-09-24** ([SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), F1.3). No Processador, a lista marcada como **Assunto** vai para `POST /api/minerador/marcas/[brandId]/subjects/import`, com `requireTenantPermission(minerador, edit)` e a marca do caminho. O corpo não aceita marca, ator nem métrica, e o ator é o `auth.users.id` da sessão. O núcleo é a função irmã `importSubjectsWithCore`, no mesmo arquivo, com a mesma normalização. `importKeywordsWithCore`, `KeywordImportSource` e `/discovery/import` não mudam. A rota trabalha em duas etapas:
+
+- **`preview`** não escreve e classifica cada linha: nova, existente sem Assunto, já Assunto (igual ou diferente), publicada ou inválida. Avisa quando há versão apagada restaurável.
+- **`apply`** cria as novas como `bruto`, já declaradas (origem `import`), com a lista padrão da marca ou a da coluna. Nas existentes, declara **só** os ids que o humano marcou (`declareExistingIds`).
+
+Regras do import:
+
+- Frase existente nunca é declarada em silêncio.
+- Já-Assunto com nota ou destino diferentes mantém o que está gravado; a troca é feita na Revisão Humana.
+- Se o DNA atual de uma existente não foi lido, nada é gravado nela.
+- A leitura é estreita: `id,keyword,status,lista_id` das vivas, paginadas; `analise_semantica` só das que casaram.
+- A idempotência vem da deduplicação por marca e de `changed: false`. A trava por `importRequestId` vale só na mesma instância.
+- Sem índice único no banco, dois envios simultâneos em instâncias diferentes ainda podem duplicar (Q8, no backlog).
+- No Descobrir não há select, e tudo segue como keyword.
+
 ## 46. Elegibilidade por volume oficial
 
 Google Ads é o provider canônico da elegibilidade mínima de demanda para keywords novas. O limiar operacional é `120` buscas mensais confirmadas.
@@ -460,6 +485,15 @@ O envio é seletivo, tenantizado, idempotente e rastreável. As candidatas preci
 Uma candidata nova cria uma keyword no Processador como `bruto`, `Keyword livre`, sem lista, Silo/Categoria, Principal, KGR, intenção/funil definitivos ou envio automático ao Arquiteto. A intenção e o funil preliminares, targeting, métricas oficiais, provider/version, seed, relação, execução e timestamps permanecem como proveniência. Keywords existentes da mesma marca não são duplicadas nem têm decisões, publicação, lista, silo, métricas ou classificação humana sobrescritas; recebem apenas vínculo adicional de origem.
 
 O lote de importação e os vínculos de origem são entidades server-side com RLS, restrições de tenant e resultado individual por candidata. A RPC histórica e os objetos SQL de `0010`, `0011` e `0012` permanecem documentados sem consumidor produtivo; o fluxo vigente usa o núcleo compartilhado de importação. A validação manual de candidata nova, persistência remota, defaults `bruto`/sem lista e aparecimento no Processador foi concluída. O Processador continua sendo aberto por `/{brandRef}/minerador`, sem redirecionamento automático.
+
+**Envio da Pesquisa por Assunto — emenda de 2026-09-24** ([SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), F1b.7; Q10, Q11 e Q14). O modo Por Assunto não tem candidata no banco, então não há UUID a enviar. O envio usa a rota própria `POST /api/minerador/marcas/[brandId]/subject-discovery/import`, com a mesma permissão de criação de `/discovery/import`:
+
+- a keyword chega como **entrada humana**, com a mesma confiança do CSV e da lista manual do Processador, e **sem nenhuma métrica**: o corpo recusa volume, CPC, resultados, estimativa, marca e ator;
+- a proveniência fica em `analise_semantica.subject_discovery` (origens e evidência curta) com `provenanceVerified: false`, isto é, **não verificada**; ela não entra em `discovery_import`, e nenhum leitor de métrica a enxerga;
+- o `subjectKeywordId` é o único dado usado como sinal e é validado no servidor: mesma marca, keyword viva e Assunto declarado;
+- numa keyword existente, a proveniência só é gravada se ela **não** tiver registro de aprovação, com escrita condicionada, para nenhuma aprovada ir para Em revisão;
+- a frase pesquisada só vira Assunto por marcação humana no envio, pela rota de import de Assuntos da §49;
+- continuam valendo a ação humana explícita, a marca ativa, a idempotência por `importRequestId` e a criação como `bruto` sem lista.
 
 ## 45. Seleção livre e fila contínua de allintitle
 
@@ -641,6 +675,8 @@ Restaurar qualquer um desses gates exige nova decisão explícita de produto.
 
 > **Superado em parte pelo §61 (2026-09-18).** A decisão explícita de produto veio: aprovar passou a exigir Lógica, Volume, Resultados e aplicabilidade do KGR quando calculável. SERP e revisão continuam **não** exigidas.
 
+> **Emendado pelo §61 em 2026-09-24 (trava no envio).** "No handoff ao Arquiteto permanecem apenas a Brand ativa e o status editorial" deixa de valer por inteiro: o envio passa a aplicar a trava de aprovação, **só** às aprovações registradas a partir de `SERVER_APPROVAL_GATE_SINCE` e com a exceção do Assunto (D2). As anteriores passam, com alerta. SERP e revisão continuam **não** exigidas. Detalhe no §61.
+
 ## 61. Aprovação versionada e pacote fechado para o Arquiteto — 2026-09-18
 
 Decisão de produto: **quando o status é `aprovado`, a keyword está pronta para o Arquiteto, e chega lá fechada**. Nada pode chegar pela metade.
@@ -654,6 +690,27 @@ Decisão de produto: **quando o status é `aprovado`, a keyword está pronta par
 **Pacote** (`ApprovedKeywordPackage`, `buildApprovedPackage`): o KeywordDNA inteiro congelado na aprovação, transportado em `payload.approvedDna` do item de workflow. Linha divergente **não produz pacote** — montar a partir dela devolveria conteúdo novo com carimbo antigo. O Arquiteto continua na última versão aprovada enquanto o Minerador prepara a próxima.
 
 **Handoff sem fluxo explícito para reaprovação:** o envio explícito vale só para keyword nova. Keyword já recebida tem o item reescrito quando o `contentHash` aprovado muda (`plan.updates`). Frescor a jusante: `lib/minerador/package-freshness.ts` (`fresh | in_review | stale | never_approved | unknown`; só `stale` impede).
+
+### Exceção do Assunto (D2) — 2026-09-24
+
+Com o Assunto declarado (§67, declaração 3), `resolveApprovalReadiness` só exige a **Lógica**. Volume, Resultados e KGR são dispensados, com o motivo "Assunto declarado: dispensa Volume, Resultados e KGR; a Lógica continua exigida." `ApprovalRequirement` não muda. A dispensa só vale com a declaração: retirar o Assunto volta a exigir tudo. As chaves `keyword_subject*` são assinadas, então declarar ou retirar numa aprovada a leva para Em revisão. A Lógica roda sozinha depois de cada declaração, pela mesma rotina do botão, e nunca aprova.
+
+### Trava no envio ao Arquiteto — 2026-09-24
+
+A trava de aprovação passa a valer **também no envio**, na tela e no servidor, pela mesma função (`resolveHandoffApprovalGate`, `lib/minerador/approved-package.ts`). No servidor, ela fica em `prepareCanonicalHandoff`. A decisão Q3 manteve a trava **só no envio**: a aprovação continua sendo gravada pelo navegador, e a rota de aprovação no servidor fica para uma SDD própria.
+
+**Só para frente.** A trava vale só para aprovações registradas a partir de `SERVER_APPROVAL_GATE_SINCE = "2026-09-24T00:00:00-03:00"` (Q9). Por que essa data: a tela aplica `resolveApprovalReadiness` desde este §61 (2026-09-18), então tudo o que a tela aprovou desde então já passou pela mesma trava. Ligar o envio no dia da aprovação da SDD não revoga nenhuma decisão tomada sob outra regra. A constante fica no código, e nenhum dado é regravado.
+
+| Situação da keyword | No envio |
+| --- | --- |
+| Aprovada a partir da constante, sem prontidão | **recusada**: 409 `CONFLICT` no lote inteiro, sem gravar nada, com o motivo da trava |
+| Aprovada antes da constante, sem registro ou com registro ilegível | passa, com alerta informativo |
+| Registro do backfill (`approvedBy` `"backfill:…"`) anterior à constante | passa, com alerta. Com data igual ou posterior, o prefixo não isenta, e vale a regra normal |
+| Já recebida pelo Arquiteto | só alerta; não sai de lá (`AGENTS.md` §10) |
+
+Aplicar a trava para trás é decisão do dono, depois do dry-run das aprovadas vivas não recebidas (Q9). Forjar o `approvedAt` pelo navegador só se fecha com a rota de aprovação no servidor (Q3).
+
+**Destino do Assunto conferido no envio.** O servidor confere de novo a página de destino do Assunto contra o `marcas.site_url` **atual** (§67, declaração 3), sem confiar no `destinationCheck` gravado pelo cliente. Nos três casos de recusa (fora do domínio, sem `https`, ou marca sem site com destino gravado), o envio dá 409 no lote. Keyword já recebida só gera alerta. Trocar o `site_url` na Marca pode passar a bloquear o envio de Assuntos com destino antigo, até o humano corrigir o destino.
 
 ## 62. KeywordDNA fechado — contrato tipado exportado pelo Minerador — 2026-09-19
 
@@ -757,7 +814,9 @@ SDD: [sdd-tres-eixos-status-publicacao-posto-2026-09-20](propostas/sdd-tres-eixo
 
 ## 67. As duas declarações do Vínculo e o endereço na palavra-chave — 2026-09-20
 
-Amplia o §66. O Vínculo passa a carregar **duas declarações humanas**, e só elas.
+Amplia o §66. O Vínculo passa a carregar **duas declarações humanas**, e só elas (três desde 2026-09-24; ver a nota abaixo).
+
+> **Ampliado em 2026-09-24:** o Vínculo passa a ter **três** declarações. A terceira é o Assunto (seção "3. Assunto", abaixo; [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), P2).
 
 ### 1. Posto de principal
 
@@ -778,7 +837,28 @@ publicada    Silo · declarado        seleção livre
 
 **Nada trava a seleção.** Quem sabe o que a página é continua sendo o humano — inclusive para corrigir uma declaração errada sem precisar desfazer a publicação. Um `select` desabilitado transformaria um engano em trabalho de desvinculação.
 
+### 3. Assunto — 2026-09-24
+
+O Assunto é a frase que o humano declara como **tronco** de um ou mais artigos, mesmo sem volume de busca. Ele é uma marca **ao lado** do tipo de página, não um quinto tipo: `KEYWORD_PAGE_TYPES` não muda, e uma keyword pode ser Assunto e Página de serviço ao mesmo tempo.
+
+- **Onde vive:** em `analise_semantica`, nestas chaves:
+  - `keyword_subject`: `{ declared, note, destinationUrl, destinationCheck }`, ou `null` depois de retirada;
+  - `keyword_subject_actor`: `auth.users.id`;
+  - `keyword_subject_at`;
+  - `keyword_subject_origin`: `import`, `review` ou `batch`;
+  - `keyword_subject_history`: só cresce, inclusive na retirada.
+
+  O domínio fica em `lib/minerador/keyword-subject.ts`.
+- **Só o humano declara** (P4). A declaração pode vir da Revisão Humana, do rodapé em grupo ou do select do import, que vale como declaração humana. O ator é sempre `auth.users.id`; e-mail e `"local-user"` são recusados. A IA e o MCP nunca declaram.
+- **Nota:** até 280 caracteres, numa linha só. **Página de destino:** opcional, `https` e no host do site da marca. Fora do domínio, é recusada. Marca sem `site_url` aceita o Assunto sem destino. O catálogo do site é só informativo, e o envio ao Arquiteto confere o destino de novo (§61).
+- **Leitura única** por `resolveKeywordVinculo`, que ganha `subject` e `subjectLabel` ("Assunto · declarado" ou "Assunto sem nota") **só** quando há declaração. Sem Assunto, o objeto e a frase do resumo ficam iguais aos de antes. Ninguém lê `keyword_subject` direto na tela.
+- **Publicada:** pode ser declarada Assunto sem mudar principal, slug, canonical nem URL (P5).
+- **Aprovação:** com Assunto, só a Lógica é exigida (§61). Declarar ou retirar muda a assinatura do pacote, e a aprovada vai para Em revisão; a tela avisa antes de confirmar.
+- **Em grupo:** a declaração aceita uma nota e um destino iguais para o lote, conferidos uma vez. A keyword que já é Assunto é pulada e mantém o que tem.
+
 ### Vocabulário das duas declarações
+
+> **Nota de 2026-09-24:** este vocabulário cobre o posto e o tipo de página. O Assunto tem vocabulário próprio na seção "3. Assunto", acima, e, quando declarado, aparece também na coluna Vínculo (`data-keyword-subject-label`, lido por `resolveKeywordVinculo`).
 
 A tela mostra exatamente três coisas, no mesmo lugar na coluna e no DNA:
 
@@ -802,7 +882,7 @@ O posto tem **três valores internos e duas respostas visíveis**: `free` (sem p
 
 **O endereço** aparece na coluna da palavra-chave, completo, em `font-mono` com a cor `text-identity-published` — a mesma cor que marca publicação em toda a plataforma. Surge assim que há URL conferida, não só depois de declarada; o `title` distingue "canônico declarado" de "página conferida". Marcado com `data-keyword-page-url` para os guardas visuais.
 
-A coluna Vínculo mostra o posto (com cor por estado) e o tipo (borda tracejada quando ainda é o padrão, sólida quando declarado ou observado). Nada mais.
+A coluna Vínculo mostra o posto (com cor por estado) e o tipo (borda tracejada quando ainda é o padrão, sólida quando declarado ou observado). Desde 2026-09-24, mostra também o selo do Assunto quando ele foi declarado: "Assunto · declarado", ou "Assunto sem nota" (seção 3. Assunto, abaixo). Nada mais.
 
 ## 68. Declaração no ato do link e as cores do vínculo — 2026-09-20
 

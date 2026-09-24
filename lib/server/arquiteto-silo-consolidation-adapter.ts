@@ -4,6 +4,7 @@ import type { PipelineContext } from "./pipeline-runtime";
 import { PipelineRuntimeError, pipelineErrorFromSupabase } from "./pipeline-runtime";
 import { readRpcDomainError } from "@/lib/arquiteto/silo-working-copy-record";
 import { canonicalVersionFromRow } from "./arquiteto-persistence";
+import { assertConsolidatedSiloSubject } from "./arquiteto-subject-guard";
 import { TERRITORY_SUBJECT_TYPE, TERRITORY_WORKFLOW_STAGE, parseTerritoryWorkflowRow } from "@/lib/arquiteto/territory-record";
 import {
   SILO_WORKING_COPY_STAGE,
@@ -305,6 +306,16 @@ export async function consolidateSiloFromWorkingCopy(
     humanConsolidationConfirmed,
     siloPageApproval,
   }));
+
+  // ------------------------------------------------- 4b. Assunto do SiloDNA
+  // O envelope vem pronto do cliente: Assunto novo ou alterado passa pela
+  // mesma guarda do writer (ator, marca, declaração, pacote), e a versão nova
+  // não perde em silêncio o Assunto da vigente. Sem Assunto em nenhuma das
+  // duas, só a leitura estreita da versão vigente.
+  await assertConsolidatedSiloSubject(context, {
+    entityId: request.siloDna.entityId,
+    subject: request.siloDna.payload.subject,
+  });
 
   // ------------------------------------------------------------- 5. RPC A
   const result = await context.supabase.rpc("persist_silo_from_working_copy_atomic", {

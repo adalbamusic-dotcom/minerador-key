@@ -28,6 +28,7 @@
  */
 
 import { radarDeclaredFunnel, type RadarAiDiscoveryContext } from "./ai-discovery-context.ts";
+import { radarIsSubjectTurnSection } from "./declared-subject.ts";
 import { radarConclusiveIntent, radarDeclaredKeywordIntent } from "./editorial-identity.ts";
 import { radarObservedSufficiencyLabel, type RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
 import { radarPlannerHandoffReadiness } from "./planner-handoff.ts";
@@ -825,7 +826,8 @@ export function buildRadarReportSummary(input: {
    * para especialista e para vídeo. Sem painel novo — uma verificação a mais.
    */
   const blueprint = input.view.blueprint;
-  const dossieEditorial: RadarReportCheck = !blueprint.sections.length
+  /* A seção da virada do Assunto é exigida, não observada: sozinha não faz dossiê (F3.1). */
+  const dossieEditorial: RadarReportCheck = !blueprint.sections.filter(secao => !radarIsSubjectTurnSection(secao.id)).length
     ? { id: "blueprint", question: "Blueprint editorial?", state: "PENDING", detail: blueprint.readiness.reason }
     : {
       id: "blueprint",

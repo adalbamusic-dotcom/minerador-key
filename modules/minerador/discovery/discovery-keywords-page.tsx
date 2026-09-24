@@ -12,8 +12,12 @@ import { DiscoverySearchRow } from "./discovery-search-row";
 import { DiscoverySourceControls, type DiscoverySourceControlsHandle, type DiscoverySourceResponse } from "./discovery-source-controls";
 import { DiscoverySourceTopbarActions } from "./discovery-source-topbar-actions";
 import { DiscoveryTablePlaceholder } from "./discovery-table-placeholder";
+import { SubjectSearchFields } from "./subject-search-fields";
+import { SubjectSearchResults } from "./subject-search-results";
+import { parseSubjectSearchLink } from "./subject-search-model";
+import { useSubjectSearch } from "./use-subject-search";
 import { MineradorSectionTabs } from "../minerador-section-tabs";
-import { DISCOVERY_CUSTOMER_FOCUSES, DISCOVERY_FUNNELS, DISCOVERY_INTENTS, DISCOVERY_MODES, type DiscoveryCpcFilter, type DiscoveryCustomerFocus, type DiscoveryFunnel, type DiscoveryIntent, type DiscoveryMode, type DiscoveryRelation, type DiscoverySearchDraft, type DiscoveryVolumeRange } from "./discovery-types";
+import { DISCOVERY_CUSTOMER_FOCUSES, DISCOVERY_FUNNELS, DISCOVERY_INTENTS, DISCOVERY_MODES, type DiscoveryCpcFilter, type DiscoveryCustomerFocus, type DiscoveryFunnel, type DiscoveryIntent, type DiscoveryMode, type DiscoveryRelation, type DiscoverySearchDraft, type DiscoverySearchKind, type DiscoveryVolumeRange } from "./discovery-types";
 
 type DiscoveryNotice = string | null;
 type ExecutedTargeting = { countryCode: "BR"; countryLabel: string; selectedStates: string[]; stateLabels: string[]; language: string; keywordPlanNetwork: "GOOGLE_SEARCH" | "GOOGLE_SEARCH_AND_PARTNERS"; includeAdultKeywords: boolean };
@@ -95,6 +99,43 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
   const [executedSearch, setExecutedSearch] = useState<ExecutedDiscoverySearch | null>(null);
   const [loading, setLoading] = useState(false);
   const loadingRef = useRef(false);
+  /*
+   * "Por Assunto" é só de tela (F1b.1): não entra em DISCOVERY_MODES nem na
+   * rota do Google Ads. O modo de antes fica guardado para a volta.
+   */
+  const [subjectSearchOpen, setSubjectSearchOpen] = useState(false);
+  const [linkedSubjectKeywordId, setLinkedSubjectKeywordId] = useState<string | null>(null);
+  const searchKind: DiscoverySearchKind = subjectSearchOpen ? "subject" : discoveryMode;
+  // "Incluir keywords adultas" mora na linha de filtros da Descoberta, que some
+  // neste modo: sem controle visível, a Pesquisa por Assunto nunca as inclui.
+  const subjectSearch = useSubjectSearch({ brandRef, active: subjectSearchOpen, language, selectedStates: states, includeAdultKeywords: false, linkedSubjectKeywordId });
+
+  // "Buscar sustentação" abre esta página com ?modo=assunto&assunto=<uuid>: só o id viaja na URL.
+  useEffect(() => {
+    const openFromLink = async () => {
+      await Promise.resolve();
+      const link = parseSubjectSearchLink(window.location.search);
+      if (!link.subjectMode) return;
+      setSubjectSearchOpen(true);
+      if (link.subjectKeywordId) setLinkedSubjectKeywordId(link.subjectKeywordId);
+    };
+    void openFromLink();
+  }, []);
+
+  const changeSearchKind = (kind: DiscoverySearchKind) => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("assunto");
+    if (kind === "subject") {
+      setSubjectSearchOpen(true);
+      url.searchParams.set("modo", "assunto");
+    } else {
+      setSubjectSearchOpen(false);
+      setDiscoveryMode(kind);
+      url.searchParams.delete("modo");
+    }
+    // Recarregar volta ao mesmo modo; a URL nunca leva frase nem nota.
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  };
 
   const seoFilters = useMemo<DiscoverySeoFilters>(() => ({
     result: discoverySeoPresetRange(resultPreset, parseDiscoverySeoBound(resultMin), parseDiscoverySeoBound(resultMax)),
@@ -169,6 +210,8 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
   };
 
   const acceptSourceResult = (payload: DiscoverySourceResponse) => {
+    // Colar ou importar CSV mostra a tabela da Descoberta: sai do modo Por Assunto.
+    if (subjectSearchOpen) changeSearchKind("keyword");
     const config = { ...initialDraft, seed: "", preliminaryIntent, preliminaryFunnel, discoveryMode: "keyword" as const, discoveryFocus: "all_customer" as const };
     setResultPreset(DISCOVERY_SEO_DEFAULT_PRESET); setResultMin(""); setResultMax(""); setKeywordDifficultyPreset(DISCOVERY_SEO_DEFAULT_PRESET); setKeywordDifficultyMin(""); setKeywordDifficultyMax("");
     setDiscoveryMode(config.discoveryMode); setDiscoveryFocus(config.discoveryFocus); setSeed(""); setRelation(config.relationshipMode); setPreliminaryIntent(config.preliminaryIntent); setPreliminaryFunnel(config.preliminaryFunnel); setLanguage(config.language); setStates(config.selectedStates); setVolume(config.volumeFilter); setCpc(config.cpcFilter); setIncludeTerms(config.includeTerms); setExcludeTerms(config.excludeTerms); setIncludeAdultKeywords(config.includeAdultKeywords);
@@ -207,9 +250,11 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
 
   return <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-x-clip px-0 py-5" aria-label="Descobrir Keywords" aria-busy={loading}>
     <DiscoverySourceControls ref={sourceControlsRef} brandRef={brandRef} preliminaryIntent={preliminaryIntent} preliminaryFunnel={preliminaryFunnel} onComplete={acceptSourceResult} />
-    <DiscoverySearchRow discoveryMode={discoveryMode} setDiscoveryMode={setDiscoveryMode} discoveryFocus={discoveryFocus} setDiscoveryFocus={setDiscoveryFocus} seed={seed} setSeed={setSeed} relation={relation} setRelation={setRelation} intent={preliminaryIntent} setIntent={setPreliminaryIntent} funnel={preliminaryFunnel} setFunnel={setPreliminaryFunnel} language={language} setLanguage={setLanguage} states={states} setStates={setStates} onSubmit={discover} />
+    <DiscoverySearchRow searchKind={searchKind} onSearchKindChange={changeSearchKind} subjectFields={<SubjectSearchFields controller={subjectSearch} />} discoveryFocus={discoveryFocus} setDiscoveryFocus={setDiscoveryFocus} seed={seed} setSeed={setSeed} relation={relation} setRelation={setRelation} intent={preliminaryIntent} setIntent={setPreliminaryIntent} funnel={preliminaryFunnel} setFunnel={setPreliminaryFunnel} language={language} setLanguage={setLanguage} states={states} setStates={setStates} onSubmit={discover} />
+    {subjectSearchOpen ? <SubjectSearchResults controller={subjectSearch} /> : <>
     <DiscoveryFilterRow discoveryMode={discoveryMode} volume={volume} setVolume={setVolume} cpc={cpc} setCpc={setCpc} resultPreset={resultPreset} setResultPreset={setResultPreset} resultMin={resultMin} setResultMin={setResultMin} resultMax={resultMax} setResultMax={setResultMax} keywordDifficultyPreset={keywordDifficultyPreset} setKeywordDifficultyPreset={setKeywordDifficultyPreset} keywordDifficultyMin={keywordDifficultyMin} setKeywordDifficultyMin={setKeywordDifficultyMin} keywordDifficultyMax={keywordDifficultyMax} setKeywordDifficultyMax={setKeywordDifficultyMax} hasSeoData={hasSeoData} serpMeasurementEnabled={serpMeasurementEnabled} includeTerms={includeTerms} setIncludeTerms={setIncludeTerms} excludeTerms={excludeTerms} setExcludeTerms={setExcludeTerms} includeAdultKeywords={includeAdultKeywords} setIncludeAdultKeywords={setIncludeAdultKeywords} activeFilterPopover={activeFilterPopover} setActiveFilterPopover={setActiveFilterPopover} onDiscover={discover} onClear={clearFilters} loading={loading} canSubmit={seed.trim().length >= 2} />
     {notice && <p className="mt-3 rounded border border-danger/45 bg-danger-soft px-3 py-2 text-sm leading-6 text-danger" role="alert">{notice}</p>}
     <DiscoveryTablePlaceholder candidates={executedSearch?.acceptedCandidates || []} seoFilters={seoFilters} seed={executedSearch?.config.seed || ""} intent={executedSearch?.config.preliminaryIntent} funnel={executedSearch?.config.preliminaryFunnel} discoveryMode={executedSearch?.config.discoveryMode || "keyword"} discoveryFocus={executedSearch?.config.discoveryFocus || "all_customer"} brandRef={brandRef} onCandidatesPatched={patchCandidates} onSerpMeasured={keepMeasuredCandidatesVisible} />
+    </>}
   </main>;
 }

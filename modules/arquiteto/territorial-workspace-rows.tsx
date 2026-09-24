@@ -3,6 +3,7 @@
 import React from "react";
 import type { TerritorialGroup, TerritorialHeaderRow, TerritorialKeywordRow, TerritorialSurface } from "@/lib/arquiteto/territorial-surface";
 import type { TerritorialProcessCell } from "@/lib/arquiteto/territorial-review";
+import { SubjectConservationBadge } from "./subject-panels";
 
 /**
  * Projeção territorial das linhas da planilha do Arquiteto (modo Silos).
@@ -547,6 +548,7 @@ function KeywordRow({
           <p className="mt-1 text-sm leading-6" data-testid="architect-keyword-vinculo">
             <span className="text-text-muted">Vínculo: </span>
             <span className={vinculo.silo ? "font-semibold text-module-accent" : "text-foreground"}>{vinculo.summary}</span>
+            {vinculo.subject ? <> <SubjectConservationBadge label={vinculo.subject.label} tone={vinculo.subject.tone} testId="architect-keyword-subject" /></> : null}
           </p>
         )}
         {/* Vínculo e hipótese saem da linha principal: uma linha, uma leitura. */}
@@ -633,7 +635,12 @@ export type KeywordSelectionControls = {
  * O Vínculo pronto para a linha: a frase do Minerador e se a keyword lidera
  * Silo. O componente não interpreta o DNA — recebe a resposta pronta.
  */
-export type KeywordVinculoLine = { summary: string; silo: boolean };
+export type KeywordVinculoLine = {
+  summary: string;
+  silo: boolean;
+  /** Selo do Assunto (SDD 2026-09-24, F2.3): tronco de N artigos ou aguardando sustentação. */
+  subject?: { label: string; tone: "trunk" | "awaiting" } | null;
+};
 
 export type KeywordDnaInspection = {
   identidade: { label: string; value: string }[];

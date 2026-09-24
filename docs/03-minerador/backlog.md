@@ -1,5 +1,71 @@
 # Backlog — Minerador
 
+## Pesquisa por Assunto (F1b) e conserto do import da Descoberta — 2026-09-24
+
+SDD: [Assunto, o tronco editorial](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md) (F1b; desvios na seção 11.4). Registro no `estado-atual.md` de 2026-09-24. Verificado no código e confirmado por teste; validado manualmente: não.
+
+- [x] Modo "Por Assunto" no Descobrir, fora de `DISCOVERY_MODES` (`DISCOVERY_SEARCH_KINDS` só na tela), com o texto da regra "não fabrica termos" citando o Google Ads e o DataForSEO Labs.
+- [x] Módulo puro do Labs (`related_keywords`, `keyword_ideas`, `ranked_keywords`), só 2076 + `"pt"`, eco exigido, estimativa rotulada "Estimativa DataForSEO" e nenhum campo `volume`.
+- [x] Rota `POST /api/minerador/marcas/[brandId]/subject-discovery/search` (`plan` | `execute`, `minerador:edit`): plano sem credencial, `planHash`, `PAID_PLAN_REQUIRED`, `PAID_PLAN_CHANGED` e teto rígido de US$ 0,20 (pior plano US$ 0,182).
+- [x] Orçamento em dólares no servidor: a próxima chamada que estouraria o autorizado não é feita; cada task liquida pelo `cost` real.
+- [x] SERP da frase com cache primeiro nas 4 lentes; hit ou miss sempre pelo `meta`; corpo e digest só depois de autorizar, travar, abrir a execução e conferir o ledger.
+- [x] Proteção contra repetição por **todas** as chaves DataForSEO planejadas no ledger (`OPERATION_ALREADY_EXECUTED` sem pagar).
+- [x] Catálogo aditivo: `keyword_research` e `dataforseo.keyword_research` no runtime, no Admin e em resolver próprio; sufixo opcional na chave do Google Ads.
+- [x] Lista local no IndexedDB próprio `minerador-pesquisa-assunto`, com a política Q12 (30 dias, 10 buscas por ator e marca, só no próprio escopo).
+- [x] Rota `POST /api/minerador/marcas/[brandId]/subject-discovery/import` (`minerador:create`): nova como `bruto` sem métrica; bloco `subject_discovery` com `provenanceVerified: false`; existente só sem registro de aprovação e com update condicionado (Q10, Q11).
+- [x] Q14: "Declarar também como Assunto" marcada para frase nova e desmarcada para frase existente, pela rota da F1.3 antes do import.
+- [x] "Buscar sustentação" na linha do Processador, com só o UUID na URL.
+- [x] Aliases do CSV de Assuntos: `assunto`, `assuntos`, `tema`, `titulo` e `título`, só com `subjectColumns` (implementado nesta rodada; sem a opção, saída idêntica).
+- [x] Descoberta: reimportar uma aprovada não a rebaixa mais para Em revisão, e o update da existente sem aprovação é condicionado a `analise_semantica->aprovacao` nulo. Confirmado por teste com cliente falso.
+- [ ] **Aplicar a migration** `20260924120000_dataforseo_keyword_research_operation.sql` **antes do deploy** (usuário): `db query --linked -f` + `migration repair --status applied 20260924120000 --linked`, nunca `db push`; readback com as consultas do cabeçalho. Sem ela, o bootstrap do Admin aborta com 23514.
+- [ ] **Homologar a F1b.12** (roteiro no `estado-atual.md`), com o passo 3 (frase longa e sem busca) registrado no `estado-atual.md`.
+- [ ] **Primeira pesquisa real** e conferência do custo no ledger contra o painel do DataForSEO; nenhuma pesquisa acima de US$ 0,20. Confirmar também o comportamento do Labs com frase sem busca e o eco do `seed_keyword` com pontuação.
+- [ ] **Filtro por caminho JSON no PostgREST real:** `.is("analise_semantica->aprovacao", null)` no import da F1b e na Descoberta, e `->>keyword_subject` na lista do navegador. Ainda não verificado; se falhar, a existente sem aprovação volta como `failed` na Descoberta.
+- [ ] Validação visual da F1b em 360, 768, 1024 e 1440 px e no dark mode, incluindo o teclado nos diálogos.
+- [x] Ajuda de contexto do modo Por Assunto em `modules/minerador/context-help.ts` (entrada `descobrir-por-assunto`). Confirmado por teste (`tests/minerador-assunto-fechamento-f1b.test.mts`, 5/5); validado manualmente: não.
+- [x] Botão "Buscar sustentação" na Revisão Humana (`components/editorial/dna-panels.tsx`, prop opcional `onSubjectSearch`, só com o Assunto declarado) e `keyword_research` no painel do Admin (`platform-integrations-panel.tsx`). Conferidos no código e no mesmo teste do fechamento; validado manualmente: não.
+- [ ] Linha `dataforseo.keyword_research` na tabela de capabilities da SDD de integrações e em `docs/01-admin/estado-atual.md`.
+- [ ] Re-export opcional do resolver `keyword_research` em `lib/minerador/dataforseo-canonical.ts`, se algum consumidor do Minerador precisar.
+- [x] `aria-label` e `title` no "Limpar seleção" de `discovery-table-placeholder.tsx` (dívida antiga, fechada no fechamento da F1b). Confirmado pelo mesmo teste; validado manualmente: não.
+- [ ] Validação manual dos quatro itens do fechamento da F1b (botão da Revisão, ajuda do modo, "Limpar seleção" abaixo de `xl`, select do Admin), junto com a F1b.12.
+- [ ] **Decidir:** paralelizar as fontes ou definir `maxDuration` na rota de busca (até 11 chamadas pagas sequenciais, de até 30 s cada).
+- [ ] **D1 a D11** da [SDD da Descoberta temporária](propostas/sdd-descoberta-temporaria-local-2026-09-23.md) continuam pendentes; a F1b não decide nenhuma delas.
+- [ ] **Camada 2 da Pesquisa por Assunto, com IA** (leitura por sentido): em SDD futura, própria.
+
+## Assunto declarado — F1 — 2026-09-24
+
+SDD: [Assunto, o tronco editorial](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md) (F1; desvios na seção 11). Registro no `estado-atual.md` de 2026-09-24.
+
+- [x] Declaração do Assunto em `analise_semantica` (`keyword-subject.ts`): nota ≤ 280, histórico append-only, ator `auth.users.id`.
+- [x] Página de destino: `https` e host da marca obrigatórios; catálogo só informativo.
+- [x] Vínculo com três declarações; sem Assunto, byte a byte igual. Spec §67.
+- [x] Import de Assuntos por rota própria, com prévia e aplicar, leituras estreitas e paginadas. Spec §49.
+- [x] Revisão Humana, coluna e cabeçalho do Perfil; rodapé "Vínculo das selecionadas" com readback estreito.
+- [x] Exceção D2: com Assunto, aprovar só exige a Lógica. Spec §61.
+- [x] Trava de aprovação no envio ao Arquiteto, só para aprovações a partir de `SERVER_APPROVAL_GATE_SINCE` (2026-09-24 00:00 BRT). Spec §60 e §61.
+- [x] Destino do Assunto conferido de novo no servidor, no envio.
+- [x] Lógica automática depois de declarar, pela mesma rotina do botão.
+- [ ] **Homologar** (roteiro no `estado-atual.md`):
+  - import por CSV e por lista colada;
+  - declarar e retirar na Revisão Humana;
+  - Vínculo em grupo;
+  - aprovar com volume `null`;
+  - enviar ao Arquiteto: 409 para aprovada depois da ativação sem processo, alerta para aprovada antes, 409 para destino fora do site.
+- [ ] **Dry-run da Q9:** script só leitura, rodado pelo usuário. Ele conta todas as aprovadas vivas ainda não recebidas pelo Arquiteto, separando as aprovadas antes e depois de `SERVER_APPROVAL_GATE_SINCE`, e quantas não passariam na trava. O script ainda não foi escrito, e aplicar a trava para trás é decisão do dono.
+- [ ] **Índice único parcial (Q8)** em `minerador_keywords(brand_id, keyword normalizada)` com `deleted_at is null`. É migration, com SDD própria, e vale também para a Descoberta. Sem ele, dois envios simultâneos em instâncias diferentes ainda podem duplicar.
+- [ ] **`approvalAlerts` no `HandoffResponseSchema`** (`lib/arquiteto/canonical-workspace.ts`), como campo opcional aditivo, e exibir na tela os alertas que só o servidor conhece: de destino e de já recebida.
+- [ ] **`site_url` da marca ativa no gate da tela** (`arquiteto-handoff-gates.ts`), para a conferência do destino ter par na tela e o 409 não ser surpresa.
+- [ ] Passar `alreadyReceivedKeywordIds` ao gate da tela, se ela vier a conhecer as recebidas. Hoje exigiria uma leitura nova, que a SDD não prevê.
+- [ ] **Rota de aprovação no servidor (Q3)**, em SDD própria. Só ela fecha o `approvedAt` forjado pelo navegador.
+- [ ] `row_version` no update da Revisão, do lote do Vínculo e do import sobre existentes (perda de chave por escrita concorrente).
+- [ ] **Decidir (dono):** o Assunto fica editável sem reabrir a Revisão Humana, ou o rodapé respeita o bloqueio de revisão concluída.
+- [x] Aceitar "assunto" como alias da coluna da frase no CSV de Assuntos: implementado na rodada da F1b (2026-09-24), com `assuntos`, `tema`, `titulo` e `título`, só na lista marcada como Assunto.
+- [ ] `approvalWarning` do import pelo status efetivo, não pelo bruto.
+- [ ] Atualizar o comentário de cabeçalho de `lib/minerador/keyword-vinculo.ts`, que ainda fala em "duas declarações".
+- [x] Rebaixamento de aprovada pela regravação de `discovery_import.lastSeenAt` na Descoberta (SDD, seção 7), com teste de regressão: corrigido em 2026-09-24 (`tests/minerador-import-descoberta-aprovada-preservada.test.mts`); o filtro JSON no PostgREST real segue pendente, na entrada da F1b.
+- [ ] Estreitar a leitura do núcleo da Descoberta, que lê `analise_semantica` da marca inteira a cada import (SDD F1.9).
+- [x] F1b, Pesquisa por Assunto no Descobrir: no código em 2026-09-24; pendências na entrada própria, acima.
+
 ## Egress, Descoberta e 4 lentes — 2026-09-23
 
 - [x] Montagem e store leem só a Qualificação vigente, com recuo preservado (correção 3 do E7).

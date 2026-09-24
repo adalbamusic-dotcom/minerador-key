@@ -7,6 +7,7 @@ import {
   resolveDataForSeoIntegrationEnvironment,
   DataForSeoCanonicalError,
 } from "../lib/minerador/dataforseo-canonical.ts";
+import { DATAFORSEO_KEYWORD_RESEARCH_CAPABILITY_KEY, resolveDataForSeoCanonicalKeywordResearchConfig } from "../lib/server/dataforseo-canonical.ts";
 import { IntegrationRuntimeError } from "../lib/server/integrations-runtime.ts";
 import type { CanonicalAuthorizationRepository } from "../lib/tenant/canonical-authorization.ts";
 import type {
@@ -133,6 +134,46 @@ test("Radar SERP resolves the global DataForSEO resource without a module entitl
   assert.equal(result.resource.binding, null);
   assert.equal(result.resource.brandId, BRAND);
   assert.equal(result.credentialSource, "connection");
+});
+
+test("F1b.8: Pesquisa por Assunto resolve a capability única dataforseo.keyword_research no recurso global", async () => {
+  const requested: Array<{ capabilityKey: string; operation: string }> = [];
+  const base = dependencies({ capability: { ...capability, capability_key: "dataforseo.keyword_research", operation_kind: "keyword_research" }, grants: [], bindings: [], quotas: [] });
+  const runtimeDependencies: IntegrationRuntimeDependencies = {
+    ...base,
+    repository: { ...base.repository, findCapability: async (input) => { requested.push({ capabilityKey: input.capabilityKey, operation: input.operation }); return base.repository.findCapability(input); } },
+  };
+  const result = await resolveDataForSeoCanonicalKeywordResearchConfig({
+    actorUserId: ACTOR,
+    agencyId: AGENCY,
+    brandId: BRAND,
+    environment: "test",
+    client: client(),
+    runtimeDependencies,
+    secretStore: { resolve: async () => JSON.stringify({ DATAFORSEO_LOGIN: "vault-login", DATAFORSEO_PASSWORD: "vault-password" }), store: async () => "unused" },
+    technicalEnvironment: { NODE_ENV: "test", DATAFORSEO_LOCATION_CODE: "2076", DATAFORSEO_LANGUAGE_CODE: "pt", DATAFORSEO_TIMEOUT_MS: "30000" },
+  });
+  assert.deepEqual(requested, [{ capabilityKey: "dataforseo.keyword_research", operation: "keyword_research" }]);
+  assert.equal(DATAFORSEO_KEYWORD_RESEARCH_CAPABILITY_KEY, "dataforseo.keyword_research");
+  assert.equal(result.resource.resourceKey, "dataforseo");
+  assert.equal(result.resource.capability?.capability_key, "dataforseo.keyword_research");
+  assert.equal(result.resource.capability?.operation_kind, "keyword_research");
+  assert.equal(result.credentialSource, "connection");
+});
+
+test("F1b.8: sem a linha do catálogo, a pesquisa resolve o recurso e o ledger fica sem capability (antes da migration)", async () => {
+  const result = await resolveDataForSeoCanonicalKeywordResearchConfig({
+    actorUserId: ACTOR,
+    agencyId: AGENCY,
+    brandId: BRAND,
+    environment: "test",
+    client: client(),
+    runtimeDependencies: dependencies({ capability: null, grants: [], bindings: [], quotas: [] }),
+    secretStore: { resolve: async () => JSON.stringify({ DATAFORSEO_LOGIN: "vault-login", DATAFORSEO_PASSWORD: "vault-password" }), store: async () => "unused" },
+    technicalEnvironment: { NODE_ENV: "test", DATAFORSEO_LOCATION_CODE: "2076", DATAFORSEO_LANGUAGE_CODE: "pt", DATAFORSEO_TIMEOUT_MS: "30000" },
+  });
+  assert.equal(result.resource.capability, null);
+  assert.equal(result.resource.connection.providerKey, "dataforseo");
 });
 
 test("canonical DataForSEO rejects missing Vault secret without env fallback", async () => {

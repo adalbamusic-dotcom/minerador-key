@@ -177,8 +177,21 @@ function saveDraftRpc(body: Record<string, unknown>) {
   return response;
 }
 
+/*
+ * SDD do Assunto, F4.2 · versões de ArticleDNA no falso, só nos testes que as
+ * pedem (vazio por padrão, como antes). `artifactReadFailure` simula falha.
+ */
+let artifactRows: Array<Record<string, unknown>> = [];
+let artifactReadFailure: string | null = null;
+
 /* Responde só o necessário para a cadeia de autorização chegar ao work(). */
 function answer(table: string, select: string | null, params: URLSearchParams): unknown[] {
+  if (table === "editorial_artifact_versions") {
+    const eq = (name: string) => (params.get(name) || "").replace(/^eq\./, "");
+    return artifactRows
+      .filter(row => row.marca_id === eq("marca_id") && row.version_id === eq("version_id") && (!params.get("artifact_type") || row.artifact_type === eq("artifact_type")))
+      .map(row => project(row, select));
+  }
   if (table === "content_documents") {
     const id = (params.get("id") || "").replace(/^eq\./, "");
     const row = fullRows[id];
@@ -209,6 +222,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   /* As funções do leitor ainda não existem no remoto: o MCP precisa funcionar assim. */
   if (method === "POST" && table.startsWith("rpc/writer_evidence_")) return pgrst("PGRST202", `Could not find the function public.${table.slice(4)}`, 404);
   if (table === "writer_evidence_divergences") return divergenceTable(method, url, request, query);
+  if (table === "editorial_artifact_versions" && artifactReadFailure) return pgrst(artifactReadFailure, "canceling statement due to statement timeout DADO-DO-DNA", 500);
   if (method !== "GET" && method !== "HEAD") return new Response(null, { status: 201 });
   const rows = answer(table, select, url.searchParams);
   if (table === "content_documents" && afterDocumentRead) afterDocumentRead(select);
@@ -344,13 +358,33 @@ const bareColumns = (select: string | null) => (select || "").split(",").filter(
 const semGeradoEm = (report: unknown) => Object.fromEntries(Object.entries(report as Record<string, unknown>)
   .filter(([key]) => key !== "generatedAt"));
 
-test("Fase 0 · o Guardião lê id, blocks e metadata numa consulta só, e o relatório é o mesmo do documento inteiro", async () => {
+/*
+ * GUARDA ATUALIZADA — SDD do Assunto, F4.2 (2026-09-24).
+ *
+ * O Guardião lia só id, blocks e metadata. Para ligar os avisos do Assunto
+ * (virada ausente, link para o destino ausente), ele passou a ler também a
+ * REFERÊNCIA ao ArticleDNA fixado (`g_articleDnaRef:payload->articleDnaRef`,
+ * ~150 B) — na mesma consulta, sem nada do contexto importado — e depois UM
+ * caminho do ArticleDNA, `payload->subject` daquela versão, na Marca do grant
+ * (< 1 kB; `readWriterGuardianSubject`). Nenhum chamador tinha o Assunto em
+ * mãos: o painel manda o documento, que não carrega o Assunto, e o MCP só lê
+ * caminhos. A alternativa (o painel e o MCP passarem o Assunto) mudaria o
+ * contrato do pedido do painel e deixaria o MCP dependente do que a IA
+ * declarar. O relatório sem Assunto continua igual ao do documento inteiro.
+ */
+test("Fase 0 · o Guardião lê id, blocks, metadata e a referência ao ArticleDNA numa consulta só, e o relatório é o mesmo do documento inteiro", async () => {
   for (const [documentId, hash, payload] of [[documentA, "hash-a", document], [documentV2, "hash-v2", payloadV2()]] as const) {
     queries.length = 0;
     const guardian = await callTool("get_writer_guardian", { documentId });
     assert.equal(guardian.ok, true, JSON.stringify(guardian));
     assert.deepEqual(documentSelects(), [WRITER_GUARDIAN_SELECT]);
-    assert.equal(WRITER_GUARDIAN_SELECT, "id,marca_id,content_hash,g_id:payload->id,g_blocks:payload->blocks,g_metadata:payload->metadata");
+    assert.equal(WRITER_GUARDIAN_SELECT, "id,marca_id,content_hash,g_id:payload->id,g_blocks:payload->blocks,g_metadata:payload->metadata,g_articleDnaRef:payload->articleDnaRef");
+    /* O Assunto, quando lido, é UM caminho do ArticleDNA fixado, na Marca do grant. */
+    for (const leitura of queries.filter(query => query.table === "editorial_artifact_versions")) {
+      assert.deepEqual((leitura.select || "").split(",").filter(coluna => coluna.includes("payload")),
+        ["a_subject:payload->subject", "e_subject:payload->payload->subject", "e_brandId:payload->payload->brandId", "a_brandId:payload->brandId"]);
+      assert.ok(leitura.filters.includes(`marca_id=eq.${brandA.brandId}`), leitura.filters);
+    }
     assert.ok(!bareColumns(WRITER_GUARDIAN_SELECT).includes("payload"), "o Guardião não pede o payload inteiro");
     const esperado = runGuardian(ContentDocumentSchema.parse(payload), hash);
     assert.deepEqual(semGeradoEm(guardian.result), semGeradoEm(JSON.parse(JSON.stringify(esperado))));
@@ -358,6 +392,28 @@ test("Fase 0 · o Guardião lê id, blocks e metadata numa consulta só, e o rel
   const respostaV2 = queries.find(query => query.table === "content_documents")?.responseBody || "";
   assert.doesNotMatch(respostaV2, new RegExp(PESO_NAO_LIDO), "o dossiê não pode sair do banco para o Guardião");
   assert.ok(respostaV2.length < JSON.stringify(payloadV2()).length / 5, `resposta de ${respostaV2.length} B`);
+});
+
+/*
+ * GUARDA ATUALIZADA — SDD do Assunto, F4.1 (adendo F4.4, 2026-09-24).
+ *
+ * As linhas da virada (`importedContext.editorialContext`, gravadas no envio
+ * só com Assunto) são uma leitura NOVA. Ela é estreita — um caminho, na Marca,
+ * `[]` (2 B) em documento enviado antes e < 2 kB com Assunto — e fica FORA do
+ * cabeçalho comum: manifesto, fatias do `read_writer_evidence` e divergências
+ * leem o cabeçalho e não usam as linhas. Só fundamentos e material por seção,
+ * que as entregam ao redator, fazem a leitura, e só quando o ArticleDNA
+ * fixado tem Assunto: sem Assunto, nenhuma consulta a mais.
+ */
+test("Fase 0 · as linhas da virada não entram no cabeçalho comum; um caminho só, pedido por fundamentos e material quando há Assunto", async () => {
+  const { WRITER_EVIDENCE_HEAD_SELECT, WRITER_EDITORIAL_CONTEXT_SELECT } = await import("../lib/server/writer-evidence-document.ts");
+  assert.equal(WRITER_EVIDENCE_HEAD_SELECT.includes("editorialContext"), false);
+  assert.equal(WRITER_EDITORIAL_CONTEXT_SELECT, "c_editorialContext:payload->importedContext->editorialContext");
+  const fonte = readFileSync(new URL("../lib/server/writer-evidence-reader.ts", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const chamadas = fonte.match(/readWriterEditorialContext\(context, head\)/g) || [];
+  assert.equal(chamadas.length, 2, "fundamentos e material, e mais ninguém");
+  assert.equal((fonte.match(/projecao\?\.fields\.subject \? await readWriterEditorialContext\(context, head\) : \[\]/g) || []).length, 2, "só com Assunto");
 });
 
 test("Fase 0 · Guardião de outra Marca continua document_not_found, sem autorização nem auditoria depois", async () => {
@@ -503,7 +559,8 @@ test("estrutura: o alvo é lido numa função só, pelas Marcas do grant; nenhum
     assert.doesNotMatch(select, /->bundle(->|,|$)|editorContent/, select);
   }
   assert.doesNotMatch(source, /select\("[^"]*\bpayload\b/, "nenhum select literal com payload");
-  assert.match(source, /const context = await readWriterGuardianContext\(evidenceContext\(access\), documentId\);/);
+  /* F4.2 · a referência ao ArticleDNA sai da MESMA linha do alvo; nenhuma leitura extra do documento. */
+  assert.match(source, /const context = await readWriterGuardianContext\(evidenceContext\(access\), documentId, \{ articleDnaRef: writerGuardianArticleDnaRefFromRow\(current\) \}\);/);
   assert.match(source, /runGuardian\(writerGuardianViewFromRow\(current\), String\(current\.content_hash\), context\)/);
   assert.doesNotMatch(source, /readOpenWriterDivergences/, "o Guardião do MCP lê pela forma que não derruba a análise");
   const fromContentDocuments = source.split('.from("content_documents")').length - 1;
@@ -839,4 +896,93 @@ test("B2 · briefing: uma instrução sozinha acima de 32 kB sai declarada (0 de
     assert.equal(refused.code, "source_too_large", JSON.stringify(refused).slice(0, 400));
     assert.ok(byteLength(refused) < 2_000, "a recusa não carrega o briefing");
   } finally { delete fullRows[unica]; delete fullRows[enorme]; }
+});
+
+/* ============ SDD do Assunto, F4.1 e F4.2 · briefing e Guardião do MCP ============ */
+
+const HASH_DNA = `sha256:${"a".repeat(64)}`;
+const ASSUNTO_DO_DNA = {
+  keywordId: "kw-2",
+  approvedPackageRef: { version: 3, contentHash: `sha256:${"p".repeat(64)}`, approvedAt: "2026-09-24T10:00:00+00:00" },
+  phrase: "Consulta dermatológica online",
+  note: "A marca atende por teleconsulta.",
+  destinationUrl: "https://careglow.com.br/consulta-online",
+  attachedBy: actorId,
+  attachedAt: "2026-09-24T12:00:00+00:00",
+};
+/* A versão do ArticleDNA que o documento da E1 fixa (`artigo-e1-v1`), com ou sem Assunto. */
+const versaoDoArtigo = (payload: Record<string, unknown>, marca = brandA.brandId) => ({
+  version_id: "artigo-e1-v1", entity_id: "artigo-e1", artifact_type: "article_dna", version_number: 1, status: "approved",
+  content_hash: HASH_DNA, created_at: "2026-09-24T12:00:00+00:00", marca_id: marca, payload: { brandId: marca, ...payload },
+});
+
+test("F4.2 · Guardião do MCP: com Assunto no ArticleDNA fixado, dois AVISOS (virada e destino), nunca bloqueio; sem Assunto, o relatório de antes", async () => {
+  const id = "writer:doc-assunto-guardiao";
+  fullRows[id] = { id, marca_id: brandA.brandId, article_id: "artigo-e1", content_hash: "hash-assunto", lock_version: 1, status: "writing", updated_at: "2026-09-23T10:00:00+00:00", payload: documentoV2ComDossie(id, bundleDoRadar(200)) };
+  try {
+    artifactRows = [versaoDoArtigo({ promise: "Rotina" })];
+    const semAssunto = await callTool("get_writer_guardian", { documentId: id });
+    assert.equal(semAssunto.ok, true, JSON.stringify(semAssunto));
+    const antes = semAssunto.result as { findings: Array<{ category: string; severity: string; message: string }>; blockingCount: number; warningCount: number; notices?: string[] };
+    assert.equal(antes.findings.some(item => /Assunto/.test(item.message)), false, "sem Assunto, nenhuma conferência nova");
+    assert.deepEqual(semGeradoEm(antes), semGeradoEm(JSON.parse(JSON.stringify(runGuardian(ContentDocumentSchema.parse(fullRows[id].payload), "hash-assunto")))));
+
+    artifactRows = [versaoDoArtigo({ subject: ASSUNTO_DO_DNA }), versaoDoArtigo({ subject: { ...ASSUNTO_DO_DNA, phrase: "Assunto de outra Marca" } }, brandB)];
+    queries.length = 0;
+    const comAssunto = await callTool("get_writer_guardian", { documentId: id });
+    assert.equal(comAssunto.ok, true, JSON.stringify(comAssunto));
+    const depois = comAssunto.result as typeof antes;
+    const doAssunto = depois.findings.filter(item => /Assunto/.test(item.message));
+    assert.deepEqual(doAssunto.map(item => `${item.category}:${item.severity}`).sort(), ["coverage:warning", "cta:warning"]);
+    assert.match(doAssunto.find(item => item.category === "coverage")!.message, /Consulta dermatológica online/);
+    assert.match(doAssunto.find(item => item.category === "cta")!.message, /careglow\.com\.br\/consulta-online/);
+    assert.equal(depois.blockingCount, antes.blockingCount, "o Assunto nunca bloqueia");
+    assert.equal(depois.warningCount, antes.warningCount + 2);
+    assert.deepEqual(documentSelects(), [WRITER_GUARDIAN_SELECT], "o documento é lido uma vez só");
+    const leituraDoDna = queries.filter(query => query.table === "editorial_artifact_versions");
+    assert.equal(leituraDoDna.length, 1, "UMA leitura do ArticleDNA");
+    assert.ok(leituraDoDna[0].filters.includes("version_id=eq.artigo-e1-v1"), leituraDoDna[0].filters);
+    assert.ok(leituraDoDna[0].filters.includes(`marca_id=eq.${brandA.brandId}`), leituraDoDna[0].filters);
+    assert.ok(Buffer.byteLength(leituraDoDna[0].responseBody) < 1_024, `${Buffer.byteLength(leituraDoDna[0].responseBody)} B`);
+    assert.doesNotMatch(JSON.stringify(depois), /Assunto de outra Marca/);
+
+    /* A virada escrita e o link para o destino: os avisos somem. */
+    const payload = structuredClone(fullRows[id].payload) as Record<string, unknown> & { blocks: unknown[] };
+    const proveniencia = { keywordDnaRefs: [], evidenceRefs: [], sourceIds: [] };
+    payload.blocks = [...payload.blocks,
+      { id: "b3", type: "heading", level: 3, text: "Quando procurar uma consulta dermatológica online", provenance: proveniencia },
+      { id: "b4", type: "paragraph", text: "Agende em [careglow](https://www.careglow.com.br/consulta-online/).", provenance: proveniencia }];
+    fullRows[id] = { ...fullRows[id], payload };
+    const escrito = await callTool("get_writer_guardian", { documentId: id });
+    assert.equal(((escrito.result as typeof antes).findings).some(item => /Assunto/.test(item.message)), false);
+
+    /* Falha ao ler o ArticleDNA: aviso, e a análise determinística segue. */
+    artifactReadFailure = "57014";
+    const falhou = await callTool("get_writer_guardian", { documentId: id });
+    assert.equal(falhou.ok, true, JSON.stringify(falhou));
+    const relatorio = falhou.result as typeof antes;
+    assert.ok((relatorio.notices || []).some(item => /^assunto_nao_lido \(statement_timeout\)/.test(item)), JSON.stringify(relatorio.notices));
+    assert.doesNotMatch(JSON.stringify(relatorio), /DADO-DO-DNA|canceling/);
+  } finally { artifactRows = []; artifactReadFailure = null; delete fullRows[id]; }
+});
+
+test("F4.1 · briefing do MCP: as linhas do envio saem em editorialContext; lista vazia não acrescenta chave", async () => {
+  const comLinhas = "writer:doc-assunto-briefing";
+  const semLinhas = "writer:doc-assunto-briefing-vazio";
+  const LINHAS = ["Tronco (Assunto): Consulta dermatológica online.", "Virada: onde quem redige decidir (sem sinal na SERP), levar o leitor de skin care noturno a Consulta dermatológica online."];
+  briefRow(comLinhas, base => ({ ...base, importedContext: { ...(base.importedContext as Record<string, unknown>), editorialContext: LINHAS } }));
+  briefRow(semLinhas, base => ({ ...base, importedContext: { ...(base.importedContext as Record<string, unknown>), editorialContext: [] } }));
+  try {
+    queries.length = 0;
+    const brief = await callTool("get_writer_brief", { documentId: comLinhas });
+    assert.equal(brief.ok, true, JSON.stringify(brief));
+    assert.deepEqual((brief.result as Record<string, unknown>).editorialContext, LINHAS);
+    assert.deepEqual(documentSelects(), [WRITER_BRIEF_SELECT]);
+    assert.match(WRITER_BRIEF_SELECT, /r_editorialContext:payload->importedContext->editorialContext/);
+    const vazio = await callTool("get_writer_brief", { documentId: semLinhas });
+    assert.equal(vazio.ok, true, JSON.stringify(vazio));
+    assert.equal("editorialContext" in (vazio.result as Record<string, unknown>), false, "sem linhas, o briefing de antes");
+    const v1 = await callTool("get_writer_brief", { documentId: documentA });
+    assert.equal("editorialContext" in (v1.result as Record<string, unknown>), false);
+  } finally { delete fullRows[comLinhas]; delete fullRows[semLinhas]; }
 });

@@ -340,13 +340,13 @@ test("D · a contribuição ACEITA do especialista não some: sai com o aviso de
 test("E · invariante 32: a estrutura é ordem SUGERIDA e a medida dos concorrentes é referência, nunca meta", () => {
   const { dados } = linhasDe(EXPORT_DO_SILO().files![0].csv);
   const pilar = dados[1];
-  assert.match(pilar.estrutura, /^Ordem sugerida: a estrutura final e a extensão são decisão do Planejador\./);
+  assert.match(pilar.estrutura, /^Ordem sugerida: a estrutura final e a extensão são decisão de quem redige\./);
   assert.match(pilar.estrutura, /Referência da SERP, não meta: os concorrentes comparáveis têm mediana de [\d.]+ palavras/);
   for (const linha of dados) {
     const tudo = RADAR_WRITING_EXPORT_COLUMNS.map(coluna => linha[coluna]).join("\n");
     assert.equal(/~\s?\d+ palavras|\d+ H2\b|com as extensões indicadas|palavras por seção/i.test(tudo), false, `${linha.ordem}: meta de extensão ou de H2 imposta`);
   }
-  assert.match(pilar.prompt, /a estrutura final e a extensão são decisão do Planejador/);
+  assert.match(pilar.prompt, /a estrutura final e a extensão são decisão de quem redige/);
 });
 
 test("E · o título gravado sai como foi, ou é omitido com o motivo — nunca reescrito", () => {
@@ -412,7 +412,7 @@ test("G · plano visual: uma capa e até três respiros, e ALT de preenchimento 
   const comPlano = dados.slice(1).filter(linha => linha.plano_visual);
   assert.ok(comPlano.length >= 2, "as linhas que servem para escrever trazem o plano visual");
   for (const linha of comPlano) {
-    assert.match(linha.plano_visual, /^Plano visual do pacote \(o Planejador confirma\): uma capa e [0-3] respiro\(s\)\./);
+    assert.match(linha.plano_visual, /^Plano visual do pacote \(quem redige confirma\): uma capa e [0-3] respiro\(s\)\./);
     assert.equal(/ALT: (Ao final|Cobrir com clareza|Reunir o que|Declarar o critério|Capturar a intenção)/.test(linha.plano_visual), false, `${linha.ordem}: ALT de preenchimento`);
     assert.equal(/legenda: (Bloco comercial|Gancho)\b/.test(linha.plano_visual), false);
   }
@@ -586,7 +586,7 @@ test("K · a rota: 'mode' opcional, padrão completo, e o ramo novo não lê nad
   assert.match(rota, /principalPolicy: texto\(dna\.primaryKeywordPolicy\)/);
 });
 
-test("K · a tela: 'Para escrever (recomendado)' primeiro, o técnico depois, em rádio de 14px, antes do primeiro item", async () => {
+test("K · a tela: o card 'Exportar para escrever' — escopo em rádio de 14px, 'Exportar CSV' sempre para escrever, o técnico no Avançado fechado", async () => {
   assert.deepEqual(RADAR_EXPORT_MODES.map(modo => modo.mode), ["writing", "full"]);
   assert.equal(RADAR_EXPORT_MODES[0].label, "Para escrever (recomendado)");
   assert.equal(RADAR_EXPORT_MODES[1].label, "Completo (técnico)");
@@ -594,35 +594,83 @@ test("K · a tela: 'Para escrever (recomendado)' primeiro, o técnico depois, em
   assert.equal(radarExportModeOf("full"), "full");
   for (const valor of [null, undefined, "", "writing", "FULL", 1]) assert.equal(radarExportModeOf(valor), "writing");
 
+  /*
+   * 2026-09-23 · O SELETOR "Formato do CSV" SAIU DO TOPO. O dono do produto
+   * aprovou o card: a escolha é de ESCOPO, o botão principal é sempre "para
+   * escrever", e o formato completo (técnico) mora no "Avançado (auditoria)",
+   * fechado. Continuam valendo: rádio fora de role=menu, 14px, tokens.
+   */
   const pagina = (await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-  const barra = pagina.slice(pagina.indexOf("const renderTopbarActions"), pagina.indexOf("const openDetail"));
-  const semComentariosDaBarra = semComentarios(barra);
-  const menu = semComentariosDaBarra.slice(semComentariosDaBarra.indexOf("role=\"menu\""));
-  const antesDoMenu = semComentariosDaBarra.slice(semComentariosDaBarra.indexOf("{menuDeExport ?"), semComentariosDaBarra.indexOf("role=\"menu\""));
-  const grupo = antesDoMenu.slice(antesDoMenu.indexOf("<fieldset"), antesDoMenu.indexOf("</fieldset>"));
-  assert.ok(antesDoMenu.indexOf("<fieldset") >= 0 && antesDoMenu.indexOf("</fieldset>") > antesDoMenu.indexOf("<fieldset"), "o formato vem antes dos itens, no mesmo popover");
-  assert.equal(/<fieldset|role="radiogroup"|type="radio"/.test(menu.slice(0, menu.indexOf("</button>", menu.lastIndexOf("data-testid=\"radar-export-dossiers\"")))), false,
-    "o rádio fica FORA do role=menu: um menu só contém itens de menu");
-  assert.match(menu, /^role="menu" aria-label="Exportar">/);
-  assert.match(grupo, /role="radiogroup" aria-label="Formato do CSV"/);
-  assert.match(grupo, /type="radio"/);
-  assert.match(grupo, /RADAR_EXPORT_MODES\.map/);
-  assert.match(grupo, /RADAR_EXPORT_EXCEL_HINT/);
-  assert.equal(/text-xs|#[0-9a-f]{3,6}\b|rgb\(|text-\[1[0-3]px\]/i.test(grupo), false, "texto abaixo de 14px ou cor fixa no seletor");
+  const barra = semComentarios(pagina.slice(pagina.indexOf("const renderTopbarActions"), pagina.indexOf("const openDetail")));
+  const card = barra.slice(barra.indexOf("{menuDeExport && escopoDoSilo ?"), barra.indexOf("onClick={grid.toggleColumns}"));
+  assert.ok(card.length > 0, "o card de export não foi encontrado");
+  assert.equal(/role="menu"|role="menuitem"/.test(card), false, "o card tem rádio e disclosure: não pode ser um role=menu");
+  assert.match(card, /role="dialog"\s+aria-labelledby="radar-export-titulo"/);
+  assert.match(card, /id="radar-export-titulo"[^>]*>Exportar para escrever</);
+  assert.equal(/Formato do CSV|RADAR_EXPORT_MODES|radarExportModeLabel/.test(card), false, "o seletor de formato voltou ao topo do card");
+
+  /* Um grupo só: o radiogroup, sem fieldset em volta anunciando o mesmo rótulo. */
+  assert.equal(/<fieldset|<legend/.test(card), false, "o agrupamento dos rádios é anunciado duas vezes");
+  const inicioDoGrupo = card.indexOf('<div role="radiogroup"');
+  assert.ok(inicioDoGrupo >= 0, "o radiogroup do escopo não foi encontrado");
+  const grupo = card.slice(inicioDoGrupo, card.lastIndexOf("<button", card.indexOf('data-testid="radar-export-csv"')));
+  assert.match(grupo, /role="radiogroup" aria-label="O que exportar"/);
+  assert.deepEqual([...grupo.matchAll(/type="radio" name="radar-escopo-do-export" value="([a-z]+)"/g)].map(item => item[1]), ["silo", "selecionados"]);
+  assert.match(grupo, /Silo completo \(recomendado\)/);
+  assert.match(grupo, /Só os artigos selecionados/);
+  assert.match(grupo, /Mesmo formato, sem o contexto do Silo\./);
+  assert.match(grupo, /Sem seleção: vão todos os artigos prontos do Radar\./, "a regra de quando não há seleção deixou de ser dita");
   assert.equal(/<button/.test(grupo), false);
-  assert.match(menu, /data-testid="radar-silos-formato">Formato: \{radarExportModeLabel\(modoDoExport\)\}/);
+  assert.equal(/text-xs|#[0-9a-f]{3,6}\b|rgb\(|text-\[1[0-3]px\]/i.test(card), false, "texto abaixo de 14px ou cor fixa no card");
+
+  /* Um botão principal, e ele nunca manda o formato técnico. */
+  const antesDoAvancado = card.slice(0, card.indexOf('data-testid="radar-export-avancado-toggle"'));
+  assert.match(antesDoAvancado, /void \(escopoDoExport === "silo" \? exportarSilosCompletos\("writing"\) : exportarDossiesFinalizados\("writing"\)\)/);
+  assert.equal(/"full"/.test(antesDoAvancado), false, "o formato técnico apareceu fora do Avançado");
+  assert.match(antesDoAvancado, /bg-action-accent/, "o botão principal deixou de ser a variante primária");
+
+  /* O Avançado: disclosure fechado, com o técnico e a planilha da tela. */
+  const avancado = card.slice(card.indexOf('data-testid="radar-export-avancado-toggle"'));
+  assert.match(card, /aria-expanded=\{avancadoDoExport\}\s+aria-controls="radar-export-avancado"/);
+  assert.match(avancado, /Avançado \(auditoria\)/);
+  assert.match(avancado, /id="radar-export-avancado" hidden=\{!avancadoDoExport\}/);
+  assert.match(avancado, /void exportarSilosCompletos\("full"\)/);
+  assert.match(avancado, /void exportarDossiesFinalizados\("full"\)/);
+  assert.match(avancado, /Não serve para escrever\./);
+  assert.match(avancado, /grid\.exportRows\(grid\.queriedRows, "planilha"\)/);
+  assert.match(avancado, /RADAR_EXPORT_EXCEL_HINT/);
+  assert.equal(/"writing"/.test(avancado), false, "o Avançado mandou o formato para escrever");
+  assert.match(barra, /setAvancadoDoExport\(false\); setMenuDeExport\(atual => !atual\)/, "o Avançado não abre fechado a cada vez");
+
+  /*
+   * Teclado: Esc fecha logo depois de abrir, com o foco ainda no botão
+   * Exportar (o handler fica no wrapper que contém o botão e o card), e toda
+   * saída do card devolve o foco ao botão — nos exports assíncronos, também
+   * quando o arquivo termina de sair e o botão volta a ficar habilitado.
+   */
+  assert.match(barra, /<div className="relative shrink-0" onKeyDown=\{evento => \{ if \(evento\.key === "Escape" && menuDeExport\) \{ evento\.stopPropagation\(\); fecharCardDeExport\(false\); \} \}\}>\s*<button\s+ref=\{botaoDoExportRef\}/,
+    "Esc só fecha o card com o foco dentro dele");
+  assert.equal(/onKeyDown/.test(card), false, "o Esc voltou a morar só no card");
+  assert.deepEqual([...card.matchAll(/onClick=\{\(\) => \{ fecharCardDeExport\((true|false)\); ([a-zA-Z.]+)/g)].map(item => `${item[1]} ${item[2]}`),
+    ["true void", "true void", "true void", "false grid.exportRows"], "um export assíncrono saiu do card sem devolver o foco");
+  const fechar = barra.slice(barra.indexOf("const fecharCardDeExport"), barra.indexOf("return <>", barra.indexOf("const fecharCardDeExport")));
+  assert.match(fechar, /if \(aposExportAssincrono\) devolverFocoAposExportRef\.current = true;\s*botaoDoExportRef\.current\?\.focus\(\);/);
+  const semNotas = semComentarios(pagina);
+  const devolucao = semNotas.slice(semNotas.indexOf("const devolverFocoAposExportRef"), semNotas.indexOf("}, [exportando]);") + 20);
+  assert.match(devolucao, /if \(exportando \|\| !devolverFocoAposExportRef\.current\) return;\s*devolverFocoAposExportRef\.current = false;\s*botaoDoExportRef\.current\?\.focus\(\);/,
+    "o foco não volta ao botão Exportar quando o export termina");
 
   const codigo = semComentarios(pagina);
   for (const funcao of ["const exportarSilosCompletos", "const exportarDossiesFinalizados"]) {
     const inicio = codigo.indexOf(funcao);
     const corpo = codigo.slice(inicio, codigo.indexOf("};", codigo.indexOf("finally", inicio)));
-    assert.match(corpo, /mode: modoDoExport/, `${funcao} não manda o formato escolhido`);
+    assert.match(codigo.slice(inicio, inicio + 80), /= async \(modo: RadarExportMode\) =>/, `${funcao} não recebe o formato de quem clicou`);
+    assert.match(corpo, /mode: modo \}/, `${funcao} não manda o formato de quem clicou`);
   }
-  assert.match(codigo, /useState<RadarExportMode>\(RADAR_EXPORT_MODE_DEFAULT\)/, "o padrão da tela é 'Para escrever'");
-  const lembranca = codigo.slice(codigo.indexOf("const [modoDoExport"), codigo.indexOf("const escolherModoDoExport") + 400);
-  assert.match(lembranca, /try \{\s*setModoDoExport\(radarExportModeOf\(window\.localStorage\.getItem\(RADAR_EXPORT_MODE_STORAGE_KEY\)\)\);\s*\} catch/);
-  assert.match(lembranca, /try \{\s*window\.localStorage\.setItem\(RADAR_EXPORT_MODE_STORAGE_KEY, modo\);\s*\} catch/);
-  assert.equal(/removeItem|localStorage\.clear/.test(codigo.slice(codigo.indexOf("const [modoDoExport"), codigo.indexOf("const [modoDoExport") + 2000)), false);
+  assert.match(codigo, /useState<"silo" \| "selecionados">\("silo"\)/, "o padrão do card é o silo completo");
+  /* A preferência de formato gravada pelo card antigo: não se lê, não se grava e não se limpa (AGENTS §10). */
+  assert.equal(/RADAR_EXPORT_MODE_STORAGE_KEY|modoDoExport|escolherModoDoExport/.test(codigo), false, "a tela voltou a usar a preferência de formato do navegador");
+  assert.equal(/removeItem\(|localStorage\.clear/.test(codigo.slice(codigo.indexOf("const [menuDeExport"), codigo.indexOf("const [menuDeExport") + 3000)), false);
 });
 
 test("K · os módulos novos são puros", async () => {

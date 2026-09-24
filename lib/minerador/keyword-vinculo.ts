@@ -1,6 +1,7 @@
 import { readPublicationLink, readSiteOrigin } from "./publication-link.ts";
 import { isPostLockedToSlug, primaryPostLabel, readPrimaryKeywordPolicy, type PrimaryKeywordPolicy } from "./primary-keyword-policy.ts";
 import { keywordPageTypeStanding, resolveKeywordPageType, type KeywordPageTypeResolution } from "./keyword-page-type.ts";
+import { keywordSubjectLabel, resolveKeywordSubject, type KeywordSubjectResolution } from "./keyword-subject.ts";
 
 /**
  * O VÍNCULO, RESOLVIDO UMA VEZ SÓ.
@@ -40,6 +41,15 @@ export type KeywordVinculo = {
   pageType: KeywordPageTypeResolution;
   /** `Artigo · potencial` ou `Silo · declarado`. */
   pageTypeLabel: string;
+
+  /**
+   * A terceira declaração (SDD 2026-09-24, F1.1): o Assunto. Aditiva e
+   * **presente só quando declarada** — sem Assunto, o objeto é byte a byte o
+   * de antes, e quem não conhece o campo não vê diferença.
+   */
+  subject?: KeywordSubjectResolution;
+  /** `Assunto · declarado` ou `Assunto sem nota`; ausente sem declaração. */
+  subjectLabel?: string;
 };
 
 export type KeywordVinculoInput = {
@@ -70,10 +80,18 @@ export function resolveKeywordVinculo(input: KeywordVinculoInput): KeywordVincul
 
     pageType,
     pageTypeLabel: keywordPageTypeStanding(pageType.type, { declared: pageType.declared }),
+    ...subjectFields(input.semantic),
   };
+}
+
+function subjectFields(semantic: Record<string, unknown> | null | undefined): Pick<KeywordVinculo, "subject" | "subjectLabel"> {
+  const subject = resolveKeywordSubject(semantic);
+  const subjectLabel = keywordSubjectLabel(subject);
+  return subject.declared && subjectLabel ? { subject, subjectLabel } : {};
 }
 
 /** A frase que a Revisão Humana, o cabeçalho e a coluna repetem sem recalcular. */
 export function keywordVinculoSummary(vinculo: KeywordVinculo): string {
-  return `${vinculo.postLabel} · ${vinculo.pageTypeLabel}`;
+  const base = `${vinculo.postLabel} · ${vinculo.pageTypeLabel}`;
+  return vinculo.subjectLabel ? `${base} · ${vinculo.subjectLabel}` : base;
 }

@@ -1,5 +1,166 @@
 # Estado atual — Radar
 
+## Assunto declarado no Radar (F3) e no export "Para escrever" (F4.3) — 2026-09-24
+
+Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), seções F3, F4.3, 6 e 7. O Assunto é o tronco que o humano declara no Minerador e o Arquiteto fixa em `ArticleDNA.subject` (F2 fase A: o schema já aceita). **O Radar lê o Assunto e nunca o troca, promove nem rebaixa** (`AGENTS.md` §7; P8).
+
+```text
+SEM_ASSUNTO            = saída byte a byte igual · hashes dourados, export J e as 13 colunas verdes
+CONSULTAS_GOOGLE       = nenhuma muda (plano idêntico com e sem Assunto, deepEqual)
+YOUTUBE                = DECLARED_SUBJECT dentro do teto de 6 · toma o lugar da última da fila · dito em limitations
+VIRADA                 = seção exigida (DNA_REQUIRED), inclusive sintética com 0 páginas · nunca H2 por decreto
+CRITERIO               = LEXICAL_STEMS (radarSemanticStems) · declarado no alerta e no rótulo
+FINALIZE               = não bloqueia · subject NÃO vai ao bundle · schema .strict() do bundle sem mudança
+ENTREGA_AO_REDATOR     = linhas curtas em importedContext.editorialContext no envio · só com Assunto · dossiê e bundle sem mudança · painel e semeadura do Redator leem pela projeção única
+TELAS_E_ESPECIALISTA   = rótulo "Exigida pelo Assunto" no r3 · prompt das pautas com o Assunto · Telegram e painel do especialista em texto simples ("Tema a aprofundar", "Pergunta")
+CHAMADAS_PAGAS = 0 · LEITURAS_NOVAS_NO_RADAR = 0 · MIGRATIONS = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: NÃO.** Nenhum ArticleDNA real tem `subject` ainda: o comportamento só aparece quando o Arquiteto gravar o Assunto, na F2 fase B (em implementação por outro fluxo). Até lá, todo artigo real segue o caminho sem Assunto.
+
+- **Contexto de pesquisa:** `RadarArticleResearchContext.article.subject = { phrase, note, destinationUrl }`, lido de `ArticleDNA.subject`. Sem Assunto a chave não existe (nem `null`). O `keywordId` do Assunto não entra.
+- **Mapa de uso:** linha `article.subject` no `RADAR_FOUNDATION_USAGE_MAP`, com seis consumidores nomeados (modelo editorial, blueprint, modelo observado, YouTube, especialista e read model portátil).
+- **YouTube:** origem `DECLARED_SUBJECT`, logo depois de `PRIMARY_KEYWORD`, só em plano com camada de vídeo. O plano sai com o mesmo número de consultas que teria sem Assunto; a última da fila sai e isso vai para `limitations`. Vale também em fila curta (3 continua 3): zero chamada a mais.
+- **Especialista:** `RadarR6ExpertTopicContext.articleDna.subject = { phrase, note, destinationUrl, request }`, com o pedido "Aprofundar o Assunto e a virada: o que o leitor desta busca precisa entender para chegar a <Assunto>?". `principal` continua sendo a promessa.
+  - O r7 aceita pauta ligada ao Assunto como necessidade real, medindo só por `phrase` e `note` (o texto do pedido não conta).
+  - Quando nenhuma pauta da IA cobre as raízes da frase, `radarR7SubjectTopic` acrescenta no fim da fila a pauta de aprofundamento, montada só com o que o ArticleDNA declara. Desde a terceira rodada, o texto dessa pauta é a pergunta simples, sem o pedido interno. Continua sujeita à revisão humana individual.
+- **Leitura da amostra** (`observed.declaredSubject`, tipo `RadarDeclaredSubjectSampleReading`): raízes da frase e da nota, sem as da principal, em título, H1, H2 e H3 das páginas comparáveis. Traz `basis` (`PAGES` | `NO_PAGES` | `NO_DISTINCT_STEMS`), `pagesTouching`, `titlePagesTouching`, `headingPagesTouching`, `sampleSize`, `placementSignal`, `label` e `alert`.
+- **Alerta** quando nenhuma raiz toca a amostra: "Nenhuma coincidência de termos entre o Assunto e as páginas das buscas de sustentação (critério por palavras). …" (`RADAR_SUBJECT_NO_TOUCH_ALERT`). Vai para `observed.limitations`, daí para o relatório, `blueprint.limitations` e o bundle. Não bloqueia o FINALIZE e não altera o ArticleDNA. Sigla curta sem termos próprios (ex.: "SEO para clínicas" contra "marketing para clínicas") gera alerta próprio que diz o limite; a virada continua exigida.
+- **Modelo editorial** (`RadarEditorialArticleModel.declaredSubject`, tipo `RadarEditorialSubjectTurn`):
+  - a frase entra nos exigidos de `territorioDoArtigo`;
+  - grupo observado que cobre todas as raízes da frase ganha `dnaRequired` com o motivo próprio (`RADAR_SUBJECT_MUST_COVER_REASON`), sem seção duplicada;
+  - sem candidato, nasce a seção sintética "Virada para <Assunto>" (id `section:subject-turn:<hash>`, `DNA_REQUIRED`, `evidenceRefs` vazio, 0 páginas);
+  - lugar (`placement`): H3 do anfitrião que mais toca as raízes, ou ponto a cobrir no eixo prático. Nunca H2 por decreto, nem com menos de três seções. Única exceção: amostra sem nenhuma seção (`ALONE`), dito em `limitations`;
+  - posição sugerida (`suggestedPosition`, `suggestedPositionLabel`) com contagem ("aparece em N de M página(s)"). Com grupo observado sem posição, o rótulo aponta a seção da amostra que já trata o Assunto. Sem sinal: "Sem sinal na SERP: o Redator decide.";
+  - complemento do H1 (`h1Complement`, com `titlePages` e `headingPages`): sugerido só com as raízes em títulos do topo (piso de 2 páginas). "Assunto em H2/H3" só quando `headingPages > 0`; com 0 de N ou sem leitura, o rótulo é "sem sinal". A principal continua dona do H1.
+- **Blueprint e FINALIZE:** o bloco sintético entra em `blueprint.sections`, com o mesmo id do modelo, só quando nenhum candidato observado cobre o Assunto, e congela como qualquer seção. O resumo do blueprint (`buildRadarBlueprintSummary`) não conta a seção sintética como bloco. `operational-view` a ignora na verificação do dossiê.
+- **CTA:** `conclusion.destinationDirection = "Levar o leitor a <destino>."` ao lado de `callToAction`, que fica intacto. No read model portátil: `editorial.ctaDestination` e `editorial.subjectTurn`. O brief do export técnico ganha "Destino da chamada" **só com Assunto**; sem ele, o J segue idêntico ao dourado.
+- **Export "Para escrever" (F4.3, `lib/radar/portable-writing-export.ts`)**, tudo só com Assunto:
+  - `artigo`: "Assunto (tronco): <frase>" abaixo de "Keyword principal"; o "Não altere" inclui o Assunto declarado;
+  - `promessa_e_leitor`, antes de "Abertura": "Tronco (Assunto): <frase> — <nota>." e "Virada: <onde>, levar o leitor de <principal> a <Assunto>; destino: <url>." Sem sugestão, o "onde" diz que quem redige decide; no caso ponto a cobrir, nomeia o anfitrião. Com destino, "Destino da chamada: …" logo abaixo de "Chamada final", que fica intacta;
+  - `titulo_e_seo`: "Direção do H1: <principal> + complemento "<Assunto>" (sugestão do Radar; a decisão é de quem redige)." ou "Assunto em H2/H3 — o H1 é da principal." (só com sinal em H2/H3) ou `RADAR_WRITING_SUBJECT_H1_NO_SIGNAL`;
+  - `estrutura`: nenhuma linha inventada; a seção da virada vem do modelo do Radar como "Obrigatória pelo ArticleDNA: <motivo próprio>". O filtro que engolia motivos "o ArticleDNA declara" deixa passar exatamente esse motivo. O ponto "virada para <Assunto>" vai à frente do corte de 4 pontos. A seção sintética leva a marca `RADAR_WRITING_SUBJECT_WORKING_TITLE` ("Título de trabalho do Radar: reescreva para o leitor antes de publicar.");
+  - limites de célula e de artigo respeitados com nota de 280 caracteres e URL longa.
+- **Especialista, telas e entrega ao Redator (segunda rodada, mesma data). Verificado no código e confirmado por teste. Validado manualmente: NÃO.**
+  - **Prompt das pautas** (`app/api/editorial/radar-topics/route.ts`): o `SYSTEM_PROMPT` não mudou (sha256 igual ao do HEAD, fixado em teste). Com Assunto, `buildSystemPrompt` junta a ele as linhas de `radarExpertTopicsSubjectPromptLines` (`lib/radar/expert-brief.ts`): frase e nota; a principal continua sendo a promessa; pedido de pautas que aprofundem o Assunto e a virada, com o texto de `subject.request`; origin ArticleDNA, need ligado ao Assunto e reference da proveniência; proibido trocar a principal ou reescrever o Assunto. Sem Assunto, o prompt do sistema é o próprio `SYSTEM_PROMPT`. A garantia continua no r7; o prompt só pede.
+  - **Telegram** (`buildRadarExpertBriefTelegramMessage`), texto da segunda rodada, **substituído na terceira** (abaixo): com Assunto, "Assunto (tronco): <frase>" e "Pedido: <request>" logo depois de "Tema:". Nota, destino e a palavra ArticleDNA não vão ao especialista. Pauta persistida sem `request` monta o pedido pela frase (`radarSubjectDeepeningRequest`). Sem Assunto, a mensagem bate com os hashes do HEAD.
+  - **Painel do especialista** (`radar-expert-brief-panel.tsx`): só com Assunto, bloco `radar-specialist-subject` no cabeçalho com frase, nota e pedido (na terceira rodada: "Tema a aprofundar", nota e "Pergunta"), em `text-sm` com tokens. Uma leitura só (`radarExpertBriefSubjectOf`) serve o painel (`context.articleDna`) e o Telegram (`radarContext.article` persistido).
+  - **Telas do r3**, lidas pelo helper puro `modules/radar/radar-subject-turn-view.ts` (`RADAR_SUBJECT_TURN_SCREEN_LABEL = "Exigida pelo Assunto"`, contagens e numeração):
+    - workbench: "Ver candidatos observados · N" conta só os blocos observados; com a virada, "Ver candidatos observados · N · 1 exigida pelo Assunto";
+    - r3-blueprint: a virada fica sem número, com o rótulo "Exigida pelo Assunto" (`text-sm text-context-accent`) no lugar de prioridade e posição; os observados continuam numerados de 1 a N;
+    - artigo-modelo: selo "Exigida pelo Assunto" na virada (outra seção exigida pelo DNA mantém o selo "Exigido pelo ArticleDNA"); bloco do Assunto com "Assunto (tronco)", "Onde virar" (`suggestedPositionLabel`), "H1" (`h1Complement.label`), contagem na amostra e alerta (`text-sm text-warning`); "Destino da chamada" na Conclusão;
+    - o alerta aparece em 14px nas limitações do blueprint e no bloco da virada. `radar-r3-serp-panel` não mudou: as limitações dele vêm do modelo competitivo, que não recebe o alerta do Assunto;
+    - sem Assunto, o markup do blueprint, do cartão de resumo e do artigo-modelo é igual ao do HEAD (renderizado com as mesmas fixtures, hashes fixados no teste).
+  - **Entrega ao Redator** (`lib/server/radar-writer-send.ts`, `lib/redator/radar-import.ts`, `lib/redator/radar-subject-turn.ts`):
+    - com Assunto, o envio grava linhas curtas em `importedContext.editorialContext` (`radarWriterSubjectTurnLines`): Tronco; Virada (onde virar, da principal ao Assunto, com o destino); Seção da virada (a sintética avisa que o título é de trabalho do Radar); Direção do H1, ou "Assunto em H2/H3 — o H1 é da principal.", ou sem sinal; Destino da chamada; Alerta;
+    - origem: `authorities.google.articleModel.declaredSubject` e o `subject` do ArticleDNA fixado pela identidade do envio. A sugestão só vale se a frase do artigo-modelo for a mesma do ArticleDNA; sem fotografia do Google, ou com virada de outra frase, as linhas devolvem a decisão a quem redige sem inventar lugar;
+    - o texto é o do CSV "Para escrever" (teste linha a linha em três Assuntos). Diferença intencional: o destino vai como declarado, sem a limpeza de `utm_*` do CSV, porque é o endereço que o Guardião confere;
+    - com Assunto, o `writerMayNot` gravado no recibo e no documento (`radarWriterDossierOf`) ganha "trocar ou remover o Assunto declarado" (`radarWriterMayNotFor`);
+    - **não vai pelo dossiê:** o bundle V3 (`.strict()`, com hash) não traz o artigo-modelo nem `blueprint.sections`; bundle e dossiê não mudam (invariante 78). Sem Assunto, `editorialContext: []` e o documento do envio é igual ao do HEAD (snapshot sha `8b366688…`, medido em quatro variações). O consumo no Redator está em `docs/07-redator/estado-atual.md`, mesma data.
+  - **Textos corrigidos na revisão:** `sampleLabel` diz "Palavras do Assunto aparecem em N de M página(s) da amostra (títulos e subtítulos)."; os rótulos de posição e de H1 do modelo trocaram "as raízes do Assunto" por "palavras do Assunto" (prefixos reconhecidos pelo CSV e pelo Redator intactos). Sem principal, a virada diz "levar o leitor da keyword principal a …", no CSV e no Redator.
+  - **Arquivos:** novos `modules/radar/radar-subject-turn-view.ts`, `lib/redator/radar-subject-turn.ts`, `tests/radar-assunto-telas.test.mts`, `tests/radar-assunto-telas-fixtures.mts` e `tests/radar-assunto-entrega-redator.test.mts`; alterados `app/api/editorial/radar-topics/route.ts`, `lib/radar/expert-brief.ts`, `declared-subject.ts`, `editorial-article-model.ts`, `portable-writing-export.ts`, `lib/server/radar-writer-send.ts`, `lib/redator/radar-import.ts`, `modules/radar/radar-expert-brief-panel.tsx`, `radar-r3-workbench.tsx` (CRLF preservado, 1532/1532), `radar-r3-blueprint.tsx` e `radar-article-model.tsx`; testes `radar-assunto-f3` e `radar-to-writer-handoff-1` ajustados. `radar-page.tsx` não foi tocado.
+  - **Testes e suítes:** `radar-assunto-telas` 14/14; `radar-assunto-entrega-redator` 9/9; um teste novo em `radar-to-writer-handoff-1` (envio real com portas: recibo e documento com a mesma lista, `editorialContext` igual às linhas da virada da F3, bundle sem artigo-modelo); `test:radar` 2684/2684 (hashes dourados, J e 13 colunas verdes; parte do aumento vem do fluxo concorrente do Arquiteto); `test:specialist` 265/265; `test:redator` 335/335; `test:redator:mcp` 117/117; `test:redator:dom` 14/14; `test:editorial` 170/174 com as 4 falhas de base por nome; `test:serp-cache` 34/34; `tsc --noEmit` exit 0; ESLint 0 erros (1 aviso antigo do HEAD em `radar-r3-blueprint.tsx`: `RadarVideoBrief` sem uso); guard visual estrito sem violação nos arquivos de `modules/radar`, nenhum `text-xs` novo; `git diff --check` limpo. Chamadas pagas: 0. Mutantes não rodados (dev server possivelmente no ar).
+- **Texto simples ao especialista externo e Assunto no painel do Redator (terceira rodada, mesma data). Verificado no código e confirmado por teste. Validado manualmente: NÃO.**
+  - **Rótulos** (`lib/radar/expert-brief.ts`):
+    - `RADAR_EXPERT_SUBJECT_LABEL = "Tema a aprofundar"` (era "Assunto (tronco)");
+    - novo `RADAR_EXPERT_SUBJECT_QUESTION_LABEL = "Pergunta"`;
+    - `radarExpertSubjectQuestion(frase)` reutiliza `radarSubjectReaderQuestion` (`lib/radar/declared-subject.ts`): "o que o leitor desta busca precisa entender para chegar a <frase>?";
+    - `RadarExpertBriefSubject` ganhou o campo `question`.
+  - **Telegram:** com Assunto, a mensagem traz "Tema a aprofundar: <frase>" e "Pergunta: …" depois de "Tema:", sem "tronco", "virada", "ArticleDNA" nem "Pedido:".
+    - Se a pergunta do Assunto já está na lista numerada (a comparação ignora maiúsculas e espaços), o cabeçalho leva só "Tema a aprofundar". Para isso, `radarExpertBriefSubjectLines(subject, { withQuestion })` ganhou a opção; a assinatura antiga continua valendo.
+    - Uma pauta persistida com `request` sai em linguagem simples sem regravar: a pergunta é montada a partir da frase.
+    - Sem Assunto, a mensagem bate com os hashes do HEAD.
+  - **Painel do especialista** (`radar-expert-brief-panel.tsx`): mostra "Tema a aprofundar", a nota e "Pergunta", sem o pedido interno.
+  - **Pauta do r7** (`radarR7SubjectTopic`): o `text` é `radarSubjectReaderQuestionText(frase)` ("O que o leitor desta busca precisa entender para chegar a <frase>?"), e não mais o `request`. Assim, uma pauta aprovada sem edição não leva jargão ao especialista. Justificativa e `need` não mudaram.
+  - **Prompt das pautas:** o `request` da SDD continua no prompt interno (`radarExpertTopicsSubjectPromptLines`). Só com Assunto, esse prompt ganhou uma linha que manda escrever o `text` da pauta em linguagem simples, sem as palavras Assunto, tronco, virada ou ArticleDNA, com um exemplo da pergunta. Sem Assunto, a lista continua vazia e o `SYSTEM_PROMPT` fica byte a byte igual. A rota `app/api/editorial/radar-topics/route.ts` não mudou nesta rodada.
+  - **No Redator:** as linhas que o envio grava em `importedContext.editorialContext` agora chegam ao painel dos fundamentos e à semeadura de roteiro e carrossel pela projeção única `radarFoundationsOf` (invariante 78). Registro em `docs/07-redator/estado-atual.md`, mesma data.
+  - **Arquivos:** `lib/radar/expert-brief.ts`, `declared-subject.ts` e `r7-sequential.ts`; `modules/radar/radar-expert-brief-panel.tsx`; testes `tests/radar-assunto-telas.test.mts` (15/15: anti-jargão, `request` preservado no prompt e um teste de ponta a ponta do Telegram) e `tests/radar-assunto-f3.test.mts` (28/28). Todos LF.
+  - **Suítes:**
+    - `test:radar` 2685/2685 (hashes dourados, J e 13 colunas verdes), relatado pela rodada de correção. `radar-assunto-telas` e `radar-assunto-f3` foram reexecutados ao documentar (43/43);
+    - `test:redator` 358/358, `test:redator:mcp` 117/117 e `test:redator:dom` 19/19;
+    - `test:editorial` 170/174 e `test:visual-system` 23/28, com as falhas de base pelo nome;
+    - `tsc --noEmit` exit 0; ESLint sem erros;
+    - guard visual estrito PASS em `expert-brief.ts`, `r7-sequential.ts`, `declared-subject.ts` e no painel do especialista;
+    - chamadas pagas: 0. Nenhuma mensagem real foi enviada ao Telegram.
+- **Arquivos (primeira rodada):**
+  - novos: `lib/radar/declared-subject.ts`, `tests/radar-assunto-f3.test.mts`, `tests/radar-assunto-f4.test.mts`;
+  - alterados: `lib/radar/article-research-context.ts`, `foundation-usage-map.ts` e `youtube-search-queries.ts` (os três CRLF preservados), `r6-sequential.ts`, `r7-sequential.ts`, `competitive-observed-model.ts`, `editorial-article-model.ts`, `editorial-blueprint.ts`, `portable-read-model.ts`, `portable-export.ts`, `operational-view.ts`, `portable-writing-export.ts`; fixture `tests/radar-portable-writing-fixtures.mts` (nova `vistaDoGoogleSobre`, `vistaDoGoogle` intacta).
+  - `investigation-finalization.ts` e o schema do bundle **não** mudaram (teste estrutural).
+- **Testes (primeira rodada):**
+  - `radar-assunto-f3` 28/28: contexto sem chave sem Assunto; mapa de uso; plano Google idêntico; YouTube no teto; especialista e pauta garantida; virada com 0 páginas não vira H2; grupo observado sem duplicata; posição e H1 com contagem; alerta com critério; CTA; pipeline real até o FINALIZE com `subject` fora do bundle e schema do bundle intacto; estrutural: nenhum arquivo do Radar atribui `.subject`, usa `ArticleDNASchema`/`DeclaredSubjectSchema`, importa `arquiteto-persistence` ou grava `editorial_artifact_versions`; fetch sentinela;
+  - `radar-assunto-f4` 16/16: as 13 colunas sem Assunto iguais ao snapshot medido antes da mudança; J sem as linhas do Assunto; as linhas novas nas colunas certas; limites; `writerMayNot` e guardião (Redator).
+- **Suítes (primeira rodada; a rodada final está acima):** `test:radar` 2660/2660 (hashes dourados e J verdes); `test:redator` 335/335; `test:redator:mcp` 112/112; `test:editorial` 170/174 e `test:arquiteto` 2272/2274 com as mesmas falhas de base por nome (0 novas); `test:serp-cache` 34/34; `tsc --noEmit` limpo; ESLint 0 problemas nos arquivos de código; `git diff --check` limpo.
+- **Limites e riscos:**
+  - **critério lexical, não semântico:** um Assunto próximo em sentido, dito com outras palavras, cai em "sem coincidência". O alerta diz o critério e não bloqueia; a leitura por sentido está no backlog;
+  - palavras de menos de 4 letras não contam; palavras da nota também contam como toque, e uma palavra genérica pode tocar página sem relação;
+  - na investigação já finalizada, o transporte compacto chega sem páginas: a leitura cai em `NO_PAGES` (sem alerta novo, sem H1, sem posição pela ordem); o alerta congelado segue no bundle;
+  - YouTube: a consulta do Assunto sempre tira a última da fila, mesmo abaixo de 6;
+  - um bloco observado só carrega a virada se virar candidato do blueprint (o conceito precisa citar a entidade da principal); senão nasce a sintética;
+  - no blueprint, a cobertura observada é medida pelo `workingTitle`; no modelo, pelas raízes do grupo. Os dois critérios podem divergir (o bundle congelaria a sintética enquanto o modelo usa o bloco observado): falta teste de coerência;
+  - a seção sintética continua em `blueprint.sections`; nas telas do r3 ganhou rótulo próprio (segunda rodada). Na lista do blueprint a virada fica sem prioridade nem posição de propósito: ali ela é sempre `FLEXIBLE`; o lugar sugerido está no artigo-modelo ("Onde virar");
+  - a limpeza de URL do CSV tira `utm_*`, `gclid` e similares também do destino do Assunto (o `editorialContext` do Redator leva o destino como declarado);
+  - o texto de `RADAR_SUBJECT_MUST_COVER_REASON` ("…e a arquitetura decide onde") foi mantido porque a SDD o fixa, mas repete "ArticleDNA" na marcação do CSV e tensiona com "quem redige decide": proposta de adendo no backlog;
+  - a posição sugerida, o complemento do H1, a seção que carrega a virada e o alerta **chegam ao Redator por `importedContext.editorialContext`, gravado no envio, e não pelo dossiê**. Isso diverge do texto da SDD F4.1 ("chega pelo dossiê") e da F4.4 ("nenhuma leitura nova", do lado do Redator): **adendo técnico proposto, aguarda aprovação do dono antes do commit** (backlog);
+  - no Redator, o painel e a semeadura de roteiro e carrossel passaram a mostrar essas linhas pela projeção `radarFoundationsOf` (terceira rodada). O MCP ainda as lê por conta própria: é pendência do Redator (ver `docs/07-redator/estado-atual.md`);
+  - o r7 acrescenta a pauta do Assunto quando nenhuma cobre a frase: com 5 pautas da IA, a lista chega a 6, e a tela e o fluxo não foram conferidos com 6;
+  - pautas persistidas antes da F3 não têm `article.subject` em `radarContext`: a mensagem do Telegram segue sem a linha do Assunto até a pauta ser salva de novo pelo painel;
+  - desde a terceira rodada, a mensagem, o painel do especialista e a pauta do r7 dizem "Tema a aprofundar" e "Pergunta", em linguagem simples. Isso diverge do texto que a SDD fixa (F3.1 e §7: "Assunto (tronco)" e "Pedido: Aprofundar o Assunto e a virada…"). **O adendo à F3.1 precisa registrar a troca** (backlog); a SDD não foi editada;
+  - documento enviado antes desta mudança, com ArticleDNA que já tinha `subject`, tem `writerMayNot` gravado sem a proibição e `editorialContext` vazio: reenviar resolve.
+
+## Export "Para escrever" — 2026-09-23
+
+Pedido do dono do produto: o CSV por silo tinha muitas colunas técnicas que
+não servem para escrever. Agora ele leva só o que é indispensável para
+escrever o artigo com outra ferramenta ou outra IA.
+
+```text
+FORMATO_PADRAO         = "Para escrever" · 13 colunas fixas · ~10 mil caracteres por artigo
+FORMATO_TECNICO        = "Completo (técnico)" · byte a byte igual ao anterior (saída dourada J)
+ROTA                   = POST /api/editorial/radar-export · mode "writing" | "full" opcional · sem mode = resposta de antes
+LEITURAS_NOVAS         = 0 · mesmas montadas, lentes e plano do formato completo (teste da rota sobre PostgREST simulado)
+CHAMADAS_PAGAS         = 0 · MIGRATIONS = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste** (`test:radar` 2615/2615, tsc limpo).
+
+- **Colunas, sempre nesta ordem:** `ordem`, `pode_escrever`, `artigo`, `promessa_e_leitor`, `titulo_e_seo`, `estrutura`, `cobrir_e_superar`, `serp_resumida`, `fontes_e_especialista`, `links_internos`, `plano_visual`, `produtos`, `prompt`.
+- **Linha de topo:**
+  - "Silo" no export por silo: ordem narrativa inteira, SiloPage, tema, fronteira e regras gerais;
+  - "Marca" no avulso e no arquivo sem silo.
+- **`pode_escrever`:** Sim, Com ressalva ou Não, com o motivo.
+  - A linha bloqueada leva só o prompt do bloqueio.
+  - O roteiro de vídeo sai só com ordem, veredito, artigo e prompt.
+- **Guardas:**
+  - não gera título, ALT, legenda nem prompt de imagem: sai o que foi gravado, ou a falta com o motivo;
+  - sem FAQ (AGENTS 13);
+  - terceiros são pesquisa;
+  - a estrutura e a extensão são decisão de quem redige (invariante 48: o Planejador saiu do pipeline e quem escreve também planeja);
+  - conteúdo publicado leva URL, canonical e estado da principal; sem política, "estado desconhecido — não trocar até decisão humana";
+  - Silo sem plano de links diz isso e não inventa link.
+- **Limpeza:** sem UUID, hash, instante ISO, código cru, provider nem rastreio de URL. A Amazon perde tag e ref. Toda célula tem guarda contra fórmula do Excel.
+- **Limites:** célula até 6.000 caracteres (estrutura 8.000), artigo até 20.000. O corte começa por `serp_resumida` e é sempre declarado.
+- **Aviso de tamanho e bloqueados:** o aviso de tamanho usa a conta do formato escolhido. O aviso do silo conta os artigos bloqueados.
+- **Nomes:** `silo-<nome>-para-escrever-<data>[-parcial].csv`, `sem-silo-para-escrever-<data>.csv`, `artigos-para-escrever-<data>.csv` e `silos-para-escrever-<data>.zip`. Os nomes do formato técnico não mudaram.
+- **Arquivos:**
+  - novos: `lib/radar/portable-writing-export.ts`, `lib/radar/portable-writing-batch.ts`, `tests/radar-portable-writing-export.test.mts`, `tests/radar-export-escrita-rota.test.mts` e `tests/radar-portable-writing-fixtures.mts` (fora do glob);
+  - acréscimos compatíveis: `lib/radar/portable-silo-export.ts` (campo `writing` opcional), `portable-export-estimate.ts` (modos, `exportMode` opcional), `portable-silo-scope.ts` (`blocked` opcional) e a rota (`mode` opcional);
+  - `tests/radar-export-leitura-por-artigo.test.mts`: a regex do E4 aceita a linha `exportMode`.
+- **Card "Exportar para escrever"** (pedido: "só os que realmente são úteis"; opção escolhida "2 opções + Avançado fechado"):
+  - o botão Exportar abre um diálogo não modal. O `role="menu"` saiu;
+  - duas opções de rádio, ambas no formato para escrever:
+    - "Silo completo (recomendado)", o padrão, com a contagem de prontos pelo escopo do silo;
+    - "Só os artigos selecionados"; sem seleção, vão todos os prontos do Radar, a regra de antes;
+  - um botão "Exportar CSV";
+  - "Avançado (auditoria)" fechado no rodapé, com "Silo completo · técnico", "Artigos selecionados · técnico", "Planilha atual" e a dica do Excel;
+  - saíram o seletor "Formato do CSV", os textos longos, o selo e o item "Dossiês editoriais finalizados";
+  - Esc fecha, e o foco volta ao botão, inclusive depois do download;
+  - a preferência de formato antiga não é mais lida nem gravada. A chave que já existir no navegador não é apagada (AGENTS §10);
+  - arquivos: `modules/radar/radar-page.tsx`, `lib/radar/portable-silo-scope.ts` (`radarSiloExportReadySummary`, aditiva) e `portable-export-estimate.ts` (dica do Excel encurtada). Testes 11, 12, integração serp-silo, leitura-por-artigo e writing-export atualizados, com o inventário exato de 13 `radar-export-*` e 4 caminhos de export.
+- **Limitações:**
+  - card não validado na tela: servidor não subiu nesta tarefa;
+  - voz, tom, autor e revisor não saem no arquivo. A linha de topo pede para colá-los. Ler do BrandDNA seria leitura nova de outro módulo: pendência no backlog.
+  - Os artigos testados pelo usuário ainda usavam os processos antigos. O formato com artigo novo de ponta a ponta não foi homologado.
+
 ## As 4 lentes no Radar, standing congelado, tela das lentes e export — 2026-09-23
 
 ```text

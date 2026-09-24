@@ -985,9 +985,17 @@ export const writerBundlePathDepth = (caminho: readonly string[]) => caminho.len
  * A PROJEÇÃO EDITORIAL DO ArticleDNA nos fundamentos (SDD §4.1). Medida em
  * 2026-09-23: no máximo 872 B. O resto do ArticleDNA sai pela fatia
  * `dna.article/<versionId>`, por chave.
+ *
+ * `subject` (SDD do Assunto, F4.1): o Assunto declarado, quando existe. Com a
+ * nota no teto de 280 caracteres e o destino, a projeção sobe para ≤ ~1,6 kB,
+ * longe do teto de 24 kB dos fundamentos. Sem Assunto, o campo não existe no
+ * ArticleDNA e a projeção não muda: ausente não vira `null`.
  */
 export const WRITER_ARTICLE_DNA_FOUNDATION_FIELDS = Object.freeze([
   "promise", "audience", "problem", "desiredResult", "angle", "mainIntent", "journeyStage", "antiCannibalizationBoundary",
   "requiredTopics", "excludedSubjects", "entities", "evidenceNeeded", "cta", "differentiation", "primaryKeywordPolicy",
-  "serpAssessmentRef", "territoryRef",
+  "serpAssessmentRef", "territoryRef", "subject",
 ] as const);
+
+/** O teto da projeção editorial do ArticleDNA com Assunto (F4.1). */
+export const WRITER_ARTICLE_DNA_FOUNDATION_MAX_BYTES = 1_638;

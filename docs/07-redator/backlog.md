@@ -1,5 +1,40 @@
 # Backlog — Redator
 
+## Assunto declarado (F4) — 2026-09-24
+
+- [x] F4.1: `subject` nos fundamentos (mesma projeção, teto 1.638 B), proibição do Assunto em `writerMayNot` só com Assunto, frase da virada nas instruções do MCP.
+- [x] F4.2 no domínio: `runGuardian` avisa (coverage e cta) com `context.subject`, sem bloquear.
+- [x] Sem Assunto: projeção, `writerMayNot` (mesmo hash) e Guardião idênticos.
+- [x] **Ligar o Guardião ao Assunto em produção** (segunda rodada, opção a): `g_articleDnaRef` no `WRITER_GUARDIAN_SELECT` e leitura só de `payload->subject` (< 1 kB, na Marca); MCP e rota do painel passam a referência; `assunto_nao_lido` em `notices` quando a leitura falha; guarda da Fase 0 atualizada com justificativa. A opção (b) foi descartada: nenhum chamador tinha o Assunto.
+- [x] **Unificar `writerMayNot`** (segunda rodada): proibição gravada no envio, no recibo e no documento; todas as ferramentas mostram a mesma lista em documentos enviados a partir de agora.
+- [x] **Receber a virada sugerida pelo Radar** (segunda rodada): linhas em `importedContext.editorialContext` gravadas no envio (Tronco, Virada, Seção da virada, Direção do H1, Destino, Alerta), lidas por `get_writer_foundations`, material por seção, pacote da IA interna (leitura estreita só com Assunto) e `get_writer_brief`. A seção sintética não chega pelo dossiê (o V3 não tem `blueprint`); chega pela linha "Seção da virada".
+- [x] Revisão: `editorialContext` fora do cabeçalho comum (leitura própria, só com Assunto); `subject` entregue reduzido a `{ phrase, note, destinationUrl }` nos fundamentos, no material e no pacote.
+- [ ] **Aprovar o adendo técnico à SDD F4.1/F4.4 (dono), antes do commit:** a virada chega por `editorialContext`, não pelo dossiê; há leituras novas estreitas no Guardião, nos fundamentos, no material, no briefing e, desde a terceira rodada, na semeadura (`d_editorialContext`, 2 B sem Assunto). Conteúdo em `estado-atual.md`, mesma data.
+- [x] **Painel do Redator com o Assunto** (terceira rodada):
+  - `radarFoundationsOf` passa `importedContext.editorialContext` a `radarFoundationsOfDossier` (segundo parâmetro opcional; a chave só existe com lista não vazia, no fim do objeto);
+  - `radarFoundationsSubjectOf` arruma as linhas para a tela;
+  - `WriterRadarFoundationsPanel` mostra o bloco do Assunto como primeiro bloco depois do cabeçalho (e não depois de "Keyword", como planejado), em `text-sm` com tokens. O aviso de título de trabalho e o alerta ficam em `text-warning`;
+  - roteiro e carrossel recebem as mesmas linhas na semeadura, pela mesma projeção (invariante 78), e a leitura estreita pega `d_editorialContext` na mesma consulta;
+  - sem Assunto, projeção, painel (normal e compacto) e prompts ficam iguais ao HEAD, com golden. Guard visual estrito sem dívida.
+- [x] **Resumo do Guardião no painel** (terceira rodada):
+  - contagens e rótulo vêm do relatório do servidor quando ele existe (`writerGuardianPanelSummary`);
+  - `notices` aparecem como frase (`writerGuardianNoticeText`), inclusive o `assunto_nao_lido`;
+  - o resumo está em `text-sm` com tokens;
+  - a aprovação também é barrada por bloqueio visto só pelo servidor (`writerGuardianApprovalBlockingCount`);
+  - a dívida de `professional-writer.tsx` caiu de 43 para 41 e está travada em teste.
+- [ ] **Aside do Guardião em 9px (tarefa visual própria):** título, botões e a lista "Achados por seção", inclusive os achados do Assunto, seguem em `text-[9px]` com `slate`/`amber`. Levar o bloco inteiro a 14px e tokens; isso também baixa a dívida de `professional-writer.tsx` (41).
+- [ ] **MCP pela projeção única (rodada própria):** `get_writer_foundations` e o material por seção (`lib/server/writer-evidence-reader.ts`) somam `editorialContext` por fora de `radarFoundationsOfDossier`, com a presença lida do `subject` do ArticleDNA. Para unificar, medir contra os goldens do `test:redator:mcp` e manter "sem Assunto, byte a byte".
+- [ ] **Decidir: Assunto estruturado no painel.** Frase, nota e destino saem do texto das linhas, porque `{ phrase, note, destinationUrl }` não está em `radarFoundationsOf`. Um campo estruturado exigiria mudar o envio (`radar-import`).
+- [ ] Caso limite: documento enviado antes desta mudança com ArticleDNA que já tinha `subject` tem `writerMayNot` sem a proibição e `editorialContext` vazio. Reenviar resolve; decidir se vale avisar no painel.
+- [ ] **Homologar (usuário), depois da F2 fase B:**
+  - enviar ao Redator um artigo real com Assunto e outro sem; conferir no documento `editorialContext` e `writerMayNot` (vazio e lista de sempre no sem Assunto);
+  - ler `get_writer_foundations` e `get_writer_brief` pelo MCP e conferir `article.fields.subject`, `editorialContext` e a proibição em `writerMayNot`;
+  - rodar `get_writer_guardian` e o Guardião do painel sem a virada e sem o link (dois avisos, sem bloqueio) e depois com os dois escritos (avisos somem);
+  - exportar o CSV "Para escrever" do artigo com Assunto e comparar as linhas com o `editorialContext`.
+  - abrir no painel do Redator o artigo com Assunto e conferir o bloco: frase e nota, onde virar, seção da virada (com o aviso de reescrever quando for sintética), H1, destino e alerta. No artigo sem Assunto, conferir que não aparece bloco novo;
+  - gerar roteiro e carrossel do artigo com Assunto (IA real, feito pelo usuário) e conferir a virada;
+  - no Guardião do painel, conferir que as contagens batem com a lista e que a falha de leitura do Assunto aparece como frase.
+
 ## Leitor de evidências — 2026-09-23
 
 - [x] Fase 0: leituras estreitas.

@@ -30,6 +30,34 @@ export const RADAR_WRITER_MAY_NOT = [
 ] as const;
 
 /**
+ * ===== O ASSUNTO DECLARADO — SDD do Assunto, F4.1 =====
+ *
+ * O tronco editorial que o humano declarou no Minerador e o Arquiteto fixou no
+ * ArticleDNA (`ArticleDNA.subject`). Quem escreve decide ONDE fazer a virada e
+ * se usa o complemento no H1 (invariante 48); trocar ou remover o Assunto não
+ * é decisão de quem escreve.
+ *
+ * A proibição só entra quando HÁ Assunto: sem ele, a lista devolvida é a
+ * própria `RADAR_WRITER_MAY_NOT` — mesma referência, mesmos itens, mesmo hash.
+ */
+export const RADAR_WRITER_MAY_NOT_SUBJECT = "trocar ou remover o Assunto declarado" as const;
+
+export function radarWriterMayNotFor(subject: { phrase?: unknown } | null | undefined): readonly string[] {
+  const temAssunto = typeof subject?.phrase === "string" && subject.phrase.trim().length > 0;
+  return temAssunto ? [...RADAR_WRITER_MAY_NOT, RADAR_WRITER_MAY_NOT_SUBJECT] : RADAR_WRITER_MAY_NOT;
+}
+
+/**
+ * A lista já gravada (dossiê do documento), acrescida da proibição do Assunto
+ * quando o ArticleDNA fixado o declara e a gravação é anterior a ela. Sem
+ * Assunto, devolve a lista recebida sem tocar.
+ */
+export function radarWriterMayNotWithSubject(base: readonly string[], subject: { phrase?: unknown } | null | undefined): readonly string[] {
+  if (radarWriterMayNotFor(subject) === RADAR_WRITER_MAY_NOT) return base;
+  return base.includes(RADAR_WRITER_MAY_NOT_SUBJECT) ? base : [...base, RADAR_WRITER_MAY_NOT_SUBJECT];
+}
+
+/**
  * ==================== O QUE ELE PODE DECIDIR ====================
  *
  * A contraparte da lista acima, escrita porque "não pode" sem "pode" produz

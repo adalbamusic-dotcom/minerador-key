@@ -283,27 +283,51 @@ test("§1 e §23 · a barra tem UM botão Exportar, com os dois produtos dentro"
    * botão Exportar, com os produtos dentro" — o que mudou foi a contagem de
    * produtos (3 itens + o menu), e não a regra de um botão só na barra.
    */
-  assert.deepEqual(botoesDeExport.sort(), [
-    'data-testid="radar-export-dossiers"',
+  /*
+   * 2026-09-23 · O CARD "EXPORTAR PARA ESCREVER".
+   *
+   * O dono do produto achou o menu bagunçado e aprovou um card: escolha de
+   * escopo, um botão "Exportar CSV" (sempre no formato para escrever) e um
+   * "Avançado (auditoria)" com o formato técnico e a planilha da tela. A trava
+   * continua a mesma — um botão Exportar na barra, com os produtos dentro —;
+   * mudaram as marcas dos caminhos de clique.
+   */
+  assert.deepEqual([...botoesDeExport].sort(), [
+    'data-testid="radar-export-avancado"',
+    'data-testid="radar-export-avancado-toggle"',
+    'data-testid="radar-export-csv"',
+    'data-testid="radar-export-dossiers-tecnico"',
+    'data-testid="radar-export-escopo"',
+    'data-testid="radar-export-escopo-selecionados"',
+    'data-testid="radar-export-escopo-silo"',
     'data-testid="radar-export-grid"',
     'data-testid="radar-export-menu"',
-    'data-testid="radar-export-silos"',
-  ], "§23 · o menu e os três itens, e nada além disso");
-  const itensDoMenu = botoesDeExport.filter(item => item !== 'data-testid="radar-export-menu"');
-  assert.equal(itensDoMenu.length, 3, "§23 · cada item aparece uma vez só");
-  const ordemNoMenu = [...barra.slice(barra.indexOf('data-testid="radar-export-menu"')).matchAll(/data-testid="(radar-export-(?:silos|grid|dossiers))"/g)].map(item => item[1]);
-  assert.deepEqual(ordemNoMenu, ["radar-export-silos", "radar-export-grid", "radar-export-dossiers"],
-    "2026-09-23 · o export recomendado (silos completos) é o PRIMEIRO item do menu");
+    'data-testid="radar-export-painel"',
+    'data-testid="radar-export-resumo-selecao"',
+    'data-testid="radar-export-resumo-silo"',
+    'data-testid="radar-export-silos-tecnico"',
+  ], "§23 · o botão da barra e as marcas do card, e nada além disso");
+  assert.equal(new Set(botoesDeExport).size, botoesDeExport.length, "§23 · cada marca aparece uma vez só");
+  /* Um caminho de export sem marca nova também conta: são quatro cliques que exportam, e só quatro. */
+  const cliquesQueExportam = [...barra.matchAll(/onClick=\{\(\) => \{[^\n]*?(?:exportarSilosCompletos|exportarDossiesFinalizados|grid\.exportRows)\(/g)];
+  assert.equal(cliquesQueExportam.length, 4, "§23 · Exportar CSV, os dois técnicos e a planilha — nada além disso");
+  assert.equal(/Dossiês editoriais finalizados|data-testid="radar-export-silos"|data-testid="radar-export-dossiers"/.test(barra), false,
+    "§23 · um item do menu antigo voltou ao card");
+  const ordemNoCard = [...barra.slice(barra.indexOf('data-testid="radar-export-menu"')).matchAll(/data-testid="(radar-export-(?:csv|silos-tecnico|dossiers-tecnico|grid))"/g)].map(item => item[1]);
+  assert.deepEqual(ordemNoCard, ["radar-export-csv", "radar-export-silos-tecnico", "radar-export-dossiers-tecnico", "radar-export-grid"],
+    "2026-09-23 · o botão 'Exportar CSV' vem antes do Avançado");
 
   /* O rótulo antigo não sobreviveu como botão de topo. */
   assert.equal(/CSV · Dossiês finalizados/.test(barra), false, "§1 · o botão separado continua na barra");
 
-  /* Os dois itens estão DENTRO do menu, e o menu abre por estado próprio. */
+  /* Os produtos estão DENTRO do card, e o card abre por estado próprio. */
   const menu = barra.slice(barra.indexOf('data-testid="radar-export-menu"'));
+  assert.match(menu, /Exportar para escrever/);
   assert.match(menu, /Planilha atual/);
-  assert.match(menu, /Dossiês editoriais finalizados \(CSV\)/);
+  assert.match(menu, /Avançado \(auditoria\)/);
   assert.match(menu, /grid\.exportRows\(grid\.queriedRows, "planilha"\)/);
-  assert.match(menu, /void exportarDossiesFinalizados\(\)/);
+  assert.match(menu, /void exportarDossiesFinalizados\("full"\)/);
+  assert.match(menu, /exportarDossiesFinalizados\("writing"\)/);
 
   /* §3 do gate anterior continua valendo: o FINALIZE não baixa nada. */
   const finalizar = pagina.slice(pagina.indexOf("const finalizarInvestigacao"), pagina.indexOf("const finalizarInvestigacao") + 3000);

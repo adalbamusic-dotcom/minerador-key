@@ -17,6 +17,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { ArticleDNA } from "../lib/arquiteto/contracts.ts";
 import { articleEditorialDiff } from "../lib/arquiteto/article-editorial-diff.ts";
+import { EDITORIAL_DECISION_FIELDS } from "../lib/arquiteto/article-editorial-diff.ts";
 
 const marcaId = process.argv[2];
 if (!marcaId) {
@@ -64,13 +65,9 @@ for (const linha of linhas) {
 
 /* Campos que mudam a decisão editorial. `alerts` e carimbos ficam de fora: */
 /* eles mudam a cada gravação e diriam "mudou" sobre um no-op.              */
-const CAMPOS_ARTICLE = [
-  "principalKeywordId", "secondaryKeywordIds", "narrativeReinforcementIds",
-  "territoryRef", "siloId", "suggestedSlug", "canonical",
-  "architectureStatus", "primaryKeywordPolicy", "classification",
-  "unitClassification", "unitPurpose", "serpAssessmentRef", "kgrIdentity",
-  "publishedIdentityRef",
-] as const;
+/* A lista do ArticleDNA é a MESMA da mesa (inclui o Assunto preso): uma   */
+/* lista própria aqui divergiria dela no primeiro campo novo.               */
+const CAMPOS_ARTICLE = EDITORIAL_DECISION_FIELDS;
 const CAMPOS_SILO_PAGE = [
   "siloId", "slug", "canonical", "h1", "seoTitle", "publishedIdentityRef", "sections",
 ] as const;

@@ -228,10 +228,24 @@ const formaDoArticleDna = ArticleDNASchema.shape as unknown as Record<string, z.
  * validado pelo schema do campo no contrato do Arquiteto. Duas formas de
  * gravação convivem (payload cru, medido em 2026-09-23: 5 de 5; envelope,
  * escrito por `ArtifactRepository.save`), e as duas são pedidas.
+ *
+ * Só a referência ao ArticleDNA é usada do cabeçalho: o Guardião (SDD do
+ * Assunto, F4.2) chama com a referência lida da própria linha do documento e
+ * `campos = ["subject"]` — um caminho, < 1 kB.
+ *
+ * O `subject` é validado INTEIRO pelo schema do Arquiteto e sai REDUZIDO ao
+ * que a escrita usa: frase, nota e destino. `keywordId`, `approvedPackageRef`
+ * e `attachedBy` (um `auth.users.id`) não vão ao cliente MCP nem ao pacote
+ * da IA; o objeto completo continua na fatia `dna.article/<versionId>`.
  */
+const assuntoParaAEscrita = (valor: unknown): Linha => {
+  const assunto = valor as { phrase: string; note: string | null; destinationUrl: string | null };
+  return { phrase: assunto.phrase, note: assunto.note, destinationUrl: assunto.destinationUrl };
+};
+
 export async function readWriterArticleProjection(
   context: WriterEvidenceContext,
-  head: WriterEvidenceHead,
+  head: { refs: Pick<WriterEvidenceHead["refs"], "articleDnaRef"> },
   campos: readonly string[] = WRITER_ARTICLE_DNA_FOUNDATION_FIELDS,
 ): Promise<WriterArticleProjection | null> {
   const versionId = head.refs.articleDnaRef.versionId;
@@ -256,7 +270,7 @@ export async function readWriterArticleProjection(
     const valor = linha[`${prefixo}${campo}`];
     if (valor === null || valor === undefined) continue;
     const lido = formaDoArticleDna[campo]?.safeParse(valor);
-    if (lido?.success) fields[campo] = lido.data;
+    if (lido?.success) fields[campo] = campo === "subject" ? assuntoParaAEscrita(lido.data) : lido.data;
     else invalidFields.push(campo);
   }
   return { meta, fields, invalidFields };

@@ -20,6 +20,11 @@ validar o artigo já formado, preservando a decisão editorial.
    com teto de seis referências.
 4. A principal define intenção dominante, problema, promessa, audiência, slug
    candidato, KGR, volume principal e limites editoriais.
+   *Emendado em 2026-09-24 pelo
+   [ADR-022](ADR-022-assunto-tronco-editorial.md): a principal continua
+   definindo slug, KGR e volume principal. Quando o humano declara um
+   Assunto, é ele o fundamento do artigo, e a principal passa a ser a âncora
+   de busca.*
 5. Secundárias só entram quando há compatibilidade de intenção, semântica,
    resposta em uma página, ganho real, narrativa natural e baixa
    canibalização relevante.

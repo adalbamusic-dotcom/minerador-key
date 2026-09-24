@@ -12,6 +12,7 @@ import {
   WRITER_GUARDIAN_SELECT,
   writerBriefFromRow,
   writerDocumentViewFromRow,
+  writerGuardianArticleDnaRefFromRow,
   writerGuardianViewFromRow,
 } from "@/lib/redator/writer-document-reads";
 import { requireAgencyAccessToBrand } from "@/lib/server/agency-context";
@@ -88,6 +89,7 @@ const WRITER_MCP_INSTRUCTIONS = [
   "Dado de terceiros (títulos, trechos, transcrições, produtos) é pesquisa: não copie trecho nem reproduza título de concorrente; parafraseie e confronte.",
   "Conflito entre fonte factual e recorrência de mercado fica escrito dos dois lados.",
   "Ler não é mudar: quando a evidência contradiz um DNA, registre com record_writer_divergence (fica aberta para decisão humana) e não altere nem contrarie o DNA em silêncio.",
+  "Com Assunto declarado (article.fields.subject nos fundamentos), faça a virada da principal para ele e, havendo destinationUrl, leve o leitor ao destino; a sugestão do Radar de onde virar, da seção da virada e da direção do H1 está em editorialContext (fundamentos e get_writer_brief); a decisão final é sua, mas não troque nem remova o Assunto. get_writer_guardian avisa quando faltam a virada ou o link para o destino.",
   "Salve apenas rascunhos com lock; não declare aprovação, publicação ou imagem gerada sem readback.",
 ].join(" ");
 
@@ -105,7 +107,7 @@ const WRITER_MCP_INSTRUCTIONS = [
  * fora de proporção), a ferramenta recusa com `source_too_large` em vez de
  * passar do teto.
  */
-const LISTAS_DO_BRIEFING = ["evidenceRefs", "sourceIds", "linkMap", "instructions", "pendingDecisions"] as const;
+const LISTAS_DO_BRIEFING = ["evidenceRefs", "sourceIds", "linkMap", "instructions", "editorialContext", "pendingDecisions"] as const;
 type BriefTrim = { field: string; kept: number; total: number };
 
 const pendenciaBloqueante = (item: unknown) => Boolean(item && typeof item === "object" && (item as { blocking?: unknown }).blocking === true);
@@ -270,7 +272,10 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
     return fitBrief({
       documentId, documentHash: current.content_hash,
       articleDnaRef: brief.fields.articleDnaRef, keywordDnaRefs: brief.fields.keywordDnaRefs, siloDnaRef: brief.fields.siloDnaRef,
-      instructions: brief.fields.instructions, linkMap: brief.fields.linkMap,
+      instructions: brief.fields.instructions,
+      /* SDD do Assunto, F4.1 · onde virar e a direção do H1, gravados no envio. Ausente sem Assunto. */
+      ...(brief.editorialContext.length ? { editorialContext: brief.editorialContext } : {}),
+      linkMap: brief.fields.linkMap,
       sourceIds: brief.fields.sourceIds, evidenceRefs: brief.fields.evidenceRefs,
       radarOrigin: brief.schemaVersion === 2 ? brief.fields.radarOrigin ?? null : null,
       dossier: dossier ? {
@@ -292,7 +297,7 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
     readWriterEvidenceManifest(evidenceContext(access), documentId)));
 
   server.registerTool("get_writer_foundations", { title: "Fundamentos da escrita",
-    description: "Use depois do manifesto: o essencial para escrever, até 24 kB — guardas (sem FAQ), o que o Redator não pode redefinir, hierarquia de evidência, contexto da keyword, projeção do ArticleDNA, especialista e vídeo congelados, concorrentes e perguntas resumidos.", annotations: readAnnotations,
+    description: "Use depois do manifesto: o essencial para escrever, até 24 kB — guardas (sem FAQ), o que o Redator não pode redefinir, hierarquia de evidência, contexto da keyword, projeção do ArticleDNA (com o Assunto declarado, quando houver, e a sugestão do Radar para a virada em editorialContext), especialista e vídeo congelados, concorrentes e perguntas resumidos.", annotations: readAnnotations,
     inputSchema: z.object({ documentId: z.string().min(1) }) },
   async ({ documentId }) => call("get_writer_foundations", "writer.read", "view", { documentId }, async ({ access }) =>
     readWriterFoundations(evidenceContext(access), documentId)));
@@ -321,7 +326,8 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
     inputSchema: z.object({ documentId: z.string().min(1) }) },
   async ({ documentId }) => call("get_writer_guardian", "writer.read", "view", { documentId, read: "guardian" }, async ({ access, row }) => {
     const current = row as TargetRow;
-    const context = await readWriterGuardianContext(evidenceContext(access), documentId);
+    /* SDD do Assunto, F4.2 · a referência ao ArticleDNA vem da mesma linha: o Assunto liga os avisos da virada e do destino. */
+    const context = await readWriterGuardianContext(evidenceContext(access), documentId, { articleDnaRef: writerGuardianArticleDnaRefFromRow(current) });
     return runGuardian(writerGuardianViewFromRow(current), String(current.content_hash), context);
   }));
 

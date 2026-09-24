@@ -7,7 +7,7 @@
 - **SiloPage** — página editorial de um silo; não é SiloDNA.
 - **ContentPlan** — plano editorial versionado que orienta um documento.
 - **ContentDocument** — documento de redação, incluindo conteúdo e proveniência compacta.
-- **Keyword principal** — keyword que identifica o foco central do artigo.
+- **Keyword principal** — âncora de busca do artigo: a keyword com demanda que identifica o foco central e é dona do slug, do KGR e do H1. Quando o artigo tem Assunto declarado, a principal continua sendo a âncora; o Assunto não a substitui.
 - **Pilar** — unidade editorial ampla que organiza conteúdos de suporte.
 - **Suporte** — conteúdo associado que aprofunda ou atende uma intenção específica.
 - **Reforço** — keyword ou relação complementar usada para fortalecer cobertura sem trocar a principal.
@@ -70,3 +70,10 @@
 - **fase de planejamento do Redator** — `ContentDocument.status = "planejado"`. A escrita começa em `escrevendo`. `ContentPlan` pode existir aí dentro como artefato interno; ele deixou de ser etapa.
 - **`sent_writer`** — o estado do item do Radar depois da entrega. `sent_planner` continua legível no enum porque existe no banco; o fluxo novo não o produz.
 - **documento de origem Radar** — `ContentDocumentV2`, nasce sem `ContentPlan`, com `radarOrigin` (identidade e hash do pacote) e `importedContext.dossier` (a estrutura canônica).
+
+## Assunto — tronco editorial declarado (2026-09-24)
+
+- **Assunto** — frase que o humano declara no Minerador como tronco de um ou mais artigos, landings ou de um Silo, sem exigência de volume de busca. Carrega a frase, uma nota curta (o que é, para quem) e, se houver, a página de destino no site da marca. Um artigo tem no máximo um Assunto. A IA nunca declara Assunto. Na tela aparece como "Assunto · declarado" ou "Assunto (tronco)". Fonte: ADR-022.
+- **keyword de sustentação** — busca real que traz o leitor ao artigo e em torno da qual o texto faz a virada para o Assunto. É entre elas que o Arquiteto elege a principal. O nome evita colidir com **Suporte**, que é o papel do artigo na hierarquia Pilar/Suporte.
+- **virada** — o ponto do artigo em que o texto leva o leitor da busca dele até o Assunto e, quando existe, à página de destino. A estrutura final é decisão do Redator.
+- **assuntos excluídos (`excludedSubjects`)** — outra coisa: os temas que o artigo **não** cobre. O Assunto declarado de um artigo não pode estar entre os assuntos excluídos dele. "Disputam o mesmo assunto", na trava de canibalização, também é outro sentido (tema disputado) e será reescrito como "o mesmo tema".

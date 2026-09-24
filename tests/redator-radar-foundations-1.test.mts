@@ -494,7 +494,7 @@ test("O · ESTRUTURAL · a semeadura lê pelo módulo estreito, por Marca, em s�
   assert.match(leitor, /await ler\(WRITER_SEED_DOCUMENT_SELECT\)/);
   assert.match(leitor, /for \(const select of WRITER_SEED_BUNDLE_SELECTS\) linhas\.push\(await ler\(select\)\)/);
   assert.doesNotMatch(leitor, /Promise\.all|"[^"]*\bpayload\b[^"]*"/);
-  assert.match(leitor, /radarFoundationsOfDossier\(dossier\)/);
+  assert.match(leitor, /radarFoundationsOfDossier\(dossier, \{ editorialContext: head\.editorialContext \}\)/);
 
   const rota = semComentarios(await fonte("../app/api/redator/seed/route.ts"));
   assert.match(rota, /const \{ document, foundations, contentHash \} = await writerSeedDocument\(input\.brandId, input\.documentId\)/);

@@ -4,6 +4,7 @@ import {
   RADAR_R5_TOPIC_ORIGINS,
 } from "@/lib/radar/r5-sequential";
 import { RadarR6ExpertTopicContextSchema, RadarR6TopicSuggestionSchema } from "@/lib/radar/r6-sequential";
+import { radarExpertTopicsSubjectPromptLines } from "@/lib/radar/expert-brief";
 import { resolveDeepSeekCanonicalConfig, DeepSeekCanonicalError } from "@/lib/server/deepseek-canonical";
 import { PipelineRuntimeError, resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { generateStructuredAI, StructuredAIError } from "@/lib/server/structured-ai";
@@ -31,6 +32,17 @@ Nao repita perguntas, requiredTopics, knownQuestions ou material existente ja co
 Nao altere ArticleDNA, KeywordDNA, SiloDNA, slug, canonical ou qualquer identidade do artigo.
 Toda pauta exige revisao humana individual e nao pode ser enviada automaticamente.`;
 
+/**
+ * O PROMPT DO SISTEMA, COM O ASSUNTO QUANDO HÁ — SDD do Assunto, F3.1.
+ *
+ * Sem Assunto não há linha a mais: o texto é exatamente `SYSTEM_PROMPT`.
+ * Com Assunto, as linhas citam a frase e a nota e pedem pautas que aprofundem
+ * o Assunto e a virada. A garantia fica no domínio (r7); aqui é o pedido.
+ */
+function buildSystemPrompt(input: z.infer<typeof RequestSchema>) {
+  return [SYSTEM_PROMPT, ...radarExpertTopicsSubjectPromptLines(input.context)].join("\n");
+}
+
 function buildPrompt(input: z.infer<typeof RequestSchema>) {
   return JSON.stringify({
     articleId: input.articleId,
@@ -46,7 +58,7 @@ export async function POST(request: Request) {
 
     const context = await resolvePipelineContext({ brandId: parsed.data.brandId, module: "radar", action: "edit" });
     const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: context.actorUserId, brandId: context.brandId, client: context.supabase, quotaUnits: 1 });
-    const result = await generateStructuredAI({ provider, system: SYSTEM_PROMPT, user: buildPrompt(parsed.data), schema: ResponseSchema, maxTokens: 2800 });
+    const result = await generateStructuredAI({ provider, system: buildSystemPrompt(parsed.data), user: buildPrompt(parsed.data), schema: ResponseSchema, maxTokens: 2800 });
 
     return NextResponse.json({ success: true, topics: result.topics, humanDecisionRequired: true, persistenceMode: "local" });
   } catch (error) {

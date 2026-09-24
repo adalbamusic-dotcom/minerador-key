@@ -25,7 +25,9 @@ import {
   ContentDocumentV2Schema,
   ImportedRadarContextSchema,
   RadarWriterDossierSchema,
+  VersionReferenceSchema,
   type RadarWriterDossier,
+  type VersionReference,
 } from "../arquiteto/contracts.ts";
 import { RADAR_FOUNDATIONS_BUNDLE_PATHS } from "./radar-foundations.ts";
 
@@ -50,10 +52,16 @@ const CAMPOS_DO_GUARDIAO = ["id", "blocks", "metadata"] as const;
  * O Guardião usa só `id`, `blocks` e `metadata` (`lib/redator/guardian.ts`).
  * `id` e `marca_id` da linha resolvem a Marca contra o grant, como antes.
  * Medido: 1.812 B por chamada no documento GOOGLE, contra 4.502.936 B.
+ *
+ * SDD do Assunto, F4.2 · e a referência ao ArticleDNA fixado (~150 B), só para
+ * achar o Assunto dele: o Guardião lê depois UM caminho do ArticleDNA
+ * (`payload->subject`, < 1 kB) e avisa quando faltam a virada ou o link para o
+ * destino. Nada do contexto importado.
  */
 export const WRITER_GUARDIAN_SELECT = [
   "id", "marca_id", "content_hash",
   ...CAMPOS_DO_GUARDIAO.map(campo => `${GUARDIAO}${campo}:payload->${campo}`),
+  `${GUARDIAO}articleDnaRef:payload->articleDnaRef`,
 ].join(",");
 
 const GuardianViewSchema = ContentDocumentV2Schema.pick({ id: true, blocks: true, metadata: true });
@@ -62,6 +70,16 @@ export type WriterGuardianView = z.infer<typeof GuardianViewSchema>;
 /** Lança `ZodError` fora do contrato, como o `parse` do documento completo lançava. */
 export function writerGuardianViewFromRow(linha: Linha): WriterGuardianView {
   return GuardianViewSchema.parse(presentes(linha, GUARDIAO, CAMPOS_DO_GUARDIAO));
+}
+
+/**
+ * A referência ao ArticleDNA fixado, para o Guardião achar o Assunto (F4.2).
+ * `null` fora do contrato: aí o Guardião segue sem a conferência do Assunto,
+ * como antes — a análise determinística não depende dela.
+ */
+export function writerGuardianArticleDnaRefFromRow(linha: Linha): VersionReference | null {
+  const lida = VersionReferenceSchema.safeParse(linha[`${GUARDIAO}articleDnaRef`]);
+  return lida.success ? lida.data : null;
 }
 
 /* =============================== Semeadura =============================== */
@@ -106,12 +124,21 @@ export const WRITER_SEED_BUNDLE_PATHS_PER_QUERY = 5;
 
 const apelidoDoBundle = (caminho: readonly string[]) => `${BUNDLE}${caminho.join("_")}`;
 
-/** A primeira consulta: o documento que a rota usa e o dossiê sem o bundle. */
+/**
+ * A primeira consulta: o documento que a rota usa e o dossiê sem o bundle.
+ *
+ * SDD do Assunto, F4.2 · e `importedContext.editorialContext`: as linhas
+ * curtas que o envio grava com Assunto (`[]` sem ele, < 2 kB com ele), para
+ * roteiro e carrossel lerem a virada pela mesma projeção do painel.
+ */
 export const WRITER_SEED_DOCUMENT_SELECT = [
   "id", "content_hash",
   ...[...CAMPOS_DA_SEMENTE, ...CAMPOS_DE_VINCULO].map(campo => `${DOCUMENTO}${campo}:payload->${campo}`),
   ...CAMPOS_DO_DOSSIE.map(campo => `${DOSSIE}${campo}:${RAIZ_DO_DOSSIE}->${campo}`),
+  `${DOCUMENTO}editorialContext:payload->importedContext->editorialContext`,
 ].join(",");
+
+const ContextoEditorialDaSementeSchema = ImportedRadarContextSchema.shape.editorialContext;
 
 /**
  * As consultas do bundle, em fatias. Toda fatia traz de volta o `bundleHash`
@@ -147,6 +174,8 @@ export type WriterSeedHead = {
   /** `null` quando o documento não veio do Radar com dossiê (v1, ou v2 sem dossiê). */
   dossier: WriterSeedDossierHead | null;
   contentHash: string;
+  /** As linhas do envio (F4.2). `[]` sem dossiê e sem Assunto. */
+  editorialContext: string[];
 };
 
 /**
@@ -164,11 +193,14 @@ export function writerSeedHeadFromRow(linha: Linha): WriterSeedHead | null {
   if (!esquemaDosVinculos.safeParse(vinculos).success) return null;
   const camposDoDossie = presentes(linha, DOSSIE, CAMPOS_DO_DOSSIE);
   if (documento.data.schemaVersion !== 2 || !Object.keys(camposDoDossie).length) {
-    return { document: documento.data, dossier: null, contentHash: linha.content_hash };
+    return { document: documento.data, dossier: null, contentHash: linha.content_hash, editorialContext: [] };
   }
   const dossie = WriterSeedDossierHeadSchema.safeParse(camposDoDossie);
   if (!dossie.success) return null;
-  return { document: documento.data, dossier: dossie.data, contentHash: linha.content_hash };
+  /* Fora do contrato (não é lista de textos): o documento inteiro também seria recusado. */
+  const contextoEditorial = ContextoEditorialDaSementeSchema.safeParse(linha[`${DOCUMENTO}editorialContext`] ?? undefined);
+  if (!contextoEditorial.success) return null;
+  return { document: documento.data, dossier: dossie.data, contentHash: linha.content_hash, editorialContext: contextoEditorial.data };
 }
 
 function colocar(alvo: Record<string, unknown>, caminho: readonly string[], valor: unknown) {
@@ -249,11 +281,19 @@ const CAMPOS_DO_BRIEFING = [
 ] as const;
 const CABECALHO_DO_DOSSIE = ["bundleId", "bundleHash", "researchProfile", "keywordContext", "writerMayNot"] as const;
 
-/** O briefing: vínculos, instruções e pendências; do dossiê, só o cabeçalho (sem o bundle). */
+/**
+ * O briefing: vínculos, instruções e pendências; do dossiê, só o cabeçalho (sem o bundle).
+ *
+ * SDD do Assunto, F4.1 · e `importedContext.editorialContext`: as linhas
+ * curtas que o envio grava com Assunto (onde virar, seção da virada, direção
+ * do H1, destino, alerta; `lib/redator/radar-subject-turn.ts`). Lista pequena
+ * (< 2 kB com Assunto, `[]` sem ele), fora do dossiê.
+ */
 export const WRITER_BRIEF_SELECT = [
   "id", "marca_id", "content_hash",
   ...CAMPOS_DO_BRIEFING.map(campo => `${BRIEFING}${campo}:payload->${campo}`),
   `${BRIEFING}pendingDecisions:payload->importedContext->pendingDecisions`,
+  `${BRIEFING}editorialContext:payload->importedContext->editorialContext`,
   ...CABECALHO_DO_DOSSIE.map(campo => `${DOSSIE}${campo}:${RAIZ_DO_DOSSIE}->${campo}`),
 ].join(",");
 
@@ -263,12 +303,15 @@ const CAMPOS_COMUNS_DO_BRIEFING = {
 const WriterBriefV1Schema = ContentDocumentV1Schema.pick(CAMPOS_COMUNS_DO_BRIEFING).strict();
 const WriterBriefV2Schema = ContentDocumentV2Schema.pick({ ...CAMPOS_COMUNS_DO_BRIEFING, radarOrigin: true }).strict();
 const PendenciasDoBriefingSchema = ImportedRadarContextSchema.shape.pendingDecisions;
+const ContextoEditorialDoBriefingSchema = ImportedRadarContextSchema.shape.editorialContext;
 const CabecalhoDoDossieSchema = RadarWriterDossierSchema.omit({ bundle: true }).strict();
 
 export type WriterBriefView = {
   schemaVersion: 1 | 2;
   fields: z.infer<typeof WriterBriefV1Schema> & { radarOrigin?: z.infer<typeof WriterBriefV2Schema>["radarOrigin"] };
   pendingDecisions: z.infer<typeof PendenciasDoBriefingSchema>;
+  /** As linhas do envio (F4.1). `[]` na v1 e sem Assunto. */
+  editorialContext: z.infer<typeof ContextoEditorialDoBriefingSchema>;
   /** `null`: v1, ou v2 sem dossiê (anterior ao gate). */
   dossier: z.infer<typeof CabecalhoDoDossieSchema> | null;
 };
@@ -282,6 +325,8 @@ export function writerBriefFromRow(linha: Linha): WriterBriefView | null {
   if (!lido.success) return null;
   const pendencias = versao === 2 ? PendenciasDoBriefingSchema.safeParse(linha[`${BRIEFING}pendingDecisions`] ?? undefined) : null;
   if (pendencias && !pendencias.success) return null;
+  const contextoEditorial = versao === 2 ? ContextoEditorialDoBriefingSchema.safeParse(linha[`${BRIEFING}editorialContext`] ?? undefined) : null;
+  if (contextoEditorial && !contextoEditorial.success) return null;
   const cabecalho = presentes(linha, DOSSIE, CABECALHO_DO_DOSSIE);
   let dossier: WriterBriefView["dossier"] = null;
   if (versao === 2 && Object.keys(cabecalho).length) {
@@ -289,5 +334,5 @@ export function writerBriefFromRow(linha: Linha): WriterBriefView | null {
     if (!dossie.success) return null;
     dossier = dossie.data;
   }
-  return { schemaVersion: versao, fields: lido.data, pendingDecisions: pendencias?.data ?? [], dossier };
+  return { schemaVersion: versao, fields: lido.data, pendingDecisions: pendencias?.data ?? [], editorialContext: contextoEditorial?.data ?? [], dossier };
 }

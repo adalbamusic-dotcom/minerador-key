@@ -431,6 +431,22 @@ export type DeterministicArticleArchitecture = {
   groups: ProvisionalArticleGroup[];
   siloCandidates: ArchitectKeyword[];
   ungrouped: ArchitectKeyword[];
+  /**
+   * Assuntos que já são tronco de algum artigo (SDD 2026-09-24, F2.3): não
+   * voltam como sobra, e não viram grupo. Presente só quando há.
+   */
+  anchoredSubjects?: ArchitectKeyword[];
+};
+
+/**
+ * O que o motor precisa saber do Assunto, calculado por quem tem a mesa
+ * (`subjectFormationSets`, em `declared-subject.ts`).
+ */
+export type DeterministicSubjectOptions = {
+  /** Declarados sem Volume validado: fora dos grupos automáticos (D1, Q7). */
+  heldOutKeywordIds?: ReadonlySet<string>;
+  /** Troncos soltos (`trunkAnchoredKeywordIds`): fora dos grupos e nunca voltam como sobra. */
+  anchoredKeywordIds?: ReadonlySet<string>;
 };
 
 /**
@@ -438,13 +454,27 @@ export type DeterministicArticleArchitecture = {
  * artigo e mantém cada registro disponível para decisão humana. Não consulta
  * SERP, não chama IA e não cria ArticleDNA/SiloDNA.
  */
-export function buildDeterministicArticleArchitecture(input: ArchitectKeyword[]): DeterministicArticleArchitecture {
+export function buildDeterministicArticleArchitecture(
+  input: ArchitectKeyword[],
+  subjects: DeterministicSubjectOptions = {},
+): DeterministicArticleArchitecture {
   const classified = classifySiloCandidates(input.map(keyword => ({ ...keyword })));
   const siloCandidates = classified.filter(keyword => keyword.siloCandidate?.status === "candidate" && !keyword.isPublished);
   const reservedIds = new Set(siloCandidates.map(keyword => keyword.id));
-  const articleInput = classified.filter(keyword => !reservedIds.has(keyword.id));
+  // O Assunto sem Volume validado não entra em grupo automático: sozinho ele
+  // viraria artigo de uma keyword só, com a frase sem busca como principal.
+  // O tronco solto também não (F2.3): ele mantém `clusterId` vazio, senão
+  // viraria secundária de um grupo, e o ArticleDNA recusa o Assunto como apoio.
+  const heldOut = subjects.heldOutKeywordIds;
+  const anchored = subjects.anchoredKeywordIds;
+  const articleInput = classified.filter(keyword => !reservedIds.has(keyword.id) && !heldOut?.has(keyword.id) && !anchored?.has(keyword.id));
   const groups = buildProvisionalGroups(articleInput);
   const groupedIds = new Set(groups.flatMap(group => group.keywordIds));
-  const ungrouped = classified.filter(keyword => reservedIds.has(keyword.id) || !groupedIds.has(keyword.id));
-  return { groups, siloCandidates, ungrouped };
+  const sobras = classified.filter(keyword => reservedIds.has(keyword.id) || !groupedIds.has(keyword.id));
+  if (!anchored?.size) return { groups, siloCandidates, ungrouped: sobras };
+  const ungrouped = sobras.filter(keyword => reservedIds.has(keyword.id) || !anchored.has(keyword.id));
+  const anchoredSubjects = sobras.filter(keyword => !reservedIds.has(keyword.id) && anchored.has(keyword.id));
+  return anchoredSubjects.length
+    ? { groups, siloCandidates, ungrouped, anchoredSubjects }
+    : { groups, siloCandidates, ungrouped };
 }

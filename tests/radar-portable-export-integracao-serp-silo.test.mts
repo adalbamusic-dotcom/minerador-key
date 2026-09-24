@@ -34,6 +34,7 @@ import {
   radarPartiallySelectedSilos,
   radarSiloExportNotice,
   radarSiloExportPreview,
+  radarSiloExportReadySummary,
   radarSiloExportScope,
   radarSiloExportScopeLimitNotice,
 } from "../lib/radar/portable-silo-scope.ts";
@@ -800,6 +801,23 @@ test("F · com seleção, o silo INTEIRO; sem seleção, todos — e a SiloPage 
   assert.ok(semDna.silos.every(silo => silo.label === "Silo sem nome"));
 });
 
+test("F · o resumo curto do card: silos e prontos do MESMO escopo, sem id e sem regra nova", () => {
+  const selecao = radarSiloExportScope({ items: ITENS_DA_TELA, selectedArticleIds: [P2], siloVersions: VERSOES_DA_TELA });
+  assert.equal(radarSiloExportReadySummary({ scope: selecao, finalizedArticleIds: [P1, P3] }), "Seleção: 1 silo · 2 de 3 artigos prontos");
+  /* Pronto fora do escopo não conta; id repetido ou vazio não soma. */
+  assert.equal(radarSiloExportReadySummary({ scope: selecao, finalizedArticleIds: [P1, P1, " ", P4] }), "Seleção: 1 silo · 1 de 3 artigos prontos");
+
+  const tudo = radarSiloExportScope({ items: ITENS_DA_TELA, selectedArticleIds: [], siloVersions: VERSOES_DA_TELA });
+  const resumo = radarSiloExportReadySummary({ scope: tudo, finalizedArticleIds: [] });
+  assert.equal(resumo, "Sem seleção, todos os silos: 2 silos · 0 de 6 artigos prontos · 1 sem silo");
+  assert.equal(resumo.includes(SILO_PELE), false, "o resumo mostrou id");
+
+  const vazio = radarSiloExportScope({ items: [], selectedArticleIds: [], siloVersions: {} });
+  assert.equal(radarSiloExportReadySummary({ scope: vazio, finalizedArticleIds: [] }), "Nenhum artigo do Radar neste escopo.");
+  /* O escopo do resumo é o do pedido: nada muda na lógica de escopo. */
+  assert.deepEqual(selecao.articleIds, [P1, P2, P3]);
+});
+
 test("F · os avisos: parcial é ATENÇÃO com o título; completo não diz 'sucesso'", () => {
   const parcial = radarSiloExportNotice({
     response: {
@@ -925,21 +943,30 @@ test("F · a faixa do aviso de export usa a cor e o papel da severidade", async 
   assert.match(faixa, /text-sm/);
 });
 
-test("F · o menu: o item recomendado vem PRIMEIRO, com selo em 14px, e o download não vira 'sucesso'", async () => {
+test("F · o card: o silo completo é a PRIMEIRA opção e o padrão, em 14px, e o download não vira 'sucesso'", async () => {
   const pagina = (await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-  const barra = pagina.slice(pagina.indexOf("const renderTopbarActions"), pagina.indexOf("const openDetail"));
-  const menu = barra.slice(barra.indexOf('role="menu"'));
-  const primeiroItem = menu.slice(menu.indexOf("<button"), menu.indexOf("</button>") + "</button>".length);
+  const barra = semComentarios(pagina.slice(pagina.indexOf("const renderTopbarActions"), pagina.indexOf("const openDetail")));
+  /*
+   * 2026-09-23 · O MENU VIROU O CARD "EXPORTAR PARA ESCREVER". O que era o
+   * "primeiro item" (silos completos, com selo) virou a PRIMEIRA OPÇÃO de
+   * escopo, marcada por padrão, com "(recomendado)" no próprio rótulo — a
+   * prévia aprovada pelo dono do produto não tem selo.
+   */
+  const card = barra.slice(barra.indexOf('role="dialog"'), barra.indexOf("onClick={grid.toggleColumns}"));
+  assert.ok(card.length > 0 && card.includes('data-testid="radar-export-grid"'), "o card de export não foi encontrado inteiro");
+  const primeiraOpcao = card.slice(card.indexOf("<label"), card.indexOf("</label>") + "</label>".length);
 
-  assert.match(primeiroItem, /data-testid="radar-export-silos"/, "o primeiro item do menu não é o export por silo");
-  assert.match(primeiroItem, /Silos completos · um CSV por silo/);
-  assert.match(primeiroItem, /Recomendado/);
-  assert.match(primeiroItem, /Todos os artigos finalizados de cada silo, na ordem do silo, com a SERP de cada um/);
-  /* O selo segue o padrão "Em foco" da planilha (mesma borda e cor), em 14px. */
-  assert.match(primeiroItem, /rounded border border-context-accent\/35 px-1\.5 py-0\.5 text-sm font-semibold text-context-accent">Recomendado/);
-  assert.equal(/text-xs|#[0-9a-f]{3,6}\b|rgb\(/i.test(primeiroItem), false, "texto abaixo de 14px ou cor fixa no item novo");
-  assert.match(primeiroItem, /radarSiloExportPreview\(radarSiloExportScope\(/, "a prévia não conta pelo silo do item");
-  assert.match(primeiroItem, /void exportarSilosCompletos\(\)/);
+  assert.match(primeiraOpcao, /data-testid="radar-export-escopo-silo"/, "a primeira opção do card não é o silo completo");
+  assert.match(primeiraOpcao, /Silo completo \(recomendado\)/);
+  assert.match(primeiraOpcao, /Um CSV por Silo, artigos na ordem do Silo\./);
+  assert.match(semComentarios(pagina), /useState<"silo" \| "selecionados">\("silo"\)/, "o silo completo deixou de ser o padrão");
+  assert.equal(/text-xs|#[0-9a-f]{3,6}\b|rgb\(/i.test(card), false, "texto abaixo de 14px ou cor fixa no card");
+  assert.match(primeiraOpcao, /radarSiloExportReadySummary\(\{ scope: escopoDoSilo,/, "o resumo não conta pelo silo do item");
+  assert.match(barra, /const escopoDoSilo = menuDeExport \? radarSiloExportScope\(\{ items: pipeline\.radarItems, selectedArticleIds, siloVersions: pipeline\.siloVersions \}\) : null;/);
+  /* O botão principal sai no formato para escrever, no escopo escolhido. */
+  const principal = card.slice(card.lastIndexOf("<button", card.indexOf('data-testid="radar-export-csv"')), card.indexOf("</button>", card.indexOf('data-testid="radar-export-csv"')));
+  assert.match(principal, /void \(escopoDoExport === "silo" \? exportarSilosCompletos\("writing"\) : exportarDossiesFinalizados\("writing"\)\)/);
+  assert.match(principal, /Exportar CSV/);
 
   const codigo = semComentarios(pagina);
   const inicio = codigo.indexOf("const exportarSilosCompletos");

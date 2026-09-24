@@ -1,4 +1,4 @@
-import type { RadarEditorialArticleModel, RadarEditorialSection } from "./editorial-article-model.ts";
+import type { RadarEditorialArticleModel, RadarEditorialSection, RadarEditorialSubjectTurn } from "./editorial-article-model.ts";
 import type { RadarEditorialProfileModel } from "./editorial-profile-model.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
 
@@ -58,6 +58,13 @@ export type RadarPortableEditorial = {
   sections: RadarPortableSection[];
   conclusion: string | null;
   cta: string | null;
+  /**
+   * SDD do Assunto, F3.1 · "Levar o leitor a <destino>." AO LADO de `cta`, que
+   * continua sendo a chamada observada. Ausente sem Assunto com destino.
+   */
+  ctaDestination?: string;
+  /** SDD do Assunto, F3.1 · a virada do artigo-modelo, como veio. Ausente sem Assunto. */
+  subjectTurn?: RadarEditorialSubjectTurn;
   sourceNeeds: string[];
   specialistNeeds: string[];
   seoApplications: string[];
@@ -255,6 +262,8 @@ export function radarPortableEditorialOf(input: {
       sections: modelo.sections.map(secaoDoGoogle),
       conclusion: modelo.conclusion.synthesis || null,
       cta: modelo.conclusion.callToAction || null,
+      ...(modelo.conclusion.destinationDirection ? { ctaDestination: modelo.conclusion.destinationDirection } : {}),
+      ...(modelo.declaredSubject ? { subjectTurn: modelo.declaredSubject } : {}),
       /*
        * §13 · O PAR `{ subject, requirement }` VIRA FRASE.
        *

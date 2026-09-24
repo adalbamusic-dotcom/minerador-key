@@ -5,6 +5,7 @@ import type {
   RadarEditorialLinkApplication,
   RadarEditorialSection,
 } from "@/lib/radar/editorial-article-model";
+import { RADAR_SUBJECT_TURN_SCREEN_LABEL, radarIsSubjectTurnScreenSection } from "./radar-subject-turn-view";
 
 /**
  * ===== O ARTIGO-MODELO NA TELA — 1.1 · §2 a §20 =====
@@ -117,7 +118,13 @@ function Secao({ section }: { section: RadarEditorialSection }) {
         * arquitetura decide onde" é a lógica certa — e repetida em cada seção
         * virava ruído. A frase inteira desceu para "Ver evidências".
         */}
-      {(section.evidenceStrength === "DNA_REQUIRED" || section.mustCoverReasons.length > 0) && <Selo tom="neutro">Exigido pelo ArticleDNA</Selo>}
+      {/*
+        * A VIRADA DO ASSUNTO TEM RÓTULO PRÓPRIO (F3.1): ela é exigida pelo
+        * Assunto declarado, não observada na amostra.
+        */}
+      {radarIsSubjectTurnScreenSection(section)
+        ? <Selo tom="neutro">{RADAR_SUBJECT_TURN_SCREEN_LABEL}</Selo>
+        : (section.evidenceStrength === "DNA_REQUIRED" || section.mustCoverReasons.length > 0) && <Selo tom="neutro">Exigido pelo ArticleDNA</Selo>}
       {section.internalLinks.length > 0 && <Selo tom="neutro">{section.internalLinks.length} link(s) interno(s)</Selo>}
       {section.mediaOpportunity.length > 0 && <Selo tom="neutro">Vídeo</Selo>}
     </div>
@@ -177,6 +184,24 @@ export function RadarArticleModelSection({ model }: { model: RadarEditorialArtic
       Outras direções: {model.titleAlternatives.join(" · ")}
     </p>}
 
+    {/*
+      * O ASSUNTO, QUANDO HÁ — SDD do Assunto, F3.1.
+      *
+      * A principal é a promessa; o Assunto é para onde o artigo faz a virada.
+      * Quem lê o artigo-modelo precisa ver o tronco, onde a amostra sugere
+      * virar, o que ela diz do H1 e o alerta quando a SERP não o toca. Sem
+      * Assunto este bloco não existe.
+      */}
+    {model.declaredSubject && <div className={`mt-3 ${cartao}`} data-testid="radar-article-model-subject">
+      <h4 className="text-sm font-semibold text-foreground">Assunto (tronco): {model.declaredSubject.phrase}</h4>
+      <dl className="mt-1.5 grid gap-1.5 md:grid-cols-2">
+        <Campo label="Onde virar">{model.declaredSubject.suggestedPositionLabel}</Campo>
+        <Campo label="H1">{model.declaredSubject.h1Complement.label}</Campo>
+      </dl>
+      <p className="mt-1.5 text-sm leading-6 text-text-muted">{model.declaredSubject.sampleLabel}</p>
+      {model.declaredSubject.alert && <p className="mt-1 text-sm leading-6 text-warning" data-testid="radar-article-model-subject-alert">{model.declaredSubject.alert}</p>}
+    </div>}
+
     {/* §5 · abertura: hook, promessa e a resposta que vem cedo. Nada além. */}
     <div className={`mt-3 ${cartao}`} data-testid="radar-article-model-opening">
       <h4 className="text-sm font-semibold text-foreground">Abertura</h4>
@@ -197,6 +222,7 @@ export function RadarArticleModelSection({ model }: { model: RadarEditorialArtic
       <dl className="mt-1.5 grid gap-1.5 md:grid-cols-2">
         <Campo label="Objetivo">{model.conclusion.synthesis}</Campo>
         <Campo label="CTA">{model.conclusion.callToAction}</Campo>
+        {model.conclusion.destinationDirection && <Campo label="Destino da chamada">{model.conclusion.destinationDirection}</Campo>}
       </dl>
     </div>
 

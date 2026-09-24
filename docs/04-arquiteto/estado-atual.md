@@ -1,3 +1,216 @@
+## Assunto declarado: fase B da F2 (o Arquiteto grava `subject`) — 2026-09-24
+
+```text
+F2_FASE_B = no código · Validado manualmente: NÃO · homologação do usuário pendente
+GRAVA_SUBJECT = ArticleDNA (qualquer unidade), SiloDNA sem SiloPage e par SiloDNA+SiloPage da consolidação · só por ato humano
+GUARDA_SERVIDOR = writer de ArticleDNA/SiloDNA, par do Silo, consolidação do Silo e PATCH da cópia de trabalho · só quando o subject é novo ou mudou
+VINCULO_FORMACAO = gravado em articleSubjectAnchor, no item da principal · sobrevive ao recarregar
+DIFF_VERSAO = subject é decisão editorial · attachedBy e attachedAt são carimbos
+CONSERVACAO = um predicado (isAnchoredSubject) e uma lista de troncos em todos os cálculos da F2.3
+GATE_Q7 = SUBJECT_PRINCIPAL_REQUIRES_VOLUME na conclusão e SUBJECT_PRINCIPAL_WITHOUT_VOLUME no servidor · Assunto sem Volume validado nunca é principal nem dá slug
+SUGESTOES = determinísticas, só sobre keywords já recebidas · subject_discovery primeiro
+IA_PEDIR_PROPOSTA = NÃO implementada (precisa de adendo)
+DEPLOY = só DEPOIS da fase A no ar e conferida · ROLLBACK = nunca abaixo da fase A
+MIGRATIONS_ADDED = 0 · LEITURAS_NOVAS = só estreitas, no servidor · CHAMADAS_PAGAS = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), seção F2 (F2.1 a F2.6, com a emenda da F2.4 que põe `subject_discovery.subjectKeywordIds` como primeiro sinal), seções 6, 7 e 11, e o [ADR-022](../00-produto/decisoes/ADR-022-assunto-tronco-editorial.md). Contrato em [spec.md](spec.md) §33. A fase A (entrada abaixo) só aceitava o campo; nesta fase o Arquiteto passa a gravá-lo. Os itens 6 a 9 são a segunda rodada do mesmo dia: fecham as pendências de servidor, de vínculo, de Silo e de diff que a primeira rodada deixou.
+
+**Verificado no código e confirmado por teste. Validado manualmente: NÃO.**
+
+**1. Gravar o Assunto (`lib/arquiteto/declared-subject.ts`, novo).**
+
+- O `subject` é montado a partir do pacote aprovado, lido só pelo resolver do Minerador (`keywordDnaFromPackage`, `resolveKeywordSubject`, `readApprovedPackageRef`). `planSubjectAttachment` recusa com código: `ACTOR_REQUIRED`, `NOT_RECEIVED`, `NO_APPROVED_PACKAGE`, `CROSS_BRAND`, `NOT_DECLARED`, `SUPPORT_ROLE`, `PRINCIPAL_WITHOUT_VOLUME`, `EXCLUDED_SUBJECT` e `INVALID_SUBJECT`.
+- `attachedBy` é o humano (`auth.users.id`); `deepseek` e `local-user` são recusados. `attachedAt` vem de quem chama. O servidor confere o mesmo na gravação (item 6).
+- Prender e soltar são funções puras no ArticleDNA, no SiloDNA e no artigo da cópia de trabalho (`subjectKeywordId`, separado de `clusterId`). Prender o mesmo Assunto do mesmo pacote devolve `changed: false`. Prender outro Assunto numa unidade que já tem um é recusado com `ANOTHER_SUBJECT_ATTACHED`; nada troca em silêncio. O mesmo Assunto com pacote aprovado novo é aceito como atualização.
+- Vale para qualquer unidade do ArticleDNA, inclusive `landing_page` e `service_page`. `centralEntity` do SiloDNA não é tocado.
+- Se o Minerador retirar a declaração ou reaprovar o pacote, `resolveAttachedSubjectStanding` devolve `withdrawn`, `update_available`, `in_review` ou `not_in_mesa` com um aviso. O artigo segue com o último pacote aprovado e nada é trocado.
+
+**2. Conservação (`AGENTS.md` §10).** Um predicado único, `isAnchoredSubject`, e uma lista só de troncos, usada pela formação, pela mesa, pelo filtro, pelo Vínculo, pelo motor e pela proposta:
+
+- servidor (`lib/server/arquiteto-workspace.ts:279` e `:533`): "incorporada" e elegibilidade usam `articleDnaIncorporatedKeywordIds`, que inclui `subject.keywordId`;
+- cenário (`lib/arquiteto/architecture-scenario.ts`): `ArticleScenarioSchema.subjectKeywordId` opcional; o tronco conta como coberto e não gera `DUPLICATE_KEYWORD` nem `KEYWORD_MISSING_FROM_COMPLETE_SCENARIO`;
+- formação (`lib/arquiteto/article-formation.ts`): sobras separadas em `anchoredSubjectKeywordIds` e `awaitingSupportSubjectKeywordIds`, presentes só quando há; `automaticFormationHoldouts` tira da formação automática o Assunto sem Volume, o tronco gravado numa Definição e o tronco preso na formação, salvo quando é a principal do próprio candidato ou tem formação humana;
+- motor legado (`lib/arquiteto/engine.ts`): `heldOutKeywordIds` e `anchoredKeywordIds` opcionais, com saída `anchoredSubjects`;
+- território (`lib/arquiteto/territory-working-copy.ts`) e proposta (`lib/arquiteto/architecture-working-proposal.ts`): o tronco ancorado sai de `unassigned` e aparece em `anchoredSubjectKeywordIds` / `anchoredSubjects`;
+- conclusão (`lib/arquiteto/article-formation-confirmation.ts`): só membros contam, então o tronco fica fora de `NO_DUPLICATED_KEYWORD` e do teto de 6;
+- mesa (`modules/arquiteto/arquiteto-workspace.tsx`): "Keywords não agrupadas" sai de `splitUngroupedBySubjectAnchor`. O tronco ancorado vai para o bloco "Assuntos como tronco", com o selo "Assunto · tronco de N artigo(s)". O Assunto sem artigo continua em não agrupadas com o selo "Assunto · aguardando sustentação". A contagem "sem grupo" usa a mesma lista.
+
+Um Assunto que é a principal de alguma unidade não é tronco solto (`trunkAnchoredKeywordIds`) e continua na formação. Uma Definição gravada fora do cenário atual também conta como tronco e aparece em "Preso em" com "Soltar Assunto".
+
+**3. Formação e gate Q7.**
+
+- Assunto sem Volume validado sai de `disponiveis` e nunca é principal, nem com papel humano de principal. Entra como membro só por decisão humana; um grupo humano formado só por ele não vira artigo e volta às sobras.
+- Gate novo `SUBJECT_PRINCIPAL_REQUIRES_VOLUME` em `validateFormationConclusion`: só aparece quando algum artigo do lote tem Assunto preso e usa `subjectVolumeValidated`. Sem a informação, a portaria trata o Assunto-principal como sem Volume e barra o lote (lado seguro). O servidor repete a regra na gravação (item 6).
+- O slug é sempre da principal eleita entre as sustentações. O Assunto nunca dá slug nem `fullPath`.
+- Assunto preso como secundária ou reforço do mesmo artigo vira conflito, e o artigo não é gravado.
+- O texto da trava `NO_UNRESOLVED_CANNIBALIZATION` passou para "disputam o mesmo tema" (`:501-502`).
+
+**4. Sugestões de sustentação (`suggestSubjectSupport`).** Determinísticas, só sobre keywords já recebidas pelo Arquiteto com pacote aprovado. Ordem dos sinais: `subject_discovery.subjectKeywordIds` ("veio da Pesquisa por Assunto"), a mesma frase da pesquisa, a mesma entidade central da Lógica, a mesma lista, intenção e funil compatíveis (funil vizinho aceito) e os termos em comum com a nota. Cada sugestão traz motivo, evidência curta e a marca "já em artigo". Ficam de fora: outra marca, keyword não recebida, bloqueada ou devolvida, outro Assunto sem Volume e keyword sem sinal.
+
+**5. Tela (`modules/arquiteto/**`).**
+
+- "Assunto · declarado" no diálogo de importação e na linha "Vínculo:" da mesa, lido por `readArchitectKeywordVinculo` (campos opcionais `subjectLabel`, `subjectNote` e `subjectDestinationUrl` em `lib/arquiteto/editorial-unit-declaration.ts`, presentes só com declaração). O selo "aguardando sustentação" aparece na linha Vínculo só quando a keyword está de fato em não agrupadas.
+- Painel "Assuntos" na aba Artigos, que funciona como filtro: cada Assunto com quantos artigos sustenta.
+- "Prender Assunto", "Soltar Assunto" e "Confirmar Assunto do Silo" (`modules/arquiteto/subject-panels.tsx` e `modules/arquiteto/subject-workspace-model.ts`, novos). Com a Definição já gravada, cada ação cria uma versão `proposed` pelo gravador existente (`persistArquitetoArtifact`, ação `edit`) e a tela usa a versão que o servidor devolve. Sem Definição, o vínculo é gravado na cópia de trabalho (item 7) e vai ao ArticleDNA ao "Concluir formação".
+- O vínculo só vale com candidato vivo. Quando a formação muda, `migrateWorkingSubjectAnchors` o leva ao ref que recebe a maioria dos membros (no empate, o da principal), na mesma escrita da formação (item 7). Se não houver destino, o Assunto volta a "aguardando sustentação", nunca vira tronco sem artigo.
+- Silo: o Assunto do SiloDNA vira sugestão aos artigos do mesmo território (`siloSubjectTerritories`), e cada artigo confirma. Silo que já tem SiloPage é recusado, com o motivo explicado, na tela e no servidor (item 6).
+- Diálogo de sustentação: mostra motivo, sinais, evidência e o Silo de cada keyword. Sem Silo confirmado, a caixa fica desabilitada. Ao confirmar, as marcadas viram um artigo novo pela mesma escrita da formação, com readback, e o vínculo do Assunto vai junto nessa escrita. A principal sai delas por `suggestPrincipal`, e o Assunto fica como tronco, fora dos membros.
+- Texto: a SERP da frase é opcional e se mede em Resultados, no Processador do Minerador; não há botão pago no Arquiteto (P7).
+- Diálogos com foco que entra, Tab contido, Escape que fecha e foco que volta a quem abriu. Nos botões repetidos, `aria-label` distinto. Texto com pelo menos 14px e tokens.
+
+**6. Guarda do Assunto no servidor (`lib/arquiteto/declared-subject-guard.ts`, domínio puro, e `lib/server/arquiteto-subject-guard.ts`, server-only; novos).**
+
+- Onde roda:
+  - no writer, `appendArquitetoArtifact` (`lib/server/arquiteto-persistence.ts`), para `article_dna` e `silo_dna`. Cobre a rota de artefatos, as rotas de IA, a de silos e a restauração de backup;
+  - em `persistSiloPairAtomic`, com o par SiloDNA+SiloPage;
+  - na consolidação canônica do Silo (`POST /api/arquiteto/silo-consolidation`): `lib/server/arquiteto-silo-consolidation-adapter.ts` chama `assertConsolidatedSiloSubject` depois de `refuseStatusEscalation` e antes da RPC `persist_silo_from_working_copy_atomic`;
+  - no PATCH `/api/arquiteto/workspace`: `assertWorkingSubjectAnchorAssignment` roda antes de `repository.update` (item 7).
+- Quando roda: só quando o `subject` é novo ou mudou em relação à versão vigente, que é a última versão da entidade (a mesma que `repository.append` usa). A comparação é campo a campo nos 7 campos, inclusive `attachedBy` e `attachedAt` (`sameSubjectRecord`), porque o JSONB não guarda a ordem das chaves. Subject igual passa sem ler a keyword, então quem reconclui carrega o Assunto que outra pessoa prendeu.
+- O que confere:
+  - `attachedBy` é o `auth.users.id` do ator da requisição; IA, e-mail e `local-user` são recusados;
+  - a keyword existe, está viva, é da mesma marca e chegou ao Arquiteto;
+  - o pacote aprovado a declara Assunto;
+  - `approvedPackageRef`, `phrase`, `note` e `destinationUrl` batem com esse pacote;
+  - Q7: o Assunto como a própria principal só passa com Volume validado. Vale também quando o subject chega igual e a nova principal passa a ser a keyword do Assunto (`subjectPrincipalRequiresCheck` e `verifySubjectAsPrincipal`); se a versão anterior já tinha o Assunto como principal, não há releitura.
+- Silo:
+  - versão avulsa de SiloDNA com Assunto novo num Silo que já tem SiloPage é recusada com `SUBJECT_SILO_PAGE_BOUND`, porque desalinharia o `siloDnaRef` da página. O par gravado junto (`persistSiloPairAtomic` e consolidação) não recebe essa recusa;
+  - a consolidação que chega sem o Assunto da versão vigente é recusada com `SUBJECT_DROPPED` (409): recarregar a mesa e consolidar de novo; soltar o Assunto é ação própria, não efeito da consolidação.
+- Restauração de backup (`lib/server/arquiteto-backup-restore.ts`): passa `{ subjectActor: "restored" }`. O autor gravado precisa ser um `auth.users.id`, não necessariamente quem restaura; keyword, marca, declaração e pacote são conferidos igual, e IA continua recusada.
+- Recusas (`SubjectWriteRefusedError`): `SUBJECT_ACTOR_MISMATCH`, `SUBJECT_KEYWORD_NOT_FOUND`, `SUBJECT_CROSS_BRAND`, `SUBJECT_NOT_RECEIVED`, `SUBJECT_NO_APPROVED_PACKAGE`, `SUBJECT_NOT_DECLARED`, `SUBJECT_PACKAGE_MISMATCH`, `SUBJECT_PRINCIPAL_WITHOUT_VOLUME`, `SUBJECT_SILO_PAGE_BOUND`, `SUBJECT_DROPPED` e `SUBJECT_INVALID`. Status 403 para ator e outra marca, 409 para o resto. Falha de leitura fecha a gravação com 503, sem escrever. A resposta de erro (`pipelineArtifactErrorResponse`) ganhou o campo aditivo `subjectCode`.
+
+**7. Vínculo da formação persistido (`app/api/arquiteto/workspace/route.ts` e `modules/arquiteto/arquiteto-workspace.tsx`).**
+
+- Campo opcional `articleSubjectAnchor` (`WorkingSubjectAnchorSchema`: `candidateRef`, `subjectKeywordId`, `attachedBy`, `attachedAt`) no `AssignmentSchema` da rota PATCH. Ele fica gravado no item de workflow da principal da formação, chaveado por `candidateRef`, no mesmo payload jsonb: nenhuma coluna, nenhuma migration.
+- Soltar (`null`) sempre passa. Prender ou trocar passa pela guarda de ator e marca (`verifyWorkingSubjectAnchorWrite`). Vínculo igual ao gravado, soltar ou atribuição sem o campo não geram leitura.
+- A tela lê os vínculos gravados pelo payload dos itens que a mesa já carrega (`persistedWorkingSubjectAnchors`), grava ao prender e ao soltar e só confirma depois do readback (`planWorkingSubjectAnchorWrites`). No artigo novo formado pelas sugestões, o vínculo vai na mesma escrita da formação. Quando um plano de formação muda o ref do artigo, o vínculo vai na mesma escrita para a principal do ref novo e sai do item antigo (`workingSubjectAnchorMigrationAssignments`).
+- O estado da sessão é só espelho do que o servidor já confirmou, até a mesa recarregar. Vínculo cujo candidato não existe mais não ancora nada (`liveWorkingSubjectAnchors`).
+- Texto da tela (`SUBJECT_WORKING_ANCHOR_NOTE`): "Preso na formação e gravado na cópia de trabalho", e vai para a Definição quando a formação for concluída.
+- Sem Assunto, o campo não é enviado, e o payload e o hash do item não mudam.
+
+**8. Silo consolidado com Assunto (`lib/arquiteto/silo-consolidation.ts`).** A consolidação já carregava o `subject` pelo spread da versão anterior, porque o `copy.id` é o `existingSiloId`; a primeira rodada registrou o contrário, por engano. Agora o carregamento é explícito e coberto por teste: o `subject` vem junto, a `centralEntity` não muda, a SiloPage nasce apontando para a versão nova e não lê o Assunto. Sem Assunto, 40 de 40 fixtures saem idênticas ao HEAD em bytes e hash.
+
+**9. Diff de versão (`lib/arquiteto/article-editorial-diff.ts`, CRLF preservado).** `subject` entrou em `EDITORIAL_DECISION_FIELDS`, e `attachedAt` e `attachedBy` passaram a ser carimbos. Prender, soltar e pacote novo são revisão; autor e data sozinhos não são. `scripts/arquiteto-audit-version-diff.mts` (CRLF preservado) usa a mesma lista (`CAMPOS_ARTICLE = EDITORIAL_DECISION_FIELDS`). Sem Assunto, o diff sai idêntico ao do HEAD em 36 de 36 casos.
+
+**Sem Assunto, nada muda.** Formação, plano, portaria e motor saem byte a byte iguais. Os hashes dourados foram capturados rodando as versões do HEAD sobre as mesmas fixtures; na portaria, a única diferença é "assunto" → "tema". No writer, sem Assunto não há leitura nova, e a sequência de chamadas é a de antes (o teste prova). A exceção é a consolidação do Silo, que agora sempre lê a versão vigente do SiloDNA (item "Egress"); artefatos e hashes não mudam.
+
+**Arquivos.**
+
+- Novos na primeira rodada: `lib/arquiteto/declared-subject.ts`, `modules/arquiteto/subject-workspace-model.ts`, `modules/arquiteto/subject-panels.tsx`, `tests/arquiteto-assunto-fase-b.test.mts`, `tests/arquiteto-assunto-fixtures.mts` e `tests/arquiteto-assunto-tela.test.mts`.
+- Novos na segunda rodada: `lib/arquiteto/declared-subject-guard.ts`, `lib/server/arquiteto-subject-guard.ts`, `tests/arquiteto-assunto-guarda.test.mts` e `tests/arquiteto-assunto-guarda-servidor.test.mts`.
+- Alterados na primeira rodada: `lib/arquiteto/article-formation.ts` (CRLF preservado), `lib/arquiteto/article-formation-confirmation.ts` (CRLF preservado), `lib/arquiteto/architecture-scenario.ts`, `lib/arquiteto/engine.ts`, `lib/arquiteto/territory-working-copy.ts`, `lib/arquiteto/architecture-working-proposal.ts`, `lib/arquiteto/editorial-unit-declaration.ts`, `lib/server/arquiteto-workspace.ts`, `modules/arquiteto/arquiteto-workspace.tsx` e `modules/arquiteto/territorial-workspace-rows.tsx` (`KeywordVinculoLine.subject` opcional).
+- Alterados na segunda rodada: `lib/server/arquiteto-persistence.ts` (5º parâmetro opcional `{ subjectActor }` em `appendArquitetoArtifact`), `lib/server/arquiteto-backup-restore.ts`, `lib/server/arquiteto-silo-consolidation-adapter.ts` (CRLF preservado), `app/api/arquiteto/workspace/route.ts`, `lib/arquiteto/article-editorial-diff.ts`, `scripts/arquiteto-audit-version-diff.mts`, `lib/arquiteto/silo-consolidation.ts`, `modules/arquiteto/arquiteto-workspace.tsx`, `modules/arquiteto/subject-workspace-model.ts`, `tests/arquiteto-assunto-tela.test.mts` (3 asserções estruturais ajustadas ao vínculo gravado) e `package.json`.
+- Compartilhados e consumidores preservados: todas as extensões são opcionais e, sem elas, o resultado é o de antes. `articleSubjectAnchor` e `subjectCode` são campos opcionais e aditivos de payload de rota. Nenhum formato novo de ArticleDNA ou SiloDNA além do schema da fase A. `package.json` só ganhou arquivos no fim de scripts existentes. O Radar e o Redator não foram tocados; F3 e F4 correm em outra frente.
+
+**Testes (fixtures, sem rede: `fetch` trocado por uma função que falha o teste, 0 chamadas).**
+
+- Reexecutados em 2026-09-24 na redação desta entrada: `tests/arquiteto-assunto-guarda.test.mts` 19/19, `tests/arquiteto-assunto-fase-b.test.mts` 37/37, `tests/arquiteto-assunto-tela.test.mts` 24/24 e `tests/arquiteto-assunto-schema.test.mts` 16/16 (96/96); `npm run -s test:arquiteto:servidor` 52/52, com `tests/arquiteto-assunto-guarda-servidor.test.mts` 23/23.
+- Os quatro primeiros estão em `test:arquiteto`; `arquiteto-assunto-guarda-servidor` está em `test:arquiteto:servidor`, que já tem `--conditions=react-server` e o registro de TS. `test:arquiteto:lentes` não roda os testes do Assunto, mas carrega a rota PATCH, que importa a guarda.
+- A primeira rodada cobre os itens da F2.6: gravação e recusas, Q7, cada cálculo da conservação com fixture própria, sugestões ("SEO para clínicas" com três sustentações sem palavra em comum), slug, isolamento de marca e as ligações da tela.
+- `arquiteto-assunto-guarda` (domínio): humano aceito; IA, `local-user` e e-mail recusados; outro humano recusado na sessão e aceito na restauração; outra marca, não declarado, inexistente, excluída, não recebida e sem pacote recusados; pacote divergente (versão, hash, frase, nota, destino); Q7; subject igual sem conferência, inclusive com outra ordem de chave; vínculo no item da principal, troca de dono, soltar e recarregar; migração do vínculo na mesma escrita; consolidação carregando o subject; diff; auditoria com a mesma lista (teste estrutural sem comentários).
+- `arquiteto-assunto-guarda-servidor` (banco em memória): gravação com leitura estreita (colunas e filtros conferidos); recusas sem insert; subject igual grava sem ler a keyword; sem Assunto, só as 2 chamadas de antes; restauração; SiloDNA com e sem página; par da consolidação; `subjectCode`; guarda do vínculo; Q7 aceito, recusado e sem releitura; consolidação recusando IA, outro ator, outra marca (sem ler o pacote dela), não declarado e pacote divergente; `SUBJECT_DROPPED`; ordem da chamada no adaptador e na rota (estruturais, sem comentários).
+- Mutantes manuais: 27 na primeira rodada e 14 na segunda (10 na guarda e no vínculo, 4 na correção), todos mortos com a suíte verde; arquivos restaurados e conferidos por md5.
+- Comparação com o HEAD, em cópias temporárias já apagadas: consolidação sem Assunto 40/40 idêntica em bytes e hash; diff sem Assunto 36/36 idêntico.
+- Suítes, segundo o relatório da segunda rodada: `test:arquiteto` 2352/2354 (as 2 falhas de base); `test:arquiteto:servidor` 52/52; `test:arquiteto:lentes` 31/31; `test:editorial` 170/174 (as 4 de base); Minerador 1023/1051 (as 28 de base); `test:arquiteto-backup-roundtrip` 8/8, com a restauração passando pela guarda; `test:visual-system` 5 falhas, `test:operational` 10 e `test:authz` 2, todas de base. Nenhuma falha nova por nome. `npx tsc --noEmit` limpo; ESLint nos arquivos de código novos ou alterados fora da tela sem problemas; `git diff --check` limpo.
+- `tests/arquiteto-canonical-persistence.test.mts` (fora de qualquer script) não carrega por um erro antigo no próprio arquivo (propriedade de parâmetro TS, que o `node --test` recusa). Não é regressão desta fase.
+
+**Egress e custo.**
+
+- Tela: nenhuma leitura nova. Sugestões e selos usam só as keywords recebidas, cuja linha inteira a mesa já carrega; o índice continua sem `analise_semantica` (E8). O vínculo gravado vem do payload dos itens que a mesa já lê.
+- Servidor, só com Assunto novo ou alterado, todas estreitas:
+  - versão vigente: `version_id`, `payload->subject` e `payload->principalKeywordId`, filtrada por marca, entidade e tipo;
+  - keyword pelo id: `id,brand_id,keyword,deleted_at`, sem filtro de marca, para a recusa dizer "outra marca" em vez de "não existe";
+  - item de workflow da keyword: `state` e `payload->approvedDna`, só quando a marca confere; o pacote de outra marca nunca é lido;
+  - existência de SiloPage (`version_id`, uma linha), só para SiloDNA avulso.
+- Consolidação do Silo: uma leitura estreita da versão vigente do SiloDNA em toda consolidação, inclusive sem Assunto, para recusar a perda do Assunto. A consolidação é rara e já fazia várias leituras.
+- Escrita: cada prender ou soltar numa Definição gravada é uma versão nova do ArticleDNA (~0,7 kB a mais por versão com Assunto, SDD F2.5). Numa formação sem Definição, é uma atualização do item de workflow da principal.
+- Custo de CPU no cliente: `keywordDnaFromPackage` roda por keyword recebida. A tela memoriza com `useMemo`.
+- Chamadas pagas: zero.
+
+**Limites conhecidos e pendências.**
+
+- **Restauração: o autor é conferido só pelo formato.** Com `subjectActor: "restored"`, `attachedBy` só precisa ter o formato de `auth.users.id` (UUID). Não se confere se o usuário existe nem se tem acesso à marca, então um backup forjado pode atribuir o Assunto a outra pessoa ou a um UUID inexistente. Mitigações atuais: IA, e-mail e `local-user` recusados; keyword, marca, declaração e pacote conferidos igual; restaurar exige permissão de edição da marca. Fechar isso exige reproduzir a autorização canônica (memberships, owner, agência e admin global); caminho sugerido: adendo que reuse `lib/server/canonical-authorization.ts`.
+- **Rotas de IA perdem o Assunto em silêncio.** `app/api/arquiteto/article-dna` e `app/api/arquiteto/silo-dna` montam a versão sem `subject`. Chamadas sobre uma entidade que já tem Assunto, a versão nova o perde. Hoje elas criam a versão 1 de grupos novos. Recusar exigiria ler a versão vigente em toda gravação sem Assunto no writer, o que muda a sequência de leituras que o teste fixa.
+- **Silo com SiloPage.** Prender Assunto novo continua recusado, na tela e no servidor. Falta decidir como o humano escolhe um Assunto novo para um Silo com página; caminho sugerido: a consolidação aceitar um subject escolhido e versionar o par junto. Soltar o Assunto de um Silo com página é recusado só na tela: no writer avulso, o servidor não confere remoção (na consolidação, a perda é recusada com `SUBJECT_DROPPED`).
+- **Restauração aplica e só depois recusa.** A guarda roda na aplicação, não no plano. Um backup com Assunto cuja keyword não está mais declarada, ou de outra marca, é recusado no meio da aplicação, e o que já foi aplicado fica, como com qualquer recusa do writer. O plano de restauração poderia conferir antes.
+- **Vínculo órfão.** Se o ref do artigo muda por um caminho em que o item antigo não está no plano, o vínculo antigo fica no payload sem efeito (`liveWorkingSubjectAnchors` o ignora). Se um candidato calculado com o mesmo ref reaparecer, ele volta a valer.
+- **Ainda não verificado:** como o código da fase A se comporta com um item de workflow que já tem `articleSubjectAnchor` no payload, num rollback. O cliente da fase A não envia o campo, e o PATCH espalha o payload atual, então o esperado é o campo ficar inerte; não há teste disso.
+- Prender numa Definição aprovada cria uma versão `proposed`. A aprovada continua canônica até a formação ser concluída de novo.
+- Na materialização, se o Assunto preso não passa mais em `planSubjectAttachment` (retirado, sem pacote, fora da mesa), aquele artigo não é concluído e a tela avisa. É um bloqueio conservador.
+- O contorno `assuntoMudou`/`sameDeclaredSubject` da materialização (`modules/arquiteto/arquiteto-workspace.tsx`) ficou redundante com o diff novo e permanece; um teste da tela o fixa. Pode sair junto com essa asserção.
+- No diálogo de importação, "Assunto · declarado" aparece só nas keywords já recebidas ou com `keywordDetail=full`, porque o índice não lê `analise_semantica`.
+- `deriveTerritorialWorkingView` não tem consumidor na tela, então a opção `anchoredKeywordIds` do território não está ligada.
+- `loadCanonicalArquitetoWorkspace` filtra ArticleDNA só pelas referências. Um artigo cujo único vínculo com as recebidas fosse o tronco não entraria na mesa; hoje não acontece, porque todo artigo tem principal recebida.
+- Com um Assunto D2 no lote, os núcleos automáticos mudam, porque ele sai da formação. É o esperado pela F2.3.
+- "Formar artigo" pelas sugestões tira as marcadas de candidatos calculados vizinhos; as que já estão em artigo decidido ficam bloqueadas.
+- **F2.4 passo 5 ("Pedir proposta" da IA) não foi implementado.** A revisão de IA existente (`lib/arquiteto/article-ai-review.ts`) só propõe membership. Pôr o Assunto no payload estratégico (`lib/arquiteto/ai-strategic-payload.ts`) muda `ARTICLE_AI_REVIEW_PROJECTION` e deixa as revisões antigas desatualizadas. Precisa de adendo.
+- Dívidas herdadas: `react-hooks/preserve-manual-memoization` em `arquiteto-workspace.tsx` subiu de 54 (HEAD) para 65 na primeira rodada; a segunda manteve o perfil (65, e `exhaustive-deps` 26). O guard visual estrito do arquivo foi de 108 para 107, e os arquivos novos têm 0. Os botões do filtro "Assuntos" (`modules/arquiteto/subject-panels.tsx`) usam `min-h-8`, como `ARCHITECT_UI.toolbarButton`. O `WorkflowImportDialog` compartilhado segue com texto de 9 a 10px fora do selo.
+
+**Deploy e rollback, obrigatórios (SDD seção 6).**
+
+- A F2·B só vai ao ar **depois** da fase A no ar e conferida pela homologação do usuário.
+- Depois que um ArticleDNA ou SiloDNA for gravado com `subject`, o rollback do código só pode voltar até a fase A, **nunca abaixo dela**. Nenhum formato novo de ArticleDNA ou SiloDNA além do schema da fase A. Pacote sem Assunto não muda o parse nem o hash.
+- O Radar (F3) e o Redator (F4) só usam o campo depois da F2·B homologada.
+
+**Homologação (usuário).**
+
+1. Formar dois artigos e uma landing page em torno de "SEO para clínicas". Conferir o slug da principal e a SERP das sustentações.
+2. Conferir o Assunto fora das não agrupadas quando ancorado, e dentro delas com o selo quando sem artigo.
+3. Prender e soltar numa Definição real e conferir no banco a versão `proposed` com `subject`. Concluir a formação e conferir o `subject` no ArticleDNA aprovado.
+4. Prender o Assunto numa formação sem Definição, recarregar e conferir que continua preso; conferir no banco `articleSubjectAnchor` no item da principal.
+5. Formar pelas sugestões e recarregar. Mover ou trocar a principal e conferir que o vínculo acompanha, ou que o Assunto volta a "aguardando".
+6. Prender num Silo sem página e conferir a sugestão nos artigos dele. Consolidar um Silo com Assunto e conferir o `subject` na versão nova do SiloDNA e o `siloDnaRef` da SiloPage.
+7. Tentar gravar pela rota com `attachedBy` de outra pessoa e esperar 403 `SUBJECT_ACTOR_MISMATCH`; tentar prender num Silo com página e esperar 409 `SUBJECT_SILO_PAGE_BOUND`.
+8. Verificar teclado e leitor de tela nos dois diálogos, em 360, 768, 1024 e 1440 px, nos temas claro e escuro.
+
+A F2·B só passa a PASS depois do readback no banco.
+
+## Assunto declarado: fase A da F2 e trava no envio — 2026-09-24
+
+```text
+SUBJECT_NO_CONTRATO = DeclaredSubjectSchema opcional em ArticleDNA e SiloDNA · nenhum caminho grava
+F2_FASE_A = no código · deploy e homologação pendentes (usuário)
+F2_FASE_B = PLANEJADA · só começa depois da fase A no ar e homologada
+ROLLBACK_ABAIXO_DA_FASE_A = PROIBIDO depois do deploy dela
+HANDOFF = trava de aprovação (F1.7) + destino do Assunto conferido no servidor · 409 no lote
+MIGRATIONS_ADDED = 0 · CHAMADAS_PAGAS_EM_TESTE = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), aprovada pelo dono do produto em 2026-09-24, e o [ADR-022](../00-produto/decisoes/ADR-022-assunto-tronco-editorial.md). O Assunto é a frase que o humano declara no Minerador como tronco do artigo, mesmo sem busca. A principal continua dona do slug, do KGR e do H1 (D1).
+
+**Fase A: o contrato só aceita o campo.** Verificado no código e confirmado por teste.
+
+- `DeclaredSubjectSchema` (`lib/arquiteto/contracts.ts:84`), `.strict()`. Obrigatórios: `keywordId`, `approvedPackageRef` (o `ApprovedPackageRefSchema` que já existia, `:62`), `phrase`, `attachedBy` e `attachedAt`. `note` tem de 1 a 280 caracteres ou é `null`; `destinationUrl` é URL ou `null`.
+- `subject` entrou como campo **opcional** no `ArticleDNASchema` (`:1013`) e no `SiloDNASchema` (`:1174`).
+- O `superRefine` do ArticleDNA ganhou duas regras, que só olham o próprio artigo (`:1098-1110`):
+  - `subject.keywordId` não pode ser secundária nem reforço (erro em `subject.keywordId`);
+  - `subject.phrase` não pode coincidir com um item de `excludedSubjects`, comparando por keyword normalizada (erro em `subject.phrase`).
+- A normalização é uma cópia local da `normalizeKeyword` do Minerador (`normalizeSubjectKeyword`, `:104`), para o contrato não depender do núcleo de import. O teste confere que as duas dão o mesmo resultado.
+- **O schema não decide** se o Assunto pode ser a própria principal: ele aceita esse caso, e a regra "só com Volume validado" (Q7) fica para o gate de conclusão da fase B. Também não impede o mesmo Assunto em vários artigos (D3).
+- O Assunto fica fora de `keywordReferences` e do teto de 6. Nenhum enum mudou. `centralEntity` do SiloDNA não recebe a frase.
+- **Nenhum caminho grava `subject`.** `DeclaredSubjectSchema` só aparece em `lib/arquiteto/contracts.ts` e em `tests/arquiteto-assunto-schema.test.mts`. Adapters, formação, persistência, telas, Radar e Redator não foram tocados.
+- **Compatibilidade:** os hashes de um ArticleDNA e de um SiloDNA sem `subject` foram capturados antes da mudança e fixados no teste. Depois dela, o parse devolve a mesma saída, sem chave `subject`, e os hashes são iguais no payload cru, no lido e no envelope versionado. Os hashes dourados do Radar seguem verdes.
+
+**Regra de rollback, obrigatória (SDD seção 6, item 1).** Depois do deploy da fase A, **nenhum rollback de código volta para antes dela**. O ArticleDNA é lido com `.strict()`: um único artefato gravado com `subject` faria a leitura canônica do Arquiteto da marca inteira lançar `INVALID_ARTIFACT` 503 (`lib/server/arquiteto-persistence.ts:216-231`) e tiraria o artigo do Radar, que o manda para `incompatible` (`lib/server/editorial-repositories.ts:96-100`). Versões consolidadas são imutáveis (invariante 9): não dá para tirar o campo dos registros. Rollback permitido: até a fase A, nunca abaixo.
+
+**Trava no envio ao Arquiteto (F1 do Minerador, no servidor do Arquiteto).** Verificado no código e confirmado por teste.
+
+- `prepareCanonicalHandoff` (`lib/server/arquiteto-workspace.ts`) aplica `resolveHandoffApprovalGate`, o mesmo veredito do gate da tela. Aprovação registrada a partir de `SERVER_APPROVAL_GATE_SINCE = 2026-09-24T00:00:00-03:00` (`lib/minerador/approved-package.ts:132`) sem Lógica, Volume, Resultados ou KGR (no Assunto declarado, sem Lógica) recusa o **lote inteiro** com 409, sem gravar nada.
+- Passam com alerta: aprovação sem registro de data, aprovação registrada antes da constante (inclusive a do backfill) e keyword já recebida, que não sai do Arquiteto (`AGENTS.md` §10). Um registro do backfill com data igual ou posterior à constante cai na regra normal.
+- A página de destino do Assunto é conferida de novo contra o `marcas.site_url` atual, com uma leitura estreita (`marcas.select("site_url")`) só quando alguma elegível tem destino. O `destinationCheck` gravado pelo navegador não vale como garantia. Fora do domínio, sem https ou marca sem site com destino gravado: 409 no lote. Já recebida: alerta com `scope: "destination"`.
+- A resposta ganhou `approvalAlerts`, de forma aditiva. **Limite:** o `HandoffResponseSchema` de `lib/arquiteto/canonical-workspace.ts` não tem o campo e o descarta no parse; a tela do Minerador mostra só os alertas que ela mesma calcula (pendência no backlog).
+- Custo de leitura da trava: zero, porque `analise_semantica` já vinha na linha das keywords pedidas. A conferência do destino lê uma linha de `marcas`.
+
+**Testes (fixtures, sem rede e sem chamada paga):**
+
+- `tests/arquiteto-assunto-schema.test.mts` 16/16, reexecutado em 2026-09-24 na redação desta entrada;
+- `tests/arquiteto-assunto-trava-servidor.test.mts` 11/11, reexecutado na mesma data; `test:arquiteto:servidor` 29/29, segundo o relatório da implementação;
+- `test:arquiteto` 2272/2274, com as mesmas 2 falhas de base; `test:arquiteto:lentes` 31/31; `test:radar` 2616/2616, com os hashes dourados; `test:redator` 335/335; `npx tsc --noEmit` limpo. Estes números são do relatório da implementação.
+
+**Não feito nesta data: fase B (Planejado aqui; entrou no código depois, na entrada da F2·B acima).** Gate de conclusão com a principal igual ao Assunto só com Volume validado; `subjectKeywordId` na cópia de trabalho e `isAnchoredSubject` nos cálculos de conservação; Assunto sem Volume validado fora da formação automática; selos, filtro "Assuntos" e listas; sugestões de sustentação; prender o Assunto em artigo e Silo; o texto "disputam o mesmo assunto" da trava de canibalização (`lib/arquiteto/article-formation-confirmation.ts:476`) continua como está. Radar (F3) e Redator (F4) ignoram o campo.
+
+**Validado manualmente: NÃO.** A homologação é do usuário: deploy da fase A sozinha; abrir o Arquiteto e o Radar das marcas e conferir que carregam normalmente; enviar ao Arquiteto uma aprovada depois da ativação sem processo (espera-se 409), uma aprovada antes (passa) e um Assunto com destino fora do site (409). A F1b (Pesquisa por Assunto) é do Minerador e não faz parte desta entrada.
+
 ## As 4 lentes no Arquiteto — 2026-09-23
 
 ```text

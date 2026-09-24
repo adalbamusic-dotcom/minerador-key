@@ -1,5 +1,64 @@
 # Backlog — Radar
 
+## Assunto declarado — F3 e export F4.3 — 2026-09-24
+
+Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md). Registro em `estado-atual.md`, mesma data.
+
+- [x] Contexto de pesquisa com `article.subject` (só com Assunto) e linha `article.subject` no `RADAR_FOUNDATION_USAGE_MAP`.
+- [x] Consultas Google sem mudança; YouTube com `DECLARED_SUBJECT` dentro do teto de 6, tomando o lugar da última da fila.
+- [x] Especialista: pedido de aprofundar o Assunto e a virada; pauta garantida no domínio (`radarR7SubjectTopic`), sujeita à revisão humana.
+- [x] Leitura lexical da amostra (`observed.declaredSubject`), alerta com o critério em `limitations`, sem bloquear o FINALIZE.
+- [x] Seção exigida da virada no modelo editorial, inclusive sintética com 0 páginas; nunca H2 por decreto; congelada em `blueprint.sections` sem mudar o schema do bundle; `subject` fora do bundle.
+- [x] Direção do CTA para o destino ao lado da chamada observada.
+- [x] Export "Para escrever": linhas do Assunto em `artigo`, `promessa_e_leitor` e `titulo_e_seo`; virada marcada em `estrutura` pelo motivo do modelo; sem Assunto, as 13 colunas e o J idênticos.
+- [x] **Levar ao Redator a virada sugerida** (segunda rodada): no envio, só com Assunto, linhas curtas em `importedContext.editorialContext` (`radarWriterSubjectTurnLines`, `lib/redator/radar-subject-turn.ts`): Tronco, Virada, Seção da virada, Direção do H1, Destino da chamada e Alerta, com o mesmo texto do CSV. Dossiê e bundle sem mudança; sem Assunto, `editorialContext: []` e documento igual ao do HEAD (snapshot sha `8b366688…`). Exposto no `get_writer_brief` e nos fundamentos (registro do Redator).
+- [x] **Gravar a proibição do Assunto no envio** (segunda rodada): recibo (`radar-writer-send.ts`) e documento (`radarWriterDossierOf`) usam `radarWriterMayNotFor` com o `subject` do ArticleDNA da identidade.
+- [x] **Especialista, fora do domínio** (segunda rodada): `SYSTEM_PROMPT` intacto e linhas do Assunto juntadas por `buildSystemPrompt` (`radarExpertTopicsSubjectPromptLines`); Telegram com "Assunto (tronco)" e "Pedido" depois de "Tema:", sem nota nem destino; bloco `radar-specialist-subject` no painel do especialista. O texto do Telegram e do painel foi substituído na terceira rodada (abaixo).
+- [x] **Telas** (segunda rodada): rótulo "Exigida pelo Assunto" no workbench ("Ver candidatos observados · N · 1 exigida pelo Assunto"), no r3-blueprint (virada sem número) e no artigo-modelo; bloco do Assunto com "Onde virar", "H1", contagem e alerta; "Destino da chamada" na Conclusão. Sem Assunto, markup igual ao do HEAD.
+- [x] Textos da revisão: `sampleLabel` e rótulos do modelo com "palavras do Assunto"; sem principal, "levar o leitor da keyword principal a …" no CSV e no Redator.
+- [ ] **Aprovar o adendo técnico à SDD F4.1/F4.4 (dono), antes do commit.** A virada chega ao Redator por `importedContext.editorialContext`, gravado no envio, e não pelo dossiê; o Redator ganhou leituras estreitas (Guardião: `g_articleDnaRef` e `payload->subject` < 1 kB; fundamentos e material: `c_editorialContext` < 2 kB, só com Assunto). O conteúdo proposto está resumido em `docs/07-redator/estado-atual.md` (mesma data); a SDD não foi editada.
+- [ ] **Homologar (gate F3 e F4, usuário), depois da F2 fase B:**
+  - investigar um artigo com Assunto e um sem; conferir a seção da virada, a posição sugerida, o complemento do H1 e o alerta;
+  - no r3, conferir o contador "Ver candidatos observados", a virada sem número com "Exigida pelo Assunto" no blueprint, o selo e o bloco do Assunto no artigo-modelo e o "Destino da chamada";
+  - abrir o painel do especialista e conferir o bloco do Assunto; enviar uma pauta de teste pelo Telegram (chamada real, feita pelo usuário) e conferir "Tema a aprofundar" e "Pergunta" (ou só "Tema a aprofundar", quando a pergunta já está numerada), sem tronco, virada nem ArticleDNA. Aprovar sem editar a pauta do Assunto que o r7 acrescenta e conferir que ela chega em linguagem simples;
+  - finalizar e conferir a virada em `blueprint.sections` e o alerta em `limitations`;
+  - exportar o CSV "Para escrever" dos dois e conferir as linhas novas e a célula idêntica no artigo sem Assunto;
+  - enviar os dois ao Redator e conferir no documento `editorialContext` e `writerMayNot` (vazio e lista de sempre no artigo sem Assunto). No painel do Redator, conferir o bloco do Assunto só no artigo que tem Assunto.
+- [ ] **Leitura semântica, não só lexical, de onde o Assunto cabe na SERP (melhoria da F3).** Hoje o critério é por raízes de palavras (`radarSemanticStems`). Ler por sentido: entidades, perguntas observadas, proximidade entre temas, sem provider pago. Exige SDD ou adendo, porque muda o critério do alerta, da posição e do H1.
+- [x] **Texto ao especialista em linguagem simples** (terceira rodada):
+  - Telegram e painel do especialista com "Tema a aprofundar" (`RADAR_EXPERT_SUBJECT_LABEL`) e "Pergunta" (`RADAR_EXPERT_SUBJECT_QUESTION_LABEL`, `radarExpertSubjectQuestion`, campo `question`), sem tronco, virada, ArticleDNA nem "Pedido:";
+  - pergunta repetida some do cabeçalho quando já está numerada;
+  - a pauta do r7 usa a pergunta simples (`radarSubjectReaderQuestionText`);
+  - o prompt das pautas manda escrever o `text` em linguagem simples;
+  - o `request` da SDD fica só no prompt interno;
+  - sem Assunto, mensagem e prompt ficam iguais ao HEAD.
+- [ ] **Adendo à SDD F3.1 (dono), antes do commit:** registrar que o texto ao especialista externo deixou de usar "Assunto (tronco)" e "Pedido: Aprofundar o Assunto e a virada…". Telegram e painel dizem "Tema a aprofundar" e "Pergunta", a pauta do r7 usa a pergunta simples e o `request` fica só no prompt interno. A SDD não foi editada.
+- [x] **Assunto no painel e na semeadura do Redator** (terceira rodada): as linhas de `importedContext.editorialContext` chegam ao painel dos fundamentos e a roteiro e carrossel pela projeção única `radarFoundationsOf`. Registro em `docs/07-redator/`.
+- [ ] **Pautas com 6 itens:** o r7 acrescenta a pauta do Assunto quando nenhuma cobre a frase; com 5 da IA, a lista chega a 6. Conferir a tela e o fluxo com 6.
+- [ ] Pautas persistidas antes da F3 não têm `article.subject` em `radarContext`: a mensagem segue sem a linha do Assunto até a pauta ser salva de novo pelo painel. Decidir se vale reler o contexto no envio.
+- [ ] **Teste de coerência blueprint × modelo:** no blueprint a cobertura observada é medida pelo `workingTitle`; no modelo, pelas raízes do grupo. Os dois podem divergir.
+- [ ] **Investigação finalizada sem páginas:** o transporte compacto leva a leitura a `NO_PAGES`; decidir se a leitura do Assunto deve ser congelada no FINALIZE (exigiria campo no bundle: fora do escopo da SDD).
+- [ ] **Adendo à SDD, texto do motivo:** `RADAR_SUBJECT_MUST_COVER_REASON` repete "ArticleDNA" na marcação do CSV e diz "a arquitetura decide onde", o que tensiona com "quem redige decide". Proposta: "O Assunto é o tronco deste artigo: a virada para ele precisa aparecer; o lugar é decisão de quem redige." Mantido até decisão, porque a SDD fixa o texto.
+- [ ] Destino com parâmetro de campanha: a limpeza do CSV tira `utm_*` e similares também do destino do Assunto. Decidir se o destino declarado é exceção.
+
+## Export "Para escrever" — 2026-09-23
+
+- [x] Formato "Para escrever" com 13 colunas, linha de topo Silo/Marca, veredito `pode_escrever`, limpeza e limites; o formato técnico ficou byte a byte igual.
+- [x] Card "Exportar para escrever": duas opções, um botão e "Avançado (auditoria)" fechado com o técnico e a planilha.
+- [ ] **Homologar o card:**
+  - abrir e fechar com Esc;
+  - Tab nos rádios, no botão e no Avançado;
+  - foco de volta ao botão depois do download;
+  - largura de 360px;
+  - contraste do botão no tema claro.
+- [ ] **Voz, tom, autor e revisor do BrandDNA** na linha de topo. É o dado indispensável que mais falta para escrever fora da plataforma. Exige leitura nova do módulo Marca: autorização.
+- [ ] **Homologar** com um artigo novo de ponta a ponta:
+  - exportar o Silo;
+  - colar o CSV numa IA externa;
+  - conferir se o texto sai sem pedir dado que faltou.
+- [ ] Bateria de mutantes das correções da revisão: as 11 asserções novas cobrem cada ramo, mas os mortos não foram medidos.
+- [ ] "Copiar para IA" por artigo (opcional no desenho): não implementado.
+
 ## 4 lentes, tela e export — 2026-09-23
 
 - [x] R1 standing congelado e trava; R2 4 lentes com cache primeiro; R3 a R5 lentes congeladas, auxiliar e apoio; tela das lentes; lentes congeladas no export; export com leitura por artigo (−31%).

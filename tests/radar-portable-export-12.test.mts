@@ -954,14 +954,20 @@ test("§29 · continua um único botão Exportar, com os produtos dentro", async
    * produtos moram DENTRO dele. O que esta trava protege — nenhum segundo
    * caminho de export na barra — é conferido pelo único botão fora do menu.
    */
+  /*
+   * 2026-09-23 · O MENU VIROU O CARD "EXPORTAR PARA ESCREVER" (aprovado pelo
+   * dono do produto): o botão da barra é o mesmo, e tudo mora DENTRO do
+   * painel que ele abre — o botão "Exportar CSV" e o Avançado.
+   */
   const botoes = [...barra.matchAll(/data-testid="radar-export-[a-z-]+"/g)].map(item => item[0]);
-  assert.equal(botoes.length, 4, "§29 · a barra voltou a ter mais de um caminho de export");
-  const foraDoMenu = barra.slice(0, barra.indexOf('role="menu"'));
+  assert.ok(botoes.includes('data-testid="radar-export-csv"'), "§29 · o card perdeu o botão 'Exportar CSV'");
+  assert.equal(botoes.length, 13, "§29 · o botão da barra e as doze marcas do card — nada além disso");
+  const foraDoMenu = barra.slice(0, barra.indexOf('role="dialog"'));
   assert.deepEqual([...foraDoMenu.matchAll(/data-testid="radar-export-[a-z-]+"/g)].map(item => item[0]), ['data-testid="radar-export-menu"'],
-    "§29 · um item de export saiu do menu para a barra");
-  assert.match(barra, /Silos completos · um CSV por silo/);
+    "§29 · um item de export saiu do card para a barra");
+  assert.match(barra, /Silo completo \(recomendado\)/);
+  assert.match(barra, /Só os artigos selecionados/);
   assert.match(barra, /Planilha atual/);
-  assert.match(barra, /Dossiês editoriais finalizados \(CSV\)/);
 });
 
 /* ============================== a sentinela ============================== */

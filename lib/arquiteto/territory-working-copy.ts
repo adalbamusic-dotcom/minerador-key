@@ -235,6 +235,12 @@ export type TerritorialWorkingView = {
   unassignedKeywordIds: string[];
   unaddressedKeywordIds: string[];
   consistency: MembershipConsistencyReport;
+  /**
+   * Assuntos que são tronco de algum artigo e não têm território (SDD
+   * 2026-09-24, F2.3): não são "sem território", porque o artigo já os
+   * sustenta. Presente só quando há.
+   */
+  anchoredSubjectKeywordIds?: string[];
 };
 
 const assignmentsOf = (workingCopy: TerritoryWorkingCopy): KeywordTerritoryAssignment[] =>
@@ -246,7 +252,11 @@ const assignmentsOf = (workingCopy: TerritoryWorkingCopy): KeywordTerritoryAssig
  * Derivação ÚNICA da leitura territorial. `keywordRefs` sai daqui e de mais
  * lugar nenhum; a UI e o mapa consomem esta projeção, nunca uma lista própria.
  */
-export function deriveTerritorialWorkingView(workingCopy: TerritoryWorkingCopy): TerritorialWorkingView {
+export function deriveTerritorialWorkingView(
+  workingCopy: TerritoryWorkingCopy,
+  /** Troncos ancorados (`anchoredSubjectKeywordIds`, em `declared-subject.ts`). */
+  subjects: { anchoredKeywordIds?: ReadonlySet<string> } = {},
+): TerritorialWorkingView {
   const assignments = assignmentsOf(workingCopy);
   const consistency = checkTerritorialConsistency({
     brandId: workingCopy.brandId,
@@ -262,20 +272,32 @@ export function deriveTerritorialWorkingView(workingCopy: TerritoryWorkingCopy):
     articleFormationReadiness: resolveArticleFormationReadiness({ territory, report: consistency, assignments }),
   }));
 
+  const unassignedKeywordIds = assignments
+    .filter(assignment => assignment.territoryRef === null)
+    .map(assignment => assignment.keywordId)
+    .sort();
+  // Keyword que ainda não recebeu decisão nenhuma. Não é "unassigned": é
+  // ausência de decisão, e continua visível em vez de sumir.
+  const unaddressedKeywordIds = workingCopy.keywords
+    .filter(keyword => !keyword.assignment)
+    .map(keyword => keyword.keywordId)
+    .sort();
+  const anchored = subjects.anchoredKeywordIds;
+  const anchoredSubjectKeywordIds = anchored?.size
+    ? [...new Set([...unassignedKeywordIds, ...unaddressedKeywordIds].filter(keywordId => anchored.has(keywordId)))].sort()
+    : [];
+
   return {
     brandId: workingCopy.brandId,
     territories,
-    unassignedKeywordIds: assignments
-      .filter(assignment => assignment.territoryRef === null)
-      .map(assignment => assignment.keywordId)
-      .sort(),
-    // Keyword que ainda não recebeu decisão nenhuma. Não é "unassigned": é
-    // ausência de decisão, e continua visível em vez de sumir.
-    unaddressedKeywordIds: workingCopy.keywords
-      .filter(keyword => !keyword.assignment)
-      .map(keyword => keyword.keywordId)
-      .sort(),
+    unassignedKeywordIds: anchoredSubjectKeywordIds.length
+      ? unassignedKeywordIds.filter(keywordId => !anchored!.has(keywordId))
+      : unassignedKeywordIds,
+    unaddressedKeywordIds: anchoredSubjectKeywordIds.length
+      ? unaddressedKeywordIds.filter(keywordId => !anchored!.has(keywordId))
+      : unaddressedKeywordIds,
     consistency,
+    ...(anchoredSubjectKeywordIds.length ? { anchoredSubjectKeywordIds } : {}),
   };
 }
 

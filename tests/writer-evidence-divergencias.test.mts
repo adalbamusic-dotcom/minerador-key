@@ -574,6 +574,7 @@ test("ESTRUTURAL · a entrega a Publicações confere divergência bloqueante an
   const rotaDaEntrega = semComentarios("../app/api/redator/publication-handoff/route.ts");
   assert.match(rotaDaEntrega, /error instanceof WriterEvidenceError/);
   const guardiao = semComentarios("../app/api/redator/guardian/route.ts");
-  assert.match(guardiao, /readWriterGuardianContext\(\{ brandId: input\.brandId \}, input\.document\.id\)/);
+  /* SDD do Assunto, F4.2 · a referência ao ArticleDNA fixado liga os avisos do Assunto, lida na Marca autorizada. */
+  assert.match(guardiao, /readWriterGuardianContext\(\{ brandId: input\.brandId \}, input\.document\.id, \{ articleDnaRef: input\.document\.articleDnaRef \}\)/);
   assert.doesNotMatch(guardiao, /readOpenWriterDivergences/);
 });

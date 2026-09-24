@@ -45,6 +45,7 @@ import { RadarR6ReportPanel } from "./radar-r6-report-panel";
 import type { SerpResearchSnapshot } from "@/lib/radar/serp/contracts";
 import { buildRadarSerpLensCoverage } from "@/lib/radar/serp-lens-coverage";
 import { radarAuxiliaryLensLabel, radarCanonicalLensLabel, radarFrozenLensView } from "./radar-serp-lens-view";
+import { radarCandidateEvidenceLabel } from "./radar-subject-turn-view";
 
 /** A cobertura de lentes da SERP canônica viva, para a linha da consulta central. */
 function lenteDaCanonica(research: SerpResearchSnapshot | null | undefined) {
@@ -1351,7 +1352,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
     {model.deepResearch && model.deepResearch.blueprint.sections.length > 0
       && <details className="mt-3 rounded-md border border-divider bg-surface p-3" data-testid="radar-candidate-evidence">
         <summary className="cursor-pointer text-sm font-semibold text-foreground">
-          Ver candidatos observados · {model.deepResearch.blueprint.sections.length}
+          {radarCandidateEvidenceLabel(model.deepResearch.blueprint.sections)}
         </summary>
         <div className="mt-3"><RadarBlueprintSummaryCard blueprint={model.deepResearch.blueprint} /></div>
       </details>}

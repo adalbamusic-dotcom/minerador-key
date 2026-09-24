@@ -1,5 +1,134 @@
 # Estado atual — Redator
 
+## Assunto declarado nos fundamentos, no MCP e no Guardião (F4) — 2026-09-24
+
+- **Fonte:** [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), F4.1, F4.2 e F4.4. O Assunto é o tronco declarado pelo humano e fixado em `ArticleDNA.subject`. O Redator decide a estrutura final (invariante 48); o Guardião só avisa (Q6).
+- **Verificado no código e confirmado por teste. Validado manualmente: NÃO.** Nenhum ArticleDNA real tem `subject` ainda: o comportamento só aparece quando o Arquiteto gravar o Assunto, na F2 fase B. **Sem Assunto, tudo byte a byte igual:** mesma projeção, mesma lista `writerMayNot` (mesma referência e mesmo hash sha256 `f5f59f87…`), Guardião igual, documento do envio igual ao do HEAD (snapshot sha `8b366688…`, medido com o `radar-import.ts` do HEAD em quatro variações), e fundamentos, briefing, material por seção e relatório do Guardião sem chave nova e sem consulta a mais. Na terceira rodada, também ficaram iguais aos do HEAD a projeção `radarFoundationsOf` (sha `104497fe9c85da5f`), o painel dos fundamentos (HTML renderizado, normal e compacto) e os prompts de roteiro e carrossel (sha `7b664c0588e00a4e`). A semeadura ganhou só um caminho na mesma consulta (2 B sem Assunto).
+- **Três rodadas na mesma data.**
+  - A primeira entregou o domínio: F4.1 nos fundamentos e F4.2 só no `runGuardian`.
+  - A segunda levou a virada e a direção do H1 ao Redator, ligou o Guardião em produção e unificou `writerMayNot`. Uma revisão depois estreitou o egress e a exposição do `subject`.
+  - A terceira levou o Assunto a quem redige pelo painel: o bloco do Assunto nos fundamentos, a mesma projeção para artigo, roteiro e carrossel, e o resumo do Guardião lido do servidor.
+
+  Pedido do dono: o Assunto chega ao Redator validado, reforçado e com o contexto do YouTube e do especialista, e o artigo faz a virada.
+
+  Situação:
+  - Assunto, virada, direção do H1, destino e proibição chegam **pelo MCP, pela IA interna, pelo painel dos fundamentos e pela semeadura de roteiro e carrossel**.
+  - O contexto do YouTube (consulta `DECLARED_SUBJECT`) e o do especialista (pauta do Assunto) seguem pelo dossiê de sempre, montado pela F3 no Radar, sem campo novo.
+  - Nada disso foi visto com dado real.
+- **F4.1 — fundamentos e MCP:**
+  - `subject` em `WRITER_ARTICLE_DNA_FOUNDATION_FIELDS` (18 campos), lido pela mesma projeção por caminho (`a_subject:payload->subject`), validado inteiro por `DeclaredSubjectSchema` e **entregue reduzido a `{ phrase, note, destinationUrl }`** (`readWriterArticleProjection`, `lib/server/writer-evidence-sources.ts`): `keywordId`, `approvedPackageRef` e `attachedBy` não vão aos fundamentos, ao material nem ao pacote da IA; o objeto inteiro segue disponível na fatia `dna.article/<versionId>`. Ausente, não vira `null`;
+  - teto `WRITER_ARTICLE_DNA_FOUNDATION_MAX_BYTES = 1_638`; com nota de 280 caracteres e destino longo, a projeção medida deu 1.571 B;
+  - `writer-handoff`: `RADAR_WRITER_MAY_NOT_SUBJECT` ("trocar ou remover o Assunto declarado"), `radarWriterMayNotFor` e `radarWriterMayNotWithSubject` (remove duplicata);
+  - MCP: a instrução manda fazer a virada da principal para o Assunto e levar ao destino, e aponta para `editorialContext` (fundamentos e `get_writer_brief`); as descrições de `get_writer_foundations` e `get_writer_brief` citam o Assunto e a sugestão do Radar. A ordem das ferramentas não mudou.
+- **Virada e direção do H1 no Redator (segunda rodada):**
+  - **não chegam pelo dossiê:** o bundle V3 (`.strict()`, com hash) não traz o artigo-modelo nem `blueprint.sections`, onde mora a seção sintética; por isso `WRITER_BUNDLE_KNOWN_PATHS` não lista `blueprint`. Dossiê e bundle não mudaram (invariante 78);
+  - no envio, só com Assunto, `buildRadarDocument` grava em `importedContext.editorialContext` as linhas de `radarWriterSubjectTurnLines` (`lib/redator/radar-subject-turn.ts`): Tronco; Virada (onde virar, da principal ao Assunto, com o destino); Seção da virada (a sintética diz que o título é de trabalho do Radar e deve ser reescrito para o leitor; a observada diz "N de M página(s)"); Direção do H1, ou "Assunto em H2/H3 — o H1 é da principal.", ou `RADAR_WRITER_SUBJECT_H1_NO_SIGNAL`; Destino da chamada; Alerta do Radar;
+  - origem: `authorities.google.articleModel.declaredSubject` e o `subject` do ArticleDNA fixado pela identidade do envio. A sugestão só vale se a frase do artigo-modelo for a mesma; sem fotografia do Google, ou com virada de outra frase, a linha diz "onde quem redige decidir (sem sinal na SERP)" e o H1 fica sem sinal, sem inventar lugar;
+  - o texto é o mesmo do CSV "Para escrever" (teste linha a linha em três Assuntos). Diferença intencional: o destino vai como declarado, sem a limpeza de `utm_*` do CSV, porque é o endereço que o Guardião confere. Sem principal: "levar o leitor da keyword principal a …";
+  - leitura: `get_writer_foundations` e o material por seção (que alimenta o pacote da IA interna) leem as linhas por `readWriterEditorialContext` (`WRITER_EDITORIAL_CONTEXT_SELECT = "c_editorialContext:payload->importedContext->editorialContext"`), um caminho, filtrado por `id` e `marca_id`, abaixo de 2 kB, **só quando o ArticleDNA fixado tem Assunto**. O cabeçalho comum (`WRITER_EVIDENCE_HEAD_SELECT`), o manifesto, as fatias do `read_writer_evidence` e as divergências ficaram como antes. `get_writer_brief` lê `r_editorialContext` no select que já fazia (`WRITER_BRIEF_SELECT`). A chave só aparece com lista não vazia.
+- **`writerMayNot` unificado (segunda rodada):** com Assunto, a proibição é gravada no envio, no recibo (`lib/server/radar-writer-send.ts`) e no documento (`radarWriterDossierOf`), a partir do ArticleDNA da identidade (`radarWriterMayNotFor`). Em documentos enviados a partir de agora, fundamentos, material por seção, pacote, envelope do `read_writer_evidence` e briefing mostram a mesma lista.
+- **F4.2 — Guardião ligado em produção (segunda rodada):** `runGuardian` com `context.subject = { phrase, destinationUrl }` emite dois avisos (`severity: "warning"`, `sectionId: "document"`), nunca bloqueio (`blockingCount` igual):
+  - `coverage`: a frase inteira, ou todas as raízes dela no mesmo bloco (critério lexical do Radar, `radarSemanticStems`), não aparece em nenhum H2/H3 ou parágrafo. O H1 não conta;
+  - `cta`: não há link para `destinationUrl` (texto, Markdown, `external_source` ou `internal_link`; ignora protocolo, `www`, fragmento e barra final);
+  - leitura: `WRITER_GUARDIAN_SELECT` ganhou `g_articleDnaRef:payload->articleDnaRef` (~150 B) na mesma consulta; `readWriterGuardianContext(ctx, id, { articleDnaRef })` lê só `payload->subject` da versão fixada (`readWriterGuardianSubject`, pela `readWriterArticleProjection` com `["subject"]`), na Marca, abaixo de 1 kB. Referência ausente ou legada não gera leitura. Se a leitura falhar, sai `assunto_nao_lido (<código>)` em `notices`, sem vazar o driver, e o relatório segue sem os avisos do Assunto;
+  - ligado no MCP (`get_writer_guardian`) e na rota do painel (`app/api/redator/guardian`, com `input.document.articleDnaRef` lido na Marca autorizada; referência de outra Marca não devolve nada);
+  - `writer-publication-handoff` e `documents/route` seguem sem o Assunto de propósito: só usam `blockingCount`, e o Assunto nunca bloqueia (consumidores preservados);
+  - o guarda "Fase 0 · o Guardião lê id, blocks e metadata numa consulta só" (`tests/redator-mcp-alvo-sem-payload.test.mts`) foi atualizado com a justificativa escrita no próprio teste.
+- **Adendo técnico à SDD F4.1/F4.4 — proposto, aguarda aprovação do dono antes do commit (a SDD não foi editada):**
+  - F4.1 dizia que a virada "chega pelo dossiê": chega por `importedContext.editorialContext`, gravado no envio a partir do artigo-modelo, fora do dossiê;
+  - F4.4 dizia "nenhuma leitura nova": o Redator ganhou `g_articleDnaRef` (~150 B) e `payload->subject` (< 1 kB) no Guardião, `c_editorialContext` (< 2 kB, só com Assunto) nos fundamentos e no material, e `r_editorialContext` no briefing;
+  - com Assunto, `writerMayNot` gravado ganha a proibição; nos fundamentos, `subject` sai reduzido.
+  - terceira rodada: a semeadura de roteiro e carrossel lê `d_editorialContext:payload->importedContext->editorialContext` na mesma primeira consulta (2 B sem Assunto, < 2 kB com ele).
+- **Painel, semeadura e Guardião do painel (terceira rodada). Verificado no código e confirmado por teste. Validado manualmente: NÃO** (nenhum ArticleDNA real tem `subject` ainda).
+  - **Projeção única (invariante 78):**
+    - `radarFoundationsOf` (`lib/redator/radar-foundations.ts`) lê `importedContext.editorialContext` do documento v2 com dossiê e o passa a `radarFoundationsOfDossier(dossier, { editorialContext })`. O segundo parâmetro é opcional.
+    - A chave `editorialContext?: string[]` só é criada quando existe linha válida, e sempre no fim do objeto.
+    - Sem Assunto, a projeção sai igual à do HEAD (sha `104497fe9c85da5f`, medido com uma cópia do código do HEAD fora do repositório e fixado em teste). Isso vale com a chave ausente, com `[]` e com lixo (`['']`, `[1, {}]`, string ou objeto).
+    - Não há segunda projeção: painel, semeadura de roteiro e semeadura de carrossel leem a mesma.
+  - **Leitura do Assunto para a tela:** `radarFoundationsSubjectOf(fundamentos)` é uma função pura. Ela separa as linhas pelos prefixos de `RADAR_WRITER_SUBJECT_LINE_PREFIXES`: frase, nota, virada, seção, H1, destino e alerta.
+    - Linha desconhecida não some: vai para `others`, na ordem.
+    - `sectionIsWorkingTitle` marca a seção sintética ("o título é de trabalho do Radar").
+    - Sem a linha do tronco, a função devolve `null`. Assim, linhas antigas sem Assunto não aparecem como Assunto.
+    - A linha do tronco não marca onde a frase acaba. Entre os travessões, vale o corte cuja frase a linha da Virada repete ("a <frase>." ou "a <frase>; destino: "). Sem Virada, ou sem casamento, vale o primeiro travessão.
+  - **Painel** (`modules/redator/writer-radar-foundations-panel.tsx`, `WriterRadarFoundationsPanel`). Só com Assunto, o primeiro bloco depois do cabeçalho mostra:
+    - "Assunto (tronco): <frase>" e a nota;
+    - "Onde fazer a virada";
+    - "Seção da virada". Se ela é sintética, aparece em `text-warning` o aviso "Esse título é de trabalho do Radar: reescreva-o para o leitor antes de usá-lo no artigo.";
+    - "Direção do H1", "Destino da chamada" e "Alerta do Radar";
+    - as linhas desconhecidas, numa lista;
+    - a frase "Onde virar é sugestão do Radar; a decisão é de quem redige. …".
+
+    O texto é 14px (`text-sm`), só com tokens existentes, e o guard visual estrito passa sem dívida. A cópia de listagem (sem bundle) também mostra o Assunto. Sem Assunto, o HTML do painel, normal e compacto, é igual ao do HEAD: os dois foram renderizados e comparados. O bloco ficou antes de "Keyword", e não depois, como o backlog planejava.
+  - **Semeadura de roteiro e carrossel** (`lib/redator/deliverable-seed.ts`):
+    - as linhas entram logo depois das keywords, sob `SEED_SUBJECT_SECTION_TITLE` ("Assunto (tronco) e virada — faça a virada da principal para o Assunto; onde virar é sugestão do Radar, a decisão é de quem redige; não troque nem remova o Assunto");
+    - linhas sem tronco entram sob o cabeçalho neutro `SEED_EDITORIAL_CONTEXT_SECTION_TITLE`;
+    - o prompt de sistema não mudou. Sem Assunto, os prompts de roteiro e carrossel são iguais aos do HEAD (sha `7b664c0588e00a4e`).
+  - **Leitura da semeadura:**
+    - a leitura estreita (`lib/redator/writer-document-reads.ts`) ganhou o caminho `d_editorialContext:payload->importedContext->editorialContext` na mesma primeira consulta;
+    - o campo é validado pelo schema do dono (`ImportedRadarContextSchema.shape.editorialContext`). Uma lista fora do contrato torna o documento incompatível, como na leitura inteira;
+    - `lib/server/writer-seed.ts` chama `radarFoundationsOfDossier(dossier, { editorialContext: head.editorialContext })`.
+  - **Guardião no painel** (`components/editorial/professional-writer.tsx`, com o helper puro `lib/redator/guardian-panel-summary.ts`):
+    - com relatório do servidor, o rótulo "Análise atual", as contagens de bloqueios e avisos e a cor vêm dele (`writerGuardianPanelSummary`), e não da prévia local, que não lê o Assunto. Com isso sai o "0 aviso(s)" que aparecia com os avisos listados logo abaixo;
+    - os `notices` do servidor aparecem como frase (`writerGuardianNoticeText`), com o texto bruto no `title`. `assunto_nao_lido (...)` vira `WRITER_GUARDIAN_SUBJECT_NOT_READ_NOTICE` ("Não foi possível ler o Assunto; a virada e o link para o destino não foram conferidos."). `migration_pendente:` e `divergencias_nao_lidas (X):` perdem o código;
+    - sem relatório do servidor, o texto é o de antes: "Prévia local", as contagens locais e nenhum aviso;
+    - o bloco do resumo passou a `text-sm` com tokens (`border-divider`, `text-danger`/`text-success`, `text-text-muted`, `text-warning`).
+  - **Aprovação pelo painel:** `requestStatus` usa `writerGuardianApprovalBlockingCount`, o maior valor entre os bloqueios da prévia local e os do resumo exibido, com a mesma mensagem. Um bloqueio visto só pelo servidor também barra a aprovação.
+    - Sem relatório do servidor, o número é o de antes.
+    - `guardianReport` é zerado a cada edição e a cada troca de documento, então um relatório desatualizado não bloqueia.
+  - **Dívida visual de `professional-writer.tsx`** (medida por `findVisualViolations`): HEAD 43, agora 41, e o teste trava em 41. O arquivo é LF (0 CRLF e 622 LF, contados com Node), e não CRLF.
+  - **MCP:** não mudou nesta rodada. `get_writer_foundations` e o material por seção continuam somando `editorialContext` por fora de `radarFoundationsOfDossier` (ver a pendência abaixo).
+- **Pendências (Planejado):**
+  - resolvidas na terceira rodada: `radarFoundationsOf` e a semeadura leem `editorialContext`; o painel mostra o Assunto; o resumo do Guardião lê o relatório do servidor e mostra os `notices`. A homologação do gate F4 pelo painel já pode ser feita, depois da F2 fase B;
+  - o MCP (`get_writer_foundations`) e o material por seção (`lib/server/writer-evidence-reader.ts`) somam `editorialContext` por fora de `radarFoundationsOfDossier`, com critério próprio: a presença vem do `subject` do ArticleDNA, e não da linha do tronco. Unificar muda o critério de presença e a leitura `readWriterEditorialContext` do contrato MCP, que tem goldens no `test:redator:mcp`. Fica para uma rodada própria, medida contra a base;
+  - o resto do aside do Guardião continua em `text-[9px]` com `slate`/`amber`, abaixo do mínimo do sistema visual: título, botões e a lista "Achados por seção". Por isso os achados do Assunto (virada ausente, link ao destino ausente) aparecem em 9px. Subir só a lista deixaria o bloco inconsistente; fica para uma tarefa visual própria, que também baixa a dívida do arquivo;
+  - quando a análise do servidor falha, o `catch` de `analyseGuardian` faz `setGuardianReport(localGuardian)`, e o painel mostra "Análise atual" com as contagens locais. É o comportamento de antes, agora explícito;
+  - frase, nota e destino saem do texto das linhas, e não de campo estruturado: `{ phrase, note, destinationUrl }` não está em `radarFoundationsOf`. Um campo estruturado exigiria mudar o envio (`radar-import`);
+  - sem `guardianReport`, o markup do resumo muda só nas classes (9px e `slate` viraram `text-sm` e tokens), e o texto é idêntico. É um desvio intencional nas linhas alteradas.
+- **Arquivos:**
+  - primeira rodada: `lib/redator/writer-handoff.ts`, `lib/redator/writer-evidence-catalog.ts`, `lib/redator/guardian.ts` (importa `lib/radar/semantic-concept-model.ts`: dependência nova do Redator sobre o Radar), `lib/server/writer-evidence-reader.ts`, `app/api/mcp/redator/route.ts`; testes `tests/writer-evidence-reader.test.mts` e `tests/radar-assunto-f4.test.mts`;
+  - segunda rodada e revisão: novo `lib/redator/radar-subject-turn.ts`; alterados `lib/redator/radar-import.ts`, `writer-document-reads.ts`, `writer-section-evidence.ts`, `lib/server/writer-evidence-document.ts`, `writer-evidence-reader.ts`, `writer-evidence-sources.ts`, `writer-evidence-divergences.ts`, `app/api/mcp/redator/route.ts` e `app/api/redator/guardian/route.ts`; do Radar, `lib/server/radar-writer-send.ts` e `lib/radar/portable-writing-export.ts` (registro em `docs/05-radar/estado-atual.md`). Todos LF, preservado.
+  - terceira rodada:
+    - alterados: `lib/redator/radar-foundations.ts`, `deliverable-seed.ts` e `writer-document-reads.ts`; `lib/server/writer-seed.ts`; `modules/redator/writer-radar-foundations-panel.tsx`; `components/editorial/professional-writer.tsx` (um import, uma linha de cálculo, o bloco do resumo e a linha de `requestStatus`); `package.json` (testes novos nas suítes do Redator, edição mínima); `tests/redator-radar-foundations-1.test.mts` (a asserção O passa a exigir `{ editorialContext: head.editorialContext }`);
+    - novos: `lib/redator/guardian-panel-summary.ts`, `tests/redator-assunto-painel.test.mts`, `tests/redator-assunto-painel-dom.test.mts`, `tests/redator-assunto-painel-fixtures.mts` e `tests/redator-guardiao-painel.test.mts`;
+    - do Radar: o texto ao especialista (registro em `docs/05-radar/estado-atual.md`);
+    - todos LF, preservado.
+- **Testes:**
+  - `radar-assunto-entrega-redator` 9/9 (novo, roda no `test:radar`): documento sem Assunto igual ao snapshot do HEAD; linhas vazias em toda forma de ausência; proibição uma vez, no fim, com dossiê e bundle iguais; linhas iguais às do CSV; seção da virada sintética e observada; sem sinal sem inventar lugar; abaixo de 2 kB; estrutural do envio; zero chamada a provider;
+  - `radar-to-writer-handoff-1`: +1, pelo `sendRadarToWriter` real com portas (recibo e documento com a mesma lista; `editorialContext` igual às linhas da virada da F3; bundle sem artigo-modelo);
+  - `redator-mcp-alvo-sem-payload`: guarda da Fase 0 atualizada; +2 (Guardião do MCP com e sem Assunto, com leitura na Marca abaixo de 1 kB, Assunto de outra Marca ignorado, avisos que somem com a virada e o link escritos, `assunto_nao_lido`; briefing com e sem `editorialContext`); +1 guarda nova (leitura de `editorialContext` só com Assunto);
+  - `writer-evidence-reader`: +2 (mesma `writerMayNot` em todas as saídas; `editorialContext` nos fundamentos, no material e no pacote, com uma leitura cada, e nada pedido sem Assunto nem pelo manifesto e pela fatia; contexto do Guardião sem leitura para referência ausente ou legada, com Assunto abaixo de 1 kB e só na Marca); ajustados para o `subject` reduzido (o id de quem anexou não aparece);
+  - `writer-evidence-divergencias`: regex estrutural da rota do painel com `{ articleDnaRef: input.document.articleDnaRef }`.
+  - terceira rodada, `redator-assunto-painel` 15/15 (roda no `test:redator`):
+    - sem linhas, a projeção tem o sha do HEAD e nenhuma chave nova, e lixo em `editorialContext` não muda nada;
+    - com linhas, só entra `editorialContext`, na ordem do envio. A cópia de listagem leva as linhas, e v1 e v2 sem dossiê continuam `null`;
+    - `radarFoundationsSubjectOf`: seção sintética marcada e observada não; sem virada, a decisão volta a quem redige; linha desconhecida vai para `others`; sem tronco, `null`; travessão na frase e na nota;
+    - prompts de roteiro e carrossel: sem Assunto, com o sha do HEAD; com Assunto, as linhas logo depois das keywords;
+    - a leitura estreita projeta o mesmo que o documento inteiro, e lista fora do contrato dá `null`;
+    - estruturais sem comentários; zero rede;
+  - terceira rodada, `redator-assunto-painel-dom` 5/5 (roda no `test:redator:dom`, com happy-dom):
+    - o painel real mostra o bloco primeiro, com os textos exatos;
+    - seção observada sai sem o aviso;
+    - sem Assunto (ausente, `[]` ou linha sem tronco), o `innerHTML` é igual byte a byte;
+    - a cópia de listagem mostra o Assunto;
+  - terceira rodada, `redator-guardiao-painel` 8/8 (roda no `test:redator`):
+    - resumo sem servidor igual ao de antes, e contagens do servidor;
+    - notices traduzidos;
+    - Guardião real com o Assunto não escrito;
+    - aprovação barrada por bloqueio visto só pelo servidor;
+    - estrutural sem comentários, bloco sem violação visual e teto de dívida 41;
+  - terceira rodada, `redator-radar-foundations-1`: asserção estrutural O ajustada.
+- **Suítes (segunda rodada, depois da revisão):** `test:redator` 335/335; `test:redator:mcp` 117/117 (112 antes); `test:redator:dom` 14/14; `test:radar` 2684/2684 (hashes dourados, J e 13 colunas verdes); `test:editorial` 170/174 com as 4 falhas de base por nome; `test:serp-cache` 34/34; `tsc --noEmit` exit 0; ESLint 0 erros nos arquivos de código; `git diff --check` limpo. Chamadas pagas em teste: 0.
+- **Suítes (terceira rodada, contra a base):**
+  - reexecutadas ao documentar: `test:redator` 358/358 (base 335), `test:redator:mcp` 117/117 e `test:redator:dom` 19/19 (14 + 5);
+  - relatadas pela rodada de correção: `test:radar` 2685/2685 (+1 de ponta a ponta do Telegram); `test:editorial` 170/174 e `test:visual-system` 23/28, com as falhas de base pelo nome (4 e 5);
+  - `tsc --noEmit` exit 0; ESLint sem erros nos arquivos de código; guard visual estrito PASS nos arquivos novos e alterados de `lib/` e `modules/`; `git diff --check` limpo;
+  - chamadas pagas, rede e IA em teste: 0.
+- **Limites:**
+  - o Guardião usa critério lexical: um Assunto dito com outras palavras gera aviso falso; o texto diz o critério e nunca bloqueia;
+  - documento enviado antes desta mudança, com ArticleDNA que já tinha `subject`, tem `writerMayNot` gravado sem a proibição e `editorialContext` vazio: fundamentos e material acrescentam a proibição pela projeção, mas o envelope do `read_writer_evidence` e o briefing mostram a lista gravada. Reenviar resolve;
+  - persistência: só com Assunto o envio grava algo novo, dentro do documento (`importedContext.editorialContext` e a proibição em `writerMayNot`). Sem migration e sem tabela nova. Tudo validado com fixtures e PostgREST falso; nada real.
+  - o painel e a semeadura só mostram e repassam as linhas gravadas no envio. Um documento enviado antes da segunda rodada tem `editorialContext` vazio e não mostra o Assunto no painel; reenviar resolve.
+
 ## Leitor de evidências, MCP com 14 ferramentas e divergências — 2026-09-23
 
 - **Implementado e confirmado por teste. Validação manual pendente. Migration `20260923150000_writer_evidence_reader.sql` escrita e NÃO aplicada.** Registro completo na seção 9 do [adendo de decisões](propostas/adendo-leitor-evidencias-decisoes-2026-09-23.md) e na [SDD do leitor](propostas/sdd-leitor-evidencias-redator-2026-09-23.md).

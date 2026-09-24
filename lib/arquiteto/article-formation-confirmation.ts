@@ -51,9 +51,15 @@ export type ConfirmationEntry = {
    * morria exatamente no momento em que ela deveria ser gravada.
    */
   keywords: { keywordId: string; role: ArticleKeywordRole }[];
-  /** Slug validado, relativo ao Silo pai. */
+  /** Slug validado, relativo ao Silo pai. Sempre da principal (D1), nunca do Assunto. */
   slug: string;
   fullPath: string;
+  /**
+   * Assunto preso ao artigo (SDD 2026-09-24, F2.3). Fica fora de `keywords`:
+   * quem materializa monta o `subject` do ArticleDNA pelo pacote aprovado
+   * (`planSubjectAttachment`). Presente só quando o humano prendeu.
+   */
+  subjectKeywordId?: string;
 };
 
 export type ArticleFormationConfirmationPlan = {
@@ -170,6 +176,7 @@ export function buildArticleFormationConfirmationPlan(input: {
         keywords: candidate.keywords.map(item => ({ keywordId: item.keywordId, role: item.role })),
         slug,
         fullPath,
+        ...(candidate.subjectKeywordId ? { subjectKeywordId: candidate.subjectKeywordId } : {}),
       });
     }
   }
@@ -283,6 +290,14 @@ export const CONCLUSION_GATE_CODES = [
    * candidatos, ou diferenciar a composição de um deles, apaga o par.
    */
   "NO_UNRESOLVED_CANNIBALIZATION",
+  /**
+   * Q7 (SDD 2026-09-24) — o Assunto só é a própria principal com Volume
+   * validado no pacote aprovado. Um Assunto da exceção D2, sem Volume, nunca
+   * dá slug, KGR nem H1 (D1). O ArticleDNA não carrega Volume, por isso a
+   * decisão mora aqui e não no `superRefine`. A portaria só mostra este
+   * contrato quando algum artigo do lote tem Assunto preso.
+   */
+  "SUBJECT_PRINCIPAL_REQUIRES_VOLUME",
 ] as const;
 
 export type ConclusionGateCode = (typeof CONCLUSION_GATE_CODES)[number];
@@ -350,6 +365,14 @@ export function validateFormationConclusion(input: {
     reasons: readonly string[];
   }[];
   serpGates: ReadonlyMap<string, { state: string; blocksConclusion: boolean; requiresHumanDecision: boolean; reason: string }>;
+  /**
+   * Q7 — o que o pacote aprovado diz do Volume de cada Assunto preso, por
+   * `keywordId` (`readArchitectSubjectStanding(...).volumeValidated`).
+   * Ausente para um Assunto que é principal = sem Volume validado.
+   */
+  subjectVolumeValidated?: ReadonlyMap<string, boolean>;
+  /** Frase de cada Assunto, só para a mensagem. */
+  subjectLabels?: ReadonlyMap<string, string>;
 }): ConclusionVerdict {
   const candidatos = input.universes.flatMap(universe =>
     universe.candidates.map(candidate => ({ candidate, siloRef: universe.siloRef })));
@@ -364,6 +387,9 @@ export function validateFormationConclusion(input: {
     .filter(([candidateRef, campos]) => aprovadosDoPlano.has(candidateRef) && campos.length)
     .map(([candidateRef, campos]) => ({ candidateRef, campos: [...campos] }));
 
+  // Só MEMBROS contam. O Assunto (`subjectKeywordId`) é tronco, não membro:
+  // o mesmo Assunto em vários artigos é permitido (D3) e fica fora da
+  // duplicidade e do teto (F2.3).
   const vistas = new Map<string, number>();
   for (const { candidate } of candidatos) {
     for (const item of candidate.keywords) vistas.set(item.keywordId, (vistas.get(item.keywordId) || 0) + 1);
@@ -472,8 +498,8 @@ export function validateFormationConclusion(input: {
       code: "NO_UNRESOLVED_CANNIBALIZATION",
       ok: canibalizacaoAberta.length === 0,
       detail: canibalizacaoAberta.length === 0
-        ? "Nenhum par de artigos do mesmo Silo disputa o mesmo assunto."
-        : `${canibalizacaoAberta.length} par(es) do mesmo Silo ainda disputam o mesmo assunto: `
+        ? "Nenhum par de artigos do mesmo Silo disputa o mesmo tema."
+        : `${canibalizacaoAberta.length} par(es) do mesmo Silo ainda disputam o mesmo tema: `
           + `${canibalizacaoAberta.map(par => `“${par.leftLabel || par.left}” × “${par.rightLabel || par.right}” (${par.reasons.join(", ")})`).join("; ")}. `
           + "Una os dois num só artigo ou diferencie a composição de um deles antes de concluir.",
     },
@@ -503,6 +529,23 @@ export function validateFormationConclusion(input: {
     },
   ];
 
+  const comAssunto = candidatos.filter(({ candidate }) => Boolean(candidate.subjectKeywordId));
+  if (comAssunto.length) {
+    const assuntoPrincipalSemVolume = comAssunto.filter(({ candidate }) =>
+      candidate.subjectKeywordId === candidate.principalKeywordId
+      && input.subjectVolumeValidated?.get(candidate.subjectKeywordId!) !== true);
+    const nomes = [...new Set(assuntoPrincipalSemVolume.map(({ candidate }) =>
+      input.subjectLabels?.get(candidate.subjectKeywordId!) || candidate.subjectKeywordId!))];
+    gates.push({
+      code: "SUBJECT_PRINCIPAL_REQUIRES_VOLUME",
+      ok: assuntoPrincipalSemVolume.length === 0,
+      detail: assuntoPrincipalSemVolume.length === 0
+        ? "Nenhum Assunto sem Volume validado é a principal de um artigo."
+        : `${assuntoPrincipalSemVolume.length} artigo(s) têm o Assunto como principal sem Volume validado no pacote aprovado: `
+          + `${nomes.map(nome => `“${nome}”`).join(", ")}. Escolha a principal entre as keywords de sustentação.`,
+    });
+  }
+
   /**
    * Só as contradições estruturais barram o lote inteiro.
    *
@@ -523,9 +566,12 @@ export function validateFormationConclusion(input: {
     // Parecer vigente esperando decisão também barra — mas por outro motivo,
     // e a mensagem precisa dizer qual dos dois é.
     "SERP_HUMAN_DECISION",
-    // Dois artigos do mesmo Silo sobre o mesmo assunto é contradição
+    // Dois artigos do mesmo Silo sobre o mesmo tema é contradição
     // estrutural, e é o último momento em que desfazer sai de graça.
     "NO_UNRESOLVED_CANNIBALIZATION",
+    // Q7 — Assunto sem Volume validado como principal daria slug e KGR a
+    // uma frase sem busca (D1).
+    "SUBJECT_PRINCIPAL_REQUIRES_VOLUME",
   ];
 
   return {

@@ -54,14 +54,9 @@ import { radarAmazonDedupeProducts, radarAmazonEmptyTargetFor, radarAmazonParseT
 import { RadarAmazonTargetSetup } from "./radar-amazon-target-setup";
 import { radarAmazonEligibleCandidates } from "@/lib/radar/amazon-eligibility";
 import { postRadarWriterHandoff, postRadarWriterHandoffBatch, radarWriterHandoffBatchSummary } from "@/lib/radar/writer-handoff-client";
-import { RadarExportRefusedError, radarDossierExportNotice, radarExportFailureNotice, radarPartiallySelectedSilos, radarSiloExportNotice, radarSiloExportPreview, radarSiloExportScope, radarSiloExportScopeLimitNotice, type RadarExportNotice, type RadarSiloExportResponseView } from "@/lib/radar/portable-silo-scope";
+import { RadarExportRefusedError, radarDossierExportNotice, radarExportFailureNotice, radarPartiallySelectedSilos, radarSiloExportNotice, radarSiloExportReadySummary, radarSiloExportScope, radarSiloExportScopeLimitNotice, type RadarExportNotice, type RadarSiloExportResponseView } from "@/lib/radar/portable-silo-scope";
 import {
   RADAR_EXPORT_EXCEL_HINT,
-  RADAR_EXPORT_MODES,
-  RADAR_EXPORT_MODE_DEFAULT,
-  RADAR_EXPORT_MODE_STORAGE_KEY,
-  radarExportModeLabel,
-  radarExportModeOf,
   radarSiloExportSizeNotice,
   type RadarExportMode,
 } from "@/lib/radar/portable-export-estimate";
@@ -511,34 +506,36 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    */
   const [menuDeExport, setMenuDeExport] = useState(false);
   /**
-   * ===== 2026-09-23 · O FORMATO DO CSV: "Para escrever" (padrão) ou "Completo (técnico)" =====
+   * ===== 2026-09-23 · O CARD "EXPORTAR PARA ESCREVER" =====
    *
-   * O dono do produto achou o CSV inútil para escrever: 61 a 63 colunas, pares
-   * Markdown + JSON, telemetria. O padrão passou a ser o formato "Para
-   * escrever" (13 colunas); o de antes continua disponível para auditoria.
+   * O dono do produto achou o card baguncado: seletor de formato no topo,
+   * textos longos e cinco caminhos lado a lado. Ficou só o que serve:
    *
-   * A escolha é lembrada no navegador só como conveniência de apresentação
-   * (AGENTS §10): quem decide o conteúdo é o servidor, e sem a lembrança a
-   * tela volta ao padrão. A leitura é depois da montagem — ler no primeiro
-   * render divergiria do HTML do servidor —, e as duas pontas são protegidas:
-   * janela privada ou armazenamento bloqueado não derrubam o menu.
+   *   - a escolha é de ESCOPO — "Silo completo (recomendado)" ou "Só os
+   *     artigos selecionados" —, e o botão "Exportar CSV" é sempre no formato
+   *     para escrever;
+   *   - o formato completo (técnico) e a planilha da tela moram num
+   *     "Avançado (auditoria)" que abre fechado.
+   *
+   * O escopo é estado da tela e não é lembrado. A escolha de FORMATO que o
+   * card antigo gravava no navegador deixou de ser lida e gravada; o valor que
+   * já estiver lá fica onde está (AGENTS §10).
    */
-  const [modoDoExport, setModoDoExport] = useState<RadarExportMode>(RADAR_EXPORT_MODE_DEFAULT);
+  const [escopoDoExport, setEscopoDoExport] = useState<"silo" | "selecionados">("silo");
+  const [avancadoDoExport, setAvancadoDoExport] = useState(false);
+  const botaoDoExportRef = useRef<HTMLButtonElement | null>(null);
+  /*
+   * O clique em "Exportar CSV" (ou num item do Avançado) desmonta o card com o
+   * foco dentro dele, e o botão Exportar da barra fica desabilitado enquanto o
+   * arquivo sai — o navegador solta o foco no body. Quando o export termina,
+   * o foco volta ao botão Exportar, de onde o teclado partiu.
+   */
+  const devolverFocoAposExportRef = useRef(false);
   useEffect(() => {
-    try {
-      setModoDoExport(radarExportModeOf(window.localStorage.getItem(RADAR_EXPORT_MODE_STORAGE_KEY)));
-    } catch {
-      /* Sem armazenamento, fica o padrão. */
-    }
-  }, []);
-  const escolherModoDoExport = (modo: RadarExportMode) => {
-    setModoDoExport(modo);
-    try {
-      window.localStorage.setItem(RADAR_EXPORT_MODE_STORAGE_KEY, modo);
-    } catch {
-      /* A escolha vale para esta sessão da tela, e isso basta. */
-    }
-  };
+    if (exportando || !devolverFocoAposExportRef.current) return;
+    devolverFocoAposExportRef.current = false;
+    botaoDoExportRef.current?.focus();
+  }, [exportando]);
   /**
    * ===== 2026-09-23 · O AVISO DO EXPORT TEM SEVERIDADE PRÓPRIA =====
    *
@@ -2483,7 +2480,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * o mesmo hash. Montá-lo aqui abriria uma segunda resolução — e a primeira
    * divergência apareceria num artigo já escrito.
    */
-  const exportarDossiesFinalizados = async () => {
+  /* O formato vem de quem clicou: "Exportar CSV" manda "writing"; o Avançado, "full". */
+  const exportarDossiesFinalizados = async (modo: RadarExportMode) => {
     if (exportando) return;
     if (!selectedBrandId) { setNotice("Selecione uma marca antes de exportar."); return; }
 
@@ -2500,7 +2498,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const resposta = await fetch("/api/editorial/radar-export", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ brandId: selectedBrandId, articleIds: alvo, mode: modoDoExport }),
+        body: JSON.stringify({ brandId: selectedBrandId, articleIds: alvo, mode: modo }),
       });
       const corpo = await resposta.json().catch(() => ({}));
       if (!resposta.ok || !corpo?.success) throw new RadarExportRefusedError(corpo?.error || "Não foi possível exportar os dossiês.", corpo?.refused);
@@ -2572,7 +2570,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * compressão e sem dependência nova — vários downloads seguidos esbarrariam
    * na permissão do navegador para baixar múltiplos arquivos.
    */
-  const exportarSilosCompletos = async () => {
+  const exportarSilosCompletos = async (modo: RadarExportMode) => {
     if (exportando) return;
     if (!selectedBrandId) { setNotice("Selecione uma marca antes de exportar."); return; }
 
@@ -2589,7 +2587,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       const resposta = await fetch("/api/editorial/radar-export", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ brandId: selectedBrandId, articleIds: escopo.articleIds, groupBy: "silo", mode: modoDoExport }),
+        body: JSON.stringify({ brandId: selectedBrandId, articleIds: escopo.articleIds, groupBy: "silo", mode: modo }),
       });
       const corpo = await resposta.json().catch(() => ({}));
       if (!resposta.ok || !corpo?.success) {
@@ -4243,15 +4241,27 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      *
      * Sem seleção, o export lê do banco cada artigo do Radar, com o item e as
      * corridas. Quando a estimativa passa de um quinto da meta do dia, o
-     * tamanho aparece no próprio item do menu, antes do clique.
+     * tamanho aparece na própria opção "Silo completo", antes do clique — e no
+     * item técnico do Avançado, com o arquivo do formato completo.
+     *
+     * O escopo e os prontos são calculados uma vez por render do card aberto:
+     * o resumo curto, os dois avisos e o botão leem a MESMA contagem.
      */
-    const avisoDeTamanhoDoExport = menuDeExport
-      ? radarSiloExportSizeNotice({
-        scope: radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds, siloVersions: pipeline.siloVersions }),
-        finalizedArticleIds: pipeline.radarItems.filter(row => radarPrimaryProfileOfAnalysis(analiseCorrenteDe(row)?.payload || null)).map(row => row.articleId),
-        exportMode: modoDoExport,
-      })
-      : null;
+    const escopoDoSilo = menuDeExport ? radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds, siloVersions: pipeline.siloVersions }) : null;
+    const prontosDoExport = menuDeExport ? pipeline.radarItems.filter(row => radarPrimaryProfileOfAnalysis(analiseCorrenteDe(row)?.payload || null)).map(row => row.articleId) : [];
+    const avisoDeTamanhoDoExport = escopoDoSilo ? radarSiloExportSizeNotice({ scope: escopoDoSilo, finalizedArticleIds: prontosDoExport, exportMode: "writing" }) : null;
+    const avisoDeTamanhoDoExportTecnico = escopoDoSilo && avancadoDoExport ? radarSiloExportSizeNotice({ scope: escopoDoSilo, finalizedArticleIds: prontosDoExport, exportMode: "full" }) : null;
+    const semSelecaoNoExport = selectedArticleIds.length === 0;
+    /*
+     * Toda saída do card devolve o foco ao botão Exportar: Esc, a planilha e,
+     * nos exports assíncronos, de novo quando o arquivo termina de sair (o
+     * botão fica desabilitado enquanto isso e perde o foco).
+     */
+    const fecharCardDeExport = (aposExportAssincrono: boolean) => {
+      setMenuDeExport(false);
+      if (aposExportAssincrono) devolverFocoAposExportRef.current = true;
+      botaoDoExportRef.current?.focus();
+    };
     return <>
       {formatColumn ? filter(formatColumn, "Formato") : null}
       {statusColumn ? filter(statusColumn, "Status") : null}
@@ -4259,114 +4269,127 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         <Plus className="h-3.5 w-3.5" aria-hidden="true" /><span>Importar do Arquiteto</span>
       </button>
       {/*
-        * ===== 1.1 · §1, §2 e §23 · UM VERBO, DOIS PRODUTOS =====
+        * ===== 2026-09-23 · UM BOTÃO "EXPORTAR", UM CARD "EXPORTAR PARA ESCREVER" =====
         *
-        * "Planilha atual" leva as COLUNAS DA TELA: operação, filtro, status.
-        * "Dossiês editoriais" leva o que se usa para ESCREVER fora daqui —
-        * ArticleDNA compacto, radiografia competitiva, estrutura, evidência,
-        * limitações e o brief.
+        * O CSV é a saída para escrever fora da plataforma, e o card diz só
+        * isso: a escolha é de ESCOPO — o silo inteiro (recomendado) ou só os
+        * artigos selecionados — e "Exportar CSV" sai sempre no formato para
+        * escrever. O resumo conta pelo `siloId` do item e pelo SiloDNA, nunca
+        * pelo rótulo de silo da planilha.
         *
-        * Os dois contratos não se misturam, e é por isso que eles não são um
-        * botão só com um formato configurável: são produtos distintos que
-        * compartilham o verbo.
+        * O formato completo (técnico) e a "Planilha atual" (as COLUNAS DA TELA)
+        * continuam existindo para auditoria, dentro de "Avançado", que abre
+        * fechado. Os contratos não se misturam: o botão principal nunca manda
+        * "full", e o Avançado nunca manda "writing".
         *
-        * §3 · e nenhum dos dois dispara no FINALIZE. Finalizar produz o
-        * artefato; exportar é ação humana, porque o arquivo sai da máquina de
-        * quem clicou e vai para onde ele decidir.
+        * Acessibilidade: o painel é um diálogo não modal, e não um `role=menu`
+        * — um menu só contém itens de menu, e o card tem rádio, botão e
+        * disclosure. Esc fecha e devolve o foco ao botão Exportar.
+        *
+        * §3 · nada disto dispara no FINALIZE. Finalizar produz o artefato;
+        * exportar é ação humana, porque o arquivo sai da máquina de quem clicou.
         */}
-      <div className="relative shrink-0">
+      {/* Esc fecha o card também com o foco ainda no botão Exportar, logo depois de abri-lo. */}
+      <div className="relative shrink-0" onKeyDown={evento => { if (evento.key === "Escape" && menuDeExport) { evento.stopPropagation(); fecharCardDeExport(false); } }}>
         <button
+          ref={botaoDoExportRef}
           type="button"
-          onClick={() => setMenuDeExport(atual => !atual)}
+          onClick={() => { setAvancadoDoExport(false); setMenuDeExport(atual => !atual); }}
           disabled={exportando}
           className={GLOBAL_TOPBAR_ACTION_CONTROL}
-          title="Exportar a planilha atual ou os dossiês editoriais"
-          aria-haspopup="menu"
+          title="Exportar para escrever"
+          aria-haspopup="dialog"
           aria-expanded={menuDeExport}
+          aria-controls="radar-export-painel"
           data-testid="radar-export-menu"
         >
           <Download className="h-3.5 w-3.5" aria-hidden="true" />
           <span>{exportando ? "Exportando…" : "Exportar"}</span>
           <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
-        {menuDeExport ? <div className="absolute right-0 top-full z-50 mt-1 w-96 max-w-[calc(100vw-2rem)] rounded-md border border-divider bg-surface-elevated p-1 shadow-lg">
-          {/*
-            * ===== 2026-09-23 · O FORMATO VEM ANTES DO QUE EXPORTAR =====
-            *
-            * "Para escrever (recomendado)" primeiro, "Completo (técnico)" depois,
-            * como escolha única: vale para o silo completo e para os dossiês
-            * avulsos. Rádio nativo, 14px, tokens do sistema visual; a dica do
-            * Excel fica logo abaixo, uma vez.
-            *
-            * O seletor fica FORA do papel ARIA de menu: um menu só contém itens de
-            * menu, e um radiogroup dentro dele é anunciado mal por leitor de
-            * tela. O popover é o mesmo; o menu começa logo abaixo do seletor.
-            */}
-          <fieldset className="mb-1 border-b border-divider px-1 pb-2 pt-1" data-testid="radar-modo-do-export">
-            <legend className="px-1 pb-1 text-sm font-semibold text-foreground/85">Formato do CSV</legend>
-            <div role="radiogroup" aria-label="Formato do CSV" className="grid gap-1">
-              {RADAR_EXPORT_MODES.map(opcao => {
-                const escolhido = modoDoExport === opcao.mode;
-                return <label key={opcao.mode} className={`flex cursor-pointer items-start gap-2 rounded px-2 py-2 text-sm ${escolhido ? "bg-context-accent/10 text-foreground" : "text-foreground/85 hover:bg-surface-subtle"}`}>
-                  <input type="radio" name="radar-modo-do-export" value={opcao.mode} checked={escolhido} onChange={() => escolherModoDoExport(opcao.mode)} className="mt-1 shrink-0 accent-context-accent focus-visible:ring-2 focus-visible:ring-context-accent/40" />
-                  <span className="block min-w-0">
-                    <strong className="block font-semibold">{opcao.label}</strong>
-                    <span className="block text-text-muted">{opcao.helper}</span>
-                  </span>
-                </label>;
-              })}
+        {menuDeExport && escopoDoSilo ? <div
+          id="radar-export-painel"
+          role="dialog"
+          aria-labelledby="radar-export-titulo"
+          className="absolute right-0 top-full z-50 mt-1 w-96 max-w-[calc(100vw-2rem)] rounded-md border border-divider bg-surface-elevated p-3 shadow-lg"
+          data-testid="radar-export-painel"
+        >
+          <p id="radar-export-titulo" className="px-2 text-base font-semibold text-foreground">Exportar para escrever</p>
+          <div role="radiogroup" aria-label="O que exportar" className="mt-2 grid gap-1" data-testid="radar-export-escopo">
+              <label className={`flex cursor-pointer items-start gap-2 rounded px-2 py-2 text-sm ${escopoDoExport === "silo" ? "bg-context-accent/10 text-foreground" : "text-foreground/85 hover:bg-surface-subtle"}`}>
+                <input type="radio" name="radar-escopo-do-export" value="silo" checked={escopoDoExport === "silo"} onChange={() => setEscopoDoExport("silo")} className="mt-1 shrink-0 accent-context-accent focus-visible:ring-2 focus-visible:ring-context-accent/40" data-testid="radar-export-escopo-silo" />
+                <span className="block min-w-0">
+                  <strong className="block font-semibold">Silo completo (recomendado)</strong>
+                  <span className="mt-0.5 block text-text-muted">Um CSV por Silo, artigos na ordem do Silo.</span>
+                  <span className="mt-0.5 block text-text-muted" data-testid="radar-export-resumo-silo">{radarSiloExportReadySummary({ scope: escopoDoSilo, finalizedArticleIds: prontosDoExport })}</span>
+                  {avisoDeTamanhoDoExport ? <span className="mt-1 block" data-testid="radar-silos-size-estimate"><strong className="font-semibold text-warning">{avisoDeTamanhoDoExport.title}:</strong> {avisoDeTamanhoDoExport.message}</span> : null}
+                </span>
+              </label>
+              <label className={`flex cursor-pointer items-start gap-2 rounded px-2 py-2 text-sm ${escopoDoExport === "selecionados" ? "bg-context-accent/10 text-foreground" : "text-foreground/85 hover:bg-surface-subtle"}`}>
+                <input type="radio" name="radar-escopo-do-export" value="selecionados" checked={escopoDoExport === "selecionados"} onChange={() => setEscopoDoExport("selecionados")} className="mt-1 shrink-0 accent-context-accent focus-visible:ring-2 focus-visible:ring-context-accent/40" data-testid="radar-export-escopo-selecionados" />
+                <span className="block min-w-0">
+                  <strong className="block font-semibold">Só os artigos selecionados</strong>
+                  <span className="mt-0.5 block text-text-muted">Mesmo formato, sem o contexto do Silo.</span>
+                  <span className="mt-0.5 block text-text-muted" data-testid="radar-export-resumo-selecao">{semSelecaoNoExport ? "Sem seleção: vão todos os artigos prontos do Radar." : `${selectedArticleIds.length} ${selectedArticleIds.length === 1 ? "artigo selecionado" : "artigos selecionados"}`}</span>
+                </span>
+              </label>
+          </div>
+          <button
+            type="button"
+            onClick={() => { fecharCardDeExport(true); void (escopoDoExport === "silo" ? exportarSilosCompletos("writing") : exportarDossiesFinalizados("writing")); }}
+            disabled={exportando}
+            className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded border border-action-accent bg-action-accent px-4 text-sm font-semibold text-foreground transition-colors hover:bg-action-accent/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
+            data-testid="radar-export-csv"
+          >
+            <Download className="h-4 w-4" aria-hidden="true" />
+            <span>Exportar CSV</span>
+          </button>
+          <div className="mt-3 border-t border-divider pt-2">
+            <button
+              type="button"
+              onClick={() => setAvancadoDoExport(aberto => !aberto)}
+              aria-expanded={avancadoDoExport}
+              aria-controls="radar-export-avancado"
+              className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm font-semibold text-foreground/85 hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              data-testid="radar-export-avancado-toggle"
+            >
+              <ChevronDown className={`h-4 w-4 shrink-0 motion-safe:transition-transform ${avancadoDoExport ? "" : "-rotate-90"}`} aria-hidden="true" />
+              <span>Avançado (auditoria)</span>
+            </button>
+            <div id="radar-export-avancado" hidden={!avancadoDoExport} className="mt-1 grid gap-1" data-testid="radar-export-avancado">
+              <p className="px-2 text-sm text-text-muted">Formato completo (técnico): tudo o que o Radar gravou. Não serve para escrever.</p>
+              <button
+                type="button"
+                onClick={() => { fecharCardDeExport(true); void exportarSilosCompletos("full"); }}
+                disabled={exportando}
+                className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
+                data-testid="radar-export-silos-tecnico"
+              >
+                <strong className="block font-semibold">Silo completo · técnico</strong>
+                <span className="mt-0.5 block text-text-muted">Um CSV por Silo, no formato completo.</span>
+                {avisoDeTamanhoDoExportTecnico ? <span className="mt-1 block" data-testid="radar-silos-size-estimate-tecnico"><strong className="font-semibold text-warning">{avisoDeTamanhoDoExportTecnico.title}:</strong> {avisoDeTamanhoDoExportTecnico.message}</span> : null}
+              </button>
+              <button
+                type="button"
+                onClick={() => { fecharCardDeExport(true); void exportarDossiesFinalizados("full"); }}
+                disabled={exportando}
+                className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
+                data-testid="radar-export-dossiers-tecnico"
+              >
+                <strong className="block font-semibold">Artigos selecionados · técnico</strong>
+                <span className="mt-0.5 block text-text-muted">{semSelecaoNoExport ? "Sem seleção: todos os artigos prontos do Radar." : "Sem o contexto do Silo."}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { fecharCardDeExport(false); grid.exportRows(grid.queriedRows, "planilha"); }}
+                className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                data-testid="radar-export-grid"
+              >
+                <strong className="block font-semibold">Planilha atual</strong>
+                <span className="mt-0.5 block text-text-muted">As colunas desta tela, com o filtro aplicado.</span>
+              </button>
+              <p className="px-2 pt-1 text-sm text-text-muted">{RADAR_EXPORT_EXCEL_HINT}</p>
             </div>
-            <p className="mt-1 px-2 text-sm text-text-muted">{RADAR_EXPORT_EXCEL_HINT}</p>
-          </fieldset>
-          <div role="menu" aria-label="Exportar">
-          {/*
-            * ===== 2026-09-23 · O EXPORT RECOMENDADO VEM PRIMEIRO =====
-            *
-            * O CSV é a saída final para escrever fora da plataforma, e um
-            * artigo de silo escrito sozinho perde a ordem, o Pilar e os irmãos.
-            * Por isso o primeiro item é o silo inteiro — um CSV por silo, com a
-            * SERP de cada artigo —, com o selo "Recomendado" no mesmo padrão do
-            * selo "Em foco" da planilha, em 14px.
-            *
-            * A prévia conta pelo `siloId` do item e pelo SiloDNA — nunca pelo
-            * rótulo de silo da planilha, que procura nas listas do Minerador.
-            */}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => { setMenuDeExport(false); void exportarSilosCompletos(); }}
-            className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle"
-            data-testid="radar-export-silos"
-          >
-            <span className="flex flex-wrap items-center gap-2">
-              <strong className="font-semibold">Silos completos · um CSV por silo</strong>
-              <span className="shrink-0 rounded border border-context-accent/35 px-1.5 py-0.5 text-sm font-semibold text-context-accent">Recomendado</span>
-            </span>
-            <span className="mt-0.5 block text-text-muted">Todos os artigos finalizados de cada silo, na ordem do silo, com a SERP de cada um.</span>
-            <span className="mt-0.5 block text-text-muted" data-testid="radar-silos-formato">Formato: {radarExportModeLabel(modoDoExport)}</span>
-            <span className="mt-0.5 block text-text-muted">{radarSiloExportPreview(radarSiloExportScope({ items: pipeline.radarItems, selectedArticleIds, siloVersions: pipeline.siloVersions }))}</span>
-            {avisoDeTamanhoDoExport ? <span className="mt-1 block" data-testid="radar-silos-size-estimate"><strong className="font-semibold text-warning">{avisoDeTamanhoDoExport.title}:</strong> {avisoDeTamanhoDoExport.message}</span> : null}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => { setMenuDeExport(false); grid.exportRows(grid.queriedRows, "planilha"); }}
-            className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle"
-            data-testid="radar-export-grid"
-          >
-            <strong className="block font-semibold">Planilha atual</strong>
-            <span className="block text-text-muted">As colunas desta tela, com o filtro aplicado.</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => { setMenuDeExport(false); void exportarDossiesFinalizados(); }}
-            className="block w-full rounded px-2 py-2 text-left text-sm text-foreground/85 hover:bg-surface-subtle"
-            data-testid="radar-export-dossiers"
-          >
-            <strong className="block font-semibold">Dossiês editoriais finalizados (CSV)</strong>
-            <span className="block text-text-muted">Os artigos selecionados, sem o contexto do silo. Formato: {radarExportModeLabel(modoDoExport)}.</span>
-          </button>
           </div>
         </div> : null}
       </div>

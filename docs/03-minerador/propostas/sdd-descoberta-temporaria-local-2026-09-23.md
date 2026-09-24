@@ -496,3 +496,11 @@ Duas refutações foram conferidas no repositório e no banco (SQL agregado de l
 - **"O Processador deve usar o idioma da candidata"**: adiado para D11. É mudança do modo keyword do `allintitle`, fora do escopo. Hoje não há caso: as 110 runs são em português (MEDIDO).
 - **"Eventos sem `targetKind` somaram custo 0"**: corrigido. A soma é nula, ou seja, sem custo registrado (MEDIDO).
 - **"O papel `authenticated` não tem `EXECUTE` sobre a RPC"**: confirmado (MEDIDO), sem efeito, porque a rota usa o cliente de `service_role` (`lib/server/authz.ts:6,54`). Registrado em 2.4, não como risco.
+
+---
+
+## 17. Nota de consumidor — Pesquisa por Assunto (F1b), 2026-09-24
+
+A F1b da [SDD do Assunto](../../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md) já nasce local: o modo **Por Assunto** do Descobrir não grava run nem candidata, e guarda o resultado num IndexedDB **próprio**, `minerador-pesquisa-assunto` (chave `actorUserId:brandId:searchId`), com a política Q12 dela (30 dias, até 10 buscas por ator e marca). Ela não usa as rotas, as tabelas nem as RPCs da Descoberta, e o envio vai por rota própria, sem recibo, com a proveniência marcada como não verificada (Q11).
+
+**Esta SDD continua como está.** A F1b não decide nenhuma de D1 a D11, e os números da D4 (20 buscas, apagar ao sair) não mudam por causa da Q12. Se esta SDD for aprovada, as duas listas locais podem convergir num adendo, que depende pelo menos de D1, D3 e D4.

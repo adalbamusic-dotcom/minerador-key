@@ -6,6 +6,7 @@ import { hasCompleteLogicalOutputContract } from "./logical-processor.ts";
 import { readKgrApplicability } from "./kgr-applicability.ts";
 import { readCanonicalKeywordDna } from "./logical-read-model.ts";
 import { SERP_EVIDENCE_RECORD_KEY } from "./serp-evidence-record.ts";
+import { resolveKeywordSubject } from "./keyword-subject.ts";
 
 /**
  * Pacote aprovado da keyword — o retrato que o Arquiteto consome.
@@ -70,6 +71,19 @@ export function resolveApprovalReadiness(input: {
   const missing: ApprovalRequirement[] = [];
 
   if (semantic.dna_origem !== "logico_deterministico" || !hasCompleteLogicalOutputContract({ semantic, intent: input.intent })) missing.push("logic");
+
+  /*
+   * EXCEÇÃO D2 (SDD 2026-09-24, F1.7). Assunto declarado pelo humano dispensa
+   * Volume, Resultados e KGR: é uma frase que o público pode não procurar, e
+   * `volume_search = null` faria a keyword nunca ser aprovável. A Lógica
+   * continua exigida — local, sem provider — e dá ao Arquiteto a hipótese de
+   * intenção e funil.
+   */
+  if (resolveKeywordSubject(semantic).declared) {
+    if (missing.length === 0) return { ok: true, missing, reason: null };
+    return { ok: false, missing, reason: SUBJECT_APPROVAL_REASON };
+  }
+
   if (!processor.volume.validated) missing.push("volume");
   if (!processor.results.validated) missing.push("results");
   // O KGR só é obrigação quando as duas medições o tornam calculável.
@@ -83,6 +97,106 @@ export function resolveApprovalReadiness(input: {
     missing,
     reason: `Aprovar exige ${lista}. O Arquiteto recebe o pacote fechado: nada pode chegar lá pela metade.`,
   };
+}
+
+/** Motivo da exceção D2 quando falta a Lógica de um Assunto declarado. */
+export const SUBJECT_APPROVAL_REASON = "Assunto declarado: dispensa Volume, Resultados e KGR; a Lógica continua exigida." as const;
+
+/*
+ * TRAVA DE APROVAÇÃO NO ENVIO AO ARQUITETO (SDD 2026-09-24, F1.7 e P10; Q3, Q9).
+ *
+ * Até aqui `resolveApprovalReadiness` só era aplicada na tela. O servidor
+ * passa a repeti-la no handoff — e a tela, no gate de envio —, pela MESMA
+ * função abaixo, para as duas dizerem a mesma coisa.
+ *
+ * SÓ PARA FRENTE. A trava vale para aprovações registradas a partir de
+ * `SERVER_APPROVAL_GATE_SINCE`. As anteriores passam, com alerta: revogar
+ * aprovação humana antiga seria decisão do Dev (AGENTS.md §9), e o backfill já
+ * registrou que a trava "NÃO é aplicada retroativamente".
+ *
+ * POR QUE ESTA DATA. A tela aplica `resolveApprovalReadiness` desde o §61
+ * (2026-09-18): toda aprovação feita pela tela desde então já passou por esta
+ * mesma trava no ato. Ligar o servidor a partir de 2026-09-24 00:00 (horário
+ * de Brasília), o dia da aprovação desta SDD, não revoga nenhuma decisão
+ * tomada sob outra regra: o que foi aprovado hoje já cumpria a exigência, e a
+ * exceção do Assunto entra no mesmo dia, nos dois lados. O que é anterior —
+ * inclusive o backfill de 2026-09-18, gravado com o instante em que rodou —
+ * fica com alerta, à espera do dry-run e da decisão do dono (Q9).
+ *
+ * Registro gravado pelo backfill (`approvedBy` "backfill:…") é tratado como
+ * anterior só quando a data dele também é anterior à ativação (ou ilegível):
+ * todo backfill legítimo rodou em 2026-09-18. Um "backfill:" com data igual
+ * ou posterior cai na regra normal, para o prefixo não desligar a trava. Forjar
+ * o `approvedAt` só se fecha com a rota de aprovação no servidor (Q3).
+ */
+export const SERVER_APPROVAL_GATE_SINCE = "2026-09-24T00:00:00-03:00" as const;
+const BACKFILL_APPROVER_PREFIX = "backfill:";
+
+export type HandoffApprovalGateScope =
+  /** Aprovação coberta pela trava: passou ou foi recusada por ela. */
+  | "gated"
+  /** Aprovação anterior à ativação. */
+  | "before_gate"
+  /** Aprovada sem registro de aprovação: não há data para comparar. */
+  | "no_record"
+  /** Registro gravado pelo backfill. */
+  | "backfill"
+  /** Já recebida pelo Arquiteto: não sai de lá (AGENTS.md §10). */
+  | "already_received";
+
+export type HandoffApprovalGate = {
+  /** `pass`: nada a dizer. `alert`: passa, mas falta processo. `refuse`: não pode ser enviada. */
+  verdict: "pass" | "alert" | "refuse";
+  scope: HandoffApprovalGateScope;
+  readiness: ApprovalReadiness;
+  /** Texto para a tela e para a resposta da rota; `null` quando `pass`. */
+  reason: string | null;
+};
+
+function instantOf(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+/**
+ * O veredito da trava no envio, igual na tela e no servidor.
+ *
+ * Só olha a prontidão de aprovação e a data do registro; status, marca e
+ * divergência do pacote continuam com quem já os decide.
+ */
+export function resolveHandoffApprovalGate(input: {
+  semantic?: Semantic | null;
+  intent?: unknown;
+  volumeSearch?: unknown;
+  resultsAllintitle?: unknown;
+  /** Já recebida pelo Arquiteto: só alerta. */
+  alreadyReceived?: boolean;
+  /** Só para teste; o padrão é `SERVER_APPROVAL_GATE_SINCE`. */
+  since?: string;
+}): HandoffApprovalGate {
+  const readiness = resolveApprovalReadiness(input);
+  if (readiness.ok) return { verdict: "pass", scope: "gated", readiness, reason: null };
+
+  const pending = readiness.reason || "Aprovação incompleta.";
+  if (input.alreadyReceived) {
+    return { verdict: "alert", scope: "already_received", readiness, reason: `Já recebida pelo Arquiteto e mantida lá. ${pending}` };
+  }
+  const record = readApprovalRecord(input.semantic);
+  if (!record) {
+    return { verdict: "alert", scope: "no_record", readiness, reason: `Aprovação sem registro de data: anterior à trava de envio. ${pending}` };
+  }
+  const approvedAt = instantOf(record.approvedAt);
+  const since = instantOf(input.since ?? SERVER_APPROVAL_GATE_SINCE);
+  const beforeGate = !Number.isFinite(approvedAt) || approvedAt < since;
+  // O prefixo do backfill só isenta registro anterior à trava: com data igual
+  // ou posterior, cai na regra normal (o registro sai do navegador, por RLS).
+  if (beforeGate && record.approvedBy.startsWith(BACKFILL_APPROVER_PREFIX)) {
+    return { verdict: "alert", scope: "backfill", readiness, reason: `Aprovação registrada pelo backfill, anterior à trava de envio. ${pending}` };
+  }
+  if (beforeGate) {
+    return { verdict: "alert", scope: "before_gate", readiness, reason: `Aprovada antes da trava de envio: passa como antes. ${pending}` };
+  }
+  return { verdict: "refuse", scope: "gated", readiness, reason: pending };
 }
 
 /** O KeywordDNA inteiro, do jeito que o Arquiteto vai consumir. */

@@ -133,6 +133,37 @@ test("provider chamado com erro registra Usage failed sem expor segredo", async 
   assert.doesNotMatch(JSON.stringify(event), /secret|token|password|authorization/i);
 });
 
+test("F1b.8: sem sufixo, a chave e o evento são os de hoje", async () => {
+  const operationRequestId = "20000000-0000-4000-8000-000000000020";
+  assert.equal(googleAdsDiscoveryUsageKey(operationRequestId), `google_ads:${operationRequestId}:keyword_discovery`);
+  assert.equal(googleAdsDiscoveryUsageKey(operationRequestId, null), `google_ads:${operationRequestId}:keyword_discovery`);
+  assert.equal(googleAdsDiscoveryUsageKey(operationRequestId, undefined), `google_ads:${operationRequestId}:keyword_discovery`);
+
+  const fixture = dependencies();
+  const event = await recordGoogleAdsDiscoveryUsage(input({ dependencies: fixture.dependencies, operationRequestId }));
+  assert.equal(event.idempotency_key, `google_ads:${operationRequestId}:keyword_discovery`);
+  assert.deepEqual(Object.keys(event.metadata).sort(), ["approvedCount", "discoveryRunId", "filteredCount", "normalizedCount", "operationRequestId", "provider", "providerVersion", "receivedCount"]);
+});
+
+test("F1b.8: com sufixo, as duas chamadas da mesma operação têm chaves distintas e não colidem", async () => {
+  const operationRequestId = "20000000-0000-4000-8000-000000000021";
+  const keywordKey = googleAdsDiscoveryUsageKey(operationRequestId, "keyword_seed");
+  const urlKey = googleAdsDiscoveryUsageKey(operationRequestId, "url_seed");
+  assert.equal(keywordKey, `google_ads:${operationRequestId}:keyword_discovery:keyword_seed`);
+  assert.equal(urlKey, `google_ads:${operationRequestId}:keyword_discovery:url_seed`);
+  assert.notEqual(keywordKey, urlKey);
+
+  const fixture = dependencies();
+  const keywordEvent = await recordGoogleAdsDiscoveryUsage(input({ dependencies: fixture.dependencies, operationRequestId, discoveryRunId: null, usageKeySuffix: "keyword_seed", providerReference: "req-a" }));
+  const urlEvent = await recordGoogleAdsDiscoveryUsage(input({ dependencies: fixture.dependencies, operationRequestId, discoveryRunId: null, usageKeySuffix: "url_seed", providerReference: "req-b" }));
+  assert.equal(keywordEvent.idempotency_key, keywordKey);
+  assert.equal(urlEvent.idempotency_key, urlKey);
+  assert.equal(fixture.usage.length, 2);
+  assert.equal(keywordEvent.metadata.discoveryRunId, null);
+  assert.equal(keywordEvent.metadata.seedKind, "keyword_seed");
+  assert.equal(urlEvent.metadata.seedKind, "url_seed");
+});
+
 test("Discovery só tenta Usage após chamada iniciada e separa provider, persistência e Usage", async () => {
   const route = await readFile(new URL("../app/api/minerador/marcas/[brandId]/google-ads/descobrir-keywords/route.ts", import.meta.url), "utf8");
   assert.match(route, /apiRequestStarted && canonicalContext && operationRequestId && !usageAttempted/);

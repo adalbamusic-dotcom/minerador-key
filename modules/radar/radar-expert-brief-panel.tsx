@@ -46,6 +46,9 @@ import {
   questionFromRadarSuggestion,
   radarExpertBriefMatchesContext,
   radarExpertBriefQuestionOriginLabel,
+  radarExpertBriefSubjectOf,
+  RADAR_EXPERT_SUBJECT_LABEL,
+  RADAR_EXPERT_SUBJECT_QUESTION_LABEL,
   type RadarExpertBriefQuestion,
 } from "@/lib/radar/expert-brief";
 
@@ -1255,6 +1258,13 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
     </article>;
   };
 
+  /*
+   * O ASSUNTO NA PAUTA — SDD do Assunto, F3.1. Com Assunto declarado, quem
+   * prepara a pauta vê o tema a aprofundar e a pergunta, com as mesmas
+   * palavras simples da mensagem ao especialista. Sem Assunto, nada aparece.
+   */
+  const assuntoDoArtigo = radarExpertBriefSubjectOf(context.articleDna);
+
   return <section className="space-y-3" aria-label="ExpertBrief do artigo selecionado" data-testid="radar-expert-brief-panel">
     {/*
       * O CABEÇALHO RESPONDE UMA PERGUNTA SÓ: em que pé está o especialista.
@@ -1296,6 +1306,11 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           <button type="button" className={action} onClick={() => leituraDaArea.refresh()} data-testid="radar-specialist-refresh">Atualizar</button>
         </div>
       </div>
+      {assuntoDoArtigo && <div className="mt-2 rounded-md border border-divider bg-surface-subtle p-3" data-testid="radar-specialist-subject">
+        <p className="text-sm text-foreground"><span className="font-semibold">{RADAR_EXPERT_SUBJECT_LABEL}:</span> {assuntoDoArtigo.phrase}</p>
+        {assuntoDoArtigo.note && <p className="mt-1 text-sm text-text-muted">Nota: {assuntoDoArtigo.note}</p>}
+        <p className="mt-1 text-sm text-foreground" data-testid="radar-specialist-subject-request"><span className="font-semibold">{RADAR_EXPERT_SUBJECT_QUESTION_LABEL}:</span> {assuntoDoArtigo.question}</p>
+      </div>}
     </header>
 
     {loading && <p className={surface + " text-sm text-text-muted"}>Carregando especialistas utilizáveis desta Marca…</p>}

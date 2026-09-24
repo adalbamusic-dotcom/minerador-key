@@ -92,6 +92,12 @@ export type ArchitectureWorkingProposal = {
   silos: ProposalSilo[];
   assignments: ProposalAssignment[];
   unassigned: ProposalUnassigned[];
+  /**
+   * Assuntos que já são tronco de algum artigo e ficariam sem Silo (SDD
+   * 2026-09-24, F2.3). Não são `unassigned`: o artigo os sustenta. Contam
+   * como resolvidos. Presente só quando há.
+   */
+  anchoredSubjects?: ProposalUnassigned[];
   counters: ArchitectureProposalCounters;
   /** Identidade da proposta. Muda quando a proposta muda — e só então. */
   proposalHash: string;
@@ -238,6 +244,8 @@ export function buildArchitectureWorkingProposal(input: {
   declarations?: ReadonlyMap<string, EditorialUnitDeclaration>;
   /** Normalizador de slug do próprio módulo; injetado para o domínio ficar puro. */
   slugOf: (value: string) => string;
+  /** Troncos ancorados (`anchoredSubjectKeywordIds`, em `declared-subject.ts`). */
+  anchoredSubjectKeywordIds?: ReadonlySet<string>;
 }): ArchitectureWorkingProposal {
   const dnaPorKeyword = new Map(input.keywords.map(item => [item.keywordId, item]));
   const keywordTexts = new Map(input.keywords.map(item => [item.keywordId, item.text]));
@@ -636,12 +644,28 @@ export function buildArchitectureWorkingProposal(input: {
     unassigned.push({ keywordId, reason: "Não entrou em nenhum grupo narrativo do lote." });
   }
 
+  /*
+   * F2.3 — O TRONCO ANCORADO NÃO É "SEM SILO". Ele sai de `unassigned` com o
+   * motivo dito, e continua contado como resolvido: nenhuma keyword some.
+   */
+  const ancorados = input.anchoredSubjectKeywordIds;
+  const anchoredSubjects: ProposalUnassigned[] = ancorados?.size
+    ? unassigned
+      .filter(item => ancorados.has(item.keywordId))
+      .map(item => ({ keywordId: item.keywordId, reason: "Assunto: já é o tronco de um artigo, que o sustenta." }))
+    : [];
+  if (anchoredSubjects.length) {
+    const restantes = unassigned.filter(item => !ancorados!.has(item.keywordId));
+    unassigned.length = 0;
+    unassigned.push(...restantes);
+  }
+
   const listaSilos = [...silos.values()].filter(silo =>
     silo.source === "proposed" || assignments.some(item => item.siloKey === silo.key));
 
   const counters: ArchitectureProposalCounters = {
     KEYWORDS_ANALYZED: keywordTexts.size,
-    RESOLVED_KEYWORDS: assignments.length + unassigned.length,
+    RESOLVED_KEYWORDS: assignments.length + unassigned.length + anchoredSubjects.length,
     SILOS_REUSED: listaSilos.filter(silo => silo.source === "reused").length,
     SILOS_PROPOSED: listaSilos.filter(silo => silo.source === "proposed").length,
     ASSIGNED: assignments.length,
@@ -653,8 +677,9 @@ export function buildArchitectureWorkingProposal(input: {
     silos: listaSilos,
     assignments,
     unassigned,
+    ...(anchoredSubjects.length ? { anchoredSubjects } : {}),
     counters,
-    proposalHash: proposalHashOf({ silos: listaSilos, assignments, unassigned }),
+    proposalHash: proposalHashOf({ silos: listaSilos, assignments, unassigned, anchoredSubjects }),
   };
 }
 
@@ -669,6 +694,8 @@ export function proposalHashOf(input: {
   silos: readonly ProposalSilo[];
   assignments: readonly ProposalAssignment[];
   unassigned: readonly ProposalUnassigned[];
+  /** Troncos ancorados; sem eles, o hash é o de antes. */
+  anchoredSubjects?: readonly ProposalUnassigned[];
 }): string {
   const partes = [
     ...input.silos.map(silo => `S|${silo.key}|${silo.slug}|${silo.source}`).sort(),
@@ -677,6 +704,7 @@ export function proposalHashOf(input: {
     // sobre base vencida.
     ...input.assignments.map(item => `A|${item.keywordId}|${item.siloKey}|${item.dnaContentHash || 'sem-dna'}`).sort(),
     ...input.unassigned.map(item => `U|${item.keywordId}`).sort(),
+    ...(input.anchoredSubjects || []).map(item => `T|${item.keywordId}`).sort(),
   ];
   // Hash textual determinístico: o domínio não importa cripto, e o que se
   // precisa aqui é só distinguir uma proposta da outra.

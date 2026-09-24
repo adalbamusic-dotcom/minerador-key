@@ -27,6 +27,8 @@ import {
   type ArtifactType,
   type PipelineJsonObject,
 } from "./pipeline-repositories";
+import { assertDeclaredSubjectWrite, SubjectWriteRefusedError } from "./arquiteto-subject-guard";
+import type { SubjectActorMode } from "@/lib/arquiteto/declared-subject-guard";
 
 export type ArquitetoArtifactType = Extract<ArtifactType, "article_dna" | "silo_dna" | "silo_page" | "article_architecture_ai_review">;
 export type ArquitetoArtifactVersion =
@@ -285,8 +287,18 @@ export async function appendArquitetoArtifact(
   type: ArquitetoArtifactType,
   version: ArquitetoArtifactVersion,
   status = "proposed",
+  options: { subjectActor?: SubjectActorMode } = {},
 ): Promise<ArquitetoPersistenceResult> {
   const payload = validatePayload(context, type, version);
+  if (type === "article_dna" || type === "silo_dna") {
+    await assertDeclaredSubjectWrite(context, {
+      artifactType: type,
+      entityId: version.entityId,
+      subject: (payload as ArticleDNA | SiloDNA).subject,
+      principalKeywordId: type === "article_dna" ? (payload as ArticleDNA).principalKeywordId : null,
+      actorMode: options.subjectActor,
+    });
+  }
   const repository = new ArtifactVersionRepository(context);
   const sourceVersionId = type === "silo_page"
     ? await assertCanonicalSiloDnaSource(repository, context, payload as SiloPage)
@@ -342,6 +354,12 @@ export async function persistSiloPairAtomic(
   if (siloDna.createdBy !== context.actorUserId || siloPage.createdBy !== context.actorUserId) {
     unauthorizedArtifact("O ator da sessão precisa ser o criador dos dois artefatos pareados.");
   }
+  await assertDeclaredSubjectWrite(context, {
+    artifactType: "silo_dna",
+    entityId: siloDna.entityId,
+    subject: dnaPayload.subject,
+    pairedWithPage: true,
+  });
 
   const result = await context.supabase.rpc("persist_silo_pair_atomic", {
     p_marca_id: context.brandId,
@@ -446,6 +464,9 @@ export async function listArquitetoArtifacts(context: PipelineContext) {
 }
 
 export function pipelineArtifactErrorResponse(error: unknown) {
+  if (error instanceof SubjectWriteRefusedError) {
+    return { status: error.status, body: { success: false, error: error.message, code: error.code, subjectCode: error.subjectCode } };
+  }
   if (error instanceof PipelineRuntimeError) {
     return { status: error.status, body: { success: false, error: error.message, code: error.code } };
   }

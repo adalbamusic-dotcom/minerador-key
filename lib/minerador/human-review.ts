@@ -32,6 +32,15 @@ export type HumanReviewAction =
    * obrigatório — informa o Arquiteto, não trava o Minerador.
    */
   | { type: "page_type"; pageType: KeywordPageType }
+  /**
+   * Assunto (SDD 2026-09-24, F1.4): a terceira declaração do Vínculo.
+   * `declared: true` declara, ou troca nota e destino; `declared: false`
+   * retira. Quem grava é `setKeywordSubject`/`withdrawKeywordSubject`, com o
+   * `auth.users.id` da sessão e origem `review`. O destino passa antes por
+   * `validateSubjectDestination`. Só o humano dispara esta ação (P4).
+   */
+  | { type: "subject"; declared: true; note?: string | null; destinationUrl?: string | null }
+  | { type: "subject"; declared: false }
   | { type: "reopen" }
   | { type: "cancel" }
   | { type: "complete" };

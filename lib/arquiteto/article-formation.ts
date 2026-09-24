@@ -77,6 +77,16 @@ export type ArticleFormationKeyword = {
   humanFormationRef?: string | null;
   /** Papel escolhido junto com o agrupamento. */
   humanRole?: ArticleKeywordRole | null;
+  /**
+   * Assunto declarado SEM Volume validado no pacote (exceção D2; SDD
+   * 2026-09-24, F2.3). Fica fora da formação automática, da eleição da
+   * principal e do slug: só entra num artigo como `subject`, ou como membro
+   * por ato humano explícito (`humanFormationRef`). Leia com
+   * `readArchitectSubjectStanding(...).heldOutOfFormation`.
+   */
+  subjectHeldOut?: boolean;
+  /** Tronco de pelo menos um artigo (`isAnchoredSubject`): nunca volta como sobra. */
+  subjectAnchored?: boolean;
 };
 
 export type ArticleCandidate = {
@@ -112,6 +122,13 @@ export type ArticleCandidate = {
   cannibalizationRisk: "baixa" | "média" | "alta";
   conflicts: string[];
   reason: string;
+  /**
+   * Assunto preso a este artigo (SDD 2026-09-24, F2.3): o tronco, fora de
+   * `keywords` e do teto. Presente só quando o humano prendeu.
+   */
+  subjectKeywordId?: string;
+  /** O Silo tem Assunto e este artigo ainda não: sugestão, que o artigo confirma. */
+  suggestedSubjectKeywordId?: string;
 };
 
 /** Página publicada reconhecida sob o Silo — nunca vira Article novo. */
@@ -140,6 +157,10 @@ export type ArticleFormationUniverse = {
   /** Keywords equivalentes a conteúdo já publicado. */
   matchedToPublished: { keywordId: string; normalizedUrl: string }[];
   conflicts: string[];
+  /** Troncos ancorados deste universo: saíram das sobras (F2.3). Presente só quando há. */
+  anchoredSubjectKeywordIds?: string[];
+  /** Assuntos sem artigo, dentro das sobras, com o selo "aguardando sustentação". Presente só quando há. */
+  awaitingSupportSubjectKeywordIds?: string[];
 };
 
 /* ------------------------------ comparação ------------------------------- */
@@ -403,6 +424,50 @@ export function suggestArticleSlug(input: {
 }
 
 /**
+ * Quem fica FORA da formação automática por causa do Assunto (SDD
+ * 2026-09-24, F2.3). Só a decisão humana (`humanFormationRef`) põe essas
+ * keywords num artigo:
+ *
+ *   - Assunto sem Volume validado (`subjectHeldOut`, exceção D2);
+ *   - tronco solto gravado numa Definição (`subjectAnchored`);
+ *   - tronco preso na formação desta sessão (`subjectByCandidateRef`), a
+ *     menos que seja a principal do próprio candidato calculado (Q7).
+ *
+ * Vínculo da sessão cujo artigo não pode mais existir (formação humana sem
+ * nenhum membro, candidato calculado cuja principal já foi decidida) não
+ * tira ninguém da formação: ref velho não prende nada.
+ *
+ * Sem Assunto no lote o conjunto é vazio e a formação é a de antes. A tela
+ * usa o mesmo conjunto para montar os núcleos, para as duas contas baterem.
+ */
+export function automaticFormationHoldouts(input: {
+  siloRef: string;
+  keywords: readonly ArticleFormationKeyword[];
+  subjectByCandidateRef?: ReadonlyMap<string, string>;
+}): Set<string> {
+  const refsHumanos = new Set(input.keywords.map(keyword => keyword.humanFormationRef).filter(Boolean));
+  const semDecisao = new Set(input.keywords.filter(keyword => !keyword.humanFormationRef).map(keyword => keyword.keywordId));
+  const prefixo = `article-candidate:${input.siloRef}:`;
+  const plausivel = (ref: string) => ref.startsWith(prefixo) ? semDecisao.has(ref.slice(prefixo.length)) : refsHumanos.has(ref);
+  const refsPorAssunto = new Map<string, string[]>();
+  for (const [ref, subjectKeywordId] of input.subjectByCandidateRef || []) {
+    if (!plausivel(ref)) continue;
+    refsPorAssunto.set(subjectKeywordId, [...(refsPorAssunto.get(subjectKeywordId) || []), ref]);
+  }
+  const ids = new Set<string>();
+  for (const keyword of input.keywords) {
+    if (keyword.humanFormationRef) continue;
+    if (keyword.subjectHeldOut || keyword.subjectAnchored) {
+      ids.add(keyword.keywordId);
+      continue;
+    }
+    const refs = refsPorAssunto.get(keyword.keywordId);
+    if (refs?.length && !refs.includes(`${prefixo}${keyword.keywordId}`)) ids.add(keyword.keywordId);
+  }
+  return ids;
+}
+
+/**
  * Monta o universo de formação de UM Silo.
  *
  * Agrupa por convergência de intenção, sugere a principal, distribui papéis e
@@ -426,6 +491,13 @@ export function buildArticleFormationUniverse(input: {
   };
   keywords: readonly ArticleFormationKeyword[];
   publishedArticles?: readonly PublishedArticleRef[];
+  /**
+   * Assunto preso a cada artigo, pelo `candidateRef` (SDD 2026-09-24, F2.3).
+   * O tronco não vira membro: fica em `subjectKeywordId` do candidato.
+   */
+  subjectByCandidateRef?: ReadonlyMap<string, string>;
+  /** Assunto do Silo pai: os artigos sem Assunto recebem a SUGESTÃO dele. */
+  siloSubjectKeywordId?: string | null;
 }): ArticleFormationUniverse {
   const publicados = [...(input.publishedArticles || [])];
   const conflicts: string[] = [];
@@ -433,11 +505,26 @@ export function buildArticleFormationUniverse(input: {
 
   // Keyword equivalente a página já publicada não forma Article novo.
   const disponiveis: ArticleFormationKeyword[] = [];
+  /*
+   * ASSUNTO SEM VOLUME VALIDADO (F2.3, D1, Q7): fora da formação automática.
+   * Só a decisão humana explícita (`humanFormationRef`) o põe num artigo, e
+   * mesmo assim nunca como principal. Ele não some: volta nas sobras, com o
+   * selo, até ser tronco de algum artigo.
+   *
+   * O TRONCO SOLTO também fica fora: a keyword do Assunto mantém `clusterId`
+   * vazio (F2.3). O conjunto é o de `automaticFormationHoldouts`.
+   */
+  const retidos: ArticleFormationKeyword[] = [];
+  const foraDaAutomatica = automaticFormationHoldouts({ siloRef: input.siloRef, keywords: input.keywords, subjectByCandidateRef: input.subjectByCandidateRef });
   for (const keyword of input.keywords) {
     const publicado = publicados.find(item => overlap(tokensOf(keyword.keyword), tokensOf(item.label || item.path)) >= 0.7);
     if (publicado) {
       matchedToPublished.push({ keywordId: keyword.keywordId, normalizedUrl: publicado.normalizedUrl });
       publicado.matchedKeywordId = publicado.matchedKeywordId ?? keyword.keywordId;
+      continue;
+    }
+    if (foraDaAutomatica.has(keyword.keywordId)) {
+      retidos.push(keyword);
       continue;
     }
     disponiveis.push(keyword);
@@ -468,9 +555,16 @@ export function buildArticleFormationUniverse(input: {
   }
 
   for (const [formationRef, grupo] of revisados) {
-    const escolhida = grupo.find(keyword => keyword.humanRole === "principal")
-      || grupo.find(keyword => keyword.isPublished)
-      || grupo[0];
+    // O Assunto sem Volume validado pode ser membro por decisão humana, nunca
+    // principal: ele não dá slug, KGR nem H1 (D1).
+    const elegivel = (keyword: ArticleFormationKeyword) => !keyword.subjectHeldOut;
+    const escolhida = grupo.find(keyword => keyword.humanRole === "principal" && elegivel(keyword))
+      || grupo.find(keyword => keyword.isPublished && elegivel(keyword))
+      || grupo.find(elegivel);
+    if (!escolhida) {
+      retidos.push(...grupo);
+      continue;
+    }
     const principalKeyword = escolhida;
     const cabem = grupo.filter(keyword => keyword.keywordId !== principalKeyword.keywordId)
       .slice(0, MAX_ARTICLE_KEYWORDS - 1);
@@ -669,6 +763,27 @@ export function buildArticleFormationUniverse(input: {
     });
   }
 
+  /*
+   * O TRONCO DE CADA ARTIGO (F2.3). Nunca é membro: fica fora de `keywords`,
+   * do teto e da duplicidade. Preso como secundária ou reforço do mesmo artigo
+   * é contradição (F2.1) e vira conflito, para a conclusão barrar.
+   */
+  if (input.subjectByCandidateRef?.size || input.siloSubjectKeywordId) {
+    const nomeDe = (keywordId: string) => input.keywords.find(keyword => keyword.keywordId === keywordId)?.keyword || keywordId;
+    for (const candidate of candidates) {
+      const subjectKeywordId = input.subjectByCandidateRef?.get(candidate.candidateRef);
+      if (subjectKeywordId) {
+        candidate.subjectKeywordId = subjectKeywordId;
+        const membro = candidate.keywords.find(item => item.keywordId === subjectKeywordId);
+        if (membro && membro.role !== "principal") {
+          candidate.conflicts.push(`o Assunto "${nomeDe(subjectKeywordId)}" não pode ser secundária nem reforço do mesmo artigo`);
+        }
+      } else if (input.siloSubjectKeywordId) {
+        candidate.suggestedSubjectKeywordId = input.siloSubjectKeywordId;
+      }
+    }
+  }
+
   /**
    * O slug proposto já é uma página publicada?
    *
@@ -701,6 +816,25 @@ export function buildArticleFormationUniverse(input: {
 
   // Leitura sobre o resultado: nada aqui reagrupa nada.
   const relations = auditCandidateRelations({ candidates, keywords: input.keywords, siloTokens });
+  /*
+   * SOBRAS COM O ASSUNTO (F2.3). O tronco ancorado não volta como sobra; o
+   * Assunto sem artigo volta, com o selo. Sem Assunto no lote, a lista é
+   * exatamente a de antes.
+   *
+   * Da sessão, só ancora o vínculo que casou com um candidato vivo: ref velho
+   * (candidato recalculado, formação desfeita) não prende nada, e o Assunto
+   * volta às sobras com o selo.
+   */
+  const ancorados = new Set<string>([
+    ...input.keywords.filter(keyword => keyword.subjectAnchored).map(keyword => keyword.keywordId),
+    ...candidates.flatMap(candidate => candidate.subjectKeywordId ? [candidate.subjectKeywordId] : []),
+  ]);
+  const sobras = [...disponiveis.filter(keyword => !usadas.has(keyword.keywordId)), ...retidos];
+  const ungroupedKeywordIds = sobras.filter(keyword => !ancorados.has(keyword.keywordId)).map(keyword => keyword.keywordId);
+  const anchoredSubjectKeywordIds = sobras.filter(keyword => ancorados.has(keyword.keywordId)).map(keyword => keyword.keywordId);
+  const awaitingSupportSubjectKeywordIds = retidos
+    .filter(keyword => !ancorados.has(keyword.keywordId))
+    .map(keyword => keyword.keywordId);
   const singletonAudits = auditSingletons({
     candidates,
     keywords: input.keywords,
@@ -717,9 +851,11 @@ export function buildArticleFormationUniverse(input: {
     relations,
     publishedArticles: publicados,
     candidates,
-    ungroupedKeywordIds: disponiveis.filter(keyword => !usadas.has(keyword.keywordId)).map(keyword => keyword.keywordId),
+    ungroupedKeywordIds,
     matchedToPublished,
     conflicts,
+    ...(anchoredSubjectKeywordIds.length ? { anchoredSubjectKeywordIds } : {}),
+    ...(awaitingSupportSubjectKeywordIds.length ? { awaitingSupportSubjectKeywordIds } : {}),
   };
 }
 
