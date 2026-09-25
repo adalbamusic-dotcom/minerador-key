@@ -284,7 +284,11 @@ test("provider OK não é sucesso: a rota persiste E relê", () => {
 test("o provider nunca aparece na interface", () => {
   const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
   const inicio = workspace.indexOf("const reviewTerritorialWithAi");
-  const handler = workspace.slice(inicio, inicio + 5400);
+  // O handler inteiro, delimitado pela âncora que vem logo depois dele — um
+  // tamanho fixo quebrava a suíte a cada linha nova no handler.
+  const fim = workspace.indexOf("const reviewTerritorialWithAiRef", inicio);
+  assert.ok(inicio >= 0 && fim > inicio, "o handler de revisão com IA precisa estar delimitado");
+  const handler = workspace.slice(inicio, fim);
 
   assert.doesNotMatch(handler, /DeepSeek|deepseek|apiKey|token|crédito|Connection/i);
   assert.match(handler, /Nada foi aplicado/);

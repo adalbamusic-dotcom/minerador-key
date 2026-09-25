@@ -1,5 +1,20 @@
 # Backlog — Minerador
 
+## Volume sem média oficial é processo executado — 2026-09-25
+
+Regra no `spec.md` §61 ("Volume como processo executado"). Registro no `estado-atual.md` de 2026-09-25. Verificado no código e confirmado por teste; validado manualmente: não.
+
+- [x] Resposta do Google Ads sem média (projeção sem média, keyword não devolvida ou registro `unavailable` com data) é `empty` no lote, nunca `failed`; célula "0" apagado lida do registro; painel "Medido · sem média oficial · data".
+- [x] Aprovação e trava do envio (mesma função): Volume vale como processo executado; volume segue `null`; KGR não exigido; nota "Volume processado, sem média oficial".
+- [x] Medir de novo sempre atualiza: número novo substitui; resposta sem média não apaga número anterior (`lastEmptyResponse`); falha nova não apaga resposta anterior.
+- [x] Remedir sem mudança real não rebaixa a aprovada (`carryApprovalAcrossRemeasurement` na rota; mesma versão e `contentHash`).
+- [ ] **Validação na tela (usuário)**: remedir as publicadas do diagnóstico, aprovar e enviar ao Arquiteto; remedir uma aprovada e confirmar que continua Aprovada.
+- [ ] Readback no banco da primeira gravação real de `lastEmptyResponse` e de uma keyword não devolvida pelo Google Ads.
+- [ ] **Decidir** se CPC, concorrência e série mensal devem deixar de rebaixar a aprovada (hoje assinados; só a proveniência saiu). Mudança na assinatura, com decisão do dono.
+- [x] Revisão do corretor: linha com volume importado + resposta sem média não vale como processada (Volume segue exigido, motivo por extenso); notificação do lote conta as sem média como processadas; `emptyResponseKind` (`returned_without_average` / `not_returned`); célula alinhada à leitura da aprovação; `contentHash` documentado como identidade.
+- [ ] **Decidir** se a linha com volume importado (planilha/legado) que o Google Ads respondeu sem média deve poder ser aprovada. Hoje não passa: o número não foi confirmado. Se passar, com rótulo explícito, o pacote sem o número importado e decisão de KGR quando houver `kgr_score`.
+- [ ] Registrar no adendo da SDD da planilha (premissa 5) que o marcador do Volume foi criado por decisão do dono; a candidata do Descobrir segue só na sessão.
+
 ## Vínculo igual à Revisão no rodapé, coluna com três escolhas e barra horizontal — 2026-09-24
 
 Registro no `estado-atual.md` de 2026-09-24. Verificado no código e confirmado por teste; validado manualmente: não.
@@ -41,7 +56,7 @@ SDDs: [planilha, lote e sino](../compartilhado/sdd-padrao-planilha-progresso-not
 - [ ] **Validação na tela (usuário)**: roteiro no `estado-atual.md` de 2026-09-24.
 - [ ] Readback no banco da primeira gravação real de `keyword_page_type_stance`.
 - [ ] **Decidir** o sentido de "Com processo / Sem processo" (hoje: passou pelo Processador; "enviado ao Arquiteto" exige leitura ou marcador novo, com SDD e gate de egress).
-- [ ] Marcador gravado de "processado sem dado" para a keyword que o Google Ads não devolve e para a candidata do Descobrir sem média (hoje o "0" apagado vale só na sessão). Muda o contrato de escrita da rota: SDD da planilha, premissa 5.
+- [ ] Marcador gravado de "processado sem dado" para a candidata do Descobrir sem média (hoje o "0" apagado vale só na sessão). A parte da keyword do Processador foi feita em 2026-09-25 (seção acima), por decisão do dono.
 - [ ] Timeout por bloco com reconciliação por readback (fatia F3 da SDD da planilha); tamanho do bloco de Resultados (5) a confirmar num lote real, pago, autorizado pelo usuário.
 - [ ] Ator `auth.users.id` no KGR em grupo e no Posto individual da Revisão (hoje e-mail da sessão).
 - [ ] Levar o padrão às outras áreas pelas fatias da SDD da planilha (F1 em diante), uma de cada vez.

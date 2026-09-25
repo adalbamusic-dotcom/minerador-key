@@ -143,6 +143,10 @@ export function resolveMineradorProcessState(input: MineradorProcessStateInput):
   const volumePrevious = hasPreviousMeasurement(processor.volume.importedValue, processor.volume.importedMeasuredAt);
   const resultsPrevious = hasPreviousMeasurement(processor.results.importedValue, processor.results.importedMeasuredAt);
   const volumeCurrent = processor.volume.validated && isValidGoogleAdsDemandMeasurement(volumeMeasurement);
+  // Resposta do Google Ads sem média gravada: o processo rodou e terminou sem
+  // dado (decisão do dono, 2026-09-25). Completa o Volume, mas não o KGR,
+  // que continua exigindo número medido.
+  const volumeEmptyResponse = !volumeCurrent && Boolean(processor.volume.emptyResponse);
   const resultsCurrent = processor.results.validated && isValidDataForSeoAllintitleMeasurement(resultsMeasurement);
   // KGR depends on promoted/current measurements only. A running or failed
   // retry does not replace those inputs and therefore cannot invalidate a
@@ -158,10 +162,12 @@ export function resolveMineradorProcessState(input: MineradorProcessStateInput):
     notCurrentArtifactState: logicReadiness.state === "incomplete" ? "invalid" : "stale",
   });
   const volume = currentState({
-    current: volumeCurrent,
+    current: volumeCurrent || volumeEmptyResponse,
     previous: volumePrevious,
     attempt: input.attempts?.volume,
-    currentReason: "Medição Google Ads atual confirmada e lida novamente do registro canônico.",
+    currentReason: volumeEmptyResponse
+      ? "Google Ads respondeu sem média oficial; o processo foi executado e o volume segue vazio."
+      : "Medição Google Ads atual confirmada e lida novamente do registro canônico.",
   });
   const results = currentState({
     current: resultsCurrent,

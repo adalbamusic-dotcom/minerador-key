@@ -1,5 +1,6 @@
 import { isValidDataForSeoAllintitleMeasurement } from "./dataforseo-competition.ts";
 import { isValidGoogleAdsDemandMeasurement } from "./google-ads-demand.ts";
+import { readGoogleAdsEmptyVolumeResponse } from "./volume-eligibility.ts";
 import { readDataForSeoKeywordOverview } from "./dataforseo-keyword-overview-core.ts";
 import { resolveMineradorProcessState, type MineradorProcessAttempt, type MineradorProcessName } from "./process-state.ts";
 
@@ -79,6 +80,9 @@ export function volumeProcessRecorded(semantic: Semantic | null | undefined): bo
   if (isValidGoogleAdsDemandMeasurement(source.volume_measurement)) return true;
   const eligibility = volumeEligibilityRecord(source);
   const status = text(eligibility?.status);
+  // "Sem média" só conta pela mesma leitura da aprovação (provider Google Ads
+  // e data legível): a célula não mostra "processado" onde a trava não vê.
+  if (status === "unavailable") return Boolean(readGoogleAdsEmptyVolumeResponse(source));
   return Boolean(status && status !== "pending" && status !== "measurement_failed" && validTimestamp(eligibility?.measuredAt));
 }
 
@@ -92,9 +96,11 @@ export function processorVolumeCell(input: { semantic?: Semantic | null; value: 
   if (input.attempts?.volume?.state === "running") return pending("Volume");
   if (input.attempts?.volume?.state === "failed") return failed("Volume", null);
   // Terminou nesta sessão sem número (ex.: o Google Ads não devolveu média
-  // para a keyword): passou pelo processo. Só apresentação — nada é gravado,
-  // e depois de recarregar volta a "—" até a rota gravar um marcador.
+  // para a keyword): passou pelo processo.
   if (input.attempts?.volume?.state === "success") return processedEmpty();
+  // Desde 2026-09-25 a rota grava a resposta sem média (`volume_eligibility`
+  // `unavailable` com data), também para keyword que o Google Ads não
+  // devolveu: o "0" apagado sobrevive ao recarregar, sem gravação nova.
   if (volumeProcessRecorded(semantic)) return processedEmpty();
   if (volumeProcessFailed(semantic)) return failed("Volume", null);
   return notProcessed();

@@ -42,7 +42,16 @@ import type { TerritorialLandscape } from "./territorial-landscape.ts";
  */
 export type BatchSiloTarget = { kind: "territory"; territoryRef: string } | { kind: "unassigned" };
 
-export type BatchSiloDecision = { keywordId: string; target: BatchSiloTarget };
+export type BatchSiloDecision = {
+  keywordId: string;
+  target: BatchSiloTarget;
+  /**
+   * O destino é o Silo que o site declara (cabeça publicada ou URL sob a URL
+   * do Silo). Só assim uma publicada ganha membership; o plano continua
+   * sendo o mesmo `planSiloAssignment`.
+   */
+  declaredBySite?: true;
+};
 
 export type BatchSiloWrite = {
   keywordId: string;
@@ -87,9 +96,25 @@ export function planSiloDecisionBatch(input: {
     if (vistas.has(decision.keywordId)) continue;
     vistas.add(decision.keywordId);
 
-    const keyword = input.keywordOf(decision.keywordId);
+    const lida = input.keywordOf(decision.keywordId);
+    const keyword = lida && decision.declaredBySite && decision.target.kind === "territory"
+      ? { ...lida, declaredTerritoryRef: decision.target.territoryRef }
+      : lida;
     if (!keyword) {
       refused.push({ keywordId: decision.keywordId, reason: "Esta keyword não tem item de workflow canônico; recarregue o workspace." });
+      continue;
+    }
+    /*
+     * PUBLICADA COM MEMBERSHIP VIGENTE E SEM SILO DECLARADO PELO SITE.
+     *
+     * A proposta a deixa sem Silo porque o endereço não declara nenhum; mas
+     * ela já tem território (posta por afinidade antes da revalidação, ou
+     * legado). Tirá-la seria remanejar patrimônio publicado sem decisão, e
+     * recusar faria todo Confirmar sair "parcial". A membership vigente é
+     * preservada: conta como "já estava", sem escrita.
+     */
+    if (keyword.isPublished && !decision.declaredBySite && decision.target.kind === "unassigned" && keyword.currentTerritoryRef !== null) {
+      unchanged.push(decision.keywordId);
       continue;
     }
 
@@ -100,7 +125,9 @@ export function planSiloDecisionBatch(input: {
       target: decision.target,
       reason: decision.target.kind === "unassigned"
         ? "Decisão humana: manter a keyword sem silo."
-        : "Decisão humana de silo na aba Silos.",
+        : decision.declaredBySite
+          ? "Decisão humana confirmando o Silo que o site declara para a página publicada."
+          : "Decisão humana de silo na aba Silos.",
       decidedAt: input.decidedAt,
     });
 

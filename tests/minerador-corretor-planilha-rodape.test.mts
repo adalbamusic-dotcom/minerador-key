@@ -78,9 +78,12 @@ test("Volume em grupo: keyword que o Google Ads não devolve termina em 0 apagad
   assert.equal(processorVolumeCell({ semantic: {}, value: null }).tone, "not_processed", "sem tentativa e sem marcador, segue —");
   assert.equal(processorVolumeCell({ semantic: {}, value: null, attempts: { volume: { state: "failed" } } }).tone, "error");
 
+  // 2026-09-25: o lote passou a classificar pelo readback (classifyVolumeReadback).
+  // A keyword não devolvida continua terminando em "success" sem dado, agora junto
+  // com a resposta sem média relida: as duas são "empty", nunca "failed".
   const start = workspace.indexOf("const unmatchedIds = new Set(");
-  const handler = workspace.slice(start, start + 900);
-  assert.match(handler, /setProcessAttempt\(chunkIds\.filter\(id => !confirmedIds\.includes\(id\) && unmatchedIds\.has\(id\)\), "volume", "success", chunkRequestId\)/);
+  const handler = workspace.slice(start, start + 2000);
+  assert.match(handler, /setProcessAttempt\(idsWith\("confirmed", "confirmed_empty", "empty"\), "volume", "success", chunkRequestId\)/);
   assert.doesNotMatch(handler, /clearProcessAttempt\(/);
 });
 

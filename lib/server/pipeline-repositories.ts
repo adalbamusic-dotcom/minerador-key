@@ -60,6 +60,11 @@ export type ArtifactVersionAppendInput = {
   createdAt?: string;
 };
 
+/** Página da leitura de versões: igual ao `max_rows` do PostgREST. */
+export const ARTIFACT_VERSION_PAGE_SIZE = 1000;
+/** Teto de segurança: 100 páginas = 100 mil versões de uma marca. */
+const ARTIFACT_VERSION_MAX_PAGES = 100;
+
 export class ArtifactVersionRepository extends ContextBoundRepository {
   /*
    * `artifactTypes` é opcional e aditivo: sem ele (ou vazio) a consulta é
@@ -77,12 +82,51 @@ export class ArtifactVersionRepository extends ContextBoundRepository {
     artifactType?: ArtifactType,
     artifactTypes?: readonly ArtifactType[],
   ): Promise<PipelineReadResult<readonly PipelineRow[]>> {
-    let query = this.client.from("editorial_artifact_versions").select("*").eq("marca_id", this.brandId);
-    if (entityId) query = query.eq("entity_id", entityId);
-    if (artifactType) query = query.eq("artifact_type", artifactType);
-    if (artifactTypes && artifactTypes.length > 0) query = query.in("artifact_type", [...artifactTypes]);
-    const result = await query.order("version_number", { ascending: true });
-    return readMany(result.data as PipelineRow[] | null, result.error);
+    const build = () => {
+      let query = this.client.from("editorial_artifact_versions").select("*").eq("marca_id", this.brandId);
+      if (entityId) query = query.eq("entity_id", entityId);
+      if (artifactType) query = query.eq("artifact_type", artifactType);
+      if (artifactTypes && artifactTypes.length > 0) query = query.in("artifact_type", [...artifactTypes]);
+      return query.order("version_number", { ascending: true });
+    };
+    /*
+     * PAGINADO (2026-09-25). O PostgREST corta cada resposta em `max_rows =
+     * 1000` (supabase/config.toml). Como a ordem é por `version_number`
+     * crescente, o corte levava justamente as versões MAIS NOVAS: numa marca
+     * com ~200 keywords, 25 Silos/artigos e várias rodadas, a mesa voltava
+     * com a versão anterior de um artefato como se fosse a vigente.
+     *
+     * Cada página pede de novo a mesma consulta com um desempate estável
+     * (`version_id`, único) e `range`. Egress: o mesmo total que a mesa já
+     * precisava; só deixa de perder as linhas acima de 1000.
+     *
+     * Driver sem `range` (dublê de teste antigo) lê uma página, como antes.
+     */
+    const first = build();
+    if (typeof (first as { range?: unknown }).range !== "function") {
+      const result = await first;
+      return readMany(result.data as PipelineRow[] | null, result.error);
+    }
+    const rows: PipelineRow[] = [];
+    const seen = new Set<string>();
+    for (let page = 0; page < ARTIFACT_VERSION_MAX_PAGES; page += 1) {
+      const from = page * ARTIFACT_VERSION_PAGE_SIZE;
+      const query = page === 0 ? first : build();
+      const result = await query.order("version_id", { ascending: true }).range(from, from + ARTIFACT_VERSION_PAGE_SIZE - 1);
+      if (result.error) throw pipelineErrorFromSupabase(result.error);
+      const data = (result.data as PipelineRow[] | null) ?? [];
+      let fresh = 0;
+      for (const row of data) {
+        const key = String(row.version_id ?? "");
+        // Página repetida (driver que ignora `range`) não duplica linha nem gira para sempre.
+        if (key && seen.has(key)) continue;
+        if (key) seen.add(key);
+        rows.push(row);
+        fresh += 1;
+      }
+      if (data.length < ARTIFACT_VERSION_PAGE_SIZE || fresh === 0) break;
+    }
+    return readMany(rows, null);
   }
 
   async append(input: ArtifactVersionAppendInput): Promise<PipelineMutationResult<PipelineRow>> {

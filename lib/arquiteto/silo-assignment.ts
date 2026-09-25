@@ -77,6 +77,14 @@ export type SiloAssignmentKeyword = {
   /** Membership vigente, lida da fonte canônica. */
   currentTerritoryRef: string | null;
   isPublished: boolean;
+  /**
+   * O Silo que o PRÓPRIO SITE declara para a publicada: a cabeça do Silo
+   * publicado, ou o artigo cuja URL está sob a URL do Silo. Só para esse
+   * destino a publicada pode ganhar membership — é revalidar o que está no
+   * ar, não remanejar. Membership não é identidade: URL, slug e canonical
+   * continuam intocados. Ausente, a publicada segue protegida como antes.
+   */
+  declaredTerritoryRef?: string | null;
 };
 
 /**
@@ -158,8 +166,17 @@ export function planSiloAssignment(input: {
   if (!keyword.workflowItemId.trim()) {
     refusals.push({ code: "KEYWORD_NOT_IN_SCOPE", detail: keyword.keywordId });
   }
-  // Identidade publicada continua protegida contra remanejo manual.
-  if (keyword.isPublished) {
+  // Identidade publicada continua protegida contra remanejo manual. As duas
+  // exceções não remanejam nada: entrar no Silo que o site declara, e ficar
+  // fora de Silo quando já está fora (nada a gravar).
+  const destinoDeclaradoPeloSite = keyword.isPublished
+    && target.kind === "territory"
+    && Boolean(keyword.declaredTerritoryRef)
+    && target.territoryRef === keyword.declaredTerritoryRef;
+  const publicadaJaForaDeSilo = keyword.isPublished && target.kind === "unassigned" && keyword.currentTerritoryRef === null;
+  if (publicadaJaForaDeSilo) {
+    refusals.push({ code: "ALREADY_IN_TARGET", detail: "A keyword publicada já está fora de Silo; nada a gravar." });
+  } else if (keyword.isPublished && !destinoDeclaradoPeloSite) {
     refusals.push({ code: "PUBLISHED_KEYWORD_PROTECTED", detail: keyword.keywordId });
   }
 
@@ -317,6 +334,59 @@ export function manualSiloCandidateDraft(input: {
     conflicts: [],
     reasons: [`Silo candidato criado manualmente: ${name}.`],
     provenance: { producedBy: "human", adoptedFromScenarioType: null, humanAdjustmentCount: 1, note: null },
+  };
+}
+
+/**
+ * O Silo cuja cabeça JÁ ESTÁ PUBLICADA nasce com a identidade do site.
+ *
+ * Mesma porta de `manualSiloCandidateDraft`, mesma falta de semântica
+ * inventada — a diferença é o endereço: a página está no ar, então o slug
+ * não é PROPOSTA, é `publishedSlug` (o caminho declarado no Vínculo), com o
+ * `publishedCanonical` da declaração, e a proteção nasce `protected`, como em
+ * `planSiteStructurePromotion`. Nenhum slug novo, nenhuma URL nova.
+ *
+ * `architecturalOrigin: "discovered"` e `territoryKind: "existing"` pelo mesmo
+ * motivo da promoção: não há SiloDNA para `existingSiloRef`, e a página não é
+ * lista nova.
+ */
+export function publishedSiloCandidateDraft(input: {
+  name: string;
+  publishedSlug: string;
+  publishedCanonical: string | null;
+  publishedUrl: string | null;
+  primaryKeyword?: TerritoryPrimaryKeyword | null;
+}): Record<string, unknown> {
+  const name = input.name.trim();
+  const endereco = input.publishedCanonical || input.publishedUrl || input.publishedSlug;
+  return {
+    schemaVersion: 1,
+    existingSiloRef: null,
+    name,
+    centralEntity: "",
+    ...(input.primaryKeyword ? { primaryKeyword: input.primaryKeyword } : {}),
+    macroIntent: "",
+    boundary: { includes: [], excludes: [] },
+    narrative: emptyTerritoryNarrative(),
+    discovery: emptyTerritoryDiscovery(),
+    territoryKind: "existing",
+    architecturalOrigin: "discovered",
+    ingestionOrigin: "ui",
+    lifecycleStatus: "candidate",
+    decisionState: "pending",
+    publicationProtection: "protected",
+    slugState: {
+      proposals: [],
+      confirmed: null,
+      publishedSlug: input.publishedSlug,
+      publishedCanonical: input.publishedCanonical,
+    },
+    lineage: emptyTerritoryLineage(),
+    consolidation: null,
+    pendingOperation: null,
+    conflicts: [],
+    reasons: [`Silo publicado declarado no Minerador: ${name}.`, `Origem: página publicada em ${endereco}; URL, slug e canonical preservados.`],
+    provenance: { producedBy: "human", adoptedFromScenarioType: null, humanAdjustmentCount: 1, note: "Silo publicado adotado com a identidade do site." },
   };
 }
 

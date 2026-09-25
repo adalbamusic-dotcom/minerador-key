@@ -1,3 +1,15 @@
+## 34. Publicado revalidado: Vínculo, Silo pela URL e remontagem — 2026-09-25
+
+Regras permanentes (no código desde 2026-09-25; homologação manual pendente):
+
+1. **Publicada** é a keyword com status legado `publicado` **ou** com publicação declarada no Vínculo do Minerador (`resolveKeywordVinculo`, lido do pacote aprovado do item). Não existe leitor paralelo de `site_origin` no Arquiteto. A publicada recebe todas as proteções de identidade: artigo próprio, principal preservada, URL, slug, canonical e marca intocados (AGENTS §11) e a trava do PATCH da cópia de trabalho.
+2. **Os campos de identidade publicada** da cópia de trabalho são uma lista só (`PUBLISHED_IDENTITY_ASSIGNMENT_KEYS`), usada pela rota para recusar e pela mesa para não enviar. `territoryRef` não é identidade.
+3. **Silo do artigo publicado pela URL.** O artigo publicado cuja URL canônica está sob a URL canônica de um Silo publicado da mesma marca (mesmo host, prefixo de caminho inteiro, normalizado) é membro declarado desse Silo. É decisão do site, não afinidade. Havendo Silos aninhados, vence o mais profundo; dois Silos com o mesmo endereço são conflito para decisão humana. O Silo publicado mantém a primária declarada. Nada disso muda canonical.
+4. **A publicada não é remanejada por afinidade.** Sem Silo na URL, ela fica fora de Silo com o motivo dito; nunca vira semente léxica nem nome de Silo novo. A membership da publicada só é gravada no destino que o site declara.
+5. **Revalidar é remontar.** As livres seguem pela proposta de sempre; um grupo léxico que contém artigo publicado de um Silo vai para esse Silo, e a livre que pede o mesmo conteúdo de um artigo publicado (piso de canibalização) entra nele, até o teto de seis, sem trocar a principal publicada. Duas publicadas nunca se fundem.
+6. **O Silo publicado mantém o endereço do site.** O slug de um Silo cuja cabeça está publicada é o caminho da URL declarada (canônico primeiro), nunca o texto da keyword normalizado. O território dele nasce `protected`, com `publishedSlug` e `publishedCanonical` da declaração e sem slug proposto. A cabeça publicada reaproveita o território de mesmo endereço (ou de mesma primária) em vez de criar outro.
+7. **Conflito não é declaração do site.** Quando o endereço não resolve o Silo de uma publicada (dois Silos com o mesmo endereço, publicada sem URL absoluta), a linha diz o conflito para decisão humana. Publicada que já está num território e cuja URL não declara Silo mantém a membership vigente até decisão humana. Revisão humana de formação que junta publicada como não principal, ou duas publicadas, aparece com conflito — a composição humana não é trocada em silêncio.
+
 ## 33. Assunto declarado no ArticleDNA e no SiloDNA — 2026-09-24
 
 Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md),
@@ -381,6 +393,22 @@ já formado e poderá reutilizar a infraestrutura compartilhada.
 além da hipótese de grupos, assessments SERP, silos e proteções de publicados.
 Esse snapshot é fato primário do Minerador; a resposta compacta da IA é apenas
 proposta e nunca substitui a cópia de trabalho nem a confirmação humana.
+
+### 21.1 Execução em blocos — 2026-09-25
+
+Quando uma ação passa do teto por pedido da rota (SERP da formação: 20
+artigos e 20 candidatas a Silo; SERP dos silos: 10 dúvidas; IA dos silos: 6
+dúvidas), o cliente divide o lote em blocos que cabem no teto e os executa em
+sequência. Regras permanentes:
+
+- o plano de chamadas pagas de todos os blocos é lido antes (sem pagar) e a
+  pessoa confirma uma vez a soma; cada bloco executa só com o número do plano
+  dele, e o orçamento do servidor continua por pedido;
+- falha de um bloco vira falha nomeada dos itens dele e não interrompe os
+  outros; nenhum bloco é repetido automaticamente;
+- nenhum item é cortado em silêncio: o que não cabe em bloco nenhum é dito;
+- o andamento diz "bloco N de M · faltam R";
+- a IA dos silos recebe só as keywords do escopo aberto da dúvida.
 
 ## 22. Identidade publicada e verificação
 

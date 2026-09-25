@@ -19,7 +19,7 @@ import { qualificationVersionLabel, type KeywordSemanticQualification } from "@/
 import { canCompleteHumanReview, humanReviewRecord, type HumanReviewAction } from "@/lib/minerador/human-review";
 import { deriveHumanReviewUiState, humanReviewStatePill, humanReviewStateSummary } from "@/lib/minerador/human-review-ui-state";
 import { buildKeywordDecisionSummary, type KeywordDecisionSummary, type KeywordDecisionSummaryState } from "@/lib/minerador/keyword-decision-summary";
-import { processorKgrStateLabel, processorMetricStateLabel } from "@/lib/minerador/processor-revalidation";
+import { processorKgrStateLabel, processorVolumeStateLabel } from "@/lib/minerador/processor-revalidation";
 import { dnaMaturityLabel } from "@/lib/minerador/dna-maturity";
 import { volumeEligibilityLabel, type VolumeEligibilityStatus } from "@/lib/minerador/volume-eligibility";
 import { readSiteOrigin } from "@/lib/minerador/publication-link";
@@ -990,6 +990,12 @@ export function KeywordDnaPanel({
     { label: "Evidências lógicas", value: semantic.evidencias_logicas, wide: true },
   ];
   const hasLogicDetails = logicDetailsFields.some(field => isMeaningfulProfileValue(field.value));
+  // Resposta sem média é medição (decisão do dono, 2026-09-25): o rótulo leva
+  // a data da resposta, e não "aguardando revalidação".
+  const googleAdsEmptyResponse = processorRevalidation.volume.emptyResponse;
+  const googleAdsStateLabel = googleAdsEmptyResponse
+    ? `${processorVolumeStateLabel(processorRevalidation.volume)} · ${profileDate(googleAdsEmptyResponse.measuredAt)}`
+    : processorVolumeStateLabel(processorRevalidation.volume);
   const googleAdsFields: ProfileFieldDefinition[] = [
     { label: "Volume atual", value: processorRevalidation.volume.value },
     { label: "Tendência", value: googleAdsDemandTrendLabel(googleAdsTrend) },
@@ -997,9 +1003,9 @@ export function KeywordDnaPanel({
     { label: "Concorrência Ads", value: profileAdsCompetition(googleAdsDisplayMeasurement?.competition) },
     { label: "Índice de concorrência", value: googleAdsDisplayMeasurement?.competitionIndex },
     { label: "Elegibilidade por volume", value: volumeEligibility },
-    { label: "Última medição", value: profileDate(processorRevalidation.volume.measuredAt || volumeEligibilityMeasurement?.measuredAt) },
+    { label: "Última medição", value: profileDate(googleAdsEmptyResponse?.measuredAt || processorRevalidation.volume.measuredAt || volumeEligibilityMeasurement?.measuredAt) },
     { label: "Targeting", value: profileTargeting(googleAdsDisplayMeasurement?.targeting || volumeMeasurement?.targeting) },
-    { label: "Estado no Processador", value: processorMetricStateLabel(processorRevalidation.volume.state, processorRevalidation.volume.value !== null), wide: true },
+    { label: "Estado no Processador", value: googleAdsStateLabel, wide: true },
   ];
   const dnaMaturity = canonicalSnapshot.maturity;
   // O cabeçalho REFLETE o que a Revisão Humana decidiu — mesmo resolvedor,
@@ -1110,7 +1116,7 @@ export function KeywordDnaPanel({
       </div>
 
       {hasGoogleAdsMeasurement && <div className="min-w-0 xl:col-span-1">
-        <ProfileBento number="2" title="GOOGLE ADS" status={<ProfilePill label={processorMetricStateLabel(processorRevalidation.volume.state, processorRevalidation.volume.value !== null)} tone={googleAdsStageComplete ? "success" : "warning"} />}>
+        <ProfileBento number="2" title="GOOGLE ADS" status={<ProfilePill label={googleAdsStateLabel} tone={googleAdsEmptyResponse ? "neutral" : googleAdsStageComplete ? "success" : "warning"} />}>
           <ProfileFields fields={googleAdsFields} compact layout="rows" />
           <MonthlyHistoryDetails value={googleAdsDisplayMeasurement?.monthlySearchVolumes} />
         </ProfileBento>

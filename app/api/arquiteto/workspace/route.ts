@@ -18,6 +18,7 @@ import { readArchitectureMarker } from "@/lib/server/arquiteto-architecture-mark
 import { createSiloWorkingCopy, listSiloWorkingCopies, updateSiloWorkingCopy } from "@/lib/server/arquiteto-silo-working-copy-store";
 import { SiloWorkingCopyRefSchema } from "@/lib/arquiteto/silo-working-copy-record";
 import { readArticleKgrDecision } from "@/lib/arquiteto/article-kgr-decision";
+import { isArchitectKeywordPublished, publishedIdentityKeysIn } from "@/lib/arquiteto/published-identity";
 import {
   SerpPrimaryAcceptanceSchema,
   acceptSerpPrimaryProposal,
@@ -156,7 +157,6 @@ export async function PATCH(request: Request) {
     // Só as keywords dos itens enviados, lidas antes de qualquer gravação, como
     // antes; a marca é filtrada e `deleted_at` continua sem filtro.
     const keywordById = await readArchitectPatchKeywords(context, architectPatchKeywordReadInput(parsed.updates || []));
-    const protectedKeys = new Set(["clusterId", "provisionalGroupId", "siloId", "silo_id", "siloName", "computedSlug", "slug_sugerido", "principalKeywordId", "role"]);
     const updated = [];
     for (const update of parsed.updates || []) {
       const currentResult = await repository.find(update.workflowItemId);
@@ -166,11 +166,14 @@ export async function PATCH(request: Request) {
         throw new PipelineRuntimeError("CONFLICT", "Somente itens recebidos pelo Arquiteto podem ser editados nesta cópia de trabalho.", 409);
       }
       const keyword = keywordById.get(String(current.subject_id));
-      const isPublished = String(keyword?.status || "").toLowerCase() === "publicado";
-      if (isPublished && Object.keys(update.assignment).some(key => protectedKeys.has(key))) {
+      const currentPayload = current.payload && typeof current.payload === "object" && !Array.isArray(current.payload) ? current.payload as Record<string, unknown> : {};
+      // Publicada pelo status legado OU pelo Vínculo do pacote aprovado que o
+      // próprio item carrega (AGENTS §11): a mesma pergunta da mesa, sem
+      // leitura nova do banco. `territoryRef` não é identidade e passa.
+      const isPublished = isArchitectKeywordPublished({ status: keyword?.status ?? null, canonicalWorkflow: { payload: currentPayload } });
+      if (isPublished && publishedIdentityKeysIn(update.assignment).length) {
         throw new PipelineRuntimeError("CONFLICT", "A identidade publicada deste artigo está protegida contra alteração manual.", 409);
       }
-      const currentPayload = current.payload && typeof current.payload === "object" && !Array.isArray(current.payload) ? current.payload as Record<string, unknown> : {};
       // Prender o Assunto: ator da requisição e keyword viva, da marca,
       // recebida e declarada no pacote aprovado. Soltar sempre passa.
       await assertWorkingSubjectAnchorAssignment(context, currentPayload, update.assignment);
