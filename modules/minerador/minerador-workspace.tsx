@@ -85,7 +85,7 @@ import {
   vinculoReadbackConfirmed,
 } from "@/lib/minerador/vinculo-screen";
 import { applyFunnelQualification, classifyKeywordFunnel } from "@/lib/minerador/keyword-qualification";
-import { readVolumeEligibility, volumeEligibilityLabel } from "@/lib/minerador/volume-eligibility";
+import { classifyVolumeReadback, readVolumeEligibility, volumeEligibilityLabel, type VolumeReadbackOutcome } from "@/lib/minerador/volume-eligibility";
 import { formatGoogleAdsCpcTableValue } from "@/lib/minerador/google-ads-demand";
 import { buildLogicalOutputContract, buildLogicalProcessorMetadata, hasCompleteLogicalOutputContract, hasCurrentLogicalProcessorMetadata, logicalSemanticRecordsEqual, validateLogicalKeywordOutput } from "@/lib/minerador/logical-processor";
 import { MINERADOR_KEYWORDS_TABLE, MINERADOR_LISTING_VIEW, withMeasurementSeries } from "@/lib/minerador/listing-payload";
@@ -103,7 +103,7 @@ import {
   resolveKeywordPublication,
 } from "@/lib/minerador/keyword-lifecycle";
 import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS, MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus, type EditorialKeywordStatus } from "@/lib/minerador/editorial-status";
-import { applyApproval, resolveApprovalReadiness } from "@/lib/minerador/approved-package";
+import { applyApproval, resolveApprovalReadiness, VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE } from "@/lib/minerador/approved-package";
 import type { KeywordTableOrderMode } from "@/lib/minerador/manual-order";
 import { manualImportListaId, resolveLegacyCsvSilo } from "@/lib/minerador/legacy-import";
 import { KeywordTableBulkBarShell } from "./keyword-table/keyword-table-bulk-bar-shell";
@@ -2881,7 +2881,20 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       setKeywords(prev => prev.map(k => idSet.has(k.id)
         ? { ...k, status: normalizedStatus, ...(semanticaPorId.has(k.id) ? { analise_semantica: semanticaPorId.get(k.id) } : {}) }
         : k));
-      showNotification("success", `Status atualizado para ${idsToUpdate.length} palavra(s). ${protectedCount > 0 ? `${protectedCount} publicada(s) preservada(s).` : ""}`);
+      // Motivo da aprovação: o Volume valeu pela resposta sem média oficial.
+      const semMediaOficial = normalizedStatus === "aprovado"
+        ? idsToUpdate.filter(wordId => {
+          const item = keywords.find(k => k.id === wordId);
+          return resolveApprovalReadiness({
+            semantic: item?.analise_semantica || null,
+            intent: item?.intent,
+            volumeSearch: item?.volume_search,
+            resultsAllintitle: item?.results_allintitle,
+          }).notes?.includes(VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE);
+        }).length
+        : 0;
+      const notaSemMedia = semMediaOficial > 0 ? ` ${VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE} em ${semMediaOficial} keyword(s).` : "";
+      showNotification("success", `Status atualizado para ${idsToUpdate.length} palavra(s). ${protectedCount > 0 ? `${protectedCount} publicada(s) preservada(s).` : ""}${notaSemMedia}`);
     } catch (err: any) {
       console.error(err);
       showNotification("error", "Falha ao salvar status.");
@@ -3584,7 +3597,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               const stop = code === "GOOGLE_ADS_QUOTA" || response.status === 401 || response.status === 403 ? reason : null;
               return { outcomes: chunkIds.map(id => ({ id, status: "failed" as const, reason })), stop };
             }
-            const projections = Array.isArray(data.projections) ? data.projections as Array<{ keywordId?: string; measuredAt?: string | null }> : [];
+            const projections = Array.isArray(data.projections) ? data.projections as Array<{ keywordId?: string; volumeSearch?: number | null; measuredAt?: string | null }> : [];
             const byKeywordId = new Map(projections.filter(item => typeof item.keywordId === "string").map(item => [item.keywordId!, item]));
             const readbackReason = "A medição Google Ads foi recebida, mas o readback canônico não foi confirmado.";
             const persistedByKeywordId = byKeywordId.size > 0
@@ -3597,31 +3610,33 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               setProcessAttempt(chunkIds, "volume", "failed", chunkRequestId);
               return chunkIds.map(id => ({ id, status: "failed" as const, reason: readbackReason }));
             }
-            const confirmedIds = [...persistedByKeywordId.entries()]
-              .filter(([id, row]) => {
-                const projectionMeasuredAt = byKeywordId.get(id)?.measuredAt;
-                const measurement = row.analise_semantica?.volume_measurement;
-                return resolveMineradorProcessState(row).volume.complete
-                  && typeof projectionMeasuredAt === "string"
-                  && measurement && typeof measurement.measuredAt === "string"
-                  && measurement.measuredAt === projectionMeasuredAt;
-              })
-              .map(([id]) => id);
             const unmatchedIds = new Set(Array.isArray(data.unmatchedKeywordIds) ? (data.unmatchedKeywordIds as unknown[]).map(String) : []);
-            setProcessAttempt(confirmedIds, "volume", "success", chunkRequestId);
-            // Sem média oficial não é erro de processo: a tentativa termina em
-            // "success" sem dado, e a célula mostra o "0" apagado (processado,
-            // sem dado) em vez do "—" de nunca processada. O dado segue null.
-            setProcessAttempt(chunkIds.filter(id => !confirmedIds.includes(id) && unmatchedIds.has(id)), "volume", "success", chunkRequestId);
-            setProcessAttempt(chunkIds.filter(id => !confirmedIds.includes(id) && !unmatchedIds.has(id)), "volume", "failed", chunkRequestId);
-            setKeywords(current => current.map(item => confirmedIds.includes(item.id) ? persistedByKeywordId.get(item.id)! : item));
+            // Resposta sem média (projeção com volume null ou keyword que o
+            // Google Ads não devolveu) é processo executado, não erro: vira
+            // "empty", e a célula lê o "0" apagado do registro gravado.
+            const outcomeById = new Map(chunkIds.map(id => {
+              const row = persistedByKeywordId.get(id);
+              return [id, classifyVolumeReadback({
+                projection: byKeywordId.get(id) || null,
+                unmatched: unmatchedIds.has(id),
+                row: row || null,
+                volumeComplete: row ? resolveMineradorProcessState(row).volume.complete : false,
+              })] as const;
+            }));
+            const idsWith = (...outcomes: VolumeReadbackOutcome[]) => chunkIds.filter(id => outcomes.includes(outcomeById.get(id)!));
+            const readBackIds = new Set(idsWith("confirmed", "confirmed_empty"));
+            setProcessAttempt(idsWith("confirmed", "confirmed_empty", "empty"), "volume", "success", chunkRequestId);
+            setProcessAttempt(idsWith("failed"), "volume", "failed", chunkRequestId);
+            setKeywords(current => current.map(item => readBackIds.has(item.id) ? persistedByKeywordId.get(item.id)! : item));
             totals.persisted += typeof data.persistedCount === "number" ? data.persistedCount : byKeywordId.size;
-            for (const id of confirmedIds) confirmedAll.add(id);
-            return chunkIds.map(id => confirmedIds.includes(id)
-              ? { id, status: "succeeded" as const }
-              : unmatchedIds.has(id)
-                ? { id, status: "empty" as const, reason: "Google Ads sem média oficial para esta keyword" }
-                : { id, status: "failed" as const, reason: byKeywordId.has(id) ? "medição recebida, mas o readback não confirmou" : "sem medição confirmada" });
+            // Sem média também terminou: uma exceção num bloco seguinte não a vira em falha.
+            for (const id of idsWith("confirmed", "confirmed_empty", "empty")) confirmedAll.add(id);
+            return chunkIds.map(id => {
+              const readback = outcomeById.get(id);
+              if (readback === "confirmed") return { id, status: "succeeded" as const };
+              if (readback === "confirmed_empty" || readback === "empty") return { id, status: "empty" as const, reason: "Google Ads sem média oficial para esta keyword" };
+              return { id, status: "failed" as const, reason: byKeywordId.has(id) ? "medição recebida, mas o readback não confirmou" : "sem medição confirmada" };
+            });
           };
           // Exceção inesperada no bloco: as tentativas dele não ficam "rodando".
           return measureChunk().catch((chunkError: unknown) => {
@@ -3638,9 +3653,12 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         showNotification("info", `O limite temporário da Google Ads API foi atingido. ${formatBatchProgress(batch)}. Nenhuma métrica anterior foi alterada.`, { code: "GOOGLE_ADS_QUOTA", stage: totals.lastFailure?.stage, diagnostic: totals.lastFailure?.diagnostic, details: batchFailureDetails(batch), metadata });
       } else if (batch.status !== "completed") {
         outcome = "error";
-        showNotification(persistedCount > 0 ? "warning" : "error", `${formatBatchProgress(batch)}. ${persistedCount} de ${requestedCount} medições Google Ads foram registradas; dados anteriores foram preservados.`, { code: totals.lastFailure?.code || "GOOGLE_ADS_PARTIAL_RESULTS", stage: totals.lastFailure?.stage, diagnostic: totals.lastFailure?.diagnostic, details: batchFailureDetails(batch), metadata: { ...metadata, failures: batch.failures } });
+        showNotification(persistedCount > 0 || batch.empty > 0 ? "warning" : "error", `${formatBatchProgress(batch)}. ${batch.succeeded + batch.empty} de ${requestedCount} keywords processadas no Google Ads (${batch.empty} sem média oficial); dados anteriores foram preservados.`, { code: totals.lastFailure?.code || "GOOGLE_ADS_PARTIAL_RESULTS", stage: totals.lastFailure?.stage, diagnostic: totals.lastFailure?.diagnostic, details: batchFailureDetails(batch), metadata: { ...metadata, failures: batch.failures } });
       } else if (batch.empty > 0) {
-        showNotification("info", `${persistedCount} de ${requestedCount} medições Google Ads foram registradas. Keywords sem média oficial ficam inelegíveis para produção; dados anteriores foram preservados.`, { code: "GOOGLE_ADS_PARTIAL_RESULTS", stage: "response_normalization", metadata });
+        // Sem média é processo executado (decisão do dono, 2026-09-25): conta como
+        // processada, sem dado, e a keyword segue aprovável. A contagem sai do lote
+        // relido, não do persistedCount da rota, que não soma a keyword não devolvida.
+        showNotification("info", `${batch.succeeded + batch.empty} de ${requestedCount} keywords processadas no Google Ads; ${batch.empty} sem média oficial ficaram registradas como processadas, sem dado. Dados anteriores foram preservados.`, { code: "GOOGLE_ADS_PARTIAL_RESULTS", stage: "response_normalization", metadata });
       } else {
         showNotification("success", `${persistedCount} métricas Google Ads foram persistidas e refletidas na tabela.`, { metadata });
       }

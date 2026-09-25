@@ -9,6 +9,7 @@ import { VersionedArticleArchitectureAiReviewSchema, type VersionedArticleArchit
 import { buildKeywordDnaProvenanceSnapshot } from "./adapters.ts";
 import { readApprovedPackageRef } from "./keyword-package-alignment.ts";
 import { adaptKeywordIdentityContext } from "./identity-context.ts";
+import { readPublishedIdentity } from "./published-identity.ts";
 import { TerritoryCandidateSchema, type TerritoryCandidate } from "./territory.ts";
 import { resolveArticleFormationState } from "./article-formation-decision.ts";
 import { SiloWorkingCopyStateSchema, type SiloWorkingCopyState } from "./silo-working-copy-record.ts";
@@ -425,13 +426,26 @@ export function buildCanonicalWorkflowWorkspaceItems(
     const assignedRole = decidedRole ?? assignmentStringOrUndefined(assignment, "role", "reviewRole");
     const parsedKgrIdentity = ArticleKgrIdentitySchema.safeParse(assignment.kgrIdentity);
     const assignedKgrIdentity = parsedKgrIdentity.success ? parsedKgrIdentity.data : undefined;
-    const isPublished = keywordStatus(keyword) === "publicado" || keyword.isPublished === true;
+    /*
+     * PUBLICADA É FATO DO SITE, NÃO SÓ STATUS LEGADO.
+     *
+     * Antes só `status = "publicado"` contava. A publicada declarada pelo
+     * Vínculo do Minerador (URL conferida, confirmação humana) chegava como
+     * `aprovado` e perdia artigo próprio, principal preservada e a trava de
+     * identidade. A leitura é a do Minerador, a partir do pacote aprovado
+     * deste item (`canonicalWorkflow`), sem leitor paralelo.
+     */
+    const legacyPublished = keywordStatus(keyword) === "publicado" || keyword.isPublished === true;
+    const publishedIdentity = readPublishedIdentity({ ...keyword, canonicalWorkflow: item });
+    const isPublished = legacyPublished || publishedIdentity !== null;
+    const publishedByVinculo = !legacyPublished && publishedIdentity?.source === "vinculo";
     // lista_id é proveniência da origem do Minerador, não uma atribuição de
-    // Silo para keywords novas. Só um publicado pode carregar esse vínculo
-    // legado como proteção de identidade; novos vínculos chegam pelo payload
-    // explícito da working copy e são nulos quando ainda não existem.
+    // Silo para keywords novas. Só um publicado LEGADO pode carregar esse
+    // vínculo como proteção de identidade; a publicada pelo Vínculo não herda
+    // a lista como Silo — o Silo dela é o que o site declara pela URL.
+    // Novos vínculos chegam pelo payload explícito da working copy.
     const protectedSourceSiloId = isPublished
-      ? stringValue(keyword.siloId) || stringValue(keyword.silo_id) || stringValue(keyword.lista_id)
+      ? stringValue(keyword.siloId) || stringValue(keyword.silo_id) || (publishedByVinculo ? null : stringValue(keyword.lista_id))
       : null;
     const protectedSourceSiloName = isPublished ? stringValue(keyword.siloName) : null;
     const assignedSiloCandidate = SiloCandidateMarkSchema.safeParse(assignment.siloCandidate).success
@@ -473,6 +487,12 @@ export function buildCanonicalWorkflowWorkspaceItems(
       provisionalGroupId: assignedProvisionalGroupId === undefined ? stringValue(keyword.provisionalGroupId) : assignedProvisionalGroupId,
       briefingId: null,
        isPublished,
+      // O endereço declarado viaja junto, só para leitura: nada aqui o grava.
+      ...(publishedByVinculo ? {
+        publishedIdentitySource: "vinculo" as const,
+        publishedUrl: stringValue(keyword.publishedUrl) || stringValue(keyword.published_url) || publishedIdentity?.url || null,
+        canonical: stringValue(keyword.canonical) || stringValue(keyword.canonical_url) || publishedIdentity?.canonicalUrl || publishedIdentity?.url || null,
+      } : {}),
       source: "CANONICAL_REMOTE" as const,
       // Membership territorial: projeção de LEITURA do mesmo payload do item de
       // workflow, que continua sendo a única autoridade. Nada é copiado para o

@@ -53,10 +53,12 @@ import { deriveTerritorialLogic, territorialAssignmentsFromWorkflowPayloads } fr
 import { buildKeywordUniverse, reservedSiloPageHeadIds } from "@/lib/arquiteto/keyword-universe";
 import { buildSiteStructureReading } from "@/lib/arquiteto/site-structure-evidence";
 import { buildTerritorialSurface, deriveTerritorialProcessAvailability } from "@/lib/arquiteto/territorial-surface";
-import { manualSiloCandidateDraft, planSiloAssignment, planSiteStructurePromotion, resolveSiloAssignmentOutcome } from "@/lib/arquiteto/silo-assignment";
+import { manualSiloCandidateDraft, planSiloAssignment, planSiteStructurePromotion, publishedSiloCandidateDraft, resolveSiloAssignmentOutcome } from "@/lib/arquiteto/silo-assignment";
 import { proposeSiloPrimaryFromSerp, serpPrimaryAcceptanceOf, stampPublishedPrimary, type SiloPrimarySerpProposal } from "@/lib/arquiteto/silo-primary-keyword";
 import { acceptRemoteSiloPrimaryProposal } from "@/lib/arquiteto/canonical-workspace";
 import { readArchitectKeywordVinculo, editorialUnitDeclarationFromVinculo, headsSilo } from "@/lib/arquiteto/editorial-unit-declaration";
+import { withoutPublishedIdentityKeys } from "@/lib/arquiteto/published-identity";
+import { regroupFreeAroundPublished, resolvePublishedSiloMembership } from "@/lib/arquiteto/published-silo-membership";
 import { planSiloDecisionBatch, chunkBatch, resolveSiloBatchOutcome, type BatchSiloDecision, type BatchSiloWrite } from "@/lib/arquiteto/silo-decision-batch";
 import type { EditorialUnitDeclaration } from "@/lib/arquiteto/contracts";
 import { validateManualSiloSlug, type SlugSubject } from "@/lib/arquiteto/slug-architecture";
@@ -137,6 +139,8 @@ import { partitionMaterializedArticles, summarizeLegacyArticles } from "@/lib/ar
 import { observedFromArticleDna, readbackMaterializedArticles, type MaterializationReadback, type MaterializedArticleExpectation } from "@/lib/arquiteto/article-materialization-readback";
 import { articleSerpParecerFromAssessment } from "@/lib/arquiteto/article-serp-interpretation";
 import { SERP_LENS_LABELS, describeQualificationLenses, describeSerpLensesMarker, describeSerpLensesMissing, mergeSerpPaidPlans, type SerpPaidPlan, type SerpPaidPlanChoice } from "@/lib/arquiteto/serp-lens-plan";
+import { TERRITORIAL_AI_BLOCK_SIZE, TERRITORIAL_AI_KEYWORD_LIMIT, TERRITORIAL_SERP_BLOCK_SIZE, executePaidSerpBlocks, formatSerpBlockProgress, planPaidSerpBlocks, serpBlockPrefix, splitFormationSerpBlocks, splitTerritorialAiQuestions, territorialAiKeywordScope } from "@/lib/arquiteto/serp-blocks";
+import { runProgressiveBatch } from "@/lib/ui/batch-progress";
 import { SerpPaidPlanDialog } from "./serp-paid-plan-dialog";
 import { ARTICLE_SERP_STATE_LABELS, articleSerpBaseHash, articleSerpBaseOf, resolveArticleFormationSerpState, serpWasExecutedFor, summarizeArticleSerpGate, type ArticleSerpGateState } from "@/lib/arquiteto/article-serp-gate";
 import { comparePrincipalCandidates, simulateScenarioChange, type ScenarioChange, type ScenarioKeyword } from "@/lib/arquiteto/formation-scenario";
@@ -790,6 +794,12 @@ export default function ArquitetoPage() {
   const [siloCandidateSerpEvidence, setSiloCandidateSerpEvidence] = useState<SerpSiloCandidateAssessment[]>([]);
   const [publicationVerifications, setPublicationVerifications] = useState<SerpPublicationVerification[]>([]);
   const [serpBusy, setSerpBusy] = useState(false);
+  /*
+   * ANDAMENTO EM BLOCOS (2026-09-25): "bloco N de M · faltam R" dos processos
+   * que passam do teto da rota e andam em sequência — a SERP de Processar
+   * artigos, a SERP dos silos e a IA dos silos. `null` fora da execução.
+   */
+  const [serpBlockProgress, setSerpBlockProgress] = useState<{ process: "formation_serp" | "territorial_serp" | "territorial_ai"; text: string } | null>(null);
   /*
    * O PLANO DE CHAMADAS PAGAS aguardando a escolha da pessoa (adendo das 4
    * lentes, A6). Enquanto ele existe, nada foi pago; `resolve(null)` cancela.
@@ -3677,7 +3687,7 @@ export default function ArquitetoPage() {
        * libera a execução, com o número exato de chamadas autorizadas.
        * Cancelar não paga nada; tudo em cache segue sem perguntar.
        */
-      const serpRequest = {
+      const serpRequestBase = {
         brandId: brandContext.id, groups: requestedGroups, siloCandidates: siloCandidateKeywords, location: "Brasil", language: "pt-br", lenses: [...SERP_LENS_LABELS],
         articleDnaVersionIds, previousAssessments,
         // A evidência nasce carimbada com a composição que observou: é o que
@@ -3686,14 +3696,39 @@ export default function ArquitetoPage() {
           .map(group => [group.publishedAnchorId || group.id, articleSerpGates.get(group.publishedAnchorId || group.id)?.expectedBaseHash])
           .filter((entry): entry is [string, string] => Boolean(entry[1]))),
       };
-      const planned = await callStrategicApi<{ plan: SerpPaidPlan }>("/api/arquiteto/serp", { ...serpRequest, mode: "plan" }, "serp");
-      const choice = await askSerpPaidPlan("Validar SERP · plano de chamadas pagas", planned.plan);
+      /*
+       * EM BLOCOS, EM SEQUÊNCIA (2026-09-25).
+       *
+       * A rota aceita até 20 artigos e 20 candidatas a Silo por pedido; o
+       * cenário do dono (4 Silos, 21 publicados, ~130 livres) passa disso e
+       * o pedido único voltava 400 sem processar nada. Agora o lote vira
+       * blocos de até 20: o plano de TODOS vem primeiro (cache, sem pagar),
+       * a pessoa confirma UMA vez a soma, e cada bloco executa com o número
+       * do plano dele — o orçamento do servidor continua por pedido. Falha
+       * de um bloco vira falha dos artigos dele e o próximo segue. Com um
+       * bloco só, o pedido é o mesmo de antes.
+       */
+      const { blocks: blocosDaSerp, leftoverSiloCandidates } = splitFormationSerpBlocks(requestedGroups, siloCandidateKeywords);
+      const pedidoDoBloco = (bloco: (typeof blocosDaSerp)[number]) => ({ ...serpRequestBase, groups: bloco.groups, siloCandidates: bloco.siloCandidates });
+      const artigosDoBloco = (bloco: (typeof blocosDaSerp)[number]) => bloco.groups.map(group => group.publishedAnchorId || group.id);
+      const planejamento = await planPaidSerpBlocks({
+        blocks: blocosDaSerp,
+        itemIdsOf: artigosDoBloco,
+        plan: async bloco => {
+          const serpRequest = pedidoDoBloco(bloco);
+          const planned = await callStrategicApi<{ plan: SerpPaidPlan }>("/api/arquiteto/serp", { ...serpRequest, mode: "plan" }, "serp");
+          return planned.plan;
+        },
+      });
+      const choice = await askSerpPaidPlan(blocosDaSerp.length > 1
+        ? `Validar SERP · plano de chamadas pagas · ${requestedGroups.length} artigos em ${blocosDaSerp.length} blocos`
+        : "Validar SERP · plano de chamadas pagas", planejamento.merged);
       if (!choice) {
         showNotification("warning", "Validação da SERP cancelada: nenhuma chamada foi paga.");
         return "cancelled";
       }
       setSerpExecution(current => ({ ...current, ...Object.fromEntries(requestedGroups.map(group => [group.publishedAnchorId || group.id, { status: "processing" as const, queryCount: group.keywords.length, completed: 0 }])) }));
-      const result = await callStrategicApi<{
+      type SerpBlockResult = {
         assessments: SerpFormationAssessment[];
         failures?: ArticleSerpFailure[];
         summary?: { requestedArticles: number; completedArticles: number; failedArticles: number };
@@ -3701,7 +3736,50 @@ export default function ArquitetoPage() {
         queryCount: number;
         paidQueries?: number;
         lenses?: string[];
-      }>("/api/arquiteto/serp", { ...serpRequest, mode: "execute", ...choice }, "serp");
+      };
+      const execucaoDosBlocos = await executePaidSerpBlocks<(typeof blocosDaSerp)[number], SerpBlockResult>({
+        label: "SERP de Processar artigos",
+        planning: planejamento,
+        choice,
+        onProgress: snapshot => setSerpBlockProgress(blocosDaSerp.length > 1 ? { process: "formation_serp", text: formatSerpBlockProgress(snapshot) } : null),
+        execute: async (bloco, choice) => {
+          const serpRequest = pedidoDoBloco(bloco);
+          const doBloco = await callStrategicApi<SerpBlockResult>("/api/arquiteto/serp", { ...serpRequest, mode: "execute", ...choice }, "serp");
+          const avaliados = new Set((doBloco.assessments || []).map(assessment => assessment.articleId));
+          const motivos = new Map((doBloco.failures || []).map(failure => [failure.articleId, failure.message] as const));
+          return {
+            result: doBloco,
+            outcomes: artigosDoBloco(bloco).map(articleId => avaliados.has(articleId)
+              ? { id: articleId, status: "succeeded" as const }
+              : { id: articleId, status: "failed" as const, reason: motivos.get(articleId) || "O servidor não devolveu avaliação para este artigo." }),
+          };
+        },
+      });
+      const principalDoArtigo = new Map(requestedGroups.map(group => [group.publishedAnchorId || group.id, group.principalSuggestion.keywordId] as const));
+      const result: SerpBlockResult = {
+        assessments: execucaoDosBlocos.results.flatMap(item => item.result.assessments || []),
+        failures: [
+          ...execucaoDosBlocos.results.flatMap(item => item.result.failures || []),
+          // O bloco que caiu inteiro nomeia os artigos dele: nenhum some da conta.
+          ...execucaoDosBlocos.blockFailures.flatMap(falha => falha.itemIds.map(articleId => ({
+            articleId,
+            principalKeywordId: principalDoArtigo.get(articleId) || "",
+            stage: falha.stage === "plan" ? "block_plan" : "block",
+            code: "SERP_BLOCK_FAILED",
+            message: `${serpBlockPrefix(falha.blockIndex, blocosDaSerp.length)}${falha.reason}`,
+            retryable: true,
+          }))),
+        ],
+        siloCandidateEvidence: execucaoDosBlocos.results.flatMap(item => item.result.siloCandidateEvidence || []),
+        queryCount: execucaoDosBlocos.results.reduce((total, item) => total + (item.result.queryCount || 0), 0),
+        paidQueries: execucaoDosBlocos.results.reduce((total, item) => total + (item.result.paidQueries || 0), 0),
+        lenses: execucaoDosBlocos.results[0]?.result.lenses,
+      };
+      if (leftoverSiloCandidates.length) {
+        // Nada é cortado em silêncio: a candidata que não coube em bloco nenhum é nomeada.
+        showNotification("warning", `${leftoverSiloCandidates.length} candidata(s) a Silo não couberam nos blocos desta coleta (cada bloco leva até 20 e precisa de um artigo): `
+          + leftoverSiloCandidates.map(keyword => keyword.keyword).join(" · ") + ". Elas entram na próxima coleta.");
+      }
       // Validação por Article: um assessment incompleto vira falha daquela
       // unidade e não invalida os assessments válidos do restante do lote.
       const parsedAssessments = result.assessments.map(assessment => SerpFormationAssessmentSchema.parse(assessment));
@@ -3831,7 +3909,7 @@ export default function ArquitetoPage() {
         ? `${message} Nenhum artigo do lote foi avaliado nesta execução; os assessments já confirmados anteriormente permanecem.`
         : message);
       return "failed";
-    } finally { setSerpBusy(false); }
+    } finally { setSerpBusy(false); setSerpBlockProgress(null); }
   };
 
   const handleSerpRecommendationDecision = async (article: (typeof articlesList)[number], keywordId: string, status: "followed" | "ignored") => {
@@ -4838,10 +4916,7 @@ export default function ArquitetoPage() {
     const updates = items.map(item => {
       const workflow = item.canonicalWorkflow;
       if (!workflow?.id || !Number.isInteger(workflow.lockVersion)) return null;
-      return {
-        workflowItemId: String(workflow.id),
-        expectedLock: Number(workflow.lockVersion),
-        assignment: {
+      const assignment = {
           workingArticleId: item.workingArticleId != null ? String(item.workingArticleId) : null,
           clusterId: item.clusterId != null ? String(item.clusterId) : item.provisionalGroupId ? String(item.provisionalGroupId) : null,
           provisionalGroupId: item.provisionalGroupId != null ? String(item.provisionalGroupId) : item.clusterId != null ? String(item.clusterId) : null,
@@ -4854,7 +4929,13 @@ export default function ArquitetoPage() {
           ...(item.siloCandidate ? { siloCandidate: item.siloCandidate } : {}),
           ...(item.articleKgrDecision ? { articleKgrDecision: item.articleKgrDecision } : {}),
           manualEdit: true,
-        },
+        };
+      return {
+        workflowItemId: String(workflow.id),
+        expectedLock: Number(workflow.lockVersion),
+        // Publicada (status legado ou Vínculo): a identidade não sai daqui —
+        // é a mesma lista que a rota recusa (AGENTS §11).
+        assignment: item.isPublished ? withoutPublishedIdentityKeys(assignment) : assignment,
       };
     }).filter((update): update is NonNullable<typeof update> => Boolean(update));
     if (!updates.length) return true;
@@ -5425,14 +5506,32 @@ export default function ArquitetoPage() {
         };
       });
 
-      // Publicada mantém artigo próprio: uma keyword, um patrimônio.
-      const gruposPublicados = publicadas.map(keyword => ({
-        principalKeywordId: keyword.keywordId,
-        keywordIds: [keyword.keywordId],
-      }));
+      /*
+       * Publicada mantém artigo próprio: uma página, um patrimônio — e ela é
+       * a principal dele. REVALIDAR é remontar em torno dela: a livre que
+       * pede o MESMO conteúdo (piso de canibalização) entra no artigo que já
+       * está no ar em vez de formar um concorrente. URL, slug e canonical da
+       * publicada não passam por aqui.
+       */
+      const remontagem = regroupFreeAroundPublished({
+        keywords: [...publicadas, ...emFormacao],
+        freeGroups: gruposDoNucleo,
+        siloTokens: tokensDoSilo,
+      });
+      for (const [keywordId, destino] of remontagem.attached) {
+        const publicada = publicadas.find(keyword => keyword.keywordId === destino.publishedKeywordId);
+        nucleusByKeywordId.set(keywordId, {
+          label: publicada?.keyword || destino.publishedKeywordId,
+          anchors: [],
+          reasons: [`Remontada em torno do artigo publicado "${publicada?.keyword || destino.publishedKeywordId}": ${destino.reasons.join("; ")}.`],
+          keywordIds: remontagem.publishedGroups.find(grupo => grupo.principalKeywordId === destino.publishedKeywordId)?.keywordIds || [keywordId],
+          siloRef: territory.territoryRef,
+        });
+      }
+      const gruposPublicados = remontagem.publishedGroups;
 
       return buildArticleFormationUniverse({
-        groups: [...gruposDoNucleo, ...gruposPublicados],
+        groups: [...remontagem.freeGroups, ...gruposPublicados],
         siloRef: territory.territoryRef,
         siloLabel,
         siloSlug: raiz,
@@ -8222,7 +8321,8 @@ export default function ArquitetoPage() {
   };
   const serpConflictCount = serpAssessments.reduce((total, assessment) => total + assessment.conflicts.length, 0);
   const serpProcessing = Object.values(serpExecution).filter(execution => execution.status === "processing");
-  const serpProgress = serpProcessing.length ? `${serpProcessing.reduce((total, execution) => total + execution.completed, 0)}/${serpProcessing.reduce((total, execution) => total + execution.queryCount, 0)}` : undefined;
+  // Em blocos, o andamento diz o bloco e o que falta; com um pedido só, a conta de antes.
+  const serpProgress = serpBlockProgress?.process === "formation_serp" ? serpBlockProgress.text : serpProcessing.length ? `${serpProcessing.reduce((total, execution) => total + execution.completed, 0)}/${serpProcessing.reduce((total, execution) => total + execution.queryCount, 0)}` : undefined;
   const scopedArticles = useMemo(() => articlesList.filter(article => selectedArticleIds.has(article.id)), [articlesList, selectedArticleIds]);
   const currentArticleEntityIds = useMemo(() => [...new Set(scopedArticles
     .map(article => articleEntityIdFor(article))
@@ -8449,7 +8549,7 @@ export default function ArquitetoPage() {
    */
   const validateTerritorialSerp = async (dentroDoProcessamento = false) => {
     if (!selectedBrandId) { showNotification("error", "Selecione uma marca ativa."); return; }
-    const perguntas = territorialSerpQuestions.slice(0, 10).map(question => ({
+    const perguntas = territorialSerpQuestions.map(question => ({
       ...question,
       base: territorialSerpBaseOf(question),
     }));
@@ -8460,56 +8560,98 @@ export default function ArquitetoPage() {
     setTerritorialSerpBusy(true);
     try {
       // As quatro lentes; o plano vem antes e só a escolha da pessoa libera o pagamento.
-      const pedir = async (extra: Record<string, unknown>) => {
+      const pedirDoBloco = (doBloco: typeof perguntas) => async (extra: Record<string, unknown>) => {
         const response = await fetch("/api/arquiteto/territorial-serp", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ brandId: selectedBrandId, questions: perguntas, lenses: [...SERP_LENS_LABELS], ...extra }),
+          body: JSON.stringify({ brandId: selectedBrandId, questions: doBloco, lenses: [...SERP_LENS_LABELS], ...extra }),
         });
         const body = await response.json();
         if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível validar a SERP dos silos.");
         return body;
       };
-      const plano = await pedir({ mode: "plan" });
-      const escolha = await askSerpPaidPlan("Validar SERP dos silos · plano de chamadas pagas", plano.data.plan as SerpPaidPlan);
+      /*
+       * TODAS AS DÚVIDAS, EM BLOCOS DE 10 (2026-09-25). Antes o cliente
+       * mandava `slice(0, 10)`: da 11ª dúvida em diante, nada era consultado e
+       * ninguém era avisado. A rota aceita 10 por pedido; os blocos andam em
+       * sequência, a soma dos planos é confirmada uma vez e cada bloco paga só
+       * o que o plano dele mostrou.
+       */
+      const blocos: (typeof perguntas)[] = [];
+      for (let inicio = 0; inicio < perguntas.length; inicio += TERRITORIAL_SERP_BLOCK_SIZE) blocos.push(perguntas.slice(inicio, inicio + TERRITORIAL_SERP_BLOCK_SIZE));
+      const planejamento = await planPaidSerpBlocks({
+        blocks: blocos,
+        itemIdsOf: bloco => bloco.map(pergunta => pergunta.questionId),
+        plan: async bloco => {
+          const pedir = pedirDoBloco(bloco);
+          const plano = await pedir({ mode: "plan" });
+          return plano.data.plan as SerpPaidPlan;
+        },
+      });
+      const escolha = await askSerpPaidPlan(blocos.length > 1
+        ? `Validar SERP dos silos · plano de chamadas pagas · ${perguntas.length} dúvidas em ${blocos.length} blocos`
+        : "Validar SERP dos silos · plano de chamadas pagas", planejamento.merged);
       if (!escolha) {
         showNotification("warning", "SERP dos silos cancelada: nenhuma chamada foi paga. Nada foi aplicado.");
         return;
       }
-      const body = await pedir({ mode: "execute", ...escolha });
-      const assessments = Array.isArray(body.data?.assessments) ? body.data.assessments : [];
-      setTerritorialSerpAssessments(previous => {
-        const porPergunta = new Map(previous.map(item => [item.questionId, item]));
-        for (const assessment of assessments) porPergunta.set(assessment.questionId, assessment);
-        return [...porPergunta.values()];
+      const execucao = await executePaidSerpBlocks<(typeof perguntas), { pareceres: number; falhas: number }>({
+        label: "SERP dos silos",
+        planning: planejamento,
+        choice: escolha,
+        onProgress: snapshot => setSerpBlockProgress(blocos.length > 1 ? { process: "territorial_serp", text: formatSerpBlockProgress(snapshot) } : null),
+        execute: async (bloco, escolha) => {
+          const pedir = pedirDoBloco(bloco);
+          const body = await pedir({ mode: "execute", ...escolha });
+          const assessments = Array.isArray(body.data?.assessments) ? body.data.assessments : [];
+          // Cada bloco entra na mesa assim que volta: o próximo não espera o fim do lote.
+          setTerritorialSerpAssessments(previous => {
+            const porPergunta = new Map(previous.map(item => [item.questionId, item]));
+            for (const assessment of assessments) porPergunta.set(assessment.questionId, assessment);
+            return [...porPergunta.values()];
+          });
+          // Falha de consulta NÃO apaga parecer válido anterior: só entra hash de
+          // quem realmente voltou do readback.
+          setTerritorialSerpBaseHashes(previous => {
+            const proximo = new Map(previous);
+            for (const pergunta of bloco) {
+              if (assessments.some((item: { questionId: string }) => item.questionId === pergunta.questionId)) {
+                proximo.set(pergunta.questionId, territorialSerpBaseHash(pergunta.base));
+              }
+            }
+            return proximo;
+          });
+          const devolvidas = new Set(assessments.map((item: { questionId: string }) => item.questionId));
+          return {
+            result: { pareceres: assessments.length, falhas: Array.isArray(body.data?.failures) ? body.data.failures.length : 0 },
+            outcomes: bloco.map(pergunta => devolvidas.has(pergunta.questionId)
+              ? { id: pergunta.questionId, status: "succeeded" as const }
+              : { id: pergunta.questionId, status: "failed" as const, reason: "sem parecer para esta dúvida" }),
+          };
+        },
       });
-      // Falha de consulta NÃO apaga parecer válido anterior: só entra hash de
-      // quem realmente voltou do readback.
-      setTerritorialSerpBaseHashes(previous => {
-        const proximo = new Map(previous);
-        for (const pergunta of perguntas) {
-          if (assessments.some((item: { questionId: string }) => item.questionId === pergunta.questionId)) {
-            proximo.set(pergunta.questionId, territorialSerpBaseHash(pergunta.base));
-          }
-        }
-        return proximo;
-      });
-      const falhas = Array.isArray(body.data?.failures) ? body.data.failures.length : 0;
+      const pareceres = execucao.results.reduce((total, item) => total + item.result.pareceres, 0);
+      // O bloco que caiu inteiro conta as dúvidas dele como falha: nenhuma some da conta.
+      const falhas = execucao.results.reduce((total, item) => total + item.result.falhas, 0)
+        + execucao.blockFailures.reduce((total, falha) => total + falha.itemIds.length, 0);
+      const motivosDosBlocos = execucao.blockFailures.map(falha => `${serpBlockPrefix(falha.blockIndex, blocos.length)}${falha.reason}`).join(" · ");
+      const detalheDosBlocos = motivosDosBlocos ? ` ${motivosDosBlocos}.` : "";
       if (dentroDoProcessamento) {
         // Falha continua sendo dita; sucesso é silêncio porque o readout do
         // processamento já responde o que a evidência produziu.
         if (falhas) {
-          showNotification("error", `${assessments.length} parecer(es) de SERP · ${falhas} consulta(s) falharam durante o processamento.`);
+          showNotification("error", `${pareceres} parecer(es) de SERP · ${falhas} consulta(s) falharam durante o processamento.${detalheDosBlocos}`);
         }
       } else {
         showNotification(falhas ? "error" : "success", falhas
-          ? `${assessments.length} parecer(es) de SERP · ${falhas} consulta(s) falharam. Nada foi aplicado.`
-          : `${assessments.length} parecer(es) de SERP prontos para revisão humana. Nada foi aplicado.`);
+          ? `${pareceres} parecer(es) de SERP · ${falhas} consulta(s) falharam. Nada foi aplicado.${detalheDosBlocos}`
+          : `${pareceres} parecer(es) de SERP prontos para revisão humana. Nada foi aplicado.`);
       }
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "Não foi possível validar a SERP dos silos.");
     } finally {
       setTerritorialSerpBusy(false);
+      setSerpBlockProgress(null);
     }
   };
 
@@ -8606,7 +8748,8 @@ export default function ArquitetoPage() {
    */
   const reviewTerritorialWithAi = async () => {
     if (!selectedBrandId) { showNotification("error", "Selecione uma marca ativa."); return; }
-    const prontas = territorialAiAvailability.ready.slice(0, 6);
+    // Todas as prontas, em blocos de 6 (teto da rota).
+    const prontas = territorialAiAvailability.ready;
     if (!prontas.length) {
       showNotification("error", territorialAiAvailability.awaiting[0]?.reason || "Nenhuma dúvida está pronta para revisão com IA.");
       return;
@@ -8646,7 +8789,15 @@ export default function ArquitetoPage() {
           architectureFacts: arquitetura,
           logicFacts: logica,
           knownTargetRefs: remoteTerritories.map(item => item.territoryRef),
-          knownKeywordIds: masterList.map(keyword => String(keyword.id)),
+          // Só o escopo aberto da dúvida (ver territorialAiKeywordScope).
+          knownKeywordIds: territorialAiKeywordScope({
+            territoryRef: question.territoryRef,
+            comparedTerritoryRef: question.comparedTerritoryRef ?? null,
+            keywords: masterList.map(keyword => ({ id: String(keyword.id), territoryRef: typeof keyword.territoryRef === "string" ? keyword.territoryRef : null })),
+            hypothesisKeywordIds: territorialSurface.logic.hypotheses
+              .filter(hypothesis => !question.territoryRef || hypothesis.targets.some(target => target.territoryRef === question.territoryRef))
+              .map(hypothesis => String(hypothesis.keywordId)),
+          }),
           publishedIdentity: publicado,
           serpRef: parecer
             ? {
@@ -8664,44 +8815,81 @@ export default function ArquitetoPage() {
         };
       });
 
-      const response = await fetch("/api/arquiteto/territorial-ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          brandId: selectedBrandId,
-          brand: {
-            name: brandContext?.name || "Marca",
-            niche: brandContext?.niche ?? null,
-            positioning: null,
-          },
-          questions,
-        }),
+      // Dúvida acima do teto de keywords não vai cortada: é dita pelo nome.
+      const { blocks: blocosDaIa, overflow } = splitTerritorialAiQuestions(questions, { keywordLimit: TERRITORIAL_AI_KEYWORD_LIMIT });
+      const pedirRevisao = async (doBloco: typeof questions) => {
+        const response = await fetch("/api/arquiteto/territorial-ai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            brandId: selectedBrandId,
+            brand: {
+              name: brandContext?.name || "Marca",
+              niche: brandContext?.niche ?? null,
+              positioning: null,
+            },
+            questions: doBloco,
+          }),
+        });
+        const body = await response.json();
+        if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível revisar os silos com IA.");
+        return body;
+      };
+      if (overflow.length) {
+        showNotification("warning", `${overflow.length} dúvida(s) passam do teto da revisão com IA e não foram enviadas: `
+          + overflow.map(item => `${item.question.questionId} (${item.lists.join(", ")})`).join(" · ") + ". Nada foi aplicado.");
+      }
+      if (!blocosDaIa.length) return;
+      let totalDePropostas = 0;
+      let falhas = 0;
+      /*
+       * EM SEQUÊNCIA (2026-09-25): antes iam só as 6 primeiras dúvidas; agora
+       * todas, em blocos de 6. Um bloco que falha conta as dúvidas dele como
+       * falha e o próximo segue; o que já voltou continua na mesa.
+       */
+      const lote = await runProgressiveBatch({
+        label: "Revisão dos silos com IA",
+        items: blocosDaIa.flat(),
+        itemId: question => question.questionId,
+        chunkSize: TERRITORIAL_AI_BLOCK_SIZE,
+        onProgress: snapshot => setSerpBlockProgress(blocosDaIa.length > 1 ? { process: "territorial_ai", text: formatSerpBlockProgress(snapshot) } : null),
+        runChunk: async doBloco => {
+          const body = await pedirRevisao([...doBloco]);
+          const propostas = Array.isArray(body.data?.proposals) ? body.data.proposals : [];
+          totalDePropostas += propostas.length;
+          falhas += Array.isArray(body.data?.failures) ? body.data.failures.length : 0;
+          setTerritorialAiProposals(previous => {
+            const porPergunta = new Map(previous.map(item => [item.questionId, item]));
+            for (const proposal of propostas) porPergunta.set(proposal.questionId, proposal);
+            return [...porPergunta.values()];
+          });
+          setTerritorialAiBaseHashes(previous => {
+            const proximo = new Map(previous);
+            for (const { question } of prontas) {
+              if (propostas.some((item: { questionId: string }) => item.questionId === question.questionId)) {
+                proximo.set(question.questionId, territorialAiBaseHashOf(question));
+              }
+            }
+            return proximo;
+          });
+          const devolvidas = new Set(propostas.map((item: { questionId: string }) => item.questionId));
+          return doBloco.map(question => devolvidas.has(question.questionId)
+            ? { id: question.questionId, status: "succeeded" as const }
+            : { id: question.questionId, status: "failed" as const, reason: "sem proposta para esta dúvida" });
+        },
       });
-      const body = await response.json();
-      if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível revisar os silos com IA.");
-      const propostas = Array.isArray(body.data?.proposals) ? body.data.proposals : [];
-      setTerritorialAiProposals(previous => {
-        const porPergunta = new Map(previous.map(item => [item.questionId, item]));
-        for (const proposal of propostas) porPergunta.set(proposal.questionId, proposal);
-        return [...porPergunta.values()];
-      });
-      setTerritorialAiBaseHashes(previous => {
-        const proximo = new Map(previous);
-        for (const { question } of prontas) {
-          if (propostas.some((item: { questionId: string }) => item.questionId === question.questionId)) {
-            proximo.set(question.questionId, territorialAiBaseHashOf(question));
-          }
-        }
-        return proximo;
-      });
-      const falhas = Array.isArray(body.data?.failures) ? body.data.failures.length : 0;
+      // Bloco que caiu inteiro não passa pela contagem da rota: soma aqui.
+      const semResposta = lote.failures.filter(falha => falha.reason !== "sem proposta para esta dúvida");
+      falhas += semResposta.length;
+      const motivo = semResposta.length ? ` ${[...new Set(semResposta.map(falha => falha.reason))].join(" · ")}.` : "";
       showNotification(falhas ? "error" : "success", falhas
-        ? `${propostas.length} proposta(s) de IA · ${falhas} dúvida(s) falharam. Nada foi aplicado.`
-        : `${propostas.length} proposta(s) de IA prontas para revisão humana. Nada foi aplicado.`);
+        ? `${totalDePropostas} proposta(s) de IA · ${falhas} dúvida(s) falharam. Nada foi aplicado.${motivo}`
+        : `${totalDePropostas} proposta(s) de IA prontas para revisão humana. Nada foi aplicado.`);
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "Não foi possível revisar os silos com IA.");
     } finally {
       setTerritorialAiBusy(false);
+      setSerpBlockProgress(null);
     }
   };
 
@@ -9590,6 +9778,43 @@ export default function ArquitetoPage() {
     return mapa;
   }, [architectureKeywordVinculos]);
 
+  /**
+   * REVALIDAR — quem é patrimônio publicado e em que Silo o site o põe.
+   *
+   * A publicada é a mesma que a projeção canônica marcou (`isPublished`:
+   * status legado ou Vínculo). O Silo de cada artigo publicado sai do
+   * ENDEREÇO: URL canônica sob a URL de um Silo publicado da marca ativa.
+   * Nada aqui escreve, e nada muda URL, slug ou canonical.
+   */
+  const publishedArchitectureKeywordIds = useMemo(
+    () => new Set(masterList.filter(keyword => keyword.isPublished).map(keyword => String(keyword.id))),
+    [masterList],
+  );
+  const publishedSiloMembership = useMemo(() => resolvePublishedSiloMembership({
+    brandId: selectedBrandId || null,
+    entries: masterList.flatMap(keyword => {
+      const keywordId = String(keyword.id);
+      const vinculo = architectureKeywordVinculos.get(keywordId);
+      if (!vinculo || !publishedArchitectureKeywordIds.has(keywordId)) return [];
+      return [{
+        keywordId,
+        brandId: typeof keyword.brand_id === "string" ? keyword.brand_id : null,
+        published: true,
+        pageType: vinculo.pageType,
+        url: vinculo.url,
+        canonicalUrl: vinculo.canonicalUrl,
+      }];
+    }),
+    // Silo publicado que já é território protegido reconhece os artigos
+    // mesmo sem a cabeça no lote.
+    territorySilos: [
+      ...territorialSurface.landscape.candidateTerritories,
+      ...territorialSurface.landscape.confirmedTerritories,
+    ]
+      .filter(territory => territory.publicationProtection === "protected" && Boolean(territory.slugState.publishedCanonical))
+      .map(territory => ({ territoryRef: territory.territoryRef, canonicalUrl: territory.slugState.publishedCanonical })),
+  }), [masterList, architectureKeywordVinculos, publishedArchitectureKeywordIds, selectedBrandId, territorialSurface]);
+
   /** A frase do Vínculo por keyword, pronta para a linha da mesa. */
   const territorialVinculoLines = useMemo(() => {
     const mapa = new Map<string, KeywordVinculoLine>();
@@ -9622,13 +9847,19 @@ export default function ArquitetoPage() {
       slug: territory.slugState.publishedSlug || territory.slugState.confirmed,
       // Pendência não vai ao motor como intenção comparável (§5).
       intent: intentIsKnown(territory.macroIntent) ? territory.macroIntent : null,
+      primaryKeywordId: territory.primaryKeyword?.keywordId ?? null,
     })),
     keywords: architectureKeywordSignals,
     declarations: architectureKeywordDeclarations,
     slugOf: normalizeManualSiloPageSlug,
     // F2.3 — o tronco ancorado não é "sem Silo": o artigo o sustenta.
     ...(subjectSets.anchored.size ? { anchoredSubjectKeywordIds: subjectSets.anchored } : {}),
-  }), [architectureAnalysis, territorialSurface, architectureKeywordSignals, architectureKeywordDeclarations, subjectSets]);
+    // REVALIDAR — a publicada não é semente léxica nem é remanejada; o
+    // Silo dela é o que o site declara pela URL.
+    publishedKeywordIds: publishedArchitectureKeywordIds,
+    publishedSiloHeadByArticle: publishedSiloMembership.siloHeadByArticle,
+    publishedSiloConflicts: new Map(publishedSiloMembership.conflicts.map(item => [item.keywordId, item.reason])),
+  }), [architectureAnalysis, territorialSurface, architectureKeywordSignals, architectureKeywordDeclarations, subjectSets, publishedArchitectureKeywordIds, publishedSiloMembership]);
 
   /**
    * Itens canônicos das keywords, para as edições escreverem com `expectedLock`.
@@ -13193,19 +13424,26 @@ export default function ArquitetoPage() {
       const criados: Awaited<ReturnType<typeof createRemoteSiloCandidate>>[] = [];
       for (const silo of proposta.silos) {
         if (silo.territoryRef) { refPorChave.set(silo.key, silo.territoryRef); continue; }
+        /*
+         * ORIGEM 2 — a proposta já leu QUEM a declaração aponta; aqui, que
+         * é onde há escrita, entra o QUANDO. A decisão não é retomada.
+         */
+        const primaria = silo.primaryKeywordDeclaration
+          ? stampPublishedPrimary(silo.primaryKeywordDeclaration, new Date().toISOString())
+          : null;
         const created = await createRemoteSiloCandidate({
           brandId: selectedBrandId,
-          draft: manualSiloCandidateDraft({
-            name: silo.name,
-            slug: silo.slug,
-            /*
-             * ORIGEM 2 — a proposta já leu QUEM a declaração aponta; aqui, que
-             * é onde há escrita, entra o QUANDO. A decisão não é retomada.
-             */
-            primaryKeyword: silo.primaryKeywordDeclaration
-              ? stampPublishedPrimary(silo.primaryKeywordDeclaration, new Date().toISOString())
-              : null,
-          }),
+          // Cabeça publicada: o território nasce com o endereço do site,
+          // protegido — nunca com um slug tirado do texto (AGENTS §11).
+          draft: silo.publishedIdentity
+            ? publishedSiloCandidateDraft({
+              name: silo.name,
+              publishedSlug: silo.publishedIdentity.slug,
+              publishedCanonical: silo.publishedIdentity.canonical,
+              publishedUrl: silo.publishedIdentity.url,
+              primaryKeyword: primaria,
+            })
+            : manualSiloCandidateDraft({ name: silo.name, slug: silo.slug, primaryKeyword: primaria }),
         });
         refPorChave.set(silo.key, created.territoryRef);
         criados.push(created);
@@ -13549,7 +13787,13 @@ export default function ArquitetoPage() {
           falhas.push(assignment.keywordId);
           continue;
         }
-        decisoes.push({ keywordId: assignment.keywordId, target: { kind: "territory", territoryRef } });
+        decisoes.push({
+          keywordId: assignment.keywordId,
+          target: { kind: "territory", territoryRef },
+          // Cabeça publicada ou URL sob o Silo: o destino é o que o site
+          // declara, e só ele admite membership da publicada.
+          ...(assignment.declaredBy ? { declaredBySite: true as const } : {}),
+        });
       }
       for (const item of architectureProposal.unassigned) {
         decisoes.push({ keywordId: item.keywordId, target: { kind: "unassigned" } });
@@ -13735,7 +13979,7 @@ export default function ArquitetoPage() {
             || `Validar SERP de ${territorialSerpQuestions.length} dúvida(s) arquitetural(is). A SERP é evidência; a decisão continua humana.`
           : "Validar SERP diretamente; a planilha permanece visível",
         progress: workspaceMode === "silos"
-          ? serpDesatualizados > 0
+          ? serpBlockProgress?.process === "territorial_serp" ? serpBlockProgress.text : serpDesatualizados > 0
             ? `${serpVigentes}/${territorialSerpQuestions.length} · ${serpDesatualizados} desatualizado(s)`
             : serpVigentes
               ? `${serpVigentes}/${territorialSerpQuestions.length}`
@@ -13755,7 +13999,7 @@ export default function ArquitetoPage() {
             : territorialAiAvailability.awaiting[0]?.reason || "Nenhuma dúvida arquitetural aguarda revisão com IA."
           : "Revisar com IA a working copy",
         progress: workspaceMode === "silos"
-          ? aiDesatualizados > 0
+          ? serpBlockProgress?.process === "territorial_ai" ? serpBlockProgress.text : aiDesatualizados > 0
             ? `${aiVigentes}/${territorialSerpQuestions.length} · ${aiDesatualizados} desatualizada(s)`
             : aiVigentes
               ? `${aiVigentes}/${territorialSerpQuestions.length}`
@@ -13779,7 +14023,7 @@ export default function ArquitetoPage() {
           : workspaceMode === "links" ? "Abrir a revisão humana do InternalLinkGraph" : "Confirmar a arquitetura após revisão humana",
       },
     };
-  }, [acceptedSiloDnas, activeLogicalTask, articlePhaseProcessStates, confirmArticleFormation, generatingStrategic, handleRevalidateStructure, handleValidateSerp, linksApprovedGraph, linksIsDirty, linksLoading, linksWorkingCopy, pendingSiloReview, selectedArticleIds.size, serpProgress, siloConsolidating, siloReviewBusy, siloWorkingCopies.length, territorialAvailability, workspaceMode]);
+  }, [acceptedSiloDnas, activeLogicalTask, articlePhaseProcessStates, confirmArticleFormation, generatingStrategic, handleRevalidateStructure, handleValidateSerp, linksApprovedGraph, linksIsDirty, linksLoading, linksWorkingCopy, pendingSiloReview, selectedArticleIds.size, serpBlockProgress, serpProgress, siloConsolidating, siloReviewBusy, siloWorkingCopies.length, territorialAvailability, workspaceMode]);
   const contextSummary = workspaceMode === "articles"
     ? activeProcess === "logic"
       ? activeLogicalTask ? `${activeLogicalTask.message || "Processando grupos"} · ${activeLogicalTask.current ?? 0}/${activeLogicalTask.total ?? masterList.length}` : [`${visibleUngroupedArticleKeywords.length} keyword(s) sem grupo`, `${siloCandidateKeywords.length} candidata(s) a Silo reservada(s)`, `${articlePipeline.counts.eligible} elegível(is)`, `${articlePipeline.counts.awaiting_silo_confirmation} aguardando confirmação do Silo`, `${articlePipeline.counts.awaiting_silo} aguardando definição de Silo`, `${articlePipeline.counts.reserved_silo_head} reservada(s) para a página do Silo`].join(" · ")

@@ -26,6 +26,7 @@ import { intentComparisonKey, intentIsKnown, type KeywordDnaSignals } from "./ke
 import type { PublishedSiloDeclaration } from "./silo-primary-keyword.ts";
 import { declaredNotSilo, headsSilo, isHumanDeclaredPageType } from "./editorial-unit-declaration.ts";
 import type { EditorialUnitDeclaration } from "./contracts.ts";
+import { publishedPageIdentityOf, publishedPathKey, type PublishedPageIdentity } from "./published-silo-membership.ts";
 
 export type ProposalSiloSource = "reused" | "proposed";
 
@@ -49,6 +50,15 @@ export type ProposalSilo = {
   primaryKeywordDeclaration: Extract<PublishedSiloDeclaration, { state: "FOUND" }> | null;
   source: ProposalSiloSource;
   reason: string;
+  /**
+   * A identidade que JÁ ESTÁ NO AR, quando o Silo nasce de uma cabeça
+   * publicada: `slug` é o caminho da URL declarada (não o texto da
+   * keyword), e canonical/URL vêm da declaração. Quem cria o território a
+   * partir disto o cria protegido, com `publishedSlug`/`publishedCanonical`
+   * — o Arquiteto não inventa outro endereço para página publicada
+   * (AGENTS §11). Aditivo: ausente em todo Silo não publicado.
+   */
+  publishedIdentity?: PublishedPageIdentity;
 };
 
 /**
@@ -75,6 +85,12 @@ export type ProposalAssignment = {
   /** §7 — a versão do KeywordDNA em que a decisão se apoia. */
   dnaVersionId: string | null;
   dnaContentHash: string | null;
+  /**
+   * O destino é DECLARAÇÃO DO SITE, não palpite da lógica: a cabeça de um
+   * Silo publicado, ou o artigo publicado cuja URL está sob a URL do Silo.
+   * Aditivo e presente só nesses casos; fora do hash da proposta.
+   */
+  declaredBy?: "published_silo_head" | "published_url";
 };
 export type ProposalUnassigned = { keywordId: string; reason: string };
 
@@ -124,6 +140,12 @@ export type ExistingSilo = {
   slug: string | null;
   /** Intenção macro declarada do Silo, quando já existe. */
   intent?: string | null;
+  /**
+   * A keyword eleita primária do território, quando há. Reconhece o Silo
+   * publicado que já virou território mesmo quando o slug gravado nele não é
+   * o caminho publicado (território criado antes desta correção).
+   */
+  primaryKeywordId?: string | null;
 };
 
 /* -------------------------------------------------------------- núcleo */
@@ -246,6 +268,25 @@ export function buildArchitectureWorkingProposal(input: {
   slugOf: (value: string) => string;
   /** Troncos ancorados (`anchoredSubjectKeywordIds`, em `declared-subject.ts`). */
   anchoredSubjectKeywordIds?: ReadonlySet<string>;
+  /**
+   * REVALIDAR — as keywords com identidade publicada (status legado ou
+   * Vínculo). Presente, a publicada nunca vira semente léxica nem é
+   * remanejada por afinidade: ou o site declara o Silo dela, ou ela fica
+   * fora de Silo com o motivo dito. Ausente, a proposta é a de antes.
+   */
+  publishedKeywordIds?: ReadonlySet<string>;
+  /**
+   * Artigo publicado → keyword-cabeça do Silo publicado cuja URL o contém
+   * (`resolvePublishedSiloMembership`). É membership declarada pelo site.
+   */
+  publishedSiloHeadByArticle?: ReadonlyMap<string, string>;
+  /**
+   * Publicada → motivo real de o endereço não resolver o Silo dela (dois
+   * Silos com o mesmo endereço, publicada sem URL absoluta). Vira o motivo
+   * da linha em vez do genérico "fora de Silo": é conflito para decisão
+   * humana, não declaração do site.
+   */
+  publishedSiloConflicts?: ReadonlyMap<string, string>;
 }): ArchitectureWorkingProposal {
   const dnaPorKeyword = new Map(input.keywords.map(item => [item.keywordId, item]));
   const keywordTexts = new Map(input.keywords.map(item => [item.keywordId, item.text]));
@@ -297,8 +338,11 @@ export function buildArchitectureWorkingProposal(input: {
    * para a primeira que ninguém declarou. Se TODAS foram declaradas não-Silo,
    * o grupo não sustenta Silo nenhum, e isto devolve `null`.
    */
+  /** Patrimônio publicado: nunca é semente léxica de Silo novo. */
+  const ehPublicada = (keywordId: string) => Boolean(input.publishedKeywordIds?.has(keywordId));
+
   const sementeLexica = (cluster: ClusterAnalysis): string | null => {
-    const livre = (keywordId: string) => !declaredNotSilo(declaracaoDe(keywordId));
+    const livre = (keywordId: string) => !declaredNotSilo(declaracaoDe(keywordId)) && !ehPublicada(keywordId);
     if (cluster.headKeywordId && livre(cluster.headKeywordId)) return cluster.headKeywordId;
     return cluster.memberKeywordIds.find(livre) ?? null;
   };
@@ -369,22 +413,52 @@ export function buildArchitectureWorkingProposal(input: {
   const resolvidasPorDeclaracao = new Set<string>();
   const siloDaCabeca = new Map<string, string>();
   const slugsExistentes = new Map([...silos.values()].map(silo => [silo.slug, silo.key]));
+  /** O mesmo endereço, comparado sem caixa nem barra final — só para Silo publicado. */
+  const caminhosExistentes = new Map<string, string>();
+  for (const silo of silos.values()) {
+    const chave = publishedPathKey(silo.slug);
+    if (chave && !caminhosExistentes.has(chave)) caminhosExistentes.set(chave, silo.key);
+  }
+  const existentePelaPrimaria = new Map<string, string>();
+  for (const silo of input.existingSilos) {
+    if (silo.primaryKeywordId && !existentePelaPrimaria.has(silo.primaryKeywordId)) existentePelaPrimaria.set(silo.primaryKeywordId, silo.territoryRef);
+  }
 
   for (const keywordId of keywordTexts.keys()) {
     const declaracao = declaracaoDe(keywordId);
     if (!headsSilo(declaracao)) continue;
 
     const nome = keywordTexts.get(keywordId) || keywordId;
-    const slug = input.slugOf(nome);
     const publicada = declaracao!.source === "published";
+    /*
+     * SILO PUBLICADO: O SLUG É O CAMINHO QUE ESTÁ NO AR.
+     *
+     * Antes o slug saía do TEXTO da keyword ("cuidados com cabelos" →
+     * `/cuidados-com-cabelos`) mesmo com a página publicada em `/cabelos`.
+     * A SiloPage seria proposta noutro endereço, os artigos novos ganhariam
+     * slug sob a raiz errada e o patrimônio do site deixaria de ser
+     * reconhecido. Sem URL absoluta declarada, fica o texto — e o motivo diz.
+     */
+    const identidadePublicada = publicada
+      ? publishedPageIdentityOf({
+        url: (declaracao as Extract<EditorialUnitDeclaration, { source: "published" }>).url,
+        canonical: (declaracao as Extract<EditorialUnitDeclaration, { source: "published" }>).canonical,
+      })
+      : null;
+    const slug = identidadePublicada?.slug ?? input.slugOf(nome);
     const dna = dnaPorKeyword.get(keywordId) ?? null;
 
     /*
      * O Silo declarado pode já existir no acervo com o mesmo endereço. Aí a
      * cabeça se junta a ele em vez de nascer um segundo Silo para a mesma
      * página — duplicar estrutura publicada é o erro que esta checagem evita.
+     * O publicado casa pelo endereço (sem caixa nem barra final) e, na falta
+     * dele, pela primária do território: o Silo criado antes desta correção
+     * com o slug do texto continua sendo o mesmo Silo.
      */
-    let key = slugsExistentes.get(slug) ?? null;
+    let key = identidadePublicada
+      ? caminhosExistentes.get(publishedPathKey(slug) || "") ?? existentePelaPrimaria.get(keywordId) ?? null
+      : slugsExistentes.get(slug) ?? null;
     if (!key) {
       key = `proposed:${slug}`;
       if (!silos.has(key)) {
@@ -395,8 +469,11 @@ export function buildArchitectureWorkingProposal(input: {
             ? { state: "FOUND", keywordId, label: nome, declaration: declaracao as Extract<EditorialUnitDeclaration, { source: "published" }> }
             : null,
           source: "proposed",
+          ...(identidadePublicada ? { publishedIdentity: identidadePublicada } : {}),
           reason: publicada
-            ? `"${nome}" já está publicada e o Minerador a declara Silo: a primária vem da declaração.`
+            ? identidadePublicada
+              ? `"${nome}" já está publicada em ${identidadePublicada.slug} e o Minerador a declara Silo: a primária vem da declaração, e o endereço publicado é preservado.`
+              : `"${nome}" está declarada Silo publicado, mas sem URL absoluta legível: o slug sai do texto até o endereço ser declarado no Minerador.`
             : isHumanDeclaredPageType(declaracao)
               ? `O humano declarou "${nome}" como Silo no Minerador: o tipo é decisão dele; a primária é provisória até a SERP confirmar.`
               : `O Minerador marcou "${nome}" com potencial de Silo: a primária é provisória até a SERP confirmar.`,
@@ -418,8 +495,51 @@ export function buildArchitectureWorkingProposal(input: {
       basis: [publicada ? "Declaração de Silo publicado no Vínculo" : "Potencial de Silo declarado no Vínculo"],
       dnaVersionId: dna?.dnaVersionId ?? null,
       dnaContentHash: dna?.dnaContentHash ?? null,
+      ...(publicada ? { declaredBy: "published_silo_head" as const } : {}),
     });
   }
+
+  /*
+   * DEPOIS DAS CABEÇAS, OS MEMBROS QUE O SITE JÁ DECLAROU.
+   *
+   * Artigo publicado cuja URL está sob a URL de um Silo publicado é membro
+   * daquele Silo: a arquitetura foi formada e comprovada no ar. O léxico não
+   * o remaneja, e nada aqui muda URL, slug ou canonical — é só a leitura do
+   * endereço (`resolvePublishedSiloMembership`).
+   */
+  const siloPelaUrl = new Map<string, string>();
+  for (const [keywordId, cabeca] of input.publishedSiloHeadByArticle || []) {
+    if (!keywordTexts.has(keywordId) || resolvidasPorDeclaracao.has(keywordId)) continue;
+    // A cabeça é keyword do lote, ou o `territoryRef` do Silo publicado que
+    // já está no acervo (`territorySilos` em `resolvePublishedSiloMembership`).
+    const key = siloDaCabeca.get(cabeca) ?? (silos.get(cabeca)?.territoryRef === cabeca ? cabeca : undefined);
+    if (!key) continue;
+    const dna = dnaPorKeyword.get(keywordId) ?? null;
+    resolvidasPorDeclaracao.add(keywordId);
+    siloPelaUrl.set(keywordId, key);
+    assignments.push({
+      keywordId,
+      siloKey: key,
+      reason: `Membro declarado pelo site: a URL publicada está sob a URL do Silo "${keywordTexts.get(cabeca) || silos.get(key)?.name || cabeca}".`,
+      membershipState: silos.get(key)?.source === "proposed" ? "new_silo_candidate" : "existing_silo_match",
+      basis: ["URL publicada sob a URL do Silo publicado"],
+      dnaVersionId: dna?.dnaVersionId ?? null,
+      dnaContentHash: dna?.dnaContentHash ?? null,
+      declaredBy: "published_url",
+    });
+  }
+
+  /*
+   * PUBLICADA SEM SILO DECLARADO PELO SITE FICA FORA DE SILO.
+   *
+   * Encaixá-la por afinidade seria a lógica decidir estrutura publicada. Ela
+   * não some: vai para `unassigned` com o motivo, e continua artigo próprio.
+   */
+  const publicadasSemSilo = new Set([...keywordTexts.keys()]
+    .filter(keywordId => ehPublicada(keywordId) && !resolvidasPorDeclaracao.has(keywordId)));
+  for (const keywordId of publicadasSemSilo) resolvidasPorDeclaracao.add(keywordId);
+  /** Já tem destino fora do léxico: não entra em `unassigned` por grupo. */
+  const destinoDoSite = (keywordId: string) => siloPelaUrl.has(keywordId) || publicadasSemSilo.has(keywordId);
 
   /** O Silo declarado dentro do grupo, se houver: é ele que atrai os vizinhos. */
   const siloDeclaradoDoGrupo = (cluster: ClusterAnalysis): string | null => {
@@ -427,7 +547,17 @@ export function buildArchitectureWorkingProposal(input: {
       const key = siloDaCabeca.get(keywordId);
       if (key) return key;
     }
-    return null;
+    /*
+     * REMONTAR EM TORNO DO PUBLICADO: o grupo que tem artigo publicado de um
+     * Silo vai para esse Silo — as livres se reagrupam em torno do que já
+     * está no ar. Com membros de Silos diferentes, vence o mais presente.
+     */
+    const contagem = new Map<string, number>();
+    for (const keywordId of cluster.memberKeywordIds) {
+      const key = siloPelaUrl.get(keywordId);
+      if (key) contagem.set(key, (contagem.get(key) || 0) + 1);
+    }
+    return [...contagem.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
   };
 
   /**
@@ -556,7 +686,7 @@ export function buildArchitectureWorkingProposal(input: {
   if (!silos.size && semDestinoProprio) {
     const semente = grupoSemente(input.analysis.clusters);
     // O termo guarda-chuva não pode ser uma keyword que o humano declarou artigo.
-    const guardaChuva = termoGuardaChuva(new Map([...keywordTexts].filter(([keywordId]) => !declaredNotSilo(declaracaoDe(keywordId)))));
+    const guardaChuva = termoGuardaChuva(new Map([...keywordTexts].filter(([keywordId]) => !declaredNotSilo(declaracaoDe(keywordId)) && !ehPublicada(keywordId))));
     if (semente && guardaChuva) {
       propor(
         { ...semente, label: guardaChuva.texto, headKeywordId: guardaChuva.keywordId },
@@ -587,6 +717,7 @@ export function buildArchitectureWorkingProposal(input: {
       const key = cluster.suggestedTerritoryRef;
       if (!silos.has(key)) {
         for (const keywordId of cluster.memberKeywordIds) {
+          if (destinoDoSite(keywordId)) continue;
           unassigned.push({
             keywordId,
             reason: `O Silo sugerido (${cluster.suggestedTerritoryLabel || key}) não está no acervo carregado.`,
@@ -623,6 +754,7 @@ export function buildArchitectureWorkingProposal(input: {
     }
 
     for (const keywordId of cluster.memberKeywordIds) {
+      if (destinoDoSite(keywordId)) continue;
       unassigned.push({
         keywordId,
         reason: vetado
@@ -632,6 +764,16 @@ export function buildArchitectureWorkingProposal(input: {
             : `Sem profundidade para Silo próprio e sem Silo de afinidade no acervo: ${cluster.reason}`,
       });
     }
+  }
+
+  for (const keywordId of publicadasSemSilo) {
+    const conflito = input.publishedSiloConflicts?.get(keywordId);
+    unassigned.push({
+      keywordId,
+      reason: conflito
+        ? `Conflito para decisão humana: ${conflito} A lógica não remaneja patrimônio publicado.`
+        : "Publicada fora de Silo reconhecido: a URL não está sob a URL de nenhum Silo publicado desta marca que esteja no lote ou no acervo. A lógica não remaneja patrimônio publicado; se o Silo dela ainda não foi importado, importe a cabeça do Silo.",
+    });
   }
 
   /*

@@ -1,5 +1,132 @@
 # Estado atual — Minerador
 
+## Volume sem média oficial é processo executado, e a aprovada não cai por remedir — 2026-09-25
+
+```text
+PEDIDO = dono do produto, 2026-09-25 (publicadas sem Volume, "Erro" ao remedir, aprovação recusada)
+PERSISTENCIA_NOVA = JSONB aditivo (volume_eligibility.lastEmptyResponse) · migration = 0 · SQL = 0
+CHAMADAS_PAGAS_EM_TESTE = 0 · ESCRITA_REMOTA = 0 · SERP = sem mudança (uma vez só)
+MANUAL_UI_VALIDATED = NO — remedir as publicadas na tela do usuário, pendente
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+**Causa (conferida no banco, só leitura).** Keywords publicadas importadas por
+lista manual em 21/09 sem métricas. Ao medir, o Google Ads respondeu sem média.
+A rota gravou `volume_eligibility = { status: "unavailable", averageMonthlySearches: null, measuredAt, provider: "google_ads", googleAdsRequestId, threshold: 120 }`,
+sem `volume_measurement`, e `volume_search` ficou `null`. A tela só confirmava
+o readback com `volume_measurement.measuredAt`. Como a keyword voltou na
+projeção sem média, e não em `unmatchedKeywordIds`, virava "failed: medição
+recebida, mas o readback não confirmou". A célula mostrava "Erro", o painel
+mostrava "Anterior/importado · aguardando revalidação", e `resolveApprovalReadiness`
+nunca validava o Volume. O resultado era `APPROVAL_INCOMPLETE`, e a keyword
+não chegava ao Arquiteto.
+
+**Decisão do dono.** O Volume é medido toda vez que é chamado, sem custo, e
+atualiza os dados. Só a SERP é coletada uma vez. As publicadas precisam
+poder ser aprovadas. Regra permanente no `spec.md` §61, em "Volume como
+processo executado".
+
+- **Resposta sem média = processado, sem dado.** No lote, a resposta sem
+  média é `empty`, nunca `failed` (`classifyVolumeReadback`, em
+  `lib/minerador/volume-eligibility.ts`). A linha relida entra no estado. A
+  célula de Volume e CPC mostra o "0" apagado lido do registro, então
+  sobrevive ao recarregar. O painel Google Ads diz "Medido · sem média oficial ·
+  data" (`processorVolumeStateLabel`), e "Última medição" traz a data da
+  resposta. O processo Volume fica completo, e o KGR não. Erro de verdade
+  continua "Erro": rede, 4xx/5xx, falha ao ler de volta, ou releitura sem o
+  registro desta resposta.
+- **Aprovação (§61):** a resposta sem média registrada cumpre o requisito
+  Volume. O volume continua `null` (ADR-020), e o KGR, não calculável, não é
+  exigido. A regra é a mesma na tela e na trava do servidor
+  (`resolveHandoffApprovalGate` / `prepareCanonicalHandoff`). A notificação da
+  aprovação diz "Volume processado, sem média oficial em N keyword(s)".
+- **Rota `metricas-keywords`:** grava a resposta sem média para toda keyword
+  sem média. Isso inclui a que o Google Ads não devolveu no lote, que antes
+  ficava sem registro, e a linha com status legado `publicado`, que antes
+  voltava `null`. Resposta sem média não apaga número anterior: fica o
+  número, e a data vai para `volume_eligibility.lastEmptyResponse`. Falha nova
+  não apaga resposta anterior: `measurement_failed` só para quem nunca
+  respondeu. A rota passou a ler `intent`, que entra na assinatura.
+- **Assinatura (item 4):** até aqui, remedir e receber exatamente o mesmo
+  resultado **rebaixava** a aprovada. A v3 assina `volume_measurement` e
+  `volume_eligibility` com a data e o request id de cada resposta. Agora a
+  rota aplica `carryApprovalAcrossRemeasurement`
+  (`lib/minerador/approved-package.ts`). Quando o registro batia antes e só
+  mudou proveniência, a rota re-assina o registro com a mesma versão, autor,
+  instante e `contentHash`. Proveniência inclui data, request id, versão da
+  API, `previous*` e `lastEmptyResponse`. Número, CPC, concorrência,
+  targeting ou elegibilidade diferentes continuam mandando a keyword para Em
+  revisão. Keyword já em revisão continua em revisão.
+- **SDD da planilha, premissa 5:** o marcador de "processado sem dado" do
+  Volume passou a ser gravado, inclusive para a keyword não devolvida, por
+  decisão do dono de 2026-09-25. O formato é o que a rota já gravava para a
+  resposta sem média. A candidata do Descobrir continua só na sessão.
+- **Arquivos:** `lib/minerador/volume-eligibility.ts`,
+  `lib/minerador/google-ads-volume.ts`, `lib/minerador/processor-revalidation.ts`,
+  `lib/minerador/process-state.ts`, `lib/minerador/approved-package.ts`,
+  `lib/minerador/processor-table-cells.ts` (comentário) e
+  `app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts`.
+  Também `modules/minerador/minerador-workspace.tsx` e
+  `components/editorial/dna-panels.tsx`, os dois com CRLF preservado. Todas
+  as mudanças são aditivas: `ApprovalReadiness.notes` e
+  `ProcessorMetricValidation.emptyResponse` são opcionais, e o
+  `ProcessorMetricValidationState` não mudou.
+- **Consumidores preservados:** `arquiteto-handoff-gates.ts`,
+  `lib/server/arquiteto-workspace.ts`, `canonical-keyword-snapshot.ts`,
+  `keyword-dna.ts`, `package-freshness.ts`, `vinculo-screen.ts` e o
+  Arquiteto (`declared-subject.ts`, `keyword-dna-projection.ts`), que
+  continuam lendo `volume.validated` como antes.
+- **Testes:** novo `tests/minerador-volume-sem-media.test.mts` (24 casos, com
+  o caso exato do diagnóstico). `tests/minerador-corretor-planilha-rodape.test.mts`
+  mudou porque fixava o formato antigo do filtro `unmatchedIds` no handler.
+  O comportamento verificado é o mesmo: a keyword não devolvida termina em
+  `success` sem dado. Minerador (`tests/minerador-*.test.mts`) sem falha
+  nova, só as 27 antigas. `test:arquiteto` só com as 2 antigas.
+  `test:arquiteto:servidor` passou inteiro, e `test:editorial` só com as 4
+  antigas. TypeScript sem erro. Lint sem apontamento novo: o
+  `minerador-workspace.tsx` já tinha 18.
+- **Revisão do corretor (mesmo dia):**
+  - **Só com o volume de fato vazio.** Uma linha com volume importado
+    (planilha/legado, ex.: `volume_search = 500`, `kgr_score = 0.024`) sem
+    medição Google Ads, que recebia a resposta sem média, passava na aprovação
+    carregando o número e o KGR antigos ao Arquiteto. Agora
+    `deriveProcessorRevalidation` só preenche `emptyResponse` sem número
+    anterior; o outro caso vai para `emptyResponseOverUnconfirmedValue`. O
+    Volume continua exigido, o motivo da recusa acrescenta "O Google Ads
+    respondeu sem média oficial e o volume importado desta keyword não foi
+    confirmado." e o painel diz "Volume importado não confirmado pelo Google
+    Ads". As keywords do diagnóstico (volume `null`) não mudam: continuam
+    aprováveis.
+  - **Notificação do lote:** conta as sem média como processadas ("X de Y
+    keywords processadas no Google Ads; Z sem média oficial…"), a partir do
+    lote relido, e deixou de dizer "inelegíveis para produção". Antes saía
+    "0 de 1 registradas" porque o `persistedCount` da rota não soma a keyword
+    não devolvida.
+  - **Porquê da resposta vazia:** `volume_eligibility.emptyResponseKind` (e o
+    mesmo campo em `lastEmptyResponse`) grava `returned_without_average` ou
+    `not_returned`, para o diagnóstico separar ausência real de defeito de
+    casamento. É proveniência na assinatura: não rebaixa a aprovada.
+  - **Célula alinhada à aprovação:** o `unavailable` só vira "0" apagado pela
+    mesma leitura (`readGoogleAdsEmptyVolumeResponse`); outro provider segue "—".
+  - **`contentHash` é identidade, não checksum:** registrado no comentário de
+    `approvedPackageHash` e no §61. Ninguém deve recalcular o SHA-256 para
+    conferir o pacote.
+  - **Remedir não derruba a aprovada** só quando número, CPC, lances e
+    concorrência se repetem. Como os lances do Google Ads variam, a aprovada
+    ainda pode ir para Em revisão numa remedição de rotina; decisão do dono.
+  - **Testes:** `tests/minerador-volume-sem-media.test.mts` passou a 30 casos
+    (6 novos, entre eles o do volume importado). Minerador 1161 testes, 27
+    falhas, as mesmas 27 antigas por nome. `test:arquiteto` 2 antigas,
+    `test:arquiteto:servidor` 52/52, `test:editorial` 4 antigas. TypeScript
+    sem erro, `git diff --check` limpo, lint com os mesmos 18 apontamentos do
+    `minerador-workspace.tsx`, guarda visual sem regressão nos arquivos desta
+    tarefa.
+- **Validação na tela (usuário), pendente:** remedir as publicadas do
+  diagnóstico (ex.: "agência de marketing para cosméticos"), ver "0" apagado e
+  "Medido · sem média oficial", aprovar e enviar ao Arquiteto. Remedir uma
+  aprovada e conferir que ela não vai para Em revisão.
+
 ## Vínculo: os mesmos selects da Revisão no rodapé, coluna com as três escolhas e sem barra horizontal à toa — 2026-09-24
 
 ```text

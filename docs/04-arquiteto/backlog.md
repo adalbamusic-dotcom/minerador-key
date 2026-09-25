@@ -1,3 +1,44 @@
+## Correção da revalidação dos publicados — 2026-09-25
+
+Estado em [estado-atual.md](estado-atual.md). Validado manualmente: NÃO.
+
+- [x] Slug do Silo publicado = caminho da URL declarada; território nasce `protected` com `publishedSlug`/`publishedCanonical`; nenhum slug proposto.
+- [x] Cabeça publicada casa com território existente pelo endereço ou pela primária (sem Silo duplicado).
+- [x] Artigo publicado entra pelo endereço de Silo publicado que já é território, sem a cabeça no lote.
+- [x] Conflito do endereço chega à linha com o motivo real.
+- [x] Publicada em território, sem Silo na URL: membership vigente preservada no Confirmar.
+- [x] Revisão humana com publicada não principal ou duas publicadas: conflito dito no candidato.
+- [x] IA dos silos: os seis tetos por dúvida conferidos no cliente pela mesma régua da rota.
+- [x] Teste estrutural do handler de IA delimitado por âncora.
+- [x] Suítes por nome contra a base, sem falha nova: Minerador por glob 1134/1161 (27 da base), `test:arquiteto` 2390/2392 (2 da base), `test:arquiteto:servidor` 52/52, `test:arquiteto:lentes` 31/31, `test:arquiteto-backup-roundtrip` 8/8, `test:editorial` 170/174 (4 da base). `tsc --noEmit` limpo.
+- [ ] **Homologar (usuário)** com o lote do dono: depois de Processar arquitetura, cada Silo publicado aparece com o endereço dele (`/cabelos`, não `/cuidados-com-cabelos`) e marcado publicado; os artigos novos das livres ganham slug sob essa raiz.
+- [ ] **Território criado antes desta correção com o slug do texto.** É reaproveitado pela primária, mas continua `unpublished` e com o slug do texto. Corrigir exige decisão humana (adotar a identidade publicada nele) — não é reescrito em silêncio.
+- [ ] Silo publicado declarado sem URL absoluta: o slug ainda sai do texto (o motivo diz). Declarar a URL no Minerador resolve.
+- [ ] Validar 360/768/1024/1440 px e temas: só textos de motivo e de aviso mudaram.
+
+## Publicados revalidados (partes 1 a 3) — 2026-09-25
+
+Estado em [estado-atual.md](estado-atual.md). Homologação manual pendente, do usuário.
+
+- [ ] **Homologar com o lote do dono** (4 Silos publicados, 21 artigos publicados, ~130 livres): Processar arquitetura, conferir que cada artigo publicado aparece no Silo da URL dele ("Membro declarado pelo site"), que o de fora aparece em "Sem silo" com o motivo e que nenhum Silo novo nasce de publicada; Confirmar e reler; na aba Artigos, conferir que a publicada é a principal do próprio artigo e que as livres que a repetem entraram nele.
+- [x] **Território do Silo publicado com a proteção do site.** Feito na correção de 2026-09-25: slug = caminho da URL declarada e `publishedSiloCandidateDraft` (`protected`, `publishedSlug`/`publishedCanonical`). A rota de criação aceita (mesmo schema da promoção de estrutura publicada).
+- [x] **Silo publicado que só existe no acervo.** Feito em 2026-09-25: `territorySilos` em `resolvePublishedSiloMembership` (território `protected` com `publishedCanonical`). Território publicado antigo sem `publishedCanonical` continua sem atrair pela URL.
+- [~] **Publicada posta por afinidade antes desta mudança.** Sem Silo na URL, a membership vigente agora é preservada ("já estava", sem falha). Com Silo na URL, o Confirmar a move para o Silo que o site declara. Falta a jornada humana explícita de "mover para o Silo da URL" fora do Confirmar.
+- [ ] **Landing e página de serviço publicadas** sob a URL de um Silo: hoje não entram pela URL (só `article`). Decidir se entram como membros.
+
+## Blocos em sequência e leitura paginada — 2026-09-25
+
+- [x] Processar artigos / Validar SERP em blocos de até 20, plano de todos antes, confirmação única com a soma, autorização por bloco e falha de bloco sem parar os outros (`lib/arquiteto/serp-blocks.ts`).
+- [x] SERP dos silos: todas as dúvidas em blocos de 10 (fim do `slice(0, 10)` silencioso).
+- [x] IA dos silos: todas as dúvidas prontas em blocos de 6; `knownKeywordIds` só do escopo aberto; tetos por dúvida da rota subiram para 520/500/500.
+- [x] Leitura de versões paginada em `ArtifactVersionRepository.list` (as acima de 1000 voltam).
+- [x] Andamento "bloco N de M · faltam R" nos modos Artigos e Silos.
+- [x] `tests/arquiteto-serp-em-blocos.test.mts` 14/14 com fixtures (4 Silos, 21 publicados, 130 livres).
+- [ ] **Homologar (usuário):** importar as ~200 keywords, rodar Processar artigos e conferir: uma confirmação com a soma, "bloco N de M · faltam R" avançando, pareceres de todos os blocos relidos do acervo e o total pago igual ao confirmado. Repetir a SERP e a IA dos silos com mais de 10 e de 6 dúvidas.
+- [ ] Botão "Parar depois do bloco atual" nas três ações (o helper já suporta `shouldStop`; a mesa ainda não oferece).
+- [ ] Candidatas a Silo acima de 20 × número de artigos ficam para a próxima coleta (a mesa nomeia). Se virar caso real, a rota `/api/arquiteto/serp` precisa aceitar bloco só de candidatas.
+- [ ] Dúvida da IA dos silos com mais de 500 keywords no escopo não é enviada (a mesa nomeia). Sem caso real hoje.
+
 ## Assunto declarado: fase B da F2 — 2026-09-24
 
 SDD: [Assunto, o tronco editorial declarado](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), F2.1 a F2.6 · [ADR-022](../00-produto/decisoes/ADR-022-assunto-tronco-editorial.md). Estado em [estado-atual.md](estado-atual.md). Validado manualmente: NÃO.
@@ -103,7 +144,7 @@ Estado em [estado-atual.md](estado-atual.md). Homologação manual pendente, do 
 - [ ] **Homologar com o próximo lote**: keywords marcadas Silo/Artigo, posto livre/travado e publicadas declaradas. Conferir na mesa a linha `Vínculo:` de cada keyword, as cabeças de Silo e o que foi para "Sem silo".
 - [ ] **Decidir o padrão do posto de publicada sem posto explícito.** O Minerador responde `locked` (travado ao slug); `adaptKeywordIdentityContext.primaryKeywordPolicy`, que a fase Artigos consome, responde `unknown`. Só divergem quando o posto não foi marcado. Não unifiquei porque mudaria o comportamento da fase Artigos, e o AGENTS.md §11 pede "desconhecido/conflito" nesse caso — a decisão é do produto.
 - [ ] **Eleger a primária do Silo potencial pela SERP na UI.** A coleta e a leitura existem (`keyword-serp`, `readPublishedGroupFromSerp`); `electPrimaryFromSerp` ainda não tem chamador. Hoje a primária de Silo potencial fica provisória até isso.
-- [ ] **`siloPath`** do item 7 — pai do artigo publicado.
+- [x] **`siloPath`** do item 7 — pai do artigo publicado. Resolvido em 2026-09-25 pela URL canônica (`resolvePublishedSiloMembership`, ver "Publicados revalidados"), sem ler `siloPath`.
 - [ ] `validateTerritorialSerp(dentroDoProcessamento)`: o parâmetro ficou sem quem passe `true`. Remover quando a etapa de SERP for redesenhada.
 - [ ] Limiares de lente/afinidade/substituição medidos em só duas keywords reais (divergência 0,061 e 0,174 contra limiar 0,5). Recalibrar com o acervo.
 
@@ -123,7 +164,7 @@ Ordem **revisada** no adendo de 2026-09-19, depois da auditoria:
 - [ ] **4.** Propagação automática — **depende** de resolver a colisão com `articleEditorialDiff`, que hoje recusaria mudança só de medição como no-op.
 - [ ] **9.** Migrar o slug para `identity-slug` (2026-09-20). A diretriz da marca passou a separar endereço (`identity-published`/`identity-new`) de identidade SEO (`identity-slug`, `#12A1E0`). `modules/arquiteto/arquiteto-workspace.tsx` pinta o slug com os papéis antigos, e `keyword-dna-readonly-panel`/`article-dna-readonly-panel` mapeiam os dois. Ver `sistema-visual.md` §5.0.1.
 - [x] **8.** Consumir `keyword_page_type` (2026-09-20). **Feito em 2026-09-23**: lido por `resolveKeywordVinculo` a partir do pacote aprovado — `analiseSemantica` já viaja integral, então não faltou transporte. A lógica da aba Silos usa o tipo para separar cabeça de Silo de artigo.
-- [~] **7.** Ler `site_origin.siteRole`/`siloPath` em `adaptKeywordIdentityContext` (2026-09-20). **`siteRole` feito em 2026-09-23**, inclusive `site_origin` gravado como texto JSON. **`siloPath` ainda não**: `resolveKeywordVinculo` não o expõe, e é ele que diria sob qual Silo um artigo publicado está.
+- [~] **7.** Ler `site_origin.siteRole`/`siloPath` em `adaptKeywordIdentityContext` (2026-09-20). **`siteRole` feito em 2026-09-23**, inclusive `site_origin` gravado como texto JSON. **`siloPath` ainda não**: `resolveKeywordVinculo` não o expõe, e é ele que diria sob qual Silo um artigo publicado está. **Resolvido de outro jeito em 2026-09-25**: o Silo do artigo publicado sai do prefixo da URL canônica que o Vínculo já expõe.
 - [ ] **6.** Trocar `resolveKeywordDnaSignals` por `keywordDnaFromPackage` de `lib/minerador/keyword-dna.ts` (2026-09-19). O Minerador já entrega os treze campos normalizados e um valor por eixo com fonte declarada; `semPlaceholder`, `listaDeTexto` e `intentIsKnown` deixam de precisar existir aqui. Equivalência garantida por `tests/minerador-keyword-dna-fechado.test.mts`.
 - [ ] **5.** Estreitar `ArticleKeywordReference`. Escopo maior do que o parecer dizia: `strategicContribution`, `purpose`, `contribution` e `purposeRationale` são template por `role`; `overlapRisk` é literal; `requiredTopics`/`excludedTopics` são sempre vazios.
 - [ ] **Em aberto:** artigo publicado recebe marcador de insumo atualizado em vez de reescrita automática.

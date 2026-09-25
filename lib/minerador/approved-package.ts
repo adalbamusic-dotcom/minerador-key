@@ -31,7 +31,21 @@ export type ApprovalReadiness = {
   ok: boolean;
   missing: ApprovalRequirement[];
   reason: string | null;
+  /**
+   * Observações sobre como um requisito foi cumprido. Aditivo: só aparece
+   * quando há o que dizer, para o objeto de sempre não mudar.
+   */
+  notes?: string[];
 };
+
+/** Nota quando o Volume vale pela resposta do Google Ads sem média. */
+export const VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE = "Volume processado, sem média oficial" as const;
+
+/**
+ * Motivo extra quando o Google Ads respondeu sem média para uma linha que
+ * carrega volume importado/legado: o número não foi confirmado.
+ */
+export const VOLUME_IMPORTED_NOT_CONFIRMED_REASON = "O Google Ads respondeu sem média oficial e o volume importado desta keyword não foi confirmado." as const;
 
 const REQUIREMENT_LABELS: Record<ApprovalRequirement, string> = {
   logic: "Lógica",
@@ -84,18 +98,34 @@ export function resolveApprovalReadiness(input: {
     return { ok: false, missing, reason: SUBJECT_APPROVAL_REASON };
   }
 
-  if (!processor.volume.validated) missing.push("volume");
+  /*
+   * Volume é PROCESSO EXECUTADO (decisão do dono, 2026-09-25): medição Google
+   * Ads com número >= 0, ou a resposta do Google Ads sem média gravada
+   * (`volume_eligibility` `unavailable`, `provider: "google_ads"`, com data).
+   * O volume continua `null` (ADR-020) e o KGR não é calculável, então a
+   * trava do KGR abaixo não o exige.
+   *
+   * Só vale com o volume de fato vazio: `emptyResponse` já é `null` quando a
+   * linha carrega um número anterior não validado (planilha, legado). Esse
+   * número não foi confirmado e não pode ir ao Arquiteto como se fosse medido
+   * — o Volume continua exigido, com o motivo dito por extenso.
+   */
+  const volumeWithoutAverage = !processor.volume.validated && Boolean(processor.volume.emptyResponse);
+  const importedVolumeNotConfirmed = !processor.volume.validated && Boolean(processor.volume.emptyResponseOverUnconfirmedValue);
+  if (!processor.volume.validated && !volumeWithoutAverage) missing.push("volume");
   if (!processor.results.validated) missing.push("results");
   // O KGR só é obrigação quando as duas medições o tornam calculável.
   if (processor.kgr.ready && readKgrApplicability(semantic) === "pending") missing.push("kgr");
 
-  if (missing.length === 0) return { ok: true, missing, reason: null };
+  const notes = volumeWithoutAverage ? { notes: [VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE] } : {};
+  if (missing.length === 0) return { ok: true, missing, reason: null, ...notes };
   const labels = missing.map(approvalRequirementLabel);
   const lista = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} e ${labels[labels.length - 1]}`;
   return {
     ok: false,
     missing,
-    reason: `Aprovar exige ${lista}. O Arquiteto recebe o pacote fechado: nada pode chegar lá pela metade.`,
+    reason: `Aprovar exige ${lista}. O Arquiteto recebe o pacote fechado: nada pode chegar lá pela metade.${importedVolumeNotConfirmed ? ` ${VOLUME_IMPORTED_NOT_CONFIRMED_REASON}` : ""}`,
+    ...notes,
   };
 }
 
@@ -346,6 +376,16 @@ export const APPROVAL_SIGNATURE_SCHEME = "fnv1a-v3" as const;
 const V2_SIGNATURE_SCHEME = "fnv1a-v2";
 const LEGACY_SIGNATURE_SCHEME = "fnv1a";
 
+/**
+ * EXCEÇÃO CONHECIDA (2026-09-25): `contentHash` é a IDENTIDADE da aprovação,
+ * não um checksum a recalcular. `carryApprovalAcrossRemeasurement` mantém o
+ * `contentHash` antigo quando uma remedição só muda proveniência (data,
+ * request id, versão da API): o `analise_semantica` muda e o hash, de
+ * propósito, não. Nenhum consumidor deve recalcular este SHA-256 para
+ * conferir o pacote — a divergência se decide pela `signature`
+ * (`approvedPackageDiverged`). Uma verificação por hash rebaixaria em massa
+ * toda aprovada remedida.
+ */
 export async function approvedPackageHash(input: ApprovedPackageInput): Promise<string> {
   return contentHash(signatureContent(input));
 }
@@ -405,6 +445,82 @@ export async function resignApprovalRecord(input: ApprovedPackageInput): Promise
         contentHash: await approvedPackageHash(input),
         signature: approvedPackageSignature(input),
       },
+    },
+  };
+}
+
+/*
+ * REMEDIR SEM MUDANÇA REAL NÃO REBAIXA A APROVADA (2026-09-25).
+ *
+ * O Volume é medido de novo sempre que o humano pede (Google Ads não tem
+ * custo). A assinatura v3 cobre `volume_measurement` e `volume_eligibility`,
+ * e com eles a DATA e o request id de cada resposta: uma remedição que
+ * devolve exatamente o mesmo mudaria a assinatura e mandaria a aprovada para
+ * Em revisão sem que nada tivesse mudado.
+ *
+ * Estes são os campos que dizem QUANDO, POR QUAL pedido e em que versão da
+ * API se mediu, nunca O QUE se mediu. Número, CPC, concorrência, targeting e
+ * elegibilidade seguem assinados: mudou algum, é mudança real, e a aprovada
+ * vai para revisão.
+ */
+const MEASUREMENT_PROVENANCE_PATHS: readonly (readonly [string, string])[] = [
+  ["volume_measurement", "measuredAt"],
+  ["volume_measurement", "googleAdsRequestId"],
+  ["volume_measurement", "providerVersion"],
+  ["volume_measurement", "previousVolume"],
+  ["volume_measurement", "previousResultsAllintitle"],
+  ["volume_measurement", "previousKgrScore"],
+  ["volume_eligibility", "measuredAt"],
+  ["volume_eligibility", "googleAdsRequestId"],
+  ["volume_eligibility", "providerVersion"],
+  ["volume_eligibility", "lastEmptyResponse"],
+  // Diagnóstico do porquê da resposta vazia (2026-09-25): não muda o que se mediu.
+  ["volume_eligibility", "emptyResponseKind"],
+];
+
+function withoutMeasurementProvenance(content: Record<string, unknown>): Record<string, unknown> {
+  const semantic = { ...(content.analiseSemantica as Semantic) };
+  for (const [parent, key] of MEASUREMENT_PROVENANCE_PATHS) {
+    const child = asRecord(semantic[parent]);
+    if (!child || !(key in child)) continue;
+    const next = { ...child };
+    delete next[key];
+    semantic[parent] = next;
+  }
+  return { ...content, analiseSemantica: semantic };
+}
+
+/**
+ * Carrega a aprovação por uma remedição que não mudou nada de real.
+ *
+ * Devolve a semântica `after` com o registro re-assinado — mesma versão,
+ * autor, instante e `contentHash` (o pacote é o mesmo, então a identidade
+ * que o Arquiteto guardou continua valendo) — quando:
+ *
+ *   1. há registro de aprovação;
+ *   2. o registro batia com a linha ANTES da remedição (no esquema que ele
+ *      declara) — uma keyword já em revisão continua em revisão;
+ *   3. antes e depois só diferem em proveniência de medição.
+ *
+ * `null` quando não há o que carregar: sem aprovação, já divergente, mudança
+ * real, ou a assinatura atual já bate.
+ */
+export function carryApprovalAcrossRemeasurement(before: ApprovedPackageInput, after: ApprovedPackageInput): Semantic | null {
+  const record = readApprovalRecord(before.semantic);
+  if (!record || !recordMatches(record, before)) return null;
+  if (recordMatches(record, after)) return null;
+  const same = canonicalJson(withoutMeasurementProvenance(signatureContent(before)))
+    === canonicalJson(withoutMeasurementProvenance(signatureContent(after)));
+  if (!same) return null;
+  return {
+    ...(after.semantic || {}),
+    aprovacao: {
+      ...(asRecord(after.semantic?.aprovacao) || {}),
+      contentHash: record.contentHash,
+      signature: approvedPackageSignature(after),
+      approvedAt: record.approvedAt,
+      approvedBy: record.approvedBy,
+      version: record.version,
     },
   };
 }

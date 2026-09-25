@@ -5,7 +5,7 @@ import { createGoogleAdsCanonicalClient, defaultGoogleAdsCanonicalTargeting, Goo
 import { generateGoogleAdsHistoricalMetrics } from "@/lib/google/ads/historical-metrics";
 import { createGoogleAdsKeywordAccount } from "@/lib/google/ads/account";
 import type { GoogleAdsHistoricalMetric } from "@/lib/google/ads/contracts";
-import { GoogleAdsVolumeRequestSchema, buildGoogleAdsUnavailableVolumePatch, buildGoogleAdsVolumeMetricPatch, matchGoogleAdsVolumeMetrics, splitGoogleAdsVolumeKeywordIds, type GoogleAdsVolumeKeyword } from "@/lib/minerador/google-ads-volume";
+import { GoogleAdsVolumeRequestSchema, buildGoogleAdsEmptyVolumePatch, buildGoogleAdsUnavailableVolumePatch, buildGoogleAdsVolumeMetricPatch, matchGoogleAdsVolumeMetrics, shouldMarkVolumeMeasurementFailed, splitGoogleAdsVolumeKeywordIds, withApprovalCarriedAcrossRemeasurement, type GoogleAdsVolumeKeyword } from "@/lib/minerador/google-ads-volume";
 import { setVolumeEligibility, volumeEligibilityFromOfficialMeasurement } from "@/lib/minerador/volume-eligibility";
 import { isTenantId } from "@/lib/tenant-routing";
 import { requireTenantPermission } from "@/lib/server/tenant-context";
@@ -53,11 +53,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     canonicalContext = await resolveGoogleAdsCanonicalContext({ actorUserId: profile.userId, agencyId: context.agencyId, brandId: context.brandId, operation: "metrics" });
     const { data: keywordRows, error: keywordError } = input.keywordIds.length ? await profile.supabase
       .from("minerador_keywords")
-      .select("id,brand_id,keyword,status,volume_search,results_allintitle,kgr_score,volume_source,analise_semantica")
+      .select("id,brand_id,keyword,status,intent,volume_search,results_allintitle,kgr_score,volume_source,analise_semantica")
       .eq("brand_id", context.brandId)
       .is("deleted_at", null)
       .in("id", input.keywordIds) : { data: [], error: null };
     if (keywordError) throw keywordError;
+    // A intenção entra na assinatura do pacote aprovado: sem ela, a remedição
+    // não saberia se a aprovada continua batendo.
+    const intentById = new Map((keywordRows || []).map(row => [String(row.id), typeof row.intent === "string" ? row.intent : null]));
     const keywords = (keywordRows || []).map(row => ({ id: String(row.id), brandId: String(row.brand_id || ""), keyword: String(row.keyword || ""), status: String(row.status || ""), volume_search: typeof row.volume_search === "number" ? row.volume_search : null, results_allintitle: typeof row.results_allintitle === "number" ? row.results_allintitle : null, kgr_score: typeof row.kgr_score === "number" ? row.kgr_score : null, volume_source: typeof row.volume_source === "string" ? row.volume_source : null, analise_semantica: row.analise_semantica && typeof row.analise_semantica === "object" ? row.analise_semantica as Record<string, unknown> : null })) as GoogleAdsVolumeKeyword[];
     const { data: candidateRows, error: candidateError } = input.candidateIds.length ? await profile.supabase.from("minerador_discovery_candidates").select("id,brand_id,keyword_original").in("id", input.candidateIds) : { data: [], error: null };
     if (candidateError) throw candidateError;
@@ -82,6 +85,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const account = createGoogleAdsKeywordAccount({ customerId: canonicalContext.customerId, loginCustomerId: canonicalContext.managerCustomerId });
     const targeting = targetingToProviderInput(canonicalContext.targeting || defaultGoogleAdsCanonicalTargeting());
     const allMetrics: Array<{ metric: GoogleAdsHistoricalMetric; requestId: string | null }> = [];
+    const requestIdByKeywordId = new Map<string, string | null>();
     for (const batchIds of splitGoogleAdsVolumeKeywordIds(requestedKeywords.map(keyword => keyword.id))) {
       const batch = requestedKeywords.filter(keyword => batchIds.includes(keyword.id));
       internalStage = "provider_request";
@@ -92,10 +96,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         includeAverageCpc: true,
       }, account);
       if (result.requestId) googleAdsRequestIds.push(result.requestId);
+      for (const id of batchIds) requestIdByKeywordId.set(id, result.requestId || null);
       providerResponseReceived = true;
       allMetrics.push(...result.metrics.map(metric => ({ metric, requestId: result.requestId })));
     }
     internalStage = "provider_response";
+    const responseMeasuredAt = new Date().toISOString();
     const matchedItems = allMetrics.flatMap(item => matchGoogleAdsVolumeMetrics(requestedKeywords, [item.metric], input.operationRequestId, item.requestId).matches);
     const matchedIds = new Set(matchedItems.map(item => item.keywordId));
     const unmatchedKeywordIds = requestedKeywords.filter(keyword => !matchedIds.has(keyword.id)).map(keyword => keyword.id);
@@ -126,9 +132,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         projection.push({ keywordId: measurement.keywordId, volumeSearch: measurement.averageMonthlySearches, kgrScore: null, eligibilityStatus: volumeEligibilityFromOfficialMeasurement(measurement.averageMonthlySearches), measuredAt: measurement.measuredAt });
         continue;
       }
-      const patch = measurement.averageMonthlySearches === null
+      // Resposta sem média é processo executado: grava o registro sem tocar no
+      // número. Remedir sem mudança real não rebaixa a aprovada.
+      const rawPatch = measurement.averageMonthlySearches === null
         ? buildGoogleAdsUnavailableVolumePatch(keyword, measurement)
         : buildGoogleAdsVolumeMetricPatch(keyword, measurement, { requireCurrentResultsMeasurement: true });
+      const patch = rawPatch ? withApprovalCarriedAcrossRemeasurement({ ...keyword, intent: intentById.get(keyword.id) ?? null }, rawPatch) : null;
       internalStage = "persist_measurements";
       const { data: persistedMeasurement, error: measurementError } = await profile.supabase
         .from("minerador_keyword_metric_measurements")
@@ -154,6 +163,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       persistedCount += 1;
       projection.push({ keywordId: measurement.keywordId, volumeSearch: measurement.averageMonthlySearches, kgrScore: measurement.averageMonthlySearches === null ? keyword.kgr_score : patch && "kgr_score" in patch ? patch.kgr_score ?? null : null, eligibilityStatus: keyword.status === "publicado" ? null : volumeEligibilityFromOfficialMeasurement(measurement.averageMonthlySearches), measuredAt: measurement.measuredAt });
     }
+    // O Google Ads respondeu ao lote e não devolveu estas keywords: é resposta
+    // sem média, não falha. O registro vai para a linha, para a tela mostrar
+    // "processado, sem dado" depois de recarregar e a aprovação valer.
+    for (const keywordId of unmatchedKeywordIds) {
+      const keyword = keywordById.get(keywordId);
+      if (!keyword || candidateIds.has(keywordId)) continue;
+      const rawPatch = buildGoogleAdsEmptyVolumePatch(keyword, { measuredAt: responseMeasuredAt, providerVersion: "v25", googleAdsRequestId: requestIdByKeywordId.get(keywordId) ?? null, kind: "not_returned" });
+      const patch = withApprovalCarriedAcrossRemeasurement({ ...keyword, intent: intentById.get(keyword.id) ?? null }, rawPatch);
+      internalStage = "project_keywords";
+      const { error: emptyProjectionError } = await profile.supabase.from("minerador_keywords").update(patch).eq("id", keywordId).eq("brand_id", context.brandId).is("deleted_at", null);
+      if (emptyProjectionError) throw emptyProjectionError;
+      persistenceWriteCount += 1;
+      persistedKeywordIds.add(keywordId);
+      projection.push({ keywordId, volumeSearch: null, kgrScore: keyword.kgr_score, eligibilityStatus: keyword.status === "publicado" ? null : "unavailable", measuredAt: responseMeasuredAt });
+    }
     internalStage = "completed";
     const partial = unmatchedKeywordIds.length > 0 || persistedCount !== requestedCount;
     return NextResponse.json({ success: true, operationRequestId, code: partial ? "GOOGLE_ADS_PARTIAL_RESULTS" : null, stage: partial ? "response_normalization" : null, message: partial ? "Algumas keywords não retornaram dados de volume." : "Métricas Google Ads persistidas e refletidas na tabela.", requestedCount, returnedCount, persistedCount, unmatchedKeywordIds, batchCount: splitGoogleAdsVolumeKeywordIds(requestedKeywords.map(keyword => keyword.id)).length, source: "google_ads", measuredAt: projection[0]?.measuredAt || null, projections: projection, diagnostic: { apiRequestStarted, providerResponseReceived, failureType: "PROVIDER_SUCCESS", internalStage, endpoint: GOOGLE_ADS_HISTORICAL_METRICS_ENDPOINT, googleAdsRequestIds, providerReturnedCount: allMetrics.length, providerReturnedKeywords, providerReturnedKeywordsTruncated: allMetrics.length > providerReturnedKeywords.length } });
@@ -171,7 +195,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         : buildGoogleAdsMetricsFailure(error, executionState, customerDiagnostic, { apiVersion: canonicalContext?.config.apiVersion || "v25", requestedKeywordCount: requestedCount });
     if (apiRequestStarted && profile && authorizedBrandId && operationRequestId) {
       const googleAdsRequestId = error instanceof GoogleAdsError ? error.requestId || googleAdsRequestIds.at(-1) || null : googleAdsRequestIds.at(-1) || null;
-      await Promise.all(loadedKeywords.filter(keyword => keyword.status !== "publicado" && !persistedKeywordIds.has(keyword.id)).map(async keyword => {
+      // Resposta anterior (número ou "sem média") não é apagada por uma falha nova.
+      await Promise.all(loadedKeywords.filter(keyword => shouldMarkVolumeMeasurementFailed(keyword) && !persistedKeywordIds.has(keyword.id)).map(async keyword => {
         try {
           await profile!.supabase.from("minerador_keywords").update({
             analise_semantica: setVolumeEligibility(keyword.analise_semantica, {

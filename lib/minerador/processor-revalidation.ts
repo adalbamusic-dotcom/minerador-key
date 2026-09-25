@@ -1,6 +1,7 @@
 import { isValidDataForSeoAllintitleMeasurement } from "./dataforseo-competition.ts";
 import { calculateKgrFromMetrics } from "./kgr-applicability.ts";
 import { isValidGoogleAdsDemandMeasurement } from "./google-ads-demand.ts";
+import { readGoogleAdsEmptyVolumeResponse, type GoogleAdsEmptyVolumeResponse } from "./volume-eligibility.ts";
 
 export type ProcessorMetricValidationState = "pending" | "imported" | "validated";
 export type ProcessorKgrSource = "none" | "previous" | "imported" | "mixed" | "processor";
@@ -29,6 +30,20 @@ export type ProcessorMetricValidation = {
   importedValue: number | null;
   importedMeasuredAt: string | null;
   importedEvidence: ProcessorImportedEvidence;
+  /**
+   * Só no Volume: o Google Ads respondeu sem média e isso ficou gravado. É
+   * processo executado (decisão do dono, 2026-09-25), com o valor ainda
+   * `null`. `null` quando há número validado, nenhum registro ou um número
+   * anterior (importado/legado) que a resposta sem média não confirmou.
+   */
+  emptyResponse?: GoogleAdsEmptyVolumeResponse | null;
+  /**
+   * Só no Volume: o Google Ads respondeu sem média, mas a linha ainda carrega
+   * um número anterior NÃO validado (planilha, legado, Descobrir). A resposta
+   * não confirma esse número, e ele não pode seguir como se fosse medido: o
+   * Volume não vale como processado e o pacote não leva o número adiante.
+   */
+  emptyResponseOverUnconfirmedValue?: GoogleAdsEmptyVolumeResponse | null;
 };
 
 export type ProcessorRevalidation = {
@@ -192,6 +207,10 @@ export function deriveProcessorRevalidation(input: {
   const resultsValue = resultsValidated ? resultsMeasuredValue : previousResults;
   const volumeImportedValue = volumeValidated ? null : previousVolume;
   const resultsImportedValue = resultsValidated ? null : previousResults;
+  // "Processado, sem dado" só quando o volume está de fato vazio. Número
+  // anterior não validado + resposta sem média não é processo concluído: o
+  // número continua sem confirmação (revisão 2026-09-25).
+  const googleAdsEmptyResponse = volumeValidated ? null : readGoogleAdsEmptyVolumeResponse(semantic);
   const volume: ProcessorMetricValidation = {
     state: metricState({ validated: volumeValidated, importedPresent: imported.present }),
     validated: volumeValidated,
@@ -202,6 +221,8 @@ export function deriveProcessorRevalidation(input: {
     importedValue: volumeImportedValue,
     importedMeasuredAt: imported.volumeMeasuredAt,
     importedEvidence: imported,
+    emptyResponse: volumeValidated || previousVolume !== null ? null : googleAdsEmptyResponse,
+    emptyResponseOverUnconfirmedValue: volumeValidated || previousVolume === null ? null : googleAdsEmptyResponse,
   };
   const results: ProcessorMetricValidation = {
     state: metricState({ validated: resultsValidated, importedPresent: imported.present }),
@@ -249,6 +270,16 @@ export function processorMetricStateLabel(state: ProcessorMetricValidationState,
   if (state === "validated") return "Validado no Processador";
   if (state === "imported") return "Anterior/importado · aguardando revalidação";
   return hasPreviousValue ? "Dado anterior · aguardando medição no Processador" : "Aguardando medição no Processador";
+}
+
+/** Número importado que o Google Ads, ao ser consultado, não confirmou. */
+export const VOLUME_IMPORTED_NOT_CONFIRMED_LABEL = "Volume importado não confirmado pelo Google Ads" as const;
+
+/** Rótulo do Volume no Perfil: a resposta sem média é medição, não pendência. */
+export function processorVolumeStateLabel(volume: Pick<ProcessorMetricValidation, "state" | "validated" | "value" | "emptyResponse" | "emptyResponseOverUnconfirmedValue">): string {
+  if (!volume.validated && volume.emptyResponse) return "Medido · sem média oficial";
+  if (!volume.validated && volume.emptyResponseOverUnconfirmedValue) return VOLUME_IMPORTED_NOT_CONFIRMED_LABEL;
+  return processorMetricStateLabel(volume.state, volume.value !== null);
 }
 
 export function processorKgrStateLabel(input: Pick<ProcessorRevalidation["kgr"], "ready" | "source">): string {

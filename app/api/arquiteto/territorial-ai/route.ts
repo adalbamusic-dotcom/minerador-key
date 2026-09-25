@@ -6,6 +6,7 @@ import {
   type TerritorialAiProposal,
 } from "@/lib/arquiteto/territorial-ai";
 import { buildTerritorialAiBase, TerritorialAiSerpRefSchema } from "@/lib/arquiteto/territorial-ai-record";
+import { TERRITORIAL_AI_QUESTION_LIMITS } from "@/lib/arquiteto/serp-blocks";
 import { readbackTerritorialAiProposal, saveTerritorialAiProposal } from "@/lib/server/arquiteto-territorial-ai-store";
 import { assertEditorialPermission } from "@/lib/server/editorial-authorization";
 import { requireCanonicalSessionProfile } from "@/lib/server/authz";
@@ -30,17 +31,26 @@ const ContextSchema = z.object({
   questionId: z.string().min(1),
   kind: z.string().min(1),
   reason: z.string().min(1),
+  /*
+   * TETOS POR DÚVIDA (2026-09-25). Um Silo real do dono passa de 74 keywords
+   * associadas e de 40 hipóteses da lógica: com os tetos antigos (80/40/200)
+   * o pedido inteiro voltava 400. O cliente agora manda só as keywords do
+   * escopo aberto da dúvida e anda em blocos de 6 dúvidas; o teto de keywords
+   * é o mesmo `TERRITORIAL_AI_KEYWORD_LIMIT` que ele usa para dizer, em vez
+   * de cortar, qual dúvida não coube. Todos os tetos por lista vêm de
+   * `TERRITORIAL_AI_QUESTION_LIMITS`, a mesma régua do cliente.
+   */
   /** Fatos da arquitetura observada — entram no prompt e no baseHash. */
-  architectureFacts: z.array(z.string()).max(80),
+  architectureFacts: z.array(z.string()).max(TERRITORIAL_AI_QUESTION_LIMITS.architectureFacts),
   /** Hipótese determinística vigente. */
-  logicFacts: z.array(z.string()).max(40),
+  logicFacts: z.array(z.string()).max(TERRITORIAL_AI_QUESTION_LIMITS.logicFacts),
   /** Refs que a proposta pode citar; qualquer outra é recusada. */
-  knownTargetRefs: z.array(z.string().min(1)).max(80),
-  knownKeywordIds: z.array(z.string().min(1)).max(200),
+  knownTargetRefs: z.array(z.string().min(1)).max(TERRITORIAL_AI_QUESTION_LIMITS.knownTargetRefs),
+  knownKeywordIds: z.array(z.string().min(1)).max(TERRITORIAL_AI_QUESTION_LIMITS.knownKeywordIds),
   /** Identidade publicada protegida: contexto, nunca alvo de alteração. */
-  publishedIdentity: z.array(z.string()).max(20).default([]),
+  publishedIdentity: z.array(z.string()).max(TERRITORIAL_AI_QUESTION_LIMITS.publishedIdentity).default([]),
   serpRef: TerritorialAiSerpRefSchema.nullable().default(null),
-  serpFacts: z.array(z.string()).max(30).default([]),
+  serpFacts: z.array(z.string()).max(TERRITORIAL_AI_QUESTION_LIMITS.serpFacts).default([]),
 });
 
 const RequestSchema = z.object({

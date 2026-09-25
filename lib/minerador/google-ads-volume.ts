@@ -2,7 +2,9 @@ import { z } from "zod";
 import type { GoogleAdsHistoricalMetric, GoogleAdsTargeting } from "../google/ads/contracts.ts";
 import { normalizeGoogleAdsKeyword } from "../google/ads/normalizers.ts";
 import { buildVolumeMetricPatch, type ExistingVolumeMetrics, type VolumeMetricPatch } from "./volume-provider.ts";
-import { setVolumeEligibility, volumeEligibilityFromOfficialMeasurement } from "./volume-eligibility.ts";
+import { readGoogleAdsEmptyVolumeResponse, setVolumeEligibility, volumeEligibilityFromOfficialMeasurement, type GoogleAdsEmptyVolumeResponseKind } from "./volume-eligibility.ts";
+import { isValidGoogleAdsDemandMeasurement } from "./google-ads-demand.ts";
+import { carryApprovalAcrossRemeasurement } from "./approved-package.ts";
 
 export const GOOGLE_ADS_VOLUME_BATCH_SIZE = 10_000;
 export const GoogleAdsVolumeRequestSchema = z.object({
@@ -111,17 +113,115 @@ export function buildGoogleAdsVolumeMetricPatch(existing: ExistingVolumeMetrics,
   return { ...base, volume_source: "google_ads", analise_semantica: semantic };
 }
 
-/** Records an exact Google Ads response with no monthly average without overwriting volume or KGR. */
-export function buildGoogleAdsUnavailableVolumePatch(existing: ExistingVolumeMetrics, measurement: GoogleAdsVolumeMeasurement) {
-  if (measurement.averageMonthlySearches !== null || existing.status === "publicado") return null;
+export type GoogleAdsEmptyVolumeResponseInput = {
+  measuredAt: string;
+  providerVersion: "v25";
+  googleAdsRequestId: string | null;
+  /** Diagnóstico: devolvida sem média ou não devolvida no lote. */
+  kind?: GoogleAdsEmptyVolumeResponseKind;
+};
+
+/**
+ * Registra a resposta do Google Ads SEM média mensal — processo executado,
+ * não falha (decisão do dono, 2026-09-25). Nunca toca em `volume_search`,
+ * `kgr_score` nem `volume_measurement` (ADR-020: ausência não vira zero).
+ *
+ * - Sem número válido anterior: `volume_eligibility` passa a `unavailable`
+ *   com a data desta resposta. É o que a tela e a trava de aprovação leem
+ *   como "processado, sem média oficial".
+ * - Com número válido anterior: o número fica, e a elegibilidade que ele
+ *   sustenta também. Só a data desta resposta vazia é registrada, em
+ *   `volume_eligibility.lastEmptyResponse`.
+ *
+ * Vale também para linha com status legado `publicado`: sem o registro, a
+ * resposta vazia desapareceria e a keyword pareceria nunca medida.
+ */
+export function buildGoogleAdsEmptyVolumePatch(existing: ExistingVolumeMetrics, response: GoogleAdsEmptyVolumeResponseInput) {
+  const semantic = existing.analise_semantica || {};
+  if (isValidGoogleAdsDemandMeasurement(semantic.volume_measurement)) {
+    const eligibility = semantic.volume_eligibility && typeof semantic.volume_eligibility === "object" && !Array.isArray(semantic.volume_eligibility)
+      ? semantic.volume_eligibility as Record<string, unknown>
+      : {};
+    return {
+      analise_semantica: {
+        ...semantic,
+        volume_eligibility: {
+          ...eligibility,
+          lastEmptyResponse: {
+            provider: "google_ads",
+            providerVersion: response.providerVersion,
+            measuredAt: response.measuredAt,
+            averageMonthlySearches: null,
+            googleAdsRequestId: response.googleAdsRequestId,
+            ...(response.kind ? { emptyResponseKind: response.kind } : {}),
+          },
+        },
+      },
+    };
+  }
   return {
-    analise_semantica: setVolumeEligibility(existing.analise_semantica, {
+    analise_semantica: setVolumeEligibility(semantic, {
       status: "unavailable",
-      measuredAt: measurement.measuredAt,
-      provider: measurement.provider,
-      providerVersion: measurement.providerVersion,
+      measuredAt: response.measuredAt,
+      provider: "google_ads",
+      providerVersion: response.providerVersion,
       averageMonthlySearches: null,
-      googleAdsRequestId: measurement.googleAdsRequestId,
+      googleAdsRequestId: response.googleAdsRequestId,
+      ...(response.kind ? { emptyResponseKind: response.kind } : {}),
     }),
   };
+}
+
+/** Records an exact Google Ads response with no monthly average without overwriting volume or KGR. */
+export function buildGoogleAdsUnavailableVolumePatch(existing: ExistingVolumeMetrics, measurement: GoogleAdsVolumeMeasurement) {
+  if (measurement.averageMonthlySearches !== null) return null;
+  return buildGoogleAdsEmptyVolumePatch(existing, {
+    measuredAt: measurement.measuredAt,
+    providerVersion: measurement.providerVersion,
+    googleAdsRequestId: measurement.googleAdsRequestId,
+    kind: "returned_without_average",
+  });
+}
+
+/**
+ * A falha de uma nova tentativa não apaga a resposta anterior.
+ *
+ * A marcação compensatória `measurement_failed` só vale para keyword que
+ * nunca teve resposta registrada. Com número válido ou com resposta sem
+ * média gravada, a falha fica na tela e na notificação, e o registro
+ * anterior segue — senão um erro de rede tiraria a keyword da aprovação.
+ */
+export function shouldMarkVolumeMeasurementFailed(existing: Pick<ExistingVolumeMetrics, "status" | "analise_semantica">): boolean {
+  if (existing.status === "publicado") return false;
+  const semantic = existing.analise_semantica || {};
+  return !isValidGoogleAdsDemandMeasurement(semantic.volume_measurement) && !readGoogleAdsEmptyVolumeResponse(semantic);
+}
+
+/**
+ * Aplica ao patch da remedição a regra "remedir sem mudança real não rebaixa
+ * a aprovada" (`carryApprovalAcrossRemeasurement`). Sem aprovação, com
+ * mudança real ou já em revisão, devolve o patch intocado.
+ */
+export function withApprovalCarriedAcrossRemeasurement<T extends { volume_search?: number; kgr_score?: number | null; analise_semantica?: Record<string, unknown> }>(
+  existing: GoogleAdsVolumeKeyword & { intent?: string | null },
+  patch: T,
+): T {
+  if (!patch.analise_semantica) return patch;
+  const before = {
+    keywordId: existing.id,
+    keyword: existing.keyword,
+    intent: existing.intent ?? null,
+    volumeSearch: existing.volume_search,
+    resultsAllintitle: existing.results_allintitle,
+    kgrScore: existing.kgr_score,
+    semantic: existing.analise_semantica || null,
+  };
+  const after = {
+    ...before,
+    volumeSearch: patch.volume_search !== undefined ? patch.volume_search : existing.volume_search,
+    kgrScore: patch.kgr_score !== undefined ? patch.kgr_score : existing.kgr_score,
+    semantic: patch.analise_semantica,
+  };
+  const carried = carryApprovalAcrossRemeasurement(before, after);
+  return carried ? { ...patch, analise_semantica: carried } : patch;
 }

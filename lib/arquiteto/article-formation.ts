@@ -575,6 +575,21 @@ export function buildArticleFormationUniverse(input: {
     const coerenciaHumana = afinidadesHumanas.length
       ? afinidadesHumanas.reduce((total, item) => total + item.affinity, 0) / afinidadesHumanas.length
       : 1;
+    /*
+     * PUBLICADA NUMA REVISÃO HUMANA ANTERIOR À REVALIDAÇÃO.
+     *
+     * A decisão humana continua valendo — ninguém a troca em silêncio. Mas
+     * uma publicada que não é a principal do grupo, ou duas publicadas no
+     * mesmo grupo, contradizem a identidade que está no ar (AGENTS §11): o
+     * candidato sai com conflito dito, para a pessoa rever a composição.
+     */
+    const publicadasDoGrupo = grupo.filter(keyword => keyword.isPublished);
+    const conflitosPublicados: string[] = [];
+    if (publicadasDoGrupo.length > 1) {
+      conflitosPublicados.push(`A revisão humana reúne ${publicadasDoGrupo.length} páginas publicadas no mesmo artigo (${publicadasDoGrupo.map(keyword => `"${keyword.keyword}"`).join(", ")}): cada uma é patrimônio próprio, e a fusão precisa de nova decisão humana.`);
+    } else if (publicadasDoGrupo.length === 1 && !principalKeyword.isPublished) {
+      conflitosPublicados.push(`"${publicadasDoGrupo[0].keyword}" está publicada e não é a principal desta revisão: a principal publicada não é trocada em silêncio; confirme a composição.`);
+    }
     const mesmaIntencaoHumana = grupo.every(keyword =>
       normalizedIntent(keyword.intent) === normalizedIntent(principalKeyword.intent));
 
@@ -610,9 +625,9 @@ export function buildArticleFormationUniverse(input: {
       overflowKeywordIds: excedentes.map(keyword => keyword.keywordId),
       origin: "human",
       stale: false,
-      conflicts: excedentes.length
+      conflicts: [...conflitosPublicados, ...(excedentes.length
         ? [`${excedentes.length} busca(s) desta revisão passam do teto de seis e precisam de decisão editorial.`]
-        : [],
+        : [])],
       reason: `Composição definida em revisão humana, com "${principalKeyword.keyword}" como principal.`,
     });
   }
