@@ -1,5 +1,328 @@
 # Estado atual — Minerador
 
+## Vínculo: os mesmos selects da Revisão no rodapé, coluna com as três escolhas e sem barra horizontal à toa — 2026-09-24
+
+```text
+PEDIDO = dono do produto, 2026-09-24, testando a tela (3 itens)
+PERSISTENCIA_NOVA = 0 · migration = 0 · SQL = 0 · CHAMADAS_PAGAS_EM_TESTE = 0 · ESCRITA_REMOTA = 0
+MANUAL_UI_VALIDATED = NO — validação na tela do usuário, pendente
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Painel "Vínculo das selecionadas" = bloco Vínculo da REVISÃO HUMANA.**
+  Os radios com "Não mudar" saíram ("confusão visual e até na própria
+  plataforma"). Um componente comum, `components/editorial/vinculo-selects.tsx`,
+  desenha nos dois lugares os mesmos três selects: Posto de principal (Livre ·
+  Travado ao slug), Potencial de página (8 valores; na publicada, os 4
+  declarados, rótulo "A página publicada é") e Assunto (Não · Declarado, com
+  nota e destino). Em grupo, cada select mostra o valor comum das
+  selecionadas; se divergem, mostra o marcador **desabilitado** "Valores
+  diferentes", que não é valor gravável. "Aplicar" grava só os selects que o
+  humano mudou; voltar um select ao valor comum desfaz a mudança dele. Assunto
+  Declarado, escolhido ou comum a todas, desliga o Posto (e limpa a escolha
+  dele), como na Revisão. Confirmação, contagem de aprovadas para Em revisão,
+  readback estreito e ator `auth.users.id`: os mesmos (`planVinculoBatchChoices`
+  sem mudança). O valor comum sai das linhas que o plano grava, pelo mesmo
+  resolvedor da coluna (`commonVinculoSelectValues` → `resolveKeywordVinculo`).
+- **Coluna Vínculo com as três escolhas**, default ou do usuário: Posto,
+  Potencial e Assunto — "Assunto: Não" quando não há declaração
+  (`keywordVinculoChoiceLabels`), a frase inteira no título da célula
+  (`keywordVinculoChoicesSummary`, ex.: "Livre · Artigo · potencial · Assunto:
+  Não"). Texto de 14px com `leading-tight` (antes 10px e 9px); a coluna passou
+  de 120px para 148px de preset (mínimo 84px mantido) para cada escolha caber
+  numa linha. `keywordVinculoSummary` continua igual para quem já a usa.
+- **Barra horizontal no fim da planilha.** Causa, medida no navegador numa
+  réplica estática: com `border-collapse`, a borda de qualquer célula ou
+  linha na lateral da tabela vira borda da própria tabela, e metade dela soma
+  à largura. As colunas somavam exatamente a largura do contêiner (a
+  Palavra-Chave recebe toda a sobra), e a `border-r` da última coluna (Status)
+  deixava a tabela 0,5px maior (1000 → 1000,5): barra ligada sem nenhuma
+  coluna alargada. A linha expandida e o detalhe (`border-l-2`) somavam mais
+  1px. Correção: a última célula perdeu a `border-r` (como o cabeçalho), e a
+  projeção de larguras ganhou uma opção **aditiva** `edgeReserve`
+  (`useKeywordTableResponsiveWidths(..., { edgeReserve })`); o Processador
+  reserva 2px, que saem da Palavra-Chave (fill), sem corte. Sem a opção, a
+  projeção é byte a byte a de antes: o Arquiteto não muda. A barra continua
+  quando o humano alarga uma coluna ou quando o zoom deixa a área abaixo da
+  soma dos mínimos (`minWidth: processorTableMinimumWidth`).
+- **Arquivos:** novo `components/editorial/vinculo-selects.tsx`;
+  `components/editorial/dna-panels.tsx` (CRLF preservado; Revisão usa o
+  componente, sem mudança de ação nem de aria-label);
+  `modules/minerador/minerador-workspace.tsx` (CRLF preservado);
+  `lib/minerador/vinculo-screen.ts` e `lib/minerador/keyword-vinculo.ts`
+  (aditivos); `modules/minerador/keyword-table/use-keyword-table-responsive-widths.ts`
+  (aditivo, consumidor preservado: `modules/arquiteto/arquiteto-workspace.tsx`);
+  `docs/03-minerador/spec.md` §4.2 (regra do rodapé).
+- **Testes:** novos `tests/minerador-vinculo-selects-comuns.test.mts` (7:
+  vocabulário, valor comum e "Valores diferentes", só o que mudou grava,
+  Posto desligado, coluna, folga de borda, última coluna) e
+  `tests/vinculo-selects-dom.test.mts` (3, DOM real com happy-dom; roda com
+  `--experimental-loader ./tests/integrations-runtime-loader.mjs`, fora do
+  glob `minerador-*`). Atualizados com o motivo (os radios e as opções saíram
+  do `dna-panels`): `assunto-tela-estrutura`, `assunto-rodape-separado`,
+  `conferir-site-catalogo`, `corretor-planilha-rodape`. Quatro mutantes
+  (valor comum, Posto atrás de select desligado, reserva de borda, marcador
+  habilitado), todos mortos com a suíte verde. Minerador 1127 testes, 27
+  falhas, todas antigas; Arquiteto 2, editorial 4, sistema visual 5, todas na
+  base. `tsc` sem erros; lint com os 18 problemas antigos do workspace e
+  nenhum novo; guard estrito 550 (era 552; o workspace caiu de 125 para 123).
+- **Limites:** a réplica mediu o Chromium; outro motor pode arredondar
+  diferente (a reserva de 2px cobre até 1,5px de borda externa). A
+  Planilha do Descobrir tem layout próprio e não mudou. O painel não
+  mostra "Valores diferentes" na nota nem no destino: a declaração em grupo
+  não troca a nota de quem já é Assunto (regra anterior).
+- **Correção da revisão (mesmo dia).** A revisão reprovou dois pontos, e
+  cinco ajustes menores entraram junto:
+  - *1366px com o menu lateral aberto* (o padrão) ainda ligava a barra: a soma
+    dos mínimos era 1158px, e sobram cerca de 1114px (1366 − 240 − 1 de borda
+    − 11 da barra vertical fina). Os mínimos de Intenção e Nicho foram de
+    104px para 80px (truncam com reticências, texto inteiro no título) e o do
+    KD de 56px para 52px: a soma caiu para 1106px. Palavra-Chave (240px),
+    Resultados (104px), Volume (96px), KGR e CPC ficaram iguais. Abaixo de
+    ~1114px de área (1280px com menu aberto, zoom), a barra continua valendo.
+  - *Publicada sem tipo determinado* (ninguém declarou e a página não disse
+    Silo nem Artigo) resolve "Artigo · potencial", que não está entre os 4
+    declarados da publicada: o navegador marcava a primeira opção e o card
+    dizia "Artigo · declarado" enquanto a coluna dizia "Artigo · potencial".
+    O valor atual agora entra como opção própria, com o rótulo da coluna
+    (`vinculoPublishedCurrentPageTypeOption`, prop `currentValue`; no painel,
+    o valor comum gravado), e escolher "Artigo · declarado" passa a gravar.
+  - A coluna mostra o Assunto com a palavra do select: "Assunto: Não",
+    "Assunto: Declarado" ou "Assunto: Declarado, sem nota"
+    (`keywordVinculoChoiceLabels`; `subjectLabel` antigo intacto para quem o lê).
+  - Confirmação e resultado do lote falam "Assunto: Declarado" / "Assunto:
+    Não" (antes "Declarar/Retirar Assunto"), como "Posto: …" e "Potencial de
+    página: …"; a recusa `POST_WITH_SUBJECT` idem.
+  - O select do Potencial no card tem nome acessível que começa pelo rótulo
+    visível ("Potencial de página na revisão humana" / "A página publicada é
+    na revisão humana", via `ariaContext`), no lugar de "Tipo de página na
+    revisão humana" (WCAG 2.5.3). O do Posto já começava pelo rótulo.
+  - Com Revisão Humana aberta em alguma selecionada, o painel avisa que
+    mostra o valor gravado, não o rascunho que a coluna mostra.
+  - Saiu a classe morta `w-[120px]` da coluna Vínculo (o `<col>` manda).
+  - O teste de DOM ganhou script: `pnpm run test:minerador:dom`, também
+    dentro de `pnpm test` (`package.json`, aditivo).
+  - Testes: `minerador-vinculo-selects-comuns` (+4: 1366px, publicada sem
+    tipo, nome acessível, aviso de rascunho) e `vinculo-selects-dom` (+1:
+    publicada sem tipo, 4/4). Atualizados com o motivo (vocabulário do
+    Assunto e nome acessível): `assunto-lote`, `assunto-tela-lote`,
+    `vinculo-seletor-unico`, `assunto-tela-estrutura`,
+    `conferir-site-catalogo`. Números da rodada no fim do relatório do
+    corretor; validação na tela continua com o usuário.
+
+## Processador: uma rolagem vertical, rodapé só com seleção e seletor Vínculo único — 2026-09-24
+
+```text
+PEDIDO = dono do produto, 2026-09-24, testando a tela (3 itens)
+PERSISTENCIA_NOVA = 0 · migration = 0 · SQL = 0 · CHAMADAS_PAGAS_EM_TESTE = 0 · ESCRITA_REMOTA = 0
+MANUAL_UI_VALIDATED = NO — validação na tela do usuário, pendente
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Uma rolagem vertical só.** A página do Processador tem a altura da tela
+  menos a barra global e não rola (`data-processor-page`, `overflow-hidden`);
+  a planilha ocupa a sobra (`flex-1` do shell + `min-h-0`, sem `max-h`) e
+  rola dentro dela, com o cabeçalho preso. Antes, o `max-h` da planilha somado
+  aos blocos de cima fazia a página rolar também: duas barras, e o cabeçalho
+  sumia. Estados de carga sem `min-h-screen`. Keywords em recuperação com
+  teto de 35% da altura, para não esmagar a planilha.
+- **Rodapé só com seleção (contrato restaurado).** A barra já só renderizava
+  com `selectedIds.size > 0`, mas a Lógica automática depois do import de
+  Assuntos transformava os alvos em seleção quando nada estava selecionado,
+  e a barra aparecia sem o humano selecionar. Saiu: a Lógica automática não
+  seleciona; sem seleção, o fim chega no sino.
+- **Vínculo em um seletor só**, ao lado do KGR (que continua separado), no
+  rodapé (`2xl`) e em "Mais ações". Abre um painel com três grupos de escolha
+  única (radios): Posto de principal, Potencial de página (os 8 valores) e
+  Assunto (Declarar, com nota e destino opcionais, ou Retirar). Cada grupo tem
+  "Não mudar". Marcar "Declarar Assunto" desliga o Posto e limpa a escolha
+  dele. "Aplicar" grava tudo de uma vez: `planVinculoBatchChoices` aplica
+  Assunto → Potencial → Posto com o mesmo `planVinculoBatch` e junta numa
+  gravação por keyword; a confirmação no painel diz quantas serão gravadas, o
+  que cada escolha pula (Assuntos no Posto, não publicadas) e quantas aprovadas
+  vão para Em revisão (contadas uma vez). Readback estreito das quatro chaves;
+  ator `auth.users.id`; a Lógica automática só nas que o "Declarar" gravou.
+  Foco no painel ao abrir; Escape ou clique fora fecham; o foco volta a quem
+  abriu. Tokens, texto de 14px, foco visível.
+- **Arquivos:** `modules/minerador/minerador-workspace.tsx` (CRLF preservado),
+  `lib/minerador/vinculo-batch.ts` (aditivo: `planVinculoBatchChoices`),
+  `lib/minerador/vinculo-screen.ts` (aditivo: escolhas do painel e textos).
+  `planVinculoBatch` e `VINCULO_BATCH_CHOICE_GROUPS` sem mudança de contrato.
+- **Testes:** novo `tests/minerador-vinculo-seletor-unico.test.mts`;
+  atualizados com o motivo os que fixavam os 3 selects ou o `max-h` da
+  planilha (`assunto-tela-estrutura`, `assunto-rodape-separado`,
+  `corretor-planilha-rodape`, `assunto-dominio`, `final-workbench`,
+  `processador-planilha`, `table-order`). Minerador 1116 testes, 27 falhas,
+  todas antigas; Arquiteto 2, editorial 4, sistema visual 5, todas antigas.
+  Guard estrito: 125 no workspace, igual a antes.
+- **Rodada do corretor (mesmo dia).** Corrigido por revisão, antes da tela:
+  - com seleção, o `pb-14` era padding dentro do único contêiner que rola, e
+    o rodapé fixo (`h-11`) cobria a barra horizontal e o fim da vertical da
+    planilha. Agora o espaço do rodapé é um irmão depois da planilha
+    (`data-bulk-bar-spacer`, `h-11 shrink-0`, só com seleção) e a classe da
+    planilha não muda com a seleção;
+  - a planilha tem altura mínima (`min-h-40`, no lugar de `min-h-0`), e os
+    blocos opcionais de cima (Organizar, prévia Site/Sitemap, conferência
+    manual, recuperação) ficam num invólucro com teto (`max-h-[45dvh]`) que
+    só rola quando passam dele — antes, num notebook 1366×768, a planilha
+    podia cair a 0px e o fim da recuperação ficava cortado sem rolagem. O
+    teto de 35% da recuperação saiu (sem rolagem aninhada);
+  - o painel do Vínculo fecha e descarta as escolhas quando a seleção esvazia
+    por qualquer caminho (teclado, troca de marca), fecha com Tab para fora
+    dele (o foco fica onde chegou) e o `aria-controls` só existe com o painel
+    aberto (só no botão do rodapé; o item de "Mais ações" some ao abrir);
+  - Potencial "potencial" em grupo **pula e conta a publicada** (motivo novo
+    `published_potential`, aditivo): na publicada o tipo já é declaração pela
+    publicação, como a tela individual (`keywordPageTypeChoices`). O
+    declarado continua valendo para ela. A confirmação diz quantas pulou.
+  - Testes: `minerador-vinculo-seletor-unico` com 13 casos (rodapé acima das
+    barras, blocos com teto, Escape/Tab/seleção vazia, publicada no
+    potencial); `final-workbench`, `processador-planilha`, `table-order` e
+    `assunto-tela-estrutura` atualizados com o motivo. Minerador 1120 testes,
+    27 falhas, todas antigas; Arquiteto 2, editorial 4, operacional 10,
+    sistema visual 5, todas na base. `tsc` sem erros; lint com os 18
+    problemas antigos; guard estrito 125 no workspace (552 no total), igual.
+- **Limites:** o Descobrir segue com `max-h` na planilha (fora do pedido) e
+  pode ter as mesmas duas barras; o painel não se reposiciona se a janela
+  mudar de tamanho com ele aberto; no celular, o `min-h-screen` (100vh) do
+  `ProductShell` compartilhado pode deixar uma rolagem externa residual onde
+  100vh > 100dvh — fora do módulo, sem mudança.
+
+## Planilha do Processador, rodapé em 4 seletores, lote progressivo e sino sem cards — 2026-09-24
+
+```text
+PEDIDO = dono do produto, 2026-09-24 (10 itens: barra global, rodapé, Potencial 8 valores, planilha, "—", Organizar, selects, lote, sino, Descobrir)
+PERSISTENCIA_NOVA = analise_semantica.keyword_page_type_stance ("potential" | "declared"), aditiva · nenhuma migration · nenhum SQL
+LEITURA_NOVA_DO_BANCO = 0 (células e filtro "Com/Sem processo" leem só o que a tela já carrega)
+CHAMADAS_PAGAS_EM_TESTE = 0 · ESCRITA_REMOTA = 0
+MANUAL_UI_VALIDATED = NO — validação na tela do usuário, pendente
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+O contrato do padrão está na
+[SDD da planilha, do lote e do sino](../compartilhado/sdd-padrao-planilha-progresso-notificacoes-2026-09-24.md)
+(seção 16) e o do Potencial declarado na
+[SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md)
+(seção 12, adendo com o motivo e o contrato lido pelo Arquiteto). A regra
+permanente está na [spec](./spec.md), §67, seção 4 (potencial x declarado,
+rodapé, filtros e o "0" processado sem dado).
+
+### O que entrou
+
+- **Barra global do Processador:** "Colar keywords" e "Importar CSV" abrem o
+  modal já existente, com "Esta lista é" em Assunto por padrão.
+- **Rodapé em 4 seletores separados**, na ordem KGR, Posto de principal,
+  Potencial de página e Assunto; os mesmos em "Mais ações". Posto, Potencial,
+  Assunto **e agora o KGR** abrem confirmação antes de gravar (a seta num
+  select fechado dispara o change no Chrome/Windows). O Assunto anula o Posto
+  e o KGR: no lote eles pulam a keyword com Assunto e contam quantas; o
+  Potencial vale também para Assunto.
+- **Potencial de página com 8 valores** (4 "· potencial" e 4 "· declarado")
+  na Revisão Humana e no rodapé, para qualquer keyword. O peso fica em
+  `keyword_page_type_stance`. Na publicada a Revisão continua com os 4
+  declarados e **não grava o peso** (a publicação já declara).
+- **Revisão Humana com Assunto:** Posto e KGR desligados. A conclusão
+  (`canCompleteHumanReview`, `lib/minerador/human-review.ts`) não cobra mais o
+  KGR de um Assunto; antes, a keyword com Assunto e KGR calculável não fechava
+  em grupo por nenhum caminho.
+- **Planilha:** cabeçalho preso ao rolar (a planilha rola na própria área,
+  altura da tela menos a barra global); a Palavra-Chave fica com toda a sobra
+  (`fill`) e quebra linha, sem corte; slug em 14px.
+- **Células de métrica** (`lib/minerador/processor-table-cells.ts`): "—" nunca
+  processado; "0" apagado com a dica "Processado, sem dado"; "Erro" na cor de
+  alerta com o motivo; "Medindo…". O "0" é só visual (ADR-020): o dado segue
+  null, e KGR, filtros e ordenação o tratam como ausente. A keyword que o
+  Google Ads não devolve no Volume em grupo termina em "0" apagado **nesta
+  sessão** (tentativa local "success" sem dado).
+- **Organizar:** sem Silo; KGR num seletor só (Aplicabilidade e Cálculo);
+  Relação com URL dentro de Vínculo; "Arquitetura" virou "Processo" (com / sem
+  processo = já passou pela Lógica, pelo Volume ou por Resultados). Preferência
+  antiga com Vínculo que o seletor não oferece (`not_confirmed`, `not_found`,
+  `redirected`, `canonical_conflict`) volta a "Todos".
+- **Selects nativos:** tema compartilhado `NATIVE_SELECT_THEME`
+  (`lib/ui/native-select-theme.ts`): lista escura no tema escuro, clara com
+  `.light`/`[data-theme="light"]`, opções nos tokens também dentro de optgroup.
+  Aplicado no rodapé, em "Mais ações", no Organizar, na "Organização das
+  linhas" (compartilhado com o Descobrir) e nos selects da Revisão Humana.
+- **Rodapé sem corte silencioso:** o grupo de ações rola na horizontal quando
+  falta espaço; KGR e os 3 seletores do Vínculo ficam no rodapé a partir de
+  `2xl` e em "Mais ações" abaixo disso; Status e Excluir a partir de 1800px.
+  O Potencial não tem mais largura fixa.
+- **Lote progressivo** (`lib/ui/batch-progress.ts`): Resultados em blocos de
+  5, Volume em blocos de 200, gravações 4 ao mesmo tempo; falha contada sem
+  parar o resto; Parar; "Ver falhas". O cartão mostra "5 de 30 · faltam 25"
+  na primeira linha e, na segunda, a etapa, o bloco e o tempo do bloco em
+  curso ("Resultados · bloco 2 de 6 · há 40s"), que prova que o lote segue vivo.
+- **Sino sem cards:** `publishNotice` só marca o contador (vermelho com erro
+  não lido); o painel abre com clique. Vale para a plataforma inteira.
+- **Descobrir:** seletor corrigido (ordem da tela e poda da seleção antiga);
+  sem Histórico e Targeting; as mesmas células; candidata pedida em "Atualizar
+  métricas" que volta sem média vira "0" apagado nesta sessão; a keyword
+  quebra linha como no Processador.
+
+### Arquivos
+
+Minerador: `modules/minerador/minerador-workspace.tsx`,
+`lib/minerador/{processor-table-cells,discovery-table-cells,table-view,last-organization,keyword-page-type,keyword-vinculo,vinculo-batch,vinculo-screen,human-review}.ts`,
+`modules/minerador/discovery/{discovery-table-placeholder,discovery-search-row,discovery-source-controls}.tsx`,
+`modules/minerador/keyword-table/{keyword-table-order.tsx,use-keyword-table-responsive-widths.ts}`.
+Compartilhados (aditivos, consumidores preservados): `components/editorial/dna-panels.tsx`,
+`components/global-notice-center.tsx`, `lib/visual-notice-contract.ts`,
+`lib/ui/batch-progress.ts`, `lib/ui/native-select-theme.ts`,
+`lib/arquiteto/editorial-unit-declaration.ts` (campo opcional
+`pageTypeHumanDeclared`; enum dos 4 tipos intacto) e
+`lib/arquiteto/architecture-working-proposal.ts` (só o texto do Silo proposto
+quando o tipo é declarado pelo humano). `lib/minerador/human-review.ts` também é
+compartilhado: `stance?` opcional na ação `page_type` e KGR não cobrado de
+Assunto na conclusão.
+
+Documentação: `docs/03-minerador/{estado-atual,backlog,spec}.md` (spec §67,
+seção 4), `docs/compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md`
+(seção 12; a 11.6 aponta para ela; nota de superado na 4.4),
+`docs/compartilhado/sdd-padrao-planilha-progresso-notificacoes-2026-09-24.md`
+(seção 16) e `docs/compartilhado/sistema-visual.md` (§24.1, sino sem cards).
+
+### Testes
+
+`tests/minerador-assunto-rodape-separado`, `minerador-processador-planilha`,
+`minerador-lote-progressivo`, `minerador-discovery-planilha` e
+`minerador-corretor-planilha-rodape` (novos), com fixtures e sem rede. Testes
+antigos que fixavam o comportamento que o dono mudou foram atualizados com o
+motivo escrito no próprio teste. Suítes por nome: nenhuma falha nova em
+relação à base (números na seção 16 da SDD da planilha): Minerador 1106
+testes com 27 falhas antigas (saiu 1 da base), `test:arquiteto` 2354/2
+antigas, `test:arquiteto:servidor` 52/0, `test:editorial` 174/4 antigas,
+`test:operational` 51/10 antigas, `test:visual-system` 28/5 antigas,
+`test:radar` 2685/0. `tsc --noEmit` sem erros. Validado manualmente: **não**.
+
+### Limites declarados
+
+- O "0" apagado da keyword que o Google Ads não devolve (Processador) e da
+  candidata sem média (Descobrir) vale só na sessão: depois de recarregar
+  volta a "—", porque a rota não grava marcador de "processado sem dado".
+  Gravar esse marcador muda o contrato de escrita da rota (SDD da planilha,
+  premissa 5).
+- Sem timeout por bloco: um bloco lento da SERP fica "há N s" até voltar. O
+  timeout com reconciliação por readback é da fatia F3 da SDD da planilha.
+- "Com processo / Sem processo" foi lido como "passou pelo Processador". Se o
+  dono quiser "enviado ao Arquiteto", é leitura nova ou marcador novo: SDD e
+  gate de egress.
+- O KGR em grupo continua com o ator antigo do lote (e-mail da sessão); o
+  Posto individual na Revisão também.
+
+### Validação na tela (usuário), pendente
+
+Rodapé em 1280, 1440 e 1920 px com a barra lateral aberta (nenhuma ação
+sumida; rolagem do grupo quando faltar espaço); os 4 seletores e as
+confirmações (KGR incluído); a lista dos selects nos dois temas; os 8 valores
+do Potencial; Assunto desligando Posto e KGR e a conclusão em grupo passando;
+cabeçalho preso; keyword inteira; "0" apagado e "Erro"; lote de 30+ em Volume
+e em Resultados com o texto e o relógio avançando; Parar; "Ver falhas"; sino
+só marcando; Descobrir (seleção depois de ordenar e filtrar). A primeira
+gravação real de `keyword_page_type_stance` precisa de readback no banco.
+
 ## Pesquisa por Assunto (F1b) e conserto do import da Descoberta — 2026-09-24
 
 ```text

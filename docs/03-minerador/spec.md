@@ -837,6 +837,8 @@ publicada    Silo · declarado        seleção livre
 
 **Nada trava a seleção.** Quem sabe o que a página é continua sendo o humano — inclusive para corrigir uma declaração errada sem precisar desfazer a publicação. Um `select` desabilitado transformaria um engano em trabalho de desvinculação.
 
+> **Corrigido em 2026-09-24 (seção 4, abaixo):** o peso potencial ou declarado deixou de depender só da publicação. O humano escolhe o peso para qualquer keyword, e a publicada continua declarada pela publicação.
+
 ### 3. Assunto — 2026-09-24
 
 O Assunto é a frase que o humano declara como **tronco** de um ou mais artigos, mesmo sem volume de busca. Ele é uma marca **ao lado** do tipo de página, não um quinto tipo: `KEYWORD_PAGE_TYPES` não muda, e uma keyword pode ser Assunto e Página de serviço ao mesmo tempo.
@@ -855,6 +857,57 @@ O Assunto é a frase que o humano declara como **tronco** de um ou mais artigos,
 - **Publicada:** pode ser declarada Assunto sem mudar principal, slug, canonical nem URL (P5).
 - **Aprovação:** com Assunto, só a Lógica é exigida (§61). Declarar ou retirar muda a assinatura do pacote, e a aprovada vai para Em revisão; a tela avisa antes de confirmar.
 - **Em grupo:** a declaração aceita uma nota e um destino iguais para o lote, conferidos uma vez. A keyword que já é Assunto é pulada e mantém o que tem.
+
+### 4. Ajustes pedidos pelo dono — 2026-09-24
+
+Pedido do dono de 2026-09-24, depois de testar na tela. O contrato completo e o motivo estão na [SDD do Assunto, seção 12](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md); o registro operacional, no `estado-atual.md` de 2026-09-24. **Verificado no código e confirmado por teste; validado manualmente: não.**
+
+#### 4.1 Potencial x declarado, para qualquer keyword
+
+**Corrige a seção 2** ("Potencial só existe enquanto a keyword é nova"). O tipo de página continua com os mesmos 4 valores (`KEYWORD_PAGE_TYPES` não muda), mas o humano escolhe também o **peso**:
+
+```text
+potencial    Artigo · potencial      "pode ser um Artigo"
+declarado    Artigo · declarado      "vai ser um Artigo, travado"
+```
+
+- **Oito escolhas** (4 tipos × 2 pesos) na Revisão Humana e no rodapé, para **qualquer** keyword, publicada ou não (`keywordPageTypeChoices`).
+- **Onde vive:** `analise_semantica.keyword_page_type_stance` = `"potential"` | `"declared"`, ao lado de `keyword_page_type`. É opcional: sem ela, a leitura é a de antes. Só `setKeywordPageType` grava; trocar só o peso entra no histórico, com `previousStance` e `nextStance`.
+- **Leitura só pelo resolver** (`resolveKeywordPageType`): `humanDeclared` aparece quando o humano gravou o tipo **e** o peso `"declared"`. `declared` continua sendo só o fato da publicação.
+- **Publicada:** a publicação continua declarando. A Revisão mostra os 4 declarados, como antes, e **não grava o peso**.
+- **"Declarado" é peso, não trava de tela.** A regra "Nada trava a seleção" (seção 2) continua valendo: o humano pode trocar o tipo e o peso a qualquer momento.
+- **O Arquiteto** lê a declaração humana como `source: "potential"`, com o motivo "tipo travado" (`pageTypeHumanDeclared`, aditivo). A primária segue provisória até a SERP confirmar.
+
+#### 4.2 Rodapé: KGR, seletor Vínculo e o Assunto
+
+- O rodapé tem o **KGR** e **um seletor "Vínculo"** (pedido do dono, 2026-09-24: os três selects separados poluíam o rodapé). O Vínculo abre um painel com os **mesmos três selects do card REVISÃO HUMANA** (componente comum `components/editorial/vinculo-selects.tsx`) — Posto de principal, Potencial de página e Assunto (Não · Declarado) —, com os mesmos rótulos e valores e **sem "Não mudar"** (pedido do dono, 2026-09-24, terceira rodada). Cada select mostra o valor comum das selecionadas ou o marcador desabilitado "Valores diferentes", que não é valor gravável; "Aplicar" grava só os selects que o humano mudou, de uma vez. Assunto Declarado (escolhido ou comum a todas) desliga o Posto. A coluna Vínculo mostra as três escolhas, default ou do usuário (ex.: "Livre · Artigo · potencial · Assunto: Não"). Os mesmos aparecem em "Mais ações". Nada é gravado antes da confirmação.
+- **O rodapé só existe com seleção feita pelo humano.** Nenhum processo automático seleciona keywords.
+- **O Assunto anula o Posto e o KGR.** São as keywords do artigo que definem posto e KGR. No lote, a keyword com Assunto é pulada e contada. Na Revisão, os dois selects ficam desligados. A conclusão da revisão não cobra o KGR de um Assunto.
+- **O Potencial de página vale também para o Assunto** ("quero que este Assunto seja uma landing page").
+- **Na publicada, o tipo já é declaração pela publicação.** Em grupo, escolher um valor "potencial" pula e conta a publicada (a confirmação diz quantas); o valor declarado vale para ela, como na Revisão individual.
+
+#### 4.3 Filtros de visualização (painel Organizar)
+
+- **Silo saiu** (coerente com o §76: a planilha não organiza silo).
+- **KGR num seletor só**, com dois grupos: Aplicabilidade (Aplicável, Não aplicável, Pendente) e Cálculo. Escolher um lado zera o outro.
+- **Vínculo inclui a Relação com URL**, em dois grupos: Vínculo (Livre, Candidata, Verificada, Publicada, Publicação não verificada) e Relação com URL. Escolher um lado zera o outro.
+- **"Arquitetura" deu lugar a "Processo"**: *Com processo* = a keyword já passou pela Lógica, pelo Volume ou por Resultados no Processador, com dado, sem dado ou com erro. Valor só importado do Descobrir conta como *Sem processo*. O sentido "enviado ao Arquiteto" exigiria leitura nova do banco ou marcador novo no Minerador e está **pendente de decisão do dono**.
+- **Preferência salva:** o formato continua o mesmo. Na restauração, Silo e Arquitetura voltam a "Todos". Se a preferência trazia os dois lados de um par, fica um lado só. Um valor de Vínculo que o seletor não oferece volta a "Todos". Nenhum filtro fica ativo sem aparecer na tela.
+
+#### 4.4 O "0" processado sem dado (regra visual)
+
+As células de métrica distinguem quatro situações: no Processador, Resultados, Volume, CPC e KD (`lib/minerador/processor-table-cells.ts`); no Descobrir, Resultados, Volume, CPC e Concorrência Ads (`lib/minerador/discovery-table-cells.ts`).
+
+```text
+—          nunca processada
+0          processada, sem dado      cinza apagado, dica "Processado, sem dado"
+Erro       o processo falhou         cor de alerta (text-warning), motivo na dica
+Medindo…   processo em andamento
+```
+
+**O "0" é só visual.** No banco o dado continua vazio (null). O KGR, a elegibilidade de volume, os filtros e a ordenação tratam a célula como **ausente**, nunca como zero medido: **ADR-020**, "volume ausente é parcial/indisponível, nunca zero implícito". Nenhum escritor grava zero no lugar de um dado ausente.
+
+**Limite:** a keyword que o Google Ads não devolve no Volume em grupo, e a candidata do Descobrir sem média, só mostram o "0" apagado **na sessão**. Depois de recarregar voltam a "—", porque a rota não grava marcador de "processado sem dado". Gravar esse marcador muda o contrato de escrita da rota e depende de SDD.
 
 ### Vocabulário das duas declarações
 

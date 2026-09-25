@@ -45,7 +45,11 @@ test("bulk bar organiza contexto, workflow, secundárias, destrutivo e progresso
   assert.match(bulkBar, /data-bulk-workflow-core/);
   assert.match(bulkBar, /data-bulk-workflow-secondary/);
   assert.match(bulkBar, /data-minerador-bulk-progress/);
-  assert.match(bulkBar, /ml-auto min-w-0 w-28 shrink-0 rounded border px-2 py-0\.5 sm:w-44 lg:w-56/);
+  // Atualizado em 2026-09-24 a pedido do dono: o cartão de progresso mostra o
+  // texto vivo do lote ("Processando 5 de 30 · faltam 25") em 14px e ficou
+  // mais largo; o ml-auto passou ao invólucro que também leva Parar e Ver falhas.
+  assert.match(bulkBar, /ml-auto flex min-w-0 shrink-0 items-center gap-1/);
+  assert.match(bulkBar, /min-w-0 w-36 shrink-0 rounded border px-2 py-0\.5 sm:w-64 lg:w-80/);
   assert.match(bulkBar, /BarChart3/);
   assert.match(bulkBar, /Search/);
   assert.match(bulkBar, /Check/);

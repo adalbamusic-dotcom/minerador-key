@@ -125,9 +125,10 @@ test("tabela identifica discretamente Google Ads, Manual e CSV", async () => {
 
 test("tabela multi-source preserva largura legível e scroll horizontal compartilhado", async () => {
   const table = await readFile(new URL("../modules/minerador/discovery/discovery-table-placeholder.tsx", import.meta.url), "utf8");
-  assert.match(table, /KeywordTableShell ref=\{tableRef\} scroll="x"/);
-  assert.match(table, /style=\{\{ minWidth: discoveryTableMinimumWidth \}\}/);
-  assert.match(table, /useKeywordTableResponsiveWidths/);
+  // 2026-09-24, pedido do dono: Keyword nunca cortada e cabeçalho fixo; a tabela rola
+  // nos dois eixos e as colunas seguem o conteúdo em vez da projeção responsiva.
+  assert.match(table, /KeywordTableShell ref=\{tableRef\} scroll="both"/);
+  assert.match(table, /style=\{\{ width: columnWidth\(columnId\) \}\}/);
   assert.match(table, /data-keyword-table="discovery"/);
   assert.match(table, /sourceBadge = .*shrink-0/);
   assert.doesNotMatch(table, /min-w-\[1442px\]/);

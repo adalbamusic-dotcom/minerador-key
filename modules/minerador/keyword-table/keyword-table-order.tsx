@@ -3,6 +3,7 @@
 import { GripVertical } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent, PointerEvent } from "react";
 import type { KeywordTableOrderMode } from "@/lib/minerador/manual-order";
+import { NATIVE_SELECT_THEME } from "@/lib/ui/native-select-theme";
 
 export { type KeywordTableOrderMode } from "@/lib/minerador/manual-order";
 
@@ -14,7 +15,7 @@ export function KeywordTableOrderModeSelect({ value, onChange }: { value: Keywor
         aria-label="Organização das linhas"
         value={value}
         onChange={event => onChange(event.target.value as KeywordTableOrderMode)}
-        className="h-9 w-full rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none transition-colors focus:border-module-accent/50 focus-visible:ring-2 focus-visible:ring-module-accent/40"
+        className={`h-9 w-full rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none transition-colors focus:border-module-accent/50 focus-visible:ring-2 focus-visible:ring-module-accent/40 ${NATIVE_SELECT_THEME}`}
       >
         <option value="auto">Ordenação por coluna</option>
         <option value="manual">Ordem manual</option>

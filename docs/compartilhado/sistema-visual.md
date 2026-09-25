@@ -693,3 +693,29 @@ o shell compartilhado:
   mantém seu clipping próprio. A validação autenticada confirmou abertura,
   fechamento externo, `Escape`, reabertura e interação independente com o sino
   em Minerador, Radar e Marca, no dark mode.
+
+### 24.1 Sino sem cards — 2026-09-24
+
+Pedido do dono do produto: os avisos não abrem mais cards. O sino só marca.
+
+- **Verificado no código:** `publishNotice` continua gravando o aviso na lista
+  do escopo e o contador de não lidos sobe. O preview automático do painel só
+  roda com `NOTICE_AUTO_OPEN_PREVIEW = true`, e o toast só com
+  `NOTICE_TOAST_ENABLED = true` (`lib/visual-notice-contract.ts`). As duas
+  constantes estão em `false`. O painel abre apenas quando o usuário clica no
+  sino. Isso substitui o "Avisos novos abrem o painel em preview curto" da
+  seção 24.
+- O marcador do sino usa `danger` quando há erro não lido (`noticeBadgeTone`),
+  e o `aria-label` diz "inclui erro". Nos outros casos segue em
+  `context-accent`.
+- Vale para a plataforma inteira: todos os produtores (Minerador, Arquiteto,
+  Radar, Marca, Planejador, Publicações, Conta e Admin, direto ou por
+  `useNoticeBridge`) passam por `publishNotice`. Nenhum contrato de produtor
+  mudou. O card de tarefa em segundo plano do Arquiteto não é aviso do sino e
+  continua como está (decisão Q2 da SDD de planilha, progresso e notificações).
+- Andamento de lote não vai para o sino: fica na barra de progresso do rodapé.
+  Um lote publica um aviso só, no fim, com o resumo e a lista das falhas nos
+  detalhes.
+- **Confirmado por teste:** `tests/minerador-lote-progressivo.test.mts`.
+  **Ainda não verificado:** validação manual na tela, nos dois temas.
+- Rollback: voltar as duas constantes para `true`.

@@ -1,6 +1,7 @@
 import { readKgrApplicability, setKgrApplicability, type KgrApplicability } from "./kgr-applicability.ts";
 import { readCanonicalKeywordDna } from "./logical-read-model.ts";
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
+import { resolveKeywordSubject } from "./keyword-subject.ts";
 
 /**
  * Revisão Humana do KeywordDNA.
@@ -15,7 +16,7 @@ import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 
 export type HumanReviewFieldDecisionType = "keep_logic" | "edit" | "confirm_unknown";
 
-import type { KeywordPageType } from "./keyword-page-type.ts";
+import type { KeywordPageType, KeywordPageTypeStance } from "./keyword-page-type.ts";
 
 export type HumanReviewAction =
   | { type: "field"; field: string; logicalValue: unknown; decision: HumanReviewFieldDecisionType; editedValue?: unknown }
@@ -31,7 +32,7 @@ export type HumanReviewAction =
    * publicação é potencial; com publicação é o que está no ar. Nunca
    * obrigatório — informa o Arquiteto, não trava o Minerador.
    */
-  | { type: "page_type"; pageType: KeywordPageType }
+  | { type: "page_type"; pageType: KeywordPageType; stance?: KeywordPageTypeStance }
   /**
    * Assunto (SDD 2026-09-24, F1.4): a terceira declaração do Vínculo.
    * `declared: true` declara, ou troca nota e destino; `declared: false`
@@ -365,6 +366,9 @@ function kgrIsCalculable(semantic: Semantic | null | undefined): boolean {
   // KGR applicability is a review gate only when the two current Processor
   // measurements make the calculation real. Imported/top-level snapshots or
   // an old persisted score must not turn into a new KGR obligation.
+  // O Assunto anula o KGR (pedido do dono, 2026-09-24): keyword declarada
+  // como Assunto não carrega a decisão de aplicabilidade como pendência.
+  if (resolveKeywordSubject(semantic).declared) return false;
   return deriveProcessorRevalidation({ semantic: semantic || {} }).kgr.ready;
 }
 

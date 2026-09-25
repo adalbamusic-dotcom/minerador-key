@@ -1,6 +1,30 @@
 export const NOTICE_TOAST_DURATION_MS = 4_500;
 export const NOTICE_PREVIEW_DURATION_MS = 5_000;
 
+/*
+ * Sino sem cards (pedido do dono, 2026-09-24; SDD
+ * docs/compartilhado/sdd-padrao-planilha-progresso-notificacoes-2026-09-24.md,
+ * seção 5.7). Aviso novo só marca o sino (contador); o painel abre apenas
+ * quando o usuário clica. Nenhum card ou toast flutuante aparece sozinho.
+ * Vale para a plataforma inteira: todos os produtores passam por
+ * `publishNotice`. Rollback: voltar as duas constantes para `true`.
+ */
+export const NOTICE_AUTO_OPEN_PREVIEW = false;
+export const NOTICE_TOAST_ENABLED = false;
+
+export type NoticeBadgeTone = "none" | "accent" | "danger";
+
+/** Tom do marcador do sino: `danger` quando existe erro não lido. */
+export function noticeBadgeTone(notices: readonly Pick<NoticeRecord, "severity" | "readState">[]): NoticeBadgeTone {
+  let unread = false;
+  for (const notice of notices) {
+    if (notice.readState !== "unread") continue;
+    if (notice.severity === "ERROR") return "danger";
+    unread = true;
+  }
+  return unread ? "accent" : "none";
+}
+
 export const NOTICE_SEVERITIES = ["SUCCESS", "INFO", "PENDING", "WARNING", "ERROR"] as const;
 export type NoticeSeverity = (typeof NOTICE_SEVERITIES)[number];
 

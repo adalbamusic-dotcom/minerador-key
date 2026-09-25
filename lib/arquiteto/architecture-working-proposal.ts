@@ -24,7 +24,7 @@
 import type { ArchitectureAnalysis, ClusterAnalysis } from "./architecture-analysis";
 import { intentComparisonKey, intentIsKnown, type KeywordDnaSignals } from "./keyword-dna-signals.ts";
 import type { PublishedSiloDeclaration } from "./silo-primary-keyword.ts";
-import { declaredNotSilo, headsSilo } from "./editorial-unit-declaration.ts";
+import { declaredNotSilo, headsSilo, isHumanDeclaredPageType } from "./editorial-unit-declaration.ts";
 import type { EditorialUnitDeclaration } from "./contracts.ts";
 
 export type ProposalSiloSource = "reused" | "proposed";
@@ -397,7 +397,9 @@ export function buildArchitectureWorkingProposal(input: {
           source: "proposed",
           reason: publicada
             ? `"${nome}" já está publicada e o Minerador a declara Silo: a primária vem da declaração.`
-            : `O Minerador marcou "${nome}" com potencial de Silo: a primária é provisória até a SERP confirmar.`,
+            : isHumanDeclaredPageType(declaracao)
+              ? `O humano declarou "${nome}" como Silo no Minerador: o tipo é decisão dele; a primária é provisória até a SERP confirmar.`
+              : `O Minerador marcou "${nome}" com potencial de Silo: a primária é provisória até a SERP confirmar.`,
         });
         nucleoDoSilo.set(key, identityCore(nome));
         intencaoDoSilo.set(key, intentComparisonKey(dna?.intent ?? null));

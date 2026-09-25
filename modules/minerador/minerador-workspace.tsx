@@ -30,6 +30,7 @@ import { AppMenu } from "@/components/app-menu";
 import { InfoHint } from "@/components/info-hint";
 import { InlineLabelCluster } from "@/components/inline-label-cluster";
 import { KeywordDnaPanel } from "@/components/editorial/dna-panels";
+import { VinculoPageTypeSelect, VinculoPostSelect, VinculoSubjectFields, VinculoSubjectSelect } from "@/components/editorial/vinculo-selects";
 import { useGlobalTopbarControlsRegistration, type GlobalTopbarModuleControls } from "@/components/global-topbar";
 import { MineradorLastOrganizationRestorer } from "./last-organization-restorer";
 import { DeleteConfirmation, PublishedDeleteConfirmation, RecoveryAction } from "@/components/lifecycle/delete-confirmation";
@@ -52,22 +53,35 @@ import { applyHumanReviewField, applyHumanReviewKgrApplicability, canCompleteHum
 import { evaluateMineradorArquitetoHandoffBatch } from "@/lib/minerador/arquiteto-handoff-gates";
 import { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";
 import { assessVolumeKgrConsistency, hasExplicitZeroMeasurement, volumeKgrConsistencyLabel, type VolumeKgrConsistency } from "@/lib/minerador/volume-kgr-consistency";
-import { deriveMineradorTableRows } from "@/lib/minerador/table-view";
+import { combinedKgrFilterValue, combinedVinculoFilterValue, deriveMineradorTableRows, KGR_FILTER_GROUPS, parseCombinedKgrFilter, parseCombinedVinculoFilter, PROCESS_RUN_FILTER_OPTIONS, VINCULO_FILTER_GROUPS } from "@/lib/minerador/table-view";
+import { processorCpcCell, processorKdCell, processorResultsCell, processorVolumeCell, type ProcessorCellState, type ProcessorRunFilter } from "@/lib/minerador/processor-table-cells";
+import { BATCH_STOPPED_BY_USER_REASON, formatBatchElapsed, formatBatchFailures, formatBatchProgress, formatBatchProgressCompact, formatBatchProgressDetail, formatBatchSummary, reclassifyBatchItemsAsFailed, runProgressiveBatch, type BatchChunkResult, type BatchItemOutcome, type BatchProgressSnapshot, type ProgressiveBatchInput } from "@/lib/ui/batch-progress";
+import { NATIVE_SELECT_THEME } from "@/lib/ui/native-select-theme";
 import { mineradorLastOrganizationKey, mineradorOrganizationButtonSummary, mineradorOrganizationLabels, type MineradorOrganizationValues } from "@/lib/minerador/last-organization";
 import { primaryKeywordPolicyLabel, readPrimaryKeywordPolicy, setPrimaryKeywordPolicy, type PrimaryKeywordPolicy } from "@/lib/minerador/primary-keyword-policy";
-import { keywordPageTypeLabel, setKeywordPageType } from "@/lib/minerador/keyword-page-type";
-import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
-import { isKeywordSubjectActorId, KEYWORD_SUBJECT_NOTE_MAX, setKeywordSubject, withdrawKeywordSubject } from "@/lib/minerador/keyword-subject";
+import { keywordPageTypeLabel, keywordPageTypeStanding, setKeywordPageType } from "@/lib/minerador/keyword-page-type";
+import { KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL, keywordVinculoChoiceLabels, keywordVinculoChoicesSummary, resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
+import { isKeywordSubjectActorId, setKeywordSubject, withdrawKeywordSubject } from "@/lib/minerador/keyword-subject";
 import { subjectDestinationCatalogKey, validateSubjectDestination, type SubjectDestinationCatalogHit } from "@/lib/minerador/subject-destination";
-import { planVinculoBatch, VINCULO_BATCH_READBACK_COLUMNS, type VinculoBatchReadbackRow } from "@/lib/minerador/vinculo-batch";
+import { planVinculoBatchChoices, VINCULO_BATCH_READBACK_COLUMNS, type VinculoBatchReadbackRow } from "@/lib/minerador/vinculo-batch";
 import {
-  describeVinculoBatchConfirmation,
-  describeVinculoBatchResult,
+  chooseVinculoBatchSelect,
+  commonVinculoSelectValues,
+  describeVinculoBatchChoicesConfirmation,
+  describeVinculoBatchChoicesResult,
+  EMPTY_VINCULO_BATCH_CHOICES,
   isSubjectDeclareChoice,
   keywordsWithoutLogic,
+  describeSubjectSkipped,
+  partitionSubjectKeywords,
   pickKeywordSubjectKeys,
-  VINCULO_BATCH_CHOICE_GROUPS,
-  vinculoBatchActionFromChoice,
+  VINCULO_BATCH_POST_DISABLED_BY_SUBJECT,
+  VINCULO_MIXED_LABEL,
+  vinculoBatchActionsFromChoices,
+  vinculoBatchPostDisabled,
+  vinculoBatchSelectValue,
+  type VinculoBatchChoiceGroupKey,
+  type VinculoBatchChoices,
   vinculoReadbackConfirmed,
 } from "@/lib/minerador/vinculo-screen";
 import { applyFunnelQualification, classifyKeywordFunnel } from "@/lib/minerador/keyword-qualification";
@@ -253,16 +267,33 @@ function candidateFromStoredSiteEvidence(item: KeywordItem, brandId: string): Mi
   };
 }
 const processorColumnWidths = {
-  drag: 32, index: 32, selection: 34, keyword: 460, vinculo: 120, results: 128, volume: 120,
+  drag: 32, index: 32, selection: 34, keyword: 460, vinculo: 148, results: 128, volume: 120,
   kgr: 108, cpc: 96, kd: 70, intent: 168, niche: 168, funnel: 80, status: 108,
 };
 const processorColumnConstraints = {
-  drag: { min: 28, max: 48 }, index: { min: 28, max: 56 }, selection: { min: 30, max: 56 }, keyword: { min: 240, max: 1200, flexible: true },
-  vinculo: { min: 84, max: 320 }, results: { min: 104, max: 260, priority: "protected" as const }, volume: { min: 96, max: 260, priority: "protected" as const }, kgr: { min: 68, max: 200 }, cpc: { min: 72, max: 220 }, kd: { min: 56, max: 180 },
-  intent: { min: 104, max: 420, flexible: true }, niche: { min: 104, max: 420, flexible: true }, funnel: { min: 56, max: 200 }, status: { min: 88, max: 280 },
+  drag: { min: 28, max: 48 }, index: { min: 28, max: 56 }, selection: { min: 30, max: 56 }, keyword: { min: 240, max: 1200, fill: true },
+  vinculo: { min: 84, max: 320 }, results: { min: 104, max: 260, priority: "protected" as const }, volume: { min: 96, max: 260, priority: "protected" as const }, kgr: { min: 68, max: 200 }, cpc: { min: 72, max: 220 }, kd: { min: 52, max: 180 },
+  intent: { min: 80, max: 420, flexible: true }, niche: { min: 80, max: 420, flexible: true }, funnel: { min: 56, max: 200 }, status: { min: 88, max: 280 },
 };
-/** Só abaixo desta largura a barra horizontal do Processador é necessária. */
+/**
+ * Só abaixo desta largura a barra horizontal do Processador é necessária. A
+ * soma dos mínimos (1106px) mais a folga das bordas cabe num notebook de
+ * 1366px com o menu lateral aberto (240px + 1px de borda) e a barra vertical
+ * fina da planilha (11px): ali a barra horizontal não liga sozinha. Cederam
+ * Intenção e Nicho, que truncam com reticências e têm o texto inteiro no
+ * título, e o KD, onde o número ainda cabe. Palavra-Chave, Resultados, Volume,
+ * KGR e CPC ficam com os mínimos de antes; a Palavra-Chave quebra linha e
+ * nunca é cortada.
+ */
 const processorTableMinimumWidth = keywordTableMinimumWidth(processorColumnConstraints, Object.keys(processorColumnWidths));
+/**
+ * Folga que a planilha deixa no contêiner. Com border-collapse, a borda
+ * esquerda de 2px da linha expandida e do detalhe (e qualquer borda na
+ * lateral da tabela) soma metade à largura da tabela; sem esta folga, colunas
+ * que somam exatamente o contêiner ligavam a barra horizontal no fim da lista
+ * sem nenhuma coluna alargada. A Palavra-Chave (fill) cede os 2px.
+ */
+const processorTableWidthOptions = { edgeReserve: 2 } as const;
 const mineradorWorkflowStatuses = MINERADOR_EDITORIAL_STATUSES;
 type MineradorWorkflowStatus = EditorialKeywordStatus;
 function funnelLabelFor(item: KeywordItem): string {
@@ -271,8 +302,25 @@ function funnelLabelFor(item: KeywordItem): string {
 
 const formatMetricInteger = (value: number) => new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(value);
 
+/**
+ * Célula de métrica sem número: "—" só quando nunca passou pelo processo;
+ * "0" apagado quando passou e não veio dado (o dado continua vazio); "Erro"
+ * na cor de alerta quando o processo falhou, com o motivo na dica.
+ */
+const processorCellToneClass: Record<ProcessorCellState["tone"], string> = {
+  value: "",
+  processed_empty: "text-text-muted/60",
+  not_processed: "",
+  error: "font-medium text-warning",
+  pending: "text-text-muted",
+};
+function ProcessorMetricPlaceholder({ cell }: { cell: ProcessorCellState }) {
+  return <span data-processor-cell-tone={cell.tone} className={processorCellToneClass[cell.tone]} title={cell.hint || undefined}>{cell.text}</span>;
+}
+
 type BulkProgressStep = "site" | "logic" | "volume" | "results" | "review";
 type BulkProgressStatus = "idle" | "processing" | "success" | "error";
+type BulkProgressFailure = { id: string; label: string; reason: string };
 type BulkProgressState = {
   status: BulkProgressStatus;
   step: BulkProgressStep | null;
@@ -280,6 +328,13 @@ type BulkProgressState = {
   total: number | null;
   message: string;
   detail: string;
+  /** Lote progressivo (lib/ui/batch-progress): o texto vivo vem do runner. */
+  batch: boolean;
+  failed: number;
+  failures: readonly BulkProgressFailure[];
+  stoppable: boolean;
+  /** Início do bloco em curso: o cartão mostra "há 40s" para provar que segue vivo. */
+  chunkStartedAtMs?: number | null;
 };
 
 const initialBulkProgressState: BulkProgressState = {
@@ -289,9 +344,32 @@ const initialBulkProgressState: BulkProgressState = {
   total: null,
   message: "",
   detail: "",
+  batch: false,
+  failed: 0,
+  failures: [],
+  stoppable: false,
 };
 
+/*
+ * LOTES PROGRESSIVOS (pedido do dono, 2026-09-24; SDD
+ * docs/compartilhado/sdd-padrao-planilha-progresso-notificacoes-2026-09-24.md, 5.5).
+ * Rotas pagas andam um bloco por vez; gravações no banco, poucas ao mesmo
+ * tempo. O limite de 1.000 alvos de Resultados continua valendo para o lote
+ * inteiro, como a rota já exigia.
+ */
+const RESULTS_BATCH_CHUNK_SIZE = 5;
+const RESULTS_BATCH_MAX_TARGETS = 1000;
+const VOLUME_BATCH_CHUNK_SIZE = 200;
+const BULK_WRITE_CONCURRENCY = 4;
+const BATCH_NO_SERVER_CONFIRMATION = "sem confirmação do servidor; confira antes de repetir";
+
+function describeBatchWriteError(error: unknown): string {
+  const cause = error as { message?: unknown; code?: unknown; details?: unknown } | null;
+  return [cause?.code, cause?.message, cause?.details].filter(Boolean).map(String).join(" · ") || "erro sem mensagem";
+}
+
 const bulkProgressStepMeta: Record<BulkProgressStep, {
+  label: string;
   processingLabel: string;
   textClass: string;
   barClass: string;
@@ -299,6 +377,7 @@ const bulkProgressStepMeta: Record<BulkProgressStep, {
   cardClass: string;
 }> = {
   site: {
+    label: "Conferir site",
     processingLabel: "Conferindo site...",
     textClass: "text-context-accent",
     barClass: "bg-context-accent",
@@ -306,6 +385,7 @@ const bulkProgressStepMeta: Record<BulkProgressStep, {
     cardClass: "border-context-accent/35 bg-context-accent/10",
   },
   logic: {
+    label: "Lógica",
     processingLabel: "Processando lógica...",
     textClass: "text-module-accent",
     barClass: "bg-module-accent",
@@ -313,6 +393,7 @@ const bulkProgressStepMeta: Record<BulkProgressStep, {
     cardClass: "border-module-accent/35 bg-module-accent/10",
   },
   volume: {
+    label: "Volume",
     processingLabel: "Medindo volume...",
     textClass: "text-context-accent",
     barClass: "bg-context-accent",
@@ -320,6 +401,7 @@ const bulkProgressStepMeta: Record<BulkProgressStep, {
     cardClass: "border-context-accent/35 bg-context-accent/10",
   },
   results: {
+    label: "Resultados",
     processingLabel: "Medindo resultados...",
     textClass: "text-context-accent",
     barClass: "bg-context-accent",
@@ -327,6 +409,7 @@ const bulkProgressStepMeta: Record<BulkProgressStep, {
     cardClass: "border-context-accent/35 bg-context-accent/10",
   },
   review: {
+    label: "Revisão",
     processingLabel: "Aplicando revisão...",
     textClass: "text-pending",
     barClass: "bg-pending",
@@ -366,6 +449,9 @@ const KEYWORD_READBACK_ID_CHUNK = 200;
 
 /** Instante fixo da prévia do Vínculo em grupo: a prévia não grava, e a gravação usa o instante real. */
 const VINCULO_BATCH_PREVIEW_AT = "1970-01-01T00:00:00+00:00";
+/** Chaves do Potencial de página que a revisão aberta precisa receber depois da gravação individual. */
+const PAGE_TYPE_DRAFT_KEYS = ["keyword_page_type", "keyword_page_type_stance", "keyword_page_type_actor", "keyword_page_type_at", "keyword_page_type_history"] as const;
+const isBatchKgrChoice = (value: string): value is KgrApplicability => value === "pending" || value === "applicable" || value === "not_applicable";
 
 /** A view ainda não existe no banco? (PostgREST não a acha no cache do schema.) */
 function viewDeListagemAusente(error: { code?: string | null; message?: string | null } | null): boolean {
@@ -375,6 +461,26 @@ function viewDeListagemAusente(error: { code?: string | null; message?: string |
     || code === "PGRST205"
     || String(error.message || "").includes(MINERADOR_LISTING_VIEW);
 }
+
+/**
+ * Selects nativos do rodapé, de "Mais ações" e do painel Organizar: o tema
+ * compartilhado abre a lista de opções no esquema do tema ativo, com as
+ * opções (também dentro de optgroup) nos tokens de fundo e texto.
+ */
+const BULK_SELECT_THEME = NATIVE_SELECT_THEME;
+/** Mesma regra para os seletores do painel Organizar, com os tokens da planilha. */
+const ORGANIZE_LABEL_CLASS = "flex min-w-40 flex-1 flex-col gap-1 text-sm font-medium text-text-muted";
+const ORGANIZE_SELECT_CLASS = `min-h-9 rounded border border-divider bg-background px-2 py-1.5 text-sm text-foreground focus:border-module-accent focus:outline-none ${BULK_SELECT_THEME}`;
+
+/**
+ * Painel do seletor "Vínculo" do rodapé: os mesmos três selects do card
+ * REVISÃO HUMANA (components/editorial/vinculo-selects.tsx), sem "Não mudar"
+ * (pedido do dono, 2026-09-24). Cada select mostra o valor comum das
+ * selecionadas ou "Valores diferentes"; a escolha fica aqui até "Aplicar", e
+ * só o select que o humano mudou é gravado. Nota e destino só com Assunto
+ * Declarado escolhido no painel.
+ */
+type VinculoBatchDialogState = VinculoBatchChoices & { note: string; destination: string };
 
 export default function Home({ brandRef, sectionTabs }: { brandRef: string; sectionTabs?: ReactNode }) {
   const { data: session, status: sessionStatus, actorUserId } = useSession();
@@ -406,6 +512,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const [dnaProcessing, setDnaProcessing] = useState(false);
   const [, setDnaProgress] = useState({ current: 0, total: 0 });
   const [bulkProgress, setBulkProgress] = useState<BulkProgressState>(initialBulkProgressState);
+  const [bulkProgressNowMs, setBulkProgressNowMs] = useState(() => Date.now());
+  const bulkChunkRunning = bulkProgress.status === "processing" && typeof bulkProgress.chunkStartedAtMs === "number";
+  // Relógio do bloco em curso: sem ele, um bloco lento da SERP deixava o
+  // cartão parado e não dava para saber se o lote travou.
+  useEffect(() => {
+    if (!bulkChunkRunning) return;
+    const timer = window.setInterval(() => setBulkProgressNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [bulkChunkRunning]);
+  const bulkChunkElapsed = bulkChunkRunning ? formatBatchElapsed(bulkProgress.chunkStartedAtMs, Math.max(bulkProgressNowMs, bulkProgress.chunkStartedAtMs ?? 0)) : null;
   const [processAttemptsByKeywordId, setProcessAttemptsByKeywordId] = useState<Record<string, Partial<Record<MineradorProcessName, MineradorProcessAttempt>>>>({});
   const [, setQualificationResults] = useState<QualificationResult[]>([]);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
@@ -438,13 +554,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("Todos");
   const [filterIntent, setFilterIntent] = useState("Todos");
-  const [filterListId, setFilterListId] = useState("Todos");
+  // Silo e Arquitetura saíram do painel Organizar (pedido do dono, 2026-09-24):
+  // os campos seguem no formato da preferência salva, sempre em "Todos".
+  const filterListId = "Todos";
   const [filterSiteRelation, setFilterSiteRelation] = useState("Todos");
-  const [filterSiteArchitecture, setFilterSiteArchitecture] = useState("Todos");
+  const filterSiteArchitecture = "Todos";
   const [filterSitePublication, setFilterSitePublication] = useState("Todos");
   const [filterKgrApplicability, setFilterKgrApplicability] = useState("Todos");
   const [filterKgrMeasurement, setFilterKgrMeasurement] = useState("Todos");
   const [filterVolumeEligibility, setFilterVolumeEligibility] = useState<"Todos" | "operational" | "pending" | "eligible" | "below_threshold" | "unavailable" | "measurement_failed">("Todos");
+  const [filterProcess, setFilterProcess] = useState<ProcessorRunFilter>("Todos");
   const [organizeOpen, setOrganizeOpen] = useState(false);
   const [orderMode, setOrderMode] = useState<KeywordTableOrderMode>("auto");
   const [sortColumn, setSortColumn] = useState<"keyword" | "results_allintitle" | "volume_search" | "kgr_score" | "cpc" | "keyword_difficulty" | "nicho" | "lista">("keyword");
@@ -453,14 +572,14 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const keywordOrder = useKeywordTableOrder(useMemo(() => keywords.map(item => item.id), [keywords]));
   const columnResize = useKeywordTableColumnResize(processorColumnWidths, processorColumnConstraints);
   const tableRef = useRef<HTMLElement | null>(null);
-  const responsiveWidths = useKeywordTableResponsiveWidths(columnResize.widths, processorColumnConstraints, tableRef, columnResize.resizedColumnIds);
+  const responsiveWidths = useKeywordTableResponsiveWidths(columnResize.widths, processorColumnConstraints, tableRef, columnResize.resizedColumnIds, processorTableWidthOptions);
   const rowResize = useKeywordTableRowResize(36, { min: 32, max: 112 });
   const { manualOrderIds } = keywordOrder;
 
   const organizationValues = useMemo<MineradorOrganizationValues>(() => ({
     searchQuery, filterStatus, filterIntent, filterListId, filterSiteRelation, filterSiteArchitecture,
-    filterSitePublication, filterKgrApplicability, filterKgrMeasurement, filterVolumeEligibility, sortColumn, sortDirection,
-  }), [searchQuery, filterStatus, filterIntent, filterListId, filterSiteRelation, filterSiteArchitecture, filterSitePublication, filterKgrApplicability, filterKgrMeasurement, filterVolumeEligibility, sortColumn, sortDirection]);
+    filterSitePublication, filterKgrApplicability, filterKgrMeasurement, filterVolumeEligibility, filterProcess, sortColumn, sortDirection,
+  }), [searchQuery, filterStatus, filterIntent, filterListId, filterSiteRelation, filterSiteArchitecture, filterSitePublication, filterKgrApplicability, filterKgrMeasurement, filterVolumeEligibility, filterProcess, sortColumn, sortDirection]);
   const organizationScopeKey = session?.user?.id && selectedBrandId
     ? mineradorLastOrganizationKey(session.user.id, selectedBrandId)
     : null;
@@ -484,11 +603,12 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     kgrApplicability: filterKgrApplicability,
     kgrMeasurement: filterKgrMeasurement,
     volumeEligibility: filterVolumeEligibility,
+    processRun: filterProcess,
     orderMode,
     manualOrderIds,
     sortColumn,
     sortDirection,
-  }), [effectiveKeywords, lists, searchQuery, filterStatus, filterIntent, filterListId, filterSiteRelation, filterSiteArchitecture, filterSitePublication, filterKgrApplicability, filterKgrMeasurement, filterVolumeEligibility, orderMode, manualOrderIds, sortColumn, sortDirection]);
+  }), [effectiveKeywords, lists, searchQuery, filterStatus, filterIntent, filterListId, filterSiteRelation, filterSiteArchitecture, filterSitePublication, filterKgrApplicability, filterKgrMeasurement, filterVolumeEligibility, filterProcess, orderMode, manualOrderIds, sortColumn, sortDirection]);
 
   const visibleKeywordIds = useMemo(() => filteredKeywords.map(item => item.id), [filteredKeywords]);
   const selection = useKeywordTableSelection(visibleKeywordIds);
@@ -628,9 +748,13 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const [volumeMeasuring, setVolumeMeasuring] = useState(false);
   const [allintitleMeasuring, setAllintitleMeasuring] = useState(false);
   const [moreActionsOpen, setMoreActionsOpen] = useState(false);
-  // Vínculo em grupo (SDD 2026-09-24, F1.6): a escolha fica aberta numa
-  // confirmação até o humano gravar; nota e destino só para "Declarar".
-  const [vinculoBatchDialog, setVinculoBatchDialog] = useState<{ choice: string; note: string; destination: string } | null>(null);
+  // Vínculo em grupo (SDD 2026-09-24, F1.6): um seletor só no rodapé abre um
+  // painel com os mesmos três selects da Revisão Humana (Posto, Potencial,
+  // Assunto); nada é gravado antes de "Aplicar". Nota e destino só com o
+  // Assunto Declarado escolhido no painel.
+  const [vinculoBatchDialog, setVinculoBatchDialog] = useState<VinculoBatchDialogState | null>(null);
+  // Canto direito do painel, alinhado ao botão que o abriu (rodapé ou Mais ações).
+  const [vinculoBatchPanelRight, setVinculoBatchPanelRight] = useState(8);
   // Foco da confirmação: entra no diálogo ao abrir e volta ao select que a
   // abriu ao fechar; Escape fecha pelo document, como o DeleteConfirmation.
   const vinculoBatchTriggerRef = useRef<HTMLElement | null>(null);
@@ -638,29 +762,88 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   // O select de "Mais ações" some com o menu: o foco volta ao botão do menu.
   const moreActionsButtonRef = useRef<HTMLButtonElement | null>(null);
   const vinculoBatchDialogOpen = vinculoBatchDialog !== null;
-  const vinculoBatchDeclareOpen = vinculoBatchDialog ? isSubjectDeclareChoice(vinculoBatchDialog.choice) : false;
+  const vinculoBatchDeclareOpen = vinculoBatchDialog ? isSubjectDeclareChoice(vinculoBatchDialog.subject) : false;
+  // O valor comum das selecionadas em cada select (ou "Valores diferentes"),
+  // pelo mesmo resolvedor da coluna, sobre as linhas que o plano grava.
+  const vinculoBatchCommon = useMemo(
+    () => vinculoBatchDialogOpen ? commonVinculoSelectValues(keywords.filter(item => selectedIds.has(item.id))) : null,
+    [vinculoBatchDialogOpen, keywords, selectedIds],
+  );
   useEffect(() => {
     if (!vinculoBatchDialogOpen) return;
-    // "Declarar" foca a nota (autoFocus); as outras escolhas focam o diálogo.
-    if (!vinculoBatchDeclareOpen) vinculoBatchDialogRef.current?.focus();
+    // O painel recebe o foco ao abrir; marcar opções não o tira dali.
+    vinculoBatchDialogRef.current?.focus();
     return () => {
       const trigger = vinculoBatchTriggerRef.current;
       vinculoBatchTriggerRef.current = null;
       if (trigger?.isConnected) trigger.focus();
     };
-  }, [vinculoBatchDialogOpen, vinculoBatchDeclareOpen]);
+  }, [vinculoBatchDialogOpen]);
   useEffect(() => {
     if (!vinculoBatchDialogOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !updating) setVinculoBatchDialog(null);
     };
+    // Clique fora fecha sem gravar; o foco fica onde o humano clicou.
+    const onPointerDown = (event: PointerEvent) => {
+      if (updating || !(event.target instanceof Node)) return;
+      if (vinculoBatchDialogRef.current?.contains(event.target) || vinculoBatchTriggerRef.current?.contains(event.target)) return;
+      vinculoBatchTriggerRef.current = null;
+      setVinculoBatchDialog(null);
+    };
+    // O painel não prende o foco: Tab para fora dele o fecha sem gravar, e o
+    // foco fica onde o humano chegou.
+    const onFocusIn = (event: FocusEvent) => {
+      if (updating || !(event.target instanceof Node)) return;
+      if (vinculoBatchDialogRef.current?.contains(event.target) || vinculoBatchTriggerRef.current?.contains(event.target)) return;
+      vinculoBatchTriggerRef.current = null;
+      setVinculoBatchDialog(null);
+    };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("focusin", onFocusIn);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("focusin", onFocusIn);
+    };
   }, [vinculoBatchDialogOpen, updating]);
+  // Seleção esvaziada por qualquer caminho (teclado, troca de marca, fim de
+  // lote): o painel fecha e as escolhas são descartadas, para não reaparecerem
+  // numa seleção nova. Nada foi gravado sem Aplicar. Ajuste no próprio
+  // render (padrão do React para estado derivado), sem efeito em cascata.
+  if (vinculoBatchDialog && selectedIds.size === 0) setVinculoBatchDialog(null);
+  const openVinculoBatchPanel = (trigger: HTMLElement | null) => {
+    vinculoBatchTriggerRef.current = trigger;
+    const rect = trigger?.getBoundingClientRect();
+    const panelWidth = Math.min(448, window.innerWidth - 16);
+    setVinculoBatchPanelRight(rect ? Math.max(8, Math.min(Math.round(window.innerWidth - rect.right), window.innerWidth - panelWidth - 8)) : 8);
+    setVinculoBatchDialog({ ...EMPTY_VINCULO_BATCH_CHOICES, note: "", destination: "" });
+  };
+  // KGR em grupo também passa por confirmação: no Chrome/Windows a seta num
+  // select fechado já dispara o change, e o lote gravaria sem querer.
+  const [kgrBatchConfirm, setKgrBatchConfirm] = useState<KgrApplicability | null>(null);
+  const kgrBatchTriggerRef = useRef<HTMLElement | null>(null);
+  const kgrBatchDialogRef = useRef<HTMLElement | null>(null);
+  const kgrBatchDialogOpen = kgrBatchConfirm !== null;
+  useEffect(() => {
+    if (!kgrBatchDialogOpen) return;
+    kgrBatchDialogRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setKgrBatchConfirm(null); };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      const trigger = kgrBatchTriggerRef.current;
+      kgrBatchTriggerRef.current = null;
+      if (trigger?.isConnected) trigger.focus();
+    };
+  }, [kgrBatchDialogOpen]);
   const [architectHandoffSending, setArchitectHandoffSending] = useState(false);
   const moreActionsRef = useRef<HTMLDivElement>(null);
   const bulkProgressLockRef = useRef(false);
   const bulkProgressResetTimerRef = useRef<number | null>(null);
+  const bulkStopRequestRef = useRef<string | null>(null);
+  const [bulkFailuresOpen, setBulkFailuresOpen] = useState(false);
 
   useEffect(() => {
     if (!moreActionsOpen) return;
@@ -678,7 +861,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     };
   }, [moreActionsOpen]);
 
-  useEffect(() => () => {
+  useEffect(() => () => { bulkStopRequestRef.current = "A tela do Processador foi fechada; os blocos que faltavam não foram enviados.";
     if (bulkProgressResetTimerRef.current !== null) {
       window.clearTimeout(bulkProgressResetTimerRef.current);
       bulkProgressResetTimerRef.current = null;
@@ -686,12 +869,12 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   }, []);
 
   // Avisos do piloto Minerador usam o contrato global.
-  const showNotification = useCallback((type: "success" | "error" | "info", message: string, options: { code?: string; stage?: string; persistent?: boolean; diagnostic?: Record<string, unknown>; metadata?: Record<string, unknown> } = {}) => {
+  const showNotification = useCallback((type: "success" | "error" | "info" | "warning", message: string, options: { code?: string; stage?: string; persistent?: boolean; diagnostic?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: string } = {}) => {
     publishNotice({
-      severity: type === "success" ? "SUCCESS" : type === "error" ? "ERROR" : "INFO",
+      severity: type === "success" ? "SUCCESS" : type === "error" ? "ERROR" : type === "warning" ? "WARNING" : "INFO",
       title: "Minerador",
       message,
-      details: [options.stage ? `Etapa: ${options.stage}` : "", options.code ? `Código: ${options.code}` : ""].filter(Boolean).join(" · ") || undefined,
+      details: [[options.stage ? `Etapa: ${options.stage}` : "", options.code ? `Código: ${options.code}` : ""].filter(Boolean).join(" · "), options.details || ""].filter(Boolean).join("\n") || undefined,
       metadata: options.metadata,
       copyPayload: options.diagnostic,
       source: type === "success" ? "persistence" : "workflow",
@@ -721,6 +904,24 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     });
   }, []);
 
+  /** Tira a tentativa em curso de quem não chegou a rodar (lote parado). */
+  const clearProcessAttempt = useCallback((keywordIds: readonly string[], step: MineradorProcessName) => {
+    if (keywordIds.length === 0) return;
+    setProcessAttemptsByKeywordId(previous => {
+      let changed = false;
+      const next = { ...previous };
+      for (const keywordId of keywordIds) {
+        const current = next[keywordId];
+        if (!current?.[step]) continue;
+        const rest = { ...current };
+        delete rest[step];
+        next[keywordId] = rest;
+        changed = true;
+      }
+      return changed ? next : previous;
+    });
+  }, []);
+
   const startBulkProgress = useCallback((step: BulkProgressStep, total: number | null = null, keywordIds?: readonly string[], operationId?: string) => {
     if (bulkProgressLockRef.current) return false;
     if (bulkProgressResetTimerRef.current !== null) {
@@ -728,6 +929,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       bulkProgressResetTimerRef.current = null;
     }
     bulkProgressLockRef.current = true;
+    bulkStopRequestRef.current = null;
+    setBulkFailuresOpen(false);
     setBulkProgress({
       status: "processing",
       step,
@@ -735,6 +938,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       total: total && total > 0 ? total : null,
       message: "",
       detail: "",
+      batch: false,
+      failed: 0,
+      failures: [],
+      stoppable: false,
     });
     setProcessAttempt(keywordIds || [...selectedIds], step, "running", operationId);
     return true;
@@ -754,21 +961,94 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     });
   }, []);
 
-  const finishBulkProgress = useCallback((status: Exclude<BulkProgressStatus, "idle" | "processing">, message?: string) => {
+  /*
+   * LOTE PROGRESSIVO (pedido do dono, 2026-09-24). As ações em grupo do
+   * Processador andam pelo helper puro `runProgressiveBatch`: a barra avança
+   * a cada item que volta, o texto diz "Processando N de T · faltam R", uma
+   * falha não para o resto e o fim diz "Concluído: X ok, Y com falha". O
+   * andamento não vai para o sino; só o resumo final vira um aviso.
+   */
+  const reportBatchProgress = useCallback((snapshot: BatchProgressSnapshot) => {
+    const stopping = bulkStopRequestRef.current !== null;
+    setBulkProgress(previous => previous.status !== "processing" ? previous : {
+      ...previous,
+      current: snapshot.done,
+      total: snapshot.total > 0 ? snapshot.total : null,
+      // Primeira linha curta ("5 de 30 · faltam 25"): o cartão estreito não
+      // pode cortar justamente o "faltam N". A etapa vai na linha de contexto.
+      message: snapshot.status === "running" ? formatBatchProgressCompact(snapshot) : "Conferindo a gravação…",
+      chunkStartedAtMs: snapshot.status === "running" ? snapshot.chunkStartedAtMs ?? null : null,
+      detail: snapshot.status === "running"
+        ? `${formatBatchProgressDetail(snapshot)}${stopping ? " · parando depois do bloco atual" : ""}`
+        : formatBatchProgress(snapshot),
+      batch: true,
+      failed: snapshot.failed,
+      stoppable: snapshot.status === "running" && snapshot.chunkCount > 1 && !stopping,
+    });
+  }, []);
+
+  const runBulkBatch = useCallback(<Item,>(input: Omit<ProgressiveBatchInput<Item>, "onProgress" | "shouldStop">) => runProgressiveBatch<Item>({
+    ...input,
+    onProgress: reportBatchProgress,
+    shouldStop: () => bulkStopRequestRef.current,
+  }), [reportBatchProgress]);
+
+  /** Parar: termina o bloco em curso e não começa outro. Nada é desfeito. */
+  const requestBulkStop = useCallback(() => {
+    bulkStopRequestRef.current = BATCH_STOPPED_BY_USER_REASON;
+    setBulkProgress(previous => previous.status === "processing"
+      ? { ...previous, stoppable: false, detail: `${previous.detail} · parando depois do bloco atual` }
+      : previous);
+  }, []);
+
+  const finishBulkProgress = useCallback((status: Exclude<BulkProgressStatus, "idle" | "processing">, message?: string, failures?: readonly BulkProgressFailure[]) => {
     bulkProgressLockRef.current = false;
+    bulkStopRequestRef.current = null;
     setBulkProgress(previous => ({
       ...previous,
       status,
       current: status === "success" && previous.total ? previous.total : previous.current,
       message: message || (status === "success" ? "Concluído" : "Falhou"),
       detail: message || (status === "success" ? "Concluído" : "Falhou"),
+      failures: failures || [],
+      stoppable: false,
     }));
     if (bulkProgressResetTimerRef.current !== null) window.clearTimeout(bulkProgressResetTimerRef.current);
+    bulkProgressResetTimerRef.current = null;
+    // Com falhas, o resumo e a lista ficam no rodapé até o humano fechar.
+    if (failures && failures.length > 0) return;
     bulkProgressResetTimerRef.current = window.setTimeout(() => {
       bulkProgressResetTimerRef.current = null;
       setBulkProgress(initialBulkProgressState);
     }, 1800);
   }, []);
+
+  const dismissBulkProgress = useCallback(() => {
+    if (bulkProgressLockRef.current) return;
+    if (bulkProgressResetTimerRef.current !== null) {
+      window.clearTimeout(bulkProgressResetTimerRef.current);
+      bulkProgressResetTimerRef.current = null;
+    }
+    setBulkFailuresOpen(false);
+    setBulkProgress(initialBulkProgressState);
+  }, []);
+
+  const batchFailureViews = (snapshot: Pick<BatchProgressSnapshot, "failures">): BulkProgressFailure[] => {
+    const nameById = new Map(keywords.map(item => [item.id, item.keyword]));
+    return snapshot.failures.map(failure => ({ id: failure.id, label: nameById.get(failure.id) || failure.id, reason: failure.reason }));
+  };
+  const batchFailureDetails = (snapshot: Pick<BatchProgressSnapshot, "failures">) => (
+    formatBatchFailures(snapshot, new Map(keywords.map(item => [item.id, item.keyword]))).join("\n") || undefined
+  );
+
+  /** Tentativas no fim de um lote de gravação: confirmada, falha ou não iniciada. */
+  const settleBatchAttempts = (step: MineradorProcessName, ids: readonly string[], confirmedIds: readonly string[], batch: BatchProgressSnapshot | null, operationId: string) => {
+    const confirmed = new Set(confirmedIds);
+    const failedSet = new Set(batch ? batch.failures.map(failure => failure.id) : ids.filter(id => !confirmed.has(id)));
+    setProcessAttempt(ids.filter(id => confirmed.has(id)), step, "success", operationId);
+    setProcessAttempt(ids.filter(id => !confirmed.has(id) && failedSet.has(id)), step, "failed", operationId);
+    clearProcessAttempt(ids.filter(id => !confirmed.has(id) && !failedSet.has(id)), step);
+  };
 
   const handleDiscoverySourceComplete = useCallback((payload: DiscoverySourceResponse) => {
     const count = payload.summary.approved;
@@ -895,6 +1175,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
 
     let failed = 0;
+    let stoppedReason: string | null = null;
     const failedIds: string[] = [];
     /*
      * POR QUE A RAZÃO É GUARDADA.
@@ -908,33 +1189,43 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
      */
     const failureReasons: Array<{ id: string; keyword: string; stage: "write" | "readback"; reason: string }> = [];
     const keywordNameById = new Map(sourceKeywords.map(item => [item.id, item.keyword]));
-    if (options.persist) {
-      for (let offset = 0; offset < pendingUpdates.length; offset += 20) {
-        const chunk = pendingUpdates.slice(offset, offset + 20);
-        const results = await Promise.allSettled(chunk.map(async update => {
-          const { error } = await supabase
-            .from("minerador_keywords")
-            .update({ intent: update.intent, analise_semantica: update.analise_semantica })
-            .eq("id", update.id)
-            .eq("brand_id", selectedBrandId)
-            .is("deleted_at", null);
-          if (error) throw error;
-          return update.id;
-        }));
-        results.forEach((result, index) => {
-          if (result.status === "rejected") {
-            failed += 1;
-            const id = chunk[index].id;
-            failedIds.push(id);
-            const causa = result.reason as { message?: unknown; code?: unknown; details?: unknown } | null;
-            failureReasons.push({
-              id,
-              keyword: keywordNameById.get(id) || id,
-              stage: "write",
-              reason: [causa?.code, causa?.message, causa?.details].filter(Boolean).join(" · ") || "erro sem mensagem",
-            });
+    if (options.persist && pendingUpdates.length > 0) {
+      // Gravação em lote progressivo: a barra conta cada keyword gravada e
+      // uma falha não impede as demais.
+      const startedIds = new Set<string>();
+      const writeBatch = await runBulkBatch({
+        label: "Lógica",
+        items: pendingUpdates,
+        itemId: update => update.id,
+        chunkSize: 1,
+        concurrency: BULK_WRITE_CONCURRENCY,
+        runChunk: async chunk => Promise.all(chunk.map(async (update): Promise<BatchItemOutcome> => {
+          startedIds.add(update.id);
+          let reason: string;
+          try {
+            const { error } = await supabase
+              .from("minerador_keywords")
+              .update({ intent: update.intent, analise_semantica: update.analise_semantica })
+              .eq("id", update.id)
+              .eq("brand_id", selectedBrandId)
+              .is("deleted_at", null);
+            if (!error) return { id: update.id, status: "succeeded" };
+            reason = describeBatchWriteError(error);
+          } catch (writeError) {
+            reason = describeBatchWriteError(writeError);
           }
-        });
+          failed += 1;
+          failedIds.push(update.id);
+          failureReasons.push({ id: update.id, keyword: keywordNameById.get(update.id) || update.id, stage: "write", reason });
+          return { id: update.id, status: "failed", reason };
+        })),
+      });
+      stoppedReason = writeBatch.stoppedReason;
+      for (const update of pendingUpdates) {
+        if (startedIds.has(update.id)) continue;
+        failed += 1;
+        failedIds.push(update.id);
+        failureReasons.push({ id: update.id, keyword: keywordNameById.get(update.id) || update.id, stage: "write", reason: `não iniciada: ${stoppedReason || "lote parado"}` });
       }
     }
 
@@ -978,7 +1269,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       if (failedSet.has(item.id)) return sourceById.get(item.id) || item;
       return persistedById?.get(item.id) || item;
     });
-    return { items: persistedItems, changed: logicalChangedIds.length, failed, failedIds, logicalChangedIds, failureReasons };
+    return { items: persistedItems, changed: logicalChangedIds.length, failed, failedIds, logicalChangedIds, failureReasons, stoppedReason };
   };
 
   const handleQualifySelected = async () => {
@@ -1011,6 +1302,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
 
     let outcome: "success" | "error" = "success";
+    let logicSummary: string | undefined;
+    let logicFailures: BulkProgressFailure[] | undefined;
     try {
       pushKeywordsHistory(keywords, `Processar lógica de ${targets.length} keyword(s)`);
       const result = await processLogicalKeywordDna(targets, lists, { persist: true, showProgress: true });
@@ -1044,12 +1337,15 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         };
       }));
       setKeywords(current => current.map(item => byId.get(item.id) || item));
+      logicSummary = formatBatchSummary({ total: targets.length, succeeded: targets.length - result.failed, failed: result.failed, stoppedReason: result.stoppedReason });
+      logicFailures = result.failureReasons.map(item => ({ id: item.id, label: item.keyword, reason: item.reason }));
       if (result.failed > 0) {
         outcome = "error";
         const primeira = result.failureReasons[0];
-        showNotification("error", `${result.changed - result.failed} processadas; ${result.failed} falharam ao salvar.${primeira ? ` [${primeira.keyword}] ${primeira.reason}` : ""}`, {
+        showNotification(result.failed < targets.length ? "warning" : "error", `${logicSummary}. ${result.changed - result.failed} processadas; ${result.failed} falharam ao salvar.${primeira ? ` [${primeira.keyword}] ${primeira.reason}` : ""}`, {
           code: "LOGIC_PARTIAL_RESULTS",
           stage: result.failureReasons.every(item => item.stage === "write") ? "persist" : "canonical_readback",
+          details: result.failureReasons.slice(0, 20).map(item => `${item.keyword}: ${item.reason}`).join("\n") || undefined,
           metadata: { executionRequestId, failures: result.failureReasons },
         });
       } else {
@@ -1072,7 +1368,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         metadata: { executionRequestId },
       });
     } finally {
-      finishBulkProgress(outcome);
+      finishBulkProgress(outcome, logicSummary, logicFailures);
     }
   };
 
@@ -1090,10 +1386,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const runAutomaticSubjectLogic = async (declaredItems: KeywordItem[]) => {
     const targets = keywordsWithoutLogic(declaredItems);
     if (targets.length === 0) return;
-    // O progresso vive na barra do rodapé, que só aparece com seleção: sem
-    // seleção (o import não seleciona), os alvos passam a ser a seleção, para
-    // o humano ver o mesmo progresso do botão Lógica. Seleção existente fica.
-    if (selectedIds.size === 0) setSelectedIds(new Set(targets.map(item => item.id)));
+    // A barra do rodapé só existe com seleção feita pelo humano (contrato):
+    // a Lógica automática nunca seleciona. Sem seleção, o fim chega no sino.
     await runLogicalProcess(targets, { automatic: true });
   };
 
@@ -1207,26 +1501,27 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
    * estreito das três declarações e o ator da sessão. O estado local recebe o
    * `analise_semantica` escrito; o readback só confirma.
    */
-  const handleBatchVinculo = async (dialog: { choice: string; note: string; destination: string }) => {
+  const handleBatchVinculo = async (dialog: VinculoBatchDialogState) => {
     if (!selectedBrandId || selectedIds.size === 0) return;
     const actorId = actorUserId;
     if (!isKeywordSubjectActorId(actorId)) {
       showNotification("error", "Aplicar o Vínculo em grupo exige o usuário autenticado. Entre de novo e repita.", { code: "VINCULO_ACTOR_REQUIRED" });
       return;
     }
-    const action = vinculoBatchActionFromChoice(dialog.choice, { note: dialog.note, destinationUrl: dialog.destination });
-    if (!action) {
-      showNotification("error", "Escolha uma ação do Vínculo.");
+    const actions = vinculoBatchActionsFromChoices(dialog, { note: dialog.note, destinationUrl: dialog.destination });
+    if (!actions || actions.length === 0) {
+      showNotification("error", "Mude ao menos um campo do Vínculo.");
       return;
     }
     const changedAt = new Date().toISOString();
-    const destinationCatalog = action.kind === "subject_declare" && action.destinationUrl
-      ? await lookupSubjectDestinationCatalog(action.destinationUrl)
+    const subjectDeclare = actions.find(action => action.kind === "subject_declare");
+    const destinationCatalog = subjectDeclare?.kind === "subject_declare" && subjectDeclare.destinationUrl
+      ? await lookupSubjectDestinationCatalog(subjectDeclare.destinationUrl)
       : null;
-    const plan = planVinculoBatch({
+    const plan = planVinculoBatchChoices({
       keywords: keywords.filter(item => selectedIds.has(item.id)),
       brandId: selectedBrandId,
-      action,
+      actions,
       actorId,
       changedAt,
       brandSiteUrl: activeBrand?.site_url || null,
@@ -1238,7 +1533,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
     setVinculoBatchDialog(null);
     if (plan.updates.length === 0) {
-      showNotification("info", describeVinculoBatchConfirmation(plan).summary);
+      showNotification("info", describeVinculoBatchChoicesConfirmation(plan).summary);
       return;
     }
     const executionRequestId = crypto.randomUUID();
@@ -1249,18 +1544,28 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     let outcome: "success" | "error" = "success";
     const persistedIds: string[] = [];
     const confirmedIds: string[] = [];
+    let batch: BatchProgressSnapshot | null = null;
     try {
-      for (const update of plan.updates) {
-        const { error } = await supabase
-          .from("minerador_keywords")
-          .update({ analise_semantica: update.semantic })
-          .eq("id", update.id)
-          .eq("brand_id", update.brandId)
-          .is("deleted_at", null);
-        if (error) throw error;
-        persistedIds.push(update.id);
-        updateBulkProgress(persistedIds.length, plan.updates.length, `Vínculo ${persistedIds.length}/${plan.updates.length}`);
-      }
+      // Lote progressivo: cada keyword é uma gravação; falha individual é
+      // contada e as demais seguem.
+      batch = await runBulkBatch({
+        label: "Vínculo",
+        items: plan.updates,
+        itemId: update => update.id,
+        chunkSize: 1,
+        concurrency: BULK_WRITE_CONCURRENCY,
+        runChunk: async chunk => Promise.all(chunk.map(async (update): Promise<BatchItemOutcome> => {
+          const { error } = await supabase
+            .from("minerador_keywords")
+            .update({ analise_semantica: update.semantic })
+            .eq("id", update.id)
+            .eq("brand_id", update.brandId)
+            .is("deleted_at", null);
+          if (error) return { id: update.id, status: "failed", reason: describeBatchWriteError(error) };
+          persistedIds.push(update.id);
+          return { id: update.id, status: "succeeded" };
+        })),
+      });
       // Readback em blocos de 200 ids: a lista vai na URL do PostgREST.
       const readbackRows: VinculoBatchReadbackRow[] = [];
       for (let start = 0; start < persistedIds.length; start += KEYWORD_READBACK_ID_CHUNK) {
@@ -1289,29 +1594,34 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         for (const [id, semantic] of writtenById) {
           if (!next[id]) continue;
           changed = true;
-          next[id] = { ...next[id], semantic: { ...next[id].semantic, ...pickKeywordSubjectKeys(semantic), keyword_page_type: semantic.keyword_page_type, primary_keyword_policy: semantic.primary_keyword_policy } as KeywordSemantic };
+          next[id] = { ...next[id], semantic: { ...next[id].semantic, ...pickKeywordSubjectKeys(semantic), keyword_page_type: semantic.keyword_page_type, keyword_page_type_stance: semantic.keyword_page_type_stance, primary_keyword_policy: semantic.primary_keyword_policy } as KeywordSemantic };
         }
         return changed ? next : current;
       });
-      const unconfirmed = persistedIds.length - confirmedIds.length;
-      if (unconfirmed > 0) throw new Error(`O Vínculo foi enviado, mas o readback não confirmou ${unconfirmed} keyword(s).`);
-      setProcessAttempt(confirmedIds, "review", "success", executionRequestId);
-      showNotification("success", describeVinculoBatchResult(plan, confirmedIds.length), { metadata: { executionRequestId } });
+      batch = reclassifyBatchItemsAsFailed(batch, persistedIds.filter(id => !confirmedIds.includes(id)), "gravado, mas o readback não confirmou");
+      settleBatchAttempts("review", targetIds, confirmedIds, batch, executionRequestId);
+      if (batch.status === "completed") {
+        showNotification("success", describeVinculoBatchChoicesResult(plan, confirmedIds.length), { metadata: { executionRequestId } });
+      } else {
+        outcome = "error";
+        showNotification(confirmedIds.length > 0 ? "warning" : "error", `${formatBatchProgress(batch)}. ${confirmedIds.length} de ${plan.updates.length} keyword(s) foram gravadas e conferidas.`, { details: batchFailureDetails(batch), metadata: { executionRequestId, failures: batch.failures } });
+      }
     } catch (error) {
       outcome = "error";
-      const failedIds = targetIds.filter(id => !confirmedIds.includes(id));
-      if (confirmedIds.length > 0) setProcessAttempt(confirmedIds, "review", "success", executionRequestId);
-      if (failedIds.length > 0) setProcessAttempt(failedIds, "review", "failed", executionRequestId);
+      if (batch) batch = reclassifyBatchItemsAsFailed(batch, persistedIds.filter(id => !confirmedIds.includes(id)), "gravado, mas o readback falhou");
+      settleBatchAttempts("review", targetIds, confirmedIds, batch, executionRequestId);
       console.error("Erro ao aplicar o Vínculo em grupo:", error);
       showNotification("error", `${error instanceof Error ? error.message : "Não foi possível aplicar o Vínculo."} ${confirmedIds.length} de ${plan.updates.length} keyword(s) foram gravadas e conferidas.`, { metadata: { executionRequestId } });
     } finally {
       setUpdating(false);
-      finishBulkProgress(outcome);
+      finishBulkProgress(outcome, batch ? formatBatchProgress(batch) : undefined, batch ? batchFailureViews(batch) : undefined);
     }
-    if (action.kind === "subject_declare" && confirmedIds.length > 0) {
+    const declaredStep = plan.steps.find(step => step.action.kind === "subject_declare");
+    if (declaredStep && confirmedIds.length > 0) {
       const byId = new Map(keywords.map(item => [item.id, item]));
+      const declaredIds = new Set(declaredStep.updates.map(update => update.id));
       const declaredItems = plan.updates
-        .filter(update => confirmedIds.includes(update.id) && byId.has(update.id))
+        .filter(update => declaredIds.has(update.id) && confirmedIds.includes(update.id) && byId.has(update.id))
         .map(update => ({ ...byId.get(update.id)!, analise_semantica: update.semantic as KeywordSemantic }));
       await runAutomaticSubjectLogic(declaredItems);
     }
@@ -2590,13 +2900,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     if (selectedIds.size === 0 || !selectedBrandId) return;
     const actorId = session?.user?.email || session?.user?.id || "local-user";
     const decidedAt = new Date().toISOString();
+    // O Assunto anula o KGR: sai do lote antes do plano, e o aviso conta.
+    const { eligible, subjects } = partitionSubjectKeywords(keywords.filter(item => selectedIds.has(item.id)));
+    const withSubjectNotice = (text: string) => [text, describeSubjectSkipped(subjects.length, "KGR")].filter(Boolean).join(" ");
     const plan = planKgrApplicabilityBatch(
-      keywords.filter(item => selectedIds.has(item.id)),
+      eligible,
       applicability,
       { actorId, decidedAt, openDraftIds: Object.keys(humanReviewDrafts) },
     );
     if (plan.updates.length === 0) {
-      showNotification("info", describeKgrApplicabilityBatch(plan, 0));
+      showNotification("info", withSubjectNotice(describeKgrApplicabilityBatch(plan, 0)));
       return;
     }
     const executionRequestId = crypto.randomUUID();
@@ -2606,37 +2919,51 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     setUpdating(true);
     let outcome: "success" | "error" = "success";
     const persistedIds: string[] = [];
+    let confirmedIds: string[] = [];
+    let batch: BatchProgressSnapshot | null = null;
     try {
-      for (const update of plan.updates) {
-        const { error } = await supabase
-          .from("minerador_keywords")
-          .update({ analise_semantica: update.semantic })
-          .eq("id", update.id)
-          .eq("brand_id", selectedBrandId)
-          .is("deleted_at", null);
-        if (error) throw error;
-        persistedIds.push(update.id);
-        updateBulkProgress(persistedIds.length, plan.updates.length, `KGR ${persistedIds.length}/${plan.updates.length}`);
-      }
-      const persistedById = await readCanonicalKeywordRows(persistedIds);
+      batch = await runBulkBatch({
+        label: "KGR",
+        items: plan.updates,
+        itemId: update => update.id,
+        chunkSize: 1,
+        concurrency: BULK_WRITE_CONCURRENCY,
+        runChunk: async chunk => Promise.all(chunk.map(async (update): Promise<BatchItemOutcome> => {
+          const { error } = await supabase
+            .from("minerador_keywords")
+            .update({ analise_semantica: update.semantic })
+            .eq("id", update.id)
+            .eq("brand_id", selectedBrandId)
+            .is("deleted_at", null);
+          if (error) return { id: update.id, status: "failed", reason: describeBatchWriteError(error) };
+          persistedIds.push(update.id);
+          return { id: update.id, status: "succeeded" };
+        })),
+      });
+      const persistedById = persistedIds.length > 0 ? await readCanonicalKeywordRows(persistedIds) : new Map<string, KeywordItem>();
       const unconfirmed = persistedIds.filter(id => {
         const row = persistedById.get(id);
         return !row || readKgrApplicability(row.analise_semantica) !== applicability;
       });
       setKeywords(current => current.map(item => persistedById.get(item.id) || item));
-      if (unconfirmed.length > 0) throw new Error(`A decisão foi salva, mas o readback canônico não confirmou ${unconfirmed.length} keyword(s).`);
-      setProcessAttempt(persistedIds, "review", "success", executionRequestId);
-      showNotification("success", describeKgrApplicabilityBatch(plan, persistedIds.length), { metadata: { executionRequestId } });
+      batch = reclassifyBatchItemsAsFailed(batch, unconfirmed, "gravado, mas o readback canônico não confirmou");
+      confirmedIds = persistedIds.filter(id => !unconfirmed.includes(id));
+      settleBatchAttempts("review", targetIds, confirmedIds, batch, executionRequestId);
+      if (batch.status === "completed") {
+        showNotification("success", withSubjectNotice(describeKgrApplicabilityBatch(plan, confirmedIds.length)), { metadata: { executionRequestId } });
+      } else {
+        outcome = "error";
+        showNotification(confirmedIds.length > 0 ? "warning" : "error", withSubjectNotice(`${formatBatchProgress(batch)}. ${confirmedIds.length} de ${plan.updates.length} keyword(s) foram atualizadas.`), { details: batchFailureDetails(batch), metadata: { executionRequestId, failures: batch.failures } });
+      }
     } catch (error) {
       outcome = "error";
-      const failedIds = targetIds.filter(id => !persistedIds.includes(id));
-      if (persistedIds.length > 0) setProcessAttempt(persistedIds, "review", "success", executionRequestId);
-      if (failedIds.length > 0) setProcessAttempt(failedIds, "review", "failed", executionRequestId);
+      if (batch) batch = reclassifyBatchItemsAsFailed(batch, persistedIds.filter(id => !confirmedIds.includes(id)), "gravado, mas o readback falhou");
+      settleBatchAttempts("review", targetIds, confirmedIds, batch, executionRequestId);
       console.error("Erro ao definir aplicabilidade do KGR em lote:", error);
-      showNotification("error", `${error instanceof Error ? error.message : "Não foi possível salvar a aplicabilidade do KGR."} ${persistedIds.length} de ${plan.updates.length} keyword(s) foram atualizadas.`, { metadata: { executionRequestId } });
+      showNotification("error", `${error instanceof Error ? error.message : "Não foi possível salvar a aplicabilidade do KGR."} ${persistedIds.length} de ${plan.updates.length} keyword(s) foram gravadas, sem conferência.`, { metadata: { executionRequestId } });
     } finally {
       setUpdating(false);
-      finishBulkProgress(outcome);
+      finishBulkProgress(outcome, batch ? formatBatchProgress(batch) : undefined, batch ? batchFailureViews(batch) : undefined);
     }
   };
 
@@ -2663,37 +2990,51 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     setUpdating(true);
     let outcome: "success" | "error" = "success";
     const persistedIds: string[] = [];
+    let confirmedIds: string[] = [];
+    let batch: BatchProgressSnapshot | null = null;
     try {
-      for (const update of plan.updates) {
-        const { error } = await supabase
-          .from("minerador_keywords")
-          .update({ analise_semantica: update.semantic })
-          .eq("id", update.id)
-          .eq("brand_id", selectedBrandId)
-          .is("deleted_at", null);
-        if (error) throw error;
-        persistedIds.push(update.id);
-        updateBulkProgress(persistedIds.length, plan.updates.length, `Revisão ${persistedIds.length}/${plan.updates.length}`);
-      }
-      const persistedById = await readCanonicalKeywordRows(persistedIds);
+      batch = await runBulkBatch({
+        label: "Revisão",
+        items: plan.updates,
+        itemId: update => update.id,
+        chunkSize: 1,
+        concurrency: BULK_WRITE_CONCURRENCY,
+        runChunk: async chunk => Promise.all(chunk.map(async (update): Promise<BatchItemOutcome> => {
+          const { error } = await supabase
+            .from("minerador_keywords")
+            .update({ analise_semantica: update.semantic })
+            .eq("id", update.id)
+            .eq("brand_id", selectedBrandId)
+            .is("deleted_at", null);
+          if (error) return { id: update.id, status: "failed", reason: describeBatchWriteError(error) };
+          persistedIds.push(update.id);
+          return { id: update.id, status: "succeeded" };
+        })),
+      });
+      const persistedById = persistedIds.length > 0 ? await readCanonicalKeywordRows(persistedIds) : new Map<string, KeywordItem>();
       const unconfirmed = persistedIds.filter(id => {
         const row = persistedById.get(id);
         return !row || humanReviewRecord(row.analise_semantica).status !== "completed";
       });
       setKeywords(current => current.map(item => persistedById.get(item.id) || item));
-      if (unconfirmed.length > 0) throw new Error(`A revisão foi salva, mas o readback canônico não confirmou ${unconfirmed.length} keyword(s).`);
-      setProcessAttempt(persistedIds, "review", "success", executionRequestId);
-      showNotification("success", describeHumanReviewCompletionBatch(plan, persistedIds.length), { metadata: { executionRequestId } });
+      batch = reclassifyBatchItemsAsFailed(batch, unconfirmed, "gravado, mas o readback canônico não confirmou");
+      confirmedIds = persistedIds.filter(id => !unconfirmed.includes(id));
+      settleBatchAttempts("review", targetIds, confirmedIds, batch, executionRequestId);
+      if (batch.status === "completed") {
+        showNotification("success", describeHumanReviewCompletionBatch(plan, confirmedIds.length), { metadata: { executionRequestId } });
+      } else {
+        outcome = "error";
+        showNotification(confirmedIds.length > 0 ? "warning" : "error", `${formatBatchProgress(batch)}. ${confirmedIds.length} de ${plan.updates.length} keyword(s) foram concluídas.`, { details: batchFailureDetails(batch), metadata: { executionRequestId, failures: batch.failures } });
+      }
     } catch (error) {
       outcome = "error";
-      const failedIds = targetIds.filter(id => !persistedIds.includes(id));
-      if (persistedIds.length > 0) setProcessAttempt(persistedIds, "review", "success", executionRequestId);
-      if (failedIds.length > 0) setProcessAttempt(failedIds, "review", "failed", executionRequestId);
+      if (batch) batch = reclassifyBatchItemsAsFailed(batch, persistedIds.filter(id => !confirmedIds.includes(id)), "gravado, mas o readback falhou");
+      settleBatchAttempts("review", targetIds, confirmedIds, batch, executionRequestId);
       console.error("Erro ao concluir revisão humana em lote:", error);
-      showNotification("error", `${error instanceof Error ? error.message : "Não foi possível concluir a revisão humana."} ${persistedIds.length} de ${plan.updates.length} keyword(s) foram concluídas.`, { metadata: { executionRequestId } });
+      showNotification("error", `${error instanceof Error ? error.message : "Não foi possível concluir a revisão humana."} ${persistedIds.length} de ${plan.updates.length} keyword(s) foram gravadas, sem conferência.`, { metadata: { executionRequestId } });
     } finally {
       setUpdating(false);
-      finishBulkProgress(outcome);
+      finishBulkProgress(outcome, batch ? formatBatchProgress(batch) : undefined, batch ? batchFailureViews(batch) : undefined);
     }
   };
 
@@ -2812,11 +3153,18 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     const baseSemantic = item.analise_semantica || {};
 
     if (action.type === "page_type") {
-      // Declaração livre: informa o Arquiteto, não trava o Minerador.
+      // Declaração livre: informa o Arquiteto, não trava o Minerador. O peso
+      // (potencial/declarado) vai junto; o ator é o auth.users.id da sessão.
+      const pageTypeActorId = actorUserId;
+      if (!isKeywordSubjectActorId(pageTypeActorId)) {
+        showNotification("error", "Declarar o Potencial de página exige o usuário autenticado. Entre de novo e repita.", { code: "PAGE_TYPE_ACTOR_REQUIRED" });
+        return;
+      }
       const evidence = readSiteOrigin(item.analise_semantica);
       const applied = setKeywordPageType(item.analise_semantica, {
         pageType: action.pageType,
-        actorId: session?.user?.id || "usuario",
+        ...(action.stance ? { stance: action.stance } : {}),
+        actorId: pageTypeActorId,
         changedAt: new Date().toISOString(),
         siteRole: evidence?.siteRole,
         published: readPublicationLink({ status: item.status, evidence }).state === "published",
@@ -2829,11 +3177,28 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       try {
         const { error } = await supabase.from("minerador_keywords").update({ analise_semantica: applied.semantic }).eq("id", item.id).eq("brand_id", selectedBrandId).is("deleted_at", null);
         if (error) throw error;
-        const { data: readback, error: readbackError } = await supabase.from("minerador_keywords").select("id,brand_id,analise_semantica").eq("id", item.id).eq("brand_id", selectedBrandId).is("deleted_at", null).maybeSingle();
+        // Readback estreito: só as declarações do Vínculo, nunca a linha inteira.
+        const { data: readback, error: readbackError } = await supabase
+          .from("minerador_keywords")
+          .select(VINCULO_BATCH_READBACK_COLUMNS)
+          .eq("id", item.id)
+          .eq("brand_id", selectedBrandId)
+          .is("deleted_at", null)
+          .maybeSingle();
         if (readbackError) throw readbackError;
-        if (!readback || readback.brand_id !== selectedBrandId) throw new Error("A declaração não pertence à marca ativa após o salvamento.");
-        setKeywords(current => current.map(keyword => keyword.id === item.id ? { ...keyword, analise_semantica: readback.analise_semantica as KeywordSemantic } : keyword));
-        showNotification("success", `Tipo de página declarado: ${keywordPageTypeLabel(action.pageType)}.`);
+        const pageTypeUpdate = { id: item.id, brandId: selectedBrandId, keyword: item.keyword, semantic: applied.semantic, demotesApproval: false };
+        if (!vinculoReadbackConfirmed(pageTypeUpdate, readback as VinculoBatchReadbackRow | null)) {
+          throw new Error("O Potencial de página foi enviado, mas o readback não confirmou a declaração nesta marca.");
+        }
+        pushKeywordsHistory(keywords, `Potencial de página de ${item.keyword}`);
+        setKeywords(current => current.map(keyword => keyword.id === item.id ? { ...keyword, analise_semantica: applied.semantic as KeywordSemantic } : keyword));
+        // A revisão aberta guarda a própria cópia do DNA: leva o tipo e o peso
+        // para ela, senão "Concluir" gravaria de volta o valor antigo.
+        const pageTypeKeys = Object.fromEntries(PAGE_TYPE_DRAFT_KEYS.filter(key => key in applied.semantic).map(key => [key, applied.semantic[key]]));
+        setHumanReviewDrafts(current => current[item.id]
+          ? { ...current, [item.id]: { ...current[item.id], semantic: { ...current[item.id].semantic, ...pageTypeKeys } as KeywordSemantic } }
+          : current);
+        showNotification("success", `Potencial de página gravado e conferido:${action.stance ? keywordPageTypeStanding(action.pageType, { declared: action.stance === "declared" }) : keywordPageTypeLabel(action.pageType)}.`);
       } catch (error) {
         showNotification("error", error instanceof Error ? error.message : "Não foi possível declarar o tipo de página.");
       } finally {
@@ -2985,64 +3350,120 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }, 180);
   };
 
-  // AÃ§Ã£o em Lote: volume pela API e resultados allintitle pela extensão conectada
+  // Ação em lote: Resultados (DataForSEO) em blocos progressivos. A rota paga
+  // recebe um bloco por vez, cada bloco com o seu operationRequestId; bloco
+  // que falha é contado e o lote segue; nada é repetido automaticamente.
   const handleBatchAllintitle = async () => {
     if (allintitleMeasuring || selectedIds.size === 0 || !selectedBrandId) return;
+    const brandId = selectedBrandId;
     const operationRequestId = crypto.randomUUID();
     const keywordIds = [...selectedIds];
+    if (keywordIds.length > RESULTS_BATCH_MAX_TARGETS) {
+      showNotification("error", "O lote de allintitle excede o limite operacional de 1.000 alvos. Selecione menos keywords.", { code: "DATAFORSEO_BATCH_LIMIT" });
+      return;
+    }
     if (!startBulkProgress("results", keywordIds.length, keywordIds, operationRequestId)) return;
     let outcome: "success" | "error" = "success";
     setAllintitleMeasuring(true);
     setUpdating(true);
-    showNotification("info", `Medindo resultados allintitle: ${keywordIds.length} alvo(s).`, { persistent: true, metadata: { executionRequestId: operationRequestId, operationRequestId } });
+    type ResultsSemanticEvidence = { keywordId?: string | null; serpEvidence?: SerpSemanticEvidence | null; serpError?: { code?: string; message?: string } | null };
+    const collectedEvidences: ResultsSemanticEvidence[] = [];
+    const collectedQualificationOutcomes: Array<{ keywordId?: string | null; persisted?: boolean }> = [];
+    const touchedIds = new Set<string>();
+    const confirmedAll = new Set<string>();
+    const chunkRequestIds: string[] = [];
+    const totals: { persisted: number; overviewPartialMessage: string | null; lastFailure: { code: string; stage: string; diagnostic?: Record<string, unknown> } | null } = { persisted: 0, overviewPartialMessage: null, lastFailure: null };
+    let batch: BatchProgressSnapshot | null = null;
     try {
-      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/dataforseo/allintitle`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keywordIds, operationRequestId }) });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.success) {
-        const error = new Error(data?.message || "A medição allintitle não foi concluída.") as Error & { code?: string; stage?: string; diagnostic?: Record<string, unknown> };
-        error.code = typeof data?.code === "string" ? data.code : "dataforseo_request_failed";
-        error.stage = typeof data?.stage === "string" ? data.stage : "provider_request";
-        error.diagnostic = data?.diagnostic && typeof data.diagnostic === "object" ? data.diagnostic : undefined;
-        throw error;
-      }
-      const projections = Array.isArray(data.projections) ? data.projections as Array<{ keywordId?: string | null; measuredAt?: string | null; serpEvidence?: SerpSemanticEvidence | null; serpError?: { code?: string; message?: string } | null }> : [];
-      const byKeywordId = new Map(projections.filter(item => typeof item.keywordId === "string").map(item => [item.keywordId!, item]));
-      // The provider projection is feedback only. The table changes only from
-      // the tenant-scoped canonical readback after persistence succeeds.
-      let confirmedIds: string[] = [];
-      if (byKeywordId.size > 0) {
-        const persistedByKeywordId = await readCanonicalKeywordRows([...byKeywordId.keys()]);
-        confirmedIds = [...persistedByKeywordId.entries()]
-          .filter(([id, row]) => {
-            const projectionMeasuredAt = byKeywordId.get(id)?.measuredAt;
-            const measurement = row.analise_semantica?.allintitle_measurement;
-            return resolveMineradorProcessState(row).results.complete
-              && typeof projectionMeasuredAt === "string"
-              && measurement && typeof measurement.measuredAt === "string"
-              && measurement.measuredAt === projectionMeasuredAt;
-          })
-          .map(([id]) => id);
-        setKeywords(current => current.map(item => confirmedIds.includes(item.id) ? persistedByKeywordId.get(item.id)! : item));
-      }
-      setProcessAttempt(confirmedIds, "results", "success", operationRequestId);
-      setProcessAttempt(keywordIds.filter(id => !confirmedIds.includes(id)), "results", "failed", operationRequestId);
-      // A evidência da SERP natural é um artefato independente da medição: ela
-      // alimenta a working copy da Qualificação Semântica sem tocar Resultado,
-      // KGR ou KeywordDNA persistido.
-      const semanticEvidences = Array.isArray(data.semanticEvidences) ? data.semanticEvidences as Array<{ keywordId?: string | null; serpEvidence?: SerpSemanticEvidence | null; serpError?: { code?: string; message?: string } | null }> : [];
-      const serpFailedIds = new Set<string>();
-      for (const projection of semanticEvidences) {
-        const keywordId = typeof projection.keywordId === "string" ? projection.keywordId : null;
-        if (!keywordId) continue;
-        if (projection.serpError) serpFailedIds.add(keywordId);
-      }
+      batch = await runBulkBatch({
+        label: "Resultados",
+        items: keywordIds,
+        itemId: id => id,
+        chunkSize: RESULTS_BATCH_CHUNK_SIZE,
+        concurrency: 1,
+        runChunk: async chunkIds => {
+          const chunkRequestId = crypto.randomUUID();
+          chunkRequestIds.push(chunkRequestId);
+          for (const id of chunkIds) touchedIds.add(id);
+          const measureChunk = async (): Promise<BatchChunkResult> => {
+            // Falha de rede não é repetida: o servidor pode ter medido e cobrado.
+            const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(brandId)}/dataforseo/allintitle`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keywordIds: chunkIds, operationRequestId: chunkRequestId }) }).catch(() => null);
+            if (!response) {
+              setProcessAttempt(chunkIds, "results", "failed", chunkRequestId);
+              return chunkIds.map(id => ({ id, status: "failed" as const, reason: BATCH_NO_SERVER_CONFIRMATION }));
+            }
+            const data = await response.json().catch(() => null);
+            const failureById = new Map<string, string>((Array.isArray(data?.failures) ? data.failures as Array<{ targetId?: unknown; message?: unknown; code?: unknown }> : [])
+              .filter(item => typeof item?.targetId === "string")
+              .map(item => [String(item.targetId), String(item.message || item.code || "sem medição confirmada")]));
+            if (!response.ok || !data?.success) {
+              const code = typeof data?.code === "string" ? data.code : "dataforseo_request_failed";
+              totals.lastFailure = { code, stage: typeof data?.stage === "string" ? data.stage : "provider_request", diagnostic: data?.diagnostic && typeof data.diagnostic === "object" ? data.diagnostic : undefined };
+              setProcessAttempt(chunkIds, "results", "failed", chunkRequestId);
+              const reason = typeof data?.message === "string" && data.message ? data.message : "A medição allintitle não foi concluída.";
+              const stop = response.status === 401 || response.status === 403 || code === "BRAND_NOT_FOUND" ? reason : null;
+              return { outcomes: chunkIds.map(id => ({ id, status: "failed" as const, reason: failureById.get(id) || reason })), stop };
+            }
+            const projections = Array.isArray(data.projections) ? data.projections as Array<{ keywordId?: string | null; measuredAt?: string | null; serpEvidence?: SerpSemanticEvidence | null; serpError?: { code?: string; message?: string } | null }> : [];
+            const byKeywordId = new Map(projections.filter(item => typeof item.keywordId === "string").map(item => [item.keywordId!, item]));
+            // The provider projection is feedback only. The table changes only from
+            // the tenant-scoped canonical readback after persistence succeeds.
+            let confirmedIds: string[] = [];
+            if (byKeywordId.size > 0) {
+              const persistedByKeywordId = await readCanonicalKeywordRows([...byKeywordId.keys()]);
+              confirmedIds = [...persistedByKeywordId.entries()]
+                .filter(([id, row]) => {
+                  const projectionMeasuredAt = byKeywordId.get(id)?.measuredAt;
+                  const measurement = row.analise_semantica?.allintitle_measurement;
+                  return resolveMineradorProcessState(row).results.complete
+                    && typeof projectionMeasuredAt === "string"
+                    && measurement && typeof measurement.measuredAt === "string"
+                    && measurement.measuredAt === projectionMeasuredAt;
+                })
+                .map(([id]) => id);
+              setKeywords(current => current.map(item => confirmedIds.includes(item.id) ? persistedByKeywordId.get(item.id)! : item));
+            }
+            setProcessAttempt(confirmedIds, "results", "success", chunkRequestId);
+            setProcessAttempt(chunkIds.filter(id => !confirmedIds.includes(id)), "results", "failed", chunkRequestId);
+            for (const id of confirmedIds) confirmedAll.add(id);
+            // A evidência da SERP natural é um artefato independente da medição: ela
+            // alimenta a working copy da Qualificação Semântica sem tocar Resultado,
+            // KGR ou KeywordDNA persistido.
+            const semanticEvidences = Array.isArray(data.semanticEvidences) ? data.semanticEvidences as ResultsSemanticEvidence[] : [];
+            const serpFailedIds = new Set<string>();
+            for (const projection of semanticEvidences) {
+              const keywordId = typeof projection.keywordId === "string" ? projection.keywordId : null;
+              if (!keywordId) continue;
+              if (projection.serpError) serpFailedIds.add(keywordId);
+            }
+            setSerpCollectionFailures(current => {
+              const next = { ...current };
+              for (const id of chunkIds) {
+                if (serpFailedIds.has(id)) next[id] = true;
+                else if (semanticEvidences.some(projection => projection.keywordId === id && projection.serpEvidence)) delete next[id];
+              }
+              return next;
+            });
+            collectedEvidences.push(...semanticEvidences);
+            if (Array.isArray(data.semanticQualifications)) collectedQualificationOutcomes.push(...data.semanticQualifications as Array<{ keywordId?: string | null; persisted?: boolean }>);
+            totals.persisted += typeof data.persistedCount === "number" ? data.persistedCount : byKeywordId.size;
+            if (data.code === "DATAFORSEO_OVERVIEW_PARTIAL") totals.overviewPartialMessage = typeof data.message === "string" ? data.message : `${byKeywordId.size} resultado(s) persistidos; alguns KD(s) não foram retornados.`;
+            return chunkIds.map(id => confirmedIds.includes(id)
+              ? { id, status: "succeeded" as const }
+              : { id, status: "failed" as const, reason: failureById.get(id) || (byKeywordId.has(id) ? "medição recebida, mas o readback não confirmou; confira antes de repetir" : "sem medição confirmada") });
+          };
+          // Exceção inesperada no bloco: as tentativas dele não ficam "rodando".
+          return measureChunk().catch((chunkError: unknown) => {
+            setProcessAttempt(chunkIds.filter(id => !confirmedAll.has(id)), "results", "failed", chunkRequestId);
+            throw chunkError;
+          });
+        },
+      });
       // O read-model só avança para a nova versão depois do write confirmado:
       // a Qualificação vem do artifact persistido, nunca da working copy.
-      const qualificationOutcomes = Array.isArray(data.semanticQualifications)
-        ? data.semanticQualifications as Array<{ keywordId?: string | null; persisted?: boolean }>
-        : [];
+      const qualificationOutcomes = collectedQualificationOutcomes;
       const persistedQualificationIds = qualificationOutcomes.filter(item => item?.persisted).map(item => String(item.keywordId)).filter(Boolean);
-      const qualificationFailedCount = typeof data.semanticQualificationFailedCount === "number" ? data.semanticQualificationFailedCount : 0;
+      const qualificationFailedCount = qualificationOutcomes.filter(item => item && !item.persisted).length;
       if (persistedQualificationIds.length > 0 && selectedBrandId) {
         const refreshed = await loadSemanticQualifications(selectedBrandId, persistedQualificationIds);
         setSemanticQualifications(current => ({ ...current, ...refreshed }));
@@ -3056,59 +3477,66 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           return next;
         });
       }
-      setSerpCollectionFailures(current => {
-        const next = { ...current };
-        for (const id of keywordIds) {
-          if (serpFailedIds.has(id)) next[id] = true;
-          else if (semanticEvidences.some(projection => projection.keywordId === id && projection.serpEvidence)) delete next[id];
-        }
-        return next;
-      });
       // Resumo agregado da ação: uma notificação por lote, sem esconder a CALL 3.
+      const semanticEvidences = collectedEvidences;
       const serpAnalyzedCount = semanticEvidences.filter(projection => projection.serpEvidence).length;
       const serpConsolidatedCount = semanticEvidences.filter(projection => projection.serpEvidence
         && (isConclusiveSerpEvidence(projection.serpEvidence.intent) || isConclusiveSerpEvidence(projection.serpEvidence.funnel))).length;
-      const persistedCount = typeof data.persistedCount === "number" ? data.persistedCount : byKeywordId.size;
-      const requestedCount = typeof data.requestedCount === "number" ? data.requestedCount : keywordIds.length;
+      const serpFailedCount = semanticEvidences.filter(projection => projection.serpError).length;
+      const persistedCount = totals.persisted;
+      const requestedCount = keywordIds.length;
+      const batchSummary = formatBatchProgress(batch);
+      const metadata = { executionRequestId: operationRequestId, operationRequestId, chunkRequestIds };
+      // Resumo dos blocos no mesmo formato da resposta de um bloco.
+      const data = {
+        code: batch.status !== "completed" ? "DATAFORSEO_PARTIAL_RESULTS" : totals.overviewPartialMessage !== null ? "DATAFORSEO_OVERVIEW_PARTIAL" : null,
+        stage: totals.lastFailure?.stage || "response_normalization",
+        message: totals.overviewPartialMessage,
+        diagnostic: totals.lastFailure?.diagnostic,
+      };
       if (data.code === "DATAFORSEO_PARTIAL_RESULTS") {
         outcome = "error";
-        showNotification("info", `${persistedCount} de ${requestedCount} resultados allintitle foram persistidos; as demais medições foram preservadas.`, { code: data.code, stage: data.stage || "response_normalization", diagnostic: data.diagnostic, persistent: true, metadata: { executionRequestId: operationRequestId, operationRequestId } });
+        showNotification(persistedCount > 0 ? "warning" : "error", `${batchSummary}. ${persistedCount} de ${requestedCount} resultados allintitle foram persistidos; as demais medições foram preservadas.`, { code: totals.lastFailure?.code || data.code, stage: data.stage, diagnostic: data.diagnostic, details: batchFailureDetails(batch), metadata: { ...metadata, failures: batch.failures } });
       }
       else if (data.code === "DATAFORSEO_OVERVIEW_PARTIAL") {
-        showNotification("info", data.message || `${persistedCount} resultado(s) persistidos; alguns KD(s) não foram retornados.`, { code: data.code, stage: data.stage || "response_normalization", diagnostic: data.diagnostic, persistent: true, metadata: { executionRequestId: operationRequestId, operationRequestId } });
+        showNotification("info", data.message || `${persistedCount} resultado(s) persistidos; alguns KD(s) não foram retornados.`, { code: data.code, stage: data.stage, metadata });
       }
-      else if (typeof data.serpFailedCount === "number" && data.serpFailedCount > 0) {
+      else if (serpFailedCount > 0) {
         // Sucesso parcial honesto: as medições valem, a SERP não.
-        showNotification("info", `Resultados atualizados para ${persistedCount} keyword(s); a coleta da SERP falhou para ${data.serpFailedCount} keyword(s).`, { code: "DATAFORSEO_SERP_PARTIAL", stage: "semantic_serp", metadata: { executionRequestId: operationRequestId } });
+        showNotification("info", `Resultados atualizados para ${persistedCount} keyword(s); a coleta da SERP falhou para ${serpFailedCount} keyword(s).`, { code: "DATAFORSEO_SERP_PARTIAL", stage: "semantic_serp", metadata });
       }
       else if (qualificationFailedCount > 0) {
         // Provider passou, persistência semântica não: nada de sucesso falso.
-        showNotification("info", `Resultados atualizados para ${persistedCount} keyword(s), mas não foi possível persistir a Qualificação Semântica de ${qualificationFailedCount} keyword(s).`, { code: "SEMANTIC_QUALIFICATION_PERSISTENCE_FAILED", stage: "semantic_qualification_persistence", metadata: { executionRequestId: operationRequestId, operationRequestId } });
+        showNotification("info", `Resultados atualizados para ${persistedCount} keyword(s), mas não foi possível persistir a Qualificação Semântica de ${qualificationFailedCount} keyword(s).`, { code: "SEMANTIC_QUALIFICATION_PERSISTENCE_FAILED", stage: "semantic_qualification_persistence", metadata });
       }
       else if (persistedQualificationIds.length > 0) {
         const serpSummary = serpConsolidatedCount > 0
           ? ` SERP consolidada para ${serpConsolidatedCount} keyword(s).`
           : " SERP analisada, mas sem evidência suficiente para consolidar Intenção/Funil.";
-        showNotification("success", `Resultados e Qualificação Semântica atualizados para ${persistedCount} keyword(s).${serpSummary}`, { metadata: { executionRequestId: operationRequestId, operationRequestId } });
+        showNotification("success", `Resultados e Qualificação Semântica atualizados para ${persistedCount} keyword(s).${serpSummary}`, { metadata });
       }
       else {
         const serpSummary = serpAnalyzedCount > 0 ? " SERP analisada, mas sem evidência suficiente para consolidar Intenção/Funil." : "";
-        showNotification("success", `Resultados atualizados para ${persistedCount} keyword(s).${serpSummary}`, { metadata: { executionRequestId: operationRequestId, operationRequestId } });
+        showNotification("success", `Resultados atualizados para ${persistedCount} keyword(s).${serpSummary}`, { metadata });
       }
     } catch (err: unknown) {
       outcome = "error";
-      setProcessAttempt(keywordIds, "results", "failed", operationRequestId);
+      setProcessAttempt(keywordIds.filter(id => touchedIds.has(id) && !confirmedAll.has(id)), "results", "failed", operationRequestId);
       const code = err && typeof err === "object" && "code" in err && typeof (err as { code?: unknown }).code === "string" ? (err as { code: string }).code : "dataforseo_request_failed";
       const stage = err && typeof err === "object" && "stage" in err && typeof (err as { stage?: unknown }).stage === "string" ? (err as { stage: string }).stage : "provider_request";
       const diagnostic = err && typeof err === "object" && "diagnostic" in err && (err as { diagnostic?: unknown }).diagnostic && typeof (err as { diagnostic?: unknown }).diagnostic === "object" ? (err as { diagnostic: Record<string, unknown> }).diagnostic : undefined;
-      showNotification("error", `Medição allintitle falhou: ${err instanceof Error ? err.message : "Erro de conexão"}`, { code, stage, diagnostic, persistent: true, metadata: { executionRequestId: operationRequestId, operationRequestId } });
+      showNotification("error", `Medição allintitle falhou: ${err instanceof Error ? err.message : "Erro de conexão"}`, { code, stage, diagnostic, metadata: { executionRequestId: operationRequestId, operationRequestId, chunkRequestIds } });
     } finally {
+      clearProcessAttempt(keywordIds.filter(id => !touchedIds.has(id)), "results");
       setAllintitleMeasuring(false);
       setUpdating(false);
-      finishBulkProgress(outcome);
+      finishBulkProgress(outcome, batch ? formatBatchProgress(batch) : undefined, batch ? batchFailureViews(batch) : undefined);
     }
   };
 
+  // Ação em lote: Volume (Google Ads) em blocos progressivos, um por vez.
+  // Keyword sem média oficial é "sem dado", não falha; cota atingida para o
+  // lote antes do próximo bloco, com o que já voltou gravado.
   const handleBatchQualify = async () => {
     if (selectedIds.size === 0 || volumeMeasuring || !selectedBrandId) return;
     const keywordIds = [...selectedIds];
@@ -3117,68 +3545,117 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     let outcome: "success" | "error" = "success";
     setUpdating(true);
     setVolumeMeasuring(true);
-    const batchCount = Math.ceil(keywordIds.length / 10_000);
-    showNotification("info", `Consultando Google Ads...${batchCount > 1 ? ` ${batchCount} lotes serão processados em sequência.` : ""}`, { persistent: true, metadata: { executionRequestId: operationRequestId, operationRequestId } });
+    const touchedIds = new Set<string>();
+    const confirmedAll = new Set<string>();
+    const chunkRequestIds: string[] = [];
+    const totals: { persisted: number; quotaReached: boolean; lastFailure: { code: string; stage: string; diagnostic?: Record<string, unknown> } | null } = { persisted: 0, quotaReached: false, lastFailure: null };
+    let batch: BatchProgressSnapshot | null = null;
     try {
-      const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/google-ads/metricas-keywords`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywordIds, operationRequestId }),
+      batch = await runBulkBatch({
+        label: "Volume",
+        items: keywordIds,
+        itemId: id => id,
+        chunkSize: VOLUME_BATCH_CHUNK_SIZE,
+        concurrency: 1,
+        runChunk: async chunkIds => {
+          const chunkRequestId = crypto.randomUUID();
+          chunkRequestIds.push(chunkRequestId);
+          for (const id of chunkIds) touchedIds.add(id);
+          const measureChunk = async (): Promise<BatchChunkResult> => {
+            // Falha de rede não é repetida: o servidor pode ter consultado o Google Ads.
+            const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(selectedBrandId)}/google-ads/metricas-keywords`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ keywordIds: chunkIds, operationRequestId: chunkRequestId }),
+            }).catch(() => null);
+            if (!response) {
+              setProcessAttempt(chunkIds, "volume", "failed", chunkRequestId);
+              return chunkIds.map(id => ({ id, status: "failed" as const, reason: BATCH_NO_SERVER_CONFIRMATION }));
+            }
+            const data = await response.json().catch(() => null);
+            if (!response.ok || !data?.success) {
+              const code = typeof data?.code === "string" ? data.code : "google_ads_volume_request_failed";
+              totals.lastFailure = { code, stage: typeof data?.stage === "string" ? data.stage : "volume_provider", diagnostic: data?.diagnostic && typeof data.diagnostic === "object" ? data.diagnostic : undefined };
+              setProcessAttempt(chunkIds, "volume", "failed", chunkRequestId);
+              if (code === "GOOGLE_ADS_QUOTA") totals.quotaReached = true;
+              const reason = code === "GOOGLE_ADS_QUOTA"
+                ? "O limite temporário da Google Ads API foi atingido."
+                : typeof data?.message === "string" && data.message ? data.message : "Google Ads não retornou uma resposta válida.";
+              const stop = code === "GOOGLE_ADS_QUOTA" || response.status === 401 || response.status === 403 ? reason : null;
+              return { outcomes: chunkIds.map(id => ({ id, status: "failed" as const, reason })), stop };
+            }
+            const projections = Array.isArray(data.projections) ? data.projections as Array<{ keywordId?: string; measuredAt?: string | null }> : [];
+            const byKeywordId = new Map(projections.filter(item => typeof item.keywordId === "string").map(item => [item.keywordId!, item]));
+            const readbackReason = "A medição Google Ads foi recebida, mas o readback canônico não foi confirmado.";
+            const persistedByKeywordId = byKeywordId.size > 0
+              ? await readCanonicalKeywordRows([...byKeywordId.keys()]).catch((readbackError: unknown) => {
+                totals.lastFailure = { code: "PROCESSOR_READBACK_FAILED", stage: "canonical_readback", diagnostic: { cause: readbackError instanceof Error ? readbackError.message : String(readbackError), provider: "google_ads" } };
+                return null;
+              })
+              : new Map<string, KeywordItem>();
+            if (!persistedByKeywordId) {
+              setProcessAttempt(chunkIds, "volume", "failed", chunkRequestId);
+              return chunkIds.map(id => ({ id, status: "failed" as const, reason: readbackReason }));
+            }
+            const confirmedIds = [...persistedByKeywordId.entries()]
+              .filter(([id, row]) => {
+                const projectionMeasuredAt = byKeywordId.get(id)?.measuredAt;
+                const measurement = row.analise_semantica?.volume_measurement;
+                return resolveMineradorProcessState(row).volume.complete
+                  && typeof projectionMeasuredAt === "string"
+                  && measurement && typeof measurement.measuredAt === "string"
+                  && measurement.measuredAt === projectionMeasuredAt;
+              })
+              .map(([id]) => id);
+            const unmatchedIds = new Set(Array.isArray(data.unmatchedKeywordIds) ? (data.unmatchedKeywordIds as unknown[]).map(String) : []);
+            setProcessAttempt(confirmedIds, "volume", "success", chunkRequestId);
+            // Sem média oficial não é erro de processo: a tentativa termina em
+            // "success" sem dado, e a célula mostra o "0" apagado (processado,
+            // sem dado) em vez do "—" de nunca processada. O dado segue null.
+            setProcessAttempt(chunkIds.filter(id => !confirmedIds.includes(id) && unmatchedIds.has(id)), "volume", "success", chunkRequestId);
+            setProcessAttempt(chunkIds.filter(id => !confirmedIds.includes(id) && !unmatchedIds.has(id)), "volume", "failed", chunkRequestId);
+            setKeywords(current => current.map(item => confirmedIds.includes(item.id) ? persistedByKeywordId.get(item.id)! : item));
+            totals.persisted += typeof data.persistedCount === "number" ? data.persistedCount : byKeywordId.size;
+            for (const id of confirmedIds) confirmedAll.add(id);
+            return chunkIds.map(id => confirmedIds.includes(id)
+              ? { id, status: "succeeded" as const }
+              : unmatchedIds.has(id)
+                ? { id, status: "empty" as const, reason: "Google Ads sem média oficial para esta keyword" }
+                : { id, status: "failed" as const, reason: byKeywordId.has(id) ? "medição recebida, mas o readback não confirmou" : "sem medição confirmada" });
+          };
+          // Exceção inesperada no bloco: as tentativas dele não ficam "rodando".
+          return measureChunk().catch((chunkError: unknown) => {
+            setProcessAttempt(chunkIds.filter(id => !confirmedAll.has(id)), "volume", "failed", chunkRequestId);
+            throw chunkError;
+          });
+        },
       });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.success) {
-        const error = new Error(data?.message || "Google Ads não retornou uma resposta válida.") as Error & { code?: string; stage?: string; diagnostic?: Record<string, unknown> };
-        error.code = typeof data?.code === "string" ? data.code : "google_ads_volume_request_failed";
-        error.stage = typeof data?.stage === "string" ? data.stage : "volume_provider";
-        error.diagnostic = data?.diagnostic && typeof data.diagnostic === "object" ? data.diagnostic : undefined;
-        throw error;
-      }
-      const projections = Array.isArray(data.projections) ? data.projections as Array<{ keywordId?: string; measuredAt?: string | null }> : [];
-      const byKeywordId = new Map(projections.filter(item => typeof item.keywordId === "string").map(item => [item.keywordId!, item]));
-      let persistedByKeywordId = new Map<string, KeywordItem>();
-      if (byKeywordId.size > 0) {
-        try {
-          persistedByKeywordId = await readCanonicalKeywordRows([...byKeywordId.keys()]);
-        } catch (readbackError) {
-          const error = new Error("A medição Google Ads foi recebida, mas o readback canônico não foi confirmado.") as Error & { code?: string; stage?: string; diagnostic?: Record<string, unknown> };
-          error.code = "PROCESSOR_READBACK_FAILED";
-          error.stage = "canonical_readback";
-          error.diagnostic = { cause: readbackError instanceof Error ? readbackError.message : String(readbackError), provider: "google_ads" };
-          throw error;
-        }
-      }
-      const confirmedIds = [...persistedByKeywordId.entries()]
-        .filter(([id, row]) => {
-          const projectionMeasuredAt = byKeywordId.get(id)?.measuredAt;
-          const measurement = row.analise_semantica?.volume_measurement;
-          return resolveMineradorProcessState(row).volume.complete
-            && typeof projectionMeasuredAt === "string"
-            && measurement && typeof measurement.measuredAt === "string"
-            && measurement.measuredAt === projectionMeasuredAt;
-        })
-        .map(([id]) => id);
-      setProcessAttempt(confirmedIds, "volume", "success", operationRequestId);
-      setProcessAttempt(keywordIds.filter(id => !confirmedIds.includes(id)), "volume", "failed", operationRequestId);
-      setKeywords(current => current.map(item => confirmedIds.includes(item.id) ? persistedByKeywordId.get(item.id)! : item));
-      const persistedCount = typeof data.persistedCount === "number" ? data.persistedCount : byKeywordId.size;
-      const requestedCount = typeof data.requestedCount === "number" ? data.requestedCount : keywordIds.length;
-      if (data.code === "GOOGLE_ADS_PARTIAL_RESULTS") {
+      const persistedCount = totals.persisted;
+      const requestedCount = keywordIds.length;
+      const metadata = { executionRequestId: operationRequestId, operationRequestId, chunkRequestIds };
+      if (totals.quotaReached) {
         outcome = "error";
-        showNotification("info", `${persistedCount} de ${requestedCount} medições Google Ads foram registradas. Keywords sem média oficial ficam inelegíveis para produção; dados anteriores foram preservados.`, { code: data.code, stage: data.stage || "response_normalization", diagnostic: data.diagnostic, persistent: true, metadata: { executionRequestId: operationRequestId, operationRequestId } });
+        showNotification("info", `O limite temporário da Google Ads API foi atingido. ${formatBatchProgress(batch)}. Nenhuma métrica anterior foi alterada.`, { code: "GOOGLE_ADS_QUOTA", stage: totals.lastFailure?.stage, diagnostic: totals.lastFailure?.diagnostic, details: batchFailureDetails(batch), metadata });
+      } else if (batch.status !== "completed") {
+        outcome = "error";
+        showNotification(persistedCount > 0 ? "warning" : "error", `${formatBatchProgress(batch)}. ${persistedCount} de ${requestedCount} medições Google Ads foram registradas; dados anteriores foram preservados.`, { code: totals.lastFailure?.code || "GOOGLE_ADS_PARTIAL_RESULTS", stage: totals.lastFailure?.stage, diagnostic: totals.lastFailure?.diagnostic, details: batchFailureDetails(batch), metadata: { ...metadata, failures: batch.failures } });
+      } else if (batch.empty > 0) {
+        showNotification("info", `${persistedCount} de ${requestedCount} medições Google Ads foram registradas. Keywords sem média oficial ficam inelegíveis para produção; dados anteriores foram preservados.`, { code: "GOOGLE_ADS_PARTIAL_RESULTS", stage: "response_normalization", metadata });
+      } else {
+        showNotification("success", `${persistedCount} métricas Google Ads foram persistidas e refletidas na tabela.`, { metadata });
       }
-      else showNotification("success", `${persistedCount} métricas Google Ads foram persistidas e refletidas na tabela.`, { metadata: { executionRequestId: operationRequestId, operationRequestId } });
     } catch (err: unknown) {
       outcome = "error";
-      setProcessAttempt(keywordIds, "volume", "failed", operationRequestId);
+      setProcessAttempt(keywordIds.filter(id => touchedIds.has(id) && !confirmedAll.has(id)), "volume", "failed", operationRequestId);
       const code = err && typeof err === "object" && "code" in err && typeof (err as { code?: unknown }).code === "string" ? (err as { code: string }).code : "google_ads_volume_request_failed";
       const stage = err && typeof err === "object" && "stage" in err && typeof (err as { stage?: unknown }).stage === "string" ? (err as { stage: string }).stage : "volume_provider";
       const diagnostic = err && typeof err === "object" && "diagnostic" in err && (err as { diagnostic?: unknown }).diagnostic && typeof (err as { diagnostic?: unknown }).diagnostic === "object" ? (err as { diagnostic: Record<string, unknown> }).diagnostic : undefined;
-      if (code === "GOOGLE_ADS_QUOTA") showNotification("info", "O limite temporário da Google Ads API foi atingido. Nenhuma métrica anterior foi alterada.", { code, stage, diagnostic, persistent: true, metadata: { executionRequestId: operationRequestId, operationRequestId } });
-      else showNotification("error", `Atualização de métricas falhou: ${err instanceof Error ? err.message : "Erro de conexão"}`, { code, stage, diagnostic, persistent: true, metadata: { executionRequestId: operationRequestId, operationRequestId } });
+      showNotification("error", `Atualização de métricas falhou: ${err instanceof Error ? err.message : "Erro de conexão"}`, { code, stage, diagnostic, metadata: { executionRequestId: operationRequestId, operationRequestId, chunkRequestIds } });
     } finally {
+      clearProcessAttempt(keywordIds.filter(id => !touchedIds.has(id)), "volume");
       setVolumeMeasuring(false);
       setUpdating(false);
-      finishBulkProgress(outcome);
+      finishBulkProgress(outcome, batch ? formatBatchProgress(batch) : undefined, batch ? batchFailureViews(batch) : undefined);
     }
   };
 
@@ -3240,13 +3717,12 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     setOrderMode("auto");
     setFilterStatus("Todos");
     setFilterIntent("Todos");
-    setFilterListId("Todos");
     setFilterSiteRelation("Todos");
-    setFilterSiteArchitecture("Todos");
     setFilterSitePublication("Todos");
     setFilterKgrApplicability("Todos");
     setFilterKgrMeasurement("Todos");
     setFilterVolumeEligibility("Todos");
+    setFilterProcess("Todos");
   };
 
   const { registerControls, unregisterControls } = useGlobalTopbarControlsRegistration();
@@ -3276,6 +3752,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         />
         {organizeFilterSummary !== "Organizar" ? <span className="sr-only">{organizeFilterSummary}</span> : null}
 
+        {/* Importar CSV e Colar lista abrem o modal com "Esta lista é"
+            (padrão Assunto), o mesmo de antes, agora alcançável pela barra. */}
+        {discoverySourceActions}
+
         <button
           type="button"
           onClick={() => {
@@ -3300,7 +3780,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
   if (sessionStatus === "loading") {
     return (
-      <div className="min-h-screen bg-background text-foreground flex items-center justify-center font-mono">
+      <div className="flex h-[calc(100dvh-2.5rem)] items-center justify-center overflow-hidden bg-background font-mono text-foreground">
         <Loader2 className="w-8 h-8 text-context-accent animate-spin" />
       </div>
     );
@@ -3308,7 +3788,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
 
   if (sessionStatus === "unauthenticated") {
     return (
-      <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-6 text-center font-mono">
+      <div className="flex h-[calc(100dvh-2.5rem)] flex-col items-center justify-center overflow-hidden bg-background p-6 text-center font-mono text-foreground">
         <Building2 className="w-12 h-12 text-context-accent mb-3" />
         <h1 className="text-lg font-bold text-foreground uppercase tracking-wider">Minerador KGR</h1>
         <p className="text-xs text-slate-400 mt-2 max-w-sm leading-relaxed">
@@ -3328,20 +3808,40 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const bulkActionProcessing = bulkProgress.status === "processing";
   // Prévia do Vínculo em grupo: o mesmo plano puro que grava, sem escrever
   // nada. O catálogo do destino só é consultado ao confirmar.
-  const vinculoBatchDialogAction = vinculoBatchDialog
-    ? vinculoBatchActionFromChoice(vinculoBatchDialog.choice, { note: vinculoBatchDialog.note, destinationUrl: vinculoBatchDialog.destination })
+  const vinculoBatchDialogActions = vinculoBatchDialog
+    ? vinculoBatchActionsFromChoices(vinculoBatchDialog, { note: vinculoBatchDialog.note, destinationUrl: vinculoBatchDialog.destination })
     : null;
-  const vinculoBatchPreview = vinculoBatchDialogAction
-    ? planVinculoBatch({
+  const vinculoBatchPreview = vinculoBatchDialogActions && vinculoBatchDialogActions.length > 0
+    ? planVinculoBatchChoices({
       keywords: keywords.filter(item => selectedIds.has(item.id)),
       brandId: selectedBrandId,
-      action: vinculoBatchDialogAction,
+      actions: vinculoBatchDialogActions,
       actorId: actorUserId,
       changedAt: VINCULO_BATCH_PREVIEW_AT,
       brandSiteUrl: activeBrand?.site_url || null,
     })
     : null;
-  const vinculoBatchPreviewText = vinculoBatchPreview?.ok ? describeVinculoBatchConfirmation(vinculoBatchPreview, { includeCatalogNotice: false }) : null;
+  const vinculoBatchPreviewText = vinculoBatchPreview?.ok ? describeVinculoBatchChoicesConfirmation(vinculoBatchPreview, { includeCatalogNotice: false }) : null;
+  const vinculoBatchPostLocked = vinculoBatchDialog && vinculoBatchCommon ? vinculoBatchPostDisabled(vinculoBatchDialog, vinculoBatchCommon) : false;
+  // O painel lê e grava o que está no banco; a coluna mostra o rascunho de uma
+  // Revisão Humana aberta. Com rascunho na seleção, o painel avisa a diferença.
+  const vinculoBatchDraftCount = vinculoBatchDialogOpen ? [...selectedIds].filter(id => Boolean(humanReviewDrafts[id])).length : 0;
+  const chooseVinculoBatch = (key: VinculoBatchChoiceGroupKey, value: string) => {
+    if (!vinculoBatchCommon) return;
+    setVinculoBatchDialog(current => current ? chooseVinculoBatchSelect(current, key, value, vinculoBatchCommon) : current);
+  };
+  // Prévia do KGR em grupo: o mesmo plano puro que grava, sem escrever nada.
+  const kgrBatchPreview = kgrBatchConfirm ? (() => {
+    const { eligible, subjects } = partitionSubjectKeywords(keywords.filter(item => selectedIds.has(item.id)));
+    const plan = planKgrApplicabilityBatch(eligible, kgrBatchConfirm, { actorId: "preview", decidedAt: VINCULO_BATCH_PREVIEW_AT, openDraftIds: Object.keys(humanReviewDrafts) });
+    return {
+      updates: plan.updates.length,
+      summary: plan.updates.length > 0
+        ? `${plan.updates.length} keyword(s) terão a Aplicabilidade do KGR definida como ${kgrApplicabilityLabel(kgrBatchConfirm)}.`
+        : `Nenhuma keyword selecionada precisa mudar para ${kgrApplicabilityLabel(kgrBatchConfirm)}.`,
+      details: [plan.unchangedIds.length > 0 || plan.draftIds.length > 0 ? describeKgrApplicabilityBatch(plan, 0) : null, describeSubjectSkipped(subjects.length, "KGR")].filter((line): line is string => Boolean(line)),
+    };
+  })() : null;
   const bulkProgressPercentage = bulkProgress.total
     ? Math.min(100, Math.round((bulkProgress.current / bulkProgress.total) * 100))
     : null;
@@ -3362,7 +3862,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   const manualSiteCheckKeyword = manualSiteCheckKeywordId ? keywords.find(keyword => keyword.id === manualSiteCheckKeywordId) : null;
 
   return (
-    <div className="flex min-h-screen min-w-0 flex-col overflow-x-clip bg-background font-mono text-xs text-foreground">
+    <div data-processor-page className="flex h-[calc(100dvh-2.5rem)] min-h-0 min-w-0 flex-col overflow-hidden bg-background font-mono text-xs text-foreground">
       <MineradorLastOrganizationRestorer
         userId={session?.user?.id || ""}
         brandId={selectedBrandId}
@@ -3371,9 +3871,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         values={organizationValues}
         onHydrated={setOrganizationHydratedKey}
         onApply={view => {
-          setSearchQuery(view.searchQuery); setFilterStatus(view.filterStatus); setFilterIntent(view.filterIntent); setFilterListId(view.filterListId);
-          setFilterSiteRelation(view.filterSiteRelation); setFilterSiteArchitecture(view.filterSiteArchitecture); setFilterSitePublication(view.filterSitePublication);
+          setSearchQuery(view.searchQuery); setFilterStatus(view.filterStatus); setFilterIntent(view.filterIntent);
+          setFilterSiteRelation(view.filterSiteRelation); setFilterSitePublication(view.filterSitePublication);
           setFilterKgrApplicability(view.filterKgrApplicability); setFilterKgrMeasurement(view.filterKgrMeasurement); setFilterVolumeEligibility(view.filterVolumeEligibility);
+          setFilterProcess(view.filterProcess || "Todos");
           setOrderMode("auto");
           setSortColumn(view.sortColumn); setSortDirection(view.sortDirection);
         }}
@@ -3384,67 +3885,75 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       {/* Só o Processador passa `subjectEntry`: o select "Esta lista é"
           (Assunto / Keyword) não entra no Descobrir (SDD 2026-09-24, F1.3). */}
       <DiscoverySourceControls ref={discoverySourceControlsRef} brandRef={brandRef} preliminaryIntent="Informativa" preliminaryFunnel="TOFU" onComplete={handleDiscoverySourceComplete} subjectEntry onSubjectsImported={result => void handleSubjectsImported(result)} />
-      
+
+      {/* Blocos opcionais acima da planilha (Organizar, prévia do Site,
+          conferência manual, recuperação): juntos têm um teto e rolam por
+          conta própria só quando passam dele, para a planilha nunca cair
+          abaixo da altura mínima nem o fim de um bloco ficar cortado. */}
+      <div data-processor-top-blocks className="max-h-[45dvh] shrink-0 overflow-y-auto">
       {organizeOpen && (
-        <section className="shrink-0 border-b border-slate-900 bg-[#0b0c10] px-4 py-3 font-sans" aria-label="Filtros de organização">
+        <section className="shrink-0 border-b border-divider bg-surface-subtle px-4 py-3 font-sans" aria-label="Filtros de organização">
+          {/* Filtros de visualização (pedido do dono, 2026-09-24): sem Silo;
+              Vínculo inclui a Relação com URL; KGR junta aplicabilidade e
+              cálculo; Processo separa quem já passou pelo Processador. */}
           <div className="flex flex-wrap items-end gap-2.5">
             <KeywordTableOrderModeSelect value={orderMode} onChange={setOrderMode} />
-            <label className="flex min-w-[150px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
+            <label className={ORGANIZE_LABEL_CLASS}>
               Status
-              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
+              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={ORGANIZE_SELECT_CLASS}>
                 <option value="Todos">Todos</option>{MINERADOR_EDITORIAL_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
-            <label className="flex min-w-[180px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
+            <label className={ORGANIZE_LABEL_CLASS}>
               Intenção
-              <select value={filterIntent} onChange={(e) => setFilterIntent(e.target.value)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
+              <select value={filterIntent} onChange={(e) => setFilterIntent(e.target.value)} className={ORGANIZE_SELECT_CLASS}>
                 <option value="Todos">Todas</option><option value="informational">Informativa</option><option value="commercial_investigation">Comercial investigativa</option><option value="transactional">Transacional</option><option value="navigational">Navegacional</option><option value="local">Local</option><option value="mixed">Mista</option><option value="unknown">Pendente / não classificada</option>
               </select>
             </label>
-            <label className="flex min-w-[160px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
-              Silo
-              <select value={filterListId} onChange={(e) => setFilterListId(e.target.value)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
-                <option value="Todos">Todos</option>{lists.map(list => <option key={list.id} value={list.id}>{list.nome}</option>)}
-              </select>
-            </label>
-            <label className="flex min-w-[180px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
-              Relação com URL
-              <select value={filterSiteRelation} onChange={(e) => setFilterSiteRelation(e.target.value)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
-                <option value="Todos">Todas</option><option value="confirmed_primary">Principal confirmada</option><option value="candidate_primary">Principal candidata</option><option value="supporting">Apoio provável</option><option value="mentioned">Mencionada</option><option value="undefined">Sem relação</option>
-              </select>
-            </label>
-            <label className="flex min-w-[180px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
-              Arquitetura
-              <select value={filterSiteArchitecture} onChange={(e) => setFilterSiteArchitecture(e.target.value)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
-                <option value="Todos">Todas</option><option value="awaiting_architecture">Aguardando arquitetura</option><option value="architectural_review_required">Revisão necessária</option><option value="architecture_confirmed">Confirmada</option><option value="conflict">Com conflito</option>
-              </select>
-            </label>
-            <label className="flex min-w-[160px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
+            <label className={ORGANIZE_LABEL_CLASS}>
               Vínculo
-              <select value={filterSitePublication} onChange={(e) => setFilterSitePublication(e.target.value)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
-                <option value="Todos">Todas</option><option value="free">Livre</option><option value="candidate">Candidata</option><option value="verified">Verificada</option><option value="published">Publicada</option><option value="legacy_unverified">Publicação não verificada</option>
+              <select
+                data-organize-filter="vinculo"
+                value={combinedVinculoFilterValue(filterSitePublication, filterSiteRelation)}
+                onChange={(e) => { const next = parseCombinedVinculoFilter(e.target.value); setFilterSitePublication(next.sitePublication); setFilterSiteRelation(next.siteRelation); }}
+                className={ORGANIZE_SELECT_CLASS}
+              >
+                <option value="Todos">Todos</option>
+                {VINCULO_FILTER_GROUPS.map(group => <optgroup key={group.label} label={group.label}>{group.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup>)}
               </select>
             </label>
-            <label className="flex min-w-[170px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
-              Aplicabilidade KGR
-              <select value={filterKgrApplicability} onChange={(e) => setFilterKgrApplicability(e.target.value)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
-                <option value="Todos">Todas</option><option value="applicable">Aplicável</option><option value="not_applicable">Não aplicável</option><option value="pending">Pendente</option>
+            <label className={ORGANIZE_LABEL_CLASS}>
+              KGR
+              <select
+                data-organize-filter="kgr"
+                value={combinedKgrFilterValue(filterKgrApplicability, filterKgrMeasurement)}
+                onChange={(e) => { const next = parseCombinedKgrFilter(e.target.value); setFilterKgrApplicability(next.kgrApplicability); setFilterKgrMeasurement(next.kgrMeasurement); }}
+                className={ORGANIZE_SELECT_CLASS}
+              >
+                <option value="Todos">Todos</option>
+                {KGR_FILTER_GROUPS.map(group => <optgroup key={group.label} label={group.label}>{group.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</optgroup>)}
               </select>
             </label>
-            <label className="flex min-w-[160px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
-              Estado do cálculo KGR
-              <select value={filterKgrMeasurement} onChange={(e) => setFilterKgrMeasurement(e.target.value)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
-                <option value="Todos">Todas</option><option value="without_data">Sem medição</option><option value="partial">Parcial</option><option value="complete">Completa</option><option value="invalid">Inválida</option>
+            <label className={ORGANIZE_LABEL_CLASS}>
+              Processo
+              <select
+                data-organize-filter="processo"
+                value={filterProcess}
+                onChange={(e) => setFilterProcess(e.target.value as ProcessorRunFilter)}
+                title="Com processo: já passou pela Lógica, pelo Volume ou por Resultados, com dado, sem dado ou com erro. Sem processo: nunca foi processada aqui."
+                className={ORGANIZE_SELECT_CLASS}
+              >
+                <option value="Todos">Todas</option>{PROCESS_RUN_FILTER_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
-            <label className="flex min-w-[190px] flex-1 flex-col gap-1 text-[11px] font-semibold text-slate-400">
+            <label className={ORGANIZE_LABEL_CLASS}>
               Elegibilidade por volume
-              <select value={filterVolumeEligibility} onChange={(e) => setFilterVolumeEligibility(e.target.value as typeof filterVolumeEligibility)} className="rounded border border-slate-800 bg-[#06070a] px-2 py-1.5 text-[12px] text-slate-200 focus:outline-none focus:border-slate-600">
+              <select value={filterVolumeEligibility} onChange={(e) => setFilterVolumeEligibility(e.target.value as typeof filterVolumeEligibility)} className={ORGANIZE_SELECT_CLASS}>
                 <option value="operational">Elegíveis para produção</option><option value="Todos">Todas</option><option value="pending">Pendente de medição</option><option value="eligible">Elegível por volume</option><option value="below_threshold">Inelegível · abaixo do corte</option><option value="unavailable">Inelegível · sem volume oficial</option><option value="measurement_failed">Medição falhou</option>
               </select>
             </label>
             <div className="flex items-center gap-2 pb-0.5">
-              <button type="button" onClick={clearOrganizeFilters} className="rounded border border-slate-800 px-3 py-1.5 text-[11px] font-semibold text-slate-400 hover:border-slate-600 hover:text-slate-200">Limpar filtros</button>
+              <button type="button" onClick={clearOrganizeFilters} className="min-h-9 rounded border border-divider px-3 py-1.5 text-sm font-medium text-text-muted transition-colors hover:border-module-accent/45 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40">Limpar filtros</button>
             </div>
           </div>
         </section>
@@ -3514,7 +4023,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       )}
 
       {recoverableKeywords.length > 0 && (
-        <section className="shrink-0 border-b border-divider bg-surface-subtle px-4 py-3 font-sans" aria-label="Keywords em recuperação">
+        <section className="border-b border-divider bg-surface-subtle px-4 py-3 font-sans" aria-label="Keywords em recuperação">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-foreground">Keywords removidas — recuperação por 24 horas</h2>
@@ -3539,10 +4048,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           </div>
         </section>
       )}
+      </div>
 
 
       {/* PLANILHA PRINCIPAL */}
-      <KeywordTableShell ref={tableRef} scroll="x" className={selectedIds.size > 0 ? "pb-14" : ""}>
+      {/* Uma rolagem vertical só (pedido do dono, 2026-09-24): a página tem a
+          altura da tela menos a barra global e não rola; a planilha ocupa a
+          sobra (flex-1, com altura mínima) e rola dentro dela, com o
+          cabeçalho preso. Com seleção, o espaço do rodapé fixo é um irmão
+          depois dela, não padding: as barras de rolagem ficam acima dele. */}
+      <KeywordTableShell ref={tableRef} scroll="both" data-processor-table-viewport className="min-h-40">
         {loading || organizationHydrationPending ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#06070a]/90">
             <Loader2 className="w-6 h-6 text-context-accent animate-spin mb-2" />
@@ -3601,7 +4116,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                 >
                   <InlineLabelCluster label="Palavra-Chave" trailing={renderSortIcon("keyword")} /><KeywordTableColumnResizeHandle columnId="keyword" label="Palavra-Chave" onStart={columnResize.startResize} />
                 </th>
-                <th className="relative w-[120px] border-r border-divider/70 px-3 py-2 text-center whitespace-nowrap">
+                <th className="relative border-r border-divider/70 px-3 py-2 text-center whitespace-nowrap">
                   <InlineLabelCluster
                     label="Vínculo"
                     info={<span onClick={(event) => event.stopPropagation()}><InfoHint title="Relação com conteúdo publicado" description="Indica se a keyword está livre, possui uma página candidata, foi verificada ou já está vinculada a uma publicação como principal ou secundária." /></span>}
@@ -3723,6 +4238,13 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                   ? item.analise_semantica.allintitle_measurement_history
                   : [];
                 const keywordDifficultyEvidence = canonicalSnapshot.metrics.kd;
+                // Sem número: nunca processado ("—"), processado sem dado ("0"
+                // apagado) ou erro de processo (cor de alerta). Só leitura.
+                const rowAttempts = processAttemptsByKeywordId[item.id];
+                const resultsCell = processorResultsCell({ semantic: item.analise_semantica, value: resultValue, attempts: rowAttempts });
+                const volumeCell = processorVolumeCell({ semantic: item.analise_semantica, value: volumeValue, attempts: rowAttempts });
+                const cpcCell = processorCpcCell({ semantic: item.analise_semantica, value: cpcEvidence.sortValue, attempts: rowAttempts });
+                const kdCell = processorKdCell({ semantic: item.analise_semantica, value: keywordDifficultyEvidence.value, attempts: rowAttempts });
                 const keywordDifficultyTitle = keywordDifficultyEvidence.source === "processor"
                   ? keywordDifficultyEvidence.value === null
                     ? "Keyword Overview revalidado no Processador; KD não retornado."
@@ -3843,7 +4365,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                           <div className="min-w-0 flex-1">
                             <div
                               title={item.keyword}
-                              className={`break-words select-text cursor-text text-keyword ${publicationProtected ? "font-semibold" : ""}`}
+                              data-processor-keyword-text
+                              className={`break-words select-text cursor-text text-sm text-keyword ${publicationProtected ? "font-semibold" : "font-medium"}`}
                             >
                               {item.keyword}
                             </div>
@@ -3857,7 +4380,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 data-keyword-page-url
-                                className={"mt-0.5 block max-w-full break-all select-text font-mono text-[10px] hover:underline " + (
+                                className={"mt-0.5 block max-w-full break-all select-text font-mono text-sm hover:underline " + (
                                   publicationLink.state === "published" ? "text-identity-published" : "text-identity-new"
                                 )}
                                 title={publicationLink.canonicalUrl
@@ -3875,10 +4398,10 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                           numa publicação e o que a página é (ou viria a ser).
                           Conferir e confirmar são dados, não declarações: vivem
                           no card DECISÃO. As duas se declaram na Revisão Humana. */}
-                      <td className="w-[120px] border-r border-divider/70 px-2 py-1 text-center whitespace-nowrap">
-                        <div className="flex min-w-0 flex-col items-center gap-1">
+                      <td data-keyword-vinculo-cell className="border-r border-divider/70 px-2 py-1 text-center whitespace-nowrap">
+                        <div data-keyword-vinculo-choices title={keywordVinculoChoicesSummary(vinculo)} className="flex min-w-0 flex-col items-center gap-0.5">
                           <span
-                            className={"inline-flex max-w-full items-center whitespace-normal rounded border px-1.5 py-0.5 text-[10px] font-semibold " + (
+                            className={"inline-flex max-w-full items-center whitespace-normal rounded border px-1 text-sm font-semibold leading-tight " + (
                               vinculo.postLockedToSlug
                                 ? "border-context-accent/50 bg-context-accent/10 text-context-accent"
                                 : "border-divider bg-surface-subtle text-text-muted"
@@ -3890,8 +4413,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             {vinculo.postLabel}
                           </span>
                           <span
-                            className={"inline-flex max-w-full items-center whitespace-normal rounded px-1 py-0.5 text-[9px] font-semibold " + (
-                              vinculo.pageType.declared
+                            className={"inline-flex max-w-full items-center whitespace-normal rounded px-1 text-sm font-semibold leading-tight " + (
+                              vinculo.pageType.declared || vinculo.pageType.humanDeclared
                                 ? "border border-context-accent/50 bg-context-accent/10 text-context-accent"
                                 : "border border-dashed border-divider text-text-muted"
                             )}
@@ -3910,9 +4433,17 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                                 ? `${vinculo.subjectLabel}: ${vinculo.subject.note}`
                                 : `${vinculo.subjectLabel}: complete a nota na Revisão Humana.`}
                             >
-                              {vinculo.subjectLabel}
+                              {keywordVinculoChoiceLabels(vinculo).subject}
                             </span>
-                          ) : null}
+                          ) : (
+                            <span
+                              data-keyword-vinculo-no-subject
+                              className="inline-flex max-w-full items-center whitespace-normal rounded border border-dashed border-divider px-1 text-sm leading-tight text-text-muted"
+                              title="Sem Assunto declarado (padrão). Declare na Revisão Humana ou no Vínculo do rodapé."
+                            >
+                              {keywordVinculoChoiceLabels(vinculo).subject}
+                            </span>
+                          )}
                           {/* F1b: abre o Descobrir no modo Por Assunto; a URL leva só o id. */}
                           {vinculo.subjectLabel && item.id ? (
                             <button
@@ -3938,8 +4469,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                           lida errada de relance. */}
                       <td className="w-[128px] border-r border-divider/70 px-3 py-1 text-center font-mono text-text-muted">
                         {resultValue !== null
-                          ? <span className="text-context-accent" title="Páginas com todas as palavras no título, medidas pelo provedor.">{formatMetricInteger(resultValue)}</span>
-                          : "-"}
+                          ? <span className="text-context-accent" title={resultsCell.hint || "Páginas com todas as palavras no título, medidas pelo provedor."}>{formatMetricInteger(resultValue)}</span>
+                          : <ProcessorMetricPlaceholder cell={resultsCell} />}
                       </td>
 
                       {/* Volume */}
@@ -3949,7 +4480,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                             className={confirmedVolumeMeasurement && volumeValue !== 0 ? "text-context-accent" : undefined}
                             title={confirmedVolumeMeasurement ? "Volume mensal confirmado pelo provedor para a keyword exata." : undefined}
                           >
-                            {volumeValue !== null ? formatMetricInteger(volumeValue) : "-"}
+                            {volumeValue !== null ? formatMetricInteger(volumeValue) : <ProcessorMetricPlaceholder cell={volumeCell} />}
                           </span>
                           {zeroConfirmed && (
                             <span className="rounded border border-context-accent/50 bg-context-accent/10 px-1 text-[8px] font-bold uppercase tracking-wide text-context-accent" title="Zero mensal explicitamente confirmado pela keyword exata.">
@@ -4001,7 +4532,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                           className={cpcEvidence.source === "processor" && cpcEvidence.sortValue !== null ? "text-context-accent" : undefined}
                           title={cpcTitle}
                         >
-                          {formatGoogleAdsCpcTableValue(cpcEvidence)}
+                          {cpcEvidence.sortValue !== null ? formatGoogleAdsCpcTableValue(cpcEvidence) : <ProcessorMetricPlaceholder cell={cpcCell} />}
                         </span>
                       </td>
 
@@ -4011,7 +4542,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                           className={keywordDifficultyEvidence.source === "processor" && keywordDifficultyEvidence.value !== null ? "text-context-accent" : undefined}
                           title={keywordDifficultyTitle}
                         >
-                          {keywordDifficultyEvidence.value !== null ? keywordDifficultyEvidence.value : "—"}
+                          {keywordDifficultyEvidence.value !== null ? keywordDifficultyEvidence.value : <ProcessorMetricPlaceholder cell={kdCell} />}
                         </span>
                       </td>
 
@@ -4042,7 +4573,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                       </td>
 
                       {/* Status — leitura: a classificação atual, escrita na barra e no DNA. */}
-                      <td className="relative w-[108px] border-r border-divider/70 px-3 py-0.5 text-center">
+                      <td className="relative w-[108px] px-3 py-0.5 text-center">
                         {editorialStatus.kind === "legacyEditorialStatusUnresolved" ? (
                           <div className="flex min-w-0 flex-col items-center gap-1">
                             <span className="inline-flex w-full items-center justify-center rounded border border-divider bg-surface-subtle px-1.5 py-0.5 text-[10px] font-medium text-text-muted" title="O status legado não é um estado editorial ativo. Escolha um estado para corrigir a marcação.">
@@ -4164,6 +4695,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           </>
         )}
       </KeywordTableShell>
+      {selectedIds.size > 0 && <div aria-hidden="true" data-bulk-bar-spacer className="h-11 shrink-0" />}
 
       {/* FOOTER BATCH ACTIONS BAR */}
       {selectedIds.size > 0 && (
@@ -4175,7 +4707,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
             {hiddenSelectedCount > 0 && <span className="hidden text-xs text-text-muted lg:inline">· {visibleSelectedCount} visíveis</span>}
           </div>
 
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden sm:gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:thin] sm:gap-2">
             <div className="hidden shrink-0 items-center border-r border-divider pr-2 sm:flex sm:pr-3">
             
             <MineradorProcessAction
@@ -4240,33 +4772,34 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               defaultValue=""
               disabled={bulkActionProcessing || updating}
               aria-label="Aplicabilidade do KGR das selecionadas"
-              onChange={(event) => { const nextApplicability = event.target.value; event.currentTarget.value = ""; if (nextApplicability) void handleBatchKgrApplicability(nextApplicability as KgrApplicability); }}
-              className="hidden min-h-9 w-16 shrink-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-sm font-medium text-foreground outline-none transition-colors hover:border-module-accent/45 hover:bg-surface-subtle focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 sm:block sm:w-20 sm:px-2"
-              title="Definir a aplicabilidade do KGR das keywords selecionadas. A decisão não altera o score nem o status."
+              onChange={(event) => { const nextApplicability = event.target.value; event.currentTarget.value = ""; if (isBatchKgrChoice(nextApplicability)) { kgrBatchTriggerRef.current = event.currentTarget; setKgrBatchConfirm(nextApplicability); } }}
+              className={`hidden min-h-9 w-16 shrink-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-sm font-medium text-foreground outline-none transition-colors hover:border-module-accent/45 hover:bg-surface-subtle focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 2xl:block sm:w-20 sm:px-2 ${BULK_SELECT_THEME}`}
+              title="Definir a aplicabilidade do KGR das keywords selecionadas. A decisão não altera o score nem o status. Keyword com Assunto declarado é pulada."
             >
               <option value="">KGR</option>
               <option value="pending">Pendente</option>
               <option value="applicable">Aplicável</option>
               <option value="not_applicable">Não aplicável</option>
             </select>
-            {/* Vínculo em grupo (F1.6): Assunto, tipo de página e posto. Reabrir
-                revisão, conferir por link e confirmar publicada ficam fora (Q5). */}
-            <select
-              defaultValue=""
+            {/* Vínculo em grupo (F1.6): um seletor só, que abre o painel com
+                os três grupos. Nada é gravado no clique. Reabrir revisão,
+                conferir por link e confirmar publicada ficam fora (Q5). */}
+            <button
+              type="button"
+              data-vinculo-batch-trigger
+              onClick={(event) => { if (vinculoBatchDialogOpen) setVinculoBatchDialog(null); else openVinculoBatchPanel(event.currentTarget); }}
               disabled={bulkActionProcessing || updating}
+              aria-haspopup="dialog"
+              aria-expanded={vinculoBatchDialogOpen}
+              aria-controls={vinculoBatchDialogOpen ? "minerador-vinculo-batch-panel" : undefined}
               aria-label="Vínculo das selecionadas"
-              onChange={(event) => { const choice = event.target.value; event.currentTarget.value = ""; if (choice) { vinculoBatchTriggerRef.current = event.currentTarget; setVinculoBatchDialog({ choice, note: "", destination: "" }); } }}
-              className="hidden min-h-9 w-20 shrink-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-sm font-medium text-foreground outline-none transition-colors hover:border-module-accent/45 hover:bg-surface-subtle focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 sm:block sm:w-24 sm:px-2"
-              title="Declarar ou retirar o Assunto, o tipo de página ou o posto das keywords selecionadas. A confirmação diz quantas aprovadas vão para Em revisão."
+              title="Vínculo das selecionadas: Posto de principal, Potencial de página e Assunto, os mesmos campos da Revisão Humana. Nada é gravado antes de Aplicar."
+              className="hidden min-h-9 shrink-0 items-center gap-1 rounded border border-transparent bg-transparent px-1.5 py-1 text-sm font-medium text-foreground outline-none transition-colors hover:border-module-accent/45 hover:bg-surface-subtle focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 2xl:inline-flex sm:px-2"
             >
-              <option value="">Vínculo</option>
-              {VINCULO_BATCH_CHOICE_GROUPS.map(group => (
-                <optgroup key={group.key} label={group.label}>
-                  {group.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </optgroup>
-              ))}
-            </select>
-            {/* Ordem do fluxo humano: decidir KGR → Vínculo → concluir revisão → definir status. */}
+              Vínculo
+              <ChevronDown className="h-4 w-4" aria-hidden="true" />
+            </button>
+            {/* Ordem do fluxo humano: KGR → Vínculo → concluir revisão → definir status. */}
             <MineradorProcessAction
               title="Concluir a revisão humana das selecionadas"
               description="Conclui a Revisão Humana de cada keyword selecionada com os defaults conservadores: divergências sem decisão mantêm a Lógica, enriquecimentos não selecionados são ignorados e campos sem evidência permanecem desconhecidos. Exige a Aplicabilidade do KGR decidida quando o cálculo é possível. Não altera status, aprovação nem métricas."
@@ -4282,7 +4815,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               disabled={bulkActionProcessing || updating}
               aria-label="Status"
               onChange={(event) => { const nextStatus = event.target.value; event.currentTarget.value = ""; if (nextStatus) void handleBatchStatus(nextStatus); }}
-              className="hidden min-h-9 w-20 shrink-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-sm font-medium text-foreground outline-none transition-colors hover:border-module-accent/45 hover:bg-surface-subtle focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 sm:block sm:w-24 sm:px-2"
+              className={`hidden min-h-9 w-20 shrink-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-sm font-medium text-foreground outline-none transition-colors hover:border-module-accent/45 hover:bg-surface-subtle focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 min-[1800px]:block sm:w-24 sm:px-2 ${BULK_SELECT_THEME}`}
               title="Definir o status operacional das keywords selecionadas"
             >
               <option value="">Status</option>
@@ -4309,27 +4842,27 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                   <button type="button" role="menuitem" onClick={() => { setMoreActionsOpen(false); void handleCheckWithSite(); }} disabled={bulkActionProcessing || updating || siteSyncLoading || siteSyncPersisting || loading || !selectedBrandId} className="flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 text-left text-sm font-medium text-context-accent transition-colors hover:bg-surface-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-context-accent disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className="h-4 w-4" aria-hidden="true" />Conferir site</button>
                   <InfoHint title="Verificar se a keyword já pertence ao site" description="Procura ou confirma uma página existente da Marca para identificar vínculo com conteúdo publicado. A conferência não publica nem altera a página." />
                 </div>
-                <label className="flex items-center justify-between gap-3 rounded px-3 py-2 text-sm font-medium text-text-muted sm:hidden">
+                <label className="flex items-center justify-between gap-3 rounded px-3 py-2 text-sm font-medium text-text-muted min-[1800px]:hidden">
                   <span>Status</span>
                   <select
                     defaultValue=""
                     disabled={bulkActionProcessing || updating}
                     aria-label="Status"
                     onChange={(event) => { const nextStatus = event.target.value; event.currentTarget.value = ""; if (nextStatus) void handleBatchStatus(nextStatus); }}
-                    className="min-h-9 min-w-24 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50"
+                    className={`min-h-9 min-w-24 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 ${BULK_SELECT_THEME}`}
                   >
                     <option value="">Selecionar</option>
                     {MINERADOR_EDITORIAL_STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </label>
-                <label className="flex items-center justify-between gap-3 rounded px-3 py-2 text-sm font-medium text-text-muted sm:hidden">
+                <label className="flex items-center justify-between gap-3 rounded px-3 py-2 text-sm font-medium text-text-muted 2xl:hidden">
                   <span>KGR</span>
                   <select
                     defaultValue=""
                     disabled={bulkActionProcessing || updating}
                     aria-label="Aplicabilidade do KGR das selecionadas"
-                    onChange={(event) => { const nextApplicability = event.target.value; event.currentTarget.value = ""; if (nextApplicability) void handleBatchKgrApplicability(nextApplicability as KgrApplicability); }}
-                    className="min-h-9 min-w-24 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50"
+                    onChange={(event) => { const nextApplicability = event.target.value; event.currentTarget.value = ""; if (isBatchKgrChoice(nextApplicability)) { kgrBatchTriggerRef.current = moreActionsButtonRef.current; setMoreActionsOpen(false); setKgrBatchConfirm(nextApplicability); } }}
+                    className={`min-h-9 min-w-24 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 ${BULK_SELECT_THEME}`}
                   >
                     <option value="">Selecionar</option>
                     <option value="pending">Pendente</option>
@@ -4337,23 +4870,18 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                     <option value="not_applicable">Não aplicável</option>
                   </select>
                 </label>
-                <label className="flex items-center justify-between gap-3 rounded px-3 py-2 text-sm font-medium text-text-muted sm:hidden">
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-vinculo-batch-trigger
+                  onClick={() => { setMoreActionsOpen(false); openVinculoBatchPanel(moreActionsButtonRef.current); }}
+                  disabled={bulkActionProcessing || updating}
+                  aria-haspopup="dialog"
+                  className="flex min-h-9 items-center justify-between gap-3 rounded px-3 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:cursor-not-allowed disabled:opacity-50 2xl:hidden"
+                >
                   <span>Vínculo</span>
-                  <select
-                    defaultValue=""
-                    disabled={bulkActionProcessing || updating}
-                    aria-label="Vínculo das selecionadas"
-                    onChange={(event) => { const choice = event.target.value; event.currentTarget.value = ""; if (choice) { vinculoBatchTriggerRef.current = moreActionsButtonRef.current; setMoreActionsOpen(false); setVinculoBatchDialog({ choice, note: "", destination: "" }); } }}
-                    className="min-h-9 min-w-24 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50"
-                  >
-                    <option value="">Selecionar</option>
-                    {VINCULO_BATCH_CHOICE_GROUPS.map(group => (
-                      <optgroup key={group.key} label={group.label}>
-                        {group.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-                      </optgroup>
-                    ))}
-                  </select>
-                </label>
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                </button>
                 <InfoHint title="Enviar ao Arquiteto" description="Envia as keywords aprovadas para a etapa de formação de artigos.">
                   <button
                     type="button"
@@ -4373,7 +4901,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                     {architectHandoffGate.reason}
                   </p>
                 )}
-                <button type="button" role="menuitem" onClick={() => { setMoreActionsOpen(false); void handleBatchDelete(false); }} disabled={bulkActionProcessing || updating || queueProcessing} className="flex items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium text-danger transition-colors hover:bg-danger-soft disabled:cursor-not-allowed disabled:opacity-50 lg:hidden"><Trash2 className="h-4 w-4" aria-hidden="true" />Excluir</button>
+                <button type="button" role="menuitem" onClick={() => { setMoreActionsOpen(false); void handleBatchDelete(false); }} disabled={bulkActionProcessing || updating || queueProcessing} className="flex items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium text-danger transition-colors hover:bg-danger-soft disabled:cursor-not-allowed disabled:opacity-50 min-[1800px]:hidden"><Trash2 className="h-4 w-4" aria-hidden="true" />Excluir</button>
               </div>}
             </div>
 
@@ -4382,7 +4910,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               onClick={() => void handleBatchDelete(false)}
               disabled={bulkActionProcessing || updating || queueProcessing}
               aria-label="Excluir"
-              className="hidden min-h-9 shrink-0 items-center gap-1 rounded border border-danger/35 bg-transparent px-1.5 py-1 text-sm font-medium text-danger transition-colors hover:border-danger/60 hover:bg-danger-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-danger disabled:cursor-not-allowed disabled:opacity-50 lg:flex lg:px-2"
+              className="hidden min-h-9 shrink-0 items-center gap-1 rounded border border-danger/35 bg-transparent px-1.5 py-1 text-sm font-medium text-danger transition-colors hover:border-danger/60 hover:bg-danger-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-danger disabled:cursor-not-allowed disabled:opacity-50 min-[1800px]:flex lg:px-2"
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />
               <span className="hidden lg:inline">Excluir</span>
@@ -4391,116 +4919,233 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
           </div>
 
           {bulkProgress.status !== "idle" && bulkProgress.step && bulkProgressMeta && (
-            <div
-              data-minerador-bulk-progress
-              data-progress-state={bulkProgress.status}
-              data-progress-step={bulkProgress.step}
-              aria-live="polite"
-              title={bulkProgress.message || bulkProgressMeta.processingLabel}
-              className={`ml-auto min-w-0 w-28 shrink-0 rounded border px-2 py-0.5 sm:w-44 lg:w-56 ${bulkProgressCardClass}`}
-            >
-              <div className="flex min-w-0 items-center gap-1 leading-3">
-      <span className={`min-w-0 flex-1 truncate text-[11px] font-semibold leading-3 ${bulkProgress.status === "success" ? "text-success" : bulkProgress.status === "error" ? "text-danger" : bulkProgressMeta.textClass}`}>
-                  {bulkProgress.status === "processing" ? bulkProgress.message || bulkProgressMeta.processingLabel : bulkProgress.status === "success" ? "Concluído" : "Falhou"}
-                </span>
-      <span className="shrink-0 text-[11px] font-semibold leading-3 text-foreground">
-                  {bulkProgressDisplayPercentage === null ? "—" : `${bulkProgressDisplayPercentage}%`}
-                </span>
-              </div>
+            <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1">
               <div
-                role="progressbar"
-                aria-label={bulkProgressMeta.processingLabel}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={bulkProgressIndeterminate ? undefined : bulkProgressBarPercentage}
-                aria-valuetext={bulkProgressAriaValueText}
-                className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-divider"
+                data-minerador-bulk-progress
+                data-progress-state={bulkProgress.status}
+                data-progress-step={bulkProgress.step}
+                data-progress-failed={bulkProgress.failed}
+                aria-live="polite"
+                title={bulkProgress.message || bulkProgressMeta.processingLabel}
+                className={`min-w-0 w-36 shrink-0 rounded border px-2 py-0.5 sm:w-64 lg:w-80 ${bulkProgressCardClass}`}
               >
+                <div className="flex min-w-0 items-center gap-1">
+                  <span className={`min-w-0 flex-1 truncate text-sm font-semibold leading-4 ${bulkProgress.status === "success" ? "text-success" : bulkProgress.status === "error" ? "text-danger" : bulkProgressMeta.textClass}`}>
+                    {bulkProgress.status === "processing" ? bulkProgress.message || bulkProgressMeta.processingLabel : bulkProgress.batch ? bulkProgress.message : bulkProgress.status === "success" ? "Concluído" : "Falhou"}
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold leading-4 tabular-nums text-foreground">
+                    {bulkProgressDisplayPercentage === null ? "—" : `${bulkProgressDisplayPercentage}%`}
+                  </span>
+                </div>
                 <div
-                  className={`h-full rounded-full transition-[width] duration-200 ${bulkProgressMeta.barClass} ${bulkProgress.status === "processing" && bulkProgressIndeterminate ? "motion-safe:animate-pulse motion-reduce:animate-none" : ""}`}
-                  style={{ width: `${bulkProgressBarPercentage}%` }}
-                />
+                  role="progressbar"
+                  aria-label={bulkProgressMeta.processingLabel}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={bulkProgressIndeterminate ? undefined : bulkProgressBarPercentage}
+                  aria-valuetext={bulkProgressAriaValueText}
+                  className="mt-0.5 h-1 overflow-hidden rounded-full bg-divider"
+                >
+                  <div
+                    className={`h-full rounded-full transition-[width] duration-200 ${bulkProgressMeta.barClass} ${bulkProgress.status === "processing" && bulkProgressIndeterminate ? "motion-safe:animate-pulse motion-reduce:animate-none" : ""}`}
+                    style={{ width: `${bulkProgressBarPercentage}%` }}
+                  />
+                </div>
+                <div className="truncate text-sm leading-4 text-text-muted">
+                  {bulkProgress.status === "processing" ? `${bulkProgress.detail || (bulkProgress.total ? `${bulkProgress.current} de ${bulkProgress.total} keywords` : "Em andamento")}${bulkChunkElapsed ? ` · ${bulkChunkElapsed}` : ""}` : bulkProgress.batch ? bulkProgressMeta.label : bulkProgress.message}
+                </div>
               </div>
-    <div className="truncate text-[11px] leading-3 text-text-muted">
-                {bulkProgress.status === "processing" ? bulkProgress.detail || (bulkProgress.total ? `${bulkProgress.current} de ${bulkProgress.total} keywords` : "Em andamento") : bulkProgress.message}
-              </div>
+              {bulkProgress.status === "processing" && bulkProgress.stoppable && (
+                <button
+                  type="button"
+                  onClick={requestBulkStop}
+                  aria-label="Parar o lote depois do bloco atual"
+                  className="min-h-9 shrink-0 rounded border border-divider px-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-context-accent"
+                >
+                  Parar
+                </button>
+              )}
+              {bulkProgress.status !== "processing" && bulkProgress.failures.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setBulkFailuresOpen(open => !open)}
+                    aria-expanded={bulkFailuresOpen}
+                    aria-controls="minerador-bulk-failures"
+                    className="min-h-9 shrink-0 rounded border border-warning/40 px-2 text-sm font-medium text-warning transition-colors hover:bg-surface-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-warning"
+                  >
+                    Ver falhas ({bulkProgress.failures.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={dismissBulkProgress}
+                    aria-label="Fechar o resumo do lote"
+                    className="inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-context-accent"
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          {bulkFailuresOpen && bulkProgress.status !== "processing" && bulkProgress.failures.length > 0 && (
+            <div
+              id="minerador-bulk-failures"
+              role="region"
+              aria-label="Falhas do lote"
+              data-minerador-bulk-failures
+              className="fixed bottom-12 right-4 z-40 max-h-72 w-96 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-divider bg-surface-elevated p-3 text-sm text-foreground shadow-lg"
+            >
+              <p className="font-semibold">{bulkProgress.message}</p>
+              <ul className="mt-2 space-y-1">
+                {bulkProgress.failures.map(failure => (
+                  <li key={failure.id} className="leading-5">
+                    <span className="font-medium text-keyword">{failure.label}</span>
+                    <span className="text-text-muted">: {failure.reason}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </KeywordTableBulkBarShell>
       )}
 
-      {/* Confirmação do Vínculo em grupo (F1.6): o que será gravado, o que
-          será pulado e quantas aprovadas vão para Em revisão. Nada é gravado
-          antes do clique em Confirmar. */}
-      {vinculoBatchDialog && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/75 px-4 py-8" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !updating) setVinculoBatchDialog(null); }}>
+      {/* Painel do Vínculo em grupo (F1.6): os três selects da Revisão Humana e a
+          confirmação no próprio painel — o que será gravado, o que será
+          pulado e quantas aprovadas vão para Em revisão. Nada é gravado antes
+          de "Aplicar". Some junto com a seleção. */}
+      {vinculoBatchDialog && selectedIds.size > 0 && (
+        <section
+          id="minerador-vinculo-batch-panel"
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="minerador-vinculo-batch-title"
+          aria-describedby="minerador-vinculo-batch-summary"
+          data-vinculo-batch-dialog
+          ref={vinculoBatchDialogRef}
+          tabIndex={-1}
+          style={{ right: vinculoBatchPanelRight }}
+          className="fixed bottom-12 z-50 flex max-h-[calc(100dvh-4rem)] w-[min(28rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-divider bg-surface-elevated font-sans text-foreground shadow-xl outline-none"
+        >
+          <header className="shrink-0 border-b border-divider px-4 py-3">
+            <h2 id="minerador-vinculo-batch-title" className="text-base font-semibold text-foreground">Vínculo das selecionadas</h2>
+            <p className="mt-0.5 text-sm text-text-muted">Os mesmos campos da Revisão Humana. Cada um mostra o valor das selecionadas, ou &quot;{VINCULO_MIXED_LABEL}&quot;; só o que você mudar é gravado.</p>
+            {vinculoBatchDraftCount > 0 && (
+              <p data-vinculo-batch-draft-note className="mt-1 text-sm text-warning">
+                {vinculoBatchDraftCount === 1 ? "1 selecionada tem Revisão Humana aberta" : `${vinculoBatchDraftCount} selecionadas têm Revisão Humana aberta`}: aqui aparece o valor gravado, não o do rascunho que a coluna mostra.
+              </p>
+            )}
+          </header>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
+            {vinculoBatchCommon && (
+              <div data-vinculo-batch-selects className="min-w-0 space-y-1.5">
+                <VinculoPostSelect
+                  id="minerador-vinculo-batch-post"
+                  value={vinculoBatchSelectValue("post", vinculoBatchDialog, vinculoBatchCommon)}
+                  disabled={updating || vinculoBatchPostLocked}
+                  subjectDeclared={vinculoBatchPostLocked}
+                  describedBy={vinculoBatchPostLocked ? "minerador-vinculo-batch-post-disabled" : undefined}
+                  onChange={value => chooseVinculoBatch("post", value)}
+                />
+                {vinculoBatchPostLocked && <p id="minerador-vinculo-batch-post-disabled" className="text-sm text-text-muted">{VINCULO_BATCH_POST_DISABLED_BY_SUBJECT}</p>}
+                <VinculoPageTypeSelect
+                  id="minerador-vinculo-batch-page-type"
+                  value={vinculoBatchSelectValue("page_type", vinculoBatchDialog, vinculoBatchCommon)}
+                  published={vinculoBatchCommon.publishedOnly}
+                  currentValue={vinculoBatchCommon.page_type}
+                  disabled={updating}
+                  onChange={value => chooseVinculoBatch("page_type", value)}
+                />
+                <VinculoSubjectSelect
+                  id="minerador-vinculo-batch-subject"
+                  value={vinculoBatchSelectValue("subject", vinculoBatchDialog, vinculoBatchCommon)}
+                  disabled={updating}
+                  onChange={value => chooseVinculoBatch("subject", value)}
+                />
+              </div>
+            )}
+            {vinculoBatchDeclareOpen && (
+              <div className="min-w-0">
+                <VinculoSubjectFields
+                  batch
+                  note={vinculoBatchDialog.note}
+                  destination={vinculoBatchDialog.destination}
+                  disabled={updating}
+                  onNoteChange={value => setVinculoBatchDialog(current => current ? { ...current, note: value } : current)}
+                  onDestinationChange={value => setVinculoBatchDialog(current => current ? { ...current, destination: value } : current)}
+                />
+                <p className="mt-1 text-sm text-text-muted">Nota em branco: a coluna marca &quot;{KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL}&quot; até você completar na Revisão Humana.</p>
+              </div>
+            )}
+            {vinculoBatchPreview && !vinculoBatchPreview.ok && (
+              <p role="alert" className="text-sm leading-6 text-danger">{vinculoBatchPreview.reason}</p>
+            )}
+            <div id="minerador-vinculo-batch-summary" aria-live="polite" className="space-y-1.5 border-t border-divider pt-3 text-sm leading-6">
+              {vinculoBatchPreviewText ? (
+                <>
+                  <p className="font-semibold text-foreground">{vinculoBatchPreviewText.summary}</p>
+                  {vinculoBatchPreviewText.steps.map(step => (
+                    <div key={step.summary}>
+                      <p className="text-foreground">{step.summary}</p>
+                      {step.details.map(detail => <p key={detail} className="text-text-muted">{detail}</p>)}
+                    </div>
+                  ))}
+                  {vinculoBatchPreviewText.warning && (
+                    <p role="note" data-vinculo-demotion-warning className="font-semibold text-warning">{vinculoBatchPreviewText.warning}</p>
+                  )}
+                  {vinculoBatchDeclareOpen && (
+                    <p className="text-text-muted">Depois de gravar, a Lógica roda sozinha nas que ainda não a têm. Nada é aprovado.</p>
+                  )}
+                </>
+              ) : !vinculoBatchPreview && (
+                <p className="text-text-muted">Mude ao menos um campo para ver o que será gravado.</p>
+              )}
+            </div>
+          </div>
+          <footer className="flex shrink-0 flex-col-reverse justify-end gap-2 border-t border-divider px-4 py-3 sm:flex-row">
+            <button type="button" onClick={() => setVinculoBatchDialog(null)} disabled={updating} className="inline-flex h-9 items-center justify-center rounded border border-divider bg-surface px-3 text-sm font-semibold text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40 disabled:cursor-not-allowed disabled:opacity-50">Cancelar</button>
+            <button
+              type="button"
+              data-vinculo-batch-apply
+              onClick={() => void handleBatchVinculo(vinculoBatchDialog)}
+              disabled={updating || bulkActionProcessing || !vinculoBatchPreview?.ok || vinculoBatchPreview.counts.updates === 0}
+              className="inline-flex h-9 items-center justify-center rounded border border-action-accent bg-action-accent px-3 text-sm font-semibold text-foreground transition-colors hover:bg-action-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Aplicar
+            </button>
+          </footer>
+        </section>
+      )}
+
+      {/* Confirmação do KGR em grupo: nada é gravado antes de Confirmar. */}
+      {kgrBatchConfirm && kgrBatchPreview && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/75 px-4 py-8" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setKgrBatchConfirm(null); }}>
           <section
             role="dialog"
             aria-modal="true"
-            aria-labelledby="minerador-vinculo-batch-title"
-            aria-describedby="minerador-vinculo-batch-summary"
-            data-vinculo-batch-dialog
-            ref={vinculoBatchDialogRef}
+            aria-labelledby="minerador-kgr-batch-title"
+            aria-describedby="minerador-kgr-batch-summary"
+            data-kgr-batch-dialog
+            ref={kgrBatchDialogRef}
             tabIndex={-1}
             className="w-full max-w-lg overflow-hidden rounded-lg border border-divider bg-surface-elevated text-foreground shadow-xl outline-none"
           >
             <header className="border-b border-divider px-5 py-4">
-              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-text-muted">Vínculo das selecionadas</p>
-              <h2 id="minerador-vinculo-batch-title" className="mt-1 text-lg font-semibold text-foreground">
-                {vinculoBatchPreview?.ok ? vinculoBatchPreview.actionLabel : "Vínculo em grupo"}
-              </h2>
+              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-text-muted">KGR das selecionadas</p>
+              <h2 id="minerador-kgr-batch-title" className="mt-1 text-lg font-semibold text-foreground">Aplicabilidade do KGR: {kgrApplicabilityLabel(kgrBatchConfirm)}</h2>
             </header>
             <div className="space-y-4 p-5">
-              {isSubjectDeclareChoice(vinculoBatchDialog.choice) && (
-                <div className="grid min-w-0 gap-3">
-                  <label className="block min-w-0 text-sm font-medium text-foreground">
-                    Nota do Assunto: o que é, para quem
-                    <input
-                      type="text"
-                      value={vinculoBatchDialog.note}
-                      maxLength={KEYWORD_SUBJECT_NOTE_MAX}
-                      onChange={event => setVinculoBatchDialog(current => current ? { ...current, note: event.target.value } : current)}
-                      placeholder="Opcional, igual para todas as selecionadas"
-                      className="mt-1 h-10 w-full rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none placeholder:text-text-muted focus:border-module-accent focus-visible:ring-2 focus-visible:ring-module-accent/40"
-                      autoFocus
-                    />
-                    <span className="mt-1 block text-sm text-text-muted">Em branco, a coluna marca &quot;Assunto sem nota&quot; até você completar na Revisão Humana.</span>
-                  </label>
-                  <label className="block min-w-0 text-sm font-medium text-foreground">
-                    Página de destino
-                    <input
-                      type="url"
-                      inputMode="url"
-                      value={vinculoBatchDialog.destination}
-                      onChange={event => setVinculoBatchDialog(current => current ? { ...current, destination: event.target.value } : current)}
-                      placeholder="https://"
-                      className="mt-1 h-10 w-full rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none placeholder:text-text-muted focus:border-module-accent focus-visible:ring-2 focus-visible:ring-module-accent/40"
-                    />
-                    <span className="mt-1 block text-sm text-text-muted">Opcional, igual para o lote. Precisa ser https:// e estar no site da marca.</span>
-                  </label>
-                </div>
-              )}
-              {vinculoBatchPreview && !vinculoBatchPreview.ok && (
-                <p role="alert" className="text-sm leading-6 text-danger">{vinculoBatchPreview.reason}</p>
-              )}
-              {vinculoBatchPreviewText && (
-                <div id="minerador-vinculo-batch-summary" className="space-y-1.5 text-sm leading-6">
-                  <p className="font-semibold text-foreground">{vinculoBatchPreviewText.summary}</p>
-                  {vinculoBatchPreviewText.details.map(detail => <p key={detail} className="text-text-muted">{detail}</p>)}
-                  {vinculoBatchPreviewText.warning && (
-                    <p role="note" data-vinculo-demotion-warning className="font-semibold text-warning">{vinculoBatchPreviewText.warning}</p>
-                  )}
-                  {isSubjectDeclareChoice(vinculoBatchDialog.choice) && (
-                    <p className="text-text-muted">Depois de gravar, a Lógica roda sozinha nas que ainda não a têm. Nada é aprovado.</p>
-                  )}
-                </div>
-              )}
+              <div id="minerador-kgr-batch-summary" className="space-y-1.5 text-sm leading-6">
+                <p className="font-semibold text-foreground">{kgrBatchPreview.summary}</p>
+                {kgrBatchPreview.details.map(detail => <p key={detail} className="text-text-muted">{detail}</p>)}
+                <p className="text-text-muted">A decisão não altera o score nem o status.</p>
+              </div>
               <div className="flex flex-col-reverse justify-end gap-2 border-t border-divider pt-4 sm:flex-row">
-                <button type="button" onClick={() => setVinculoBatchDialog(null)} disabled={updating} className="inline-flex h-9 items-center justify-center rounded border border-divider bg-surface px-3 text-sm font-semibold text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40 disabled:cursor-not-allowed disabled:opacity-50">Cancelar</button>
+                <button type="button" onClick={() => setKgrBatchConfirm(null)} className="inline-flex h-9 items-center justify-center rounded border border-divider bg-surface px-3 text-sm font-semibold text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40">Cancelar</button>
                 <button
                   type="button"
-                  onClick={() => void handleBatchVinculo(vinculoBatchDialog)}
-                  disabled={updating || bulkActionProcessing || !vinculoBatchPreview?.ok || vinculoBatchPreview.counts.updates === 0}
+                  onClick={() => { const nextApplicability = kgrBatchConfirm; setKgrBatchConfirm(null); void handleBatchKgrApplicability(nextApplicability as KgrApplicability); }}
+                  disabled={updating || bulkActionProcessing || kgrBatchPreview.updates === 0}
                   className="inline-flex h-9 items-center justify-center rounded border border-action-accent bg-action-accent px-3 text-sm font-semibold text-foreground transition-colors hover:bg-action-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Confirmar

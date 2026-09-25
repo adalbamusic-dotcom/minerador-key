@@ -24,16 +24,17 @@ import { dnaMaturityLabel } from "@/lib/minerador/dna-maturity";
 import { volumeEligibilityLabel, type VolumeEligibilityStatus } from "@/lib/minerador/volume-eligibility";
 import { readSiteOrigin } from "@/lib/minerador/publication-link";
 import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS } from "@/lib/minerador/editorial-status";
-import { primaryPostLabel } from "@/lib/minerador/primary-keyword-policy";
-import { KEYWORD_PAGE_TYPES, keywordPageTypeStanding } from "@/lib/minerador/keyword-page-type";
+import { keywordPageTypeStance, parseKeywordPageTypeChoice } from "@/lib/minerador/keyword-page-type";
 import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
-import { KEYWORD_SUBJECT_NOTE_MAX, type KeywordSubjectResolution } from "@/lib/minerador/keyword-subject";
-import { subjectReviewWarning } from "@/lib/minerador/vinculo-screen";
+import type { KeywordSubjectResolution } from "@/lib/minerador/keyword-subject";
+import { subjectReviewWarning, vinculoSelectValues } from "@/lib/minerador/vinculo-screen";
+import { NATIVE_SELECT_THEME } from "@/lib/ui/native-select-theme";
 import { keywordUrlRelationLabel } from "@/lib/minerador/publication-link";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
 import { mineradorProcessPresentation, type MineradorProcessAttempt, type MineradorProcessName, type MineradorProcessState } from "@/lib/minerador/process-state";
 import { createSemanticConsolidationDraft, resolveSemanticAxis, semanticConsolidationBySerp, type SemanticAxisResolution, type SemanticConsolidationAxis, type SemanticConsolidationAxisDraft, type SemanticConsolidationDraft, type SemanticSerpStrength } from "@/lib/minerador/semantic-consolidation-draft";
 import { ConfidenceBadge, ProvenancePanel, VersionBadge } from "./pipeline-ui";
+import { VinculoPageTypeSelect, VinculoPostSelect, VinculoSubjectFields, VinculoSubjectSelect } from "./vinculo-selects";
 
 type ProfileRecord = Record<string, unknown>;
 type ProfileFieldValue = unknown;
@@ -478,9 +479,16 @@ function HumanReviewPanel({
   const completion = canCompleteHumanReview(semantic, { intent, status });
   // Aqui se decide. Coluna e cabeçalho leem exatamente este mesmo resultado.
   const vinculo = resolveKeywordVinculo({ status, semantic });
+  const vinculoSelects = vinculoSelectValues(vinculo);
   // Decisão humana disponível é decisão concreta esperando escolha — nunca a
   // ausência de clique. Sem nada a decidir, o painel se declara de leitura.
   const pendingHumanDecisions = completion.pendingFields.length + (completion.pendingKgrDecision ? 1 : 0);
+  // O Assunto anula o KGR e o Posto (pedido do dono, 2026-09-24): não há busca
+  // a medir nem vaga a disputar. A conclusão também não cobra o KGR de um
+  // Assunto (human-review.ts), então a revisão nunca fica presa. O Potencial
+  // de página vale.
+  const subjectDeclared = vinculo.subject?.declared === true;
+  const subjectLocksKgr = subjectDeclared;
   const reviewUiState = deriveHumanReviewUiState({ completed: reviewCompleted, pendingDecisions: pendingHumanDecisions });
   const setOpen = (next: boolean) => {
     if (open === undefined) setUncontrolledOpen(next);
@@ -516,8 +524,8 @@ function HumanReviewPanel({
     </section>
 
     <section aria-label="Aplicabilidade do KGR" className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-divider bg-surface px-2.5 py-2">
-      <div className="min-w-0"><p className="text-sm font-semibold text-foreground">Aplicabilidade do KGR</p><p className="text-sm text-text-muted">A decisão não altera o score nem o status.</p></div>
-      <select aria-label="Aplicabilidade do KGR na revisão humana" value={kgrApplicability} disabled={statusUpdating || reviewLocked} onChange={event => void onAction?.({ type: "kgr", applicability: event.target.value as KgrApplicability })} className="min-h-9 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60">
+      <div className="min-w-0"><p className="text-sm font-semibold text-foreground">Aplicabilidade do KGR</p><p className="text-sm text-text-muted">{subjectLocksKgr ? "Com Assunto declarado, o KGR não se aplica a esta keyword." : "A decisão não altera o score nem o status."}</p></div>
+      <select aria-label="Aplicabilidade do KGR na revisão humana" value={kgrApplicability} disabled={statusUpdating || reviewLocked || subjectLocksKgr} title={subjectLocksKgr ? "Com Assunto declarado, o KGR não se aplica." : undefined} onChange={event => void onAction?.({ type: "kgr", applicability: event.target.value as KgrApplicability })} className={`min-h-9 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60 ${NATIVE_SELECT_THEME}`}>
         <option value="pending">Pendente</option>
         <option value="applicable">Aplicável</option>
         <option value="not_applicable">Não aplicável</option>
@@ -530,45 +538,32 @@ function HumanReviewPanel({
         ? "Esta keyword pertence a uma publicação. Diga se ela está travada ao slug e o que a página é."
         : "Nenhuma publicação declarada: a keyword está livre e o tipo é potencial. Nada aqui é obrigatório, e nada trava a escolha."}</p>
 
-      <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <label className="text-sm font-medium text-text-muted" htmlFor={`review-primary-post-${keywordId}`}>Posto de principal</label>
-        <select
-          id={`review-primary-post-${keywordId}`}
-          aria-label="Posto de principal na revisão humana"
-          value={vinculo.postSelectValue}
-          disabled={statusUpdating || reviewLocked || !onAction}
-          onChange={event => { const value = event.target.value; if (value === "locked" || value === "reviewable") void onAction?.({ type: "primary_policy", policy: value }); }}
-          className="h-8 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60"
-          title="Livre: a keyword pode ser primária ou secundária de qualquer página, e pode perder a vaga. Travado ao slug: ela é a primária desta URL e não se solta dela."
-        >
-          <option value="reviewable">{primaryPostLabel("free")}</option>
-          <option value="locked">{primaryPostLabel("locked")}</option>
-        </select>
-      </div>
+      {/* Os mesmos três selects do painel "Vínculo das selecionadas" do
+          rodapé (vinculo-selects.tsx): aqui cada escolha vira a ação da
+          keyword; o Assunto espera a gravação no ReviewSubjectControl. */}
+      <VinculoPostSelect
+        id={`review-primary-post-${keywordId}`}
+        className="mt-2"
+        aria-label="Posto de principal na revisão humana"
+        value={vinculoSelects.post}
+        disabled={statusUpdating || reviewLocked || !onAction || subjectDeclared}
+        subjectDeclared={subjectDeclared}
+        onChange={value => { if (value === "locked" || value === "reviewable") void onAction?.({ type: "primary_policy", policy: value }); }}
+      />
 
-      <div className="mt-1.5 flex min-w-0 flex-wrap items-center justify-between gap-2">
-        <label className="text-sm font-medium text-text-muted" htmlFor={`review-page-type-${keywordId}`}>
-          {vinculo.publicationDeclared ? "A página publicada é" : "Potencial de página"}
-        </label>
-        <select
-          id={`review-page-type-${keywordId}`}
-          aria-label="Tipo de página na revisão humana"
-          value={vinculo.pageType.type}
-          disabled={statusUpdating || reviewLocked || !onAction}
-          onChange={event => void onAction?.({ type: "page_type", pageType: event.target.value as typeof KEYWORD_PAGE_TYPES[number] })}
-          className="h-8 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60"
-          title="Enquanto a keyword é nova, o tipo é potencial; com publicação declarada, passa a ser declaração. A escolha continua sua nos dois casos."
-        >
-          {/* O peso vem da publicação, não da opção: escolher Silo numa
-              keyword nova é "Silo · potencial"; na publicada é "Silo ·
-              declarado". Mostrar só "Silo" escondia metade da frase. */}
-          {KEYWORD_PAGE_TYPES.map(value => (
-            <option key={value} value={value}>
-              {keywordPageTypeStanding(value, { declared: vinculo.publicationDeclared })}
-            </option>
-          ))}
-        </select>
-      </div>
+      <VinculoPageTypeSelect
+        id={`review-page-type-${keywordId}`}
+        className="mt-1.5"
+        ariaContext="na revisão humana"
+        value={vinculoSelects.page_type}
+        published={vinculo.publicationDeclared}
+        disabled={statusUpdating || reviewLocked || !onAction}
+        onChange={value => { const choice = parseKeywordPageTypeChoice(value); if (!choice) return; void onAction?.(vinculo.publicationDeclared ? { type: "page_type", pageType: choice.pageType } : { type: "page_type", pageType: choice.pageType, stance: choice.stance }); }}
+      />
+
+      {subjectDeclared ? (
+        <p data-review-subject-overrides className="mt-1 text-sm text-text-muted">Com Assunto declarado, o KGR e o Posto de principal não se aplicam; o Potencial de página continua valendo.</p>
+      ) : null}
 
       <ReviewSubjectControl
         key={`${vinculo.subject?.declared ? "declared" : "none"}|${vinculo.subject?.note ?? ""}|${vinculo.subject?.destinationUrl ?? ""}`}
@@ -602,7 +597,7 @@ function HumanReviewPanel({
         {vinculo.subjectLabel ? <>{" · "}<span data-review-subject-label className="font-semibold text-context-accent">{vinculo.subjectLabel}</span></> : null}
         {" — "}
         {vinculo.pageType.source === "human"
-          ? "escolhido por alguém desta marca."
+          ? vinculo.pageType.humanDeclared ? "declarado por alguém desta marca: o Arquiteto respeita o tipo." : "escolhido por alguém desta marca."
           : vinculo.pageType.source === "site"
             ? "veio do papel observado na página publicada."
             : "padrão do Minerador. Marque Silo se esta keyword deve abrir um universo novo."}
@@ -681,53 +676,22 @@ function ReviewSubjectControl({
       ? { type: "subject", declared: true, note: note.trim() || null, destinationUrl: destination.trim() || null }
       : { type: "subject", declared: false });
   };
-  const inputClass = "mt-1 h-8 w-full min-w-0 rounded-md border border-divider bg-surface-subtle px-2 text-sm text-foreground outline-none placeholder:text-text-muted hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60";
-
   return <div data-review-subject data-keyword-id={keywordId} className="mt-1.5 min-w-0">
-    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-      <label className="text-sm font-medium text-text-muted" htmlFor={selectId}>Assunto</label>
-      <select
-        id={selectId}
-        value={choice}
-        disabled={disabled}
-        onChange={event => setChoice(event.target.value === "declared" ? "declared" : "none")}
-        className="h-8 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60"
-        title="Assunto é a frase que você declara como tronco de um ou mais artigos. Pode não ter busca: na aprovação dispensa Volume, Resultados e KGR, mas não a Lógica."
-      >
-        <option value="none">Não</option>
-        <option value="declared">Declarado</option>
-      </select>
-    </div>
+    <VinculoSubjectSelect
+      id={selectId}
+      value={choice}
+      disabled={disabled}
+      onChange={value => setChoice(value === "declared" ? "declared" : "none")}
+    />
 
     {nextDeclared && (
-      <div className="mt-1.5 grid min-w-0 gap-2 sm:grid-cols-2">
-        <label className="block min-w-0 text-sm font-medium text-text-muted">
-          Nota: o que é, para quem
-          <input
-            type="text"
-            value={note}
-            maxLength={KEYWORD_SUBJECT_NOTE_MAX}
-            disabled={disabled}
-            onChange={event => setNote(event.target.value)}
-            placeholder="Opcional"
-            className={inputClass}
-          />
-          <span className="mt-0.5 block text-sm text-text-muted">{note.trim().length}/{KEYWORD_SUBJECT_NOTE_MAX} caracteres</span>
-        </label>
-        <label className="block min-w-0 text-sm font-medium text-text-muted">
-          Página de destino
-          <input
-            type="url"
-            inputMode="url"
-            value={destination}
-            disabled={disabled}
-            onChange={event => setDestination(event.target.value)}
-            placeholder="https://"
-            className={inputClass}
-          />
-          <span className="mt-0.5 block text-sm text-text-muted">Opcional. Precisa estar no site da marca.</span>
-        </label>
-      </div>
+      <VinculoSubjectFields
+        note={note}
+        destination={destination}
+        disabled={disabled}
+        onNoteChange={setNote}
+        onDestinationChange={setDestination}
+      />
     )}
 
     {dirty && (
@@ -1110,7 +1074,7 @@ export function KeywordDnaPanel({
                 edição estrutural ficam bloqueadas (sistema-visual §5.1). */}
             <ProfilePill label="Publicada" tone="danger" />
             <ProfilePill label={headerVinculo.postLabel} tone={headerVinculo.postLockedToSlug ? "accent" : "neutral"} />
-            <ProfilePill label={headerVinculo.pageTypeLabel} tone={headerVinculo.pageType.declared ? "accent" : "neutral"} />
+            <ProfilePill label={headerVinculo.pageTypeLabel} tone={keywordPageTypeStance(headerVinculo.pageType) === "declared" ? "accent" : "neutral"} />
           </div>
         )}
       </div>
@@ -1187,7 +1151,7 @@ export function KeywordDnaPanel({
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <label className="text-sm font-semibold text-text-muted" htmlFor={`status-${keyword.id}`}>Status final</label>
-              {onWorkflowStatusChange && !(legacyPublishedStatus && !allowPublishedWorkflowStatus) ? <select id={`status-${keyword.id}`} aria-label={`Status da keyword ${keyword.keyword}`} value={editorialStatus.status || "bruto"} onChange={event => void onWorkflowStatusChange(event.target.value)} disabled={statusUpdating || legacyPublishedStatus} className="h-8 rounded-md border border-divider bg-surface px-2 text-sm font-semibold text-foreground outline-none hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60">
+              {onWorkflowStatusChange && !(legacyPublishedStatus && !allowPublishedWorkflowStatus) ? <select id={`status-${keyword.id}`} aria-label={`Status da keyword ${keyword.keyword}`} value={editorialStatus.status || "bruto"} onChange={event => void onWorkflowStatusChange(event.target.value)} disabled={statusUpdating || legacyPublishedStatus} className={`h-8 rounded-md border border-divider bg-surface px-2 text-sm font-semibold text-foreground outline-none hover:border-context-accent/60 focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60 ${NATIVE_SELECT_THEME}`}>
                 {/* Mesma lista da coluna Status da tabela: o status editorial
                     é um eixo só. "Publicado" saiu daqui — publicação é o outro
                     eixo, declarado no Vínculo, e nenhuma linha do banco usava

@@ -1,5 +1,51 @@
 # Backlog — Minerador
 
+## Vínculo igual à Revisão no rodapé, coluna com três escolhas e barra horizontal — 2026-09-24
+
+Registro no `estado-atual.md` de 2026-09-24. Verificado no código e confirmado por teste; validado manualmente: não.
+
+- [x] Painel "Vínculo das selecionadas" com os mesmos três selects da Revisão Humana (componente comum), sem "Não mudar"; "Valores diferentes" desabilitado quando as selecionadas divergem; só o select mudado grava.
+- [x] Coluna Vínculo mostra Posto, Potencial e Assunto (default ou escolha), em 14px.
+- [x] Barra horizontal só quando as colunas não cabem: última célula sem `border-r` e reserva de 2px para as bordas do `border-collapse` (opção aditiva; Arquiteto sem mudança).
+- [ ] **Validação na tela (usuário)**: painel e card lado a lado no escuro e no claro; seleção mista mostrando "Valores diferentes"; sem barra horizontal com e sem linha expandida; barra de volta ao alargar uma coluna ou com zoom.
+- [x] Correção da revisão: mínimos somam 1106px e cabem em 1366px com o menu lateral aberto; publicada sem tipo determinado mostra "Artigo · potencial" no select, como na coluna; Assunto com a palavra do select na coluna e na confirmação; nome acessível do Potencial começa pelo rótulo visível; aviso de rascunho aberto no painel; `test:minerador:dom` no `pnpm test`.
+- [ ] **Validação na tela (usuário), também**: 1366px com menu aberto sem barra horizontal; publicada sem tipo mostrando "Artigo · potencial" no card, no painel e na coluna.
+
+## Processador: rolagem única, rodapé só com seleção e seletor Vínculo — 2026-09-24
+
+Registro no `estado-atual.md` de 2026-09-24. Verificado no código e confirmado por teste; validado manualmente: não.
+
+- [x] Uma rolagem vertical só no Processador: a página não rola, a planilha ocupa a sobra com o cabeçalho preso.
+- [x] Rodapé só com seleção: a Lógica automática depois do import de Assuntos não seleciona mais nada.
+- [x] Vínculo em um seletor só (ao lado do KGR), com três grupos de escolha única; Declarar Assunto desliga o Posto; "Aplicar" grava as escolhas de uma vez, com confirmação, readback estreito e ator `auth.users.id`.
+- [ ] **Validação na tela (usuário)**: uma só barra vertical com e sem o painel Organizar aberto; rodapé some ao limpar a seleção e não aparece depois de importar Assuntos; painel do Vínculo no escuro e no claro, com teclado (Tab, setas nos radios, Escape).
+- [x] Corretor: com seleção, o espaço do rodapé fixo é um irmão depois da planilha (as barras de rolagem não ficam mais sob o rodapé); planilha com altura mínima e blocos de cima com teto e rolagem própria; painel do Vínculo fecha com seleção vazia e com Tab para fora; Potencial "potencial" em grupo pula e conta a publicada.
+- [ ] Levar a rolagem única ao Descobrir (hoje com `max-h` na planilha), se o dono confirmar o mesmo defeito lá.
+- [ ] Celular: `ProductShell` (compartilhado) usa `min-h-screen` (100vh); onde 100vh > 100dvh pode sobrar rolagem externa. Tratar com `min-h-dvh` em tarefa própria, se o dono usar o celular.
+
+## Planilha do Processador, rodapé, lote progressivo e sino — 2026-09-24
+
+SDDs: [planilha, lote e sino](../compartilhado/sdd-padrao-planilha-progresso-notificacoes-2026-09-24.md) (seção 16) e [Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md) (seção 12) e [spec](./spec.md) §67, seção 4. Registro no `estado-atual.md` de 2026-09-24. Verificado no código e confirmado por teste; validado manualmente: não.
+
+- [x] "Colar keywords" e "Importar CSV" na barra global do Processador.
+- [x] Rodapé com 4 seletores separados (KGR, Posto, Potencial, Assunto), também em "Mais ações"; todos com confirmação antes de gravar, KGR incluído.
+- [x] Potencial de página com 8 valores (4 potenciais e 4 declarados) na Revisão Humana e no rodapé; peso em `keyword_page_type_stance`; publicada sem gravar peso.
+- [x] Assunto anula Posto e KGR (lote pula e conta; Revisão desliga; a conclusão não cobra mais o KGR de Assunto).
+- [x] Planilha: cabeçalho preso, keyword com a sobra e sem corte, slug em 14px; células "—", "0" apagado, "Erro" e "Medindo…" (ADR-020 preservado).
+- [x] Organizar: sem Silo; KGR num seletor; Relação com URL dentro de Vínculo; "Processo" (com/sem) no lugar de Arquitetura; preferência antiga sem filtro escondido.
+- [x] Selects nativos com `NATIVE_SELECT_THEME` (rodapé, Mais ações, Organizar, Organização das linhas, Revisão Humana; Descobrir com o mesmo esquema).
+- [x] Rodapé sem corte silencioso (rolagem do grupo; seletores em "Mais ações" abaixo de `2xl`; Status e Excluir abaixo de 1800px).
+- [x] Lote progressivo com texto curto "5 de 30 · faltam 25", bloco e relógio do bloco em curso; falha contada; Parar; "Ver falhas".
+- [x] Sino só marca o contador; nada de card nem painel automático.
+- [x] Descobrir: seletor corrigido; sem Histórico e Targeting; mesmas células; keyword quebra linha.
+- [ ] **Validação na tela (usuário)**: roteiro no `estado-atual.md` de 2026-09-24.
+- [ ] Readback no banco da primeira gravação real de `keyword_page_type_stance`.
+- [ ] **Decidir** o sentido de "Com processo / Sem processo" (hoje: passou pelo Processador; "enviado ao Arquiteto" exige leitura ou marcador novo, com SDD e gate de egress).
+- [ ] Marcador gravado de "processado sem dado" para a keyword que o Google Ads não devolve e para a candidata do Descobrir sem média (hoje o "0" apagado vale só na sessão). Muda o contrato de escrita da rota: SDD da planilha, premissa 5.
+- [ ] Timeout por bloco com reconciliação por readback (fatia F3 da SDD da planilha); tamanho do bloco de Resultados (5) a confirmar num lote real, pago, autorizado pelo usuário.
+- [ ] Ator `auth.users.id` no KGR em grupo e no Posto individual da Revisão (hoje e-mail da sessão).
+- [ ] Levar o padrão às outras áreas pelas fatias da SDD da planilha (F1 em diante), uma de cada vez.
+
 ## Pesquisa por Assunto (F1b) e conserto do import da Descoberta — 2026-09-24
 
 SDD: [Assunto, o tronco editorial](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md) (F1b; desvios na seção 11.4). Registro no `estado-atual.md` de 2026-09-24. Verificado no código e confirmado por teste; validado manualmente: não.

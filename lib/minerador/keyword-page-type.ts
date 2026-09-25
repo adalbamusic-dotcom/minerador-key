@@ -46,6 +46,60 @@ export function keywordPageTypeLabel(type: KeywordPageType): string {
 }
 
 /**
+ * O PESO DA ESCOLHA (pedido do dono, 2026-09-24): além do tipo, o humano diz
+ * se ele é **potencial** ("pode ser um Artigo") ou **declarado** ("vai ser um
+ * Artigo, travado"). É uma dimensão a mais, gravada ao lado do tipo em
+ * `keyword_page_type_stance`: o enum dos 4 tipos fica intacto, e quem não
+ * conhece a chave nova lê exatamente o que lia antes.
+ *
+ * Declarado vale para qualquer keyword, publicada ou não. Na publicada, o
+ * tipo já era declaração pela publicação e continua sendo.
+ */
+export const KEYWORD_PAGE_TYPE_STANCES = ["potential", "declared"] as const;
+export type KeywordPageTypeStance = typeof KEYWORD_PAGE_TYPE_STANCES[number];
+export const KEYWORD_PAGE_TYPE_STANCE_KEY = "keyword_page_type_stance" as const;
+
+function isStance(value: unknown): value is KeywordPageTypeStance {
+  return value === "potential" || value === "declared";
+}
+
+export type KeywordPageTypeChoice = {
+  /** Valor do `<select>`: `potential:article`, `declared:silo`. */
+  value: string;
+  pageType: KeywordPageType;
+  stance: KeywordPageTypeStance;
+  /** `Artigo · potencial` ou `Artigo · declarado`. */
+  label: string;
+};
+
+export function keywordPageTypeChoiceValue(pageType: KeywordPageType, stance: KeywordPageTypeStance): string {
+  return `${stance}:${pageType}`;
+}
+
+/** Valor do select vira tipo + peso; valor desconhecido não vira nada. */
+export function parseKeywordPageTypeChoice(value: unknown): { pageType: KeywordPageType; stance: KeywordPageTypeStance } | null {
+  if (typeof value !== "string") return null;
+  const [stance, pageType, ...rest] = value.split(":");
+  if (rest.length > 0 || !isStance(stance) || !isPageType(pageType)) return null;
+  return { pageType, stance };
+}
+
+/**
+ * As escolhas do Potencial de página: os 4 potenciais e os 4 declarados. Na
+ * publicada, o tipo já é declaração pela publicação — a tela mostra só os 4
+ * declarados, como antes.
+ */
+export function keywordPageTypeChoices(options: { published?: boolean } = {}): KeywordPageTypeChoice[] {
+  const stances: readonly KeywordPageTypeStance[] = options.published ? ["declared"] : KEYWORD_PAGE_TYPE_STANCES;
+  return stances.flatMap(stance => KEYWORD_PAGE_TYPES.map(pageType => ({
+    value: keywordPageTypeChoiceValue(pageType, stance),
+    pageType,
+    stance,
+    label: keywordPageTypeStanding(pageType, { declared: stance === "declared" }),
+  })));
+}
+
+/**
  * Rótulo com o sentido explícito. Sem publicação é aposta; com publicação é
  * fato observado — e a tela não pode deixar os dois parecerem a mesma coisa.
  */
@@ -86,7 +140,22 @@ export type KeywordPageTypeResolution = {
   declared: boolean;
   /** `false` enquanto a keyword é nova: aí o valor é potencial. */
   published: boolean;
+  /**
+   * O humano escolheu o tipo como **declarado** (travado), publicada ou não.
+   * Aditivo e presente só quando verdadeiro: sem a declaração, o objeto é
+   * byte a byte o de antes. `declared` (acima) continua sendo só o fato da
+   * publicação — é o que o Arquiteto lê como página no ar.
+   */
+  humanDeclared?: true;
 };
+
+/**
+ * O peso que a tela mostra: `declared` quando a publicação o impõe ou o
+ * humano declarou; `potential` no resto.
+ */
+export function keywordPageTypeStance(resolution: Pick<KeywordPageTypeResolution, "declared" | "humanDeclared">): KeywordPageTypeStance {
+  return resolution.declared || resolution.humanDeclared === true ? "declared" : "potential";
+}
 
 export type KeywordPageTypeInput = { semantic?: Semantic; siteRole?: unknown; published?: boolean };
 
@@ -102,7 +171,8 @@ export function resolveKeywordPageType(input: KeywordPageTypeInput): KeywordPage
   // Publicada e com valor determinado, o tipo é declaração: a tela para de
   // dizer "potencial". Continua editável — corrigir o que a página é tem de
   // ser possível sem desfazer a publicação.
-  return { ...base, published, declared: published && base.determined };
+  const humanDeclared = base.source === "human" && input.semantic?.[KEYWORD_PAGE_TYPE_STANCE_KEY] === "declared";
+  return { ...base, published, declared: published && base.determined, ...(humanDeclared ? { humanDeclared: true as const } : {}) };
 }
 
 export function readKeywordPageType(input: KeywordPageTypeInput): KeywordPageType {
@@ -114,6 +184,9 @@ export type KeywordPageTypeHistoryEntry = {
   next: KeywordPageType;
   actorId: string;
   changedAt: string;
+  /** Presentes quando a escolha trouxe o peso (potencial/declarado). */
+  previousStance?: KeywordPageTypeStance;
+  nextStance?: KeywordPageTypeStance;
 };
 
 function readHistory(value: unknown): KeywordPageTypeHistoryEntry[] {
@@ -126,20 +199,38 @@ function readHistory(value: unknown): KeywordPageTypeHistoryEntry[] {
  */
 export function setKeywordPageType(
   semantic: Semantic,
-  input: { pageType: KeywordPageType; actorId: string; changedAt: string; siteRole?: unknown; published?: boolean },
+  input: {
+    pageType: KeywordPageType;
+    actorId: string;
+    changedAt: string;
+    siteRole?: unknown;
+    published?: boolean;
+    /** Potencial ou declarado. Ausente, o peso gravado fica como está (contrato anterior). */
+    stance?: KeywordPageTypeStance;
+  },
 ): { semantic: Record<string, unknown>; changed: boolean; reason?: string } {
   const current = { ...(semantic || {}) };
   const resolution = resolveKeywordPageType({ semantic: current, siteRole: input.siteRole, published: input.published });
   const previous = resolution.type;
-  if (previous === input.pageType && isPageType(current[KEYWORD_PAGE_TYPE_KEY])) {
+  const stance = isStance(input.stance) ? input.stance : undefined;
+  const previousStance: KeywordPageTypeStance = current[KEYWORD_PAGE_TYPE_STANCE_KEY] === "declared" ? "declared" : "potential";
+  const sameStance = stance === undefined || stance === previousStance;
+  if (previous === input.pageType && isPageType(current[KEYWORD_PAGE_TYPE_KEY]) && sameStance) {
     return { semantic: current, changed: false };
   }
   const history = readHistory(current.keyword_page_type_history);
-  history.push({ previous, next: input.pageType, actorId: input.actorId, changedAt: input.changedAt });
+  history.push({
+    previous,
+    next: input.pageType,
+    actorId: input.actorId,
+    changedAt: input.changedAt,
+    ...(stance ? { previousStance, nextStance: stance } : {}),
+  });
   return {
     semantic: {
       ...current,
       [KEYWORD_PAGE_TYPE_KEY]: input.pageType,
+      ...(stance ? { [KEYWORD_PAGE_TYPE_STANCE_KEY]: stance } : {}),
       keyword_page_type_actor: input.actorId,
       keyword_page_type_at: input.changedAt,
       keyword_page_type_history: history,

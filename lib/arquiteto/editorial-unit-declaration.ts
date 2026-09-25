@@ -69,6 +69,13 @@ export type ArchitectKeywordVinculo = {
   /** Publicada E determinada: é declaração, não aposta. */
   pageTypeDeclared: boolean;
   pageTypeSource: "human" | "site" | "default";
+  /**
+   * O humano declarou o tipo como DECLARADO (travado), sem publicação
+   * (pedido do dono, 2026-09-24). Aditivo e presente só quando verdadeiro: sem
+   * a declaração, o objeto é o de antes. A formação respeita o tipo como
+   * decisão humana; o enum dos 4 tipos continua o mesmo.
+   */
+  pageTypeHumanDeclared?: true;
   /** O posto: pode perder a vaga de primária? */
   post: MineradorPost;
   postLockedToSlug: boolean;
@@ -104,6 +111,7 @@ export function readArchitectKeywordVinculo(keyword: RecordLike): ArchitectKeywo
     pageTypeDetermined: vinculo.pageType.determined,
     pageTypeDeclared: vinculo.pageType.declared,
     pageTypeSource: vinculo.pageType.source,
+    ...(vinculo.pageType.humanDeclared && !vinculo.pageType.declared ? { pageTypeHumanDeclared: true as const } : {}),
     post: vinculo.post,
     postLockedToSlug: vinculo.postLockedToSlug,
     publicationDeclared: vinculo.publicationDeclared,
@@ -142,11 +150,26 @@ export function editorialUnitDeclarationFromVinculo(vinculo: ArchitectKeywordVin
     source: "potential",
     unit: vinculo.pageType,
     confidence: null,
-    reasons: [vinculo.pageTypeSource === "human"
-      ? "Declarado pelo humano no Minerador."
-      : "Sugerido pelo papel observado no site; a publicação ainda não foi declarada."],
+    reasons: [vinculo.pageTypeHumanDeclared
+      ? PAGE_TYPE_HUMAN_DECLARED_REASON
+      : vinculo.pageTypeSource === "human"
+        ? "Declarado pelo humano no Minerador."
+        : "Sugerido pelo papel observado no site; a publicação ainda não foi declarada."],
   });
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * O motivo que marca o tipo DECLARADO pelo humano (travado) numa keyword sem
+ * publicação. Continua `source: "potential"` — não há página no ar, e o
+ * contrato estrito não ganha valor novo —, mas a mesa diz que é decisão
+ * humana, não aposta.
+ */
+export const PAGE_TYPE_HUMAN_DECLARED_REASON = "Declarado pelo humano no Minerador como tipo travado: o tipo é decisão humana; a primária segue provisória até a SERP confirmar." as const;
+
+/** A declaração é o tipo travado pelo humano (não publicada)? */
+export function isHumanDeclaredPageType(declaration: EditorialUnitDeclaration | undefined): boolean {
+  return declaration?.source === "potential" && declaration.reasons.includes(PAGE_TYPE_HUMAN_DECLARED_REASON);
 }
 
 /** Atalho: a keyword do lote, direto para a declaração. */
@@ -207,6 +230,7 @@ export function describeEditorialUnitDeclaration(declaration: EditorialUnitDecla
   if (declaration.source === "published") {
     return `Publicada: o site declara que esta página é ${papel}${declaration.url ? ` (${declaration.url})` : ""}.`;
   }
+  if (isHumanDeclaredPageType(declaration)) return `Nova: declarada ${papel} pelo humano (tipo travado).`;
   return declaration.unit === "silo"
     ? "Nova: tem potencial de Silo — a SERP confirma ou recusa na etapa seguinte."
     : `Nova: tem potencial de ${papel}.`;

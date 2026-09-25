@@ -8,7 +8,7 @@ import { InlineLabelCluster } from "@/components/inline-label-cluster";
 import { GOOGLE_ADS_DISCOVERY_STATE_LABELS, GOOGLE_ADS_DISCOVERY_STATE_OPTIONS } from "@/lib/minerador/google-ads-discovery-catalog";
 import { DISCOVERY_CUSTOMER_FOCUSES, DISCOVERY_FUNNELS, DISCOVERY_INTENTS, DISCOVERY_RELATIONS, DISCOVERY_SEARCH_KINDS, type DiscoveryCustomerFocus, type DiscoveryFunnel, type DiscoveryIntent, type DiscoveryRelation, type DiscoverySearchKind } from "./discovery-types";
 
-const control = "mt-1 h-10 w-full rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none transition-colors hover:border-module-accent/25 focus:border-module-accent/50 focus-visible:ring-2 focus-visible:ring-module-accent/40";
+const control = "mt-1 h-10 w-full rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none transition-colors scheme-dark in-[.light]:scheme-light in-data-[theme=light]:scheme-light hover:border-module-accent/25 focus:border-module-accent/50 focus-visible:ring-2 focus-visible:ring-module-accent/40";
 const primarySearchControl = "mt-1 h-10 w-full rounded border border-action-accent/35 bg-surface-subtle px-3 text-sm text-foreground outline-none transition-colors hover:border-action-accent/50 focus:border-action-accent/65 focus-visible:ring-2 focus-visible:ring-action-accent/20";
 const readonlyContext = "mt-1 flex h-10 w-full items-center rounded border border-divider bg-surface-subtle px-3 text-sm font-normal text-foreground";
 const states = ["Todos os estados", ...GOOGLE_ADS_DISCOVERY_STATE_OPTIONS];

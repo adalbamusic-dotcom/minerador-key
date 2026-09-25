@@ -9,6 +9,7 @@ const page = readFileSync(new URL("../modules/minerador/discovery/discovery-keyw
 const searchRow = readFileSync(new URL("../modules/minerador/discovery/discovery-search-row.tsx", import.meta.url), "utf8");
 const filterRow = readFileSync(new URL("../modules/minerador/discovery/discovery-filter-row.tsx", import.meta.url), "utf8");
 const table = readFileSync(new URL("../modules/minerador/discovery/discovery-table-placeholder.tsx", import.meta.url), "utf8");
+const tableCells = readFileSync(new URL("../lib/minerador/discovery-table-cells.ts", import.meta.url), "utf8");
 const googleAdsRoute = readFileSync(new URL("../app/api/minerador/marcas/[brandId]/google-ads/descobrir-keywords/route.ts", import.meta.url), "utf8");
 const importRoute = readFileSync(new URL("../app/api/minerador/marcas/[brandId]/discovery/import/route.ts", import.meta.url), "utf8");
 
@@ -90,7 +91,9 @@ test("moeda contextual aparece depois de Estados/UF como leitura somente", () =>
   assert.doesNotMatch(currencyBlock, /<select|<input|<button|ChevronDown|onChange/);
   assert.match(searchRow, /discoveryCurrencyByCountry/);
   assert.doesNotMatch(searchRow, /currencyCode/);
-  assert.match(table, /formatDiscoveryMoney/);
+  // 2026-09-24: a célula de CPC passou para discoveryCpcCell ("0" apagado quando processado sem dado), que formata pela moeda da candidata.
+  assert.match(table, /discoveryCpcCell\(candidate\)/);
+  assert.match(tableCells, /formatDiscoveryMoney\(candidate\.averageCpcMicros, candidate\.currencyCode\)/);
   assert.doesNotMatch(searchRow, /fetch\s*\(/);
 });
 
