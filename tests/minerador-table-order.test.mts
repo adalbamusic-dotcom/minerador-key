@@ -47,7 +47,10 @@ test("as duas planilhas usam arraste por ponteiro e resize compartilhados", () =
     assert.match(source, /data-keyword-table-row-id/);
     assert.match(source, /onPointerDragStart=\{.*startPointerDragging/);
   }
-  assert.match(processor, /<KeywordTableShell ref=\{tableRef\} scroll="x" className=\{selectedIds\.size > 0 \? "pb-14" : ""\}>/);
+  // 2026-09-24, pedido do dono: o cabeçalho do Processador fica preso ao rolar; o shell rola nos dois eixos, limitado à tela.
+  // Atualizado no mesmo dia: sem max-h na planilha; a página não rola e o shell ocupa a sobra (uma rolagem vertical só).
+  // Corretor, mesmo dia: sem pb-14 (a barra horizontal ficava sob o rodapé fixo); o espaço do rodapé é um irmão.
+  assert.match(processor, /<KeywordTableShell ref=\{tableRef\} scroll="both" data-processor-table-viewport className="min-h-40">/);
   assert.match(processor, /visualPosition=\{index \+ 1\}/);
   assert.match(processor, /<KeywordDnaPanel/);
   assert.match(dnaPanel, /data-keyword-profile="bento"/);
@@ -55,7 +58,9 @@ test("as duas planilhas usam arraste por ponteiro e resize compartilhados", () =
   assert.doesNotMatch(processor, /Outros campos do perfil da keyword/);
   assert.doesNotMatch(processor, /JSON\.stringify\(value\)/);
   assert.match(processor, /responsiveWidths\[columnId\]/);
-  assert.match(discovery, /responsiveWidths\[columnId\]/);
+  // 2026-09-24, pedido do dono: a Keyword do Descobrir pega o espaço que sobra e nunca é cortada;
+  // a largura vem de columnWidth (conteúdo ou ajuste humano), não mais da projeção responsiva.
+  assert.match(discovery, /style=\{\{ width: columnWidth\(columnId\) \}\}/);
   assert.match(resize, /onMouseDown/);
   assert.match(resize, /cursor-col-resize/);
   assert.match(resize, /cursor-row-resize/);

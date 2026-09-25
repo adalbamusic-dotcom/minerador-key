@@ -98,7 +98,7 @@ test("declarar em grupo: aprovadas que vão para Em revisão são contadas e a c
   assert.equal(plan.counts.updates, 3);
   assert.equal(plan.counts.approvedToReview, 2);
   assert.equal(plan.demotionWarning, "2 aprovadas desta seleção vão para Em revisão.");
-  assert.equal(plan.actionLabel, "Declarar Assunto");
+  assert.equal(plan.actionLabel, "Assunto: Declarado", "o rótulo do select do Assunto, como Posto e Potencial");
   for (const update of plan.updates) {
     assert.equal(update.brandId, BRAND);
     const subject = resolveKeywordSubject(update.semantic);
@@ -185,7 +185,7 @@ test("declarar numa keyword que já é Assunto não troca a nota dela; retirar s
   assert.deepEqual(withdraw.updates.map(update => update.id), [already.id]);
   assert.equal(withdraw.updates[0].semantic.keyword_subject, null);
   assert.deepEqual(withdraw.skipped.map(entry => entry.reason), ["unchanged"]);
-  assert.equal(withdraw.actionLabel, "Retirar Assunto");
+  assert.equal(withdraw.actionLabel, "Assunto: Não");
 });
 
 test("posto só em publicadas: as demais são puladas e contadas", () => {
@@ -244,7 +244,10 @@ test("ator e marca obrigatórios: e-mail, local-user e marca vazia não planejam
 });
 
 test("readback estreito: colunas das três chaves e conferência por marca e valor", () => {
-  assert.equal(VINCULO_BATCH_READBACK_COLUMNS, "id,brand_id,analise_semantica->keyword_subject,analise_semantica->keyword_page_type,analise_semantica->primary_keyword_policy");
+  // 2026-09-24 (pedido do dono): o Potencial de página ganhou o peso
+  // potencial/declarado, gravado em keyword_page_type_stance; o readback
+  // estreito passa a conferir essa chave também.
+  assert.equal(VINCULO_BATCH_READBACK_COLUMNS, "id,brand_id,analise_semantica->keyword_subject,analise_semantica->keyword_page_type,analise_semantica->keyword_page_type_stance,analise_semantica->primary_keyword_policy");
   assert.doesNotMatch(VINCULO_BATCH_READBACK_COLUMNS, /\*/);
   const plan = planVinculoBatch({ keywords: [row(1, { analise_semantica: { keyword_page_type: "silo" } })], brandId: BRAND, action: { kind: "subject_declare", note: "n" }, actorId: ACTOR, changedAt: AT });
   assert.ok(plan.ok);

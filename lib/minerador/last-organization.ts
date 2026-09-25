@@ -12,6 +12,8 @@ export type MineradorOrganizationValues = {
   filterKgrApplicability: string;
   filterKgrMeasurement: string;
   filterVolumeEligibility: "Todos" | "operational" | VolumeEligibilityStatus;
+  /** "Com processo / Sem processo"; opcional para a preferência antiga continuar válida. */
+  filterProcess?: "Todos" | "with_process" | "without_process";
   sortColumn: "keyword" | "results_allintitle" | "volume_search" | "kgr_score" | "cpc" | "keyword_difficulty" | "nicho" | "lista";
   sortDirection: "asc" | "desc";
 };
@@ -21,8 +23,12 @@ export type MineradorOrganizationList = { id: string; nome: string };
 const all = "Todos";
 const sortColumns = new Set<MineradorOrganizationValues["sortColumn"]>(["keyword", "results_allintitle", "volume_search", "kgr_score", "cpc", "keyword_difficulty", "nicho", "lista"]);
 const siteRelations = new Set([all, "confirmed_primary", "candidate_primary", "supporting", "mentioned", "undefined"]);
-const siteArchitectures = new Set([all, "awaiting_architecture", "architectural_review_required", "architecture_confirmed", "conflict"]);
-const sitePublications = new Set([all, "published", "not_confirmed", "not_found", "redirected", "canonical_conflict"]);
+// Só os valores que o seletor Vínculo oferece (VINCULO_FILTER_GROUPS em
+// table-view.ts). Estado antigo salvo ("not_confirmed", "not_found",
+// "redirected", "canonical_conflict") não existe mais em readPublicationLink:
+// restaurado, filtraria a tabela até vazio com o select mostrando "Todos".
+const sitePublications = new Set([all, "free", "candidate", "verified", "published", "legacy_unverified"]);
+const processRuns = new Set([all, "with_process", "without_process"]);
 const kgrApplicability = new Set([all, "applicable", "not_applicable", "pending"]);
 const kgrMeasurements = new Set([all, "without_data", "partial", "complete", "invalid"]);
 const volumeEligibility = new Set([all, "operational", "pending", "eligible", "below_threshold", "unavailable", "measurement_failed"]);
@@ -33,7 +39,7 @@ export const MINERADOR_ORGANIZATION_STORAGE_VERSION = 2;
 export const defaultMineradorOrganization: MineradorOrganizationValues = {
   searchQuery: "", filterStatus: all, filterIntent: all, filterListId: all,
   filterSiteRelation: all, filterSiteArchitecture: all, filterSitePublication: all,
-  filterKgrApplicability: all, filterKgrMeasurement: all, filterVolumeEligibility: all, sortColumn: "keyword", sortDirection: "asc",
+  filterKgrApplicability: all, filterKgrMeasurement: all, filterVolumeEligibility: all, filterProcess: all, sortColumn: "keyword", sortDirection: "asc",
 };
 
 export function mineradorLastOrganizationKey(userId: string, brandId: string) {
@@ -64,8 +70,10 @@ export function normalizeMineradorLastOrganization(
   knownListIds?: readonly string[],
 ): MineradorOrganizationValues {
   if (!value) return { ...defaultMineradorOrganization };
-  const requestedListId = textValue(value.filterListId);
-  const listId = requestedListId === all || !requestedListId || (knownListIds && !knownListIds.includes(requestedListId)) ? all : requestedListId;
+  // O filtro Silo saiu do painel (pedido do dono, 2026-09-24). A preferência
+  // antiga não pode deixar um filtro ativo que a tela não mostra mais.
+  void knownListIds;
+  const listId = all;
   const requestedIntent = textValue(value.filterIntent);
   const intent = requestedIntent && requestedIntent !== all ? normalizeIntentKey(requestedIntent) : all;
   const normalizedVolumeEligibility = knownOrAll(value.filterVolumeEligibility, volumeEligibility) as MineradorOrganizationValues["filterVolumeEligibility"];
@@ -75,17 +83,26 @@ export function normalizeMineradorLastOrganization(
   const volumeFilter = normalizedVolumeEligibility === "operational" && !hasCurrentStorageVersion
     ? all
     : normalizedVolumeEligibility;
+  // Um seletor só para KGR e outro para Vínculo + Relação com URL: quando a
+  // preferência antiga trazia os dois lados, fica o primeiro (aplicabilidade;
+  // vínculo) e o outro volta a "Todos", para não haver filtro escondido.
+  const kgrApplicabilityValue = knownOrAll(value.filterKgrApplicability, kgrApplicability);
+  const kgrMeasurementValue = value.filterKgrMeasurement === "with_score" ? "complete" : value.filterKgrMeasurement === "without_data" ? all : knownOrAll(value.filterKgrMeasurement, kgrMeasurements);
+  const sitePublicationValue = knownOrAll(value.filterSitePublication, sitePublications);
+  const siteRelationValue = knownOrAll(value.filterSiteRelation, siteRelations);
   return {
     searchQuery: textValue(value.searchQuery),
     filterStatus: normalizeStatus(value.filterStatus),
     filterIntent: intent,
     filterListId: listId,
-    filterSiteRelation: knownOrAll(value.filterSiteRelation, siteRelations),
-    filterSiteArchitecture: knownOrAll(value.filterSiteArchitecture, siteArchitectures),
-    filterSitePublication: knownOrAll(value.filterSitePublication, sitePublications),
-    filterKgrApplicability: knownOrAll(value.filterKgrApplicability, kgrApplicability),
-    filterKgrMeasurement: value.filterKgrMeasurement === "with_score" ? "complete" : value.filterKgrMeasurement === "without_data" ? all : knownOrAll(value.filterKgrMeasurement, kgrMeasurements),
+    filterSiteRelation: sitePublicationValue !== all ? all : siteRelationValue,
+    // "Arquitetura" deu lugar a "Com processo / Sem processo".
+    filterSiteArchitecture: all,
+    filterSitePublication: sitePublicationValue,
+    filterKgrApplicability: kgrApplicabilityValue,
+    filterKgrMeasurement: kgrApplicabilityValue !== all ? all : kgrMeasurementValue,
     filterVolumeEligibility: volumeFilter,
+    filterProcess: knownOrAll(value.filterProcess, processRuns) as NonNullable<MineradorOrganizationValues["filterProcess"]>,
     sortColumn: sortColumns.has(textValue(value.sortColumn) as MineradorOrganizationValues["sortColumn"]) ? textValue(value.sortColumn) as MineradorOrganizationValues["sortColumn"] : "keyword",
     sortDirection: textValue(value.sortDirection) === "desc" ? "desc" : "asc",
   };
@@ -95,19 +112,19 @@ export function mineradorOrganizationLabels(values: MineradorOrganizationValues,
   const labels: string[] = [];
   const status = ({ bruto: "Brutas", aprovado: "Aprovadas", rejeitado: "Rejeitadas", publicado: "Publicados" } as Record<string, string>)[values.filterStatus];
   if (status) labels.push(status);
-  const publication = ({ published: "Publicação publicada", not_confirmed: "Publicação não confirmada", not_found: "Publicação não localizada", redirected: "Publicação redirecionada", canonical_conflict: "Conflito de canonical" } as Record<string, string>)[values.filterSitePublication];
+  const publication = ({ free: "Vínculo: Livre", candidate: "Vínculo: Candidata", verified: "Vínculo: Verificada", legacy_unverified: "Publicação não verificada", published: "Publicação publicada", not_confirmed: "Publicação não confirmada", not_found: "Publicação não localizada", redirected: "Publicação redirecionada", canonical_conflict: "Conflito de canonical" } as Record<string, string>)[values.filterSitePublication];
   if (publication) labels.push(publication);
   const intent = ({ informational: "Informativa", commercial_investigation: "Comercial investigativa", transactional: "Transacional", navigational: "Navegacional", local: "Local", mixed: "Mista", unknown: "Pendente" } as Record<string, string>)[values.filterIntent];
   if (intent) labels.push(intent);
-  if (values.filterListId !== all) labels.push(`Silo: ${lists.find(list => list.id === values.filterListId)?.nome || "não encontrado"}`);
+  void lists;
   const relation = ({ confirmed_primary: "Principal confirmada", candidate_primary: "Principal candidata", supporting: "Apoio provável", mentioned: "Mencionada", undefined: "Sem relação" } as Record<string, string>)[values.filterSiteRelation];
   if (relation) labels.push(`URL: ${relation}`);
-  const architecture = ({ awaiting_architecture: "Aguardando", architectural_review_required: "Revisão necessária", architecture_confirmed: "Confirmada", conflict: "Conflito" } as Record<string, string>)[values.filterSiteArchitecture];
-  if (architecture) labels.push(`Arquitetura: ${architecture}`);
+  const processRun = ({ with_process: "Com processo", without_process: "Sem processo" } as Record<string, string>)[values.filterProcess || all];
+  if (processRun) labels.push(processRun);
   const applicability = ({ applicable: "KGR aplicável", not_applicable: "KGR não aplicável", pending: "KGR pendente" } as Record<string, string>)[values.filterKgrApplicability];
   if (applicability) labels.push(applicability);
   const measurement = ({ without_data: "Sem medição", partial: "Parcial", complete: "Completa", invalid: "Inválida" } as Record<string, string>)[values.filterKgrMeasurement];
-  if (measurement) labels.push(`Métricas: ${measurement}`);
+  if (measurement) labels.push(`KGR: ${measurement}`);
   const volume = ({ operational: "Elegíveis por volume", pending: "Pendente de medição", eligible: "Elegível por volume", below_threshold: "Abaixo do corte", unavailable: "Sem volume oficial", measurement_failed: "Medição falhou" } as Record<string, string>)[values.filterVolumeEligibility];
   if (volume) labels.push(`Volume: ${volume}`);
   if (values.searchQuery.trim()) labels.push(`Busca: ${values.searchQuery.trim()}`);

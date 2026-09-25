@@ -522,7 +522,7 @@ test("o Vínculo mostra só as duas declarações; conferência e link saem da c
   const panels = readFileSync(new URL("../components/editorial/dna-panels.tsx", import.meta.url), "utf8");
   const limpo = (value: string) => value.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/^\s*\/\/.*$/gm, "");
   const celula = limpo(workspace).slice(
-    limpo(workspace).indexOf(`<td className="w-[120px] border-r border-divider/70 px-2 py-1 text-center whitespace-nowrap">`),
+    limpo(workspace).indexOf(`<td data-keyword-vinculo-cell className="border-r border-divider/70 px-2 py-1 text-center whitespace-nowrap">`),
     limpo(workspace).indexOf(`{/* Resultados`) >= 0 ? limpo(workspace).indexOf(`{/* Resultados`) : undefined,
   );
 
@@ -542,7 +542,7 @@ test("o Vínculo mostra só as duas declarações; conferência e link saem da c
 
   // As duas declarações se fazem na Revisão Humana, e nenhuma é obrigatória.
   assert.match(limpo(panels), /aria-label="Vínculo da keyword"/);
-  assert.match(limpo(panels), /aria-label="Tipo de página na revisão humana"/);
+  assert.match(limpo(panels), /<VinculoPageTypeSelect[\s\S]{0,200}ariaContext="na revisão humana"/, "nome acessível: o rótulo visível + contexto");
   assert.match(limpo(panels), /aria-label="Posto de principal na revisão humana"/);
 });
 
@@ -676,7 +676,10 @@ test("endereço e identidade SEO têm papéis de cor diferentes", () => {
 });
 
 test("o select do tipo mostra o peso que a escolha terá, e os defaults dos dois lados", () => {
-  const panels = readFileSync(new URL("../components/editorial/dna-panels.tsx", import.meta.url), "utf8");
+  // 2026-09-24 (pedido do dono): as opções do Potencial moram no componente
+  // comum da Revisão e do rodapé (vinculo-selects.tsx); a Revisão o usa.
+  const panels = readFileSync(new URL("../components/editorial/dna-panels.tsx", import.meta.url), "utf8")
+    + readFileSync(new URL("../components/editorial/vinculo-selects.tsx", import.meta.url), "utf8");
   const limpo = panels.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/^\s*\/\/.*$/gm, "");
 
   /*
@@ -684,12 +687,18 @@ test("o select do tipo mostra o peso que a escolha terá, e os defaults dos dois
    * é "Silo · potencial"; na publicada é "Silo · declarado". O select
    * mostrava só "Silo" enquanto a linha abaixo dizia a frase inteira.
    */
-  assert.match(limpo, /keywordPageTypeStanding\(value, \{ declared: vinculo\.publicationDeclared \}\)/, "as opções carregam o peso");
+  // 2026-09-24 (pedido do dono): o peso deixou de vir só da publicação. A
+  // keyword nova escolhe entre 8 valores (4 potenciais e 4 declarados); a
+  // publicada mostra os 4 declarados, como antes. Os rótulos vêm do domínio.
+  assert.match(limpo, /keywordPageTypeChoices\(\{ published: true \}\)/, "publicada: só os declarados");
+  assert.match(limpo, /keywordPageTypeChoices\(\)\.filter\(choice => choice\.stance === "potential"\)/, "nova: os potenciais");
+  assert.match(limpo, /keywordPageTypeChoices\(\)\.filter\(choice => choice\.stance === "declared"\)/, "nova: os declarados");
+  assert.match(limpo, /\{choice\.label\}/, "as opções carregam o peso");
   assert.doesNotMatch(limpo, /<option key=\{value\} value=\{value\}>\{keywordPageTypeLabel\(value\)\}/, "sem rótulo cru no select");
 
   // Os dois selects escrevem; coluna e cabeçalho só refletem.
   assert.match(limpo, /aria-label="Posto de principal na revisão humana"[\s\S]{0,700}type: "primary_policy"/);
-  assert.match(limpo, /aria-label="Tipo de página na revisão humana"[\s\S]{0,700}type: "page_type"/);
+  assert.match(limpo, /ariaContext="na revisão humana"[\s\S]{0,700}type: "page_type"/);
 
   // E o default de cada lado sai do resolvedor, não de literal na tela.
   const nova = resolveKeywordVinculo({ status: "bruto", semantic: {} });

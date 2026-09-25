@@ -22,8 +22,10 @@ test("a página e os controles da Descoberta não ampliam o documento", () => {
 test("somente o shell da tabela da Descoberta recebe rolagem horizontal", () => {
   assert.match(shell, /scroll\?: "both" \| "x"/);
   assert.match(shell, /overflow-x-auto overflow-y-visible/);
-  assert.match(table, /<KeywordTableShell[^>]*scroll="x"/);
-  assert.match(table, /style=\{\{ minWidth: discoveryTableMinimumWidth \}\}/);
+  // 2026-09-24, pedido do dono: cabeçalho fixo ao rolar. Com overflow-x o sticky
+  // não prende na página; o shell do Descobrir rola nos dois eixos, com altura da tela.
+  assert.match(table, /<KeywordTableShell[^>]*scroll="both"[^>]*max-h-\[calc\(100dvh-2\.5rem\)\]/);
+  assert.match(table, /sticky top-0 z-20/);
 });
 
 test("Estados/UF usa popover ancorado e limitado à viewport", () => {

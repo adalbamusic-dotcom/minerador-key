@@ -143,6 +143,8 @@ As premissas foram apresentadas ao dono antes da aprovação. Ele autorizou a im
 
 ### 4.4 Rodapé e inventário das escolhas humanas
 
+> **Superado em 2026-09-24 (seção 12):** o select único "Vínculo" desta tabela virou 4 seletores separados (KGR, Posto, Potencial e Assunto), a pedido do dono.
+
 O que o rodapé tem hoje: Conferir site, Lógica, Volume, Resultados, Revisar, select de KGR, Concluir revisão, select de Status e Excluir. "Mais ações" repete Status e KGR e traz Enviar ao Arquiteto (`modules/minerador/minerador-workspace.tsx:3776-3947`). **Verificado no código.**
 
 O dono pediu **todas** as escolhas humanas no rodapé. O inventário da Revisão Humana (`components/editorial/dna-panels.tsx`) e do card DECISÃO:
@@ -1298,3 +1300,71 @@ Entregue conforme a F3.1, com estes ajustes:
 `tsc --noEmit` sem erros e `git diff --check` limpo.
 
 **Nada disso é homologação.** O roteiro de validação na tela das fatias F2·B, F3 e F4 é do usuário, depois do deploy.
+
+### 11.6 Revisão de implementação — rodapé em 4 seletores e Potencial declarado (2026-09-24)
+
+Movida para a **seção 12**, que registra o motivo (pedido do dono), o que mudou em relação ao desenho da F1 e o contrato novo lido pelo Arquiteto.
+
+## 12. Adendo — rodapé com 4 seletores e potencial declarado (2026-09-24)
+
+> **Estado:** no código. **Verificado no código** e **confirmado por teste** nesta data. **Validado manualmente: não.** A homologação na tela é do usuário e está pendente.
+> Registro operacional: `docs/03-minerador/estado-atual.md` e `backlog.md` (entrada "Planilha do Processador, rodapé em 4 seletores, lote progressivo e sino sem cards — 2026-09-24"). Regra permanente: `docs/03-minerador/spec.md`, §67, seção "4".
+> Este adendo **não** muda o enum dos 4 tipos de página, não cria migration nem coluna e não muda a regra da primária. Tudo o que ele acrescenta é opcional e fica ausente quando não há declaração.
+
+### 12.1 Motivo: pedido do dono
+
+O dono testou a F1 na tela em 2026-09-24 e pediu três mudanças:
+
+1. **Quatro seletores no rodapé, não um.** A F1 juntava Posto de principal, Tipo de página e Assunto num select único, "Vínculo", com três grupos (seção 4.4, "entra no select Vínculo do rodapé"). Cada dimensão tem valores próprios, e no lote dava para aplicar só uma delas por vez. O dono pediu **4 seletores separados**: KGR, Posto de principal, Potencial de página e Assunto.
+2. **O Assunto anula o KGR e o Posto.** São as keywords do artigo que definem KGR e posto de principal, e o Assunto não é uma delas. O **Potencial de página continua valendo** para o Assunto ("quero que este Assunto seja uma landing page").
+3. **Potencial x declarado para qualquer keyword.** O Potencial de página tinha só os 4 valores "potencial" ("pode ser um Artigo"). Faltavam os 4 "declarado" ("vai ser um Artigo, travado"), para qualquer keyword e não só para a publicada. Os 8 valores precisam estar na Revisão Humana e no rodapé.
+
+### 12.2 O que mudou em relação ao desenho
+
+| # | Desenho (F1 e spec §67) | Como ficou | Por quê |
+| --- | --- | --- | --- |
+| 1 | Rodapé com um select "Vínculo" de três grupos (seção 4.4) | 4 selects separados, na ordem KGR, Posto, Potencial e Assunto, repetidos em "Mais ações". Todos abrem confirmação antes de gravar, **inclusive o KGR** | Pedido do dono (12.1, item 1). A confirmação no KGR existe porque, no Chrome/Windows, a seta do teclado num select fechado dispara o change e gravava o lote sem aviso |
+| 2 | Tipo de página: "potencial" enquanto a keyword é nova, "declarado" só com publicação (spec §67, seção 2) | O humano escolhe o peso, potencial ou declarado, para qualquer keyword. Na publicada, a publicação continua declarando | Pedido do dono (12.1, item 3) |
+| 3 | Assunto independente de Posto e KGR | O Assunto anula Posto e KGR: o lote pula e conta, a Revisão desliga os dois e a conclusão da revisão não cobra o KGR de um Assunto | Pedido do dono (12.1, item 2). Sem isso, a keyword com Assunto e KGR calculável não fechava a revisão em grupo por nenhum caminho |
+
+### 12.3 Contrato de dados no Minerador
+
+Tudo mora em `minerador_keywords.analise_semantica` (jsonb). Não há migration nem SQL.
+
+- **Chave nova, opcional:** `keyword_page_type_stance` = `"potential"` | `"declared"` (`KEYWORD_PAGE_TYPE_STANCE_KEY`, `lib/minerador/keyword-page-type.ts`). Quem não conhece a chave lê exatamente o que lia antes.
+- **Escritor único:** `setKeywordPageType(semantic, { pageType, actorId, changedAt, stance? })`.
+  - Sem `stance`, o peso gravado fica como está (contrato anterior).
+  - Com `stance`, a chave é gravada e o histórico `keyword_page_type_history` ganha `previousStance` e `nextStance`.
+  - Trocar só o peso é mudança e entra no histórico. Repetir tipo e peso não grava nada.
+- **Leitura, sempre pelo resolver** (`resolveKeywordPageType`):
+  - `humanDeclared: true` aparece **só** quando o tipo foi gravado pelo humano (`source === "human"`) **e** o peso gravado é `"declared"`. Peso sem tipo gravado é ignorado. Sem a declaração, o objeto é o de antes, byte a byte.
+  - `declared` continua sendo **só** o fato da publicação (`published && determined`). É o que o Arquiteto lê como página no ar.
+  - O rótulo da tela vem de `keywordPageTypeStance(resolution)`: `"declared"` quando a publicação impõe ou o humano declarou, `"potential"` no resto.
+- **As 8 escolhas:** `keywordPageTypeChoices({ published })` devolve os valores `"<peso>:<tipo>"` (`parseKeywordPageTypeChoice` lê de volta), com rótulos "Artigo · potencial" … "Página de serviço · declarado". A keyword nova recebe as 8; a publicada, os 4 declarados, como antes.
+- **Publicada na Revisão:** a ação `page_type` vai **sem** `stance`, então o peso gravado não muda. Gravar `"declared"` ali tornaria a keyword "declarada pelo humano" no Arquiteto se a publicação fosse desvinculada depois.
+- **Revisão Humana** (`lib/minerador/human-review.ts`, compartilhado, aditivo): a ação `page_type` ganha `stance?` opcional. `kgrIsCalculable` devolve `false` quando há Assunto declarado. Com isso, `canCompleteHumanReview` não cobra o KGR de um Assunto, e `completeHumanReview` grava `kgrDecisionReviewed: true` sem inventar aplicabilidade.
+- **Assunto anula Posto e KGR:**
+  - o plano do Vínculo em grupo (`lib/minerador/vinculo-batch.ts`) pula o Posto com o motivo `subject_declared` e conta os pulados na confirmação;
+  - o KGR em grupo separa os Assuntos antes do plano (`partitionSubjectKeywords`, `lib/minerador/vinculo-screen.ts`) e soma o aviso às mensagens;
+  - a Revisão Humana desliga o select de Posto e o de KGR quando há Assunto.
+- **Readback e ator:** o readback estreito do Vínculo (`VINCULO_BATCH_READBACK_COLUMNS`) inclui `keyword_page_type_stance`. O ator do Vínculo em grupo e do tipo individual na Revisão é `auth.users.id`.
+
+### 12.4 Contrato novo lido pelo Arquiteto
+
+Arquivo: `lib/arquiteto/editorial-unit-declaration.ts`. A mudança é **aditiva**: `EditorialUnitDeclarationSchema` e o enum dos 4 tipos ficaram intactos.
+
+- `readArchitectKeywordVinculo` ganha o campo opcional `pageTypeHumanDeclared?: true`. Ele só aparece quando o humano declarou o tipo e a keyword **não** é publicada (`humanDeclared && !declared`). A publicada continua saindo como `source: "published"`.
+- `editorialUnitDeclarationFromVinculo` continua devolvendo `source: "potential"` para a keyword não publicada; a declaração humana **nunca** vira `"published"`. O que muda é o motivo: `reasons: [PAGE_TYPE_HUMAN_DECLARED_REASON]`, com o texto "Declarado pelo humano no Minerador como tipo travado: o tipo é decisão humana; a primária segue provisória até a SERP confirmar."
+- `isHumanDeclaredPageType(declaration)` reconhece esse motivo. `describeEditorialUnitDeclaration` usa a frase "Nova: declarada X pelo humano (tipo travado)."
+- `lib/arquiteto/architecture-working-proposal.ts` muda **só o texto** do Silo proposto quando o tipo é declarado pelo humano ("O humano declarou … como Silo no Minerador: o tipo é decisão dele; a primária é provisória até a SERP confirmar.").
+- **O que não mudou:** a regra da primária (provisória até a SERP confirmar), a eleição e a formação. Se o Arquiteto for tratar o tipo declarado como trava na formação, isso é decisão nova, com gate próprio.
+
+### 12.5 Testes
+
+Com fixtures e sem rede: `tests/minerador-assunto-rodape-separado.test.mts` (as 8 escolhas, resolução byte a byte sem o peso, declarado em keyword nova, publicada como antes, os selects separados, Posto pulando Assunto, partição do KGR, leitura aditiva do Arquiteto) e `tests/minerador-corretor-planilha-rodape.test.mts` (conclusão com Assunto e KGR calculável, publicada sem peso, confirmação do KGR). Os testes antigos que fixavam o select único "Vínculo" foram atualizados, com o motivo escrito no próprio teste. Suítes por nome, comparadas com a base desta sessão: nenhuma falha nova (números na seção 16 da [SDD da planilha](./sdd-padrao-planilha-progresso-notificacoes-2026-09-24.md)).
+
+### 12.6 Pendências
+
+- Validação na tela pelo usuário: os 4 seletores no rodapé e em "Mais ações", as confirmações, os 8 valores na Revisão Humana, Posto e KGR desligados com Assunto e a conclusão em grupo passando.
+- Readback no banco da primeira gravação real de `keyword_page_type_stance`.
+- O ator `auth.users.id` ainda não chegou ao KGR em grupo nem ao Posto individual da Revisão (hoje, e-mail da sessão). Trocar muda o contrato de `planKgrApplicabilityBatch`.

@@ -1,6 +1,6 @@
 import { readPublicationLink, readSiteOrigin } from "./publication-link.ts";
 import { isPostLockedToSlug, primaryPostLabel, readPrimaryKeywordPolicy, type PrimaryKeywordPolicy } from "./primary-keyword-policy.ts";
-import { keywordPageTypeStanding, resolveKeywordPageType, type KeywordPageTypeResolution } from "./keyword-page-type.ts";
+import { keywordPageTypeStance, keywordPageTypeStanding, resolveKeywordPageType, type KeywordPageTypeResolution } from "./keyword-page-type.ts";
 import { keywordSubjectLabel, resolveKeywordSubject, type KeywordSubjectResolution } from "./keyword-subject.ts";
 
 /**
@@ -37,7 +37,7 @@ export type KeywordVinculo = {
   /** Valor do `<select>`: o posto tem dois itens, não três. */
   postSelectValue: "locked" | "reviewable";
 
-  /** Tipo de página resolvido, com origem e se já é declaração. */
+  /** Tipo de página resolvido, com origem, peso (potencial/declarado) e se já é declaração. */
   pageType: KeywordPageTypeResolution;
   /** `Artigo · potencial` ou `Silo · declarado`. */
   pageTypeLabel: string;
@@ -79,7 +79,8 @@ export function resolveKeywordVinculo(input: KeywordVinculoInput): KeywordVincul
     postSelectValue: post === "locked" ? "locked" : "reviewable",
 
     pageType,
-    pageTypeLabel: keywordPageTypeStanding(pageType.type, { declared: pageType.declared }),
+    // O peso vem da publicação OU da declaração humana (potencial/declarado).
+    pageTypeLabel: keywordPageTypeStanding(pageType.type, { declared: keywordPageTypeStance(pageType) === "declared" }),
     ...subjectFields(input.semantic),
   };
 }
@@ -94,4 +95,32 @@ function subjectFields(semantic: Record<string, unknown> | null | undefined): Pi
 export function keywordVinculoSummary(vinculo: KeywordVinculo): string {
   const base = `${vinculo.postLabel} · ${vinculo.pageTypeLabel}`;
   return vinculo.subjectLabel ? `${base} · ${vinculo.subjectLabel}` : base;
+}
+
+/**
+ * A terceira escolha quando não há Assunto declarado. A coluna mostra o
+ * default do Assunto como já mostra "Livre" e "Artigo · potencial": as três
+ * escolhas aparecem sempre, venham do padrão ou do usuário (pedido do dono,
+ * 2026-09-24). Mesma palavra do select: "Não".
+ */
+export const KEYWORD_VINCULO_NO_SUBJECT_LABEL = "Assunto: Não" as const;
+/** Com Assunto declarado, a mesma palavra do select: "Declarado". */
+export const KEYWORD_VINCULO_SUBJECT_DECLARED_LABEL = "Assunto: Declarado" as const;
+/** Declarado sem nota: a coluna avisa que falta completar na Revisão Humana. */
+export const KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL = "Assunto: Declarado, sem nota" as const;
+
+/** As três escolhas do Vínculo, na ordem dos selects: Posto, Potencial e Assunto. */
+export function keywordVinculoChoiceLabels(vinculo: KeywordVinculo): { post: string; pageType: string; subject: string } {
+  const subject = !vinculo.subject?.declared
+    ? KEYWORD_VINCULO_NO_SUBJECT_LABEL
+    : vinculo.subject.noteMissing
+      ? KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL
+      : KEYWORD_VINCULO_SUBJECT_DECLARED_LABEL;
+  return { post: vinculo.postLabel, pageType: vinculo.pageTypeLabel, subject };
+}
+
+/** `Livre · Artigo · potencial · Assunto: Não`: as três escolhas numa frase. */
+export function keywordVinculoChoicesSummary(vinculo: KeywordVinculo): string {
+  const labels = keywordVinculoChoiceLabels(vinculo);
+  return `${labels.post} · ${labels.pageType} · ${labels.subject}`;
 }

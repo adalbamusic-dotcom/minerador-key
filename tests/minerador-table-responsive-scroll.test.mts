@@ -39,8 +39,9 @@ const discoveryConstraints = readConstraints(discovery, "discoveryColumnConstrai
 test("a largura mínima da tabela é derivada dos mínimos das colunas, não de um valor fixo", () => {
   assert.match(workspace, /minWidth: processorTableMinimumWidth/);
   assert.match(workspace, /keywordTableMinimumWidth\(processorColumnConstraints, Object\.keys\(processorColumnWidths\)\)/);
-  assert.match(discovery, /minWidth: discoveryTableMinimumWidth/);
-  assert.match(discovery, /keywordTableMinimumWidth\(discoveryColumnConstraints, tableColumnIds\)/);
+  // 2026-09-24, pedido do dono: no Descobrir a largura sai do conteúdo (layout automático),
+  // a Keyword recebe o que sobra e nunca é cortada; não há largura mínima fixa na tabela.
+  assert.doesNotMatch(discovery, /table-fixed|minWidth:/);
   assert.doesNotMatch(workspace, /min-w-\[\d+px\] table-fixed/);
   assert.doesNotMatch(discovery, /min-w-\[\d+px\]/);
 });

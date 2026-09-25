@@ -111,7 +111,7 @@ export type DiscoverySourceResponse = {
 const button = "inline-flex h-9 items-center justify-center gap-2 rounded border px-3 text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50";
 const primaryButton = `${button} border-action-accent bg-action-accent text-foreground hover:bg-action-accent/90`;
 const neutralButton = `${button} border-border bg-surface text-text hover:border-text-muted hover:bg-surface-elevated`;
-const control = "mt-1 h-10 w-full rounded border border-border bg-surface-subtle px-3 text-sm text-text outline-none focus:border-focus focus-visible:ring-2 focus-visible:ring-focus";
+const control = "mt-1 h-10 w-full rounded border border-border bg-surface-subtle px-3 text-sm text-text outline-none scheme-dark in-[.light]:scheme-light in-data-[theme=light]:scheme-light focus:border-focus focus-visible:ring-2 focus-visible:ring-focus";
 
 function brandIdFromRef(brandRef: string) { return brandRef.split("--").at(-1)?.trim() || ""; }
 function normalizeListLabel(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLocaleLowerCase("pt-BR").replace(/\s+/g, " "); }

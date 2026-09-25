@@ -57,8 +57,15 @@ test("barra de seleção é um dock único no viewport e reserva espaço para as
   assert.match(bulkBar, /overflow-hidden/);
   assert.doesNotMatch(bulkBar, /overflow(?:-[xy])?-(?:auto|scroll)/);
   assert.match(bulkBar, /bg-surface-elevated/);
-  assert.match(processor, /KeywordTableShell ref=\{tableRef\} scroll="x" className=\{selectedIds\.size > 0 \? "pb-14" : ""\}/);
-  assert.match(discoveryTable, /KeywordTableShell ref=\{tableRef\} scroll="x" className=\{selection\.selectedIds\.size \? "pb-14" : ""\}/);
+  // 2026-09-24, pedido do dono: cabeçalho fixo ao rolar também no Processador; o shell rola nos dois eixos.
+  // Atualizado no mesmo dia: com max-h na planilha a página também rolava (duas barras verticais e o
+  // cabeçalho sumia); agora a página não rola e a planilha ocupa a sobra (flex-1 do shell + min-h-0).
+  // Corretor, mesmo dia: o pb-14 deixava a barra horizontal sob o rodapé fixo; o espaço virou um irmão
+  // (data-bulk-bar-spacer) e a planilha ganhou altura mínima (min-h-40) no lugar de min-h-0.
+  assert.match(processor, /KeywordTableShell ref=\{tableRef\} scroll="both" data-processor-table-viewport className="min-h-40">/);
+  assert.match(processor, /\{selectedIds\.size > 0 && <div aria-hidden="true" data-bulk-bar-spacer className="h-11 shrink-0" \/>\}/);
+  // 2026-09-24, pedido do dono: cabeçalho fixo ao rolar; o shell do Descobrir rola nos dois eixos, limitado à tela.
+  assert.match(discoveryTable, /KeywordTableShell ref=\{tableRef\} scroll="both"[^>]*className=\{`max-h-\[calc\(100dvh-2\.5rem\)\] \$\{selection\.selectedIds\.size \? "pb-14" : ""\}`\.trim\(\)\}/);
 });
 
 test("GlobalTopbar agrupa as ferramentas do Minerador imediatamente antes das tabs", () => {
@@ -77,8 +84,10 @@ test("as duas tabelas têm mínimo semântico e reduzem colunas flexíveis antes
   assert.match(processor, /const processorTableMinimumWidth = keywordTableMinimumWidth\(processorColumnConstraints/);
   assert.match(processor, /flexible: true/);
   assert.match(discoveryTable, /data-keyword-table="discovery"/);
-  assert.match(discoveryTable, /keywordTableMinimumWidth\(discoveryColumnConstraints, tableColumnIds\)/);
-  assert.match(discoveryTable, /flexible: true/);
+  // 2026-09-24, pedido do dono: a Keyword do Descobrir nunca é cortada; as colunas
+  // auxiliares ficam do tamanho do conteúdo e a Keyword recebe o espaço que sobra.
+  assert.match(discoveryTable, /return columnId === "keyword" \? undefined : 1;/);
+  assert.doesNotMatch(discoveryTable, /table-fixed/);
 });
 
 test("reordenação e resize continuam separados", () => {

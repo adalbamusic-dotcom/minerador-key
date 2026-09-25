@@ -294,7 +294,11 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
   setKeywordSubject: ["lib/minerador/keyword-import-core.ts", "lib/minerador/vinculo-batch.ts", "modules/minerador/minerador-workspace.tsx"],
   withdrawKeywordSubject: ["lib/minerador/vinculo-batch.ts", "modules/minerador/minerador-workspace.tsx"],
-  planVinculoBatch: ["modules/minerador/minerador-workspace.tsx"],
+  // 2026-09-24 (pedido do dono): o seletor Vínculo único grava as três
+  // escolhas de uma vez por planVinculoBatchChoices, que chama o
+  // planVinculoBatch passo a passo no próprio arquivo; a tela só chama o novo.
+  planVinculoBatch: [],
+  planVinculoBatchChoices: ["modules/minerador/minerador-workspace.tsx"],
   importSubjectsWithCore: ["app/api/minerador/marcas/[brandId]/subjects/import/route.ts"],
 };
 
@@ -302,6 +306,7 @@ const SUBJECT_WRITE_DEFINED_IN: Record<string, string> = {
   setKeywordSubject: "lib/minerador/keyword-subject.ts",
   withdrawKeywordSubject: "lib/minerador/keyword-subject.ts",
   planVinculoBatch: "lib/minerador/vinculo-batch.ts",
+  planVinculoBatchChoices: "lib/minerador/vinculo-batch.ts",
   importSubjectsWithCore: "lib/minerador/keyword-import-core.ts",
 };
 

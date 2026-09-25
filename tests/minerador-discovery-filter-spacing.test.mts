@@ -18,8 +18,10 @@ test("o espaçamento não altera handlers nem a planilha da Descoberta", () => {
   assert.match(filters, /onClear/);
   assert.match(filters, /setActiveFilterPopover/);
   assert.doesNotMatch(filters, /fetch\s*\(/);
-  assert.match(table, /<KeywordTableShell ref=\{tableRef\} scroll="x"/);
+  // 2026-09-24, pedido do dono: cabeçalho fixo e Keyword nunca cortada. O shell rola
+  // nos dois eixos e a tabela usa layout automático (o min-w-[1442px] já tinha saído antes).
+  assert.match(table, /<KeywordTableShell ref=\{tableRef\} scroll="both"/);
   assert.match(table, /data-keyword-table="discovery"/);
-  assert.match(table, /table-fixed/);
-  assert.match(table, /min-w-\[1442px\]/);
+  assert.doesNotMatch(table, /table-fixed/);
+  assert.doesNotMatch(table, /min-w-\[1442px\]/);
 });

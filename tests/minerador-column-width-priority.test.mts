@@ -43,15 +43,19 @@ test("colunas protegidas só cedem em último caso e nunca abaixo do próprio m�
 });
 
 test("as duas tabelas declaram preset protegido, mínimo e header sem quebra", () => {
-  for (const source of [workspace, discovery]) {
+  for (const source of [workspace]) {
     assert.match(source, /results: \{[^\n]*min: 104[^\n]*priority: "protected"/);
     assert.match(source, /volume: \{[^\n]*min: 96[^\n]*priority: "protected"/);
     assert.match(source, /whitespace-nowrap/);
   }
+  // 2026-09-24, pedido do dono: no Descobrir as colunas auxiliares encolhem até o
+  // conteúdo (nunca cortam) e a Keyword recebe o resto; não há preset protegido a encolher.
+  assert.match(discovery, /return columnId === "keyword" \? undefined : 1;/);
+  assert.match(discovery, /whitespace-nowrap/);
   // A largura mínima passou a ser derivada dos mínimos das colunas: a barra
   // horizontal só aparece quando nem os mínimos cabem na área disponível.
   assert.match(workspace, /minWidth: processorTableMinimumWidth/);
-  assert.match(discovery, /minWidth: discoveryTableMinimumWidth/);
+  assert.doesNotMatch(discovery, /table-fixed/);
   assert.doesNotMatch(workspace, /min-w-\[\d+px\] table-fixed/);
   assert.doesNotMatch(discovery, /min-w-\[\d+px\]/);
 });

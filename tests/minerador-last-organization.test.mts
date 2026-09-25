@@ -26,8 +26,10 @@ test("resumo mantém a ordem estável, limita a três nomes e preserva tooltip c
     filterKgrApplicability: "applicable", filterSiteRelation: "Todos", filterSiteArchitecture: "Todos", filterKgrMeasurement: "Todos",
   }, ["silo-1"]);
   const labels = mineradorOrganizationLabels(restored, [{ id: "silo-1", nome: "Estética" }]);
-  assert.deepEqual(labels, ["Publicados", "Publicação publicada", "Informativa", "Silo: Estética", "KGR aplicável"]);
-  assert.equal(mineradorOrganizationButtonSummary(labels), "Publicados · Publicação publicada · Informativa +2");
+  // 2026-09-24, pedido do dono: o filtro Silo saiu do painel Organizar; a preferência antiga não deixa filtro escondido.
+  assert.equal(restored.filterListId, "Todos");
+  assert.deepEqual(labels, ["Publicados", "Publicação publicada", "Informativa", "KGR aplicável"]);
+  assert.equal(mineradorOrganizationButtonSummary(labels), "Publicados · Publicação publicada · Informativa +1");
   assert.equal(mineradorOrganizationButtonSummary([]), "Organizar");
 });
 

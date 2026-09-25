@@ -9,7 +9,29 @@ export type KeywordTableColumnConstraint = {
   flexible?: boolean;
   /** Protected columns keep their preset width while lower-priority columns give up space first. */
   priority?: "protected" | "normal";
+  /**
+   * Coluna que recebe TODA a sobra de largura (no Processador, a Palavra-Chave)
+   * e é a última a encolher. Opcional: sem ela, nada muda para quem já usa.
+   */
+  fill?: boolean;
 };
+
+/**
+ * Opções aditivas da projeção. Sem elas, o cálculo é o de sempre.
+ *
+ * `edgeReserve`: pixels que a tabela precisa deixar livres no contêiner. Com
+ * `border-collapse`, a borda de qualquer célula (ou linha) na borda externa da
+ * tabela vira borda da própria tabela, e metade dela soma à largura: colunas
+ * que somam exatamente a largura do contêiner passam dele por 0,5 a 1px, e a
+ * barra horizontal fica ligada sem nenhuma coluna alargada. A reserva devolve
+ * essa folga; com `width: 100%`, a tabela continua ocupando o contêiner todo.
+ */
+export type KeywordTableResponsiveWidthOptions = { edgeReserve?: number };
+
+function edgeReserveOf(options: KeywordTableResponsiveWidthOptions | undefined) {
+  const reserve = options?.edgeReserve;
+  return typeof reserve === "number" && Number.isFinite(reserve) && reserve > 0 ? Math.ceil(reserve) : 0;
+}
 
 function sum(values: number[]) {
   return values.reduce((total, value) => total + value, 0);
@@ -64,29 +86,40 @@ export function resolveKeywordTableResponsiveWidths(
   constraints: Record<string, KeywordTableColumnConstraint>,
   availableWidth: number | null,
   resizedColumnIds: readonly string[] = [],
+  options?: KeywordTableResponsiveWidthOptions,
 ) {
   const ids = Object.keys(preferredWidths);
   const preferredTotal = sum(ids.map(id => preferredWidths[id] ?? 0));
   const minimumTotal = keywordTableMinimumWidth(constraints, ids);
-  if (availableWidth === null || availableWidth >= preferredTotal) return preferredWidths;
+  const fillId = ids.find(id => constraints[id]?.fill);
+  if (availableWidth === null) return preferredWidths;
+  availableWidth = Math.max(0, availableWidth - edgeReserveOf(options));
+  if (availableWidth >= preferredTotal) {
+    // A sobra inteira vai para a coluna `fill`; as outras ficam no preset.
+    if (!fillId || availableWidth === preferredTotal) return preferredWidths;
+    return { ...preferredWidths, [fillId]: (preferredWidths[fillId] ?? 0) + (availableWidth - preferredTotal) };
+  }
 
   const targetWidth = Math.max(minimumTotal, availableWidth);
   const next = { ...preferredWidths };
   let remaining = preferredTotal - targetWidth;
   const resized = new Set(resizedColumnIds);
-  const automatic = ids.filter(id => !resized.has(id));
+  const automatic = ids.filter(id => !resized.has(id) && !constraints[id]?.fill);
   const flexibleIds = automatic.filter(id => constraints[id]?.priority !== "protected" && constraints[id]?.flexible);
   const normalIds = automatic.filter(id => constraints[id]?.priority !== "protected" && !constraints[id]?.flexible);
   const protectedIds = automatic.filter(id => constraints[id]?.priority === "protected");
+  // A coluna `fill` é a última a ceder: só depois de todas no mínimo.
+  const fillIds = fillId && !resized.has(fillId) ? [fillId] : [];
   remaining = shrinkWidths(next, constraints, flexibleIds, remaining);
   remaining = shrinkWidths(next, constraints, normalIds, remaining);
-  shrinkWidths(next, constraints, protectedIds, remaining);
+  remaining = shrinkWidths(next, constraints, protectedIds, remaining);
+  shrinkWidths(next, constraints, fillIds, remaining);
   // O arredondamento por coluna pode sobrar 1-2px e isso bastaria para manter a
   // barra horizontal permanentemente ligada. A sobra é devolvida à coluna com
   // mais folga acima do próprio mínimo.
   const overflow = sum(ids.map(id => next[id] ?? 0)) - targetWidth;
   if (overflow > 0) {
-    const donor = [...flexibleIds, ...normalIds, ...protectedIds]
+    const donor = [...flexibleIds, ...normalIds, ...protectedIds, ...fillIds]
       .sort((left, right) => (next[right] ?? 0) - (constraints[right]?.min ?? 56) - ((next[left] ?? 0) - (constraints[left]?.min ?? 56)))[0];
     if (donor) next[donor] = Math.max(constraints[donor]?.min ?? 56, (next[donor] ?? 0) - overflow);
   }
@@ -99,6 +132,7 @@ export function useKeywordTableResponsiveWidths(
   constraints: Record<string, KeywordTableColumnConstraint>,
   containerRef: RefObject<HTMLElement | null>,
   resizedColumnIds: readonly string[] = [],
+  options?: KeywordTableResponsiveWidthOptions,
 ) {
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
 
@@ -129,8 +163,9 @@ export function useKeywordTableResponsiveWidths(
   }, [containerRef]);
 
   const resizedKey = resizedColumnIds.join("|");
+  const edgeReserve = edgeReserveOf(options);
   return useMemo(
-    () => resolveKeywordTableResponsiveWidths(preferredWidths, constraints, availableWidth, resizedKey ? resizedKey.split("|") : []),
-    [availableWidth, constraints, preferredWidths, resizedKey],
+    () => resolveKeywordTableResponsiveWidths(preferredWidths, constraints, availableWidth, resizedKey ? resizedKey.split("|") : [], edgeReserve ? { edgeReserve } : undefined),
+    [availableWidth, constraints, preferredWidths, resizedKey, edgeReserve],
   );
 }

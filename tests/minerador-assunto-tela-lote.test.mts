@@ -83,11 +83,14 @@ function jsonbOrder(value: unknown): unknown {
 }
 
 test("o select Vínculo tem os três grupos e nenhuma das escolhas que ficam fora (Q5)", () => {
-  assert.deepEqual(VINCULO_BATCH_CHOICE_GROUPS.map(group => group.key), ["subject", "page_type", "post"]);
-  assert.deepEqual(VINCULO_BATCH_CHOICE_GROUPS.map(group => group.label), ["Assunto", "Tipo de página", "Posto (só publicadas)"]);
-  const [subject, pageType, post] = VINCULO_BATCH_CHOICE_GROUPS;
-  assert.deepEqual(subject.options.map(option => option.label), ["Declarar Assunto", "Retirar Assunto"]);
-  assert.equal(pageType.options.length, 4, "os 4 tipos, enum intacto");
+  // 2026-09-24 (pedido do dono): os três grupos viraram três selects
+  // separados, na ordem do rodapé (Posto → Potencial → Assunto), e o
+  // Potencial de página tem 8 valores: os 4 tipos como potencial e como declarado.
+  assert.deepEqual(VINCULO_BATCH_CHOICE_GROUPS.map(group => group.key), ["post", "page_type", "subject"]);
+  assert.deepEqual(VINCULO_BATCH_CHOICE_GROUPS.map(group => group.label), ["Posto de principal", "Potencial de página", "Assunto"]);
+  const [post, pageType, subject] = VINCULO_BATCH_CHOICE_GROUPS;
+  assert.deepEqual(subject.options.map(option => option.label), ["Declarado", "Não"], "as palavras do select do Assunto");
+  assert.equal(pageType.options.length, 8, "os 4 tipos × potencial/declarado, enum intacto");
   assert.deepEqual(post.options.map(option => option.label), ["Travado ao slug", "Livre"]);
 
   const everything = VINCULO_BATCH_CHOICE_GROUPS.flatMap(group => group.options.map(option => `${option.value} ${option.label}`)).join(" | ");
@@ -106,9 +109,11 @@ test("o select Vínculo tem os três grupos e nenhuma das escolhas que ficam for
 });
 
 test("declarar em grupo leva nota e destino opcionais, iguais para o lote", () => {
-  const declare = VINCULO_BATCH_CHOICE_GROUPS[0].options[0].value;
+  // 2026-09-24: o Assunto é o terceiro select separado (antes era o primeiro grupo).
+  const subjectGroup = VINCULO_BATCH_CHOICE_GROUPS.find(group => group.key === "subject")!;
+  const declare = subjectGroup.options[0].value;
   assert.equal(isSubjectDeclareChoice(declare), true);
-  assert.equal(isSubjectDeclareChoice(VINCULO_BATCH_CHOICE_GROUPS[0].options[1].value), false);
+  assert.equal(isSubjectDeclareChoice(subjectGroup.options[1].value), false);
   assert.deepEqual(vinculoBatchActionFromChoice(declare), { kind: "subject_declare", note: null, destinationUrl: null });
   assert.deepEqual(vinculoBatchActionFromChoice(declare, { note: "  ", destinationUrl: "  " }), { kind: "subject_declare", note: null, destinationUrl: null });
   assert.deepEqual(
@@ -134,10 +139,10 @@ test("a confirmação diz quantas aprovadas vão para Em revisão, e o que é pu
   assert.ok(plan.ok);
   if (!plan.ok) return;
   const text = describeVinculoBatchConfirmation(plan);
-  assert.equal(text.summary, "Declarar Assunto: 3 keywords serão gravadas.");
+  assert.equal(text.summary, "Assunto: Declarado: 3 keywords serão gravadas.");
   assert.equal(text.warning, "2 aprovadas desta seleção vão para Em revisão.");
   assert.ok(text.details.some(detail => detail.startsWith("1 já é Assunto e fica como está")), text.details.join(" / "));
-  assert.equal(describeVinculoBatchResult(plan, 3), "Declarar Assunto: 3 keywords gravadas e conferidas. 1 foi pulada.");
+  assert.equal(describeVinculoBatchResult(plan, 3), "Assunto: Declarado: 3 keywords gravadas e conferidas. 1 foi pulada.");
 
   // Sem aprovadas, não há aviso.
   const fresh = planVinculoBatch({ keywords: [row(5)], brandId: BRAND, action: { kind: "page_type", pageType: "landing_page" }, actorId: ACTOR, changedAt: AT });

@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { usePathname } from "next/navigation";
 import { Bell, Check, CheckCircle2, CircleX, Clock3, Copy, Info, TriangleAlert, X } from "lucide-react";
 import { useSupabaseSession } from "@/components/auth/supabase-session-context";
-import { createNoticeRecord, formatNoticeDiagnostic, NOTICE_PREVIEW_DURATION_MS, NOTICE_SEVERITIES, NOTICE_TOAST_DURATION_MS, type NoticeRecord, type NoticeScope, type NoticeSeverity, type PublishNoticeInput } from "@/lib/visual-notice-contract";
+import { createNoticeRecord, formatNoticeDiagnostic, NOTICE_AUTO_OPEN_PREVIEW, NOTICE_PREVIEW_DURATION_MS, NOTICE_SEVERITIES, NOTICE_TOAST_DURATION_MS, NOTICE_TOAST_ENABLED, noticeBadgeTone, type NoticeRecord, type NoticeScope, type NoticeSeverity, type PublishNoticeInput } from "@/lib/visual-notice-contract";
 import { resolveNoticeScope } from "@/lib/visual-notice-scope";
 
 type NoticeCenterValue = {
@@ -107,9 +107,9 @@ export function GlobalNoticeProvider({ children }: { children: React.ReactNode }
     const record = createNoticeRecord({ ...input, scope });
     if (scope) {
       setNotices((current) => [record, ...current]);
-      setAutoOpenNotice(record);
+      if (NOTICE_AUTO_OPEN_PREVIEW) setAutoOpenNotice(record);
     }
-    setToast(input.showToast && scope ? record : null);
+    if (NOTICE_TOAST_ENABLED) setToast(input.showToast && scope ? record : null);
     return record;
   }, [currentScope]);
 
@@ -431,10 +431,13 @@ export function NotificationBell() {
     </ul> : <div className="py-8 text-center text-sm text-text-muted">Nenhum aviso recente.</div>}
   </div> : null;
 
-  return <div ref={containerRef} className="relative">
-    <button ref={buttonRef} type="button" onClick={openPanelManually} className="relative inline-flex min-h-9 min-w-9 items-center justify-center rounded-md text-foreground/75 hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent" aria-label={unreadCount ? `Abrir avisos recentes (${unreadCount} não lidos)` : "Abrir avisos recentes"} aria-expanded={open} aria-controls={panelId} aria-haspopup="dialog">
+  const badgeTone = noticeBadgeTone(notices);
+  const badgeLabel = `${unreadCount} avisos não lidos${badgeTone === "danger" ? ", inclui erro" : ""}`;
+
+  return <div ref={containerRef} className="relative" data-notice-badge-tone={badgeTone}>
+    <button ref={buttonRef} type="button" onClick={openPanelManually} className="relative inline-flex min-h-9 min-w-9 items-center justify-center rounded-md text-foreground/75 hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-context-accent" aria-label={unreadCount ? `Abrir avisos recentes (${badgeLabel})` : "Abrir avisos recentes"} aria-expanded={open} aria-controls={panelId} aria-haspopup="dialog">
       <Bell className="h-5 w-5" aria-hidden="true" />
-      {unreadCount ? <span className="absolute right-0.5 top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-context-accent px-1 text-[10px] font-bold text-background" aria-label={`${unreadCount} avisos não lidos`}>{unreadCount > 9 ? "9+" : unreadCount}</span> : null}
+      {unreadCount ? <span className={`absolute right-0.5 top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-background ${badgeTone === "danger" ? "bg-danger" : "bg-context-accent"}`} aria-label={badgeLabel}>{unreadCount > 9 ? "9+" : unreadCount}</span> : null}
     </button>
     {panel && typeof document !== "undefined" ? createPortal(panel, document.body) : null}
   </div>;
