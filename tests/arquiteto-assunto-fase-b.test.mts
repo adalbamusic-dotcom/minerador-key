@@ -867,6 +867,23 @@ test("sugestões · a Pesquisa por Assunto vem primeiro, depois a mesma frase, d
   assert.equal(suggestSubjectSupport({ brandId: MARCA, subjectKeyword: assuntoD2(), keywords, limit: 1 }).length, 1);
 });
 
+test("sugestões · reconhecem sustentação pela frase do Assunto mesmo sem nota ou descoberta", () => {
+  const subject = linhaDaMesa({
+    id: ASSUNTO_ID,
+    keyword: "como atrair pacientes para clínica",
+    semantic: { ...declarado(null), ...logica({ intent: "Informativa" }) },
+  });
+  const candidate = sustentacao("por-frase", "como atrair pacientes sem redes sociais", logica({ intent: "Informativa" }));
+  const oneTermOnly = sustentacao("um-termo", "clínica estética", logica({ intent: "Transacional" }));
+  const suggestions = suggestSubjectSupport({ brandId: MARCA, subjectKeyword: subject, keywords: [candidate, oneTermOnly] });
+  assert.deepEqual(suggestions.map(item => item.keywordId), ["por-frase", "um-termo"]);
+  assert.ok(suggestions[0].signals.includes("subject_phrase_terms"));
+  assert.deepEqual(suggestions[0].sharedSubjectTerms, ["atrair", "paciente"]);
+  assert.equal(suggestions[0].automaticEligible, true);
+  const soUmTermo = suggestSubjectSupport({ brandId: MARCA, subjectKeyword: subject, keywords: [oneTermOnly] });
+  assert.equal(soUmTermo[0].automaticEligible, false, "um único termo comum sem outra evidência não inicia composição automática");
+});
+
 test("sugestões · isolamento: Assunto de outra marca não sugere nada, e keyword comum não é Assunto", () => {
   const keywords = [sustentacao("s2", "agendamento online consultorio", logica({ entity: "marketing para clínicas" }))];
   assert.deepEqual(suggestSubjectSupport({ brandId: MARCA, subjectKeyword: assuntoD2({ brandId: OUTRA_MARCA }), keywords }), []);

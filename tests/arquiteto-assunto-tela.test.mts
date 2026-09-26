@@ -17,6 +17,7 @@ import {
   buildSubjectFilterEntries,
   filterBySubject,
   heldOutSubjectIds,
+  groupAutomaticSubjectSupports,
   liveWorkingSubjectAnchors,
   migrateWorkingSubjectAnchors,
   planSubjectSupportFormation,
@@ -31,7 +32,7 @@ import {
   SUBJECT_SUPPORT_PRINCIPAL_HINT,
   SUBJECT_WITHDRAWN_LABEL,
 } from "../modules/arquiteto/subject-workspace-model.ts";
-import { planSubjectAttachment, splitUngroupedBySubjectAnchor, SUBJECT_ANOTHER_ATTACHED_REASON, SUBJECT_AWAITING_SUPPORT_LABEL } from "../lib/arquiteto/declared-subject.ts";
+import { planSubjectAttachment, splitUngroupedBySubjectAnchor, SUBJECT_ANOTHER_ATTACHED_REASON, SUBJECT_AWAITING_SUPPORT_LABEL, type SubjectSupportSuggestion } from "../lib/arquiteto/declared-subject.ts";
 import { buildArticleFormationUniverse, suggestPrincipal } from "../lib/arquiteto/article-formation.ts";
 import { planKeywordRole } from "../lib/arquiteto/article-formation-editing.ts";
 import { findVisualViolations } from "../scripts/check-visual-system.mjs";
@@ -333,6 +334,66 @@ test("sustentação marcada vira artigo: principal entre as marcadas pela regra 
     assert.equal(patch.assignment.articleFormationDecision.source, "human");
     assert.equal(patch.expectedLock, 3);
   }
+
+  const automatico = planSubjectSupportFormation({
+    subjectKeywordId: ASSUNTO_ID,
+    marked: [kwFormacao("s1", "atrair pacientes estetica", { volume: 900 }), kwFormacao("s2", "agendamento online consultorio", { volume: 25 })],
+    siloRefOf: () => SILO_REF,
+    keywords: ["s1", "s2"].map(keywordId => ({ keywordId, workflowItemId: `wf-${keywordId}`, lockVersion: 3 })),
+    principalKeywordIds: new Set(["s2"]),
+    mintUuid: "5f4e3d2c-1b0a-4987-8654-3210fedcba98",
+    decidedAt: AGORA,
+    source: "system",
+  });
+  assert.ok(automatico.ok);
+  assert.equal(automatico.principalKeywordId, "s2", "o lote automático só elege entre volumes validados");
+  assert.ok(automatico.patches.every(patch => patch.assignment.articleFormationDecision.source === "system"));
+});
+
+test("lote automático divide por Silo e intenção, respeita seis e não perde termos sem Principal", () => {
+  const suggestion = (keywordId: string, extra: Partial<SubjectSupportSuggestion> = {}): SubjectSupportSuggestion => ({
+    keywordId,
+    keyword: `keyword ${keywordId}`,
+    signals: ["subject_phrase_terms"],
+    reason: "termos em comum",
+    discoveryEvidence: [],
+    sharedNoteTerms: [],
+    sharedSubjectTerms: ["clinica", "paciente"],
+    automaticEligible: true,
+    alreadyInArticle: false,
+    ...extra,
+  });
+  const suggestions = ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "b1", "c1", "x1"].map(keywordId => suggestion(keywordId));
+  const silos = new Map(suggestions.map(item => [item.keywordId, item.keywordId.startsWith("b") ? "silo-b" : item.keywordId.startsWith("c") ? "silo-a" : "silo-a"]));
+  const intents = new Map(suggestions.map(item => [item.keywordId, item.keywordId.startsWith("b") ? "Comercial" : item.keywordId.startsWith("c") ? "Transacional" : "Informativa"]));
+  const grouped = groupAutomaticSubjectSupports({
+    suggestions,
+    siloRefByKeywordId: silos,
+    intentByKeywordId: intents,
+    principalEligibleKeywordIds: new Set(["a1", "a7", "b1", "c1"]),
+    excludedKeywordIds: new Set(["x1"]),
+  });
+  assert.deepEqual(grouped.batches.map(batch => [batch.siloRef, batch.intentKey, batch.suggestions.map(item => item.keywordId)]), [
+    ["silo-a", "informativa", ["a1", "a2", "a3", "a4", "a5", "a6"]],
+    ["silo-a", "informativa", ["a7"]],
+    ["silo-b", "comercial", ["b1"]],
+    ["silo-a", "transacional", ["c1"]],
+  ]);
+  assert.deepEqual(grouped.withoutPrincipal, []);
+  const unformable = groupAutomaticSubjectSupports({
+    suggestions: [suggestion("no-volume")],
+    siloRefByKeywordId: new Map([["no-volume", "silo-a"]]),
+    intentByKeywordId: new Map([["no-volume", null]]),
+    principalEligibleKeywordIds: new Set(),
+  });
+  assert.deepEqual(unformable.batches, []);
+  assert.deepEqual(unformable.withoutPrincipal.map(item => item.keywordId), ["no-volume"]);
+  assert.equal(groupAutomaticSubjectSupports({
+    suggestions: [suggestion("unconfirmed")],
+    siloRefByKeywordId: new Map([["unconfirmed", null]]),
+    intentByKeywordId: new Map(),
+    principalEligibleKeywordIds: new Set(["unconfirmed"]),
+  }).batches.length, 0, "Silo não confirmado nunca vira pai do artigo");
 });
 
 test("sustentação: recusas antes de gravar", () => {
@@ -378,8 +439,8 @@ test("textos fixos: SERP da frase no Processador, sem chamada paga; principal pe
   assert.match(SUBJECT_PHRASE_SERP_HINT, /Resultados/);
   assert.match(SUBJECT_PHRASE_SERP_HINT, /Processador do Minerador/);
   assert.match(SUBJECT_PHRASE_SERP_HINT, /não faz chamada paga/);
-  assert.match(SUBJECT_SUPPORT_PRINCIPAL_HINT, /entre as keywords marcadas/);
-  assert.match(SUBJECT_SUPPORT_PRINCIPAL_HINT, /não vira principal nem dá o slug/);
+  assert.match(SUBJECT_SUPPORT_PRINCIPAL_HINT, /agrupa as keywords elegíveis por intenção e Silo/);
+  assert.match(SUBJECT_SUPPORT_PRINCIPAL_HINT, /não vira keyword, principal nem dá o slug/);
   assert.equal(subjectUnitLabel(null), "Artigo");
   assert.equal(subjectUnitLabel("category_page"), "Página de categoria");
 });
@@ -406,7 +467,12 @@ test("leitor de tela: cada Soltar e cada Confirmar diz a unidade; cada sugestão
   assert.match(painel, /aria-label=\{`\$\{SUBJECT_DETACH_ACTION_LABEL\} de \$\{anchor\.unitLabel\} \$\{anchor\.label\}`\}/);
   assert.match(painel, /aria-label=\{`\$\{SUBJECT_SILO_SUGGESTION_ACTION_LABEL\} em \$\{suggestion\.label\}`\}/);
   assert.match(painel, /aria-label=\{`\$\{SUBJECT_ATTACH_ACTION_LABEL\} em \$\{option\.label\}`\}/);
-  assert.match(painel, /disabled=\{busy \|\| suggestion\.alreadyInArticle \|\| !silo\}/);
+  assert.match(painel, /suggestion\.automaticEligible/);
+  assert.doesNotMatch(painel, /type="checkbox"/);
+  assert.match(painel, /Formar artigos automaticamente/);
+  assert.match(workspace, /groupAutomaticSubjectSupports\(/);
+  assert.match(workspace, /automatic \? "system" : "human"/);
+  assert.match(workspace, /setAutomaticSubjectFinalization/);
   assert.match(painel, /\{SUBJECT_SUPPORT_WITHOUT_SILO\}/);
   assert.match(painel, /\{SUBJECT_SILO_SCOPE_NOTE\}/);
 });
@@ -434,7 +500,7 @@ test("nenhuma rede, nenhum provider e nenhum botão pago na tela do Assunto", ()
   for (const fonte of [painel, modelo]) {
     assert.doesNotMatch(fonte, /\bfetch\(|\/api\/|supabase|dataforseo/i);
   }
-  const bloco = workspace.slice(workspace.indexOf("const selectedSubjectRow = useMemo"), workspace.indexOf("const confirmSubjectSupport = useCallback"));
+  const bloco = workspace.slice(workspace.indexOf("const selectedSubjectRow = useMemo"), workspace.indexOf("const confirmSubjectSupport = async"));
   assert.ok(bloco.length > 1000, "bloco do Assunto não encontrado");
   assert.doesNotMatch(bloco, /\bfetch\(|keyword-serp|territorial-serp|dataforseo/i);
   assert.match(bloco, /persistArquitetoArtifact\(\{ brandId: selectedBrandId, artifactType: "article_dna", action: "edit", version: successor, status: "proposed" \}\)/);
@@ -507,13 +573,20 @@ test("ações humanas: prender, soltar, confirmar a sugestão do Silo e formar e
   const aplicar = workspace.slice(workspace.indexOf("const applyFormationPlan = useCallback"), workspace.indexOf("const universeOfCandidate = useCallback"));
   assert.ok(aplicar.indexOf("workingSubjectAnchorMigrationAssignments(") < aplicar.indexOf("await persistArchitectWorkingCopy("), "o vínculo acompanha o artigo na mesma escrita da formação");
   assert.ok(aplicar.indexOf("setWorkingSubjectAnchorState(") > aplicar.indexOf("if (naoConfirmadas.length)"), "a mesa só mostra o vínculo movido depois do readback");
-  assert.match(workspace, /applyFormationPlan\(\{ patches: plano\.patches, refusals: \[\] \}, "Artigo formado em torno do Assunto", \[plano\.formationRef\], vinculoNaFormacao\)/);
-  const formar = workspace.slice(workspace.indexOf("const confirmSubjectSupport = useCallback"));
+  assert.match(workspace, /applyFormationPlan\(\{ patches, refusals: \[\] \}, "Artigos formados automaticamente em torno do Assunto", refsNovos, vinculosNaFormacao\)/);
+  const formar = workspace.slice(workspace.indexOf("const confirmSubjectSupport = async"));
   assert.ok(formar.indexOf("planSubjectAttachment(") < formar.indexOf("await applyFormationPlan("), "o Assunto é conferido antes de gravar a formação");
-  assert.match(formar, /setWorkingSubjectAnchor\(plano\.formationRef, assunto\.subjectKeywordId\)/);
+  assert.match(formar, /setWorkingSubjectAnchor\(anchor\.candidateRef, anchor\.subjectKeywordId\)/);
   assert.match(workspace, /filterBySubject\(porCampos, workspaceMode === "articles" \? activeSubjectFilter : null/);
   assert.match(workspace, /detachSubjectFromArticleDna\(entry\.version\.payload\);\s*if \(article\.candidateRef\) await persistWorkingSubjectAnchor\(\{ candidateRef: article\.candidateRef, subjectKeywordId: null, holderKeywordId: null, actorId \}\);/);
   assert.match(workspace, /authenticatedArchitectActor\(\{ sessionStatus, actorUserId: session\?\.user\?\.id, brandId: selectedBrandId \}\);\s*if \(!actorId\) \{\s*showNotification\("error", "Prender o Assunto é ato humano/);
+});
+
+test("formação automática conclui os artigos aprovados mesmo se outro candidato parar num gate", () => {
+  const finalize = workspace.slice(workspace.indexOf("const request = automaticSubjectFinalization"), workspace.indexOf("const processArchitecture = useCallback"));
+  assert.match(finalize, /const eligibleCandidateRefs = request\.candidateRefs\.filter\(\(_, index\) => !gates\[index\]\?\.blocksConclusion\)/);
+  assert.match(finalize, /if \(eligibleCandidateRefs\.length\) \{\s*void confirmArticleFormation\(\{ candidateRefs: eligibleCandidateRefs, subjectPhrase: request\.subjectPhrase \}\)/);
+  assert.match(finalize, /blocked\.length/);
 });
 
 test("nenhuma chamada de rede em todo o arquivo", () => {

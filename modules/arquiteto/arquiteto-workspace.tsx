@@ -56,9 +56,10 @@ import { buildTerritorialSurface, deriveTerritorialProcessAvailability } from "@
 import { manualSiloCandidateDraft, planSiloAssignment, planSiteStructurePromotion, publishedSiloCandidateDraft, resolveSiloAssignmentOutcome } from "@/lib/arquiteto/silo-assignment";
 import { proposeSiloPrimaryFromSerp, serpPrimaryAcceptanceOf, stampPublishedPrimary, type SiloPrimarySerpProposal } from "@/lib/arquiteto/silo-primary-keyword";
 import { acceptRemoteSiloPrimaryProposal } from "@/lib/arquiteto/canonical-workspace";
-import { readArchitectKeywordVinculo, editorialUnitDeclarationFromVinculo, headsSilo } from "@/lib/arquiteto/editorial-unit-declaration";
+import { readArchitectKeywordVinculo, editorialUnitDeclarationFromVinculo, headsSilo, readEditorialUnitDeclaration } from "@/lib/arquiteto/editorial-unit-declaration";
 import { withoutPublishedIdentityKeys } from "@/lib/arquiteto/published-identity";
 import { regroupFreeAroundPublished, resolvePublishedSiloMembership } from "@/lib/arquiteto/published-silo-membership";
+import { planPublishedArchitectureRecognition } from "@/lib/arquiteto/published-architecture-recognition";
 import { planSiloDecisionBatch, chunkBatch, resolveSiloBatchOutcome, type BatchSiloDecision, type BatchSiloWrite } from "@/lib/arquiteto/silo-decision-batch";
 import type { EditorialUnitDeclaration } from "@/lib/arquiteto/contracts";
 import { validateManualSiloSlug, type SlugSubject } from "@/lib/arquiteto/slug-architecture";
@@ -128,7 +129,7 @@ import { buildArchitectSerpProvenance } from "@/lib/arquiteto/radar-handoff-gate
 import type { RadarArticleHandoffContext } from "@/lib/editorial/operational-flow";
 import { buildStructuralLinkConnections, describeStructuralLinkDerivation, structuralLinkBlockers, type StructuralLinkDerivationReadout } from "@/lib/arquiteto/internal-link-structure";
 import { buildLinkRelationRows, resolveArticleLinkProjection, resolveSiloHierarchyView, tallyLinkRelations } from "@/lib/arquiteto/internal-link-projection";
-import { newFormationRef, planKeywordRole, planMergeCandidates, planMoveKeyword, planPrincipalChange, planSplitKeyword, type FormationKeywordLike, type FormationPlan } from "@/lib/arquiteto/article-formation-editing";
+import { newFormationRef, planKeywordRole, planMergeCandidates, planMoveKeyword, planPrincipalChange, planSplitKeyword, type FormationKeywordLike, type FormationPatch, type FormationPlan } from "@/lib/arquiteto/article-formation-editing";
 import { resolveArticleFormationState } from "@/lib/arquiteto/article-formation-decision";
 import { buildArticleFormationConfirmationPlan, summarizeConfirmationPlan, validateFormationConclusion, type ConclusionGate, type ConfirmationEntry } from "@/lib/arquiteto/article-formation-confirmation";
 import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, automaticFormationHoldouts, buildArticleFormationUniverse, siloThemeTokens, suggestPrincipal, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
@@ -158,7 +159,7 @@ import { ArchitecturePanel } from "./architecture-panel";
 import { buildArchitectureFlowProjection, clusterRefOfFlowNode } from "@/lib/arquiteto/architecture-flow";
 import { ARCHITECTURE_MARKER_CONTRACT_VERSION, ARCHITECTURE_SCENARIO_LABELS, resolveArchitectureScenarioState, type ArchitectureMarkerPayload } from "@/lib/arquiteto/architecture-marker-record";
 import { buildPublishedSiteArchitecture } from "@/lib/arquiteto/published-site-architecture";
-import { resolveTerritoryConfirmationReadiness, siloIsHumanDecided } from "@/lib/arquiteto/territory";
+import { readinessWithPlannedMembers, resolveTerritoryConfirmationReadiness, siloIsHumanDecided } from "@/lib/arquiteto/territory";
 import { TerritorialReviewPanel } from "./territorial-review-panel";
 import { PublishedSerpPanel } from "./published-serp-panel";
 import { SiloPrimaryProposalPanel } from "./silo-primary-proposal-panel";
@@ -182,6 +183,7 @@ import {
   attachedSubjectWarning,
   buildSubjectFilterEntries,
   filterBySubject,
+  groupAutomaticSubjectSupports,
   heldOutSubjectIds,
   liveWorkingSubjectAnchors,
   migrateWorkingSubjectAnchors,
@@ -773,6 +775,12 @@ export default function ArquitetoPage() {
   const [subjectAttachOpen, setSubjectAttachOpen] = useState(false);
   const [subjectSupportOpen, setSubjectSupportOpen] = useState(false);
   const [subjectBusy, setSubjectBusy] = useState(false);
+  const [subjectAutomationRequest, setSubjectAutomationRequest] = useState<{
+    subjectKeywordId: string;
+    subjectPhrase: string;
+    candidateRefs: string[];
+  } | null>(null);
+  const [automaticSubjectFinalization, setAutomaticSubjectFinalization] = useState<{ candidateRefs: string[]; subjectPhrase: string } | null>(null);
   const [provisionalGroups, setProvisionalGroups] = useState<ProvisionalArticleGroup[]>([]);
   const [serpAssessments, setSerpAssessments] = useState<SerpFormationAssessment[]>([]);
   /**
@@ -827,7 +835,6 @@ export default function ArquitetoPage() {
   // Estado da SERP por Article: falha específica carrega estágio, código e se
   // a execução daquela unidade pode ser repetida.
   const [serpExecution, setSerpExecution] = useState<Record<string, { status: "processing" | "ready" | "error"; queryCount: number; completed: number; message?: string; stage?: string; code?: string; retryable?: boolean; lastAttemptFailed?: boolean }>>({});
-  const [verificationBusy, setVerificationBusy] = useState<Set<string>>(new Set());
   const [pendingKeywordReview, setPendingKeywordReview] = useState<PendingKeywordReview | null>(null);
   /** Confirmação curta (antes/depois/impacto) das ações estruturais humanas. */
   const [pendingManualArchitecture, setPendingManualArchitecture] = useState<PendingManualArchitecture | null>(null);
@@ -3934,24 +3941,6 @@ export default function ArquitetoPage() {
     }
   };
 
-  const handleVerifyPublication = async (article: (typeof articlesList)[number]) => {
-    const url = publicationUrlFor(article);
-    const articleId = articleEntityIdFor(article);
-    if (!url || !articleId || !selectedBrandId) return showNotification("error", "URL publicada ausente; nenhuma URL será inventada.");
-    setVerificationBusy(current => new Set(current).add(article.id));
-    try {
-      const result = await callStrategicApi<{ verification: SerpPublicationVerification }>("/api/arquiteto/publication/verify", {
-        brandId: selectedBrandId, articleId, articleDnaVersionId: acceptedArticleDnas[articleId]?.versionId || null, url, sitemapUrl: null,
-      });
-      const verification = SerpPublicationVerificationSchema.parse(result.verification);
-      const nextVerifications = [...publicationVerifications.filter(item => item.id !== verification.id && item.articleId !== articleId), verification];
-      await persistSerpState(serpAssessments, nextVerifications);
-      setPublicationVerifications(nextVerifications);
-      showNotification("success", `Verificação concluída: ${verification.status}.`);
-    } catch (error) {
-      showNotification("error", error instanceof Error ? error.message : "Falha ao verificar URL e canonical.");
-    } finally { setVerificationBusy(current => { const next = new Set(current); next.delete(article.id); return next; }); }
-  };
   const renderSerpRecommendationForKeyword = (article: (typeof articlesList)[number], keywordDnaId: string | undefined, keywordLabel: string) => {
     const articleId = articleEntityIdFor(article);
     if (!articleId || !keywordDnaId) return null;
@@ -5160,6 +5149,19 @@ export default function ArquitetoPage() {
    */
   const reservedSiloHeadIds = useMemo(() => {
     const reservadas = new Set(reservedSiloPageHeadIds(keywordUniverse));
+    /*
+     * O VÍNCULO DECIDE PRIMEIRO: keyword declarada Silo É o Silo.
+     *
+     * As duas reservas abaixo só enxergam hipótese lexical e Silo já
+     * confirmado. A cabeça DECLARADA ("Travado ao slug · Silo · declarado",
+     * pelo resolver do Minerador) ficava fora enquanto o território dela era
+     * candidato — e "Captação de Pacientes" aparecia na mesa de Artigos como
+     * ARTICLE · PUBLICADO: o Silo publicado virando linha de artigo. A
+     * declaração é fato do DNA e não depende do ciclo de vida do território.
+     */
+    for (const keyword of masterList) {
+      if (headsSilo(readEditorialUnitDeclaration(keyword))) reservadas.add(String(keyword.id));
+    }
     for (const item of remoteTerritories) {
       if (!siloIsHumanDecided(item.territory.lifecycleStatus)) continue;
       const doSilo = reservedForSiloPage({
@@ -7010,7 +7012,6 @@ export default function ArquitetoPage() {
     serpAssessments,
     publicationVerifications,
     serpExecution,
-    verificationBusy,
     siloOptions,
     expandedIds,
     activeTabs,
@@ -7043,7 +7044,6 @@ export default function ArquitetoPage() {
     serpAssessments,
     publicationVerifications,
     serpExecution,
-    verificationBusy,
     siloOptions,
     expandedIds,
     activeTabs,
@@ -9106,13 +9106,14 @@ export default function ArquitetoPage() {
    */
   const applySiloDecisionsInBatch = async (
     decisions: readonly BatchSiloDecision[],
+    landscape = territorialSurface.landscape,
   ): Promise<{ applied: string[]; unchanged: string[]; refused: string[] }> => {
     if (!selectedBrandId) return { applied: [], unchanged: [], refused: decisions.map(item => item.keywordId) };
 
     const porId = new Map(masterList.map(entry => [String(entry.id), entry as Record<string, unknown>]));
     const plano = planSiloDecisionBatch({
       brandId: selectedBrandId,
-      landscape: territorialSurface.landscape,
+      landscape,
       keywordOf: keywordId => {
         const item = porId.get(keywordId);
         const workflow = item?.canonicalWorkflow as { id?: unknown; lockVersion?: unknown } | undefined;
@@ -10588,8 +10589,8 @@ export default function ArquitetoPage() {
 
   /** Sugestões de sustentação: só keywords já recebidas, pela ordem do domínio. */
   const subjectSupportSuggestions = useMemo(
-    () => subjectSupportOpen && selectedBrandId && selectedSubjectRow
-      ? suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword: selectedSubjectRow, keywords: masterList, memberKeywordIds: subjectSupportMemberIds, limit: 40 })
+  () => subjectSupportOpen && selectedBrandId && selectedSubjectRow
+      ? suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword: selectedSubjectRow, keywords: masterList, memberKeywordIds: subjectSupportMemberIds })
       : [],
     [subjectSupportOpen, selectedBrandId, selectedSubjectRow, masterList, subjectSupportMemberIds],
   );
@@ -10822,11 +10823,12 @@ export default function ArquitetoPage() {
   }, [attachSubjectToUnit]);
 
   /**
-   * As sustentações marcadas viram um artigo novo em torno do Assunto
-   * (F2.4 passo 2). A principal sai entre as marcadas, pela regra da
-   * formação; o Assunto fica como tronco, fora de `clusterId` e do teto.
+   * O lote de sustentações do Assunto é selecionado e agrupado pelo Arquiteto
+   * a partir dos pacotes aprovados recebidos (F2.4). A principal sai entre as
+   * keywords com Volume validado; o Assunto fica como tronco, fora de
+   * `clusterId` e do teto.
    */
-  const confirmSubjectSupport = useCallback(async (keywordIds: string[]) => {
+  const confirmSubjectSupport = async () => {
     if (!selectedBrandId || !selectedSubjectRow) return;
     const actorId = authenticatedArchitectActor({ sessionStatus, actorUserId: session?.user?.id, brandId: selectedBrandId });
     if (!actorId) {
@@ -10834,83 +10836,183 @@ export default function ArquitetoPage() {
       return;
     }
     const subjectKeywordId = String(selectedSubjectRow.id);
-    const marcadas: ArticleFormationKeyword[] = keywordIds.flatMap(keywordId => {
-      const row = masterList.find(keyword => String(keyword.id) === keywordId);
-      if (!row) return [];
-      const dna = dnaSignalsByKeyword.get(keywordId);
-      return [{
-        keywordId,
-        keyword: String(row.keyword || ""),
-        intent: dna?.intent ?? null,
-        volume: row.volume_search ?? null,
-        kgr: row.kgr ?? null,
-        entity: dna?.centralEntity ?? null,
-        problem: row.analise_semantica?.problema_percebido || null,
-        semanticState: dna?.semanticState ?? null,
-        modifiers: dna?.modifiers ?? [],
-        confidence: dna?.confidence ?? null,
-        dnaVersionId: dna?.dnaVersionId ?? null,
-        dnaContentHash: dna?.dnaContentHash ?? null,
-        isPublished: Boolean(row.isPublished),
-        ...(subjectSets.heldOut.has(keywordId) ? { subjectHeldOut: true } : {}),
-      }];
+    const candidatesByKeyword = new Map<string, ArticleCandidate>();
+    for (const universe of articleFormationUniverses) {
+      for (const candidate of universe.candidates) {
+        for (const member of candidate.keywords) candidatesByKeyword.set(member.keywordId, candidate);
+      }
+    }
+    const siloRefOfCandidate = (candidateRef?: string) => articleFormationUniverses.find(universe =>
+      universe.candidates.some(candidate => candidate.candidateRef === candidateRef))?.siloRef ?? null;
+    const existingCandidateRefs = new Set<string>();
+    const candidateTargets = new Map<string, { candidate: ArticleCandidate; siloRef: string }>();
+    for (const suggestion of subjectSupportSuggestions.filter(item => item.automaticEligible)) {
+      const candidate = candidatesByKeyword.get(suggestion.keywordId);
+      const siloRef = siloRefOfCandidate(candidate?.candidateRef);
+      if (!candidate || !siloRef || !confirmedTerritoryRefs.has(siloRef)) continue;
+      candidateTargets.set(candidate.candidateRef, { candidate, siloRef });
+    }
+    for (const { candidate } of candidateTargets.values()) {
+      if (candidate.conflicts.length || candidate.stale || acceptedArticleDnas[candidate.candidateRef]) continue;
+      if (candidate.subjectKeywordId && candidate.subjectKeywordId !== subjectKeywordId) continue;
+      if (candidate.subjectKeywordId === subjectKeywordId) {
+        existingCandidateRefs.add(candidate.candidateRef);
+        continue;
+      }
+      const attachment = planSubjectAttachment({
+        brandId: selectedBrandId,
+        keyword: selectedSubjectRow,
+        actorUserId: actorId,
+        attachedAt: new Date().toISOString(),
+        target: {
+          principalKeywordId: candidate.principalKeywordId,
+          keywords: candidate.keywords.map(item => ({ keywordId: item.keywordId, role: item.role })),
+        },
+      });
+      if (!attachment.ok) continue;
+      await persistWorkingSubjectAnchor({ candidateRef: candidate.candidateRef, subjectKeywordId, holderKeywordId: candidate.principalKeywordId, actorId });
+      setWorkingSubjectAnchor(candidate.candidateRef, subjectKeywordId);
+      existingCandidateRefs.add(candidate.candidateRef);
+    }
+    const freeSuggestions = subjectSupportSuggestions.filter(item => {
+      const row = masterList.find(keyword => String(keyword.id) === item.keywordId);
+      return item.automaticEligible && Boolean(subjectSupportSiloLabels.get(item.keywordId)) && !item.alreadyInArticle
+        && !row?.isPublished && !candidatesByKeyword.has(item.keywordId);
     });
-    const siloRefOf = (keywordId: string) => {
-      const ref = masterList.find(keyword => String(keyword.id) === keywordId)?.territoryRef;
-      return typeof ref === "string" && confirmedTerritoryRefs.has(ref) ? ref : null;
-    };
-    const territorio = remoteTerritories.find(item => item.territoryRef === siloRefOf(keywordIds[0] || ""))?.territory ?? null;
-    const siloSlug = territorio ? territorio.slugState.publishedSlug || territorio.slugState.confirmed || territorio.slugState.proposals?.[0]?.slug || null : null;
-    const plano = planSubjectSupportFormation({
-      subjectKeywordId,
-      marked: marcadas,
-      siloRefOf,
-      keywords: formationKeywordItems,
-      memberKeywordIds: subjectSupportMemberIds,
-      siloTokens: territorio
-        ? siloContextTokens({ name: territorio.name || territorio.centralEntity || "", centralEntity: territorio.centralEntity, slug: siloSlug ? (siloSlug.startsWith("/") ? siloSlug : `/${siloSlug}`) : null })
-        : undefined,
-      mintUuid: crypto.randomUUID(),
-      decidedAt: new Date().toISOString(),
+    const siloRefByKeywordId = new Map<string, string | null>();
+    const intentByKeywordId = new Map<string, string | null>();
+    const principalEligibleKeywordIds = new Set<string>();
+    for (const suggestion of freeSuggestions) {
+      const row = masterList.find(keyword => String(keyword.id) === suggestion.keywordId);
+      const siloRef = typeof row?.territoryRef === "string" && confirmedTerritoryRefs.has(row.territoryRef) ? row.territoryRef : null;
+      siloRefByKeywordId.set(suggestion.keywordId, siloRef);
+      intentByKeywordId.set(suggestion.keywordId, dnaSignalsByKeyword.get(suggestion.keywordId)?.intent ?? null);
+      if (subjectStandings.get(suggestion.keywordId)?.volumeValidated && !subjectSets.heldOut.has(suggestion.keywordId)) {
+        principalEligibleKeywordIds.add(suggestion.keywordId);
+      }
+    }
+    const grouped = groupAutomaticSubjectSupports({
+      suggestions: freeSuggestions,
+      siloRefByKeywordId,
+      intentByKeywordId,
+      principalEligibleKeywordIds,
+      excludedKeywordIds: new Set(candidatesByKeyword.keys()),
     });
-    if (!plano.ok) {
-      showNotification("error", plano.reason);
+    if (!grouped.batches.length) {
+      if (existingCandidateRefs.size) {
+        setSubjectSupportOpen(false);
+        setSubjectAutomationRequest({ subjectKeywordId, subjectPhrase: selectedSubjectEntry?.phrase || String(selectedSubjectRow.keyword), candidateRefs: [...existingCandidateRefs] });
+        showNotification("success", `O Assunto foi vinculado automaticamente a ${existingCandidateRefs.size} artigo(s) já formados. O Arquiteto seguirá para a SERP e concluirá os que passarem pelos gates.`);
+        return;
+      }
+      showNotification("warning", grouped.withoutPrincipal.length
+        ? `${grouped.withoutPrincipal.length} keyword(s) têm sustentação sem volume validado para eleger Principal. Nenhum artigo foi formado; elas continuam disponíveis no Arquiteto.`
+        : "Nenhuma keyword livre elegível está em Silo confirmado. Candidatos já formados e publicados foram preservados.");
       return;
     }
-    // O Assunto precisa caber no artigo ANTES de gravar a formação.
-    const assunto = planSubjectAttachment({
-      brandId: selectedBrandId, keyword: selectedSubjectRow, actorUserId: actorId, attachedAt: new Date().toISOString(),
-      target: {
-        principalKeywordId: plano.principalKeywordId,
-        keywords: plano.patches.map(patch => ({ keywordId: patch.keywordId, role: patch.assignment.articleFormationDecision.role })),
-      },
-    });
-    if (!assunto.ok) {
-      showNotification("error", assunto.reason);
+    const refsNovos: string[] = [];
+    const patches: FormationPatch[] = [];
+    const vinculosNaFormacao = new Map<string, Record<string, unknown>>();
+    const anchorsConfirmados: Array<{ candidateRef: string; subjectKeywordId: string }> = [];
+    const falhas: string[] = [];
+    const siloRefOf = (keywordId: string) => siloRefByKeywordId.get(keywordId) ?? null;
+    for (const batch of grouped.batches) {
+      const marcadas: ArticleFormationKeyword[] = batch.suggestions.flatMap(suggestion => {
+        const row = masterList.find(keyword => String(keyword.id) === suggestion.keywordId);
+        if (!row) return [];
+        const dna = dnaSignalsByKeyword.get(suggestion.keywordId);
+        return [{
+          keywordId: suggestion.keywordId,
+          keyword: String(row.keyword || ""),
+          intent: dna?.intent ?? null,
+          volume: row.volume_search ?? null,
+          kgr: row.kgr ?? null,
+          entity: dna?.centralEntity ?? null,
+          problem: row.analise_semantica?.problema_percebido || null,
+          semanticState: dna?.semanticState ?? null,
+          modifiers: dna?.modifiers ?? [],
+          confidence: dna?.confidence ?? null,
+          dnaVersionId: dna?.dnaVersionId ?? null,
+          dnaContentHash: dna?.dnaContentHash ?? null,
+          isPublished: Boolean(row.isPublished),
+          ...(subjectSets.heldOut.has(suggestion.keywordId) ? { subjectHeldOut: true } : {}),
+        }];
+      });
+      const territorio = remoteTerritories.find(item => item.territoryRef === batch.siloRef)?.territory ?? null;
+      if (!territorio || !confirmedTerritoryRefs.has(batch.siloRef)) {
+        falhas.push(`Silo ${batch.siloRef} deixou de estar confirmado`);
+        continue;
+      }
+      const siloSlug = territorio.slugState.publishedSlug || territorio.slugState.confirmed || territorio.slugState.proposals?.[0]?.slug || null;
+      const plano = planSubjectSupportFormation({
+        subjectKeywordId,
+        marked: marcadas,
+        siloRefOf,
+        keywords: formationKeywordItems,
+        memberKeywordIds: subjectSupportMemberIds,
+        principalKeywordIds: principalEligibleKeywordIds,
+        siloTokens: siloContextTokens({ name: territorio.name || territorio.centralEntity || "", centralEntity: territorio.centralEntity, slug: siloSlug ? (siloSlug.startsWith("/") ? siloSlug : `/${siloSlug}`) : null }),
+        mintUuid: crypto.randomUUID(),
+        decidedAt: new Date().toISOString(),
+        source: "system",
+      });
+      if (!plano.ok) {
+        falhas.push(plano.reason);
+        continue;
+      }
+      const assunto = planSubjectAttachment({
+        brandId: selectedBrandId, keyword: selectedSubjectRow, actorUserId: actorId, attachedAt: new Date().toISOString(),
+        target: {
+          principalKeywordId: plano.principalKeywordId,
+          keywords: plano.patches.map(patch => ({ keywordId: patch.keywordId, role: patch.assignment.articleFormationDecision.role })),
+        },
+      });
+      if (!assunto.ok) {
+        falhas.push(assunto.reason);
+        continue;
+      }
+      const vinculo = planWorkingSubjectAnchorWrites({
+        candidateRef: plano.formationRef,
+        subjectKeywordId: assunto.subjectKeywordId,
+        holderKeywordId: plano.principalKeywordId,
+        items: formationKeywordItems,
+        persisted: persistedSubjectAnchors,
+        actorUserId: actorId,
+        attachedAt: new Date().toISOString(),
+      });
+      if (!vinculo.ok) {
+        falhas.push(vinculo.reason);
+        continue;
+      }
+      refsNovos.push(plano.formationRef);
+      patches.push(...plano.patches);
+      for (const write of vinculo.writes) vinculosNaFormacao.set(write.keywordId, write.assignment as Record<string, unknown>);
+      anchorsConfirmados.push({ candidateRef: plano.formationRef, subjectKeywordId: assunto.subjectKeywordId });
+    }
+    if (!patches.length && !existingCandidateRefs.size) {
+      showNotification("warning", falhas.length
+        ? `${falhas.join(" · ")} ${grouped.withoutPrincipal.length ? `· ${grouped.withoutPrincipal.length} keyword(s) sem volume validado continuam disponíveis.` : ""}`
+        : "Nenhum grupo de sustentação passou os critérios de formação. As keywords continuam no Arquiteto.");
       return;
     }
-    // O vínculo vai na MESMA escrita da formação, no item da principal: ou os
-    // dois são gravados, ou nenhum.
-    const vinculo = planWorkingSubjectAnchorWrites({
-      candidateRef: plano.formationRef,
-      subjectKeywordId: assunto.subjectKeywordId,
-      holderKeywordId: plano.principalKeywordId,
-      items: formationKeywordItems,
-      persisted: persistedSubjectAnchors,
-      actorUserId: actorId,
-      attachedAt: new Date().toISOString(),
-    });
-    if (!vinculo.ok) {
-      showNotification("error", vinculo.reason);
-      return;
-    }
-    const vinculoNaFormacao = new Map(vinculo.writes.map(write => [write.keywordId, write.assignment as Record<string, unknown>]));
-    const gravado = await applyFormationPlan({ patches: plano.patches, refusals: [] }, "Artigo formado em torno do Assunto", [plano.formationRef], vinculoNaFormacao);
+    const gravado = patches.length
+      ? await applyFormationPlan({ patches, refusals: [] }, "Artigos formados automaticamente em torno do Assunto", refsNovos, vinculosNaFormacao)
+      : true;
     if (!gravado) return;
-    setWorkingSubjectAnchor(plano.formationRef, assunto.subjectKeywordId);
+    for (const anchor of anchorsConfirmados) setWorkingSubjectAnchor(anchor.candidateRef, anchor.subjectKeywordId);
     setSubjectSupportOpen(false);
-    showNotification("success", `O artigo foi formado em torno do Assunto "${assunto.subject.phrase}", e o vínculo foi gravado com a formação. O Assunto vai para a Definição do artigo quando a formação for concluída.`);
-  }, [selectedBrandId, selectedSubjectRow, sessionStatus, session?.user?.id, masterList, dnaSignalsByKeyword, subjectSets, confirmedTerritoryRefs, remoteTerritories, formationKeywordItems, subjectSupportMemberIds, persistedSubjectAnchors, applyFormationPlan, setWorkingSubjectAnchor, showNotification]);
+    const candidateRefs = [...existingCandidateRefs, ...refsNovos];
+    setSubjectAutomationRequest({ subjectKeywordId, subjectPhrase: selectedSubjectEntry?.phrase || String(selectedSubjectRow.keyword), candidateRefs });
+    const formedKeywordCount = patches.length;
+    const details = [
+      `${refsNovos.length} artigo(s) novo(s) em ${new Set(grouped.batches.map(batch => batch.siloRef)).size} Silo(s)`,
+      `${formedKeywordCount} keyword(s) agrupadas`,
+      existingCandidateRefs.size ? `${existingCandidateRefs.size} artigo(s) existente(s) vinculados` : null,
+      grouped.withoutPrincipal.length ? `${grouped.withoutPrincipal.length} keyword(s) sem volume para iniciar outro artigo` : null,
+      falhas.length ? `${falhas.length} grupo(s) pararam por validação` : null,
+    ].filter(Boolean).join(" · ");
+    showNotification("success", `O Assunto “${selectedSubjectEntry?.phrase || String(selectedSubjectRow.keyword)}” iniciou a formação automática. ${details}. O Arquiteto seguirá para a SERP e concluirá os artigos que passarem pelos gates.`);
+  };
 
   /**
    * Secundária ↔ reforço narrativo — sem mover a busca de artigo.
@@ -12045,12 +12147,22 @@ export default function ArquitetoPage() {
    * Determinístico neste corte: sem SERP e sem IA. Nada é materializado; o
    * resultado é PROPOSTA de formação sobre um read-model.
    */
-  const processArticleFormation = useCallback(async () => {
+  const processArticleFormation = useCallback(async (automatic?: { candidateRefs: readonly string[]; finalizeSubject?: string }) => {
     if (!selectedBrandId) return;
     // A leitura é a do clique. Ver `formationScopeRef`.
-    const { scope: escopo, universes: selecionados } = formationScopeRef.current;
+    const requestedRefs = automatic?.candidateRefs?.length ? new Set(automatic.candidateRefs) : null;
+    const escopo = requestedRefs
+      ? { ok: true, reason: null, candidateRefs: requestedRefs }
+      : formationScopeRef.current.scope;
+    const selecionados = requestedRefs
+      ? scopeFormationUniverses({ universes: articleRunScopeRef.current.universes, selectedCandidateRefs: requestedRefs })
+      : formationScopeRef.current.universes;
     if (!escopo.ok) {
       showNotification("error", escopo.reason ?? "Selecione pelo menos um artigo.");
+      return;
+    }
+    if (requestedRefs && selecionados.flatMap(universe => universe.candidates.map(candidate => candidate.candidateRef)).length !== requestedRefs.size) {
+      showNotification("warning", "A formação automática aguarda a releitura das composições atualizadas; nenhum artigo foi descartado.");
       return;
     }
     setFormationBusy(true);
@@ -12128,6 +12240,7 @@ export default function ArquitetoPage() {
         // A conferência número por número, na ordem do §4 — do ESCOPO.
         showNotification("success", readoutDaExecucao(new Set(), escopo.candidateRefs));
         anunciarBloqueios(new Set(), escopo.candidateRefs);
+        if (automatic?.finalizeSubject) setAutomaticSubjectFinalization({ candidateRefs: [...escopo.candidateRefs], subjectPhrase: automatic.finalizeSubject });
         return;
       }
       showNotification("success", `Formação processada: ${resumoDaFormacao.candidates} artigo(s) candidato(s) selecionado(s). Coletando SERP de ${pendentes.length} artigo(s) sem evidência vigente.`);
@@ -12139,6 +12252,9 @@ export default function ArquitetoPage() {
       const coletadosAgora = resultadoDaSerp === "cancelled" ? new Set<string>() : new Set(resumoSerp.needsCollection);
       showNotification("success", readoutDaExecucao(coletadosAgora, escopo.candidateRefs));
       anunciarBloqueios(coletadosAgora, escopo.candidateRefs);
+      if (automatic?.finalizeSubject && resultadoDaSerp === "completed") {
+        setAutomaticSubjectFinalization({ candidateRefs: [...escopo.candidateRefs], subjectPhrase: automatic.finalizeSubject });
+      }
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "A formação não pôde ser processada.");
     } finally {
@@ -12174,6 +12290,7 @@ export default function ArquitetoPage() {
      * qual pai ele pode declarar.
      */
     estagio: ArticleParentBindingStage = "CANONICAL_REQUIRED",
+    origin: "human" | "system" = "human",
   ) => {
     // O desfecho tem duas listas desde o corte do ciclo: materializado e
     // aguardando o Silo canônico. Sair com array vazio deixava o chamador sem
@@ -12451,10 +12568,14 @@ export default function ArquitetoPage() {
           entityId: articleId,
           versionNumber: (vigente?.versionNumber || 0) + 1,
           previousVersionId: vigente?.versionId || null,
-          origin: "human",
+          origin,
           changeReason: vigente
-            ? "Formação concluída novamente: composição revisada e ArticleDNA aprovado."
-            : "Formação concluída: ArticleDNA materializado e aprovado na mesma decisão.",
+            ? origin === "system"
+              ? "Formação automática do Assunto: composição validada e ArticleDNA aprovado pelo fluxo autorizado."
+              : "Formação concluída novamente: composição revisada e ArticleDNA aprovado."
+            : origin === "system"
+              ? "Formação automática do Assunto: ArticleDNA materializado após os gates do Arquiteto."
+              : "Formação concluída: ArticleDNA materializado e aprovado na mesma decisão.",
           createdBy: actorId,
           payload,
         });
@@ -12470,7 +12591,9 @@ export default function ArquitetoPage() {
         if (persistido.persistence === "UNCHANGED") continue;
         const canonico = persistido.version as VersionEnvelope<ArticleDNA>;
         aprovacoes.push(createStatusEvent(canonico.versionId, "approved", actorId,
-          "Formação concluída: a decisão humana da fase Artigos aprova o ArticleDNA."));
+          origin === "system"
+            ? "Formação automática do Assunto autorizada pelo dono; composição, SERP, slug e Silo passaram os gates e o readback."
+            : "Formação concluída: a decisão humana da fase Artigos aprova o ArticleDNA."));
         criados.push({
           candidateRef: aprovado.candidateRef,
           keywordIds: aprovado.keywordIds,
@@ -13024,13 +13147,23 @@ export default function ArquitetoPage() {
     canonicalSiloPairFor, acceptedArticleDnas, masterList, showNotification,
   ]);
 
-  const confirmArticleFormation = useCallback(async () => {
+  const confirmArticleFormation = useCallback(async (automatic?: { candidateRefs: readonly string[]; subjectPhrase?: string }) => {
     if (!selectedBrandId || !articleFormationMarker) return;
     // A MESMA autoridade de `Processar artigos`, lida no mesmo instante: sem
     // isto, corrigir um botão hoje reencontraria o outro amanhã.
-    const { scope: escopo, universes: universosSelecionados } = formationScopeRef.current;
+    const requestedRefs = automatic?.candidateRefs?.length ? new Set(automatic.candidateRefs) : null;
+    const escopo = requestedRefs
+      ? { ok: true, reason: null, candidateRefs: requestedRefs }
+      : formationScopeRef.current.scope;
+    const universosSelecionados = requestedRefs
+      ? scopeFormationUniverses({ universes: articleRunScopeRef.current.universes, selectedCandidateRefs: requestedRefs })
+      : formationScopeRef.current.universes;
     if (!escopo.ok) {
       showNotification("error", escopo.reason ?? "Selecione pelo menos um artigo.");
+      return;
+    }
+    if (requestedRefs && universosSelecionados.flatMap(universe => universe.candidates.map(candidate => candidate.candidateRef)).length !== requestedRefs.size) {
+      showNotification("warning", "A conclusão automática aguarda a releitura dos artigos formados; nada foi descartado.");
       return;
     }
     setFormationBusy(true);
@@ -13094,7 +13227,11 @@ export default function ArquitetoPage() {
         return;
       }
 
-      const { criados, aguardandoSilo } = await materializeApprovedArticleDnas(plano.approved);
+      const { criados, aguardandoSilo } = await materializeApprovedArticleDnas(
+        plano.approved,
+        "CANONICAL_REQUIRED",
+        automatic ? "system" : "human",
+      );
 
       /*
        * Confirmar fecha a fase INTEIRA — inclusive o que ficou aberto atrás.
@@ -13372,6 +13509,41 @@ export default function ArquitetoPage() {
     }
   }, [selectedBrandId, articleFormationMarker, articleFormationUniverses, articleFormationBase, articleSerpGates, candidateGuards, unresolvedClassificationsByCandidate, materializeApprovedArticleDnas, materializeLegacyArticleSiloIds, masterList, showNotification, subjectStandings]);
 
+  /**
+   * Encadeia o Assunto depois do readback da cópia de trabalho. A execução
+   * espera os candidateRefs e o vínculo do tronco aparecerem no read-model;
+   * assim não processa uma composição antiga nem depende de seleção visual.
+   */
+  useEffect(() => {
+    const request = subjectAutomationRequest;
+    if (!request || subjectBusy || formationBusy || serpBusy) return;
+    const candidates = articleFormationUniverses.flatMap(universe => universe.candidates);
+    const ready = request.candidateRefs.every(ref => candidates.some(candidate =>
+      candidate.candidateRef === ref && candidate.subjectKeywordId === request.subjectKeywordId));
+    if (!ready) return;
+    setSubjectAutomationRequest(null);
+    setWorkspaceMode("articles");
+    void processArticleFormation({ candidateRefs: request.candidateRefs, finalizeSubject: request.subjectPhrase });
+  }, [subjectAutomationRequest, subjectBusy, formationBusy, serpBusy, articleFormationUniverses, processArticleFormation]);
+
+  /** Sem novo clique por Article: o readback SERP libera a conclusão automática. */
+  useEffect(() => {
+    const request = automaticSubjectFinalization;
+    if (!request || formationBusy || serpBusy) return;
+    const gates = request.candidateRefs.map(ref => articleSerpGates.get(ref));
+    if (gates.some(gate => !gate)) return;
+    const blocked = gates.filter((gate): gate is ArticleSerpGateState => Boolean(gate?.blocksConclusion));
+    const eligibleCandidateRefs = request.candidateRefs.filter((_, index) => !gates[index]?.blocksConclusion);
+    if (blocked.length) {
+      const reasons = [...new Set(blocked.map(gate => gate.reason))];
+      showNotification("warning", `${blocked.length} artigo(s) do Assunto “${request.subjectPhrase}” pararam nos gates: ${reasons.join(" · ")}`);
+    }
+    setAutomaticSubjectFinalization(null);
+    if (eligibleCandidateRefs.length) {
+      void confirmArticleFormation({ candidateRefs: eligibleCandidateRefs, subjectPhrase: request.subjectPhrase });
+    }
+  }, [automaticSubjectFinalization, formationBusy, serpBusy, articleSerpGates, confirmArticleFormation, showNotification]);
+
 
   /**
    * Processar arquitetura — uma ação, os motores por dentro.
@@ -13388,9 +13560,9 @@ export default function ArquitetoPage() {
    * keyword era decidida, e a pessoa tinha de criar o Silo à mão para o
    * motor voltar a enxergar alguma coisa.
    *
-   * Agora ele fecha a proposta: cria os Silos candidatos que faltam, grava a
-   * decisão de TODA keyword do lote e devolve os números. O que ele NÃO faz
-   * é aprovar — SiloDNA e SiloPage continuam nascendo em Confirmar.
+   * Agora ele cria os Silos que faltam, efetiva os publicados declarados e
+   * deixa keywords livres/Silos novos como proposta. SiloDNA e SiloPage
+   * novos seguem seus gates próprios.
    */
   const processArchitecture = async () => {
     if (!selectedBrandId) { showNotification("error", "Selecione uma marca ativa."); return; }
@@ -13415,7 +13587,8 @@ export default function ArquitetoPage() {
       const proposta = architectureProposal;
 
       /*
-       * 1 · OS SILOS PROPOSTOS NASCEM COMO CANDIDATOS.
+       * 1 · SILOS NOVOS NASCEM COMO CANDIDATOS; PUBLICADOS SERÃO
+       * RECONHECIDOS APÓS O READBACK DAS MEMBERSHIPS DECLARADAS.
        *
        * Mesma porta canônica da criação manual: só o candidato, sem SiloDNA,
        * sem SiloPage, sem publicação. Aprovar é ato de Confirmar.
@@ -13454,9 +13627,10 @@ export default function ArquitetoPage() {
           ...criados,
         ]);
       }
+      const territoriosDoProcessamento = new Map([...remoteTerritories, ...criados].map(item => [item.territoryRef, item]));
 
       /*
-       * 2 · PROCESSAR NÃO APROVA MEMBERSHIP.
+       * 2 · PROCESSAR NÃO APROVA MEMBERSHIP PROPOSTA.
        *
        * A versão anterior gravava as decisões aqui. Duas coisas estavam
        * erradas nisso. A primeira é de contrato: aprovar a membership no
@@ -13468,8 +13642,9 @@ export default function ArquitetoPage() {
        * `lock_version = 1`. A escrita não chegou, e o código não conferia o
        * retorno do writer — anunciava sucesso sobre o que nunca aconteceu.
        *
-       * A proposta é DERIVADA (`architectureProposal`) e sobrevive ao F5 sem
-       * gravação própria. Quem materializa é Confirmar, com readback.
+       * A proposta LIVRE é derivada (`architectureProposal`) e sobrevive ao F5
+       * sem gravação própria. Quem materializa a parte nova é Confirmar, com
+       * readback. O publicado é um fato anterior e é efetivado abaixo.
        */
       const bloqueados: string[] = [];
       const decidedAt = new Date().toISOString();
@@ -13493,7 +13668,13 @@ export default function ArquitetoPage() {
        * clique em Confirmar arquitetura. A base fica escrita no statement.
        */
       const porSilo = new Map<string, string[]>();
+      const chavesDeSiloPublicado = new Set(proposta.assignments
+        .filter(item => item.declaredBy === "published_silo_head")
+        .map(item => item.siloKey));
       for (const item of proposta.assignments) {
+        // A fronteira do publicado registra só o que o site já declarou.
+        // Keywords livres neste Silo ainda são proposta editorial.
+        if (chavesDeSiloPublicado.has(item.siloKey) && !item.declaredBy) continue;
         const lista = porSilo.get(item.siloKey) || [];
         const texto = String(masterList.find(entry => String(entry.id) === item.keywordId)?.keyword || "");
         if (texto) lista.push(texto);
@@ -13564,9 +13745,65 @@ export default function ArquitetoPage() {
           if (!gravou) {
             bloqueados.push(`${silo.name}: a identidade não apareceu no readback do Silo`);
           }
+          territoriosDoProcessamento.set(territoryRef, atualizado);
           setRemoteTerritories(previous => [...previous.filter(item => item.territoryRef !== territoryRef), atualizado]);
         } catch (error) {
           bloqueados.push(`${silo.name}: identidade não pôde ser gravada (${error instanceof Error ? error.message : "falha"})`);
+        }
+      }
+
+      /*
+       * PUBLICADO JÁ É DECISÃO. O Vínculo aprovado e a URL no site declaram
+       * o Silo e seus artigos; este clique apenas efetiva essa declaração.
+       * A proposta de keywords livres e os Silos novos continuam pendentes.
+       */
+      const fatosPublicados = planPublishedArchitectureRecognition({
+        brandId: selectedBrandId,
+        proposal: proposta,
+        declarations: architectureKeywordDeclarations,
+        siloHeadByArticle: publishedSiloMembership.siloHeadByArticle,
+        territoryRefOf: key => refPorChave.get(key) ?? (key.startsWith("proposed:") ? null : key),
+        territoryOf: ref => territoriosDoProcessamento.get(ref)?.territory,
+      });
+      bloqueados.push(...fatosPublicados.conflicts);
+      let membershipsPublicadas = 0;
+      let silosPublicadosEfetivados = 0;
+      if (fatosPublicados.decisions.length) {
+        const payloads = new Map<string, unknown>(masterList.map(item => [String(item.id), item]));
+        const { assignments } = territorialAssignmentsFromWorkflowPayloads({ brandId: selectedBrandId, payloads });
+        const paisagemAtual = buildTerritorialLandscape({
+          brandId: selectedBrandId,
+          keywords: masterList as Array<{ id: string }>,
+          territories: [...territoriosDoProcessamento.values()].map(item => item.territory),
+          assignments,
+          siloDnas: Object.values(acceptedSiloDnas),
+          siloPages: Object.values(acceptedSiloPages),
+          brandRegistrySilos: brandSiloCatalog,
+          siteStructures: siteStructureReading.structures,
+        });
+        const resultado = await applySiloDecisionsInBatch(fatosPublicados.decisions, paisagemAtual);
+        const efetivas = new Set([...resultado.applied, ...resultado.unchanged]);
+        membershipsPublicadas = efetivas.size;
+        for (const keywordId of resultado.refused) bloqueados.push(`Publicado ${keywordId}: a membership declarada não foi confirmada no readback`);
+        for (const territoryRef of fatosPublicados.territoryRefs) {
+          const decisoesDoSilo = fatosPublicados.decisions.filter(item => item.target.kind === "territory" && item.target.territoryRef === territoryRef);
+          if (!decisoesDoSilo.length || decisoesDoSilo.some(item => !efetivas.has(item.keywordId))) continue;
+          const remoto = territoriosDoProcessamento.get(territoryRef);
+          if (!remoto || remoto.territory.lifecycleStatus === "consolidated") continue;
+          if (siloIsHumanDecided(remoto.territory.lifecycleStatus)) continue;
+          try {
+            const confirmado = await confirmRemoteSiloCandidate({
+              brandId: selectedBrandId,
+              territoryRef,
+              expectedLock: remoto.lockVersion,
+              territory: remoto.territory as unknown as Record<string, unknown>,
+            });
+            territoriosDoProcessamento.set(territoryRef, confirmado);
+            setRemoteTerritories(previous => [...previous.filter(item => item.territoryRef !== territoryRef), confirmado]);
+            silosPublicadosEfetivados++;
+          } catch (error) {
+            bloqueados.push(`${remoto.territory.name || "Silo publicado"}: reconhecimento não persistiu (${error instanceof Error ? error.message : "falha"})`);
+          }
         }
       }
 
@@ -13577,8 +13814,12 @@ export default function ArquitetoPage() {
         baseHash: architectureAnalysis.baseHash,
         processedAt: decidedAt,
         confirmation: {
-          status: "none", confirmedAt: null, appliedMembershipCount: 0,
-          confirmedSiloCount: 0, pendingSiloCount: 0, failedCount: 0,
+          status: silosPublicadosEfetivados || membershipsPublicadas ? "partial" : "none",
+          confirmedAt: silosPublicadosEfetivados || membershipsPublicadas ? decidedAt : null,
+          appliedMembershipCount: membershipsPublicadas,
+          confirmedSiloCount: silosPublicadosEfetivados,
+          pendingSiloCount: [...territoriosDoProcessamento.values()].filter(item => item.territory.lifecycleStatus === "candidate").length,
+          failedCount: bloqueados.length,
         },
       });
       setArchitectureMarker(marcador);
@@ -13588,12 +13829,15 @@ export default function ArquitetoPage() {
 
       const contadores = { ...proposta.counters, BLOCKED: bloqueados.length };
       showNotification(bloqueados.length ? "warning" : "success",
-        `${formatProposalCounters(contadores)}`
+        `${formatProposalCounters(contadores)} · ${silosPublicadosEfetivados} Silo(s) publicado(s) efetivado(s) · ${membershipsPublicadas} membership(s) publicadas reconhecidas`
         + (bloqueados.length ? ` · Bloqueadas: ${bloqueados.join(" · ")}` : ""));
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "Não foi possível processar a arquitetura.");
     } finally {
       setArchitectureBusy(false);
+      // Uma falha pode ocorrer depois de uma criação/escrita parcial. O próximo
+      // clique sempre parte do estado canônico relido, nunca do snapshot antigo.
+      setCanonicalWorkspaceReload(current => current + 1);
     }
   };
 
@@ -13606,8 +13850,26 @@ export default function ArquitetoPage() {
    */
   const confirmArchitecture = async () => {
     if (!selectedBrandId) { showNotification("error", "Selecione uma marca ativa."); return; }
+    /*
+     * A PRONTIDÃO ENXERGA O PRÓPRIO PLANO.
+     *
+     * Este clique aplica as memberships E confirma os Silos. Medida só no
+     * estado gravado, a prontidão barrava por EMPTY_TERRITORY os Silos que o
+     * próprio clique ia preencher: 154 memberships aplicadas, 0 Silos
+     * confirmados, e a fase Artigos inteira presa em "aguardando confirmação
+     * do Silo". A previsão vem da MESMA proposta que o clique materializa.
+     */
+    const previstasPorSilo = new Map<string, number>();
+    for (const assignment of architectureProposal.assignments) {
+      const alvo = resolveProposalSiloRef(assignment.siloKey);
+      if (alvo) previstasPorSilo.set(alvo, (previstasPorSilo.get(alvo) || 0) + 1);
+    }
+    /* Silos prontos SÓ pela previsão: o gate pós-lote confere se ela virou fato. */
+    const sustentadosPelaPrevisao = new Set<string>();
     const readiness = new Map(territorialSurface.landscape.candidateTerritories.map(territory => {
-      const resultado = resolveTerritoryConfirmationReadiness({ territory, report: territorialSurface.landscape.consistency });
+      const medido = resolveTerritoryConfirmationReadiness({ territory, report: territorialSurface.landscape.consistency });
+      const resultado = readinessWithPlannedMembers(medido, previstasPorSilo.get(territory.territoryRef) || 0);
+      if (medido.state === "blocked" && resultado.state === "ready") sustentadosPelaPrevisao.add(territory.territoryRef);
       return [territory.territoryRef, {
         ready: resultado.state === "ready",
         blockers: resultado.blockers.map(blocker => blocker.detail || blocker.code),
@@ -13807,7 +14069,26 @@ export default function ArquitetoPage() {
         // A releitura falhou: sem ela nada pode ser anunciado como aplicado.
         for (const decisao of decisoes) falhas.push(decisao.keywordId);
       }
+      /*
+       * A PREVISÃO PRECISA TER VIRADO FATO.
+       *
+       * A prontidão de um Silo vazio foi emprestada das memberships DESTE
+       * lote. Se nenhuma chegou — todas recusadas, ou a releitura falhou —,
+       * confirmar criaria exatamente o Silo vazio que a prontidão impede.
+       * "Já estava no destino" também sustenta: o membro existe.
+       */
+      const alvoPorKeyword = new Map(decisoes.flatMap(decisao =>
+        decisao.target.kind === "territory" ? [[decisao.keywordId, decisao.target.territoryRef] as const] : []));
+      const efetivasPorSilo = new Set<string>();
+      for (const keywordId of [...aplicadas, ...inalteradas]) {
+        const alvo = alvoPorKeyword.get(keywordId);
+        if (alvo) efetivasPorSilo.add(alvo);
+      }
       for (const territoryRef of plan.confirmTerritoryRefs) {
+        if (sustentadosPelaPrevisao.has(territoryRef) && !efetivasPorSilo.has(territoryRef)) {
+          falhas.push(territoryRef);
+          continue;
+        }
         try {
           await confirmSiloCandidate(territoryRef);
           aplicadas.push(territoryRef);
@@ -14852,35 +15133,14 @@ export default function ArquitetoPage() {
     // Usar h-screen aqui empurrava o documento para 100vh + 40px e criava uma
     // segunda barra de rolagem vertical por fora da barra interna do workspace.
     <div className="relative flex h-[calc(100vh-2.5rem)] min-h-0 flex-col overflow-hidden bg-background font-sans text-sm text-foreground">
-      <style jsx>{`
-        .architect-scrollbar {
-          scrollbar-color: color-mix(in srgb, var(--foreground) 24%, transparent) transparent;
-          scrollbar-width: thin;
-        }
-        .architect-scrollbar::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
-        }
-        .architect-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .architect-scrollbar::-webkit-scrollbar-thumb {
-          background: color-mix(in srgb, var(--foreground) 20%, transparent);
-          border-radius: 999px;
-        }
-        .architect-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: color-mix(in srgb, var(--foreground) 32%, transparent);
-        }
-      `}</style>
-
       <HistoryControls moduleId="arquiteto" showHistory={false} showUndoRedo={false} visualVariant="semantic" entries={masterHistory.entries} canUndo={masterHistory.canUndo} canRedo={masterHistory.canRedo}
         onUndo={undoMasterList} onRedo={redoMasterList} onRestore={masterHistory.restore} compact presentation="popover"/>
 
       {/* ── PLANILHA PRINCIPAL DE ARTIGOS ── */}
-      <main className="architect-scrollbar min-w-0 flex-1 overflow-y-auto bg-background">
+      <main className="min-w-0 flex-1 overflow-y-auto bg-background">
         {/* Recolhido ocupa um terço do topo (prioridade é a planilha); a seta abre para 72vh. */}
-        <div className={`grid min-h-0 shrink-0 gap-0 bg-surface lg:grid-cols-2 lg:overflow-hidden ${mapExpanded ? "lg:max-h-[72vh]" : "lg:max-h-[33vh]"}`} data-testid="architect-workbench-layout">
-          <div className="architect-scrollbar min-h-0 min-w-0 overflow-y-auto border-b border-divider lg:border-b-0 lg:border-r border-divider" data-testid="architect-workbench-left">
+        <div className={`grid min-h-0 shrink-0 gap-0 bg-surface lg:grid-cols-2 lg:overflow-hidden ${mapExpanded ? "lg:h-[72vh]" : "lg:h-[33vh]"}`} data-testid="architect-workbench-layout">
+          <div className="min-h-0 min-w-0 overflow-y-auto border-b border-divider lg:border-b-0 lg:border-r border-divider" data-testid="architect-workbench-left" aria-label="Painel do Workbench do Arquiteto">
             <ArchitectWorkbench
               mode={workspaceMode}
               articleCount={filteredArticles.length}
@@ -15158,6 +15418,7 @@ export default function ArquitetoPage() {
                     })]}
                     busy={architectureBusy}
                     confirmed={confirmedArchitecture}
+                    canContinueToArticles={confirmedTerritoryRefs.size > 0}
                     processChips={architectureProcessChips}
                     selectedCluster={selectedClusterAnalysis}
                     consolidation={!SILO_ADVANCED_CONTROLS ? null : (() => {
@@ -15772,7 +16033,7 @@ export default function ArquitetoPage() {
             </span>
           </div>
         ) : (
-          <div ref={articleTableRef} className="architect-scrollbar w-full overflow-x-auto">
+          <div ref={articleTableRef} className="w-full overflow-x-auto">
             <table data-architect-table="articles" className="w-full table-fixed border-collapse text-left text-sm tracking-wide">
               <colgroup>
                 {architectColumnIds.map(columnId => <col key={columnId} data-architect-table-column={columnId} style={{ width: articleColumnWidths[columnId] }} />)}
@@ -16326,7 +16587,7 @@ export default function ArquitetoPage() {
                            */
                           const pai = articleParentFor(art);
                           return <span className="text-xs text-text-muted" title="O Silo do artigo foi decidido na fase Silos; aqui não se troca de Silo.">{pai.lifecycle.pendingIsExpected ? "Silo definido na fase Silos" : pai.pending || "Silo definido na fase Silos"}</span>;
-                        })() :!art.siloId ? <span className="text-xs text-text-muted" title="O Silo do artigo foi decidido na fase Silos; aqui não se troca de Silo.">Silo definido na fase Silos</span> :<select value={art.siloId || ""} onChange={e => handleMoveArticleToSilo(art, e.target.value)} className={`${ARCHITECT_UI.control} h-8 max-w-[145px] text-xs`} title="Mudar de Silo"><option value="" className="bg-surface-elevated">Sem silo</option>{siloOptions.map(silo => <option key={silo.id} value={silo.id} className="bg-surface-elevated">{silo.nome}</option>)}</select>}</div> : <div className="flex flex-col items-end gap-1"><span className="flex items-center justify-end gap-1 text-right text-xs font-medium text-text-muted"><ShieldCheck className="w-3 h-3" />{articleMode ? "Identidade protegida" : "URL/Silo protegidos"}</span>{publicationUrlFor(art) && <button onClick={() => void handleVerifyPublication(art)} disabled={verificationBusy.has(art.id)} className={`${ARCHITECT_UI.toolbarButton} min-h-8 px-2 text-xs`}>{verificationBusy.has(art.id) ? "Verificando…" : "Verificar identidade"}</button>}</div>}</td>
+                        })() :!art.siloId ? <span className="text-xs text-text-muted" title="O Silo do artigo foi decidido na fase Silos; aqui não se troca de Silo.">Silo definido na fase Silos</span> :<select value={art.siloId || ""} onChange={e => handleMoveArticleToSilo(art, e.target.value)} className={`${ARCHITECT_UI.control} h-8 max-w-[145px] text-xs`} title="Mudar de Silo"><option value="" className="bg-surface-elevated">Sem silo</option>{siloOptions.map(silo => <option key={silo.id} value={silo.id} className="bg-surface-elevated">{silo.nome}</option>)}</select>}</div> : <span className="flex items-center justify-end gap-1.5 text-right text-sm font-medium text-text-muted" title="O artigo já está declarado como publicado. O Arquiteto preserva URL, slug, canonical e o Silo associado; isso não bloqueia revisar keywords conforme o Vínculo nem exige confirmação manual." aria-label="Artigo publicado: URL, slug, canonical e Silo associado preservados. As keywords seguem o Vínculo e não exigem nova confirmação."><ShieldCheck className="h-3.5 w-3.5 shrink-0" />{articleMode ? "URL, slug e Silo preservados" : "URL e Silo preservados"}</span>}</td>
                         {/*
                           * §1 — APROVAÇÃO NÃO EMPRESTA PALAVRA DO OPERACIONAL.
                           *
@@ -17142,7 +17403,7 @@ export default function ArquitetoPage() {
 
       {/* Ações que dependem da seleção ficam sempre no rodapé, fora do scroll da planilha. */}
       {(selectedArticleIds.size > 0 || selectedSiloPageIds.size > 0) && (
-        <footer className="architect-scrollbar flex min-h-10 shrink-0 items-center justify-between gap-3 overflow-x-auto border-t border-divider bg-surface-elevated px-3 py-2">
+        <footer className="flex min-h-10 shrink-0 items-center justify-between gap-3 overflow-x-auto border-t border-divider bg-surface-elevated px-3 py-2">
           {/* Contadores separados */}
           <div className="flex shrink-0 items-center gap-3">
             {selectedArticleIds.size > 0 && (
@@ -17257,7 +17518,7 @@ export default function ArquitetoPage() {
           busy={subjectBusy || formationBusy}
           buttonClassName={ARCHITECT_UI.toolbarButton}
           primaryButtonClassName={ARCHITECT_UI.primaryButton}
-          onConfirm={keywordIds => { void confirmSubjectSupport(keywordIds); }}
+          onStart={() => { void confirmSubjectSupport(); }}
           onClose={() => setSubjectSupportOpen(false)}
         />
       )}
@@ -17412,7 +17673,7 @@ export default function ArquitetoPage() {
         </div>
       )}
       {siloContextRef && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" data-testid="architect-silo-context-modal">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4" data-testid="architect-silo-context-modal">
           <div className="w-full max-w-lg overflow-hidden rounded-lg border border-divider bg-surface-elevated">
             <div className="flex items-center justify-between border-b border-divider px-4 py-3">
               <span className="text-sm font-semibold uppercase tracking-wider text-foreground">Contexto do Silo</span>

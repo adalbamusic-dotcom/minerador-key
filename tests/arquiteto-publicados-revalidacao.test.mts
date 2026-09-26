@@ -25,6 +25,7 @@ import {
   resolvePublishedSiloMembership,
 } from "../lib/arquiteto/published-silo-membership.ts";
 import { manualSiloCandidateDraft, planSiloAssignment, publishedSiloCandidateDraft } from "../lib/arquiteto/silo-assignment.ts";
+import { planPublishedArchitectureRecognition } from "../lib/arquiteto/published-architecture-recognition.ts";
 import { planSiloDecisionBatch } from "../lib/arquiteto/silo-decision-batch.ts";
 import { buildTerritorialLandscape, type TerritorialLandscapeInput } from "../lib/arquiteto/territorial-landscape.ts";
 import { TerritoryCandidateSchema, type TerritoryCandidate } from "../lib/arquiteto/territory.ts";
@@ -429,6 +430,24 @@ test("(3) a publicada só ganha membership no Silo que o site declara", () => {
   assert.match(String((escrita.assignment.territoryAssignment as { reason: string }).reason), /Silo que o site declara/);
 });
 
+test("reprocessar publicado já no Silo consolidado é no-op, não exige sucessor", () => {
+  const consolidada = buildTerritorialLandscape({
+    brandId: BRAND,
+    keywords: [{ id: "art-skin-0", brand_id: BRAND }],
+    territories: [{ ...territorio(), lifecycleStatus: "consolidated", decisionState: "confirmed" }],
+    assignments: [],
+  } as TerritorialLandscapeInput);
+  const lote = planSiloDecisionBatch({
+    brandId: BRAND, landscape: consolidada,
+    keywordOf: () => ({ ...chave("art-skin-0", true), currentTerritoryRef: REF }),
+    decisions: [{ keywordId: "art-skin-0", target: { kind: "territory", territoryRef: REF }, declaredBySite: true }],
+    decidedAt: NOW,
+  });
+  assert.deepEqual(lote.unchanged, ["art-skin-0"]);
+  assert.deepEqual(lote.writes, []);
+  assert.deepEqual(lote.refused, []);
+});
+
 /* ------------------------ (3) remontar livres em torno do artigo publicado */
 
 const kw = (keywordId: string, keyword: string, isPublished = false, over: Partial<ArticleFormationKeyword> = {}): ArticleFormationKeyword => ({
@@ -540,6 +559,94 @@ test("(2) o território do Silo publicado nasce protegido, com publishedSlug e c
 
   const mesa = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
   assert.match(mesa, /draft: silo\.publishedIdentity\s*\? publishedSiloCandidateDraft\(\{/);
+});
+
+test("publicados declarados são efetiváveis no primeiro processamento sem confirmar proposta livre", () => {
+  const proposal = proposta(true);
+  const refs = new Map(SILOS.map((silo, index) => [silo.id, `territory:00000000-0000-4000-8000-00000000000${index}`]));
+  const refByKey = new Map(proposal.silos.flatMap(silo => {
+    const ref = silo.seedKeywordId ? refs.get(silo.seedKeywordId) : null;
+    return ref ? [[silo.key, ref] as const] : [];
+  }));
+  const territories = new Map(proposal.silos.flatMap(silo => {
+    const ref = refByKey.get(silo.key);
+    if (!ref || !silo.publishedIdentity) return [];
+    return [[ref, TerritoryCandidateSchema.parse({
+      ...publishedSiloCandidateDraft({
+        name: silo.name,
+        publishedSlug: silo.publishedIdentity.slug,
+        publishedCanonical: silo.publishedIdentity.canonical,
+        publishedUrl: silo.publishedIdentity.url,
+      }),
+      territoryRef: ref, brandId: BRAND,
+    })] as const];
+  }));
+  const membership = resolvePublishedSiloMembership({ brandId: BRAND, entries: entradas(LOTE) });
+  const plan = planPublishedArchitectureRecognition({
+    brandId: BRAND,
+    proposal, declarations: declaracoes, siloHeadByArticle: membership.siloHeadByArticle,
+    territoryRefOf: key => refByKey.get(key) ?? null,
+    territoryOf: ref => territories.get(ref),
+  });
+  assert.deepEqual(plan.conflicts, []);
+  assert.equal(plan.territoryRefs.length, 4);
+  assert.equal(plan.decisions.length, 24, "4 cabeças e 20 artigos sob URLs dos Silos");
+  assert.ok(plan.decisions.every(item => item.declaredBySite === true));
+  assert.ok(plan.decisions.every(item => item.keywordId.startsWith("silo-") || item.keywordId.startsWith("art-")));
+  assert.equal(plan.decisions.some(item => item.keywordId === "art-fora"), false);
+  assert.equal(plan.decisions.some(item => item.keywordId.startsWith("livre-")), false);
+
+  const firstSilo = proposal.silos.find(item => item.seedKeywordId === SILOS[0].id)!;
+  const reused = buildArchitectureWorkingProposal({
+    analysis: analise, keywords: LOTE.map(sinais), declarations: declaracoes, slugOf,
+    existingSilos: [{ territoryRef: refByKey.get(firstSilo.key)!, name: firstSilo.name, centralEntity: firstSilo.name, slug: firstSilo.slug, primaryKeywordId: SILOS[0].id }],
+    publishedKeywordIds: new Set([...SILOS, ...ARTIGOS].map(item => item.id)),
+    publishedSiloHeadByArticle: membership.siloHeadByArticle,
+  });
+  const reusedPlan = planPublishedArchitectureRecognition({
+    brandId: BRAND,
+    proposal: reused, declarations: declaracoes, siloHeadByArticle: membership.siloHeadByArticle,
+    territoryRefOf: key => refByKey.get(key) ?? (territories.has(key) ? key : null),
+    territoryOf: ref => territories.get(ref),
+  });
+  assert.equal(reusedPlan.territoryRefs.length, 4, "candidato publicado legado é reaproveitado");
+  assert.equal(reusedPlan.decisions.length, 24, "reaproveitar não perde artigos publicados");
+
+  const corrupted = new Map(territories);
+  const [firstRef, firstTerritory] = [...corrupted.entries()][0];
+  corrupted.set(firstRef, TerritoryCandidateSchema.parse({ ...firstTerritory, slugState: { ...firstTerritory.slugState, publishedSlug: "/outra-raiz" } }));
+  const refused = planPublishedArchitectureRecognition({
+    brandId: BRAND,
+    proposal, declarations: declaracoes, siloHeadByArticle: membership.siloHeadByArticle,
+    territoryRefOf: key => refByKey.get(key) ?? null,
+    territoryOf: ref => corrupted.get(ref),
+  });
+  assert.ok(refused.conflicts.length > 0, "endereço divergente não autoriza reconhecimento");
+  assert.equal(refused.territoryRefs.length, 3);
+  const withoutCanonical = new Map(territories);
+  withoutCanonical.set(firstRef, TerritoryCandidateSchema.parse({ ...firstTerritory, slugState: { ...firstTerritory.slugState, publishedCanonical: null } }));
+  assert.equal(planPublishedArchitectureRecognition({
+    brandId: BRAND, proposal, declarations: declaracoes,
+    siloHeadByArticle: membership.siloHeadByArticle,
+    territoryRefOf: key => refByKey.get(key) ?? null,
+    territoryOf: ref => withoutCanonical.get(ref),
+  }).territoryRefs.length, 3, "canonical declarado não pode sumir do território efetivado");
+  const otherBrand = planPublishedArchitectureRecognition({
+    brandId: "outra-marca", proposal, declarations: declaracoes,
+    siloHeadByArticle: membership.siloHeadByArticle,
+    territoryRefOf: key => refByKey.get(key) ?? null,
+    territoryOf: ref => territories.get(ref),
+  });
+  assert.deepEqual(otherBrand.decisions, [], "território de outra marca nunca recebe publicado");
+});
+
+test("Silo publicado efetivado libera Artigos sem clicar Confirmar arquitetura", () => {
+  const mesa = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
+  const painel = readFileSync("modules/arquiteto/architecture-panel.tsx", "utf8");
+  assert.match(mesa, /canContinueToArticles=\{confirmedTerritoryRefs\.size > 0\}/);
+  assert.match(painel, /\{canContinueToArticles && \(/);
+  assert.match(painel, /Confirmar propostas novas/);
+  assert.doesNotMatch(painel, /\{confirmed && \(\s*<button[\s\S]*?architect-continue-to-articles/);
 });
 
 test("(2) Silo publicado já no acervo é reconhecido pelo endereço (ou pela primária) e não duplica", () => {

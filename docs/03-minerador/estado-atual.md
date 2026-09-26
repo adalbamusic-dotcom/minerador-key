@@ -5416,3 +5416,17 @@ Medido: **267 linhas de 3 marcas** chegavam ao snapshot da Care Glow, que tem
 A métrica **Keywords** da página da Marca (`modules/marca/brand-page.tsx:155`,
 `pipeline.snapshot.keywords.length`) **cai de 267 para 39** na Care Glow. O
 número antigo contava keywords de outras duas marcas. O novo é o correto.
+
+## Lógica determinística compartilhada com MCP — 2026-09-26
+
+- **Verificado no código:** a derivação de intenção, nicho, funil, contrato de
+  saída e metadados da Lógica foi extraída para
+  `lib/minerador/logical-batch.ts`. A tela do Minerador e a ferramenta
+  `run_keyword_logic` usam o mesmo núcleo; decisões humanas existentes de
+  intenção, nicho e funil permanecem protegidas.
+- **Persistência MCP:** o servidor deriva o lote inteiro antes de escrever,
+  compara os campos atuais no filtro de atualização e confirma os valores por
+  readback. Não usa `updated_at` porque essa coluna não pertence ao contrato de
+  `minerador_keywords`; não chama provider nem consome créditos.
+- **Ainda não verificado:** escrita remota com Claude; as medições de Volume,
+  Resultados e KGR seguem fora do MCP e continuam exigindo operação na tela.

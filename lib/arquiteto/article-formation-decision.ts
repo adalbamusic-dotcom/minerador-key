@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * DECISÃO HUMANA SOBRE A FORMAÇÃO DE UM ARTIGO.
+ * DECISÃO SOBRE A FORMAÇÃO DE UM ARTIGO.
  *
  * O agrupamento automático é PROPOSTA. Quando a pessoa move uma keyword, junta
  * dois candidatos, separa um ou troca a principal, essa decisão precisa
@@ -20,8 +20,10 @@ import { z } from "zod";
  * membership já mora. Sem coluna nova, sem subject_type novo, sem migration,
  * sem tocar RLS.
  *
- * NÃO é ArticleDNA: é working state. A materialização continua sendo um passo
- * humano separado.
+ * NÃO é ArticleDNA: é working state. No fluxo normal, a decisão é humana; no
+ * lote de Assunto autorizado, `source: system` identifica a aplicação
+ * determinística iniciada pelo usuário. A materialização segue os gates
+ * canônicos do Arquiteto.
  *
  * Domínio puro: sem storage, sem fetch.
  */
@@ -45,8 +47,8 @@ export const ArticleFormationDecisionSchema = z.object({
   operation: ArticleFormationOperationSchema,
   role: ArticleFormationRoleSchema,
   reason: z.string().min(1),
-  /** Só `human` por enquanto: SERP e IA não decidem formação neste corte. */
-  source: z.enum(["human"]),
+  /** `system` registra a formação automática iniciada a partir de Assunto declarado. */
+  source: z.enum(["human", "system"]),
   decidedAt: z.string().min(1),
 }).strict();
 export type ArticleFormationDecision = z.infer<typeof ArticleFormationDecisionSchema>;

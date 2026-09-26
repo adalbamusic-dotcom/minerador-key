@@ -9,10 +9,12 @@ import {
   type ArchitectSubjectStanding,
   type AttachedSubjectStanding,
   type SubjectAnchorCarrier,
+  type SubjectSupportSuggestion,
 } from "../../lib/arquiteto/declared-subject.ts";
 import type { DeclaredSubject, EditorialArticleUnitType } from "../../lib/arquiteto/contracts.ts";
 import { newFormationRef, type FormationKeywordLike, type FormationPatch } from "../../lib/arquiteto/article-formation-editing.ts";
 import { MAX_ARTICLE_KEYWORDS, suggestPrincipal, type ArticleFormationKeyword } from "../../lib/arquiteto/article-formation.ts";
+import { intentComparisonKey } from "../../lib/arquiteto/keyword-dna-signals.ts";
 
 /**
  * O ASSUNTO NA TELA DO ARQUITETO — regras puras (SDD 2026-09-24, F2.2 a F2.4).
@@ -29,9 +31,9 @@ type SubjectRow = Record<string, unknown>;
 export const SUBJECT_PHRASE_SERP_HINT =
   "A SERP da frase do Assunto é opcional. Se quiser medi-la, use Resultados no Processador do Minerador: a medição entra no pacote aprovado e passa a valer aqui. O Arquiteto não faz chamada paga para a frase.";
 
-/** A principal sai entre as marcadas, pela regra de sempre (F2.4 passo 2, D1). */
+/** A principal sai entre as keywords elegíveis com Volume validado, pela regra atual (D1). */
 export const SUBJECT_SUPPORT_PRINCIPAL_HINT =
-  "A principal sai entre as keywords marcadas, pela regra de sempre (publicada, centralidade, volume). O Assunto fica como tronco: não vira principal nem dá o slug.";
+  "Usa somente os pacotes aprovados já recebidos; agrupa as keywords elegíveis por intenção e Silo confirmado e valida a composição na SERP. Cada artigo precisa de keyword com Volume validado; o Assunto fica como tronco, não vira keyword, principal nem dá o slug. Keywords sem Principal continuam sem agrupamento.";
 
 /** O vínculo da formação sem Definição fica gravado na cópia de trabalho (item da principal). */
 export const SUBJECT_WORKING_ANCHOR_NOTE =
@@ -363,12 +365,74 @@ export type SupportFormationPlan =
   }
   | { ok: false; code: SupportFormationRefusalCode; reason: string };
 
+export type AutomaticSubjectSupportBatch = {
+  siloRef: string;
+  intentKey: string | null;
+  suggestions: SubjectSupportSuggestion[];
+};
+
+export type AutomaticSubjectSupportGroups = {
+  batches: AutomaticSubjectSupportBatch[];
+  /** Eligible sustentações que não podem iniciar outro artigo sem volume. */
+  withoutPrincipal: SubjectSupportSuggestion[];
+};
+
+/**
+ * Particiona todas as sustentações elegíveis por Silo confirmado e intenção,
+ * mantendo a ordem de relevância entregue pelo domínio. Cada artigo respeita
+ * o teto canônico; o restante forma artigos irmãos, nunca é descartado.
+ */
+export function groupAutomaticSubjectSupports(input: {
+  suggestions: readonly SubjectSupportSuggestion[];
+  siloRefByKeywordId: ReadonlyMap<string, string | null>;
+  intentByKeywordId: ReadonlyMap<string, string | null>;
+  principalEligibleKeywordIds: ReadonlySet<string>;
+  excludedKeywordIds?: ReadonlySet<string>;
+}): AutomaticSubjectSupportGroups {
+  const grouped = new Map<string, { siloRef: string; intentKey: string | null; suggestions: SubjectSupportSuggestion[] }>();
+  for (const suggestion of input.suggestions) {
+    if (!suggestion.automaticEligible || suggestion.alreadyInArticle || input.excludedKeywordIds?.has(suggestion.keywordId)) continue;
+    const siloRef = input.siloRefByKeywordId.get(suggestion.keywordId);
+    if (!siloRef) continue;
+    const intentKey = intentComparisonKey(input.intentByKeywordId.get(suggestion.keywordId));
+    const groupKey = `${siloRef}\u0000${intentKey ?? "unknown"}`;
+    const group = grouped.get(groupKey) ?? { siloRef, intentKey, suggestions: [] };
+    group.suggestions.push(suggestion);
+    grouped.set(groupKey, group);
+  }
+
+  const batches: AutomaticSubjectSupportBatch[] = [];
+  const withoutPrincipal: SubjectSupportSuggestion[] = [];
+  for (const group of grouped.values()) {
+    const remaining = [...group.suggestions];
+    while (remaining.length) {
+      const principalIndex = remaining.findIndex(item => input.principalEligibleKeywordIds.has(item.keywordId));
+      if (principalIndex < 0) {
+        withoutPrincipal.push(...remaining);
+        break;
+      }
+      // Reserve a volume-bearing principal for each new article. This keeps a
+      // high-ranked but volume-less term from consuming the six slots before
+      // a later batch can receive a usable principal.
+      const principal = remaining.splice(principalIndex, 1)[0];
+      const supports = remaining.splice(0, MAX_ARTICLE_KEYWORDS - 1);
+      batches.push({
+        siloRef: group.siloRef,
+        intentKey: group.intentKey,
+        suggestions: [principal, ...supports],
+      });
+    }
+  }
+  return { batches, withoutPrincipal };
+}
+
 const refuseSupport = (code: SupportFormationRefusalCode, reason: string): SupportFormationPlan => ({ ok: false, code, reason });
 
 /**
- * O artigo novo em torno do Assunto, a partir das sustentações que o humano
- * marcou (F2.4 passo 2). Puro: devolve os patches da cópia de trabalho, pelo
- * mesmo formato das outras edições da formação.
+ * O artigo novo em torno do Assunto, a partir das sustentações elegíveis.
+ * Puro: devolve os patches da cópia de trabalho, pelo mesmo formato das
+ * outras edições da formação. `system` é usado só no lote automático que o
+ * dono autorizou; chamadas anteriores mantêm o padrão `human`.
  *
  * A principal sai ENTRE as marcadas por `suggestPrincipal`, a regra da
  * formação. O Assunto nunca é marcado nem vira membro: ele é o tronco, preso
@@ -380,9 +444,12 @@ export function planSubjectSupportFormation(input: {
   siloRefOf: (keywordId: string) => string | null;
   keywords: readonly FormationKeywordLike[];
   memberKeywordIds?: ReadonlySet<string>;
+  /** Restringe a eleição automática a keywords cujo volume foi validado. */
+  principalKeywordIds?: ReadonlySet<string>;
   siloTokens?: ReadonlySet<string>;
   mintUuid: string;
   decidedAt: string;
+  source?: "human" | "system";
 }): SupportFormationPlan {
   const marked = [...new Map(input.marked.map(keyword => [keyword.keywordId, keyword])).values()];
   if (!marked.length) return refuseSupport("NONE_MARKED", "Marque pelo menos uma keyword de sustentação.");
@@ -405,10 +472,11 @@ export function planSubjectSupportFormation(input: {
   }
   const siloRef = [...silos][0] as string;
 
-  const elegiveis = marked.filter(keyword => !keyword.subjectHeldOut);
+  const elegiveis = marked.filter(keyword => !keyword.subjectHeldOut
+    && (!input.principalKeywordIds || input.principalKeywordIds.has(keyword.keywordId)));
   const principal = suggestPrincipal({ keywords: elegiveis, siloTokens: input.siloTokens });
   if (!principal) {
-    return refuseSupport("NO_ELIGIBLE_PRINCIPAL", "Nenhuma keyword marcada pode ser principal: marque pelo menos uma com Volume validado.");
+    return refuseSupport("NO_ELIGIBLE_PRINCIPAL", "Nenhuma keyword do grupo tem Volume validado para ser Principal.");
   }
 
   const formationRef = newFormationRef(input.mintUuid);
@@ -427,8 +495,10 @@ export function planSubjectSupportFormation(input: {
         articleFormationDecision: {
           operation: "merge",
           role: keyword.keywordId === principal.keywordId ? "principal" : "secundaria",
-          reason: "sustentação do Assunto confirmada em revisão humana",
-          source: "human",
+          reason: input.source === "system"
+            ? "sustentação agrupada automaticamente a partir de Assunto declarado; validada pelo fluxo do Arquiteto"
+            : "sustentação do Assunto confirmada em revisão humana",
+          source: input.source ?? "human",
           decidedAt: input.decidedAt,
         },
       },

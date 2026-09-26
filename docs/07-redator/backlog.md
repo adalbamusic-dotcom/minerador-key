@@ -1,5 +1,14 @@
 # Backlog — Redator
 
+## MCP plataforma e homologação — 2026-09-26
+
+- [x] Comparar ferramentas anunciadas pelo protocolo com o catálogo dinâmico; remover a contagem rígida antiga de 25.
+- [x] Health expõe fingerprint do catálogo, tópicos e ferramentas catalogadas, sem alegar autenticação de cliente.
+- [x] Verificar endpoints remotos somente por leitura: health, protected-resource metadata, OAuth discovery e recusa anônima.
+- [ ] **Usuário — publicar e homologar:** aplicar M8/M9 que estiverem pendentes, fazer deploy, conferir o hash no health e reconsentir Claude.
+- [ ] **Usuário — chamada real:** testar com Claude `get_platform_guide` → `get_platform_state` → prévia de decisão. Nenhum grant do Claude ou fluxo autenticado foi testado nesta revisão.
+- [ ] Evoluções fora desta revisão: medição no Minerador, formação/conclusão via ferramenta do Arquiteto e investigação/finalização via ferramenta do Radar; hoje o catálogo direciona para a interface.
+
 ## Assunto declarado (F4) — 2026-09-24
 
 - [x] F4.1: `subject` nos fundamentos (mesma projeção, teto 1.638 B), proibição do Assunto em `writerMayNot` só com Assunto, frase da virada nas instruções do MCP.
@@ -291,5 +300,16 @@ Ver SDD de [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-
 - Concluído no código: ferramentas da plataforma no mesmo servidor MCP, escopos
   novos, catálogo único de processos e testes de sincronia. Ver
   `docs/compartilhado/agentes-mcp-backlog.md`.
-- Pendente do usuário: migration m8 → deploy → reconsentir → homologar.
-- Próximas fatias (P1–P4) no backlog compartilhado de agentes.
+- Pendente do usuário: conferir/aplicar migrations remotas que ainda faltam
+  (M8 e M9, sem `db push`), deploy e reconsentir o Claude com a marca e escopos
+  escolhidos.
+- Revisão local atual: `platform.decide`, prévia/hash/auditoria, Lógica e
+  decisões do Minerador, aprovação do documento e handoff interno a Publicações
+  implementados. Medição paga, formação/decisões do Arquiteto e investigação/
+  finalização do Radar continuam em tela; ver o backlog compartilhado.
+## MCP da plataforma — auditoria de 2026-09-26
+
+- [x] Corrigir o teto OAuth de três para a quantidade de escopos anunciados, nas rotas de consentimento e gestão de grants; regressão em `test:agent`.
+- [x] Unir `requestId` da declaração de Assunto via MCP ao evento auditado, sem alterar o caminho da tela.
+- [ ] Deploy pelo usuário, reconsentimento separado de Claude com Marca e escopos escolhidos e smoke autenticado `get_platform_guide` → `get_platform_state` → `find_topic_in_platform` → prévia de declaração. O health público não substitui esse teste.
+- [ ] Implementar, conforme SDD/adendo e gates próprios, Lógica, medição com plano de custo, decisões de keywords por aceite no chat, formação/decisões do Arquiteto, investigação Radar e finalização do Redator. Até isso existir, não declarar que Claude conclui um artigo sozinho da ideia ao texto.

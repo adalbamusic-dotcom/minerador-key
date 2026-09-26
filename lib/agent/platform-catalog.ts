@@ -23,8 +23,9 @@
  * `access: "tool"` — existe operação de servidor, e a IA a executa pelo MCP.
  * `access: "ui"`   — a operação só existe na tela. A IA explica, manda o link e
  *                    retoma quando o estado mostrar que foi feita.
- * `decision: "human"` — aprovação. Continua humana mesmo que um dia vire
- *                    ferramenta (`AGENTS.md` §9; ADR-022 para o Assunto).
+ * `decision: "human"` — a decisão continua sendo do usuário. Uma ferramenta
+ *                    só pode aplicá-la se `chatConfirmationRequired` for true;
+ *                    a IA precisa exibir uma prévia e registrar o aceite.
  */
 
 export const PLATFORM_STAGES = ["marca", "minerador", "arquiteto", "radar", "redator", "publicacoes"] as const;
@@ -56,6 +57,8 @@ export type PlatformOperation = {
   cost: OperationCost;
   decision: OperationDecision;
   access: OperationAccess;
+  /** Permite à IA aplicar uma decisão humana aceita explicitamente no chat. */
+  chatConfirmationRequired?: boolean;
   /** Nome da ferramenta MCP, quando `access = "tool"`. */
   tools?: readonly string[];
   /** Tela onde a pessoa faz a operação: o módulo da rota tenantizada. */
@@ -184,25 +187,41 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     ],
   },
   {
-    id: "minerador.measure_and_qualify",
+    id: "minerador.run_logic",
     stage: "minerador",
-    title: "Medir e qualificar (Volume, Resultados, KGR, Lógica)",
-    purpose: "Medir volume e allintitle, calcular KGR e rodar a Lógica (intenção e funil) para cada keyword.",
+    title: "Executar a Lógica determinística",
+    purpose: "Classificar intenção, nicho e funil sem chamar provedores, preservando decisões humanas existentes.",
     requires: ["Keywords no Processador"],
-    produces: ["Métricas, KGR e hipótese de intenção/funil por keyword"],
+    produces: ["Contrato de Lógica completo por keyword"],
+    cost: "free",
+    decision: "agent",
+    access: "tool",
+    tools: ["run_keyword_logic"],
+    screen: "minerador",
+    howOnScreen: "Minerador → Processar Keywords → barra do rodapé → Lógica.",
+    routes: [],
+    notes: ["Pode rodar para uma keyword ou em grupo. Usa o mesmo núcleo da tela; não mede volume, Resultados ou KGR."],
+  },
+  {
+    id: "minerador.measure_keywords",
+    stage: "minerador",
+    title: "Medir Volume e Resultados",
+    purpose: "Consultar Google Ads e DataForSEO para obter Volume, Resultados e KGR.",
+    requires: ["Keywords no Processador"],
+    produces: ["Volume, allintitle e KGR"],
     cost: "paid_provider",
     decision: "human",
     access: "ui",
     screen: "minerador",
-    howOnScreen: "Minerador → Processar Keywords → barra do rodapé, nesta ordem: Lógica → Volume → Resultados → Revisar → KGR → Vínculo.",
+    howOnScreen: "Minerador → Processar Keywords → barra do rodapé → Volume e Resultados.",
     routes: [
       "/api/minerador/marcas/[brandId]/dataforseo/allintitle",
       "/api/minerador/marcas/[brandId]/google-ads/metricas-keywords",
       "/api/minerador/marcas/[brandId]/google-ads/conexao",
     ],
     notes: [
+      "A medição chama provedores pagos. A IA ainda não a executa pelo MCP; faça-a na tela.",
       "Com Assunto declarado, aprovar dispensa Volume, Resultados e KGR: só a Lógica é exigida.",
-      "Ainda não há operação de servidor para a Lógica e as medições: a IA não executa esta etapa.",
     ],
   },
   {
@@ -214,13 +233,15 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     produces: ["Keywords 'aprovado', prontas para o Arquiteto"],
     cost: "free",
     decision: "human",
-    access: "ui",
+    access: "tool",
+    chatConfirmationRequired: true,
+    tools: ["set_keyword_vinculo", "set_kgr_applicability", "decide_keywords"],
     screen: "minerador",
-    howOnScreen: "Minerador → Processar Keywords → Revisão Humana (individual) ou barra do rodapé (em grupo) → Concluir revisão → Status: aprovado.",
+    howOnScreen: "Minerador → Processar Keywords → Revisão Humana (individual) ou barra do rodapé (em grupo) → Concluir revisão → Status: aprovado. Pelo MCP, a IA apresenta prévia e só aplica após o aceite explícito no chat.",
     routes: [],
     notes: [
       "Tipo de página 'silo' marca a keyword que será a cabeça do silo (a página do silo). Declare-o para a keyword do silo.",
-      "A aprovação grava direto do navegador; a IA pede ao usuário e confere o resultado com get_platform_state.",
+      "O Vínculo, o KGR e a aprovação podem ser aplicados pelo MCP só após prévia, aceite específico, hash vigente e readback. Conteúdo publicado segue protegido.",
     ],
   },
   {
@@ -266,14 +287,14 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     id: "arquiteto.form_architecture",
     stage: "arquiteto",
     title: "Formar artigos e silos (Processar lógica)",
-    purpose: "Agrupar as keywords em artigos (uma principal + até 5 de apoio) e os artigos em silos, com pilar e suportes.",
+    purpose: "Reconhecer Silos e artigos já publicados pelo Vínculo e canonical; propor o agrupamento das keywords livres e a arquitetura nova.",
     requires: ["Keywords recebidas do Minerador"],
-    produces: ["Proposta de ArticleDNA e SiloDNA na cópia de trabalho"],
+    produces: ["Silos e memberships publicados efetivados", "Proposta de artigos, keywords livres e Silos novos na cópia de trabalho"],
     cost: "free",
     decision: "human",
     access: "ui",
     screen: "arquiteto",
-    howOnScreen: "Arquiteto → Processar lógica. Revise principal, secundárias e reforços de cada artigo antes de seguir.",
+    howOnScreen: "Arquiteto → Silos → Processar arquitetura; depois Artigos → Processar artigos. Confira o Vínculo e o canonical dos publicados e revise a proposta das livres.",
     routes: [
       "/api/arquiteto/workspace",
       "/api/arquiteto/artifacts",
@@ -285,7 +306,7 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
       "/api/arquiteto/homologation-fresh",
       "/api/arquiteto/backup/restore",
     ],
-    notes: ["Máximo de 6 keywords por artigo (1 principal + 5). A principal é dona do slug, do KGR e do H1."],
+    notes: ["Publicado declarado não exige Confirmar arquitetura de novo: o primeiro processamento efetiva Silo e membership pela URL, com readback. Divergência de endereço continua conflito.", "Silos novos e keywords livres permanecem propostas; papel Pilar/Suporte e troca de principal publicada não são presumidos.", "Assunto declarado: no Arquiteto, uma ação inicia a formação automática com todos os pacotes aprovados já recebidos. O fluxo agrupa por evidência semântica, Silo confirmado e intenção, limita a seis keywords, escolhe Principal com Volume validado, valida na SERP e materializa ArticleDNA somente após readback e gates; não pede seleção de keyword nem confirmação por artigo. Para SERP sem cache, o usuário ainda autoriza o plano de custo uma vez por execução. O catálogo não cria nem importa sustentação ausente no Arquiteto.", "Máximo de 6 keywords por artigo (1 principal + 5). A principal é dona do slug, do KGR e do H1."],
   },
   {
     id: "arquiteto.validate_serp",
@@ -319,15 +340,15 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
   {
     id: "arquiteto.confirm_architecture",
     stage: "arquiteto",
-    title: "Confirmar arquitetura (ArticleDNA, SiloDNA e SiloPage)",
-    purpose: "Aprovar os artigos, o silo e a página do silo. SiloDNA e SiloPage têm aprovações próprias.",
+    title: "Confirmar propostas novas de arquitetura (ArticleDNA, SiloDNA e SiloPage)",
+    purpose: "Revisar e aprovar a arquitetura nova ou alterada; publicados declarados já foram reconhecidos no processamento.",
     requires: ["Proposta revisada"],
     produces: ["ArticleDNA, SiloDNA e SiloPage aprovados"],
     cost: "free",
     decision: "human",
     access: "ui",
     screen: "arquiteto",
-    howOnScreen: "Arquiteto → Confirmar arquitetura; depois aprovar o Silo e a página do Silo.",
+    howOnScreen: "Arquiteto → Silos → Confirmar propostas novas; a formação canônica do Silo e da SiloPage segue depois dos Artigos.",
     routes: [
       "/api/arquiteto/article-dna",
       "/api/arquiteto/silo-dna",
@@ -563,10 +584,12 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     produces: ["Documento aprovado, pronto para Publicações"],
     cost: "free",
     decision: "human",
-    access: "ui",
+    access: "tool",
+    chatConfirmationRequired: true,
+    tools: ["finalize_writer_document"],
     screen: "redator",
-    howOnScreen: "Redator → documento → Aprovar para Publicações.",
-    routes: ["/api/redator/publication-handoff"],
+    howOnScreen: "Redator → documento → Aprovar para Publicações; pelo MCP, prévia do Guardião → aceite explícito no chat → aplicar.",
+    routes: ["/api/editorial/documents", "/api/redator/publication-handoff"],
   },
 
   /* ----------------------------- Publicações ---------------------------- */
@@ -579,10 +602,13 @@ export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
     produces: ["PublicationRecord"],
     cost: "free",
     decision: "human",
-    access: "ui",
+    access: "tool",
+    chatConfirmationRequired: true,
+    tools: ["send_writer_to_publications"],
     screen: "publicacoes",
-    howOnScreen: "Publicações → documento → registrar publicação.",
-    routes: ["/api/publicacoes"],
+    howOnScreen: "Redator → documento aprovado → enviar a Publicações; pelo MCP, prévia → aceite explícito → criar PublicationRecord interno.",
+    routes: ["/api/redator/publication-handoff", "/api/publicacoes"],
+    notes: ["Cria o registro interno. Não publica URL, altera slug nem muda canonical."],
   },
 ] as const;
 
@@ -678,10 +704,12 @@ export const PLATFORM_PLAYBOOKS: readonly PlatformPlaybook[] = [
       "Se não existe silo que o comporte: siga o playbook 'silo_do_zero'.",
       "Declare o tema como Assunto (declare_subjects: preview → aceite do usuário → apply).",
       "Pesquise keywords de sustentação (search_subject_keywords: plan → custo ao usuário → execute).",
-      "Escolha com o usuário a principal candidata (KGR < 0,25 quando houver medição; intenção coerente com o tema) e até 5 de apoio; importe (import_subject_keywords).",
+      "No Minerador, escolha quais descobertas devem entrar no Processador e qualificar-se. Essa seleção controla os insumos aprovados; ela não define o agrupamento final dos artigos.",
       "Medição, Lógica, revisão e aprovação ficam na tela do Minerador: mande o link e espere o usuário aprovar.",
       "Com as keywords aprovadas: send_keywords_to_arquiteto.",
-      "No Arquiteto, o usuário processa a lógica, valida a SERP, confirma a arquitetura e envia ao Radar (link da tela).",
+      "No Arquiteto, Silos e artigos publicados declarados pelo Vínculo/canonical são reconhecidos sem novo aceite. Para Assunto já declarado, inicie uma vez 'Formar artigos automaticamente': o Arquiteto agrupa keywords aprovadas e recebidas por evidência semântica, Silo confirmado e intenção, escolhe Principal com Volume validado, forma slug/canonical e valida os artigos na SERP; não pede escolha keyword por keyword nem confirmação por artigo. Este início é uma ação na interface; o MCP orienta o caminho, mas ainda não dispara essa operação por ferramenta.",
+      "Se faltar evidência SERP no cache, apresente e obtenha o aceite do plano de custo antes das chamadas pagas. Readback e gates aprovam automaticamente apenas os candidatos aptos; reporte motivos dos demais. Propostas gerais de arquitetura fora desse fluxo continuam com revisão humana.",
+      "Depois dos artigos aptos no Arquiteto, envie ao Radar e siga o fluxo normal de investigação e finalização (send_radar_to_writer).",
       "No Radar, o usuário investiga e finaliza; você envia ao Redator (send_radar_to_writer).",
       "Escreva: playbook 'escrever_artigo'.",
     ],

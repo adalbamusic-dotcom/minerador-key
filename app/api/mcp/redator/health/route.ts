@@ -1,4 +1,6 @@
 import type { NextRequest } from "next/server";
+import { PLATFORM_GUIDE_TOPICS, catalogToolNames } from "@/lib/agent/platform-catalog";
+import { PLATFORM_CATALOG_HASH } from "@/lib/agent/catalog-hash";
 import { mcpRuntimeFailure, readMcpRuntimeConfig } from "@/lib/server/mcp-runtime-config";
 
 export const runtime = "nodejs";
@@ -18,9 +20,14 @@ export async function GET(request: NextRequest) {
   const blockers = config.oauthEnabled ? [] : ["oauth_disabled"];
   const payload = {
     ok: !failure,
-    service: "minerador-key-redator-mcp",
+    service: "minerador-key-mcp",
     transport: "streamable_http",
     endpoint: config.endpoint,
+    catalog: {
+      hash: PLATFORM_CATALOG_HASH,
+      guideTopicCount: PLATFORM_GUIDE_TOPICS.length,
+      toolCount: catalogToolNames().length,
+    },
     authMode: config.oauthEnabled ? "oauth_supabase" : "delegated_bearer",
     remoteBearerAllowed: config.remoteBearerAllowed,
     oauth: {

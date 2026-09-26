@@ -1,4 +1,18 @@
+## Formação automática de artigos a partir de Assuntos — 2026-09-26
+
+Escopo autorizado e implementação: [SDD de automatização](sdd-automatizacao-assuntos-2026-09-26.md). O fluxo agora é iniciado pelo usuário uma vez; a seleção das keywords, a formação, SERP e materialização prosseguem sem confirmação artigo por artigo. Verificado: `test:arquiteto` 2.402/2.402, `test:agent` 44/44, `tsc --noEmit` e build Next.js 16; ESLint dos auxiliares alterados passou. ESLint do workspace monolítico ainda registra 124 erros em várias áreas. Não houve escrita remota nem chamada paga nesta entrega.
+
+- [x] Reconhecer sobreposição direta entre frase do Assunto e keywords aprovadas e recebidas.
+- [x] Agrupar todas as sugestões elegíveis por Silo confirmado e intenção; separar em grupos de até seis e exigir keyword de Volume validado para iniciar cada artigo.
+- [x] Preservar candidatas existentes, Assuntos incompatíveis, keywords sem principal, conflitos, e identidades publicadas; não descartar membros não processáveis.
+- [x] Encadear pelo readback existente: cópia de trabalho → SERP (quando sem cache) → gates → ArticleDNA e fechamento canônico elegíveis.
+- [x] Atualizar guia/playbook do catálogo MCP e cobrir a segmentação, principal de volume, trilha `system` e fluxo automático com fixtures sem providers.
+- [ ] **Homologar (usuário) após deploy:** iniciar um Assunto com keywords recebidas em mais de um Silo/intenção, conferir que grupos, principais, slugs, canonicals e vínculos seguem as associações lidas; autorizar custo se a SERP não estiver em cache; confirmar readback de ArticleDNA e os motivos individuais dos candidatos bloqueados.
+- [ ] Quando houver keywords elegíveis sem Volume validado, conferir que seguem visíveis em `Keywords não agrupadas` e que não viram principal.
+
 ## Correção da revalidação dos publicados — 2026-09-25
+
+Atualização de 2026-09-26: o publicado declarado não espera `Confirmar arquitetura`; `Processar arquitetura` efetiva Silo e memberships publicadas com readback. A confirmação manual abaixo aplica-se às propostas novas, às livres e a conflitos. Ainda falta homologação na AdalbaPro após deploy, inclusive candidatos legados, 21 artigos, papéis Pilar/Suporte e erros reais de persistência. Ver [SDD](sdd-efetivacao-publicados-no-processamento-2026-09-26.md) e [estado atual](estado-atual.md).
 
 Estado em [estado-atual.md](estado-atual.md). Validado manualmente: NÃO.
 
@@ -20,7 +34,7 @@ Estado em [estado-atual.md](estado-atual.md). Validado manualmente: NÃO.
 
 Estado em [estado-atual.md](estado-atual.md). Homologação manual pendente, do usuário.
 
-- [ ] **Homologar com o lote do dono** (4 Silos publicados, 21 artigos publicados, ~130 livres): Processar arquitetura, conferir que cada artigo publicado aparece no Silo da URL dele ("Membro declarado pelo site"), que o de fora aparece em "Sem silo" com o motivo e que nenhum Silo novo nasce de publicada; Confirmar e reler; na aba Artigos, conferir que a publicada é a principal do próprio artigo e que as livres que a repetem entraram nele.
+- [ ] **Homologar com o lote do dono** (4 Silos publicados, 21 artigos publicados, ~130 livres): Processar arquitetura, conferir por readback que cada artigo publicado aparece no Silo da URL dele ("Membro declarado pelo site"), que o de fora aparece em "Sem silo" com o motivo e que nenhum Silo novo nasce de publicada; sem clicar Confirmar para patrimônio publicado, entrar na aba Artigos e conferir que a publicada é a principal do próprio artigo. Keywords livres e novos Silos seguem confirmação própria; conferir que as livres semanticamente equivalentes entram no artigo publicado após essa revisão.
 - [x] **Território do Silo publicado com a proteção do site.** Feito na correção de 2026-09-25: slug = caminho da URL declarada e `publishedSiloCandidateDraft` (`protected`, `publishedSlug`/`publishedCanonical`). A rota de criação aceita (mesmo schema da promoção de estrutura publicada).
 - [x] **Silo publicado que só existe no acervo.** Feito em 2026-09-25: `territorySilos` em `resolvePublishedSiloMembership` (território `protected` com `publishedCanonical`). Território publicado antigo sem `publishedCanonical` continua sem atrair pela URL.
 - [~] **Publicada posta por afinidade antes desta mudança.** Sem Silo na URL, a membership vigente agora é preservada ("já estava", sem falha). Com Silo na URL, o Confirmar a move para o Silo que o site declara. Falta a jornada humana explícita de "mover para o Silo da URL" fora do Confirmar.
@@ -2167,3 +2181,26 @@ Todas confirmadas pela lente de gatilho; a correção proposta de cada uma foi
    `analise_semantica` completa (~430 kB). Poderia ler
    `minerador_keywords_listagem` — a assinatura v3 foi verificada idêntica em
    linha podada e completa —, mas o revisor classificou como estrutural.
+## Incidente da formação de publicados — 2026-09-26
+
+- [x] Reservar cabeças declaradas como Silo no Vínculo antes de projetar a aba Artigos; verificado localmente: 21 artigos publicados, não 25.
+- [x] Considerar memberships da mesma confirmação para `EMPTY_TERRITORY`, com conferência do lote gravado antes de confirmar cada Silo; teste focado sem chamada paga.
+- [ ] Homologação do usuário depois do deploy: processar a arquitetura e conferir por readback que os quatro Silos e 21 artigos declarados como publicados foram efetivados sem segunda confirmação; confirmar manualmente somente Silos novos/potenciais que ainda aguardem decisão. Recarregar e conferir os sete estados/154 memberships; na aba Artigos, verificar as livres agrupadas sob os publicados e as quatro SiloPages fora da lista de Articles.
+- [ ] Validar os conflitos semânticos e de SERP do lote real, especialmente artigos publicados com principal revisável e keywords livres de maior volume; nenhum ajuste de principal/slug/canonical deve ocorrer sem decisão humana específica.
+
+### Ação de identidade publicada — 2026-09-26
+
+- [x] Remover a segunda verificação manual da coluna Ações dos artigos publicados; deixar explícito que a publicação, URL, slug, canonical e vínculo do Silo já estão preservados.
+- [x] Corrigir a incompatibilidade entre a resposta de `/api/arquiteto/publication/verify` e o schema estrito do Arquiteto (`entityType`, `siloPageId`, `siloPageVersionId`).
+- [ ] Conferir após deploy que a linha publicada não pede verificação e que o fluxo de palavras livres/principal continua disponível; smoke visual no navegador real.
+
+### Seleção de artigos publicados na fase Artigos — 2026-09-26
+
+- [x] Explicar que artigos publicados são âncoras preservadas e não candidatos à criação de novos Articles; indicar a seleção das linhas de candidatos para processar keywords livres.
+- [ ] Após deploy, validar que as linhas de candidatos cobrem as keywords livres associadas aos artigos publicados e que a identidade publicada permanece preservada.
+
+### Validação local atual — 2026-09-26
+
+- [x] `test:arquiteto` 2.396/2.396, incluindo a separação entre Silos e Artigos e a rolagem do Workbench.
+- [ ] Homologar após deploy com os sete Silos/21 artigos da marca e conferir associações por readback.
+- [ ] A investigação SERP e a formação/finalização MCP continuam fora das ferramentas executáveis; ver `docs/compartilhado/agentes-mcp-backlog.md`.

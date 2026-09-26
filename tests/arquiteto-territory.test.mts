@@ -30,6 +30,7 @@ import {
   resolveArticleFormationReadiness,
   resolveMembershipOperationStatus,
   resolveTerritoryConfirmationReadiness,
+  readinessWithPlannedMembers,
   structuralChangeRefusal,
   territoryIdentityIssues,
   unassignedKeywordIds,
@@ -304,6 +305,20 @@ test("F · MANUAL_STRATEGIC sem keyword existe como candidato e bloqueia só na 
   assert.equal(readiness.state, "blocked");
   assert.ok(readiness.blockers.map(blocker => blocker.code).includes("EMPTY_TERRITORY"));
   assert.ok(TERRITORY_CONFIRMATION_BLOCKERS.includes("EMPTY_TERRITORY"));
+});
+
+test("F2 · confirmar no mesmo clique pode contar memberships planejadas, sem dispensar outros bloqueios", () => {
+  const descrito = territory({
+    narrative: { statement: "Universo editorial.", continuity: "coherent", brandAlignment: "aligned", rationale: ["Estratégia da Marca."] },
+  });
+  const readiness = resolveTerritoryConfirmationReadiness({ territory: descrito, report: report([descrito], []) });
+  assert.deepEqual(readiness.blockers.map(item => item.code), ["EMPTY_TERRITORY"]);
+  assert.equal(readinessWithPlannedMembers(readiness, 0).state, "blocked");
+  assert.equal(readinessWithPlannedMembers(readiness, 1).state, "ready");
+
+  const semNarrativa = territory();
+  const aindaBloqueado = resolveTerritoryConfirmationReadiness({ territory: semNarrativa, report: report([semNarrativa], []) });
+  assert.deepEqual(readinessWithPlannedMembers(aindaBloqueado, 1).blockers.map(item => item.code), ["TERRITORY_NARRATIVE_UNRESOLVED"]);
 });
 
 /* -------------------------------- membership ----------------------------- */

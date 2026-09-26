@@ -63,8 +63,12 @@ test("A/B · processar e concluir leem o MESMO escopo", () => {
    *
    * O portão continua sendo UM. O que mudou foi de onde ele é lido.
    */
-  const usos = workspace.split("} = formationScopeRef.current;").length - 1;
-  assert.equal(usos, 2, "reprocessar e concluir precisam do mesmo portão");
+  const processar = workspace.slice(workspace.indexOf("const processArticleFormation"), workspace.indexOf("const materializeApprovedArticleDnas"));
+  const concluir = workspace.slice(workspace.indexOf("const confirmArticleFormation"), workspace.indexOf("Encadeia o Assunto depois do readback"));
+  for (const corpo of [processar, concluir]) {
+    assert.match(corpo, /formationScopeRef\.current\.scope/);
+    assert.match(corpo, /formationScopeRef\.current\.universes/);
+  }
   assert.match(workspace, /resolveFormationSelectionScope\(\{ selectedArticleIds, articles: articlesList \}\)/);
   assert.match(workspace, /const selectedCandidateRefs = formationSelectionScope\.candidateRefs;/);
   // A leitura antiga, que divergia do rodapé, não pode voltar.
@@ -108,7 +112,7 @@ test("I · não existe segundo approval nem etapa intermediária", () => {
   assert.ok(!workspace.includes(`<option value="approve"`));
   assert.ok(!workspace.includes("const handleConfirmArticleArchitecture"));
   assert.ok(!workspace.includes("const consolidateArticleArchitecture"));
-  assert.match(workspace, /await materializeApprovedArticleDnas\(plano\.approved\)/);
+  assert.match(workspace, /await materializeApprovedArticleDnas\(\s*plano\.approved,\s*"CANONICAL_REQUIRED",\s*automatic \? "system" : "human"/);
 });
 
 /* ============== F · Silo não vira conflito da aba Artigos ============== */

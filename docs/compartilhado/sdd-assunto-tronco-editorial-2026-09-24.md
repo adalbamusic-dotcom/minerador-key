@@ -35,7 +35,7 @@ Precedência: abaixo de invariantes e ADRs, acima de spec e código (`AGENTS.md`
 | Minerador · Revisão Humana | O Vínculo ganha uma terceira declaração, **Assunto · declarado**, com uma nota curta (o que é, para quem) e a página de destino, se houver. Vale para qualquer keyword, inclusive as que vieram do Descobrir e as já publicadas. |
 | Minerador · aprovar | Declarado o Assunto, a aprovação dispensa Volume, Resultados e KGR (a SERP já não é exigida para aprovar hoje). Só a **Lógica** continua exigida. Ela é local e não custa nada, e dá ao Arquiteto uma hipótese de intenção e funil. |
 | Minerador · barra do rodapé | Entram as escolhas que hoje faltam: **Assunto, tipo de página e posto de principal**. KGR, concluir revisão e Status já estão lá. Esta SDD **propõe deixar fora** cinco escolhas, e cada uma é decisão sua (Q5): **reabrir a revisão** e **cancelar** (desfazem decisões de cada keyword, uma a uma), **conferir por link** e **confirmar publicada / desvincular** (cada keyword tem a própria URL, e a spec proíbe declarar publicação em massa) e **nota e página de destino do Assunto** (cada Assunto tem as suas). |
-| Arquiteto | Cada artigo pode ter **um** Assunto como tronco. Vale para qualquer página que o Arquiteto forma: artigo, landing page, página de serviço. O mesmo Assunto pode sustentar vários artigos, landings ou um Silo inteiro. O Arquiteto sugere keywords de sustentação sem gastar nada, e você escolhe. A SERP das keywords escolhidas valida o artigo, como hoje. |
+| Arquiteto | Cada artigo pode ter **um** Assunto como tronco. Vale para qualquer página que o Arquiteto forma: artigo, landing page, página de serviço. O mesmo Assunto pode sustentar vários artigos, landings ou um Silo inteiro. A implementação inicial pedia escolha manual. Desde 2026-09-26, um início de lote agrupa automaticamente as keywords aprovadas já recebidas, valida na SERP e conclui as que passam nos gates; ver o [SDD de automatização](../04-arquiteto/sdd-automatizacao-assuntos-2026-09-26.md). |
 | Radar | Investiga em torno do Assunto: a estrutura do artigo passa a **exigir** uma parte que sustente o Assunto e faça a virada, mesmo que nenhuma página concorrente fale dele; a pauta do especialista pede para aprofundá-lo; vídeos, quando houver. Se as buscas não sustentarem o Assunto, o Radar **avisa** e devolve ao Arquiteto. Ele nunca troca o Assunto. Nesta primeira versão, o Radar procura o Assunto nas páginas pelas palavras, não pelo sentido (F3.1). |
 | CSV "Para escrever" e Redator | Chegam com o tronco, a nota, a página de destino, a direção do H1 e a seção sugerida para a virada. A estrutura final é decisão do Redator. |
 
@@ -751,6 +751,15 @@ A afinidade lexical não junta tronco e sustentação (`lib/arquiteto/article-fo
 4. **SERP da frase (opcional, sob pedido explícito), pela rota Resultados do Minerador.** O Assunto é uma linha de `minerador_keywords`, então a SERP dele sai pela mesma rota das outras keywords (`app/api/minerador/marcas/[brandId]/dataforseo/allintitle/route.ts`): mede Resultados e garante as 4 lentes no cache. Assim a SERP conclusiva chega a `analise_semantica.evidencia_serp` e passa a valer na leitura canônica, na ordem **SERP conclusiva → humano → Lógica** (`docs/03-minerador/spec.md` §63). A hipótese da Lógica deixa de ser a última palavra sobre intenção e funil do Assunto. **Não** se usa um pseudo-id no Arquiteto (como o `territory:<ref>` de `lib/arquiteto/territorial-serp.ts:156-175`): por ele, a SERP ficaria fora de `evidencia_serp`, e o Arquiteto continuaria com a Lógica. Efeito lateral, pela regra atual: SERP conclusiva que muda intenção ou funil de um Assunto aprovado o põe em Em revisão (§63); a reaprovação só exige a Lógica (D2). A SERP da frase não entra na trava de SERP do artigo.
 5. **IA só como proposta explícita.** Um botão "Pedir proposta" usa a revisão de IA que já existe no Arquiteto e grava proposta, nunca `subject`. Aceitar é ato humano (`AGENTS.md` §9).
 6. **Silo em torno do Assunto:** o humano liga o Assunto ao SiloDNA. Os artigos novos daquele Silo recebem a **sugestão** do mesmo Assunto, e cada artigo confirma.
+
+**Atualização autorizada em 2026-09-26:** os passos 2 e 6 descrevem o primeiro
+desenho, que exigia escolher sustentações e confirmar cada artigo. Esse trecho
+foi substituído para o fluxo de Assuntos já declarados pelo [SDD de formação
+automática do Arquiteto](../04-arquiteto/sdd-automatizacao-assuntos-2026-09-26.md):
+um início de lote usa os pacotes aprovados já recebidos, agrupa por Silo e
+intenção, valida a SERP, e efetiva os candidatos que passam nos gates sem
+confirmação artigo por artigo. A declaração do Assunto permanece humana; plano
+de custo e consentimento continuam necessários para chamadas pagas.
 
 #### F2.5 Consumidores afetados e custo (F2)
 

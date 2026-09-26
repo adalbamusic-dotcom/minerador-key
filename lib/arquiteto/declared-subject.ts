@@ -629,6 +629,7 @@ export function resolveAttachedSubjectStanding(input: {
 export const SUBJECT_SUGGESTION_SIGNALS = [
   "subject_discovery",
   "subject_discovery_phrase",
+  "subject_phrase_terms",
   "central_entity",
   "same_list",
   "intent_funnel",
@@ -639,6 +640,7 @@ export type SubjectSuggestionSignal = (typeof SUBJECT_SUGGESTION_SIGNALS)[number
 export const SUBJECT_SUGGESTION_SIGNAL_LABELS: Record<SubjectSuggestionSignal, string> = {
   subject_discovery: "veio da Pesquisa por Assunto",
   subject_discovery_phrase: "pesquisa com a mesma frase",
+  subject_phrase_terms: "termos da frase do Assunto",
   central_entity: "mesma entidade central da Lógica",
   same_list: "mesma lista",
   intent_funnel: "intenção e funil compatíveis com a hipótese do Assunto",
@@ -655,6 +657,10 @@ export type SubjectSupportSuggestion = {
   discoveryEvidence: string[];
   /** Termos da nota que a keyword repete. */
   sharedNoteTerms: string[];
+  /** Termos normalizados da frase do Assunto que a keyword repete. */
+  sharedSubjectTerms: string[];
+  /** Elegibilidade determinística para o lote automático, sem seleção manual. */
+  automaticEligible: boolean;
   /** Já é membro de algum artigo: aparece só como informação. */
   alreadyInArticle: boolean;
 };
@@ -705,7 +711,9 @@ const sameText = (left: string | null, right: string | null) =>
  *
  * Só olha as keywords JÁ recebidas pelo Arquiteto, com pacote aprovado: é a
  * linha que a mesa já tem inteira. Nenhuma leitura nova, nenhum provider,
- * nenhuma rede. A ordem é:
+ * nenhuma rede. Correspondência textual direta com o Assunto é um sinal de
+ * sustentação próprio — sem isso, "como atrair pacientes para clínica" não
+ * reconhecia "como atrair pacientes para clínica estética". A ordem é:
  *
  *   1. o pacote traz o Assunto em `subject_discovery.subjectKeywordIds`
  *      ("veio da Pesquisa por Assunto");
@@ -714,7 +722,8 @@ const sameText = (left: string | null, right: string | null) =>
  *   3. mesma entidade central da Lógica;
  *   4. mesma lista;
  *   5. intenção e funil compatíveis com a hipótese da Lógica do Assunto;
- *   6. termos em comum com a NOTA do Assunto (mais termos, antes).
+ *   6. termos em comum com a FRASE do Assunto;
+ *   7. termos em comum com a NOTA do Assunto (mais termos, antes).
  *
  * Fica de fora: o próprio Assunto, keyword de outra marca, keyword não
  * recebida, outro Assunto sem Volume validado (não sustenta busca) e keyword
@@ -738,6 +747,7 @@ export function suggestSubjectSupport(input: {
 
   const subjectId = subjectStanding.keywordId;
   const subjectPhrase = normalizeKeyword(subjectStanding.phrase);
+  const subjectPhraseTerms = noteTerms(subjectStanding.phrase);
   const subjectEntity = text(subjectDna.logical.centralEntity);
   const subjectList = text(subjectPkg.listaId);
   const note = subjectStanding.note ? noteTerms(subjectStanding.note) : new Set<string>();
@@ -776,12 +786,16 @@ export function suggestSubjectSupport(input: {
     const intent = intentFunnelCompatible(subjectDna, dna);
     if (intent) signals.push("intent_funnel");
     const terms = noteTerms(pkg.keyword);
+    const sharedSubjectTerms = [...terms].filter(term => subjectPhraseTerms.has(term)).sort();
     const sharedNoteTerms = [...terms].filter(term => note.has(term)).sort();
+    if (sharedSubjectTerms.length) signals.push("subject_phrase_terms");
     if (sharedNoteTerms.length) signals.push("note_terms");
     if (!signals.length) continue;
 
     const labels = signals.map(signal => signal === "note_terms"
       ? `${SUBJECT_SUGGESTION_SIGNAL_LABELS.note_terms} (${sharedNoteTerms.join(", ")})`
+      : signal === "subject_phrase_terms"
+        ? `${SUBJECT_SUGGESTION_SIGNAL_LABELS.subject_phrase_terms} (${sharedSubjectTerms.join(", ")})`
       : SUBJECT_SUGGESTION_SIGNAL_LABELS[signal]);
     const reason = labels.length === 1
       ? `${labels[0][0].toUpperCase()}${labels[0].slice(1)}.`
@@ -794,8 +808,15 @@ export function suggestSubjectSupport(input: {
       reason,
       discoveryEvidence,
       sharedNoteTerms,
+      sharedSubjectTerms,
+      // Um sinal fraco isolado (lista ou entidade sem intenção) nunca inicia
+      // uma decisão persistida. O lote só inclui origem direta, frase
+      // lexicalmente próxima, duas evidências semânticas convergentes ou uma
+      // nota explícita com sobreposição suficiente.
+      automaticEligible: byId || byPhrase || sharedSubjectTerms.length >= 2
+        || (entity && intent) || sharedNoteTerms.length >= 2,
       alreadyInArticle: Boolean(input.memberKeywordIds?.has(keywordId)),
-      rank: [byId ? 1 : 0, byPhrase ? 1 : 0, entity ? 1 : 0, list ? 1 : 0, intent ? 1 : 0, sharedNoteTerms.length],
+      rank: [byId ? 1 : 0, byPhrase ? 1 : 0, sharedSubjectTerms.length, entity ? 1 : 0, list ? 1 : 0, intent ? 1 : 0, sharedNoteTerms.length],
       sort: normalizeKeyword(pkg.keyword),
     });
   }

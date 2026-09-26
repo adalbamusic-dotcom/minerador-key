@@ -4,6 +4,7 @@ import { describe, it, test } from "node:test";
 
 const workbench = readFileSync("modules/arquiteto/arquiteto-workbench.tsx", "utf8");
 const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
+const globalStyles = readFileSync("app/globals.css", "utf8");
 
 describe("Workbench de processos do Arquiteto", () => {
   it("mantém as áreas como tabs na GlobalTopbar e dá a cada fase o seu painel", () => {
@@ -130,7 +131,10 @@ describe("Workbench de processos do Arquiteto", () => {
     assert.match(workspace, /onExpandedChange=\{setMapExpanded\}/);
     assert.match(workspace, /overflow-hidden p-0/);
     // Recolhido ocupa um terço do topo (a planilha é a prioridade); a seta abre para 72vh.
-    assert.match(workspace, /mapExpanded \? "lg:max-h-\[72vh\]" : "lg:max-h-\[33vh\]"/);
+    assert.match(workspace, /mapExpanded \? "lg:h-\[72vh\]" : "lg:h-\[33vh\]"/);
+    assert.doesNotMatch(workspace, /architect-scrollbar|scrollbar-gutter/);
+    assert.match(globalStyles, /\*::-webkit-scrollbar\s*\{[\s\S]*?width:\s*8px/);
+    assert.match(workspace, /className="min-h-0 min-w-0 overflow-y-auto[^\"]*" data-testid="architect-workbench-left" aria-label="Painel do Workbench do Arquiteto"/);
     assert.match(workbench, /expanded \? "h-\[clamp\(24rem,72vh,56rem\)\]" : "h-\[clamp\(12rem,33vh,24rem\)\]"/);
     assert.doesNotMatch(workbench, /h-\[clamp\(11rem,18vh,15rem\)\]/);
     // O mapa começa recolhido e só a seta abre: trocar de processo não expande.

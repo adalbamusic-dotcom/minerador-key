@@ -505,13 +505,16 @@ async function readRestorableDeleted(client: SupabaseClient, brandId: string, no
   return { deleted, available: true };
 }
 
-function subjectImportBlock(input: { importRequestId: string | null; source: "manual" | "csv"; actorUserId: string; now: string }) {
+export type SubjectImportChannel = { kind: "mcp"; grantId: string | null; requestId: string };
+
+function subjectImportBlock(input: { importRequestId: string | null; source: "manual" | "csv"; actorUserId: string; now: string; channel?: SubjectImportChannel }) {
   return {
     source: "subject_import",
     origin: input.source,
     importRequestId: input.importRequestId,
     importedAt: input.now,
     actorId: input.actorUserId,
+    ...(input.channel ? { channel: input.channel } : {}),
   };
 }
 
@@ -565,6 +568,8 @@ export async function importSubjectsWithCore(input: {
   defaultListaId?: string | null;
   /** `marcas.site_url`, lido no servidor para a marca da rota. */
   brandSiteUrl?: string | null;
+  /** Proveniência aditiva para declarações feitas por cliente MCP autorizado. */
+  channel?: SubjectImportChannel;
   now?: string;
 }): Promise<SubjectImportResult> {
   const brandId = typeof input.brandId === "string" ? input.brandId.trim() : "";
@@ -603,6 +608,7 @@ async function runSubjectImport(input: {
   lists?: LegacyImportList[];
   defaultListaId?: string | null;
   brandSiteUrl?: string | null;
+  channel?: SubjectImportChannel;
   now?: string;
 }): Promise<SubjectImportResult> {
   const { brandId, actorUserId, supabase } = input;
@@ -735,7 +741,7 @@ async function runSubjectImport(input: {
 
   // Apply: só escreve o que a prévia mostraria, relido agora do banco.
   const marked = new Set((input.declareExistingIds || []).map(id => String(id)));
-  const block = subjectImportBlock({ importRequestId: input.importRequestId, source: input.source, actorUserId, now });
+  const block = subjectImportBlock({ importRequestId: input.importRequestId, source: input.source, actorUserId, now, channel: input.channel });
   const createdIds: string[] = [];
   const declaredIds: string[] = [];
   let failed = 0;

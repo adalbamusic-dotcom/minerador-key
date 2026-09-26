@@ -77,7 +77,7 @@ export function buildProtectedResourceMetadata(config: McpRuntimeConfig = readMc
     authorization_servers: [config.oauthIssuer],
     scopes_supported: [...WRITER_MCP_OIDC_SCOPES],
     bearer_methods_supported: ["header"],
-    resource_name: "Minerador Key — Redator",
+    resource_name: "Minerador Key",
   } as const;
 }
 

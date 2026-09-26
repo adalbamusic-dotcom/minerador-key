@@ -107,7 +107,7 @@ export type FormationSelectionScope = {
 
 export function resolveFormationSelectionScope(input: {
   selectedArticleIds: ReadonlySet<string>;
-  articles: readonly { id: string; candidateRef?: string | null; keywordPrincipal?: string | null }[];
+  articles: readonly { id: string; candidateRef?: string | null; keywordPrincipal?: string | null; isPublished?: boolean }[];
 }): FormationSelectionScope {
   const selecionados = input.articles.filter(article => input.selectedArticleIds.has(article.id));
   const candidateRefs = new Set(selecionados
@@ -146,6 +146,16 @@ export function resolveFormationSelectionScope(input: {
      * recusa que ninguém consegue resolver: não há ato que a satisfaça.
      */
     const nomes = excluded.map(item => item.label).join(" · ");
+    const selecionadosSaoPublicados = selecionados.length === selectedCount
+      && selecionados.length > 0
+      && selecionados.every(article => article.isPublished === true && !article.candidateRef);
+    if (selecionadosSaoPublicados) {
+      return {
+        selectedCount, candidateRefs, excluded, missing, ok: false,
+        reason: `${selectedCount} artigo(s) publicado(s) selecionado(s) já são patrimônio e servem de âncora; não precisam de nova confirmação. `
+          + "Para processar keywords livres, selecione as linhas de candidatos do cenário. Quando houver correspondência, elas podem ser agrupadas sob o artigo publicado, preservando URL, slug, canonical e Silo.",
+      };
+    }
     return {
       selectedCount, candidateRefs, excluded, missing, ok: false,
       reason: `${selectedCount} artigo(s) selecionado(s), mas nenhum participa da formação do cenário corrente${nomes ? `: ${nomes}` : ""}. `

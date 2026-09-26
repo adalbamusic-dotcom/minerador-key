@@ -15,6 +15,7 @@ import {
   renderPlatformGuide,
 } from "../lib/agent/platform-catalog.ts";
 import { WRITER_MCP_DEFAULT_SCOPES, WRITER_MCP_SCOPES } from "../lib/redator/mcp-consent-domain.ts";
+import { PLATFORM_CATALOG_HASH } from "../lib/agent/catalog-hash.ts";
 
 /**
  * O QUE AS IAS SABEM PRECISA ACOMPANHAR A PLATAFORMA.
@@ -101,9 +102,15 @@ test("03 · as ferramentas do servidor são exatamente as do catálogo", async (
   assert.deepEqual(tools, catalogToolNames(), "servidor e catálogo divergem: registre a ferramenta no catálogo (ou remova do catálogo)");
 });
 
-test("04 · decisão humana nunca vira ferramenta; ferramenta é sempre operação da IA", () => {
+test("04 · decisão humana só vira ferramenta quando exige aceite explícito no chat", () => {
   for (const operation of PLATFORM_OPERATIONS) {
-    if (operation.decision === "human") assert.equal(operation.access, "ui", `${operation.id}: aprovação é humana e fica na tela`);
+    if (operation.decision === "human" && operation.access === "tool") {
+      assert.equal(operation.chatConfirmationRequired, true, `${operation.id}: ferramenta de decisão sem prévia e aceite obrigatório`);
+    }
+    if (operation.chatConfirmationRequired) {
+      assert.equal(operation.decision, "human", `${operation.id}: aceite de chat só pertence a uma decisão humana`);
+      assert.equal(operation.access, "tool", `${operation.id}: confirmação de chat sem ferramenta`);
+    }
     if (operation.access === "tool") assert.ok(operation.tools?.length, `${operation.id}: acesso por ferramenta sem ferramenta`);
     if (operation.access === "ui") assert.equal(operation.tools?.length ?? 0, 0, `${operation.id}: operação de tela não anuncia ferramenta`);
   }
@@ -140,17 +147,30 @@ test("07 · a instrução do servidor começa pela plataforma, vinda do catálog
 
 /* =========================== 4 · escopos =========================== */
 
-test("08 · a migration m8 aceita exatamente os escopos do código, nas duas tabelas", () => {
+test("08 · a migration m8 aceita os escopos anteriores e m9 acrescenta platform.decide", () => {
   const sql = read("supabase/migrations/20260926120000_m8_platform_mcp_scopes.sql");
   const arrays = [...sql.matchAll(/scopes <@ ARRAY\[([^\]]+)\]/g)].map(match => [...match[1].matchAll(/'([^']+)'/g)].map(item => item[1]).sort());
   assert.equal(arrays.length, 2, "grants e delegações");
-  for (const lista of arrays) assert.deepEqual(lista, [...WRITER_MCP_SCOPES].sort());
+  const m8Scopes = WRITER_MCP_SCOPES.filter(scope => scope !== "platform.decide").sort();
+  for (const lista of arrays) assert.deepEqual(lista, m8Scopes);
+  const m9 = read("supabase/migrations/20260926140000_m9_platform_decide_scope.sql");
+  const m9Arrays = [...m9.matchAll(/scopes <@ ARRAY\[([^\]]+)\]/g)].map(match => [...match[1].matchAll(/'([^']+)'/g)].map(item => item[1]).sort());
+  assert.equal(m9Arrays.length, 2, "grants e delegações");
+  for (const lista of m9Arrays) assert.deepEqual(lista, [...WRITER_MCP_SCOPES].sort());
+  assert.ok(!WRITER_MCP_DEFAULT_SCOPES.includes("platform.decide"), "delegação de decisões deve ser opt-in");
 });
 
 test("09 · gastar com provider nunca vem marcado por padrão", () => {
   assert.ok(!WRITER_MCP_DEFAULT_SCOPES.includes("provider.spend"));
   assert.match(read("modules/conta/oauth-consent-form.tsx"), /defaultScopes : WRITER_MCP_DEFAULT_SCOPES/);
   assert.match(read("modules/conta/agency-mcp-panel.tsx"), /useState<AgencyMcpScope\[\]>\(\[\.\.\.WRITER_MCP_DEFAULT_SCOPES\]\)/);
+});
+
+test("09b · as duas rotas aceitam a quantidade inteira de escopos anunciados", () => {
+  assert.ok(WRITER_MCP_SCOPES.length > 3);
+  for (const route of ["app/api/oauth/consent/route.ts", "app/api/oauth/grants/route.ts"]) {
+    assert.match(read(route), /scopes: z\.array\(z\.string\(\)\.max\(40\)\).*\.max\(WRITER_MCP_SCOPES\.length\)/, route);
+  }
 });
 
 test("10 · a lista de escopos da Agência não é mais uma cópia à mão", () => {
@@ -168,6 +188,10 @@ test("12 · o guia funciona sem Marca autorizada: é conteúdo da plataforma, n�
   const body = toolText(await send(3, "tools/call", { name: "get_platform_guide", arguments: { topic: "playbooks" } }));
   assert.equal(body.ok, true);
   assert.match(String(body.guide), /silo/i);
+  assert.match(String(body.guide), /Formar artigos automaticamente/);
+  assert.match(String(body.guide), /ainda não dispara essa operação por ferramenta/);
+  assert.equal(body.catalogHash, PLATFORM_CATALOG_HASH);
+  assert.match(PLATFORM_CATALOG_HASH, /^[0-9a-f]{64}$/);
 });
 
 test("13 · ler a marca exige platform.read — conexão só do Redator recebe o link para reconsentir", async () => {
@@ -178,6 +202,21 @@ test("13 · ler a marca exige platform.read — conexão só do Redator recebe o
   assert.equal(body.code, "scope_denied");
   assert.equal(body.scope, "platform.read");
   assert.ok(String(body.consentUrl).includes("conexoes-ia"));
+});
+
+test("13b · ferramentas de decisão recusam apply sem hash e aceite antes de consultar estado", async () => {
+  const send = harness(createWriterServer(principal([brand(["writer.read"])])));
+  const cases = [
+    ["decide_keywords", { brandId: brand([]).brandId, mode: "apply", action: "approve", keywordIds: ["00000000-0000-4000-8000-000000000001"] }],
+    ["set_kgr_applicability", { brandId: brand([]).brandId, mode: "apply", applicability: "applicable", keywordIds: ["00000000-0000-4000-8000-000000000001"] }],
+    ["set_keyword_vinculo", { brandId: brand([]).brandId, mode: "apply", action: { kind: "page_type", pageType: "article", stance: "potential" }, keywordIds: ["00000000-0000-4000-8000-000000000001"] }],
+    ["finalize_writer_document", { brandId: brand([]).brandId, documentId: "doc-1", mode: "apply" }],
+    ["send_writer_to_publications", { brandId: brand([]).brandId, documentId: "doc-1", mode: "apply" }],
+  ] as const;
+  for (const [name, args] of cases) {
+    const answer = await send(40, "tools/call", { name, arguments: args });
+    assert.equal(toolText(answer).code, "human_confirmation_required", name);
+  }
 });
 
 test("14 · com mais de uma Marca, a leitura exige brandId", async () => {

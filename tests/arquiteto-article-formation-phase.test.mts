@@ -213,7 +213,7 @@ test("confirmar formação materializa ArticleDNA pelo plano, não às cegas", (
   const corpo = trecho.slice(0, trecho.indexOf("\n  }, ["));
   // O plano é quem decide quem entra; confirmar não varre a lista inteira.
   assert.match(corpo, /buildArticleFormationConfirmationPlan/);
-  assert.match(corpo, /materializeApprovedArticleDnas\(plano\.approved\)/);
+  assert.match(corpo, /materializeApprovedArticleDnas\(\s*plano\.approved,\s*"CANONICAL_REQUIRED",\s*automatic \? "system" : "human"/);
   assert.match(corpo, /persistArticleFormationMarker/);
 });
 

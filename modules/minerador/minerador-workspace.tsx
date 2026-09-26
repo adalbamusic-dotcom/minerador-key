@@ -88,6 +88,7 @@ import { applyFunnelQualification, classifyKeywordFunnel } from "@/lib/minerador
 import { classifyVolumeReadback, readVolumeEligibility, volumeEligibilityLabel, type VolumeReadbackOutcome } from "@/lib/minerador/volume-eligibility";
 import { formatGoogleAdsCpcTableValue } from "@/lib/minerador/google-ads-demand";
 import { buildLogicalOutputContract, buildLogicalProcessorMetadata, hasCompleteLogicalOutputContract, hasCurrentLogicalProcessorMetadata, logicalSemanticRecordsEqual, validateLogicalKeywordOutput } from "@/lib/minerador/logical-processor";
+import { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";
 import { MINERADOR_KEYWORDS_TABLE, MINERADOR_LISTING_VIEW, withMeasurementSeries } from "@/lib/minerador/listing-payload";
 import { readCanonicalKeywordDna, readLogicalIntentLabel, readLogicalNiche } from "@/lib/minerador/logical-read-model";
 import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";
@@ -1086,85 +1087,12 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
     }
 
     for (const [index, item] of sourceKeywords.entries()) {
-      const list = item.lista_id ? listById.get(item.lista_id) : null;
-      const intentOrigin = String(item.analise_semantica?.intencao_origem || item.analise_semantica?.intent_source || "").toLowerCase();
-      const semanticDnaOrigin = String(item.analise_semantica?.dna_origem || "").toLowerCase();
-      const humanIntentProtected = ["human", "humano", "manual", "humana"].includes(intentOrigin)
-        || ["human", "humano", "manual", "humana"].includes(semanticDnaOrigin)
-        || ["aprovado", "confirmado", "confirmed"].includes(String(item.analise_semantica?.dna_revisao_humana || "").toLowerCase());
-      const nicheProtected = humanNicheProtected(item.analise_semantica);
-      const niche = (nicheProtected ? logicalNiche(item.analise_semantica?.nicho_override) : null)
-        || logicalNiche(list?.nicho)
-        || logicalNiche(autoDetectNiche(item.keyword));
-      const existingIntent = item.intent || (typeof item.analise_semantica?.intencao_principal === "string" ? item.analise_semantica.intencao_principal : null);
-      // Existing values are context only. The current engine runs again for
-      // every explicit selection; only an explicit human decision is protected.
-      const intentForDerivation = humanIntentProtected ? existingIntent : null;
-      const logical = deriveLogicalKeywordDna({
-        keywordId: item.id,
-        keyword: item.keyword,
-        intent: intentForDerivation,
-        niche,
-        location: item.location,
-        existingSemantic: item.analise_semantica,
-      });
-      const logicalSemantic = mergeLogicalKeywordSemantic(item.analise_semantica, logical.semantic, { forceLogical: true });
-      if (niche) {
-        logicalSemantic.nicho_override = niche;
-        logicalSemantic.nicho = niche;
-        if (!nicheProtected) logicalSemantic.nicho_origem = "logico_deterministico";
-      } else if (!nicheProtected) {
-        delete logicalSemantic.nicho_override;
-        delete logicalSemantic.nicho;
-        delete logicalSemantic.nicho_origem;
-      }
-      const storedIntent = humanIntentProtected && item.intent && normalizeIntentKey(item.intent) !== "unknown" ? item.intent : null;
-      const semanticIntent = typeof logicalSemantic.intencao_principal === "string" && normalizeIntentKey(logicalSemantic.intencao_principal) !== "unknown"
-        ? logicalSemantic.intencao_principal
-        : null;
-      const intent = storedIntent || semanticIntent || logical.intentLabel || canonicalIntentLabel(logical.dna.searchIntent);
-      const funnelProtected = humanFunnelProtected(item.analise_semantica);
-      if (!funnelProtected) {
-        delete logicalSemantic.funnel;
-        delete logicalSemantic.funnel_source;
-        delete logicalSemantic.funnel_confidence;
-        delete logicalSemantic.funnel_review_required;
-        delete logicalSemantic.funnel_evidence;
-      }
-      const funnelQualification = classifyKeywordFunnel({
-        keyword: item.keyword,
-        intent,
-        niche,
-        location: item.location,
-        semantic: logicalSemantic,
-      });
-      const semantic = applyFunnelQualification(logicalSemantic, funnelQualification);
-      semantic.logical_output_contract = buildLogicalOutputContract({
-        semantic,
-        intent,
-        niche,
-        funnel: semantic.funnel,
-      });
-      const logicalOutput = validateLogicalKeywordOutput({ semantic, intent });
-      if (!logicalOutput.valid || !hasCompleteLogicalOutputContract({ semantic, intent })) {
-        throw new Error(`A leitura lógica não completou o contrato de saída: ${logicalOutput.missingFields.join(", ")}.`);
-      }
-      Object.assign(semantic, buildLogicalProcessorMetadata({ keywordId: item.id, keyword: item.keyword, location: item.location, niche }, processedAt));
-      const next = { ...item, intent, analise_semantica: semantic };
+      const list = item.lista_id ? listById.get(item.lista_id) ?? null : null;
+      const derived = deriveLogicalKeywordBatchItem(item, list, processedAt);
+      const next = { ...item, intent: derived.update.intent, analise_semantica: derived.update.analise_semantica };
       updatedItems.push(next);
-
-      const logicalChanged = !logicalSemanticRecordsEqual(item.analise_semantica, semantic) || item.intent !== intent;
-      if (logicalChanged) logicalChangedIds.push(item.id);
-      const metadataCurrent = hasCurrentLogicalProcessorMetadata({
-        keywordId: item.id,
-        keyword: item.keyword,
-        location: item.location,
-        niche,
-        semantic,
-      });
-      if (logicalChanged || !metadataCurrent) {
-        pendingUpdates.push({ id: item.id, intent, analise_semantica: semantic });
-      }
+      if (derived.changed) logicalChangedIds.push(item.id);
+      if (derived.needsWrite) pendingUpdates.push(derived.update);
       if (options.showProgress) {
         setDnaProgress({ current: index + 1, total: sourceKeywords.length });
         updateBulkProgress(index + 1, sourceKeywords.length);

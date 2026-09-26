@@ -142,6 +142,24 @@ test("§8 — linha selecionada sem candidateRef recebe erro específico", () =>
   assert.notEqual(escopo.reason, "Selecione pelo menos um artigo.");
 });
 
+test("§9 — seleção só de artigos publicados explica âncoras e aponta para candidatos livres", () => {
+  const escopo = resolveFormationSelectionScope({
+    selectedArticleIds: new Set(["pub-1", "pub-2"]),
+    articles: [
+      { id: "pub-1", candidateRef: null, keywordPrincipal: "artigo publicado um", isPublished: true },
+      { id: "pub-2", candidateRef: null, keywordPrincipal: "artigo publicado dois", isPublished: true },
+    ],
+  });
+  assert.equal(escopo.ok, false);
+  assert.equal(escopo.selectedCount, 2);
+  assert.equal(escopo.candidateRefs.size, 0);
+  assert.match(escopo.reason || "", /já são patrimônio e servem de âncora/);
+  assert.match(escopo.reason || "", /não precisam de nova confirmação/);
+  assert.match(escopo.reason || "", /selecione as linhas de candidatos do cenário/);
+  assert.match(escopo.reason || "", /preservando URL, slug, canonical e Silo/);
+  assert.doesNotMatch(escopo.reason || "", /Reprocessar artigos recompõe o cenário/);
+});
+
 /* =============== §1/§2/§7 · a autoridade é lida no clique =============== */
 
 test("§2 — a autoridade é única e é lida no CLIQUE, não na renderização", () => {

@@ -104,6 +104,13 @@ export function planSiloDecisionBatch(input: {
       refused.push({ keywordId: decision.keywordId, reason: "Esta keyword não tem item de workflow canônico; recarregue o workspace." });
       continue;
     }
+    // Reprocessar um patrimônio já consolidado não é uma nova associação.
+    // O território pode não aceitar membros NOVOS, mas o vínculo que já está
+    // nele continua válido e não exige sucessor para ser lido de novo.
+    if (decision.target.kind === "territory" && keyword.currentTerritoryRef === decision.target.territoryRef) {
+      unchanged.push(decision.keywordId);
+      continue;
+    }
     /*
      * PUBLICADA COM MEMBERSHIP VIGENTE E SEM SILO DECLARADO PELO SITE.
      *
@@ -126,7 +133,7 @@ export function planSiloDecisionBatch(input: {
       reason: decision.target.kind === "unassigned"
         ? "Decisão humana: manter a keyword sem silo."
         : decision.declaredBySite
-          ? "Decisão humana confirmando o Silo que o site declara para a página publicada."
+          ? "Efetivação do Silo que o site declara para a página publicada; decisão humana prévia no Minerador."
           : "Decisão humana de silo na aba Silos.",
       decidedAt: input.decidedAt,
     });

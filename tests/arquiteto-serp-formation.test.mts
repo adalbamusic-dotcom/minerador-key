@@ -5,7 +5,7 @@ import { articleKeywordReference, deterministicArticleDnaPayload } from "../lib/
 import { ArticleDNASchema, ProvisionalArticleGroupSchema } from "../lib/arquiteto/contracts.ts";
 import { adaptKeywordIdentityContext, resolveArticleSerpIdentityContext } from "../lib/arquiteto/identity-context.ts";
 import { explicitEditorialFormat, intentCompatibility, normalizeSearchIntent } from "../lib/arquiteto/intent-profile.ts";
-import { applySerpRecommendationToWorkCopy, assessedKeywordDnaIds, buildSerpFormationAssessment, buildSerpFormationEvidence, buildSiloCandidateSerpEvidence, decideSerpRecommendation, findSerpRecommendationForKeyword, isPublishedStructuralRecommendation, latestActiveSerpFormationAssessment, markSerpAssessmentOutdated, normalizeArchitectSerpSnapshot, preserveSiloCandidateEvidenceOnFailure, resolvePublishedIdentity, resolveSerpValidationProfile, SerpFormationAssessmentSchema, SerpFormationRecoverySchema, SerpKeywordRecommendationSchema, supersedeRecommendations, unassociatedSerpRecommendations } from "../lib/arquiteto/serp-formation.ts";
+import { applySerpRecommendationToWorkCopy, assessedKeywordDnaIds, buildSerpFormationAssessment, buildSerpFormationEvidence, buildSiloCandidateSerpEvidence, decideSerpRecommendation, findSerpRecommendationForKeyword, isPublishedStructuralRecommendation, latestActiveSerpFormationAssessment, markSerpAssessmentOutdated, normalizeArchitectSerpSnapshot, preserveSiloCandidateEvidenceOnFailure, resolvePublishedIdentity, resolveSerpValidationProfile, SerpFormationAssessmentSchema, SerpFormationRecoverySchema, SerpKeywordRecommendationSchema, SerpPublicationVerificationSchema, supersedeRecommendations, unassociatedSerpRecommendations } from "../lib/arquiteto/serp-formation.ts";
 import { collectSerperSnapshot } from "../lib/radar/serper-provider-core.ts";
 import { createVersionEnvelope } from "../lib/arquiteto/versioning.ts";
 import { importArticlesToRadar } from "../lib/editorial/operational-flow.ts";
@@ -398,4 +398,37 @@ test("contexto publicado candidato protege identidade, mas mantém principal cor
   assert.ok(context.protectedActions.includes("preserve_published_slug"));
   assert.ok(context.allowedActions.includes("correct_candidate_principal"));
   assert.ok(context.forbiddenActions.includes("replace_published_identity"));
+});
+
+test("a resposta de verificação de artigo aceita o escopo devolvido pela rota", () => {
+  const verification = SerpPublicationVerificationSchema.parse({
+    schemaVersion: 1,
+    id: "publication-verification:brand-1:article-1:article-v1",
+    brandId: "brand-1",
+    entityType: "article",
+    articleId: "article-1",
+    siloPageId: null,
+    articleDnaVersionId: "article-v1",
+    siloPageVersionId: null,
+    requestedUrl: "https://example.com/artigo",
+    resolvedUrl: "https://example.com/artigo",
+    declaredCanonical: "https://example.com/artigo",
+    httpStatus: 200,
+    sitemapUrl: null,
+    sitemapMatch: null,
+    status: "verified",
+    checkedAt: "2026-09-26T12:00:00.000Z",
+    checkedBy: "actor-1",
+    message: null,
+  });
+  assert.equal(verification.entityType, "article");
+  assert.equal(verification.siloPageVersionId, null);
+});
+
+test("ação de artigo publicado explica a preservação e não pede outra verificação", async () => {
+  const workspace = await readFile("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
+  assert.match(workspace, /URL, slug e Silo preservados/);
+  assert.match(workspace, /nem exige confirmação manual/);
+  assert.doesNotMatch(workspace, /Verificar identidade/);
+  assert.doesNotMatch(workspace, /handleVerifyPublication/);
 });
