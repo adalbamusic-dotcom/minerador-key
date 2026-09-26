@@ -6,7 +6,7 @@ import { InfoHint } from "@/components/info-hint";
 import { internalBadge, internalButton, internalButtonDanger, internalButtonPrimary, internalField, internalNoticeWarning, internalSurface, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
 import type { AgencyIntegrationWorkspace, AgencyMcpProviderKey, AgencyMcpScope } from "@/lib/server/integration-governance";
 import { MCP_CONNECTION_STATUS_LABELS, MCP_OAUTH_REASON_LABELS } from "@/lib/redator/mcp-connection-status";
-import { WRITER_MCP_SCOPE_LABELS, WRITER_MCP_SCOPES } from "@/lib/redator/mcp-consent-domain";
+import { WRITER_MCP_DEFAULT_SCOPES, WRITER_MCP_SCOPE_LABELS, WRITER_MCP_SCOPES } from "@/lib/redator/mcp-consent-domain";
 
 type AgencyMcpPanelProps = {
   data: AgencyIntegrationWorkspace;
@@ -45,7 +45,7 @@ export function AgencyMcpPanel({ data, saving, agencyRef, mutate, reload, notify
   const [guide, setGuide] = useState<GuideKey>("chatgpt");
   const [provider, setProvider] = useState<AgencyMcpProviderKey>("chatgpt");
   const [clientName, setClientName] = useState("Cliente MCP do Redator");
-  const [scopes, setScopes] = useState<AgencyMcpScope[]>([...WRITER_MCP_SCOPES]);
+  const [scopes, setScopes] = useState<AgencyMcpScope[]>([...WRITER_MCP_DEFAULT_SCOPES]);
   const [showRevokedClients, setShowRevokedClients] = useState(false);
   const [showRevokedGrants, setShowRevokedGrants] = useState(false);
   const [bearerBrandId, setBearerBrandId] = useState(data.brands[0]?.id || "");

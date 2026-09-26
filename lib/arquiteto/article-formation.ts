@@ -410,7 +410,8 @@ const slugify = (value: string) =>
  * arquitetural, não penalidade de buscador.
  */
 export function suggestArticleSlug(input: {
-  principal: ArticleFormationKeyword;
+  /** Só a keyword é lida — o agente da plataforma sugere slug antes de haver formação (SDD 2026-09-26). */
+  principal: Pick<ArticleFormationKeyword, "keyword">;
   siloSlug: string | null;
 }): string {
   const base = slugify(input.principal.keyword);

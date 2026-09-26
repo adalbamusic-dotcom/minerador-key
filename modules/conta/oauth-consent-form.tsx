@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { internalButton, internalButtonPrimary, internalNoticeError, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
-import { WRITER_MCP_SCOPES, WRITER_MCP_SCOPE_LABELS, type ConsentBrandOption, type WriterMcpScope } from "@/lib/redator/mcp-consent-domain";
+import { WRITER_MCP_DEFAULT_SCOPES, WRITER_MCP_SCOPES, WRITER_MCP_SCOPE_LABELS, type ConsentBrandOption, type WriterMcpScope } from "@/lib/redator/mcp-consent-domain";
 
 type OAuthConsentFormProps = {
   authorizationId: string;
@@ -19,7 +19,7 @@ const checkbox = "mt-1 h-4 w-4 shrink-0 accent-action-accent";
 
 export function OAuthConsentForm({ authorizationId, client, redirectUri, userEmail, brands, defaultScopes }: OAuthConsentFormProps) {
   const [brandIds, setBrandIds] = useState<string[]>(() => (brands.length === 1 ? [brands[0].brandId] : []));
-  const [scopes, setScopes] = useState<WriterMcpScope[]>(() => [...(defaultScopes?.length ? defaultScopes : WRITER_MCP_SCOPES)]);
+  const [scopes, setScopes] = useState<WriterMcpScope[]>(() => [...(defaultScopes?.length ? defaultScopes : WRITER_MCP_DEFAULT_SCOPES)]);
   const [pending, setPending] = useState<"approve" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
