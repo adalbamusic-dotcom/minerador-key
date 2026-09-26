@@ -429,6 +429,26 @@ Não declarar conclusão apenas porque TypeScript, build ou testes passaram, um 
 
 A conclusão exige comparar objetivo, código, persistência real, interface e comportamento validado.
 
+## 17.1 As IAs conectadas pelo MCP acompanham a plataforma
+
+IAs como Claude e ChatGPT operam a plataforma pelo MCP (`/api/mcp/redator`,
+que cobre todas as áreas desde 2026-09-26). Tudo o que elas sabem sobre COMO
+trabalhar aqui — etapas, pré-condições, custos, quem decide, onde clicar,
+playbooks e critérios de SEO — sai de um lugar só:
+`lib/agent/platform-catalog.ts`.
+
+**Toda mudança de processo atualiza esse catálogo na mesma entrega.** Vale para
+rota nova, rota removida, etapa nova, botão renomeado, regra de SEO nova,
+aprovação que muda de lugar e operação que passa a existir no servidor.
+
+- Operação que ganhou função de servidor pode virar ferramenta em
+  `lib/server/platform-mcp-tools.ts`, chamando o MESMO núcleo da rota da tela.
+- Aprovação, exclusão e publicação continuam humanas: nunca viram ferramenta.
+- `npm run test:agent` falha quando rota, ferramenta, guia ou escopo divergem
+  do catálogo.
+
+SDD: `docs/compartilhado/sdd-plataforma-para-agentes-mcp-2026-09-26.md`.
+
 ## 18. Ordem atual de desenvolvimento
 
 1. Marca — BrandDNA, site e equipe;

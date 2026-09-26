@@ -39,7 +39,8 @@ const toolText = (message: { result?: Record<string, unknown> }) => {
 test("MCP inicializa e anuncia ferramentas com anotações de leitura/escrita", async () => {
   const send = harness(createWriterServer(principal([brandA])));
   const initialized = await send(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "redator-test", version: "1" } });
-  assert.equal(initialized.result?.serverInfo && (initialized.result.serverInfo as { name: string }).name, "minerador-key-redator");
+  // Desde a SDD da plataforma para agentes (2026-09-26) o servidor cobre a plataforma inteira, na mesma URL.
+  assert.equal(initialized.result?.serverInfo && (initialized.result.serverInfo as { name: string }).name, "minerador-key");
   const listed = await send(2, "tools/list", {});
   const tools = listed.result?.tools as Array<{ name: string; annotations?: { readOnlyHint?: boolean } }>;
   assert.ok(Array.isArray(tools), JSON.stringify(listed));
@@ -49,9 +50,16 @@ test("MCP inicializa e anuncia ferramentas com anotações de leitura/escrita", 
     assert.equal(byName.get(name)?.annotations?.readOnlyHint, true, name);
   for (const name of ["save_writer_draft", "save_writer_deliverable", "register_media_brief", "attach_media_asset", "record_writer_divergence"])
     assert.equal(byName.get(name)?.annotations?.readOnlyHint, false, name);
-  for (const name of ["approve_writer_document", "publish_document", "delete_writer_document", "update_article_dna", "resolve_writer_divergence"])
+  // As da plataforma: leitura é leitura; as que escrevem se anunciam como escrita.
+  for (const name of ["get_platform_guide", "get_platform_state", "find_topic_in_platform", "list_platform_keywords", "get_next_actions", "validate_silo_plan"])
+    assert.equal(byName.get(name)?.annotations?.readOnlyHint, true, name);
+  for (const name of ["declare_subjects", "search_subject_keywords", "import_subject_keywords", "send_keywords_to_arquiteto", "send_radar_to_writer"])
+    assert.equal(byName.get(name)?.annotations?.readOnlyHint, false, name);
+  // Aprovar, excluir e publicar continuam fora — no Redator e na plataforma inteira (AGENTS.md §9).
+  for (const name of ["approve_writer_document", "publish_document", "delete_writer_document", "update_article_dna", "resolve_writer_divergence",
+    "approve_keywords", "delete_keywords", "purge_keywords", "approve_article_dna", "approve_silo", "approve_silo_page", "finalize_radar", "publish_article"])
     assert.equal(byName.has(name), false, name);
-  assert.equal(tools.length, 14, "as 10 ferramentas de antes e as 4 do leitor de evidências");
+  assert.equal(tools.length, 25, "as 14 do Redator e as 11 da plataforma");
 });
 
 test("a instrução do servidor ensina manifesto → fundamentos → fatias e leva as guardas (sem FAQ, terceiros, DNA)", async () => {

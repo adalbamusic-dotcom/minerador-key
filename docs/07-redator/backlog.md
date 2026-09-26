@@ -286,3 +286,10 @@ Ver SDD de [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-
    estreitar para `payload->blocks` tira ~4,48 MB por chamada, mas perde o
    `ContentDocumentSchema.parse` do payload relido. Decidir se esse parse é
    garantia exigida.
+
+## MCP da plataforma — 2026-09-26
+- Concluído no código: ferramentas da plataforma no mesmo servidor MCP, escopos
+  novos, catálogo único de processos e testes de sincronia. Ver
+  `docs/compartilhado/agentes-mcp-backlog.md`.
+- Pendente do usuário: migration m8 → deploy → reconsentir → homologar.
+- Próximas fatias (P1–P4) no backlog compartilhado de agentes.

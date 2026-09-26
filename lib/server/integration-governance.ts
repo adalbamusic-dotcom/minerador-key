@@ -1,4 +1,5 @@
 import "server-only";
+import { WRITER_MCP_SCOPES } from "@/lib/redator/mcp-consent-domain";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isTenantId } from "@/lib/tenant-routing";
@@ -66,7 +67,8 @@ export type AgencyIntegrationQuota = {
 
 export const AGENCY_MCP_PROVIDER_KEYS = ["chatgpt", "claude", "gemini", "custom_mcp"] as const;
 export type AgencyMcpProviderKey = typeof AGENCY_MCP_PROVIDER_KEYS[number];
-export const AGENCY_MCP_SCOPES = ["writer.read", "writer.draft.write", "writer.media.brief"] as const;
+/** Uma lista só: a do consentimento. Duplicada à mão, o painel oferecia escopo que o servidor recusava. */
+export const AGENCY_MCP_SCOPES = WRITER_MCP_SCOPES;
 export type AgencyMcpScope = typeof AGENCY_MCP_SCOPES[number];
 
 export type AgencyMcpConnection = {

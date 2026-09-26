@@ -647,3 +647,18 @@ em `save_writer_draft`: o `before` (exigido enquanto a RPC pede `p_payload`
 inteiro) e o readback. Estreitar o readback para `payload->blocks` tiraria
 mais ~4,48 MB, mas perde o `ContentDocumentSchema.parse` do payload relido —
 é decisão a tomar, não a assumir.
+
+# O MCP passa a cobrir a plataforma inteira — 2026-09-26
+
+- **Verificado no código:** a mesma URL (`/api/mcp/redator`) ganhou 11 ferramentas
+  da plataforma, além das 14 do Redator (inalteradas): guia, retrato da marca,
+  busca de tema, keywords, próximos passos, validação de silo, declarar Assuntos,
+  pesquisa por Assunto (plano grátis → execução paga), import ao Processador,
+  envio ao Arquiteto e envio do Radar ao Redator. SDD:
+  `docs/compartilhado/sdd-plataforma-para-agentes-mcp-2026-09-26.md`.
+- **Verificado no código:** o nome anunciado do servidor passou de
+  `minerador-key-redator` para `minerador-key`. Conexões existentes não
+  precisam reconectar; para os escopos novos, precisam **reconsentir**.
+- **Confirmado por teste:** `test:agent` 40/40; `test:redator:mcp` 117/117.
+- **Pendente (usuário):** aplicar a migration m8 **antes** do deploy e homologar
+  com um cliente real. Roteiro em `docs/compartilhado/agentes-mcp-backlog.md`.

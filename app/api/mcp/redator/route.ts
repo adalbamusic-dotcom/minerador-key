@@ -25,6 +25,13 @@ import { readWriterGuardianContext, recordWriterDivergenceFromMcp } from "@/lib/
 import { readWriterEvidence, readWriterEvidenceManifest, readWriterFoundations, WriterEvidenceError } from "@/lib/server/writer-evidence-reader";
 import { recordWriterMcpCall, WriterMcpAuthError, type WriterMcpScope } from "@/lib/server/writer-mcp-delegation";
 import { resolveWriterMcpPrincipal, type WriterMcpBrandAccess, type WriterMcpPrincipal } from "@/lib/server/writer-mcp-principal";
+import { platformServerInstructions } from "@/lib/agent/platform-catalog";
+import { AuthzError } from "@/lib/server/authz";
+import type { EditorialAction } from "@/lib/server/editorial-authorization";
+import { PipelineRuntimeError } from "@/lib/server/pipeline-runtime";
+import { PlatformToolFailure, registerPlatformTools, type PlatformPermission } from "@/lib/server/platform-mcp-tools";
+import { RadarStartError } from "@/lib/server/radar-youtube-start";
+import { RadarWriterSendError } from "@/lib/server/radar-writer-send";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,7 +88,14 @@ const brandOptions = (principal: WriterMcpPrincipal) => principal.brands.map((br
  * §4.4 e §4.5; adendo D9). O dossiê não viaja mais no briefing: a IA chega à
  * evidência pelo manifesto, pelos fundamentos e pelas fatias.
  */
+/*
+ * A PLATAFORMA PRIMEIRO. O texto da plataforma vem do catálogo
+ * (`lib/agent/platform-catalog.ts`): mudou o processo lá, muda aqui sem
+ * editar este arquivo. As regras do Redator abaixo continuam como eram.
+ */
 const WRITER_MCP_INSTRUCTIONS = [
+  platformServerInstructions(),
+  "Para escrever um documento que já está no Redator:",
   "Chame get_writer_connection_profile para saber as Marcas autorizadas.",
   "Para escrever: get_writer_evidence_manifest (o que existe, com tamanhos e ausências) → get_writer_foundations (o essencial, ≤ 24 kB) → read_writer_evidence com a sourceKey do manifesto, só para a seção que está escrevendo (fatias de até 32 kB, com cursor e ifNoneMatch).",
   "get_writer_document traz blocos, metadados, lock e vínculos; get_writer_brief traz instruções e pendências. Preserve as evidências e pendências do Radar.",
@@ -147,7 +161,7 @@ function fitBrief<T extends Record<string, unknown>>(brief: T): T & { trimmed?: 
 }
 
 export function createWriterServer(principal: WriterMcpPrincipal) {
-  const server = new McpServer({ name: "minerador-key-redator", version: "0.3.0" }, { instructions: WRITER_MCP_INSTRUCTIONS });
+  const server = new McpServer({ name: "minerador-key", version: "0.4.0" }, { instructions: WRITER_MCP_INSTRUCTIONS });
   const readAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
   const draftAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false } as const;
   const divergenceAnnotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: true } as const;
@@ -157,7 +171,9 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
    * é conferida: a checagem e os caminhos vêm da mesma linha, sem janela
    * entre as duas e sem consulta a mais. Sem `read`, só o dono (id,marca_id).
    */
-  type Target = { brandId?: string | null; documentId?: string; read?: Exclude<TargetRead, "owner"> };
+  type Target = { brandId?: string | null; documentId?: string; read?: Exclude<TargetRead, "owner">;
+    /** As palavras do usuário aceitando a ação. Só as ferramentas de escrita da plataforma mandam. */
+    humanConfirmation?: string | null };
   type Resolved = { access: WriterMcpBrandAccess; row: TargetRow | null };
 
   /*
@@ -184,7 +200,15 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
     throw new ToolFailure("brand_required", { brands: brandOptions(principal), message: "Informe brandId: esta conexão cobre mais de uma Marca." });
   };
 
-  const call = async <T>(toolName: string, scope: WriterMcpScope, action: "view" | "edit", target: Target, work: (resolved: Resolved) => Promise<T>) => {
+  /*
+   * UM INVÓLUCRO, VÁRIOS MÓDULOS.
+   *
+   * As ferramentas do Redator conferem `redator`; as da plataforma dizem
+   * quais módulos tocam — o envio do Radar ao Redator, por exemplo, exige
+   * editar no Radar E criar no Redator, como a rota da tela. Cada permissão é
+   * conferida na Agência e na Marca, a cada chamada.
+   */
+  const callWith = async <T>(toolName: string, scope: WriterMcpScope | readonly WriterMcpScope[], permissions: readonly PlatformPermission[], target: Target, work: (resolved: Resolved) => Promise<T>) => {
     const requestId = crypto.randomUUID();
     let resolved: Resolved | null = null;
     const audit = async (resultCode: string) => {
@@ -192,33 +216,50 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
       await recordWriterMcpCall({
         delegationId: resolved.access.delegationId, grantId: resolved.access.grantId, brandId: resolved.access.brandId,
         documentId: target.documentId, toolName, resultCode: resultCode.slice(0, 100), requestId,
+        humanConfirmation: target.humanConfirmation ?? null,
       });
     };
     try {
       resolved = await resolveTarget(target);
-      if (!resolved.access.scopes.includes(scope)) throw new ToolFailure("scope_denied", { scope });
+      for (const required of Array.isArray(scope) ? scope : [scope as WriterMcpScope]) {
+        if (!resolved.access.scopes.includes(required)) throw new ToolFailure("scope_denied", { scope: required, consentUrl: principal.consentUrl, message: `Esta conexão não tem a permissão ${required}. O usuário pode reconsentir na Conta → Conexões de IA.` });
+      }
       // Vínculo Agência→Marca ainda vale? Quem consentiu ainda pode agir? Conferido a cada chamada.
-      const agency = await requireAgencyAccessToBrand({ brandId: resolved.access.brandId, module: "redator", action, profile: principal.profile });
-      if (agency.agency.agencyId !== resolved.access.agencyId) throw new ToolFailure("agency_changed");
-      await assertEditorialPermission(principal.profile, resolved.access.brandId, "redator", action);
+      for (const permission of permissions) {
+        const agency = await requireAgencyAccessToBrand({ brandId: resolved.access.brandId, module: permission.module, action: permission.action, profile: principal.profile });
+        if (agency.agency.agencyId !== resolved.access.agencyId) throw new ToolFailure("agency_changed");
+        await assertEditorialPermission(principal.profile, resolved.access.brandId, permission.module, permission.action);
+      }
       await audit("attempt");
       const result = await work(resolved);
       await audit("success");
       return asText({ ok: true, requestId, brandId: resolved.access.brandId, result });
     } catch (error) {
       const code = error instanceof ToolFailure ? error.code
+        : error instanceof PlatformToolFailure ? error.code
+        : error instanceof AuthzError ? "permission_denied"
+        : error instanceof PipelineRuntimeError || error instanceof RadarStartError || error instanceof RadarWriterSendError ? String((error as { code: unknown }).code)
         : error instanceof WriterEvidenceError ? error.code
         : error instanceof OptimisticLockError ? "conflict"
         : error instanceof WriterDeliverableError ? error.code
         : "tool_failed";
       // O motivo do leitor (onde descer, o que falta) ajuda a IA; nunca carrega payload nem segredo.
       const details = error instanceof ToolFailure ? error.details
+        : error instanceof PlatformToolFailure ? error.details
+        : error instanceof AuthzError || error instanceof PipelineRuntimeError || error instanceof RadarStartError || error instanceof RadarWriterSendError ? { message: error.message }
         : error instanceof WriterEvidenceError && error.code !== "document_not_found" ? { message: error.message, ...error.details }
         : {};
       try { await audit(code); } catch { /* the original error is retained */ }
       return { isError: true, ...asText({ ok: false, requestId, code, ...details }) };
     }
   };
+
+  /** As ferramentas do Redator: um módulo, uma ação — exatamente como eram. */
+  const call = <T>(toolName: string, scope: WriterMcpScope, action: "view" | "edit", target: Target, work: (resolved: Resolved) => Promise<T>) =>
+    callWith(toolName, scope, [{ module: "redator", action: action as EditorialAction }], target, work);
+
+  /** As ferramentas da plataforma: `lib/server/platform-mcp-tools.ts`. */
+  registerPlatformTools(server, principal, (toolName, scope, target, permissions, work) => callWith(toolName, scope, permissions, target, work));
 
   /** A Marca da leitura de evidência é a do grant que resolveu o documento — nunca um parâmetro. */
   const evidenceContext = (access: WriterMcpBrandAccess) => ({ brandId: access.brandId });

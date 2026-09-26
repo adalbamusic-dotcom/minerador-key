@@ -27,7 +27,16 @@ const admin = stripComments(read("lib/server/platform-integrations-admin.ts"));
 const canonical = stripComments(read("lib/server/dataforseo-canonical.ts"));
 const migrationRaw = read("supabase/migrations/20260924120000_dataforseo_keyword_research_operation.sql");
 const migration = stripSqlComments(migrationRaw);
-const route = stripComments(read("app/api/minerador/marcas/[brandId]/subject-discovery/search/route.ts"));
+/*
+ * A ROTA E AS PORTAS QUE ELA MONTA, lidas juntas. As portas saíram da rota para
+ * lib/server/subject-discovery-runtime.ts (SDD da plataforma para agentes), para
+ * o MCP pagar pelo mesmo caminho. As garantias abaixo valem para o código que
+ * implementa a rota, esteja onde estiver — nenhuma asserção foi afrouxada.
+ */
+const route = stripComments([
+  read("app/api/minerador/marcas/[brandId]/subject-discovery/search/route.ts"),
+  read("lib/server/subject-discovery-runtime.ts"),
+].join("\n"));
 const search = stripComments(read("lib/minerador/subject-discovery-search.ts"));
 const plan = stripComments(read("lib/minerador/subject-discovery-plan.ts"));
 const labs = stripComments(read("lib/minerador/dataforseo-labs-keyword-research-core.ts"));

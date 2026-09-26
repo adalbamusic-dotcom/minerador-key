@@ -87,6 +87,12 @@ export async function recordWriterMcpCall(input: {
   toolName: string;
   resultCode: string;
   requestId: string;
+  /**
+   * As palavras do usuário aceitando a ação (SDD da plataforma para agentes).
+   * Só as ferramentas que dependem dos escopos da migration m8 mandam; por isso
+   * a coluna só é escrita quando há valor — antes da m8 ninguém chega aqui com ele.
+   */
+  humanConfirmation?: string | null;
 }) {
   if (!input.delegationId && !input.grantId) throw new WriterMcpAuthError("audit_principal_missing", 500);
   const { error } = await getOperationalClient().from("writer_mcp_call_events").insert({
@@ -94,6 +100,7 @@ export async function recordWriterMcpCall(input: {
     ...(input.grantId ? { grant_id: input.grantId } : {}),
     marca_id: input.brandId, document_id: input.documentId || null,
     tool_name: input.toolName, result_code: input.resultCode, request_id: input.requestId,
+    ...(input.humanConfirmation ? { human_confirmation: input.humanConfirmation.slice(0, 500) } : {}),
   });
   if (error) mapPersistenceError(error);
 }
