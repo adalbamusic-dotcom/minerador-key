@@ -342,11 +342,13 @@ test("R2.3 conecta o Arquiteto à busca e ao histórico globais sem duplicar est
 });
 
 test("R2.4 absorve a operação completa do Arquiteto na GlobalTopbar", async () => {
-  const [topbar, arquiteto, controls, workbench] = await Promise.all([
+  const [topbar, arquiteto, controls, workbench, architecturePanel, formationPanel] = await Promise.all([
     read("components/global-topbar.tsx"),
     read("modules/arquiteto/arquiteto-workspace.tsx"),
     read("components/global-topbar-control.ts"),
     read("modules/arquiteto/arquiteto-workbench.tsx"),
+    read("modules/arquiteto/architecture-panel.tsx"),
+    read("modules/arquiteto/article-formation-panel.tsx"),
   ]);
 
   assert.match(controls, /GLOBAL_TOPBAR_ACTION_CONTROL/);
@@ -361,7 +363,10 @@ test("R2.4 absorve a operação completa do Arquiteto na GlobalTopbar", async ()
   assert.match(arquiteto, /setFilterStatus\(event\.target\.value\)/);
   assert.match(arquiteto, /topbarHandlersRef\.current\.processDeterministicStructure/);
   assert.match(arquiteto, /tabs: <nav[^>]+role="tablist"[^>]+data-arquiteto-topbar-tabs/);
-  assert.match(workbench, /architect-process-/);
+  assert.match(workbench, /architecture\?\.panel/);
+  assert.match(workbench, /formation\?\.panel/);
+  assert.match(architecturePanel, /data-testid="architect-process-architecture"/);
+  assert.match(formationPanel, /data-testid="architect-process-articles"/);
   assert.doesNotMatch(arquiteto, /contextExpanded|setContextExpanded|architect-context-toggle/);
   assert.match(arquiteto, /architect-process-context-panel/);
   assert.match(arquiteto, /setKeywordImportOpen\(true\); void topbarHandlersRef\.current\.fetchMasterList\(\)/);
@@ -369,7 +374,7 @@ test("R2.4 absorve a operação completa do Arquiteto na GlobalTopbar", async ()
   assert.match(arquiteto, /topbarHandlersRef\.current\.toggleExportMenu\(\)/);
   assert.match(arquiteto, /gap-1 overflow-x-auto xl:overflow-visible/);
   assert.doesNotMatch(arquiteto, /data-arquiteto-topbar-actions[^>]*overflow-x-scroll/);
-  assert.match(arquiteto, /title: workspaceMode === "silos" \? "Formar a working copy provisória dos Silos" : "Processar lógica sem IA"/);
+  assert.match(arquiteto, /title: workspaceMode === "silos" \? territorialAvailability\.blockedReason \|\| "Analisar a estrutura de silos e formar a working copy provisória dos Silos" : selectedArticleIds\.size \? "Processar lógica somente nos artigos selecionados"/);
   assert.match(arquiteto, /title="Selecionar keywords aprovadas no Minerador"/);
   assert.match(arquiteto, /title="Criar novo Silo"/);
   assert.match(arquiteto, /title="Exportar backup restaurável ou dados editoriais desta Marca"/);
@@ -390,7 +395,7 @@ test("R2.5 impede o ciclo de registro dos controles do Arquiteto", async () => {
   assert.match(provider, /const registerControls = useCallback\([\s\S]*setControls\(\(current\) => current === nextControls \? current : nextControls\)[\s\S]*, \[\]\)/);
   assert.match(provider, /const unregisterControls = useCallback\([\s\S]*current\?\.moduleId === moduleId \? null : current[\s\S]*, \[\]\)/);
 
-  assert.match(arquiteto, /const topbarHandlersRef = useRef\(\{ fetchMasterList, processDeterministicStructure, showNotification, undoMasterList, redoMasterList \}\)/);
+  assert.match(arquiteto, /const topbarHandlersRef = useRef\(\{\s*fetchMasterList, processDeterministicStructure, showNotification, undoMasterList, redoMasterList,/);
   assert.match(arquiteto, /topbarHandlersRef\.current\.fetchMasterList/);
   assert.match(arquiteto, /topbarHandlersRef\.current\.processDeterministicStructure/);
   assert.match(arquiteto, /topbarHandlersRef\.current\.undoMasterList/);

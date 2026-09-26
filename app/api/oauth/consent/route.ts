@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { normalizeConsentBrandSelection, normalizeWriterMcpScopes, WriterMcpConsentError } from "@/lib/redator/mcp-consent-domain";
+import { normalizeConsentBrandSelection, normalizeWriterMcpScopes, WRITER_MCP_SCOPES, WriterMcpConsentError } from "@/lib/redator/mcp-consent-domain";
 import { authzErrorResponse, requireCanonicalSessionProfile } from "@/lib/server/authz";
 import { PersistenceUnavailableError } from "@/lib/server/editorial-db";
 import { readMcpRuntimeConfig } from "@/lib/server/mcp-runtime-config";
@@ -15,7 +15,7 @@ const RequestSchema = z.object({
   authorizationId: z.string().regex(/^[A-Za-z0-9_-]{8,200}$/),
   decision: z.enum(["approve", "deny"]),
   brandIds: z.array(z.string().uuid()).max(50).default([]),
-  scopes: z.array(z.string().max(40)).max(3).default([]),
+  scopes: z.array(z.string().max(40)).max(WRITER_MCP_SCOPES.length).default([]),
 });
 
 const noStore = { headers: { "Cache-Control": "no-store" } };

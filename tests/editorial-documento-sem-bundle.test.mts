@@ -484,14 +484,17 @@ const semComentarios = (fonte: string) => fonte.replace(/\/\*[\s\S]*?\*\//g, "")
 
 test("19 · ESTRUTURAL · a rota completa a cópia antes de guardião, reuso e save, e grava por marca", () => {
   const fonte = semComentarios(readFileSync(new URL("../app/api/editorial/documents/route.ts", import.meta.url), "utf8"));
+  const finalizacao = semComentarios(readFileSync(new URL("../lib/server/writer-document-finalization.ts", import.meta.url), "utf8"));
   const completa = fonte.indexOf("repository.completeWithStoredBundle(");
   assert.ok(completa > 0);
-  for (const depois of ["runGuardian(document, hash)", "reuseFinalizedArticleVersion({", "repository.save("]) {
+  for (const depois of ["saveAndFinalizeWriterDocument({", "contentHash: hash,"]) {
     assert.ok(fonte.indexOf(depois) > completa, `${depois} usa o documento completo`);
   }
-  assert.match(fonte, /repository\.save\(input\.documentId, input\.expectedLockVersion, document, hash, profile\.userId, input\.brandId\)/);
+  for (const gate of ["runGuardian(input.document, input.contentHash)", "reuseFinalizedArticleVersion({", "repository.save(input.documentId, input.expectedLockVersion, input.document, input.contentHash, input.actorId, input.brandId)"]) {
+    assert.ok(finalizacao.includes(gate), `${gate} permanece no núcleo compartilhado`);
+  }
   /* `input.document` seguido de vírgula ou parêntese: `input.documentId` não conta. */
-  assert.doesNotMatch(fonte, /runGuardian\(input\.document[,)]|save\([^)]*input\.document[,)]/);
+  assert.doesNotMatch(fonte, /runGuardian\(input\.document[,)]|repository\.save\([^)]*input\.document[,)]/);
   const repositorio = semComentarios(readFileSync(new URL("../lib/server/editorial-repositories.ts", import.meta.url), "utf8"));
   const lista = repositorio.slice(repositorio.indexOf("async list(marcaId: string, userId: string)"), repositorio.indexOf("async findDetail("));
   assert.doesNotMatch(lista, /select\("id,payload/, "a listagem não volta a pedir a coluna inteira");

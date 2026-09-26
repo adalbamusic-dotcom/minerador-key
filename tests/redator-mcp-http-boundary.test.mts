@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { GET as mcpGet, POST as mcpPost } from "../app/api/mcp/redator/route.ts";
 import { GET as healthGet } from "../app/api/mcp/redator/health/route.ts";
+import { PLATFORM_CATALOG_HASH } from "../lib/agent/catalog-hash.ts";
+import { PLATFORM_GUIDE_TOPICS, catalogToolNames } from "../lib/agent/platform-catalog.ts";
 
 const publicHost = "mcp.example.test";
 const publicBaseUrl = `https://${publicHost}`;
@@ -128,6 +130,11 @@ test("health preserva HTTP 200 e ok legado sem afirmar login ChatGPT ou round-tr
     assert.equal(payload.transport, "streamable_http");
     assert.equal(payload.authMode, "delegated_bearer");
     assert.equal(payload.endpoint, `${publicBaseUrl}/api/mcp/redator`);
+    assert.deepEqual(payload.catalog, {
+      hash: PLATFORM_CATALOG_HASH,
+      guideTopicCount: PLATFORM_GUIDE_TOPICS.length,
+      toolCount: catalogToolNames().length,
+    });
     assert.equal(payload.oauth.configured, false);
     assert.equal(payload.oauth.requiredForPublicClient, true);
     assert.equal(payload.oauth.protectedResourceMetadataUrl, null);

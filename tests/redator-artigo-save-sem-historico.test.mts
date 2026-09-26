@@ -36,6 +36,7 @@ const COMPONENTE = "../components/editorial/professional-writer.tsx";
 const SERVIDOR = "../lib/server/writer-deliverables.ts";
 const M6 = "../supabase/migrations/20260919050000_m6_writer_mcp_article_draft_no_history.sql";
 const ORQUESTRACAO = "../lib/server/article-finalization.ts";
+const FINALIZACAO_COMPARTILHADA = "../lib/server/writer-document-finalization.ts";
 const REPOSITORIO = "../lib/server/editorial-repositories.ts";
 
 /** Comentário que explica uma ausência casa com a busca pela ausência. */
@@ -74,15 +75,17 @@ test("01 · COMPORTAMENTAL · o contrato da rota da tela nasce sem versionar", (
 
 test("02 · ESTRUTURAL · a rota da tela só versiona quando pedem", async () => {
   const src = semComentarios(await fonte(ROTA_TELA));
+  const finalizacao = semComentarios(await fonte(FINALIZACAO_COMPARTILHADA));
 
   /*
    * A rota não chama mais `repository.createVersion` direto: quem orquestra
    * versão + ponteiro + readback + retenção é `finalizeArticleVersion`. O que
    * não mudou, e é o que este teste guarda, é o CONDICIONAL.
    */
-  assert.match(src, /const version = input\.createVersion\s*\?\s*await finalizeArticleVersion\(/,
+  assert.match(src, /saveAndFinalizeWriterDocument\(/, "a rota usa o núcleo compartilhado");
+  assert.match(finalizacao, /const version = input\.createVersion\s*\?\s*await finalizeArticleVersion\(/,
     "sem o pedido explícito, nenhuma versão");
-  assert.match(src, /:\s*null;/, "o ramo sem versão devolve null");
+  assert.match(finalizacao, /:\s*null;/, "o ramo sem versão devolve null");
   assert.doesNotMatch(src, /repository\.createVersion\(/,
     "a criação de versão passa pela orquestração, não pela rota");
   /* E a rota da tela não inicia retenção de jeito nenhum. */
@@ -338,13 +341,12 @@ test("13 · ESTRUTURAL · a ordem da finalização do artigo", async () => {
 test("14 · ESTRUTURAL · só a finalização marca; o save não", async () => {
   const rota = semComentarios(await fonte(ROTA_TELA));
   const servidor = semComentarios(await fonte(SERVIDOR));
+  const finalizacao = semComentarios(await fonte(FINALIZACAO_COMPARTILHADA));
 
-  /* A orquestração só roda sob `createVersion`. */
-  assert.match(rota, /const version = input\.createVersion\s*\?\s*await finalizeArticleVersion\(/);
-  assert.equal(rota.split("finalizeArticleVersion(").length - 1, 1, "chamada em um lugar só");
-  /* O 6A.5 acrescentou o reconhecimento de finalização já feita ao mesmo import. */
-  assert.match(rota, /import \{[^}]*finalizeArticleVersion[^}]*\} from "@\/lib\/server\/article-finalization";/);
-  assert.match(rota, /import \{[^}]*reuseFinalizedArticleVersion[^}]*\} from "@\/lib\/server\/article-finalization";/);
+  assert.match(rota, /saveAndFinalizeWriterDocument\(/);
+  assert.match(finalizacao, /const version = input\.createVersion\s*\?\s*await finalizeArticleVersion\(/);
+  assert.equal(finalizacao.split("finalizeArticleVersion(").length - 1, 1, "chamada em um lugar só");
+  assert.match(finalizacao, /reuseFinalizedArticleVersion\(/, "idempotência fica no núcleo compartilhado");
   /* A rota em si não conhece retenção. */
   assert.doesNotMatch(rota, /markArticlePredecessorSuperseded|superseded|purge_after/);
 
@@ -380,12 +382,12 @@ test("16 · ESTRUTURAL · o lock devolvido é o de DEPOIS do movimento do pontei
    * número já vencido — e a próxima gravação do usuário bateria em conflito
    * logo depois de finalizar, que é o pior momento possível.
    */
-  const rota = semComentarios(await fonte(ROTA_TELA));
+  const finalizacao = semComentarios(await fonte(FINALIZACAO_COMPARTILHADA));
   const repo = semComentarios(await fonte(REPOSITORIO));
   const corpo = trecho(semComentarios(await fonte(ORQUESTRACAO)),
     "export async function finalizeArticleVersion");
 
-  assert.match(rota, /lockVersion: version\?\.lockVersion \?\? saved\.lock_version/,
+  assert.match(finalizacao, /lockVersion: version\?\.lockVersion \?\? saved\.lock_version/,
     "a resposta prefere o lock pós-finalização");
   /*
    * O readback precisa trazer o lock. A asserção é pela COLUNA, não pela lista
@@ -460,23 +462,23 @@ test("18 · COMPORTAMENTAL · o ciclo inteiro: primeira, idêntica, mudança, id
 });
 
 test("19 · ESTRUTURAL · a rota pergunta antes de escrever, e de novo depois do conflito", async () => {
-  const rota = semComentarios(await fonte(ROTA_TELA));
+  const finalizacao = semComentarios(await fonte(FINALIZACAO_COMPARTILHADA));
 
   /* Duas consultas de reuso: a preventiva e a do retry que perdeu o lock. */
-  assert.equal(rota.split("reuseFinalizedArticleVersion({").length - 1, 2);
+  assert.equal(finalizacao.split("reuseFinalizedArticleVersion({").length - 1, 2);
 
   /* A preventiva vem ANTES do save. */
-  const primeiroReuso = rota.indexOf("reuseFinalizedArticleVersion({");
-  const save = rota.indexOf("repository.save(");
+  const primeiroReuso = finalizacao.indexOf("reuseFinalizedArticleVersion({");
+  const save = finalizacao.indexOf("repository.save(");
   assert.ok(primeiroReuso < save, "perguntar antes de escrever");
 
   /* A segunda só vale para finalização e só para conflito de lock. */
-  assert.match(rota, /if \(input\.createVersion && erro instanceof OptimisticLockError\)/);
-  assert.match(rota, /throw erro;/, "conteúdo divergente mantém o conflito");
-  assert.ok(rota.lastIndexOf("reuseFinalizedArticleVersion({") > save);
+  assert.match(finalizacao, /if \(input\.createVersion && error instanceof OptimisticLockError\)/);
+  assert.match(finalizacao, /throw error;/, "conteúdo divergente mantém o conflito");
+  assert.ok(finalizacao.lastIndexOf("reuseFinalizedArticleVersion({") > save);
 
   /* Ambas as consultas são condicionadas a createVersion: o save puro não muda. */
-  assert.match(rota, /if \(input\.createVersion\) \{\s*const jaFeito/);
+  assert.match(finalizacao, /if \(input\.createVersion\) \{\s*const alreadyFinalized/);
 });
 
 test("20 · ESTRUTURAL · reconhecer finalização já feita não escreve nada", async () => {
@@ -514,14 +516,14 @@ test("21 · ESTRUTURAL · a concorrência é barrada pelo banco, não por compar
   assert.match(save, /if \(!data\) throw new OptimisticLockError\(\);/);
 
   /* E a criação de versão só acontece depois do save ter passado. */
-  const rota = semComentarios(await fonte(ROTA_TELA));
-  assert.ok(rota.indexOf("repository.save(") < rota.indexOf("finalizeArticleVersion({"),
+  const finalizacao = semComentarios(await fonte(FINALIZACAO_COMPARTILHADA));
+  assert.ok(finalizacao.indexOf("repository.save(") < finalizacao.indexOf("finalizeArticleVersion({"),
     "nenhuma versão nasce antes do lock ser vencido");
 });
 
 test("22 · ESTRUTURAL · todo caminho devolve o lock corrente e diz se reusou", async () => {
   const orq = semComentarios(await fonte(ORQUESTRACAO));
-  const rota = semComentarios(await fonte(ROTA_TELA));
+  const finalizacao = semComentarios(await fonte(FINALIZACAO_COMPARTILHADA));
   const componente = semComentarios(await fonte(COMPONENTE));
 
   /* Reuso não escreve, então o lock devolvido é o que está no banco. */
@@ -529,8 +531,8 @@ test("22 · ESTRUTURAL · todo caminho devolve o lock corrente e diz se reusou",
     "export async function finalizeArticleVersion");
   assert.match(reuso, /lockVersion: documento\.lockVersion/);
 
-  /* Os dois retornos de reuso na rota carregam lock e updatedAt lidos. */
-  assert.equal(rota.split("lockVersion: version.lockVersion, updatedAt,").length - 1, 2);
+  /* Os dois retornos de reuso no núcleo carregam lock e updatedAt lidos. */
+  assert.equal(finalizacao.split("lockVersion: alreadyFinalized.lockVersion,").length - 1, 2);
 
   /* A tela não pode dizer "criada" quando nada foi criado. */
   assert.match(componente, /body\.version\.reused \?/);

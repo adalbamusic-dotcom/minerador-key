@@ -869,6 +869,32 @@ export function resolveTerritoryConfirmationReadiness(input: {
   return readinessFrom(blockers, deferred);
 }
 
+/**
+ * A prontidão à luz das memberships que O MESMO clique vai gravar.
+ *
+ * Confirmar arquitetura faz duas coisas numa ação só: aplica as memberships da
+ * proposta e confirma os Silos prontos. Medida ANTES da gravação, a prontidão
+ * via o Silo recém-criado pelo processamento ainda VAZIO — e `EMPTY_TERRITORY`
+ * barrava exatamente os Silos que o clique ia preencher. Foi assim que uma
+ * confirmação real gravou 154 memberships e confirmou ZERO Silos, deixando a
+ * fase Artigos inteira em "aguardando confirmação do Silo".
+ *
+ * Território que vai receber membro NESTE plano não é vazio. Só esse bloqueio
+ * é dispensado, e só com previsão real; os demais continuam valendo. Quem
+ * chama ainda precisa conferir, DEPOIS do lote, que alguma membership chegou
+ * de fato: prontidão emprestada da previsão não sobrevive a um lote que
+ * falhou inteiro.
+ */
+export function readinessWithPlannedMembers(
+  readiness: TerritoryReadiness,
+  plannedMemberCount: number,
+): TerritoryReadiness {
+  if (readiness.state === "ready" || plannedMemberCount <= 0) return readiness;
+  const restantes = readiness.blockers.filter(blocker => blocker.code !== "EMPTY_TERRITORY");
+  if (restantes.length === readiness.blockers.length) return readiness;
+  return readinessFrom(restantes, readiness.deferred);
+}
+
 /* -------------------------- formação de Article -------------------------- */
 
 export const ARTICLE_FORMATION_REFUSAL_CODES = [

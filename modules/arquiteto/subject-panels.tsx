@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState, type RefObject } from "react";
+import React, { useEffect, useRef, type RefObject } from "react";
 import {
   SUBJECT_ATTACH_ACTION_LABEL,
   SUBJECT_DETACH_ACTION_LABEL,
@@ -225,7 +225,7 @@ export function SubjectFilterPanel({
               {SUBJECT_ATTACH_ACTION_LABEL}
             </button>
             <button type="button" disabled={busy || !selected.attachable} onClick={onOpenSupport} className={buttonClassName} data-testid="architect-subject-support-open">
-              Sugestões de sustentação
+              Formar artigos automaticamente
             </button>
           </div>
           <p className="text-sm leading-6 text-text-muted" data-testid="architect-subject-serp-hint">{SUBJECT_PHRASE_SERP_HINT}</p>
@@ -331,30 +331,25 @@ export function SubjectSupportDialog({
   busy,
   buttonClassName,
   primaryButtonClassName,
-  onConfirm,
+  onStart,
   onClose,
 }: {
   open: boolean;
   subjectPhrase: string;
   subjectNote: string | null;
   suggestions: readonly SubjectSupportSuggestion[];
-  /** Silo confirmado de cada sugestão; `null` ou ausente = sem Silo, não pode ser marcada. */
+  /** Silo confirmado de cada sugestão; sem ele, a keyword fica fora do lote automático. */
   siloLabels: ReadonlyMap<string, string | null>;
   busy: boolean;
   buttonClassName: string;
   primaryButtonClassName: string;
-  onConfirm: (keywordIds: string[]) => void;
+  onStart: () => void;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLElement | null>(null);
-  const [marcadas, setMarcadas] = useState<Set<string>>(new Set());
   useSubjectDialogFocus(open, dialogRef, onClose, !busy);
   if (!open) return null;
-  const alternar = (keywordId: string) => setMarcadas(anterior => {
-    const proximo = new Set(anterior);
-    if (proximo.has(keywordId)) proximo.delete(keywordId); else proximo.add(keywordId);
-    return proximo;
-  });
+  const elegiveis = suggestions.filter(suggestion => suggestion.automaticEligible && Boolean(siloLabels.get(suggestion.keywordId)));
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="presentation">
       <section
@@ -372,16 +367,13 @@ export function SubjectSupportDialog({
             Sugestões de sustentação: <span className="text-keyword">{subjectPhrase}</span>
           </h2>
           {subjectNote && <p className="mt-1 text-sm leading-6 text-foreground/85">Nota do Assunto: {subjectNote}</p>}
-          <p className="mt-1 text-sm leading-6 text-text-muted">
-            Só keywords que já chegaram ao Arquiteto, ordenadas pelo que o pacote aprovado de cada uma já diz. Nada é gravado até você confirmar; a sugestão não prende nada.
-          </p>
           <p id="architect-subject-support-principal" className="text-sm leading-6 text-text-muted">{SUBJECT_SUPPORT_PRINCIPAL_HINT}</p>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto rounded border border-divider">
           {suggestions.length === 0 ? (
             <p className="p-3 text-sm leading-6 text-text-muted" data-testid="architect-subject-support-empty">
-              Nenhuma keyword recebida tem sinal em comum com este Assunto. Envie as keywords de sustentação pelo Minerador ou use a Pesquisa por Assunto.
+              Nenhum pacote aprovado recebido tem sustentação suficiente para formar um artigo. Envie ou pesquise keywords no Minerador; nenhuma métrica será inventada.
             </p>
           ) : (
             <ul className="divide-y divide-divider/70">
@@ -390,20 +382,15 @@ export function SubjectSupportDialog({
                 const silo = siloLabels.get(suggestion.keywordId) ?? null;
                 return (
                   <li key={suggestion.keywordId} className="flex items-start gap-3 px-3 py-2" data-testid="architect-subject-support-option">
-                    <input
-                      id={id}
-                      type="checkbox"
-                      className="mt-1 h-4 w-4 shrink-0 accent-module-accent"
-                      checked={marcadas.has(suggestion.keywordId)}
-                      disabled={busy || suggestion.alreadyInArticle || !silo}
-                      onChange={() => alternar(suggestion.keywordId)}
-                    />
-                    <label htmlFor={id} className="min-w-0 flex-1 text-sm leading-6">
+                    <div id={id} className="min-w-0 flex-1 text-sm leading-6">
                       <span className="font-medium text-keyword">{suggestion.keyword}</span>
-                      {suggestion.alreadyInArticle && <span className="text-text-muted"> · já está em artigo decidido (só informação)</span>}
+                      {suggestion.alreadyInArticle && <span className="text-text-muted"> · já está numa formação; ela será preservada</span>}
                       {silo
                         ? <span className="block text-text-muted" data-testid="architect-subject-support-silo">Silo: {silo}</span>
                         : <span className="block text-warning" data-testid="architect-subject-support-without-silo">{SUBJECT_SUPPORT_WITHOUT_SILO}</span>}
+                      <span className={suggestion.automaticEligible && silo ? "block text-success" : "block text-text-muted"}>
+                        {suggestion.automaticEligible && silo ? "Elegível para o fluxo automático" : "Evidência insuficiente para inclusão automática"}
+                      </span>
                       <span className="block text-foreground/85">{suggestion.reason}</span>
                       <span className="mt-1 flex flex-wrap gap-1">
                         {suggestion.signals.map(signal => (
@@ -413,7 +400,7 @@ export function SubjectSupportDialog({
                       {suggestion.discoveryEvidence.length > 0 && (
                         <span className="mt-1 block text-text-muted">Evidência da Pesquisa por Assunto: {suggestion.discoveryEvidence.join(" · ")}</span>
                       )}
-                    </label>
+                    </div>
                   </li>
                 );
               })}
@@ -429,12 +416,12 @@ export function SubjectSupportDialog({
           </button>
           <button
             type="button"
-            disabled={busy || marcadas.size === 0}
-            onClick={() => onConfirm([...marcadas])}
+            disabled={busy || elegiveis.length === 0}
+            onClick={onStart}
             className={primaryButtonClassName}
             data-testid="architect-subject-support-confirm"
           >
-            {busy ? "Gravando…" : `Formar artigo com ${marcadas.size} keyword(s)`}
+            {busy ? "Processando Assunto…" : `Iniciar formação automática · ${elegiveis.length} keyword(s)`}
           </button>
         </div>
       </section>

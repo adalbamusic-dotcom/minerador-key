@@ -70,6 +70,7 @@ export function ArchitecturePanel({
   scenarioState,
   busy,
   confirmed,
+  canContinueToArticles,
   processChips,
   selectedCluster,
   consolidation,
@@ -91,6 +92,8 @@ export function ArchitecturePanel({
   busy: boolean;
   /** Síntese da última confirmação, quando houver. */
   confirmed: { silos: number; keywords: number; pending: number } | null;
+  /** Um Silo publicado já efetivado também libera a entrada na fase Artigos. */
+  canContinueToArticles: boolean;
   processChips: ArchitectureProcessChip[];
   selectedCluster: ClusterAnalysis | null;
   /**
@@ -256,12 +259,12 @@ export function ArchitecturePanel({
           onClick={onConfirm}
           disabled={busy || !processed}
           data-testid="architect-confirm-architecture"
-          title={processed ? "Confirmar os silos prontos do cenário revisado" : "Processe a arquitetura antes de confirmar."}
+          title={processed ? "Confirmar somente propostas novas; Silos publicados declarados já foram reconhecidos." : "Processe a arquitetura antes de confirmar propostas novas."}
           className="inline-flex min-h-9 items-center gap-1.5 rounded border border-positive-soft/45 px-3 text-sm font-semibold text-positive-soft transition-colors hover:bg-positive-soft/10 disabled:opacity-40"
         >
-          Confirmar arquitetura
+          Confirmar propostas novas
         </button>
-        {confirmed && (
+        {canContinueToArticles && (
           <button
             type="button"
             onClick={onContinueToArticles}
@@ -270,6 +273,9 @@ export function ArchitecturePanel({
           >
             Continuar para Artigos
           </button>
+        )}
+        {canContinueToArticles && (
+          <span className="text-sm text-text-muted">Silos publicados declarados já podem seguir para Artigos.</span>
         )}
         {stale && (
           <span className="text-sm text-warning" data-testid="architect-architecture-stale">
@@ -383,8 +389,8 @@ export function ArchitecturePanel({
         <div className="mt-3 rounded border border-divider bg-surface p-3" data-testid="architect-silopage-preflight">
           <p className="text-sm font-semibold text-foreground">O que a confirmação vai fechar</p>
           <p className="mt-0.5 text-sm leading-6 text-text-muted">
-            Confirmar arquitetura fecha SiloDNA e SiloPage juntos. Aprovado não é publicado: uma página
-            planejada pode ser aprovada com canonical planejado e continuar fora do ar.
+            A confirmação aplica propostas novas. SiloDNA e SiloPage são formados nas etapas próprias;
+            os Silos já publicados não precisam de outra confirmação para entrar em Artigos.
           </p>
           <ul className="mt-2 space-y-2">
             {preflight.map(silo => (

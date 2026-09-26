@@ -87,7 +87,7 @@ test("a aprovação do ArticleDNA tem uma autoridade só", () => {
   // Só as passagens de código contam; a nota que explica a remoção cita o campo.
   assert.equal((workspace.match(/^\s+status: "approved",$/gm) || []).length, 2);
   const conclusao = workspace.slice(workspace.indexOf("const confirmArticleFormation"));
-  assert.match(conclusao, /await materializeApprovedArticleDnas\(plano\.approved\)/);
+  assert.match(conclusao, /await materializeApprovedArticleDnas\(\s*plano\.approved,\s*"CANONICAL_REQUIRED",\s*automatic \? "system" : "human"/);
   assert.match(conclusao, /await materializeLegacyArticleSiloIds\(\)/);
   // A porta de persistência recusa explicitamente qualquer reintrodução.
   assert.match(workspace, /Aprovar ArticleDNA é ato de Concluir formação, na aba Artigos\./);

@@ -9,6 +9,7 @@ Regras permanentes (no código desde 2026-09-25; homologação manual pendente):
 5. **Revalidar é remontar.** As livres seguem pela proposta de sempre; um grupo léxico que contém artigo publicado de um Silo vai para esse Silo, e a livre que pede o mesmo conteúdo de um artigo publicado (piso de canibalização) entra nele, até o teto de seis, sem trocar a principal publicada. Duas publicadas nunca se fundem.
 6. **O Silo publicado mantém o endereço do site.** O slug de um Silo cuja cabeça está publicada é o caminho da URL declarada (canônico primeiro), nunca o texto da keyword normalizado. O território dele nasce `protected`, com `publishedSlug` e `publishedCanonical` da declaração e sem slug proposto. A cabeça publicada reaproveita o território de mesmo endereço (ou de mesma primária) em vez de criar outro.
 7. **Conflito não é declaração do site.** Quando o endereço não resolve o Silo de uma publicada (dois Silos com o mesmo endereço, publicada sem URL absoluta), a linha diz o conflito para decisão humana. Publicada que já está num território e cuja URL não declara Silo mantém a membership vigente até decisão humana. Revisão humana de formação que junta publicada como não principal, ou duas publicadas, aparece com conflito — a composição humana não é trocada em silêncio.
+8. **Declaração publicada é decisão anterior, não proposta a confirmar outra vez.** No primeiro `Processar arquitetura`, a cabeça publicada e os artigos publicados sob sua URL são efetivados no território protegido com readback. Um território publicado que ficou `candidate/pending` de uma passada anterior é reconhecido na mesma operação, se identidade, marca e endereço coincidem. Keywords livres e Silos novos/potenciais continuam propostas, e papel Pilar/Suporte, troca de principal revisável e alteração de DNA seguem seus gates. Divergência ou escrita falha nunca se declara efetivada.
 
 ## 33. Assunto declarado no ArticleDNA e no SiloDNA — 2026-09-24
 
@@ -91,13 +92,22 @@ Vigentes no código, salvo os itens marcados **Planejado**. Implementação em
   de workflow da principal, chaveado por `candidateRef`, e sobrevive ao
   recarregar. Vai com a formação quando o ref do artigo muda e passa ao
   ArticleDNA ao concluir a formação. Soltar sempre é aceito.
-- **Formação em torno do Assunto:** sugestões determinísticas só sobre as
-  keywords já recebidas, sem leitura nova e sem provider. O primeiro sinal é
-  `subject_discovery.subjectKeywordIds` do pacote. O humano escolhe as
-  sustentações; a principal sai entre elas pela regra atual; a SERP das
-  sustentações, nas 4 lentes com cache, valida o artigo. A SERP da frase é
-  opcional, sob pedido, pela rota Resultados do Minerador, e não entra na trava
-  de SERP do artigo.
+- **Formação automática em torno do Assunto:** após iniciar o lote, o Arquiteto
+  compara a frase e a nota do Assunto, `subject_discovery`, entidade, lista,
+  intenção e funil com os pacotes aprovados já recebidos. A composição é
+  agrupada por Silo confirmado e intenção, até seis keywords por artigo; cada
+  novo artigo precisa ter ao menos uma keyword com Volume validado para eleger
+  a principal pela regra atual. Termos que não couberem num grupo com
+  principal continuam visíveis e sem associação inventada. O Assunto é preso
+  como tronco fora das referências e do slug. O lote passa pela SERP das
+  sustentações nas quatro lentes; chamadas pagas mostram um plano e exigem um
+  aceite de custo por execução, não confirmação artigo por artigo. Após
+  readback e gates, o Arquiteto grava automaticamente ArticleDNA, slug e Silo
+  canônico para os artigos aprovados. Conflitos e gates reprovados param só os
+  candidatos afetados. A regra está detalhada no [adendo autorizado de
+  automatização](sdd-automatizacao-assuntos-2026-09-26.md). A SERP da frase
+  segue opcional, pela rota Resultados do Minerador, e não entra na trava de
+  SERP do artigo.
 - **Silo:** o Assunto preso ao SiloDNA vira sugestão aos artigos do Silo, e
   cada artigo confirma. Um Silo que já tem SiloPage não recebe Assunto novo
   por versão avulsa do SiloDNA (`SUBJECT_SILO_PAGE_BOUND`), porque isso
@@ -412,7 +422,7 @@ sequência. Regras permanentes:
 
 ## 22. Identidade publicada e verificação
 
-`publishedIdentityRef` pode carregar URL publicada e canonical vindos de uma fonte coerente de KeywordDNA, IDs de origem e verificação online. URL divergente vira conflito; sem URL o Arquiteto mostra ausência e não inventa destino. A verificação é explícita, server-side, brand-scoped e não sobrescreve identidade publicada.
+`publishedIdentityRef` pode carregar URL publicada e canonical vindos de uma fonte coerente de KeywordDNA, IDs de origem e evidência de verificação online. URL divergente vira conflito; sem URL o Arquiteto mostra ausência e não inventa destino. A verificação online é uma checagem diagnóstica explícita, server-side e brand-scoped; ela não confirma novamente uma publicação já declarada, não é pré-requisito para reconhecer seu Silo ou processar keywords e não sobrescreve a identidade publicada. A tela deve explicar que URL, slug, canonical e vínculo de Silo estão preservados, sem pedir confirmação manual redundante.
 
 ## 24. Modos SERP por estado editorial
 

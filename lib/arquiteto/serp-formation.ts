@@ -152,8 +152,13 @@ export const SerpPublicationVerificationSchema = z.object({
   schemaVersion: z.literal(1),
   id: z.string().min(1),
   brandId: z.string().min(1),
+  // A rota de conferência atende Articles e SiloPages. Estes campos opcionais
+  // tornam a resposta retrocompatível com verificações antigas de Article.
+  entityType: z.enum(["article", "silo_page"]).optional(),
   articleId: z.string().min(1),
+  siloPageId: z.string().min(1).nullable().optional(),
   articleDnaVersionId: z.string().min(1).nullable(),
+  siloPageVersionId: z.string().min(1).nullable().optional(),
   requestedUrl: z.string().url(),
   resolvedUrl: z.string().url().nullable(),
   declaredCanonical: z.string().url().nullable(),

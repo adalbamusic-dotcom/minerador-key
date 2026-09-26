@@ -24,7 +24,7 @@ const CreateSchema = z.object({
   oauthClientId: z.string().min(1).max(200),
   clientName: z.string().max(120).optional(),
   brandIds: z.array(z.string().uuid()).min(1).max(50),
-  scopes: z.array(z.string().max(40)).min(1).max(3),
+  scopes: z.array(z.string().max(40)).min(1).max(WRITER_MCP_SCOPES.length),
 });
 const RevokeSchema = z.object({ grantId: z.string().uuid() });
 

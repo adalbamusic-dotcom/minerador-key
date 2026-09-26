@@ -57,11 +57,11 @@ export function OAuthConsentForm({ authorizationId, client, redirectUri, userEma
     </div>
 
     <fieldset className="space-y-2">
-      <legend className="text-sm font-semibold">Marcas que este aplicativo pode operar no Redator</legend>
+      <legend className="text-sm font-semibold">Marcas que este aplicativo pode operar na plataforma</legend>
       {brands.length ? brands.map((brand) => <label key={brand.brandId} className="flex cursor-pointer items-start gap-3 rounded-md border border-divider px-3 py-2 hover:bg-surface-subtle">
         <input type="checkbox" className={checkbox} checked={brandIds.includes(brand.brandId)} onChange={() => setBrandIds((current) => toggle(current, brand.brandId))} disabled={pending !== null} />
         <span className="text-sm font-medium">{brand.brandName}</span>
-      </label>) : <p className={internalNoticeError}>Sua conta não tem Marca com acesso ao Redator em uma Agência ativa. Peça acesso à Agência antes de conectar um aplicativo.</p>}
+      </label>) : <p className={internalNoticeError}>Sua conta não tem Marca com acesso à plataforma em uma Agência ativa. Peça acesso à Agência antes de conectar um aplicativo.</p>}
     </fieldset>
 
     <fieldset className="space-y-2">
@@ -75,7 +75,7 @@ export function OAuthConsentForm({ authorizationId, client, redirectUri, userEma
       </label>)}
     </fieldset>
 
-    <p className="flex items-start gap-2 text-sm leading-6 text-text-muted"><ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-context-accent" aria-hidden="true" />O aplicativo nunca aprova, publica ou exclui conteúdo. Você pode revogar este acesso em Conta, na seção Conexões de IA.</p>
+    <p className="flex items-start gap-2 text-sm leading-6 text-text-muted"><ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-context-accent" aria-hidden="true" />Decisões só podem ser delegadas com a permissão opcional “Delegar decisões aceitas no chat”; cada ação exige prévia e o aceite específico que você escreveu. Publicação e exclusão seguem fora do MCP. Você pode revogar este acesso em Conta → Conexões de IA.</p>
 
     {error ? <p role="alert" className={internalNoticeError}>{error}</p> : null}
 

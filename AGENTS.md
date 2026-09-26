@@ -443,7 +443,13 @@ aprovação que muda de lugar e operação que passa a existir no servidor.
 
 - Operação que ganhou função de servidor pode virar ferramenta em
   `lib/server/platform-mcp-tools.ts`, chamando o MESMO núcleo da rota da tela.
-- Aprovação, exclusão e publicação continuam humanas: nunca viram ferramenta.
+- Aprovação continua sendo decisão humana. Pode ser aplicada pelo MCP somente
+  quando o usuário aceitar aquela ação no chat, após prévia com hash vigente,
+  escopo opt-in `platform.decide`, permissões do módulo e trilha com o ator
+  autenticado. A IA não decide sozinha.
+- Exclusão, restauração, purga e publicação externa continuam fora das
+  ferramentas MCP. Envio interno entre etapas não publica URL nem altera
+  canonical e só pode ser delegado com o aceite humano previsto no catálogo.
 - `npm run test:agent` falha quando rota, ferramenta, guia ou escopo divergem
   do catálogo.
 

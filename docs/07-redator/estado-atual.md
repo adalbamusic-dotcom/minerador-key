@@ -1,5 +1,28 @@
 # Estado atual — Redator
 
+## MCP da plataforma — integração e fingerprint — 2026-09-26
+
+- **Verificado no código local:** `/api/mcp/redator` expõe 31 ferramentas no
+  transporte MCP: 14 do Redator e 17 operações de plataforma. Guia, catálogo,
+  ferramentas e rotas são conferidos pelos testes do agente.
+- **Alteração local desta revisão:** `/api/mcp/redator/health` inclui hash
+  SHA-256 do catálogo, quantidade de tópicos e ferramentas catalogadas, para
+  identificar a revisão implantada sem uma sessão autenticada.
+- **Hash esperado no checkout validado:**
+  `8600db73353959f2f015311fa3bfc7365372dff5424ad955a604bb6dee2f877e`;
+  31 ferramentas catalogadas.
+- **Confirmado por testes locais:** `test:redator:mcp` 117/117,
+  `test:agent` 44/44, `test:mcp:runtime` 5/5, TypeScript e build de produção.
+- **Verificado remotamente, somente leitura:** health, metadata do recurso e
+  discovery OAuth retornam 200; inicialização anônima do MCP retorna 401 e
+  aponta o metadata OAuth. A produção ainda mostra os identificadores legados
+  (`minerador-key-redator-mcp`, `Minerador Key — Redator`) e não publica o hash
+  do catálogo, portanto não está comprovado que o código local atual esteja
+  implantado.
+- **Pendente do usuário:** migration M9 (e M8 se ainda pendente), deploy,
+  reconsentimento do Claude para escopos novos e chamada autenticada real. Isso
+  ainda não comprova que Claude executou as ferramentas autorizadas.
+
 ## Assunto declarado nos fundamentos, no MCP e no Guardião (F4) — 2026-09-24
 
 - **Fonte:** [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), F4.1, F4.2 e F4.4. O Assunto é o tronco declarado pelo humano e fixado em `ArticleDNA.subject`. O Redator decide a estrutura final (invariante 48); o Guardião só avisa (Q6).
@@ -650,8 +673,9 @@ mais ~4,48 MB, mas perde o `ContentDocumentSchema.parse` do payload relido —
 
 # O MCP passa a cobrir a plataforma inteira — 2026-09-26
 
-- **Verificado no código:** a mesma URL (`/api/mcp/redator`) ganhou 11 ferramentas
-  da plataforma, além das 14 do Redator (inalteradas): guia, retrato da marca,
+- **Verificado no código local:** após a ampliação seguinte, a mesma URL
+  (`/api/mcp/redator`) registra 17 ferramentas da plataforma, além das 14 do
+  Redator: guia, retrato da marca,
   busca de tema, keywords, próximos passos, validação de silo, declarar Assuntos,
   pesquisa por Assunto (plano grátis → execução paga), import ao Processador,
   envio ao Arquiteto e envio do Radar ao Redator. SDD:
@@ -662,3 +686,22 @@ mais ~4,48 MB, mas perde o `ContentDocumentSchema.parse` do payload relido —
 - **Confirmado por teste:** `test:agent` 40/40; `test:redator:mcp` 117/117.
 - **Pendente (usuário):** aplicar a migration m8 **antes** do deploy e homologar
   com um cliente real. Roteiro em `docs/compartilhado/agentes-mcp-backlog.md`.
+## Auditoria das permissões MCP — 2026-09-26
+
+- **Verificado em produção, somente leitura:** `/api/mcp/redator/health` e metadata OAuth respondem 200; pedido anônimo de ferramentas responde 401. O próprio health declara `verificationScope: runtime_configuration_only`, então não comprova uma sessão Claude.
+- **Verificado no banco remoto, somente leitura:** a migration m8 aceita os oito escopos em grants e delegações. Há um grant ativo para ChatGPT apenas com os três escopos antigos do Redator; não foi encontrado grant ativo de Claude. A trilha dos últimos sete dias mostra somente chamadas ChatGPT às ferramentas do Redator, com último evento em 2026-09-20; não há exercício registrado das novas ferramentas da plataforma. Nenhuma permissão remota foi concedida nesta auditoria.
+- **Defeito corrigido localmente:** `/api/oauth/consent` e `/api/oauth/grants` limitavam a seleção a três itens apesar de anunciar oito. O teto agora acompanha `WRITER_MCP_SCOPES.length`. O consentimento continua a validar a lista permitida e `provider.spend` continua desmarcado por padrão.
+- **Verificado no código / teste local naquela revisão:** o invólucro de ferramenta transmite o mesmo `requestId` ao domínio e à auditoria; a declaração de Assunto via MCP registra `channel.kind`, `grantId` e `requestId` no bloco `subject_import`, sem mudar o ator canônico. Chamadores de importação pela tela mantêm o payload anterior. O `catalogHash` deriva de todos os tópicos do guia. Validação autenticada de Claude e fluxo editorial completo não foram realizados naquela revisão.
+- **Estado funcional atualizado abaixo:** o MCP atual inclui ferramentas de decisão delegada; veja “Delegação explícita e finalização”. Medição paga, formação/confirmação de artigos e Silos no Arquiteto e investigação/finalização do Radar ainda não têm execução por ferramenta. O catálogo orienta a IA a usar a interface nessas etapas.
+- **Arquivos desta correção:** `app/api/oauth/consent/route.ts`, `app/api/oauth/grants/route.ts`, `app/api/mcp/redator/route.ts`, `lib/server/platform-mcp-tools.ts`, `lib/agent/catalog-hash.ts`, `lib/minerador/keyword-import-core.ts`, `tests/agent-platform-mcp.test.mts`, `tests/minerador-assunto-import-core.test.mts`. Compartilhados preservados: importação pela tela, grants existentes e ferramentas anteriores do Redator. Sem migration, deploy ou escrita remota nesta revisão.
+
+## Delegação explícita e finalização — implementação local de 2026-09-26
+
+- **Verificado no código:** `platform.decide` foi adicionado como opt-in e excluído dos escopos pré-selecionados. `decide_keywords`, `set_kgr_applicability`, `set_keyword_vinculo`, `finalize_writer_document` e `send_writer_to_publications` exigem `preview → decisionHash vigente → userConfirmation`. O invólucro confere grant por Marca, escopo, permissões por Agência/Marca e registra o ator e o aceite no evento.
+- **Núcleo compartilhado:** o PATCH da tela e `finalize_writer_document` usam `saveAndFinalizeWriterDocument`; a tela e o MCP não mantêm implementações concorrentes da gravação e versão final. `send_writer_to_publications` só cria o registro interno e relê o resultado; não publica URL.
+- **Ainda pendente:** migration M9 e deploy pelo usuário, reconsentimento do Claude e teste autenticado remoto. Medição paga de Volume/Resultados, confirmação/formação no Arquiteto e investigação/finalização do Radar ainda não têm ferramenta MCP.
+
+### Validação local da revisão — 2026-09-26
+
+- **Confirmado por teste:** `test:redator` 358/358; `test:agent` 44/44; TypeScript sem erros. A rota PATCH do Redator e a ferramenta MCP compartilham o mesmo núcleo de guardião, optimistic lock, versionamento, readback e retenção.
+- **Ainda não verificado:** grant e escopos no Supabase após M9, consentimento real do Claude, salvamento remoto do documento e fluxo MCP autenticado.

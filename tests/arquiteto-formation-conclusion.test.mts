@@ -349,9 +349,10 @@ test("reprocessar é dono da SERP; concluir apenas valida", () => {
   // A autoridade é lida no CLIQUE: os dois `useCallback` liam a memo sem
   // citá-la nas dependências e ficavam congelados no escopo da renderização em
   // que nasceram — o painel dizia "1 selecionado" e o handler recusava.
-  assert.ok(corpoConcluir.includes("} = formationScopeRef.current;"));
+  assert.ok(corpoConcluir.includes("formationScopeRef.current.scope"));
+  assert.ok(corpoConcluir.includes("formationScopeRef.current.universes"));
   assert.match(corpoConcluir, /validateFormationConclusion\(/);
-  assert.match(corpoConcluir, /materializeApprovedArticleDnas\(plano\.approved\)/);
+  assert.match(corpoConcluir, /materializeApprovedArticleDnas\(\s*plano\.approved,\s*"CANONICAL_REQUIRED",\s*automatic \? "system" : "human"/);
 });
 
 test("SiloPage projetada não é SiloPage canônica", () => {

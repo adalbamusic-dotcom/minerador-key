@@ -8,6 +8,9 @@
 > A autorização cobre o código desta SDD. **Não** cobre migration, SQL remoto, commit,
 > deploy nem chamada paga em teste: isso continua com o usuário (`AGENTS.md` §15).
 
+Este desenho foi complementado por
+[`sdd-adendo-decisao-humana-delegada-pelo-chat-2026-09-26.md`](sdd-adendo-decisao-humana-delegada-pelo-chat-2026-09-26.md): a decisão segue humana, mas pode ser aplicada pela IA quando o usuário a aceitar explicitamente no chat, com escopo opt-in `platform.decide`, prévia, hash, permissão e auditoria.
+
 Grau das afirmações (`AGENTS.md` §1): **Verificado no código**, **Verificado no banco**
 (leitura somente, `npx supabase db query --linked`), **Proposto**, **Não encontrado**.
 
@@ -32,18 +35,21 @@ já existe:
    pesquisar keywords de sustentação (paga, só com custo confirmado), importar as
    escolhidas, enviar keywords aprovadas ao Arquiteto, enviar pacote do Radar ao
    Redator, e escrever no Redator (ferramentas que já existiam).
-5. **Parar onde a decisão é humana,** com o link da tela exata, e retomar sozinha
-   quando o estado mostrar que a decisão foi tomada.
+5. **Respeitar onde a decisão é humana.** A IA propõe e mostra a prévia; se o
+   usuário aceitar explicitamente no chat e delegar `platform.decide`, a IA pode
+   aplicar somente aquela decisão, com hash vigente e auditoria. Sem delegação,
+   aponta a tela exata e retoma quando o estado mostrar que a pessoa decidiu.
 6. **Escrever fora da plataforma** (WordPress, mini-WordPress) lendo o mesmo dossiê
    que o Redator lê.
 
 **O que NÃO muda:**
 
 - **Aprovação continua humana** (`AGENTS.md` §9: "decisão final é humana"; SDD do
-  Assunto, P4: "a IA nunca declara Assunto" por conta própria). A IA prepara, mostra e
-  pede; quem aprova é a pessoa, na tela. Declarar um Assunto pela IA só acontece com a
-  frase escolhida pelo usuário no chat, repassada em `userConfirmation` e gravada na
-  trilha.
+  Assunto, P4: "a IA nunca declara Assunto" por conta própria). A pessoa pode
+  aceitar uma proposta no chat e delegar sua aplicação, seguindo as garantias do
+  adendo. A IA não aprova por conta própria. Declarar um Assunto pela IA só
+  acontece com a frase escolhida pelo usuário no chat, repassada em
+  `userConfirmation` e gravada na trilha.
 - **Nenhuma chamada paga sem confirmação:** o plano de custo é gratuito; a execução exige
   o escopo `provider.spend`, o plano autorizado e a confirmação do usuário.
 - **Publicados protegidos:** URL, slug, canonical e principal (`AGENTS.md` §11).
@@ -138,8 +144,10 @@ Leitura estreita (SDD de egress: nada de payload inteiro):
 
 ### 3.5 Escopos novos
 
-`platform.read`, `minerador.write`, `arquiteto.write`, `radar.write`, `provider.spend`.
-Nenhum escopo de aprovação: aprovação é humana e fica na tela.
+`platform.read`, `minerador.write`, `arquiteto.write`, `radar.write`,
+`platform.decide`, `provider.spend`. `platform.decide` é opt-in, não vem marcado
+por padrão e aplica somente decisões que o usuário aceitou no chat. Exclusão,
+restauração, purga e publicação externa continuam fora das ferramentas.
 
 ### 3.6 Sincronia obrigatória
 

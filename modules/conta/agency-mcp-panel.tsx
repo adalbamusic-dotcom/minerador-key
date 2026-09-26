@@ -44,7 +44,7 @@ function scopeTitles(scopes: readonly AgencyMcpScope[]) {
 export function AgencyMcpPanel({ data, saving, agencyRef, mutate, reload, notify }: AgencyMcpPanelProps) {
   const [guide, setGuide] = useState<GuideKey>("chatgpt");
   const [provider, setProvider] = useState<AgencyMcpProviderKey>("chatgpt");
-  const [clientName, setClientName] = useState("Cliente MCP do Redator");
+  const [clientName, setClientName] = useState("Cliente MCP do Minerador Key");
   const [scopes, setScopes] = useState<AgencyMcpScope[]>([...WRITER_MCP_DEFAULT_SCOPES]);
   const [showRevokedClients, setShowRevokedClients] = useState(false);
   const [showRevokedGrants, setShowRevokedGrants] = useState(false);
@@ -112,10 +112,11 @@ export function AgencyMcpPanel({ data, saving, agencyRef, mutate, reload, notify
     claude: {
       title: "Claude",
       steps: [
-        { text: "No claude.ai, abra Configurações → Conectores → Adicionar conector personalizado. Informe um nome e a URL do servidor igual ao endpoint acima.", hint: { title: "Claude Code e Desktop", description: "No Claude Code use: claude mcp add --transport http redator <endpoint>. O Claude Desktop aceita o mesmo endpoint remoto em Conectores." } },
-        { text: "Clique em Conectar. O login desta plataforma abre; entre com a sua conta normal." },
-        { text: "Na tela Autorizar acesso ao Redator, escolha as Marcas e as permissões e aprove." },
-        { text: "No chat, ative o conector nas ferramentas e peça o perfil da conexão do Redator." },
+        { text: "No claude.ai Pro ou Max, abra Customize → Connectors → + → Add custom connector. Em Team ou Enterprise, um Owner precisa adicionar o conector em Organization settings → Connectors; depois cada usuário se conecta em Customize → Connectors.", hint: { title: "Claude Code e Desktop", description: "Conectores remotos do Claude são chamados pela infraestrutura da Anthropic e exigem um servidor acessível pela internet. Claude Code também pode usar `claude mcp add --transport http minerador-key <endpoint>`." } },
+        { text: "Informe o nome Minerador Key e a URL HTTPS exibida acima. Deixe Client ID e Client Secret em Advanced settings vazios: o endpoint publica OAuth e registro dinâmico." },
+        { text: "Clique em Connect. O login desta plataforma abre; entre com sua conta normal e confira Marca e permissões na tela de consentimento." },
+        { text: "Selecione platform.read, as áreas necessárias e, se você quer delegar decisões aceitas no chat, marque platform.decide conscientemente. Esta permissão vem desmarcada; provider.spend também." },
+        { text: "Ative o conector na conversa e teste nesta ordem: get_platform_guide → get_platform_state → find_topic_in_platform → declare_subjects em preview. O preview não grava." },
       ],
     },
     custom: {
@@ -135,7 +136,7 @@ export function AgencyMcpPanel({ data, saving, agencyRef, mutate, reload, notify
       : <span className={offBadge}>Desativado</span>;
 
   const checklist = [
-    { ok: httpsEndpoint, label: "Servidor MCP publicado em HTTPS", detail: data.mcpEndpoint, hint: "Endereço que os aplicativos usam para chamar as ferramentas do Redator. Precisa ser HTTPS para clientes remotos." },
+    { ok: httpsEndpoint, label: "Servidor MCP publicado em HTTPS", detail: data.mcpEndpoint, hint: "Endereço que os aplicativos usam para chamar as ferramentas do Minerador Key. Precisa ser HTTPS e acessível pela internet para conectores remotos do Claude." },
     { ok: readiness.status !== "disabled" && Boolean(data.mcpMetadataUrl), label: "Metadata OAuth do recurso", detail: data.mcpMetadataUrl || "não publicado", hint: "Documento público que diz aos aplicativos qual servidor de autorização emite tokens para este MCP. Sem ele o aplicativo responde que o servidor não implementa OAuth." },
     { ok: oauthReady, label: "Servidor de autorização (Supabase)", detail: readiness.reason ? MCP_OAUTH_REASON_LABELS[readiness.reason] : `${readiness.issuer}${readiness.checkedAt ? ` · verificado ${formatDateTime(readiness.checkedAt)}` : ""}`, hint: "É quem faz o login e emite os tokens. Fica no projeto Supabase da plataforma e é ligado pela Plataforma, não pela Agência." },
   ];
@@ -143,8 +144,8 @@ export function AgencyMcpPanel({ data, saving, agencyRef, mutate, reload, notify
   return <section className={panel} aria-labelledby="agency-mcp-title">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex items-start gap-3"><Bot className="mt-0.5 h-5 w-5 shrink-0 text-context-accent" aria-hidden="true" /><div>
-        <h2 id="agency-mcp-title" className="text-xl font-semibold">MCP do Redator</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">ChatGPT, Claude e outros aplicativos de IA operam o Redator desta Agência pelo mesmo servidor. Cada usuário conecta o próprio aplicativo com a conta da plataforma e escolhe quais Marcas ele pode ler e rascunhar. Nada é aprovado ou publicado pelo aplicativo.</p>
+        <h2 id="agency-mcp-title" className="text-xl font-semibold">MCP do Minerador Key</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-muted">ChatGPT, Claude e outros aplicativos de IA usam o mesmo servidor para ler e operar os módulos autorizados desta Agência. Cada usuário conecta o aplicativo com a própria conta e escolhe Marcas e permissões. Decisões delegadas exigem a permissão opcional, prévia e aceite específico no chat; publicação e exclusão não ficam disponíveis.</p>
       </div></div>
       <div className="flex items-center gap-2">{readinessBadge}<InfoHint title="Estado do OAuth" description="Pronto: aplicativos conseguem fazer login e pedir consentimento. Pendente: falta uma etapa da plataforma, descrita na lista abaixo. Desativado: a conexão por OAuth está desligada nesta plataforma." /></div>
     </div>

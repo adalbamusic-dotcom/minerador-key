@@ -174,14 +174,14 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
   type Target = { brandId?: string | null; documentId?: string; read?: Exclude<TargetRead, "owner">;
     /** As palavras do usuário aceitando a ação. Só as ferramentas de escrita da plataforma mandam. */
     humanConfirmation?: string | null };
-  type Resolved = { access: WriterMcpBrandAccess; row: TargetRow | null };
+  type Resolved = { access: WriterMcpBrandAccess; row: TargetRow | null; requestId: string };
 
   /*
    * A Marca vem do documento quando há documento; senão do parâmetro; senão
    * é implícita só quando o principal tem uma única Marca. Documento fora do
    * grant responde como inexistente, sem revelar que existe noutra Marca.
    */
-  const resolveTarget = async (target: Target): Promise<Resolved> => {
+  const resolveTarget = async (target: Target): Promise<Omit<Resolved, "requestId">> => {
     if (!principal.brands.length) throw new ToolFailure("grant_required", { consentUrl: principal.consentUrl, message: "Nenhuma Marca autorizada para esta conexão. Abra o link e escolha as Marcas e permissões." });
     if (target.documentId) {
       // Todos os caminhos respondem document_not_found no mesmo ponto, antes de escopo e auditoria.
@@ -220,7 +220,7 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
       });
     };
     try {
-      resolved = await resolveTarget(target);
+      resolved = { ...await resolveTarget(target), requestId };
       for (const required of Array.isArray(scope) ? scope : [scope as WriterMcpScope]) {
         if (!resolved.access.scopes.includes(required)) throw new ToolFailure("scope_denied", { scope: required, consentUrl: principal.consentUrl, message: `Esta conexão não tem a permissão ${required}. O usuário pode reconsentir na Conta → Conexões de IA.` });
       }

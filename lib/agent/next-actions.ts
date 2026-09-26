@@ -56,7 +56,8 @@ export function resolveNextActions(state: PlatformStateSnapshot): { actions: Nex
   const brutas = state.minerador.byStatus.bruto ?? 0;
   const emRevisao = state.minerador.byStatus.em_revisao ?? 0;
   if (brutas > 0) {
-    push("minerador.measure_and_qualify", `${brutas} keyword(s) em 'bruto' aguardam medição e Lógica no Processador.`, [], brutas);
+    push("minerador.run_logic", `${brutas} keyword(s) em 'bruto' podem receber a Lógica determinística pelo MCP; obtenha os IDs em list_platform_keywords.`, [], brutas);
+    push("minerador.measure_keywords", `${brutas} keyword(s) em 'bruto' aguardam medição de Volume e Resultados na tela do Minerador.`, [], brutas);
   }
   if (brutas + emRevisao > 0) {
     push("minerador.review_and_approve", `${brutas + emRevisao} keyword(s) aguardam revisão e aprovação humana.`, [], brutas + emRevisao);

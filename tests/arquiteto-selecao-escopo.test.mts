@@ -131,8 +131,12 @@ test("o painel e os handlers usam o mesmo escopo", () => {
    * menos um artigo", sobre a mesma seleção.
    */
   assert.match(workspace, /resolveFormationSelectionScope\(\{ selectedArticleIds, articles: articlesList \}\)/);
-  const recusas = workspace.split("} = formationScopeRef.current;").length - 1;
-  assert.equal(recusas, 2, "processar e concluir precisam do mesmo portão");
+  const processar = workspace.slice(workspace.indexOf("const processArticleFormation"), workspace.indexOf("const materializeApprovedArticleDnas"));
+  const concluir = workspace.slice(workspace.indexOf("const confirmArticleFormation"), workspace.indexOf("Encadeia o Assunto depois do readback"));
+  assert.match(processar, /formationScopeRef\.current\.scope/);
+  assert.match(processar, /formationScopeRef\.current\.universes/);
+  assert.match(concluir, /formationScopeRef\.current\.scope/);
+  assert.match(concluir, /formationScopeRef\.current\.universes/);
   // O ref existe porque lista de dependência envelhece: os dois `useCallback`
   // liam a memo sem citá-la nas dependências e ficavam congelados no escopo da
   // renderização em que nasceram.

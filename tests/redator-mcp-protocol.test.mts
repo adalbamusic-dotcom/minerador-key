@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { createWriterServer } from "../app/api/mcp/redator/route.ts";
+import { catalogToolNames } from "../lib/agent/platform-catalog.ts";
 
 type Principal = Parameters<typeof createWriterServer>[0];
 
@@ -59,7 +60,8 @@ test("MCP inicializa e anuncia ferramentas com anotações de leitura/escrita", 
   for (const name of ["approve_writer_document", "publish_document", "delete_writer_document", "update_article_dna", "resolve_writer_divergence",
     "approve_keywords", "delete_keywords", "purge_keywords", "approve_article_dna", "approve_silo", "approve_silo_page", "finalize_radar", "publish_article"])
     assert.equal(byName.has(name), false, name);
-  assert.equal(tools.length, 25, "as 14 do Redator e as 11 da plataforma");
+  for (const name of catalogToolNames()) assert.ok(byName.has(name), `ferramenta ausente no servidor: ${name}`);
+  assert.equal(tools.length, catalogToolNames().length, "o servidor anuncia exatamente todas as ferramentas do catálogo");
 });
 
 test("a instrução do servidor ensina manifesto → fundamentos → fatias e leva as guardas (sem FAQ, terceiros, DNA)", async () => {

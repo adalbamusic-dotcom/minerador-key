@@ -1965,3 +1965,19 @@ Ver SDD de [uso da Supabase](../compartilhado/sdd-uso-supabase-orcamento-egress-
 4. **`analise_semantica` no snapshot da mesa** (`/api/inteligencia`): tirá-la
    cortaria ~96% do que sobrou, mas muda o DTO da hidratação global —
    estrutural.
+
+## Execução da Lógica pelo MCP — 2026-09-26
+
+- [x] Extrair o núcleo determinístico para `lib/minerador/logical-batch.ts` e
+  usar a mesma função na tela e em `run_keyword_logic`.
+- [x] Preservar decisões humanas de intenção, nicho e funil; gravar somente
+  depois de derivar o lote e confirmar por compare-and-swap/readback.
+- [ ] Extrair Volume, Resultados e KGR para um núcleo de servidor compartilhado
+  com `plan` grátis, estimativa de custo, aceite explícito, `provider.spend` e
+  readback. Não foram feitas chamadas pagas.
+
+### Validação após extração da Lógica — 2026-09-26
+
+- [x] `test:agent` 44/44 e `test:minerador:dom` 4/4 passaram; TypeScript passou.
+- [ ] Medição de Volume/Resultados/KGR continua como ação da tela até compartilhar
+  a execução, orçamento e readback com o servidor MCP. Nenhum provider foi chamado.

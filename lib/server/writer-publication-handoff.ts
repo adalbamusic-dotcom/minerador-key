@@ -55,12 +55,15 @@ export type WriterPublicationResult = {
   publication: ReturnType<typeof createWriterPublication>;
 };
 
-export async function sendWriterToPublications(input: {
+export async function prepareWriterPublicationHandoff(input: {
   brandId: string;
   documentId: string;
-  actorId: string;
   now?: string;
-}): Promise<WriterPublicationResult> {
+}): Promise<{
+  publication: ReturnType<typeof createWriterPublication>;
+  documentHash: string;
+  sourceSnapshot: Record<string, unknown>;
+}> {
   const client = getOperationalClient();
 
   /* ---------- 1. VALIDAR MARCA E DOCUMENTO, NA MESMA CONSULTA ---------- */
@@ -143,6 +146,32 @@ export async function sendWriterToPublications(input: {
   const article = artefato.data.payload as VersionEnvelope<ArticleDNA>;
 
   const publication = createWriterPublication({ brandId: input.brandId, document, article }, input.now);
+  return {
+    publication,
+    documentHash: documento.data.content_hash as string,
+    sourceSnapshot: {
+      brandId: input.brandId,
+      documentId: input.documentId,
+      articleId: documento.data.article_id,
+      articleDnaVersionId: documento.data.article_dna_version_id,
+      documentStatus: documento.data.status,
+      documentHash: documento.data.content_hash,
+      radarAnalysisVersionId: document.radarOrigin.analysisVersionId,
+      evidenceBundleHash: document.radarOrigin.evidenceBundleHash,
+      pendingBlockingDecisions: bloqueantes.length,
+      publicationId: publication.id,
+      slug: publication.slug,
+    },
+  };
+}
+
+export async function sendWriterToPublications(input: {
+  brandId: string;
+  documentId: string;
+  actorId: string;
+  now?: string;
+}): Promise<WriterPublicationResult> {
+  const { publication, documentHash } = await prepareWriterPublicationHandoff(input);
 
   /* ---------- 5. PERSISTIR ---------- */
   const repositorio = new PublicationRepository();
@@ -170,7 +199,7 @@ export async function sendWriterToPublications(input: {
   return {
     change,
     publicationId: relido.publication.id,
-    documentHash: documento.data.content_hash as string,
+    documentHash,
     publication: relido.publication,
   };
 }

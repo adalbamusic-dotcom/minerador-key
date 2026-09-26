@@ -10,15 +10,16 @@
 /*
  * OS ESCOPOS DA PLATAFORMA INTEIRA — SDD `sdd-plataforma-para-agentes-mcp-2026-09-26.md`.
  *
- * Os três primeiros são do Redator e não mudam. Os cinco novos abrem as outras
- * áreas. Nenhum escopo aprova: aprovação é humana e fica na tela.
+ * Os três primeiros são do Redator e não mudam. Os novos abrem as outras
+ * áreas. `platform.decide` só delega decisões que o usuário aceitou no chat,
+ * com prévia, hash de decisão e trilha; fica opt-in.
  *
  * A ordem é a do pipeline, e é a ordem em que a tela de consentimento lista.
  * O banco confere a mesma lista (`writer_mcp_grants_scopes_check`, migration m8).
  */
 export const WRITER_MCP_SCOPES = [
   "writer.read", "writer.draft.write", "writer.media.brief",
-  "platform.read", "minerador.write", "arquiteto.write", "radar.write", "provider.spend",
+  "platform.read", "minerador.write", "arquiteto.write", "radar.write", "platform.decide", "provider.spend",
 ] as const;
 export type WriterMcpScope = typeof WRITER_MCP_SCOPES[number];
 
@@ -29,7 +30,7 @@ export type WriterMcpScope = typeof WRITER_MCP_SCOPES[number];
  * com `provider.spend` nela, um clique rápido em "Autorizar" daria à IA
  * permissão de pagar. Gastar precisa ser escolha marcada pela pessoa.
  */
-export const WRITER_MCP_DEFAULT_SCOPES: readonly WriterMcpScope[] = WRITER_MCP_SCOPES.filter((scope) => scope !== "provider.spend");
+export const WRITER_MCP_DEFAULT_SCOPES: readonly WriterMcpScope[] = WRITER_MCP_SCOPES.filter((scope) => scope !== "provider.spend" && scope !== "platform.decide");
 
 /** Escopos OIDC anunciados ao cliente. Os de produto ficam fora do token de propósito. */
 export const WRITER_MCP_OIDC_SCOPES = ["openid", "email", "profile"] as const;
@@ -42,6 +43,7 @@ export const WRITER_MCP_SCOPE_LABELS: Record<WriterMcpScope, { title: string; de
   "minerador.write": { title: "Trabalhar no Minerador", description: "Declarar os Assuntos que você aceitar, planejar a pesquisa de keywords e importar as escolhidas. Não aprova nem exclui keywords." },
   "arquiteto.write": { title: "Enviar ao Arquiteto", description: "Enviar ao Arquiteto as keywords que você já aprovou. Não forma nem aprova artigos e silos." },
   "radar.write": { title: "Enviar ao Redator", description: "Enviar ao Redator os artigos cuja investigação você já finalizou no Radar." },
+  "platform.decide": { title: "Delegar decisões aceitas no chat", description: "Aplicar decisões específicas que você aceitou no chat, sempre depois de prévia, hash vigente e registro do aceite. Não publica nem exclui." },
   "provider.spend": { title: "Gastar com provider", description: "Executar pesquisas pagas (DataForSEO, Google Ads) depois de mostrar o custo e você aceitar. Desmarcado por padrão." },
 };
 
@@ -81,7 +83,7 @@ export function writerMcpScopesRequireEdit(scopes: readonly WriterMcpScope[]): b
 }
 
 /** Escopo que escreve em algum módulo — o consentimento avisa a pessoa. */
-export const WRITER_MCP_WRITE_SCOPES: readonly WriterMcpScope[] = ["writer.draft.write", "writer.media.brief", "minerador.write", "arquiteto.write", "radar.write", "provider.spend"];
+export const WRITER_MCP_WRITE_SCOPES: readonly WriterMcpScope[] = ["writer.draft.write", "writer.media.brief", "minerador.write", "arquiteto.write", "radar.write", "platform.decide", "provider.spend"];
 
 export function normalizeClientName(input: unknown, fallback = "Cliente MCP"): string {
   const name = typeof input === "string" ? input.trim().replace(/\s+/g, " ") : "";

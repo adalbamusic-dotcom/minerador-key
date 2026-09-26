@@ -230,6 +230,7 @@ test("apply cria as novas como bruto, declaradas pelo humano, e reaplicar não e
     assert.equal(semantic.keyword_subject_actor, ACTOR);
     assert.equal(semantic.keyword_subject_origin, "import");
     assert.equal((semantic.subject_import as Row).importRequestId, REQUEST);
+    assert.equal("channel" in (semantic.subject_import as Row), false, "a rota existente mantém o formato anterior");
     assert.equal("discovery_import" in semantic, false);
   }
   const subject = resolveKeywordSubject(created[0].analise_semantica as Row);
@@ -247,6 +248,16 @@ test("apply cria as novas como bruto, declaradas pelo humano, e reaplicar não e
   assert.equal(db.writes().length, writesBefore, "reimportar não cria nem regrava");
   assert.deepEqual(second.createdIds, []);
   assert.deepEqual(second.rows.map(row => row.outcome), ["unchanged", "unchanged"]);
+});
+
+test("declaração via MCP liga o Assunto ao grant e ao evento auditado sem mudar o ator", async () => {
+  const db = fakeSupabase({ minerador_keywords: [] });
+  const channel = { kind: "mcp" as const, grantId: "grant-1", requestId: "request-1" };
+  const result = await run(db, "apply", [{ keyword: "SEO para clínicas" }], { channel });
+  assert.equal(result.ok, true);
+  const semantic = db.data.minerador_keywords[0].analise_semantica as Row;
+  assert.deepEqual((semantic.subject_import as Row).channel, channel);
+  assert.equal(semantic.keyword_subject_actor, ACTOR);
 });
 
 test("existente sem Assunto não é declarada sem marcação; com marcação, é declarada", async () => {

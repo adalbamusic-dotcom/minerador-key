@@ -245,8 +245,8 @@ test("a aba Silos tem cabeçalho próprio na mesma mesa", () => {
   // O cabeçalho ganhou o "selecionar todos" (§8) e deixou de ser auto-fechado.
   // O que este teste guarda é a ESCOLHA por projeção, não a forma da tag.
   assert.ok(workspace.includes('siloView === "sitemap" ? <SitemapViewHeader /> : <TerritorialWorkspaceHeader'));
-  // Uma tabela só: Artigos e Links continuam com os cabeçalhos deles.
-  assert.equal((workspace.match(/<thead/g) || []).length, 1);
+  // A projeção de Silos e a mesa de Artigos têm cabeçalhos independentes.
+  assert.equal((workspace.match(/<thead/g) || []).length, 2);
 
   const rows = readFileSync("modules/arquiteto/territorial-workspace-rows.tsx", "utf8");
   // Colunas condensadas: hipótese e evidência longas foram para a expansão da

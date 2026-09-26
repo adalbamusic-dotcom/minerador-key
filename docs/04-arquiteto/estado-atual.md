@@ -1,3 +1,37 @@
+## Formação automática a partir de Assuntos — 2026-09-26
+
+SDD autorizada: [formação automática](sdd-automatizacao-assuntos-2026-09-26.md).
+**Estado desta entrega:** verificado no código e confirmado por testes locais
+(`test:arquiteto` 2.402/2.402; `test:agent` 44/44; `tsc --noEmit`; build de
+produção Next.js 16; ESLint dos quatro arquivos auxiliares alterados). A
+homologação real da marca permanece pendente do deploy do usuário. O ESLint do
+arquivo monolítico `arquiteto-workspace.tsx` ainda retorna 124 erros em várias
+áreas; essa dívida ampla não foi tratada nesta correção. Não houve escrita no
+Supabase remoto nem chamada paga de SERP nesta entrega.
+
+- A frase do Assunto agora participa do pareamento lexical; também entram nota,
+  pesquisa por Assunto, entidade, lista, intenção e funil. A elegibilidade
+  exige evidência suficiente, e os dados continuam limitados a pacotes
+  aprovados já recebidos pela marca ativa.
+- Um início de lote agrupa por Silo confirmado e intenção, reserva uma
+  principal com Volume validado e divide em artigos de até seis keywords.
+  Sustentações sem principal possível ficam sem agrupamento e recebem um
+  motivo; não se perdem nem viram principal sem volume.
+- O vínculo do Assunto e as decisões da cópia de trabalho são gravados pelo
+  writer canônico e confirmados por readback. O Arquiteto segue para a SERP e,
+  depois do readback e dos gates, materializa ArticleDNA e fecha os Silos
+  elegíveis sem confirmação por artigo.
+- Conteúdo publicado, slug, URL, canonical, marca e outros Assuntos presos
+  continuam protegidos. Divergência, canibalização, classificação pendente,
+  colisão de slug ou evidência incompleta interrompem apenas o candidato
+  afetado. O plano de custo ainda exige aceite único quando a SERP precisar de
+  chamadas pagas; cache válido não gera nova chamada.
+- Catálogo e playbook MCP atualizados. O começo do lote continua sendo uma
+  ação na interface; Claude pelo MCP consegue orientar para a tela e retomar a
+  leitura, mas ainda não tem ferramenta para disparar essa formação. O MCP
+  também não recebe autorização de custo por essa rota nem substitui decisões
+  humanas nos candidatos bloqueados.
+
 ## Silo publicado com o endereço do site e conflitos ditos (correção da revalidação dos publicados) — 2026-09-25
 
 ```text
@@ -140,7 +174,7 @@ Um Assunto que é a principal de alguma unidade não é tronco solto (`trunkAnch
 - "Prender Assunto", "Soltar Assunto" e "Confirmar Assunto do Silo" (`modules/arquiteto/subject-panels.tsx` e `modules/arquiteto/subject-workspace-model.ts`, novos). Com a Definição já gravada, cada ação cria uma versão `proposed` pelo gravador existente (`persistArquitetoArtifact`, ação `edit`) e a tela usa a versão que o servidor devolve. Sem Definição, o vínculo é gravado na cópia de trabalho (item 7) e vai ao ArticleDNA ao "Concluir formação".
 - O vínculo só vale com candidato vivo. Quando a formação muda, `migrateWorkingSubjectAnchors` o leva ao ref que recebe a maioria dos membros (no empate, o da principal), na mesma escrita da formação (item 7). Se não houver destino, o Assunto volta a "aguardando sustentação", nunca vira tronco sem artigo.
 - Silo: o Assunto do SiloDNA vira sugestão aos artigos do mesmo território (`siloSubjectTerritories`), e cada artigo confirma. Silo que já tem SiloPage é recusado, com o motivo explicado, na tela e no servidor (item 6).
-- Diálogo de sustentação: mostra motivo, sinais, evidência e o Silo de cada keyword. Sem Silo confirmado, a caixa fica desabilitada. Ao confirmar, as marcadas viram um artigo novo pela mesma escrita da formação, com readback, e o vínculo do Assunto vai junto nessa escrita. A principal sai delas por `suggestPrincipal`, e o Assunto fica como tronco, fora dos membros.
+- Diálogo de sustentação: mostra motivo, sinais, evidência, elegibilidade e o Silo de cada keyword, sem seleção manual por checkbox. **A ação única inicia agrupamento por intenção/Silo e processamento automático**; cada artigo tem até seis keywords, principal com Volume validado, Assunto preso como tronco e slug da principal. O fluxo grava a cópia de trabalho com readback, executa SERP se necessário, e conclui cada ArticleDNA/Silo que passar nos gates. A seção inicial deste arquivo e o SDD 2026-09-26 registram as limitações e a homologação pendente.
 - Texto: a SERP da frase é opcional e se mede em Resultados, no Processador do Minerador; não há botão pago no Arquiteto (P7).
 - Diálogos com foco que entra, Tab contido, Escape que fecha e foco que volta a quem abriu. Nos botões repetidos, `aria-label` distinto. Texto com pelo menos 14px e tokens.
 
@@ -4959,3 +4993,35 @@ só quatro tipos. É a mesma classe de defeito já corrigida em
   `tests/arquiteto-artefatos-filtrados-na-consulta.test.mts` acusa isso,
   desde que a comparação seja escrita como `type === ...`. Registrado em
   `test:arquiteto`.
+## Incidente AdalbaPro: confirmação de Silos e cabeças publicadas — 2026-09-26
+
+**Verificado na interface remota antes da correção:** 159 keywords, 154 associadas a sete Silos candidatos, 25 linhas na aba Artigos (incluindo as quatro SiloPages publicadas) e formação bloqueada por ausência de Silo confirmado. O Vínculo mostrava corretamente as cabeças publicadas como `Silo · declarado` e os artigos publicados como `Artigo · declarado`; o defeito estava na passagem do cenário para a confirmação e na reserva das cabeças para a aba Artigos. Nenhum dado remoto foi alterado nesta revisão.
+
+**Verificado no código e confirmado por teste local:** `reservedSiloHeadIds` consulta `readEditorialUnitDeclaration` antes de qualquer hipótese lexical ou estado de confirmação; a aba Artigos local passou de 25 para **21** artigos, com seis keywords reservadas para páginas de Silo (quatro publicadas e duas candidatas). `Confirmar arquitetura` considera as memberships do próprio plano para superar somente `EMPTY_TERRITORY`; depois do lote, exige membro efetivamente aplicado ou já presente antes de confirmar cada Silo. Falha de gravação entra em `failedCount`, sem marcador falso de confirmação completa. Foram preservados os bloqueios de narrativa, consistência, decisão e isolamento. A formação de Article ainda depende de Silo confirmado.
+
+**Ainda não verificado:** confirmação e formação após deploy com o lote real, agrupamento semântico final das livres, revisão da SERP e persistência remota de ArticleDNA/SiloDNA. O teste local cobriu 61 casos focados e a aba Artigos; não executou `Confirmar arquitetura` nem chamadas pagas no banco da marca. Arquivos: `lib/arquiteto/territory.ts`, `modules/arquiteto/arquiteto-workspace.tsx`, `tests/arquiteto-territory.test.mts`; consumidores preservados: confirmação de Silos sem previsão, formação de artigos por Silo e proteção de URL/slug/canonical publicados. Sem migration.
+
+### Correção do gate de publicados, após esclarecimento do dono
+
+**Verificado no código e confirmado por teste local:** o bloqueio acima estava errado para o patrimônio publicado. A declaração `Silo · declarado`/`Artigo · declarado` no Vínculo aprovado e a URL/canonical do site são decisões prévias. `Processar arquitetura` agora separa fatos de propostas: efetiva a membership da cabeça e dos artigos publicados, verifica a gravação por readback e confirma o território publicado protegido no mesmo processamento. O candidato publicado legado é reaproveitado; não nasce segundo Silo. A fronteira escrita para um Silo publicado novo usa somente membros declarados pelo site. O botão `Continuar para Artigos` usa Silos efetivamente confirmados no snapshot, inclusive após F5, sem depender do clique manual em `Confirmar arquitetura`. Propostas de keywords livres e Silos potenciais não recebem aprovação automática. `planPublishedArchitectureRecognition` recusa marca ou endereço divergente e relação de URL ambígua. O catálogo do MCP foi atualizado na mesma entrega. SDD: [efetivação de publicados](sdd-efetivacao-publicados-no-processamento-2026-09-26.md).
+
+**Limite de validação:** teste focado de publicados 26/26, `test:agent` 41/41, `tsc --noEmit` e build de produção passaram. `test:arquiteto`: 2.392/2.394; as duas falhas são as mesmas já registradas na base (teste do Minerador e cabeçalho antigo da aba Silos). Lint direcionado dos arquivos menores passou; o arquivo grande da mesa conserva débitos de lint anteriores. O fluxo real após deploy, o readback remoto da AdalbaPro, a formação dos artigos e a atribuição Pilar/Suporte ainda não foram homologados. Nenhuma escrita remota, migration, chamada paga, commit ou deploy foi executado nesta correção. Arquivos alterados nesta etapa: `lib/arquiteto/published-architecture-recognition.ts`, `lib/arquiteto/silo-decision-batch.ts`, `modules/arquiteto/arquiteto-workspace.tsx`, `modules/arquiteto/architecture-panel.tsx`, teste de publicados e catálogo MCP. Consumidores preservados: confirmação manual de Silos novos, formação por território, proteção de publicados, isolamento da marca e guia MCP.
+
+### Workbench rolável e validação atual — 2026-09-26
+
+- **Verificado no código:** o painel do Workbench tem altura delimitada por estado e rolagem vertical no painel esquerdo, com `min-h-0`/`overflow-y-auto`. A barra usa o CSS global de `app/globals.css`; não há scrollbar local nem `scrollbar-gutter`. O modal usa `bg-background/80` do sistema visual.
+- **Confirmado por teste local:** `test:arquiteto` passou 2.396/2.396; a checagem focada do Workbench e publicados passou 75/75; `test:agent` 44/44; `test:redator` 358/358; `test:minerador:dom` 4/4. TypeScript e lint direcionado dos núcleos MCP passaram.
+- **Ainda não validado:** renderização visual após deploy e leitura/escrita real dos sete Silos e 21 artigos. `test:visual-system` e `check:visual-system` ainda reportam falhas em áreas preexistentes fora deste ajuste, incluindo cores do Radar e dívida visual de Redator/Publicações; a validação específica do Workbench passou. Nenhuma gravação remota, migration, chamada paga ou deploy foi feito.
+
+### Ação de artigos publicados e erro na verificação — 2026-09-26
+
+- **Corrigido no código:** a coluna Ações não oferece mais `Verificar identidade` para artigo já declarado como publicado. Ela informa `URL, slug e Silo preservados`; o texto acessível explica que o canonical também fica protegido, que keywords continuam seguindo o Vínculo e que não há nova confirmação manual.
+- **Causa do erro reportado:** a rota `/api/arquiteto/publication/verify` respondia com `entityType`, `siloPageId` e `siloPageVersionId`, enquanto `SerpPublicationVerificationSchema` era estrito e não reconhecia esses campos. A validação falhava antes de persistir a evidência. O schema agora aceita esses metadados opcionais, preservando registros antigos.
+- **Confirmado por fixture local:** a resposta com os metadados da rota passa no schema; teste da tela verifica o texto e a ausência do botão para artigos publicados. A checagem online continua diagnóstica e não é gate para reconhecer o artigo/Silo. Verificação manual no navegador após deploy: pendente.
+- **Arquivos:** `modules/arquiteto/arquiteto-workspace.tsx`, `lib/arquiteto/serp-formation.ts`, `tests/arquiteto-serp-formation.test.mts`, `docs/04-arquiteto/spec.md`. Consumidores preservados: dados de verificação SERP antigos, verificação da SiloPage e processamento de identidade já publicada.
+
+### Explicação da seleção de artigos publicados — 2026-09-26
+
+- **Corrigido no código:** quando a seleção contém somente artigos publicados, a recusa informa que eles já são patrimônio/âncoras e não precisam de confirmação novamente. Também orienta a selecionar as linhas de candidatos que representam keywords livres; se agrupadas sob um artigo publicado, a identidade da publicação continua protegida.
+- **Comportamento preservado:** artigos publicados sem `candidateRef` continuam fora do escopo de formação de novos `ArticleDNA`. O ajuste altera a explicação exibida, não publica, reagrupa, confirma nem grava dados remotos.
+- **Confirmado por teste local:** fixture de dois artigos publicados selecionados verifica a mensagem e preservação explícita de URL, slug, canonical e Silo. A homologação da seleção real após deploy continua pendente.

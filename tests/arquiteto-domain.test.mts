@@ -311,13 +311,15 @@ test("Minerador qualifica somente por ação explícita e não chama IA no motor
   const source = await readFile(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /processLogicalKeywordDna\(eligibleKeywords, loadedLists/);
   assert.match(source, /onClick=\{handleQualifySelected\}/);
-  assert.match(source, /<span className="hidden sm:inline">Processar lógica<\/span>/);
+  assert.match(source, /label="Lógica"[\s\S]{0,250}onClick=\{handleQualifySelected\}/);
   assert.match(source, /Mais ações/);
   assert.doesNotMatch(source, /Detectar viés · KeywordDNA/);
   assert.match(source, /onWorkflowStatusChange=\{\(status\) => handleUpdateStatus\(item\.id, status\)\}/);
   const panel = await readFile(new URL("../components/editorial/dna-panels.tsx", import.meta.url), "utf8");
   assert.match(panel, /Status da keyword/);
-  assert.match(panel, /option value="aprovado"/);
+  assert.match(panel, /MINERADOR_EDITORIAL_STATUS_OPTIONS\.map\(option => <option key=\{option\.value\} value=\{option\.value\}>/);
+  const status = await readFile(new URL("../lib/minerador/editorial-status.ts", import.meta.url), "utf8");
+  assert.match(status, /\["bruto", "em_revisao", "aprovado", "rejeitado"\]/);
   const engine = await readFile(new URL("../lib/arquiteto/keyword-dna-engine.ts", import.meta.url), "utf8");
   assert.doesNotMatch(engine, /fetch\(|DEEPSEEK|OPENROUTER|chat\/completions/i);
 });
