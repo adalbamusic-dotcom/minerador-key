@@ -1,3 +1,91 @@
+## Mesmo assunto pela SERP — correção dos dilemas (revisão da entrega) — 2026-09-27
+
+Pedido do dono: trocar a principal Livre dos publicados por uma keyword com volume que divide a SERP, sem mexer no slug travado, e "caprichar essa resposta do sistema a estes dilemas". Regras: Parte D (D1.3, D2.1, D2.2) de [regras da SERP e dos Assuntos](../compartilhado/regras-serp-e-assuntos-2026-09-26.md).
+**Estado desta correção:** verificado no código e confirmado por testes locais com a fixture da leitura real e por simulação da medida completa da AdalbaPro (159 keywords, 25 publicados, top 10 do cache; sem rede) nos três Postos. **Não validado manualmente** na tela real — a homologação é do usuário. Não houve escrita remota, SQL, migration, chamada paga, servidor, build nem git com mudança de estado.
+
+- **Par em outro artigo** (estado novo `pair_in_other_article`, rótulo "Par em outro artigo"): quando o par real do publicado (ou do Assunto) está no MESMO Silo, mas já em outro artigo, o cartão deixou de dizer "nenhuma keyword deste lote trata do mesmo assunto no Google" (era falso). Agora diz qual keyword, em que artigo, quantas páginas divide com cada lado, avisa quando dois publicados disputam o mesmo assunto (canibalização) e oferece "Abrir o artigo …", que abre o artigo na mesa (o mesmo nó do mapa); lá, "Mover para…" leva a keyword com prévia do efeito. Abrir não move nada. Na AdalbaPro: "como atrair pacientes para consultório odontológico" e "como atrair pacientes sem redes sociais" (antes "Sem par no lote").
+- **Volume entre os pares fortes (D1.3)**: entre as keywords que o Google junta (3+ páginas), entra primeiro a de maior volume; com o mesmo volume, mais páginas; palavras só desempatam (`strongSerpVolumeWeight` em `serp-subject-convergence.ts`; a faixa forte continua entre 1 e 2, acima de apoio e de palavras). Em "marketing digital para dentistas", "marketing para dentistas" (210, 3 páginas) e "marketing dentista" (70) entram no lugar de keywords de volume 10 com 4 páginas, e a troca proposta passa a ser aplicável.
+- **Substituta que não cabe**: a troca só é proposta com uma substituta que já está no artigo ou que cabe nele. Se a melhor está fora de um artigo cheio, o cartão diz qual é (`substituteOutsideFullArticle`) e oferece "Abrir este artigo para liberar uma vaga" — nunca mais um "Aplicar troca" inativo sem saída.
+- **Posto Livre sem substituta** vem no título do cartão, com "Buscar reforço". Uma keyword só na vizinhança do Google (2 páginas) é dita como tal ("na vizinhança do Google") no título e na recusa (`serp_support`: "serve para reforçar, mas assumir a principal exige 3 ou mais"); o título não diz mais "divide a SERP" dela.
+- **Posto não declarado**: o cartão diz "Posto: não declarado (o Minerador mostra 'Travado ao slug' por padrão, mas ninguém declarou)" e mostra qual seria a troca se o dono declarasse "Livre" (`swapIfDeclaredFree`, só informação). Nada é proposto nem bloqueado sem declaração (AGENTS §11).
+- **SERP vencida × nunca coletada**: a leitura devolve `collectedAt` na lente que existe mas não serve (aditivo em `missingLenses`); `serpGapsFromMissingLenses` separa `stale`, `never` e `unusable`, e o cartão diz "A SERP de … venceu (coletada há N dias; validade de 30)" com "Coletar de novo (pago, com plano)", ou "nunca teve a SERP coletada".
+- **Posto relido na hora de gravar**: "Aplicar troca" relê `primary_keyword_policy` das publicadas no Minerador (só essa coluna, marca ativa, RLS) antes de decidir; travado, não declarado ou diferente do que a mesa mostrou recusa a troca com o motivo (`freshPublishedPostOf`, `freshPostRefusal`).
+- **Métricas da nova principal**: a nova versão do ArticleDNA leva `primaryKeywordMetrics`, `volumeStrategy` (principal e secundárias; combinado igual, pois o conjunto não muda), `keywordStrategy` (DNA, volume, status KGR, narrativa) e `kgrIdentity` (principal, volume, KGR; confirmada volta a candidata, slug publicado igual) da nova principal. Métrica desconhecida vira `null`, nunca o número da antiga. Só campos que o schema já aceita.
+- **Leitura do cache na sessão**: a resposta fica no `sessionStorage` da aba, por marca, com a assinatura do conjunto e a hora; reabrir a aba ou recarregar em até 20 minutos reaproveita sem consulta nova, e o painel diz isso. "Reler o cache de SERP" sempre relê.
+- Simulação real (AdalbaPro, sem rede): Posto Livre → 3 trocas propostas ("como atrair clientes para consultório" → "como atrair pacientes para o consultório", vol 20, 5 páginas; "marketing digital para dentistas" → "marketing para dentistas", vol 210, 3 páginas; "como atrair pacientes para clínica" → "como atrair clientes para clinica medica", vol 10, 4 páginas, Comercial), 2 reforçados, 2 pares em outro artigo, 1 sem SERP, 18 sem par no lote; nenhuma keyword duplicada ou sumida; teto de 6 respeitado. Travado e não declarado: nenhuma troca.
+- Arquivos: `lib/arquiteto/serp-subject-convergence.ts`, `serp-subject-diagnosis.ts`, `published-primary-swap.ts`, `lib/server/arquiteto-serp-subject-store.ts` (aditivo), `modules/arquiteto/serp-subject-model.ts`, `serp-subject-panels.tsx`, `arquiteto-workspace.tsx`, `lib/agent/platform-catalog.ts`, testes `tests/arquiteto-serp-mesmo-assunto.test.mts` (+6) e `-tela.test.mts` (+5).
+- Testes: `test:arquiteto` 2.485/2.485, `test:arquiteto:servidor` 57/57, `test:arquiteto:lentes` 35/35, `test:agent` 54/54, Minerador por glob 1.137/1.165 (28 falhas, todas da base; nenhuma nova), `tsc --noEmit` limpo no código (ver a limitação do arquivo gerado), `git diff --check` limpo.
+- Limitações: "Manter" continua só no navegador (decisão do dono pendente). O servidor ainda não bloqueia, por conta própria, a gravação de `principalKeywordId` diferente em ArticleDNA publicado sem decisão confirmada e Posto Livre (a tela relê o Posto antes; o bloqueio no servidor é mudança de persistência e pede SDD). A formação ainda ancora o candidato na publicada depois da troca aplicada. O `tsc` do projeto inteiro esbarrou em `.next/dev/types/routes.d.ts` truncado pelo `next dev` em execução (arquivo gerado, fora desta entrega).
+
+## Mesmo assunto pela SERP — a tela dos dilemas (publicados e Assuntos) — 2026-09-26
+
+Pedido do dono: "caprichar essa resposta do sistema a estes dilemas, que vai ter muito". Regras: Parte D (D1, D2, D2.1, D2.2) de [regras da SERP e dos Assuntos](../compartilhado/regras-serp-e-assuntos-2026-09-26.md).
+**Estado desta entrega:** verificado no código e confirmado por testes locais (sem rede, fixture da leitura real). **Não validado manualmente** na tela real — a homologação é do usuário. Não houve escrita remota, SQL, migration, chamada paga, servidor nem build.
+
+- **Leitura da SERP da mesa** (`arquiteto-workspace.tsx`): com a aba Artigos aberta, a mesa pede `POST /api/arquiteto/serp-subject` uma vez por marca e por conjunto de keywords dos Silos confirmados (publicados e Assuntos primeiro, lotes de até 600, `planSerpSubjectRead`), monta `buildSerpSubjectIndex` e o entrega a `planSiloArticleFormation`, `proposeCrossSiloReinforcements` e às três chamadas de `suggestSubjectSupport`. O painel mostra o custo de leitura (egress: consultas, entradas, KB) e diz "Nenhuma chamada paga ao provider". Sem leitura (ou com falha), a formação é a de antes e o painel diz isso. "Reler o cache de SERP" relê.
+- **Painel "Mesmo assunto no Google · publicados e Assuntos"** (`serp-subject-panels.tsx`, modelo puro em `serp-subject-model.ts`): resumo do lote (Reforçados, Trocas sugeridas, Pares em outros Silos, Sem par no lote, Sem demanda no Google, e os demais), filtro por estado (padrão "Pedem decisão") e um cartão por publicado e Assunto com frase curta e o ato:
+  - Reforçado: "Reforçado com N keywords que dividem a SERP[ e M só por palavras]. Cabem mais K." (Assunto: "Assunto sustentado por…"); Posto Livre sem substituta oferece "Buscar reforço".
+  - Troca proposta: "Troca da principal sugerida: <nova> (volume X, Y páginas em comum). URL e slug continuam." com "Aplicar troca" / "Manter".
+  - Par em outro Silo: "O par está no Silo <X>: trazer?" com "Trazer para este artigo" (a mesma decisão de Silo da aba Silos, com lock e releitura).
+  - Sem par no lote: "Nenhuma keyword deste lote trata do mesmo assunto no Google." com "Buscar reforço".
+  - Tema sem demanda no Google: quando a busca de reforço já rodou e nenhuma candidata tem volume do Google Ads (lido da lista local da Pesquisa por Assunto, só leitura, nada apagado).
+  - Par com intenção diferente, Par sem volume e Sem SERP no cache, com "Revisar a intenção no Minerador", "Medir volume no Minerador" ou "Coletar SERP (pago, com plano)" (o caminho pago que já existe, com plano e confirmação; depois a mesa relê o cache).
+  - Posto não declarado em publicado (AGENTS §11): o cartão diz e oferece "Declarar o Posto no Minerador". Só `primary_keyword_policy` gravado conta como declaração; o padrão "Travado" do Minerador não é tratado como decisão.
+  - "Ver a evidência": as páginas em comum no top 10 com as lentes em que cada uma aparece dos dois lados, a lente que falta no cache, e os detalhes do domínio (canibalização entre publicados, barradas pelo DNA, pares já em outro artigo, recusas da substituta).
+- **Aplicar troca (D2.1)**: grava NOVA versão do ArticleDNA do artigo publicado, em revisão, pela porta de versão existente (`persistArticleSubjectVersion`), com `decidePublishedPrimarySwap` (ator autenticado e hora) e `buildPublishedSwapArticlePayload`: nova principal, antiga como secundária, reforço narrativo preservado, `primaryKeywordCandidates`/`primaryKeywordDecision` confirmados, histórico no `primaryKeywordPolicyContext` (Posto inalterado), alerta; URL, slug, canonical, marca e identidade copiados. Passa pelo `ArticleDNASchema` de hoje (nenhum campo novo; rollback seguro acima da F2·A). Sucesso só depois da releitura (`loadCanonicalArquitetoWorkspace`). O botão só fica ativo com Posto Livre, ArticleDNA existente e a substituta dentro dele; senão diz o que falta.
+- **Reconciliação** (`reconciliationPrincipalKeywordId`): o ArticleDNA com troca confirmada de uma principal publicada se reconcilia com o candidato da mesa pela publicada anterior — sem isso ele iria ao acervo como "outra principal". Muda só esse caso.
+- **Manter**: não grava versão (nova versão só com mudança real); fica em `localStorage` por marca, como estado de apresentação, e volta se a substituta mudar. "Rever a sugestão" desfaz.
+- **Aceitar em grupo**: marca trocas e reforços de outro Silo, confirma num diálogo (foco preso, Escape, rótulos) e anuncia só o que a releitura confirmou (`describeSerpSubjectBatchOutcome`).
+- **Artigo selecionado**: `ArticleFormationPanel` ganhou a prop opcional `selectedCandidateSerp` e mostra o mesmo cartão.
+- **Minerador — Buscar reforço de publicado**: `?modo=assunto&reforco=<id>` (`parseReinforcementSearchLink`, `reinforcementSearchFields`, `use-reinforcement-link.ts`): lê só a keyword, na marca da rota, com colunas estreitas (`id,keyword,status,site_origin,primary_keyword_policy`), e preenche tema = principal publicada, página de destino = URL do artigo e nota. Nada é pesquisado sozinho. `parseSubjectSearchLink` e o link de Assunto (`&assunto=<id>`) não mudaram.
+- Arquivos: novos `modules/arquiteto/serp-subject-model.ts`, `modules/arquiteto/serp-subject-panels.tsx`, `modules/minerador/discovery/use-reinforcement-link.ts`, `tests/arquiteto-serp-mesmo-assunto-tela.test.mts`; alterados `arquiteto-workspace.tsx`, `article-formation-panel.tsx` (prop opcional), `subject-panels.tsx` (exporta `useSubjectDialogFocus`), `subject-search-model.ts` e `discovery-keywords-page.tsx` (aditivos), `platform-catalog.ts`, `package.json` (teste novo em `test:arquiteto`).
+- Testes: `test:arquiteto` 2.474/2.474 (16 novos da tela), `test:arquiteto:servidor` 57/57, `test:arquiteto:lentes` 35/35, `test:agent` 44/44, Minerador por glob com as mesmas 29 falhas da base desta sessão (nenhuma nova), `tsc --noEmit`, ESLint dos arquivos novos e alterados menores, `git diff --check`. ESLint do workspace monolítico só roda com heap maior (12 GB): 118 problemas antigos (41 erros, 77 avisos), nenhum nas linhas desta entrega.
+- Limitações: a formação ainda ancora o artigo publicado na keyword publicada; depois da troca aplicada, o candidato da mesa continua mostrando a publicada como "P" enquanto o ArticleDNA (em revisão) já tem a nova principal — o cartão diz "Troca aplicada". "Manter" é local ao navegador. A busca de reforço de publicado casa pela frase e pela URL de destino da lista local (sem campo novo no registro).
+
+## Mesmo assunto pela SERP: reforço, troca da principal Livre e dilemas (domínio e servidor) — 2026-09-26
+
+Regras do dono: Parte D de [regras da SERP e dos Assuntos](../compartilhado/regras-serp-e-assuntos-2026-09-26.md) (D1, D2, D2.1, D2.2).
+**Estado desta entrega:** verificado no código e confirmado por testes locais com
+fixture da leitura real (`test:arquiteto` 2.458/2.458; `test:arquiteto:servidor`
+57/57; `test:arquiteto:lentes` 35/35; `test:agent` 44/44; Minerador por glob com
+as mesmas 31 falhas antigas da base, nenhuma nova; `tsc --noEmit`; `git diff
+--check`). A tela (consumo do índice e do diagnóstico) é outra parte da entrega
+e não está aqui. Não houve escrita remota, SQL, migration nem chamada paga.
+
+- **Medida de mesmo assunto** (`lib/arquiteto/serp-subject-overlap.ts`): páginas
+  em comum no top 10, união das 4 lentes, do cache já pago. Régua nomeada e
+  calibrada em 12.561 pares reais da AdalbaPro: 3+ páginas forte, 2 apoio, 1
+  ruído, 0 nenhuma; sem páginas no cache é `unknown`, nunca zero.
+- **Convergência com a âncora** (`serp-subject-convergence.ts`): SERP forte
+  entra mesmo com poucas palavras; apoio só com palavras; fraca ou nenhuma barra
+  palavras parecidas; sem SERP volta às palavras, dizendo isso. Contradição de
+  DNA continua barrando. Sem índice, a formação é byte a byte a de antes.
+- **Formação** (`article-formation-priority.ts`, `published-silo-membership.ts`):
+  `serpSubject` opcional em `planSiloArticleFormation`, `reservePriorityArticleGroups`
+  e `proposeCrossSiloReinforcements`; reforço de publicado, sustentação de
+  Assunto (medida também contra a frase declarada) e propostas entre Silos
+  usam a SERP como critério principal, com teto de 6 e publicado antes de
+  Assunto. `suggestSubjectSupport` ganhou o sinal `serp_shared_pages`.
+- **Troca da principal (D2.1)** (`published-primary-swap.ts`): Posto Livre
+  propõe a substituta com Volume validado maior, mesma intenção e SERP forte;
+  Travado ao slug nunca propõe; Posto não declarado não libera nem bloqueia.
+  `decidePublishedPrimarySwap` aplica só com ator e hora, confere Posto atual,
+  principal vigente e teto, mantém URL/slug/canonical e rebaixa a antiga a
+  secundária; devolve `primaryKeywordCandidates`/`primaryKeywordDecision` que o
+  ArticleDNA já aceita (nenhum formato novo; rollback seguro acima da F2·A).
+- **Diagnóstico** (`serp-subject-diagnosis.ts`): um estado por publicado e por
+  Assunto — Troca proposta, Reforçado, Par em outro Silo, Par sem volume, Par
+  com intenção diferente, Sem SERP no cache, Tema sem demanda no Google, Sem
+  par no lote (Buscar reforço) — com frase, detalhes (canibalização entre
+  publicados, barrados pelo DNA, pares já em outro artigo) e ações.
+- **Servidor**: `POST /api/arquiteto/serp-subject` (só leitura, permissão
+  `arquiteto:view`) com `readSerpSubjectFootprints`: meta, 10 URLs do digest e
+  domínios da observação por caminho JSON, lotes de 100, filtro de marca;
+  ~1,5 KB por keyword × lente, custo lido devolvido em `egress`. O corpo da
+  lente canônica não é lido (entra pelos domínios).
+- Catálogo MCP: operação `arquiteto.serp_subject_dilemmas`, duas regras de SEO
+  e o playbook `reforcar_publicado_pela_serp`.
+
 ## Formação automática a partir de Assuntos — 2026-09-26
 
 SDD autorizada: [formação automática](sdd-automatizacao-assuntos-2026-09-26.md).

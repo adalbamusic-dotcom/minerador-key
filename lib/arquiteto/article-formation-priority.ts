@@ -27,6 +27,12 @@
  * O DNA vem primeiro (D5): intenção, funil e SERP conclusiva divergentes
  * impedem o agrupamento automático (`formationDnaContradiction`).
  *
+ * D2.2 — MESMO ASSUNTO É O QUE A SERP DIZ. Com o índice de SERP da mesa
+ * (`serpSubject`, lido do cache já pago), o reforço de publicado, a
+ * sustentação de Assunto e as propostas entre Silos usam as PÁGINAS EM COMUM
+ * no top 10 nas 4 lentes como critério principal; palavras e DNA desempatam
+ * (`serp-subject-convergence.ts`). Sem o índice, tudo é como antes.
+ *
  * Domínio puro: sem React, sem storage, sem rede, sem provider.
  */
 import {
@@ -45,6 +51,8 @@ import {
 import { normalizePublishedAddress, regroupFreeAroundPublished } from "./published-silo-membership.ts";
 import { buildSemanticSignature, deriveSemanticNuclei, splitNucleusIfEditorialBoundary, type SemanticNucleus } from "./semantic-nucleus.ts";
 import type { KeywordDnaSignals } from "./keyword-dna-signals.ts";
+import { bestAnchorConvergence, measureAnchorConvergence, type AnchorConvergenceBasis } from "./serp-subject-convergence.ts";
+import type { SerpSubjectIndex } from "./serp-subject-overlap.ts";
 
 type Group = { principalKeywordId: string; keywordIds: string[] };
 type Attachment = { publishedKeywordId: string; affinity: number; reasons: string[] };
@@ -54,6 +62,20 @@ const porAfinidade = (anchor: ArticleFormationKeyword, siloTokens: ReadonlySet<s
     sameArticleAffinity(anchor, right, siloTokens).affinity - sameArticleAffinity(anchor, left, siloTokens).affinity
     || left.keywordId.localeCompare(right.keywordId);
 
+/**
+ * A ordem das candidatas diante de uma âncora: com SERP, a convergência
+ * (páginas em comum primeiro); sem SERP, a afinidade por palavras de antes.
+ */
+const porConvergencia = (anchors: readonly ArticleFormationKeyword[], siloTokens: ReadonlySet<string>, serp: SerpSubjectIndex | null | undefined) => {
+  if (!serp) return porAfinidade(anchors[0], siloTokens);
+  const nota = new Map<string, number>();
+  const score = (keyword: ArticleFormationKeyword) => {
+    if (!nota.has(keyword.keywordId)) nota.set(keyword.keywordId, bestAnchorConvergence(anchors, keyword, { siloTokens, serp }).score);
+    return nota.get(keyword.keywordId)!;
+  };
+  return (left: ArticleFormationKeyword, right: ArticleFormationKeyword) => score(right) - score(left) || left.keywordId.localeCompare(right.keywordId);
+};
+
 /** D5 — a candidata não contradiz o DNA de NENHUM membro já admitido. */
 const semContradicao = (keyword: ArticleFormationKeyword, membros: readonly ArticleFormationKeyword[]) =>
   membros.every(membro => !formationDnaContradiction(membro, keyword));
@@ -62,12 +84,23 @@ const semContradicao = (keyword: ArticleFormationKeyword, membros: readonly Arti
  * As que cabem ao lado da âncora, até as vagas: no piso de convergência com
  * ela e sem contradição de DNA com nenhum membro já admitido.
  */
-function compativeis(anchor: ArticleFormationKeyword, pool: readonly ArticleFormationKeyword[], siloTokens: ReadonlySet<string>, vagas: number, membros: readonly ArticleFormationKeyword[] = [anchor]) {
+function compativeis(
+  anchor: ArticleFormationKeyword,
+  pool: readonly ArticleFormationKeyword[],
+  siloTokens: ReadonlySet<string>,
+  vagas: number,
+  membros: readonly ArticleFormationKeyword[] = [anchor],
+  /** D2.2 — com SERP, a convergência mede contra a âncora e contra o Assunto dela. */
+  serp?: { index: SerpSubjectIndex; subject?: ArticleFormationKeyword | null } | null,
+) {
   const admitidas: ArticleFormationKeyword[] = [];
+  const ancoras = serp?.subject ? [anchor, serp.subject] : [anchor];
   const ordenadas = pool
     .filter(keyword => keyword.keywordId !== anchor.keywordId && !membros.some(membro => membro.keywordId === keyword.keywordId))
-    .filter(keyword => sameArticleAffinity(anchor, keyword, siloTokens).affinity >= AFFINITY_FLOOR)
-    .sort(porAfinidade(anchor, siloTokens));
+    .filter(keyword => serp
+      ? bestAnchorConvergence(ancoras, keyword, { siloTokens, serp: serp.index }).eligible
+      : sameArticleAffinity(anchor, keyword, siloTokens).affinity >= AFFINITY_FLOOR)
+    .sort(porConvergencia(ancoras, siloTokens, serp?.index));
   for (const keyword of ordenadas) {
     if (admitidas.length >= vagas) break;
     if (semContradicao(keyword, [...membros, ...admitidas])) admitidas.push(keyword);
@@ -86,6 +119,10 @@ export function reservePriorityArticleGroups(input: {
   subjectPrincipals?: readonly ArticleFormationKeyword[];
   /** Nome legível de uma keyword, para os motivos. */
   nameOf?: (keywordId: string) => string;
+  /** D2.2 — o índice de SERP da mesa (cache já pago). Sem ele, a regra das palavras. */
+  serpSubject?: SerpSubjectIndex | null;
+  /** A linha de uma keyword do Silo (a frase do Assunto também mede SERP). */
+  keywordOf?: (keywordId: string) => ArticleFormationKeyword | undefined;
 }): {
   publishedGroups: Group[];
   subjectGroups: Array<Group & { subjectKeywordId: string }>;
@@ -103,6 +140,7 @@ export function reservePriorityArticleGroups(input: {
   releasedSupports: Map<string, { subjectKeywordId: string; principalKeywordId: string }>;
 } {
   const nome = input.nameOf || ((keywordId: string) => keywordId);
+  const serp = input.serpSubject || null;
   const publishedIds = new Set(input.published.map(keyword => keyword.keywordId));
   const livres = new Map(input.free.filter(keyword => !keyword.humanFormationRef).map(keyword => [keyword.keywordId, keyword]));
 
@@ -130,7 +168,7 @@ export function reservePriorityArticleGroups(input: {
     const pool = claim.keywordIds
       .filter(keywordId => livres.has(keywordId) && !disputadas.has(keywordId) && !attached.has(keywordId))
       .map(keywordId => livres.get(keywordId)!)
-      .sort(porAfinidade(publicada, input.siloTokens));
+      .sort(porConvergencia([publicada], input.siloTokens, serp));
     const vagas = MAX_ARTICLE_KEYWORDS - 1 - (ocupadas.get(publicada.keywordId) ?? 0);
     const admitidas: ArticleFormationKeyword[] = [];
     for (const keyword of pool) {
@@ -138,7 +176,8 @@ export function reservePriorityArticleGroups(input: {
       if (semContradicao(keyword, [publicada, ...admitidas])) admitidas.push(keyword);
     }
     for (const keyword of admitidas) {
-      const { affinity, reasons } = sameArticleAffinity(publicada, keyword, input.siloTokens);
+      const medida = serp ? measureAnchorConvergence(publicada, keyword, { siloTokens: input.siloTokens, serp }) : null;
+      const { affinity, reasons } = medida ? { affinity: medida.score, reasons: medida.reasons } : sameArticleAffinity(publicada, keyword, input.siloTokens);
       attached.set(keyword.keywordId, {
         publishedKeywordId: publicada.keywordId,
         affinity,
@@ -169,6 +208,7 @@ export function reservePriorityArticleGroups(input: {
       siloTokens: input.siloTokens,
       minimumAffinity: piso,
       occupiedSlots: ocupadas,
+      ...(serp ? { convergenceOf: (publicada: ArticleFormationKeyword, livre: ArticleFormationKeyword) => measureAnchorConvergence(publicada, livre, { siloTokens: input.siloTokens, serp, floor: piso }) } : {}),
     });
     // D5 — dentro da página, nenhum reforço contradiz o DNA de outro.
     const membrosDe = (publicadaId: string) => [
@@ -227,12 +267,13 @@ export function reservePriorityArticleGroups(input: {
     const assuntoPrincipal = input.subjectPrincipals?.find(keyword => keyword.keywordId === claim.subjectKeywordId);
     if (!assuntosComArtigo.has(claim.subjectKeywordId)) {
       if (assuntoPrincipal) {
-        artigo = [assuntoPrincipal.keywordId, ...compativeis(assuntoPrincipal, pool, input.siloTokens, MAX_ARTICLE_KEYWORDS - 1).map(keyword => keyword.keywordId)];
+        artigo = [assuntoPrincipal.keywordId, ...compativeis(assuntoPrincipal, pool, input.siloTokens, MAX_ARTICLE_KEYWORDS - 1, [assuntoPrincipal], serp ? { index: serp } : null).map(keyword => keyword.keywordId)];
       } else {
         const eligible = pool.filter(keyword => input.principalEligibleKeywordIds.has(keyword.keywordId));
         const principal = suggestPrincipal({ keywords: eligible, siloTokens: input.siloTokens });
         const anchor = principal ? pool.find(keyword => keyword.keywordId === principal.keywordId) : undefined;
-        if (anchor) artigo = [anchor.keywordId, ...compativeis(anchor, pool, input.siloTokens, MAX_ARTICLE_KEYWORDS - 1).map(keyword => keyword.keywordId)];
+        const frase = serp ? input.keywordOf?.(claim.subjectKeywordId) ?? null : null;
+        if (anchor) artigo = [anchor.keywordId, ...compativeis(anchor, pool, input.siloTokens, MAX_ARTICLE_KEYWORDS - 1, [anchor], serp ? { index: serp, subject: frase } : null).map(keyword => keyword.keywordId)];
       }
     }
     if (!artigo) continue;
@@ -405,12 +446,20 @@ export function planSiloArticleFormation(input: {
   batchObjective?: FormationBatchObjective;
   /** Ação explícita do dono: "Formar artigos novos com as sobras" (D1.4). */
   formNewFromLeftovers?: boolean;
+  /**
+   * D2.2 — o índice de SERP da mesa, lido do cache já pago
+   * (`POST /api/arquiteto/serp-subject`). Com ele, reforço de publicado e
+   * sustentação de Assunto usam as páginas em comum no top 10 como critério
+   * principal. Sem ele, a formação é a de antes.
+   */
+  serpSubject?: SerpSubjectIndex | null;
 }): SiloFormationPlan {
   const porId = new Map(input.keywords.map(keyword => [keyword.keywordId, keyword]));
   const nome = (keywordId: string) => porId.get(keywordId)?.keyword || keywordId;
   const declarado = (keywordId: string) => input.subjects?.get(keywordId)?.declared === true;
   const comVolume = (keywordId: string) => input.subjects?.get(keywordId)?.volumeValidated === true;
   const siloTokens = input.siloTokens;
+  const serp = input.serpSubject || null;
   /*
    * D1 — O LOTE DIZ O OBJETIVO. Com publicado ou Assunto no lote, a
    * formação melhora o que existe; artigo novo com as sobras só pela ação
@@ -437,6 +486,7 @@ export function planSiloArticleFormation(input: {
     siloTokens,
     subjectPrincipals: assuntosPrincipais,
     nameOf: nome,
+    ...(serp ? { serpSubject: serp, keywordOf: (keywordId: string) => porId.get(keywordId) } : {}),
   });
 
   const nucleusByKeywordId = new Map<string, SiloFormationNucleusInfo>();
@@ -453,17 +503,30 @@ export function planSiloArticleFormation(input: {
     ...reserva.publishedGroups.map(group => ({ kind: "published" as const, principal: porId.get(group.principalKeywordId)!, keywordIds: [...group.keywordIds] })),
     ...reserva.subjectGroups.map(group => ({ kind: "subject" as const, principal: porId.get(group.principalKeywordId)!, keywordIds: [...group.keywordIds], subjectKeywordId: group.subjectKeywordId })),
   ].filter(ancora => Boolean(ancora.principal));
+  /** D2.2 — o porquê de cada livre que a SERP levou a uma âncora (só com índice). */
+  const porqueNaAncora = new Map<string, string[]>();
+  /** D2.2 — com SERP, a âncora é medida pela principal E pela frase do Assunto dela. */
+  const medirNaAncora = (ancora: Ancora, keyword: ArticleFormationKeyword) => {
+    if (!serp) {
+      const affinity = sameArticleAffinity(ancora.principal, keyword, siloTokens).affinity;
+      return { eligible: affinity >= AFFINITY_FLOOR, score: affinity, reasons: [] as string[] };
+    }
+    const frase = ancora.subjectKeywordId ? porId.get(ancora.subjectKeywordId) : undefined;
+    return bestAnchorConvergence(frase ? [ancora.principal, frase] : [ancora.principal], keyword, { siloTokens, serp });
+  };
   const oferecerAsAncoras = (keyword: ArticleFormationKeyword): Ancora | null => {
     const destino = ancoras
       .filter(ancora => ancora.keywordIds.length < MAX_ARTICLE_KEYWORDS)
       .filter(ancora => semContradicao(keyword, ancora.keywordIds.map(id => porId.get(id)!).filter(Boolean)))
-      .map(ancora => ({ ancora, affinity: sameArticleAffinity(ancora.principal, keyword, siloTokens).affinity }))
-      .filter(item => item.affinity >= AFFINITY_FLOOR)
+      .map(ancora => ({ ancora, medida: medirNaAncora(ancora, keyword) }))
+      .filter(item => item.medida.eligible)
+      .map(item => ({ ancora: item.ancora, affinity: item.medida.score, reasons: item.medida.reasons }))
       .sort((left, right) => right.affinity - left.affinity
         || (left.ancora.kind === right.ancora.kind ? 0 : left.ancora.kind === "published" ? -1 : 1)
         || left.ancora.principal.keywordId.localeCompare(right.ancora.principal.keywordId))[0];
     if (!destino) return null;
     destino.ancora.keywordIds.push(keyword.keywordId);
+    if (serp && destino.reasons.length) porqueNaAncora.set(keyword.keywordId, destino.reasons);
     return destino.ancora;
   };
 
@@ -515,12 +578,15 @@ export function planSiloArticleFormation(input: {
     const convergentes = [
       ...proprias,
       ...livresDaReserva
-        .filter(keyword => sameArticleAffinity(assunto, keyword, siloTokens).affinity >= AFFINITY_FLOOR && !formationDnaContradiction(assunto, keyword)),
+        .filter(keyword => serp
+          // D2.2 — a sustentação do Assunto é o que divide a SERP com a frase dele.
+          ? measureAnchorConvergence(assunto, keyword, { siloTokens, serp }).eligible
+          : sameArticleAffinity(assunto, keyword, siloTokens).affinity >= AFFINITY_FLOOR && !formationDnaContradiction(assunto, keyword)),
     ];
     const principal = suggestPrincipal({ keywords: convergentes.filter(keyword => comVolume(keyword.keywordId)), siloTokens });
     if (!principal) continue;
     const ancoraDoArtigo = convergentes.find(keyword => keyword.keywordId === principal.keywordId)!;
-    const ids = [ancoraDoArtigo.keywordId, ...compativeis(ancoraDoArtigo, convergentes, siloTokens, MAX_ARTICLE_KEYWORDS - 1).map(keyword => keyword.keywordId)];
+    const ids = [ancoraDoArtigo.keywordId, ...compativeis(ancoraDoArtigo, convergentes, siloTokens, MAX_ARTICLE_KEYWORDS - 1, [ancoraDoArtigo], serp ? { index: serp, subject: assunto } : null).map(keyword => keyword.keywordId)];
     ancoras.push({ kind: "subject", principal: ancoraDoArtigo, keywordIds: ids, subjectKeywordId: assunto.keywordId });
     assuntosComArtigo.add(assunto.keywordId);
     tirarDaReserva(ids);
@@ -724,7 +790,7 @@ export function planSiloArticleFormation(input: {
       if (nucleusByKeywordId.has(keywordId) && !anexadaPor.has(keywordId)) continue;
       nucleusByKeywordId.set(keywordId, {
         label: nome(ancora.subjectKeywordId || ancora.principal.keywordId), anchors: [], siloRef: input.siloRef, keywordIds: [...ancora.keywordIds],
-        reasons: [`Sustentação do Assunto "${nome(ancora.subjectKeywordId || ancora.principal.keywordId)}", oferecida antes de formar artigo novo (D1).`],
+        reasons: [`Sustentação do Assunto "${nome(ancora.subjectKeywordId || ancora.principal.keywordId)}", oferecida antes de formar artigo novo (D1).`, ...(porqueNaAncora.get(keywordId) || [])],
       });
     }
   }
@@ -732,7 +798,7 @@ export function planSiloArticleFormation(input: {
     if (ancora.kind !== "published") continue;
     nucleusByKeywordId.set(keywordId, {
       label: ancora.principal.keyword, anchors: [], siloRef: input.siloRef, keywordIds: [...ancora.keywordIds],
-      reasons: [`Reforça o artigo publicado "${ancora.principal.keyword}" antes de formar artigo novo (D1/D7).`],
+      reasons: [`Reforça o artigo publicado "${ancora.principal.keyword}" antes de formar artigo novo (D1/D7).`, ...(porqueNaAncora.get(keywordId) || [])],
     });
   }
 
@@ -803,6 +869,14 @@ export type CrossSiloReinforcementProposal = {
   anchorLabel: string;
   affinity: number;
   reason: string;
+  /**
+   * D2.2 (aditivo) — em que a proposta se apoia: `serp` (páginas em comum no
+   * top 10), `serp_and_words`, `words_without_serp`, `words` (sem índice)
+   * ou `subject_support` (sustentação sugerida pelo Minerador).
+   */
+  basis?: AnchorConvergenceBasis | "subject_support";
+  /** Páginas do top 10 em comum com a âncora, quando a SERP mediu. */
+  sharedPageCount?: number;
 };
 
 /**
@@ -834,7 +908,10 @@ export function proposeCrossSiloReinforcements(input: {
   subjectClaims?: readonly { subjectKeywordId: string; keywordIds: readonly string[] }[];
   /** Livres com Volume validado: só elas podem virar a principal de um Assunto sem artigo. */
   principalEligibleKeywordIds?: ReadonlySet<string>;
+  /** D2.2 — o índice de SERP da mesa: a proposta entre Silos segue a SERP. */
+  serpSubject?: SerpSubjectIndex | null;
 }): CrossSiloReinforcementProposal[] {
+  const serp = input.serpSubject || null;
   const reivindicada = new Map<string, Set<string>>();
   for (const claim of input.subjectClaims || []) {
     for (const keywordId of claim.keywordIds) {
@@ -881,13 +958,19 @@ export function proposeCrossSiloReinforcements(input: {
       .filter(destino => !destino.precisaPrincipal || destino.membros.length > 0 || input.principalEligibleKeywordIds?.has(keyword.keywordId))
       .filter(destino => !formationDnaContradiction(destino.alvo, keyword) && semContradicao(keyword, destino.membros))
       .map(destino => {
-        const { affinity, reasons } = sameArticleAffinity(destino.alvo, keyword, destino.siloTokens);
         const sustentacao = Boolean(destino.subjectKeywordId && reivindicada.get(keyword.keywordId)?.has(destino.subjectKeywordId));
-        return { destino, affinity, reasons, sustentacao };
+        if (!serp) {
+          const { affinity, reasons } = sameArticleAffinity(destino.alvo, keyword, destino.siloTokens);
+          return { destino, affinity, reasons, sustentacao, eligible: affinity >= AFFINITY_FLOOR, score: affinity, medida: null };
+        }
+        // D2.2 — mede contra a principal e contra a frase do Assunto do destino.
+        const frase = destino.subjectKeywordId ? input.keywords.get(destino.subjectKeywordId) : undefined;
+        const medida = bestAnchorConvergence(frase && frase.keywordId !== destino.alvo.keywordId ? [destino.alvo, frase] : [destino.alvo], keyword, { siloTokens: destino.siloTokens, serp });
+        return { destino, affinity: medida.lexicalAffinity, reasons: medida.reasons, sustentacao, eligible: medida.eligible, score: medida.score, medida };
       })
-      .filter(item => item.sustentacao || item.affinity >= AFFINITY_FLOOR)
+      .filter(item => item.sustentacao || item.eligible)
       .sort((left, right) => Number(right.sustentacao) - Number(left.sustentacao)
-        || right.affinity - left.affinity
+        || right.score - left.score
         || (left.destino.kind === right.destino.kind ? 0 : left.destino.kind === "published" ? -1 : 1)
         || left.destino.alvo.keywordId.localeCompare(right.destino.alvo.keywordId));
     const escolha = opcoes[0];
@@ -911,7 +994,15 @@ export function proposeCrossSiloReinforcements(input: {
       affinity: Math.round(escolha.affinity * 100) / 100,
       reason: escolha.sustentacao
         ? `sustentação sugerida pelo Minerador para o Assunto "${alvoRotulo}", que está no Silo "${escolha.destino.siloLabel}"`
-        : `${escolha.destino.kind === "published" ? "reforça o artigo publicado" : "sustenta o Assunto"} "${alvoRotulo}" (convergência ${Math.round(escolha.affinity * 100)}%${escolha.reasons.length ? `: ${escolha.reasons.slice(0, 2).join("; ")}` : ""}); no Silo "${silo.siloLabel}" não encontrou publicado nem Assunto compatível`,
+        : escolha.medida && (escolha.medida.basis === "serp" || escolha.medida.basis === "serp_and_words")
+          ? `${escolha.destino.kind === "published" ? "reforça o artigo publicado" : "sustenta o Assunto"} "${alvoRotulo}": ${escolha.medida.overlap!.sharedPageCount} páginas em comum no top 10 do Google; no Silo "${silo.siloLabel}" não encontrou publicado nem Assunto do mesmo assunto`
+          : `${escolha.destino.kind === "published" ? "reforça o artigo publicado" : "sustenta o Assunto"} "${alvoRotulo}" (convergência ${Math.round(escolha.affinity * 100)}%${escolha.reasons.length ? `: ${escolha.reasons.slice(0, 2).join("; ")}` : ""}); no Silo "${silo.siloLabel}" não encontrou publicado nem Assunto compatível`,
+      ...(serp
+        ? {
+          basis: escolha.sustentacao ? "subject_support" as const : escolha.medida!.basis,
+          ...(escolha.medida?.overlap && escolha.medida.overlap.strength !== "unknown" ? { sharedPageCount: escolha.medida.overlap.sharedPageCount } : {}),
+        }
+        : {}),
     });
   }
   return propostas;

@@ -3,6 +3,7 @@ import { PLATFORM_STAGES, type PlatformStage } from "@/lib/agent/platform-catalo
 import type { PlatformStateSnapshot } from "@/lib/agent/platform-state-model";
 import type { TopicCandidate } from "@/lib/agent/topic-match";
 import { resolveEditorialKeywordStatus } from "@/lib/minerador/editorial-status";
+import { radarFrozenObservedAtOfAnalysis } from "@/lib/radar/evidence-bundle-runtime";
 import { buildTenantPath } from "@/lib/tenant-routing";
 import { getOperationalClient, mapPersistenceError } from "./editorial-db";
 import { readMcpRuntimeConfig } from "./mcp-runtime-config";
@@ -151,8 +152,22 @@ export async function readPlatformState(brandId: string): Promise<PlatformStateS
   }
 
   /* ---- Radar e Redator ---- */
+  /*
+   * FINALIZADO É O CARIMBO DA ANÁLISE CORRENTE, não o estado da esteira.
+   *
+   * O fluxo vigente (START → ANALYZE → FINALIZE) deixa a linha em
+   * research_pending depois de finalizada (lib/server/radar-writer-send.ts);
+   * ler `state === "approved"` fazia a IA nunca oferecer o envio ao Redator
+   * (auditoria 2026-09-26, J1/S1/R3). Lê só os três carimbos da última versão
+   * — 553 bytes para três artigos, contra vários MB do payload.
+   *
+   * A última posição do array é a maior `versionNumber` (conferido no banco em
+   * 2026-09-26 nos três itens da Care Glow): o array só recebe versões novas
+   * no fim, e a poda preserva a corrente.
+   */
   const radar = await db.from("editorial_workflow_items")
-    .select("subject_id,state").eq("marca_id", brandId).eq("stage", "radar").eq("subject_type", "article").limit(TETO.artigos);
+    .select("subject_id,state,amz:payload->analysisVersions->-1->payload->amazonFrozenInvestigation->>finalizedAt,yt:payload->analysisVersions->-1->payload->youtubeFrozenInvestigation->>finalizedAt,gg:payload->analysisVersions->-1->payload->finalizedBundle->>frozenAt")
+    .eq("marca_id", brandId).eq("stage", "radar").eq("subject_type", "article").limit(TETO.artigos);
   if (radar.error) mapPersistenceError(radar.error);
 
   const documentos = await db.from("content_documents")
@@ -229,7 +244,18 @@ export async function readPlatformState(brandId: string): Promise<PlatformStateS
       }),
     },
     radar: {
-      items: ((radar.data || []) as Row[]).map(row => ({ articleId: String(row.subject_id), state: String(row.state) })),
+      // O parser tipado do supabase-js não lê o índice -1; o PostgREST lê (conferido em 2026-09-26).
+      items: ((radar.data || []) as unknown as Row[]).map(row => {
+        const articleId = String(row.subject_id);
+        // A precedência Amazon > YouTube > Google é a da casa: remonta os carimbos e pergunta a ela.
+        const finalizedAt = radarFrozenObservedAtOfAnalysis({
+          ...(texto(row.amz) ? { amazonFrozenInvestigation: { finalizedAt: row.amz } } : {}),
+          ...(texto(row.yt) ? { youtubeFrozenInvestigation: { finalizedAt: row.yt } } : {}),
+          ...(texto(row.gg) ? { finalizedBundle: { frozenAt: row.gg } } : {}),
+        });
+        const hasDocument = ((documentos.data || []) as Row[]).some(doc => texto(doc.article_id) === articleId);
+        return { articleId, state: String(row.state), finalizedAt, hasDocument };
+      }),
     },
     redator: {
       documents: ((documentos.data || []) as Row[]).map(row => ({

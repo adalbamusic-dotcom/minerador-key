@@ -45,6 +45,7 @@ import {
 } from "./contracts.ts";
 import { readApprovedPackageRef } from "./keyword-package-alignment.ts";
 import { intentComparisonKey } from "./keyword-dna-signals.ts";
+import type { SerpSubjectIndex, SerpSubjectStrength } from "./serp-subject-overlap.ts";
 
 type RecordLike = Record<string, unknown>;
 
@@ -650,6 +651,8 @@ export const SUBJECT_SUGGESTION_SIGNALS = [
   "same_list",
   "intent_funnel",
   "note_terms",
+  /** D2.2 (aditivo) — divide páginas do top 10 com o Assunto no Google (cache já pago). */
+  "serp_shared_pages",
 ] as const;
 export type SubjectSuggestionSignal = (typeof SUBJECT_SUGGESTION_SIGNALS)[number];
 
@@ -661,6 +664,7 @@ export const SUBJECT_SUGGESTION_SIGNAL_LABELS: Record<SubjectSuggestionSignal, s
   same_list: "mesma lista",
   intent_funnel: "intenção e funil compatíveis com a hipótese do Assunto",
   note_terms: "termos em comum com a nota",
+  serp_shared_pages: "mesmo assunto no Google (páginas em comum no top 10)",
 };
 
 export type SubjectSupportSuggestion = {
@@ -675,6 +679,11 @@ export type SubjectSupportSuggestion = {
   sharedNoteTerms: string[];
   /** Termos normalizados da frase do Assunto que a keyword repete. */
   sharedSubjectTerms: string[];
+  /**
+   * D2.2 (aditivo, só com índice de SERP) — a medida da SERP contra o
+   * Assunto: páginas em comum no top 10 e a frase para a tela.
+   */
+  serp?: { strength: SerpSubjectStrength; sharedPageCount: number; reason: string };
   /** Elegibilidade determinística para o lote automático, sem seleção manual. */
   automaticEligible: boolean;
   /** Já é membro de algum artigo: aparece só como informação. */
@@ -754,6 +763,14 @@ export function suggestSubjectSupport(input: {
   /** Membros de artigo hoje, para a marca "já em artigo". */
   memberKeywordIds?: ReadonlySet<string>;
   limit?: number;
+  /**
+   * D2.2 — o índice de SERP da mesa (cache já pago). Com ele, dividir 3+
+   * páginas do top 10 com o Assunto é sustentação por si só e vem primeiro;
+   * a keyword que só se parece nas palavras, mas que o Google põe em outro
+   * assunto (0 ou 1 página em comum), deixa de entrar no lote automático.
+   * A que veio da Pesquisa por Assunto do próprio Assunto continua valendo.
+   */
+  serpSubject?: SerpSubjectIndex | null;
 }): SubjectSupportSuggestion[] {
   const subjectStanding = readArchitectSubjectStanding(input.subjectKeyword);
   if (!subjectStanding.declared || subjectStanding.brandId !== input.brandId) return [];
@@ -784,6 +801,10 @@ export function suggestSubjectSupport(input: {
     if (dna.subject?.declared === true && !dna.metrics.volume.validated) continue;
 
     const signals: SubjectSuggestionSignal[] = [];
+    const serpMedida = input.serpSubject ? input.serpSubject.overlap(subjectId, keywordId) : null;
+    const serpForte = serpMedida?.strength === "strong";
+    const serpRecusa = serpMedida?.strength === "weak" || serpMedida?.strength === "none";
+    if (serpForte) signals.push("serp_shared_pages");
     const discovery = readSubjectDiscoveryBlock(pkg.analiseSemantica);
     const byId = discovery.subjectKeywordIds.includes(subjectId);
     const byPhrase = !byId && discovery.searches.some(search => normalizeKeyword(search.subjectPhrase) === subjectPhrase);
@@ -810,12 +831,15 @@ export function suggestSubjectSupport(input: {
 
     const labels = signals.map(signal => signal === "note_terms"
       ? `${SUBJECT_SUGGESTION_SIGNAL_LABELS.note_terms} (${sharedNoteTerms.join(", ")})`
+      : signal === "serp_shared_pages"
+        ? `mesmo assunto no Google (${serpMedida!.sharedPageCount} páginas em comum no top 10)`
       : signal === "subject_phrase_terms"
         ? `${SUBJECT_SUGGESTION_SIGNAL_LABELS.subject_phrase_terms} (${sharedSubjectTerms.join(", ")})`
       : SUBJECT_SUGGESTION_SIGNAL_LABELS[signal]);
-    const reason = labels.length === 1
+    const frase = labels.length === 1
       ? `${labels[0][0].toUpperCase()}${labels[0].slice(1)}.`
       : `${labels[0][0].toUpperCase()}${labels[0].slice(1)}; ${labels.slice(1).join("; ")}.`;
+    const reason = serpRecusa ? `${frase} O Google não confirma: ${serpMedida!.sharedPageCount ? "só 1 página" : "nenhuma página"} em comum no top 10.` : frase;
 
     scored.push({
       keywordId,
@@ -829,10 +853,15 @@ export function suggestSubjectSupport(input: {
       // uma decisão persistida. O lote só inclui origem direta, frase
       // lexicalmente próxima, duas evidências semânticas convergentes ou uma
       // nota explícita com sobreposição suficiente.
-      automaticEligible: byId || byPhrase || sharedSubjectTerms.length >= 2
-        || (entity && intent) || sharedNoteTerms.length >= 2,
+      /*
+       * D2.2 — a SERP forte basta; a que o Google põe em outro assunto só
+       * entra pela proveniência da Pesquisa por Assunto do próprio Assunto.
+       */
+      automaticEligible: serpForte || byId || (!serpRecusa && (byPhrase || sharedSubjectTerms.length >= 2
+        || (entity && intent) || sharedNoteTerms.length >= 2)),
       alreadyInArticle: Boolean(input.memberKeywordIds?.has(keywordId)),
-      rank: [byId ? 1 : 0, byPhrase ? 1 : 0, sharedSubjectTerms.length, entity ? 1 : 0, list ? 1 : 0, intent ? 1 : 0, sharedNoteTerms.length],
+      ...(serpMedida ? { serp: { strength: serpMedida.strength, sharedPageCount: serpMedida.sharedPageCount, reason: serpMedida.reason } } : {}),
+      rank: [...(input.serpSubject ? [serpForte ? serpMedida!.sharedPageCount : 0] : []), byId ? 1 : 0, byPhrase ? 1 : 0, sharedSubjectTerms.length, entity ? 1 : 0, list ? 1 : 0, intent ? 1 : 0, sharedNoteTerms.length],
       sort: normalizeKeyword(pkg.keyword),
     });
   }

@@ -275,6 +275,12 @@ export function regroupFreeAroundPublished(input: {
   minimumAffinity?: number;
   /** Vagas já ocupadas em cada publicada (sustentação do Assunto publicado): o teto de seis continua valendo. */
   occupiedSlots?: ReadonlyMap<string, number>;
+  /**
+   * D2.2 — a medida de "mesmo assunto" pela SERP (aditivo). Quando vem, ela
+   * decide se a livre entra (`eligible`) e a ordem das vagas (`score`), no
+   * lugar do piso de afinidade por palavras. Ausente, tudo é como antes.
+   */
+  convergenceOf?: (published: ArticleFormationKeyword, free: ArticleFormationKeyword) => { eligible: boolean; score: number; reasons: string[] };
 }): PublishedRegrouping {
   const publicadas = input.keywords.filter(keyword => keyword.isPublished);
   const porId = new Map(input.keywords.map(keyword => [keyword.keywordId, keyword]));
@@ -289,6 +295,11 @@ export function regroupFreeAroundPublished(input: {
         const livre = porId.get(keywordId);
         if (!livre || livre.isPublished || livre.humanFormationRef || livre.subjectHeldOut || livre.subjectAnchored) continue;
         for (const publicada of publicadas) {
+          const medida = input.convergenceOf?.(publicada, livre);
+          if (medida) {
+            if (medida.eligible) pares.push({ livre: keywordId, publicada: publicada.keywordId, affinity: medida.score, reasons: medida.reasons });
+            continue;
+          }
           const { affinity, reasons } = sameArticleAffinity(publicada, livre, input.siloTokens);
           if (affinity >= (input.minimumAffinity ?? CANNIBAL_FLOOR)) pares.push({ livre: keywordId, publicada: publicada.keywordId, affinity, reasons });
         }

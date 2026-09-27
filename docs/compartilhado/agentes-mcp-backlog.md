@@ -122,3 +122,37 @@ específico.
 
 Autonomia sem instrução e aceite do usuário continua fora de escopo. A IA pode
 sugerir caminhos; ela não inventa aprovações, evidências ou dados publicados.
+
+## Correções da auditoria de 2026-09-26 (segunda rodada) — só no código local
+
+Auditoria em 6 frentes com verificação adversarial: 107 achados confirmados. Parte foi
+resolvida no commit `339a754` (consentimento com mais de 3 escopos, hash do catálogo,
+ferramentas de decisão delegada). Esta rodada corrigiu o que continuava aberto:
+
+- **Radar finalizado** passa a ser o carimbo da análise corrente
+  (`radarFrozenObservedAtOfAnalysis`), lido estreito (553 B para 3 artigos), e não o
+  estado `approved`, que o fluxo atual não grava. Na Care Glow, o artigo finalizado em
+  16/09 sem documento passa a gerar `radar.send_to_writer`.
+- **Colisão com publicado:** `pathOfUrl` aceita o formato real do catálogo, sem esquema
+  (`publishedPathOf`). Antes, as 41 páginas da Care Glow viravam null.
+- **Busca de tema:** plural `-es` ("melhor" × "melhores"), tema de uma palavra só é
+  "mesmo tema" na igualdade, teto por tipo com totais, publicado primeiro no empate.
+- **Conta → Conexões de IA** marca só o padrão (sem gasto nem decisão delegada); sugestão
+  da Agência nunca pré-marca opt-in; o link de reconsentimento (`reconsentUrl`) chega no
+  `scope_denied` mesmo com grant, e o login preserva `mcp_client`.
+- **Posto da principal publicada** saiu de `set_keyword_vinculo`: o adendo §3 e o
+  `AGENTS.md` §11 o mantêm fora do MCP.
+- **P4 do Assunto:** os dois chamadores MCP entram na lista fechada, com teste que prova
+  aceite → hash → aplicar.
+- Testes: `test:agent` 54/54, `test:redator:mcp` 117/117, `test:redator` 358/358, P4
+  16/16, tsc e lint limpos. Todos os testes novos falham no código anterior.
+
+**Verificado no banco (só leitura) em 2026-09-26 23:4x:** a m9 **não** está aplicada
+(`platform.decide` ausente dos dois CHECK) e não existe grant do Claude.
+
+**Ainda aberto:** medição Volume/Resultados como ferramenta; status efetivo da keyword
+(S6); BrandDNA no retrato (J13); `redator.finalize`/`send_to_publications` no catálogo
+e nos próximos passos (S8); Guardião bloqueando prosa com "definir"/"pendente" (S14);
+`test:agent` fora do `npm test` (S5); mapeamento de erros por status (R9); limite de
+chamadas contando dois eventos (J5). O catálogo e o `package.json` estavam sendo editados
+por outra sessão e não foram tocados nesta rodada.

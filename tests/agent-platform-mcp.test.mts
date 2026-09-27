@@ -41,7 +41,10 @@ const brand = (scopes: string[], overrides: Partial<Brand> = {}): Brand => ({
 const principal = (brands: Brand[], overrides: Partial<Principal> = {}): Principal => ({
   authMode: "oauth_supabase", actorId, oauthClientId: "9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d", clientName: "Claude",
   profile: { userId: actorId, role: "cliente", isAdmin: false } as Principal["profile"],
-  brands, consentUrl: "https://mcp.example.test/conta#conexoes-ia", ...overrides,
+  brands,
+  consentUrl: brands.length ? null : "https://mcp.example.test/conta?mcp_client=9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d#conexoes-ia",
+  reconsentUrl: "https://mcp.example.test/conta?mcp_client=9a8b7c6d-5e4f-3a2b-1c0d-9e8f7a6b5c4d#conexoes-ia",
+  ...overrides,
 });
 
 function harness(server: ReturnType<typeof createWriterServer>) {
@@ -201,7 +204,8 @@ test("13 · ler a marca exige platform.read — conexão só do Redator recebe o
   const body = toolText(answer);
   assert.equal(body.code, "scope_denied");
   assert.equal(body.scope, "platform.read");
-  assert.ok(String(body.consentUrl).includes("conexoes-ia"));
+  // Com grant, o link vem do reconsentUrl — e leva o id do cliente para a Conta abrir no lugar certo.
+  assert.ok(String(body.consentUrl).includes("mcp_client="), JSON.stringify(body));
 });
 
 test("13b · ferramentas de decisão recusam apply sem hash e aceite antes de consultar estado", async () => {
@@ -264,4 +268,34 @@ test("18 · cada escrita pede o próprio escopo", async () => {
     assert.equal(body.code, "scope_denied", `${name}: ${JSON.stringify(body)}`);
     assert.equal(body.scope, scope, name);
   }
+});
+
+
+/* ============ conexão: regressões da auditoria de 2026-09-26 ============ */
+
+test("28 · Conta → Conexões de IA oferece tudo, mas marca só o padrão (J3/R7)", () => {
+  const painel = read("modules/conta/ai-connections-panel.tsx");
+  assert.match(painel, /initial\.scopes\.filter\(\(scope\) => WRITER_MCP_DEFAULT_SCOPES\.includes\(scope\)\)/);
+  assert.doesNotMatch(painel, /useState<WriterMcpScope\[\]>\(\(\) => \[\.\.\.initial\.scopes\]\)/);
+  for (const optIn of ["provider.spend", "platform.decide"]) {
+    assert.ok(!(WRITER_MCP_DEFAULT_SCOPES as readonly string[]).includes(optIn), optIn);
+  }
+});
+
+test("29 · sugestão da Agência nunca pré-marca opt-in, e sugestão legada só-Redator cai no padrão", () => {
+  const grants = read("lib/server/writer-mcp-grants.ts");
+  assert.match(grants, /match\.scopes\.filter\(\(scope\) => WRITER_MCP_DEFAULT_SCOPES\.includes\(scope\)\)/);
+  assert.match(grants, /legada \? \[\.\.\.WRITER_MCP_DEFAULT_SCOPES\]/);
+});
+
+test("30 · o link de reconsentimento sobrevive ao login (J4)", () => {
+  const pagina = read("app/(personal)/conta/page.tsx");
+  assert.match(pagina, /redirect\(loginRedirectFor\(\(await searchParams\)\.mcp_client\)\)/);
+  assert.match(pagina, /\/conta\?mcp_client=\$\{encodeURIComponent\(id\)\}/);
+  assert.doesNotMatch(pagina, /redirect\("\/login\?callbackUrl=%2Fconta"\)/, "o redirect fixo perdia o mcp_client");
+});
+
+test("31 · o principal OAuth sempre traz o reconsentUrl, mesmo com grant (J5)", () => {
+  const principalSrc = read("lib/server/writer-mcp-principal.ts");
+  assert.match(principalSrc, /reconsentUrl: writerMcpConsentUrl\(runtime\.publicBaseUrl, identity\.oauthClientId\)/);
 });

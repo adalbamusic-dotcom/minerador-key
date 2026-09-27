@@ -87,6 +87,7 @@ export function ArticleFormationPanel({
   scopeReason,
   confirmed,
   selectedCandidate,
+  selectedCandidateSerp = null,
   selectedSingletonAudit,
   keywordLabels,
   mergeTargets,
@@ -134,6 +135,11 @@ export function ArticleFormationPanel({
   scopeReason: string | null;
   confirmed: { articles: number; keywords: number; pending: number } | null;
   selectedCandidate: ArticleCandidate | null;
+  /**
+   * D2.2 — o dilema de "mesmo assunto no Google" do artigo selecionado,
+   * quando ele é publicado ou de Assunto. Aditivo: sem ele, nada muda.
+   */
+  selectedCandidateSerp?: React.ReactNode;
   /** Presente quando o candidato aberto tem uma keyword só. */
   selectedSingletonAudit: SingletonAudit | null;
   keywordLabels: ReadonlyMap<string, string>;
@@ -521,6 +527,7 @@ export function ArticleFormationPanel({
               <p className="mt-1 text-sm text-text-muted">
                 Principal sugerida: <span className="text-foreground">{nomeDaKeyword(selectedCandidate.principalKeywordId)}</span>
               </p>
+              {selectedCandidateSerp && <div className="mt-2" data-testid="architect-candidate-serp-subject">{selectedCandidateSerp}</div>}
 
               <p className="mt-2 text-sm font-semibold text-text-muted">Keywords</p>
               <ul className="mt-0.5 space-y-0.5 text-sm leading-6" data-testid="architect-candidate-keywords">

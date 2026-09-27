@@ -139,3 +139,51 @@ test("15 · keyword da página do silo igual à de um artigo é aviso: disputari
   plano.siloPage.slug = "silo-pele-oleosa";
   assert.ok(validateSiloPlan(plano, contextoVazio).issues.some(issue => /disputariam/.test(issue.message)));
 });
+
+/* ============ regressões da auditoria de 2026-09-26, com dado REAL ============ */
+
+test("23 · URL do catálogo vem sem esquema: o caminho sai assim mesmo (J3/R2)", () => {
+  // Formato real de brand_site_catalog_entries.normalized_url (Care Glow).
+  assert.equal(pathOfUrl("careglow.com.br/clareamento-e-manchas/melhores-clareadores-de-virilha"), "clareamento-e-manchas/melhores-clareadores-de-virilha");
+  assert.equal(pathOfUrl("careglow.com.br/"), null, "a home não é caminho de artigo");
+  assert.equal(pathOfUrl("https://careglow.com.br/blog/pele-oleosa/"), "blog/pele-oleosa", "com esquema continua valendo");
+});
+
+test("24 · colisão com publicado é detectada a partir do formato real do catálogo", () => {
+  const plano = planoBom();
+  plano.siloPage = { keyword: "clareamento e manchas", slug: "clareamento-e-manchas" };
+  const publicados = ["careglow.com.br/clareamento-e-manchas/melhores-clareadores-de-virilha"]
+    .map(pathOfUrl).filter((p): p is string => Boolean(p));
+  plano.articles[2].slug = "melhores-clareadores-de-virilha";
+  const resultado = validateSiloPlan(plano, { ...contextoVazio, publishedPaths: publicados });
+  assert.equal(resultado.ok, false);
+  assert.ok(resultado.issues.some(issue => issue.severity === "block" && /já está publicado/.test(issue.message)), JSON.stringify(resultado.issues));
+});
+
+test("25 · 'melhor' casa com 'melhores' — título real publicado (R4)", () => {
+  assert.equal(topicCoverage("melhor clareador de virilha", "Melhores clareadores de virilha: como escolher certo | CareGlow"), 1);
+  assert.equal(topicCoverage("protetor solar", "protetores solares"), 1);
+  assert.equal(topicCoverage("creme", "cremes"), 1, "o que já casava continua casando");
+  const resultado = lookupTopic("melhor clareador de virilha", [
+    { kind: "published_page", id: "u", text: "Melhores clareadores de virilha: como escolher certo | CareGlow", where: "Publicado no site" },
+  ]);
+  assert.equal(resultado.same.length, 1);
+  assert.match(resultado.reading, /Não crie outro/);
+});
+
+test("26 · tema de uma palavra não é 'mesmo tema' de tudo que a contém (R12)", () => {
+  const resultado = lookupTopic("pele", [
+    { kind: "article", id: "a", text: "Hidratante para pele oleosa", where: "x" },
+    { kind: "keyword", id: "k", text: "pele", where: "y" },
+  ]);
+  assert.deepEqual(resultado.same.map(item => item.id), ["k"], "só a igualdade exata é o mesmo tema");
+  assert.deepEqual(resultado.related.map(item => item.id), ["a"]);
+});
+
+test("27 · keyword não esconde página publicada: teto por tipo e totais declarados (J4)", () => {
+  const keywords: TopicCandidate[] = Array.from({ length: 20 }, (_, i) => ({ kind: "keyword", id: `k${i}`, text: `pele oleosa ${i}`, where: "Minerador" }));
+  const resultado = lookupTopic("pele oleosa", [...keywords, { kind: "published_page", id: "p", text: "Pele oleosa: guia", where: "Publicado no site" }], 5);
+  assert.equal(resultado.same[0].kind, "published_page", "publicado vem primeiro no empate");
+  assert.ok(resultado.same.some(item => item.id === "p"));
+  assert.deepEqual(resultado.totals.keyword, { matched: 20, shown: 5 });
+});

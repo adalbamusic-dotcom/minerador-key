@@ -87,14 +87,20 @@ export function resolveNextActions(state: PlatformStateSnapshot): { actions: Nex
   }
 
   /* ---- Radar ---- */
-  const emInvestigacao = state.radar.items.filter(item => !["approved", "sent_writer", "sent_planner"].includes(item.state));
+  /*
+   * Três grupos, pelo carimbo de finalização e pelo documento — nunca pelo
+   * estado 'approved' da esteira, que o fluxo atual não grava.
+   */
+  const noRedator = (item: PlatformStateSnapshot["radar"]["items"][number]) =>
+    item.hasDocument || item.state === "sent_writer" || item.state === "sent_planner";
+  const emInvestigacao = state.radar.items.filter(item => !noRedator(item) && !item.finalizedAt);
   if (emInvestigacao.length) {
     push("radar.investigate", `${emInvestigacao.length} artigo(s) em investigação no Radar.`, emInvestigacao.map(item => item.articleId));
     push("radar.finalize", "Quando a investigação tiver evidência suficiente, o usuário finaliza.", emInvestigacao.map(item => item.articleId));
   }
-  const finalizados = state.radar.items.filter(item => item.state === "approved");
+  const finalizados = state.radar.items.filter(item => !noRedator(item) && item.finalizedAt);
   if (finalizados.length) {
-    push("radar.send_to_writer", `${finalizados.length} artigo(s) finalizado(s) ainda não estão no Redator.`, finalizados.map(item => item.articleId));
+    push("radar.send_to_writer", `${finalizados.length} artigo(s) com investigação finalizada ainda não estão no Redator.`, finalizados.map(item => item.articleId));
   }
 
   /* ---- Redator ---- */

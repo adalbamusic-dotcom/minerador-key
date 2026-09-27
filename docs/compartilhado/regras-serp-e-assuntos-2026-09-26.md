@@ -267,6 +267,27 @@ Com publicados ou Assuntos no lote, a formação segue esta ordem:
 - O Silo do artigo publicado sai da URL (caminho sob a URL do Silo publicado), não da semelhança de palavras.
 - Ele recebe livres compatíveis até o teto de 6 (D4). Duas publicadas nunca se fundem.
 
+### D2.1 Posto da principal publicada: travada ou livre para troca
+
+O Posto da keyword publicada diz o que o dono quer do artigo:
+
+- **Travado ao slug:** a principal fica. O artigo só **recebe reforço**.
+- **Livre:** a principal está ali **para ser trocada**. O dono colocou o artigo no lote para melhorá-lo, e em geral a principal atual não tem volume. O Arquiteto **procura e propõe** a melhor substituta:
+  - uma keyword com volume validado;
+  - com a mesma intenção;
+  - que **divida a SERP** com o artigo, com páginas em comum nas 4 lentes.
+- **O que nunca muda na troca:**
+  - URL, slug, canonical e marca;
+  - a principal antiga vira secundária do mesmo artigo.
+- **A troca só é aplicada por decisão humana,** com nova versão e histórico (AGENTS §11).
+
+### D2.2 Medida de "mesmo assunto": a SERP primeiro
+
+- **Duas keywords tratam do mesmo assunto quando a SERP diz isso:** páginas em comum no top 10, nas 4 lentes, lidas do cache já pago. Palavras em comum e a Lógica são sinais de apoio, nunca a medida principal (A2).
+- **O reforço, a troca da principal, a sustentação de Assunto e as propostas entre Silos usam essa medida.**
+- **Quando nenhuma keyword do lote divide a SERP com o publicado ou o Assunto,** o sistema diz isso claramente ("nenhuma keyword deste lote trata do mesmo assunto no Google"). Ele oferece **Buscar reforço**: a Pesquisa por Assunto com o tema e a URL do artigo. E não cola keyword de outro assunto.
+- **Se nem a busca achar demanda,** o sistema informa "tema sem demanda no Google" e deixa a decisão com o dono.
+
 ### D3. Assunto nunca é penalizado
 
 - O Assunto é tronco. Ele nunca aparece como "isolado", "Não aplicável" ou falha por não ter volume ou companhia.

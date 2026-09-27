@@ -1,3 +1,13 @@
+## 35. Mesmo assunto pela SERP e troca da principal Livre — 2026-09-27
+
+Regras permanentes (no código desde 2026-09-27; homologação manual pendente). Fonte: Parte D de [regras da SERP e dos Assuntos](../compartilhado/regras-serp-e-assuntos-2026-09-26.md).
+
+1. **Mesmo assunto é o que a SERP diz**: páginas em comum no top 10, união das 4 lentes, lidas do cache já pago. 3+ páginas é forte; 2 é vizinhança e só vale com palavras em comum; 1 ou 0, outro assunto. Sem SERP no cache não é zero: a formação volta às palavras e diz isso. SERP vencida (30 dias) é dita como vencida, não como ausente.
+2. **Ordem entre os fortes**: maior volume primeiro, depois mais páginas, depois palavras (D1.3). Contradição de DNA barra mesmo com páginas em comum. Teto de 6; publicado antes de Assunto.
+3. **Posto da principal publicada**: "Travado ao slug" só recebe reforço, sem troca nem hipótese. "Livre" está ali para ser trocada: a substituta tem Volume validado maior, mesma intenção e 3+ páginas em comum, e precisa caber no artigo; vizinhança (2 páginas) reforça, mas não assume. Sem política gravada o Posto é desconhecido: nada é proposto nem bloqueado, e a tela pode mostrar a troca que seria proposta se o dono declarasse "Livre".
+4. **A troca é decisão humana**: nova versão do ArticleDNA em revisão, com `primaryKeywordDecision` confirmada (ator e hora), histórico no contexto do Posto, a principal antiga como secundária e as métricas da nova principal; URL, slug, canonical e marca copiados. O Posto é relido do Minerador na hora de gravar; sucesso só com a releitura. "Manter" não gera versão.
+5. **Um estado por publicado e por Assunto**, com frase e ato: Troca proposta, Reforçado, Par em outro Silo, Par em outro artigo, Par sem volume, Par com intenção diferente, Sem SERP no cache, Tema sem demanda no Google, Sem par no lote. "Nenhuma keyword deste lote trata do mesmo assunto no Google" só quando nenhuma divide a SERP; quando o par está em outro artigo, o estado é "Par em outro artigo" e mover é decisão humana.
+
 ## 34. Publicado revalidado: Vínculo, Silo pela URL e remontagem — 2026-09-25
 
 Regras permanentes (no código desde 2026-09-25; homologação manual pendente):

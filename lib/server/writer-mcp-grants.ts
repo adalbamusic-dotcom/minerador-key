@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import {
+  WRITER_MCP_DEFAULT_SCOPES,
   groupWriterMcpGrantsByClient,
   isOAuthClientId,
   normalizeClientName,
@@ -55,7 +56,17 @@ export async function defaultWriterConsentScopes(agencyIds: readonly string[], c
   for (const agencyId of [...new Set(agencyIds)]) {
     try {
       const match = await matchAgencyMcpConnection(agencyId, clientName);
-      if (match?.scopes.length) return match.scopes;
+      if (match?.scopes.length) {
+        /*
+         * A sugestão da Agência pré-marca, mas nunca um escopo opt-in (gasto e
+         * decisão delegada): esses só entram marcados pela pessoa. E sugestão
+         * gravada antes dos escopos da plataforma (só writer.*) não pode
+         * esconder a plataforma de quem reconsente hoje — cai no padrão.
+         */
+        const sugeridos = match.scopes.filter((scope) => WRITER_MCP_DEFAULT_SCOPES.includes(scope));
+        const legada = !sugeridos.some((scope) => !scope.startsWith("writer."));
+        return legada ? [...WRITER_MCP_DEFAULT_SCOPES] : sugeridos;
+      }
     } catch {
       // Sugestão é conveniência; sem ela a tela oferece os três escopos.
     }

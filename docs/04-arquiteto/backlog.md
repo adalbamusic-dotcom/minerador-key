@@ -1,3 +1,40 @@
+## Mesmo assunto pela SERP — correção dos dilemas — 2026-09-27
+
+- [x] Estado "Par em outro artigo": o par real que já está em outro artigo do Silo nunca mais sai como "Sem par no lote"; o cartão abre o artigo que ficou com ele.
+- [x] Volume primeiro entre os pares fortes (D1.3); a substituta do Posto Livre cabe no artigo; substituta fora de artigo cheio vira aviso com "Abrir este artigo para liberar uma vaga".
+- [x] Posto Livre sem substituta no título; vizinhança do Google (2 páginas) dita como tal; Posto não declarado com o padrão do Minerador explicado e a troca hipotética.
+- [x] SERP vencida separada de nunca coletada; Posto relido antes de gravar a troca; métricas da nova principal na nova versão; leitura do cache reaproveitada na sessão (20 min).
+- [ ] Bloqueio no servidor: recusar gravação de ArticleDNA publicado que muda `principalKeywordId` sem `primaryKeywordDecision` confirmada e Posto Livre relido (persistência: exige SDD e autorização).
+- [ ] Decidir onde persistir "Manter" (a decisão `rejected` que `decidePublishedPrimarySwap` já produz) para valer em outro aparelho, outro membro e no MCP.
+- [ ] Conferir o egress real da primeira leitura (`approxBytes`) contra a estimativa de ~1,5 KB por keyword × lente.
+- [ ] **Homologar (usuário) após deploy, na AdalbaPro:** com o Posto declarado "Livre": "como atrair clientes para consultório" → Troca proposta para "como atrair pacientes para o consultório"; "marketing digital para dentistas" → Troca proposta para "marketing para dentistas" (210), com "marketing para dentistas" dentro do artigo; "como atrair pacientes para clínica" → Troca proposta para "como atrair clientes para clinica medica" (Comercial, 4 páginas) — os pares Informativos de 7 páginas aparecem nos detalhes como barrados pelo DNA (não é defeito). "como atrair pacientes para consultório odontológico" e "como atrair pacientes sem redes sociais" → Par em outro artigo, com "Abrir o artigo". Sem declarar o Posto: nenhuma troca, cartão com "não declarado" e a troca hipotética. Depois de aplicar uma troca, conferir no readback que URL, slug e canonical não mudaram e que o volume da principal no ArticleDNA é o da nova.
+
+## Mesmo assunto pela SERP — a tela dos dilemas — 2026-09-26
+
+- [x] Mesa lê a SERP do cache (`/api/arquiteto/serp-subject`, lotes de até 600, egress no painel) e entrega o índice à formação, às propostas entre Silos e às sugestões de sustentação.
+- [x] Painel "Mesmo assunto no Google" com resumo do lote, filtro por estado, cartão por publicado e Assunto, frase por dilema e evidência por lente ao expandir.
+- [x] Aplicar troca como nova versão do ArticleDNA (em revisão), com decisão, histórico e releitura; Manter sem versão; aceitar em grupo com confirmação.
+- [x] Minerador: `?modo=assunto&reforco=<id>` preenche tema e URL do artigo; "Tema sem demanda no Google" lido da lista local da Pesquisa por Assunto.
+- [ ] Formação: honrar a troca confirmada (candidato com a nova principal e a publicada como secundária), para a mesa não mostrar a publicada como "P" depois da troca.
+- [ ] Decidir se "Manter" deve ser persistido no servidor (hoje é estado de apresentação por navegador).
+- [ ] ESLint do `arquiteto-workspace.tsx`: com o heap padrão do Node estoura memória; com 12 GB, 118 problemas antigos (41 erros), nenhum nas linhas da tela de mesmo assunto. Dividir o arquivo.
+- [ ] **Homologar (usuário):** na AdalbaPro, abrir Arquiteto → Artigos, conferir o painel (reforçados, trocas, pares, sem par), "Ver a evidência", "Buscar reforço" (abre a Pesquisa por Assunto com tema e URL), e uma troca em artigo com Posto Livre e ArticleDNA existente — conferir no readback que URL, slug e canonical não mudaram.
+
+## Mesmo assunto pela SERP: reforço, troca da principal Livre e dilemas — 2026-09-26
+
+Domínio e servidor entregues com fixture da leitura real da AdalbaPro; sem escrita remota nem chamada paga.
+
+- [x] Medida de páginas em comum no top 10 nas 4 lentes, com régua nomeada (3 forte, 2 apoio).
+- [x] Leitura estreita e por lote do cache (`/api/arquiteto/serp-subject`), com custo de leitura declarado.
+- [x] Reforço de publicado, sustentação de Assunto e propostas entre Silos pela SERP; palavras e DNA como apoio.
+- [x] Troca da principal com Posto Livre (proposta + decisão humana pura), Travado só reforço.
+- [x] Diagnóstico por publicado e por Assunto, com estado, frase e ação; catálogo MCP atualizado.
+- [ ] Tela: chamar a rota, montar `buildSerpSubjectIndex`, passar `serpSubject` à formação e às propostas, mostrar o diagnóstico e a decisão da troca (outra parte da entrega).
+- [ ] Persistir a troca aceita como nova versão do ArticleDNA com histórico, liberando `protectPrincipal` só com a decisão confirmada.
+- [ ] Minerador: aceitar `?modo=assunto&reforco=<id>` (publicado) lendo frase e URL pelo Vínculo; `assunto=<id>` já existe.
+- [ ] Registrar o desfecho de "Buscar reforço" por âncora para alimentar o estado "Tema sem demanda no Google".
+- [ ] **Homologar (usuário) após deploy:** na AdalbaPro, conferir os pares da medida real (dentistas, captação, como atrair) e os ~17 publicados sem par.
+
 ## Formação automática de artigos a partir de Assuntos — 2026-09-26
 
 Escopo autorizado e implementação: [SDD de automatização](sdd-automatizacao-assuntos-2026-09-26.md). O fluxo agora é iniciado pelo usuário uma vez; a seleção das keywords, a formação, SERP e materialização prosseguem sem confirmação artigo por artigo. Verificado: `test:arquiteto` 2.402/2.402, `test:agent` 44/44, `tsc --noEmit` e build Next.js 16; ESLint dos auxiliares alterados passou. ESLint do workspace monolítico ainda registra 124 erros em várias áreas. Não houve escrita remota nem chamada paga nesta entrega.
