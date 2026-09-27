@@ -182,6 +182,11 @@ export type ClassificationEvidence = {
   compatibilityEvaluated: number;
   /** Quantas keywords a composição tem. Uma só não tem par a comparar. */
   compositionKeywordCount?: number;
+  /**
+   * A Principal é um Assunto declarado (D3). Sozinho, o Assunto é tronco que
+   * aguarda sustentação — nunca "Não aplicável".
+   */
+  principalIsSubject?: boolean;
 
   isPublished: boolean;
   principalProtected: boolean;
@@ -361,6 +366,28 @@ function resolveCompatibility(evidence: ClassificationEvidence): ResolvedField<A
    * decisão humana nenhuma.
    */
   if (evidence.compositionKeywordCount === 1) {
+    /*
+     * D2/D3 — PUBLICADO E ASSUNTO NUNCA SÃO "NÃO APLICÁVEL".
+     *
+     * A página publicada já foi formada e comprovada no ar: sozinha, ela é um
+     * artigo completo que aguarda reforço. O Assunto é tronco. Os dois são
+     * compatíveis consigo mesmos por definição, e o motivo diz o que falta —
+     * o valor continua dentro do vocabulário gravado no ArticleDNA.
+     */
+    if (evidence.isPublished) {
+      return {
+        value: "COMPATIBLE",
+        source: "article_decision",
+        reason: "Artigo publicado: a página no ar já comprova a composição. Sozinho, é um artigo completo que aguarda reforço de keywords compatíveis (até seis).",
+      };
+    }
+    if (evidence.principalIsSubject) {
+      return {
+        value: "COMPATIBLE",
+        source: "article_decision",
+        reason: "Assunto declarado é tronco: aguarda as keywords de sustentação que o humano confirmar.",
+      };
+    }
     return {
       value: "NOT_APPLICABLE",
       source: "group",

@@ -115,6 +115,9 @@ export function splitFormationSerpBlocks<Group, Candidate>(
  * Somando os blocos dá o número que a pessoa viu na confirmação.
  */
 export function choiceForSerpBlock(choice: SerpPaidPlanChoice, blockPlan: SerpPaidPlan): SerpPaidPlanChoice {
+  if (choice.cacheOnly) {
+    return { authorizedPaidQueries: 0, payMissingExtraLenses: false, recollectStaleLenses: false, cacheOnly: true };
+  }
   if (choice.recollectStaleLenses) {
     return { authorizedPaidQueries: blockPlan.paidQueries + blockPlan.recollectableQueries, payMissingExtraLenses: true, recollectStaleLenses: true };
   }

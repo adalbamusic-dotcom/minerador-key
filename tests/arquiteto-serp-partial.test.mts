@@ -80,7 +80,7 @@ test("o cliente persiste somente assessments válidos e marca o artigo falho", (
   assert.match(workspace, /const incompleteAssessments = parsedAssessments\.filter/);
   assert.match(workspace, /const assessments = parsedAssessments\.filter\(assessment => !incompleteAssessments\.includes\(assessment\)\)/);
   assert.match(workspace, /const serverFailures: ArticleSerpFailure\[\] = result\.failures \|\| \[\];/);
-  assert.match(workspace, /SERP parcial: \$\{completedCount\} de \$\{requestedCount\} artigo\(s\) concluído\(s\)/);
+  assert.match(workspace, /SERP parcial: \$\{completedCount\} de \$\{requestedCount\} artigo\(s\) confirmados/);
   // O estado por Article só é erro quando não existe avaliação vigente.
   assert.match(workspace, /status: latestSerpAssessmentFor\(failure\.articleId\) \? "ready" as const : "error" as const,/);
   // Nenhuma falha entra na lista persistida de assessments.

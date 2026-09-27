@@ -12,7 +12,8 @@
  * composição foi exatamente o que produziu 13 artigos de uma keyword só.
  *
  * O agrupamento interno só roda para keywords que o formador canônico não
- * cobriu, e é fallback — não autoridade.
+ * cobriu, e é fallback. Ambos respeitam o teto; excedentes ficam visíveis
+ * fora da composição até haver outra fronteira editorial validada.
  *
  * A pergunta desta fase é diferente da fase Silos. Lá se perguntava quais
  * universos narrativos existem. Aqui, dentro de UM universo:
@@ -68,6 +69,19 @@ export type ArticleFormationKeyword = {
   dnaContentHash?: string | null;
   /** Problema/pergunta central observado. */
   problem: string | null;
+  /**
+   * D5 — FUNIL E SERP DO KEYWORDDNA APROVADO.
+   *
+   * `funnel` é o funil do DNA (Lógica ou SERP, como o Minerador fechou).
+   * `observedIntent`/`observedFunnel` só vêm preenchidos quando a `evidencia_serp`
+   * do pacote é CONCLUSIVA; `observedMixed` diz que a SERP mostrou "Misto"
+   * (sinal, não contradição). Ausência nunca separa: só valores declarados e
+   * diferentes impedem o agrupamento automático.
+   */
+  funnel?: string | null;
+  observedIntent?: string | null;
+  observedFunnel?: string | null;
+  observedMixed?: boolean;
   isPublished: boolean;
   /**
    * Agrupamento decidido por um humano, lido do payload canônico da keyword.
@@ -129,6 +143,13 @@ export type ArticleCandidate = {
   subjectKeywordId?: string;
   /** O Silo tem Assunto e este artigo ainda não: sugestão, que o artigo confirma. */
   suggestedSubjectKeywordId?: string;
+  /**
+   * D3 — este é o artigo de um Assunto: o tronco está preso a ele ou foi
+   * sugerido pela PRÓPRIA formação (não pela sugestão genérica do Silo pai).
+   * Sozinho, ele é o artigo do Assunto aguardando sustentação, nunca
+   * "isolado", "sem convergência" ou "Não aplicável". Aditivo.
+   */
+  carriesSubject?: boolean;
 };
 
 /** Página publicada reconhecida sob o Silo — nunca vira Article novo. */
@@ -161,6 +182,14 @@ export type ArticleFormationUniverse = {
   anchoredSubjectKeywordIds?: string[];
   /** Assuntos sem artigo, dentro das sobras, com o selo "aguardando sustentação". Presente só quando há. */
   awaitingSupportSubjectKeywordIds?: string[];
+  /**
+   * Assuntos que a formação já pôs como tronco sugerido de um candidato vivo:
+   * TÊM artigo, aguardando a confirmação humana do tronco. Não levam o selo
+   * "aguardando sustentação". Presente só quando há. Aditivo.
+   */
+  suggestedTrunkSubjectKeywordIds?: string[];
+  /** Keywords não agrupadas por precedência ou teto, com o motivo (D4/D8). Presente só quando há. */
+  deferredKeywords?: { keywordId: string; reason: string }[];
 };
 
 /* ------------------------------ comparação ------------------------------- */
@@ -190,6 +219,36 @@ const overlap = (left: Set<string>, right: Set<string>) => {
  */
 const normalizedIntent = (value: string | null) => intentComparisonKey(value);
 
+const funnelStage = (value: string | null | undefined): "TOP" | "MIDDLE" | "BOTTOM" | null => {
+  const texto = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!texto) return null;
+  if (/^tofu|topo|^top|awareness|descoberta/.test(texto)) return "TOP";
+  if (/^mofu|meio|middle|considera/.test(texto)) return "MIDDLE";
+  if (/^bofu|fundo|bottom|decis|convers/.test(texto)) return "BOTTOM";
+  return null;
+};
+
+/**
+ * D5 — O AGRUPAMENTO QUE CONTRARIA O DNA NÃO É AUTOMÁTICO.
+ *
+ * Intenção diferente, funil diferente ou SERP conclusiva divergente entre as
+ * duas buscas: o Minerador já concluiu que elas pedem coisas distintas, e o
+ * Arquiteto não refaz essa conclusão por semelhança de palavras. Devolve o
+ * motivo, ou `null` quando nada no DNA separa as duas.
+ */
+export function formationDnaContradiction(left: ArticleFormationKeyword, right: ArticleFormationKeyword): string | null {
+  const leftIntent = normalizedIntent(left.intent);
+  const rightIntent = normalizedIntent(right.intent);
+  if (leftIntent && rightIntent && leftIntent !== rightIntent) return "intenções principais diferentes";
+  const leftObserved = normalizedIntent(left.observedIntent ?? null);
+  const rightObserved = normalizedIntent(right.observedIntent ?? null);
+  if (leftObserved && rightObserved && leftObserved !== rightObserved) return "o Google mostrou, de forma conclusiva, intenções diferentes para as duas buscas";
+  const leftFunnel = funnelStage(left.observedFunnel ?? left.funnel);
+  const rightFunnel = funnelStage(right.observedFunnel ?? right.funnel);
+  if (leftFunnel && rightFunnel && leftFunnel !== rightFunnel) return "estágios de funil diferentes no KeywordDNA";
+  return null;
+}
+
 /**
  * Duas buscas pedem o mesmo conteúdo?
  *
@@ -214,9 +273,8 @@ export function sameArticleAffinity(
   const reasons: string[] = [];
   const leftIntent = normalizedIntent(left.intent);
   const rightIntent = normalizedIntent(right.intent);
-  if (leftIntent && rightIntent && leftIntent !== rightIntent) {
-    return { affinity: 0, reasons: ["intenções principais diferentes"] };
-  }
+  const contradicao = formationDnaContradiction(left, right);
+  if (contradicao) return { affinity: 0, reasons: [contradicao] };
 
   const semSilo = (value: string) => {
     const tokens = tokensOf(value);
@@ -298,6 +356,15 @@ export function siloThemeTokens(input: {
   macroIntent?: string | null;
   boundaryIncludes?: readonly string[];
   narrative?: string | null;
+  /**
+   * As frases das keywords do próprio Silo. A fronteira gravada pelo
+   * processamento é a LISTA DOS MEMBROS (107 frases no Silo "Leads sem
+   * Tráfego Pago"); somar os tokens delas ao tema do pai descontava de toda
+   * convergência as palavras que definem cada artigo — "captar", "pacientes",
+   * "clientes" —, e publicado nenhum recebia reforço. Item da fronteira que é
+   * a frase de um membro não é tema: é o membro.
+   */
+  memberPhrases?: Iterable<string>;
 }): ReadonlySet<string> {
   const tokens = tokensOf(input.siloLabel);
   for (const token of tokensOf((input.siloSlug || "").replace(/[/-]+/g, " "))) tokens.add(token);
@@ -305,7 +372,9 @@ export function siloThemeTokens(input: {
   for (const token of tokensOf(input.macroIntent || "")) tokens.add(token);
   // A fronteira declara o que o Silo já cobre: repetir isso entre keywords não
   // aproxima nada, porque vale para todas elas.
+  const membros = new Set([...(input.memberPhrases || [])].map(frase => [...tokensOf(frase)].sort().join(" ")).filter(Boolean));
   for (const item of input.boundaryIncludes || []) {
+    if (membros.has([...tokensOf(item)].sort().join(" "))) continue;
     for (const token of tokensOf(item)) tokens.add(token);
   }
   for (const token of tokensOf(input.narrative || "")) tokens.add(token);
@@ -313,7 +382,7 @@ export function siloThemeTokens(input: {
 }
 
 /** Abaixo disso as buscas pedem conteúdos diferentes. */
-const AFFINITY_FLOOR = 0.5;
+export const AFFINITY_FLOOR = 0.5;
 /**
  * Acima disso, separar viraria canibalização.
  *
@@ -458,6 +527,15 @@ export function automaticFormationHoldouts(input: {
   const ids = new Set<string>();
   for (const keyword of input.keywords) {
     if (keyword.humanFormationRef) continue;
+    /*
+     * D2 — PUBLICADO PREVALECE SOBRE A RETENÇÃO DO ASSUNTO.
+     *
+     * Uma página publicada que também foi declarada Assunto sem Volume já
+     * está no ar: ela é a principal do próprio artigo, com URL, slug e
+     * canonical protegidos. Retê-la mandava a publicada para Keywords não
+     * agrupadas e deixava as livres dela formarem um artigo concorrente.
+     */
+    if (keyword.isPublished) continue;
     if (keyword.subjectHeldOut || keyword.subjectAnchored) {
       ids.add(keyword.keywordId);
       continue;
@@ -497,6 +575,17 @@ export function buildArticleFormationUniverse(input: {
    * O tronco não vira membro: fica em `subjectKeywordId` do candidato.
    */
   subjectByCandidateRef?: ReadonlyMap<string, string>;
+  /** Assunto proposto pela formação, ainda sem vínculo persistido. */
+  suggestedSubjectByCandidateRef?: ReadonlyMap<string, string>;
+  /** Assuntos declarados que aguardam sustentação fora da formação automática. */
+  automaticHoldoutIds?: ReadonlySet<string>;
+  /**
+   * Keywords que a precedência (D1/D4) deixou fora de todo artigo, com o
+   * motivo: excedente do teto sem fronteira própria, sustentação que espera a
+   * Principal do Assunto. Vão para Keywords não agrupadas, nunca somem, e não
+   * semeiam um artigo concorrente no laço de convergência.
+   */
+  deferredKeywordIds?: ReadonlyMap<string, string>;
   /** Assunto do Silo pai: os artigos sem Assunto recebem a SUGESTÃO dele. */
   siloSubjectKeywordId?: string | null;
 }): ArticleFormationUniverse {
@@ -516,16 +605,29 @@ export function buildArticleFormationUniverse(input: {
    * vazio (F2.3). O conjunto é o de `automaticFormationHoldouts`.
    */
   const retidos: ArticleFormationKeyword[] = [];
+  /** Fora de artigo por precedência ou teto, com motivo (`deferredKeywordIds`). */
+  const adiadas: ArticleFormationKeyword[] = [];
   const foraDaAutomatica = automaticFormationHoldouts({ siloRef: input.siloRef, keywords: input.keywords, subjectByCandidateRef: input.subjectByCandidateRef });
   for (const keyword of input.keywords) {
-    const publicado = publicados.find(item => overlap(tokensOf(keyword.keyword), tokensOf(item.label || item.path)) >= 0.7);
+    // A keyword da própria página publicada precisa entrar no candidato que
+    // revalida o artigo. Uma página já representada por âncora publicada
+    // também não sequestra suas possíveis sustentações livres.
+    const publicado = keyword.isPublished ? null : publicados.find(item =>
+      !item.matchedKeywordId && !input.keywords.some(anchor => anchor.isPublished
+        && overlap(tokensOf(anchor.keyword), tokensOf(item.label || item.path)) >= 0.7)
+      && overlap(tokensOf(keyword.keyword), tokensOf(item.label || item.path)) >= 0.7);
     if (publicado) {
       matchedToPublished.push({ keywordId: keyword.keywordId, normalizedUrl: publicado.normalizedUrl });
       publicado.matchedKeywordId = publicado.matchedKeywordId ?? keyword.keywordId;
       continue;
     }
-    if (foraDaAutomatica.has(keyword.keywordId)) {
+    if (foraDaAutomatica.has(keyword.keywordId)
+      || (input.automaticHoldoutIds?.has(keyword.keywordId) && !keyword.humanFormationRef && !keyword.isPublished)) {
       retidos.push(keyword);
+      continue;
+    }
+    if (input.deferredKeywordIds?.has(keyword.keywordId) && !keyword.humanFormationRef && !keyword.isPublished) {
+      adiadas.push(keyword);
       continue;
     }
     disponiveis.push(keyword);
@@ -535,9 +637,29 @@ export function buildArticleFormationUniverse(input: {
     siloLabel: input.siloLabel,
     siloSlug: input.siloSlug,
     ...(input.siloContext || {}),
+    memberPhrases: input.keywords.map(keyword => keyword.keyword),
   });
   const usadas = new Set<string>();
+  const diferidas = new Set<string>();
+  const motivosDeFora = new Map<string, string>(input.deferredKeywordIds || []);
   const candidates: ArticleCandidate[] = [];
+  /*
+   * D2/D3 — O ARTIGO SOZINHO NÃO É "ISOLADO" QUANDO É PUBLICADO OU ASSUNTO.
+   *
+   * O motivo da coerência vai para a conclusão da revisão do candidato. Um
+   * publicado sozinho é artigo completo que aguarda reforço; o artigo de um
+   * Assunto (tronco preso ou sugerido pela formação) aguarda sustentação.
+   */
+  const carregaAssunto = (candidateRef: string) =>
+    Boolean(input.subjectByCandidateRef?.has(candidateRef) || input.suggestedSubjectByCandidateRef?.has(candidateRef));
+  const motivoSozinho = (candidateRef: string, principal: ArticleFormationKeyword) => principal.isPublished
+    ? "artigo publicado · aguarda reforço"
+    : carregaAssunto(candidateRef) ? "artigo do Assunto · aguarda sustentação" : "busca isolada no silo";
+  const razaoSozinho = (candidateRef: string, principal: ArticleFormationKeyword, padrao: string) => principal.isPublished
+    ? `"${principal.keyword}" é artigo publicado: completo, aguarda reforço de keywords compatíveis (até seis).`
+    : carregaAssunto(candidateRef)
+      ? `"${principal.keyword}" é a Principal do artigo do Assunto: aguarda as sustentações que o humano confirmar.`
+      : padrao;
 
   /**
    * Revisão humana primeiro.
@@ -633,12 +755,7 @@ export function buildArticleFormationUniverse(input: {
     });
   }
 
-  /**
-   * Grupos do formador canônico entram como estão.
-   *
-   * Nada é recalculado aqui: reagrupar o que o engine já decidiu criaria uma
-   * segunda autoridade capaz de divergir da primeira, sem regra de desempate.
-   */
+  /** O formador decide os grupos; esta fronteira aplica o teto do contrato. */
   for (const group of input.groups || []) {
     // Decisão humana tem precedência: keyword já revisada não volta para o
     // grupo calculado, senão ela apareceria em dois artigos ao mesmo tempo.
@@ -649,21 +766,33 @@ export function buildArticleFormationUniverse(input: {
     if (!membros.length) continue;
 
     const principalKeyword = membros.find(keyword => keyword.keywordId === group.principalKeywordId) || membros[0];
-    for (const keyword of membros) usadas.add(keyword.keywordId);
+    const outrosOrdenados = membros.filter(keyword => keyword.keywordId !== principalKeyword.keywordId)
+      .sort((left, right) => sameArticleAffinity(principalKeyword, right, siloTokens).affinity
+        - sameArticleAffinity(principalKeyword, left, siloTokens).affinity);
+    const admitidos = [principalKeyword, ...outrosOrdenados.slice(0, MAX_ARTICLE_KEYWORDS - 1)];
+    const excedentes = outrosOrdenados.slice(MAX_ARTICLE_KEYWORDS - 1);
+    for (const keyword of admitidos) usadas.add(keyword.keywordId);
+    // O excedente permanece em Keywords não agrupadas, sem semear um artigo
+    // concorrente para o mesmo núcleo. Uma fronteira editorial distinta pode
+    // ser processada como artigo novo numa revisão posterior.
+    for (const keyword of excedentes) {
+      diferidas.add(keyword.keywordId);
+      motivosDeFora.set(keyword.keywordId, `passou do teto de seis do artigo "${principalKeyword.keyword}"; aguarda fronteira própria ou revisão humana`);
+    }
 
-    const outros = membros.filter(keyword => keyword.keywordId !== principalKeyword.keywordId);
+    const outros = admitidos.filter(keyword => keyword.keywordId !== principalKeyword.keywordId);
     const afinidadesEngine = outros.map(keyword => sameArticleAffinity(principalKeyword, keyword, siloTokens));
     const coerenciaEngine = afinidadesEngine.length
       ? afinidadesEngine.reduce((total, item) => total + item.affinity, 0) / afinidadesEngine.length
       : 1;
-    const mesmaIntencaoEngine = membros.every(keyword =>
+    const mesmaIntencaoEngine = admitidos.every(keyword =>
       normalizedIntent(keyword.intent) === normalizedIntent(principalKeyword.intent));
 
     candidates.push({
       candidateRef: `article-candidate:${input.siloRef}:${principalKeyword.keywordId}`,
       siloRef: input.siloRef,
       principalKeywordId: principalKeyword.keywordId,
-      keywords: membros.map(keyword => ({
+      keywords: admitidos.map(keyword => ({
         keywordId: keyword.keywordId,
         role: keyword.keywordId === principalKeyword.keywordId
           ? "principal" as const
@@ -680,7 +809,7 @@ export function buildArticleFormationUniverse(input: {
           value: pct(coerenciaEngine),
           reasons: afinidadesEngine.length
             ? [...new Set(afinidadesEngine.flatMap(item => item.reasons))]
-            : ["busca isolada no silo"],
+            : [motivoSozinho(`article-candidate:${input.siloRef}:${principalKeyword.keywordId}`, principalKeyword)],
         },
         intent: {
           value: mesmaIntencaoEngine ? 100 : 60,
@@ -695,17 +824,17 @@ export function buildArticleFormationUniverse(input: {
       origin: "logic",
       stale: false,
       conflicts: [],
-      reason: membros.length > 1
-        ? `${membros.length} buscas agrupadas pelo formador canônico sob "${principalKeyword.keyword}".`
-        : `"${principalKeyword.keyword}" formou artigo próprio no formador canônico.`,
+      reason: admitidos.length > 1
+        ? `${admitidos.length} buscas agrupadas pelo formador canônico sob "${principalKeyword.keyword}"${excedentes.length ? `; ${excedentes.length} aguardam revisão fora do teto` : ""}.`
+        : razaoSozinho(`article-candidate:${input.siloRef}:${principalKeyword.keywordId}`, principalKeyword, `"${principalKeyword.keyword}" formou artigo próprio no formador canônico.`),
     });
   }
 
   for (const semente of disponiveis) {
-    if (usadas.has(semente.keywordId)) continue;
+    if (usadas.has(semente.keywordId) || diferidas.has(semente.keywordId)) continue;
 
     const convergentes = disponiveis
-      .filter(other => other.keywordId !== semente.keywordId && !usadas.has(other.keywordId))
+      .filter(other => other.keywordId !== semente.keywordId && !usadas.has(other.keywordId) && !diferidas.has(other.keywordId))
       .map(other => ({ keyword: other, ...sameArticleAffinity(semente, other, siloTokens) }))
       .filter(item => item.affinity >= AFFINITY_FLOOR)
       .sort((left, right) => right.affinity - left.affinity);
@@ -715,16 +844,18 @@ export function buildArticleFormationUniverse(input: {
     /**
      * Convergiu, mas não coube.
      *
-     * Deixar o excesso solto faria ele semear um candidato novo — inventando
-     * um segundo assunto onde só existe um. Ele fica registrado como excesso
-     * do MESMO artigo e a decisão de o que fazer é editorial.
+     * Deixar o excesso voltar ao loop faria ele semear um candidato novo e
+     * inventar um segundo assunto. Ele fica em Keywords não agrupadas.
      */
     const excedentes = convergentes.slice(MAX_ARTICLE_KEYWORDS - 1);
     const afinidades = cabem;
 
     const grupo = [semente, ...afinidades.map(item => item.keyword)];
     for (const keyword of grupo) usadas.add(keyword.keywordId);
-    for (const item of excedentes) usadas.add(item.keyword.keywordId);
+    for (const item of excedentes) {
+      diferidas.add(item.keyword.keywordId);
+      motivosDeFora.set(item.keyword.keywordId, `converge com "${semente.keyword}" além do teto de seis; aguarda fronteira própria ou revisão humana`);
+    }
 
     const principal = suggestPrincipal({ keywords: grupo, siloTokens });
     if (!principal) continue;
@@ -758,7 +889,7 @@ export function buildArticleFormationUniverse(input: {
       scores: {
         coherence: {
           value: pct(coerencia),
-          reasons: afinidades.length ? [...new Set(afinidades.flatMap(item => item.reasons))] : ["busca isolada no silo"],
+          reasons: afinidades.length ? [...new Set(afinidades.flatMap(item => item.reasons))] : [motivoSozinho(`article-candidate:${input.siloRef}:${principal.keywordId}`, principalKeyword)],
         },
         intent: {
           value: mesmaIntencao ? 100 : 60,
@@ -767,15 +898,13 @@ export function buildArticleFormationUniverse(input: {
         centrality: { value: pct(centralidade), reasons: principal.reasons },
       },
       cannibalizationRisk: canibalizacao,
-      overflowKeywordIds: excedentes.map(item => item.keyword.keywordId),
+      overflowKeywordIds: [],
       origin: "logic",
       stale: false,
-      conflicts: excedentes.length
-        ? [`${excedentes.length} busca(s) convergem com este artigo além do teto de seis e precisam de decisão editorial.`]
-        : [],
+      conflicts: [],
       reason: grupo.length > 1
         ? `${grupo.length} buscas respondem ao mesmo conteúdo; "${principalKeyword.keyword}" representa melhor o núcleo.`
-        : `"${principalKeyword.keyword}" não convergiu com outras buscas deste silo e forma um artigo próprio.`,
+        : razaoSozinho(`article-candidate:${input.siloRef}:${principal.keywordId}`, principalKeyword, `"${principalKeyword.keyword}" não convergiu com outras buscas deste silo e forma um artigo próprio.`),
     });
   }
 
@@ -784,18 +913,19 @@ export function buildArticleFormationUniverse(input: {
    * do teto e da duplicidade. Preso como secundária ou reforço do mesmo artigo
    * é contradição (F2.1) e vira conflito, para a conclusão barrar.
    */
-  if (input.subjectByCandidateRef?.size || input.siloSubjectKeywordId) {
+  if (input.subjectByCandidateRef?.size || input.suggestedSubjectByCandidateRef?.size || input.siloSubjectKeywordId) {
     const nomeDe = (keywordId: string) => input.keywords.find(keyword => keyword.keywordId === keywordId)?.keyword || keywordId;
     for (const candidate of candidates) {
       const subjectKeywordId = input.subjectByCandidateRef?.get(candidate.candidateRef);
+      if (subjectKeywordId || input.suggestedSubjectByCandidateRef?.has(candidate.candidateRef)) candidate.carriesSubject = true;
       if (subjectKeywordId) {
         candidate.subjectKeywordId = subjectKeywordId;
         const membro = candidate.keywords.find(item => item.keywordId === subjectKeywordId);
         if (membro && membro.role !== "principal") {
           candidate.conflicts.push(`o Assunto "${nomeDe(subjectKeywordId)}" não pode ser secundária nem reforço do mesmo artigo`);
         }
-      } else if (input.siloSubjectKeywordId) {
-        candidate.suggestedSubjectKeywordId = input.siloSubjectKeywordId;
+      } else if (input.suggestedSubjectByCandidateRef?.has(candidate.candidateRef) || input.siloSubjectKeywordId) {
+        candidate.suggestedSubjectKeywordId = input.suggestedSubjectByCandidateRef?.get(candidate.candidateRef) || input.siloSubjectKeywordId || undefined;
       }
     }
   }
@@ -845,12 +975,53 @@ export function buildArticleFormationUniverse(input: {
     ...input.keywords.filter(keyword => keyword.subjectAnchored).map(keyword => keyword.keywordId),
     ...candidates.flatMap(candidate => candidate.subjectKeywordId ? [candidate.subjectKeywordId] : []),
   ]);
-  const sobras = [...disponiveis.filter(keyword => !usadas.has(keyword.keywordId)), ...retidos];
+  const sobras = [...disponiveis.filter(keyword => !usadas.has(keyword.keywordId)), ...retidos, ...adiadas];
   const ungroupedKeywordIds = sobras.filter(keyword => !ancorados.has(keyword.keywordId)).map(keyword => keyword.keywordId);
   const anchoredSubjectKeywordIds = sobras.filter(keyword => ancorados.has(keyword.keywordId)).map(keyword => keyword.keywordId);
+  // O selo "aguardando sustentação" é do ASSUNTO (D3). Sustentação que espera
+  // a Principal dele, ou excedente do teto, é keyword livre com motivo.
+  /*
+   * D3 — o Assunto que a formação já pôs como tronco sugerido de um candidato
+   * vivo TEM artigo: não leva o selo "aguardando sustentação". Continua nas
+   * sobras até o humano confirmar o tronco, com o motivo dito.
+   */
+  const troncosSugeridos = new Set(candidates
+    .filter(candidate => candidate.carriesSubject && !candidate.subjectKeywordId && candidate.suggestedSubjectKeywordId)
+    .map(candidate => candidate.suggestedSubjectKeywordId!));
+  const suggestedTrunkSubjectKeywordIds = ungroupedKeywordIds.filter(keywordId => troncosSugeridos.has(keywordId));
   const awaitingSupportSubjectKeywordIds = retidos
-    .filter(keyword => !ancorados.has(keyword.keywordId))
+    .filter(keyword => !ancorados.has(keyword.keywordId) && !troncosSugeridos.has(keyword.keywordId))
     .map(keyword => keyword.keywordId);
+  /*
+   * D8 — NENHUMA KEYWORD FICA FORA SEM MOTIVO. O Assunto que aguarda
+   * sustentação tem o selo; toda outra keyword fora de artigo diz por quê,
+   * inclusive a do grupo humano sem Principal elegível, que pela mesa só
+   * aparecia se o `clusterId` estivesse vazio.
+   */
+  const aguardandoSelo = new Set(awaitingSupportSubjectKeywordIds);
+  const principalDoTronco = (keywordId: string) => {
+    const artigo = candidates.find(candidate => candidate.carriesSubject && candidate.suggestedSubjectKeywordId === keywordId);
+    return artigo ? input.keywords.find(keyword => keyword.keywordId === artigo.principalKeywordId)?.keyword || artigo.principalKeywordId : "";
+  };
+  const retidosIds = new Set(retidos.map(keyword => keyword.keywordId));
+  for (const keywordId of ungroupedKeywordIds) {
+    if (motivosDeFora.has(keywordId)) continue;
+    const keyword = input.keywords.find(item => item.keywordId === keywordId);
+    // O grupo humano tem `clusterId`: sem o motivo aqui, a mesa não o mostraria.
+    if (aguardandoSelo.has(keywordId) && !keyword?.humanFormationRef) continue;
+    if (troncosSugeridos.has(keywordId)) {
+      motivosDeFora.set(keywordId, `Assunto · tronco sugerido do artigo "${principalDoTronco(keywordId)}"; aguarda a confirmação humana do tronco`);
+    } else if (keyword?.humanFormationRef) {
+      motivosDeFora.set(keywordId, "a revisão humana reuniu este grupo sem uma Principal elegível (só Assunto sem Volume validado); aguarda revisão humana com uma Principal de Volume validado");
+    } else if (retidosIds.has(keywordId)) {
+      motivosDeFora.set(keywordId, "fora da formação automática por uma decisão anterior sobre o Assunto; aguarda revisão humana");
+    } else {
+      motivosDeFora.set(keywordId, "não formou artigo nesta formação; aguarda revisão humana");
+    }
+  }
+  const deferredKeywords = ungroupedKeywordIds
+    .filter(keywordId => motivosDeFora.has(keywordId))
+    .map(keywordId => ({ keywordId, reason: motivosDeFora.get(keywordId)! }));
   const singletonAudits = auditSingletons({
     candidates,
     keywords: input.keywords,
@@ -872,6 +1043,8 @@ export function buildArticleFormationUniverse(input: {
     conflicts,
     ...(anchoredSubjectKeywordIds.length ? { anchoredSubjectKeywordIds } : {}),
     ...(awaitingSupportSubjectKeywordIds.length ? { awaitingSupportSubjectKeywordIds } : {}),
+    ...(suggestedTrunkSubjectKeywordIds.length ? { suggestedTrunkSubjectKeywordIds } : {}),
+    ...(deferredKeywords.length ? { deferredKeywords } : {}),
   };
 }
 
@@ -885,10 +1058,20 @@ export function summarizeArticleFormation(universes: readonly ArticleFormationUn
   const relations = universes.flatMap(universe => universe.relations);
   const sobreposicoes = relations.filter(relation => relation.relation !== "distinct").length;
   const singletons = universes.flatMap(universe => universe.singletonAudits);
+  /*
+   * D2/D3 — publicado e Assunto sozinhos são artigos completos aguardando
+   * reforço, não "candidatos individuais". A conta os separa para o painel
+   * não os misturar com livres que não convergiram.
+   */
+  const ancoras = new Set(singletons
+    .filter(item => item.classification === "PUBLISHED_ANCHOR" || item.classification === "SUBJECT_TRUNK")
+    .map(item => item.candidateRef));
   // Composição: quantas buscas cada artigo reúne.
   const composicao = { um: 0, dois: 0, tresASeis: 0 };
   for (const candidate of candidates) {
-    if (candidate.keywords.length === 1) composicao.um += 1;
+    if (candidate.keywords.length === 1) {
+      if (!ancoras.has(candidate.candidateRef)) composicao.um += 1;
+    }
     else if (candidate.keywords.length === 2) composicao.dois += 1;
     else composicao.tresASeis += 1;
   }
@@ -901,10 +1084,16 @@ export function summarizeArticleFormation(universes: readonly ArticleFormationUn
     freeKeywords: livres,
     needsReview: comConflito,
     readyToConfirm: candidates.length - comConflito,
-    /** Candidatos de uma keyword só — nem todos são problema. */
+    /** Candidatos de uma keyword só — nem todos são problema. Publicado e Assunto ficam fora (D2/D3). */
     singles: composicao.um,
     /** Candidatos que reuniram mais de uma busca. */
-    grouped: candidates.length - composicao.um,
+    grouped: composicao.dois + composicao.tresASeis,
+    /** Publicados sozinhos: artigo completo que aguarda reforço (D2). */
+    publishedAwaitingSupport: singletons.filter(item => item.classification === "PUBLISHED_ANCHOR").length,
+    /** Assuntos principais sozinhos: tronco aguardando sustentação (D3). */
+    subjectsAwaitingSupport: singletons.filter(item => item.classification === "SUBJECT_TRUNK").length,
+    /** Keywords fora de artigo por precedência ou teto, com motivo (D4/D8). */
+    deferredKeywords: universes.reduce((total, universe) => total + (universe.deferredKeywords?.length ?? 0), 0),
     composition: composicao,
     /** Pares de candidatos que talvez devessem ser um só. */
     possibleOverlaps: sobreposicoes,
@@ -966,6 +1155,10 @@ export function articleFormationBaseHash(input: {
  * distinta" e "ficou sozinha porque a evidência não deu para juntar".
  */
 export type SingletonClassification =
+  /** D2 — publicado sozinho: artigo completo, aguarda reforço. Nunca "isolado". */
+  | "PUBLISHED_ANCHOR"
+  /** D3 — Assunto como principal, sem sustentação ainda: estado normal. */
+  | "SUBJECT_TRUNK"
   | "UNIQUE_INTENT"
   | "LOW_SIMILARITY"
   | "POSSIBLE_MERGE"
@@ -1084,7 +1277,49 @@ export function auditSingletons(input: {
       nearestReasons = relation.reasons;
     }
 
+    /*
+     * D2/D3 — PUBLICADO E ASSUNTO NUNCA SÃO PENALIZADOS POR ESTAR SOZINHOS.
+     *
+     * A página publicada já foi formada e comprovada no ar; o Assunto é tronco.
+     * Nenhum dos dois é "sem convergência", "pode juntar" ou "já publicado":
+     * são artigos completos que aguardam reforço de livres compatíveis.
+     */
+    if (keyword.isPublished) {
+      audits.push({
+        candidateRef: candidate.candidateRef,
+        keywordId: keyword.keywordId,
+        classification: "PUBLISHED_ANCHOR",
+        reasons: [
+          "artigo publicado, reconhecido pelo Vínculo: URL, slug, canonical e principal não mudam",
+          "sozinho, é um artigo completo que aguarda reforço de keywords compatíveis (até seis)",
+        ],
+        nearestCandidateRef,
+        nearestAffinity,
+      });
+      continue;
+    }
+    /*
+     * D3 — o artigo que CARREGA um Assunto (tronco preso ou sugerido pela
+     * formação) também é tronco, mesmo quando a Principal é uma livre de
+     * Volume validado: sozinho, aguarda sustentação, nunca "sem convergência".
+     */
+    const principalEAssunto = candidate.subjectKeywordId === keyword.keywordId || candidate.suggestedSubjectKeywordId === keyword.keywordId;
+    if (principalEAssunto || candidate.carriesSubject || candidate.subjectKeywordId) {
+      audits.push({
+        candidateRef: candidate.candidateRef,
+        keywordId: keyword.keywordId,
+        classification: "SUBJECT_TRUNK",
+        reasons: [principalEAssunto
+          ? "Assunto declarado é tronco: aguarda as keywords de sustentação que o humano confirmar"
+          : "artigo do Assunto: a Principal tem Volume validado e o Assunto é o tronco; aguarda as keywords de sustentação que o humano confirmar"],
+        nearestCandidateRef,
+        nearestAffinity,
+      });
+      continue;
+    }
+
     const publicado = input.publishedArticles
+      .filter(item => item.matchedKeywordId !== keyword.keywordId)
       .map(item => ({ item, score: overlap(tokensOf(keyword.keyword), tokensOf(item.label || item.path)) }))
       .sort((left, right) => right.score - left.score)[0];
 
@@ -1130,6 +1365,8 @@ export function auditSingletons(input: {
 }
 
 export const SINGLETON_CLASSIFICATION_LABELS: Record<SingletonClassification, string> = {
+  PUBLISHED_ANCHOR: "Publicado · aguarda reforço",
+  SUBJECT_TRUNK: "Assunto · aguardando sustentação",
   UNIQUE_INTENT: "Intenção própria",
   LOW_SIMILARITY: "Sem convergência",
   POSSIBLE_MERGE: "Pode juntar",

@@ -145,10 +145,14 @@ test("o universo recebe a composição de um motor, não a inventa na tela", () 
    * do DNA canônico. O princípio é o mesmo e é ele que este teste guarda: a
    * tela DELEGA a composição, nunca a monta.
    */
-  assert.match(workspace, /const particao = deriveSemanticNuclei\(\{ signatures: assinaturas \}\)/);
-  assert.match(workspace, /splitNucleusIfEditorialBoundary\(\{/);
+  // 2026-09-26 (Parte D): a tela delega ao planejador por Silo, que aplica a
+  // precedência antes dos núcleos. O motor continua sendo o mesmo.
+  assert.match(workspace, /planSiloArticleFormation\(\{/);
+  const planejador = readFileSync("lib/arquiteto/article-formation-priority.ts", "utf8");
+  assert.match(planejador, /const particao = deriveSemanticNuclei\(\{ signatures: assinaturas \}\)/);
+  assert.match(planejador, /splitNucleusIfEditorialBoundary\(\{/);
   // §13 — a Principal é escolhida pelo motor, depois de o tema existir.
-  assert.match(workspace, /suggestPrincipal\(\{ keywords: membros, siloTokens: tokensDoSilo \}\)/);
+  assert.match(planejador, /suggestPrincipal\(\{ keywords: membros, siloTokens \}\)/);
   // E o agrupamento provisório deixou de decidir a composição do Article.
   assert.doesNotMatch(workspace, /groups: \(escopo\?\.groups \|\| \[\]\)\.map/);
 });

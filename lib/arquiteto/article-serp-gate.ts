@@ -116,6 +116,7 @@ export const ARTICLE_SERP_STATES = [
   "missing",
   "processing",
   "failed",
+  "incomplete",
   "stale",
   "current_supported",
   "current_divergent_unresolved",
@@ -137,6 +138,7 @@ export const ARTICLE_SERP_STATE_LABELS: Record<ArticleSerpState, string> = {
   missing: "não executada",
   processing: "processando",
   failed: "falhou",
+  incomplete: "incompleta · faltam lentes",
   stale: "desatualizada",
   current_supported: "sustentada",
   current_divergent_unresolved: "divergente",
@@ -157,7 +159,7 @@ export function serpAwaitsHuman(state: ArticleSerpState): boolean {
 
 /** Precisa ir (ou voltar) ao provider. */
 export function serpNeedsCollection(state: ArticleSerpState): boolean {
-  return state === "missing" || state === "stale" || state === "failed";
+  return state === "missing" || state === "stale" || state === "failed" || state === "incomplete";
 }
 
 export type ArticleSerpGateState = {
@@ -180,7 +182,21 @@ export type ObservedArticleSerp = {
   verdict: "NOT_RUN" | "COMPATIBLE" | "INCONCLUSIVE" | "DIVERGENCE";
   /** Decisão humana registrada sobre divergência/inconclusão desta base. */
   humanDecisionBaseHash?: string | null;
+  /** Presente nos pareceres com marcador de lentes; `false` bloqueia conclusão. */
+  lensesComplete?: boolean;
 };
+
+/** O marcador legado ausente permanece desconhecido; um marcador novo parcial bloqueia. */
+export function articleSerpLensesComplete(marker: {
+  requested: readonly string[];
+  observed: readonly string[];
+  missing: readonly unknown[];
+} | null | undefined): boolean | undefined {
+  if (!marker) return undefined;
+  return marker.requested.length === 4
+    && marker.missing.length === 0
+    && marker.requested.every(lens => marker.observed.includes(lens));
+}
 
 /**
  * Este Article pode ser concluído?
@@ -235,6 +251,9 @@ export function resolveArticleFormationSerpState(input: {
     return monta("stale", input.observed.formationBaseHash
       ? "A composição mudou depois desta coleta: a evidência anterior não descreve mais este artigo."
       : "A avaliação vigente é anterior ao gate e não declara qual composição observou.");
+  }
+  if (input.observed.lensesComplete === false) {
+    return monta("incomplete", "O parecer parcial foi salvo, mas faltam lentes da SERP; consulte o cache ou autorize apenas as chamadas faltantes antes de concluir.");
   }
 
   const decidido = input.observed.humanDecisionBaseHash === input.expectedBaseHash;
@@ -297,6 +316,7 @@ export function summarizeArticleSerpGate(states: readonly ArticleSerpGateState[]
     missing: conta("missing"),
     stale: conta("stale"),
     failed: conta("failed"),
+    incomplete: conta("incomplete"),
     processing: conta("processing"),
     /** Evidência existe; falta a pessoa decidir. */
     awaitingHuman: states.filter(item => serpAwaitsHuman(item.state)).length,

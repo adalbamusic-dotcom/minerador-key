@@ -55,7 +55,7 @@ test("sem formação processada, nenhuma keyword vira artigo sozinha", () => {
    * `candidateRef`, e enquanto não é processada se declara CANDIDATO, sem
    * ArticleDNA e sem SERP.
    */
-  assert.match(workspace, /const candidato = kw\.isPublished \? null : formationCandidateByKeyword\.get/);
+  assert.match(workspace, /const candidato = formationCandidateByKeyword\.get\(String\(kw\.id\)\) \?\? null;/);
   assert.match(workspace, /if \(!kw\.isPublished && !candidato\) return;/);
   assert.match(workspace, /isFormationCandidate: Boolean\(c\.candidateRef\) && !articleFormationMarker/);
   // E o índice não volta a depender do marcador.
@@ -69,7 +69,8 @@ test("keyword sem artigo continua visível como pendente", () => {
 });
 
 test("patrimônio publicado nunca depende da formação para aparecer", () => {
-  assert.match(workspace, /const candidato = kw\.isPublished \? null : formationCandidateByKeyword\.get/);
+  assert.match(workspace, /const candidato = formationCandidateByKeyword\.get\(String\(kw\.id\)\) \?\? null;/);
+  assert.match(workspace, /if \(!kw\.isPublished && !candidato\) return;/);
 });
 
 /* ------------------------------- marcador -------------------------------- */

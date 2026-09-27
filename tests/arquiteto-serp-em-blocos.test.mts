@@ -187,6 +187,13 @@ test("cada bloco paga o número do plano DELE, na opção escolhida; a soma é o
   }
 });
 
+test("opção somente cache preserva orçamento zero em todos os blocos", () => {
+  const choice = { authorizedPaidQueries: 0, payMissingExtraLenses: false, recollectStaleLenses: false, cacheOnly: true };
+  for (const plan of [plano(6, 2), plano(3, 1), plano(0, 0)]) {
+    assert.deepEqual(choiceForSerpBlock(choice, plan), choice);
+  }
+});
+
 /* -------------------------------- runner --------------------------------- */
 
 test("Processar artigos: plano de todos, UMA confirmação com a soma, blocos em sequência", async () => {

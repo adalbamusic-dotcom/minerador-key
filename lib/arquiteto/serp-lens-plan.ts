@@ -202,6 +202,13 @@ export type SerpPaidPlan = {
    * como acerto aqui e só na execução vira "sem digest" — sem pagar nada.
    */
   digestChecked: false;
+  /** Faltas reais da formação, para que o plano não esconda qual busca/lente falta. */
+  missingDetails?: { article: string; keyword: string; lens: string; reason: string; primary: boolean }[];
+  /**
+   * D6 — o cache não pôde ser lido: tudo foi contado como falta, e o total é
+   * o custo MÁXIMO. A tela avisa e oferece coletar ou tentar ler de novo.
+   */
+  cacheUnavailable?: boolean;
 };
 
 const arredondar = (valor: number) => Math.round(valor * 10000) / 10000;
@@ -353,6 +360,7 @@ export function mergeSerpPaidPlans(plans: readonly SerpPaidPlan[]): SerpPaidPlan
     payMissingExtraLenses: primeiro.payMissingExtraLenses,
     recollectStaleLenses: primeiro.recollectStaleLenses,
     digestChecked: false,
+    ...(plans.some(plan => plan.cacheUnavailable) ? { cacheUnavailable: true } : {}),
   };
 }
 
@@ -388,6 +396,10 @@ export type SerpPaidPlanChoice = {
   authorizedPaidQueries: number;
   payMissingExtraLenses: boolean;
   recollectStaleLenses: boolean;
+  /** Formação: avalia somente o que o cache consegue servir, sem provider. */
+  cacheOnly?: boolean;
+  /** D6 — o cache estava ilegível e a pessoa pediu para tentar ler de novo antes de decidir. */
+  retryCacheRead?: boolean;
 };
 
 export type SerpPaidPlanOption = { id: "all" | "primary_only" | "recollect"; label: string; choice: SerpPaidPlanChoice };
@@ -427,7 +439,11 @@ export function serpPaidPlanOptions(plan: SerpPaidPlan, options: { allowPrimaryO
 }
 
 /** As frases do plano: número de chamadas, custo em faixa e datas. */
-export function describeSerpPaidPlan(plan: SerpPaidPlan): { headline: string; cost: string | null; dates: string | null; conditional: string | null } {
+export function describeSerpPaidPlan(plan: SerpPaidPlan): { headline: string; cost: string | null; dates: string | null; conditional: string | null; cacheWarning: string | null } {
+  // D6 — cache ilegível: o aviso vem antes do número, que é o teto possível.
+  const cacheWarning = plan.cacheUnavailable
+    ? "Não foi possível ler o cache da SERP, então não dá para saber o que já está pago. O total abaixo é o custo máximo, como se nada estivesse no cache: você pode coletar com esse teto ou tentar ler o cache de novo."
+    : null;
   const headline = plan.paidQueries > 0
     ? `Até ${plan.paidQueries} chamada(s) paga(s): ${plan.primaryPaidQueries} na lente principal e ${plan.extraPaidQueries} nas lentes extras.`
     : "Nenhuma chamada paga: tudo o que esta validação lê já está no cache.";
@@ -442,7 +458,7 @@ export function describeSerpPaidPlan(plan: SerpPaidPlan): { headline: string; co
       ? `Lentes de datas diferentes: até ${plan.collectedAtSpreadDays} dias entre as lentes da mesma consulta. ${plan.recollectableQueries} lente(s) antiga(s) podem ser recoletadas, só se você pedir.`
       : `Lentes de datas diferentes: até ${plan.collectedAtSpreadDays} dias entre as lentes da mesma consulta. Esta ação não recoleta lentes antigas; a diferença fica marcada no que ela devolve.`
     : null;
-  return { headline, cost, dates, conditional };
+  return { headline, cost, dates, conditional, cacheWarning };
 }
 
 /* ----------------------------- autorização ------------------------------- */

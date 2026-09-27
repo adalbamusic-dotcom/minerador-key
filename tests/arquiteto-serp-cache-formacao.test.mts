@@ -341,10 +341,11 @@ test("a quota conta só as faltas, e com zero faltas o resolve não é chamado",
    * chamadas pagas — faltas da lente principal e das extras, lidas em `meta` —,
    * o mesmo número que a pessoa autorizou.
    */
-  assert.match(rota, /const potentialMisses = plan\.paidQueries;/);
+  assert.match(rota, /const potentialMisses = parsed\.data\.cacheOnly \? 0 : plan\.paidQueries;/);
   // Mudou em 2026-09-23 (correção da A2): a entrada do plano é nomeada, para o orçamento reservar as mesmas faltas.
   assert.match(rota, /const planInput = \{/);
-  assert.match(rota, /const plan = buildSerpPaidPlan\(planInput\);/);
+  // D6: o plano carrega o aviso aditivo quando o cache não pôde ser lido.
+  assert.match(rota, /const plan = \{\s*\.\.\.buildSerpPaidPlan\(planInput\),\s*[\s\S]*?cacheUnavailable: true/);
   // A previsão começa nas faltas da leitura meta; o resolve só roda se houver alguma.
   assert.match(rota, /const quota = createFormationSerpQuotaLedger\(resolveDataForSeo\);\n\s+quota\.expectMisses\(potentialMisses\);/);
   assert.match(rota, /if \(potentialMisses > 0\) await quota\.ensureCovered\(\);/);
@@ -388,9 +389,11 @@ test("um único relógio por requisição", () => {
   assert.match(rota, /const now = new Date\(\);/);
 });
 
-test("cache fora não derruba a operação: a leitura falha e a rota paga", () => {
+test("D6 · cache ilegível não proíbe a coleta: plano com custo máximo; só a análise com cache devolve 503", () => {
   const meta = trecho(rota, "let metaLookups: SerpCacheLookup[];", "const cachedMeta = ");
-  assert.match(meta, /\} catch \(error\) \{[\s\S]*diagnostic\.cacheReadFailed = true;[\s\S]*hit: null/);
+  assert.match(meta, /\} catch \(error\) \{[\s\S]*diagnostic\.cacheReadFailed = true;[\s\S]*if \(parsed\.data\.cacheOnly\) \{[\s\S]*SERP_CACHE_UNAVAILABLE[\s\S]*missReason: "cache ilegível"/);
+  // O 503 sem plano não existe mais fora da análise somente com cache.
+  assert.doesNotMatch(meta, /plano pago suspenso/);
   const corpos = trecho(rota, "const readCachedBodies = ", "const payKeywordSerp = ");
   assert.match(corpos, /lookupSerpCache\(pipelineContext, cacheRequests, \{ mode: "body", now \}\)/);
   assert.match(corpos, /\} catch \(error\) \{[\s\S]*diagnostic\.cacheReadFailed = true;/);
@@ -948,14 +951,14 @@ test("A6 · modo plan: devolve o plano ANTES de credencial, quota, corpo e qualq
     assert.ok(posicao > plano, `${depois} precisa vir depois do retorno do plano`);
   }
   const retorno = trecho(rota, 'if (parsed.data.mode === "plan") {', "const authorization = ");
-  assert.match(retorno, /return NextResponse\.json\(\{ success: true, data: \{ mode: "plan", plan,/);
+  assert.match(retorno, /return NextResponse\.json\(\{ success: true, data: \{ mode: "plan", plan: \{ \.\.\.plan, missingDetails \},/);
   // O plano lê só `meta`, das quatro lentes.
   const leitura = trecho(rota, "let metaLookups: SerpCacheLookup[];", "const slots: SerpPlanSlot[] = [];");
   assert.match(leitura, /\{ mode: "meta", now \}\)[\s\S]*extraSlotsWanted\.map\(item => cacheRequestFor\(item\.keyword, undefined, item\.extraLens\)\), \{ mode: "meta", now \}/);
 });
 
 test("A6 · execução: autorização antes de pagar, orçamento em TODO caminho pago, 409 sem pagar", () => {
-  const autorizar = rota.indexOf("const authorization = authorizeSerpPaidPlan(plan, parsed.data.authorizedPaidQueries);");
+  const autorizar = rota.indexOf("const authorization = parsed.data.cacheOnly ? { ok: true } as const : authorizeSerpPaidPlan(plan, parsed.data.authorizedPaidQueries);");
   assert.ok(autorizar > -1);
   assert.ok(autorizar < rota.indexOf("await quota.ensureCovered()"), "a autorização vem antes da quota");
   assert.ok(autorizar < rota.indexOf("await collectAndCacheSerp("), "e antes de qualquer pagamento");
@@ -970,10 +973,11 @@ test("A6 · execução: autorização antes de pagar, orçamento em TODO caminho
   }
   assert.equal(rota.match(/await collectAndCacheSerp\(/g)?.length, 2, "só os dois caminhos pagos chamam o provider");
   // O teto da quota é o plano autorizado.
-  assert.match(rota, /const potentialMisses = plan\.paidQueries;/);
+  assert.match(rota, /const potentialMisses = parsed\.data\.cacheOnly \? 0 : plan\.paidQueries;/);
+  assert.match(rota, /if \(parsed\.data\.cacheOnly\) \{[\s\S]*?throw new SerpPaidBudgetExhaustedError\(\);/);
 });
 
-test("A3 · as extras são lidas pelo digest (nunca o corpo), só onde há par, e pagas SEM corpo", () => {
+test("A3 · as extras são lidas pelo digest para toda keyword e pagas SEM corpo", () => {
   const extras = trecho(rota, "const readExtraLenses = ", "const extraLensesByArticle = ");
   assert.match(extras, /lookupSerpCache\(pipelineContext, pedidos\.map\(item => item\.request\), \{ mode: "digest", now \}\)/);
   assert.doesNotMatch(extras, /mode: "body"/);
@@ -985,9 +989,9 @@ test("A3 · as extras são lidas pelo digest (nunca o corpo), só onde há par, 
   const pagarExtra = trecho(rota, "const collectExtraLens = ", "const payExtraLensDigest = ");
   assert.match(pagarExtra, /storeBody: architectSerpStoresBody\(input\.extraLens\),/);
   assert.match(trecho(rota, "const payExtraLensDigest = ", "const readExtraLenses = "), /normalizeOrganicDigestSerp\(collected\.digest, input\.serpInput, collected\)/);
-  // Só com pelo menos duas buscas observadas: uma busca só não tem par a votar.
-  assert.match(rota, /if \(requested\.extras\.length && snapshots\.length >= 2\) \{/);
-  assert.match(rota, /if \(group\.keywords\.length < 2\) return \[\];/);
+  // Artigo unitário também observa quatro lentes para detectar diferença entre aparelhos.
+  assert.match(rota, /if \(requested\.extras\.length && snapshots\.length >= 1\) \{/);
+  assert.doesNotMatch(rota, /if \(group\.keywords\.length < 2\) return \[\];/);
 });
 
 test("A3/A5 · pedido legado grava o parecer de antes; pedido com lentes grava o voto agregado e o marcador", () => {
@@ -1024,12 +1028,16 @@ test("A6 · 'Validar SERP': as quatro lentes, o plano primeiro, e só a escolha 
   const escolha = corpo.indexOf("await askSerpPaidPlan(");
   const execucao = corpo.indexOf('{ ...serpRequest, mode: "execute", ...choice }');
   assert.ok(plano > -1 && escolha > plano && execucao > escolha, "plano → escolha → execução");
-  // Cancelar não paga e não marca nenhum artigo como em processamento.
+  // Prévia interrompida sem escolha não paga e não marca nenhum artigo como em processamento.
   const cancelar = corpo.slice(escolha, execucao);
-  assert.match(cancelar, /if \(!choice\) \{[\s\S]*?nenhuma chamada foi paga[\s\S]*?return "cancelled";/);
-  // Quem chamou (o processamento da formação) não conta como coletado o que foi cancelado.
+  assert.match(cancelar, /if \(!choice\) \{[\s\S]*?nenhuma chamada foi paga[\s\S]*?return semResultado\("cancelled"/);
+  // D6 — cancelar o PAGAMENTO segue só com o cache e avisa que nada será pago.
+  assert.match(cancelar, /if \(choice\.cacheOnly\) \{[\s\S]*?Pagamento cancelado: nenhuma chamada será paga/);
+  // Cache ilegível: tentar ler de novo refaz o plano, sem pagar.
+  assert.match(cancelar, /if \(!choice\?\.retryCacheRead\) break;/);
+  // Quem chamou (o processamento da formação) só conta coletado/reaproveitado depois do readback.
   assert.match(mesa, /const resultadoDaSerp = await confirmSerpValidation\(pendentes\);/);
-  assert.match(mesa, /const coletadosAgora = resultadoDaSerp === "cancelled" \? new Set<string>\(\) : new Set\(resumoSerp\.needsCollection\);/);
+  assert.match(mesa, /collected: new Set\(resultadoDaSerp\.collectedIds\),\s*reused: new Set\(resultadoDaSerp\.reusedIds\),/);
   assert.ok(cancelar.indexOf('status: "processing"') > cancelar.indexOf("if (!choice)"), "o estado de processamento só depois da escolha");
 });
 

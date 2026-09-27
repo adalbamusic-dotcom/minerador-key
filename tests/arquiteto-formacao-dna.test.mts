@@ -133,10 +133,20 @@ test("C — texto menos parecido, DNA alinhado: o DNA sustenta a formação", ()
   );
 });
 
-test("§3 — funil NÃO é identidade temática", () => {
-  const fonte = readFileSync("lib/arquiteto/article-formation.ts", "utf8");
-  // O contrato nem carrega funil para a afinidade: TOFU/MOFU explica estágio.
-  assert.equal(fonte.includes("funnel"), false, "o funil entrou na formação");
+test("§3 — funil NÃO é identidade temática; D5 — funil divergente impede o agrupamento automático", () => {
+  /*
+   * As duas regras convivem (regras do dono, 2026-09-26, D5): funil igual
+   * não APROXIMA duas buscas — estágio não é tema —, mas funil diferente no
+   * KeywordDNA impede que o Arquiteto as proponha juntas sozinho.
+   */
+  const base = { keywordId: "a", keyword: "rotina de skincare para pele oleosa", intent: "informacional", volume: 100, kgr: null, entity: null, problem: null, isPublished: false };
+  const outra = { ...base, keywordId: "b", keyword: "rotina skincare pele oleosa" };
+  const semFunil = sameArticleAffinity(base, outra).affinity;
+  const mesmoFunil = sameArticleAffinity({ ...base, funnel: "TOFU" }, { ...outra, funnel: "Topo" }).affinity;
+  assert.equal(mesmoFunil, semFunil, "funil igual não pode somar afinidade");
+  const funisDiferentes = sameArticleAffinity({ ...base, funnel: "TOFU" }, { ...outra, funnel: "BOFU" });
+  assert.equal(funisDiferentes.affinity, 0);
+  assert.match(funisDiferentes.reasons.join(" "), /funil/);
 });
 
 /* ============================ §12 · Teste D ============================= */

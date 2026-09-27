@@ -83,6 +83,7 @@ class Consulta {
 class Banco {
   tabelas = new Map<string, Linha[]>();
   consultas: Consulta[] = [];
+  falhaLeituraMetaSerp = false;
   private proximo = 1;
   from(tabela: string) { return new Consulta(this, tabela); }
   linhas(tabela: string) {
@@ -91,6 +92,9 @@ class Banco {
   }
   executar(consulta: Consulta) {
     this.consultas.push(consulta);
+    if (this.falhaLeituraMetaSerp && consulta.tabela === "editorial_workflow_items" && consulta.colunas === "subject_id,meta:payload->meta") {
+      return { data: null, error: { message: "cache temporariamente indisponível" } };
+    }
     const linhas = this.linhas(consulta.tabela);
     if (consulta.op === "insert") {
       const linha: Linha = { ...structuredClone(consulta.valores!), id: `linha-${this.proximo++}`, lock_version: 1 };
@@ -282,6 +286,40 @@ test("A6 · `plan` não chama o provider, não resolve credencial, não registra
   assert.ok(leiturasDoCache.every(consulta => consulta.colunas === "subject_id,meta:payload->meta"));
 });
 
+test("D6 · cache ilegível não proíbe a coleta: plano com custo máximo e aviso; só paga o autorizado", async () => {
+  recomecar();
+  banco.falhaLeituraMetaSerp = true;
+  // O plano não suspende: tudo vira falta, com o aviso de que o total é o máximo.
+  const planejado = await chamar({ mode: "plan" });
+  assert.equal(planejado.status, 200, JSON.stringify(planejado.corpo).slice(0, 400));
+  assert.equal(planejado.corpo.data.plan.cacheUnavailable, true);
+  assert.equal(planejado.corpo.data.plan.paidQueries, 8, "2 keywords × 4 lentes: o custo máximo");
+  assert.ok(planejado.corpo.data.plan.missingDetails.every((item: { reason: string }) => item.reason === "cache ilegível"));
+  assert.deepEqual(pedidosAoProvider, [], "planejar não paga");
+  assert.equal(resolucoes, 0);
+  assert.deepEqual(usos, []);
+
+  // Analisar só com o cache não tem o que ler: 503, sem custo, com as duas saídas.
+  const somenteCache = await chamar({ mode: "execute", cacheOnly: true, authorizedPaidQueries: 0, payMissingExtraLenses: false });
+  assert.equal(somenteCache.status, 503);
+  assert.equal(somenteCache.corpo.code, "SERP_CACHE_UNAVAILABLE");
+  assert.match(somenteCache.corpo.error, /ler o cache de novo|custo máximo/);
+  assert.deepEqual(pedidosAoProvider, []);
+
+  // Sem autorização, nada é pago mesmo com o cache fora.
+  const semAutorizacao = await chamar({ mode: "execute" });
+  assert.equal(semAutorizacao.status, 409);
+  assert.equal(semAutorizacao.corpo.data.plan.cacheUnavailable, true);
+  assert.deepEqual(pedidosAoProvider, []);
+
+  // Autorizado o teto, a coleta acontece e o artigo sai como COLETADO.
+  const executado = await chamar({ mode: "execute", authorizedPaidQueries: 8 });
+  assert.equal(executado.status, 200, JSON.stringify(executado.corpo).slice(0, 500));
+  assert.ok(pedidosAoProvider.length > 0 && pedidosAoProvider.length <= 8, "nunca além do autorizado");
+  assert.equal(executado.corpo.diagnostic.cacheReadFailed, true);
+  assert.deepEqual(executado.corpo.data.articleSources, [{ articleId: "grupo-1", source: "collected" }]);
+});
+
 test("A6 · `execute` sem autorização, ou com menos que o plano, NÃO paga nada e devolve o plano", async () => {
   recomecar();
   const semAutorizacao = await chamar({ mode: "execute" });
@@ -316,6 +354,7 @@ test("A3/A5 · tudo em cache: nenhuma chamada, o voto nas 4 lentes e o marcador 
   const { status, corpo } = await chamar({ mode: "execute" });
   assert.equal(status, 200, JSON.stringify(corpo).slice(0, 500));
   assert.equal(corpo.data.paidQueries, 0);
+  assert.deepEqual(corpo.data.articleSources, [{ articleId: "grupo-1", source: "reused" }], "parecer novo feito só com o cache é reaproveitado, nunca coletado");
   assert.deepEqual(pedidosAoProvider, [], "tudo em cache: o provider não é chamado");
   assert.equal(resolucoes, 0, "nem a credencial é lida");
   assert.equal(corpo.diagnostic.extraLensCacheHits, 6);
@@ -334,6 +373,82 @@ test("A3/A5 · tudo em cache: nenhuma chamada, o voto nas 4 lentes e o marcador 
   assert.equal(gravados[0].verdict, "COMPATIBLE");
 });
 
+test("artigo de uma keyword usa as quatro lentes em cache sem cobrar", async () => {
+  recomecar();
+  for (let lente = 0; lente < 4; lente += 1) await semear("skincare facial", KW_1, lente);
+  pedidosAoProvider.length = 0;
+  const unitario = { ...grupo, keywordIds: [KW_1], keywords: [keyword(KW_1, "skincare facial")], roles: { [KW_1]: "principal" } };
+  const planejado = await chamar({ mode: "plan", groups: [unitario] });
+  assert.equal(planejado.status, 200);
+  assert.equal(planejado.corpo.data.plan.paidQueries, 0);
+  const executado = await chamar({ mode: "execute", groups: [unitario] });
+  assert.equal(executado.status, 200, JSON.stringify(executado.corpo).slice(0, 500));
+  assert.equal(executado.corpo.data.assessments.length, 1);
+  const lenses = gravados[0].interpretation?.lenses as { observed: string[]; missing: unknown[] };
+  assert.deepEqual(lenses.observed, ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"]);
+  assert.deepEqual(lenses.missing, []);
+  assert.deepEqual(pedidosAoProvider, []);
+  assert.deepEqual(usos, []);
+});
+
+test("artigo unitário com só lente canônica mostra três faltas e pode ser analisado sem pagar", async () => {
+  recomecar();
+  await semear("skincare facial", KW_1, 0);
+  pedidosAoProvider.length = 0;
+  const unitario = { ...grupo, keywordIds: [KW_1], keywords: [keyword(KW_1, "skincare facial")], roles: { [KW_1]: "principal" } };
+  const planejado = await chamar({ mode: "plan", groups: [unitario] });
+  assert.equal(planejado.status, 200);
+  assert.equal(planejado.corpo.data.plan.extraPaidQueries, 3);
+  assert.equal(planejado.corpo.data.plan.missingDetails.length, 3);
+  const executado = await chamar({ mode: "execute", groups: [unitario], cacheOnly: true, authorizedPaidQueries: 0, payMissingExtraLenses: false });
+  assert.equal(executado.status, 200, JSON.stringify(executado.corpo).slice(0, 500));
+  assert.equal(executado.corpo.data.assessments.length, 1);
+  const lenses = gravados[0].interpretation?.lenses as { observed: string[]; missing: unknown[] };
+  assert.deepEqual(lenses.observed, ["desktop-windows"]);
+  assert.equal(lenses.missing.length, 3);
+  assert.deepEqual(pedidosAoProvider, []);
+  assert.deepEqual(usos, []);
+});
+
+test("formação com cache parcial avalia os artigos atendidos sem pagar e nomeia a keyword ausente", async () => {
+  recomecar();
+  for (const [texto, id] of [["skincare facial", KW_1], ["rotina skincare facial", KW_2]] as const) {
+    for (let lente = 0; lente < 4; lente += 1) await semear(texto, id, lente);
+  }
+  pedidosAoProvider.length = 0;
+  const keywordAusenteId = "44444444-4444-4444-8444-444444444444";
+  const grupoAusente = {
+    ...grupo,
+    id: "grupo-sem-cache",
+    keywordIds: [keywordAusenteId],
+    keywords: [keyword(keywordAusenteId, "busca ainda sem serp")],
+    principalSuggestion: { ...grupo.principalSuggestion, keywordId: keywordAusenteId },
+    roles: { [keywordAusenteId]: "principal" },
+  };
+  const groups = [grupo, grupoAusente];
+  const planned = await chamar({ mode: "plan", groups });
+  assert.equal(planned.status, 200);
+  assert.equal(planned.corpo.data.plan.primaryPaidQueries, 1);
+  assert.ok(planned.corpo.data.plan.missingDetails.some((item: { keyword: string; lens: string }) =>
+    item.keyword === "busca ainda sem serp" && item.lens === "desktop-windows"));
+  assert.deepEqual(pedidosAoProvider, []);
+
+  const executed = await chamar({ mode: "execute", groups, cacheOnly: true, payMissingExtraLenses: false, authorizedPaidQueries: 0 });
+  assert.equal(executed.status, 200, JSON.stringify(executed.corpo).slice(0, 600));
+  assert.equal(executed.corpo.data.paidQueries, 0);
+  assert.equal(executed.corpo.data.assessments.length, 1);
+  assert.equal(executed.corpo.data.assessments[0].articleId, grupo.id);
+  assert.equal(executed.corpo.data.failures.length, 1);
+  assert.equal(executed.corpo.data.failures[0].articleId, grupoAusente.id);
+  // D6 — o pendente diz exatamente o que falta; o parecer do cache é "reaproveitado".
+  assert.match(executed.corpo.data.failures[0].message, /busca ainda sem serp/);
+  assert.match(executed.corpo.data.failures[0].message, /não está no cache/);
+  assert.deepEqual(executed.corpo.data.articleSources, [{ articleId: grupo.id, source: "reused" }]);
+  assert.deepEqual(pedidosAoProvider, []);
+  assert.deepEqual(usos, []);
+  assert.equal(resolucoes, 0);
+});
+
 test("A6/A3 · paga EXATAMENTE as lentes que faltam, sem corpo nas extras, com a lente no uso", async () => {
   recomecar();
   // A canônica das duas e a macOS das duas em cache; android e iOS faltam.
@@ -348,6 +463,8 @@ test("A6/A3 · paga EXATAMENTE as lentes que faltam, sem corpo nas extras, com a
   const { status, corpo } = await chamar({ mode: "execute", authorizedPaidQueries: plano.corpo.data.plan.paidQueries });
   assert.equal(status, 200, JSON.stringify(corpo).slice(0, 500));
   assert.equal(pedidosAoProvider.length, 4);
+  // D6 — houve SERP paga neste parecer: ele conta como coletado.
+  assert.deepEqual(corpo.data.articleSources, [{ articleId: "grupo-1", source: "collected" }]);
   assert.ok(pedidosAoProvider.every(pedido => pedido.device === "mobile" && pedido.depth === 10));
   assert.deepEqual(pedidosAoProvider.map(pedido => pedido.os).sort(), ["android", "android", "ios", "ios"]);
   assert.equal(corpo.data.paidQueries, 4);

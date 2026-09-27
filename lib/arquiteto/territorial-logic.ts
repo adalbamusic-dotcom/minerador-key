@@ -97,6 +97,10 @@ export type TerritorialLogicResult = {
 };
 
 const AFFINITY_FLOOR = 0.34;
+/** Convergência mínima com uma página publicada do território para ela atrair a keyword. */
+const PUBLISHED_ATTRACTION_FLOOR = 0.5;
+/** Quanto a página publicada pesa no destino: o reforço vem antes da semelhança com o tema. */
+const PUBLISHED_ATTRACTION_BONUS = 0.25;
 /** Dois destinos dentro desta distância são ambíguos, não um vencedor. */
 const AMBIGUITY_DELTA = 0.12;
 
@@ -167,6 +171,24 @@ export function deriveTerritorialLogic(input: {
    * dela na iteração (comparação em nível de grupo).
    */
   const targetsByKeyword = new Map<string, TerritorialHypothesisTarget[]>();
+  /*
+   * D1/D2 — AS PÁGINAS PUBLICADAS ATRAEM O QUE AS REFORÇA.
+   *
+   * O destino era pontuado só pela entidade central, pela fronteira e pela
+   * intenção do território. Uma livre que pede o conteúdo de um artigo
+   * publicado caía no Silo de palavras mais parecidas, longe da página que ela
+   * reforçaria. Agora a convergência com uma publicada do território entra
+   * no escore e no motivo. E a fronteira gravada como LISTA DOS MEMBROS não
+   * conta como fronteira: o membro não é o tema do Silo.
+   */
+  const phraseKey = (value: unknown) => [...tokens(value)].sort().join(" ");
+  const publishedByTerritory = new Map(territories.map(territory => [territory.territoryRef, territory.keywordRefs
+    .map(ref => keywordById.get(ref) as { keyword?: unknown; isPublished?: unknown } | undefined)
+    .filter((item): item is { keyword?: unknown; isPublished?: unknown } => Boolean(item?.isPublished))
+    .map(item => ({ label: String(item.keyword || ""), tokens: tokens(item.keyword) }))]));
+  const memberPhrasesByTerritory = new Map(territories.map(territory => [territory.territoryRef, new Set(territory.keywordRefs
+    .map(ref => phraseKey((keywordById.get(ref) as { keyword?: unknown } | undefined)?.keyword))
+    .filter(Boolean))]));
   const computeTargets = (keywordId: string): { targets: TerritorialHypothesisTarget[]; evidence: string[] } => {
     // Evidência só interessa na passagem da própria keyword; o cache guarda os
     // destinos, que é o que a consulta em nível de grupo precisa.
@@ -180,7 +202,10 @@ export function deriveTerritorialLogic(input: {
     for (const territory of territories) {
       const entityAffinity = overlap(facts.entity, tokens(territory.centralEntity));
       const textAffinity = overlap(facts.text, tokens(territory.centralEntity));
-      const includes = territory.boundary.includes.some(term => facts.text.has(normalize(term)) || facts.entity.has(normalize(term)));
+      const membros = memberPhrasesByTerritory.get(territory.territoryRef);
+      const includes = territory.boundary.includes
+        .filter(term => !membros?.has(phraseKey(term)))
+        .some(term => facts.text.has(normalize(term)) || facts.entity.has(normalize(term)));
       const excludes = territory.boundary.excludes.some(term => facts.text.has(normalize(term)));
       if (excludes) {
         evidence.push(`${siloLabel(territory.territoryRef)}: a fronteira exclui explicitamente esta keyword.`);
@@ -191,15 +216,22 @@ export function deriveTerritorialLogic(input: {
         : 0.5;
       // Entidade e fronteira pesam mais que o texto: similaridade lexical
       // sozinha nunca sustenta um destino.
-      const score = (entityAffinity * 0.45) + (textAffinity * 0.15) + (intentAffinity * 0.2) + (includes ? 0.2 : 0);
+      const publicada = (publishedByTerritory.get(territory.territoryRef) || [])
+        .map(item => ({ label: item.label, affinity: overlap(facts.text, item.tokens) }))
+        .sort((left, right) => right.affinity - left.affinity)[0];
+      const reforcaPublicada = Boolean(publicada && publicada.affinity >= PUBLISHED_ATTRACTION_FLOOR);
+      const score = (entityAffinity * 0.45) + (textAffinity * 0.15) + (intentAffinity * 0.2) + (includes ? 0.2 : 0)
+        + (reforcaPublicada ? PUBLISHED_ATTRACTION_BONUS : 0);
       if (score < AFFINITY_FLOOR) continue;
       targets.push({
         territoryRef: territory.territoryRef,
         existingSiloId: territory.existingSiloRef?.siloId ?? null,
         score: Math.round(score * 100) / 100,
-        reason: includes
-          ? "Entidade compatível e termo dentro da fronteira declarada."
-          : "Entidade e intenção compatíveis com a fronteira declarada.",
+        reason: reforcaPublicada
+          ? `Reforça o artigo publicado "${publicada!.label}" deste Silo.`
+          : includes
+            ? "Entidade compatível e termo dentro da fronteira declarada."
+            : "Entidade e intenção compatíveis com a fronteira declarada.",
       });
     }
 

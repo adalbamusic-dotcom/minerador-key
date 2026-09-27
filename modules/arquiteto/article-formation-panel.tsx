@@ -46,6 +46,8 @@ const ROLE_TITLES: Record<ArticleCandidate["keywords"][number]["role"], string> 
 
 /** Classificações que pedem olhar humano antes de confirmar. */
 const SINGLETON_REVIEW: ReadonlySet<SingletonAudit["classification"]> = new Set(["POSSIBLE_MERGE", "PUBLISHED_OVERLAP"]);
+/** D2/D3 — publicado e Assunto sozinhos são artigos completos, nunca "candidato independente". */
+const SINGLETON_ANCHORS: ReadonlySet<SingletonAudit["classification"]> = new Set(["PUBLISHED_ANCHOR", "SUBJECT_TRUNK"]);
 
 function Bar({ label, value, total, tone }: { label: string; value: number; total: number; tone: string }) {
   const ratio = total > 0 ? value / total : 0;
@@ -282,6 +284,8 @@ export function ArticleFormationPanel({
             </p>
             <p className="text-sm leading-6 text-text-muted">
               {summary.singles} candidato(s) individual(is) · {summary.grouped} agrupamento(s)
+              {summary.publishedAwaitingSupport > 0 ? ` · ${summary.publishedAwaitingSupport} publicado(s) aguardando reforço` : ""}
+              {summary.subjectsAwaitingSupport > 0 ? ` · ${summary.subjectsAwaitingSupport} Assunto(s) aguardando sustentação` : ""}
             </p>
             <p className="text-sm leading-6 text-text-muted">
               {summary.publishedArticles} artigo(s) publicado(s) reconhecido(s) · {summary.possibleOverlaps} possível(is) sobreposição(ões) ·{" "}
@@ -290,6 +294,11 @@ export function ArticleFormationPanel({
             {summary.overflowKeywords > 0 && (
               <p className="text-sm leading-6 text-warning" data-testid="architect-formation-overflow">
                 {summary.overflowKeywords} busca(s) convergem além do teto de seis e esperam decisão editorial.
+              </p>
+            )}
+            {summary.deferredKeywords > 0 && (
+              <p className="text-sm leading-6 text-text-muted" data-testid="architect-formation-deferred">
+                {summary.deferredKeywords} keyword(s) em Keywords não agrupadas por precedência ou pelo teto de seis, cada uma com o motivo.
               </p>
             )}
           </div>
@@ -501,7 +510,7 @@ export function ArticleFormationPanel({
             <p className="text-sm font-semibold text-text-muted">Destino das keywords</p>
             <Bar label="Em artigo candidato" value={summary.keywordsEmCandidatos} total={totalKeywords} tone="bg-module-accent/70" />
             <Bar label="Já publicadas" value={jaPublicadas} total={totalKeywords} tone="bg-success/70" />
-            <Bar label="Sem convergência" value={summary.freeKeywords} total={totalKeywords} tone="bg-text-muted/50" />
+            <Bar label="Keywords não agrupadas" value={summary.freeKeywords} total={totalKeywords} tone="bg-text-muted/50" />
           </div>
 
           {selectedCandidate && (
@@ -618,7 +627,9 @@ export function ArticleFormationPanel({
               {selectedSingletonAudit ? (
                 <div data-testid="architect-candidate-singleton">
                   <p className="text-sm leading-6 text-foreground">
-                    Mantido como candidato independente · {SINGLETON_CLASSIFICATION_LABELS[selectedSingletonAudit.classification]}
+                    {SINGLETON_ANCHORS.has(selectedSingletonAudit.classification)
+                      ? SINGLETON_CLASSIFICATION_LABELS[selectedSingletonAudit.classification]
+                      : <>Mantido como candidato independente · {SINGLETON_CLASSIFICATION_LABELS[selectedSingletonAudit.classification]}</>}
                   </p>
                   <ul className="mt-0.5 space-y-0.5 text-sm leading-6 text-text-muted">
                     {selectedSingletonAudit.reasons.map(razao => <li key={razao}>✓ {razao}</li>)}

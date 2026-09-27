@@ -2204,3 +2204,41 @@ Todas confirmadas pela lente de gatilho; a correção proposta de cada uma foi
 - [x] `test:arquiteto` 2.396/2.396, incluindo a separação entre Silos e Artigos e a rolagem do Workbench.
 - [ ] Homologar após deploy com os sete Silos/21 artigos da marca e conferir associações por readback.
 - [ ] A investigação SERP e a formação/finalização MCP continuam fora das ferramentas executáveis; ver `docs/compartilhado/agentes-mcp-backlog.md`.
+## Precedência da formação — 2026-09-26
+
+- [x] Ler os sinais do KeywordDNA aprovado e reservar cada artigo publicado antes dos Assuntos e dos candidatos novos no mesmo Silo.
+- [x] Reservar sustentações automáticas de Assuntos com Principal de Volume validado, sem transformar o tronco em keyword do artigo; disputa ambígua fica visível sem destino inventado.
+- [x] Aplicar limite de seis em grupos automáticos, manter o excedente em `Keywords não agrupadas` e enviar apenas membros efetivos à SERP.
+- [x] Projetar as sustentações no artigo publicado da mesa; tratar `Não aplicável` de artigo unitário como informação neutra.
+- [x] Contar SERP concluída somente com assessment confirmado por readback; atualizar catálogo MCP e regressões.
+- [ ] **Homologar após deploy (usuário):** na AdalbaPro, conferir os 21 artigos publicados, Assuntos, keywords não agrupadas, ausência de candidato acima de seis, plano de custo antes de qualquer coleta e readback dos assessments. Separar divergência real da SERP de falta de evidência no cache.
+- [ ] Avaliar, com fixture de KeywordDNA e snapshot real sanitizado, se o cache compartilhado de cada keyword cobre as quatro lentes do assessment do artigo. Quando não cobrir, manter o plano explícito de custo; não afirmar que a SERP do artigo já foi executada apenas porque uma keyword tem resultados próprios.
+- [x] Formação: detalhar as lentes faltantes no plano e permitir gerar pareceres dos artigos atendidos somente com cache, orçamento zero, sem chamadas pagas. Testes locais de cache parcial e de blocos.
+- [ ] Homologar após deploy na marca AdalbaPro: abrir o plano dos 55 artigos, conferir nomes e motivos das faltas (a contagem pode mudar porque os unitários passaram a exigir quatro lentes), escolher **Cancelar pagamento · analisar com o cache (US$ 0)** e verificar por readback os pareceres completos e incompletos. Não autorizar chamada paga nesta verificação.
+- [ ] Investigar as faltas reais mostradas no plano por targeting, idioma, lente, endpoint, profundidade e validade de 30 dias. A captura antiga, agregada, não revela qual desses motivos se aplica às seis faltas daquele momento.
+- [x] Alinhar a formação de artigos de keyword única à regra de quatro lentes: plano, leitura do cache, marcador e gate de conclusão com regressões locais.
+- [ ] Homologar após deploy o plano dos unitários e o estado `incompleta · faltam lentes` quando alguma lente não estiver no cache. Verificar os registros legados sem marcador antes de qualquer revalidação em lote.
+## O lote diz o objetivo (D1) e reforço entre Silos (D8) — 2026-09-26
+
+- [x] Com publicado ou Assunto no lote recebido, a sobra sem encaixe fica em Keywords não agrupadas com motivo; artigo novo só pela ação explícita "Formar artigos novos com as sobras". Lote todo novo forma artigos.
+- [x] Assunto sem Volume recebe livres convergentes do Silo, com principal de Volume validado.
+- [x] Propostas "Reforçar publicado ou Assunto de outro Silo", aplicadas só por decisão humana de Silo com releitura.
+- [x] Fronteira gravada como lista dos membros fora do tema do Silo; publicada atrai a livre na hipótese territorial.
+- [x] D6: sem opção gratuita com cache ilegível; legenda dos contadores; `lookup?.subjectId` no plano. SDDs, spec e catálogo MCP atualizados.
+- [ ] **Homologar após deploy (usuário), AdalbaPro:** conferir "21 artigo(s) publicado(s) reconhecido(s)" (leitura remota de 2026-09-26: 21 artigos publicados e 4 cabeças de Silo; o total de 25 inclui as cabeças), nenhum candidato novo automático, nenhum candidato acima de seis, publicados e Assuntos sem "Não aplicável", as propostas de reforço de "Leads sem Tráfego Pago" para Captação e Crescimento e, depois de aceitá-las, o readback do `territoryRef` e o reforço na formação. Na SERP, escolher "Cancelar pagamento · analisar com o cache (US$ 0)" e conferir os pareceres gravados e os pendentes com motivo. Não autorizar chamada paga nesta verificação.
+- [ ] Validar na tela (navegador) o bloco "Objetivo do lote", o botão da ação explícita e a lista de propostas em largura de celular; não foi aberto nesta entrega.
+- [ ] Similaridade semântica real: a convergência continua lexical (tokens); propostas entre Silos podem deixar de fora reforços por sinônimo ("captar" × "atrair"). Avaliar o DNA (entidade e problema) ou embeddings com fixture real sanitizada.
+- [x] Assunto com artigo sugerido pela formação ganhou selo próprio, "Assunto · artigo sugerido na formação, aguarda confirmação"; a formação e a mesa dão a mesma resposta (ver a entrada seguinte).
+- [ ] `react-hooks/set-state-in-effect` no efeito `readoutPendente` (trabalho local anterior) segue o padrão já existente no arquivo; revisar com a dívida de lint do workspace.
+
+## Um artigo por Assunto e nenhuma penalidade — 2026-09-26
+
+- [x] Um artigo por Assunto: a sustentação que não coube volta a ser livre, é oferecida às âncoras e, sem encaixe, fica com motivo e nas propostas; nunca um segundo artigo concorrente (sondas Z e H).
+- [x] Artigo do Assunto com Principal livre: tronco, nunca "Sem convergência" nem "Não aplicável" (sonda C), nas quatro leituras da classificação.
+- [x] Publicado sozinho: "artigo publicado · aguarda reforço" na conclusão da revisão, nunca "busca isolada".
+- [x] Sustentação que esperava Principal: entra no artigo do próprio Assunto, senão é oferecida às âncoras e às propostas.
+- [x] Motivo para toda keyword fora de artigo, inclusive o grupo humano sem Principal elegível.
+- [x] Plano de custo avisa que as quatro lentes valem para artigo unitário e que o parecer antigo "sem par" bloqueia até as extras.
+- [ ] **Antes da homologação, dizer ao dono o que esperar na AdalbaPro:** 21 artigos publicados reconhecidos. Em "Leads sem Tráfego Pago", no máximo 25 das 101 livres reforçam os 5 publicados, e pelo menos 76 ficam em Keywords não agrupadas, com motivo, ou viram propostas para outros Silos. Os artigos unitários com parecer antigo ficam "incompleta · faltam lentes" até as extras serem coletadas, e cada um soma até 3 chamadas no plano.
+- [ ] Homologar após deploy (usuário): nenhum Assunto com mais de um artigo, nenhum candidato de uma keyword com o mesmo Assunto sugerido, o selo "Assunto · artigo sugerido na formação, aguarda confirmação" e a compatibilidade dos artigos de Assunto sem "Não aplicável".
+- [ ] A convergência continua lexical: avaliar o DNA (entidade e problema) antes de declarar a D1 atendida na AdalbaPro.

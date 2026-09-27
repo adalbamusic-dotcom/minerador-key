@@ -80,7 +80,10 @@ test("singleton que ninguém alcança é baixa similaridade", () => {
 });
 
 test("todas as classificações têm rótulo legível", () => {
-  assert.equal(Object.keys(SINGLETON_CLASSIFICATION_LABELS).length, 5);
+  // D2/D3 (2026-09-26): publicado e Assunto sozinhos têm rótulo próprio.
+  assert.equal(Object.keys(SINGLETON_CLASSIFICATION_LABELS).length, 7);
+  assert.equal(SINGLETON_CLASSIFICATION_LABELS.PUBLISHED_ANCHOR, "Publicado · aguarda reforço");
+  assert.equal(SINGLETON_CLASSIFICATION_LABELS.SUBJECT_TRUNK, "Assunto · aguardando sustentação");
   for (const rotulo of Object.values(SINGLETON_CLASSIFICATION_LABELS)) assert.ok(rotulo.length > 3);
 });
 
@@ -95,8 +98,8 @@ test("candidatos separados por teto continuam declarados como sobrepostos", () =
 
   assert.equal(resultado.candidates.length, 1, "sete buscas do mesmo assunto não viram dois artigos");
   assert.equal(resultado.candidates[0].keywords.length, MAX_ARTICLE_KEYWORDS);
-  assert.equal(resultado.candidates[0].overflowKeywordIds.length, 1);
-  assert.match(resultado.candidates[0].conflicts.join(" "), /além do teto/);
+  assert.equal(resultado.candidates[0].overflowKeywordIds.length, 0);
+  assert.equal(resultado.ungroupedKeywordIds.length, 1);
 });
 
 test("candidatos realmente distintos são declarados distintos", () => {
@@ -160,11 +163,11 @@ test("nove buscas da mesma intenção não viram dois artigos automaticamente", 
 
   assert.equal(resultado.candidates.length, 1, "o teto não pode fabricar um segundo assunto");
   assert.equal(resultado.candidates[0].keywords.length, MAX_ARTICLE_KEYWORDS);
-  assert.equal(resultado.candidates[0].overflowKeywordIds.length, 3);
-  // O excesso não some da mesa: ele é do artigo, esperando decisão.
+  assert.equal(resultado.candidates[0].overflowKeywordIds.length, 0);
+  // O excesso não some da mesa nem entra artificialmente no ArticleDNA.
   const todas = new Set([
     ...resultado.candidates[0].keywords.map(item => item.keywordId),
-    ...resultado.candidates[0].overflowKeywordIds,
+    ...resultado.ungroupedKeywordIds,
   ]);
   assert.equal(todas.size, 9);
 });

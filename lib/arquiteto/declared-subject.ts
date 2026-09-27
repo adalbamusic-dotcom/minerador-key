@@ -68,6 +68,12 @@ const text = (value: unknown): string | null => (typeof value === "string" && va
 
 /** Assunto declarado, ainda sem artigo: fica em "Keywords não agrupadas" com este selo (§10). */
 export const SUBJECT_AWAITING_SUPPORT_LABEL = "Assunto · aguardando sustentação" as const;
+/**
+ * D3 — a formação já montou o artigo deste Assunto (tronco sugerido de um
+ * candidato vivo); falta só a confirmação humana do tronco. Não é espera por
+ * sustentação: o artigo existe.
+ */
+export const SUBJECT_SUGGESTED_TRUNK_LABEL = "Assunto · artigo sugerido na formação, aguarda confirmação" as const;
 /** O mesmo texto do Minerador: a declaração tem um nome só nas duas telas. */
 export const SUBJECT_DECLARED_LABEL = KEYWORD_SUBJECT_LABEL;
 /** Filtro da mesa (F2.2). */
@@ -292,6 +298,12 @@ export function splitUngroupedBySubjectAnchor(input: {
   articles: readonly SubjectAnchorCarrier[];
   /** Declarado Assunto no pacote (`readArchitectSubjectStanding(...).declared`). */
   isDeclaredSubject: (keywordId: string) => boolean;
+  /**
+   * Aditivo (D3): Assuntos que a formação já pôs como tronco sugerido de um
+   * candidato vivo. Continuam na lista até a confirmação, com o selo próprio,
+   * e não com "aguardando sustentação" — a tela e a formação dizem o mesmo.
+   */
+  suggestedTrunkKeywordIds?: ReadonlySet<string>;
 }): UngroupedSubjectView {
   const view: UngroupedSubjectView = { ungrouped: [], anchored: [] };
   for (const raw of input.ungroupedKeywordIds) {
@@ -301,7 +313,11 @@ export function splitUngroupedBySubjectAnchor(input: {
       view.anchored.push({ keywordId, label: subjectTrunkLabel(articleCount), articleCount });
       continue;
     }
-    view.ungrouped.push({ keywordId, label: input.isDeclaredSubject(keywordId) ? SUBJECT_AWAITING_SUPPORT_LABEL : null });
+    const declarado = input.isDeclaredSubject(keywordId);
+    view.ungrouped.push({
+      keywordId,
+      label: !declarado ? null : input.suggestedTrunkKeywordIds?.has(keywordId) ? SUBJECT_SUGGESTED_TRUNK_LABEL : SUBJECT_AWAITING_SUPPORT_LABEL,
+    });
   }
   return view;
 }
