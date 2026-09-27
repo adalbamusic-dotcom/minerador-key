@@ -43,10 +43,17 @@ function costFromBody(body: unknown): number | null {
   return task && typeof task.cost === "number" && Number.isFinite(task.cost) ? task.cost : null;
 }
 
-export function buildSubjectDiscoveryPorts({ profile, context, input }: {
+export function buildSubjectDiscoveryPorts({ profile, context, input, usage }: {
   profile: CanonicalSessionProfile;
   context: TenantContext;
-  input: SubjectDiscoverySearchRequest;
+  /** Só o `operationRequestId` é lido (o uso do Google Ads). A rota passa o pedido inteiro. */
+  input: Pick<SubjectDiscoverySearchRequest, "operationRequestId">;
+  /**
+   * Aditivo (diferenciação de publicados, 2026-09-27): quem paga pelo MESMO
+   * caminho declara o módulo no ledger e o coletor no cache. Ausente, tudo
+   * sai como antes: `minerador`.
+   */
+  usage?: { module?: string; collectedBy?: "minerador" | "arquiteto" | "radar" };
 }): SubjectDiscoveryPorts {
   // Um instante por requisição: validade do cache e coleta contam dele.
   const now = new Date();
@@ -136,7 +143,7 @@ export function buildSubjectDiscoveryPorts({ profile, context, input }: {
           const collection = await collectAndCacheSerp(serpCache, serpRequest, {
             config: resolved.config,
             operationRequestId: options.operationRequestId,
-            collectedBy: "minerador",
+            collectedBy: usage?.collectedBy ?? "minerador",
             now,
             storeBody: options.storeBody,
             provider: { onRequestStarted: options.onRequestStarted },
@@ -158,7 +165,7 @@ export function buildSubjectDiscoveryPorts({ profile, context, input }: {
           const recorded = await recordIntegrationUsage({
             resource: resolved.resource,
             operation: "module_operation",
-            module: "minerador",
+            module: usage?.module ?? "minerador",
             resultStatus: event.resultStatus,
             units: 1,
             costAmount: event.costUsd,

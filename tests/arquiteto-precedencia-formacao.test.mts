@@ -318,7 +318,9 @@ test("cenário do dono · o núcleo de 27 com publicados no lote: livres reforç
   const adiadas = universe.deferredKeywords || [];
   assert.equal(adiadas.filter(item => doNucleo(item.keywordId)).length, 27 - 5);
   assert.equal(adiadas.filter(item => item.keywordId.startsWith("d-")).length, 81);
-  assert.ok(adiadas.every(item => item.reason.includes(FORM_NEW_FROM_LEFTOVERS_ACTION) && /não vira artigo novo sozinha/.test(item.reason)));
+  // D2.3 — motivo curto, sem o rótulo da Lógica; a ação explícita fica no bloco "Objetivo do lote" e nas oportunidades.
+  assert.ok(adiadas.every(item => /sem par com publicado ou Assunto deste Silo/.test(item.reason) && !/Precisa avaliar/.test(item.reason) && item.reason.length <= 160), adiadas.map(item => item.reason).find(reason => reason.length > 160));
+  assert.ok(!adiadas.some(item => item.reason.includes(FORM_NEW_FROM_LEFTOVERS_ACTION)), "a ação não se repete em cada linha");
   assert.equal(plan.leftoverKeywordIds.length, 22 + 81, "as sobras são as candidatas a reforçar outro Silo");
   // 4) As livres de estética reforçam a publicada de estética.
   assert.deepEqual(new Set(candidatoDe(universe, "p-leads-2")!.keywords.map(item => item.keywordId)), new Set(["p-leads-2", "e-1", "e-2"]));
@@ -362,7 +364,7 @@ test("D1 · lote todo novo forma artigos desde o início; com âncora no LOTE, o
   assert.equal(melhorar.universe.candidates.length, 0);
   assert.deepEqual(new Set(melhorar.leftoverKeywordIds), new Set(keywords.map(keyword => keyword.keywordId)));
   assert.equal(melhorar.universe.deferredKeywords?.length, 4);
-  assert.ok(melhorar.universe.deferredKeywords!.some(item => item.reason.includes("formaria com outras 2 busca(s)")));
+  assert.ok(melhorar.universe.deferredKeywords!.some(item => item.reason.includes("formaria tema com outras 2: \"captar leads clinica odontologica")));
 });
 
 test("D1/D3 · Assunto sem Volume e sem sustentação sugerida vira artigo com as livres que convergem com ele", () => {

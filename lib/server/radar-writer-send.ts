@@ -459,6 +459,8 @@ export async function sendRadarToWriter(entrada: {
     keywordDnaRefs: partes.keywordDnaRefs,
     actorUserId: entrada.actorId,
     now: entrada.sentAt,
+    /* A nota de diferenciação da MESMA versão (SDD 2026-09-27, §5). */
+    differentiation: identidade.article.payload.differentiation ?? null,
     /* O Assunto da MESMA versão do ArticleDNA que a identidade fixa (F4.1). */
     subject: identidade.article.payload.subject ?? null,
   }));

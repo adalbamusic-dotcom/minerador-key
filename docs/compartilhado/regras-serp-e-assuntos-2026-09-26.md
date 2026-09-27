@@ -288,6 +288,25 @@ O Posto da keyword publicada diz o que o dono quer do artigo:
 - **Quando nenhuma keyword do lote divide a SERP com o publicado ou o Assunto,** o sistema diz isso claramente ("nenhuma keyword deste lote trata do mesmo assunto no Google"). Ele oferece **Buscar reforço**: a Pesquisa por Assunto com o tema e a URL do artigo. E não cola keyword de outro assunto.
 - **Se nem a busca achar demanda,** o sistema informa "tema sem demanda no Google" e deixa a decisão com o dono.
 
+### D2.3 Volume primeiro, e sugestão que o dono só confirma
+
+Decidido pelo dono em 2026-09-27: "se não tem volume, não presta".
+
+- **Keyword sem volume não reforça nada.** O Google Ads sem média e a estimativa do DataForSEO igual a zero ou vazia contam como sem volume.
+  - Ela nunca é sugerida como reforço, sustentação ou nova principal.
+  - Na Pesquisa por Assunto, fica **escondida por padrão**, com o total escondido à vista.
+  - O Assunto é a única exceção, porque ele é o tronco.
+- **O sistema faz o trabalho pesado; o dono só confirma.** Cada publicado e cada Assunto recebe uma lista de sugestões ordenada por volume, em dois níveis:
+  - **Forte:** 3 ou mais páginas em comum no top 10 (D2.2). Vem marcada.
+  - **Provável:** 2 páginas em comum, ou 3 ou mais domínios em comum, ou mesma entidade e mesmo problema no DNA. Vem desmarcada.
+
+  Cada item mostra o volume e o motivo. O dono marca e aplica de uma vez, até o teto de 6.
+- **A intenção que barra é a da SERP** (`evidencia_serp`). A intenção da Lógica, quando diverge, só gera aviso.
+- **Sobras viram oportunidades:**
+  - elas aparecem agrupadas por tema, pelo volume somado, com o nome da keyword principal do grupo;
+  - cada grupo tem a ação "Criar artigo novo com este grupo", que nunca é automática;
+  - sobra sem volume aparece recolhida, no fim.
+
 ### D3. Assunto nunca é penalizado
 
 - O Assunto é tronco. Ele nunca aparece como "isolado", "Não aplicável" ou falha por não ter volume ou companhia.

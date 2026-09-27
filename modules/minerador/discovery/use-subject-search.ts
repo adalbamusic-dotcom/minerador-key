@@ -17,6 +17,7 @@ import {
   SUBJECT_SEARCH_DEFAULT_FILTERS,
   buildSubjectDiscoveryImportItems,
   buildSubjectSearchRequest,
+  countSubjectCandidatesHiddenWithoutVolume,
   declaredSubjectOptions,
   defaultDeclarePhraseAsSubject,
   filterSubjectCandidates,
@@ -376,6 +377,13 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
     return filterSubjectCandidates(activeRecord.result.candidates, filters, imported, candidate => candidate.normalizedKeyword);
   }, [activeRecord, filters]);
 
+  // D2.3: o total escondido pelo "Só com volume" fica à vista, com a opção de mostrar.
+  const hiddenWithoutVolume = useMemo(() => {
+    if (!activeRecord) return 0;
+    const imported = new Set(Object.keys(activeRecord.marks));
+    return countSubjectCandidatesHiddenWithoutVolume(activeRecord.result.candidates, filters, imported, candidate => candidate.normalizedKeyword);
+  }, [activeRecord, filters]);
+
   /* ------------------------ envio ao Processador ------------------------ */
 
   const postSubjects = useCallback(async (body: Record<string, unknown>) => {
@@ -506,6 +514,7 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
     storageAvailable,
     filters, setFilters,
     visibleCandidates,
+    hiddenWithoutVolume,
     importDialog, openImport, setDeclare, closeImport, confirmImport,
   };
 }

@@ -9,7 +9,15 @@ import {
   type ReinforcementSearchOutcome,
   type SerpSubjectDilemmaState,
 } from "../../lib/arquiteto/serp-subject-diagnosis.ts";
+import { subjectDiscoveryHasVolume, type SubjectVolumeFields } from "../../lib/minerador/subject-discovery-volume.ts";
 import { PUBLISHED_PRIMARY_POST_LABELS, publishedPrimaryPostOf, type PublishedPrimaryPost, type PublishedPrimarySwapOutcome } from "../../lib/arquiteto/published-primary-swap.ts";
+import {
+  CREATE_ARTICLE_FROM_GROUP_ACTION,
+  SERP_SUGGESTION_LEVEL_LABELS,
+  type AnchorSuggestion,
+  type LeftoverOpportunities,
+  type SerpSuggestionLevel,
+} from "../../lib/arquiteto/serp-subject-suggestions.ts";
 import {
   SERP_SUBJECT_LENS_LABELS,
   normalizeSerpPageUrl,
@@ -567,7 +575,8 @@ export function serializeKeptSwaps(kept: ReadonlySet<string>): string {
 export type ReinforcementSearchRecordLike = {
   savedAt: string;
   config: { phrase: string; destinationUrl: string; subjectKeywordId: string | null };
-  result: { candidates: ReadonlyArray<{ googleAds: { averageMonthlySearches: number | null } | null }> };
+  /** D2.3: demanda = a mesma regra do Minerador (média do Google Ads ou estimativa maior que zero). */
+  result: { candidates: ReadonlyArray<SubjectVolumeFields> };
 };
 
 const normalizarFrase = (value: string | null | undefined) => String(value || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -598,7 +607,7 @@ export function reinforcementSearchOutcomes(input: {
       resultado.set(ancora.anchorKeywordId, {
         searchedAt: new Date(quando).toISOString(),
         candidateCount: candidatas.length,
-        candidatesWithDemand: candidatas.filter(item => (item.googleAds?.averageMonthlySearches ?? 0) > 0).length,
+        candidatesWithDemand: candidatas.filter(item => subjectDiscoveryHasVolume(item)).length,
         savedAtMs: quando,
       });
     }
@@ -661,6 +670,12 @@ export type SerpSubjectCardView = {
   /** O detalhe, só ao expandir. */
   details: string[];
   serpEvidence: AnchorSerpDiagnosis["serpEvidence"];
+  /** D2.3 — as sugestões com volume, por volume (Forte marcada, Provável desmarcada). */
+  suggestions: SuggestionRowView[];
+  /** Quantas cabem de uma vez (vagas do artigo, teto de 6). */
+  suggestionLimit: number;
+  /** `add`: entram no artigo; `create`: o Assunto sem artigo ganha um, com elas. */
+  suggestionMode: "add" | "create";
 };
 
 export type SerpSubjectCardContext = {
@@ -732,7 +747,7 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
     headline = `Principal mantida por você: "${swap.publishedKeyword}". A sugestão era "${swap.substitute.keyword}" (volume ${volumeBr(swap.substitute.volume)}, ${swap.substitute.sharedPageCount} páginas em comum).`;
     actions.push({ kind: "review_swap", label: SWAP_REVIEW_ACTION_LABEL });
   } else if (diagnosis.state === "swap_proposed" && swap?.substitute) {
-    headline = `Troca da principal sugerida: "${swap.substitute.keyword}" (volume ${volumeBr(swap.substitute.volume)}, ${swap.substitute.sharedPageCount} páginas em comum). URL e slug continuam.`;
+    headline = `Troca da principal sugerida${swap.substitute.level === "probable" ? " (Provável)" : ""}: "${swap.substitute.keyword}" (volume ${volumeBr(swap.substitute.volume)}, ${swap.substitute.sharedPageCount} páginas em comum). URL e slug continuam.`;
     partesSub.push(`"${swap.publishedKeyword}" vira secundária`);
     const prontidao = context.swapReadiness ?? { ready: false as const, reason: "Não foi possível conferir o ArticleDNA deste artigo." };
     actions.push({ kind: "apply_swap", label: SWAP_APPLY_ACTION_LABEL, disabledReason: prontidao.ready ? null : prontidao.reason });
@@ -811,6 +826,13 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
         : `Sem SERP de "${diagnosis.anchorLabel}" no cache: não dá para medir o que o Google trata como o mesmo assunto.`;
       actions.push({ kind: "collect_serp", label: COLLECT_SERP_ACTION_LABEL }, buscar);
     }
+  } else if (diagnosis.state === "suggestions_available") {
+    const fortes = diagnosis.suggestions.filter(item => item.level === "strong").length;
+    const provaveis = diagnosis.suggestions.length - fortes;
+    headline = `${plural(diagnosis.suggestions.length, "sugestão", "sugestões")} com volume: ${[fortes ? `${fortes} Forte` : "", provaveis ? `${provaveis} Provável` : ""].filter(Boolean).join(", ")}. Marque e aplique de uma vez.`;
+    if (diagnosis.slotsLeft) partesSub.push(`cabem mais ${diagnosis.slotsLeft}`);
+    else partesSub.push("artigo no teto de 6");
+    actions.push(buscar);
   } else if (diagnosis.state === "no_demand") {
     const busca = context.reinforcementSearch;
     headline = `${cap(NO_DEMAND_MESSAGE)}.`;
@@ -855,6 +877,156 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
     actions,
     details: [...new Set(details)],
     serpEvidence: diagnosis.serpEvidence,
+    suggestions: (diagnosis.suggestions || []).map(suggestionRowView),
+    suggestionLimit: diagnosis.kind === "subject" && diagnosis.members.length === 0 ? MAX_SUGGESTION_SELECTION : Math.max(0, diagnosis.slotsLeft),
+    suggestionMode: diagnosis.kind === "subject" && diagnosis.members.length === 0 ? "create" : "add",
+  };
+}
+
+/* ------------------------- D2.3 — as sugestões no cartão ------------------------- */
+
+/** Nunca mais que o teto de 6 num artigo. */
+export const MAX_SUGGESTION_SELECTION = 6;
+export const APPLY_SUGGESTIONS_ACTION_LABEL = "Aplicar selecionadas";
+
+export type SuggestionRowView = {
+  keywordId: string;
+  keyword: string;
+  volume: number;
+  volumeLabel: string;
+  level: SerpSuggestionLevel;
+  levelLabel: string;
+  /** Curto: "7 páginas em comum no top 10". */
+  reason: string;
+  warning: string | null;
+  where: AnchorSuggestion["where"];
+  whereLabel: string;
+  /** Vem marcada (Forte, no Silo, fora de artigo, cabe). */
+  preselected: boolean;
+  toSiloRef: string | null;
+};
+
+export function suggestionRowView(item: AnchorSuggestion): SuggestionRowView {
+  return {
+    keywordId: item.keywordId,
+    keyword: item.keyword,
+    volume: item.volume,
+    volumeLabel: `volume ${volumeBr(item.volume)}`,
+    level: item.level,
+    levelLabel: SERP_SUGGESTION_LEVEL_LABELS[item.level],
+    reason: item.reason,
+    warning: item.warning,
+    where: item.where,
+    whereLabel: item.whereLabel,
+    preselected: item.preselected,
+    toSiloRef: item.where === "other_silo" ? item.siloRef : null,
+  };
+}
+
+/** A seleção inicial: as marcadas pelo domínio. */
+export function initialSuggestionSelection(card: Pick<SerpSubjectCardView, "suggestions" | "suggestionLimit">): Set<string> {
+  return new Set(card.suggestions.filter(item => item.preselected).slice(0, card.suggestionLimit).map(item => item.keywordId));
+}
+
+export type SuggestionApplyPreview = {
+  /** Entram no artigo agora (mesmo Silo). */
+  intoArticle: SuggestionRowView[];
+  /** Saem de outro artigo (tirar de lá é decisão sua). */
+  fromOtherArticle: SuggestionRowView[];
+  /** Mudam de Silo primeiro (decisão de Silo); depois aparecem aqui para entrar. */
+  changeSilo: SuggestionRowView[];
+  /** Por que não dá para aplicar. `null` = pode. */
+  blockedReason: string | null;
+};
+
+/** O que "Aplicar selecionadas" vai fazer, dito antes da confirmação. */
+export function suggestionApplyPreview(card: Pick<SerpSubjectCardView, "suggestions" | "suggestionLimit" | "suggestionMode">, selected: ReadonlySet<string>): SuggestionApplyPreview {
+  const marcadas = card.suggestions.filter(item => selected.has(item.keywordId));
+  const changeSilo = marcadas.filter(item => item.where === "other_silo");
+  const intoArticle = marcadas.filter(item => item.where !== "other_silo");
+  const fromOtherArticle = intoArticle.filter(item => item.where === "other_article" || item.where === "new_article");
+  let blockedReason: string | null = null;
+  if (!marcadas.length) blockedReason = "Marque ao menos uma sugestão.";
+  else if (intoArticle.length > card.suggestionLimit) {
+    blockedReason = card.suggestionLimit
+      ? `Cabem ${card.suggestionLimit} neste artigo (teto de 6): desmarque ${intoArticle.length - card.suggestionLimit}.`
+      : "O artigo está no teto de 6: abra o artigo e tire uma keyword antes.";
+  } else if (card.suggestionMode === "create" && !intoArticle.length) {
+    blockedReason = "O Assunto ainda não tem artigo: marque ao menos uma keyword deste Silo para criá-lo.";
+  }
+  return { intoArticle, fromOtherArticle, changeSilo, blockedReason };
+}
+
+/** O desfecho, só com o que a releitura confirmou. */
+export function describeSuggestionOutcome(input: {
+  anchorLabel: string;
+  addedConfirmed: number;
+  created: boolean;
+  movedToSilo: number;
+  refused: readonly string[];
+}): { tone: "success" | "warning" | "error"; message: string } {
+  const partes = [
+    input.addedConfirmed ? `${plural(input.addedConfirmed, "keyword entrou", "keywords entraram")} ${input.created ? "no artigo novo do Assunto" : "no artigo"} "${input.anchorLabel}"` : "",
+    input.movedToSilo ? `${plural(input.movedToSilo, "keyword mudou", "keywords mudaram")} de Silo: agora aparecem na lista para entrar` : "",
+  ].filter(Boolean);
+  const nada = !partes.length;
+  return {
+    tone: nada ? "error" : input.refused.length ? "warning" : "success",
+    message: `${partes.join(" · ") || "Nada foi aplicado"}.${input.refused.length ? ` Não aplicado: ${input.refused.slice(0, 3).map(item => item.replace(/\.\s*$/, "")).join(" · ")}${input.refused.length > 3 ? " · …" : ""}.` : ""}${nada ? "" : " Confirmado na releitura."} URL, slug e canonical não mudam.`,
+  };
+}
+
+/* ----------------------- D2.3 — as sobras como oportunidade ----------------------- */
+
+export type LeftoverOpportunityGroupView = {
+  key: string;
+  siloRef: string;
+  siloLabel: string;
+  name: string;
+  totalVolume: number;
+  totalVolumeLabel: string;
+  leaderKeywordId: string;
+  members: Array<{ keywordId: string; keyword: string; volumeLabel: string; reason: string; warning: string | null; leader: boolean }>;
+  reason: string;
+  actionLabel: string;
+};
+
+export type LeftoverOpportunitiesView = {
+  groups: LeftoverOpportunityGroupView[];
+  withoutVolume: Array<{ keywordId: string; keyword: string; siloLabel: string }>;
+  headline: string;
+};
+
+export function leftoverOpportunitiesView(input: LeftoverOpportunities): LeftoverOpportunitiesView {
+  const groups = input.groups.map(group => ({
+    key: group.key,
+    siloRef: group.siloRef,
+    siloLabel: group.siloLabel,
+    name: group.name,
+    totalVolume: group.totalVolume,
+    totalVolumeLabel: `volume somado ${volumeBr(group.totalVolume)}`,
+    leaderKeywordId: group.leaderKeywordId,
+    members: group.members.map(member => ({
+      keywordId: member.keywordId,
+      keyword: member.keyword,
+      volumeLabel: volumeBr(member.volume),
+      reason: member.reason,
+      warning: member.warning,
+      leader: member.keywordId === group.leaderKeywordId,
+    })),
+    reason: group.reason,
+    actionLabel: CREATE_ARTICLE_FROM_GROUP_ACTION,
+  }));
+  const comVolume = input.groups.reduce((soma, group) => soma + group.members.length, 0);
+  const partes = [
+    `${plural(comVolume, "sobra", "sobras")} com volume em ${plural(groups.length, "tema", "temas")}`,
+    input.reservedForAnchors ? `${input.reservedForAnchors} já sugerida(s) como reforço` : "",
+    input.withoutVolume.length ? `${input.withoutVolume.length} sem volume, no fim` : "",
+  ].filter(Boolean);
+  return {
+    groups,
+    withoutVolume: input.withoutVolume.map(item => ({ keywordId: item.keywordId, keyword: item.keyword, siloLabel: item.siloLabel })),
+    headline: input.totalLeftovers ? `${partes.join(" · ")}.` : "Nenhuma sobra: toda keyword está num artigo ou num Assunto.",
   };
 }
 
@@ -875,6 +1047,10 @@ export type SerpSubjectPanelSummary = {
   withoutSerp: number;
   blockedByDna: number;
   pairWithoutVolume: number;
+  /** D2.3 — cartões no estado "Sugestões para confirmar". */
+  suggestionsToConfirm: number;
+  /** D2.3 — cartões com ao menos uma sugestão com volume (qualquer estado). */
+  withSuggestions: number;
   headline: string;
 };
 
@@ -897,10 +1073,13 @@ export function summarizeSerpSubjectCards(cards: readonly SerpSubjectCardView[])
     withoutSerp: conta("serp_missing"),
     blockedByDna: conta("pair_blocked_by_dna"),
     pairWithoutVolume: conta("pair_without_volume"),
+    suggestionsToConfirm: conta("suggestions_available"),
+    withSuggestions: cards.filter(card => card.suggestions.length > 0).length,
   };
   const partes = [
     resumo.reinforced ? plural(resumo.reinforced, "reforçado", "reforçados") : "",
     resumo.swapsSuggested ? plural(resumo.swapsSuggested, "troca sugerida", "trocas sugeridas") : "",
+    resumo.withSuggestions ? `${resumo.withSuggestions} com sugestões de reforço` : "",
     resumo.pairsInOtherSilos ? plural(resumo.pairsInOtherSilos, "par em outro Silo", "pares em outros Silos") : "",
     resumo.pairsInOtherArticles ? plural(resumo.pairsInOtherArticles, "par em outro artigo", "pares em outros artigos") : "",
     resumo.withoutPair ? `${resumo.withoutPair} sem par no lote` : "",
@@ -921,6 +1100,8 @@ export type SerpSubjectBatchChoice = {
   kind: "swap" | "cross_silo";
   anchorKeywordId: string;
   label: string;
+  /** D2.3 (aditivo) — troca Provável: fica fora de "Marcar todas"; o dono marca uma a uma. */
+  probable?: boolean;
   /** Por que não dá para escolher agora. `null` = pode. */
   disabledReason: string | null;
   crossSilo?: { keywordId: string; keyword: string; toSiloRef: string; toSiloLabel: string; fromSiloLabel: string };
@@ -942,8 +1123,9 @@ export function serpSubjectBatchChoices(input: {
         id: `swap:${diagnostico.anchorKeywordId}`,
         kind: "swap",
         anchorKeywordId: diagnostico.anchorKeywordId,
-        label: `Trocar a principal de "${diagnostico.anchorLabel}" por "${diagnostico.swap.substitute.keyword}" (URL e slug continuam)`,
+        label: `Trocar a principal de "${diagnostico.anchorLabel}" por "${diagnostico.swap.substitute.keyword}"${diagnostico.swap.substitute.level === "probable" ? " · Provável, confira a evidência" : ""} (URL e slug continuam)`,
         disabledReason: aplicar && aplicar.kind === "apply_swap" ? aplicar.disabledReason : "Troca indisponível.",
+        ...(diagnostico.swap.substitute.level === "probable" ? { probable: true } : {}),
       });
     }
     for (const proposta of diagnostico.crossSilo) {

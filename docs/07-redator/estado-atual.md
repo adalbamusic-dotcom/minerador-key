@@ -1,5 +1,12 @@
 # Estado atual — Redator
 
+## Nota de diferenciação no envio do Radar — 2026-09-27
+
+- **Verificado no código:** quando o ArticleDNA fixado tem linhas `Diferenciação: ` no campo `differentiation` (gravadas pelo "Aceitar grupo" do Arquiteto), `lib/redator/radar-import.ts` as acrescenta ao `editorialContext`, depois das linhas do Assunto (até 4). `lib/server/radar-writer-send.ts` passa o campo. Sem nota, o documento sai igual ao de antes. Exemplo de linha: "não cobrir tráfego pago; é do artigo X; linkar para ele".
+- **Confirmado por teste:** `differentiationEditorialLines` (domínio do Arquiteto), a suíte `test:redator` (sem nota) e `buildRadarDocument` com nota em `tests/arquiteto-diferenciacao-publicados.test.mts`: só as linhas com o prefixo descem, depois das do Assunto, no máximo 4; sem nota, o documento é byte a byte o de antes.
+- **Quando a nota chega:** só depois que a versão nova do ArticleDNA (gravada pelo "Aceitar grupo", em revisão) for aprovada e o Radar enviar o artigo de novo; o documento já enviado não muda sozinho.
+- **Não validado manualmente.** Origem: [SDD do Arquiteto](../04-arquiteto/sdd-diferenciacao-publicados-canibalizados-2026-09-27.md).
+
 ## MCP da plataforma — integração e fingerprint — 2026-09-26
 
 - **Verificado no código local:** `/api/mcp/redator` expõe 31 ferramentas no

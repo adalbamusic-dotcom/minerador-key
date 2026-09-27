@@ -1,3 +1,39 @@
+## Diferenciar publicados que disputam o mesmo assunto — 2026-09-27
+
+- [x] Núcleo: detecção grátis pelo cache, ângulos (slug, DNA, IA opcional), plano com teto de US$ 0,50 por grupo e hash, rodada paga pelo núcleo da Pesquisa por Assunto, avaliação (separação e encaixe), aplicar com readback, "Manter como está", rotas plan/run/apply, MCP de detecção e prévia, catálogo.
+- [x] Tela: painel "Publicados que disputam o mesmo assunto" (linha por grupo com checkbox, "Planejar diferenciação (grátis)", "Buscar e validar (US$ x a y)" com uma confirmação e progresso por grupo, proposta por página com estado e motivo, antes → depois, "Aceitar grupo" com confirmação e releitura, "Manter como está") e os passos seguintes do aceite ("Enviar ao Minerador" e "Colocar no artigo"). Catálogo com os rótulos da tela.
+- [x] Reler a avaliação gravada na proposta quando a resposta da rodada se perder: a mesma rodada devolve o resultado gravado; `resume` relê sem custo.
+- [x] Teste de ponta a ponta do `editorialContext` com a nota `Diferenciação: ` em `lib/redator/radar-import.ts` (com e sem Assunto, limite de 4, sem nota byte a byte igual).
+- [x] Revisão: a prévia vale UMA rodada (reserva por `lock_version` antes de pagar; outra rodada na mesma prévia recusada sem pagar).
+- [x] Revisão: nova prévia não apaga avaliação paga nem desfaz "Manter como está" (também pelo MCP); "Planejar nova rodada" guarda a anterior no histórico.
+- [x] Revisão: separação medida contra a principal que a irmã mantém; "fraca" só como evidência; aceite padrão só com as "Diferenciado" e "Incluir no aceite" por página.
+- [x] Revisão: Q3 relido no aceite; rodada confere se os membros continuam publicados; sementes pagas com o tema; entidade de uma palavra exige mais uma palavra da página; IA com o cliente da sessão; "Manter como está" com confirmação; "Aceitar de novo".
+- [ ] Mostrar na tela o histórico das rodadas substituídas (`payload.history`), hoje só no banco.
+- [ ] Reabrir pela tela um grupo mantido antes de a SERP mudar (hoje ele volta sozinho quando a SERP muda).
+- [ ] InternalLinkGraph: a sugestão de link entre as irmãs está no ArticleDNA (`internalLinks`) e no payload da proposta; gravar como proposta do grafo quando a Proposal IA de Links Internos existir.
+- [ ] Radar: mostrar a nota `Diferenciação: ` do ArticleDNA na investigação (hoje chega ao Redator pelos fundamentos e pelo `editorialContext`).
+- [ ] Aceitar de novo depois que as keywords novas forem aprovadas no Minerador completa a troca da principal; avaliar um aviso automático na tela quando isso ficar possível.
+- [ ] **Homologar (usuário) na AdalbaPro:** detecção das 4 famílias; prévia do par atrair × captar (US$ 0,072 a 0,284); rodada com confirmação; "Buscar e validar" inativo depois da rodada e "Planejar diferenciação" reabrindo o resultado sem custo; aceite com readback (só as páginas marcadas); "Manter como está" com confirmação; conferir no ledger o módulo `arquiteto` e a operação `published_differentiation`, uma vez por rodada.
+
+## D2.3 — volume primeiro e sugestões que o dono só confirma — 2026-09-27
+
+- [x] Nível Forte (3+ páginas) e Provável (2 páginas, 3+ sites que distinguem, ou mesma entidade e problema no DNA), sem rede social nem portal genérico.
+- [x] Sem volume não é sugestão, sustentação nem nova principal; com a SERP lida, não entra sozinha em artigo e fica recolhida nas sobras.
+- [x] Intenção que barra é a da SERP; a da Lógica vira aviso quando a SERP mede o par.
+- [x] Sugestões por publicado e por Assunto, por volume, Forte marcada e Provável desmarcada, par em outro Silo como proposta; "Aplicar selecionadas" com prévia, confirmação, teto de 6 e releitura.
+- [x] Troca da principal Livre por Forte ou Provável de 2 páginas com palavras (com aviso e "(Provável)" no título), sempre com volume maior; sites em comum, DNA e SERP desconhecida nunca propõem troca (D2.1).
+- [x] Sobras agrupadas por tema e volume somado, com "Criar artigo novo com este grupo" (confirmação e releitura) e sem volume recolhida no fim; motivos curtos sem o rótulo da Lógica.
+- [x] Catálogo das IAs (§17.1) com a D2.3.
+- [x] Revisão: a Provável pelo DNA só vale quando a SERP não mede o par.
+- [x] Revisão: "Tema sem demanda no Google" conta também a estimativa maior que zero (mesma regra do Minerador).
+- [x] Revisão: MCP diz `hasVolume` e `estimate` na candidata da Pesquisa por Assunto (aditivo).
+- [x] Revisão: "Aplicar selecionadas" conta o confirmado, mostra o motivo do plano recusado e confere o vínculo do Assunto na releitura.
+- [x] Revisão: "Keywords não agrupadas pela formação" recolhida com o painel de Sobras, por volume, sem volume no fim.
+- [ ] Confirmar com o dono se a Provável por 3+ sites (0 página) deve continuar na lista de reforço (desmarcada) ou sair dela.
+- [x] Troca por sites em comum (0 página) ou pelo DNA: corrigida na revisão, a troca exige páginas em comum.
+- [ ] Par de outro Silo em um passo só (mudar de Silo e entrar no artigo na mesma confirmação), se o dono pedir.
+- [ ] **Homologar (usuário) na AdalbaPro:** Arquiteto → Artigos: cartão de "como atrair pacientes para clínica" com "como atrair pacientes" no artigo e o aviso da Lógica; lista "Sugestões de reforço" com Forte marcada e Provável desmarcada; "Aplicar selecionadas" num publicado com vaga (confirmar a releitura e a composição); painel "Sobras · oportunidades de artigo novo" com "agência de marketing", "tráfego pago", "como atrair clientes", "leads qualificados"; "Criar artigo novo com este grupo" num grupo e conferir o artigo novo na mesa.
+
 ## Mesmo assunto pela SERP — correção dos dilemas — 2026-09-27
 
 - [x] Estado "Par em outro artigo": o par real que já está em outro artigo do Silo nunca mais sai como "Sem par no lote"; o cartão abre o artigo que ficou com ele.

@@ -43,8 +43,13 @@ import {
   readSerpSubjectSession,
   serializeSerpSubjectSession,
   summarizeSerpSubjectCards,
+  describeSuggestionOutcome,
+  initialSuggestionSelection,
+  leftoverOpportunitiesView,
+  suggestionApplyPreview,
   type SerpSubjectCardView,
 } from "../modules/arquiteto/serp-subject-model.ts";
+import { groupLeftoverOpportunities } from "../lib/arquiteto/serp-subject-suggestions.ts";
 import { parseReinforcementSearchLink, parseSubjectSearchLink, reinforcementSearchFields } from "../modules/minerador/discovery/subject-search-model.ts";
 import { findVisualViolations } from "../scripts/check-visual-system.mjs";
 
@@ -195,7 +200,9 @@ test("cada dilema fala como o dono pediu: curto, com o ato certo", () => {
   assert.equal(resumo.pairsInOtherSilos, 1);
   assert.equal(resumo.withoutPair, 1);
   assert.equal(resumo.withoutSerp, 1);
-  assert.equal(resumo.headline, "5 publicados e 0 Assuntos: 1 reforçado, 1 troca sugerida, 1 par em outro Silo, 1 sem par no lote.");
+  // D2.3 — o resumo conta os cartões com sugestões de reforço com volume.
+  assert.equal(resumo.withSuggestions, diagnosticos.filter(item => item.suggestions.length > 0).length);
+  assert.equal(resumo.headline, `5 publicados e 0 Assuntos: 1 reforçado, 1 troca sugerida, ${resumo.withSuggestions} com sugestões de reforço, 1 par em outro Silo, 1 sem par no lote.`);
   assert.equal(chamadasDeRede, 0);
 });
 
@@ -358,6 +365,14 @@ test("ação em grupo: trocas e reforços escolhíveis, o indisponível diz por 
   assert.equal(troca.anchorKeywordId, "kw-01");
   assert.equal(troca.disabledReason, "conclua a formação");
   assert.match(troca.label, /Trocar a principal de "como atrair pacientes para clínica" por "como atrair pacientes" \(URL e slug continuam\)/);
+  assert.equal(troca.probable, undefined, "a Forte entra em 'Marcar todas'");
+  // A mesma troca como Provável: o nível aparece no rótulo e ela sai de "Marcar todas".
+  const provaveis = diagnosticos.map(item => item.swap?.substitute ? { ...item, swap: { ...item.swap, substitute: { ...item.swap.substitute, level: "probable" as const } } } : item);
+  const trocaProvavel = serpSubjectBatchChoices({ diagnoses: provaveis, cards: cartoes }).find(item => item.kind === "swap")!;
+  assert.match(trocaProvavel.label, /por "como atrair pacientes" · Provável, confira a evidência \(URL e slug continuam\)/);
+  assert.equal(trocaProvavel.probable, true);
+  const cartaoProvavel = serpSubjectCardView(provaveis.find(item => item.anchorKeywordId === "kw-01")!, { post: "free", swapReadiness: { ready: true } });
+  assert.match(cartaoProvavel.headline, /^Troca da principal sugerida \(Provável\): "como atrair pacientes"/, "o nível aparece no título do cartão");
   const trazer = escolhas.find(item => item.kind === "cross_silo")!;
   assert.equal(trazer.crossSilo?.keywordId, "kw-19");
   assert.equal(trazer.disabledReason, null);
@@ -374,21 +389,25 @@ test("ação em grupo: trocas e reforços escolhíveis, o indisponível diz por 
 
 /* ============================ 4. Buscar reforço ============================ */
 
-test("a busca que já rodou: Assunto pelo id, publicado pela frase e pela URL; demanda = volume do Google Ads", () => {
+test("a busca que já rodou: Assunto pelo id, publicado pela frase e pela URL; demanda = Google Ads ou estimativa maior que zero (D2.3)", () => {
   const registros = [
     { savedAt: "2026-09-20T10:00:00Z", config: { phrase: "Promoções para Estética", destinationUrl: "https://www.adalbapro.com.br/promocoes-para-estetica/", subjectKeywordId: null }, result: { candidates: [{ googleAds: { averageMonthlySearches: 0 } }, { googleAds: null }] } },
     { savedAt: "2026-09-25T10:00:00Z", config: { phrase: "promocoes para estetica", destinationUrl: "https://adalbapro.com.br/promocoes-para-estetica", subjectKeywordId: null }, result: { candidates: [{ googleAds: { averageMonthlySearches: 30 } }, { googleAds: { averageMonthlySearches: null } }, { googleAds: { averageMonthlySearches: 0 } }] } },
     { savedAt: "2026-09-26T10:00:00Z", config: { phrase: "outra coisa", destinationUrl: "", subjectKeywordId: "assunto-1" }, result: { candidates: [] } },
     { savedAt: "2026-09-26T11:00:00Z", config: { phrase: "promoções para estética", destinationUrl: "https://outro.com.br/x", subjectKeywordId: null }, result: { candidates: [{ googleAds: { averageMonthlySearches: 900 } }] } },
+    // Sem média do Google Ads, mas com estimativa: tem demanda (mesma regra do Minerador).
+    { savedAt: "2026-09-26T12:00:00Z", config: { phrase: "", destinationUrl: "", subjectKeywordId: "assunto-2" }, result: { candidates: [{ googleAds: null, dataForSeoEstimate: { searchVolume: 90 } }, { googleAds: { averageMonthlySearches: null }, dataForSeoEstimate: { searchVolume: 0 } }, { googleAds: null, dataForSeoEstimate: null }] } },
   ];
   const buscas = reinforcementSearchOutcomes({ records: registros, anchors: [
     { kind: "published", anchorKeywordId: "kw-07", phrase: "promoções para estética", destinationUrl: "https://adalbapro.com.br/promocoes-para-estetica" },
     { kind: "subject", anchorKeywordId: "assunto-1", phrase: "", destinationUrl: null },
+    { kind: "subject", anchorKeywordId: "assunto-2", phrase: "", destinationUrl: null },
     { kind: "published", anchorKeywordId: "kw-08", phrase: "leads sem tráfego pago", destinationUrl: null },
   ] });
   assert.deepEqual(buscas.get("kw-07"), { searchedAt: "2026-09-25T10:00:00.000Z", candidateCount: 3, candidatesWithDemand: 1 }, "a mais recente da mesma página; outra URL não conta");
   assert.deepEqual(buscas.get("assunto-1"), { searchedAt: "2026-09-26T10:00:00.000Z", candidateCount: 0, candidatesWithDemand: 0 });
   assert.equal(buscas.has("kw-08"), false, "publicado sem URL não casa com nada");
+  assert.deepEqual(buscas.get("assunto-2"), { searchedAt: "2026-09-26T12:00:00.000Z", candidateCount: 3, candidatesWithDemand: 1 }, "só estimativa 90 conta; estimativa 0 e vazia, não");
 });
 
 test("o link do Arquiteto abre a Pesquisa por Assunto com o tema e a URL do artigo, sem mudar o link de Assunto", () => {
@@ -641,4 +660,117 @@ test("fiação: Posto relido antes de gravar, métricas da nova, abrir artigo se
   assert.doesNotMatch(workspace, /sessionStorage\.(removeItem|clear)\(/);
   assert.match(workspace, /serpGaps: serpSubjectRead\.data && serpSubjectRead\.brandId === selectedBrandId/);
   assert.match(painel, /case "open_article":/);
+});
+
+/* ================== 6. D2.3 — sugestões e oportunidades na tela ================== */
+
+function loteComSobras() {
+  const keywords = mapaDe(["kw-01", "kw-09", "kw-10", "kw-11", "kw-12", "kw-13", "kw-19", "kw-20"], { "kw-12": { volume: 0 } });
+  const silos = [
+    { siloRef: "territory:a", siloLabel: "Captação", siloTokens: sem, plan: {
+      anchors: [{ kind: "published" as const, principalKeywordId: "kw-01", keywordIds: ["kw-01", "kw-13"] }],
+      awaitingSubjectKeywordIds: [], leftoverKeywordIds: ["kw-09", "kw-10", "kw-11", "kw-12", "kw-20"] } },
+    { siloRef: "territory:b", siloLabel: "Leads", siloTokens: sem, plan: { anchors: [], awaitingSubjectKeywordIds: [], leftoverKeywordIds: ["kw-19"] } },
+  ];
+  const [diagnostico] = diagnoseSerpSubjectAnchors({
+    silos, keywords, serp: INDICE,
+    published: new Map([["kw-01", publicado("locked", "como-atrair-pacientes-para-clinica")]]),
+    volumeValidated: new Set(["kw-09", "kw-10", "kw-11", "kw-13", "kw-19", "kw-20"]),
+    brandRef: "adalbapro--brand",
+  });
+  return { diagnostico, keywords, silos };
+}
+
+test("D2.3 · o cartão traz as sugestões por volume, Forte marcada até as vagas, e a prévia diz o que muda", () => {
+  const { diagnostico } = loteComSobras();
+  const cartao = serpSubjectCardView(diagnostico, { post: "locked", nameOf: nomeDe });
+  assert.ok(cartao.suggestions.length >= 3);
+  assert.ok(!cartao.suggestions.some(item => item.keywordId === "kw-12"), "volume zero não aparece");
+  const volumes = cartao.suggestions.map(item => item.volume);
+  assert.deepEqual(volumes, [...volumes].sort((left, right) => right - left));
+  assert.equal(cartao.suggestionLimit, 4, "dois no artigo: cabem mais quatro");
+  assert.equal(cartao.suggestionMode, "add");
+  const marcadas = initialSuggestionSelection(cartao);
+  assert.ok(marcadas.size > 0 && marcadas.size <= 4);
+  assert.ok([...marcadas].every(id => cartao.suggestions.find(item => item.keywordId === id)?.level === "strong"));
+  assert.ok(cartao.suggestions.filter(item => item.level === "probable").every(item => !marcadas.has(item.keywordId)));
+  const linha = cartao.suggestions[0];
+  assert.match(linha.volumeLabel, /^volume \d/);
+  assert.ok(["Forte", "Provável"].includes(linha.levelLabel));
+
+  const previa = suggestionApplyPreview(cartao, marcadas);
+  assert.equal(previa.blockedReason, null);
+  assert.equal(previa.intoArticle.length, marcadas.size);
+  const demais = suggestionApplyPreview({ ...cartao, suggestionLimit: 1 }, new Set(cartao.suggestions.slice(0, 3).filter(item => item.where !== "other_silo").map(item => item.keywordId)));
+  assert.match(demais.blockedReason!, /^Cabem 1 neste artigo \(teto de 6\): desmarque/);
+  assert.match(suggestionApplyPreview({ ...cartao, suggestionLimit: 0 }, new Set([linha.keywordId])).blockedReason!, /teto de 6/);
+  assert.equal(suggestionApplyPreview(cartao, new Set()).blockedReason, "Marque ao menos uma sugestão.");
+  const outroSilo = cartao.suggestions.find(item => item.where === "other_silo");
+  assert.equal(outroSilo?.keywordId, "kw-19", "o par de outro Silo entra na mesma lista");
+  assert.equal(suggestionApplyPreview(cartao, new Set([outroSilo!.keywordId])).changeSilo.length, 1, "o par de outro Silo muda de Silo antes");
+});
+
+test("D2.3 · desfecho só com a releitura; oportunidades com nome, volume somado e sem volume no fim", () => {
+  assert.equal(describeSuggestionOutcome({ anchorLabel: "x", addedConfirmed: 2, created: false, movedToSilo: 0, refused: [] }).tone, "success");
+  assert.match(describeSuggestionOutcome({ anchorLabel: "x", addedConfirmed: 2, created: false, movedToSilo: 1, refused: ["a"] }).message, /^2 keywords entraram no artigo "x" · 1 keyword mudou de Silo.*Não aplicado: a\..*URL, slug e canonical não mudam\.$/);
+  assert.equal(describeSuggestionOutcome({ anchorLabel: "x", addedConfirmed: 0, created: false, movedToSilo: 0, refused: ["falhou"] }).tone, "error");
+  const recusado = describeSuggestionOutcome({ anchorLabel: "x", addedConfirmed: 0, created: false, movedToSilo: 0, refused: ["O artigo já tem 6 keywords (teto)."] });
+  assert.match(recusado.message, /^Nada foi aplicado\. Não aplicado: O artigo já tem 6 keywords \(teto\)\. URL, slug e canonical não mudam\.$/, "a recusa do plano aparece com o motivo dela, sem 'Confirmado na releitura'");
+  assert.match(describeSuggestionOutcome({ anchorLabel: "A", addedConfirmed: 3, created: true, movedToSilo: 0, refused: ["o vínculo do Assunto não voltou na releitura (o artigo foi criado): prenda o Assunto de novo na Revisão"] }).message, /^3 keywords entraram no artigo novo do Assunto "A"\. Não aplicado: o vínculo do Assunto não voltou na releitura \(o artigo foi criado\)/);
+
+  const { keywords, silos } = loteComSobras();
+  const vista = leftoverOpportunitiesView(groupLeftoverOpportunities({
+    silos: silos.map(silo => ({ siloRef: silo.siloRef, siloLabel: silo.siloLabel, leftoverKeywordIds: silo.plan.leftoverKeywordIds })),
+    keywords, serp: INDICE,
+  }));
+  assert.ok(vista.groups.length > 0);
+  assert.ok(vista.groups.every(group => group.actionLabel === "Criar artigo novo com este grupo" && group.members[0].leader && group.name === group.members[0].keyword));
+  assert.ok(vista.groups.every(group => /^volume somado \d/.test(group.totalVolumeLabel)));
+  assert.deepEqual(vista.withoutVolume.map(item => item.keywordId), ["kw-12"]);
+  assert.match(vista.headline, /1 sem volume, no fim\.$/);
+  assert.ok(vista.groups.every(group => group.members.every(member => !/Precisa avaliar/.test(member.reason))));
+});
+
+test("D2.3 · painéis: seleção por checkbox com rótulo, diálogo de confirmação, 14px+, tokens e sem rede", () => {
+  const oportunidades = readFileSync("modules/arquiteto/leftover-opportunities-panel.tsx", "utf8");
+  for (const caminho of ["modules/arquiteto/serp-subject-panels.tsx", "modules/arquiteto/leftover-opportunities-panel.tsx"]) {
+    assert.deepEqual(findVisualViolations(readFileSync(caminho, "utf8")), [], caminho);
+  }
+  for (const fonte of [painel, oportunidades]) {
+    assert.doesNotMatch(semComentarios(fonte), /\bfetch\(|\/api\/|supabase|dataforseo/i);
+    assert.doesNotMatch(fonte, /\btext-xs\b|text-\[\d+px\]/);
+  }
+  assert.match(painel, /data-testid="architect-serp-subject-suggestions"/);
+  assert.match(painel, /data-testid="architect-serp-subject-suggestions-dialog"/);
+  assert.match(painel, /await handlers\.onApplySuggestions\(card\.key, \[\.\.\.selecionadas\]\)/);
+  assert.match(painel, /disabled=\{busy \|\| Boolean\(previa\.blockedReason\)\}/, "o teto de 6 barra na confirmação");
+  assert.match(oportunidades, /role="dialog"[\s\S]{0,80}aria-modal="true"/);
+  assert.match(oportunidades, /<label htmlFor=\{id\}/);
+  assert.match(oportunidades, /<details[\s\S]{0,120}architect-leftover-without-volume/, "sem volume, recolhida");
+  assert.doesNotMatch(semComentarios(oportunidades), /onCreateArticle\(\{[\s\S]{0,40}\}\)\s*;?\s*\}\s*\}\s*\/>/, "criar só pela confirmação");
+});
+
+test("D2.3 · fiação: aplicar e criar passam pelo writer da formação com releitura; outro Silo pela decisão de Silo", () => {
+  const aplicar = workspace.slice(workspace.indexOf("const applyAnchorSuggestions = async"), workspace.indexOf("const leftoverOpportunities = useMemo"));
+  assert.match(aplicar, /planAddKeywordsToCandidate\(/);
+  assert.match(aplicar, /planNewArticleFromKeywords\(/);
+  assert.match(aplicar, /planWorkingSubjectAnchorWrites\(/);
+  assert.equal((aplicar.match(/await applyFormationPlan\(/g) || []).length, 2);
+  assert.match(aplicar, /await applySiloDecisionsInBatch\(/);
+  assert.match(aplicar, /publishedKeywordIds: publishedKeywordIdSet/);
+  assert.doesNotMatch(aplicar, /supabase\.|fetch\(/, "nenhum gravador novo");
+  const criar = workspace.slice(workspace.indexOf("const createArticleFromLeftoverGroup = async"), workspace.indexOf("const serpSubjectHandlers = {"));
+  assert.match(criar, /await applyFormationPlan\(planNewArticleFromKeywords\(/);
+  assert.match(workspace, /onApplySuggestions: \(cardKey: string, keywordIds: readonly string\[\]\) => applyAnchorSuggestions\(cardKey, keywordIds\)/);
+  assert.match(workspace, /<LeftoverOpportunitiesPanel[\s\S]{0,200}onCreateArticle=\{createArticleFromLeftoverGroup\}/);
+  // Correções do revisor: conta o confirmado, diz o motivo do plano e confere o vínculo do Assunto.
+  assert.doesNotMatch(aplicar, /adicionadas = ids\.length/, "conta o que o plano gravou, não o que foi pedido");
+  assert.equal((aplicar.match(/plano\.refusals\.length\) recusas\.push\(\.\.\.plano\.refusals\.map\(refusal => refusal\.detail\)\)/g) || []).length, 2, "a recusa do plano vai com o motivo dela");
+  assert.match(aplicar, /if \(!vinculo\.ok\) recusas\.push\(/, "sem vínculo do Assunto, o artigo não nasce");
+  assert.match(aplicar, /relidos\.get\(ref\)\?\.subjectKeywordId === diagnosis\.anchorKeywordId/, "o vínculo é conferido na releitura");
+  // A lista antiga de não agrupadas: recolhida quando há o painel de Sobras, por volume, sem volume no fim.
+  assert.match(workspace, /<details open=\{!leftoverOpportunities\}>[\s\S]{0,900}formationDeferredRowsByVolume\.map/);
+  assert.match(workspace, /\(right\.volume \?\? -1\) - \(left\.volume \?\? -1\)/);
+  // Troca Provável fica fora de "Marcar todas".
+  assert.match(painel, /disponiveis\.filter\(choice => !choice\.probable\)\.map\(choice => choice\.id\)/);
 });

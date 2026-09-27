@@ -6,9 +6,12 @@ import { REINFORCEMENT_SEARCH_ACTION_LABEL } from "@/lib/arquiteto/serp-subject-
 import type { CrossSiloReinforcementProposal } from "@/lib/arquiteto/article-formation-priority";
 import { useSubjectDialogFocus } from "./subject-panels";
 import {
+  APPLY_SUGGESTIONS_ACTION_LABEL,
   SERP_SUBJECT_CARD_STATE_LABELS,
   SERP_SUBJECT_EVIDENCE_RELATION_LABELS,
   SERP_SUBJECT_TONE_CLASSES,
+  initialSuggestionSelection,
+  suggestionApplyPreview,
   type SerpSubjectBatchChoice,
   type SerpSubjectCardAction,
   type SerpSubjectCardState,
@@ -30,6 +33,12 @@ import {
  * e do modelo (`serp-subject-model`); toda gravação é ato humano confirmado
  * pelo remoto. As classes de botão chegam por prop, como nos painéis do
  * Assunto, para não haver um segundo estilo de botão.
+ *
+ * D2.3 — cada cartão traz as SUGESTÕES com volume, por volume: Forte vem
+ * marcada, Provável desmarcada, cada uma com nível, volume e motivo curto. O
+ * dono marca e aplica de uma vez ("Aplicar selecionadas"), até o teto de 6,
+ * com confirmação que diz o que entra no artigo, o que sai de outro artigo e
+ * o que muda de Silo antes. Só a releitura confirma.
  */
 
 export type SerpSubjectReadStatus = {
@@ -52,6 +61,8 @@ type Handlers = {
   onOpenMinerador: (href: string) => void;
   /** Abre o artigo na mesa (o que ficou com o par, ou este, para liberar vaga). */
   onOpenArticle: (siloRef: string, principalKeywordId: string) => void;
+  /** D2.3 — aplica as sugestões marcadas (só depois da confirmação). */
+  onApplySuggestions: (cardKey: string, keywordIds: readonly string[]) => Promise<void> | void;
 };
 
 type ButtonClasses = { buttonClassName: string; primaryButtonClassName: string };
@@ -161,6 +172,149 @@ function EvidenceList({ pairs }: { pairs: readonly SerpSubjectEvidencePair[] }) 
   );
 }
 
+/** Quantas linhas a lista mostra antes de "Ver todas". */
+const SUGESTOES_VISIVEIS = 8;
+
+const NIVEL_CLASSE: Record<SerpSubjectCardView["suggestions"][number]["level"], string> = {
+  strong: "border-success/40 bg-success/10 text-success",
+  probable: "border-context-accent/40 bg-context-accent/10 text-context-accent",
+};
+
+/** D2.3 — a confirmação de "Aplicar selecionadas": o que entra, o que sai de outro artigo, o que muda de Silo. */
+function SuggestionConfirmDialog({ open, card, selected, busy, onConfirm, onClose, buttonClassName, primaryButtonClassName }: {
+  open: boolean;
+  card: SerpSubjectCardView;
+  selected: ReadonlySet<string>;
+  busy: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+} & ButtonClasses) {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useSubjectDialogFocus(open, dialogRef, onClose, !busy);
+  if (!open) return null;
+  const previa = suggestionApplyPreview(card, selected);
+  const tituloId = `architect-suggestions-title-${card.anchorKeywordId}`;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="presentation">
+      <section
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={tituloId}
+        data-testid="architect-serp-subject-suggestions-dialog"
+        className="flex max-h-[86vh] w-full max-w-2xl flex-col gap-3 overflow-hidden rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl outline-none"
+      >
+        <h2 id={tituloId} className="text-base font-semibold text-foreground">{`${APPLY_SUGGESTIONS_ACTION_LABEL} em "${card.anchorLabel}"`}</h2>
+        <div className="grid gap-3 overflow-y-auto text-sm leading-6">
+          {previa.intoArticle.length > 0 && (
+            <div>
+              <h3 className="font-semibold text-foreground/80">{card.suggestionMode === "create" ? "Formam o artigo do Assunto" : "Entram no artigo"} · {previa.intoArticle.length}</h3>
+              <ul className="mt-1 grid gap-1">{previa.intoArticle.map(item => <li key={item.keywordId} className="text-foreground">{`${item.keyword} · ${item.volumeLabel} · ${item.levelLabel}`}</li>)}</ul>
+            </div>
+          )}
+          {previa.fromOtherArticle.length > 0 && (
+            <p className="text-warning">{`Saem de outro artigo: ${previa.fromOtherArticle.map(item => `"${item.keyword}" (${item.whereLabel})`).join(", ")}. Aquele artigo fica sem elas.`}</p>
+          )}
+          {previa.changeSilo.length > 0 && (
+            <div>
+              <h3 className="font-semibold text-foreground/80">Mudam de Silo primeiro · {previa.changeSilo.length}</h3>
+              <p className="text-text-muted">A mudança é a mesma decisão de Silo da aba Silos. Depois, elas aparecem nesta lista para entrar no artigo.</p>
+              <ul className="mt-1 grid gap-1">{previa.changeSilo.map(item => <li key={item.keywordId} className="text-foreground">{`${item.keyword} · ${item.whereLabel}`}</li>)}</ul>
+            </div>
+          )}
+          <p className="text-text-muted">{card.suggestionMode === "create" ? "A principal é a de maior volume. O Assunto fica como tronco e não entra no teto." : "URL, slug e canonical não mudam."} Nada é gravado sem esta confirmação, e só a releitura confirma.</p>
+          {previa.blockedReason && <p className="text-warning">{previa.blockedReason}</p>}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" disabled={busy} onClick={onClose} className={buttonClassName}>Cancelar</button>
+          <button type="button" disabled={busy || Boolean(previa.blockedReason)} onClick={onConfirm} className={primaryButtonClassName} data-testid="architect-serp-subject-suggestions-confirm">
+            {busy ? "Aplicando…" : `Aplicar ${selected.size}`}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/** D2.3 — a lista de sugestões do cartão, por volume, com a seleção e o botão. */
+function SuggestionList({ card, busy, handlers, buttonClassName, primaryButtonClassName }: { card: SerpSubjectCardView; busy: boolean; handlers: Handlers } & ButtonClasses) {
+  const [selecionadas, setSelecionadas] = useState<ReadonlySet<string>>(() => initialSuggestionSelection(card));
+  const [todas, setTodas] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
+  const listaId = useId();
+  const visiveis = todas ? card.suggestions : card.suggestions.slice(0, SUGESTOES_VISIVEIS);
+  const noArtigo = card.suggestions.filter(item => selecionadas.has(item.keywordId) && item.where !== "other_silo").length;
+  const alternar = (keywordId: string) => setSelecionadas(atual => {
+    const proximo = new Set(atual);
+    if (proximo.has(keywordId)) proximo.delete(keywordId); else proximo.add(keywordId);
+    return proximo;
+  });
+  return (
+    <div className="mt-2 grid gap-2 border-t border-divider pt-2" data-testid="architect-serp-subject-suggestions">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 id={listaId} className="text-sm font-semibold text-foreground">{`Sugestões de reforço · ${card.suggestions.length} com volume`}</h3>
+        <span className="text-sm text-text-muted">{card.suggestionLimit ? `Cabem ${card.suggestionLimit}` : "Artigo no teto de 6"}</span>
+      </div>
+      <ul className="grid gap-1.5" aria-labelledby={listaId}>
+        {visiveis.map(item => {
+          const id = `${listaId}-${item.keywordId}`;
+          return (
+            <li key={item.keywordId} className="flex items-start gap-2 text-sm leading-6">
+              <input
+                id={id}
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0"
+                disabled={busy}
+                checked={selecionadas.has(item.keywordId)}
+                onChange={() => alternar(item.keywordId)}
+              />
+              <label htmlFor={id} className="min-w-0">
+                <span className="font-medium text-keyword">{item.keyword}</span>
+                <span className={`${badgeBase} ml-2 ${NIVEL_CLASSE[item.level]}`}>{item.levelLabel}</span>
+                <span className="block text-text-muted">{`${item.volumeLabel} · ${item.reason}${item.where === "leftover" ? "" : ` · ${item.whereLabel}`}`}</span>
+                {item.warning && <span className="block text-warning">{item.warning}</span>}
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="flex flex-wrap items-center gap-2">
+        {card.suggestions.length > SUGESTOES_VISIVEIS && (
+          <button type="button" onClick={() => setTodas(atual => !atual)} className={buttonClassName} aria-expanded={todas}>
+            {todas ? "Ver menos" : `Ver todas (${card.suggestions.length})`}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={busy || !selecionadas.size}
+          onClick={() => setConfirmando(true)}
+          className={primaryButtonClassName}
+          title={noArtigo > card.suggestionLimit ? `Cabem ${card.suggestionLimit} neste artigo.` : "Mostra o que muda antes de gravar."}
+          data-testid="architect-serp-subject-suggestions-open"
+        >
+          {`${APPLY_SUGGESTIONS_ACTION_LABEL} (${selecionadas.size})`}
+        </button>
+      </div>
+      <SuggestionConfirmDialog
+        open={confirmando}
+        card={card}
+        selected={selecionadas}
+        busy={busy}
+        onClose={() => setConfirmando(false)}
+        onConfirm={() => {
+          void (async () => {
+            await handlers.onApplySuggestions(card.key, [...selecionadas]);
+            setConfirmando(false);
+          })();
+        }}
+        buttonClassName={buttonClassName}
+        primaryButtonClassName={primaryButtonClassName}
+      />
+    </div>
+  );
+}
+
 /** Um publicado ou Assunto: o dilema, os botões e a evidência ao expandir. */
 export function SerpSubjectCard({
   card,
@@ -213,6 +367,16 @@ export function SerpSubjectCard({
       {card.actions.filter(action => action.kind === "apply_swap" && action.disabledReason).map(action => (
         <p key="apply-swap-reason" className="mt-1 text-sm leading-6 text-warning">{action.kind === "apply_swap" ? action.disabledReason : null}</p>
       ))}
+      {card.suggestions.length > 0 && (
+        <SuggestionList
+          key={card.suggestions.map(item => `${item.keywordId}:${item.preselected ? 1 : 0}`).join("|")}
+          card={card}
+          busy={busy}
+          handlers={handlers}
+          buttonClassName={buttonClassName}
+          primaryButtonClassName={primaryButtonClassName}
+        />
+      )}
       {open && (
         <div id={detalheId} className="mt-2 grid gap-2 border-t border-divider pt-2">
           <p className="text-sm leading-6 text-text-muted">
@@ -235,6 +399,7 @@ const FILTROS: ReadonlyArray<{ key: "all" | "attention" | SerpSubjectCardState; 
   { key: "attention", label: "Pedem decisão" },
   { key: "swap_proposed", label: SERP_SUBJECT_CARD_STATE_LABELS.swap_proposed },
   { key: "reinforced", label: SERP_SUBJECT_CARD_STATE_LABELS.reinforced },
+  { key: "suggestions_available", label: SERP_SUBJECT_CARD_STATE_LABELS.suggestions_available },
   { key: "pair_in_other_silo", label: SERP_SUBJECT_CARD_STATE_LABELS.pair_in_other_silo },
   { key: "pair_in_other_article", label: SERP_SUBJECT_CARD_STATE_LABELS.pair_in_other_article },
   { key: "no_pair_in_batch", label: SERP_SUBJECT_CARD_STATE_LABELS.no_pair_in_batch },
@@ -247,7 +412,7 @@ const FILTROS: ReadonlyArray<{ key: "all" | "attention" | SerpSubjectCardState; 
 ];
 
 /** Estados que pedem uma decisão ou uma ação do dono. */
-const PEDEM_DECISAO = new Set<SerpSubjectCardState>(["swap_proposed", "pair_in_other_silo", "pair_in_other_article", "pair_blocked_by_dna", "pair_without_volume", "no_pair_in_batch", "serp_missing"]);
+const PEDEM_DECISAO = new Set<SerpSubjectCardState>(["swap_proposed", "suggestions_available", "pair_in_other_silo", "pair_in_other_article", "pair_blocked_by_dna", "pair_without_volume", "no_pair_in_batch", "serp_missing"]);
 
 function BatchConfirmDialog({ open, choices, busy, onConfirm, onClose, buttonClassName, primaryButtonClassName }: {
   open: boolean;
@@ -346,6 +511,7 @@ export function SerpSubjectDiagnosisPanel({
   const numeros: Array<{ label: string; value: number; tone: string }> = [
     { label: "Reforçados", value: summary.reinforced, tone: "text-success" },
     { label: "Trocas sugeridas", value: summary.swapsSuggested, tone: "text-context-accent" },
+    { label: "Com sugestões de reforço", value: summary.withSuggestions, tone: "text-context-accent" },
     { label: "Pares em outros Silos", value: summary.pairsInOtherSilos, tone: "text-context-accent" },
     { label: "Pares em outros artigos", value: summary.pairsInOtherArticles, tone: "text-context-accent" },
     { label: "Sem par no lote", value: summary.withoutPair, tone: "text-warning" },
@@ -415,8 +581,11 @@ export function SerpSubjectDiagnosisPanel({
               );
             })}
           </ul>
+          {disponiveis.some(choice => choice.probable) && (
+            <p className="mt-2 text-sm leading-6 text-text-muted">{"Troca Provável não entra em \"Marcar todas\": marque uma a uma."}</p>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button type="button" disabled={busy || !disponiveis.length} onClick={() => setEscolhidas(new Set(disponiveis.map(choice => choice.id)))} className={buttonClassName}>Marcar todas as disponíveis</button>
+            <button type="button" disabled={busy || !disponiveis.length} onClick={() => setEscolhidas(new Set(disponiveis.filter(choice => !choice.probable).map(choice => choice.id)))} className={buttonClassName}>Marcar todas as disponíveis</button>
             <button type="button" disabled={busy || !selecionadas.length} onClick={() => setEscolhidas(new Set())} className={buttonClassName}>Limpar</button>
             <button type="button" disabled={busy || !selecionadas.length} onClick={() => setConfirmando(true)} className={primaryButtonClassName} data-testid="architect-serp-subject-batch-open">
               Aplicar escolhidas ({selecionadas.length})

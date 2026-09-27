@@ -1,5 +1,61 @@
 # Estado atual — Minerador
 
+## Pesquisa por Assunto: volume primeiro (D2.3) — 2026-09-27
+
+```text
+PEDIDO = dono do produto, 2026-09-27 ("se não tem volume, não presta"; dezenas de candidatas "Sem média do Google Ads" no "Buscar reforço")
+REGRA = docs/compartilhado/regras-serp-e-assuntos-2026-09-26.md, D2.3
+PERSISTENCIA_NOVA = nenhuma · migration = 0 · SQL = 0 · ESCRITA_REMOTA = 0
+CUSTO, FONTES E ROTAS = sem mudança · CHAMADAS_PAGAS_EM_TESTE = 0
+MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Regra única** em `lib/minerador/subject-discovery-volume.ts`: sem volume é
+  Google Ads sem média (ou 0) **e** estimativa DataForSEO zero ou vazia. A
+  estimativa continua rotulada e fora da coluna Volume e do envio; ela só
+  decide se a candidata tem demanda.
+- **Filtro "Só com volume"**, ligado por padrão (checkbox no lugar do seletor
+  antigo "Todos / Com volume / Sem volume do Google Ads"). Quando esconde
+  alguma, a linha "N candidatas sem volume escondidas." aparece com o botão
+  "Mostrar as N". A contagem respeita os outros filtros (texto, origem, já
+  existe). Trocar de busca ou pesquisar de novo volta ao padrão ligado.
+- **Ordem por volume**, na tela e no servidor: com volume antes, média do
+  Google Ads maior primeiro, depois a estimativa; sem volume no fim, na ordem
+  recebida. A tela reordena também as buscas antigas guardadas no navegador.
+  No servidor, o corte das 600 passa a cair nas sem volume. A projeção do MCP
+  (`search_subject_keywords`) herda a ordem.
+- **Envio ao Processador**: a barra mostra "N sem volume" e o diálogo avisa
+  "N selecionadas estão sem volume...". Não bloqueia; o corpo continua sem
+  métrica.
+- Célula de Volume de uma sem volume: "Sem volume", em cor apagada. Com só a
+  estimativa: "Sem média do Google Ads", como antes.
+
+Arquivos: `lib/minerador/subject-discovery-volume.ts` (novo),
+`lib/minerador/subject-discovery-search.ts` (ordem da fusão),
+`modules/minerador/discovery/subject-search-model.ts`, `subject-search-results.tsx`,
+`subject-search-dialogs.tsx`, `use-subject-search.ts`; comentário em
+`lib/server/platform-mcp-tools.ts`; nota do MCP em `lib/agent/platform-catalog.ts`.
+Consumidores preservados: o Arquiteto lê a lista local só pelo
+`subject-search-local-store` (formato sem mudança; os filtros não são guardados).
+
+Testes: `minerador-assunto-pesquisa-tela-local` (regra, filtro, contagem,
+ordem com volumes reais da AdalbaPro, aviso do envio), `minerador-assunto-pesquisa-tela`
+(estrutura) e `minerador-assunto-pesquisa-busca` (ordem e corte no servidor).
+`test:agent`, `test:arquiteto`, `test:arquiteto:servidor`, `test:arquiteto:lentes`
+e `tsc` verdes. Glob do Minerador: 25 falhas, todas em arquivos que não importam
+os arquivos alterados (pré-existentes).
+
+Resolvido na revisão (2026-09-27): o cartão "Tema sem demanda no Google" do Arquiteto
+(`modules/arquiteto/serp-subject-model.ts`) conta pela mesma regra,
+`subjectDiscoveryHasVolume` (média do Google Ads ou estimativa maior que zero).
+`SubjectVolumeFields.dataForSeoEstimate` passou a ser opcional (alargamento compatível), e a projeção do MCP (`compactSubjectCandidate`) diz `hasVolume` e `estimate` (aditivos; `volume` continua só o Google Ads). Testes: `arquiteto-serp-mesmo-assunto-tela` e `agent-platform-mcp` (32).
+
+Validação na tela (usuário): abrir "Buscar reforço" de um publicado da AdalbaPro,
+conferir que as "Sem média do Google Ads" sem estimativa somem, que a contagem e
+"Mostrar" funcionam, e que o envio avisa as sem volume.
+
 ## Volume sem média oficial é processo executado, e a aprovada não cai por remedir — 2026-09-25
 
 ```text

@@ -1,5 +1,18 @@
 # Backlog — Minerador
 
+## Pesquisa por Assunto: volume primeiro (D2.3) — 2026-09-27
+
+Regra no `spec.md` (modo Por Assunto) e em [regras SERP e Assuntos](../compartilhado/regras-serp-e-assuntos-2026-09-26.md), D2.3. Registro no `estado-atual.md` de 2026-09-27. Verificado no código e confirmado por teste; validado manualmente: não.
+
+- [x] Regra única de "sem volume" (Google Ads sem média e estimativa zero ou vazia) em `lib/minerador/subject-discovery-volume.ts`.
+- [x] "Só com volume" ligado por padrão, com o total escondido à vista e "Mostrar as N".
+- [x] Lista ordenada por volume na tela e no servidor; o corte das 600 cai nas sem volume.
+- [x] Envio ao Processador avisa quantas selecionadas estão sem volume, sem bloquear e sem métrica no corpo.
+- [x] Nota do `search_subject_keywords` no catálogo do MCP.
+- [x] MCP: a candidata diz `hasVolume` e `estimate` (aditivos), para a IA não propor candidata sem volume.
+- [ ] **Validação na tela (usuário)**: "Buscar reforço" de um publicado da AdalbaPro; contagem, "Mostrar" e aviso do envio.
+- [x] Arquiteto: o cartão "Tema sem demanda no Google" conta também a estimativa maior que zero (D2.3; feito na revisão de 2026-09-27).
+
 ## Volume sem média oficial é processo executado — 2026-09-25
 
 Regra no `spec.md` §61 ("Volume como processo executado"). Registro no `estado-atual.md` de 2026-09-25. Verificado no código e confirmado por teste; validado manualmente: não.

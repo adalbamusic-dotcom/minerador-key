@@ -30,6 +30,15 @@ import { PrimaryKeywordCandidateSchema, PrimaryKeywordDecisionSchema } from "../
 import { suggestSubjectSupport } from "../lib/arquiteto/declared-subject.ts";
 import { subjectSearchLinkHref } from "../modules/minerador/discovery/subject-search-model.ts";
 import { ASSUNTO_ID, MARCA, VOLUME_VALIDADO, declarado, linhaDaMesa, logica } from "./arquiteto-assunto-fixtures.mts";
+import {
+  CREATE_ARTICLE_FROM_GROUP_ACTION,
+  groupLeftoverOpportunities,
+  hasSearchVolume,
+  serpSuggestionMatch,
+  suggestAnchorReinforcements,
+} from "../lib/arquiteto/serp-subject-suggestions.ts";
+import { SERP_GENERIC_DOMAINS } from "../lib/arquiteto/serp-subject-overlap.ts";
+import { planAddKeywordsToCandidate, planNewArticleFromKeywords } from "../lib/arquiteto/article-formation-editing.ts";
 
 /**
  * D2.2 — "MESMO ASSUNTO" PELA SERP, COM A LEITURA REAL DA ADALBAPRO.
@@ -158,11 +167,22 @@ test("convergência: SERP forte entra com poucas palavras; SERP fraca barra pala
   assert.equal(estetica.basis, "serp_refuses");
 });
 
-test("convergência: contradição de DNA continua barrando mesmo com 7 páginas em comum", () => {
+test("convergência (D2.3): a intenção da Lógica diferente vira aviso com 7 páginas; a da SERP continua barrando", () => {
+  // Comercial × Informativa só na Lógica: o Google junta as duas (7 páginas) — entra, com aviso.
   const medida = measureAnchorConvergence(kw("kw-01"), kw("kw-09"), { siloTokens: sem, serp: INDICE });
-  assert.equal(medida.eligible, false);
-  assert.equal(medida.basis, "dna_contradiction");
-  assert.match(medida.reasons[0], /7 páginas em comum.*Mas o DNA separa as duas: intenções principais diferentes/);
+  assert.equal(medida.eligible, true);
+  assert.equal(medida.basis, "serp");
+  assert.match(medida.reasons[0], /7 páginas em comum/);
+  assert.match(medida.warnings!.join(" "), /^Aviso: intenção da Lógica diferente \(Comercial × Informativo\); quem barra é a intenção da SERP/);
+  // A intenção OBSERVADA na SERP (evidencia_serp conclusiva) diferente barra.
+  const observada = measureAnchorConvergence(kw("kw-01", { observedIntent: "Comercial" }), kw("kw-09", { observedIntent: "Informativa" }), { siloTokens: sem, serp: INDICE });
+  assert.equal(observada.eligible, false);
+  assert.equal(observada.basis, "dna_contradiction");
+  assert.match(observada.reasons[0], /7 páginas em comum.*Mas o DNA separa as duas: o Google mostrou, de forma conclusiva, intenções diferentes/);
+  // Sem índice de SERP, a regra de antes: a Lógica barra.
+  const semIndice = measureAnchorConvergence(kw("kw-01"), kw("kw-09"), { siloTokens: sem });
+  assert.equal(semIndice.eligible, false);
+  assert.deepEqual(semIndice.reasons, ["O DNA separa as duas: intenções principais diferentes."]);
 });
 
 test("convergência: sem SERP no cache volta às palavras, dizendo isso, e fica atrás de quem tem SERP", () => {
@@ -435,17 +455,29 @@ test("diagnóstico: depois da busca sem demanda, 'tema sem demanda no Google' e 
   assert.equal(diagnosticos[0].actions[0].search, undefined, "sem link: o href só existe com brandRef");
 });
 
-test("diagnóstico: par forte barrado pelo DNA não é 'sem par' — é intenção diferente, decisão humana", () => {
-  const diagnosticos = diagnoseSerpSubjectAnchors({
-    silos: [{ siloRef: "territory:a", siloLabel: "Captação", plan: { anchors: [{ kind: "published", principalKeywordId: "kw-01", keywordIds: ["kw-01"] }], awaitingSubjectKeywordIds: [], leftoverKeywordIds: ["kw-09", "kw-10"] } }],
-    keywords: mapaDe(["kw-01", "kw-03", "kw-09", "kw-10"]), serp: INDICE,
+test("diagnóstico (D2.3): a Lógica diferente não barra — o par de 7 páginas vira sugestão Forte, marcada, com aviso", () => {
+  const entrada = {
+    silos: [{ siloRef: "territory:a", siloLabel: "Captação", plan: { anchors: [{ kind: "published" as const, principalKeywordId: "kw-01", keywordIds: ["kw-01"] }], awaitingSubjectKeywordIds: [], leftoverKeywordIds: ["kw-09", "kw-10"] } }],
+    serp: INDICE,
     published: new Map([["kw-01", publicado("locked", "como-atrair-pacientes-para-clinica")], ["kw-03", publicado("locked", "como-atrair-clientes-para-consultorio")]]),
     volumeValidated: new Set(["kw-09", "kw-10"]),
-  });
-  const alvo = diagnosticos[0];
+  };
+  const [sugerido] = diagnoseSerpSubjectAnchors({ ...entrada, keywords: mapaDe(["kw-01", "kw-03", "kw-09", "kw-10"]) });
+  assert.equal(sugerido.state, "suggestions_available");
+  assert.deepEqual(sugerido.blockedByDna, []);
+  assert.deepEqual(sugerido.suggestions.map(item => [item.keywordId, item.level, item.preselected, item.where]), [["kw-09", "strong", true, "leftover"], ["kw-10", "strong", true, "leftover"]]);
+  assert.match(sugerido.suggestions[0].reason, /^7 páginas em comum no top 10$/);
+  assert.match(sugerido.suggestions[0].warning!, /Intenção da Lógica diferente \(Comercial × Informativo\): só aviso/);
+  assert.match(sugerido.headline, /^2 sugestões com volume para o artigo "como atrair pacientes para clínica" \(2 Forte\)\. A maior: "como atrair pacientes"/);
+  assert.equal(sugerido.actions[0].kind, "apply_suggestions");
+
+  // A intenção OBSERVADA na SERP diferente continua barrando: "Par com intenção diferente".
+  const observada = { "kw-01": { observedIntent: "Comercial" }, "kw-09": { observedIntent: "Informativa" }, "kw-10": { observedIntent: "Informativa" } };
+  const [alvo] = diagnoseSerpSubjectAnchors({ ...entrada, keywords: mapaDe(["kw-01", "kw-03", "kw-09", "kw-10"], observada) });
   assert.equal(alvo.state, "pair_blocked_by_dna");
+  assert.deepEqual(alvo.suggestions, [], "a SERP separou: não é sugestão");
   assert.deepEqual(alvo.blockedByDna.map(item => item.keywordId), ["kw-09", "kw-10"]);
-  assert.match(alvo.headline, /^2 keywords tratam do mesmo assunto no Google que o artigo "como atrair pacientes para clínica" \("como atrair pacientes", 7 páginas em comum\), mas o DNA separa: intenções principais diferentes\./);
+  assert.match(alvo.headline, /^2 keywords tratam do mesmo assunto no Google que o artigo "como atrair pacientes para clínica" \("como atrair pacientes", 7 páginas em comum\), mas o DNA separa: o Google mostrou, de forma conclusiva, intenções diferentes/);
   assert.equal(alvo.actions[0].kind, "review_dna");
   // Outra página publicada divide a SERP: sinal de canibalização, nunca fusão.
   assert.deepEqual(alvo.publishedOverlaps.map(item => item.keywordId), ["kw-03"]);
@@ -625,7 +657,7 @@ test("Par em outro artigo: o par real do publicado está em outro artigo do Silo
   assert.match(summarizeSerpSubjectDiagnoses(diagnosticos).headline, /1 par em outro artigo/);
 });
 
-test("Posto Livre sem substituta vem no título, com Buscar reforço; SERP de apoio não é chamada de 'divide'", () => {
+test("Posto Livre (D2.3): a Provável de 2 páginas com volume maior vira troca proposta, com aviso; SERP de apoio não é chamada de 'divide'", () => {
   const pegada = (keywordId: string, urls: string[]): KeywordSerpFootprint => ({ keywordId, keyword: keywordId, lenses: [{ lens: "mobile-android", urls, domains: null, collectedAt: null }] });
   const indice = buildSerpSubjectIndex([
     pegada("pub", ["https://a.com/1", "https://b.com/2", "https://c.com/3", "https://d.com/4"]),
@@ -641,16 +673,27 @@ test("Posto Livre sem substituta vem no título, com Buscar reforço; SERP de ap
     volumeValidated: new Set(["viz"]),
     brandRef: "adalbapro--brand",
   });
-  assert.equal(diagnostico.state, "reinforced");
+  assert.equal(diagnostico.state, "swap_proposed");
   assert.equal(diagnostico.members.find(item => item.keywordId === "viz")?.basis, "serp_and_words");
-  assert.match(diagnostico.headline, /^Reforçado com 1 keyword — 1 na vizinhança do Google \(2 páginas, confirmada pelas palavras\)\. Cabem mais 4\. Posto Livre, mas nenhuma keyword do lote serve de substituta/);
+  assert.equal(diagnostico.swap?.substitute?.keywordId, "viz");
+  assert.equal(diagnostico.swap?.substitute?.level, "probable");
+  assert.match(diagnostico.swap!.substitute!.warning!, /Nível Provável \(2 páginas e palavras em comum no top 10\)/);
+  assert.match(diagnostico.headline, /^Troca proposta \(Provável\): "tráfego pago ou orgânico para clínica de estética" \(volume 30, 2 páginas em comum no top 10\)/);
   assert.doesNotMatch(diagnostico.headline, /divide a SERP/);
-  assert.ok(diagnostico.actions.some(action => action.kind === "search_reinforcement"), "a Livre sem substituta pede Buscar reforço");
-  const recusa = diagnostico.swap?.rejected.find(item => item.keywordId === "viz");
-  assert.equal(recusa?.missing, "serp_support");
-  assert.match(recusa!.reason, /^Só 2 páginas em comum no top 10 \(vizinhança do Google\): serve para reforçar, mas assumir a principal exige 3 ou mais\.$/);
-  assert.match(diagnostico.swap!.note, /1 só na vizinhança do Google: 2 páginas, e a troca exige 3\+/);
-  assert.doesNotMatch(diagnostico.swap!.note, /não divide/);
+  assert.match(diagnostico.swap!.note, /é Provável: 2 páginas e palavras em comum no top 10\..*URL, slug e canonical não mudam/);
+  // Sem volume, a Provável não assume: a Livre fica sem substituta e pede Buscar reforço.
+  const [semVolume] = diagnoseSerpSubjectAnchors({
+    silos: [{ siloRef: "territory:e", siloLabel: "Estética", plan: { anchors: [{ kind: "published", principalKeywordId: "pub", keywordIds: ["pub", "viz"] }], awaitingSubjectKeywordIds: [], leftoverKeywordIds: [] }, siloTokens: new Set(["trafego", "pago", "organico"]) }],
+    keywords: new Map([["pub", pub], ["viz", { ...viz, volume: null }]]),
+    serp: indice,
+    published: new Map([["pub", publicado_("free", "trafego-pago-vs-organico")]]),
+    volumeValidated: new Set(),
+    brandRef: "adalbapro--brand",
+  });
+  assert.equal(semVolume.state, "reinforced");
+  assert.match(semVolume.headline, /Posto Livre, mas nenhuma keyword do lote serve de substituta/);
+  assert.ok(semVolume.actions.some(action => action.kind === "search_reinforcement"), "a Livre sem substituta pede Buscar reforço");
+  assert.equal(semVolume.swap?.rejected.find(item => item.keywordId === "viz")?.missing, "volume");
 });
 
 test("Posto não declarado: diz que o Minerador mostra 'Travado' por padrão e o que seria proposto se fosse Livre", () => {
@@ -714,4 +757,315 @@ test("SERP vencida não é 'nunca coletada': o cartão diz quando venceu e ofere
   const nunca = diagnosticos.find(item => item.anchorKeywordId === "kw-07")!;
   assert.match(nunca.headline, /^"promoções para estética" nunca teve a SERP coletada/);
   assert.equal(nunca.actions[0].label, "Coletar SERP (pago)");
+});
+
+/* ================== 9. D2.3 — volume primeiro, sugestão que o dono confirma ================== */
+
+test("D2.3 · sem volume é nulo, zero ou inválido", () => {
+  assert.equal(hasSearchVolume(null), false);
+  assert.equal(hasSearchVolume(undefined), false);
+  assert.equal(hasSearchVolume(0), false);
+  assert.equal(hasSearchVolume(Number.NaN), false);
+  assert.equal(hasSearchVolume(10), true);
+});
+
+test("D2.3 · o nível: Forte com 3+ páginas; Provável com 2 páginas, 3+ sites que distinguem ou mesma entidade e problema", () => {
+  const pegada = (keywordId: string, urls: string[]): KeywordSerpFootprint => ({ keywordId, keyword: keywordId, lenses: [{ lens: "mobile-ios", urls, domains: null, collectedAt: null }] });
+  const indice = buildSerpSubjectIndex([
+    pegada("a", ["https://a.com/1", "https://b.com/2", "https://c.com/3", "https://s1.com/x", "https://s2.com/x", "https://s3.com/x", "https://www.instagram.com/p", "https://youtube.com/v"]),
+    pegada("forte", ["https://a.com/1", "https://b.com/2", "https://c.com/3"]),
+    pegada("duas", ["https://a.com/1", "https://b.com/2"]),
+    pegada("sites", ["https://s1.com/y", "https://s2.com/y", "https://s3.com/y"]),
+    pegada("social", ["https://instagram.com/q", "https://m.youtube.com/w", "https://s1.com/z"]),
+    pegada("nada", ["https://z.com/9"]),
+  ]);
+  const linha = (keywordId: string, extra: Partial<ArticleFormationKeyword> = {}): ArticleFormationKeyword => ({ keywordId, keyword: keywordId, intent: null, volume: 10, kgr: null, entity: null, problem: null, isPublished: false, ...extra });
+  assert.equal(serpSuggestionMatch(linha("a"), linha("forte"), indice)?.level, "strong");
+  assert.equal(serpSuggestionMatch(linha("a"), linha("forte"), indice)?.reason, "3 páginas em comum no top 10");
+  assert.deepEqual([serpSuggestionMatch(linha("a"), linha("duas"), indice)?.level, serpSuggestionMatch(linha("a"), linha("duas"), indice)?.basis], ["probable", "two_pages"]);
+  const sites = serpSuggestionMatch(linha("a"), linha("sites"), indice);
+  assert.deepEqual([sites?.level, sites?.basis, sites?.reason], ["probable", "domains", "3 sites em comum no top 10"]);
+  assert.equal(serpSuggestionMatch(linha("a"), linha("social"), indice), null, "rede social não distingue assunto");
+  assert.ok(SERP_GENERIC_DOMAINS.includes("instagram.com"));
+  assert.equal(serpSuggestionMatch(linha("a"), linha("nada"), indice), null);
+  const dna = { entity: "Clínica", problem: "atrair pacientes", semanticState: "conclusive" as const };
+  // A SERP mediu o par (0 página, sem sites em comum): outro assunto, o DNA não reabre (D2.2/A2).
+  assert.equal(serpSuggestionMatch(linha("a", dna), linha("nada", dna), indice), null, "SERP que separa vence o DNA");
+  // Sem SERP no cache para a candidata: o DNA sustenta a Provável.
+  const semSerp = serpSuggestionMatch(linha("a", dna), linha("fora-do-cache", dna), indice);
+  assert.deepEqual([semSerp?.level, semSerp?.basis], ["probable", "dna"]);
+  assert.match(semSerp?.reason ?? "", /sem SERP para medir/);
+  assert.equal(serpSuggestionMatch(linha("a", dna), linha("fora-do-cache", { ...dna, semanticState: "non_conclusive" }), indice), null, "DNA inconclusivo não sustenta");
+});
+
+test("D2.3 · site presente em mais de 15% das SERPs do lote não conta como sinal (lote de 50+)", () => {
+  const pegada = (keywordId: string, urls: string[]): KeywordSerpFootprint => ({ keywordId, keyword: keywordId, lenses: [{ lens: "mobile-ios", urls, domains: null, collectedAt: null }] });
+  const comuns = ["https://portal1.com.br/a", "https://portal2.com.br/a", "https://portal3.com.br/a"];
+  const lote = Array.from({ length: 60 }, (_, indice) => pegada(`k${indice}`, [...comuns.map(url => `${url}${indice}`), `https://unico${indice}.com/x`]));
+  const indice = buildSerpSubjectIndex(lote);
+  assert.ok(indice.genericDomains().has("portal1.com.br"));
+  const medida = indice.overlap("k0", "k1");
+  assert.equal(medida.sharedDomainCount, 3);
+  assert.equal(medida.sharedDistinctiveDomainCount, 0);
+  // Abaixo de 50 keywords, só a lista fixa vale.
+  assert.equal(buildSerpSubjectIndex(lote.slice(0, 49)).genericDomains().size, 0);
+});
+
+test("D2.3 · sugestões do publicado: só com volume, por volume, Forte marcada até as vagas, Provável desmarcada, outro Silo como proposta", () => {
+  const keywords = mapaDe(["kw-01", "kw-03", "kw-09", "kw-10", "kw-11", "kw-12", "kw-13", "kw-14", "kw-19", "kw-20"], {
+    "kw-12": { volume: 0 },
+    "kw-13": { humanFormationRef: "article-formation:outro" },
+  });
+  const lugares: Record<string, { siloRef: string; siloLabel: string; kind: "leftover" | "anchor_member" }> = {
+    "kw-09": { siloRef: "territory:a", siloLabel: "Captação", kind: "leftover" },
+    "kw-10": { siloRef: "territory:a", siloLabel: "Captação", kind: "leftover" },
+    "kw-11": { siloRef: "territory:a", siloLabel: "Captação", kind: "leftover" },
+    "kw-14": { siloRef: "territory:a", siloLabel: "Captação", kind: "anchor_member" },
+    "kw-19": { siloRef: "territory:b", siloLabel: "Leads", kind: "leftover" },
+    "kw-20": { siloRef: "territory:a", siloLabel: "Captação", kind: "leftover" },
+  };
+  const sugestoes = suggestAnchorReinforcements({
+    siloRef: "territory:a",
+    measureAgainst: [keywords.get("kw-01")!],
+    memberIds: ["kw-01", "kw-03"].slice(0, 1),
+    keywords,
+    serp: INDICE,
+    locate: keywordId => {
+      const lugar = lugares[keywordId];
+      return lugar ? { ...lugar, articleLabel: keywordId === "kw-14" ? "como atrair clientes para consultório" : null } : { siloRef: null, siloLabel: null, kind: "unknown" as const };
+    },
+    slotsLeft: 2,
+  });
+  const ids = sugestoes.map(item => item.keywordId);
+  assert.ok(!ids.includes("kw-03"), "publicada nunca é sugestão");
+  assert.ok(!ids.includes("kw-12"), "sem volume não é sugestão");
+  assert.ok(!ids.includes("kw-13"), "decisão humana noutro artigo é preservada");
+  const volumes = sugestoes.map(item => item.volume);
+  assert.deepEqual(volumes, [...volumes].sort((left, right) => right - left), "ordenadas por volume");
+  const marcadas = sugestoes.filter(item => item.preselected);
+  assert.equal(marcadas.length, 2, "Forte marcada só até as vagas");
+  assert.ok(marcadas.every(item => item.level === "strong" && item.where === "leftover"));
+  assert.ok(sugestoes.filter(item => item.level === "probable").every(item => !item.preselected), "Provável vem desmarcada");
+  const outroSilo = sugestoes.find(item => item.keywordId === "kw-19");
+  assert.ok(outroSilo, "par em outro Silo entra na lista, como proposta");
+  {
+    assert.equal(outroSilo!.where, "other_silo");
+    assert.equal(outroSilo!.preselected, false);
+    assert.equal(outroSilo!.whereLabel, 'Silo "Leads"');
+  }
+  const noOutroArtigo = sugestoes.find(item => item.keywordId === "kw-14");
+  assert.ok(noOutroArtigo, "Forte em outro artigo entra desmarcada");
+  {
+    assert.equal(noOutroArtigo!.where, "other_article");
+    assert.equal(noOutroArtigo!.preselected, false);
+    assert.equal(noOutroArtigo!.whereLabel, 'no artigo "como atrair clientes para consultório"');
+  }
+  // A Lógica (Comercial × Informativa) só avisa.
+  assert.match(sugestoes.find(item => item.keywordId === "kw-09")!.warning!, /Intenção da Lógica diferente/);
+  assert.ok(sugestoes.every(item => item.reason.length <= 40 && !/Precisa avaliar/.test(item.reason)), "motivo curto");
+});
+
+test("D2.3 · formação: o par de 7 páginas com a Lógica diferente reforça o publicado; a livre sem volume não reforça e fica recolhida", () => {
+  const plano = planSiloArticleFormation({
+    siloRef: "territory:a", siloLabel: "Captação", siloSlug: "/captacao", siloTokens: sem,
+    keywords: [kw("kw-01"), kw("kw-09"), kw("kw-10", { volume: null })],
+    subjects: comVolume(["kw-09"]),
+    batchObjective: "improve",
+    serpSubject: INDICE,
+  });
+  const publicado = plano.anchors.find(ancora => ancora.kind === "published")!;
+  assert.deepEqual(publicado.keywordIds, ["kw-01", "kw-09"], "como atrair pacientes entra em como atrair pacientes para clínica");
+  assert.deepEqual(plano.leftoverKeywordIds, ["kw-10"]);
+  assert.equal(plano.universe.deferredKeywords?.find(item => item.keywordId === "kw-10")?.reason, "sem volume: não reforça nem forma artigo");
+  assert.match(plano.nucleusByKeywordId.get("kw-09")!.reasons.join(" "), /7 páginas em comum.*Aviso: intenção da Lógica diferente/);
+  // Sem índice de SERP, a regra de antes: a Lógica barra e a sem volume segue a regra das palavras.
+  const semIndice = planSiloArticleFormation({
+    siloRef: "territory:a", siloLabel: "Captação", siloSlug: "/captacao", siloTokens: sem,
+    keywords: [kw("kw-01"), kw("kw-09")], subjects: comVolume(["kw-09"]), batchObjective: "improve",
+  });
+  assert.deepEqual(semIndice.anchors.find(ancora => ancora.kind === "published")!.keywordIds, ["kw-01"]);
+});
+
+test("D2.3 · o publicado com composição decidida por humano continua com cartão (só com SERP) e não recebe proposta de outro Silo", () => {
+  const ref = "article-formation:11111111-1111-4111-8111-111111111111";
+  const plano = planSiloArticleFormation({
+    siloRef: "territory:a", siloLabel: "Captação", siloSlug: "/captacao", siloTokens: sem,
+    keywords: [kw("kw-01", { humanFormationRef: ref }), kw("kw-09", { humanFormationRef: ref }), kw("kw-10")],
+    subjects: comVolume(["kw-09", "kw-10"]),
+    batchObjective: "improve",
+    serpSubject: INDICE,
+  });
+  const humano = plano.anchors.find(ancora => ancora.principalKeywordId === "kw-01");
+  assert.ok(humano);
+  assert.equal(humano!.humanDecided, true);
+  assert.deepEqual(humano!.keywordIds, ["kw-01", "kw-09"]);
+  const propostas = proposeCrossSiloReinforcements({
+    silos: [
+      { siloRef: "territory:a", siloLabel: "Captação", siloTokens: sem, plan: plano },
+      { siloRef: "territory:b", siloLabel: "Leads", siloTokens: sem, plan: { anchors: [], awaitingSubjectKeywordIds: [], leftoverKeywordIds: ["kw-11"] } },
+    ],
+    keywords: mapaDe(["kw-01", "kw-09", "kw-10", "kw-11"]),
+    serpSubject: INDICE,
+  });
+  assert.ok(propostas.every(item => item.anchorKeywordId !== "kw-01"), "composição decidida por humano não recebe proposta automática");
+  const semSerp = planSiloArticleFormation({
+    siloRef: "territory:a", siloLabel: "Captação", siloSlug: "/captacao", siloTokens: sem,
+    keywords: [kw("kw-01", { humanFormationRef: ref }), kw("kw-09", { humanFormationRef: ref })],
+    subjects: comVolume(["kw-09"]), batchObjective: "improve",
+  });
+  assert.equal(semSerp.anchors.some(ancora => ancora.humanDecided), false, "sem SERP, nada muda");
+});
+
+test("D2.3 · troca: a Forte tem prioridade; a Provável (2 páginas e palavras) de volume maior fica nas alternativas, com o nível", () => {
+  const pegada = (keywordId: string, urls: string[]): KeywordSerpFootprint => ({ keywordId, keyword: keywordId, lenses: [{ lens: "mobile-ios", urls, domains: null, collectedAt: null }] });
+  const indice = buildSerpSubjectIndex([
+    pegada("pub", ["https://a.com/1", "https://b.com/2", "https://c.com/3", "https://d.com/4"]),
+    pegada("forte", ["https://a.com/1", "https://b.com/2", "https://c.com/3"]),
+    pegada("provavel", ["https://a.com/1", "https://b.com/2"]),
+  ]);
+  const nomes: Record<string, string> = { pub: "como atrair pacientes para clínica", forte: "atrair pacientes clínica", provavel: "como atrair pacientes para clínica médica" };
+  const linha = (keywordId: string, volume: number | null, isPublished = false): ArticleFormationKeyword => ({ keywordId, keyword: nomes[keywordId], intent: "Informativo", volume, kgr: null, entity: null, problem: null, isPublished });
+  const proposta = proposePublishedPrimarySwap({
+    published: linha("pub", null, true), post: "free", identity: identidade, serp: indice,
+    candidates: [{ ...linha("forte", 20), volumeValidated: true }, { ...linha("provavel", 900), volumeValidated: true }],
+  });
+  assert.equal(proposta.state, "proposed");
+  assert.equal(proposta.substitute?.keywordId, "forte");
+  assert.equal(proposta.substitute?.level, "strong");
+  assert.deepEqual(proposta.alternatives.map(item => [item.keywordId, item.level]), [["provavel", "probable"]]);
+  const soProvavel = proposePublishedPrimarySwap({
+    published: linha("pub", 10, true), post: "free", identity: identidade, serp: indice,
+    candidates: [{ ...linha("provavel", 900), volumeValidated: true }, { ...linha("forte", 5), volumeValidated: true }],
+  });
+  assert.equal(soProvavel.substitute?.keywordId, "provavel", "sem Forte com volume maior, a Provável é proposta");
+  assert.match(soProvavel.substitute!.warning!, /Nível Provável \(2 páginas e palavras em comum no top 10\)/);
+  assert.equal(soProvavel.rejected.find(item => item.keywordId === "forte")?.missing, "volume_not_higher", "sempre com volume maior");
+});
+
+test("D2.1 · troca exige páginas em comum: 2 páginas sem palavras, só sites, só o DNA ou SERP desconhecida nunca assumem a principal", () => {
+  const pegada = (keywordId: string, urls: string[]): KeywordSerpFootprint => ({ keywordId, keyword: keywordId, lenses: [{ lens: "mobile-ios", urls, domains: null, collectedAt: null }] });
+  const indice = buildSerpSubjectIndex([
+    pegada("pub", ["https://a.com/1", "https://b.com/2", "https://s1.com/x", "https://s2.com/x", "https://s3.com/x"]),
+    pegada("duas", ["https://a.com/1", "https://b.com/2"]),
+    pegada("sites", ["https://s1.com/y", "https://s2.com/y", "https://s3.com/y"]),
+    pegada("dna", ["https://z.com/9"]),
+  ]);
+  const dna = { entity: "Clínica", problem: "atrair pacientes", semanticState: "conclusive" as const };
+  const nomes: Record<string, string> = { pub: "como atrair pacientes para clínica", duas: "receita de bolo", sites: "marketing odontológico", dna: "bolo de cenoura", fora: "torta de limão" };
+  const linha = (keywordId: string, volume: number | null, isPublished = false): ArticleFormationKeyword => ({ keywordId, keyword: nomes[keywordId], intent: "Informativo", volume, kgr: null, isPublished, ...dna });
+  const proposta = proposePublishedPrimarySwap({
+    published: linha("pub", null, true), post: "free", identity: identidade, serp: indice,
+    candidates: ["duas", "sites", "dna", "fora"].map(id => ({ ...linha(id, 5000), volumeValidated: true })),
+  });
+  assert.equal(proposta.state, "no_candidate");
+  assert.equal(proposta.substitute, null);
+  assert.deepEqual(proposta.rejected.map(item => [item.keywordId, item.missing]), [["duas", "serp_support"], ["sites", "serp"], ["dna", "serp"], ["fora", "serp_unknown"]]);
+  // Para a lista de reforço (D2.3), os sites em comum continuam Provável; o DNA só vale sem SERP.
+  assert.equal(serpSuggestionMatch(linha("pub", null, true), linha("sites", 5000), indice)?.basis, "domains");
+  assert.equal(serpSuggestionMatch(linha("pub", null, true), linha("dna", 5000), indice), null);
+  assert.equal(serpSuggestionMatch(linha("pub", null, true), linha("fora", 5000), indice)?.basis, "dna");
+});
+
+test("D2.1 · par real da AdalbaPro: 'marketing para clinica' (4 sites, 0 página) não assume 'como atrair pacientes sem redes sociais'", () => {
+  const lentes = (keywordId: string, porLente: Record<string, string[]>): KeywordSerpFootprint => ({ keywordId, keyword: keywordId, lenses: Object.entries(porLente).map(([lens, urls]) => ({ lens: lens as "mobile-ios", urls, domains: null, collectedAt: null })) });
+  const semRedes = [
+    "https://www.youtube.com/watch?v=ORCb_r_FKbk",
+    "https://telemedicinamorsch.com.br/blog/como-atrair-pacientes-para-clinica",
+    "https://www.reddit.com/r/PsicologiaBR/comments/1kyjt30/dificuldade_em_captar_pacientes_pelo_instagram/",
+    "https://iclinic.com.br/blog/erros-nas-redes-sociais/",
+    "https://saudeservice.blog/estrategias-praticas-para-atrair-mais-pacientes-pelas-redes-sociais/",
+    "https://sitedeclinica.com.br/blog/8-maneiras-para-atrair-e-conquistar-novos-pacientes/",
+    "https://mambowifi.com/redes-sociais-saude-atrair-paciente/",
+    "https://pro.doctoralia.com.br/blog/especialistas/como-atrair-pacientes-pelo-instagram",
+  ];
+  const semRedesMac = [
+    "https://hotmart.com/pt-br/marketplace/produtos/como-captar-paciente-fora-das-redes-sociais/X103484022R",
+    "https://www.sympla.com.br/evento/como-captar-pacientes-sem-depender-do-instagram/3471191",
+    "https://www.instagram.com/reel/DYeq-HTSpCn/",
+    "https://www.reddit.com/r/PsicologiaBR/comments/1fkn6js/marketing_para_atrair_pacientes/",
+    "https://feegowclinic.com.br/blog/como-atrair-pacientes-particulares",
+    "https://panoramaestrategico.com.br/blog/captar-pacientes-pela-internet/",
+    "https://www.instagram.com/reel/CT9QjpgLYJr/",
+    "https://www.futuremarketing.com.br/como-atrair-pacientes",
+  ];
+  const marketing = [
+    "https://telemedicinamorsch.com.br/blog/marketing-para-clinicas-medicas",
+    "https://www.futuremarketing.com.br/",
+    "https://pro.doctoralia.com.br/blog/clinicas/marketing-360-para-clinicas",
+    "https://iclinic.com.br/blog/estrategias-de-marketing-para-clinicas/",
+    "https://educacaomedica.afya.com.br/blog/marketing-de-experiencia",
+    "https://www.rdstation.com/blog/marketing/marketing-para-area-da-saude/",
+    "https://clinicanasnuvens.com.br/blog/marketing-para-clinicas-multidisciplinares/",
+    "https://marketmed.com.br/",
+    "https://www.simdoctor.com.br/marketing-medico",
+  ];
+  const indice = buildSerpSubjectIndex([
+    lentes("pub", { "mobile-ios": semRedes, "mobile-android": semRedes, "desktop-macos": semRedesMac }),
+    lentes("mkt", { "mobile-ios": marketing, "mobile-android": marketing, "desktop-macos": marketing }),
+  ]);
+  const pub: ArticleFormationKeyword = { keywordId: "pub", keyword: "como atrair pacientes sem redes sociais", intent: "Informativo", volume: null, kgr: null, entity: null, problem: null, isPublished: true };
+  const mkt: ArticleFormationKeyword = { keywordId: "mkt", keyword: "marketing para clinica", intent: "Comercial", volume: 140, kgr: null, entity: null, problem: null, isPublished: false };
+  const medida = indice.overlap("pub", "mkt");
+  assert.equal(medida.sharedPageCount, 0);
+  assert.ok((medida.sharedDistinctiveDomainCount ?? 0) >= 3, "4 sites em comum");
+  const proposta = proposePublishedPrimarySwap({ published: pub, post: "free", identity: identidade, serp: indice, candidates: [{ ...mkt, volumeValidated: true }] });
+  assert.equal(proposta.state, "no_candidate");
+  assert.deepEqual(proposta.rejected.map(item => [item.keyword, item.missing]), [["marketing para clinica", "serp"]]);
+  // Como reforço, continua sugerida como Provável (sites em comum), desmarcada.
+  assert.equal(serpSuggestionMatch(pub, mkt, indice)?.basis, "domains");
+});
+
+test("D2.3 · sobras: agrupadas por tema, nome da de maior volume, ordem pelo volume somado, até 6, sem volume no fim", () => {
+  const extras = Array.from({ length: 3 }, (_, indice) => ({ ...footprintsReais().find(item => item.keywordId === "kw-11")!, keywordId: `clone-${indice}`, keyword: `como atrair mais pacientes ${indice}` }));
+  const indice = buildSerpSubjectIndex([...footprintsReais(), ...extras]);
+  const keywords = new Map([
+    ...mapaDe(["kw-09", "kw-10", "kw-11", "kw-12", "kw-13", "kw-15", "kw-16", "kw-17", "kw-20", "kw-07"], { "kw-07": { isPublished: false, volume: null } }),
+    ...extras.map(item => [item.keywordId, { ...kw("kw-11"), keywordId: item.keywordId, keyword: item.keyword }] as const),
+  ]);
+  const oportunidades = groupLeftoverOpportunities({
+    silos: [{ siloRef: "territory:a", siloLabel: "Captação", leftoverKeywordIds: [...keywords.keys()] }],
+    keywords, serp: indice, reservedKeywordIds: new Set(["kw-16"]),
+  });
+  assert.equal(oportunidades.reservedForAnchors, 1, "a Forte já marcada para um publicado fica lá (D1)");
+  assert.deepEqual(oportunidades.withoutVolume.map(item => item.keywordId), ["kw-07"], "sem volume, recolhida no fim");
+  const somas = oportunidades.groups.map(group => group.totalVolume);
+  assert.deepEqual(somas, [...somas].sort((left, right) => right - left), "ordem pelo volume somado");
+  assert.ok(oportunidades.groups.every(group => group.members.length <= 6), "teto de 6");
+  for (const group of oportunidades.groups) {
+    assert.equal(group.name, group.members[0].keyword);
+    assert.ok(group.members.every(member => member.volume <= group.members[0].volume), "a líder é a de maior volume");
+  }
+  const atrair = oportunidades.groups.find(group => group.members.some(member => member.keywordId === "kw-09"))!;
+  assert.ok(atrair.members.length >= 4, "o Google junta a família de 'como atrair pacientes'");
+  assert.equal(atrair.basis, "serp");
+  // "marketing para clinica" tem palavras de outras, mas a SERP a separa.
+  const clinica = oportunidades.groups.find(group => group.members.some(member => member.keywordId === "kw-20"))!;
+  assert.ok(!clinica.members.some(member => member.keywordId === "kw-09"));
+  assert.equal(CREATE_ARTICLE_FROM_GROUP_ACTION, "Criar artigo novo com este grupo");
+  const semSobras = groupLeftoverOpportunities({ silos: [], keywords, serp: indice });
+  assert.equal(semSobras.totalLeftovers, 0);
+});
+
+test("D2.3 · aplicar as marcadas e criar artigo: um plano pelo mesmo writer, teto de 6, publicada protegida", () => {
+  const universo = {
+    siloRef: "territory:a", siloLabel: "Captação", siloSlug: null,
+    keywordIds: ["p", "a", "b", "c", "d", "e", "f", "g"],
+    publishedArticles: [], ungroupedKeywordIds: ["a", "b", "c", "d", "e", "f", "g"], singletonAudits: [], relations: [], matchedToPublished: [], conflicts: [],
+    candidates: [{ candidateRef: "article-candidate:territory:a:p", siloRef: "territory:a", principalKeywordId: "p", keywords: [{ keywordId: "p", role: "principal" }], overflowKeywordIds: [], suggestedSlug: null, origin: "logic", stale: false, scores: { coherence: { value: 1, reasons: [] }, intent: { value: 1, reasons: [] }, centrality: { value: 1, reasons: [] } }, cannibalizationRisk: "baixa", conflicts: [], reason: "" }],
+  } as unknown as Parameters<typeof planAddKeywordsToCandidate>[0]["universe"];
+  const itens = ["p", "a", "b", "c", "d", "e", "f", "g"].map((keywordId, indice) => ({ keywordId, workflowItemId: `w-${keywordId}`, lockVersion: indice }));
+  const base = { universe: universo, keywords: itens, mintUuid: "22222222-2222-4222-8222-222222222222", decidedAt: "2026-09-27T12:00:00Z" };
+  const plano = planAddKeywordsToCandidate({ ...base, keywordIds: ["a", "b"], targetCandidateRef: "article-candidate:territory:a:p", publishedKeywordIds: new Set(["p"]) });
+  assert.deepEqual(plano.refusals, []);
+  assert.deepEqual(plano.patches.map(patch => [patch.keywordId, patch.assignment.articleFormationDecision.role]), [["p", "principal"], ["a", "secundaria"], ["b", "secundaria"]]);
+  assert.ok(plano.patches.every(patch => patch.assignment.articleFormationRef === "article-formation:22222222-2222-4222-8222-222222222222" && patch.assignment.articleFormationDecision.source === "human"));
+  assert.equal(planAddKeywordsToCandidate({ ...base, keywordIds: ["a", "b", "c", "d", "e", "f"], targetCandidateRef: "article-candidate:territory:a:p" }).refusals[0]?.code, "MERGE_EXCEEDS_CEILING");
+  assert.equal(planAddKeywordsToCandidate({ ...base, keywordIds: ["x"], targetCandidateRef: "article-candidate:territory:a:p" }).refusals[0]?.code, "KEYWORD_NOT_IN_UNIVERSE");
+  assert.equal(planAddKeywordsToCandidate({ ...base, keywordIds: ["a"], targetCandidateRef: "article-candidate:territory:a:p", publishedKeywordIds: new Set(["a"]) }).refusals[0]?.code, "PUBLISHED_KEYWORD_IS_PROTECTED");
+
+  const novo = planNewArticleFromKeywords({ universe: universo, keywords: itens, keywordIds: ["b", "a"], principalKeywordId: "a", newFormationRef: "article-formation:33333333-3333-4333-8333-333333333333", decidedAt: "2026-09-27T12:00:00Z" });
+  assert.deepEqual(novo.patches.map(patch => [patch.keywordId, patch.assignment.articleFormationDecision.role]), [["a", "principal"], ["b", "secundaria"]]);
+  assert.equal(planNewArticleFromKeywords({ universe: universo, keywords: itens, keywordIds: ["a", "b", "c", "d", "e", "f", "g"], principalKeywordId: "a", newFormationRef: "article-formation:33333333-3333-4333-8333-333333333333", decidedAt: "2026-09-27T12:00:00Z" }).refusals[0]?.code, "MERGE_EXCEEDS_CEILING");
+  assert.equal(planNewArticleFromKeywords({ universe: universo, keywords: itens, keywordIds: ["p", "a"], principalKeywordId: "a", publishedKeywordIds: new Set(["p"]), newFormationRef: "article-formation:33333333-3333-4333-8333-333333333333", decidedAt: "2026-09-27T12:00:00Z" }).refusals[0]?.code, "PUBLISHED_KEYWORD_IS_PROTECTED");
+  assert.equal(chamadasDeRede, 0);
 });
