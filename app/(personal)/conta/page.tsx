@@ -9,13 +9,21 @@ import { loadWriterMcpConnectionsForAccount } from "@/lib/server/writer-mcp-gran
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function PersonalAccountRoute() {
+/** O link de reconsentimento do MCP traz ?mcp_client; o login não pode perdê-lo. */
+function loginRedirectFor(mcpClient: string | string[] | undefined) {
+  const id = typeof mcpClient === "string" ? mcpClient.trim() : "";
+  const valido = id.length >= 1 && id.length <= 200 && !/\s/.test(id);
+  if (!valido) return "/login?callbackUrl=%2Fconta";
+  return `/login?callbackUrl=${encodeURIComponent(`/conta?mcp_client=${encodeURIComponent(id)}`)}`;
+}
+
+export default async function PersonalAccountRoute({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
   let account: Awaited<ReturnType<typeof getCanonicalPersonalAccount>>;
   try {
     account = await getCanonicalPersonalAccount();
   } catch (error) {
     if ((error instanceof CanonicalAuthorizationError && error.status === 401) || error instanceof SupabaseSessionError) {
-      redirect("/login?callbackUrl=%2Fconta");
+      redirect(loginRedirectFor((await searchParams).mcp_client));
     }
     throw error;
   }

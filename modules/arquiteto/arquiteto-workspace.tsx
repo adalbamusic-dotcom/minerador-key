@@ -183,6 +183,43 @@ import {
   type SubjectAnchorCarrier,
 } from "@/lib/arquiteto/declared-subject";
 import { SubjectAttachDialog, SubjectConservationBadge, SubjectFilterPanel, SubjectSupportDialog, type SubjectAnchorView, type SubjectSiloSuggestionView } from "./subject-panels";
+import { SerpSubjectCard, SerpSubjectDiagnosisPanel, type SerpSubjectReadStatus } from "./serp-subject-panels";
+import {
+  KEPT_SWAPS_STORAGE_PREFIX,
+  appliedPublishedSwapOf,
+  buildPublishedSwapArticlePayload,
+  describeSerpSubjectBatchOutcome,
+  evidenceTargetsOf,
+  freshPostRefusal,
+  freshPublishedPostOf,
+  keptSwapKey,
+  mergeSerpSubjectReads,
+  planSerpSubjectRead,
+  publishedSwapReadiness,
+  readKeptSwaps,
+  reconciliationPrincipalKeywordId,
+  reinforcementSearchOutcomes,
+  serializeKeptSwaps,
+  serpSubjectBatchChoices,
+  serpSubjectCardView,
+  serpSubjectEgressLabel,
+  serpSubjectSessionLabel,
+  readSerpSubjectSession,
+  serializeSerpSubjectSession,
+  SERP_SUBJECT_SESSION_PREFIX,
+  serpSubjectEvidencePairs,
+  summarizeSerpSubjectCards,
+  type ReinforcementSearchRecordLike,
+  type SerpSubjectBatchChoice,
+  type SerpSubjectCardView,
+  type SerpSubjectReadResponse,
+  type SerpSubjectReadTarget,
+} from "./serp-subject-model";
+import { buildSerpSubjectIndex } from "@/lib/arquiteto/serp-subject-overlap";
+import { diagnoseSerpSubjectAnchors, reinforcementSearchHref, serpGapsFromMissingLenses, type PublishedAnchorInfo, type ReinforcementSearchOutcome, type SubjectAnchorInfo } from "@/lib/arquiteto/serp-subject-diagnosis";
+import { decidePublishedPrimarySwap, publishedPrimaryPostOf, type PublishedPrimaryPost } from "@/lib/arquiteto/published-primary-swap";
+import { createIndexedDbSubjectSearchStorage, readSubjectSearchLocalRecord, subjectSearchLocalScope } from "@/modules/minerador/discovery/subject-search-local-store";
+import { buildBrandRef } from "@/lib/tenant-routing";
 import {
   attachedSubjectWarning,
   buildSubjectFilterEntries,
@@ -5422,6 +5459,91 @@ export default function ArquitetoPage() {
   const [newFromLeftoversBrandId, setNewFromLeftoversBrandId] = useState<string | null>(null);
   const formNewFromLeftovers = Boolean(selectedBrandId) && newFromLeftoversBrandId === selectedBrandId;
 
+  /*
+   * D2.2 — A SERP DA MESA, SÓ DO CACHE JÁ PAGO.
+   *
+   * "Mesmo assunto" é o que o Google diz: páginas em comum no top 10, nas 4
+   * lentes. A mesa lê, uma vez por marca e por conjunto de keywords, a pegada
+   * de cada keyword dos Silos confirmados (`POST /api/arquiteto/serp-subject`):
+   * só leitura, estreita (URLs do digest e domínios da observação), em lotes
+   * de até 600 ids, publicados e Assuntos primeiro. Nenhuma chamada paga; o
+   * custo de leitura (egress) aparece no painel. Sem a leitura, a formação é
+   * a de antes (palavras e DNA) — e o painel diz isso.
+   */
+  const serpSubjectReadPlan = useMemo(() => planSerpSubjectRead(masterList.flatMap((keyword): SerpSubjectReadTarget[] => {
+    const ref = typeof keyword.territoryRef === "string" ? keyword.territoryRef : null;
+    const keywordId = String(keyword.id);
+    if (!ref || !confirmedTerritoryRefs.has(ref) || reservedSiloHeadIds.has(keywordId)) return [];
+    const priority = keyword.isPublished ? "published" : subjectStandings.get(keywordId)?.declared ? "subject" : "free";
+    return [{ keywordId, keyword: String(keyword.keyword || ""), priority }];
+  })), [masterList, confirmedTerritoryRefs, reservedSiloHeadIds, subjectStandings]);
+  const [serpSubjectReload, setSerpSubjectReload] = useState(0);
+  const [serpSubjectRead, setSerpSubjectRead] = useState<{ brandId: string | null; state: SerpSubjectReadStatus["state"]; data: SerpSubjectReadResponse | null; error: string | null; fromSessionAt?: string | null }>({ brandId: null, state: "idle", data: null, error: null });
+  const serpSubjectRequestedKey = useRef("");
+  const serpSubjectKey = selectedBrandId && serpSubjectReadPlan.total ? `${selectedBrandId}#${serpSubjectReload}#${serpSubjectReadPlan.signature}` : "";
+  useEffect(() => {
+    if (workspaceMode !== "articles" || !serpSubjectKey || !selectedBrandId) return;
+    if (serpSubjectRequestedKey.current === serpSubjectKey) return;
+    serpSubjectRequestedKey.current = serpSubjectKey;
+    let ativo = true;
+    let terminou = false;
+    const lotes = serpSubjectReadPlan.batches;
+    const assinatura = serpSubjectReadPlan.signature;
+    const chaveSessao = `${SERP_SUBJECT_SESSION_PREFIX}${selectedBrandId}`;
+    // "Reler o cache de SERP" (reload > 0) nunca reaproveita a sessão.
+    const podeReaproveitar = serpSubjectReload === 0;
+    const ler = async () => {
+      await Promise.resolve();
+      if (!ativo) return;
+      if (podeReaproveitar) {
+        let bruto: string | null = null;
+        try { bruto = window.sessionStorage.getItem(chaveSessao); } catch { bruto = null; }
+        const guardada = readSerpSubjectSession(bruto, { signature: assinatura, now: new Date() });
+        if (guardada) {
+          terminou = true;
+          setSerpSubjectRead({ brandId: selectedBrandId, state: "ready", data: guardada.data, error: null, fromSessionAt: guardada.savedAt });
+          return;
+        }
+      }
+      setSerpSubjectRead(current => ({ ...current, brandId: current.brandId === selectedBrandId ? current.brandId : null, state: "loading", error: null, data: current.brandId === selectedBrandId ? current.data : null }));
+      try {
+        const respostas: SerpSubjectReadResponse[] = [];
+        for (const lote of lotes) {
+          const response = await fetch("/api/arquiteto/serp-subject", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ brandId: selectedBrandId, keywords: lote }),
+          });
+          const body = await response.json().catch(() => null) as { success?: boolean; error?: string; data?: SerpSubjectReadResponse } | null;
+          if (!response.ok || !body?.success || !body.data) throw new Error(body?.error || `HTTP ${response.status}`);
+          respostas.push(body.data);
+        }
+        terminou = true;
+        const juntas = mergeSerpSubjectReads(respostas);
+        try {
+          window.sessionStorage.setItem(chaveSessao, serializeSerpSubjectSession({ signature: assinatura, savedAt: new Date().toISOString(), data: juntas }));
+        } catch { /* sem sessão: a próxima abertura lê de novo */ }
+        if (!ativo) return;
+        setSerpSubjectRead({ brandId: selectedBrandId, state: "ready", data: juntas, error: null, fromSessionAt: null });
+      } catch (error) {
+        terminou = true;
+        if (!ativo) return;
+        setSerpSubjectRead({ brandId: selectedBrandId, state: "failed", data: null, error: error instanceof Error ? error.message : "falha na leitura" });
+      }
+    };
+    void ler();
+    return () => {
+      ativo = false;
+      // Interrompida no meio: a próxima passada lê de novo.
+      if (!terminou) serpSubjectRequestedKey.current = "";
+    };
+  }, [workspaceMode, serpSubjectKey, selectedBrandId, serpSubjectReadPlan, serpSubjectReload]);
+  /** O índice da mesa: uma leitura para a formação, a troca e o diagnóstico. */
+  const serpSubjectIndex = useMemo(
+    () => serpSubjectRead.data && serpSubjectRead.brandId === selectedBrandId ? buildSerpSubjectIndex(serpSubjectRead.data.footprints) : null,
+    [serpSubjectRead, selectedBrandId],
+  );
+
   const articleFormation = useMemo(() => {
     const publicado = brandSiteSnapshot?.catalog?.length
       ? buildPublishedSiteArchitecture({ catalog: brandSiteSnapshot.catalog as never })
@@ -5565,7 +5687,7 @@ export default function ArquitetoPage() {
           const subjectKeyword = masterList.find(keyword => String(keyword.id) === standing.keywordId);
           if (!subjectKeyword || !selectedBrandId) return [];
           // Só sustentação deste Silo: nenhuma associação cruza Silo (D8).
-          const keywordIds = suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword, keywords: masterList })
+          const keywordIds = suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword, keywords: masterList, serpSubject: serpSubjectIndex })
             .filter(suggestion => suggestion.automaticEligible && idsDoSilo.has(suggestion.keywordId))
             .map(suggestion => suggestion.keywordId);
           return keywordIds.length ? [{ subjectKeywordId: standing.keywordId, keywordIds }] : [];
@@ -5594,6 +5716,8 @@ export default function ArquitetoPage() {
         catalogPages,
         ...(workingSubjectAnchors.size ? { subjectByCandidateRef: workingSubjectAnchors } : {}),
         ...(siloSubjectByTerritoryRef.get(territory.territoryRef) ? { siloSubjectKeywordId: siloSubjectByTerritoryRef.get(territory.territoryRef)?.subject.keywordId } : {}),
+        // D2.2 — com a SERP do cache, "mesmo assunto" são as páginas em comum no top 10.
+        serpSubject: serpSubjectIndex,
         batchObjective,
         formNewFromLeftovers,
       });
@@ -5619,7 +5743,7 @@ export default function ArquitetoPage() {
         .flatMap(standing => {
           const subjectKeyword = masterList.find(keyword => String(keyword.id) === standing.keywordId);
           if (!subjectKeyword) return [];
-          const keywordIds = suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword, keywords: masterList })
+          const keywordIds = suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword, keywords: masterList, serpSubject: serpSubjectIndex })
             .filter(suggestion => suggestion.automaticEligible)
             .map(suggestion => suggestion.keywordId);
           return keywordIds.length ? [{ subjectKeywordId: standing.keywordId, keywordIds }] : [];
@@ -5631,10 +5755,12 @@ export default function ArquitetoPage() {
         keywords: todasAsKeywords,
         subjectClaims: sustentacoesDaMarca,
         principalEligibleKeywordIds: new Set([...todasAsKeywords.keys()].filter(keywordId => subjectStandings.get(keywordId)?.volumeValidated)),
+        serpSubject: serpSubjectIndex,
       })
       : [];
-    return { universes, nucleusByKeywordId, separationByKeywordId, batchObjective, crossSiloProposals };
-  }, [masterList, confirmedTerritoryRefs, reservedSiloHeadIds, remoteTerritories, brandSiteSnapshot, dnaSignalsByKeyword, subjectHeldOut, subjectFormationTrunks, workingSubjectAnchors, siloSubjectByTerritoryRef, subjectStandings, selectedBrandId, formNewFromLeftovers]);
+    // D2.2 — o diagnóstico de cada publicado e Assunto lê os MESMOS planos.
+    return { universes, nucleusByKeywordId, separationByKeywordId, batchObjective, crossSiloProposals, serpPlans: planosPorSilo, formationKeywords: todasAsKeywords };
+  }, [masterList, confirmedTerritoryRefs, reservedSiloHeadIds, remoteTerritories, brandSiteSnapshot, dnaSignalsByKeyword, subjectHeldOut, subjectFormationTrunks, workingSubjectAnchors, siloSubjectByTerritoryRef, subjectStandings, selectedBrandId, formNewFromLeftovers, serpSubjectIndex]);
 
   const articleFormationUniverses = articleFormation.universes;
   /**
@@ -5676,11 +5802,18 @@ export default function ArquitetoPage() {
    * keywords. O que não descreve o cenário corrente fica no acervo, fora do
    * fluxo — isolado, nunca apagado.
    */
+  /*
+   * D2.1 — a troca da principal publicada muda a principal do ArticleDNA, mas
+   * a página é a mesma (URL, slug, keywords). A reconciliação com o candidato
+   * da mesa, que a formação ancora na publicada, usa a principal anterior —
+   * sem isto, o artigo recém-trocado iria ao acervo como "outra principal".
+   */
+  const publishedKeywordIdSet = useMemo(() => new Set(masterList.filter(item => item.isPublished).map(item => String(item.id))), [masterList]);
   const materializationPartition = useMemo(() => partitionMaterializedArticles({
     accepted: Object.values(acceptedArticleDnas).map(version => ({
       articleId: String(version.payload.articleId),
       territoryRef: version.payload.territoryRef ? String(version.payload.territoryRef) : null,
-      principalKeywordId: String(version.payload.principalKeywordId),
+      principalKeywordId: reconciliationPrincipalKeywordId(version.payload, publishedKeywordIdSet),
       keywordIds: [
         String(version.payload.principalKeywordId),
         ...(version.payload.secondaryKeywordIds || []).map(String),
@@ -5693,7 +5826,7 @@ export default function ArquitetoPage() {
       principalKeywordId: candidate.principalKeywordId,
       keywordIds: [...candidate.keywords.map(item => item.keywordId), ...candidate.overflowKeywordIds],
     }))),
-  }), [acceptedArticleDnas, articleFormationUniverses]);
+  }), [acceptedArticleDnas, articleFormationUniverses, publishedKeywordIdSet]);
 
   /** `candidateRef` dos artigos do cenário já materializados — ARTICLE vs CANDIDATO. */
   const materializedArticleIds = materializationPartition.current;
@@ -10741,9 +10874,9 @@ export default function ArquitetoPage() {
   /** Sugestões de sustentação: só keywords já recebidas, pela ordem do domínio. */
   const subjectSupportSuggestions = useMemo(
   () => subjectSupportOpen && selectedBrandId && selectedSubjectRow
-      ? suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword: selectedSubjectRow, keywords: masterList, memberKeywordIds: subjectSupportMemberIds })
+      ? suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword: selectedSubjectRow, keywords: masterList, memberKeywordIds: subjectSupportMemberIds, serpSubject: serpSubjectIndex })
       : [],
-    [subjectSupportOpen, selectedBrandId, selectedSubjectRow, masterList, subjectSupportMemberIds],
+    [subjectSupportOpen, selectedBrandId, selectedSubjectRow, masterList, subjectSupportMemberIds, serpSubjectIndex],
   );
 
   /** O Silo confirmado de cada sugestão: a formação recusa sem Silo ou com Silos diferentes. */
@@ -10803,6 +10936,401 @@ export default function ArquitetoPage() {
     addVersionEvents([createStatusEvent(canonico.versionId, "proposed", input.actorId, `${input.changeReason} A aprovação continua independente.`)]);
     return persisted.persistence;
   }, [selectedBrandId, setAcceptedSiloDnas, addVersionEvents]);
+
+  /* ------------------------------------------------------------------------
+   * MESMO ASSUNTO NO GOOGLE — O DILEMA DE CADA PUBLICADO E DE CADA ASSUNTO
+   * (regras do dono, Parte D: D1, D2, D2.1 e D2.2).
+   *
+   * O domínio diz o estado (`diagnoseSerpSubjectAnchors`) a partir dos MESMOS
+   * planos da formação e do índice de SERP lido do cache. A tela diz o dilema
+   * numa frase e oferece o ato: aplicar ou manter a troca da principal Livre,
+   * trazer o par de outro Silo, buscar reforço no Minerador ou coletar a SERP
+   * que falta (pago, com plano). Toda gravação é decisão humana confirmada
+   * pela releitura; nada muda URL, slug ou canonical.
+   * ---------------------------------------------------------------------- */
+  const serpSubjectBrandRef = useMemo(() => {
+    if (!activeBrand?.id || !activeBrand.nome) return null;
+    try { return buildBrandRef(activeBrand.nome, activeBrand.id); } catch { return null; }
+  }, [activeBrand?.id, activeBrand?.nome]);
+
+  /**
+   * O Posto de cada principal publicada, pelo Vínculo do Minerador. Posto não
+   * declarado em página publicada é desconhecido (AGENTS §11): não libera nem
+   * bloqueia a troca em silêncio — o cartão pede a declaração.
+   */
+  const serpPublishedInfo = useMemo(() => {
+    const mapa = new Map<string, PublishedAnchorInfo>();
+    for (const keyword of masterList) {
+      if (!keyword.isPublished) continue;
+      const vinculo = readArchitectKeywordVinculo(keyword);
+      const aprovada = approvedSemanticOf(keyword);
+      const semantica = aprovada ?? (keyword.analise_semantica && typeof keyword.analise_semantica === "object" ? keyword.analise_semantica as Record<string, unknown> : null);
+      const postoDeclarado = typeof semantica?.primary_keyword_policy === "string" && semantica.primary_keyword_policy.trim().length > 0;
+      const url = vinculo.url ?? null;
+      let slug: string | null = null;
+      try { slug = url ? new URL(url).pathname.replace(/\/+$/, "") || "/" : null; } catch { slug = null; }
+      mapa.set(String(keyword.id), {
+        post: postoDeclarado ? publishedPrimaryPostOf(vinculo.post) : "unknown",
+        url,
+        canonical: vinculo.canonicalUrl ?? null,
+        slug,
+      });
+    }
+    return mapa;
+  }, [masterList]);
+
+  /*
+   * A "Buscar reforço" que já rodou: lida da lista local da Pesquisa por
+   * Assunto (IndexedDB do Minerador, deste ator e desta marca). Só leitura —
+   * nada é apagado daqui. É estado de apresentação: diz "tema sem demanda no
+   * Google" quando a busca voltou sem volume.
+   */
+  const reinforcementActorId = authenticatedArchitectActor({ sessionStatus, actorUserId: session?.user?.id, brandId: selectedBrandId });
+  const reinforcementScope = subjectSearchLocalScope(reinforcementActorId, selectedBrandId);
+  const [reinforcementRecords, setReinforcementRecords] = useState<{ scope: string; records: ReinforcementSearchRecordLike[] }>({ scope: "", records: [] });
+  useEffect(() => {
+    if (workspaceMode !== "articles" || !reinforcementScope) return;
+    let ativo = true;
+    const ler = async () => {
+      await Promise.resolve();
+      const [actorUserId, brandId] = reinforcementScope.split(":");
+      try {
+        const entradas = await createIndexedDbSubjectSearchStorage().list(reinforcementScope);
+        const records = entradas
+          .map(entrada => readSubjectSearchLocalRecord(entrada.value, { actorUserId, brandId, key: entrada.key }))
+          .filter((item): item is NonNullable<typeof item> => Boolean(item));
+        if (ativo) setReinforcementRecords({ scope: reinforcementScope, records });
+      } catch {
+        if (ativo) setReinforcementRecords({ scope: reinforcementScope, records: [] });
+      }
+    };
+    void ler();
+    return () => { ativo = false; };
+  }, [workspaceMode, reinforcementScope, serpSubjectReload]);
+
+  const serpSubjectAnalysis = useMemo(() => {
+    const planos = articleFormation.serpPlans;
+    if (!planos.length) return { diagnoses: [], searches: new Map<string, ReinforcementSearchOutcome>() };
+    const volumeValidated = new Set<string>();
+    const subjectDeclared = new Set<string>();
+    const subjects = new Map<string, SubjectAnchorInfo>();
+    for (const standing of subjectStandings.values()) {
+      if (standing.volumeValidated) volumeValidated.add(standing.keywordId);
+      if (standing.declared) {
+        subjectDeclared.add(standing.keywordId);
+        subjects.set(standing.keywordId, { note: standing.note, destinationUrl: standing.destinationUrl });
+      }
+    }
+    const nomes = articleFormation.formationKeywords;
+    const ancoras = planos.flatMap(plano => [
+      ...plano.plan.anchors.map(ancora => ancora.kind === "published"
+        ? { kind: "published" as const, anchorKeywordId: ancora.principalKeywordId, phrase: nomes.get(ancora.principalKeywordId)?.keyword || "", destinationUrl: serpPublishedInfo.get(ancora.principalKeywordId)?.canonical || serpPublishedInfo.get(ancora.principalKeywordId)?.url || null }
+        : { kind: "subject" as const, anchorKeywordId: ancora.subjectKeywordId || ancora.principalKeywordId, phrase: "", destinationUrl: null }),
+      ...plano.plan.awaitingSubjectKeywordIds.map(keywordId => ({ kind: "subject" as const, anchorKeywordId: keywordId, phrase: "", destinationUrl: null })),
+    ]);
+    const searches = reinforcementSearchOutcomes({
+      records: reinforcementRecords.scope === reinforcementScope ? reinforcementRecords.records : [],
+      anchors: ancoras,
+    });
+    const diagnoses = diagnoseSerpSubjectAnchors({
+      silos: planos.map(plano => ({
+        siloRef: plano.siloRef,
+        siloLabel: plano.siloLabel,
+        plan: plano.plan,
+        keywordIds: plano.keywords.map(keyword => keyword.keywordId),
+        siloTokens: plano.siloTokens,
+      })),
+      keywords: nomes,
+      serp: serpSubjectIndex,
+      published: serpPublishedInfo,
+      subjects,
+      volumeValidated,
+      subjectDeclared,
+      crossSiloProposals: articleFormation.crossSiloProposals,
+      reinforcementSearches: searches,
+      brandRef: serpSubjectBrandRef,
+      // Vencida (30 dias) e nunca coletada são ditas de modos diferentes.
+      serpGaps: serpSubjectRead.data && serpSubjectRead.brandId === selectedBrandId
+        ? serpGapsFromMissingLenses({ missingLenses: serpSubjectRead.data.missingLenses, withPages: keywordId => Boolean(serpSubjectIndex?.hasPages(keywordId)), now: new Date() })
+        : undefined,
+    });
+    return { diagnoses, searches };
+  }, [articleFormation, subjectStandings, serpPublishedInfo, reinforcementRecords, reinforcementScope, serpSubjectIndex, serpSubjectBrandRef, serpSubjectRead, selectedBrandId]);
+  const serpSubjectDiagnoses = serpSubjectAnalysis.diagnoses;
+
+  /** "Manter": estado de apresentação por marca, neste navegador (nova versão só com mudança real). */
+  const [keptSwapState, setKeptSwapState] = useState<{ brandId: string | null; kept: ReadonlySet<string> }>({ brandId: null, kept: new Set() });
+  useEffect(() => {
+    if (!selectedBrandId) return;
+    let ativo = true;
+    const ler = async () => {
+      await Promise.resolve();
+      let bruto: string | null = null;
+      try { bruto = window.localStorage.getItem(`${KEPT_SWAPS_STORAGE_PREFIX}${selectedBrandId}`); } catch { bruto = null; }
+      if (ativo) setKeptSwapState({ brandId: selectedBrandId, kept: readKeptSwaps(bruto) });
+    };
+    void ler();
+    return () => { ativo = false; };
+  }, [selectedBrandId]);
+  const keptSwaps = useMemo(() => keptSwapState.brandId === selectedBrandId ? keptSwapState.kept : new Set<string>(), [keptSwapState, selectedBrandId]);
+  const saveKeptSwaps = useCallback((next: ReadonlySet<string>) => {
+    if (!selectedBrandId) return;
+    setKeptSwapState({ brandId: selectedBrandId, kept: next });
+    try { window.localStorage.setItem(`${KEPT_SWAPS_STORAGE_PREFIX}${selectedBrandId}`, serializeKeptSwaps(next)); } catch { /* fica só nesta sessão */ }
+  }, [selectedBrandId]);
+
+  /** O candidato da mesa que é o artigo desta âncora (a formação o ancora na principal). */
+  const serpAnchorCandidateRef = useCallback((siloRef: string, principalKeywordId: string) => articleFormationUniverses
+    .find(universe => universe.siloRef === siloRef)?.candidates
+    .find(candidate => candidate.principalKeywordId === principalKeywordId)?.candidateRef ?? null, [articleFormationUniverses]);
+
+  const serpSubjectCards = useMemo(() => {
+    const nomes = articleFormation.formationKeywords;
+    const mineradorHref = serpSubjectBrandRef ? `/${serpSubjectBrandRef}/minerador` : null;
+    return serpSubjectDiagnoses.map((diagnosis): SerpSubjectCardView => {
+      const publicado = diagnosis.kind === "published";
+      const info = publicado ? serpPublishedInfo.get(diagnosis.anchorKeywordId) : undefined;
+      const post: PublishedPrimaryPost = info?.post ?? "unknown";
+      const candidateRef = publicado ? serpAnchorCandidateRef(diagnosis.siloRef, diagnosis.principalKeywordId) : null;
+      const article = candidateRef ? articleDnaEntryFor({ candidateRef }).version?.payload ?? null : null;
+      const substituta = diagnosis.swap?.substitute;
+      return serpSubjectCardView(diagnosis, {
+        ...(publicado ? { post, swapReadiness: publishedSwapReadiness({ diagnosis, article, currentPost: post }) } : {}),
+        pageUrl: publicado ? (info?.canonical || info?.url || null) : (subjectStandings.get(diagnosis.anchorKeywordId)?.destinationUrl ?? null),
+        appliedSwap: appliedPublishedSwapOf(article),
+        kept: Boolean(substituta && keptSwaps.has(keptSwapKey(diagnosis.anchorKeywordId, substituta.keywordId))),
+        reinforcementSearch: serpSubjectAnalysis.searches.get(diagnosis.anchorKeywordId) ?? null,
+        mineradorHref,
+        reinforcementHref: serpSubjectBrandRef ? reinforcementSearchHref(serpSubjectBrandRef, { kind: diagnosis.kind, anchorKeywordId: diagnosis.anchorKeywordId }) : null,
+        nameOf: keywordId => nomes.get(keywordId)?.keyword || keywordId,
+      });
+    });
+  }, [articleFormation.formationKeywords, serpSubjectBrandRef, serpSubjectDiagnoses, serpPublishedInfo, serpAnchorCandidateRef, articleDnaEntryFor, subjectStandings, keptSwaps, serpSubjectAnalysis.searches]);
+  const serpSubjectCardByKey = useMemo(() => new Map(serpSubjectCards.map(card => [card.key, card])), [serpSubjectCards]);
+  const serpSubjectSummary = useMemo(() => summarizeSerpSubjectCards(serpSubjectCards), [serpSubjectCards]);
+  const serpSubjectChoices = useMemo(() => serpSubjectBatchChoices({ diagnoses: serpSubjectDiagnoses, cards: serpSubjectCardByKey }), [serpSubjectDiagnoses, serpSubjectCardByKey]);
+  const serpSubjectEvidenceOf = useCallback((card: SerpSubjectCardView) => {
+    const diagnosis = serpSubjectDiagnoses.find(item => `${item.kind}:${item.anchorKeywordId}` === card.key);
+    return diagnosis ? serpSubjectEvidencePairs({ index: serpSubjectIndex, anchorKeywordId: diagnosis.anchorKeywordId, others: evidenceTargetsOf(diagnosis) }) : [];
+  }, [serpSubjectDiagnoses, serpSubjectIndex]);
+  const serpSubjectReadStatus = useMemo<SerpSubjectReadStatus>(() => ({
+    state: serpSubjectRead.brandId === selectedBrandId || serpSubjectRead.state === "loading" ? serpSubjectRead.state : "idle",
+    error: serpSubjectRead.error,
+    egressLabel: serpSubjectRead.fromSessionAt ? serpSubjectSessionLabel(serpSubjectRead.fromSessionAt, new Date()) : serpSubjectEgressLabel(serpSubjectRead.data?.egress),
+    requested: serpSubjectReadPlan.total,
+    withoutSerp: serpSubjectRead.data?.withoutSerp.length ?? 0,
+    targetingReadFailed: Boolean(serpSubjectRead.data?.targetingReadFailed),
+  }), [serpSubjectRead, selectedBrandId, serpSubjectReadPlan.total]);
+
+  const [serpSubjectBusy, setSerpSubjectBusy] = useState(false);
+
+  /**
+   * D2.1 — APLICAR A TROCA DA PRINCIPAL LIVRE, só por decisão humana.
+   *
+   * Cada troca vira uma NOVA versão do ArticleDNA (em revisão), pela porta de
+   * versão que já existe, com `primaryKeywordDecision` confirmada e o
+   * histórico do Posto. A principal antiga fica como secundária; URL, slug e
+   * canonical são copiados da versão atual. Sucesso só com a releitura.
+   */
+  const applyPublishedSwaps = async (anchorKeywordIds: readonly string[]) => {
+    const refused: Array<{ label: string; reason: string }> = [];
+    if (!selectedBrandId) return { confirmed: 0, refused: [{ label: "Marca", reason: "selecione uma marca ativa" }] };
+    const actorId = authenticatedArchitectActor({ sessionStatus, actorUserId: session?.user?.id, brandId: selectedBrandId });
+    if (!actorId) return { confirmed: 0, refused: anchorKeywordIds.map(id => ({ label: `"${articleFormation.formationKeywords.get(id)?.keyword || id}"`, reason: "a sessão não tem usuário autenticado; entre de novo para decidir" })) };
+    /*
+     * O POSTO É RELIDO AGORA, não tirado da memória da mesa. Se o dono travou
+     * o Posto no Minerador em outra aba, a memória ainda diria "Livre". Só a
+     * coluna da política, pela marca ativa, sob RLS; sem leitura, nada grava.
+     */
+    const postosRelidos = new Map<string, PublishedPrimaryPost>();
+    try {
+      const { data, error } = await supabase
+        .from("minerador_keywords")
+        .select("id,primary_keyword_policy:analise_semantica->primary_keyword_policy")
+        .eq("brand_id", selectedBrandId)
+        .in("id", [...new Set(anchorKeywordIds)]);
+      if (error) throw error;
+      for (const linha of (data || []) as Array<{ id: string | number; primary_keyword_policy?: unknown }>) {
+        postosRelidos.set(String(linha.id), freshPublishedPostOf(linha));
+      }
+    } catch {
+      postosRelidos.clear();
+    }
+    const gravadas: Array<{ articleId: string; principalKeywordId: string; label: string }> = [];
+    for (const anchorKeywordId of anchorKeywordIds) {
+      const diagnosis = serpSubjectDiagnoses.find(item => item.kind === "published" && item.anchorKeywordId === anchorKeywordId);
+      const label = `"${diagnosis?.anchorLabel || anchorKeywordId}"`;
+      const swap = diagnosis?.swap;
+      if (!diagnosis || !swap?.substitute) { refused.push({ label, reason: "não há troca proposta" }); continue; }
+      const info = serpPublishedInfo.get(anchorKeywordId);
+      const postoMostrado: PublishedPrimaryPost = info?.post ?? "unknown";
+      const recusaDoPosto = freshPostRefusal({ shown: postoMostrado, fresh: postosRelidos.get(anchorKeywordId) ?? null });
+      if (recusaDoPosto) { refused.push({ label, reason: recusaDoPosto }); continue; }
+      const post: PublishedPrimaryPost = postosRelidos.get(anchorKeywordId) ?? "unknown";
+      const candidateRef = serpAnchorCandidateRef(diagnosis.siloRef, diagnosis.principalKeywordId);
+      const entry = candidateRef ? articleDnaEntryFor({ candidateRef }) : null;
+      const current = entry?.version ?? null;
+      const prontidao = publishedSwapReadiness({ diagnosis, article: current?.payload ?? null, currentPost: post });
+      if (!prontidao.ready || !current || !entry?.key) { refused.push({ label, reason: prontidao.ready ? "o ArticleDNA não foi encontrado" : prontidao.reason }); continue; }
+      const decidedAt = new Date().toISOString();
+      const outcome = decidePublishedPrimarySwap({
+        proposal: swap,
+        article: {
+          principalKeywordId: current.payload.principalKeywordId,
+          keywordIds: current.payload.keywordReferences.map(reference => reference.keywordId),
+          identity: { url: info?.url ?? null, canonical: info?.canonical ?? null, slug: info?.slug ?? null },
+        },
+        currentPost: post,
+        accepted: true,
+        actorUserId: actorId,
+        decidedAt,
+      });
+      if (!outcome.ok) { refused.push({ label, reason: outcome.reason }); continue; }
+      try {
+        // As métricas da nova principal vêm do Minerador; sem elas, null — nunca as da antiga.
+        const linhaDaNova = masterList.find(item => String(item.id) === swap.substitute!.keywordId) as (Record<string, unknown> | undefined);
+        const numero = (valor: unknown) => typeof valor === "number" && Number.isFinite(valor) ? valor : null;
+        const payload = buildPublishedSwapArticlePayload({
+          current: current.payload, outcome, actorId, decidedAt, substituteLabel: swap.substitute.keyword, previousLabel: diagnosis.anchorLabel,
+          substituteMetrics: {
+            volume: numero(linhaDaNova?.volume_search) ?? swap.substitute.volume,
+            resultCount: numero(linhaDaNova?.results_allintitle),
+            kgrScore: numero(linhaDaNova?.kgr_score),
+          },
+        });
+        await persistArticleSubjectVersion({
+          articleKey: entry.key,
+          current,
+          payload,
+          actorId,
+          changeReason: `Troca da principal publicada (Posto Livre): "${swap.substitute.keyword}" assume e "${diagnosis.anchorLabel}" fica como secundária. URL, slug e canonical preservados.`,
+        });
+        gravadas.push({ articleId: String(current.payload.articleId), principalKeywordId: outcome.principalKeywordId, label });
+      } catch (error) {
+        refused.push({ label, reason: error instanceof Error ? error.message : "a gravação falhou" });
+      }
+    }
+    let confirmed = 0;
+    if (gravadas.length) {
+      try {
+        // Gravar não é sucesso: a troca vale quando a releitura devolve a versão nova.
+        const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+        for (const gravada of gravadas) {
+          const relida = canonical.articleDnas.some(version => String(version.payload.articleId) === gravada.articleId
+            && version.payload.principalKeywordId === gravada.principalKeywordId
+            && version.payload.primaryKeywordDecision?.status === "confirmed");
+          if (relida) confirmed += 1;
+          else refused.push({ label: gravada.label, reason: "a releitura não confirmou a nova versão" });
+        }
+      } catch {
+        for (const gravada of gravadas) refused.push({ label: gravada.label, reason: "a releitura falhou; recarregue a mesa antes de repetir" });
+      }
+      setCanonicalWorkspaceReload(current => current + 1);
+    }
+    return { confirmed, refused };
+  };
+
+  const applyOnePublishedSwap = async (anchorKeywordId: string) => {
+    if (serpSubjectBusy) return;
+    setSerpSubjectBusy(true);
+    try {
+      const resultado = await applyPublishedSwaps([anchorKeywordId]);
+      const desfecho = describeSerpSubjectBatchOutcome({ swapsConfirmed: resultado.confirmed, swapsRefused: resultado.refused, movedConfirmed: 0, movedUnchanged: 0, movedRefused: 0 });
+      showNotification(desfecho.tone, desfecho.message);
+    } finally {
+      setSerpSubjectBusy(false);
+    }
+  };
+
+  const keepPublishedPrimary = (anchorKeywordId: string, keep: boolean) => {
+    const substituta = serpSubjectDiagnoses.find(item => item.kind === "published" && item.anchorKeywordId === anchorKeywordId)?.swap?.substitute;
+    if (!substituta) return;
+    const chave = keptSwapKey(anchorKeywordId, substituta.keywordId);
+    const proximo = new Set(keptSwaps);
+    if (keep) proximo.add(chave); else proximo.delete(chave);
+    saveKeptSwaps(proximo);
+    if (keep) showNotification("success", `Principal mantida: "${articleFormation.formationKeywords.get(anchorKeywordId)?.keyword || anchorKeywordId}". Nenhuma versão foi gravada; a escolha fica neste navegador e a sugestão volta se a substituta mudar.`);
+  };
+
+  /** A ação em grupo: trocas e reforços escolhidos, com a releitura de cada caminho. */
+  const applySerpSubjectBatch = async (choices: readonly SerpSubjectBatchChoice[]) => {
+    if (!choices.length || serpSubjectBusy) return;
+    setSerpSubjectBusy(true);
+    try {
+      const trocas = await applyPublishedSwaps(choices.filter(choice => choice.kind === "swap").map(choice => choice.anchorKeywordId));
+      const movidas = choices.flatMap(choice => choice.kind === "cross_silo" && choice.crossSilo ? [choice.crossSilo] : []);
+      let lote = { applied: [] as string[], unchanged: [] as string[], refused: [] as string[] };
+      if (movidas.length) {
+        try {
+          lote = await applySiloDecisionsInBatch(movidas.map(item => ({ keywordId: item.keywordId, target: { kind: "territory" as const, territoryRef: item.toSiloRef } })));
+          setCanonicalWorkspaceReload(current => current + 1);
+        } catch {
+          lote = { applied: [], unchanged: [], refused: movidas.map(item => item.keywordId) };
+        }
+      }
+      const desfecho = describeSerpSubjectBatchOutcome({
+        swapsConfirmed: trocas.confirmed,
+        swapsRefused: trocas.refused,
+        movedConfirmed: lote.applied.length,
+        movedUnchanged: lote.unchanged.length,
+        movedRefused: lote.refused.length,
+      });
+      showNotification(desfecho.tone, desfecho.message);
+    } finally {
+      setSerpSubjectBusy(false);
+    }
+  };
+
+  const serpSubjectHandlers = {
+    onApplySwap: (anchorKeywordId: string) => { void applyOnePublishedSwap(anchorKeywordId); },
+    onKeepSwap: (anchorKeywordId: string) => keepPublishedPrimary(anchorKeywordId, true),
+    onReviewSwap: (anchorKeywordId: string) => keepPublishedPrimary(anchorKeywordId, false),
+    onBringPair: (proposals: readonly { keywordId: string; keyword: string; toSiloRef: string; toSiloLabel: string }[]) => { void applyCrossSiloReinforcements(proposals); },
+    onSearch: (href: string) => router.push(href),
+    onCollectSerp: (siloRef: string) => {
+      void (async () => {
+        await collectKeywordSerp(siloRef);
+        // A coleta paga gravou no cache: a mesa relê a SERP (sem custo).
+        setSerpSubjectReload(current => current + 1);
+      })();
+    },
+    onOpenMinerador: (href: string) => router.push(href),
+    /*
+     * "Par em outro artigo" e "liberar uma vaga": abre o artigo na mesa, o
+     * MESMO nó do mapa. A decisão é feita lá, com "Mover para…" e a prévia do
+     * efeito — este botão não move nada.
+     */
+    onOpenArticle: (siloRef: string, principalKeywordId: string) => {
+      const candidateRef = serpAnchorCandidateRef(siloRef, principalKeywordId);
+      if (!candidateRef) {
+        showNotification("warning", "O artigo não está mais na mesa: recarregue a formação e tente de novo.");
+        return;
+      }
+      const no = articleFlow.nodes.find(item => item.articleRef === candidateRef && item.kind !== "silo_page" && item.kind !== "keyword")
+        || articleFlow.nodes.find(item => item.articleRef === candidateRef && item.kind !== "silo_page");
+      setPanelSiloRef(siloRef);
+      setSelectedArticleNodeRef(candidateRef);
+      if (no) setMapState(current => ({ ...current, selectedNodeId: no.id }));
+    },
+  };
+
+  /** O cartão do artigo selecionado na mesa, quando ele é publicado ou de Assunto. */
+  const serpSubjectCardForCandidate = (candidate: ArticleCandidate | null) => {
+    if (!candidate) return null;
+    const diagnosis = serpSubjectDiagnoses.find(item => item.siloRef === candidate.siloRef && item.principalKeywordId === candidate.principalKeywordId);
+    const card = diagnosis ? serpSubjectCardByKey.get(`${diagnosis.kind}:${diagnosis.anchorKeywordId}`) : null;
+    if (!card) return null;
+    return (
+      <SerpSubjectCard
+        card={card}
+        busy={serpSubjectBusy || crossSiloBusy}
+        evidenceOf={serpSubjectEvidenceOf}
+        handlers={serpSubjectHandlers}
+        buttonClassName={ARCHITECT_UI.toolbarButton}
+        primaryButtonClassName={ARCHITECT_UI.primaryButton}
+      />
+    );
+  };
 
   /** O que o servidor já confirmou, enquanto a releitura não chega. */
   const setWorkingSubjectAnchor = useCallback((candidateRef: string, subjectKeywordId: string | null) => {
@@ -15376,6 +15904,7 @@ export default function ArquitetoPage() {
                     scopeReason={formationSelectionScope.reason}
                     confirmed={confirmedFormation}
                     selectedCandidate={selectedFormationCandidate}
+                    selectedCandidateSerp={serpSubjectCardForCandidate(selectedFormationCandidate)}
                     selectedSingletonAudit={selectedSingletonAudit}
                     keywordLabels={formationKeywordLabels}
                     mergeTargets={formationMergeTargets}
@@ -16127,6 +16656,26 @@ export default function ArquitetoPage() {
               </div>
             )}
           </section>
+        )}
+        {workspaceMode === "articles" && serpSubjectCards.length > 0 && (
+          <SerpSubjectDiagnosisPanel
+            cards={serpSubjectCards}
+            summary={serpSubjectSummary}
+            read={serpSubjectReadStatus}
+            choices={serpSubjectChoices}
+            busy={serpSubjectBusy || crossSiloBusy}
+            highlightedKey={(() => {
+              const candidato = selectedFormationCandidate;
+              const diagnostico = candidato ? serpSubjectDiagnoses.find(item => item.siloRef === candidato.siloRef && item.principalKeywordId === candidato.principalKeywordId) : null;
+              return diagnostico ? `${diagnostico.kind}:${diagnostico.anchorKeywordId}` : null;
+            })()}
+            evidenceOf={serpSubjectEvidenceOf}
+            handlers={serpSubjectHandlers}
+            onReread={() => setSerpSubjectReload(current => current + 1)}
+            onApplyBatch={applySerpSubjectBatch}
+            buttonClassName={ARCHITECT_UI.toolbarButton}
+            primaryButtonClassName={ARCHITECT_UI.primaryButton}
+          />
         )}
         {workspaceMode === "articles" && formationDeferredRows.length > 0 && (
           <section className="border-b border-divider bg-surface-subtle px-4 py-4" data-testid="architect-formation-deferred-list">

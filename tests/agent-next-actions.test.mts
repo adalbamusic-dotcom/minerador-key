@@ -64,14 +64,35 @@ test("19 · keywords em bruto: Lógica é ferramenta, medição é humana e apro
   assert.equal(aprovar?.screen, "/m/minerador");
 });
 
-test("20 · Radar aprovado vira envio ao Redator pela IA; Radar em curso fica com o humano", () => {
+test("20 · Radar finalizado (carimbo, não estado) vira envio ao Redator pela IA; em curso fica com o humano", () => {
   const estado = vazio();
   estado.arquiteto.articles = [{ articleId: "a1", promise: "x", slug: "x", siloId: null, hierarchy: null, siloRole: null, journeyStage: null, mainIntent: null, principalKeyword: null, workflowState: "ENVIADO_AO_RADAR", canonical: null }];
-  estado.radar.items = [{ articleId: "a1", state: "approved" }, { articleId: "a2", state: "research_pending" }];
+  /*
+   * Formato REAL (Care Glow, 2026-09-26): a linha finalizada continua
+   * research_pending; o que diz "finalizado" é o carimbo da análise corrente.
+   * O fixture antigo usava state "approved", estado que o fluxo atual não grava.
+   */
+  estado.radar.items = [
+    { articleId: "a1", state: "research_pending", finalizedAt: "2026-09-16T05:07:53.223Z", hasDocument: false },
+    { articleId: "a2", state: "research_pending", finalizedAt: null, hasDocument: false },
+    { articleId: "a3", state: "sent_writer", finalizedAt: "2026-09-11T22:19:44.627Z", hasDocument: true },
+  ];
   const acoes = resolveNextActions(estado).actions;
   assert.equal(acoes.find(item => item.operationId === "radar.send_to_writer")?.who, "agent");
   assert.deepEqual(acoes.find(item => item.operationId === "radar.send_to_writer")?.items, ["a1"]);
+  assert.deepEqual(acoes.find(item => item.operationId === "radar.investigate")?.items, ["a2"], "só o não finalizado é investigação");
   assert.equal(acoes.find(item => item.operationId === "radar.investigate")?.who, "human");
+});
+
+test("20b · 'approved' sem carimbo NÃO é finalizado, e finalizado com documento não é reenviado", () => {
+  const estado = vazio();
+  estado.radar.items = [
+    { articleId: "legado", state: "approved", finalizedAt: null, hasDocument: false },
+    { articleId: "feito", state: "research_pending", finalizedAt: "2026-09-16T05:07:53.223Z", hasDocument: true },
+  ];
+  const acoes = resolveNextActions(estado).actions;
+  assert.equal(acoes.find(item => item.operationId === "radar.send_to_writer"), undefined);
+  assert.deepEqual(acoes.find(item => item.operationId === "radar.investigate")?.items, ["legado"]);
 });
 
 test("21 · documento planejado: a IA escreve; em revisão: o humano aprova", () => {

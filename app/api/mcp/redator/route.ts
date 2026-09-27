@@ -222,7 +222,7 @@ export function createWriterServer(principal: WriterMcpPrincipal) {
     try {
       resolved = { ...await resolveTarget(target), requestId };
       for (const required of Array.isArray(scope) ? scope : [scope as WriterMcpScope]) {
-        if (!resolved.access.scopes.includes(required)) throw new ToolFailure("scope_denied", { scope: required, consentUrl: principal.consentUrl, message: `Esta conexão não tem a permissão ${required}. O usuário pode reconsentir na Conta → Conexões de IA.` });
+        if (!resolved.access.scopes.includes(required)) throw new ToolFailure("scope_denied", { scope: required, consentUrl: principal.consentUrl ?? principal.reconsentUrl ?? null, message: `Esta conexão não tem a permissão ${required}. Peça ao usuário para abrir o link e marcar essa permissão (Conta → Conexões de IA).` });
       }
       // Vínculo Agência→Marca ainda vale? Quem consentiu ainda pode agir? Conferido a cada chamada.
       for (const permission of permissions) {

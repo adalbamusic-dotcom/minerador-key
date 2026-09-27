@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Bot, Loader2 } from "lucide-react";
 import { internalButtonDanger, internalButtonPrimary, internalField, internalNoticeError, internalNoticeSuccess, internalSurfaceSubtle } from "@/components/editorial/internal-page-visual";
-import { WRITER_MCP_SCOPE_LABELS, type ConsentBrandOption, type WriterMcpClientSummary, type WriterMcpScope } from "@/lib/redator/mcp-consent-domain";
+import { WRITER_MCP_DEFAULT_SCOPES, WRITER_MCP_SCOPE_LABELS, type ConsentBrandOption, type WriterMcpClientSummary, type WriterMcpScope } from "@/lib/redator/mcp-consent-domain";
 
 export type AiConnectionsInitialState = {
   enabled: boolean;
@@ -36,7 +36,12 @@ export function AiConnectionsPanel({ initial }: { initial: AiConnectionsInitialS
   const [clientId, setClientId] = useState(() => searchParams.get("mcp_client") || "");
   const [clientName, setClientName] = useState("");
   const [brandIds, setBrandIds] = useState<string[]>([]);
-  const [scopes, setScopes] = useState<WriterMcpScope[]>(() => [...initial.scopes]);
+  /*
+   * `initial.scopes` é a lista OFERECIDA (os 8+). O que vem MARCADO é o padrão,
+   * sem "Gastar com provider" nem "Decidir quando eu pedir no chat": marcar
+   * tudo fazia um clique rápido autorizar gasto (auditoria 2026-09-26, J3).
+   */
+  const [scopes, setScopes] = useState<WriterMcpScope[]>(() => initial.scopes.filter((scope) => WRITER_MCP_DEFAULT_SCOPES.includes(scope)));
 
   const reload = async () => {
     const response = await fetch("/api/oauth/grants", { cache: "no-store" });

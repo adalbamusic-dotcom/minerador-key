@@ -849,14 +849,18 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("set_keyword_vinculo", {
     title: "Decidir Vínculo das keywords",
-    description: "Altera o tipo/potencial de página ou o posto da principal, somente após o aceite específico no chat. Use mode=preview e depois mode=apply com o mesmo decisionHash. Usa planVinculoBatchChoices e o readback do Minerador; publicação, slug, canonical e marca permanecem protegidos.",
+    description: "Altera o tipo/potencial de página (inclui 'silo', a cabeça do silo), somente após o aceite específico no chat. Use mode=preview e depois mode=apply com o mesmo decisionHash. Usa planVinculoBatchChoices e o readback do Minerador. O posto (travado/revisável) da principal publicada NÃO é alterável pelo MCP: é decisão na tela do Minerador. Publicação, slug, canonical e marca permanecem protegidos.",
     inputSchema: z.object({
       brandId: brandIdInput,
       mode: z.enum(["preview", "apply"]),
       keywordIds: z.array(z.string().uuid()).min(1).max(100),
+      /*
+       * Só o tipo de página. O posto (travado/revisável) protege a principal de
+       * conteúdo PUBLICADO: o adendo de 2026-09-26 §3 e o AGENTS.md §11 o deixam
+       * fora do alcance do MCP, mesmo com aceite. Estava aceito aqui; saiu.
+       */
       action: z.discriminatedUnion("kind", [
         z.object({ kind: z.literal("page_type"), pageType: z.enum(KEYWORD_PAGE_TYPES), stance: z.enum(KEYWORD_PAGE_TYPE_STANCES) }),
-        z.object({ kind: z.literal("post"), policy: z.enum(["locked", "reviewable"]) }),
       ]),
       decisionHash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
       userConfirmation: confirmationInput.optional(),

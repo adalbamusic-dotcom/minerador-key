@@ -11,6 +11,7 @@ import {
   type SubjectDiscoverySource,
 } from "../../../lib/minerador/subject-discovery-plan.ts";
 import { resolveKeywordSubject } from "../../../lib/minerador/keyword-subject.ts";
+import { resolveKeywordVinculo } from "../../../lib/minerador/keyword-vinculo.ts";
 
 /**
  * PESQUISA POR ASSUNTO — regras puras da tela (SDD 2026-09-24, F1b.1, F1b.5,
@@ -284,6 +285,45 @@ export function parseSubjectSearchLink(search: string): { subjectMode: boolean; 
   const subjectMode = params.get("modo") === "assunto";
   const id = params.get("assunto");
   return { subjectMode, subjectKeywordId: subjectMode && isSubjectSearchUuid(id) ? id : null };
+}
+
+/* ------------------------- "Buscar reforço" do Arquiteto ------------------------- */
+
+/**
+ * D2.2 — o Arquiteto abre esta página com `?modo=assunto&reforco=<uuid>` quando
+ * nenhuma keyword do lote trata do mesmo assunto que um artigo PUBLICADO. Como
+ * em "Buscar sustentação", só o id viaja na URL: a frase (a principal
+ * publicada) e a página de destino (a URL do artigo) são lidas da marca.
+ * Não mexe em `parseSubjectSearchLink`: o link de Assunto continua igual.
+ */
+export function parseReinforcementSearchLink(search: string): { reinforcementKeywordId: string | null } {
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(search);
+  } catch {
+    return { reinforcementKeywordId: null };
+  }
+  const id = params.get("reforco");
+  return { reinforcementKeywordId: params.get("modo") === "assunto" && isSubjectSearchUuid(id) ? id : null };
+}
+
+/** A nota que acompanha a busca de reforço de um publicado (editável antes de pesquisar). */
+export const REINFORCEMENT_SEARCH_NOTE = "Reforço do artigo publicado: keywords com volume que tratem do mesmo assunto no Google (páginas em comum no top 10). URL e slug do artigo não mudam.";
+
+/**
+ * Os campos da Pesquisa por Assunto a partir da linha publicada, lida com as
+ * colunas estreitas (`id,keyword,status,site_origin,primary_keyword_policy`).
+ * Sem publicação declarada no Vínculo, devolve `null`: o link não inventa URL.
+ */
+export function reinforcementSearchFields(row: { id?: unknown; keyword?: unknown; status?: unknown; site_origin?: unknown; primary_keyword_policy?: unknown } | null | undefined): { keywordId: string; phrase: string; destinationUrl: string; note: string } | null {
+  if (!row || !isSubjectSearchUuid(row.id) || typeof row.keyword !== "string" || !row.keyword.trim()) return null;
+  const semantic: Record<string, unknown> = {};
+  if (row.site_origin !== undefined && row.site_origin !== null) semantic.site_origin = row.site_origin;
+  if (typeof row.primary_keyword_policy === "string") semantic.primary_keyword_policy = row.primary_keyword_policy;
+  const vinculo = resolveKeywordVinculo({ status: typeof row.status === "string" ? row.status : null, semantic });
+  const destino = vinculo.canonicalUrl || vinculo.url;
+  if (!destino) return null;
+  return { keywordId: row.id, phrase: row.keyword.replace(/\s+/g, " ").trim(), destinationUrl: destino, note: REINFORCEMENT_SEARCH_NOTE };
 }
 
 /* ----------------------------- Assuntos declarados ----------------------------- */

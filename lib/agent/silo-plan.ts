@@ -2,6 +2,7 @@ import { z } from "zod";
 import { suggestArticleSlug } from "../arquiteto/article-formation.ts";
 import { reviewSlugQuality, SLUG_REVIEW_LABELS } from "../arquiteto/article-silo-view.ts";
 import { normalizeManualSiloPageSlug } from "../arquiteto/manual-silo.ts";
+import { publishedPathOf } from "../arquiteto/published-site-architecture.ts";
 import { topicCoverage, normalizeTopicText } from "./topic-match.ts";
 
 /**
@@ -66,10 +67,18 @@ export type SiloPlanContext = {
 const semBarras = (value: string) => value.replace(/^\/+|\/+$/g, "").toLowerCase();
 const ultimoSegmento = (path: string) => semBarras(path).split("/").filter(Boolean).at(-1) ?? "";
 
-/** O caminho de uma URL publicada, sem barras nas pontas — é o que colide. */
+/**
+ * O caminho de uma URL publicada, sem barras nas pontas — é o que colide.
+ *
+ * `brand_site_catalog_entries.normalized_url` vem SEM esquema
+ * ("careglow.com.br/protecao-solar/…"): é o contrato canônico. Com
+ * `new URL()` direto, as 41 páginas da Care Glow viravam null e nenhuma
+ * colisão com publicado era detectada (auditoria 2026-09-26, J3/R2). A regra
+ * é a do Arquiteto, `publishedPathOf`; a home vira null.
+ */
 export function pathOfUrl(url: string): string | null {
   try {
-    const caminho = semBarras(decodeURIComponent(new URL(url).pathname));
+    const caminho = semBarras(decodeURIComponent(publishedPathOf(url.trim())));
     return caminho || null;
   } catch {
     return null;

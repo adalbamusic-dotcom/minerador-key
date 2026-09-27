@@ -38,7 +38,7 @@ const FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]), selec
  * Foco do diálogo: entra nele ao abrir, o Tab fica contido, Escape fecha e,
  * ao fechar, o foco volta ao botão que abriu.
  */
-function useSubjectDialogFocus(open: boolean, dialogRef: RefObject<HTMLElement | null>, onClose: () => void, closeEnabled: boolean) {
+export function useSubjectDialogFocus(open: boolean, dialogRef: RefObject<HTMLElement | null>, onClose: () => void, closeEnabled: boolean) {
   const onCloseRef = useRef(onClose);
   const closeEnabledRef = useRef(closeEnabled);
   useEffect(() => {

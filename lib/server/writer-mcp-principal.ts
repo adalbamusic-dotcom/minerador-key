@@ -34,6 +34,12 @@ export type WriterMcpPrincipal = {
   brands: WriterMcpBrandAccess[];
   /** Presente só quando o token OAuth é válido mas não há Marca autorizada. */
   consentUrl: string | null;
+  /**
+   * Link para a pessoa marcar escopos ou Marcas desta conexão, mesmo quando já
+   * existe grant. Sem ele, scope_denied chegava sem caminho para resolver
+   * (auditoria 2026-09-26, J5). Null no bearer de diagnóstico, gerido pela Agência.
+   */
+  reconsentUrl?: string | null;
 };
 
 const RATE_LIMIT_PER_MINUTE = 60;
@@ -98,5 +104,6 @@ export async function resolveWriterMcpPrincipal(
       delegationId: null,
     })),
     consentUrl: grants.length ? null : writerMcpConsentUrl(runtime.publicBaseUrl, identity.oauthClientId),
+    reconsentUrl: writerMcpConsentUrl(runtime.publicBaseUrl, identity.oauthClientId),
   };
 }

@@ -298,9 +298,15 @@ const SUBJECT_WRITE_CALLERS: Record<string, readonly string[]> = {
   // escolhas de uma vez por planVinculoBatchChoices, que chama o
   // planVinculoBatch passo a passo no próprio arquivo; a tela só chama o novo.
   planVinculoBatch: [],
-  planVinculoBatchChoices: ["modules/minerador/minerador-workspace.tsx"],
-  importSubjectsWithCore: ["app/api/minerador/marcas/[brandId]/subjects/import/route.ts"],
+  // 2026-09-26 (SDD da plataforma para agentes §5.1 e adendo da decisão
+  // delegada): o MCP declara Assunto e decide o Vínculo SÓ com o aceite do
+  // usuário no chat. O teste P4b abaixo prova a guarda antes de cada chamada.
+  planVinculoBatchChoices: ["modules/minerador/minerador-workspace.tsx", "lib/server/platform-mcp-tools.ts"],
+  importSubjectsWithCore: ["app/api/minerador/marcas/[brandId]/subjects/import/route.ts", "lib/server/platform-mcp-tools.ts"],
 };
+
+/** Chamador de IA autorizado — isento da regex de "caminho de IA", e só ele. */
+const MCP_ACEITE_CALLER = "lib/server/platform-mcp-tools.ts";
 
 const SUBJECT_WRITE_DEFINED_IN: Record<string, string> = {
   setKeywordSubject: "lib/minerador/keyword-subject.ts",
@@ -327,6 +333,7 @@ test("P4: a gravação do Assunto só tem os chamadores da lista fechada — nen
   const aiProvider = /from ["'][^"']*(openai|anthropic|@ai-sdk|gemini|deepseek|ai-provider)[^"']*["']/i;
   const allowedCallers = new Set(Object.values(SUBJECT_WRITE_CALLERS).flat());
   for (const path of allowedCallers) {
+    if (path === MCP_ACEITE_CALLER) continue;
     assert.doesNotMatch(path, /mcp|\/ai[-/.]|-ai\.|openai|anthropic|gemini|deepseek|llm|radar|redator|arquiteto/i, `${path} parece caminho de IA`);
     const source = files.find(file => file.path === path)?.source ?? "";
     assert.doesNotMatch(source, aiProvider, `${path} importa provider de IA e grava Assunto`);
@@ -336,4 +343,23 @@ test("P4: a gravação do Assunto só tem os chamadores da lista fechada — nen
     if (!file.path.startsWith("app/api/") || !/mcp/i.test(file.path)) continue;
     assert.doesNotMatch(file.source, /keyword_subject|setKeywordSubject|withdrawKeywordSubject|importSubjectsWithCore|planVinculoBatch/, file.path);
   }
+});
+
+test("P4b: o MCP só grava Assunto/Vínculo depois da guarda do aceite humano", () => {
+  const source = stripComments(readFileSync(join(ROOT, MCP_ACEITE_CALLER), "utf8"));
+
+  // declare_subjects: a guarda de aceite vem antes da chamada ao núcleo.
+  const declarar = source.slice(source.indexOf('registerTool("declare_subjects"'), source.indexOf("importSubjectsWithCore(", source.indexOf('registerTool("declare_subjects"')));
+  assert.match(declarar, /mode === "apply" && !userConfirmation[\s\S]*human_confirmation_required/);
+
+  // set_keyword_vinculo: aceite + hash antes; a aplicação só depois de conferir o hash da prévia.
+  const vinculoInicio = source.indexOf('registerTool("set_keyword_vinculo"');
+  const vinculo = source.slice(vinculoInicio, source.indexOf("registerTool(", vinculoInicio + 30));
+  const guarda = vinculo.indexOf("!userConfirmation || !decisionHash");
+  const conferencia = vinculo.indexOf("decisionHash !== currentDecisionHash");
+  const aplicacao = vinculo.indexOf("const planToApply = planVinculoBatchChoices(");
+  assert.ok(guarda > 0 && conferencia > guarda && aplicacao > conferencia, "aceite → hash → aplicar, nesta ordem");
+  assert.match(vinculo, /"platform\.decide"/, "aplicar exige o escopo opt-in");
+  // O posto da principal publicada fica fora (adendo §3; AGENTS.md §11).
+  assert.doesNotMatch(vinculo, /kind: z\.literal\("post"\)/);
 });

@@ -40,8 +40,16 @@ function raiz(token: string): string {
   if (token.length > 4 && token.endsWith("oes")) return `${token.slice(0, -3)}ao`;
   if (token.length > 4 && token.endsWith("aes")) return `${token.slice(0, -3)}ao`;
   if (token.length > 4 && token.endsWith("is")) return `${token.slice(0, -2)}l`;
-  if (token.length > 3 && token.endsWith("s")) return token.slice(0, -1);
-  return token;
+  if (token.length > 4 && token.endsWith("ns")) return `${token.slice(0, -2)}m`;
+  const semS = token.length > 3 && token.endsWith("s") ? token.slice(0, -1) : token;
+  /*
+   * "melhores" → "melhore" → "melhor", e "melhor" fica "melhor". Sem isso a
+   * página publicada "Melhores hidratantes…" não casava com "melhor
+   * hidratante" (auditoria 2026-09-26, R4). Os dois lados passam pela mesma
+   * função, então tirar o "e" depois de r/s/z também no singular ("base" →
+   * "bas") não separa nada que antes casava.
+   */
+  return semS.length > 3 && /[rsz]e$/.test(semS) ? semS.slice(0, -1) : semS;
 }
 
 /**
@@ -87,9 +95,21 @@ export const TOPIC_MATCH_THRESHOLDS = {
   same: 0.99,
 } as const;
 
+/**
+ * A ORDEM DE QUEM APARECE PRIMEIRO no empate: o que já está no ar e o que já é
+ * artigo pesam mais para decidir "não criar outro" do que uma keyword solta.
+ * Antes o empate era alfabético, e keywords escondiam as páginas publicadas
+ * mais relevantes (auditoria J4).
+ */
+const PRIORIDADE: Record<TopicCandidateKind, number> = {
+  published_page: 0, article: 1, silo_page: 2, silo: 3, subject: 4, keyword: 5,
+};
+
 export type TopicLookup = {
   topic: string;
   match: "lexical";
+  /** Quantos candidatos de cada tipo casaram e quantos ficaram fora por teto — dito, não escondido. */
+  totals: Partial<Record<TopicCandidateKind, { matched: number; shown: number }>>;
   /** Mesmo tema: cobre todos os tokens do pedido. */
   same: TopicMatch[];
   /** Relacionado: cobre metade ou mais. */
@@ -107,10 +127,36 @@ export function lookupTopic(topic: string, candidates: readonly TopicCandidate[]
       fit: AMPLOS.has(candidate.kind) ? arredondar(topicCoverage(candidate.text, topic)) : 0,
     }))
     .filter(item => item.score >= TOPIC_MATCH_THRESHOLDS.related || item.fit >= TOPIC_MATCH_THRESHOLDS.related)
-    .sort((a, b) => Math.max(b.score, b.fit) - Math.max(a.score, a.fit) || a.kind.localeCompare(b.kind));
+    .sort((a, b) => Math.max(b.score, b.fit) - Math.max(a.score, a.fit) || PRIORIDADE[a.kind] - PRIORIDADE[b.kind]);
 
-  const same = pontuados.filter(item => item.score >= TOPIC_MATCH_THRESHOLDS.same).slice(0, limit);
-  const related = pontuados.filter(item => item.score < TOPIC_MATCH_THRESHOLDS.same).slice(0, limit);
+  /*
+   * "MESMO TEMA" com uma palavra só exige a volta: o tema "pele" cobre 100% de
+   * "hidratante para pele oleosa", mas não é o mesmo tema (auditoria R12). Com
+   * duas palavras ou mais a cobertura do tema basta, como antes.
+   */
+  const umaPalavra = topicTokens(topic).length < 2;
+  const eMesmo = (item: TopicMatch) => item.score >= TOPIC_MATCH_THRESHOLDS.same
+    && (!umaPalavra || topicCoverage(item.text, topic) >= TOPIC_MATCH_THRESHOLDS.same);
+
+  /* Teto POR TIPO: keyword não empurra página publicada para fora da lista. */
+  const porTipo = (lista: TopicMatch[]) => {
+    const vistos = new Map<TopicCandidateKind, number>();
+    return lista.filter(item => {
+      const n = vistos.get(item.kind) ?? 0;
+      vistos.set(item.kind, n + 1);
+      return n < limit;
+    });
+  };
+  const same = porTipo(pontuados.filter(eMesmo));
+  const related = porTipo(pontuados.filter(item => !eMesmo(item)));
+
+  const totals: TopicLookup["totals"] = {};
+  for (const item of pontuados) {
+    const atual = totals[item.kind] ?? { matched: 0, shown: 0 };
+    atual.matched += 1;
+    totals[item.kind] = atual;
+  }
+  for (const item of [...same, ...related]) totals[item.kind]!.shown += 1;
 
   const temArtigoOuPublicado = same.some(item => item.kind === "article" || item.kind === "published_page");
   const temSilo = [...same, ...related].some(item => item.kind === "silo" || item.kind === "silo_page");
@@ -127,5 +173,5 @@ export function lookupTopic(topic: string, candidates: readonly TopicCandidate[]
             ? "Só há correspondências parciais. Confira com o usuário se alguma é o mesmo tema antes de criar algo novo."
             : "Nada encontrado pelas palavras. Isso não prova que o tema é inédito (a busca não entende sinônimos): confirme com o usuário e, se for novo, proponha um silo.";
 
-  return { topic, match: "lexical", same, related, reading };
+  return { topic, match: "lexical", totals, same, related, reading };
 }

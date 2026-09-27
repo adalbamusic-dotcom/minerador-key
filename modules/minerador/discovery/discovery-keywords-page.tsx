@@ -14,8 +14,9 @@ import { DiscoverySourceTopbarActions } from "./discovery-source-topbar-actions"
 import { DiscoveryTablePlaceholder } from "./discovery-table-placeholder";
 import { SubjectSearchFields } from "./subject-search-fields";
 import { SubjectSearchResults } from "./subject-search-results";
-import { parseSubjectSearchLink } from "./subject-search-model";
+import { parseReinforcementSearchLink, parseSubjectSearchLink } from "./subject-search-model";
 import { useSubjectSearch } from "./use-subject-search";
+import { useReinforcementLink } from "./use-reinforcement-link";
 import { MineradorSectionTabs } from "../minerador-section-tabs";
 import { DISCOVERY_CUSTOMER_FOCUSES, DISCOVERY_FUNNELS, DISCOVERY_INTENTS, DISCOVERY_MODES, type DiscoveryCpcFilter, type DiscoveryCustomerFocus, type DiscoveryFunnel, type DiscoveryIntent, type DiscoveryMode, type DiscoveryRelation, type DiscoverySearchDraft, type DiscoverySearchKind, type DiscoveryVolumeRange } from "./discovery-types";
 
@@ -105,6 +106,8 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
    */
   const [subjectSearchOpen, setSubjectSearchOpen] = useState(false);
   const [linkedSubjectKeywordId, setLinkedSubjectKeywordId] = useState<string | null>(null);
+  // "Buscar reforço" do Arquiteto (D2.2): ?modo=assunto&reforco=<uuid> de um artigo publicado.
+  const [linkedReinforcementKeywordId, setLinkedReinforcementKeywordId] = useState<string | null>(null);
   const searchKind: DiscoverySearchKind = subjectSearchOpen ? "subject" : discoveryMode;
   // "Incluir keywords adultas" mora na linha de filtros da Descoberta, que some
   // neste modo: sem controle visível, a Pesquisa por Assunto nunca as inclui.
@@ -118,13 +121,24 @@ export function DiscoveryKeywordsPage({ brandRef }: { brandRef: string }) {
       if (!link.subjectMode) return;
       setSubjectSearchOpen(true);
       if (link.subjectKeywordId) setLinkedSubjectKeywordId(link.subjectKeywordId);
+      const reforco = parseReinforcementSearchLink(window.location.search);
+      if (reforco.reinforcementKeywordId) setLinkedReinforcementKeywordId(reforco.reinforcementKeywordId);
     };
     void openFromLink();
   }, []);
 
+  // O tema é a principal publicada e a página de destino é a URL do artigo; nada é pesquisado sem o plano de custo.
+  useReinforcementLink({
+    brandId: brandIdFromRef(brandRef),
+    keywordId: linkedReinforcementKeywordId,
+    apply: fields => { subjectSearch.setPhrase(fields.phrase); subjectSearch.setDestinationUrl(fields.destinationUrl); subjectSearch.setNote(fields.note); },
+    onError: message => publishNotice({ severity: "WARNING", title: "Buscar reforço", message, source: "workflow", module: "minerador", area: "Descoberta de keywords" }),
+  });
+
   const changeSearchKind = (kind: DiscoverySearchKind) => {
     const url = new URL(window.location.href);
     url.searchParams.delete("assunto");
+    url.searchParams.delete("reforco");
     if (kind === "subject") {
       setSubjectSearchOpen(true);
       url.searchParams.set("modo", "assunto");

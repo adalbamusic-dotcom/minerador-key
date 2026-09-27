@@ -75,7 +75,19 @@ export type PlatformStateSnapshot = {
     silos: PlatformStateSilo[];
   };
   radar: {
-    items: Array<{ articleId: string; state: string }>;
+    items: Array<{
+      articleId: string;
+      /** Estado da esteira. NÃO diz se a investigação foi finalizada: o fluxo atual não o move. */
+      state: string;
+      /**
+       * Quando a investigação da versão corrente foi finalizada (Amazon, YouTube
+       * ou Google, na precedência de `radarFrozenObservedAtOfAnalysis`), ou null.
+       * É o predicado da tela e do envio ao Redator — não um critério novo.
+       */
+      finalizedAt: string | null;
+      /** Já existe documento no Redator para este artigo. */
+      hasDocument: boolean;
+    }>;
   };
   redator: {
     documents: Array<{ documentId: string; articleId: string | null; title: string; status: string }>;
