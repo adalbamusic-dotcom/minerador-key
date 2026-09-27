@@ -501,8 +501,12 @@ test("(3) a mesa usa a remontagem e a membership pela URL", () => {
   const mesa = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
   const formacao = mesa.slice(mesa.indexOf("const articleFormation = useMemo"));
   const corpo = formacao.slice(0, formacao.indexOf("\n  }, ["));
-  assert.match(corpo, /regroupFreeAroundPublished\(\{/);
-  assert.match(corpo, /groups: \[\.\.\.remontagem\.freeGroups, \.\.\.gruposPublicados\]/);
+  // A precedência (publicados → Assuntos → livres) mora no planejador por Silo.
+  assert.match(corpo, /planSiloArticleFormation\(\{/);
+  assert.match(corpo, /publishedPages,/);
+  const planejador = readFileSync("lib/arquiteto/article-formation-priority.ts", "utf8");
+  assert.match(planejador, /const reserva = reservePriorityArticleGroups\(\{/);
+  assert.match(planejador, /\.\.\.ancoras\.filter\(ancora => ancora\.kind === "published"\)[\s\S]*?\.\.\.ancoras\.filter\(ancora => ancora\.kind === "subject"\)[\s\S]*?\.\.\.gruposNovos,/);
   assert.match(mesa, /publishedSiloHeadByArticle: publishedSiloMembership\.siloHeadByArticle/);
   assert.match(mesa, /assignment\.declaredBy \? \{ declaredBySite: true as const \} : \{\}/);
   assert.match(mesa, /resolvePublishedSiloMembership\(\{/);

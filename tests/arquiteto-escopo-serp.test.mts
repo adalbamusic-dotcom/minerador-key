@@ -110,9 +110,11 @@ test("§1/§2 — processar recorta gates, resumo e plano de coleta pela seleç�
   // O plano de coleta vem do resumo JÁ recortado — é isso que impede a SERP
   // de pedir as 8 keywords do Silo por causa de um candidato marcado.
   assert.match(corpo, /serpGroupsForCandidates\(resumoSerp\.needsCollection\)/);
-  // E os contadores anunciados são do escopo.
-  assert.match(corpo, /readoutDaExecucao\(coletadosAgora, escopo\.candidateRefs\)/);
-  assert.match(corpo, /anunciarBloqueios\(coletadosAgora, escopo\.candidateRefs\)/);
+  // E os contadores anunciados são do escopo — depois do readback (D6): a
+  // execução deixa o resultado e o efeito conta com os gates já atualizados.
+  assert.match(corpo, /setReadoutPendente\(\{\s*refs: escopo\.candidateRefs,/);
+  assert.match(workspace, /readoutDaExecucao\(readoutPendente\.collected, readoutPendente\.refs, execucao\)/);
+  assert.match(workspace, /anunciarBloqueios\(readoutPendente\.collected, readoutPendente\.refs, execucao\)/);
 
   // As leituras do lote inteiro não podem voltar por descuido.
   assert.doesNotMatch(corpo, /articleSerpGateSummary/);

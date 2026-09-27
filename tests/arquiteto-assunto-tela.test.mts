@@ -518,10 +518,14 @@ test("não agrupadas: o predicado do domínio decide, e nenhuma keyword some", (
 test("formação, motor e proposta recebem os conjuntos do Assunto, de uma lista só", () => {
   assert.match(workspace, /const subjectHeldOut = useMemo\(\(\) => heldOutSubjectIds\(subjectStandings\)/);
   assert.match(workspace, /const subjectFormationTrunks = useMemo\(\(\) => trunkAnchoredKeywordIds\(subjectDnaCarriers\)/);
-  assert.match(workspace, /subjectHeldOut\.has\(String\(keyword\.id\)\) \? \{ subjectHeldOut: true \}/);
-  assert.match(workspace, /subjectFormationTrunks\.has\(String\(keyword\.id\)\) \? \{ subjectAnchored: true \}/);
-  assert.match(workspace, /automaticFormationHoldouts\(\{\s*siloRef: territory\.territoryRef,\s*keywords: universoKeywords,\s*subjectByCandidateRef: workingSubjectAnchors,\s*\}\)/);
-  assert.match(workspace, /!keyword\.isPublished && !foraDaAutomatica\.has\(keyword\.keywordId\)/);
+  // D2 — a publicada prevalece: declarada Assunto sem Volume, não é retida.
+  assert.match(workspace, /!publicada && subjectHeldOut\.has\(String\(keyword\.id\)\) \? \{ subjectHeldOut: true \}/);
+  assert.match(workspace, /!publicada && subjectFormationTrunks\.has\(String\(keyword\.id\)\) \? \{ subjectAnchored: true \}/);
+  // A retenção e a precedência moraram para o planejador por Silo.
+  assert.match(workspace, /planSiloArticleFormation\(\{[\s\S]*?keywords: universoKeywords,[\s\S]*?subjectByCandidateRef: workingSubjectAnchors/);
+  const planejador = readFileSync("lib/arquiteto/article-formation-priority.ts", "utf8");
+  assert.match(planejador, /automaticFormationHoldouts\(\{ siloRef: input\.siloRef, keywords: input\.keywords, subjectByCandidateRef: input\.subjectByCandidateRef \}\)/);
+  assert.match(planejador, /!keyword\.isPublished && !holdouts\.has\(keyword\.keywordId\)/);
   assert.match(workspace, /\.\.\.subjectDnaCarriers,\s*\.\.\.workingSubjectCarriers\(\{ workingAnchors: workingSubjectAnchors, materializedRefs: materializationPartition\.current, liveCandidates: liveSubjectCandidates \}\)/);
   assert.match(workspace, /anchored: trunkAnchoredKeywordIds\(subjectAnchorCarriers\)/);
   assert.doesNotMatch(workspace, /subjectMesaAnchors|subjectFormationAnchors/);

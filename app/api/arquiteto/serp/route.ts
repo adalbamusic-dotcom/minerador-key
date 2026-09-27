@@ -80,6 +80,8 @@ const RequestSchema = z.object({
   payMissingExtraLenses: z.boolean().default(true),
   /** Recoleta das lentes antigas pelo portão de datas — só por pedido explícito. */
   recollectStaleLenses: z.boolean().default(false),
+  /** Reinterpreta somente a SERP já guardada; nenhuma falta pode chamar o provider. */
+  cacheOnly: z.boolean().default(false),
 });
 
 type SerpQueryDiagnostic = DataForSeoSerpProviderDiagnostic & {
@@ -129,7 +131,10 @@ type SerpOperationDiagnostic = {
   cacheHits: number;
   /** Chamadas pagas de fato nesta execução, em todas as lentes. */
   paidQueries: number;
-  /** A leitura do cache falhou e a rota pagou como antes do cache. */
+  /**
+   * A leitura do cache falhou (D6): o plano tratou tudo como falta, com o
+   * custo máximo, e só paga o que a pessoa autorizar ao ver esse aviso.
+   */
   cacheReadFailed: boolean;
   /** Das pagas, as das lentes extras. */
   extraLensPaidQueries: number;
@@ -393,12 +398,11 @@ export async function POST(request: Request) {
      * só decide quem falta. O corpo trafega depois, e só para a keyword que a
      * rota de fato normaliza — a secundária de um KGR leve pode nem ser lida.
      *
-     * As lentes extras entram na mesma leitura `meta`, só para os grupos com
-     * mais de uma busca: num artigo de uma busca só não há par a comparar, e
-     * pagar outra lente não mudaria o parecer.
+     * As lentes extras entram na mesma leitura `meta` para toda keyword,
+     * inclusive artigo unitário. A regra de quatro lentes também permite
+     * verificar divergência de intenção/formato da busca entre aparelhos.
      */
     const extraSlotsWanted = groups.flatMap(group => {
-      if (group.keywords.length < 2) return [];
       const articleId = group.publishedAnchorId || group.id;
       return group.keywords.flatMap(keyword => requested.extras.map(extraLens => ({ group, articleId, keyword, extraLens })));
     });
@@ -410,18 +414,37 @@ export async function POST(request: Request) {
         ? await lookupSerpCache(pipelineContext, extraSlotsWanted.map(item => cacheRequestFor(item.keyword, undefined, item.extraLens)), { mode: "meta", now })
         : [];
     } catch (error) {
-      // Cache fora nunca derruba a operação: tudo vira falta e é pago como antes.
+      /*
+       * D6 — CACHE ILEGÍVEL NÃO PROÍBE A COLETA.
+       *
+       * Sem ler o cache não dá para saber o que já foi pago. A resposta não é
+       * suspender: o plano trata TUDO como falta — o custo máximo — e marca
+       * `cacheUnavailable`, para a tela avisar e oferecer coletar com esse
+       * custo ou tentar ler de novo. Nada é pago sem a pessoa autorizar, e o
+       * servidor continua recusando pagar além do autorizado.
+       *
+       * Só a análise SOMENTE COM CACHE não tem o que fazer sem o cache: ela
+       * devolve 503, sem custo, dizendo as duas saídas.
+       */
       diagnostic.cacheReadFailed = true;
-      console.warn("[arquiteto/serp] leitura do cache de SERP falhou; seguindo sem cache", {
+      console.warn("[arquiteto/serp] leitura do cache de SERP falhou; plano com custo máximo", {
         correlationId: diagnostic.correlationId, error: error instanceof Error ? error.message.slice(0, 300) : "falha desconhecida",
       });
+      if (parsed.data.cacheOnly) {
+        return NextResponse.json({
+          success: false,
+          code: "SERP_CACHE_UNAVAILABLE",
+          error: "Não foi possível ler o cache da SERP, então não dá para saber o que já está nele. Nada foi pago. Tente ler o cache de novo ou autorize a coleta com o custo máximo.",
+          diagnostic,
+        }, { status: 503 });
+      }
       metaLookups = potentialKeywords.map(keyword => {
         const cacheRequest = cacheRequestFor(keyword);
-        return { request: cacheRequest, subjectId: serpCacheSubjectId(cacheRequest.query), hit: null, missReason: "cache indisponível" };
+        return { request: cacheRequest, subjectId: serpCacheSubjectId(cacheRequest.query), hit: null, missReason: "cache ilegível" };
       });
       extraMetaLookups = extraSlotsWanted.map(item => {
         const cacheRequest = cacheRequestFor(item.keyword, undefined, item.extraLens);
-        return { request: cacheRequest, subjectId: serpCacheSubjectId(cacheRequest.query), hit: null, missReason: "cache indisponível" };
+        return { request: cacheRequest, subjectId: serpCacheSubjectId(cacheRequest.query), hit: null, missReason: "cache ilegível" };
       });
     }
 
@@ -475,13 +498,54 @@ export async function POST(request: Request) {
       payMissingExtraLenses: parsed.data.payMissingExtraLenses,
       recollectStaleLenses: parsed.data.recollectStaleLenses,
     };
-    const plan = buildSerpPaidPlan(planInput);
+    const plan = {
+      ...buildSerpPaidPlan(planInput),
+      // Aditivo: a tela avisa que o total é o máximo, porque o cache não foi lido.
+      ...(diagnostic.cacheReadFailed ? { cacheUnavailable: true } : {}),
+    };
 
     // O plano não paga, não resolve credencial e não lê corpo.
     if (parsed.data.mode === "plan") {
-      return NextResponse.json({ success: true, data: { mode: "plan", plan, lenses: lensLabels, requestedKeywordCount: totalKeywords }, diagnostic });
+      let position = 0;
+      const missingDetails = groups.flatMap(group => {
+        const missing = group.keywords.flatMap(keyword => {
+          const lookup = metaLookups[position++];
+          return lookup?.hit ? [] : [{
+            article: group.keywords.find(item => item.id === group.principalSuggestion.keywordId)?.keyword || group.keywords[0]?.keyword || group.id,
+            keyword: keyword.keyword,
+            lens: serpCacheLensLabel(lens),
+            reason: lookup?.missReason || "entrada não encontrada",
+            primary: true,
+          }];
+        });
+        return missing;
+      });
+      siloCandidateKeywords.forEach(keyword => {
+        const lookup = metaLookups[position++];
+        if (!lookup?.hit) missingDetails.push({ article: "Primária de Silo", keyword: keyword.keyword, lens: serpCacheLensLabel(lens), reason: lookup?.missReason || "entrada não encontrada", primary: true });
+      });
+      const extraMissingSeen = new Set<string>();
+      extraSlotsWanted.forEach((item, index) => {
+        const lookup = extraMetaLookups[index];
+        // Leitura que não devolveu a posição não derruba o plano: a chave sai da própria consulta.
+        const subjectId = lookup?.subjectId ?? serpCacheSubjectId(cacheRequestFor(item.keyword, undefined, item.extraLens).query);
+        if (!lookup?.hit && !extraMissingSeen.has(subjectId)) {
+          extraMissingSeen.add(subjectId);
+          missingDetails.push({
+          article: item.group.keywords.find(keyword => keyword.id === item.group.principalSuggestion.keywordId)?.keyword || item.group.id,
+          keyword: item.keyword.keyword,
+          lens: serpCacheLensLabel(item.extraLens),
+          reason: lookup?.missReason || "entrada não encontrada",
+          primary: false,
+          });
+        }
+      });
+      return NextResponse.json({ success: true, data: { mode: "plan", plan: { ...plan, missingDetails }, lenses: lensLabels, requestedKeywordCount: totalKeywords }, diagnostic });
     }
-    const authorization = authorizeSerpPaidPlan(plan, parsed.data.authorizedPaidQueries);
+    if (parsed.data.cacheOnly && (parsed.data.authorizedPaidQueries !== 0 || parsed.data.payMissingExtraLenses || parsed.data.recollectStaleLenses)) {
+      return NextResponse.json({ success: false, error: "A validação somente com cache exige orçamento zero e nenhuma recoleta." }, { status: 400 });
+    }
+    const authorization = parsed.data.cacheOnly ? { ok: true } as const : authorizeSerpPaidPlan(plan, parsed.data.authorizedPaidQueries);
     if (!authorization.ok) {
       // Nada foi pago: o plano de agora vai junto, para a pessoa decidir de novo.
       return NextResponse.json({ success: false, error: authorization.message, code: authorization.code, data: { plan, lenses: lensLabels }, diagnostic }, { status: 409 });
@@ -500,7 +564,7 @@ export async function POST(request: Request) {
     const cachedMeta = new Map<string, SerpCacheMeta>();
     for (const lookup of metaLookups) if (lookup.hit && !recollectSubjects.has(lookup.subjectId)) cachedMeta.set(lookup.subjectId, lookup.hit.meta);
     // Teto, não previsão: a secundária de um KGR leve pode não ser consultada.
-    const potentialMisses = plan.paidQueries;
+    const potentialMisses = parsed.data.cacheOnly ? 0 : plan.paidQueries;
 
     // Cai para `false` se a config resolvida divergir dos códigos da chave.
     let cacheCodesMatch = true;
@@ -586,7 +650,7 @@ export async function POST(request: Request) {
       }
       // Acerto meta sem corpo vira chamada paga: a quota é reavaliada para o lote antes de pagar.
       const degradedHits = cacheRequests.length - servedRequests;
-      if (degradedHits > 0) {
+      if (degradedHits > 0 && !parsed.data.cacheOnly) {
         quota.expectMisses(degradedHits);
         await quota.ensureCovered();
       }
@@ -608,6 +672,10 @@ export async function POST(request: Request) {
      */
     const payKeywordSerp = async (input: { articleId: string; keywordId: string; serpInput: SerpSearchInput; queryDiagnostic: SerpQueryDiagnostic }): Promise<SerpResearchSnapshot> => {
       const { queryDiagnostic } = input;
+      if (parsed.data.cacheOnly) {
+        queryDiagnostic.internalCode = "SERP_PAID_NOT_AUTHORIZED";
+        throw new SerpPaidBudgetExhaustedError(`A lente ${serpCacheLensLabel(lens)} de "${input.serpInput.keyword}" não está no cache e a coleta paga não foi autorizada: este artigo fica pendente, sem custo.`);
+      }
       // Fora do plano autorizado, nada é pago: a unidade falha dizendo por quê.
       if (!budget.take(payKeyOf(input.articleId, input.keywordId, lens))) {
         queryDiagnostic.internalCode = "SERP_PAID_NOT_AUTHORIZED";
@@ -843,6 +911,7 @@ export async function POST(request: Request) {
           }
           snapshot = paga.snapshot;
           lensDiagnostic.source = "provider";
+          articlesWithPaidSerp.add(input.articleId);
         }
         porLente.get(label)?.push({ keywordId, keyword: item.keyword.keyword, role: "secundaria", results: serpResultFactsOf(snapshot) });
         result.collectedAtByLens.set(label, [...(result.collectedAtByLens.get(label) || []), snapshot.collectedAt]);
@@ -853,6 +922,14 @@ export async function POST(request: Request) {
     };
 
     const extraLensesByArticle = new Map<string, ArticleExtraLenses>();
+    /**
+     * D6 — OS CONTADORES FALAM A VERDADE.
+     *
+     * Artigo cujo parecer usou ao menos uma SERP paga NESTA execução é
+     * "coletado"; o que saiu só do cache é "reaproveitado". O cliente só conta
+     * um ou outro depois do readback do parecer.
+     */
+    const articlesWithPaidSerp = new Set<string>();
 
     // A principal de todo grupo é sempre normalizada: uma leitura só para todas.
     const principalBodies = await readCachedBodies(groups.flatMap(group => group.keywords.filter(keyword => keyword.id === group.principalSuggestion.keywordId)));
@@ -878,7 +955,9 @@ export async function POST(request: Request) {
           version: 1, previousSnapshotId: null,
         };
         try {
-          return await obtainKeywordSerp({ articleId, keywordId: keyword.id, serpInput, queryDiagnostic, cachedBodies });
+          const snapshot = await obtainKeywordSerp({ articleId, keywordId: keyword.id, serpInput, queryDiagnostic, cachedBodies });
+          if (queryDiagnostic.source === "provider") articlesWithPaidSerp.add(articleId);
+          return snapshot;
         } catch (error) {
           diagnostic.normalizationSucceeded = false;
           diagnostic.internalCode = queryDiagnostic.internalCode || "SERP_NORMALIZATION_FAILED";
@@ -901,11 +980,9 @@ export async function POST(request: Request) {
         const secondarySnapshots = await Promise.all(group.keywords.map((keyword, index) => index === principalIndex ? null : collect(keyword, index, secondaryBodies)));
         snapshots.push(...secondarySnapshots.filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot)));
       }
-      /*
-       * AS LENTES EXTRAS votam só onde há par: com uma busca observada, outra
-       * lente não mudaria o parecer, e nada é lido nem pago por ela.
-       */
-      if (requested.extras.length && snapshots.length >= 2) {
+      // Toda busca observada consulta as quatro lentes do cache. Pares só
+      // existem em grupos; a keyword unitária ainda recebe leitura por lente.
+      if (requested.extras.length && snapshots.length >= 1) {
         const observed = snapshots.map(snapshot => group.keywords.find(keyword => keyword.id === snapshot.keywordId)).filter((keyword): keyword is NonNullable<typeof keyword> => Boolean(keyword));
         extraLensesByArticle.set(articleId, await readExtraLenses({ articleId, articleDnaVersionId, observed }));
       }
@@ -1031,9 +1108,7 @@ export async function POST(request: Request) {
           principalKeywordId: group.principalSuggestion.keywordId,
           notObserved,
         });
-        const missing: SerpLensesMarker["missing"] = extras
-          ? extras.missing
-          : requested.extras.map(extraLens => ({ lens: serpCacheLensLabel(extraLens), keywordId: null, reason: "sem par" as const, detail: "Só uma busca observada: outra lente não mudaria o parecer, e nada foi lido nem pago." }));
+        const missing: SerpLensesMarker["missing"] = extras?.missing || [];
         const collectedAtByLens = new Map<string, string[]>([[primaryLabel, assessment.snapshots.map(snapshot => snapshot.collectedAt)], ...(extras?.collectedAtByLens || new Map<string, string[]>())]);
         // O portão de datas é por keyword: a lente principal e as extras da MESMA busca.
         const collectedAtByKeyword = new Map<string, string[]>();
@@ -1089,7 +1164,11 @@ export async function POST(request: Request) {
     diagnostic.assessmentSucceeded = assessments.length > 0;
     diagnostic.stage = failures.length && !assessments.length ? "assessment" : "completed";
     if (failures.length) diagnostic.internalCode = failures[0].code as SerpOperationDiagnostic["internalCode"];
-    return NextResponse.json({ success: true, data: { assessments, persisted, failures, summary: { requestedArticles: groups.length, completedArticles: assessments.length, failedArticles: failures.length }, siloCandidateEvidence, queryCount: assessments.reduce((total, assessment) => total + assessment.queryCount, 0), candidateQueryCount: siloCandidateEvidence.filter(item => item.snapshot).length, requestedKeywordCount: totalKeywords, mode: "keyword_individual", lenses: lensLabels, plan, paidQueries: budget.used, lensSummaries }, diagnostic });
+    const persistedRefs = new Set(persisted.map(item => item.candidateRef));
+    const articleSources = assessments
+      .filter(assessment => persistedRefs.has(assessment.articleId))
+      .map(assessment => ({ articleId: assessment.articleId, source: articlesWithPaidSerp.has(assessment.articleId) ? "collected" as const : "reused" as const }));
+    return NextResponse.json({ success: true, data: { assessments, persisted, articleSources, failures, summary: { requestedArticles: groups.length, completedArticles: assessments.length, failedArticles: failures.length }, siloCandidateEvidence, queryCount: assessments.reduce((total, assessment) => total + assessment.queryCount, 0), candidateQueryCount: siloCandidateEvidence.filter(item => item.snapshot).length, requestedKeywordCount: totalKeywords, mode: "keyword_individual", lenses: lensLabels, plan, paidQueries: budget.used, lensSummaries }, diagnostic });
   } catch (error) {
     if (error instanceof DataForSeoCanonicalError || error instanceof DataForSeoSerpError) {
       if (!diagnostic.internalCode) diagnostic.internalCode = error instanceof DataForSeoCanonicalError ? "SERP_CONNECTION_RESOLUTION_FAILED" : "SERP_REQUEST_FAILED";

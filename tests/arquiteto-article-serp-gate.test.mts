@@ -10,6 +10,7 @@ import {
   serpWasExecutedFor,
   articleSerpBaseHash,
   articleSerpBaseOf,
+  articleSerpLensesComplete,
   resolveArticleSerpGate,
   serpVerdictOfAssessment,
   summarizeArticleSerpGate,
@@ -112,6 +113,19 @@ test("compatível e vigente libera a conclusão", () => {
   const resultado = gate({ formationBaseHash: "serpbase:aaa", verdict: "COMPATIBLE" });
   assert.equal(resultado.state, "current_supported");
   assert.equal(resultado.blocksConclusion, false);
+});
+
+test("parecer parcial salvo continua visível, mas quatro lentes incompletas bloqueiam a conclusão", () => {
+  assert.equal(articleSerpLensesComplete(null), undefined, "parecer legado não ganha evidência inventada");
+  assert.equal(articleSerpLensesComplete({ requested: ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"], observed: ["desktop-windows"], missing: [{ lens: "mobile-ios" }] }), false);
+  assert.equal(articleSerpLensesComplete({ requested: ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"], observed: ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"], missing: [] }), true);
+  const incompleto = gate({ formationBaseHash: "serpbase:aaa", verdict: "COMPATIBLE", lensesComplete: false, humanDecisionBaseHash: "serpbase:aaa" });
+  assert.equal(incompleto.state, "incomplete");
+  assert.equal(incompleto.blocksConclusion, true);
+  assert.equal(serpNeedsCollection(incompleto.state), true);
+  assert.equal(serpWasExecutedFor(incompleto.state), false);
+  const completo = gate({ formationBaseHash: "serpbase:aaa", verdict: "COMPATIBLE", lensesComplete: true });
+  assert.equal(completo.state, "current_supported");
 });
 
 test("divergência bloqueia até um humano decidir", () => {

@@ -182,3 +182,28 @@ test("a Lógica é determinística e não decide nem grava", async () => {
   // INV-T6: nenhuma regra de contagem de keywords cria Silo.
   assert.doesNotMatch(logicSource, /keywords\.length\s*>=?\s*[0-9]+\s*\)\s*.*new_silo_candidate/);
 });
+
+test("D1/D2 · a página publicada do território atrai a livre que a reforça, e a fronteira feita dos membros não conta", () => {
+  const publicadaB = keyword("pub-b", "como atrair pacientes para o consultorio", "marketing odontologico", { isPublished: true });
+  const membroA = keyword("membro-a", "como atrair pacientes para o consultorio odontologico", "marketing odontologico");
+  const alvo = keyword("kw-1", "como atrair pacientes para o consultorio odontologico", "marketing odontologico");
+  // Os dois territórios têm o mesmo tema; sem a publicada, seria ambíguo.
+  const territorioA = territory(REF_A, { centralEntity: "marketing odontologico", boundary: { includes: [String(membroA.keyword)], excludes: [] } });
+  const territorioB = territory(REF_B, { centralEntity: "marketing odontologico", boundary: { includes: [], excludes: [] } });
+  const decidido = (keywordId: string, territoryRef: string) => ({
+    keywordId, brandId: BRAND, territoryRef, state: "existing_silo_match", reason: "Decisão humana.", source: "human", decidedAt: "2026-09-02T12:00:00.000Z",
+  } as never);
+  const landscape = buildTerritorialLandscape({
+    brandId: BRAND,
+    keywords: [publicadaB, membroA, alvo],
+    territories: [territorioA, territorioB],
+    assignments: [decidido("pub-b", REF_B), decidido("membro-a", REF_A)],
+  });
+  const logic = deriveTerritorialLogic({ landscape, keywords: [publicadaB, membroA, alvo] });
+  const hipotese = logic.hypotheses.find(item => item.keywordId === "kw-1")!;
+  assert.equal(hipotese.state, "existing_silo_match", JSON.stringify(hipotese.targets));
+  assert.equal(hipotese.targets[0].territoryRef, REF_B);
+  assert.match(hipotese.targets[0].reason, /Reforça o artigo publicado "como atrair pacientes para o consultorio"/);
+  // A frase do membro gravada como fronteira de A não vira "termo dentro da fronteira".
+  assert.ok(!hipotese.targets.some(target => /termo dentro da fronteira/.test(target.reason)));
+});

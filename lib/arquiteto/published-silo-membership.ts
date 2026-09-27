@@ -271,10 +271,14 @@ export function regroupFreeAroundPublished(input: {
   /** Grupos das livres, como o formador os montou. */
   freeGroups: readonly FormationGroup[];
   siloTokens?: ReadonlySet<string>;
+  /** Na reserva anterior aos Assuntos, reforços coerentes podem entrar abaixo do piso de canibalização. */
+  minimumAffinity?: number;
+  /** Vagas já ocupadas em cada publicada (sustentação do Assunto publicado): o teto de seis continua valendo. */
+  occupiedSlots?: ReadonlyMap<string, number>;
 }): PublishedRegrouping {
   const publicadas = input.keywords.filter(keyword => keyword.isPublished);
   const porId = new Map(input.keywords.map(keyword => [keyword.keywordId, keyword]));
-  const vagas = new Map(publicadas.map(keyword => [keyword.keywordId, MAX_ARTICLE_KEYWORDS - 1]));
+  const vagas = new Map(publicadas.map(keyword => [keyword.keywordId, Math.max(0, MAX_ARTICLE_KEYWORDS - 1 - (input.occupiedSlots?.get(keyword.keywordId) ?? 0))]));
   const attached: PublishedRegrouping["attached"] = new Map();
 
   if (publicadas.length) {
@@ -286,7 +290,7 @@ export function regroupFreeAroundPublished(input: {
         if (!livre || livre.isPublished || livre.humanFormationRef || livre.subjectHeldOut || livre.subjectAnchored) continue;
         for (const publicada of publicadas) {
           const { affinity, reasons } = sameArticleAffinity(publicada, livre, input.siloTokens);
-          if (affinity >= CANNIBAL_FLOOR) pares.push({ livre: keywordId, publicada: publicada.keywordId, affinity, reasons });
+          if (affinity >= (input.minimumAffinity ?? CANNIBAL_FLOOR)) pares.push({ livre: keywordId, publicada: publicada.keywordId, affinity, reasons });
         }
       }
     }

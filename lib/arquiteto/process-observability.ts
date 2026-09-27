@@ -57,8 +57,15 @@ export function serpSourceOf(input: {
   candidateRef: string;
   collectedInThisRun: ReadonlySet<string>;
   hasEvidence: boolean;
+  /**
+   * Parecer produzido NESTA execução só com SERP que já estava no cache
+   * (D6). É evidência nova do artigo, mas nenhuma coleta aconteceu: contar
+   * como "coletada" faria o readout anunciar gasto que não houve.
+   */
+  reusedInThisRun?: ReadonlySet<string>;
 }): SerpSource | null {
   if (input.collectedInThisRun.has(input.candidateRef)) return "COLLECTED";
+  if (input.reusedInThisRun?.has(input.candidateRef)) return "REUSED";
   return input.hasEvidence ? "REUSED" : null;
 }
 
@@ -79,6 +86,12 @@ export type ArticleRunReadout = {
   ARTICLES_PROCESSED: number;
   SERP_COLLECTED: number;
   SERP_REUSED: number;
+  /**
+   * Artigos que terminam a execução SEM parecer vigente (D6): a coleta
+   * dependia de pagamento recusado, de lente que falta ou de cache ilegível.
+   * Cada um sai com o motivo em `decisionBasis`.
+   */
+  SERP_PENDING: number;
   FORMATIONS_CHANGED: number;
   FORMATIONS_UNCHANGED: number;
   READY_TO_CONCLUDE: number;
@@ -90,6 +103,7 @@ export function buildArticleRunReadout(rows: readonly ArticleRunRow[]): ArticleR
     ARTICLES_PROCESSED: rows.length,
     SERP_COLLECTED: rows.filter(row => row.serpSource === "COLLECTED").length,
     SERP_REUSED: rows.filter(row => row.serpSource === "REUSED").length,
+    SERP_PENDING: rows.filter(row => row.serpSource === null).length,
     FORMATIONS_CHANGED: rows.filter(row => row.formationChanged).length,
     FORMATIONS_UNCHANGED: rows.filter(row => !row.formationChanged).length,
     READY_TO_CONCLUDE: rows.filter(row => row.readyToConclude).length,
@@ -108,12 +122,23 @@ export function formatArticleRunReadout(readout: ArticleRunReadout): string {
     `ARTICLES_PROCESSED = ${readout.ARTICLES_PROCESSED}`,
     `SERP_COLLECTED = ${readout.SERP_COLLECTED}`,
     `SERP_REUSED = ${readout.SERP_REUSED}`,
+    `SERP_PENDING = ${readout.SERP_PENDING}`,
     `FORMATIONS_CHANGED = ${readout.FORMATIONS_CHANGED}`,
     `FORMATIONS_UNCHANGED = ${readout.FORMATIONS_UNCHANGED}`,
     `READY_TO_CONCLUDE = ${readout.READY_TO_CONCLUDE}`,
     `BLOCKED = ${readout.BLOCKED}`,
-  ].join(" · ");
+  ].join(" · ") + ` ${ARTICLE_RUN_READOUT_LEGEND}`;
 }
+
+/**
+ * D6 — o que cada contador conta, dito na própria tela.
+ *
+ * `SERP_COLLECTED` e `SERP_REUSED` contam PARECERES DE ARTIGO confirmados no
+ * acervo, não entradas do cache por keyword: com 149 keywords nas quatro
+ * lentes, um lote sem parecer gravado mostra 0 e 0, e isso é verdade. Sem a
+ * legenda, "SERP_REUSED = 0" parecia dizer que o cache estava vazio.
+ */
+export const ARTICLE_RUN_READOUT_LEGEND = "(por parecer de artigo confirmado no acervo: COLLECTED pagou SERP nesta execução; REUSED saiu só do cache; PENDING ficou sem parecer, com o motivo)";
 
 /**
  * §10 — `BLOCKED = 5` não explica nada.
@@ -170,6 +195,14 @@ export function articleRunRowsFromGates(input: {
   gates: readonly ArticleGateReading[];
   collectedInThisRun: ReadonlySet<string>;
   closedCandidateRefs: ReadonlySet<string>;
+  /** Pareceres desta execução feitos só com o cache: contam como reaproveitados. */
+  reusedInThisRun?: ReadonlySet<string>;
+  /**
+   * Por que cada artigo ficou sem parecer NESTA execução, dito pela própria
+   * execução (lente que falta, pagamento recusado, cache ilegível). O gate
+   * só sabe dizer "não executada"; o readout precisa dizer o que falta.
+   */
+  pendingReasons?: ReadonlyMap<string, string>;
 }): ArticleRunRow[] {
   return input.gates.map(gate => {
     const { verdict, hasEvidence } = leituraDoEstado(gate.state);
@@ -178,10 +211,11 @@ export function articleRunRowsFromGates(input: {
       serpSource: serpSourceOf({
         candidateRef: gate.candidateRef,
         collectedInThisRun: input.collectedInThisRun,
+        reusedInThisRun: input.reusedInThisRun,
         hasEvidence,
       }),
       serpVerdict: verdict,
-      decisionBasis: gate.reason || SERP_VERDICT_LABELS[verdict],
+      decisionBasis: (!hasEvidence ? input.pendingReasons?.get(gate.candidateRef) : null) || gate.reason || SERP_VERDICT_LABELS[verdict],
       formationChanged: !input.closedCandidateRefs.has(gate.candidateRef),
       readyToConclude: !gate.blocksConclusion,
       blocked: gate.blocksConclusion,

@@ -363,13 +363,19 @@ test("§1 — a formação consome o DNA canônico antes de compor", () => {
   const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
   const trecho = workspace.slice(workspace.indexOf("const articleFormation = useMemo"));
   const corpo = trecho.slice(0, trecho.indexOf("\n  }, ["));
-  // KeywordDNA → assinatura → núcleos → candidatos, nesta ordem.
-  const ordem = ["dnaSignalsByKeyword.get", "buildSemanticSignature", "deriveSemanticNuclei", "buildArticleFormationUniverse"]
-    .map(marca => corpo.indexOf(marca));
+  // A tela lê o KeywordDNA e delega ao planejador por Silo (Parte D).
+  const naTela = ["dnaSignalsByKeyword.get", "planSiloArticleFormation"].map(marca => corpo.indexOf(marca));
+  assert.ok(naTela.every(posicao => posicao >= 0), "a tela não lê o DNA antes de planejar");
+  assert.deepEqual([...naTela].sort((a, b) => a - b), naTela);
+  // No planejador: precedência → assinatura → núcleos → candidatos, nesta ordem.
+  const planejador = readFileSync("lib/arquiteto/article-formation-priority.ts", "utf8");
+  const plano = planejador.slice(planejador.indexOf("export function planSiloArticleFormation"));
+  const ordem = ["reservePriorityArticleGroups({", "buildSemanticSignature({", "deriveSemanticNuclei({", "buildArticleFormationUniverse({"]
+    .map(marca => plano.indexOf(marca));
   assert.ok(ordem.every(posicao => posicao >= 0), "a cadeia da formação não está completa");
   assert.deepEqual([...ordem].sort((a, b) => a - b), ordem, "a ordem do contrato não foi respeitada");
   // Patrimônio publicado não é reagrupado por afinidade semântica.
-  assert.match(corpo, /const publicadas = universoKeywords\.filter\(keyword => keyword\.isPublished\)/);
+  assert.match(plano, /const publicadas = input\.keywords\.filter\(keyword => keyword\.isPublished && !keyword\.humanFormationRef\)/);
 });
 
 test("§10 — a fronteira usa a evidência JÁ persistida, sem chamar provider", () => {

@@ -58,7 +58,9 @@ import { proposeSiloPrimaryFromSerp, serpPrimaryAcceptanceOf, stampPublishedPrim
 import { acceptRemoteSiloPrimaryProposal } from "@/lib/arquiteto/canonical-workspace";
 import { readArchitectKeywordVinculo, editorialUnitDeclarationFromVinculo, headsSilo, readEditorialUnitDeclaration } from "@/lib/arquiteto/editorial-unit-declaration";
 import { withoutPublishedIdentityKeys } from "@/lib/arquiteto/published-identity";
-import { regroupFreeAroundPublished, resolvePublishedSiloMembership } from "@/lib/arquiteto/published-silo-membership";
+import { resolvePublishedSiloMembership } from "@/lib/arquiteto/published-silo-membership";
+import { FORM_NEW_FROM_LEFTOVERS_ACTION, planSiloArticleFormation, proposeCrossSiloReinforcements, type SiloFormationPlan } from "@/lib/arquiteto/article-formation-priority";
+import { readSerpEvidenceRecord, serpEvidenceAxisValue, serpEvidenceMixedLabels } from "@/lib/minerador/serp-evidence-record";
 import { planPublishedArchitectureRecognition } from "@/lib/arquiteto/published-architecture-recognition";
 import { planSiloDecisionBatch, chunkBatch, resolveSiloBatchOutcome, type BatchSiloDecision, type BatchSiloWrite } from "@/lib/arquiteto/silo-decision-batch";
 import type { EditorialUnitDeclaration } from "@/lib/arquiteto/contracts";
@@ -132,8 +134,8 @@ import { buildLinkRelationRows, resolveArticleLinkProjection, resolveSiloHierarc
 import { newFormationRef, planKeywordRole, planMergeCandidates, planMoveKeyword, planPrincipalChange, planSplitKeyword, type FormationKeywordLike, type FormationPatch, type FormationPlan } from "@/lib/arquiteto/article-formation-editing";
 import { resolveArticleFormationState } from "@/lib/arquiteto/article-formation-decision";
 import { buildArticleFormationConfirmationPlan, summarizeConfirmationPlan, validateFormationConclusion, type ConclusionGate, type ConfirmationEntry } from "@/lib/arquiteto/article-formation-confirmation";
-import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, automaticFormationHoldouts, buildArticleFormationUniverse, siloThemeTokens, suggestPrincipal, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
-import { buildSemanticSignature, deriveSemanticNuclei, siloContextTokens, splitNucleusIfEditorialBoundary } from "@/lib/arquiteto/semantic-nucleus";
+import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, siloThemeTokens, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
+import { siloContextTokens } from "@/lib/arquiteto/semantic-nucleus";
 import { resolveCandidateBoundaries, type CandidateSerpEvidence } from "@/lib/arquiteto/candidate-serp-boundary";
 import { challengesRequiringSiloReview, describeSiloReconsideration, resolveSiloBoundaryChallenge, type SiloBoundaryChallenge } from "@/lib/arquiteto/silo-boundary-challenge";
 import { partitionMaterializedArticles, summarizeLegacyArticles } from "@/lib/arquiteto/formation-materialization";
@@ -143,7 +145,7 @@ import { SERP_LENS_LABELS, describeQualificationLenses, describeSerpLensesMarker
 import { TERRITORIAL_AI_BLOCK_SIZE, TERRITORIAL_AI_KEYWORD_LIMIT, TERRITORIAL_SERP_BLOCK_SIZE, executePaidSerpBlocks, formatSerpBlockProgress, planPaidSerpBlocks, serpBlockPrefix, splitFormationSerpBlocks, splitTerritorialAiQuestions, territorialAiKeywordScope } from "@/lib/arquiteto/serp-blocks";
 import { runProgressiveBatch } from "@/lib/ui/batch-progress";
 import { SerpPaidPlanDialog } from "./serp-paid-plan-dialog";
-import { ARTICLE_SERP_STATE_LABELS, articleSerpBaseHash, articleSerpBaseOf, resolveArticleFormationSerpState, serpWasExecutedFor, summarizeArticleSerpGate, type ArticleSerpGateState } from "@/lib/arquiteto/article-serp-gate";
+import { ARTICLE_SERP_STATE_LABELS, articleSerpBaseHash, articleSerpBaseOf, articleSerpLensesComplete, resolveArticleFormationSerpState, serpWasExecutedFor, summarizeArticleSerpGate, type ArticleSerpGateState } from "@/lib/arquiteto/article-serp-gate";
 import { comparePrincipalCandidates, simulateScenarioChange, type ScenarioChange, type ScenarioKeyword } from "@/lib/arquiteto/formation-scenario";
 import { ArticleFormationReviewPanel, type EvidenceState } from "./article-formation-review";
 import { ARTICLE_FORMATION_MARKER_CONTRACT_VERSION, ARTICLE_FORMATION_SCENARIO_LABELS, resolveArticleFormationScenarioState, type ArticleFormationMarkerPayload } from "@/lib/arquiteto/article-formation-marker";
@@ -167,12 +169,14 @@ import {
   attachSubjectToArticleDna,
   attachSubjectToSiloDna,
   countSubjectAnchors,
+  readArchitectSubjectStanding,
   detachSubjectFromArticleDna,
   detachSubjectFromSiloDna,
   planSubjectAttachment,
   sameDeclaredSubject,
   splitUngroupedBySubjectAnchor,
   subjectConservationLabel,
+  SUBJECT_SUGGESTED_TRUNK_LABEL,
   suggestSubjectFromSilo,
   suggestSubjectSupport,
   trunkAnchoredKeywordIds,
@@ -636,6 +640,17 @@ function proposalTerritoryRef(
   return resolveProposalTerritoryRef({ articleIds, territoryRefByArticleId }).territoryRef;
 }
 
+/**
+ * A semântica do PACOTE APROVADO (`approvedDna.analiseSemantica`), onde o
+ * Minerador grava a `evidencia_serp`. A linha viva não entra: o que o
+ * Arquiteto lê é o que o humano aprovou (D5).
+ */
+function approvedSemanticOf(keyword: unknown): Record<string, unknown> | null {
+  const payload = ((keyword as { canonicalWorkflow?: { payload?: Record<string, unknown> } } | null)?.canonicalWorkflow?.payload) || {};
+  const aprovado = payload.approvedDna && typeof payload.approvedDna === "object" ? payload.approvedDna as Record<string, unknown> : null;
+  return aprovado?.analiseSemantica && typeof aprovado.analiseSemantica === "object" ? aprovado.analiseSemantica as Record<string, unknown> : null;
+}
+
 export default function ArquitetoPage() {
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
@@ -816,20 +831,21 @@ export default function ArquitetoPage() {
     title: string;
     plan: SerpPaidPlan;
     allowPrimaryOnly: boolean;
+    allowCacheOnly: boolean;
     resolve: (choice: SerpPaidPlanChoice | null) => void;
   } | null>(null);
   /**
    * Mostra o plano e espera a escolha. Sem nada a pagar e sem lente antiga a
    * oferecer, segue direto: não há o que confirmar.
    */
-  const askSerpPaidPlan = useCallback((title: string, plan: SerpPaidPlan, allowPrimaryOnly = true): Promise<SerpPaidPlanChoice | null> => {
+  const askSerpPaidPlan = useCallback((title: string, plan: SerpPaidPlan, allowPrimaryOnly = true, allowCacheOnly = false): Promise<SerpPaidPlanChoice | null> => {
     if (plan.paidQueries === 0 && plan.recollectableQueries === 0) {
       return Promise.resolve({ authorizedPaidQueries: 0, payMissingExtraLenses: plan.payMissingExtraLenses, recollectStaleLenses: false });
     }
     // Uma prévia nova nunca deixa a anterior pendurada: a anterior é cancelada, sem pagar.
     return new Promise(resolve => setSerpPaidPlanPrompt(anterior => {
       anterior?.resolve(null);
-      return { title, plan, allowPrimaryOnly, resolve };
+      return { title, plan, allowPrimaryOnly, allowCacheOnly, resolve };
     }));
   }, []);
   // Estado da SERP por Article: falha específica carrega estágio, código e se
@@ -3037,6 +3053,11 @@ export default function ArquitetoPage() {
     kgr: ReturnType<typeof readArticleKgrDecision>;
     isPublished: boolean;
     principalProtected: boolean;
+    /**
+     * D3 — o artigo carrega um Assunto (tronco preso ou sugerido pela
+     * formação), mesmo com uma livre de Volume validado como Principal.
+     */
+    carriesSubject?: boolean;
   }): ClassificationEvidence => {
     const texto = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
     const semanticaDe = (keywordId: string) => {
@@ -3099,8 +3120,13 @@ export default function ArquitetoPage() {
       compatibilityConflicts: conflitos,
       compatibilityEvaluated: avaliadas,
       // Uma keyword não tem par: a compatibilidade não se aplica, e isso é
-      // resultado terminal, não incerteza.
+      // resultado terminal, não incerteza — exceto publicado e Assunto (D2/D3).
       compositionKeywordCount: input.keywordIds.length,
+      // D3 — o artigo do Assunto, com Principal livre, também é tronco: nunca "Não aplicável".
+      principalIsSubject: Boolean(input.carriesSubject) || (() => {
+        const linha = masterList.find(item => String(item.id) === input.principalKeywordId);
+        return linha ? readArchitectSubjectStanding(linha as Record<string, unknown>).declared : false;
+      })(),
       isPublished: input.isPublished,
       principalProtected: input.principalProtected,
     };
@@ -3134,6 +3160,7 @@ export default function ArquitetoPage() {
         kgr: articleKgrDecisionFor(article),
         isPublished: Boolean(article.isPublished),
         principalProtected: article.mainKeywordObj?.primaryKeywordPolicy === "locked",
+        carriesSubject: Boolean(articleSubjectFor(article)) || Boolean(article.candidateRef && subjectCarrierCandidateRefs.has(article.candidateRef)),
       })),
     };
   };
@@ -3352,7 +3379,7 @@ export default function ArquitetoPage() {
       siloArtifactsApproved: Boolean(siloVersion && effectiveVersionStatus(siloVersion.versionId, versionEvents) === "approved")
         && Boolean(siloPageVersion),
       internalLinkGraphApproved: Boolean(linksApprovedGraph?.nodes.some(node => node.articleDnaVersionRef?.versionId === canonical?.versionId)),
-      serpAssessmentComplete: Boolean(assessment && isSerpAssessmentComplete({
+      serpAssessmentComplete: Boolean(assessment && articleSerpLensesComplete(remoteArticleSerp.find(item => item.candidateRef === article.candidateRef)?.payload.interpretation?.lenses) !== false && isSerpAssessmentComplete({
         queryCount: assessment.queryCount,
         queriedKeywordDnaIds: assessedKeywordDnaIds(assessment),
         snapshotCount: assessment.snapshots.length,
@@ -3668,11 +3695,24 @@ export default function ArquitetoPage() {
   type ArticleSerpFailure = { articleId: string; principalKeywordId: string; stage: string; code: string; message: string; retryable: boolean };
 
   /**
-   * Devolve o que aconteceu: `cancelled` quando a pessoa recusou o plano de
-   * chamadas pagas — quem chamou não pode anunciar SERP coletada.
+   * Devolve o que aconteceu, artigo por artigo e só depois do readback:
+   * `collectedIds` usou SERP paga nesta execução, `reusedIds` saiu só do
+   * cache, e `pendingReasons` diz o que falta aos que ficaram sem parecer
+   * (D6). `cancelled` só quando a prévia foi interrompida sem escolha.
    */
-  const confirmSerpValidation = async (requestedGroups: ProvisionalArticleGroup[]): Promise<"completed" | "cancelled" | "failed"> => {
-    if (!requestedGroups.length || !brandContext) return "failed";
+  type SerpValidationOutcome = {
+    status: "completed" | "partial" | "cancelled" | "failed";
+    completedIds: string[];
+    collectedIds: string[];
+    reusedIds: string[];
+    pendingReasons: Map<string, string>;
+  };
+  const confirmSerpValidation = async (requestedGroups: ProvisionalArticleGroup[]): Promise<SerpValidationOutcome> => {
+    const semResultado = (status: SerpValidationOutcome["status"], motivo?: string): SerpValidationOutcome => ({
+      status, completedIds: [], collectedIds: [], reusedIds: [],
+      pendingReasons: new Map(motivo ? requestedGroups.map(group => [group.publishedAnchorId || group.id, motivo] as const) : []),
+    });
+    if (!requestedGroups.length || !brandContext) return semResultado("failed");
     const requestedArticleIds = requestedGroups.map(group => group.publishedAnchorId || group.id);
     setSerpBusy(true);
     try {
@@ -3718,25 +3758,50 @@ export default function ArquitetoPage() {
       const { blocks: blocosDaSerp, leftoverSiloCandidates } = splitFormationSerpBlocks(requestedGroups, siloCandidateKeywords);
       const pedidoDoBloco = (bloco: (typeof blocosDaSerp)[number]) => ({ ...serpRequestBase, groups: bloco.groups, siloCandidates: bloco.siloCandidates });
       const artigosDoBloco = (bloco: (typeof blocosDaSerp)[number]) => bloco.groups.map(group => group.publishedAnchorId || group.id);
-      const planejamento = await planPaidSerpBlocks({
-        blocks: blocosDaSerp,
-        itemIdsOf: artigosDoBloco,
-        plan: async bloco => {
-          const serpRequest = pedidoDoBloco(bloco);
-          const planned = await callStrategicApi<{ plan: SerpPaidPlan }>("/api/arquiteto/serp", { ...serpRequest, mode: "plan" }, "serp");
-          return planned.plan;
-        },
-      });
-      const choice = await askSerpPaidPlan(blocosDaSerp.length > 1
-        ? `Validar SERP · plano de chamadas pagas · ${requestedGroups.length} artigos em ${blocosDaSerp.length} blocos`
-        : "Validar SERP · plano de chamadas pagas", planejamento.merged);
+      /*
+       * D6 — CACHE PRIMEIRO, COLETA QUANDO PRECISA.
+       *
+       * O plano lê o cache (sem pagar). Cache ilegível não suspende nada: o
+       * plano volta com o custo máximo e o aviso, e a pessoa escolhe coletar
+       * ou tentar ler de novo. "Cancelar pagamento" segue só com o cache: os
+       * artigos com evidência completa recebem parecer, e só os que dependem
+       * de coleta ficam pendentes, com o motivo.
+       */
+      let planejamento: Awaited<ReturnType<typeof planPaidSerpBlocks<(typeof blocosDaSerp)[number]>>>;
+      let choice: SerpPaidPlanChoice | null;
+      for (;;) {
+        planejamento = await planPaidSerpBlocks({
+          blocks: blocosDaSerp,
+          itemIdsOf: artigosDoBloco,
+          plan: async bloco => {
+            const serpRequest = pedidoDoBloco(bloco);
+            const planned = await callStrategicApi<{ plan: SerpPaidPlan }>("/api/arquiteto/serp", { ...serpRequest, mode: "plan" }, "serp");
+            return planned.plan;
+          },
+        });
+        const mergedFormationPlan: SerpPaidPlan = {
+          ...planejamento.merged,
+          missingDetails: planejamento.plans.flatMap(blockPlan => blockPlan?.missingDetails || []),
+        };
+        choice = await askSerpPaidPlan(blocosDaSerp.length > 1
+          ? `Validar SERP · plano de chamadas pagas · ${requestedGroups.length} artigos em ${blocosDaSerp.length} blocos`
+          : "Validar SERP · plano de chamadas pagas", mergedFormationPlan, true, true);
+        if (!choice?.retryCacheRead) break;
+        showNotification("warning", "Lendo o cache da SERP de novo. Nenhuma chamada foi paga.");
+      }
       if (!choice) {
-        showNotification("warning", "Validação da SERP cancelada: nenhuma chamada foi paga.");
-        return "cancelled";
+        // Só uma prévia interrompida chega aqui: nenhuma escolha foi feita.
+        showNotification("warning", "Validação da SERP interrompida antes da escolha: nenhuma chamada foi paga.");
+        return semResultado("cancelled", "A validação foi interrompida antes da escolha do plano.");
+      }
+      if (choice.cacheOnly) {
+        showNotification("warning", "Pagamento cancelado: nenhuma chamada será paga. Os artigos com evidência completa no cache recebem parecer; os que dependem de coleta ficam pendentes com o motivo.");
       }
       setSerpExecution(current => ({ ...current, ...Object.fromEntries(requestedGroups.map(group => [group.publishedAnchorId || group.id, { status: "processing" as const, queryCount: group.keywords.length, completed: 0 }])) }));
       type SerpBlockResult = {
         assessments: SerpFormationAssessment[];
+        /** De onde veio a SERP de cada parecer gravado: paga agora ou só do cache. */
+        articleSources?: { articleId: string; source: "collected" | "reused" }[];
         failures?: ArticleSerpFailure[];
         summary?: { requestedArticles: number; completedArticles: number; failedArticles: number };
         siloCandidateEvidence?: SerpSiloCandidateAssessment[];
@@ -3765,6 +3830,7 @@ export default function ArquitetoPage() {
       const principalDoArtigo = new Map(requestedGroups.map(group => [group.publishedAnchorId || group.id, group.principalSuggestion.keywordId] as const));
       const result: SerpBlockResult = {
         assessments: execucaoDosBlocos.results.flatMap(item => item.result.assessments || []),
+        articleSources: execucaoDosBlocos.results.flatMap(item => item.result.articleSources || []),
         failures: [
           ...execucaoDosBlocos.results.flatMap(item => item.result.failures || []),
           // O bloco que caiu inteiro nomeia os artigos dele: nenhum some da conta.
@@ -3819,8 +3885,25 @@ export default function ArquitetoPage() {
             retryable: true,
           })),
       ];
+      const pendingReasons = new Map(failures.map(failure => [failure.articleId, failure.message] as const));
       if (!assessments.length) {
-        throw new Error(failures[0]?.message || "A SERP não produziu nenhuma avaliação para os artigos selecionados.");
+        /*
+         * Nenhum parecer nesta execução não é erro do lote: cada artigo sai
+         * pendente com o motivo dele (lente que falta, pagamento cancelado,
+         * cache ilegível). Os pareceres anteriores continuam valendo.
+         */
+        setSerpExecution(current => ({ ...current, ...Object.fromEntries(failures.map(failure => [failure.articleId, {
+          status: latestSerpAssessmentFor(failure.articleId) ? "ready" as const : "error" as const,
+          queryCount: requestedGroups.find(group => (group.publishedAnchorId || group.id) === failure.articleId)?.keywords.length || 0,
+          completed: 0,
+          lastAttemptFailed: true,
+          message: `${failure.message} (estágio ${failure.stage} · código ${failure.code})`,
+          stage: failure.stage,
+          code: failure.code,
+          retryable: failure.retryable,
+        }])) }));
+        showNotification("warning", `Nenhum parecer novo nesta execução: ${failures.length} artigo(s) pendente(s). ${failures.slice(0, 5).map(failure => failure.message).join(" · ")}${failures.length > 5 ? " · …" : ""}`);
+        return { ...semResultado(choice.cacheOnly ? "partial" : "failed"), pendingReasons };
       }
       // Uma vigente por Article, histórico preservado e reexecução idêntica sem
       // duplicata nem falso erro de confirmação.
@@ -3876,24 +3959,35 @@ export default function ArquitetoPage() {
        */
       const canonicalPosSerp = await loadCanonicalArquitetoWorkspace(brandContext.id);
       setRemoteArticleSerp(canonicalPosSerp.articleFormationSerp);
-      const confirmadosNoRemoto = new Set(canonicalPosSerp.articleFormationSerp.map(item => item.candidateRef));
+      const confirmadosNoRemoto = new Set(assessments
+        .filter(assessment => canonicalPosSerp.articleFormationSerp.some(item =>
+          item.candidateRef === assessment.articleId
+          && item.payload.assessment.id === assessment.id
+          && item.payload.assessment.contentHash === assessment.contentHash))
+        .map(assessment => assessment.articleId));
       const semRemoto = assessments
         .map(assessment => assessment.articleId)
         .filter(articleId => !confirmadosNoRemoto.has(articleId));
 
-      const completedCount = assessments.length;
+      const completedCount = assessments.filter(assessment => confirmadosNoRemoto.has(assessment.articleId)).length;
       const requestedCount = requestedGroups.length;
       if (semRemoto.length) {
         // Gravar não é sucesso: o estado só muda depois que o remoto devolve.
         showNotification("error", `SERP coletada, mas ${semRemoto.length} parecer(es) não voltaram do acervo: ${semRemoto.join(" · ")}. `
           + "A evidência não está disponível para a conclusão até o remoto confirmar.");
       }
-      showNotification(failures.length ? "error" : "success", failures.length
-        ? `SERP parcial: ${completedCount} de ${requestedCount} artigo(s) concluído(s) · ${failures.length} com erro. ${failures.map(failure => `${failure.articleId}: ${failure.message}`).join(" ")}`
-        : `SERP concluída: ${completedCount} de ${requestedCount} artigo(s) avaliado(s) · ${result.queryCount} snapshot(s)`
+      // D6 — "coletada" e "reaproveitada" só depois do readback confirmado.
+      const fonteDoArtigo = new Map((result.articleSources || []).map(item => [item.articleId, item.source] as const));
+      const completedIds = assessments.map(assessment => assessment.articleId).filter(articleId => confirmadosNoRemoto.has(articleId));
+      const collectedIds = completedIds.filter(articleId => fonteDoArtigo.get(articleId) === "collected");
+      const reusedIds = completedIds.filter(articleId => fonteDoArtigo.get(articleId) !== "collected");
+      for (const articleId of semRemoto) pendingReasons.set(articleId, "O parecer foi gravado, mas o acervo remoto ainda não o devolveu no readback.");
+      showNotification(failures.length || semRemoto.length ? "warning" : "success", failures.length || semRemoto.length
+        ? `SERP parcial: ${completedCount} de ${requestedCount} artigo(s) confirmados (${collectedIds.length} com coleta paga · ${reusedIds.length} só com o cache) · ${failures.length} pendente(s) · ${semRemoto.length} sem readback · ${result.paidQueries ?? 0} chamada(s) paga(s). ${failures.slice(0, 5).map(failure => failure.message).join(" · ")}${failures.length > 5 ? " · …" : ""}`
+        : `SERP concluída: ${completedCount} de ${requestedCount} artigo(s) avaliado(s) (${collectedIds.length} com coleta paga · ${reusedIds.length} só com o cache) · ${result.queryCount} snapshot(s)`
           + ` · ${result.lenses?.length || 1} lente(s) · ${result.paidQueries ?? 0} chamada(s) paga(s). `
           + `${confirmadosNoRemoto.size} parecer(es) confirmados no acervo remoto.`);
-      return "completed";
+      return { status: failures.length || semRemoto.length ? "partial" : "completed", completedIds, collectedIds, reusedIds, pendingReasons };
     } catch (error) {
       // O erro real já vem sanitizado do servidor (estágio, HTTP, código) ou de
       // uma validação local. Engolir tudo em uma frase genérica escondia a causa.
@@ -3915,7 +4009,7 @@ export default function ArquitetoPage() {
       showNotification("error", requestedGroups.length > 1
         ? `${message} Nenhum artigo do lote foi avaliado nesta execução; os assessments já confirmados anteriormente permanecem.`
         : message);
-      return "failed";
+      return semResultado("failed", message);
     } finally { setSerpBusy(false); setSerpBlockProgress(null); }
   };
 
@@ -5317,6 +5411,17 @@ export default function ArquitetoPage() {
    * passaram a discordar sobre a mesma keyword. Aqui a partição sai uma vez e
    * é devolvida junto com os universos.
    */
+  /*
+   * D1.4 — "FORMAR ARTIGOS NOVOS COM AS SOBRAS" É AÇÃO EXPLÍCITA DO DONO.
+   *
+   * Com publicado ou Assunto no lote, a formação só melhora o que existe. O
+   * dono pode pedir artigos novos com as sobras: a escolha vale para a marca
+   * ativa, nesta sessão, e os candidatos só viram decisão ao serem
+   * confirmados na mesa. Estado de apresentação, nunca de autorização.
+   */
+  const [newFromLeftoversBrandId, setNewFromLeftoversBrandId] = useState<string | null>(null);
+  const formNewFromLeftovers = Boolean(selectedBrandId) && newFromLeftoversBrandId === selectedBrandId;
+
   const articleFormation = useMemo(() => {
     const publicado = brandSiteSnapshot?.catalog?.length
       ? buildPublishedSiteArchitecture({ catalog: brandSiteSnapshot.catalog as never })
@@ -5345,6 +5450,18 @@ export default function ArquitetoPage() {
     /** Por que uma busca NÃO entrou no núcleo vizinho. */
     const separationByKeywordId = new Map<string, string[]>();
 
+    /*
+     * D1 — O LOTE DIZ O OBJETIVO. O lote é o que a marca ativa entregou ao
+     * Arquiteto, não um Silo: com uma página publicada (artigo ou Silo, pelo
+     * Vínculo) ou um Assunto declarado no pacote aprovado, o dono quer
+     * melhorá-los, e nenhum Silo forma artigo novo com a sobra sozinho.
+     */
+    const loteTemAncora = masterList.some(keyword => Boolean(keyword.isPublished)
+      || Boolean(subjectStandings.get(String(keyword.id))?.declared));
+    const batchObjective = loteTemAncora ? "improve" as const : "new" as const;
+    /** O que cada Silo planejou, para as propostas de reforço entre Silos (D8). */
+    const planosPorSilo: Array<{ siloRef: string; siloLabel: string; siloTokens: ReadonlySet<string>; plan: SiloFormationPlan; keywords: ArticleFormationKeyword[] }> = [];
+
     const universes = confirmados.map(territory => {
       // Publicado > confirmado > proposto. A proposta humana já é o
       // endereço projetado do Silo: ignorá-la faria a mesa dizer "sem página"
@@ -5354,8 +5471,13 @@ export default function ArquitetoPage() {
         || territory.slugState.proposals?.[0]?.slug
         || null;
       const raiz = siloSlug ? (siloSlug.startsWith("/") ? siloSlug : `/${siloSlug}`) : null;
-      // Patrimônio sob este Silo: as páginas que já existem publicadas.
-      const publishedArticles = (publicado?.nodes || [])
+      /*
+       * D2 — o publicado é reconhecido pelo VÍNCULO (URL e canonical
+       * conferidos), mesmo com status "aprovado". O catálogo rastreado do
+       * site é só evidência adicional: marca sem sitemap não pode contar zero
+       * artigo publicado com páginas no ar.
+       */
+      const catalogPages = (publicado?.nodes || [])
         .filter(node => node.role === "leaf" && raiz && node.structuralRootPath === raiz)
         .map(node => ({
           normalizedUrl: node.normalizedUrl,
@@ -5381,8 +5503,14 @@ export default function ArquitetoPage() {
            * está "Pendente" nas nove enquanto o DNA já diz "Informativa".
            * Alimentar a formação com a coluna faria o agrupamento decidir
            * sobre um campo que ninguém preencheu.
+           *
+           * D5 — o funil do DNA e a `evidencia_serp` do pacote aprovado
+           * (intenção e funil conclusivos nas 4 lentes) também entram: um
+           * agrupamento que os contradiz não é proposto como automático.
            */
           const dna = dnaSignalsByKeyword.get(String(keyword.id));
+          const evidenciaSerp = readSerpEvidenceRecord(approvedSemanticOf(keyword));
+          const publicada = Boolean(keyword.isPublished);
           return {
           keywordId: String(keyword.id),
           keyword: String(keyword.keyword || ""),
@@ -5390,164 +5518,151 @@ export default function ArquitetoPage() {
           volume: keyword.volume_search ?? null,
           kgr: keyword.kgr ?? null,
           entity: dna?.centralEntity ?? null,
-          problem: keyword.analise_semantica?.problema_percebido || null,
+          problem: dna?.perceivedProblem ?? null,
           semanticState: dna?.semanticState ?? null,
           modifiers: dna?.modifiers ?? [],
           confidence: dna?.confidence ?? null,
           dnaVersionId: dna?.dnaVersionId ?? null,
           dnaContentHash: dna?.dnaContentHash ?? null,
-          isPublished: Boolean(keyword.isPublished),
+          funnel: dna?.funnel ?? null,
+          observedIntent: serpEvidenceAxisValue(evidenciaSerp, "intent"),
+          observedFunnel: serpEvidenceAxisValue(evidenciaSerp, "funnel"),
+          observedMixed: Boolean(serpEvidenceMixedLabels(evidenciaSerp, "intent") || serpEvidenceMixedLabels(evidenciaSerp, "funnel")),
+          isPublished: publicada,
           // Revisão humana lida do payload canônico. Estado incoerente não
           // vira agrupamento: ele volta para a lógica e a incoerência aparece.
           humanFormationRef: resolveArticleFormationState(keyword).formationRef,
           humanRole: resolveArticleFormationState(keyword).decision?.role ?? null,
           // F2.3 — Assunto sem Volume validado fica fora da formação automática;
-          // tronco ancorado não volta como sobra. Sem Assunto, os dois somem.
-          ...(subjectHeldOut.has(String(keyword.id)) ? { subjectHeldOut: true } : {}),
-          ...(subjectFormationTrunks.has(String(keyword.id)) ? { subjectAnchored: true } : {}),
+          // tronco ancorado não volta como sobra. D2 — a publicada prevalece:
+          // declarada Assunto sem Volume, ela continua principal do artigo dela.
+          ...(!publicada && subjectHeldOut.has(String(keyword.id)) ? { subjectHeldOut: true } : {}),
+          ...(!publicada && subjectFormationTrunks.has(String(keyword.id)) ? { subjectAnchored: true } : {}),
           };
         });
 
       /**
-       * §1/§5 — A COMPOSIÇÃO NASCE DO NÚCLEO TEMÁTICO.
+       * §1/§5 — A COMPOSIÇÃO NASCE DO NÚCLEO TEMÁTICO, DEPOIS DA PRECEDÊNCIA.
        *
-       * A ordem anterior era `semelhança de string → candidatos → consertar`:
-       * `buildSiloScopedProvisionalGroups` agrupa sobre a lista bruta — sem
-       * entidade, sem modificadores, sem estado semântico, com a coluna
-       * `intent` em "Pendente" — e o KeywordDNA só chegava depois, para
-       * DESCREVER o que já tinha sido decidido às cegas. Foi assim que três
-       * formulações de "pele oleosa" viraram três Articles.
+       *   KeywordDNA → publicados (Vínculo) → Assuntos declarados → livres
+       *   → núcleos temáticos → teto de seis → excedente com motivo
        *
-       * Agora a ordem é a do contrato:
-       *
-       *   KeywordDNA → assinatura semântica → núcleos temáticos
-       *   → dedup DENTRO do núcleo → candidatos
-       *
-       * Um núcleo é uma pergunta editorial distinta, derivada dos DNAs reais.
-       * O agrupamento provisório continua existindo no Minerador; ele só
-       * deixou de decidir a composição do Article.
+       * `planSiloArticleFormation` aplica a Parte D das regras do dono; a
+       * tela só entrega o que leu (pacotes aprovados, Vínculo, Assunto,
+       * sustentações sugeridas pelo Minerador) e recebe o universo pronto.
        */
       const tokensDoSilo = siloContextTokens({
         name: siloLabel,
         centralEntity: territory.centralEntity,
         slug: raiz,
       });
-      /*
-       * Patrimônio publicado NÃO entra na partição.
-       *
-       * A página já existe e o artigo dela já foi decidido; reagrupá-la por
-       * afinidade semântica seria reescrever estrutura publicada a partir de
-       * uma heurística.
-       */
-      const publicadas = universoKeywords.filter(keyword => keyword.isPublished);
-      const foraDaAutomatica = automaticFormationHoldouts({
-        siloRef: territory.territoryRef,
-        keywords: universoKeywords,
-        subjectByCandidateRef: workingSubjectAnchors,
-      });
-      const emFormacao = universoKeywords.filter(keyword => !keyword.isPublished && !foraDaAutomatica.has(keyword.keywordId));
-
-      const assinaturas = emFormacao.map(keyword => buildSemanticSignature({
-        dna: dnaSignalsByKeyword.get(keyword.keywordId)
-          // Sem DNA, só a formulação está disponível — e isso é dito, não
-          // preenchido: todos os campos semânticos ficam nulos.
-          ?? {
-            keywordId: keyword.keywordId, text: keyword.keyword,
-            intent: null, secondaryIntent: null, funnel: null, semanticState: null,
-            confidence: null, centralEntity: null, modifiers: [],
-            perceivedProblem: null, audience: null, desiredResult: null,
-            editorialType: null, awarenessLevel: null, journeyStage: null,
-            cannibalizationNote: null, dnaVersionId: null, dnaContentHash: null,
-          },
-        siloTokens: tokensDoSilo,
-        volume: keyword.volume,
-        kgr: keyword.kgr,
-        isPublished: false,
-      }));
-
-      const particao = deriveSemanticNuclei({ signatures: assinaturas });
-      const nucleos = particao.nuclei.flatMap(nucleus => splitNucleusIfEditorialBoundary({
-        nucleus, signatures: assinaturas, ceiling: MAX_ARTICLE_KEYWORDS,
-      }));
-
-      for (const nucleo of nucleos) {
-        for (const keywordId of nucleo.keywordIds) {
-          nucleusByKeywordId.set(keywordId, {
-            label: nucleo.label,
-            anchors: [...nucleo.anchors],
-            reasons: [...nucleo.reasons],
-            keywordIds: [...nucleo.keywordIds],
-            siloRef: territory.territoryRef,
-          });
-        }
-      }
-      for (const separacao of particao.separations) {
-        separationByKeywordId.set(separacao.left, [
-          ...(separationByKeywordId.get(separacao.left) || []),
-          ...separacao.reasons,
-        ]);
-      }
-
-      const porKeywordId = new Map(emFormacao.map(keyword => [keyword.keywordId, keyword]));
-      const gruposDoNucleo = nucleos.map(nucleo => {
-        const membros = nucleo.keywordIds
-          .map(id => porKeywordId.get(id))
-          .filter((keyword): keyword is (typeof emFormacao)[number] => Boolean(keyword));
-        /*
-         * §13 — a Principal é escolhida DEPOIS de o tema estar definido.
-         *
-         * Escolher a cabeceira antes de saber do que o artigo trata era o que
-         * deixava a busca mais popular representar um conteúdo que não é o
-         * dela. A centralidade é medida dentro do núcleo, e o termo do Silo é
-         * descontado para não eleger quem só repete o assunto do pai.
-         */
-        const principal = suggestPrincipal({ keywords: membros, siloTokens: tokensDoSilo });
-        return {
-          principalKeywordId: principal?.keywordId || nucleo.keywordIds[0],
-          keywordIds: [...nucleo.keywordIds],
-        };
-      });
-
-      /*
-       * Publicada mantém artigo próprio: uma página, um patrimônio — e ela é
-       * a principal dele. REVALIDAR é remontar em torno dela: a livre que
-       * pede o MESMO conteúdo (piso de canibalização) entra no artigo que já
-       * está no ar em vez de formar um concorrente. URL, slug e canonical da
-       * publicada não passam por aqui.
-       */
-      const remontagem = regroupFreeAroundPublished({
-        keywords: [...publicadas, ...emFormacao],
-        freeGroups: gruposDoNucleo,
-        siloTokens: tokensDoSilo,
-      });
-      for (const [keywordId, destino] of remontagem.attached) {
-        const publicada = publicadas.find(keyword => keyword.keywordId === destino.publishedKeywordId);
-        nucleusByKeywordId.set(keywordId, {
-          label: publicada?.keyword || destino.publishedKeywordId,
-          anchors: [],
-          reasons: [`Remontada em torno do artigo publicado "${publicada?.keyword || destino.publishedKeywordId}": ${destino.reasons.join("; ")}.`],
-          keywordIds: remontagem.publishedGroups.find(grupo => grupo.principalKeywordId === destino.publishedKeywordId)?.keywordIds || [keywordId],
-          siloRef: territory.territoryRef,
+      const idsDoSilo = new Set(universoKeywords.map(keyword => keyword.keywordId));
+      const subjectClaims = [...subjectStandings.values()]
+        .filter(standing => standing.declared && standing.received && standing.approvedPackageRef && standing.brandId === selectedBrandId)
+        .filter(standing => idsDoSilo.has(standing.keywordId) || !confirmedTerritoryRefs.has(String(masterList.find(keyword => String(keyword.id) === standing.keywordId)?.territoryRef ?? "")))
+        .sort((left, right) => left.keywordId.localeCompare(right.keywordId))
+        .flatMap(standing => {
+          const subjectKeyword = masterList.find(keyword => String(keyword.id) === standing.keywordId);
+          if (!subjectKeyword || !selectedBrandId) return [];
+          // Só sustentação deste Silo: nenhuma associação cruza Silo (D8).
+          const keywordIds = suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword, keywords: masterList })
+            .filter(suggestion => suggestion.automaticEligible && idsDoSilo.has(suggestion.keywordId))
+            .map(suggestion => suggestion.keywordId);
+          return keywordIds.length ? [{ subjectKeywordId: standing.keywordId, keywordIds }] : [];
         });
-      }
-      const gruposPublicados = remontagem.publishedGroups;
+      const publishedPages = (keywordsPorSilo.get(territory.territoryRef) || [])
+        .filter(keyword => keyword.isPublished)
+        .map(keyword => {
+          const vinculo = readArchitectKeywordVinculo(keyword);
+          return { keywordId: String(keyword.id), url: vinculo?.url ?? null, canonical: vinculo?.canonicalUrl ?? null };
+        });
 
-      return buildArticleFormationUniverse({
-        groups: [...remontagem.freeGroups, ...gruposPublicados],
+      const plano = planSiloArticleFormation({
         siloRef: territory.territoryRef,
         siloLabel,
         siloSlug: raiz,
         siloContext,
+        siloTokens: tokensDoSilo,
         keywords: universoKeywords,
-        publishedArticles,
+        dnaSignals: dnaSignalsByKeyword,
+        subjects: new Map(universoKeywords.map(keyword => {
+          const standing = subjectStandings.get(keyword.keywordId);
+          return [keyword.keywordId, { declared: Boolean(standing?.declared), volumeValidated: Boolean(standing?.volumeValidated) }] as const;
+        })),
+        subjectClaims,
+        publishedPages,
+        catalogPages,
         ...(workingSubjectAnchors.size ? { subjectByCandidateRef: workingSubjectAnchors } : {}),
         ...(siloSubjectByTerritoryRef.get(territory.territoryRef) ? { siloSubjectKeywordId: siloSubjectByTerritoryRef.get(territory.territoryRef)?.subject.keywordId } : {}),
+        batchObjective,
+        formNewFromLeftovers,
       });
+      planosPorSilo.push({ siloRef: territory.territoryRef, siloLabel, siloTokens: tokensDoSilo, plan: plano, keywords: universoKeywords });
+      for (const [keywordId, info] of plano.nucleusByKeywordId) nucleusByKeywordId.set(keywordId, info);
+      for (const separacao of plano.separations) {
+        separationByKeywordId.set(separacao.left, [...(separationByKeywordId.get(separacao.left) || []), ...separacao.reasons]);
+      }
+      return plano.universe;
     });
-    return { universes, nucleusByKeywordId, separationByKeywordId };
-  }, [masterList, confirmedTerritoryRefs, reservedSiloHeadIds, remoteTerritories, brandSiteSnapshot, dnaSignalsByKeyword, subjectHeldOut, subjectFormationTrunks, workingSubjectAnchors, siloSubjectByTerritoryRef]);
+
+    /*
+     * D8 — REFORÇO DE PUBLICADO OU ASSUNTO DE OUTRO SILO, SÓ POR PROPOSTA.
+     *
+     * A sobra sem encaixe no próprio Silo pode ser exatamente o reforço que
+     * falta a um publicado ou Assunto de outro Silo. A formação não move
+     * ninguém de Silo: propõe, com o motivo, e o humano confirma.
+     */
+    const todasAsKeywords = new Map(planosPorSilo.flatMap(item => item.keywords.map(keyword => [keyword.keywordId, keyword] as const)));
+    const sustentacoesDaMarca = selectedBrandId
+      ? [...subjectStandings.values()]
+        .filter(standing => standing.declared && standing.received && standing.approvedPackageRef && standing.brandId === selectedBrandId)
+        .flatMap(standing => {
+          const subjectKeyword = masterList.find(keyword => String(keyword.id) === standing.keywordId);
+          if (!subjectKeyword) return [];
+          const keywordIds = suggestSubjectSupport({ brandId: selectedBrandId, subjectKeyword, keywords: masterList })
+            .filter(suggestion => suggestion.automaticEligible)
+            .map(suggestion => suggestion.keywordId);
+          return keywordIds.length ? [{ subjectKeywordId: standing.keywordId, keywordIds }] : [];
+        })
+      : [];
+    const crossSiloProposals = batchObjective === "improve" && !formNewFromLeftovers
+      ? proposeCrossSiloReinforcements({
+        silos: planosPorSilo,
+        keywords: todasAsKeywords,
+        subjectClaims: sustentacoesDaMarca,
+        principalEligibleKeywordIds: new Set([...todasAsKeywords.keys()].filter(keywordId => subjectStandings.get(keywordId)?.volumeValidated)),
+      })
+      : [];
+    return { universes, nucleusByKeywordId, separationByKeywordId, batchObjective, crossSiloProposals };
+  }, [masterList, confirmedTerritoryRefs, reservedSiloHeadIds, remoteTerritories, brandSiteSnapshot, dnaSignalsByKeyword, subjectHeldOut, subjectFormationTrunks, workingSubjectAnchors, siloSubjectByTerritoryRef, subjectStandings, selectedBrandId, formNewFromLeftovers]);
 
   const articleFormationUniverses = articleFormation.universes;
+  /**
+   * D3 — os candidatos que são o artigo de um Assunto (tronco preso ou
+   * sugerido pela formação). Sozinhos, eles aguardam sustentação: a
+   * compatibilidade não volta "Não aplicável".
+   */
+  const subjectCarrierCandidateRefs = useMemo(() => new Set(articleFormationUniverses.flatMap(universe => universe.candidates
+    .filter(candidate => candidate.carriesSubject || candidate.subjectKeywordId)
+    .map(candidate => candidate.candidateRef))), [articleFormationUniverses]);
+
+  /*
+   * D4/D8 — NENHUMA KEYWORD SOME.
+   *
+   * O excedente do teto sem fronteira própria e a sustentação que espera a
+   * Principal do Assunto ficam fora de artigo, com o motivo. A lista da mesa
+   * de "Keywords não agrupadas" nasce do agrupamento provisório do Minerador
+   * e não as enxergava; esta é a lista da FORMAÇÃO, com o porquê de cada uma.
+   */
+  const formationDeferredRows = useMemo(() => {
+    const nomes = new Map(masterList.map(keyword => [String(keyword.id), String(keyword.keyword || "")]));
+    return articleFormationUniverses.flatMap(universe => (universe.deferredKeywords || []).map(item => ({
+      keywordId: item.keywordId,
+      keyword: nomes.get(item.keywordId) || item.keywordId,
+      reason: item.reason,
+      siloName: universe.siloLabel,
+    })));
+  }, [articleFormationUniverses, masterList]);
 
   /**
    * Quais artigos do cenário JÁ têm ArticleDNA — e quais artefatos são acervo.
@@ -6148,7 +6263,7 @@ export default function ArquitetoPage() {
       // Uma keyword não é um artigo. Conteúdo novo só aparece na mesa depois
       // que a formação foi processada e a agrupou com as buscas que pedem o
       // mesmo conteúdo. O patrimônio publicado é a exceção: já existe.
-      const candidato = kw.isPublished ? null : formationCandidateByKeyword.get(String(kw.id));
+      const candidato = formationCandidateByKeyword.get(String(kw.id)) ?? null;
       if (!kw.isPublished && !candidato) return;
       const workingArticleId = resolveWorkingArticleId(kw);
       // A seleção precisa sobreviver a mudanças de keywords, papéis e silo.
@@ -6495,7 +6610,9 @@ export default function ArquitetoPage() {
     ungroupedKeywordIds: ungroupedArticleKeywords.map(keyword => String(keyword.id)),
     articles: subjectAnchorCarriers,
     isDeclaredSubject: keywordId => subjectStandings.get(keywordId)?.declared === true,
-  }), [ungroupedArticleKeywords, subjectAnchorCarriers, subjectStandings]);
+    // D3 — o Assunto com artigo sugerido pela formação não é "aguardando sustentação".
+    suggestedTrunkKeywordIds: new Set(articleFormationUniverses.flatMap(universe => universe.suggestedTrunkSubjectKeywordIds || [])),
+  }), [ungroupedArticleKeywords, subjectAnchorCarriers, subjectStandings, articleFormationUniverses]);
   const ungroupedSubjectLabels = useMemo(
     () => new Map(ungroupedSubjectView.ungrouped.map(item => [item.keywordId, item.label])),
     [ungroupedSubjectView],
@@ -8330,7 +8447,7 @@ export default function ArquitetoPage() {
   const currentArticleSerpAssessments = useMemo(() => currentArticleEntityIds
     .map(articleId => latestSerpAssessmentFor(articleId))
     .filter((assessment): assessment is SerpFormationAssessment => Boolean(assessment)), [currentArticleEntityIds, selectedBrandId, serpAssessments]);
-  const currentArticleSerpIncompleteCount = currentArticleSerpAssessments.filter(assessment => !isSerpAssessmentComplete({
+  const currentArticleSerpIncompleteCount = currentArticleSerpAssessments.filter(assessment => articleSerpLensesComplete(remoteArticleSerp.find(item => item.candidateRef === assessment.articleId)?.payload.interpretation?.lenses) === false || !isSerpAssessmentComplete({
     queryCount: assessment.queryCount,
     queriedKeywordDnaIds: assessedKeywordDnaIds(assessment),
     snapshotCount: assessment.snapshots.length,
@@ -9171,6 +9288,36 @@ export default function ArquitetoPage() {
     };
   };
 
+  /*
+   * D8 — O HUMANO ACEITA O REFORÇO DE OUTRO SILO.
+   *
+   * A proposta nasce da formação (`proposeCrossSiloReinforcements`); mover a
+   * keyword é a MESMA decisão de Silo da aba Silos, com lock por item e uma
+   * releitura. Só o que a releitura confirmou é anunciado como movido; a
+   * formação do Silo de destino recalcula e oferece a keyword à página.
+   */
+  const [crossSiloBusy, setCrossSiloBusy] = useState(false);
+  const applyCrossSiloReinforcements = async (proposals: readonly { keywordId: string; keyword: string; toSiloRef: string; toSiloLabel: string }[]) => {
+    if (!proposals.length || crossSiloBusy) return;
+    setCrossSiloBusy(true);
+    try {
+      const lote = await applySiloDecisionsInBatch(proposals.map(proposal => ({
+        keywordId: proposal.keywordId,
+        target: { kind: "territory" as const, territoryRef: proposal.toSiloRef },
+      })));
+      const recusadas = proposals.filter(proposal => lote.refused.includes(proposal.keywordId));
+      showNotification(recusadas.length ? "warning" : "success",
+        `Reforço entre Silos: ${lote.applied.length} keyword(s) movida(s) e confirmada(s) na releitura · ${lote.unchanged.length} já estavam no destino · ${recusadas.length} recusada(s)`
+        + (recusadas.length ? `: ${recusadas.slice(0, 5).map(proposal => proposal.keyword).join(" · ")}${recusadas.length > 5 ? " · …" : ""}` : "")
+        + ". A formação do Silo de destino oferece cada uma ao publicado ou Assunto; confirme o artigo na mesa.");
+      setCanonicalWorkspaceReload(current => current + 1);
+    } catch (error) {
+      showNotification("error", `Reforço entre Silos não confirmado: ${error instanceof Error ? error.message : "falha na releitura"}. Nada foi anunciado como movido.`);
+    } finally {
+      setCrossSiloBusy(false);
+    }
+  };
+
   const applySiloDecision = async (
     keywordId: string,
     target: { kind: "territory"; territoryRef: string } | { kind: "existing_structure"; siloId: string } | { kind: "unassigned" },
@@ -9826,7 +9973,11 @@ export default function ArquitetoPage() {
       // principal de artigo não leva selo de espera.
       const trunkCount = countSubjectAnchors(keywordId, subjectAnchorCarriers);
       const aguardando = Boolean(vinculo.subjectLabel) && Boolean(ungroupedSubjectLabels.get(keywordId));
-      const subjectLabel = subjectConservationLabel({ declared: aguardando, anchoredArticleCount: trunkCount });
+      // D3 — com artigo sugerido pela formação, o selo diz isso, e não "aguardando sustentação".
+      const troncoSugerido = trunkCount === 0 && aguardando && ungroupedSubjectLabels.get(keywordId) === SUBJECT_SUGGESTED_TRUNK_LABEL;
+      const subjectLabel = troncoSugerido
+        ? SUBJECT_SUGGESTED_TRUNK_LABEL
+        : subjectConservationLabel({ declared: aguardando, anchoredArticleCount: trunkCount });
       mapa.set(keywordId, {
         summary: vinculo.summary,
         silo: headsSilo(architectureKeywordDeclarations.get(keywordId)),
@@ -11330,6 +11481,7 @@ export default function ArquitetoPage() {
             ? {
               formationBaseHash: remoto.formationBaseHash,
               verdict: remoto.verdict,
+              lensesComplete: articleSerpLensesComplete(remoto.interpretation?.lenses),
               // A decisão humana vale para a composição sobre a qual foi
               // tomada, e o registro guarda exatamente essa base.
               humanDecisionBaseHash: remoto.humanResolution?.formationBaseHash ?? null,
@@ -11382,6 +11534,7 @@ export default function ArquitetoPage() {
           }),
           isPublished: keywords.some(item => Boolean(item.isPublished)),
           principalProtected: keywords.find(item => String(item.id) === principalId)?.primaryKeywordPolicy === "locked",
+          carriesSubject: Boolean(candidate.carriesSubject || candidate.subjectKeywordId),
         });
         const codes = unresolvedClassifications(evidencia);
         if (codes.length) {
@@ -12003,7 +12156,8 @@ export default function ArquitetoPage() {
    * a mesa respondia `ARTICLES_PROCESSED = 5 · BLOCKED = 5`, contando como
    * bloqueado quem a pessoa nem tinha escolhido.
    */
-  const linhasDaExecucao = useCallback((coletadosAgora: ReadonlySet<string>, refs?: ReadonlySet<string>) => (
+  type ExecucaoDaSerp = { reusedInThisRun?: ReadonlySet<string>; pendingReasons?: ReadonlyMap<string, string> };
+  const linhasDaExecucao = useCallback((coletadosAgora: ReadonlySet<string>, refs?: ReadonlySet<string>, execucao?: ExecucaoDaSerp) => (
     articleRunRowsFromGates({
       gates: [...articleSerpGates.values()].filter(gate => !refs || refs.has(gate.candidateRef)).map(gate => ({
         candidateRef: gate.candidateRef,
@@ -12013,12 +12167,14 @@ export default function ArquitetoPage() {
       })),
       collectedInThisRun: coletadosAgora,
       closedCandidateRefs,
+      ...(execucao?.reusedInThisRun ? { reusedInThisRun: execucao.reusedInThisRun } : {}),
+      ...(execucao?.pendingReasons ? { pendingReasons: execucao.pendingReasons } : {}),
     })
   ), [articleSerpGates, closedCandidateRefs]);
 
   const readoutDaExecucao = useCallback(
-    (coletadosAgora: ReadonlySet<string>, refs?: ReadonlySet<string>) =>
-      formatArticleRunReadout(buildArticleRunReadout(linhasDaExecucao(coletadosAgora, refs))),
+    (coletadosAgora: ReadonlySet<string>, refs?: ReadonlySet<string>, execucao?: ExecucaoDaSerp) =>
+      formatArticleRunReadout(buildArticleRunReadout(linhasDaExecucao(coletadosAgora, refs, execucao))),
     [linhasDaExecucao],
   );
 
@@ -12030,13 +12186,37 @@ export default function ArquitetoPage() {
    * que o gate formulou; o que faltava era dizê-la, com o NOME do artigo em
    * vez do `candidateRef`.
    */
-  const anunciarBloqueios = useCallback((coletadosAgora: ReadonlySet<string>, refs?: ReadonlySet<string>) => {
+  const anunciarBloqueios = useCallback((coletadosAgora: ReadonlySet<string>, refs?: ReadonlySet<string>, execucao?: ExecucaoDaSerp) => {
     const detalhe = formatArticleRunBlockers(
-      linhasDaExecucao(coletadosAgora, refs),
+      linhasDaExecucao(coletadosAgora, refs, execucao),
       candidateRef => articlesList.find(article => article.candidateRef === candidateRef)?.keywordPrincipal || candidateRef,
     );
     if (detalhe) showNotification("warning", `Bloqueado para concluir — ${detalhe}`);
   }, [articlesList, linhasDaExecucao, showNotification]);
+
+  /*
+   * D6 — O READOUT DEPOIS DO READBACK, COM OS GATES DE AGORA.
+   *
+   * `processArticleFormation` é um callback: os gates que ele enxerga são os
+   * do render do clique, anteriores aos pareceres gravados nesta execução.
+   * Contar dali dava `BLOCKED = 55` mesmo com parecer confirmado. A execução
+   * deixa o resultado aqui, e o efeito conta no render seguinte, quando
+   * `remoteArticleSerp` já trouxe o que o acervo devolveu.
+   */
+  const [readoutPendente, setReadoutPendente] = useState<{
+    refs: ReadonlySet<string>;
+    collected: ReadonlySet<string>;
+    reused: ReadonlySet<string>;
+    pendingReasons: ReadonlyMap<string, string>;
+    tone: "success" | "warning";
+  } | null>(null);
+  useEffect(() => {
+    if (!readoutPendente) return;
+    const execucao = { reusedInThisRun: readoutPendente.reused, pendingReasons: readoutPendente.pendingReasons };
+    showNotification(readoutPendente.tone, readoutDaExecucao(readoutPendente.collected, readoutPendente.refs, execucao));
+    anunciarBloqueios(readoutPendente.collected, readoutPendente.refs, execucao);
+    setReadoutPendente(null);
+  }, [readoutPendente, readoutDaExecucao, anunciarBloqueios, showNotification]);
 
   const articleSerpGateSummary = useMemo(
     () => summarizeArticleSerpGate([...articleSerpGates.values()]),
@@ -12067,7 +12247,10 @@ export default function ArquitetoPage() {
     for (const universe of articleFormationUniverses) {
       for (const candidate of universe.candidates) {
         if (!alvos.has(candidate.candidateRef)) continue;
-        const membros = [...candidate.keywords.map(item => item.keywordId), ...candidate.overflowKeywordIds]
+        // Revisão humana acima de seis continua em conflito até ser ajustada;
+        // consultar só seis com hash de sete daria um parecer enganoso.
+        if (candidate.overflowKeywordIds.length) continue;
+        const membros = candidate.keywords.map(item => item.keywordId)
           .map(keywordId => masterList.find(item => String(item.id) === keywordId))
           .filter((item): item is (typeof masterList)[number] => Boolean(item));
         if (!membros.length) continue;
@@ -12223,6 +12406,11 @@ export default function ArquitetoPage() {
 
       const pendentes = serpGroupsForCandidates(resumoSerp.needsCollection);
       if (!pendentes.length) {
+        if (resumoSerp.needsCollection.length) {
+          showNotification("warning", `${resumoSerp.needsCollection.length} artigo(s) ainda precisam de SERP, mas a composição excede seis keywords ou tem conflito de formação. Revise as keywords antes de coletar.`);
+          anunciarBloqueios(new Set(), escopo.candidateRefs);
+          return;
+        }
         // Nada a coletar não é "nada aconteceu": é evidência reaproveitada. A
         // mensagem precisa dizer o que o mercado já respondeu, senão a pessoa
         // acha que o clique não fez nada e clica de novo.
@@ -12243,16 +12431,22 @@ export default function ArquitetoPage() {
         if (automatic?.finalizeSubject) setAutomaticSubjectFinalization({ candidateRefs: [...escopo.candidateRefs], subjectPhrase: automatic.finalizeSubject });
         return;
       }
-      showNotification("success", `Formação processada: ${resumoDaFormacao.candidates} artigo(s) candidato(s) selecionado(s). Coletando SERP de ${pendentes.length} artigo(s) sem evidência vigente.`);
+      showNotification("success", `Formação processada: ${resumoDaFormacao.candidates} artigo(s) candidato(s) selecionado(s). Consultando a SERP em cache para avaliar ${pendentes.length} artigo(s) sem parecer vigente.`);
       const resultadoDaSerp = await confirmSerpValidation(pendentes);
       /*
-       * Plano de chamadas recusado: nada foi coletado, e o readout não pode
-       * contar esses artigos como "coletados agora".
+       * D6 — coletada é só o que pagou SERP nesta execução e voltou no
+       * readback; reaproveitada é o parecer novo feito só com o cache. O que
+       * ficou sem parecer sai com o motivo da própria execução. A contagem
+       * espera o render com os pareceres gravados (`readoutPendente`).
        */
-      const coletadosAgora = resultadoDaSerp === "cancelled" ? new Set<string>() : new Set(resumoSerp.needsCollection);
-      showNotification("success", readoutDaExecucao(coletadosAgora, escopo.candidateRefs));
-      anunciarBloqueios(coletadosAgora, escopo.candidateRefs);
-      if (automatic?.finalizeSubject && resultadoDaSerp === "completed") {
+      setReadoutPendente({
+        refs: escopo.candidateRefs,
+        collected: new Set(resultadoDaSerp.collectedIds),
+        reused: new Set(resultadoDaSerp.reusedIds),
+        pendingReasons: resultadoDaSerp.pendingReasons,
+        tone: resultadoDaSerp.status === "completed" ? "success" : "warning",
+      });
+      if (automatic?.finalizeSubject && resultadoDaSerp.status === "completed") {
         setAutomaticSubjectFinalization({ candidateRefs: [...escopo.candidateRefs], subjectPhrase: automatic.finalizeSubject });
       }
     } catch (error) {
@@ -12441,6 +12635,7 @@ export default function ArquitetoPage() {
           kgr: kgrDoArtigo,
           isPublished: Boolean(base.publishedIdentityRef),
           principalProtected: keywords.find(item => String(item.id) === aprovado.principalKeywordId)?.primaryKeywordPolicy === "locked",
+          carriesSubject: Boolean(aprovado.subjectKeywordId) || subjectCarrierCandidateRefs.has(aprovado.candidateRef),
         });
 
         const naoResolvidas = unresolvedClassifications(evidenciaClassificacao);
@@ -12632,7 +12827,7 @@ export default function ArquitetoPage() {
         : `${semDiff.length} artigo(s) já representados pelo ArticleDNA aprovado: nenhuma versão nova foi necessária.`);
     }
     return { criados, aguardandoSilo };
-  }, [selectedBrandId, sessionStatus, session?.user?.id, masterList, acceptedArticleDnas, acceptedSiloDnas, articleVersionAuthorities, addVersionEvents, showNotification, subjectStandings]);
+  }, [selectedBrandId, sessionStatus, session?.user?.id, masterList, acceptedArticleDnas, acceptedSiloDnas, articleVersionAuthorities, addVersionEvents, showNotification, subjectStandings, subjectCarrierCandidateRefs]);
 
   /**
    * Confirmar formação — registra a decisão humana sobre o agrupamento.
@@ -12715,6 +12910,7 @@ export default function ArquitetoPage() {
           }),
           isPublished: Boolean(vigente.payload.publishedIdentityRef),
           principalProtected: keywords.find(item => String(item.id) === vigente.payload.principalKeywordId)?.primaryKeywordPolicy === "locked",
+          carriesSubject: Boolean(vigente.payload.subject),
         });
         const abertas = unresolvedClassifications(evidenciaLegado);
         if (abertas.length) {
@@ -15190,12 +15386,15 @@ export default function ArquitetoPage() {
                       received: masterList.length,
                       awaitingConfirmation: articlePipeline.counts.awaiting_silo_confirmation,
                       withoutSilo: articlePipeline.counts.awaiting_silo,
-                      rows: visiblePipelineRows.map(row => ({
-                        keywordId: row.keywordId,
-                        keyword: row.keyword,
-                        reason: row.reason,
-                        siloName: row.siloName,
-                      })),
+                      rows: [
+                        ...visiblePipelineRows.map(row => ({
+                          keywordId: row.keywordId,
+                          keyword: row.keyword,
+                          reason: row.reason,
+                          siloName: row.siloName,
+                        })),
+                        ...formationDeferredRows,
+                      ],
                     }}
                     crossSilo={articleScopeAudit.crossSilo}
                     // §13 — leitura do lote corrente. Todo número é derivado do
@@ -15880,6 +16079,69 @@ export default function ArquitetoPage() {
                 );
               })}
             </div>
+          </section>
+        )}
+        {workspaceMode === "articles" && articleFormation.batchObjective === "improve" && (
+          <section className="border-b border-divider bg-surface-subtle px-4 py-4" data-testid="architect-formation-objective">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <span className="text-sm font-bold uppercase tracking-widest text-text-muted">Objetivo do lote · melhorar publicados e Assuntos</span>
+                <p className="mt-1 text-sm leading-6 text-text-muted">
+                  {formNewFromLeftovers
+                    ? "Você pediu artigos novos com as sobras: depois de reforçar publicados e Assuntos, as livres sem encaixe formam candidatos novos (até seis keywords cada). Nada é gravado antes de você confirmar na mesa."
+                    : "O lote tem páginas publicadas ou Assuntos declarados: as livres reforçam cada publicado e cada Assunto (até seis keywords por artigo), e a sobra sem encaixe fica em Keywords não agrupadas, com o motivo. Nenhum artigo novo nasce sozinho."}
+                </p>
+              </div>
+              {formNewFromLeftovers ? (
+                <button type="button" onClick={() => setNewFromLeftoversBrandId(null)} className={ARCHITECT_UI.toolbarButton} data-testid="architect-formation-improve-only">
+                  Voltar a só melhorar publicados e Assuntos
+                </button>
+              ) : formationDeferredRows.length > 0 ? (
+                <button type="button" onClick={() => setNewFromLeftoversBrandId(selectedBrandId)} className={ARCHITECT_UI.toolbarButton} data-testid="architect-formation-new-from-leftovers">
+                  {FORM_NEW_FROM_LEFTOVERS_ACTION}
+                </button>
+              ) : null}
+            </div>
+            {articleFormation.crossSiloProposals.length > 0 && (
+              <div className="mt-3 rounded-md border border-divider bg-surface p-3" data-testid="architect-cross-silo-proposals">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-foreground">Reforçar publicado ou Assunto de outro Silo · {articleFormation.crossSiloProposals.length} proposta(s)</span>
+                  <button type="button" disabled={crossSiloBusy} onClick={() => void applyCrossSiloReinforcements(articleFormation.crossSiloProposals)} className={ARCHITECT_UI.primaryButton} data-testid="architect-cross-silo-apply-all">
+                    Mover todas para o Silo do destino
+                  </button>
+                </div>
+                <p className="mb-2 text-sm leading-6 text-text-muted">A formação não move keyword de Silo sozinha. Cada proposta diz de onde sai, qual página ou Assunto reforça e por quê; mover é decisão sua, gravada como a decisão de Silo da aba Silos.</p>
+                <ul className="grid gap-2 text-sm leading-6">
+                  {articleFormation.crossSiloProposals.map(proposal => (
+                    <li key={proposal.keywordId} className="flex flex-wrap items-center justify-between gap-2 border-t border-divider/70 pt-2">
+                      <span className="min-w-0 text-text-muted">
+                        <span className="font-medium text-keyword">{proposal.keyword}</span>
+                        {` · de "${proposal.fromSiloLabel}" para "${proposal.toSiloLabel}" · ${proposal.anchorKind === "published" ? "publicado" : "Assunto"} "${proposal.anchorLabel}" · ${proposal.reason}`}
+                      </span>
+                      <button type="button" disabled={crossSiloBusy} onClick={() => void applyCrossSiloReinforcements([proposal])} className={ARCHITECT_UI.toolbarButton} data-testid="architect-cross-silo-apply">
+                        {`Mover para "${proposal.toSiloLabel}"`}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
+        )}
+        {workspaceMode === "articles" && formationDeferredRows.length > 0 && (
+          <section className="border-b border-divider bg-surface-subtle px-4 py-4" data-testid="architect-formation-deferred-list">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-bold uppercase tracking-widest text-text-muted">Keywords não agrupadas pela formação · {formationDeferredRows.length}</span>
+              <span className="text-sm text-text-muted">Fora de artigo por precedência, pelo objetivo do lote ou pelo teto de seis. Nenhuma some; cada uma diz o motivo.</span>
+            </div>
+            <ul className="grid gap-1 text-sm leading-6 text-text-muted">
+              {formationDeferredRows.map(row => (
+                <li key={row.keywordId}>
+                  <span className="font-medium text-keyword">{row.keyword}</span>
+                  {row.siloName ? ` · ${row.siloName}` : ""} · {row.reason}
+                </li>
+              ))}
+            </ul>
           </section>
         )}
         {workspaceMode === "silos" && authoritativeSiloWorkingCopies.length > 0 && (
@@ -16867,7 +17129,7 @@ export default function ArquitetoPage() {
                                 <div><dt className="text-text-muted">Funil</dt><dd className="mt-0.5 font-medium text-foreground" data-testid="article-summary-funnel">{ARTICLE_FUNNEL_LABELS[articleClassification.funnel.value]} <InfoHint title="Estágio de funil" description={`${articleClassification.funnel.reason} Origem: ${articleClassification.funnel.source}.`} /></dd></div>
                                 <div><dt className="text-text-muted">KGR</dt><dd className={`mt-0.5 font-medium ${ARTICLE_KGR_TONE_CLASSES[articleKgr.tone]}`} data-testid="article-summary-kgr">{ARTICLE_KGR_LABELS[articleClassification.kgr.value]} <InfoHint title="KGR do artigo" description={`Classificação do artigo, não o KGR da keyword. ${articleClassification.kgr.reason} Aplicabilidade upstream da Principal: ${articleKgr.principalApplicabilityLabel}. O KGR sai dos fatos do KeywordDNA — a SERP não o define.`} /></dd></div>
                                 <div><dt className="text-text-muted">Aplicabilidade</dt><dd className="mt-0.5 font-medium text-foreground" data-testid="article-summary-kgr-applicability">{ARTICLE_KGR_APPLICABILITY_LABELS[articleClassification.kgrApplicability.value]} <InfoHint title="Aplicabilidade do KGR" description={articleClassification.kgrApplicability.reason} /></dd></div>
-                                <div><dt className="text-text-muted">Compatibilidade</dt><dd className={`mt-0.5 font-medium ${articleClassification.compatibility.value === "COMPATIBLE" ? "text-foreground" : "text-warning"}`} data-testid="article-summary-compatibility">{ARTICLE_COMPATIBILITY_LABELS[articleClassification.compatibility.value]} <InfoHint title="Compatibilidade da composição" description={articleClassification.compatibility.reason} /></dd></div>
+                                <div><dt className="text-text-muted">Compatibilidade</dt><dd className={`mt-0.5 font-medium ${articleClassification.compatibility.value === "INCOMPATIBLE" ? "text-warning" : "text-foreground"}`} data-testid="article-summary-compatibility">{ARTICLE_COMPATIBILITY_LABELS[articleClassification.compatibility.value]} <InfoHint title="Compatibilidade da composição" description={articleClassification.compatibility.reason} /></dd></div>
                                   <div><dt className="text-text-muted">Proteção</dt><dd className="mt-0.5 font-medium text-foreground" data-testid="article-summary-protection">{ARTICLE_PROTECTION_LABELS[articleClassification.protection.value]} <InfoHint title="Proteção da identidade" description={articleClassification.protection.reason} /></dd></div>
                                   <div><dt className="text-text-muted">Silo</dt><dd className="mt-0.5 font-medium text-foreground">{articleParentLabel(articleParentFor(art))}{articleSiloReadiness.reasons.length > 0 && <InfoHint title="Pronto para Silos" description={articleSiloReadiness.reasons.join(" ")} />}</dd></div>
                                 </dl>}
@@ -17543,6 +17805,7 @@ export default function ArquitetoPage() {
           title={serpPaidPlanPrompt.title}
           plan={serpPaidPlanPrompt.plan}
           allowPrimaryOnly={serpPaidPlanPrompt.allowPrimaryOnly}
+          allowCacheOnly={serpPaidPlanPrompt.allowCacheOnly}
           buttonClassName={ARCHITECT_UI.toolbarButton}
           primaryButtonClassName={ARCHITECT_UI.primaryButton}
           onChoose={choice => { serpPaidPlanPrompt.resolve(choice); setSerpPaidPlanPrompt(null); }}

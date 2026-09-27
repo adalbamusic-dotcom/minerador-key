@@ -108,6 +108,29 @@ Vigentes no código, salvo os itens marcados **Planejado**. Implementação em
   automatização](sdd-automatizacao-assuntos-2026-09-26.md). A SERP da frase
   segue opcional, pela rota Resultados do Minerador, e não entra na trava de
   SERP do artigo.
+- **Precedência obrigatória da formação:** em cada Silo confirmado, ler
+  primeiro o pacote aprovado e o KeywordDNA (incluindo sinais semânticos,
+  Vínculo, volume e evidência SERP). Reservar, nesta ordem, cada artigo
+  publicado como âncora própria, os Assuntos declarados como troncos (o
+  Assunto sem Volume também recebe as livres que convergem com ele, com
+  principal de Volume validado; **um artigo por Assunto**: a sustentação que
+  não coube ou não converge com a principal dele volta a ser livre, é
+  oferecida às âncoras e, sem encaixe, fica em Keywords não agrupadas com
+  motivo, nunca num segundo artigo concorrente) e distribuir as livres por semântica e
+  importância onde agregam mais. **O lote diz o objetivo (D1):** com
+  publicado ou Assunto no lote recebido pela marca, a sobra sem encaixe fica
+  em Keywords não agrupadas, com o motivo, e só vira artigo novo pela ação
+  explícita do dono "Formar artigos novos com as sobras"; em lote todo novo,
+  as livres formam artigos novos. A formação não cruza Silo: o reforço de
+  publicado ou Assunto de outro Silo é proposta aplicada só por decisão
+  humana de Silo (D8). As livres
+  semanticamente compatíveis fortalecem as âncoras até o teto de seis
+  referências por ArticleDNA. O Assunto não entra nesse teto. Excedentes sem
+  fronteira editorial distinta e disputas entre Assuntos permanecem visíveis
+  como não agrupados; não geram artigo concorrente automaticamente. Nenhum
+  membro acima do teto é enviado à SERP. A validação SERP do artigo pode
+  reinterpretar snapshots vigentes das keywords, mas coleta falha ou cancelada
+  não conta como assessment concluído. Ver [SDD de precedência](sdd-precedencia-publicados-assuntos-2026-09-26.md).
 - **Silo:** o Assunto preso ao SiloDNA vira sugestão aos artigos do Silo, e
   cada artigo confirma. Um Silo que já tem SiloPage não recebe Assunto novo
   por versão avulsa do SiloDNA (`SUBJECT_SILO_PAGE_BOUND`), porque isso

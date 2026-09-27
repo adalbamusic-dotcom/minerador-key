@@ -41,10 +41,10 @@ const universo = (keywords: ArticleFormationKeyword[], publicados: { path: strin
 
 /* ------------------------- §28 confirmação parcial ----------------------- */
 
-test("o que está pronto passa e o pendente continua candidato", () => {
+test("excedente automático continua visível sem bloquear o candidato dentro do teto", () => {
   const resultado = universo([
     kw("k1", "creme hidratante facial"),
-    // Nove buscas convergentes geram excesso além do teto: conflito declarado.
+    // Nove buscas convergentes deixam o excesso fora da composição.
     ...Array.from({ length: 8 }, (_, index) =>
       kw(`x${index}`, `creme noturno ${["", "bom", "top", "novo", "ideal", "leve", "puro", "forte"][index]}`.trim(),
         { entity: "creme noturno", problem: "escolher creme noturno" })),
@@ -52,9 +52,8 @@ test("o que está pronto passa e o pendente continua candidato", () => {
 
   const plano = buildArticleFormationConfirmationPlan({ universes: [resultado] });
   assert.ok(plano.approved.length >= 1, "o candidato limpo precisa passar");
-  assert.ok(plano.blocked.length >= 1, "o candidato com excesso não pode passar às cegas");
-  assert.equal(plano.blocked[0].code, "FORMATION_CONFLICT");
-  // Bloquear o lote inteiro por causa de um caso duvidoso seria impasse.
+  assert.equal(resultado.ungroupedKeywordIds.length, 2);
+  assert.ok(plano.approved.every(entry => entry.keywords.length <= 6));
   assert.equal(plano.approved.length + plano.blocked.length, resultado.candidates.length);
 });
 
