@@ -1,5 +1,11 @@
 # Backlog — Redator
 
+## Nota de diferenciação do Arquiteto — 2026-09-27
+
+- [x] `editorialContext` recebe as linhas `Diferenciação: ` do ArticleDNA fixado (aditivo; sem nota, nada muda).
+- [x] Teste do import do Radar com um ArticleDNA que tem nota: o Assunto primeiro, a nota depois, limite de 4 e, sem nota, documento byte a byte igual (`tests/arquiteto-diferenciacao-publicados.test.mts`).
+- [ ] Homologar (usuário): enviar ao Redator um artigo aceito na diferenciação e conferir a nota no contexto editorial.
+
 ## MCP plataforma e homologação — 2026-09-26
 
 - [x] Comparar ferramentas anunciadas pelo protocolo com o catálogo dinâmico; remover a contagem rígida antiga de 25.

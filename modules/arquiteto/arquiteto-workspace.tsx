@@ -131,7 +131,9 @@ import { buildArchitectSerpProvenance } from "@/lib/arquiteto/radar-handoff-gate
 import type { RadarArticleHandoffContext } from "@/lib/editorial/operational-flow";
 import { buildStructuralLinkConnections, describeStructuralLinkDerivation, structuralLinkBlockers, type StructuralLinkDerivationReadout } from "@/lib/arquiteto/internal-link-structure";
 import { buildLinkRelationRows, resolveArticleLinkProjection, resolveSiloHierarchyView, tallyLinkRelations } from "@/lib/arquiteto/internal-link-projection";
-import { newFormationRef, planKeywordRole, planMergeCandidates, planMoveKeyword, planPrincipalChange, planSplitKeyword, type FormationKeywordLike, type FormationPatch, type FormationPlan } from "@/lib/arquiteto/article-formation-editing";
+import { newFormationRef, planAddKeywordsToCandidate, planKeywordRole, planMergeCandidates, planMoveKeyword, planNewArticleFromKeywords, planPrincipalChange, planSplitKeyword, type FormationKeywordLike, type FormationPatch, type FormationPlan } from "@/lib/arquiteto/article-formation-editing";
+import { groupLeftoverOpportunities } from "@/lib/arquiteto/serp-subject-suggestions";
+import { LeftoverOpportunitiesPanel } from "./leftover-opportunities-panel";
 import { resolveArticleFormationState } from "@/lib/arquiteto/article-formation-decision";
 import { buildArticleFormationConfirmationPlan, summarizeConfirmationPlan, validateFormationConclusion, type ConclusionGate, type ConfirmationEntry } from "@/lib/arquiteto/article-formation-confirmation";
 import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, siloThemeTokens, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
@@ -184,6 +186,7 @@ import {
 } from "@/lib/arquiteto/declared-subject";
 import { SubjectAttachDialog, SubjectConservationBadge, SubjectFilterPanel, SubjectSupportDialog, type SubjectAnchorView, type SubjectSiloSuggestionView } from "./subject-panels";
 import { SerpSubjectCard, SerpSubjectDiagnosisPanel, type SerpSubjectReadStatus } from "./serp-subject-panels";
+import { PublishedDifferentiationSection } from "./published-differentiation-panel";
 import {
   KEPT_SWAPS_STORAGE_PREFIX,
   appliedPublishedSwapOf,
@@ -202,6 +205,8 @@ import {
   serializeKeptSwaps,
   serpSubjectBatchChoices,
   serpSubjectCardView,
+  describeSuggestionOutcome,
+  leftoverOpportunitiesView,
   serpSubjectEgressLabel,
   serpSubjectSessionLabel,
   readSerpSubjectSession,
@@ -5790,6 +5795,15 @@ export default function ArquitetoPage() {
     })));
   }, [articleFormationUniverses, masterList]);
 
+  /** D2.3 — a mesma lista para ler: com volume por volume, sem volume no fim. */
+  const formationDeferredRowsByVolume = useMemo(() => formationDeferredRows
+    .map(row => {
+      const volume = articleFormation.formationKeywords.get(row.keywordId)?.volume;
+      return { ...row, volume: typeof volume === "number" && Number.isFinite(volume) && volume > 0 ? volume : null };
+    })
+    .sort((left, right) => (right.volume ?? -1) - (left.volume ?? -1) || left.keyword.localeCompare(right.keyword, "pt-BR")),
+  [formationDeferredRows, articleFormation]);
+
   /**
    * Quais artigos do cenário JÁ têm ArticleDNA — e quais artefatos são acervo.
    *
@@ -11281,6 +11295,161 @@ export default function ArquitetoPage() {
     }
   };
 
+  /* ------------------------------------------------------------------------
+   * D2.3 — O SISTEMA FAZ O TRABALHO PESADO; O DONO SÓ CONFIRMA.
+   *
+   * "Aplicar selecionadas": as sugestões marcadas entram no artigo pelo MESMO
+   * writer da formação (`applyFormationPlan`, com lock e releitura); as de
+   * outro Silo mudam de Silo pela MESMA decisão de Silo da aba Silos. O
+   * Assunto sem artigo ganha um, com a principal de maior Volume validado e o
+   * vínculo do Assunto na mesma escrita. Teto de 6; publicado nunca entra em
+   * outro artigo; URL, slug e canonical não mudam.
+   * ---------------------------------------------------------------------- */
+  const applyAnchorSuggestions = async (cardKey: string, keywordIds: readonly string[]) => {
+    if (serpSubjectBusy || !selectedBrandId) return;
+    const diagnosis = serpSubjectDiagnoses.find(item => `${item.kind}:${item.anchorKeywordId}` === cardKey);
+    if (!diagnosis) {
+      showNotification("warning", "O cartão mudou depois da leitura: recarregue a mesa e marque de novo.");
+      return;
+    }
+    const escolhidas = diagnosis.suggestions.filter(item => keywordIds.includes(item.keywordId));
+    const noSilo = escolhidas.filter(item => item.where !== "other_silo");
+    const outroSilo = escolhidas.filter(item => item.where === "other_silo");
+    const recusas: string[] = [];
+    let adicionadas = 0;
+    let criado = false;
+    let movidas = 0;
+    const decidedAt = new Date().toISOString();
+    setSerpSubjectBusy(true);
+    try {
+      if (noSilo.length) {
+        const ids = noSilo.map(item => item.keywordId);
+        if (diagnosis.kind === "subject" && diagnosis.members.length === 0) {
+          // O Assunto sem artigo: cria o artigo com as marcadas; o Assunto é o tronco (B5/B6).
+          const universe = articleFormationUniverses.find(item => item.siloRef === diagnosis.siloRef) || null;
+          const principal = [...noSilo].sort((left, right) => right.volume - left.volume || left.keywordId.localeCompare(right.keywordId))
+            .find(item => subjectStandings.get(item.keywordId)?.volumeValidated);
+          const actorId = authenticatedArchitectActor({ sessionStatus, actorUserId: session?.user?.id, brandId: selectedBrandId });
+          if (!universe) recusas.push("o Silo do Assunto não está na mesa");
+          else if (!principal) recusas.push("nenhuma marcada tem Volume validado para ser a principal");
+          else if (!actorId) recusas.push("a sessão não tem usuário autenticado");
+          else {
+            const ref = newFormationRef(crypto.randomUUID());
+            const plano = planNewArticleFromKeywords({ universe, keywords: formationKeywordItems, keywordIds: ids, principalKeywordId: principal.keywordId, newFormationRef: ref, publishedKeywordIds: publishedKeywordIdSet, decidedAt });
+            const vinculo = planWorkingSubjectAnchorWrites({ candidateRef: ref, subjectKeywordId: diagnosis.anchorKeywordId, holderKeywordId: principal.keywordId, items: formationKeywordItems, persisted: persistedSubjectAnchors, actorUserId: actorId, attachedAt: decidedAt });
+            // O artigo do Assunto nasce COM o vínculo, na mesma escrita, ou não nasce.
+            if (!vinculo.ok) recusas.push(`o vínculo do Assunto não pôde ser montado (${vinculo.reason})`);
+            else if (plano.refusals.length) recusas.push(...plano.refusals.map(refusal => refusal.detail));
+            else if (!plano.patches.length) recusas.push("nada a gravar: as marcadas já estão num artigo");
+            else {
+              const extra = new Map<string, Record<string, unknown>>(vinculo.writes.filter(write => write.keywordId === principal.keywordId).map(write => [write.keywordId, write.assignment as Record<string, unknown>] as const));
+              const ok = await applyFormationPlan(plano, `Artigo do Assunto "${diagnosis.anchorLabel}" criado com as sugestões`, [], extra);
+              if (ok) {
+                // O readback da formação confere o artigo; o vínculo é conferido aqui.
+                adicionadas = ids.filter(id => plano.patches.some(patch => patch.keywordId === id)).length;
+                criado = true;
+                let vinculoConfirmado = false;
+                try {
+                  const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+                  const relidos = persistedWorkingSubjectAnchors(buildCanonicalWorkflowWorkspaceItems(canonical.workflowItems, canonical.keywords, selectedBrandId) as Record<string, unknown>[]);
+                  vinculoConfirmado = relidos.get(ref)?.subjectKeywordId === diagnosis.anchorKeywordId;
+                } catch {
+                  vinculoConfirmado = false;
+                }
+                if (vinculoConfirmado) setWorkingSubjectAnchor(ref, diagnosis.anchorKeywordId);
+                else recusas.push("o vínculo do Assunto não voltou na releitura (o artigo foi criado): prenda o Assunto de novo na Revisão");
+              } else recusas.push("a gravação ou a releitura não confirmou o artigo novo (veja o aviso da formação)");
+            }
+          }
+        } else {
+          const candidateRef = serpAnchorCandidateRef(diagnosis.siloRef, diagnosis.principalKeywordId);
+          const universe = candidateRef ? universeOfCandidate(candidateRef) : null;
+          if (!candidateRef || !universe) recusas.push("o artigo não está mais na mesa");
+          else {
+            const plano = planAddKeywordsToCandidate({ universe, keywords: formationKeywordItems, keywordIds: ids, targetCandidateRef: candidateRef, publishedKeywordIds: publishedKeywordIdSet, mintUuid: crypto.randomUUID(), decidedAt });
+            // A recusa do plano (teto, outro Silo, publicada) é dita com o motivo dela.
+            if (plano.refusals.length) recusas.push(...plano.refusals.map(refusal => refusal.detail));
+            else if (!plano.patches.length) recusas.push("nada a gravar: as marcadas já estão no artigo");
+            else {
+              const ok = await applyFormationPlan(plano, `Sugestões aplicadas em "${diagnosis.anchorLabel}"`);
+              // Conta o que a releitura confirmou: as marcadas que o plano gravou.
+              if (ok) adicionadas = ids.filter(id => plano.patches.some(patch => patch.keywordId === id)).length;
+              else recusas.push("a gravação ou a releitura não confirmou as keywords no artigo (veja o aviso da formação)");
+            }
+          }
+        }
+      }
+      if (outroSilo.length) {
+        try {
+          const lote = await applySiloDecisionsInBatch(outroSilo.map(item => ({ keywordId: item.keywordId, target: { kind: "territory" as const, territoryRef: diagnosis.siloRef } })));
+          movidas = lote.applied.length + lote.unchanged.length;
+          if (lote.refused.length) recusas.push(`${lote.refused.length} não mudaram de Silo`);
+          setCanonicalWorkspaceReload(current => current + 1);
+        } catch {
+          recusas.push("a mudança de Silo falhou");
+        }
+      }
+      const desfecho = describeSuggestionOutcome({ anchorLabel: diagnosis.anchorLabel, addedConfirmed: adicionadas, created: criado, movedToSilo: movidas, refused: recusas });
+      showNotification(desfecho.tone, desfecho.message);
+    } finally {
+      setSerpSubjectBusy(false);
+    }
+  };
+
+  /** D2.3 — as sobras como oportunidades de artigo novo, por tema e volume. */
+  const leftoverOpportunities = useMemo(() => {
+    const planos = articleFormation.serpPlans;
+    if (!planos.length) return null;
+    const reservadas = new Set(serpSubjectDiagnoses.flatMap(item => item.suggestions.filter(sugestao => sugestao.preselected).map(sugestao => sugestao.keywordId)));
+    return leftoverOpportunitiesView(groupLeftoverOpportunities({
+      silos: planos.map(plano => ({ siloRef: plano.siloRef, siloLabel: plano.siloLabel, siloTokens: plano.siloTokens, leftoverKeywordIds: plano.plan.leftoverKeywordIds })),
+      keywords: articleFormation.formationKeywords,
+      serp: serpSubjectIndex,
+      reservedKeywordIds: reservadas,
+    }));
+  }, [articleFormation, serpSubjectDiagnoses, serpSubjectIndex]);
+
+  /** "Criar artigo novo com este grupo": ação explícita, confirmada, pelo writer da formação e com releitura. */
+  const createArticleFromLeftoverGroup = async (input: { siloRef: string; keywordIds: string[]; principalKeywordId: string; name: string }) => {
+    if (!selectedBrandId) return;
+    const universe = articleFormationUniverses.find(item => item.siloRef === input.siloRef) || null;
+    if (!universe) {
+      showNotification("warning", "O Silo deste grupo não está mais na mesa: recarregue a formação.");
+      return;
+    }
+    await applyFormationPlan(planNewArticleFromKeywords({
+      universe,
+      keywords: formationKeywordItems,
+      keywordIds: input.keywordIds,
+      principalKeywordId: input.principalKeywordId,
+      newFormationRef: newFormationRef(crypto.randomUUID()),
+      publishedKeywordIds: publishedKeywordIdSet,
+      decidedAt: new Date().toISOString(),
+    }), `Artigo novo "${input.name}" criado com o grupo`);
+  };
+
+  /* ----------------------------------------------------------------------
+   * DIFERENCIAR PUBLICADOS (SDD 2026-09-27): passo seguinte do "Aceitar
+   * grupo". Keyword do Minerador que ainda não está no artigo do publicado
+   * entra pelo MESMO writer da formação (planAddKeywordsToCandidate +
+   * applyFormationPlan, com lock e releitura). Teto de 6 e publicadas são
+   * conferidos pelo plano; a recusa volta com o motivo.
+   * ---------------------------------------------------------------------- */
+  const addDifferentiationKeywordsToArticle = async (pageKeywordId: string, keywordIds: readonly string[]): Promise<{ ok: boolean; message: string }> => {
+    if (!selectedBrandId) return { ok: false, message: "Sem marca ativa." };
+    const universe = articleFormationUniverses.find(item => item.candidates.some(candidate => candidate.principalKeywordId === pageKeywordId)) || null;
+    const candidateRef = universe?.candidates.find(candidate => candidate.principalKeywordId === pageKeywordId)?.candidateRef ?? null;
+    if (!universe || !candidateRef) return { ok: false, message: "O artigo desta página não está na mesa (confirme o Silo dela antes)." };
+    const plano = planAddKeywordsToCandidate({ universe, keywords: formationKeywordItems, keywordIds, targetCandidateRef: candidateRef, publishedKeywordIds: publishedKeywordIdSet, mintUuid: crypto.randomUUID(), decidedAt: new Date().toISOString() });
+    if (plano.refusals.length) return { ok: false, message: plano.refusals.map(refusal => refusal.detail).join(" ") };
+    if (!plano.patches.length) return { ok: false, message: "Nada a gravar: as keywords já estão no artigo." };
+    const ok = await applyFormationPlan(plano, "Diferenciação: keywords colocadas no artigo do publicado");
+    const gravadas = keywordIds.filter(id => plano.patches.some(patch => patch.keywordId === id)).length;
+    return ok
+      ? { ok: true, message: `${gravadas} keyword(s) no artigo, confirmada(s) na releitura. Busque de novo e aceite para completar.` }
+      : { ok: false, message: "A gravação ou a releitura não confirmou (veja o aviso da formação)." };
+  };
+
   const serpSubjectHandlers = {
     onApplySwap: (anchorKeywordId: string) => { void applyOnePublishedSwap(anchorKeywordId); },
     onKeepSwap: (anchorKeywordId: string) => keepPublishedPrimary(anchorKeywordId, true),
@@ -11300,6 +11469,7 @@ export default function ArquitetoPage() {
      * MESMO nó do mapa. A decisão é feita lá, com "Mover para…" e a prévia do
      * efeito — este botão não move nada.
      */
+    onApplySuggestions: (cardKey: string, keywordIds: readonly string[]) => applyAnchorSuggestions(cardKey, keywordIds),
     onOpenArticle: (siloRef: string, principalKeywordId: string) => {
       const candidateRef = serpAnchorCandidateRef(siloRef, principalKeywordId);
       if (!candidateRef) {
@@ -16677,20 +16847,49 @@ export default function ArquitetoPage() {
             primaryButtonClassName={ARCHITECT_UI.primaryButton}
           />
         )}
+        {workspaceMode === "articles" && (
+          <PublishedDifferentiationSection
+            brandId={selectedBrandId}
+            enabled={workspaceMode === "articles"}
+            onApplied={() => setCanonicalWorkspaceReload(current => current + 1)}
+            onAddToArticle={addDifferentiationKeywordsToArticle}
+            buttonClassName={ARCHITECT_UI.toolbarButton}
+            primaryButtonClassName={ARCHITECT_UI.primaryButton}
+          />
+        )}
+        {workspaceMode === "articles" && leftoverOpportunities && (
+          <LeftoverOpportunitiesPanel
+            view={leftoverOpportunities}
+            busy={formationBusy || serpSubjectBusy}
+            onCreateArticle={createArticleFromLeftoverGroup}
+            buttonClassName={ARCHITECT_UI.toolbarButton}
+            primaryButtonClassName={ARCHITECT_UI.primaryButton}
+          />
+        )}
         {workspaceMode === "articles" && formationDeferredRows.length > 0 && (
           <section className="border-b border-divider bg-surface-subtle px-4 py-4" data-testid="architect-formation-deferred-list">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-bold uppercase tracking-widest text-text-muted">Keywords não agrupadas pela formação · {formationDeferredRows.length}</span>
-              <span className="text-sm text-text-muted">Fora de artigo por precedência, pelo objetivo do lote ou pelo teto de seis. Nenhuma some; cada uma diz o motivo.</span>
-            </div>
-            <ul className="grid gap-1 text-sm leading-6 text-text-muted">
-              {formationDeferredRows.map(row => (
-                <li key={row.keywordId}>
-                  <span className="font-medium text-keyword">{row.keyword}</span>
-                  {row.siloName ? ` · ${row.siloName}` : ""} · {row.reason}
-                </li>
-              ))}
-            </ul>
+            {/*
+              D2.3 — com o painel de Sobras na tela, esta lista fica recolhida
+              (as com volume já estão agrupadas lá). Aberta, vem por volume, e
+              as sem volume ficam no fim. Nenhuma some.
+            */}
+            <details open={!leftoverOpportunities}>
+              <summary className="cursor-pointer text-sm font-bold uppercase tracking-widest text-text-muted">Keywords não agrupadas pela formação · {formationDeferredRows.length}</summary>
+              <p className="mt-1 text-sm leading-6 text-text-muted">
+                {leftoverOpportunities
+                  ? "As com volume estão agrupadas acima, em Sobras. Aqui, a lista completa, por volume, com o motivo."
+                  : "Fora de artigo por precedência, pelo objetivo do lote ou pelo teto de seis. Nenhuma some; cada uma diz o motivo."}
+              </p>
+              <ul className="mt-2 grid gap-1 text-sm leading-6 text-text-muted">
+                {formationDeferredRowsByVolume.map(row => (
+                  <li key={row.keywordId}>
+                    <span className="font-medium text-keyword">{row.keyword}</span>
+                    {row.volume !== null ? ` · volume ${row.volume.toLocaleString("pt-BR")}` : " · sem volume"}
+                    {row.siloName ? ` · ${row.siloName}` : ""} · {row.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
           </section>
         )}
         {workspaceMode === "silos" && authoritativeSiloWorkingCopies.length > 0 && (

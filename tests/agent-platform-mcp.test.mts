@@ -16,6 +16,7 @@ import {
 } from "../lib/agent/platform-catalog.ts";
 import { WRITER_MCP_DEFAULT_SCOPES, WRITER_MCP_SCOPES } from "../lib/redator/mcp-consent-domain.ts";
 import { PLATFORM_CATALOG_HASH } from "../lib/agent/catalog-hash.ts";
+import { compactSubjectCandidate } from "../lib/server/platform-mcp-tools.ts";
 
 /**
  * O QUE AS IAS SABEM PRECISA ACOMPANHAR A PLATAFORMA.
@@ -298,4 +299,44 @@ test("30 · o link de reconsentimento sobrevive ao login (J4)", () => {
 test("31 · o principal OAuth sempre traz o reconsentUrl, mesmo com grant (J5)", () => {
   const principalSrc = read("lib/server/writer-mcp-principal.ts");
   assert.match(principalSrc, /reconsentUrl: writerMcpConsentUrl\(runtime\.publicBaseUrl, identity\.oauthClientId\)/);
+});
+
+test("32 · D2.3: a candidata da Pesquisa por Assunto diz à IA se tem volume (Ads ou estimativa) e a estimativa nunca vira volume", () => {
+  const base = { normalizedKeyword: "x", origins: ["ads_keyword_seed"], evidence: [], ranked: [], bestRankGroup: null, isSubjectPhrase: false, existingKeywordId: null } as const;
+  const ads = (media: number | null) => ({ averageMonthlySearches: media, competition: null, competitionIndex: null, lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: null });
+  const estimativa = (volume: number | null) => ({ searchVolume: volume, label: "Estimativa DataForSEO" });
+  type Candidata = Parameters<typeof compactSubjectCandidate>[0];
+  const comAds = compactSubjectCandidate({ ...base, keyword: "agência de marketing", googleAds: ads(18100), dataForSeoEstimate: null } as unknown as Candidata);
+  assert.equal(comAds.volume, 18100);
+  assert.equal(comAds.hasVolume, true);
+  assert.equal("estimate" in comAds, false);
+  const soEstimativa = compactSubjectCandidate({ ...base, keyword: "só estimativa", googleAds: null, dataForSeoEstimate: estimativa(90) } as unknown as Candidata);
+  assert.equal(soEstimativa.volume, null, "a estimativa nunca vira volume");
+  assert.equal(soEstimativa.hasVolume, true);
+  assert.equal(soEstimativa.estimate, 90);
+  for (const semVolume of [
+    compactSubjectCandidate({ ...base, keyword: "zerada", googleAds: ads(0), dataForSeoEstimate: estimativa(0) } as unknown as Candidata),
+    compactSubjectCandidate({ ...base, keyword: "vazia", googleAds: ads(null), dataForSeoEstimate: null } as unknown as Candidata),
+  ]) {
+    assert.equal(semVolume.hasVolume, false, semVolume.keyword);
+    assert.equal("estimate" in semVolume, false);
+  }
+});
+
+test("33 · diferenciação de publicados: detectar pede platform.read, a prévia pede arquiteto.write e o grupo; pagar e aplicar não são ferramenta", async () => {
+  const semEscopo = harness(createWriterServer(principal([brand(["writer.read"])])));
+  const detectar = toolText(await semEscopo(50, "tools/call", { name: "plan_published_differentiation", arguments: { mode: "detect" } }));
+  assert.equal(detectar.code, "scope_denied");
+  assert.equal(detectar.scope, "platform.read");
+  const semGrupo = toolText(await semEscopo(51, "tools/call", { name: "plan_published_differentiation", arguments: { mode: "preview" } }));
+  assert.equal(semGrupo.code, "group_required");
+  const soLeitura = harness(createWriterServer(principal([brand(["platform.read"])])));
+  const previa = toolText(await soLeitura(52, "tools/call", { name: "plan_published_differentiation", arguments: { mode: "preview", groupId: "dg-0123456789abcdef" } }));
+  assert.equal(previa.code, "scope_denied");
+  assert.equal(previa.scope, "arquiteto.write");
+  const pagar = PLATFORM_OPERATIONS.find(operation => operation.id === "arquiteto.published_differentiation")!;
+  assert.equal(pagar.access, "ui");
+  assert.equal(pagar.decision, "human");
+  assert.deepEqual([...pagar.routes].sort(), ["/api/arquiteto/cannibalization/apply", "/api/arquiteto/cannibalization/run"]);
+  assert.deepEqual(PLATFORM_OPERATIONS.find(operation => operation.id === "arquiteto.published_differentiation_detect")?.tools, ["plan_published_differentiation"]);
 });

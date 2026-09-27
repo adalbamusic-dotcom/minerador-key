@@ -12,6 +12,7 @@ import {
 } from "../../../lib/minerador/subject-discovery-plan.ts";
 import { resolveKeywordSubject } from "../../../lib/minerador/keyword-subject.ts";
 import { resolveKeywordVinculo } from "../../../lib/minerador/keyword-vinculo.ts";
+import { compareSubjectDiscoveryByVolume, subjectDiscoveryHasVolume } from "../../../lib/minerador/subject-discovery-volume.ts";
 
 /**
  * PESQUISA POR ASSUNTO — regras puras da tela (SDD 2026-09-24, F1b.1, F1b.5,
@@ -20,7 +21,7 @@ import { resolveKeywordVinculo } from "../../../lib/minerador/keyword-vinculo.ts
  * Aqui não há rede, banco nem armazenamento: só o que a tela decide sozinha e
  * que precisa ser igual toda vez — os textos fixos, o padrão da opção
  * "Declarar também como Assunto" (Q14), o corpo dos pedidos (sem métrica), o
- * filtro "Com volume" (só Google Ads) e o link "Buscar sustentação" (só o UUID).
+ * filtro "Só com volume" (D2.3, ligado por padrão) e o link "Buscar sustentação" (só o UUID).
  */
 
 /* ---------------------------------- textos --------------------------------- */
@@ -107,34 +108,77 @@ export function subjectCandidateGoogleAdsVolume(candidate: Pick<SubjectDiscovery
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-export const SUBJECT_SEARCH_VOLUME_FILTERS = ["Todos", "Com volume", "Sem volume do Google Ads"] as const;
-export type SubjectSearchVolumeFilter = typeof SUBJECT_SEARCH_VOLUME_FILTERS[number];
-
 export type SubjectSearchFilters = {
-  volume: SubjectSearchVolumeFilter;
+  /** D2.3: ligado por padrão. Esconde a candidata sem média do Google Ads e sem estimativa DataForSEO. */
+  onlyWithVolume: boolean;
   origin: SubjectDiscoverySource | "all";
   hideExisting: boolean;
   text: string;
 };
 
-export const SUBJECT_SEARCH_DEFAULT_FILTERS: SubjectSearchFilters = { volume: "Todos", origin: "all", hideExisting: false, text: "" };
+export const SUBJECT_SEARCH_DEFAULT_FILTERS: SubjectSearchFilters = { onlyWithVolume: true, origin: "all", hideExisting: false, text: "" };
+
+/** Com volume: média do Google Ads > 0 ou estimativa DataForSEO > 0 (D2.3). A estimativa não vira Volume. */
+export function subjectCandidateHasVolume(candidate: Pick<SubjectDiscoveryCandidate, "googleAds" | "dataForSeoEstimate">): boolean {
+  return subjectDiscoveryHasVolume(candidate);
+}
+
+export const SUBJECT_SEARCH_ONLY_WITH_VOLUME_LABEL = "Só com volume";
+export const SUBJECT_SEARCH_ONLY_WITH_VOLUME_HELP = "Esconde as candidatas sem média do Google Ads e sem estimativa DataForSEO. Sem volume, a keyword não reforça artigo. Filtrar não chama provider.";
+
+export function subjectSearchHiddenWithoutVolumeText(count: number): string {
+  return count === 1 ? "1 candidata sem volume escondida." : `${count} candidatas sem volume escondidas.`;
+}
+
+export function subjectSearchShowHiddenLabel(count: number): string {
+  return count === 1 ? "Mostrar a sem volume" : `Mostrar as ${count}`;
+}
+
+/** O aviso do envio: quantas selecionadas estão sem volume. Não bloqueia; quem decide é o dono. */
+export function subjectSearchSelectedWithoutVolumeText(count: number): string | null {
+  if (count <= 0) return null;
+  return count === 1
+    ? "1 selecionada está sem volume: sem média do Google Ads e sem estimativa DataForSEO. Sem volume, ela não reforça artigo."
+    : `${count} selecionadas estão sem volume: sem média do Google Ads e sem estimativa DataForSEO. Sem volume, elas não reforçam artigo.`;
+}
 
 function foldText(value: string) {
   return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("pt-BR").trim();
 }
 
-/** Filtros locais: nunca chamam provider nem banco. "Com volume" lê só o Google Ads. */
-export function filterSubjectCandidates<T extends Pick<SubjectDiscoveryCandidate, "keyword" | "googleAds" | "origins" | "existingKeywordId">>(candidates: readonly T[], filters: SubjectSearchFilters, importedKeys?: ReadonlySet<string> | null, keyOf?: (candidate: T) => string): T[] {
+type FilterableCandidate = Pick<SubjectDiscoveryCandidate, "keyword" | "googleAds" | "dataForSeoEstimate" | "origins" | "existingKeywordId">;
+
+function matchesOtherFilters<T extends FilterableCandidate>(candidate: T, filters: SubjectSearchFilters, text: string, importedKeys?: ReadonlySet<string> | null, keyOf?: (candidate: T) => string): boolean {
+  if (filters.origin !== "all" && !candidate.origins.includes(filters.origin)) return false;
+  if (filters.hideExisting && (candidate.existingKeywordId || (importedKeys && keyOf && importedKeys.has(keyOf(candidate))))) return false;
+  if (text && !foldText(candidate.keyword).includes(text)) return false;
+  return true;
+}
+
+/**
+ * Filtros locais: nunca chamam provider nem banco. "Só com volume" (padrão)
+ * esconde a sem volume (D2.3). O resultado sai ordenado por volume, com
+ * empate na ordem recebida: vale também para buscas antigas desta lista.
+ */
+export function filterSubjectCandidates<T extends FilterableCandidate>(candidates: readonly T[], filters: SubjectSearchFilters, importedKeys?: ReadonlySet<string> | null, keyOf?: (candidate: T) => string): T[] {
   const text = foldText(filters.text || "");
-  return candidates.filter(candidate => {
-    const volume = subjectCandidateGoogleAdsVolume(candidate);
-    if (filters.volume === "Com volume" && !(volume !== null && volume > 0)) return false;
-    if (filters.volume === "Sem volume do Google Ads" && volume !== null && volume > 0) return false;
-    if (filters.origin !== "all" && !candidate.origins.includes(filters.origin)) return false;
-    if (filters.hideExisting && (candidate.existingKeywordId || (importedKeys && keyOf && importedKeys.has(keyOf(candidate))))) return false;
-    if (text && !foldText(candidate.keyword).includes(text)) return false;
-    return true;
-  });
+  return candidates
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(({ candidate }) => (!filters.onlyWithVolume || subjectDiscoveryHasVolume(candidate)) && matchesOtherFilters(candidate, filters, text, importedKeys, keyOf))
+    .sort((a, b) => compareSubjectDiscoveryByVolume(a.candidate, b.candidate) || a.index - b.index)
+    .map(({ candidate }) => candidate);
+}
+
+/** Quantas o filtro "Só com volume" escondeu, entre as que passam nos outros filtros. Desligado, 0. */
+export function countSubjectCandidatesHiddenWithoutVolume<T extends FilterableCandidate>(candidates: readonly T[], filters: SubjectSearchFilters, importedKeys?: ReadonlySet<string> | null, keyOf?: (candidate: T) => string): number {
+  if (!filters.onlyWithVolume) return 0;
+  const text = foldText(filters.text || "");
+  return candidates.filter(candidate => !subjectDiscoveryHasVolume(candidate) && matchesOtherFilters(candidate, filters, text, importedKeys, keyOf)).length;
+}
+
+/** Selecionadas sem volume, fora a própria frase do Assunto (que não entra no envio). */
+export function countSelectedWithoutVolume(candidates: readonly SubjectDiscoveryCandidate[], selectedKeys: ReadonlySet<string>): number {
+  return candidates.filter(candidate => selectedKeys.has(candidate.normalizedKeyword) && !candidate.isSubjectPhrase && !subjectDiscoveryHasVolume(candidate)).length;
 }
 
 /* --------------------------------- pedidos --------------------------------- */

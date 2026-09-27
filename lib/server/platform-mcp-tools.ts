@@ -17,6 +17,7 @@ import { vinculoReadbackConfirmed } from "@/lib/minerador/vinculo-screen";
 import { resolveKeywordSubject } from "@/lib/minerador/keyword-subject";
 import { isKeywordPublished } from "@/lib/minerador/keyword-lifecycle";
 import { GOOGLE_ADS_DISCOVERY_LANGUAGES } from "@/lib/minerador/google-ads-discovery-catalog";
+import { subjectDiscoveryEstimate, subjectDiscoveryHasVolume } from "@/lib/minerador/subject-discovery-volume";
 import { deriveKgrVisualState, KGR_FULL_RANGE_LIMIT, kgrApplicabilityLabel } from "@/lib/minerador/kgr-applicability";
 import { importSubjectsWithCore, type SubjectImportChannel } from "@/lib/minerador/keyword-import-core";
 import { KEYWORD_PAGE_TYPE_KEY, KEYWORD_PAGE_TYPE_STANCE_KEY, keywordPageTypeStance } from "@/lib/minerador/keyword-page-type";
@@ -35,6 +36,7 @@ import type { EditorialAction, EditorialModule } from "./editorial-authorization
 import { getOperationalClient, mapPersistenceError, OptimisticLockError, PersistenceUnavailableError } from "./editorial-db";
 import { readPlatformState, readPublishedPagesForMatching, topicCandidatesFrom } from "./agent-platform-state";
 import { createMineradorArquitetoHandoff } from "./arquiteto-workspace";
+import { handleDifferentiationPlan } from "./arquiteto-differentiation";
 import { resolvePipelineContext } from "./pipeline-runtime";
 import { RadarWriterSendError, sendRadarToWriter } from "./radar-writer-send";
 import { RadarStartError } from "./radar-youtube-start";
@@ -406,8 +408,8 @@ export function projectPlatformKeywordRow(row: Record<string, unknown>) {
  * projeção compacta — o que ela precisa para escolher e para montar o
  * `import_subject_keywords` (keyword, volume do Ads, concorrência, `origins`,
  * melhor posição, uma evidência) — no mesmo teto de bytes das fatias do
- * Redator. A lista já vem ordenada por relevância (mais fontes, com métrica
- * do Ads, melhor posição); se não couber, ficam as primeiras e o corte vai em
+ * Redator. A lista já vem ordenada por volume (D2.3: com volume antes, média
+ * do Ads e depois estimativa do Labs); se não couber, ficam as primeiras e o corte vai em
  * `trimmed`, nunca em silêncio. A lista inteira segue na tela.
  */
 export const PLATFORM_TOOL_RESULT_MAX_BYTES = WRITER_EVIDENCE_LIMITS.sliceMaxBytes;
@@ -416,6 +418,13 @@ export type AgentSubjectCandidate = {
   keyword: string;
   /** Média mensal do Google Ads; `null` quando a candidata não veio do Ads. Estimativa do Labs nunca vira volume. */
   volume: number | null;
+  /**
+   * D2.3 (aditivo): tem demanda — média do Google Ads maior que zero OU
+   * estimativa DataForSEO maior que zero. `false` = sem volume: não propor.
+   */
+  hasVolume: boolean;
+  /** D2.3 (aditivo): estimativa DataForSEO Labs, rotulada; nunca é Volume. Só quando maior que zero. */
+  estimate?: number;
   competition?: string;
   origins: SubjectDiscoveryExecuteResponse["candidates"][number]["origins"];
   bestRankGroup?: number;
@@ -428,6 +437,8 @@ export function compactSubjectCandidate(candidate: SubjectDiscoveryExecuteRespon
   return {
     keyword: candidate.keyword,
     volume: candidate.googleAds?.averageMonthlySearches ?? null,
+    hasVolume: subjectDiscoveryHasVolume(candidate),
+    ...((subjectDiscoveryEstimate(candidate) ?? 0) > 0 ? { estimate: subjectDiscoveryEstimate(candidate) as number } : {}),
     ...(candidate.googleAds?.competition ? { competition: candidate.googleAds.competition } : {}),
     origins: candidate.origins,
     ...(typeof candidate.bestRankGroup === "number" ? { bestRankGroup: candidate.bestRankGroup } : {}),
@@ -1096,6 +1107,37 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     );
     return reportArquitetoHandoff(keywordIds, await createMineradorArquitetoHandoff(context, keywordIds));
   }));
+
+  server.registerTool("plan_published_differentiation", {
+    title: "Publicados que disputam o mesmo assunto",
+    description: [
+      "Use para achar canibalização entre páginas publicadas da marca e montar a prévia da diferenciação (SDD 2026-09-27).",
+      "mode 'detect' (grátis, só lê o cache de SERP): os grupos de publicados com 3 ou mais páginas em comum no top 10 (4 lentes), com o Posto, o volume e quem ranqueia (posição).",
+      "mode 'preview' com o groupId de um grupo (grátis, grava a prévia): o ângulo de cada página, as chamadas, a faixa de custo (teto de US$ 0,50 por grupo, com os cortes) e o planHash. Mostre o custo ao usuário.",
+      "A prévia nunca apaga uma rodada paga nem desfaz 'Manter como está': grupo mantido (erro DIFFERENTIATION_GROUP_KEPT) ou com avaliação gravada (DIFFERENTIATION_EVALUATION_PENDING) é recusado — o usuário reabre o resultado ou pede uma nova rodada na tela. Cada grupo do 'detect' traz proposal (estado e se já há avaliação).",
+      "Buscar as keywords (pago) e aceitar a diferenciação são atos humanos na tela do Arquiteto; não há ferramenta para isso. Nada aqui apaga, redireciona, funde nem muda URL, slug ou canonical.",
+    ].join(" "),
+    inputSchema: z.object({
+      brandId: brandIdInput,
+      mode: z.enum(["detect", "preview"]).default("detect"),
+      groupId: z.string().regex(/^dg-[0-9a-f]{16}$/).optional().describe("O groupId devolvido pelo mode 'detect'."),
+    }),
+    annotations: write,
+  }, async ({ brandId, mode, groupId }) => {
+    const previa = mode === "preview";
+    if (previa && !groupId) return asText({ ok: false, code: "group_required", message: "A prévia é de um grupo: rode mode 'detect' e passe o groupId." });
+    const acao = previa ? "edit" as const : "view" as const;
+    return call("plan_published_differentiation", previa ? "arquiteto.write" : "platform.read", { brandId }, [{ module: "arquiteto", action: acao }], async ({ access }) => {
+      // O mesmo núcleo da rota /api/arquiteto/cannibalization/plan, sem a IA da plataforma.
+      const context = await resolvePipelineContext(
+        { brandId: access.brandId, module: "arquiteto", action: acao },
+        { requireActorUserId: async () => principal.actorId },
+      );
+      const outcome = await handleDifferentiationPlan({ store: context, now: () => new Date() }, { brandId: access.brandId, groupId: previa ? groupId : undefined, ai: false });
+      if (outcome.status >= 400) throw new PlatformToolFailure(String(outcome.body.code || "differentiation_refused"), { message: outcome.body.error ?? null });
+      return outcome.body.data;
+    });
+  });
 
   /* ================================ Radar ============================= */
 

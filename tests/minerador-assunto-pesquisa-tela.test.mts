@@ -124,6 +124,21 @@ test("resultado: origens com rótulo próprio, evidência curta, selo de já exi
   assert.match(model, /const value = candidate\.googleAds\?\.averageMonthlySearches;/);
 });
 
+test("D2.3: 'Só com volume' ligado, total escondido à vista com 'Mostrar', e aviso das sem volume no envio", () => {
+  assert.match(model, /SUBJECT_SEARCH_DEFAULT_FILTERS: SubjectSearchFilters = \{ onlyWithVolume: true,/);
+  assert.doesNotMatch(results, /SUBJECT_SEARCH_VOLUME_FILTERS|"Com volume"/, "o seletor antigo saiu");
+  assert.match(results, /checked=\{controller\.filters\.onlyWithVolume\}/);
+  assert.match(results, /subjectSearchHiddenWithoutVolumeText\(hiddenWithoutVolume\)/);
+  assert.match(results, /onlyWithVolume: false \}\)\)\} className=\{neutralButton\}>\{subjectSearchShowHiddenLabel\(hiddenWithoutVolume\)\}/);
+  assert.match(hook, /countSubjectCandidatesHiddenWithoutVolume\(activeRecord\.result\.candidates, filters, imported/);
+  assert.match(results, /countSelectedWithoutVolume\(record\.result\.candidates, selectedKeys\)/);
+  assert.match(results, /selectedWithoutVolume=\{selectedWithoutVolume\}/);
+  const importDialog = dialogs.slice(dialogs.indexOf("export function SubjectSearchImportDialog"));
+  assert.match(importDialog, /subjectSearchSelectedWithoutVolumeText\(selectedWithoutVolume\)/);
+  assert.doesNotMatch(importDialog, /disabled=\{[^}]*selectedWithoutVolume/, "o aviso não bloqueia o envio");
+  assert.match(model, /from "\.\.\/\.\.\/\.\.\/lib\/minerador\/subject-discovery-volume\.ts"/, "a tela usa a mesma regra do servidor");
+});
+
 test("lista local: texto da tela, política e armazenamento só em IndexedDB próprio", () => {
   assert.match(results, /\{SUBJECT_SEARCH_LOCAL_LIST_TEXT\}/);
   assert.match(model, /"Lista guardada só neste navegador\. Só o envio ao Processador salva no banco\. Limpar os dados do navegador apaga a lista\. Os resultados do Google ficam guardados para a marca por 30 dias; os do DataForSEO Labs, não: repetir a pesquisa paga de novo\."/);

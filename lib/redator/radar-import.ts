@@ -2,6 +2,7 @@ import type { ArticleDNA, ContentDocument, ContentDocumentV2, RadarDocumentOrigi
 import { legacyVersionReference, toVersionReference } from "../arquiteto/versioning.ts";
 import { radarWriterMayNotFor } from "./writer-handoff.ts";
 import { radarWriterSubjectOf, radarWriterSubjectTurnLines } from "./radar-subject-turn.ts";
+import { differentiationEditorialLines } from "../arquiteto/differentiation-note.ts";
 import type { RadarCanonicalDossier } from "../server/radar-canonical-dossier.ts";
 
 /**
@@ -185,6 +186,14 @@ export type BuildRadarDocumentInput = {
    * como antes — `writerMayNot` de sempre e `editorialContext` vazio.
    */
   subject?: ArticleDNA["subject"] | null;
+  /**
+   * ===== A NOTA DE DIFERENCIAÇÃO (SDD 2026-09-27, §5) =====
+   *
+   * `ArticleDNA.differentiation` da MESMA versão fixada. Só as linhas com o
+   * prefixo `Diferenciação: ` descem no `editorialContext`, depois das do
+   * Assunto. Opcional e aditivo: sem nota, o documento sai byte a byte como antes.
+   */
+  differentiation?: ArticleDNA["differentiation"] | null;
 };
 
 /**
@@ -322,7 +331,7 @@ export function buildRadarDocument(input: BuildRadarDocumentInput): ContentDocum
         subject: input.subject,
         turn: dossier.authorities?.google?.articleModel?.declaredSubject ?? null,
         principal: dossier.keywordContext.principal,
-      }),
+      }).concat(differentiationEditorialLines(input.differentiation)),
       visualGuidance: [],
       pendingDecisions: [],
     },

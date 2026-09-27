@@ -33,6 +33,12 @@
  * no top 10 nas 4 lentes como critério principal; palavras e DNA desempatam
  * (`serp-subject-convergence.ts`). Sem o índice, tudo é como antes.
  *
+ * D2.3 — VOLUME PRIMEIRO, E A INTENÇÃO QUE BARRA É A DA SERP (2026-09-27).
+ * Com o índice de SERP da mesa: keyword sem volume (nulo ou zero) não reforça
+ * publicado nem sustenta Assunto — fica nas sobras, recolhida; e só a
+ * intenção e o funil OBSERVADOS na SERP separam duas keywords — a Lógica que
+ * diverge vira aviso (`serpAwareDnaBarrier`). Sem o índice, a regra de antes.
+ *
  * Domínio puro: sem React, sem storage, sem rede, sem provider.
  */
 import {
@@ -51,8 +57,9 @@ import {
 import { normalizePublishedAddress, regroupFreeAroundPublished } from "./published-silo-membership.ts";
 import { buildSemanticSignature, deriveSemanticNuclei, splitNucleusIfEditorialBoundary, type SemanticNucleus } from "./semantic-nucleus.ts";
 import type { KeywordDnaSignals } from "./keyword-dna-signals.ts";
-import { bestAnchorConvergence, measureAnchorConvergence, type AnchorConvergenceBasis } from "./serp-subject-convergence.ts";
+import { bestAnchorConvergence, measureAnchorConvergence, serpAwareDnaBarrier, type AnchorConvergenceBasis } from "./serp-subject-convergence.ts";
 import type { SerpSubjectIndex } from "./serp-subject-overlap.ts";
+import { hasSearchVolume } from "./serp-subject-suggestions.ts";
 
 type Group = { principalKeywordId: string; keywordIds: string[] };
 type Attachment = { publishedKeywordId: string; affinity: number; reasons: string[] };
@@ -76,9 +83,16 @@ const porConvergencia = (anchors: readonly ArticleFormationKeyword[], siloTokens
   return (left: ArticleFormationKeyword, right: ArticleFormationKeyword) => score(right) - score(left) || left.keywordId.localeCompare(right.keywordId);
 };
 
-/** D5 — a candidata não contradiz o DNA de NENHUM membro já admitido. */
-const semContradicao = (keyword: ArticleFormationKeyword, membros: readonly ArticleFormationKeyword[]) =>
-  membros.every(membro => !formationDnaContradiction(membro, keyword));
+/**
+ * D5 — a candidata não contradiz o DNA de NENHUM membro já admitido.
+ * D2.3 — com o índice de SERP, só a intenção observada na SERP barra; sem ele,
+ * a regra de antes (`formationDnaContradiction`).
+ */
+const semContradicao = (keyword: ArticleFormationKeyword, membros: readonly ArticleFormationKeyword[], serp?: SerpSubjectIndex | null) =>
+  membros.every(membro => !serpAwareDnaBarrier(membro, keyword, serp));
+
+/** D2.3 — com o índice de SERP, só keyword com volume reforça ou sustenta. Sem índice, todas (regra de antes). */
+const reforcaComVolume = (keyword: ArticleFormationKeyword, serp: SerpSubjectIndex | null | undefined) => !serp || hasSearchVolume(keyword.volume);
 
 /**
  * As que cabem ao lado da âncora, até as vagas: no piso de convergência com
@@ -97,13 +111,14 @@ function compativeis(
   const ancoras = serp?.subject ? [anchor, serp.subject] : [anchor];
   const ordenadas = pool
     .filter(keyword => keyword.keywordId !== anchor.keywordId && !membros.some(membro => membro.keywordId === keyword.keywordId))
+    .filter(keyword => reforcaComVolume(keyword, serp?.index))
     .filter(keyword => serp
       ? bestAnchorConvergence(ancoras, keyword, { siloTokens, serp: serp.index }).eligible
       : sameArticleAffinity(anchor, keyword, siloTokens).affinity >= AFFINITY_FLOOR)
     .sort(porConvergencia(ancoras, siloTokens, serp?.index));
   for (const keyword of ordenadas) {
     if (admitidas.length >= vagas) break;
-    if (semContradicao(keyword, [...membros, ...admitidas])) admitidas.push(keyword);
+    if (semContradicao(keyword, [...membros, ...admitidas], serp?.index)) admitidas.push(keyword);
   }
   return admitidas;
 }
@@ -168,12 +183,13 @@ export function reservePriorityArticleGroups(input: {
     const pool = claim.keywordIds
       .filter(keywordId => livres.has(keywordId) && !disputadas.has(keywordId) && !attached.has(keywordId))
       .map(keywordId => livres.get(keywordId)!)
+      .filter(keyword => reforcaComVolume(keyword, serp))
       .sort(porConvergencia([publicada], input.siloTokens, serp));
     const vagas = MAX_ARTICLE_KEYWORDS - 1 - (ocupadas.get(publicada.keywordId) ?? 0);
     const admitidas: ArticleFormationKeyword[] = [];
     for (const keyword of pool) {
       if (admitidas.length >= vagas) break;
-      if (semContradicao(keyword, [publicada, ...admitidas])) admitidas.push(keyword);
+      if (semContradicao(keyword, [publicada, ...admitidas], serp)) admitidas.push(keyword);
     }
     for (const keyword of admitidas) {
       const medida = serp ? measureAnchorConvergence(publicada, keyword, { siloTokens: input.siloTokens, serp }) : null;
@@ -200,7 +216,8 @@ export function reservePriorityArticleGroups(input: {
   const reivindicadas = new Set(input.subjectClaims
     .filter(claim => !publishedIds.has(claim.subjectKeywordId))
     .flatMap(claim => claim.keywordIds));
-  const anexarAsPublicadas = (candidatas: readonly ArticleFormationKeyword[], piso: number) => {
+  const anexarAsPublicadas = (todas: readonly ArticleFormationKeyword[], piso: number) => {
+    const candidatas = todas.filter(keyword => reforcaComVolume(keyword, serp));
     if (!candidatas.length || !input.published.length) return;
     const passada = regroupFreeAroundPublished({
       keywords: [...input.published, ...candidatas],
@@ -218,7 +235,7 @@ export function reservePriorityArticleGroups(input: {
     const ordenadas = [...passada.attached].sort((left, right) => right[1].affinity - left[1].affinity || left[0].localeCompare(right[0]));
     for (const [keywordId, destino] of ordenadas) {
       const keyword = livres.get(keywordId);
-      if (!keyword || !semContradicao(keyword, membrosDe(destino.publishedKeywordId))) continue;
+      if (!keyword || !semContradicao(keyword, membrosDe(destino.publishedKeywordId), serp)) continue;
       attached.set(keywordId, destino);
       ocupadas.set(destino.publishedKeywordId, (ocupadas.get(destino.publishedKeywordId) ?? 0) + 1);
     }
@@ -338,6 +355,12 @@ export type SiloFormationAnchor = {
   principalKeywordId: string;
   keywordIds: string[];
   subjectKeywordId?: string;
+  /**
+   * D2.3 (aditivo) — publicado cuja composição já foi decidida por humano
+   * (revisão na mesa ou sugestões aplicadas). A formação não mexe nele; ele
+   * aparece aqui só para continuar com cartão e sugestões no diagnóstico.
+   */
+  humanDecided?: boolean;
 };
 
 /** Frase fixa do motivo da sobra no modo melhorar: a tela e o catálogo citam a mesma ação. */
@@ -515,9 +538,10 @@ export function planSiloArticleFormation(input: {
     return bestAnchorConvergence(frase ? [ancora.principal, frase] : [ancora.principal], keyword, { siloTokens, serp });
   };
   const oferecerAsAncoras = (keyword: ArticleFormationKeyword): Ancora | null => {
+    if (!reforcaComVolume(keyword, serp)) return null;
     const destino = ancoras
       .filter(ancora => ancora.keywordIds.length < MAX_ARTICLE_KEYWORDS)
-      .filter(ancora => semContradicao(keyword, ancora.keywordIds.map(id => porId.get(id)!).filter(Boolean)))
+      .filter(ancora => semContradicao(keyword, ancora.keywordIds.map(id => porId.get(id)!).filter(Boolean), serp))
       .map(ancora => ({ ancora, medida: medirNaAncora(ancora, keyword) }))
       .filter(item => item.medida.eligible)
       .map(item => ({ ancora: item.ancora, affinity: item.medida.score, reasons: item.medida.reasons }))
@@ -574,13 +598,13 @@ export function planSiloArticleFormation(input: {
   const esperandoAssunto = new Map([...donoDaEspera.keys()].map(keywordId => [keywordId, porId.get(keywordId)!] as const).filter(([, keyword]) => Boolean(keyword)));
   for (const assunto of assuntosSemVolume) {
     const proprias = [...esperandoAssunto.values()]
-      .filter(keyword => donoDaEspera.get(keyword.keywordId) === assunto.keywordId && !formationDnaContradiction(assunto, keyword));
+      .filter(keyword => donoDaEspera.get(keyword.keywordId) === assunto.keywordId && !serpAwareDnaBarrier(assunto, keyword, serp) && reforcaComVolume(keyword, serp));
     const convergentes = [
       ...proprias,
       ...livresDaReserva
         .filter(keyword => serp
-          // D2.2 — a sustentação do Assunto é o que divide a SERP com a frase dele.
-          ? measureAnchorConvergence(assunto, keyword, { siloTokens, serp }).eligible
+          // D2.2 — a sustentação do Assunto é o que divide a SERP com a frase dele; D2.3 — com volume.
+          ? hasSearchVolume(keyword.volume) && measureAnchorConvergence(assunto, keyword, { siloTokens, serp }).eligible
           : sameArticleAffinity(assunto, keyword, siloTokens).affinity >= AFFINITY_FLOOR && !formationDnaContradiction(assunto, keyword)),
     ];
     const principal = suggestPrincipal({ keywords: convergentes.filter(keyword => comVolume(keyword.keywordId)), siloTokens });
@@ -689,12 +713,22 @@ export function planSiloArticleFormation(input: {
        * que não coube fica em Keywords não agrupadas, dizendo o tema que
        * formaria e a ação explícita que o dono pode tomar.
        */
-      const tema = membros.length > 1
-        ? `formaria com outras ${membros.length - 1} busca(s) o tema "${nucleo.label}"`
-        : "não converge com nenhuma outra livre deste Silo";
+      /*
+       * D2.3 — MOTIVO CURTO. O tema é dito pela keyword de MAIOR VOLUME do
+       * núcleo, nunca pelo rótulo da Lógica ("Precisa avaliar a adequação de
+       * … ao contexto …"), que o dono não entende. A oportunidade de artigo
+       * novo aparece agrupada, com a ação explícita.
+       */
+      const lider = [...membros].sort((left, right) => (right.volume ?? -1) - (left.volume ?? -1) || left.keywordId.localeCompare(right.keywordId))[0];
+      const semVolume = (keyword: ArticleFormationKeyword) => serp && !hasSearchVolume(keyword.volume);
       for (const keyword of membros) {
         sobrasSemEncaixe.push(keyword.keywordId);
-        deferred.set(keyword.keywordId, `${devolvida(keyword.keywordId) ? `${motivoDaDevolvida(keyword.keywordId)}; ` : ""}sem encaixe semântico em publicado ou Assunto deste Silo; ${tema}. O lote tem publicados ou Assuntos, então a sobra não vira artigo novo sozinha — use "${FORM_NEW_FROM_LEFTOVERS_ACTION}" ou aceite uma proposta de reforço de outro Silo`);
+        const tema = membros.length > 1
+          ? `formaria tema com outras ${membros.length - 1}: "${lider.keyword}"`
+          : "sem outra livre do mesmo tema";
+        deferred.set(keyword.keywordId, semVolume(keyword)
+          ? "sem volume: não reforça nem forma artigo"
+          : `${devolvida(keyword.keywordId) ? "sustentação que não coube no artigo do Assunto (um artigo por Assunto); " : ""}sem par com publicado ou Assunto deste Silo; ${tema}`);
       }
       continue;
     }
@@ -843,12 +877,32 @@ export function planSiloArticleFormation(input: {
     separations,
     objective,
     formNewFromLeftovers,
-    anchors: ancoras.map(ancora => ({
-      kind: ancora.kind,
-      principalKeywordId: ancora.principal.keywordId,
-      keywordIds: [...ancora.keywordIds],
-      ...(ancora.subjectKeywordId ? { subjectKeywordId: ancora.subjectKeywordId } : {}),
-    })),
+    anchors: [
+      ...ancoras.map(ancora => ({
+        kind: ancora.kind,
+        principalKeywordId: ancora.principal.keywordId,
+        keywordIds: [...ancora.keywordIds],
+        ...(ancora.subjectKeywordId ? { subjectKeywordId: ancora.subjectKeywordId } : {}),
+      })),
+      /*
+       * D2.3 — o publicado com composição decidida por humano continua sendo
+       * âncora para o diagnóstico: aplicar sugestões não pode sumir com o
+       * cartão dele. Só com o índice de SERP (a mesa do mesmo assunto); a
+       * formação não mexe nele.
+       */
+      ...(serp
+        ? input.keywords
+          .filter(keyword => keyword.isPublished && keyword.humanFormationRef)
+          .map(keyword => ({
+            kind: "published" as const,
+            principalKeywordId: keyword.keywordId,
+            keywordIds: [keyword.keywordId, ...input.keywords
+              .filter(outra => outra.keywordId !== keyword.keywordId && outra.humanFormationRef === keyword.humanFormationRef)
+              .map(outra => outra.keywordId)],
+            humanDecided: true,
+          }))
+        : []),
+    ],
     awaitingSubjectKeywordIds,
     leftoverKeywordIds: sobrasSemEncaixe,
   };
@@ -927,7 +981,8 @@ export function proposeCrossSiloReinforcements(input: {
   for (const silo of input.silos) {
     for (const ancora of silo.plan.anchors) {
       const alvo = input.keywords.get(ancora.principalKeywordId);
-      if (!alvo) continue;
+      // Artigo com composição decidida por humano não recebe proposta automática.
+      if (!alvo || ancora.humanDecided) continue;
       destinos.push({
         siloRef: silo.siloRef, siloLabel: silo.siloLabel, siloTokens: silo.siloTokens,
         kind: ancora.kind, alvo, subjectKeywordId: ancora.subjectKeywordId ?? null,
@@ -948,7 +1003,9 @@ export function proposeCrossSiloReinforcements(input: {
   }
   const sobras = input.silos.flatMap(silo => silo.plan.leftoverKeywordIds
     .map(keywordId => ({ silo, keyword: input.keywords.get(keywordId) }))
-    .filter((item): item is { silo: typeof silo; keyword: ArticleFormationKeyword } => Boolean(item.keyword)))
+    .filter((item): item is { silo: typeof silo; keyword: ArticleFormationKeyword } => Boolean(item.keyword))
+    // D2.3 — com SERP, sobra sem volume não reforça outro Silo.
+    .filter(item => reforcaComVolume(item.keyword, serp)))
     .sort((left, right) => (right.keyword.volume ?? -1) - (left.keyword.volume ?? -1) || left.keyword.keywordId.localeCompare(right.keyword.keywordId));
 
   const propostas: CrossSiloReinforcementProposal[] = [];
@@ -956,7 +1013,7 @@ export function proposeCrossSiloReinforcements(input: {
     const opcoes = destinos
       .filter(destino => destino.siloRef !== silo.siloRef && destino.vagas > 0)
       .filter(destino => !destino.precisaPrincipal || destino.membros.length > 0 || input.principalEligibleKeywordIds?.has(keyword.keywordId))
-      .filter(destino => !formationDnaContradiction(destino.alvo, keyword) && semContradicao(keyword, destino.membros))
+      .filter(destino => !serpAwareDnaBarrier(destino.alvo, keyword, serp) && semContradicao(keyword, destino.membros, serp))
       .map(destino => {
         const sustentacao = Boolean(destino.subjectKeywordId && reivindicada.get(keyword.keywordId)?.has(destino.subjectKeywordId));
         if (!serp) {

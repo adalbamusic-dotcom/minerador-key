@@ -421,3 +421,121 @@ export function planKeywordRole(input: {
     ? { patches, refusals: [] }
     : refusal("KEYWORD_WITHOUT_WORKFLOW_ITEM", "Nenhuma keyword do artigo tem item canônico.");
 }
+/**
+ * D2.3 — APLICAR AS SUGESTÕES MARCADAS: várias keywords entram de uma vez num
+ * artigo (publicado ou Assunto), pelo MESMO writer e com a MESMA decisão
+ * humana de "mover". É o `planMoveKeyword` em lote: o destino calculado ganha
+ * identidade estável uma vez só, e o teto de seis vale para o conjunto.
+ *
+ * Recusa: keyword fora do Silo, keyword publicada (duas publicadas nunca se
+ * fundem), conjunto que passa do teto. Nada é escrito aqui.
+ */
+export function planAddKeywordsToCandidate(input: {
+  universe: ArticleFormationUniverse;
+  keywords: readonly FormationKeywordLike[];
+  keywordIds: readonly string[];
+  targetCandidateRef: string;
+  /** Keywords publicadas: nunca entram em outro artigo. */
+  publishedKeywordIds?: ReadonlySet<string>;
+  mintUuid: string;
+  decidedAt: string;
+  reason?: string;
+}): FormationPlan {
+  const destino = input.universe.candidates.find(item => item.candidateRef === input.targetCandidateRef);
+  if (!destino) return refusal("CANDIDATE_NOT_FOUND", "O artigo de destino não existe neste Silo.");
+  const atuais = keywordIdsOf(destino);
+  const novas = [...new Set(input.keywordIds)].filter(keywordId => !atuais.includes(keywordId));
+  if (!novas.length) return refusal("KEYWORD_NOT_IN_UNIVERSE", "Nenhuma keyword nova para este artigo.");
+  const fora = novas.filter(keywordId => !input.universe.keywordIds.includes(keywordId));
+  if (fora.length) return refusal("KEYWORD_NOT_IN_UNIVERSE", `${fora.length} keyword(s) não pertencem a este Silo: mude o Silo delas antes.`);
+  if (novas.some(keywordId => input.publishedKeywordIds?.has(keywordId))) {
+    return refusal("PUBLISHED_KEYWORD_IS_PROTECTED", "Uma keyword publicada é a principal da própria página: duas publicadas nunca se fundem.");
+  }
+  if (atuais.length + novas.length > CEILING) {
+    return refusal("MERGE_EXCEEDS_CEILING", `O artigo ficaria com ${atuais.length + novas.length} keywords e o teto é ${CEILING}: marque no máximo ${Math.max(0, CEILING - atuais.length)}.`);
+  }
+
+  const formationRef = stableFormationRef(input.targetCandidateRef, input.mintUuid);
+  const patches: FormationPatch[] = [];
+  if (formationRef !== input.targetCandidateRef) {
+    const papelAtual = new Map(destino.keywords.map(item => [item.keywordId, item.role]));
+    for (const keywordId of atuais) {
+      const patch = patchFor({
+        keywordId,
+        keywords: input.keywords,
+        formationRef,
+        decision: decision(
+          "move",
+          keywordId === destino.principalKeywordId ? "principal" : papelAtual.get(keywordId) === "reforco" ? "reforco" : "secundaria",
+          "permaneceu no artigo que recebeu as sugestões aplicadas",
+          input.decidedAt,
+        ),
+      });
+      if (patch) patches.push(patch);
+    }
+  }
+  const semItem: string[] = [];
+  for (const keywordId of novas) {
+    const patch = patchFor({
+      keywordId,
+      keywords: input.keywords,
+      formationRef,
+      decision: decision("move", "secundaria", input.reason || "sugestão de reforço aplicada em revisão humana", input.decidedAt),
+    });
+    if (patch) patches.push(patch); else semItem.push(keywordId);
+  }
+  if (semItem.length) {
+    return refusal("KEYWORD_WITHOUT_WORKFLOW_ITEM", `${semItem.length} keyword(s) sem item canônico para receber a decisão: nada foi aplicado.`);
+  }
+  return { patches, refusals: [] };
+}
+
+/**
+ * D2.3 — "CRIAR ARTIGO NOVO COM ESTE GRUPO": as keywords marcadas formam UM
+ * artigo novo, com identidade revisada nova e a principal escolhida (a de
+ * maior volume, por padrão da tela). Só dentro de um Silo, até seis, sem
+ * keyword publicada. Quem estava em outro candidato calculado sai dele na
+ * próxima leitura (a composição é derivada das keywords).
+ */
+export function planNewArticleFromKeywords(input: {
+  universe: ArticleFormationUniverse;
+  keywords: readonly FormationKeywordLike[];
+  keywordIds: readonly string[];
+  principalKeywordId: string;
+  newFormationRef: string;
+  publishedKeywordIds?: ReadonlySet<string>;
+  decidedAt: string;
+}): FormationPlan {
+  const ids = [...new Set(input.keywordIds)];
+  if (!ids.length) return refusal("KEYWORD_NOT_IN_UNIVERSE", "Nenhuma keyword marcada.");
+  if (!ids.includes(input.principalKeywordId)) return refusal("PRINCIPAL_NOT_IN_CANDIDATE", "A principal precisa estar entre as keywords marcadas.");
+  const fora = ids.filter(keywordId => !input.universe.keywordIds.includes(keywordId));
+  if (fora.length) return refusal("KEYWORD_NOT_IN_UNIVERSE", `${fora.length} keyword(s) não pertencem a este Silo.`);
+  if (ids.some(keywordId => input.publishedKeywordIds?.has(keywordId))) {
+    return refusal("PUBLISHED_KEYWORD_IS_PROTECTED", "Keyword publicada já é a principal da própria página: não entra em artigo novo.");
+  }
+  if (ids.length > CEILING) return refusal("MERGE_EXCEEDS_CEILING", `O grupo tem ${ids.length} keywords e o teto é ${CEILING}.`);
+  if (!isArticleFormationRef(input.newFormationRef)) return refusal("CANDIDATE_NOT_FOUND", "Identidade inválida para o artigo novo.");
+
+  const patches: FormationPatch[] = [];
+  const semItem: string[] = [];
+  for (const keywordId of [input.principalKeywordId, ...ids.filter(item => item !== input.principalKeywordId)]) {
+    const principal = keywordId === input.principalKeywordId;
+    const patch = patchFor({
+      keywordId,
+      keywords: input.keywords,
+      formationRef: input.newFormationRef,
+      decision: decision(
+        "merge",
+        principal ? "principal" : "secundaria",
+        principal ? "principal do artigo novo criado com o grupo, em revisão humana" : "agrupada no artigo novo criado com o grupo, em revisão humana",
+        input.decidedAt,
+      ),
+    });
+    if (patch) patches.push(patch); else semItem.push(keywordId);
+  }
+  if (semItem.length) {
+    return refusal("KEYWORD_WITHOUT_WORKFLOW_ITEM", `${semItem.length} keyword(s) sem item canônico: o artigo não foi criado.`);
+  }
+  return { patches, refusals: [] };
+}

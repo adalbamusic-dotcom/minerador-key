@@ -132,6 +132,35 @@ export function normalizeSerpDomain(value: string | null | undefined): string | 
 
 const hostDaPagina = (pagina: string) => pagina.split("/")[0];
 
+/* ----------------------------- domínios genéricos ----------------------------- */
+
+/**
+ * D2.3 — "3 OU MAIS DOMÍNIOS EM COMUM" SÓ CONTA COM SITE QUE DISTINGUE.
+ *
+ * Rede social e portal que ranqueiam tudo não dizem que duas buscas são o
+ * mesmo assunto. Na AdalbaPro (cache de 2026-09-26, 158 keywords com páginas),
+ * instagram.com aparece no top 10 de 65 e youtube.com no de 59: contando os
+ * dois, 239 pares viravam "Provável" só por domínio. Tirando a lista fixa e os
+ * sites presentes em mais de 15% das SERPs do lote, sobram 51 — vizinhos de
+ * verdade. Os genéricos continuam lidos; só não contam como sinal.
+ */
+export const SERP_GENERIC_DOMAINS: readonly string[] = Object.freeze([
+  "instagram.com", "youtube.com", "facebook.com", "reddit.com", "linkedin.com", "tiktok.com",
+  "pinterest.com", "twitter.com", "x.com", "wikipedia.org", "quora.com", "google.com",
+]);
+/** Fração das SERPs do lote a partir da qual um site é genérico. */
+export const SERP_GENERIC_DOMAIN_SHARE = 0.15;
+/**
+ * Abaixo disto o lote é pequeno (e em geral de um tema só) para medir a
+ * frequência: um site que ranqueia a família inteira pareceria genérico. Só a
+ * lista fixa vale.
+ */
+export const SERP_GENERIC_DOMAIN_MIN_KEYWORDS = 50;
+
+export function isFixedGenericDomain(domain: string): boolean {
+  return SERP_GENERIC_DOMAINS.some(generico => domain === generico || domain.endsWith(`.${generico}`));
+}
+
 /* --------------------------------- medida --------------------------------- */
 
 export type SerpSubjectOverlap = {
@@ -144,6 +173,13 @@ export type SerpSubjectOverlap = {
   /** Domínios em comum (URLs das lentes com digest + domínios da observação). */
   sharedDomains: string[];
   sharedDomainCount: number;
+  /**
+   * D2.3 (aditivo) — os domínios em comum sem rede social nem portal genérico
+   * (`SERP_GENERIC_DOMAINS` e, no índice, os sites de mais de 15% das SERPs).
+   * É o que conta para o nível "Provável" (3 ou mais).
+   */
+  sharedDistinctiveDomains: string[];
+  sharedDistinctiveDomainCount: number;
   /** Lentes em que as duas têm a MESMA página no MESMO aparelho. */
   lensesAgreeing: string[];
   /** Lentes com páginas lidas de cada lado. */
@@ -202,7 +238,7 @@ function forcaPorPaginas(paginas: number, limiares: SerpSubjectThresholds): Excl
 export function measureSerpSubjectOverlap(
   left: KeywordSerpFootprint | null | undefined,
   right: KeywordSerpFootprint | null | undefined,
-  options: { thresholds?: SerpSubjectThresholds; leftKeywordId?: string; rightKeywordId?: string } = {},
+  options: { thresholds?: SerpSubjectThresholds; leftKeywordId?: string; rightKeywordId?: string; genericDomains?: ReadonlySet<string> } = {},
 ): SerpSubjectOverlap {
   const limiares = options.thresholds || SERP_SUBJECT_THRESHOLDS;
   const a = pegadaDe(left);
@@ -211,6 +247,8 @@ export function measureSerpSubjectOverlap(
   const rightKeywordId = right?.keywordId || options.rightKeywordId || "";
   const sharedPages = [...a.paginas].filter(pagina => b.paginas.has(pagina)).sort();
   const sharedDomains = [...a.dominios].filter(dominio => b.dominios.has(dominio)).sort();
+  const sharedDistinctiveDomains = sharedDomains.filter(dominio => !isFixedGenericDomain(dominio) && !options.genericDomains?.has(dominio));
+  const distintivos = { sharedDistinctiveDomains, sharedDistinctiveDomainCount: sharedDistinctiveDomains.length };
   const lensesAgreeing = SERP_SUBJECT_LENS_LABELS.filter(lens => {
     const esquerda = a.paginasPorLente.get(lens);
     const direita = b.paginasPorLente.get(lens);
@@ -228,7 +266,7 @@ export function measureSerpSubjectOverlap(
     const semSerp = [!a.paginas.size ? nomeA : null, !b.paginas.size ? nomeB : null].filter(Boolean).join(" e ");
     return {
       leftKeywordId, rightKeywordId, strength: "unknown",
-      sharedPages: [], sharedPageCount: 0, sharedDomains, sharedDomainCount: sharedDomains.length,
+      sharedPages: [], sharedPageCount: 0, sharedDomains, sharedDomainCount: sharedDomains.length, ...distintivos,
       lensesAgreeing: [], pageLensesLeft, pageLensesRight, missingLensesLeft, missingLensesRight, complete,
       reason: `Sem páginas da SERP no cache para ${semSerp}: não dá para medir se é o mesmo assunto no Google.`,
     };
@@ -247,7 +285,7 @@ export function measureSerpSubjectOverlap(
         : `Nenhuma página em comum no top 10${sharedDomains.length ? ` (só ${sharedDomains.length} domínio(s) em comum)` : ""}: para o Google não é o mesmo assunto.${incompleta}`;
   return {
     leftKeywordId, rightKeywordId, strength,
-    sharedPages, sharedPageCount: sharedPages.length, sharedDomains, sharedDomainCount: sharedDomains.length,
+    sharedPages, sharedPageCount: sharedPages.length, sharedDomains, sharedDomainCount: sharedDomains.length, ...distintivos,
     lensesAgreeing, pageLensesLeft, pageLensesRight, missingLensesLeft, missingLensesRight, complete,
     reason,
   };
@@ -268,6 +306,8 @@ export type SerpSubjectIndex = {
   overlap(leftKeywordId: string, rightKeywordId: string): SerpSubjectOverlap;
   /** As keywords do índice com páginas no cache. */
   keywordIdsWithPages(): string[];
+  /** D2.3 (aditivo) — os sites que aparecem em tantas SERPs do lote que não distinguem assunto. */
+  genericDomains(): ReadonlySet<string>;
 };
 
 export function buildSerpSubjectIndex(
@@ -279,8 +319,31 @@ export function buildSerpSubjectIndex(
     .filter(item => item.lenses.some(leitura => (leitura.urls || []).some(url => Boolean(normalizeSerpPageUrl(url)))))
     .map(item => item.keywordId));
   const memo = new Map<string, SerpSubjectOverlap>();
+  // D2.3 — site presente em mais de 15% das SERPs do lote não distingue assunto.
+  const presenca = new Map<string, number>();
+  let comDominios = 0;
+  for (const pegada of footprints) {
+    const dominios = new Set<string>();
+    for (const leitura of pegada.lenses) {
+      for (const url of leitura.urls || []) {
+        const pagina = normalizeSerpPageUrl(url);
+        if (pagina) dominios.add(hostDaPagina(pagina));
+      }
+      for (const dominio of leitura.domains || []) {
+        const normal = normalizeSerpDomain(dominio);
+        if (normal) dominios.add(normal);
+      }
+    }
+    if (!dominios.size) continue;
+    comDominios += 1;
+    for (const dominio of dominios) presenca.set(dominio, (presenca.get(dominio) ?? 0) + 1);
+  }
+  const genericos: ReadonlySet<string> = comDominios >= SERP_GENERIC_DOMAIN_MIN_KEYWORDS
+    ? new Set([...presenca].filter(([, vezes]) => vezes / comDominios > SERP_GENERIC_DOMAIN_SHARE).map(([dominio]) => dominio))
+    : new Set();
   return {
     thresholds,
+    genericDomains: () => genericos,
     footprint: keywordId => porId.get(keywordId) || null,
     hasPages: keywordId => comPaginas.has(keywordId),
     keywordIdsWithPages: () => [...comPaginas].sort(),
@@ -289,7 +352,7 @@ export function buildSerpSubjectIndex(
       const pronta = memo.get(chave);
       if (pronta) return pronta;
       // A contagem é simétrica; a frase cita as duas na ordem pedida.
-      const medida = measureSerpSubjectOverlap(porId.get(leftKeywordId), porId.get(rightKeywordId), { thresholds, leftKeywordId, rightKeywordId });
+      const medida = measureSerpSubjectOverlap(porId.get(leftKeywordId), porId.get(rightKeywordId), { thresholds, leftKeywordId, rightKeywordId, genericDomains: genericos });
       memo.set(chave, medida);
       return medida;
     },

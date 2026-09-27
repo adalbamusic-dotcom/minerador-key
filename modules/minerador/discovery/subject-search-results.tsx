@@ -19,16 +19,20 @@ import {
   SUBJECT_SEARCH_LOCAL_LIST_TEXT,
   SUBJECT_SEARCH_LOCAL_POLICY_TEXT,
   SUBJECT_SEARCH_MEMORY_ONLY_TEXT,
-  SUBJECT_SEARCH_VOLUME_FILTERS,
+  SUBJECT_SEARCH_ONLY_WITH_VOLUME_HELP,
+  SUBJECT_SEARCH_ONLY_WITH_VOLUME_LABEL,
+  countSelectedWithoutVolume,
   formatSubjectSearchUsd,
   subjectCandidateGoogleAdsVolume,
+  subjectCandidateHasVolume,
+  subjectSearchHiddenWithoutVolumeText,
+  subjectSearchShowHiddenLabel,
   subjectSearchLensName,
   subjectSearchOriginLabel,
   subjectSearchSerpLensLabel,
   subjectSearchSourceStatusLabel,
   subjectSearchSummary,
   type SubjectSearchImportMark,
-  type SubjectSearchVolumeFilter,
 } from "./subject-search-model";
 import { SubjectSearchImportDialog, SubjectSearchPlanDialog } from "./subject-search-dialogs";
 import type { SubjectSearchController } from "./use-subject-search";
@@ -39,7 +43,9 @@ import type { SubjectSearchController } from "./use-subject-search";
  * Tabela própria, porque a candidata guarda TODAS as origens, mas com os
  * componentes compartilhados do Minerador: shell, seleção e barra inferior.
  * Volume é só o do Google Ads; a estimativa do Labs tem coluna própria,
- * rotulada, e nunca entra no filtro "Com volume" nem no envio.
+ * rotulada, e nunca vai ao envio. D2.3: "Só com volume" vem ligado; ele conta
+ * a média do Google Ads OU a estimativa maior que zero, a lista sai ordenada
+ * por volume, o total escondido fica à vista e o envio avisa as sem volume.
  */
 
 const control = "h-9 rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none transition-colors focus:border-module-accent/50 focus-visible:ring-2 focus-visible:ring-module-accent/40";
@@ -92,6 +98,8 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
   const selectedCandidates = record ? record.result.candidates.filter(candidate => selectedKeys.has(candidate.normalizedKeyword)) : [];
   const subjectPhraseSelected = selectedCandidates.some(candidate => candidate.isSubjectPhrase);
   const selectedItemCount = selectedCandidates.filter(candidate => !candidate.isSubjectPhrase).length;
+  const selectedWithoutVolume = record ? countSelectedWithoutVolume(record.result.candidates, selectedKeys) : 0;
+  const hiddenWithoutVolume = controller.hiddenWithoutVolume;
   const busy = controller.executing || Boolean(controller.importDialog?.submitting);
 
   return <section className="mt-5 flex min-h-0 w-full flex-1 flex-col" aria-label="Resultados da Pesquisa por Assunto" data-subject-search-results>
@@ -148,9 +156,9 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
 
       {record && <div className="flex min-w-0 flex-wrap items-center gap-2" data-subject-search-filters>
         <label className="relative min-w-0 flex-1 sm:max-w-md"><span className="sr-only">Buscar nas candidatas</span><Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted" aria-hidden="true" /><input value={controller.filters.text} onChange={event => controller.setFilters(current => ({ ...current, text: event.target.value }))} placeholder="Buscar nas candidatas..." className="w-full rounded border border-divider bg-surface-subtle py-1.5 pl-7 pr-2 text-sm text-foreground outline-none transition-colors placeholder:text-text-muted focus:border-module-accent/50 focus-visible:ring-2 focus-visible:ring-module-accent/40" /></label>
-        <label className="inline-flex min-h-9 items-center gap-2 text-sm text-foreground/80">
-          <InlineLabelCluster label={<InfoHint title="Volume do Google Ads" description="Filtra só pela média mensal do Google Ads. A estimativa DataForSEO não conta como volume. Filtrar não chama provider."><span tabIndex={0} className="cursor-help rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-module-accent/40">Volume</span></InfoHint>} />
-          <select value={controller.filters.volume} onChange={event => controller.setFilters(current => ({ ...current, volume: event.target.value as SubjectSearchVolumeFilter }))} aria-label="Filtrar pelo volume do Google Ads" className={control}>{SUBJECT_SEARCH_VOLUME_FILTERS.map(option => <option key={option} value={option}>{option}</option>)}</select>
+        <label className="inline-flex min-h-9 items-center gap-2 rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground/80" data-subject-search-only-volume>
+          <input type="checkbox" checked={controller.filters.onlyWithVolume} onChange={event => controller.setFilters(current => ({ ...current, onlyWithVolume: event.target.checked }))} />
+          <InlineLabelCluster label={SUBJECT_SEARCH_ONLY_WITH_VOLUME_LABEL} info={<InfoHint title={SUBJECT_SEARCH_ONLY_WITH_VOLUME_LABEL} description={SUBJECT_SEARCH_ONLY_WITH_VOLUME_HELP} />} />
         </label>
         <label className="inline-flex min-h-9 items-center gap-2 text-sm text-foreground/80">Origem
           <select value={controller.filters.origin} onChange={event => controller.setFilters(current => ({ ...current, origin: event.target.value as typeof current.origin }))} aria-label="Filtrar pela origem" className={control}>
@@ -162,6 +170,10 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
           <input type="checkbox" checked={controller.filters.hideExisting} onChange={event => controller.setFilters(current => ({ ...current, hideExisting: event.target.checked }))} />
           Esconder as que já existem
         </label>
+        {hiddenWithoutVolume > 0 && <p className="inline-flex min-h-9 flex-wrap items-center gap-2 text-sm text-text-muted" role="status" data-subject-search-hidden-volume>
+          {subjectSearchHiddenWithoutVolumeText(hiddenWithoutVolume)}
+          <button type="button" onClick={() => controller.setFilters(current => ({ ...current, onlyWithVolume: false }))} className={neutralButton}>{subjectSearchShowHiddenLabel(hiddenWithoutVolume)}</button>
+        </p>}
       </div>}
     </div>
 
@@ -178,7 +190,7 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
             <th scope="col" className="border-r border-divider/70 px-2 py-2 font-medium">CPC</th>
             <th scope="col" className="border-r border-divider/70 px-2 py-2 font-medium">Concorrência Ads</th>
             <th scope="col" className="border-r border-divider/70 px-2 py-2 font-medium">
-              <InlineLabelCluster label={SUBJECT_SEARCH_ESTIMATE_COLUMN} info={<InfoHint title={SUBJECT_SEARCH_ESTIMATE_COLUMN} description="Estimativa de busca do DataForSEO Labs, só para leitura. Não é volume, não entra no filtro Com volume e não vai ao Processador." />} />
+              <InlineLabelCluster label={SUBJECT_SEARCH_ESTIMATE_COLUMN} info={<InfoHint title={SUBJECT_SEARCH_ESTIMATE_COLUMN} description="Estimativa de busca do DataForSEO Labs, só para leitura. Não preenche a coluna Volume e não vai ao Processador. Maior que zero, conta no filtro Só com volume." />} />
             </th>
             <th scope="col" className="px-2 py-2 font-medium">Situação</th>
           </tr>
@@ -189,20 +201,21 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
             const mark = record.marks[key];
             const state = situation(candidate, mark);
             const volume = subjectCandidateGoogleAdsVolume(candidate);
+            const hasVolume = subjectCandidateHasVolume(candidate);
             const origins = candidate.origins.map(origin => subjectSearchOriginLabel(origin));
             return <tr key={key} data-keyword-table-row-id={key} className={`h-9 transition-colors ${selectedKeys.has(key) ? "bg-selected hover:bg-surface-elevated" : "hover:bg-surface-subtle"}`}>
               <KeywordSelectionCell id={key} keyword={candidate.keyword} selected={selectedKeys.has(key)} onPointerDown={event => selection.onSelectionPointerDown(key, event)} onClick={event => selection.onSelectionClick(key, event)} />
               <td className={keywordCell} title={candidate.keyword}>{candidate.keyword}</td>
               <td className={multiLineCell}><ul className="space-y-0.5">{origins.map(origin => <li key={origin}>{origin}</li>)}</ul></td>
               <td className={`${multiLineCell} text-text-muted`}>{candidate.evidence.length ? <ul className="space-y-0.5">{candidate.evidence.map(text => <li key={text}>{text}</li>)}</ul> : "—"}</td>
-              <td className={auxiliaryCell}>{volume === null ? "Sem média do Google Ads" : new Intl.NumberFormat("pt-BR").format(volume)}</td>
+              <td className={hasVolume ? auxiliaryCell : `${auxiliaryCell} text-text-muted`} data-subject-search-without-volume={hasVolume ? undefined : ""}>{volume === null ? (hasVolume ? "Sem média do Google Ads" : "Sem volume") : new Intl.NumberFormat("pt-BR").format(volume)}</td>
               <td className={auxiliaryCell}>{candidate.googleAds ? formatDiscoveryMoney(candidate.googleAds.averageCpcMicros, candidate.googleAds.currencyCode) : "—"}</td>
               <td className={auxiliaryCell}>{candidate.googleAds ? `${competitionText(candidate.googleAds.competition)}${candidate.googleAds.competitionIndex === null ? "" : ` · ${candidate.googleAds.competitionIndex}`}` : "—"}</td>
               <td className={`${auxiliaryCell} text-text-muted`}>{candidate.dataForSeoEstimate?.searchVolume === null || candidate.dataForSeoEstimate?.searchVolume === undefined ? "—" : new Intl.NumberFormat("pt-BR").format(candidate.dataForSeoEstimate.searchVolume)}</td>
               <td className="whitespace-normal break-words px-2 py-1 leading-6" title={state.title}>{state.label}</td>
             </tr>;
           })}
-          {!candidates.length && <tr><td colSpan={9} className="p-0"><KeywordTableEmptyState><p className="text-sm text-text-muted">{record.result.candidates.length ? "Nenhuma candidata corresponde aos filtros locais." : "Nenhuma fonte devolveu candidatas para este Assunto. Confira o estado de cada fonte acima."}</p></KeywordTableEmptyState></td></tr>}
+          {!candidates.length && <tr><td colSpan={9} className="p-0"><KeywordTableEmptyState><p className="text-sm text-text-muted">{record.result.candidates.length ? (hiddenWithoutVolume > 0 ? "Nenhuma candidata com volume nestes filtros." : "Nenhuma candidata corresponde aos filtros locais.") : "Nenhuma fonte devolveu candidatas para este Assunto. Confira o estado de cada fonte acima."}</p></KeywordTableEmptyState></td></tr>}
         </tbody>
       </table>
     </KeywordTableShell> : <KeywordTableEmptyState><div className="max-w-xl space-y-2"><p className="text-base font-semibold text-foreground">Nenhuma Pesquisa por Assunto neste navegador.</p><p className="text-sm leading-6 text-text-muted">Escreva o Assunto ou escolha um declarado e aperte Pesquisar. O custo aparece antes de qualquer consulta paga.</p></div></KeywordTableEmptyState>}
@@ -210,6 +223,7 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
     {record && selectedKeys.size > 0 && <KeywordTableBulkBarShell className="font-sans">
       <div className="flex min-w-0 shrink-0 items-center gap-2" data-subject-search-bulk-context>
         <strong className="shrink-0 rounded border border-module-accent/50 bg-selected px-2.5 py-1 text-sm font-bold text-foreground">{selectedKeys.size} {selectedKeys.size === 1 ? "selecionada" : "selecionadas"}</strong>
+        {selectedWithoutVolume > 0 && <span className="shrink-0 text-sm text-warning" data-subject-search-selected-without-volume>{selectedWithoutVolume} sem volume</span>}
       </div>
       <div className="flex min-w-0 items-center gap-0.5">
         <MineradorProcessAction title="Enviar ao Processador" description="Leva ao Processador só as keywords selecionadas, sem métrica. O volume é medido de novo lá, pelo Google Ads, sem custo." label={controller.importDialog?.submitting ? "Enviando..." : "Enviar ao Processador"} ariaLabel="Enviar selecionadas ao Processador" labelClassName="hidden sm:inline" icon={<Send className="h-3.5 w-3.5" aria-hidden="true" />} onClick={() => controller.openImport(selectedKeys.size)} disabled={busy || !selectedItemCount} buttonClassName="text-action-accent" />
@@ -218,6 +232,6 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
     </KeywordTableBulkBarShell>}
 
     <SubjectSearchPlanDialog controller={controller} />
-    <SubjectSearchImportDialog controller={controller} selectedKeys={selectedKeys} selectedItemCount={selectedItemCount} subjectPhraseSelected={subjectPhraseSelected} />
+    <SubjectSearchImportDialog controller={controller} selectedKeys={selectedKeys} selectedItemCount={selectedItemCount} selectedWithoutVolume={selectedWithoutVolume} subjectPhraseSelected={subjectPhraseSelected} />
   </section>;
 }

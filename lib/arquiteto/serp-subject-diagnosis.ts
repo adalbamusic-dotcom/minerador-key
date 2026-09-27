@@ -40,6 +40,17 @@
  *                        "tema sem demanda no Google" — a decisão é do dono.
  *   no_pair_in_batch     nenhuma keyword do lote trata do mesmo assunto no
  *                        Google: oferecer "Buscar reforço" (D2.2).
+ *   suggestions_available D2.3 — há sugestões com volume (Forte marcada,
+ *                        Provável desmarcada) para o dono confirmar de uma vez.
+ *                        Vem antes do par em outro Silo quando alguma está no
+ *                        próprio Silo, fora de artigo; senão, antes de "sem
+ *                        SERP", "sem demanda" e "sem par".
+ *
+ * D2.3 — TODO cartão traz `suggestions`: as keywords com volume que dividem a
+ * SERP com a âncora (Forte ou Provável), por volume, com motivo curto. A
+ * intenção que barra é a da SERP; a da Lógica, quando diverge, é aviso — o par
+ * "como atrair pacientes" × "como atrair pacientes para clínica" (7 páginas)
+ * deixa de ser "intenção diferente" e vira sugestão Forte, com o aviso.
  *
  * Nada aqui aplica coisa alguma: a formação já decidiu o que é automático, a
  * troca e o movimento entre Silos são decisão humana. Isto só LÊ o plano e o
@@ -57,6 +68,7 @@ import {
   type PublishedPrimarySwapProposal,
 } from "./published-primary-swap.ts";
 import { MAX_ARTICLE_KEYWORDS } from "./article-formation.ts";
+import { suggestAnchorReinforcements, type AnchorSuggestion, type SuggestionLocation } from "./serp-subject-suggestions.ts";
 
 /* --------------------------------- estados --------------------------------- */
 
@@ -70,6 +82,7 @@ export const SERP_SUBJECT_DILEMMA_STATES = [
   "serp_missing",
   "no_demand",
   "no_pair_in_batch",
+  "suggestions_available",
 ] as const;
 export type SerpSubjectDilemmaState = (typeof SERP_SUBJECT_DILEMMA_STATES)[number];
 
@@ -84,6 +97,7 @@ export const SERP_SUBJECT_DILEMMA_LABELS: Readonly<Record<SerpSubjectDilemmaStat
   serp_missing: "Sem SERP no cache",
   no_demand: "Tema sem demanda no Google",
   no_pair_in_batch: "Sem par no lote",
+  suggestions_available: "Sugestões para confirmar",
 });
 
 /** O tom do selo, no vocabulário do sistema visual (sem cor crua). */
@@ -97,6 +111,7 @@ export const SERP_SUBJECT_DILEMMA_TONES: Readonly<Record<SerpSubjectDilemmaState
   serp_missing: "warning",
   no_demand: "neutral",
   no_pair_in_batch: "warning",
+  suggestions_available: "info",
 });
 
 /** A frase fixa da D2.2, citada igual na tela e no catálogo das IAs. */
@@ -244,7 +259,7 @@ export type AnchorPairElsewhere = {
 };
 
 export type SerpSubjectDiagnosisAction = {
-  kind: "decide_swap" | "review_cross_silo" | "collect_serp" | "search_reinforcement" | "measure_volume" | "review_dna" | "declare_post" | "owner_decides" | "open_article";
+  kind: "decide_swap" | "review_cross_silo" | "collect_serp" | "search_reinforcement" | "measure_volume" | "review_dna" | "declare_post" | "owner_decides" | "open_article" | "apply_suggestions";
   label: string;
   search?: ReinforcementSearchRequest;
   /** `open_article`: o artigo a abrir na mesa (o que ficou com o par, ou este, para liberar vaga). */
@@ -294,6 +309,12 @@ export type AnchorSerpDiagnosis = {
   publishedOverlaps: Array<{ keywordId: string; keyword: string; sharedPageCount: number }>;
   /** A primeira é a ação principal. */
   actions: SerpSubjectDiagnosisAction[];
+  /**
+   * D2.3 (aditivo) — as sugestões de reforço com volume, por volume: Forte
+   * marcada (no próprio Silo, fora de artigo, até as vagas), Provável
+   * desmarcada, par em outro Silo como proposta. Nada é aplicado aqui.
+   */
+  suggestions: AnchorSuggestion[];
 };
 
 /* -------------------------------- diagnóstico -------------------------------- */
@@ -349,6 +370,16 @@ export function diagnoseSerpSubjectAnchors(input: {
     for (const keywordId of silo.plan.awaitingSubjectKeywordIds) siloDe.set(keywordId, { siloRef: silo.siloRef, siloLabel: silo.siloLabel });
   }
   const todas = [...input.keywords.keys()];
+  const aguardando = new Set(input.silos.flatMap(silo => silo.plan.awaitingSubjectKeywordIds));
+  const localizar = (keywordId: string): SuggestionLocation => {
+    const silo = siloDe.get(keywordId) ?? null;
+    const naAncora = ancoraDe.get(keywordId);
+    const base = { siloRef: silo?.siloRef ?? null, siloLabel: silo?.siloLabel ?? null };
+    if (naAncora) return { ...base, kind: "anchor_member", articleLabel: naAncora.label, articlePrincipalKeywordId: naAncora.principalKeywordId };
+    if (sobras.has(keywordId)) return { ...base, kind: "leftover" };
+    if (aguardando.has(keywordId)) return { ...base, kind: "awaiting_subject" };
+    return { ...base, kind: silo ? "new_article" : "unknown" };
+  };
 
   const evidenciaDe = (keywordId: string): AnchorSerpDiagnosis["serpEvidence"] => {
     if (!serp || !serp.hasPages(keywordId)) return "missing";
@@ -432,6 +463,19 @@ export function diagnoseSerpSubjectAnchors(input: {
     const crossSilo = propostas.filter(proposta => proposta.anchorKeywordId === params.anchorKeywordId
       || (params.kind === "published" && proposta.anchorKind === "published" && proposta.anchorKeywordId === params.principalKeywordId));
 
+    // D2.3 — as sugestões com volume, por volume, no nível Forte ou Provável.
+    const suggestions = suggestAnchorReinforcements({
+      siloRef: params.siloRef,
+      measureAgainst: medidores,
+      memberIds: params.memberIds,
+      keywords: input.keywords,
+      serp,
+      locate: localizar,
+      subjectDeclared: input.subjectDeclared,
+      slotsLeft,
+    });
+    const sugestoesNoSilo = suggestions.filter(item => item.where === "leftover" || item.where === "new_article");
+
     // D2.1 — a troca da principal publicada.
     //
     // A substituta só é PROPOSTA quando cabe: já está no artigo, ou o artigo
@@ -445,10 +489,12 @@ export function diagnoseSerpSubjectAnchors(input: {
     const infoPublicada = params.kind === "published" ? input.published.get(params.anchorKeywordId) : undefined;
     if (params.kind === "published" && ancoraKw) {
       const info = infoPublicada || { post: "unknown" as const, url: null, canonical: null, slug: null };
-      const deFora = [
+      // D2.3 — a substituta pode vir de fora do artigo: Forte ou Provável, no próprio Silo.
+      const deFora = [...new Set([
         ...crossSilo.map(proposta => proposta.keywordId),
         ...pairsElsewhere.filter(par => par.where === "leftover_same_silo").map(par => par.keywordId),
-      ].filter(keywordId => !noArtigo.has(keywordId));
+        ...sugestoesNoSilo.map(item => item.keywordId),
+      ])].filter(keywordId => !noArtigo.has(keywordId));
       const comoCandidatas = (ids: readonly string[]) => ids
         .map(id => input.keywords.get(id))
         .filter((item): item is ArticleFormationKeyword => Boolean(item))
@@ -509,9 +555,15 @@ export function diagnoseSerpSubjectAnchors(input: {
     let headline: string;
     const actions: SerpSubjectDiagnosisAction[] = [];
     const semArtigoDeAssunto = params.kind === "subject" && params.memberIds.length === 0;
+    const fortes = suggestions.filter(item => item.level === "strong").length;
+    const sugestoesFrase = () => {
+      const maior = suggestions[0];
+      const niveis = [fortes ? `${fortes} Forte` : "", suggestions.length - fortes ? `${suggestions.length - fortes} Provável` : ""].filter(Boolean).join(", ");
+      return `${plural(suggestions.length, "sugestão", "sugestões")} com volume para ${rotulo} (${niveis}). A maior: "${maior.keyword}" (volume ${maior.volume}, ${maior.reason}). Marque e aplique de uma vez, até o teto de 6.`;
+    };
     if (swap?.state === "proposed" && swap.substitute) {
       state = "swap_proposed";
-      headline = `Troca proposta: "${swap.substitute.keyword}" (volume ${swap.substitute.volume}, ${swap.substitute.sharedPageCount} páginas em comum no top 10) assume a principal; "${nome(params.anchorKeywordId)}" vira secundária. URL, slug e canonical não mudam.`;
+      headline = `Troca proposta${swap.substitute.level === "probable" ? " (Provável)" : ""}: "${swap.substitute.keyword}" (volume ${swap.substitute.volume}, ${swap.substitute.sharedPageCount} páginas em comum no top 10) assume a principal; "${nome(params.anchorKeywordId)}" vira secundária. URL, slug e canonical não mudam.`;
       actions.push({ kind: "decide_swap", label: "Decidir a troca" });
     } else if (apoios > 0 || (params.kind === "subject" && !semArtigoDeAssunto)) {
       state = "reinforced";
@@ -530,6 +582,10 @@ export function diagnoseSerpSubjectAnchors(input: {
       if (crossSilo.length) actions.push({ kind: "review_cross_silo", label: "Ver proposta entre Silos" });
       // Posto Livre sem substituta: a principal está ali PARA SER TROCADA — buscar uma com volume.
       if ((livreSemSubstituta && !substituteOutsideFullArticle) || (slotsLeft && !pairsElsewhere.length && !crossSilo.length)) actions.push(buscar);
+    } else if (sugestoesNoSilo.length && !semArtigoDeAssunto) {
+      state = "suggestions_available";
+      headline = sugestoesFrase();
+      actions.push({ kind: "apply_suggestions", label: "Aplicar selecionadas" });
     } else if (crossSilo.length || paresOutroSilo.length) {
       state = "pair_in_other_silo";
       const primeiro = crossSilo[0]
@@ -573,6 +629,10 @@ export function diagnoseSerpSubjectAnchors(input: {
       const primeira = blockedByDna[0];
       headline = `${plural(blockedByDna.length, "keyword trata", "keywords tratam")} do mesmo assunto no Google que ${rotulo} ("${primeira.keyword}", ${primeira.sharedPageCount} páginas em comum), mas o DNA separa: ${primeira.reason.replace(/^.*Mas o DNA separa as duas: /, "").replace(/ — só por decisão humana.$/, "")}. Nada entra sozinho: revise a intenção no Minerador ou decida você.`;
       actions.push({ kind: "review_dna", label: "Revisar a intenção no Minerador" }, buscar);
+    } else if (suggestions.length) {
+      state = "suggestions_available";
+      headline = sugestoesFrase();
+      actions.push({ kind: "apply_suggestions", label: "Aplicar selecionadas" });
     } else if (serpEvidence === "missing") {
       state = "serp_missing";
       const alvo = nome(params.anchorKeywordId);
@@ -648,6 +708,7 @@ export function diagnoseSerpSubjectAnchors(input: {
       blockedByDna,
       publishedOverlaps,
       actions,
+      suggestions,
     };
   };
 

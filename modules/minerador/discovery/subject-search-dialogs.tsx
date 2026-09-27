@@ -12,6 +12,7 @@ import {
   subjectPhraseDeclarationPlan,
   subjectSearchLensName,
   subjectSearchOriginLabel,
+  subjectSearchSelectedWithoutVolumeText,
   type SubjectPhrasePreviewRow,
 } from "./subject-search-model";
 import type { SubjectSearchController } from "./use-subject-search";
@@ -150,7 +151,7 @@ export function SubjectSearchPlanDialog({ controller }: { controller: SubjectSea
   </div>;
 }
 
-export function SubjectSearchImportDialog({ controller, selectedKeys, selectedItemCount, subjectPhraseSelected }: { controller: SubjectSearchController; selectedKeys: ReadonlySet<string>; selectedItemCount: number; subjectPhraseSelected: boolean }) {
+export function SubjectSearchImportDialog({ controller, selectedKeys, selectedItemCount, selectedWithoutVolume = 0, subjectPhraseSelected }: { controller: SubjectSearchController; selectedKeys: ReadonlySet<string>; selectedItemCount: number; selectedWithoutVolume?: number; subjectPhraseSelected: boolean }) {
   const dialog = controller.importDialog;
   const record = controller.activeRecord;
   const dialogRef = useRef<HTMLElement | null>(null);
@@ -161,12 +162,15 @@ export function SubjectSearchImportDialog({ controller, selectedKeys, selectedIt
   const decision = dialog.offered && dialog.declare && !dialog.declaredId && dialog.preview.row ? subjectPhraseDeclarationPlan(dialog.preview.row) : null;
   const waitingPreview = dialog.offered && dialog.declare && !dialog.declaredId && (dialog.preview.loading || Boolean(dialog.preview.error) || !dialog.preview.row || decision?.action === "refuse");
   const done = Boolean(dialog.result);
+  // D2.3: avisa, sem bloquear. Quem decide o envio é o dono.
+  const withoutVolumeText = subjectSearchSelectedWithoutVolumeText(selectedWithoutVolume);
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="presentation">
     <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="subject-search-import-title" data-subject-search-import className="flex max-h-[86vh] w-full max-w-2xl flex-col gap-3 overflow-y-auto rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl outline-none">
       <div className="min-w-0">
         <h2 id="subject-search-import-title" className="text-base font-semibold text-foreground">Enviar ao Processador</h2>
         <p className="mt-1 text-sm leading-6 text-foreground">{selectedItemCount} keyword(s) de sustentação selecionada(s) para o Assunto <span className="font-semibold">{subject.phrase}</span>.</p>
         {subjectPhraseSelected && <p className="text-sm leading-6 text-text-muted">A própria frase do Assunto não entra como keyword de sustentação.</p>}
+        {withoutVolumeText && <p className="mt-1 text-sm leading-6 text-warning" role="status" data-subject-search-import-without-volume>{withoutVolumeText}</p>}
       </div>
 
       {subject.subjectKeywordId

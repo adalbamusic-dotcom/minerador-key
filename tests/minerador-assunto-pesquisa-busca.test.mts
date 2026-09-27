@@ -481,6 +481,34 @@ test("dedupe pela normalizeKeyword: acento e caixa juntam; corte em 600 com o to
   assert.equal(many.truncated, true);
 });
 
+test("D2.3: volume primeiro — Google Ads maior, depois a estimativa, e o corte das 600 cai nas sem volume", () => {
+  const ads = (averageMonthlySearches: number | null) => ({ averageMonthlySearches, competition: null, competitionIndex: null, averageCpcMicros: null, lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: null });
+  const merged = mergeSubjectDiscoveryCandidates({
+    contributions: [
+      // Três fontes e sem volume nenhum: antes vinha primeiro; agora vai para o fim.
+      { source: "ads_keyword_seed", keyword: "marketing sem busca", googleAds: ads(null) },
+      { source: "labs_related", keyword: "marketing sem busca", estimate: { searchVolume: 0, label: "Estimativa DataForSEO" } },
+      { source: "labs_category", keyword: "marketing sem busca" },
+      { source: "labs_related", keyword: "so estimativa", estimate: { searchVolume: 5000, label: "Estimativa DataForSEO" } },
+      { source: "ads_keyword_seed", keyword: "como atrair clientes", googleAds: ads(720) },
+      { source: "ads_keyword_seed", keyword: "agencia de marketing", googleAds: ads(18100) },
+    ],
+    normalizedPhrase: "marketing",
+  });
+  assert.deepEqual(merged.candidates.map(item => item.keyword), ["agencia de marketing", "como atrair clientes", "so estimativa", "marketing sem busca"]);
+  assert.equal(merged.candidates.find(item => item.keyword === "so estimativa")?.googleAds, null, "a estimativa nunca vira Volume");
+
+  const many = mergeSubjectDiscoveryCandidates({
+    contributions: [
+      ...Array.from({ length: 640 }, (_, index) => ({ source: "labs_related" as const, keyword: "sem volume " + index })),
+      { source: "ads_keyword_seed" as const, keyword: "trafego pago", googleAds: ads(5400) },
+    ],
+    normalizedPhrase: "x",
+  });
+  assert.equal(many.truncated, true);
+  assert.equal(many.candidates[0].keyword, "trafego pago", "a com volume nunca é cortada pelas sem volume");
+});
+
 test("\"já existe\" só casa com as keywords da marca que a porta devolveu", () => {
   const merged = mergeSubjectDiscoveryCandidates({
     contributions: [{ source: "labs_related", keyword: "seo local" }, { source: "labs_related", keyword: "seo técnico" }],

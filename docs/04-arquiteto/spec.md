@@ -1,3 +1,28 @@
+## 37. Diferenciar publicados que disputam o mesmo assunto — 2026-09-27
+
+Regras permanentes (no código desde 2026-09-27; homologação manual pendente). Fonte: [SDD aprovada](sdd-diferenciacao-publicados-canibalizados-2026-09-27.md) e D2.1, D2.2, D2.3 e D6 de [regras da SERP e dos Assuntos](../compartilhado/regras-serp-e-assuntos-2026-09-26.md).
+
+1. **Detectar é grátis**: grupos de publicados da marca pela régua D2.2, lida do cache (Forte = 3+ páginas em comum no top 10, nas 4 lentes). Publicado sem SERP no cache fica de fora, com o motivo.
+2. **Diferenciar não muda endereço**: URL, slug, canonical e marca nunca mudam; nada é apagado, despublicado, redirecionado ou fundido. O ângulo precisa caber no slug.
+3. **Ângulos por autoridade**: o que separa os slugs, o DNA, o que o Google associa à URL e, por último, a IA, opcional e sem decidir nada.
+4. **Buscar é pago e confirmado**: a tela mostra a faixa de custo antes; uma confirmação vale para os grupos marcados; teto de US$ 0,50 por grupo, aplicado no servidor; cache válido não cobra; só DataForSEO; a rodada exige o hash do plano.
+5. **Volume e SERP decidem**: keyword sem volume nunca é proposta; separação (no máximo 1 página em comum com cada irmã: a principal que ela mantém mais as propostas dela) e encaixe (2 ou mais com a própria página). Estados: Diferenciado, Diferenciação fraca (com o motivo; a melhor possível é só evidência, nunca keyword aplicável) ou Sem saída pelo provider.
+6. **Principal**: só Posto Livre troca a principal, pela régua da troca (D2.1). Posto Travado ou não declarado e página que ranqueia recebem só 1 ou 2 secundárias, com aviso. Teto de 6 keywords por artigo.
+7. **Aceitar é humano**: confirmação, nova versão do ArticleDNA em revisão, ator autenticado e releitura; sucesso só com a releitura. Por padrão só as páginas "Diferenciado"; outra página entra só marcada pela pessoa e recebe só a nota. O Posto e o ranqueamento (Q3) são relidos na hora de gravar. A nota vai em `differentiation` (prefixo "Diferenciação: ") e desce ao Redator; o ângulo das irmãs vai em `excludedSubjects`. Keyword nova passa pelo Minerador antes de entrar no artigo; nenhuma keyword some.
+8. **Manter como está** (com confirmação) vale para a SERP do momento: o grupo volta quando ela mudar. Nenhuma prévia o desfaz.
+9. **Uma rodada por prévia**: a proposta é reservada antes de pagar; outra rodada na mesma prévia é recusada sem pagar; a mesma rodada repetida devolve o resultado gravado; nova prévia não apaga avaliação paga — só "Planejar nova rodada", pedido na tela, a substitui, e a anterior fica no histórico.
+
+## 36. Volume primeiro e sugestão que o dono só confirma (D2.3) — 2026-09-27
+
+Regras permanentes (no código desde 2026-09-27; homologação manual pendente). Fonte: D2.3 de [regras da SERP e dos Assuntos](../compartilhado/regras-serp-e-assuntos-2026-09-26.md). Onde a seção 35 diverge (itens 2 e 3), vale esta.
+
+1. **Sem volume não reforça**: Google Ads sem média e estimativa zero ou vazia = sem volume. Nunca é sugestão de reforço, sustentação ou nova principal; com a SERP da mesa lida, também não entra sozinha em artigo. O Assunto é a exceção (tronco).
+2. **Dois níveis**: Forte = 3+ páginas em comum no top 10 (vem marcada); Provável = 2 páginas, ou 3+ sites em comum (sem rede social nem portal presente em mais de 15% das SERPs do lote), ou mesma entidade e mesmo problema no DNA, este só quando a SERP não mede o par (vem desmarcada). SERP que mediu 0 ou 1 página e menos de 3 sites é outro assunto: não é sugestão. Cada sugestão mostra nível, volume e motivo curto, ordenada por volume.
+3. **A intenção que barra é a da SERP** (`evidencia_serp` conclusiva). A da Lógica, quando diverge e a SERP mede o par, é aviso. Sem SERP para medir, a Lógica segura a entrada automática.
+4. **Aplicar é ato humano**: o dono marca e confirma de uma vez, até o teto de 6, com prévia e releitura, pelos gravadores que a mesa já usa. Par em outro Silo entra como proposta (muda de Silo antes). Publicada nunca entra em outro artigo; decisão humana de formação não é desfeita por sugestão.
+5. **Troca da principal Livre**: Forte (3+ páginas) ou Provável só com 2 páginas confirmadas pelas palavras, sempre com volume maior; a Forte tem prioridade e a Provável vem com aviso e "(Provável)" no título. Sites em comum e o DNA sugerem reforço, nunca a troca (D2.1: páginas em comum); sem SERP no cache, não há troca.
+6. **Sobras viram oportunidades**: agrupadas por tema, nomeadas pela keyword de maior volume, ordenadas pelo volume somado, até 6 por grupo; "Criar artigo novo com este grupo" nunca é automática; sobra sem volume fica recolhida no fim, com a contagem. Motivos curtos, sem rótulo da Lógica.
+
 ## 35. Mesmo assunto pela SERP e troca da principal Livre — 2026-09-27
 
 Regras permanentes (no código desde 2026-09-27; homologação manual pendente). Fonte: Parte D de [regras da SERP e dos Assuntos](../compartilhado/regras-serp-e-assuntos-2026-09-26.md).

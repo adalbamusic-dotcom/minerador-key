@@ -25,6 +25,13 @@ import {
   declaredSubjectOptions,
   defaultDeclarePhraseAsSubject,
   filterSubjectCandidates,
+  countSelectedWithoutVolume,
+  countSubjectCandidatesHiddenWithoutVolume,
+  subjectCandidateHasVolume,
+  subjectSearchHiddenWithoutVolumeText,
+  subjectSearchSelectedWithoutVolumeText,
+  subjectSearchShowHiddenLabel,
+  SUBJECT_SEARCH_ONLY_WITH_VOLUME_LABEL,
   parseSubjectSearchLink,
   subjectCandidateGoogleAdsVolume,
   subjectIdFromApply,
@@ -294,15 +301,74 @@ test("pedido de plano e de execução: só os campos do schema estrito, sem mét
 
 /* ----------------------------- volume (§47) ----------------------------- */
 
-test("'Com volume' lê só o Google Ads: a estimativa DataForSEO nunca vira volume", () => {
-  const onlyEstimate = candidate({ keyword: "a", normalizedKeyword: "a", dataForSeoEstimate: { searchVolume: 5000, label: "Estimativa DataForSEO" } });
-  const withAds = candidate({ keyword: "b", normalizedKeyword: "b", googleAds: { averageMonthlySearches: 10, competition: null, competitionIndex: null, averageCpcMicros: null, lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: null } });
-  assert.equal(subjectCandidateGoogleAdsVolume(onlyEstimate as never), null);
-  assert.equal(subjectCandidateGoogleAdsVolume(withAds as never), 10);
-  const withVolume = filterSubjectCandidates([onlyEstimate, withAds] as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, volume: "Com volume" });
-  assert.deepEqual(withVolume.map(item => (item as { keyword: string }).keyword), ["b"]);
-  const without = filterSubjectCandidates([onlyEstimate, withAds] as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, volume: "Sem volume do Google Ads" });
-  assert.deepEqual(without.map(item => (item as { keyword: string }).keyword), ["a"]);
+const ADS = (averageMonthlySearches: number | null) => ({ averageMonthlySearches, competition: null, competitionIndex: null, averageCpcMicros: null, lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: null });
+const ESTIMATE = (searchVolume: number | null) => ({ searchVolume, label: "Estimativa DataForSEO" });
+const keywordsOf = (list: unknown[]) => list.map(item => (item as { keyword: string }).keyword);
+
+/* Volumes reais da AdalbaPro (Google Ads, lidos em 2026-09-27), sem custo. */
+function adalbaCandidates() {
+  return [
+    candidate({ keyword: "marketing para clinicas sem busca", normalizedKeyword: "marketing para clinicas sem busca", origins: ["ads_keyword_seed", "labs_related", "labs_category"], googleAds: ADS(null), dataForSeoEstimate: ESTIMATE(0) }),
+    candidate({ keyword: "como atrair pacientes", normalizedKeyword: "como atrair pacientes", googleAds: ADS(20) }),
+    candidate({ keyword: "agência de marketing", normalizedKeyword: "agencia de marketing", googleAds: ADS(18100) }),
+    candidate({ keyword: "só estimativa", normalizedKeyword: "so estimativa", dataForSeoEstimate: ESTIMATE(90) }),
+    candidate({ keyword: "como atrair clientes", normalizedKeyword: "como atrair clientes", googleAds: ADS(720) }),
+    candidate({ keyword: "ads zerado", normalizedKeyword: "ads zerado", googleAds: ADS(0), dataForSeoEstimate: ESTIMATE(null) }),
+    candidate({ keyword: "leads qualificados", normalizedKeyword: "leads qualificados", googleAds: ADS(880) }),
+  ];
+}
+
+test("D2.3: sem volume é Google Ads sem média E estimativa DataForSEO zero ou vazia", () => {
+  assert.equal(subjectCandidateHasVolume(candidate({ googleAds: ADS(10) }) as never), true);
+  assert.equal(subjectCandidateHasVolume(candidate({ dataForSeoEstimate: ESTIMATE(5000) }) as never), true, "a estimativa conta para ter volume");
+  assert.equal(subjectCandidateHasVolume(candidate({ googleAds: ADS(null), dataForSeoEstimate: ESTIMATE(0) }) as never), false);
+  assert.equal(subjectCandidateHasVolume(candidate({ googleAds: ADS(0), dataForSeoEstimate: ESTIMATE(null) }) as never), false);
+  assert.equal(subjectCandidateHasVolume(candidate() as never), false);
+  // A coluna Volume continua só com o Google Ads: a estimativa nunca vira Volume.
+  assert.equal(subjectCandidateGoogleAdsVolume(candidate({ dataForSeoEstimate: ESTIMATE(5000) }) as never), null);
+  assert.equal(subjectCandidateGoogleAdsVolume(candidate({ googleAds: ADS(10) }) as never), 10);
+});
+
+test("D2.3: 'Só com volume' vem ligado, esconde as sem volume e ordena por volume", () => {
+  assert.equal(SUBJECT_SEARCH_DEFAULT_FILTERS.onlyWithVolume, true);
+  assert.equal(SUBJECT_SEARCH_ONLY_WITH_VOLUME_LABEL, "Só com volume");
+  const list = adalbaCandidates();
+  const visible = filterSubjectCandidates(list as never[], SUBJECT_SEARCH_DEFAULT_FILTERS);
+  assert.deepEqual(keywordsOf(visible), ["agência de marketing", "leads qualificados", "como atrair clientes", "como atrair pacientes", "só estimativa"], "Google Ads maior primeiro; só a estimativa depois");
+  assert.equal(countSubjectCandidatesHiddenWithoutVolume(list as never[], SUBJECT_SEARCH_DEFAULT_FILTERS), 2);
+  const all = filterSubjectCandidates(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, onlyWithVolume: false });
+  assert.equal(all.length, list.length, "desligado, nenhuma some");
+  assert.deepEqual(keywordsOf(all).slice(-2), ["marketing para clinicas sem busca", "ads zerado"], "sem volume no fim, na ordem recebida");
+  assert.equal(countSubjectCandidatesHiddenWithoutVolume(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, onlyWithVolume: false }), 0);
+  assert.equal(list.length, 7, "filtrar não altera a lista guardada");
+  assert.equal((list[0] as { keyword: string }).keyword, "marketing para clinicas sem busca");
+});
+
+test("D2.3: a contagem de escondidas respeita os outros filtros", () => {
+  const list = adalbaCandidates();
+  assert.equal(countSubjectCandidatesHiddenWithoutVolume(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, text: "zerado" }), 1);
+  assert.equal(countSubjectCandidatesHiddenWithoutVolume(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, origin: "labs_category" }), 1);
+  assert.equal(countSubjectCandidatesHiddenWithoutVolume(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, text: "atrair" }), 0);
+  assert.equal(subjectSearchHiddenWithoutVolumeText(1), "1 candidata sem volume escondida.");
+  assert.equal(subjectSearchHiddenWithoutVolumeText(12), "12 candidatas sem volume escondidas.");
+  assert.equal(subjectSearchShowHiddenLabel(12), "Mostrar as 12");
+});
+
+test("D2.3: o envio avisa quantas selecionadas estão sem volume, sem contar a frase do Assunto", () => {
+  const list = [
+    ...adalbaCandidates(),
+    candidate({ keyword: "marketing para clinicas", normalizedKeyword: "marketing para clinicas", isSubjectPhrase: true }),
+  ];
+  const selected = new Set(["ads zerado", "marketing para clinicas sem busca", "leads qualificados", "marketing para clinicas"]);
+  assert.equal(countSelectedWithoutVolume(list as never[], selected), 2);
+  assert.equal(countSelectedWithoutVolume(list as never[], new Set(["leads qualificados"])), 0);
+  assert.equal(subjectSearchSelectedWithoutVolumeText(0), null);
+  assert.match(subjectSearchSelectedWithoutVolumeText(2) || "", /^2 selecionadas estão sem volume: sem média do Google Ads e sem estimativa DataForSEO\./);
+  assert.match(subjectSearchSelectedWithoutVolumeText(1) || "", /^1 selecionada está sem volume/);
+  // O aviso não muda o envio: os itens continuam sem métrica.
+  const { items } = buildSubjectDiscoveryImportItems(list as never[], selected, "marketing para clinicas");
+  assert.equal(items.length, 3);
+  assert.doesNotMatch(JSON.stringify(items), /volume|estimate|averageMonthlySearches/i);
 });
 
 test("filtros locais: origem, já existe e texto sem acento", () => {
@@ -310,9 +376,9 @@ test("filtros locais: origem, já existe e texto sem acento", () => {
     candidate({ keyword: "Clínica estética", normalizedKeyword: "clinica estetica", origins: ["labs_ranked"] }),
     candidate({ keyword: "outra", normalizedKeyword: "outra", origins: ["ads_keyword_seed"], existingKeywordId: "99999999-9999-4999-8999-999999999999" }),
   ];
-  assert.equal(filterSubjectCandidates(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, origin: "labs_ranked" }).length, 1);
-  assert.equal(filterSubjectCandidates(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, hideExisting: true }).length, 1);
-  assert.equal(filterSubjectCandidates(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, text: "clinica" }).length, 1);
+  assert.equal(filterSubjectCandidates(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, onlyWithVolume: false, origin: "labs_ranked" }).length, 1);
+  assert.equal(filterSubjectCandidates(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, onlyWithVolume: false, hideExisting: true }).length, 1);
+  assert.equal(filterSubjectCandidates(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, onlyWithVolume: false, text: "clinica" }).length, 1);
 });
 
 /* ------------------------------- rótulos e textos ------------------------------- */

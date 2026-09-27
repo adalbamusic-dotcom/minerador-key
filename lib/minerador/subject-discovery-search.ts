@@ -22,6 +22,7 @@ import {
   type DataForSeoLabsResearchRequest,
   type DataForSeoLabsResearchResult,
 } from "./dataforseo-labs-keyword-research-core.ts";
+import { compareSubjectDiscoveryByVolume } from "./subject-discovery-volume.ts";
 import {
   SUBJECT_DISCOVERY_CAPS,
   SUBJECT_DISCOVERY_NOTICES,
@@ -385,9 +386,10 @@ function evidenceFor(contribution: SubjectDiscoveryContribution): string {
 
 /**
  * Junta as contribuições das fontes pela `normalizeKeyword` do import. Uma
- * candidata que veio de várias fontes guarda TODAS as origens. Ordem: mais
- * origens, depois com métrica do Google Ads, depois a melhor posição no
- * ranked. Corte em 600, com o total antes do corte.
+ * candidata que veio de várias fontes guarda TODAS as origens. Ordem (D2.3):
+ * volume primeiro (com volume antes; média do Google Ads, depois estimativa
+ * DataForSEO); no empate, mais origens, com métrica do Google Ads e a melhor
+ * posição no ranked. Corte em 600, com o total antes do corte.
  */
 export function mergeSubjectDiscoveryCandidates(input: {
   contributions: readonly SubjectDiscoveryContribution[];
@@ -437,8 +439,11 @@ export function mergeSubjectDiscoveryCandidates(input: {
     origins: SUBJECT_DISCOVERY_SOURCES.filter(source => originSet.has(source)),
     evidence: [...evidenceAll.filter(item => item.ranked), ...evidenceAll.filter(item => !item.ranked)].slice(0, EVIDENCE_MAX).map(item => item.text),
   }));
+  // D2.3: volume primeiro. Com volume antes, a média do Google Ads maior
+  // primeiro, depois a estimativa DataForSEO; o corte das 600 cai nas sem volume.
   all.sort((a, b) =>
-    b.origins.length - a.origins.length
+    compareSubjectDiscoveryByVolume(a, b)
+    || b.origins.length - a.origins.length
     || Number(Boolean(b.googleAds)) - Number(Boolean(a.googleAds))
     || (a.bestRankGroup ?? Number.POSITIVE_INFINITY) - (b.bestRankGroup ?? Number.POSITIVE_INFINITY)
     || a.normalizedKeyword.localeCompare(b.normalizedKeyword, "pt-BR"));
