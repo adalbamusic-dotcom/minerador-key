@@ -202,9 +202,11 @@ test("R6 comunica o processo na faixa sem transformar estado em veto de decisão
   const panel = readFileSync(new URL("../components/editorial/dna-panels.tsx", import.meta.url), "utf8");
   const workspace = readFileSync(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
   const steps = panel.slice(panel.indexOf("const profileSteps"), panel.indexOf("return <section data-keyword-profile"));
-  for (const label of ["Lógica", "Volume", "Resultados", "KGR", "Revisão"]) assert.match(steps, new RegExp(label));
-  assert.doesNotMatch(steps, /Google Ads|DataForSEO|Humano/);
-  assert.match(steps, /value: processStates\.kgr\.complete \? kgrScore : null/);
+  for (const label of ["Lógica", "Volume", "Revisão"]) assert.match(steps, new RegExp(label));
+  // Resultados e KGR são opcionais desde 2026-09-28: não são etapa do processo.
+  const stepCode = steps.replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(stepCode, /label: "Resultados"|label: "KGR"|processStates\.results|processStates\.kgr/);
+  assert.doesNotMatch(stepCode, /Google Ads|DataForSEO|Humano/);
   // A faixa comunica o processo; nenhuma decisão final depende dela. Aprovar
   // e rejeitar são decisões humanas sobre o estado atual da keyword.
   const statusHandler = workspace.slice(workspace.indexOf("const handleUpdateStatus"), workspace.indexOf("const handleBatchStatus"));
