@@ -1,5 +1,416 @@
 # Estado atual — Minerador
 
+## Correções do corretor sobre as frentes de 2026-09-28 — 2026-09-28
+
+```text
+ORIGEM = revisão das frentes M, D, A e R da SDD sdd-serp-no-artigo-e-kgr-opcional-2026-09-28
+RESULTADOS = fora da sequência de processos · ações secundárias da barra · rótulo "Resultados (opcional · pago)" · plano de custo + 1 confirmação · keyword sem volume nunca é coletada
+KGR_EM_LOTE = "Não aplicável" grava a decisão humana sobre o "pending" legado e a origem automática; sem valor gravado, nada é escrito
+MIGRATION = 0 · SQL = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · CAMPO_NOVO_EM_STRICT = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- Barra do Processador (`modules/minerador/minerador-workspace.tsx`): Resultados
+  saiu do grupo `data-bulk-workflow-core` e foi para o início de
+  `data-bulk-workflow-secondary` (`data-bulk-optional-results`), com o rótulo
+  "Resultados (opcional · pago)". A sequência passa a Conferir site → Lógica →
+  Volume → Revisar. Abaixo de `lg` só o ícone aparece, como nos outros botões;
+  o nome acessível e o InfoHint levam o "opcional · pago".
+- Antes de pagar, `handleBatchAllintitle` monta o plano com
+  `lib/minerador/results-batch-plan.ts` (novo, domínio puro): só keywords com
+  `volume_search > 0`, custo estimado de US$ 0,025 a 0,036 por keyword e quantas
+  ficaram fora por falta de volume. Uma confirmação (`window.confirm`, o padrão
+  das outras confirmações da tela); cancelar não paga nada. O limite de 1.000
+  alvos passa a contar só as que vão ao provider. O texto com os dois ramos
+  iguais virou "Medir resultados" / "Atualizar resultados".
+- Prévia do KeywordDNA na Qualificação Semântica
+  (`components/editorial/dna-panels.tsx`): sem SERP consolidada, Intenção e
+  Funil mostram "Indicação da Lógica: <valor>" em vez de "Não consolidada". O
+  eixo da consolidação continua dizendo "Não consolidado" com o motivo.
+- "Concluir revisão": a descrição não diz mais que exige a Aplicabilidade do
+  KGR (ela não bloqueia desde a M2).
+- Lote de KGR (`lib/minerador/kgr-applicability-batch.ts`): "Não aplicável" em
+  grupo grava a decisão humana onde havia o `pending` legado ou valor de origem
+  automática, como o seletor da linha já fazia; a linha sai do filtro
+  "Pendente (legado)". Sem nenhum valor gravado continua sem gravar nada. Como
+  toda decisão humana, a gravação muda o `analise_semantica` de uma aprovada.
+- Filtro salvo (`lib/minerador/last-organization.ts`): "KGR pendente" →
+  "KGR pendente (legado)".
+- Pesquisa por Assunto: o diálogo do plano não repete o aviso "sem custo no
+  DataForSEO", que já está no resumo.
+- Catálogo e MCP (AGENTS §17.1): `minerador.measure_keywords` (Resultados fora
+  da sequência, com confirmação e sem keyword sem volume),
+  `minerador.review_and_approve` (lote de KGR sobre o legado) e
+  `minerador.search_subject_keywords` / descrição MCP (custo em dinheiro zero; a
+  marcação de provider fica por causa da cota do Google Ads). Ajuda de contexto
+  de Resultados atualizada.
+- Testes: `minerador-serp-opcional-kgr-padrao` (+2 casos),
+  `minerador-kgr-applicability-batch` (+1); ajustados ao contrato novo
+  `minerador-bulk-bar-visual`, `minerador-bulk-bar-sem-ia`,
+  `minerador-keyword-table-infrastructure` e `minerador-assunto-pesquisa-tela`.
+- Minerador por glob (`node --test "tests/minerador-*.test.mts"`): 1184 testes,
+  28 falhas, com os nomes idênticos aos da base. Com `--conditions=react-server`:
+  30 falhas, os mesmos 17 arquivos da base.
+
+Pendências: homologação manual da barra (tema claro e escuro, larguras abaixo e
+acima de `lg`), da confirmação de Resultados e da Prévia do KeywordDNA; custo
+estimado a confirmar no ledger.
+
+## Integração das frentes de 2026-09-28 (catálogo MCP e ajuda) — 2026-09-28
+
+```text
+INTEGRACAO = frentes M (M1-M4), D (D1-D2), A (A1-A5) e R (R1-R3) da SDD sdd-serp-no-artigo-e-kgr-opcional-2026-09-28
+CATALOGO_MCP = lib/agent/platform-catalog.ts atualizado na mesma entrega (AGENTS §17.1) · npm run test:agent = 56/56
+ROTA_NOVA_NO_CATALOGO = /api/arquiteto/article-allintitle (em arquiteto.validate_serp)
+MIGRATION = 0 · SQL = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- Catálogo: `minerador.measure_keywords` passa a "Medir Volume" (Resultados é
+  opcional e pago, fora da aprovação); `minerador.review_and_approve` exige só
+  Lógica e Volume e diz que o KGR tem padrão "não aplicável";
+  `minerador.search_subject_keywords` descreve a pesquisa só com o Google Ads
+  (plano sem custo no DataForSEO, `GOOGLE_ADS_UNAVAILABLE`). A regra de SEO do
+  KGR passou a "padrão não aplicável; aplicar é manual; faixa 150–550 só
+  informativa".
+- MCP (`lib/server/platform-mcp-tools.ts`, só descrições): `list_keywords`,
+  `search_subject_keywords` e `send_keywords_to_arquiteto` ("sem Lógica ou
+  Volume"). Nenhuma lógica, escopo ou anotação mudou: a pesquisa continua com
+  `paid`, `provider.spend` e `userConfirmation`.
+- Ajuda de contexto (`modules/minerador/context-help.ts`, só texto): o modo Por
+  Assunto não cita mais o DataForSEO Labs como fonte ativa; a ordem recomendada,
+  a barra de processos, KGR, Resultados, Revisar e "Tratar a aplicabilidade do
+  KGR" deixam de tratar Resultados e KGR como requisito. Teste ajustado:
+  `tests/minerador-assunto-fechamento-f1b.test.mts`.
+- Testes de tipo corrigidos: `tests/minerador-allintitle.test.mts` (CRLF
+  preservado) e `tests/minerador-serp-opcional-kgr-padrao.test.mts`.
+- Suíte do Minerador por glob (`node --test "tests/minerador-*.test.mts"`):
+  1181 testes, 28 falhas, os mesmos nomes da base; nenhuma nova.
+
+## Pesquisa por Assunto só com o Google Ads (fatia D1) — 2026-09-28
+
+```text
+DECISAO = dono do produto, 2026-09-28 ("vamos aplicar"), item 3
+SDD = docs/compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md (§3.2, fatia D1)
+FONTES_ATIVAS = ads_keyword_seed + ads_url_seed (esta só com página de destino aceita)
+FONTES_LEGIVEIS = as 5 de sempre (labs_related, labs_category e labs_ranked só em buscas antigas)
+PLANO = subject-discovery-plan-v2 · paidCalls = 0 · maxCostUsd = 0 · planHash continua exigido no execute
+DATAFORSEO_NA_PESQUISA = 0 chamadas (nem Labs, nem SERP da frase) · Google Ads = grátis, usa a cota
+PERSISTENCIA_NOVA = nenhuma · campo novo em schema .strict() = 0 · migration = 0 · SQL = 0 · ESCRITA_REMOTA = 0
+LOCALSTORAGE/INDEXEDDB = nada limpo · buscas antigas continuam abrindo e importáveis
+CHAMADAS_PAGAS_EM_TESTE = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+O que mudou:
+
+- **Plano** (`lib/minerador/subject-discovery-plan.ts`). `SUBJECT_DISCOVERY_PLAN_VERSION`
+  passa a `subject-discovery-plan-v2`; o v1 fica como
+  `SUBJECT_DISCOVERY_LEGACY_PLAN_VERSION`, só para ler buscas antigas.
+  - O plano tem só as linhas do Google Ads: `ads_keyword_seed` e, com página
+    de destino aceita, `ads_url_seed`. Saíram as três linhas do Labs e a linha
+    `serp_phrase` (só existia para alimentar `labs_ranked`; a 1ª coleta da
+    SERP passa a ser no Arquiteto). `paidCalls = 0`, `maxCostUsd = 0`,
+    `ledgerRecording = true`.
+  - `planHash` cobre versão, marca, frase normalizada, Assunto, destino,
+    targeting do Google Ads e as linhas. Saíram do hash preços, tetos,
+    `labsLocale` e lentes da SERP.
+  - Os campos `serp`, `labsLocale` e `prices` continuam no tipo (vazios ou
+    constantes nas pesquisas novas), porque a lista local antiga e a projeção
+    da MCP os leem.
+  - `SUBJECT_DISCOVERY_SOURCES` continua com as 5 origens LEGÍVEIS; entra
+    `SUBJECT_DISCOVERY_ACTIVE_SOURCES` (as 2 do Google Ads). Os rótulos do
+    Labs ganharam "(fonte antiga)".
+  - `authorizeSubjectDiscoveryPlan`: plano sem chamada paga continua exigindo
+    o MESMO `planHash` (sem confirmação → `PAID_PLAN_REQUIRED`; hash de outro
+    plano → `PAID_PLAN_CHANGED`), com orçamento 0. Os códigos são os de
+    sempre: a tela e a MCP já os tratam.
+  - `createSubjectDiscoveryBudget`, os preços e `subjectDiscoveryLedgerKey`
+    ficam: a diferenciação de publicados paga a SERP por eles.
+- **Execução** (`lib/minerador/subject-discovery-search.ts`).
+  - `prepare` não lê mais o cache de SERP da frase nem a capability do ledger
+    DataForSEO (menos leitura).
+  - O execute abre só o Google Ads (`openExecution({ dataForSeo: false })`) e
+    roda as duas sementes. Resposta: `sources` só com as 2 do Google Ads,
+    `serp: { lenses: [], topUrls: [], readFailed: null }`,
+    `reportedCostUsd = 0`, `budgetSpentUsd = 0` e `ledgerRecording` = uso do
+    Google Ads gravado sem aviso.
+  - Falha ao abrir a execução responde `GOOGLE_ADS_UNAVAILABLE` (código novo,
+    aditivo na união), "nada foi consultado".
+  - A porta `runLabs` saiu de `SubjectDiscoveryExecutionPorts`.
+  - `mergeSubjectDiscoveryCandidates` NÃO encolheu o filtro de origens: uma
+    candidata antiga só do Labs nunca perde a origem.
+  - `subjectDiscoverySerpRequests` (chave 2076 + "pt") e
+    `selectSubjectDiscoveryTopUrls` continuam exportados.
+- **Runtime** (`lib/server/subject-discovery-runtime.ts`). `openExecution`
+  ganhou a opção `{ dataForSeo?: boolean }`. Com `false`, a Connection
+  DataForSEO não é resolvida: uma marca sem DataForSEO pesquisa normalmente, e
+  as portas DataForSEO recusam com `DATAFORSEO_NOT_OPENED`. Sem a opção, tudo
+  como antes (a diferenciação abre com o DataForSEO). O `runLabs` saiu do
+  runtime; o núcleo do Labs (`dataforseo-labs-keyword-research-core.ts`) fica
+  no código, sem chamador, porque as constantes 2076 e "pt" são a chave de
+  local do cache de SERP. O `recordGoogleAdsUsage` repassa o módulo do
+  `usage` (ausente, `minerador`).
+- **Ledger do Google Ads** (`lib/minerador/google-ads-discovery-usage.ts`,
+  compartilhado, aditivo). O sufixo aceita a página (`keyword_seed:p2`) para a
+  diferenciação e ganhou o parâmetro opcional `module`. As chaves de hoje (sem
+  sufixo, `keyword_seed` e `url_seed`) e o metadata sem sufixo continuam byte
+  a byte; com sufixo por página, `seedKind` segue sendo o tipo e a página vai
+  em `seedPage`.
+- **Tela** (`modules/minerador/discovery/*`).
+  - O diálogo passa a "Plano da Pesquisa por Assunto", com "Sem custo no
+    DataForSEO; usa a cota do Google Ads" e a coluna "Custo" = "Sem custo (só
+    roda depois de confirmar)".
+  - As colunas de preço, o parágrafo da SERP da frase e "Preços do
+    DataForSEO" só aparecem num plano que os tenha. O plano continua sendo
+    confirmado inteiro ("Confirmar e pesquisar").
+  - No resultado, "Sem custo no DataForSEO: só o Google Ads foi consultado."
+    O bloco "Resultados do Google para a frase", a coluna "Estimativa
+    DataForSEO" e as origens `labs_*` no filtro Origem só aparecem numa busca
+    antiga que os tenha.
+  - Textos revistos: a regra, o idioma, a lista local, a ajuda do Enter, "Só
+    com volume", o aviso do envio e o aviso "Consultando o Google Ads (frase e
+    página de destino)…".
+  - Tipografia e tokens de sempre (`text-sm`, `text-text-muted`,
+    `text-foreground`); nenhuma cor nova.
+- **Volume:** nas pesquisas novas, "tem volume" = média do Google Ads > 0.
+  `subjectDiscoveryHasVolume` não mudou: as buscas antigas mantêm a regra com
+  que foram feitas (estimativa > 0 também conta).
+- **Spec:** emenda de 2026-09-28 no "Modo Por Assunto" (`spec.md`), com as
+  fontes, o plano sem custo e o volume das pesquisas novas.
+
+Compatibilidade:
+
+- **Lista local:** registros antigos no IndexedDB com origens `labs_*`,
+  `dataForSeoEstimate`, `plan.serp` e `serp.topUrls` continuam lidos pela
+  mesma validação e abrem como foram feitos. Nada é limpo.
+- **Envio e import:** `buildSubjectDiscoveryImportItems` filtra pelas 5
+  origens e o zod do import (`SUBJECT_DISCOVERY_ORIGINS`) continua com as 5:
+  envio de busca antiga passa.
+- **Deploy:** único, servidor junto ou antes do cliente. Uma aba aberta antes
+  do deploy confirma um hash v1 e recebe `PAID_PLAN_CHANGED` com o plano v2,
+  sem consultar nada. Basta confirmar o plano novo.
+- **Idempotência:** sem chamada DataForSEO não há chave DataForSEO a conferir
+  antes de consultar. A trava da instância barra a mesma operação em curso.
+  Repetir o MESMO `operationRequestId` depois consulta o Google Ads de novo
+  (sem custo, gasta cota), e o uso cai na mesma chave do ledger, que não
+  duplica. A tela e a MCP geram um id novo por plano.
+
+Egress:
+
+| Gatilho | Leitura |
+| --- | --- |
+| Plano | declaração do Assunto, se houver (`id,keyword,keyword_subject`) + `marcas.site_url`. Nenhum cache de SERP, nenhuma capability, nenhum segredo |
+| Execute | as mesmas + contexto do Google Ads (Secret Store) + `id,keyword` das vivas da marca, paginado. Nenhuma Connection DataForSEO |
+
+Arquivos alterados:
+
+- `lib/minerador/subject-discovery-plan.ts` e `lib/minerador/subject-discovery-search.ts`;
+- `lib/server/subject-discovery-runtime.ts`;
+- `lib/minerador/google-ads-discovery-usage.ts` (compartilhado, aditivo);
+- `app/api/minerador/marcas/[brandId]/subject-discovery/search/route.ts` (só
+  o comentário);
+- `modules/minerador/discovery/subject-search-dialogs.tsx`,
+  `subject-search-model.ts`, `subject-search-results.tsx`,
+  `use-subject-search.ts` e `subject-search-fields.tsx` (só o comentário).
+
+Consumidores preservados:
+
+- a rota `subject-discovery/search`;
+- a MCP `search_subject_keywords`: a projeção lê os mesmos campos, com
+  `maxCostUsd = 0` e `serp.topUrls = []`;
+- `import_subject_keywords` e a rota `subject-discovery/import`;
+- o Arquiteto: "Buscar reforço" e `serp-subject-model.ts`, pelo mesmo
+  `subjectDiscoveryHasVolume`;
+- a diferenciação de publicados: mesmas portas, orçamento e chave DataForSEO;
+- o Descobrir por Palavra-chave e a rota `google-ads/descobrir-keywords`: a
+  chave sem sufixo não mudou.
+
+Fim de linha: todos os arquivos tocados continuam em LF (conferido pelo Node).
+
+Testes, rodados arquivo a arquivo, sem rede:
+
+- `minerador-assunto-pesquisa-plano` 12;
+- `minerador-assunto-pesquisa-busca` 22 (reescrito: só Google Ads, marca sem
+  DataForSEO, `GOOGLE_ADS_UNAVAILABLE`, repetição, semente que falha, uso que
+  falha, candidata antiga só do Labs);
+- `minerador-assunto-pesquisa-catalogo` 11 (a asserção do locale foi para
+  `subjectDiscoverySerpRequests`; nova: execute sem DataForSEO e sem Labs);
+- `minerador-assunto-pesquisa-tela` 12 e `minerador-assunto-pesquisa-tela-local`
+  27 (busca antiga abre, filtra e importa; busca nova sem coluna Estimativa);
+- `minerador-google-ads-discovery-usage` 6 (com o loader de integrações; novo:
+  sufixo por página e módulo);
+- sem mudança e verdes: `-labs` 10, `-import` 20, `-import-rota` 7,
+  `-import-csv-aliases` 6 e `minerador-import-descoberta-aprovada-preservada` 7.
+
+Suítes:
+
+- `node --test "tests/minerador-*.test.mts"`: 1181 testes, 28 falhas, o mesmo
+  número da base. Nenhuma vem destes arquivos: a de
+  `minerador-google-ads-discovery-usage` é só a falta do loader, e com ele o
+  arquivo passa 6/6.
+- `test:arquiteto` 2539/2539 e `test:arquiteto:servidor` 70/70.
+- `test:agent` 53/54: a única falha é a rota nova
+  `/api/arquiteto/article-allintitle`, de outra fatia, ainda fora do catálogo.
+- `tsc --noEmit` sem erro nos arquivos desta fatia; ESLint sem problema nos
+  arquivos de código; `git diff --check` limpo.
+
+Pendências:
+
+- **Integrador:** `lib/agent/platform-catalog.ts` (Pesquisa por Assunto: fonte,
+  requisito, custo e volume) e a descrição de `search_subject_keywords` em
+  `lib/server/platform-mcp-tools.ts`, que ainda diz "Google Ads + DataForSEO
+  Labs".
+- **Adendo** na `sdd-assunto-tronco-editorial-2026-09-24.md`: F1b.2 fontes 3 a
+  5, F1b.4 e F1b.10.
+- **Homologação manual (usuário):** Descobrir → Por Assunto numa marca com e
+  numa sem DataForSEO; diálogo "Sem custo"; resultado sem bloco da SERP; uma
+  busca antiga da lista local abrindo com a Estimativa e enviando ao
+  Processador.
+
+## SERP opcional e KGR padrão "não aplicável" (fatias M1 a M4) — 2026-09-28
+
+```text
+DECISAO = dono do produto, 2026-09-28 ("vamos aplicar"), itens 1 e 2
+SDD = docs/compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md (fatias M1, M2, M3, M4)
+APROVAR_EXIGE = Lógica + Volume (Google Ads, inclusive resposta sem média) · Assunto declarado = só a Lógica
+SERP_REQUIRED_FOR_APPROVAL = NO · RESULTS_REQUIRED_FOR_APPROVAL = NO · KGR_DECISION_REQUIRED_WHEN_CALCULABLE = NO
+KGR_APPLICABILITY_DEFAULT = not_applicable · KGR_INTEREST_VOLUME_RANGE = 150..550 (só informativa)
+PERSISTENCIA_NOVA = nenhuma · campo novo em schema .strict() = 0 · migration = 0 · SQL = 0 · ESCRITA_REMOTA = 0
+SERVER_APPROVAL_GATE_SINCE, contentHash e assinatura fnv1a-v3 = sem mudança
+CHAMADAS_PAGAS_EM_TESTE = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+O que mudou:
+
+- **M1 · trava de aprovação** (`lib/minerador/approved-package.ts`).
+  `resolveApprovalReadiness` não empurra mais `results` nem `kgr`. A união
+  `ApprovalRequirement` mantém os dois valores (contrato de tipo das rotas e
+  da MCP), nunca emitidos. O motivo passa a listar só Lógica e Volume
+  ("Aprovar exige Volume. …"). `SUBJECT_APPROVAL_REASON` passa a "Assunto
+  declarado: dispensa Volume e KGR; a Lógica continua exigida." A tela, o gate
+  de envio da tela, `prepareCanonicalHandoff` (409) e a MCP `decide_keywords`
+  relaxam juntos, pela mesma função. Nenhum registro `aprovacao` é regravado.
+- **M2 · KGR padrão "não aplicável"** (`lib/minerador/kgr-applicability.ts`).
+  - `readKgrApplicability` (leitor único) lê ausência de decisão, origem
+    automática (IA/provider) e o `"pending"` legado como `not_applicable`. Só
+    a decisão humana "Aplicável" liga o KGR. O enum de 3 valores continua.
+  - Auxiliares aditivos: `readStoredKgrApplicability` (valor gravado, sem
+    padrão), `hasLegacyPendingKgrApplicability`, `hasHumanKgrDecision`,
+    `KGR_INTEREST_VOLUME_RANGE = { min: 150, max: 550 }`,
+    `isInKgrInterestVolumeRange` e `KGR_INTEREST_VOLUME_RANGE_LABEL`.
+  - `setKgrApplicability` só grava histórico de decisão humana anterior (o
+    padrão e o legado pendente não são decisão de ninguém).
+  - O score é fato técnico: `dataforseo-allintitle.ts` e `allintitle.ts`
+    (CRLF) calculam `kgr_score` com qualquer aplicabilidade, como
+    `volume-provider.ts`. Evita score velho depois de nova medição.
+  - `volume-kgr-consistency.ts` deixou de ler a aplicabilidade por conta
+    própria e segue o leitor único; o diagnóstico de coerência só roda com
+    "Aplicável".
+  - Revisão Humana: `canCompleteHumanReview` não emite mais
+    `pendingKgrDecision` e `completeHumanReview` não lança erro por KGR. A
+    conclusão grava a aplicabilidade efetiva no `human_review` e só marca
+    `kgrDecisionReviewed` quando há decisão humana gravada ou o KGR não é
+    calculável. O lote (`human-review-completion-batch.ts`) segue o mesmo
+    contrato; `pendingKgrIds` fica no tipo, sempre vazio.
+  - Filtro "Pendente (legado)" (`table-view.ts`) mostra só linhas com o valor
+    antigo gravado.
+- **M3 · processos e maturidade.** `MineradorProcessState.optional?: true`
+  (aditivo, só de apresentação, nunca persistido) marca `results` e `kgr`, com
+  motivo "Opcional e pago…" / "Opcional…" quando não há artefato. Os seis nomes
+  de processo continuam. `deriveDnaMaturity`: "COMPLETA PARA REVISÃO" depende
+  só do Volume processado e da Lógica; o snapshot passa `googleAdsValid` como
+  Volume processado (medido ou resposta sem média), igual à trava. Rótulos do
+  enum de maturidade iguais.
+- **M4 · tela.**
+  - Rodapé do Processador: "Resultados" continua, com título "Medir
+    concorrência orgânica (opcional · pago)" e descrição que diz que não é
+    exigido para aprovar nem para enviar, que a primeira coleta da SERP é no
+    Arquiteto (aba Artigos) e o custo estimado (cerca de US$ 0,025 a 0,036 por
+    keyword). Sem disparo automático, como antes.
+  - Seletores de KGR (coluna, rodapé desktop, menu compacto e Revisão Humana):
+    "Não aplicável" e "Aplicável". "Pendente (legado)" aparece desabilitado só
+    quando a linha tem o valor antigo gravado. O lote não oferece mais
+    "Pendente".
+  - Revisão Humana: "Opcional: o padrão é não aplicável e aplicar é escolha
+    sua." e, com volume entre 150 e 550, "Volume na faixa de interesse para KGR
+    (150 a 550). Só informativo: não aplica o KGR." O Perfil ganha o campo
+    "Faixa de interesse (150 a 550)".
+  - Faixa de passos do Perfil: Resultados e KGR sem artefato aparecem neutros,
+    com "· opcional", nunca como pendência ou "Atualizar".
+  - Qualificação Semântica: "SERP não coletada. Ela é opcional: a indicação de
+    Intenção e Funil vem da Lógica…"; o eixo sem SERP diz "SERP não coletada
+    (opcional): a indicação vem da Lógica."
+  - Textos que citavam "Resultados e KGR" como obrigação: avisos do Assunto em
+    `vinculo-screen.ts`, título do Assunto em `vinculo-selects.tsx`,
+    comentários em `arquiteto-handoff-gates.ts` e
+    `lib/server/arquiteto-workspace.ts`.
+  - Export CSV: já exportava a aplicabilidade efetiva pelo snapshot; o trecho
+    com mojibake não foi tocado.
+
+O que **não** mudou (de propósito):
+
+- A precedência SERP conclusiva > humano > Lógica (`readCanonicalKeywordDna`)
+  e `v2SignatureContent`: estão na assinatura v2/v3. Intenção e funil pela
+  SERP continuam valendo quando o usuário roda Resultados; sem SERP, a Lógica
+  dá a indicação.
+- A rota paga `dataforseo/allintitle` (4 lentes, cache primeiro, KD,
+  Qualificação), o "Medir resultados" do Descobrir e toda proveniência já
+  coletada (`allintitle_measurement`, `evidencia_serp`,
+  `dataforseo_keyword_overview`, históricos): nada apagado, tudo legível.
+- `engine.ts` (volume ≥ 120) e o filtro do Descobrir (120–499): fatia própria.
+
+Compatibilidade e pacotes aprovados: relaxar a trava só reduz recusas. A
+assinatura cobre o `analise_semantica` bruto e não a leitura do KGR, então o
+novo padrão não rebaixa aprovadas (teste). Marcar "Não aplicável" numa keyword
+sem decisão é no-op (não grava e não rebaixa a aprovada); a trilha registra a
+marcação "Aplicável" e as trocas entre decisões humanas. Uma **nova** medição
+manual de Resultados passa a gravar `kgr_score` mesmo com "não aplicável";
+como `kgrScore` e `resultsAllintitle` são assinados, isso pode rebaixar uma
+aprovada — só por ação humana explícita, como já acontecia com remedição.
+
+**Rollback.** Todas as mudanças são de código. Efeito conhecido de voltar
+abaixo desta versão: keywords aprovadas **sem** Resultados com `approvedAt` ≥
+2026-09-24 passam a ser **recusadas (409)** pelo código antigo em
+`prepareCanonicalHandoff` e na MCP. Nada se perde: basta medir Resultados
+(pago, manual) ou reaplicar o deploy. Deploy único do monólito (tela, servidor
+e MCP juntos). Pela SDD (6.5), a coleta do lote no Arquiteto (fatia A2) tem de
+estar no ar antes ou junto desta fatia.
+
+Consumidores preservados: tela, gate de envio, `prepareCanonicalHandoff`, MCP
+(`decide_keywords`; `projectPlatformKeywordRow`, cujo `kgrUse` passa a
+`nao_utilizada` no padrão sem mudar código; `set_kgr_applicability`),
+Arquiteto (`article-expanded-panel`, `editorial-keyword-dna-export`,
+`keyword-dna-projection`), CSV, filtros e ordenação. Efeito cruzado: a leitura
+de `lib/arquiteto/article-kgr-decision.ts` (fatia A1, frente do Arquiteto)
+passa a receber `not_applicable` no lugar de `pending`; o
+`PENDING_APPLICABILITY` praticamente some.
+
+Testes: `tests/minerador-serp-opcional-kgr-padrao.test.mts` (novo, 9 casos) e
+ajustes em `minerador-aprovacao-versionada`, `minerador-assunto-aprovacao`,
+`minerador-assunto-tela-lote`, `minerador-allintitle`,
+`minerador-corretor-planilha-rodape`, `minerador-human-review`,
+`minerador-human-review-completion-batch`, `minerador-revisao-humana-sem-ia`,
+`minerador-info-hint`, `minerador-kgr-applicability`,
+`minerador-kgr-applicability-batch`, `minerador-kgr-visual-range`,
+`minerador-semantic-qualification-rehydration`,
+`minerador-serp-auto-consolidation`, `minerador-serp-simulation-removal`,
+`minerador-volume-kgr-consistency` e `arquiteto-assunto-trava-servidor` (caso
+novo: aprovada depois da ativação sem Resultados passa na tela e no
+servidor). Suíte do Minerador por glob (140 arquivos): nenhuma falha nova por
+nome frente à base de 2026-09-28, exceto nos testes da Pesquisa por Assunto,
+que a frente D1 está alterando ao mesmo tempo. `test:editorial`: as mesmas 4
+falhas da base. `test:agent`: 1 falha, a rota nova do Arquiteto
+(`article-allintitle`) ainda fora do catálogo (frente A4/integrador).
+
+Pendências: validação na tela (usuário); catálogo das IAs e descrições da MCP
+(integrador); adendos das SDDs listadas na seção 12 da SDD.
+
 ## Pesquisa por Assunto: volume primeiro (D2.3) — 2026-09-27
 
 ```text

@@ -26,7 +26,9 @@ async function readBulkBar() {
 test("a barra tem seis processos e nenhum deles é IA", async () => {
   const { page, bulkBar } = await readBulkBar();
   assert.match(page, /\{selectedIds\.size > 0 && \(/);
-  for (const label of ['label="Conferir site"', 'label="Lógica"', 'label="Volume"', 'label="Resultados"', 'label="Revisar"']) {
+  // Resultados saiu da sequência de processos em 2026-09-28 (decisão do dono):
+  // continua na barra, como ação opcional e paga, fora do grupo principal.
+  for (const label of ['label="Conferir site"', 'label="Lógica"', 'label="Volume"', 'label="Resultados (opcional · pago)"', 'label="Revisar"']) {
     assert.ok(bulkBar.includes(label), `${label} precisa continuar na barra`);
   }
   assert.ok(!bulkBar.includes('label="IA"'), "o botão IA saiu da barra");
@@ -40,8 +42,8 @@ test("a ordem inicial inclui Conferir site e depois Lógica, sempre determiníst
     'label="Conferir site"',
     "onClick={handleQualifySelected}",
     "onClick={handleBatchQualify}",
-    "onClick={handleBatchAllintitle}",
     'label="Revisar"',
+    "onClick={handleBatchAllintitle}",
     'aria-label="Status"',
   ];
   let previous = -1;

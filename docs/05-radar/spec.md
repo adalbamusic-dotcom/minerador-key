@@ -175,6 +175,25 @@ antes de começar, gravada e imutável no meio do caminho.
 Nenhum perfil decide o formato do que será publicado. Investigar no YouTube não
 transforma o artigo em vídeo.
 
+### YouTube e Amazon acrescentam; o Google continua — 2026-09-28
+
+Decisão do dono (SDD "SERP no artigo e KGR opcional", 2026-09-28): YouTube
+(artigo que vira vídeo) e Amazon (artigo que vira review) só **acrescentam**
+dados. Nunca substituem nem apagam os dados de busca no Google.
+
+- A busca no Google do Radar lê primeiro o cache compartilhado
+  (`serp_cache_entry`, 4 lentes, 30 dias). A coleta que o Arquiteto fez na aba
+  Artigos é reaproveitada pela chave, sem custo. Só a lente faltante ou vencida
+  é paga, e a recoleta paga é sempre explícita.
+- A precedência do perfil primário continua (Amazon > YouTube > Google), e o
+  dossiê continua com uma única camada PRIMARY. Com o Google **finalizado**, a
+  camada Google do dossiê de vídeo ou de produto é SUPPORT e leva a fotografia
+  congelada: referências e contagens do congelado, `observed` (quando confere
+  com o congelado) e `serpLenses`. Sem Google finalizado, o dossiê é o de antes.
+- Secundária ou reforço sem volume de busca (nulo, zero ou inválido) não gera
+  consulta auxiliar: fica como contexto, com o motivo. A principal é sempre a
+  âncora da investigação.
+
 ### Hierarquia de evidência
 
 A ordem é a de `RADAR_EVIDENCE_HIERARCHY`, em `lib/radar/evidence-authority.ts`,

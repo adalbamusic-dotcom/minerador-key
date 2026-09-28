@@ -413,6 +413,21 @@ export function radarDossierDivergesFromFrozen(dossier: RadarEvidenceBundle, fro
    */
   if (!observado) return divergencias;
 
+  divergencias.push(...radarObservedDivergesFromFrozen(observado, frozen));
+  return divergencias;
+}
+
+/**
+ * A fotografia do Google ainda é a que foi congelada?
+ *
+ * A mesma régua de `radarDossierDivergesFromFrozen`, sem o vínculo do dossiê:
+ * o dossiê de YouTube ou de Amazon a usa para decidir se a fotografia do
+ * Google finalizado pode viajar como apoio (SDD "SERP no artigo e KGR
+ * opcional", R3). Divergiu? Ela não viaja; a leitura de hoje não recebe o
+ * carimbo de ontem.
+ */
+export function radarObservedDivergesFromFrozen(observado: NonNullable<RadarEvidenceBundle["observed"]>, frozen: RadarFrozenEvidenceBundle): string[] {
+  const divergencias: string[] = [];
   const amostra = observado.sample;
   if (amostra.analyzedSuccess !== frozen.sample.analyzedSuccess) {
     divergencias.push(`Páginas lidas: ${amostra.analyzedSuccess} no dossiê, ${frozen.sample.analyzedSuccess} no congelado.`);

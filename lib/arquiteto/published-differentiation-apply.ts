@@ -160,7 +160,11 @@ export type DifferentiationApplyPlan = {
 
 export type DifferentiationApplyArticle = { articleId: string; payload: ArticleDNA };
 
-const origemPadrao: SubjectDiscoverySource = "labs_category";
+/**
+ * A origem de uma escolha que chegou sem origem. Desde 2026-09-28 as keywords
+ * novas vêm do Google Ads; escolhas antigas mantêm as origens `labs_*` delas.
+ */
+const origemPadrao: SubjectDiscoverySource = "ads_keyword_seed";
 
 function paraIngestao(escolha: DifferentiationChoice): DifferentiationIngestItem {
   const origins = escolha.origins.length ? escolha.origins : [origemPadrao];

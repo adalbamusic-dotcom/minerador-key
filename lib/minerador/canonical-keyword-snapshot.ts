@@ -121,9 +121,12 @@ export function resolveCanonicalKeywordSnapshot(input: CanonicalKeywordSnapshotI
   const humanCompleted = confirmationValid;
   const maturity = deriveDnaMaturity({
     logicalProcessed,
-    googleAdsValid: processor.volume.validated,
+    // Volume PROCESSADO, como na trava de aprovação: medição validada ou a
+    // resposta do Google Ads sem média gravada (decisão do dono, 2026-09-25).
+    googleAdsValid: processor.volume.validated || Boolean(processor.volume.emptyResponse),
     dataForSeoValid: processor.results.validated,
-    kgrTreated: !processor.kgr.ready || kgrApplicability !== "pending" || review.kgrDecisionReviewed === true,
+    // KGR opcional desde 2026-09-28 (padrão "não aplicável"): nunca pendência.
+    kgrTreated: true,
     humanConfirmed: humanCompleted,
     humanReviewCompleted: process.review.complete && canComplete.ok,
   });

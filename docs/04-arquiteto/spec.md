@@ -1,3 +1,13 @@
+## 38. SERP no artigo e KGR opcional — 2026-09-28
+
+Regras permanentes (no código desde 2026-09-28; homologação manual pendente). Fonte: [SDD aprovada](../compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md), fatias A1 a A5.
+
+1. **A primeira coleta da SERP é na aba Artigos.** Processar artigos coleta, antes da formação, as 4 lentes de todas as keywords com volume do lote (Silos em formação). A coleta usa o cache primeiro (30 dias), o plano de custo e uma confirmação só. Keyword que chega sem SERP do Minerador é o caso normal.
+2. **Keyword sem volume nunca é coletada.** "Com volume" é a média do Google Ads maior que zero. Dentro do artigo, a busca sem volume fica fora do plano e sai do parecer como não observada, sem travar as lentes. A Principal continua sempre consultada.
+3. **KGR não aplicável por padrão.** O artigo só trabalha KGR com a escolha humana "Aplicar KGR" (padrão Não), que vale para qualquer artigo e pode ser trocada. Score abaixo de 0,25 e volume na faixa 150–550 são informação, nunca decisão. KGR não aplicável nunca bloqueia formação nem aprovação. Com "Aplicar KGR" Sim e sem allintitle, a conclusão espera a medição.
+4. **Allintitle da Principal, uma consulta por artigo.** A medição reaproveita a do Arquiteto ou a do Minerador de até 30 dias. "Recalcular" é pago, com confirmação. O resultado fica na identidade KGR do artigo. O Arquiteto nunca escreve na linha do Minerador.
+5. **O que já foi decidido fica.** Identidade gravada pela regra antiga (KGR pleno automático), decisão humana e vínculo confirmado são lidos como estão; trocar é decisão humana. A troca da regra não abre versão nova do ArticleDNA.
+
 ## 37. Diferenciar publicados que disputam o mesmo assunto — 2026-09-27
 
 Regras permanentes (no código desde 2026-09-27; homologação manual pendente). Fonte: [SDD aprovada](sdd-diferenciacao-publicados-canibalizados-2026-09-27.md) e D2.1, D2.2, D2.3 e D6 de [regras da SERP e dos Assuntos](../compartilhado/regras-serp-e-assuntos-2026-09-26.md).

@@ -1,3 +1,5 @@
+import { readKgrApplicability, type KgrApplicability } from "./kgr-applicability.ts";
+
 export type VolumeKgrConsistency =
   | "coherent"
   | "measurement_pending"
@@ -41,19 +43,16 @@ function finiteNonNegative(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-function resolvedApplicability(input: VolumeKgrConsistencyInput): string {
-  const origin = String(input.semantic?.kgr_decisao_origem ?? "").trim().toLowerCase();
-  if (["ai", "ia", "automatic", "automatico", "automático", "provider"].includes(origin)) return "pending";
-  const value = input.kgrApplicability
-    ?? input.semantic?.kgr_aplicabilidade
-    ?? input.semantic?.kgr_decisao
-    ?? input.semantic?.kgr_applicability
-    ?? input.semantic?.kgrApplicability
-    ?? input.semantic?.kgr_aplicavel;
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : value;
-  return normalized === "not_applicable" || normalized === "não" || normalized === "nao" || normalized === "nãƒo" || normalized === "nã£o" || normalized === false
-    ? "not_applicable"
-    : "pending";
+/**
+ * Segue o leitor único (`readKgrApplicability`) desde 2026-09-28: o padrão é
+ * "não aplicável" e só a decisão humana "Aplicável" liga o diagnóstico de
+ * coerência. Um `kgrApplicability` passado explicitamente vale como decisão.
+ */
+function resolvedApplicability(input: VolumeKgrConsistencyInput): KgrApplicability {
+  if (input.kgrApplicability !== undefined && input.kgrApplicability !== null) {
+    return readKgrApplicability({ kgr_aplicabilidade: input.kgrApplicability });
+  }
+  return readKgrApplicability(input.semantic);
 }
 
 export function assessVolumeKgrConsistency(input: VolumeKgrConsistencyInput): VolumeKgrConsistency {

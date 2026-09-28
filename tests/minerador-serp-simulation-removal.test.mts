@@ -18,7 +18,9 @@ test("a Qualificação Semântica não oferece mais a ação simulada de SERP", 
 
 test("o estado da SERP reflete a coleta real do processo Resultados", () => {
   assert.ok(consolidation.includes("serpCollectionLabel(serpState)"));
-  assert.ok(consolidation.includes("SERP não coletada. Execute o processo Resultados"));
+  // SERP opcional desde 2026-09-28: o texto não manda mais executar Resultados.
+  assert.ok(consolidation.includes("SERP não coletada. Ela é opcional"));
+  assert.ok(consolidation.includes("use Resultados (opcional · pago)"));
   assert.doesNotMatch(consolidation, /SERP · Ainda não coletada/);
   assert.doesNotMatch(consolidation, /Aguardando evidência externa/);
   assert.doesNotMatch(consolidation, /Ainda não validada/);

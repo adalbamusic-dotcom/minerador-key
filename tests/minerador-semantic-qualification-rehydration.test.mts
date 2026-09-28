@@ -122,7 +122,8 @@ test("F/G · sem IA, a decisão de KGR segue humana", () => {
   const humanReview = panel.slice(panel.indexOf("function HumanReviewPanel"));
   assert.ok(!humanReview.includes("aiReview"), "nenhum vestígio de IA na Revisão Humana");
   assert.ok(humanReview.includes('aria-label="Aplicabilidade do KGR na revisão humana"'));
-  assert.equal(readKgrApplicability({}), "pending");
+  // Padrão "não aplicável" desde 2026-09-28; aplicar continua decisão humana.
+  assert.equal(readKgrApplicability({}), "not_applicable");
   // KGR inalterado: fórmula e faixa visual.
   assert.equal(calculateKgrFromMetrics(720, 388), 0.5389);
   assert.equal(deriveKgrVisualState(0.249).favorable, true);

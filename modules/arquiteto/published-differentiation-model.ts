@@ -90,7 +90,10 @@ export type DifferentiationRunData = {
   evaluationHash: string;
   costs: { reportedCostUsd: number; budgetSpentUsd: number; authorizedUsd: number; byPage: DifferentiationPageCost[] };
   serp: DifferentiationSerpOutcome;
+  /** Rodadas antigas (com Labs). Nas de hoje, vazio. */
   labsFailures: Array<{ keywordId: string; endpoint: string; reason: string }>;
+  /** Rodadas de hoje (Google Ads): as sementes que falharam. Ausente nas antigas. */
+  adsFailures?: Array<{ keywordId: string; kind: string; reason: string }>;
   adsVolumeFailed: boolean;
   refusedCount: Record<string, number>;
   ledgerRecording: boolean;
@@ -424,8 +427,10 @@ export function differentiationEvaluationView(run: DifferentiationRunData, group
   const temProposta = pages.some(page => page.included);
   const notices = [
     ...run.notices,
-    run.adsVolumeFailed ? "O volume do Google Ads não respondeu: só entrou quem tinha estimativa do DataForSEO." : null,
-    run.labsFailures.length ? `${run.labsFailures.length} busca(s) no DataForSEO falharam; as outras seguiram.` : null,
+    // Rodada de hoje: as falhas do Google Ads já vêm nos avisos do servidor. As
+    // duas frases abaixo são das rodadas antigas (com Labs), relidas como foram.
+    run.adsVolumeFailed && !run.adsFailures ? "O volume do Google Ads não respondeu: só entrou quem tinha estimativa do DataForSEO." : null,
+    run.labsFailures.length ? `${run.labsFailures.length} busca(s) no DataForSEO Labs falharam; as outras seguiram.` : null,
     run.ledgerWarning,
     run.persistWarning,
   ].filter((item): item is string => Boolean(item));
@@ -555,6 +560,7 @@ const MENSAGENS: Record<string, string> = {
   DATAFORSEO_UNAVAILABLE: "O DataForSEO não está disponível agora. Nada foi pago.",
   LEDGER_UNAVAILABLE: "O controle de gastos não respondeu. Nada foi pago.",
   DIFFERENTIATION_PLAN_REQUIRED: "Planeje o grupo antes de buscar. Nada foi pago.",
+  DIFFERENTIATION_PLAN_OUTDATED: "Esta prévia é de antes da troca para o Google Ads. Planeje o grupo de novo; nada foi pago.",
   DIFFERENTIATION_GROUP_NOT_FOUND: "Este grupo não aparece mais na SERP do cache. Releia o painel.",
   DIFFERENTIATION_EVALUATION_REQUIRED: "Busque e valide o grupo antes de aceitar.",
   PREVIEW_CHANGED: "A proposta mudou desde que você a viu. Nada foi gravado; busque de novo.",

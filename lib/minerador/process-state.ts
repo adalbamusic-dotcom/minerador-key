@@ -23,6 +23,13 @@ export type MineradorProcessState = {
   artifactState: MineradorArtifactState;
   complete: boolean;
   reason: string;
+  /**
+   * Processo OPCIONAL: não entra na sequência nem em nenhuma trava (aprovar,
+   * concluir a revisão, maturidade). Aditivo e só de apresentação, nunca
+   * persistido. Desde 2026-09-28 marca `results` (SERP paga, ação manual) e
+   * `kgr` (padrão "não aplicável").
+   */
+  optional?: true;
 };
 
 export type MineradorProcessStates = Record<MineradorProcessName, MineradorProcessState>;
@@ -175,12 +182,20 @@ export function resolveMineradorProcessState(input: MineradorProcessStateInput):
     attempt: input.attempts?.results,
     currentReason: "Medição DataForSEO atual confirmada e lida novamente do registro canônico.",
   });
+  results.optional = true;
+  if (!results.complete && results.artifactState === "missing") {
+    results.reason = "Opcional e pago: Resultados (SERP) é ação manual e não é exigido para aprovar. A primeira coleta da SERP acontece no Arquiteto.";
+  }
   const kgr = currentState({
     current: kgrCurrent,
     previous: processor.kgr.score !== null,
     attempt: input.attempts?.kgr,
     currentReason: "KGR calculado automaticamente com Volume e Resultado atuais do Processador.",
   });
+  kgr.optional = true;
+  if (!kgr.complete && kgr.artifactState === "missing") {
+    kgr.reason = "Opcional: o KGR é não aplicável por padrão e só é calculado com Resultados medidos.";
+  }
   const site = currentState({
     current: siteIsCurrent(semantic),
     previous: Boolean(readSiteOrigin(semantic)),

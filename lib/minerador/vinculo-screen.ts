@@ -449,13 +449,13 @@ export function pickKeywordSubjectKeys(semantic: Semantic | null | undefined): S
 
 /** F1.5: retirar o Assunto de uma aprovada. */
 export const SUBJECT_WITHDRAW_APPROVED_WARNING =
-  "Esta keyword foi aprovada como Assunto. Sem a declaração, aprovar exige Volume, Resultados e KGR, e o Arquiteto seguirá vendo o Assunto até lá." as const;
+  "Esta keyword foi aprovada como Assunto. Sem a declaração, aprovar exige Volume, e o Arquiteto seguirá vendo o Assunto até lá." as const;
 
 /** F1.5 em grupo: retirar o Assunto de aprovadas da seleção. */
 export const SUBJECT_WITHDRAW_APPROVED_BATCH_WARNING_ONE =
-  "A aprovada desta seleção foi aprovada como Assunto. Sem a declaração, aprovar exige Volume, Resultados e KGR, e o Arquiteto seguirá vendo o Assunto até lá." as const;
+  "A aprovada desta seleção foi aprovada como Assunto. Sem a declaração, aprovar exige Volume, e o Arquiteto seguirá vendo o Assunto até lá." as const;
 export const SUBJECT_WITHDRAW_APPROVED_BATCH_WARNING_MANY =
-  "As aprovadas desta seleção foram aprovadas como Assunto. Sem a declaração, aprovar exige Volume, Resultados e KGR, e o Arquiteto seguirá vendo o Assunto até lá." as const;
+  "As aprovadas desta seleção foram aprovadas como Assunto. Sem a declaração, aprovar exige Volume, e o Arquiteto seguirá vendo o Assunto até lá." as const;
 
 /** F1.5: declarar (ou trocar nota e destino) numa aprovada. */
 export const SUBJECT_DECLARE_APPROVED_WARNING =

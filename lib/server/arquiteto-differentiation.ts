@@ -25,6 +25,8 @@ import {
 } from "@/lib/arquiteto/published-differentiation";
 import {
   DIFFERENTIATION_MAX_COST_USD,
+  DIFFERENTIATION_PLAN_OUTDATED_MESSAGE,
+  DIFFERENTIATION_PLAN_VERSION,
   authorizeDifferentiationPlan,
   buildDifferentiationPlan,
   runPublishedDifferentiation,
@@ -216,6 +218,8 @@ function runData(groupId: string, resultado: DifferentiationRunResult, evaluatio
     costs: resultado.costs,
     serp: resultado.serp,
     labsFailures: resultado.labsFailures,
+    // Aditivo (rodadas v2): as sementes do Google Ads que falharam.
+    adsFailures: resultado.adsFailures ?? [],
     adsVolumeFailed: resultado.adsVolumeFailed,
     refusedCount: Object.fromEntries(Object.entries(resultado.refused || {}).map(([id, lista]) => [id, lista.length])),
     ledgerRecording: resultado.ledgerRecording,
@@ -372,6 +376,8 @@ export async function handleDifferentiationRun(deps: DifferentiationHandlerDeps,
   if (linha.state === "running") return falhou(409, "OPERATION_IN_PROGRESS", "Uma rodada deste grupo já está em andamento. Aguarde; nada foi pago de novo.");
   if (linha.state === "kept") return falhou(409, "DIFFERENTIATION_GROUP_KEPT", "Este grupo foi mantido como está. Nada foi pago.");
   if (linha.state !== "planned") return falhou(409, "DIFFERENTIATION_PLAN_REQUIRED", "Monte uma prévia nova antes de rodar. Nada foi pago.");
+  // Prévia v1 (com Labs) gravada antes de 2026-09-28: recusada antes de reservar, sem pagar.
+  if (plan.version !== DIFFERENTIATION_PLAN_VERSION) return falhou(409, "DIFFERENTIATION_PLAN_OUTDATED", DIFFERENTIATION_PLAN_OUTDATED_MESSAGE, { plan });
 
   // Hash e custo antes de qualquer gravação: pedido errado não mexe na proposta.
   if (!await verifyDifferentiationPlanHash(plan)) return falhou(409, "PLAN_TAMPERED", "O plano gravado não confere com o hash dele. Monte um plano novo; nada foi pago.", { plan });

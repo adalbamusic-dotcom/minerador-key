@@ -318,6 +318,8 @@ Uma troca entre `locked` e `reviewable` preserva `primary_keyword_published_orig
 
 O Minerador mostra prévia e só persiste `success` numérico ou `zero_results` explicitamente comprovado. Falha, ausência, CAPTCHA, bloqueio e cancelamento preservam resultado anterior e nunca enviam `null`. A confirmação atualiza somente a keyword real da marca/silo ativo, registra fonte/data/lote/consulta no metadado existente e recalcula KGR apenas quando houver volume válido e a aplicabilidade não for `not_applicable`. Volume e resultados permanecem independentes.
 
+> **Corrigido pela §78 (2026-09-28):** o KGR é recalculado em toda medição com volume válido, com qualquer aplicabilidade; a aplicabilidade decide só o uso.
+
 ## 33. Contrato autenticado da extensão e handshake v2
 
 A extensão Chrome autentica chamadas específicas do Minerador com `Authorization: Bearer <supabase_access_token>`. O servidor valida o token pelo Supabase Auth, obtém o `sub` validado e resolve perfil, owner, memberships, estado da marca e capacidade do módulo pelos helpers canônicos. O popup não concede acesso por papel, email, `brandId` ou `brandRef` enviados pelo cliente e não consulta diretamente `marcas`, `perfis` ou `listas_kgr` para listar opções.
@@ -417,6 +419,12 @@ A Extensão não é mais necessária para descobrir ou importar keywords. Ela pe
 - **Nada é pago sem confirmar.** A pesquisa monta primeiro um plano, sem custo, e só executa depois de o humano confirmar o plano inteiro no diálogo de custo. O servidor recalcula o plano, confere a autorização e mantém um teto rígido de US$ 0,20 por pesquisa.
 - **A SERP da frase segue a regra da plataforma:** cache primeiro, sempre nas 4 lentes, e o que é pago vai para o cache da marca.
 - Os outros modos continuam só com keyword, na rota de hoje.
+
+**Emenda de 2026-09-28 — só Google Ads** ([SDD SERP no artigo e KGR opcional](../compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md), §3.2; decisão do dono). O modo Por Assunto passa a usar **só o Google Ads**: a frase e a frase mais a página de destino aceita. O DataForSEO Labs e a SERP da frase saíram da pesquisa; a primeira coleta da SERP acontece no Arquiteto. No que conflitar com os itens acima, vale esta emenda:
+
+- A regra da tela passa a "O Google Ads devolve as candidatas, pela frase e pela página de destino; o Minerador não fabrica termos."
+- O plano continua e é confirmado inteiro, agora sem custo no DataForSEO ("Sem custo no DataForSEO; usa a cota do Google Ads"). O `planHash` amarra a frase, a página de destino e a segmentação; o servidor recusa a execução sem ele.
+- Nas pesquisas novas, "com volume" é a média do Google Ads maior que zero. Buscas antigas (com Labs, estimativa DataForSEO e SERP da frase) continuam legíveis e importáveis, com a regra com que foram feitas. Nada é apagado.
 
 ## 50. Fase 8 — métricas atuais e allintitle nas duas áreas — implementação autorizada localmente
 
@@ -684,6 +692,8 @@ Decisão de produto: **quando o status é `aprovado`, a keyword está pronta par
 
 **Trava na aprovação** (`resolveApprovalReadiness`): Lógica processada, Volume processado (medição Google Ads com número ≥ 0 **ou** resposta do Google Ads sem média registrada; emenda de 2026-09-25, abaixo), Resultados validado e aplicabilidade do KGR decidida quando calculável. SERP não conclusiva **não** trava, e revisão humana **não** é gate. `APPROVAL_ALWAYS_AVAILABLE = NO` · `SERP_REQUIRED_FOR_APPROVAL = NO` · `REVIEW_REQUIRED_FOR_APPROVAL = NO` · `KGR_DECISION_REQUIRED_WHEN_CALCULABLE = YES`.
 
+> **Corrigido pela §78 (2026-09-28):** aprovar exige só Lógica e Volume. Resultados e a decisão de KGR saíram da trava (`KGR_DECISION_REQUIRED_WHEN_CALCULABLE = NO`).
+
 **Registro de aprovação** (`analise_semantica.aprovacao`): `contentHash` (SHA-256), `signature` (FNV-1a síncrona), `approvedAt`, `approvedBy`, `version` (incrementa a cada aprovação). O conteúdo assinado é o pacote inteiro — semântica completa, intenção, volume, resultados, KGR — menos `brandId`, `listaId` e o próprio registro.
 
 **Status `em_revisao` é derivado, nunca gravado.** A coluna `status` guarda a proveniência da última escolha humana; `resolveEffectiveKeywordStatus` devolve `em_revisao` quando a assinatura atual diverge da aprovada. Mexer em keyword aprovada muda o status efetivo sozinho; reaprovar grava versão nova. `minerador_keywords.status` é `text` sem CHECK — sem migration.
@@ -695,6 +705,8 @@ Decisão de produto: **quando o status é `aprovado`, a keyword está pronta par
 ### Exceção do Assunto (D2) — 2026-09-24
 
 Com o Assunto declarado (§67, declaração 3), `resolveApprovalReadiness` só exige a **Lógica**. Volume, Resultados e KGR são dispensados, com o motivo "Assunto declarado: dispensa Volume, Resultados e KGR; a Lógica continua exigida." `ApprovalRequirement` não muda. A dispensa só vale com a declaração: retirar o Assunto volta a exigir tudo. As chaves `keyword_subject*` são assinadas, então declarar ou retirar numa aprovada a leva para Em revisão. A Lógica roda sozinha depois de cada declaração, pela mesma rotina do botão, e nunca aprova.
+
+> **Corrigido pela §78 (2026-09-28):** o motivo passa a "Assunto declarado: dispensa Volume e KGR; a Lógica continua exigida." Retirar o Assunto volta a exigir Volume (Resultados e KGR são opcionais para todas).
 
 ### Trava no envio ao Arquiteto — 2026-09-24
 
@@ -1435,4 +1447,53 @@ MINERADOR_INTENT_FUNNEL_FROM_4_LENSES = YES
 LENS_AGREEMENT_IS_REINFORCEMENT = NO
 URL_TOKENS_DECIDE_INTENT = NO
 AUTOMATIC_RECOLLECTION = NO
+```
+
+## 78. SERP opcional no Minerador e KGR padrão "não aplicável" — 2026-09-28
+
+Decisão do dono (2026-09-28, "vamos aplicar"). SDD:
+`docs/compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md`
+(fatias M1 a M4). Corrige a §61 (trava), a §319 e a §529 (score) e a
+exceção do Assunto.
+
+**Aprovar exige Lógica e Volume.** Volume é processo executado (medição
+Google Ads ou resposta sem média, emenda de 2026-09-25). Resultados (SERP,
+allintitle, KD) e a decisão de KGR saem da trava. Com o Assunto declarado,
+só a Lógica; o motivo passa a "Assunto declarado: dispensa Volume e KGR; a
+Lógica continua exigida." `ApprovalRequirement` mantém `results` e `kgr` no
+tipo, sem emiti-los. A mesma função vale na tela, no gate de envio, no
+servidor e na MCP. `SERVER_APPROVAL_GATE_SINCE`, `contentHash` e assinatura
+não mudam.
+
+**Resultados é ação manual, opcional e paga.** Sai da sequência de
+processos: o nome `results` continua, marcado como opcional
+(`optional?: true`, só apresentação). A primeira coleta da SERP acontece no
+Arquiteto, aba Artigos, só para keywords com volume. Quando o usuário roda
+Resultados, a SERP conclusiva continua fechando Intenção e Funil acima do
+humano e da Lógica (§63); sem SERP, a Lógica dá a indicação, nunca requisito.
+Nada do que foi coletado é apagado.
+
+**KGR padrão "não aplicável".** `readKgrApplicability` lê ausência de
+decisão, origem automática e o `"pending"` legado como `not_applicable`. Só o
+humano marca "Aplicável". O enum de 3 valores continua; o legado fica gravado
+e aparece como "Pendente (legado)". A decisão de KGR nunca trava aprovação nem
+a conclusão da Revisão Humana. O score KGR é fato técnico e é calculado em toda
+medição, com qualquer aplicabilidade; a aplicabilidade decide só o uso.
+
+**Faixa de interesse para KGR: 150 a 550 buscas** (KGR = allintitle ÷
+volume; bom abaixo de 0,25). Só informativa: não é trava e não aplica o KGR.
+
+**Maturidade.** "COMPLETA PARA REVISÃO" depende do Volume processado e da
+Lógica. Os rótulos do enum não mudam.
+
+```text
+APPROVAL_REQUIRES = LOGIC + VOLUME (Assunto: LOGIC)
+SERP_REQUIRED_FOR_APPROVAL = NO
+RESULTS_REQUIRED_FOR_APPROVAL = NO
+KGR_DECISION_REQUIRED_WHEN_CALCULABLE = NO
+KGR_BLOCKS_HUMAN_REVIEW_COMPLETION = NO
+KGR_APPLICABILITY_DEFAULT = not_applicable
+KGR_SCORE_ALWAYS_CALCULATED = YES
+KGR_INTEREST_VOLUME_RANGE = 150..550 (informativa)
+RESULTS_PROCESS = manual, opcional, pago
 ```

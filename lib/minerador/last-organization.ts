@@ -121,7 +121,7 @@ export function mineradorOrganizationLabels(values: MineradorOrganizationValues,
   if (relation) labels.push(`URL: ${relation}`);
   const processRun = ({ with_process: "Com processo", without_process: "Sem processo" } as Record<string, string>)[values.filterProcess || all];
   if (processRun) labels.push(processRun);
-  const applicability = ({ applicable: "KGR aplicável", not_applicable: "KGR não aplicável", pending: "KGR pendente" } as Record<string, string>)[values.filterKgrApplicability];
+  const applicability = ({ applicable: "KGR aplicável", not_applicable: "KGR não aplicável", pending: "KGR pendente (legado)" } as Record<string, string>)[values.filterKgrApplicability];
   if (applicability) labels.push(applicability);
   const measurement = ({ without_data: "Sem medição", partial: "Parcial", complete: "Completa", invalid: "Inválida" } as Record<string, string>)[values.filterKgrMeasurement];
   if (measurement) labels.push(`KGR: ${measurement}`);

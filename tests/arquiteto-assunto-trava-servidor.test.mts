@@ -228,7 +228,7 @@ test("aprovada depois da ativação, sem processo, é recusada com 409 e nada é
     createMineradorArquitetoHandoff(contextFor(db), [uuid(1)]),
     (error: { code?: string; status?: number; message?: string }) =>
       error.code === "CONFLICT" && error.status === 409
-      && /A aprovação desta keyword está incompleta para o envio ao Arquiteto\. "keyword 1": Aprovar exige Lógica, Volume e Resultados/.test(error.message || ""),
+      && /A aprovação desta keyword está incompleta para o envio ao Arquiteto\. "keyword 1": Aprovar exige Lógica e Volume\./.test(error.message || ""),
   );
   assert.deepEqual(db.writes(), [], "nenhum workflow criado");
 });
@@ -374,4 +374,36 @@ test("o gate da tela e o do servidor dão o mesmo veredito para a mesma fixture"
     verdicts.push(server.verdict);
   }
   assert.deepEqual(verdicts, ["refuse", "alert", "pass", "refuse", "alert"]);
+});
+
+/*
+ * SDD SERP no artigo e KGR opcional (2026-09-28, M1): aprovada depois da
+ * ativação só com Lógica e Volume (Google Ads), SEM Resultados e com KGR sem
+ * decisão, passa na tela e no servidor. A SERP é ação manual e opcional.
+ */
+test("aprovada depois da ativação com Lógica e Volume, sem Resultados nem KGR, passa na tela e no servidor", async () => {
+  const semantic = {
+    ...comLogica(),
+    volume_measurement: { provider: "google_ads", averageMonthlySearches: 320, measuredAt: "2026-09-24T12:00:00.000Z" },
+  };
+  const row = await approvedKeyword(9, semantic, AFTER);
+  row.volume_search = 320;
+  row.analise_semantica = await applyApproval({
+    keywordId: String(row.id),
+    brandId: BRAND,
+    keyword: String(row.keyword),
+    intent: INTENT,
+    volumeSearch: 320,
+    resultsAllintitle: null,
+    kgrScore: null,
+    listaId: null,
+    semantic,
+    approvedAt: AFTER,
+    approvedBy: ACTOR,
+  });
+  const screen = evaluateMineradorArquitetoHandoff(row as Parameters<typeof evaluateMineradorArquitetoHandoff>[0], BRAND, null);
+  assert.equal(screen.approvalGate?.verdict, "pass");
+  assert.equal(screen.resultsValidated, false, "Resultados segue só informativo");
+  assert.equal(screen.ok, true);
+  assert.deepEqual(await serverOutcome(row), { verdict: "pass" });
 });

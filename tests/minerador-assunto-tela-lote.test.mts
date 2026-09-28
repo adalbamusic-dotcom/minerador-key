@@ -268,7 +268,7 @@ test("a declaração vai para a cópia de uma revisão aberta, sem levar o resto
 
 test("F1.5: aviso antes de confirmar, só em aprovada", () => {
   assert.equal(subjectReviewWarning({ approved: true, currentlyDeclared: true, nextDeclared: false }), SUBJECT_WITHDRAW_APPROVED_WARNING);
-  assert.match(SUBJECT_WITHDRAW_APPROVED_WARNING, /^Esta keyword foi aprovada como Assunto\. Sem a declaração, aprovar exige Volume, Resultados e KGR, e o Arquiteto seguirá vendo o Assunto até lá\.$/);
+  assert.match(SUBJECT_WITHDRAW_APPROVED_WARNING, /^Esta keyword foi aprovada como Assunto\. Sem a declaração, aprovar exige Volume, e o Arquiteto seguirá vendo o Assunto até lá\.$/);
   assert.equal(subjectReviewWarning({ approved: true, currentlyDeclared: false, nextDeclared: true }), SUBJECT_DECLARE_APPROVED_WARNING);
   assert.equal(subjectReviewWarning({ approved: true, currentlyDeclared: true, nextDeclared: true }), SUBJECT_DECLARE_APPROVED_WARNING, "trocar nota numa aprovada também muda o pacote");
   assert.match(SUBJECT_DECLARE_APPROVED_WARNING, /Em revisão/);

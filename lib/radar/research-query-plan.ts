@@ -21,6 +21,10 @@
  *      sozinhos: KGR alto não promove reforço a consulta central, e volume alto
  *      não transforma secundária em principal.
  *
+ * A ÚNICA EXCEÇÃO É A AUSÊNCIA DE VOLUME (SDD "SERP no artigo e KGR
+ * opcional", 2026-09-28, R2): secundária ou reforço sem volume de busca não
+ * gera consulta própria. Regra do dono: keyword sem volume nunca é coletada.
+ *
  * Domínio puro: sem fetch, sem storage, sem provider.
  */
 
@@ -95,6 +99,18 @@ const doSnapshot = (keyword: RadarResearchKeyword, chave: string): unknown => {
 const textoOu = (value: unknown): string | null => typeof value === "string" && value.trim() ? value.trim() : null;
 
 /**
+ * A keyword tem volume de busca? Nulo, zero ou inválido = sem volume.
+ *
+ * É o predicado único das coletas novas da SDD de 2026-09-28 — o mesmo de
+ * `hasSearchVolume` (`lib/arquiteto/serp-subject-suggestions.ts`), repetido
+ * aqui para o plano do Radar não carregar o módulo de formação do Arquiteto.
+ * `tests/radar-plano-sem-volume.test.mts` prova que os dois respondem igual.
+ */
+export function radarQueryHasSearchVolume(volume: number | null | undefined): volume is number {
+  return typeof volume === "number" && Number.isFinite(volume) && volume > 0;
+}
+
+/**
  * A consulta acrescenta uma leitura que a principal não traz?
  *
  * Intenção diferente muda o TIPO de página que a SERP devolve; entidade
@@ -161,6 +177,18 @@ export function buildRadarResearchQueryPlan(context: RadarArticleResearchContext
     if (candidata.role === "principal") {
       candidata.disposition = "EXECUTE";
       candidata.reason = "Consulta central da unidade editorial: é a âncora da investigação.";
+      continue;
+    }
+
+    /*
+     * KEYWORD SEM VOLUME NÃO GERA CONSULTA PRÓPRIA (R2 da SDD de 2026-09-28).
+     *
+     * Ela continua no plano, como contexto e com o motivo declarado. A
+     * principal não passa por aqui: ela é a âncora da investigação.
+     */
+    if (!radarQueryHasSearchVolume(candidata.volume)) {
+      candidata.disposition = "CONTEXT_ONLY";
+      candidata.reason = "Sem volume de busca registrado no ArticleDNA: a keyword não gera consulta própria e permanece como contexto.";
       continue;
     }
 

@@ -70,6 +70,10 @@ export type ArticleReviewChecklistInput = {
     fullKgr: boolean;
     principalKeyword: string | null;
     principalScoreLabel: string;
+    /** "Aplicar KGR" do artigo (SDD 2026-09-28). Ausente = leitura anterior. */
+    applyKgr?: boolean;
+    /** O artigo aplica o KGR e falta o allintitle da Principal. */
+    metricMissing?: boolean;
   };
   unitType: { defined: boolean; label: string | null };
   serp: Pick<SerpFormationVerdictReadModel, "kind" | "label" | "divergences">;
@@ -101,7 +105,32 @@ const STATUS_BADGES: Record<ArticleReviewStatus, string> = {
 export function buildArticleReviewChecklist(input: ArticleReviewChecklistInput): ArticleReviewChecklist {
   const decisions: ArticleReviewDecision[] = [];
 
-  decisions.push({
+  /*
+   * PADRÃO "KGR NÃO APLICÁVEL" (SDD 2026-09-28). Sem "Aplicar KGR" não há o
+   * que decidir: o item fica resolvido. Só o artigo que aplica o KGR sem o
+   * allintitle da Principal fica pendente, e a saída é medir.
+   */
+  if (typeof input.kgr.applyKgr === "boolean") {
+    const faltaMetrica = input.kgr.applyKgr && Boolean(input.kgr.metricMissing);
+    decisions.push({
+      id: "article-kgr",
+      kind: "article_kgr",
+      title: "KGR do artigo",
+      resolved: !faltaMetrica,
+      state: input.kgr.label,
+      what: faltaMetrica
+        ? "\"Aplicar KGR\" está marcado, mas falta o allintitle da Principal para calcular o KGR."
+        : input.kgr.applyKgr
+          ? input.kgr.fullKgr
+            ? "Aplicado pela regra antiga (KGR pleno automático); trocar para Não é decisão humana."
+            : "O artigo aplica o KGR."
+          : "KGR não aplicável por padrão; nada a decidir.",
+      why: `Principal ${input.kgr.principalKeyword || "não definida"} · KGR do artigo ${input.kgr.principalScoreLabel}.`,
+      how: faltaMetrica
+        ? "Medir o allintitle da Principal (pago, com confirmação) nesta aba."
+        : "Opcional: escolher \"Aplicar KGR\" para trabalhar o KGR neste artigo.",
+    });
+  } else decisions.push({
     id: "article-kgr",
     kind: "article_kgr",
     title: "KGR do artigo",

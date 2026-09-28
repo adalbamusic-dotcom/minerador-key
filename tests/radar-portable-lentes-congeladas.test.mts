@@ -494,10 +494,18 @@ test("3 · pacote sem a cópia diz por quê: anterior às lentes, sem SERP confe
   assert.equal(telaSemCopia.state, "absent");
   assert.match(telaSemCopia.label, /^Lentes não congeladas nesta investigação: o FINALIZE não gravou cópia das lentes \(a SERP lida não trazia as quatro lentes conferidas, ou a investigação foi finalizada antes de o FINALIZE copiá-las\)\.$/);
 
-  /* Um bloco num dossiê que não é do Google não é lido: o YouTube não congela lentes. */
-  const youtube = radarPortableExportFrozenLensesInput({ profile: "YOUTUBE", bundle: { ...dossieDoYoutube(), serpLenses: BLOCO }, analysis: {}, records: [REGISTRO_V3] });
+  /*
+   * Atualizado pelo corretor (2026-09-28, R3): YouTube e Amazon só ACRESCENTAM.
+   * Sem o Google finalizado, o dossiê de vídeo não traz lentes e a coluna diz
+   * que não se aplicam. Com o Google finalizado, o dossiê traz as lentes do
+   * Google como apoio, e o export as mostra em vez de apagá-las.
+   */
+  const youtube = radarPortableExportFrozenLensesInput({ profile: "YOUTUBE", bundle: dossieDoYoutube(), analysis: {}, records: [REGISTRO_V3] });
   assert.equal(youtube.block, null);
   assert.equal(radarPortableFrozenLensesState(youtube), "not_applicable");
+  const youtubeComGoogle = radarPortableExportFrozenLensesInput({ profile: "YOUTUBE", bundle: { ...dossieDoYoutube(), serpLenses: BLOCO }, analysis: {}, records: [REGISTRO_V3] });
+  assert.equal(youtubeComGoogle.block, BLOCO, "as lentes do Google que o dossiê de vídeo traz não somem do export");
+  assert.equal(radarPortableFrozenLensesState(youtubeComGoogle), "frozen");
   const md = colunas(youtube).serp_lenses_md;
   assert.match(md, /Não se aplicam a este pacote: a cópia das quatro lentes da SERP existe só na investigação de páginas do Google, e este artigo foi investigado pelo perfil YouTube\./);
   assert.equal(/### desktop-windows \(desktop · Windows\) — Cache · pago/.test(md), false);
@@ -872,7 +880,8 @@ test("7 · a rota liga a cópia do dossiê e as limitações portáteis, sem lei
 
   const lote = semComentarios(await readFile(new URL("../lib/radar/portable-export-batch.ts", import.meta.url), "utf8"));
   assert.match(lote, /\.\.\.\(artigo\.lentesCongeladas \? \{ frozen: artigo\.lentesCongeladas \} : \{\}\)/);
-  assert.match(lote, /block: input\.profile === "GOOGLE" \? input\.bundle\.serpLenses \?\? null : null/);
+  // R3 (2026-09-28): as lentes do dossiê saem em qualquer perfil que as traga.
+  assert.match(lote, /block: input\.bundle\.serpLenses \?\? null,/);
 });
 
 test("PROVIDER_CALLS = 0 e AI_CALLS = 0", () => {

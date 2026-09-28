@@ -37,7 +37,8 @@ test("InfoHint acompanha as ações sem substituir handlers nem pré-condições
   for (const [title, handler] of [
     ["Interpretar o significado da keyword", "handleQualifySelected"],
     ["Atualizar demanda de busca", "handleBatchQualify"],
-    ["Medir concorrência orgânica", "handleBatchAllintitle"],
+    // Resultados é ação manual, opcional e paga desde 2026-09-28.
+    ["Medir concorrência orgânica (opcional · pago)", "handleBatchAllintitle"],
     ["Confirmar as decisões do KeywordDNA", "handleOpenHumanReview"],
   ] as const) {
     const start = workspace.indexOf(`title="${title}"`);

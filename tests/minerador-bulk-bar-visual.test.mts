@@ -34,7 +34,9 @@ test("bulk bar organiza contexto, workflow, secundárias, destrutivo e progresso
   const start = page.indexOf("{/* FOOTER BATCH ACTIONS BAR */}");
   const end = page.indexOf("</KeywordTableBulkBarShell>", start);
   const bulkBar = page.slice(start, end);
-  const order = ["ariaLabel=\"Conferir site\"", "ariaLabel=\"Lógica\"", "ariaLabel=\"Volume\"", "ariaLabel=\"Resultados\"", "ariaLabel=\"Revisar\"", "aria-label=\"Status\"", "aria-label=\"Mais ações\"", "aria-label=\"Excluir\""];
+  // Atualizado em 2026-09-28 (decisão do dono): Resultados saiu da sequência
+  // de processos e vive nas ações secundárias, como opcional e pago.
+  const order = ["ariaLabel=\"Conferir site\"", "ariaLabel=\"Lógica\"", "ariaLabel=\"Volume\"", "ariaLabel=\"Revisar\"", "ariaLabel=\"Resultados (opcional · pago)\"", "aria-label=\"Status\"", "aria-label=\"Mais ações\"", "aria-label=\"Excluir\""];
   let previous = -1;
   for (const label of order) {
     const current = bulkBar.indexOf(label);
@@ -44,6 +46,10 @@ test("bulk bar organiza contexto, workflow, secundárias, destrutivo e progresso
 
   assert.match(bulkBar, /data-bulk-workflow-core/);
   assert.match(bulkBar, /data-bulk-workflow-secondary/);
+  const core = bulkBar.slice(bulkBar.indexOf("data-bulk-workflow-core"), bulkBar.indexOf("data-bulk-workflow-secondary"));
+  assert.ok(!core.includes("handleBatchAllintitle"), "Resultados não faz parte da sequência de processos");
+  const secundarias = bulkBar.slice(bulkBar.indexOf("data-bulk-workflow-secondary"));
+  assert.ok(secundarias.indexOf("data-bulk-optional-results") >= 0 && secundarias.indexOf("onClick={handleBatchAllintitle}") > secundarias.indexOf("data-bulk-optional-results"));
   assert.match(bulkBar, /data-minerador-bulk-progress/);
   // Atualizado em 2026-09-24 a pedido do dono: o cartão de progresso mostra o
   // texto vivo do lote ("Processando 5 de 30 · faltam 25") em 14px e ficou

@@ -61,7 +61,11 @@ const objeto = (valor: unknown): Linha | null =>
   valor && typeof valor === "object" && !Array.isArray(valor) ? valor as Linha : null;
 
 export type RadarCanonicalAuthorities = {
-  /** A fotografia do pipeline do Google. `null` fora do perfil GOOGLE. */
+  /**
+   * A fotografia do pipeline do Google. No perfil GOOGLE, e também no YouTube
+   * ou na Amazon quando o Google foi finalizado (R3 da SDD de 2026-09-28).
+   * `null` quando o Google não foi finalizado fora do perfil GOOGLE.
+   */
   google: RadarGoogleReadModel | null;
   /** §3 · a biblioteca casada com as pautas. `null` quando não há seleção. */
   video: RadarVideoEvidenceLayer | null;
@@ -314,10 +318,17 @@ export async function loadRadarCanonicalAuthorities(input: {
    * era montá-la fora do React — e é isso, e só isso, que acontece aqui.
    */
   const perfil = radarPrimaryProfileOfAnalysis(input.analysis.payload);
+  /*
+   * SDD "SERP no artigo e KGR opcional" (2026-09-28), R3: YouTube e Amazon só
+   * acrescentam. Com o Google FINALIZADO, a fotografia dele é montada também
+   * quando o perfil primário é de vídeo ou de produto; o dossiê a confere com
+   * o congelado antes de anexá-la ao apoio.
+   */
+  const googleFinalizado = perfil === "GOOGLE" || (perfil !== null && Boolean(input.analysis.payload.finalizedBundle));
   const snapshots = input.serpRecords
-    ?? (perfil === "GOOGLE" ? (await new SerpSnapshotRepository().list(input.brandId, input.articleId)).records : []);
+    ?? (googleFinalizado ? (await new SerpSnapshotRepository().list(input.brandId, input.articleId)).records : []);
 
-  const google = perfil === "GOOGLE" && researchContext
+  const google = googleFinalizado && researchContext
     ? radarGoogleReadModelOfAnalysis({
       context: researchContext,
       analysis: input.analysis,

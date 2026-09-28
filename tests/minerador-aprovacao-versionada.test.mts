@@ -48,7 +48,7 @@ function pacoteDe(semantic: Record<string, unknown>) {
   };
 }
 
-test("aprovar exige Lógica, Volume, Resultados e KGR tratado", () => {
+test("aprovar exige Lógica e Volume; Resultados e KGR são opcionais (2026-09-28)", () => {
   const pronta = resolveApprovalReadiness({ semantic: semanticPronta(), intent: INTENT, volumeSearch: 90, resultsAllintitle: 336 });
   assert.equal(pronta.ok, true);
   assert.deepEqual(pronta.missing, []);
@@ -59,12 +59,18 @@ test("aprovar exige Lógica, Volume, Resultados e KGR tratado", () => {
   assert.match(semLogica.reason || "", /pacote fechado/);
 
   const semMedicao = resolveApprovalReadiness({ semantic: semanticPronta({ volume_measurement: undefined, allintitle_measurement: undefined }), intent: INTENT });
-  assert.ok(semMedicao.missing.includes("volume"));
-  assert.ok(semMedicao.missing.includes("results"));
+  assert.deepEqual(semMedicao.missing, ["volume"]);
+  assert.match(semMedicao.reason || "", /^Aprovar exige Volume\. /);
 
+  // Sem Resultados (SERP): pronta com Google Ads + Lógica (2026-09-28).
+  const semResultados = resolveApprovalReadiness({ semantic: semanticPronta({ allintitle_measurement: undefined }), intent: INTENT, volumeSearch: 90 });
+  assert.equal(semResultados.ok, true);
+  assert.deepEqual(semResultados.missing, []);
+
+  // "pending" legado com KGR calculável não trava mais.
   const kgrPendente = resolveApprovalReadiness({ semantic: semanticPronta({ kgr_aplicabilidade: "pending" }), intent: INTENT, volumeSearch: 90, resultsAllintitle: 336 });
-  assert.equal(kgrPendente.ok, false);
-  assert.ok(kgrPendente.missing.includes("kgr"));
+  assert.equal(kgrPendente.ok, true);
+  assert.deepEqual(kgrPendente.missing, []);
 });
 
 test("SERP não conclusiva não trava a aprovação", () => {

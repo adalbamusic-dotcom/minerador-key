@@ -175,6 +175,14 @@ export type ClassificationEvidence = {
   humanKgrDecision: "YES" | "NO" | null;
   /** A regra atual devolve a decisão ao humano neste caso. */
   awaitingHumanKgrDecision: boolean;
+  /**
+   * "Aplicar KGR" do ARTIGO (contrato `article-kgr-decision-v2`, SDD
+   * 2026-09-28). Quando informado, é a única fonte da aplicabilidade: `false`
+   * = KGR não aplicável por padrão; `true` = o humano (ou um vínculo
+   * confirmado, ou a regra antiga gravada) aplica o KGR. Ausente = leitura
+   * anterior, pela aplicabilidade da Principal.
+   */
+  articleAppliesKgr?: boolean | null;
 
   /** Conflitos de compatibilidade detectados na composição. */
   compatibilityConflicts: number;
@@ -297,6 +305,16 @@ function resolveFunnel(evidence: ClassificationEvidence): ResolvedField<ArticleT
 }
 
 function resolveKgrApplicability(evidence: ClassificationEvidence): ResolvedField<ArticleTerminalKgrApplicability> {
+  /*
+   * PADRÃO "KGR NÃO APLICÁVEL" (SDD 2026-09-28). A aplicabilidade é do
+   * ARTIGO: sem "Aplicar KGR", não se aplica — e isso é resultado terminal,
+   * não pendência. A mesa e o ArticleDNA leem a mesma resposta.
+   */
+  if (typeof evidence.articleAppliesKgr === "boolean") {
+    return evidence.articleAppliesKgr
+      ? { value: "APPLICABLE", source: "article_decision", reason: "O artigo aplica o KGR (\"Aplicar KGR\" = Sim)." }
+      : { value: "NOT_APPLICABLE", source: "article_decision", reason: "KGR não aplicável por padrão: ninguém escolheu Aplicar KGR neste artigo." };
+  }
   if (evidence.principalKgrApplicability === "applicable") {
     return { value: "APPLICABLE", source: "principal", reason: "A Principal recebeu aplicabilidade de KGR do Minerador.", };
   }
@@ -326,6 +344,16 @@ function resolveKgr(
       value: evidence.humanKgrDecision,
       source: "article_decision",
       reason: "Decisão humana de KGR registrada para este artigo.",
+    };
+  }
+  // O artigo aplica o KGR sem decisão humana registrada: vínculo confirmado ou regra antiga gravada.
+  if (evidence.articleAppliesKgr === true) {
+    return {
+      value: "YES",
+      source: "article_decision",
+      reason: evidence.principalKgrScore === null
+        ? "O artigo aplica o KGR; falta o allintitle da Principal para calcular a métrica."
+        : `O artigo aplica o KGR; KGR do artigo ${evidence.principalKgrScore}.`,
     };
   }
   // NOT_APPLICABLE não vira "Não": são coisas distintas no contrato vigente.
@@ -482,6 +510,15 @@ export type ClassificationBlockerCode = keyof typeof CLASSIFICATION_BLOCKER_LABE
  */
 export function unresolvedClassifications(evidence: ClassificationEvidence): ClassificationBlockerCode[] {
   const codes: ClassificationBlockerCode[] = [];
+  /*
+   * Com "Aplicar KGR" informado, só o artigo que APLICA o KGR sem allintitle
+   * medido fica bloqueado — inclusive por decisão humana: aplicar o KGR sem a
+   * métrica não fecha. KGR não aplicável nunca bloqueia.
+   */
+  if (typeof evidence.articleAppliesKgr === "boolean") {
+    if (evidence.articleAppliesKgr && evidence.principalKgrScore === null) codes.push("KGR_APPLICABLE_WITHOUT_METRIC");
+    return codes;
+  }
   if (
     evidence.principalKgrApplicability === "applicable"
     && evidence.principalKgrScore === null

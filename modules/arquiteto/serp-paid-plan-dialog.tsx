@@ -7,6 +7,9 @@ import {
   type SerpPaidPlan,
   type SerpPaidPlanChoice,
 } from "@/lib/arquiteto/serp-lens-plan";
+import { ARTICLE_ALLINTITLE_PLAN_LABEL } from "@/lib/arquiteto/article-allintitle";
+
+const usd = (valor: number) => valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
 /**
  * O PLANO DE CHAMADAS PAGAS, ANTES DE PAGAR (adendo das 4 lentes, A6).
@@ -44,7 +47,24 @@ export function SerpPaidPlanDialog({
   onChoose: (choice: SerpPaidPlanChoice) => void;
   onCancel: () => void;
 }) {
-  const texto = describeSerpPaidPlan(plan);
+  /*
+   * O allintitle da Principal usa o mesmo diálogo e a mesma autorização, mas
+   * não é SERP em lentes: uma consulta por artigo, em desktop. O texto diz isso
+   * em vez de falar de "lente principal" e "lentes extras".
+   */
+  const allintitle = plan.lenses.length === 1 && plan.lenses[0] === ARTICLE_ALLINTITLE_PLAN_LABEL;
+  const descrito = describeSerpPaidPlan(plan);
+  const texto = allintitle
+    ? {
+      ...descrito,
+      headline: plan.paidQueries > 0
+        ? `Até ${plan.paidQueries} consulta(s) paga(s) de allintitle: uma por artigo, só da Principal.`
+        : "Nenhuma consulta paga: o allintitle de todas as Principais já foi medido nos últimos 30 dias.",
+      cost: plan.paidQueries > 0
+        ? `≈ US$ ${usd(plan.estimatedCostUsd.min)} a ${usd(plan.estimatedCostUsd.max)} (estimado até o primeiro registro real no ledger).`
+        : null,
+    }
+    : descrito;
   const [principal, ...outras] = serpPaidPlanOptions(plan, { allowPrimaryOnly });
   const somenteCache: SerpPaidPlanChoice = { authorizedPaidQueries: 0, payMissingExtraLenses: false, recollectStaleLenses: false, cacheOnly: true };
   /*
@@ -69,7 +89,7 @@ export function SerpPaidPlanDialog({
           <table className="w-full text-left text-sm">
             <thead className="sticky top-0 bg-surface text-text-muted">
               <tr>
-                <th className="px-2 py-1 font-semibold">Lente</th>
+                <th className="px-2 py-1 font-semibold">{allintitle ? "Consulta" : "Lente"}</th>
                 <th className="px-2 py-1 font-semibold">No cache</th>
                 <th className="px-2 py-1 font-semibold">A pagar</th>
                 <th className="px-2 py-1 font-semibold">Não pagas</th>
@@ -108,7 +128,9 @@ export function SerpPaidPlanDialog({
         ) : null}
 
         <p className="text-sm leading-6 text-text-muted">
-          Nada é pago antes da sua escolha. “No cache” conta entradas pela metadata; o corpo é conferido ao analisar. Uma lente ausente fica declarada no parecer.
+          {allintitle
+            ? "Nada é pago antes da sua escolha. “No cache” conta as medições de até 30 dias (do Arquiteto ou do Minerador). Medir não decide “Aplicar KGR”."
+            : "Nada é pago antes da sua escolha. “No cache” conta entradas pela metadata; o corpo é conferido ao analisar. Uma lente ausente fica declarada no parecer."}
           {plan.perLens.length > 1 ? " As quatro lentes valem também para artigo de uma keyword só: o parecer antigo marcado “sem par” fica incompleto, faltando lentes, até as extras serem coletadas, e bloqueia a conclusão daquele artigo." : ""}
           {ofereceSomenteCache ? " Cancelar o pagamento não cancela a análise: os artigos com evidência completa no cache recebem parecer, sem custo, e os que dependem de coleta ficam pendentes com o motivo." : ""}
           {allowCacheOnly && plan.cacheUnavailable ? " Com o cache ilegível não dá para analisar sem custo: colete com o custo máximo, tente ler o cache de novo ou cancele sem pagar nada." : ""}

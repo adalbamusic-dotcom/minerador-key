@@ -48,7 +48,8 @@ function kgrCalculable(extra: Record<string, unknown> = {}) {
 const subject = { keyword_subject: { declared: true, note: null, destinationUrl: null, destinationCheck: null } };
 
 test("Assunto anula o KGR também na conclusão: o lote conclui e o KGR em grupo continua pulando", () => {
-  assert.equal(canCompleteHumanReview(kgrCalculable()).pendingKgrDecision, true, "sem Assunto, o KGR calculável continua exigido");
+  // 2026-09-28: o KGR é opcional (padrão "não aplicável") e não trava nem sem Assunto.
+  assert.equal(canCompleteHumanReview(kgrCalculable()).pendingKgrDecision, undefined, "sem Assunto, o KGR calculável também não é mais exigido");
 
   const semantic = kgrCalculable(subject);
   assert.equal(canCompleteHumanReview(semantic).pendingKgrDecision, undefined);

@@ -164,6 +164,36 @@ test("F1b.8: com sufixo, as duas chamadas da mesma operação têm chaves distin
   assert.equal(urlEvent.metadata.seedKind, "url_seed");
 });
 
+test("2026-09-28: sufixo por página (diferenciação) não colide, preserva as chaves de hoje e leva o módulo", async () => {
+  const operationRequestId = "20000000-0000-4000-8000-000000000022";
+  const keys = [
+    googleAdsDiscoveryUsageKey(operationRequestId, "keyword_seed:p1"),
+    googleAdsDiscoveryUsageKey(operationRequestId, "url_seed:p1"),
+    googleAdsDiscoveryUsageKey(operationRequestId, "keyword_seed:p2"),
+    googleAdsDiscoveryUsageKey(operationRequestId, "url_seed:p2"),
+  ];
+  assert.equal(keys[0], `google_ads:${operationRequestId}:keyword_discovery:keyword_seed:p1`);
+  assert.equal(new Set(keys).size, 4, "duas páginas da mesma rodada não colidem");
+  // As chaves de hoje, byte a byte.
+  assert.equal(googleAdsDiscoveryUsageKey(operationRequestId), `google_ads:${operationRequestId}:keyword_discovery`);
+  assert.equal(googleAdsDiscoveryUsageKey(operationRequestId, "keyword_seed"), `google_ads:${operationRequestId}:keyword_discovery:keyword_seed`);
+
+  const fixture = dependencies();
+  const first = await recordGoogleAdsDiscoveryUsage(input({ dependencies: fixture.dependencies, operationRequestId, discoveryRunId: null, usageKeySuffix: "keyword_seed:p1", module: "arquiteto" }));
+  const second = await recordGoogleAdsDiscoveryUsage(input({ dependencies: fixture.dependencies, operationRequestId, discoveryRunId: null, usageKeySuffix: "keyword_seed:p2", module: "arquiteto" }));
+  assert.equal(fixture.usage.length, 2);
+  assert.equal(first.idempotency_key, keys[0]);
+  assert.equal(second.idempotency_key, keys[2]);
+  assert.equal(first.module, "arquiteto");
+  assert.equal(first.metadata.seedKind, "keyword_seed", "o tipo da semente continua o mesmo");
+  assert.equal(first.metadata.seedPage, "p1");
+
+  // Sem módulo, continua `minerador`; sem página, sem `seedPage`.
+  const plain = await recordGoogleAdsDiscoveryUsage(input({ dependencies: fixture.dependencies, operationRequestId, discoveryRunId: null, usageKeySuffix: "url_seed" }));
+  assert.equal(plain.module, "minerador");
+  assert.equal("seedPage" in plain.metadata, false);
+});
+
 test("Discovery só tenta Usage após chamada iniciada e separa provider, persistência e Usage", async () => {
   const route = await readFile(new URL("../app/api/minerador/marcas/[brandId]/google-ads/descobrir-keywords/route.ts", import.meta.url), "utf8");
   assert.match(route, /apiRequestStarted && canonicalContext && operationRequestId && !usageAttempted/);

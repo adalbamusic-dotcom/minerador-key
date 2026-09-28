@@ -8,12 +8,23 @@
  * paga; a rodada só paga o plano autorizado, com orçamento em dólares.
  *
  * A rodada usa o MESMO núcleo da Pesquisa por Assunto — as portas
- * `SubjectDiscoveryExecutionPorts` (Labs, SERP com cache e ledger), o
- * orçamento `createSubjectDiscoveryBudget`, a junção
+ * `SubjectDiscoveryExecutionPorts` (ideias do Google Ads, SERP com cache e
+ * ledger), o orçamento `createSubjectDiscoveryBudget`, a junção
  * `mergeSubjectDiscoveryCandidates`, o pedido de SERP nas 4 lentes
  * `subjectDiscoverySerpRequests` e a chave de idempotência do ledger. Nada
- * paralelo. Só DataForSEO (Serper e RapidAPI nunca). O volume do Google Ads é
- * grátis e vem por uma porta própria (métricas históricas, a mesma do Minerador).
+ * paralelo. A SERP é do DataForSEO (Serper e RapidAPI nunca).
+ *
+ * Plano v2 (2026-09-28, SDD `sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md`
+ * §3.3): as keywords novas vêm SÓ do Google Ads, grátis — `keywordSeed` com as
+ * sementes do ângulo e `keywordAndUrlSeed` com a URL da página. Saíram as três
+ * chamadas do DataForSEO Labs (ranked, ideias, relacionadas); o custo da prévia
+ * é só a SERP das candidatas. As sementes, a URL e o targeting entram no hash.
+ * O volume que decide continua sendo a média mensal do Google Ads pelas
+ * métricas históricas (a mesma coluna Volume do Minerador); a média da ideia
+ * só vale para quem ficou sem a métrica histórica.
+ *
+ * Rodadas pagas no plano v1 (com Labs) continuam legíveis e aceitáveis; uma
+ * prévia v1 ainda não rodada é recusada antes de reservar, sem pagar.
  *
  * A avaliação decide pela SERP (A2): separação (a keyword proposta para uma
  * página divide no máximo 1 página do top 10 com as propostas das irmãs) e
@@ -42,23 +53,19 @@ import {
   type DifferentiationGroup,
   type DifferentiationGroupMember,
 } from "./published-differentiation.ts";
-import {
-  DATAFORSEO_LABS_LANGUAGE_CODE,
-  DATAFORSEO_LABS_LOCATION_CODE,
-  DATAFORSEO_LABS_RESEARCH_ENDPOINTS,
-  DataForSeoLabsResearchError,
-  type DataForSeoLabsResearchRequest,
-} from "../minerador/dataforseo-labs-keyword-research-core.ts";
+import { GOOGLE_ADS_DISCOVERY_COUNTRY, GOOGLE_ADS_DISCOVERY_LANGUAGES } from "../minerador/google-ads-discovery-catalog.ts";
 import {
   SUBJECT_DISCOVERY_LABS_CALL_MAX_USD,
   SUBJECT_DISCOVERY_PRICES,
   createSubjectDiscoveryBudget,
   subjectDiscoveryLedgerKey,
+  type SubjectDiscoveryAdsTargeting,
   type SubjectDiscoveryPaidCall,
 } from "../minerador/subject-discovery-plan.ts";
 import {
   mergeSubjectDiscoveryCandidates,
   subjectDiscoverySerpRequests,
+  type SubjectDiscoveryAdsSeed,
   type SubjectDiscoveryContribution,
   type SubjectDiscoveryExecutionPorts,
 } from "../minerador/subject-discovery-search.ts";
@@ -68,7 +75,25 @@ import { normalizeKeyword } from "../minerador/keyword-import-core.ts";
 
 /* ---------------------------------- preços ---------------------------------- */
 
-export const DIFFERENTIATION_PLAN_VERSION = "published-differentiation-plan-v1" as const;
+export const DIFFERENTIATION_PLAN_VERSION = "published-differentiation-plan-v2" as const;
+/** Prévias gravadas antes de 2026-09-28 (com Labs): rodadas pagas nelas continuam legíveis. */
+export const DIFFERENTIATION_LEGACY_PLAN_VERSION = "published-differentiation-plan-v1" as const;
+/** A recusa de uma prévia v1 ainda não rodada: nada é pago, basta planejar de novo. */
+export const DIFFERENTIATION_PLAN_OUTDATED_MESSAGE = "Esta prévia é de antes da troca para o Google Ads. Planeje o grupo de novo; nada foi pago.";
+
+/**
+ * O targeting das ideias do Google Ads: o canônico da plataforma (português,
+ * Brasil, só Pesquisa, sem adulto) — o mesmo das métricas históricas desta
+ * rodada. Constante, e entra no hash do plano.
+ */
+export const DIFFERENTIATION_ADS_TARGETING: Readonly<SubjectDiscoveryAdsTargeting> = Object.freeze({
+  language: GOOGLE_ADS_DISCOVERY_LANGUAGES["Português"],
+  geoTargetConstants: [GOOGLE_ADS_DISCOVERY_COUNTRY.geoTargetConstant],
+  keywordPlanNetwork: "GOOGLE_SEARCH" as const,
+  includeAdultKeywords: false,
+});
+/** Ideias por chamada do Google Ads, por semente. */
+export const DIFFERENTIATION_ADS_PAGE_SIZE = 100;
 
 /** Teto por grupo aceito pelo dono (Q2). O servidor nunca paga acima dele. */
 export const DIFFERENTIATION_MAX_COST_USD = 0.5;
@@ -76,10 +101,10 @@ export const DIFFERENTIATION_MAX_COST_USD = 0.5;
 export const DIFFERENTIATION_SERP_CANDIDATES_MAX = 5;
 /** Piso do corte: menos que 2 candidatas não compara nada. */
 export const DIFFERENTIATION_SERP_CANDIDATES_MIN = 2;
-/** Candidatas por página que vão ao Google Ads (grátis) depois do filtro. */
+/** Candidatas por página que vão às métricas históricas do Google Ads (grátis) depois da junção. */
 export const DIFFERENTIATION_ADS_CANDIDATES_PER_PAGE = 60;
 
-/** Os preços que já estão no código, só lidos. */
+/** Os preços que já estão no código, só lidos. Os do Labs ficam para ler prévias v1. */
 export const DIFFERENTIATION_PRICES = Object.freeze({
   labsTaskUsd: SUBJECT_DISCOVERY_PRICES.labsTaskUsd,
   labsItemUsd: SUBJECT_DISCOVERY_PRICES.labsItemUsd,
@@ -112,11 +137,25 @@ export type DifferentiationLabsCall = {
   input: string;
 };
 
+/** Uma consulta grátis ao Google Ads por semente. Entra no hash (o que se pesquisa), fora do orçamento. */
+export type DifferentiationAdsCall = {
+  /** `p{n}:ads:keyword_seed` ou `p{n}:ads:url_seed`. */
+  callId: string;
+  kind: "keyword_seed" | "url_seed";
+  /** As sementes do ângulo, sem repetir. */
+  keywords: string[];
+  /** Só no `url_seed`: a URL do publicado, do Vínculo. */
+  url: string | null;
+};
+
 export type DifferentiationPlanPage = {
   keywordId: string;
   keyword: string;
   url: string | null;
+  /** Legado (v1): as chamadas do Labs. No v2, sempre vazio. */
   labs: DifferentiationLabsCall[];
+  /** v2: as sementes do Google Ads desta página. Ausente em prévias v1. */
+  ads?: DifferentiationAdsCall[];
   /** Quantas candidatas desta página vão à SERP (4 lentes cada). */
   serpCandidates: number;
   /** Fora desta rodada pelo teto: nada é pago para ela. */
@@ -125,15 +164,20 @@ export type DifferentiationPlanPage = {
 };
 
 export type DifferentiationPlan = {
-  version: typeof DIFFERENTIATION_PLAN_VERSION;
+  version: typeof DIFFERENTIATION_PLAN_VERSION | typeof DIFFERENTIATION_LEGACY_PLAN_VERSION;
   brandId: string;
   groupId: string;
   serpFingerprint: string;
   pages: DifferentiationPlanPage[];
   aiUsed: boolean;
   prices: typeof DIFFERENTIATION_PRICES;
+  /** v2: o targeting das ideias do Google Ads. Ausente em prévias v1. */
+  adsTargeting?: SubjectDiscoveryAdsTargeting;
   hardCapUsd: number;
-  /** Mínimo: só as tarefas Labs, sem item e com a SERP toda no cache. Máximo: tudo pago. */
+  /**
+   * Mínimo: v2, US$ 0 (a SERP toda no cache); v1, as tarefas Labs sem item.
+   * Máximo: tudo pago.
+   */
   costRange: { minUsd: number; maxUsd: number };
   paidCallsMax: number;
   withinCap: boolean;
@@ -144,7 +188,7 @@ export type DifferentiationPlan = {
 };
 
 const serpSlotId = (pageIndex: number, candidate: number, lensIndex: number) => `p${pageIndex + 1}:serp:${candidate}:${lensIndex + 1}`;
-const labsCallId = (pageIndex: number, endpoint: DifferentiationLabsEndpoint) => `p${pageIndex + 1}:${endpoint}`;
+const adsCallId = (pageIndex: number, kind: DifferentiationAdsCall["kind"]) => `p${pageIndex + 1}:ads:${kind}`;
 
 function planCostMicros(pages: readonly DifferentiationPlanPage[]) {
   let min = 0;
@@ -170,8 +214,10 @@ function hashMaterial(plan: Omit<DifferentiationPlan, "planHash">) {
     brandId: plan.brandId,
     groupId: plan.groupId,
     serpFingerprint: plan.serpFingerprint,
-    pages: plan.pages.map(page => ({ keywordId: page.keywordId, url: page.url, labs: page.labs, serpCandidates: page.serpCandidates, inRound: page.inRound })),
+    // `ads` e `adsTargeting` só existem no v2: um plano v1 continua com o hash dele.
+    pages: plan.pages.map(page => ({ keywordId: page.keywordId, url: page.url, labs: page.labs, ...(page.ads ? { ads: page.ads } : {}), serpCandidates: page.serpCandidates, inRound: page.inRound })),
     prices: plan.prices,
+    ...(plan.adsTargeting ? { adsTargeting: plan.adsTargeting } : {}),
     hardCapUsd: plan.hardCapUsd,
   };
 }
@@ -187,13 +233,14 @@ export async function verifyDifferentiationPlanHash(plan: DifferentiationPlan): 
 }
 
 /**
- * O plano pago de UM grupo. Por página: `ranked_keywords` da URL (se houver),
- * `keyword_ideas` com a semente do ângulo, `related_keywords` com a semente da
- * IA ou a própria keyword, e a SERP de até 5 candidatas nas 4 lentes.
+ * O plano de UM grupo (v2). Por página: o Google Ads com as sementes do ângulo
+ * (`keywordSeed`: a semente de ideias e a de pesquisa relacionada, sem repetir)
+ * e, com a URL no Vínculo, a semente de ideias + a URL (`keywordAndUrlSeed`) —
+ * grátis; e a SERP de até 5 candidatas nas 4 lentes — a única parte paga.
  *
  * Acima de US$ 0,50, corta nesta ordem, até caber: candidatas na SERP (5 → 3),
- * pesquisas relacionadas (da última página para a primeira), candidatas (3 → 2)
- * e, por fim, páginas do fim do grupo (ficam para outra rodada; sempre sobram 2).
+ * candidatas (3 → 2) e, por fim, páginas do fim do grupo (ficam para outra
+ * rodada; sempre sobram 2). Com o teto de hoje, até 7 páginas cabem sem corte.
  */
 export async function buildDifferentiationPlan(input: {
   brandId: string;
@@ -207,24 +254,25 @@ export async function buildDifferentiationPlan(input: {
   const notices: string[] = [];
   const pages: DifferentiationPlanPage[] = input.group.members.map((member, indice) => {
     const angulo = angulos.get(member.page.keywordId);
-    const labs: DifferentiationLabsCall[] = [];
-    if (member.page.url) labs.push({ callId: labsCallId(indice, "ranked_keywords"), endpoint: "ranked_keywords", input: member.page.url });
-    labs.push({ callId: labsCallId(indice, "keyword_ideas"), endpoint: "keyword_ideas", input: angulo?.ideasSeed || member.page.keyword });
-    labs.push({ callId: labsCallId(indice, "related_keywords"), endpoint: "related_keywords", input: angulo?.relatedSeed || member.page.keyword });
+    const ideias = (angulo?.ideasSeed || member.page.keyword).replace(/\s+/g, " ").trim();
+    const relacionada = (angulo?.relatedSeed || member.page.keyword).replace(/\s+/g, " ").trim();
+    const sementes = [ideias, ...(normalizeKeyword(relacionada) && normalizeKeyword(relacionada) !== normalizeKeyword(ideias) ? [relacionada] : [])].filter(Boolean);
+    const ads: DifferentiationAdsCall[] = [{ callId: adsCallId(indice, "keyword_seed"), kind: "keyword_seed", keywords: sementes, url: null }];
+    if (member.page.url) ads.push({ callId: adsCallId(indice, "url_seed"), kind: "url_seed", keywords: [ideias], url: member.page.url });
     return {
       keywordId: member.page.keywordId,
       keyword: member.page.keyword,
       url: member.page.url,
-      labs,
+      labs: [],
+      ads,
       serpCandidates: DIFFERENTIATION_SERP_CANDIDATES_MAX,
       inRound: true,
-      note: member.page.url ? null : "Sem a URL no Vínculo: o que o Google associa à página (ranked_keywords) fica de fora.",
+      note: member.page.url ? null : "Sem a URL no Vínculo: o Google Ads recebe só as sementes do ângulo, sem a página.",
     };
   });
 
   const acima = () => planCostMicros(pages).max > toMicros(teto);
   let candidatasCortadas = false;
-  const semRelacionadas: string[] = [];
   const foraDaRodada: string[] = [];
   const reduzirCandidatas = (piso: number) => {
     while (acima()) {
@@ -235,12 +283,6 @@ export async function buildDifferentiationPlan(input: {
     }
   };
   reduzirCandidatas(3);
-  while (acima()) {
-    const alvo = [...pages].reverse().find(page => page.inRound && page.labs.some(call => call.endpoint === "related_keywords"));
-    if (!alvo) break;
-    alvo.labs = alvo.labs.filter(call => call.endpoint !== "related_keywords");
-    semRelacionadas.push(alvo.keyword);
-  }
   reduzirCandidatas(DIFFERENTIATION_SERP_CANDIDATES_MIN);
   while (acima() && pages.filter(page => page.inRound).length > 2) {
     const alvo = [...pages].reverse().find(page => page.inRound)!;
@@ -256,9 +298,9 @@ export async function buildDifferentiationPlan(input: {
     const maior = Math.max(...faixas);
     cuts.push(`SERP de ${menor === maior ? menor : `${menor} a ${maior}`} candidatas por página, em vez de ${DIFFERENTIATION_SERP_CANDIDATES_MAX}.`);
   }
-  if (semRelacionadas.length) cuts.push(`Sem pesquisas relacionadas em ${semRelacionadas.length} página(s): ${semRelacionadas.map(nome => `"${nome}"`).join(", ")}.`);
   if (foraDaRodada.length) cuts.push(`Fora desta rodada: ${foraDaRodada.map(nome => `"${nome}"`).join(", ")}.`);
   if (input.aiUsed) notices.push("A IA sugeriu sementes: são a autoridade mais baixa. Volume e SERP decidem.");
+  notices.push("As keywords novas vêm do Google Ads (sementes do ângulo e a página), sem custo no DataForSEO. O custo é só a SERP das candidatas.");
   notices.push("Cache de SERP válido não cobra: o custo real costuma ficar abaixo do máximo.");
   notices.push("O volume do Google Ads não custa nada.");
 
@@ -271,6 +313,7 @@ export async function buildDifferentiationPlan(input: {
     pages,
     aiUsed: input.aiUsed,
     prices: DIFFERENTIATION_PRICES,
+    adsTargeting: { ...DIFFERENTIATION_ADS_TARGETING, geoTargetConstants: [...DIFFERENTIATION_ADS_TARGETING.geoTargetConstants] },
     hardCapUsd: teto,
     costRange: { minUsd: fromMicros(custo.min), maxUsd: fromMicros(custo.max) },
     paidCallsMax: custo.calls,
@@ -681,9 +724,12 @@ export function evaluateDifferentiation(input: {
 
 export type DifferentiationRunPorts = {
   now: () => Date;
-  /** As MESMAS portas pagas da Pesquisa por Assunto (credencial só aqui). */
-  openExecution: () => Promise<Pick<SubjectDiscoveryExecutionPorts, "ledgerCapability" | "findUsage" | "collectSerp" | "runLabs" | "recordDataForSeoUsage">>;
-  /** Média mensal do Google Ads por keyword normalizada (`normalizeKeyword`). Grátis. */
+  /**
+   * As MESMAS portas da Pesquisa por Assunto (credencial só aqui), abertas COM o
+   * DataForSEO: SERP e ledger pagos; ideias e uso do Google Ads, grátis.
+   */
+  openExecution: () => Promise<Pick<SubjectDiscoveryExecutionPorts, "ledgerCapability" | "findUsage" | "collectSerp" | "recordDataForSeoUsage" | "googleAdsIdeas" | "recordGoogleAdsUsage">>;
+  /** Média mensal do Google Ads por keyword normalizada (`normalizeKeyword`), pelas métricas históricas. Grátis. */
   googleAdsVolumes: (keywords: readonly string[]) => Promise<ReadonlyMap<string, number | null>>;
   /** Pegada das candidatas no cache (4 lentes), lida como a medida lê. */
   readFootprints: (targets: ReadonlyArray<{ keywordId: string; keyword: string }>) => Promise<{ footprints: KeywordSerpFootprint[]; missingLenses: Array<{ keywordId: string; lens: string; reason: string }> }>;
@@ -715,7 +761,10 @@ export type DifferentiationRunResult = {
   footprints: KeywordSerpFootprint[];
   costs: { reportedCostUsd: number; budgetSpentUsd: number; authorizedUsd: number; byPage: DifferentiationPageCost[] };
   serp: DifferentiationSerpOutcome;
+  /** Legado (rodadas v1). Nas rodadas v2, sempre vazio. */
   labsFailures: Array<{ keywordId: string; endpoint: DifferentiationLabsEndpoint; reason: string }>;
+  /** v2: sementes do Google Ads que falharam, por página. Ausente em rodadas v1. */
+  adsFailures?: Array<{ keywordId: string; kind: DifferentiationAdsCall["kind"]; reason: string }>;
   adsVolumeFailed: boolean;
   ledgerRecording: boolean;
   ledgerWarning: string | null;
@@ -726,10 +775,9 @@ export type DifferentiationRunOutcome =
   | { ok: true; result: DifferentiationRunResult }
   | { ok: false; status: number; code: DifferentiationRunErrorCode; message: string };
 
-const LABS_SOURCE: Record<DifferentiationLabsEndpoint, SubjectDiscoverySource> = {
-  ranked_keywords: "labs_ranked",
-  keyword_ideas: "labs_category",
-  related_keywords: "labs_related",
+const ADS_SOURCE: Record<DifferentiationAdsCall["kind"], SubjectDiscoverySource> = {
+  keyword_seed: "ads_keyword_seed",
+  url_seed: "ads_url_seed",
 };
 
 function mensagemSegura(error: unknown, fallback: string) {
@@ -746,9 +794,10 @@ const emExecucao = new Set<string>();
 
 /**
  * A rodada paga de UM grupo, pelo plano autorizado. Ordem:
- *   1. confere o hash do plano relido e a autorização (nada é pago sem ela);
+ *   1. confere a versão (v2) e o hash do plano relido e a autorização (nada é
+ *      pago sem ela);
  *   2. trava a operação na instância e confere o ledger (repetição não paga);
- *   3. Labs de cada página (ranked da URL, ideias e relacionadas);
+ *   3. Google Ads de cada página (sementes do ângulo e a URL), grátis;
  *   4. junta, filtra (volume, publicada, ângulo da irmã) e mede o Google Ads;
  *   5. SERP das melhores (até N por página) — cache primeiro, só as lentes que faltam;
  *   6. avalia pela SERP.
@@ -769,6 +818,10 @@ export async function runPublishedDifferentiation(input: {
   authorizedPlan: { planHash: string; maxCostUsd: number } | null | undefined;
 }, ports: DifferentiationRunPorts): Promise<DifferentiationRunOutcome> {
   const { plan } = input;
+  // Prévia v1 (com Labs) nunca roda: o Labs saiu da diferenciação em 2026-09-28.
+  if (plan.version !== DIFFERENTIATION_PLAN_VERSION) {
+    return { ok: false, status: 409, code: "PAID_PLAN_CHANGED", message: DIFFERENTIATION_PLAN_OUTDATED_MESSAGE };
+  }
   if (!await verifyDifferentiationPlanHash(plan)) {
     return { ok: false, status: 409, code: "PLAN_TAMPERED", message: "O plano gravado não confere com o hash dele. Monte um plano novo; nada foi pago." };
   }
@@ -830,36 +883,54 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
     }
   };
 
-  /* 3. Labs por página. */
-  const locale = { locationCode: DATAFORSEO_LABS_LOCATION_CODE, languageCode: DATAFORSEO_LABS_LANGUAGE_CODE };
+  /*
+   * 3. Google Ads por página, grátis e fora do orçamento: as sementes do ângulo
+   * e, com URL, a semente de ideias + a página. Uma chave de uso por página e
+   * semente (`keyword_seed:p2`), no módulo do Arquiteto. Falha conta e segue.
+   */
   const contribuicoes = new Map<string, SubjectDiscoveryContribution[]>(plan.pages.map(page => [page.keywordId, []]));
-  const labsFailures: DifferentiationRunResult["labsFailures"] = [];
-  let orcamentoEsgotado = false;
-  for (const page of plan.pages) {
+  const adsFailures: NonNullable<DifferentiationRunResult["adsFailures"]> = [];
+  const adsTargeting = plan.adsTargeting ?? DIFFERENTIATION_ADS_TARGETING;
+  for (const [pageIndex, page] of plan.pages.entries()) {
     if (!page.inRound) continue;
-    for (const call of page.labs) {
-      if (orcamentoEsgotado || !budget.reserve(call.callId).ok) {
-        orcamentoEsgotado = true;
-        labsFailures.push({ keywordId: page.keywordId, endpoint: call.endpoint, reason: "Não executada por orçamento." });
-        continue;
-      }
-      const pedido: DataForSeoLabsResearchRequest = call.endpoint === "ranked_keywords"
-        ? { kind: "ranked_keywords", targetUrl: call.input, tag: operationRequestId, ...locale }
-        : { kind: call.endpoint, keyword: call.input, tag: operationRequestId, ...locale };
-      let saiu = false;
+    for (const call of page.ads || []) {
+      if (!call.keywords.length || (call.kind === "url_seed" && !call.url)) continue;
+      const seed: SubjectDiscoveryAdsSeed = call.kind === "url_seed" && call.url
+        ? { kind: "keyword_and_url", keywords: [...call.keywords], url: call.url }
+        : { kind: "keyword", keywords: [...call.keywords] };
+      const suffix = `${call.kind}:p${pageIndex + 1}` as const;
       try {
-        const resultado = await exec.runLabs(pedido, { onRequestStarted: () => { saiu = true; } });
-        budget.settle(call.callId, resultado.cost, saiu);
-        somar(page.keywordId, call.callId, resultado.cost, "labs");
+        const resposta = await exec.googleAdsIdeas(seed, { ...adsTargeting, geoTargetConstants: [...adsTargeting.geoTargetConstants] }, DIFFERENTIATION_ADS_PAGE_SIZE);
+        const ideias = resposta.ideas.slice(0, DIFFERENTIATION_ADS_PAGE_SIZE);
         const lista = contribuicoes.get(page.keywordId)!;
-        for (const item of resultado.keywords) lista.push({ source: LABS_SOURCE[call.endpoint], keyword: item.keyword, estimate: item.estimate, ranked: item.ranked, relatedDepth: item.relatedDepth });
-        await registrar({ callId: call.callId, endpoint: DATAFORSEO_LABS_RESEARCH_ENDPOINTS[call.endpoint], resultStatus: "succeeded", costUsd: resultado.cost, providerRequestId: resultado.providerRequestId, errorCode: null, metadata: { pageKeywordId: page.keywordId } });
+        for (const ideia of ideias) {
+          lista.push({
+            source: ADS_SOURCE[call.kind],
+            keyword: ideia.keyword,
+            googleAds: {
+              averageMonthlySearches: ideia.averageMonthlySearches,
+              competition: ideia.competition,
+              competitionIndex: ideia.competitionIndex,
+              averageCpcMicros: ideia.averageCpcMicros,
+              lowTopOfPageBidMicros: ideia.lowTopOfPageBidMicros,
+              highTopOfPageBidMicros: ideia.highTopOfPageBidMicros,
+              currencyCode: ideia.currencyCode,
+            },
+          });
+        }
+        try {
+          await exec.recordGoogleAdsUsage({ suffix, resultStatus: "succeeded", providerReference: resposta.requestId, errorCode: null, receivedCount: ideias.length });
+        } catch (error) {
+          avisosLedger.push(`google_ads:${suffix}: ${codigoSeguro(error, "GOOGLE_ADS_USAGE_RECORDING_FAILED")}`);
+        }
       } catch (error) {
-        const custo = error instanceof DataForSeoLabsResearchError ? error.cost : null;
-        budget.settle(call.callId, custo, saiu);
-        if (saiu) somar(page.keywordId, call.callId, custo, "labs");
-        labsFailures.push({ keywordId: page.keywordId, endpoint: call.endpoint, reason: mensagemSegura(error, "A chamada do DataForSEO Labs falhou; as outras seguiram.") });
-        if (saiu) await registrar({ callId: call.callId, endpoint: DATAFORSEO_LABS_RESEARCH_ENDPOINTS[call.endpoint], resultStatus: "failed", costUsd: custo, providerRequestId: error instanceof DataForSeoLabsResearchError ? error.providerRequestId : null, errorCode: codigoSeguro(error, "dataforseo_labs_failed"), metadata: { pageKeywordId: page.keywordId } });
+        const codigo = codigoSeguro(error, "GOOGLE_ADS_DISCOVERY_ERROR");
+        adsFailures.push({ keywordId: page.keywordId, kind: call.kind, reason: mensagemSegura(error, "O Google Ads não respondeu a esta semente; as outras seguiram.") });
+        try {
+          await exec.recordGoogleAdsUsage({ suffix, resultStatus: "failed", providerReference: null, errorCode: codigo, receivedCount: null });
+        } catch (usageError) {
+          avisosLedger.push(`google_ads:${suffix}: ${codigoSeguro(usageError, "GOOGLE_ADS_USAGE_RECORDING_FAILED")}`);
+        }
       }
     }
   }
@@ -868,9 +939,15 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
   const angulos = new Map(input.angles.map(angle => [angle.keywordId, angle]));
   const bloqueadas = new Set<string>([...input.publishedNormalized, ...group.members.map(member => normalizeKeyword(member.page.keyword))]);
   const unidas = new Map<string, DifferentiationCandidate[]>();
+  // A média mensal que veio na ideia do Google Ads, por keyword normalizada.
+  const mediaDaIdeia = new Map<string, number | null>();
   for (const page of plan.pages) {
     if (!page.inRound) { unidas.set(page.keywordId, []); continue; }
     const juntas = mergeSubjectDiscoveryCandidates({ contributions: contribuicoes.get(page.keywordId) || [], normalizedPhrase: normalizeKeyword(page.keyword), existingByNormalized: input.existingByNormalized ?? null });
+    for (const candidata of juntas.candidates) {
+      const media = candidata.googleAds?.averageMonthlySearches;
+      if (!mediaDaIdeia.has(candidata.normalizedKeyword) || typeof media === "number") mediaDaIdeia.set(candidata.normalizedKeyword, typeof media === "number" && Number.isFinite(media) && media >= 0 ? media : null);
+    }
     unidas.set(page.keywordId, juntas.candidates.map(candidata => ({
       candidateId: differentiationCandidateId(candidata.normalizedKeyword),
       keyword: candidata.keyword,
@@ -878,6 +955,8 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
       origins: candidata.origins,
       evidence: candidata.evidence,
       adsVolume: null,
+      // Rodadas v2 não têm estimativa DataForSEO nem `labs_ranked`: a semente
+      // por URL do Google Ads NÃO é "o Google ranqueia a página".
       estimate: candidata.dataForSeoEstimate?.searchVolume ?? null,
       hasVolume: false,
       entityFit: false,
@@ -887,9 +966,13 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
       serpMeasured: false,
     })).filter(candidata => candidata.normalizedKeyword !== normalizeKeyword(page.keyword)));
   }
+  // As métricas históricas (a coluna Volume do Minerador) das até 60 com maior
+  // média na ideia, por página. Elas decidem; a média da ideia só vale para quem
+  // ficou sem a métrica histórica (fora das 60 ou com a consulta falhando).
   const paraOAds = new Set<string>();
+  const ordemDaIdeia = (candidata: DifferentiationCandidate) => mediaDaIdeia.get(candidata.normalizedKeyword) ?? candidata.estimate ?? -1;
   for (const lista of unidas.values()) {
-    for (const candidata of [...lista].sort((a, b) => (b.estimate ?? -1) - (a.estimate ?? -1)).slice(0, DIFFERENTIATION_ADS_CANDIDATES_PER_PAGE)) {
+    for (const candidata of [...lista].sort((a, b) => ordemDaIdeia(b) - ordemDaIdeia(a)).slice(0, DIFFERENTIATION_ADS_CANDIDATES_PER_PAGE)) {
       if (!bloqueadas.has(candidata.normalizedKeyword)) paraOAds.add(candidata.keyword);
     }
   }
@@ -908,8 +991,9 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
     const angulo = angulos.get(page.keywordId);
     const irmas = input.angles.filter(angle => angle.keywordId !== page.keywordId).flatMap(angle => angle.distinctTokens);
     const comVolume = (unidas.get(page.keywordId) || []).map(candidata => {
-      const ads = volumes.get(candidata.normalizedKeyword);
-      const adsVolume = typeof ads === "number" && Number.isFinite(ads) && ads >= 0 ? ads : null;
+      const valido = (valor: number | null | undefined) => typeof valor === "number" && Number.isFinite(valor) && valor >= 0 ? valor : null;
+      // A métrica histórica, quando foi pedida e respondeu (inclusive "sem média"); senão, a média da ideia.
+      const adsVolume = volumes.has(candidata.normalizedKeyword) ? valido(volumes.get(candidata.normalizedKeyword)) : valido(mediaDaIdeia.get(candidata.normalizedKeyword));
       return { ...candidata, adsVolume, hasVolume: subjectDiscoveryHasVolume({ googleAds: { averageMonthlySearches: adsVolume }, dataForSeoEstimate: { searchVolume: candidata.estimate } }) };
     });
     const filtro = filterDifferentiationCandidates({
@@ -992,10 +1076,10 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
   const evaluation = evaluateDifferentiation({ group, angles: input.angles, candidates: mapa, serp: indice, inRound: naRodada });
 
   const notices: string[] = [];
-  if (adsVolumeFailed) notices.push("O Google Ads não respondeu: sem a média mensal, nenhuma principal nova é proposta.");
+  if (adsVolumeFailed) notices.push("As métricas históricas do Google Ads não responderam: valeu a média mensal das ideias do Google Ads.");
   if (serpOutcome.readFailed) notices.push("O cache de SERP não pôde ser lido: as lentes das candidatas foram coletadas dentro do orçamento.");
   if (serpOutcome.skippedBudget) notices.push(`${serpOutcome.skippedBudget} lente(s) não coletada(s) por orçamento.`);
-  if (labsFailures.length) notices.push(`${labsFailures.length} chamada(s) do Labs falharam ou ficaram fora do orçamento; as outras seguiram.`);
+  if (adsFailures.length) notices.push(`${adsFailures.length} semente(s) do Google Ads falharam; as outras seguiram.`);
 
   return {
     ok: true,
@@ -1014,7 +1098,8 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
         byPage: [...custoPorPagina.values()],
       },
       serp: serpOutcome,
-      labsFailures,
+      labsFailures: [],
+      adsFailures,
       adsVolumeFailed,
       ledgerRecording,
       ledgerWarning: avisosLedger.length ? `O uso de ${avisosLedger.length} chamada(s) não foi gravado no controle de gastos; o resultado foi mantido (${avisosLedger.slice(0, 3).join("; ")}).` : null,

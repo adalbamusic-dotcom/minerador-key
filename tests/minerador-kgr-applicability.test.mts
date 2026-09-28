@@ -4,7 +4,12 @@ import {
   calculateKgrFromMetrics,
   classifyKgrMeasurement,
   compareKgrRows,
+  hasHumanKgrDecision,
+  hasLegacyPendingKgrApplicability,
   hasUsableKgrScore,
+  isInKgrInterestVolumeRange,
+  KGR_INTEREST_VOLUME_RANGE,
+  readStoredKgrApplicability,
   kgrApplicabilityLabel,
   kgrDecisionLabel,
   kgrMeasurementLabel,
@@ -13,9 +18,45 @@ import {
 } from "../lib/minerador/kgr-applicability.ts";
 import { canonicalIntentLabel, normalizeIntentKey } from "../lib/minerador/intent-taxonomy.ts";
 
-test("KGR permanece pendente sem decisão humana explícita", () => {
-  assert.equal(readKgrApplicability({ kgr_score: 0.1, intent: "comercial" }), "pending");
-  assert.equal(readKgrApplicability({ kgr_decisao: "SIM", kgr_decisao_origem: "ai" }), "pending");
+test("sem decisão humana explícita, o KGR é não aplicável por padrão (2026-09-28)", () => {
+  assert.equal(readKgrApplicability(null), "not_applicable");
+  assert.equal(readKgrApplicability({}), "not_applicable");
+  // Score favorável e intenção comercial nunca decidem.
+  assert.equal(readKgrApplicability({ kgr_score: 0.1, intent: "comercial" }), "not_applicable");
+  // Origem automática (IA, provider) nunca vale como decisão.
+  assert.equal(readKgrApplicability({ kgr_decisao: "SIM", kgr_decisao_origem: "ai" }), "not_applicable");
+  // "pending" legado é lido como não aplicável, sem regravar.
+  const legacy = { kgr_aplicabilidade: "pending", kgr_decisao: "PENDENTE" };
+  assert.equal(readKgrApplicability(legacy), "not_applicable");
+  assert.equal(readStoredKgrApplicability(legacy), "pending");
+  assert.equal(hasLegacyPendingKgrApplicability(legacy), true);
+  assert.equal(legacy.kgr_aplicabilidade, "pending");
+  // Só a decisão humana "Aplicável" liga o KGR.
+  assert.equal(readKgrApplicability({ kgr_aplicabilidade: "applicable", kgr_decisao_origem: "human" }), "applicable");
+  assert.equal(hasHumanKgrDecision({ kgr_aplicabilidade: "applicable" }), true);
+  assert.equal(hasHumanKgrDecision({ kgr_aplicabilidade: "not_applicable" }), true);
+  assert.equal(hasHumanKgrDecision({}), false);
+  assert.equal(hasHumanKgrDecision(legacy), false);
+  assert.equal(readStoredKgrApplicability({}), null);
+});
+
+test("faixa de interesse 150–550 é só informativa: não aplica o KGR", () => {
+  assert.deepEqual(KGR_INTEREST_VOLUME_RANGE, { min: 150, max: 550 });
+  assert.equal(isInKgrInterestVolumeRange(150), true);
+  assert.equal(isInKgrInterestVolumeRange(550), true);
+  assert.equal(isInKgrInterestVolumeRange(149), false);
+  assert.equal(isInKgrInterestVolumeRange(551), false);
+  assert.equal(isInKgrInterestVolumeRange(null), false);
+  assert.equal(isInKgrInterestVolumeRange(Number.NaN), false);
+  assert.equal(readKgrApplicability({ volume_search: 300, kgr_score: 0.1 }), "not_applicable");
+});
+
+test("marcar Aplicável sobre o padrão não grava histórico de decisão inexistente", () => {
+  const first = setKgrApplicability({}, "applicable", { actorId: "a", decidedAt: "2026-09-28T12:00:00.000Z" });
+  assert.deepEqual(JSON.parse(String(first.kgr_decisao_historico)), []);
+  assert.equal(first.kgr_decisao_versao, 1);
+  const legacy = setKgrApplicability({ kgr_aplicabilidade: "pending" }, "applicable", { actorId: "a", decidedAt: "2026-09-28T12:00:00.000Z" });
+  assert.deepEqual(JSON.parse(String(legacy.kgr_decisao_historico)), []);
 });
 
 test("decisão KGR usa rótulo humano sem alterar métricas", () => {
@@ -68,10 +109,13 @@ test("KGR é calculado somente a partir das métricas persistidas", () => {
 
 test("ordenação KGR é determinística por grupo e pontuação", () => {
   const applicable = { kgr_score: 0.2, volume_search: 10, results_allintitle: 2, analise_semantica: { kgr_aplicabilidade: "applicable" } };
-  const pending = { kgr_score: null, volume_search: null, results_allintitle: null, analise_semantica: {} };
+  // Sem decisão = não aplicável por padrão (2026-09-28): fica no grupo dos não
+  // aplicáveis, ordenado pela medição.
+  const semDecisao = { kgr_score: null, volume_search: null, results_allintitle: null, analise_semantica: {} };
   const notApplicable = { kgr_score: 0.01, volume_search: 10, results_allintitle: 1, analise_semantica: { kgr_aplicabilidade: "not_applicable" } };
-  assert.ok(compareKgrRows(applicable, pending) < 0);
-  assert.ok(compareKgrRows(pending, notApplicable) < 0);
+  assert.ok(compareKgrRows(applicable, semDecisao) < 0);
+  assert.ok(compareKgrRows(applicable, notApplicable) < 0);
+  assert.ok(compareKgrRows(notApplicable, semDecisao) < 0);
 });
 
 test("taxonomia de intenção normaliza legados sem reescrever o valor armazenado", () => {

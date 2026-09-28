@@ -2,7 +2,6 @@ import { z } from "zod";
 import {
   SERP_CACHE_CANONICAL_LENS,
   SERP_CACHE_LENSES,
-  buildSerpOrganicDigest,
   sameSerpCacheLens,
   serpCacheLensLabel,
   type SerpCacheLens,
@@ -16,49 +15,44 @@ import { validateSubjectDestination, SUBJECT_DESTINATION_NO_BRAND_SITE_NOTICE, t
 import {
   DATAFORSEO_LABS_LANGUAGE_CODE,
   DATAFORSEO_LABS_LOCATION_CODE,
-  DATAFORSEO_LABS_RESEARCH_ENDPOINTS,
-  DataForSeoLabsResearchError,
   type DataForSeoLabsEstimate,
-  type DataForSeoLabsResearchRequest,
-  type DataForSeoLabsResearchResult,
 } from "./dataforseo-labs-keyword-research-core.ts";
 import { compareSubjectDiscoveryByVolume } from "./subject-discovery-volume.ts";
 import {
+  SUBJECT_DISCOVERY_ACTIVE_SOURCES,
   SUBJECT_DISCOVERY_CAPS,
   SUBJECT_DISCOVERY_NOTICES,
   SUBJECT_DISCOVERY_SOURCES,
   SUBJECT_DISCOVERY_SOURCE_LABELS,
   authorizeSubjectDiscoveryPlan,
   buildSubjectDiscoveryPlan,
-  createSubjectDiscoveryBudget,
-  listSubjectDiscoveryPaidCalls,
-  subjectDiscoveryCallId,
-  subjectDiscoveryLedgerKey,
+  type SubjectDiscoveryActiveSource,
   type SubjectDiscoveryAdsTargeting,
-  type SubjectDiscoveryBudget,
-  type SubjectDiscoveryLedgerEndpoint,
   type SubjectDiscoveryPlan,
   type SubjectDiscoverySource,
 } from "./subject-discovery-plan.ts";
 
 /**
  * PESQUISA POR ASSUNTO — orquestração do plano e da execução
- * (SDD `docs/compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md`, F1b.1 a F1b.8).
+ * (SDD `docs/compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md`, F1b.1 a F1b.8;
+ * SDD `docs/compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md`, §3.2).
  *
- * `mode: "plan"` não paga nada e não materializa credencial: lê a declaração
- * do Assunto (se houver), o site da marca, o cache de SERP da frase em modo
- * `meta` e a linha do catálogo do ledger. `mode: "execute"` recalcula o plano
- * pela mesma leitura `meta`, confere a autorização, abre as credenciais (só
- * aqui), lê o ledger antes de pagar, só então lê corpo e digest do cache, e
- * executa as cinco fontes com orçamento em dólares.
+ * Desde 2026-09-28 a pesquisa usa SÓ o Google Ads (frase e frase + página de
+ * destino aceita). `mode: "plan"` não consulta nada e não materializa
+ * credencial: lê a declaração do Assunto (se houver) e o site da marca, e
+ * devolve o plano com o `planHash`. `mode: "execute"` recalcula o plano,
+ * confere a confirmação (o mesmo `planHash`), abre só o Google Ads e roda as
+ * duas sementes. Nada é pago ao DataForSEO: nem Labs, nem SERP da frase — a
+ * primeira coleta da SERP acontece no Arquiteto.
  *
  * Regras que este arquivo sustenta:
- *   - candidata só vem de provider: Google Ads e DataForSEO Labs. O Minerador
- *     não fabrica termos, e nenhum caminho de IA monta candidata;
- *   - a estimativa do Labs sai rotulada e nunca vira Volume;
+ *   - candidata só vem de provider (Google Ads). O Minerador não fabrica
+ *     termos, e nenhum caminho de IA monta candidata;
  *   - candidatas NÃO vão ao banco: a resposta volta ao navegador;
  *   - a frase só usa o destino ACEITO no domínio ATUAL da marca;
- *   - dedupe e "já existe" pela `normalizeKeyword` do import, a autoridade.
+ *   - dedupe e "já existe" pela `normalizeKeyword` do import, a autoridade;
+ *   - buscas antigas (com `labs_*`, estimativa e SERP da frase) continuam
+ *     legíveis: a junção nunca descarta uma origem legível.
  *
  * Toda leitura, escrita e chamada chega por portas: a rota as monta com a
  * marca da rota e o cliente do servidor. Aqui não há banco nem credencial.
@@ -123,7 +117,8 @@ export type SubjectDiscoveryGoogleAdsMetrics = {
 
 /**
  * Uma candidata da lista local. Não tem campo `volume`: o volume do Google Ads
- * está em `googleAds`, e a estimativa do Labs, rotulada, em `dataForSeoEstimate`.
+ * está em `googleAds`. A estimativa do Labs, rotulada, em `dataForSeoEstimate`,
+ * só existe em buscas antigas (antes de 2026-09-28); nas novas vem `null`.
  */
 export type SubjectDiscoveryCandidate = {
   keyword: string;
@@ -217,6 +212,7 @@ export type SubjectDiscoveryErrorCode =
   | "OPERATION_ALREADY_EXECUTED"
   | "LEDGER_UNAVAILABLE"
   | "DATAFORSEO_UNAVAILABLE"
+  | "GOOGLE_ADS_UNAVAILABLE"
   | "SUBJECT_DISCOVERY_READ_FAILED";
 
 export type SubjectDiscoveryErrorResponse = {
@@ -274,19 +270,33 @@ export type SubjectDiscoveryAdsIdea = {
   currencyCode: string | null;
 };
 
-/** Portas do EXECUTE: são as únicas que tocam credencial e provider. */
+/**
+ * O sufixo da chave do Google Ads no ledger. Sem página, o de sempre; com
+ * página (`:p2`), uma chave por página da MESMA operação — a diferenciação de
+ * publicados faz duas chamadas por página.
+ */
+export type SubjectDiscoveryAdsUsageSuffix = "keyword_seed" | "url_seed" | `${"keyword_seed" | "url_seed"}:p${number}`;
+
+/**
+ * Portas do EXECUTE: são as únicas que tocam credencial e provider. As do
+ * DataForSEO (`ledgerCapability`, `findUsage`, `collectSerp`,
+ * `recordDataForSeoUsage`) servem à diferenciação de publicados, que paga a
+ * SERP; a Pesquisa por Assunto abre a execução sem o DataForSEO.
+ */
 export type SubjectDiscoveryExecutionPorts = {
-  /** A capability do ledger existe (depois da migration). */
+  /** A capability do ledger existe (depois da migration). Sem o DataForSEO aberto, `false`. */
   ledgerCapability: boolean;
   /** O evento com esta chave já está no ledger. */
   findUsage: (idempotencyKey: string) => Promise<boolean>;
   collectSerp: (request: SubjectDiscoverySerpRequest, options: { storeBody: boolean; operationRequestId: string; onRequestStarted: () => void }) => Promise<SubjectDiscoverySerpCollection>;
-  runLabs: (request: DataForSeoLabsResearchRequest, hooks: { onRequestStarted: () => void }) => Promise<DataForSeoLabsResearchResult>;
   /** `skipped`: sem capability, o uso não é gravado. Lança em falha de gravação. */
   recordDataForSeoUsage: (event: SubjectDiscoveryUsageEvent) => Promise<"recorded" | "skipped">;
   googleAdsIdeas: (seed: SubjectDiscoveryAdsSeed, targeting: SubjectDiscoveryAdsTargeting, pageSize: number) => Promise<{ ideas: SubjectDiscoveryAdsIdea[]; requestId: string | null }>;
-  recordGoogleAdsUsage: (event: { suffix: "keyword_seed" | "url_seed"; resultStatus: "succeeded" | "failed"; providerReference: string | null; errorCode: string | null; receivedCount: number | null }) => Promise<void>;
+  recordGoogleAdsUsage: (event: { suffix: SubjectDiscoveryAdsUsageSuffix; resultStatus: "succeeded" | "failed"; providerReference: string | null; errorCode: string | null; receivedCount: number | null }) => Promise<void>;
 };
+
+/** `dataForSeo: false` abre só o Google Ads: nenhuma Connection DataForSEO é resolvida. */
+export type SubjectDiscoveryOpenExecutionOptions = { dataForSeo?: boolean };
 
 export type SubjectDiscoveryPorts = {
   now: () => Date;
@@ -294,14 +304,18 @@ export type SubjectDiscoveryPorts = {
   readBrandSiteUrl: () => Promise<string | null>;
   /** Keyword viva da marca da rota, com `analise_semantica->keyword_subject`. Outra marca ou inexistente: `null`. */
   readSubjectKeyword: (keywordId: string) => Promise<{ id: string; keyword: string; keywordSubject: unknown } | null>;
-  /** Cache de SERP da marca. Lança quando o banco não responde. */
+  /**
+   * Cache de SERP da marca. Lança quando o banco não responde. A pesquisa v2
+   * não lê a SERP (a 1ª coleta é no Arquiteto); a porta fica para quem monta
+   * as mesmas portas.
+   */
   lookupSerp: (requests: SubjectDiscoverySerpRequest[], mode: "meta" | "digest" | "body") => Promise<Array<SubjectDiscoverySerpHit | null>>;
-  /** Só a linha do catálogo, sem Connection nem Secret Store. */
+  /** Só a linha do catálogo, sem Connection nem Secret Store. A pesquisa v2 não a lê. */
   findLedgerCapability: () => Promise<boolean>;
   /** `id,keyword` das vivas da marca da rota, paginado. */
   readExistingKeywords: () => Promise<Array<{ id: string; keyword: string }>>;
-  /** Abre as credenciais. Só o execute chama. */
-  openExecution: () => Promise<SubjectDiscoveryExecutionPorts>;
+  /** Abre as credenciais. Só o execute chama; a pesquisa pede `{ dataForSeo: false }`. */
+  openExecution: (options?: SubjectDiscoveryOpenExecutionOptions) => Promise<SubjectDiscoveryExecutionPorts>;
 };
 
 /* -------------------------------- auxiliares ------------------------------- */
@@ -311,6 +325,11 @@ const SERP_OTHER_LENS_DEPTH = 10;
 const EVIDENCE_MAX = 3;
 const EVIDENCE_TEXT_MAX = 160;
 
+/**
+ * O pedido de SERP nas 4 lentes, com a chave de local do cache (2076 + "pt").
+ * A pesquisa v2 não o usa; a diferenciação de publicados coleta a SERP das
+ * candidatas por ele, na MESMA chave do Resultados do Processador.
+ */
 export function subjectDiscoverySerpRequests(phrase: string, subjectKeywordId: string | null): Array<{ lens: SerpCacheLens; label: string; canonical: boolean; request: SubjectDiscoverySerpRequest }> {
   return SERP_CACHE_LENSES.map(lens => {
     const canonical = sameSerpCacheLens(lens, SERP_CACHE_CANONICAL_LENS);
@@ -331,7 +350,8 @@ export function subjectDiscoverySerpRequests(phrase: string, subjectKeywordId: s
 /**
  * Até 5 URLs do topo: união das lentes, só orgânicos, sem URL repetida. Ordem:
  * melhor posição entre as lentes; no empate, a que aparece em mais lentes.
- * Lente sem digest (entrada extra antiga) fica fora da união.
+ * Lente sem digest (entrada extra antiga) fica fora da união. Era a entrada da
+ * fonte `labs_ranked` (plano v1); a pesquisa v2 não a chama.
  */
 export function selectSubjectDiscoveryTopUrls(lenses: ReadonlyArray<{ lens: string; digest: SerpOrganicDigest | null | undefined }>, max: number = SUBJECT_DISCOVERY_CAPS.rankedMaxUrls): SubjectDiscoveryTopUrl[] {
   const byUrl = new Map<string, { best: number; lenses: Set<string> }>();
@@ -472,11 +492,6 @@ function safeCode(error: unknown, fallback: string) {
   return /^[A-Za-z0-9_.-]{1,80}$/.test(value) ? value : fallback;
 }
 
-function safeMessage(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : "";
-  return message ? message.replace(/(token|secret|password|authorization|login)\s*[:=]?\s*[^\s,;]+/gi, "$1=[redacted]").slice(0, 240) : fallback;
-}
-
 /** Trava da instância: a mesma operação não roda duas vezes ao mesmo tempo aqui. */
 const inFlight = new Set<string>();
 
@@ -485,13 +500,6 @@ const inFlight = new Set<string>();
 type Prepared = {
   subject: SubjectDiscoverySubject;
   plan: SubjectDiscoveryPlan;
-  serpSlots: ReturnType<typeof subjectDiscoverySerpRequests>;
-  /**
-   * Hit ou miss por lente, SEMPRE lido em `meta` — no plan e no execute. Assim o
-   * `planHash` do execute é o mesmo do plan (uma canônica sem corpo não vira
-   * "falta" só no execute), e o corpo nunca é lido antes de autorizar.
-   */
-  serpHits: Array<SubjectDiscoverySerpHit | null>;
 };
 
 async function prepare(brandId: string, request: SubjectDiscoverySearchRequest, ports: SubjectDiscoveryPorts): Promise<{ ok: true; value: Prepared } | { ok: false; outcome: SubjectDiscoverySearchOutcome }> {
@@ -563,26 +571,8 @@ async function prepare(brandId: string, request: SubjectDiscoverySearchRequest, 
     return { ok: false, outcome: failure(400, "GOOGLE_ADS_TARGETING_INVALID", "request_validation", message === "GOOGLE_ADS_TOO_MANY_GEO_TARGETS" ? "Selecione no máximo 10 estados ou use Todos os estados." : "As UFs selecionadas não são válidas para o Google Ads.") };
   }
 
-  const serpSlots = subjectDiscoverySerpRequests(phrase, subjectKeywordId);
-  let serpHits: Array<SubjectDiscoverySerpHit | null> = serpSlots.map(() => null);
-  let serpReadFailed: string | null = null;
-  try {
-    // Plan e execute decidem o que está em cache do mesmo jeito: `meta`, nunca
-    // corpo nem digest. O corpo e o digest só são lidos no execute, depois de
-    // autorizar, travar, abrir a execução e conferir o ledger.
-    serpHits = await ports.lookupSerp(serpSlots.map(slot => slot.request), "meta");
-  } catch (error) {
-    serpReadFailed = safeMessage(error, "cache de SERP ilegível");
-    serpHits = serpSlots.map(() => null);
-  }
-
-  let ledgerRecording = false;
-  try {
-    ledgerRecording = await ports.findLedgerCapability();
-  } catch {
-    ledgerRecording = false;
-  }
-
+  // Plano v2: só o Google Ads. Nem o cache de SERP nem o ledger DataForSEO são
+  // lidos aqui — nada é pago ao DataForSEO nesta pesquisa.
   const plan = await buildSubjectDiscoveryPlan({
     brandId,
     phrase,
@@ -590,68 +580,22 @@ async function prepare(brandId: string, request: SubjectDiscoverySearchRequest, 
     subjectKeywordId,
     destination: { acceptedUrl: destination.url, reason: destination.reason },
     adsTargeting,
-    serpLenses: serpSlots.map((slot, index) => ({ lens: slot.label, cached: Boolean(serpHits[index]) })),
-    serpReadFailed,
-    ledgerRecording,
   });
 
-  return { ok: true, value: { subject: { phrase, normalizedPhrase, note, subjectKeywordId, destination }, plan, serpSlots, serpHits } };
+  return { ok: true, value: { subject: { phrase, normalizedPhrase, note, subjectKeywordId, destination }, plan } };
 }
 
 /* -------------------------------- execução -------------------------------- */
 
-const LABS_ENDPOINT_BY_SOURCE: Record<"labs_related" | "labs_category" | "labs_ranked", SubjectDiscoveryLedgerEndpoint> = {
-  labs_related: "related_keywords",
-  labs_category: "keyword_ideas",
-  labs_ranked: "ranked_keywords",
-};
-
 function emptyOutcome(source: SubjectDiscoverySource): SubjectDiscoverySourceOutcome {
   return { source, label: SUBJECT_DISCOVERY_SOURCE_LABELS[source], status: "not_applicable", calls: 0, skippedByBudget: 0, received: 0, costUsd: null, reason: null, errorCode: null };
-}
-
-const BUDGET_REASON = "Não executada por orçamento: a próxima chamada passaria do custo máximo autorizado.";
-
-/**
- * As URLs guardadas das lentes que o `meta` deu como hit: corpo da canônica
- * (é o que ela guarda) e digest das extras. Falha de leitura aqui não paga a
- * lente de novo: ela fica em cache, fora da união.
- */
-async function readCachedSerpDigests(
-  slots: Prepared["serpSlots"],
-  metaHits: Prepared["serpHits"],
-  ports: SubjectDiscoveryPorts,
-): Promise<Array<{ digest: SerpOrganicDigest | null; readFailed: boolean }>> {
-  const result = slots.map(() => ({ digest: null as SerpOrganicDigest | null, readFailed: false }));
-  const canonicalIndexes = slots.map((slot, index) => index).filter(index => slots[index].canonical && metaHits[index]);
-  const otherIndexes = slots.map((slot, index) => index).filter(index => !slots[index].canonical && metaHits[index]);
-  if (canonicalIndexes.length) {
-    try {
-      const hits = await ports.lookupSerp(canonicalIndexes.map(index => slots[index].request), "body");
-      canonicalIndexes.forEach((index, position) => {
-        const body = hits[position]?.body;
-        result[index].digest = body ? buildSerpOrganicDigest(body) : null;
-      });
-    } catch {
-      for (const index of canonicalIndexes) result[index].readFailed = true;
-    }
-  }
-  if (otherIndexes.length) {
-    try {
-      const hits = await ports.lookupSerp(otherIndexes.map(index => slots[index].request), "digest");
-      otherIndexes.forEach((index, position) => { result[index].digest = hits[position]?.digest ?? null; });
-    } catch {
-      for (const index of otherIndexes) result[index].readFailed = true;
-    }
-  }
-  return result;
 }
 
 export async function runSubjectDiscoverySearch(input: { brandId: string; request: SubjectDiscoverySearchRequest }, ports: SubjectDiscoveryPorts): Promise<SubjectDiscoverySearchOutcome> {
   const { brandId, request } = input;
   const prepared = await prepare(brandId, request, ports);
   if (!prepared.ok) return prepared.outcome;
-  const { subject, plan, serpSlots, serpHits } = prepared.value;
+  const { subject, plan } = prepared.value;
 
   if (request.mode === "plan") {
     const authorization = authorizeSubjectDiscoveryPlan(plan, { planHash: plan.planHash, maxCostUsd: plan.maxCostUsd });
@@ -664,96 +608,49 @@ export async function runSubjectDiscoverySearch(input: { brandId: string; reques
   if (!authorization.ok) return failure(authorization.code === "SUBJECT_DISCOVERY_PLAN_ABOVE_CAP" ? 422 : 409, authorization.code, "authorization", authorization.message, { plan });
 
   const lockKey = `${brandId}:${operationRequestId}`;
-  if (inFlight.has(lockKey)) return failure(409, "OPERATION_IN_PROGRESS", "idempotency", "Esta pesquisa já está em execução. Aguarde o resultado; nada foi pago de novo.");
+  if (inFlight.has(lockKey)) return failure(409, "OPERATION_IN_PROGRESS", "idempotency", "Esta pesquisa já está em execução. Aguarde o resultado; nada foi consultado de novo.");
   inFlight.add(lockKey);
   try {
-    return await execute({ brandId, operationRequestId, subject, plan, serpSlots, serpHits, budgetUsd: authorization.budgetUsd }, ports);
+    return await execute({ operationRequestId, subject, plan }, ports);
   } finally {
     inFlight.delete(lockKey);
   }
 }
 
+/**
+ * As duas sementes do Google Ads, grátis, só depois da confirmação.
+ *
+ * Repetição: sem chamada DataForSEO, não há chave DataForSEO a conferir no
+ * ledger antes de consultar. A trava da instância barra a mesma operação em
+ * curso; repetir o MESMO `operationRequestId` depois consulta o Google Ads de
+ * novo (sem custo, gasta cota) e o uso cai na mesma chave do ledger, que não
+ * duplica. A tela e o MCP geram um id novo por plano.
+ */
 async function execute(context: {
-  brandId: string;
   operationRequestId: string;
   subject: SubjectDiscoverySubject;
   plan: SubjectDiscoveryPlan;
-  serpSlots: Prepared["serpSlots"];
-  serpHits: Prepared["serpHits"];
-  budgetUsd: number;
 }, ports: SubjectDiscoveryPorts): Promise<SubjectDiscoverySearchOutcome> {
   const { operationRequestId, subject, plan } = context;
   let exec: SubjectDiscoveryExecutionPorts;
   try {
-    exec = await ports.openExecution();
+    exec = await ports.openExecution({ dataForSeo: false });
   } catch (error) {
-    return failure(503, "DATAFORSEO_UNAVAILABLE", "credential_resolution", "O DataForSEO não está disponível para esta pesquisa. Nada foi pago.", { diagnostic: { causeCode: safeCode(error, "unknown") } });
+    return failure(503, "GOOGLE_ADS_UNAVAILABLE", "credential_resolution", "O Google Ads não está disponível para esta pesquisa. Nada foi consultado.", { diagnostic: { causeCode: safeCode(error, "unknown") } });
   }
 
-  const paidCalls = listSubjectDiscoveryPaidCalls(plan);
-  /*
-   * REPETIÇÃO, PELO LEDGER, ANTES DE PAGAR (F1b.4): as chaves de TODAS as
-   * chamadas DataForSEO planejadas (até 11 leituras pequenas), não só a da
-   * primeira. A primeira pode não ter sido gravada (pedido que não saiu, ou
-   * gravação que virou `ledgerWarning`) enquanto as seguintes foram pagas.
-   * Qualquer uma existindo, a operação já rodou — em qualquer instância — e
-   * nada é pago. Sem capability (antes da migration) nenhum evento é gravado,
-   * e só a trava da instância protege.
-   */
-  if (exec.ledgerCapability && paidCalls.length) {
-    let exists: boolean;
-    try {
-      const found = await Promise.all(paidCalls.map(call => exec.findUsage(subjectDiscoveryLedgerKey(operationRequestId, call.callId))));
-      exists = found.some(Boolean);
-    } catch {
-      return failure(503, "LEDGER_UNAVAILABLE", "ledger_read", "O controle de gastos não pôde ser consultado antes de pagar. Nada foi pago.");
-    }
-    if (exists) return failure(409, "OPERATION_ALREADY_EXECUTED", "idempotency", "Esta pesquisa já foi executada. Monte um plano novo para pesquisar de novo; nada foi pago.");
-  }
-
-  /*
-   * Corpo da canônica e digest das extras: só agora, e só das lentes que o
-   * `meta` deu como hit — e só quando a fonte 5 existe, porque é dela que as
-   * URLs do topo servem. Uma entrada em cache sem corpo (ou sem digest) conta
-   * como cache, sem URL e sem pagamento.
-   */
-  const rankedLine = plan.lines.find(line => line.kind === "labs_ranked");
-  const cachedDigests = rankedLine && !plan.serp.readFailed
-    ? await readCachedSerpDigests(context.serpSlots, context.serpHits, ports)
-    : context.serpSlots.map(() => ({ digest: null as SerpOrganicDigest | null, readFailed: false }));
-
-  const budget: SubjectDiscoveryBudget = createSubjectDiscoveryBudget({ maxCostUsd: context.budgetUsd, plannedCalls: paidCalls });
-  const outcomes = new Map<SubjectDiscoverySource, SubjectDiscoverySourceOutcome>(SUBJECT_DISCOVERY_SOURCES.map(source => [source, emptyOutcome(source)]));
+  const outcomes = new Map<SubjectDiscoveryActiveSource, SubjectDiscoverySourceOutcome>(SUBJECT_DISCOVERY_ACTIVE_SOURCES.map(source => [source, emptyOutcome(source)]));
   const contributions: SubjectDiscoveryContribution[] = [];
   const ledgerWarnings: string[] = [];
-  let reportedCostMicros = 0;
-  let ledgerRecording = exec.ledgerCapability;
-  const addCost = (cost: number | null) => {
-    if (typeof cost === "number" && Number.isFinite(cost) && cost >= 0) reportedCostMicros += Math.round(cost * 1_000_000);
-  };
-
-  const recordDataForSeo = async (event: Omit<SubjectDiscoveryUsageEvent, "idempotencyKey" | "metadata"> & { metadata?: SubjectDiscoveryUsageEvent["metadata"] }) => {
-    try {
-      const recorded = await exec.recordDataForSeoUsage({
-        ...event,
-        idempotencyKey: subjectDiscoveryLedgerKey(operationRequestId, event.callId),
-        metadata: { operationRequestId, operationKind: "subject_discovery", callId: event.callId, endpoint: event.endpoint, ...(event.metadata || {}) },
-      });
-      if (recorded === "skipped") ledgerRecording = false;
-    } catch (error) {
-      // Depois de pagar, falha do ledger nunca descarta o resultado.
-      ledgerWarnings.push(`${event.callId}: ${safeCode(error, "LEDGER_WRITE_FAILED")}`);
-    }
-  };
 
   /* 1–2. Google Ads: grátis, mas só no execute. */
-  const adsSources: Array<{ source: "ads_keyword_seed" | "ads_url_seed"; seed: SubjectDiscoveryAdsSeed | null }> = [
+  const adsSources: Array<{ source: SubjectDiscoveryActiveSource; seed: SubjectDiscoveryAdsSeed | null }> = [
     { source: "ads_keyword_seed", seed: { kind: "keyword", keywords: [subject.phrase] } },
     { source: "ads_url_seed", seed: plan.destinationUrl ? { kind: "keyword_and_url", keywords: [subject.phrase], url: plan.destinationUrl } : null },
   ];
   for (const { source, seed } of adsSources) {
     const outcome = outcomes.get(source) as SubjectDiscoverySourceOutcome;
-    if (!seed) {
+    if (!seed || !plan.lines.some(line => line.kind === source)) {
       outcome.reason = plan.notApplicable.find(item => item.kind === source)?.reason ?? null;
       continue;
     }
@@ -775,128 +672,13 @@ async function execute(context: {
       outcome.calls = 1;
       outcome.status = "failed";
       outcome.errorCode = safeCode(error, "GOOGLE_ADS_DISCOVERY_ERROR");
-      outcome.reason = "O Google Ads não respondeu a esta fonte; as outras seguiram.";
+      outcome.reason = "O Google Ads não respondeu a esta semente; a outra seguiu.";
       try {
         await exec.recordGoogleAdsUsage({ suffix, resultStatus: "failed", providerReference: null, errorCode: outcome.errorCode, receivedCount: null });
       } catch (usageError) {
         ledgerWarnings.push(`google_ads:${suffix}: ${safeCode(usageError, "GOOGLE_ADS_USAGE_RECORDING_FAILED")}`);
       }
     }
-  }
-
-  /* 3. SERP da frase: cache primeiro; as lentes que faltam, como unidade. */
-  const serpLenses: SubjectDiscoverySerpLensOutcome[] = [];
-  const lensDigests: Array<{ lens: string; digest: SerpOrganicDigest | null }> = [];
-  const serpPaidCalls = paidCalls.filter(call => call.endpoint === "serp");
-  let serpBudgetOk = true;
-  if (serpPaidCalls.length) {
-    const reservation = budget.reserveAll(serpPaidCalls.map(call => call.callId));
-    serpBudgetOk = reservation.ok;
-  }
-  for (const [index, slot] of context.serpSlots.entries()) {
-    if (plan.serp.readFailed) {
-      serpLenses.push({ lens: slot.label, source: "skipped_read_failed", costUsd: null, stored: false, urls: 0, reason: "Cache de SERP ilegível; a lente não foi paga." });
-      continue;
-    }
-    const hit = context.serpHits[index];
-    if (hit) {
-      const { digest, readFailed } = cachedDigests[index];
-      lensDigests.push({ lens: slot.label, digest });
-      const reason = digest
-        ? null
-        : readFailed
-          ? "Os resultados guardados não puderam ser lidos agora: a lente fica fora da união e não é paga."
-          : rankedLine
-            ? "Entrada antiga sem resultados legíveis: fica fora da união."
-            : null;
-      serpLenses.push({ lens: slot.label, source: "cache", costUsd: 0, stored: true, urls: digest?.organic.length ?? 0, reason });
-      continue;
-    }
-    const call = serpPaidCalls.find(item => item.lens === slot.label);
-    if (!call || !serpBudgetOk) {
-      serpLenses.push({ lens: slot.label, source: "skipped_budget", costUsd: null, stored: false, urls: 0, reason: BUDGET_REASON });
-      continue;
-    }
-    let started = false;
-    try {
-      const collection = await exec.collectSerp(slot.request, { storeBody: slot.canonical, operationRequestId, onRequestStarted: () => { started = true; } });
-      budget.settle(call.callId, collection.costUsd, started);
-      addCost(collection.costUsd);
-      const usable = collection.digest && (collection.organicCount ?? collection.digest.organic.length) > 0 ? collection.digest : null;
-      lensDigests.push({ lens: slot.label, digest: usable });
-      serpLenses.push({ lens: slot.label, source: collection.error && !usable ? "failed" : "collected", costUsd: collection.costUsd, stored: collection.stored, urls: usable?.organic.length ?? 0, reason: collection.error });
-      await recordDataForSeo({ callId: call.callId, endpoint: "/v3/serp/google/organic/live/advanced", resultStatus: usable ? "succeeded" : "failed", costUsd: collection.costUsd, providerRequestId: collection.providerRequestId, errorCode: usable ? null : "SERP_UNUSABLE", metadata: { lens: slot.label } });
-    } catch (error) {
-      budget.settle(call.callId, null, started);
-      serpLenses.push({ lens: slot.label, source: "failed", costUsd: null, stored: false, urls: 0, reason: safeMessage(error, "A SERP da lente não foi coletada.") });
-      if (started) await recordDataForSeo({ callId: call.callId, endpoint: "/v3/serp/google/organic/live/advanced", resultStatus: "failed", costUsd: null, providerRequestId: null, errorCode: safeCode(error, "SERP_COLLECTION_FAILED"), metadata: { lens: slot.label } });
-    }
-  }
-  const topUrls = selectSubjectDiscoveryTopUrls(lensDigests);
-
-  /* 4–6. DataForSEO Labs, com orçamento em dólares antes de cada chamada. */
-  let budgetStopped = false;
-  const runLabs = async (source: "labs_related" | "labs_category" | "labs_ranked", n: number, request: DataForSeoLabsResearchRequest, extraMetadata: SubjectDiscoveryUsageEvent["metadata"] = {}) => {
-    const outcome = outcomes.get(source) as SubjectDiscoverySourceOutcome;
-    const callId = subjectDiscoveryCallId(LABS_ENDPOINT_BY_SOURCE[source], n);
-    if (budgetStopped || !budget.reserve(callId).ok) {
-      budgetStopped = true;
-      outcome.skippedByBudget += 1;
-      return;
-    }
-    let started = false;
-    outcome.calls += 1;
-    try {
-      const result = await exec.runLabs(request, { onRequestStarted: () => { started = true; } });
-      budget.settle(callId, result.cost, started);
-      addCost(result.cost);
-      outcome.costUsd = (outcome.costUsd ?? 0) + (result.cost ?? 0);
-      outcome.received += result.keywords.length;
-      for (const keyword of result.keywords) {
-        contributions.push({ source, keyword: keyword.keyword, estimate: keyword.estimate, ranked: keyword.ranked, relatedDepth: keyword.relatedDepth });
-      }
-      await recordDataForSeo({ callId, endpoint: DATAFORSEO_LABS_RESEARCH_ENDPOINTS[request.kind], resultStatus: "succeeded", costUsd: result.cost, providerRequestId: result.providerRequestId, errorCode: null, metadata: extraMetadata });
-    } catch (error) {
-      const cost = error instanceof DataForSeoLabsResearchError ? error.cost : null;
-      budget.settle(callId, cost, started);
-      addCost(cost);
-      outcome.errorCode = safeCode(error, "dataforseo_labs_failed");
-      outcome.reason = safeMessage(error, "A chamada do DataForSEO Labs falhou; as outras fontes seguiram.");
-      if (started) {
-        await recordDataForSeo({ callId, endpoint: DATAFORSEO_LABS_RESEARCH_ENDPOINTS[request.kind], resultStatus: "failed", costUsd: cost, providerRequestId: error instanceof DataForSeoLabsResearchError ? error.providerRequestId : null, errorCode: outcome.errorCode, metadata: extraMetadata });
-      }
-    }
-  };
-
-  const locale = { locationCode: DATAFORSEO_LABS_LOCATION_CODE, languageCode: DATAFORSEO_LABS_LANGUAGE_CODE };
-  await runLabs("labs_related", 1, { kind: "related_keywords", keyword: subject.phrase, tag: operationRequestId, ...locale });
-  await runLabs("labs_category", 1, { kind: "keyword_ideas", keyword: subject.phrase, tag: operationRequestId, ...locale });
-  if (rankedLine) {
-    for (const [index, top] of topUrls.slice(0, rankedLine.calls).entries()) {
-      await runLabs("labs_ranked", index + 1, { kind: "ranked_keywords", targetUrl: top.url, tag: operationRequestId, ...locale }, { targetRank: top.bestRankGroup });
-    }
-  }
-
-  for (const source of ["labs_related", "labs_category", "labs_ranked"] as const) {
-    const outcome = outcomes.get(source) as SubjectDiscoverySourceOutcome;
-    if (source === "labs_ranked" && !rankedLine) {
-      outcome.status = "not_applicable";
-      outcome.reason = plan.notApplicable.find(item => item.kind === "labs_ranked")?.reason ?? null;
-      continue;
-    }
-    if (source === "labs_ranked" && !topUrls.length && !outcome.skippedByBudget) {
-      outcome.status = "not_applicable";
-      outcome.reason = "Sem resultados do Google para a frase, não há páginas do topo para consultar.";
-      continue;
-    }
-    if (outcome.calls === 0 && outcome.skippedByBudget) {
-      outcome.status = "skipped_budget";
-      outcome.reason = BUDGET_REASON;
-      continue;
-    }
-    if (outcome.errorCode && outcome.received === 0) outcome.status = "failed";
-    else outcome.status = outcome.received ? "ok" : "empty";
-    if (outcome.skippedByBudget) outcome.reason = `${outcome.skippedByBudget} chamada(s) não executada(s) por orçamento.`;
   }
 
   /* "Já existe": id,keyword das vivas da marca, pela mesma chave do import. */
@@ -926,16 +708,18 @@ async function execute(context: {
       executedAt: ports.now().toISOString(),
       subject: { ...subject, phraseExistingKeywordId: existingByNormalized?.get(subject.normalizedPhrase) ?? null },
       plan,
-      sources: SUBJECT_DISCOVERY_SOURCES.map(source => outcomes.get(source) as SubjectDiscoverySourceOutcome),
-      serp: { lenses: serpLenses, topUrls, readFailed: plan.serp.readFailed },
+      sources: SUBJECT_DISCOVERY_ACTIVE_SOURCES.map(source => outcomes.get(source) as SubjectDiscoverySourceOutcome),
+      // Sem SERP da frase desde o plano v2: a 1ª coleta da SERP é no Arquiteto.
+      serp: { lenses: [], topUrls: [], readFailed: null },
       candidates: merged.candidates,
       totalCandidates: merged.total,
       returnedCandidates: merged.candidates.length,
       truncated: merged.truncated,
-      reportedCostUsd: reportedCostMicros / 1_000_000,
-      budgetSpentUsd: budget.spentUsd,
-      ledgerRecording,
-      ledgerWarning: ledgerWarnings.length ? `O uso de ${ledgerWarnings.length} chamada(s) não foi gravado no controle de gastos; o resultado foi mantido (${ledgerWarnings.slice(0, 3).join("; ")}).` : null,
+      reportedCostUsd: 0,
+      budgetSpentUsd: 0,
+      // O uso desta pesquisa é o do Google Ads: registrado, salvo o que caiu no aviso.
+      ledgerRecording: ledgerWarnings.length === 0,
+      ledgerWarning: ledgerWarnings.length ? `O uso de ${ledgerWarnings.length} consulta(s) ao Google Ads não foi gravado no controle de gastos; o resultado foi mantido (${ledgerWarnings.slice(0, 3).join("; ")}).` : null,
       existingCheckFailed: existingByNormalized === null,
       notices,
     },

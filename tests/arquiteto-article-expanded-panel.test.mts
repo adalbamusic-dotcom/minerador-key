@@ -77,7 +77,8 @@ test("KGR zero e ausência real permanecem distintos, e o decimal fica preservad
   assert.equal(zero.kgr.value, 0);
   assert.equal(zero.kgr.label, "Aplicável");
   assert.equal(absent.kgr.value, null);
-  assert.equal(absent.kgr.label, "Pendente");
+  // Padrão "KGR não aplicável" (SDD 2026-09-28): sem decisão, a leitura é "Não aplicável".
+  assert.equal(absent.kgr.label, "Não aplicável");
 });
 
 test("painel expandido mostra fatos da Principal, aplicabilidade do KGR e compatibilidade fora dos processos", () => {

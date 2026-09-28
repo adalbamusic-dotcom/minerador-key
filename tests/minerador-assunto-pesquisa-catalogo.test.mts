@@ -105,7 +105,7 @@ test("rota: toda leitura filtra a marca da rota, com colunas estreitas", () => {
 });
 
 test("rota: a credencial só é resolvida dentro de openExecution; o plano lê só o catálogo", () => {
-  const open = route.indexOf("async openExecution()");
+  const open = route.indexOf("async openExecution(");
   assert.ok(open > 0);
   const resolver = route.indexOf("resolveDataForSeoCanonicalKeywordResearchConfig(");
   const googleAds = route.indexOf("resolveGoogleAdsCanonicalContext(");
@@ -114,6 +114,16 @@ test("rota: a credencial só é resolvida dentro de openExecution; o plano lê s
   const ledgerRead = route.slice(route.indexOf("async findLedgerCapability()"), route.indexOf("async readExistingKeywords()"));
   assert.match(ledgerRead, /findCapability\(/);
   assert.doesNotMatch(ledgerRead, /secret|resolveDataForSeoCanonical|findPlatformConnections|store\.resolve/i);
+});
+
+test("2026-09-28: a Pesquisa por Assunto abre a execução SEM o DataForSEO, e o runtime não resolve a Connection nesse caso", () => {
+  assert.match(search, /await ports\.openExecution\(\{ dataForSeo: false \}\)/);
+  const open = route.slice(route.indexOf("async openExecution("));
+  assert.match(open, /const withDataForSeo = options\?\.dataForSeo !== false;/);
+  assert.match(open, /const resolved = withDataForSeo\s*\? await resolveDataForSeoCanonicalKeywordResearchConfig\(/);
+  // O Labs saiu das portas: nem a busca nem o runtime o chamam.
+  assert.doesNotMatch(route, /executeDataForSeoLabsResearch|runLabs/);
+  assert.doesNotMatch(search, /runLabs|DATAFORSEO_LABS_RESEARCH_ENDPOINTS|DataForSeoLabsResearchError|collectSerp\(|lookupSerp\(|findLedgerCapability\(/);
 });
 
 test("candidata só de provider: nenhum caminho de IA, e Serper/RapidAPI não voltam", () => {
@@ -126,9 +136,11 @@ test("candidata só de provider: nenhum caminho de IA, e Serper/RapidAPI não vo
   assert.doesNotMatch(route, /setKeywordSubject|withdrawKeywordSubject|importSubjectsWithCore/);
 });
 
-test("o Labs recebe só 2076 + \"pt\"; a UF nunca chega a ele", () => {
+test("a chave de local do cache de SERP continua 2076 + \"pt\" (constantes do núcleo do Labs, que fica no código)", () => {
   assert.match(labs, /DATAFORSEO_LABS_LOCATION_CODE = 2076;/);
   assert.match(labs, /DATAFORSEO_LABS_LANGUAGE_CODE = "pt";/);
-  assert.match(search, /const locale = \{ locationCode: DATAFORSEO_LABS_LOCATION_CODE, languageCode: DATAFORSEO_LABS_LANGUAGE_CODE \};/);
-  assert.doesNotMatch(search, /geoTargetConstants[^\n]*runLabs|runLabs[^\n]*geoTargetConstants/);
+  // A SERP das 4 lentes (a diferenciação coleta por aqui) usa a mesma chave do Resultados.
+  const serpRequests = search.slice(search.indexOf("export function subjectDiscoverySerpRequests("), search.indexOf("export function selectSubjectDiscoveryTopUrls("));
+  assert.match(serpRequests, /query: \{ keyword: phrase, locationCode: DATAFORSEO_LABS_LOCATION_CODE, languageCode: DATAFORSEO_LABS_LANGUAGE_CODE, lens, endpoint: "advanced" \}/);
+  assert.doesNotMatch(serpRequests, /geoTargetConstants/, "a UF nunca chega à chave da SERP");
 });

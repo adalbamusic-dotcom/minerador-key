@@ -15,8 +15,10 @@ import { requireTenantPermission } from "@/lib/server/tenant-context";
  * O servidor confere o hash gravado, o teto de US$ 0,50 por grupo, relê a SERP
  * dos publicados (grupo mudou → nada é pago) e o ledger (repetição não paga).
  * Paga pelo MESMO caminho da Pesquisa por Assunto (`buildSubjectDiscoveryPorts`:
- * Labs, SERP com cache primeiro, ledger), registrado como módulo `arquiteto`.
- * Só DataForSEO. O volume do Google Ads é grátis.
+ * SERP com cache primeiro e ledger), registrado como módulo `arquiteto`. Desde
+ * 2026-09-28 as keywords novas vêm do Google Ads (sementes do ângulo e a URL),
+ * grátis, pelas mesmas portas; o Labs saiu. A SERP é do DataForSEO; o volume
+ * do Google Ads é grátis.
  */
 export async function POST(request: Request) {
   try {

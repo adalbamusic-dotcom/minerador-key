@@ -332,8 +332,9 @@ async function prepareCanonicalHandoff(context: PipelineContext, requestedKeywor
   /*
    * TRAVA DE APROVAÇÃO NO ENVIO (SDD 2026-09-24, F1.7 e P10). O mesmo veredito
    * que o gate da tela (`resolveHandoffApprovalGate`): aprovação registrada a
-   * partir de `SERVER_APPROVAL_GATE_SINCE` sem Lógica, Volume, Resultados ou
-   * KGR — ou sem Lógica, no Assunto declarado — é recusada. Anterior à
+   * partir de `SERVER_APPROVAL_GATE_SINCE` sem Lógica ou Volume — ou sem
+   * Lógica, no Assunto declarado — é recusada. Resultados (SERP) e KGR deixaram
+   * de ser trava em 2026-09-28 (SDD SERP no artigo e KGR opcional, M1). Anterior à
    * ativação passa com alerta; já recebida pelo Arquiteto só alerta e não sai
    * de lá (AGENTS.md §10). Custo de leitura zero: `analise_semantica` já veio
    * na linha inteira das keywords pedidas.

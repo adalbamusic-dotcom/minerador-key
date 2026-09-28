@@ -241,7 +241,10 @@ export function buildAllintitleMetricPatch(existing: {
     results_allintitle: result.resultsAllintitle!,
     analise_semantica: semantic,
   };
-  if (applicability !== "not_applicable" && typeof existing.volume_search === "number" && Number.isFinite(existing.volume_search)) {
+  // O score é fato técnico: calculado com qualquer aplicabilidade (2026-09-28).
+  // O parâmetro `applicability` fica na assinatura pelos chamadores.
+  void applicability;
+  if (typeof existing.volume_search === "number" && Number.isFinite(existing.volume_search)) {
     patch.kgr_score = existing.volume_search > 0 ? Number((result.resultsAllintitle! / existing.volume_search).toFixed(4)) : null;
   }
   return patch;

@@ -171,7 +171,7 @@ function sumKnown(values: Array<number | null | undefined>) {
 }
 
 export function radarKgrClassificationLabel(value: RadarKgrStrategy["classification"], source?: RadarKgrStrategy["source"]) {
-  return value === "confirmed_kgr" ? `KGR confirmado pelo ${source === "keyword_dna" ? "KeywordDNA" : "Minerador"}` : value === "not_kgr" ? "Não classificado como KGR" : "Classificação KGR não recebida";
+  return value === "confirmed_kgr" ? `KGR confirmado pelo ${source === "keyword_dna" ? "KeywordDNA" : "Minerador"}` : value === "not_kgr" ? "KGR não aplicável" : "Classificação KGR não recebida";
 }
 
 export function radarSlugAlignmentLabel(value: RadarKgrStrategy["slugAlignment"]) {

@@ -41,7 +41,7 @@ test("contrato reconhece somente sucesso numérico e zero confirmado como persis
   assert.equal(isPersistableAllintitleResult({ ...base, status: "success", resultsAllintitle: 0 }), false);
 });
 
-test("patch preserva volume e calcula KGR apenas quando aplicável", () => {
+test("patch preserva volume e calcula o KGR com qualquer aplicabilidade (score é fato técnico, 2026-09-28)", () => {
   const existing = { results_allintitle: 7, volume_search: 100, kgr_score: 0.07, analise_semantica: { existing: true } };
   const result: AllintitleMeasurementResult = { ...base, status: "success", resultsAllintitle: 20 };
   assert.deepEqual(buildAllintitleMetricPatch(existing, result, "applicable"), {
@@ -53,7 +53,8 @@ test("patch preserva volume e calcula KGR apenas quando aplicável", () => {
       allintitle_measurement_history: [],
     },
   });
-  assert.equal("kgr_score" in buildAllintitleMetricPatch(existing, result, "not_applicable"), false);
+  assert.equal((buildAllintitleMetricPatch(existing, result, "not_applicable") as { kgr_score?: unknown }).kgr_score, 0.2);
+  assert.equal((buildAllintitleMetricPatch(existing, result, "pending") as { kgr_score?: unknown }).kgr_score, 0.2);
   assert.deepEqual(buildAllintitleMetricPatch(existing, { ...base, status: "error" }, "applicable"), {});
 });
 

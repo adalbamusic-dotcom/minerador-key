@@ -5,7 +5,6 @@ import { Search, Send, Trash2, X } from "lucide-react";
 import { InfoHint } from "@/components/info-hint";
 import { InlineLabelCluster } from "@/components/inline-label-cluster";
 import { formatDiscoveryMoney } from "@/lib/minerador/discovery-keywords";
-import { SUBJECT_DISCOVERY_SOURCES } from "@/lib/minerador/subject-discovery-plan";
 import type { SubjectDiscoveryCandidate } from "@/lib/minerador/subject-discovery-search";
 import { KeywordTableBulkBarShell } from "../keyword-table/keyword-table-bulk-bar-shell";
 import { KeywordTableEmptyState } from "../keyword-table/keyword-table-empty-state";
@@ -25,7 +24,9 @@ import {
   formatSubjectSearchUsd,
   subjectCandidateGoogleAdsVolume,
   subjectCandidateHasVolume,
+  subjectSearchHasEstimate,
   subjectSearchHiddenWithoutVolumeText,
+  subjectSearchOriginFilterOptions,
   subjectSearchShowHiddenLabel,
   subjectSearchLensName,
   subjectSearchOriginLabel,
@@ -42,10 +43,14 @@ import type { SubjectSearchController } from "./use-subject-search";
  *
  * Tabela própria, porque a candidata guarda TODAS as origens, mas com os
  * componentes compartilhados do Minerador: shell, seleção e barra inferior.
- * Volume é só o do Google Ads; a estimativa do Labs tem coluna própria,
- * rotulada, e nunca vai ao envio. D2.3: "Só com volume" vem ligado; ele conta
- * a média do Google Ads OU a estimativa maior que zero, a lista sai ordenada
- * por volume, o total escondido fica à vista e o envio avisa as sem volume.
+ * Volume é só o do Google Ads. D2.3: "Só com volume" vem ligado, a lista sai
+ * ordenada por volume, o total escondido fica à vista e o envio avisa as sem
+ * volume.
+ *
+ * Desde 2026-09-28 a pesquisa é só do Google Ads. Buscas antigas desta lista
+ * (com Labs e SERP da frase) continuam abrindo como foram feitas: a coluna
+ * Estimativa DataForSEO, o bloco da SERP e as origens `labs_*` do filtro só
+ * aparecem quando a busca os tem. Nada é apagado.
  */
 
 const control = "h-9 rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none transition-colors focus:border-module-accent/50 focus-visible:ring-2 focus-visible:ring-module-accent/40";
@@ -55,7 +60,8 @@ const auxiliaryCell = "border-r border-divider/70 px-2 py-1";
 const multiLineCell = "whitespace-normal break-words border-r border-divider/70 px-2 py-1 leading-6";
 const keywordCell = "max-w-[340px] truncate border-r border-divider/70 px-3 py-1 font-medium text-keyword select-text";
 const columnWidths = { selection: 34, keyword: 340, origins: 280, evidence: 300, volume: 120, cpc: 110, competition: 150, estimate: 170, situation: 220 };
-const tableMinimumWidth = Object.values(columnWidths).reduce((total, width) => total + width, 0);
+/** As colunas da busca: a Estimativa só numa busca antiga que a tenha. */
+const columnsFor = (withEstimate: boolean) => Object.entries(columnWidths).filter(([id]) => withEstimate || id !== "estimate");
 
 const competitionText = (value: string | null) => value === "LOW" ? "Baixa" : value === "MEDIUM" ? "Média" : value === "HIGH" ? "Alta" : "Sem dado";
 
@@ -101,6 +107,13 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
   const selectedWithoutVolume = record ? countSelectedWithoutVolume(record.result.candidates, selectedKeys) : 0;
   const hiddenWithoutVolume = controller.hiddenWithoutVolume;
   const busy = controller.executing || Boolean(controller.importDialog?.submitting);
+  // Busca antiga: estimativa, SERP da frase e custo pago aparecem como foram gravados.
+  const withEstimate = useMemo(() => subjectSearchHasEstimate(record?.result.candidates || []), [record]);
+  const originOptions = useMemo(() => subjectSearchOriginFilterOptions(record?.result.candidates || []), [record]);
+  const columns = columnsFor(withEstimate);
+  const tableMinimumWidth = columns.reduce((total, [, width]) => total + width, 0);
+  const serpShown = Boolean(record && (record.result.serp.lenses.length || record.result.serp.topUrls.length || record.result.serp.readFailed));
+  const paidSearch = Boolean(record && (record.result.plan.paidCalls > 0 || record.result.reportedCostUsd > 0));
 
   return <section className="mt-5 flex min-h-0 w-full flex-1 flex-col" aria-label="Resultados da Pesquisa por Assunto" data-subject-search-results>
     <div className="space-y-3 px-3 sm:px-4 xl:px-6">
@@ -123,14 +136,16 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
       {record && <div className="space-y-3" data-subject-search-summary>
         <div className="space-y-1 text-sm leading-6">
           <p className="text-foreground">Assunto <span className="font-semibold">{record.result.subject.phrase}</span> · pesquisado em {formatDate(record.result.executedAt)} · {subjectSearchSummary(record.result)}</p>
-          <p className="text-foreground/85">Custo informado pelo provider: {formatSubjectSearchUsd(record.result.reportedCostUsd)} · máximo confirmado {formatSubjectSearchUsd(record.result.plan.maxCostUsd)}</p>
+          <p className="text-foreground/85" data-subject-search-cost>{paidSearch
+            ? `Custo informado pelo provider: ${formatSubjectSearchUsd(record.result.reportedCostUsd)} · máximo confirmado ${formatSubjectSearchUsd(record.result.plan.maxCostUsd)}`
+            : "Sem custo no DataForSEO: só o Google Ads foi consultado."}</p>
           {record.result.subject.destination.reason && <p className="text-text-muted">{record.result.subject.destination.reason}</p>}
           {!record.result.ledgerRecording && <p className="text-warning">O uso desta pesquisa não foi registrado no controle de gastos.</p>}
           {record.result.ledgerWarning && <p className="text-warning">{record.result.ledgerWarning}</p>}
           {record.result.existingCheckFailed && <p className="text-warning">A conferência de keywords que já existem na marca falhou: a coluna Situação não mostra quais já existem.</p>}
           {record.result.notices.filter(notice => !notice.startsWith("Este custo não será registrado")).map(notice => <p key={notice} className="text-text-muted">{notice}</p>)}
         </div>
-        <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+        <div className={`grid min-w-0 gap-3 ${serpShown ? "lg:grid-cols-2" : ""}`}>
           <div className="min-w-0 rounded border border-divider bg-surface-subtle p-3">
             <p className="text-sm font-semibold text-foreground">Fontes</p>
             <ul className="mt-1 space-y-1 text-sm leading-6">
@@ -141,7 +156,7 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
               </li>)}
             </ul>
           </div>
-          <div className="min-w-0 rounded border border-divider bg-surface-subtle p-3">
+          {serpShown && <div className="min-w-0 rounded border border-divider bg-surface-subtle p-3" data-subject-search-serp>
             <p className="text-sm font-semibold text-foreground">Resultados do Google para a frase</p>
             <ul className="mt-1 space-y-1 text-sm leading-6">
               {record.result.serp.lenses.map(lens => <li key={lens.lens} className="text-foreground/85">
@@ -150,7 +165,7 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
               </li>)}
             </ul>
             {record.result.serp.topUrls.length > 0 && <p className="mt-1 text-sm leading-6 text-text-muted">Páginas do topo consultadas: {record.result.serp.topUrls.map(top => `#${top.bestRankGroup} ${top.url}`).join(" · ")}</p>}
-          </div>
+          </div>}
         </div>
       </div>}
 
@@ -163,7 +178,7 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
         <label className="inline-flex min-h-9 items-center gap-2 text-sm text-foreground/80">Origem
           <select value={controller.filters.origin} onChange={event => controller.setFilters(current => ({ ...current, origin: event.target.value as typeof current.origin }))} aria-label="Filtrar pela origem" className={control}>
             <option value="all">Todas</option>
-            {SUBJECT_DISCOVERY_SOURCES.map(source => <option key={source} value={source}>{subjectSearchOriginLabel(source)}</option>)}
+            {originOptions.map(source => <option key={source} value={source}>{subjectSearchOriginLabel(source)}</option>)}
           </select>
         </label>
         <label className="inline-flex min-h-9 items-center gap-2 rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground/80">
@@ -179,7 +194,7 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
 
     {record ? <KeywordTableShell scroll="x" className={`mt-3 ${selectedKeys.size ? "pb-14" : ""}`}>
       <table data-keyword-table="subject-search" style={{ minWidth: tableMinimumWidth }} className="w-full table-fixed border-collapse text-left text-sm font-sans">
-        <colgroup>{Object.entries(columnWidths).map(([id, width]) => <col key={id} style={{ width }} />)}</colgroup>
+        <colgroup>{columns.map(([id, width]) => <col key={id} style={{ width }} />)}</colgroup>
         <KeywordTableHeader className="sticky top-0 z-20 border-b border-divider bg-surface-subtle">
           <tr className="text-text-muted">
             <KeywordSelectionHeader allSelected={visibleIds.length > 0 && visibleSelected === visibleIds.length} someSelected={visibleSelected > 0 && visibleSelected < visibleIds.length} onToggle={selection.toggleVisible} />
@@ -189,9 +204,9 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
             <th scope="col" className="border-r border-divider/70 px-2 py-2 font-medium">Volume (Google Ads)</th>
             <th scope="col" className="border-r border-divider/70 px-2 py-2 font-medium">CPC</th>
             <th scope="col" className="border-r border-divider/70 px-2 py-2 font-medium">Concorrência Ads</th>
-            <th scope="col" className="border-r border-divider/70 px-2 py-2 font-medium">
-              <InlineLabelCluster label={SUBJECT_SEARCH_ESTIMATE_COLUMN} info={<InfoHint title={SUBJECT_SEARCH_ESTIMATE_COLUMN} description="Estimativa de busca do DataForSEO Labs, só para leitura. Não preenche a coluna Volume e não vai ao Processador. Maior que zero, conta no filtro Só com volume." />} />
-            </th>
+            {withEstimate && <th scope="col" className="border-r border-divider/70 px-2 py-2 font-medium">
+              <InlineLabelCluster label={SUBJECT_SEARCH_ESTIMATE_COLUMN} info={<InfoHint title={SUBJECT_SEARCH_ESTIMATE_COLUMN} description="Estimativa de busca do DataForSEO Labs, de uma busca antiga, só para leitura. Não preenche a coluna Volume e não vai ao Processador. Maior que zero, conta no filtro Só com volume. Pesquisas novas não trazem estimativa." />} />
+            </th>}
             <th scope="col" className="px-2 py-2 font-medium">Situação</th>
           </tr>
         </KeywordTableHeader>
@@ -211,14 +226,14 @@ export function SubjectSearchResults({ controller }: { controller: SubjectSearch
               <td className={hasVolume ? auxiliaryCell : `${auxiliaryCell} text-text-muted`} data-subject-search-without-volume={hasVolume ? undefined : ""}>{volume === null ? (hasVolume ? "Sem média do Google Ads" : "Sem volume") : new Intl.NumberFormat("pt-BR").format(volume)}</td>
               <td className={auxiliaryCell}>{candidate.googleAds ? formatDiscoveryMoney(candidate.googleAds.averageCpcMicros, candidate.googleAds.currencyCode) : "—"}</td>
               <td className={auxiliaryCell}>{candidate.googleAds ? `${competitionText(candidate.googleAds.competition)}${candidate.googleAds.competitionIndex === null ? "" : ` · ${candidate.googleAds.competitionIndex}`}` : "—"}</td>
-              <td className={`${auxiliaryCell} text-text-muted`}>{candidate.dataForSeoEstimate?.searchVolume === null || candidate.dataForSeoEstimate?.searchVolume === undefined ? "—" : new Intl.NumberFormat("pt-BR").format(candidate.dataForSeoEstimate.searchVolume)}</td>
+              {withEstimate && <td className={`${auxiliaryCell} text-text-muted`}>{candidate.dataForSeoEstimate?.searchVolume === null || candidate.dataForSeoEstimate?.searchVolume === undefined ? "—" : new Intl.NumberFormat("pt-BR").format(candidate.dataForSeoEstimate.searchVolume)}</td>}
               <td className="whitespace-normal break-words px-2 py-1 leading-6" title={state.title}>{state.label}</td>
             </tr>;
           })}
-          {!candidates.length && <tr><td colSpan={9} className="p-0"><KeywordTableEmptyState><p className="text-sm text-text-muted">{record.result.candidates.length ? (hiddenWithoutVolume > 0 ? "Nenhuma candidata com volume nestes filtros." : "Nenhuma candidata corresponde aos filtros locais.") : "Nenhuma fonte devolveu candidatas para este Assunto. Confira o estado de cada fonte acima."}</p></KeywordTableEmptyState></td></tr>}
+          {!candidates.length && <tr><td colSpan={columns.length} className="p-0"><KeywordTableEmptyState><p className="text-sm text-text-muted">{record.result.candidates.length ? (hiddenWithoutVolume > 0 ? "Nenhuma candidata com volume nestes filtros." : "Nenhuma candidata corresponde aos filtros locais.") : "Nenhuma fonte devolveu candidatas para este Assunto. Confira o estado de cada fonte acima."}</p></KeywordTableEmptyState></td></tr>}
         </tbody>
       </table>
-    </KeywordTableShell> : <KeywordTableEmptyState><div className="max-w-xl space-y-2"><p className="text-base font-semibold text-foreground">Nenhuma Pesquisa por Assunto neste navegador.</p><p className="text-sm leading-6 text-text-muted">Escreva o Assunto ou escolha um declarado e aperte Pesquisar. O custo aparece antes de qualquer consulta paga.</p></div></KeywordTableEmptyState>}
+    </KeywordTableShell> : <KeywordTableEmptyState><div className="max-w-xl space-y-2"><p className="text-base font-semibold text-foreground">Nenhuma Pesquisa por Assunto neste navegador.</p><p className="text-sm leading-6 text-text-muted">Escreva o Assunto ou escolha um declarado e aperte Pesquisar. O plano aparece antes de qualquer consulta ao Google Ads.</p></div></KeywordTableEmptyState>}
 
     {record && selectedKeys.size > 0 && <KeywordTableBulkBarShell className="font-sans">
       <div className="flex min-w-0 shrink-0 items-center gap-2" data-subject-search-bulk-context>

@@ -46,11 +46,12 @@ import {
 } from "@/lib/arquiteto/keyword-dna-engine";
 import { persistMineradorArquitetoHandoff } from "@/lib/arquiteto/canonical-workspace";
 import { buildMineradorSiteSyncPlan, loadMineradorSiteSyncSnapshot, uniqueSiteSyncCandidates, type MineradorSiteSyncCandidate, type MineradorSiteSyncPlan } from "@/lib/minerador/site-sync-adapter";
-import { classifyKgrMeasurement, kgrApplicabilityLabel, kgrDecisionLabel, kgrMeasurementLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";
+import { classifyKgrMeasurement, hasLegacyPendingKgrApplicability, isInKgrInterestVolumeRange, KGR_INTEREST_VOLUME_RANGE_LABEL, kgrApplicabilityLabel, kgrDecisionLabel, kgrMeasurementLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";
 import { describeKgrApplicabilityBatch, planKgrApplicabilityBatch } from "@/lib/minerador/kgr-applicability-batch";
 import { describeHumanReviewCompletionBatch, planHumanReviewCompletionBatch } from "@/lib/minerador/human-review-completion-batch";
 import { applyHumanReviewField, applyHumanReviewKgrApplicability, canCompleteHumanReview, completeHumanReview, humanReviewRecord, isHumanReviewCompleted, type HumanReviewAction } from "@/lib/minerador/human-review";
 import { evaluateMineradorArquitetoHandoffBatch } from "@/lib/minerador/arquiteto-handoff-gates";
+import { describeMineradorResultsBatchPlan, planMineradorResultsBatch } from "@/lib/minerador/results-batch-plan";
 import { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";
 import { assessVolumeKgrConsistency, hasExplicitZeroMeasurement, volumeKgrConsistencyLabel, type VolumeKgrConsistency } from "@/lib/minerador/volume-kgr-consistency";
 import { combinedKgrFilterValue, combinedVinculoFilterValue, deriveMineradorTableRows, KGR_FILTER_GROUPS, parseCombinedKgrFilter, parseCombinedVinculoFilter, PROCESS_RUN_FILTER_OPTIONS, VINCULO_FILTER_GROUPS } from "@/lib/minerador/table-view";
@@ -452,7 +453,8 @@ const KEYWORD_READBACK_ID_CHUNK = 200;
 const VINCULO_BATCH_PREVIEW_AT = "1970-01-01T00:00:00+00:00";
 /** Chaves do Potencial de página que a revisão aberta precisa receber depois da gravação individual. */
 const PAGE_TYPE_DRAFT_KEYS = ["keyword_page_type", "keyword_page_type_stance", "keyword_page_type_actor", "keyword_page_type_at", "keyword_page_type_history"] as const;
-const isBatchKgrChoice = (value: string): value is KgrApplicability => value === "pending" || value === "applicable" || value === "not_applicable";
+// "Pendente" saiu das escolhas em 2026-09-28 (padrão "não aplicável"): o lote só grava decisão.
+const isBatchKgrChoice = (value: string): value is KgrApplicability => value === "applicable" || value === "not_applicable";
 
 /** A view ainda não existe no banco? (PostgREST não a acha no cache do schema.) */
 function viewDeListagemAusente(error: { code?: string | null; message?: string | null } | null): boolean {
@@ -2723,8 +2725,9 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
        * APROVAR É FECHAR O PACOTE.
        *
        * O Arquiteto passou a consumir o que foi aprovado, e não a linha viva.
-       * Por isso a aprovação exige processo executado — Lógica, Volume,
-       * Resultados e a aplicabilidade do KGR quando ele é calculável.
+       * Por isso a aprovação exige processo executado — Lógica e Volume
+       * (Google Ads). Resultados (SERP) e KGR são opcionais desde 2026-09-28:
+       * a primeira coleta da SERP acontece no Arquiteto, aba Artigos.
        *
        * O que NÃO entra na trava: Intenção e Funil consolidados. SERP mista é
        * resultado legítimo da análise; exigir conclusão tornaria impossível
@@ -2909,8 +2912,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   };
 
   // Conclusão da Revisão Humana sobre a seleção atual, com o mesmo contrato da
-  // conclusão individual: defaults conservadores para itens sem decisão e
-  // aplicabilidade do KGR obrigatória quando o cálculo é possível. Concluir não
+  // conclusão individual: defaults conservadores para itens sem decisão. O KGR
+  // é opcional desde 2026-09-28 (padrão não aplicável) e não trava. Concluir não
   // altera status, aprovação, handoff nem métricas.
   const handleBatchCompleteHumanReview = async () => {
     if (selectedIds.size === 0 || !selectedBrandId) return;
@@ -3294,13 +3297,27 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
   // Ação em lote: Resultados (DataForSEO) em blocos progressivos. A rota paga
   // recebe um bloco por vez, cada bloco com o seu operationRequestId; bloco
   // que falha é contado e o lote segue; nada é repetido automaticamente.
+  //
+  // Desde 2026-09-28 é ação manual, opcional e paga (a primeira coleta da SERP
+  // é a do Arquiteto): mostra o plano de custo e pede UMA confirmação, como as
+  // outras chamadas pagas, e keyword sem volume nunca é coletada.
   const handleBatchAllintitle = async () => {
     if (allintitleMeasuring || selectedIds.size === 0 || !selectedBrandId) return;
     const brandId = selectedBrandId;
     const operationRequestId = crypto.randomUUID();
-    const keywordIds = [...selectedIds];
+    const volumePorId = new Map(keywords.map(item => [item.id, item.volume_search] as const));
+    const plano = planMineradorResultsBatch([...selectedIds].map(id => ({ id, volume_search: volumePorId.get(id) })));
+    const keywordIds = plano.targetIds;
     if (keywordIds.length > RESULTS_BATCH_MAX_TARGETS) {
       showNotification("error", "O lote de allintitle excede o limite operacional de 1.000 alvos. Selecione menos keywords.", { code: "DATAFORSEO_BATCH_LIMIT" });
+      return;
+    }
+    if (!keywordIds.length) {
+      showNotification("warning", "Nenhuma selecionada tem volume no Google Ads: keyword sem volume nunca é coletada. Meça o Volume primeiro; nada foi pago.");
+      return;
+    }
+    if (!window.confirm(describeMineradorResultsBatchPlan(plano))) {
+      showNotification("info", "Resultados cancelado: nenhuma chamada foi paga. Não é exigido para aprovar nem para enviar ao Arquiteto.");
       return;
     }
     if (!startBulkProgress("results", keywordIds.length, keywordIds, operationRequestId)) return;
@@ -3426,6 +3443,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
       const serpFailedCount = semanticEvidences.filter(projection => projection.serpError).length;
       const persistedCount = totals.persisted;
       const requestedCount = keywordIds.length;
+      const semVolumeResumo = plano.withoutVolumeIds.length ? ` ${plano.withoutVolumeIds.length} sem volume ficaram fora.` : "";
       const batchSummary = formatBatchProgress(batch);
       const metadata = { executionRequestId: operationRequestId, operationRequestId, chunkRequestIds };
       // Resumo dos blocos no mesmo formato da resposta de um bloco.
@@ -3454,11 +3472,11 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
         const serpSummary = serpConsolidatedCount > 0
           ? ` SERP consolidada para ${serpConsolidatedCount} keyword(s).`
           : " SERP analisada, mas sem evidência suficiente para consolidar Intenção/Funil.";
-        showNotification("success", `Resultados e Qualificação Semântica atualizados para ${persistedCount} keyword(s).${serpSummary}`, { metadata });
+        showNotification("success", `Resultados e Qualificação Semântica atualizados para ${persistedCount} keyword(s).${serpSummary}${semVolumeResumo}`, { metadata });
       }
       else {
         const serpSummary = serpAnalyzedCount > 0 ? " SERP analisada, mas sem evidência suficiente para consolidar Intenção/Funil." : "";
-        showNotification("success", `Resultados atualizados para ${persistedCount} keyword(s).${serpSummary}`, { metadata });
+        showNotification("success", `Resultados atualizados para ${persistedCount} keyword(s).${serpSummary}${semVolumeResumo}`, { metadata });
       }
     } catch (err: unknown) {
       outcome = "error";
@@ -4162,6 +4180,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                 const volumeValue = canonicalSnapshot.metrics.volume.value;
                 const resultValue = canonicalSnapshot.metrics.result.value;
                 const kgrApplicability = canonicalSnapshot.metrics.kgr.applicability;
+                const kgrLegacyPending = hasLegacyPendingKgrApplicability(item.analise_semantica);
+                const kgrInInterestRange = isInKgrInterestVolumeRange(volumeValue);
                 const automaticKgrScore = canonicalSnapshot.metrics.kgr.score;
                 const kgrMeasurement = classifyKgrMeasurement({ kgrScore: automaticKgrScore, volume: volumeValue, results: resultValue });
                 const volumeKgrConsistency: VolumeKgrConsistency = assessVolumeKgrConsistency({ volume: volumeValue, results: resultValue, kgrScore: automaticKgrScore, semantic: item.analise_semantica });
@@ -4458,16 +4478,16 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                               ? <span className={`${kgrTextBadge} ${kgrState.className}`}>{kgrState.label}</span>
                               : <span className="text-text-muted">Não calculável</span>}
                           <select
-                            value={kgrApplicability}
+                            value={kgrLegacyPending ? "pending" : kgrApplicability}
                             onChange={(event) => void handleHumanReviewAction(item.id, { type: "kgr", applicability: event.target.value as KgrApplicability })}
                             disabled={updating || bulkActionProcessing}
                             aria-label="Aplicabilidade do KGR"
-                            title={`Aplicabilidade do KGR: ${kgrApplicabilityLabel(kgrApplicability)}. A decisão não altera o score nem o status.`}
+                            title={`Aplicabilidade do KGR: ${kgrApplicabilityLabel(kgrApplicability)}${kgrLegacyPending ? " (valor legado Pendente, lido como não aplicável)" : ""}. Opcional: o padrão é não aplicável e aplicar é escolha sua. A decisão não altera o score nem o status.${kgrInInterestRange ? ` ${KGR_INTEREST_VOLUME_RANGE_LABEL}.` : ""}`}
                             className={`w-full cursor-pointer rounded border px-1 py-0 text-center font-sans text-[10px] font-bold leading-4 focus:border-module-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${kgrApplicabilityClass}`}
                           >
-                            <option value="pending">Pendente</option>
-                            <option value="applicable">Aplicável</option>
+                            {kgrLegacyPending ? <option value="pending" disabled>Pendente (legado)</option> : null}
                             <option value="not_applicable">Não aplicável</option>
+                            <option value="applicable">Aplicável</option>
                           </select>
                         </div>
                       </td>
@@ -4692,16 +4712,6 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
               activeClassName={bulkActionStateClass("volume")}
             />
             <MineradorProcessAction
-              title="Medir concorrência orgânica"
-              description={`${someSelectedHaveAllintitle ? "Medir/Atualizar resultados" : "Medir/Atualizar resultados"}. Consulta os dados orgânicos usados pelo Minerador para avaliar competição, Resultado, KD e outras evidências disponíveis para a keyword.`}
-              label="Resultados"
-              ariaLabel="Resultados"
-              icon={allintitleMeasuring ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
-              onClick={handleBatchAllintitle}
-              disabled={bulkActionProcessing || updating || volumeMeasuring || allintitleMeasuring || selectedIds.size === 0}
-              activeClassName={bulkActionStateClass("results")}
-            />
-            <MineradorProcessAction
               title="Confirmar as decisões do KeywordDNA"
               description="Abre a revisão humana para registrar decisões que só um humano pode tomar. É opcional: não condiciona aprovação, status nem envio ao Arquiteto."
               label="Revisar"
@@ -4714,18 +4724,32 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
             </div>
 
             <div data-bulk-workflow-secondary className="ml-auto flex shrink-0 items-center gap-1 border-l border-divider pl-2 sm:gap-2 sm:pl-3">
+            {/* Resultados saiu da sequência de processos (decisão do dono,
+                2026-09-28): é ação manual, opcional e paga, com plano de custo
+                e confirmação. A primeira coleta da SERP é a do Arquiteto. */}
+            <div data-bulk-optional-results className="flex shrink-0 items-center">
+            <MineradorProcessAction
+              title="Medir concorrência orgânica (opcional · pago)"
+              description={`${someSelectedHaveAllintitle ? "Atualizar resultados" : "Medir resultados"} (opcional · pago). Ação manual: não é exigida para aprovar nem para enviar ao Arquiteto, que faz a primeira coleta da SERP na aba Artigos. Consulta no DataForSEO allintitle, KD e a SERP nas 4 lentes (cache primeiro): cerca de US$ 0,025 a 0,036 por keyword (estimativa). Antes de pagar, mostra o custo e pede confirmação; keyword sem volume nunca é coletada.`}
+              label="Resultados (opcional · pago)"
+              ariaLabel="Resultados (opcional · pago)"
+              icon={allintitleMeasuring ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
+              onClick={handleBatchAllintitle}
+              disabled={bulkActionProcessing || updating || volumeMeasuring || allintitleMeasuring || selectedIds.size === 0}
+              activeClassName={bulkActionStateClass("results")}
+            />
+            </div>
             <select
               defaultValue=""
               disabled={bulkActionProcessing || updating}
               aria-label="Aplicabilidade do KGR das selecionadas"
               onChange={(event) => { const nextApplicability = event.target.value; event.currentTarget.value = ""; if (isBatchKgrChoice(nextApplicability)) { kgrBatchTriggerRef.current = event.currentTarget; setKgrBatchConfirm(nextApplicability); } }}
               className={`hidden min-h-9 w-16 shrink-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-sm font-medium text-foreground outline-none transition-colors hover:border-module-accent/45 hover:bg-surface-subtle focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 2xl:block sm:w-20 sm:px-2 ${BULK_SELECT_THEME}`}
-              title="Definir a aplicabilidade do KGR das keywords selecionadas. A decisão não altera o score nem o status. Keyword com Assunto declarado é pulada."
+              title="Definir a aplicabilidade do KGR das keywords selecionadas. Opcional: o padrão é não aplicável. A decisão não altera o score nem o status. Keyword com Assunto declarado é pulada."
             >
               <option value="">KGR</option>
-              <option value="pending">Pendente</option>
-              <option value="applicable">Aplicável</option>
               <option value="not_applicable">Não aplicável</option>
+              <option value="applicable">Aplicável</option>
             </select>
             {/* Vínculo em grupo (F1.6): um seletor só, que abre o painel com
                 os três grupos. Nada é gravado no clique. Reabrir revisão,
@@ -4748,7 +4772,7 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
             {/* Ordem do fluxo humano: KGR → Vínculo → concluir revisão → definir status. */}
             <MineradorProcessAction
               title="Concluir a revisão humana das selecionadas"
-              description="Conclui a Revisão Humana de cada keyword selecionada com os defaults conservadores: divergências sem decisão mantêm a Lógica, enriquecimentos não selecionados são ignorados e campos sem evidência permanecem desconhecidos. Exige a Aplicabilidade do KGR decidida quando o cálculo é possível. Não altera status, aprovação nem métricas."
+              description="Conclui a Revisão Humana de cada keyword selecionada com os defaults conservadores: divergências sem decisão mantêm a Lógica, enriquecimentos não selecionados são ignorados e campos sem evidência permanecem desconhecidos. A Aplicabilidade do KGR é opcional (padrão não aplicável) e não bloqueia a conclusão. Não altera status, aprovação nem métricas."
               label="Concluir revisão"
               ariaLabel="Concluir revisão das selecionadas"
               icon={bulkActionProcessing && bulkProgress.step === "review" ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <CheckCheck className="h-4 w-4" aria-hidden="true" />}
@@ -4811,9 +4835,8 @@ export default function Home({ brandRef, sectionTabs }: { brandRef: string; sect
                     className={`min-h-9 min-w-24 rounded border border-divider bg-surface-subtle px-2 py-1 text-sm font-medium text-foreground outline-none focus-visible:border-module-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-module-accent disabled:opacity-50 ${BULK_SELECT_THEME}`}
                   >
                     <option value="">Selecionar</option>
-                    <option value="pending">Pendente</option>
-                    <option value="applicable">Aplicável</option>
                     <option value="not_applicable">Não aplicável</option>
+                    <option value="applicable">Aplicável</option>
                   </select>
                 </label>
                 <button

@@ -12,7 +12,7 @@ import { dataForSeoRecordValue } from "@/lib/minerador/dataforseo-competition";
 import { deriveGoogleAdsDemandTrend, formatGoogleAdsCpcTableValue, googleAdsDemandTrendLabel, hasGoogleAdsDemandEvidence } from "@/lib/minerador/google-ads-demand";
 import { dataForSeoKeywordDifficultyStateLabel, readDataForSeoKeywordDifficultyEvidence } from "@/lib/minerador/dataforseo-keyword-overview-core";
 import { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";
-import { calculateKgrFromMetrics, kgrDecisionLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";
+import { calculateKgrFromMetrics, hasLegacyPendingKgrApplicability, isInKgrInterestVolumeRange, KGR_INTEREST_VOLUME_RANGE_LABEL, kgrDecisionLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";
 import { serpCollectionLabel, serpEvidenceStrengthPresentation, serpLensEvidencePresentation } from "@/lib/minerador/serp-semantic-evidence";
 import { qualificationVersionLabel, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";
 
@@ -245,11 +245,16 @@ function ProfileStepStrip({ steps }: { steps: Array<{ label: string; complete: b
     {steps.map(step => {
       const presentation = mineradorProcessPresentation(step.state);
       const failed = presentation === "failed";
-      const stale = presentation === "stale";
       const running = presentation === "running";
-      const label = failed ? `${step.label} · Falhou` : stale ? `${step.label} · Atualizar` : running ? `${step.label} · Processando` : step.value !== undefined ? `${step.label} ${step.value ?? "—"}` : step.label;
+      // Processo opcional (Resultados e KGR desde 2026-09-28) sem artefato atual
+      // não é pendência: aparece neutro, com "opcional", e nunca como "Atualizar".
+      const optionalIdle = step.state.optional === true && !step.complete && !failed && !running;
+      const stale = presentation === "stale" && !optionalIdle;
+      const label = failed ? `${step.label} · Falhou` : optionalIdle ? `${step.label} · opcional` : stale ? `${step.label} · Atualizar` : running ? `${step.label} · Processando` : step.value !== undefined ? `${step.label} ${step.value ?? "—"}` : step.label;
       const accessibleState = failed
         ? "falha na última tentativa; dados anteriores preservados"
+        : optionalIdle
+          ? "opcional; não é exigido para aprovar"
         : stale
           ? "artefato anterior preservado; atualização disponível"
           : running
@@ -258,7 +263,7 @@ function ProfileStepStrip({ steps }: { steps: Array<{ label: string; complete: b
               ? "concluída"
               : "pendente";
       const tone = failed ? "border-danger/45 bg-danger-soft text-danger" : stale ? "border-pending/40 bg-pending-soft text-pending" : running ? "border-context-accent/40 bg-context-accent/10 text-context-accent" : step.complete ? "border-success/35 bg-success-soft text-success" : "border-divider bg-surface-subtle text-text-muted";
-      return <span key={step.label} aria-label={`${step.label}: ${accessibleState}`} title={failed ? "Falha na última tentativa; dados anteriores foram preservados." : stale ? "Artefato anterior preservado. Atualize esta etapa quando desejar." : step.title} data-process-artifact-state={step.state.artifactState} data-process-attempt-state={step.state.attemptState} className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium leading-none ${tone}`}>
+      return <span key={step.label} aria-label={`${step.label}: ${accessibleState}`} title={failed ? "Falha na última tentativa; dados anteriores foram preservados." : optionalIdle ? step.state.reason : stale ? "Artefato anterior preservado. Atualize esta etapa quando desejar." : step.title} data-process-artifact-state={step.state.artifactState} data-process-attempt-state={step.state.attemptState} className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium leading-none ${tone}`}>
         {step.value !== undefined && presentation === "current" ? <span>{label}</span> : <><span aria-hidden="true">{failed ? "!" : stale ? "↻" : running ? "·" : step.complete ? "✓" : "—"}</span><span>{label}</span></>}
       </span>;
     })}
@@ -364,7 +369,7 @@ function SemanticConsolidationPanel({ draft, qualification = null, serpCollectin
   // cabeçalho e cards. `null` é ausência de coleta, não força fraca.
   const strength = (value: SemanticSerpStrength) => value
     ? serpEvidenceStrengthPresentation(value)
-    : { label: "SERP não coletada", tone: "pending" as const, description: "A coleta real da SERP ainda não foi executada para esta keyword." };
+    : { label: "SERP não coletada", tone: "neutral" as const, description: "A SERP é opcional no Minerador e ainda não foi coletada para esta keyword. A indicação de Intenção e Funil vem da Lógica." };
   // Evidência conclusiva fecha o eixo sozinha: não há confirmação humana,
   // proposta, edição semântica nem fallback para a Lógica.
   const axisPanel = (axis: SemanticConsolidationAxis, label: string, value: SemanticConsolidationAxisDraft, resolution: SemanticAxisResolution) => {
@@ -399,7 +404,7 @@ function SemanticConsolidationPanel({ draft, qualification = null, serpCollectin
       ? (serpConclusive ? "analyzed" as const : "analyzed_without_consolidation" as const)
       : serpFailed ? "failed" as const : "not_collected" as const;
   const serpStateDescription = serpState === "not_collected"
-    ? "SERP não coletada. Execute o processo Resultados para coletar a evidência externa desta keyword."
+    ? "SERP não coletada. Ela é opcional: a indicação de Intenção e Funil vem da Lógica, e a primeira coleta da SERP acontece no Arquiteto, aba Artigos. Para coletar aqui, use Resultados (opcional · pago)."
     : serpState === "collecting"
       ? "Coletando a SERP da keyword dentro do processo Resultados."
       : serpState === "failed"
@@ -409,14 +414,14 @@ function SemanticConsolidationPanel({ draft, qualification = null, serpCollectin
           : "SERP analisada. A evidência conclusiva consolidou Intenção e/ou Funil automaticamente.";
   const consolidatedBySerp = semanticConsolidationBySerp(draft);
   return <section data-keyword-semantic-consolidation className="min-w-0 rounded-md border border-context-accent/35 bg-surface-subtle p-2.5" aria-label="Qualificação semântica">
-    <header className="flex min-w-0 flex-wrap items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-1.5"><h3 className="text-base font-semibold tracking-tight text-foreground">QUALIFICAÇÃO SEMÂNTICA</h3><InfoHint title="Consolidação semântica" description="A Lógica é hipótese inicial. A SERP real é evidência externa: quando conclusiva, ela fecha Intenção e Funil automaticamente, sem confirmação humana." /></div><div className="inline-flex min-w-0 flex-wrap items-center gap-1.5">{lensView && <span data-semantic-consolidation-lenses className="inline-flex items-center gap-1"><ProfilePill label={lensView.headline} /><InfoHint title="Quatro lentes" description="A SERP é lida em desktop Windows, desktop macOS, mobile Android e mobile iOS. Cada página conta uma vez; a concordância entre lentes e a diferença entre desktop e mobile ficam registradas, mas não aumentam a força da evidência." /></span>}<ProfilePill label={serpCollectionLabel(serpState)} tone={serpState === "analyzed" ? "success" : serpState === "failed" ? "danger" : serpState === "collecting" ? "accent" : "pending"} /></div></header>
+    <header className="flex min-w-0 flex-wrap items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-1.5"><h3 className="text-base font-semibold tracking-tight text-foreground">QUALIFICAÇÃO SEMÂNTICA</h3><InfoHint title="Consolidação semântica" description="A Lógica é hipótese inicial. A SERP real é evidência externa: quando conclusiva, ela fecha Intenção e Funil automaticamente, sem confirmação humana." /></div><div className="inline-flex min-w-0 flex-wrap items-center gap-1.5">{lensView && <span data-semantic-consolidation-lenses className="inline-flex items-center gap-1"><ProfilePill label={lensView.headline} /><InfoHint title="Quatro lentes" description="A SERP é lida em desktop Windows, desktop macOS, mobile Android e mobile iOS. Cada página conta uma vez; a concordância entre lentes e a diferença entre desktop e mobile ficam registradas, mas não aumentam a força da evidência." /></span>}<ProfilePill label={serpCollectionLabel(serpState)} tone={serpState === "analyzed" ? "success" : serpState === "failed" ? "danger" : serpState === "collecting" ? "accent" : serpState === "not_collected" ? "neutral" : "pending"} /></div></header>
     <p className="mt-1 text-sm text-text-muted">Esta camada é uma working copy local: não altera Lógica, métricas, KGR, revisão persistida nem o runtime do Arquiteto.</p>
     <div className="mt-2 grid min-w-0 gap-2 xl:grid-cols-2">{axisPanel("intent", "INTENÇÃO", draft.intent, intentResolution)}{axisPanel("funnel", "FUNIL", draft.funnel, funnelResolution)}</div>
     <p data-semantic-consolidation-serp-state className="mt-2 border-t border-divider pt-2 text-sm text-text-muted">{serpStateDescription}</p>
     {lensView?.missing && <p data-semantic-consolidation-lenses-missing className="mt-1 text-sm text-text-muted">{lensView.missing}</p>}
     {lensView?.dates && <p data-semantic-consolidation-lens-dates className="mt-1 text-sm text-warning">{lensView.dates}</p>}
     {draft.serpSnapshotRef && <details data-semantic-consolidation-evidence className="mt-2 border-t border-divider pt-1.5"><summary className="cursor-pointer text-sm font-semibold text-text-muted hover:text-foreground">Ver evidências</summary><p className="mt-1 text-sm text-text-muted">{`${draft.serpSnapshotRef.label} (${draft.serpSnapshotRef.id})`}</p>{lensView && <ul data-semantic-consolidation-lens-readings className="mt-1 space-y-1">{lensView.lenses.map(line => <li key={line} className="text-sm text-text-muted">{line}</li>)}</ul>}{lensView?.blocks && <p className="mt-1 text-sm text-text-muted">{lensView.blocks}</p>}</details>}
-    <section data-semantic-consolidation-handoff-preview className="mt-2 rounded-md border border-divider bg-surface px-2.5 py-2" aria-label="Prévia do KeywordDNA"><p className="text-sm font-semibold text-foreground">PRÉVIA DO KEYWORDDNA</p><dl className="mt-1.5 grid min-w-0 gap-x-3 gap-y-1.5 sm:grid-cols-2"><div><dt className="text-sm text-text-muted">Intenção</dt><dd className="text-sm font-semibold text-foreground">{intentResolution.status === "serp_consolidated" ? displayValue(intentResolution.value, "Indeterminado") : "Não consolidada"}</dd></div><div><dt className="text-sm text-text-muted">Funil</dt><dd className="text-sm font-semibold text-foreground">{funnelResolution.status === "serp_consolidated" ? displayValue(funnelResolution.value, "Indefinido") : "Não consolidado"}</dd></div><div><dt className="text-sm text-text-muted">Evidência</dt><dd className="text-sm font-semibold text-foreground">{consolidatedBySerp ? "SERP forte / conclusiva" : serpState === "not_collected" ? "SERP ainda não coletada" : "SERP não conclusiva"}</dd></div><div><dt className="text-sm text-text-muted">Versão</dt><dd className="text-sm font-semibold text-foreground">{qualification ? qualificationVersionLabel(qualification) : "Prévia local · ainda não persistida"}</dd></div></dl></section>
+    <section data-semantic-consolidation-handoff-preview className="mt-2 rounded-md border border-divider bg-surface px-2.5 py-2" aria-label="Prévia do KeywordDNA"><p className="text-sm font-semibold text-foreground">PRÉVIA DO KEYWORDDNA</p><dl className="mt-1.5 grid min-w-0 gap-x-3 gap-y-1.5 sm:grid-cols-2"><div><dt className="text-sm text-text-muted">Intenção</dt><dd className="text-sm font-semibold text-foreground">{intentResolution.status === "serp_consolidated" ? displayValue(intentResolution.value, "Indeterminado") : draft.intent.logic ? `Indicação da Lógica: ${displayValue(draft.intent.logic)}` : "Não consolidada"}</dd></div><div><dt className="text-sm text-text-muted">Funil</dt><dd className="text-sm font-semibold text-foreground">{funnelResolution.status === "serp_consolidated" ? displayValue(funnelResolution.value, "Indefinido") : draft.funnel.logic ? `Indicação da Lógica: ${displayValue(draft.funnel.logic)}` : "Não consolidado"}</dd></div><div><dt className="text-sm text-text-muted">Evidência</dt><dd className="text-sm font-semibold text-foreground">{consolidatedBySerp ? "SERP forte / conclusiva" : serpState === "not_collected" ? "SERP não coletada (opcional)" : "SERP não conclusiva"}</dd></div><div><dt className="text-sm text-text-muted">Versão</dt><dd className="text-sm font-semibold text-foreground">{qualification ? qualificationVersionLabel(qualification) : "Prévia local · ainda não persistida"}</dd></div></dl></section>
   </section>;
 }
 
@@ -472,6 +477,7 @@ function HumanReviewPanel({
   const reviewEditing = reviewDraftActive || editingReview;
   const reviewLocked = reviewCompleted && !reviewEditing;
   const kgrApplicability = readKgrApplicability(semantic);
+  const kgrLegacyPending = hasLegacyPendingKgrApplicability(semantic);
   const kgrTone = kgrTechnicalTone(kgrScore, kgrVolume);
   const kgrText = typeof kgrScore === "number" && Number.isFinite(kgrScore)
     ? kgrScore.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 3 })
@@ -524,11 +530,11 @@ function HumanReviewPanel({
     </section>
 
     <section aria-label="Aplicabilidade do KGR" className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-divider bg-surface px-2.5 py-2">
-      <div className="min-w-0"><p className="text-sm font-semibold text-foreground">Aplicabilidade do KGR</p><p className="text-sm text-text-muted">{subjectLocksKgr ? "Com Assunto declarado, o KGR não se aplica a esta keyword." : "A decisão não altera o score nem o status."}</p></div>
-      <select aria-label="Aplicabilidade do KGR na revisão humana" value={kgrApplicability} disabled={statusUpdating || reviewLocked || subjectLocksKgr} title={subjectLocksKgr ? "Com Assunto declarado, o KGR não se aplica." : undefined} onChange={event => void onAction?.({ type: "kgr", applicability: event.target.value as KgrApplicability })} className={`min-h-9 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60 ${NATIVE_SELECT_THEME}`}>
-        <option value="pending">Pendente</option>
-        <option value="applicable">Aplicável</option>
+      <div className="min-w-0"><p className="text-sm font-semibold text-foreground">Aplicabilidade do KGR</p><p className="text-sm text-text-muted">{subjectLocksKgr ? "Com Assunto declarado, o KGR não se aplica a esta keyword." : "Opcional: o padrão é não aplicável e aplicar é escolha sua. A decisão não altera o score nem o status."}</p>{!subjectLocksKgr && kgrLegacyPending && <p data-kgr-legacy-pending className="text-sm text-text-muted">Valor legado “Pendente”, lido como não aplicável até você decidir.</p>}{!subjectLocksKgr && isInKgrInterestVolumeRange(volume) && <p data-kgr-interest-range className="text-sm text-text-muted">{KGR_INTEREST_VOLUME_RANGE_LABEL}. Só informativo: não aplica o KGR.</p>}</div>
+      <select aria-label="Aplicabilidade do KGR na revisão humana" value={kgrLegacyPending ? "pending" : kgrApplicability} disabled={statusUpdating || reviewLocked || subjectLocksKgr} title={subjectLocksKgr ? "Com Assunto declarado, o KGR não se aplica." : undefined} onChange={event => void onAction?.({ type: "kgr", applicability: event.target.value as KgrApplicability })} className={`min-h-9 rounded-md border border-divider bg-surface-subtle px-2 text-sm font-semibold text-foreground outline-none focus:border-context-accent focus:ring-2 focus:ring-context-accent/30 disabled:cursor-not-allowed disabled:opacity-60 ${NATIVE_SELECT_THEME}`}>
+        {kgrLegacyPending ? <option value="pending" disabled>Pendente (legado)</option> : null}
         <option value="not_applicable">Não aplicável</option>
+        <option value="applicable">Aplicável</option>
       </select>
     </section>
 
@@ -935,6 +941,7 @@ export function KeywordDnaPanel({
     { label: "Estado do cálculo", value: kgrCalculationState },
     { label: "Origem dos inputs", value: processorKgrStateLabel(processorRevalidation.kgr) },
     { label: "Aplicabilidade", value: kgrApplicabilityValue },
+    { label: "Faixa de interesse (150 a 550)", value: typeof canonicalSnapshot.metrics.volume.value === "number" ? (isInKgrInterestVolumeRange(canonicalSnapshot.metrics.volume.value) ? "Na faixa · só informativo" : "Fora da faixa") : null },
     { label: "Decisão", value: kgr?.decision || kgrDecisionLabel(kgrApplicabilityState), wide: true },
     { label: "Justificativa", value: kgr?.justification, wide: true },
   ];

@@ -147,13 +147,16 @@ test("KGR da keyword e KGR do artigo continuam separados", () => {
   const before = JSON.stringify(readyKeyword);
   const projection = projectKeywordDnaForArchitect(readyKeyword);
 
-  assert.equal(article.decision, "YES");
-  assert.equal(article.source, "FULL_KGR_RULE");
+  // Padrão "KGR não aplicável" (SDD 2026-09-28): score pleno não vira "Sim" sozinho.
+  assert.equal(article.decision, "NO");
+  assert.equal(article.source, "KEYWORD_APPLICABILITY_RULE");
+  assert.equal(article.applyKgr, false);
+  assert.equal(article.scoreInFullRange, true);
   assert.equal(article.requiresHumanDecision, false);
   assert.equal(JSON.stringify(readyKeyword), before);
   assert.equal(projection.summaryPrimary.find(item => item.label === "KGR")?.value, "0,022");
   assert.equal(readonlyPanel.includes("KGR do artigo"), false);
-  assert.match(workspace, /articleKgr\.requiresHumanDecision && <label/);
+  assert.match(workspace, /data-testid="architect-article-apply-kgr"/);
 });
 
 test("A10 · as lentes da Qualificação chegam à seção do Minerador, e a legada continua sem a linha", () => {

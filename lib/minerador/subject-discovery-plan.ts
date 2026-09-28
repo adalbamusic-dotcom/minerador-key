@@ -5,34 +5,37 @@ import {
   DATAFORSEO_LABS_LOCATION_CODE,
   DATAFORSEO_LABS_RANKED_MAX_RANK_GROUP,
   DATAFORSEO_LABS_RELATED_DEPTH,
-  DATAFORSEO_LABS_RESEARCH_ENDPOINTS,
   DATAFORSEO_LABS_RESEARCH_LIMIT,
 } from "./dataforseo-labs-keyword-research-core.ts";
 
 /**
- * PLANO PAGO GENÉRICO POR FONTE — Pesquisa por Assunto
- * (SDD `docs/compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md`, F1b.4 e F1b.10).
+ * PLANO POR FONTE — Pesquisa por Assunto
+ * (SDD `docs/compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md`, F1b.4 e F1b.10;
+ * SDD `docs/compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md`, §3.2).
  *
- * O plano do Arquiteto é por lente (`SerpPaidPlan`) e não serve para cinco
- * fontes. Aqui cada linha é uma fonte: endpoint, número de chamadas, preço por
- * task e por item, itens máximos e custo máximo. O plano é autorizado INTEIRO
- * pelo humano; não há autorização fonte a fonte nem lente a lente.
+ * Desde 2026-09-28 (plano v2, decisão do dono) a pesquisa usa SÓ o Google Ads:
+ * a semente frase (`ads_keyword_seed`) e a semente frase + página de destino
+ * aceita (`ads_url_seed`). Saíram as três fontes do DataForSEO Labs e a linha
+ * `serp_phrase`, que só existia para alimentar a fonte do topo da SERP. O plano
+ * continua existindo e continua sendo confirmado INTEIRO: o `planHash` amarra a
+ * frase, o Assunto, o destino e o targeting do Google Ads que o humano viu.
+ * Custo no DataForSEO: zero. O Google Ads não cobra; usa a cota da conta.
  *
- * Três travas, todas no servidor:
- *   1. `planHash` cobre marca, frase normalizada, Assunto, destino, targeting,
- *      fontes com endpoint, chamadas, limit e depth, lentes a pagar, preços e
- *      tetos. Autorização de outro plano → `PAID_PLAN_CHANGED`, nada é pago.
- *   2. Orçamento em DÓLARES: antes de cada chamada paga, gasto acumulado (custo
- *      real informado pela task) + custo máximo da próxima > autorizado → a
- *      chamada não é feita.
- *   3. Teto rígido de US$ 0,20 por pesquisa, o valor que o dono aceitou.
+ * As cinco origens continuam LEGÍVEIS (`SUBJECT_DISCOVERY_SOURCES`): buscas
+ * antigas da lista local e blocos gravados trazem `labs_*`, e nada disso é
+ * apagado nem deixa de ser importável. As fontes que a pesquisa EXECUTA hoje
+ * são `SUBJECT_DISCOVERY_ACTIVE_SOURCES`.
  *
- * Contas em micro-dólares inteiros: 0,012 + 100 × 0,00012 dá 0,024 exato.
+ * O orçamento em dólares (`createSubjectDiscoveryBudget`), os preços e a chave
+ * do ledger DataForSEO continuam aqui porque a diferenciação de publicados paga
+ * a SERP por eles. Contas em micro-dólares inteiros.
  *
  * Domínio puro. Não lê banco, não chama provider, não conhece credencial.
  */
 
-export const SUBJECT_DISCOVERY_PLAN_VERSION = "subject-discovery-plan-v1" as const;
+export const SUBJECT_DISCOVERY_PLAN_VERSION = "subject-discovery-plan-v2" as const;
+/** Planos gravados antes de 2026-09-28 (com Labs e SERP da frase): só leitura, na lista local. */
+export const SUBJECT_DISCOVERY_LEGACY_PLAN_VERSION = "subject-discovery-plan-v1" as const;
 
 /** Teto rígido por pesquisa, aceito pelo dono (F1b.4). Plano acima dele é recusado. */
 export const SUBJECT_DISCOVERY_MAX_COST_USD = 0.2;
@@ -40,6 +43,8 @@ export const SUBJECT_DISCOVERY_MAX_COST_USD = 0.2;
 /**
  * Preços do DataForSEO Labs consultados em dataforseo.com em 2026-09-24
  * (fonte externa, não medida). A SERP usa a constante que já existe, só lida.
+ * O plano v2 não paga nada disso; os preços ficam para a leitura de planos
+ * antigos e para a diferenciação de publicados, que paga a SERP.
  */
 export const SUBJECT_DISCOVERY_PRICES = {
   labsTaskUsd: 0.012,
@@ -59,28 +64,40 @@ export const SUBJECT_DISCOVERY_CAPS = {
   totalCandidates: 600,
 } as const;
 
-/** As cinco fontes, na ordem em que a pesquisa as executa e a tela as lista. */
+/**
+ * As cinco origens LEGÍVEIS, na ordem em que a tela as lista. As três `labs_*`
+ * só aparecem em buscas antigas (antes de 2026-09-28): continuam aqui para a
+ * lista local, o envio ao Processador e os blocos gravados nas keywords.
+ */
 export const SUBJECT_DISCOVERY_SOURCES = ["ads_keyword_seed", "ads_url_seed", "labs_related", "labs_category", "labs_ranked"] as const;
 export type SubjectDiscoverySource = typeof SUBJECT_DISCOVERY_SOURCES[number];
+
+/** As fontes que a pesquisa EXECUTA hoje: só o Google Ads (frase e frase + página). */
+export const SUBJECT_DISCOVERY_ACTIVE_SOURCES = ["ads_keyword_seed", "ads_url_seed"] as const satisfies readonly SubjectDiscoverySource[];
+export type SubjectDiscoveryActiveSource = typeof SUBJECT_DISCOVERY_ACTIVE_SOURCES[number];
 
 /** Cada origem tem rótulo próprio. Nenhuma cai em "Google Ads" por padrão. */
 export const SUBJECT_DISCOVERY_SOURCE_LABELS: Record<SubjectDiscoverySource, string> = {
   ads_keyword_seed: "Google Ads · frase",
   ads_url_seed: "Google Ads · frase + página",
-  labs_related: "DataForSEO Labs · pesquisas relacionadas",
-  labs_category: "DataForSEO Labs · mesma categoria",
-  labs_ranked: "DataForSEO Labs · o que o topo da SERP ranqueia",
+  labs_related: "DataForSEO Labs · pesquisas relacionadas (fonte antiga)",
+  labs_category: "DataForSEO Labs · mesma categoria (fonte antiga)",
+  labs_ranked: "DataForSEO Labs · o que o topo da SERP ranqueia (fonte antiga)",
 };
 
 export type SubjectDiscoveryPlanLineKind = SubjectDiscoverySource | "serp_phrase";
 
+/** Rótulo da linha `serp_phrase` de planos antigos (v1). O plano v2 não tem SERP. */
 export const SUBJECT_DISCOVERY_SERP_LABEL = "Resultados do Google para a frase (4 lentes)" as const;
 
-/** Os textos fixos do diálogo de custo. A tela não escreve estes avisos por conta própria. */
+/** Os textos fixos do diálogo e do resultado. A tela não escreve estes avisos por conta própria. */
 export const SUBJECT_DISCOVERY_NOTICES = {
+  /** Aviso de planos v1, que pagavam o Labs. Fica para a leitura de buscas antigas. */
   longPhrase: "Frases longas ou sem busca podem não ter pesquisas relacionadas; cada fonte cobra a consulta mesmo sem resultado.",
-  locale: "Pesquisas do DataForSEO e resultados do Google: Brasil inteiro. A UF vale só para o Google Ads.",
-  sourceRule: "O Google Ads e o DataForSEO Labs devolvem as candidatas; o Minerador não fabrica termos.",
+  free: "Sem custo no DataForSEO: a pesquisa consulta só o Google Ads, que não cobra e usa a cota da conta.",
+  locale: "O idioma e as UFs escolhidos valem para o Google Ads, a única fonte desta pesquisa.",
+  sourceRule: "O Google Ads devolve as candidatas, pela frase e pela página de destino; o Minerador não fabrica termos.",
+  /** Aviso de planos v1 sem a capability do ledger DataForSEO. O plano v2 não paga o DataForSEO. */
   ledgerMissing: (migration: string) => `Este custo não será registrado no controle de gastos até aplicar a atualização do banco ${migration}.`,
 } as const;
 
@@ -116,7 +133,8 @@ export type SubjectDiscoveryAdsTargeting = {
 export type SubjectDiscoverySerpLensState = { lens: string; cached: boolean };
 
 export type SubjectDiscoveryPlan = {
-  version: typeof SUBJECT_DISCOVERY_PLAN_VERSION;
+  /** v2 nas pesquisas novas; v1 só em buscas antigas da lista local. */
+  version: typeof SUBJECT_DISCOVERY_PLAN_VERSION | typeof SUBJECT_DISCOVERY_LEGACY_PLAN_VERSION;
   brandId: string;
   phrase: string;
   normalizedPhrase: string;
@@ -124,7 +142,9 @@ export type SubjectDiscoveryPlan = {
   /** Só a página ACEITA no domínio da marca; qualquer outro caso é nulo. */
   destinationUrl: string | null;
   adsTargeting: SubjectDiscoveryAdsTargeting;
+  /** Legado (v1): o local do Labs. No v2 fica com as constantes de sempre, fora do hash. */
   labsLocale: { locationCode: number; languageCode: string };
+  /** Legado (v1): a SERP da frase. No v2 vem vazio — a 1ª coleta da SERP é no Arquiteto. */
   serp: {
     lenses: SubjectDiscoverySerpLensState[];
     missingLenses: string[];
@@ -137,9 +157,11 @@ export type SubjectDiscoveryPlan = {
   prices: typeof SUBJECT_DISCOVERY_PRICES;
   caps: typeof SUBJECT_DISCOVERY_CAPS;
   hardCapUsd: number;
+  /** Chamadas pagas ao DataForSEO. No v2, sempre 0. */
   paidCalls: number;
+  /** Custo máximo no DataForSEO. No v2, sempre 0: o Google Ads não cobra. */
   maxCostUsd: number;
-  /** `false` antes da migration: a capability do ledger não existe, o custo fica fora do ledger. */
+  /** v1: `false` antes da migration da capability DataForSEO. v2: `true` (nada é pago ao DataForSEO). */
   ledgerRecording: boolean;
   notices: string[];
   planHash: string;
@@ -159,30 +181,7 @@ export type BuildSubjectDiscoveryPlanInput = {
   subjectKeywordId: string | null;
   destination: { acceptedUrl: string | null; reason: string | null };
   adsTargeting: SubjectDiscoveryAdsTargeting;
-  /** As quatro lentes, na ordem do produto, com o estado do cache. */
-  serpLenses: SubjectDiscoverySerpLensState[];
-  serpReadFailed: string | null;
-  ledgerRecording: boolean;
 };
-
-function labsLine(kind: "labs_related" | "labs_category" | "labs_ranked", calls: number, params: SubjectDiscoveryPlanLine["params"]): SubjectDiscoveryPlanLine {
-  const endpoint = kind === "labs_related"
-    ? DATAFORSEO_LABS_RESEARCH_ENDPOINTS.related_keywords
-    : kind === "labs_category" ? DATAFORSEO_LABS_RESEARCH_ENDPOINTS.keyword_ideas : DATAFORSEO_LABS_RESEARCH_ENDPOINTS.ranked_keywords;
-  return {
-    kind,
-    label: SUBJECT_DISCOVERY_SOURCE_LABELS[kind],
-    provider: "dataforseo",
-    endpoint,
-    calls,
-    pricePerTaskUsd: SUBJECT_DISCOVERY_PRICES.labsTaskUsd,
-    pricePerItemUsd: SUBJECT_DISCOVERY_PRICES.labsItemUsd,
-    maxItemsPerCall: SUBJECT_DISCOVERY_CAPS.labsLimit,
-    maxCostUsd: fromMicros(calls * toMicros(SUBJECT_DISCOVERY_LABS_CALL_MAX_USD)),
-    params,
-    free: false,
-  };
-}
 
 function adsLine(kind: "ads_keyword_seed" | "ads_url_seed"): SubjectDiscoveryPlanLine {
   return {
@@ -200,7 +199,11 @@ function adsLine(kind: "ads_keyword_seed" | "ads_url_seed"): SubjectDiscoveryPla
   };
 }
 
-/** O que o `planHash` cobre. Avisos e o estado do ledger ficam fora: não mudam o que se paga. */
+/**
+ * O que o `planHash` cobre: marca, frase normalizada, Assunto, destino,
+ * targeting do Google Ads e as linhas (endpoint e `pageSize`). A versão entra:
+ * um plano v1 nunca confere com um v2. Avisos ficam fora.
+ */
 function hashMaterial(plan: Omit<SubjectDiscoveryPlan, "planHash">) {
   return {
     version: plan.version,
@@ -209,13 +212,7 @@ function hashMaterial(plan: Omit<SubjectDiscoveryPlan, "planHash">) {
     subjectKeywordId: plan.subjectKeywordId,
     destinationUrl: plan.destinationUrl,
     adsTargeting: plan.adsTargeting,
-    labsLocale: plan.labsLocale,
-    missingLenses: plan.serp.missingLenses,
-    serpReadFailed: plan.serp.readFailed !== null,
-    lines: plan.lines.map(line => ({ kind: line.kind, endpoint: line.endpoint, calls: line.calls, pricePerTaskUsd: line.pricePerTaskUsd, pricePerItemUsd: line.pricePerItemUsd, maxItemsPerCall: line.maxItemsPerCall, params: line.params })),
-    prices: plan.prices,
-    caps: plan.caps,
-    hardCapUsd: plan.hardCapUsd,
+    lines: plan.lines.map(line => ({ kind: line.kind, endpoint: line.endpoint, calls: line.calls, maxItemsPerCall: line.maxItemsPerCall, params: line.params })),
   };
 }
 
@@ -223,6 +220,7 @@ export async function computeSubjectDiscoveryPlanHash(plan: Omit<SubjectDiscover
   return contentHash(hashMaterial(plan));
 }
 
+/** O plano v2: só as linhas do Google Ads. A de página só com destino aceito. */
 export async function buildSubjectDiscoveryPlan(input: BuildSubjectDiscoveryPlanInput): Promise<SubjectDiscoveryPlan> {
   const lines: SubjectDiscoveryPlanLine[] = [];
   const notApplicable: SubjectDiscoveryNotApplicable[] = [];
@@ -230,38 +228,6 @@ export async function buildSubjectDiscoveryPlan(input: BuildSubjectDiscoveryPlan
   lines.push(adsLine("ads_keyword_seed"));
   if (input.destination.acceptedUrl) lines.push(adsLine("ads_url_seed"));
   else notApplicable.push({ kind: "ads_url_seed", reason: input.destination.reason || "Sem página de destino aceita no site da marca: o Google Ads não recebe a página." });
-
-  const lenses = input.serpLenses.map(lens => ({ lens: lens.lens, cached: input.serpReadFailed ? false : lens.cached }));
-  const missingLenses = input.serpReadFailed ? [] : lenses.filter(lens => !lens.cached).map(lens => lens.lens);
-  const cachedLenses = input.serpReadFailed ? [] : lenses.filter(lens => lens.cached).map(lens => lens.lens);
-  if (input.serpReadFailed) {
-    notApplicable.push({ kind: "serp_phrase", reason: "O cache de resultados do Google não pôde ser lido: a SERP da frase não é paga e não há fonte 5." });
-  } else if (missingLenses.length) {
-    // A SERP da frase é uma unidade: as lentes que faltam, todas, ou nenhuma.
-    lines.push({
-      kind: "serp_phrase",
-      label: SUBJECT_DISCOVERY_SERP_LABEL,
-      provider: "dataforseo",
-      endpoint: "/v3/serp/google/organic/live/advanced",
-      calls: missingLenses.length,
-      pricePerTaskUsd: SUBJECT_DISCOVERY_PRICES.serpLensMaxUsd,
-      pricePerItemUsd: 0,
-      maxItemsPerCall: 20,
-      maxCostUsd: fromMicros(missingLenses.length * toMicros(SUBJECT_DISCOVERY_PRICES.serpLensMaxUsd)),
-      params: { lenses: missingLenses.join(","), canonicalDepth: 20, otherDepth: 10 },
-      free: false,
-    });
-  }
-
-  lines.push(labsLine("labs_related", 1, { limit: SUBJECT_DISCOVERY_CAPS.labsLimit, depth: SUBJECT_DISCOVERY_CAPS.relatedDepth }));
-  lines.push(labsLine("labs_category", 1, { limit: SUBJECT_DISCOVERY_CAPS.labsLimit }));
-  if (input.serpReadFailed) notApplicable.push({ kind: "labs_ranked", reason: "Sem resultados do Google para a frase, não há páginas do topo para consultar." });
-  else lines.push(labsLine("labs_ranked", SUBJECT_DISCOVERY_CAPS.rankedMaxUrls, { limit: SUBJECT_DISCOVERY_CAPS.labsLimit, maxRankGroup: SUBJECT_DISCOVERY_CAPS.rankedMaxRankGroup, maxUrls: SUBJECT_DISCOVERY_CAPS.rankedMaxUrls }));
-
-  const paidLines = lines.filter(line => !line.free);
-  const maxCostMicros = paidLines.reduce((total, line) => total + toMicros(line.maxCostUsd), 0);
-  const notices: string[] = [SUBJECT_DISCOVERY_NOTICES.longPhrase, SUBJECT_DISCOVERY_NOTICES.locale];
-  if (!input.ledgerRecording) notices.push(SUBJECT_DISCOVERY_NOTICES.ledgerMissing(SUBJECT_DISCOVERY_LEDGER_MIGRATION));
 
   const draft: Omit<SubjectDiscoveryPlan, "planHash"> = {
     version: SUBJECT_DISCOVERY_PLAN_VERSION,
@@ -277,16 +243,16 @@ export async function buildSubjectDiscoveryPlan(input: BuildSubjectDiscoveryPlan
       includeAdultKeywords: input.adsTargeting.includeAdultKeywords,
     },
     labsLocale: { locationCode: DATAFORSEO_LABS_LOCATION_CODE, languageCode: DATAFORSEO_LABS_LANGUAGE_CODE },
-    serp: { lenses, missingLenses, cachedLenses, readFailed: input.serpReadFailed },
+    serp: { lenses: [], missingLenses: [], cachedLenses: [], readFailed: null },
     lines,
     notApplicable,
     prices: SUBJECT_DISCOVERY_PRICES,
     caps: SUBJECT_DISCOVERY_CAPS,
     hardCapUsd: SUBJECT_DISCOVERY_MAX_COST_USD,
-    paidCalls: paidLines.reduce((total, line) => total + line.calls, 0),
-    maxCostUsd: fromMicros(maxCostMicros),
-    ledgerRecording: input.ledgerRecording,
-    notices,
+    paidCalls: 0,
+    maxCostUsd: 0,
+    ledgerRecording: true,
+    notices: [SUBJECT_DISCOVERY_NOTICES.free, SUBJECT_DISCOVERY_NOTICES.locale],
   };
   return { ...draft, planHash: await computeSubjectDiscoveryPlanHash(draft) };
 }
@@ -300,16 +266,29 @@ export type SubjectDiscoveryAuthorization =
   | { ok: false; code: "PAID_PLAN_REQUIRED" | "PAID_PLAN_CHANGED" | "SUBJECT_DISCOVERY_PLAN_ABOVE_CAP"; message: string };
 
 /**
- * A execução só paga o plano autorizado inteiro. Sem autorização → nada é pago
- * (`PAID_PLAN_REQUIRED`). Hash diferente, ou custo máximo acima do autorizado
- * → nada é pago (`PAID_PLAN_CHANGED`). O orçamento é o autorizado, nunca acima
- * do teto rígido.
+ * A execução só roda o plano confirmado inteiro. Sem confirmação → nada é
+ * consultado (`PAID_PLAN_REQUIRED`). Hash diferente, ou custo máximo acima do
+ * autorizado → nada é consultado (`PAID_PLAN_CHANGED`). Com chamada paga, o
+ * orçamento é o autorizado, nunca acima do teto rígido.
+ *
+ * Plano sem chamada paga (o v2, só Google Ads): continua exigindo o MESMO
+ * `planHash` — ele amarra a frase, a página de destino e o targeting que o
+ * humano confirmou —, com orçamento 0. Os códigos ficam os de sempre, porque a
+ * tela e o MCP já os tratam.
  */
 export function authorizeSubjectDiscoveryPlan(plan: Pick<SubjectDiscoveryPlan, "planHash" | "maxCostUsd" | "paidCalls">, authorized: SubjectDiscoveryAuthorizedPlan | null | undefined): SubjectDiscoveryAuthorization {
   if (toMicros(plan.maxCostUsd) > toMicros(SUBJECT_DISCOVERY_MAX_COST_USD)) {
     return { ok: false, code: "SUBJECT_DISCOVERY_PLAN_ABOVE_CAP", message: `O plano custaria até US$ ${plan.maxCostUsd.toFixed(3)}, acima do teto de US$ ${SUBJECT_DISCOVERY_MAX_COST_USD.toFixed(2)} por pesquisa. Nada foi pago.` };
   }
-  if (plan.paidCalls <= 0) return { ok: true, budgetUsd: 0 };
+  if (plan.paidCalls <= 0) {
+    if (!authorized || typeof authorized.planHash !== "string" || !authorized.planHash) {
+      return { ok: false, code: "PAID_PLAN_REQUIRED", message: "Confirme o plano (frase, página de destino e segmentação do Google Ads) antes de pesquisar. Nada foi consultado." };
+    }
+    if (authorized.planHash !== plan.planHash) {
+      return { ok: false, code: "PAID_PLAN_CHANGED", message: "O plano mudou desde a confirmação (frase, página de destino ou segmentação). Nada foi consultado; confira o plano novo." };
+    }
+    return { ok: true, budgetUsd: 0 };
+  }
   if (!authorized || typeof authorized.planHash !== "string" || !Number.isFinite(authorized.maxCostUsd) || authorized.maxCostUsd <= 0) {
     return { ok: false, code: "PAID_PLAN_REQUIRED", message: `Esta pesquisa faria até ${plan.paidCalls} chamada(s) paga(s), até US$ ${plan.maxCostUsd.toFixed(3)}. Confirme o custo antes de pesquisar; nada foi pago.` };
   }

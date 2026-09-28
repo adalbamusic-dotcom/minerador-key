@@ -1,4 +1,4 @@
-import { calculateKgrFromMetrics, readKgrApplicability } from "./kgr-applicability.ts";
+import { calculateKgrFromMetrics } from "./kgr-applicability.ts";
 import { isValidGoogleAdsDemandMeasurement } from "./google-ads-demand.ts";
 import type { DataForSeoAllintitleMeasurement } from "./dataforseo-serp-core.ts";
 import type { DataForSeoKeywordOverviewMeasurement } from "./dataforseo-keyword-overview-core.ts";
@@ -107,7 +107,13 @@ export function buildDataForSeoKeywordMeasurementPatch(input: {
     results_allintitle: input.measurement.resultsAllintitle,
     analise_semantica: nextSemantic,
   };
-  if (readKgrApplicability(input.existing.analise_semantica) !== "not_applicable") {
+  /*
+   * O score é FATO TÉCNICO e é calculado sempre que há medição (SDD SERP no
+   * artigo e KGR opcional, 2026-09-28, M2), como em `volume-provider.ts`. A
+   * aplicabilidade decide só o USO do KGR — com o padrão "não aplicável",
+   * condicionar o cálculo deixaria `kgr_score` velho após nova medição.
+   */
+  {
     const rawVolumeMeasurement = input.existing.analise_semantica?.volume_measurement;
     const volumeMeasurement = rawVolumeMeasurement && typeof rawVolumeMeasurement === "object" && !Array.isArray(rawVolumeMeasurement)
       ? rawVolumeMeasurement as JsonObject

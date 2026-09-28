@@ -18,7 +18,8 @@ test("decisão em lote aplica o contrato humano em cada keyword sem tocar nas m�
   ];
   const plan = planKgrApplicabilityBatch(rows, "applicable", context);
   assert.deepEqual(plan.updates.map(update => update.id), ["a", "b"]);
-  assert.deepEqual(plan.updates.map(update => update.previous), ["pending", "not_applicable"]);
+  // Sem decisão, a leitura efetiva é o padrão "não aplicável" (2026-09-28).
+  assert.deepEqual(plan.updates.map(update => update.previous), ["not_applicable", "not_applicable"]);
   for (const update of plan.updates) {
     assert.equal(readKgrApplicability(update.semantic), "applicable");
     assert.equal(update.semantic.kgr_decisao, "SIM");
@@ -33,8 +34,11 @@ test("decisão em lote aplica o contrato humano em cada keyword sem tocar nas m�
   assert.equal(plan.updates[0].semantic.results_allintitle, 6);
   assert.equal(plan.updates[1].semantic.kgr_decisao_versao, 1);
   assert.deepEqual(JSON.parse(String(plan.updates[1].semantic.kgr_decisao_historico)).map((entry: { applicability: string }) => entry.applicability), ["not_applicable"]);
+  // O padrão não é decisão de ninguém: não entra no histórico.
+  assert.deepEqual(JSON.parse(String(plan.updates[0].semantic.kgr_decisao_historico)), []);
   // As linhas originais permanecem intactas: a persistência decide quando aplicar.
-  assert.equal(readKgrApplicability(rows[0].analise_semantica), "pending");
+  assert.equal(readKgrApplicability(rows[0].analise_semantica), "not_applicable");
+  assert.equal(rows[0].analise_semantica?.kgr_aplicabilidade, undefined);
   assert.equal(readKgrApplicability(rows[1].analise_semantica), "not_applicable");
 });
 
@@ -52,7 +56,10 @@ test("keywords já na decisão alvo, duplicadas ou com revisão em edição não
 
 test("resumo da decisão em lote conta somente o que aconteceu", () => {
   const plan = planKgrApplicabilityBatch([keyword("a"), keyword("b", { kgr_aplicabilidade: "not_applicable" }), keyword("c")], "not_applicable", { ...context, openDraftIds: ["c"] });
-  assert.equal(describeKgrApplicabilityBatch(plan), "Aplicabilidade do KGR definida como Não aplicável para 1 keyword(s). 1 já estava(m) como Não aplicável. 1 com revisão em edição foi(ram) ignorada(s); conclua ou cancele a edição antes.");
+  // Sem decisão já é "Não aplicável" pelo padrão: marcar de novo não grava nada.
+  assert.equal(describeKgrApplicabilityBatch(plan), "2 já estava(m) como Não aplicável. 1 com revisão em edição foi(ram) ignorada(s); conclua ou cancele a edição antes.");
+  const applicable = planKgrApplicabilityBatch([keyword("a"), keyword("b", { kgr_aplicabilidade: "applicable", kgr_decisao_origem: "human" })], "applicable", context);
+  assert.equal(describeKgrApplicabilityBatch(applicable), "Aplicabilidade do KGR definida como Aplicável para 1 keyword(s). 1 já estava(m) como Aplicável.");
   assert.equal(describeKgrApplicabilityBatch(planKgrApplicabilityBatch([], "applicable", context), 0), "Nenhuma keyword precisou mudar para Aplicável.");
 });
 
@@ -62,7 +69,8 @@ test("planilha expõe o seletor de aplicabilidade por linha e a decisão em lote
   assert.match(kgrCell, /aria-label="Aplicabilidade do KGR"/);
   assert.match(kgrCell, /handleHumanReviewAction\(item\.id, \{ type: "kgr", applicability: event\.target\.value as KgrApplicability \}\)/);
   assert.match(kgrCell, /<span className=\{kgrColor\}>\{kgrText\}<\/span>/);
-  assert.match(kgrCell, /<option value="pending">Pendente<\/option>/);
+  // "Pendente" só aparece para o valor legado gravado, desabilitado (2026-09-28).
+  assert.match(kgrCell, /<option value="pending" disabled>Pendente \(legado\)<\/option>/);
   assert.match(kgrCell, /<option value="applicable">Aplicável<\/option>/);
   assert.match(kgrCell, /<option value="not_applicable">Não aplicável<\/option>/);
   assert.equal((page.match(/aria-label="Aplicabilidade do KGR das selecionadas"/g) || []).length, 2, "seletor em lote no rodapé desktop e no menu compacto");
@@ -70,4 +78,23 @@ test("planilha expõe o seletor de aplicabilidade por linha e a decisão em lote
   assert.match(page, /planKgrApplicabilityBatch\(/);
   assert.match(page, /readCanonicalKeywordRows\(persistedIds\)/);
   assert.doesNotMatch(page, /Aprovar como KGR/);
+});
+
+test("correção · \"Não aplicável\" em lote grava a decisão humana sobre o pending legado e a origem automática", () => {
+  const rows = [
+    keyword("legado", { kgr_aplicabilidade: "pending" }),
+    keyword("automatico", { kgr_aplicabilidade: "not_applicable", kgr_decisao_origem: "automatic" }),
+    keyword("sem-decisao"),
+    keyword("humano", { kgr_aplicabilidade: "not_applicable", kgr_decisao_origem: "human" }),
+  ];
+  const plan = planKgrApplicabilityBatch(rows, "not_applicable", context);
+  assert.deepEqual(plan.updates.map(update => update.id), ["legado", "automatico"]);
+  assert.deepEqual(plan.unchangedIds, ["sem-decisao", "humano"], "sem valor gravado nada é escrito; decisão humana igual não se repete");
+  for (const update of plan.updates) {
+    assert.equal(update.semantic.kgr_aplicabilidade, "not_applicable");
+    assert.equal(update.semantic.kgr_decisao_origem, "human");
+    assert.equal(update.semantic.kgr_decidido_por, context.actorId);
+    // O padrão e o legado não são decisão de ninguém: não entram no histórico.
+    assert.deepEqual(JSON.parse(String(update.semantic.kgr_decisao_historico)), []);
+  }
 });

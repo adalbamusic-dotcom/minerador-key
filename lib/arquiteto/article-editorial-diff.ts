@@ -1,4 +1,5 @@
 import type { ArticleDNA } from "./contracts.ts";
+import { articleKgrIdentityChangedMaterially } from "./article-kgr-decision.ts";
 
 /**
  * SUCESSORA SÓ NASCE DE DECISÃO EDITORIAL — não de carimbo.
@@ -98,6 +99,16 @@ export function articleEditorialDiff(input: {
 
   const changedFields: string[] = [];
   for (const campo of EDITORIAL_DECISION_FIELDS) {
+    if (campo === "kgrIdentity") {
+      /*
+       * Identidade KGR: só MUDANÇA REAL conta (SDD 2026-09-28, guarda da A1) —
+       * Principal, "Aplicar KGR" humano, vínculo confirmado e, com o KGR
+       * aplicado, a medição de allintitle. Medir o allintitle de um artigo
+       * sem KGR aplicado, ou a troca da regra de derivação, não é revisão.
+       */
+      if (articleKgrIdentityChangedMaterially(input.canonical.kgrIdentity, input.candidate.kgrIdentity)) changedFields.push(campo);
+      continue;
+    }
     const antes = JSON.stringify(normalizar((input.canonical as Record<string, unknown>)[campo]));
     const depois = JSON.stringify(normalizar((input.candidate as Record<string, unknown>)[campo]));
     if (antes !== depois) changedFields.push(campo);
