@@ -174,11 +174,17 @@ test("convergência (D2.3): a intenção da Lógica diferente vira aviso com 7 p
   assert.equal(medida.basis, "serp");
   assert.match(medida.reasons[0], /7 páginas em comum/);
   assert.match(medida.warnings!.join(" "), /^Aviso: intenção da Lógica diferente \(Comercial × Informativo\); quem barra é a intenção da SERP/);
-  // A intenção OBSERVADA na SERP (evidencia_serp conclusiva) diferente barra.
+  // D2.3.1 — a intenção OBSERVADA diferente com 7 páginas em comum vira aviso: as páginas vencem o rótulo.
   const observada = measureAnchorConvergence(kw("kw-01", { observedIntent: "Comercial" }), kw("kw-09", { observedIntent: "Informativa" }), { siloTokens: sem, serp: INDICE });
-  assert.equal(observada.eligible, false);
-  assert.equal(observada.basis, "dna_contradiction");
-  assert.match(observada.reasons[0], /7 páginas em comum.*Mas o DNA separa as duas: o Google mostrou, de forma conclusiva, intenções diferentes/);
+  assert.equal(observada.eligible, true);
+  assert.equal(observada.basis, "serp");
+  assert.match(observada.warnings!.join(" "), /Aviso: o Google mostrou, de forma conclusiva, intenções diferentes para as duas buscas, mas 7 páginas do top 10 coincidem/);
+  // Com só 2 páginas em comum, a intenção observada diferente continua barrando.
+  const vizinha = measureAnchorConvergence(kw("kw-01", { observedIntent: "Comercial" }), kw("kw-19", { observedIntent: "Informativa" }), { siloTokens: sem, serp: INDICE });
+  assert.equal(INDICE.overlap("kw-01", "kw-19").sharedPageCount, 2);
+  assert.equal(vizinha.eligible, false);
+  assert.equal(vizinha.basis, "dna_contradiction");
+  assert.match(vizinha.reasons[0], /Mas o DNA separa as duas: o Google mostrou, de forma conclusiva, intenções diferentes/);
   // Sem índice de SERP, a regra de antes: a Lógica barra.
   const semIndice = measureAnchorConvergence(kw("kw-01"), kw("kw-09"), { siloTokens: sem });
   assert.equal(semIndice.eligible, false);
@@ -471,17 +477,27 @@ test("diagnóstico (D2.3): a Lógica diferente não barra — o par de 7 página
   assert.match(sugerido.headline, /^2 sugestões com volume para o artigo "como atrair pacientes para clínica" \(2 Forte\)\. A maior: "como atrair pacientes"/);
   assert.equal(sugerido.actions[0].kind, "apply_suggestions");
 
-  // A intenção OBSERVADA na SERP diferente continua barrando: "Par com intenção diferente".
-  const observada = { "kw-01": { observedIntent: "Comercial" }, "kw-09": { observedIntent: "Informativa" }, "kw-10": { observedIntent: "Informativa" } };
-  const [alvo] = diagnoseSerpSubjectAnchors({ ...entrada, keywords: mapaDe(["kw-01", "kw-03", "kw-09", "kw-10"], observada) });
-  assert.equal(alvo.state, "pair_blocked_by_dna");
-  assert.deepEqual(alvo.suggestions, [], "a SERP separou: não é sugestão");
-  assert.deepEqual(alvo.blockedByDna.map(item => item.keywordId), ["kw-09", "kw-10"]);
-  assert.match(alvo.headline, /^2 keywords tratam do mesmo assunto no Google que o artigo "como atrair pacientes para clínica" \("como atrair pacientes", 7 páginas em comum\), mas o DNA separa: o Google mostrou, de forma conclusiva, intenções diferentes/);
-  assert.equal(alvo.actions[0].kind, "review_dna");
+  // D2.3.1 (2026-09-28) — o DEFEITO da AdalbaPro: intenção OBSERVADA diferente, mas 7
+  // páginas em comum. As páginas vencem o rótulo: sugestão Forte, com aviso.
+  const observada = { "kw-01": { observedIntent: "Comercial" }, "kw-09": { observedIntent: "Informativa" }, "kw-10": { observedIntent: "Informativa" }, "kw-19": { observedIntent: "Informativa" } };
+  const [corrigido] = diagnoseSerpSubjectAnchors({ ...entrada, keywords: mapaDe(["kw-01", "kw-03", "kw-09", "kw-10"], observada) });
+  assert.equal(corrigido.state, "suggestions_available");
+  assert.deepEqual(corrigido.blockedByDna, []);
+  assert.deepEqual(corrigido.suggestions.map(item => [item.keywordId, item.level, item.preselected]), [["kw-09", "strong", true], ["kw-10", "strong", true]]);
+  assert.match(corrigido.suggestions[0].warning!, /Aviso: o Google mostrou, de forma conclusiva, intenções diferentes para as duas buscas, mas 7 páginas do top 10 coincidem/);
+
+  // Com 2 páginas em comum, a intenção observada diferente continua barrando: "o DNA separa".
+  const [alvo] = diagnoseSerpSubjectAnchors({
+    ...entrada,
+    silos: [{ ...entrada.silos[0], plan: { ...entrada.silos[0].plan, leftoverKeywordIds: ["kw-19"] } }],
+    volumeValidated: new Set(["kw-19"]),
+    keywords: mapaDe(["kw-01", "kw-03", "kw-19"], observada),
+  });
+  assert.deepEqual(alvo.suggestions, [], "2 páginas e a SERP separou: não é sugestão");
+  assert.notEqual(alvo.state, "suggestions_available");
   // Outra página publicada divide a SERP: sinal de canibalização, nunca fusão.
-  assert.deepEqual(alvo.publishedOverlaps.map(item => item.keywordId), ["kw-03"]);
-  assert.ok(alvo.details.some(linha => /possível canibalização/.test(linha)));
+  assert.deepEqual(corrigido.publishedOverlaps.map(item => item.keywordId), ["kw-03"]);
+  assert.ok(corrigido.details.some(linha => /possível canibalização/.test(linha)));
 });
 
 test("diagnóstico do Assunto: aguardando sustentação e par sem volume", () => {

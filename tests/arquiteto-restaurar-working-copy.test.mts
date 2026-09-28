@@ -207,9 +207,12 @@ test("§14 · Reprocessar fecha a conta em vez de dizer que nada aconteceu", () 
   const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
   // O resumo é o da SELEÇÃO: contar o lote fazia a mesa dizer "5 analisados"
   // para quem tinha marcado um.
-  assert.match(workspace, /Processamento concluído: \$\{resumoDaFormacao\.candidates\} Article\(s\) analisado\(s\)/);
-  assert.match(workspace, /\$\{prontos\} pronto\(s\) para concluir/);
-  assert.match(workspace, /const prontos = Math\.max\(g\.total - g\.blocking, 0\)/);
+  // 2026-09-28: a conta sai em português simples, do ESCOPO, diz que nada foi gravado
+  // (sem SUCCESS) e qual botão grava: "Reforçar publicados" para os publicados.
+  assert.match(workspace, /const leituraDoCache = readoutDaExecucao\(new Set\(\), escopo\.candidateRefs\);/);
+  assert.match(workspace, /showNotification\(leituraDoCache\.tone, leituraDoCache\.message\)/);
+  assert.match(workspace, /describeArticleRunPlain\(\{ rows: linhas, publishedRefs: publishedCandidateRefs, opinionsWritten: gravadosAgora\.size \}\)/);
+  assert.doesNotMatch(workspace, /showNotification\("success", `Processamento concluído/);
 });
 
 test("§5 · a restauração não edita artefato, não sucede e não chama provider", () => {

@@ -208,6 +208,55 @@ function planCostMicros(pages: readonly DifferentiationPlanPage[]) {
   return { min, max, calls };
 }
 
+/** O custo máximo do plano, em dólares (SERP das candidatas nas 4 lentes). */
+export function publishedSearchPlanMaxUsd(pages: readonly DifferentiationPlanPage[]): number {
+  return fromMicros(planCostMicros(pages).max);
+}
+
+/** A faixa de custo e o número máximo de chamadas pagas das páginas na rodada. */
+export function publishedSearchPlanCost(pages: readonly DifferentiationPlanPage[]): { costRange: { minUsd: number; maxUsd: number }; paidCallsMax: number; withinCap: (capUsd: number) => boolean } {
+  const custo = planCostMicros(pages);
+  return { costRange: { minUsd: fromMicros(custo.min), maxUsd: fromMicros(custo.max) }, paidCallsMax: custo.calls, withinCap: capUsd => custo.max <= toMicros(capUsd) };
+}
+
+/**
+ * O corte comum às buscas pagas dos publicados (diferenciação e reforço): acima
+ * do teto, corta nesta ordem, até caber — candidatas na SERP (5 → 3),
+ * candidatas (3 → 2) e, por fim, páginas do fim da lista (ficam para outra
+ * rodada; sempre sobram 2). Muda `pages` no lugar e devolve os cortes em frases.
+ */
+export function fitPublishedSearchPagesToCap(pages: DifferentiationPlanPage[], capUsd: number, outOfRoundNote: string): string[] {
+  const acima = () => planCostMicros(pages).max > toMicros(capUsd);
+  let candidatasCortadas = false;
+  const foraDaRodada: string[] = [];
+  const reduzirCandidatas = (piso: number) => {
+    while (acima()) {
+      const alvo = [...pages].reverse().find(page => page.inRound && page.serpCandidates > piso);
+      if (!alvo) return;
+      alvo.serpCandidates -= 1;
+      candidatasCortadas = true;
+    }
+  };
+  reduzirCandidatas(3);
+  reduzirCandidatas(DIFFERENTIATION_SERP_CANDIDATES_MIN);
+  while (acima() && pages.filter(page => page.inRound).length > 2) {
+    const alvo = [...pages].reverse().find(page => page.inRound)!;
+    alvo.inRound = false;
+    alvo.note = outOfRoundNote;
+    foraDaRodada.push(alvo.keyword);
+  }
+
+  const cuts: string[] = [];
+  if (candidatasCortadas) {
+    const faixas = pages.filter(page => page.inRound).map(page => page.serpCandidates);
+    const menor = Math.min(...faixas);
+    const maior = Math.max(...faixas);
+    cuts.push(`SERP de ${menor === maior ? menor : `${menor} a ${maior}`} candidatas por página, em vez de ${DIFFERENTIATION_SERP_CANDIDATES_MAX}.`);
+  }
+  if (foraDaRodada.length) cuts.push(`Fora desta rodada: ${foraDaRodada.map(nome => `"${nome}"`).join(", ")}.`);
+  return cuts;
+}
+
 function hashMaterial(plan: Omit<DifferentiationPlan, "planHash">) {
   return {
     version: plan.version,
@@ -271,34 +320,7 @@ export async function buildDifferentiationPlan(input: {
     };
   });
 
-  const acima = () => planCostMicros(pages).max > toMicros(teto);
-  let candidatasCortadas = false;
-  const foraDaRodada: string[] = [];
-  const reduzirCandidatas = (piso: number) => {
-    while (acima()) {
-      const alvo = [...pages].reverse().find(page => page.inRound && page.serpCandidates > piso);
-      if (!alvo) return;
-      alvo.serpCandidates -= 1;
-      candidatasCortadas = true;
-    }
-  };
-  reduzirCandidatas(3);
-  reduzirCandidatas(DIFFERENTIATION_SERP_CANDIDATES_MIN);
-  while (acima() && pages.filter(page => page.inRound).length > 2) {
-    const alvo = [...pages].reverse().find(page => page.inRound)!;
-    alvo.inRound = false;
-    alvo.note = "Fora desta rodada pelo teto de US$ 0,50 por grupo: rode de novo depois, com as outras já diferenciadas.";
-    foraDaRodada.push(alvo.keyword);
-  }
-
-  const cuts: string[] = [];
-  if (candidatasCortadas) {
-    const faixas = pages.filter(page => page.inRound).map(page => page.serpCandidates);
-    const menor = Math.min(...faixas);
-    const maior = Math.max(...faixas);
-    cuts.push(`SERP de ${menor === maior ? menor : `${menor} a ${maior}`} candidatas por página, em vez de ${DIFFERENTIATION_SERP_CANDIDATES_MAX}.`);
-  }
-  if (foraDaRodada.length) cuts.push(`Fora desta rodada: ${foraDaRodada.map(nome => `"${nome}"`).join(", ")}.`);
+  const cuts = fitPublishedSearchPagesToCap(pages, teto, "Fora desta rodada pelo teto de US$ 0,50 por grupo: rode de novo depois, com as outras já diferenciadas.");
   if (input.aiUsed) notices.push("A IA sugeriu sementes: são a autoridade mais baixa. Volume e SERP decidem.");
   notices.push("As keywords novas vêm do Google Ads (sementes do ângulo e a página), sem custo no DataForSEO. O custo é só a SERP das candidatas.");
   notices.push("Cache de SERP válido não cobra: o custo real costuma ficar abaixo do máximo.");
@@ -348,8 +370,22 @@ export function authorizeDifferentiationPlan(
   plan: Pick<DifferentiationPlan, "planHash" | "costRange" | "hardCapUsd" | "withinCap">,
   authorized: { planHash: string; maxCostUsd: number } | null | undefined,
 ): DifferentiationAuthorization {
-  if (!plan.withinCap || toMicros(plan.costRange.maxUsd) > toMicros(DIFFERENTIATION_MAX_COST_USD)) {
-    return { ok: false, code: "DIFFERENTIATION_PLAN_ABOVE_CAP", message: `O plano custaria até US$ ${plan.costRange.maxUsd.toFixed(3)}, acima do teto de US$ ${DIFFERENTIATION_MAX_COST_USD.toFixed(2)} por grupo. Nada foi pago.` };
+  const autorizacao = authorizePublishedSearchPlan(plan, authorized, { capUsd: DIFFERENTIATION_MAX_COST_USD, capLabel: "por grupo" });
+  return autorizacao.ok ? autorizacao : { ...autorizacao, code: autorizacao.code === "PLAN_ABOVE_CAP" ? "DIFFERENTIATION_PLAN_ABOVE_CAP" : autorizacao.code };
+}
+
+/**
+ * A autorização comum às buscas pagas dos publicados: o plano inteiro, pelo
+ * hash que o humano viu, até o teto (conferido aqui, no servidor). O orçamento
+ * é o menor entre o autorizado, o teto do plano e o teto do produto.
+ */
+export function authorizePublishedSearchPlan(
+  plan: Pick<DifferentiationPlan, "planHash" | "costRange" | "hardCapUsd" | "withinCap">,
+  authorized: { planHash: string; maxCostUsd: number } | null | undefined,
+  cap: { capUsd: number; capLabel: string },
+): { ok: true; budgetUsd: number } | { ok: false; code: "PAID_PLAN_REQUIRED" | "PAID_PLAN_CHANGED" | "PLAN_ABOVE_CAP"; message: string } {
+  if (!plan.withinCap || toMicros(plan.costRange.maxUsd) > toMicros(cap.capUsd)) {
+    return { ok: false, code: "PLAN_ABOVE_CAP", message: `O plano custaria até US$ ${plan.costRange.maxUsd.toFixed(3)}, acima do teto de US$ ${cap.capUsd.toFixed(2)} ${cap.capLabel}. Nada foi pago.` };
   }
   if (!authorized || typeof authorized.planHash !== "string" || !Number.isFinite(authorized.maxCostUsd) || authorized.maxCostUsd <= 0) {
     return { ok: false, code: "PAID_PLAN_REQUIRED", message: `A rodada custa até US$ ${plan.costRange.maxUsd.toFixed(3)}. Confirme o custo antes; nada foi pago.` };
@@ -357,7 +393,7 @@ export function authorizeDifferentiationPlan(
   if (authorized.planHash !== plan.planHash || toMicros(plan.costRange.maxUsd) > toMicros(authorized.maxCostUsd)) {
     return { ok: false, code: "PAID_PLAN_CHANGED", message: "O plano mudou desde a confirmação. Nada foi pago; confira o plano novo." };
   }
-  return { ok: true, budgetUsd: fromMicros(Math.min(toMicros(authorized.maxCostUsd), toMicros(plan.hardCapUsd), toMicros(DIFFERENTIATION_MAX_COST_USD))) };
+  return { ok: true, budgetUsd: fromMicros(Math.min(toMicros(authorized.maxCostUsd), toMicros(plan.hardCapUsd), toMicros(cap.capUsd))) };
 }
 
 /* -------------------------------- candidatas -------------------------------- */
@@ -793,6 +829,17 @@ function codigoSeguro(error: unknown, fallback: string) {
 const emExecucao = new Set<string>();
 
 /**
+ * A trava da rodada na instância, comum às buscas pagas dos publicados:
+ * devolve o `liberar`, ou `null` quando a MESMA operação já está rodando.
+ */
+export function acquirePublishedSearchLock(brandId: string, operationRequestId: string): (() => void) | null {
+  const trava = `${brandId}:${operationRequestId}`;
+  if (emExecucao.has(trava)) return null;
+  emExecucao.add(trava);
+  return () => { emExecucao.delete(trava); };
+}
+
+/**
  * A rodada paga de UM grupo, pelo plano autorizado. Ordem:
  *   1. confere a versão (v2) e o hash do plano relido e a autorização (nada é
  *      pago sem ela);
@@ -802,6 +849,10 @@ const emExecucao = new Set<string>();
  *   5. SERP das melhores (até N por página) — cache primeiro, só as lentes que faltam;
  *   6. avalia pela SERP.
  * Falha no meio conta e segue (A8); o que foi pago fica registrado.
+ *
+ * Os passos 2 a 5 são o núcleo comum `executePublishedSearchRound`, o MESMO
+ * da busca em lote do "Reforçar publicados" (2026-09-28): só o filtro e a
+ * avaliação mudam.
  */
 export async function runPublishedDifferentiation(input: {
   brandId: string;
@@ -828,25 +879,124 @@ export async function runPublishedDifferentiation(input: {
   const autorizacao = authorizeDifferentiationPlan(plan, input.authorizedPlan);
   if (!autorizacao.ok) return { ok: false, status: autorizacao.code === "DIFFERENTIATION_PLAN_ABOVE_CAP" ? 422 : 409, code: autorizacao.code, message: autorizacao.message };
 
-  const trava = `${input.brandId}:${input.operationRequestId}`;
-  if (emExecucao.has(trava)) return { ok: false, status: 409, code: "OPERATION_IN_PROGRESS", message: "Esta rodada já está em execução. Aguarde; nada foi pago de novo." };
-  emExecucao.add(trava);
+  const liberar = acquirePublishedSearchLock(input.brandId, input.operationRequestId);
+  if (!liberar) return { ok: false, status: 409, code: "OPERATION_IN_PROGRESS", message: "Esta rodada já está em execução. Aguarde; nada foi pago de novo." };
   try {
     return await executar(input, autorizacao.budgetUsd, ports);
   } finally {
-    emExecucao.delete(trava);
+    liberar();
   }
 }
 
 async function executar(input: Parameters<typeof runPublishedDifferentiation>[0], budgetUsd: number, ports: DifferentiationRunPorts): Promise<DifferentiationRunOutcome> {
   const { plan, group, operationRequestId } = input;
+  const angulos = new Map(input.angles.map(angle => [angle.keywordId, angle]));
+  const rodada = await executePublishedSearchRound({
+    brandId: input.brandId,
+    operationRequestId,
+    pages: plan.pages,
+    adsTargeting: plan.adsTargeting ?? DIFFERENTIATION_ADS_TARGETING,
+    ledgerMetadata: { operationKind: "published_differentiation", groupId: plan.groupId },
+    blockedNormalized: new Set<string>([...input.publishedNormalized, ...group.members.map(member => normalizeKeyword(member.page.keyword))]),
+    existingByNormalized: input.existingByNormalized ?? null,
+    pageFootprints: input.pageFootprints,
+    filter: (page, comVolume, bloqueadas) => {
+      const angulo = angulos.get(page.keywordId);
+      const irmas = input.angles.filter(angle => angle.keywordId !== page.keywordId).flatMap(angle => angle.distinctTokens);
+      return filterDifferentiationCandidates({
+        candidates: comVolume,
+        angle: angulo || { entityTokens: [], distinctTokens: [] },
+        siblingDistinctTokens: irmas,
+        blockedNormalized: bloqueadas,
+        pageTokens: differentiationTokens(page.keyword),
+      });
+    },
+  }, budgetUsd, ports);
+  if (!rodada.ok) return rodada;
+  const { round } = rodada;
+
+  /* 6. Avalia pela SERP. */
+  const mapa = new Map(Object.entries(round.candidates));
+  const naRodada = new Set(plan.pages.filter(page => page.inRound).map(page => page.keywordId));
+  const evaluation = evaluateDifferentiation({ group, angles: input.angles, candidates: mapa, serp: round.index, inRound: naRodada });
+
+  return {
+    ok: true,
+    result: {
+      groupId: plan.groupId,
+      operationRequestId,
+      executedAt: ports.now().toISOString(),
+      evaluation,
+      candidates: Object.fromEntries(Object.entries(round.candidates).map(([id, lista]) => [id, lista.slice(0, 40)])),
+      refused: round.refused,
+      footprints: round.footprints,
+      costs: round.costs,
+      serp: round.serp,
+      labsFailures: [],
+      adsFailures: round.adsFailures,
+      adsVolumeFailed: round.adsVolumeFailed,
+      ledgerRecording: round.ledgerRecording,
+      ledgerWarning: round.ledgerWarning,
+      notices: round.notices,
+    },
+  };
+}
+
+/* ------------------------- o núcleo comum da rodada ------------------------- */
+
+/** O que a rodada paga devolve antes da avaliação (diferenciação ou reforço). */
+export type PublishedSearchRound = {
+  /** As candidatas filtradas por página, com `serpMeasured` já medido. */
+  candidates: Record<string, DifferentiationCandidate[]>;
+  refused: Record<string, DifferentiationCandidateRefusal[]>;
+  /** Pegadas das páginas e das candidatas com lentes (a medida é refeita no Aplicar). */
+  footprints: KeywordSerpFootprint[];
+  /** O índice de SERP de páginas e candidatas (inclusive as sem lentes). */
+  index: SerpSubjectIndex;
+  costs: DifferentiationRunResult["costs"];
+  serp: DifferentiationSerpOutcome;
+  adsFailures: NonNullable<DifferentiationRunResult["adsFailures"]>;
+  adsVolumeFailed: boolean;
+  ledgerRecording: boolean;
+  ledgerWarning: string | null;
+  notices: string[];
+};
+
+export type PublishedSearchRoundOutcome =
+  | { ok: true; round: PublishedSearchRound }
+  | { ok: false; status: number; code: DifferentiationRunErrorCode; message: string };
+
+/**
+ * OS PASSOS 2 A 5 DA RODADA PAGA, COMUNS À DIFERENCIAÇÃO E AO REFORÇO.
+ *
+ * Ledger (repetição não paga), orçamento em dólares, Google Ads de cada página
+ * (grátis), junção, métricas históricas do Google Ads (grátis), o filtro de
+ * quem chama (`filter`) e a SERP das melhores, cache primeiro. O que muda
+ * entre os dois modos é só o filtro e, depois daqui, a avaliação.
+ */
+export async function executePublishedSearchRound(input: {
+  brandId: string;
+  operationRequestId: string;
+  pages: readonly DifferentiationPlanPage[];
+  adsTargeting: SubjectDiscoveryAdsTargeting;
+  /** Vai no metadata do ledger de cada chamada paga. */
+  ledgerMetadata: { operationKind: string } & Record<string, string>;
+  /** Normalizadas que nunca viram candidata (publicadas da marca e as páginas da rodada). */
+  blockedNormalized: ReadonlySet<string>;
+  existingByNormalized?: ReadonlyMap<string, string> | null;
+  pageFootprints: readonly KeywordSerpFootprint[];
+  /** O filtro antes da SERP: devolve as que seguem, na ordem de ida à SERP. */
+  filter: (page: DifferentiationPlanPage, withVolume: DifferentiationCandidate[], blockedNormalized: ReadonlySet<string>) => { kept: DifferentiationCandidate[]; refused: DifferentiationCandidateRefusal[] };
+}, budgetUsd: number, ports: DifferentiationRunPorts): Promise<PublishedSearchRoundOutcome> {
+  const { operationRequestId } = input;
+  const pages = input.pages;
   let exec: Awaited<ReturnType<DifferentiationRunPorts["openExecution"]>>;
   try {
     exec = await ports.openExecution();
   } catch {
     return { ok: false, status: 503, code: "DATAFORSEO_UNAVAILABLE", message: "O DataForSEO não está disponível para esta rodada. Nada foi pago." };
   }
-  const planejadas = listDifferentiationPaidCalls(plan);
+  const planejadas = listDifferentiationPaidCalls({ pages: [...pages] });
   if (exec.ledgerCapability && planejadas.length) {
     try {
       const achadas = await Promise.all(planejadas.map(call => exec.findUsage(subjectDiscoveryLedgerKey(operationRequestId, call.callId))));
@@ -857,7 +1007,7 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
   }
 
   const budget = createSubjectDiscoveryBudget({ maxCostUsd: budgetUsd, plannedCalls: planejadas });
-  const custoPorPagina = new Map<string, DifferentiationPageCost>(plan.pages.map(page => [page.keywordId, { keywordId: page.keywordId, labsCalls: 0, serpCalls: 0, costUsd: 0 }]));
+  const custoPorPagina = new Map<string, DifferentiationPageCost>(pages.map(page => [page.keywordId, { keywordId: page.keywordId, labsCalls: 0, serpCalls: 0, costUsd: 0 }]));
   const maximoPorVaga = new Map(planejadas.map(call => [call.callId, call.maxCostUsd]));
   let reportado = 0;
   const avisosLedger: string[] = [];
@@ -875,7 +1025,7 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
       const gravado = await exec.recordDataForSeoUsage({
         ...event,
         idempotencyKey: subjectDiscoveryLedgerKey(operationRequestId, event.callId),
-        metadata: { operationRequestId, operationKind: "published_differentiation", groupId: plan.groupId, callId: event.callId, endpoint: event.endpoint, ...(event.metadata || {}) },
+        metadata: { operationRequestId, ...input.ledgerMetadata, callId: event.callId, endpoint: event.endpoint, ...(event.metadata || {}) },
       });
       if (gravado === "skipped") ledgerRecording = false;
     } catch (error) {
@@ -884,14 +1034,14 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
   };
 
   /*
-   * 3. Google Ads por página, grátis e fora do orçamento: as sementes do ângulo
-   * e, com URL, a semente de ideias + a página. Uma chave de uso por página e
+   * 3. Google Ads por página, grátis e fora do orçamento: as sementes e, com
+   * URL, a semente de ideias + a página. Uma chave de uso por página e
    * semente (`keyword_seed:p2`), no módulo do Arquiteto. Falha conta e segue.
    */
-  const contribuicoes = new Map<string, SubjectDiscoveryContribution[]>(plan.pages.map(page => [page.keywordId, []]));
+  const contribuicoes = new Map<string, SubjectDiscoveryContribution[]>(pages.map(page => [page.keywordId, []]));
   const adsFailures: NonNullable<DifferentiationRunResult["adsFailures"]> = [];
-  const adsTargeting = plan.adsTargeting ?? DIFFERENTIATION_ADS_TARGETING;
-  for (const [pageIndex, page] of plan.pages.entries()) {
+  const adsTargeting = input.adsTargeting;
+  for (const [pageIndex, page] of pages.entries()) {
     if (!page.inRound) continue;
     for (const call of page.ads || []) {
       if (!call.keywords.length || (call.kind === "url_seed" && !call.url)) continue;
@@ -936,12 +1086,11 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
   }
 
   /* 4. Junta, filtra e mede o Google Ads (grátis). */
-  const angulos = new Map(input.angles.map(angle => [angle.keywordId, angle]));
-  const bloqueadas = new Set<string>([...input.publishedNormalized, ...group.members.map(member => normalizeKeyword(member.page.keyword))]);
+  const bloqueadas = input.blockedNormalized;
   const unidas = new Map<string, DifferentiationCandidate[]>();
   // A média mensal que veio na ideia do Google Ads, por keyword normalizada.
   const mediaDaIdeia = new Map<string, number | null>();
-  for (const page of plan.pages) {
+  for (const page of pages) {
     if (!page.inRound) { unidas.set(page.keywordId, []); continue; }
     const juntas = mergeSubjectDiscoveryCandidates({ contributions: contribuicoes.get(page.keywordId) || [], normalizedPhrase: normalizeKeyword(page.keyword), existingByNormalized: input.existingByNormalized ?? null });
     for (const candidata of juntas.candidates) {
@@ -987,22 +1136,14 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
   }
   const candidates: Record<string, DifferentiationCandidate[]> = {};
   const refused: Record<string, DifferentiationCandidateRefusal[]> = {};
-  for (const page of plan.pages) {
-    const angulo = angulos.get(page.keywordId);
-    const irmas = input.angles.filter(angle => angle.keywordId !== page.keywordId).flatMap(angle => angle.distinctTokens);
+  for (const page of pages) {
     const comVolume = (unidas.get(page.keywordId) || []).map(candidata => {
       const valido = (valor: number | null | undefined) => typeof valor === "number" && Number.isFinite(valor) && valor >= 0 ? valor : null;
       // A métrica histórica, quando foi pedida e respondeu (inclusive "sem média"); senão, a média da ideia.
       const adsVolume = volumes.has(candidata.normalizedKeyword) ? valido(volumes.get(candidata.normalizedKeyword)) : valido(mediaDaIdeia.get(candidata.normalizedKeyword));
       return { ...candidata, adsVolume, hasVolume: subjectDiscoveryHasVolume({ googleAds: { averageMonthlySearches: adsVolume }, dataForSeoEstimate: { searchVolume: candidata.estimate } }) };
     });
-    const filtro = filterDifferentiationCandidates({
-      candidates: comVolume,
-      angle: angulo || { entityTokens: [], distinctTokens: [] },
-      siblingDistinctTokens: irmas,
-      blockedNormalized: bloqueadas,
-      pageTokens: differentiationTokens(page.keyword),
-    });
+    const filtro = input.filter(page, comVolume, bloqueadas);
     candidates[page.keywordId] = filtro.kept;
     refused[page.keywordId] = filtro.refused.slice(0, 30);
   }
@@ -1010,7 +1151,7 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
   /* 5. SERP das melhores: cache primeiro; só as lentes que faltam. */
   const selecionadas: Array<{ pageIndex: number; pageKeywordId: string; slot: number; candidate: DifferentiationCandidate }> = [];
   const jaNaSerp = new Set<string>();
-  plan.pages.forEach((page, pageIndex) => {
+  pages.forEach((page, pageIndex) => {
     if (!page.inRound) return;
     let slot = 0;
     for (const candidata of candidates[page.keywordId] || []) {
@@ -1064,16 +1205,12 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
     }
   }
 
-  /* 6. Avalia pela SERP. */
   const candidatasPegadas: KeywordSerpFootprint[] = selecionadas.map(item => ({ keywordId: item.candidate.candidateId, keyword: item.candidate.keyword, lenses: pegadas.get(item.candidate.candidateId) || [] }));
   const footprints = [...input.pageFootprints, ...candidatasPegadas];
   const indice = buildSerpSubjectIndex(footprints);
   for (const lista of Object.values(candidates)) {
     for (const candidata of lista) candidata.serpMeasured = indice.hasPages(candidata.candidateId);
   }
-  const mapa = new Map(Object.entries(candidates));
-  const naRodada = new Set(plan.pages.filter(page => page.inRound).map(page => page.keywordId));
-  const evaluation = evaluateDifferentiation({ group, angles: input.angles, candidates: mapa, serp: indice, inRound: naRodada });
 
   const notices: string[] = [];
   if (adsVolumeFailed) notices.push("As métricas históricas do Google Ads não responderam: valeu a média mensal das ideias do Google Ads.");
@@ -1083,14 +1220,11 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
 
   return {
     ok: true,
-    result: {
-      groupId: plan.groupId,
-      operationRequestId,
-      executedAt: ports.now().toISOString(),
-      evaluation,
-      candidates: Object.fromEntries(Object.entries(candidates).map(([id, lista]) => [id, lista.slice(0, 40)])),
+    round: {
+      candidates,
       refused,
       footprints: footprints.filter(pegada => pegada.lenses.length),
+      index: indice,
       costs: {
         reportedCostUsd: fromMicros(reportado),
         budgetSpentUsd: budget.spentUsd,
@@ -1098,7 +1232,6 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
         byPage: [...custoPorPagina.values()],
       },
       serp: serpOutcome,
-      labsFailures: [],
       adsFailures,
       adsVolumeFailed,
       ledgerRecording,

@@ -233,7 +233,7 @@ export function planDifferentiationApply(input: {
     if (ingest.length) ingestBatches.push({ pageKeywordId: page.keywordId, subjectPhrase: page.keyword, items: ingest });
 
     if (!artigo) {
-      pages.push({ ...vazio, formation, ingest, swap: { applied: false, keyword: resultado.state === "differentiated" ? resultado.newPrincipal?.keyword ?? null : null, reason: "Sem ArticleDNA: conclua a formação do artigo e aplique de novo." }, refusal: "A nota e as exclusões são gravadas no ArticleDNA, que ainda não existe para esta página: conclua a formação dela (Concluir formação) e aplique de novo." });
+      pages.push({ ...vazio, formation, ingest, swap: { applied: false, keyword: resultado.state === "differentiated" ? resultado.newPrincipal?.keyword ?? null : null, reason: "Sem ArticleDNA: use \"Reforçar publicados\" (ele cria o ArticleDNA desta página) e aceite de novo." }, refusal: "A nota e as exclusões são gravadas no ArticleDNA, que ainda não existe para esta página: use \"Reforçar publicados\" (ele cria o ArticleDNA, sem custo) e aceite de novo; nada é pago de novo." });
       continue;
     }
     // O artigo precisa ser o desta página publicada (a principal ou a troca já aplicada).

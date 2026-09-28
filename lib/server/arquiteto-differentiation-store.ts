@@ -272,12 +272,16 @@ export type DifferentiationRow = {
 
 const COLUNAS_DA_PROPOSTA = "id,state,lock_version,payload";
 
-export async function readDifferentiationProposal(context: DifferentiationStoreContext, groupId: string): Promise<DifferentiationRow | null> {
+/**
+ * A proposta de um grupo (ou, com `subjectType`, a de outra busca dos publicados
+ * que usa o mesmo lugar e a mesma trava: a busca em lote do Reforçar publicados).
+ */
+export async function readDifferentiationProposal(context: DifferentiationStoreContext, groupId: string, subjectType: string = DIFFERENTIATION_SUBJECT_TYPE): Promise<DifferentiationRow | null> {
   const resultado = await context.supabase
     .from("editorial_workflow_items")
     .select(COLUNAS_DA_PROPOSTA)
     .eq("marca_id", context.brandId)
-    .eq("subject_type", DIFFERENTIATION_SUBJECT_TYPE)
+    .eq("subject_type", subjectType)
     .eq("stage", DIFFERENTIATION_STAGE)
     .eq("subject_id", groupId)
     .maybeSingle();
@@ -339,14 +343,15 @@ export class DifferentiationConflictError extends Error {
  */
 export async function writeDifferentiationProposal(
   context: DifferentiationStoreContext,
-  input: { groupId: string; state: DifferentiationRowState; payload: Record<string, unknown>; expected: DifferentiationRow | null },
+  input: { groupId: string; state: DifferentiationRowState; payload: Record<string, unknown>; expected: DifferentiationRow | null; subjectType?: string },
 ): Promise<DifferentiationRow> {
+  const subjectType = input.subjectType ?? DIFFERENTIATION_SUBJECT_TYPE;
   if (!input.expected) {
     const criada = await context.supabase
       .from("editorial_workflow_items")
       .insert({
         marca_id: context.brandId,
-        subject_type: DIFFERENTIATION_SUBJECT_TYPE,
+        subject_type: subjectType,
         subject_id: input.groupId,
         article_id: null,
         stage: DIFFERENTIATION_STAGE,
@@ -372,7 +377,37 @@ export async function writeDifferentiationProposal(
     if (atualizada.error) falha("Atualização da proposta de diferenciação", atualizada.error);
     if (!atualizada.data) throw new DifferentiationConflictError("A proposta mudou desde a leitura (outra aba ou outro membro). Recarregue e tente de novo.");
   }
-  const relida = await readDifferentiationProposal(context, input.groupId);
+  const relida = await readDifferentiationProposal(context, input.groupId, subjectType);
   if (!relida || relida.state !== input.state) throw new Error("O readback da proposta de diferenciação não confirmou a gravação.");
   return relida;
+}
+
+/* ------------------------ busca em lote do Reforçar ------------------------ */
+
+/**
+ * As sugestões gravadas das buscas em lote do Reforçar publicados, por página,
+ * da rodada mais recente de cada página (egress estreito: só o resultado).
+ */
+export async function readReinforcementSearchSuggestions(context: DifferentiationStoreContext, subjectType: string): Promise<Map<string, { searchId: string; operationRequestId: string; executedAt: string; suggestions: Array<Record<string, unknown>> }>> {
+  const resultado = await context.supabase
+    .from("editorial_workflow_items")
+    .select("subject_id,state,operation:payload->run->>operationRequestId,executed_at:payload->run->>executedAt,pages:payload->run->pages")
+    .eq("marca_id", context.brandId)
+    .eq("subject_type", subjectType)
+    .eq("stage", DIFFERENTIATION_STAGE);
+  if (resultado.error) falha("Leitura das buscas de reforço", resultado.error);
+  const porPagina = new Map<string, { searchId: string; operationRequestId: string; executedAt: string; suggestions: Array<Record<string, unknown>> }>();
+  for (const linha of (resultado.data || []) as unknown as Array<{ subject_id: string; operation: string | null; executed_at: string | null; pages: unknown }>) {
+    const executedAt = texto(linha.executed_at);
+    const operationRequestId = texto(linha.operation);
+    if (!executedAt || !operationRequestId || !Array.isArray(linha.pages)) continue;
+    for (const pagina of linha.pages as Array<Record<string, unknown>>) {
+      const id = texto(pagina?.keywordId);
+      if (!id) continue;
+      const atual = porPagina.get(id);
+      if (atual && atual.executedAt >= executedAt) continue;
+      porPagina.set(id, { searchId: String(linha.subject_id), operationRequestId, executedAt, suggestions: Array.isArray(pagina.suggestions) ? pagina.suggestions as Array<Record<string, unknown>> : [] });
+    }
+  }
+  return porPagina;
 }

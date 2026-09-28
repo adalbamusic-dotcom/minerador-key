@@ -1,3 +1,39 @@
+## Reforçar publicados: correções da revisão — 2026-09-28
+
+- [x] ArticleDNA `approved` com arquitetura confirmada, evidência SERP do artigo e `articleApprovalRevalidationIssues` antes de gravar; sem parecer, recusa na prévia.
+- [x] Papel humano de reforço preservado; sem regravar quem já está na formação; Silo muda só para quem entra.
+- [x] Recusa: formação com outra principal decidida, keyword já no ArticleDNA de outro artigo, keyword em outro estado no Arquiteto.
+- [x] Keyword marcada em dois publicados entra só no de mais páginas em comum; a confirmação não trava.
+- [x] Desfecho: o que já ficou gravado na página que falhou, os não tentados pelo nome, keyword sem volume dita; sucessora igual não grava.
+- [x] Permissões do Minerador só com keyword nova; cabeçalhos em processo só com a sessão; prévia MCP pelo mesmo schema e leituras.
+- [x] Busca em lote: rodada paga interrompida não roda de novo com a mesma prévia.
+- [x] Barra, filtro "Pedem decisão", cartão devolvido pela busca, "Aceitar em grupo" e Processar sem SUCCESS.
+- [ ] **Homologar (usuário) na AdalbaPro:** rodar "Processar artigos" se algum publicado não tiver parecer de SERP; Reforçar "como atrair pacientes para clínica" (5 Forte) e conferir no banco o ArticleDNA v1 (`architecture_confirmed`, `serpAssessmentRef`) e a linha da tabela com 6 keywords.
+- [ ] Conferir se `slug_sugerido` dos publicados bate com o último segmento da URL; se não, a rota `article-dna` (IA) trocaria o slug numa versão futura (SDD §12).
+- [ ] Registrar o publicado reforçado em `concludedFormations` (fechamento do Silo).
+
+## Reforçar publicados: tela e mensagens simples — 2026-09-28
+
+- [x] Botão "Reforçar publicados" (painel) e "Reforçar este publicado" (cartão), com a confirmação única montada da prévia do servidor, o aceite das keywords novas amarrado ao hash e o desfecho por artigo.
+- [x] "Aplicar troca" sem ArticleDNA abre o Reforçar com a troca marcada; fim do "conclua a formação e volte aqui" (troca, diferenciação e Revisão do artigo).
+- [x] "Sem par no lote" numa linha só, com "Buscar keywords para os publicados sem par (até US$ 1,00)", prévia grátis, uma confirmação do custo, progresso e as sugestões nos cartões.
+- [x] Mensagens simples do Processar/Reprocessar, do allintitle e da mudança de Silo (INFO quando nada foi gravado).
+- [ ] **Homologar (usuário) na AdalbaPro:** a confirmação do Reforçar (prévia, aceite, "Gravar e reler") e o desfecho; a busca em lote (prévia até US$ 0,98, uma confirmação); conferir no banco o ArticleDNA v1 dos publicados e a tabela da mesa depois da releitura.
+- [ ] Se a tabela da mesa continuar em "1 keyword" depois do Reforçar: a partição do cenário exige o mesmo conjunto do candidato; ler o ArticleDNA pela principal publicada também na tabela.
+- [ ] Mostrar o readout técnico do §4 num "Detalhes" da notificação (hoje fica só no domínio e nos testes).
+
+## Reforçar publicados e busca em lote (núcleo) — 2026-09-28
+
+- [x] D2.3.1: 3+ páginas em comum vencem o rótulo de intenção observada (aviso); 2 páginas ou sem SERP continuam barrando.
+- [x] `POST /api/arquiteto/published-reinforcement` (preview/apply): primeiro ArticleDNA do publicado, composição, troca aceita e keyword nova pelos núcleos do Minerador, com releitura e parada no primeiro erro.
+- [x] Busca em lote `search/plan` e `search/run` com teto de US$ 1,00 no servidor, dois modos por grupo e o núcleo comum da diferenciação.
+- [x] Núcleo da Lógica e da aprovação extraído do MCP (`lib/server/minerador-keyword-decision-core.ts`).
+- [x] Catálogo e MCP: `preview_published_reinforcement`; operações do Reforçar e da busca; notas sem "Concluir formação" para publicado.
+- [x] **Tela (entregue em 2026-09-28, seção acima):** botão "Reforçar publicados" com a confirmação (frases `lines`, `approvalText`), faixa "Sem par no lote" com "Buscar keywords para os publicados sem par (até US$ 1,00)" e `SerpPaidPlanDialog`, sugestões da busca no cartão, remover "conclua a formação e volte aqui" (`serp-subject-model.ts`, `published-differentiation-apply.ts`, `published-differentiation-panel.tsx`), mensagens simples do Processar.
+- [ ] Registrar o publicado reforçado em `concludedFormations` do marcador (`materializedArticleId`) para o fechamento automático do Silo.
+- [ ] Normalizar "Informativa"/"Informativo" em `intentComparisonKey` (hoje só geraria aviso falso).
+- [ ] **Homologar (usuário) na AdalbaPro:** Reforçar "como atrair pacientes para clínica" (primeiro ArticleDNA + 3 Forte), a busca em lote dos sem par (prévia até US$ 0,98, uma confirmação) e uma keyword nova até o artigo.
+
 ## Correções do corretor (frentes de 2026-09-28) — 2026-09-28
 
 - [x] Medir ou recalcular o allintitle sem "Aplicar KGR" não abre sucessora do ArticleDNA (diff pela guarda material).

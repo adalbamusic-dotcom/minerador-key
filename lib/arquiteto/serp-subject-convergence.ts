@@ -5,7 +5,8 @@
  * Silo quando trata do MESMO assunto que a âncora. A medida principal é a
  * SERP (`serp-subject-overlap.ts`); as palavras (`sameArticleAffinity`) e o
  * DNA são apoio e desempate. A contradição de DNA (intenção, funil, SERP
- * conclusiva divergente) continua barrando (D5) — mesmo com páginas em comum.
+ * conclusiva divergente) continua barrando (D5), salvo quando 3+ páginas do
+ * top 10 coincidem: aí o rótulo observado vira aviso (D2.3.1, 2026-09-28).
  *
  *   SERP forte (3+ páginas)      entra, mesmo com poucas palavras em comum;
  *   SERP de apoio (2 páginas)    entra só se as palavras também convergem;
@@ -92,16 +93,45 @@ export function logicDnaDivergence(left: ArticleFormationKeyword, right: Article
 }
 
 /**
+ * D2.3.1 (2026-09-28) — AS PÁGINAS VENCEM O RÓTULO.
+ *
+ * O rótulo de intenção de cada SERP é uma classificação derivada (tipos de
+ * resultado); as páginas em comum são a evidência direta (D2.2). Com 3+
+ * páginas do top 10 em comum, o Google tratou as duas como o mesmo assunto:
+ * a intenção observada diferente vira AVISO, não barreira. Com 2 páginas ou
+ * menos, ou sem SERP para medir, ela continua barrando.
+ *
+ * Na AdalbaPro, "como atrair pacientes para clínica" divide 7 páginas com
+ * "como atrair pacientes", "como atrair pacientes para o consultório" e "como
+ * atrair mais pacientes" e o cartão dizia "o DNA separa".
+ */
+export function serpObservedBarrier(left: ArticleFormationKeyword, right: ArticleFormationKeyword, serp?: SerpSubjectIndex | null): string | null {
+  const observada = serpObservedDnaContradiction(left, right);
+  if (!observada) return null;
+  return serp && serp.overlap(left.keywordId, right.keywordId).strength === "strong" ? null : observada;
+}
+
+/** O aviso quando a intenção observada diverge e as páginas (3+) dizem que é o mesmo assunto. */
+export function serpObservedWarning(left: ArticleFormationKeyword, right: ArticleFormationKeyword, serp?: SerpSubjectIndex | null): string | null {
+  if (!serp) return null;
+  const observada = serpObservedDnaContradiction(left, right);
+  if (!observada) return null;
+  const overlap = serp.overlap(left.keywordId, right.keywordId);
+  if (overlap.strength !== "strong") return null;
+  return `Aviso: ${observada}, mas ${overlap.sharedPageCount} páginas do top 10 coincidem; quem diz o assunto são as páginas.`;
+}
+
+/**
  * A barreira de DNA entre duas keywords, com a regra D2.3.
  *
  * Sem índice de SERP: a regra anterior (`formationDnaContradiction`), byte a
- * byte. Com índice: barra a SERP observada; a Lógica só barra quando a SERP
- * não mede o par (sem páginas de um dos dois no cache).
+ * byte. Com índice: barra a SERP observada, salvo quando 3+ páginas coincidem
+ * (D2.3.1: aí é aviso); a Lógica só barra quando a SERP não mede o par (sem
+ * páginas de um dos dois no cache).
  */
 export function serpAwareDnaBarrier(left: ArticleFormationKeyword, right: ArticleFormationKeyword, serp?: SerpSubjectIndex | null): string | null {
   if (!serp) return formationDnaContradiction(left, right);
-  const observada = serpObservedDnaContradiction(left, right);
-  if (observada) return observada;
+  if (serpObservedDnaContradiction(left, right)) return serpObservedBarrier(left, right, serp);
   if (!logicDnaDivergence(left, right)) return formationDnaContradiction(left, right);
   return serp.overlap(left.keywordId, right.keywordId).strength === "unknown" ? formationDnaContradiction(left, right) : null;
 }
@@ -169,10 +199,13 @@ export function measureAnchorConvergence(
   // D2.3 — com SERP, só a intenção observada barra; a Lógica que diverge vira aviso.
   const contradicao = options.serp ? serpAwareDnaBarrier(anchor, candidate, options.serp) : formationDnaContradiction(anchor, candidate);
   const divergenciaDaLogica = options.serp && !contradicao ? logicDnaDivergence(anchor, candidate) : null;
-  const { affinity, reasons } = divergenciaDaLogica
-    ? sameArticleAffinity(semLogica(anchor), semLogica(candidate), options.siloTokens || new Set())
+  // D2.3.1 — intenção observada diferente com 3+ páginas em comum: aviso, não barreira.
+  const avisoObservado = options.serp && !contradicao ? serpObservedWarning(anchor, candidate, options.serp) : null;
+  const semRotulos = (keyword: ArticleFormationKeyword): ArticleFormationKeyword => avisoObservado ? { ...semLogica(keyword), observedIntent: null } : semLogica(keyword);
+  const { affinity, reasons } = divergenciaDaLogica || avisoObservado
+    ? sameArticleAffinity(semRotulos(anchor), semRotulos(candidate), options.siloTokens || new Set())
     : sameArticleAffinity(anchor, candidate, options.siloTokens || new Set());
-  const aviso = divergenciaDaLogica ? [logicWarningText(divergenciaDaLogica)] : [];
+  const aviso = [...(avisoObservado ? [avisoObservado] : []), ...(divergenciaDaLogica ? [logicWarningText(divergenciaDaLogica)] : [])];
   const base = { lexicalAffinity: affinity, measuredAgainstKeywordId: anchor.keywordId, ...(aviso.length ? { warnings: aviso } : {}) };
   const overlap = options.serp ? options.serp.overlap(anchor.keywordId, candidate.keywordId) : null;
 

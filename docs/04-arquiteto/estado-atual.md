@@ -1,3 +1,176 @@
+## Reforçar publicados: correções da revisão — 2026-09-28
+
+Verificado no código e confirmado por teste (fixtures, sem rede, sem custo).
+Nada executado no banco remoto; homologação manual é do dono.
+
+- **Aprovação com a mesma portaria da rota de artefatos.** O ArticleDNA do
+  "Reforçar publicados" sai `approved` com `architectureStatus =
+  architecture_confirmed` e o `serpAssessmentRef` do parecer de SERP do artigo
+  gravado pelo "Processar artigos" (`withHumanArticleApproval`), e o núcleo roda
+  `articleApprovalRevalidationIssues` antes de gravar. Sem parecer, a prévia
+  recusa a página com o motivo. O Posto do publicado não é travado.
+- **Decisão humana preservada.** Reforço narrativo decidido na formação continua
+  reforço no ArticleDNA; quem já está na formação do publicado não é regravado;
+  só as keywords que entram agora mudam de Silo.
+- **Uma keyword, um artigo.** Formação do publicado com outra principal decidida,
+  membro ou escolhida já no ArticleDNA de outro artigo, e keyword do Minerador em
+  outro estado no Arquiteto são recusadas com o motivo.
+- **A confirmação não trava mais por keyword repetida.** Marcada em mais de um
+  publicado, ela entra só no de mais páginas em comum (membro da formação ou
+  substituta da troca vencem) e a frase diz onde entrou e de onde saiu. Com os
+  dados reais: 4 keywords repetidas ("como atrair pacientes para o
+  consultório" em 4 publicados, "como atrair mais pacientes" em 3, …) vão para
+  "como atrair pacientes para clínica" (7/6/4 páginas); os 25 publicados seguem
+  para a prévia, 12 keywords sem repetição, maior artigo com 6.
+- **Desfecho honesto.** Parada: o publicado que falhou diz o que já ficou gravado
+  (Minerador, composição) e os não tentados são nomeados; keyword nova sem volume
+  fica no Minerador e é dita; sucessora igual à vigente não grava versão.
+- **Releitura reforçada**: composição (ref, papel, Silo) e ArticleDNA
+  (`versionId` e `contentHash` gravados).
+- **Permissões do Minerador** só quando a prévia confirmada tem keyword nova;
+  chamadas em processo levam só a sessão e o `content-type`; a prévia MCP usa o
+  mesmo schema e as mesmas leituras (`lib/server/arquiteto-published-reinforcement-deps.ts`).
+- **Busca em lote**: rodada paga que para no meio marca a prévia e não roda de
+  novo com outro id (teto por rodada); a próxima exige prévia e confirmação novas.
+- **Tela**: a barra separa "com reforço proposto ainda não gravado" de "só ganham
+  o ArticleDNA"; "Pedem decisão" mostra o "Reforço proposto" não gravado; o cartão
+  devolvido pela busca diz "A busca em lote achou N keywords…" e perde o "Buscar
+  reforço"; "Aceitar em grupo" diz que mudar de Silo grava só o Silo; o
+  Processar nunca sai SUCCESS (grava só o parecer) e diz onde fica o botão.
+- **Tabela da mesa**: teste com a composição gravada pelo Reforçar mostra o
+  candidato do publicado com as 3 keywords (universo da formação). A tela real
+  continua a conferir na homologação.
+- Suítes: `test:arquiteto` 2593/2593, `test:arquiteto:servidor` 82/82,
+  `test:arquiteto:lentes` 43/43, `test:agent` 56/56, `test:editorial` 170/174
+  (as 4 antigas), Minerador por glob 1156/1184 (as 28 antigas, mesmos nomes),
+  `tsc --noEmit` limpo, ESLint limpo nos arquivos tocados, `git diff --check` limpo.
+- Deploy: uma fase só, sem migration, ArticleDNA sem campo novo.
+
+## Reforçar publicados: a tela, a busca em lote e as mensagens simples — 2026-09-28
+
+```text
+SDD = docs/04-arquiteto/sdd-reforcar-publicados-2026-09-28.md (aprovada pelo dono em 2026-09-28, teto US$ 1,00)
+MODULO_PROPRIETARIO = Arquiteto · NUCLEO = a entrega anterior (rotas preview/apply e search/plan|run, sem mudança de contrato)
+ARQUIVOS_NOVOS = modules/arquiteto/published-reinforcement-model.ts · published-reinforcement-panel.tsx · use-published-reinforcement.ts · lib/arquiteto/plain-run-messages.ts · tests/arquiteto-reforcar-publicados-tela.test.mts
+MIGRATION = 0 · SQL = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · CAMPO_NOVO_EM_STRICT = 0 · DEV_SERVER = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não (a homologação é do dono).**
+
+- **"Reforçar publicados"** (painel "Mesmo assunto no Google", no topo, e
+  "Reforçar este publicado" em cada cartão de publicado). Abre UMA confirmação
+  com a prévia do servidor (grátis): por artigo, "Cria o ArticleDNA (v1)",
+  "Nova versão (vN)", "Nada muda" ou "Não será gravado", as frases do núcleo
+  (troca, reforços, keywords novas "importadas e aprovadas por você no
+  Minerador", o que fica de fora e por quê) e "Custo para gravar: zero". Tirar
+  um publicado ou aceitar/desfazer a troca refaz a prévia (o hash acompanha).
+  Com keyword nova, "Gravar e reler (N)" só libera com "Eu aprovo estas
+  keywords novas no Minerador." marcado, e o aceite vale só para a prévia vista
+  (prévia nova pede de novo). 409 "estado mudou" mostra a prévia nova e não
+  grava. O desfecho diz o que foi gravado e relido e o que não foi, por artigo.
+  Depois de gravar, a mesa relê o acervo e o cache de SERP.
+- **Cartões mais simples.** Sem ArticleDNA (ou sem a substituta nele),
+  "Aplicar troca" fica ativo e abre a confirmação com a troca marcada. Acabou
+  o "conclua a formação e volte aqui" (troca, diferenciação e Revisão do
+  artigo). Publicado com proposta não gravada diz "Reforço proposto" e
+  "sem ArticleDNA ainda: 'Reforçar publicados' grava". As sugestões do cartão
+  de publicado usam a seleção do hook (a mesma na Revisão do artigo) e vão para
+  o Reforçar; o Assunto continua com "Aplicar selecionadas". "Par com intenção
+  diferente" ficou curto ("… mas a intenção é outra. Só entra se você decidir.").
+- **"Sem par no lote" numa linha só**, com "Buscar keywords para os publicados
+  sem par (até US$ 1,00)": prévia grátis (`search/plan`), UMA confirmação do
+  custo ("Confirmar US$ x a y"; "Cancelar (nada é pago)"), progresso e, depois,
+  quem ganhou sugestão volta a ser cartão com "Keywords da busca em lote"
+  (Forte marcada, Provável desmarcada, "nova no Minerador"); quem ficou sem
+  nada fica na linha, com o motivo. Os que disputam o mesmo assunto entre si
+  aparecem com o aviso da diferenciação. Rodada já paga é relida sem custo ao
+  abrir a aba; "Nova busca" só por pedido explícito. A confirmação do custo usa
+  o mesmo diálogo da diferenciação (mesmo núcleo, faixa e teto por rodada), não
+  o `SerpPaidPlanDialog`, que descreve lentes e não candidatas.
+- **Mensagens em português simples** (`lib/arquiteto/plain-run-messages.ts`).
+  Processar/Reprocessar: "21 artigos analisados pelo cache, sem custo. Nada foi
+  gravado ainda. Para gravar os 21 publicados: 'Reforçar publicados'." (INFO,
+  nunca SUCCESS sem gravação); com parecer gravado, diz quantos e que as
+  keywords dos artigos ainda não foram gravadas; novos prontos vão para
+  "Concluir formação". Os códigos do §4 (`ARTICLES_PROCESSED`…) saíram da
+  notificação e continuam no domínio. Allintitle: medido e gravado × já medido
+  (nada novo) × sem volume. "Trazidas de outro Silo": "Gravado: só o Silo
+  delas. Elas ainda não estão no artigo nem no ArticleDNA: para gravar,
+  'Reforçar publicados'." (INFO). A notificação ganhou a severidade INFO.
+- **Catálogo das IAs** (AGENTS §17.1): os rótulos da tela ("Reforçar este
+  publicado", "Aceitar a troca", o aceite, "Gravar e reler (N)", a linha dos
+  sem par, "Cancelar (nada é pago)", "Nova busca…") e as mensagens novas.
+- Consumidores preservados: a troca pronta (ArticleDNA com a substituta)
+  continua pela porta de versão da mesa; "Aceitar em grupo" continua, com a
+  troca sem ArticleDNA apontada para o Reforçar; a diferenciação e a Pesquisa
+  por Assunto dos Assuntos não mudaram.
+- Suítes: `test:arquiteto` 2592/2592 (inclui o teste de tela novo, 16 casos),
+  `test:arquiteto:servidor` 77/77, `test:arquiteto:lentes` 43/43,
+  `test:agent` 56/56, `test:editorial` 170/174 (as 4 falhas antigas),
+  Minerador por glob 1156/1184 (as 28 falhas antigas, mesmos nomes),
+  `tsc --noEmit` limpo, ESLint sem erro novo nos arquivos tocados (a mesa já
+  tinha 41 erros antigos, nenhum nas linhas alteradas), `git diff --check` limpo.
+
+Pendências: homologação manual do dono na AdalbaPro (Reforçar "como atrair
+pacientes para clínica", a busca em lote dos sem par e uma keyword nova até o
+artigo; PASS só com o traço no banco); a tabela da mesa pode continuar contando
+"1 keyword" para um publicado cuja composição gravada difere do candidato (a
+partição exige o mesmo conjunto) — conferir na homologação; registrar o
+publicado em `concludedFormations` do marcador (fechamento do Silo).
+
+## Reforçar publicados, busca em lote e o par de 7 páginas (núcleo) — 2026-09-28
+
+```text
+SDD = docs/04-arquiteto/sdd-reforcar-publicados-2026-09-28.md (aprovada pelo dono em 2026-09-28, teto US$ 1,00)
+ROTAS_NOVAS = POST /api/arquiteto/published-reinforcement (preview|apply) · POST /api/arquiteto/published-reinforcement/search/plan · .../search/run
+MCP = preview_published_reinforcement (só prévia, platform.read) · catálogo com 3 operações novas e D2.3.1
+NUCLEOS_EXTRAIDOS = lib/server/minerador-keyword-decision-core.ts (Lógica e aprovação do MCP) · executePublishedSearchRound (rodada paga comum à diferenciação)
+MIGRATION = 0 · SQL = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · CAMPO_NOVO_EM_STRICT = 0 · MANUAL_UI_VALIDATED = NO · TELA = outra frente
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não. Tela: não faz parte desta entrega.**
+
+- **D2.3.1 (defeito do par de 7 páginas).** `serpObservedBarrier`/`serpObservedWarning`
+  (`lib/arquiteto/serp-subject-convergence.ts`): com 3+ páginas em comum, a
+  intenção/funil OBSERVADOS diferentes viram aviso; com 2 ou menos (ou sem SERP),
+  continuam barrando. Na leitura real, "como atrair pacientes para clínica" ganha
+  "como atrair pacientes", "como atrair pacientes para o consultório" e "como
+  atrair mais pacientes" (7 páginas) e "como atrair mais pacientes para o
+  consultorio" (6) e "como atrair pacientes particulares" (4) como Forte, com o
+  aviso; "como captar pacientes" (2 páginas) continua barrada. O teste antigo
+  que fixava a barreira com 7 páginas foi trocado.
+- **Reforçar publicados.** `lib/arquiteto/published-reinforcement.ts` (plano por
+  página, primeiro ArticleDNA do publicado pelo construtor determinístico com
+  `publishedAnchorId` + guarda do publicado + pai no estágio INITIAL,
+  sucessora que só acrescenta, troca pelos gravadores da mesa, releitura,
+  frase do desfecho) e `lib/server/arquiteto-published-reinforcement.ts`
+  (prévia com `decisionHash`; aplicar na ordem keyword nova → composição → DNA,
+  parando no primeiro erro com o motivo). ArticleDNA sai `approved` (a
+  confirmação é a aprovação humana). A prévia já monta o primeiro DNA e recusa
+  a página que o construtor recusaria.
+- **Busca em lote.** `lib/arquiteto/published-reinforcement-search.ts` e
+  `lib/server/arquiteto-published-reinforcement-search.ts`: dois modos (quem
+  disputa o mesmo assunto com outro publicado vai à diferenciação), plano
+  `published-reinforcement-plan-v1` com teto de US$ 1,00 no servidor, rodada
+  pelo núcleo comum, Forte/Provável pela SERP, cada candidata num publicado só.
+- **Núcleo da diferenciação refatorado sem mudar comportamento**:
+  `fitPublishedSearchPagesToCap`, `authorizePublishedSearchPlan`,
+  `acquirePublishedSearchLock`, `executePublishedSearchRound`; proposta com
+  `subjectType` opcional no store. Suítes da diferenciação verdes.
+- **Simulação com os dados reais (sem custo, 25 publicados do export):** 8 com
+  reforço por páginas já no lote; 17 sem par; destes, 11 disputam o mesmo
+  assunto (3 grupos → diferenciação) e 6 vão à busca em lote (US$ 0,00 a 0,42);
+  os 14 do dono, se fossem todos à busca, dariam US$ 0,00 a 0,98, sem corte.
+- Suítes: `test:arquiteto` 2576/2576, `test:arquiteto:servidor` 77/77,
+  `test:arquiteto:lentes` 43/43, `test:agent` 56/56, `test:editorial` 170/174
+  (as 4 falhas antigas), Minerador por glob 1156/1184 (as 28 falhas antigas,
+  mesmos nomes), `tsc --noEmit` limpo, ESLint limpo, `git diff --check` limpo.
+
+Pendências: a tela (botão "Reforçar publicados", a confirmação com as frases
+`lines` e o `approvalText`, a linha "Sem par no lote" com a busca em lote, as
+mensagens simples do Processar); registrar o publicado em `concludedFormations`
+do marcador (fechamento do Silo); homologação manual do dono na AdalbaPro.
+
 ## Correções do corretor sobre as frentes de 2026-09-28 — 2026-09-28
 
 ```text

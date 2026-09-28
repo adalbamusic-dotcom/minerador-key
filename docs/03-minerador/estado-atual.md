@@ -1,5 +1,21 @@
 # Estado atual — Minerador
 
+## Lógica e aprovação no servidor viram núcleo compartilhado — 2026-09-28
+
+```text
+ORIGEM = SDD docs/04-arquiteto/sdd-reforcar-publicados-2026-09-28.md (Reforçar publicados do Arquiteto)
+MUDANCA = lib/server/minerador-keyword-decision-core.ts (runKeywordLogicWithCore, keywordDecisionEntries, applyKeywordDecisionEntries, constrainKeywordSnapshot, readDecisionKeywords)
+CONSUMIDORES = MCP run_keyword_logic e decide_keywords (mesma saída) · POST /api/arquiteto/published-reinforcement (keyword nova)
+REGRA = nenhuma nova: Lógica = deriveLogicalKeywordBatchItem; aprovação = resolveApprovalReadiness + applyApproval (só Lógica e Volume); compare-and-swap e releitura
+MIGRATION = 0 · SQL = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0
+```
+
+- A rota de Volume do Google Ads e o import da Pesquisa por Assunto não mudaram:
+  o Reforçar publicados os chama como estão (a rota de volume em processo, com a
+  mesma sessão).
+- Suítes: Minerador por glob 1156/1184 (as 28 falhas antigas, mesmos nomes),
+  `test:agent` 56/56.
+
 ## Faixa de processos do Perfil sem Resultados e KGR — 2026-09-28
 
 ```text

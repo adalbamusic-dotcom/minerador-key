@@ -311,11 +311,21 @@ export function reconciliationPrincipalKeywordId(
   return troca && publishedKeywordIds.has(troca.previousKeywordId) ? troca.previousKeywordId : String(payload.principalKeywordId);
 }
 
-export type PublishedSwapReadiness = { ready: true } | { ready: false; reason: string };
+/**
+ * `viaReinforcement` (aditivo, 2026-09-28): a troca não sai por aqui, mas sai
+ * pelo "Reforçar publicados", que cria o ArticleDNA do publicado (ou a versão
+ * com a substituta) e aplica a troca na MESMA confirmação. Acabou o "conclua a
+ * formação e volte aqui": publicado nunca passa por "Concluir formação".
+ */
+export type PublishedSwapReadiness = { ready: true } | { ready: false; reason: string; viaReinforcement?: boolean };
+
+/** O nome do botão, igual a `PUBLISHED_REINFORCEMENT_ACTION_LABEL` (o teste confere; importar criaria ciclo). */
+export const REINFORCE_PUBLISHED_ACTION_LABEL = "Reforçar publicados";
 
 /**
  * A troca pode ser aplicada AGORA? Ela é gravada como nova versão do ArticleDNA
- * do artigo publicado, então precisa dele — e da substituta dentro dele.
+ * do artigo publicado, então precisa dele — e da substituta dentro dele. Sem
+ * um ou outro, o caminho é o "Reforçar publicados".
  */
 export function publishedSwapReadiness(input: {
   diagnosis: AnchorSerpDiagnosis;
@@ -330,7 +340,7 @@ export function publishedSwapReadiness(input: {
       : "O Posto da principal não está declarado: declare \"Livre\" na Revisão Humana do Minerador antes de trocar." };
   }
   if (!input.article) {
-    return { ready: false, reason: "A troca é gravada como nova versão do ArticleDNA deste artigo, que ainda não existe: conclua a formação dele (Concluir formação) e volte aqui." };
+    return { ready: false, viaReinforcement: true, reason: `Este publicado ainda não tem ArticleDNA: "${REINFORCE_PUBLISHED_ACTION_LABEL}" cria o ArticleDNA e aplica a troca numa confirmação só.` };
   }
   const aplicada = appliedPublishedSwapOf(input.article);
   if (aplicada && aplicada.previousKeywordId === troca.publishedKeywordId) {
@@ -340,7 +350,7 @@ export function publishedSwapReadiness(input: {
     return { ready: false, reason: "O ArticleDNA deste artigo já tem outra principal: recarregue a mesa antes de decidir." };
   }
   if (!input.article.keywordReferences.some(reference => reference.keywordId === troca.substitute!.keywordId)) {
-    return { ready: false, reason: `"${troca.substitute.keyword}" ainda não está no ArticleDNA deste artigo: traga-a para o artigo e conclua a formação com ela dentro, depois aplique a troca.` };
+    return { ready: false, viaReinforcement: true, reason: `"${troca.substitute.keyword}" ainda não está no ArticleDNA deste artigo: "${REINFORCE_PUBLISHED_ACTION_LABEL}" coloca a keyword no artigo e aplica a troca numa confirmação só.` };
   }
   return { ready: true };
 }
@@ -641,7 +651,8 @@ export const SERP_SUBJECT_TONE_CLASSES: Readonly<Record<SerpSubjectTone, { badge
 });
 
 export type SerpSubjectCardAction =
-  | { kind: "apply_swap"; label: string; disabledReason: string | null }
+  /** `viaReinforcement`: sem ArticleDNA (ou sem a substituta nele), o clique abre o "Reforçar publicados" com a troca marcada. */
+  | { kind: "apply_swap"; label: string; disabledReason: string | null; viaReinforcement?: boolean; note?: string | null }
   | { kind: "keep_swap"; label: string }
   | { kind: "review_swap"; label: string }
   | { kind: "bring_pair"; label: string; proposals: AnchorSerpDiagnosis["crossSilo"] }
@@ -676,6 +687,18 @@ export type SerpSubjectCardView = {
   suggestionLimit: number;
   /** `add`: entram no artigo; `create`: o Assunto sem artigo ganha um, com elas. */
   suggestionMode: "add" | "create";
+  /**
+   * Reforçar publicados (2026-09-28, aditivo): as keywords que a formação já
+   * pôs neste artigo (sem a âncora) — vão para o artigo na confirmação.
+   */
+  memberKeywordIds: string[];
+  /** A substituta da troca proposta (publicado, não mantida, não aplicada). */
+  swapSubstitute: { keywordId: string; keyword: string } | null;
+  /**
+   * Publicado: o ArticleDNA já tem todas essas keywords? `false` = a proposta
+   * ainda não está gravada (o cartão diz); `null` = não se aplica ou não se sabe.
+   */
+  recordedInArticle: boolean | null;
 };
 
 export type SerpSubjectCardContext = {
@@ -696,6 +719,11 @@ export type SerpSubjectCardContext = {
   /** O link de "Buscar reforço" desta âncora, quando o domínio não o trouxe na ação. */
   reinforcementHref?: string | null;
   nameOf?: (keywordId: string) => string;
+  /**
+   * As keywords do ArticleDNA do publicado (`null` = ainda não tem ArticleDNA).
+   * Ausente: o cartão não diz nada sobre o que está gravado.
+   */
+  articleKeywordIds?: ReadonlySet<string> | null;
 };
 
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
@@ -738,6 +766,17 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
     ? { kind: "open_article", label: action.label, siloRef: action.article.siloRef, principalKeywordId: action.article.principalKeywordId }
     : null;
 
+  const memberKeywordIds = diagnosis.members.filter(item => item.basis !== "anchor" && item.keywordId !== diagnosis.anchorKeywordId).map(item => item.keywordId);
+  const noArtigo = context.articleKeywordIds;
+  const recordedInArticle = publicado && noArtigo !== undefined
+    ? noArtigo !== null && memberKeywordIds.every(id => noArtigo.has(id))
+    : null;
+  if (recordedInArticle === false) {
+    partesSub.push(noArtigo === null
+      ? `sem ArticleDNA ainda: "${REINFORCE_PUBLISHED_ACTION_LABEL}" grava`
+      : `proposta ainda não gravada: "${REINFORCE_PUBLISHED_ACTION_LABEL}" grava`);
+  }
+
   const aplicada = context.appliedSwap && swap && context.appliedSwap.previousKeywordId === swap.publishedKeywordId ? context.appliedSwap : null;
   if (publicado && aplicada) {
     state = "swap_applied";
@@ -749,12 +788,18 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
   } else if (diagnosis.state === "swap_proposed" && swap?.substitute) {
     headline = `Troca da principal sugerida${swap.substitute.level === "probable" ? " (Provável)" : ""}: "${swap.substitute.keyword}" (volume ${volumeBr(swap.substitute.volume)}, ${swap.substitute.sharedPageCount} páginas em comum). URL e slug continuam.`;
     partesSub.push(`"${swap.publishedKeyword}" vira secundária`);
-    const prontidao = context.swapReadiness ?? { ready: false as const, reason: "Não foi possível conferir o ArticleDNA deste artigo." };
-    actions.push({ kind: "apply_swap", label: SWAP_APPLY_ACTION_LABEL, disabledReason: prontidao.ready ? null : prontidao.reason });
+    const prontidao: PublishedSwapReadiness = context.swapReadiness ?? { ready: false, reason: "Não foi possível conferir o ArticleDNA deste artigo." };
+    const peloReforco = !prontidao.ready && prontidao.viaReinforcement === true;
+    actions.push({
+      kind: "apply_swap",
+      label: SWAP_APPLY_ACTION_LABEL,
+      disabledReason: prontidao.ready || peloReforco ? null : prontidao.reason,
+      ...(peloReforco ? { viaReinforcement: true, note: prontidao.reason } : {}),
+    });
     actions.push({ kind: "keep_swap", label: SWAP_KEEP_ACTION_LABEL });
   } else if (diagnosis.state === "reinforced") {
     const total = diagnosis.members.filter(item => item.basis !== "anchor").length;
-    const alvo = publicado ? "Reforçado" : "Assunto sustentado";
+    const alvo = publicado ? (recordedInArticle === false ? "Reforço proposto" : "Reforçado") : "Assunto sustentado";
     const partes = [
       membrosSerp ? `${plural(membrosSerp, "keyword que divide", "keywords que dividem")} a SERP` : "",
       membrosVizinhanca ? `${membrosVizinhanca} na vizinhança do Google (2 páginas, com palavras em comum)` : "",
@@ -808,7 +853,7 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
     actions.push(buscar);
   } else if (diagnosis.state === "pair_blocked_by_dna") {
     const primeira = diagnosis.blockedByDna[0];
-    headline = `O Google junta "${primeira.keyword}" a ${publicado ? "este artigo" : "este Assunto"} (${primeira.sharedPageCount} páginas em comum), mas o DNA separa. Nada entra sozinho.`;
+    headline = `O Google junta "${primeira.keyword}" a ${publicado ? "este artigo" : "este Assunto"} (${primeira.sharedPageCount} páginas em comum), mas a intenção é outra. Só entra se você decidir.`;
     if (diagnosis.blockedByDna.length > 1) partesSub.push(`e mais ${diagnosis.blockedByDna.length - 1} na mesma situação`);
     actions.push({ kind: "open_minerador", label: "Revisar a intenção no Minerador", href: context.mineradorHref ?? null }, buscar);
   } else if (diagnosis.state === "pair_without_volume") {
@@ -829,7 +874,7 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
   } else if (diagnosis.state === "suggestions_available") {
     const fortes = diagnosis.suggestions.filter(item => item.level === "strong").length;
     const provaveis = diagnosis.suggestions.length - fortes;
-    headline = `${plural(diagnosis.suggestions.length, "sugestão", "sugestões")} com volume: ${[fortes ? `${fortes} Forte` : "", provaveis ? `${provaveis} Provável` : ""].filter(Boolean).join(", ")}. Marque e aplique de uma vez.`;
+    headline = `${plural(diagnosis.suggestions.length, "sugestão", "sugestões")} com volume: ${[fortes ? `${fortes} Forte` : "", provaveis ? `${provaveis} Provável` : ""].filter(Boolean).join(", ")}. ${publicado ? `Marque e grave com "${REINFORCE_PUBLISHED_ACTION_LABEL}".` : "Marque e aplique de uma vez."}`;
     if (diagnosis.slotsLeft) partesSub.push(`cabem mais ${diagnosis.slotsLeft}`);
     else partesSub.push("artigo no teto de 6");
     actions.push(buscar);
@@ -880,6 +925,9 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
     suggestions: (diagnosis.suggestions || []).map(suggestionRowView),
     suggestionLimit: diagnosis.kind === "subject" && diagnosis.members.length === 0 ? MAX_SUGGESTION_SELECTION : Math.max(0, diagnosis.slotsLeft),
     suggestionMode: diagnosis.kind === "subject" && diagnosis.members.length === 0 ? "create" : "add",
+    memberKeywordIds,
+    swapSubstitute: publicado && state === "swap_proposed" && swap?.substitute ? { keywordId: swap.substitute.keywordId, keyword: swap.substitute.keyword } : null,
+    recordedInArticle,
   };
 }
 
@@ -898,6 +946,8 @@ export type SuggestionRowView = {
   levelLabel: string;
   /** Curto: "7 páginas em comum no top 10". */
   reason: string;
+  /** Páginas em comum no top 10 com a âncora (decide onde a keyword entra quando dois publicados a querem). */
+  sharedPageCount?: number;
   warning: string | null;
   where: AnchorSuggestion["where"];
   whereLabel: string;
@@ -915,6 +965,7 @@ export function suggestionRowView(item: AnchorSuggestion): SuggestionRowView {
     level: item.level,
     levelLabel: SERP_SUGGESTION_LEVEL_LABELS[item.level],
     reason: item.reason,
+    sharedPageCount: item.sharedPageCount,
     warning: item.warning,
     where: item.where,
     whereLabel: item.whereLabel,
@@ -1124,7 +1175,9 @@ export function serpSubjectBatchChoices(input: {
         kind: "swap",
         anchorKeywordId: diagnostico.anchorKeywordId,
         label: `Trocar a principal de "${diagnostico.anchorLabel}" por "${diagnostico.swap.substitute.keyword}"${diagnostico.swap.substitute.level === "probable" ? " · Provável, confira a evidência" : ""} (URL e slug continuam)`,
-        disabledReason: aplicar && aplicar.kind === "apply_swap" ? aplicar.disabledReason : "Troca indisponível.",
+        disabledReason: aplicar && aplicar.kind === "apply_swap"
+          ? aplicar.viaReinforcement ? `Aceite esta troca em "${REINFORCE_PUBLISHED_ACTION_LABEL}": ${aplicar.note ?? "o ArticleDNA ainda não tem a substituta."}` : aplicar.disabledReason
+          : "Troca indisponível.",
         ...(diagnostico.swap.substitute.level === "probable" ? { probable: true } : {}),
       });
     }
@@ -1144,26 +1197,38 @@ export function serpSubjectBatchChoices(input: {
   return escolhas;
 }
 
-/** O desfecho da ação em grupo, só com o que a releitura confirmou. */
+/**
+ * O desfecho da ação em grupo, só com o que a releitura confirmou.
+ *
+ * 2026-09-28: "12 keywords trazidas de outro Silo" saía como sucesso e o dono
+ * não achava nada no artigo. Mudar de Silo grava SÓ o Silo da keyword: ela
+ * ainda não está no artigo nem no ArticleDNA. A frase diz isso e o próximo
+ * passo; mudança de Silo sozinha é `info` (sucesso só com troca gravada).
+ */
 export function describeSerpSubjectBatchOutcome(input: {
   swapsConfirmed: number;
   swapsRefused: ReadonlyArray<{ label: string; reason: string }>;
   movedConfirmed: number;
   movedUnchanged: number;
   movedRefused: number;
-}): { tone: "success" | "warning" | "error"; message: string } {
+}): { tone: "success" | "info" | "warning" | "error"; message: string } {
   const partes: string[] = [];
   if (input.swapsConfirmed || input.swapsRefused.length) {
     partes.push(`${plural(input.swapsConfirmed, "troca confirmada", "trocas confirmadas")} na releitura (nova versão do ArticleDNA, em revisão)`);
   }
-  if (input.movedConfirmed || input.movedUnchanged || input.movedRefused) {
+  const movidas = input.movedConfirmed || input.movedUnchanged || input.movedRefused;
+  if (movidas) {
     partes.push(`${plural(input.movedConfirmed, "keyword trazida", "keywords trazidas")} de outro Silo${input.movedUnchanged ? `, ${input.movedUnchanged} já estavam no destino` : ""}${input.movedRefused ? `, ${input.movedRefused} recusada(s)` : ""}`);
   }
   const recusas = input.swapsRefused.slice(0, 3).map(item => `${item.label}: ${item.reason}`);
   const falhou = input.swapsRefused.length > 0 || input.movedRefused > 0;
   const nada = !input.swapsConfirmed && !input.movedConfirmed && !input.movedUnchanged;
+  const soSilo = !input.swapsConfirmed && Boolean(input.movedConfirmed || input.movedUnchanged);
+  const aindaNao = input.movedConfirmed || input.movedUnchanged
+    ? ` Gravado: só o Silo delas. Elas ainda não estão no artigo nem no ArticleDNA: para gravar, "${REINFORCE_PUBLISHED_ACTION_LABEL}".`
+    : "";
   return {
-    tone: nada && falhou ? "error" : falhou ? "warning" : "success",
-    message: `${partes.join(" · ") || "Nada foi aplicado"}.${recusas.length ? ` Não aplicado: ${recusas.join(" · ")}${input.swapsRefused.length > 3 ? " · …" : ""}.` : ""} URL, slug e canonical dos publicados não mudaram.`,
+    tone: nada && falhou ? "error" : falhou ? "warning" : soSilo ? "info" : "success",
+    message: `${partes.join(" · ") || "Nada foi aplicado"}.${aindaNao}${recusas.length ? ` Não aplicado: ${recusas.join(" · ")}${input.swapsRefused.length > 3 ? " · …" : ""}.` : ""} URL, slug e canonical dos publicados não mudaram.`,
   };
 }

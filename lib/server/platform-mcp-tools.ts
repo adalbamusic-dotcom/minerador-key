@@ -7,15 +7,13 @@ import { PLATFORM_GUIDE_TOPICS, renderPlatformGuide } from "@/lib/agent/platform
 import { resolveNextActions } from "@/lib/agent/next-actions";
 import { pathOfUrl, SILO_ARTICLE_RANGE, SiloPlanSchema, validateSiloPlan } from "@/lib/agent/silo-plan";
 import { lookupTopic, type TopicCandidate } from "@/lib/agent/topic-match";
-import { MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus, resolveEffectiveKeywordStatus } from "@/lib/minerador/editorial-status";
-import { applyApproval, approvedPackageDiverged, readApprovalRecord, resolveApprovalReadiness } from "@/lib/minerador/approved-package";
+import { MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus } from "@/lib/minerador/editorial-status";
 import { readKgrApplicability } from "@/lib/minerador/kgr-applicability";
 import { planKgrApplicabilityBatch } from "@/lib/minerador/kgr-applicability-batch";
 import { KEYWORD_PAGE_TYPES, KEYWORD_PAGE_TYPE_STANCES } from "@/lib/minerador/keyword-page-type";
 import { planVinculoBatchChoices, type VinculoBatchAction, type VinculoBatchReadbackRow } from "@/lib/minerador/vinculo-batch";
 import { vinculoReadbackConfirmed } from "@/lib/minerador/vinculo-screen";
 import { resolveKeywordSubject } from "@/lib/minerador/keyword-subject";
-import { isKeywordPublished } from "@/lib/minerador/keyword-lifecycle";
 import { GOOGLE_ADS_DISCOVERY_LANGUAGES } from "@/lib/minerador/google-ads-discovery-catalog";
 import { subjectDiscoveryEstimate, subjectDiscoveryHasVolume } from "@/lib/minerador/subject-discovery-volume";
 import { deriveKgrVisualState, KGR_FULL_RANGE_LIMIT, kgrApplicabilityLabel } from "@/lib/minerador/kgr-applicability";
@@ -23,9 +21,8 @@ import { importSubjectsWithCore, type SubjectImportChannel } from "@/lib/minerad
 import { KEYWORD_PAGE_TYPE_KEY, KEYWORD_PAGE_TYPE_STANCE_KEY, keywordPageTypeStance } from "@/lib/minerador/keyword-page-type";
 import { KEYWORD_SUBJECT_AT_KEY, KEYWORD_SUBJECT_KEY, KEYWORD_SUBJECT_ORIGIN_KEY } from "@/lib/minerador/keyword-subject";
 import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";
-import { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";
 import type { LegacyImportList } from "@/lib/minerador/legacy-import";
-import { hasCompleteLogicalOutputContract, hasCurrentLogicalProcessorMetadata, LOGICAL_OUTPUT_CONTRACT_KEY } from "@/lib/minerador/logical-processor";
+import { LOGICAL_OUTPUT_CONTRACT_KEY } from "@/lib/minerador/logical-processor";
 import { readCanonicalKeywordDna } from "@/lib/minerador/logical-read-model";
 import { SERP_EVIDENCE_RECORD_KEY } from "@/lib/minerador/serp-evidence-record";
 import { importSubjectDiscoveryWithCore, SubjectDiscoveryImportRequestSchema } from "@/lib/minerador/subject-discovery-import";
@@ -36,6 +33,9 @@ import type { EditorialAction, EditorialModule } from "./editorial-authorization
 import { getOperationalClient, mapPersistenceError, OptimisticLockError, PersistenceUnavailableError } from "./editorial-db";
 import { readPlatformState, readPublishedPagesForMatching, topicCandidatesFrom } from "./agent-platform-state";
 import { createMineradorArquitetoHandoff } from "./arquiteto-workspace";
+import { PublishedReinforcementRequestSchema, handlePublishedReinforcement } from "./arquiteto-published-reinforcement";
+import { publishedReinforcementReadDeps } from "./arquiteto-published-reinforcement-deps";
+import { applyKeywordDecisionEntries, constrainKeywordSnapshot, keywordDecisionBase, keywordDecisionEntries, readDecisionKeywords, runKeywordLogicWithCore, type DecisionKeywordRow } from "./minerador-keyword-decision-core";
 import { handleDifferentiationPlan } from "./arquiteto-differentiation";
 import { resolvePipelineContext } from "./pipeline-runtime";
 import { RadarWriterSendError, sendRadarToWriter } from "./radar-writer-send";
@@ -91,19 +91,6 @@ export class PlatformToolFailure extends Error {
   constructor(code: string, details: Record<string, unknown> = {}) { super(code); this.code = code; this.details = details; }
 }
 
-type DecisionKeywordRow = {
-  id: string;
-  brand_id: string;
-  keyword: string;
-  status: string | null;
-  intent: string | null;
-  volume_search: number | null;
-  results_allintitle: number | null;
-  kgr_score: number | null;
-  lista_id: string | null;
-  analise_semantica: Record<string, unknown> | null;
-};
-
 function canonicalValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalValue);
   if (!value || typeof value !== "object") return value;
@@ -114,71 +101,6 @@ function canonicalValue(value: unknown): unknown {
 
 function hashDecision(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(canonicalValue(value))).digest("hex");
-}
-
-async function readDecisionKeywords(brandId: string, ids: readonly string[]) {
-  const uniqueIds = [...new Set(ids)];
-  const { data, error } = await getOperationalClient().from("minerador_keywords")
-    .select("id,brand_id,keyword,status,intent,volume_search,results_allintitle,kgr_score,lista_id,analise_semantica")
-    .eq("brand_id", brandId).is("deleted_at", null).in("id", uniqueIds);
-  if (error) mapPersistenceError(error);
-  const rows = (data || []) as unknown as DecisionKeywordRow[];
-  const byId = new Map(rows.map(row => [row.id, row]));
-  return {
-    rows: uniqueIds.flatMap(id => byId.has(id) ? [byId.get(id)!] : []),
-    missingCount: uniqueIds.filter(id => !byId.has(id)).length,
-  };
-}
-
-function approvalInput(row: DecisionKeywordRow) {
-  return {
-    keywordId: row.id,
-    brandId: row.brand_id,
-    keyword: row.keyword,
-    intent: row.intent,
-    volumeSearch: row.volume_search,
-    resultsAllintitle: row.results_allintitle,
-    kgrScore: row.kgr_score,
-    listaId: row.lista_id,
-    semantic: row.analise_semantica,
-  };
-}
-
-function keywordDecisionBase(row: DecisionKeywordRow) {
-  const diverged = approvedPackageDiverged(approvalInput(row));
-  return {
-    id: row.id,
-    keyword: row.keyword,
-    status: resolveEffectiveKeywordStatus({ status: row.status, diverged }).status ?? "desconhecido",
-    intent: row.intent,
-    volume: row.volume_search,
-    allintitle: row.results_allintitle,
-    kgr: row.kgr_score,
-    listaId: row.lista_id,
-    semantic: row.analise_semantica,
-  };
-}
-
-/**
- * `minerador_keywords` has no `updated_at`. Compare-and-swap the business
- * snapshot that determines eligibility inside the remote UPDATE, so a write
- * cannot overwrite a concurrent edit between preview and apply.
- */
-function constrainKeywordSnapshot<T extends {
-  eq: (column: string, value: unknown) => T;
-  is: (column: string, value: null) => T;
-  filter: (column: string, operator: string, value: string) => T;
-}>(query: T, row: DecisionKeywordRow): T {
-  let guarded = query.eq("keyword", row.keyword);
-  const nullable: Array<[string, unknown]> = [
-    ["status", row.status], ["intent", row.intent], ["volume_search", row.volume_search],
-    ["results_allintitle", row.results_allintitle], ["kgr_score", row.kgr_score], ["lista_id", row.lista_id],
-  ];
-  for (const [column, value] of nullable) guarded = value === null ? guarded.is(column, null) : guarded.eq(column, value);
-  guarded = row.analise_semantica === null
-    ? guarded.is("analise_semantica", null)
-    : guarded.filter("analise_semantica", "eq", JSON.stringify(row.analise_semantica));
-  return guarded;
 }
 
 async function persistSemanticDecision(input: {
@@ -762,25 +684,8 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     const permission = mode === "apply" ? "approve" as const : "view" as const;
     return call("decide_keywords", scope, { brandId, humanConfirmation: mode === "apply" ? userConfirmation : null }, [{ module: "minerador", action: permission }], async ({ access }) => {
       const { rows, missingCount } = await readDecisionKeywords(access.brandId, keywordIds);
-      const entries = await Promise.all(rows.map(async row => {
-        const current = keywordDecisionBase(row);
-        const published = isKeywordPublished({ status: row.status, semantic: row.analise_semantica });
-        const readiness = resolveApprovalReadiness({ semantic: row.analise_semantica, intent: row.intent, volumeSearch: row.volume_search, resultsAllintitle: row.results_allintitle });
-        const approval = readApprovalRecord(row.analise_semantica);
-        const diverged = approvedPackageDiverged(approvalInput(row));
-        const noop = action === "approve"
-          ? current.status === "aprovado" && Boolean(approval) && diverged === false
-          : current.status === "rejeitado";
-        const blocked = published ? "Conteúdo publicado é protegido." : action === "approve" && !readiness.ok ? readiness.reason : null;
-        return {
-          id: row.id, keyword: row.keyword, currentStatus: current.status,
-          proposedStatus: action === "approve" ? "aprovado" : "rejeitado",
-          outcome: noop ? "unchanged" as const : blocked ? "blocked" as const : "ready" as const,
-          blockers: blocked ? [blocked] : [],
-          readiness: action === "approve" ? { ok: readiness.ok, missing: readiness.missing, reason: readiness.reason } : null,
-          approvalDiverged: diverged,
-        };
-      }));
+      // O MESMO núcleo do "Reforçar publicados" (lib/server/minerador-keyword-decision-core.ts).
+      const entries = keywordDecisionEntries(rows, action);
       const snapshot = {
         tool: "decide_keywords", brandId: access.brandId, actorId: principal.actorId, action,
         keywordIds: [...new Set(keywordIds)], missingCount,
@@ -791,32 +696,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       if (mode === "preview") return { mode, action, entries, missingCount, decisionHash: currentDecisionHash, readOnly: true };
       if (decisionHash !== currentDecisionHash) throw new PlatformToolFailure("decision_stale", { message: "O estado das keywords mudou desde a prévia. Gere uma nova prévia antes de aplicar." });
 
-      const results: Array<{ id: string; outcome: "applied" | "unchanged" | "blocked" | "stale"; reason?: string }> = [];
-      const rowById = new Map(rows.map(row => [row.id, row]));
-      for (const entry of entries) {
-        const row = rowById.get(entry.id)!;
-        if (entry.outcome === "unchanged") { results.push({ id: row.id, outcome: "unchanged" }); continue; }
-        if (entry.outcome === "blocked") { results.push({ id: row.id, outcome: "blocked", reason: entry.blockers[0] }); continue; }
-        let semantic = row.analise_semantica || {};
-        if (action === "approve") semantic = await applyApproval({ ...approvalInput(row), approvedAt: new Date().toISOString(), approvedBy: principal.actorId });
-        const saved = await constrainKeywordSnapshot(
-          getOperationalClient().from("minerador_keywords")
-            .update({ status: entry.proposedStatus, ...(action === "approve" ? { analise_semantica: semantic } : {}) })
-            .eq("id", row.id).eq("brand_id", access.brandId).is("deleted_at", null),
-          row,
-        )
-          .select("id,status,analise_semantica").maybeSingle();
-        if (saved.error) mapPersistenceError(saved.error);
-        const readback = saved.data as { id?: unknown; status?: unknown; analise_semantica?: Record<string, unknown> | null } | null;
-        const expectedApproval = action === "approve" ? readApprovalRecord(semantic) : null;
-        const actualApproval = action === "approve" ? readApprovalRecord(readback?.analise_semantica) : null;
-        const confirmed = readback?.id === row.id && readback.status === entry.proposedStatus
-          && (action === "reject" || Boolean(expectedApproval && actualApproval
-            && expectedApproval.contentHash === actualApproval.contentHash
-            && expectedApproval.signature === actualApproval.signature
-            && expectedApproval.approvedBy === principal.actorId));
-        results.push(confirmed ? { id: row.id, outcome: "applied" } : { id: row.id, outcome: "stale", reason: "compare_and_swap_or_readback_failed" });
-      }
+      const results = await applyKeywordDecisionEntries({ brandId: access.brandId, actorId: principal.actorId, action, rows, entries });
       return { mode, action, results, missingCount, decisionHash: currentDecisionHash, readbackConfirmed: results.every(item => item.outcome === "applied" || item.outcome === "unchanged") };
     });
   });
@@ -1051,47 +931,8 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     inputSchema: z.object({ brandId: brandIdInput, keywordIds: z.array(z.string().uuid()).min(1).max(100) }),
     annotations: write,
   }, async ({ brandId, keywordIds }) => call("run_keyword_logic", "minerador.write", { brandId }, [{ module: "minerador", action: "edit" }], async ({ access }) => {
-    const uniqueIds = [...new Set(keywordIds)];
-    const db = getOperationalClient();
-    const selected = await db.from("minerador_keywords")
-      .select("id,brand_id,keyword,status,intent,location,volume_search,results_allintitle,kgr_score,lista_id,analise_semantica")
-      .eq("brand_id", access.brandId).is("deleted_at", null).in("id", uniqueIds);
-    if (selected.error) mapPersistenceError(selected.error);
-    const rows = (selected.data || []) as unknown as Array<DecisionKeywordRow & { location: string | null }>;
-    const byId = new Map(rows.map(row => [row.id, row]));
-    const missingIds = uniqueIds.filter(id => !byId.has(id));
-    const listIds = [...new Set(rows.map(row => row.lista_id).filter((id): id is string => Boolean(id)))];
-    const listResult = listIds.length
-      ? await db.from("minerador_keyword_lists").select("id,nicho").eq("marca_id", access.brandId).in("id", listIds)
-      : { data: [], error: null };
-    if (listResult.error) mapPersistenceError(listResult.error);
-    const listById = new Map(((listResult.data || []) as Array<{ id: string; nicho: string | null }>).map(list => [list.id, list]));
-    const processedAt = new Date().toISOString();
-    const planned = rows.map(row => ({ row, derived: deriveLogicalKeywordBatchItem(
-      { id: row.id, keyword: row.keyword, location: row.location, intent: row.intent, analise_semantica: row.analise_semantica },
-      row.lista_id ? listById.get(row.lista_id) || null : null,
-      processedAt,
-    ) }));
-    const results: Array<{ id: string; keyword: string; outcome: "applied" | "unchanged" | "stale"; reason?: string }> = [];
-    for (const { row, derived } of planned) {
-      if (!derived.needsWrite) { results.push({ id: row.id, keyword: row.keyword, outcome: "unchanged" }); continue; }
-      const saved = await constrainKeywordSnapshot(
-        db.from("minerador_keywords").update({ intent: derived.update.intent, analise_semantica: derived.update.analise_semantica })
-          .eq("id", row.id).eq("brand_id", access.brandId).is("deleted_at", null),
-        row,
-      ).select("id,intent,analise_semantica").maybeSingle();
-      if (saved.error) mapPersistenceError(saved.error);
-      const readback = saved.data as { id?: string; intent?: string | null; analise_semantica?: Record<string, unknown> | null } | null;
-      const confirmed = Boolean(readback?.id === row.id && readback.intent === derived.update.intent
-        && hasCompleteLogicalOutputContract({ semantic: readback.analise_semantica, intent: derived.update.intent })
-        && hasCurrentLogicalProcessorMetadata({ keywordId: row.id, keyword: row.keyword, location: row.location, niche: derived.niche, semantic: readback.analise_semantica }));
-      results.push(confirmed
-        ? { id: row.id, keyword: row.keyword, outcome: "applied" }
-        : { id: row.id, keyword: row.keyword, outcome: "stale", reason: "compare_and_swap_or_readback_failed" });
-    }
-    const applied = results.filter(result => result.outcome === "applied").length;
-    const failed = results.filter(result => result.outcome === "stale").length;
-    return { processedAt, requested: uniqueIds.length, found: rows.length, missingIds, applied, unchanged: results.length - applied - failed, failed, results, readbackConfirmed: failed === 0 };
+    // O MESMO núcleo do "Reforçar publicados" (lib/server/minerador-keyword-decision-core.ts).
+    return runKeywordLogicWithCore({ brandId: access.brandId, keywordIds });
   }));
 
   /* ============================== Arquiteto =========================== */
@@ -1139,6 +980,38 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
       return outcome.body.data;
     });
   });
+
+  server.registerTool("preview_published_reinforcement", {
+    title: "Reforçar publicados: prévia (grátis)",
+    description: [
+      "Use para mostrar ao usuário o que o botão 'Reforçar publicados' do Arquiteto gravaria (SDD 2026-09-28): por página publicada, se nasce o primeiro ArticleDNA ou uma versão nova, quais keywords do Minerador entram (as que o cartão mostra e as marcadas), quais keywords novas da busca em lote entram (passam pelo Minerador: import, Lógica, Volume do Google Ads e aprovação do usuário), a troca da principal aceita e o que fica de fora, com o motivo.",
+      "Grátis e sem gravar: relê publicados, Posto, cache de SERP e o resultado gravado da busca. Devolve decisionHash e as frases da confirmação.",
+      "Confirmar (gravar) e a busca paga em lote são atos humanos na tela do Arquiteto; não há ferramenta para isso. URL, slug e canonical nunca mudam.",
+    ].join(" "),
+    inputSchema: z.object({
+      brandId: brandIdInput,
+      pages: z.array(z.object({
+        publishedKeywordId: z.string().min(1).max(80).describe("O id da keyword publicada (a principal da página)."),
+        keywordIds: z.array(z.string().min(1).max(80)).max(10).default([]).describe("Keywords do Minerador que devem estar no artigo."),
+        newKeywords: z.array(z.string().trim().min(1).max(200)).max(10).default([]).describe("Keywords novas do resultado da busca em lote desta página."),
+        swapKeywordId: z.string().min(1).max(80).nullable().default(null).describe("A troca da principal que o usuário quer (Posto Livre)."),
+      })).min(1).max(30),
+    }),
+    annotations: read,
+  }, async ({ brandId, pages }) => call("preview_published_reinforcement", "platform.read", { brandId }, [{ module: "arquiteto", action: "view" }], async ({ access }) => {
+    // O mesmo núcleo da rota /api/arquiteto/published-reinforcement (mode preview).
+    const context = await resolvePipelineContext(
+      { brandId: access.brandId, module: "arquiteto", action: "view" },
+      { requireActorUserId: async () => principal.actorId },
+    );
+    // O MESMO schema da rota: publicado repetido, a mesma keyword em dois
+    // publicados ou uma publicada como reforço são recusados antes de ler.
+    const pedido = PublishedReinforcementRequestSchema.safeParse({ brandId: access.brandId, mode: "preview", pages });
+    if (!pedido.success) throw new PlatformToolFailure("invalid_reinforcement_request", { message: pedido.error.issues.map(issue => issue.message).join(" ") });
+    const outcome = await handlePublishedReinforcement(publishedReinforcementReadDeps(context), pedido.data);
+    if (outcome.status >= 400) throw new PlatformToolFailure(String(outcome.body.code || "reinforcement_refused"), { message: outcome.body.error ?? null });
+    return outcome.body.data;
+  }));
 
   /* ================================ Radar ============================= */
 

@@ -131,7 +131,7 @@ test("o readback não confirmado vira pendência de registro, não 0/N", () => {
 });
 
 test("WARNING existe como severidade do Arquiteto", () => {
-  assert.match(workspace, /const showNotification = useCallback\(\(type: "success" \| "warning" \| "error", msg: string\)/);
+  assert.match(workspace, /const showNotification = useCallback\(\(type: "success" \| "warning" \| "error"(?: \| "info")?, msg: string\)/);
   assert.match(workspace, /type === "warning" \? "WARNING"/);
   assert.match(workspace, /showNotification\(outcome\.severity, outcome\.message\)/);
 });

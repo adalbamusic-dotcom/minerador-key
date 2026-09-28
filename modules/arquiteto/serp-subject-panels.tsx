@@ -19,6 +19,9 @@ import {
   type SerpSubjectEvidencePair,
   type SerpSubjectPanelSummary,
 } from "./serp-subject-model";
+import { PUBLISHED_REINFORCEMENT_ACTION_LABEL, cardWithBatchSearch, noPairLineView, reinforcementNeedsAttention, searchActionLabel } from "./published-reinforcement-model";
+import { NoPairPublishedLine, PublishedReinforcementBar, SearchSuggestionList } from "./published-reinforcement-panel";
+import type { PublishedReinforcementController } from "./use-published-reinforcement";
 
 /**
  * MESMO ASSUNTO NO GOOGLE — O PAINEL DA MESA (D2.1 e D2.2).
@@ -67,6 +70,33 @@ type Handlers = {
 
 type ButtonClasses = { buttonClassName: string; primaryButtonClassName: string };
 
+/**
+ * Reforçar publicados (2026-09-28): no cartão do publicado, as sugestões
+ * marcadas vão para a confirmação única do "Reforçar publicados" (a seleção
+ * mora no hook, a mesma no painel e na Revisão do artigo), e o cartão ganha
+ * "Reforçar este publicado". `extra` traz as keywords da busca em lote.
+ */
+export type CardReinforcement = {
+  selected: ReadonlySet<string>;
+  onToggle: (keywordId: string) => void;
+  onReinforce: () => void;
+  extra?: React.ReactNode;
+};
+
+/** As props de reforço de um cartão de publicado, a partir do hook. */
+export function cardReinforcementOf(controller: PublishedReinforcementController | null | undefined, card: SerpSubjectCardView, cards: readonly SerpSubjectCardView[]): CardReinforcement | undefined {
+  if (!controller || card.kind !== "published") return undefined;
+  const busca = controller.results.get(card.anchorKeywordId);
+  return {
+    selected: controller.suggestionPicksOf(card),
+    onToggle: keywordId => controller.toggleSuggestion(card, keywordId),
+    onReinforce: () => { void controller.openReinforcement(cards, { only: new Set([card.anchorKeywordId]) }); },
+    extra: busca && busca.state === "found" ? <SearchSuggestionList controller={controller} pageId={card.anchorKeywordId} result={busca} /> : undefined,
+  };
+}
+
+export const REINFORCE_THIS_PUBLISHED_LABEL = "Reforçar este publicado";
+
 const badgeBase = "inline-flex shrink-0 items-center rounded border px-2 py-0.5 text-sm font-medium";
 
 const EVIDENCIA_ROTULO: Record<SerpSubjectCardView["serpEvidence"], string> = {
@@ -83,7 +113,7 @@ function ActionButton({ action, card, busy, handlers, buttonClassName, primaryBu
         <button
           type="button"
           disabled={busy || Boolean(action.disabledReason)}
-          title={action.disabledReason ?? "Grava uma nova versão do ArticleDNA, em revisão. URL, slug e canonical não mudam."}
+          title={action.disabledReason ?? (action.viaReinforcement ? action.note ?? undefined : "Grava uma nova versão do ArticleDNA, em revisão. URL, slug e canonical não mudam.")}
           aria-label={`${action.label} em ${alvo}`}
           onClick={() => handlers.onApplySwap(card.anchorKeywordId)}
           className={primaryButtonClassName}
@@ -238,18 +268,23 @@ function SuggestionConfirmDialog({ open, card, selected, busy, onConfirm, onClos
 }
 
 /** D2.3 — a lista de sugestões do cartão, por volume, com a seleção e o botão. */
-function SuggestionList({ card, busy, handlers, buttonClassName, primaryButtonClassName }: { card: SerpSubjectCardView; busy: boolean; handlers: Handlers } & ButtonClasses) {
-  const [selecionadas, setSelecionadas] = useState<ReadonlySet<string>>(() => initialSuggestionSelection(card));
+function SuggestionList({ card, busy, handlers, buttonClassName, primaryButtonClassName, reinforcement }: { card: SerpSubjectCardView; busy: boolean; handlers: Handlers; reinforcement?: CardReinforcement } & ButtonClasses) {
+  const [selecaoLocal, setSelecaoLocal] = useState<ReadonlySet<string>>(() => initialSuggestionSelection(card));
   const [todas, setTodas] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
   const listaId = useId();
+  // Publicado com o "Reforçar publicados": a seleção é a do hook (a mesma da confirmação única).
+  const selecionadas = reinforcement ? reinforcement.selected : selecaoLocal;
   const visiveis = todas ? card.suggestions : card.suggestions.slice(0, SUGESTOES_VISIVEIS);
   const noArtigo = card.suggestions.filter(item => selecionadas.has(item.keywordId) && item.where !== "other_silo").length;
-  const alternar = (keywordId: string) => setSelecionadas(atual => {
-    const proximo = new Set(atual);
-    if (proximo.has(keywordId)) proximo.delete(keywordId); else proximo.add(keywordId);
-    return proximo;
-  });
+  const alternar = (keywordId: string) => {
+    if (reinforcement) { reinforcement.onToggle(keywordId); return; }
+    setSelecaoLocal(atual => {
+      const proximo = new Set(atual);
+      if (proximo.has(keywordId)) proximo.delete(keywordId); else proximo.add(keywordId);
+      return proximo;
+    });
+  };
   return (
     <div className="mt-2 grid gap-2 border-t border-divider pt-2" data-testid="architect-serp-subject-suggestions">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -285,16 +320,20 @@ function SuggestionList({ card, busy, handlers, buttonClassName, primaryButtonCl
             {todas ? "Ver menos" : `Ver todas (${card.suggestions.length})`}
           </button>
         )}
-        <button
-          type="button"
-          disabled={busy || !selecionadas.size}
-          onClick={() => setConfirmando(true)}
-          className={primaryButtonClassName}
-          title={noArtigo > card.suggestionLimit ? `Cabem ${card.suggestionLimit} neste artigo.` : "Mostra o que muda antes de gravar."}
-          data-testid="architect-serp-subject-suggestions-open"
-        >
-          {`${APPLY_SUGGESTIONS_ACTION_LABEL} (${selecionadas.size})`}
-        </button>
+        {reinforcement ? (
+          <span className="text-sm leading-6 text-text-muted">{`${selecionadas.size} marcada(s): entram em "${REINFORCE_THIS_PUBLISHED_LABEL}" ou em "Reforçar publicados".${noArtigo > card.suggestionLimit ? ` Cabem ${card.suggestionLimit}.` : ""}`}</span>
+        ) : (
+          <button
+            type="button"
+            disabled={busy || !selecionadas.size}
+            onClick={() => setConfirmando(true)}
+            className={primaryButtonClassName}
+            title={noArtigo > card.suggestionLimit ? `Cabem ${card.suggestionLimit} neste artigo.` : "Mostra o que muda antes de gravar."}
+            data-testid="architect-serp-subject-suggestions-open"
+          >
+            {`${APPLY_SUGGESTIONS_ACTION_LABEL} (${selecionadas.size})`}
+          </button>
+        )}
       </div>
       <SuggestionConfirmDialog
         open={confirmando}
@@ -324,12 +363,15 @@ export function SerpSubjectCard({
   buttonClassName,
   primaryButtonClassName,
   highlighted = false,
+  reinforcement,
 }: {
   card: SerpSubjectCardView;
   busy: boolean;
   evidenceOf: (card: SerpSubjectCardView) => SerpSubjectEvidencePair[];
   handlers: Handlers;
   highlighted?: boolean;
+  /** Publicado: a seleção e o botão do "Reforçar publicados". */
+  reinforcement?: CardReinforcement;
 } & ButtonClasses) {
   const [open, setOpen] = useState(false);
   const detalheId = useId();
@@ -353,6 +395,18 @@ export function SerpSubjectCard({
         {card.actions.map(action => (
           <ActionButton key={`${action.kind}:${action.label}`} action={action} card={card} busy={busy} handlers={handlers} buttonClassName={buttonClassName} primaryButtonClassName={primaryButtonClassName} />
         ))}
+        {reinforcement && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={reinforcement.onReinforce}
+            className={buttonClassName}
+            title="Mostra, antes de gravar, o que entra no ArticleDNA deste publicado. Custo: zero."
+            data-testid="architect-reinforcement-card-open"
+          >
+            {REINFORCE_THIS_PUBLISHED_LABEL}
+          </button>
+        )}
         <button
           type="button"
           aria-expanded={open}
@@ -367,6 +421,9 @@ export function SerpSubjectCard({
       {card.actions.filter(action => action.kind === "apply_swap" && action.disabledReason).map(action => (
         <p key="apply-swap-reason" className="mt-1 text-sm leading-6 text-warning">{action.kind === "apply_swap" ? action.disabledReason : null}</p>
       ))}
+      {card.actions.filter(action => action.kind === "apply_swap" && action.viaReinforcement && action.note).map(action => (
+        <p key="apply-swap-note" className="mt-1 text-sm leading-6 text-text-muted">{action.kind === "apply_swap" ? action.note : null}</p>
+      ))}
       {card.suggestions.length > 0 && (
         <SuggestionList
           key={card.suggestions.map(item => `${item.keywordId}:${item.preselected ? 1 : 0}`).join("|")}
@@ -375,8 +432,10 @@ export function SerpSubjectCard({
           handlers={handlers}
           buttonClassName={buttonClassName}
           primaryButtonClassName={primaryButtonClassName}
+          reinforcement={reinforcement}
         />
       )}
+      {reinforcement?.extra}
       {open && (
         <div id={detalheId} className="mt-2 grid gap-2 border-t border-divider pt-2">
           <p className="text-sm leading-6 text-text-muted">
@@ -480,6 +539,7 @@ export function SerpSubjectDiagnosisPanel({
   onApplyBatch,
   buttonClassName,
   primaryButtonClassName,
+  reinforcement = null,
 }: {
   cards: readonly SerpSubjectCardView[];
   summary: SerpSubjectPanelSummary;
@@ -491,16 +551,28 @@ export function SerpSubjectDiagnosisPanel({
   handlers: Handlers;
   onReread: () => void;
   onApplyBatch: (choices: readonly SerpSubjectBatchChoice[]) => Promise<void> | void;
+  /** Reforçar publicados (2026-09-28): a barra, a linha dos sem par e a seleção dos cartões. */
+  reinforcement?: PublishedReinforcementController | null;
 } & ButtonClasses) {
   const [filtro, setFiltro] = useState<(typeof FILTROS)[number]["key"]>("attention");
   const [escolhidas, setEscolhidas] = useState<ReadonlySet<string>>(new Set());
   const [confirmando, setConfirmando] = useState(false);
   const grupoId = useId();
 
-  const visiveis = cards.filter(card => filtro === "all" ? true : filtro === "attention" ? PEDEM_DECISAO.has(card.state) : card.state === filtro);
+  /*
+   * Os publicados "Sem par no lote" viram UMA linha, com a busca em lote. Quem
+   * a busca achou volta a ser cartão, com as keywords da busca para marcar.
+   */
+  const linhaSemPar = reinforcement ? noPairLineView(cards, reinforcement.results) : null;
+  const naLinha = new Set(linhaSemPar ? linhaSemPar.pageIds.filter(id => !linhaSemPar.found.includes(id)) : []);
+  // Pedem decisão: os estados de dilema e o publicado com reforço calculado ainda não gravado.
+  const pedeDecisao = (card: SerpSubjectCardView) => PEDEM_DECISAO.has(card.state) || reinforcementNeedsAttention(card);
+  const filtrados = cards.filter(card => filtro === "all" ? true : filtro === "attention" ? pedeDecisao(card) : card.state === filtro);
+  const mostraLinha = Boolean(linhaSemPar && naLinha.size > 0 && filtrados.some(card => card.kind === "published" && naLinha.has(card.anchorKeywordId)));
+  const visiveis = filtrados.filter(card => !(card.kind === "published" && naLinha.has(card.anchorKeywordId)));
   const disponiveis = choices.filter(choice => !choice.disabledReason);
   const selecionadas = disponiveis.filter(choice => escolhidas.has(choice.id));
-  const contagem = (key: (typeof FILTROS)[number]["key"]) => key === "all" ? cards.length : key === "attention" ? cards.filter(card => PEDEM_DECISAO.has(card.state)).length : cards.filter(card => card.state === key).length;
+  const contagem = (key: (typeof FILTROS)[number]["key"]) => key === "all" ? cards.length : key === "attention" ? cards.filter(pedeDecisao).length : cards.filter(card => card.state === key).length;
 
   const alternar = (id: string) => setEscolhidas(current => {
     const proximo = new Set(current);
@@ -556,10 +628,12 @@ export function SerpSubjectDiagnosisPanel({
       </dl>
       {outros.length > 0 && <p className="mt-2 text-sm leading-6 text-text-muted">Também: {outros.join(" · ")}.</p>}
 
+      {reinforcement && <PublishedReinforcementBar controller={reinforcement} cards={cards} buttonClassName={buttonClassName} primaryButtonClassName={primaryButtonClassName} />}
+
       {choices.length > 0 && (
         <fieldset className="mt-3 rounded-md border border-divider bg-surface p-3" data-testid="architect-serp-subject-batch">
           <legend className="px-1 text-sm font-semibold text-foreground">Aceitar em grupo · {disponiveis.length} de {choices.length} disponível(is)</legend>
-          <p className="text-sm leading-6 text-text-muted">Marque as trocas e os reforços que você aceita. Nada é aplicado antes da confirmação.</p>
+          <p className="text-sm leading-6 text-text-muted">{`Marque as trocas e as mudanças de Silo que você aceita. Nada é aplicado antes da confirmação. Mudar de Silo grava só o Silo: para pôr as keywords no artigo publicado, use "${PUBLISHED_REINFORCEMENT_ACTION_LABEL}".`}</p>
           <ul className="mt-2 grid gap-1.5">
             {choices.map(choice => {
               const id = `${grupoId}-${choice.id}`;
@@ -609,22 +683,26 @@ export function SerpSubjectDiagnosisPanel({
       </div>
 
       <div className="mt-3 grid gap-2 lg:grid-cols-2">
-        {visiveis.map(card => (
+        {mostraLinha && reinforcement && linhaSemPar && (
+          <NoPairPublishedLine controller={reinforcement} view={linhaSemPar} buttonClassName={buttonClassName} primaryButtonClassName={primaryButtonClassName} />
+        )}
+        {visiveis.map(original => reinforcement ? cardWithBatchSearch(original, reinforcement.results.get(original.anchorKeywordId)) : original).map(card => (
           <SerpSubjectCard
             key={card.key}
             card={card}
-            busy={busy}
+            busy={busy || Boolean(reinforcement?.busy)}
             evidenceOf={evidenceOf}
             handlers={handlers}
             highlighted={card.key === highlightedKey}
             buttonClassName={buttonClassName}
             primaryButtonClassName={primaryButtonClassName}
+            reinforcement={cardReinforcementOf(reinforcement, card, cards)}
           />
         ))}
-        {!visiveis.length && <p className="text-sm leading-6 text-text-muted">Nenhum publicado ou Assunto neste filtro.</p>}
+        {!visiveis.length && !mostraLinha && <p className="text-sm leading-6 text-text-muted">Nenhum publicado ou Assunto neste filtro.</p>}
       </div>
       <p className="mt-3 text-sm leading-6 text-text-muted">
-        {`"${REINFORCEMENT_SEARCH_ACTION_LABEL}" abre a Pesquisa por Assunto do Minerador com o tema e a página de destino; a pesquisa mostra o custo antes de rodar. Nenhuma keyword de outro assunto é colada para encher um artigo.`}
+        {`"${REINFORCEMENT_SEARCH_ACTION_LABEL}" abre a Pesquisa por Assunto do Minerador com o tema e a página de destino; a pesquisa mostra o custo antes de rodar.${reinforcement ? ` Os publicados sem par usam "${searchActionLabel()}", em lote.` : ""} Nenhuma keyword de outro assunto é colada para encher um artigo.`}
       </p>
 
       <BatchConfirmDialog
