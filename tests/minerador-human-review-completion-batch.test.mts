@@ -49,7 +49,7 @@ test("conclusão em lote usa o contrato individual e confirma o DNA sem tocar em
   assert.equal(isHumanReviewCompleted(rows[0].analise_semantica), false);
 });
 
-test("KGR pendente com cálculo possível, revisão concluída e revisão em edição ficam fora do lote", () => {
+test("KGR legado pendente não segura mais o lote; revisão concluída e revisão em edição ficam fora (2026-09-28)", () => {
   const completed = semantic({ dna_revisao_humana: "aprovado", human_review: { schemaVersion: "r6", status: "completed", decision: "completed", fieldDecisions: [], completedAt: "2026-09-01T00:00:00.000Z", completedBy: "x" } });
   const rows = [
     keyword("kgr", semantic({ ...measured, kgr_aplicabilidade: "pending" })),
@@ -59,11 +59,13 @@ test("KGR pendente com cálculo possível, revisão concluída e revisão em edi
     keyword("ok", semantic()),
   ];
   const plan = planHumanReviewCompletionBatch(rows, { ...context, openDraftIds: ["draft"] });
-  assert.deepEqual(plan.pendingKgrIds, ["kgr"]);
+  assert.deepEqual(plan.pendingKgrIds, []);
   assert.deepEqual(plan.alreadyCompletedIds, ["done"]);
   assert.deepEqual(plan.draftIds, ["draft"]);
   assert.deepEqual(plan.blocked, []);
-  assert.deepEqual(plan.updates.map(item => item.id), ["ok"]);
+  assert.deepEqual(plan.updates.map(item => item.id), ["kgr", "ok"]);
+  // A conclusão não regrava o valor legado: segue no banco como proveniência.
+  assert.equal(plan.updates[0].semantic.kgr_aplicabilidade, "pending");
   // Revisão concluída não ganha versão artificial.
   assert.equal(humanReviewRecord(completed).completedAt, "2026-09-01T00:00:00.000Z");
 });
@@ -74,7 +76,7 @@ test("resumo da conclusão em lote conta somente o que aconteceu", () => {
     keyword("kgr", semantic({ ...measured, kgr_aplicabilidade: "pending" })),
     keyword("draft", semantic()),
   ], { ...context, openDraftIds: ["draft"] });
-  assert.equal(describeHumanReviewCompletionBatch(plan), "Revisão humana concluída para 1 keyword(s); o DNA foi confirmado. 1 aguarda(m) a Aplicabilidade do KGR antes de concluir. 1 com revisão em edição foi(ram) ignorada(s); conclua ou cancele a edição no painel.");
+  assert.equal(describeHumanReviewCompletionBatch(plan), "Revisão humana concluída para 2 keyword(s); o DNA foi confirmado. 1 com revisão em edição foi(ram) ignorada(s); conclua ou cancele a edição no painel.");
   assert.equal(describeHumanReviewCompletionBatch(planHumanReviewCompletionBatch([], context), 0), "Nenhuma revisão humana precisou ser concluída.");
 });
 

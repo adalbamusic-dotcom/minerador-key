@@ -482,7 +482,12 @@ export type DifferentiationAngle = {
   entityTokens: string[];
   /** As palavras que o grupo inteiro divide (o que NÃO separa). */
   sharedTokens: string[];
-  /** Até 5, na ordem de autoridade. A primeira vai ao `keyword_ideas`; a de pesquisa relacionada, ao `related_keywords`. */
+  /**
+   * Até 5, na ordem de autoridade. Plano v2 (2026-09-28): `ideasSeed` e
+   * `relatedSeed` vão ao Google Ads como semente frase, e `ideasSeed` também
+   * com a URL da página. No plano v1 iam ao `keyword_ideas` e ao
+   * `related_keywords` do Labs.
+   */
   seeds: DifferentiationSeed[];
   ideasSeed: string;
   relatedSeed: string;

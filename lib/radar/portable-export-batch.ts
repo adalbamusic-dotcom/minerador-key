@@ -165,7 +165,9 @@ export function radarPortableExportDossierGapsInput(input: {
       /* As lentes do pacote: o mesmo dossiê, a mesma régua de `serp_lenses_*`. */
       frozenLenses: {
         profile: input.profile,
-        block: input.profile === "GOOGLE" ? input.bundle.serpLenses ?? null : null,
+        // R3 (2026-09-28): com o Google finalizado, o dossiê de YouTube ou
+        // Amazon também traz as lentes do Google, como apoio.
+        block: input.bundle.serpLenses ?? null,
         frozenAt: radarFrozenObservedAtOfAnalysis(input.analysis),
       },
     },
@@ -179,7 +181,8 @@ export function radarPortableExportDossierGapsInput(input: {
  * ===== AS LENTES QUE O PACOTE ENTREGA AO REDATOR, PARA A COLUNA DE LENTES =====
  *
  * A cópia é a do DOSSIÊ (`bundle.serpLenses`): o mesmo bloco que o Planejador
- * e o Redator recebem, lido do bundle congelado só no perfil Google. Nada de
+ * e o Redator recebem, lido do bundle congelado (no YouTube e na Amazon, só
+ * quando o Google finalizado viaja como apoio, R3 de 2026-09-28). Nada de
  * cache nem de snapshot vivo — o cache entra na mesma coluna, depois, como
  * observação fora do pacote.
  *
@@ -196,7 +199,8 @@ export function radarPortableExportFrozenLensesInput(input: {
   analysis: unknown;
   records?: readonly SerpCollectionRecord[];
 }): RadarPortableFrozenLensesInput {
-  const block = input.profile === "GOOGLE" ? input.bundle.serpLenses ?? null : null;
+  // R3 (2026-09-28): YouTube e Amazon só acrescentam; as lentes do Google, quando o dossiê as traz, saem.
+  const block = input.bundle.serpLenses ?? null;
   const base = { profile: input.profile, block, frozenAt: radarFrozenObservedAtOfAnalysis(input.analysis) };
   if (!block?.canonicalSnapshotId) return base;
 

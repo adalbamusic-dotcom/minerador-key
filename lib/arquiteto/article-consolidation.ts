@@ -29,7 +29,9 @@ export function publishedArticleCompatibilityIssues(
 export function articleConsolidationIssues(input: ArticleConsolidationGateInput): string[] {
   const article = input.candidate.payload;
   const issues: string[] = [];
-  if (article.kgrIdentity?.decision === "PENDING_HUMAN_DECISION") issues.push("A decisão humana Sim/Não do KGR do artigo permanece pendente.");
+  // Padrão "KGR não aplicável" (SDD 2026-09-28): o KGR nunca bloqueia a
+  // consolidação. Um "A decidir" gravado pela regra antiga é lido como "Não
+  // aplicável" até o humano escolher "Aplicar KGR".
   const references = article.keywordReferences;
   const principal = references.filter(reference => reference.role === "principal");
   const expectedIds = [article.principalKeywordId, ...article.secondaryKeywordIds, ...article.narrativeReinforcementIds];

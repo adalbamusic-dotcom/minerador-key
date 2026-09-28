@@ -33,9 +33,20 @@ function safeCauseCode(error: unknown) {
  * faz DUAS chamadas Google Ads na mesma operação (`keyword_seed` e `url_seed`),
  * e a chave fixa colidiria no índice único do ledger. Sem sufixo, a string é
  * idêntica à de antes — o Descobrir de hoje não muda.
+ *
+ * Aditivo (2026-09-28, SDD `sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md`
+ * §3.3): a diferenciação de publicados faz as duas sementes POR PÁGINA na
+ * mesma operação. O sufixo por página (`keyword_seed:p2`) separa as chaves; as
+ * duas de hoje e a sem sufixo continuam byte a byte iguais.
  */
 export const GOOGLE_ADS_DISCOVERY_USAGE_KEY_SUFFIXES = ["keyword_seed", "url_seed"] as const;
-export type GoogleAdsDiscoveryUsageKeySuffix = typeof GOOGLE_ADS_DISCOVERY_USAGE_KEY_SUFFIXES[number];
+type GoogleAdsDiscoveryUsageSeedKind = typeof GOOGLE_ADS_DISCOVERY_USAGE_KEY_SUFFIXES[number];
+export type GoogleAdsDiscoveryUsageKeySuffix = GoogleAdsDiscoveryUsageSeedKind | `${GoogleAdsDiscoveryUsageSeedKind}:p${number}`;
+
+/** O tipo de semente de um sufixo, com ou sem página: `keyword_seed:p2` → `keyword_seed`. */
+export function googleAdsDiscoveryUsageSeedKind(usageKeySuffix: GoogleAdsDiscoveryUsageKeySuffix): GoogleAdsDiscoveryUsageSeedKind {
+  return usageKeySuffix.split(":")[0] as GoogleAdsDiscoveryUsageSeedKind;
+}
 
 export function googleAdsDiscoveryUsageKey(operationRequestId: string, usageKeySuffix?: GoogleAdsDiscoveryUsageKeySuffix | null) {
   const base = `google_ads:${operationRequestId}:keyword_discovery`;
@@ -57,6 +68,8 @@ export async function recordGoogleAdsDiscoveryUsage(input: {
   filteredCount?: number;
   /** Ausente: a chave de hoje. Com sufixo: uma chave por chamada da mesma operação. */
   usageKeySuffix?: GoogleAdsDiscoveryUsageKeySuffix | null;
+  /** Aditivo: o módulo do ledger. Ausente, `minerador` (como sempre). A diferenciação passa `arquiteto`. */
+  module?: string | null;
   environment?: IntegrationEnvironment;
   dependencies: IntegrationRuntimeDependencies;
 }): Promise<IntegrationUsageEvent> {
@@ -78,7 +91,7 @@ export async function recordGoogleAdsDiscoveryUsage(input: {
     const event = await recordGoogleAdsInfrastructureUsage({
       usage,
       operation: "module_operation",
-      module: "minerador",
+      module: input.module || "minerador",
       resultStatus: input.resultStatus,
       units: 1,
       providerReference: input.providerReference || null,
@@ -93,8 +106,10 @@ export async function recordGoogleAdsDiscoveryUsage(input: {
         normalizedCount: input.normalizedCount ?? null,
         approvedCount: input.approvedCount ?? null,
         filteredCount: input.filteredCount ?? null,
-        // Só com sufixo: sem ele, o metadata é byte a byte o de antes.
-        ...(input.usageKeySuffix ? { seedKind: input.usageKeySuffix } : {}),
+        // Só com sufixo: sem ele, o metadata é byte a byte o de antes. Com página,
+        // `seedKind` continua sendo o tipo da semente e a página vai à parte.
+        ...(input.usageKeySuffix ? { seedKind: googleAdsDiscoveryUsageSeedKind(input.usageKeySuffix) } : {}),
+        ...(input.usageKeySuffix && input.usageKeySuffix.includes(":") ? { seedPage: input.usageKeySuffix.split(":")[1] } : {}),
       },
     }, input.dependencies);
 

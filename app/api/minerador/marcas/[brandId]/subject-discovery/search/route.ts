@@ -8,19 +8,20 @@ import { SubjectDiscoverySearchRequestSchema, runSubjectDiscoverySearch } from "
 
 /**
  * PESQUISA POR ASSUNTO — plano e execução
- * (SDD `docs/compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md`, F1b.4).
+ * (SDD `docs/compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md`, F1b.4;
+ * desde 2026-09-28, só Google Ads — `sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md` §3.2).
  *
- * `POST { mode: "plan" }`    nada é pago e nenhuma credencial é lida: o cache
- *                            de SERP em `meta`, a declaração do Assunto, o
- *                            site da marca e a linha do catálogo do ledger.
- * `POST { mode: "execute" }` recalcula o plano, confere `authorizedPlan`, e só
- *                            então resolve a Connection DataForSEO e o Google
- *                            Ads (Secret Store), lê o ledger e paga.
+ * `POST { mode: "plan" }`    nada é consultado e nenhuma credencial é lida: a
+ *                            declaração do Assunto e o site da marca.
+ * `POST { mode: "execute" }` recalcula o plano, confere `authorizedPlan` (o
+ *                            mesmo `planHash`), e só então abre o Google Ads
+ *                            (Secret Store) para a frase e a página de destino.
+ *                            Nada é pago ao DataForSEO.
  *
  * A marca é a da rota; o ator é `auth.users.id`. As candidatas voltam ao
  * navegador e NÃO são gravadas: esta rota não escreve em
  * `minerador_discovery_*` nem em `minerador_keywords`. O banco recebe só o
- * uso no ledger e a SERP da frase no cache da marca.
+ * uso do Google Ads no ledger.
  */
 
 export const dynamic = "force-dynamic";

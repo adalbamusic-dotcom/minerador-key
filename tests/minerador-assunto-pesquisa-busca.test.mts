@@ -7,19 +7,16 @@ import {
   selectSubjectDiscoveryTopUrls,
   type SubjectDiscoveryExecuteResponse,
   type SubjectDiscoveryExecutionPorts,
+  type SubjectDiscoveryOpenExecutionOptions,
   type SubjectDiscoveryPlanResponse,
   type SubjectDiscoveryPorts,
-  type SubjectDiscoverySerpRequest,
-  type SubjectDiscoveryUsageEvent,
 } from "../lib/minerador/subject-discovery-search.ts";
-import type { DataForSeoLabsResearchRequest, DataForSeoLabsResearchResult } from "../lib/minerador/dataforseo-labs-keyword-research-core.ts";
-import { DataForSeoLabsResearchError } from "../lib/minerador/dataforseo-labs-keyword-research-core.ts";
-import { subjectDiscoveryCallId, subjectDiscoveryLedgerKey } from "../lib/minerador/subject-discovery-plan.ts";
 
 /*
- * F1b.11 — plano e execução da Pesquisa por Assunto com portas falsas.
- * Nenhuma rede: o fetch global falha o teste. Nenhuma credencial: a porta de
- * execução falha o teste quando o plano a abre.
+ * F1b.11 e SDD 2026-09-28 §3.2 — plano e execução da Pesquisa por Assunto,
+ * só com o Google Ads, com portas falsas. Nenhuma rede: o fetch global falha o
+ * teste. Nenhuma credencial: a porta de execução falha o teste quando o plano
+ * a abre. Nenhuma porta DataForSEO pode ser chamada: todas falham o teste.
  */
 
 globalThis.fetch = (async () => { throw new Error("Rede proibida no teste da Pesquisa por Assunto."); }) as typeof fetch;
@@ -30,7 +27,7 @@ const OTHER_BRAND_SUBJECT_ID = "50000000-0000-4000-8000-0000000000b1";
 const WITHDRAWN_ID = "50000000-0000-4000-8000-0000000000a2";
 const MOVED_DESTINATION_ID = "50000000-0000-4000-8000-0000000000a3";
 const SITE = "https://adalba.com.br";
-const NOW = new Date("2026-09-24T12:00:00+00:00");
+const NOW = new Date("2026-09-28T12:00:00+00:00");
 const LENSES = ["desktop-windows", "desktop-macos", "mobile-android", "mobile-ios"];
 
 const declared = (note: string, destinationUrl: string | null) => ({ declared: true, note, destinationUrl, destinationCheck: destinationUrl ? { hostMatchesBrand: true, catalogPageType: null, catalogTitle: null, checkedAt: "2026-09-20T10:00:00+00:00" } : null });
@@ -41,14 +38,8 @@ const SUBJECTS: Record<string, { id: string; keyword: string; keywordSubject: un
   [MOVED_DESTINATION_ID]: { id: MOVED_DESTINATION_ID, keyword: "SEO para dentistas", keywordSubject: declared("Para dentistas", "https://site-antigo.com.br/seo") },
 };
 
-const labelOf = (request: SubjectDiscoverySerpRequest) => `${request.query.lens.device}-${request.query.lens.operatingSystem}`;
-
 function digest(urls: Array<[string, number]>) {
   return { version: "organic-digest-v1" as const, keyword: "seo para clinicas", depth: 10, organic: urls.map(([url, rank]) => ({ rank_group: rank, url })), blocks: [], sellers: [] };
-}
-
-function body(urls: Array<[string, number]>) {
-  return { tasks: [{ id: "serp-task", status_code: 20000, cost: 0.0035, result: [{ keyword: "seo para clinicas", items: urls.map(([url, rank]) => ({ type: "organic", rank_group: rank, url })) }] }] };
 }
 
 const SERP_URLS: Record<string, Array<[string, number]>> = {
@@ -60,81 +51,46 @@ const SERP_URLS: Record<string, Array<[string, number]>> = {
 
 type Options = {
   siteUrl?: string | null;
-  cachedLenses?: string[];
-  oldExtraWithoutDigest?: string[];
-  serpReadFails?: boolean;
-  ledgerCapability?: boolean;
-  ledgerConflict?: boolean;
   existing?: Array<{ id: string; keyword: string }>;
   existingFails?: boolean;
-  labs?: (request: DataForSeoLabsResearchRequest) => DataForSeoLabsResearchResult;
   adsIdeas?: Record<string, string[]>;
-  holdLabs?: Promise<void>;
-  /** A canônica está no cache (meta), mas sem corpo: a leitura em `body` a descarta. */
-  canonicalWithoutBody?: boolean;
+  /** A semente que falha no Google Ads. */
+  adsFails?: "keyword" | "keyword_and_url";
+  /** A gravação do uso do Google Ads no ledger falha. */
+  adsUsageFails?: boolean;
+  holdAds?: Promise<void>;
+  /** A marca não tem Connection DataForSEO: abrir COM o DataForSEO falha. */
+  noDataForSeo?: boolean;
+  /** Abrir a execução falha de todo jeito. */
+  openFails?: boolean;
 };
-
-function labsResult(request: DataForSeoLabsResearchRequest, keywords: string[], cost = 0.02): DataForSeoLabsResearchResult {
-  return {
-    kind: request.kind,
-    endpoint: `/v3/dataforseo_labs/google/${request.kind}/live`,
-    provider: "dataforseo",
-    providerVersion: "v3",
-    providerRequestId: `labs-${request.kind}`,
-    cost,
-    totalCount: keywords.length,
-    droppedByRank: 0,
-    keywords: keywords.map(keyword => ({
-      keyword,
-      estimate: { searchVolume: 999, label: "Estimativa DataForSEO" as const },
-      relatedDepth: request.kind === "related_keywords" ? 1 : null,
-      ranked: request.kind === "ranked_keywords" ? { url: request.targetUrl, rankGroup: 4 } : null,
-    })),
-  };
-}
 
 function harness(options: Options = {}) {
   const log = {
     lookups: [] as string[],
+    ledgerCatalogReads: 0,
     opened: 0,
-    serpCollects: [] as string[],
-    labs: [] as DataForSeoLabsResearchRequest[],
-    ads: [] as Array<{ kind: string; url?: string; geo: string[] }>,
+    openOptions: [] as Array<SubjectDiscoveryOpenExecutionOptions | undefined>,
+    ads: [] as Array<{ kind: string; url?: string; geo: string[]; keywords: string[] }>,
     adsUsage: [] as Array<{ suffix: string; resultStatus: string }>,
-    usageFinds: [] as string[],
   };
-  const ledger = new Map<string, SubjectDiscoveryUsageEvent>();
-  const cached = new Set(options.cachedLenses || []);
+  const forbidden = (name: string) => async () => assert.fail(`A Pesquisa por Assunto chamou o DataForSEO (${name}).`);
   const exec: SubjectDiscoveryExecutionPorts = {
-    ledgerCapability: options.ledgerCapability ?? true,
-    async findUsage(key) { log.usageFinds.push(key); return ledger.has(key); },
-    async collectSerp(request, hooks) {
-      hooks.onRequestStarted();
-      const lens = labelOf(request);
-      log.serpCollects.push(lens);
-      const urls = SERP_URLS[lens];
-      return { providerRequestId: `serp-${lens}`, costUsd: lens === "desktop-windows" ? 0.0035 : 0.002, digest: digest(urls), organicCount: urls.length, stored: true, error: null };
-    },
-    async runLabs(request, hooks) {
-      if (options.holdLabs) await options.holdLabs;
-      hooks.onRequestStarted();
-      log.labs.push(request);
-      if (options.labs) return options.labs(request);
-      if (request.kind === "related_keywords") return labsResult(request, ["Marketing para Clínicas", "captar pacientes", "SEO para clínicas"]);
-      if (request.kind === "keyword_ideas") return labsResult(request, ["marketing para clinicas", "site para clínica"]);
-      return labsResult(request, [`ranqueada por ${new URL(request.targetUrl).hostname}`]);
-    },
-    async recordDataForSeoUsage(event) {
-      if (options.ledgerConflict) throw Object.assign(new Error("A idempotency key já foi usada por outra operação."), { code: "INTEGRATION_IDEMPOTENCY_CONFLICT" });
-      ledger.set(event.idempotencyKey, event);
-      return options.ledgerCapability === false ? "skipped" : "recorded";
-    },
+    ledgerCapability: false,
+    findUsage: forbidden("findUsage"),
+    collectSerp: forbidden("collectSerp"),
+    recordDataForSeoUsage: forbidden("recordDataForSeoUsage"),
     async googleAdsIdeas(seed, targeting) {
-      log.ads.push({ kind: seed.kind, url: seed.kind === "keyword_and_url" ? seed.url : undefined, geo: targeting.geoTargetConstants });
-      const keywords = (options.adsIdeas || { keyword: ["marketing para clínicas", "agência de marketing médico"], keyword_and_url: ["seo médico"] })[seed.kind] || [];
-      return { requestId: `ads-${seed.kind}`, ideas: keywords.map(keyword => ({ keyword, averageMonthlySearches: 1300, competition: "HIGH", competitionIndex: 80, averageCpcMicros: "2500000", lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: "BRL" })) };
+      if (options.holdAds) await options.holdAds;
+      log.ads.push({ kind: seed.kind, url: seed.kind === "keyword_and_url" ? seed.url : undefined, geo: targeting.geoTargetConstants, keywords: seed.keywords });
+      if (options.adsFails === seed.kind) throw Object.assign(new Error("Google Ads fora"), { code: "GOOGLE_ADS_DISCOVERY_ERROR" });
+      const keywords = (options.adsIdeas || { keyword: ["marketing para clínicas", "agência de marketing médico", "SEO para clínicas"], keyword_and_url: ["seo médico", "Marketing para Clinicas"] })[seed.kind] || [];
+      return { requestId: `ads-${seed.kind}`, ideas: keywords.map((keyword, index) => ({ keyword, averageMonthlySearches: index === 1 ? null : 1300 - index, competition: "HIGH", competitionIndex: 80, averageCpcMicros: "2500000", lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: "BRL" })) };
     },
-    async recordGoogleAdsUsage(event) { log.adsUsage.push({ suffix: event.suffix, resultStatus: event.resultStatus }); },
+    async recordGoogleAdsUsage(event) {
+      log.adsUsage.push({ suffix: event.suffix, resultStatus: event.resultStatus });
+      if (options.adsUsageFails) throw Object.assign(new Error("ledger fora"), { code: "GOOGLE_ADS_USAGE_RECORDING_FAILED" });
+    },
   };
   let executionAllowed = false;
   const ports: SubjectDiscoveryPorts = {
@@ -144,27 +100,23 @@ function harness(options: Options = {}) {
     readSubjectKeyword: async id => SUBJECTS[id] ?? null,
     async lookupSerp(requests, mode) {
       log.lookups.push(mode);
-      if (options.serpReadFails) throw new Error("banco fora");
-      return requests.map(request => {
-        const lens = labelOf(request);
-        if (!cached.has(lens)) return null;
-        if (mode === "meta") return {};
-        if (mode === "body") return options.canonicalWithoutBody && lens === "desktop-windows" ? null : { body: body(SERP_URLS[lens]) };
-        return { digest: options.oldExtraWithoutDigest?.includes(lens) ? null : digest(SERP_URLS[lens]) };
-      });
+      return requests.map(() => null);
     },
-    findLedgerCapability: async () => options.ledgerCapability ?? true,
+    async findLedgerCapability() { log.ledgerCatalogReads += 1; return true; },
     async readExistingKeywords() {
       if (options.existingFails) throw new Error("banco fora");
       return options.existing || [];
     },
-    async openExecution() {
+    async openExecution(openOptions) {
       log.opened += 1;
+      log.openOptions.push(openOptions);
       if (!executionAllowed) assert.fail("O plano abriu credencial (Connection/Secret Store).");
+      if (options.openFails) throw Object.assign(new Error("sem Secret Store"), { code: "GOOGLE_ADS_CONTEXT_UNAVAILABLE" });
+      if (options.noDataForSeo && openOptions?.dataForSeo !== false) throw Object.assign(new Error("sem Connection DataForSEO"), { code: "DATAFORSEO_CONNECTION_MISSING" });
       return exec;
     },
   };
-  return { ports, log, ledger, allowExecution: () => { executionAllowed = true; } };
+  return { ports, log, allowExecution: () => { executionAllowed = true; } };
 }
 
 const targeting = { language: "languageConstants/1014", selectedStates: ["Todos os estados"], keywordPlanNetwork: "GOOGLE_SEARCH" as const, includeAdultKeywords: false };
@@ -186,28 +138,24 @@ async function executeWith(h: ReturnType<typeof harness>, overrides: Record<stri
   return runSubjectDiscoverySearch({ brandId: BRAND, request: request({ mode: "execute", operationRequestId, authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.maxCostUsd }, ...overrides }) }, h.ports);
 }
 
-test("plan: não abre credencial, lê o cache só em meta e não chama provider nenhum", async () => {
-  const h = harness({ cachedLenses: ["desktop-macos"] });
+test("plan: não abre credencial, não lê cache de SERP nem o ledger DataForSEO e não chama provider", async () => {
+  const h = harness();
   const plan = await planFor(h);
   assert.equal(h.log.opened, 0);
-  assert.deepEqual(h.log.lookups, ["meta"]);
-  assert.equal(h.log.labs.length + h.log.serpCollects.length + h.log.ads.length, 0);
-  assert.deepEqual(plan.serp.missingLenses, ["desktop-windows", "mobile-android", "mobile-ios"]);
+  assert.deepEqual(h.log.lookups, [], "a SERP da frase não é lida: a 1ª coleta é no Arquiteto");
+  assert.equal(h.log.ledgerCatalogReads, 0);
+  assert.equal(h.log.ads.length, 0);
   assert.equal(plan.destinationUrl, `${SITE}/seo-clinicas`);
-  assert.equal(plan.lines.find(line => line.kind === "ads_url_seed")?.maxCostUsd, 0);
+  assert.equal(plan.maxCostUsd, 0);
+  assert.equal(plan.paidCalls, 0);
+  assert.deepEqual(plan.lines.map(line => line.kind), ["ads_keyword_seed", "ads_url_seed"]);
 });
 
-test("plan: capability nula → ledgerRecording false, com o aviso", async () => {
-  const plan = await planFor(harness({ ledgerCapability: false }));
-  assert.equal(plan.ledgerRecording, false);
-  assert.ok(plan.notices.some(notice => notice.includes("controle de gastos")));
-});
-
-test("Assunto declarado: outra marca e inexistente dão o mesmo 404; retirado dá 409; nada é pago", async () => {
+test("Assunto declarado: outra marca e inexistente dão o mesmo 404; retirado dá 409; nada é consultado", async () => {
   for (const mode of ["plan", "execute"]) {
     const h = harness();
     h.allowExecution();
-    const extra = mode === "execute" ? { operationRequestId: OP, authorizedPlan: { planHash: "sha256:x", maxCostUsd: 0.2 } } : {};
+    const extra = mode === "execute" ? { operationRequestId: OP, authorizedPlan: { planHash: "sha256:x", maxCostUsd: 0 } } : {};
     const other = await runSubjectDiscoverySearch({ brandId: BRAND, request: request({ mode, subjectKeywordId: OTHER_BRAND_SUBJECT_ID, ...extra }) }, h.ports);
     const missing = await runSubjectDiscoverySearch({ brandId: BRAND, request: request({ mode, subjectKeywordId: "50000000-0000-4000-8000-0000000000ff", ...extra }) }, h.ports);
     assert.equal(other.status, 404);
@@ -215,7 +163,7 @@ test("Assunto declarado: outra marca e inexistente dão o mesmo 404; retirado d�
     const withdrawn = await runSubjectDiscoverySearch({ brandId: BRAND, request: request({ mode, subjectKeywordId: WITHDRAWN_ID, ...extra }) }, h.ports);
     assert.equal(withdrawn.status, 409);
     assert.equal(!withdrawn.body.success && withdrawn.body.code, "SUBJECT_NOT_DECLARED");
-    assert.equal(h.log.opened + h.log.labs.length + h.log.serpCollects.length + h.log.ads.length, 0);
+    assert.equal(h.log.opened + h.log.ads.length, 0);
   }
 });
 
@@ -256,7 +204,7 @@ test("sem destino, fora do domínio, EMPTY ou NO_BRAND_SITE → sem url_seed; s�
   assert.equal(accepted.lines.some(line => line.kind === "ads_url_seed"), true);
 });
 
-test("PAID_PLAN_REQUIRED e PAID_PLAN_CHANGED não abrem credencial nem pagam", async () => {
+test("sem confirmação, ou com plano diferente, nada é aberto nem consultado", async () => {
   const h = harness();
   h.allowExecution();
   const required = await runSubjectDiscoverySearch({ brandId: BRAND, request: request({ mode: "execute", operationRequestId: OP }) }, h.ports);
@@ -268,110 +216,141 @@ test("PAID_PLAN_REQUIRED e PAID_PLAN_CHANGED não abrem credencial nem pagam", a
   const changed = await runSubjectDiscoverySearch({ brandId: BRAND, request: request({ mode: "execute", operationRequestId: OP, phrase: "SEO para dentistas", authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.maxCostUsd } }) }, h.ports);
   assert.equal(!changed.body.success && changed.body.code, "PAID_PLAN_CHANGED");
   assert.notEqual(!changed.body.success && changed.body.plan?.planHash, plan.planHash);
-  assert.equal(h.log.opened + h.log.labs.length + h.log.serpCollects.length + h.log.ads.length, 0);
+
+  // Uma aba aberta antes do deploy confirma o hash do plano v1: recusado, nada consultado.
+  const legacy = await runSubjectDiscoverySearch({ brandId: BRAND, request: request({ mode: "execute", operationRequestId: OP, authorizedPlan: { planHash: "sha256:plano-v1", maxCostUsd: 0.182 } }) }, h.ports);
+  assert.equal(!legacy.body.success && legacy.body.code, "PAID_PLAN_CHANGED");
+  assert.equal(h.log.opened + h.log.ads.length, 0);
+  assert.deepEqual(h.log.lookups, []);
 });
 
-test("execute: as 5 fontes, a SERP das lentes que faltam e as origens todas de cada candidata", async () => {
-  const h = harness({ cachedLenses: ["desktop-macos"], existing: [{ id: "50000000-0000-4000-8000-0000000000e1", keyword: "Captar Pacientes" }] });
+test("execute: só as duas sementes do Google Ads, sem DataForSEO, custo zero e origens só do Ads", async () => {
+  const h = harness({ existing: [{ id: "50000000-0000-4000-8000-0000000000e1", keyword: "Agência de Marketing Médico" }] });
   const outcome = await executeWith(h, { targeting: { ...targeting, selectedStates: ["SP"] } });
   assert.equal(outcome.status, 200, JSON.stringify(outcome.body));
   const response = outcome.body as SubjectDiscoveryExecuteResponse;
 
-  // SERP: só as 3 que faltavam; a canônica com corpo, as outras sem.
-  assert.deepEqual(h.log.serpCollects, ["desktop-windows", "mobile-android", "mobile-ios"]);
-  assert.deepEqual(response.serp.lenses.map(lens => lens.source), ["collected", "cache", "collected", "collected"]);
-  // UF só no Google Ads; Labs sempre 2076 + "pt".
-  assert.deepEqual(h.log.ads.map(call => call.geo), [["geoTargetConstants/20106"], ["geoTargetConstants/20106"]]);
-  for (const call of h.log.labs) { assert.equal(call.locationCode, 2076); assert.equal(call.languageCode, "pt"); }
-  assert.deepEqual(h.log.labs.map(call => call.kind), ["related_keywords", "keyword_ideas", "ranked_keywords", "ranked_keywords", "ranked_keywords", "ranked_keywords", "ranked_keywords"]);
+  // Abre SEM o DataForSEO; as portas DataForSEO do harness falhariam o teste.
+  assert.deepEqual(h.log.openOptions, [{ dataForSeo: false }]);
+  assert.deepEqual(h.log.lookups, []);
+  // UF e frase só no Google Ads; a página só na semente com URL.
+  assert.deepEqual(h.log.ads, [
+    { kind: "keyword", url: undefined, geo: ["geoTargetConstants/20106"], keywords: ["SEO para clínicas"] },
+    { kind: "keyword_and_url", url: `${SITE}/seo-clinicas`, geo: ["geoTargetConstants/20106"], keywords: ["SEO para clínicas"] },
+  ]);
   assert.deepEqual(h.log.adsUsage, [{ suffix: "keyword_seed", resultStatus: "succeeded" }, { suffix: "url_seed", resultStatus: "succeeded" }]);
+
+  assert.deepEqual(response.sources.map(source => [source.source, source.status]), [["ads_keyword_seed", "ok"], ["ads_url_seed", "ok"]]);
+  assert.deepEqual(response.serp, { lenses: [], topUrls: [], readFailed: null });
+  assert.equal(response.reportedCostUsd, 0);
+  assert.equal(response.budgetSpentUsd, 0);
+  assert.equal(response.plan.maxCostUsd, 0);
+  assert.equal(response.ledgerRecording, true);
+  assert.equal(response.ledgerWarning, null);
 
   const byKey = new Map(response.candidates.map(candidate => [candidate.normalizedKeyword, candidate]));
   const marketing = byKey.get("marketing para clinicas");
   assert.ok(marketing);
-  assert.deepEqual(marketing.origins, ["ads_keyword_seed", "labs_related", "labs_category"]);
+  assert.deepEqual(marketing.origins, ["ads_keyword_seed", "ads_url_seed"], "a mesma ideia pelas duas sementes guarda as duas origens");
   assert.equal(marketing.googleAds?.averageMonthlySearches, 1300);
   assert.equal(response.candidates[0].normalizedKeyword, "marketing para clinicas");
   assert.equal(byKey.get("seo para clinicas")?.isSubjectPhrase, true);
-  assert.equal(byKey.get("captar pacientes")?.existingKeywordId, "50000000-0000-4000-8000-0000000000e1");
-  assert.equal(byKey.get("site para clinica")?.existingKeywordId, null);
-  assert.equal(response.subject.phraseExistingKeywordId, null);
-  assert.ok(response.sources.every(source => source.status === "ok"));
-  assert.equal(response.ledgerRecording, true);
-  assert.equal(response.ledgerWarning, null);
-  // Um evento por chamada DataForSEO: 3 lentes + 2 + 5 ranked.
-  assert.equal(h.ledger.size, 10);
-  assert.ok([...h.ledger.keys()].every(key => key.startsWith(`dataforseo:${OP}:keyword_research:`)));
+  assert.equal(byKey.get("agencia de marketing medico")?.existingKeywordId, "50000000-0000-4000-8000-0000000000e1");
+  assert.equal(byKey.get("seo medico")?.existingKeywordId, null);
+  for (const candidate of response.candidates) {
+    assert.ok(candidate.origins.every(origin => origin === "ads_keyword_seed" || origin === "ads_url_seed"), candidate.keyword);
+    assert.equal(candidate.dataForSeoEstimate, null, "pesquisa nova não tem estimativa DataForSEO");
+    assert.deepEqual(candidate.ranked, []);
+  }
+  assert.ok(response.notices.some(notice => /Sem custo no DataForSEO/.test(notice)));
 });
 
-test("volume: a estimativa do Labs nunca vira volume nem métrica do Google Ads", async () => {
-  const h = harness();
-  const response = (await executeWith(h)).body as SubjectDiscoveryExecuteResponse;
-  const onlyLabs = response.candidates.find(candidate => candidate.normalizedKeyword === "site para clinica");
-  assert.ok(onlyLabs);
-  assert.equal(onlyLabs.googleAds, null);
-  assert.deepEqual(onlyLabs.dataForSeoEstimate, { searchVolume: 999, label: "Estimativa DataForSEO" });
-  assert.doesNotMatch(JSON.stringify(response.candidates), /"volume"|"volume_search"|"averageMonthlySearches":999/);
+test("marca sem DataForSEO pesquisa normalmente: só o Google Ads é aberto", async () => {
+  const h = harness({ noDataForSeo: true });
+  const outcome = await executeWith(h);
+  assert.equal(outcome.status, 200, JSON.stringify(outcome.body));
+  assert.ok((outcome.body as SubjectDiscoveryExecuteResponse).candidates.length > 0);
 });
 
-test("orçamento: a task que informa custo acima da tabela barra as chamadas seguintes", async () => {
-  const h = harness({ cachedLenses: LENSES, labs: request => labsResult(request, ["termo"], request.kind === "related_keywords" ? 0.15 : 0.02) });
+test("execução que não abre: GOOGLE_ADS_UNAVAILABLE, nada consultado", async () => {
+  const h = harness({ openFails: true });
+  const outcome = await executeWith(h);
+  assert.equal(outcome.status, 503);
+  assert.equal(!outcome.body.success && outcome.body.code, "GOOGLE_ADS_UNAVAILABLE");
+  assert.match(!outcome.body.success ? outcome.body.message : "", /Google Ads/);
+  assert.equal(h.log.ads.length, 0);
+});
+
+test("volume: candidata sem média do Google Ads fica sem volume; nenhuma métrica vira campo 'volume'", async () => {
+  const response = (await executeWith(harness())).body as SubjectDiscoveryExecuteResponse;
+  const semMedia = response.candidates.find(candidate => candidate.normalizedKeyword === "agencia de marketing medico");
+  assert.ok(semMedia);
+  assert.equal(semMedia.googleAds?.averageMonthlySearches, null);
+  assert.equal(response.candidates.at(-1)?.normalizedKeyword, "agencia de marketing medico", "sem volume vai para o fim");
+  assert.doesNotMatch(JSON.stringify(response.candidates), /"volume"|"volume_search"/);
+});
+
+test("uma semente que falha não derruba a outra", async () => {
+  const h = harness({ adsFails: "keyword_and_url" });
   const response = (await executeWith(h)).body as SubjectDiscoveryExecuteResponse;
-  assert.deepEqual(h.log.labs.map(call => call.kind), ["related_keywords"]);
   const status = Object.fromEntries(response.sources.map(source => [source.source, source.status]));
-  assert.equal(status.labs_related, "ok");
-  assert.equal(status.labs_category, "skipped_budget");
-  assert.equal(status.labs_ranked, "skipped_budget");
-  assert.ok(response.budgetSpentUsd <= response.plan.maxCostUsd);
-  assert.equal(response.reportedCostUsd, 0.15);
+  assert.equal(status.ads_keyword_seed, "ok");
+  assert.equal(status.ads_url_seed, "failed");
+  assert.deepEqual(h.log.adsUsage, [{ suffix: "keyword_seed", resultStatus: "succeeded" }, { suffix: "url_seed", resultStatus: "failed" }]);
+  assert.ok(response.candidates.length > 0);
 });
 
-test("repetição: evento já no ledger → OPERATION_ALREADY_EXECUTED sem nenhuma chamada", async () => {
+test("falha ao gravar o uso do Google Ads devolve as candidatas com ledgerWarning", async () => {
+  const response = (await executeWith(harness({ adsUsageFails: true }))).body as SubjectDiscoveryExecuteResponse;
+  assert.ok(response.candidates.length > 0);
+  assert.equal(response.ledgerRecording, false);
+  assert.match(response.ledgerWarning || "", /GOOGLE_ADS_USAGE_RECORDING_FAILED/);
+  assert.match(response.ledgerWarning || "", /Google Ads/);
+});
+
+test("repetir a MESMA operação consulta só o Google Ads de novo: nada de DataForSEO nem custo", async () => {
   const h = harness();
   const first = await executeWith(h);
   assert.equal(first.status, 200);
-  const callsAfterFirst = { labs: h.log.labs.length, serp: h.log.serpCollects.length, ads: h.log.ads.length };
-  // O mesmo operationRequestId com um plano novo (agora a SERP da frase está no ledger).
   const again = await executeWith(h);
-  assert.equal(again.status, 409);
-  assert.equal(!again.body.success && again.body.code, "OPERATION_ALREADY_EXECUTED");
-  assert.deepEqual({ labs: h.log.labs.length, serp: h.log.serpCollects.length, ads: h.log.ads.length }, callsAfterFirst);
+  assert.equal(again.status, 200);
+  assert.equal(h.log.ads.length, 4);
+  // As chaves do Google Ads são as mesmas nas duas: o ledger não duplica o uso.
+  assert.deepEqual(h.log.adsUsage.map(item => item.suffix), ["keyword_seed", "url_seed", "keyword_seed", "url_seed"]);
+  assert.equal((again.body as SubjectDiscoveryExecuteResponse).reportedCostUsd, 0);
 });
 
-test("repetição: a chave de uma chamada que NÃO é a primeira já no ledger também barra, sem nenhuma chamada", async () => {
-  const h = harness({ cachedLenses: LENSES });
-  // A primeira chamada paga (related) não foi gravada; a de ideias foi.
-  h.ledger.set(subjectDiscoveryLedgerKey(OP, subjectDiscoveryCallId("keyword_ideas", 1)), {} as SubjectDiscoveryUsageEvent);
-  const again = await executeWith(h);
-  assert.equal(again.status, 409);
-  assert.equal(!again.body.success && again.body.code, "OPERATION_ALREADY_EXECUTED");
-  assert.equal(h.log.labs.length + h.log.serpCollects.length + h.log.ads.length, 0);
-  assert.ok(h.log.usageFinds.length > 1, "todas as chaves planejadas são conferidas");
-});
-
-test("execute recusado não lê corpo nem digest do cache: só meta", async () => {
-  const h = harness({ cachedLenses: LENSES });
-  h.allowExecution();
-  const required = await runSubjectDiscoverySearch({ brandId: BRAND, request: request({ mode: "execute", operationRequestId: OP }) }, h.ports);
-  assert.equal(!required.body.success && required.body.code, "PAID_PLAN_REQUIRED");
+test("mesma operação em curso na instância é recusada", async () => {
+  let release: () => void = () => {};
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const h = harness({ holdAds: hold });
   const plan = await planFor(h);
-  const changed = await runSubjectDiscoverySearch({ brandId: BRAND, request: request({ mode: "execute", operationRequestId: OP, phrase: "SEO para dentistas", authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.maxCostUsd } }) }, h.ports);
-  assert.equal(!changed.body.success && changed.body.code, "PAID_PLAN_CHANGED");
-  h.ledger.set(subjectDiscoveryLedgerKey(OP, subjectDiscoveryCallId("related_keywords", 1)), {} as SubjectDiscoveryUsageEvent);
-  const done = await runSubjectDiscoverySearch({ brandId: BRAND, request: request({ mode: "execute", operationRequestId: OP, authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.maxCostUsd } }) }, h.ports);
-  assert.equal(!done.body.success && done.body.code, "OPERATION_ALREADY_EXECUTED");
-  assert.deepEqual([...new Set(h.log.lookups)], ["meta"]);
+  h.allowExecution();
+  const body = request({ mode: "execute", operationRequestId: OP, authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.maxCostUsd } });
+  const first = runSubjectDiscoverySearch({ brandId: BRAND, request: body }, h.ports);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  const second = await runSubjectDiscoverySearch({ brandId: BRAND, request: body }, h.ports);
+  assert.equal(!second.body.success && second.body.code, "OPERATION_IN_PROGRESS");
+  release();
+  assert.equal((await first).status, 200);
 });
 
-test("canônica em cache sem corpo: plan e execute dão o mesmo hash, a lente não é paga e fica fora da união", async () => {
-  const h = harness({ cachedLenses: LENSES, canonicalWithoutBody: true });
-  const outcome = await executeWith(h);
-  assert.equal(outcome.status, 200, JSON.stringify(outcome.body));
-  const response = outcome.body as SubjectDiscoveryExecuteResponse;
-  assert.equal(h.log.serpCollects.length, 0);
-  assert.equal(response.serp.lenses.find(lens => lens.lens === "desktop-windows")?.source, "cache");
-  assert.equal(response.serp.topUrls.some(item => item.url === "https://c.com/3"), false, "URL só da canônica sem corpo fica fora");
-  assert.equal(response.serp.topUrls.some(item => item.url === "https://a.com/1"), true, "a mesma URL vinda de outra lente entra");
+test("\"já existe\" indisponível não descarta o resultado", async () => {
+  const response = (await executeWith(harness({ existingFails: true }))).body as SubjectDiscoveryExecuteResponse;
+  assert.equal(response.existingCheckFailed, true);
+  assert.ok(response.candidates.length > 0);
+  assert.ok(response.candidates.every(candidate => candidate.existingKeywordId === null));
+});
+
+test("junção: uma candidata antiga só do Labs mantém a origem (nunca some do envio)", () => {
+  const merged = mergeSubjectDiscoveryCandidates({
+    contributions: [
+      { source: "labs_related", keyword: "captar pacientes", estimate: { searchVolume: 480, label: "Estimativa DataForSEO" }, relatedDepth: 1 },
+      { source: "labs_ranked", keyword: "seo local", ranked: { url: "https://exemplo.com/pagina", rankGroup: 3 } },
+    ],
+    normalizedPhrase: "seo",
+  });
+  assert.deepEqual(merged.candidates.map(item => item.origins), [["labs_related"], ["labs_ranked"]]);
 });
 
 test("evidência: a do ranked vem primeiro e não é cortada pelas outras três", () => {
@@ -391,72 +370,12 @@ test("evidência: a do ranked vem primeiro e não é cortada pelas outras três"
   assert.equal(evidence[0], "ranqueia em #7 em exemplo.com/pagina");
 });
 
-test("conflito do ledger DEPOIS de pagar devolve as candidatas com ledgerWarning", async () => {
-  const h = harness({ ledgerConflict: true });
-  const outcome = await executeWith(h);
-  assert.equal(outcome.status, 200);
-  const response = outcome.body as SubjectDiscoveryExecuteResponse;
-  assert.ok(response.candidates.length > 0);
-  assert.match(response.ledgerWarning || "", /INTEGRATION_IDEMPOTENCY_CONFLICT/);
-});
-
-test("mesma operação em curso na instância é recusada", async () => {
-  let release: () => void = () => {};
-  const hold = new Promise<void>(resolve => { release = resolve; });
-  const h = harness({ holdLabs: hold, cachedLenses: LENSES });
-  const plan = await planFor(h);
-  h.allowExecution();
-  const body = request({ mode: "execute", operationRequestId: OP, authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.maxCostUsd } });
-  const first = runSubjectDiscoverySearch({ brandId: BRAND, request: body }, h.ports);
-  await new Promise(resolve => setTimeout(resolve, 5));
-  const second = await runSubjectDiscoverySearch({ brandId: BRAND, request: body }, h.ports);
-  assert.equal(!second.body.success && second.body.code, "OPERATION_IN_PROGRESS");
-  release();
-  assert.equal((await first).status, 200);
-});
-
 test("URLs do topo: união das 4 lentes, no máximo 5; extra antiga sem digest fica fora", () => {
   const top = selectSubjectDiscoveryTopUrls(LENSES.map(lens => ({ lens, digest: digest(SERP_URLS[lens]) })));
   assert.deepEqual(top.map(item => item.url), ["https://a.com/1", "https://b.com/2", "https://e.com/5", "https://c.com/3", "https://d.com/4"]);
   assert.equal(top[0].lensCount, 2);
   const withoutOld = selectSubjectDiscoveryTopUrls([{ lens: "desktop-windows", digest: digest([["https://a.com/1", 1]]) }, { lens: "mobile-ios", digest: null }]);
   assert.deepEqual(withoutOld.map(item => item.url), ["https://a.com/1"]);
-});
-
-test("execute com extra antiga sem digest: a lente conta como cache e fica fora da união", async () => {
-  const h = harness({ cachedLenses: LENSES, oldExtraWithoutDigest: ["mobile-android"] });
-  const response = (await executeWith(h)).body as SubjectDiscoveryExecuteResponse;
-  assert.equal(h.log.serpCollects.length, 0);
-  assert.equal(response.serp.topUrls.some(item => item.url === "https://e.com/5"), false);
-  assert.deepEqual(h.log.lookups.slice(-2), ["body", "digest"]);
-});
-
-test("sem SERP, não há fonte 5 e as outras seguem", async () => {
-  const h = harness({ serpReadFails: true });
-  const response = (await executeWith(h)).body as SubjectDiscoveryExecuteResponse;
-  assert.equal(h.log.serpCollects.length, 0);
-  assert.deepEqual(h.log.labs.map(call => call.kind), ["related_keywords", "keyword_ideas"]);
-  assert.equal(response.sources.find(source => source.source === "labs_ranked")?.status, "not_applicable");
-  assert.equal(response.sources.find(source => source.source === "labs_related")?.status, "ok");
-});
-
-test("falha de uma fonte não derruba as outras", async () => {
-  const h = harness({ cachedLenses: LENSES, labs: request => {
-    if (request.kind === "keyword_ideas") throw new DataForSeoLabsResearchError("dataforseo_task_failed", "falhou", 502, "task-x", 0.012);
-    return labsResult(request, ["termo"]);
-  } });
-  const response = (await executeWith(h)).body as SubjectDiscoveryExecuteResponse;
-  const status = Object.fromEntries(response.sources.map(source => [source.source, source.status]));
-  assert.equal(status.labs_category, "failed");
-  assert.equal(status.labs_related, "ok");
-  assert.equal(status.labs_ranked, "ok");
-});
-
-test("\"já existe\" indisponível não descarta o resultado pago", async () => {
-  const response = (await executeWith(harness({ existingFails: true }))).body as SubjectDiscoveryExecuteResponse;
-  assert.equal(response.existingCheckFailed, true);
-  assert.ok(response.candidates.length > 0);
-  assert.ok(response.candidates.every(candidate => candidate.existingKeywordId === null));
 });
 
 test("dedupe pela normalizeKeyword: acento e caixa juntam; corte em 600 com o total", () => {

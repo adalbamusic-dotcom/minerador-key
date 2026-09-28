@@ -1,3 +1,43 @@
+## Correções do corretor (frentes de 2026-09-28) — 2026-09-28
+
+- [x] Medir ou recalcular o allintitle sem "Aplicar KGR" não abre sucessora do ArticleDNA (diff pela guarda material).
+- [x] Reformar mantém a identidade KGR da canônica quando a cópia de trabalho não traz decisão (`reconcileArticleKgrIdentityWithCanonical`).
+- [x] Rota do allintitle: sem volume nunca mede (guarda no servidor); item fora da etapa vira lacuna.
+- [x] Cabeça da SiloPage com volume entra na primeira coleta.
+- [x] Diálogo do plano pago fala em "consulta" para o allintitle.
+- [ ] **Dono decide** (antes do deploy, SDD §13): Principal sem volume no parecer — hoje continua consultada e paga se faltar.
+- [ ] Guarda de volume no servidor de `/api/arquiteto/serp` e de `keyword-serp`; modo `cacheOnly` para a leitura automática da fase Silos.
+- [ ] Encadear, no mesmo clique, a reformação e o parecer depois de a primeira coleta pagar algo (hoje pede um segundo clique).
+- [ ] Oferecer a primeira coleta para artigos formados pela finalização automática do Assunto.
+- [ ] **Dono confirma**: identidades automáticas antigas ("KGR pleno automático") continuam "Sim · regra antiga" no Arquiteto, enquanto o Minerador lê origem automática como "não aplicável".
+
+## SERP no artigo e KGR opcional (fatias A1 a A5) — 2026-09-28
+
+- [x] A1 · KGR do artigo com padrão "Não aplicável": matriz v2 (humano > vínculo confirmado > regra antiga gravada > padrão), `requiresHumanDecision` sempre falso, score e faixa 150–550 só informativos, fechamento convergente (`articleAppliesKgr`), PATCH aceitando "Aplicar KGR" Sim/Não sempre, contrato `article-kgr-decision-v2`, nenhum campo ou enum novo.
+- [x] A1 · Guarda de versionamento (`articleKgrIdentityChangedMaterially`): a troca da regra não abre sucessora do ArticleDNA.
+- [x] A2 · Primeira coleta da SERP do lote em Processar artigos, antes da formação: 4 lentes, só keywords com volume, cache primeiro, uma confirmação, núcleo de `keyword-serp`.
+- [x] A3 · Secundária e reforço sem volume fora do plano e da coleta do parecer; saem como `notObserved` com motivo próprio e não travam as lentes.
+- [x] A4 · Allintitle da Principal: rota `POST /api/arquiteto/article-allintitle` (plan/execute, `recollect`), cache primeiro (Arquiteto ou Minerador até 30 dias), medição em `kgrIdentity`, nunca escreve no Minerador; etapa 4 de Processar artigos e botão "Medir/Recalcular allintitle (pago)" na Revisão.
+- [x] A5 · "Consultar nas 4 lentes" da fase Silos: manual, opcional e só com keywords com volume.
+- [ ] **Integrador:** incluir `tests/arquiteto-serp-no-artigo.test.mts` em `test:arquiteto` e `tests/arquiteto-serp-no-artigo-rota.test.mts` em `test:arquiteto:lentes` (`package.json`); catálogo das IAs (`lib/agent/platform-catalog.ts`, Arquiteto `:298-345`, regras de SEO `:866-879`) e a rota nova em `lib/server/platform-mcp-tools.ts`, se virar ferramenta.
+- [ ] **Adendo** na SDD de decisão KGR do artigo (`docs/04-arquiteto/propostas/2026-08-28-sdd-article-kgr-decision-keyword-contextual-presentation.md`, §5.1): padrão não aplicável, "Aplicar KGR", allintitle medido pelo Arquiteto e faixa 150–550.
+- [ ] **Dono confirma:** artigo sem nenhuma keyword com volume (ex.: publicado com Posto Livre). Até lá, a Principal continua sempre consultada no parecer (SDD §13).
+- [ ] Guarda de volume também no servidor de `keyword-serp` e modo `cacheOnly` para a leitura automática da fase Silos, depois da fatia R1 do Radar (mesma rota).
+- [ ] Confirmar o preço do allintitle sozinho no primeiro evento real do ledger (`operationKind: article_allintitle`) e trocar a faixa estimada (US$ 0,002 a 0,0035).
+- [ ] **Homologar (usuário):** Processar artigos com lote sem SERP do Minerador (plano da primeira coleta, uma confirmação, formação refeita); segundo clique com parecer pelo cache; allintitle das Principais; "Aplicar KGR" Sim sem allintitle bloqueando até medir; artigo antigo "KGR pleno" sem versão nova.
+
+## Diferenciar publicados: keywords novas só do Google Ads (fatia D2) — 2026-09-28
+
+- [x] Plano v2: `page.labs = []`, `page.ads` com a semente frase do ângulo e a URL como semente, targeting canônico no hash; custo só da SERP (par: US$ 0,00 a 0,14); sem o corte das relacionadas.
+- [x] Rodada: ideias do Google Ads pelas portas da Pesquisa por Assunto, chave de uso por página no módulo `arquiteto`, métricas históricas como volume oficial e a média da ideia só como reserva; `adsFailures` aditivo.
+- [x] Prévia v1 `planned` recusada antes de reservar (409 `DIFFERENTIATION_PLAN_OUTDATED`), sem pagar; rodadas v1 pagas continuam legíveis e aceitáveis.
+- [x] Aceite: origem padrão `ads_keyword_seed`; escolhas antigas mantêm `labs_*`.
+- [x] Tela: confirmação e avisos sem o Labs nas rodadas novas; mensagem do plano desatualizado.
+- [ ] **Integrador**: `lib/agent/platform-catalog.ts` (diferenciação, `:360-399`) e `lib/agent/silo-plan.ts:209`.
+- [ ] **Adendo** na `sdd-diferenciacao-publicados-canibalizados-2026-09-27.md` (§3.3–3.5: fontes e custo).
+- [ ] **Acompanhar** a qualidade sem `ranked_keywords` (mais "Diferenciação fraca" esperada); se o dono quiser, avaliar outra fonte grátis para "o que o Google associa à URL".
+- [ ] **Homologar (usuário) na AdalbaPro:** prévia do par atrair × captar com US$ 0,00 a 0,14; rodada trazendo candidatas do Google Ads.
+
 ## Diferenciar publicados que disputam o mesmo assunto — 2026-09-27
 
 - [x] Núcleo: detecção grátis pelo cache, ângulos (slug, DNA, IA opcional), plano com teto de US$ 0,50 por grupo e hash, rodada paga pelo núcleo da Pesquisa por Assunto, avaliação (separação e encaixe), aplicar com readback, "Manter como está", rotas plan/run/apply, MCP de detecção e prévia, catálogo.

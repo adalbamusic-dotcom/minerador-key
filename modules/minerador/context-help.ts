@@ -20,11 +20,11 @@ const GENERAL_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "ordem-recomendada",
     title: "Ordem recomendada para processar uma keyword",
-    summary: "Siga a sequência lógica → Volume → Resultados → KGR → IA → Revisar → Status.",
+    summary: "Siga a sequência lógica → Volume → IA → Revisar → Status. Resultados e KGR são opcionais.",
     description: "Cada etapa acrescenta evidências ao DNA. A lógica propõe uma leitura, os provedores medem fatos, a IA revisa e a pessoa consolida a decisão.",
     howToUse: [
       "Execute Lógica para criar a leitura inicial.",
-      "Atualize Volume e meça Resultados quando precisar dos fatos quantitativos.",
+      "Atualize Volume pelo Google Ads. Resultados (SERP) é opcional e pago: a primeira coleta da SERP acontece no Arquiteto.",
       "Execute IA e Revisar somente depois de reunir o contexto necessário.",
     ],
     keywords: ["fluxo", "etapas", "processar", "volume", "resultados", "kgr", "ia", "revisão", "status"],
@@ -82,19 +82,19 @@ const DISCOVERY_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "descobrir-por-assunto",
     title: "Buscar keywords que sustentam um Assunto",
-    summary: "O modo Por Assunto parte da frase do Assunto e reúne keywords reais que podem sustentá-lo, mostrando o custo antes de qualquer consulta paga.",
-    description: "O Google Ads e o DataForSEO Labs devolvem as candidatas; o Minerador não fabrica termos. Escreva o Assunto ou escolha um já declarado; o botão Buscar sustentação, na linha do Processador e na Revisão Humana, abre este modo com o Assunto preenchido.",
+    summary: "O modo Por Assunto parte da frase do Assunto e reúne keywords reais do Google Ads que podem sustentá-lo, mostrando o plano antes de qualquer consulta.",
+    description: "O Google Ads devolve as candidatas; o Minerador não fabrica termos. Escreva o Assunto ou escolha um já declarado; o botão Buscar sustentação, na linha do Processador e na Revisão Humana, abre este modo com o Assunto preenchido.",
     sections: [
-      { heading: "Fontes", body: "Google Ads pela frase, e pela frase com a página de destino quando houver; DataForSEO Labs com pesquisas relacionadas, mesma categoria e o que o topo da SERP ranqueia; e os resultados do Google para a frase, reaproveitados do cache quando já existem." },
-      { heading: "Custo", body: "Antes de pesquisar, o diálogo mostra cada fonte, o custo máximo e o que já está em cache. Nada é pago antes de você confirmar." },
+      { heading: "Fontes", body: "Google Ads pela frase, e pela frase com a página de destino quando houver. Pesquisas antigas podem mostrar também fontes do DataForSEO Labs e a estimativa, só para leitura." },
+      { heading: "Custo", body: "Antes de pesquisar, o diálogo mostra o plano: sem custo no DataForSEO, usa a cota do Google Ads. Nada é consultado antes de você confirmar." },
       { heading: "Onde a lista fica", body: "O resultado fica neste navegador. Só vai ao banco quando você envia as selecionadas ao Processador, sem métrica: o volume é medido de novo lá." },
     ],
     howToUse: [
       "Selecione Por Assunto em Tipo de descoberta.",
-      "Escreva o Assunto ou escolha um declarado e confira o custo.",
+      "Escreva o Assunto ou escolha um declarado e confira o plano.",
       "Selecione as candidatas e envie ao Processador.",
     ],
-    keywords: ["por assunto", "assunto", "buscar sustentação", "sustentação", "DataForSEO Labs", "Google Ads", "custo", "tronco editorial"],
+    keywords: ["por assunto", "assunto", "buscar sustentação", "sustentação", "Google Ads", "custo", "tronco editorial"],
   },
   {
     id: "descobrir-modo-enfoque",
@@ -252,7 +252,7 @@ const PROCESSOR_TOPICS: readonly ContextHelpTopic[] = [
     id: "processar-fluxo",
     title: "Usar a sequência de processos",
     summary: "A barra de processos mostra as etapas validadas no Processador, não apenas dados importados.",
-    description: "Lógica, Volume e Resultados recebem confirmação após sua execução no Processador. KGR é automático; IA e Revisão dependem das condições próprias de cada etapa.",
+    description: "Lógica e Volume recebem confirmação após sua execução no Processador. Resultados e KGR são opcionais e não contam para aprovar; IA e Revisão dependem das condições próprias de cada etapa.",
     sections: [
       { heading: "Importante", body: "Uma medição trazida da Descoberta permanece como histórico ou contexto até ser revalidada no Processador." },
       { heading: "Acompanhe", body: "Use a barra de progresso e os avisos para saber o que foi executado e abra a linha para ler o resultado persistido." },
@@ -301,8 +301,8 @@ const PROCESSOR_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "processar-kgr",
     title: "KGR",
-    summary: "KGR é calculado automaticamente a partir de Resultado e Volume atuais e válidos.",
-    description: "O KGR é uma evidência de apoio, não uma aprovação automática. O score só é atual quando os dois inputs canônicos estão disponíveis; aplicabilidade e decisão humana aparecem separadamente.",
+    summary: "KGR = Resultado ÷ Volume. O padrão é Não aplicável; só a pessoa marca Aplicável.",
+    description: "O KGR é uma evidência de apoio, opcional, e não é requisito para aprovar. O score só é atual quando Resultado e Volume estão disponíveis; é bom abaixo de 0,25. A faixa de volume de interesse (150 a 550) é só informativa.",
     sections: [
       { heading: "Não é uma ação", body: "Não existe botão próprio para calcular KGR: ele acompanha a atualização dos dados necessários." },
       { heading: "Zero real", body: "Volume ou Resultado medido como zero é um dado válido; ausência de medição continua sendo desconhecida." },
@@ -404,11 +404,11 @@ const PROCESSOR_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "resultados",
     title: "Resultados",
-    summary: "Mede Resultado, KD e outras evidências orgânicas disponíveis.",
+    summary: "Ação opcional e paga: mede Resultado, KD e outras evidências orgânicas disponíveis. Não é requisito para aprovar.",
     description: "A consulta de Resultados preserva a medição técnica e seus estados. Resultado/allintitle e Keyword Overview podem ter disponibilidade diferente; ausência de KD não apaga um Resultado confirmado.",
     howToUse: [
-      "Selecione as keywords que deseja consultar.",
-      "Acione Resultados e aguarde o aviso de processamento.",
+      "Selecione as keywords que deseja consultar; as sem volume ficam fora (keyword sem volume nunca é coletada).",
+      "Acione \"Resultados (opcional · pago)\" nas ações secundárias da barra, confira o custo estimado, confirme e aguarde o aviso de processamento.",
       "Confira Resultado, KD e a situação de cada medição no Perfil.",
     ],
     keywords: ["resultados", "resultado", "allintitle", "dataforseo", "kd", "overview", "concorrência orgânica"],
@@ -433,7 +433,7 @@ const PROCESSOR_TOPICS: readonly ContextHelpTopic[] = [
     howToUse: [
       "Execute IA e abra Revisar.",
       "Resolva divergências e escolha incluir ou ignorar enriquecimentos.",
-      "Trate a aplicabilidade KGR e acione Concluir revisão.",
+      "Se quiser trabalhar KGR, marque Aplicável (o padrão é Não aplicável) e acione Concluir revisão.",
     ],
     keywords: ["revisar", "revisão humana", "concluir revisão", "divergência", "enriquecimento", "decisão humana"],
   },
@@ -549,15 +549,15 @@ const REVIEW_DECISION_TOPICS: readonly ContextHelpTopic[] = [
   {
     id: "revisao-kgr",
     title: "Tratar a aplicabilidade do KGR",
-    summary: "A pessoa decide se o KGR é aplicável ao caso; o score técnico permanece separado.",
-    description: "Confira Volume, Resultado e o score calculado antes de escolher Aplicável, Não aplicável ou manter Pendente. Um score desfavorável não bloqueia sozinho uma decisão humana aprovada.",
+    summary: "O padrão é Não aplicável; a pessoa marca Aplicável quando quer trabalhar KGR. O score técnico permanece separado.",
+    description: "Confira Volume, Resultado e o score calculado antes de escolher Aplicável ou Não aplicável. Pendente só aparece em keywords antigas e é lido como Não aplicável. O KGR não bloqueia a aprovação.",
     keywords: ["kgr", "aplicável", "não aplicável", "pendente", "score", "decisão humana"],
   },
   {
     id: "revisao-concluir",
     title: "Concluir ou reabrir uma revisão",
     summary: "Concluir confirma a consolidação; Reabrir permite revisar novamente sem refazer medições.",
-    description: "A conclusão exige IA executada, KGR tratado quando aplicável, divergências resolvidas e nenhuma alteração aberta sem salvar. Reabrir cria uma cópia de trabalho e mantém os fatos medidos somente leitura.",
+    description: "A conclusão exige IA executada, divergências resolvidas e nenhuma alteração aberta sem salvar; o KGR não bloqueia. Reabrir cria uma cópia de trabalho e mantém os fatos medidos somente leitura.",
     keywords: ["concluir revisão", "reabrir", "revisar novamente", "cancelar", "cópia de trabalho", "pendências"],
   },
   {

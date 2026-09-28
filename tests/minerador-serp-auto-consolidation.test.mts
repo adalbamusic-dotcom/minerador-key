@@ -135,7 +135,8 @@ test("H · a Revisão Humana não confirma semântica, mas mantém a decisão de
   // A aplicabilidade do KGR continua sendo decisão humana própria.
   assert.ok(humanReview.includes('aria-label="Aplicabilidade do KGR na revisão humana"'));
   assert.ok(humanReview.includes('onAction?.({ type: "kgr"'));
-  assert.equal(readKgrApplicability({}), "pending");
+  // Padrão "não aplicável" desde 2026-09-28; aplicar continua decisão humana.
+  assert.equal(readKgrApplicability({}), "not_applicable");
   assert.equal(calculateKgrFromMetrics(720, 388), 0.5389);
 });
 

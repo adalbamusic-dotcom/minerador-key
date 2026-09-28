@@ -8,7 +8,6 @@ import { createVersionEnvelope } from "../lib/arquiteto/versioning.ts";
 import { normalizeSerpPageUrl } from "../lib/arquiteto/serp-subject-overlap.ts";
 import { DIFFERENTIATION_STAGE, DIFFERENTIATION_SUBJECT_TYPE } from "../lib/arquiteto/published-differentiation.ts";
 import type { DifferentiationRunPorts } from "../lib/arquiteto/published-differentiation-run.ts";
-import type { DataForSeoLabsResearchRequest, DataForSeoLabsResearchResult } from "../lib/minerador/dataforseo-labs-keyword-research-core.ts";
 import { normalizeKeyword } from "../lib/minerador/keyword-import-core.ts";
 import {
   DifferentiationApplyRequestSchema,
@@ -221,19 +220,20 @@ const SERP_CANDIDATAS: Record<string, string[]> = {
 const VOLUME: Record<string, number> = { "anúncios para clínica de estética": 320, "instagram para clínica de estética": 480 };
 
 function portas() {
-  const registro = { openExecution: 0, labs: 0, serp: 0 };
+  const registro = { openExecution: 0, ideias: 0, serp: 0, usoAds: [] as string[] };
   const run: Omit<DifferentiationRunPorts, "now"> = {
     async openExecution() {
       registro.openExecution += 1;
       return {
         ledgerCapability: false,
         findUsage: async () => false,
-        async runLabs(request: DataForSeoLabsResearchRequest, hooks): Promise<DataForSeoLabsResearchResult> {
-          hooks.onRequestStarted();
-          registro.labs += 1;
-          const lista = request.kind === "ranked_keywords" ? [] : request.keyword.includes("captar") ? ["anúncios para clínica de estética"] : request.keyword.includes("atrair") ? ["instagram para clínica de estética"] : [];
-          return { kind: request.kind, endpoint: "x", provider: "dataforseo", providerVersion: "v3", providerRequestId: "r", cost: 0.012, totalCount: null, droppedByRank: 0, keywords: lista.map(item => ({ keyword: item, estimate: { searchVolume: VOLUME[item], label: "Estimativa DataForSEO" }, relatedDepth: null, ranked: null })) };
+        async googleAdsIdeas(seed) {
+          registro.ideias += 1;
+          const texto = seed.kind === "keyword_and_url" ? "" : seed.keywords.join(" ");
+          const lista = texto.includes("captar") ? ["anúncios para clínica de estética"] : texto.includes("atrair") ? ["instagram para clínica de estética"] : [];
+          return { requestId: "r", ideas: lista.map(item => ({ keyword: item, averageMonthlySearches: VOLUME[item], competition: null, competitionIndex: null, averageCpcMicros: null, lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: null })) };
         },
+        async recordGoogleAdsUsage(event) { registro.usoAds.push(event.suffix); },
         async collectSerp(request, opcoes) {
           opcoes.onRequestStarted();
           registro.serp += 1;
@@ -291,7 +291,7 @@ test("prévia, rodada e aceite: hash exigido, grupo relido, readback e decisão 
   const previa = await handleDifferentiationPlan(deps(banco), DifferentiationPlanRequestSchema.parse({ brandId: MARCA, groupId }));
   assert.equal(previa.status, 200, JSON.stringify(previa.body));
   const plano = dados(previa).plan as { planHash: string; costRange: { minUsd: number; maxUsd: number } };
-  assert.deepEqual(plano.costRange, { minUsd: 0.072, maxUsd: 0.284 });
+  assert.deepEqual(plano.costRange, { minUsd: 0, maxUsd: 0.14 }, "só a SERP: 2 páginas × 5 candidatas × 4 lentes");
   const linha = banco.linhas("editorial_workflow_items").find(item => item.subject_type === DIFFERENTIATION_SUBJECT_TYPE)!;
   assert.equal(linha.stage, DIFFERENTIATION_STAGE);
   assert.equal(linha.marca_id, MARCA);
@@ -316,6 +316,10 @@ test("prévia, rodada e aceite: hash exigido, grupo relido, readback e decisão 
   assert.deepEqual(avaliacao.pages.find(pagina => pagina.keywordId === K_ATRAIR)!.secondaries.map(item => item.keyword), ["instagram para clínica de estética"]);
   assert.equal((rodada.proposal as { state: string }).state, "proposed");
   assert.equal(falsas.registro.serp, 8, "2 candidatas × 4 lentes");
+  assert.equal(falsas.registro.ideias, 4, "as keywords novas vêm do Google Ads: 2 sementes por página");
+  assert.deepEqual([...falsas.registro.usoAds].sort(), ["keyword_seed:p1", "keyword_seed:p2", "url_seed:p1", "url_seed:p2"]);
+  assert.deepEqual(rodada.labsFailures, []);
+  assert.deepEqual(rodada.adsFailures, []);
   assert.equal(rodada.paid, true);
 
   // Aceite com a prévia errada: nada é gravado.
@@ -369,7 +373,7 @@ test("rodada: SERP do grupo mudou desde a prévia → nada é pago", async () =>
   const saida = await handleDifferentiationRun(deps(banco, { openRunPorts: async () => falsas.run }), DifferentiationRunRequestSchema.parse({ brandId: MARCA, groupId, operationRequestId: "55555555-5555-4555-8555-555555555555", authorizedPlan: { planHash: plano.planHash, maxCostUsd: plano.costRange.maxUsd } }));
   assert.equal(saida.status, 409);
   assert.equal(saida.body.code, "PLAN_STALE");
-  assert.equal(falsas.registro.openExecution + falsas.registro.labs + falsas.registro.serp, 0);
+  assert.equal(falsas.registro.openExecution + falsas.registro.ideias + falsas.registro.serp, 0);
 });
 
 test("Manter como está: registrado com ator e o grupo sai do painel até a SERP mudar", async () => {
@@ -421,7 +425,7 @@ const proposta = (banco: Banco) => banco.linhas("editorial_workflow_items").find
 
 test("a prévia vale uma rodada: outro id não paga de novo; o mesmo id devolve o resultado gravado", async () => {
   const { banco, falsas, pedido, primeira } = await rodadaFeita();
-  const pagas = { labs: falsas.registro.labs, serp: falsas.registro.serp, open: falsas.registro.openExecution };
+  const pagas = { ideias: falsas.registro.ideias, serp: falsas.registro.serp, open: falsas.registro.openExecution };
 
   const outra = await handleDifferentiationRun(deps(banco, { openRunPorts: async () => falsas.run }), pedido("77777777-7777-4777-8777-777777777777"));
   assert.equal(outra.status, 409);
@@ -432,7 +436,7 @@ test("a prévia vale uma rodada: outro id não paga de novo; o mesmo id devolve 
   assert.equal(dados(mesma).replayed, true);
   assert.equal(dados(mesma).paid, false);
   assert.equal(dados(mesma).evaluationHash, dados(primeira).evaluationHash, "o resultado pago, relido");
-  assert.deepEqual({ labs: falsas.registro.labs, serp: falsas.registro.serp, open: falsas.registro.openExecution }, pagas, "nada foi pago de novo");
+  assert.deepEqual({ ideias: falsas.registro.ideias, serp: falsas.registro.serp, open: falsas.registro.openExecution }, pagas, "nada foi pago de novo");
 });
 
 test("rodada em andamento (outra aba, outro id): 409 sem abrir o provider; a reserva é por lock_version", async () => {
@@ -464,6 +468,31 @@ test("rodada em andamento (outra aba, outro id): 409 sem abrir o provider; a res
   const fora = await handleDifferentiationRun(deps(banco2, { openRunPorts: async () => { throw new Error("sem credencial"); } }), DifferentiationRunRequestSchema.parse({ brandId: MARCA, groupId, operationRequestId: "12121212-1212-4212-8212-121212121212", authorizedPlan: { planHash: plano2.planHash, maxCostUsd: plano2.costRange.maxUsd } }));
   assert.equal(fora.body.code, "DATAFORSEO_UNAVAILABLE");
   assert.equal(proposta(banco2).state, "planned", "a prévia volta a valer");
+});
+
+test("prévia v1 (com Labs) gravada antes da troca: a rodada é recusada antes de reservar, sem abrir o provider", async () => {
+  const banco = await montarBanco();
+  const deteccao = await handleDifferentiationPlan(deps(banco), DifferentiationPlanRequestSchema.parse({ brandId: MARCA }));
+  const groupId = (dados(deteccao).groups as Array<{ groupId: string }>)[0].groupId;
+  await handleDifferentiationPlan(deps(banco), DifferentiationPlanRequestSchema.parse({ brandId: MARCA, groupId }));
+  const linha = proposta(banco);
+  const payload = linha.payload as { plan: { version: string; planHash: string; costRange: { maxUsd: number }; pages: Array<Record<string, unknown>> } };
+  // A prévia como o código de antes a gravava: v1, com Labs e sem as sementes do Google Ads.
+  payload.plan.version = "published-differentiation-plan-v1";
+  payload.plan.pages = payload.plan.pages.map(pagina => ({ ...pagina, ads: undefined, labs: [{ callId: "p1:keyword_ideas", endpoint: "keyword_ideas", input: String(pagina.keyword) }] }));
+  const versaoAntes = linha.lock_version;
+  const falsas = portas();
+  const saida = await handleDifferentiationRun(deps(banco, { openRunPorts: async () => falsas.run }), DifferentiationRunRequestSchema.parse({ brandId: MARCA, groupId, operationRequestId: "14141414-1414-4414-8414-141414141414", authorizedPlan: { planHash: payload.plan.planHash, maxCostUsd: 0.284 } }));
+  assert.equal(saida.status, 409);
+  assert.equal(saida.body.code, "DIFFERENTIATION_PLAN_OUTDATED");
+  assert.match(String(saida.body.error), /antes da troca para o Google Ads.*nada foi pago/);
+  assert.equal(falsas.registro.openExecution + falsas.registro.ideias + falsas.registro.serp, 0, "nada foi aberto nem pago");
+  assert.equal(proposta(banco).state, "planned", "nada foi reservado");
+  assert.equal(proposta(banco).lock_version, versaoAntes, "a proposta não foi regravada");
+
+  // Planejar de novo troca a prévia por uma v2, que roda normalmente.
+  const nova = await handleDifferentiationPlan(deps(banco), DifferentiationPlanRequestSchema.parse({ brandId: MARCA, groupId }));
+  assert.equal((dados(nova).plan as { version: string }).version, "published-differentiation-plan-v2");
 });
 
 test("nova prévia não apaga a avaliação paga: recusada (também pelo MCP); reler é grátis; nova rodada só com pedido explícito", async () => {
@@ -520,7 +549,7 @@ test("rodada: publicado que saiu do Vínculo desde a prévia → nada é pago", 
   assert.equal(saida.status, 409);
   assert.equal(saida.body.code, "PLAN_STALE");
   assert.match(String(saida.body.error), /não é mais um publicado/);
-  assert.equal(falsas.registro.openExecution + falsas.registro.labs + falsas.registro.serp, 0);
+  assert.equal(falsas.registro.openExecution + falsas.registro.ideias + falsas.registro.serp, 0);
   assert.equal(proposta(banco).state, "planned", "nada foi reservado");
 });
 

@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 import { LoaderCircle } from "lucide-react";
-import { SUBJECT_DISCOVERY_SERP_LABEL } from "@/lib/minerador/subject-discovery-plan";
+import { SUBJECT_DISCOVERY_NOTICES, SUBJECT_DISCOVERY_SERP_LABEL } from "@/lib/minerador/subject-discovery-plan";
 import {
+  SUBJECT_SEARCH_FREE_PLAN_TEXT,
   SUBJECT_SEARCH_PLAN_TEXT,
   SUBJECT_SEARCH_UNDECLARED_TEXT,
   SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT,
@@ -24,6 +25,10 @@ import type { SubjectSearchController } from "./use-subject-search";
  * parte; aqui o plano é por FONTE e é confirmado inteiro. Por isso o diálogo é
  * próprio, com a mesma superfície: sobreposição, `surface-elevated`, borda
  * `divider`, tabela compacta e os botões do Minerador.
+ *
+ * Desde 2026-09-28 o plano é só do Google Ads (frase e frase + página) e não
+ * tem custo no DataForSEO: o diálogo mostra "Sem custo" e esconde as colunas
+ * de preço e a SERP da frase, que só um plano antigo teria.
  */
 
 const button = "inline-flex h-9 items-center justify-center gap-2 rounded border px-3 text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50";
@@ -90,13 +95,19 @@ export function SubjectSearchPlanDialog({ controller }: { controller: SubjectSea
   if (!state) return null;
   const { plan } = state;
   const ledgerNotice = (notice: string) => !plan.ledgerRecording && notice.startsWith("Este custo não será registrado");
+  // Plano v2 (só Google Ads): sem chamada paga. As colunas de preço e a SERP da
+  // frase só aparecem num plano que ainda as tenha.
+  const paid = plan.paidCalls > 0;
+  const hasSerp = plan.serp.lenses.length > 0 || Boolean(plan.serp.readFailed);
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="presentation">
     <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="subject-search-plan-title" aria-describedby="subject-search-plan-summary" data-subject-search-plan className="flex max-h-[86vh] w-full max-w-3xl flex-col gap-3 overflow-hidden rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl outline-none">
       <div className="min-w-0">
-        <h2 id="subject-search-plan-title" className="text-base font-semibold text-foreground">Custo da Pesquisa por Assunto</h2>
+        <h2 id="subject-search-plan-title" className="text-base font-semibold text-foreground">{paid ? "Custo da Pesquisa por Assunto" : "Plano da Pesquisa por Assunto"}</h2>
         <p className="mt-1 text-sm leading-6 text-foreground">Assunto: <span className="font-semibold">{plan.phrase}</span></p>
         <p id="subject-search-plan-summary" className="text-sm leading-6 text-foreground" data-subject-search-plan-total>
-          Custo máximo: <strong>{formatSubjectSearchUsd(plan.maxCostUsd)}</strong> · {plan.paidCalls} chamada(s) paga(s) · teto por pesquisa {formatSubjectSearchUsd(plan.hardCapUsd)}
+          {paid
+            ? <>Custo máximo: <strong>{formatSubjectSearchUsd(plan.maxCostUsd)}</strong> · {plan.paidCalls} chamada(s) paga(s) · teto por pesquisa {formatSubjectSearchUsd(plan.hardCapUsd)}</>
+            : <><strong>{SUBJECT_SEARCH_FREE_PLAN_TEXT}</strong> · {plan.lines.length} consulta(s) ao Google Ads</>}
         </p>
         {state.message && <p className="mt-1 text-sm leading-6 text-warning" role="status">{state.message}</p>}
       </div>
@@ -106,35 +117,36 @@ export function SubjectSearchPlanDialog({ controller }: { controller: SubjectSea
           <thead className="sticky top-0 bg-surface text-text-muted">
             <tr>
               <th scope="col" className="px-2 py-1 font-semibold">Fonte</th>
-              <th scope="col" className="px-2 py-1 font-semibold">Chamadas</th>
-              <th scope="col" className="px-2 py-1 font-semibold">Por chamada</th>
-              <th scope="col" className="px-2 py-1 font-semibold">Por item</th>
+              <th scope="col" className="px-2 py-1 font-semibold">Consultas</th>
+              {paid && <th scope="col" className="px-2 py-1 font-semibold">Por chamada</th>}
+              {paid && <th scope="col" className="px-2 py-1 font-semibold">Por item</th>}
               <th scope="col" className="px-2 py-1 font-semibold">Itens máx.</th>
-              <th scope="col" className="px-2 py-1 font-semibold">Custo máximo</th>
+              <th scope="col" className="px-2 py-1 font-semibold">{paid ? "Custo máximo" : "Custo"}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-divider/70">
             {plan.lines.map(line => <tr key={line.kind}>
               <td className="px-2 py-1 text-foreground">{line.kind === "serp_phrase" ? SUBJECT_DISCOVERY_SERP_LABEL : subjectSearchOriginLabel(line.kind)}</td>
               <td className="px-2 py-1 text-foreground/85">{line.kind === "labs_ranked" ? `até ${line.calls}` : line.calls}</td>
-              <td className="px-2 py-1 text-foreground/85">{line.free ? "Grátis" : formatSubjectSearchUsd(line.pricePerTaskUsd)}</td>
-              <td className="px-2 py-1 text-foreground/85">{line.free || !line.pricePerItemUsd ? "—" : formatSubjectSearchUsd(line.pricePerItemUsd)}</td>
+              {paid && <td className="px-2 py-1 text-foreground/85">{line.free ? "Grátis" : formatSubjectSearchUsd(line.pricePerTaskUsd)}</td>}
+              {paid && <td className="px-2 py-1 text-foreground/85">{line.free || !line.pricePerItemUsd ? "—" : formatSubjectSearchUsd(line.pricePerItemUsd)}</td>}
               <td className="px-2 py-1 text-foreground/85">{line.maxItemsPerCall}</td>
-              <td className="px-2 py-1 text-foreground">{line.free ? "Grátis (só roda depois de confirmar)" : formatSubjectSearchUsd(line.maxCostUsd)}</td>
+              <td className="px-2 py-1 text-foreground">{line.free ? "Sem custo (só roda depois de confirmar)" : formatSubjectSearchUsd(line.maxCostUsd)}</td>
             </tr>)}
           </tbody>
         </table>
       </div>
 
       <div className="space-y-1 text-sm leading-6">
-        <p className="text-foreground/85" data-subject-search-plan-serp>
+        {hasSerp && <p className="text-foreground/85" data-subject-search-plan-serp>
           {plan.serp.readFailed
             ? "Resultados do Google para a frase: o cache não pôde ser lido. A SERP não é paga e a fonte das páginas do topo fica de fora."
             : `Resultados do Google para a frase: ${plan.serp.cachedLenses.length} de 4 lentes no cache (0 pagas)${plan.serp.missingLenses.length ? ` · a pagar: ${plan.serp.missingLenses.map(subjectSearchLensName).join(", ")}` : ""}.`}
-        </p>
+        </p>}
         {plan.notApplicable.map(item => <p key={item.kind} className="text-text-muted">Fora desta pesquisa · {item.kind === "serp_phrase" ? SUBJECT_DISCOVERY_SERP_LABEL : subjectSearchOriginLabel(item.kind)}: {item.reason}</p>)}
-        {plan.notices.map(notice => <p key={notice} className={ledgerNotice(notice) ? "text-warning" : "text-text-muted"}>{notice}</p>)}
-        <p className="text-text-muted">Preços do DataForSEO consultados em {plan.prices.consultedAt.split("-").reverse().join("/")}; o custo real vem de cada consulta e nunca passa do máximo confirmado.</p>
+        {/* O resumo acima já diz "sem custo no DataForSEO": o aviso igual do plano não se repete aqui. */}
+        {plan.notices.filter(notice => paid || notice !== SUBJECT_DISCOVERY_NOTICES.free).map(notice => <p key={notice} className={ledgerNotice(notice) ? "text-warning" : "text-text-muted"}>{notice}</p>)}
+        {paid && <p className="text-text-muted">Preços do DataForSEO consultados em {plan.prices.consultedAt.split("-").reverse().join("/")}; o custo real vem de cada consulta e nunca passa do máximo confirmado.</p>}
         <p className="text-foreground/85">{SUBJECT_SEARCH_PLAN_TEXT}</p>
       </div>
 
@@ -201,7 +213,7 @@ export function SubjectSearchImportDialog({ controller, selectedKeys, selectedIt
 
       <div className="space-y-1 text-sm leading-6 text-text-muted">
         <p className="text-foreground/85">{SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT}</p>
-        <p>Nenhuma métrica desta lista vai ao banco: nem o volume do Google Ads nem a estimativa DataForSEO.</p>
+        <p>Nenhuma métrica desta lista vai ao banco: nem o volume do Google Ads nem, em buscas antigas, a estimativa DataForSEO.</p>
         <p>Keywords que já existem e têm registro de aprovação não recebem a origem desta pesquisa, para não sair da aprovação.</p>
       </div>
 

@@ -154,7 +154,7 @@ test("R6 conclui uma revisão sem respostas com keep_logic, ignore e confirm_unk
   assert.equal((completed as Record<string, unknown>).intencao_principal, "Informativa");
 });
 
-test("R6.1 mantém KGR como gate independente da semântica", () => {
+test("R6.1 (2026-09-28): KGR opcional não trava a conclusão; o legado pendente fica gravado", () => {
   const review = {
     ...aiReview,
     overallVerdict: "CONCORDA",
@@ -167,11 +167,13 @@ test("R6.1 mantém KGR como gate independente da semântica", () => {
     }],
   };
   const pendingKgr = { ...semantic(), ai_review: review, kgr_aplicabilidade: "pending" };
-  // The KGR decision remains a human gate, but it is reported instead of
-  // disabling the command upfront.
-  assert.equal(canCompleteHumanReview(pendingKgr).pendingKgrDecision, true);
-  assert.match(canCompleteHumanReview(pendingKgr).reason || "", /KGR/);
-  assert.throws(() => completeHumanReview({ semantic: pendingKgr, intent: "Informativa", actorId: "human-1", completedAt: "2026-08-18T12:20:00.000Z" }), /KGR/);
+  // Desde 2026-09-28 o KGR tem padrão "não aplicável" e não é pendência: a
+  // conclusão passa e não regrava o valor legado.
+  assert.equal(canCompleteHumanReview(pendingKgr).pendingKgrDecision, undefined);
+  assert.doesNotMatch(canCompleteHumanReview(pendingKgr).reason || "", /KGR/);
+  const completed = completeHumanReview({ semantic: pendingKgr, intent: "Informativa", actorId: "human-1", completedAt: "2026-08-18T12:20:00.000Z" });
+  assert.equal(completed.kgr_aplicabilidade, "pending");
+  assert.equal((completed.human_review as { kgrApplicability?: string }).kgrApplicability, "not_applicable");
   const notApplicable = { ...pendingKgr, kgr_aplicabilidade: "not_applicable" };
   assert.equal(canCompleteHumanReview(notApplicable).ok, true);
   assert.equal(canCompleteHumanReview(notApplicable).pendingKgrDecision, undefined);

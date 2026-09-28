@@ -402,14 +402,14 @@ export function projectPlatformKeywordRow(row: Record<string, unknown>) {
  * O RESULTADO PAGO CABE NA RESPOSTA (J2).
  *
  * O execute devolve até 600 candidatas com métricas completas, ranked e
- * estimativa do Labs: ~300 kB, bem acima do que um cliente MCP aceita numa
+ * estimativa do Labs (só em pesquisas antigas): ~300 kB, bem acima do que um cliente MCP aceita numa
  * resposta de ferramenta. E as candidatas não ficam gravadas: repetir a
  * execução é recusado (OPERATION_ALREADY_EXECUTED). A IA recebe então uma
  * projeção compacta — o que ela precisa para escolher e para montar o
  * `import_subject_keywords` (keyword, volume do Ads, concorrência, `origins`,
  * melhor posição, uma evidência) — no mesmo teto de bytes das fatias do
  * Redator. A lista já vem ordenada por volume (D2.3: com volume antes, média
- * do Ads e depois estimativa do Labs); se não couber, ficam as primeiras e o corte vai em
+ * do Ads; em pesquisas antigas, depois a estimativa do Labs); se não couber, ficam as primeiras e o corte vai em
  * `trimmed`, nunca em silêncio. A lista inteira segue na tela.
  */
 export const PLATFORM_TOOL_RESULT_MAX_BYTES = WRITER_EVIDENCE_LIMITS.sliceMaxBytes;
@@ -423,7 +423,7 @@ export type AgentSubjectCandidate = {
    * estimativa DataForSEO maior que zero. `false` = sem volume: não propor.
    */
   hasVolume: boolean;
-  /** D2.3 (aditivo): estimativa DataForSEO Labs, rotulada; nunca é Volume. Só quando maior que zero. */
+  /** D2.3 (aditivo): estimativa DataForSEO Labs, rotulada; nunca é Volume. Só quando maior que zero (só em pesquisas antigas). */
   estimate?: number;
   competition?: string;
   origins: SubjectDiscoveryExecuteResponse["candidates"][number]["origins"];
@@ -637,7 +637,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     description: [
       "Use para ver keywords do Minerador com métricas, status, Vínculo e declaração de Assunto, lidas como a tela lê. Filtre por status, só Assuntos ou texto. Paginado.",
       "intent e funnel são os canônicos (SERP > humano > lógica), com a origem em intentSource/funnelSource; intent nulo é intenção ainda não resolvida (intentLabel diz o estado).",
-      `kgrFull é KGR < ${kgrLimit} (${kgrLimit} exato não é pleno). O KGR só conta como critério quando kgrApplicability não é 'not_applicable': nesse caso kgr e kgrFull vêm nulos e kgrUse é 'nao_utilizada' (decisão humana).`,
+      `kgrFull é KGR < ${kgrLimit} (${kgrLimit} exato não é pleno). O KGR só conta como critério quando kgrApplicability não é 'not_applicable': nesse caso kgr e kgrFull vêm nulos e kgrUse é 'nao_utilizada' — é o padrão desde 2026-09-28; só a decisão humana 'Aplicável' liga o KGR. Resultados e KGR não são requisito para aprovar.`,
       "pageType vem resolvido: type, source (human, site ou default), stance (potential ou declared) e o rótulo da tela; keyword publicada como silo já é silo declarado.",
     ].join(" "),
     inputSchema: z.object({
@@ -998,9 +998,10 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
   server.registerTool("search_subject_keywords", {
     title: "Pesquisar keywords de sustentação por Assunto",
     description: [
-      "Use para achar as buscas reais em torno de um Assunto (Google Ads + DataForSEO Labs).",
+      "Use para achar as buscas reais em torno de um Assunto (Google Ads: frase e página de destino).",
       "Se o Assunto já está declarado, passe request.subjectKeywordId (de declare_subjects rows[].keywordId ou de get_platform_state minerador.subjects[].keywordId): o servidor relê a frase, a nota e a página de destino, e o destino alimenta a fonte por URL. Sem ele, request.phrase.",
-      "Sempre primeiro request.mode 'plan' (grátis): devolve o plano e o custo. Mostre o custo ao usuário.",
+      "Sempre primeiro request.mode 'plan' (grátis): devolve o plano (sem custo no DataForSEO; usa a cota do Google Ads). Mostre o plano ao usuário.",
+      "Custo em dinheiro: zero (o Google Ads não cobra a consulta). A ferramenta continua marcada como de provider porque a execução gasta a cota do Google Ads da marca: por isso o aceite do usuário e o escopo provider.spend. Não apresente a pesquisa como gasto em dinheiro.",
       "Só com o aceite dele chame request.mode 'execute' com authorizedPlan (planHash e maxCostUsd do plano), userConfirmation e um operationRequestId UUID v4 novo — repetido só numa nova tentativa do MESMO execute. Executar exige também o escopo provider.spend.",
       `targeting: language ${subjectSearchLanguagesText()}; selectedStates ['Todos os estados'] ou siglas de UF (ex.: ['SP','RJ']); keywordPlanNetwork 'GOOGLE_SEARCH'; includeAdultKeywords false.`,
       `O execute volta compacto, em até ${Math.round(PLATFORM_TOOL_RESULT_MAX_BYTES / 1024)} kB: candidatas na ordem de relevância com keyword, volume (Google Ads), origins e uma evidência; o que não coube vem declarado em trimmed.`,
@@ -1011,7 +1012,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
   }, async ({ brandId, request, userConfirmation }) => {
     const executar = request.mode === "execute";
     if (executar && !userConfirmation) {
-      return asText({ ok: false, code: "human_confirmation_required", message: "A execução é paga. Mostre o custo do plano, peça o aceite e envie as palavras dele em userConfirmation." });
+      return asText({ ok: false, code: "human_confirmation_required", message: "A execução consulta o Google Ads da marca (sem custo no DataForSEO; usa a cota). Mostre o plano, peça o aceite e envie as palavras dele em userConfirmation." });
     }
     // Executar exige os dois escopos; a recusa vem do invólucro, antes de qualquer leitura.
     const escopos = executar ? ["minerador.write", "provider.spend"] as const : "minerador.write" as const;
@@ -1097,7 +1098,7 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("send_keywords_to_arquiteto", {
     title: "Enviar keywords aprovadas ao Arquiteto",
-    description: "Use quando o usuário já aprovou as keywords no Minerador: transfere ao Arquiteto (idempotente). A resposta traz requested, sent e notSent: keyword não aprovada (ou aprovada e alterada depois) não vai e aparece em notSent com o motivo; se nenhuma for elegível, a resposta é o erro nothing_eligible. Aprovação incompleta (sem Lógica, Volume, Resultados ou KGR) ou página de destino fora do domínio recusa o lote inteiro. Formar artigos e silos continua na tela do Arquiteto.",
+    description: "Use quando o usuário já aprovou as keywords no Minerador: transfere ao Arquiteto (idempotente). A resposta traz requested, sent e notSent: keyword não aprovada (ou aprovada e alterada depois) não vai e aparece em notSent com o motivo; se nenhuma for elegível, a resposta é o erro nothing_eligible. Aprovação incompleta (sem Lógica ou Volume) ou página de destino fora do domínio recusa o lote inteiro. Formar artigos e silos continua na tela do Arquiteto.",
     inputSchema: z.object({ brandId: brandIdInput, keywordIds: z.array(z.string().uuid()).min(1).max(500) }),
     annotations: write,
   }, async ({ brandId, keywordIds }) => call("send_keywords_to_arquiteto", "arquiteto.write", { brandId }, [{ module: "arquiteto", action: "create" }], async ({ access }) => {

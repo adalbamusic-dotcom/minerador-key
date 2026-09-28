@@ -10,6 +10,18 @@
 > SDD de egress (`sdd-uso-supabase-orcamento-egress-2026-09-23.md`), SDD do
 > Assunto (`sdd-assunto-tronco-editorial-2026-09-24.md`), ADR-022 e invariantes
 > 79 a 83.
+>
+> **Adendo de 2026-09-28 (decisão do dono, "vamos aplicar"):** SDD
+> `sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md`, APROVADA.
+> - No Minerador, a SERP (Resultados/allintitle, intenção e funil pela SERP)
+>   passa a ser ação **manual e opcional** e não é requisito para aprovar.
+> - A **primeira coleta da SERP** do fluxo passa a ser no Arquiteto, na aba
+>   Artigos, só para as keywords com volume do lote.
+> - A Pesquisa por Assunto usa só o Google Ads.
+> - O KGR tem padrão "não aplicável" (ADR-020, adendo).
+>
+> As seções A4, A6, A6.1, B4, B7, D2.3, D5 e C foram ajustadas e marcam o
+> que mudou. É regra do dono: o código ainda não foi alterado (Planejado).
 
 ---
 
@@ -58,7 +70,9 @@ Quando duas fontes discordam, vence, nesta ordem:
 
 ### A4. Cache: a SERP paga é paga uma vez
 
-- **A SERP vai para o cache no banco desde a primeira coleta**, em qualquer lugar onde ela for acionada: Descobrir, Pesquisa por Assunto, Processador, Arquiteto ou Radar. É a única exceção à regra de que o Descobrir não grava no banco, porque é dado pago.
+- **A SERP vai para o cache no banco desde a primeira coleta**, em qualquer lugar onde ela for acionada: Descobrir, Processador (opcional), Arquiteto ou Radar. É a única exceção à regra de que o Descobrir não grava no banco, porque é dado pago.
+- **A primeira coleta do fluxo é no Arquiteto** (desde 2026-09-28): na aba Artigos, nas 4 lentes, para todas as keywords **com volume** do lote que está sendo formado. Isso acontece uma vez só, com cache primeiro e o plano de custo antes. **Keyword sem volume nunca é coletada.** As coletas do Minerador (Resultados, Descobrir) passam a ser manuais e opcionais, e o que elas já gravaram continua valendo pelo cache.
+- *Até 2026-09-27, a Pesquisa por Assunto também coletava a SERP da frase. Essa coleta saiu com o adendo de 2026-09-28, e as entradas já gravadas continuam no cache até vencerem.*
 - **Chave do cache:** marca × keyword × localidade × idioma × lente × endpoint.
 - **Validade:** 30 dias, por marca.
 - **Cache primeiro, sempre.** Antes de qualquer chamada paga, o sistema lê o cache e **só paga as lentes que faltam**. Uma SERP que o Minerador pagou serve ao Arquiteto e ao Radar, e o inverso também vale.
@@ -83,30 +97,37 @@ Quando duas fontes discordam, vence, nesta ordem:
 | Área | Quando a SERP entra | O que ela decide |
 | --- | --- | --- |
 | **Descobrir** | Só com o filtro de Resultado ou de KD ativado (os dois começam em "Sem medição"), e só pelo botão de medir. | Resultados (allintitle), KD e a SERP nas 4 lentes, que vai para o cache. |
-| **Pesquisa por Assunto** | Só com o plano confirmado. A SERP da frase entra nas 4 lentes, como unidade. | Mostra quais páginas estão no topo, para a fonte "o que o topo ranqueia". |
-| **Processador (Minerador)** | Botão Resultados. | Intenção e funil saem das **4 lentes** (classificador v4). A SERP conclusiva fecha intenção e funil acima da Lógica. Se a SERP diverge, vira "Misto na SERP (A × B)", nunca "Ambíguo" por falta de leitura. |
-| **Arquiteto** | "Processar arquitetura" é **só Lógica, sem provider**. A SERP entra depois, por ação explícita: validar a formação dos artigos, eleger a primária de um Silo novo e responder à pergunta territorial. | Valida a composição de cada artigo; elege a primária entre candidatas de um Silo novo. Sem candidata forte, a eleição recusa. |
-| **Radar** | Investigação do artigo, com cache primeiro. "Recoletar agora" é pago e pede confirmação. | Estrutura observada, concorrentes, perguntas, lacunas, onde o Assunto cabe. Congela tudo ao finalizar. |
+| **Pesquisa por Assunto** | **Não coleta SERP** desde 2026-09-28. Usa só o Google Ads (frase e página de destino), sem custo no DataForSEO. *Antes: a SERP da frase entrava nas 4 lentes para a fonte "o que o topo ranqueia" do DataForSEO Labs, que saiu.* | Nada. As candidatas vêm do Google Ads. |
+| **Processador (Minerador)** | **Opcional:** botão Resultados, manual e pago. **Não é requisito para aprovar** (aprovar exige Volume do Google Ads e Lógica) e não é etapa da sequência de processos. | Se o usuário rodar: intenção e funil saem das **4 lentes** (classificador v4); a SERP conclusiva fecha intenção e funil acima da Lógica; se diverge, vira "Misto na SERP (A × B)". Sem SERP, a intenção e o funil da Lógica ficam como **indicação**, nunca como requisito. |
+| **Arquiteto** | "Processar arquitetura" é **só Lógica, sem provider**. **Na aba Artigos acontece a primeira coleta da SERP do fluxo:** as 4 lentes de todas as keywords com volume do lote, antes da formação, uma vez só, com cache primeiro e plano de custo. Por artigo, o allintitle da principal (uma consulta, cache primeiro). Eleger a primária de um Silo novo e a pergunta territorial continuam por ação explícita. Na fase Silos, a SERP por keyword passa a ler só o cache por padrão; a coleta ali é manual. | Valida a composição de cada artigo; alimenta a medida "mesmo assunto" (D2.2) da formação; elege a primária entre candidatas de um Silo novo (sem candidata forte, a eleição recusa); dá o KGR do **artigo** quando o humano escolhe "Aplicar KGR" (padrão: não). |
+| **Radar** | Investigação do artigo, com cache primeiro: reaproveita a coleta do Arquiteto (mesma chave, mesmo cache). Keyword sem volume não gera consulta auxiliar. "Recoletar agora" é pago e pede confirmação. YouTube e Amazon **acrescentam** fontes e nunca substituem nem apagam a busca no Google. | Estrutura observada, concorrentes, perguntas, lacunas, onde o Assunto cabe. Congela tudo ao finalizar. |
 | **Redator e CSV** | Nunca coletam. | Leem a SERP congelada pelo Radar, com as 4 lentes e a proveniência. |
 
 ### A6.1 Minerador e Radar: a mesma SERP, perguntas diferentes
 
 Os dois usam **o mesmo cache**. O que muda é a pergunta que cada um faz à SERP.
 
+> **Desde 2026-09-28:** no Minerador a SERP é **opcional**. Ela não é
+> requisito para aprovar, e quem paga primeiro, normalmente, é o **Arquiteto**,
+> na aba Artigos. A coluna Minerador abaixo vale quando o usuário aciona
+> Resultados por conta própria.
+
 | | **Minerador** | **Radar** |
 | --- | --- | --- |
 | **Pergunta** | "O que é esta busca?": uma keyword de cada vez. | "O que este artigo precisa ter para ganhar?": o artigo inteiro, com todas as keywords dele. |
 | **Recebe** | A keyword, com a Lógica já feita. | O ArticleDNA: principal, secundárias, reforços e Assunto. |
-| **Quando coleta** | Botão Resultados no Processador, ou "Medir resultados" no Descobrir com o filtro ativo. Numa ação só, vêm Resultados (allintitle), KD e a SERP nas 4 lentes. | Na investigação do artigo: SERP da principal e das secundárias nas 4 lentes. "Atualizar SERP" usa o cache; "Recoletar agora" é pago e pede confirmação. |
-| **Paga** | Normalmente é quem paga primeiro. | Só as lentes que faltam: reaproveita o que o Minerador e o Arquiteto já pagaram. |
+| **Quando coleta** | Só por ação manual e opcional: botão Resultados no Processador, ou "Medir resultados" no Descobrir com o filtro ativo. Numa ação só, vêm Resultados (allintitle), KD e a SERP nas 4 lentes. | Na investigação do artigo: SERP da principal e das secundárias com volume, nas 4 lentes. "Atualizar SERP" usa o cache; "Recoletar agora" é pago e pede confirmação. |
+| **Paga** | Só quando o usuário aciona. *Até 2026-09-27 era quem pagava primeiro.* | Só as lentes que faltam: reaproveita o que o Arquiteto (primeira coleta) e o Minerador já pagaram. |
 | **O que lê da SERP** | Os orgânicos e todos os blocos (vídeos, produtos, perguntas, AI Overview, local), nas 4 lentes, para classificar a busca; a concorrência (domínios fortes); a presença do site da marca. | Tudo o que ajuda a escrever: títulos e estrutura dos concorrentes, perguntas, AI Overview e citações, vídeos, produtos, lacunas, diferença de formato entre aparelhos e onde o Assunto aparece. |
-| **O que decide** | **Intenção e funil** da keyword. Se a SERP for conclusiva, vale acima da Lógica. Se as lentes divergirem, "Misto na SERP (A × B)". Também o formato esperado. | O **modelo editorial**: seções, cobertura obrigatória (inclusive a seção da virada), posição sugerida da virada, complemento do H1, se a SERP sustenta o artigo (suficiente, parcial ou em conflito), alertas e lacunas. |
+| **O que decide** | **Intenção e funil** da keyword, quando a SERP foi coletada. Se a SERP for conclusiva, vale acima da Lógica. Se as lentes divergirem, "Misto na SERP (A × B)". Também o formato esperado. Sem SERP, a Lógica dá a indicação e nada fica pendente. | O **modelo editorial**: seções, cobertura obrigatória (inclusive a seção da virada), posição sugerida da virada, complemento do H1, se a SERP sustenta o artigo (suficiente, parcial ou em conflito), alertas e lacunas. |
 | **O que grava** | No KeywordDNA, só o **resumo** (`evidencia_serp`: intenção, funil, lentes lidas, acordo entre elas). O corpo fica no cache. | A investigação e, ao **finalizar**, o pacote **congelado**: lentes usadas, estado da SERP, estrutura. Depois de finalizado, não atualiza mais. |
 | **Entrega** | KeywordDNA aprovado, para o Arquiteto. | Pacote congelado, para o Redator e o CSV. |
 | **Nunca faz** | Agrupar keywords, formar artigo, recoletar sozinho, inventar intenção sem evidência. | Reagrupar keywords, trocar a principal, mudar papéis, slug, canonical ou o Assunto. O que ele acha que deveria mudar vira **alerta e proposta ao Arquiteto**. |
 
 **Entre os dois fica o Arquiteto:**
+- desde 2026-09-28, faz a **primeira coleta** da SERP das keywords com volume do lote, na aba Artigos, antes da formação (A4);
 - usa a SERP das keywords (a mesma do cache) para **validar a composição** de cada artigo;
+- mede o allintitle da principal de cada artigo e calcula o KGR do artigo só quando o humano escolhe "Aplicar KGR" (padrão: não);
 - usa a mesma SERP para **eleger a primária** de um Silo novo;
 - não investiga o conteúdo: isso é do Radar.
 
@@ -165,7 +186,7 @@ Regras entre elas:
 
 ### B4. Aprovação do Assunto
 
-- Com Assunto declarado, aprovar **dispensa Volume, Resultados e KGR**. Só a **Lógica** continua exigida. Ela é local, grátis, **roda sozinha** logo depois da declaração e dá ao Arquiteto uma hipótese de intenção e funil.
+- *Desde 2026-09-28, Resultados e KGR não são exigidos para nenhuma keyword: aprovar exige Volume e Lógica.* Com Assunto declarado, aprovar **dispensa também o Volume**. Só a **Lógica** continua exigida. Ela é local, grátis, **roda sozinha** logo depois da declaração e dá ao Arquiteto uma hipótese de intenção e funil.
 - **A aprovação continua sendo um ato humano** pelo Status: nada é aprovado sozinho.
 - **Mesma regra na tela e no servidor:** a tela e a trava do envio ao Arquiteto usam a mesma regra.
 
@@ -185,14 +206,12 @@ Regras entre elas:
 ### B7. Encontrar as keywords de sustentação (Pesquisa por Assunto)
 
 - **No Descobrir,** o modo "Por Assunto" recebe a frase (e, opcionalmente, a nota e a página) ou um Assunto já declarado.
-- **Fontes:**
-  - Google Ads pela frase e pela página de destino, grátis;
-  - pesquisas relacionadas do Google, mesma categoria e o que as páginas do topo da SERP da frase já ranqueiam, pagas pelo DataForSEO Labs;
-  - a SERP da frase, nas 4 lentes, com cache primeiro.
-- **Custo:** o custo aparece antes, e o teto é de **US$ 0,20 por pesquisa**.
+- **Fontes (desde 2026-09-28):** só o **Google Ads**, pela frase e pela página de destino. Não tem custo no DataForSEO e usa a cota do Google Ads.
+  - *Até 2026-09-27, havia também as pesquisas relacionadas, a mesma categoria e o que o topo da SERP da frase ranqueia, pagas pelo DataForSEO Labs, e a SERP da frase nas 4 lentes. Essas fontes saíram. As pesquisas antigas que as têm continuam legíveis e importáveis.*
+- **Custo:** o plano continua aparecendo antes e diz "sem custo no DataForSEO". O teto de **US$ 0,20 por pesquisa** fica para qualquer fonte paga futura.
 - **Candidatas:**
   - cada uma mostra de onde veio e por quê;
-  - a estimativa de volume do Labs aparece rotulada e **nunca vira volume**, porque o volume oficial é medido depois no Processador pelo Google Ads;
+  - a estimativa de volume do Labs, só em pesquisas antigas, aparece rotulada e **nunca vira volume**, porque o volume oficial é medido depois no Processador pelo Google Ads;
   - o Minerador não inventa keyword: toda candidata vem de um provider.
 - **Onde fica a lista:**
   - a lista fica **no navegador**, por 30 dias, com no máximo 10 pesquisas por marca, e a vencida e a mais antiga saem sozinhas;
@@ -292,7 +311,7 @@ O Posto da keyword publicada diz o que o dono quer do artigo:
 
 Decidido pelo dono em 2026-09-27: "se não tem volume, não presta".
 
-- **Keyword sem volume não reforça nada.** O Google Ads sem média e a estimativa do DataForSEO igual a zero ou vazia contam como sem volume.
+- **Keyword sem volume não reforça nada.** O Google Ads sem média e a estimativa do DataForSEO igual a zero ou vazia contam como sem volume. *Desde 2026-09-28, as coletas novas usam só a média do Google Ads maior que zero; a estimativa conta só em registros antigos. Keyword sem volume também nunca é coletada na SERP (A4).*
   - Ela nunca é sugerida como reforço, sustentação ou nova principal.
   - Na Pesquisa por Assunto, fica **escondida por padrão**, com o total escondido à vista.
   - O Assunto é a única exceção, porque ele é o tronco.
@@ -323,8 +342,8 @@ Decidido pelo dono em 2026-09-27: "se não tem volume, não presta".
 ### D5. O DNA das keywords vem primeiro
 
 - **Todo processo do Arquiteto começa lendo os KeywordDNAs aprovados:**
-  - intenção e funil tirados da SERP nas 4 lentes;
-  - volume, KGR e Resultados;
+  - intenção e funil tirados da SERP nas 4 lentes, quando o Minerador coletou; sem SERP, a indicação da Lógica. *Desde 2026-09-28, a SERP das keywords com volume é coletada pelo próprio Arquiteto na aba Artigos (A4), e o Arquiteto não grava no KeywordDNA;*
+  - volume e, quando existirem, KGR e Resultados;
   - entidade central e nicho;
   - Vínculo: posto, tipo de página, URL publicada e Assunto;
   - proveniência, como a Pesquisa por Assunto.
@@ -360,8 +379,12 @@ Cada item abaixo é uma regra acima transformada em verificação. Um "não" é 
 1. Alguma tela coleta SERP com menos de 4 lentes, ou oferece "só a principal" como padrão?
 2. Alguma chamada paga sai sem plano e confirmação, ou sem registro no ledger?
 3. Alguma área paga de novo uma lente que está no cache dentro dos 30 dias, sem o botão "Recoletar"?
-4. A SERP coletada no Descobrir ou na Pesquisa por Assunto vai para o cache e serve ao Processador, ao Arquiteto e ao Radar?
-5. A intenção e o funil do Processador saem das 4 lentes, com "Misto na SERP" quando a SERP diverge?
+4. A SERP coletada no Descobrir, no Processador ou no Arquiteto vai para o cache e serve às outras áreas e ao Radar?
+5. Quando o usuário roda Resultados, a intenção e o funil do Processador saem das 4 lentes, com "Misto na SERP" quando a SERP diverge? E aprovar dispensa Resultados e KGR?
+13. A primeira coleta da SERP acontece na aba Artigos do Arquiteto, só para keywords com volume, uma vez só e com cache primeiro? Alguma keyword sem volume foi coletada?
+14. O KGR aparece como "não aplicável" por padrão no Minerador e no Arquiteto, e só é aplicado por escolha humana?
+15. A Pesquisa por Assunto ou a diferenciação de publicados chamou o DataForSEO Labs?
+16. Algum dossiê do Radar com YouTube ou Amazon deixou de levar a busca no Google?
 6. Algum filtro, abertura de tela ou importação dispara SERP?
 7. O Radar congela as lentes que usou, e o Redator lê o que foi congelado?
 8. A SERP trocou alguma principal publicada, ou moveu alguma keyword, sem decisão humana?

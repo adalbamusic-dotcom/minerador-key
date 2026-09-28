@@ -40,7 +40,13 @@ import {
   subjectSearchOriginLabel,
   formatSubjectSearchUsd,
   subjectSearchLensName,
+  subjectSearchHasEstimate,
+  subjectSearchOriginFilterOptions,
   SUBJECT_SEARCH_DEFAULT_FILTERS,
+  SUBJECT_SEARCH_FREE_PLAN_TEXT,
+  SUBJECT_SEARCH_LANGUAGE_TEXT,
+  SUBJECT_SEARCH_LOCAL_LIST_TEXT,
+  SUBJECT_SEARCH_PLAN_TEXT,
 } from "../modules/minerador/discovery/subject-search-model.ts";
 import { SUBJECT_DISCOVERY_SOURCES, SUBJECT_DISCOVERY_NOTICES } from "../lib/minerador/subject-discovery-plan.ts";
 import { SubjectDiscoverySearchRequestSchema } from "../lib/minerador/subject-discovery-search.ts";
@@ -363,7 +369,7 @@ test("D2.3: o envio avisa quantas selecionadas estão sem volume, sem contar a f
   assert.equal(countSelectedWithoutVolume(list as never[], selected), 2);
   assert.equal(countSelectedWithoutVolume(list as never[], new Set(["leads qualificados"])), 0);
   assert.equal(subjectSearchSelectedWithoutVolumeText(0), null);
-  assert.match(subjectSearchSelectedWithoutVolumeText(2) || "", /^2 selecionadas estão sem volume: sem média do Google Ads e sem estimativa DataForSEO\./);
+  assert.match(subjectSearchSelectedWithoutVolumeText(2) || "", /^2 selecionadas estão sem volume: sem média do Google Ads\./);
   assert.match(subjectSearchSelectedWithoutVolumeText(1) || "", /^1 selecionada está sem volume/);
   // O aviso não muda o envio: os itens continuam sem métrica.
   const { items } = buildSubjectDiscoveryImportItems(list as never[], selected, "marketing para clinicas");
@@ -381,6 +387,46 @@ test("filtros locais: origem, já existe e texto sem acento", () => {
   assert.equal(filterSubjectCandidates(list as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, onlyWithVolume: false, text: "clinica" }).length, 1);
 });
 
+/* ------------------- 2026-09-28: busca antiga continua abrindo ------------------- */
+
+test("busca antiga (Labs, SERP da frase e estimativa) continua lida, filtrável e importável", () => {
+  const antiga = record({ id: searchId(40), savedAt: daysAgo(2) });
+  antiga.result.plan = { version: "subject-discovery-plan-v1", paidCalls: 11, maxCostUsd: 0.182 } as never;
+  antiga.result.serp = { lenses: [{ lens: "desktop-windows", source: "collected", costUsd: 0.0035, stored: true, urls: 3, reason: null }], topUrls: [{ url: "https://a.com/1", bestRankGroup: 1, lensCount: 2 }], readFailed: null } as never;
+  antiga.result.candidates = [
+    candidate({ keyword: "captar pacientes", normalizedKeyword: "captar pacientes", origins: ["labs_related"], dataForSeoEstimate: { searchVolume: 480, label: "Estimativa DataForSEO" } }),
+    candidate({ keyword: "seo local", normalizedKeyword: "seo local", origins: ["ads_keyword_seed", "labs_ranked"], evidence: ["ranqueia em #3 em exemplo.com/pagina"], googleAds: { averageMonthlySearches: 90, competition: null, competitionIndex: null, averageCpcMicros: null, lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: null } }),
+  ] as never;
+  const key = subjectSearchLocalKey(subjectSearchLocalScope(ACTOR, BRAND) as string, antiga.searchId);
+  const lida = readSubjectSearchLocalRecord(antiga, { actorUserId: ACTOR, brandId: BRAND, key });
+  assert.ok(lida, "o registro antigo continua legível");
+  const candidatas = lida.result.candidates;
+
+  // A coluna Estimativa e as origens do Labs aparecem, porque a busca as tem.
+  assert.equal(subjectSearchHasEstimate(candidatas), true);
+  assert.deepEqual(subjectSearchOriginFilterOptions(candidatas), ["ads_keyword_seed", "ads_url_seed", "labs_related", "labs_ranked"]);
+  // A regra de volume da época vale para ela: estimativa > 0 conta.
+  assert.equal(filterSubjectCandidates(candidatas as never[], SUBJECT_SEARCH_DEFAULT_FILTERS).length, 2);
+  assert.equal(filterSubjectCandidates(candidatas as never[], { ...SUBJECT_SEARCH_DEFAULT_FILTERS, origin: "labs_related" }).length, 1);
+
+  // Uma candidata só do Labs não perde a origem e não some do envio.
+  const { items } = buildSubjectDiscoveryImportItems(candidatas as never, new Set(["captar pacientes", "seo local"]), "seo para clinicas");
+  assert.deepEqual(items.map(item => item.origins), [["labs_related"], ["ads_keyword_seed", "labs_ranked"]]);
+  const body = { importRequestId: "77777777-7777-4777-8777-777777777778", searchId: antiga.searchId, subjectKeywordId: null, subjectPhrase: "SEO para clínicas", items };
+  assert.equal(SubjectDiscoveryImportRequestSchema.safeParse(body).success, true, "o envio de uma busca antiga passa no schema");
+});
+
+test("busca nova (só Google Ads): sem coluna Estimativa e o filtro de origem só com as do Google Ads", () => {
+  const novas = [
+    candidate({ keyword: "marketing para clinicas", normalizedKeyword: "marketing para clinicas", origins: ["ads_keyword_seed", "ads_url_seed"], evidence: ["Ideia do Google Ads para a frase"], googleAds: { averageMonthlySearches: 880, competition: "LOW", competitionIndex: 10, averageCpcMicros: null, lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: "BRL" } }),
+    candidate({ keyword: "sem media", normalizedKeyword: "sem media", origins: ["ads_keyword_seed"], googleAds: { averageMonthlySearches: null, competition: null, competitionIndex: null, averageCpcMicros: null, lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: null } }),
+  ];
+  assert.equal(subjectSearchHasEstimate(novas as never[]), false);
+  assert.deepEqual(subjectSearchOriginFilterOptions(novas as never[]), ["ads_keyword_seed", "ads_url_seed"]);
+  assert.deepEqual(subjectSearchOriginFilterOptions([]), ["ads_keyword_seed", "ads_url_seed"]);
+  assert.deepEqual((filterSubjectCandidates(novas as never[], SUBJECT_SEARCH_DEFAULT_FILTERS) as Array<{ keyword: string }>).map(item => item.keyword), ["marketing para clinicas"]);
+});
+
 /* ------------------------------- rótulos e textos ------------------------------- */
 
 test("cada origem tem rótulo próprio e nenhuma cai em 'Google Ads' genérico", () => {
@@ -391,9 +437,11 @@ test("cada origem tem rótulo próprio e nenhuma cai em 'Google Ads' genérico",
 });
 
 test("textos fixos da tela", () => {
-  assert.equal(SUBJECT_SEARCH_RULE_TEXT, "O Google Ads e o DataForSEO Labs devolvem as candidatas; o Minerador não fabrica termos.");
+  assert.equal(SUBJECT_SEARCH_RULE_TEXT, "O Google Ads devolve as candidatas, pela frase e pela página de destino; o Minerador não fabrica termos.");
   assert.equal(SUBJECT_SEARCH_RULE_TEXT, SUBJECT_DISCOVERY_NOTICES.sourceRule);
-  assert.equal(SUBJECT_SEARCH_ENTER_HELP, "Enter mostra o custo antes de pesquisar.");
+  assert.equal(SUBJECT_SEARCH_ENTER_HELP, "Enter mostra o plano antes de pesquisar.");
+  assert.equal(SUBJECT_SEARCH_FREE_PLAN_TEXT, "Sem custo no DataForSEO; usa a cota do Google Ads");
+  assert.doesNotMatch(SUBJECT_SEARCH_LANGUAGE_TEXT + SUBJECT_SEARCH_LOCAL_LIST_TEXT + SUBJECT_SEARCH_PLAN_TEXT, /Labs|paga de novo|Nada é pago/, "nenhum texto promete ou cobra o Labs");
   assert.equal(SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT, "O volume será medido de novo no Processador, pelo Google Ads, sem custo.");
   assert.equal(SUBJECT_SEARCH_UNDECLARED_TEXT, "Para ligar estas keywords a um Assunto, declare-o antes, aqui ou no Processador.");
 });

@@ -144,7 +144,7 @@ import { partitionMaterializedArticles, summarizeLegacyArticles } from "@/lib/ar
 import { observedFromArticleDna, readbackMaterializedArticles, type MaterializationReadback, type MaterializedArticleExpectation } from "@/lib/arquiteto/article-materialization-readback";
 import { articleSerpParecerFromAssessment } from "@/lib/arquiteto/article-serp-interpretation";
 import { SERP_LENS_LABELS, describeQualificationLenses, describeSerpLensesMarker, describeSerpLensesMissing, mergeSerpPaidPlans, type SerpPaidPlan, type SerpPaidPlanChoice } from "@/lib/arquiteto/serp-lens-plan";
-import { TERRITORIAL_AI_BLOCK_SIZE, TERRITORIAL_AI_KEYWORD_LIMIT, TERRITORIAL_SERP_BLOCK_SIZE, executePaidSerpBlocks, formatSerpBlockProgress, planPaidSerpBlocks, serpBlockPrefix, splitFormationSerpBlocks, splitTerritorialAiQuestions, territorialAiKeywordScope } from "@/lib/arquiteto/serp-blocks";
+import { TERRITORIAL_AI_BLOCK_SIZE, TERRITORIAL_AI_KEYWORD_LIMIT, TERRITORIAL_SERP_BLOCK_SIZE, executePaidSerpBlocks, formatSerpBlockProgress, planPaidSerpBlocks, runPaidSerpBlocks, serpBlockPrefix, splitFormationSerpBlocks, splitTerritorialAiQuestions, territorialAiKeywordScope } from "@/lib/arquiteto/serp-blocks";
 import { runProgressiveBatch } from "@/lib/ui/batch-progress";
 import { SerpPaidPlanDialog } from "./serp-paid-plan-dialog";
 import { ARTICLE_SERP_STATE_LABELS, articleSerpBaseHash, articleSerpBaseOf, articleSerpLensesComplete, resolveArticleFormationSerpState, serpWasExecutedFor, summarizeArticleSerpGate, type ArticleSerpGateState } from "@/lib/arquiteto/article-serp-gate";
@@ -278,7 +278,10 @@ import {
   type ArticleAiReviewProposalInput,
   type VersionedArticleArchitectureAiReview,
 } from "@/lib/arquiteto/article-ai-review";
-import { readArticleKgrDecision, resolveArticleKgrSerpReadout, type ArticleKgrDecisionTone } from "@/lib/arquiteto/article-kgr-decision";
+import { ARTICLE_KGR_INTEREST_VOLUME_RANGE, articleKgrIdentityChangedMaterially, mergeArticleAllintitleEvidence, readArticleKgrDecision, reconcileArticleKgrIdentityWithCanonical, resolveArticleKgrSerpReadout, type ArticleKgrDecisionTone } from "@/lib/arquiteto/article-kgr-decision";
+import { ARTICLE_ALLINTITLE_BLOCK_SIZE } from "@/lib/arquiteto/article-allintitle";
+import { articleBatchSerpScopeId, describeArticleBatchSerpLot, planArticleBatchSerpLot, type ArticleBatchSerpTarget } from "@/lib/arquiteto/article-batch-serp";
+import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 import { aggregateArticleProcessReadModels, articleAiStateLabel, articleReviewStateLabel, deriveArticleProcessReadModel, type ArticleProcessReadModel } from "@/lib/arquiteto/article-process-read-model";
 import { selectArticlePanelProcessTab } from "@/lib/arquiteto/article-panel-tab-navigation";
 import { suggestInternalLinkAnchorConcepts } from "@/lib/arquiteto/link-anchor-concepts";
@@ -3071,7 +3074,9 @@ export default function ArquitetoPage() {
     const articleId = articleEntityIdFor(article);
     const dna = articleId ? acceptedArticleDnas[articleId] : undefined;
     return readArticleKgrDecision({
-      kgrIdentity: dna?.payload.kgrIdentity || article.mainKeywordObj?.kgrIdentity,
+      // A decisão vem do ArticleDNA quando existe; a medição de allintitle mais
+      // nova da working copy (mesma Principal) entra só para o score.
+      kgrIdentity: mergeArticleAllintitleEvidence(dna?.payload.kgrIdentity, article.mainKeywordObj?.kgrIdentity),
       principal: article.mainKeywordObj,
       principalKeywordId: article.mainKeywordObj?.id,
       supports: article.supportKeywords,
@@ -3159,6 +3164,8 @@ export default function ArquitetoPage() {
         ? input.kgr.decision
         : null,
       awaitingHumanKgrDecision: input.kgr.requiresHumanDecision,
+      // "Aplicar KGR" do artigo: a mesa e o ArticleDNA fecham com a mesma resposta.
+      articleAppliesKgr: input.kgr.applyKgr,
       compatibilityConflicts: conflitos,
       compatibilityEvaluated: avaliadas,
       // Uma keyword não tem par: a compatibilidade não se aplica, e isso é
@@ -3211,12 +3218,110 @@ export default function ArquitetoPage() {
     const principal = article.mainKeywordObj;
     if (!principal || !selectedBrandId) return showNotification("error", "A Principal atual é necessária para registrar a decisão KGR.");
     const readModel = articleKgrDecisionFor(article);
-    if (!readModel.requiresHumanDecision) return showNotification("error", "A decisão humana não se aplica ao KGR atual da Principal.");
+    // "Aplicar KGR" vale para qualquer artigo; repetir a escolha atual não grava nada.
+    if (readModel.applyKgr === (decision === "YES") && readModel.source === "HUMAN_DECISION") return;
     const persisted = await persistWorkingCopyAssignments([{ ...principal, articleKgrDecision: decision }]);
     if (!persisted) return;
     setProvisionalGroups(describeAssignedGroups(masterListRef.current));
-    showNotification("success", `KGR do artigo registrado como ${decision === "YES" ? "Sim" : "Não"} na cópia de trabalho canônica.`);
+    showNotification("success", decision === "YES"
+      ? (readModel.principalKgrScore === null
+        ? "Aplicar KGR: Sim, gravado. Falta o allintitle da Principal para calcular o KGR do artigo — use \"Medir allintitle (pago)\"."
+        : "Aplicar KGR: Sim, gravado na cópia de trabalho canônica.")
+      : "Aplicar KGR: Não, gravado na cópia de trabalho canônica. O KGR não se aplica a este artigo.");
   };
+
+  /*
+   * ALLINTITLE DA PRINCIPAL (SDD 2026-09-28, fatia A4): uma consulta por
+   * artigo, cache primeiro (a medição do Arquiteto ou do Minerador de até 30
+   * dias), com o MESMO diálogo de plano pago. "Recalcular" paga de novo e só
+   * com confirmação. Principal sem volume não é medida: sem volume não há KGR,
+   * e guardar o número seria dado inútil. Medir não decide "Aplicar KGR".
+   */
+  const [articleAllintitleBusy, setArticleAllintitleBusy] = useState(false);
+  const principalWorkflowIdOf = (keyword: unknown): string | null => {
+    const id = (keyword as { canonicalWorkflow?: { id?: unknown } } | null | undefined)?.canonicalWorkflow?.id;
+    return typeof id === "string" && id ? id : null;
+  };
+  const measureArticleAllintitle = async (principalKeywordIds: readonly string[], recollect: boolean, fromProcessing = false) => {
+    if (!selectedBrandId) return;
+    const vistos = new Set<string>();
+    const alvos: { workflowItemId: string; keywordId: string }[] = [];
+    let semVolume = 0;
+    let semItem = 0;
+    for (const keywordId of principalKeywordIds) {
+      if (vistos.has(keywordId)) continue;
+      vistos.add(keywordId);
+      const keyword = masterListRef.current.find(item => String(item.id) === keywordId);
+      if (!keyword) continue;
+      if (!hasSearchVolume(typeof keyword.volume_search === "number" ? keyword.volume_search : null)) { semVolume += 1; continue; }
+      const workflowItemId = principalWorkflowIdOf(keyword);
+      if (!workflowItemId) { semItem += 1; continue; }
+      alvos.push({ workflowItemId, keywordId });
+    }
+    if (!alvos.length) {
+      if (!fromProcessing) showNotification("warning", semVolume ? "A Principal não tem volume no Google Ads: sem volume não há KGR, e o allintitle não é medido." : "A Principal ainda não está na cópia de trabalho canônica: recarregue o Arquiteto e tente de novo.");
+      return;
+    }
+    setArticleAllintitleBusy(true);
+    try {
+      const pedir = async (bloco: typeof alvos, extra: Record<string, unknown>) => {
+        const response = await fetch("/api/arquiteto/article-allintitle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brandId: selectedBrandId, articles: bloco.map(item => ({ workflowItemId: item.workflowItemId })), recollect, ...extra }),
+        });
+        const body = await response.json().catch(() => null);
+        if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível medir o allintitle do artigo.");
+        return body;
+      };
+      const blocos: (typeof alvos)[] = [];
+      for (let inicio = 0; inicio < alvos.length; inicio += ARTICLE_ALLINTITLE_BLOCK_SIZE) blocos.push(alvos.slice(inicio, inicio + ARTICLE_ALLINTITLE_BLOCK_SIZE));
+      const planos: SerpPaidPlan[] = [];
+      for (const bloco of blocos) planos.push((await pedir(bloco, { mode: "plan" })).data.plan as SerpPaidPlan);
+      const escolha = await askSerpPaidPlan(recollect
+        ? "Recalcular allintitle da Principal · chamada paga"
+        : `Allintitle da Principal · 1 consulta por artigo · ${alvos.length} artigo(s)`, mergeSerpPaidPlans(planos), false);
+      if (!escolha) {
+        showNotification("warning", "Allintitle cancelado: nenhuma chamada foi paga. O KGR não aplicável não bloqueia nada.");
+        return;
+      }
+      let medidos = 0;
+      let reaproveitados = 0;
+      const falhas: string[] = [];
+      const linhas = new Map<string, Record<string, unknown>>();
+      for (let indice = 0; indice < blocos.length; indice += 1) {
+        const body = await pedir(blocos[indice], { mode: "execute", authorizedPaidQueries: planos[indice].paidQueries });
+        const itens: Array<{ status?: string }> = Array.isArray(body.data?.items) ? body.data.items : [];
+        medidos += itens.filter(item => item.status === "measured").length;
+        reaproveitados += itens.filter(item => item.status === "reused").length;
+        for (const lacuna of Array.isArray(body.data?.gaps) ? body.data.gaps : []) falhas.push(String(lacuna?.reason || "falha"));
+        for (const linha of Array.isArray(body.data?.updatedItems) ? body.data.updatedItems : []) {
+          if (linha && typeof linha.id === "string") linhas.set(linha.id, linha as Record<string, unknown>);
+        }
+      }
+      // A medição gravada volta para a mesa pelo mesmo caminho do PATCH: payload, lock e identidade.
+      if (linhas.size) {
+        setMasterList(previous => previous.map(item => {
+          const workflow = item.canonicalWorkflow as Record<string, unknown> | undefined;
+          if (!workflow || typeof workflow.id !== "string") return item;
+          const linha = linhas.get(workflow.id);
+          if (!linha) return item;
+          const payload = linha.payload && typeof linha.payload === "object" ? linha.payload as Record<string, unknown> : null;
+          return { ...item, ...(payload?.kgrIdentity ? { kgrIdentity: payload.kgrIdentity } : {}), canonicalWorkflow: { ...workflow, lockVersion: Number(linha.lock_version || workflow.lockVersion), updatedAt: String(linha.updated_at || workflow.updatedAt), payload: payload || workflow.payload } };
+        }));
+      }
+      const partes = [`${medidos} medido(s) agora`, `${reaproveitados} reaproveitado(s) (até 30 dias)`];
+      if (semVolume) partes.push(`${semVolume} Principal(is) sem volume não medida(s)`);
+      if (semItem) partes.push(`${semItem} fora da cópia de trabalho`);
+      showNotification(falhas.length ? "warning" : "success", `Allintitle da Principal: ${partes.join(" · ")}${falhas.length ? ` · ${falhas.length} falha(s): ${falhas.slice(0, 2).join("; ")}` : ""}.`);
+    } catch (error) {
+      showNotification("error", error instanceof Error ? error.message : "Não foi possível medir o allintitle do artigo.");
+    } finally {
+      setArticleAllintitleBusy(false);
+    }
+  };
+  const measureArticleAllintitleRef = useRef(measureArticleAllintitle);
+  measureArticleAllintitleRef.current = measureArticleAllintitle;
 
   /**
    * Veredito da SERP de formação: compatível, inconclusivo ou divergente.
@@ -3343,6 +3448,8 @@ export default function ArquitetoPage() {
         fullKgr: kgr.fullKgr,
         principalKeyword: article.mainKeywordObj?.keyword || null,
         principalScoreLabel: kgr.principalKgrScore?.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 3 }) ?? "—",
+        applyKgr: kgr.applyKgr,
+        metricMissing: kgr.applyKgr && kgr.principalKgrScore === null,
       },
       unitType: {
         // Derivado é resolvido: só ambiguidade real vira decisão humana.
@@ -7071,8 +7178,20 @@ export default function ArquitetoPage() {
       const currentStatus = current ? effectiveVersionStatus(current.versionId, versionEvents) : null;
       if (current && currentStatus !== "rejected" && currentStatus !== "superseded") {
         const currentKgrIdentity = current.payload.kgrIdentity || null;
-        const nextKgrIdentity = deterministicArticleDnaPayload(group, selectedBrandId).kgrIdentity || null;
-        if (JSON.stringify(currentKgrIdentity) !== JSON.stringify(nextKgrIdentity)) {
+        const derivada = deterministicArticleDnaPayload(group, selectedBrandId);
+        // Sem decisão nova na cópia de trabalho, a identidade gravada continua valendo.
+        const nextKgrIdentity = reconcileArticleKgrIdentityWithCanonical({
+          canonical: currentKgrIdentity,
+          candidate: derivada.kgrIdentity,
+          principalKeywordId: derivada.principalKeywordId,
+        }) || null;
+        /*
+         * Só MUDANÇA REAL abre sucessora (SDD 2026-09-28, guarda da A1): troca
+         * da Principal, "Aplicar KGR" do humano, vínculo confirmado ou — com o
+         * KGR aplicado — a medição de allintitle. A troca da regra de derivação
+         * (KGR pleno automático → padrão "não aplicável") não versiona nada.
+         */
+        if (articleKgrIdentityChangedMaterially(currentKgrIdentity, nextKgrIdentity)) {
           const nextPayload = { ...current.payload };
           if (nextKgrIdentity) nextPayload.kgrIdentity = nextKgrIdentity;
           else delete nextPayload.kgrIdentity;
@@ -9705,7 +9824,19 @@ export default function ArquitetoPage() {
        * 6 (6 × 4 lentes = 24 consultas por requisição).
        */
       const LOTE_DE_KEYWORDS = 6;
-      const todas = doTerritorio.map(kw => ({ keywordId: String(kw.id), keyword: String(kw.keyword || "") }));
+      /*
+       * Ação MANUAL e opcional da fase Silos (SDD 2026-09-28, fatia A5): a
+       * primeira coleta do fluxo é a da aba Artigos. Aqui também vale a regra
+       * das coletas novas — keyword sem volume nunca é coletada.
+       */
+      const comVolume = doTerritorio.filter(kw => hasSearchVolume(typeof kw.volume_search === "number" ? kw.volume_search : null));
+      const semVolume = doTerritorio.length - comVolume.length;
+      if (!comVolume.length) {
+        showNotification("warning", "Nenhuma keyword com volume neste Silo: a SERP não é coletada para keyword sem volume.");
+        return;
+      }
+      if (semVolume) showNotification("warning", `${semVolume} keyword(s) sem volume ficam fora da consulta nas 4 lentes (nunca coletadas).`);
+      const todas = comVolume.map(kw => ({ keywordId: String(kw.id), keyword: String(kw.keyword || "") }));
       const pedirLote = async (keywords: typeof todas, extra: Record<string, unknown>) => {
         const response = await fetch("/api/arquiteto/keyword-serp", {
           method: "POST",
@@ -9727,7 +9858,7 @@ export default function ArquitetoPage() {
         const planoDoLote = await pedirLote(keywords, { mode: "plan" });
         lotes.push({ keywords, plan: planoDoLote.data.plan as SerpPaidPlan });
       }
-      const escolha = await askSerpPaidPlan("Consultar nas 4 lentes · plano de chamadas pagas", mergeSerpPaidPlans(lotes.map(lote => lote.plan)), false);
+      const escolha = await askSerpPaidPlan("Consultar nas 4 lentes · ação manual e opcional · plano de chamadas pagas", mergeSerpPaidPlans(lotes.map(lote => lote.plan)), false);
       if (!escolha) {
         showNotification("warning", "Consulta nas 4 lentes cancelada: nenhuma chamada foi paga.");
         return;
@@ -9776,6 +9907,84 @@ export default function ArquitetoPage() {
       setKeywordSerpBusyScope(null);
     }
   };
+
+  /*
+   * PRIMEIRA COLETA DA SERP DO LOTE (SDD 2026-09-28, fatia A2).
+   *
+   * A aba Artigos é onde a SERP é coletada pela primeira vez: todas as
+   * keywords COM VOLUME dos Silos em formação, nas 4 lentes, uma vez só, cache
+   * primeiro. Keyword sem volume nunca é coletada. Com tudo no cache nada é
+   * pedido (só leitura); com faltas, o plano somado vai para UMA confirmação.
+   * Keyword que chegou sem SERP do Minerador é o caso NORMAL, não erro.
+   *
+   * Devolve "collected" quando pagou algo (a formação precisa ser refeita com o
+   * índice "mesmo assunto" relido do cache), "cached" quando tudo já estava no
+   * cache, "empty" sem keyword com volume e "cancelled" quando a pessoa não
+   * autorizou o pagamento.
+   */
+  const collectArticleBatchSerp = async (siloRefs: readonly string[]): Promise<"collected" | "cached" | "empty" | "cancelled"> => {
+    if (!selectedBrandId || !siloRefs.length) return "empty";
+    // A cabeça da SiloPage com volume também entra (correção de 2026-09-28):
+    // "todas as keywords com volume" do lote. Ela não forma Article, mas a SERP
+    // dela alimenta o índice "mesmo assunto" (artigo competindo com a página do
+    // Silo) e a SiloPage no Radar, pela mesma chave de cache.
+    const lote = planArticleBatchSerpLot({ keywords: masterListRef.current, siloRefs });
+    if (!lote.targets.length) return "empty";
+    const scopeId = articleBatchSerpScopeId(lote.siloRefs);
+    const pedirBloco = async (keywords: ArticleBatchSerpTarget[], extra: Record<string, unknown>) => {
+      const response = await fetch("/api/arquiteto/keyword-serp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brandId: selectedBrandId, scopeId, territoryRef: null, keywords, ...extra }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok || !body?.success) throw new Error(body?.error || "Não foi possível coletar a SERP do lote.");
+      return body;
+    };
+    const resultado = await runPaidSerpBlocks<ArticleBatchSerpTarget[], { reused: number; collected: number; gaps: number }>({
+      label: "Primeira coleta da SERP do lote",
+      blocks: lote.blocks,
+      itemIdsOf: bloco => bloco.map(item => item.keywordId),
+      plan: async bloco => (await pedirBloco(bloco, { mode: "plan" })).data.plan as SerpPaidPlan,
+      // Nunca "só a principal": a coleta é sempre nas 4 lentes.
+      ask: merged => askSerpPaidPlan(`Primeira coleta da SERP do lote · 4 lentes · ${describeArticleBatchSerpLot(lote)}`, merged, false),
+      onProgress: snapshot => setSerpBlockProgress(lote.blocks.length > 1 ? { process: "formation_serp", text: formatSerpBlockProgress(snapshot) } : null),
+      execute: async (bloco, escolha) => {
+        const body = await pedirBloco(bloco, { mode: "execute", authorizedPaidQueries: escolha.authorizedPaidQueries });
+        const lacunas: Array<{ keywordId: string; reason: string }> = Array.isArray(body.data?.gaps) ? body.data.gaps : [];
+        const comFalha = new Map(lacunas.map(item => [item.keywordId, item.reason] as const));
+        return {
+          result: { reused: Number(body.data?.reused) || 0, collected: Number(body.data?.collected) || 0, gaps: lacunas.length },
+          outcomes: bloco.map(item => comFalha.has(item.keywordId)
+            ? { id: item.keywordId, status: "failed" as const, reason: comFalha.get(item.keywordId) || "lente sem resposta" }
+            : { id: item.keywordId, status: "succeeded" as const }),
+        };
+      },
+    });
+    setSerpBlockProgress(null);
+    if (resultado.status === "cancelled") {
+      showNotification("warning", "Primeira coleta da SERP do lote cancelada: nenhuma chamada foi paga.");
+      return "cancelled";
+    }
+    const somas = resultado.results.reduce((total, item) => ({
+      reused: total.reused + item.result.reused,
+      collected: total.collected + item.result.collected,
+      gaps: total.gaps + item.result.gaps,
+    }), { reused: 0, collected: 0, gaps: 0 });
+    const falhasDeBloco = resultado.blockFailures.length;
+    if (somas.collected > 0) {
+      // O cache mudou: a mesa relê o "mesmo assunto" (sem custo) e a formação é refeita.
+      setSerpSubjectReload(current => current + 1);
+      showNotification(somas.gaps || falhasDeBloco ? "warning" : "success", `SERP do lote coletada: ${somas.collected} lente(s) paga(s) agora, ${somas.reused} do cache · ${describeArticleBatchSerpLot(lote)}`
+        + (somas.gaps ? ` · ${somas.gaps} lente(s) sem resposta` : "")
+        + (falhasDeBloco ? ` · ${falhasDeBloco} bloco(s) com falha` : "")
+        + ". A formação foi refeita com a SERP; clique em Processar artigos de novo para o parecer de cada artigo (pelo cache, sem custo).");
+      return "collected";
+    }
+    return "cached";
+  };
+  const collectArticleBatchSerpRef = useRef(collectArticleBatchSerp);
+  collectArticleBatchSerpRef.current = collectArticleBatchSerp;
 
   /**
    * A leitura do grupo publicado, uma por território.
@@ -13052,6 +13261,28 @@ export default function ArquitetoPage() {
         showNotification("error", "Nenhum Silo confirmado libera formação de artigos ainda.");
         return;
       }
+      /*
+       * 1. PRIMEIRA COLETA DA SERP DO LOTE (SDD 2026-09-28, fatia A2) — antes
+       * da formação, nas 4 lentes, só keywords com volume, cache primeiro.
+       * Quando algo foi pago, o índice "mesmo assunto" é relido e a formação
+       * muda: o parecer fica para o próximo clique, já pelo cache. Tudo no
+       * cache segue direto. Cancelar o pagamento segue com o que houver no
+       * cache, como antes. A finalização automática do Assunto não coleta aqui.
+       */
+      if (!automatic) {
+        const silosDoLote = [...new Set(selecionados.map(universe => universe.siloRef).filter((ref): ref is string => typeof ref === "string" && ref.length > 0))];
+        const coletaDoLote = await collectArticleBatchSerpRef.current(silosDoLote);
+        if (coletaDoLote === "collected") return;
+      }
+      // Etapa 4 (allintitle da Principal, uma consulta por artigo): depois do parecer.
+      const principaisDoEscopo = selecionados
+        .flatMap(universe => universe.candidates)
+        .filter(candidate => escopo.candidateRefs.has(candidate.candidateRef))
+        .map(candidate => candidate.principalKeywordId);
+      const medirAllintitleDoEscopo = async () => {
+        if (automatic || !principaisDoEscopo.length) return;
+        await measureArticleAllintitleRef.current(principaisDoEscopo, false, true);
+      };
       const marcador = await persistArticleFormationMarker(selectedBrandId, {
         contractVersion: ARTICLE_FORMATION_MARKER_CONTRACT_VERSION,
         baseHash: articleFormationBase,
@@ -13126,6 +13357,7 @@ export default function ArquitetoPage() {
         // A conferência número por número, na ordem do §4 — do ESCOPO.
         showNotification("success", readoutDaExecucao(new Set(), escopo.candidateRefs));
         anunciarBloqueios(new Set(), escopo.candidateRefs);
+        await medirAllintitleDoEscopo();
         if (automatic?.finalizeSubject) setAutomaticSubjectFinalization({ candidateRefs: [...escopo.candidateRefs], subjectPhrase: automatic.finalizeSubject });
         return;
       }
@@ -13144,6 +13376,7 @@ export default function ArquitetoPage() {
         pendingReasons: resultadoDaSerp.pendingReasons,
         tone: resultadoDaSerp.status === "completed" ? "success" : "warning",
       });
+      await medirAllintitleDoEscopo();
       if (automatic?.finalizeSubject && resultadoDaSerp.status === "completed") {
         setAutomaticSubjectFinalization({ candidateRefs: [...escopo.candidateRefs], subjectPhrase: automatic.finalizeSubject });
       }
@@ -13316,7 +13549,8 @@ export default function ArquitetoPage() {
         const registroSerp = remoteArticleSerp.find(item => item.candidateRef === aprovado.candidateRef)?.payload;
         const gateSerp = articleSerpGates.get(aprovado.candidateRef);
         const kgrDoArtigo = readArticleKgrDecision({
-          kgrIdentity: acceptedArticleDnas[articleId]?.payload.kgrIdentity,
+          // A medição de allintitle mais nova da working copy entra só no score (a mesma leitura da mesa).
+          kgrIdentity: mergeArticleAllintitleEvidence(acceptedArticleDnas[articleId]?.payload.kgrIdentity, keywords.find(item => String(item.id) === aprovado.principalKeywordId)?.kgrIdentity),
           principal: keywords.find(item => String(item.id) === aprovado.principalKeywordId),
           principalKeywordId: aprovado.principalKeywordId,
           supports: keywords.filter(item => String(item.id) !== aprovado.principalKeywordId),
@@ -13424,7 +13658,21 @@ export default function ArquitetoPage() {
           });
           continue;
         }
-        const payload = vinculo.payload;
+        const canonicaAprovada = articleVersionAuthorities.get(articleId)?.canonical ?? null;
+        /*
+         * IDENTIDADE KGR: A DA CANÔNICA CONTINUA VALENDO sem decisão nova.
+         * A cópia de trabalho da Principal muitas vezes não traz a identidade
+         * (ela nasce no ArticleDNA) ou traz só a medição de allintitle. Sem
+         * reconciliar, reformar trocaria em silêncio "Sim · regra antiga" ou o
+         * vínculo confirmado por "Não aplicável" (SDD 2026-09-28, A1).
+         */
+        const kgrReconciliada = reconcileArticleKgrIdentityWithCanonical({
+          canonical: (canonicaAprovada?.payload ?? acceptedArticleDnas[articleId]?.payload)?.kgrIdentity,
+          candidate: vinculo.payload.kgrIdentity,
+          principalKeywordId: vinculo.payload.principalKeywordId,
+        });
+        // Sem identidade a reconciliar, o campo segue ausente (undefined não é gravado).
+        const payload: ArticleDNA = { ...vinculo.payload, kgrIdentity: kgrReconciliada };
 
         /*
          * SUCESSORA SÓ NASCE DE DECISÃO EDITORIAL.
@@ -13441,7 +13689,6 @@ export default function ArquitetoPage() {
          * publicada? É revisão real e vira sucessora. Não mudou nada disso? Não
          * há o que consolidar.
          */
-        const canonicaAprovada = articleVersionAuthorities.get(articleId)?.canonical ?? null;
         const diffEditorial = articleEditorialDiff({ canonical: canonicaAprovada?.payload ?? null, candidate: payload });
         // O Assunto ainda não está na lista de decisões do diff: prendê-lo ou
         // soltá-lo também é revisão real, pela comparação do próprio domínio.
@@ -13601,7 +13848,7 @@ export default function ArquitetoPage() {
           serpInterpretation: registro?.interpretation ?? null,
           serpResolved: serpWasExecutedFor(gate?.state || "missing"),
           kgr: readArticleKgrDecision({
-            kgrIdentity: vigente.payload.kgrIdentity,
+            kgrIdentity: mergeArticleAllintitleEvidence(vigente.payload.kgrIdentity, keywords.find(item => String(item.id) === vigente.payload.principalKeywordId)?.kgrIdentity),
             principal: keywords.find(item => String(item.id) === vigente.payload.principalKeywordId),
             principalKeywordId: vigente.payload.principalKeywordId,
             supports: keywords.filter(item => String(item.id) !== vigente.payload.principalKeywordId),
@@ -18328,13 +18575,29 @@ export default function ArquitetoPage() {
                                           {decision.kind === "article_kgr" && <div className="mt-2" data-testid="architect-review-kgr-decision">
                                             <p className={`text-sm font-semibold ${ARTICLE_KGR_TONE_CLASSES[articleKgr.tone]}`}>KGR do artigo · {articleKgr.label}</p>
                                             {articleKgr.notes.map(note => <p key={note} className="mt-1 text-sm leading-6 text-text-muted">• {note}</p>)}
-                                            {articleKgr.requiresHumanDecision && <label className="mt-2 block text-sm font-medium text-foreground">Decisão do artigo
-                                              <select aria-label={`Decisão KGR do artigo ${art.keywordPrincipal}`} value="" onChange={event => { if (event.target.value === "YES" || event.target.value === "NO") void handleArticleKgrDecision(art, event.target.value); }} className={`${ARCHITECT_UI.control} mt-1 w-full max-w-xs text-sm`}>
-                                                <option value="">A decidir</option>
+                                            {/*
+                                              * "APLICAR KGR" (SDD 2026-09-28): padrão Não, para qualquer artigo.
+                                              * Sim sem allintitle fica gravado e pede a medição; nada bloqueia
+                                              * a formação por KGR não aplicável.
+                                              */}
+                                            <label className="mt-2 block text-sm font-medium text-foreground">Aplicar KGR
+                                              <select aria-label={`Aplicar KGR no artigo ${art.keywordPrincipal}`} data-testid="architect-article-apply-kgr" value={articleKgr.applyKgr ? "YES" : "NO"} onChange={event => { if (event.target.value === "YES" || event.target.value === "NO") void handleArticleKgrDecision(art, event.target.value); }} className={`${ARCHITECT_UI.control} mt-1 w-full max-w-xs text-sm`}>
+                                                <option value="NO">Não (padrão)</option>
                                                 <option value="YES">Sim</option>
-                                                <option value="NO">Não</option>
                                               </select>
-                                            </label>}
+                                            </label>
+                                            <dl className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-3" data-testid="architect-article-allintitle">
+                                              <div><dt className="text-text-muted">Allintitle da Principal</dt><dd className="mt-0.5 font-medium text-foreground">{articleKgr.principalResultCount !== null ? articleKgr.principalResultCount.toLocaleString("pt-BR") : "Não medido"}</dd></div>
+                                              <div><dt className="text-text-muted">KGR do artigo</dt><dd className={`mt-0.5 font-medium ${articleKgr.scoreInFullRange ? "text-success" : "text-foreground"}`}>{articleKgr.principalKgrScore?.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 3 }) ?? "—"}</dd></div>
+                                              <div><dt className="text-text-muted">Volume da Principal</dt><dd className="mt-0.5 font-medium text-foreground">{articleKgr.principalVolume?.toLocaleString("pt-BR") ?? "—"}{articleKgr.volumeInInterestRange ? " · na faixa de interesse" : ""}</dd></div>
+                                            </dl>
+                                            <p className="mt-1 text-sm leading-6 text-text-muted">
+                                              {articleKgr.scoreSource === "arquiteto_allintitle" && articleKgr.allintitleMeasuredAt ? `Allintitle medido pelo Arquiteto em ${new Date(articleKgr.allintitleMeasuredAt).toLocaleDateString("pt-BR")}. ` : articleKgr.scoreSource === "minerador" ? "Allintitle medido pelo Minerador. " : ""}
+                                              KGR = allintitle ÷ volume; bom abaixo de 0,25. Faixa de volume de interesse: {ARTICLE_KGR_INTEREST_VOLUME_RANGE.min} a {ARTICLE_KGR_INTEREST_VOLUME_RANGE.max} (só informação).
+                                            </p>
+                                            {principalWorkflowIdOf(art.mainKeywordObj) ? <button type="button" data-testid="architect-article-allintitle-measure" disabled={articleAllintitleBusy} onClick={() => { void measureArticleAllintitle([String(art.mainKeywordObj?.id || "")].filter(Boolean), articleKgr.principalResultCount !== null && articleKgr.scoreSource === "arquiteto_allintitle"); }} className={`${ARCHITECT_UI.toolbarButton} mt-2`}>
+                                              {articleKgr.principalResultCount !== null && articleKgr.scoreSource === "arquiteto_allintitle" ? "Recalcular allintitle (pago)" : "Medir allintitle (pago)"}
+                                            </button> : null}
                                             <p className="mt-1 text-sm leading-6 text-text-muted">Decisão do artigo; não substitui nem reutiliza o select de aplicabilidade do KeywordDNA.</p>
                                           </div>}
                                           {decision.kind === "unit_type" && expandedUnitSuggestion && expandedUnitDraft && <div className="mt-2">

@@ -17,7 +17,10 @@ import {
   type DifferentiationPage,
 } from "../lib/arquiteto/published-differentiation.ts";
 import {
+  DIFFERENTIATION_LEGACY_PLAN_VERSION,
   DIFFERENTIATION_MAX_COST_USD,
+  DIFFERENTIATION_PLAN_OUTDATED_MESSAGE,
+  DIFFERENTIATION_PLAN_VERSION,
   DIFFERENTIATION_SERP_KEYWORD_MAX_USD,
   authorizeDifferentiationPlan,
   buildDifferentiationPlan,
@@ -36,7 +39,7 @@ import {
   planDifferentiationApply,
   withDifferentiationFields,
 } from "../lib/arquiteto/published-differentiation-apply.ts";
-import type { DataForSeoLabsResearchRequest, DataForSeoLabsResearchResult } from "../lib/minerador/dataforseo-labs-keyword-research-core.ts";
+import type { SubjectDiscoveryAdsSeed } from "../lib/minerador/subject-discovery-search.ts";
 import { buildRadarDocument, radarDocumentId } from "../lib/redator/radar-import.ts";
 import { normalizeKeyword } from "../lib/minerador/keyword-import-core.ts";
 
@@ -214,36 +217,66 @@ test("IA (Q1) é a menor autoridade: id inventado recusado, sementes conferidas,
 
 /* ============================== plano e custo ============================== */
 
-test("plano: faixa de custo com os preços do código, teto de US$ 0,50 por grupo, cortes explicados", async () => {
+test("plano v2: as keywords novas vêm do Google Ads (grátis); o custo é só a SERP, com teto de US$ 0,50 por grupo", async () => {
   const deteccao = detectarReal();
   const par = deteccao.groups.find(grupo => grupo.members.some(membro => membro.page.keyword === CAPTAR))!;
-  const plano = await buildDifferentiationPlan({ brandId: "marca", group: par, angles: proposeDifferentiationAngles({ group: par }), aiUsed: false });
+  const angulos = proposeDifferentiationAngles({ group: par });
+  const plano = await buildDifferentiationPlan({ brandId: "marca", group: par, angles: angulos, aiUsed: false });
+  assert.equal(plano.version, DIFFERENTIATION_PLAN_VERSION);
+  assert.equal(plano.version, "published-differentiation-plan-v2");
   assert.equal(DIFFERENTIATION_SERP_KEYWORD_MAX_USD, 0.014);
-  assert.deepEqual(plano.costRange, { minUsd: 0.072, maxUsd: 0.284 }, "2 páginas × (3 Labs + 5 candidatas × 4 lentes)");
+  assert.deepEqual(plano.costRange, { minUsd: 0, maxUsd: 0.14 }, "2 páginas × 5 candidatas × 4 lentes; tudo no cache custa 0");
   assert.equal(plano.cuts.length, 0);
   assert.equal(plano.withinCap, true);
-  assert.equal(listDifferentiationPaidCalls(plano).length, 46);
+  assert.equal(listDifferentiationPaidCalls(plano).length, 40, "só a SERP é paga");
+  assert.ok(listDifferentiationPaidCalls(plano).every(chamada => chamada.endpoint === "serp"));
+  assert.deepEqual(plano.adsTargeting, { language: "languageConstants/1014", geoTargetConstants: ["geoTargetConstants/2076"], keywordPlanNetwork: "GOOGLE_SEARCH", includeAdultKeywords: false });
+  for (const [indice, pagina] of plano.pages.entries()) {
+    const angulo = angulos.find(item => item.keywordId === pagina.keywordId)!;
+    assert.deepEqual(pagina.labs, [], "nenhuma chamada do Labs");
+    assert.ok(pagina.url, "as páginas reais têm URL no Vínculo");
+    assert.deepEqual(pagina.ads?.map(chamada => [chamada.callId, chamada.kind, chamada.url]), [[`p${indice + 1}:ads:keyword_seed`, "keyword_seed", null], [`p${indice + 1}:ads:url_seed`, "url_seed", pagina.url]]);
+    assert.equal(pagina.ads?.[0].keywords[0], angulo.ideasSeed, "a semente de ideias do ângulo vai ao Google Ads");
+    assert.equal(new Set(pagina.ads?.[0].keywords.map(normalizeKeyword)).size, pagina.ads?.[0].keywords.length, "sem semente repetida");
+    assert.deepEqual(pagina.ads?.[1].keywords, [angulo.ideasSeed]);
+  }
+  assert.ok(plano.notices.some(aviso => /vêm do Google Ads/.test(aviso)));
+
+  // Sem URL no Vínculo: só a semente frase, e a nota diz por quê.
+  const semUrl = { ...par, members: par.members.map((membro, indice) => indice ? membro : { ...membro, page: { ...membro.page, url: null } }) };
+  const planoSemUrl = await buildDifferentiationPlan({ brandId: "marca", group: semUrl, angles: angulos, aiUsed: false });
+  assert.deepEqual(planoSemUrl.pages[0].ads?.map(chamada => chamada.kind), ["keyword_seed"]);
+  assert.match(planoSemUrl.pages[0].note || "", /Google Ads recebe só as sementes/);
 
   const campanhas = deteccao.groups.find(grupo => grupo.members.length === 5)!;
-  const cortado = await buildDifferentiationPlan({ brandId: "marca", group: campanhas, angles: proposeDifferentiationAngles({ group: campanhas }), aiUsed: false });
+  const cinco = await buildDifferentiationPlan({ brandId: "marca", group: campanhas, angles: proposeDifferentiationAngles({ group: campanhas }), aiUsed: false });
+  assert.deepEqual(cinco.costRange, { minUsd: 0, maxUsd: 0.35 }, "5 páginas cabem no teto sem corte");
+  assert.equal(cinco.cuts.length, 0);
+  assert.ok(cinco.pages.every(pagina => pagina.inRound));
+
+  // Oito páginas passam do teto: corta candidatas (5 → 3 → 2), nunca o Google Ads.
+  const oito = { ...campanhas, members: [...campanhas.members, ...campanhas.members.slice(0, 3).map(membro => ({ ...membro, page: { ...membro.page, keywordId: `${membro.page.keywordId}-copia` } }))] };
+  const cortado = await buildDifferentiationPlan({ brandId: "marca", group: oito, angles: proposeDifferentiationAngles({ group: oito }), aiUsed: false });
   assert.ok(cortado.costRange.maxUsd <= DIFFERENTIATION_MAX_COST_USD, `máximo ${cortado.costRange.maxUsd}`);
-  assert.ok(cortado.cuts.some(corte => /SERP de 3 candidatas por página/.test(corte)));
-  assert.ok(cortado.cuts.some(corte => /Sem pesquisas relacionadas em 3 página/.test(corte)));
-  assert.ok(cortado.pages.every(pagina => pagina.inRound), "5 páginas cabem sem sair da rodada");
+  assert.ok(cortado.cuts.some(corte => /SERP de .* candidatas por página/.test(corte)));
+  assert.ok(!cortado.cuts.some(corte => /pesquisas relacionadas/.test(corte)), "o corte das relacionadas saiu");
+  assert.ok(cortado.pages.every(pagina => (pagina.ads || []).length > 0));
 
   const total = (await Promise.all(deteccao.groups.map(grupo => buildDifferentiationPlan({ brandId: "marca", group: grupo, angles: proposeDifferentiationAngles({ group: grupo }), aiUsed: false })))).reduce((soma, item) => soma + item.costRange.maxUsd, 0);
-  assert.ok(total > 1.5 && total < 2.1, `as 4 famílias: ~US$ 2 no máximo (${total.toFixed(3)})`);
+  assert.ok(Math.abs(total - 0.98) < 1e-9, `as 4 famílias (14 páginas): até US$ 0,98, antes ~US$ 2 (${total.toFixed(3)})`);
 });
 
 test("prévia com hash: sem autorização, com outro hash ou acima do teto nada é pago", async () => {
   const par = detectarReal().groups.find(grupo => grupo.members.some(membro => membro.page.keyword === CAPTAR))!;
   const plano = await buildDifferentiationPlan({ brandId: "marca", group: par, angles: proposeDifferentiationAngles({ group: par }), aiUsed: false });
   assert.ok(await verifyDifferentiationPlanHash(plano));
-  assert.equal(await verifyDifferentiationPlanHash({ ...plano, pages: plano.pages.map((pagina, indice) => indice ? pagina : { ...pagina, serpCandidates: 5, labs: [...pagina.labs, { callId: "p1:extra", endpoint: "keyword_ideas", input: "outra" }] }) }), false, "plano adulterado não confere");
+  assert.equal(await verifyDifferentiationPlanHash({ ...plano, pages: plano.pages.map((pagina, indice) => indice ? pagina : { ...pagina, ads: (pagina.ads || []).map(chamada => ({ ...chamada, keywords: [...chamada.keywords, "outra semente"] })) }) }), false, "semente adulterada não confere");
+  assert.equal(await verifyDifferentiationPlanHash({ ...plano, pages: plano.pages.map((pagina, indice) => indice ? pagina : { ...pagina, ads: (pagina.ads || []).map(chamada => chamada.kind === "url_seed" ? { ...chamada, url: "https://outro.com/x" } : chamada) }) }), false, "URL adulterada não confere");
+  assert.equal(await verifyDifferentiationPlanHash({ ...plano, adsTargeting: { ...plano.adsTargeting!, geoTargetConstants: ["geoTargetConstants/20106"] } }), false, "targeting adulterado não confere");
   assert.equal(authorizeDifferentiationPlan(plano, null).ok, false);
   assert.equal((authorizeDifferentiationPlan(plano, { planHash: "sha256:outro", maxCostUsd: 0.3 }) as { code: string }).code, "PAID_PLAN_CHANGED");
   assert.equal((authorizeDifferentiationPlan(plano, { planHash: plano.planHash, maxCostUsd: 0.1 }) as { code: string }).code, "PAID_PLAN_CHANGED", "autorizado abaixo do máximo");
-  assert.deepEqual(authorizeDifferentiationPlan(plano, { planHash: plano.planHash, maxCostUsd: plano.costRange.maxUsd }), { ok: true, budgetUsd: 0.284 });
+  assert.deepEqual(authorizeDifferentiationPlan(plano, { planHash: plano.planHash, maxCostUsd: plano.costRange.maxUsd }), { ok: true, budgetUsd: 0.14 });
   assert.equal((authorizeDifferentiationPlan({ ...plano, costRange: { minUsd: 0.1, maxUsd: 0.6 }, withinCap: false }, { planHash: plano.planHash, maxCostUsd: 0.6 }) as { code: string }).code, "DIFFERENTIATION_PLAN_ABOVE_CAP");
 });
 
@@ -300,26 +333,30 @@ const VOLUMES: Record<string, number | null> = {
   "marketing de indicação estética": 50, "captar clientes estética grátis": 0, "como atrair pacientes estética": 110,
 };
 
-function labs(request: DataForSeoLabsResearchRequest): DataForSeoLabsResearchResult {
-  const itens = (keywords: string[], ranked: string | null = null) => keywords.map((keyword, indice) => ({ keyword, estimate: { searchVolume: VOLUMES[keyword] ?? 30, label: "Estimativa DataForSEO" as const }, relatedDepth: request.kind === "related_keywords" ? 1 : null, ranked: ranked ? { url: ranked, rankGroup: 12 + indice } : null }));
-  const base = { kind: request.kind, endpoint: "x", provider: "dataforseo" as const, providerVersion: "v3" as const, providerRequestId: `req-${request.kind}`, cost: 0.0121, totalCount: null, droppedByRank: 0 };
-  if (request.kind === "ranked_keywords") {
-    return { ...base, keywords: request.targetUrl.includes("captar") ? itens(["anúncios para clínica de estética", "tráfego pago para estética"], request.targetUrl) : itens(["instagram para clínica de estética"], request.targetUrl) };
+/** As ideias do Google Ads falso: pela URL da página (url_seed) e pelas sementes do ângulo (keyword_seed). */
+function ideiasDoAds(seed: SubjectDiscoveryAdsSeed): string[] {
+  if (seed.kind === "keyword_and_url") {
+    return seed.url.includes("captar") ? ["anúncios para clínica de estética", "tráfego pago para estética"] : ["instagram para clínica de estética"];
   }
-  if (request.keyword.includes("captar")) return { ...base, keywords: itens(["captar clientes estética grátis", "como atrair pacientes estética", "marketing para clínica de estética"]) };
-  if (request.keyword.includes("atrair")) return { ...base, keywords: itens(["marketing de indicação estética"]) };
-  return { ...base, keywords: [] };
+  if (seed.keywords.some(semente => semente.includes("captar"))) return ["captar clientes estética grátis", "como atrair pacientes estética", "marketing para clínica de estética"];
+  if (seed.keywords.some(semente => semente.includes("atrair"))) return ["marketing de indicação estética"];
+  return [];
 }
 
-function portasFalsas(options: { usado?: boolean } = {}) {
-  const registro = { labs: [] as string[], serp: [] as string[], ledger: [] as string[], ads: 0 };
+function portasFalsas(options: { usado?: boolean; adsFalha?: "keyword_and_url"; volumesFalham?: boolean } = {}) {
+  const registro = { ideias: [] as string[], usoAds: [] as Array<{ suffix: string; resultStatus: string }>, serp: [] as string[], ledger: [] as string[], ads: 0 };
   const ports: DifferentiationRunPorts = {
     now: () => new Date("2026-09-27T12:00:00Z"),
     async openExecution() {
       return {
         ledgerCapability: true,
         findUsage: async () => Boolean(options.usado),
-        async runLabs(request, hooks) { hooks.onRequestStarted(); registro.labs.push(`${request.kind}:${request.kind === "ranked_keywords" ? request.targetUrl : request.keyword}`); return labs(request); },
+        async googleAdsIdeas(seed, targeting, pageSize) {
+          registro.ideias.push(`${seed.kind}:${seed.kind === "keyword_and_url" ? seed.url : seed.keywords.join(" + ")}|${targeting.geoTargetConstants.join(",")}|${pageSize}`);
+          if (options.adsFalha === seed.kind) throw Object.assign(new Error("Google Ads fora"), { code: "GOOGLE_ADS_DISCOVERY_ERROR" });
+          return { requestId: `ads-${seed.kind}`, ideas: ideiasDoAds(seed).map(keyword => ({ keyword, averageMonthlySearches: VOLUMES[keyword] ?? 30, competition: null, competitionIndex: null, averageCpcMicros: null, lowTopOfPageBidMicros: null, highTopOfPageBidMicros: null, currencyCode: null })) };
+        },
+        async recordGoogleAdsUsage(event) { registro.usoAds.push({ suffix: event.suffix, resultStatus: event.resultStatus }); },
         async collectSerp(request, options2) {
           options2.onRequestStarted();
           registro.serp.push(`${request.query.keyword}|${request.query.lens.device}-${request.query.lens.operatingSystem}`);
@@ -329,7 +366,11 @@ function portasFalsas(options: { usado?: boolean } = {}) {
         async recordDataForSeoUsage(event) { registro.ledger.push(event.idempotencyKey); return "recorded" as const; },
       };
     },
-    async googleAdsVolumes(keywords) { registro.ads += 1; return new Map(keywords.map(keyword => [normalizeKeyword(keyword), VOLUMES[keyword] ?? null])); },
+    async googleAdsVolumes(keywords) {
+      registro.ads += 1;
+      if (options.volumesFalham) throw new Error("métricas fora");
+      return new Map(keywords.map(keyword => [normalizeKeyword(keyword), VOLUMES[keyword] ?? null]));
+    },
     async readFootprints(targets) {
       // Cache primeiro: "instagram…" já está no cache nas 4 lentes; as outras faltam.
       const cacheadas = targets.filter(alvo => alvo.keyword === "instagram para clínica de estética");
@@ -353,7 +394,7 @@ async function montarPar(postoAtrair: DifferentiationPage["post"] = "locked") {
 
 const OPERACAO = "11111111-2222-4333-8444-555555555555";
 
-test("rodada paga com portas falsas: Labs, Ads grátis, SERP cache-first, avaliação e custo dentro do autorizado", async () => {
+test("rodada paga com portas falsas: Google Ads grátis (sementes e URL), SERP cache-first, avaliação e custo só da SERP", async () => {
   const { grupo, angles, plan, pageFootprints } = await montarPar("locked");
   const { ports, registro } = portasFalsas();
   const desfecho = await runPublishedDifferentiation({
@@ -364,15 +405,23 @@ test("rodada paga com portas falsas: Labs, Ads grátis, SERP cache-first, avalia
   assert.ok(desfecho.ok, JSON.stringify(desfecho));
   if (!desfecho.ok) return;
   const { result } = desfecho;
-  assert.equal(registro.labs.length, 6, "3 chamadas Labs por página");
-  assert.ok(registro.labs.some(item => item.startsWith("keyword_ideas:captar clientes clínica estética")));
-  assert.equal(registro.ads, 1, "o Google Ads é consultado uma vez, em lote");
+  assert.equal(registro.ideias.length, 4, "2 sementes do Google Ads por página");
+  assert.ok(registro.ideias.some(item => item.startsWith("keyword:captar clientes clínica estética")), "a semente do ângulo vai ao Google Ads");
+  assert.ok(registro.ideias.filter(item => item.startsWith("keyword_and_url:https://")).length === 2, "a URL de cada página vai como semente");
+  assert.ok(registro.ideias.every(item => item.endsWith("|geoTargetConstants/2076|100")), "targeting canônico do plano e 100 ideias por semente");
+  assert.deepEqual(registro.usoAds.map(item => item.suffix), ["keyword_seed:p1", "url_seed:p1", "keyword_seed:p2", "url_seed:p2"], "uma chave de uso por página e semente: não colidem");
+  assert.equal(registro.ads, 1, "as métricas históricas do Google Ads são consultadas uma vez, em lote");
   assert.ok(!registro.serp.some(item => item.startsWith("instagram")), "a candidata no cache não é paga de novo");
   assert.equal(registro.serp.length, 12, "3 candidatas × 4 lentes que faltavam");
   assert.equal(new Set(registro.ledger).size, registro.ledger.length, "uma chave de ledger por chamada");
   assert.ok(registro.ledger.every(chave => chave.startsWith(`dataforseo:${OPERACAO}:keyword_research:p`)));
+  assert.ok(registro.ledger.every(chave => /:serp:/.test(chave)), "só a SERP entra no ledger DataForSEO");
   assert.ok(result.costs.budgetSpentUsd <= plan.costRange.maxUsd);
-  assert.equal(result.costs.reportedCostUsd, Number((6 * 0.0121 + 12 * 0.002).toFixed(6)));
+  assert.equal(result.costs.reportedCostUsd, Number((12 * 0.002).toFixed(6)), "o custo é só a SERP");
+  assert.deepEqual(result.labsFailures, []);
+  assert.deepEqual(result.adsFailures, []);
+  assert.ok(Object.values(result.candidates).flat().every(item => item.origins.every(origem => origem === "ads_keyword_seed" || origem === "ads_url_seed")), "origens só do Google Ads");
+  assert.ok(Object.values(result.candidates).flat().every(item => !item.rankedByUrl && item.estimate === null), "a semente por URL não liga rankedByUrl e não há estimativa");
   assert.equal(chamadasDeRede, 0);
 
   const avaliacao = result.evaluation;
@@ -399,14 +448,40 @@ test("rodada: ledger com a operação → nada é pago; plano adulterado → nad
   const repetida = await runPublishedDifferentiation({ brandId: "marca", plan, group: grupo, angles, pageFootprints, publishedNormalized: new Set(), operationRequestId: OPERACAO, authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.costRange.maxUsd } }, usado.ports);
   assert.equal(repetida.ok, false);
   assert.equal((repetida as { code: string }).code, "OPERATION_ALREADY_EXECUTED");
-  assert.equal(usado.registro.labs.length + usado.registro.serp.length, 0);
+  assert.equal(usado.registro.ideias.length + usado.registro.serp.length, 0);
 
   const limpo = portasFalsas();
   const adulterado = await runPublishedDifferentiation({ brandId: "marca", plan: { ...plan, hardCapUsd: 5 }, group: grupo, angles, pageFootprints, publishedNormalized: new Set(), operationRequestId: OPERACAO, authorizedPlan: { planHash: plan.planHash, maxCostUsd: 5 } }, limpo.ports);
   assert.equal((adulterado as { code: string }).code, "PLAN_TAMPERED");
   const semAutorizacao = await runPublishedDifferentiation({ brandId: "marca", plan, group: grupo, angles, pageFootprints, publishedNormalized: new Set(), operationRequestId: OPERACAO, authorizedPlan: null }, limpo.ports);
   assert.equal((semAutorizacao as { code: string }).code, "PAID_PLAN_REQUIRED");
-  assert.equal(limpo.registro.labs.length + limpo.registro.serp.length, 0);
+  assert.equal(limpo.registro.ideias.length + limpo.registro.serp.length, 0);
+});
+
+test("rodada: prévia v1 (com Labs) nunca roda — recusada antes de qualquer chamada, sem pagar", async () => {
+  const { grupo, angles, plan, pageFootprints } = await montarPar();
+  const { ports, registro } = portasFalsas();
+  const antiga = { ...plan, version: DIFFERENTIATION_LEGACY_PLAN_VERSION, pages: plan.pages.map(pagina => ({ ...pagina, ads: undefined, labs: [{ callId: "p1:keyword_ideas", endpoint: "keyword_ideas" as const, input: pagina.keyword }] })), adsTargeting: undefined };
+  const desfecho = await runPublishedDifferentiation({ brandId: "marca", plan: antiga, group: grupo, angles, pageFootprints, publishedNormalized: new Set(), operationRequestId: OPERACAO, authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.costRange.maxUsd } }, ports);
+  assert.equal(desfecho.ok, false);
+  assert.equal((desfecho as { code: string }).code, "PAID_PLAN_CHANGED");
+  assert.equal((desfecho as { message: string }).message, DIFFERENTIATION_PLAN_OUTDATED_MESSAGE);
+  assert.equal(registro.ideias.length + registro.serp.length + registro.ledger.length + registro.ads, 0);
+});
+
+test("rodada: uma semente do Google Ads que falha segue com as outras; métricas fora usam a média da ideia", async () => {
+  const { grupo, angles, plan, pageFootprints } = await montarPar("locked");
+  const { ports, registro } = portasFalsas({ adsFalha: "keyword_and_url", volumesFalham: true });
+  const desfecho = await runPublishedDifferentiation({ brandId: "marca", plan, group: grupo, angles, pageFootprints, publishedNormalized: new Set(), operationRequestId: OPERACAO, authorizedPlan: { planHash: plan.planHash, maxCostUsd: plan.costRange.maxUsd } }, ports);
+  assert.ok(desfecho.ok, JSON.stringify(desfecho));
+  if (!desfecho.ok) return;
+  assert.deepEqual(desfecho.result.adsFailures?.map(item => item.kind), ["url_seed", "url_seed"]);
+  assert.deepEqual(registro.usoAds.filter(item => item.resultStatus === "failed").map(item => item.suffix), ["url_seed:p1", "url_seed:p2"]);
+  assert.equal(desfecho.result.adsVolumeFailed, true);
+  assert.ok(desfecho.result.notices.some(aviso => /média mensal das ideias/.test(aviso)));
+  assert.ok(desfecho.result.notices.some(aviso => /2 semente\(s\) do Google Ads falharam/.test(aviso)));
+  const marketing = desfecho.result.candidates[ATRAIR]?.find(item => item.keyword === "marketing de indicação estética");
+  assert.equal(marketing?.adsVolume, 50, "sem a métrica histórica, vale a média da ideia do Google Ads");
 });
 
 /* =========================== avaliação sintética =========================== */

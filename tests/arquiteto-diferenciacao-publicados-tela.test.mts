@@ -171,9 +171,11 @@ test("Manter como está: o grupo mantido some do painel e o resumo diz quantos",
 test("plano: ângulos por página, faixa de custo arredondada para fora e teto por grupo", async () => {
   const plano = await planoDe(PAR.groupId);
   const vista = differentiationPlanView(plano);
-  assert.equal(vista.costLabel, "US$ 0,07 a 0,29", "0,072 a 0,284: o mínimo para baixo, o máximo para cima");
+  // Plano v2 (2026-09-28): o Google Ads é grátis; o custo é só a SERP, de 0 (tudo no cache) a 0,14.
+  assert.equal(vista.costLabel, "US$ 0,00 a 0,14", "0 a 0,14: o mínimo para baixo, o máximo para cima");
   assert.equal(vista.capLabel, "Teto de US$ 0,50 por grupo.");
   assert.ok(vista.withinCap);
+  assert.ok(vista.notices.some(aviso => /vêm do Google Ads/.test(aviso)), "a tela diz de onde vêm as keywords novas");
   const captar = vista.angles.find(item => item.keyword === CAPTAR)!;
   assert.match(captar.angle, /captar/);
   assert.match(captar.sources, /o que já separa os slugs/);
@@ -183,11 +185,25 @@ test("plano: ângulos por página, faixa de custo arredondada para fora e teto p
 
   const todos = await Promise.all(DETECCAO.groups.map(grupo => planoDe(grupo.groupId)));
   const soma = sumDifferentiationCost(todos.map(item => item.plan));
-  assert.ok(soma.maxUsd > 1.5 && soma.maxUsd < 2.1, `as 4 famílias: ~US$ 2 (${soma.maxUsd})`);
-  assert.match(runActionLabel(soma), /^Buscar e validar \(US\$ 0,\d\d a 1,\d\d\)$/);
+  assert.ok(Math.abs(soma.maxUsd - 0.98) < 1e-9, `as 4 famílias: até US$ 0,98, antes ~US$ 2 (${soma.maxUsd})`);
+  assert.equal(runActionLabel(soma), "Buscar e validar (US$ 0,00 a 0,98)");
   assert.equal(runActionLabel(null), DIFFERENTIATION_RUN_ACTION);
-  const cortado = todos.find(item => item.plan.cuts.length)!;
-  assert.ok(differentiationPlanView(cortado).cuts.length > 0, "o corte do teto aparece na tela");
+  assert.ok(todos.every(item => !item.plan.cuts.length), "sem o Labs, as 4 famílias cabem no teto sem corte");
+  const comCorte = { ...plano, plan: { ...plano.plan, cuts: ["SERP de 3 candidatas por página, em vez de 5."] } };
+  assert.deepEqual(differentiationPlanView(comCorte).cuts, ["SERP de 3 candidatas por página, em vez de 5."], "o corte do teto aparece na tela");
+});
+
+test("avisos da rodada: a de hoje traz os do Google Ads pelo servidor; a antiga (Labs) continua legível", () => {
+  const hoje = { ...rodada(), adsFailures: [{ keywordId: CAPTAR, kind: "url_seed", reason: "Google Ads fora" }], adsVolumeFailed: true, notices: ["As métricas históricas do Google Ads não responderam: valeu a média mensal das ideias do Google Ads.", "1 semente(s) do Google Ads falharam; as outras seguiram."] };
+  const vistaHoje = differentiationEvaluationView(hoje, PAR_COMPACTO);
+  assert.ok(vistaHoje.notices.some(aviso => /1 semente\(s\) do Google Ads falharam/.test(aviso)));
+  assert.ok(!vistaHoje.notices.some(aviso => /estimativa do DataForSEO|DataForSEO Labs/.test(aviso)), "sem frase do Labs numa rodada de hoje");
+
+  const antiga = { ...rodada(), labsFailures: [{ keywordId: CAPTAR, endpoint: "related_keywords", reason: "falhou" }], adsVolumeFailed: true };
+  const vistaAntiga = differentiationEvaluationView(antiga, PAR_COMPACTO);
+  assert.ok(vistaAntiga.notices.some(aviso => /1 busca\(s\) no DataForSEO Labs falharam/.test(aviso)));
+  assert.ok(vistaAntiga.notices.some(aviso => /só entrou quem tinha estimativa do DataForSEO/.test(aviso)));
+  assert.equal(differentiationErrorMessage(409, { code: "DIFFERENTIATION_PLAN_OUTDATED" }), "Esta prévia é de antes da troca para o Google Ads. Planeje o grupo de novo; nada foi pago.");
 });
 
 test("Buscar e validar só com plano dentro do teto; o corpo leva o hash e o custo confirmados", async () => {

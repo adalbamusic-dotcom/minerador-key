@@ -54,13 +54,16 @@ test("C — sem IA e com KGR calculável já decidido a revisão conclui", () =>
   assert.equal(humanReviewRecord(completed).kgrApplicability, "applicable");
 });
 
-test("C.1 — KGR calculável sem decisão reporta a pendência sem desabilitar nem inventar valor", () => {
+test("C.1 (2026-09-28) — KGR calculável sem decisão não é pendência e a conclusão não inventa valor", () => {
   const semantic = semanticWithoutAi({ ...measured, kgr_aplicabilidade: "pending" });
   const completion = canCompleteHumanReview(semantic);
   assert.equal(completion.ok, true);
-  assert.equal(completion.pendingKgrDecision, true);
-  assert.match(completion.reason || "", /KGR/);
-  assert.throws(() => completeHumanReview({ semantic, intent: "Informativa", actorId: "human-1", completedAt: "2026-08-24T14:10:00.000Z" }), /KGR/);
+  assert.equal(completion.pendingKgrDecision, undefined);
+  assert.doesNotMatch(completion.reason || "", /KGR/);
+  const completed = completeHumanReview({ semantic, intent: "Informativa", actorId: "human-1", completedAt: "2026-08-24T14:10:00.000Z" });
+  // O legado continua gravado; a decisão de KGR não foi revisada por ninguém.
+  assert.equal(completed.kgr_aplicabilidade, "pending");
+  assert.equal((completed.human_review as { kgrDecisionReviewed?: boolean }).kgrDecisionReviewed, false);
 });
 
 test("F — IA ausente não bloqueia o envio ao Arquiteto nem depende de freshness cruzada", () => {

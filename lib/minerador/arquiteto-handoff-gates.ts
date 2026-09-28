@@ -55,8 +55,9 @@ function normalizedStatus(value: unknown): string {
  * Estado de processo é informação: Revisão e a conclusividade da SERP seguem
  * no read-model para leitura e proveniência, sem vetar o envio.
  *
- * EMENDA (SDD 2026-09-24, F1.7): a trava de APROVAÇÃO — Lógica, Volume,
- * Resultados e KGR, ou só a Lógica para Assunto declarado — passa a valer no
+ * EMENDA (SDD 2026-09-24, F1.7): a trava de APROVAÇÃO — Lógica e Volume
+ * (Resultados e KGR saíram em 2026-09-28 e ficam só informativos aqui), ou só
+ * a Lógica para Assunto declarado — passa a valer no
  * envio para aprovações registradas a partir de `SERVER_APPROVAL_GATE_SINCE`.
  * As anteriores passam com alerta; a já recebida pelo Arquiteto também. O
  * veredito sai de `resolveHandoffApprovalGate`, o mesmo do servidor.

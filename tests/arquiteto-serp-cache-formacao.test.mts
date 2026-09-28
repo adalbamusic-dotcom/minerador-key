@@ -403,7 +403,8 @@ test("os corpos são lidos por lote — principais de todos os grupos, secundár
   assert.match(rota, /const principalBodies = await readCachedBodies\(groups\.flatMap\(group => group\.keywords\.filter\(keyword => keyword\.id === group\.principalSuggestion\.keywordId\)\)\);/);
   assert.ok(rota.indexOf("const principalBodies = ") < rota.indexOf("const settledAssessments = "), "as principais são lidas antes dos grupos");
   assert.match(rota, /collect\(group\.keywords\[principalIndex\], principalIndex, principalBodies\)/);
-  assert.match(rota, /const secondaryBodies = await readCachedBodies\(group\.keywords\.filter\(\(_, index\) => index !== principalIndex\)\);/);
+  // Secundária e reforço sem volume nunca são lidos nem pagos (SDD 2026-09-28, A3).
+  assert.match(rota, /const secondaryBodies = await readCachedBodies\(group\.keywords\.filter\(\(keyword, index\) => index !== principalIndex && observableInGroup\(group, keyword\)\)\);/);
   assert.match(rota, /const candidateBodies = await readCachedBodies\(siloCandidateKeywords\);/);
   // A secundária de um KGR leve continua condicionada à principal ambígua.
   assert.match(rota, /if \(validationProfile !== "kgr_light" \|\| principalAmbiguous\) \{/);

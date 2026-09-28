@@ -91,10 +91,12 @@ test("ajuda do modo Por Assunto explica fontes, custo antes, lista no navegador 
   assert.ok(start >= 0, "tópico descobrir-por-assunto ausente");
   const end = help.indexOf("\n  },", start);
   const topic = help.slice(start, end);
-  assert.match(topic, /O Google Ads e o DataForSEO Labs devolvem as candidatas; o Minerador não fabrica termos\./);
+  // 2026-09-28: a Pesquisa por Assunto usa só o Google Ads; o Labs só aparece em pesquisas antigas.
+  assert.match(topic, /O Google Ads devolve as candidatas; o Minerador não fabrica termos\./);
+  assert.doesNotMatch(topic, /O Google Ads e o DataForSEO Labs devolvem/);
   assert.match(topic, /Por Assunto/);
   assert.match(topic, /Google Ads/);
-  assert.match(topic, /DataForSEO Labs/);
+  assert.match(topic, /sem custo no DataForSEO/);
   assert.match(topic, /custo/i);
   assert.match(topic, /antes/);
   assert.match(topic, /neste navegador/);

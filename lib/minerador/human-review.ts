@@ -1,4 +1,4 @@
-import { readKgrApplicability, setKgrApplicability, type KgrApplicability } from "./kgr-applicability.ts";
+import { hasHumanKgrDecision, readKgrApplicability, setKgrApplicability, type KgrApplicability } from "./kgr-applicability.ts";
 import { readCanonicalKeywordDna } from "./logical-read-model.ts";
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 import { resolveKeywordSubject } from "./keyword-subject.ts";
@@ -378,7 +378,12 @@ function kgrIsCalculable(semantic: Semantic | null | undefined): boolean {
  * própria, reportada como pendente em vez de desabilitar o comando.
  */
 export function canCompleteHumanReview(semantic: Semantic | null | undefined, options: { hasOpenEdit?: boolean; intent?: string | null; status?: string | null } = {}): { ok: boolean; pendingFields: string[]; pendingKgrDecision?: boolean; reason?: string } {
-  const pendingKgrDecision = kgrIsCalculable(semantic) && readKgrApplicability(semantic) === "pending";
+  /*
+   * O KGR NUNCA BLOQUEIA A CONCLUSÃO (decisão do dono, 2026-09-28; SDD SERP no
+   * artigo e KGR opcional, M2). O padrão é "não aplicável" e aplicar é escolha
+   * humana opcional. O campo `pendingKgrDecision` continua no tipo para os
+   * consumidores, mas não é mais emitido.
+   */
 
   /*
    * O posto de principal NÃO é decisão pendente.
@@ -399,12 +404,9 @@ export function canCompleteHumanReview(semantic: Semantic | null | undefined, op
   return {
     ok: true,
     pendingFields,
-    ...(pendingKgrDecision ? { pendingKgrDecision } : {}),
-    ...(pendingKgrDecision
-      ? { reason: "Trate a aplicabilidade do KGR para concluir a revisão humana." }
-      : pendingFields.length > 0
-        ? { reason: "Você pode concluir agora: campos sem evidência permanecerão desconhecidos." }
-        : {}),
+    ...(pendingFields.length > 0
+      ? { reason: "Você pode concluir agora: campos sem evidência permanecerão desconhecidos." }
+      : {}),
   };
 }
 
@@ -446,9 +448,9 @@ export function completeHumanReview(input: {
 }): Semantic {
   const completion = canCompleteHumanReview(input.semantic, { intent: input.intent });
   if (!completion.ok) throw new Error(completion.reason || "Há pendências na revisão humana.");
-  // The KGR applicability stays a human decision: the completion command
-  // never invents "aplicável"/"não aplicável" on the human's behalf.
-  if (completion.pendingKgrDecision) throw new Error(completion.reason || "Trate a aplicabilidade do KGR para concluir a revisão humana.");
+  // A conclusão não inventa "aplicável": registra a aplicabilidade efetiva
+  // (padrão "não aplicável" desde 2026-09-28) e só marca a decisão de KGR como
+  // revisada quando houve decisão humana gravada ou o KGR não era calculável.
   const defaults = applyHumanReviewCompletionDefaults({
     semantic: { ...(input.semantic || {}) },
     intent: input.intent ?? null,
@@ -462,7 +464,7 @@ export function completeHumanReview(input: {
     status: "completed",
     decision: "completed",
     kgrApplicability: applicability,
-    kgrDecisionReviewed: record.kgrDecisionReviewed === true || !kgrIsCalculable(defaults.semantic) || applicability !== "pending",
+    kgrDecisionReviewed: record.kgrDecisionReviewed === true || !kgrIsCalculable(defaults.semantic) || hasHumanKgrDecision(defaults.semantic),
     pendingFields: [],
     completedAt: input.completedAt,
     completedBy: input.actorId,

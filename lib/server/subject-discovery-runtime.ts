@@ -13,9 +13,9 @@ import { createGoogleAdsKeywordAccount } from "@/lib/google/ads/account";
 import { generateGoogleAdsKeywordIdeas } from "@/lib/google/ads/keyword-ideas";
 import { createGoogleAdsCanonicalClient, resolveGoogleAdsCanonicalContext } from "./google-ads-canonical";
 import { recordGoogleAdsDiscoveryUsage } from "@/lib/minerador/google-ads-discovery-usage";
-import { executeDataForSeoLabsResearch } from "@/lib/minerador/dataforseo-labs-keyword-research-core";
 import {
   type SubjectDiscoveryExecutionPorts,
+  type SubjectDiscoveryOpenExecutionOptions,
   type SubjectDiscoveryPorts,
   type SubjectDiscoverySearchRequest,
 } from "@/lib/minerador/subject-discovery-search";
@@ -31,7 +31,14 @@ import type { TenantContext } from "./tenant-context";
  * conferência de `authorizedPlan`, mesmo ledger. Duas montagens acabariam
  * divergindo exatamente no ponto que decide se uma chamada é paga.
  *
- * SDD: `docs/compartilhado/sdd-plataforma-para-agentes-mcp-2026-09-26.md`.
+ * Desde 2026-09-28 a Pesquisa por Assunto usa só o Google Ads e abre a
+ * execução com `{ dataForSeo: false }`: a Connection DataForSEO não é
+ * resolvida, e uma marca sem DataForSEO pesquisa normalmente. A diferenciação
+ * de publicados abre com o DataForSEO (paga a SERP das candidatas). O Labs saiu
+ * das portas: o núcleo dele fica no código, sem chamador.
+ *
+ * SDD: `docs/compartilhado/sdd-plataforma-para-agentes-mcp-2026-09-26.md` e
+ * `docs/compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md`.
  */
 
 /** Lote da leitura "já existe": `id,keyword`, nunca a linha inteira. */
@@ -115,15 +122,24 @@ export function buildSubjectDiscoveryPorts({ profile, context, input, usage }: {
       }
       return rows;
     },
-    async openExecution(): Promise<SubjectDiscoveryExecutionPorts> {
+    async openExecution(options?: SubjectDiscoveryOpenExecutionOptions): Promise<SubjectDiscoveryExecutionPorts> {
       const serviceClient = createCanonicalServiceClient();
       const runtimeRepository = createIntegrationRuntimeRepository(serviceClient);
-      const resolved = await resolveDataForSeoCanonicalKeywordResearchConfig({
-        actorUserId: profile.userId,
-        agencyId: context.agencyId || null,
-        brandId: context.brandId,
-        client: serviceClient,
-      });
+      // Sem o DataForSEO (Pesquisa por Assunto), a Connection nem é resolvida:
+      // as portas DataForSEO recusam, e o ledger DataForSEO fica de fora.
+      const withDataForSeo = options?.dataForSeo !== false;
+      const resolved = withDataForSeo
+        ? await resolveDataForSeoCanonicalKeywordResearchConfig({
+          actorUserId: profile.userId,
+          agencyId: context.agencyId || null,
+          brandId: context.brandId,
+          client: serviceClient,
+        })
+        : null;
+      const dataForSeo = () => {
+        if (!resolved) throw Object.assign(new Error("O DataForSEO não foi aberto nesta execução."), { code: "DATAFORSEO_NOT_OPENED" });
+        return resolved;
+      };
       const googleAdsUsageDependencies = { repository: runtimeRepository, authorizationRepository: createCanonicalAuthorizationRepository(serviceClient) };
       let googleAds: Promise<{ client: Awaited<ReturnType<typeof createGoogleAdsCanonicalClient>>["client"]; account: ReturnType<typeof createGoogleAdsKeywordAccount> }> | null = null;
       const openGoogleAds = () => {
@@ -135,18 +151,19 @@ export function buildSubjectDiscoveryPorts({ profile, context, input, usage }: {
         return googleAds;
       };
       return {
-        ledgerCapability: Boolean(resolved.resource.capability),
+        ledgerCapability: Boolean(resolved?.resource.capability),
         async findUsage(idempotencyKey) {
-          return Boolean(await runtimeRepository.findUsageByIdempotency(resolved.resource.connection.connectionId, idempotencyKey));
+          const dataforseo = dataForSeo();
+          return Boolean(await runtimeRepository.findUsageByIdempotency(dataforseo.resource.connection.connectionId, idempotencyKey));
         },
-        async collectSerp(serpRequest, options) {
+        async collectSerp(serpRequest, collectOptions) {
           const collection = await collectAndCacheSerp(serpCache, serpRequest, {
-            config: resolved.config,
-            operationRequestId: options.operationRequestId,
+            config: dataForSeo().config,
+            operationRequestId: collectOptions.operationRequestId,
             collectedBy: usage?.collectedBy ?? "minerador",
             now,
-            storeBody: options.storeBody,
-            provider: { onRequestStarted: options.onRequestStarted },
+            storeBody: collectOptions.storeBody,
+            provider: { onRequestStarted: collectOptions.onRequestStarted },
           });
           const stored = collection.write === "created" || collection.write === "updated" || collection.write === "concurrent" || collection.write === "kept";
           return {
@@ -158,12 +175,9 @@ export function buildSubjectDiscoveryPorts({ profile, context, input, usage }: {
             error: collection.observationError || (collection.writeError ? `A gravação no cache falhou: ${collection.writeError.slice(0, 200)}` : null),
           };
         },
-        runLabs(labsRequest, hooks) {
-          return executeDataForSeoLabsResearch(labsRequest, { config: resolved.config, onRequestStarted: hooks.onRequestStarted });
-        },
         async recordDataForSeoUsage(event) {
           const recorded = await recordIntegrationUsage({
-            resource: resolved.resource,
+            resource: dataForSeo().resource,
             operation: "module_operation",
             module: usage?.module ?? "minerador",
             resultStatus: event.resultStatus,
@@ -217,6 +231,8 @@ export function buildSubjectDiscoveryPorts({ profile, context, input, usage }: {
             receivedCount: event.receivedCount ?? undefined,
             normalizedCount: event.receivedCount ?? undefined,
             usageKeySuffix: event.suffix,
+            // Aditivo: quem paga pelo mesmo caminho declara o módulo (ausente, `minerador`).
+            module: usage?.module ?? null,
             dependencies: googleAdsUsageDependencies,
           });
         },

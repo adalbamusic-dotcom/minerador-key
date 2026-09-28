@@ -1,5 +1,133 @@
 # Estado atual — Radar
 
+## Correções do corretor sobre as frentes de 2026-09-28 — 2026-09-28
+
+```text
+ORIGEM = revisão da frente R (R1-R3) da SDD sdd-serp-no-artigo-e-kgr-opcional-2026-09-28
+EXPORT_PORTATIL = lentes do Google no dossiê de YouTube/Amazon saem na coluna de lentes (antes: vazia, "não se aplicam")
+MIGRATION = 0 · SQL = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- Export portátil (`lib/radar/portable-export-batch.ts` e
+  `lib/radar/portable-serp-observed.ts`): as lentes congeladas saem de
+  `bundle.serpLenses` em qualquer perfil que as traga. Com o Google finalizado
+  como apoio (R3), a coluna mostra as lentes em vez de dizer que não se aplicam;
+  sem o Google, o dossiê de vídeo ou de produto continua "não se aplicam". O
+  teste `tests/radar-portable-lentes-congeladas.test.mts` foi atualizado ao
+  contrato do R3 (YouTube e Amazon só acrescentam).
+- Planejador (outro módulo, só rótulo): "KGR não aplicável" no lugar de "Não
+  classificado como KGR".
+- Suítes: `test:radar` 2716/2716, `test:redator` 358/358, `test:redator:mcp`
+  117/117, `test:serp-cache` 34/34.
+
+Pendências, fora desta correção:
+- Redator (`lib/server/writer-evidence-reader.ts`, linhas 249, 618, 719 e
+  1233): o manifesto, os fundamentos e o material de seção tratam todo perfil
+  diferente de GOOGLE como "fotografia do Google ausente" e recusam ler
+  `observed`. Com o R3 o pacote pode trazer a fotografia do Google como apoio.
+  Ajustar é mudança do módulo Redator, com testes próprios (`test:redator`,
+  `test:redator:mcp`).
+- `collect_auxiliary` (`app/api/editorial/serp/route.ts`) sem guarda de volume
+  no servidor; investigações já iniciadas com auxiliares sem volume em PLANNED
+  continuam coletando na retomada. Falta decidir o destino desses registros.
+
+## Integração das frentes de 2026-09-28 (catálogo MCP) — 2026-09-28
+
+```text
+INTEGRACAO = frentes M (M1-M4), D (D1-D2), A (A1-A5) e R (R1-R3) da SDD sdd-serp-no-artigo-e-kgr-opcional-2026-09-28
+CATALOGO_MCP = lib/agent/platform-catalog.ts atualizado na mesma entrega (AGENTS §17.1) · npm run test:agent = 56/56
+ROTA_NOVA_NO_CATALOGO = /api/arquiteto/article-allintitle (em arquiteto.validate_serp)
+MIGRATION = 0 · SQL = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- Catálogo: `radar.investigate` ganhou as notas do reaproveitamento da coleta do
+  Arquiteto pelo cache (4 lentes, 30 dias), da secundária sem volume como
+  "Somente contexto", de YouTube e Amazon que só acrescentam e do rótulo
+  "KGR não aplicável".
+- Suítes: `test:radar` 2716/2716, `test:redator` 358/358.
+
+## SERP no artigo e KGR opcional — fatias R1, R2 e R3 do Radar — 2026-09-28
+
+Fonte: [SDD "SERP no artigo e KGR opcional"](../compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md), seções 3.4, 6.4, 8 e 10 (aprovada pelo dono em 2026-09-28). Item 5 da decisão: "a busca no Google reaproveita a mesma coleta do Arquiteto (mesmo cache). YouTube e Amazon só acrescentam dados; nunca substituem nem apagam os dados de busca no Google".
+
+```text
+R1_CHAVE_IGUAL        = já funcionava · provado por teste · nenhum código de produção mudou nesta fatia
+R2_SEM_VOLUME         = secundária ou reforço sem volume → CONTEXT_ONLY · sem consulta auxiliar (4 lentes pagas a menos por keyword)
+R3_GOOGLE_PRESERVADO  = Google finalizado + YouTube ou Amazon → Google SUPPORT com observed, refs e contagens do congelado e serpLenses
+ROTULO_KGR            = "Não classificado como KGR" → "KGR não aplicável"
+HASH_DOS_OUTROS       = dourados iguais (só Google, só YouTube, só Amazon)
+CHAMADAS_PAGAS = 0 · MIGRATIONS = 0 · SCHEMA_NOVO = 0 · CAMPO_NOVO_EM_STRICT = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: NÃO.**
+
+### R1 · a busca no Google reaproveita a coleta do Arquiteto
+
+- O reaproveitamento é pela CHAVE do cache (`serp_cache_entry`): keyword normalizada (trim + minúsculas) × localidade × idioma × lente × `advanced`. `collectedBy` não é filtro. Nada foi mudado no núcleo (`lib/server/radar-serp-lenses.ts`).
+- Provado em `tests/radar-serp-reaproveita-arquiteto.test.mts`:
+  - chave igual entre a rota `keyword-serp`, a formação (`formationSerpCacheRequest`) e o Radar nas 4 lentes, em três casos: keyword fora do acervo lido, keyword **sem medição do Minerador** (a SERP deixou de ser obrigatória lá) e keyword com targeting em inglês. Também com o ambiente em `pt-br` e com outra grafia da keyword;
+  - o Radar lê as 4 lentes que o Arquiteto pagou: 0 chamada, nenhuma credencial, nenhum uso registrado, nenhuma entrada nova no cache, `collectedBy: "arquiteto"` em cada lente e na proveniência;
+  - o snapshot lido do cache tem o mesmo `contentHash` do pago pelo próprio Radar;
+  - config ≠ ambiente: o Radar consulta e grava pelos códigos da chave, nunca pelos da config;
+  - em produção a config da SERP tira localidade e idioma do mesmo leitor da chave (`buildDataForSeoSerpConfig` → `readDataForSeoTargetCodes(process.env)`), e nenhuma das rotas injeta outro ambiente.
+- **O desvio de `keyword-serp` não foi editado.** A rota paga sob os códigos da config quando eles divergem do ambiente (`app/api/arquiteto/keyword-serp/route.ts`, bloco `keyword_serp_cache_codes_diverge`). Em produção esse ramo não é alcançável (mesmo leitor, mesmo `process.env`). A rota está sendo reescrita pela fatia A2 do Arquiteto neste mesmo momento, e mexer nela aqui criaria conflito. Registrado no backlog.
+- Limites conhecidos, sem mudança (decisões do dono ou da SDD):
+  - validade de 30 dias (D4 aberta): depois disso o Radar paga as lentes vencidas;
+  - canônica gravada sem corpo por outro gravador: o Radar paga só a canônica (provado por teste). O Arquiteto grava o corpo da canônica;
+  - apoio Google da Amazon com texto derivado ("X review", "A vs B"): chave própria, paga as 4 lentes. É acréscimo, não substituição (SDD 7.5);
+  - o YouTube consulta o endpoint próprio, sem cache.
+
+### R2 · keyword sem volume não gera consulta auxiliar
+
+- `lib/radar/research-query-plan.ts`: secundária ou reforço com volume nulo, zero ou inválido vira `CONTEXT_ONLY`, com o motivo "Sem volume de busca registrado no ArticleDNA: a keyword não gera consulta própria e permanece como contexto.". A principal continua `EXECUTE` (é a âncora). Keyword sem texto continua `NOT_EXECUTABLE`.
+- O predicado é `radarQueryHasSearchVolume`, igual a `hasSearchVolume` do Arquiteto (teste de equivalência). Ele foi repetido no Radar para o plano não carregar o módulo de formação do Arquiteto.
+- `startRadarDeepResearch` grava essas consultas como `NOT_EXECUTED`, e `radarResearchResumption` não as põe na fila de coleta auxiliar.
+- Investigações já iniciadas mantêm as disposições gravadas no registro. A rota `collect_auxiliary` não ganhou guarda de servidor (ver backlog).
+- Teste: `tests/radar-plano-sem-volume.test.mts`.
+
+### R3 · YouTube e Amazon acrescentam; o Google finalizado continua no dossiê
+
+- Antes: com o Google finalizado e depois um YouTube ou uma Amazon finalizados, o perfil primário passava a ser o de vídeo ou o de produto (precedência fixa, que continua), e o Google ia só como referência ao snapshot de apoio, sem `observed` e sem `serpLenses`. O hash desses dossiês era igual ao de um YouTube ou de uma Amazon sozinhos: o Google finalizado ficava invisível ao Planejador e ao Redator.
+- Agora (`lib/radar/evidence-bundle-runtime.ts`), com `finalizedBundle` presente e perfil YOUTUBE ou AMAZON:
+  - `research.google` é `SUPPORT`, com a referência do snapshot da análise (`SEO_SUPPORT` no YouTube, `SEO_COMMERCIAL_SUPPORT` na Amazon), a assinatura do snapshot, o `frozenAt`, as contagens do CONGELADO e as limitações dele. A referência de apoio que aponta para outro snapshot continua como segunda referência;
+  - `observed` viaja quando confere com o congelado: mesmo artigo, mesma versão do ArticleDNA e a régua de `radarObservedDivergesFromFrozen` (extraída de `radarDossierDivergesFromFrozen`, sem mudar o comportamento dela). Se divergir, ou se não passar na conferência de proveniência do dossiê, não viaja, e o motivo vai para `limitations`. O pacote de vídeo ou de produto continua pronto;
+  - `serpLenses` e as limitações das lentes entram como no perfil Google;
+  - `serpStanding` continua o do perfil primário (sem mudança).
+- `lib/server/radar-canonical-authorities.ts` monta a fotografia do Google (e lê os snapshots) também quando o Google foi finalizado fora do perfil GOOGLE.
+- Hash: só o caso "Google finalizado + YouTube ou Amazon" muda. Os dourados de só Google, só YouTube e só Amazon foram medidos antes da mudança e continuam iguais. Dossiês já entregues (`plannerBundle`, `writerBundle`) não são recalculados. Um novo envio desse caso sai como `NEW_VERSION`, com mais evidência.
+- Nenhum schema mudou: o dossiê V3 não é `.strict()`, e `observed` e `serpLenses` já existiam. Continua havendo uma única camada PRIMARY. Não há ordem de deploy nova.
+- Consumidores que passam a receber a fotografia nesse caso:
+  - Planejador e Redator, pelo dossiê. `lib/redator/radar-foundations.ts` lê `bundle.observed` sem olhar o perfil;
+  - as linhas da virada do Assunto no envio ao Redator (`authorities.google.articleModel`);
+  - o export "Para escrever" (`googleObserved`).
+- Testes: `tests/radar-dossie-google-preservado.test.mts` e o caso YouTube de `tests/radar-serp-lentes-congeladas.test.mts`. Esse caso foi atualizado: antes afirmava que as lentes do Google não entravam no dossiê de vídeo, e a regra mudou por decisão do dono.
+
+### Rótulo do KGR
+
+- `radarKgrClassificationLabel("not_kgr")` passa de "Não classificado como KGR" a "KGR não aplicável" (tela de análise do Radar). O Planejador tem o mesmo texto em `modules/planejador/planner-cockpit-workspace.tsx:70`, fora desta frente.
+
+### Arquivos
+
+- Produção:
+  - `lib/radar/evidence-bundle-runtime.ts`;
+  - `lib/radar/planner-handoff.ts` (função extraída, sem mudança de comportamento);
+  - `lib/radar/research-query-plan.ts` (CRLF preservado);
+  - `lib/radar/strategy-context.ts`;
+  - `lib/server/radar-canonical-authorities.ts`.
+- Testes novos: `tests/radar-serp-reaproveita-arquiteto.test.mts`, `tests/radar-plano-sem-volume.test.mts` e `tests/radar-dossie-google-preservado.test.mts`. Atualizado: `tests/radar-serp-lentes-congeladas.test.mts`. O glob de `test:radar` já pega os três novos.
+- Não editados: `app/api/arquiteto/keyword-serp/route.ts`, `lib/agent/platform-catalog.ts`, `package.json` e a SDD.
+
+### Testes executados
+
+- `npm run test:radar`: 2716 de 2716. A linha de base, antes da mudança, era 2685 de 2685.
+- `npm run test:redator`: 358 de 358. `npm run test:redator:mcp`: 117 de 117. `npm run test:serp-cache`: 34 de 34.
+- `npm run test:editorial`: 170 de 174. As 4 falhas são de `tests/editorial-pipeline.test.mts` e leem arquivos fora desta frente (página de conta, layout do Admin, página da Marca e `arquiteto-workspace.tsx`). Nenhuma delas lê arquivo desta frente.
+- TypeScript (`tsc --noEmit`): nenhum erro nos arquivos desta frente; os erros restantes são de testes de outras frentes em andamento. ESLint direcionado: sem erro. `git diff --check`: limpo.
+
 ## Assunto declarado no Radar (F3) e no export "Para escrever" (F4.3) — 2026-09-24
 
 Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md), seções F3, F4.3, 6 e 7. O Assunto é o tronco que o humano declara no Minerador e o Arquiteto fixa em `ArticleDNA.subject` (F2 fase A: o schema já aceita). **O Radar lê o Assunto e nunca o troca, promove nem rebaixa** (`AGENTS.md` §7; P8).

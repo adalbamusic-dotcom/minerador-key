@@ -3,7 +3,6 @@ import { withoutMeasurementSeries } from "./listing-payload.ts";
 import { PUBLICATION_IDENTITY_LOCK_HISTORY_KEY } from "./publication-link.ts";
 import { deriveProcessorRevalidation } from "./processor-revalidation.ts";
 import { hasCompleteLogicalOutputContract } from "./logical-processor.ts";
-import { readKgrApplicability } from "./kgr-applicability.ts";
 import { readCanonicalKeywordDna } from "./logical-read-model.ts";
 import { SERP_EVIDENCE_RECORD_KEY } from "./serp-evidence-record.ts";
 import { resolveKeywordSubject } from "./keyword-subject.ts";
@@ -88,7 +87,7 @@ export function resolveApprovalReadiness(input: {
 
   /*
    * EXCEÇÃO D2 (SDD 2026-09-24, F1.7). Assunto declarado pelo humano dispensa
-   * Volume, Resultados e KGR: é uma frase que o público pode não procurar, e
+   * Volume e KGR (Resultados deixou de ser trava para todas em 2026-09-28): é uma frase que o público pode não procurar, e
    * `volume_search = null` faria a keyword nunca ser aprovável. A Lógica
    * continua exigida — local, sem provider — e dá ao Arquiteto a hipótese de
    * intenção e funil.
@@ -102,8 +101,7 @@ export function resolveApprovalReadiness(input: {
    * Volume é PROCESSO EXECUTADO (decisão do dono, 2026-09-25): medição Google
    * Ads com número >= 0, ou a resposta do Google Ads sem média gravada
    * (`volume_eligibility` `unavailable`, `provider: "google_ads"`, com data).
-   * O volume continua `null` (ADR-020) e o KGR não é calculável, então a
-   * trava do KGR abaixo não o exige.
+   * O volume continua `null` (ADR-020) e o KGR não é calculável.
    *
    * Só vale com o volume de fato vazio: `emptyResponse` já é `null` quando a
    * linha carrega um número anterior não validado (planilha, legado). Esse
@@ -113,9 +111,18 @@ export function resolveApprovalReadiness(input: {
   const volumeWithoutAverage = !processor.volume.validated && Boolean(processor.volume.emptyResponse);
   const importedVolumeNotConfirmed = !processor.volume.validated && Boolean(processor.volume.emptyResponseOverUnconfirmedValue);
   if (!processor.volume.validated && !volumeWithoutAverage) missing.push("volume");
-  if (!processor.results.validated) missing.push("results");
-  // O KGR só é obrigação quando as duas medições o tornam calculável.
-  if (processor.kgr.ready && readKgrApplicability(semantic) === "pending") missing.push("kgr");
+  /*
+   * RESULTADOS E KGR NÃO SÃO TRAVA (decisão do dono, 2026-09-28; SDD
+   * `sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md`, fatia M1). A SERP
+   * (allintitle, KD, SERP canônica) virou ação manual e opcional no Minerador:
+   * a primeira coleta acontece no Arquiteto, aba Artigos, só para keywords com
+   * volume. O KGR tem padrão "não aplicável" e aplicar é escolha humana.
+   *
+   * A união `ApprovalRequirement` mantém "results" e "kgr" — nunca emitidos
+   * aqui — porque é o contrato de tipo das rotas e da MCP. Só reduz recusas:
+   * nenhum registro `aprovacao` é regravado, e `contentHash`, assinatura e
+   * `SERVER_APPROVAL_GATE_SINCE` ficam iguais.
+   */
 
   const notes = volumeWithoutAverage ? { notes: [VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE] } : {};
   if (missing.length === 0) return { ok: true, missing, reason: null, ...notes };
@@ -130,7 +137,7 @@ export function resolveApprovalReadiness(input: {
 }
 
 /** Motivo da exceção D2 quando falta a Lógica de um Assunto declarado. */
-export const SUBJECT_APPROVAL_REASON = "Assunto declarado: dispensa Volume, Resultados e KGR; a Lógica continua exigida." as const;
+export const SUBJECT_APPROVAL_REASON = "Assunto declarado: dispensa Volume e KGR; a Lógica continua exigida." as const;
 
 /*
  * TRAVA DE APROVAÇÃO NO ENVIO AO ARQUITETO (SDD 2026-09-24, F1.7 e P10; Q3, Q9).

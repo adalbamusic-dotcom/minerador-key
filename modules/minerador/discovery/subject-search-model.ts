@@ -5,6 +5,7 @@ import type {
   SubjectDiscoverySourceStatus,
 } from "../../../lib/minerador/subject-discovery-search.ts";
 import {
+  SUBJECT_DISCOVERY_ACTIVE_SOURCES,
   SUBJECT_DISCOVERY_NOTICES,
   SUBJECT_DISCOVERY_SOURCE_LABELS,
   SUBJECT_DISCOVERY_SOURCES,
@@ -29,18 +30,21 @@ import { compareSubjectDiscoveryByVolume, subjectDiscoveryHasVolume } from "../.
 /** A regra do modo, a mesma frase do servidor. */
 export const SUBJECT_SEARCH_RULE_TEXT = SUBJECT_DISCOVERY_NOTICES.sourceRule;
 export const SUBJECT_SEARCH_LOCALE_TEXT = SUBJECT_DISCOVERY_NOTICES.locale;
-/** O select de Idioma continua visível no modo: ele também vale só para o Google Ads. */
-export const SUBJECT_SEARCH_LANGUAGE_TEXT = "O idioma escolhido também vale só para o Google Ads; o DataForSEO e os resultados do Google usam sempre português.";
-export const SUBJECT_SEARCH_ENTER_HELP = "Enter mostra o custo antes de pesquisar.";
+/** O select de Idioma continua visível no modo: ele vale para o Google Ads, a única fonte. */
+export const SUBJECT_SEARCH_LANGUAGE_TEXT = "A pesquisa não consulta o DataForSEO: não tem custo por pesquisa, só usa a cota do Google Ads.";
+export const SUBJECT_SEARCH_ENTER_HELP = "Enter mostra o plano antes de pesquisar.";
 export const SUBJECT_SEARCH_NOTE_HELP = "A nota não muda a pesquisa; ela acompanha o Assunto, se você o declarar no envio.";
 export const SUBJECT_SEARCH_DESTINATION_HELP = "Opcional. Só uma página https do site da marca entra no Google Ads, junto com a frase.";
 export const SUBJECT_SEARCH_DECLARED_HELP = "Com um Assunto declarado, o servidor relê a frase, a nota e a página gravadas na marca.";
-export const SUBJECT_SEARCH_LOCAL_LIST_TEXT = "Lista guardada só neste navegador. Só o envio ao Processador salva no banco. Limpar os dados do navegador apaga a lista. Os resultados do Google ficam guardados para a marca por 30 dias; os do DataForSEO Labs, não: repetir a pesquisa paga de novo.";
+export const SUBJECT_SEARCH_LOCAL_LIST_TEXT = "Lista guardada só neste navegador. Só o envio ao Processador salva no banco. Limpar os dados do navegador apaga a lista. Repetir a pesquisa consulta o Google Ads de novo, sem custo.";
 export const SUBJECT_SEARCH_LOCAL_POLICY_TEXT = "Cada busca vale 30 dias neste navegador, e ficam no máximo 10 por marca. A vencida e a mais antiga saem sozinhas.";
 export const SUBJECT_SEARCH_MEMORY_ONLY_TEXT = "O armazenamento deste navegador não respondeu: a lista está só na memória e não sobrevive ao recarregar a página.";
 export const SUBJECT_SEARCH_VOLUME_REMEASURE_TEXT = "O volume será medido de novo no Processador, pelo Google Ads, sem custo.";
 export const SUBJECT_SEARCH_UNDECLARED_TEXT = "Para ligar estas keywords a um Assunto, declare-o antes, aqui ou no Processador.";
-export const SUBJECT_SEARCH_PLAN_TEXT = "Nada é pago antes de você confirmar. O plano é confirmado inteiro: nenhuma fonte fica de fora, para o total confirmado ser o total executado.";
+export const SUBJECT_SEARCH_PLAN_TEXT = "Nada é consultado antes de você confirmar. O plano é confirmado inteiro: a frase, a página de destino e a segmentação do Google Ads que você vê são as que a pesquisa usa.";
+/** O resumo do plano sem chamada paga (o de hoje, só Google Ads). */
+export const SUBJECT_SEARCH_FREE_PLAN_TEXT = "Sem custo no DataForSEO; usa a cota do Google Ads";
+/** Coluna de buscas antigas (antes de 2026-09-28): só aparece quando alguma candidata tem estimativa. */
 export const SUBJECT_SEARCH_ESTIMATE_COLUMN = "Estimativa DataForSEO";
 
 export function declarePhraseAsSubjectLabel(phrase: string) {
@@ -109,7 +113,7 @@ export function subjectCandidateGoogleAdsVolume(candidate: Pick<SubjectDiscovery
 }
 
 export type SubjectSearchFilters = {
-  /** D2.3: ligado por padrão. Esconde a candidata sem média do Google Ads e sem estimativa DataForSEO. */
+  /** D2.3: ligado por padrão. Esconde a candidata sem média do Google Ads (e, em buscas antigas, sem estimativa DataForSEO). */
   onlyWithVolume: boolean;
   origin: SubjectDiscoverySource | "all";
   hideExisting: boolean;
@@ -118,13 +122,32 @@ export type SubjectSearchFilters = {
 
 export const SUBJECT_SEARCH_DEFAULT_FILTERS: SubjectSearchFilters = { onlyWithVolume: true, origin: "all", hideExisting: false, text: "" };
 
-/** Com volume: média do Google Ads > 0 ou estimativa DataForSEO > 0 (D2.3). A estimativa não vira Volume. */
+/**
+ * Com volume: média do Google Ads > 0 (D2.3). Buscas antigas (antes de
+ * 2026-09-28) também contam a estimativa DataForSEO > 0, a regra com que foram
+ * feitas; nas novas a estimativa não existe. A estimativa não vira Volume.
+ */
 export function subjectCandidateHasVolume(candidate: Pick<SubjectDiscoveryCandidate, "googleAds" | "dataForSeoEstimate">): boolean {
   return subjectDiscoveryHasVolume(candidate);
 }
 
+/** A busca tem estimativa DataForSEO (busca antiga)? Só então a coluna Estimativa aparece. */
+export function subjectSearchHasEstimate(candidates: ReadonlyArray<Pick<SubjectDiscoveryCandidate, "dataForSeoEstimate">>): boolean {
+  return candidates.some(candidate => typeof candidate.dataForSeoEstimate?.searchVolume === "number");
+}
+
+/**
+ * As origens do filtro: as fontes de hoje (Google Ads) e, numa busca antiga,
+ * as que ela trouxe (`labs_*`), na ordem das fontes. Uma origem desconhecida
+ * não entra no filtro; continua na coluna Origens, com o rótulo de desconhecida.
+ */
+export function subjectSearchOriginFilterOptions(candidates: ReadonlyArray<Pick<SubjectDiscoveryCandidate, "origins">>): SubjectDiscoverySource[] {
+  const present = new Set<string>(candidates.flatMap(candidate => candidate.origins));
+  return SUBJECT_DISCOVERY_SOURCES.filter(source => (SUBJECT_DISCOVERY_ACTIVE_SOURCES as readonly string[]).includes(source) || present.has(source));
+}
+
 export const SUBJECT_SEARCH_ONLY_WITH_VOLUME_LABEL = "Só com volume";
-export const SUBJECT_SEARCH_ONLY_WITH_VOLUME_HELP = "Esconde as candidatas sem média do Google Ads e sem estimativa DataForSEO. Sem volume, a keyword não reforça artigo. Filtrar não chama provider.";
+export const SUBJECT_SEARCH_ONLY_WITH_VOLUME_HELP = "Esconde as candidatas sem média do Google Ads (em buscas antigas, também sem estimativa DataForSEO). Sem volume, a keyword não reforça artigo. Filtrar não chama provider.";
 
 export function subjectSearchHiddenWithoutVolumeText(count: number): string {
   return count === 1 ? "1 candidata sem volume escondida." : `${count} candidatas sem volume escondidas.`;
@@ -138,8 +161,8 @@ export function subjectSearchShowHiddenLabel(count: number): string {
 export function subjectSearchSelectedWithoutVolumeText(count: number): string | null {
   if (count <= 0) return null;
   return count === 1
-    ? "1 selecionada está sem volume: sem média do Google Ads e sem estimativa DataForSEO. Sem volume, ela não reforça artigo."
-    : `${count} selecionadas estão sem volume: sem média do Google Ads e sem estimativa DataForSEO. Sem volume, elas não reforçam artigo.`;
+    ? "1 selecionada está sem volume: sem média do Google Ads. Sem volume, ela não reforça artigo."
+    : `${count} selecionadas estão sem volume: sem média do Google Ads. Sem volume, elas não reforçam artigo.`;
 }
 
 function foldText(value: string) {

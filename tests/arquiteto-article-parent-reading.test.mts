@@ -91,7 +91,9 @@ test("concluir formação materializa o ArticleDNA já aprovado", () => {
    */
   assert.match(workspace, /const vinculo = bindArticleParentForMaterialization\(\{/);
   assert.match(workspace, /stage: estagio,/);
-  assert.match(workspace, /const payload = vinculo.payload;/);
+  // Correção de 2026-09-28: o payload continua sendo o do binder; só a
+  // identidade KGR é reconciliada com a canônica antes de comparar.
+  assert.match(workspace, /const payload: ArticleDNA = \{ \.\.\.vinculo\.payload, kgrIdentity: kgrReconciliada \};/);
 });
 
 test("o cabeçalho do grupo não redecide o que o agrupamento já nomeou", () => {

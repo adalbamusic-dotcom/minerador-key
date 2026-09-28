@@ -1,5 +1,35 @@
 # Backlog — Radar
 
+## Correções do corretor (frentes de 2026-09-28) — 2026-09-28
+
+- [x] Export portátil: lentes do Google do dossiê de YouTube/Amazon (R3) saem na coluna de lentes.
+- [ ] Redator: manifesto, fundamentos e material de seção reconhecerem a fotografia do Google de apoio (perfil ≠ GOOGLE) em vez de declará-la ausente e recusar `observed`.
+- [ ] Guarda de volume no servidor em `collect_auxiliary` e destino das auxiliares sem volume já gravadas como PLANNED.
+
+## SERP no artigo e KGR opcional — R1, R2 e R3 — 2026-09-28
+
+Fonte: [SDD "SERP no artigo e KGR opcional"](../compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md). Registro em `estado-atual.md`, mesma data.
+
+- [x] **R1 · chave igual entre Arquiteto e Radar:** provada com e sem targeting, com outra grafia e com config ≠ ambiente. O Radar lê a coleta do Arquiteto com 0 chamada (`tests/radar-serp-reaproveita-arquiteto.test.mts`). Nenhum código de produção mudou.
+- [x] **R2 · keyword sem volume não gera consulta auxiliar:** `CONTEXT_ONLY` com motivo, e o predicado é igual ao `hasSearchVolume` do Arquiteto.
+- [x] **R3 · Google finalizado preservado no dossiê** quando YouTube ou Amazon são o perfil primário: camada SUPPORT com referências e contagens do congelado, `observed` conferido com o congelado e `serpLenses`. O hash dos demais dossiês não muda (valores dourados).
+- [x] Rótulo "KGR não aplicável" na análise do Radar.
+- [ ] **Desvio de códigos da rota `keyword-serp`** (dono: fatia A2 do Arquiteto ou integrador).
+  - Quando a config diverge do ambiente, a rota paga e grava sob os códigos da config (bloco `keyword_serp_cache_codes_diverge`). A formação e a SERP territorial fazem o mesmo.
+  - Em produção esse ramo não é alcançável (mesmo `process.env`). Se um dia for, o Radar não acha a entrada.
+  - Correção sugerida: pagar sempre sob os códigos da chave, porque o provider recebe os códigos da consulta, não os da config.
+  - Não foi editado aqui porque a fatia A2 reescreve a rota ao mesmo tempo.
+- [ ] **Teste de chave para a coleta do lote do Arquiteto (A2):** quando o núcleo da coleta do lote existir, provar que ele monta o mesmo pedido da `keyword-serp`: `advanced`, códigos por `readMineradorKeywordTargetCodes`, `architectSerpCollectionRequest` e corpo só na canônica. O teste da R1 reproduz o pedido da rota atual.
+- [ ] **Guarda de servidor em `collect_auxiliary`** (`app/api/editorial/serp/route.ts`) para keyword sem volume. Não foi feita: investigações já iniciadas têm auxiliares sem volume gravadas como `PLANNED`, e a recusa as deixaria em falha na retomada. Falta decidir o que fazer com esses registros.
+- [ ] **Export portátil do caso Google + YouTube ou Amazon:** `lib/radar/portable-export-batch.ts` ainda filtra `bundle.serpLenses` pelo perfil GOOGLE (`frozenLenses.block` e `radarPortableExportFrozenLensesInput`), e `serpStandingFrozen` também. Nesse caso a coluna das lentes sai vazia, embora o dossiê as traga.
+- [ ] **Manifesto de evidências do Redator** (`lib/server/writer-evidence-reader.ts:249`, módulo Redator): declara "fotografia do Google ausente no perfil YOUTUBE/AMAZON" sem olhar se `observed` veio no pacote. Com a R3, isso deixa de ser verdade no caso Google finalizado + YouTube ou Amazon.
+- [ ] **Rótulo do Planejador:** `modules/planejador/planner-cockpit-workspace.tsx:70` ainda diz "Não classificado como KGR".
+- [ ] **Homologar (usuário):**
+  - coletar a SERP de um artigo no Arquiteto. No Radar, clicar em "Atualizar SERP" no mesmo artigo e conferir "0 chamadas pagas" e a origem "arquiteto" nas 4 lentes;
+  - num artigo com secundária sem volume, iniciar a pesquisa Google e conferir "Somente contexto" com o motivo e nenhuma consulta auxiliar dela;
+  - num artigo com Google finalizado, finalizar o YouTube (ou a Amazon) e enviar ao Planejador. Conferir no pacote o Google como apoio, com a fotografia e as lentes, e conferir na tela do Radar que os dados do Google continuam visíveis;
+  - conferir "KGR não aplicável" na análise do Radar.
+
 ## Assunto declarado — F3 e export F4.3 — 2026-09-24
 
 Fonte: [SDD do Assunto](../compartilhado/sdd-assunto-tronco-editorial-2026-09-24.md). Registro em `estado-atual.md`, mesma data.

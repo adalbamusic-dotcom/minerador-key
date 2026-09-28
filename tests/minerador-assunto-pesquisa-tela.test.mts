@@ -82,11 +82,21 @@ test("Enter ou Pesquisar só montam o plano; a ajuda diz isso; o texto da regra 
   assert.doesNotMatch(requestPlan, /mode: "execute"/, "o Enter nunca executa");
 });
 
-test("diálogo de custo: plano inteiro, total, lentes em cache, sem desligar fonte; execução só no confirmar", () => {
+test("diálogo do plano: plano inteiro, sem custo no DataForSEO, sem desligar fonte; execução só no confirmar", () => {
   const planDialog = between(dialogs, "export function SubjectSearchPlanDialog", "export function SubjectSearchImportDialog");
-  assert.match(planDialog, /Custo máximo: <strong>\{formatSubjectSearchUsd\(plan\.maxCostUsd\)\}<\/strong>/);
+  // 2026-09-28: plano só do Google Ads. "Sem custo" no lugar do custo máximo;
+  // preço por chamada, preços do DataForSEO e a SERP da frase só num plano que os tenha.
+  assert.match(planDialog, /const paid = plan\.paidCalls > 0;/);
+  assert.match(planDialog, /<strong>\{SUBJECT_SEARCH_FREE_PLAN_TEXT\}<\/strong> · \{plan\.lines\.length\} consulta\(s\) ao Google Ads/);
+  assert.match(model, /SUBJECT_SEARCH_FREE_PLAN_TEXT = "Sem custo no DataForSEO; usa a cota do Google Ads"/);
+  assert.match(planDialog, /paid\s*\? <>Custo máximo: <strong>\{formatSubjectSearchUsd\(plan\.maxCostUsd\)\}<\/strong>/);
+  assert.match(planDialog, /\{paid && <th scope="col" className="px-2 py-1 font-semibold">Por chamada<\/th>\}/);
+  assert.match(planDialog, /\{paid && <p className="text-text-muted">Preços do DataForSEO/);
+  assert.match(planDialog, /const hasSerp = plan\.serp\.lenses\.length > 0 \|\| Boolean\(plan\.serp\.readFailed\);/);
+  assert.match(planDialog, /\{hasSerp && <p className="text-foreground\/85" data-subject-search-plan-serp>/);
   assert.match(planDialog, /plan\.serp\.cachedLenses\.length\} de 4 lentes no cache \(0 pagas\)/);
-  assert.match(planDialog, /plan\.notices\.map/);
+  // Correção de 2026-09-28: o aviso "sem custo" do plano não repete o resumo do diálogo.
+  assert.match(planDialog, /plan\.notices\.filter\(notice => paid \|\| notice !== SUBJECT_DISCOVERY_NOTICES\.free\)\.map/);
   assert.match(planDialog, /plan\.notApplicable\.map/);
   assert.match(planDialog, /\{SUBJECT_SEARCH_PLAN_TEXT\}/);
   assert.match(planDialog, /"Confirmar e pesquisar"/);
@@ -118,6 +128,18 @@ test("resultado: origens com rótulo próprio, evidência curta, selo de já exi
   assert.match(results, /"É o Assunto"/);
   assert.match(results, /SUBJECT_SEARCH_ESTIMATE_COLUMN/);
   assert.match(model, /SUBJECT_SEARCH_ESTIMATE_COLUMN = "Estimativa DataForSEO"/);
+  // 2026-09-28: a coluna Estimativa, o bloco da SERP e as origens do Labs no
+  // filtro só aparecem numa busca antiga que os tenha; nada é apagado.
+  assert.match(results, /const withEstimate = useMemo\(\(\) => subjectSearchHasEstimate\(record\?\.result\.candidates \|\| \[\]\), \[record\]\);/);
+  assert.match(results, /\{withEstimate && <th scope="col"/);
+  assert.match(results, /\{withEstimate && <td className=/);
+  assert.match(results, /colSpan=\{columns\.length\}/);
+  assert.match(results, /\{serpShown && <div className="min-w-0 rounded border border-divider bg-surface-subtle p-3" data-subject-search-serp>/);
+  assert.match(results, /\{originOptions\.map\(source => <option key=\{source\} value=\{source\}>/);
+  assert.doesNotMatch(results, /SUBJECT_DISCOVERY_SOURCES\.map/, "o filtro não lista o Labs numa busca nova");
+  assert.match(results, /"Sem custo no DataForSEO: só o Google Ads foi consultado\."/);
+  assert.match(hook, /"Consultando o Google Ads \(frase e página de destino\) pelo plano confirmado…"/);
+  assert.doesNotMatch(hook + results + dialogs + fields, /DataForSEO Labs pelo plano|Consultando o Google Ads e o DataForSEO/);
   assert.match(results, /Volume \(Google Ads\)/);
   assert.match(results, /const volume = subjectCandidateGoogleAdsVolume\(candidate\);/);
   assert.doesNotMatch(results, /dataForSeoEstimate[^\n]{0,80}volume ===|volume = candidate\.dataForSeoEstimate/, "a estimativa nunca vira Volume");
@@ -141,7 +163,7 @@ test("D2.3: 'Só com volume' ligado, total escondido à vista com 'Mostrar', e a
 
 test("lista local: texto da tela, política e armazenamento só em IndexedDB próprio", () => {
   assert.match(results, /\{SUBJECT_SEARCH_LOCAL_LIST_TEXT\}/);
-  assert.match(model, /"Lista guardada só neste navegador\. Só o envio ao Processador salva no banco\. Limpar os dados do navegador apaga a lista\. Os resultados do Google ficam guardados para a marca por 30 dias; os do DataForSEO Labs, não: repetir a pesquisa paga de novo\."/);
+  assert.match(model, /"Lista guardada só neste navegador\. Só o envio ao Processador salva no banco\. Limpar os dados do navegador apaga a lista\. Repetir a pesquisa consulta o Google Ads de novo, sem custo\."/);
   assert.match(localStore, /SUBJECT_SEARCH_LOCAL_DATABASE = "minerador-pesquisa-assunto"/);
   for (const [name, source] of Object.entries(screenFiles)) {
     assert.doesNotMatch(source, /localStorage|sessionStorage|deleteDatabase|\.clear\(\)/, `${name} não limpa nem usa outro armazenamento`);

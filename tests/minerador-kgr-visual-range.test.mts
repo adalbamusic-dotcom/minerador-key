@@ -69,8 +69,10 @@ test("a cor deriva só do score: volume alto não tira o verde", () => {
 test("I · score favorável não decide a aplicabilidade humana do KGR", () => {
   const semantic = { kgr_aplicabilidade: "pending" };
   assert.equal(deriveKgrVisualState(0.168).favorable, true);
-  assert.equal(readKgrApplicability(semantic), "pending");
-  assert.equal(readKgrApplicability({}), "pending");
+  // Padrão "não aplicável" desde 2026-09-28: o score favorável continua sem decidir.
+  assert.equal(readKgrApplicability(semantic), "not_applicable");
+  assert.equal(readKgrApplicability({}), "not_applicable");
+  assert.equal(readKgrApplicability({ kgr_score: 0.168 }), "not_applicable");
 });
 
 test("J · score favorável não altera status editorial nem aprovação", () => {

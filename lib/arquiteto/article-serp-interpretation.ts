@@ -75,6 +75,9 @@ export type UnobservedKeyword = {
 
 export const NOT_OBSERVED_REASON = "Sem SERP consultada nesta validação: não conta como convergente nem como de fora.";
 
+/** Busca sem volume do Google Ads: nunca coletada (SDD 2026-09-28, fatia A3). Mesma regra: sai da conta. */
+export const NO_VOLUME_NOT_OBSERVED_REASON = "Sem volume no Google Ads: a SERP desta busca nunca é coletada; não conta como convergente nem como de fora.";
+
 /** O recorte de um resultado orgânico que o parecer lê. Estrutural, não o tipo inteiro. */
 type ObservedResultLike = {
   position?: unknown;

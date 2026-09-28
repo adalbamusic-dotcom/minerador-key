@@ -1,3 +1,454 @@
+## Correções do corretor sobre as frentes de 2026-09-28 — 2026-09-28
+
+```text
+ORIGEM = revisão das frentes A1-A5 e D2 da SDD sdd-serp-no-artigo-e-kgr-opcional-2026-09-28
+VERSIONAMENTO = medir/recalcular o allintitle sem "Aplicar KGR" não abre sucessora do ArticleDNA · identidade KGR antiga da canônica é mantida ao reformar
+ALLINTITLE_SERVIDOR = Principal sem volume nunca é medida (lacuna, nada pago) · item fora da etapa vira lacuna, sem derrubar o bloco
+PRIMEIRA_COLETA = inclui a cabeça da SiloPage com volume ("todas as keywords com volume do lote")
+PRINCIPAL_SEM_VOLUME_NO_PARECER = sem mudança (SDD §13, decisão do dono pendente)
+MIGRATION = 0 · SQL = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · CAMPO_NOVO_EM_STRICT = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Sucessora sem decisão editorial (corrigido).** A rota do allintitle grava a
+  medição em `kgrIdentity` da cópia de trabalho; a formação levava essa
+  identidade para o payload, e `articleEditorialDiff` comparava a identidade
+  inteira, então medir ou "Recalcular" abria ArticleDNA vN+1 sem decisão. Agora
+  o diff compara `kgrIdentity` pela guarda `articleKgrIdentityChangedMaterially`
+  (Principal, "Aplicar KGR" humano, vínculo confirmado e, só com KGR aplicado, a
+  medição). A data da decisão humana virou carimbo: repetir a mesma escolha não
+  é revisão.
+- **Identidade antiga trocada em silêncio (corrigido).** Sem identidade na cópia
+  de trabalho, a derivação nova (que não cria identidade por score) trocava
+  "Sim · regra antiga", vínculo confirmado ou "PENDING_HUMAN_DECISION" da
+  canônica por "Não aplicável". `reconcileArticleKgrIdentityWithCanonical`
+  (novo, `lib/arquiteto/article-kgr-decision.ts`) mantém a decisão da canônica
+  quando a cópia não traz decisão (humana ou vínculo confirmado) e só junta a
+  medição nova às evidências; Principal trocada não herda a identidade antiga. A
+  conclusão da formação e o preparo (`prepareSelectedLogicalArticleDnas`) usam a
+  reconciliação antes de comparar.
+- **Rota do allintitle.** O servidor confere `volume_search` da linha da marca
+  e não mede Principal sem volume, nem numa chamada direta. Item fora de
+  `architect/received` ou Principal fora do acervo viram lacuna (`gaps`) no
+  plano e na execução, e os outros artigos do bloco seguem.
+- **Primeira coleta.** A cabeça da SiloPage com volume entra no lote: ela não
+  forma artigo, mas a SERP dela alimenta o índice "mesmo assunto" (artigo
+  competindo com a página do Silo) e a SiloPage no Radar, pela mesma chave de
+  cache.
+- **Diálogo do plano pago.** Para o allintitle, o diálogo diz "consulta" e "uma
+  por artigo" em vez de "lente principal"/"lentes extras", e o custo aparece
+  como estimado até o primeiro registro no ledger.
+- Comentários de `lib/arquiteto/article-batch-serp.ts`: o predicado lê a coluna
+  `volume_search` (não a origem) e o teto da rota é de 12 keywords por pedido.
+- Planejador (rótulo, outro módulo, só texto): "Não classificado como KGR" →
+  "KGR não aplicável"; sem identidade, "KGR não aplicável (padrão)".
+- Catálogo (`arquiteto.validate_serp`): cabeça da SiloPage no lote, guardas do
+  servidor do allintitle e versionamento.
+- Testes: `tests/arquiteto-serp-no-artigo.test.mts` (+5 casos de correção),
+  `tests/arquiteto-serp-no-artigo-rota.test.mts` (+1),
+  `tests/arquiteto-article-parent-reading.test.mts` ajustado.
+- Suítes: `test:arquiteto` 2561/2561, `test:arquiteto:servidor` 70/70,
+  `test:arquiteto:lentes` 43/43, `test:agent` 56/56.
+
+Recusado nesta correção, com motivo: tirar do parecer a Principal sem volume.
+A SDD §13 deixa esse caso para o dono e recomenda concluir o artigo "sem SERP",
+o que muda o portão de conclusão e o envio ao Radar (workflow, exige adendo).
+Até a decisão, a Principal sem volume continua consultada no parecer (paga se
+faltar no cache).
+
+Pendências: guarda de volume no servidor de `/api/arquiteto/serp` (hoje confia
+no `volume_search` enviado) e de `keyword-serp`; a finalização automática do
+Assunto não faz a primeira coleta (a próxima "Processar artigos" manual cobre o
+Silo); quando a coleta paga algo, o parecer fica para o segundo clique.
+
+## Integração das frentes de 2026-09-28 (catálogo MCP e scripts) — 2026-09-28
+
+```text
+INTEGRACAO = frentes M (M1-M4), D (D1-D2), A (A1-A5) e R (R1-R3) da SDD sdd-serp-no-artigo-e-kgr-opcional-2026-09-28
+CATALOGO_MCP = lib/agent/platform-catalog.ts atualizado na mesma entrega (AGENTS §17.1) · npm run test:agent = 56/56
+ROTA_NOVA_NO_CATALOGO = /api/arquiteto/article-allintitle (em arquiteto.validate_serp)
+MIGRATION = 0 · SQL = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- Catálogo: `arquiteto.validate_serp` passa a "Primeira coleta da SERP do lote
+  e parecer por artigo", com a rota `/api/arquiteto/article-allintitle`, a regra
+  de keyword sem volume, o allintitle da Principal e a fase Silos como ação
+  manual. `arquiteto.form_architecture` ganhou a nota do KGR do artigo (padrão
+  "Não aplicável", "Aplicar KGR" humano). A diferenciação de publicados diz
+  que as keywords novas vêm do Google Ads e cita `DIFFERENTIATION_PLAN_OUTDATED`.
+- `package.json`: `tests/arquiteto-serp-no-artigo.test.mts` entrou em
+  `test:arquiteto` e `tests/arquiteto-serp-no-artigo-rota.test.mts` em
+  `test:arquiteto:lentes`.
+- Suítes: `test:arquiteto` 2556/2556, `test:arquiteto:servidor` 70/70,
+  `test:arquiteto:lentes` 42/42, `tsc --noEmit` sem erros.
+
+## SERP no artigo e KGR opcional: primeira coleta na aba Artigos, allintitle da principal e "Aplicar KGR" (fatias A1 a A5) — 2026-09-28
+
+```text
+DECISAO = dono do produto, 2026-09-28 ("vamos aplicar"), item 4 e item 2 (KGR)
+SDD = docs/compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md (§3.3, fatias A1 a A5)
+PRIMEIRA_COLETA_SERP = aba Artigos, em Processar artigos, ANTES da formação · 4 lentes · só keywords com volume (Google Ads > 0) · cache primeiro (30 dias) · uma confirmação
+SEM_VOLUME = nunca coletada (lote, parecer e SERP por keyword da fase Silos) · no parecer sai como notObserved com motivo próprio
+ALLINTITLE = 1 consulta por artigo, só da Principal com volume · reaproveita Arquiteto ou Minerador de até 30 dias · Recalcular pago com confirmação
+KGR_DO_ARTIGO = padrão "Não aplicável" · "Aplicar KGR" Sim/Não para qualquer artigo · contrato article-kgr-decision-v2 · faixa 150–550 só informativa
+CAMPO_NOVO_STRICT = 0 · VALOR_NOVO_DE_ENUM = 0 · migration = 0 · SQL = 0 · ESCRITA_REMOTA = 0
+ESCRITA_EM_minerador_keywords = 0 (a linha do Minerador só é lida)
+CHAMADAS_PAGAS_EM_TESTE = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+A homologação na tela é do usuário.
+
+### A1 · KGR do artigo com padrão "não aplicável"
+
+- `lib/arquiteto/article-kgr-decision.ts` — `readArticleKgrDecision` passa à
+  matriz v2:
+  1. "Aplicar KGR" escolhido pelo humano (Sim/Não, `HUMAN_DECISION`);
+  2. vínculo confirmado (`CONFIRMED_KGR_BINDING`);
+  3. identidade gravada pela regra antiga (`FULL_KGR_RULE` persistida), lida
+     como está: "Sim · regra antiga (KGR pleno automático)";
+  4. no resto, `NO` com fonte `KEYWORD_APPLICABILITY_RULE`, rótulo
+     "Não aplicável".
+- Score abaixo de 0,25 e volume na faixa 150–550 viram informação
+  (`scoreInFullRange`, `volumeInInterestRange`), nunca decisão.
+- `requiresHumanDecision` fica sempre `false`: o KGR não pende para formar nem
+  para aprovar. O campo continua no tipo para os consumidores.
+- O score do ARTIGO (`readArticleKgrScore`) segue esta ordem:
+  - allintitle medido pelo Arquiteto em `kgrIdentity.evidence` (mesma
+    Principal) ÷ volume da Principal;
+  - `kgr_score` da linha do Minerador;
+  - `results_allintitle` ÷ `volume_search` do Minerador;
+  - `kgrValue` já gravado.
+  Ausência nunca vira zero.
+- `deriveArticleKgrIdentity` (`strategic-context.ts`) não cria mais identidade
+  KGR por score. Artigo novo sem decisão fica sem identidade. Com a Principal
+  trocada e histórico de decisão, nasce a identidade padrão v2 levando o
+  histórico.
+- Fechamento (`article-classification-closure.ts`): campo aditivo opcional
+  `articleAppliesKgr` em `ClassificationEvidence` (tipo TS, fora de schema).
+  - Com ele, a mesa e o ArticleDNA fecham igual: sem "Aplicar KGR", `kgr` e
+    `kgrApplicability` = `NOT_APPLICABLE` com `source: article_decision`.
+  - Com Sim e sem allintitle, `KGR_APPLICABLE_WITHOUT_METRIC` bloqueia até
+    medir, inclusive por decisão humana.
+  - Sem o campo, a leitura anterior fica igual (testes antigos verdes).
+- `PATCH /api/arquiteto/workspace`:
+  - aceita `articleKgrDecision` YES/NO sempre (antes recusava com 409 sem
+    decisão pendente ou sem score);
+  - grava `decisionContractVersion: "article-kgr-decision-v2"` e o motivo
+    "Decisão humana: Aplicar KGR neste artigo." (ou "não aplicar");
+  - o score vem de `kgrIdentity`, com a linha do Minerador como reserva;
+  - nada é escrito no Minerador.
+- `article-review-checklist.ts`: o item "KGR do artigo" só fica pendente
+  quando o artigo aplica o KGR sem allintitle. `article-consolidation.ts` não
+  bloqueia mais por "A decidir" gravado pela regra antiga.
+- **Guarda de versionamento:** `articleKgrIdentityChangedMaterially`
+  substitui a comparação por JSON em `prepareSelectedLogicalArticleDnas`. A
+  sucessora do ArticleDNA só nasce com:
+  - troca da Principal;
+  - "Aplicar KGR" do humano;
+  - vínculo confirmado;
+  - medição de allintitle, só com o KGR aplicado.
+
+  A troca da regra (v1 → v2) não abre sucessora.
+- Tela: o seletor "Aplicar KGR" (padrão "Não (padrão)") aparece sempre no item
+  "KGR do artigo" da Revisão. Junto dele aparecem:
+  - allintitle da Principal, KGR do artigo e volume, com "na faixa de
+    interesse" quando está entre 150 e 550;
+  - a origem da medição;
+  - o botão "Medir allintitle (pago)" ou "Recalcular allintitle (pago)".
+- A leitura da mesa junta a medição mais nova da cópia de trabalho à
+  identidade do ArticleDNA (`mergeArticleAllintitleEvidence`), só para o
+  score. A decisão continua a do ArticleDNA.
+
+### A2 · primeira coleta da SERP do lote
+
+- `lib/arquiteto/article-batch-serp.ts` (novo) monta o lote:
+  - entram as keywords dos Silos em formação, menos as cabeças de SiloPage;
+  - o predicado de volume é único: `hasSearchVolume`, média do Google Ads
+    finita e maior que zero;
+  - keyword do mesmo texto é consultada uma vez;
+  - os blocos têm 6 keywords (24 consultas por pedido).
+- `Processar artigos` (`arquiteto-workspace.tsx`) roda a coleta ANTES do
+  marcador e da formação (`collectArticleBatchSerp`). Ela usa o núcleo da rota
+  `keyword-serp`:
+  - keyword × lente, cache primeiro;
+  - a canônica com profundidade 20 e corpo;
+  - `runPaidSerpBlocks`, com um plano somado e uma confirmação;
+  - nunca a opção "só a principal".
+- Resultado da coleta:
+  - se pagou algo: relê o índice "mesmo assunto" (`serpSubjectReload`) e para,
+    pedindo um novo clique para o parecer, que sai pelo cache e sem custo;
+  - se estava tudo no cache: segue direto;
+  - se a pessoa cancelou o pagamento: segue com o que houver no cache, como
+    antes.
+  A finalização automática do Assunto não coleta aqui.
+- Keyword que chega sem SERP do Minerador é o caminho normal: ela entra no lote.
+
+### A3 · keyword sem volume no parecer
+
+- `app/api/arquiteto/serp/route.ts`: secundária e reforço sem volume ficam
+  fora dos slots do plano, da leitura de corpos, da coleta e das lentes
+  extras.
+  - Saem como `notObserved`, com o motivo `NO_VOLUME_NOT_OBSERVED_REASON`
+    (`article-serp-interpretation.ts`).
+  - Não entram em `missing` e não travam `articleSerpLensesComplete`.
+- A Principal continua sempre consultada: o parecer depende dela. Principal
+  sem volume segue a regra de hoje até o dono confirmar (SDD §13).
+
+### A4 · allintitle da Principal
+
+- `lib/arquiteto/article-allintitle.ts` (novo) + rota nova
+  `POST /api/arquiteto/article-allintitle` (`plan`/`execute`, até 20 artigos
+  por pedido, `recollect` para "Recalcular").
+  - Cache primeiro: a medição do Arquiteto em `kgrIdentity.evidence` e depois
+    a do Minerador (`results_allintitle` + `allintitle_measurement.measuredAt`,
+    lidos por coluna estreita), as duas com validade de 30 dias.
+  - O plano usa o mesmo formato, a mesma autorização (`authorizeSerpPaidPlan`)
+    e o mesmo diálogo da SERP. O preço é a faixa de outra lente, US$ 0,002 a
+    0,0035 por consulta (**ESTIMADO**, SDD §7.1).
+  - Medição paga pelo mesmo núcleo do Minerador
+    (`measureDataForSeoAllintitle`): `allintitle:` sem aspas, desktop,
+    profundidade 10.
+  - A medição é gravada em `kgrIdentity` do item de workflow da Principal
+    (`resultCount`, `kgrValue`, `primaryVolume`, `evaluatedAt`, `evaluatedBy`,
+    `evidence`, com as 5 mais novas). Tudo são campos que já existem.
+  - O ledger registra `module_operation`/`arquiteto` com
+    `operationKind: "article_allintitle"`.
+  - Nunca escreve em `minerador_keywords`. Medir não decide "Aplicar KGR".
+- `Processar artigos` mede o allintitle das Principais do escopo depois do
+  parecer (etapa 4), com plano e confirmação. Principal sem volume não é
+  medida: sem volume não há KGR.
+
+### A5 · fase Silos
+
+- "Consultar nas 4 lentes" (SERP por keyword do território) continua como
+  ação manual e opcional, com o plano pago, e passa a coletar só as keywords
+  com volume.
+- A SERP territorial (texto da entidade central) não mudou: já era ação
+  manual, com plano e confirmação.
+
+### Compatibilidade e deploy
+
+- Pacotes aprovados, `SERVER_APPROVAL_GATE_SINCE` e assinaturas não mudam.
+- ArticleDNA aprovado continua imutável. Identidades `FULL_KGR_RULE`,
+  `HUMAN_DECISION` e `CONFIRMED_KGR_BINDING` gravadas são lidas como estão.
+  Identidade confirmada mantém a trava de slug e principal e o perfil
+  `kgr_light` (`identity-context.ts` não mudou).
+- Nenhum campo novo nem valor novo de enum em schema `.strict()`:
+  - `decisionContractVersion` é string livre;
+  - `evidence` é um array de registros livres;
+  - `notObserved` já existia.
+
+  O leitor antigo aceita tudo o que o código novo grava.
+- **Ordem de deploy:** monólito único, junto ou antes de M1 (SDD §6.5). Sem
+  isso, keywords aprovadas sem SERP chegam a um Arquiteto que não coleta o
+  lote.
+- **Rollback abaixo desta entrega:**
+  - o código antigo volta a mostrar "Sim · KGR pleno" automático para score
+    abaixo de 0,25;
+  - o PATCH antigo volta a recusar "Aplicar KGR" sem decisão pendente;
+  - medições v2 gravadas continuam legíveis.
+
+### Consumidores preservados
+
+- Aba Silos: a SERP territorial e a leitura "mesmo assunto".
+- Radar: mesmo cache, sem código tocado.
+- `article-phase.ts`: `kgrDecisionPending` passa a ser sempre falso.
+- `article-dna-projection.ts` e `article-expanded-panel.ts`.
+- Diferenciação de publicados (fatia D2, outra entrega).
+- Rota `keyword-serp`: não foi editada, só reutilizada.
+
+### Arquivos
+
+- Alterados:
+  - `lib/arquiteto/article-kgr-decision.ts` (misto; o único CRLF foi
+    preservado);
+  - `article-classification-closure.ts`, `strategic-context.ts`,
+    `article-review-checklist.ts` e `article-consolidation.ts` (CRLF);
+  - `article-serp-interpretation.ts`;
+  - `app/api/arquiteto/serp/route.ts` e `app/api/arquiteto/workspace/route.ts`;
+  - `modules/arquiteto/arquiteto-workspace.tsx`.
+- Novos:
+  - `lib/arquiteto/article-batch-serp.ts`;
+  - `lib/arquiteto/article-allintitle.ts`;
+  - `app/api/arquiteto/article-allintitle/route.ts`.
+
+### Testes
+
+Fixtures e `fetch` falso.
+
+- Novos:
+  - `tests/arquiteto-serp-no-artigo.test.mts`: 17 testes, domínio e leitura
+    estrutural. Quatro mutantes (filtro de volume da rota e do lote,
+    Recalcular e guarda de versão) morreram com a suíte verde;
+  - `tests/arquiteto-serp-no-artigo-rota.test.mts`: 7 testes. Executam de
+    verdade as rotas `serp`, `keyword-serp`, `article-allintitle` e o PATCH,
+    com banco em memória.
+- Ajustados ao padrão novo:
+  - `arquiteto-article-kgr-decision` (reescrito, 15 testes);
+  - `arquiteto-keyword-dna-readonly`;
+  - `arquiteto-article-expanded-panel`: rótulo "Não aplicável" do leitor
+    único do Minerador;
+  - `arquiteto-article-serp-interpretation`;
+  - `arquiteto-serp-cache-formacao`.
+- Resultados:
+  - `test:arquiteto`: 2539/2539;
+  - `test:arquiteto:servidor`: 70/70;
+  - `test:arquiteto:lentes`: 35/35.
+- Os dois arquivos novos ainda não estão nos scripts do `package.json`; o
+  integrador inclui.
+- TypeScript sem erro nos arquivos desta entrega. O lint direcionado não
+  acusa erro novo: os 41 erros de `arquiteto-workspace.tsx` já existiam, fora
+  das linhas alteradas.
+
+### Pendências
+
+- O dono precisa confirmar a regra para Principal sem volume, como o
+  publicado com Posto Livre (SDD §13).
+- O servidor de `keyword-serp` não filtra volume; o filtro está no lote do
+  cliente e na rota do parecer. Guarda no servidor exige editar a rota que a
+  fatia R1 do Radar está ajustando.
+- Leitura "só cache" automática na fase Silos: a coleta paga já é manual. Um
+  modo `cacheOnly` na rota `keyword-serp` fica para depois da fatia R1.
+- Preço do allintitle sozinho ainda não medido: a faixa é estimada até o
+  primeiro evento real no ledger.
+- Catálogo das IAs (`lib/agent/platform-catalog.ts`) e ferramentas MCP da
+  rota nova ficam com o integrador.
+
+## Diferenciar publicados: keywords novas só do Google Ads (fatia D2) — 2026-09-28
+
+```text
+DECISAO = dono do produto, 2026-09-28 ("vamos aplicar"), item 3
+SDD = docs/compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md (§3.3, fatia D2)
+PLANO = published-differentiation-plan-v2 · page.labs = [] · page.ads = keyword_seed [+ url_seed com a URL]
+CUSTO_DA_PREVIA = só a SERP de até 5 candidatas por página nas 4 lentes (0 a 0,014 cada) · par: US$ 0,00 a 0,14 (antes 0,072 a 0,284)
+PREVIA_V1_PLANNED = recusada antes de reservar (409 DIFFERENTIATION_PLAN_OUTDATED), nada pago
+RODADAS_V1_PAGAS = legíveis e aceitáveis (labsFailures, origens labs_*)
+PERSISTENCIA_NOVA = nenhuma (payload JSON aditivo: page.ads, plan.adsTargeting, run.adsFailures) · migration = 0 · SQL = 0 · ESCRITA_REMOTA = 0
+CHAMADAS_PAGAS_EM_TESTE = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+O que mudou:
+
+- **Plano** (`lib/arquiteto/published-differentiation-run.ts`).
+  - `DIFFERENTIATION_PLAN_VERSION` passa a `published-differentiation-plan-v2`;
+    o v1 fica como `DIFFERENTIATION_LEGACY_PLAN_VERSION`.
+  - Por página, `labs` fica vazio e entra `ads`:
+    - `keyword_seed` com `[ideasSeed, relatedSeed]`, sem repetir;
+    - com a URL no Vínculo, `url_seed` com `[ideasSeed]` e a URL.
+  - O targeting das ideias é o canônico da plataforma
+    (`DIFFERENTIATION_ADS_TARGETING`: português, Brasil, só Pesquisa, sem
+    adulto), gravado em `plan.adsTargeting`.
+  - Sementes, URL e targeting entram no `planHash`. Um plano v1 continua com o
+    hash dele, porque os campos novos só entram quando existem.
+  - Custo: só a SERP. O mínimo passa a US$ 0 (tudo no cache); o máximo é
+    candidatas × 0,014.
+  - Saiu o corte "Sem pesquisas relacionadas". Os cortes que ficam são os de
+    candidatas (5 → 3 → 2) e o de páginas. Até 7 páginas cabem no teto de
+    US$ 0,50 sem corte, e as 4 famílias da AdalbaPro (14 páginas) somam até
+    US$ 0,98 (antes ~US$ 2).
+  - Página sem URL: "o Google Ads recebe só as sementes do ângulo, sem a
+    página".
+- **Rodada:**
+  - a porta `openExecution` pega `googleAdsIdeas` e `recordGoogleAdsUsage` no
+    lugar de `runLabs`. As ideias vêm grátis e fora do orçamento, 100 por
+    semente, com uma chave de uso por página e semente (`keyword_seed:p2`) no
+    módulo `arquiteto`;
+  - origens `ads_keyword_seed` e `ads_url_seed`;
+  - o volume que decide continua sendo a média do Google Ads pelas métricas
+    históricas (a coluna Volume do Minerador), para as até 60 de maior média
+    na ideia por página. A média da ideia só vale para quem ficou sem a
+    métrica histórica: fora das 60, ou com a consulta falhando, e aí o aviso é
+    "valeu a média mensal das ideias do Google Ads";
+  - semente que falha conta em `adsFailures` (campo novo, opcional) e segue;
+  - `labsFailures` vem vazio nas rodadas novas;
+  - `runPublishedDifferentiation` recusa um plano que não seja v2 antes de
+    qualquer chamada.
+- **Mudança de comportamento (registrada):**
+  - sem `ranked_keywords`, `rankedByUrl` fica falso nas rodadas novas: a
+    semente por URL do Google Ads NÃO é "o Google ranqueia a página";
+  - a faixa "ranked" e as referências `daUrl` da avaliação só valem para
+    rodadas antigas;
+  - espera-se mais "Diferenciação fraca" e "Sem saída pelo provider" quando o
+    slug e a SERP não bastam.
+- **Servidor** (`lib/server/arquiteto-differentiation.ts`):
+  - prévia v1 em `planned` responde 409 `DIFFERENTIATION_PLAN_OUTDATED` ("Esta
+    prévia é de antes da troca para o Google Ads. Planeje o grupo de novo;
+    nada foi pago."), antes do hash, da reserva e do provider;
+  - `runData` devolve `adsFailures` (aditivo). "Planejar" de novo grava uma
+    prévia v2.
+- **Aceite** (`published-differentiation-apply.ts`): a origem padrão de uma
+  escolha sem origem passa de `labs_category` a `ads_keyword_seed`. As
+  escolhas antigas mantêm as origens `labs_*`, aceitas pelo import.
+- **Tela** (`modules/arquiteto/published-differentiation-model.ts` e `-panel.tsx`):
+  - a confirmação diz "As keywords novas vêm do Google Ads, sem custo. A parte
+    paga é a SERP das candidatas (DataForSEO)…";
+  - a faixa aparece como "US$ 0,00 a 0,14";
+  - mensagem para `DIFFERENTIATION_PLAN_OUTDATED`;
+  - as frases do Labs e da estimativa só aparecem numa rodada antiga.
+- **Rota** `cannibalization/run`: só o comentário. As portas continuam
+  `buildSubjectDiscoveryPorts({ usage: { module: "arquiteto", collectedBy: "arquiteto" } })`,
+  abertas com o DataForSEO (a SERP é paga).
+
+Arquivos alterados:
+
+- `lib/arquiteto/published-differentiation-run.ts`,
+  `published-differentiation-apply.ts` e `published-differentiation.ts` (só o
+  comentário das sementes);
+- `lib/server/arquiteto-differentiation.ts`;
+- `app/api/arquiteto/cannibalization/run/route.ts` (comentário);
+- `modules/arquiteto/published-differentiation-model.ts` e
+  `published-differentiation-panel.tsx`.
+
+Compartilhados, pela fatia D1 do Minerador:
+
+- `lib/minerador/google-ads-discovery-usage.ts`: sufixo por página e `module`,
+  aditivos;
+- `lib/minerador/subject-discovery-search.ts`: o tipo do sufixo e `runLabs`
+  fora das portas;
+- `lib/server/subject-discovery-runtime.ts`: `openExecution` com opção.
+
+Fim de linha: todos em LF (conferido pelo Node).
+
+Consumidores preservados:
+
+- as rotas `cannibalization/plan`, `run` e `apply`;
+- `resume` das propostas gravadas;
+- `planDifferentiationApply`, que não chama provider;
+- o envio ao Minerador pelo import da Pesquisa por Assunto (5 origens);
+- as ferramentas MCP da diferenciação: detectar e prever; pagar e aplicar
+  continuam fora da MCP.
+
+Testes, sem rede:
+
+- `arquiteto-diferenciacao-publicados` 20. Novos: plano v2 com sementes e URL,
+  custo 0 a 0,14, 5 páginas sem corte, 8 páginas cortando só candidatas,
+  adulteração de semente, URL e targeting, rodada com o Google Ads falso,
+  chaves por página, prévia v1 recusada sem chamada, semente que falha e
+  métricas fora;
+- `arquiteto-diferenciacao-publicados-servidor` 12 (novo: prévia v1 `planned`
+  recusada sem reservar nem abrir o provider; planejar de novo grava v2);
+- `arquiteto-diferenciacao-publicados-tela` 15 (novo: avisos da rodada de hoje
+  e da antiga; mensagem do plano desatualizado).
+
+Suítes: `test:arquiteto` 2539/2539 e `test:arquiteto:servidor` 70/70.
+
+Pendências:
+
+- **Integrador:** `lib/agent/platform-catalog.ts` (diferenciação: fonte das
+  keywords novas, custo só da SERP, sai o corte das relacionadas) e
+  `lib/agent/silo-plan.ts:209`.
+- **Adendo** na `sdd-diferenciacao-publicados-canibalizados-2026-09-27.md`
+  (§3.3 a §3.5).
+- **Homologação manual (usuário):** "Planejar diferenciação" do par atrair ×
+  captar mostra US$ 0,00 a 0,14; "Buscar e validar" traz candidatas do Google
+  Ads; uma prévia antiga (se houver no banco) é recusada sem pagar.
+
 ## Diferenciar publicados — correções da revisão — 2026-09-27
 
 Revisão das entregas de núcleo e tela abaixo. **Verificado no código e confirmado por testes locais** (fixtures, banco em memória, portas falsas e a leitura real do cache da AdalbaPro; sem rede, sem crédito). **Não validado manualmente.** Nenhuma escrita remota, SQL, migration, chamada paga, servidor, build ou git com mudança de estado. O schema do ArticleDNA não mudou: não há regra de deploy nova.

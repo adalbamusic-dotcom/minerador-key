@@ -38,7 +38,9 @@ import { readDataForSeoTargetCodes } from "@/lib/minerador/dataforseo-serp-core"
 import { IntegrationRuntimeError, integrationRuntimeErrorResponse, recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { readbackArticleFormationSerpAssessment, saveArticleFormationSerpAssessment } from "@/lib/server/arquiteto-article-serp-store";
+import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
 import {
+  NO_VOLUME_NOT_OBSERVED_REASON,
   formationLensesMarkerOf,
   interpretArticleSerp,
   interpretArticleSerpAcrossLenses,
@@ -358,6 +360,17 @@ export async function POST(request: Request) {
 
     const siloCandidateKeywords = parsed.data.siloCandidates.filter(keyword => keyword.siloCandidate?.status === "candidate");
     const potentialKeywords = [...groups.flatMap(group => group.keywords), ...siloCandidateKeywords];
+    /*
+     * KEYWORD SEM VOLUME NUNCA É COLETADA (SDD 2026-09-28, fatia A3). Dentro
+     * do artigo, secundária e reforço sem volume do Google Ads ficam fora do
+     * plano e da coleta e saem como não observados, com o motivo — nunca em
+     * `missing`, que é enum fechado e travaria a conclusão por falta de lente.
+     * A Principal continua sempre consultada: o parecer depende dela (o caso
+     * "artigo sem nenhuma keyword com volume" segue a regra de hoje até o dono
+     * confirmar, SDD §13).
+     */
+    const observableInGroup = (group: typeof groups[number], keyword: typeof groups[number]["keywords"][number]) =>
+      keyword.id === group.principalSuggestion.keywordId || hasSearchVolume(keyword.volume_search);
 
     /*
      * OS CÓDIGOS DO MINERADOR (A8). Keyword do acervo da marca ativa usa os
@@ -404,7 +417,7 @@ export async function POST(request: Request) {
      */
     const extraSlotsWanted = groups.flatMap(group => {
       const articleId = group.publishedAnchorId || group.id;
-      return group.keywords.flatMap(keyword => requested.extras.map(extraLens => ({ group, articleId, keyword, extraLens })));
+      return group.keywords.filter(keyword => observableInGroup(group, keyword)).flatMap(keyword => requested.extras.map(extraLens => ({ group, articleId, keyword, extraLens })));
     });
     let metaLookups: SerpCacheLookup[];
     let extraMetaLookups: SerpCacheLookup[];
@@ -465,6 +478,8 @@ export async function POST(request: Request) {
       for (const keyword of group.keywords) {
         const lookup = metaLookups[cursor];
         cursor += 1;
+        // Sem volume: fora do plano pago (a leitura meta acima é só posição).
+        if (!observableInGroup(group, keyword)) continue;
         const payKey = payKeyOf(articleId, String(keyword.id), lens);
         if (lookup) primarySubjectByPayKey.set(payKey, lookup.subjectId);
         slots.push({
@@ -510,7 +525,7 @@ export async function POST(request: Request) {
       const missingDetails = groups.flatMap(group => {
         const missing = group.keywords.flatMap(keyword => {
           const lookup = metaLookups[position++];
-          return lookup?.hit ? [] : [{
+          return lookup?.hit || !observableInGroup(group, keyword) ? [] : [{
             article: group.keywords.find(item => item.id === group.principalSuggestion.keywordId)?.keyword || group.keywords[0]?.keyword || group.id,
             keyword: keyword.keyword,
             lens: serpCacheLensLabel(lens),
@@ -976,8 +991,8 @@ export async function POST(request: Request) {
         || principalSnapshot.diagnostic.confidence === "insufficient";
       if (validationProfile !== "kgr_light" || principalAmbiguous) {
         // Uma leitura de corpos para todas as secundárias e reforços do grupo.
-        const secondaryBodies = await readCachedBodies(group.keywords.filter((_, index) => index !== principalIndex));
-        const secondarySnapshots = await Promise.all(group.keywords.map((keyword, index) => index === principalIndex ? null : collect(keyword, index, secondaryBodies)));
+        const secondaryBodies = await readCachedBodies(group.keywords.filter((keyword, index) => index !== principalIndex && observableInGroup(group, keyword)));
+        const secondarySnapshots = await Promise.all(group.keywords.map((keyword, index) => index === principalIndex || !observableInGroup(group, keyword) ? null : collect(keyword, index, secondaryBodies)));
         snapshots.push(...secondarySnapshots.filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot)));
       }
       // Toda busca observada consulta as quatro lentes do cache. Pares só
@@ -1073,7 +1088,7 @@ export async function POST(request: Request) {
        * clara só ela é consultada: a secundária sem snapshot fica registrada
        * como não observada, e nunca vira "de fora" por falta de dado.
        */
-      const { members, notObserved } = splitArticleSerpMembers({
+      const { members, notObserved: naoObservadas } = splitArticleSerpMembers({
         keywords: group.keywords.map(keyword => ({
           keywordId: String(keyword.id),
           keyword: String(keyword.keyword),
@@ -1083,6 +1098,9 @@ export async function POST(request: Request) {
         })),
         snapshots: assessment.snapshots,
       });
+      // A busca sem volume diz POR QUE ficou fora: não foi falta de dado.
+      const semVolume = new Set(group.keywords.filter(keyword => !observableInGroup(group, keyword)).map(keyword => String(keyword.id)));
+      const notObserved = naoObservadas.map(item => semVolume.has(item.keywordId) ? { ...item, reason: NO_VOLUME_NOT_OBSERVED_REASON } : item);
 
       /*
        * Pedido legado (`device`): uma lente, o parecer de antes, sem marcador.

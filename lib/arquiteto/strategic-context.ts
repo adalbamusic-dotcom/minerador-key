@@ -14,7 +14,7 @@ import {
   type ArchitectKeyword,
   type ProvisionalArticleGroup,
 } from "./contracts.ts";
-import { readArticleKgrDecision } from "./article-kgr-decision.ts";
+import { defaultNotApplicableKgrIdentity, readArticleKgrDecision } from "./article-kgr-decision.ts";
 import { isConfirmedKgrIdentity, normalizePrimaryKeywordPolicy, resolveArticleSerpIdentityContext, resolvePrimaryKeywordPolicy } from "./identity-context.ts";
 import { normalizeSearchIntent } from "./intent-profile.ts";
 import { buildArticleUnitStrategy } from "./unit-strategy.ts";
@@ -189,28 +189,23 @@ export function deriveArticleKgrIdentity(group: ProvisionalArticleGroup, princip
   const principalKeywordDnaId = sourceKeywordDnaId(principal);
   const principalChanged = Boolean(existing?.primaryKeywordId && existing.primaryKeywordId !== principal.id);
   if (!existing || principalChanged) {
-    const decision = readArticleKgrDecision({ principal, principalKeywordId: principal.id });
-    if (!decision.fullKgr && !decision.requiresHumanDecision) return undefined;
-    return {
-      isKgrArticle: decision.decision === "YES",
-      source: "minerador",
+    /*
+     * PADRÃO "KGR NÃO APLICÁVEL" (SDD 2026-09-28, fatia A1). Score abaixo de
+     * 0,25 não gera mais identidade KGR sozinho: sem decisão humana, o artigo
+     * novo não carrega identidade nenhuma — e a leitura diz "Não aplicável".
+     * Só quando a Principal mudou e havia histórico de decisão humana a
+     * identidade padrão nasce, para o histórico não se perder.
+     */
+    const history = existing?.decisionHistory?.length ? existing.decisionHistory : undefined;
+    if (!history) return undefined;
+    return defaultNotApplicableKgrIdentity({
+      principalKeywordId: principal.id,
       principalKeywordDnaId,
       principalKeywordDnaVersionId: principal.keywordDnaRef?.versionId,
       principalKeywordDnaContentHash: principal.keywordDnaRef?.contentHash,
-      primaryKeywordId: principal.id,
       primaryVolume: finiteVolume(principal.volume_search),
-      kgrValue: decision.principalKgrScore,
-      principalKgrApplicability: decision.principalApplicability,
-      bindingStatus: decision.decision === "YES" ? "candidate" : "not_applicable",
-      status: decision.decision === "YES" ? "candidate" : decision.decision === "NO" ? "not_kgr" : "unknown",
-      ...(decision.decision === "YES" ? { boundSlug: suggestedSlug } : {}),
-      decision: decision.decision,
-      decisionSource: decision.source,
-      decisionReason: decision.fullKgr ? "KGR pleno da Principal pela regra 0 <= KGR < 0.25." : decision.requiresHumanDecision ? "Decisão humana obrigatória para KGR do artigo." : "Decisão derivada exclusivamente dos fatos atuais da Principal.",
-      decisionContractVersion: "article-kgr-decision-v1",
-      ...(existing?.decisionHistory?.length ? { decisionHistory: existing.decisionHistory } : {}),
-      purpose: decision.fullKgr ? "KGR pleno da Principal pela regra 0 <= KGR < 0.25." : "Decisão do artigo reavaliada a partir da Principal atual.",
-    };
+      decisionHistory: history,
+    });
   }
   const resolvedPrincipalKeywordDnaId = existing.principalKeywordDnaId || principalKeywordDnaId;
   const samePrincipal = !existing.principalKeywordDnaId || existing.principalKeywordDnaId === resolvedPrincipalKeywordDnaId;

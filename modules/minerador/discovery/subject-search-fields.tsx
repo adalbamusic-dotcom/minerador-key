@@ -18,7 +18,7 @@ import type { SubjectSearchController } from "./use-subject-search";
 /**
  * Campos da Pesquisa por Assunto (SDD 2026-09-24, F1b.1). Ficam no lugar da
  * semente quando o radiogroup está em "Por Assunto". Enter ou Pesquisar só
- * montam o plano: nada é pago antes de o humano confirmar o custo.
+ * montam o plano: nada é consultado antes de o humano confirmar o plano.
  */
 
 const control = "mt-1 h-10 w-full rounded border border-divider bg-surface-subtle px-3 text-sm text-foreground outline-none transition-colors hover:border-module-accent/25 focus:border-module-accent/50 focus-visible:ring-2 focus-visible:ring-module-accent/40 read-only:text-text-muted disabled:cursor-not-allowed disabled:opacity-60";

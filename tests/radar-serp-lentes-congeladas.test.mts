@@ -520,18 +520,34 @@ test("R3 · o dossiê entrega as lentes congeladas, sem digest bruto, e as lacun
   assert.ok(entregue.limitations.includes("uma limitação congelada"), "as limitações congeladas continuam");
 });
 
-test("R3 · perfil YOUTUBE: as lentes da fotografia do Google não entram num dossiê de vídeo", async () => {
+/*
+ * SDD "SERP no artigo e KGR opcional" (2026-09-28), R3 — a regra deste caso
+ * mudou por decisão do dono: YouTube e Amazon só ACRESCENTAM. Antes, as lentes
+ * do Google finalizado não entravam num dossiê de vídeo; agora entram, com o
+ * Google como camada SUPPORT (o vídeo continua PRIMARY).
+ */
+test("R3 · perfil YOUTUBE com o Google finalizado: as lentes congeladas do Google continuam no dossiê de vídeo", async () => {
   const { research } = await snapshotDoCache();
   const congelada = await congelar(research);
-  assert.ok(radarFrozenSerpLensesOf(congelada.payload.finalizedBundle), "a fotografia do Google tem lentes");
+  const lentes = radarFrozenSerpLensesOf(congelada.payload.finalizedBundle);
+  assert.ok(lentes, "a fotografia do Google tem lentes");
   const payload = {
     ...congelada.payload,
     youtubeFrozenInvestigation: { finalizedAt: "2026-09-23T13:00:00.000Z", runRef: { runId: "yt-1", runFingerprint: "fp", collectedAt: "2026-09-23T12:30:00.000Z", universeSize: 4, queriesExecuted: 1 }, limitations: [] },
   };
   const entregue = dossie(payload, "2026-09-23T13:00:00.000Z");
   assert.equal(entregue.primaryResearchProfile, "YOUTUBE");
-  assert.equal("serpLenses" in entregue, false);
-  assert.equal(entregue.limitations.some(frase => /Só em Celular/.test(frase)), false);
+  assert.equal(entregue.research.youtube?.role, "PRIMARY");
+  assert.equal(entregue.research.google?.role, "SUPPORT");
+  assert.equal(entregue.research.google?.refs[0]?.ref, research.id, "o apoio aponta para a SERP congelada");
+  assert.deepEqual(entregue.serpLenses, lentes);
+  assert.ok(entregue.limitations.some(frase => /Só em Celular/.test(frase)), "as divergências entre aparelhos continuam declaradas");
+  assert.ok(entregue.limitations.includes("uma limitação congelada"), "as limitações do Google finalizado continuam");
+
+  /* Sem o Google finalizado, o dossiê de vídeo continua sem as lentes. */
+  const soVideo = dossie({ ...payload, finalizedBundle: null }, "2026-09-23T13:00:00.000Z");
+  assert.equal("serpLenses" in soVideo, false);
+  assert.equal(soVideo.research.google, null);
 });
 
 test("R3 · dossiê de investigação sem lentes continua sem a chave e com o hash de antes", async () => {

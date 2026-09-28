@@ -24,8 +24,10 @@ export type HumanReviewCompletionBatchPlan = {
 /**
  * Plans the explicit completion of the human review over a selection, with the
  * same contract as the per-keyword command: conservative defaults for items
- * without a decision and a mandatory KGR applicability decision whenever the
- * calculation is real. Nothing here touches status, approval or metrics.
+ * without a decision. Since 2026-09-28 the KGR applicability is optional (default
+ * "não aplicável") and never holds the completion: `pendingKgrIds` stays in the
+ * plan type for its consumers, always empty. Nothing here touches status,
+ * approval or metrics.
  * Reviews already completed are left as they are (no artificial version), and
  * keywords with an open review draft stay out until the draft is concluded or
  * cancelled in the panel, because their edits live only in the draft.

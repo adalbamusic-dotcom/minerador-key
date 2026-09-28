@@ -39,19 +39,68 @@ function fromExplicitDecision(value: unknown): KgrApplicability | null {
   return null;
 }
 
-/** Reads only an explicit decision. Metrics, intent and commercial status never decide applicability. */
-export function readKgrApplicability(semantic: KgrSemantic | null | undefined): KgrApplicability {
-  if (!semantic) return "pending";
+const AUTOMATIC_KGR_ORIGINS = ["ai", "ia", "automatic", "automatico", "automático", "provider"];
+
+/**
+ * Decisão de KGR GRAVADA, sem padrão: `null` quando não há decisão explícita ou
+ * quando a origem é automática (IA, provider). O `"pending"` legado volta como
+ * `"pending"` — é o que permite à tela e ao filtro mostrarem o valor antigo sem
+ * regravá-lo. Métricas, intenção e status comercial nunca decidem.
+ */
+export function readStoredKgrApplicability(semantic: KgrSemantic | null | undefined): KgrApplicability | null {
+  if (!semantic) return null;
   const origin = String(semantic.kgr_decisao_origem ?? "").toLowerCase();
-  if (["ai", "ia", "automatic", "automatico", "automático", "provider"].includes(origin)) return "pending";
+  if (AUTOMATIC_KGR_ORIGINS.includes(origin)) return null;
 
   const direct = fromExplicitDecision(semantic.kgr_aplicabilidade);
   if (direct) return direct;
   const decision = fromExplicitDecision(semantic.kgr_decisao);
   if (decision) return decision;
-  const legacy = fromExplicitDecision(semantic.kgr_applicability ?? semantic.kgrApplicability ?? semantic.kgr_aplicavel);
-  return legacy ?? "pending";
+  return fromExplicitDecision(semantic.kgr_applicability ?? semantic.kgrApplicability ?? semantic.kgr_aplicavel);
 }
+
+/** `true` quando há decisão humana gravada ("Aplicável" ou "Não aplicável"). */
+export function hasHumanKgrDecision(semantic: KgrSemantic | null | undefined): boolean {
+  const stored = readStoredKgrApplicability(semantic);
+  return stored === "applicable" || stored === "not_applicable";
+}
+
+/** `true` só quando a linha carrega o `"pending"` legado gravado antes de 2026-09-28. */
+export function hasLegacyPendingKgrApplicability(semantic: KgrSemantic | null | undefined): boolean {
+  return readStoredKgrApplicability(semantic) === "pending";
+}
+
+/**
+ * Aplicabilidade EFETIVA do KGR (leitor único de toda a plataforma).
+ *
+ * PADRÃO "NÃO APLICÁVEL" (decisão do dono, 2026-09-28; SDD SERP no artigo e
+ * KGR opcional, fatia M2). Ausência de decisão, origem automática e o
+ * `"pending"` legado são lidos como `"not_applicable"`. Só o humano marca
+ * "Aplicável". Nada é regravado: o enum de 3 valores continua aceito no
+ * KeywordDNA e no `human_review`, e o valor antigo segue no banco como
+ * proveniência (`readStoredKgrApplicability`). A assinatura do pacote aprovado
+ * cobre o `analise_semantica` bruto, não esta leitura — mudar o padrão não
+ * rebaixa aprovadas.
+ */
+export function readKgrApplicability(semantic: KgrSemantic | null | undefined): KgrApplicability {
+  const stored = readStoredKgrApplicability(semantic);
+  return stored === "applicable" ? "applicable" : "not_applicable";
+}
+
+/**
+ * Faixa de volume de interesse para KGR (regra do dono, 2026-09-28): 150 a 550
+ * buscas mensais, com os dois limites incluídos. SÓ INFORMATIVA: nunca é trava,
+ * nunca aplica o KGR sozinha e não muda a eleição do Arquiteto (`engine.ts`) nem
+ * o filtro do Descobrir.
+ */
+export const KGR_INTEREST_VOLUME_RANGE = { min: 150, max: 550 } as const;
+
+export function isInKgrInterestVolumeRange(volume: unknown): boolean {
+  return typeof volume === "number" && Number.isFinite(volume)
+    && volume >= KGR_INTEREST_VOLUME_RANGE.min && volume <= KGR_INTEREST_VOLUME_RANGE.max;
+}
+
+export const KGR_INTEREST_VOLUME_RANGE_LABEL = "Volume na faixa de interesse para KGR (150 a 550)";
 
 function finiteNonNegative(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
@@ -138,9 +187,12 @@ export function setKgrApplicability(
 ): KgrSemantic {
   const current = { ...(semantic ?? {}) };
   const previous = readKgrApplicability(current);
+  // O histórico registra só decisão humana anterior. O padrão "não aplicável"
+  // e o "pending" legado não são decisão de ninguém.
+  const storedPrevious = readStoredKgrApplicability(current);
   const history = parseHistory(current.kgr_decisao_historico);
   const changed = previous !== applicability;
-  if (changed && previous !== "pending") {
+  if (changed && storedPrevious !== null && storedPrevious !== "pending") {
     history.push({
       applicability: previous,
       decision: kgrDecisionLabel(previous),

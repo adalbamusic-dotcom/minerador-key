@@ -1,5 +1,48 @@
 # Backlog — Minerador
 
+## Correções do corretor (frentes de 2026-09-28) — 2026-09-28
+
+- [x] Resultados fora da sequência de processos, nas ações secundárias, com "(opcional · pago)" visível, plano de custo, uma confirmação e sem keyword sem volume.
+- [x] Prévia do KeywordDNA mostra a indicação da Lógica sem SERP consolidada.
+- [x] "Não aplicável" em lote grava a decisão humana sobre o `pending` legado e a origem automática.
+- [x] Rótulos: "KGR pendente (legado)" no filtro salvo; descrição de "Concluir revisão" sem exigir KGR; diálogo do Assunto sem frase repetida.
+- [ ] Homologação manual (usuário): barra em várias larguras e nos dois temas, confirmação de Resultados, Prévia do KeywordDNA.
+- [ ] Dono decide se Resultados deve usar o diálogo de plano pago do Arquiteto (com leitura do cache) no lugar da confirmação simples.
+- [ ] Dono decide se o predicado "com volume" (`volume_search > 0`) deve exigir volume validado pelo Google Ads, excluindo volume de planilha ainda não medido.
+
+## Pesquisa por Assunto só com o Google Ads (fatia D1) — 2026-09-28
+
+SDD [SERP no artigo e KGR opcional](../compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md), §3.2, fatia D1. Registro no `estado-atual.md` de 2026-09-28. Verificado no código e confirmado por teste; validado manualmente: não.
+
+- [x] Plano v2 só com o Google Ads (frase e frase + página aceita): sem Labs, sem `serp_phrase`, custo 0 no DataForSEO; o `planHash` continua exigido no execute.
+- [x] Execute abre só o Google Ads (`openExecution({ dataForSeo: false })`); marca sem DataForSEO pesquisa; `runLabs` saiu das portas; o núcleo do Labs fica sem chamador (as constantes são a chave do cache de SERP).
+- [x] As 5 origens continuam legíveis e importáveis; `SUBJECT_DISCOVERY_ACTIVE_SOURCES` com as 2 do Google Ads; a junção e o envio não encolhem o filtro.
+- [x] Tela: diálogo "Sem custo no DataForSEO; usa a cota do Google Ads"; Estimativa, SERP da frase e origens `labs_*` só em buscas antigas; textos revistos.
+- [x] Ledger do Google Ads: sufixo por página e `module` opcional (aditivos; as chaves de hoje byte a byte).
+- [ ] **Integrador**: `lib/agent/platform-catalog.ts` (Pesquisa por Assunto: purpose, requires, custo, volume) e a descrição de `search_subject_keywords` em `lib/server/platform-mcp-tools.ts`.
+- [ ] **Adendo** na `sdd-assunto-tronco-editorial-2026-09-24.md` (F1b.2 fontes 3–5, F1b.4, F1b.10).
+- [ ] **Validação na tela (usuário)**: Por Assunto numa marca com e numa sem DataForSEO; diálogo "Sem custo"; busca antiga da lista local abrindo com a Estimativa e enviando ao Processador.
+- [ ] **Decidir** se a repetição do mesmo `operationRequestId` deve conferir as chaves do Google Ads no ledger antes de consultar (hoje repete a consulta, sem custo, e o uso não duplica).
+
+## SERP opcional e KGR padrão "não aplicável" (fatias M1 a M4) — 2026-09-28
+
+SDD [SERP no artigo e KGR opcional](../compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md), fatias M1 a M4. Registro no `estado-atual.md` de 2026-09-28. Verificado no código e confirmado por teste; validado manualmente: não.
+
+- [x] M1 · Aprovar exige só Lógica e Volume (Assunto: só a Lógica). `results` e `kgr` ficam no tipo, nunca emitidos. Tela, gate de envio, `prepareCanonicalHandoff` e MCP relaxam juntos. `SERVER_APPROVAL_GATE_SINCE`, `contentHash` e assinatura sem mudança.
+- [x] M2 · KGR padrão "não aplicável" no leitor único; `"pending"` legado lido como não aplicável, sem regravar; auxiliares aditivos (`readStoredKgrApplicability`, `hasLegacyPendingKgrApplicability`, `hasHumanKgrDecision`).
+- [x] M2 · Score KGR calculado com qualquer aplicabilidade (`dataforseo-allintitle.ts`, `allintitle.ts`); `volume-kgr-consistency.ts` segue o leitor único.
+- [x] M2 · KGR nunca bloqueia a conclusão da Revisão Humana (individual e em lote).
+- [x] M2 · Faixa de interesse 150–550 como constante e informação na tela; nunca gate e nunca aplica o KGR.
+- [x] M3 · `optional?: true` em Resultados e KGR (só apresentação); maturidade "COMPLETA PARA REVISÃO" com Volume processado + Lógica.
+- [x] M4 · Resultados como ação manual "opcional · pago" com custo; seletores de KGR sem "Pendente" (só legado, desabilitado); faixa do Perfil com "· opcional"; textos de SERP opcional na Qualificação.
+- [ ] **Validação na tela (usuário)**: aprovar uma keyword só com Lógica e Volume e enviar ao Arquiteto; conferir o rótulo e a descrição de "Resultados"; seletor de KGR na coluna, no rodapé e na Revisão; faixa 150–550 no Perfil; linha com "Pendente" legado.
+- [ ] **Readback no banco** da primeira aprovação real sem Resultados enviada ao Arquiteto depois do deploy.
+- [ ] **Integrador**: `lib/agent/platform-catalog.ts` (`minerador.measure_keywords`, `review_and_approve`, nota do Assunto e regras de SEO) e descrições da MCP em `lib/server/platform-mcp-tools.ts` (`decide_keywords`/`send_keywords_to_arquiteto`: "sem Lógica ou Volume").
+- [ ] **Deploy**: a fatia A2 (coleta do lote no Arquiteto) no ar antes ou junto desta. Não voltar abaixo desta versão (rollback recusa com 409 as aprovadas sem Resultados depois de 2026-09-24).
+- [ ] **Decidir** se "Resultados" no Processador deve ganhar diálogo de confirmação com o plano de custo, como as outras chamadas pagas (hoje dispara no clique, como antes; a descrição mostra o custo estimado).
+- [ ] **Decidir** se o diagnóstico de coerência Volume × KGR deve continuar rodando para keywords com score e sem decisão (hoje segue o leitor único e só roda com "Aplicável").
+- [ ] Spec §319 e §529 (score sempre calculado) e §685 (trava): adendo feito em §78; revisar o texto antigo quando a spec for consolidada.
+
 ## Pesquisa por Assunto: volume primeiro (D2.3) — 2026-09-27
 
 Regra no `spec.md` (modo Por Assunto) e em [regras SERP e Assuntos](../compartilhado/regras-serp-e-assuntos-2026-09-26.md), D2.3. Registro no `estado-atual.md` de 2026-09-27. Verificado no código e confirmado por teste; validado manualmente: não.

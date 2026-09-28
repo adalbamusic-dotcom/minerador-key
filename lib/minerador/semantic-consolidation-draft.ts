@@ -89,7 +89,7 @@ function inconclusiveReason(strength: Exclude<SerpEvidenceStrength, "conclusive"
  * humano não inventa o valor.
  */
 export function resolveSemanticAxis(axis: SemanticConsolidationAxisDraft): SemanticAxisResolution {
-  if (!axis.serpStrength) return { value: null, status: "awaiting_serp", reason: "SERP ainda não coletada para esta keyword." };
+  if (!axis.serpStrength) return { value: null, status: "awaiting_serp", reason: "SERP não coletada (opcional): a indicação vem da Lógica." };
   if (axis.serpStrength === "conclusive" && clean(axis.serp)) {
     return { value: clean(axis.serp), status: "serp_consolidated", reason: null };
   }

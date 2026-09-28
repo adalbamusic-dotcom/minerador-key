@@ -32,7 +32,7 @@ const INPUT_CLASS = "mt-1 h-8 w-full min-w-0 rounded-md border border-divider bg
 export const VINCULO_POST_TITLE = "Livre: a keyword pode ser primária ou secundária de qualquer página, e pode perder a vaga. Travado ao slug: ela é a primária desta URL e não se solta dela.";
 export const VINCULO_POST_TITLE_SUBJECT = "Com Assunto declarado, o Posto de principal não se aplica.";
 export const VINCULO_PAGE_TYPE_TITLE = "Potencial: pode vir a ser este tipo. Declarado: vai ser este tipo, travado como decisão sua. Na publicada, o tipo já é declaração. Vale também para Assunto.";
-export const VINCULO_SUBJECT_TITLE = "Assunto é a frase que você declara como tronco de um ou mais artigos. Pode não ter busca: na aprovação dispensa Volume, Resultados e KGR, mas não a Lógica.";
+export const VINCULO_SUBJECT_TITLE = "Assunto é a frase que você declara como tronco de um ou mais artigos. Pode não ter busca: na aprovação dispensa Volume e KGR, mas não a Lógica.";
 
 type VinculoSelectProps = {
   id: string;

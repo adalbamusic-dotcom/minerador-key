@@ -42,9 +42,10 @@ import {
  * F1b.4, F1b.5, F1b.6 e F1b.7).
  *
  * Ordem das coisas, sempre:
- *   1. Enter ou Pesquisar monta o PLANO (grátis) e abre o diálogo de custo;
+ *   1. Enter ou Pesquisar monta o PLANO (grátis) e abre o diálogo do plano;
  *   2. só "Confirmar e pesquisar" executa, com o `planHash` e o custo máximo
- *      do plano confirmado e um `operationRequestId` novo por plano;
+ *      do plano confirmado e um `operationRequestId` novo por plano (desde
+ *      2026-09-28 o plano é só do Google Ads e o custo máximo é zero);
  *   3. o resultado fica na lista local (IndexedDB próprio), nunca no banco;
  *   4. o envio ao Processador, se o humano marcar, declara a frase pela rota
  *      da F1.3 (prévia e apply) e só depois importa pela rota da F1b.
@@ -293,7 +294,7 @@ export function useSubjectSearch({ brandRef, active, language, selectedStates, i
     const { plan, config, operationRequestId } = planState;
     busyRef.current = true;
     setExecuting(true); setPlanError(null);
-    publishNotice({ severity: "PENDING", title: "Pesquisa por Assunto", message: "Consultando o Google Ads e o DataForSEO Labs pelo plano confirmado…", source: "workflow", module: "minerador", area: "Descoberta de keywords" });
+    publishNotice({ severity: "PENDING", title: "Pesquisa por Assunto", message: "Consultando o Google Ads (frase e página de destino) pelo plano confirmado…", source: "workflow", module: "minerador", area: "Descoberta de keywords" });
     try {
       const response = await fetch(`/api/minerador/marcas/${encodeURIComponent(brandId)}/subject-discovery/search`, {
         method: "POST",

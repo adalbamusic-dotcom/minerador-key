@@ -1589,8 +1589,9 @@ function limitacaoCongeladaPortatil(texto: string, bloco: RadarFrozenSerpLensBlo
 
 /** Em que situação estão as lentes do pacote. Só lê o que a rota informou. */
 export function radarPortableFrozenLensesState(input: Pick<RadarPortableFrozenLensesInput, "profile" | "block" | "frozenAt">): RadarPortableFrozenLensesState {
-  if (input.profile !== "GOOGLE") return "not_applicable";
+  // R3 (2026-09-28): o dossiê de vídeo ou de produto traz as lentes do Google quando ele foi finalizado.
   if (input.block) return "frozen";
+  if (input.profile !== "GOOGLE") return "not_applicable";
   const congelado = Date.parse(limpo(input.frozenAt));
   return Number.isFinite(congelado) && congelado < Date.parse(`${RADAR_PORTABLE_FROZEN_LENSES_SINCE}T00:00:00.000Z`) ? "legacy" : "absent";
 }

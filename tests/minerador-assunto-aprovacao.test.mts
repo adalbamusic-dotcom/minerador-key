@@ -92,7 +92,7 @@ test("Assunto sem Lógica é recusado, e o missing só pode conter logic", () =>
   assert.equal(readiness.ok, false);
   assert.deepEqual(readiness.missing, ["logic"]);
   assert.equal(readiness.reason, SUBJECT_APPROVAL_REASON);
-  assert.equal(SUBJECT_APPROVAL_REASON, "Assunto declarado: dispensa Volume, Resultados e KGR; a Lógica continua exigida.");
+  assert.equal(SUBJECT_APPROVAL_REASON, "Assunto declarado: dispensa Volume e KGR; a Lógica continua exigida.");
 });
 
 test("Assunto com KGR calculável e pendente continua aprovável (D2 dispensa o KGR)", () => {
@@ -100,21 +100,21 @@ test("Assunto com KGR calculável e pendente continua aprovável (D2 dispensa o 
   assert.equal(readiness.ok, true);
 });
 
-test("keyword comum continua exigindo tudo, com o motivo de sempre", () => {
+test("keyword comum exige Lógica e Volume; Resultados e KGR são opcionais (2026-09-28)", () => {
   const sem = resolveApprovalReadiness({ semantic: comLogica(), intent: INTENT, volumeSearch: null, resultsAllintitle: null });
   assert.equal(sem.ok, false);
-  assert.deepEqual(sem.missing, ["volume", "results"]);
-  assert.match(sem.reason || "", /^Aprovar exige Volume e Resultados\. O Arquiteto recebe o pacote fechado/);
+  assert.deepEqual(sem.missing, ["volume"]);
+  assert.match(sem.reason || "", /^Aprovar exige Volume\. O Arquiteto recebe o pacote fechado/);
   const nada = resolveApprovalReadiness({ semantic: {}, volumeSearch: null });
-  assert.deepEqual(nada.missing, ["logic", "volume", "results"]);
+  assert.deepEqual(nada.missing, ["logic", "volume"]);
   assert.equal(resolveApprovalReadiness({ semantic: medida(), intent: INTENT, volumeSearch: 90, resultsAllintitle: 336 }).ok, true);
 });
 
-test("Assunto retirado volta a exigir Volume, Resultados e KGR", () => {
+test("Assunto retirado volta a exigir Volume (Resultados e KGR opcionais)", () => {
   const declared = declarar(comLogica());
   const withdrawn = { ...declared, keyword_subject: null };
   const readiness = resolveApprovalReadiness({ semantic: withdrawn, intent: INTENT, volumeSearch: null, resultsAllintitle: null });
-  assert.deepEqual(readiness.missing, ["volume", "results"]);
+  assert.deepEqual(readiness.missing, ["volume"]);
 });
 
 /* ---------------------------- trava no envio (Q9) ---------------------------- */
@@ -131,7 +131,7 @@ test("aprovada depois da ativação, sem processo, é recusada; antes passa com 
   const gateAfter = resolveHandoffApprovalGate({ semantic: after.analise_semantica, intent: after.intent, volumeSearch: null, resultsAllintitle: null });
   assert.equal(gateAfter.verdict, "refuse");
   assert.equal(gateAfter.scope, "gated");
-  assert.match(gateAfter.reason || "", /^Aprovar exige Lógica, Volume e Resultados/);
+  assert.match(gateAfter.reason || "", /^Aprovar exige Lógica e Volume\./);
 
   const before = await aprovada({}, BEFORE);
   const gateBefore = resolveHandoffApprovalGate({ semantic: before.analise_semantica, intent: before.intent });

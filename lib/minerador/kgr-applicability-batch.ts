@@ -1,5 +1,5 @@
 import { applyHumanReviewKgrApplicability } from "./human-review.ts";
-import { kgrApplicabilityLabel, readKgrApplicability, type KgrApplicability } from "./kgr-applicability.ts";
+import { hasLegacyPendingKgrApplicability, kgrApplicabilityLabel, readKgrApplicability, readStoredKgrApplicability, type KgrApplicability } from "./kgr-applicability.ts";
 
 export type KgrApplicabilityBatchKeyword = {
   id: string;
@@ -29,6 +29,12 @@ export type KgrApplicabilityBatchPlan = {
  * never reopens a completed review nor bumps the decision version. Keywords
  * with an open review draft are skipped, because their pending edits live only
  * in the draft until it is completed or cancelled.
+ *
+ * Correção de 2026-09-28: o "pending" legado e o valor de origem automática
+ * são LIDOS como "não aplicável", mas não são decisão de ninguém. Marcar
+ * "Não aplicável" neles grava a decisão humana (como no seletor da linha), o
+ * que registra quem decidiu e tira a linha do filtro "Pendente (legado)".
+ * Sem nenhum valor gravado, "Não aplicável" continua sem gravar nada.
  */
 export function planKgrApplicabilityBatch(
   keywords: readonly KgrApplicabilityBatchKeyword[],
@@ -46,7 +52,11 @@ export function planKgrApplicabilityBatch(
       continue;
     }
     const previous = readKgrApplicability(keyword.analise_semantica);
-    if (previous === applicability) {
+    const stored = readStoredKgrApplicability(keyword.analise_semantica);
+    const recorded = keyword.analise_semantica?.kgr_aplicabilidade;
+    const notHumanRecord = hasLegacyPendingKgrApplicability(keyword.analise_semantica)
+      || (stored === null && recorded !== undefined && recorded !== null && recorded !== "");
+    if (previous === applicability && !notHumanRecord) {
       plan.unchangedIds.push(keyword.id);
       continue;
     }

@@ -338,7 +338,7 @@ export function PublishedDifferentiationPanel({ controller, buttonClassName, pri
           lines={[
             ...planosMarcados.map(item => `${differentiationGroupRowView(groups.find(group => group.groupId === item.id) ?? item.entry!.plan!.group).title}: ${costRangeLabel(item.entry!.plan!.plan.costRange)}.`),
             `Total: ${costRangeLabel(controller.selectedCost)}. Teto de US$ ${formatUsd(DIFFERENTIATION_MAX_COST_USD)} por grupo, conferido no servidor.`,
-            "Só DataForSEO. O que já está no cache não é pago de novo. Keyword sem volume nunca é proposta.",
+            "As keywords novas vêm do Google Ads, sem custo. A parte paga é a SERP das candidatas (DataForSEO): o que já está no cache não é pago de novo. Keyword sem volume nunca é proposta.",
             "Nada é gravado nos artigos: depois você aceita ou mantém cada grupo.",
           ]}
           confirmLabel={`Confirmar ${costRangeLabel(controller.selectedCost)}`}

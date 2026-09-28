@@ -1,4 +1,4 @@
-import { classifyKgrMeasurement, compareKgrRows } from "./kgr-applicability.ts";
+import { classifyKgrMeasurement, compareKgrRows, hasLegacyPendingKgrApplicability } from "./kgr-applicability.ts";
 import { normalizeIntentKey } from "./intent-taxonomy.ts";
 import { isOperationallyEligible, readVolumeEligibility, type VolumeEligibilityStatus } from "./volume-eligibility.ts";
 import { applyManualOrder, type KeywordTableOrderMode } from "./manual-order.ts";
@@ -85,7 +85,10 @@ export function deriveMineradorTableRows(
   if (filters.sitePublication !== "Todos") {
     result = result.filter(item => readPublicationLink({ status: item.status, evidence: readSiteOrigin(item.analise_semantica) }).state === filters.sitePublication);
   }
-  if (filters.kgrApplicability !== "Todos") result = result.filter(item => resolveCanonicalKeywordSnapshot(item).metrics.kgr.applicability === filters.kgrApplicability);
+  // "Pendente" deixou de ser leitura efetiva em 2026-09-28 (padrão "não
+  // aplicável"): o filtro mostra só as linhas com o valor legado gravado.
+  if (filters.kgrApplicability === "pending") result = result.filter(item => hasLegacyPendingKgrApplicability(item.analise_semantica));
+  else if (filters.kgrApplicability !== "Todos") result = result.filter(item => resolveCanonicalKeywordSnapshot(item).metrics.kgr.applicability === filters.kgrApplicability);
   if (filters.kgrMeasurement !== "Todos") result = result.filter(item => {
     const snapshot = resolveCanonicalKeywordSnapshot(item);
     return classifyKgrMeasurement({ kgrScore: snapshot.metrics.kgr.score, volume: snapshot.metrics.volume.value, results: snapshot.metrics.result.value }) === filters.kgrMeasurement;
@@ -169,7 +172,7 @@ export const KGR_FILTER_GROUPS: readonly CombinedFilterGroup[] = [
   { label: "Aplicabilidade", options: [
     { value: `${KGR_APPLICABILITY_PREFIX}applicable`, label: "Aplicável" },
     { value: `${KGR_APPLICABILITY_PREFIX}not_applicable`, label: "Não aplicável" },
-    { value: `${KGR_APPLICABILITY_PREFIX}pending`, label: "Pendente" },
+    { value: `${KGR_APPLICABILITY_PREFIX}pending`, label: "Pendente (legado)" },
   ] },
   { label: "Cálculo", options: [
     { value: `${KGR_MEASUREMENT_PREFIX}without_data`, label: "Sem medição" },
