@@ -923,9 +923,6 @@ export function KeywordDnaPanel({
   const kgrVolumeNumber = profileNonNegativeNumber(resolvedKgrVolume);
   const kgrAllintitleNumber = profileNonNegativeNumber(resolvedKgrAllintitle);
   const kgrScoreValue = canonicalSnapshot.metrics.kgr.score;
-  const kgrScore = kgrScoreValue !== null
-    ? kgrScoreValue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 3 })
-    : null;
   const decisionIntent = keywordReadModel.intentState === "confirmed_unknown"
     ? keywordReadModel.intentLabel
     : normalizeIntentKey(keywordReadModel.intent) === "unknown" ? null : keywordReadModel.intentLabel;
@@ -1051,11 +1048,11 @@ export function KeywordDnaPanel({
     { label: "Maturidade do DNA", value: dnaMaturityLabel(dnaMaturity) },
     { label: "Status final", value: finalStatusLabel },
   ];
+  // Resultados e KGR são opcionais desde 2026-09-28 (SDD serp-no-artigo-e-kgr-opcional):
+  // não contam para aprovar, então não aparecem como etapa do processo.
   const profileSteps = [
     { label: "Lógica", complete: logicalProcessComplete, state: processStates.logic },
     { label: "Volume", complete: googleAdsStageComplete, state: processStates.volume },
-    { label: "Resultados", complete: dataForSeoStageComplete, state: processStates.results },
-    { label: "KGR", complete: processStates.kgr.complete, value: processStates.kgr.complete ? kgrScore : null, state: processStates.kgr },
     { label: "Revisão", complete: humanReviewCompleted, state: processStates.review },
   ];
   return <section data-keyword-profile="bento" className="mb-3 w-full min-w-0 whitespace-normal rounded-lg border border-context-accent/35 bg-surface p-2.5">

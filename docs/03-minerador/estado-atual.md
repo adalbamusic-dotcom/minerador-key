@@ -1,5 +1,16 @@
 # Estado atual — Minerador
 
+## Faixa de processos do Perfil sem Resultados e KGR — 2026-09-28
+
+```text
+PEDIDO = dono, com print da faixa "Lógica · Volume · Resultados · KGR · Revisão": Resultados e KGR não contam mais, então saem do fluxo
+MUDANCA = components/editorial/dna-panels.tsx · profileSteps = Lógica · Volume · Revisão
+DADOS = Resultados, allintitle e KGR medidos continuam visíveis nos cards e na Proveniência; nada foi apagado
+TESTE = tests/minerador-human-review.test.mts (R6) exige só Lógica/Volume/Revisão e recusa passo Resultados/KGR
+BASE = as 8 falhas de minerador-keyword-profile-bento já estavam na base (corr-min-fails), nenhuma nova
+VALIDACAO_MANUAL = pendente (usuário)
+```
+
 ## Correções do corretor sobre as frentes de 2026-09-28 — 2026-09-28
 
 ```text
