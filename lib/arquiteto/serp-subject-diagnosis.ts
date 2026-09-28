@@ -33,6 +33,12 @@
  *                        para "como atrair clientes para clinica medica",
  *                        Comercial, 4 páginas; os pares Informativos ficam
  *                        nos detalhes como barrados pelo DNA.)
+ *                        D2.3.1 (2026-09-28): com 3+ páginas em comum, nem a
+ *                        intenção OBSERVADA barra — vira aviso e o par vira
+ *                        sugestão Forte. Como este estado só olha pares
+ *                        fortes, com a SERP medindo ele deixa de aparecer; o
+ *                        par de 2 páginas com intenção observada diferente
+ *                        continua fora das sugestões, sem cartão próprio.
  *   serp_missing         sem SERP da âncora no cache: não dá para medir (A7/D6).
  *                        Vencida (A4, 30 dias) e nunca coletada são ditas
  *                        de modos diferentes (`serpGaps`).

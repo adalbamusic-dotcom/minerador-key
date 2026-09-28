@@ -680,7 +680,9 @@ test("aplicar: Posto travado depois da proposta, sem ArticleDNA, keyword fora do
   assert.match(captarFora.swap.reason, /traga-a pela formação/);
   const semDna = fora.pages.find(pagina => pagina.keywordId === ATRAIR)!;
   assert.equal(semDna.nextPayload, null);
-  assert.match(semDna.refusal || "", /Concluir formação/);
+  // 2026-09-28: publicado nunca passa por "Concluir formação"; o ArticleDNA nasce no "Reforçar publicados".
+  assert.match(semDna.refusal || "", /use "Reforçar publicados" \(ele cria o ArticleDNA, sem custo\)/);
+  assert.doesNotMatch(semDna.refusal || "", /Concluir formação/);
 
   // Q3 relido agora: a página passou a aparecer no Google, ou a SERP não pôde ser relida → a principal fica.
   const artigosCaptar = new Map([[CAPTAR, { articleId: captarAtual.articleId, payload: artigo(CAPTAR, ["kw-anuncios"]) }], [ATRAIR, null]]);

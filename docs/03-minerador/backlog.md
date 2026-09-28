@@ -1,5 +1,10 @@
 # Backlog — Minerador
 
+## Núcleo da Lógica e da aprovação no servidor — 2026-09-28
+
+- [x] Extrair do MCP a Lógica e a aprovação com compare-and-swap e releitura (`lib/server/minerador-keyword-decision-core.ts`), usadas pelo MCP e pelo Reforçar publicados.
+- [ ] Extrair o corpo da rota de Volume do Google Ads para um núcleo de servidor (hoje o Reforçar a chama em processo).
+
 ## Correções do corretor (frentes de 2026-09-28) — 2026-09-28
 
 - [x] Resultados fora da sequência de processos, nas ações secundárias, com "(opcional · pago)" visível, plano de custo, uma confirmação e sem keyword sem volume.

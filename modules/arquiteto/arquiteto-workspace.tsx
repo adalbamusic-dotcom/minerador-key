@@ -116,7 +116,8 @@ import { buildRadarHandoffPlan } from "@/lib/arquiteto/radar-handoff-gate";
 import { buildArchitectureWorkingProposal, formatProposalCounters, intentIsKnown, proposalCoversScope, resolveKeywordDnaSignals, type KeywordDnaSignals } from "@/lib/arquiteto/architecture-working-proposal";
 import { detectCandidateOverlap, detectSlugCollisions, reservedForSiloPage, unresolvedCannibalization, type CandidateOverlapRisk } from "@/lib/arquiteto/article-candidate-guards";
 import { describeRadarReadback, verifyRadarHandoffReadback } from "@/lib/arquiteto/radar-handoff-readback";
-import { articleRunRowsFromGates, buildArticleRunReadout, formatArticleRunBlockers, formatArticleRunReadout } from "@/lib/arquiteto/process-observability";
+import { articleRunRowsFromGates, formatArticleRunBlockers } from "@/lib/arquiteto/process-observability";
+import { describeAllintitlePlain, describeArticleRunPlain, describeArticleRunStartPlain } from "@/lib/arquiteto/plain-run-messages";
 import { describeFormationConclusionOutcome, resolveFormationLedger, resolveSiloClosureReadiness } from "@/lib/arquiteto/silo-closure-readiness";
 import { keywordPackageClosureIssues, resolveArticleKeywordAlignment, type KeywordPackageState } from "@/lib/arquiteto/keyword-package-alignment";
 import { buildCanonicalSiloClosurePlan, resolveCanonicalClosureResumption, verifyCanonicalSiloClosure, type CanonicalSiloClosurePlan, type CanonicalSiloClosureVerification } from "@/lib/arquiteto/silo-composition-from-formations";
@@ -185,8 +186,10 @@ import {
   type SubjectAnchorCarrier,
 } from "@/lib/arquiteto/declared-subject";
 import { SubjectAttachDialog, SubjectConservationBadge, SubjectFilterPanel, SubjectSupportDialog, type SubjectAnchorView, type SubjectSiloSuggestionView } from "./subject-panels";
-import { SerpSubjectCard, SerpSubjectDiagnosisPanel, type SerpSubjectReadStatus } from "./serp-subject-panels";
+import { SerpSubjectCard, SerpSubjectDiagnosisPanel, cardReinforcementOf, type SerpSubjectReadStatus } from "./serp-subject-panels";
 import { PublishedDifferentiationSection } from "./published-differentiation-panel";
+import { usePublishedReinforcement } from "./use-published-reinforcement";
+import { noPairLineView } from "./published-reinforcement-model";
 import {
   KEPT_SWAPS_STORAGE_PREFIX,
   appliedPublishedSwapOf,
@@ -702,11 +705,12 @@ export default function ArquitetoPage() {
   const { brands, selectedBrandId, profileLoading } = useBrand();
   const supabase = useMemo(() => createAuthenticatedBrowserClient(), []);
   const { publishNotice } = useNoticeCenter();
-  const showNotification = useCallback((type: "success" | "warning" | "error", msg: string) => {
+  const showNotification = useCallback((type: "success" | "warning" | "error" | "info", msg: string) => {
     publishNotice({
       // WARNING existe para o desfecho que concluiu a execução mas ainda tem
       // pendência operacional; só ERROR significa que nada foi concluído.
-      severity: type === "success" ? "SUCCESS" : type === "warning" ? "WARNING" : "ERROR",
+      // INFO (2026-09-28): análise ou leitura que NÃO gravou nada — nunca SUCCESS.
+      severity: type === "success" ? "SUCCESS" : type === "warning" ? "WARNING" : type === "info" ? "INFO" : "ERROR",
       title: "Arquiteto",
       message: msg,
       source: type === "success" ? "persistence" : "workflow",
@@ -3310,10 +3314,9 @@ export default function ArquitetoPage() {
           return { ...item, ...(payload?.kgrIdentity ? { kgrIdentity: payload.kgrIdentity } : {}), canonicalWorkflow: { ...workflow, lockVersion: Number(linha.lock_version || workflow.lockVersion), updatedAt: String(linha.updated_at || workflow.updatedAt), payload: payload || workflow.payload } };
         }));
       }
-      const partes = [`${medidos} medido(s) agora`, `${reaproveitados} reaproveitado(s) (até 30 dias)`];
-      if (semVolume) partes.push(`${semVolume} Principal(is) sem volume não medida(s)`);
-      if (semItem) partes.push(`${semItem} fora da cópia de trabalho`);
-      showNotification(falhas.length ? "warning" : "success", `Allintitle da Principal: ${partes.join(" · ")}${falhas.length ? ` · ${falhas.length} falha(s): ${falhas.slice(0, 2).join("; ")}` : ""}.`);
+      // 2026-09-28: diz o que foi medido e GRAVADO, o que já estava medido (nada novo) e o que não foi — sem SUCCESS quando nada foi gravado.
+      const allintitle = describeAllintitlePlain({ measured: medidos, reused: reaproveitados, withoutVolume: semVolume, outsideWorkingCopy: semItem, failures: falhas });
+      showNotification(allintitle.tone, allintitle.message);
     } catch (error) {
       showNotification("error", error instanceof Error ? error.message : "Não foi possível medir o allintitle do artigo.");
     } finally {
@@ -11307,6 +11310,25 @@ export default function ArquitetoPage() {
     .find(universe => universe.siloRef === siloRef)?.candidates
     .find(candidate => candidate.principalKeywordId === principalKeywordId)?.candidateRef ?? null, [articleFormationUniverses]);
 
+  /*
+   * Reforçar publicados (2026-09-28): o ArticleDNA vigente de cada publicado,
+   * pela principal (ou pela publicada anterior, depois da troca). O cartão diz
+   * se a proposta já está gravada; a troca continua lendo o do candidato.
+   */
+  const articleDnaByPublishedPrincipal = useMemo(() => {
+    const mapa = new Map<string, ArticleDNA>();
+    const versoes = new Map<string, number>();
+    for (const versao of Object.values(acceptedArticleDnas)) {
+      if (!versao?.payload) continue;
+      const principal = reconciliationPrincipalKeywordId(versao.payload, publishedKeywordIdSet);
+      if (!publishedKeywordIdSet.has(principal)) continue;
+      if ((versoes.get(principal) ?? -1) >= versao.versionNumber) continue;
+      versoes.set(principal, versao.versionNumber);
+      mapa.set(principal, versao.payload);
+    }
+    return mapa;
+  }, [acceptedArticleDnas, publishedKeywordIdSet]);
+
   const serpSubjectCards = useMemo(() => {
     const nomes = articleFormation.formationKeywords;
     const mineradorHref = serpSubjectBrandRef ? `/${serpSubjectBrandRef}/minerador` : null;
@@ -11316,9 +11338,10 @@ export default function ArquitetoPage() {
       const post: PublishedPrimaryPost = info?.post ?? "unknown";
       const candidateRef = publicado ? serpAnchorCandidateRef(diagnosis.siloRef, diagnosis.principalKeywordId) : null;
       const article = candidateRef ? articleDnaEntryFor({ candidateRef }).version?.payload ?? null : null;
+      const vigente = publicado ? article ?? articleDnaByPublishedPrincipal.get(diagnosis.anchorKeywordId) ?? null : null;
       const substituta = diagnosis.swap?.substitute;
       return serpSubjectCardView(diagnosis, {
-        ...(publicado ? { post, swapReadiness: publishedSwapReadiness({ diagnosis, article, currentPost: post }) } : {}),
+        ...(publicado ? { post, swapReadiness: publishedSwapReadiness({ diagnosis, article, currentPost: post }), articleKeywordIds: vigente ? new Set(vigente.keywordReferences.map(reference => String(reference.keywordId))) : null } : {}),
         pageUrl: publicado ? (info?.canonical || info?.url || null) : (subjectStandings.get(diagnosis.anchorKeywordId)?.destinationUrl ?? null),
         appliedSwap: appliedPublishedSwapOf(article),
         kept: Boolean(substituta && keptSwaps.has(keptSwapKey(diagnosis.anchorKeywordId, substituta.keywordId))),
@@ -11328,7 +11351,7 @@ export default function ArquitetoPage() {
         nameOf: keywordId => nomes.get(keywordId)?.keyword || keywordId,
       });
     });
-  }, [articleFormation.formationKeywords, serpSubjectBrandRef, serpSubjectDiagnoses, serpPublishedInfo, serpAnchorCandidateRef, articleDnaEntryFor, subjectStandings, keptSwaps, serpSubjectAnalysis.searches]);
+  }, [articleFormation.formationKeywords, serpSubjectBrandRef, serpSubjectDiagnoses, serpPublishedInfo, serpAnchorCandidateRef, articleDnaEntryFor, articleDnaByPublishedPrincipal, subjectStandings, keptSwaps, serpSubjectAnalysis.searches]);
   const serpSubjectCardByKey = useMemo(() => new Map(serpSubjectCards.map(card => [card.key, card])), [serpSubjectCards]);
   const serpSubjectSummary = useMemo(() => summarizeSerpSubjectCards(serpSubjectCards), [serpSubjectCards]);
   const serpSubjectChoices = useMemo(() => serpSubjectBatchChoices({ diagnoses: serpSubjectDiagnoses, cards: serpSubjectCardByKey }), [serpSubjectDiagnoses, serpSubjectCardByKey]);
@@ -11346,6 +11369,25 @@ export default function ArquitetoPage() {
   }), [serpSubjectRead, selectedBrandId, serpSubjectReadPlan.total]);
 
   const [serpSubjectBusy, setSerpSubjectBusy] = useState(false);
+
+  /*
+   * REFORÇAR PUBLICADOS (SDD 2026-09-28): a confirmação única que grava o
+   * ArticleDNA dos publicados, a troca aceita e os reforços marcados, e a
+   * busca em lote dos "Sem par no lote" (até US$ 1,00 por rodada). As rotas
+   * do núcleo gravam e releem no servidor; depois, a mesa relê o acervo e o
+   * cache de SERP.
+   */
+  const serpSubjectNoPairIds = useMemo(() => noPairLineView(serpSubjectCards, new Map()).pageIds, [serpSubjectCards]);
+  const publishedReinforcement = usePublishedReinforcement({
+    brandId: selectedBrandId,
+    enabled: workspaceMode === "articles",
+    noPairPageIds: serpSubjectNoPairIds,
+    onWritten: () => {
+      setCanonicalWorkspaceReload(current => current + 1);
+      setSerpSubjectReload(current => current + 1);
+    },
+    onNotify: showNotification,
+  });
 
   /**
    * D2.1 — APLICAR A TROCA DA PRINCIPAL LIVRE, só por decisão humana.
@@ -11660,7 +11702,15 @@ export default function ArquitetoPage() {
   };
 
   const serpSubjectHandlers = {
-    onApplySwap: (anchorKeywordId: string) => { void applyOnePublishedSwap(anchorKeywordId); },
+    onApplySwap: (anchorKeywordId: string) => {
+      // Sem ArticleDNA (ou sem a substituta nele): a troca vai pelo "Reforçar publicados", com ela marcada.
+      const aplicar = serpSubjectCardByKey.get(`published:${anchorKeywordId}`)?.actions.find(action => action.kind === "apply_swap");
+      if (aplicar && aplicar.kind === "apply_swap" && aplicar.viaReinforcement) {
+        void publishedReinforcement.openReinforcement(serpSubjectCards, { only: new Set([anchorKeywordId]), acceptSwapOf: anchorKeywordId });
+        return;
+      }
+      void applyOnePublishedSwap(anchorKeywordId);
+    },
     onKeepSwap: (anchorKeywordId: string) => keepPublishedPrimary(anchorKeywordId, true),
     onReviewSwap: (anchorKeywordId: string) => keepPublishedPrimary(anchorKeywordId, false),
     onBringPair: (proposals: readonly { keywordId: string; keyword: string; toSiloRef: string; toSiloLabel: string }[]) => { void applyCrossSiloReinforcements(proposals); },
@@ -11702,11 +11752,12 @@ export default function ArquitetoPage() {
     return (
       <SerpSubjectCard
         card={card}
-        busy={serpSubjectBusy || crossSiloBusy}
+        busy={serpSubjectBusy || crossSiloBusy || publishedReinforcement.busy}
         evidenceOf={serpSubjectEvidenceOf}
         handlers={serpSubjectHandlers}
         buttonClassName={ARCHITECT_UI.toolbarButton}
         primaryButtonClassName={ARCHITECT_UI.primaryButton}
+        reinforcement={cardReinforcementOf(publishedReinforcement, card, serpSubjectCards)}
       />
     );
   };
@@ -13079,10 +13130,24 @@ export default function ArquitetoPage() {
     })
   ), [articleSerpGates, closedCandidateRefs]);
 
+  /*
+   * 2026-09-28 — "fala que deu sucesso; mas sucesso onde?". A leitura da
+   * execução sai em português simples: quantos foram analisados e como
+   * (cache ou pago), o que foi GRAVADO (só o parecer confirmado nesta
+   * execução) e o que não foi, com o próximo passo pelo nome do botão —
+   * "Reforçar publicados" para os publicados (nunca "Concluir formação").
+   * Os contadores do §4 continuam no domínio (`buildArticleRunReadout`).
+   */
+  const publishedCandidateRefs = useMemo(() => new Set(articleFormationUniverses.flatMap(universe => universe.candidates
+    .filter(candidate => publishedKeywordIdSet.has(candidate.principalKeywordId))
+    .map(candidate => candidate.candidateRef))), [articleFormationUniverses, publishedKeywordIdSet]);
   const readoutDaExecucao = useCallback(
-    (coletadosAgora: ReadonlySet<string>, refs?: ReadonlySet<string>, execucao?: ExecucaoDaSerp) =>
-      formatArticleRunReadout(buildArticleRunReadout(linhasDaExecucao(coletadosAgora, refs, execucao))),
-    [linhasDaExecucao],
+    (coletadosAgora: ReadonlySet<string>, refs?: ReadonlySet<string>, execucao?: ExecucaoDaSerp) => {
+      const linhas = linhasDaExecucao(coletadosAgora, refs, execucao);
+      const gravadosAgora = new Set([...coletadosAgora, ...(execucao?.reusedInThisRun ?? [])].filter(ref => !refs || refs.has(ref)));
+      return describeArticleRunPlain({ rows: linhas, publishedRefs: publishedCandidateRefs, opinionsWritten: gravadosAgora.size });
+    },
+    [linhasDaExecucao, publishedCandidateRefs],
   );
 
   /**
@@ -13120,7 +13185,9 @@ export default function ArquitetoPage() {
   useEffect(() => {
     if (!readoutPendente) return;
     const execucao = { reusedInThisRun: readoutPendente.reused, pendingReasons: readoutPendente.pendingReasons };
-    showNotification(readoutPendente.tone, readoutDaExecucao(readoutPendente.collected, readoutPendente.refs, execucao));
+    const leitura = readoutDaExecucao(readoutPendente.collected, readoutPendente.refs, execucao);
+    // Execução interrompida (pagamento recusado, lente que falta) nunca sai como sucesso.
+    showNotification(readoutPendente.tone === "warning" ? "warning" : leitura.tone, leitura.message);
     anunciarBloqueios(readoutPendente.collected, readoutPendente.refs, execucao);
     setReadoutPendente(null);
   }, [readoutPendente, readoutDaExecucao, anunciarBloqueios, showNotification]);
@@ -13343,25 +13410,21 @@ export default function ArquitetoPage() {
         // Nada a coletar não é "nada aconteceu": é evidência reaproveitada. A
         // mensagem precisa dizer o que o mercado já respondeu, senão a pessoa
         // acha que o clique não fez nada e clica de novo.
-        const g = resumoSerp;
-        // §14 — o resultado fecha a conta: quantos foram analisados, o que o
-        // mercado respondeu e quantos já podem ser concluídos. "Nada mudou"
-        // também é resultado, e precisa ser dito com números.
-        const prontos = Math.max(g.total - g.blocking, 0);
-        showNotification("success", `Processamento concluído: ${resumoDaFormacao.candidates} Article(s) analisado(s). `
-          + `SERP reaproveitada para ${g.analyzed}/${g.total}`
-          + (g.missing + g.stale + g.failed ? ` · ${g.missing + g.stale + g.failed} sem evidência vigente` : "")
-          + `. ${g.supported} sustentado(s) · ${g.divergent} divergente(s) · ${g.inconclusive} inconclusivo(s)`
-          + (g.awaitingHuman ? ` · ${g.awaitingHuman} aguardando decisão humana` : "")
-          + `. ${prontos} pronto(s) para concluir.`);
-        // A conferência número por número, na ordem do §4 — do ESCOPO.
-        showNotification("success", readoutDaExecucao(new Set(), escopo.candidateRefs));
+        //
+        // §14 + 2026-09-28 — o resultado fecha a conta em português simples:
+        // quantos foram analisados (pelo cache, sem custo), que NADA foi
+        // gravado nos artigos e qual botão grava — "Reforçar publicados" para
+        // os publicados, "Concluir formação" para os novos. Sem SUCCESS: nada
+        // foi gravado (o marcador de processamento não é conteúdo do artigo).
+        const leituraDoCache = readoutDaExecucao(new Set(), escopo.candidateRefs);
+        showNotification(leituraDoCache.tone, leituraDoCache.message);
         anunciarBloqueios(new Set(), escopo.candidateRefs);
         await medirAllintitleDoEscopo();
         if (automatic?.finalizeSubject) setAutomaticSubjectFinalization({ candidateRefs: [...escopo.candidateRefs], subjectPhrase: automatic.finalizeSubject });
         return;
       }
-      showNotification("success", `Formação processada: ${resumoDaFormacao.candidates} artigo(s) candidato(s) selecionado(s). Consultando a SERP em cache para avaliar ${pendentes.length} artigo(s) sem parecer vigente.`);
+      const inicio = describeArticleRunStartPlain({ candidates: resumoDaFormacao.candidates, withoutOpinion: pendentes.length });
+      showNotification(inicio.tone, inicio.message);
       const resultadoDaSerp = await confirmSerpValidation(pendentes);
       /*
        * D6 — coletada é só o que pagou SERP nesta execução e voltou no
@@ -17092,6 +17155,7 @@ export default function ArquitetoPage() {
             onApplyBatch={applySerpSubjectBatch}
             buttonClassName={ARCHITECT_UI.toolbarButton}
             primaryButtonClassName={ARCHITECT_UI.primaryButton}
+            reinforcement={publishedReinforcement}
           />
         )}
         {workspaceMode === "articles" && (
@@ -18641,8 +18705,8 @@ export default function ArquitetoPage() {
                                             fica o que ainda impede — nomeado e com o caminho que resolve. */}
                                         <p className="mt-3 text-sm leading-6 text-text-muted" data-testid="architect-closing-authority">
                                           {articleClosingIssues.length === 0
-                                            ? "Pronto para fechar: selecione este artigo na aba Artigos e use “Concluir formação”."
-                                            : "Resolva o que falta e conclua a formação na aba Artigos."}
+                                            ? "Pronto para fechar: selecione este artigo na aba Artigos e use “Concluir formação” (artigo publicado: “Reforçar publicados”)."
+                                            : "Resolva o que falta e use “Concluir formação” na aba Artigos (artigo publicado: “Reforçar publicados”)."}
                                         </p>
                                         {articleClosingIssues.length > 0 && <ul className="mt-2 space-y-1 text-sm leading-6 text-text-muted">
                                           {articleClosingIssues.map(item => <li key={`${item.code}:${item.detail}`}>• {item.detail} {item.resolveWith}</li>)}

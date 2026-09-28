@@ -1,3 +1,13 @@
+## 39. Reforçar publicados e mensagens que dizem o que foi gravado — 2026-09-28
+
+Regras permanentes (no código desde 2026-09-28; homologação manual pendente). Fonte: [SDD aprovada](sdd-reforcar-publicados-2026-09-28.md).
+
+1. **Publicado nunca passa por "Concluir formação".** O ArticleDNA do artigo publicado (o primeiro ou a versão nova), a troca aceita e os reforços são gravados por "Reforçar publicados", numa confirmação só, com prévia do servidor, hash e releitura. A confirmação é a aprovação humana; custo para gravar: zero.
+2. **Keyword nova no Reforçar** passa pelo Minerador na mesma confirmação (import, Lógica, Volume do Google Ads, aprovação e envio ao Arquiteto), só com o aceite explícito do dono de que ele a aprova no Minerador.
+3. **Busca em lote dos publicados sem par**: Google Ads grátis, SERP das melhores paga, teto de US$ 1,00 por rodada no servidor, uma confirmação; o resultado é sugestão (Forte 3+ páginas, Provável 2 páginas com palavras) e nada é gravado sem o Reforçar. Quem disputa o mesmo assunto com outro publicado segue a diferenciação.
+4. **D2.3.1**: com 3+ páginas em comum, a intenção observada diferente vira aviso; com 2 ou menos, ou sem SERP, continua barrando.
+5. **Mensagem de desfecho**: diz o que foi feito, o que foi gravado (só o confirmado na releitura) e o que não foi, com o botão que grava. Sucesso só com gravação confirmada; análise ou leitura que não gravou nada é informação. Mudar keyword de Silo grava só o Silo e diz que ela ainda não está no artigo.
+
 ## 38. SERP no artigo e KGR opcional — 2026-09-28
 
 Regras permanentes (no código desde 2026-09-28; homologação manual pendente). Fonte: [SDD aprovada](../compartilhado/sdd-serp-no-artigo-e-kgr-opcional-2026-09-28.md), fatias A1 a A5.

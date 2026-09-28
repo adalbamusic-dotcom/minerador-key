@@ -334,17 +334,23 @@ test("a troca só é oferecida quando pode ser gravada, e cada impedimento diz o
   const { de } = loteReal();
   const diagnostico = de.get("kw-01")!;
   const semArtigo = publishedSwapReadiness({ diagnosis: diagnostico, article: null, currentPost: "free" });
-  assert.ok(!semArtigo.ready && /conclua a formação dele \(Concluir formação\)/.test(semArtigo.reason));
+  // 2026-09-28: acabou o "conclua a formação e volte aqui" — publicado nunca passa por "Concluir formação".
+  assert.ok(!semArtigo.ready && semArtigo.viaReinforcement === true && /"Reforçar publicados" cria o ArticleDNA e aplica a troca/.test(semArtigo.reason));
+  assert.doesNotMatch(semArtigo.ready ? "" : semArtigo.reason, /conclua a formação|volte aqui/);
   const semSubstituta = publishedSwapReadiness({ diagnosis: diagnostico, article: artigoPublicado({ secondaryKeywordIds: ["kw-10"], keywordReferences: [referencia("kw-01", "principal"), referencia("kw-10", "secundaria"), referencia("kw-11", "reforco_narrativo")] } as Partial<ArticleDNA>), currentPost: "free" });
-  assert.ok(!semSubstituta.ready && /"como atrair pacientes" ainda não está no ArticleDNA/.test(semSubstituta.reason));
+  assert.ok(!semSubstituta.ready && semSubstituta.viaReinforcement === true && /"como atrair pacientes" ainda não está no ArticleDNA/.test(semSubstituta.reason));
   const travou = publishedSwapReadiness({ diagnosis: diagnostico, article: artigoPublicado(), currentPost: "locked" });
   assert.ok(!travou.ready && /Travado ao slug/.test(travou.reason));
   const naoDeclarado = publishedSwapReadiness({ diagnosis: diagnostico, article: artigoPublicado(), currentPost: "unknown" });
   assert.ok(!naoDeclarado.ready && /Revisão Humana do Minerador/.test(naoDeclarado.reason));
 
+  // Sem ArticleDNA, o botão fica ATIVO e vai pelo "Reforçar publicados" (a nota diz isso); Posto travado continua desabilitado.
   const cartao = serpSubjectCardView(diagnostico, { post: "free", swapReadiness: semArtigo });
   const aplicar = cartao.actions.find(action => action.kind === "apply_swap");
-  assert.ok(aplicar && aplicar.kind === "apply_swap" && aplicar.disabledReason === (semArtigo.ready ? null : semArtigo.reason));
+  assert.ok(aplicar && aplicar.kind === "apply_swap" && aplicar.disabledReason === null && aplicar.viaReinforcement === true && aplicar.note === (semArtigo.ready ? null : semArtigo.reason));
+  const cartaoTravado = serpSubjectCardView(diagnostico, { post: "free", swapReadiness: travou });
+  const aplicarTravado = cartaoTravado.actions.find(action => action.kind === "apply_swap");
+  assert.ok(aplicarTravado && aplicarTravado.kind === "apply_swap" && aplicarTravado.disabledReason === (travou.ready ? null : travou.reason) && !aplicarTravado.viaReinforcement);
 
   const antigaEAssunto = artigoPublicado({ subject: { keywordId: "kw-01", phrase: "como atrair pacientes para clínica", note: null, destinationUrl: null, attachedBy: ATOR, attachedAt: "2026-09-24T10:00:00+00:00", approvedPackageRef: { version: 1, contentHash: "pkg", approvedAt: "2026-09-24T09:00:00+00:00" } } } as Partial<ArticleDNA>);
   const decidida = decidePublishedPrimarySwap({ proposal: diagnostico.swap!, currentPost: "free", accepted: true, actorUserId: ATOR, decidedAt: "2026-09-26T21:00:00Z", article: { principalKeywordId: "kw-01", keywordIds: ["kw-01", "kw-09", "kw-10", "kw-11"], identity: { url: null, canonical: null, slug: null } } });
@@ -380,7 +386,11 @@ test("ação em grupo: trocas e reforços escolhíveis, o indisponível diz por 
 
   const tudoCerto = describeSerpSubjectBatchOutcome({ swapsConfirmed: 1, swapsRefused: [], movedConfirmed: 2, movedUnchanged: 1, movedRefused: 0 });
   assert.equal(tudoCerto.tone, "success");
-  assert.match(tudoCerto.message, /1 troca confirmada na releitura .*2 keywords trazidas de outro Silo, 1 já estavam no destino\. URL, slug e canonical dos publicados não mudaram\./);
+  assert.match(tudoCerto.message, /1 troca confirmada na releitura .*2 keywords trazidas de outro Silo, 1 já estavam no destino\. Gravado: só o Silo delas\. Elas ainda não estão no artigo nem no ArticleDNA: para gravar, "Reforçar publicados"\. URL, slug e canonical dos publicados não mudaram\./);
+  // Mudança de Silo sozinha não é sucesso: grava só o Silo; o artigo ainda não tem as keywords.
+  const soSilo = describeSerpSubjectBatchOutcome({ swapsConfirmed: 0, swapsRefused: [], movedConfirmed: 12, movedUnchanged: 0, movedRefused: 0 });
+  assert.equal(soSilo.tone, "info");
+  assert.match(soSilo.message, /^12 keywords trazidas de outro Silo\. Gravado: só o Silo delas\. Elas ainda não estão no artigo nem no ArticleDNA/);
   const parcial = describeSerpSubjectBatchOutcome({ swapsConfirmed: 0, swapsRefused: [{ label: "\"a\"", reason: "a releitura não confirmou a nova versão" }], movedConfirmed: 1, movedUnchanged: 0, movedRefused: 0 });
   assert.equal(parcial.tone, "warning");
   assert.match(parcial.message, /Não aplicado: "a": a releitura não confirmou a nova versão/);

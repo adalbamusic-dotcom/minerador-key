@@ -198,7 +198,7 @@ function GroupRow({ controller, group, onAccept, onKeep, buttonClassName, primar
             <span className="text-keyword">{member.keyword}</span>
             <span className="text-text-muted">· {member.volumeLabel} · Posto {member.postLabel} ·</span>
             <span className={member.ranks ? "text-warning" : "text-text-muted"}>{member.rankingLabel}</span>
-            {!member.hasArticle && <span className="text-text-muted">· sem DNA do artigo</span>}
+            {!member.hasArticle && <span className="text-text-muted">· sem ArticleDNA ainda (&quot;Reforçar publicados&quot; cria, sem custo)</span>}
           </li>
         ))}
       </ul>

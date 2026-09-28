@@ -30,7 +30,7 @@
  * gravadores que a mesa já usa (formação e decisão de Silo).
  */
 import { AFFINITY_FLOOR, MAX_ARTICLE_KEYWORDS, sameArticleAffinity, type ArticleFormationKeyword } from "./article-formation.ts";
-import { logicDnaDivergence, serpAwareDnaBarrier, serpObservedDnaContradiction } from "./serp-subject-convergence.ts";
+import { logicDnaDivergence, serpAwareDnaBarrier, serpObservedBarrier, serpObservedWarning } from "./serp-subject-convergence.ts";
 import { SERP_SUBJECT_THRESHOLDS, type SerpSubjectIndex, type SerpSubjectOverlap } from "./serp-subject-overlap.ts";
 
 /* --------------------------------- volume --------------------------------- */
@@ -203,13 +203,14 @@ export function suggestAnchorReinforcements(input: {
     // Decisão humana de formação noutro artigo não é desfeita por sugestão.
     if (keyword.humanFormationRef) continue;
     if (!hasSearchVolume(keyword.volume)) continue;
-    // A SERP observada separa: não é sugestão (D5/D2.3).
-    if (input.measureAgainst.some(anchor => serpObservedDnaContradiction(anchor, keyword))) continue;
+    // A SERP observada separa: não é sugestão (D5/D2.3) — salvo 3+ páginas em comum (D2.3.1: aviso).
+    if (input.measureAgainst.some(anchor => serpObservedBarrier(anchor, keyword, input.serp))) continue;
     const match = bestSerpSuggestionMatch(input.measureAgainst, keyword, input.serp);
     if (!match) continue;
     // Sem SERP para medir, a Lógica ainda é o único sinal de intenção.
     if (input.measureAgainst.some(anchor => serpAwareDnaBarrier(anchor, keyword, input.serp))) continue;
     const divergencia = input.measureAgainst.map(anchor => logicDnaDivergence(anchor, keyword)).find(Boolean) ?? null;
+    const avisoObservado = input.measureAgainst.map(anchor => serpObservedWarning(anchor, keyword, input.serp)).find(Boolean) ?? null;
     const lugar = input.locate(keyword.keywordId);
     const outroSilo = Boolean(lugar.siloRef && lugar.siloRef !== input.siloRef);
     const where: AnchorSuggestionWhere = outroSilo
@@ -233,10 +234,12 @@ export function suggestAnchorReinforcements(input: {
       sharedPageCount: match.sharedPageCount,
       sharedDomainCount: match.sharedDomainCount,
       reason: match.reason,
-      warning: divergencia
+      warning: avisoObservado && !divergencia
+        ? avisoObservado
+        : divergencia
         ? match.basis === "domains"
           ? `${divergencia[0].toUpperCase()}${divergencia.slice(1)}: só aviso. Sem páginas em comum, confira antes de aplicar.`
-          : `${divergencia[0].toUpperCase()}${divergencia.slice(1)}: só aviso, a intenção da SERP não separa.`
+          : `${divergencia[0].toUpperCase()}${divergencia.slice(1)}: só aviso, a intenção da SERP não separa.${avisoObservado ? ` ${avisoObservado}` : ""}`
         : null,
       where,
       whereLabel,
@@ -345,9 +348,10 @@ export function groupLeftoverOpportunities(input: {
     const ligacao = (lider: ArticleFormationKeyword, outra: ArticleFormationKeyword): { reason: string; basis: "serp" | "words"; warning: string | null } | null => {
       if (serpAwareDnaBarrier(lider, outra, input.serp)) return null;
       const divergencia = input.serp ? logicDnaDivergence(lider, outra) : null;
-      const aviso = divergencia ? `${divergencia[0].toUpperCase()}${divergencia.slice(1)}: só aviso.` : null;
+      const observado = serpObservedWarning(lider, outra, input.serp);
+      const aviso = [divergencia ? `${divergencia[0].toUpperCase()}${divergencia.slice(1)}: só aviso.` : "", observado ?? ""].filter(Boolean).join(" ") || null;
       const medida = input.serp ? input.serp.overlap(lider.keywordId, outra.keywordId) : null;
-      const semLogica = (keyword: ArticleFormationKeyword) => divergencia ? { ...keyword, intent: null, funnel: null, observedFunnel: null } : keyword;
+      const semLogica = (keyword: ArticleFormationKeyword) => divergencia || observado ? { ...keyword, intent: null, funnel: null, observedFunnel: null, ...(observado ? { observedIntent: null } : {}) } : keyword;
       const palavras = sameArticleAffinity(semLogica(lider), semLogica(outra), tokens).affinity;
       if (medida?.strength === "strong") return { reason: `${medida.sharedPageCount} páginas em comum com "${lider.keyword}"`, basis: "serp", warning: aviso };
       if (medida?.strength === "support") {
