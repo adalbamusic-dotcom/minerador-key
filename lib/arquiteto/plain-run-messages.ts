@@ -30,7 +30,7 @@ export type PlainOutcome = { tone: PlainTone; message: string };
 /** Os nomes dos botões que gravam, como a tela os mostra. */
 export const REINFORCE_PUBLISHED_STEP = "Reforçar publicados";
 /** Onde o botão mora, dito junto com o nome. */
-export const REINFORCE_PUBLISHED_WHERE = 'no painel "Mesmo assunto no Google", acima dos cartões';
+export const REINFORCE_PUBLISHED_WHERE = 'tabela no painel "Mesmo assunto no Google", botão "Gravar reforços"';
 export const CONCLUDE_FORMATION_STEP = "Concluir formação";
 
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;

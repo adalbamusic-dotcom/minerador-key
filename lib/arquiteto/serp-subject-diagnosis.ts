@@ -496,21 +496,30 @@ export function diagnoseSerpSubjectAnchors(input: {
     if (params.kind === "published" && ancoraKw) {
       const info = infoPublicada || { post: "unknown" as const, url: null, canonical: null, slug: null };
       // D2.3 — a substituta pode vir de fora do artigo: Forte ou Provável, no próprio Silo.
+      // 2026-09-28 — e a sobra de OUTRO Silo que divide SERP Forte com a página
+      // (a mudança de Silo é anunciada na confirmação do Reforçar).
       const deFora = [...new Set([
         ...crossSilo.map(proposta => proposta.keywordId),
-        ...pairsElsewhere.filter(par => par.where === "leftover_same_silo").map(par => par.keywordId),
+        ...pairsElsewhere.filter(par => par.where === "leftover_same_silo" || par.where === "leftover_other_silo").map(par => par.keywordId),
         ...sugestoesNoSilo.map(item => item.keywordId),
+        ...suggestions.filter(item => item.where === "other_silo" && item.level === "strong").map(item => item.keywordId),
       ])].filter(keywordId => !noArtigo.has(keywordId));
+      // Quem já mora em OUTRO artigo (âncora de outro publicado ou membro de outro artigo) não vira principal deste.
+      const emOutroArtigo = (keywordId: string): string | null => {
+        const dono = ancoraDe.get(keywordId);
+        if (!dono || dono.principalKeywordId === params.principalKeywordId || dono.anchorKeywordId === params.anchorKeywordId) return null;
+        return dono.published ? `Está no artigo publicado "${dono.label}"` : `Está no artigo "${dono.label}"`;
+      };
       const comoCandidatas = (ids: readonly string[]) => ids
         .map(id => input.keywords.get(id))
         .filter((item): item is ArticleFormationKeyword => Boolean(item))
         .map(item => ({ ...item, volumeValidated: input.volumeValidated.has(item.keywordId), subjectDeclared: input.subjectDeclared?.has(item.keywordId) ?? false }));
       const identity = { url: info.url, canonical: info.canonical, slug: info.slug };
       const cabem = slotsLeft > 0 ? [...params.memberIds, ...deFora] : [...params.memberIds];
-      swap = proposePublishedPrimarySwap({ published: ancoraKw, post: info.post, identity, candidates: comoCandidatas(cabem), serp });
+      swap = proposePublishedPrimarySwap({ published: ancoraKw, post: info.post, identity, candidates: comoCandidatas(cabem), serp, elsewhere: emOutroArtigo });
       const postoParaMedir = info.post === "unknown" ? "free" as const : info.post;
       if (postoParaMedir === "free" && !slotsLeft && deFora.length) {
-        const todas = proposePublishedPrimarySwap({ published: ancoraKw, post: "free", identity, candidates: comoCandidatas([...params.memberIds, ...deFora]), serp });
+        const todas = proposePublishedPrimarySwap({ published: ancoraKw, post: "free", identity, candidates: comoCandidatas([...params.memberIds, ...deFora]), serp, elsewhere: emOutroArtigo });
         const melhor = todas.substitute;
         const atual = info.post === "free" ? swap.substitute : null;
         if (melhor && !noArtigo.has(melhor.keywordId) && (!atual || melhor.volume > atual.volume)) {
@@ -519,7 +528,7 @@ export function diagnoseSerpSubjectAnchors(input: {
       }
       // Posto não declarado: o que SERIA proposto se o dono declarasse "Livre".
       if (info.post === "unknown") {
-        swapIfDeclaredFree = proposePublishedPrimarySwap({ published: ancoraKw, post: "free", identity, candidates: comoCandidatas(cabem), serp });
+        swapIfDeclaredFree = proposePublishedPrimarySwap({ published: ancoraKw, post: "free", identity, candidates: comoCandidatas(cabem), serp, elsewhere: emOutroArtigo });
       }
     }
 

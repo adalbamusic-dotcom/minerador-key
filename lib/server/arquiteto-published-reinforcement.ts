@@ -14,6 +14,7 @@ import { ARTICLE_FORMATION_REF_PREFIX } from "@/lib/arquiteto/article-formation-
 import { proposePublishedPrimarySwap, type PublishedPrimarySwapProposal } from "@/lib/arquiteto/published-primary-swap";
 import { formationKeywordOfPage, readPageRanking, type DifferentiationPage } from "@/lib/arquiteto/published-differentiation";
 import { REINFORCEMENT_SEARCH_SUBJECT_TYPE } from "@/lib/arquiteto/published-reinforcement-search";
+import { calculatedCandidateRefOf, PUBLISHED_REINFORCEMENT_SWAP_REASON, publishedSwapDecisionRole, type SerpAssessmentComposition } from "@/lib/arquiteto/published-formation-serp";
 import {
   PUBLISHED_REINFORCEMENT_APPROVAL_TEXT,
   PUBLISHED_REINFORCEMENT_MAX_PAGES,
@@ -104,8 +105,11 @@ export type PublishedReinforcementRequest = z.infer<typeof PublishedReinforcemen
 
 export type WorkingCopyPatch = { workflowItemId: string; expectedLock: number; assignment: Record<string, unknown> };
 
-/** O parecer de SERP do artigo gravado pelo Processar (`article_formation_serp`), como referência de versão. */
-export type ArticleSerpReferenceRow = { candidateRef: string; territoryRef: string; reference: VersionReference };
+/**
+ * O parecer de SERP do artigo gravado pelo Processar (`article_formation_serp`), como referência de versão.
+ * `composition` (aditivo, 2026-09-28): as keywords e a principal que ele observou.
+ */
+export type ArticleSerpReferenceRow = { candidateRef: string; territoryRef: string; reference: VersionReference; composition?: SerpAssessmentComposition | null };
 
 export type PublishedReinforcementMineradorPorts = {
   importKeywords: (request: SubjectDiscoveryImportRequest) => Promise<{ ok: true } | { ok: false; reason: string }>;
@@ -209,8 +213,8 @@ function observedOf(linha: WorkspaceRow | undefined): { observedIntent: string |
 }
 
 type Reading = {
-  /** O parecer de SERP de cada página (a evidência que a aprovação leva). */
-  serpRefByPage: Map<string, VersionReference | null>;
+  /** Os pareceres de SERP que podem responder por cada página (o plano escolhe o da composição). */
+  serpRefByPage: Map<string, VersionReference[]>;
   facts: PublishedReinforcementPageFacts[];
   plans: PublishedReinforcementPagePlan[];
   missingPages: string[];
@@ -261,7 +265,7 @@ async function readAndPlan(deps: PublishedReinforcementDeps, body: PublishedRein
       if (linha.state && linha.state !== "received") foraDoArquiteto.set(String(linha.subject_id), String(linha.state));
     }
   }
-  const serpRefByPage = new Map<string, VersionReference | null>();
+  const serpRefByPage = new Map<string, VersionReference[]>();
 
   for (const pedido of pedidos) {
     const lida = paginas.get(pedido.publishedKeywordId);
@@ -274,15 +278,41 @@ async function readAndPlan(deps: PublishedReinforcementDeps, body: PublishedRein
     const members = item?.formationRef
       ? [...rows.values()].filter(linha => texto(linha.articleFormationRef) === item.formationRef && String(linha.id) !== page.keywordId).map(linha => factsOf(linha, String(linha.id), null, alheio))
       : [];
-    // O parecer de SERP do artigo: pelo candidato da formação gravada ou pelo do publicado no Silo dele.
+    /*
+     * Os pareceres de SERP que podem responder por este artigo, na ordem: o da
+     * formação humana gravada, depois o do candidato calculado da página no
+     * Silo dela. O plano escolhe o que DESCREVE a composição a gravar (2026-09-28):
+     * antes o primeiro achado ia para o DNA aprovado, fosse de que composição fosse.
+     */
     const territorioDaPagina = item?.territoryRef ?? null;
-    const candidatos = [item?.formationRef ?? null, territorioDaPagina ? `article-candidate:${territorioDaPagina}:${page.keywordId}` : null].filter((ref): ref is string => Boolean(ref));
-    const parecer = candidatos.map(ref => pareceres.find(linha => linha.candidateRef === ref)).find(Boolean)
-      ?? pareceres.find(linha => linha.candidateRef.endsWith(`:${page.keywordId}`) && linha.territoryRef === territorioDaPagina)
-      ?? null;
-    serpRefByPage.set(page.keywordId, parecer?.reference ?? null);
+    const candidatos = [item?.formationRef ?? null, territorioDaPagina ? calculatedCandidateRefOf(territorioDaPagina, page.keywordId) : null].filter((ref): ref is string => Boolean(ref));
+    const achados = [
+      ...candidatos.map(ref => pareceres.find(linha => linha.candidateRef === ref)),
+      ...pareceres.filter(linha => linha.candidateRef.endsWith(`:${page.keywordId}`) && linha.territoryRef === territorioDaPagina),
+    ].filter((linha): linha is ArticleSerpReferenceRow => Boolean(linha));
+    const serpCandidates = [...new Map(achados.map(linha => [linha.reference.versionId, { reference: linha.reference, composition: linha.composition ?? null }])).values()];
+    serpRefByPage.set(page.keywordId, serpCandidates.map(linha => linha.reference));
     const versao = artigoIndice ? await readLatestArticleDnaVersion(deps.store, artigoIndice.articleId) : null;
     const article = versao ? { articleId: versao.entityId, versionId: versao.versionId, versionNumber: versao.versionNumber, payload: versao.payload } : null;
+    /*
+     * A troca decidida numa confirmação anterior e gravada só na mesa (o DNA
+     * esperava o parecer da composição): a principal da formação humana, que
+     * não é a página, é a troca a aplicar agora — pela mesma régua, relida.
+     */
+    const trocaConfirmadaNoDna = article?.payload.primaryKeywordDecision?.status === "confirmed" ? article.payload.principalKeywordId : null;
+    /*
+     * Só a troca que o PRÓPRIO Reforçar gravou (marcador na decisão humana da
+     * página e da nova principal) vira troca aqui (corretor 2026-09-28). Uma
+     * formação da Revisão humana com outra principal não vira troca implícita:
+     * ela segue recusada com "confirme a composição na mesa antes".
+     */
+    const decisaoDe = (keywordId: string) => (rows.get(keywordId)?.canonicalWorkflow as CanonicalWorkflowItem | undefined)?.payload?.articleFormationDecision;
+    const paginaMarcada = publishedSwapDecisionRole(decisaoDe(page.keywordId)) === "secundaria";
+    const trocaDaMesa = paginaMarcada
+      ? members.find(membro => membro.formationRole === "principal" && membro.keywordId !== trocaConfirmadaNoDna && publishedSwapDecisionRole(decisaoDe(membro.keywordId)) === "principal")?.keywordId ?? null
+      : null;
+    const swapKeywordId = pedido.swapKeywordId ?? trocaDaMesa;
+    const swapSource: PublishedReinforcementPageFacts["swapSource"] = pedido.swapKeywordId ? "request" : trocaDaMesa ? "recorded" : null;
 
     // Keywords novas: só as do resultado gravado da busca desta página; a que já existe e está no Arquiteto vira "do Minerador".
     const busca = buscas.get(page.keywordId) ?? null;
@@ -319,7 +349,7 @@ async function readAndPlan(deps: PublishedReinforcementDeps, body: PublishedRein
     }
 
     // O cache de SERP da página e das escolhidas: o nível e o ranqueamento, relidos agora.
-    const idsParaMedir = [...new Set([...escolhidasIds, ...(pedido.swapKeywordId ? [pedido.swapKeywordId] : [])])];
+    const idsParaMedir = [...new Set([...escolhidasIds, ...(swapKeywordId ? [swapKeywordId] : [])])];
     const alvos = [{ keywordId: page.keywordId, keyword: page.keyword }, ...idsParaMedir.flatMap(id => rows.get(id) ? [{ keywordId: id, keyword: String(rows.get(id)!.keyword) }] : [])];
     let footprints: Awaited<ReturnType<typeof readPublishedFootprints>>["footprints"] = [];
     let serpLida = true;
@@ -343,18 +373,26 @@ async function readAndPlan(deps: PublishedReinforcementDeps, body: PublishedRein
     }
 
     let swapProposal: PublishedPrimarySwapProposal | null = null;
-    if (pedido.swapKeywordId && rows.get(pedido.swapKeywordId)) {
-      const substituta = factsOf(rows.get(pedido.swapKeywordId), pedido.swapKeywordId, null);
+    if (swapKeywordId && rows.get(swapKeywordId)) {
+      const substituta = factsOf(rows.get(swapKeywordId), swapKeywordId, null);
+      // A MESMA régua da mesa: encaixe no slug publicado e recusa de quem já mora em outro artigo.
+      const formacaoDaPagina = item?.formationRef ?? null;
+      const emOutroArtigo = (keywordId: string): string | null => {
+        if (alheio(keywordId)) return "Já está no ArticleDNA de outro artigo";
+        const ref = texto(rows.get(keywordId)?.articleFormationRef);
+        return ref && ref !== formacaoDaPagina ? "Está na formação de outro artigo, por decisão sua" : null;
+      };
       swapProposal = proposePublishedPrimarySwap({
         published: ancora,
         post: page.post,
         identity: { url: page.url, canonical: page.canonical, slug: page.slug },
-        candidates: [{ keywordId: substituta.keywordId, keyword: substituta.keyword, intent: null, volume: substituta.volume, kgr: null, entity: null, problem: null, isPublished: substituta.isPublished, volumeValidated: substituta.volumeValidated, ...observedOf(rows.get(pedido.swapKeywordId)) }],
+        candidates: [{ keywordId: substituta.keywordId, keyword: substituta.keyword, intent: null, volume: substituta.volume, kgr: null, entity: null, problem: null, isPublished: substituta.isPublished, volumeValidated: substituta.volumeValidated, ...observedOf(rows.get(swapKeywordId)) }],
         serp,
+        elsewhere: emOutroArtigo,
       });
     }
     const ranking = serpLida ? readPageRanking(page, serp.footprint(page.keywordId), hosts) : null;
-    facts.push({ page, item, members, article, ranking, chosen, unknownIds, newKeywords, newMissing, newRefused, swapKeywordId: pedido.swapKeywordId, swapProposal });
+    facts.push({ page, item, members, article, ranking, chosen, unknownIds, newKeywords, newMissing, newRefused, swapKeywordId, swapProposal, serpCandidates, swapSource });
   }
 
   // O primeiro ArticleDNA é montado já na prévia (sem as keywords novas): o que
@@ -364,12 +402,9 @@ async function readAndPlan(deps: PublishedReinforcementDeps, body: PublishedRein
   const plans = facts.map(item => {
     const plano = planPublishedReinforcementPage(item);
     if (plano.status !== "ready") return plano;
-    // A aprovação leva a evidência SERP do artigo (a mesma portaria da rota de artefatos).
-    const serpRef = serpRefByPage.get(item.page.keywordId) ?? null;
-    if (!serpRef && !item.article?.payload.serpAssessmentRef) {
-      return recusarPlano(plano, "O artigo ainda não tem o parecer da SERP gravado: use \"Processar artigos\" (cache primeiro) e abra a prévia de novo.");
-    }
-    if (plano.dna.mode !== "first" || !plano.territoryRef) return plano;
+    // A aprovação leva a evidência SERP DESTA composição (o plano a escolheu, ou adiou o DNA).
+    const serpRef = plano.serpReference ?? null;
+    if (plano.dnaDeferred || plano.dna.mode !== "first" || !plano.territoryRef) return plano;
     const composicao = compositionOf(plano, null, [], rows);
     const linhas = composicao.ids.map(id => rows.get(id)).filter((linha): linha is WorkspaceRow => Boolean(linha));
     const ensaio = buildFirstPublishedArticleDna({ brandId: deps.store.brandId, page: item.page, territoryRef: plano.territoryRef, keywords: linhas, roles: composicao.roles, siloVersions: workspace.siloDnas });
@@ -382,7 +417,7 @@ async function readAndPlan(deps: PublishedReinforcementDeps, body: PublishedRein
     actorUserId: deps.store.actorUserId,
     pages: body.pages,
     missingPages,
-    serp: [...serpRefByPage.entries()].map(([pagina, referencia]) => [pagina, referencia?.versionId ?? null]),
+    serp: [...serpRefByPage.entries()].map(([pagina, referencias]) => [pagina, referencias.map(referencia => referencia.versionId)]),
     facts: facts.map(item => ({
       page: [item.page.keywordId, item.page.url, item.page.canonical, item.page.post],
       item: item.item ? [item.item.workflowItemId, item.item.lockVersion, item.item.territoryRef, item.item.formationRef] : null,
@@ -430,7 +465,25 @@ function compositionOf(plan: PublishedReinforcementPagePlan, article: ArticleDNA
     const papel = papelNoArtigo.get(id) ?? (formationRoleOf(rows.get(id)?.canonicalWorkflow as CanonicalWorkflowItem | undefined) === "reforco" ? "reforco_narrativo" : null);
     roles[id] = id === plan.publishedKeywordId ? "principal" : papel === "reforco_narrativo" ? "reforco_narrativo" : "secundaria";
   }
-  return { ids: unicos, roles };
+  /*
+   * Os papéis que a MESA grava (2026-09-28): depois da troca — aplicada agora
+   * ou já confirmada no ArticleDNA — a nova principal é "principal" e a página
+   * é "secundaria". Antes a mesa ficava com a página como principal enquanto o
+   * DNA dizia o contrário, e a próxima formação desfazia a troca. `roles`
+   * continua sendo o de construção do primeiro DNA (a página primeiro; a troca
+   * é aplicada sobre ele).
+   */
+  const trocaJaConfirmada = article?.primaryKeywordDecision?.status === "confirmed" && article.primaryKeywordDecision.previousKeywordId === plan.publishedKeywordId && article.principalKeywordId !== plan.publishedKeywordId
+    ? article.principalKeywordId
+    : null;
+  // A troca confirmada que contradiz o slug não é alinhada na mesa (corretor 2026-09-28): os papéis ficam.
+  const novaPrincipal = plan.swap.state === "apply" && plan.swap.keywordId ? plan.swap.keywordId : plan.confirmedSwapContradictsSlug ? null : trocaJaConfirmada;
+  const mesaRoles: Record<string, "principal" | "secundaria" | "reforco_narrativo"> = { ...roles };
+  if (novaPrincipal && unicos.includes(novaPrincipal)) {
+    mesaRoles[novaPrincipal] = "principal";
+    mesaRoles[plan.publishedKeywordId] = "secundaria";
+  }
+  return { ids: unicos, roles, mesaRoles, swapIds: novaPrincipal && unicos.includes(novaPrincipal) ? [novaPrincipal, plan.publishedKeywordId] : [] };
 }
 
 export async function handlePublishedReinforcement(deps: PublishedReinforcementDeps, body: PublishedReinforcementRequest): Promise<PublishedReinforcementOutcomeBody> {
@@ -530,17 +583,22 @@ export async function handlePublishedReinforcement(deps: PublishedReinforcementD
       const linha = rows.get(id);
       const item = linha?.canonicalWorkflow as CanonicalWorkflowItem | undefined;
       if (!item || item.state !== "received") continue;
-      const papel = composicao.roles[id] === "principal" ? "principal" : composicao.roles[id] === "reforco_narrativo" ? "reforco" : "secundaria";
+      const papel = composicao.mesaRoles[id] === "principal" ? "principal" : composicao.mesaRoles[id] === "reforco_narrativo" ? "reforco" : "secundaria";
       const mudaSilo = entram.has(id) && texto(linha?.territoryRef) !== territorio;
-      // Já está nesta formação: a decisão humana dela fica como está (nada é "normalizado").
-      if (texto(linha?.articleFormationRef) === formationRef && !mudaSilo) continue;
+      // Já está nesta formação: a decisão humana dela fica como está (nada é
+      // "normalizado") — salvo o papel da troca decidida, que a mesa precisa dizer.
+      const mudaPapelDaTroca = (composicao.mesaRoles[id] !== composicao.roles[id] && formationRoleOf(item) !== papel)
+        // A troca aplicada agora grava o marcador mesmo quando o papel já estava certo na mesa.
+        || (plan.swap.state === "apply" && composicao.swapIds.includes(id) && publishedSwapDecisionRole(item.payload?.articleFormationDecision) !== papel);
+      if (texto(linha?.articleFormationRef) === formationRef && !mudaSilo && !mudaPapelDaTroca) continue;
       esperado.set(item.id, { territoryRef: mudaSilo ? territorio : texto(linha?.territoryRef) });
       patches.push({
         workflowItemId: item.id,
         expectedLock: item.lockVersion,
         assignment: {
           articleFormationRef: formationRef,
-          articleFormationDecision: { operation: "move", role: papel, reason: "Reforçar publicados: composição do artigo publicado decidida por humano.", source: "human", decidedAt: agora },
+          // A troca leva o marcador próprio: é ele que a mesa e a próxima confirmação reconhecem como troca decidida aqui.
+          articleFormationDecision: { operation: "move", role: papel, reason: composicao.swapIds.includes(id) ? PUBLISHED_REINFORCEMENT_SWAP_REASON : "Reforçar publicados: composição do artigo publicado decidida por humano.", source: "human", decidedAt: agora },
           ...(mudaSilo ? {
             territoryRef: territorio,
             territoryAssignment: { state: "existing_silo_match", reason: "Decisão humana: reforço do artigo publicado (Reforçar publicados).", source: "human", decidedAt: agora },
@@ -569,7 +627,21 @@ export async function handlePublishedReinforcement(deps: PublishedReinforcementD
       resultado.partial!.push(`a composição do artigo na mesa (${plural(patches.length, "keyword", "keywords")})`);
     }
 
-    /* 3. O ArticleDNA: o primeiro ou a sucessora, com a troca aceita, aprovado por humano. */
+    /*
+     * 3. O ArticleDNA: o primeiro ou a sucessora, com a troca aceita, aprovado
+     * por humano — só com o parecer de SERP desta composição. Sem ele, a mesa
+     * ficou gravada acima e o DNA espera o "Processar artigos" (nada é gravado
+     * com a evidência de outra composição).
+     */
+    // Adiado só por keywords novas que ficaram sem volume: o ArticleDNA não mudaria.
+    const dnaNaoMudaria = plan.create.length > 0 && Boolean(facts.article) && !criadas.length && !plan.add.length && plan.swap.state !== "apply" && !plan.serpRefresh
+      && composicao.ids.every(id => facts.article!.payload.keywordReferences.some(reference => String(reference.keywordId) === id));
+    if (plan.dnaDeferred && dnaNaoMudaria) { outcomes.push(resultado); continue; }
+    if (plan.dnaDeferred) {
+      resultado.dnaDeferred = plan.dnaDeferred;
+      outcomes.push(resultado);
+      continue;
+    }
     const linhasDoArtigo = composicao.ids.map(id => rows.get(id)).filter((linha): linha is WorkspaceRow => Boolean(linha));
     let payload: ArticleDNA;
     let mudou = true;
@@ -584,10 +656,13 @@ export async function handlePublishedReinforcement(deps: PublishedReinforcementD
       mudou = sucessora.changed;
     }
     if (plan.swap.state === "apply" && facts.swapProposal) {
+      // Refazer: a troca já confirmada contradiz o slug e o humano escolheu outra (a página segue sendo o artigo).
+      const principalAtual = facts.article && facts.article.payload.principalKeywordId !== facts.page.keywordId ? facts.article.payload.principalKeywordId : null;
       const troca = applyReinforcementSwap({
         current: payload,
         proposal: facts.swapProposal,
         page: facts.page,
+        redo: principalAtual ? { currentPrincipalLabel: String(rows.get(principalAtual)?.keyword ?? plan.keep.find(item => item.keywordId === principalAtual)?.keyword ?? principalAtual) } : null,
         substituteVolume: facts.chosen.find(item => item.keywordId === plan.swap.keywordId)?.volume ?? null,
         actorId: deps.store.actorUserId,
         decidedAt: agora,
@@ -597,9 +672,12 @@ export async function handlePublishedReinforcement(deps: PublishedReinforcementD
       mudou = true;
       resultado.swapApplied = true;
     }
+    // Nova versão só para levar o parecer da composição gravada: é mudança real da evidência.
+    if (plan.serpRefresh) mudou = true;
     // Sucessora igual à vigente (ex.: as novas ficaram sem volume): não há versão nova.
     if (!mudou) { outcomes.push(resultado); continue; }
-    payload = withHumanArticleApproval(payload, leitura.serpRefByPage.get(plan.publishedKeywordId) ?? null);
+    if (!plan.serpReference) { parar("o parecer da SERP desta composição não foi encontrado; nada foi gravado no ArticleDNA."); break; }
+    payload = withHumanArticleApproval(payload, plan.serpReference);
     const anterior = facts.article?.payload ?? null;
     try {
       const versao = await createVersionEnvelope({

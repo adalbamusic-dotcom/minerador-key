@@ -19,8 +19,19 @@ import {
   type SerpSubjectEvidencePair,
   type SerpSubjectPanelSummary,
 } from "./serp-subject-model";
-import { PUBLISHED_REINFORCEMENT_ACTION_LABEL, cardWithBatchSearch, noPairLineView, reinforcementNeedsAttention, searchActionLabel } from "./published-reinforcement-model";
-import { NoPairPublishedLine, PublishedReinforcementBar, SearchSuggestionList } from "./published-reinforcement-panel";
+import {
+  PUBLISHED_REINFORCEMENT_ACTION_LABEL,
+  PUBLISHED_REINFORCEMENT_SAVE_LABEL,
+  cardWithBatchSearch,
+  noPairLineView,
+  reinforcementNeedsAttention,
+  reinforcementRowNeedsAttention,
+  reinforcementTableRows,
+  searchActionLabel,
+  sortReinforcementRows,
+  type ReinforcementKeywordInfo,
+} from "./published-reinforcement-model";
+import { NoPairPublishedLine, PublishedReinforcementTable, SearchSuggestionList } from "./published-reinforcement-panel";
 import type { PublishedReinforcementController } from "./use-published-reinforcement";
 
 /**
@@ -364,6 +375,7 @@ export function SerpSubjectCard({
   primaryButtonClassName,
   highlighted = false,
   reinforcement,
+  asDetail = false,
 }: {
   card: SerpSubjectCardView;
   busy: boolean;
@@ -372,8 +384,14 @@ export function SerpSubjectCard({
   highlighted?: boolean;
   /** Publicado: a seleção e o botão do "Reforçar publicados". */
   reinforcement?: CardReinforcement;
+  /**
+   * O cartão como DETALHE de uma linha da tabela do reforço (2026-09-28): a
+   * evidência já aberta, sem as sugestões (a tabela as mostra, com caixinha)
+   * e sem botão de gravar próprio — grava-se só por "Gravar reforços".
+   */
+  asDetail?: boolean;
 } & ButtonClasses) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(asDetail);
   const detalheId = useId();
   const tom = SERP_SUBJECT_TONE_CLASSES[card.tone];
   const evidencia = useMemo(() => open ? evidenceOf(card) : [], [open, evidenceOf, card]);
@@ -395,7 +413,7 @@ export function SerpSubjectCard({
         {card.actions.map(action => (
           <ActionButton key={`${action.kind}:${action.label}`} action={action} card={card} busy={busy} handlers={handlers} buttonClassName={buttonClassName} primaryButtonClassName={primaryButtonClassName} />
         ))}
-        {reinforcement && (
+        {reinforcement && !asDetail && (
           <button
             type="button"
             disabled={busy}
@@ -407,16 +425,18 @@ export function SerpSubjectCard({
             {REINFORCE_THIS_PUBLISHED_LABEL}
           </button>
         )}
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={detalheId}
-          onClick={() => setOpen(current => !current)}
-          className={buttonClassName}
-          data-testid="architect-serp-subject-expand"
-        >
-          {open ? "Esconder a evidência" : "Ver a evidência"}
-        </button>
+        {!asDetail && (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={detalheId}
+            onClick={() => setOpen(current => !current)}
+            className={buttonClassName}
+            data-testid="architect-serp-subject-expand"
+          >
+            {open ? "Esconder a evidência" : "Ver a evidência"}
+          </button>
+        )}
       </div>
       {card.actions.filter(action => action.kind === "apply_swap" && action.disabledReason).map(action => (
         <p key="apply-swap-reason" className="mt-1 text-sm leading-6 text-warning">{action.kind === "apply_swap" ? action.disabledReason : null}</p>
@@ -424,7 +444,7 @@ export function SerpSubjectCard({
       {card.actions.filter(action => action.kind === "apply_swap" && action.viaReinforcement && action.note).map(action => (
         <p key="apply-swap-note" className="mt-1 text-sm leading-6 text-text-muted">{action.kind === "apply_swap" ? action.note : null}</p>
       ))}
-      {card.suggestions.length > 0 && (
+      {card.suggestions.length > 0 && !asDetail && (
         <SuggestionList
           key={card.suggestions.map(item => `${item.keywordId}:${item.preselected ? 1 : 0}`).join("|")}
           card={card}
@@ -435,7 +455,7 @@ export function SerpSubjectCard({
           reinforcement={reinforcement}
         />
       )}
-      {reinforcement?.extra}
+      {!asDetail && reinforcement?.extra}
       {open && (
         <div id={detalheId} className="mt-2 grid gap-2 border-t border-divider pt-2">
           <p className="text-sm leading-6 text-text-muted">
@@ -540,6 +560,7 @@ export function SerpSubjectDiagnosisPanel({
   buttonClassName,
   primaryButtonClassName,
   reinforcement = null,
+  keywordOf,
 }: {
   cards: readonly SerpSubjectCardView[];
   summary: SerpSubjectPanelSummary;
@@ -551,25 +572,46 @@ export function SerpSubjectDiagnosisPanel({
   handlers: Handlers;
   onReread: () => void;
   onApplyBatch: (choices: readonly SerpSubjectBatchChoice[]) => Promise<void> | void;
-  /** Reforçar publicados (2026-09-28): a barra, a linha dos sem par e a seleção dos cartões. */
+  /** Reforçar publicados (2026-09-28): a tabela única, a linha dos sem par e a seleção. */
   reinforcement?: PublishedReinforcementController | null;
+  /** Nome e volume de cada keyword (a principal atual e o volume somado da tabela). */
+  keywordOf?: (keywordId: string) => ReinforcementKeywordInfo | null | undefined;
 } & ButtonClasses) {
   const [filtro, setFiltro] = useState<(typeof FILTROS)[number]["key"]>("attention");
   const [escolhidas, setEscolhidas] = useState<ReadonlySet<string>>(new Set());
   const [confirmando, setConfirmando] = useState(false);
   const grupoId = useId();
 
+  const [assuntoAplicando, setAssuntoAplicando] = useState<{ card: SerpSubjectCardView; keywordIds: string[] } | null>(null);
+
   /*
-   * Os publicados "Sem par no lote" viram UMA linha, com a busca em lote. Quem
-   * a busca achou volta a ser cartão, com as keywords da busca para marcar.
+   * A TABELA ÚNICA do reforço (pedido do dono, 2026-09-28): uma linha por
+   * publicado e Assunto, com as sugeridas marcáveis e o volume antes → depois.
+   * Os publicados "Sem par no lote" continuam na tabela; a linha de cima só
+   * traz a busca em lote para eles, e o resultado cai na linha de cada um.
    */
+  const linhas = reinforcement ? reinforcementTableRows({
+    cards,
+    results: reinforcement.results,
+    keywordOf: keywordOf ?? (() => null),
+    suggestionPicksOf: reinforcement.suggestionPicksOf,
+    searchPicksOf: reinforcement.searchPicksOf,
+    swapAccepted: reinforcement.swapAccepted,
+    writtenPageIds: reinforcement.writtenPageIds,
+    deferredPageIds: reinforcement.deferredPageIds,
+    owners: reinforcement.owners,
+  }) : [];
+  const linhaDe = new Map(linhas.map(linha => [linha.key, linha]));
   const linhaSemPar = reinforcement ? noPairLineView(cards, reinforcement.results) : null;
-  const naLinha = new Set(linhaSemPar ? linhaSemPar.pageIds.filter(id => !linhaSemPar.found.includes(id)) : []);
-  // Pedem decisão: os estados de dilema e o publicado com reforço calculado ainda não gravado.
-  const pedeDecisao = (card: SerpSubjectCardView) => PEDEM_DECISAO.has(card.state) || reinforcementNeedsAttention(card);
+  // Pedem decisão: os estados de dilema, o reforço calculado ainda não gravado e a linha com algo a marcar ou gravada agora.
+  const pedeDecisao = (card: SerpSubjectCardView) => {
+    const linha = linhaDe.get(card.key);
+    return PEDEM_DECISAO.has(card.state) || reinforcementNeedsAttention(card) || Boolean(linha && reinforcementRowNeedsAttention(linha));
+  };
   const filtrados = cards.filter(card => filtro === "all" ? true : filtro === "attention" ? pedeDecisao(card) : card.state === filtro);
-  const mostraLinha = Boolean(linhaSemPar && naLinha.size > 0 && filtrados.some(card => card.kind === "published" && naLinha.has(card.anchorKeywordId)));
-  const visiveis = filtrados.filter(card => !(card.kind === "published" && naLinha.has(card.anchorKeywordId)));
+  const mostraLinha = Boolean(linhaSemPar && linhaSemPar.pageIds.length > linhaSemPar.found.length);
+  const visiveis = filtrados;
+  const linhasVisiveis = sortReinforcementRows(filtrados.flatMap(card => linhaDe.get(card.key) ?? []));
   const disponiveis = choices.filter(choice => !choice.disabledReason);
   const selecionadas = disponiveis.filter(choice => escolhidas.has(choice.id));
   const contagem = (key: (typeof FILTROS)[number]["key"]) => key === "all" ? cards.length : key === "attention" ? cards.filter(pedeDecisao).length : cards.filter(card => card.state === key).length;
@@ -628,12 +670,70 @@ export function SerpSubjectDiagnosisPanel({
       </dl>
       {outros.length > 0 && <p className="mt-2 text-sm leading-6 text-text-muted">Também: {outros.join(" · ")}.</p>}
 
-      {reinforcement && <PublishedReinforcementBar controller={reinforcement} cards={cards} buttonClassName={buttonClassName} primaryButtonClassName={primaryButtonClassName} />}
+      {mostraLinha && reinforcement && linhaSemPar && (
+        <NoPairPublishedLine controller={reinforcement} view={linhaSemPar} buttonClassName={buttonClassName} primaryButtonClassName={primaryButtonClassName} />
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-1.5" role="group" aria-label="Filtrar publicados e Assuntos pelo estado">
+        {FILTROS.filter(item => item.key === "all" || item.key === "attention" || contagem(item.key) > 0).map(item => (
+          <button
+            key={item.key}
+            type="button"
+            aria-pressed={filtro === item.key}
+            onClick={() => setFiltro(item.key)}
+            className={`${buttonClassName} ${filtro === item.key ? "border-module-accent/45 text-foreground" : ""}`}
+          >
+            {item.label} · {contagem(item.key)}
+          </button>
+        ))}
+      </div>
+
+      {reinforcement ? (
+        <PublishedReinforcementTable
+          controller={reinforcement}
+          cards={cards}
+          rows={linhasVisiveis}
+          allRows={linhas}
+          busy={busy}
+          highlightedKey={highlightedKey}
+          renderDetail={card => (
+            <SerpSubjectCard
+              card={cardWithBatchSearch(card, reinforcement.results.get(card.anchorKeywordId))}
+              busy={busy || reinforcement.busy}
+              evidenceOf={evidenceOf}
+              handlers={handlers}
+              buttonClassName={buttonClassName}
+              primaryButtonClassName={primaryButtonClassName}
+              reinforcement={cardReinforcementOf(reinforcement, card, cards)}
+              asDetail
+            />
+          )}
+          onApplySubject={(card, keywordIds) => setAssuntoAplicando({ card, keywordIds: [...keywordIds] })}
+          buttonClassName={buttonClassName}
+          primaryButtonClassName={primaryButtonClassName}
+        />
+      ) : (
+        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          {visiveis.map(card => (
+            <SerpSubjectCard
+              key={card.key}
+              card={card}
+              busy={busy}
+              evidenceOf={evidenceOf}
+              handlers={handlers}
+              highlighted={card.key === highlightedKey}
+              buttonClassName={buttonClassName}
+              primaryButtonClassName={primaryButtonClassName}
+            />
+          ))}
+          {!visiveis.length && <p className="text-sm leading-6 text-text-muted">Nenhum publicado ou Assunto neste filtro.</p>}
+        </div>
+      )}
 
       {choices.length > 0 && (
         <fieldset className="mt-3 rounded-md border border-divider bg-surface p-3" data-testid="architect-serp-subject-batch">
           <legend className="px-1 text-sm font-semibold text-foreground">Aceitar em grupo · {disponiveis.length} de {choices.length} disponível(is)</legend>
-          <p className="text-sm leading-6 text-text-muted">{`Marque as trocas e as mudanças de Silo que você aceita. Nada é aplicado antes da confirmação. Mudar de Silo grava só o Silo: para pôr as keywords no artigo publicado, use "${PUBLISHED_REINFORCEMENT_ACTION_LABEL}".`}</p>
+          <p className="text-sm leading-6 text-text-muted">{`Marque as trocas e as mudanças de Silo que você aceita. Nada é aplicado antes da confirmação. Mudar de Silo grava só o Silo: para pôr as keywords no artigo publicado, use a tabela "${PUBLISHED_REINFORCEMENT_ACTION_LABEL}" acima, que já muda o Silo e grava com "${PUBLISHED_REINFORCEMENT_SAVE_LABEL}".`}</p>
           <ul className="mt-2 grid gap-1.5">
             {choices.map(choice => {
               const id = `${grupoId}-${choice.id}`;
@@ -668,42 +768,27 @@ export function SerpSubjectDiagnosisPanel({
         </fieldset>
       )}
 
-      <div className="mt-3 flex flex-wrap gap-1.5" role="group" aria-label="Filtrar publicados e Assuntos pelo estado">
-        {FILTROS.filter(item => item.key === "all" || item.key === "attention" || contagem(item.key) > 0).map(item => (
-          <button
-            key={item.key}
-            type="button"
-            aria-pressed={filtro === item.key}
-            onClick={() => setFiltro(item.key)}
-            className={`${buttonClassName} ${filtro === item.key ? "border-module-accent/45 text-foreground" : ""}`}
-          >
-            {item.label} · {contagem(item.key)}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-3 grid gap-2 lg:grid-cols-2">
-        {mostraLinha && reinforcement && linhaSemPar && (
-          <NoPairPublishedLine controller={reinforcement} view={linhaSemPar} buttonClassName={buttonClassName} primaryButtonClassName={primaryButtonClassName} />
-        )}
-        {visiveis.map(original => reinforcement ? cardWithBatchSearch(original, reinforcement.results.get(original.anchorKeywordId)) : original).map(card => (
-          <SerpSubjectCard
-            key={card.key}
-            card={card}
-            busy={busy || Boolean(reinforcement?.busy)}
-            evidenceOf={evidenceOf}
-            handlers={handlers}
-            highlighted={card.key === highlightedKey}
-            buttonClassName={buttonClassName}
-            primaryButtonClassName={primaryButtonClassName}
-            reinforcement={cardReinforcementOf(reinforcement, card, cards)}
-          />
-        ))}
-        {!visiveis.length && !mostraLinha && <p className="text-sm leading-6 text-text-muted">Nenhum publicado ou Assunto neste filtro.</p>}
-      </div>
       <p className="mt-3 text-sm leading-6 text-text-muted">
         {`"${REINFORCEMENT_SEARCH_ACTION_LABEL}" abre a Pesquisa por Assunto do Minerador com o tema e a página de destino; a pesquisa mostra o custo antes de rodar.${reinforcement ? ` Os publicados sem par usam "${searchActionLabel()}", em lote.` : ""} Nenhuma keyword de outro assunto é colada para encher um artigo.`}
       </p>
+
+      {assuntoAplicando && (
+        <SuggestionConfirmDialog
+          open
+          card={assuntoAplicando.card}
+          selected={new Set(assuntoAplicando.keywordIds)}
+          busy={busy}
+          onClose={() => setAssuntoAplicando(null)}
+          onConfirm={() => {
+            void (async () => {
+              await handlers.onApplySuggestions(assuntoAplicando.card.key, assuntoAplicando.keywordIds);
+              setAssuntoAplicando(null);
+            })();
+          }}
+          buttonClassName={buttonClassName}
+          primaryButtonClassName={primaryButtonClassName}
+        />
+      )}
 
       <BatchConfirmDialog
         open={confirmando}

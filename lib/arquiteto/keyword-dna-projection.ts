@@ -287,11 +287,15 @@ export function projectKeywordDnaForArchitect(
   const published = String(keyword.status || "").toLocaleLowerCase("pt-BR") === "publicado"
     || (keyword as { isPublished?: unknown }).isPublished === true;
   const identityTone = published ? "identity-published" as const : "identity-new" as const;
+  // Membro de artigo publicado NÃO é publicado: o slug que ele mostra é o do
+  // artigo da página, dito como tal e sem a cor de identidade publicada.
+  const paginaDoArtigo = !published ? asRecord((keyword as { publishedArticlePage?: unknown }).publishedArticlePage as Record<string, unknown> | null) : null;
+  const slugLabel = paginaDoArtigo ? `Slug do artigo publicado de "${textValue(paginaDoArtigo.keyword) ?? "outra keyword"}"` : "Slug";
   const publication = section("publicacao", "Publicação e proteção", [
     field("Vínculo", snapshot.vinculo.label),
     field("URL", snapshot.vinculo.url, { tone: identityTone }),
     field("Relação", snapshot.vinculo.relation),
-    field("Slug", semanticText("slug_sugerido") || textValue((keyword as { computedSlug?: unknown }).computedSlug), { tone: identityTone }),
+    field(slugLabel, semanticText("slug_sugerido") || textValue((keyword as { computedSlug?: unknown }).computedSlug), paginaDoArtigo ? {} : { tone: identityTone }),
     field("Canonical", textValue((keyword as { canonical?: unknown }).canonical), { tone: identityTone }),
     field("Política da principal", textValue((keyword as { primaryKeywordPolicy?: unknown }).primaryKeywordPolicy)),
   ], "Sem identidade publicada recebida.");

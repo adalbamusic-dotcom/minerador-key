@@ -18,6 +18,7 @@ import {
   type WorkingCopyPatch,
 } from "../lib/server/arquiteto-published-reinforcement.ts";
 import { buildCanonicalWorkflowWorkspaceItems } from "../lib/arquiteto/canonical-workspace.ts";
+import { PUBLISHED_REINFORCEMENT_SWAP_REASON, recordedPublishedSwapsOf } from "../lib/arquiteto/published-formation-serp.ts";
 import { resolveArticleFormationState } from "../lib/arquiteto/article-formation-decision.ts";
 import { buildArticleFormationUniverse, type ArticleFormationKeyword } from "../lib/arquiteto/article-formation.ts";
 import { articleApprovalRevalidationIssues } from "../lib/arquiteto/article-approval-revalidation.ts";
@@ -184,7 +185,8 @@ function montar() {
   const patches: WorkingCopyPatch[][] = [];
   const versoes: Array<VersionEnvelope<ArticleDNA>> = [];
   // O parecer de SERP do artigo publicado, gravado pelo Processar (a evidência que a aprovação exige).
-  const pareceres: ArticleSerpReferenceRow[] = [{ candidateRef: `article-candidate:${TERRITORIO}:${K_PUB}`, territoryRef: TERRITORIO, reference: { entityId: "assessment-pub", versionId: "assessment-pub:base-1", contentHash: `sha256:${"b".repeat(64)}` } }];
+  // A composição que ele observou (2026-09-28): só a página, como os 21 pareceres de produção.
+  const pareceres: ArticleSerpReferenceRow[] = [{ candidateRef: `article-candidate:${TERRITORIO}:${K_PUB}`, territoryRef: TERRITORIO, reference: { entityId: "assessment-pub", versionId: "assessment-pub:base-1", contentHash: `sha256:${"b".repeat(64)}` }, composition: { keywordIds: [K_PUB], principalKeywordId: K_PUB } }];
   const vigentes = () => {
     const porEntidade = new Map<string, VersionEnvelope<ArticleDNA>>();
     for (const versao of versoes) if (!porEntidade.has(versao.entityId) || porEntidade.get(versao.entityId)!.versionNumber < versao.versionNumber) porEntidade.set(versao.entityId, versao);
@@ -242,7 +244,9 @@ test("prévia: grátis e sem gravar — primeiro ArticleDNA do publicado, as dua
 });
 
 test("aplicar: hash exigido; com o hash, composição e ArticleDNA aprovados com releitura, URL/slug/canonical do site", async () => {
-  const { banco, mesa, patches, versoes, deps } = montar();
+  const { banco, mesa, patches, versoes, deps, pareceres } = montar();
+  // O parecer gravado descreve a composição que vai ser gravada (publicada + as duas).
+  pareceres[0].composition = { keywordIds: [K_PUB, K_A, K_B], principalKeywordId: K_PUB };
   const previa = dados(await handlePublishedReinforcement(deps(), pedido()));
   const errado = await handlePublishedReinforcement(deps(), pedido({ mode: "apply", decisionHash: "sha256:outro", operationRequestId: "33333333-3333-4333-8333-333333333333" }));
   assert.equal(errado.status, 409);
@@ -296,7 +300,7 @@ test("aplicar: hash exigido; com o hash, composição e ArticleDNA aprovados com
 });
 
 test("keyword nova: sem o aceite de aprovar no Minerador é recusada; com ele, a ordem dos núcleos e a releitura", async () => {
-  const { banco, mesa, versoes, deps } = montar();
+  const { banco, mesa, versoes, deps, pareceres } = montar();
   // O resultado gravado da busca em lote desta página.
   banco.linhas("editorial_workflow_items").push({ id: "busca-1", lock_version: 1, marca_id: MARCA, subject_type: REINFORCEMENT_SEARCH_SUBJECT_TYPE, stage: "architect", subject_id: "rs-0000000000000001", state: "proposed", payload: { run: { operationRequestId: "55555555-5555-4555-8555-555555555555", executedAt: "2026-09-28T11:00:00Z", pages: [{ keywordId: K_PUB, suggestions: [{ candidateId: "cand:captar pacientes clinica", keyword: "captar pacientes clínica", normalizedKeyword: "captar pacientes clinica", adsVolume: 50, level: "strong", sharedPageCount: 4, origins: ["ads_url_seed"], evidence: [] }] }] } } });
   const passos: string[] = [];
@@ -326,7 +330,23 @@ test("keyword nova: sem o aceite de aprovar no Minerador é recusada; com ele, a
   assert.equal(comAceite.status, 200, JSON.stringify(comAceite.body));
   assert.deepEqual(passos, [`import:${PUB}:captar pacientes clínica`, `logica:${NOVA}`, `volume:${NOVA}`, `aprovar:${NOVA}`, `enviar:${NOVA}`]);
   assert.equal(dados(comAceite).readbackConfirmed, true, JSON.stringify(dados(comAceite)));
+  // 2026-09-28: a keyword nova nunca foi confrontada pelo parecer gravado. A mesa
+  // (Minerador e composição) fica gravada; o ArticleDNA espera o parecer desta composição.
+  assert.equal(versoes.length, 0, "nenhum ArticleDNA com o parecer de outra composição");
+  assert.match(String(dados(comAceite).message), /O ArticleDNA ainda não foi gravado: Entram keywords novas: o parecer da SERP gravado não as confrontou. Próximo passo: "Processar artigos"/);
+  const formacao = String(mesa.itens.find(entrada => entrada.subjectId === K_PUB)!.payload.articleFormationRef);
+  assert.equal(mesa.itens.find(entrada => entrada.subjectId === NOVA)!.payload.articleFormationRef, formacao);
+  // O "Processar artigos" (cache) grava o parecer da formação com a composição nova.
+  pareceres.push({ candidateRef: formacao, territoryRef: TERRITORIO, reference: { entityId: "assessment-formacao", versionId: "assessment-formacao:base-2", contentHash: `sha256:${"e".repeat(64)}` }, composition: { keywordIds: [K_PUB, K_A, NOVA], principalKeywordId: K_PUB } });
+  const segunda = dados(await handlePublishedReinforcement(deps({ minerador }), pedido({ pages: [{ publishedKeywordId: K_PUB }] })));
+  const [planoSegundo] = segunda.pages as Array<{ status: string; dna: { mode: string }; lines: string[] }>;
+  assert.equal(planoSegundo.status, "ready");
+  assert.equal(planoSegundo.dna.mode, "first");
+  const gravada = dados(await handlePublishedReinforcement(deps({ minerador }), pedido({ pages: [{ publishedKeywordId: K_PUB }], mode: "apply", decisionHash: segunda.decisionHash, operationRequestId: "67676767-6767-4676-8676-676767676767" })));
+  assert.equal(gravada.readbackConfirmed, true, JSON.stringify(gravada));
+  assert.equal(passos.length, 5, "a segunda confirmação não passa de novo pelo Minerador");
   const dna = ArticleDNASchema.parse(versoes.at(-1)!.payload);
+  assert.equal(dna.serpAssessmentRef?.versionId, "assessment-formacao:base-2", "o DNA leva o parecer DESTA composição");
   assert.deepEqual(dna.keywordReferences.map(reference => reference.keywordId), [K_PUB, K_A, NOVA]);
   // A keyword nova entrou no Silo do publicado.
   assert.equal(mesa.itens.find(entrada => entrada.subjectId === NOVA)!.payload.territoryRef, TERRITORIO);
@@ -357,7 +377,8 @@ test("um passo falha: para com o motivo, nada depois dele é gravado", async () 
 
 test("parada no meio: os publicados seguintes são nomeados como não tentados; o que falhou diz o que já ficou gravado", async () => {
   const { mesa, pareceres, deps } = montar();
-  pareceres.push({ candidateRef: `article-candidate:${TERRITORIO}:${K_DENT}`, territoryRef: TERRITORIO, reference: { entityId: "assessment-dent", versionId: "assessment-dent:base", contentHash: `sha256:${"c".repeat(64)}` } });
+  pareceres[0].composition = { keywordIds: [K_PUB, K_A], principalKeywordId: K_PUB };
+  pareceres.push({ candidateRef: `article-candidate:${TERRITORIO}:${K_DENT}`, territoryRef: TERRITORIO, reference: { entityId: "assessment-dent", versionId: "assessment-dent:base", contentHash: `sha256:${"c".repeat(64)}` }, composition: { keywordIds: [K_DENT], principalKeywordId: K_DENT } });
   const base = { pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A] }, { publishedKeywordId: K_DENT }] };
   const previa = dados(await handlePublishedReinforcement(deps(), pedido(base)));
   assert.deepEqual((previa.pages as Array<{ status: string }>).map(page => page.status), ["ready", "ready"]);
@@ -379,12 +400,17 @@ test("parada no meio: os publicados seguintes são nomeados como não tentados; 
 test("aprovação exige a evidência SERP do artigo: sem parecer gravado, a prévia recusa com o motivo; o papel humano de reforço e o Silo de quem já estava no artigo são preservados", async () => {
   const semParecer = montar();
   semParecer.pareceres.length = 0;
-  const [recusado] = dados(await handlePublishedReinforcement(semParecer.deps(), pedido())).pages as Array<{ status: string; refusal: string }>;
+  const [recusado] = dados(await handlePublishedReinforcement(semParecer.deps(), pedido({ pages: [{ publishedKeywordId: K_PUB }] }))).pages as Array<{ status: string; refusal: string }>;
   assert.equal(recusado.status, "refused");
-  assert.match(recusado.refusal, /ainda não tem o parecer da SERP gravado: use "Processar artigos"/);
+  assert.match(recusado.refusal, /ainda não tem parecer da SERP gravado\. Rode "Processar artigos" para este artigo \(cache primeiro/);
+  // Com reforço marcado, a mesa é gravada e o ArticleDNA espera o parecer (nunca aprovado sem ele).
+  const [adiado] = dados(await handlePublishedReinforcement(semParecer.deps(), pedido())).pages as Array<{ status: string; dnaDeferred: string | null }>;
+  assert.equal(adiado.status, "ready");
+  assert.match(String(adiado.dnaDeferred), /ainda não tem parecer da SERP gravado/);
 
   // K_A já está na formação do publicado como REFORÇO (decisão humana) e noutro Silo.
-  const { mesa, patches, versoes, deps } = montar();
+  const { mesa, patches, versoes, deps, pareceres } = montar();
+  pareceres[0].composition = { keywordIds: [K_PUB, K_A, K_B], principalKeywordId: K_PUB };
   const ref = "article-formation:11111111-2222-4333-8444-555555555555";
   const OUTRO_SILO = "territory:99999999-1a2b-4c3d-8e9f-0a1b2c3d4e5f";
   const decisao = (role: string) => ({ operation: "move", role, reason: "humano", source: "human", decidedAt: "2026-09-20T00:00:00Z" });
@@ -405,7 +431,9 @@ test("aprovação exige a evidência SERP do artigo: sem parecer gravado, a pré
 });
 
 test("formação do publicado com outra principal decidida, ou keyword já no ArticleDNA de outro artigo: recusado antes de gravar", async () => {
-  const { mesa, versoes, deps } = montar();
+  const { banco, mesa, versoes, deps } = montar();
+  // Posto Travado: a principal decidida na mesa não pode virar troca (a régua recusa).
+  Object.assign(banco.linhas("minerador_keywords").find(linha => linha.id === K_PUB)!, { analise_semantica: { site_origin: siteOrigin(URL_PUB), primary_keyword_policy: "locked" } });
   const ref = "article-formation:21111111-2222-4333-8444-555555555555";
   const decisao = (role: string) => ({ operation: "move", role, reason: "humano", source: "human", decidedAt: "2026-09-20T00:00:00Z" });
   Object.assign(mesa.itens.find(entrada => entrada.subjectId === K_PUB)!.payload, { articleFormationRef: ref, articleFormationDecision: decisao("secundaria") });
@@ -575,4 +603,133 @@ test("keyword nova que o dono rejeitou no Minerador não volta sozinha", async (
   assert.deepEqual(plano.create, []);
   assert.match(plano.refused[0].reason, /rejeitou no Minerador/);
   assert.equal(saida.approvalText, null);
+});
+
+/* ================= correção de 2026-09-28: os defeitos vistos em produção ================= */
+
+const papelNaMesa = (mesa: Mesa, keywordId: string) => (mesa.itens.find(entrada => entrada.subjectId === keywordId)!.payload.articleFormationDecision as { role: string } | undefined)?.role;
+
+test("Defeito 2+3: a troca grava na mesa a nova principal e a página como secundária; a que troca a entidade do slug é recusada", async () => {
+  const { mesa, versoes, deps, pareceres } = montar();
+  // O parecer desta composição: a página e "como atrair pacientes", já com a nova principal.
+  pareceres[0].composition = { keywordIds: [K_PUB, K_A], principalKeywordId: K_A };
+  const consultorio = dados(await handlePublishedReinforcement(deps(), pedido({ pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_B], swapKeywordId: K_B }] })));
+  const [planoConsultorio] = consultorio.pages as Array<{ swap: { state: string; reason: string } }>;
+  assert.equal(planoConsultorio.swap.state, "refused");
+  assert.match(planoConsultorio.swap.reason, /troca a entidade do slug: o slug diz "clinica" e ela diz "consultorio"/);
+
+  const base = { pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A], swapKeywordId: K_A }] };
+  const previa = dados(await handlePublishedReinforcement(deps(), pedido(base)));
+  const [plano] = previa.pages as Array<{ status: string; swap: { state: string; reason: string }; dnaDeferred: string | null }>;
+  assert.equal(plano.swap.state, "apply", plano.swap.reason);
+  assert.equal(plano.dnaDeferred, null);
+  const aplicado = dados(await handlePublishedReinforcement(deps(), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "41414141-4141-4141-8141-414141414141" })));
+  assert.equal(aplicado.readbackConfirmed, true, JSON.stringify(aplicado));
+  const dna = ArticleDNASchema.parse(versoes.at(-1)!.payload);
+  assert.equal(versoes.at(-1)!.entityId, K_PUB, "o artigo continua identificado pela página");
+  assert.equal(dna.principalKeywordId, K_A);
+  assert.equal(dna.primaryKeywordDecision?.previousKeywordId, K_PUB);
+  assert.equal(dna.suggestedSlug, "como-atrair-pacientes-para-clinica");
+  assert.equal(papelNaMesa(mesa, K_A), "principal", "a mesa diz o que o ArticleDNA diz");
+  assert.equal(papelNaMesa(mesa, K_PUB), "secundaria");
+});
+
+test("Defeito 3: DNA gravado com o parecer de 1 keyword e a mesa desalinhada da troca (c937661d) — a confirmação alinha a mesa e, depois do Processar, a sucessora leva o parecer certo", async () => {
+  const { mesa, versoes, deps, pareceres } = montar();
+  pareceres[0].composition = { keywordIds: [K_PUB, K_A], principalKeywordId: K_A };
+  const base = { pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A], swapKeywordId: K_A }] };
+  const previa = dados(await handlePublishedReinforcement(deps(), pedido(base)));
+  await handlePublishedReinforcement(deps(), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "42424242-4242-4242-8242-424242424242" }));
+  assert.equal(versoes.length, 1);
+  // O estado de produção: o parecer observou só a página, e a mesa ficou com a página como principal.
+  pareceres[0].composition = { keywordIds: [K_PUB], principalKeywordId: K_PUB };
+  for (const [id, role] of [[K_PUB, "principal"], [K_A, "secundaria"]] as const) {
+    const alvo = mesa.itens.find(entrada => entrada.subjectId === id)!;
+    alvo.payload = { ...alvo.payload, articleFormationDecision: { ...(alvo.payload.articleFormationDecision as object), role } };
+  }
+  const pedidoSo = { pages: [{ publishedKeywordId: K_PUB }] };
+  const alinhar = dados(await handlePublishedReinforcement(deps(), pedido(pedidoSo)));
+  const [planoAlinhar] = alinhar.pages as Array<{ status: string; dnaDeferred: string | null; lines: string[] }>;
+  assert.equal(planoAlinhar.status, "ready");
+  assert.ok(planoAlinhar.lines.some(linha => /Alinha na mesa a troca já confirmada no ArticleDNA: "como atrair pacientes" principal e "como atrair pacientes para clínica" secundária/.test(linha)), planoAlinhar.lines.join(" | "));
+  assert.match(String(planoAlinhar.dnaDeferred), /foi aprovado com o parecer da SERP de outra composição \(2 keywords no artigo\)/);
+  const alinhado = dados(await handlePublishedReinforcement(deps(), pedido({ ...pedidoSo, mode: "apply", decisionHash: alinhar.decisionHash, operationRequestId: "43434343-4343-4343-8343-434343434343" })));
+  assert.equal(alinhado.readbackConfirmed, true, JSON.stringify(alinhado));
+  assert.equal(versoes.length, 1, "nenhuma versão com o parecer de outra composição");
+  assert.equal(papelNaMesa(mesa, K_A), "principal");
+  assert.equal(papelNaMesa(mesa, K_PUB), "secundaria");
+  assert.match(String(alinhado.message), /O ArticleDNA ainda não foi gravado: O ArticleDNA v1 foi aprovado com o parecer da SERP de outra composição/);
+
+  // "Processar artigos" (cache) grava o parecer da formação: a composição do DNA, com a principal trocada.
+  const formacao = String(mesa.itens.find(entrada => entrada.subjectId === K_PUB)!.payload.articleFormationRef);
+  pareceres.push({ candidateRef: formacao, territoryRef: TERRITORIO, reference: { entityId: "assessment-formacao", versionId: "assessment-formacao:base-9", contentHash: `sha256:${"f".repeat(64)}` }, composition: { keywordIds: [K_A, K_PUB], principalKeywordId: K_A } });
+  const refresco = dados(await handlePublishedReinforcement(deps(), pedido(pedidoSo)));
+  const [planoRefresco] = refresco.pages as Array<{ status: string; serpRefresh: boolean; dna: { mode: string } }>;
+  assert.equal(planoRefresco.status, "ready");
+  assert.equal(planoRefresco.serpRefresh, true);
+  const gravado = dados(await handlePublishedReinforcement(deps(), pedido({ ...pedidoSo, mode: "apply", decisionHash: refresco.decisionHash, operationRequestId: "44444444-4444-4444-8444-444444444445" })));
+  assert.equal(gravado.readbackConfirmed, true, JSON.stringify(gravado));
+  assert.equal(versoes.length, 2);
+  const v2 = ArticleDNASchema.parse(versoes.at(-1)!.payload);
+  assert.equal(versoes.at(-1)!.versionNumber, 2);
+  assert.equal(v2.serpAssessmentRef?.versionId, "assessment-formacao:base-9");
+  assert.equal(v2.principalKeywordId, K_A, "a troca confirmada é preservada");
+  assert.deepEqual(v2.keywordReferences.map(reference => reference.keywordId).sort(), [K_PUB, K_A].sort(), "nenhuma keyword some");
+  assert.equal(v2.canonical, URL_PUB);
+  assert.deepEqual(articleApprovalRevalidationIssues({ version: versoes.at(-1)!, authorizedBrandId: MARCA }), []);
+  // De novo: nada muda.
+  const denovo = dados(await handlePublishedReinforcement(deps(), pedido(pedidoSo)));
+  assert.equal((denovo.pages as Array<{ status: string }>)[0].status, "unchanged");
+});
+
+/* ================= corretor de 2026-09-28: a troca que espera o ArticleDNA ================= */
+
+test("Corretor: troca sem o parecer da composição — a mesa grava a troca com o marcador e a reconhece; a confirmação seguinte a aplica sem a caixinha, e a página segue sendo o artigo", async () => {
+  const { mesa, versoes, deps, pareceres } = montar();
+  // Só o parecer da página (1 keyword): a troca vai para a mesa e o primeiro ArticleDNA espera o "Processar artigos".
+  const base = { pages: [{ publishedKeywordId: K_PUB, keywordIds: [K_A], swapKeywordId: K_A }] };
+  const previa = dados(await handlePublishedReinforcement(deps(), pedido(base)));
+  const [plano] = previa.pages as Array<{ status: string; swap: { state: string; reason: string }; dnaDeferred: string | null }>;
+  assert.equal(plano.swap.state, "apply", plano.swap.reason);
+  assert.match(String(plano.dnaDeferred), /descreve outra composição/);
+  const aplicado = dados(await handlePublishedReinforcement(deps(), pedido({ ...base, mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "51515151-5151-4151-8151-515151515151" })));
+  assert.equal(aplicado.written, false, "nenhum ArticleDNA sem o parecer desta composição");
+  assert.equal(versoes.length, 0);
+  const [desfecho] = aplicado.pages as Array<{ dnaDeferred: string | null; partial: string[] }>;
+  assert.ok(desfecho.partial.length > 0 && desfecho.dnaDeferred, "a mesa foi gravada: a tela relê");
+  const decisao = (id: string) => mesa.itens.find(entrada => entrada.subjectId === id)!.payload.articleFormationDecision as { role: string; reason: string };
+  assert.deepEqual([decisao(K_A).role, decisao(K_A).reason], ["principal", PUBLISHED_REINFORCEMENT_SWAP_REASON]);
+  assert.deepEqual([decisao(K_PUB).role, decisao(K_PUB).reason], ["secundaria", PUBLISHED_REINFORCEMENT_SWAP_REASON]);
+  // A mesa reconhece a troca gravada (sem ela, a formação abriria "publicada e não é a principal").
+  const linhas = mesa.itens.map(entrada => ({ id: entrada.subjectId, isPublished: entrada.subjectId === K_PUB, ...entrada.payload }));
+  assert.equal(recordedPublishedSwapsOf(linhas).get(K_PUB), K_A);
+
+  // "Processar artigos" (cache) grava o parecer da formação, com a nova principal e os papéis.
+  const formacao = String(mesa.itens.find(entrada => entrada.subjectId === K_PUB)!.payload.articleFormationRef);
+  pareceres.push({ candidateRef: formacao, territoryRef: TERRITORIO, reference: { entityId: "assessment-troca", versionId: "assessment-troca:base-3", contentHash: `sha256:${"e".repeat(64)}` }, composition: { keywordIds: [K_PUB, K_A], principalKeywordId: K_A, roles: { [K_A]: "principal", [K_PUB]: "secundaria" } } });
+  const pedidoSo = { pages: [{ publishedKeywordId: K_PUB }] };
+  const segunda = dados(await handlePublishedReinforcement(deps(), pedido(pedidoSo)));
+  const [plano2] = segunda.pages as Array<{ status: string; swap: { state: string; reason: string }; dnaDeferred: string | null }>;
+  assert.equal(plano2.swap.state, "apply", plano2.swap.reason);
+  assert.match(plano2.swap.reason, /Troca que você confirmou na confirmação anterior do Reforçar \(gravada na mesa, esperando o ArticleDNA\)/);
+  assert.equal(plano2.dnaDeferred, null);
+  const gravado = dados(await handlePublishedReinforcement(deps(), pedido({ ...pedidoSo, mode: "apply", decisionHash: segunda.decisionHash, operationRequestId: "52525252-5252-4252-8252-525252525252" })));
+  assert.equal(gravado.readbackConfirmed, true, JSON.stringify(gravado));
+  assert.equal(versoes.length, 1);
+  const dna = ArticleDNASchema.parse(versoes.at(-1)!.payload);
+  assert.equal(versoes.at(-1)!.entityId, K_PUB, "o artigo continua identificado pela página");
+  assert.equal(dna.principalKeywordId, K_A);
+  assert.equal(dna.primaryKeywordDecision?.previousKeywordId, K_PUB);
+  assert.equal(dna.serpAssessmentRef?.versionId, "assessment-troca:base-3", "o parecer DESTA composição");
+  assert.equal(dna.canonical, URL_PUB);
+
+  // Uma formação da Revisão humana com outra principal (sem o marcador) não vira troca implícita.
+  const outra = montar();
+  const ref = "article-formation:61616161-2222-4333-8444-555555555555";
+  const humana = (role: string) => ({ operation: "move", role, reason: "humano", source: "human", decidedAt: "2026-09-20T00:00:00Z" });
+  Object.assign(outra.mesa.itens.find(entrada => entrada.subjectId === K_PUB)!.payload, { articleFormationRef: ref, articleFormationDecision: humana("secundaria") });
+  Object.assign(outra.mesa.itens.find(entrada => entrada.subjectId === K_A)!.payload, { articleFormationRef: ref, articleFormationDecision: humana("principal") });
+  const [semTroca] = dados(await handlePublishedReinforcement(outra.deps(), pedido(pedidoSo))).pages as Array<{ status: string; refusal: string; swap: { state: string } }>;
+  assert.equal(semTroca.status, "refused");
+  assert.match(semTroca.refusal, /como principal, por decisão sua: confirme a composição na mesa antes/);
 });

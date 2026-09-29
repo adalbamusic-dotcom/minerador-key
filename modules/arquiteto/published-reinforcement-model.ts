@@ -12,7 +12,7 @@ import {
   type ReinforcementSuggestion,
 } from "../../lib/arquiteto/published-reinforcement-search.ts";
 import { costRangeLabel, formatUsd } from "./published-differentiation-model.ts";
-import type { SerpSubjectCardView, SerpSubjectTone } from "./serp-subject-model.ts";
+import { initialSuggestionSelection, type SerpSubjectCardView, type SerpSubjectTone } from "./serp-subject-model.ts";
 
 /**
  * REFORÇAR PUBLICADOS — O MODELO DA TELA (SDD docs/04-arquiteto/sdd-reforcar-publicados-2026-09-28.md).
@@ -34,6 +34,8 @@ import type { SerpSubjectCardView, SerpSubjectTone } from "./serp-subject-model.
  * o que foi. Puro: sem React, sem rede, sem storage.
  */
 
+/** O botão único da tabela do reforço (a confirmação se chama "Reforçar publicados"). */
+export const PUBLISHED_REINFORCEMENT_SAVE_LABEL = "Gravar reforços";
 export const PUBLISHED_REINFORCEMENT_COST_LINE = "Custo para gravar: zero (nenhuma chamada paga).";
 export const PUBLISHED_SEARCH_ACTION_LABEL = REINFORCEMENT_SEARCH_ACTION_LABEL;
 export { PUBLISHED_REINFORCEMENT_ACTION_LABEL };
@@ -83,6 +85,14 @@ export function buildReinforcementRequest(input: {
   swapPicks: ReadonlySet<string>;
   /** Só estes publicados (o botão do cartão); `null` = todos. */
   only?: ReadonlySet<string> | null;
+  /**
+   * Aditivo (tabela única, 2026-09-28): manda também o publicado já gravado e
+   * sem nada marcado. O servidor é quem sabe se falta algo nele (alinhar na
+   * mesa a troca já confirmada, nova versão só com o parecer da composição) e
+   * responde "nada muda" quando não falta. Quem tem algo marcado vai primeiro
+   * (o limite de 30 por confirmação não o empurra para a próxima).
+   */
+  includeRecorded?: boolean;
 }): ReinforcementRequestBuild {
   const publicados = input.cards.filter(card => card.kind === "published" && (!input.only || input.only.has(card.anchorKeywordId)));
   const idsPublicados = new Set(input.cards.filter(card => card.kind === "published").map(card => card.anchorKeywordId));
@@ -108,7 +118,7 @@ export function buildReinforcementRequest(input: {
     if (troca) pesar(card.anchorKeywordId, troca, Number.MAX_SAFE_INTEGER);
     for (const item of card.suggestions) pesar(card.anchorKeywordId, item.keywordId, item.sharedPageCount ?? 0);
     const algoMarcado = sugeridas.length > 0 || newKeywords.length > 0 || Boolean(troca);
-    if (!algoMarcado && card.recordedInArticle === true) continue;
+    if (!algoMarcado && card.recordedInArticle === true && !input.includeRecorded) continue;
     if (!algoMarcado && card.recordedInArticle === null && !input.only) continue;
     pages.push({ publishedKeywordId: card.anchorKeywordId, keywordIds: keywordIds.slice(0, MAX_POR_LISTA), newKeywords: newKeywords.slice(0, MAX_POR_LISTA), swapKeywordId: troca });
   }
@@ -145,14 +155,17 @@ export function buildReinforcementRequest(input: {
   }
   // Publicado que ficou sem nada marcado depois da divisão segue a mesma regra de entrada de cima.
   const cardDe = new Map(publicados.map(card => [card.anchorKeywordId, card]));
-  const finais = pages.filter(page => {
+  const algoNa = (page: ReinforcementRequestPage) => {
     const card = cardDe.get(page.publishedKeywordId);
-    if (!card) return true;
-    const algo = page.newKeywords.length > 0 || Boolean(page.swapKeywordId) || page.keywordIds.some(id => !card.memberKeywordIds.includes(id));
-    if (algo) return true;
-    if (card.recordedInArticle === true) return false;
+    return !card || page.newKeywords.length > 0 || Boolean(page.swapKeywordId) || page.keywordIds.some(id => !card.memberKeywordIds.includes(id)) || card.recordedInArticle === false;
+  };
+  const filtradas = pages.filter(page => {
+    const card = cardDe.get(page.publishedKeywordId);
+    if (!card || algoNa(page)) return true;
+    if (card.recordedInArticle === true) return Boolean(input.includeRecorded);
     return !(card.recordedInArticle === null && !input.only);
   });
+  const finais = input.includeRecorded ? [...filtradas.filter(algoNa), ...filtradas.filter(page => !algoNa(page))] : filtradas;
   return {
     pages: finais.slice(0, PUBLISHED_REINFORCEMENT_MAX_PAGES),
     reassigned,
@@ -331,7 +344,7 @@ export function cardWithBatchSearch(card: SerpSubjectCardView, result: Pick<Rein
   const provaveis = result.suggestions.length - fortes;
   return {
     ...card,
-    headline: `A busca em lote achou ${plural(result.suggestions.length, "keyword com volume", "keywords com volume")} (${[fortes ? `${fortes} Forte` : "", provaveis ? `${provaveis} Provável` : ""].filter(Boolean).join(", ")}): marque e grave com "${PUBLISHED_REINFORCEMENT_ACTION_LABEL}".`,
+    headline: `A busca em lote achou ${plural(result.suggestions.length, "keyword com volume", "keywords com volume")} (${[fortes ? `${fortes} Forte` : "", provaveis ? `${provaveis} Provável` : ""].filter(Boolean).join(", ")}): marque na tabela e grave com "${PUBLISHED_REINFORCEMENT_SAVE_LABEL}".`,
     subline: null,
     actions: card.actions.filter(action => action.kind !== "search_reinforcement"),
   };
@@ -383,7 +396,7 @@ export function searchConfirmLines(data: ReinforcementSearchPlanData): { lines: 
     ...plan.notices,
     ...plan.cuts.map(corte => `Corte: ${corte}`),
     ...data.differentiation.map(grupo => grupo.message),
-    `Nada é gravado nos artigos: as sugestões caem nos cartões. Para gravar, marque e use "${PUBLISHED_REINFORCEMENT_ACTION_LABEL}".`,
+    `Nada é gravado nos artigos: as sugestões caem na tabela "${PUBLISHED_REINFORCEMENT_ACTION_LABEL}", na linha de cada publicado. Para gravar, marque e use "${PUBLISHED_REINFORCEMENT_SAVE_LABEL}".`,
   ];
   const blockedReason = plan.withinCap ? null : `O plano passa do teto de US$ ${formatUsd(REINFORCEMENT_MAX_COST_USD)}. Nada foi pago.`;
   return { lines, confirmLabel: `Confirmar ${costRangeLabel(plan.costRange)}`, blockedReason };
@@ -459,6 +472,360 @@ export function noPairLineView(cards: readonly SerpSubjectCardView[], results: R
     without,
     found,
   };
+}
+
+/* ------------------------------ a tabela única (pedido do dono, 2026-09-28) ------------------------------ */
+
+/*
+ * "Não notei nenhuma diferença, e não está claro como reforçar": só as Forte do
+ * mesmo Silo vinham marcadas, e o resto pedia caixinhas espalhadas por cartão.
+ * A tabela junta tudo numa superfície: uma linha por publicado (e Assunto), a
+ * principal atual com o volume, as sugeridas com caixinha (nível, volume,
+ * páginas em comum, Silo de origem), o volume somado antes → depois e o estado.
+ * Um botão só, "Gravar reforços", abre a mesma confirmação por artigo do
+ * servidor; depois da releitura, a linha mostra o total novo do ArticleDNA.
+ */
+
+/** A linha "Mesa gravada · falta o ArticleDNA": o próximo passo, sem custo. */
+export const PUBLISHED_REINFORCEMENT_DEFERRED_NOTE = "A composição já está gravada na mesa; o ArticleDNA espera o parecer da SERP desta composição. Próximo passo: \"Processar artigos\" (cache primeiro, sem custo quando as 4 lentes estão no cache) e \"Gravar reforços\" de novo.";
+export const PUBLISHED_REINFORCEMENT_TABLE_LINE ="Reforço só vale com keywords do mesmo assunto no Google; keywords de volume alto de outro assunto viram artigo novo em Sobras.";
+/** O teto de keywords num artigo (o mesmo da formação). */
+const TETO_DO_ARTIGO = 6;
+
+export type ReinforcementKeywordInfo = { keyword: string; volume: number | null };
+
+const PESO_FIXO = Number.MAX_SAFE_INTEGER;
+const chaveNova = (frase: string) => `novo:${normalizeKeyword(frase)}`;
+/** "volume 20", ou "sem volume" quando o Google Ads não mediu. */
+const comVolume = (valor: number | null | undefined) => typeof valor === "number" && Number.isFinite(valor) ? `volume ${valor.toLocaleString("pt-BR")}` : "sem volume";
+const volumeTexto = (valor: number | null | undefined) => typeof valor === "number" && Number.isFinite(valor) ? valor.toLocaleString("pt-BR") : "sem volume";
+
+/**
+ * O dono de cada keyword sugerida entre os publicados: UM artigo só, o de mais
+ * páginas em comum (empate: o primeiro da lista). Quem já está na formação de
+ * um publicado, ou é a substituta da troca dele, fica nele. A keyword nova da
+ * busca em lote é comparada pela frase normalizada (`novo:…`).
+ */
+export function reinforcementSuggestionOwners(cards: readonly SerpSubjectCardView[], results?: ReadonlyMap<string, ReinforcementPageResult>): Map<string, string> {
+  const melhor = new Map<string, { dono: string; peso: number }>();
+  const pesar = (chave: string, dono: string, peso: number) => {
+    const atual = melhor.get(chave);
+    if (!atual || peso > atual.peso) melhor.set(chave, { dono, peso });
+  };
+  for (const card of cards) {
+    if (card.kind !== "published") continue;
+    for (const id of card.memberKeywordIds) pesar(id, card.anchorKeywordId, PESO_FIXO);
+    if (card.swapSubstitute) pesar(card.swapSubstitute.keywordId, card.anchorKeywordId, PESO_FIXO);
+    for (const item of card.suggestions) pesar(item.keywordId, card.anchorKeywordId, item.sharedPageCount ?? 0);
+    for (const item of results?.get(card.anchorKeywordId)?.suggestions ?? []) pesar(chaveNova(item.keyword), card.anchorKeywordId, item.sharedPageCount);
+  }
+  return new Map([...melhor].map(([chave, valor]) => [chave, valor.dono]));
+}
+
+const pertence = (owners: ReadonlyMap<string, string> | null | undefined, chave: string, dono: string) => !owners || !owners.has(chave) || owners.get(chave) === dono;
+
+/**
+ * A pré-marcação da tabela. Publicado: toda Forte com volume — do mesmo Silo
+ * ou de QUALQUER outro (a mudança de Silo aparece na confirmação) — que não
+ * está em outro artigo, até as vagas (teto de 6); Provável vem desmarcada; a
+ * keyword que é de outro publicado (mais páginas em comum) não vem aqui.
+ * Assunto: a marcação do domínio.
+ */
+export function reinforcementDefaultPicks(card: Pick<SerpSubjectCardView, "kind" | "anchorKeywordId" | "suggestions" | "suggestionLimit">, owners?: ReadonlyMap<string, string> | null): Set<string> {
+  if (card.kind !== "published") return initialSuggestionSelection(card);
+  const marcadas = new Set<string>();
+  for (const item of card.suggestions) {
+    if (marcadas.size >= card.suggestionLimit) break;
+    if (item.level !== "strong" || !pertence(owners, item.keywordId, card.anchorKeywordId)) continue;
+    if (item.where === "leftover" || (item.where === "other_silo" && !item.inOtherArticle)) marcadas.add(item.keywordId);
+  }
+  return marcadas;
+}
+
+/** As keywords da busca em lote marcadas de início: as Forte, só no publicado dono delas. */
+export function reinforcementDefaultSearchPicks(pageId: string, result: Pick<ReinforcementPageResult, "suggestions"> | null | undefined, owners?: ReadonlyMap<string, string> | null): string[] {
+  return defaultSearchPicks(result).filter(frase => pertence(owners, chaveNova(frase), pageId));
+}
+
+export type ReinforcementTableSuggestion = {
+  /** O id do Minerador, ou `novo:<frase>` para a keyword da busca em lote. */
+  key: string;
+  source: "mesa" | "busca";
+  keywordId: string | null;
+  keyword: string;
+  level: "strong" | "probable";
+  levelLabel: string;
+  volume: number | null;
+  sharedPageCount: number | null;
+  /** O Silo em que ela está hoje. */
+  siloLabel: string;
+  /** Muda para o Silo do publicado na confirmação. */
+  changesSilo: boolean;
+  isNew: boolean;
+  /** "volume 20 · 7 páginas em comum · Silo "Captação"". */
+  detail: string;
+  warning: string | null;
+  checked: boolean;
+};
+
+export type ReinforcementTableRow = {
+  key: string;
+  kind: SerpSubjectCardView["kind"];
+  kindLabel: string;
+  anchorKeywordId: string;
+  anchorLabel: string;
+  siloLabel: string;
+  card: SerpSubjectCardView;
+  principal: { keyword: string; volumeLabel: string };
+  /** Depois de uma troca, a principal não é mais a página: a linha diz qual é a página. */
+  pageNote: string | null;
+  swap: { keyword: string; detail: string; accepted: boolean } | null;
+  suggestions: ReinforcementTableSuggestion[];
+  /** Sem sugestão: por quê, numa frase. */
+  emptyReason: string | null;
+  /** O motivo é erro (do Google Ads), não "nada achado": vai em tom de aviso. */
+  emptyIsError: boolean;
+  before: { keywords: number; volume: number };
+  after: { keywords: number; volume: number };
+  /** "2 → 4 keywords · volume 30 → 90". */
+  totalsLabel: string;
+  /** "2 → 4 keywords" e "volume 30 → 90", para as duas linhas da célula. */
+  keywordsChangeLabel: string;
+  volumeChangeLabel: string;
+  capWarning: string | null;
+  status: { label: string; tone: SerpSubjectTone };
+  /**
+   * Aditivo (corretor 2026-09-28): a frase do estado quando ele precisa de
+   * explicação — "mesa gravada, falta o ArticleDNA" diz o próximo passo.
+   */
+  statusNote: string | null;
+  /** Publicado com algo a gravar no "Gravar reforços". */
+  pending: boolean;
+  writtenNow: boolean;
+  /** O que a confirmação acrescenta por artigo: mudança de Silo e o total depois. */
+  confirmLines: string[];
+  /** Assunto: as marcadas para "Aplicar no Assunto". */
+  subjectPicks: string[];
+};
+
+const soma = (valores: Iterable<number | null | undefined>) => {
+  let total = 0;
+  for (const valor of valores) if (typeof valor === "number" && Number.isFinite(valor)) total += valor;
+  return total;
+};
+
+/**
+ * As linhas da tabela, a partir dos cartões (o estado do domínio) e das
+ * marcações do hook. Puro: o que é gravado continua saindo só da confirmação.
+ */
+export function reinforcementTableRows(input: {
+  cards: readonly SerpSubjectCardView[];
+  results?: ReadonlyMap<string, ReinforcementPageResult>;
+  keywordOf: (keywordId: string) => ReinforcementKeywordInfo | null | undefined;
+  suggestionPicksOf: (card: SerpSubjectCardView) => ReadonlySet<string>;
+  searchPicksOf: (pageId: string) => readonly string[];
+  swapAccepted: (pageId: string) => boolean;
+  writtenPageIds?: ReadonlySet<string>;
+  owners?: ReadonlyMap<string, string> | null;
+  /**
+   * Aditivo (corretor 2026-09-28): os publicados cuja última confirmação gravou
+   * a mesa e deixou o ArticleDNA para depois, com o motivo do servidor.
+   */
+  deferredPageIds?: ReadonlyMap<string, string>;
+}): ReinforcementTableRow[] {
+  const owners = input.owners ?? reinforcementSuggestionOwners(input.cards, input.results);
+  const rotulo = new Map(input.cards.map(card => [card.anchorKeywordId, card.anchorLabel]));
+  return input.cards.map(card => {
+    const publicado = card.kind === "published";
+    const nomeDe = new Map<string, string>(card.suggestions.map(item => [item.keywordId, item.keyword]));
+    const volumeDe = new Map<string, number>(card.suggestions.map(item => [item.keywordId, item.volume]));
+    if (card.swapSubstitute) nomeDe.set(card.swapSubstitute.keywordId, card.swapSubstitute.keyword);
+    const nome = (id: string) => input.keywordOf(id)?.keyword || nomeDe.get(id) || (id === card.anchorKeywordId ? card.anchorLabel : id);
+    const volume = (id: string) => {
+      const lido = input.keywordOf(id)?.volume;
+      return typeof lido === "number" ? lido : volumeDe.get(id) ?? null;
+    };
+    const marcadas = input.suggestionPicksOf(card);
+    const suggestions: ReinforcementTableSuggestion[] = card.suggestions
+      .filter(item => !publicado || pertence(owners, item.keywordId, card.anchorKeywordId))
+      .map(item => {
+        const mudaSilo = item.where === "other_silo";
+        const silo = mudaSilo ? item.siloLabel || "outro Silo" : card.siloLabel;
+        const lugar = item.where === "other_article" || item.where === "new_article" ? ` · ${item.whereLabel}` : "";
+        return {
+          key: item.keywordId,
+          source: "mesa" as const,
+          keywordId: item.keywordId,
+          keyword: item.keyword,
+          level: item.level,
+          levelLabel: item.levelLabel,
+          volume: item.volume,
+          sharedPageCount: item.sharedPageCount ?? null,
+          siloLabel: silo,
+          changesSilo: mudaSilo,
+          isNew: false,
+          detail: `volume ${volumeTexto(item.volume)}${typeof item.sharedPageCount === "number" ? ` · ${plural(item.sharedPageCount, "página em comum", "páginas em comum")}` : ""} · Silo "${silo}"${mudaSilo ? " (muda para o deste artigo)" : ""}${lugar}`,
+          warning: item.warning,
+          checked: marcadas.has(item.keywordId),
+        };
+      });
+    const busca = publicado ? input.results?.get(card.anchorKeywordId) : undefined;
+    if (publicado && busca?.state === "found") {
+      const jaNaMesa = new Set(suggestions.map(item => item.keywordId));
+      const marcadasDaBusca = new Set(input.searchPicksOf(card.anchorKeywordId).map(normalizeKeyword));
+      for (const item of busca.suggestions) {
+        if (item.existingKeywordId && jaNaMesa.has(item.existingKeywordId)) continue;
+        if (!pertence(owners, chaveNova(item.keyword), card.anchorKeywordId)) continue;
+        suggestions.push({
+          key: chaveNova(item.keyword),
+          source: "busca",
+          keywordId: item.existingKeywordId,
+          keyword: item.keyword,
+          level: item.level,
+          levelLabel: item.level === "strong" ? "Forte" : "Provável",
+          volume: item.adsVolume,
+          sharedPageCount: item.sharedPageCount,
+          siloLabel: card.siloLabel,
+          changesSilo: false,
+          isNew: !item.existingKeywordId,
+          detail: `volume ${volumeTexto(item.adsVolume)} (Google Ads) · ${plural(item.sharedPageCount, "página em comum", "páginas em comum")} · busca em lote${item.existingKeywordId ? "" : " · nova no Minerador"}`,
+          warning: null,
+          checked: marcadasDaBusca.has(normalizeKeyword(item.keyword)),
+        });
+      }
+    }
+
+    const principalId = publicado ? card.articlePrincipalKeywordId || card.anchorKeywordId : card.anchorKeywordId;
+    const antes = publicado ? new Set(card.articleKeywordIds ?? [card.anchorKeywordId]) : new Set(card.memberKeywordIds);
+    const trocaAceita = Boolean(publicado && card.swapSubstitute && input.swapAccepted(card.anchorKeywordId));
+    const depois = new Set(antes);
+    const novas: number[] = [];
+    if (publicado) {
+      depois.add(card.anchorKeywordId);
+      for (const id of card.memberKeywordIds) depois.add(id);
+    }
+    for (const item of suggestions) {
+      if (!item.checked) continue;
+      // No Assunto, quem vem de outro Silo muda de Silo antes (decisão de Silo): não entra agora.
+      if (!publicado && item.changesSilo) continue;
+      if (item.keywordId) depois.add(item.keywordId);
+      else novas.push(item.volume ?? 0);
+    }
+    if (trocaAceita && card.swapSubstitute) depois.add(card.swapSubstitute.keywordId);
+    const before = { keywords: antes.size, volume: soma([...antes].map(volume)) };
+    const after = { keywords: depois.size + novas.length, volume: soma([...depois].map(volume)) + soma(novas) };
+    // Keyword sem medida não é "volume 0": sem nenhuma medida do lado, a célula diz "sem volume".
+    const temVolume = (ids: Iterable<string>, extras: readonly number[] = []) => [...ids].some(id => typeof volume(id) === "number") || extras.length > 0;
+    const volumeAntes = temVolume(antes) ? volumeTexto(before.volume) : "sem volume";
+    const volumeDepois = temVolume(depois, novas) ? volumeTexto(after.volume) : "sem volume";
+    const entram = after.keywords - before.keywords;
+    const writtenNow = Boolean(input.writtenPageIds?.has(card.anchorKeywordId));
+    const semDna = publicado && card.articleKeywordIds === null;
+    /*
+     * MESA GRAVADA, ARTICLEDNA PENDENTE (corretor 2026-09-28). A composição
+     * está na mesa (formação humana) e o ArticleDNA ainda não a tem: o servidor
+     * espera o parecer da SERP DESTA composição. Não é "Grava +N" — clicar de
+     * novo sem o "Processar artigos" adiaria de novo — e não conta no botão.
+     */
+    const marcouAgora = trocaAceita || suggestions.some(item => item.checked);
+    const adiado = input.deferredPageIds?.get(card.anchorKeywordId) ?? null;
+    const mesaSemDna = publicado && !marcouAgora && (Boolean(adiado) || (card.formationRecorded === true && card.recordedInArticle === false));
+    const pending = publicado && !mesaSemDna && (entram > 0 || trocaAceita || card.recordedInArticle === false);
+    let status: ReinforcementTableRow["status"];
+    let statusNote: string | null = null;
+    if (writtenNow && !pending && !mesaSemDna) status = { label: "Gravado e relido agora", tone: "success" };
+    else if (!publicado) status = { label: card.stateLabel, tone: card.tone };
+    else if (mesaSemDna) {
+      status = { label: "Mesa gravada · falta o ArticleDNA", tone: "warning" };
+      statusNote = `${adiado ? `${adiado} ` : ""}${PUBLISHED_REINFORCEMENT_DEFERRED_NOTE}`;
+    } else if (semDna) status = { label: entram > 0 ? `Cria o ArticleDNA com +${entram}` : "Cria o ArticleDNA", tone: "info" };
+    else if (entram > 0 || trocaAceita) status = { label: [entram > 0 ? `Grava +${entram}` : "", trocaAceita ? "troca a principal" : ""].filter(Boolean).join(" e "), tone: "info" };
+    else if (card.recordedInArticle === false) status = { label: "Proposta ainda não gravada", tone: "warning" };
+    else status = { label: "Gravado no ArticleDNA", tone: "success" };
+
+    const mudancas = suggestions.filter(item => item.checked && item.changesSilo);
+    const confirmLines = publicado ? [
+      ...mudancas.map(item => `"${item.keyword}" muda do Silo "${item.siloLabel}" para o Silo "${card.siloLabel}" deste publicado.`),
+      `Pela tabela, o artigo fica com ${plural(after.keywords, "keyword", "keywords")} (eram ${before.keywords}), volume somado ${volumeAntes} → ${volumeDepois}; as recusadas acima, com o motivo, ficam de fora.`,
+    ] : [];
+    const capWarning = after.keywords > TETO_DO_ARTIGO ? `Passa do teto de ${TETO_DO_ARTIGO}: desmarque ${after.keywords - TETO_DO_ARTIGO}.` : null;
+    // As sugestões deste publicado que ficaram com outro (mais páginas em comum): a linha diz onde estão.
+    const cedidas = publicado ? card.suggestions.filter(item => !pertence(owners, item.keywordId, card.anchorKeywordId)) : [];
+    const emptyReason = suggestions.length
+      ? null
+      : cedidas.length
+        ? `${cedidas.slice(0, 3).map(item => `"${item.keyword}" está na linha de "${rotulo.get(owners.get(item.keywordId) ?? "") ?? "outro publicado"}"`).join("; ")} (mais páginas em comum): cada keyword vai para um artigo só.`
+      : busca && busca.state !== "found"
+        ? busca.reason
+        : card.state === "no_pair_in_batch" && publicado
+          ? "Sem par no lote: nenhuma keyword deste lote trata do mesmo assunto no Google. Use a busca em lote acima."
+          : card.headline;
+    return {
+      key: card.key,
+      kind: card.kind,
+      kindLabel: card.kindLabel,
+      anchorKeywordId: card.anchorKeywordId,
+      anchorLabel: card.anchorLabel,
+      siloLabel: card.siloLabel,
+      card,
+      principal: { keyword: nome(principalId), volumeLabel: comVolume(volume(principalId)) },
+      pageNote: publicado && principalId !== card.anchorKeywordId ? `Página: "${card.anchorLabel}" (URL, slug e canonical dela)` : null,
+      swap: publicado && card.swapSubstitute ? {
+        keyword: card.swapSubstitute.keyword,
+        detail: comVolume(volume(card.swapSubstitute.keywordId)),
+        accepted: trocaAceita,
+      } : null,
+      suggestions,
+      emptyReason,
+      emptyIsError: !suggestions.length && busca?.state === "ads_error",
+      before,
+      after,
+      // Depois de gravar e reler, a célula mostra o total NOVO do ArticleDNA (o que o dono pediu), não "3 → 3".
+      totalsLabel: writtenNow && !pending && !mesaSemDna
+        ? `${plural(before.keywords, "keyword", "keywords")} · volume ${volumeAntes} (gravado agora)`
+        : `${before.keywords} → ${after.keywords} keywords · volume ${volumeAntes} → ${volumeDepois}`,
+      keywordsChangeLabel: writtenNow && !pending && !mesaSemDna ? `${plural(before.keywords, "keyword", "keywords")} (gravado agora)` : `${before.keywords} → ${after.keywords} keywords`,
+      volumeChangeLabel: writtenNow && !pending && !mesaSemDna ? `volume ${volumeAntes}` : `volume ${volumeAntes} → ${volumeDepois}`,
+      capWarning,
+      status,
+      statusNote,
+      pending,
+      writtenNow,
+      confirmLines,
+      subjectPicks: publicado ? [] : suggestions.filter(item => item.checked && item.keywordId).map(item => item.keywordId!),
+    };
+  });
+}
+
+/**
+ * A ordem da tabela: primeiro quem tem algo a gravar, depois quem acabou de
+ * ser gravado, depois quem tem sugestão, depois o resto; publicados antes de
+ * Assuntos. Estável.
+ */
+export function sortReinforcementRows(rows: readonly ReinforcementTableRow[]): ReinforcementTableRow[] {
+  const peso = (row: ReinforcementTableRow) => (row.pending ? 0 : row.statusNote || row.writtenNow ? 1 : row.suggestions.length ? 2 : 3) * 2 + (row.kind === "published" ? 0 : 1);
+  return rows.map((row, indice) => ({ row, indice })).sort((a, b) => peso(a.row) - peso(b.row) || a.indice - b.indice).map(item => item.row);
+}
+
+/** A linha pede decisão: tem algo a gravar, foi gravada agora, ou tem sugestão para marcar. */
+export function reinforcementRowNeedsAttention(row: Pick<ReinforcementTableRow, "pending" | "writtenNow" | "suggestions"> & { statusNote?: string | null }): boolean {
+  // "Mesa gravada · falta o ArticleDNA" também pede decisão (o próximo passo está na linha).
+  return row.pending || row.writtenNow || row.suggestions.length > 0 || Boolean(row.statusNote);
+}
+
+/** A frase ao lado de "Gravar reforços": o que ele grava agora. */
+export function reinforcementTableSummary(rows: readonly ReinforcementTableRow[]): string {
+  const pendentes = rows.filter(row => row.pending);
+  if (!pendentes.length) return "Nada marcado. O botão também confere se falta algo nos artigos já gravados. Custo: zero.";
+  const entram = pendentes.reduce((total, row) => total + Math.max(0, row.after.keywords - row.before.keywords), 0);
+  const trocas = pendentes.filter(row => row.swap?.accepted).length;
+  const semDna = pendentes.filter(row => row.card.articleKeywordIds === null).length;
+  const partes = [
+    entram ? plural(entram, "keyword entra", "keywords entram") : "",
+    trocas ? plural(trocas, "troca de principal", "trocas de principal") : "",
+    semDna ? `${plural(semDna, "ganha", "ganham")} o primeiro ArticleDNA` : "",
+  ].filter(Boolean);
+  return `${plural(pendentes.length, "artigo publicado com algo a gravar", "artigos publicados com algo a gravar")}${partes.length ? ` (${partes.join(", ")})` : ""}. A confirmação mostra, por artigo, o que muda. ${PUBLISHED_REINFORCEMENT_COST_LINE}`;
 }
 
 /* ------------------------------ erros ------------------------------ */

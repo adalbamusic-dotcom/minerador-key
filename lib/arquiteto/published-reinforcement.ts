@@ -43,6 +43,8 @@ import { rankingBlocksSwap, type DifferentiationPage, type DifferentiationRankin
 import type { SerpSuggestionLevel } from "./serp-subject-suggestions.ts";
 import type { SubjectDiscoverySource } from "../minerador/subject-discovery-plan.ts";
 import { buildPublishedSwapArticlePayload } from "../../modules/arquiteto/serp-subject-model.ts";
+import { serpCompositionMismatch, type SerpArticleRole, type SerpAssessmentComposition } from "./published-formation-serp.ts";
+import { classifySlugFit, slugTextOf } from "./published-slug-fit.ts";
 
 /* -------------------------------- constantes -------------------------------- */
 
@@ -121,6 +123,21 @@ export type PublishedReinforcementPageFacts = {
   /** A troca pedida e a proposta medida agora (régua da troca, D2.1). */
   swapKeywordId: string | null;
   swapProposal: PublishedPrimarySwapProposal | null;
+  /**
+   * Aditivo (2026-09-28, Defeito 3): os pareceres de SERP gravados que podem
+   * responder por este artigo, na ordem de preferência (o da formação humana,
+   * depois o do candidato calculado da página), com a composição que cada um
+   * observou. O ArticleDNA só é aprovado com o parecer DA COMPOSIÇÃO que vai
+   * ser gravada — nunca com o de outra.
+   */
+  serpCandidates?: Array<{ reference: VersionReference; composition: SerpAssessmentComposition | null }>;
+  /**
+   * Aditivo (corretor 2026-09-28): de onde veio a troca. `request` = a caixinha
+   * "Aceitar a troca" desta confirmação; `recorded` = a troca que você
+   * confirmou numa confirmação anterior do Reforçar e ficou gravada na mesa
+   * (marcador `PUBLISHED_REINFORCEMENT_SWAP_REASON`) esperando o ArticleDNA.
+   */
+  swapSource?: "request" | "recorded" | null;
 };
 
 /* ---------------------------------- plano ---------------------------------- */
@@ -159,7 +176,30 @@ export type PublishedReinforcementPagePlan = {
   refused: Array<{ keyword: string; reason: string }>;
   /** O que a confirmação diz desta página, em frases simples. */
   lines: string[];
+  /**
+   * Aditivo (2026-09-28): o parecer de SERP que descreve a composição a gravar
+   * (vai no ArticleDNA aprovado), ou `null` quando não há.
+   */
+  serpReference?: VersionReference | null;
+  /**
+   * Aditivo (2026-09-28): por que o ArticleDNA fica para a próxima
+   * confirmação — a composição mudou e ainda não há parecer de SERP dela. A
+   * mesa (Minerador, composição, Silo) é gravada agora; o ArticleDNA, depois
+   * do "Processar artigos" (cache primeiro). `null`: o DNA é gravado agora.
+   */
+  dnaDeferred?: string | null;
+  /** Aditivo (2026-09-28): nova versão só para levar o parecer da composição gravada. */
+  serpRefresh?: boolean;
+  /**
+   * Aditivo (corretor 2026-09-28): a principal da troca já confirmada no
+   * ArticleDNA troca a entidade do slug. A mesa NÃO é alinhada a ela (os papéis
+   * ficam como estão) e a confirmação diz isso; uma nova troca pode ser pedida.
+   */
+  confirmedSwapContradictsSlug?: boolean;
 };
+
+/** A frase do próximo passo quando o ArticleDNA espera o parecer da composição. */
+export const PUBLISHED_REINFORCEMENT_SERP_NEXT_STEP = "Próximo passo: \"Processar artigos\" para este artigo (cache primeiro: sem custo quando as 4 lentes estão no cache) e use \"Gravar reforços\" de novo (tabela \"Reforçar publicados\") para gravar o ArticleDNA.";
 
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
 const lista = (nomes: readonly string[]) => nomes.map(nome => `"${nome}"`).join(", ");
@@ -201,7 +241,13 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
   // A formação gravada do publicado pertence a ele: outra principal decidida por
   // humano, ou membro já no ArticleDNA de outro artigo, faria a mesma keyword
   // morar em dois ArticleDNAs. Nada é desfeito em silêncio.
-  const outraPrincipal = facts.members.find(item => item.formationRole === "principal");
+  // Exceção (2026-09-28): a principal da formação é a da troca pedida agora,
+  // ou a da troca já confirmada no ArticleDNA — as duas são decisão humana
+  // sobre ESTE artigo, e a página continua sendo ele.
+  const trocaConfirmada = facts.article?.payload.primaryKeywordDecision?.status === "confirmed" && facts.article.payload.primaryKeywordDecision.previousKeywordId === page.keywordId
+    ? facts.article.payload.principalKeywordId
+    : null;
+  const outraPrincipal = facts.members.find(item => item.formationRole === "principal" && item.keywordId !== facts.swapKeywordId && item.keywordId !== trocaConfirmada);
   if (outraPrincipal) return recusar(`A formação gravada deste publicado tem "${outraPrincipal.keyword}" como principal, por decisão sua: confirme a composição na mesa antes.`);
   const emOutroArtigo = facts.members.filter(item => item.otherArticleId);
   if (emOutroArtigo.length) return recusar(`${lista(emOutroArtigo.map(item => item.keyword))} já ${emOutroArtigo.length === 1 ? "está" : "estão"} no ArticleDNA de outro artigo: tire de lá antes (uma keyword mora num artigo só).`);
@@ -213,8 +259,33 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
   // Quem fica: o que o ArticleDNA já tem (nenhuma keyword some) e a formação gravada.
   const doArtigo = facts.article ? facts.article.payload.keywordReferences.map(reference => String(reference.keywordId)) : [];
   const ficam = [...new Set([...doArtigo, ...facts.members.map(item => item.keywordId)])].filter(id => id !== page.keywordId);
+  // O texto das keywords que só o ArticleDNA conhece (ex.: a principal de uma troca já aplicada).
+  for (const referencia of facts.article?.payload.keywordReferences || []) {
+    const snapshot = referencia.keywordDnaSnapshot?.sourceKeywordSnapshot as { keyword?: unknown } | undefined;
+    if (!nomes.has(String(referencia.keywordId)) && typeof snapshot?.keyword === "string" && snapshot.keyword.trim()) nomes.set(String(referencia.keywordId), snapshot.keyword.trim());
+  }
   const keep = ficam.map(id => ({ keywordId: id, keyword: nomes.get(id) ?? id }));
   const composicao = new Set<string>([page.keywordId, ...ficam]);
+  // Teto de 6 também para o que já está gravado (ArticleDNA + formação): nada entra por cima dele.
+  if (composicao.size > MAX_ARTICLE_KEYWORDS) {
+    return recusar(`O ArticleDNA e a composição gravada na mesa somam ${composicao.size} keywords, acima do teto de ${MAX_ARTICLE_KEYWORDS}: tire ${composicao.size - MAX_ARTICLE_KEYWORDS} na mesa antes.`);
+  }
+  /*
+   * A TROCA JÁ CONFIRMADA QUE CONTRADIZ O SLUG (corretor 2026-09-28).
+   *
+   * A troca de 2026-09-28 pôs "como atrair pacientes para o consultório" como
+   * principal de /como-atrair-pacientes-para-clinica: a URL diz uma entidade e
+   * a principal diz outra. A régua nova só evita as próximas; esta já está no
+   * ArticleDNA. O Reforçar não a consolida na mesa sem dizer isso, e aceita
+   * uma nova troca para uma keyword que caiba no slug (decisão humana, nova
+   * versão, a página continua sendo o artigo).
+   */
+  const slugDaPagina = slugTextOf({ slug: page.slug ?? null, url: page.url, canonical: page.canonical ?? null });
+  const contradicaoDaTroca = trocaConfirmada ? classifySlugFit(slugDaPagina, nomes.get(trocaConfirmada) ?? "") : null;
+  const trocaConfirmadaContradiz = contradicaoDaTroca?.fit === "contradicts";
+  const avisoDaTroca = trocaConfirmadaContradiz
+    ? `A principal atual, "${nomes.get(trocaConfirmada!) ?? trocaConfirmada}", não combina com o slug publicado "${slugDaPagina}": ${contradicaoDaTroca!.reason}. A troca já confirmada não é alinhada na mesa sem uma nova decisão sua: troque por uma keyword que caiba no slug ("Aceitar a troca" na tabela) ou mantenha como está.`
+    : null;
 
   for (const id of facts.unknownIds) refused.push({ keyword: id, reason: "Não existe nesta marca." });
   for (const frase of facts.newMissing) refused.push({ keyword: frase, reason: "Não está no resultado gravado da busca desta página: rode a busca de novo." });
@@ -272,25 +343,120 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
     const recusarTroca = (reason: string) => { swap = { keywordId: facts.swapKeywordId, keyword: nome, state: "refused", reason }; };
     const post: PublishedPrimaryPost = page.post;
     const jaTrocada = facts.article?.payload.primaryKeywordDecision?.status === "confirmed" && facts.article.payload.principalKeywordId !== page.keywordId;
-    if (jaTrocada) recusarTroca("A troca da principal já foi aplicada neste artigo.");
+    // Refazer a troca só quando a principal de agora contradiz o slug (e para outra keyword).
+    if (jaTrocada && (!trocaConfirmadaContradiz || facts.swapKeywordId === trocaConfirmada)) recusarTroca("A troca da principal já foi aplicada neste artigo.");
     else if (post === "locked") recusarTroca("Posto \"Travado ao slug\": a principal fica; o artigo só recebe secundárias.");
     else if (post !== "free") recusarTroca("O Posto não está declarado: declare \"Livre\" no Minerador antes de trocar.");
     else if (!facts.ranking) recusarTroca("Não deu para reler a SERP da página agora: a principal fica. Tente de novo depois.");
     else if (rankingBlocksSwap(facts.ranking)) recusarTroca("A página aparece no Google: a principal fica (página que ranqueia não troca de principal).");
     else if (!finais.has(facts.swapKeywordId)) recusarTroca(`"${nome}" não está no artigo nesta confirmação: marque-a como reforço também.`);
     else if (!facts.swapProposal || facts.swapProposal.state !== "proposed" || facts.swapProposal.substitute?.keywordId !== facts.swapKeywordId) {
-      recusarTroca(facts.swapProposal?.note || "A régua da troca não aceita esta keyword agora (volume do Google Ads maior e SERP em comum).");
-    } else swap = { keywordId: facts.swapKeywordId, keyword: nome, state: "apply", reason: `"${nome}" assume a principal; "${page.keyword}" fica como secundária.` };
+      // O motivo desta keyword, quando a régua a recusou (ex.: troca a entidade do slug); senão, a nota geral.
+      recusarTroca(facts.swapProposal?.rejected.find(item => item.keywordId === facts.swapKeywordId)?.reason || facts.swapProposal?.note || "A régua da troca não aceita esta keyword agora (volume do Google Ads maior e SERP em comum).");
+    } else {
+      const deQuem = facts.swapSource === "recorded" ? "Troca que você confirmou na confirmação anterior do Reforçar (gravada na mesa, esperando o ArticleDNA): " : "";
+      const refeita = jaTrocada ? ` "${nomes.get(trocaConfirmada!) ?? trocaConfirmada}", que contradiz o slug, deixa de ser a principal e fica como secundária.` : "";
+      swap = { keywordId: facts.swapKeywordId, keyword: nome, state: "apply", reason: `${deQuem}"${nome}" assume a principal; "${page.keyword}" fica como secundária.${refeita}` };
+    }
   }
 
-  const mudaComposicao = addNoTeto.length > 0 || createNoTeto.length > 0;
-  const dnaMode: PublishedReinforcementPagePlan["dna"]["mode"] = !facts.article ? "first" : mudaComposicao || swap.state === "apply" ? "successor" : "none";
-  const status: PublishedReinforcementPagePlan["status"] = dnaMode === "none" ? "unchanged" : "ready";
+  // Membros da formação gravada que o ArticleDNA ainda não tem (a composição
+  // foi gravada numa confirmação anterior, antes do parecer): entram agora.
+  const pendentesNoDna = facts.article ? ficam.filter(id => !doArtigo.includes(id)) : [];
+  // A principal da formação gravada que é a troca pedida só vale se a troca
+  // passar agora pela régua: senão a decisão humana dela ficaria desfeita.
+  const principalDaMesa = facts.members.find(item => item.formationRole === "principal" && item.keywordId === facts.swapKeywordId && item.keywordId !== trocaConfirmada);
+  if (principalDaMesa && swap.state !== "apply") {
+    return recusar(`A formação gravada deste publicado tem "${principalDaMesa.keyword}" como principal, por decisão sua, e a troca não passa agora: ${swap.reason || "a régua da troca não a aceita"} Confirme a composição na mesa antes.`);
+  }
+  const mudaComposicao = addNoTeto.length > 0 || createNoTeto.length > 0 || pendentesNoDna.length > 0;
+  let dnaMode: PublishedReinforcementPagePlan["dna"]["mode"] = !facts.article ? "first" : mudaComposicao || swap.state === "apply" ? "successor" : "none";
+
+  /*
+   * O PARECER DE SERP DA COMPOSIÇÃO QUE VAI SER GRAVADA (Defeito 3).
+   *
+   * A aprovação leva a evidência SERP do artigo. Ela precisa descrever esta
+   * composição (as mesmas keywords e a mesma principal, depois da troca):
+   * gravar o parecer de 1 keyword num artigo de 5 é aprovar o que ninguém
+   * confrontou com o mercado. Sem o parecer desta composição, a mesa é gravada
+   * agora e o ArticleDNA espera o "Processar artigos" (cache primeiro).
+   */
+  const principalFinal = swap.state === "apply" && swap.keywordId ? swap.keywordId : facts.article?.payload.principalKeywordId ?? page.keywordId;
+  /*
+   * Os papéis da composição a gravar (corretor 2026-09-28): os do ArticleDNA,
+   * senão os da decisão humana na mesa ("reforco" → reforço narrativo), e a
+   * principal final. O parecer precisa ter visto os mesmos papéis nas keywords
+   * que consultou — não só a mesma lista e a mesma principal.
+   */
+  const papelNoArtigo = new Map((facts.article?.payload.keywordReferences || []).map(reference => [String(reference.keywordId), reference.role as SerpArticleRole]));
+  const papelNaMesa = new Map(facts.members.map(item => [item.keywordId, item.formationRole] as const));
+  const papeisDe = (ids: readonly string[], principal: string, doArtigoSo = false): Record<string, SerpArticleRole> => Object.fromEntries(ids.map(id => [id,
+    id === principal ? "principal"
+      : papelNoArtigo.get(id) === "reforco_narrativo" || (!doArtigoSo && !papelNoArtigo.has(id) && papelNaMesa.get(id) === "reforco") ? "reforco_narrativo" : "secundaria"]));
+  const idsDoAlvo = [...new Set([...composicao, ...addNoTeto.map(item => item.keywordId)])];
+  const alvo = { keywordIds: idsDoAlvo, principalKeywordId: principalFinal, roles: papeisDe(idsDoAlvo, principalFinal) };
+  // `serpCandidates` ausente = chamador de domínio que não confere a SERP
+  // (o servidor sempre manda a lista, mesmo vazia).
+  const confereSerp = facts.serpCandidates !== undefined;
+  const candidatosSerp = facts.serpCandidates || [];
+  const doAlvo = createNoTeto.length ? null : candidatosSerp.find(item => serpCompositionMismatch(item.composition, alvo) === null) ?? null;
+  let serpRefresh = false;
+  /*
+   * A troca já confirmada no ArticleDNA e a mesa dizendo o contrário (a página
+   * "principal", a nova principal "secundaria" — a gravação de 2026-09-28 fez
+   * isso): a confirmação alinha os papéis na mesa, pela mesma rota da mesa.
+   * Sem isso a próxima formação ancorava na página e desfazia a troca.
+   */
+  // A troca confirmada que contradiz o slug NÃO é alinhada na mesa (nem com nova troca pedida agora).
+  const alinharTroca = confereSerp && trocaConfirmada !== null && !trocaConfirmadaContradiz && swap.state !== "apply"
+    && (facts.item.formationRole === "principal" || facts.members.find(item => item.keywordId === trocaConfirmada)?.formationRole !== "principal");
+  const comAviso = (motivo: string) => avisoDaTroca && swap.state !== "apply" ? `${avisoDaTroca} ${motivo}` : motivo;
+  let motivoDoDnaVigente: string | null = null;
+  if (confereSerp && dnaMode === "none" && facts.article) {
+    // O ArticleDNA vigente leva um parecer de OUTRA composição (ex.: gravado
+    // antes desta correção): nova versão só para levar o parecer certo — ou,
+    // sem ele ainda, o motivo e o caminho, em vez de "nada muda" em silêncio.
+    const atual = facts.article.payload.serpAssessmentRef;
+    const idsDoArtigo = facts.article.payload.keywordReferences.map(reference => String(reference.keywordId));
+    const composicaoDoArtigo = { keywordIds: idsDoArtigo, principalKeywordId: facts.article.payload.principalKeywordId, roles: papeisDe(idsDoArtigo, facts.article.payload.principalKeywordId, true) };
+    const atualDescreve = Boolean(atual) && candidatosSerp.some(item => item.reference.versionId === atual!.versionId && serpCompositionMismatch(item.composition, composicaoDoArtigo) === null);
+    const atualConhecido = Boolean(atual) && candidatosSerp.some(item => item.reference.versionId === atual!.versionId);
+    // O porquê, dito: outras keywords, outra principal, outros papéis (ex.: o de 2026-09-28 em "tráfego pago": reforço × secundária).
+    const porqueAtual = atualConhecido ? serpCompositionMismatch(candidatosSerp.find(item => item.reference.versionId === atual!.versionId)!.composition, composicaoDoArtigo) : null;
+    const detalhe = porqueAtual ? ` — ${porqueAtual}` : "";
+    if (!atualDescreve && doAlvo && atual?.versionId !== doAlvo.reference.versionId) { dnaMode = "successor"; serpRefresh = true; }
+    else if (!atualDescreve && !doAlvo && atualConhecido && alinharTroca) {
+      motivoDoDnaVigente = `O ArticleDNA v${facts.article.versionNumber} foi aprovado com o parecer da SERP de outra composição (${plural(composicaoDoArtigo.keywordIds.length, "keyword", "keywords")} no artigo)${detalhe}: a nova versão leva o parecer desta composição depois do "Processar artigos".`;
+    } else if (!atualDescreve && !doAlvo && atualConhecido) {
+      return { ...recusar(comAviso(`O ArticleDNA v${facts.article.versionNumber} foi aprovado com o parecer da SERP de outra composição (${plural(composicaoDoArtigo.keywordIds.length, "keyword", "keywords")} no artigo)${detalhe}. Rode "Processar artigos" para este artigo (cache primeiro: sem custo quando as 4 lentes estão no cache) e use "Gravar reforços" de novo (tabela "Reforçar publicados"): a nova versão leva o parecer desta composição.`)), refused };
+    }
+  }
+  const mesaMuda = addNoTeto.length > 0 || createNoTeto.length > 0 || alinharTroca
+    || (swap.state === "apply" && facts.members.find(item => item.keywordId === swap.keywordId)?.formationRole !== "principal");
+  let dnaDeferred: string | null = motivoDoDnaVigente;
+  if (confereSerp && dnaMode !== "none" && !doAlvo) {
+    const primeiroMotivo = candidatosSerp.length ? serpCompositionMismatch(candidatosSerp[0].composition, alvo) : null;
+    const motivo = !candidatosSerp.length
+      ? "O artigo ainda não tem parecer da SERP gravado."
+      : createNoTeto.length
+        ? "Entram keywords novas: o parecer da SERP gravado não as confrontou."
+        : `${primeiroMotivo ? `${primeiroMotivo[0].toUpperCase()}${primeiroMotivo.slice(1)}` : "O parecer da SERP gravado não descreve esta composição"}.`;
+    if (!mesaMuda) return { ...recusar(comAviso(`${motivo} Rode "Processar artigos" para este artigo (cache primeiro: sem custo quando as 4 lentes estão no cache) e abra a prévia de novo.`)), refused };
+    dnaDeferred = motivo;
+  }
+  // A troca confirmada que contradiz o slug, sem nada a gravar agora: recusada com o aviso (nunca "nada muda" calado).
+  if (avisoDaTroca && swap.state !== "apply" && dnaMode === "none" && !alinharTroca) return { ...recusar(avisoDaTroca), refused };
+  const status: PublishedReinforcementPagePlan["status"] = dnaMode === "none" && !alinharTroca ? "unchanged" : "ready";
 
   const lines: string[] = [];
-  if (dnaMode === "first") lines.push(`"${page.keyword}": cria o ArticleDNA do publicado (versão 1), aprovado por você.`);
+  if (dnaDeferred) lines.push(`"${page.keyword}": grava agora a composição na mesa; o ArticleDNA fica para a próxima confirmação. ${dnaDeferred}`);
+  else if (serpRefresh) lines.push(`"${page.keyword}": nova versão do ArticleDNA (v${(facts.article?.versionNumber ?? 0) + 1}) só para levar o parecer da SERP desta composição, aprovada por você.`);
+  else if (dnaMode === "first") lines.push(`"${page.keyword}": cria o ArticleDNA do publicado (versão 1), aprovado por você.`);
   else if (dnaMode === "successor") lines.push(`"${page.keyword}": nova versão do ArticleDNA (v${(facts.article?.versionNumber ?? 0) + 1}), aprovada por você.`);
   else lines.push(`"${page.keyword}": nada muda (o ArticleDNA já tem tudo o que foi marcado).`);
+  if (avisoDaTroca && swap.state !== "apply") lines.push(avisoDaTroca);
+  if (alinharTroca) lines.push(`Alinha na mesa a troca já confirmada no ArticleDNA: "${nomes.get(trocaConfirmada!) ?? trocaConfirmada}" principal e "${page.keyword}" secundária (a próxima formação não desfaz a troca).`);
+  if (pendentesNoDna.length) lines.push(`Entram no ArticleDNA ${plural(pendentesNoDna.length, "keyword que já estava", "keywords que já estavam")} na composição gravada: ${lista(pendentesNoDna.map(id => nomes.get(id) ?? id))}.`);
   if (addNoTeto.length) lines.push(`Entram ${plural(addNoTeto.length, "keyword do Minerador", "keywords do Minerador")}: ${lista(addNoTeto.map(item => item.keyword))}.`);
   const outroSilo = addNoTeto.filter(item => item.fromTerritoryRef);
   if (outroSilo.length) lines.push(`${plural(outroSilo.length, "delas muda", "delas mudam")} para o Silo do publicado.`);
@@ -301,6 +467,7 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
   if (swap.state === "apply") lines.push(`Troca da principal: ${swap.reason}`);
   if (swap.state === "refused") lines.push(`Troca da principal não será feita: ${swap.reason}`);
   if (refused.length) lines.push(`Ficam de fora: ${refused.map(item => `"${item.keyword}" (${item.reason})`).join("; ")}`);
+  if (dnaDeferred) lines.push(PUBLISHED_REINFORCEMENT_SERP_NEXT_STEP);
   lines.push("URL, slug e canonical não mudam.");
 
   return {
@@ -314,6 +481,10 @@ export function planPublishedReinforcementPage(facts: PublishedReinforcementPage
     swap,
     refused,
     lines,
+    serpReference: doAlvo?.reference ?? null,
+    dnaDeferred,
+    serpRefresh,
+    ...(trocaConfirmadaContradiz ? { confirmedSwapContradictsSlug: true } : {}),
   };
 }
 
@@ -469,11 +640,18 @@ export function applyReinforcementSwap(input: {
   substituteVolume: number | null;
   actorId: string;
   decidedAt: string;
+  /**
+   * Aditivo (corretor 2026-09-28): refaz uma troca já confirmada cuja principal
+   * contradiz o slug. A decisão continua sendo sobre a PÁGINA
+   * (`previousKeywordId` = a página, que segue identificando o artigo); a
+   * principal de agora vira secundária. `currentPrincipalLabel` é o texto dela.
+   */
+  redo?: { currentPrincipalLabel: string } | null;
 }): { ok: true; payload: ArticleDNA } | { ok: false; reason: string } {
   const desfecho = decidePublishedPrimarySwap({
     proposal: input.proposal,
     article: {
-      principalKeywordId: input.current.principalKeywordId,
+      principalKeywordId: input.redo ? input.page.keywordId : input.current.principalKeywordId,
       keywordIds: input.current.keywordReferences.map(reference => String(reference.keywordId)),
       identity: { url: input.page.url, canonical: input.page.canonical, slug: input.page.slug },
     },
@@ -491,7 +669,7 @@ export function applyReinforcementSwap(input: {
       actorId: input.actorId,
       decidedAt: input.decidedAt,
       substituteLabel: input.proposal.substitute?.keyword ?? "",
-      previousLabel: input.page.keyword,
+      previousLabel: input.redo ? input.redo.currentPrincipalLabel : input.page.keyword,
       substituteMetrics: { volume: input.substituteVolume, resultCount: null, kgrScore: null },
     });
     return { ok: true, payload };
@@ -536,6 +714,8 @@ export type PublishedReinforcementPageOutcome = {
   partial?: string[];
   /** Keywords que ficaram de fora durante a gravação, com o motivo (ex.: sem volume do Google Ads). */
   leftOut?: Array<{ keyword: string; reason: string }>;
+  /** Aditivo (2026-09-28): a mesa foi gravada e o ArticleDNA espera o parecer da SERP desta composição (o motivo). */
+  dnaDeferred?: string | null;
 };
 
 /**
@@ -550,7 +730,8 @@ export function describePublishedReinforcementOutcome(
 ): { tone: "success" | "info" | "warning"; message: string } {
   const gravadas = outcomes.filter(item => item.written);
   const falhas = outcomes.filter(item => item.error);
-  const soNoMinerador = outcomes.filter(item => !item.written && !item.error && item.partial?.length);
+  const adiadas = outcomes.filter(item => !item.written && !item.error && item.dnaDeferred);
+  const soNoMinerador = outcomes.filter(item => !item.written && !item.error && !item.dnaDeferred && item.partial?.length);
   const deFora = outcomes.flatMap(item => (item.leftOut || []).map(fora => `"${fora.keyword}" (${fora.reason})`));
   const partes: string[] = [];
   if (gravadas.length) {
@@ -558,8 +739,11 @@ export function describePublishedReinforcementOutcome(
     const trocas = gravadas.filter(item => item.swapApplied).length;
     partes.push(`${plural(gravadas.length, "artigo publicado gravado", "artigos publicados gravados")} e confirmados na releitura${keywords ? `, com ${plural(keywords, "keyword nova no artigo", "keywords novas nos artigos")}` : ""}${trocas ? ` e ${plural(trocas, "troca", "trocas")} de principal` : ""}.`);
   }
+  for (const item of adiadas) {
+    partes.push(`"${item.keyword}": ${item.partial?.length ? `gravado e confirmado na releitura: ${item.partial.join("; ")}. ` : ""}O ArticleDNA ainda não foi gravado: ${item.dnaDeferred} ${PUBLISHED_REINFORCEMENT_SERP_NEXT_STEP}`);
+  }
   for (const item of soNoMinerador) partes.push(`"${item.keyword}": o ArticleDNA não mudou. Gravado só: ${item.partial!.join("; ")}.`);
-  if (!gravadas.length && !falhas.length && !soNoMinerador.length && !stoppedReason) partes.push("Nada foi gravado: os artigos já tinham tudo o que foi marcado.");
+  if (!gravadas.length && !falhas.length && !soNoMinerador.length && !adiadas.length && !stoppedReason) partes.push("Nada foi gravado: os artigos já tinham tudo o que foi marcado.");
   if (deFora.length) partes.push(`Ficaram de fora: ${deFora.join("; ")}.`);
   if (falhas.length) {
     partes.push(`Não gravado: ${falhas.map(item => `"${item.keyword}" (${item.error})${item.partial?.length ? ` — já ficou gravado: ${item.partial.join("; ")}` : " — nada foi gravado nele"}`).join("; ")}.`);
@@ -567,6 +751,6 @@ export function describePublishedReinforcementOutcome(
   if (stoppedReason) partes.push(`Parou antes do fim: ${stoppedReason}`);
   if (notAttempted.length) partes.push(`Não tentados (nada foi gravado neles): ${lista(notAttempted)}. Abra a prévia de novo para gravá-los.`);
   partes.push("URL, slug e canonical não mudaram.");
-  const pendencia = falhas.length > 0 || Boolean(stoppedReason) || notAttempted.length > 0;
+  const pendencia = falhas.length > 0 || Boolean(stoppedReason) || notAttempted.length > 0 || adiadas.length > 0;
   return { tone: gravadas.length && !pendencia ? "success" : pendencia ? "warning" : "info", message: partes.join(" ") };
 }

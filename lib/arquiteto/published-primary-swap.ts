@@ -50,6 +50,7 @@ import { intentComparisonKey } from "./keyword-dna-signals.ts";
 import { SERP_SUBJECT_THRESHOLDS, type SerpSubjectIndex, type SerpSubjectOverlap } from "./serp-subject-overlap.ts";
 import { logicDnaDivergence, logicWarningText, measureAnchorConvergence, serpAwareDnaBarrier } from "./serp-subject-convergence.ts";
 import { SERP_SUGGESTION_LEVEL_LABELS, type SerpSuggestionLevel } from "./serp-subject-suggestions.ts";
+import { classifySlugFit, slugTextOf, type SlugFit } from "./published-slug-fit.ts";
 
 /* -------------------------------- o posto -------------------------------- */
 
@@ -109,7 +110,12 @@ export type PublishedPrimarySwapRejection = {
    * para REFORÇAR com palavras em comum, não para ASSUMIR a principal, que
    * exige 3 ou mais. `serp` = o Google diz que é outro assunto.
    */
-  missing: "volume" | "volume_not_higher" | "intent" | "serp" | "serp_support" | "serp_unknown" | "published" | "subject_without_volume";
+  /**
+   * Aditivo (2026-09-28): `slug_entity` = troca a entidade do slug publicado
+   * ("para o consultório" num slug "-para-clinica"); `other_article` = é
+   * âncora de outro publicado ou membro de outro artigo.
+   */
+  missing: "volume" | "volume_not_higher" | "intent" | "serp" | "serp_support" | "serp_unknown" | "published" | "subject_without_volume" | "slug_entity" | "other_article";
   reason: string;
   sharedPageCount: number | null;
 };
@@ -132,9 +138,11 @@ export type PublishedPrimarySwapProposal = {
     warning: string | null;
     /** D2.3 (aditivo) — Forte (3+ páginas) ou Provável (com aviso). */
     level?: SerpSuggestionLevel;
+    /** Aditivo (2026-09-28): cabe no slug publicado ou neutra (a que contradiz nunca é proposta). */
+    slugFit?: SlugFit;
   } | null;
   /** As outras que cumpriram tudo, na ordem (para o humano escolher outra). */
-  alternatives: Array<{ keywordId: string; keyword: string; volume: number; sharedPageCount: number; level?: SerpSuggestionLevel }>;
+  alternatives: Array<{ keywordId: string; keyword: string; volume: number; sharedPageCount: number; level?: SerpSuggestionLevel; slugFit?: SlugFit }>;
   rejected: PublishedPrimarySwapRejection[];
   /** URL, slug, canonical e marca ficam como estão. */
   protectedIdentity: PublishedPrimarySwapIdentity;
@@ -165,8 +173,15 @@ export function proposePublishedPrimarySwap(input: {
   identity: PublishedPrimarySwapIdentity;
   candidates: readonly PublishedPrimarySwapCandidate[];
   serp: SerpSubjectIndex | null;
+  /**
+   * Aditivo (2026-09-28): por que a keyword já pertence a OUTRO artigo (âncora
+   * de outro publicado, membro de outro ArticleDNA ou de outra formação
+   * humana), ou `null`. Quem já mora em outro artigo não vira principal deste.
+   */
+  elsewhere?: (keywordId: string) => string | null;
 }): PublishedPrimarySwapProposal {
   const { published } = input;
+  const slugPublicado = slugTextOf(input.identity);
   const base = {
     publishedKeywordId: published.keywordId,
     publishedKeyword: published.keyword,
@@ -203,7 +218,7 @@ export function proposePublishedPrimarySwap(input: {
   const volumeAtual = typeof published.volume === "number" && published.volume > 0 ? published.volume : null;
   const intencaoAtual = intencaoDe(published);
   const rejected: PublishedPrimarySwapRejection[] = [];
-  const aptas: Array<{ keyword: PublishedPrimarySwapCandidate; volume: number; overlap: SerpSubjectOverlap; warning: string | null; level: SerpSuggestionLevel; motivoDoNivel: string }> = [];
+  const aptas: Array<{ keyword: PublishedPrimarySwapCandidate; volume: number; overlap: SerpSubjectOverlap; warning: string | null; level: SerpSuggestionLevel; motivoDoNivel: string; slugFit: SlugFit }> = [];
   const vistas = new Set<string>([published.keywordId]);
 
   for (const candidata of input.candidates) {
@@ -212,6 +227,8 @@ export function proposePublishedPrimarySwap(input: {
     const recusar = (missing: PublishedPrimarySwapRejection["missing"], reason: string, overlap?: SerpSubjectOverlap | null) =>
       rejected.push({ keywordId: candidata.keywordId, keyword: candidata.keyword, missing, reason, sharedPageCount: overlap && overlap.strength !== "unknown" ? overlap.sharedPageCount : null });
     if (candidata.isPublished) { recusar("published", "É a principal de outra página publicada: duas publicadas nunca se fundem."); continue; }
+    const alheia = input.elsewhere ? input.elsewhere(candidata.keywordId) : null;
+    if (alheia) { recusar("other_article", `${alheia}: uma keyword mora num artigo só, e a de outro artigo não assume esta principal.`); continue; }
     const volume = typeof candidata.volume === "number" ? candidata.volume : null;
     if (candidata.subjectDeclared && !candidata.volumeValidated) { recusar("subject_without_volume", "Assunto declarado sem Volume validado: nunca é principal nem dá slug (B5)."); continue; }
     if (!candidata.volumeValidated || volume === null || volume <= 0) { recusar("volume", "Sem Volume validado pelo Google Ads: a troca existe para ganhar volume."); continue; }
@@ -241,21 +258,30 @@ export function proposePublishedPrimarySwap(input: {
       recusar("serp", `Não divide a SERP com o artigo: ${overlap.reason}`, overlap);
       continue;
     }
+    // 2026-09-28 — URL, slug e canonical ficam: a substituta que troca a
+    // entidade do slug ("consultório" num slug de "clínica") não é proposta.
+    const encaixe = classifySlugFit(slugPublicado, candidata.keyword);
+    if (encaixe.fit === "contradicts") {
+      recusar("slug_entity", `Não combina com o slug publicado "${slugPublicado}": ${encaixe.reason}. A página ficaria com a URL de uma coisa e a principal de outra.`, overlap);
+      continue;
+    }
     const divergencia = logicDnaDivergence(published, candidata);
     const avisos = [
       !intencaoAtual || !intencao ? `A intenção de "${!intencaoAtual ? published.keyword : candidata.keyword}" não está registrada no DNA; confira antes de aceitar.` : "",
       divergencia ? logicWarningText(divergencia) : "",
       nivel.level === "probable" ? `Nível Provável (${nivel.reason}): o Google não junta as duas com ${SERP_SUBJECT_THRESHOLDS.strongPages}+ páginas; confira a evidência antes de aceitar.` : "",
     ].filter(Boolean);
-    aptas.push({ keyword: candidata, volume, overlap, warning: avisos.length ? avisos.join(" ") : null, level: nivel.level, motivoDoNivel: nivel.reason });
+    aptas.push({ keyword: candidata, volume, overlap, warning: avisos.length ? avisos.join(" ") : null, level: nivel.level, motivoDoNivel: nivel.reason, slugFit: encaixe.fit });
   }
 
-  // A melhor: Forte antes de Provável; dentro do nível, mais volume (é para
-  // isso que o dono soltou a principal); no empate, mais páginas em comum;
-  // depois a ordem estável.
-  aptas.sort((left, right) => (left.level === right.level ? 0 : left.level === "strong" ? -1 : 1)
-    || right.volume - left.volume
+  // A melhor (2026-09-28): primeiro a que CABE no slug publicado (a entidade
+  // central do slug); depois Forte antes de Provável; depois mais páginas em
+  // comum (o Google junta mais); depois mais volume; depois a ordem estável.
+  const ordemDoEncaixe = (fit: SlugFit) => fit === "fits" ? 0 : 1;
+  aptas.sort((left, right) => ordemDoEncaixe(left.slugFit) - ordemDoEncaixe(right.slugFit)
+    || (left.level === right.level ? 0 : left.level === "strong" ? -1 : 1)
     || right.overlap.sharedPageCount - left.overlap.sharedPageCount
+    || right.volume - left.volume
     || left.keyword.keywordId.localeCompare(right.keyword.keywordId));
 
   const candidates = [...candidatesBase];
@@ -266,7 +292,7 @@ export function proposePublishedPrimarySwap(input: {
       keyword: apta.keyword.keyword,
       status: "candidate",
       source: "serp",
-      reason: `${indice === 0 ? "Melhor substituta" : "Também qualifica"} (${SERP_SUGGESTION_LEVEL_LABELS[apta.level]}): volume ${apta.volume}${volumeAtual === null ? " (a atual não tem volume)" : ` contra ${volumeAtual}`}, mesma intenção na SERP e ${apta.motivoDoNivel}.`,
+      reason: `${indice === 0 ? "Melhor substituta" : "Também qualifica"} (${SERP_SUGGESTION_LEVEL_LABELS[apta.level]}${apta.slugFit === "fits" ? ", cabe no slug" : ""}): volume ${apta.volume}${volumeAtual === null ? " (a atual não tem volume)" : ` contra ${volumeAtual}`}, mesma intenção na SERP e ${apta.motivoDoNivel}.`,
     });
     if (registro.success) candidates.push(registro.data);
   }
@@ -294,6 +320,8 @@ export function proposePublishedPrimarySwap(input: {
       soVizinhanca ? `${soVizinhanca} só na vizinhança do Google: ${SERP_SUBJECT_THRESHOLDS.supportPages} páginas sem palavras em comum, e a troca exige ${SERP_SUBJECT_THRESHOLDS.strongPages}+ ou palavras que confirmem` : "",
       semVolume ? `${semVolume} sem volume maior que o da atual` : "",
       rejected.some(item => item.missing === "intent") ? "intenção diferente em outras" : "",
+      rejected.some(item => item.missing === "slug_entity") ? "outras trocam a entidade do slug publicado" : "",
+      rejected.some(item => item.missing === "other_article") ? "outras já moram em outro artigo" : "",
       semLeitura ? `${semLeitura} sem SERP no cache para medir` : "",
     ].filter(Boolean);
     return {
@@ -304,9 +332,10 @@ export function proposePublishedPrimarySwap(input: {
     };
   }
 
+  const noSlug = melhor.slugFit === "fits" ? ` (cabe no slug "${slugPublicado}")` : "";
   const reason = melhor.level === "strong"
-    ? `"${melhor.keyword.keyword}" tem volume ${melhor.volume}${volumeAtual === null ? " e a principal atual não tem volume" : ` contra ${volumeAtual}`}, a mesma intenção e divide ${melhor.overlap.sharedPageCount} páginas do top 10 com o artigo.`
-    : `"${melhor.keyword.keyword}" tem volume ${melhor.volume}${volumeAtual === null ? " e a principal atual não tem volume" : ` contra ${volumeAtual}`}, a mesma intenção e é Provável: ${melhor.motivoDoNivel}.`;
+    ? `"${melhor.keyword.keyword}"${noSlug} tem volume ${melhor.volume}${volumeAtual === null ? " e a principal atual não tem volume" : ` contra ${volumeAtual}`}, a mesma intenção e divide ${melhor.overlap.sharedPageCount} páginas do top 10 com o artigo.`
+    : `"${melhor.keyword.keyword}"${noSlug} tem volume ${melhor.volume}${volumeAtual === null ? " e a principal atual não tem volume" : ` contra ${volumeAtual}`}, a mesma intenção e é Provável: ${melhor.motivoDoNivel}.`;
   const decisao = PrimaryKeywordDecisionSchema.safeParse({
     status: "pending",
     previousKeywordId: published.keywordId,
@@ -325,8 +354,9 @@ export function proposePublishedPrimarySwap(input: {
       reason,
       warning: melhor.warning,
       level: melhor.level,
+      slugFit: melhor.slugFit,
     },
-    alternatives: aptas.slice(1).map(apta => ({ keywordId: apta.keyword.keywordId, keyword: apta.keyword.keyword, volume: apta.volume, sharedPageCount: apta.overlap.sharedPageCount, level: apta.level })),
+    alternatives: aptas.slice(1).map(apta => ({ keywordId: apta.keyword.keywordId, keyword: apta.keyword.keyword, volume: apta.volume, sharedPageCount: apta.overlap.sharedPageCount, level: apta.level, slugFit: apta.slugFit })),
     rejected,
     candidates,
     decision: decisao.success ? decisao.data : null,
