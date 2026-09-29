@@ -297,7 +297,10 @@ test("D2.1 Livre: propõe a de maior volume que divide a SERP; URL, slug e canon
   assert.equal(proposta.state, "proposed");
   assert.equal(proposta.substitute?.keywordId, "kw-09", "volume 20 e 7 páginas; empate com kw-10 pela ordem estável");
   assert.equal(proposta.substitute?.sharedPageCount, 7);
-  assert.deepEqual(proposta.alternatives.map(item => item.keywordId), ["kw-10", "kw-11", "kw-12", "kw-13"]);
+  // 2026-09-28 (Defeito 2): "para o consultório" troca a entidade do slug "-para-clinica" — nunca é proposta.
+  assert.deepEqual(proposta.alternatives.map(item => item.keywordId), ["kw-11", "kw-13"]);
+  assert.deepEqual(proposta.rejected.filter(item => item.missing === "slug_entity").map(item => item.keywordId), ["kw-10", "kw-12"]);
+  assert.equal(proposta.substitute?.slugFit, "fits");
   assert.deepEqual(proposta.protectedIdentity, identidade);
   assert.equal(proposta.previousPrimaryBecomes, "secundaria");
   assert.equal(proposta.decision?.status, "pending");
@@ -336,7 +339,7 @@ test("D2.1: cada recusa diz o que faltou — volume menor, intenção, SERP, pub
   assert.equal(motivo.get("kw-20"), "volume");
   assert.match(proposta.note, /Buscar reforço/);
   const intencao = proposePublishedPrimarySwap({ published: kw("kw-01"), post: "free", identity: identidade, candidates: candidatasAtrair(), serp: INDICE });
-  assert.ok(intencao.rejected.every(item => item.missing === "intent"), "Comercial × Informativa: a troca exige a mesma intenção");
+  assert.ok(intencao.rejected.filter(item => item.missing !== "slug_entity").every(item => item.missing === "intent"), "Comercial × Informativa: a troca exige a mesma intenção");
 });
 
 test("D2.1 decisão humana: aceita troca a principal, a antiga vira secundária, identidade igual", () => {

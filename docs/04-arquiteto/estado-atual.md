@@ -1,3 +1,141 @@
+## Reforçar publicados: correções da revisão (corretor) — 2026-09-28
+
+```text
+SDD = docs/04-arquiteto/sdd-reforcar-publicados-2026-09-28.md §15 (adendo)
+MODULO_PROPRIETARIO = Arquiteto · MINERADOR = só leitura
+MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · CAMPO_NOVO_EM_STRICT = 0 · DEV_SERVER = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Simulado com dados reais (leitura SELECT, sem custo). Validado manualmente: não.**
+
+- **Slug = último segmento:** a pasta do Silo não conta como slug na régua da
+  troca (a mesa e o servidor passam o caminho inteiro). Slug com dois
+  complementos não recusa a keyword com a mesma entidade central.
+- **Portaria do servidor:** o ArticleDNA só é aprovado com parecer que tenha as
+  mesmas keywords, a mesma principal, os mesmos papéis nas consultadas, as 4
+  lentes e ainda vigente; o motivo é dito. Real: 18 de 21 DNAs vigentes são
+  descritos pelo próprio parecer; "tráfego pago vs orgânico" (outros papéis),
+  "como atrair pacientes para clínica" e "como atrair pacientes sem redes
+  sociais" (outra composição) pedem o "Processar artigos" (as 4 lentes estão no
+  cache dos 21 pareceres: sem custo).
+- **Troca confirmada que contradiz o slug** ("para o consultório" em
+  /como-atrair-pacientes-para-clinica): a mesa não é alinhada a ela; a prévia e o
+  cartão avisam; "Aceitar a troca" (desmarcada) oferece "como atrair pacientes"
+  (cabe no slug, 7 páginas, volume 20). A página segue sendo o artigo.
+  **Não aplicar a PARTE C de `reforco-reparo.sql`.**
+- **Troca que espera o ArticleDNA:** a mesa grava a troca com o marcador do
+  Reforçar e a reconhece (sem o conflito "publicada e não é a principal"); a
+  confirmação seguinte a aplica sem a caixinha. Formação da Revisão humana com
+  outra principal não vira troca implícita.
+- **Tela:** "Mesa gravada · falta o ArticleDNA" (aviso, próximo passo, fora da
+  conta do botão); a mesa é relida depois de qualquer gravação; total novo depois
+  de gravar; "sem volume" em vez de 0; frases mais curtas; selo repetido tirado;
+  o total do servidor na confirmação quando difere.
+- **Contagem:** 25 keywords com Vínculo publicado = 21 artigos + 4 páginas de
+  Silo (leitor exato do Vínculo); a mesa conta os 21 artigos.
+- Suítes: `test:arquiteto` 2613/2613, `test:arquiteto:servidor` 85/85,
+  `test:arquiteto:lentes` 43/43, `test:arquiteto:dom` 3/3, `test:agent` 56/56,
+  `test:editorial` 170/174 (as 4 falhas antigas), Minerador por glob 1156/1184
+  (as mesmas 28 antigas), `tsc` 0 erros, ESLint limpo nos tocados
+  (`arquiteto-workspace.tsx` igual ao HEAD: 41 erros e 77 avisos antigos),
+  `git diff --check` limpo.
+- Pendências: homologação do dono; o botão "Processar artigos" na própria linha
+  adiada (hoje o próximo passo é dito na linha); uma confirmação só para mesa e
+  ArticleDNA precisaria de SDD própria.
+
+## Reforçar publicados: a tabela única — 2026-09-28
+
+```text
+SDD = docs/04-arquiteto/sdd-reforcar-publicados-2026-09-28.md §14 (adendo)
+PEDIDO = dono ("não notei nenhuma diferença, e não está claro como reforçar")
+MODULO_PROPRIETARIO = Arquiteto · NUCLEO = o do §13, sem mudança de contrato
+ARQUIVO_NOVO = tests/arquiteto-reforcar-publicados-tabela-dom.test.mts (script test:arquiteto:dom)
+MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · CAMPO_NOVO_EM_STRICT = 0 · DEV_SERVER = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste (modelo, estrutura e a tabela renderizada com `react-dom/server`). Validado manualmente: não.**
+
+- **Uma tabela no lugar da grade de cartões** do painel "Mesmo assunto no
+  Google": uma linha por publicado e Assunto; colunas "Publicado ou Assunto",
+  "Principal atual" (volume; página indicada depois da troca; "Aceitar a
+  troca" opt-in), "Keywords sugeridas" (caixinha, nível, volume, páginas em
+  comum, Silo de origem; as da busca em lote na linha do publicado), "Volume
+  somado" (keywords e volume antes → depois) e "Estado".
+- **Frase no topo:** "Reforço só vale com keywords do mesmo assunto no Google;
+  keywords de volume alto de outro assunto viram artigo novo em Sobras."
+- **Pré-marcação:** Forte de qualquer Silo (fora de outro artigo, até as vagas)
+  marcada; Provável desmarcada. Uma keyword aparece num publicado só (o de mais
+  páginas em comum); a linha do outro diz onde ela está.
+- **Um botão:** "Gravar reforços (N)" → a confirmação do servidor, por artigo,
+  com a mudança de Silo e o total depois. Ele manda também os já gravados sem
+  nada marcado: o servidor diz se falta alinhar a troca já confirmada ou levar o
+  parecer da composição (antes o pedido os pulava, e o alinhamento do §13 ficava
+  sem caminho na tela); os "Sem mudança (N)" vêm numa linha. Assunto:
+  "Aplicar no Assunto (N)".
+- **Depois de gravar:** "Gravado e relido agora" e o total do ArticleDNA relido
+  na linha; ela continua no filtro "Pedem decisão".
+- **Cartão = detalhe:** "Ver a evidência" abre o cartão na própria linha (atos
+  do dilema e páginas em comum), sem sugestões nem botão de gravar próprio. A
+  Revisão do artigo continua com o cartão inteiro.
+- **Frases:** "Gravar reforços" (na tabela "Reforçar publicados") nas mensagens
+  do Processar, da busca em lote, do próximo passo do parecer e do cartão.
+  Catálogo do agente atualizado (§17.1).
+- Aditivos compartilhados (opcionais): `SerpSubjectCardView.articleKeywordIds`
+  e `articlePrincipalKeywordId`, `SuggestionRowView.siloLabel` e
+  `inOtherArticle`, `SerpSubjectCard.asDetail`, `usePublishedReinforcement({ cards })`.
+  Consumidores preservados: Revisão do artigo e "Aceitar em grupo".
+- Suítes: `test:arquiteto` 2604/2604, `test:arquiteto:servidor` 84/84,
+  `test:arquiteto:lentes` 43/43, `test:agent` 56/56, `test:arquiteto:dom` 3/3
+  (nova), `test:editorial` 170/174 (as 4 antigas), Minerador por glob
+  1156/1184 (as mesmas 28), `tsc --noEmit` limpo, ESLint limpo nos tocados (a mesa: 41 erros/77 avisos,
+  iguais ao HEAD, só deslocados de linha), `git diff --check` limpo.
+- Pendente: a validação manual da tabela (homologação do dono): largura em
+  celular (a tabela rola na horizontal), leitura das caixinhas marcadas, a
+  confirmação e o total depois da releitura.
+
+## Reforçar publicados: os quatro defeitos de produção — 2026-09-28
+
+```text
+SDD = docs/04-arquiteto/sdd-reforcar-publicados-2026-09-28.md §13 (adendo)
+MODULO_PROPRIETARIO = Arquiteto · MINERADOR = só lido
+ARQUIVOS_NOVOS = lib/arquiteto/published-formation-serp.ts · lib/arquiteto/published-slug-fit.ts
+MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · CAMPO_NOVO_EM_STRICT = 0 · DEV_SERVER = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Simulado com os dados reais (SELECT, sem custo). Validado manualmente: não.**
+
+- **Publicado é a página.** A mesa marcava cada membro de artigo publicado como
+  publicado (21 → 27). Só a referência da página carrega URL e canonical; o
+  membro diz "Slug do artigo publicado de "…"". Simulação: 21 ArticleDNA, 27
+  referências; a projeção nova reconhece 21 páginas e 6 membros. O artigo
+  trocado continua identificado pela página (c937661d); a nova principal
+  (236e5d03) não vira publicado.
+- **Troca pelo slug.** Substituta: cabe no slug → Forte/Provável → páginas →
+  volume; "para o consultório" num slug "-para-clinica" não é proposta; âncora
+  de outro publicado ou membro de outro artigo é recusada; sobra de outro Silo
+  com SERP Forte entra (mudança de Silo anunciada). Simulação com a SERP real:
+  "como atrair pacientes" (7 páginas, cabe no slug) vence "como atrair pacientes
+  para o consultório" (7 páginas, troca a entidade).
+- **Gate SERP do Reforçar.** A mesa acha o parecer da página para a formação
+  humana dela; o hash decide (simulação: 19 vigentes; b1e61059 e c937661d
+  desatualizados). O DNA só é aprovado com o parecer DESTA composição; sem ele, a
+  confirmação grava a mesa e o DNA espera o "Processar artigos" (cache
+  primeiro). DNA com parecer de outra composição: a confirmação alinha os papéis
+  da troca na mesa e, depois do Processar, grava a sucessora só com o parecer.
+- **Busca em lote.** Funil por página gravado na rodada e frase com o motivo real.
+  Produção de 28/09: "O Google Ads devolveu só a própria frase (2 ideias em 2
+  sementes)" nas 4 páginas — não é "outro assunto" nem falha do token. Erro do
+  Google Ads aparece como erro (página `ads_error`; rodada inteira 503).
+- Catálogo do agente atualizado (troca, publicado = página, duas confirmações,
+  funil); `test:agent` 56/56.
+- Suítes: `test:arquiteto` 2600/2600, `test:arquiteto:servidor` 84/84,
+  `test:arquiteto:lentes` 43/43, `test:agent` 56/56, `test:editorial` 170/174
+  (as 4 antigas), Minerador por glob 1156/1184 (as mesmas 28), `tsc` limpo,
+  ESLint limpo nos tocados (a mesa: 41 erros/77 avisos, iguais ao HEAD),
+  `git diff --check` limpo.
+- Pendência de dado: `reforco-reparo.sql` (scratchpad da sessão) ficou opcional —
+  a confirmação do Reforçar alinha os papéis de c937661d/236e5d03 pela rota da mesa.
+
 ## Reforçar publicados: correções da revisão — 2026-09-28
 
 Verificado no código e confirmado por teste (fixtures, sem rede, sem custo).

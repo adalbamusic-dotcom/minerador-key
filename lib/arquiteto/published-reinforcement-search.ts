@@ -59,6 +59,7 @@ import {
   type DifferentiationRunPorts,
   type DifferentiationRunResult,
   type DifferentiationSerpOutcome,
+  type PublishedSearchPageFunnel,
 } from "./published-differentiation-run.ts";
 import type { SubjectDiscoveryAdsTargeting, SubjectDiscoverySource } from "../minerador/subject-discovery-plan.ts";
 import { normalizeKeyword } from "../minerador/keyword-import-core.ts";
@@ -279,7 +280,8 @@ export type ReinforcementSuggestion = {
   preselected: boolean;
 };
 
-export type ReinforcementPageState = "found" | "none" | "not_in_round";
+/** `ads_error` (aditivo, 2026-09-28): todas as sementes do Google Ads desta página falharam — é erro, nunca "nada achado". */
+export type ReinforcementPageState = "found" | "none" | "not_in_round" | "ads_error";
 
 export type ReinforcementPageResult = {
   keywordId: string;
@@ -292,7 +294,46 @@ export type ReinforcementPageResult = {
   suggestions: ReinforcementSuggestion[];
   /** Quantas candidatas com volume foram medidas na SERP. */
   measured: number;
+  /** Aditivo (2026-09-28): de onde saiu (ou não) cada candidata — o funil do Google Ads à SERP. */
+  funnel?: PublishedSearchPageFunnel;
 };
+
+const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
+const comPonto = (frase: string) => /[.!?]$/.test(frase.trim()) ? frase.trim() : `${frase.trim()}.`;
+
+/**
+ * Por que a página ficou sem sugestão, pelo funil (Defeito 4). Cada caso tem
+ * a sua frase: erro do Google Ads é erro; eco da própria frase não é "outro
+ * assunto"; "outro assunto" só quando a SERP mediu alguma candidata.
+ */
+export function describeReinforcementFunnel(funnel: PublishedSearchPageFunnel | undefined, measured: number): { state: "none" | "ads_error"; reason: string } {
+  const falhas = (funnel?.seeds || []).filter(semente => semente.failed);
+  const erroParcial = falhas.length ? ` Erro do Google Ads em ${plural(falhas.length, "busca", "buscas")} de ${funnel!.seeds.length}: ${comPonto(falhas[0].failed!)}` : "";
+  // O próximo passo quando o Google Ads não trouxe nada novo (a causa de ele devolver só a frase ainda não foi verificada).
+  const proximo = " Próximo passo: \"Buscar reforço\" com um tema mais amplo.";
+  const amostra = funnel?.sample.length ? ` Ideias recebidas: ${funnel.sample.slice(0, 5).map(ideia => `"${ideia}"`).join(", ")}.` : "";
+  if (funnel && funnel.seeds.length && falhas.length === funnel.seeds.length) {
+    return { state: "ads_error", reason: `Erro do Google Ads: ${comPonto(falhas[0].failed!)} Nenhuma ideia veio para esta página; nada foi medido na SERP.` };
+  }
+  if (measured > 0) {
+    return { state: "none", reason: `${measured} candidata(s) com volume foram medidas na SERP, e nenhuma divide 2 ou mais páginas com o artigo: o Google trata como outro assunto.${erroParcial}` };
+  }
+  if (!funnel) return { state: "none", reason: "O Google Ads não trouxe keyword com volume que chegasse à SERP para este tema." };
+  if (funnel.ideasReceived === 0) {
+    return { state: "none", reason: `O Google Ads não devolveu nenhuma ideia para esta página (${plural(funnel.seeds.length, "busca", "buscas")}): sem keyword nova para medir.${proximo}${erroParcial}` };
+  }
+  if (funnel.distinct === 0) {
+    return { state: "none", reason: `O Google Ads devolveu só a própria frase (${plural(funnel.ideasReceived, "ideia", "ideias")} em ${plural(funnel.seeds.length, "busca", "buscas")}) para esta página: sem keyword nova para medir.${proximo}${erroParcial}` };
+  }
+  const partes = [
+    funnel.withoutVolume ? `${funnel.withoutVolume} sem volume` : "",
+    funnel.blocked ? `${funnel.blocked} já ${funnel.blocked === 1 ? "é publicada" : "são publicadas"} da marca` : "",
+    funnel.cut ? `${funnel.cut} cortada(s) pelo filtro` : "",
+    funnel.kept && !funnel.sentToSerp ? `${funnel.kept} com volume sem vaga na SERP desta rodada` : "",
+    funnel.sentToSerp ? `${funnel.sentToSerp} mandada(s) à SERP sem leitura` : "",
+  ].filter(Boolean);
+  return { state: "none", reason: `O Google Ads trouxe ${plural(funnel.distinct, "keyword nova", "keywords novas")}${partes.length ? `: ${partes.join(", ")}` : ""}. Nenhuma chegou a ser medida na SERP.${amostra}${erroParcial}` };
+}
 
 const vagasDe = (page: Pick<DifferentiationPage, "articleKeywordCount">) => {
   const atual = typeof page.articleKeywordCount === "number" && page.articleKeywordCount > 0 ? page.articleKeywordCount : 1;
@@ -315,6 +356,8 @@ export function evaluateReinforcementSearch(input: {
   inRound: ReadonlySet<string>;
   candidates: Readonly<Record<string, readonly DifferentiationCandidate[]>>;
   serp: SerpSubjectIndex;
+  /** Aditivo (2026-09-28): o funil de cada página, para dizer por que ficou sem sugestão. */
+  funnel?: Readonly<Record<string, PublishedSearchPageFunnel>>;
 }): ReinforcementPageResult[] {
   const paginasNaRodada = input.pages.filter(page => input.inRound.has(page.keywordId));
   // Todas as candidatas medidas, uma vez cada.
@@ -370,15 +413,16 @@ export function evaluateReinforcementSearch(input: {
       if (item.level === "strong") { item.preselected = true; vagas -= 1; }
     }
     const medidasDaPagina = (input.candidates[page.keywordId] || []).filter(item => item.serpMeasured).length;
+    const funil = input.funnel?.[page.keywordId];
     if (!sugestoes.length) {
+      const leitura = describeReinforcementFunnel(funil, medidasDaPagina);
       return {
         ...base,
-        state: "none" as const,
-        reason: medidasDaPagina
-          ? `${medidasDaPagina} candidata(s) com volume foram medidas na SERP, e nenhuma divide 2 ou mais páginas com o artigo: o Google trata como outro assunto.`
-          : "O Google Ads não trouxe keyword com volume que chegasse à SERP para este tema.",
+        state: leitura.state,
+        reason: leitura.reason,
         suggestions: [],
         measured: medidasDaPagina,
+        ...(funil ? { funnel: funil } : {}),
       };
     }
     const fortes = sugestoes.filter(item => item.level === "strong").length;
@@ -388,6 +432,7 @@ export function evaluateReinforcementSearch(input: {
       reason: `${sugestoes.length} sugestão(ões) com volume do Google Ads: ${fortes} Forte, ${sugestoes.length - fortes} Provável.`,
       suggestions: sugestoes,
       measured: medidasDaPagina,
+      ...(funil ? { funnel: funil } : {}),
     };
   });
 }
@@ -413,7 +458,7 @@ export type ReinforcementSearchResult = {
 
 export type ReinforcementSearchOutcome =
   | { ok: true; result: ReinforcementSearchResult }
-  | { ok: false; status: number; code: DifferentiationRunErrorCode | "PLAN_ABOVE_CAP"; message: string };
+  | { ok: false; status: number; code: DifferentiationRunErrorCode | "PLAN_ABOVE_CAP" | "GOOGLE_ADS_UNAVAILABLE"; message: string };
 
 /**
  * A rodada paga, pelo plano autorizado: versão e hash, autorização até
@@ -455,8 +500,18 @@ export async function runReinforcementSearch(input: {
     if (!rodada.ok) return rodada;
     const { round } = rodada;
     const naRodada = new Set(plan.pages.filter(page => page.inRound).map(page => page.keywordId));
+    /*
+     * Todas as sementes de todas as páginas falharam no Google Ads (ex.: token
+     * vencido): é ERRO da rodada, com o motivo — nunca "nenhum publicado ganhou
+     * sugestão". Sem ideia não há candidata, e nada foi pago na SERP.
+     */
+    const funis = [...naRodada].map(id => round.funnel?.[id]).filter((funil): funil is PublishedSearchPageFunnel => Boolean(funil));
+    if (funis.length && funis.every(funil => funil.seeds.length > 0 && funil.seeds.every(semente => semente.failed))) {
+      const motivo = funis.flatMap(funil => funil.seeds.map(semente => semente.failed)).find(Boolean) ?? "sem resposta";
+      return { ok: false, status: 503, code: "GOOGLE_ADS_UNAVAILABLE", message: `Erro do Google Ads: ${comPonto(motivo)} Nenhuma ideia veio para os publicados desta rodada e nada foi medido na SERP. Nada foi gravado; confira a conexão do Google Ads da marca e rode de novo.` };
+    }
     const paginas = plan.pages.map(page => porId.get(page.keywordId) ?? { keywordId: page.keywordId, keyword: page.keyword, url: page.url, canonical: null, slug: null, post: "unknown" as const, volume: null, volumeValidated: false, intent: null, entity: null, problem: null, articleId: null, articleKeywordCount: null });
-    const avaliacao = evaluateReinforcementSearch({ pages: paginas, inRound: naRodada, candidates: round.candidates, serp: round.index });
+    const avaliacao = evaluateReinforcementSearch({ pages: paginas, inRound: naRodada, candidates: round.candidates, serp: round.index, funnel: round.funnel });
     return {
       ok: true,
       result: {
@@ -485,6 +540,21 @@ export function describeReinforcementSearchResult(result: Pick<ReinforcementSear
   const achados = result.pages.filter(page => page.state === "found");
   const sugestoes = achados.reduce((total, page) => total + page.suggestions.length, 0);
   const custo = `US$ ${result.costs.reportedCostUsd.toFixed(3)}`;
-  if (!achados.length) return `Busca feita (${custo}). Nenhum publicado ganhou sugestão: o Google trata as keywords com volume como outro assunto. Nada foi gravado.`;
-  return `Busca feita (${custo}). ${achados.length} publicado(s) ganharam ${sugestoes} sugestão(ões) com volume. Nada foi gravado ainda. Para gravar: marque e use "Reforçar publicados".`;
+  // Erro do Google Ads vem primeiro e com o nome de erro (Defeito 4).
+  const comErro = result.pages.filter(page => page.state === "ads_error");
+  const erro = comErro.length ? `Erro do Google Ads em ${plural(comErro.length, "publicado", "publicados")} (${comErro.map(page => `"${page.keyword}"`).slice(0, 3).join(", ")}): ${comErro[0].reason.replace(/^Erro do Google Ads: /, "")} ` : "";
+  if (!achados.length) {
+    const naRodada = result.pages.filter(page => page.state !== "not_in_round" && page.state !== "ads_error");
+    const medidas = naRodada.reduce((total, page) => total + page.measured, 0);
+    if (medidas > 0) return `Busca feita (${custo}). ${erro}Nenhum publicado ganhou sugestão: ${plural(medidas, "keyword com volume foi medida", "keywords com volume foram medidas")} na SERP e o Google as trata como outro assunto. Nada foi gravado.`;
+    const funis = naRodada.map(page => page.funnel).filter((funil): funil is PublishedSearchPageFunnel => Boolean(funil));
+    const ideias = funis.reduce((total, funil) => total + funil.ideasReceived, 0);
+    const soEco = funis.filter(funil => funil.ideasReceived > 0 && funil.distinct === 0).length;
+    const semVolume = funis.reduce((total, funil) => total + funil.withoutVolume, 0);
+    const detalhe = funis.length
+      ? `o Google Ads devolveu ${plural(ideias, "ideia", "ideias")} para ${plural(naRodada.length, "publicado", "publicados")}${soEco ? ` (${soEco} só com a própria frase)` : ""}${semVolume ? `, ${semVolume} sem volume` : ""}, e nenhuma keyword chegou a ser medida na SERP (não é "outro assunto")`
+      : "nenhuma keyword com volume chegou à SERP";
+    return `Busca feita (${custo}). ${erro}Nenhum publicado ganhou sugestão: ${detalhe}. Veja o motivo em cada publicado. Nada foi gravado.`;
+  }
+  return `Busca feita (${custo}). ${erro}${achados.length} publicado(s) ganharam ${sugestoes} sugestão(ões) com volume. Nada foi gravado ainda. Para gravar: marque na tabela "Reforçar publicados" e use "Gravar reforços".`;
 }

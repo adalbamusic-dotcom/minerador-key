@@ -10,6 +10,7 @@ import {
   type SerpSubjectDilemmaState,
 } from "../../lib/arquiteto/serp-subject-diagnosis.ts";
 import { subjectDiscoveryHasVolume, type SubjectVolumeFields } from "../../lib/minerador/subject-discovery-volume.ts";
+import { classifySlugFit, slugTextOf } from "../../lib/arquiteto/published-slug-fit.ts";
 import { PUBLISHED_PRIMARY_POST_LABELS, publishedPrimaryPostOf, type PublishedPrimaryPost, type PublishedPrimarySwapOutcome } from "../../lib/arquiteto/published-primary-swap.ts";
 import {
   CREATE_ARTICLE_FROM_GROUP_ACTION,
@@ -321,6 +322,8 @@ export type PublishedSwapReadiness = { ready: true } | { ready: false; reason: s
 
 /** O nome do botão, igual a `PUBLISHED_REINFORCEMENT_ACTION_LABEL` (o teste confere; importar criaria ciclo). */
 export const REINFORCE_PUBLISHED_ACTION_LABEL = "Reforçar publicados";
+/** O botão único da tabela, igual a `PUBLISHED_REINFORCEMENT_SAVE_LABEL` (o teste confere). */
+export const REINFORCE_PUBLISHED_SAVE_LABEL = "Gravar reforços";
 
 /**
  * A troca pode ser aplicada AGORA? Ela é gravada como nova versão do ArticleDNA
@@ -699,6 +702,19 @@ export type SerpSubjectCardView = {
    * ainda não está gravada (o cartão diz); `null` = não se aplica ou não se sabe.
    */
   recordedInArticle: boolean | null;
+  /**
+   * Aditivo (2026-09-28, tabela do Reforçar): as keywords do ArticleDNA
+   * vigente (`null` = ainda não tem; ausente = não se sabe) e a principal
+   * dele — a tabela mostra a principal atual e o volume somado antes → depois.
+   */
+  articleKeywordIds?: string[] | null;
+  articlePrincipalKeywordId?: string | null;
+  /**
+   * Aditivo (corretor 2026-09-28): a composição deste publicado já está gravada
+   * na mesa como formação humana (`article-formation:<uuid>`). Com
+   * `recordedInArticle === false`, é o "mesa gravada, ArticleDNA pendente".
+   */
+  formationRecorded?: boolean;
 };
 
 export type SerpSubjectCardContext = {
@@ -724,6 +740,10 @@ export type SerpSubjectCardContext = {
    * Ausente: o cartão não diz nada sobre o que está gravado.
    */
   articleKeywordIds?: ReadonlySet<string> | null;
+  /** Aditivo (2026-09-28): a principal do ArticleDNA vigente (depois de uma troca, não é a página). */
+  articlePrincipalKeywordId?: string | null;
+  /** Aditivo (corretor 2026-09-28): a formação deste publicado está gravada na mesa (formação humana). */
+  formationRecorded?: boolean;
 };
 
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
@@ -773,12 +793,33 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
     : null;
   if (recordedInArticle === false) {
     partesSub.push(noArtigo === null
-      ? `sem ArticleDNA ainda: "${REINFORCE_PUBLISHED_ACTION_LABEL}" grava`
-      : `proposta ainda não gravada: "${REINFORCE_PUBLISHED_ACTION_LABEL}" grava`);
+      ? `sem ArticleDNA ainda: "${REINFORCE_PUBLISHED_SAVE_LABEL}" (tabela "${REINFORCE_PUBLISHED_ACTION_LABEL}") grava`
+      : `proposta ainda não gravada: "${REINFORCE_PUBLISHED_SAVE_LABEL}" (tabela "${REINFORCE_PUBLISHED_ACTION_LABEL}") grava`);
   }
 
   const aplicada = context.appliedSwap && swap && context.appliedSwap.previousKeywordId === swap.publishedKeywordId ? context.appliedSwap : null;
-  if (publicado && aplicada) {
+  /*
+   * A TROCA JÁ APLICADA QUE CONTRADIZ O SLUG (corretor 2026-09-28): a principal
+   * de agora troca a entidade da URL ("consultório" num slug de "clínica"). O
+   * cartão não diz "Troca aplicada" em verde: avisa, e oferece a substituta que
+   * cabe no slug quando a régua acha uma ("Aceitar a troca" na tabela).
+   */
+  const slugDaPagina = publicado ? slugTextOf({ url: context.pageUrl ?? null }) : null;
+  const aplicadaContradiz = publicado && aplicada ? classifySlugFit(slugDaPagina, nome(aplicada.selectedKeywordId)) : null;
+  let trocaDeNovo: { keywordId: string; keyword: string } | null = null;
+  let tomDoAviso: SerpSubjectTone | null = null;
+  if (publicado && aplicada && aplicadaContradiz?.fit === "contradicts") {
+    const nova = swap?.state === "proposed" && swap.substitute && swap.substitute.keywordId !== aplicada.selectedKeywordId ? swap.substitute : null;
+    state = "swap_applied";
+    tomDoAviso = "warning";
+    trocaDeNovo = nova ? { keywordId: nova.keywordId, keyword: nova.keyword } : null;
+    headline = `A principal atual, "${nome(aplicada.selectedKeywordId)}", não combina com o slug publicado "${slugDaPagina}": ${aplicadaContradiz.reason}.`
+      + (nova
+        ? ` A que cabe no slug é "${nova.keyword}" (volume ${volumeBr(nova.volume)}, ${nova.sharedPageCount} páginas em comum): marque "Aceitar a troca" na tabela e grave. URL e slug continuam.`
+        : ` Nenhuma keyword do lote que caiba no slug serve de substituta agora: use "${REINFORCEMENT_SEARCH_ACTION_LABEL}". URL e slug continuam.`);
+    partesSub.push(`troca de ${aplicada.decidedAt ? new Date(aplicada.decidedAt).toLocaleDateString("pt-BR") : "antes"}: "${nome(aplicada.previousKeywordId)}" ficou como secundária`);
+    if (!nova) actions.push(buscar);
+  } else if (publicado && aplicada) {
     state = "swap_applied";
     headline = `Troca aplicada: "${nome(aplicada.selectedKeywordId)}" é a principal e "${nome(aplicada.previousKeywordId)}" ficou como secundária. URL e slug continuam.`;
   } else if (diagnosis.state === "swap_proposed" && swap?.substitute && context.kept) {
@@ -874,7 +915,7 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
   } else if (diagnosis.state === "suggestions_available") {
     const fortes = diagnosis.suggestions.filter(item => item.level === "strong").length;
     const provaveis = diagnosis.suggestions.length - fortes;
-    headline = `${plural(diagnosis.suggestions.length, "sugestão", "sugestões")} com volume: ${[fortes ? `${fortes} Forte` : "", provaveis ? `${provaveis} Provável` : ""].filter(Boolean).join(", ")}. ${publicado ? `Marque e grave com "${REINFORCE_PUBLISHED_ACTION_LABEL}".` : "Marque e aplique de uma vez."}`;
+    headline = `${plural(diagnosis.suggestions.length, "sugestão", "sugestões")} com volume: ${[fortes ? `${fortes} Forte` : "", provaveis ? `${provaveis} Provável` : ""].filter(Boolean).join(", ")}. ${publicado ? `Marque na tabela e grave com "${REINFORCE_PUBLISHED_SAVE_LABEL}".` : "Marque e aplique de uma vez."}`;
     if (diagnosis.slotsLeft) partesSub.push(`cabem mais ${diagnosis.slotsLeft}`);
     else partesSub.push("artigo no teto de 6");
     actions.push(buscar);
@@ -916,7 +957,7 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
     siloLabel: diagnosis.siloLabel,
     state,
     stateLabel: SERP_SUBJECT_CARD_STATE_LABELS[state],
-    tone: TONS[state],
+    tone: tomDoAviso ?? TONS[state],
     headline,
     subline: partesSub.length ? partesSub.join(" · ") : null,
     actions,
@@ -926,8 +967,10 @@ export function serpSubjectCardView(diagnosis: AnchorSerpDiagnosis, context: Ser
     suggestionLimit: diagnosis.kind === "subject" && diagnosis.members.length === 0 ? MAX_SUGGESTION_SELECTION : Math.max(0, diagnosis.slotsLeft),
     suggestionMode: diagnosis.kind === "subject" && diagnosis.members.length === 0 ? "create" : "add",
     memberKeywordIds,
-    swapSubstitute: publicado && state === "swap_proposed" && swap?.substitute ? { keywordId: swap.substitute.keywordId, keyword: swap.substitute.keyword } : null,
+    swapSubstitute: trocaDeNovo ?? (publicado && state === "swap_proposed" && swap?.substitute ? { keywordId: swap.substitute.keywordId, keyword: swap.substitute.keyword } : null),
     recordedInArticle,
+    ...(publicado && noArtigo !== undefined ? { articleKeywordIds: noArtigo ? [...noArtigo] : null, articlePrincipalKeywordId: context.articlePrincipalKeywordId ?? null } : {}),
+    ...(publicado && context.formationRecorded ? { formationRecorded: true } : {}),
   };
 }
 
@@ -954,6 +997,9 @@ export type SuggestionRowView = {
   /** Vem marcada (Forte, no Silo, fora de artigo, cabe). */
   preselected: boolean;
   toSiloRef: string | null;
+  /** Aditivo (2026-09-28, tabela do Reforçar): o Silo em que ela está hoje e se já está num artigo. */
+  siloLabel?: string | null;
+  inOtherArticle?: boolean;
 };
 
 export function suggestionRowView(item: AnchorSuggestion): SuggestionRowView {
@@ -971,6 +1017,8 @@ export function suggestionRowView(item: AnchorSuggestion): SuggestionRowView {
     whereLabel: item.whereLabel,
     preselected: item.preselected,
     toSiloRef: item.where === "other_silo" ? item.siloRef : null,
+    siloLabel: item.siloLabel,
+    inOtherArticle: Boolean(item.inArticlePrincipalKeywordId),
   };
 }
 

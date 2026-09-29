@@ -84,6 +84,14 @@ export type ArticleFormationKeyword = {
   observedMixed?: boolean;
   isPublished: boolean;
   /**
+   * Aditivo (2026-09-28): a página publicada teve a principal TROCADA por
+   * decisão humana confirmada no ArticleDNA dela (`primaryKeywordDecision`
+   * confirmada, `previousKeywordId` = esta página): o id da nova principal.
+   * A página continua sendo o artigo (URL, slug, canonical); ela pode ser
+   * secundária do próprio artigo sem conflito, e o slug do artigo é o dela.
+   */
+  publishedPrimarySwapConfirmedTo?: string | null;
+  /**
    * Agrupamento decidido por um humano, lido do payload canônico da keyword.
    *
    * Quando existe, ele MANDA: o algoritmo determinístico não desfaz revisão.
@@ -710,7 +718,8 @@ export function buildArticleFormationUniverse(input: {
     const conflitosPublicados: string[] = [];
     if (publicadasDoGrupo.length > 1) {
       conflitosPublicados.push(`A revisão humana reúne ${publicadasDoGrupo.length} páginas publicadas no mesmo artigo (${publicadasDoGrupo.map(keyword => `"${keyword.keyword}"`).join(", ")}): cada uma é patrimônio próprio, e a fusão precisa de nova decisão humana.`);
-    } else if (publicadasDoGrupo.length === 1 && !principalKeyword.isPublished) {
+    } else if (publicadasDoGrupo.length === 1 && !principalKeyword.isPublished
+      && publicadasDoGrupo[0].publishedPrimarySwapConfirmedTo !== principalKeyword.keywordId) {
       conflitosPublicados.push(`"${publicadasDoGrupo[0].keyword}" está publicada e não é a principal desta revisão: a principal publicada não é trocada em silêncio; confirme a composição.`);
     }
     const mesmaIntencaoHumana = grupo.every(keyword =>
@@ -726,7 +735,9 @@ export function buildArticleFormationUniverse(input: {
           ? "principal" as const
           : keyword.humanRole && keyword.humanRole !== "principal" ? keyword.humanRole : "secundaria" as const,
       })),
-      suggestedSlug: principalKeyword.isPublished
+      // A página publicada do grupo (principal ou, depois da troca confirmada,
+      // secundária) mantém o slug no ar: nenhum slug novo é sugerido.
+      suggestedSlug: principalKeyword.isPublished || publicadasDoGrupo.some(keyword => keyword.publishedPrimarySwapConfirmedTo === principalKeyword.keywordId)
         ? null
         : suggestArticleSlug({ principal: principalKeyword, siloSlug: input.siloSlug }),
       scores: {

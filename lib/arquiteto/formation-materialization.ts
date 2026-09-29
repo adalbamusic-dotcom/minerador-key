@@ -29,6 +29,13 @@ export type MaterializedArticleRecord = {
   territoryRef: string | null;
   principalKeywordId: string;
   keywordIds: readonly string[];
+  /**
+   * Aditivo (2026-09-28): outra principal que também identifica este artigo.
+   * Depois da troca confirmada da principal publicada, a mesa pode ancorar o
+   * candidato na página (principal anterior) OU já na nova principal: os dois
+   * descrevem o mesmo artigo, e nenhum dos dois pode mandá-lo ao acervo.
+   */
+  alsoPrincipalKeywordIds?: readonly string[];
 };
 
 export type ScenarioCandidateRecord = {
@@ -91,7 +98,8 @@ export function partitionMaterializedArticles(input: {
 
   for (const registro of input.accepted) {
     const porPrincipal = input.candidates
-      .filter(candidate => candidate.principalKeywordId === registro.principalKeywordId);
+      .filter(candidate => candidate.principalKeywordId === registro.principalKeywordId
+        || (registro.alsoPrincipalKeywordIds || []).includes(candidate.principalKeywordId));
 
     if (!porPrincipal.length) {
       // Sem Principal em comum não há o que reconciliar: o artefato fala de um

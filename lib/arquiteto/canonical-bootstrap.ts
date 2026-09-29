@@ -42,6 +42,23 @@ function optionalUrl(value: unknown): string | null | undefined {
 }
 
 /**
+ * A página publicada de um ArticleDNA: a keyword cuja URL está no ar.
+ *
+ * Nesta ordem: o `articleId` (o construtor do publicado usa a keyword do
+ * Vínculo como id do artigo) quando ele é uma das referências; senão a
+ * principal ANTERIOR de uma troca confirmada (a página continua a mesma);
+ * senão a principal. Artigo sem identidade publicada não tem página: `null`.
+ */
+export function publishedPageKeywordIdOf(article: Pick<ArticleDNA, "articleId" | "principalKeywordId" | "keywordReferences" | "primaryKeywordDecision" | "publishedIdentityRef">, entityId?: string): string | null {
+  if (article.publishedIdentityRef?.publicationStatus !== "published_protected") return null;
+  const ids = new Set(article.keywordReferences.map(reference => reference.keywordId));
+  for (const candidato of [entityId, article.articleId]) if (candidato && ids.has(candidato)) return candidato;
+  const troca = article.primaryKeywordDecision;
+  if (troca?.status === "confirmed" && troca.previousKeywordId && ids.has(troca.previousKeywordId)) return troca.previousKeywordId;
+  return article.principalKeywordId;
+}
+
+/**
  * Materializa somente o read-model mínimo que a tabela antiga do Arquiteto
  * precisa para representar um ArticleDNA remoto. O artifact permanece a
  * fonte canônica; estes itens não são persistidos como um novo contrato.
@@ -78,13 +95,32 @@ export function buildCanonicalArticleWorkspaceItems(
     };
     const primaryMetrics = article.primaryKeywordMetrics;
     const publishedUrl = optionalUrl(article.publishedIdentityRef?.publishedUrl);
+    /*
+     * A IDENTIDADE PUBLICADA É DA PÁGINA, NÃO DE CADA MEMBRO (2026-09-28).
+     *
+     * O artigo publicado é UMA página: a keyword do Vínculo. Espalhar
+     * `isPublished`, URL e canonical do artigo em toda referência fazia cada
+     * secundária do Reforçar virar "outro publicado" na mesa (21 → 27), com
+     * "Reforçar este publicado" ativo para uma página que não existe. Só a
+     * referência da página carrega a identidade; os membros levam apenas o
+     * endereço de LEITURA do artigo de que fazem parte.
+     */
+    const pageKeywordId = publishedPageKeywordIdOf(article, version.entityId);
+    const pageReference = pageKeywordId ? article.keywordReferences.find(reference => reference.keywordId === pageKeywordId) : undefined;
+    const pageKeyword = pageReference ? keywordTextFromReference(pageReference) : null;
+    const troca = article.primaryKeywordDecision;
+    const swappedTo = pageKeywordId && troca?.status === "confirmed" && troca.previousKeywordId === pageKeywordId && article.principalKeywordId !== pageKeywordId
+      ? article.principalKeywordId
+      : null;
 
     for (const reference of references) {
       const keyword = keywordTextFromReference(reference)!;
       const isPrimary = reference.keywordId === article.principalKeywordId;
       const volume = reference.volume ?? (isPrimary ? numberOrNull(primaryMetrics?.volumeSearch) : null);
       const kgrScore = reference.kgrScore ?? (isPrimary ? numberOrNull(primaryMetrics?.kgrScore) : null);
-      const canonical = optionalUrl(article.canonical);
+      const isPage = pageKeywordId !== null && reference.keywordId === pageKeywordId;
+      const memberOfPublished = pageKeywordId !== null && !isPage;
+      const canonical = memberOfPublished ? null : optionalUrl(article.canonical);
 
       items.push({
         id: reference.keywordId,
@@ -107,8 +143,10 @@ export function buildCanonicalArticleWorkspaceItems(
         keywordDnaRef: reference.keywordDnaSnapshot?.versionReference,
         keywordDnaSnapshot: reference.keywordDnaSnapshot,
         canonical,
-        publishedUrl,
-        isPublished: article.publishedIdentityRef?.publicationStatus === "published_protected",
+        publishedUrl: memberOfPublished ? undefined : publishedUrl,
+        isPublished: isPage,
+        ...(isPage && swappedTo ? { publishedPrimarySwapTo: swappedTo } : {}),
+        ...(memberOfPublished ? { publishedArticlePage: { keywordId: pageKeywordId, keyword: pageKeyword, url: publishedUrl ?? null } } : {}),
         clusterId: version.entityId,
         provisionalGroupId: version.entityId,
         ...(reference.demandEvidence ? { demandEvidence: reference.demandEvidence } : {}),
@@ -165,12 +203,22 @@ export function mergeCanonicalArticleWorkspaceItems(
    * revisão humana ficava impossível exatamente nos artigos já formados.
    */
   const assignmentKeys = ["workingArticleId", "clusterId", "provisionalGroupId", "siloId", "silo_id", "siloName", "computedSlug", "slug_sugerido", "computedHierarquia", "hierarquia", "reviewRole", "role", "territoryRef", "territoryAssignment", "articleFormationRef", "articleFormationDecision", "canonicalWorkflow"];
+  const identityKeys = ["isPublished", "publishedIdentitySource", "publishedUrl", "canonical"];
   const canonicalWithWorkingCopy = validCanonical.map(item => {
     const keywordId = stringValue(item, "keywordId") || stringValue(item, "id");
     const working = keywordId ? workingCopyByKeyword.get(keywordId) : undefined;
     if (!working) return item;
     const overlay = Object.fromEntries(assignmentKeys.filter(key => working[key] !== undefined).map(key => [key, working[key]]));
-    return { ...item, ...overlay };
+    /*
+     * A identidade publicada da PRÓPRIA keyword vem do Vínculo do Minerador,
+     * que a working copy lê. Quando ela diz que a keyword é uma página
+     * publicada, isso vence a projeção do artigo — nunca o contrário: ser
+     * membro de um artigo publicado não publica ninguém.
+     */
+    const identidade = working.isPublished === true
+      ? Object.fromEntries(identityKeys.filter(key => working[key] !== undefined).map(key => [key, working[key]]))
+      : {};
+    return { ...item, ...overlay, ...identidade };
   });
   const canonicalKeywordIds = new Set(canonicalWithWorkingCopy.map(item => stringValue(item, "keywordId") || stringValue(item, "id")).filter(Boolean));
   const articleIds = canonicalArticleIds(canonicalWithWorkingCopy);

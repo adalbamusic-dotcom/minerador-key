@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReinforcementPageResult } from "@/lib/arquiteto/published-reinforcement-search";
-import { initialSuggestionSelection, type SerpSubjectCardView } from "./serp-subject-model";
+import type { SerpSubjectCardView } from "./serp-subject-model";
 import {
   buildReinforcementRequest,
-  defaultSearchPicks,
+  reinforcementDefaultPicks,
+  reinforcementDefaultSearchPicks,
+  reinforcementSuggestionOwners,
   reinforcementApplyRequest,
   reinforcementErrorMessage,
   reinforcementOutcomeLines,
@@ -89,10 +91,16 @@ export function usePublishedReinforcement(input: {
   enabled: boolean;
   /** Os publicados "Sem par no lote", como a mesa os mostra: a busca gravada é relida para eles (grátis). */
   noPairPageIds: readonly string[];
+  /**
+   * Os cartões da mesa (publicados e Assuntos): decidem de qual publicado é
+   * cada keyword sugerida (um artigo só, o de mais páginas em comum) e, com
+   * isso, a pré-marcação da tabela.
+   */
+  cards?: readonly SerpSubjectCardView[];
   onWritten?: () => void;
   onNotify?: ReinforcementNotify;
 }) {
-  const { brandId, enabled, noPairPageIds, onWritten, onNotify } = input;
+  const { brandId, enabled, noPairPageIds, cards, onWritten, onNotify } = input;
   const [suggestionPicks, setSuggestionPicks] = useState<Record<string, string[]>>({});
   const [searchPicks, setSearchPicks] = useState<Record<string, string[]>>({});
   const [swapPicks, setSwapPicks] = useState<string[]>([]);
@@ -100,6 +108,10 @@ export function usePublishedReinforcement(input: {
   const [search, setSearch] = useState<ReinforcementSearchState>(buscaVazia);
   const [outcome, setOutcome] = useState<{ tone: ReinforcementApplyData["tone"]; message: string; lines: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Os publicados gravados e relidos na última confirmação: a tabela mostra o total novo deles. */
+  const [writtenPageIds, setWrittenPageIds] = useState<ReadonlySet<string>>(() => new Set());
+  /** Os publicados em que a última confirmação gravou a mesa e deixou o ArticleDNA para depois (com o motivo). */
+  const [deferredPageIds, setDeferredPageIds] = useState<ReadonlyMap<string, string>>(() => new Map());
   const relido = useRef("");
 
   // Outra marca: nada da anterior fica na tela.
@@ -112,6 +124,8 @@ export function usePublishedReinforcement(input: {
       setDialog(dialogoFechado());
       setSearch(buscaVazia());
       setOutcome(null);
+      setWrittenPageIds(new Set());
+      setDeferredPageIds(new Map());
     };
     void limpar();
   }, [brandId]);
@@ -137,31 +151,32 @@ export function usePublishedReinforcement(input: {
   }, [assinatura, brandId]);
 
   const results = useMemo(() => new Map<string, ReinforcementPageResult>((search.run?.pages || []).map(page => [page.keywordId, page])), [search.run]);
+  const owners = useMemo(() => reinforcementSuggestionOwners(cards || [], results), [cards, results]);
 
   /* ------------------------------ marcações ------------------------------ */
 
   const suggestionPicksOf = useCallback((card: SerpSubjectCardView): ReadonlySet<string> => {
     const explicitas = suggestionPicks[card.key];
-    return explicitas ? new Set(explicitas) : initialSuggestionSelection(card);
-  }, [suggestionPicks]);
+    return explicitas ? new Set(explicitas) : reinforcementDefaultPicks(card, owners);
+  }, [suggestionPicks, owners]);
 
   const toggleSuggestion = useCallback((card: SerpSubjectCardView, keywordId: string) => {
     setSuggestionPicks(current => {
-      const atuais = new Set(current[card.key] ?? [...initialSuggestionSelection(card)]);
+      const atuais = new Set(current[card.key] ?? [...reinforcementDefaultPicks(card, owners)]);
       if (atuais.has(keywordId)) atuais.delete(keywordId); else atuais.add(keywordId);
       return { ...current, [card.key]: [...atuais] };
     });
-  }, []);
+  }, [owners]);
 
-  const searchPicksOf = useCallback((pageId: string): readonly string[] => searchPicks[pageId] ?? defaultSearchPicks(results.get(pageId)), [searchPicks, results]);
+  const searchPicksOf = useCallback((pageId: string): readonly string[] => searchPicks[pageId] ?? reinforcementDefaultSearchPicks(pageId, results.get(pageId), owners), [searchPicks, results, owners]);
 
   const toggleSearchPick = useCallback((pageId: string, keyword: string) => {
     setSearchPicks(current => {
-      const atuais = new Set(current[pageId] ?? defaultSearchPicks(results.get(pageId)));
+      const atuais = new Set(current[pageId] ?? reinforcementDefaultSearchPicks(pageId, results.get(pageId), owners));
       if (atuais.has(keyword)) atuais.delete(keyword); else atuais.add(keyword);
       return { ...current, [pageId]: [...atuais] };
     });
-  }, [results]);
+  }, [results, owners]);
 
   const swapAccepted = useCallback((pageId: string) => swapPicks.includes(pageId), [swapPicks]);
   const toggleSwap = useCallback((pageId: string) => {
@@ -188,14 +203,14 @@ export function usePublishedReinforcement(input: {
    * Abre a confirmação com a prévia do servidor. `only` = o botão de um
    * cartão; `acceptSwapOf` = "Aplicar troca" num publicado sem ArticleDNA.
    */
-  const openReinforcement = useCallback(async (cards: readonly SerpSubjectCardView[], options: { only?: ReadonlySet<string> | null; acceptSwapOf?: string | null; swaps?: ReadonlySet<string> } = {}) => {
+  const openReinforcement = useCallback(async (cards: readonly SerpSubjectCardView[], options: { only?: ReadonlySet<string> | null; acceptSwapOf?: string | null; swaps?: ReadonlySet<string>; includeRecorded?: boolean } = {}) => {
     if (!brandId || busy) return;
     const trocas = new Set(options.swaps ?? swapPicks);
     if (options.acceptSwapOf) {
       trocas.add(options.acceptSwapOf);
       setSwapPicks(current => current.includes(options.acceptSwapOf!) ? current : [...current, options.acceptSwapOf!]);
     }
-    const pedido = buildReinforcementRequest({ cards, suggestionPicks: suggestionPicksOf, searchPicks: searchPicksOf, swapPicks: trocas, only: options.only ?? null });
+    const pedido = buildReinforcementRequest({ cards, suggestionPicks: suggestionPicksOf, searchPicks: searchPicksOf, swapPicks: trocas, only: options.only ?? null, includeRecorded: options.includeRecorded === true });
     setOutcome(null);
     if (!pedido.pages.length) {
       setDialog({ ...dialogoFechado(), open: true, status: "failed", notices: pedido.reassigned, error: "Nenhum publicado com algo a gravar: todos já têm o ArticleDNA com as keywords do cartão." });
@@ -219,7 +234,8 @@ export function usePublishedReinforcement(input: {
     if (trocas.has(pageId)) trocas.delete(pageId); else trocas.add(pageId);
     setSwapPicks([...trocas]);
     const only = new Set(dialog.requested.map(page => page.publishedKeywordId).filter(id => !dialog.excluded.includes(id)));
-    await openReinforcement(cards, { only, swaps: trocas });
+    // Os publicados que já estão na confirmação ficam nela, mesmo sem nada marcado (o servidor diz se falta algo).
+    await openReinforcement(cards, { only, swaps: trocas, includeRecorded: true });
   }, [swapPicks, dialog.requested, dialog.excluded, openReinforcement]);
 
   const closeReinforcement = useCallback(() => {
@@ -251,10 +267,18 @@ export function usePublishedReinforcement(input: {
       setOutcome(desfecho);
       setDialog(dialogoFechado());
       onNotify?.(desfecho.tone, desfecho.message);
-      if (result.data.written) {
+      setWrittenPageIds(new Set(result.data.pages.filter(page => page.written).map(page => page.publishedKeywordId)));
+      setDeferredPageIds(new Map(result.data.pages.filter(page => !page.written && page.dnaDeferred).map(page => [page.publishedKeywordId, page.dnaDeferred!] as const)));
+      /*
+       * Qualquer coisa gravada — ArticleDNA, ou só a mesa (Minerador, composição,
+       * Silo, papéis da troca), inclusive quando o ArticleDNA ficou para depois —
+       * relê a mesa e limpa as marcações dessas páginas (corretor 2026-09-28).
+       */
+      const gravadas = result.data.pages.filter(page => page.written || Boolean(page.partial?.length) || Boolean(page.dnaDeferred));
+      if (result.data.written || gravadas.length) {
         setSuggestionPicks({});
         setSwapPicks([]);
-        setSearchPicks(current => Object.fromEntries(Object.entries(current).filter(([pageId]) => !result.data.pages.some(page => page.written && page.publishedKeywordId === pageId))));
+        setSearchPicks(current => Object.fromEntries(Object.entries(current).filter(([pageId]) => !gravadas.some(page => page.publishedKeywordId === pageId))));
         onWritten?.();
       }
     } finally {
@@ -313,7 +337,8 @@ export function usePublishedReinforcement(input: {
     const run = result.data;
     setSearchPicks({});
     setSearch(current => ({ ...current, status: "done", run, error: null, retryOperationId: null, message: [run.message, run.persistWarning, run.ledgerWarning].filter(Boolean).join(" ") }));
-    onNotify?.("info", run.message);
+    // Erro do Google Ads numa página é aviso, nunca "nada achado" em tom neutro.
+    onNotify?.(run.pages.some(page => page.state === "ads_error") ? "warning" : "info", run.message);
   }, [brandId, search.plan, onNotify]);
 
   /** Só depois da confirmação única do custo: um id novo por rodada. */
@@ -343,7 +368,10 @@ export function usePublishedReinforcement(input: {
     dialog,
     search,
     results,
+    owners,
     outcome,
+    writtenPageIds,
+    deferredPageIds,
     suggestionPicksOf,
     toggleSuggestion,
     searchPicksOf,

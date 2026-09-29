@@ -10,6 +10,7 @@ import { buildKeywordDnaProvenanceSnapshot } from "./adapters.ts";
 import { readApprovedPackageRef } from "./keyword-package-alignment.ts";
 import { adaptKeywordIdentityContext } from "./identity-context.ts";
 import { readPublishedIdentity } from "./published-identity.ts";
+import { aliasPublishedFormationSerp } from "./published-formation-serp.ts";
 import { TerritoryCandidateSchema, type TerritoryCandidate } from "./territory.ts";
 import { resolveArticleFormationState } from "./article-formation-decision.ts";
 import { SiloWorkingCopyStateSchema, type SiloWorkingCopyState } from "./silo-working-copy-record.ts";
@@ -299,7 +300,12 @@ export async function loadCanonicalArquitetoWorkspace(brandId: string, options: 
     territories: body.data.territories,
     siloWorkingCopies: body.data.siloWorkingCopies,
     territorialSerp: body.data.territorialSerp,
-    articleFormationSerp: body.data.articleFormationSerp,
+    // O parecer da página publicada também responde pela formação humana dela
+    // (Reforçar publicados); o hash da base decide se ainda descreve o artigo.
+    articleFormationSerp: aliasPublishedFormationSerp(
+      body.data.articleFormationSerp,
+      buildCanonicalWorkflowWorkspaceItems(body.data.workflowItems, body.data.keywords, brandId) as unknown as Array<Record<string, unknown>>,
+    ),
     territorialAi: body.data.territorialAi,
     architectureMarker: body.data.architectureMarker,
     articleFormationMarker: body.data.articleFormationMarker,

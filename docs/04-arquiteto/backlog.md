@@ -1,3 +1,39 @@
+## Reforçar publicados: correções da revisão (corretor) — 2026-09-28
+
+- [x] Régua da troca: slug = último segmento da URL; dois complementos no slug não recusam a mesma entidade.
+- [x] Portaria do servidor: papéis, 4 lentes e parecer vigente conferidos; o motivo é dito ("outros papéis", "outra principal", "outra composição"…).
+- [x] Troca confirmada que contradiz o slug: não alinhada na mesa, aviso na prévia e no cartão, nova troca para a que cabe no slug (opt-in); a página segue sendo o artigo.
+- [x] Troca gravada na mesa com marcador próprio; reconhecida pela mesa; aplicada na confirmação seguinte; Revisão humana não vira troca implícita.
+- [x] Teto de 6 para o ArticleDNA + composição gravada.
+- [x] Tela: "Mesa gravada · falta o ArticleDNA"; releitura depois de qualquer gravação; total novo depois de gravar; "sem volume"; frases curtas; total do servidor na confirmação.
+- [ ] **Homologar (usuário) depois do deploy, na AdalbaPro:** (1) a mesa mostra 21 publicados; (2) "como atrair pacientes para clínica": o cartão avisa que a principal atual troca a entidade do slug e oferece "como atrair pacientes"; marcar "Aceitar a troca" → "Gravar reforços" → a confirmação diz a troca e "fica para a próxima confirmação" → a linha mostra "Mesa gravada · falta o ArticleDNA"; (3) "Processar artigos" (cache, sem custo) em "como atrair pacientes para clínica", "como atrair pacientes sem redes sociais" e "tráfego pago vs orgânico para clínica de estética"; (4) "Gravar reforços" de novo grava as sucessoras; (5) readback no banco: `serpAssessmentRef` de cada DNA aponta para parecer com a mesma composição e os mesmos papéis; `primaryKeywordDecision.previousKeywordId` de c937661d continua c937661d.
+- [ ] **Não aplicar a PARTE C de `reforco-reparo.sql`** (alinharia a mesa à troca que contradiz o slug).
+- [ ] Botão "Processar artigos" na própria linha adiada (hoje o próximo passo é dito na linha).
+- [ ] Uma confirmação só (mesa + ArticleDNA) exigiria rodar a SERP (cache) dentro do Reforçar com o hash de base da mesa: SDD própria, se o dono quiser.
+
+## Reforçar publicados: a tabela única — 2026-09-28
+
+- [x] Uma tabela (publicados e Assuntos × sugeridas com caixinha; principal atual com volume; volume somado antes → depois; estado), com a frase da regra no topo.
+- [x] Forte de qualquer Silo marcada (fora de outro artigo, até as vagas); Provável desmarcada; cada keyword num publicado só (o de mais páginas), com a linha do outro dizendo onde ela está.
+- [x] Um botão, "Gravar reforços (N)", com a confirmação por artigo (mudança de Silo e total depois); Assunto por "Aplicar no Assunto (N)".
+- [x] Depois de gravar: "Gravado e relido agora" e o total novo (keywords e volume somado) do ArticleDNA relido.
+- [x] Cartões viraram o detalhe da linha ("Ver a evidência"); Revisão do artigo mantém o cartão.
+- [x] Mensagens, catálogo do agente e SDD (§14); testes de tela (modelo, estrutura e renderização).
+- [ ] **Homologar (usuário) depois do deploy:** o alinhamento da troca de "como atrair pacientes para clínica" sai de "Gravar reforços" sem marcar nada (a confirmação diz "Alinha na mesa a troca já confirmada…"); a tabela lista os 21 publicados (sem os 6 membros); "como atrair pacientes para clínica" mostra a principal atual e as sugeridas marcadas; "Gravar reforços" → confirmação por artigo → "Gravar e reler"; a linha passa a "Gravado e relido agora" com o total novo; no celular, a tabela rola na horizontal sem rolar a página.
+- [ ] Se o dono quiser, filtro "Só com algo a gravar" e ordenação por volume somado na tabela (hoje: o filtro de estados e a ordem "falta gravar → gravado agora → com sugestão → resto").
+
+## Reforçar publicados: defeitos de produção — 2026-09-28
+
+- [x] Membro de artigo publicado não é publicado (projeção da página; perfil do membro; merge com o Vínculo).
+- [x] Troca pelo slug: cabe no slug primeiro; entidade trocada não é proposta; outro artigo recusado; sobra de outro Silo com SERP Forte entra.
+- [x] Gate SERP: parecer da página para a formação humana (hash decide); DNA só com o parecer da composição; duas confirmações; alinhar a troca na mesa; sucessora só com o parecer.
+- [x] Busca em lote: funil por página, motivo real, erro do Google Ads como erro (página e rodada).
+- [ ] **Homologar (usuário) na AdalbaPro, depois do deploy:** a mesa mostra 21 publicados (sem os 6 membros); "como atrair pacientes para clínica" → "Gravar reforços" (tabela "Reforçar publicados") sem marcar nada alinha os papéis; "Processar artigos" (cache) nos dois artigos; nova confirmação grava v2 de c937661d e v3 de b1e61059 com o parecer certo; readback no banco: `serpAssessmentRef` de cada DNA aponta para parecer com a mesma composição.
+- [ ] Investigar por que o Google Ads devolve só a própria frase desde 24/09 (acesso do Keyword Planner, conta sem gasto, frase de cauda longa); a amostra das ideias agora fica gravada na rodada.
+- [x] UX pedida pelo dono: o reforço como UMA tabela (publicados × sugeridas com checkbox, volume antes → depois, Forte de qualquer Silo marcada, um botão "Gravar reforços"); os cartões viram "Ver a evidência". Entregue na seção "a tabela única" acima.
+- [ ] `publishedIdentityRef.sourceKeywordDnaIds` ainda leva todos os membros (serp-formation → adapters); nenhum leitor usa; corrigir na próxima sucessora.
+- [ ] A resolução humana do parecer (`accept_current_composition`) não acha o parecer emprestado da página pela chave da formação: responde erro e pede o Processar; decidir se a rota `serp-resolution` deve aceitar o empréstimo.
+
 ## Reforçar publicados: correções da revisão — 2026-09-28
 
 - [x] ArticleDNA `approved` com arquitetura confirmada, evidência SERP do artigo e `articleApprovalRevalidationIssues` antes de gravar; sem parecer, recusa na prévia.

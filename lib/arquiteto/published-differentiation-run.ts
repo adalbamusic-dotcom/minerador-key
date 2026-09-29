@@ -945,7 +945,40 @@ async function executar(input: Parameters<typeof runPublishedDifferentiation>[0]
 /* ------------------------- o núcleo comum da rodada ------------------------- */
 
 /** O que a rodada paga devolve antes da avaliação (diferenciação ou reforço). */
+/**
+ * O FUNIL DE UMA PÁGINA NA RODADA (aditivo, 2026-09-28, Defeito 4).
+ *
+ * "Nenhum publicado ganhou sugestão" não diz nada: foi o Google Ads que falhou,
+ * que devolveu só a própria frase, que trouxe ideias sem volume, ou a SERP que
+ * disse "outro assunto"? Cada contagem responde uma dessas perguntas, e a
+ * amostra guarda só o TEXTO das primeiras ideias recebidas (diagnóstico).
+ */
+export type PublishedSearchPageFunnel = {
+  /** Cada semente do Google Ads: quantas ideias vieram, ou o erro dela. */
+  seeds: Array<{ kind: DifferentiationAdsCall["kind"]; received: number | null; failed: string | null }>;
+  /** Ideias recebidas somando as sementes (antes de juntar repetidas). */
+  ideasReceived: number;
+  /** Ideias iguais à própria frase da página. */
+  echoOfPhrase: number;
+  /** Keywords distintas depois de tirar a própria frase. */
+  distinct: number;
+  /** Publicadas da marca ou páginas da rodada (nunca viram candidata). */
+  blocked: number;
+  /** Sem volume do Google Ads. */
+  withoutVolume: number;
+  /** Cortadas pelo filtro por outro motivo. */
+  cut: number;
+  /** Seguiram para a SERP, na ordem de ida. */
+  kept: number;
+  /** Mandadas à SERP nesta rodada (cache ou coleta). */
+  sentToSerp: number;
+  /** As primeiras ideias recebidas, só o texto (até 8). */
+  sample: string[];
+};
+
 export type PublishedSearchRound = {
+  /** Aditivo (2026-09-28): o funil de cada página da rodada. */
+  funnel?: Record<string, PublishedSearchPageFunnel>;
   /** As candidatas filtradas por página, com `serpMeasured` já medido. */
   candidates: Record<string, DifferentiationCandidate[]>;
   refused: Record<string, DifferentiationCandidateRefusal[]>;
@@ -1040,6 +1073,9 @@ export async function executePublishedSearchRound(input: {
    */
   const contribuicoes = new Map<string, SubjectDiscoveryContribution[]>(pages.map(page => [page.keywordId, []]));
   const adsFailures: NonNullable<DifferentiationRunResult["adsFailures"]> = [];
+  const funil: Record<string, PublishedSearchPageFunnel> = Object.fromEntries(pages.filter(page => page.inRound).map(page => [page.keywordId, {
+    seeds: [], ideasReceived: 0, echoOfPhrase: 0, distinct: 0, blocked: 0, withoutVolume: 0, cut: 0, kept: 0, sentToSerp: 0, sample: [],
+  } satisfies PublishedSearchPageFunnel]));
   const adsTargeting = input.adsTargeting;
   for (const [pageIndex, page] of pages.entries()) {
     if (!page.inRound) continue;
@@ -1053,6 +1089,13 @@ export async function executePublishedSearchRound(input: {
         const resposta = await exec.googleAdsIdeas(seed, { ...adsTargeting, geoTargetConstants: [...adsTargeting.geoTargetConstants] }, DIFFERENTIATION_ADS_PAGE_SIZE);
         const ideias = resposta.ideas.slice(0, DIFFERENTIATION_ADS_PAGE_SIZE);
         const lista = contribuicoes.get(page.keywordId)!;
+        const daPagina = funil[page.keywordId];
+        if (daPagina) {
+          daPagina.seeds.push({ kind: call.kind, received: ideias.length, failed: null });
+          daPagina.ideasReceived += ideias.length;
+          daPagina.echoOfPhrase += ideias.filter(ideia => normalizeKeyword(ideia.keyword) === normalizeKeyword(page.keyword)).length;
+          for (const ideia of ideias) if (daPagina.sample.length < 8 && !daPagina.sample.includes(ideia.keyword)) daPagina.sample.push(ideia.keyword);
+        }
         for (const ideia of ideias) {
           lista.push({
             source: ADS_SOURCE[call.kind],
@@ -1075,7 +1118,9 @@ export async function executePublishedSearchRound(input: {
         }
       } catch (error) {
         const codigo = codigoSeguro(error, "GOOGLE_ADS_DISCOVERY_ERROR");
-        adsFailures.push({ keywordId: page.keywordId, kind: call.kind, reason: mensagemSegura(error, "O Google Ads não respondeu a esta semente; as outras seguiram.") });
+        const motivo = mensagemSegura(error, "O Google Ads não respondeu a esta semente; as outras seguiram.");
+        adsFailures.push({ keywordId: page.keywordId, kind: call.kind, reason: motivo });
+        funil[page.keywordId]?.seeds.push({ kind: call.kind, received: null, failed: motivo });
         try {
           await exec.recordGoogleAdsUsage({ suffix, resultStatus: "failed", providerReference: null, errorCode: codigo, receivedCount: null });
         } catch (usageError) {
@@ -1146,6 +1191,16 @@ export async function executePublishedSearchRound(input: {
     const filtro = input.filter(page, comVolume, bloqueadas);
     candidates[page.keywordId] = filtro.kept;
     refused[page.keywordId] = filtro.refused.slice(0, 30);
+    const daPagina = funil[page.keywordId];
+    if (daPagina) {
+      const bloqueadasDaPagina = comVolume.filter(candidata => bloqueadas.has(candidata.normalizedKeyword)).length;
+      const semVolume = comVolume.filter(candidata => !bloqueadas.has(candidata.normalizedKeyword) && !(typeof candidata.adsVolume === "number" && candidata.adsVolume > 0)).length;
+      daPagina.distinct = comVolume.length;
+      daPagina.blocked = bloqueadasDaPagina;
+      daPagina.withoutVolume = semVolume;
+      daPagina.kept = filtro.kept.length;
+      daPagina.cut = Math.max(0, filtro.refused.length - bloqueadasDaPagina - semVolume);
+    }
   }
 
   /* 5. SERP das melhores: cache primeiro; só as lentes que faltam. */
@@ -1160,6 +1215,7 @@ export async function executePublishedSearchRound(input: {
       jaNaSerp.add(candidata.candidateId);
       slot += 1;
       selecionadas.push({ pageIndex, pageKeywordId: page.keywordId, slot, candidate: candidata });
+      if (funil[page.keywordId]) funil[page.keywordId].sentToSerp += 1;
     }
   });
   const serpOutcome: DifferentiationSerpOutcome = { cached: 0, collected: 0, failed: 0, skippedBudget: 0, readFailed: false };
@@ -1221,6 +1277,7 @@ export async function executePublishedSearchRound(input: {
   return {
     ok: true,
     round: {
+      funnel: funil,
       candidates,
       refused,
       footprints: footprints.filter(pegada => pegada.lenses.length),

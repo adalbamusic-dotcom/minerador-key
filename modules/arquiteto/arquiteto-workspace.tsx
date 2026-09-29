@@ -59,6 +59,7 @@ import { acceptRemoteSiloPrimaryProposal } from "@/lib/arquiteto/canonical-works
 import { readArchitectKeywordVinculo, editorialUnitDeclarationFromVinculo, headsSilo, readEditorialUnitDeclaration } from "@/lib/arquiteto/editorial-unit-declaration";
 import { withoutPublishedIdentityKeys } from "@/lib/arquiteto/published-identity";
 import { resolvePublishedSiloMembership } from "@/lib/arquiteto/published-silo-membership";
+import { recordedPublishedSwapsOf } from "@/lib/arquiteto/published-formation-serp";
 import { FORM_NEW_FROM_LEFTOVERS_ACTION, planSiloArticleFormation, proposeCrossSiloReinforcements, type SiloFormationPlan } from "@/lib/arquiteto/article-formation-priority";
 import { readSerpEvidenceRecord, serpEvidenceAxisValue, serpEvidenceMixedLabels } from "@/lib/minerador/serp-evidence-record";
 import { planPublishedArchitectureRecognition } from "@/lib/arquiteto/published-architecture-recognition";
@@ -135,7 +136,7 @@ import { buildLinkRelationRows, resolveArticleLinkProjection, resolveSiloHierarc
 import { newFormationRef, planAddKeywordsToCandidate, planKeywordRole, planMergeCandidates, planMoveKeyword, planNewArticleFromKeywords, planPrincipalChange, planSplitKeyword, type FormationKeywordLike, type FormationPatch, type FormationPlan } from "@/lib/arquiteto/article-formation-editing";
 import { groupLeftoverOpportunities } from "@/lib/arquiteto/serp-subject-suggestions";
 import { LeftoverOpportunitiesPanel } from "./leftover-opportunities-panel";
-import { resolveArticleFormationState } from "@/lib/arquiteto/article-formation-decision";
+import { ARTICLE_FORMATION_REF_PREFIX, resolveArticleFormationState } from "@/lib/arquiteto/article-formation-decision";
 import { buildArticleFormationConfirmationPlan, summarizeConfirmationPlan, validateFormationConclusion, type ConclusionGate, type ConfirmationEntry } from "@/lib/arquiteto/article-formation-confirmation";
 import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, siloThemeTokens, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
 import { siloContextTokens } from "@/lib/arquiteto/semantic-nucleus";
@@ -5732,6 +5733,13 @@ export default function ArquitetoPage() {
         boundaryIncludes: territory.boundary?.includes,
         narrative: territory.narrative?.statement ?? null,
       };
+      /*
+       * A troca confirmada no Reforçar e gravada na mesa antes do ArticleDNA
+       * (corretor 2026-09-28): a página publicada fica como secundária da nova
+       * principal sem virar conflito "publicada e não é a principal". O marcador
+       * da decisão humana é o do Reforçar; a da Revisão humana não entra aqui.
+       */
+      const trocasDaMesa = recordedPublishedSwapsOf(keywordsPorSilo.get(territory.territoryRef) || []);
       const universoKeywords = (keywordsPorSilo.get(territory.territoryRef) || []).map(keyword => {
           /*
            * §2 — A INTENÇÃO VEM DO KEYWORDDNA, NÃO DA COLUNA.
@@ -5766,6 +5774,7 @@ export default function ArquitetoPage() {
           observedFunnel: serpEvidenceAxisValue(evidenciaSerp, "funnel"),
           observedMixed: Boolean(serpEvidenceMixedLabels(evidenciaSerp, "intent") || serpEvidenceMixedLabels(evidenciaSerp, "funnel")),
           isPublished: publicada,
+          ...(publicada && (trocasDaMesa.has(String(keyword.id)) || typeof keyword.publishedPrimarySwapTo === "string") ? { publishedPrimarySwapConfirmedTo: trocasDaMesa.get(String(keyword.id)) ?? String(keyword.publishedPrimarySwapTo) } : {}),
           // Revisão humana lida do payload canônico. Estado incoerente não
           // vira agrupamento: ele volta para a lógica e a incoerência aparece.
           humanFormationRef: resolveArticleFormationState(keyword).formationRef,
@@ -5938,6 +5947,7 @@ export default function ArquitetoPage() {
       articleId: String(version.payload.articleId),
       territoryRef: version.payload.territoryRef ? String(version.payload.territoryRef) : null,
       principalKeywordId: reconciliationPrincipalKeywordId(version.payload, publishedKeywordIdSet),
+      alsoPrincipalKeywordIds: [String(version.payload.principalKeywordId)],
       keywordIds: [
         String(version.payload.principalKeywordId),
         ...(version.payload.secondaryKeywordIds || []).map(String),
@@ -11341,7 +11351,7 @@ export default function ArquitetoPage() {
       const vigente = publicado ? article ?? articleDnaByPublishedPrincipal.get(diagnosis.anchorKeywordId) ?? null : null;
       const substituta = diagnosis.swap?.substitute;
       return serpSubjectCardView(diagnosis, {
-        ...(publicado ? { post, swapReadiness: publishedSwapReadiness({ diagnosis, article, currentPost: post }), articleKeywordIds: vigente ? new Set(vigente.keywordReferences.map(reference => String(reference.keywordId))) : null } : {}),
+        ...(publicado ? { post, swapReadiness: publishedSwapReadiness({ diagnosis, article, currentPost: post }), articleKeywordIds: vigente ? new Set(vigente.keywordReferences.map(reference => String(reference.keywordId))) : null, articlePrincipalKeywordId: vigente ? String(vigente.principalKeywordId) : null, formationRecorded: Boolean(candidateRef?.startsWith(ARTICLE_FORMATION_REF_PREFIX)) } : {}),
         pageUrl: publicado ? (info?.canonical || info?.url || null) : (subjectStandings.get(diagnosis.anchorKeywordId)?.destinationUrl ?? null),
         appliedSwap: appliedPublishedSwapOf(article),
         kept: Boolean(substituta && keptSwaps.has(keptSwapKey(diagnosis.anchorKeywordId, substituta.keywordId))),
@@ -11353,6 +11363,11 @@ export default function ArquitetoPage() {
     });
   }, [articleFormation.formationKeywords, serpSubjectBrandRef, serpSubjectDiagnoses, serpPublishedInfo, serpAnchorCandidateRef, articleDnaEntryFor, articleDnaByPublishedPrincipal, subjectStandings, keptSwaps, serpSubjectAnalysis.searches]);
   const serpSubjectCardByKey = useMemo(() => new Map(serpSubjectCards.map(card => [card.key, card])), [serpSubjectCards]);
+  /** Tabela do Reforçar (2026-09-28): nome e volume de cada keyword, para a principal atual e o volume somado. */
+  const serpSubjectKeywordOf = useCallback((keywordId: string) => {
+    const keyword = articleFormation.formationKeywords.get(keywordId);
+    return keyword ? { keyword: keyword.keyword, volume: keyword.volume } : null;
+  }, [articleFormation.formationKeywords]);
   const serpSubjectSummary = useMemo(() => summarizeSerpSubjectCards(serpSubjectCards), [serpSubjectCards]);
   const serpSubjectChoices = useMemo(() => serpSubjectBatchChoices({ diagnoses: serpSubjectDiagnoses, cards: serpSubjectCardByKey }), [serpSubjectDiagnoses, serpSubjectCardByKey]);
   const serpSubjectEvidenceOf = useCallback((card: SerpSubjectCardView) => {
@@ -11382,6 +11397,7 @@ export default function ArquitetoPage() {
     brandId: selectedBrandId,
     enabled: workspaceMode === "articles",
     noPairPageIds: serpSubjectNoPairIds,
+    cards: serpSubjectCards,
     onWritten: () => {
       setCanonicalWorkspaceReload(current => current + 1);
       setSerpSubjectReload(current => current + 1);
@@ -17156,6 +17172,7 @@ export default function ArquitetoPage() {
             buttonClassName={ARCHITECT_UI.toolbarButton}
             primaryButtonClassName={ARCHITECT_UI.primaryButton}
             reinforcement={publishedReinforcement}
+            keywordOf={serpSubjectKeywordOf}
           />
         )}
         {workspaceMode === "articles" && (

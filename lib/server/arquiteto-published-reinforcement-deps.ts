@@ -3,6 +3,7 @@ import "server-only";
 import type { PublishedReinforcementDeps } from "@/lib/server/arquiteto-published-reinforcement";
 import { listArticleFormationSerpAssessments } from "@/lib/server/arquiteto-article-serp-store";
 import { loadCanonicalArquitetoWorkspace } from "@/lib/server/arquiteto-workspace";
+import { serpAssessmentComposition } from "@/lib/arquiteto/published-formation-serp";
 import type { PipelineContext } from "@/lib/server/pipeline-runtime";
 
 /**
@@ -23,6 +24,9 @@ export function publishedReinforcementReadDeps(context: PipelineContext): Pick<P
       territoryRef: item.payload.territoryRef,
       // A mesma referência que a mesa grava no "Concluir formação" (canonicalSerpReferenceFor).
       reference: { entityId: item.payload.assessment.id, versionId: `${item.payload.assessment.id}:${item.payload.formationBaseHash}`, contentHash: item.payload.assessment.contentHash },
+      // A composição que o parecer observou: o Reforçar só aprova o DNA com o parecer DESTA composição.
+      // Papéis das consultadas, as 4 lentes e se o parecer ainda vale (corretor 2026-09-28).
+      composition: serpAssessmentComposition(item.payload.assessment, (item.payload.interpretation as { lenses?: unknown } | undefined)?.lenses),
     })),
   };
 }
