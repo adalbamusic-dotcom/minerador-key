@@ -49,7 +49,11 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
         // batch, rather than asking the human to approve each internal step.
         while (mounted.current && current.state === "applying" && !current.leaseUntil) current = await send("apply", current);
         if (mounted.current) onApplied();
-      } else if (action === "prepare" || action === "collect") setSelected(new Set(current.proposals.filter(p => p.status === "ready").map(p => p.targetId)));
+      } else if (action === "collect") {
+        // The server works in bounded steps; keep calling until it leaves "collecting".
+        while (mounted.current && current.state === "collecting") current = await send("collect", current);
+        if (mounted.current) setSelected(new Set(current.proposals.filter(p => p.status === "ready").map(p => p.targetId)));
+      } else if (action === "prepare") setSelected(new Set(current.proposals.filter(p => p.status === "ready").map(p => p.targetId)));
     } catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : "Falha na execução."); }
     finally { if (mounted.current) setBusy(false); }
   }
@@ -60,7 +64,8 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
   const ready = proposals.filter(p => p.status === "ready").length;
   const done = run?.state === "complete";
   const pendingApply = Boolean(run && !done && (selected.size > 0 || run.acceptedIds?.length));
-  const needsCost = Boolean(run && run.costs.paidQueries > 0 && !run.acceptedIds);
+  const collecting = run?.state === "collecting";
+  const needsCost = Boolean(run && !collecting && run.costs.paidQueries > 0 && !run.acceptedIds);
   return <section className="border-b border-divider bg-surface px-4 py-4 text-sm leading-6" aria-label={ARTICLE_IMPROVEMENT_LABEL} data-testid="architect-article-improvement">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="min-w-0">
@@ -68,11 +73,12 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
         <p className="text-text-muted">Uma análise para todos os publicados e Assuntos. Você revisa o que muda e confirma uma vez; URL, slug e canonical nunca mudam.</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        {!pendingApply && <button className={primaryButtonClassName} disabled={!brandId || busy || leaseActive} onClick={() => void execute("prepare")}>Preparar melhorias</button>}
-        {pendingApply && <button className={primaryButtonClassName} disabled={busy || leaseActive} onClick={() => run?.acceptedIds ? void execute("apply") : setConfirm("apply")}>{run?.acceptedIds ? "Continuar melhorias aceitas" : `Aplicar melhorias (${selected.size})`}</button>}
+        {collecting && <button className={primaryButtonClassName} disabled={busy} onClick={() => void execute("collect")}>Continuar coleta</button>}
+        {!pendingApply && !collecting && <button className={primaryButtonClassName} disabled={!brandId || busy || leaseActive} onClick={() => void execute("prepare")}>Preparar melhorias</button>}
+        {pendingApply && !collecting && <button className={primaryButtonClassName} disabled={busy || leaseActive} onClick={() => run?.acceptedIds ? void execute("apply") : setConfirm("apply")}>{run?.acceptedIds ? "Continuar melhorias aceitas" : `Aplicar melhorias (${selected.size})`}</button>}
         {pendingApply && !run?.acceptedIds && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => void execute("prepare")}>Refazer análise</button>}
         {needsCost && <button className={buttonClassName} disabled={busy} onClick={() => setConfirm("collect")}>Revisar custo da SERP</button>}
-        {run && (leaseActive || run.state === "applying" || run.state === "collecting") && <button className={buttonClassName} disabled={busy} onClick={() => void execute("status")}>Atualizar</button>}
+        {run && (leaseActive || run.state === "applying") && <button className={buttonClassName} disabled={busy} onClick={() => void execute("status")}>Atualizar</button>}
       </div>
     </div>
     {busy && <p role="status" className="mt-2 text-text-muted">Processando; o andamento fica guardado no servidor.</p>}
@@ -105,7 +111,8 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
         })}
       </tbody></table></div>
       {run.costs.cacheUnavailable && <p className="mt-2 text-warning">Não deu para conferir o cache: a estimativa pode incluir consultas já pagas.</p>}
-      {run.notices.map((notice, i) => <p className="mt-2 text-text-muted" key={`${i}:${notice}`}>{notice}</p>)}
+      {collecting && <p className="mt-2 text-warning">A coleta ficou pela metade. O que já foi pago está no cache e não é cobrado de novo: toque em “Continuar coleta”.</p>}
+      {[...new Set(run.notices)].map((notice, i) => <p className="mt-2 text-text-muted" key={`${i}:${notice}`}>{notice}</p>)}
     </>}
     {confirm && run && <div className="mt-4 border-t border-divider pt-4" role="region" aria-label="Confirmar prévia">
       {confirm === "apply"
