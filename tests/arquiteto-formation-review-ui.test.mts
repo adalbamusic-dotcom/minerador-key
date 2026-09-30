@@ -36,8 +36,11 @@ test("restam duas ações principais na fase Artigos", () => {
 test("o detalhe do artigo troca as abas de processo por um painel só", () => {
   assert.match(workspace, /\{articleMode \? \(\(\) => \{/);
   assert.match(workspace, /<ArticleFormationReviewPanel/);
-  // Fora da fase Artigos o fluxo por processo continua exatamente como estava.
-  assert.match(workspace, /\}\)\(\) : <>/);
+  // Em Links (2026-09-30) o artigo não é decidido: só um aviso que leva à aba Artigos.
+  assert.match(workspace, /\}\)\(\) : workspaceMode === "links" \? \(/);
+  assert.match(workspace, /data-testid="architect-links-article-readonly"/);
+  assert.match(workspace, /onClick=\{\(\) => setWorkspaceMode\("articles"\)\}[^>]*data-testid="architect-links-open-articles"/);
+  // O fluxo antigo por processo sobrevive só fora de Artigos e Links.
   assert.match(workspace, /role="tablist"/);
 });
 

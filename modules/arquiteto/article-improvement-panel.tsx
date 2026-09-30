@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { InfoHint } from "@/components/info-hint";
+import { OperationProgress } from "./operation-progress";
 import { ARTICLE_IMPROVEMENT_LABEL, IMPROVEMENT_AI_LABEL, IMPROVEMENT_LIST_CORE_LABEL, isListReading } from "@/lib/arquiteto/article-improvement";
 import { ARTICLES_NEW_ANCHOR, ARTICLES_SOBRAS_ANCHOR, improvementApplyLabel, improvementValidateLabel, resolveImprovementNextStep } from "@/lib/arquiteto/article-improvement-next-step";
 import type { ImprovementRun } from "@/lib/server/arquiteto-article-improvement";
@@ -27,27 +28,15 @@ const ACTIVITY_LABELS: Record<Activity["action"], string> = {
   apply: "Gravando as melhorias",
   status: "Lendo o andamento",
 };
-const elapsedText = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`; };
 /**
  * Progresso de toda etapa longa do painel, no padrão da plataforma: texto,
  * contador e barra. Com total conhecido, a barra enche; sem total, ela pulsa
  * e o tempo decorrido mostra que está andando.
  */
 export function ImprovementProgress({ activity, now, done, total, unit }: { activity: Activity; now: number; done: number | null; total: number | null; unit: string }) {
-  const known = typeof done === "number" && typeof total === "number" && total > 0;
-  const percent = known ? Math.min(100, Math.round((done! / total!) * 100)) : null;
-  return <div className="mt-2" data-testid="architect-improvement-progress">
-    <div className="flex items-center justify-between gap-2 text-sm">
-      <span className="font-semibold text-module-accent">{ACTIVITY_LABELS[activity.action]}…</span>
-      <span className="tabular-nums text-foreground">{percent === null ? elapsedText(now - activity.startedAt) : `${percent}%`}</span>
-    </div>
-    <div role="progressbar" aria-label={ACTIVITY_LABELS[activity.action]} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} aria-valuetext={known ? `${done} de ${total} ${unit}` : "em andamento"} className="mt-1 h-1.5 overflow-hidden rounded-full bg-divider">
-      <div className={`h-full rounded-full bg-module-accent transition-[width] duration-300 ${percent === null ? "w-1/3 motion-safe:animate-pulse motion-reduce:animate-none" : ""}`} style={percent === null ? undefined : { width: `${Math.max(percent, 3)}%` }} />
-    </div>
-    <p className="mt-1 text-sm tabular-nums text-text-muted">
-      {known ? `${done} de ${total} ${unit}` : "Em andamento"} · {elapsedText(now - activity.startedAt)} · o andamento fica guardado no servidor
-    </p>
-  </div>;
+  // O mesmo componente de progresso das outras etapas longas do Arquiteto.
+  return <OperationProgress label={ACTIVITY_LABELS[activity.action]} startedAt={activity.startedAt} now={now} done={done} total={total} unit={unit}
+    note="o andamento fica guardado no servidor" testId="architect-improvement-progress" />;
 }
 
 function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false }: {

@@ -273,7 +273,7 @@ export function describeSiloClosureReading(input: {
   if (input.consolidated) return { state: "closed", text: `${input.label}: fechado — Pilar, Suportes, SiloDNA e SiloPage gravados.` };
   const faltas: string[] = [];
   if (input.pendingLabels.length) {
-    faltas.push(`falta concluir ${input.pendingLabels.length} artigo(s): ${input.pendingLabels.map(nome => `“${nome}”`).join(", ")} (abra cada um e use “Manter composição” se a SERP pedir decisão; depois “Concluir formação”)`);
+    faltas.push(`falta concluir ${input.pendingLabels.length} artigo(s): ${input.pendingLabels.map(nome => `“${nome}”`).join(", ")} (aba Artigos: marque os artigos do Silo e clique em “Concluir formação”)`);
   }
   for (const bloqueio of input.blockers) {
     if (bloqueio.code === "FORMATIONS_PENDING" || bloqueio.code === "ALREADY_CONSOLIDATED") continue;

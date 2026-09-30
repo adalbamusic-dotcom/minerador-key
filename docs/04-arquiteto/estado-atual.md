@@ -1,3 +1,140 @@
+## Barra de progresso nos Links internos — 2026-09-30 (noite)
+
+**Verificado no código, confirmado por teste e visto na tela local (carregamento, só leitura).**
+
+- O cartão “Links internos · fase final da passada” dizia só “Há uma operação em curso.”. Agora
+  mostra a barra de progresso da plataforma com o nome do que está em curso: “Carregando o grafo
+  do Silo”, “Processando links: esqueleto do Silo e âncoras da IA” ou “Salvando e conferindo na
+  releitura”. A barra vem com o tempo decorrido e fica pulsando enquanto não há total.
+- O componente foi extraído para `modules/arquiteto/operation-progress.tsx` (`OperationProgress`)
+  e a “Melhorar publicados” passou a usar o mesmo: um visual só.
+- **Testes:** `test:arquiteto` 2703, `:dom` 17, `:servidor` 98, `:lentes` 69 e `test:agent` 65,
+  todos sem falhas.
+
+## Links internos não decide artigo — 2026-09-30 (noite)
+
+**Verificado no código, confirmado por teste e conferido na tela local (só leitura).**
+
+- Pedido do dono: em Links internos, a linha aberta mostrava o painel antigo (Lógica · SERP · IA
+  · Revisão). Ele repetia decisões de composição e de tipo da unidade e tinha um “Fechamento do
+  artigo” com conta própria, que acusava “Tipo de unidade: falta decisão humana”.
+- Agora, em Links, a linha mostra só o que é de Links: “Hierarquia no Silo” e os links do artigo
+  no grafo. Mostra também um aviso (`architect-links-article-readonly`) com o botão “Abrir na aba
+  Artigos”. Toda decisão do artigo fica na aba Artigos.
+- **Testes:** `test:arquiteto` 2702, sem falhas.
+
+## Tipo da unidade no candidato — 2026-09-30 (noite)
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- No candidato ainda sem ArticleDNA, a revisão cobrava “Registrar decisão” do tipo da unidade. O
+  botão devolvia “Gere a definição do artigo antes de classificar o tipo da unidade.”: um beco
+  sem saída, porque o tipo mora no ArticleDNA, que só nasce no “Concluir formação”.
+- Agora o candidato mostra o tipo como “… · definido ao concluir a formação”, e o controle não
+  aparece. Se o tipo ainda for ambíguo depois da conclusão, a decisão aparece no artigo formado,
+  onde o botão funciona.
+- **Testes:** `test:arquiteto` 2702, sem falhas.
+
+## Silo fechado aparecia duas vezes na aba Silos — 2026-09-30 (noite)
+
+**Verificado no código, confirmado por teste e conferido na tela local (só leitura).**
+
+- “Estruturas existentes · 3” (Captação, Crescimento e Estratégia, com “0 keyword · 0 artigo”)
+  não eram Silos a apagar: eram os SiloDNA dos três Silos fechados. Apareciam soltos porque a
+  paisagem só ancorava estrutura em território por `existingSiloRef`, e o fechamento grava o
+  vínculo em `consolidation.siloId` e em `SiloDNA.territoryRef`.
+- `territorial-landscape.ts` passa a ancorar pelas duas fontes, e `territorial-surface.ts` não
+  repete a estrutura já ancorada num território.
+- Tela conferida: “SILOS · 4”. Leads está Confirmado, e Captação, Crescimento e Estratégia estão
+  Consolidados. Nenhuma estrutura solta.
+- **Testes:** `test:arquiteto` 2701, sem falhas.
+
+## “Confirmar propostas novas” não desmonta artigo; a aba Silos diz como o Silo fecha — 2026-09-30 (noite)
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- A confirmação na aba Silos foi recusada por inteiro porque a análise propunha mover “como
+  atrair clientes pelo whatsapp” de Captação (fechado) para Leads. A mesma proposta também
+  deixava “sem Silo” keywords que o dono pôs nos artigos de Leads.
+- Agora `sairiaDoSilo` preserva as keywords de ArticleDNA aprovado, de formação concluída ou
+  decidida pela pessoa e de Silo fechado. Elas ficam onde estão, com aviso, e o resto do plano
+  segue. Isso vale no plano da trava de impacto e nas decisões gravadas.
+- A aba Silos mostra “Fechamento dos Silos” (`architect-silo-closure-status-silos`), com o que
+  falta e o caminho: aba Artigos → “Concluir formação”.
+- **Testes:** `test:arquiteto` 2700 e `test:agent` 65, sem falhas. `tsc` limpo.
+
+## “Concluir formação” fecha tudo o que está selecionado — 2026-09-30 (noite)
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+Pedido do dono: não havia botão claro para fechar “como captar um cliente” e “como atrair um
+cliente”. O “Manter composição” só libera com motivo digitado, artigo por artigo, e o
+“Concluir formação” deveria bastar.
+
+- Antes da portaria, o Concluir levanta nos selecionados o que precisa de decisão: SERP
+  divergente esperando decisão, par que disputa o tema (os dois lados na seleção) e fronteira
+  contestada. Mostra a lista numa confirmação só (`architect-conclusion-keep-dialog`).
+- “Concluir e manter N” grava para cada um a mesma decisão do “Manter composição”:
+  `accept_current_composition` pela rota `/api/arquiteto/serp-resolution`, conferida na
+  releitura. Depois a conclusão continua sozinha (`keepConfirmed`) e o fechamento do Silo vem
+  em seguida.
+- A decisão que não voltar na releitura mantém o artigo de fora, com aviso.
+- **Testes:** `test:arquiteto` 2699, `:dom` 17, `:servidor` 98, `:lentes` 69 e `test:agent` 65,
+  todos sem falhas. `tsc` limpo.
+
+## Mesa e aba Silos depois da recuperação — 2026-09-30 (noite)
+
+**Verificado no código, confirmado por teste e conferido na tela local (só leitura). Validado
+manualmente pelo dono: não.**
+
+- O dono rodou a recuperação. Releitura: 0 keywords nos duplicados; Captação, Crescimento e
+  Estratégia consolidados; Leads e limpeza de pele confirmados; whatsapp → `8bcd8ff3`.
+- **Tela conferida:** nos três Silos fechados, todas as linhas mostram Papel no Silo
+  (PILAR/SUPORTE), “Consolidado” e “Aprovado”. “leads qualificados” aparece como “Formação
+  concluída · Aguardando consolidação do Silo”.
+- **Correções:**
+  - “Conclusão desatualizada” compara a composição DO ARTIGO (Principal e keywords), não o hash
+    do lote inteiro (`readFormationConclusionState.currentComposition`).
+  - A linha liga ao ArticleDNA pelo vínculo gravado no marcador (`explicitLinks` em
+    `partitionMaterializedArticles`, no mesmo Silo). “marketing digital para dentistas” voltou a
+    mostrar o artigo aprovado.
+  - Na aba Silos, Silo fechado aparece como “fechado · SiloDNA e SiloPage aprovados” e o Pilar
+    vira texto fixo. O painel de contestação usa a mesma lista do fechamento.
+  - Silo desfeito nunca é destino da proposta, e o “Confirmar” deixa as keywords dele sem Silo.
+- **Testes:** `test:arquiteto` 2698, `:dom` 17, `:servidor` 98, `:lentes` 69 e `test:agent` 65,
+  todos sem falhas. `tsc` limpo.
+- **Falta (dono):** Leads sem Tráfego Pago, com “Manter composição” e “Concluir” em “como captar
+  um cliente” e “como atrair um cliente”.
+
+## Silos fechados, e a duplicação que veio depois — 2026-09-30 (noite)
+
+**Verificado no banco (leitura), no código e por teste. Validado manualmente: não.**
+
+- **Fechamento feito:** Crescimento de Clínicas e Estratégia de Negócios às 11:37, Captação de
+  Pacientes às 11:56. Cada um tem SiloDNA e SiloPage aprovados v1, e os ArticleDNA dos três
+  receberam o `siloId` (sucessoras).
+- **Defeito 1 (Reprocessar arquitetura):** às 11:57 a adoção de Silo publicado não reconheceu
+  os três Silos consolidados, porque a proposta só conhece candidatos e confirmados. Ela criou
+  DUPLICATAS (`d0fa7569`, `c295b112`, `7cde53f0`) e moveu para elas as 19 keywords das páginas
+  publicadas. Também recriou como candidatos “botox para o rosto” e “tratamento estético para o
+  rosto”, que o dono tinha desfeito. O “Restaurar” da tela é recusado, porque Silo consolidado
+  não recebe keyword.
+  - Correção: `existingTerritoryForProposedSilo` faz o mesmo endereço ser o mesmo Silo
+    (consolidado incluído) e impede recriar um Silo desfeito pela pessoa.
+  - Recuperação: `supabase/manual/20260930-recuperar-silos-adalbapro.sql`, a ser executada pelo
+    dono. Numa transação com guardas, ela devolve as 19 keywords ao Silo de origem (o mesmo do
+    ArticleDNA delas), rejeita as 3 duplicatas (com `supersededByTerritoryRef`) e os 2
+    candidatos, e religa o whatsapp ao artigo original.
+- **Defeito 2 (Concluir formação):** reconcluir usava o `candidateRef` como identidade e criou
+  `article-formation:62ade5c4…` duplicando “como atrair clientes pelo whatsapp” (`8bcd8ff3…`).
+  Agora reconcluir sucede o MESMO ArticleDNA, e publicado nunca é reescrito pelo “Concluir”
+  (vai pelo “Reforçar publicados”). A duplicata segue no acervo, fora do SiloDNA. Ela não sai
+  sozinha: as versões são append-only e não há jornada para aposentar artigo.
+- **Papel no Silo:** a coluna aparece em Artigos e em Links, lida do SiloDNA aprovado de todo
+  Silo fechado (`siloRoleByArticleId`).
+- **Testes:** `test:arquiteto` 2695, `:dom` 17, `:servidor` 98, `:lentes` 69 e `test:agent` 65,
+  todos sem falhas. `tsc` limpo.
+
 ## Correção do dano do Concluir e fechamento sem contagem própria — 2026-09-30 (fim da tarde)
 
 **Verificado no código e confirmado por teste. Validado manualmente: não.**

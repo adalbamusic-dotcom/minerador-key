@@ -470,7 +470,7 @@ test("Concluir formação conclui os prontos, nomeia quem ficou de fora e pede a
   // Só no clique humano; a conclusão automática do Assunto segue com a regra dela.
   assert.match(corpo, /if \(!portaria\.ok && humano\)/);
   // A continuação relê a seleção da mesa (não reusa os refs do clique) e não pede a SERP de novo.
-  assert.match(workspace, /void confirmArticleFormation\(undefined, \{ serpRequested: true \}\);/);
+  assert.match(workspace, /void confirmArticleFormation\(undefined, manter \? \{ serpRequested: true, keepConfirmed: true \} : \{ serpRequested: true \}\);/);
   assert.match(corpo, /const requestedRefs = automatic\?\.candidateRefs\?\.length \? new Set\(automatic\.candidateRefs\) : null;/);
 });
 

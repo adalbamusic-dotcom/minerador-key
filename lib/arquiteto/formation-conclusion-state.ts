@@ -70,9 +70,21 @@ export function readFormationConclusionState(input: {
   /** O lote foi processado — existe marcador de formação. */
   processed: boolean;
   /** As formações congeladas no marcador, vindas do remoto. */
-  concludedFormations: readonly { candidateRef: string; formationBaseHash: string }[];
+  concludedFormations: readonly {
+    candidateRef: string;
+    formationBaseHash: string;
+    principalKeywordId?: string;
+    members?: readonly { keywordId: string }[];
+  }[];
   /** A composição corrente; conclusão de outra composição é histórico. */
   currentFormationBaseHash?: string | null;
+  /**
+   * A composição DESTE artigo na mesa (2026-09-30). Quando vem, a conclusão só
+   * fica desatualizada se a Principal ou as keywords DELE mudaram. O hash do
+   * lote inteiro muda com qualquer keyword de qualquer Silo e marcava como
+   * "desatualizada" uma formação que ninguém tinha tocado.
+   */
+  currentComposition?: { principalKeywordId: string; keywordIds: readonly string[] } | null;
   published?: boolean;
 }): FormationConclusionReading {
   if (input.published) {
@@ -113,8 +125,13 @@ export function readFormationConclusionState(input: {
      * fechou não é o que está na tela — e dizer "concluída" ali esconderia
      * que a decisão precisa ser refeita.
      */
-    const stale = Boolean(input.currentFormationBaseHash)
-      && congelada.formationBaseHash !== input.currentFormationBaseHash;
+    const composicao = input.currentComposition;
+    const stale = composicao && congelada.members && congelada.principalKeywordId
+      ? congelada.principalKeywordId !== composicao.principalKeywordId
+        || congelada.members.length !== composicao.keywordIds.length
+        || congelada.members.some(member => !composicao.keywordIds.includes(member.keywordId))
+      : Boolean(input.currentFormationBaseHash)
+        && congelada.formationBaseHash !== input.currentFormationBaseHash;
     return stale
       ? {
         state: "IN_FORMATION",

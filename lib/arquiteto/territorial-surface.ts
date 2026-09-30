@@ -155,6 +155,9 @@ export function buildTerritorialSurface(input: {
   }
 
   for (const structure of landscape.existingStructures) {
+    // Estrutura ancorada num território já aparece por ele (com keywords e
+    // artigos); repeti-la aqui mostrava o mesmo Silo duas vezes, vazio.
+    if (structure.anchoredByTerritoryRef) continue;
     groups.push({
       kind: "existing_structures",
       header: {

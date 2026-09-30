@@ -9,6 +9,9 @@ import {
 } from "../lib/arquiteto/silo-composition-from-formations.ts";
 import { closureFormationsForSilo, closureGuardsForSilo, describeSiloClosureReading, resolveSiloClosureReadiness } from "../lib/arquiteto/silo-closure-readiness.ts";
 import { proposalFromRemoteWorkingCopy } from "../lib/arquiteto/silo-working-copy-bridge.ts";
+import { existingTerritoryForProposedSilo } from "../lib/arquiteto/silo-assignment.ts";
+import { readFormationConclusionState } from "../lib/arquiteto/formation-conclusion-state.ts";
+import { partitionMaterializedArticles } from "../lib/arquiteto/formation-materialization.ts";
 import { resolveArticleRowAxes } from "../lib/arquiteto/operational-status.ts";
 import { siloConsolidationIssues } from "../lib/arquiteto/silo-consolidation.ts";
 import type { CanonicalSiloWorkingCopy } from "../lib/arquiteto/canonical-workspace.ts";
@@ -402,7 +405,7 @@ test("o fechamento de cada Silo diz em português o que falta", () => {
     blockers: [{ code: "FORMATIONS_PENDING", detail: "3 formações" }, { code: "KEYWORD_PACKAGE_STALE", detail: "\"atrair\" está em revisão" }],
   });
   assert.equal(espera.state, "waiting");
-  assert.match(espera.text, /falta concluir 1 artigo\(s\): “leads qualificados” \(abra cada um e use “Manter composição” se a SERP pedir decisão; depois “Concluir formação”\)/);
+  assert.match(espera.text, /falta concluir 1 artigo\(s\): “leads qualificados” \(aba Artigos: marque os artigos do Silo e clique em “Concluir formação”\)/);
   assert.match(espera.text, /está em revisão/);
   assert.doesNotMatch(espera.text, /3 formações/, "a pendência de formação sai pelo nome, não pela contagem crua");
 });
@@ -531,4 +534,129 @@ test("o Concluir não entrega fragmento órfão, não apaga o vínculo e não li
   assert.match(corpo, /plano\.blocked\.filter\(item => item\.code !== "PUBLISHED_COLLISION"\)/);
   assert.match(corpo, /closureResumptionAttempted\.current\.clear\(\);/);
   assert.match(codigo, /return candidateGuards\.openChallenges\.filter\(item => !humanKeptCandidate\(item\.scope\.id\) && !concluidos\.has\(item\.scope\.id\)\);/);
+});
+
+test("reprocessar não duplica Silo consolidado nem recria Silo desfeito pela pessoa", () => {
+  const territories = [
+    { territoryRef: "t-captacao", territory: { name: "Captação de Pacientes", lifecycleStatus: "consolidated", slugState: { publishedSlug: "/captacao-de-pacientes", confirmed: null, proposals: [] } } },
+    { territoryRef: "t-botox", territory: { name: "botox para o rosto", lifecycleStatus: "rejected", slugState: { publishedSlug: null, confirmed: null, proposals: [{ slug: "botox-para-o-rosto" }] } } },
+  ];
+  // A página publicada do Silo consolidado é o MESMO Silo: reaproveita.
+  assert.deepEqual(existingTerritoryForProposedSilo({ name: "Captação de Pacientes", slug: null, publishedSlug: "captacao-de-pacientes", territories }), { kind: "reuse", territoryRef: "t-captacao" });
+  // O que a pessoa desfez não volta sozinho — nem pelo endereço, nem pelo nome.
+  assert.deepEqual(existingTerritoryForProposedSilo({ name: "Botox para o Rosto", slug: "outro-slug", publishedSlug: null, territories }), { kind: "rejected_by_human", territoryRef: "t-botox" });
+  // Silo realmente novo continua nascendo.
+  assert.equal(existingTerritoryForProposedSilo({ name: "Skincare", slug: "skincare", publishedSlug: null, territories }), null);
+  // A fiação: consulta ANTES de criar.
+  const processar = codigo.slice(codigo.indexOf("const naoRecriados: string[] = [];"));
+  const antesDeCriar = processar.slice(0, processar.indexOf("createRemoteSiloCandidate({"));
+  assert.match(antesDeCriar, /existingTerritoryForProposedSilo\(\{/);
+  assert.match(antesDeCriar, /if \(existente\?\.kind === "reuse"\) \{ refPorChave\.set\(silo\.key, existente\.territoryRef\); continue; \}/);
+  assert.match(antesDeCriar, /if \(existente\?\.kind === "rejected_by_human"\) \{ naoRecriados\.push\(silo\.name\); continue; \}/);
+});
+
+test("reconcluir formação materializada sucede o MESMO artigo e nunca reescreve publicado", () => {
+  const trecho = codigo.slice(codigo.indexOf("const materializeApprovedArticleDnas = useCallback"));
+  const corpo = trecho.slice(0, trecho.indexOf("\n  }, ["));
+  assert.match(corpo, /const articleId = \(articleFormationMarker\?\.concludedFormations \|\| \[\]\)\s*\.find\(item => item\.candidateRef === aprovado\.candidateRef\)\?\.materializedArticleId\s*\|\| aprovado\.candidateRef;/);
+  assert.match(corpo, /if \(acceptedArticleDnas\[articleId\]\?\.payload\.publishedIdentityRef\) \{/);
+  assert.equal(corpo.includes("const articleId = aprovado.candidateRef;"), false);
+});
+
+test("Papel no Silo aparece em Artigos e em Links, lido do SiloDNA aprovado de todo Silo fechado", () => {
+  assert.match(codigo, /const siloRoleByArticleId = useMemo\(\(\) => \{/);
+  assert.match(codigo, /if \(version\.payload\.pillarArticleId\) papeis\.set\(String\(version\.payload\.pillarArticleId\), "PILAR"\);/);
+  assert.match(codigo, /\?\? siloRoleByArticleId\.get\(String\(articleDnaVersion\?\.payload\.articleId \|\| ""\)\);/);
+  assert.equal(codigo.includes('{workspaceMode === "links" && <th className="relative border-r border-divider px-2 py-2 text-center">Papel no Silo</th>}'), false);
+  assert.match(codigo, /\{ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId \}/);
+});
+
+test("conclusão só fica desatualizada quando a composição DO ARTIGO mudou, não o lote", () => {
+  const congelada = { candidateRef: "f-leads", formationBaseHash: "lote-antigo", principalKeywordId: "k1", members: [{ keywordId: "k1" }, { keywordId: "k2" }] };
+  const base = { candidateRef: "f-leads", articleDnaVersionNumber: null, processed: true, concludedFormations: [congelada], currentFormationBaseHash: "lote-novo" };
+  const igual = readFormationConclusionState({ ...base, currentComposition: { principalKeywordId: "k1", keywordIds: ["k2", "k1"] } });
+  assert.equal(igual.stale, false, "outra keyword de outro Silo mudou o hash do lote, não este artigo");
+  assert.equal(igual.statusLabel, "Aguardando consolidação do Silo");
+  const mudou = readFormationConclusionState({ ...base, currentComposition: { principalKeywordId: "k1", keywordIds: ["k1", "k3"] } });
+  assert.equal(mudou.stale, true);
+});
+
+test("o vínculo gravado mantém o artigo aprovado na linha mesmo com revisão em andamento", () => {
+  const particao = partitionMaterializedArticles({
+    accepted: [{ articleId: "a-dentistas", territoryRef: "silo-c", principalKeywordId: "k-dentistas", keywordIds: ["k-dentistas", "k-b"] }],
+    candidates: [
+      { candidateRef: "f-dentistas", siloRef: "silo-c", principalKeywordId: "k-outra", keywordIds: ["k-outra", "k-dentistas", "k-b"] },
+      { candidateRef: "f-orfao", siloRef: "silo-x", principalKeywordId: "k-z", keywordIds: ["k-z"] },
+    ],
+    explicitLinks: new Map([["f-dentistas", "a-dentistas"], ["f-orfao", "a-dentistas"]]),
+  });
+  assert.equal(particao.matched.get("f-dentistas"), "a-dentistas");
+  assert.equal(particao.matched.has("f-orfao"), false, "vínculo de outro Silo não vale");
+  assert.deepEqual(particao.legacy, []);
+});
+
+test("aba Silos: Silo fechado diz 'fechado', Pilar em texto, contestação sem concluído e sem Silo desfeito como destino", () => {
+  assert.match(codigo, /closed: Boolean\(aprovadaAgora\) && Boolean\(siloDnaVersion\) && effectiveVersionStatus\(siloDnaVersion!\.versionId, versionEvents\) === "approved",/);
+  const painel = readFileSync("modules/arquiteto/architecture-panel.tsx", "utf8");
+  assert.match(painel, /silo\.closed \? "fechado · SiloDNA e SiloPage aprovados"/);
+  assert.match(codigo, /data-testid="architect-silo-pillar-closed"/);
+  assert.match(codigo, /const openSiloReconsideration = useMemo\(\(\) => describeSiloReconsideration\(openSiloChallenges\), \[openSiloChallenges\]\);/);
+  assert.equal(codigo.includes("candidateGuards.reconsideration.required"), false);
+  assert.match(codigo, /const achado = remoteTerritories\.filter\(item => item\.territory\.lifecycleStatus !== "rejected"\)\.find\(/);
+  assert.match(codigo, /if \(desfeito\) \{ registrar\("unchanged", assignment\.keywordId\); continue; \}/);
+});
+
+test("Concluir formação fecha tudo: o que precisa de decisão vira UMA confirmação, gravada como 'Manter composição'", () => {
+  const concluir = codigo.slice(codigo.indexOf("const confirmArticleFormation = useCallback"));
+  const corpo = concluir.slice(0, concluir.indexOf("\n  }, ["));
+  // Levanta antes da portaria: divergência da SERP, par (os dois lados na seleção) e fronteira.
+  assert.ok(corpo.indexOf("if (humano && !continuacao?.keepConfirmed) {") < corpo.indexOf("let portaria = validateFormationConclusion("));
+  assert.match(corpo, /if \(articleSerpGates\.get\(ref\)\?\.requiresHumanDecision\) anotar\(ref,/);
+  assert.match(corpo, /if \(!naSelecao\.has\(par\.left\) \|\| !naSelecao\.has\(par\.right\)\) continue;/);
+  assert.match(corpo, /setConclusionKeepPrompt\(\{ items: itens \}\);\s*return;/);
+  // A gravação é a MESMA decisão do "Manter composição", conferida na releitura.
+  const manter = codigo.slice(codigo.indexOf("const keepAndConclude = useCallback"));
+  const corpoManter = manter.slice(0, manter.indexOf("\n  }, ["));
+  assert.match(corpoManter, /"\/api\/arquiteto\/serp-resolution"/);
+  assert.match(corpoManter, /decision: "accept_current_composition"/);
+  assert.match(corpoManter, /const canonical = await loadCanonicalArquitetoWorkspace\(selectedBrandId\);/);
+  assert.match(corpoManter, /setPendingHumanConclusion\("keep"\);/);
+  assert.match(codigo, /data-testid="architect-conclusion-keep-confirm"/);
+});
+
+test("Confirmar propostas novas não tira keyword de artigo nem de Silo fechado, e a aba Silos diz como o Silo fecha", () => {
+  const confirmar = codigo.slice(codigo.indexOf("const confirmArchitecture = async"));
+  const corpo = confirmar.slice(0, confirmar.indexOf("\n  };"));
+  assert.match(corpo, /const sairiaDoSilo = \(keywordId: string, destino: string \| null\) => \{/);
+  // Filtra o plano ANTES da trava de impacto: uma proposta inválida não barra o lote inteiro.
+  assert.ok(corpo.indexOf("const mantidasNosArtigos = plan.assignments.filter(") < corpo.indexOf("const impactoEstrutural = resolveTerritoryChangeImpact("));
+  assert.match(corpo, /if \(sairiaDoSilo\(assignment\.keywordId, territoryRef\)\) \{ registrar\("unchanged", assignment\.keywordId\); continue; \}/);
+  assert.match(corpo, /if \(sairiaDoSilo\(item\.keywordId, null\)\) \{ registrar\("unchanged", item\.keywordId\);/);
+  assert.match(codigo, /data-testid="architect-silo-closure-status-silos"/);
+});
+
+test("Silo fechado aparece uma vez só na aba Silos: o SiloDNA dele é do território, não 'estrutura existente' solta", () => {
+  const paisagem = readFileSync("lib/arquiteto/territorial-landscape.ts", "utf8");
+  assert.match(paisagem, /if \(territory\.consolidation\?\.siloId\) anchoredSiloIds\.set\(territory\.consolidation\.siloId, territory\.territoryRef\);/);
+  assert.match(paisagem, /territories\.some\(item => item\.territoryRef === territorio\)/);
+  const superficie = readFileSync("lib/arquiteto/territorial-surface.ts", "utf8");
+  assert.match(superficie, /for \(const structure of landscape\.existingStructures\) \{\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*if \(structure\.anchoredByTerritoryRef\) continue;/);
+});
+
+test("candidato não cobra 'Registrar decisão' do tipo da unidade: ele é definido ao concluir a formação", () => {
+  assert.match(codigo, /if \(!temArticleDna\) return \{ defined: true, label: `\$\{rotulo \|\| "Artigo"\} · definido ao concluir a formação` \};/);
+  // O controle só aparece com decisão de tipo pendente — no candidato, nunca.
+  assert.match(codigo, /unitTypeControl=\{expandedUnitDraft && articleReview\.decisions\.some\(item => item\.kind === "unit_type" && !item\.resolved\)/);
+});
+
+test("Links internos mostra a barra de progresso com o nome do que está em curso", () => {
+  const componente = readFileSync("modules/arquiteto/operation-progress.tsx", "utf8");
+  assert.match(componente, /role="progressbar"/);
+  assert.match(componente, /motion-safe:animate-pulse motion-reduce:animate-none/);
+  assert.match(codigo, /"Processando links: esqueleto do Silo e âncoras da IA"/);
+  assert.match(codigo, /<OperationProgress key=\{linksPhaseReading\.activityLabel\} label=\{linksPhaseReading\.activityLabel\} testId="architect-links-progress"/);
+  assert.equal(codigo.includes('? "Há uma operação em curso."'), false, "o genérico virou o nome do que está em curso");
+  // A melhoria de publicados usa o MESMO componente (um visual só).
+  const melhoria = readFileSync("modules/arquiteto/article-improvement-panel.tsx", "utf8");
+  assert.match(melhoria, /<OperationProgress label=\{ACTIVITY_LABELS\[activity\.action\]\}/);
 });

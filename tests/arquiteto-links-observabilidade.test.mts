@@ -384,7 +384,8 @@ test("a linha re-renderiza ao entrar em Links: a coluna tem célula", () => {
    * invisível — exatamente o que a homologação encontrou.
    */
   assert.equal(codigo.includes("const articleRowRevision = useMemo("), true);
-  assert.equal(codigo.includes("() => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy })"), true);
+  // E o papel lido do SiloDNA (Artigos e Links, 2026-09-30) também re-renderiza a linha.
+  assert.equal(codigo.includes("() => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId })"), true);
   assert.equal(codigo.includes("revision={articleRowRevision}"), true);
   assert.equal(codigo.includes("revision={articleTableRenderRevision}"), false, "as linhas não podem mais comparar a revisão antiga");
 });
