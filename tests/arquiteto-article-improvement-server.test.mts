@@ -178,3 +178,17 @@ test("campo volátil (lock, carimbo da SERP) entre a prévia e o aplicar não de
   setup();const outra=await prepare();rows[0].territoryRef="outro-silo";
   const recusada=await apply(outra);assert.equal(recusada.outcomes[0].status,"failed");assert.match(recusada.outcomes[0].message,/mudaram desde a prévia/);
 });
+test("coleta interrompida antes desta versão (presa em collecting, sem progresso) termina só pelo cache, sem pagar de novo", async()=>{
+  setup();plansMissing=3;const run=await prepare();
+  journal[0].payload={...journal[0].payload,state:"collecting",reservedCostUsd:.02};
+  delete journal[0].payload.collect;
+  const resumed=await handleArticleImprovement(runtime,{brandId,action:"collect",runId:run.runId,decisionHash:run.decisionHash});
+  assert.equal(resumed.state,"prepared",JSON.stringify(resumed.notices));
+  assert.equal(paid,0,"nada pago na retomada");
+  assert.equal((resumed as any).collect,undefined);
+});
+test("coleta nova grava o progresso por grupo e termina em prepared", async()=>{
+  setup();plansMissing=1;const run=await prepare();
+  const done=await handleArticleImprovement(runtime,{brandId,action:"collect",runId:run.runId,decisionHash:run.decisionHash,authorizedCostUsd:run.costs.estimatedCostUsd.max});
+  assert.equal(done.state,"prepared");assert.ok(paid<=run.costs.paidQueries);
+});

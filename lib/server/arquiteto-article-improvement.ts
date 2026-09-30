@@ -57,6 +57,8 @@ export type ImprovementRun = {
   beforeAssignments: Record<string, Record<string, unknown>>;
   proposals: ImprovementProposal[]; costs: CostPlan; reservedCostUsd: number;
   notices: string[]; outcomes: Outcome[]; acceptedIds: string[] | null;
+  /** Progress of a bounded paid collection; absent outside \"collecting\". */
+  collect?: { doneGroupIds: string[]; remaining: number; reservedRemaining: number; phase: "collect" | "refresh" };
 };
 export { ArticleImprovementRequestSchema } from "@/lib/arquiteto/article-improvement-request";
 import type { ArticleImprovementRequest } from "@/lib/arquiteto/article-improvement-request";
@@ -187,35 +189,35 @@ async function discover(context: PipelineContext, targets: ImprovementTarget[], 
   const { client } = await createGoogleAdsCanonicalClient({ context: canonical });
   const account = createGoogleAdsKeywordAccount({ customerId: canonical.customerId, loginCustomerId: canonical.managerCustomerId });
   const memo = new Set<string>(), found = new Map(existing.map(k => [normalizeKeyword(k.keyword), k]));
+  // One request per page (theme + URL together); a second, broader one only
+  // when the first brings back nothing new. Budget covers every target once.
+  const LIMIT = 40;
   let requests = 0;
-  for (const target of targets) {
-    const direct: GoogleAdsKeywordIdeasInput["seed"][] = [{ kind: "keyword", keywords: [target.theme] }];
-    if (target.url) direct.push({ kind: "url", url: target.url }, { kind: "keyword_and_url", keywords: [target.theme], url: target.url });
-    const concepts = [target.signals.centralEntity, target.signals.perceivedProblem, target.signals.desiredResult].filter((s): s is string => Boolean(s));
-    const stages = [direct, concepts.length ? [{ kind: "keyword" as const, keywords: concepts.slice(0, 3) }] : []];
-    for (const seeds of stages) for (const seed of seeds) {
-      if (requests >= 24) { notices.push(`Limite da rodada gratuita: pesquisa adicional pendente para ${target.theme}.`); break; }
-      const seedKey = JSON.stringify(seed);
-      if (memo.has(seedKey)) continue;
-      memo.add(seedKey);
-      let pageToken: string | undefined;
-      const seenTokens = new Set<string>();
-      // One page per seed: three pages of 500 exhausted the Google Ads quota in production.
-      for (let page = 0; page < 1 && requests < 24; page++) {
-        requests++;
-        const result = await generateGoogleAdsKeywordIdeas(client, { account: { customerId: account.customerId, loginCustomerId: account.loginCustomerId ?? undefined }, targeting: targetingToProviderInput(canonical.targeting ?? defaultGoogleAdsCanonicalTargeting()), seed, pageSize: 500, pageToken }, account);
-        for (const idea of result.ideas) {
-          const phrase = idea.keyword, normalized = normalizeKeyword(phrase);
-          if (!normalized || found.has(normalized)) continue;
-          const id = stableUuid(context.brandId, normalized, "improvement-candidate");
-          const logic = deriveLogicalKeywordBatchItem({ id, keyword: phrase, location: null, intent: null, analise_semantica: {} }, null, new Date().toISOString());
-          found.set(normalized, { id, keyword: phrase, volume: null, volumeValidated: false, signals: resolveKeywordDnaSignals({ keywordId: id, text: phrase, semantic: logic.update.analise_semantica }), ownerId: null, published: false, territoryRef: null, external: true });
-        }
-        if (!result.nextPageToken || seenTokens.has(result.nextPageToken)) break;
-        pageToken = result.nextPageToken; seenTokens.add(pageToken);
-      }
+  const pending: string[] = [];
+  const ask = async (seed: GoogleAdsKeywordIdeasInput["seed"]): Promise<number> => {
+    const seedKey = JSON.stringify(seed);
+    if (memo.has(seedKey)) return 0;
+    memo.add(seedKey); requests++;
+    const result = await generateGoogleAdsKeywordIdeas(client, { account: { customerId: account.customerId, loginCustomerId: account.loginCustomerId ?? undefined }, targeting: targetingToProviderInput(canonical.targeting ?? defaultGoogleAdsCanonicalTargeting()), seed, pageSize: 500 }, account);
+    let fresh = 0;
+    for (const idea of result.ideas) {
+      const phrase = idea.keyword, normalized = normalizeKeyword(phrase);
+      if (!normalized || found.has(normalized)) continue;
+      const id = stableUuid(context.brandId, normalized, "improvement-candidate");
+      const logic = deriveLogicalKeywordBatchItem({ id, keyword: phrase, location: null, intent: null, analise_semantica: {} }, null, new Date().toISOString());
+      found.set(normalized, { id, keyword: phrase, volume: null, volumeValidated: false, signals: resolveKeywordDnaSignals({ keywordId: id, text: phrase, semantic: logic.update.analise_semantica }), ownerId: null, published: false, territoryRef: null, external: true });
+      fresh++;
     }
+    return fresh;
+  };
+  for (const target of targets) {
+    if (requests >= LIMIT) { pending.push(target.theme); continue; }
+    const direct: GoogleAdsKeywordIdeasInput["seed"] = target.url ? { kind: "keyword_and_url", keywords: [target.theme], url: target.url } : { kind: "keyword", keywords: [target.theme] };
+    const fresh = await ask(direct);
+    const concepts = [target.signals.centralEntity, target.signals.perceivedProblem].filter((s): s is string => Boolean(s));
+    if (fresh === 0 && concepts.length && requests < LIMIT) await ask({ kind: "keyword", keywords: concepts.slice(0, 2) });
   }
+  if (pending.length) notices.push(`Pesquisa gratuita pendente para ${pending.length} item(ns) nesta rodada (${pending.slice(0, 3).join("; ")}${pending.length > 3 ? "…" : ""}). Prepare de novo para continuar.`);
   const candidates = [...found.values()].filter(k => k.external && !k.published && !k.ownerId && targets.some(t => improvementEditorialFit(t, k).fits));
   // Metrics are free, and estimates from keyword ideas are never validated demand.
   const volumes = await readGoogleAdsAverageVolumes({ actorUserId: context.actorUserId, agencyId: null, brandId: context.brandId, keywords: candidates.map(k => k.keyword) });
@@ -260,27 +262,46 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
   if (run.state === "complete") return run;
   if (request.action === "collect") {
     if (run.acceptedIds) throw refusal("Não recolha uma nova composição depois do aceite editorial.");
-    if (!request.authorizedCostUsd || request.authorizedCostUsd < run.costs.estimatedCostUsd.max || request.authorizedCostUsd + run.reservedCostUsd > 1) throw refusal("Autorize o plano vigente dentro do teto total de US$ 1 desta execução.");
-    // Reserve before opening a provider. Uncertain completion is not refunded,
-    // and retry can only inspect cache; it never repeats an uncertain payment.
-    if (run.state === "collecting") throw refusal("Coleta já reservada. Consulte o cache com uma nova preparação; não repita pagamentos incertos.");
-    const input = await readInputs(context, run.targets.map(t => t.id));
-    for (const target of run.targets) if (sourceHash(input.targets.find(t => t.id === target.id)!, input.workspace, input.rows) !== run.sourceHashes[target.id]) throw refusal("A arquitetura mudou desde a prévia. Prepare novamente antes de autorizar custos.");
-    run.state = "collecting"; run.reservedCostUsd += run.costs.estimatedCostUsd.max;
-    current = await saveRun(context, current, run);
-    let remaining = run.costs.paidQueries, reservedRemaining = run.costs.estimatedCostUsd.max;
-    const rows = candidateRows(run.keywords, input.rows);
-    for (const group of validationGroups(run, rows)) {
-      const plan = object((await serpOperation(context, group, "plan")).plan) as CostPlan;
-      if (plan.estimatedCostUsd.max > reservedRemaining || plan.paidQueries > remaining) {
-        run.notices.push(`Plano mudou para ${group.keywords[0].keyword}: nova autorização será necessária; nada pago para esta consulta.`);
-        continue;
-      }
-      const amount = Math.min(plan.paidQueries, remaining);
-      reservedRemaining -= plan.estimatedCostUsd.max;
-      try { await serpOperation(context, group, "execute", amount); remaining -= amount; } catch (error) { run.notices.push(`Coleta/validação ${group.id}: ${error instanceof Error ? error.message : "falhou"}. Pagamentos não serão repetidos automaticamente.`); remaining -= amount; }
+    // Bounded steps: each request works about a minute, saves the progress and
+    // returns "collecting"; the screen calls again. One request for everything
+    // exceeded the 120 s function limit in production (11 of 12 paid, then killed).
+    const started = Date.now(), STEP_MS = 60000;
+    let input: Awaited<ReturnType<typeof readInputs>>;
+    if (run.state !== "collecting") {
+      if (!request.authorizedCostUsd || request.authorizedCostUsd < run.costs.estimatedCostUsd.max || request.authorizedCostUsd + run.reservedCostUsd > 1) throw refusal("Autorize o plano vigente dentro do teto total de US$ 1 desta execução.");
+      input = await readInputs(context, run.targets.map(t => t.id));
+      for (const target of run.targets) if (sourceHash(input.targets.find(t => t.id === target.id)!, input.workspace, input.rows) !== run.sourceHashes[target.id]) throw refusal("A arquitetura mudou desde a prévia. Prepare novamente antes de autorizar custos.");
+      run.state = "collecting"; run.reservedCostUsd += run.costs.estimatedCostUsd.max;
+      run.collect = { doneGroupIds: [], remaining: run.costs.paidQueries, reservedRemaining: run.costs.estimatedCostUsd.max, phase: "collect" };
+      current = await saveRun(context, current, run);
+    } else {
+      // Resume. A run interrupted before this version has no progress record:
+      // it continues with zero paid budget, so only the cache is read.
+      input = await readInputs(context, run.targets.map(t => t.id));
+      run.collect ??= { doneGroupIds: [], remaining: 0, reservedRemaining: 0, phase: "collect" };
     }
-    await refreshPlan(runtime, run, input.rows); run.state = "prepared"; run.decisionHash = decisionHashOf(run);
+    const progress = run.collect!;
+    const rows = candidateRows(run.keywords, input.rows);
+    if (progress.phase === "collect") {
+      for (const group of validationGroups(run, rows)) {
+        if (progress.doneGroupIds.includes(group.id)) continue;
+        if (Date.now() - started > STEP_MS) return (await saveRun(context, current, run)).run;
+        const plan = object((await serpOperation(context, group, "plan")).plan) as CostPlan;
+        if (plan.paidQueries > 0 && (plan.estimatedCostUsd.max > progress.reservedRemaining || plan.paidQueries > progress.remaining)) {
+          if (progress.remaining > 0) run.notices.push(`Plano mudou para ${group.keywords[0].keyword}: nova autorização será necessária; nada pago para esta consulta.`);
+        } else {
+          const amount = Math.min(plan.paidQueries, progress.remaining);
+          progress.reservedRemaining -= plan.estimatedCostUsd.max;
+          try { await serpOperation(context, group, "execute", amount); progress.remaining -= amount; } catch (error) { run.notices.push(`Coleta/validação ${group.id}: ${error instanceof Error ? error.message : "falhou"}. Pagamentos não serão repetidos automaticamente.`); }
+        }
+        progress.doneGroupIds.push(group.id);
+        current = await saveRun(context, current, run);
+      }
+      progress.phase = "refresh";
+      current = await saveRun(context, current, run);
+      if (Date.now() - started > STEP_MS / 2) return current.run;
+    }
+    await refreshPlan(runtime, run, input.rows); run.state = "prepared"; delete run.collect; run.decisionHash = decisionHashOf(run);
     return (await saveRun(context, current, run)).run;
   }
   // One human confirmation persists the accepted set. Subsequent requests only
