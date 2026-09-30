@@ -26,7 +26,7 @@ test("cobertura não degrada a evidência de Forte para Provável", () => {
   assert.equal(result.get("only"), "a"); assert.equal(result.size, 1);
 });
 test("Livre sem volume usa fundamento editorial e SERP completa da candidata", () => {
-  const result = planArticleImprovements({ targets: [page("old")], keywords: [term("old", { published: true, volume: null, volumeValidated: false }), term("new")], evidence: [proof("old", "new", { sharedPages: 0, anchorConclusive: false })] })[0];
+  const result = planArticleImprovements({ targets: [page("old")], keywords: [term("old", { published: true, volume: null, volumeValidated: false }), term("new", { keyword: "captação de pacientes old guia" })], evidence: [proof("old", "new", { sharedPages: 0, anchorConclusive: false })] })[0];
   assert.equal(result.status, "ready"); assert.equal(result.principalId, "new");
   assert.deepEqual(result.memberIds, ["old", "new"]); assert.equal(result.evidenceBasis, "editorial_and_candidate_serp");
 });
@@ -84,4 +84,12 @@ test("ângulos distintos são registrados com exclusões recíprocas", () => {
   const result = planArticleImprovements({ targets: [a, b], keywords: [term("a", { published: true, volume: 0, volumeValidated: false }), term("b", { published: true, volume: 0, volumeValidated: false }), ka, kb], evidence: [proof("a", "ka"), proof("b", "kb")] });
   assert.ok(result.every(p => p.status === "ready"));
   assert.deepEqual(result[0].exclusions, [result[1].angle]); assert.deepEqual(result[1].exclusions, [result[0].angle]);
+});
+test("sem páginas em comum, a principal nova precisa caber no slug: 'agência de marketing' não substitui 'agência de marketing para cosméticos'", () => {
+  const signals = (id: string) => resolveKeywordDnaSignals({ keywordId: id, text: "agência de marketing", semantic: { entidade_central: "agência de marketing", problema_percebido: "contratar agência", resultado_desejado: "escolher agência" } });
+  const target = page("cosm", { theme: "agência de marketing para cosméticos", slug: "agencia-de-marketing-para-cosmeticos", signals: signals("cosm") });
+  const keywords = [term("cosm", { keyword: "agência de marketing para cosméticos", published: true, volume: null, volumeValidated: false, signals: signals("cosm") }), term("generica", { keyword: "agência de marketing", volume: 18100, signals: signals("generica") })];
+  const result = planArticleImprovements({ targets: [target], keywords, evidence: [proof("cosm", "generica", { sharedPages: 0, anchorConclusive: false })] })[0];
+  assert.notEqual(result.principalId, "generica");
+  assert.deepEqual(result.addIds, []);
 });

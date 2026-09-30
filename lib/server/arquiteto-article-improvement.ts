@@ -79,7 +79,18 @@ function signals(row: Row) {
 }
 function sourceHash(target: ImprovementTarget, workspace: Workspace, rows: Map<string, Row>): string {
   const article = workspace.articleDnas.find(a => a.entityId === target.id || a.payload.articleId === target.id || a.payload.subject?.keywordId === target.id || a.payload.publishedIdentityRef?.sourceKeywordDnaIds?.includes(target.id));
-  return hash({ target, article: article?.contentHash ?? null, members: target.memberIds.map(id => ({ id, row: rows.get(id) ?? null })), silos: workspace.siloDnas.map(s => [s.entityId, s.contentHash]) });
+  // Only what changes the article: never the whole row. Lock versions, SERP
+  // stamps and timestamps change when the preview itself (or "Processar
+  // artigos") records a SERP assessment, and made every apply fail with
+  // "mudaram desde a prévia".
+  const member = (id: string) => {
+    const row = rows.get(id);
+    if (!row) return { id, missing: true };
+    const decision = object(row.articleFormationDecision);
+    return { id, territoryRef: text(row.territoryRef), formationRef: text(row.articleFormationRef), role: text(decision.role), decisionSource: text(decision.source), published: Boolean(row.isPublished), post: text(row.primaryKeywordPolicy), dnaVersion: row.keywordDnaRef?.versionId ?? null };
+  };
+  const identity = { id: target.id, kind: target.kind, theme: target.theme, primaryId: target.primaryId, post: target.post, memberIds: target.memberIds, territoryRef: target.territoryRef, slug: target.slug, url: target.url, canonical: target.canonical };
+  return hash({ target: identity, article: article?.contentHash ?? null, members: target.memberIds.map(member) });
 }
 async function readInputs(context: PipelineContext, requested?: string[]) {
   const [workspace, brand, territories] = await Promise.all([loadCanonicalArquitetoWorkspace(context, { keywordDetail: "full" }), readDifferentiationBrandKeywords(context), listTerritoryWorkflowItems(context)]);
@@ -183,13 +194,14 @@ async function discover(context: PipelineContext, targets: ImprovementTarget[], 
     const concepts = [target.signals.centralEntity, target.signals.perceivedProblem, target.signals.desiredResult].filter((s): s is string => Boolean(s));
     const stages = [direct, concepts.length ? [{ kind: "keyword" as const, keywords: concepts.slice(0, 3) }] : []];
     for (const seeds of stages) for (const seed of seeds) {
-      if (requests >= 36) { notices.push(`Limite da rodada gratuita: pesquisa adicional pendente para ${target.theme}.`); break; }
+      if (requests >= 24) { notices.push(`Limite da rodada gratuita: pesquisa adicional pendente para ${target.theme}.`); break; }
       const seedKey = JSON.stringify(seed);
       if (memo.has(seedKey)) continue;
       memo.add(seedKey);
       let pageToken: string | undefined;
       const seenTokens = new Set<string>();
-      for (let page = 0; page < 3 && requests < 36; page++) {
+      // One page per seed: three pages of 500 exhausted the Google Ads quota in production.
+      for (let page = 0; page < 1 && requests < 24; page++) {
         requests++;
         const result = await generateGoogleAdsKeywordIdeas(client, { account: { customerId: account.customerId, loginCustomerId: account.loginCustomerId ?? undefined }, targeting: targetingToProviderInput(canonical.targeting ?? defaultGoogleAdsCanonicalTargeting()), seed, pageSize: 500, pageToken }, account);
         for (const idea of result.ideas) {

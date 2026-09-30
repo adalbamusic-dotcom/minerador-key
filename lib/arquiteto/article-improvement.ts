@@ -37,6 +37,22 @@ const knownEqual = (a: string | null, b: string | null) => Boolean(a && b && key
 const clinicalConcept = (v: string | null) => key(v).replace(/captar clientes|atrair clientes|atrair pacientes|captar pacientes|captacao de pacientes|captacao de clientes/g, "captacao pacientes");
 const unknown = (v: string | null) => !v || /indetermin|pendente|amb.gu|n.o definido/i.test(v);
 
+const SLUG_STOPWORDS = new Set(["de", "da", "do", "das", "dos", "para", "com", "sem", "e", "o", "a", "os", "as", "em", "no", "na", "um", "uma", "como", "que", "por", "vs"]);
+const slugWords = (value: string) => key(value).split(/[^a-z0-9]+/).filter(word => word.length > 2 && !SLUG_STOPWORDS.has(word)).map(word => word.replace(/s$/, ""));
+/**
+ * Without shared Google pages, a new principal must cover the subject the
+ * published slug promises: at least 3/4 of its content words. "agência de
+ * marketing" does not cover agencia-de-marketing-para-cosmeticos (no
+ * "cosméticos"), even though all its words are inside the slug.
+ */
+export function coversSlugSubject(slug: string | null, keyword: string): boolean {
+  const last = (slug ?? "").split("/").filter(Boolean).at(-1) ?? "";
+  const required = [...new Set(slugWords(last.replace(/-/g, " ")))];
+  if (!required.length) return false;
+  const present = new Set(slugWords(keyword));
+  return required.filter(word => present.has(word)).length / required.length >= 0.75;
+}
+
 /** A structured editorial match needs entity plus problem, audience or outcome. */
 export function improvementEditorialFit(target: ImprovementTarget, candidate: ImprovementKeyword): { fits: boolean; reason: string; conflict?: boolean; conflictKind?: "intent" } {
   if (target.kind === "published" && classifySlugFit(target.slug ?? "", candidate.keyword).fit === "contradicts") return { fits: false, conflict: true, reason: "A candidata contradiz a entidade do slug publicado." };
@@ -81,7 +97,10 @@ export function planArticleImprovements(input: {
     // phrase is not an obligatory overlap anchor when it has no demand.
     if (!evidence?.complete) return [];
     const old = target.primaryId ? byId.get(target.primaryId) : null;
-    const fallback = !old?.volumeValidated && !evidence.anchorConclusive && editorial.fits;
+    // Without shared pages, the page itself must vouch: the candidate has to fit
+    // the published slug ("agência de marketing" does not fit a cosmetics page).
+    const fitsSlug = target.kind !== "published" || coversSlugSubject(target.slug, candidate.keyword);
+    const fallback = !old?.volumeValidated && !evidence.anchorConclusive && editorial.fits && fitsSlug;
     if (evidence.sharedPages < 2 && !fallback && target.kind !== "subject") return [];
     return [{ targetId: target.id, keywordId: candidate.id, tier: evidence.sharedPages >= 3 ? 0 : 1, score: evidence.sharedPages + (editorial.fits ? 2 : 0), volume: candidate.volume! }];
   }));

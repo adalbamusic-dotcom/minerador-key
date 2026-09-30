@@ -170,3 +170,11 @@ test("one target failure keeps the accepted batch and the next subject still mat
   failPatch=true;const partial=await apply(run);assert.equal(partial.state,"applying");assert.equal(partial.outcomes[0].status,"failed");assert.equal(partial.acceptedIds?.length,2);
   failPatch=false;const completed=await apply(partial);assert.equal(completed.state,"complete");assert.equal(completed.acceptedIds?.length,2);assert.equal(completed.outcomes.filter(o=>o.status==="improved").length,1);assert.equal(completed.outcomes.filter(o=>o.status==="failed").length,1);
 });
+test("campo volátil (lock, carimbo da SERP) entre a prévia e o aplicar não derruba a melhoria; mudança real de Silo derruba", async()=>{
+  setup();const run=await prepare();assert.equal(run.proposals[0].status,"ready",JSON.stringify(run.proposals));
+  // O que o "Processar artigos" e a própria prévia mudam na linha: versão de lock, carimbos.
+  for(const row of rows){row.canonicalWorkflow={...(row.canonicalWorkflow??{}),lockVersion:(row.canonicalWorkflow?.lockVersion??1)+7};row.updatedAt="2026-09-30T01:00:00.000Z";row.serpStamp="novo";}
+  const result=await apply(run);assert.equal(result.outcomes[0].status,"improved",JSON.stringify(result.outcomes));
+  setup();const outra=await prepare();rows[0].territoryRef="outro-silo";
+  const recusada=await apply(outra);assert.equal(recusada.outcomes[0].status,"failed");assert.match(recusada.outcomes[0].message,/mudaram desde a prévia/);
+});

@@ -17114,11 +17114,8 @@ export default function ArquitetoPage() {
           </section>
         )}
         {workspaceMode === "articles" && visibleUngroupedArticleKeywords.length > 0 && (
-          <section className="border-b border-warning/35 bg-warning/10 px-4 py-4">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-bold uppercase tracking-widest text-warning">Keywords não agrupadas · {visibleUngroupedArticleKeywords.length}</span>
-              <span className="text-sm text-text-muted">Sem agrupamento inferido durante a recuperação</span>
-            </div>
+          <details className="border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-ungrouped-keywords">
+            <summary className="cursor-pointer text-sm font-semibold text-foreground">Keywords sem artigo · {visibleUngroupedArticleKeywords.length} (as com volume estão em Sobras, abaixo)</summary>
             <div className="flex flex-wrap gap-1.5">
               {visibleUngroupedArticleKeywords.map(keyword => {
                 const selo = ungroupedSubjectLabels.get(String(keyword.id)) ?? null;
@@ -17131,7 +17128,7 @@ export default function ArquitetoPage() {
                 );
               })}
             </div>
-          </section>
+          </details>
         )}
         {workspaceMode === "articles" && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} />}
         {workspaceMode === "articles" && articleFormation.batchObjective === "improve" && (
