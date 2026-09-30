@@ -15,6 +15,7 @@ import { publishedPrimaryPostOf } from "@/lib/arquiteto/published-primary-swap";
 import { buildFirstPublishedArticleDna, withHumanArticleApproval } from "@/lib/arquiteto/published-reinforcement";
 import { resolveKeywordDnaSignals } from "@/lib/arquiteto/keyword-dna-signals";
 import { readArchitectSubjectStanding, planSubjectAttachment, attachSubjectToArticleDna } from "@/lib/arquiteto/declared-subject";
+import { shortSeedsOf, sharesTheme } from "@/lib/arquiteto/article-improvement-seeds";
 import { ARTICLE_IMPROVEMENT_VERSION, planArticleImprovements, improvementEditorialFit, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence } from "@/lib/arquiteto/article-improvement";
 import { buildSerpSubjectIndex, SERP_SUBJECT_LENS_LABELS } from "@/lib/arquiteto/serp-subject-overlap";
 import { createVersionEnvelope } from "@/lib/arquiteto/versioning";
@@ -43,6 +44,8 @@ import { stableUuid } from "./arquiteto-published-reinforcement";
 const refusal = (message: string) => new PipelineRuntimeError("CONFLICT", message, 409);
 const SUBJECT_TYPE = "article_improvement_run";
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const canonicalJson = (value: unknown): unknown => Array.isArray(value) ? value.map(canonicalJson) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => [k, canonicalJson(v)])) : value;
+export const stableHash = (value: unknown) => hash(canonicalJson(JSON.parse(JSON.stringify(value ?? null))));
 const text = (v: unknown) => typeof v === "string" && v.trim() ? v.trim() : null;
 const object = (v: unknown): Record<string, unknown> => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
 type Row = ArchitectKeyword & Record<string, unknown>;
@@ -212,13 +215,16 @@ async function discover(context: PipelineContext, targets: ImprovementTarget[], 
   };
   for (const target of targets) {
     if (requests >= LIMIT) { pending.push(target.theme); continue; }
-    const direct: GoogleAdsKeywordIdeasInput["seed"] = target.url ? { kind: "keyword_and_url", keywords: [target.theme], url: target.url } : { kind: "keyword", keywords: [target.theme] };
+    // Google Ads returns only the phrase itself for long titles; short cores
+    // ("plano de marketing", "clínica de estética") bring the related searches.
+    const cores = shortSeedsOf(target.theme);
+    const direct: GoogleAdsKeywordIdeasInput["seed"] = target.url ? { kind: "keyword_and_url", keywords: cores, url: target.url } : { kind: "keyword", keywords: cores };
     const fresh = await ask(direct);
     const concepts = [target.signals.centralEntity, target.signals.perceivedProblem].filter((s): s is string => Boolean(s));
     if (fresh === 0 && concepts.length && requests < LIMIT) await ask({ kind: "keyword", keywords: concepts.slice(0, 2) });
   }
   if (pending.length) notices.push(`Pesquisa gratuita pendente para ${pending.length} item(ns) nesta rodada (${pending.slice(0, 3).join("; ")}${pending.length > 3 ? "…" : ""}). Prepare de novo para continuar.`);
-  const candidates = [...found.values()].filter(k => k.external && !k.published && !k.ownerId && targets.some(t => improvementEditorialFit(t, k).fits));
+  const candidates = [...found.values()].filter(k => k.external && !k.published && !k.ownerId && targets.some(t => sharesTheme(t.theme, k.keyword) || improvementEditorialFit(t, k).fits));
   // Metrics are free, and estimates from keyword ideas are never validated demand.
   const volumes = await readGoogleAdsAverageVolumes({ actorUserId: context.actorUserId, agencyId: null, brandId: context.brandId, keywords: candidates.map(k => k.keyword) });
   for (const k of candidates) { const measured = volumes.get(normalizeKeyword(k.keyword)); if (measured !== undefined) { k.volume = measured; k.volumeValidated = typeof measured === "number" && measured > 0; } }
@@ -235,7 +241,8 @@ async function findRun(context: PipelineContext, runId: string) {
 async function saveRun(context: PipelineContext, current: Awaited<ReturnType<typeof findRun>>, run: ImprovementRun) {
   await new WorkflowRepository(context).update(current.id, current.lock, { state: run.state, payload: run as unknown as Record<string, unknown> });
   const readback = await findRun(context, run.runId);
-  if (hash(readback.run) !== hash(run)) throw refusal("A releitura da execução não confirmou a gravação.");
+  // JSONB reorders object keys and drops undefined: compare the content, not the text.
+  if (stableHash(readback.run) !== stableHash(run)) throw refusal("A releitura da execução não confirmou a gravação.");
   return readback;
 }
 const decisionHashOf = (run: ImprovementRun) => hash({ version: run.version, brandId: run.brandId, actorId: run.actorId, sources: run.sourceHashes, proposals: run.proposals, keywords: run.keywords, costs: run.costs });
@@ -311,7 +318,7 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     if (selected.some(id => !run.proposals.some(p => p.targetId === id && p.status === "ready"))) throw refusal("Só propostas prontas podem ser aceitas; nenhuma keyword será forçada.");
     if (selected.some(id => run.proposals.find(p => p.targetId === id)?.addIds.some(k => run.keywords.find(keyword => keyword.id === k)?.external)) && request.approveNewKeywords !== true) throw refusal("Confirme explicitamente a aprovação das novas keywords no Minerador.");
     run.acceptedIds = selected;
-  } else if (request.targetIds && hash(request.targetIds) !== hash(run.acceptedIds)) throw refusal("A retomada não pode alterar os alvos aceitos.");
+  } else if (request.targetIds && stableHash(request.targetIds) !== stableHash(run.acceptedIds)) throw refusal("A retomada não pode alterar os alvos aceitos.");
   if (run.leaseUntil && Date.parse(run.leaseUntil) > Date.now()) throw refusal("Execução em andamento. Consulte o progresso antes de retomar.");
   const pending = run.acceptedIds.find(id => !run.outcomes.some(o => o.targetId === id));
   if (!pending) { run.state = "complete"; return (await saveRun(context, current, run)).run; }
@@ -346,9 +353,11 @@ function validationGroups(run: ImprovementRun, rows: Map<string, Row>): Provisio
   for (const target of run.targets) {
     if (!target.territoryRef) continue;
     const proposal = run.proposals.find(p => p.targetId === target.id)!;
-    if (proposal.principalId && proposal.memberIds.length) groups.push(makeGroup(target, proposal, rows));
+    // SERP is paid only for keywords with volume. The page's own composition is
+    // checked only when there is a real proposal to check.
+    if (proposal.status === "ready" && proposal.principalId && proposal.memberIds.length) groups.push(makeGroup(target, proposal, rows));
     const recommended = proposal.status === "ready" ? proposal.memberIds.filter(id => id === proposal.principalId || (rows.get(id)?.volume_search ?? 0) > 0) : [];
-    const ids = [...new Set([...recommended, ...run.keywords.filter(k => !k.published && k.volumeValidated && (!k.ownerId || k.ownerId === target.id) && improvementEditorialFit(target, k).fits).sort((a, b) => b.volume! - a.volume!).slice(0, 5).map(k => k.id)])];
+    const ids = [...new Set([...recommended, ...run.keywords.filter(k => !k.published && k.volumeValidated && (!k.ownerId || k.ownerId === target.id) && (sharesTheme(target.theme, k.keyword) || improvementEditorialFit(target, k).fits)).sort((a, b) => b.volume! - a.volume!).slice(0, 5).map(k => k.id)])];
     for (const id of ids) groups.push(makeGroup({ ...target, id, kind: "subject" }, { ...proposal, targetId: id, principalId: id, memberIds: [id] }, rows));
   }
   return [...new Map(groups.map(g => [g.id, g])).values()];
@@ -411,7 +420,7 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   for (const id of members) {
     const accepted = run.keywords.find(k => k.id === id);
     const current = input.keywords.find(k => k.id === id);
-    if (!accepted?.external && (!current || hash(current) !== hash(accepted))) throw refusal("Uma keyword da prévia mudou. Prepare novamente para revisar os dados atuais.");
+    if (!accepted?.external && (!current || stableHash(current) !== stableHash(accepted))) throw refusal("Uma keyword da prévia mudou. Prepare novamente para revisar os dados atuais.");
   }
   const newIds = members.filter(id => run.keywords.find(k => k.id === id)?.external);
   if (newIds.length) {

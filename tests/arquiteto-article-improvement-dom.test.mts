@@ -22,9 +22,9 @@ test.beforeEach(async()=>{
 });
 test.afterEach(()=>screen.destroy());
 test("one acceptance completes the batch; cancelling costs does not block ready targets",async()=>{
-  await screen.render(panel());await screen.click(button("Preparar melhorias"));assert.equal(calls.length,1);
-  assert.match(screen.text(),/volume 50/);await screen.click(button("Revisar custo da SERP"));assert.match(screen.text(),/mobile-ios/);await screen.click(button("Cancelar"));assert.equal(calls.filter(c=>c.action==="collect").length,0);
-  await screen.click(button("Aplicar melhorias (2)"));assert.equal(calls.length,1);await screen.click(button("Confirmar e aplicar"));
+  await screen.render(panel());await screen.click(button("1 · Buscar keywords (grátis)"));assert.equal(calls.length,1);
+  assert.match(screen.text(),/volume 50/);await screen.click(button("2 · Validar no Google (2 consultas, até US$ 0.01)"));assert.match(screen.text(),/mobile-ios/);await screen.click(button("Cancelar"));assert.equal(calls.filter(c=>c.action==="collect").length,0);
+  await screen.click(button("3 · Gravar melhorias (2)"));assert.equal(calls.length,1);await screen.click(button("Confirmar e aplicar"));
   const applies=calls.filter(c=>c.action==="apply");assert.equal(applies.length,2);assert.deepEqual(applies[0].targetIds,["a","b"]);assert.equal(applies[0].approveNewKeywords,true);assert.equal(applies[1].targetIds,undefined);
   assert.match(screen.text(),/Melhoria gravada/);assert.match(screen.text(),/Falha recuperável/);assert.equal(applied,1);
 });
@@ -35,7 +35,7 @@ test("F5 restores server acceptance and offers continuation without another conf
 test("an old-brand response cannot restore state after switching brand",async()=>{
   let deliver: ((value: Response)=>void)|undefined;
   globalThis.fetch=async (_url,options)=>options?.method?new Promise<Response>(resolve=>{deliver=resolve;}):new Response(JSON.stringify({success:true,data:null}));
-  await screen.render(panel());await screen.click(button("Preparar melhorias"));await screen.render(panel("brand-b"));
+  await screen.render(panel());await screen.click(button("1 · Buscar keywords (grátis)"));await screen.render(panel("brand-b"));
   await React.act(async()=>{deliver!(new Response(JSON.stringify({success:true,data:fixture()})));});
-  assert.doesNotMatch(screen.text(),/Publicado a/);assert.equal(button("Preparar melhorias").disabled,false);
+  assert.doesNotMatch(screen.text(),/Publicado a/);assert.equal(button("1 · Buscar keywords (grátis)").disabled,false);
 });
