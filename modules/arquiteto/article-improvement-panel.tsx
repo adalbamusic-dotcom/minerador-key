@@ -70,14 +70,14 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="min-w-0">
         <h3 className="font-semibold text-foreground">{ARTICLE_IMPROVEMENT_LABEL}</h3>
-        <p className="text-text-muted">Uma análise para todos os publicados e Assuntos. Você revisa o que muda e confirma uma vez; URL, slug e canonical nunca mudam.</p>
+        <p className="text-text-muted">1 · Buscar keywords com volume para cada publicado e Assunto (grátis, Google Ads). 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar. URL, slug e canonical nunca mudam.</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        {collecting && <button className={primaryButtonClassName} disabled={busy} onClick={() => void execute("collect")}>Continuar coleta</button>}
-        {!pendingApply && !collecting && <button className={primaryButtonClassName} disabled={!brandId || busy || leaseActive} onClick={() => void execute("prepare")}>Preparar melhorias</button>}
-        {pendingApply && !collecting && <button className={primaryButtonClassName} disabled={busy || leaseActive} onClick={() => run?.acceptedIds ? void execute("apply") : setConfirm("apply")}>{run?.acceptedIds ? "Continuar melhorias aceitas" : `Aplicar melhorias (${selected.size})`}</button>}
-        {pendingApply && !run?.acceptedIds && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => void execute("prepare")}>Refazer análise</button>}
-        {needsCost && <button className={buttonClassName} disabled={busy} onClick={() => setConfirm("collect")}>Revisar custo da SERP</button>}
+        {collecting && <button className={primaryButtonClassName} disabled={busy} onClick={() => void execute("collect")}>2 · Continuar validação (sem custo novo)</button>}
+        {!pendingApply && !collecting && <button className={primaryButtonClassName} disabled={!brandId || busy || leaseActive} onClick={() => void execute("prepare")}>1 · Buscar keywords (grátis)</button>}
+        {pendingApply && !collecting && <button className={primaryButtonClassName} disabled={busy || leaseActive} onClick={() => run?.acceptedIds ? void execute("apply") : setConfirm("apply")}>{run?.acceptedIds ? "Continuar melhorias aceitas" : `3 · Gravar melhorias (${selected.size})`}</button>}
+        {pendingApply && !run?.acceptedIds && <button className={buttonClassName} disabled={busy || leaseActive} onClick={() => void execute("prepare")}>Buscar de novo</button>}
+        {needsCost && <button className={buttonClassName} disabled={busy} onClick={() => setConfirm("collect")}>{`2 · Validar no Google (${run?.costs.paidQueries ?? 0} consultas, até US$ ${(run?.costs.estimatedCostUsd.max ?? 0).toFixed(2)})`}</button>}
         {run && (leaseActive || run.state === "applying") && <button className={buttonClassName} disabled={busy} onClick={() => void execute("status")}>Atualizar</button>}
       </div>
     </div>
@@ -111,7 +111,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
         })}
       </tbody></table></div>
       {run.costs.cacheUnavailable && <p className="mt-2 text-warning">Não deu para conferir o cache: a estimativa pode incluir consultas já pagas.</p>}
-      {collecting && <p className="mt-2 text-warning">A coleta ficou pela metade. O que já foi pago está no cache e não é cobrado de novo: toque em “Continuar coleta”.</p>}
+      {collecting && <p className="mt-2 text-warning">A validação ficou pela metade. O que já foi pago está no cache e não é cobrado de novo: toque em “2 · Continuar validação”.</p>}
       {[...new Set(run.notices)].map((notice, i) => <p className="mt-2 text-text-muted" key={`${i}:${notice}`}>{notice}</p>)}
     </>}
     {confirm && run && <div className="mt-4 border-t border-divider pt-4" role="region" aria-label="Confirmar prévia">

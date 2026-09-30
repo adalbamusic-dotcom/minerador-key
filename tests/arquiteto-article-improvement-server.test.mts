@@ -25,6 +25,8 @@ let paid = 0, plansMissing = 0, failReadback = false, failPatch = false, incompl
 let external = false, qualification: string[] = [];
 const discoveredPhrase = "captação de pacientes para clínica de estética";
 const clone = (v: any) => structuredClone(v);
+// Postgres JSONB does not keep key order and drops undefined: the mock behaves the same.
+const jsonb = (v: any): any => Array.isArray(v) ? v.map(jsonb) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined).sort(([p], [q]) => q.length - p.length || (p < q ? 1 : -1)).map(([k, x]) => [k, jsonb(x)])) : v;
 const json = (data: any) => new Response(JSON.stringify({ success: true, data }));
 class Query {
   filters: [string, any][] = [];
@@ -80,8 +82,8 @@ mock.module("../lib/server/arquiteto-article-formation-marker-store.ts", { named
 } });
 mock.module("../lib/server/pipeline-repositories.ts", { namedExports: { WorkflowRepository: class {
   context: any; constructor(c: any){this.context=c;}
-  async create(input: any){ journal.push({id:"journal", marca_id:this.context.brandId,subject_type:input.subjectType,subject_id:input.subjectId,stage:input.stage,payload:clone(input.payload),lock_version:1}); }
-  async update(id: string,lock: number,input: any){const r=journal.find(r=>r.id===id&&r.marca_id===this.context.brandId); assert.equal(r.lock_version,lock); Object.assign(r,clone(input));r.lock_version++;return{data:clone(r)};}
+  async create(input: any){ journal.push({id:"journal", marca_id:this.context.brandId,subject_type:input.subjectType,subject_id:input.subjectId,stage:input.stage,payload:jsonb(clone(input.payload)),lock_version:1}); }
+  async update(id: string,lock: number,input: any){const r=journal.find(r=>r.id===id&&r.marca_id===this.context.brandId); assert.equal(r.lock_version,lock); Object.assign(r,{...clone(input),...(input.payload?{payload:jsonb(clone(input.payload))}:{})});r.lock_version++;return{data:clone(r)};}
 } } });
 const subjectImportActual = await import("../lib/minerador/subject-discovery-import.ts");
 mock.module("../lib/minerador/subject-discovery-import.ts", { namedExports: { ...subjectImportActual, importSubjectDiscoveryWithCore: async (input:any)=>{
