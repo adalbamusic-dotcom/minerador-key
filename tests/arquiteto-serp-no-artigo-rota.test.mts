@@ -200,7 +200,9 @@ mock.module("@/lib/server/arquiteto-persistence", { namedExports: {
     ? { status: error.status, body: { success: false, error: error.message, code: error.code } }
     : { status: 503, body: { success: false, error: error instanceof Error ? error.message : String(error), code: "QUERY_FAILURE" } },
 } });
-mock.module("@/lib/server/arquiteto-territory-store", { namedExports: { listTerritoryWorkflowItems: async () => [], createTerritoryWorkflowItem: async () => ({}), updateTerritoryWorkflowItem: async () => ({}) } });
+mock.module("@/lib/server/arquiteto-territory-store", { namedExports: { listTerritoryWorkflowItems: async () => [], createTerritoryWorkflowItem: async () => ({}), updateTerritoryWorkflowItem: async () => ({}), readTerritoryWorkflowItem: async () => null } });
+// A rota do workspace passou a importar o "Desfazer Silo"; esta suíte não o usa.
+mock.module("@/lib/server/arquiteto-territory-undo", { namedExports: { planTerritoryUndoForBrand: async () => { throw new Error("Desfazer Silo fora do escopo desta suíte."); } } });
 mock.module("@/lib/server/arquiteto-territorial-serp-store", { namedExports: { listTerritorialSerpAssessments: async () => [], saveTerritorialSerpAssessment: async () => undefined, readbackTerritorialSerpAssessment: async () => ({ payload: {} }) } });
 mock.module("@/lib/server/arquiteto-territorial-ai-store", { namedExports: { listTerritorialAiProposals: async () => [] } });
 mock.module("@/lib/server/arquiteto-article-formation-marker-store", { namedExports: { readArticleFormationMarker: async () => null } });

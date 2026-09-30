@@ -10,6 +10,7 @@ import { RadarPrimaryModeConflictError } from "@/lib/radar/search-mode";
 import { buildRadarYoutubeUniverse } from "@/lib/radar/youtube-search-model";
 import { buildRadarYoutubeSearchRun } from "@/lib/radar/youtube-search-run";
 import { RadarStartError, finishRadarYoutubeRun, radarStartPorts, startRadarYoutubeRun } from "@/lib/server/radar-youtube-start";
+import { assertRadarGoogleBase } from "@/lib/server/radar-google-base";
 import { recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import type { RadarYoutubeSearchResult } from "@/lib/radar/youtube-search-model";
 
@@ -103,6 +104,8 @@ export async function POST(request: Request) {
      * só RETORNA quando a corrida está gravada e relida. Se qualquer passo
      * falhar, ele lança — e o provider nunca é alcançado.
      */
+    /* SDD Radar 2026-09-30 (Parte A): o YouTube acrescenta ao Google finalizado; sem ele, recusa antes de gastar. */
+    await assertRadarGoogleBase({ brandId: input.brandId, articleId: input.articleId, mode: "YOUTUBE" });
     const inicio = await startRadarYoutubeRun({
       brandId: input.brandId,
       articleId: input.articleId,

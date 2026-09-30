@@ -345,7 +345,7 @@ test("§3 e §4 · o filtro de utilidade compara SEGMENTO, não substring", () =
 });
 
 test("§1 · a rota entrega as consultas da corrida para o id virar texto", async () => {
-  const rota = await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8");
+  const rota = (await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8"));
   const semComentarios = rota.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
   /*

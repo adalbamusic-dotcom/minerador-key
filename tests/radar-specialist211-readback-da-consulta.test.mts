@@ -359,7 +359,11 @@ test("SPECIALIST_2.1.1 · a consulta é lida do banco, não remontada na tela", 
 test("SPECIALIST_2.1.1 · nenhuma migration foi criada para consertar o readback", async () => {
   const { readdir } = await import("node:fs/promises");
   const migrations = await readdir(new URL("../supabase/migrations/", import.meta.url));
-  assert.deepEqual(migrations.filter(nome => /specialist|consultation|expert/i.test(nome)), ["20260825150000_telegram_expert_contribution_platform_foundation.sql"]);
+  // A do canal da plataforma veio depois, autorizada na SDD do Radar de 2026-09-30 (Parte B, D3).
+  assert.deepEqual(migrations.filter(nome => /specialist|consultation|expert/i.test(nome)), [
+    "20260825150000_telegram_expert_contribution_platform_foundation.sql",
+    "20260930120000_expert_contribution_platform_channel.sql",
+  ]);
 });
 
 /* ========= SPECIALIST_2.1.2 · o @username vem da plataforma ========= */

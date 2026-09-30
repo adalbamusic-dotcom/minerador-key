@@ -1,3 +1,598 @@
+## Correção do dano do Concluir e fechamento sem contagem própria — 2026-09-30 (fim da tarde)
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+Homologação: o F5 criou as working copies, mas a consolidação recusou por contestar
+“como atrair clientes pelo whatsapp”, um artigo já concluído. O “Concluir formação” seguinte
+entregou fragmentos órfãos como candidatos. A leitura remota confirmou o dano no marcador:
+- `7e497890` virou “como captar pacientes” em Leads, sem ArticleDNA. O artigo real é o ArticleDNA
+  `611c5a96` em Captação, intacto.
+- `62ade5c4` (whatsapp) perdeu o vínculo com o ArticleDNA `8bcd8ff3`. A composição é a mesma e o
+  ArticleDNA está intacto.
+
+Correções:
+- Contestação de artigo já concluído não barra consolidação, leitura nem gatilho
+  (`openSiloChallenges`).
+- O gatilho depois do “Concluir” usa `closureFormationsForSilo`, a mesma leitura do fechamento, e
+  limpa `closureResumptionAttempted` para a retomada tentar de novo.
+- Fragmento órfão não entra no “Concluir formação”. Isso evita o dano acima, a SERP repetida e o
+  “ficou de fora” duplicado.
+- Publicado protegido (`PUBLISHED_COLLISION`) não aparece como “ficou de fora” nem como bloqueio.
+- Reconcluir preserva o `materializedArticleId` anterior.
+- `closureFormationsForSilo` religa a formação sem vínculo ao ArticleDNA aprovado da mesma
+  Principal no Silo. Nunca materializa um segundo artigo (isso resolve o whatsapp sem escrita).
+- **Reparo autorizado pelo dono e feito (2026-09-30):** a entrada `7e497890` do marcador foi restaurada a partir do ArticleDNA `611c5a96` (Captação, 3 keywords, slug `como-atrair-clientes-para-consultorio`), e o `62ade5c4` foi religado ao ArticleDNA `8bcd8ff3`. A gravação usou a rota do marcador e foi conferida na releitura: 22 entradas, nenhuma outra alterada.
+- Testes: `test:arquiteto` 2692, `:dom` 17, `:servidor` 98, `:lentes` 69 e `test:agent` 65,
+  todos sem falhas. `tsc` limpo.
+
+## Fechamento dos Silos destravado sem mexer em artigo — 2026-09-30 (tarde)
+
+**Verificado no código, confirmado por teste e por leitura do estado real (diagnóstico só de
+leitura). Validado manualmente: não.**
+
+O dono não quer tirar keyword de nenhum artigo. A leitura real do fechamento mostrou que os
+artigos aprovados estavam íntegros e que o impasse vinha de quatro defeitos, nenhum editorial:
+
+1. **Ponteiro órfão.** Cinco keywords que saíram de artigos ou mudaram de Silo guardavam o
+   ponteiro de uma formação concluída em outro Silo: “seo para google meu negócio”, “marketing
+   para clinica”, “marketing para clinicas”, “como atrair pacientes” e “como captar pacientes”.
+   A mesa montava fragmentos que nunca podiam ser concluídos (`FORMATIONS_PENDING` eterno).
+   `closureFormationsForSilo` não os conta como ativos.
+2. **Publicado aprovado sem “Concluir formação”.** “como captar clientes para clínica de
+   estética” ganhou o ArticleDNA pelo “Reforçar publicados”. Agora entra no fechamento pelo
+   próprio ArticleDNA, com a composição e os papéis dele, sem reescrever.
+3. **Pilar pelo ref da formação.** O fechamento gravava `article-formation:…` como Pilar. O
+   Pilar agora é o `articleId` do ArticleDNA (`pilarArticleId`).
+4. **Contestação da marca inteira na consolidação.** `consolidateSilos` recusava todos os Silos
+   por uma contestação em Leads. Agora só contam as contestações dos Silos em consolidação.
+
+- **Manter composição:** a decisão humana que já era gravada (aceitar a composição atual, com
+  o hash, e releitura) passa a resolver também o par que disputa o tema, quando os dois lados
+  forem mantidos ou a SERP separar os dois (`KEEP_SEPARATE`), e a fronteira contestada do
+  artigo mantido. A revisão lista o que “Manter” decide antes do clique
+  (`architect-serp-keep-also-decides`).
+- **Continuação do Concluir:** a continuação depois da SERP relê a seleção da mesa. Antes, ela
+  parava em “aguarda a releitura” para sempre.
+- **Estado observado (leitura remota):** Crescimento, Estratégia e Captação ficaram prontos
+  para fechar sem criar artigo (Pilares: “harmonização fácial preço”, “plano de marketing” e
+  “como atrair pacientes para consultório odontológico”, pela cobertura). A tela do dono já
+  gravou as 3 working copies do Silo com Pilar e Suportes. SiloDNA e SiloPage ainda não foram
+  gravados, porque o defeito 4 recusou. Leads espera “Manter composição” e “Concluir” nos três
+  candidatos.
+- **Testes:** `test:arquiteto` 2690, `:dom` 17, `:servidor` 98, `:lentes` 69 e `test:agent` 65,
+  todos sem falhas. `tsc` limpo.
+
+## Fechamento dos Silos: o que barra é do próprio Silo; tirar candidato do Silo — 2026-09-30
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+A aba Links internos dizia “Nenhum par SiloDNA + SiloPage disponível”, e “Papel no Silo”
+estava vazio. A leitura remota (só leitura) mostrou 21 formações concluídas e 22 ArticleDNA,
+mas 0 SiloDNA e 0 SiloPage. Estratégia de Negócios, Crescimento de Clínicas e Captação de
+Pacientes estavam com todas as formações concluídas e materializadas, e mesmo assim nenhum
+fechou.
+
+- **Causa:** o fechamento de cada Silo recebia os pares de canibalização e as contestações de
+  fronteira da marca inteira. O par “como captar um cliente” × “como atrair um cliente” (Leads
+  sem Tráfego Pago) barrava os quatro Silos.
+- **Correção:** `closureGuardsForSilo` (`lib/arquiteto/silo-closure-readiness.ts`) passa só o
+  que é do Silo. Um par cujos dois lados já foram concluídos não barra mais. Vale nos dois
+  pontos: a retomada automática e o gatilho depois de “Concluir formação”.
+- **Leitura única:** `siloClosureReadings` (memo) é a leitura de onde a retomada e a tela leem.
+  Links internos ganhou “Fechamento dos Silos” (`describeSiloClosureReading`), que diz por Silo
+  se ele fechou, se fecha sozinho ou o que falta.
+- **Pilar e Suportes:** nascem no fechamento (cobertura de buscas; empate pelo volume da
+  Principal), como já era a regra. Estavam vazios porque o fechamento nunca aconteceu.
+- **Tirar este artigo do Silo:** fica na revisão do candidato. As keywords voltam para “sem
+  Silo” pela decisão de Silo que já existe (`applySiloDecisionsInBatch`, alvo `unassigned`),
+  com confirmação e releitura. Nada é apagado e não há contrato novo. Só vale para candidato
+  não concluído e não publicado. É a saída para os três candidatos de Leads que o dono não vai
+  usar.
+- **Atenção:** a retomada automática grava SiloDNA e SiloPage no banco ao abrir o Arquiteto
+  (regra que já existia, sem botão). Com esta correção, os três Silos completos devem fechar na
+  próxima abertura.
+- **Testes:** 4 novos em `tests/arquiteto-retomada-fechamento.test.mts`. `test:arquiteto` 2685,
+  `:dom` 17, `:servidor` 98, `:lentes` 69 e `test:agent` 65, todos sem falhas. `tsc` limpo.
+
+## Concluir formação conclui os prontos, pede a SERP que falta; Descartar sobras — 2026-09-30
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+Pedido do dono: “Concluir formação” não concluía nada. A portaria olhava o lote inteiro, e um
+único artigo com pendência barrava os outros. As pendências eram: três candidatos novos em
+Leads sem Tráfego Pago (o par “como captar um cliente” × “como atrair um cliente” e um artigo
+acima do teto) e três publicados sem as 4 lentes.
+
+- **SERP ao concluir:** o clique pede a SERP dos selecionados sem parecer vigente pelo mesmo
+  caminho do Processar (`confirmSerpValidation`): cache primeiro, e só as lentes que faltam
+  entram no plano de pagamento, com a escolha da pessoa. Depois do render com os pareceres, a
+  conclusão continua sozinha (`pendingHumanConclusion`), uma vez por clique.
+- **Os prontos seguem:** `readyConclusionSubset` (`lib/arquiteto/article-formation-confirmation.ts`)
+  atribui cada impedimento ao artigo que o carrega. Os motivos são: teto, SERP faltando, decisão
+  da SERP, os dois lados do par, duplicidade, Silo cruzado, Principal e Assunto sem Volume. Esses
+  artigos ficam de fora e continuam candidatos. O resto passa pela MESMA portaria, relida sobre
+  ele. A notificação nomeia quem ficou de fora e o motivo. Só vale no clique humano; a conclusão
+  automática do Assunto mantém a regra dela.
+- **Descartar sobras:** o botão no painel Sobras tira as oportunidades da tela. É preferência de
+  navegador, por Marca. Nenhuma keyword é apagada nem movida: elas seguem em Keywords não
+  agrupadas. Uma sobra nova traz o painel de volta, e “Mostrar de novo” desfaz.
+- **Silos novos que não serão usados:** saem pelo botão que já existia, “Desfazer os Silos
+  sugeridos”, na aba Silos. O Silo fica guardado como rejeitado e as keywords voltam para “sem
+  Silo”.
+- **Testes:** 4 novos em `tests/arquiteto-candidatos-guards.test.mts`. 4 estruturais foram
+  ajustados à regra nova (concluir agora pede a SERP que falta). Suítes: `test:arquiteto` 2681,
+  `:dom` 17, `:servidor` 98, `:lentes` 69 e `test:agent` 65, todas sem falhas. `tsc` limpo.
+- **Não verificado:** o clique real. Ele grava no banco de produção e é da homologação do dono.
+
+## “Como captar clientes para clínica de estética”: o Google diz que é outro assunto — 2026-09-30
+
+Leitura remota, só diagnóstico: a página ganhou volume 10 e, com ele, a SERP própria. No parecer
+da composição, a página × “como captar clientes / um cliente / novos clientes” ficou baixa ou
+nenhuma nas 4 lentes. Já as três genéricas formam um grupo forte entre si. Pela hierarquia (SERP
+acima da lógica e da IA), elas não reforçam a página: são o artigo novo “como captar um cliente”
+das Sobras. A recusa estava certa; o texto é que dizia só “incompleta ou diverge”. Agora a linha
+diz que o Google trata essas keywords como outro assunto e aponta as Sobras (teste no servidor).
+
+## Ajustes após a homologação: captar, busca local e artigos aprovados fora do Silo — 2026-09-30
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** Leitura remota
+somente para diagnóstico; nada foi escrito.
+
+- **Captar:** a IA escolheu “como captar um cliente” e “como captar mais clientes”, e o Google
+  separou as duas. A composição menor não rodava, porque a âncora era a própria página (sem volume
+  e sem SERP). Agora a âncora é a entrada de maior volume. A IA também passa a ser completada pela
+  leitura da lista (“como captar clientes”, 390). A leitura da lista exige a palavra de ação do slug
+  escrita na keyword.
+- **Busca local:** “agência de marketing em são paulo” entrou em “agência de marketing para
+  clínica de estética”. `localSearchOf` recusa cidade, zona ou “perto de mim” que não esteja no
+  alvo. A que já foi gravada continua no artigo, até revisão humana.
+- **5 ArticleDNAs fora do cenário:** um lote de “Decisão humana de silo na aba Silos” (05:23 e
+  01:32 de 2026-09-30) levou 14 membros aprovados de “Crescimento de Clínicas” para “Leads sem
+  Tráfego Pago”. As melhorias gravadas depois carregaram esses membros deslocados. Agora
+  `applySiloDecisionsInBatch` calcula o impacto nos aprovados e recusa a keyword que quebraria um
+  artigo aprovado; devolver continua permitido. O estado atual se conserta com “Restaurar”, na aba
+  Silos.
+- Testes: `arquiteto-melhoria-leitura-ia` (completar, busca local), servidor (âncora),
+  `arquiteto-restaurar-working-copy` (lote de Silo).
+
+## Leitura da lista pelo código, par pelo verbo do slug e composição menor — 2026-09-30
+
+```text
+ORIGEM = dono, 3 publicados ainda sem melhoria (captar × atrair clínica de estética; campanhas … sem anúncios) · MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · LEITURA_REMOTA = diagnóstico somente leitura da execução · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+Diagnóstico (leitura da última execução no banco):
+- a IA deu “como captar clientes” e “como captar um cliente” (390) aos dois publicados, captar e
+  atrair; a trava de canibalização barrou os dois. “Como atrair clientes / o cliente / os
+  clientes / um cliente” (720 cada) estavam livres na lista, e a IA não as escolheu;
+- “campanhas … sem anúncios”: a composição “campanhas de marketing” + “melhores / três /
+  digital de sucesso” teve parecer DIVERGENCE: os pares ficaram “nenhuma” ou “baixa” em
+  quase todas as lentes.
+
+Mudanças:
+- **Leitura da lista pelo código (`list_core`, “Lista · núcleo do slug”)** — em
+  `planArticleImprovements`, depois da IA e da trava. Quem ficou sem proposta pronta recebe até 3
+  keywords livres, com volume, que são o núcleo do slug (com sinônimos), sem outro ângulo, e que
+  levam uma palavra literal do slug (`slugCoreListPicks`). O passo 1 do prepare roda com
+  `listReading: false`, para a IA continuar lendo primeiro.
+- **Par pelo verbo do slug (`ownSlugWordsDiffer`)** — a trava agora é `guardCannibalPairs`. Dois
+  publicados que disputam o mesmo assunto passam quando cada lado que muda recebe só keywords com a
+  palavra própria do seu slug e sem o verbo do outro. Dar “captar” à página de “atrair” continua
+  barrado.
+- **Composição menor** — quando o parecer da composição diverge, o servidor refaz a composição uma
+  vez, pelo cache e sem custo, só com a principal e as keywords com par forte ou parcial em 2 ou
+  mais lentes (`serpSupportedMembers`). A linha diz quem saiu.
+- A origem `list_core` passa pelas mesmas travas da IA no servidor (`isListReading`): o parecer da
+  composição é obrigatório, e sem lente o passo 2 é obrigatório.
+- **Sobras** — a caixinha guardava as marcadas do primeiro render, então keyword que entrava no grupo
+  depois aparecia desmarcada. Agora guarda só as desmarcadas pela pessoa.
+- Catálogo MCP, InfoHint “Como funciona” e ajuda do Arquiteto atualizados.
+- Testes: caso real captar × atrair e `serpSupportedMembers` em
+  `tests/arquiteto-melhoria-leitura-ia.test.mts`; composição menor em
+  `tests/arquiteto-article-improvement-server.test.mts`.
+
+## Divergência de SERP explicada e Ajuda do Arquiteto — 2026-09-30
+
+```text
+ORIGEM = dono, "vai ter muitos user inexperientes em SEO mexendo" · MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Alerta da divergência de SERP:** cada divergência ganhou `plain`
+  (`plainSerpDivergence` em `lib/arquiteto/serp-formation-verdict.ts`, campo
+  opcional e aditivo). O cartão da aba SERP abre com o aviso “Atenção: …”, que diz
+  o que houve (páginas diferentes no Google, sinais mistos, canibalização ou
+  principal melhor), por que importa, o que fazem “Manter no artigo” e “Aplicar
+  recomendação” e como decidir na dúvida. Os dados técnicos ficam abaixo, como
+  antes. A pendência na Revisão do artigo usa o mesmo texto.
+- **A divergência se resolve no painel da aba Artigos:** o painel da formação
+  (`article-formation-review.tsx`) substituiu as abas do artigo, e o botão “Abrir
+  a divergência na aba SERP” só existia na aba Links internos. Em “Decisões
+  pendentes”, a divergência agora mostra o aviso e os botões “Manter no artigo” e
+  “Aplicar recomendação”, que chamam o mesmo `handleSerpRecommendationDecision`
+  de antes. As outras pendências ganharam a linha “Por quê”. Campos novos da prop
+  `pendingDecisions` (`why`, `serpDivergence`) são opcionais.
+- **Limitação já existente, não mudada:** a decisão da divergência é gravada por
+  `persistSerpState` → `writeBrowserArtifact` (neste navegador), não no banco. Em
+  outro navegador a pendência volta. Na fase 1 ela não bloqueia “Concluir
+  formação” (`PHASE1_UNRESOLVED_SERP_BLOCKS_CONCLUSION = false`).
+- **Ajuda desta área (Arquiteto):** `modules/arquiteto/context-help.ts`,
+  registrado em `lib/context-help-registry.ts`. Os tópicos cobrem conceitos
+  (Silo, principal, Travado/Livre, Assunto, volume, mesmo assunto no Google,
+  custos), a jornada de melhoria (Próximo passo, 1/2/3, IA, canibalização, Sobras,
+  keywords sem artigo, Processar artigos, Detalhes técnicos), Silos, a Revisão
+  (divergência, parecer, KGR, tipo, IA, estados) e as etapas finais. Antes a área
+  mostrava “Ajuda desta área ainda não disponível.”
+- Consumidores preservados: `article-review-checklist` (texto das pendências
+  mais rico, mesmo formato) e a aba SERP do artigo.
+- Testes: `tests/arquiteto-serp-human-verdict.test.mts` (alerta) e
+  `tests/context-help.test.mts` (catálogo do Arquiteto).
+
+## Melhorar publicados: aproveitar melhor a lista — 2026-09-30
+
+```text
+ORIGEM = dono, "acertar o melhor aproveitamento das listas de keywords" · MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Secundárias da lista aceitas pela IA:** as regras de principal (entidade do
+  slug, núcleo, intenção conclusiva) saíram da barreira das secundárias e ficaram
+  em `editorialAiPrincipalBlock`. A secundária passa quando leva o núcleo inteiro
+  (com os sinônimos atrair/conquistar/conseguir/ganhar → captar, paciente → cliente)
+  ou uma palavra do assunto além do público. Continuam barradas: sem volume,
+  publicada, de outro dono, cabeça genérica e restrição editorial.
+- **A IA lê primeiro os artigos com menos keywords**, até 12 por rodada.
+- **Publicados canibalizados que recebem keywords próprias:** quando dois
+  publicados disputam o mesmo assunto ("como captar clientes…" × "como atrair
+  pacientes…"), os dois deixam de ser barrados se cada um receber da lista uma
+  principal própria. A principal não pode ser sinônimo da outra (mesmas palavras
+  depois dos sinônimos), e os dois não podem ter keyword em comum. Cada um grava a
+  exclusão recíproca ("não cobrir …"). Trocar só o sinônimo continua barrado.
+- Testes: `tests/arquiteto-article-improvement.test.mts` (caso real captar ×
+  atrair) e `tests/arquiteto-melhoria-leitura-ia.test.mts` (secundárias do caso
+  real). Suítes: test:arquiteto 2670, servidor 98, lentes 66, dom 17, agent 58,
+  tsc limpo.
+
+## Melhorar publicados: leitura da IA — correções da revisão (corretor) — 2026-09-30
+
+```text
+ORIGEM = duas revisões da entrega logo abaixo · MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 (IA e Google Ads simulados) · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+Corrigido:
+
+- **Uma escolha malformada não derruba a leitura:** a camada de IA confere só o
+  envelope `{ picks: [...] }` (`ImprovementAiResponseSchema` deixou de ser
+  estrito por item); `validateImprovementAiPicks` confere cada escolha
+  sozinha. Papel com acento ("Secundária") é normalizado; motivo acima de 240
+  caracteres é encurtado; papel inexistente, motivo vazio ou item sem campos é
+  recusado ("fora do formato") e as boas seguem.
+- **Tamanho da chamada:** até 12 alvos por chamada (era 30) e teto de saída de
+  2.000 tokens (era 3.000); motivo de até 12 palavras. Com 30 alvos a resposta
+  passava do teto e saía truncada. Quem passar de 12 fica com as regras e a
+  busca gratuita, com um aviso.
+- **Prazo da requisição:** depois de 90 s desde o início do prepare (ou do
+  passo do collect), nenhuma composição nova começa a ser conferida; a que
+  sobra vira "Precisa validar no Google (passo 2)" com o motivo "Faltou tempo
+  nesta etapa…" (nada pago, nada gravado). Os pares da SERP são conferidos
+  antes das composições da IA, e os pareceres são lidos uma vez só (antes, uma
+  leitura completa por composição).
+- **MCP e tela avisam que o prepare usa a IA:** descrição e
+  `human_confirmation_required` de `improve_articles`
+  (`lib/server/platform-mcp-tools.ts`), requisito e passo do playbook no
+  catálogo, frase do cartão ("O Google Ads é grátis; a leitura da IA usa a
+  Connection DeepSeek da marca.") e "Como funciona". O rótulo do botão
+  "1 · Buscar keywords (grátis)" ficou (testes e catálogo o citam).
+- **Principal mais ampla que o slug no caminho da IA:** a linha escreve o
+  mesmo aviso do caminho da SERP (`broaderPrincipalReason`). No caso real,
+  "como atrair clientes" (720) para "como atrair clientes para consultório".
+- **Assunto sem papel "principal" da IA:** vence a escolha que leva o núcleo
+  do assunto, com mais volume e menos palavras ("como atrair clientes" antes de
+  "como atrair os clientes"); empate, a ordem da IA.
+- **Núcleo do assunto exige as duas palavras** (`every`, era `some`):
+  "plano de saúde para clínica" não passa para um checklist de plano de
+  marketing. Sinônimos atrair/captar e paciente/cliente continuam.
+- **Recusas visíveis:** a recusa guarda o texto da keyword e do alvo; o painel
+  mostra "Sugestões da IA recusadas pelas regras (N)" recolhido, com keyword →
+  alvo → motivo. O aviso lista todas as barreiras.
+- **Origem por linha:** "Origem: Pares da SERP", "SERP da candidata", "Leitura
+  da IA — confira" ou "Busca nova no Google Ads".
+- **Sugestão da IA derrubada pela SERP:** a linha ganha "A IA sugeriu esta
+  composição, mas a SERP dela não confirmou: nada entra." e, na lista "sem
+  melhoria possível", o rótulo e o motivo da IA continuam à vista.
+- **Falha da IA como texto fixo:** `editorialAi.message` é "A IA excedeu o
+  tempo limite.", "A resposta da IA veio fora do formato.", "A Connection
+  DeepSeek da marca não está disponível." ou "A IA está indisponível." — nunca
+  a mensagem crua do provider.
+- **Texto do relatório anterior:** a linha "precisa validar" tem a caixa
+  DESABILITADA (não "sem caixa"); corrigido abaixo e no comentário do painel.
+
+Registrado (não revertido):
+
+- **`broaderCore` no passo 1 (pares da SERP):** no working tree,
+  `planArticleImprovements` aceita pelo caminho da SERP a candidata sem ajuste
+  editorial quando o publicado é Livre, sem volume e ela leva o núcleo do slug
+  (`carriesSlugCore`; cabeça de 2 palavras acima de 5.000 fica fora), e o
+  fallback também. Essa regra não é da leitura da IA: vem de outra decisão do
+  dono do mesmo dia (principal mais ampla), já está coberta por
+  `tests/arquiteto-article-improvement.test.mts` ("decisão 2026-09-30…") e não
+  tinha registro. A frase "o caminho da SERP não mudou", na seção abaixo, vale
+  só para a leitura da IA.
+
+Limitações:
+
+- Alvo que a SERP deixa pronto e o parecer da composição rebaixa no
+  `refreshPlan` fica sem leitura da IA nesta execução (os alvos da IA saem do
+  primeiro plano). Registrado no backlog.
+- A busca gratuita checa o orçamento entre alvos: um pedido ao Google Ads em
+  andamento pode passar alguns segundos do orçamento. O prazo de 90 s das
+  composições absorve isso, mas o tempo real não foi medido.
+- Composição adiada por prazo com todas as lentes já no cache fica com custo 0:
+  não há passo 2 pago para ela; "Buscar de novo" refaz a preparação (e a
+  leitura da IA).
+
+Arquivos: `lib/arquiteto/article-improvement-ai.ts`,
+`lib/arquiteto/article-improvement.ts`, `lib/arquiteto/article-improvement-next-step.ts`,
+`lib/server/arquiteto-article-improvement.ts`,
+`lib/server/arquiteto-differentiation-runtime.ts`,
+`lib/server/platform-mcp-tools.ts` (só textos da ferramenta; contrato igual),
+`lib/agent/platform-catalog.ts`, `modules/arquiteto/article-improvement-panel.tsx`,
+SDD (adendo). Consumidores preservados: rota e ferramenta MCP com o mesmo
+schema de pedido; execuções antigas sem `keyword`/`theme` nas recusas
+continuam legíveis (a tela cai para o id).
+
+Testes: `tests/arquiteto-melhoria-leitura-ia.test.mts` (+3 e 2 ajustados:
+escolha malformada, núcleo com palavra ambígua, limite de 12 alvos; Assunto
+sem papel; aviso de principal mais ampla; nicho com núcleo inteiro),
+`tests/arquiteto-article-improvement-server.test.mts` (+3: prazo da etapa,
+falha como texto fixo, escolha malformada no prepare),
+`tests/arquiteto-article-improvement-dom.test.mts` (+1: origem, recusas,
+sugestão derrubada). Suítes: `test:arquiteto` 2666/2666,
+`test:arquiteto:servidor` 98/98, `test:arquiteto:lentes` 65/65,
+`test:arquiteto:dom` 16/16, `test:agent` 58/58, `tsc --noEmit` e eslint
+dos tocados limpos, `git diff --check` limpo.
+
+## Melhorar publicados: leitura editorial da IA na lista existente — 2026-09-30
+
+```text
+DECISÃO = dono, 2026-09-30, "Sim, lista primeiro" · MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 (IA e Google Ads simulados) · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+Adendo na SDD: `docs/04-arquiteto/sdd-melhoria-artigos-assuntos-2026-09-29.md`.
+
+- **Ordem do prepare:** 1 pares da SERP no cache (regra anterior) → 2 leitura
+  editorial da IA na lista existente, só para quem ficou sem proposta pronta →
+  3 busca nova no Google Ads (`discover`) só para quem ainda ficou sem nada. O
+  tempo da IA sai do orçamento da busca gratuita (até 60 s somados a partir do
+  início do prepare; a busca nunca fica com menos de 5 s nem mais de 35 s).
+- **A chamada:** uma só, em lote, pela Connection DeepSeek canônica da marca
+  (`proposeArticleImprovementAiPicks` em
+  `lib/server/arquiteto-differentiation-runtime.ts` → `generateStructuredAI`,
+  sem Thinking, limite de 40 s, até 12 alvos — eram 30 antes da revisão — e 200 keywords). O pedido usa
+  apelidos curtos (A1, K1) que o código traduz de volta; a IA nunca vê os ids
+  reais. A resposta fica em `run.editorialAi` e é reaproveitada no `collect`;
+  a IA não é chamada de novo na mesma execução nem no `apply`.
+- **A lista:** keywords da marca já no Arquiteto, com volume do Google Ads
+  validado, sem publicação, sem dono (ArticleDNA aprovado ou formação decidida)
+  e fora das propostas prontas. Ideia nova do Google Ads nunca entra.
+- **A IA tem a menor autoridade** (`editorialAiBarrier`,
+  `editorialAiPrincipalBlock` e `validateImprovementAiPicks`): apelido fora do
+  pedido é id inventado; até 3 por alvo e 6 por artigo; uma keyword vai para um
+  alvo só (`allocateReinforcementChoices` com a preferência da IA como score);
+  barreiras: publicada, sem volume validado, de outro artigo, já no artigo,
+  contradiz o slug, restrição "sem tráfego pago/sem anúncios", DNA com público
+  ou intenção conclusiva divergente, cabeça genérica de até 2 palavras acima de
+  5.000, outro nicho ("para …") e ausência do núcleo do assunto. Principal nova
+  só com Posto Livre, principal atual sem volume, página que não ranqueia
+  (leitura do cache; sem leitura, fica) e candidata com o núcleo do slug; senão
+  entra como secundária, com o motivo. A proposta pronta da SERP vence.
+- **Na tela:** `evidenceBasis = "editorial_ai"`; o motivo de cada keyword
+  aparece na linha sob "Leitura da IA — confira". Sem as quatro lentes da
+  composição no cache, a linha fica "Precisa validar no Google (passo 2)"
+  (`needsValidation`, caixa desabilitada) e a composição entra no plano pago do
+  passo 2; depois da validação volta a "Pronto para aplicar".
+- **Gravar:** igual a antes — o parecer da SERP da composição final sai do
+  cache (`cacheOnly`) no `refreshPlan` e no `apply`; nada é gravado sem o
+  clique do dono.
+- **Falhas:** IA desligada (runtime sem IA), erro, resposta fora do contrato ou
+  tempo esgotado geram um aviso único e a jornada segue pelas regras.
+- **Catálogo MCP** (`lib/agent/platform-catalog.ts`): nota da operação
+  `arquiteto.article_improvement` e passo no playbook
+  `reforcar_publicado_pela_serp`.
+
+Arquivos: `lib/arquiteto/article-improvement.ts` (aditivo: tipos, barreiras,
+passo da IA no plano; `slugWords` exportado), `lib/arquiteto/article-improvement-ai.ts`
+(novo), `lib/server/arquiteto-article-improvement.ts`,
+`lib/server/arquiteto-differentiation-runtime.ts` (função nova; a dos ângulos
+não mudou), `modules/arquiteto/article-improvement-panel.tsx`,
+`lib/agent/platform-catalog.ts`, `package.json` (teste novo no
+`test:arquiteto`). Consumidores preservados: a rota
+`/api/arquiteto/article-improvement` e a ferramenta MCP `improve_articles`
+usam `improvementRuntime`, que agora injeta a IA; execuções antigas sem
+`editorialAi` continuam legíveis; o caminho da SERP não mudou por esta entrega (a regra `broaderCore` do passo 1 é de outra decisão do dia; ver a seção de correções acima).
+
+Testes: `tests/arquiteto-melhoria-leitura-ia.test.mts` (novo, 10: casos bons e
+ruins reais da AdalbaPro, ids inventados e apelidos, barreiras, Posto e
+ranqueamento, alocação, ordem SERP → IA, pedido em lote);
+`tests/arquiteto-article-improvement-server.test.mts` (+5: proposta pronta
+`editorial_ai` e gravação sem custo, recusa de id inventado, falha sem derrubar
+e ordem lista → busca nova, tempo esgotado, "precisa validar" e collect sem
+nova chamada à IA); `tests/arquiteto-article-improvement-dom.test.mts` (+1).
+Suítes: `test:arquiteto` 2663/2663, `test:arquiteto:servidor` 98/98,
+`test:arquiteto:lentes` 62/62, `test:arquiteto:dom` 15/15, `test:agent`
+58/58, `tsc --noEmit` e eslint dos tocados limpos, `git diff --check` limpo.
+
+Limitações: a qualidade da leitura depende da resposta real da DeepSeek, que
+não foi chamada no desenvolvimento; o tempo real da chamada com a lista da
+AdalbaPro (~87 keywords) não foi medido.
+
+## Desfazer Silo e aba Artigos: correções da revisão (corretor) — 2026-09-30
+
+```text
+ORIGEM = duas revisões da entrega logo abaixo · MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** Esta
+seção corrige a de baixo onde as duas divergem.
+
+- **Cartão "Próximo passo" nunca manda para um lugar vazio.** O painel recebe
+  `hasLeftovers` (a mesma condição com que `LeftoverOpportunitiesPanel` aparece).
+  Com Sobras: "Nada a fazer nos publicados agora. Veja artigos novos em Sobras."
+  ("Ver Sobras"). Sem Sobras: "Nada a fazer nos publicados nem nas Sobras agora.
+  Para formar artigos novos, use “Processar artigos” logo abaixo." ("Ir para
+  Artigos novos", que rola até a barra `#architect-articles-new`).
+- **Linhas prontas desmarcadas** não caem mais em "nada a fazer": estado novo
+  `select` ("N melhoria(s) pronta(s). Marque na tabela abaixo as que quer
+  gravar."), botão desabilitado com o motivo.
+- **Execução em andamento no servidor** (lease): o botão diz "Ver andamento" (só
+  lê o estado); "Continuar" ficou só para o que retoma trabalho.
+- **Números só no cartão:** na fileira do painel os outros atos aparecem sem
+  número; com a validação pendente, gravar direto aparece como "Gravar sem
+  validar (N)". O parágrafo dos três passos foi para "Como funciona" (fechado);
+  fica uma linha: "URL, slug e canonical nunca mudam."
+- **Desfazer Silo:** a confirmação diz "O Silo sai da aba Silos (fica guardado
+  como rejeitado; nada é apagado). As keywords dele voltam para “sem Silo” e
+  continuam na mesa."; o diálogo fica aberto durante o lote com "Desfazendo i de
+  N…" (`role=status`) e só fecha depois da releitura; Esc fecha (fora do
+  andamento) e o foco abre no "Cancelar". Pela metade sem keyword restante, a
+  frase diz "as keywords já saíram do Silo; falta marcar o Silo como desfeito.
+  Tente de novo." (antes: "0 keyword(s) ainda no Silo").
+- **Servidor do desfazer lê o envelope legado:** ArticleDNA aprovado e
+  SiloDNA/SiloPage são lidos no corpo plano (`payload.x`) e no envelope
+  (`payload.payload.x`), como `global-workflow-canonical.ts`. Os SiloDNA/SiloPage
+  da marca são lidos em páginas e filtrados pelo território depois (o filtro no
+  banco por `payload->>territoryRef` não enxergava o envelope).
+- **Mudanças do painel que a seção de baixo não registrava** (presentes na cópia
+  de trabalho; agora registradas e testadas): resposta que não é JSON (tempo
+  esgotado da plataforma) vira `TEMPO_ESGOTADO` e, durante a validação, o painel
+  consulta o andamento e continua sozinho (até 3 vezes seguidas); a tabela mostra
+  só as linhas que podem mudar (ou já têm resultado) e as demais ficam num
+  `<details>` fechado "N sem melhoria possível agora"; a confirmação abre logo
+  abaixo dos botões, com rolagem até ela.
+- **Não mudou:** o tempo esgotado no PRIMEIRO passo de uma ação continua
+  mostrando o aviso "toque de novo no mesmo botão" (o andamento está salvo).
+- Arquivos: `lib/arquiteto/article-improvement-next-step.ts`,
+  `modules/arquiteto/article-improvement-panel.tsx`,
+  `modules/arquiteto/arquiteto-workspace.tsx`, `lib/server/arquiteto-territory-undo.ts`,
+  `lib/agent/platform-catalog.ts` (textos de tela), testes
+  `tests/arquiteto-artigos-simples.test.mts`, `tests/arquiteto-article-improvement-dom.test.mts`,
+  `tests/arquiteto-desfazer-silo.test.mts`, `tests/arquiteto-desfazer-silo-servidor.test.mts`
+  (recusa `KEYWORD_NOT_EDITABLE` sem escrita; envelope legado de ArticleDNA e de
+  SiloDNA recusa; SiloDNA de outro território não).
+- Suítes: `test:arquiteto` 2652/2652, `test:arquiteto:servidor` 98/98,
+  `test:arquiteto:lentes` 57/57, `test:arquiteto:dom` 14/14, `test:agent` 58/58,
+  `test:arquiteto-backup-roundtrip` 8/8, `test:editorial` 170/174 (as 4 falhas
+  antigas), `tsc` 0 erros, ESLint limpo nos tocados (`arquiteto-workspace.tsx`
+  com os mesmos 41 erros e 77 avisos antigos), `git diff --check` limpo.
+
+## Desfazer Silo sugerido e aba Artigos simples — 2026-09-30
+
+```text
+PEDIDO = dono ("quero ativos só os silos publicados; tem que ter uma forma de desfazer os silos novos sugeridos" · "esse painel é muito confuso")
+MODULO_PROPRIETARIO = Arquiteto · MINERADOR = não tocado
+CONTRATO = aditivo no PATCH /api/arquiteto/workspace (territoryUndos: ref + lock) · sem coluna, sem migration
+MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA = 0 · CAMPO_NOVO_EM_STRICT = 0 (TerritoryCandidate inalterado) · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste (domínio, rota com banco simulado, tela renderizada do painel). Validado manualmente: não.**
+
+### A · Desfazer Silo sugerido (aba Silos)
+
+- **Botão "Desfazer Silo"** na linha de cada Silo candidato/confirmado SEM
+  endereço publicado (sem `publishedSlug`/`publishedCanonical`, sem proteção
+  de publicado, sem página do site). Silo publicado não mostra o botão.
+- **Confirmação** diz o que acontece antes de qualquer escrita: "O Silo passa a
+  rejeitado. Nada é apagado. As keywords voltam para “sem Silo” e continuam na
+  mesa", com o número de keywords de cada Silo; Silo com motivo de recusa
+  aparece com o motivo e fica fora do botão.
+- **Lote:** "Desfazer os Silos sugeridos (N)" no título da seção Silos, com uma
+  confirmação só; um Silo por requisição (lock de cada um) e UMA releitura no
+  fim.
+- **Servidor (autoridade):** `territoryUndos` no PATCH canônico do workspace. O
+  plano (`lib/server/arquiteto-territory-undo.ts`) lê do banco, filtrado pela
+  marca, o território, as keywords que apontam para ele, os ArticleDNA
+  aprovados e os SiloDNA/SiloPage do território, e recusa (409, motivo por
+  extenso) ANTES da primeira escrita: endereço publicado, consolidado ou com
+  `existingSiloRef`, SiloDNA/SiloPage aprovado ou SiloPage publicada, ArticleDNA
+  aprovado com keyword do Silo (ou que declara o território), keyword publicada
+  no Silo, keyword fora da etapa, lock vencido, Silo já desfeito.
+- **Gravação:** cada keyword volta para "sem Silo" pelo MESMO writer da decisão
+  de Silo (`payload.territoryRef = null` + `territoryAssignment` humano
+  `unassigned`, fábrica única `humanSiloDecision`), com o lock dela; por último
+  o território vai para `rejected`/`rejected` pelo writer territorial, com o
+  lock dele. Ator (`updated_by`) e hora são do servidor; o motivo com o ator
+  fica nos `reasons` do Silo. Nenhuma linha é apagada.
+- **Releitura:** sucesso só para o Silo que voltou `rejected` e sem nenhuma
+  keyword apontando para ele (`resolveTerritoryUndoOutcome`); pela metade diz
+  quantas ficaram e o Silo continua na tela para tentar de novo.
+- **Trava nova:** a edição genérica (`territoryUpdates`) não rejeita Silo; ela
+  manda usar "Desfazer Silo".
+- **Mesa e contagens:** Silo `rejected` sem keyword some da mesa e da contagem
+  de Silos (`territorial-surface.ts`); rejeitado que ainda segura keyword
+  continua visível (keyword nenhuma some). A formação de artigos já ignorava
+  `rejected` (`siloIsHumanDecided`).
+- **Catálogo MCP:** `arquiteto.undo_suggested_silo`, `access: "ui"`,
+  `decision: "human"`, sem ferramenta MCP.
+
+### B · Aba Artigos na ordem do trabalho
+
+- **Na frente, nesta ordem:** (1) cartão "Próximo passo" com UMA frase e UM
+  botão, no topo do painel "Melhorar publicados e formar Assuntos"
+  (`resolveImprovementNextStep`): sem análise → "1 · Buscar keywords
+  (grátis)"; validação pendente → "2 · Validar no Google (… US$ x)"; linhas
+  prontas → "3 · Gravar melhorias (N)"; execução parada → "Continuar"; nada
+  pendente → "Nada a fazer nos publicados agora. Veja artigos novos em
+  Sobras." ("Ver Sobras"). O botão do cartão faz o mesmo ato do botão da
+  fileira, que sai da fileira para não aparecer duas vezes. (2) o painel de
+  melhoria; uma barra "Artigos novos" com "Processar/Reprocessar artigos" e
+  "Concluir formação" (mesmos handlers e travas do painel de formação); (3) a
+  mesa; (4) Sobras.
+- **"Detalhes técnicos"** (`<details>` fechado, no fim): a grade inteira do
+  Workbench — painel de formação (Análise dos artigos, Leitura do lote,
+  métricas), Processo ativo, Ações humanas e o mapa, Reservadas para Silo,
+  Assuntos, Keywords sem artigo, Objetivo do lote e reforço de outro Silo,
+  Análise por keyword (avançado), Diferenciar (avançado), Keywords não
+  agrupadas, Candidatas provisórias. Nas abas Silos e Links a grade continua
+  abrindo a tela, como antes (`workbenchGrid`, uma const só).
+- Nenhum comportamento mudou e nenhuma função saiu da tela.
+
+- Arquivos: `lib/arquiteto/territory-undo.ts` (novo), `lib/server/arquiteto-territory-undo.ts`
+  (novo), `lib/arquiteto/article-improvement-next-step.ts` (novo),
+  `lib/arquiteto/silo-assignment.ts` (`humanSiloDecision`, mesma forma),
+  `lib/arquiteto/territorial-surface.ts`, `lib/arquiteto/canonical-workspace.ts`
+  (`undoRemoteSiloCandidate`), `lib/server/arquiteto-territory-store.ts`
+  (`readTerritoryWorkflowItem`), `lib/server/arquiteto-workspace-http.ts`
+  (`territoryUndos`, writer da keyword extraído sem mudar regra),
+  `lib/agent/platform-catalog.ts`, `modules/arquiteto/arquiteto-workspace.tsx`,
+  `modules/arquiteto/territorial-workspace-rows.tsx`,
+  `modules/arquiteto/article-improvement-panel.tsx`, `package.json`.
+- Consumidores preservados: o PATCH sem `territoryUndos` grava igual (mesmo
+  writer da keyword, extraído para uma função); `arquiteto-article-improvement`
+  continua mandando só `updates`. Os dublês dos testes de rota das lentes
+  ganharam as duas exportações novas.
+- Testes: `tests/arquiteto-desfazer-silo.test.mts`,
+  `tests/arquiteto-desfazer-silo-servidor.test.mts` (rota real, banco em
+  memória, recusas sem escrita), `tests/arquiteto-artigos-simples.test.mts`,
+  cartão no `tests/arquiteto-article-improvement-dom.test.mts`.
+- Suítes: `test:arquiteto` 2648/2648, `test:arquiteto:servidor` 95/95,
+  `test:arquiteto:lentes` 57/57, `test:arquiteto:dom` 9/9, `test:agent` 58/58,
+  `test:arquiteto-backup-roundtrip` 8/8, `test:editorial` 170/174 (as 4 falhas
+  antigas), `tsc` 0 erros, ESLint limpo nos tocados (`arquiteto-workspace.tsx`
+  igual ao antes: 41 erros e 77 avisos antigos), `git diff --check` limpo.
+- Pendências: homologação do dono na AdalbaPro (desfazer "botox para o rosto",
+  "limpeza de pele com peeling" e "tratamento estético para o rosto"; conferir
+  no banco os três `rejected` e as keywords com `territoryRef` nulo); "Processar
+  arquitetura" pode voltar a propor os mesmos Silos novos (proposta, que só vale
+  com confirmação); o mapa dentro de "Detalhes técnicos" mede o tamanho quando
+  o bloco abre.
+
 ## Reforçar publicados: correções da revisão (corretor) — 2026-09-28
 
 ```text

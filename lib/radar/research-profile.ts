@@ -64,6 +64,12 @@ export const RADAR_RESEARCH_SOURCE_ROLES = [
   "PRIMARY_COMPETITIVE_RESEARCH",
   "SEO_SUPPORT",
   "SEO_COMMERCIAL_SUPPORT",
+  /**
+   * SDD Radar 2026-09-30 (Parte A): YouTube ou Amazon ACRESCENTADOS a um
+   * artigo cujo Google já foi finalizado — converter em vídeo ou em review.
+   * O Google é a base; esta fonte não é a pesquisa principal.
+   */
+  "FORMAT_EXTENSION",
 ] as const;
 export const RadarResearchSourceRoleSchema = z.enum(RADAR_RESEARCH_SOURCE_ROLES);
 export type RadarResearchSourceRole = typeof RADAR_RESEARCH_SOURCE_ROLES[number];
@@ -72,6 +78,7 @@ export const RADAR_RESEARCH_SOURCE_ROLE_LABELS: Record<RadarResearchSourceRole, 
   PRIMARY_COMPETITIVE_RESEARCH: "pesquisa principal",
   SEO_SUPPORT: "apoio SEO",
   SEO_COMMERCIAL_SUPPORT: "apoio SEO e comercial",
+  FORMAT_EXTENSION: "acréscimo de formato (vídeo ou review)",
 };
 
 export type RadarResearchProfilePlan = {

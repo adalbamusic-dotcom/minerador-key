@@ -108,7 +108,8 @@ test("§1 · a página consulta a AUTORIDADE antes de gastar, nos dois caminhos 
    * regra — e foi assim que a trava do 1.1 acabou existindo só de um lado.
    */
   const autoridade = semComentarios(pagina.slice(pagina.indexOf("const compromissoDeModo"), pagina.indexOf("const garantirContextoDoRadar")));
-  assert.ok(autoridade.includes("radarPrimaryModeOfAnalysis(payload)"));
+  /* SDD Radar 2026-09-30 (Parte A): a regra compartilhada agora é "o Google é a base". */
+  assert.ok(autoridade.includes("radarGoogleBaseCommitment({ mode: modo, payload })"));
   assert.equal(/deepResearch|youtubeSearch/.test(autoridade), false, "a tela não reimplementa a resolução de modo");
   assert.equal(autoridade.includes("searchModeByArticle"), false, "o seletor é preferência de quem olha, não compromisso");
 });

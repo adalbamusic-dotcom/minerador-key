@@ -221,6 +221,20 @@ export type SiloConfirmationControls = {
   onDefineContext: (territoryRef: string) => void;
 };
 
+/**
+ * Desfazer Silo SUGERIDO. Só os Silos sem endereço publicado entram em
+ * `byRef`; o motivo de recusa (quando houver) vem pronto do domínio e é
+ * mostrado na confirmação. Quem grava é o workspace.
+ */
+export type SiloUndoControls = {
+  byRef: ReadonlyMap<string, { keywordCount: number; refusals: readonly string[] }>;
+  /** Quantos podem ser desfeitos agora, para o botão em lote. */
+  eligibleCount: number;
+  busy: boolean;
+  onUndo: (territoryRef: string) => void;
+  onUndoAll: () => void;
+};
+
 /** Processamento em uma célula: quatro naturezas, sem parágrafo. */
 function ProcessCells({ cells }: { cells: readonly TerritorialProcessCell[] }) {
   if (!cells.length) return <span className="truncate text-text-muted">—</span>;
@@ -245,6 +259,7 @@ function SiloPageRow({
   header,
   siteControls,
   confirmControls,
+  undoControls,
   processing,
   decisionLabel,
   details,
@@ -252,6 +267,7 @@ function SiloPageRow({
   header: TerritorialHeaderRow;
   siteControls?: SiteStructureControls | null;
   confirmControls?: SiloConfirmationControls | null;
+  undoControls?: SiloUndoControls | null;
   processing?: readonly TerritorialProcessCell[];
   decisionLabel?: string | null;
   /** Evidência longa vive aqui, não na linha principal. */
@@ -346,6 +362,18 @@ function SiloPageRow({
                 className="min-h-8 rounded border border-module-accent/40 px-2.5 text-sm font-semibold text-module-accent transition-colors hover:bg-module-accent/10 disabled:opacity-40"
               >
                 {siteControls.busyUrl === header.ref ? "Usando…" : "Usar como Silo"}
+              </button>
+            )}
+            {header.kind === "territory" && undoControls?.byRef.has(header.ref) && (
+              <button
+                type="button"
+                onClick={() => undoControls.onUndo(header.ref)}
+                disabled={undoControls.busy}
+                title="Sugestão sem endereço publicado. Desfazer não apaga nada: as keywords voltam para sem Silo."
+                data-testid="architect-undo-silo"
+                className="min-h-8 rounded border border-warning/45 px-2.5 text-sm font-semibold text-warning transition-colors hover:bg-warning/10 disabled:opacity-40"
+              >
+                Desfazer Silo
               </button>
             )}
           </div>
@@ -673,11 +701,14 @@ function SectionRow({
   count,
   collapsed,
   onToggle,
+  undoAll = null,
 }: {
   kind: TerritorialGroup["kind"];
   count: number;
   collapsed: boolean;
   onToggle: (() => void) | null;
+  /** Só na seção de Silos: desfaz de uma vez os sugeridos que podem sair. */
+  undoAll?: { count: number; busy: boolean; onClick: () => void } | null;
 }) {
   return (
     <tr data-testid="architect-territorial-section" className="bg-surface-subtle">
@@ -696,6 +727,18 @@ function SectionRow({
               {collapsed ? "Expandir" : "Recolher"}
             </button>
           )}
+          {undoAll && undoAll.count > 0 && (
+            <button
+              type="button"
+              onClick={undoAll.onClick}
+              disabled={undoAll.busy}
+              data-testid="architect-undo-all-silos"
+              title="Desfaz todos os Silos sugeridos que não têm endereço publicado. Nada é apagado."
+              className="min-h-8 rounded border border-warning/45 px-2.5 text-sm font-semibold text-warning transition-colors hover:bg-warning/10 disabled:opacity-40"
+            >
+              {`Desfazer os Silos sugeridos (${undoAll.count})`}
+            </button>
+          )}
         </div>
       </td>
     </tr>
@@ -708,6 +751,7 @@ export function TerritorialWorkspaceRows({
   controls = null,
   siteControls = null,
   confirmControls = null,
+  undoControls = null,
   processingByRef = null,
   decisionByRef = null,
   detailsByRef = null,
@@ -733,6 +777,8 @@ export function TerritorialWorkspaceRows({
   vinculoByKeywordId?: ReadonlyMap<string, KeywordVinculoLine> | null;
   /** Ação de confirmar o silo. */
   confirmControls?: SiloConfirmationControls | null;
+  /** Desfazer Silo sugerido (sem endereço publicado). */
+  undoControls?: SiloUndoControls | null;
   /** Estados dos quatro processos por silo; read-model de UI. */
   processingByRef?: ReadonlyMap<string, readonly TerritorialProcessCell[]> | null;
   /** Decisão HUMANA por silo. Recomendação de SERP/IA não entra aqui. */
@@ -794,6 +840,9 @@ export function TerritorialWorkspaceRows({
                   return next;
                 })
                 : null}
+              undoAll={section.kind === "territories" && undoControls
+                ? { count: undoControls.eligibleCount, busy: undoControls.busy, onClick: undoControls.onUndoAll }
+                : null}
             />
             {!isCollapsed && section.groups.map((group, index) => {
               const header = group.header;
@@ -809,6 +858,7 @@ export function TerritorialWorkspaceRows({
                       header={header}
                       siteControls={siteControls}
                       confirmControls={confirmControls}
+                      undoControls={undoControls}
                       processing={processingByRef?.get(header.ref)}
                       decisionLabel={decisionByRef?.get(header.ref) ?? null}
                       details={detailsByRef?.get(header.ref)}

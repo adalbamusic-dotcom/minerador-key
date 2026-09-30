@@ -285,7 +285,8 @@ export function radarSpecialistSuggestedClassification(input: {
 /* =========================== a extração (§7, §8) =========================== */
 
 export type RadarSpecialistExtractionProvenance = {
-  provider: "telegram";
+  /** "platform": escrito na aba Especialista (SDD Radar 2026-09-30, Parte B). */
+  provider: "telegram" | "platform";
   briefId: string;
   externalUpdateId: string | null;
   originalAssetUri: string | null;
@@ -389,6 +390,8 @@ export type RadarSpecialistExtractionInput = {
   originalAssetUri?: string | null;
   checksum?: string | null;
   receivedAt: string;
+  /** O canal do parecer. Ausente = Telegram: a proveniência de toda resposta anterior não muda. */
+  provider?: "telegram" | "platform";
   /** A decisão JÁ TOMADA, quando houver. A extração não decide nada. */
   decision?: RadarSpecialistDecision | null;
   /** A classificação corrigida por uma pessoa. Vence a sugestão, sempre. */
@@ -438,7 +441,7 @@ export function radarSpecialistExtraction(input: RadarSpecialistExtractionInput)
     /* Citação só existe por decisão humana: marcar é o ato que a cria. */
     quoteCandidate: decision === "QUOTE_CANDIDATE" && verbatim ? verbatim : null,
     provenance: {
-      provider: "telegram",
+      provider: input.provider ?? "telegram",
       briefId: input.briefId,
       externalUpdateId: input.externalUpdateId || null,
       originalAssetUri: input.originalAssetUri || null,

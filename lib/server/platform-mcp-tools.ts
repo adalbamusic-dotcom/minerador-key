@@ -40,6 +40,7 @@ import { applyKeywordDecisionEntries, constrainKeywordSnapshot, keywordDecisionB
 import { handleDifferentiationPlan } from "./arquiteto-differentiation";
 import { resolvePipelineContext } from "./pipeline-runtime";
 import { RadarWriterSendError, sendRadarToWriter } from "./radar-writer-send";
+import { projectVolumeResultForAgent, sliceWritingCsv, VOLUME_MEASURE_MAX_KEYWORDS } from "@/lib/agent/platform-tool-projections";
 import { RadarStartError } from "./radar-youtube-start";
 import { ContentDocumentRepository } from "./editorial-repositories";
 import { makeApprovedWriterDocument, saveAndFinalizeWriterDocument } from "./writer-document-finalization";
@@ -936,6 +937,40 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     return runKeywordLogicWithCore({ brandId: access.brandId, keywordIds });
   }));
 
+  server.registerTool("measure_keywords", {
+    title: "Medir Volume (Google Ads)",
+    description: [
+      "Mede o Volume das keywords no Google Ads, como o botão 'Volume' do Processador (SDD MCP ponta a ponta, F1). Aprovar keyword exige Lógica e Volume: use depois de import_subject_keywords e run_keyword_logic.",
+      "Sempre primeiro mode 'plan' (grátis, só lê): devolve as keywords que existem na marca, o número de blocos de 200 e o planHash. Mostre ao usuário.",
+      "Custo em dinheiro: zero (o Google Ads não cobra a consulta), mas gasta a cota do Google Ads da marca: por isso o aceite e o escopo provider.spend. Não apresente como gasto em dinheiro.",
+      `Só com o aceite dele chame mode 'execute' com o mesmo keywordIds, o planHash do plano e userConfirmation. Até ${VOLUME_MEASURE_MAX_KEYWORDS} keywords por chamada.`,
+      "O execute relê cada keyword: 'medida' tem volume confirmado; 'sem_media' é processada, sem dado (não é falha); 'falhou' traz o motivo. Cota atingida para o lote; o que já voltou fica gravado.",
+    ].join(" "),
+    inputSchema: z.object({
+      brandId: brandIdInput,
+      mode: z.enum(["plan", "execute"]),
+      keywordIds: z.array(z.string().uuid()).min(1).max(VOLUME_MEASURE_MAX_KEYWORDS),
+      planHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+      userConfirmation: confirmationInput.optional(),
+    }),
+    annotations: paid,
+  }, async ({ brandId, mode, keywordIds, planHash, userConfirmation }) => {
+    const executar = mode === "execute";
+    if (executar && !userConfirmation) return asText({ ok: false, code: "human_confirmation_required", message: "Mostre o plano (cota do Google Ads, sem custo em dinheiro), peça o aceite e envie as palavras dele em userConfirmation." });
+    if (executar && !planHash) return asText({ ok: false, code: "plan_hash_required", message: "Chame mode 'plan' e envie o planHash dele no execute." });
+    const escopos = executar ? ["minerador.write", "provider.spend"] as const : "platform.read" as const;
+    return call("measure_keywords", escopos, { brandId, humanConfirmation: executar ? userConfirmation : null }, [{ module: "minerador", action: executar ? "edit" : "view" }], async ({ access }) => {
+      const context = await resolvePipelineContext({ brandId: access.brandId, module: "minerador", action: executar ? "edit" : "view" }, { requireActorUserId: async () => principal.actorId });
+      const { measureKeywordVolume, planKeywordVolume } = await import("./minerador-volume-measure");
+      const plan = await planKeywordVolume(context, keywordIds);
+      if (!executar) return { mode, ...plan, readOnly: true };
+      if (plan.planHash !== planHash) throw new PlatformToolFailure("plan_stale", { message: "As keywords mudaram desde o plano. Gere um plano novo e peça o aceite de novo." });
+      if (!plan.keywordIds.length) throw new PlatformToolFailure("nothing_to_measure", { message: "Nenhuma das keywords pedidas existe nesta marca.", missingIds: plan.missingIds });
+      const result = await measureKeywordVolume(context, plan.keywordIds);
+      return { mode, planHash, missingIds: plan.missingIds, ...projectVolumeResultForAgent(result, PLATFORM_TOOL_RESULT_MAX_BYTES - 1024) };
+    });
+  });
+
   /* ============================== Arquiteto =========================== */
 
   server.registerTool("send_keywords_to_arquiteto", {
@@ -1016,11 +1051,11 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
 
   server.registerTool("improve_articles", {
     title: "Melhorar publicados e formar Assuntos",
-    description: "Uma jornada para todos os publicados e Assuntos da marca. prepare: acervo, DNAs, cache e pesquisa Google Ads gratuita (usa quota, exige aceite); status: retomar. Mostre principal, entradas/saídas, transferências, enfoques, evidência e custos. collect: só com aceite específico do plano vigente e teto total US$ 1. apply: só após aceite editorial da prévia vigente, incluindo novas keywords; cada chamada avança um artigo, até state complete. Não reescreve nem publica no site. Principal Livre pode trocar; Travada, URLs, slugs, canonical e Silo publicados preservados. Nenhuma troca de sinônimos é apresentada como solução de canibalização.",
+    description: "Uma jornada para todos os publicados e Assuntos da marca. prepare: acervo, DNAs, cache, uma leitura editorial da IA na lista da marca (consome a Connection DeepSeek da marca) e pesquisa Google Ads gratuita (usa quota); exige aceite que cite a IA e a quota; status: retomar. Linha com evidenceBasis editorial_ai é sugestão da IA: mostre o motivo de cada keyword e peça conferência. Mostre principal, entradas/saídas, transferências, enfoques, evidência e custos. collect: só com aceite específico do plano vigente e teto total US$ 1. apply: só após aceite editorial da prévia vigente, incluindo novas keywords; cada chamada avança um artigo, até state complete. Não reescreve nem publica no site. Principal Livre pode trocar; Travada, URLs, slugs, canonical e Silo publicados preservados. Nenhuma troca de sinônimos é apresentada como solução de canibalização.",
     inputSchema: ArticleImprovementRequestSchema.safeExtend({ userConfirmation: confirmationInput.optional() }),
     annotations: write,
   }, async ({ userConfirmation, ...request }) => {
-    if (request.action !== "status" && !userConfirmation) return asText({ ok: false, code: "human_confirmation_required", message: "Exiba a prévia pertinente e envie o aceite específico do usuário. Preparar usa a quota gratuita do Google Ads." });
+    if (request.action !== "status" && !userConfirmation) return asText({ ok: false, code: "human_confirmation_required", message: "Exiba a prévia pertinente e envie o aceite específico do usuário. Preparar faz uma leitura da IA na lista da marca (consome a Connection DeepSeek da marca) e usa a quota gratuita do Google Ads." });
     const scopes = request.action === "status" ? ["platform.read"] as const : request.action === "prepare" ? ["arquiteto.write", "provider.spend"] as const : request.action === "collect" ? ["arquiteto.write", "provider.spend"] as const : ["arquiteto.write", "platform.decide", "minerador.write"] as const;
     return call("improve_articles", scopes, { brandId: request.brandId, humanConfirmation: userConfirmation ?? null }, [{ module: "arquiteto", action: request.action === "status" ? "view" : "edit" }, ...(request.action === "apply" ? [{ module: "arquiteto", action: "approve" } as const, { module: "minerador", action: "approve" } as const] : [])], async ({ access }) => {
       const context = await resolvePipelineContext({ brandId: access.brandId, module: "arquiteto", action: request.action === "status" ? "view" : "edit" }, { requireActorUserId: async () => principal.actorId });
@@ -1040,4 +1075,24 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
   }, async ({ brandId, articleIds }) => call("send_radar_to_writer", "radar.write", { brandId },
     [{ module: "radar", action: "edit" }, { module: "redator", action: "create" }], async ({ access }) =>
       sendArticlesToWriter(articleIds, articleId => sendRadarToWriter({ brandId: access.brandId, articleId, actorId: principal.actorId, sentAt: new Date().toISOString() }))));
+
+  server.registerTool("get_article_for_writing", {
+    title: "Material do artigo para escrever fora da plataforma",
+    description: [
+      "Use quando o usuário vai escrever o artigo no ambiente dele (e não no Redator): devolve o MESMO CSV do botão 'Para escrever' do Radar, de um artigo com investigação finalizada.",
+      "Traz identidade da página (URL, slug e canonical protegidos quando publicada), principal e secundárias, SERP das 4 lentes, estrutura dos concorrentes, perguntas, fontes, autoridade, links internos, identidade visual e se pode escrever (coluna pode_escrever).",
+      `Grátis: só lê o que o Radar já congelou; nunca chama provider. Uma chamada por artigo; o CSV vem em partes de até ${Math.round(WRITING_CSV_PART_CHARS / 1000)} mil caracteres: peça part 1, 2, … até parts e junte na ordem.`,
+      "Artigo sem investigação finalizada volta recusado com o motivo; finalize no Radar antes.",
+    ].join(" "),
+    inputSchema: z.object({ brandId: brandIdInput, articleId: z.string().trim().min(1).max(256), part: z.number().int().min(1).max(200).optional() }),
+    annotations: read,
+  }, async ({ brandId, articleId, part }) => call("get_article_for_writing", "platform.read", { brandId }, [{ module: "radar", action: "view" }], async ({ access }) => {
+    const { radarWritingExportForArticle } = await import("./radar-portable-export-core");
+    const exported = await radarWritingExportForArticle({ brandId: access.brandId, articleId, supabase: getOperationalClient(), actorUserId: principal.actorId });
+    if (!exported.ok) throw new PlatformToolFailure(exported.code, { message: exported.reason });
+    return { articleId, filename: exported.filename, canWrite: !exported.blocked, exportedAt: exported.exportedAt, ...sliceWritingCsv(exported.csv, part ?? 1, WRITING_CSV_PART_CHARS) };
+  }));
 }
+
+/** Folga para o escape do JSON (aspas e quebras de linha do CSV) dentro do teto de bytes. */
+const WRITING_CSV_PART_CHARS = 12_000;

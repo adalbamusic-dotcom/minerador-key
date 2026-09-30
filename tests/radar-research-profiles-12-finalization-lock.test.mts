@@ -212,7 +212,19 @@ test("D · antes do freeze a barra continua oferecendo o que deve", () => {
 
 /* ============ E · o seletor de perfil ============ */
 
-test("E · Google e Amazon ficam desabilitados depois do freeze, com motivo legível", async () => {
+test("E · SDD Radar 2026-09-30 · o seletor não trava mais pelo freeze: o Google é a base e YouTube/Amazon esperam só o Google finalizado", async () => {
+  const fonte = semComentarios(await workbench());
+  const abre = fonte.indexOf('data-testid="radar-search-mode"');
+  const seletor = fonte.slice(abre, fonte.indexOf('data-testid="radar-format-extension-hint"', abre) + 200);
+  assert.ok(seletor.includes("disabled={busy || esperaGoogle}"), "só o acréscimo espera o Google");
+  assert.ok(!seletor.includes("travadoPeloPerfil") && !seletor.includes("const congelado ="), "a trava de universo único saiu (decisão do dono)");
+  assert.ok(seletor.includes('data-testid="radar-format-extension-hint"'), "o motivo está escrito, não só no title");
+  /* A projeção do perfil continua dizendo o que foi finalizado; ela só deixou de travar o seletor. */
+  const projecao = finalizada();
+  assert.equal(projecao.profileLocked, true);
+});
+
+test("E (histórico) · antes, o seletor travava depois do freeze", { skip: "Revogado pela SDD Radar 2026-09-30 (Parte A): o Google é a base, YouTube e Amazon são acréscimos." }, async () => {
   const fonte = semComentarios(await workbench());
   const abre = fonte.indexOf('data-testid="radar-search-mode"');
   const seletor = fonte.slice(abre, fonte.indexOf('data-testid="radar-profile-locked"', abre) + 200);

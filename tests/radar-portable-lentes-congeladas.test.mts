@@ -870,7 +870,7 @@ test("5b · rótulos e tetos do pacote: zero orgânico, limitações omitidas e 
 const semComentarios = (fonte: string) => fonte.replace(/\r\n/g, "\n").replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
 test("7 · a rota liga a cópia do dossiê e as limitações portáteis, sem leitura nova", async () => {
-  const rota = semComentarios(await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8"));
+  const rota = semComentarios((await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8")));
   assert.match(rota, /lentesCongeladas: radarPortableExportFrozenLensesInput\(\{ profile: perfil, bundle, analysis: payload, records: snapshots\.records \}\)/);
   assert.match(rota, /researchLimitations: radarPortableExportResearchLimitations\(bundle\)/);
   assert.equal(/researchLimitations: bundle\.limitations/.test(rota), false, "a rota voltou a mandar o motivo cru das lentes");

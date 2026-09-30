@@ -1,5 +1,17 @@
 # Backlog — Radar
 
+## Google base e parecer direto do especialista — 2026-09-30
+
+- [x] Parte A: Google base; YouTube e Amazon como acréscimos (tela, rota paga, pacote, CSV status).
+- [x] Parte B, passo 1: ponto de revisão associado vale no pacote.
+- [x] **Dono:** aplicar `20260930120000_expert_contribution_platform_channel.sql` (`db query -f` + `migration repair`). Conferido por leitura remota.
+- [x] Parte B: campo “Escrever o parecer aqui” + `submitPlatformExpertContribution` + rota `POST /api/editorial/expert-contributions/platform`.
+- [x] Parte B: tipos sem ponto de revisão (FECHAMENTO, CTA, DIRETRIZ) entram pela pauta própria com ponto sintético `direto:`.
+- [ ] **Homologar (dono):** Radar → artigo → Especialista → “Escrever o parecer aqui” → enviar → aparece em Respostas recebidas com canal “Plataforma” → aceitar → finalizar → o parecer aparece no Redator e no CSV “Para escrever”.
+- [ ] Redator lê `formatBlueprints` (roteiro de vídeo e produtos do review).
+- [ ] CSV do review: produtos, links e aviso de afiliado quando a Amazon é acréscimo.
+- [ ] **Homologar (dono):** artigo com Google finalizado → “+ YouTube (vídeo)” → finalizar → enviar ao Redator (“Atualização disponível” se já enviado).
+
 ## Correções do corretor (frentes de 2026-09-28) — 2026-09-28
 
 - [x] Export portátil: lentes do Google do dossiê de YouTube/Amazon (R3) saem na coluna de lentes.

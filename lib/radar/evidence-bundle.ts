@@ -218,6 +218,25 @@ export type RadarEvidenceBundle = {
    * congelada não tem lentes, e o hash de todo dossiê anterior não muda.
    */
   serpLenses?: RadarFrozenSerpLensBlock;
+  /**
+   * ===== OS FORMATOS ACRESCENTADOS AO GOOGLE — SDD Radar 2026-09-30, Parte A =====
+   *
+   * O Google é sempre a base (camada PRIMARY). YouTube e Amazon entram depois,
+   * como camadas SUPPORT, quando o artigo também vai virar vídeo ou review. O
+   * blueprint de formato de cada um viaja aqui, porque `competitiveBlueprint`
+   * continua sendo o do Google.
+   *
+   * ADITIVO E OPCIONAL, como `serpLenses`: a chave só aparece quando houve
+   * acréscimo, e o hash de todo dossiê só-Google continua o mesmo.
+   */
+  formatBlueprints?: RadarFormatBlueprints;
+};
+
+export type RadarFormatBlueprints = {
+  /** Converter em vídeo: o blueprint multiformato congelado da investigação do YouTube. */
+  video?: { frozenAt: string | null; blueprint: Record<string, unknown> };
+  /** Artigo review: o blueprint comercial congelado da Amazon, com a intenção original e a saída escolhida. */
+  review?: { frozenAt: string | null; blueprint: RadarCompetitiveBlueprint; intent: Record<string, unknown> | null; editorialOutput: Record<string, unknown> | null };
 };
 
 /* ============================ as invariantes ============================ */

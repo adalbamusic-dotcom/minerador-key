@@ -32,7 +32,7 @@ import {
 import { radarQueryExecutionLabel } from "@/lib/radar/deep-research";
 import { radarQueryDispositionLabel } from "@/lib/radar/research-query-plan";
 import type { RadarDeepResearchView } from "@/lib/radar/deep-research-view";
-import { RADAR_DEFAULT_SEARCH_MODE, radarSearchModeAvailability, radarSearchModeLabel, type RadarPrimarySearchMode } from "@/lib/radar/search-mode";
+import { RADAR_DEFAULT_SEARCH_MODE, RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE, radarSearchModeAvailability, radarSearchModeLabel, type RadarPrimarySearchMode } from "@/lib/radar/search-mode";
 import { RadarR3AmazonPanel } from "./radar-r3-amazon-panel";
 import { RadarR3ContentDossier } from "./radar-r3-content-dossier";
 import { RadarR3VideosPanel, type RadarVideoSourcesView } from "./radar-r3-videos-panel";
@@ -583,46 +583,38 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
       * mesma amostra não descreveria nenhum deles. Por isso é UMA escolha, e
       * não três lugares para pesquisar.
       */}
+    {/*
+      * ===== O GOOGLE É A BASE; YOUTUBE E AMAZON ACRESCENTAM (SDD Radar 2026-09-30, Parte A) =====
+      *
+      * Antes era "Pesquisar em", uma escolha única: começado o Google, YouTube e
+      * Amazon ficavam travados ("Zere para trocar"). Agora o Google é a base e
+      * está sempre disponível; YouTube (o artigo também vira vídeo) e Amazon
+      * (também vira review) são acréscimos, liberados depois do Google
+      * finalizado. Trocar de aba só muda o painel à vista: nada é travado,
+      * apagado ou trocado.
+      */}
     {onSearchModeChange && <div className="mt-3" data-testid="radar-search-mode">
-      <span className="text-sm text-text-muted">Pesquisar em</span>
-      <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Onde pesquisar">
+      <span className="text-sm text-text-muted">Base do artigo e acréscimos opcionais</span>
+      <div className="mt-1.5 flex flex-wrap gap-2" role="tablist" aria-label="Base e acréscimos da pesquisa">
         {(["WEB", "YOUTUBE", "AMAZON"] as const).map(modo => {
           const disponibilidade = radarSearchModeAvailability(modo);
-          /*
-           * §3 · DEPOIS DO FREEZE O PERFIL NÃO É MAIS UMA OPÇÃO.
-           *
-           * Trocá-lo aqui trocaria o universo sob uma fotografia já assinada.
-           * O apoio interno do Google NÃO transforma Google num segundo perfil
-           * selecionável: ele é camada da investigação de vídeo, não alternativa
-           * a ela.
-           */
-          const travadoPeloPerfil = Boolean(doPerfil?.profileLocked);
-          /*
-           * §15 · UMA CORRIDA EM CURSO TAMBÉM SEGURA O SELETOR.
-           *
-           * `view.state` é o estado do pipeline do GOOGLE. Num artigo de
-           * produto ele fica NOT_STARTED por construção — e era por isso que
-           * trocar para YouTube no meio de uma coleta da Amazon continuava
-           * clicável, trocando o universo sob uma pesquisa paga em andamento,
-           * em silêncio.
-           */
-          const emCurso = Boolean(doPerfil && doPerfil.state !== "NOT_STARTED");
-          const congelado = travadoPeloPerfil || emCurso || view.state !== "NOT_STARTED";
-          return <button key={modo} type="button" role="radio" aria-checked={searchMode === modo} data-testid={`radar-search-mode-${modo.toLowerCase()}`}
+          const acrescimo = modo !== "WEB";
+          const bloqueio = modo === "YOUTUBE" ? youtubeSearch?.blockedReason : modo === "AMAZON" ? amazonSearch?.blockedReason : null;
+          const esperaGoogle = acrescimo && bloqueio === RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE;
+          const rotulo = modo === "WEB" ? "Google · base" : modo === "YOUTUBE" ? "+ YouTube (vídeo)" : "+ Amazon (review)";
+          return <button key={modo} type="button" role="tab" aria-selected={searchMode === modo} data-testid={`radar-search-mode-${modo.toLowerCase()}`}
             className={`inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-60 ${searchMode === modo ? "border-context-accent bg-selected font-medium text-foreground" : "border-divider text-text-muted hover:border-module-accent/40 hover:text-foreground"}`}
-            disabled={busy || congelado}
-            title={travadoPeloPerfil
-              ? doPerfil!.lockReason || undefined
-              : congelado ? "A investigação em curso foi feita no modo atual. Zere para trocar." : disponibilidade.reason || undefined}
+            disabled={busy || esperaGoogle}
+            title={esperaGoogle ? RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE : disponibilidade.reason || undefined}
             onClick={() => onSearchModeChange(modo)}>
             <span aria-hidden="true">{searchMode === modo ? "●" : "○"}</span>
-            {radarSearchModeLabel(modo)}
+            {rotulo}
             {disponibilidade.engine === "planned" && <span className="text-xs text-text-muted">em construção</span>}
           </button>;
         })}
       </div>
-      {/* O motivo do lock precisa ser legível sem passar o mouse. */}
-      {doPerfil?.profileLocked && <p className="mt-1.5 text-sm text-text-muted" role="status" data-testid="radar-profile-locked">{doPerfil.lockReason}</p>}
+      {/* O motivo precisa ser legível sem passar o mouse. */}
+      {(youtubeSearch?.blockedReason === RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE || amazonSearch?.blockedReason === RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE) && <p className="mt-1.5 text-sm text-text-muted" role="status" data-testid="radar-format-extension-hint">{RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE}</p>}
     </div>}
 
     {/*

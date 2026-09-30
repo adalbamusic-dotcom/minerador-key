@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shortSeedsOf, sharesTheme } from "../lib/arquiteto/article-improvement-seeds.ts";
+import { shortSeedsOf, sharesTheme } from "../lib/minerador/short-seeds.ts";
 
 // O Google Ads devolveu só a própria frase para o título inteiro (Descobrir, 29/09/2026).
 test("títulos longos viram sementes curtas para o Google Ads", () => {

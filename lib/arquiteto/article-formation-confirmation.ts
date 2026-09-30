@@ -582,3 +582,73 @@ export function validateFormationConclusion(input: {
     blocked: input.plan.blocked.length,
   };
 }
+
+export type ConclusionHeldOut = { candidateRef: string; reasons: string[] };
+
+/**
+ * OS PRONTOS SEGUEM, QUEM TEM PENDÊNCIA ESPERA (pedido do dono, 2026-09-30).
+ *
+ * A portaria acima olha o lote, e uma pendência de UM artigo — teto de
+ * buscas, SERP faltando, par que disputa o tema — barrava os outros vinte.
+ * Aqui cada impedimento é atribuído ao artigo que o carrega: esse artigo fica
+ * de fora, continua candidato, e o motivo sai com ele. Os demais formam o
+ * subconjunto que a portaria aprova sozinho (a mesma regra, relida sobre ele).
+ *
+ * Nada é afrouxado: o que fica de fora é exatamente o que a portaria barraria,
+ * e nenhum ArticleDNA nasce sobre contradição. Duplicidade e canibalização
+ * tiram OS DOIS lados — escolher um deles seria decidir no lugar do humano.
+ */
+export function readyConclusionSubset(input: Parameters<typeof validateFormationConclusion>[0]): {
+  readyCandidateRefs: string[];
+  heldOut: ConclusionHeldOut[];
+} {
+  const motivos = new Map<string, string[]>();
+  const barrar = (candidateRef: string, motivo: string) => {
+    const lista = motivos.get(candidateRef) || [];
+    if (!lista.includes(motivo)) lista.push(motivo);
+    motivos.set(candidateRef, lista);
+  };
+
+  const candidatos = input.universes.flatMap(universe =>
+    universe.candidates.map(candidate => ({ candidate, siloRef: universe.siloRef })));
+  const aprovados = new Set(input.plan.approved.map(entry => entry.candidateRef));
+
+  const donos = new Map<string, string[]>();
+  for (const { candidate } of candidatos) {
+    for (const item of candidate.keywords) donos.set(item.keywordId, [...(donos.get(item.keywordId) || []), candidate.candidateRef]);
+  }
+
+  for (const { candidate, siloRef } of candidatos) {
+    const ref = candidate.candidateRef;
+    if (!aprovados.has(ref)) continue;
+    if (candidate.siloRef !== siloRef) barrar(ref, "declara um Silo diferente do universo em que foi formado");
+    if (candidate.keywords.filter(item => item.role === "principal").length !== 1) barrar(ref, "não tem exatamente uma Principal");
+    if ([...candidate.keywords].some(item => (donos.get(item.keywordId) || []).length > 1)) barrar(ref, "tem busca que também está em outro artigo");
+    if (candidate.keywords.length + candidate.overflowKeywordIds.length > input.ceiling) barrar(ref, `passa do teto de ${input.ceiling} buscas`);
+    if (candidate.keywords.some(item => {
+      const dela = input.keywordSiloRef.get(item.keywordId);
+      return dela !== undefined && dela !== null && dela !== siloRef;
+    })) barrar(ref, "reúne buscas de Silos diferentes");
+    if (candidate.conflicts.some(conflito => conflito.toLowerCase().includes("publicado"))) barrar(ref, "colide com conteúdo publicado");
+    if (candidate.subjectKeywordId && candidate.subjectKeywordId === candidate.principalKeywordId
+      && input.subjectVolumeValidated?.get(candidate.subjectKeywordId) !== true) {
+      barrar(ref, "tem o Assunto como principal sem Volume validado");
+    }
+    const campos = input.unresolvedClassifications?.get(ref) || [];
+    if (campos.length) barrar(ref, `classificação não resolvida: ${campos.join(", ")}`);
+    const gate = input.serpGates.get(ref);
+    if (gate?.requiresHumanDecision) barrar(ref, "a SERP espera decisão editorial (Manter ou Aplicar)");
+    else if (!gate || gate.blocksConclusion) barrar(ref, gate?.reason || "ainda não foi confrontado com a SERP");
+  }
+
+  for (const par of input.unresolvedCannibalization || []) {
+    if (!aprovados.has(par.left) || !aprovados.has(par.right)) continue;
+    barrar(par.left, `disputa o mesmo tema com “${par.rightLabel || par.right}”`);
+    barrar(par.right, `disputa o mesmo tema com “${par.leftLabel || par.left}”`);
+  }
+
+  return {
+    readyCandidateRefs: input.plan.approved.map(entry => entry.candidateRef).filter(ref => !motivos.has(ref)),
+    heldOut: [...motivos].map(([candidateRef, reasons]) => ({ candidateRef, reasons })),
+  };
+}

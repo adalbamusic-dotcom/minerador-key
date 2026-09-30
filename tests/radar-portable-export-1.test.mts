@@ -506,7 +506,7 @@ test("§3 e §17 · sem seleção o escopo é a visão; com seleção, o selecio
 });
 
 test("§1 · a rota resolve pelo caminho canônico e não chama provider", async () => {
-  const rota = await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8");
+  const rota = (await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8"));
   const semComentarios = rota.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
   assert.match(semComentarios, /resolveRadarCanonicalDossier\(\{/);

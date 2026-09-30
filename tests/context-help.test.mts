@@ -74,6 +74,25 @@ test("catálogo local do Minerador cobre os fluxos autorizados", () => {
   assert.doesNotMatch(mineradorContent, /fetch\(|supabase|OpenAI|DeepSeek|requestId|raw payload/i);
 });
 
+test("catálogo local do Arquiteto explica todos os processos e botões para quem não conhece SEO (dono, 2026-09-30)", async () => {
+  const arquitetoContent = await readFile(new URL("../modules/arquiteto/context-help.ts", import.meta.url), "utf8");
+  assert.match(registry, /if \(area === "arquiteto"\) return ARQUITETO_CONTEXT_HELP/);
+  for (const topicId of [
+    "sobre-o-arquiteto", "ordem-recomendada", "conceitos-basicos", "publicado-travado-livre", "volume-primeiro", "mesmo-assunto-no-google", "custos",
+    "proximo-passo", "buscar-keywords", "validar-no-google", "gravar-melhorias", "leitura-da-ia", "canibalizacao", "sobras", "processar-artigos",
+    "desfazer-silo", "restaurar-keywords-no-silo", "revisao-do-artigo", "divergencia-serp", "parecer-da-serp", "kgr-do-artigo", "links-internos", "enviar-ao-radar",
+  ]) assert.match(arquitetoContent, new RegExp(`id: "${topicId}"`));
+  const topicIds = [...arquitetoContent.matchAll(/id: "([^"]+)"/g)].map(match => match[1]);
+  assert.equal(new Set(topicIds).size, topicIds.length, "IDs de ajuda duplicados");
+  const summaries = [...arquitetoContent.matchAll(/summary: "([^"]*)"/g)].map(match => match[1]);
+  assert.equal(summaries.length, topicIds.length, "cada tópico deve ter um resumo");
+  assert.ok(summaries.every(summary => summary.length <= 240), "resumos devem permanecer curtos");
+  for (const botao of ["1 · Buscar keywords (grátis)", "2 · Validar no Google", "3 · Gravar melhorias", "Buscar de novo", "Continuar", "Manter no artigo", "Aplicar recomendação", "Desfazer Silo", "Restaurar", "Criar artigo novo com este grupo", "Processar artigos", "Medir allintitle (pago)"]) {
+    assert.ok(arquitetoContent.includes(botao), `botão sem explicação: ${botao}`);
+  }
+  assert.doesNotMatch(arquitetoContent, /fetch\(|supabase|OpenAI|DeepSeek|requestId|raw payload/i);
+});
+
 test("drawer preserva interação de teclado, foco e composição sem nested button", () => {
   assert.match(center, /role="dialog" aria-modal="true"/);
   assert.match(center, /event\.key === "Escape"/);

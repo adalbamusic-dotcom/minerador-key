@@ -358,7 +358,10 @@ test("§3 · UI_ONLY_AUTHORITY = NO — a tela usa a mesma resolução, não uma
   const autoridade = pagina.slice(pagina.indexOf("const compromissoDeModo"), pagina.indexOf("const garantirContextoDoRadar"))
     .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-  assert.ok(autoridade.includes("radarPrimaryModeOfAnalysis(payload)"), "a tela chama o resolver compartilhado");
+  /* SDD Radar 2026-09-30 (Parte A): a tela chama a regra compartilhada "o Google é a base", a mesma da porta das rotas pagas. */
+  assert.ok(autoridade.includes("radarGoogleBaseCommitment({ mode: modo, payload })"), "a tela chama o resolver compartilhado");
+  const porta = await readFile(new URL("../lib/server/radar-google-base.ts", import.meta.url), "utf8");
+  assert.ok(porta.includes("radarGoogleBaseCommitment({ mode: input.mode, payload:"), "e a porta das rotas pagas usa a mesma");
   assert.equal(/deepResearch|youtubeSearch/.test(autoridade), false, "e não sabe quais campos provam cada modo");
 
   /* O invólucro da tela é a MESMA regra: ele chama o assert e converte. */

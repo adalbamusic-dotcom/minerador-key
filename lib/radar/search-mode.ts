@@ -531,6 +531,27 @@ export function radarPrimaryModeCommitment(input: {
 }
 
 /**
+ * ===== O GOOGLE É A BASE — SDD Radar 2026-09-30, Parte A (decisão do dono) =====
+ *
+ * Substitui a trava de "um artigo, um universo" (`radarPrimaryModeCommitment`)
+ * na tela e no início pago do YouTube e da Amazon. O Google começa sempre: é a
+ * base do artigo. YouTube (o artigo também vira vídeo) e Amazon (também vira
+ * review) são ACRÉSCIMOS: entram depois de o Google ser finalizado e nunca
+ * travam, apagam ou trocam o Google. Uma corrida de YouTube ou Amazon já
+ * gravada (legado, ou acréscimo em curso) continua podendo seguir.
+ */
+export const RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE = "Finalize a pesquisa Google primeiro: YouTube (vídeo) e Amazon (review) são acréscimos ao artigo e entram depois da base do Google.";
+
+export function radarGoogleBaseCommitment(input: { mode: RadarPrimarySearchMode; payload: unknown }): RadarPrimaryModeCommitment {
+  if (input.mode === "WEB") return { committedTo: null, canStart: true, reason: null };
+  const analise = (input.payload && typeof input.payload === "object" ? input.payload : null) as { finalizedBundle?: unknown; youtubeSearch?: unknown; amazonSearch?: unknown } | null;
+  const googleFinalizado = Boolean(analise?.finalizedBundle);
+  const jaIniciado = input.mode === "YOUTUBE" ? Boolean(analise?.youtubeSearch) : Boolean(analise?.amazonSearch);
+  if (googleFinalizado || jaIniciado) return { committedTo: googleFinalizado ? "WEB" : input.mode, canStart: true, reason: null };
+  return { committedTo: null, canStart: false, reason: RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE };
+}
+
+/**
  * Trocar de modo com investigação em curso descarta a anterior.
  *
  * Não existe "misturar depois": um universo de vídeo e um de artigo respondem

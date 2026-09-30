@@ -353,17 +353,18 @@ test("L · UM START visível, e o painel não chama provider nem grava", () => {
 
 /* ================================ M ================================ */
 
-test("M · §15 · o seletor não troca de perfil durante uma corrida", () => {
+test("M · SDD Radar 2026-09-30 · a aba não troca universo: a Amazon é acréscimo e só espera o Google finalizado", async () => {
   const workbench = semComentarios(fonteDaWorkbench);
 
   /*
-   * `view.state` é o pipeline do GOOGLE, e num artigo de produto ele fica
-   * NOT_STARTED por construção — era daí que saía o seletor clicável no meio
-   * de uma coleta paga da Amazon.
+   * O seletor deixou de ser escolha única (decisão do dono): trocar de aba só
+   * muda o painel à vista, e nenhuma coleta é trocada ou apagada. O que
+   * continua protegido é o gasto: durante uma corrida o botão fica ocupado
+   * (`busy`), e a Amazon só começa com o Google finalizado — na tela e na rota.
    */
-  assert.match(workbench, /const emCurso = Boolean\(doPerfil && doPerfil\.state !== "NOT_STARTED"\);/);
-  assert.match(workbench, /const congelado = travadoPeloPerfil \|\| emCurso \|\| view\.state !== "NOT_STARTED";/);
-  assert.match(workbench, /disabled=\{busy \|\| congelado\}/);
+  assert.match(workbench, /disabled=\{busy \|\| esperaGoogle\}/);
+  const rota = semComentarios(await readFile(new URL("../app/api/editorial/radar-amazon-search/route.ts", import.meta.url), "utf8"));
+  assert.match(rota, /await assertRadarGoogleBase\(\{ brandId: input\.brandId, articleId: input\.articleId, mode: "AMAZON" \}\);\s*const inicio = await startRadarAmazonRun/);
 });
 
 /* ================================ N ================================ */

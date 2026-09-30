@@ -270,7 +270,7 @@ test("concluir formação continua exigindo que as pendências estejam resolvida
   assert.match(review, /data-testid="architect-revision-pending"/);
   assert.match(workspace, /articleClosingIssues\.map/);
   // E a portaria da conclusão continua sendo a que decide gravar.
-  assert.match(workspace, /const portaria = validateFormationConclusion\(\{/);
+  assert.match(workspace, /let portaria = validateFormationConclusion\(entradaDaPortaria\(universosSelecionados, plano\)\);/);
 });
 
 test("as decisões obrigatórias voltaram ao fluxo, com o controle que as resolve", () => {

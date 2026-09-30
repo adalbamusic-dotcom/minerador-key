@@ -9,7 +9,7 @@ import { radarResearchUniverseFingerprint } from "../lib/radar/research-curation
 import { autoDecideRadarReference } from "../lib/radar/research-auto-selection.ts";
 import { freezeRadarEvidenceBundle, radarFinalizationReadiness } from "../lib/radar/investigation-finalization.ts";
 import { radarActionOutcome, radarClaimAction, type RadarActionClaim } from "../lib/radar/operational-actions.ts";
-import { radarSearchModeAvailability } from "../lib/radar/search-mode.ts";
+import { RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE, radarSearchModeAvailability } from "../lib/radar/search-mode.ts";
 import type { RadarArticleResearchContext } from "../lib/radar/article-research-context.ts";
 import type { RadarExtractionPage, RadarObservedLink } from "../lib/radar/analysis-contracts.ts";
 import type { RadarR3Model } from "../lib/radar/r3-workbench.ts";
@@ -474,9 +474,9 @@ test("GATE 15.2 · P e §10 — o seletor escolhe um modo só, e Amazon não ofe
   const amazon = seletor.querySelector('[data-testid="radar-search-mode-amazon"]') as HTMLButtonElement;
   assert.ok(google && amazon);
 
-  /* Seleção única: o modo ativo é o marcado, e só ele. */
-  assert.equal(google.getAttribute("aria-checked"), "true");
-  assert.equal(amazon.getAttribute("aria-checked"), "false");
+  /* Abas (SDD Radar 2026-09-30): a aba à vista é a marcada, e só ela. */
+  assert.equal(google.getAttribute("aria-selected"), "true");
+  assert.equal(amazon.getAttribute("aria-selected"), "false");
 
   await tela.click(amazon);
   assert.deepEqual(spy.mode, ["AMAZON"], "o clique escolhe o modo — e nada além disso");
@@ -505,18 +505,33 @@ test("GATE 15.2 · P e §10 — o seletor escolhe um modo só, e Amazon não ofe
   tela.destroy(); comAmazon.tela.destroy();
 });
 
-test("GATE 15.2 · §10 — iniciada a investigação, o modo fica congelado", async () => {
-  const { tela, spy } = await montarTela(vista());
+test("GATE 15.2 · §10 (SDD Radar 2026-09-30) — YouTube e Amazon esperam o Google finalizado; depois, a aba só troca o painel", async () => {
+  /* Sem o Google finalizado, o acréscimo fica desabilitado e a tela diz por quê. */
+  const { tela, spy } = await montarTela(vista(), {
+    youtubeSearch: { blockedReason: RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE },
+    amazonSearch: { blockedReason: RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE },
+  });
   await abrirArea(tela, "pesquisa");
-
   const seletor = tela.get("radar-search-mode");
   const youtube = seletor.querySelector('[data-testid="radar-search-mode-youtube"]') as HTMLButtonElement;
-  assert.equal(youtube.disabled, true, "com investigação em curso, o modo não troca");
-
+  const google = seletor.querySelector('[data-testid="radar-search-mode-web"]') as HTMLButtonElement;
+  assert.equal(youtube.disabled, true, "o YouTube espera a base do Google");
+  assert.equal(google.disabled, false, "o Google, base, nunca trava");
+  assert.ok(tela.query("radar-format-extension-hint"), "o motivo está escrito, sem passar o mouse");
   await tela.click(youtube);
-  assert.deepEqual(spy.mode, [], "e o clique não muda a investigação ativa em silêncio");
+  assert.deepEqual(spy.mode, [], "o clique no acréscimo bloqueado não faz nada");
   semOperacao(spy);
   tela.destroy();
+
+  /* Com o Google finalizado (sem motivo de bloqueio), a aba abre o painel, e nada é executado. */
+  const liberada = await montarTela(vista());
+  await abrirArea(liberada.tela, "pesquisa");
+  const yt = liberada.tela.get("radar-search-mode").querySelector('[data-testid="radar-search-mode-youtube"]') as HTMLButtonElement;
+  assert.equal(yt.disabled, false, "com a Pesquisa Google em curso, a aba não trava mais");
+  await liberada.tela.click(yt);
+  assert.deepEqual(liberada.spy.mode, ["YOUTUBE"], "a aba troca só o painel à vista");
+  semOperacao(liberada.spy);
+  liberada.tela.destroy();
 });
 
 /* ==============  Q · VÍDEOS REGISTRA, E SÓ  =========================== */

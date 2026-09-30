@@ -477,7 +477,9 @@ test("§2 — o gatilho lê o marcador do readback, não uma soma otimista de cl
   assert.match(rota, /readbackArticleFormationMarker/, "a rota devolve o readback remoto");
   assert.match(rota, /marker: readback\.payload/, "o corpo devolvido é o do remoto");
   // E o plano é construído sobre esse marcador — o que o remoto devolveu.
-  const congeladas = codigo.indexOf("const congeladasDoSilo = (marcador.concludedFormations");
+  // O marcador do readback entra pela leitura do Silo (closureFormationsForSilo), e o plano sai dela.
+  assert.ok(codigo.includes("concludedFormations: marcador.concludedFormations || [],"));
+  const congeladas = codigo.indexOf("const congeladasDoSilo = leituraDoSilo.formations");
   const plano = codigo.indexOf("const closurePlan = buildCanonicalSiloClosurePlan(", congeladas);
   assert.ok(congeladas > 0, "as formações do Silo saem do marcador do readback");
   assert.ok(plano > congeladas, "o plano é construído depois, sobre elas");

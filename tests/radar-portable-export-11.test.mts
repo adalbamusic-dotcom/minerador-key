@@ -533,7 +533,7 @@ test("§8 · o Blueprint do Google que a tela mostra é o que o dossiê exporta"
 });
 
 test("§8 · a rota lê a fotografia do Google pela cadeia de domínio, sem React", async () => {
-  const rota = await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8");
+  const rota = (await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8"));
   const semComentarios = rota.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
   assert.match(semComentarios, /loadRadarCanonicalAuthorities\(\{/);
@@ -648,7 +648,7 @@ test("§10 · sem shortlist válida não saem produtos nem links", () => {
 });
 
 test("§10 · a rota recusa a corrida cuja configuração não é a da fotografia", async () => {
-  const rota = await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8");
+  const rota = (await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8"));
   const semComentarios = rota.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
   /*

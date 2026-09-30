@@ -34,11 +34,11 @@ import {
   type RadarBundleEditorialOutput,
   type RadarEvidenceBinding,
   type RadarEvidenceBundle,
+  type RadarFormatBlueprints,
   type RadarResearchLayer,
 } from "./evidence-bundle.ts";
 import { radarSerpEvidenceStanding } from "./evidence-authority.ts";
-import { radarFrozenSerpLensesOf, radarFrozenSerpStandingOf, type RadarFrozenEvidenceBundle } from "./investigation-finalization.ts";
-import { radarObservedDivergesFromFrozen } from "./planner-handoff.ts";
+import { radarFrozenSerpLensesOf, radarFrozenSerpStandingOf } from "./investigation-finalization.ts";
 import type { RadarCompetitiveBlueprint, RadarResearchRef } from "./competitive-blueprint.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
 import type { RadarResearchSource } from "./search-mode.ts";
@@ -89,21 +89,29 @@ const inteiro = (valor: unknown): number =>
 export function radarFrozenObservedAtOfAnalysis(payload: unknown): string | null {
   const analise = objeto(payload);
   if (!analise) return null;
+  const google = objeto(analise.finalizedBundle);
+  if (google && typeof google.frozenAt === "string") return google.frozenAt;
   const amazon = objeto(analise.amazonFrozenInvestigation);
   if (amazon && typeof amazon.finalizedAt === "string") return amazon.finalizedAt;
   const youtube = objeto(analise.youtubeFrozenInvestigation);
   if (youtube && typeof youtube.finalizedAt === "string") return youtube.finalizedAt;
-  const google = objeto(analise.finalizedBundle);
-  if (google && typeof google.frozenAt === "string") return google.frozenAt;
   return null;
 }
 
+/**
+ * ===== O GOOGLE É A BASE — SDD Radar 2026-09-30, Parte A =====
+ *
+ * Com o Google finalizado, ele é o perfil primário, e YouTube e Amazon entram
+ * como acréscimo de formato (vídeo, review). A precedência antiga
+ * (Amazon > YouTube > Google) só vale para investigação legada, sem Google
+ * finalizado: ela continua legível como foi entregue.
+ */
 export function radarPrimaryProfileOfAnalysis(payload: unknown): RadarResearchProfile | null {
   const analise = objeto(payload);
   if (!analise) return null;
+  if (objeto(analise.finalizedBundle)) return "GOOGLE";
   if (objeto(analise.amazonFrozenInvestigation)) return "AMAZON";
   if (objeto(analise.youtubeFrozenInvestigation)) return "YOUTUBE";
-  if (objeto(analise.finalizedBundle)) return "GOOGLE";
   return null;
 }
 
@@ -206,90 +214,6 @@ function camadaDeApoioDoGoogle(input: {
     counts: { queries: input.keyword ? 1 : 0, items: 0 },
     limitations: [],
   };
-}
-
-/**
- * ===== O GOOGLE FINALIZADO CONTINUA VIAJANDO — SDD "SERP no artigo e KGR opcional", R3 =====
- *
- * Decisão do dono (2026-09-28): YouTube (artigo que vira vídeo) e Amazon
- * (artigo que vira review) só ACRESCENTAM; nunca substituem nem apagam os
- * dados de busca no Google.
- *
- * Com o Google finalizado ANTES, o perfil primário continua sendo o de vídeo
- * ou o de produto (§4: uma única camada PRIMARY), mas a camada do Google deixa
- * de ser só uma referência ao snapshot de apoio: ela leva as referências e as
- * contagens do CONGELADO, e as limitações dele. As contagens saem da
- * fotografia congelada, não da leitura de hoje.
- *
- * A referência de apoio que aponta para outro snapshot continua como segunda
- * referência: nada some.
- */
-function camadaDoGoogleFinalizadoComoApoio(input: {
-  congelado: Record<string, unknown>;
-  snapshotId: string | null;
-  snapshotHash: string | null;
-  apoio: RadarResearchLayer | null;
-  role: RadarResearchRef["role"];
-}): RadarResearchLayer {
-  const busca = objeto(input.congelado.search);
-  const amostra = objeto(input.congelado.sample);
-  const congeladoEm = texto(input.congelado.frozenAt);
-  const refs: RadarResearchRef[] = input.snapshotId
-    ? [{
-      source: "WEB_SERP",
-      role: input.role,
-      ref: input.snapshotId,
-      fingerprint: input.snapshotHash,
-      collectedAt: congeladoEm,
-      sampleSize: inteiro(amostra?.comparablePages),
-    }]
-    : [];
-  for (const referencia of input.apoio?.refs || []) {
-    if (!refs.some(item => item.ref === referencia.ref)) refs.push(referencia);
-  }
-  return {
-    role: "SUPPORT",
-    frozenAt: congeladoEm,
-    refs,
-    counts: {
-      queries: inteiro(busca?.canonicalQueries) + inteiro(busca?.auxiliaryQueries),
-      items: inteiro(amostra?.comparablePages),
-    },
-    limitations: textos(input.congelado.limitations),
-  };
-}
-
-/**
- * A fotografia do Google (`observed`) só acompanha o apoio quando é a MESMA
- * que foi congelada: mesmo artigo, mesma versão do ArticleDNA e a mesma régua
- * de `radarObservedDivergesFromFrozen` que o envio ao Planejador aplica.
- *
- * Divergiu, ou não dá para conferir? Ela não viaja, e o motivo vira limitação
- * declarada. O pacote de vídeo ou de produto continua pronto: a divergência
- * de uma camada de apoio não pode bloquear a investigação primária.
- */
-function fotografiaDoGoogleFinalizado(
-  congelado: Record<string, unknown>,
-  observado: RadarCompetitiveObservedModel | null,
-  vinculo: RadarEvidenceBinding,
-): { observed: RadarCompetitiveObservedModel | null; limitation: string | null } {
-  if (!observado) return { observed: null, limitation: null };
-  const identidade = observado.identity;
-  if (identidade.articleId !== vinculo.articleId
-    || identidade.articleDnaVersionId !== vinculo.articleDnaVersionId
-    || identidade.articleDnaContentHash !== vinculo.articleDnaContentHash) {
-    return { observed: null, limitation: "A fotografia do Google finalizada não foi anexada: ela descreve outra versão do artigo." };
-  }
-  let divergencias: string[];
-  try {
-    divergencias = radarObservedDivergesFromFrozen(observado, congelado as unknown as RadarFrozenEvidenceBundle);
-  } catch {
-    divergencias = ["o congelado do Google não pôde ser conferido."];
-  }
-  if (divergencias.length) {
-    return { observed: null, limitation: `A fotografia do Google finalizada não foi anexada: ela não confere com o congelado (${divergencias[0]})` };
-  }
-  return { observed: observado, limitation: null };
 }
 
 /* ====================== §7 · o que o Radar recomenda ====================== */
@@ -456,30 +380,6 @@ export function buildRadarEvidenceBundleFromAnalysis(input: {
     if (apoio) { research.google = apoio; sources.push("WEB_SERP"); }
   }
 
-  /*
-   * R3 · COM O GOOGLE FINALIZADO, O VÍDEO E O PRODUTO ACRESCENTAM.
-   *
-   * Sem `finalizedBundle` nada aqui roda, e o dossiê de YouTube ou de Amazon
-   * sai byte a byte igual ao de antes (mesmo hash).
-   */
-  const googleCongelado = perfil !== "GOOGLE" ? objeto(analise.finalizedBundle) : null;
-  let fotografiaDeApoio: RadarCompetitiveObservedModel | null = null;
-  const limitacoesDaFotografia: string[] = [];
-  if (googleCongelado) {
-    const avaliada = fotografiaDoGoogleFinalizado(googleCongelado, input.googleObserved || null, input.article);
-    fotografiaDeApoio = avaliada.observed;
-    if (avaliada.limitation) limitacoesDaFotografia.push(avaliada.limitation);
-    research.google = camadaDoGoogleFinalizadoComoApoio({
-      congelado: googleCongelado,
-      snapshotId: texto(analise.serpSnapshotId),
-      snapshotHash: texto(analise.serpSnapshotHash),
-      apoio: research.google,
-      role: perfil === "AMAZON" ? "SEO_COMMERCIAL_SUPPORT" : "SEO_SUPPORT",
-    });
-    sources.push("WEB_SERP");
-    limitacoes.push(...research.google.limitations);
-  }
-
   if (perfil === "GOOGLE") {
     const congelado = objeto(analise.finalizedBundle)!;
     const observado = input.googleObserved || null;
@@ -507,6 +407,45 @@ export function buildRadarEvidenceBundleFromAnalysis(input: {
   }
 
   /*
+   * ===== OS ACRÉSCIMOS DE FORMATO — SDD Radar 2026-09-30, Parte A =====
+   *
+   * Com o Google finalizado ele é a base (PRIMARY). O YouTube (o artigo também
+   * vira vídeo) e a Amazon (o artigo também vira review) entram como camadas
+   * SUPPORT, cada uma com o blueprint de formato em `formatBlueprints`. Sem
+   * acréscimo, nada aqui roda e o dossiê só-Google sai byte a byte igual (mesmo
+   * hash). Antes desta SDD, o R3 fazia o contrário: o vídeo ou o produto virava
+   * a camada primária e o Google finalizado, apoio.
+   */
+  const formatos: RadarFormatBlueprints = {};
+  if (perfil === "GOOGLE") {
+    const youtubeCongelado = objeto(analise.youtubeFrozenInvestigation);
+    if (youtubeCongelado) {
+      const camada = camadaDoYoutube(youtubeCongelado);
+      research.youtube = { ...camada, role: "SUPPORT", refs: camada.refs.map(ref => ({ ...ref, role: "FORMAT_EXTENSION" as const })) };
+      sources.push("YOUTUBE_SERP");
+      limitacoes.push(...research.youtube.limitations);
+      multimodal = objeto(objeto(youtubeCongelado.multimodal)?.blueprint);
+      if (multimodal) formatos.video = { frozenAt: texto(youtubeCongelado.finalizedAt), blueprint: multimodal };
+    }
+    const amazonCongelada = objeto(analise.amazonFrozenInvestigation);
+    if (amazonCongelada) {
+      const camada = camadaDaAmazon(amazonCongelada);
+      research.amazon = { ...camada, role: "SUPPORT", refs: camada.refs.map(ref => ({ ...ref, role: "FORMAT_EXTENSION" as const })) };
+      sources.push("AMAZON_SERP");
+      limitacoes.push(...research.amazon.limitations);
+      const blueprint = objeto(amazonCongelada.competitiveBlueprint);
+      if (blueprint) {
+        formatos.review = {
+          frozenAt: texto(amazonCongelada.finalizedAt),
+          blueprint: blueprint as unknown as RadarCompetitiveBlueprint,
+          intent: objeto(amazonCongelada.originalEditorialIntent),
+          editorialOutput: objeto(amazonCongelada.editorialOutput),
+        };
+      }
+    }
+  }
+
+  /*
    * ============ §14 · TODA LIMITAÇÃO MATERIAL ATRAVESSA ============
    *
    * "Não analisou texto de reviews", "não abriu PDP", "nota não prova
@@ -526,7 +465,7 @@ export function buildRadarEvidenceBundleFromAnalysis(input: {
    * lacunas e divergências entre aparelhos que o bloco escreveu entram nas
    * limitações do dossiê: quem planeja lê o que faltou sem abrir o bloco.
    */
-  const lentesCongeladas = perfil === "GOOGLE" || googleCongelado ? radarFrozenSerpLensesOf(analise.finalizedBundle) : null;
+  const lentesCongeladas = perfil === "GOOGLE" ? radarFrozenSerpLensesOf(analise.finalizedBundle) : null;
   if (lentesCongeladas) limitacoes.push(...lentesCongeladas.limitations);
 
   const montar = (fotografia: RadarCompetitiveObservedModel | null, extras: readonly string[]) => buildRadarEvidenceBundleV3({
@@ -540,7 +479,8 @@ export function buildRadarEvidenceBundleFromAnalysis(input: {
     crossSerp: cruzamentoDoMultimodal(multimodal),
     editorialOutputs: perfil === "YOUTUBE" && multimodal
       ? saidasDoMultimodal(multimodal)
-      : saidasDoBlueprint(input.competitiveBlueprint),
+      /* Com o vídeo acrescentado ao Google, a saída de vídeo soma à do artigo. */
+      : [...saidasDoBlueprint(input.competitiveBlueprint), ...(perfil === "GOOGLE" && multimodal ? saidasDoMultimodal(multimodal) : [])],
     observed: perfil === "GOOGLE" ? input.googleObserved || null : fotografia,
     /*
      * ===== R1 · O STANDING CONGELADO VENCE, E NADA É CALCULADO AQUI =====
@@ -570,19 +510,9 @@ export function buildRadarEvidenceBundleFromAnalysis(input: {
     ...(input.keywordContext ? { keywordContext: input.keywordContext } : {}),
     /* Ausente sem lentes congeladas: o hash de todo dossiê anterior é o mesmo. */
     ...(lentesCongeladas ? { serpLenses: lentesCongeladas } : {}),
+    /* Ausente sem acréscimo de formato: o hash de todo dossiê só-Google é o mesmo. */
+    ...(formatos.video || formatos.review ? { formatBlueprints: formatos } : {}),
   });
 
-  /*
-   * R3 · a fotografia de apoio que não passa na conferência de proveniência
-   * do dossiê (descoberta de outro vínculo, comparação ausente) não derruba o
-   * pacote primário: ela sai, e o motivo fica nas limitações.
-   */
-  if (fotografiaDeApoio) {
-    try {
-      return { ok: true, bundle: montar(fotografiaDeApoio, limitacoesDaFotografia) };
-    } catch {
-      return { ok: true, bundle: montar(null, [...limitacoesDaFotografia, "A fotografia do Google finalizada não foi anexada: ela não passou na conferência de proveniência do dossiê."]) };
-    }
-  }
-  return { ok: true, bundle: montar(null, limitacoesDaFotografia) };
+  return { ok: true, bundle: montar(null, []) };
 }

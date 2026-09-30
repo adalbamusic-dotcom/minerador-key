@@ -232,7 +232,13 @@ async function camadaDoEspecialista(input: {
         contributionId: contribuicao.id,
         expertId: contribuicao.expertId,
         briefId: contribuicao.briefId,
-        requirementId: radarSpecialistRequirementIdOf(pauta.radarContext),
+        /*
+         * O PONTO QUE A PESSOA ESCOLHEU NA REVISÃO VALE (SDD 2026-09-30, Parte B).
+         * A resposta de uma pauta avulsa, associada a um ponto na tela e aceita,
+         * saía do dossiê: a camada só lia o ponto da pauta. A decisão humana vem
+         * primeiro; sem ela, o ponto da pauta, como antes.
+         */
+        requirementId: decisoes[contribuicao.id]?.relatedRequirementId ?? radarSpecialistRequirementIdOf(pauta.radarContext),
         requirementKind: texto(requisito?.kind),
         requirementQuestion: texto(requisito?.question),
         sourceType: contribuicao.sourceType,
@@ -254,6 +260,7 @@ async function camadaDoEspecialista(input: {
         originalAssetUri: null,
         checksum: null,
         receivedAt: contribuicao.receivedAt,
+        provider: contribuicao.provider,
         decision: decisoes[contribuicao.id]?.decision || "NOT_APPROVED",
         classification: decisoes[contribuicao.id]?.classification ?? null,
       }),
@@ -281,7 +288,8 @@ async function camadaDoEspecialista(input: {
      */
     preparedRequirements: new Set(pautas
       .map(pauta => radarSpecialistRequirementIdOf(pauta.radarContext))
-      .filter((valor): valor is string => Boolean(valor))).size,
+      /* O parecer direto (fechamento, CTA, diretriz) tem ponto sintético: não é ponto que a investigação preparou. */
+      .filter((valor): valor is string => Boolean(valor) && !String(valor).startsWith("direto:"))).size,
     sources: fontes,
   });
 

@@ -915,7 +915,7 @@ test("F · acima do teto do servidor, o aviso vem ANTES do pedido — e a rota u
   assert.equal(acima?.type, "warning");
   assert.match(acima!.message, /acima do limite de 500 por exportação\. Selecione alguns silos/);
 
-  const rota = semComentarios(await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8"));
+  const rota = semComentarios((await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8")));
   assert.match(rota, /articleIds: z\.array\([^\n]*\)\.min\(1\)\.max\(RADAR_EXPORT_MAX_ARTICLES\)/, "o teto da rota e o da tela divergiram");
   const pagina = semComentarios(await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8"));
   const exportar = pagina.slice(pagina.indexOf("const exportarSilosCompletos"), pagina.indexOf("await fetch(\"/api/editorial/radar-export\"", pagina.indexOf("const exportarSilosCompletos")));
@@ -1009,7 +1009,7 @@ test("G · o campo novo das autoridades fica FORA do dossiê: o hash não muda",
 /* ================================ H ================================ */
 
 test("H · a rota liga as colunas novas com leituras por LOTE, sem coleta e sem mexer no E4", async () => {
-  const rota = semComentarios(await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8"));
+  const rota = semComentarios((await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8")));
 
   /* O corpo aceita o agrupamento, e só ele: o schema continua estrito. */
   assert.match(rota, /groupBy: z\.literal\("silo"\)\.optional\(\)/);
@@ -1039,7 +1039,9 @@ test("H · a rota liga as colunas novas com leituras por LOTE, sem coleta e sem 
    */
   const leituraDasLentes = rota.slice(rota.indexOf("const lentes ="), rota.indexOf("const plano ="));
   assert.match(leituraDasLentes, /const ambiente = readDataForSeoTargetCodes\(\)/);
-  assert.match(leituraDasLentes, /readMineradorKeywordTargetCodes\(\s*profile\.supabase,\s*input\.brandId,/);
+  // Desde a extração do núcleo (SDD MCP F1), o cliente chega como parâmetro; a rota passa o da sessão.
+  assert.match(leituraDasLentes, /readMineradorKeywordTargetCodes\(\s*input\.supabase,\s*input\.brandId,/);
+  assert.match(rota, /assembleRadarPortableExport\(\{[\s\S]*?supabase: profile\.supabase,\s*actorUserId: profile\.userId,/);
   assert.match(leituraDasLentes, /codesFor: keywordId => serpTargetCodesFor\(alvos\.codes, keywordId, ambiente\)/, "o pedido ao cache voltou aos códigos do ambiente");
   assert.equal((rota.match(/readMineradorKeywordTargetCodes\(/g) || []).length, 1);
 

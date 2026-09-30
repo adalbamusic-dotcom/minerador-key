@@ -269,8 +269,14 @@ test("SPECIALIST_2.1 · MIGRATION_CREATED = NO", async () => {
   const migrations = await readdir(new URL("../supabase/migrations/", import.meta.url));
   const especialista = migrations.filter(nome => /specialist|consultation|expert/i.test(nome));
 
-  /* A única migration de especialista continua sendo a fundação de 2026-08-25. */
-  assert.deepEqual(especialista, ["20260825150000_telegram_expert_contribution_platform_foundation.sql"]);
+  /*
+   * A fundação de 2026-08-25 e, depois, só a do canal da plataforma, autorizada
+   * pelo dono na SDD do Radar de 2026-09-30 (Parte B, D3). Nenhuma outra.
+   */
+  assert.deepEqual(especialista, [
+    "20260825150000_telegram_expert_contribution_platform_foundation.sql",
+    "20260930120000_expert_contribution_platform_channel.sql",
+  ]);
 });
 
 /* ========================= §4 · a UI do convite ======================= */

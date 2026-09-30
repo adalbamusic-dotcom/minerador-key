@@ -303,7 +303,7 @@ test("E4 · as guardas da linha são as da leitura antiga", () => {
 const semComentarios = (fonte: string) => fonte.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
 
 test("E4 · a rota lê a corrente pela leitura estreita, e só a releitura antiga lê o estado inteiro", async () => {
-  const rotaFonte = semComentarios(await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8"));
+  const rotaFonte = semComentarios((await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8")));
   assert.equal((rotaFonte.match(/radarExportArticleReads\.currentAnalysis\(/g) || []).length, 1);
   assert.equal(/loadRadarState\(|findByArticle\(|\.sort\(\(esquerda, direita\) => direita\.versionNumber/.test(rotaFonte), false, "a rota voltou a ler o estado inteiro");
   assert.equal((rotaFonte.match(/loadRadarCanonicalAuthorities\(\{/g) || []).length, 1);

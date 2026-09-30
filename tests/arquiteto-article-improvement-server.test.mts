@@ -23,6 +23,10 @@ const semantic = { entidade_central: "captação de pacientes", problema_percebi
 let rows: any[], articles: any[], journal: any[], assessments: any[], marker: any;
 let paid = 0, plansMissing = 0, failReadback = false, failPatch = false, incomplete = false, wrongRole = false;
 let external = false, qualification: string[] = [];
+// Leitura da IA: keywords com SERP sem páginas em comum, ordem dos passos e lentes que só chegam depois de pagar.
+let disjoint = new Set<string>(), events: string[] = [], incompleteUntilPaid = false;
+// Keywords que o Google separa da principal: a composição com elas diverge (par "nenhuma" nas 4 lentes).
+let diverge = new Set<string>();
 const discoveredPhrase = "captação de pacientes para clínica de estética";
 const clone = (v: any) => structuredClone(v);
 // Postgres JSONB does not keep key order and drops undefined: the mock behaves the same.
@@ -39,26 +43,30 @@ const runtime: any = { context, authorize: async (module: string, action: string
 mock.module("../lib/server/arquiteto-territory-store.ts", { namedExports: { listTerritoryWorkflowItems: async () => [{territoryRef:territory,territory:{lifecycleStatus:"confirmed",centralEntity:"clínica de estética",macroIntent:"Informativa",slugState:{publishedSlug:"captacao-de-pacientes"}}}] } });
 const workspace = () => ({ workflowItems: [], keywords: clone(rows), articleDnas: clone(articles), siloDnas: [] });
 function setup() {
-  journal=[]; articles=[]; assessments=[]; marker=null; paid=0; plansMissing=0; failReadback=false; failPatch=false; incomplete=false; wrongRole=false; external=false;qualification=[];
+  journal=[]; articles=[]; assessments=[]; marker=null; paid=0; plansMissing=0; failReadback=false; failPatch=false; incomplete=false; wrongRole=false; external=false;qualification=[];disjoint=new Set();events=[];incompleteUntilPaid=false;diverge=new Set();
   rows = [oldId,newId].map((id,i) => ({ id, brand_id: brandId, keyword: i ? "captação de pacientes para clínica de estética" : "como captar clientes para clínica de estética", intent: "Informativa", volume_search: i ? 50 : null, volume_source: i ? "google_ads" : null, analise_semantica: semantic, isPublished: !i, publishedUrl: !i ? url : undefined, primaryKeywordPolicy: !i ? "reviewable" : "free", territoryRef: i ? "territory:other" : territory, keywordDnaRef: { entityId: id, versionId: `${id}:v1`, contentHash: `sha256:${"a".repeat(64)}` }, canonicalWorkflow: { id: `workflow-${id}`, lockVersion: 1, payload: { semanticQualification: { intent: "Informativa", semanticState: "conclusive" }, approvedDna: { analiseSemantica: semantic } } } }));
 }
 mock.module("../lib/arquiteto/canonical-workspace.ts", { namedExports: { buildCanonicalWorkflowWorkspaceItems: (_w: any,k: any) => k } });
 mock.module("../lib/server/arquiteto-workspace.ts", { namedExports: { loadCanonicalArquitetoWorkspace: async () => workspace(), createMineradorArquitetoHandoff: async () => { assert.ok(external);qualification.push("handoff"); } } });
 mock.module("../lib/server/arquiteto-differentiation-store.ts", { namedExports: {
   readDifferentiationBrandKeywords: async () => ({ pages: rows[0].isPublished ? [{ keywordId: oldId, keyword: rows[0].keyword, url, canonical: url, slug: url.split('/').at(-1), post: "reviewable" }] : [], existingByNormalized: new Map(rows.map(r=>[normalizeKeyword(r.keyword),r.id])) }),
-  readPublishedFootprints: async (_c: any, queries: any[]) => ({ missingLenses: [], footprints: queries.map(q => ({ ...q, lenses: SERP_SUBJECT_LENS_LABELS.map(lens => ({ lens, urls: ["https://example.org/1","https://example.org/2","https://example.org/3","https://example.org/4"] })) })) }),
+  readPublishedFootprints: async (_c: any, queries: any[]) => ({ missingLenses: [], footprints: queries.map(q => ({ ...q, lenses: SERP_SUBJECT_LENS_LABELS.map(lens => ({ lens, urls: (disjoint.has(q.keywordId) ? ["https://outro.org/1","https://outro.org/2","https://outro.org/3","https://outro.org/4"] : ["https://example.org/1","https://example.org/2","https://example.org/3","https://example.org/4"]) })) })) }),
 } });
-mock.module("../lib/server/arquiteto-differentiation-runtime.ts", { namedExports: { readGoogleAdsAverageVolumes: async () => { assert.ok(external);return new Map([[normalizeKeyword(discoveredPhrase),50]]); } } });
+mock.module("../lib/server/arquiteto-differentiation-runtime.ts", { namedExports: {
+  readGoogleAdsAverageVolumes: async () => { assert.ok(external);return new Map([[normalizeKeyword(discoveredPhrase),50]]); },
+  // A IA real nunca é chamada nos testes: a do runtime injetado é simulada.
+  proposeArticleImprovementAiPicks: async () => { throw new Error("IA real proibida nos testes"); },
+} });
 mock.module("../lib/server/arquiteto-serp-http.ts", { namedExports: { handleArchitectFormationSerp: async (req: Request) => {
   const body = await req.json();
   // Same limits as the real route: at most 20 groups, each a valid group.
   assert.ok(body.groups.length >= 1 && body.groups.length <= 20, `groups per request: ${body.groups.length}`);
   for (const group of body.groups) ProvisionalArticleGroupSchema.parse(group);
   if (body.mode === "plan") return json({ plan: { paidQueries: plansMissing, estimatedCostUsd: { min: plansMissing * .002, max: plansMissing * .003 }, missingDetails: [] } });
-  if (body.authorizedPaidQueries) paid += body.authorizedPaidQueries;
+  if (body.authorizedPaidQueries) { paid += body.authorizedPaidQueries; incompleteUntilPaid = false; }
   else assert.equal(body.cacheOnly, true, "no implicit provider call");
   for (const group of body.groups) {
-    const record = { candidateRef: group.id, payload: { formationBaseHash: body.formationBaseHashes[group.id], verdict: "INCONCLUSIVE", interpretation: { lenses: { requested: SERP_SUBJECT_LENS_LABELS, observed: incomplete ? SERP_SUBJECT_LENS_LABELS.slice(0,3) : SERP_SUBJECT_LENS_LABELS, missing: incomplete ? ["mobile-ios"] : [] } }, assessment: { id: `assessment:${group.id}`, contentHash: `sha256:${"b".repeat(64)}`, keywordDnaReferences: group.keywordIds.map((keywordId: string) => ({ keywordId })), recommendations: group.keywordIds.map((keywordId: string) => ({ keywordId, currentRole: wrongRole ? "secundaria" : group.roles[keywordId] })) } } };
+    const record = { candidateRef: group.id, payload: { formationBaseHash: body.formationBaseHashes[group.id], verdict: group.keywordIds.some((id: string) => diverge.has(id)) ? "DIVERGENCE" : "INCONCLUSIVE", interpretation: { lenses: { perLens: SERP_SUBJECT_LENS_LABELS.map(lens => ({ lens, pairs: group.keywordIds.filter((id: string) => diverge.has(id)).map((id: string) => ({ left: group.principalSuggestion.keywordId, right: id, level: "nenhuma" })) })), requested: SERP_SUBJECT_LENS_LABELS, observed: incomplete || incompleteUntilPaid ? SERP_SUBJECT_LENS_LABELS.slice(0,3) : SERP_SUBJECT_LENS_LABELS, missing: incomplete || incompleteUntilPaid ? ["mobile-ios"] : [] } }, assessment: { id: `assessment:${group.id}`, contentHash: `sha256:${"b".repeat(64)}`, keywordDnaReferences: group.keywordIds.map((keywordId: string) => ({ keywordId })), recommendations: group.keywordIds.map((keywordId: string) => ({ keywordId, currentRole: wrongRole ? "secundaria" : group.roles[keywordId] })) } } };
     assessments = [...assessments.filter(a => a.candidateRef !== group.id), record];
   }
   return json({});
@@ -99,7 +107,7 @@ mock.module("../lib/server/google-ads-canonical.ts", { namedExports: {
   resolveGoogleAdsCanonicalContext:async()=>{assert.ok(external);return {customerId:"1234567890",managerCustomerId:null,targeting:null};},
   createGoogleAdsCanonicalClient:async()=>({client:{}}),targetingToProviderInput:()=>({}),defaultGoogleAdsCanonicalTargeting:()=>({}),
 } });
-mock.module("../lib/google/ads/keyword-ideas.ts",{namedExports:{generateGoogleAdsKeywordIdeas:async()=>({ideas:[{keyword:discoveredPhrase}],nextPageToken:null})}});
+mock.module("../lib/google/ads/keyword-ideas.ts",{namedExports:{generateGoogleAdsKeywordIdeas:async()=>{events.push("busca");return {ideas:[{keyword:discoveredPhrase}],nextPageToken:null};}}});
 mock.module("../lib/server/arquiteto-published-reinforcement.ts", { namedExports: { stableUuid: (...parts: string[]) => parts.includes("improvement") ? "dddddddd-0000-4000-8000-000000000001" : "eeeeeeee-0000-4000-8000-000000000001" } });
 const {handleArticleImprovement,projectImprovementRun}=await import("../lib/server/arquiteto-article-improvement.ts");
 function assertReloadGate(kind:"published"|"subject") {
@@ -184,13 +192,194 @@ test("coleta interrompida antes desta versão (presa em collecting, sem progress
   setup();plansMissing=3;const run=await prepare();
   journal[0].payload={...journal[0].payload,state:"collecting",reservedCostUsd:.02};
   delete journal[0].payload.collect;
-  const resumed=await handleArticleImprovement(runtime,{brandId,action:"collect",runId:run.runId,decisionHash:run.decisionHash});
+  // Um grupo por chamada: a tela chama de novo enquanto estiver "collecting".
+  let resumed=await handleArticleImprovement(runtime,{brandId,action:"collect",runId:run.runId,decisionHash:run.decisionHash});
+  for(let i=0;i<20&&resumed.state==="collecting";i++) resumed=await handleArticleImprovement(runtime,{brandId,action:"collect",runId:run.runId,decisionHash:run.decisionHash});
   assert.equal(resumed.state,"prepared",JSON.stringify(resumed.notices));
   assert.equal(paid,0,"nada pago na retomada");
   assert.equal((resumed as any).collect,undefined);
 });
 test("coleta nova grava o progresso por grupo e termina em prepared", async()=>{
   setup();plansMissing=1;const run=await prepare();
-  const done=await handleArticleImprovement(runtime,{brandId,action:"collect",runId:run.runId,decisionHash:run.decisionHash,authorizedCostUsd:run.costs.estimatedCostUsd.max});
+  const pedido={brandId,action:"collect" as const,runId:run.runId,decisionHash:run.decisionHash,authorizedCostUsd:run.costs.estimatedCostUsd.max};
+  let done=await handleArticleImprovement(runtime,pedido);let chamadas=1;
+  while(done.state==="collecting"&&chamadas<20){assert.ok((done as any).collect?.doneGroupIds.length>=1,"progresso gravado a cada chamada");done=await handleArticleImprovement(runtime,pedido);chamadas++;}
   assert.equal(done.state,"prepared");assert.ok(paid<=run.costs.paidQueries);
+});
+
+/*
+ * LEITURA EDITORIAL DA IA NA LISTA (decisão do dono, 2026-09-30). A IA é
+ * simulada pelo runtime injetado; nenhuma chamada real. A candidata da lista
+ * não tem par na SERP do publicado (páginas diferentes) nem DNA em comum:
+ * sem a IA, ninguém a sugeriria.
+ */
+const listPhrase = "captação de clientes para clínica";
+function listCandidate() {
+  rows[1] = { ...rows[1], keyword: listPhrase, volume_search: 390, volume_source: "google_ads", analise_semantica: {}, canonicalWorkflow: { ...rows[1].canonicalWorkflow, payload: { semanticQualification: {}, approvedDna: { analiseSemantica: {} } } } };
+  disjoint.add(newId);
+}
+// A IA recebe apelidos curtos (A1 = o publicado, K1 = a keyword da lista), nunca os ids reais.
+const aiPick = { picks: [{ targetId: "A1", keywordId: "K1", role: "principal", reason: "Quem busca captar clientes para a clínica lê este passo a passo." }] };
+function aiRuntime(answer: () => Promise<unknown>) {
+  const prompts: any[] = [];
+  return { prompts, runtime: { ...runtime, editorialAi: async (prompt: any) => { prompts.push(prompt); events.push("ia"); return answer(); } } };
+}
+
+test("IA simulada: publicado sem par da SERP ganha proposta pronta editorial_ai, com o motivo, e grava pelo parecer do cache", async () => {
+  setup(); listCandidate();
+  const semIa = await prepare();
+  assert.notEqual(semIa.proposals[0].status, "ready", "sem a IA, a lista não vira proposta");
+  assert.equal(semIa.editorialAi?.status, "off"); assert.equal(semIa.notices.filter(n => /Leitura da IA desligada/.test(n)).length, 1);
+  setup(); listCandidate();
+  const { prompts, runtime: comIa } = aiRuntime(async () => aiPick);
+  const run = await handleArticleImprovement(comIa, { brandId, action: "prepare" });
+  const proposal = run.proposals[0];
+  assert.equal(proposal.status, "ready", JSON.stringify(proposal));
+  assert.equal(proposal.evidenceBasis, "editorial_ai");
+  assert.deepEqual(proposal.addIds, [newId]);
+  assert.equal(proposal.principalId, oldId, "sem o núcleo do slug, a sugestão de principal entra como secundária");
+  assert.match(proposal.reasons.join(" "), /entra como secundária/);
+  assert.deepEqual(proposal.aiReasons, [{ keywordId: newId, reason: aiPick.picks[0].reason }]);
+  assert.equal(run.editorialAi?.status, "answered"); assert.equal(prompts.length, 1);
+  const pedido = JSON.parse(prompts[0].user);
+  assert.deepEqual(pedido.alvos.map((a: any) => [a.targetId, a.tema]), [["A1", rows[0].keyword]]); assert.deepEqual(pedido.lista.map((k: any) => [k.keywordId, k.keyword, k.volume]), [["K1", listPhrase, 390]]);
+  assert.ok(!prompts[0].user.includes(newId) && !prompts[0].user.includes(oldId), "ids reais não vão para a IA");
+  assert.ok(prompts[0].timeoutMs <= 45000, "limite de tempo seguro dentro dos 120 s da rota");
+  assert.deepEqual(events, ["ia"], "com proposta pronta pela lista, não há busca nova no Google Ads");
+  assert.equal(paid, 0); assert.equal(articles.length, 0, "nada gravado sem o clique do dono");
+  assert.equal(projectImprovementRun(run).keywords.some(k => k.id === newId), true);
+  const result = await handleArticleImprovement(comIa, { brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash });
+  assert.equal(result.outcomes[0].status, "improved", JSON.stringify(result.outcomes));
+  assert.deepEqual(articles[0].payload.secondaryKeywordIds, [newId]);
+  assert.equal(articles[0].payload.principalKeywordId, oldId); assert.equal(prompts.length, 1, "aplicar não chama a IA"); assert.equal(paid, 0);
+});
+
+test("IA com id inventado ou keyword barrada não vira proposta; só o que passa nas barreiras entra", async () => {
+  setup(); listCandidate();
+  const { runtime: comIa } = aiRuntime(async () => ({ picks: [{ targetId: "A1", keywordId: "K7", role: "principal", reason: "Apelido que não existe na lista." }, { targetId: "A1", keywordId: newId, role: "principal", reason: "Id real que a IA nunca recebeu." }] }));
+  const run = await handleArticleImprovement(comIa, { brandId, action: "prepare" });
+  assert.notEqual(run.proposals[0].evidenceBasis, "editorial_ai");
+  assert.equal(run.editorialAi?.rejectedCount, 2); assert.ok(run.editorialAi!.rejected.every(r => /id inventado/.test(r.reason)));
+  assert.ok(run.notices.some(n => /recusada\(s\) pelas regras do código/.test(n)));
+});
+
+test("falha da IA não derruba: aviso único e a ordem segue lista → busca nova no Google Ads", async () => {
+  setup(); listCandidate(); external = true;
+  const { runtime: comIa } = aiRuntime(async () => { throw new Error("A IA excedeu o tempo limite."); });
+  const run = await handleArticleImprovement(comIa, { brandId, action: "prepare" });
+  assert.equal(run.editorialAi?.status, "failed");
+  assert.equal(run.notices.filter(n => /Leitura da IA indisponível agora/.test(n)).length, 1);
+  assert.deepEqual(events.slice(0, 2), ["ia", "busca"], "a IA na lista vem antes da busca nova");
+  assert.ok(!run.proposals.some(p => p.evidenceBasis === "editorial_ai"));
+  assert.equal(paid, 0);
+});
+
+test("IA que não responde no limite de tempo: a preparação segue sem ela", async () => {
+  setup(); listCandidate();
+  const { runtime: comIa } = aiRuntime(() => new Promise(() => {}));
+  const run = await handleArticleImprovement({ ...comIa, editorialAiTimeoutMs: 20 } as any, { brandId, action: "prepare" });
+  assert.equal(run.editorialAi?.status, "failed"); assert.match(run.editorialAi!.message!, /tempo limite/);
+  assert.ok(run.proposals.every(p => p.evidenceBasis !== "editorial_ai"));
+});
+
+test("faltando lente, a linha da IA fica 'precisa validar' (passo 2 pago) e o collect reaproveita a resposta guardada", async () => {
+  setup(); listCandidate(); plansMissing = 1; incompleteUntilPaid = true;
+  const { prompts, runtime: comIa } = aiRuntime(async () => aiPick);
+  const run = await handleArticleImprovement(comIa, { brandId, action: "prepare" });
+  const proposal = run.proposals[0];
+  assert.equal(proposal.status, "insufficient_evidence"); assert.equal(proposal.needsValidation, true, JSON.stringify(proposal));
+  assert.match(proposal.reasons.join(" "), /Precisa validar no Google/);
+  assert.ok(run.costs.paidQueries > 0, "o passo 2 pago aparece com prévia de custo");
+  await assert.rejects(() => handleArticleImprovement(comIa, { brandId, action: "apply", runId: run.runId, decisionHash: run.decisionHash, targetIds: [oldId] }), /prontas/);
+  const pedido = { brandId, action: "collect" as const, runId: run.runId, decisionHash: run.decisionHash, authorizedCostUsd: run.costs.estimatedCostUsd.max };
+  let done = await handleArticleImprovement(comIa, pedido);
+  for (let i = 0; i < 20 && done.state === "collecting"; i++) done = await handleArticleImprovement(comIa, pedido);
+  assert.equal(done.state, "prepared");
+  assert.equal(paid > 0, true, "a composição escolhida pela IA foi validada no passo 2");
+  assert.equal(done.proposals[0].status, "ready", JSON.stringify(done.proposals[0]));
+  assert.equal(done.proposals[0].evidenceBasis, "editorial_ai");
+  assert.equal(prompts.length, 1, "a IA não é chamada de novo no collect");
+});
+
+test("prazo da etapa: composição que não começou a tempo fica 'precisa validar', sem ler parecer nem pagar", async () => {
+  setup(); listCandidate();
+  const { runtime: comIa } = aiRuntime(async () => aiPick);
+  const run = await handleArticleImprovement({ ...comIa, compositionDeadlineMs: -1 } as any, { brandId, action: "prepare" });
+  const proposal = run.proposals[0];
+  assert.equal(proposal.evidenceBasis, "editorial_ai");
+  assert.equal(proposal.status, "insufficient_evidence"); assert.equal(proposal.needsValidation, true);
+  assert.match(proposal.reasons.join(" "), /Faltou tempo nesta etapa/);
+  assert.equal(assessments.length, 0, "nenhum parecer começou depois do prazo"); assert.equal(paid, 0); assert.equal(articles.length, 0);
+});
+
+test("falha da IA vai para a execução como texto fixo, nunca a mensagem crua do provider", async () => {
+  setup(); listCandidate();
+  const { runtime: comIa } = aiRuntime(async () => { throw Object.assign(new Error("upstream 401: chave sk-segredo-123 recusada em https://api.exemplo"), { code: "AI_PROVIDER_UNAVAILABLE" }); });
+  const run = await handleArticleImprovement(comIa, { brandId, action: "prepare" });
+  assert.equal(run.editorialAi?.status, "failed"); assert.equal(run.editorialAi?.message, "A IA está indisponível.");
+  assert.ok(!JSON.stringify(run).includes("sk-segredo"), "nada do erro cru na execução");
+  const formato = aiRuntime(async () => { throw Object.assign(new Error("Campo picks.0.role: Invalid enum"), { code: "AI_OUTPUT_INVALID" }); });
+  setup(); listCandidate();
+  assert.equal((await handleArticleImprovement(formato.runtime, { brandId, action: "prepare" })).editorialAi?.message, "A resposta da IA veio fora do formato.");
+});
+
+test("uma escolha malformada da IA não derruba a boa, e a recusa guarda o texto para a tela", async () => {
+  setup(); listCandidate();
+  const { runtime: comIa } = aiRuntime(async () => ({ picks: [{ ...aiPick.picks[0], role: "Secundária" }, { targetId: "A1", keywordId: "K1", role: "reforço", reason: "Papel inválido." }] }));
+  const run = await handleArticleImprovement(comIa, { brandId, action: "prepare" });
+  assert.equal(run.proposals[0].status, "ready", JSON.stringify(run.proposals[0])); assert.equal(run.proposals[0].evidenceBasis, "editorial_ai");
+  assert.equal(run.editorialAi?.rejectedCount, 1); assert.match(run.editorialAi!.rejected[0].reason, /fora do formato/);
+});
+test("publicado que também é Assunto declarado grava: a página fora da lista de keywords não conta como 'keyword mudou' (caso real)", async()=>{
+  setup();
+  // A página publicada é também um Assunto declarado: readInputs a tira da lista de keywords, na prévia e no aplicar.
+  const pagina=linhaDaMesa({id:oldId,keyword:"como captar clientes para clínica de estética",brandId,semantic:{...semantic,...declarado()}});
+  rows[0]={...rows[0],analise_semantica:(pagina as any).analise_semantica ?? rows[0].analise_semantica,canonicalWorkflow:{...(rows[0].canonicalWorkflow as object),payload:{...((rows[0].canonicalWorkflow as any)?.payload??{}),...((pagina as any).canonicalWorkflow?.payload??{})}}};
+  const run=await prepare();
+  const alvo=run.proposals.find((p:any)=>p.targetId===oldId);
+  assert.equal(alvo?.status,"ready",JSON.stringify(alvo));
+  assert.ok(!run.keywords.some((k:any)=>k.id===oldId),"a página declarada fica fora da lista, como em produção");
+  const result=await apply(run);
+  assert.notEqual(result.outcomes[0].status,"failed",JSON.stringify(result.outcomes));
+});
+
+test("o Google separou parte da composição: sai quem não divide páginas com a principal e a menor é conferida de novo, sem custo (caso real 'campanhas de marketing', 2026-09-30)", async()=>{
+  setup();
+  const k3 = "aaaaaaaa-0000-4000-8000-000000000003";
+  rows.push({ ...clone(rows[1]), id: k3, keyword: "captação de pacientes em clínica de estética", volume_search: 40, territoryRef: "territory:other", keywordDnaRef: { entityId: k3, versionId: `${k3}:v1`, contentHash: `sha256:${"d".repeat(64)}` }, canonicalWorkflow: { ...clone(rows[1].canonicalWorkflow), id: `workflow-${k3}` } });
+  diverge = new Set([k3]);
+  const run = await prepare();
+  const p = run.proposals[0];
+  assert.equal(p.status, "ready", JSON.stringify(p.reasons));
+  assert.equal(p.principalId, newId);
+  assert.ok(!p.memberIds.includes(k3) && !p.addIds.includes(k3), "a que o Google separou fica de fora");
+  assert.match(p.reasons.join(" "), /O Google separou “captação de pacientes em clínica de estética” da principal/);
+  assert.equal(paid, 0, "a composição menor sai do cache");
+});
+
+test("composição menor com a página sem volume como principal: a âncora é a entrada de maior volume (caso real 'como captar clientes', 2026-09-30)", async()=>{
+  setup();
+  rows[0].primaryKeywordPolicy = "locked";
+  const k3 = "aaaaaaaa-0000-4000-8000-000000000003";
+  rows.push({ ...clone(rows[1]), id: k3, keyword: "captação de pacientes em clínica de estética", volume_search: 40, territoryRef: "territory:other", keywordDnaRef: { entityId: k3, versionId: `${k3}:v1`, contentHash: `sha256:${"d".repeat(64)}` }, canonicalWorkflow: { ...clone(rows[1].canonicalWorkflow), id: `workflow-${k3}` } });
+  diverge = new Set([k3]);
+  const run = await prepare();
+  const p = run.proposals[0];
+  assert.equal(p.principalId, oldId, "Travado: a página continua a principal");
+  assert.equal(p.status, "ready", JSON.stringify(p.reasons));
+  assert.deepEqual(p.addIds, [newId]);
+  assert.match(p.reasons.join(" "), /O Google separou/);
+  assert.equal(paid, 0);
+});
+
+test("o Google separa todas as entradas da página: a linha diz 'outro assunto' e aponta as Sobras (caso real 'como captar clientes', 2026-09-30)", async()=>{
+  setup();
+  rows[0].primaryKeywordPolicy = "locked"; rows[0].volume_search = 10; rows[0].volume_source = "google_ads";
+  diverge = new Set([newId]);
+  const run = await prepare();
+  const p = run.proposals[0];
+  assert.notEqual(p.status, "ready");
+  assert.match(p.reasons.join(" "), /O Google trata “captação de pacientes para clínica de estética” como outro assunto/, JSON.stringify(p.reasons));
+  assert.match(p.reasons.join(" "), /Sobras/);
+  assert.equal(paid, 0);
 });

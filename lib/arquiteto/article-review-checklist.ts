@@ -175,9 +175,11 @@ export function buildArticleReviewChecklist(input: ArticleReviewChecklistInput):
       title: `Divergência SERP ${index + 1} · ${divergence.keyword}`,
       resolved: false,
       state: `${divergence.currentRole} · sobreposição ${divergence.overlapLabel}`,
-      what: divergence.recommendation,
-      why: divergence.reason,
-      how: "Decidir na aba SERP: manter no artigo, separar ou promover a Principal quando aplicável.",
+      what: divergence.plain ? `${divergence.plain.what} Recomendação: ${divergence.recommendation}` : divergence.recommendation,
+      why: divergence.plain ? `${divergence.plain.why} Motivo técnico: ${divergence.reason}` : divergence.reason,
+      how: divergence.plain
+        ? `Escolher “Manter no artigo” ou “Aplicar recomendação” no aviso da divergência. ${divergence.plain.tip}`
+        : "Decidir na aba SERP: manter no artigo, separar ou promover a Principal quando aplicável.",
     });
   });
 

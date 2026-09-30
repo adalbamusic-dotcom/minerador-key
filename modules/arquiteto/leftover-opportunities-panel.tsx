@@ -72,9 +72,15 @@ function OpportunityGroup({ group, busy, onCreate, primaryButtonClassName }: {
   onCreate: (group: LeftoverOpportunityGroupView, selected: ReadonlySet<string>) => void;
   primaryButtonClassName: string;
 }) {
-  const [marcadas, setMarcadas] = useState<ReadonlySet<string>>(() => new Set(group.members.map(member => member.keywordId)));
+  /*
+   * Guarda só o que a pessoa DESMARCOU. Guardar as marcadas congelava o grupo
+   * do primeiro render: keyword que entrava no grupo depois (a SERP do cache
+   * chega depois) aparecia desmarcada sem ninguém ter tocado nela.
+   */
+  const [desmarcadas, setDesmarcadas] = useState<ReadonlySet<string>>(() => new Set());
+  const marcadas: ReadonlySet<string> = new Set(group.members.map(member => member.keywordId).filter(id => !desmarcadas.has(id)));
   const grupoId = useId();
-  const alternar = (keywordId: string) => setMarcadas(atual => {
+  const alternar = (keywordId: string) => setDesmarcadas(atual => {
     const proximo = new Set(atual);
     if (proximo.has(keywordId)) proximo.delete(keywordId); else proximo.add(keywordId);
     return proximo;
@@ -110,11 +116,16 @@ function OpportunityGroup({ group, busy, onCreate, primaryButtonClassName }: {
   );
 }
 
-export function LeftoverOpportunitiesPanel({ view, busy, onCreateArticle, buttonClassName, primaryButtonClassName }: {
+export function LeftoverOpportunitiesPanel({ view, busy, onCreateArticle, onDismiss, buttonClassName, primaryButtonClassName }: {
   view: LeftoverOpportunitiesView;
   busy: boolean;
   /** Só depois da confirmação: grava pela formação e relê. */
   onCreateArticle: (input: { siloRef: string; keywordIds: string[]; principalKeywordId: string; name: string }) => Promise<void> | void;
+  /**
+   * "Descartar sobras" (pedido do dono, 2026-09-30): tira as oportunidades da
+   * tela. Não apaga nem move keyword: elas seguem em Keywords não agrupadas.
+   */
+  onDismiss?: () => void;
 } & ButtonClasses) {
   const [todos, setTodos] = useState(false);
   const [confirmando, setConfirmando] = useState<{ group: LeftoverOpportunityGroupView; selected: ReadonlySet<string> } | null>(null);
@@ -123,7 +134,15 @@ export function LeftoverOpportunitiesPanel({ view, busy, onCreateArticle, button
   if (!view.groups.length && !view.withoutVolume.length) return null;
   return (
     <section className="border-b border-divider bg-surface-subtle px-4 py-4" data-testid="architect-leftover-opportunities" aria-labelledby={tituloId}>
-      <h2 id={tituloId} className="text-sm font-bold uppercase tracking-widest text-context-accent">Sobras · oportunidades de artigo novo</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id={tituloId} className="text-sm font-bold uppercase tracking-widest text-context-accent">Sobras · oportunidades de artigo novo</h2>
+        {onDismiss && (
+          <button type="button" disabled={busy} onClick={onDismiss} className={buttonClassName} data-testid="architect-leftover-dismiss"
+            title="Tira as sobras da tela. Nenhuma keyword é apagada: elas continuam em Keywords não agrupadas.">
+            Descartar sobras
+          </button>
+        )}
+      </div>
       <p className="mt-1 text-sm leading-6 text-foreground">{view.headline}</p>
       <p className="mt-0.5 text-sm leading-6 text-text-muted">Agrupadas por tema, pelo volume somado. Nenhum artigo nasce sozinho: você escolhe o grupo e confirma.</p>
       {visiveis.length > 0 && (

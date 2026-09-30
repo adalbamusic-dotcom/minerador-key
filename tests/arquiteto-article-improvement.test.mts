@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { allocateReinforcementChoices } from "../lib/arquiteto/reinforcement-allocation.ts";
-import { planArticleImprovements, improvementEditorialFit, type ImprovementTarget, type ImprovementKeyword, type ImprovementEvidence } from "../lib/arquiteto/article-improvement.ts";
+import { planArticleImprovements, carriesSlugCore, slugCoreWords, improvementEditorialFit, type ImprovementTarget, type ImprovementKeyword, type ImprovementEvidence } from "../lib/arquiteto/article-improvement.ts";
 import { resolveKeywordDnaSignals } from "../lib/arquiteto/keyword-dna-signals.ts";
 
 const dna = (id: string, text = "captação de pacientes") => resolveKeywordDnaSignals({ keywordId: id, text, semantic: { entidade_central: "captação de pacientes", problema_percebido: "poucos agendamentos", publico: "gestores de clínicas", resultado_desejado: "ampliar agendamentos", intencao_principal: "Informativa" } });
@@ -73,10 +73,21 @@ test("restrição sem anúncios não aceita anúncios pagos, mesmo com páginas 
 });
 test("caso real captar clientes × atrair pacientes: sinônimos não resolvem a canibalização", () => {
   const a = page("a", { theme: "como captar clientes para clínica de estética" }), b = page("b", { theme: "como atrair pacientes para clínica de estética" });
-  const keywords = [term("a", { published: true, volume: 0, volumeValidated: false }), term("b", { published: true, volume: 0, volumeValidated: false }), term("ka"), term("kb")];
+  // As principais novas são o mesmo assunto com sinônimo trocado (captar/atrair, pacientes/clientes).
+  const keywords = [term("a", { published: true, volume: 0, volumeValidated: false }), term("b", { published: true, volume: 0, volumeValidated: false }), term("ka", { keyword: "captar pacientes clínica de estética" }), term("kb", { keyword: "atrair clientes clínica de estética" })];
   const result = planArticleImprovements({ targets: [a, b], keywords, evidence: [proof("a", "ka"), proof("b", "kb")] });
   assert.ok(result.every(p => p.status === "insufficient_evidence"));
   assert.ok(result.every(p => p.reasons.some(reason => reason.includes("canibalização"))));
+});
+test("caso real 2026-09-30: captar × atrair ficam distintos quando cada um recebe keywords próprias da lista", () => {
+  const a = page("a", { theme: "como captar clientes para clínica de estética" }), b = page("b", { theme: "como atrair pacientes para clínica de estética" });
+  const keywords = [term("a", { published: true, volume: 0, volumeValidated: false }), term("b", { published: true, volume: 0, volumeValidated: false }), term("ka", { keyword: "como captar clientes", volume: 390 }), term("kb", { keyword: "como atrair clientes pelo instagram", volume: 90 })];
+  const result = planArticleImprovements({ targets: [a, b], keywords, evidence: [proof("a", "ka"), proof("b", "kb")] });
+  assert.ok(result.every(p => p.status === "ready"), JSON.stringify(result.map(p => [p.status, p.reasons])));
+  assert.equal(result[0].principalId, "ka"); assert.equal(result[1].principalId, "kb");
+  assert.deepEqual(result[0].exclusions, ["como atrair clientes pelo instagram"]);
+  assert.deepEqual(result[1].exclusions, ["como captar clientes"]);
+  assert.match(result[0].reasons.join(" "), /keywords próprias da lista/);
 });
 test("ângulos distintos são registrados com exclusões recíprocas", () => {
   const a = page("a", { theme: "como captar clientes para clínica de estética" }), b = page("b", { theme: "como atrair pacientes para clínica de estética" });
@@ -92,4 +103,30 @@ test("sem páginas em comum, a principal nova precisa caber no slug: 'agência d
   const result = planArticleImprovements({ targets: [target], keywords, evidence: [proof("cosm", "generica", { sharedPages: 0, anchorConclusive: false })] })[0];
   assert.notEqual(result.principalId, "generica");
   assert.deepEqual(result.addIds, []);
+});
+test("decisão 2026-09-30: publicado Livre sem volume ganha principal mais ampla que leva o núcleo do slug; cabeça genérica enorme continua fora", () => {
+  const slug = "checklist-de-plano-de-marketing-para-clinica-de-estetica";
+  assert.deepEqual(slugCoreWords(slug), ["plano", "marketing"]);
+  assert.equal(carriesSlugCore(slug, { keyword: "exemplo de plano de marketing", volume: 1300 }), true);
+  assert.equal(carriesSlugCore(slug, { keyword: "plano de marketing para clínica", volume: 90 }), true);
+  assert.equal(carriesSlugCore(slug, { keyword: "plano de marketing", volume: 9900 }), false, "cabeça de 2 palavras acima de 5.000");
+  assert.equal(carriesSlugCore(slug, { keyword: "marketing para clínica de estética", volume: 90 }), false, "sem o núcleo 'plano'");
+  assert.equal(carriesSlugCore("agencia-de-marketing-para-cosmeticos", { keyword: "agência de marketing", volume: 18100 }), false);
+  assert.deepEqual(slugCoreWords("como-atrair-pacientes-para-clinica-de-estetica"), ["atrair", "paciente"]);
+
+  const semDna = (id: string, text: string) => resolveKeywordDnaSignals({ keywordId: id, text, semantic: {} });
+  const alvo = page("chk", { theme: "checklist de plano de marketing para clínica de estética", slug, signals: semDna("chk", "checklist de plano de marketing para clínica de estética") });
+  const keywords = [
+    term("chk", { keyword: "checklist de plano de marketing para clínica de estética", published: true, volume: null, volumeValidated: false, signals: semDna("chk", "checklist") }),
+    term("amplo", { keyword: "exemplo de plano de marketing", volume: 1300, signals: semDna("amplo", "exemplo de plano de marketing") }),
+    term("cabeca", { keyword: "plano de marketing", volume: 9900, signals: semDna("cabeca", "plano de marketing") }),
+  ];
+  const evidence = [proof("chk", "amplo", { sharedPages: 0, anchorConclusive: false }), proof("chk", "cabeca", { sharedPages: 0, anchorConclusive: false })];
+  const livre = planArticleImprovements({ targets: [alvo], keywords, evidence })[0];
+  assert.equal(livre.status, "ready", JSON.stringify(livre));
+  assert.equal(livre.principalId, "amplo");
+  assert.ok(!livre.memberIds.includes("cabeca"));
+  assert.match(livre.reasons.join(" "), /Principal mais ampla, com volume/);
+  const travado = planArticleImprovements({ targets: [{ ...alvo, post: "locked" }], keywords, evidence })[0];
+  assert.equal(travado.principalId, "chk", "Travado não troca");
 });

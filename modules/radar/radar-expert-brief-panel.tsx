@@ -199,6 +199,7 @@ function parseContribution(value: unknown): RadarExpertContributionRecord | null
     externalUpdateId: recordValue(asObject(record.evidence)?.externalUpdateId),
     originalAssetUri: optionalRecordValue(asObject(record.evidence)?.originalAssetUri),
     checksum: optionalRecordValue(asObject(record.evidence)?.checksum),
+    provider: record.provider === "platform" ? "platform" : "telegram",
   };
 }
 
@@ -326,6 +327,105 @@ const VAZIO_CONSULTAS: RadarConsultationView[] = [];
 
 /** A decisão humana que transforma contribuição em evidência. */
 const REVISAO_PENDENTE: ExpertReview = { decision: "NOT_APPROVED", classification: null, relatedRequirementId: null, decidedAt: "", decidedBy: null };
+
+/** O canal por onde o parecer chegou, como a tela o diz. */
+function canalDaContribuicao(contribution: { provider?: "telegram" | "platform" }): string {
+  return contribution.provider === "platform" ? "Plataforma" : "Telegram";
+}
+
+const TIPOS_DO_PARECER = [
+  { value: "RESPOSTA", label: "Resposta a um ponto de revisão" },
+  { value: "FECHAMENTO", label: "Fechamento do artigo" },
+  { value: "CTA", label: "Argumentação do CTA" },
+  { value: "DIRETRIZ", label: "Diretriz de conteúdo" },
+] as const;
+const PARECER_MAX = 20000;
+
+/**
+ * ===== O PARECER DIRETO DO ESPECIALISTA — SDD Radar 2026-09-30, Parte B =====
+ *
+ * O especialista com acesso à plataforma escreve aqui, sem Telegram: a
+ * resposta a um ponto de revisão, o fechamento, o argumento do CTA ou uma
+ * diretriz. O parecer entra em "Respostas recebidas" como contribuição a
+ * revisar e só vai ao pacote (Redator e CSV) depois da decisão na revisão —
+ * o mesmo caminho das respostas do Telegram.
+ */
+function RadarSpecialistDirectEntry({ brandId, articleId, articleDnaVersionId, experts, requirements, defaultExpertId, onSent }: {
+  brandId: string; articleId: string; articleDnaVersionId: string;
+  experts: readonly RadarExpertRecord[];
+  requirements: readonly RadarFrozenSpecialistRequirement[];
+  defaultExpertId: string;
+  onSent: () => void;
+}) {
+  const [expertId, setExpertId] = useState(defaultExpertId);
+  const [tipo, setTipo] = useState<(typeof TIPOS_DO_PARECER)[number]["value"]>(requirements.length ? "RESPOSTA" : "FECHAMENTO");
+  const [pontoId, setPontoId] = useState(requirements[0]?.requirementId || "");
+  const [texto, setTexto] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [desfecho, setDesfecho] = useState<{ ok: boolean; message: string } | null>(null);
+  const emVoo = useRef(false);
+  const especialista = expertId || defaultExpertId;
+  const ponto = requirements.find(item => item.requirementId === pontoId) || null;
+  const faltaPonto = tipo === "RESPOSTA" && !ponto;
+  const podeEnviar = Boolean(especialista && texto.trim() && !faltaPonto && !enviando);
+
+  const enviar = async () => {
+    if (!podeEnviar || emVoo.current) return;
+    emVoo.current = true;
+    setEnviando(true);
+    setDesfecho(null);
+    try {
+      const resposta = await fetch("/api/editorial/expert-contributions/platform", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brandId, articleId, articleDnaVersionId, expertId: especialista, kind: tipo, text: texto,
+          requirement: tipo === "RESPOSTA" && ponto ? { id: ponto.requirementId, question: ponto.specificQuestion || null, kind: ponto.kind || null } : null,
+        }),
+      });
+      const corpo = await resposta.json().catch(() => ({})) as { error?: string };
+      if (!resposta.ok) { setDesfecho({ ok: false, message: corpo.error || "Não foi possível enviar o parecer." }); return; }
+      setTexto("");
+      setDesfecho({ ok: true, message: "Parecer enviado. Ele aparece em Respostas recebidas para revisão; só entra no artigo depois de aceito." });
+      onSent();
+    } catch {
+      setDesfecho({ ok: false, message: "Sem resposta do servidor. Confira em Respostas recebidas antes de enviar de novo." });
+    } finally {
+      emVoo.current = false;
+      setEnviando(false);
+    }
+  };
+
+  return <section className={surface} data-testid="radar-specialist-direct-entry" aria-label="Escrever o parecer do especialista">
+    <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">Escrever o parecer aqui</h4>
+    <p className="mt-1 text-sm leading-6 text-text-muted">Para o especialista com acesso à plataforma: escreva direto, sem Telegram. O parecer passa pela mesma revisão das respostas recebidas.</p>
+    <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <label className="block text-sm text-foreground">Especialista
+        <select value={especialista} onChange={event => setExpertId(event.target.value)} disabled={enviando} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground" data-testid="radar-specialist-direct-expert">
+          {experts.map(expert => <option value={expert.id} key={expert.id}>{expert.displayName}{expert.specialty ? ` · ${expert.specialty}` : ""}</option>)}
+        </select>
+      </label>
+      <label className="block text-sm text-foreground">Tipo do parecer
+        <select value={tipo} onChange={event => setTipo(event.target.value as typeof tipo)} disabled={enviando} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground" data-testid="radar-specialist-direct-kind">
+          {TIPOS_DO_PARECER.map(item => <option value={item.value} key={item.value} disabled={item.value === "RESPOSTA" && !requirements.length}>{item.label}</option>)}
+        </select>
+      </label>
+    </div>
+    {tipo === "RESPOSTA" && <label className="mt-3 block text-sm text-foreground">Ponto de revisão respondido
+      <select value={pontoId} onChange={event => setPontoId(event.target.value)} disabled={enviando} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground" data-testid="radar-specialist-direct-point">
+        {requirements.map(item => <option value={item.requirementId} key={item.requirementId}>{item.specificQuestion}</option>)}
+      </select>
+    </label>}
+    <label className="mt-3 block text-sm text-foreground">Parecer
+      <textarea value={texto} onChange={event => setTexto(event.target.value.slice(0, PARECER_MAX))} rows={6} disabled={enviando} placeholder="Ex.: o que pode ser afirmado com segurança, como fechar o artigo, o argumento para o CTA…" className="mt-1 min-h-32 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm leading-6 text-foreground disabled:cursor-not-allowed disabled:opacity-70" data-testid="radar-specialist-direct-text" />
+    </label>
+    <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+      <span className="text-sm text-text-muted">{texto.length.toLocaleString("pt-BR")} de {PARECER_MAX.toLocaleString("pt-BR")} caracteres</span>
+      <button type="button" className={primaryAction} disabled={!podeEnviar} onClick={() => void enviar()} data-testid="radar-specialist-direct-send">{enviando ? "Enviando…" : "Enviar parecer"}</button>
+    </div>
+    {desfecho && <p className={`mt-2 text-sm ${desfecho.ok ? "text-success" : "text-warning"}`} role="status" data-testid="radar-specialist-direct-outcome">{desfecho.message}</p>}
+  </section>;
+}
 
 export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId, articleTitle, articleVersion, articleRole, context, suggestedQuestions = [], requirements = [], onExpertEvidenceChange }: RadarExpertBriefPanelProps) {
   /**
@@ -1171,7 +1271,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
     return <article className="rounded-md border border-divider bg-surface p-3" key={contribution.id} data-testid="radar-specialist-review-contribution">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h5 className="text-sm font-semibold text-foreground">{expertName(contribution.expertId)} · Telegram</h5>
+          <h5 className="text-sm font-semibold text-foreground">{expertName(contribution.expertId)} · {canalDaContribuicao(contribution)}</h5>
           <p className="mt-1 text-sm text-text-muted">{formatDate(contribution.receivedAt)}{contributionDuration(contribution) ? ` · ${contributionDuration(contribution)}` : ""} · {processingStatusLabel(contribution.processingStatus)}</p>
         </div>
         <span className="shrink-0 rounded-full border border-divider px-2 py-1 text-sm text-text-muted" data-testid="radar-specialist-decision-state">{RADAR_SPECIALIST_DECISION_LABELS[review.decision]}</span>
@@ -1361,6 +1461,12 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           </details>
         </section>}
 
+        {!loading && experts.length > 0 && <RadarSpecialistDirectEntry
+          brandId={brandId} articleId={articleId} articleDnaVersionId={articleDnaVersionId}
+          experts={experts} requirements={requirements} defaultExpertId={selectedExpertId || contributions[0]?.expertId || experts[0]?.id || ""}
+          onSent={() => leituraDaArea.refresh()}
+        />}
+
         <section className={surface} aria-label="Entradas recebidas do especialista">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="text-sm font-semibold uppercase tracking-wide text-foreground">RESPOSTAS RECEBIDAS</h4>
@@ -1375,7 +1481,7 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground">{expertName(contribution.expertId)} · {sourceTypeLabel(contribution.sourceType)}</p>
-                  <p className="mt-1 text-sm text-text-muted">Telegram · {formatDate(contribution.receivedAt)}{contributionDuration(contribution) ? ` · ${contributionDuration(contribution)}` : ""}</p>
+                  <p className="mt-1 text-sm text-text-muted">{canalDaContribuicao(contribution)} · {formatDate(contribution.receivedAt)}{contributionDuration(contribution) ? ` · ${contributionDuration(contribution)}` : ""}</p>
                 </div>
                 <span className="shrink-0 rounded-full border border-divider px-2 py-1 text-sm text-text-muted">{processingStatusLabel(contribution.processingStatus)}</span>
               </div>

@@ -3,6 +3,7 @@ import "server-only";
 import { createGoogleAdsKeywordAccount } from "@/lib/google/ads/account";
 import { generateGoogleAdsHistoricalMetrics } from "@/lib/google/ads/historical-metrics";
 import { DifferentiationAiResponseSchema } from "@/lib/arquiteto/published-differentiation";
+import { IMPROVEMENT_AI_MAX_TOKENS, ImprovementAiResponseSchema } from "@/lib/arquiteto/article-improvement-ai";
 import { GOOGLE_ADS_VOLUME_BATCH_SIZE } from "@/lib/minerador/google-ads-volume";
 import { normalizeKeyword } from "@/lib/minerador/keyword-import-core";
 import { createGoogleAdsCanonicalClient, defaultGoogleAdsCanonicalTargeting, resolveGoogleAdsCanonicalContext, targetingToProviderInput } from "@/lib/server/google-ads-canonical";
@@ -61,4 +62,16 @@ export async function readGoogleAdsAverageVolumes(input: {
 export async function proposeDifferentiationAiAngles(input: { actorUserId: string; brandId: string; agencyId?: string | null; client?: Parameters<typeof resolveDeepSeekCanonicalConfig>[0]["client"]; system: string; user: string }): Promise<unknown> {
   const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, agencyId: input.agencyId ?? null, brandId: input.brandId, client: input.client });
   return generateStructuredAI({ provider, system: input.system, user: input.user, schema: DifferentiationAiResponseSchema, maxTokens: 1500 });
+}
+
+/**
+ * Melhorar publicados e formar Assuntos — a leitura editorial da lista (decisão
+ * do dono, 2026-09-30). Mesma Connection e mesma camada; uma chamada em lote,
+ * com limite de tempo e sem Thinking, para caber na preparação (rota de 120 s).
+ * A resposta volta crua: quem confere ids e barreiras é o domínio.
+ */
+export async function proposeArticleImprovementAiPicks(input: { actorUserId: string; brandId: string; agencyId?: string | null; client?: Parameters<typeof resolveDeepSeekCanonicalConfig>[0]["client"]; system: string; user: string; timeoutMs: number }): Promise<unknown> {
+  const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, agencyId: input.agencyId ?? null, brandId: input.brandId, client: input.client });
+  // O schema aqui é só o envelope `{ picks: [...] }`: cada escolha é conferida no domínio, uma a uma.
+  return generateStructuredAI({ provider, system: input.system, user: input.user, schema: ImprovementAiResponseSchema, maxTokens: IMPROVEMENT_AI_MAX_TOKENS, timeoutMs: input.timeoutMs, thinkingMode: "disabled" });
 }

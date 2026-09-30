@@ -740,7 +740,7 @@ test("§14 · casamento sem trecho nenhum não se apresenta como casado", () => 
 });
 
 test("§9 e §10 · a projeção lê o bundle, e o contrato não ganhou versão nova", async () => {
-  const rota = await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8");
+  const rota = (await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8"));
   const semComentarios = rota.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
   /*

@@ -32,8 +32,9 @@ test("concluir não reexecuta o formador nem os motores", () => {
   // Olhar o lote inteiro fazia a portaria reclamar de artigo que a pessoa não
   // tinha escolhido — a mesma pergunta com dois escopos.
   assert.match(corpo, /buildArticleFormationConfirmationPlan\(\{ universes: universosSelecionados \}\)/);
-  // E nada de reagrupar, medir SERP ou chamar IA no caminho da escrita.
-  assert.doesNotMatch(corpo, /buildProvisionalGroups|buildSiloScopedProvisionalGroups|confirmSerpValidation|runKeywordReview/);
+  // E nada de reagrupar nem chamar IA no caminho da escrita. A SERP que falta
+  // é pedida uma vez, pelo mesmo caminho do Reprocessar (2026-09-30).
+  assert.doesNotMatch(corpo, /buildProvisionalGroups|buildSiloScopedProvisionalGroups|runKeywordReview|await confirmSerpValidation\(/);
 });
 
 test("o plano leva a composição COM os papéis do cenário", () => {
@@ -324,7 +325,7 @@ test("o vocabulário da conclusão é o mesmo em toda a fase", () => {
 
 /* ------------- FECHAMENTO: quem é dono da SERP e quem só valida ---------- */
 
-test("reprocessar é dono da SERP; concluir apenas valida", () => {
+test("reprocessar é dono da SERP; concluir só pede a que falta, pelo mesmo caminho", () => {
   const reprocessar = workspace.slice(workspace.indexOf("const processArticleFormation"));
   const corpoReprocessar = reprocessar.slice(0, reprocessar.indexOf("\n  }, ["));
   // Agrupa, confere o gate e só chama o provider para o que falta.
@@ -337,9 +338,13 @@ test("reprocessar é dono da SERP; concluir apenas valida", () => {
 
   const concluir = workspace.slice(workspace.indexOf("const confirmArticleFormation"));
   const corpoConcluir = concluir.slice(0, concluir.indexOf("\n  }, ["));
-  // Concluir não reagrupa, não coleta e não fala com provider nenhum.
+  // Concluir não reagrupa nem fala com o provider por conta própria. A SERP que
+  // falta (pedido do dono, 2026-09-30) vai pelo MESMO caminho do Reprocessar —
+  // cache primeiro, plano de pagamento com escolha — e só uma vez por clique.
   assert.doesNotMatch(corpoConcluir, /buildProvisionalGroups|buildSiloScopedProvisionalGroups/);
-  assert.doesNotMatch(corpoConcluir, /confirmSerpValidation|serpGroupsForCandidates|callStrategicApi/);
+  assert.doesNotMatch(corpoConcluir, /callStrategicApi|await confirmSerpValidation\(/);
+  assert.match(corpoConcluir, /if \(humano && !continuacao\) \{/);
+  assert.match(corpoConcluir, /await confirmSerpValidationRef\.current\(grupos\);\n\s*setPendingHumanConclusion/);
   // Ele lê o cenário vigente, passa pela portaria e materializa.
   assert.match(corpoConcluir, /buildArticleFormationConfirmationPlan\(\{ universes: universosSelecionados \}\)/);
   // Concluir também é selection-scoped: sem seleção não há escopo, e "nada

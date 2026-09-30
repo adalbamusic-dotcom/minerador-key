@@ -207,6 +207,12 @@ mock.module("@/lib/server/arquiteto-territory-store", { namedExports: {
     territoriosGravados.push({ op: "update", territoryRef, territory });
     return { territoryRef, lockVersion: 2, territory };
   },
+  // A rota importa a leitura estreita para a trava do "Desfazer Silo"; esta
+  // suíte não rejeita Silo, então ela nunca é chamada aqui.
+  readTerritoryWorkflowItem: async () => null,
+} });
+mock.module("@/lib/server/arquiteto-territory-undo", { namedExports: {
+  planTerritoryUndoForBrand: async () => { throw new Error("Desfazer Silo fora do escopo desta suíte."); },
 } });
 mock.module("@/lib/server/arquiteto-territorial-ai-store", { namedExports: { listTerritorialAiProposals: async () => [] } });
 mock.module("@/lib/server/arquiteto-article-formation-marker-store", { namedExports: { readArticleFormationMarker: async () => null } });

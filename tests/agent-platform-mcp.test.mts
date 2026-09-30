@@ -354,3 +354,30 @@ test("33 · diferenciação de publicados: detectar pede platform.read, a prévi
   assert.deepEqual([...pagar.routes].sort(), ["/api/arquiteto/cannibalization/apply", "/api/arquiteto/cannibalization/run"]);
   assert.deepEqual(PLATFORM_OPERATIONS.find(operation => operation.id === "arquiteto.published_differentiation_detect")?.tools, ["plan_published_differentiation"]);
 });
+
+/* ============ SDD MCP ponta a ponta · F1 (2026-09-30) ============ */
+
+test("F1 · medir Volume: sem aceite, sem planHash ou sem provider.spend é recusado antes de ler", async () => {
+  const ids = ["00000000-0000-4000-8000-0000000000c1"];
+  const cheio = harness(createWriterServer(principal([brand(["platform.read", "minerador.write", "provider.spend"])])));
+  assert.equal(toolText(await cheio(90, "tools/call", { name: "measure_keywords", arguments: { mode: "execute", keywordIds: ids } })).code, "human_confirmation_required");
+  assert.equal(toolText(await cheio(91, "tools/call", { name: "measure_keywords", arguments: { mode: "execute", keywordIds: ids, userConfirmation: "Pode medir o volume" } })).code, "plan_hash_required");
+  const semGasto = harness(createWriterServer(principal([brand(["platform.read", "minerador.write"])])));
+  const recusa = toolText(await semGasto(92, "tools/call", { name: "measure_keywords", arguments: { mode: "execute", keywordIds: ids, planHash: "a".repeat(64), userConfirmation: "Pode medir o volume" } }));
+  assert.equal(recusa.code, "scope_denied"); assert.equal(recusa.scope, "provider.spend");
+  const semLeitura = harness(createWriterServer(principal([brand(["minerador.write"])])));
+  const plano = toolText(await semLeitura(93, "tools/call", { name: "measure_keywords", arguments: { mode: "plan", keywordIds: ids } }));
+  assert.equal(plano.code, "scope_denied"); assert.equal(plano.scope, "platform.read");
+});
+
+test("F1 · 'Para escrever' pelo MCP é leitura: pede platform.read e usa o mesmo núcleo da rota da tela", async () => {
+  const semLeitura = harness(createWriterServer(principal([brand(["radar.write"])])));
+  const recusa = toolText(await semLeitura(94, "tools/call", { name: "get_article_for_writing", arguments: { articleId: "artigo-1" } }));
+  assert.equal(recusa.code, "scope_denied"); assert.equal(recusa.scope, "platform.read");
+  const ferramentas = read("lib/server/platform-mcp-tools.ts");
+  assert.match(ferramentas, /radarWritingExportForArticle\(/);
+  const rota = read("app/api/editorial/radar-export/route.ts");
+  assert.match(rota, /assembleRadarPortableExport\(\{/, "a tela e o MCP montam pelo mesmo núcleo");
+  const nucleo = read("lib/server/radar-portable-export-core.ts");
+  assert.doesNotMatch(nucleo.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " "), /collectRadarSerp|fetch\(|recordIntegrationUsage/, "exportar nunca chama provider");
+});
