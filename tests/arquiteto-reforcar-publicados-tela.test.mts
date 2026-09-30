@@ -41,6 +41,7 @@ import {
   PUBLISHED_REINFORCEMENT_TABLE_LINE,
   buildReinforcementRequest,
   reinforcementDefaultPicks,
+  reinforcementSlotsOf,
   reinforcementDefaultSearchPicks,
   reinforcementRowNeedsAttention,
   reinforcementSuggestionOwners,
@@ -737,4 +738,20 @@ test("Corretor: troca aplicada que contradiz o slug — o cartão avisa e oferec
   assert.equal(certa.tone, "success");
   assert.match(certa.headline, /^Troca aplicada: "como atrair pacientes" é a principal/);
   assert.equal(certa.swapSubstitute, null);
+});
+
+test("vagas contam o que a formação já pôs no publicado: 1 gravada + 5 na cópia não deixam marcar mais 5 (o caso 1 → 11)", () => {
+  const forte = (id: string) => ({ keywordId: id, level: "strong", where: "leftover", inOtherArticle: false }) as unknown as Parameters<typeof reinforcementDefaultPicks>[0]["suggestions"][number];
+  const card = { kind: "published" as const, anchorKeywordId: "pub", suggestionLimit: 5, articleKeywordIds: ["pub"], memberKeywordIds: ["pub", "m1", "m2", "m3", "m4", "m5"], suggestions: ["s1", "s2", "s3", "s4", "s5"].map(forte) };
+  assert.equal(reinforcementSlotsOf(card), 0);
+  assert.equal(reinforcementDefaultPicks(card).size, 0, "artigo cheio na cópia: nada vem marcado");
+  assert.equal(reinforcementDefaultPicks({ ...card, memberKeywordIds: ["pub", "m1"] }).size, 4, "1 gravada + 1 na cópia: cabem 4");
+});
+
+test("publicado fica no Silo da URL: a contestação de fronteira ignora publicados e a confirmação da arquitetura não os remaneja", () => {
+  const mesa = readFileSync(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8").replace(/\/\/.*$/gm, "");
+  assert.match(mesa, /if \(artigo\.isPublished\) candidatosPublicados\.add\(String\(artigo\.candidateRef\)\);/);
+  assert.match(mesa, /if \(candidatosPublicados\.has\(evidencia\.candidateRef\)\) continue;/);
+  assert.match(mesa, /const mantidasNoSiloDaUrl = plan\.assignments\.filter\(item => buscasDePublicados\.has\(item\.keywordId\)/);
+  assert.ok(mesa.indexOf("const mantidasNoSiloDaUrl") < mesa.indexOf("const impactoEstrutural = resolveTerritoryChangeImpact"), "o filtro vem antes da trava de impacto");
 });

@@ -145,8 +145,29 @@ function baseHash(group: ProvisionalArticleGroup) {
     siloContext: { centralEntity: target?.siloContext?.centralEntity ?? null, macroIntent: target?.siloContext?.macroIntent ?? null },
   });
 }
-async function serpOperation(context: PipelineContext, supplied: ProvisionalArticleGroup | ProvisionalArticleGroup[], mode: "plan" | "execute", budget = 0) {
+/** The SERP route accepts at most 20 groups per request (RequestSchema). */
+export const SERP_GROUPS_PER_REQUEST = 20;
+async function serpOperation(context: PipelineContext, supplied: ProvisionalArticleGroup | ProvisionalArticleGroup[], mode: "plan" | "execute", budget = 0): Promise<Record<string, unknown>> {
   const groups = Array.isArray(supplied) ? supplied : [supplied];
+  if (groups.length > SERP_GROUPS_PER_REQUEST) {
+    if (mode !== "plan") throw refusal("Validação da SERP em lote acima de 20 grupos não é permitida numa chamada.");
+    // Plan only reads the cache: split in blocks and merge, counting each
+    // keyword/lens once so the cost is not inflated by repeated candidates.
+    const seen = new Set<string>(), details: unknown[] = [];
+    let paidQueries = 0, min = 0, max = 0, cacheUnavailable = false;
+    for (let start = 0; start < groups.length; start += SERP_GROUPS_PER_REQUEST) {
+      const part = object((await serpOperation(context, groups.slice(start, start + SERP_GROUPS_PER_REQUEST), "plan")).plan);
+      const partDetails = Array.isArray(part.missingDetails) ? part.missingDetails : [];
+      const fresh = partDetails.filter(raw => { const item = object(raw); const k = `${String(item.keywordId ?? item.keyword ?? "")}|${String(item.lens ?? "")}`; if (seen.has(k)) return false; seen.add(k); return true; });
+      const calls = Number(part.paidQueries ?? 0), cost = object(part.estimatedCostUsd);
+      const share = partDetails.length ? fresh.length / partDetails.length : 1;
+      paidQueries += partDetails.length ? fresh.length : calls;
+      min += Number(cost.min ?? 0) * share; max += Number(cost.max ?? 0) * share;
+      details.push(...fresh);
+      cacheUnavailable ||= part.cacheUnavailable === true;
+    }
+    return { plan: { paidQueries, estimatedCostUsd: { min, max }, missingDetails: details, ...(cacheUnavailable ? { cacheUnavailable: true } : {}) } };
+  }
   return responseData(await handleArchitectFormationSerp(internalRequest("/api/arquiteto/serp", { brandId: context.brandId, groups, formationBaseHashes: Object.fromEntries(groups.map(group => [group.id, baseHash(group)])), lenses: SERP_SUBJECT_LENS_LABELS, mode, cacheOnly: mode === "execute" && budget === 0, authorizedPaidQueries: budget, payMissingExtraLenses: mode === "plan" || budget > 0, recollectStaleLenses: false }), context));
 }
 /** Pagination and direct/expanded seeds share a memo; no repeated seed calls. */
