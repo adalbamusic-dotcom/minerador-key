@@ -92,11 +92,31 @@ const sameSet = (left: readonly string[], right: readonly string[]) => {
 export function partitionMaterializedArticles(input: {
   accepted: readonly MaterializedArticleRecord[];
   candidates: readonly ScenarioCandidateRecord[];
+  /**
+   * O VÍNCULO GRAVADO VALE ANTES DA COMPARAÇÃO (2026-09-30).
+   *
+   * `candidateRef` → `articleId` que a conclusão registrou no marcador
+   * (`materializedArticleId`). Com ele, o artigo aprovado continua sendo o
+   * artigo daquela linha mesmo quando a cópia de trabalho ganhou uma revisão
+   * (outra Principal, outra composição) — a revisão é revisão, não faz o
+   * aprovado sumir da mesa. Só vale no MESMO Silo.
+   */
+  explicitLinks?: ReadonlyMap<string, string>;
 }): MaterializationPartition {
   const matched = new Map<string, string>();
   const legacy: { articleId: string; reason: LegacyReasonCode }[] = [];
+  const ligados = new Set<string>();
+  for (const [candidateRef, articleId] of input.explicitLinks || []) {
+    const candidato = input.candidates.find(item => item.candidateRef === candidateRef);
+    const registro = input.accepted.find(item => item.articleId === articleId);
+    if (!candidato || !registro || matched.has(candidateRef) || ligados.has(articleId)) continue;
+    if (registro.territoryRef && candidato.siloRef !== registro.territoryRef) continue;
+    matched.set(candidateRef, articleId);
+    ligados.add(articleId);
+  }
 
   for (const registro of input.accepted) {
+    if (ligados.has(registro.articleId)) continue;
     const porPrincipal = input.candidates
       .filter(candidate => candidate.principalKeywordId === registro.principalKeywordId
         || (registro.alsoPrincipalKeywordIds || []).includes(candidate.principalKeywordId));
@@ -127,6 +147,11 @@ export function partitionMaterializedArticles(input: {
       continue;
     }
 
+    // Candidato já ligado pelo vínculo gravado não recebe um segundo artigo.
+    if (matched.has(equivalente.candidateRef)) {
+      legacy.push({ articleId: registro.articleId, reason: "DIFFERENT_COMPOSITION" });
+      continue;
+    }
     matched.set(equivalente.candidateRef, registro.articleId);
   }
 

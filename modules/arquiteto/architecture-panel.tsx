@@ -111,6 +111,8 @@ export function ArchitecturePanel({
     canonical: string;
     publication: string;
     ready: boolean;
+    /** SiloDNA e SiloPage aprovados: o Silo está fechado. */
+    closed?: boolean;
     blockers: readonly string[];
   }[];
   /**
@@ -395,8 +397,8 @@ export function ArchitecturePanel({
               <li key={silo.siloId} className="rounded border border-divider/70 p-2" data-testid={`architect-silopage-preflight-${silo.siloId}`}>
                 <p className="text-sm font-medium text-foreground">
                   {silo.label}
-                  <span className={`ml-2 text-xs font-semibold ${silo.ready ? "text-positive-soft" : "text-warning"}`}>
-                    {silo.ready ? "pronto para confirmar" : "SILO_PAGE_APPROVAL_READY = NO"}
+                  <span className={`ml-2 text-xs font-semibold ${silo.closed || silo.ready ? "text-positive-soft" : "text-warning"}`}>
+                    {silo.closed ? "fechado · SiloDNA e SiloPage aprovados" : silo.ready ? "pronto para confirmar" : "SILO_PAGE_APPROVAL_READY = NO"}
                   </span>
                 </p>
                 <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-sm leading-6 text-text-muted sm:grid-cols-4">

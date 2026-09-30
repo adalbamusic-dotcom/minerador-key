@@ -286,6 +286,19 @@ export function buildTerritorialLandscape(input: TerritorialLandscapeInput): Ter
   const anchoredSiloIds = new Map<string, string>();
   for (const territory of territories) {
     if (territory.existingSiloRef?.siloId) anchoredSiloIds.set(territory.existingSiloRef.siloId, territory.territoryRef);
+    /*
+     * O SILODNA NASCIDO DO FECHAMENTO É DO PRÓPRIO TERRITÓRIO (2026-09-30).
+     * Sem isto, o Silo fechado aparecia duas vezes na aba Silos: como
+     * território (com as keywords e os artigos) e como "estrutura existente"
+     * solta, com 0 keyword e 0 artigo — parecendo um Silo vazio a apagar.
+     */
+    if (territory.consolidation?.siloId) anchoredSiloIds.set(territory.consolidation.siloId, territory.territoryRef);
+  }
+  for (const version of siloDnas) {
+    const territorio = (version.payload as { territoryRef?: string | null }).territoryRef;
+    if (territorio && !anchoredSiloIds.has(version.payload.siloId) && territories.some(item => item.territoryRef === territorio)) {
+      anchoredSiloIds.set(version.payload.siloId, territorio);
+    }
   }
   const publishedSiloPageIds = sortedUnique(siloPages
     .filter(version => Boolean((version.payload as { publishedUrl?: string | null }).publishedUrl))

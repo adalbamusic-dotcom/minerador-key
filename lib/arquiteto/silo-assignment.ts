@@ -404,6 +404,52 @@ export function publishedSiloCandidateDraft(input: {
   };
 }
 
+/**
+ * ANTES DE CRIAR UM SILO, O QUE JÁ EXISTE (2026-09-30).
+ *
+ * A proposta da arquitetura só conhece Silos candidatos e confirmados. O
+ * "Reprocessar arquitetura" criava um território para todo Silo da proposta
+ * sem `territoryRef` — e assim, logo depois do fechamento, criou DUPLICATAS de
+ * Captação, Crescimento e Estratégia (consolidados, com a mesma URL publicada)
+ * e moveu para elas as keywords das páginas publicadas. Também recriou Silos
+ * que o dono tinha desfeito.
+ *
+ * Regra: mesmo endereço (slug publicado, confirmado ou proposto) é o MESMO
+ * Silo. Vivo (inclusive consolidado): reaproveita, nunca duplica. Desfeito
+ * pela pessoa (rejeitado): não recria — a decisão humana vale até ela mudar.
+ */
+export function existingTerritoryForProposedSilo(input: {
+  name: string;
+  slug: string | null;
+  publishedSlug: string | null;
+  territories: ReadonlyArray<{
+    territoryRef: string;
+    territory: {
+      name?: string | null;
+      lifecycleStatus?: string | null;
+      slugState?: { confirmed?: string | null; publishedSlug?: string | null; proposals?: ReadonlyArray<{ slug: string }> | null } | null;
+    };
+  }>;
+}): { kind: "reuse" | "rejected_by_human"; territoryRef: string } | null {
+  const normaliza = (valor: string | null | undefined) => String(valor || "").trim().toLowerCase().replace(/^\/+|\/+$/g, "");
+  const nome = (valor: string | null | undefined) => String(valor || "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const alvos = new Set([normaliza(input.publishedSlug), normaliza(input.slug)].filter(Boolean));
+  const mesmoEndereco = (item: (typeof input.territories)[number]) => {
+    const estado = item.territory.slugState;
+    return [estado?.publishedSlug, estado?.confirmed, ...(estado?.proposals || []).map(proposta => proposta.slug)]
+      .map(normaliza)
+      .some(valor => valor && alvos.has(valor));
+  };
+  const vivos = input.territories.filter(item => item.territory.lifecycleStatus !== "rejected" && item.territory.lifecycleStatus !== "archived");
+  const vivo = vivos.find(mesmoEndereco);
+  if (vivo) return { kind: "reuse", territoryRef: vivo.territoryRef };
+  // Um Silo vivo com o mesmo endereço tem precedência; só então olha o que a pessoa desfez.
+  const desfeito = input.territories
+    .filter(item => item.territory.lifecycleStatus === "rejected")
+    .find(item => mesmoEndereco(item) || (nome(item.territory.name) && nome(item.territory.name) === nome(input.name)));
+  return desfeito ? { kind: "rejected_by_human", territoryRef: desfeito.territoryRef } : null;
+}
+
 /* ------------------- promoção de estrutura publicada --------------------- */
 
 export const SITE_PROMOTION_REFUSAL_CODES = [

@@ -1,3 +1,14 @@
+## Recuperação dos Silos — 2026-09-30 (noite)
+
+- [x] Reprocessar não duplica Silo consolidado nem recria Silo desfeito.
+- [x] Reconcluir sucede o mesmo ArticleDNA; publicado não passa pelo Concluir.
+- [x] Papel no Silo em Artigos e Links, pelo SiloDNA.
+- [x] **Dono:** rodou `supabase/manual/20260930-recuperar-silos-adalbapro.sql` (releitura: 0 keywords nos duplicados; ativos: Captação, Crescimento, Estratégia consolidados, Leads e limpeza de pele confirmados; whatsapp → 8bcd8ff3) e conferir a releitura (`keywords_nos_duplicados = 0`, `whatsapp_aponta_para = 8bcd8ff3…`).
+- [ ] Aposentar o ArticleDNA duplicado `article-formation:62ade5c4…`. Exige decisão: as versões são append-only e não existe status/jornada de “retirado”.
+- [x] Leads sem Tráfego Pago fechado pelo dono com “Concluir formação” + “Concluir e manter” (leads qualificados = PILAR; os demais SUPORTE; todos Consolidado v1/Aprovado).
+- [x] Links internos: Crescimento de Clínicas processado (14 relações, 6 páginas, 0 órfãs, GRAPH_READY_TO_CONFIRM = YES), aguardando “Confirmar links internos” do dono.
+- [ ] Links internos: processar e confirmar Captação de Pacientes, Estratégia de Negócios e Leads sem Tráfego Pago.
+
 ## Fechamento destravado sem mexer em artigo — 2026-09-30 (tarde)
 
 - [x] Ponteiro órfão não conta como formação pendente; publicado aprovado entra pelo próprio ArticleDNA.

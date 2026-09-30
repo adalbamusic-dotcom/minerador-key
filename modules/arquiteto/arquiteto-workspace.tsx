@@ -55,7 +55,7 @@ import { deriveTerritorialLogic, territorialAssignmentsFromWorkflowPayloads } fr
 import { buildKeywordUniverse, reservedSiloPageHeadIds } from "@/lib/arquiteto/keyword-universe";
 import { buildSiteStructureReading } from "@/lib/arquiteto/site-structure-evidence";
 import { buildTerritorialSurface, deriveTerritorialProcessAvailability } from "@/lib/arquiteto/territorial-surface";
-import { manualSiloCandidateDraft, planSiloAssignment, planSiteStructurePromotion, publishedSiloCandidateDraft, resolveSiloAssignmentOutcome } from "@/lib/arquiteto/silo-assignment";
+import { existingTerritoryForProposedSilo, manualSiloCandidateDraft, planSiloAssignment, planSiteStructurePromotion, publishedSiloCandidateDraft, resolveSiloAssignmentOutcome } from "@/lib/arquiteto/silo-assignment";
 import { proposeSiloPrimaryFromSerp, serpPrimaryAcceptanceOf, stampPublishedPrimary, type SiloPrimarySerpProposal } from "@/lib/arquiteto/silo-primary-keyword";
 import { acceptRemoteSiloPrimaryProposal } from "@/lib/arquiteto/canonical-workspace";
 import { readArchitectKeywordVinculo, editorialUnitDeclarationFromVinculo, headsSilo, readEditorialUnitDeclaration } from "@/lib/arquiteto/editorial-unit-declaration";
@@ -138,6 +138,7 @@ import { buildLinkRelationRows, resolveArticleLinkProjection, resolveSiloHierarc
 import { newFormationRef, planAddKeywordsToCandidate, planKeywordRole, planMergeCandidates, planMoveKeyword, planNewArticleFromKeywords, planPrincipalChange, planSplitKeyword, type FormationKeywordLike, type FormationPatch, type FormationPlan } from "@/lib/arquiteto/article-formation-editing";
 import { groupLeftoverOpportunities } from "@/lib/arquiteto/serp-subject-suggestions";
 import { LeftoverOpportunitiesPanel } from "./leftover-opportunities-panel";
+import { OperationProgress } from "./operation-progress";
 import { ARTICLE_FORMATION_REF_PREFIX, resolveArticleFormationState } from "@/lib/arquiteto/article-formation-decision";
 import { buildArticleFormationConfirmationPlan, readyConclusionSubset, summarizeConfirmationPlan, validateFormationConclusion, type ConclusionGate, type ConclusionHeldOut, type ConfirmationEntry } from "@/lib/arquiteto/article-formation-confirmation";
 import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, siloThemeTokens, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
@@ -3466,11 +3467,20 @@ export default function ArquitetoPage() {
         applyKgr: kgr.applyKgr,
         metricMissing: kgr.applyKgr && kgr.principalKgrScore === null,
       },
-      unitType: {
+      unitType: (() => {
+        const temArticleDna = Boolean(articleDnaEntryFor({ articleId, candidateRef: article.candidateRef }).version);
+        const rotulo = unitClassification ? EDITORIAL_UNIT_LABELS[unitClassification.type] : null;
+        /*
+         * CANDIDATO NÃO TEM ONDE GRAVAR O TIPO (2026-09-30): o tipo da unidade
+         * mora no ArticleDNA, que nasce no "Concluir formação". Cobrar
+         * "Registrar decisão" antes disso só levava ao erro "Gere a definição
+         * do artigo antes…". No candidato ele é resolvido pela conclusão; se
+         * ainda for ambíguo depois dela, a decisão aparece no artigo formado.
+         */
+        if (!temArticleDna) return { defined: true, label: `${rotulo || "Artigo"} · definido ao concluir a formação` };
         // Derivado é resolvido: só ambiguidade real vira decisão humana.
-        defined: editorialUnitTypeIsDerived(unitClassification),
-        label: unitClassification ? EDITORIAL_UNIT_LABELS[unitClassification.type] : null,
-      },
+        return { defined: editorialUnitTypeIsDerived(unitClassification), label: rotulo };
+      })(),
       serp: articleSerpVerdictFor(article),
       aiProposals: proposals,
       unresolvedConflicts,
@@ -5974,7 +5984,11 @@ export default function ArquitetoPage() {
       principalKeywordId: candidate.principalKeywordId,
       keywordIds: [...candidate.keywords.map(item => item.keywordId), ...candidate.overflowKeywordIds],
     }))),
-  }), [acceptedArticleDnas, articleFormationUniverses, publishedKeywordIdSet]);
+    // O vínculo que a conclusão gravou: a linha continua mostrando o artigo aprovado.
+    explicitLinks: new Map((articleFormationMarker?.concludedFormations || [])
+      .filter(item => item.materializedArticleId)
+      .map(item => [item.candidateRef, String(item.materializedArticleId)] as const)),
+  }), [acceptedArticleDnas, articleFormationUniverses, publishedKeywordIdSet, articleFormationMarker]);
 
   /** `candidateRef` dos artigos do cenário já materializados — ARTICLE vs CANDIDATO. */
   const materializedArticleIds = materializationPartition.current;
@@ -6155,6 +6169,8 @@ export default function ArquitetoPage() {
           ? (CURRENT_SCENARIO_REQUIRES_PUBLISHED_VERIFICATION ? "publicada" : "publicada · verificação adiada")
           : "ainda não publicada",
         ready: portaria?.state === "approved",
+        // Fechado = SiloDNA e SiloPage aprovados: não há mais o que confirmar (2026-09-30).
+        closed: Boolean(aprovadaAgora) && Boolean(siloDnaVersion) && effectiveVersionStatus(siloDnaVersion!.versionId, versionEvents) === "approved",
         blockers: portaria && portaria.state === "blocked"
           ? portaria.blockers.map(item => `${item.code}: ${item.detail}`)
           : siloDnaVersion ? [] : ["SILO_DNA_AUSENTE: consolide o Silo antes de aprovar a página."],
@@ -8285,9 +8301,24 @@ export default function ArquitetoPage() {
    * `linksHierarchy` — declará-la lá em cima daria TDZ. Mesmo motivo de
    * `articleRunScopeRef`.
    */
+  /*
+   * PAPEL NO SILO LIDO DO SILODNA APROVADO (2026-09-30): Pilar e Suportes são
+   * decididos no fechamento e gravados no SiloDNA. A coluna aparece em Artigos
+   * e em Links para TODO Silo fechado, não só para o Silo escolhido no grafo.
+   */
+  const siloRoleByArticleId = useMemo(() => {
+    const papeis = new Map<string, "PILAR" | "SUPORTE">();
+    for (const version of Object.values(acceptedSiloDnas)) {
+      if (version.payload.pillarArticleId) papeis.set(String(version.payload.pillarArticleId), "PILAR");
+      for (const articleId of version.payload.supportArticleIds || []) {
+        if (!papeis.has(String(articleId))) papeis.set(String(articleId), "SUPORTE");
+      }
+    }
+    return papeis;
+  }, [acceptedSiloDnas]);
   const articleRowRevision = useMemo(
-    () => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy }),
-    [articleTableRenderRevision, workspaceMode, linksHierarchy],
+    () => ({ base: articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId }),
+    [articleTableRenderRevision, workspaceMode, linksHierarchy, siloRoleByArticleId],
   );
 
   /** §4/§5 — as relações da AUTORIDADE, classificadas e legíveis. */
@@ -8381,12 +8412,20 @@ export default function ArquitetoPage() {
     anotar(dependenciaUpstream);
 
     const ocupado = linksLoading || linksSaveState === "saving";
+    /* O que está em curso, pelo nome — a barra de progresso mostra junto (2026-09-30). */
+    const emCurso = linksSaveState === "loading"
+      ? "Carregando o grafo do Silo"
+      : linksSaveState === "saving"
+        ? "Salvando e conferindo na releitura"
+        : linksLoading
+          ? "Processando links: esqueleto do Silo e âncoras da IA"
+          : null;
     const processBlocker = !linksSelectedContext
       ? "Selecione o Silo do grafo."
       : dependenciaUpstream
         ? dependenciaUpstream
         : ocupado
-          ? "Há uma operação em curso."
+          ? `Aguarde: ${emCurso || "operação em curso"}.`
           : null;
 
     const confirmBlocker = !linksWorkingCopy
@@ -8394,7 +8433,7 @@ export default function ArquitetoPage() {
       : dependenciaUpstream
         ? dependenciaUpstream
         : ocupado
-          ? "Há uma operação em curso."
+          ? `Aguarde: ${emCurso || "operação em curso"}.`
           : linksIsDirty || linksSaveState !== "saved"
             ? "Há alterações locais não confirmadas pelo readback; salve antes de aprovar."
             : !linksWorkingCopy.edges.length
@@ -8418,7 +8457,9 @@ export default function ArquitetoPage() {
 
     return {
       summary: defasagem.stale ? `${summary} Revisão de links desatualizada.` : summary,
-      blockers,
+      activityLabel: emCurso,
+      // O "Aguarde" vira a barra de progresso: não repete na lista de motivos.
+      blockers: emCurso ? blockers.filter(motivo => !motivo.startsWith("Aguarde:")) : blockers,
       canProcess: !processBlocker,
       processBlocker,
       canConfirm: !confirmBlocker,
@@ -13067,7 +13108,9 @@ export default function ArquitetoPage() {
   const resolveProposalSiloRef = useCallback((siloKey: string): string | null => {
     if (!siloKey.startsWith("proposed:")) return siloKey;
     const slug = siloKey.slice("proposed:".length);
-    const achado = remoteTerritories.find(item => {
+    // Silo desfeito (rejeitado) nunca é destino: senão a proposta mandaria
+    // keyword para um Silo que a pessoa desfez — ou para uma duplicata aposentada.
+    const achado = remoteTerritories.filter(item => item.territory.lifecycleStatus !== "rejected").find(item => {
       const estado = item.territory.slugState;
       return [estado?.confirmed, estado?.publishedSlug, ...(estado?.proposals || []).map(proposta => proposta.slug)]
         .filter(Boolean)
@@ -13435,7 +13478,15 @@ export default function ArquitetoPage() {
    * A conclusão pedida pela pessoa que esperou a SERP: roda de novo depois do
    * render que trouxe os pareceres gravados (os gates do clique são os de antes).
    */
-  const [pendingHumanConclusion, setPendingHumanConclusion] = useState(false);
+  const [pendingHumanConclusion, setPendingHumanConclusion] = useState<false | "serp" | "keep">(false);
+  /*
+   * "CONCLUIR FORMAÇÃO" FECHA TUDO O QUE ESTÁ SELECIONADO (pedido do dono,
+   * 2026-09-30). O que exigia "Manter composição" artigo por artigo, com motivo
+   * digitado, vira UMA confirmação do próprio Concluir: a lista do que vai ser
+   * mantido, e um clique.
+   */
+  const [conclusionKeepPrompt, setConclusionKeepPrompt] = useState<{ items: { candidateRef: string; label: string; reasons: string[] }[] } | null>(null);
+  const [conclusionKeepBusy, setConclusionKeepBusy] = useState(false);
   useEffect(() => {
     if (!readoutPendente) return;
     const execucao = { reusedInThisRun: readoutPendente.reused, pendingReasons: readoutPendente.pendingReasons };
@@ -13477,6 +13528,9 @@ export default function ArquitetoPage() {
     const concluidos = new Set((articleFormationMarker?.concludedFormations || []).map(item => item.candidateRef));
     return candidateGuards.openChallenges.filter(item => !humanKeptCandidate(item.scope.id) && !concluidos.has(item.scope.id));
   }, [candidateGuards, humanKeptCandidate, articleFormationMarker]);
+
+  /* O painel de contestação da aba Silos lê a MESMA lista do fechamento: sem o artigo já concluído ou mantido. */
+  const openSiloReconsideration = useMemo(() => describeSiloReconsideration(openSiloChallenges), [openSiloChallenges]);
 
   const articleSerpGateSummary = useMemo(
     () => summarizeArticleSerpGate([...articleSerpGates.values()]),
@@ -13826,7 +13880,22 @@ export default function ArquitetoPage() {
 
       // A identidade do ArticleDNA vem do agrupamento revisado — determinística
       // e estável, para que reconfirmar não crie um artigo paralelo.
-      const articleId = aprovado.candidateRef;
+      /*
+       * FORMAÇÃO JÁ MATERIALIZADA TEM ARTIGO: reconcluir sucede o MESMO
+       * ArticleDNA, nunca cria outra identidade (2026-09-30). O publicado ou
+       * melhorado tem `articleId` próprio (≠ candidateRef); usar o ref criou
+       * um "como atrair clientes pelo whatsapp" duplicado ao lado do original.
+       */
+      const articleId = (articleFormationMarker?.concludedFormations || [])
+        .find(item => item.candidateRef === aprovado.candidateRef)?.materializedArticleId
+        || aprovado.candidateRef;
+      // Publicado não é reescrito pelo Concluir: o payload daqui não carrega a
+      // identidade publicada (URL, slug, canonical). O caminho dele é o
+      // "Reforçar publicados".
+      if (acceptedArticleDnas[articleId]?.payload.publishedIdentityRef) {
+        semDiff.push({ articleId, reason: "Artigo publicado: a composição dele é gravada pelo Reforçar publicados, que preserva URL, slug e canonical." });
+        continue;
+      }
       const grupo = {
         id: articleId,
         keywordIds: keywords.map(keyword => String(keyword.id)),
@@ -14121,7 +14190,7 @@ export default function ArquitetoPage() {
         : `${semDiff.length} artigo(s) já representados pelo ArticleDNA aprovado: nenhuma versão nova foi necessária.`);
     }
     return { criados, aguardandoSilo };
-  }, [selectedBrandId, sessionStatus, session?.user?.id, masterList, acceptedArticleDnas, acceptedSiloDnas, articleVersionAuthorities, addVersionEvents, showNotification, subjectStandings, subjectCarrierCandidateRefs]);
+  }, [selectedBrandId, sessionStatus, session?.user?.id, masterList, acceptedArticleDnas, acceptedSiloDnas, articleVersionAuthorities, articleFormationMarker, addVersionEvents, showNotification, subjectStandings, subjectCarrierCandidateRefs]);
 
   /**
    * Confirmar formação — registra a decisão humana sobre o agrupamento.
@@ -14717,7 +14786,7 @@ export default function ArquitetoPage() {
      * publicados, que não são candidatos) com os candidatos e parava em
      * "aguarda a releitura" para sempre.
      */
-    continuacao?: { serpRequested: true },
+    continuacao?: { serpRequested: true; keepConfirmed?: boolean },
   ) => {
     if (!selectedBrandId || !articleFormationMarker) return;
     const humano = !automatic;
@@ -14785,7 +14854,44 @@ export default function ArquitetoPage() {
         if (grupos.length) {
           showNotification("info", `Concluir formação: ${grupos.length} artigo(s) sem SERP completa. Lendo o cache primeiro; só as lentes que faltam entram no plano de pagamento, e você escolhe. Depois a conclusão continua.`);
           await confirmSerpValidationRef.current(grupos);
-          setPendingHumanConclusion(true);
+          setPendingHumanConclusion("serp");
+          return;
+        }
+      }
+
+      /*
+       * O QUE PRECISA DE DECISÃO ENTRA NA MESMA CONFIRMAÇÃO (2026-09-30).
+       *
+       * Divergência da SERP esperando decisão, par que disputa o tema (os dois
+       * lados na seleção) e fronteira contestada: a saída era "Manter
+       * composição" em cada artigo, com motivo digitado. O Concluir mostra a
+       * lista e grava a mesma decisão — aceitar a composição atual, com hash e
+       * releitura — num clique. Só entra quem tem parecer de SERP gravado.
+       */
+      if (humano && !continuacao?.keepConfirmed) {
+        const naSelecao = new Set(plano.approved.map(entry => entry.candidateRef));
+        const precisa = new Map<string, string[]>();
+        const anotar = (ref: string, motivo: string) => {
+          if (humanKeptCandidate(ref)) return;
+          precisa.set(ref, [...new Set([...(precisa.get(ref) || []), motivo])]);
+        };
+        const nomeDe = (ref: string) => candidateGuards.rotuloDoCandidato.get(ref) || ref;
+        for (const ref of naSelecao) {
+          if (articleSerpGates.get(ref)?.requiresHumanDecision) anotar(ref, "a SERP diverge da composição: ela fica como está");
+        }
+        for (const par of openCannibalPairs) {
+          if (!naSelecao.has(par.left) || !naSelecao.has(par.right)) continue;
+          anotar(par.left, `fica separado de “${nomeDe(par.right)}”`);
+          anotar(par.right, `fica separado de “${nomeDe(par.left)}”`);
+        }
+        for (const contestacao of openSiloChallenges) {
+          if (naSelecao.has(contestacao.scope.id)) anotar(contestacao.scope.id, `fica no Silo atual${contestacao.suggestedSiloLabel ? `, e não em “${contestacao.suggestedSiloLabel}”` : ""}`);
+        }
+        const itens = [...precisa]
+          .filter(([ref]) => remoteArticleSerp.some(item => item.candidateRef === ref))
+          .map(([candidateRef, reasons]) => ({ candidateRef, label: nomeDe(candidateRef), reasons }));
+        if (itens.length) {
+          setConclusionKeepPrompt({ items: itens });
           return;
         }
       }
@@ -15179,14 +15285,61 @@ export default function ArquitetoPage() {
     } finally {
       setFormationBusy(false);
     }
-  }, [selectedBrandId, articleFormationMarker, articleFormationUniverses, articleFormationBase, articleSerpGates, candidateGuards, unresolvedClassificationsByCandidate, materializeApprovedArticleDnas, materializeLegacyArticleSiloIds, masterList, openCannibalPairs, openSiloChallenges, approvedArticlesForClosure, serpGroupsForCandidates, showNotification, subjectStandings]);
+  }, [selectedBrandId, articleFormationMarker, articleFormationUniverses, articleFormationBase, articleSerpGates, candidateGuards, unresolvedClassificationsByCandidate, materializeApprovedArticleDnas, materializeLegacyArticleSiloIds, masterList, openCannibalPairs, openSiloChallenges, approvedArticlesForClosure, serpGroupsForCandidates, showNotification, subjectStandings, humanKeptCandidate, remoteArticleSerp]);
 
   /* A continuação do clique humano, depois da SERP pedida ao concluir. */
   useEffect(() => {
     if (!pendingHumanConclusion || formationBusy || serpBusy) return;
+    const manter = pendingHumanConclusion === "keep";
     setPendingHumanConclusion(false);
-    void confirmArticleFormation(undefined, { serpRequested: true });
+    void confirmArticleFormation(undefined, manter ? { serpRequested: true, keepConfirmed: true } : { serpRequested: true });
   }, [pendingHumanConclusion, formationBusy, serpBusy, confirmArticleFormation]);
+
+  /*
+   * "Concluir e manter": a MESMA decisão do "Manter composição" (aceitar a
+   * composição atual, pela rota de resolução da SERP, com releitura), gravada
+   * para cada artigo da lista; depois a conclusão continua sozinha.
+   */
+  const keepAndConclude = useCallback(async () => {
+    const pedido = conclusionKeepPrompt;
+    if (!pedido || !selectedBrandId) return;
+    setConclusionKeepBusy(true);
+    try {
+      const falharam: string[] = [];
+      for (const item of pedido.items) {
+        const registro = remoteArticleSerp.find(entry => entry.candidateRef === item.candidateRef)?.payload;
+        if (!registro) { falharam.push(item.label); continue; }
+        try {
+          await callStrategicApi<{ candidateRef: string }>("/api/arquiteto/serp-resolution", {
+            brandId: selectedBrandId,
+            candidateRef: item.candidateRef,
+            formationBaseHash: registro.formationBaseHash,
+            assessmentId: registro.assessment.id,
+            decision: "accept_current_composition",
+            reason: `Mantida ao concluir a formação: ${item.reasons.join("; ")}.`,
+          }, "serp");
+        } catch {
+          falharam.push(item.label);
+        }
+      }
+      // Gravar não é sucesso: a decisão só vale depois que o remoto a devolve.
+      const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+      setRemoteArticleSerp(canonical.articleFormationSerp);
+      const confirmadas = pedido.items.filter(item => {
+        const decisao = canonical.articleFormationSerp.find(entry => entry.candidateRef === item.candidateRef)?.payload.humanResolution;
+        return decisao?.decision === "accept_current_composition";
+      });
+      setConclusionKeepPrompt(null);
+      if (falharam.length || confirmadas.length < pedido.items.length) {
+        showNotification("warning", `A decisão de manter não foi confirmada para: ${pedido.items.filter(item => !confirmadas.includes(item)).map(item => item.label).join(", ")}. Esses ficam de fora desta conclusão; os outros seguem.`);
+      } else {
+        showNotification("info", `Decisão registrada para ${confirmadas.length} artigo(s). Concluindo a formação…`);
+      }
+      setPendingHumanConclusion("keep");
+    } finally {
+      setConclusionKeepBusy(false);
+    }
+  }, [conclusionKeepPrompt, selectedBrandId, remoteArticleSerp, showNotification]);
 
   /**
    * Encadeia o Assunto depois do readback da cópia de trabalho. A execução
@@ -15274,8 +15427,22 @@ export default function ArquitetoPage() {
        */
       const refPorChave = new Map<string, string>();
       const criados: Awaited<ReturnType<typeof createRemoteSiloCandidate>>[] = [];
+      const naoRecriados: string[] = [];
       for (const silo of proposta.silos) {
         if (silo.territoryRef) { refPorChave.set(silo.key, silo.territoryRef); continue; }
+        /*
+         * O QUE JÁ EXISTE NÃO NASCE DE NOVO (2026-09-30): mesmo endereço é o
+         * mesmo Silo — consolidado incluído —, e Silo desfeito pela pessoa não
+         * é recriado. Ver `existingTerritoryForProposedSilo`.
+         */
+        const existente = existingTerritoryForProposedSilo({
+          name: silo.name,
+          slug: silo.slug ?? null,
+          publishedSlug: silo.publishedIdentity?.slug ?? null,
+          territories: remoteTerritories,
+        });
+        if (existente?.kind === "reuse") { refPorChave.set(silo.key, existente.territoryRef); continue; }
+        if (existente?.kind === "rejected_by_human") { naoRecriados.push(silo.name); continue; }
         /*
          * ORIGEM 2 — a proposta já leu QUEM a declaração aponta; aqui, que
          * é onde há escrita, entra o QUANDO. A decisão não é retomada.
@@ -15305,6 +15472,9 @@ export default function ArquitetoPage() {
           ...previous.filter(item => !criados.some(novo => novo.territoryRef === item.territoryRef)),
           ...criados,
         ]);
+      }
+      if (naoRecriados.length) {
+        showNotification("info", `${naoRecriados.length} Silo(s) que você desfez não foram recriados: ${naoRecriados.join(", ")}. As keywords deles continuam sem Silo.`);
       }
       const territoriosDoProcessamento = new Map([...remoteTerritories, ...criados].map(item => [item.territoryRef, item]));
 
@@ -15619,6 +15789,34 @@ export default function ArquitetoPage() {
       Object.assign(plan, { assignments: plan.assignments.filter(item => !mantidasNoSiloDaUrl.includes(item)) });
       showNotification("info", `${mantidasNoSiloDaUrl.length} busca(s) de artigos publicados ficaram no Silo da URL: ${mantidasNoSiloDaUrl.map(item => territorioAtual.has(item.keywordId) ? String(masterList.find(k => String(k.id) === item.keywordId)?.keyword || item.keywordId) : item.keywordId).join(", ")}. O resto do plano segue.`);
     }
+    /*
+     * KEYWORD DE ARTIGO NÃO SAI DO SILO PELA PROPOSTA (pedido do dono, 2026-09-30).
+     *
+     * A análise da arquitetura reagrupa por afinidade e propunha mover
+     * "como atrair clientes pelo whatsapp" de Captação (Silo fechado) para Leads
+     * — o que barrava a confirmação inteira — e deixar "sem Silo" keywords que a
+     * pessoa pôs à mão nos artigos de Leads. Keyword que está num ArticleDNA
+     * aprovado, numa formação concluída ou decidida pela pessoa, ou num Silo
+     * fechado, fica onde está; a proposta vale para o resto. Mudar isso é
+     * revisão do artigo, não decisão de Silo.
+     */
+    const territoriosFechados = new Set(remoteTerritories
+      .filter(item => item.territory.lifecycleStatus === "consolidated")
+      .map(item => item.territoryRef));
+    const buscasFixas = new Set<string>([
+      ...Object.values(acceptedArticleDnas).flatMap(version => version.payload.keywordReferences.map(reference => String(reference.keywordId))),
+      ...(articleFormationMarker?.concludedFormations || []).flatMap(item => item.members.map(member => member.keywordId)),
+      ...masterList.filter(item => typeof item.articleFormationRef === "string" && item.articleFormationRef).map(item => String(item.id)),
+      ...masterList.filter(item => typeof item.territoryRef === "string" && territoriosFechados.has(item.territoryRef)).map(item => String(item.id)),
+    ]);
+    const sairiaDoSilo = (keywordId: string, destino: string | null) => {
+      const atual = territorioAtual.get(keywordId);
+      return Boolean(atual) && atual !== destino && buscasFixas.has(keywordId);
+    };
+    const mantidasNosArtigos = plan.assignments.filter(item => sairiaDoSilo(item.keywordId, item.territoryRef));
+    if (mantidasNosArtigos.length) {
+      Object.assign(plan, { assignments: plan.assignments.filter(item => !mantidasNosArtigos.includes(item)) });
+    }
     const impactoEstrutural = resolveTerritoryChangeImpact({
       proposals: plan.assignments.map(assignment => ({ keywordId: assignment.keywordId, territoryRef: assignment.territoryRef })),
       // O preview precisa do lote inteiro: dizer só "1 Article afetado"
@@ -15745,10 +15943,24 @@ export default function ArquitetoPage() {
       for (const assignment of architectureProposal.assignments) {
         const territoryRef = refDoSilo(assignment.siloKey);
         if (!territoryRef) {
+          /*
+           * Silo que a pessoa DESFEZ não é falha nem é recriado: as keywords
+           * dele ficam sem Silo, que foi a decisão (2026-09-30).
+           */
+          const siloDaProposta = architectureProposal.silos.find(item => item.key === assignment.siloKey);
+          const desfeito = siloDaProposta && existingTerritoryForProposedSilo({
+            name: siloDaProposta.name,
+            slug: siloDaProposta.slug ?? null,
+            publishedSlug: siloDaProposta.publishedIdentity?.slug ?? null,
+            territories: remoteTerritories,
+          })?.kind === "rejected_by_human";
+          if (desfeito) { registrar("unchanged", assignment.keywordId); continue; }
           // Silo proposto que não existe no acervo: processar de novo o cria.
           falhas.push(assignment.keywordId);
           continue;
         }
+        // Keyword de artigo ou de Silo fechado fica onde está (ver `sairiaDoSilo`).
+        if (sairiaDoSilo(assignment.keywordId, territoryRef)) { registrar("unchanged", assignment.keywordId); continue; }
         decisoes.push({
           keywordId: assignment.keywordId,
           target: { kind: "territory", territoryRef },
@@ -15757,8 +15969,15 @@ export default function ArquitetoPage() {
           ...(assignment.declaredBy ? { declaredBySite: true as const } : {}),
         });
       }
+      const mantidasSemMover: string[] = [];
       for (const item of architectureProposal.unassigned) {
+        if (sairiaDoSilo(item.keywordId, null)) { registrar("unchanged", item.keywordId); mantidasSemMover.push(item.keywordId); continue; }
         decisoes.push({ keywordId: item.keywordId, target: { kind: "unassigned" } });
+      }
+      const nomesMantidos = [...new Set([...mantidasNosArtigos.map(item => item.keywordId), ...mantidasSemMover])]
+        .map(keywordId => String(masterList.find(item => String(item.id) === keywordId)?.keyword || keywordId));
+      if (nomesMantidos.length) {
+        showNotification("info", `${nomesMantidos.length} keyword(s) de artigos ou de Silos fechados ficaram onde estão: ${nomesMantidos.slice(0, 12).join(", ")}${nomesMantidos.length > 12 ? ", …" : ""}. Tirar keyword de artigo é revisão do artigo, não decisão de Silo.`);
       }
       try {
         const lote = await applySiloDecisionsInBatch(decisoes);
@@ -16974,6 +17193,10 @@ export default function ArquitetoPage() {
                   <div className="mt-3 rounded-md border border-divider bg-surface-subtle p-3" data-testid="architect-links-phase-panel">
                     <p className="text-sm font-semibold text-foreground">Links internos · fase final da passada</p>
                     <p className="mt-1 text-sm leading-6 text-text-muted">{linksPhaseReading.summary}</p>
+                    {linksPhaseReading.activityLabel && (
+                      <OperationProgress key={linksPhaseReading.activityLabel} label={linksPhaseReading.activityLabel} testId="architect-links-progress"
+                        note={linksPhaseReading.activityLabel.startsWith("Processando") ? "a IA propõe as âncoras; nada é aprovado" : null} />
+                    )}
                     {linksPhaseReading.blockers.length > 0 && (
                       <ul className="mt-2 space-y-1">
                         {linksPhaseReading.blockers.map(motivo => (
@@ -17090,13 +17313,24 @@ export default function ArquitetoPage() {
                     * arquitetura incorpora a evidência e mostra a mudança
                     * proposta; Confirmar arquitetura aplica a membership.
                     */}
-                  {candidateGuards.reconsideration.required && (
+                  {siloClosureSummaries.some(item => item.state !== "closed") && (
+                    <section className="mb-4 rounded border border-divider bg-surface p-3" data-testid="architect-silo-closure-status-silos">
+                      <p className="text-sm font-semibold text-foreground">Fechamento dos Silos</p>
+                      <p className="text-sm leading-6 text-text-muted">Um Silo fecha sozinho quando todos os artigos dele estão concluídos: na aba Artigos, marque os artigos do Silo e clique em “Concluir formação”. “Confirmar propostas novas” não fecha Silo.</p>
+                      <ul className="mt-1 grid gap-1">
+                        {siloClosureSummaries.map(item => (
+                          <li key={item.territoryRef} className={`text-sm leading-6 ${item.state === "waiting" ? "text-warning" : item.state === "closing" ? "text-foreground" : "text-positive-soft"}`}>{item.text}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                  {openSiloReconsideration.required && (
                     <section className="mb-4 rounded border border-warning/40 bg-warning/10 p-3" data-testid="architect-silo-reconsideration">
                       <p className="text-xs font-bold uppercase tracking-widest text-warning">
                         Contestação de fronteira vinda dos Artigos
                       </p>
                       <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-foreground">
-                        {candidateGuards.reconsideration.byTargetSilo.map(destino => (
+                        {openSiloReconsideration.byTargetSilo.map(destino => (
                           <li key={destino.suggestedSiloRef || destino.label}>
                             {destino.scopes.join(", ")} → <span className="font-semibold">{destino.label}</span>
                           </li>
@@ -17742,11 +17976,16 @@ export default function ArquitetoPage() {
                     </div>
                     <span className="shrink-0 rounded border border-module-accent/40 bg-module-accent/10 px-2 py-1 text-xs font-semibold text-module-accent">{readOnly ? "Consolidada" : entry.authority === "REMOTE" ? "Remota" : "Provisório"}</span>
                   </div>
+                  {readOnly ? (
+                    // Silo fechado: o Pilar está gravado no SiloDNA e não se escolhe mais aqui.
+                    <p className="mt-3 text-sm text-text-muted" data-testid="architect-silo-pillar-closed">Pilar · fechado com o Silo: <span className="font-semibold text-foreground">{pillarArticleId ? articleLabel(pillarArticleId) : "—"}</span></p>
+                  ) : <>
                   <label className="mt-3 block text-sm font-semibold text-text-muted" htmlFor={`silo-pillar-${entry.territoryRef}`}>{remote ? "Pilar humano · decisão persistida" : "Pilar sugerido · ainda não é decisão"}</label>
                   <select id={`silo-pillar-${entry.territoryRef}`} value={pillarArticleId} disabled={readOnly} onChange={event => void chooseWorkingCopyPillar(entry.territoryRef, event.target.value)} className="mt-1 w-full rounded border border-divider bg-surface-elevated px-2 py-1.5 text-sm text-foreground disabled:opacity-60">
                     <option value="">Sem Pilar decidido</option>
                     {articleIds.map(articleId => <option key={articleId} value={articleId}>{articleLabel(articleId)}</option>)}
                   </select>
+                  </>}
                   <p className="mt-2 text-sm leading-6 text-text-muted">Suportes: {supportArticleIds.length ? supportArticleIds.map(articleLabel).join(" · ") : "nenhum"}</p>
                   {exclusions.length > 0 && <p className="mt-2 text-sm leading-6 text-text-muted">Excluídos por decisão humana: {exclusions.map(exclusion => articleLabel(exclusion.articleId)).join(" · ")}</p>}
                   {remote && !readOnly && (
@@ -17999,7 +18238,7 @@ export default function ArquitetoPage() {
                     * `supportArticleIds` —, nunca de volume, posição, slug ou
                     * quantidade de links.
                     */}
-                  {workspaceMode === "links" && <th className="relative border-r border-divider px-2 py-2 text-center">Papel no Silo</th>}
+                  <th className="relative border-r border-divider px-2 py-2 text-center">Papel no Silo</th>
                   <th className="relative border-r border-divider px-2 py-2 text-center">Definição do artigo<KeywordTableColumnResizeHandle columnId="articleDefinition" label="Definição do artigo" onStart={columnResize.startResize} /></th>
                   <th className="relative border-r border-divider px-2 py-2">Silo<KeywordTableColumnResizeHandle columnId="silo" label="Silo" onStart={columnResize.startResize} /></th>
                   <th className="relative border-r border-divider px-2 py-2 text-right">Ações<KeywordTableColumnResizeHandle columnId="actions" label="Ações" onStart={columnResize.startResize} /></th>
@@ -18351,6 +18590,12 @@ export default function ArquitetoPage() {
                       processed: Boolean(articleFormationMarker),
                       concludedFormations: articleFormationMarker?.concludedFormations || [],
                       currentFormationBaseHash: articleFormationBase,
+                      currentComposition: (() => {
+                        const candidato = art.candidateRef
+                          ? universeOfCandidate(String(art.candidateRef))?.candidates.find(item => item.candidateRef === art.candidateRef)
+                          : undefined;
+                        return candidato ? { principalKeywordId: candidato.principalKeywordId, keywordIds: candidato.keywords.map(item => item.keywordId) } : null;
+                      })(),
                       published: art.isPublished,
                     });
                     /*
@@ -18436,7 +18681,7 @@ export default function ArquitetoPage() {
                         {/* Keyword principal */}
                         <td className="min-w-0 border-r border-slate-800/60 px-3 py-2"><p className="break-words text-sm font-semibold text-keyword" title={art.keywordPrincipal}>{art.keywordPrincipal}</p>{art.isPublished ? (publicationUrlFor(art) ? <a href={publicationUrlFor(art)!} target="_blank" rel="noopener noreferrer" className="mt-1 block max-w-[280px] truncate font-mono text-xs text-identity-published underline decoration-identity-published/50 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus select-all">{publicationUrlFor(art)}</a> : <span className="mt-1 block truncate font-mono text-xs text-identity-published">URL não recebida · /{art.slug}</span>) : <input type="text" value={articleIdentityContext.slugProtected && kgrBoundSlug ? kgrBoundSlug : currentSlug} onFocus={() => pushMasterHistory(masterList, `Editar slug de ${art.keywordPrincipal}`)} onChange={e => { if (!articleIdentityContext.slugProtected) setCustomSlugs(prev => ({ ...prev, [art.id]: e.target.value })); }} onBlur={e => { if (!articleIdentityContext.slugProtected) persistArticleIdentityField(art, "computedSlug", e.target.value); }} disabled={articleIdentityContext.slugProtected} className={`${ARCHITECT_UI.control} mt-1 h-7 w-full max-w-[280px] font-mono text-xs text-identity-new disabled:cursor-not-allowed disabled:opacity-70`} />}</td>
                         <td className="border-r border-slate-800/60 px-2 py-2 text-center text-sm text-foreground">{art.supportKeywords.length + 1} {art.supportKeywords.length === 0 ? "keyword" : "keywords"}</td>
-                        {workspaceMode === "links" && <td className="border-r border-divider px-2 py-2 text-center">{(() => {
+                        {workspaceMode !== "silos" && <td className="border-r border-divider px-2 py-2 text-center">{(() => {
                           /*
                            * A CHAVE É A DO ARTICLEDNA, NÃO A DA LINHA.
                            *
@@ -18449,7 +18694,8 @@ export default function ArquitetoPage() {
                            * mapa e o painel — que leem pelo nó do grafo, cujo id
                            * vem do ArticleDNA — mostravam PILAR e SUPORTE.
                            */
-                          const papel = linksHierarchy?.roleByArticleId.get(String(articleDnaVersion?.payload.articleId || ""));
+                          const papel = linksHierarchy?.roleByArticleId.get(String(articleDnaVersion?.payload.articleId || ""))
+                            ?? siloRoleByArticleId.get(String(articleDnaVersion?.payload.articleId || ""));
                           return papel
                             ? <span data-testid="architect-silo-role-cell" className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${papel === "PILAR" ? "border-positive-soft/40 bg-positive-soft/10 text-positive-soft" : "border-divider text-text-muted"}`}>{papel}</span>
                             : <span className="text-xs text-text-muted">—</span>;
@@ -18977,7 +19223,20 @@ export default function ArquitetoPage() {
                                         ? () => { void removeCandidateFromSilo(revisao.candidate.candidateRef); }
                                         : null}
                                     />;
-                                  })() : <>
+                                  })() : workspaceMode === "links" ? (
+                                    /*
+                                     * LINKS NÃO DECIDE ARTIGO (pedido do dono, 2026-09-30). O painel
+                                     * antigo (Lógica · SERP · IA · Revisão) repetia aqui decisões de
+                                     * composição, tipo da unidade e um "Fechamento do artigo" com
+                                     * conta própria. Em Links fica só o que é de Links — hierarquia
+                                     * no Silo e links, acima —; o artigo se decide na aba Artigos.
+                                     */
+                                    <section className="rounded-md border border-divider bg-surface-subtle p-3" data-testid="architect-links-article-readonly">
+                                      <p className="text-sm font-semibold text-foreground">As decisões do artigo ficam na aba Artigos</p>
+                                      <p className="mt-1 text-sm leading-6 text-text-muted">Aqui só se decidem os links. Composição, Principal, SERP, tipo da unidade e conclusão do artigo são resolvidos na aba Artigos, com “Concluir formação”.</p>
+                                      <button type="button" onClick={() => setWorkspaceMode("articles")} className={`${ARCHITECT_UI.toolbarButton} mt-2`} data-testid="architect-links-open-articles">Abrir na aba Artigos</button>
+                                    </section>
+                                  ) : <>
                                   <div role="tablist" aria-label={`Processos de ${art.keywordPrincipal}`} className="flex flex-wrap gap-2 border-b border-divider pb-3">
                                     {(["logic", "serp", "ai", "review"] as const).map(process => <button key={process} type="button" role="tab" aria-selected={expandedProcessTab === process} onClick={() => setExpandedProcessTabs(current => selectArticlePanelProcessTab(current, art.id, process))} className={`min-h-9 rounded-md border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-module-accent/35 ${expandedProcessTab === process ? "border-module-accent/45 bg-module-accent/10 text-foreground" : "border-divider bg-surface-subtle text-text-muted hover:bg-surface-elevated hover:text-foreground"}`}>{({ logic: "Lógica", serp: "SERP", ai: "IA", review: "Revisão" } as const)[process]}</button>)}
                                   </div>
@@ -19492,6 +19751,30 @@ export default function ArquitetoPage() {
       {/* DESFAZER SILO SUGERIDO — confirmação. Diz o que acontece antes de
           qualquer escrita; Silo com motivo de recusa aparece com o motivo e
           fica fora do botão. */}
+      {conclusionKeepPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="dialog" aria-modal="true" aria-label="Concluir formação e manter" data-testid="architect-conclusion-keep-dialog"
+          onKeyDown={event => { if (event.key === "Escape" && !conclusionKeepBusy) setConclusionKeepPrompt(null); }}>
+          <div className="flex max-h-[86vh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl">
+            <p className="text-base font-semibold text-foreground">Concluir formação</p>
+            <p className="text-sm leading-6 text-text-muted">Concluir também registra a sua decisão de manter estes artigos como estão. É a mesma decisão do “Manter composição”: vale para a composição de agora e é conferida na releitura.</p>
+            <ul className="grid gap-2 text-sm leading-6">
+              {conclusionKeepPrompt.items.map(item => (
+                <li key={item.candidateRef} className="rounded border border-divider bg-surface px-3 py-2">
+                  <span className="font-semibold text-foreground">{item.label}</span>
+                  <span className="block text-text-muted">{item.reasons.join(" · ")}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" disabled={conclusionKeepBusy} onClick={() => setConclusionKeepPrompt(null)} className={ARCHITECT_UI.toolbarButton}>Cancelar</button>
+              <button type="button" disabled={conclusionKeepBusy} onClick={() => { void keepAndConclude(); }} className={ARCHITECT_UI.primaryButton} data-testid="architect-conclusion-keep-confirm">
+                {conclusionKeepBusy ? "Gravando…" : `Concluir e manter ${conclusionKeepPrompt.items.length}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {siloUndoPrompt && (() => {
         const itens = siloUndoPrompt.map(ref => ({ ref, leitura: siloUndoReadings.get(ref) })).filter(item => item.leitura);
         const podem = itens.filter(item => item.leitura!.refusals.length === 0);
