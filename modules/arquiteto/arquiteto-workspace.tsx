@@ -10571,8 +10571,11 @@ export default function ArquitetoPage() {
      * humana anterior sem que ninguém soubesse.
      */
     const siloDeCandidato = new Map<string, string>();
+    /** O Silo do publicado é o da URL (spec §3): nunca é contestado nem movido por aqui. */
+    const candidatosPublicados = new Set<string>();
     for (const artigo of articlesList) {
       if (!artigo.candidateRef) continue;
+      if (artigo.isPublished) candidatosPublicados.add(String(artigo.candidateRef));
       siloDeCandidato.set(String(artigo.candidateRef), articleParentFor(artigo).territoryRef || "sem-silo");
     }
     const silosDoLote = [...new Set([...siloDeCandidato.values()])].filter(ref => ref !== "sem-silo");
@@ -10586,6 +10589,7 @@ export default function ArquitetoPage() {
       const atual = siloDeCandidato.get(evidencia.candidateRef);
       // Sem evidência vigente não há contestação: ausência não acusa ninguém.
       if (!atual || atual === "sem-silo" || !evidencia.current || !evidencia.urls.length) continue;
+      if (candidatosPublicados.has(evidencia.candidateRef)) continue;
       const proprias = new Set(evidencia.urls);
 
       /** Quantos resultados este candidato divide com os OUTROS de um Silo. */
@@ -15141,6 +15145,27 @@ export default function ArquitetoPage() {
      * isso sem dizer quem perde o quê — a decisão precisa ser informada, e o
      * Article impactado precisa entrar em revisão em vez de desaparecer.
      */
+    /*
+     * PUBLICADO FICA NO SILO DA URL (spec §3).
+     *
+     * A reanálise da arquitetura agrupa por afinidade e chegou a propor mover
+     * "modelos de campanha" de Estratégia de Negócios para Crescimento de
+     * Clínicas, contra a pasta da própria URL. A trava de impacto barrava tudo,
+     * inclusive os Silos que nada tinham a ver. A busca de uma página publicada
+     * (âncora ou membro do ArticleDNA dela) não é remanejada por aqui: fica onde
+     * está, e o resto do plano segue.
+     */
+    const buscasDePublicados = new Set<string>(masterList.filter(item => item.isPublished).map(item => String(item.id)));
+    for (const version of Object.values(acceptedArticleDnas)) {
+      if (!version.payload.publishedIdentityRef) continue;
+      for (const reference of version.payload.keywordReferences) buscasDePublicados.add(reference.keywordId);
+    }
+    const territorioAtual = new Map(masterList.map(item => [String(item.id), typeof item.territoryRef === "string" ? item.territoryRef : null]));
+    const mantidasNoSiloDaUrl = plan.assignments.filter(item => buscasDePublicados.has(item.keywordId) && territorioAtual.get(item.keywordId) && territorioAtual.get(item.keywordId) !== item.territoryRef);
+    if (mantidasNoSiloDaUrl.length) {
+      Object.assign(plan, { assignments: plan.assignments.filter(item => !mantidasNoSiloDaUrl.includes(item)) });
+      showNotification("info", `${mantidasNoSiloDaUrl.length} busca(s) de artigos publicados ficaram no Silo da URL: ${mantidasNoSiloDaUrl.map(item => territorioAtual.has(item.keywordId) ? String(masterList.find(k => String(k.id) === item.keywordId)?.keyword || item.keywordId) : item.keywordId).join(", ")}. O resto do plano segue.`);
+    }
     const impactoEstrutural = resolveTerritoryChangeImpact({
       proposals: plan.assignments.map(assignment => ({ keywordId: assignment.keywordId, territoryRef: assignment.territoryRef })),
       // O preview precisa do lote inteiro: dizer só "1 Article afetado"
@@ -17108,6 +17133,7 @@ export default function ArquitetoPage() {
             </div>
           </section>
         )}
+        {workspaceMode === "articles" && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} />}
         {workspaceMode === "articles" && articleFormation.batchObjective === "improve" && (
           <section className="border-b border-divider bg-surface-subtle px-4 py-4" data-testid="architect-formation-objective">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -17155,7 +17181,6 @@ export default function ArquitetoPage() {
             )}
           </section>
         )}
-        {workspaceMode === "articles" && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} />}
         {workspaceMode === "articles" && serpSubjectCards.length > 0 && (
           <details className="border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-serp-subject-advanced">
           <summary className="cursor-pointer text-sm font-semibold text-foreground">Análise por keyword (avançado): mesmo assunto no Google, trocas e reforços um a um</summary>
@@ -17182,6 +17207,8 @@ export default function ArquitetoPage() {
           </details>
         )}
         {workspaceMode === "articles" && (
+          <details className="border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-differentiation-advanced">
+          <summary className="cursor-pointer text-sm font-semibold text-foreground">Diferenciar publicados que disputam o mesmo assunto (avançado)</summary>
           <PublishedDifferentiationSection
             brandId={selectedBrandId}
             enabled={workspaceMode === "articles"}
@@ -17190,6 +17217,7 @@ export default function ArquitetoPage() {
             buttonClassName={ARCHITECT_UI.toolbarButton}
             primaryButtonClassName={ARCHITECT_UI.primaryButton}
           />
+          </details>
         )}
         {workspaceMode === "articles" && leftoverOpportunities && (
           <LeftoverOpportunitiesPanel

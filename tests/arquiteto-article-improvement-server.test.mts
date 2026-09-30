@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { mock, test } from "node:test";
-import { ArticleDNASchema } from "../lib/arquiteto/contracts.ts";
+import { ArticleDNASchema, ProvisionalArticleGroupSchema } from "../lib/arquiteto/contracts.ts";
 import { articleSerpBaseHash, resolveArticleFormationSerpState } from "../lib/arquiteto/article-serp-gate.ts";
 import { resolveKeywordDnaSignals } from "../lib/arquiteto/keyword-dna-signals.ts";
 import { suggestArticleSlug } from "../lib/arquiteto/article-formation.ts";
@@ -49,6 +49,9 @@ mock.module("../lib/server/arquiteto-differentiation-store.ts", { namedExports: 
 mock.module("../lib/server/arquiteto-differentiation-runtime.ts", { namedExports: { readGoogleAdsAverageVolumes: async () => { assert.ok(external);return new Map([[normalizeKeyword(discoveredPhrase),50]]); } } });
 mock.module("../lib/server/arquiteto-serp-http.ts", { namedExports: { handleArchitectFormationSerp: async (req: Request) => {
   const body = await req.json();
+  // Same limits as the real route: at most 20 groups, each a valid group.
+  assert.ok(body.groups.length >= 1 && body.groups.length <= 20, `groups per request: ${body.groups.length}`);
+  for (const group of body.groups) ProvisionalArticleGroupSchema.parse(group);
   if (body.mode === "plan") return json({ plan: { paidQueries: plansMissing, estimatedCostUsd: { min: plansMissing * .002, max: plansMissing * .003 }, missingDetails: [] } });
   if (body.authorizedPaidQueries) paid += body.authorizedPaidQueries;
   else assert.equal(body.cacheOnly, true, "no implicit provider call");

@@ -518,7 +518,18 @@ export function reinforcementSuggestionOwners(cards: readonly SerpSubjectCardVie
     ...card.suggestions.filter(item => item.where === "leftover" || (item.where === "other_silo" && !item.inOtherArticle)).map(item => ({ targetId: card.anchorKeywordId, keywordId: item.keywordId, tier: item.level === "strong" ? 0 : 1, score: item.sharedPageCount ?? 0, volume: item.volume ?? 0 })),
     ...(results?.get(card.anchorKeywordId)?.suggestions ?? []).map(item => ({ targetId: card.anchorKeywordId, keywordId: chaveNova(item.keyword), tier: item.level === "strong" ? 0 : 1, score: item.sharedPageCount, volume: item.adsVolume })),
   ]);
-  return allocateReinforcementChoices({ targets: targets.map(card => ({ id: card.anchorKeywordId, capacity: Math.max(0, card.suggestionLimit - (card.swapSubstitute && swapAccepted(card.anchorKeywordId) && !card.memberKeywordIds.includes(card.swapSubstitute.keywordId) ? 1 : 0)), priority: card.memberKeywordIds.length })), edges, fixed });
+  return allocateReinforcementChoices({ targets: targets.map(card => ({ id: card.anchorKeywordId, capacity: Math.max(0, reinforcementSlotsOf(card) - (card.swapSubstitute && swapAccepted(card.anchorKeywordId) && !card.memberKeywordIds.includes(card.swapSubstitute.keywordId) ? 1 : 0)), priority: card.memberKeywordIds.length })), edges, fixed });
+}
+
+/**
+ * Vagas reais do publicado: o teto de 6 menos o que ele já tem gravado E o que a
+ * formação já pôs nele na cópia de trabalho. Sem isso, a linha somava as duas
+ * coisas e passava do teto (1 → 11).
+ */
+export function reinforcementSlotsOf(card: Pick<SerpSubjectCardView, "kind" | "anchorKeywordId" | "suggestionLimit" | "memberKeywordIds"> & { articleKeywordIds?: readonly string[] | null }): number {
+  if (card.kind !== "published") return card.suggestionLimit;
+  const ocupadas = new Set([card.anchorKeywordId, ...(card.articleKeywordIds ?? []), ...card.memberKeywordIds]);
+  return Math.max(0, Math.min(card.suggestionLimit, TETO_DO_ARTIGO - ocupadas.size));
 }
 
 const pertence = (owners: ReadonlyMap<string, string> | null | undefined, chave: string, dono: string) => !owners || !owners.has(chave) || owners.get(chave) === dono;
@@ -530,11 +541,11 @@ const pertence = (owners: ReadonlyMap<string, string> | null | undefined, chave:
  * keyword que é de outro publicado (mais páginas em comum) não vem aqui.
  * Assunto: a marcação do domínio.
  */
-export function reinforcementDefaultPicks(card: Pick<SerpSubjectCardView, "kind" | "anchorKeywordId" | "suggestions" | "suggestionLimit">, owners?: ReadonlyMap<string, string> | null): Set<string> {
+export function reinforcementDefaultPicks(card: Pick<SerpSubjectCardView, "kind" | "anchorKeywordId" | "suggestions" | "suggestionLimit" | "memberKeywordIds"> & { articleKeywordIds?: readonly string[] | null }, owners?: ReadonlyMap<string, string> | null): Set<string> {
   if (card.kind !== "published") return initialSuggestionSelection(card);
   const marcadas = new Set<string>();
   for (const item of card.suggestions) {
-    if (marcadas.size >= card.suggestionLimit) break;
+    if (marcadas.size >= reinforcementSlotsOf(card)) break;
     if (item.level !== "strong" || !pertence(owners, item.keywordId, card.anchorKeywordId)) continue;
     if (item.where === "leftover" || (item.where === "other_silo" && !item.inOtherArticle)) marcadas.add(item.keywordId);
   }
