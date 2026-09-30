@@ -41,7 +41,7 @@ import { buildRadarResetPayload, radarResetDecision, radarResetLabel, radarReset
 import { buildRadarAutomaticResearchCuration } from "@/lib/radar/research-auto-selection";
 import { RADAR_EXTRACTION_MAX_ATTEMPTS, radarExtractionFailureIsRecoverable } from "@/lib/radar/extraction-retry";
 import { radarPhase1NextAction } from "@/lib/radar/serp-phase1";
-import { RADAR_DEFAULT_SEARCH_MODE, radarPrimaryModeCommitment, radarPrimaryModeOfAnalysis, radarResearchPlanOfAnalysis, radarSearchModeLabel, type RadarPrimarySearchMode } from "@/lib/radar/search-mode";
+import { RADAR_DEFAULT_SEARCH_MODE, radarGoogleBaseCommitment, radarResearchPlanOfAnalysis, radarSearchModeLabel, type RadarPrimarySearchMode } from "@/lib/radar/search-mode";
 import { buildRadarResearchPackage, radarProfileOfTarget, radarProfileSupportPlan, type RadarResearchPackage, type RadarResearchProfile, type RadarSupportResearchRecord } from "@/lib/radar/research-profile";
 import { radarAmazonReportEvidence, radarResearchProfileStateOfAnalysis, radarYoutubeFinalizeDecision, radarYoutubeReportEvidence, type RadarResearchProfileProjection } from "@/lib/radar/research-profile-state";
 import { buildRadarAmazonQueryPlan, radarAmazonQueryId, type RadarAmazonSearchRun } from "@/lib/radar/amazon-search-run";
@@ -622,7 +622,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * o 1.1 acabou com a trava só de um lado.
      */
     const payload = row ? analiseCorrenteDe(row)?.payload : null;
-    return radarPrimaryModeCommitment({ mode: modo, currentMode: radarPrimaryModeOfAnalysis(payload) });
+    /*
+     * SDD Radar 2026-09-30 (Parte A): o Google é a base e começa sempre;
+     * YouTube e Amazon são acréscimos liberados depois do Google finalizado.
+     * A trava antiga de "um universo por artigo" deixou de valer.
+     */
+    return radarGoogleBaseCommitment({ mode: modo, payload });
   }, [analiseCorrenteDe]);
 
   /**
@@ -4435,7 +4440,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       run: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.amazonSearch || null : null,
       plannedQueries: planoAmazon(activeRadarItem).queries.length,
       busy: amazonBusy,
-      blockedReason: planoAmazon(activeRadarItem).limitations[0] || null,
+      /* SDD Radar 2026-09-30 (Parte A): a Amazon é acréscimo; sem o Google finalizado, a tela diz por quê. */
+      blockedReason: (activeRadarItem ? compromissoDeModo(activeRadarItem, "AMAZON").reason : null) || planoAmazon(activeRadarItem).limitations[0] || null,
       pacote: activeRadarItem ? analiseCorrenteDe(activeRadarItem)?.payload.researchPackage || null : null,
       projecao: projecaoAmazon(activeRadarItem),
       blueprintView: blueprintCanonico(activeRadarItem, "AMAZON"),

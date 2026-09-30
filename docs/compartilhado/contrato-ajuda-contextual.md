@@ -55,6 +55,13 @@ O piloto real do Minerador vive em `modules/minerador/context-help.ts` e cobre:
 `Revisão Humana`. Os textos devem continuar coerentes com handlers, contratos
 e estado atual do módulo; estados não confirmados devem permanecer explícitos.
 
+O Arquiteto tem o seu catálogo em `modules/arquiteto/context-help.ts`
+(2026-09-30). Ele foi escrito para quem não conhece SEO e explica cada processo e
+cada botão: o cartão “Próximo passo” e os passos 1, 2 e 3; a leitura da IA;
+canibalização; Sobras; Silos (Desfazer, Restaurar); a Revisão do artigo,
+incluindo a divergência de SERP; KGR; Links internos; e o envio ao Radar. Quando
+um processo ou botão do Arquiteto muda, este catálogo muda na mesma entrega.
+
 ## Comportamento e acessibilidade
 
 - O trigger usa o `InfoHint` compartilhado com o título `Ajuda desta área`.

@@ -45,7 +45,7 @@ import { createStatusEvent, createVersionEnvelope, toVersionReference } from "@/
 import { loadCanonicalArquitetoArtifacts, persistArquitetoArtifact, persistArquitetoSiloPair } from "@/lib/arquiteto/canonical-persistence";
 import { buildCanonicalArticleWorkspaceItems, mergeCanonicalArticleWorkspaceItems } from "@/lib/arquiteto/canonical-bootstrap";
 import { persistArticleFormationMarker } from "@/lib/arquiteto/canonical-workspace";
-import { anchorRemoteTerritoryForSilo, buildCanonicalWorkflowWorkspaceItems, confirmRemoteSiloCandidate, createRemoteSiloCandidate, persistArchitectureMarker, updateRemoteTerritoryContext, consolidateRemoteSiloFromWorkingCopy, createRemoteSiloWorkingCopy, loadCanonicalArquitetoWorkspace, persistArchitectWorkingCopy, updateRemoteSiloWorkingCopy, type CanonicalSiloWorkingCopy, type CanonicalTerritory, type CanonicalWorkspaceSnapshot, type RemoteArticleFormationSerp, persistMineradorArquitetoHandoff } from "@/lib/arquiteto/canonical-workspace";
+import { anchorRemoteTerritoryForSilo, buildCanonicalWorkflowWorkspaceItems, confirmRemoteSiloCandidate, undoRemoteSiloCandidate, createRemoteSiloCandidate, persistArchitectureMarker, updateRemoteTerritoryContext, consolidateRemoteSiloFromWorkingCopy, createRemoteSiloWorkingCopy, loadCanonicalArquitetoWorkspace, persistArchitectWorkingCopy, updateRemoteSiloWorkingCopy, type CanonicalSiloWorkingCopy, type CanonicalTerritory, type CanonicalWorkspaceSnapshot, type RemoteArticleFormationSerp, persistMineradorArquitetoHandoff } from "@/lib/arquiteto/canonical-workspace";
 import { absolutePublishedUrl, applySiloIdentityToProposal, classifySiloWorkingCopyFailure, consolidatedTerritoryRefsOf, deriveSupportArticleIds, draftSiloWorkingCopyFromProposal, humanExclusion, humanPillarSelection, proposalFromRemoteWorkingCopy, resolveAuthoritativeSiloWorkingCopies, resolveProposalTerritoryRef, resolveSiloWorkingCopyIdentity, siloWorkingCopyIsReadOnly } from "@/lib/arquiteto/silo-working-copy-bridge";
 import type { SiloWorkingCopyState } from "@/lib/arquiteto/silo-working-copy-record";
 import { markSiloConsolidationIndeterminate, openSiloConsolidationOperation, registerSiloConsolidationAttempt, settleSiloConsolidationOperation, siloConsolidationRequestBody, type SiloConsolidationOperation } from "@/lib/arquiteto/silo-consolidation-operation";
@@ -121,7 +121,7 @@ import { detectCandidateOverlap, detectSlugCollisions, reservedForSiloPage, unre
 import { describeRadarReadback, verifyRadarHandoffReadback } from "@/lib/arquiteto/radar-handoff-readback";
 import { articleRunRowsFromGates, formatArticleRunBlockers } from "@/lib/arquiteto/process-observability";
 import { describeAllintitlePlain, describeArticleRunPlain, describeArticleRunStartPlain } from "@/lib/arquiteto/plain-run-messages";
-import { describeFormationConclusionOutcome, resolveFormationLedger, resolveSiloClosureReadiness } from "@/lib/arquiteto/silo-closure-readiness";
+import { closureFormationsForSilo, closureGuardsForSilo, describeFormationConclusionOutcome, describeSiloClosureReading, resolveFormationLedger, resolveSiloClosureReadiness } from "@/lib/arquiteto/silo-closure-readiness";
 import { keywordPackageClosureIssues, resolveArticleKeywordAlignment, type KeywordPackageState } from "@/lib/arquiteto/keyword-package-alignment";
 import { buildCanonicalSiloClosurePlan, resolveCanonicalClosureResumption, verifyCanonicalSiloClosure, type CanonicalSiloClosurePlan, type CanonicalSiloClosureVerification } from "@/lib/arquiteto/silo-composition-from-formations";
 import { readFormationConclusionState } from "@/lib/arquiteto/formation-conclusion-state";
@@ -139,7 +139,7 @@ import { newFormationRef, planAddKeywordsToCandidate, planKeywordRole, planMerge
 import { groupLeftoverOpportunities } from "@/lib/arquiteto/serp-subject-suggestions";
 import { LeftoverOpportunitiesPanel } from "./leftover-opportunities-panel";
 import { ARTICLE_FORMATION_REF_PREFIX, resolveArticleFormationState } from "@/lib/arquiteto/article-formation-decision";
-import { buildArticleFormationConfirmationPlan, summarizeConfirmationPlan, validateFormationConclusion, type ConclusionGate, type ConfirmationEntry } from "@/lib/arquiteto/article-formation-confirmation";
+import { buildArticleFormationConfirmationPlan, readyConclusionSubset, summarizeConfirmationPlan, validateFormationConclusion, type ConclusionGate, type ConclusionHeldOut, type ConfirmationEntry } from "@/lib/arquiteto/article-formation-confirmation";
 import { MAX_ARTICLE_KEYWORDS, articleFormationBaseHash, siloThemeTokens, summarizeArticleFormation, type ArticleCandidate, type ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
 import { siloContextTokens } from "@/lib/arquiteto/semantic-nucleus";
 import { resolveCandidateBoundaries, type CandidateSerpEvidence } from "@/lib/arquiteto/candidate-serp-boundary";
@@ -168,6 +168,7 @@ import { buildArchitectureFlowProjection, clusterRefOfFlowNode } from "@/lib/arq
 import { ARCHITECTURE_MARKER_CONTRACT_VERSION, ARCHITECTURE_SCENARIO_LABELS, resolveArchitectureScenarioState, type ArchitectureMarkerPayload } from "@/lib/arquiteto/architecture-marker-record";
 import { buildPublishedSiteArchitecture } from "@/lib/arquiteto/published-site-architecture";
 import { readinessWithPlannedMembers, resolveTerritoryConfirmationReadiness, siloIsHumanDecided } from "@/lib/arquiteto/territory";
+import { resolveTerritoryUndoOutcome, territoryHasPublishedAddress, territoryUndoLabel, territoryUndoRefusals } from "@/lib/arquiteto/territory-undo";
 import { TerritorialReviewPanel } from "./territorial-review-panel";
 import { PublishedSerpPanel } from "./published-serp-panel";
 import { SiloPrimaryProposalPanel } from "./silo-primary-proposal-panel";
@@ -2776,8 +2777,16 @@ export default function ArquitetoPage() {
      * portão do servidor (`SILO_RECONSIDERATION_PENDING`) existe e está
      * testado, mas só terá o que ler quando o achado for persistido.
      */
-    if (candidateGuards.openChallenges.length) {
-      return recusa(candidateGuards.reconsideration.summary);
+    /*
+     * Só as contestações DOS Silos que estão consolidando, e só as que a
+     * pessoa não manteve (2026-09-30). A contestação de um candidato de Leads
+     * barrava a consolidação de Estratégia, Crescimento e Captação — cada um
+     * com os artigos gravados e a working copy com Pilar pronta.
+     */
+    const contestacoesDoEscopo = openSiloChallenges
+      .filter(item => !escopo?.onlyTerritoryRefs || escopo.onlyTerritoryRefs.includes(item.currentSiloRef));
+    if (contestacoesDoEscopo.length) {
+      return recusa(describeSiloReconsideration(contestacoesDoEscopo).summary);
     }
 
     // A autoridade é a WC REMOTA. Sem linha remota não há o que consolidar:
@@ -4167,6 +4176,9 @@ export default function ArquitetoPage() {
       return semResultado("failed", message);
     } finally { setSerpBusy(false); setSerpBlockProgress(null); }
   };
+  /* "Concluir formação" é useCallback: lê a validação do render de agora, não a do clique anterior. */
+  const confirmSerpValidationRef = useRef(confirmSerpValidation);
+  confirmSerpValidationRef.current = confirmSerpValidation;
 
   const handleSerpRecommendationDecision = async (article: (typeof articlesList)[number], keywordId: string, status: "followed" | "ignored") => {
     const articleId = articleEntityIdFor(article);
@@ -9472,6 +9484,118 @@ export default function ArquitetoPage() {
     }
   };
 
+  /*
+   * DESFAZER SILO SUGERIDO.
+   *
+   * Só Silo sem endereço publicado aparece aqui. A leitura abaixo usa o que a
+   * tela já tem (membros, ArticleDNA e SiloDNA/SiloPage aprovados) para dizer
+   * ANTES do clique se ele pode sair; o servidor confere tudo de novo, no
+   * banco, e é quem decide. Nada é apagado: o Silo vira "rejeitado" e as
+   * keywords voltam para "sem Silo", na mesa.
+   */
+  const [siloUndoPrompt, setSiloUndoPrompt] = useState<string[] | null>(null);
+  const [siloUndoBusy, setSiloUndoBusy] = useState(false);
+  /** Andamento do lote: o diálogo fica aberto e diz "Desfazendo 1 de 3…". */
+  const [siloUndoProgress, setSiloUndoProgress] = useState<{ done: number; total: number } | null>(null);
+  const siloUndoCancelRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { if (siloUndoPrompt) siloUndoCancelRef.current?.focus(); }, [siloUndoPrompt]);
+  const siloUndoReadings = useMemo(() => {
+    const leituras = new Map<string, { label: string; keywordCount: number; refusals: string[] }>();
+    const aprovados = Object.values(acceptedArticleDnas)
+      .filter(version => version.payload.brandId === selectedBrandId && effectiveVersionStatus(version.versionId, versionEvents) === "approved")
+      .map(version => ({
+        articleId: version.payload.articleId,
+        label: version.payload.suggestedSlug || null,
+        territoryRef: version.payload.territoryRef ?? null,
+        keywordIds: [version.payload.principalKeywordId, ...version.payload.secondaryKeywordIds, ...version.payload.narrativeReinforcementIds],
+      }));
+    const artefatos = [
+      ...Object.values(acceptedSiloDnas).map(version => ({ kind: "silo_dna" as const, territoryRef: version.payload.territoryRef ?? null, status: effectiveVersionStatus(version.versionId, versionEvents) || "", published: false })),
+      ...Object.values(acceptedSiloPages).map(version => ({ kind: "silo_page" as const, territoryRef: version.payload.territoryRef ?? null, status: effectiveVersionStatus(version.versionId, versionEvents) || "", published: version.payload.publicationStatus === "published" })),
+    ];
+    for (const remote of remoteTerritories) {
+      const territory = remote.territory;
+      if (territory.lifecycleStatus !== "candidate" && territory.lifecycleStatus !== "confirmed") continue;
+      if (territoryHasPublishedAddress(territory)) continue;
+      const membros = masterList
+        .filter(item => item.territoryRef === remote.territoryRef)
+        .map(item => ({ keywordId: String(item.id), label: String(item.keyword || ""), isPublished: Boolean(item.isPublished) }));
+      leituras.set(remote.territoryRef, {
+        label: territoryUndoLabel(territory),
+        keywordCount: membros.length,
+        refusals: territoryUndoRefusals({ territory, members: membros, approvedArticles: aprovados, siloArtifacts: artefatos }).map(refusal => refusal.message),
+      });
+    }
+    return leituras;
+  }, [acceptedArticleDnas, acceptedSiloDnas, acceptedSiloPages, masterList, remoteTerritories, selectedBrandId, versionEvents]);
+  const siloUndoEligibleRefs = useMemo(() => [...siloUndoReadings.entries()]
+    .filter(([, leitura]) => leitura.refusals.length === 0)
+    .map(([ref]) => ref), [siloUndoReadings]);
+
+  /**
+   * Um Silo por requisição, cada um com o seu lock; UMA releitura no fim diz
+   * o desfecho de cada. Sucesso só é anunciado para o que a releitura
+   * confirmou: território `rejected` e nenhuma keyword apontando para ele.
+   */
+  const undoSuggestedSilos = async (refs: readonly string[]) => {
+    if (!selectedBrandId || !refs.length || siloUndoBusy) return;
+    setSiloUndoBusy(true);
+    const recusas: string[] = [];
+    const esperados = new Map<string, string[]>();
+    try {
+      for (const [indice, ref] of refs.entries()) {
+        setSiloUndoProgress({ done: indice + 1, total: refs.length });
+        const remote = remoteTerritories.find(item => item.territoryRef === ref);
+        const nome = remote ? territoryUndoLabel(remote.territory) : "Silo";
+        if (!remote) { recusas.push(`${nome}: não está no snapshot remoto; recarregue.`); continue; }
+        esperados.set(ref, masterList.filter(item => item.territoryRef === ref).map(item => String(item.id)));
+        try {
+          await undoRemoteSiloCandidate({ brandId: selectedBrandId, territoryRef: ref, expectedLock: remote.lockVersion });
+        } catch (error) {
+          const bruto = error instanceof Error ? error.message : "";
+          recusas.push(bruto.replace(/territory:[0-9a-f-]{36}/gi, nome).trim() || `${nome} não pôde ser desfeito.`);
+        }
+      }
+      const canonical = await loadCanonicalArquitetoWorkspace(selectedBrandId);
+      const membrosRelidos = new Map<string, string[]>();
+      for (const entry of buildCanonicalWorkflowWorkspaceItems(canonical.workflowItems, canonical.keywords, selectedBrandId)) {
+        const ref = (entry as Record<string, unknown>).territoryRef;
+        if (typeof ref === "string" && esperados.has(ref)) membrosRelidos.set(ref, [...(membrosRelidos.get(ref) || []), String((entry as Record<string, unknown>).id)]);
+      }
+      const desfeitos: string[] = [];
+      const pendentes: string[] = [];
+      for (const [ref, esperadas] of esperados) {
+        const relido = canonical.territories.find(item => item.territoryRef === ref);
+        const nome = relido ? territoryUndoLabel(relido.territory) : "Silo";
+        const veredito = resolveTerritoryUndoOutcome({
+          territoryRef: ref,
+          readbackLifecycle: relido?.territory.lifecycleStatus ?? null,
+          expectedMemberIds: esperadas,
+          readbackMemberIds: membrosRelidos.get(ref) || [],
+        });
+        if (veredito.outcome === "applied") desfeitos.push(`${nome} (${esperadas.length} keyword(s) em sem Silo)`);
+        else if (veredito.outcome === "partial") pendentes.push(veredito.remaining.length
+          ? `${nome}: ficou pela metade (${veredito.remaining.length} keyword(s) ainda no Silo). Tente de novo.`
+          : `${nome}: as keywords já saíram do Silo; falta marcar o Silo como desfeito. Tente de novo.`);
+      }
+      setRemoteTerritories(canonical.territories);
+      const partes = [
+        desfeitos.length ? `Silo(s) desfeito(s) e conferido(s) na releitura: ${desfeitos.join(" · ")}. Nada foi apagado.` : "",
+        ...pendentes,
+        ...recusas,
+      ].filter(Boolean);
+      showNotification(recusas.length || pendentes.length ? (desfeitos.length ? "warning" : "error") : "success",
+        partes.join(" ") || "Nenhum Silo foi desfeito.");
+    } catch (error) {
+      showNotification("error", `Não deu para conferir o resultado: ${error instanceof Error ? error.message : "falha na releitura"}. Recarregue antes de tentar de novo.`);
+    } finally {
+      setSiloUndoBusy(false);
+      setSiloUndoProgress(null);
+      setSiloUndoPrompt(null);
+      setCanonicalWorkspaceReload(current => current + 1);
+    }
+  };
+
   /**
    * Decisão humana de Silo para uma keyword.
    *
@@ -9509,6 +9633,30 @@ export default function ArquitetoPage() {
     if (!selectedBrandId) return { applied: [], unchanged: [], refused: decisions.map(item => item.keywordId) };
 
     const porId = new Map(masterList.map(entry => [String(entry.id), entry as Record<string, unknown>]));
+    /*
+     * ARTIGO APROVADO NÃO PERDE KEYWORD POR DECISÃO DE SILO EM LOTE (2026-09-30).
+     * Na AdalbaPro, um lote de "Decisão humana de silo" levou 14 keywords de 5
+     * ArticleDNAs aprovados para outro Silo, e os artigos saíram do cenário
+     * ("N de M buscas saíram do território deste artigo"). O Confirmar já barra
+     * isso; os outros caminhos do lote (reforço entre Silos, aceitar em grupo)
+     * não barravam. A keyword que quebraria um artigo aprovado fica fora do
+     * lote, recusada; devolver ao território do artigo continua permitido.
+     */
+    const impacto = resolveTerritoryChangeImpact({
+      proposals: decisions.filter(decision => !decision.declaredBySite).map(decision => ({
+        keywordId: decision.keywordId,
+        territoryRef: decision.target.kind === "territory" ? decision.target.territoryRef : decision.target.kind === "unassigned" ? null : String(porId.get(decision.keywordId)?.territoryRef ?? ""),
+      })),
+      approvedArticles: Object.values(acceptedArticleDnas).filter(version => effectiveVersionStatus(version.versionId, versionEvents) === "approved"),
+      territoryByKeywordId: new Map(masterList.map(keyword => [String(keyword.id), typeof (keyword as Record<string, unknown>).territoryRef === "string" ? String((keyword as Record<string, unknown>).territoryRef) : null])),
+      // O aviso nomeia o artigo pela principal, nunca pelo id técnico.
+      labelByKeywordId: new Map(masterList.map(keyword => [String(keyword.id), String((keyword as Record<string, unknown>).keyword || "")])),
+    });
+    const protegidas = new Set(impacto.impacted.filter(item => item.classification === "BREAKS_APPROVED_STRUCTURE").flatMap(item => item.losingKeywordIds));
+    if (protegidas.size) {
+      const nomes = impacto.impacted.filter(item => item.classification === "BREAKS_APPROVED_STRUCTURE").map(item => item.label);
+      showNotification("info", `${protegidas.size} keyword(s) continuam no Silo do próprio artigo aprovado (${nomes.slice(0, 5).join(", ")}${nomes.length > 5 ? ", …" : ""}). Não é erro: tirar keyword de artigo aprovado é revisão do artigo, não decisão de Silo.`);
+    }
     const plano = planSiloDecisionBatch({
       brandId: selectedBrandId,
       landscape,
@@ -9525,9 +9673,15 @@ export default function ArquitetoPage() {
           isPublished: Boolean(item.isPublished),
         };
       },
-      decisions,
+      decisions: decisions.filter(decision => !protegidas.has(decision.keywordId)),
       decidedAt: new Date().toISOString(),
     });
+    /*
+     * Ficar no Silo do artigo aprovado é o resultado certo, não falha: conta
+     * como "já estava" (caso real 2026-09-30: o Confirmar dizia "37 escritas
+     * falharam" em ERRO para keywords que só permaneceram no próprio artigo).
+     */
+    plano.unchanged.push(...protegidas);
 
     const paraGravar = (lote: readonly BatchSiloWrite[]) => lote.map(write => ({
       workflowItemId: write.workflowItemId,
@@ -10623,7 +10777,7 @@ export default function ArquitetoPage() {
     const challengePorCandidato = new Map(challenges.map(item => [item.scope.id, item]));
 
     return {
-      riscoPorCandidato, colisaoPorCandidato, pares, rotuloDoCandidato,
+      riscoPorCandidato, colisaoPorCandidato, pares, rotuloDoCandidato, siloDeCandidato,
       fronteiras, fronteiraPorCandidato,
       challenges, challengePorCandidato,
       reconsideration: describeSiloReconsideration(challenges),
@@ -11681,6 +11835,79 @@ export default function ArquitetoPage() {
       reservedKeywordIds: reservadas,
     }));
   }, [articleFormation, serpSubjectDiagnoses, serpSubjectIndex]);
+  /** A mesma condição com que `LeftoverOpportunitiesPanel` decide se aparece: o cartão "Próximo passo" nunca manda para Sobras vazias. */
+  /*
+   * SOBRAS DESCARTADAS (pedido do dono, 2026-09-30). É preferência de tela,
+   * por Marca e por navegador: guarda quais sobras a pessoa descartou e
+   * esconde o painel enquanto forem as mesmas. Nenhuma keyword é apagada nem
+   * movida — seguem em Keywords não agrupadas. Sobra nova traz o painel de
+   * volta, e "Mostrar de novo" desfaz.
+   */
+  const leftoverKeywordIds = useMemo(() => leftoverOpportunities
+    ? [...leftoverOpportunities.groups.flatMap(group => group.members.map(member => member.keywordId)), ...leftoverOpportunities.withoutVolume.map(item => item.keywordId)]
+    : [], [leftoverOpportunities]);
+  const leftoverDismissKey = selectedBrandId ? `arquiteto:sobras-descartadas:${selectedBrandId}` : null;
+  /* A escolha desta sessão vence a guardada: sem armazenamento, ainda vale na tela. */
+  const [dismissedLeftoversNow, setDismissedLeftoversNow] = useState<{ key: string; ids: ReadonlySet<string> } | null>(null);
+  const dismissedLeftoverIds = useMemo((): ReadonlySet<string> => {
+    if (!leftoverDismissKey) return new Set();
+    if (dismissedLeftoversNow?.key === leftoverDismissKey) return dismissedLeftoversNow.ids;
+    if (typeof window === "undefined") return new Set();
+    try {
+      const ids: unknown = JSON.parse(window.localStorage.getItem(leftoverDismissKey) || "[]");
+      return new Set(Array.isArray(ids) ? ids.map(String) : []);
+    } catch {
+      return new Set();
+    }
+  }, [leftoverDismissKey, dismissedLeftoversNow]);
+  const leftoversDismissed = leftoverKeywordIds.length > 0 && leftoverKeywordIds.every(id => dismissedLeftoverIds.has(id));
+  const dismissLeftovers = (descartar: boolean) => {
+    if (!leftoverDismissKey) return;
+    const ids = descartar ? leftoverKeywordIds : [];
+    try { window.localStorage.setItem(leftoverDismissKey, JSON.stringify(ids)); } catch { /* sem armazenamento: vale só nesta tela */ }
+    setDismissedLeftoversNow({ key: leftoverDismissKey, ids: new Set(ids) });
+    showNotification("info", descartar
+      ? `${ids.length} sobra(s) descartada(s) da tela. Nenhuma keyword foi apagada: elas continuam em Keywords não agrupadas, e sobra nova volta a aparecer.`
+      : "As sobras voltaram para a tela.");
+  };
+  const hasLeftoverOpportunities = !leftoversDismissed && Boolean(leftoverOpportunities && (leftoverOpportunities.groups.length || leftoverOpportunities.withoutVolume.length));
+
+  /*
+   * "TIRAR ESTE ARTIGO DO SILO" (pedido do dono, 2026-09-30).
+   *
+   * Candidato que a pessoa não vai usar segurava o fechamento do Silo para
+   * sempre (FORMATIONS_PENDING). A saída usa a decisão de Silo que já existe —
+   * "sem Silo" —, pelo mesmo lote com lock e releitura: nenhuma keyword é
+   * apagada, nenhum contrato novo. Só candidato não concluído e não publicado.
+   */
+  const removeCandidateFromSilo = async (candidateRef: string) => {
+    const universe = universeOfCandidate(candidateRef);
+    const candidate = universe?.candidates.find(item => item.candidateRef === candidateRef);
+    if (!universe || !candidate) {
+      showNotification("warning", "O artigo não está mais na mesa: recarregue a formação.");
+      return;
+    }
+    const concluido = (articleFormationMarker?.concludedFormations || []).some(item => item.candidateRef === candidateRef);
+    if (concluido || candidate.keywords.some(item => publishedKeywordIdSet.has(item.keywordId))) {
+      showNotification("warning", "Artigo concluído ou publicado não sai do Silo por aqui.");
+      return;
+    }
+    const nome = candidateGuards.rotuloDoCandidato.get(candidateRef) || candidateRef;
+    const ids = [...new Set([...candidate.keywords.map(item => item.keywordId), ...candidate.overflowKeywordIds])];
+    setFormationBusy(true);
+    try {
+      const lote = await applySiloDecisionsInBatch(ids.map(keywordId => ({ keywordId, target: { kind: "unassigned" as const } })));
+      setCanonicalWorkspaceReload(current => current + 1);
+      const sairam = lote.applied.length + lote.unchanged.length;
+      showNotification(lote.refused.length ? "warning" : "success",
+        `“${nome}” saiu do Silo: ${sairam} de ${ids.length} keyword(s) voltaram para “sem Silo”, confirmadas na releitura. Nada foi apagado.`
+        + (lote.refused.length ? ` ${lote.refused.length} não mudaram (veja o aviso da decisão de Silo).` : ""));
+    } catch (error) {
+      showNotification("error", `“${nome}” não saiu do Silo: ${error instanceof Error ? error.message : "a gravação não confirmou"}. Nada foi apagado.`);
+    } finally {
+      setFormationBusy(false);
+    }
+  };
 
   /** "Criar artigo novo com este grupo": ação explícita, confirmada, pelo writer da formação e com releitura. */
   const createArticleFromLeftoverGroup = async (input: { siloRef: string; keywordIds: string[]; principalKeywordId: string; name: string }) => {
@@ -13204,6 +13431,11 @@ export default function ArquitetoPage() {
     pendingReasons: ReadonlyMap<string, string>;
     tone: "success" | "warning";
   } | null>(null);
+  /*
+   * A conclusão pedida pela pessoa que esperou a SERP: roda de novo depois do
+   * render que trouxe os pareceres gravados (os gates do clique são os de antes).
+   */
+  const [pendingHumanConclusion, setPendingHumanConclusion] = useState(false);
   useEffect(() => {
     if (!readoutPendente) return;
     const execucao = { reusedInThisRun: readoutPendente.reused, pendingReasons: readoutPendente.pendingReasons };
@@ -13213,6 +13445,38 @@ export default function ArquitetoPage() {
     anunciarBloqueios(readoutPendente.collected, readoutPendente.refs, execucao);
     setReadoutPendente(null);
   }, [readoutPendente, readoutDaExecucao, anunciarBloqueios, showNotification]);
+
+  /*
+   * "MANTER COMPOSIÇÃO" É A DECISÃO HUMANA QUE FALTAVA (2026-09-30).
+   *
+   * Par que disputa o tema e fronteira contestada não tinham saída sem mover
+   * keyword: o par só fechava com um confronto que ninguém gravava, e a
+   * contestação nascia sempre "aberta". A decisão que a pessoa JÁ grava —
+   * aceitar a composição atual, com o hash dela, confirmada na releitura —
+   * passa a valer para os dois, e a tela diz isso antes do clique:
+   *   - par: resolvido quando a SERP separa (KEEP_SEPARATE) ou quando os DOIS
+   *     lados foram mantidos pela pessoa;
+   *   - fronteira: resolvida quando o artigo contestado foi mantido.
+   * Mudou a composição, o hash muda e a decisão deixa de valer sozinha.
+   */
+  const humanKeptCandidate = useCallback((candidateRef: string) => {
+    const decisao = remoteArticleSerp.find(item => item.candidateRef === candidateRef)?.payload.humanResolution;
+    const esperado = articleSerpGates.get(candidateRef)?.expectedBaseHash;
+    return decisao?.decision === "accept_current_composition" && Boolean(esperado) && decisao.formationBaseHash === esperado;
+  }, [remoteArticleSerp, articleSerpGates]);
+  const openCannibalPairs = useMemo(() => unresolvedCannibalization({
+    risks: candidateGuards.pares,
+    resolvedPairs: [
+      ...candidateGuards.fronteiras.filter(item => item.verdict === "KEEP_SEPARATE"),
+      ...candidateGuards.pares.filter(par => humanKeptCandidate(par.left) && humanKeptCandidate(par.right)),
+    ],
+  }), [candidateGuards, humanKeptCandidate]);
+  const openSiloChallenges = useMemo(() => {
+    // Artigo já concluído foi decidido no "Concluir formação": mudar o Silo dele
+    // é revisão do artigo, não pendência do fechamento (2026-09-30).
+    const concluidos = new Set((articleFormationMarker?.concludedFormations || []).map(item => item.candidateRef));
+    return candidateGuards.openChallenges.filter(item => !humanKeptCandidate(item.scope.id) && !concluidos.has(item.scope.id));
+  }, [candidateGuards, humanKeptCandidate, articleFormationMarker]);
 
   const articleSerpGateSummary = useMemo(
     () => summarizeArticleSerpGate([...articleSerpGates.values()]),
@@ -14016,6 +14280,13 @@ export default function ArquitetoPage() {
     if (!selectedBrandId) throw new Error("Selecione uma marca antes de fechar o Silo.");
     const todas = input.formations;
     const porRef = new Map(todas.map(item => [item.candidateRef, item]));
+    /*
+     * O PILAR É UM ARTIGO, NÃO UMA FORMAÇÃO (2026-09-30). O plano deriva o Pilar
+     * pelo `candidateRef`; o SiloDNA aponta o `articleId` do ArticleDNA. No
+     * publicado os dois diferem (o artigo é a keyword publicada), e usar o ref
+     * gravaria um Pilar que não existe no acervo.
+     */
+    const pilarArticleId = porRef.get(input.plan.pillarFormationRef)?.materializedArticleId || input.plan.pillarFormationRef;
 
     /* 1. ARTICLEDNA — do snapshot congelado, com `siloId` nulo. */
     const entradas: ConfirmationEntry[] = [];
@@ -14109,7 +14380,7 @@ export default function ArquitetoPage() {
       return verifyCanonicalSiloClosure({
         territoryRef: input.territoryRef,
         expectedArticleIds: esperados,
-        expectedPillarArticleId: input.plan.pillarFormationRef,
+        expectedPillarArticleId: pilarArticleId,
         observedArticles: artigos.map(version => ({
           articleId: String(version.payload.articleId),
           versionId: version.versionId,
@@ -14167,7 +14438,7 @@ export default function ArquitetoPage() {
     // cobertura com desempate declarado, e o motivo viaja junto.
     const proposta = chooseSiloWorkingCopyPillar(
       applySiloIdentityToProposal(propostaBruta, siloIdentityOf(territorio)),
-      input.plan.pillarFormationRef,
+      pilarArticleId,
     );
 
     const rascunho = draftSiloWorkingCopyFromProposal({
@@ -14177,7 +14448,7 @@ export default function ArquitetoPage() {
     });
     const existente = posArtigos.siloWorkingCopies.find(item => item.workingCopy.territoryRef === input.territoryRef);
     const decisaoPilar = humanPillarSelection({
-      articleId: input.plan.pillarFormationRef,
+      articleId: pilarArticleId,
       actorUserId: session?.user?.id || "human-reviewer",
       decidedAt: new Date().toISOString(),
       // O ato humano é a conclusão da formação; o Pilar é a consequência
@@ -14187,7 +14458,7 @@ export default function ArquitetoPage() {
     });
     const suportes = deriveSupportArticleIds({
       articleIds: rascunho.articleRefs.map(reference => reference.articleId),
-      pillarArticleId: input.plan.pillarFormationRef,
+      pillarArticleId: pilarArticleId,
       exclusions: existente?.workingCopy.exclusions || [],
     });
 
@@ -14270,6 +14541,120 @@ export default function ArquitetoPage() {
    * Nada é recriado: `materializationOrder` já exclui quem tem
    * `materializedArticleId`, então a retomada normal cria zero ArticleDNA.
    */
+  /*
+   * A LEITURA DO FECHAMENTO DE CADA SILO, SEM ESCREVER NADA (2026-09-30).
+   *
+   * A retomada automática abaixo e a tela leem DAQUI: uma regra só. Antes, o
+   * Silo que não fechava não dizia por quê — a aba Links internos mostrava
+   * "Nenhum par SiloDNA + SiloPage" e a mesa "consolidação canônica
+   * pendente", sem o motivo.
+   */
+  const approvedArticlesForClosure = useMemo(() => Object.values(acceptedArticleDnas).map(version => ({
+    versionId: version.versionId,
+    createdAt: version.createdAt,
+    createdBy: version.createdBy,
+    articleId: String(version.payload.articleId),
+    territoryRef: version.payload.territoryRef ?? null,
+    principalKeywordId: version.payload.principalKeywordId,
+    suggestedSlug: version.payload.suggestedSlug ?? null,
+    references: version.payload.keywordReferences.map(reference => ({ keywordId: String(reference.keywordId), role: reference.role })),
+  })), [acceptedArticleDnas]);
+  const siloClosureReadings = useMemo(() => {
+    const congeladas = articleFormationMarker?.concludedFormations || [];
+    const territorios = [...new Set([
+      ...congeladas.map(item => item.territoryRef),
+      ...articleFormationUniverses.map(universe => universe.siloRef),
+    ])].filter(Boolean);
+    const volumes = new Map(masterList.map(keyword => [
+      String(keyword.id),
+      typeof keyword.volume_search === "number" ? keyword.volume_search : null,
+    ]));
+    const aprovados = approvedArticlesForClosure;
+    return territorios.map(territoryRef => {
+      // Ponteiro órfão e aprovado sem "Concluir formação": ver `closureFormationsForSilo`.
+      const leituraDoSilo = closureFormationsForSilo({
+        territoryRef,
+        concludedFormations: congeladas,
+        candidates: articleFormationUniverses
+          .filter(universe => universe.siloRef === territoryRef)
+          .flatMap(universe => universe.candidates),
+        approvedArticles: aprovados,
+      });
+      const ativos = leituraDoSilo.activeCandidateRefs;
+      const doSilo = leituraDoSilo.formations;
+      const concluidos = new Set(doSilo.map(item => item.candidateRef));
+      const foraDoCenario = leituraDoSilo.outOfScenario;
+      const par = canonicalSiloPairFor(territoryRef);
+      const guardas = closureGuardsForSilo({
+        siloRef: territoryRef,
+        pairs: openCannibalPairs,
+        challenges: openSiloChallenges,
+        siloOfCandidate: candidateGuards.siloDeCandidato,
+        concludedCandidateRefs: concluidos,
+      });
+      const fechamento = resolveSiloClosureReadiness({
+        siloRef: territoryRef,
+        activeCandidateRefs: ativos,
+        concludedCandidateRefs: doSilo.map(item => item.candidateRef),
+        pendingMaterializationRefs: doSilo.filter(item => !item.materializedArticleId).map(item => item.candidateRef),
+        openBoundaryChallenges: guardas.challenges.map(item => ({ scopeLabel: item.scope.label })),
+        unresolvedCannibalization: guardas.pairs.map(item => ({
+          leftLabel: candidateGuards.rotuloDoCandidato.get(item.left) || item.left,
+          rightLabel: candidateGuards.rotuloDoCandidato.get(item.right) || item.right,
+        })),
+        alreadyConsolidated: par.complete,
+        // Insumo em movimento barra a retomada igual ao gatilho: uma regra.
+        keywordPackageIssues: keywordPackageIssuesFor(doSilo.flatMap(item => item.members.map(member => member.keywordId))),
+      });
+      const formacoes = doSilo.map(item => ({
+        candidateRef: item.candidateRef,
+        principalKeywordId: item.principalKeywordId,
+        members: item.members,
+        formationBaseHash: item.formationBaseHash,
+        materializedArticleId: item.materializedArticleId,
+      }));
+      const plano = buildCanonicalSiloClosurePlan({
+        formations: formacoes,
+        blockers: fechamento.blockers,
+        principalVolumeByKeywordId: volumes,
+      });
+      const retomada = resolveCanonicalClosureResumption({
+        plan: plano,
+        formations: formacoes,
+        remoteApprovedArticleIds: Object.values(acceptedArticleDnas)
+          .filter(version => version.payload.territoryRef === territoryRef)
+          .map(version => String(version.payload.articleId)),
+        canonicalSiloExists: Boolean(par.siloDna),
+        canonicalSiloPageExists: Boolean(par.siloPage),
+      });
+      return {
+        territoryRef,
+        label: articleFormationUniverses.find(universe => universe.siloRef === territoryRef)?.siloLabel || territoryRef,
+        doSilo,
+        foraDoCenario,
+        consolidated: par.complete,
+        pendingLabels: ativos.filter(ref => !concluidos.has(ref)).map(ref => candidateGuards.rotuloDoCandidato.get(ref) || ref),
+        fechamento,
+        plano,
+        retomada,
+      };
+    });
+  }, [articleFormationMarker, articleFormationUniverses, candidateGuards, openCannibalPairs, openSiloChallenges, canonicalSiloPairFor, keywordPackageIssuesFor, approvedArticlesForClosure, acceptedArticleDnas, masterList]);
+  const siloClosureSummaries = useMemo(() => siloClosureReadings.map(leitura => ({
+    territoryRef: leitura.territoryRef,
+    ...describeSiloClosureReading({
+      label: leitura.label,
+      consolidated: leitura.consolidated,
+      pendingLabels: leitura.pendingLabels,
+      blockers: leitura.fechamento.blockers,
+      outOfScenarioCount: leitura.foraDoCenario.length,
+      hasConcluded: leitura.doSilo.length > 0,
+      planReady: leitura.plano.state === "READY",
+      resumable: leitura.retomada.state === "RESUMABLE",
+      resumptionReason: leitura.retomada.state === "RESUMABLE" ? null : leitura.retomada.reason,
+    }),
+  })), [siloClosureReadings]);
+
   const closureResumptionAttempted = useRef(new Set<string>());
   useEffect(() => {
     if (!selectedBrandId || !articleFormationMarker || formationBusy || siloConsolidating) return;
@@ -14282,62 +14667,13 @@ export default function ArquitetoPage() {
      * chegar, e antes disso não há leitura a fazer.
      */
     if (canonicalBootstrapStatus !== "LOADED") return;
-    const congeladas = articleFormationMarker.concludedFormations || [];
-    if (!congeladas.length) return;
 
-    for (const territoryRef of [...new Set(congeladas.map(item => item.territoryRef))]) {
+    for (const leitura of siloClosureReadings) {
+      const { territoryRef, doSilo, plano, retomada } = leitura;
+      if (!doSilo.length) continue;
       if (closureResumptionAttempted.current.has(territoryRef)) continue;
-      const doSilo = congeladas.filter(item => item.territoryRef === territoryRef);
-      const ativos = articleFormationUniverses
-        .filter(universe => universe.siloRef === territoryRef)
-        .flatMap(universe => universe.candidates.map(candidate => candidate.candidateRef));
       // Fora do cenário corrente não há o que retomar: o lote mudou.
-      if (!doSilo.every(item => ativos.includes(item.candidateRef))) continue;
-
-      const par = canonicalSiloPairFor(territoryRef);
-      const fechamento = resolveSiloClosureReadiness({
-        siloRef: territoryRef,
-        activeCandidateRefs: ativos,
-        concludedCandidateRefs: doSilo.map(item => item.candidateRef),
-        pendingMaterializationRefs: doSilo.filter(item => !item.materializedArticleId).map(item => item.candidateRef),
-        openBoundaryChallenges: candidateGuards.openChallenges.map(item => ({ scopeLabel: item.scope.label })),
-        unresolvedCannibalization: candidateGuards.pares.map(item => ({
-          leftLabel: candidateGuards.rotuloDoCandidato.get(item.left) || item.left,
-          rightLabel: candidateGuards.rotuloDoCandidato.get(item.right) || item.right,
-        })),
-        alreadyConsolidated: par.complete,
-        // Insumo em movimento barra a retomada igual ao gatilho: uma regra.
-        keywordPackageIssues: keywordPackageIssuesFor(doSilo.flatMap(item => item.members.map(member => member.keywordId))),
-      });
-      const plano = buildCanonicalSiloClosurePlan({
-        formations: doSilo.map(item => ({
-          candidateRef: item.candidateRef,
-          principalKeywordId: item.principalKeywordId,
-          members: item.members,
-          formationBaseHash: item.formationBaseHash,
-          materializedArticleId: item.materializedArticleId,
-        })),
-        blockers: fechamento.blockers,
-        principalVolumeByKeywordId: new Map(masterList.map(keyword => [
-          String(keyword.id),
-          typeof keyword.volume_search === "number" ? keyword.volume_search : null,
-        ])),
-      });
-      const retomada = resolveCanonicalClosureResumption({
-        plan: plano,
-        formations: doSilo.map(item => ({
-          candidateRef: item.candidateRef,
-          principalKeywordId: item.principalKeywordId,
-          members: item.members,
-          formationBaseHash: item.formationBaseHash,
-          materializedArticleId: item.materializedArticleId,
-        })),
-        remoteApprovedArticleIds: Object.values(acceptedArticleDnas)
-          .filter(version => version.payload.territoryRef === territoryRef)
-          .map(version => String(version.payload.articleId)),
-        canonicalSiloExists: Boolean(par.siloDna),
-        canonicalSiloPageExists: Boolean(par.siloPage),
-      });
+      if (leitura.foraDoCenario.length) continue;
       if (retomada.state !== "RESUMABLE" || plano.state !== "READY") continue;
 
       closureResumptionAttempted.current.add(territoryRef);
@@ -14369,19 +14705,29 @@ export default function ArquitetoPage() {
     }
   }, [
     selectedBrandId, articleFormationMarker, formationBusy, siloConsolidating,
-    canonicalBootstrapStatus, articleFormationUniverses, candidateGuards,
-    canonicalSiloPairFor, acceptedArticleDnas, masterList, showNotification,
+    canonicalBootstrapStatus, siloClosureReadings, showNotification,
   ]);
 
-  const confirmArticleFormation = useCallback(async (automatic?: { candidateRefs: readonly string[]; subjectPhrase?: string }) => {
+  const confirmArticleFormation = useCallback(async (
+    automatic?: { candidateRefs: readonly string[]; subjectPhrase?: string },
+    /**
+     * A continuação de um clique HUMANO, depois da SERP pedida ao concluir: a
+     * SERP já foi pedida, e o escopo é a seleção da mesa relida AGORA, como no
+     * clique. Reusar os refs do clique comparava a seleção (que inclui
+     * publicados, que não são candidatos) com os candidatos e parava em
+     * "aguarda a releitura" para sempre.
+     */
+    continuacao?: { serpRequested: true },
+  ) => {
     if (!selectedBrandId || !articleFormationMarker) return;
+    const humano = !automatic;
     // A MESMA autoridade de `Processar artigos`, lida no mesmo instante: sem
     // isto, corrigir um botão hoje reencontraria o outro amanhã.
     const requestedRefs = automatic?.candidateRefs?.length ? new Set(automatic.candidateRefs) : null;
     const escopo = requestedRefs
       ? { ok: true, reason: null, candidateRefs: requestedRefs }
       : formationScopeRef.current.scope;
-    const universosSelecionados = requestedRefs
+    let universosSelecionados = requestedRefs
       ? scopeFormationUniverses({ universes: articleRunScopeRef.current.universes, selectedCandidateRefs: requestedRefs })
       : formationScopeRef.current.universes;
     if (!escopo.ok) {
@@ -14389,9 +14735,21 @@ export default function ArquitetoPage() {
       return;
     }
     if (requestedRefs && universosSelecionados.flatMap(universe => universe.candidates.map(candidate => candidate.candidateRef)).length !== requestedRefs.size) {
-      showNotification("warning", "A conclusão automática aguarda a releitura dos artigos formados; nada foi descartado.");
+      showNotification("warning", humano
+        ? "A conclusão aguarda a releitura dos artigos formados; nada foi descartado. Clique em Concluir formação de novo."
+        : "A conclusão automática aguarda a releitura dos artigos formados; nada foi descartado.");
       return;
     }
+    /*
+     * FRAGMENTO ÓRFÃO NÃO É CANDIDATO (2026-09-30): keyword com o ponteiro de
+     * uma formação concluída em OUTRO Silo não é artigo deste. Ela entrava no
+     * plano, pedia SERP a cada clique e saía como "ficou de fora".
+     */
+    const concluidaEm = new Map((articleFormationMarker.concludedFormations || []).map(item => [item.candidateRef, item.territoryRef]));
+    universosSelecionados = universosSelecionados.map(universe => ({
+      ...universe,
+      candidates: universe.candidates.filter(candidate => !concluidaEm.has(candidate.candidateRef) || concluidaEm.get(candidate.candidateRef) === universe.siloRef),
+    }));
     setFormationBusy(true);
     try {
       /**
@@ -14403,8 +14761,34 @@ export default function ArquitetoPage() {
        */
       // O plano decide sobre os SELECIONADOS. Um Article não selecionado com
       // pendência não entra e, por isso, não barra quem está pronto.
-      const plano = buildArticleFormationConfirmationPlan({ universes: universosSelecionados });
-      const sintese = summarizeConfirmationPlan(plano);
+      let plano = buildArticleFormationConfirmationPlan({ universes: universosSelecionados });
+      let sintese = summarizeConfirmationPlan(plano);
+
+      /*
+       * A SERP QUE FALTA É CHAMADA AO CONCLUIR (pedido do dono, 2026-09-30).
+       *
+       * Antes, concluir só recusava ("ainda precisam de coleta SERP") e mandava
+       * voltar ao Reprocessar. Agora o próprio clique pede a SERP dos artigos
+       * sem parecer vigente, pelo MESMO caminho do Reprocessar: cache primeiro,
+       * e só as lentes que faltam aparecem no plano de pagamento — a pessoa
+       * escolhe pagar ou seguir só com o cache. Depois do render com os
+       * pareceres gravados, a conclusão continua sozinha, sem pedir de novo.
+       */
+      if (humano && !continuacao) {
+        const semSerp = plano.approved
+          .map(entry => entry.candidateRef)
+          .filter(ref => {
+            const gate = articleSerpGates.get(ref);
+            return !gate || (gate.blocksConclusion && !gate.requiresHumanDecision);
+          });
+        const grupos = serpGroupsForCandidates(semSerp);
+        if (grupos.length) {
+          showNotification("info", `Concluir formação: ${grupos.length} artigo(s) sem SERP completa. Lendo o cache primeiro; só as lentes que faltam entram no plano de pagamento, e você escolhe. Depois a conclusão continua.`);
+          await confirmSerpValidationRef.current(grupos);
+          setPendingHumanConclusion(true);
+          return;
+        }
+      }
 
       /**
        * §14 — a portaria roda ANTES de qualquer escrita.
@@ -14414,9 +14798,9 @@ export default function ArquitetoPage() {
        * possa esperar: gravar ArticleDNA em cima disso carimbaria a
        * contradição no acervo canônico.
        */
-      const portaria = validateFormationConclusion({
-        universes: universosSelecionados,
-        plan: plano,
+      const entradaDaPortaria = (universes: typeof universosSelecionados, plan: typeof plano) => ({
+        universes,
+        plan,
         keywordSiloRef: new Map(masterList.map(keyword => [
           String(keyword.id),
           typeof keyword.territoryRef === "string" ? keyword.territoryRef : null,
@@ -14431,7 +14815,7 @@ export default function ArquitetoPage() {
          * detectado chega aberto — e a saída, dita na própria mensagem, é
          * editorial: unir os dois candidatos ou diferenciar um deles.
          */
-        unresolvedCannibalization: unresolvedCannibalization({ risks: candidateGuards.pares })
+        unresolvedCannibalization: openCannibalPairs
           .map(par => ({
             left: par.left,
             right: par.right,
@@ -14444,7 +14828,40 @@ export default function ArquitetoPage() {
         subjectVolumeValidated: new Map([...subjectStandings].map(([keywordId, standing]) => [keywordId, standing.volumeValidated])),
         subjectLabels: new Map([...subjectStandings].filter(([, standing]) => standing.declared).map(([keywordId, standing]) => [keywordId, standing.phrase])),
       });
+      let portaria = validateFormationConclusion(entradaDaPortaria(universosSelecionados, plano));
+      /*
+       * OS PRONTOS SEGUEM (pedido do dono, 2026-09-30): uma pendência de um
+       * artigo não trava os outros. Quem carrega o impedimento fica de fora,
+       * continua candidato e sai nomeado com o motivo; o resto passa pela
+       * MESMA portaria, relida sobre ele. Só no clique humano: a conclusão
+       * automática do Assunto já filtra os seus.
+       */
+      let deFora: ConclusionHeldOut[] = [];
+      if (!portaria.ok && humano) {
+        const subconjunto = readyConclusionSubset(entradaDaPortaria(universosSelecionados, plano));
+        if (subconjunto.readyCandidateRefs.length && subconjunto.heldOut.length) {
+          const universosProntos = scopeFormationUniverses({ universes: universosSelecionados, selectedCandidateRefs: new Set(subconjunto.readyCandidateRefs) });
+          const planoPronto = buildArticleFormationConfirmationPlan({ universes: universosProntos });
+          const releitura = validateFormationConclusion(entradaDaPortaria(universosProntos, planoPronto));
+          if (releitura.ok) {
+            deFora = [
+              ...subconjunto.heldOut,
+              // Publicado protegido não passa por aqui e não é pendência: não entra na lista.
+              ...plano.blocked.filter(item => item.code !== "PUBLISHED_COLLISION").map(item => ({ candidateRef: item.candidateRef, reasons: [item.reason || item.code] })),
+            ];
+            universosSelecionados = universosProntos;
+            plano = planoPronto;
+            sintese = summarizeConfirmationPlan(plano);
+            portaria = releitura;
+          }
+        }
+      }
       setConclusionGates(portaria.gates);
+      if (deFora.length) {
+        showNotification("warning", `Ficaram de fora ${deFora.length} artigo(s), que continuam candidatos: `
+          + deFora.map(item => `${candidateGuards.rotuloDoCandidato.get(item.candidateRef) || item.candidateRef} (${item.reasons.join("; ")})`).join(" · ")
+          + `. Os outros ${plano.approved.length} seguem para a conclusão.`);
+      }
       if (!portaria.ok) {
         const impeditivos = portaria.gates.filter(gate => !gate.ok).map(gate => gate.detail);
         showNotification("error", impeditivos.length
@@ -14493,7 +14910,8 @@ export default function ArquitetoPage() {
       const criadosConfirmados = criados.filter(item => confirmados.has(item.articleId));
 
       const prontos = plano.approved;
-      const pendentes = plano.blocked.length;
+      // Quem ficou de fora neste clique continua pendente: a formação não fechou inteira.
+      const pendentes = deFora.length ? deFora.length : plano.blocked.filter(item => item.code !== "PUBLISHED_COLLISION").length;
       const cobertas = criadosConfirmados.reduce((total, item) => total + item.keywordIds.length, 0);
       const completa = prontos.length > 0
         && pendentes === 0
@@ -14549,7 +14967,9 @@ export default function ArquitetoPage() {
                 fullPath: entrada.fullPath || null,
                 concludedAt: new Date().toISOString(),
                 concludedBy: session?.user?.id || "human-reviewer",
-                materializedArticleId: materializado?.articleId ?? null,
+                // Reconcluir não desfaz a materialização: sem isto o vínculo com o
+                // ArticleDNA aprovado sumia e o fechamento criaria um segundo artigo.
+                materializedArticleId: materializado?.articleId ?? anteriores.get(entrada.candidateRef)?.materializedArticleId ?? null,
               };
             })
             .filter(item => item.territoryRef);
@@ -14589,10 +15009,15 @@ export default function ArquitetoPage() {
         concluded: criadosConfirmados.length + aguardandoSilo.length,
         materialized: criadosConfirmados.length,
         awaitingCanonicalSilo: aguardandoSilo.length,
-        blocked: plano.blocked.map(item => ({
-          label: candidateGuards.rotuloDoCandidato.get(item.candidateRef) || item.candidateRef,
-          reason: item.reason || item.code,
-        })),
+        blocked: deFora.length
+          ? deFora.map(item => ({
+            label: candidateGuards.rotuloDoCandidato.get(item.candidateRef) || item.candidateRef,
+            reason: item.reasons.join("; "),
+          }))
+          : plano.blocked.filter(item => item.code !== "PUBLISHED_COLLISION").map(item => ({
+            label: candidateGuards.rotuloDoCandidato.get(item.candidateRef) || item.candidateRef,
+            reason: item.reason || item.code,
+          })),
       });
       showNotification(desfecho.severity, `${desfecho.message}${partes ? ` ${partes}` : ""}`);
 
@@ -14606,10 +15031,20 @@ export default function ArquitetoPage() {
        * ela é anunciada.
        */
       const territoriosDoLote = [...new Set(universosSelecionados.map(universe => universe.siloRef))];
+      // Um clique humano novo reabre a retomada automática: a tentativa anterior
+      // pode ter sido recusada por algo que esta conclusão acabou de resolver.
+      closureResumptionAttempted.current.clear();
       for (const siloRef of territoriosDoLote) {
-        const ativos = articleFormationUniverses
-          .filter(universe => universe.siloRef === siloRef)
-          .flatMap(universe => universe.candidates.map(candidate => candidate.candidateRef));
+        // A mesma leitura do fechamento: órfão não conta e aprovado sem conclusão entra.
+        const leituraDoSilo = closureFormationsForSilo({
+          territoryRef: siloRef,
+          concludedFormations: marcador.concludedFormations || [],
+          candidates: articleFormationUniverses
+            .filter(universe => universe.siloRef === siloRef)
+            .flatMap(universe => universe.candidates),
+          approvedArticles: approvedArticlesForClosure,
+        });
+        const ativos = leituraDoSilo.activeCandidateRefs;
         /*
          * §1 — O ESTADO DO SILO É O ACUMULADO, NÃO O DESTA EXECUÇÃO.
          *
@@ -14623,20 +15058,31 @@ export default function ArquitetoPage() {
          */
         const ledger = resolveFormationLedger({
           activeCandidateRefs: ativos,
-          remoteConcludedRefs: (marcador.concludedFormations || []).map(item => item.candidateRef),
+          remoteConcludedRefs: leituraDoSilo.formations.map(item => item.candidateRef),
         });
         const fechamento = resolveSiloClosureReadiness({
           siloRef,
           activeCandidateRefs: ledger.activeFormationRefs,
           concludedCandidateRefs: ledger.concludedFormationRefs,
-          pendingMaterializationRefs: (marcador.concludedFormations || [])
+          pendingMaterializationRefs: leituraDoSilo.formations
             .filter(item => !item.materializedArticleId && ativos.includes(item.candidateRef))
             .map(item => item.candidateRef),
-          openBoundaryChallenges: candidateGuards.openChallenges.map(item => ({ scopeLabel: item.scope.label })),
-          unresolvedCannibalization: candidateGuards.pares.map(par => ({
-            leftLabel: candidateGuards.rotuloDoCandidato.get(par.left) || par.left,
-            rightLabel: candidateGuards.rotuloDoCandidato.get(par.right) || par.right,
-          })),
+          ...(() => {
+            const guardas = closureGuardsForSilo({
+              siloRef,
+              pairs: openCannibalPairs,
+              challenges: openSiloChallenges,
+              siloOfCandidate: candidateGuards.siloDeCandidato,
+              concludedCandidateRefs: new Set(ledger.concludedFormationRefs),
+            });
+            return {
+              openBoundaryChallenges: guardas.challenges.map(item => ({ scopeLabel: item.scope.label })),
+              unresolvedCannibalization: guardas.pairs.map(par => ({
+                leftLabel: candidateGuards.rotuloDoCandidato.get(par.left) || par.left,
+                rightLabel: candidateGuards.rotuloDoCandidato.get(par.right) || par.right,
+              })),
+            };
+          })(),
           /*
            * §6 — O PAR, NÃO A METADE.
            *
@@ -14662,8 +15108,8 @@ export default function ArquitetoPage() {
          * §2 — O GATILHO. Nenhum botão novo: o plano é construído aqui, sobre
          * o marcador que o remoto acabou de confirmar, e ele decide sozinho.
          */
-        const congeladasDoSilo = (marcador.concludedFormations || [])
-          .filter(item => item.territoryRef === siloRef && ativos.includes(item.candidateRef));
+        const congeladasDoSilo = leituraDoSilo.formations
+          .filter(item => ativos.includes(item.candidateRef) || item.candidateRef.startsWith("article-dna:"));
         const closurePlan = buildCanonicalSiloClosurePlan({
           formations: congeladasDoSilo.map(item => ({
             candidateRef: item.candidateRef,
@@ -14733,7 +15179,14 @@ export default function ArquitetoPage() {
     } finally {
       setFormationBusy(false);
     }
-  }, [selectedBrandId, articleFormationMarker, articleFormationUniverses, articleFormationBase, articleSerpGates, candidateGuards, unresolvedClassificationsByCandidate, materializeApprovedArticleDnas, materializeLegacyArticleSiloIds, masterList, showNotification, subjectStandings]);
+  }, [selectedBrandId, articleFormationMarker, articleFormationUniverses, articleFormationBase, articleSerpGates, candidateGuards, unresolvedClassificationsByCandidate, materializeApprovedArticleDnas, materializeLegacyArticleSiloIds, masterList, openCannibalPairs, openSiloChallenges, approvedArticlesForClosure, serpGroupsForCandidates, showNotification, subjectStandings]);
+
+  /* A continuação do clique humano, depois da SERP pedida ao concluir. */
+  useEffect(() => {
+    if (!pendingHumanConclusion || formationBusy || serpBusy) return;
+    setPendingHumanConclusion(false);
+    void confirmArticleFormation(undefined, { serpRequested: true });
+  }, [pendingHumanConclusion, formationBusy, serpBusy, confirmArticleFormation]);
 
   /**
    * Encadeia o Assunto depois do readback da cópia de trabalho. A execução
@@ -16374,18 +16827,15 @@ export default function ArquitetoPage() {
 
   const articleMode = workspaceMode === "articles";
 
-
-  return (
-    // A GlobalTopbar (40px = 2.5rem) já ocupa o topo do <main> do ProductShell.
-    // Usar h-screen aqui empurrava o documento para 100vh + 40px e criava uma
-    // segunda barra de rolagem vertical por fora da barra interna do workspace.
-    <div className="relative flex h-[calc(100vh-2.5rem)] min-h-0 flex-col overflow-hidden bg-background font-sans text-sm text-foreground">
-      <HistoryControls moduleId="arquiteto" showHistory={false} showUndoRedo={false} visualVariant="semantic" entries={masterHistory.entries} canUndo={masterHistory.canUndo} canRedo={masterHistory.canRedo}
-        onUndo={undoMasterList} onRedo={redoMasterList} onRestore={masterHistory.restore} compact presentation="popover"/>
-
-      {/* ── PLANILHA PRINCIPAL DE ARTIGOS ── */}
-      <main className="min-w-0 flex-1 overflow-y-auto bg-background">
-        {/* Recolhido ocupa um terço do topo (prioridade é a planilha); a seta abre para 72vh. */}
+  /*
+   * A GRADE DO WORKBENCH (painel + mapa) — uma só, em dois lugares.
+   *
+   * Nas abas Silos e Links ela abre a tela, como sempre. Na aba Artigos ela
+   * vai inteira para "Detalhes técnicos", fechado, no fim: na frente ficam o
+   * próximo passo, a melhoria dos publicados, a mesa e as Sobras. Nada saiu
+   * da tela nem mudou de comportamento; só a ordem.
+   */
+  const workbenchGrid = (
         <div className={`grid min-h-0 shrink-0 gap-0 bg-surface lg:grid-cols-2 lg:overflow-hidden ${mapExpanded ? "lg:h-[72vh]" : "lg:h-[33vh]"}`} data-testid="architect-workbench-layout">
           <div className="min-h-0 min-w-0 overflow-y-auto border-b border-divider lg:border-b-0 lg:border-r border-divider" data-testid="architect-workbench-left" aria-label="Painel do Workbench do Arquiteto">
             <ArchitectWorkbench
@@ -16749,6 +17199,17 @@ export default function ArquitetoPage() {
               {linkSiloContexts.length > 0 ? <label className="mt-3 block text-sm font-semibold text-text-muted">Silo do grafo<select aria-label="Silo do InternalLinkGraph" value={resolvedLinksSiloId || ""} onChange={event => handleLinksSiloChange(event.target.value || null)} className="mt-1 w-full rounded border border-divider bg-surface-elevated px-2 py-1.5 text-sm font-normal text-foreground">
                 {linkSiloContexts.map(context => <option key={context.siloId} value={context.siloId}>{context.siloDna.payload.name || context.siloDna.payload.centralEntity || context.siloId}</option>)}
               </select></label> : <p className="mt-3 rounded border border-warning/40 bg-warning/10 px-2 py-2 text-sm leading-6 text-warning">Nenhum par SiloDNA + SiloPage disponível para formar o contexto do grafo.</p>}
+              {siloClosureSummaries.some(item => item.state !== "closed") && (
+                <div className="mt-3 rounded border border-divider bg-surface px-2.5 py-2" data-testid="architect-silo-closure-status">
+                  <p className="text-sm font-semibold text-foreground">Fechamento dos Silos</p>
+                  <p className="text-sm leading-6 text-text-muted">Links internos precisam do Silo fechado. O fechamento define o Pilar e os Suportes e grava SiloDNA e SiloPage, sozinho, quando todos os artigos do Silo estão concluídos.</p>
+                  <ul className="mt-1 grid gap-1">
+                    {siloClosureSummaries.map(item => (
+                      <li key={item.territoryRef} className={`text-sm leading-6 ${item.state === "waiting" ? "text-warning" : item.state === "closing" ? "text-foreground" : "text-positive-soft"}`}>{item.text}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {linksSelectedContext && <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <div className="rounded border border-divider bg-surface px-2.5 py-2 text-sm"><span className="font-semibold text-foreground">Base:</span> {linksSelectedContext.siloDna.versionId} · {linksSelectedContext.siloPage.versionId}</div>
                 <div className="rounded border border-divider bg-surface px-2.5 py-2 text-sm"><span className="font-semibold text-foreground">Participantes:</span> {(linksWorkingCopy || linksApprovedGraph)?.participatingArticleDnaVersionRefs.length || linksSelectedContext.siloDna.payload.articleReferences.length}</div>
@@ -17130,7 +17591,6 @@ export default function ArquitetoPage() {
             </div>
           </details>
         )}
-        {workspaceMode === "articles" && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} />}
         {workspaceMode === "articles" && articleFormation.batchObjective === "improve" && (
           <section className="border-b border-divider bg-surface-subtle px-4 py-4" data-testid="architect-formation-objective">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -17215,15 +17675,6 @@ export default function ArquitetoPage() {
             primaryButtonClassName={ARCHITECT_UI.primaryButton}
           />
           </details>
-        )}
-        {workspaceMode === "articles" && leftoverOpportunities && (
-          <LeftoverOpportunitiesPanel
-            view={leftoverOpportunities}
-            busy={formationBusy || serpSubjectBusy}
-            onCreateArticle={createArticleFromLeftoverGroup}
-            buttonClassName={ARCHITECT_UI.toolbarButton}
-            primaryButtonClassName={ARCHITECT_UI.primaryButton}
-          />
         )}
         {workspaceMode === "articles" && formationDeferredRows.length > 0 && (
           <section className="border-b border-divider bg-surface-subtle px-4 py-4" data-testid="architect-formation-deferred-list">
@@ -17374,6 +17825,60 @@ export default function ArquitetoPage() {
             />
           </div>
         </div>
+  );
+
+
+  return (
+    // A GlobalTopbar (40px = 2.5rem) já ocupa o topo do <main> do ProductShell.
+    // Usar h-screen aqui empurrava o documento para 100vh + 40px e criava uma
+    // segunda barra de rolagem vertical por fora da barra interna do workspace.
+    <div className="relative flex h-[calc(100vh-2.5rem)] min-h-0 flex-col overflow-hidden bg-background font-sans text-sm text-foreground">
+      <HistoryControls moduleId="arquiteto" showHistory={false} showUndoRedo={false} visualVariant="semantic" entries={masterHistory.entries} canUndo={masterHistory.canUndo} canRedo={masterHistory.canRedo}
+        onUndo={undoMasterList} onRedo={redoMasterList} onRestore={masterHistory.restore} compact presentation="popover"/>
+
+      {/* ── PLANILHA PRINCIPAL DE ARTIGOS ── */}
+      <main className="min-w-0 flex-1 overflow-y-auto bg-background">
+        {/* Recolhido ocupa um terço do topo (prioridade é a planilha); a seta abre para 72vh. */}
+        {/* Aba Artigos: a grade do Workbench vai para "Detalhes técnicos", no fim. */}
+        {!articleMode && workbenchGrid}
+        {/*
+          * ABA ARTIGOS, NA ORDEM DO TRABALHO: (1) o próximo passo e (2) a
+          * melhoria dos publicados — o painel mostra o cartão no topo —,
+          * (3) a mesa com o resultado, (4) Sobras. O resto fica em
+          * "Detalhes técnicos", fechado, no fim.
+          */}
+        {articleMode && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities} />}
+        {/* Artigos novos: os dois atos da formação continuam à mão sem abrir
+            os detalhes. Mesmos handlers e mesmas travas do painel de formação. */}
+        {articleMode && (
+          <section id="architect-articles-new" className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-articles-formation-actions">
+            <span className="text-sm font-semibold text-foreground">Artigos novos</span>
+            <button
+              type="button"
+              onClick={() => { void processArticleFormation(); }}
+              disabled={formationBusy || Boolean(formationSelectionScope.reason)}
+              title={formationSelectionScope.reason ?? `Processar ${formationSelectionScope.selectedCount} artigo(s) selecionado(s).`}
+              data-testid="architect-articles-top-process"
+              className={ARCHITECT_UI.toolbarButton}
+            >
+              {formationBusy ? "Processando…" : articleFormationMarker ? "Reprocessar artigos" : "Processar artigos"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { void confirmArticleFormation(); }}
+              disabled={formationBusy || !articleFormationMarker || Boolean(formationSelectionScope.reason)}
+              title={formationSelectionScope.reason
+                ?? (articleFormationMarker ? `Concluir os ${formationSelectionScope.selectedCount} artigo(s) selecionado(s).` : "Processe os artigos antes de concluir.")}
+              data-testid="architect-articles-top-confirm"
+              className={ARCHITECT_UI.toolbarButton}
+            >
+              Concluir formação
+            </button>
+            <span className={`text-sm ${formationSelectionScope.reason && formationSelectionScope.selectedCount > 0 ? "text-warning" : "text-text-muted"}`}>
+              {formationSelectionScope.reason ?? `${formationSelectionScope.selectedCount} artigo(s) selecionado(s) na mesa`}
+            </span>
+          </section>
+        )}
         {canonicalBootstrapError ? (
           <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 px-6 text-center text-danger">
             <span className="text-base">Não foi possível carregar os dados do Arquiteto.</span>
@@ -17524,6 +18029,13 @@ export default function ArquitetoPage() {
                       onConfirm: territoryRef => { void confirmSiloCandidate(territoryRef); },
                       onDefineContext: openSiloContextEditor,
                     } : null}
+                    undoControls={{
+                      byRef: siloUndoReadings,
+                      eligibleCount: siloUndoEligibleRefs.length,
+                      busy: siloUndoBusy,
+                      onUndo: territoryRef => setSiloUndoPrompt([territoryRef]),
+                      onUndoAll: () => setSiloUndoPrompt(siloUndoEligibleRefs),
+                    }}
                     siteControls={{
                       busyUrl: siteStructureBusyUrl,
                       onUseAsSilo: normalizedUrl => { void promoteSiteStructureToSilo(normalizedUrl); },
@@ -18428,7 +18940,15 @@ export default function ArquitetoPage() {
                                       busy={formationBusy}
                                       readOnlyReason={art.isPublished ? "Artigo publicado: identidade protegida. A composição não é recomposta por aqui." : null}
                                       onAcceptSerp={reason => { void acceptSerpForCandidate(revisao.candidate.candidateRef, reason); }}
-                                      pendingDecisions={articleReview.decisions.filter(item => !item.resolved).map(item => ({ id: item.id, title: item.title, what: item.what, how: item.how, resolved: item.resolved }))}
+                                      pendingDecisions={articleReview.decisions.filter(item => !item.resolved).map(item => {
+                                        const divergence = item.kind === "serp_divergence" ? articleSerpVerdict.divergences.find(d => item.id === `serp-divergence:${d.keywordId}`) : undefined;
+                                        return { id: item.id, title: item.title, what: item.what, why: item.why, how: item.how, resolved: item.resolved,
+                                          serpDivergence: divergence?.plain ? {
+                                            plain: divergence.plain,
+                                            onKeep: () => { void handleSerpRecommendationDecision(art, divergence.keywordId, "ignored"); },
+                                            onApply: () => { void handleSerpRecommendationDecision(art, divergence.keywordId, "followed"); },
+                                          } : undefined };
+                                      })}
                                       unitTypeControl={expandedUnitDraft && articleReview.decisions.some(item => item.kind === "unit_type" && !item.resolved)
                                         ? { value: expandedUnitDraft.type,
                                           options: (Object.keys(EDITORIAL_UNIT_LABELS) as EditorialArticleUnitType[]).map(value => ({ value, label: EDITORIAL_UNIT_LABELS[value] })),
@@ -18439,6 +18959,23 @@ export default function ArquitetoPage() {
                                       onPreview={change => setPendingScenarioChange(change)}
                                       onApply={() => { void applyPendingScenarioChange(); }}
                                       onCancel={() => setPendingScenarioChange(null)}
+                                      keepAlsoDecides={humanKeptCandidate(revisao.candidate.candidateRef) ? [] : [
+                                        ...openCannibalPairs
+                                          .filter(par => par.left === revisao.candidate.candidateRef || par.right === revisao.candidate.candidateRef)
+                                          .map(par => {
+                                            const outro = par.left === revisao.candidate.candidateRef ? par.right : par.left;
+                                            const nomeOutro = candidateGuards.rotuloDoCandidato.get(outro) || outro;
+                                            const fronteira = candidateGuards.fronteiras.find(item => [item.left, item.right].includes(outro) && [item.left, item.right].includes(revisao.candidate.candidateRef));
+                                            return `“${art.keywordPrincipal}” fica separado de “${nomeOutro}”${fronteira ? ` (o Google mostra ${fronteira.sharedUrls} resultado(s) iguais no topo das duas)` : ""}. Vale quando os dois forem mantidos${humanKeptCandidate(outro) ? " — o outro já foi" : ""}.`;
+                                          }),
+                                        ...openSiloChallenges
+                                          .filter(item => item.scope.id === revisao.candidate.candidateRef)
+                                          .map(item => `“${art.keywordPrincipal}” fica no Silo atual${item.suggestedSiloLabel ? `, e não em “${item.suggestedSiloLabel}” (que a SERP sugeria)` : ""}.`),
+                                      ]}
+                                      onRemoveFromSilo={!art.isPublished && !articleDnaVersion
+                                        && !(articleFormationMarker?.concludedFormations || []).some(item => item.candidateRef === revisao.candidate.candidateRef)
+                                        ? () => { void removeCandidateFromSilo(revisao.candidate.candidateRef); }
+                                        : null}
                                     />;
                                   })() : <>
                                   <div role="tablist" aria-label={`Processos de ${art.keywordPrincipal}`} className="flex flex-wrap gap-2 border-b border-divider pb-3">
@@ -18519,7 +19056,18 @@ export default function ArquitetoPage() {
                                         {articleSerpVerdict.observations.map(observation => <p key={observation} className="mt-1 text-sm leading-6 text-text-muted">• {observation}</p>)}
                                         {articleSerpVerdict.canRefresh && <button type="button" onClick={() => { if (provisionalGroup) void confirmSerpValidation([provisionalGroup]); }} disabled={serpBusy || !provisionalGroup} className={`${ARCHITECT_UI.toolbarButton} mt-3`}>Atualizar SERP</button>}
                                         {articleSerpVerdict.divergences.map(divergence => <article key={divergence.keywordId} data-testid="architect-serp-divergence" className="mt-3 rounded-md border border-divider bg-surface p-3">
+                                          {divergence.plain && <div role="status" data-testid="architect-serp-divergence-plain" className="mb-3 rounded-md border border-warning/40 bg-warning/10 p-3">
+                                            <p className="text-sm font-semibold text-warning">Atenção: {divergence.plain.title}</p>
+                                            <p className="mt-1 text-sm leading-6 text-foreground">{divergence.plain.what}</p>
+                                            <p className="mt-1 text-sm leading-6 text-foreground">{divergence.plain.why}</p>
+                                            <ul className="mt-2 space-y-1 text-sm leading-6 text-foreground">
+                                              <li>• {divergence.plain.keep}</li>
+                                              <li>• {divergence.plain.apply}</li>
+                                            </ul>
+                                            <p className="mt-2 text-sm leading-6 text-text-muted">{divergence.plain.tip}</p>
+                                          </div>}
                                           <p className="text-sm font-semibold text-keyword">{divergence.keyword}</p>
+                                          <p className="mt-1 text-sm text-text-muted">Dados técnicos da SERP:</p>
                                           <dl className="mt-2 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
                                             <div><dt className="text-text-muted">Papel atual</dt><dd className="mt-0.5 font-medium text-foreground">{divergence.currentRole}</dd></div>
                                             <div><dt className="text-text-muted">Fato upstream</dt><dd className="mt-0.5 font-medium text-foreground">{divergence.upstreamFact}</dd></div>
@@ -18784,6 +19332,30 @@ export default function ArquitetoPage() {
             </table>
           </div>
         )}
+        {articleMode && leftoverOpportunities && !leftoversDismissed && (
+          <div id="architect-sobras" data-testid="architect-articles-sobras">
+            <LeftoverOpportunitiesPanel
+              view={leftoverOpportunities}
+              busy={formationBusy || serpSubjectBusy}
+              onCreateArticle={createArticleFromLeftoverGroup}
+              onDismiss={() => dismissLeftovers(true)}
+              buttonClassName={ARCHITECT_UI.toolbarButton}
+              primaryButtonClassName={ARCHITECT_UI.primaryButton}
+            />
+          </div>
+        )}
+        {articleMode && leftoversDismissed && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface-subtle px-4 py-3 text-sm text-text-muted" data-testid="architect-leftover-dismissed">
+            <span>{`${leftoverKeywordIds.length} sobra(s) descartada(s). Continuam em Keywords não agrupadas; nada foi apagado.`}</span>
+            <button type="button" onClick={() => dismissLeftovers(false)} className={ARCHITECT_UI.toolbarButton}>Mostrar de novo</button>
+          </div>
+        )}
+        {articleMode && (
+          <details className="border-t border-divider bg-surface" data-testid="architect-articles-technical">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-foreground">Detalhes técnicos</summary>
+            {workbenchGrid}
+          </details>
+        )}
       </main>
 
       {/* Ações que dependem da seleção ficam sempre no rodapé, fora do scroll da planilha. */}
@@ -18916,6 +19488,46 @@ export default function ArquitetoPage() {
         description={`Esta ação removerá ${keywordDeleteReview?.publishedIds.length || 0} KeywordDNA(s) publicada(s) da operação e permitirá restauração durante 24 horas.`}
         confirmationName={keywordDeleteReview?.confirmationName || ""} impact={keywordDeleteReview?.impact || []}
         onCancel={() => { setKeywordDeletePublishedOpen(false); setKeywordDeleteReview(null); }} onConfirm={confirmSelectedKeywordDeletion}/>
+
+      {/* DESFAZER SILO SUGERIDO — confirmação. Diz o que acontece antes de
+          qualquer escrita; Silo com motivo de recusa aparece com o motivo e
+          fica fora do botão. */}
+      {siloUndoPrompt && (() => {
+        const itens = siloUndoPrompt.map(ref => ({ ref, leitura: siloUndoReadings.get(ref) })).filter(item => item.leitura);
+        const podem = itens.filter(item => item.leitura!.refusals.length === 0);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90 p-4" role="dialog" aria-modal="true" aria-label="Confirmar desfazer Silo" data-testid="architect-undo-silo-dialog"
+            onKeyDown={event => { if (event.key === "Escape" && !siloUndoBusy) setSiloUndoPrompt(null); }}>
+            <div className="flex max-h-[86vh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-lg border border-divider bg-surface-elevated p-4 shadow-xl">
+              <p className="text-base font-semibold text-foreground">{itens.length > 1 ? `Desfazer os Silos sugeridos (${podem.length})` : "Desfazer Silo"}</p>
+              <p className="text-sm leading-6 text-text-muted">O Silo sai da aba Silos (fica guardado como rejeitado; nada é apagado). As keywords dele voltam para “sem Silo” e continuam na mesa.</p>
+              <ul className="grid gap-2 text-sm leading-6">
+                {itens.map(({ ref, leitura }) => (
+                  <li key={ref} className="rounded border border-divider bg-surface px-3 py-2">
+                    <span className="font-semibold text-foreground">{leitura!.label}</span>
+                    {leitura!.refusals.length === 0
+                      ? <span className="text-text-muted">{` · ${leitura!.keywordCount} keyword(s) voltam para sem Silo`}</span>
+                      : <span className="block text-warning">{`Não pode ser desfeito: ${leitura!.refusals.join(" ")}`}</span>}
+                  </li>
+                ))}
+              </ul>
+              {siloUndoProgress && (
+                <p role="status" className="text-sm leading-6 text-foreground" data-testid="architect-undo-silo-progress">
+                  {`Desfazendo ${siloUndoProgress.done} de ${siloUndoProgress.total}… Depois a tela relê o banco para conferir.`}
+                </p>
+              )}
+              <div className="flex flex-wrap justify-end gap-2">
+                <button type="button" ref={siloUndoCancelRef} disabled={siloUndoBusy} onClick={() => setSiloUndoPrompt(null)} className={ARCHITECT_UI.toolbarButton}>Cancelar</button>
+                {podem.length > 0 && (
+                  <button type="button" disabled={siloUndoBusy} onClick={() => { void undoSuggestedSilos(podem.map(item => item.ref)); }} className={ARCHITECT_UI.primaryButton} data-testid="architect-undo-silo-confirm">
+                    {siloUndoBusy ? "Desfazendo…" : podem.length > 1 ? `Desfazer ${podem.length} Silos` : "Desfazer Silo"}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {dangerApproval && <DangerApprovalDialog open title={dangerApproval.title} description={dangerApproval.description}
         impact={dangerApproval.impact} verificationPhrase={dangerApproval.phrase} confirmLabel={dangerApproval.label}

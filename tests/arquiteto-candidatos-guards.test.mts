@@ -12,6 +12,7 @@ import {
 } from "../lib/arquiteto/article-candidate-guards.ts";
 import {
   buildArticleFormationConfirmationPlan,
+  readyConclusionSubset,
   validateFormationConclusion,
 } from "../lib/arquiteto/article-formation-confirmation.ts";
 import { buildArticleFormationUniverse, type ArticleFormationKeyword } from "../lib/arquiteto/article-formation.ts";
@@ -362,7 +363,9 @@ test("§5 — par com um lado fora do lote não trava quem estava pronto", () =>
 test("§5 — a portaria da tela recebe os pares detectados", () => {
   const trecho = workspace.slice(workspace.indexOf("const confirmArticleFormation"));
   const corpo = trecho.slice(0, trecho.indexOf("\n  }, ["));
-  assert.match(corpo, /unresolvedCannibalization: unresolvedCannibalization\(\{ risks: candidateGuards\.pares \}\)/);
+  // Os pares ABERTOS: detectados, menos os que a SERP separou ou a pessoa manteve dos dois lados (2026-09-30).
+  assert.match(corpo, /unresolvedCannibalization: openCannibalPairs/);
+  assert.match(workspace, /const openCannibalPairs = useMemo\(\(\) => unresolvedCannibalization\(\{\s*risks: candidateGuards\.pares,/);
   // Com nome, não com ref: a pessoa precisa saber QUAIS artigos são.
   assert.match(corpo, /leftLabel: candidateGuards\.rotuloDoCandidato\.get\(par\.left\)/);
 });
@@ -387,4 +390,97 @@ test("§6 — endereço quase igual é sinalizado, sem virar bloqueio", () => {
       { candidateRef: "cand-d", slug: "skin-care-nivea", label: "skin care nivea" },
     ],
   }), []);
+});
+
+/* ====== Os prontos seguem, quem tem pendência espera (dono, 2026-09-30) ===== */
+
+const cenarioDeTres = () => {
+  const universe = buildArticleFormationUniverse({
+    siloRef: SILO_REF, siloLabel: "Skincare", siloSlug: "/skincare",
+    groups: [
+      { principalKeywordId: "k1", keywordIds: ["k1"] },
+      { principalKeywordId: "k2", keywordIds: ["k2"] },
+      { principalKeywordId: "k3", keywordIds: ["k3"] },
+    ],
+    keywords: [
+      kwFormacao("k1", "skin care para peles oleosas"),
+      kwFormacao("k2", "protetor solar com cor"),
+      kwFormacao("k3", "serum vitamina c"),
+    ],
+  });
+  const plan = buildArticleFormationConfirmationPlan({ universes: [universe] });
+  const [a, b, c] = plan.approved.map(entry => entry.candidateRef);
+  const vigente = { state: "current_supported", blocksConclusion: false, requiresHumanDecision: false, reason: "" };
+  return {
+    universe, plan, refs: { a, b, c },
+    entrada: {
+      universes: [universe],
+      plan,
+      keywordSiloRef: new Map([["k1", SILO_REF], ["k2", SILO_REF], ["k3", SILO_REF]]),
+      ceiling: 6,
+      // b sem SERP completa; a e c com parecer vigente.
+      serpGates: new Map([
+        [a, vigente],
+        [b, { state: "partial", blocksConclusion: true, requiresHumanDecision: false, reason: "faltam lentes da SERP" }],
+        [c, vigente],
+      ]),
+    },
+  };
+};
+
+test("pendência de um artigo não trava os outros: ele fica de fora, com o motivo", () => {
+  const { universe, refs, entrada } = cenarioDeTres();
+  assert.equal(validateFormationConclusion(entrada).ok, false, "o lote inteiro continua recusado pela portaria");
+  const subconjunto = readyConclusionSubset(entrada);
+  assert.deepEqual(subconjunto.readyCandidateRefs.sort(), [refs.a, refs.c].sort());
+  assert.deepEqual(subconjunto.heldOut.map(item => item.candidateRef), [refs.b]);
+  assert.match(subconjunto.heldOut[0].reasons.join(" "), /faltam lentes da SERP/);
+
+  // O subconjunto passa pela MESMA portaria, sozinho.
+  const prontos = { ...universe, candidates: universe.candidates.filter(item => subconjunto.readyCandidateRefs.includes(item.candidateRef)) };
+  const planoPronto = buildArticleFormationConfirmationPlan({ universes: [prontos] });
+  assert.equal(validateFormationConclusion({ ...entrada, universes: [prontos], plan: planoPronto }).ok, true);
+});
+
+test("par que disputa o tema tira os DOIS lados; decisão de divergência também espera", () => {
+  const { refs, entrada } = cenarioDeTres();
+  const serpGates = new Map(entrada.serpGates);
+  serpGates.set(refs.b, { state: "current_supported", blocksConclusion: false, requiresHumanDecision: false, reason: "" });
+  const comPar = readyConclusionSubset({
+    ...entrada,
+    serpGates,
+    unresolvedCannibalization: [{ left: refs.a, right: refs.b, leftLabel: "skin care para peles oleosas", rightLabel: "protetor solar com cor", reasons: ["mesma entidade"] }],
+  });
+  assert.deepEqual(comPar.readyCandidateRefs, [refs.c]);
+  assert.deepEqual(comPar.heldOut.map(item => item.candidateRef).sort(), [refs.a, refs.b].sort());
+  assert.match(comPar.heldOut.find(item => item.candidateRef === refs.a)!.reasons.join(" "), /disputa o mesmo tema com “protetor solar com cor”/);
+
+  serpGates.set(refs.c, { state: "current_divergent_unresolved", blocksConclusion: true, requiresHumanDecision: true, reason: "" });
+  const comDecisao = readyConclusionSubset({ ...entrada, serpGates });
+  assert.ok(comDecisao.heldOut.some(item => item.candidateRef === refs.c && /Manter ou Aplicar/.test(item.reasons.join(" "))));
+});
+
+test("Concluir formação conclui os prontos, nomeia quem ficou de fora e pede a SERP que falta", () => {
+  const concluir = workspace.slice(workspace.indexOf("const confirmArticleFormation"));
+  const corpo = concluir.slice(0, concluir.indexOf("\n  }, ["));
+  assert.match(corpo, /readyConclusionSubset\(entradaDaPortaria\(universosSelecionados, plano\)\)/);
+  // O subconjunto só vale se a MESMA portaria aprovar sozinho.
+  assert.match(corpo, /const releitura = validateFormationConclusion\(entradaDaPortaria\(universosProntos, planoPronto\)\);\n\s*if \(releitura\.ok\)/);
+  assert.match(corpo, /Ficaram de fora \$\{deFora\.length\} artigo\(s\), que continuam candidatos/);
+  // Só no clique humano; a conclusão automática do Assunto segue com a regra dela.
+  assert.match(corpo, /if \(!portaria\.ok && humano\)/);
+  // A continuação relê a seleção da mesa (não reusa os refs do clique) e não pede a SERP de novo.
+  assert.match(workspace, /void confirmArticleFormation\(undefined, \{ serpRequested: true \}\);/);
+  assert.match(corpo, /const requestedRefs = automatic\?\.candidateRefs\?\.length \? new Set\(automatic\.candidateRefs\) : null;/);
+});
+
+test("Descartar sobras só tira da tela: nenhuma keyword é apagada ou movida", () => {
+  const painel = readFileSync("modules/arquiteto/leftover-opportunities-panel.tsx", "utf8");
+  assert.match(painel, /data-testid="architect-leftover-dismiss"/);
+  const trecho = workspace.slice(workspace.indexOf("const dismissLeftovers"));
+  const corpo = trecho.slice(0, trecho.indexOf("\n  };"));
+  assert.match(corpo, /window\.localStorage\.setItem\(leftoverDismissKey/);
+  assert.doesNotMatch(corpo, /applyFormationPlan|applySiloDecisionsInBatch|fetch\(|persist/);
+  assert.match(workspace, /data-testid="architect-leftover-dismissed"/);
+  assert.match(workspace, /onClick=\{\(\) => dismissLeftovers\(false\)\}[^>]*>Mostrar de novo</);
 });

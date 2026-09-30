@@ -334,7 +334,7 @@ export type RadarPlannerHandoffDecision = z.infer<typeof RadarPlannerHandoffDeci
 export const RadarExpertEvidenceSchema = z.object({
   id: z.string().min(1), expertId: z.string().min(1), briefId: z.string().min(1), contributionId: z.string().min(1),
   evidenceType: z.enum(["ORIGINAL", "TRANSCRIPTION", "EXTRACTION", "EDITORIAL_ORGANIZATION"]),
-  approvedContent: z.string().min(1), provider: z.literal("telegram"), externalUpdateId: z.string().min(1), originalAssetUri: z.string().url().nullable(), checksum: z.string().nullable(),
+  approvedContent: z.string().min(1), provider: z.enum(["telegram", "platform"]), externalUpdateId: z.string().min(1), originalAssetUri: z.string().url().nullable(), checksum: z.string().nullable(),
   contributedAt: z.string().datetime(), humanDecision: z.enum(["pending", "accepted", "rejected"]), fidelityStatus: z.enum(["unreviewed", "faithful", "needs_review", "conflict"]),
 }).strict();
 export type RadarExpertEvidence = z.infer<typeof RadarExpertEvidenceSchema>;

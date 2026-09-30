@@ -1,5 +1,99 @@
 # Estado atual — Radar
 
+## Google base, YouTube/Amazon acréscimos, ponto do especialista — 2026-09-30
+
+```text
+SDD = docs/05-radar/sdd-google-base-e-parecer-direto-2026-09-30.md (aprovada) · MIGRATION = aplicada pelo dono e conferida (Parte B) · ESCRITA_REMOTA_DO_AGENTE = 0 · PROVIDER_CALLS = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+Parte A (implementada):
+- **Tela:** o seletor “Pesquisar em” (escolha única) virou abas:
+  - “Google · base”, sempre disponível;
+  - “+ YouTube (vídeo)” e “+ Amazon (review)”, liberadas depois do Google
+    finalizado, com o motivo escrito (`radar-format-extension-hint`).
+  - A trava “Zere para trocar” e a de universo único saíram.
+  - A regra é `radarGoogleBaseCommitment` (`lib/radar/search-mode.ts`).
+- **Servidor:** as rotas pagas de YouTube e Amazon chamam `assertRadarGoogleBase`
+  (`lib/server/radar-google-base.ts`) antes de `startRadar*Run`. Sem o Google
+  finalizado, a resposta é `409 radar_google_base_required`, e nada é pago.
+- **Pacote** (`evidence-bundle-runtime.ts`):
+  - com o Google finalizado, ele é o PRIMARY;
+  - YouTube e Amazon entram como SUPPORT (`FORMAT_EXTENSION`);
+  - o blueprint de vídeo e o de review vão em `formatBlueprints` (opcional; o
+    hash só-Google não muda);
+  - o R3 de 2026-09-28 (YouTube ou Amazon como primário, com o Google de apoio)
+    saiu, junto com os auxiliares dele.
+- **CSV:** `research_status_md` ganhou “Acréscimos de formato”, só quando há
+  acréscimo.
+- **Testes:** os que prendiam o modo único ou o R3 foram reescritos para a regra
+  nova; um teste histórico ficou marcado como revogado. `test:radar` 2717, 0
+  falhas.
+
+Parte B:
+- **Feito sem migration:** a camada do especialista passa a usar o ponto de
+  revisão associado na revisão (`relatedRequirementId`), como a tela.
+- **Migration:** o dono aplicou
+  `supabase/migrations/20260930120000_expert_contribution_platform_channel.sql`
+  (canal `platform` + `authored_by`, com rollback) e fez o `migration repair`.
+  A leitura remota conferiu a coluna `authored_by` e os CHECKs
+  `expert_contributions_provider_check` (telegram | platform) e
+  `ck_expert_contribution_platform_authorship`.
+- **Campo “Escrever o parecer aqui”** (aba Especialista,
+  `radar-specialist-direct-entry`): especialista, tipo (Resposta a um ponto de
+  revisão, Fechamento do artigo, Argumentação do CTA, Diretriz de conteúdo),
+  ponto respondido quando é resposta, texto até 20.000 caracteres.
+  - Rota `POST /api/editorial/expert-contributions/platform`: pede sessão, acesso
+    à Marca e `radar:edit`. O autor é quem está logado.
+  - Núcleo `lib/server/expert-platform-contribution.ts`: confere a migration
+    antes de qualquer escrita, reaproveita a pauta do ponto ou cria uma pauta
+    própria (tipos livres ganham o ponto sintético `direto:<tipo>:<id>`), grava
+    a contribuição como `platform` e confere pela releitura.
+  - O parecer entra em “Respostas recebidas” como contribuição a revisar. Só vai
+    ao pacote depois de aceito, pela mesma revisão do Telegram.
+  - O ponto sintético não conta como ponto preparado pela investigação.
+- **Canal na tela e no pacote:** cada resposta mostra o canal real (“Plataforma”
+  ou “Telegram”). O `provider` vai à evidência e à proveniência. Resposta sem
+  canal declarado continua “telegram”, então o hash de pacote já entregue não
+  muda.
+- **Testes:** `tests/radar-especialista-parecer-direto.test.mts` (9). Suítes:
+  `test:radar` 2727 (1 pulado, 0 falhas), `test:redator` 358, `test:agent` 65.
+  `tsc` limpo e lint sem erros.
+- **Não verificado:** o envio real pela tela. A Marca AdalbaPro não tinha artigo
+  no Radar na checagem local, e o envio grava no banco de produção, então fica
+  para a homologação do dono.
+
+**Pendências:**
+- O Redator ainda não lê `formatBlueprints`: escreve o artigo; o roteiro de vídeo
+  e a lista de produtos do review ficam no pacote.
+- O CSV do review ainda não traz produtos, links nem o aviso de afiliado, que só
+  saíam com a Amazon primária.
+- Homologação na tela: do dono.
+
+## “Para escrever” pelo MCP e núcleo do export no servidor — 2026-09-30
+
+```text
+SDD = docs/compartilhado/sdd-mcp-jornada-completa-2026-09-30.md (F1, aprovada) · MIGRATION = 0 · ESCRITA_REMOTA = 0 · PROVIDER_CALLS = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Extração sem mudança de comportamento:** a montagem por artigo do export portátil saiu da rota
+  `/api/editorial/radar-export` para `lib/server/radar-portable-export-core.ts`
+  (`assembleRadarPortableExport`), junto com `estadoComercialCanonico` e
+  `identidadeDoArticleDna`. A rota virou adaptador: autorização da sessão, formato
+  (`writing`/`full`), silo e fluxo da resposta. O cliente das leituras de alvo e do cache chega
+  como parâmetro; a rota passa o da sessão.
+- **MCP `get_article_for_writing`** (`platform.read` + `radar:view`): o MESMO CSV “Para escrever”
+  de um artigo finalizado (`radarWritingExportForArticle`), em partes de até 12 mil caracteres
+  (`sliceWritingCsv`). Juntas na ordem, as partes formam o arquivo byte a byte. Grátis e só
+  leitura.
+- **Testes:** os estruturais que liam o texto da rota passam a ler rota + núcleo; `test:radar`
+  2716/2716, com os testes que executam a rota (`radar-export-escrita-rota`,
+  `radar-export-leitura-por-artigo`) inalterados.
+- **Pendente (usuário):** baixar “Para escrever” na tela e comparar com o que a IA recebe.
+
 ## Correções do corretor sobre as frentes de 2026-09-28 — 2026-09-28
 
 ```text

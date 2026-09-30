@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { shortSeedsOf } from "./short-seeds.ts";
+/** Só frases longas (5+ palavras) ganham núcleos curtos: numa frase curta eles ficariam largos demais ("seo"). */
+const seedKeywordsOf = (phrase: string) => phrase.trim().split(/\s+/).length >= 5 ? [...new Set([phrase, ...shortSeedsOf(phrase)])].slice(0, 6) : [phrase];
 import {
   SERP_CACHE_CANONICAL_LENS,
   SERP_CACHE_LENSES,
@@ -645,8 +648,9 @@ async function execute(context: {
 
   /* 1–2. Google Ads: grátis, mas só no execute. */
   const adsSources: Array<{ source: SubjectDiscoveryActiveSource; seed: SubjectDiscoveryAdsSeed | null }> = [
-    { source: "ads_keyword_seed", seed: { kind: "keyword", keywords: [subject.phrase] } },
-    { source: "ads_url_seed", seed: plan.destinationUrl ? { kind: "keyword_and_url", keywords: [subject.phrase], url: plan.destinationUrl } : null },
+    // A frase longa sozinha volta só com ela mesma no Google Ads; os núcleos curtos trazem as buscas relacionadas.
+    { source: "ads_keyword_seed", seed: { kind: "keyword", keywords: seedKeywordsOf(subject.phrase) } },
+    { source: "ads_url_seed", seed: plan.destinationUrl ? { kind: "keyword_and_url", keywords: seedKeywordsOf(subject.phrase), url: plan.destinationUrl } : null },
   ];
   for (const { source, seed } of adsSources) {
     const outcome = outcomes.get(source) as SubjectDiscoverySourceOutcome;

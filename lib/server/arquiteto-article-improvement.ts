@@ -15,8 +15,10 @@ import { publishedPrimaryPostOf } from "@/lib/arquiteto/published-primary-swap";
 import { buildFirstPublishedArticleDna, withHumanArticleApproval } from "@/lib/arquiteto/published-reinforcement";
 import { resolveKeywordDnaSignals } from "@/lib/arquiteto/keyword-dna-signals";
 import { readArchitectSubjectStanding, planSubjectAttachment, attachSubjectToArticleDna } from "@/lib/arquiteto/declared-subject";
-import { shortSeedsOf, sharesTheme } from "@/lib/arquiteto/article-improvement-seeds";
-import { ARTICLE_IMPROVEMENT_VERSION, planArticleImprovements, improvementEditorialFit, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence } from "@/lib/arquiteto/article-improvement";
+import { shortSeedsOf, sharesTheme } from "@/lib/minerador/short-seeds";
+import { ARTICLE_IMPROVEMENT_VERSION, carriesSlugCore, planArticleImprovements, improvementEditorialFit, isListReading, serpSupportedMembers, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence } from "@/lib/arquiteto/article-improvement";
+import { buildImprovementAiPrompt, editorialAiRecord, improvementAiEligibleTargets, improvementAiList, improvementAiTargets, IMPROVEMENT_AI_TIMEOUT_MS, validateImprovementAiPicks, type ImprovementEditorialAi } from "@/lib/arquiteto/article-improvement-ai";
+import { readPageRanking, rankingBlocksSwap } from "@/lib/arquiteto/published-differentiation";
 import { buildSerpSubjectIndex, SERP_SUBJECT_LENS_LABELS } from "@/lib/arquiteto/serp-subject-overlap";
 import { createVersionEnvelope } from "@/lib/arquiteto/versioning";
 import { normalizeKeyword } from "@/lib/minerador/keyword-import-core";
@@ -24,7 +26,7 @@ import { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";
 import { importSubjectDiscoveryWithCore } from "@/lib/minerador/subject-discovery-import";
 import { loadCanonicalArquitetoWorkspace, createMineradorArquitetoHandoff } from "./arquiteto-workspace";
 import { readDifferentiationBrandKeywords, readPublishedFootprints } from "./arquiteto-differentiation-store";
-import { readGoogleAdsAverageVolumes } from "./arquiteto-differentiation-runtime";
+import { proposeArticleImprovementAiPicks, readGoogleAdsAverageVolumes } from "./arquiteto-differentiation-runtime";
 import { handleArchitectWorkspacePatch } from "./arquiteto-workspace-http";
 import { handleArchitectFormationSerp } from "./arquiteto-serp-http";
 import { handleGoogleAdsKeywordMetrics } from "./minerador-google-ads-metrics-http";
@@ -61,12 +63,18 @@ export type ImprovementRun = {
   proposals: ImprovementProposal[]; costs: CostPlan; reservedCostUsd: number;
   notices: string[]; outcomes: Outcome[]; acceptedIds: string[] | null;
   /** Progress of a bounded paid collection; absent outside \"collecting\". */
-  collect?: { doneGroupIds: string[]; remaining: number; reservedRemaining: number; phase: "collect" | "refresh" };
+  collect?: { doneGroupIds: string[]; remaining: number; reservedRemaining: number; phase: "collect" | "refresh"; totalGroups?: number };
+  /** A leitura editorial da IA na lista: feita uma vez no prepare e reaproveitada (nunca repetida) no collect. */
+  editorialAi?: ImprovementEditorialAi;
 };
 export { ArticleImprovementRequestSchema } from "@/lib/arquiteto/article-improvement-request";
 import type { ArticleImprovementRequest } from "@/lib/arquiteto/article-improvement-request";
 type ContextResolver = (module: string, action: string) => Promise<PipelineContext>;
-export type ImprovementRuntime = { context: PipelineContext; authorize: ContextResolver };
+/** A IA da leitura editorial (injetável; ausente = IA desligada, a jornada segue pelas regras). */
+export type ImprovementEditorialAiCall = (prompt: { system: string; user: string; timeoutMs: number }) => Promise<unknown>;
+export type ImprovementRuntime = { context: PipelineContext; authorize: ContextResolver; editorialAi?: ImprovementEditorialAiCall; editorialAiTimeoutMs?: number;
+  /** Prazo (desde o início da requisição) para começar a ler o parecer de uma composição; testes encurtam. */
+  compositionDeadlineMs?: number };
 
 async function responseData(response: Response): Promise<Record<string, unknown>> {
   const body = await response.json() as Record<string, unknown>;
@@ -131,18 +139,27 @@ async function readInputs(context: PipelineContext, requested?: string[]) {
   const keywords: ImprovementKeyword[] = [...rows.values()].filter(r => !readArchitectSubjectStanding(r).declared).map(r => ({ id: r.id, keyword: r.keyword, volume: r.volume_search ?? null, volumeValidated: String(r.volume_source ?? object(r.demandEvidence).source ?? "").toLowerCase() === "google_ads" && (r.volume_search ?? 0) > 0, signals: signals(r), ownerId: owned.get(r.id) ?? (text(r.articleFormationRef) && object(r.articleFormationDecision).source === "human" ? `formation:${r.articleFormationRef}` : null), published: Boolean(r.isPublished) || brand.pages.some(p => p.keywordId === r.id), territoryRef: text(r.territoryRef), external: false }));
   return { workspace, rows, targets: selected, keywords };
 }
-async function evidenceOf(context: PipelineContext, targets: ImprovementTarget[], keywords: ImprovementKeyword[]) {
+type EvidenceRead = { evidence: ImprovementEvidence[]; ranking: Record<string, boolean | null> };
+async function evidenceOf(context: PipelineContext, targets: ImprovementTarget[], keywords: ImprovementKeyword[]): Promise<EvidenceRead> {
   const queries = new Map([...targets.map(t => [t.id, t.theme] as const), ...keywords.map(k => [k.id, k.keyword] as const)]);
   let cache: Awaited<ReturnType<typeof readPublishedFootprints>>;
   try { cache = await readPublishedFootprints(context, [...queries].map(([keywordId, keyword]) => ({ keywordId, keyword })), new Date()); }
-  catch { return targets.flatMap(t => keywords.map(k => ({ targetId: t.id, keywordId: k.id, complete: false, sharedPages: 0, contradiction: false, anchorConclusive: false }))); }
+  catch { return { ranking: Object.fromEntries(targets.map(t => [t.id, null])), evidence: targets.flatMap(t => keywords.map(k => ({ targetId: t.id, keywordId: k.id, complete: false, sharedPages: 0, contradiction: false, anchorConclusive: false }))) }; }
   const index = buildSerpSubjectIndex(cache.footprints);
   const missing = new Set(cache.missingLenses.map(m => m.keywordId));
+  // "Página que ranqueia não troca de principal": a mesma leitura do Reforçar
+  // publicados, pelo cache já lido. Sem leitura completa, fica desconhecido (null).
+  const ranking: Record<string, boolean | null> = {};
+  for (const t of targets) {
+    if (t.kind !== "published") continue;
+    const footprint = cache.footprints.find(f => f.keywordId === t.id);
+    ranking[t.id] = footprint && rankingBlocksSwap(readPageRanking({ url: t.url, canonical: t.canonical }, footprint)) ? true : !footprint || missing.has(t.id) ? null : false;
+  }
   const evidence: ImprovementEvidence[] = targets.flatMap(t => keywords.map(k => {
     const overlap = index.overlap(t.id, k.id);
     return { targetId: t.id, keywordId: k.id, complete: !missing.has(k.id) && cache.footprints.some(f => f.keywordId === k.id && f.lenses.length === 4), sharedPages: overlap.sharedPageCount ?? 0, contradiction: overlap.strength === "none" && (keywords.find(old => old.id === t.primaryId)?.volumeValidated ?? false), anchorConclusive: overlap.strength !== "unknown" && !missing.has(t.id) && (keywords.find(old => old.id === t.primaryId)?.volumeValidated ?? false) };
   }));
-  return evidence;
+  return { evidence, ranking };
 }
 const groupContexts = new WeakMap<ProvisionalArticleGroup, ImprovementTarget>();
 function makeGroup(target: ImprovementTarget, proposal: ImprovementProposal, rows: Map<string, Row>): ProvisionalArticleGroup {
@@ -186,15 +203,72 @@ async function serpOperation(context: PipelineContext, supplied: ProvisionalArti
   }
   return responseData(await handleArchitectFormationSerp(internalRequest("/api/arquiteto/serp", { brandId: context.brandId, groups, formationBaseHashes: Object.fromEntries(groups.map(group => [group.id, baseHash(group)])), lenses: SERP_SUBJECT_LENS_LABELS, mode, cacheOnly: mode === "execute" && budget === 0, authorizedPaidQueries: budget, payMissingExtraLenses: mode === "plan" || budget > 0, recollectStaleLenses: false }), context));
 }
+/** Até aqui (a partir do início do prepare) cabem IA + busca gratuita; o resto é cache da SERP e gravação. */
+const PREPARE_SEARCH_DEADLINE_MS = 60000;
+/**
+ * Depois disso (desde o início da requisição) nenhuma composição nova começa a
+ * ser conferida: a rota tem 120 s e ainda falta gravar e reler a execução. A
+ * composição que ficou de fora vira "precisa validar" (nada pago, nada gravado).
+ */
+const COMPOSITION_DEADLINE_MS = 90000;
+const AI_TIMEOUT_MESSAGE = "A IA excedeu o tempo limite.";
+function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error(AI_TIMEOUT_MESSAGE), { code: "AI_TIMEOUT" })), ms); });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+/**
+ * O que vai para a execução (e para o navegador) é um texto fixo por tipo de
+ * falha, nunca a mensagem crua do provider.
+ */
+function editorialAiFailureMessage(error: unknown): string {
+  const code = error && typeof error === "object" ? String((error as { code?: unknown }).code ?? "") : "";
+  if (code === "AI_TIMEOUT" || (error instanceof Error && error.name === "AbortError")) return AI_TIMEOUT_MESSAGE;
+  if (code === "AI_OUTPUT_INVALID" || code === "AI_PROVIDER_INVALID_RESPONSE") return "A resposta da IA veio fora do formato.";
+  if (/CONNECTION|CREDENTIAL|PROVIDER_INVALID|NOT_CONFIGURED/i.test(code)) return "A Connection DeepSeek da marca não está disponível.";
+  return "A IA está indisponível.";
+}
+/**
+ * 2 · LEITURA EDITORIAL DA IA NA LISTA (decisão do dono, 2026-09-30). Uma
+ * chamada em lote por execução; a resposta fica no run e o collect só a relê.
+ * Falha, tempo esgotado ou IA desligada: um aviso e a jornada segue pelas regras.
+ */
+async function readEditorialAi(runtime: ImprovementRuntime, run: ImprovementRun, ranking: Record<string, boolean | null>) {
+  if (run.editorialAi) return;
+  const eligible = improvementAiEligibleTargets(run.targets, run.proposals).length;
+  const targets = improvementAiTargets(run.targets, run.proposals);
+  const list = improvementAiList(run.keywords, run.proposals);
+  const base = { askedTargetIds: targets.map(t => t.id), listSize: list.length, picks: [], rejected: [] };
+  if (!targets.length || !list.length) { run.editorialAi = editorialAiRecord({ ...base, status: "skipped" }); return; }
+  if (!runtime.editorialAi) {
+    run.editorialAi = editorialAiRecord({ ...base, status: "off", message: "IA desligada nesta execução." });
+    run.notices.push("Leitura da IA desligada: a lista existente seguiu só pelas regras da SERP e pela busca gratuita.");
+    return;
+  }
+  try {
+    const timeoutMs = runtime.editorialAiTimeoutMs ?? IMPROVEMENT_AI_TIMEOUT_MS;
+    // O provider aborta no limite; a corrida garante o mesmo limite para qualquer implementação injetada.
+    const prompt = buildImprovementAiPrompt({ targets, list, keywords: run.keywords, ranking });
+    const raw = await withDeadline(runtime.editorialAi({ system: prompt.system, user: prompt.user, timeoutMs }), timeoutMs + 2000);
+    const checked = validateImprovementAiPicks(raw, { targets, keywords: run.keywords, listIds: list.map(k => k.id), aliases: prompt.aliases });
+    run.editorialAi = editorialAiRecord({ ...base, status: "answered", picks: checked.picks, rejected: checked.rejected });
+    if (checked.rejected.length) run.notices.push(`Leitura da IA: ${checked.rejected.length} sugestão(ões) recusada(s) pelas regras do código (formato, id fora da lista, sem volume, já publicada, de outro artigo, contradiz o slug ou a restrição do tema, outro público ou nicho, sem o núcleo do assunto, cabeça genérica ou mais de 3 por alvo). Veja cada recusa em “Sugestões da IA recusadas”.`);
+  } catch (error) {
+    const message = editorialAiFailureMessage(error);
+    run.editorialAi = editorialAiRecord({ ...base, status: "failed", message });
+    run.notices.push(`Leitura da IA indisponível agora (${message}) A busca seguiu pelas regras de sempre.`);
+  }
+  if (eligible > targets.length) run.notices.push(`Leitura da IA: ${eligible - targets.length} publicado(s) ou Assunto(s) além dos ${targets.length} desta leitura ficaram só com as regras e a busca gratuita nesta preparação (limite por chamada da IA).`);
+}
 /** Pagination and direct/expanded seeds share a memo; no repeated seed calls. */
-async function discover(context: PipelineContext, targets: ImprovementTarget[], existing: ImprovementKeyword[], notices: string[]) {
+async function discover(context: PipelineContext, targets: ImprovementTarget[], existing: ImprovementKeyword[], notices: string[], budgetMs = 35000) {
   const canonical = await resolveGoogleAdsCanonicalContext({ actorUserId: context.actorUserId, agencyId: null, brandId: context.brandId, operation: "discovery" });
   const { client } = await createGoogleAdsCanonicalClient({ context: canonical });
   const account = createGoogleAdsKeywordAccount({ customerId: canonical.customerId, loginCustomerId: canonical.managerCustomerId });
   const memo = new Set<string>(), found = new Map(existing.map(k => [normalizeKeyword(k.keyword), k]));
   // One request per page (theme + URL together); a second, broader one only
   // when the first brings back nothing new. Budget covers every target once.
-  const LIMIT = 40;
+  const LIMIT = 40, BUDGET_MS = budgetMs, started = Date.now();
   let requests = 0;
   const pending: string[] = [];
   const ask = async (seed: GoogleAdsKeywordIdeasInput["seed"]): Promise<number> => {
@@ -214,7 +288,8 @@ async function discover(context: PipelineContext, targets: ImprovementTarget[], 
     return fresh;
   };
   for (const target of targets) {
-    if (requests >= LIMIT) { pending.push(target.theme); continue; }
+    // The preparation also reads the SERP cache: keep the free search inside a bounded time.
+    if (requests >= LIMIT || Date.now() - started > BUDGET_MS) { pending.push(target.theme); continue; }
     // Google Ads returns only the phrase itself for long titles; short cores
     // ("plano de marketing", "clínica de estética") bring the related searches.
     const cores = shortSeedsOf(target.theme);
@@ -253,11 +328,20 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
   if (request.action === "prepare") {
     const input = await readInputs(context, request.targetIds);
     const run: ImprovementRun = { version: ARTICLE_IMPROVEMENT_VERSION, runId: randomUUID(), brandId: context.brandId, actorId: context.actorUserId, createdAt: new Date().toISOString(), state: "prepared", leaseUntil: null, decisionHash: "", sourceHashes: Object.fromEntries(input.targets.map(t => [t.id, sourceHash(t, input.workspace, input.rows)])), targets: input.targets, keywords: input.keywords, beforeAssignments: Object.fromEntries([...input.rows].map(([id, row]) => [id, Object.fromEntries(Object.entries(object(object(row.canonicalWorkflow).payload)).filter(([key]) => ["territoryRef", "territoryAssignment", "articleFormationRef", "articleFormationDecision", "articleSubjectAnchor", "workingArticleId"].includes(key)))])), proposals: [], costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] }, reservedCostUsd: 0, notices: [], outcomes: [], acceptedIds: null };
-    const evidence = await evidenceOf(context, run.targets, run.keywords);
-    run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence });
+    const started = Date.now();
+    const { evidence, ranking } = await evidenceOf(context, run.targets, run.keywords);
+    // 1 · pares da SERP (cache).
+    run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, listReading: false });
+    // 2 · leitura da IA na lista existente, só para quem ficou sem proposta pronta.
+    await readEditorialAi(runtime, run, ranking);
+    // 2b · leitura da lista pelo código (núcleo do slug) para quem a IA não resolveu.
+    run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, editorialPicks: run.editorialAi?.picks });
+    // 3 · busca nova no Google Ads só para quem ainda ficou sem nada. O tempo
+    // que a IA usou sai do orçamento da busca: o prepare inteiro fica abaixo de 120 s.
     const gaps = run.targets.filter(t => run.proposals.find(p => p.targetId === t.id)?.status !== "ready" && run.proposals.find(p => p.targetId === t.id)?.status !== "adequate");
-    if (gaps.length) try { run.keywords = await discover(context, gaps, run.keywords, run.notices); } catch (error) { run.notices.push(`Pesquisa gratuita incompleta: ${error instanceof Error ? error.message : "provider indisponível"}. O acervo continua válido.`); }
-    await refreshPlan(runtime, run, input.rows);
+    const discoverBudgetMs = Math.max(5000, Math.min(35000, PREPARE_SEARCH_DEADLINE_MS - (Date.now() - started)));
+    if (gaps.length) try { run.keywords = await discover(context, gaps, run.keywords, run.notices, discoverBudgetMs); } catch (error) { run.notices.push(`Pesquisa gratuita incompleta: ${error instanceof Error ? error.message : "provider indisponível"}. O acervo continua válido.`); }
+    await refreshPlan(runtime, run, input.rows, started + (runtime.compositionDeadlineMs ?? COMPOSITION_DEADLINE_MS));
     run.decisionHash = decisionHashOf(run);
     await new WorkflowRepository(context).create({ subjectType: SUBJECT_TYPE, subjectId: run.runId, stage: "architect", state: "prepared", sourceEntityId: run.runId, payload: run as unknown as Record<string, unknown> });
     return (await findRun(context, run.runId)).run;
@@ -272,7 +356,11 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     // Bounded steps: each request works about a minute, saves the progress and
     // returns "collecting"; the screen calls again. One request for everything
     // exceeded the 120 s function limit in production (11 of 12 paid, then killed).
-    const started = Date.now(), STEP_MS = 60000;
+    // One SERP group per request: a group with four lenses can take a minute by itself.
+    // Several groups per request, starting a new one only in the first 30 s:
+    // a group with four lenses can take ~40 s, so the request stays under 120 s.
+    const started = Date.now(), START_WINDOW_MS = 30000;
+    let groupsThisRequest = 0;
     let input: Awaited<ReturnType<typeof readInputs>>;
     if (run.state !== "collecting") {
       if (!request.authorizedCostUsd || request.authorizedCostUsd < run.costs.estimatedCostUsd.max || request.authorizedCostUsd + run.reservedCostUsd > 1) throw refusal("Autorize o plano vigente dentro do teto total de US$ 1 desta execução.");
@@ -290,9 +378,12 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     const progress = run.collect!;
     const rows = candidateRows(run.keywords, input.rows);
     if (progress.phase === "collect") {
-      for (const group of validationGroups(run, rows)) {
+      const groups = validationGroups(run, rows);
+      progress.totalGroups = groups.length;
+      for (const group of groups) {
         if (progress.doneGroupIds.includes(group.id)) continue;
-        if (Date.now() - started > STEP_MS) return (await saveRun(context, current, run)).run;
+        if (groupsThisRequest >= 1 && Date.now() - started > START_WINDOW_MS) return (await saveRun(context, current, run)).run;
+        groupsThisRequest++;
         const plan = object((await serpOperation(context, group, "plan")).plan) as CostPlan;
         if (plan.paidQueries > 0 && (plan.estimatedCostUsd.max > progress.reservedRemaining || plan.paidQueries > progress.remaining)) {
           if (progress.remaining > 0) run.notices.push(`Plano mudou para ${group.keywords[0].keyword}: nova autorização será necessária; nada pago para esta consulta.`);
@@ -306,9 +397,9 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
       }
       progress.phase = "refresh";
       current = await saveRun(context, current, run);
-      if (Date.now() - started > STEP_MS / 2) return current.run;
+      if (groupsThisRequest > 0 && Date.now() - started > START_WINDOW_MS) return current.run;
     }
-    await refreshPlan(runtime, run, input.rows); run.state = "prepared"; delete run.collect; run.decisionHash = decisionHashOf(run);
+    await refreshPlan(runtime, run, input.rows, started + (runtime.compositionDeadlineMs ?? COMPOSITION_DEADLINE_MS)); run.state = "prepared"; delete run.collect; run.decisionHash = decisionHashOf(run);
     return (await saveRun(context, current, run)).run;
   }
   // One human confirmation persists the accepted set. Subsequent requests only
@@ -355,16 +446,19 @@ function validationGroups(run: ImprovementRun, rows: Map<string, Row>): Provisio
     const proposal = run.proposals.find(p => p.targetId === target.id)!;
     // SERP is paid only for keywords with volume. The page's own composition is
     // checked only when there is a real proposal to check.
-    if (proposal.status === "ready" && proposal.principalId && proposal.memberIds.length) groups.push(makeGroup(target, proposal, rows));
-    const recommended = proposal.status === "ready" ? proposal.memberIds.filter(id => id === proposal.principalId || (rows.get(id)?.volume_search ?? 0) > 0) : [];
-    const ids = [...new Set([...recommended, ...run.keywords.filter(k => !k.published && k.volumeValidated && (!k.ownerId || k.ownerId === target.id) && (sharesTheme(target.theme, k.keyword) || improvementEditorialFit(target, k).fits)).sort((a, b) => b.volume! - a.volume!).slice(0, 5).map(k => k.id)])];
+    // A composição escolhida pela IA que ainda não tem as quatro lentes entra no passo 2 (pago, com prévia).
+    const validating = proposal.status === "ready" || proposal.needsValidation === true;
+    if (validating && proposal.principalId && proposal.memberIds.length) groups.push(makeGroup(target, proposal, rows));
+    const recommended = validating ? proposal.memberIds.filter(id => id === proposal.principalId || (rows.get(id)?.volume_search ?? 0) > 0) : [];
+    const ids = [...new Set([...recommended, ...(isListReading(proposal) ? proposal.addIds : []), ...run.keywords.filter(k => !k.published && k.volumeValidated && (!k.ownerId || k.ownerId === target.id) && (sharesTheme(target.theme, k.keyword) || improvementEditorialFit(target, k).fits)).sort((a, b) => Number(carriesSlugCore(target.slug, b)) - Number(carriesSlugCore(target.slug, a)) || b.volume! - a.volume!).slice(0, 5).map(k => k.id)])];
     for (const id of ids) groups.push(makeGroup({ ...target, id, kind: "subject" }, { ...proposal, targetId: id, principalId: id, memberIds: [id] }, rows));
   }
   return [...new Map(groups.map(g => [g.id, g])).values()];
 }
-async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, existing: Map<string, Row>) {
-  const evidence = await evidenceOf(runtime.context, run.targets, run.keywords);
-  run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence });
+async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, existing: Map<string, Row>, deadlineAt = Number.POSITIVE_INFINITY) {
+  const { evidence, ranking } = await evidenceOf(runtime.context, run.targets, run.keywords);
+  // As escolhas da IA guardadas no prepare valem de novo aqui; a IA não é chamada outra vez.
+  run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, editorialPicks: run.editorialAi?.picks });
   const rows = candidateRows(run.keywords, existing), groups = validationGroups(run, rows);
   // All cached candidates were evaluated above before choosing paid candidates.
   let maximum = 0, minimum = 0, calls = 0, cacheUnavailable = false;
@@ -380,20 +474,102 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
   }
   // A candidate's cache does not by itself prove the whole proposed article.
   // Check the final roles and composition before asking for editorial acceptance.
-  for (const proposal of run.proposals.filter(p => p.status === "ready")) {
+  // Os pares da SERP primeiro (regra anterior); as composições da IA depois. Uma
+  // composição só começa dentro do prazo; a que sobra fica "precisa validar".
+  const pending = run.proposals.filter(p => p.status === "ready").sort((a, b) => Number(isListReading(a)) - Number(isListReading(b)));
+  const executed: { proposal: ImprovementProposal; group: ProvisionalArticleGroup }[] = [];
+  const unreadable = (proposal: ImprovementProposal) => {
+    proposal.status = "insufficient_evidence"; proposal.reasons.push("Não foi possível validar a composição pelo cache. Consulte ou complete a evidência antes do aceite.");
+    if (isListReading(proposal)) proposal.needsValidation = true;
+  };
+  for (const proposal of pending) {
+    if (Date.now() > deadlineAt) {
+      proposal.status = "insufficient_evidence"; proposal.needsValidation = true;
+      proposal.reasons.push("Faltou tempo nesta etapa para ler o parecer da SERP desta composição (nada foi pago nem gravado): valide no passo 2 ou toque em “Buscar de novo”.");
+      continue;
+    }
     const target = run.targets.find(t => t.id === proposal.targetId)!;
     const group = makeGroup(target, proposal, rows);
-    try {
-      await serpOperation(runtime.context, group, "execute", 0);
-      const assessment = (await listArticleFormationSerpAssessments(runtime.context)).find(a => a.candidateRef === group.id && a.payload.formationBaseHash === baseHash(group));
-      const composition = assessment ? serpAssessmentComposition(assessment.payload.assessment, object(assessment.payload.interpretation).lenses) : null;
-      const mismatch = serpCompositionMismatch(composition, { keywordIds: proposal.memberIds, principalKeywordId: proposal.principalId!, roles: Object.fromEntries(group.keywordIds.map(id => [id, id === group.principalSuggestion.keywordId ? "principal" as const : "secundaria" as const])) });
-      if (!assessment || mismatch || composition?.lensesComplete !== true || assessment.payload.verdict === "DIVERGENCE") {
-        proposal.status = "insufficient_evidence";
-        proposal.reasons.push(mismatch ?? "A SERP da composição final está incompleta ou diverge; complete a evidência antes do aceite.");
-      } else if (assessment.payload.verdict === "INCONCLUSIVE") proposal.reasons.push("SERP da composição inconclusiva nas quatro lentes: o aceite humano confirma este fundamento editorial, sem tratar a inconclusão como prova de compatibilidade.");
-    } catch { proposal.status = "insufficient_evidence"; proposal.reasons.push("Não foi possível validar a composição pelo cache. Consulte ou complete a evidência antes do aceite."); }
+    try { await serpOperation(runtime.context, group, "execute", 0); executed.push({ proposal, group }); }
+    catch { unreadable(proposal); }
   }
+  // Uma leitura dos pareceres para todas as composições conferidas (antes: uma por composição).
+  type Checked = { proposal: ImprovementProposal; group: ProvisionalArticleGroup };
+  const judge = async (batch: Checked[], allowShrink: boolean): Promise<ImprovementProposal[]> => {
+    if (!batch.length) return [];
+    let assessments: Awaited<ReturnType<typeof listArticleFormationSerpAssessments>> = [];
+    try { assessments = await listArticleFormationSerpAssessments(runtime.context); }
+    catch { for (const { proposal } of batch) unreadable(proposal); return []; }
+    const shrunk: ImprovementProposal[] = [];
+    for (const { proposal, group } of batch) {
+      try {
+        const assessment = assessments.find(a => a.candidateRef === group.id && a.payload.formationBaseHash === baseHash(group));
+        const composition = assessment ? serpAssessmentComposition(assessment.payload.assessment, object(assessment.payload.interpretation).lenses) : null;
+        const mismatch = serpCompositionMismatch(composition, { keywordIds: proposal.memberIds, principalKeywordId: proposal.principalId!, roles: Object.fromEntries(group.keywordIds.map(id => [id, id === group.principalSuggestion.keywordId ? "principal" as const : "secundaria" as const])) });
+        // Sem lente no cache, a rota em modo só-cache deixa a composição sem parecer (nada pago).
+        if (isListReading(proposal) && (!assessment || composition?.lensesComplete !== true) && assessment?.payload.verdict !== "DIVERGENCE") {
+          // Faltam lentes da composição escolhida na lista: a linha fica "precisa validar" (passo 2, pago, com prévia).
+          proposal.status = "insufficient_evidence"; proposal.needsValidation = true;
+          proposal.reasons.push("Precisa validar no Google: faltam lentes da SERP para esta composição. Valide no passo 2 antes de gravar.");
+        } else if (!assessment || mismatch || composition?.lensesComplete !== true || assessment.payload.verdict === "DIVERGENCE") {
+          /*
+           * O Google separou parte da composição (dono, 2026-09-30: "campanhas
+           * de marketing" não divide páginas com "melhores/três campanhas…").
+           * Uma nova tentativa, só pelo cache e sem custo, com a principal e as
+           * keywords que dividem páginas com ela em 2+ lentes.
+           */
+          // A âncora é a principal quando ela tem volume (e SERP); sem isso — a página publicada sem
+          // volume nunca é coletada — é a entrada de maior volume ("como captar um cliente", 390).
+          const volumeOf = (id: string | null) => run.keywords.find(k => k.id === id && k.volumeValidated)?.volume ?? 0;
+          const anchor = proposal.principalId && volumeOf(proposal.principalId) > 0 ? proposal.principalId
+            : [...proposal.addIds].sort((a, b) => volumeOf(b) - volumeOf(a))[0] ?? null;
+          const kept = allowShrink && assessment && !mismatch && composition?.lensesComplete === true && assessment.payload.verdict === "DIVERGENCE" && anchor
+            ? serpSupportedMembers(object(assessment.payload.interpretation).lenses, anchor, proposal.addIds) : null;
+          const dropped = kept ? proposal.addIds.filter(id => !kept.includes(id) && id !== proposal.principalId) : [];
+          if (kept && dropped.length && (kept.length > 0 || proposal.principalId !== proposal.currentPrimaryId)) {
+            const nomes = dropped.map(id => `“${run.keywords.find(k => k.id === id)?.keyword ?? id}”`).join(", ");
+            proposal.addIds = kept;
+            proposal.memberIds = proposal.memberIds.filter(id => !dropped.includes(id));
+            proposal.transfers = proposal.transfers.filter(id => !dropped.includes(id));
+            if (proposal.aiReasons) proposal.aiReasons = proposal.aiReasons.filter(item => !dropped.includes(item.keywordId));
+            proposal.reasons.push(`O Google separou ${nomes} da principal (poucas páginas em comum): ficam de fora. A composição menor foi conferida de novo pelo cache, sem custo.`);
+            shrunk.push(proposal);
+            continue;
+          }
+          proposal.status = "insufficient_evidence";
+          /*
+           * O Google separou TODAS as entradas da página (caso real, 2026-09-30:
+           * "como captar clientes para clínica de estética" × "como captar
+           * clientes / um cliente / novos clientes", baixa ou nenhuma nas 4
+           * lentes). Não é falta de evidência: é outro assunto. A tela diz isso
+           * e aponta as Sobras, em vez de "incompleta ou diverge".
+           */
+          const separadas = kept && kept.every(id => id === anchor) && anchor === proposal.principalId && proposal.principalId === proposal.currentPrimaryId ? dropped : [];
+          if (separadas.length) {
+            const nomes = separadas.map(id => `“${run.keywords.find(k => k.id === id)?.keyword ?? id}”`).join(", ");
+            proposal.reasons.push(`O Google trata ${nomes} como outro assunto: quase nenhuma página em comum com esta nas 4 lentes. Elas não reforçam esta página; formam um artigo novo (veja Sobras). A página fica como está.`);
+          } else proposal.reasons.push(mismatch ?? "A SERP da composição final está incompleta ou diverge; complete a evidência antes do aceite.");
+          // "A IA sugeriu, o Google discordou": a linha guarda a origem e o motivo.
+          if (proposal.evidenceBasis === "editorial_ai") proposal.reasons.push("A IA sugeriu esta composição, mas a SERP dela não confirmou: nada entra.");
+          if (proposal.evidenceBasis === "list_core") proposal.reasons.push("A lista sugeriu esta composição, mas a SERP dela não confirmou: nada entra.");
+        } else if (assessment.payload.verdict === "INCONCLUSIVE") proposal.reasons.push("SERP da composição inconclusiva nas quatro lentes: o aceite humano confirma este fundamento editorial, sem tratar a inconclusão como prova de compatibilidade.");
+      } catch { unreadable(proposal); }
+    }
+    return shrunk;
+  };
+  const shrunk = await judge(executed, true);
+  const again: Checked[] = [];
+  for (const proposal of shrunk) {
+    if (Date.now() > deadlineAt) {
+      proposal.status = "insufficient_evidence"; proposal.needsValidation = true;
+      proposal.reasons.push("Faltou tempo nesta etapa para ler o parecer da composição menor (nada foi pago nem gravado): toque em “Buscar de novo”.");
+      continue;
+    }
+    const group = makeGroup(run.targets.find(t => t.id === proposal.targetId)!, proposal, rows);
+    try { await serpOperation(runtime.context, group, "execute", 0); again.push({ proposal, group }); }
+    catch { unreadable(proposal); }
+  }
+  await judge(again, false);
   run.costs = { paidQueries: calls, estimatedCostUsd: { min: Number(minimum.toFixed(6)), max: Number(maximum.toFixed(6)) }, missingDetails: details, ...(cacheUnavailable ? { cacheUnavailable: true } : {}) };
 }
 
@@ -417,10 +593,23 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   if (sourceHash(target, input.workspace, input.rows) !== run.sourceHashes[target.id]) throw refusal("O artigo, suas keywords ou o Silo mudaram desde a prévia. Prepare novamente.");
   let members = [...proposal.memberIds], principalId = proposal.principalId!;
   let transfers = [...proposal.transfers];
+  // Só o que muda o artigo conta como "mudou": texto, volume, Silo, dono e publicação.
+  // A página publicada e o Assunto declarado nunca entram na lista de keywords
+  // (nem na prévia nem agora): antes, isso acusava "mudou" para sempre e o
+  // artigo que também é Assunto nunca gravava.
+  const materialOf = (k: ImprovementKeyword) => ({ keyword: normalizeKeyword(k.keyword), volume: k.volume, volumeValidated: k.volumeValidated, territoryRef: k.territoryRef, ownerId: k.ownerId, published: k.published });
   for (const id of members) {
     const accepted = run.keywords.find(k => k.id === id);
+    if (accepted?.external) continue;
     const current = input.keywords.find(k => k.id === id);
-    if (!accepted?.external && (!current || stableHash(current) !== stableHash(accepted))) throw refusal("Uma keyword da prévia mudou. Prepare novamente para revisar os dados atuais.");
+    if (!accepted && !current) {
+      if (!input.rows.has(id)) throw refusal("Uma keyword da prévia saiu do Arquiteto. Prepare novamente para revisar os dados atuais.");
+      continue;
+    }
+    if (!accepted || !current || stableHash(materialOf(current)) !== stableHash(materialOf(accepted))) {
+      const nome = (current ?? accepted)?.keyword ?? id;
+      throw refusal(`A keyword "${nome}" mudou desde a prévia (volume, Silo ou artigo). Prepare novamente para revisar os dados atuais.`);
+    }
   }
   const newIds = members.filter(id => run.keywords.find(k => k.id === id)?.external);
   if (newIds.length) {
@@ -522,7 +711,12 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
 }
 
 export function improvementRuntime(context: PipelineContext): ImprovementRuntime {
-  return { context, authorize: (module, action) => resolvePipelineContext({ brandId: context.brandId, module, action }, { requireActorUserId: async () => context.actorUserId }) };
+  return {
+    context,
+    authorize: (module, action) => resolvePipelineContext({ brandId: context.brandId, module, action }, { requireActorUserId: async () => context.actorUserId }),
+    // A Connection DeepSeek resolvida como nas outras rotas do Arquiteto (cliente da sessão).
+    editorialAi: prompt => proposeArticleImprovementAiPicks({ actorUserId: context.actorUserId, brandId: context.brandId, client: context.supabase, ...prompt }),
+  };
 }
 
 /** Send only the terms shown in the preview, rather than the full brand pool. */

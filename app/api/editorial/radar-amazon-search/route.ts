@@ -17,6 +17,7 @@ import { buildRadarAmazonUniverse, type RadarAmazonRelatedSearch, type RadarAmaz
 import { RadarPrimaryModeConflictError } from "@/lib/radar/search-mode";
 import { RadarAmazonEditorialIntentSchema, RadarAmazonResearchTargetSchema, radarAmazonSupportQuery, radarAmazonValidateSetup } from "@/lib/radar/amazon-editorial-target";
 import { RadarStartError, radarStartPorts } from "@/lib/server/radar-youtube-start";
+import { assertRadarGoogleBase } from "@/lib/server/radar-google-base";
 import { finishRadarAmazonRun, startRadarAmazonRun } from "@/lib/server/radar-amazon-start";
 import { recordIntegrationUsage } from "@/lib/server/integrations-runtime";
 import { collectRadarGoogleSupport, type RadarSupportCollectionOutcome } from "@/lib/server/radar-support-research";
@@ -246,6 +247,8 @@ export async function POST(request: Request) {
      * confirmada. Só depois disso a rota resolve config (que já reserva cota) e
      * chama o provider.
      */
+    /* SDD Radar 2026-09-30 (Parte A): a Amazon acrescenta ao Google finalizado; sem ele, recusa antes de gastar. */
+    await assertRadarGoogleBase({ brandId: input.brandId, articleId: input.articleId, mode: "AMAZON" });
     const inicio = await startRadarAmazonRun({
       brandId: input.brandId,
       articleId: input.articleId,

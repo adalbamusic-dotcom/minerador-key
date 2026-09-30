@@ -334,14 +334,12 @@ export function ArchitecturePanel({
 
       {!restore.plan.clean && (
         <div className="mt-3 rounded border border-warning/40 bg-warning/10 p-3" data-testid="architect-restore-working-copy">
-          <p className="text-sm font-semibold text-foreground">A cópia de trabalho não representa os ArticleDNA aprovados</p>
-          <p className="mt-1 text-sm leading-6 text-text-muted">
-            {restore.plan.summary} Reprocessar não conserta isto: ele preserva a estrutura corrente.
-            Restaurar devolve as keywords ao território que o artefato aprovado declara — sem editar
-            ArticleDNA, sem criar sucessora e sem chamar provider.
+          <p className="text-sm font-semibold text-foreground">
+            {restore.plan.articlesAffected} artigo(s) aprovado(s) com {restore.plan.keywordsToRestore} keyword(s) no Silo errado
           </p>
-          <p className="mt-2 text-sm text-text-muted">
-            ARTICLES_AFETADOS = {restore.plan.articlesAffected} · KEYWORDS_A_RESTAURAR = {restore.plan.keywordsToRestore}
+          <p className="mt-1 text-sm leading-6 text-text-muted">
+            Na mesa, essas keywords estão num Silo diferente do Silo do próprio artigo. “Restaurar” coloca cada uma
+            de volta no Silo do artigo. Não muda o artigo, não cria versão nova e não cobra nada.
           </p>
 
           {restore.previewOpen && (
@@ -372,15 +370,15 @@ export function ArchitecturePanel({
             data-testid="architect-restore-action"
             onClick={restore.onRestore}
             title={restore.previewOpen
-              ? "Aplica as atribuições acima de uma vez só; se alguma falhar, todas voltam."
-              : "Primeiro clique mostra o que seria restaurado. Nada é gravado agora."}
+              ? "Aplica tudo de uma vez; se alguma falhar, todas voltam."
+              : "Mostra quais keywords voltam para qual Silo. Nada é gravado neste clique."}
             className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded border border-warning/50 px-3 text-sm font-semibold text-warning transition-colors hover:bg-warning/10 disabled:opacity-40"
           >
             {restore.busy
               ? "Restaurando…"
               : restore.previewOpen
-                ? `Restaurar ${restore.plan.keywordsToRestore} atribuição(ões)`
-                : "Restaurar cópia de trabalho"}
+                ? `Restaurar ${restore.plan.keywordsToRestore} keyword(s)`
+                : "Ver quais keywords"}
           </button>
         </div>
       )}

@@ -372,7 +372,7 @@ test("R1 · bundle NOVO: o dossiê lê só a cópia — um serp vivo não a sobr
   assert.notEqual(primeira.bundleHash, HASH_DOURADO_DO_DOSSIE, "o standing congelado entra na identidade do dossiê novo");
 });
 
-test("R1 · perfil YOUTUBE: o standing do Google congelado não entra num dossiê de vídeo", () => {
+test("Google base (SDD Radar 2026-09-30) · YouTube acrescentado: o standing do Google congelado continua valendo", () => {
   const congelado = radarStampFrozenSerpStanding(LEGADO, avaliar({ sufficiency: "INSUFFICIENT" }));
   const payload = {
     ...payloadDaAnalise(congelado),
@@ -380,8 +380,9 @@ test("R1 · perfil YOUTUBE: o standing do Google congelado não entra num dossi�
   };
   const resultado = buildRadarEvidenceBundleFromAnalysis({ payload, article: ARTIGO_CORRENTE, competitiveBlueprint: null, observedAt: "2026-09-21T12:00:00.000Z" });
   assert.ok(resultado.ok);
-  assert.equal(resultado.bundle.primaryResearchProfile, "YOUTUBE");
-  assert.equal(resultado.bundle.serpStanding.authoritative, true, "comportamento anterior preservado fora do perfil Google");
+  assert.equal(resultado.bundle.primaryResearchProfile, "GOOGLE", "o Google é a base; o YouTube é acréscimo");
+  assert.equal(resultado.bundle.research.youtube?.role, "SUPPORT");
+  assert.equal(resultado.bundle.serpStanding.sufficient, false, "o standing congelado do Google (insuficiente) viaja, como num artigo só-Google");
 });
 
 /* ======================= (4) as travas ======================= */
@@ -710,7 +711,7 @@ test("R1 · D1 · a revisão casa pelo id do registro e pelo id da pesquisa", ()
   assert.equal(vinculadaPelaLinha.valid, false, "análise vinculada pelo id da linha, revisão pelo da pesquisa");
 });
 
-test("R1 · perfil AMAZON: o standing do Google congelado não entra num dossiê de produto", () => {
+test("Google base (SDD Radar 2026-09-30) · Amazon acrescentada: o standing do Google congelado continua valendo", () => {
   const congelado = radarStampFrozenSerpStanding(LEGADO, avaliar({ sufficiency: "INSUFFICIENT" }));
   const payload = {
     ...payloadDaAnalise(congelado),
@@ -718,9 +719,9 @@ test("R1 · perfil AMAZON: o standing do Google congelado não entra num dossiê
   };
   const resultado = buildRadarEvidenceBundleFromAnalysis({ payload, article: ARTIGO_CORRENTE, competitiveBlueprint: null, observedAt: "2026-09-21T12:00:00.000Z" });
   assert.ok(resultado.ok, JSON.stringify(resultado));
-  assert.equal(resultado.bundle.primaryResearchProfile, "AMAZON");
-  assert.equal(resultado.bundle.serpStanding.authoritative, true, "comportamento anterior preservado fora do perfil Google");
-  assert.equal(resultado.bundle.serpStanding.sufficient, true);
+  assert.equal(resultado.bundle.primaryResearchProfile, "GOOGLE", "o Google é a base; a Amazon é acréscimo");
+  assert.equal(resultado.bundle.research.amazon?.role, "SUPPORT");
+  assert.equal(resultado.bundle.serpStanding.sufficient, false, "o standing congelado do Google (insuficiente) viaja");
 });
 
 function semearHistorico(versoes: unknown[]) {

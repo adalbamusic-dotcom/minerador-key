@@ -1,5 +1,29 @@
 # Estado atual — Minerador
 
+## Medir Volume pelo MCP — 2026-09-30
+
+```text
+SDD = docs/compartilhado/sdd-mcp-jornada-completa-2026-09-30.md (F1, aprovada) · MIGRATION = 0 · ESCRITA_REMOTA = 0 · CHAMADA_PAGA_EM_TESTE = 0 · MANUAL_UI_VALIDATED = NO
+```
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- `lib/server/minerador-volume-measure.ts` faz no servidor o laço e a releitura que o botão
+  “Volume” faz na tela:
+  - blocos de 200;
+  - `classifyVolumeReadback` + `resolveMineradorProcessState`;
+  - cota, 401 e 403 param o lote.
+  Ele chama o mesmo núcleo `handleGoogleAdsKeywordMetrics` com contexto autorizado. A tela não
+  mudou.
+- **MCP `measure_keywords`:**
+  - `plan` (grátis; `platform.read`): devolve as keywords da marca, os blocos e o `planHash`;
+  - `execute`: exige `minerador.write` + `provider.spend`, o `planHash` vigente e o aceite do
+    usuário. Até 500 keywords por chamada;
+  - desfechos: medida, sem média (processada, sem dado) e falhou (com o motivo).
+- Testes: `tests/agent-mcp-f1-volume-nucleo.test.mts` (Google Ads e banco simulados),
+  `tests/agent-mcp-f1-volume-e-escrita.test.mts`, `tests/agent-platform-mcp.test.mts` (recusas).
+- **Pendente (usuário):** smoke real pela IA conectada.
+
 ## Lógica e aprovação no servidor viram núcleo compartilhado — 2026-09-28
 
 ```text

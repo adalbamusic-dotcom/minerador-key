@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const ExpertEvidenceReferenceSchema = z.object({
   sourceType: z.enum(["TEXT", "VOICE", "AUDIO", "DOCUMENT"]),
-  provider: z.literal("telegram"),
+  provider: z.enum(["telegram", "platform"]),
   externalUpdateId: z.string().min(1).max(80),
   originalAssetUri: z.string().url().nullable().optional(),
   checksum: z.string().max(256).nullable().optional(),
@@ -38,7 +38,7 @@ export const ExpertContributionRecordSchema = z.object({
   brandId: z.string().uuid(),
   expertId: z.string().uuid(),
   briefId: z.string().uuid(),
-  provider: z.literal("telegram"),
+  provider: z.enum(["telegram", "platform"]),
   sourceType: z.enum(["TEXT", "VOICE", "AUDIO", "DOCUMENT"]),
   originalText: z.string().nullable(),
   transcriptText: z.string().nullable(),

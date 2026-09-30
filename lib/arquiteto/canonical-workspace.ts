@@ -725,6 +725,36 @@ export async function confirmRemoteSiloCandidate(input: {
 }
 
 /**
+ * Desfaz um Silo SUGERIDO (sem endereço publicado).
+ *
+ * Mesmo PATCH canônico, com `territoryUndos`: o servidor lê o Silo, confere
+ * endereço publicado, ArticleDNA aprovado e SiloDNA/SiloPage, devolve cada
+ * keyword para "sem Silo" pela decisão de Silo e só então grava o território
+ * como `rejected`, com lock e ator. Nada é apagado. O sucesso aqui é só o
+ * retorno da gravação; quem chama confere na releitura.
+ */
+export async function undoRemoteSiloCandidate(input: {
+  brandId: string;
+  territoryRef: string;
+  expectedLock: number;
+}): Promise<CanonicalTerritory> {
+  const response = await fetch("/api/arquiteto/workspace", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      brandId: input.brandId,
+      territoryUndos: [{ territoryRef: input.territoryRef, expectedLock: input.expectedLock }],
+    }),
+  });
+  const body = WorkingCopyResponseSchema.parse(await readResponse(response));
+  const updated = body.data.territories.find(item => item.territoryRef === input.territoryRef);
+  if (!updated || updated.territory.lifecycleStatus !== "rejected") {
+    throw new CanonicalWorkspaceError("QUERY_FAILURE", "O servidor não confirmou o Silo como desfeito.");
+  }
+  return updated;
+}
+
+/**
  * Contexto humano do Silo — entidade central, intenção macro, fronteira e
  * narrativa.
  *

@@ -13,6 +13,8 @@ export type RadarExpertContributionEvidenceSource = {
   originalAssetUri: string | null;
   checksum: string | null;
   receivedAt: string;
+  /** O canal por onde o parecer chegou. Ausente = Telegram (o único canal antes de 2026-09-30). */
+  provider?: "telegram" | "platform";
 };
 
 export type RadarExpertBriefEvidenceSource = {
@@ -144,7 +146,7 @@ export function projectRadarExpertEvidence(input: {
     contributionId: input.contribution.id,
     evidenceType,
     approvedContent,
-    provider: "telegram",
+    provider: input.contribution.provider ?? "telegram",
     externalUpdateId: input.contribution.externalUpdateId,
     originalAssetUri: input.contribution.originalAssetUri,
     checksum: input.contribution.checksum,

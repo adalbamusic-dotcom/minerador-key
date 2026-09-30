@@ -28,10 +28,16 @@ test("A · o instante do pacote é lido do perfil que manda, na precedência can
   assert.equal(radarFrozenObservedAtOfAnalysis(GOOGLE), "2026-09-10T13:00:00.000Z");
   assert.equal(radarFrozenObservedAtOfAnalysis(YOUTUBE), "2026-09-14T10:00:00.000Z");
   assert.equal(radarFrozenObservedAtOfAnalysis(AMAZON), "2026-09-16T08:00:00.000Z");
-  /* AMAZON > YOUTUBE > GOOGLE — a mesma ordem de `radarPrimaryProfileOfAnalysis`. */
-  assert.equal(radarFrozenObservedAtOfAnalysis({ ...GOOGLE, ...YOUTUBE, ...AMAZON }), "2026-09-16T08:00:00.000Z");
-  assert.equal(radarFrozenObservedAtOfAnalysis({ ...GOOGLE, ...YOUTUBE }), "2026-09-14T10:00:00.000Z");
-  assert.equal(radarPrimaryProfileOfAnalysis({ ...GOOGLE, ...YOUTUBE }), "YOUTUBE", "o instante e o perfil precisam concordar");
+  /*
+   * SDD Radar 2026-09-30 (Parte A): com o Google finalizado ele é a base e
+   * manda no instante; sem ele, a precedência legada AMAZON > YOUTUBE. A mesma
+   * ordem de `radarPrimaryProfileOfAnalysis`.
+   */
+  assert.equal(radarFrozenObservedAtOfAnalysis({ ...GOOGLE, ...YOUTUBE, ...AMAZON }), "2026-09-10T13:00:00.000Z");
+  assert.equal(radarFrozenObservedAtOfAnalysis({ ...GOOGLE, ...YOUTUBE }), "2026-09-10T13:00:00.000Z");
+  assert.equal(radarPrimaryProfileOfAnalysis({ ...GOOGLE, ...YOUTUBE }), "GOOGLE", "o instante e o perfil precisam concordar");
+  assert.equal(radarFrozenObservedAtOfAnalysis({ ...YOUTUBE, ...AMAZON }), "2026-09-16T08:00:00.000Z", "legado sem Google");
+  assert.equal(radarPrimaryProfileOfAnalysis({ ...YOUTUBE, ...AMAZON }), "AMAZON");
 });
 
 test("A · sem congelamento não há instante — e não se inventa um", () => {
@@ -43,7 +49,7 @@ test("A · sem congelamento não há instante — e não se inventa um", () => {
 
 test("A · envio e export resolvem o dossiê com o MESMO instante — o congelado", async () => {
   const envio = semComentarios(await source("../lib/server/radar-writer-send.ts"));
-  const exportacao = semComentarios(await source("../app/api/editorial/radar-export/route.ts"));
+  const exportacao = semComentarios((await source("../app/api/editorial/radar-export/route.ts") + "\n" + await source("../lib/server/radar-portable-export-core.ts")));
   assert.match(envio, /observedAt = radarFrozenObservedAtOfAnalysis\(corrente\.payload\) \?\? entrada\.sentAt/);
   assert.match(envio, /resolveRadarCanonicalDossier\(\{ analysis: corrente, article, observedAt, authorities/);
   assert.equal(/observedAt: entrada\.sentAt/.test(envio), false, "a hora do clique voltou a entrar no hash");

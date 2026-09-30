@@ -784,7 +784,7 @@ test("N · nenhuma superfície do Radar oferece “Enviar ao Planejador”", asy
 /* ================================= O ================================= */
 
 test("O · o export portátil não mudou por causa deste gate", async () => {
-  const rota = await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8");
+  const rota = (await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8"));
 
   /*
    * O EXPORT CONTINUA SENDO A SEGUNDA SAÍDA DA MESMA RESOLUÇÃO.

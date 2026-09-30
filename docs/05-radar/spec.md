@@ -169,11 +169,44 @@ O perfil descreve COMO se investigou. A saída descreve O QUE se produz.
 | `YOUTUBE` | SERP do próprio YouTube | blueprint audiovisual + roteiro-modelo |
 | `AMAZON` | Merchant / catálogo | blueprint comercial |
 
-Os três estão implementados. A seleção continua única por investigação, feita
-antes de começar, gravada e imutável no meio do caminho.
+Os três estão implementados.
 
-Nenhum perfil decide o formato do que será publicado. Investigar no YouTube não
-transforma o artigo em vídeo.
+**Revogado em 2026-09-30:** “a seleção continua única por investigação”. Vale a
+regra da seção “O Google é a base”, logo abaixo.
+
+Nenhum perfil decide sozinho o formato do que será publicado: o acréscimo de
+YouTube ou Amazon declara a intenção de também produzir vídeo ou review, e a
+decisão final continua de quem escreve.
+
+### O Google é a base; YouTube e Amazon são acréscimos — 2026-09-30
+
+Decisão do dono, na SDD `docs/05-radar/sdd-google-base-e-parecer-direto-2026-09-30.md`,
+Parte A. **Vale sobre a seção de 2026-09-28 abaixo no que houver divergência.**
+
+- **Google, a base:**
+  - todo artigo começa pelo Google, sempre disponível;
+  - artigo novo só vai ao Redator com o Google finalizado;
+  - com `finalizedBundle`, o perfil primário do pacote é GOOGLE
+    (`radarPrimaryProfileOfAnalysis`), e o instante do pacote é o do
+    congelamento do Google.
+- **YouTube (o artigo também vira vídeo) e Amazon (também vira review):**
+  - são acréscimos opcionais, liberados depois do Google finalizado. A tela
+    desabilita o botão com o motivo, e a rota paga recusa com
+    `radar_google_base_required` (`lib/server/radar-google-base.ts`);
+  - uma corrida do mesmo formato já gravada pode seguir;
+  - nunca travam, substituem nem apagam o Google.
+- **No pacote:**
+  - YouTube e Amazon entram como camadas SUPPORT, com referências de papel
+    `FORMAT_EXTENSION`;
+  - o blueprint de vídeo e o de review vão no campo opcional
+    `formatBlueprints`, ausente sem acréscimo (o hash de todo dossiê só-Google
+    não muda);
+  - com vídeo, a saída de vídeo soma às saídas editoriais e o sinal cruzado
+    YouTube × Google entra;
+  - acrescentar depois de enviar gera pacote novo (“Atualização disponível” no
+    Redator).
+- **Legado:** investigação sem Google finalizado continua na precedência antiga
+  (Amazon > YouTube) e legível como foi entregue.
 
 ### YouTube e Amazon acrescentam; o Google continua — 2026-09-28
 

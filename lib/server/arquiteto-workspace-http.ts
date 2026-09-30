@@ -9,7 +9,8 @@ import { KeywordTerritoryDecisionSchema, TerritoryRefSchema } from "@/lib/arquit
 import { ArticleFormationDecisionSchema, ArticleFormationRefSchema } from "@/lib/arquiteto/article-formation-decision";
 import { WorkingSubjectAnchorSchema } from "@/lib/arquiteto/declared-subject-guard";
 import { assertWorkingSubjectAnchorAssignment } from "@/lib/server/arquiteto-subject-guard";
-import { createTerritoryWorkflowItem, listTerritoryWorkflowItems, updateTerritoryWorkflowItem } from "@/lib/server/arquiteto-territory-store";
+import { createTerritoryWorkflowItem, listTerritoryWorkflowItems, readTerritoryWorkflowItem, updateTerritoryWorkflowItem } from "@/lib/server/arquiteto-territory-store";
+import { planTerritoryUndoForBrand } from "@/lib/server/arquiteto-territory-undo";
 import { listTerritorialSerpAssessments } from "@/lib/server/arquiteto-territorial-serp-store";
 import { listArticleFormationSerpAssessments } from "@/lib/server/arquiteto-article-serp-store";
 import { listTerritorialAiProposals } from "@/lib/server/arquiteto-territorial-ai-store";
@@ -100,6 +101,12 @@ const PatchSchema = z.object({
     territory: TerritoryDraftSchema,
     acceptance: SerpPrimaryAcceptanceSchema,
   }).strict()).max(20).optional(),
+  // Desfazer Silo sugerido: só o ref e o lock. Ator, hora, motivo e as
+  // keywords que saem são do servidor, lidos do banco.
+  territoryUndos: z.array(z.object({
+    territoryRef: TerritoryRefSchema,
+    expectedLock: z.number().int().positive(),
+  }).strict()).max(20).optional(),
   // Working copy de Silo: operações de EDIÇÃO da cópia de trabalho. Consolidar
   // o Silo é outro ato, e não passa por aqui.
   siloWorkingCopyCreates: z.array(z.object({
@@ -116,6 +123,7 @@ const PatchSchema = z.object({
     || body.territoryCreates?.length
     || body.territoryUpdates?.length
     || body.territoryPrimaryAcceptances?.length
+    || body.territoryUndos?.length
     || body.siloWorkingCopyCreates?.length
     || body.siloWorkingCopyUpdates?.length,
   ),
@@ -159,7 +167,16 @@ export async function handleArchitectWorkspacePatch(request: Request, authorized
     // antes; a marca é filtrada e `deleted_at` continua sem filtro.
     const keywordById = await readArchitectPatchKeywords(context, architectPatchKeywordReadInput(parsed.updates || []));
     const updated = [];
-    for (const update of parsed.updates || []) {
+    /*
+     * O WRITER DA DECISÃO DE SILO — um só. `updates` (a mesa) e
+     * `territoryUndos` (Desfazer Silo) gravam o item da keyword por aqui, com
+     * as mesmas travas: item da Brand, recebido pelo Arquiteto, identidade
+     * publicada protegida e lock por item.
+     */
+    const applyKeywordUpdate = async (
+      update: { workflowItemId: string; expectedLock: number; assignment: z.infer<typeof AssignmentSchema> },
+      keywordById: Awaited<ReturnType<typeof readArchitectPatchKeywords>>,
+    ) => {
       const currentResult = await repository.find(update.workflowItemId);
       if (currentResult.status !== "READY" || !currentResult.data) throw new PipelineRuntimeError("NOT_AUTHORIZED", "O item de workflow não pertence à Brand ativa.", 403);
       const current = currentResult.data;
@@ -196,8 +213,9 @@ export async function handleArchitectWorkspacePatch(request: Request, authorized
       }
       const nextPayload = { ...currentPayload, ...assignment, ...(kgrIdentity ? { kgrIdentity } : {}), manualEdit: true, manualEditAt: new Date().toISOString() };
       const result = await repository.update(update.workflowItemId, update.expectedLock, { payload: nextPayload });
-      updated.push(result.data);
-    }
+      return result.data;
+    };
+    for (const update of parsed.updates || []) updated.push(await applyKeywordUpdate(update, keywordById));
     const territories = [];
     for (const create of parsed.territoryCreates || []) {
       // Identidade nunca chega do cliente. Um draft que já traz territoryRef é
@@ -227,7 +245,32 @@ export async function handleArchitectWorkspacePatch(request: Request, authorized
       // A edição genérica não troca nem apaga a primária do Silo (AGENTS §9, §11).
       const primariaAlterada = territoryPrimaryChangeRefusal(await primariaVigente(update.territoryRef), update.territory);
       if (primariaAlterada) throw new PipelineRuntimeError("CONFLICT", primariaAlterada, 409);
+      // Rejeitar um Silo é o "Desfazer Silo" (`territoryUndos`), que confere
+      // endereço publicado, artigos aprovados e tira as keywords. A edição
+      // genérica não abre esse atalho.
+      if (update.territory.lifecycleStatus === "rejected") {
+        const vigente = await readTerritoryWorkflowItem(context, update.territoryRef);
+        if (vigente?.territory.lifecycleStatus !== "rejected") {
+          throw new PipelineRuntimeError("CONFLICT", "Para desfazer um Silo use \"Desfazer Silo\": ele confere o endereço publicado e os artigos aprovados e devolve as keywords para sem Silo.", 409);
+        }
+      }
       territories.push(await updateTerritoryWorkflowItem(context, update.territoryRef, update.expectedLock, update.territory));
+    }
+    /*
+     * DESFAZER SILO SUGERIDO. O plano lê e confere tudo antes da primeira
+     * escrita (lock do território incluído). Depois: cada keyword volta para
+     * "sem Silo" pelo writer da decisão de Silo, com o lock dela; por último o
+     * território vira `rejected` pelo writer territorial, com o lock dele.
+     * Se uma keyword falhar, o território fica de pé e o Silo continua na tela
+     * para tentar de novo. Nada é apagado.
+     */
+    for (const undo of parsed.territoryUndos || []) {
+      const plano = await planTerritoryUndoForBrand(context, undo.territoryRef, undo.expectedLock);
+      const undoKeywordById = await readArchitectPatchKeywords(context, architectPatchKeywordReadInput(
+        plano.keywordUpdates.map(update => ({ workflowItemId: update.workflowItemId, assignment: {} })),
+      ));
+      for (const update of plano.keywordUpdates) updated.push(await applyKeywordUpdate(update, undoKeywordById));
+      territories.push(await updateTerritoryWorkflowItem(context, undo.territoryRef, undo.expectedLock, plano.territoryDraft));
     }
     for (const acceptance of parsed.territoryPrimaryAcceptances || []) {
       const declaredRef = acceptance.territory.territoryRef;

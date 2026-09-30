@@ -182,12 +182,14 @@ test("§6 · a aba Silos oferece a restauração com preview antes de gravar", (
   assert.match(painel, /data-testid="architect-restore-working-copy"/);
   assert.match(painel, /data-testid="architect-restore-preview"/);
   assert.match(painel, /data-testid="architect-restore-action"/);
-  assert.match(painel, /ARTICLES_AFETADOS = \{restore\.plan\.articlesAffected\} · KEYWORDS_A_RESTAURAR = \{restore\.plan\.keywordsToRestore\}/);
+  // Texto em português simples (pedido do dono, 2026-09-30): quantos artigos e quantas keywords, sem códigos.
+  assert.match(painel, /\{restore\.plan\.articlesAffected\} artigo\(s\) aprovado\(s\) com \{restore\.plan\.keywordsToRestore\} keyword\(s\) no Silo errado/);
+  assert.doesNotMatch(painel, /ARTICLES_AFETADOS|KEYWORDS_A_RESTAURAR/);
   // O primeiro clique abre o preview; nada é gravado nele.
   assert.match(workspace, /if \(!restorePreviewOpen\) \{/);
   assert.match(workspace, /Nada foi gravado: confirme novamente para restaurar/);
-  // E o texto diz por que Reprocessar não resolve isso.
-  assert.match(painel, /Reprocessar não conserta isto/);
+  // E o texto diz o que Restaurar faz, e que não muda o artigo nem cobra.
+  assert.match(painel, /coloca cada uma\s+de volta no Silo do artigo\. Não muda o artigo, não cria versão nova e não cobra nada\./);
 });
 
 test("§15 · o painel de formação lê o escopo da autoridade única", () => {
@@ -222,4 +224,24 @@ test("§5 · a restauração não edita artefato, não sucede e não chama provi
   }
   assert.match(fonte, /não edita ArticleDNA, não cria sucessora, não aprova nada/);
   assert.match(fonte, /não reagrupa por similaridade/);
+});
+
+test("decisão de Silo em lote não tira keyword de artigo aprovado (caso real 2026-09-30: 14 keywords de 5 ArticleDNAs saíram do Silo)", async () => {
+  const { resolveTerritoryChangeImpact } = await import("../lib/arquiteto/article-structural-impact.ts");
+  const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
+  const lote = workspace.slice(workspace.indexOf("const applySiloDecisionsInBatch = async"), workspace.indexOf("const plano = planSiloDecisionBatch({"));
+  assert.match(lote, /resolveTerritoryChangeImpact\(/, "o lote calcula o impacto nos aprovados");
+  assert.match(lote, /BREAKS_APPROVED_STRUCTURE/);
+  assert.match(workspace, /decisions: decisions\.filter\(decision => !protegidas\.has\(decision\.keywordId\)\)/);
+  // Ficar no Silo do artigo aprovado conta como "já estava", nunca como falha em ERRO (caso real 2026-09-30).
+  assert.match(workspace, /plano\.unchanged\.push\(\.\.\.protegidas\);/);
+  assert.match(workspace, /labelByKeywordId: new Map\(masterList\.map/);
+  // O domínio: sair do território do artigo quebra; voltar restaura.
+  const article = { articleId: "a", territoryRef: "territory:crescimento", principalKeywordId: "p", keywordReferences: [{ keywordId: "p" }, { keywordId: "s" }] } as unknown as ArticleDNA;
+  const approved = [{ payload: article } as never];
+  const territorio = new Map([["p", "territory:crescimento"], ["s", "territory:crescimento"]]);
+  const sai = resolveTerritoryChangeImpact({ proposals: [{ keywordId: "s", territoryRef: "territory:leads" }], approvedArticles: approved, territoryByKeywordId: territorio });
+  assert.deepEqual(sai.impacted[0].losingKeywordIds, ["s"]); assert.equal(sai.impacted[0].classification, "BREAKS_APPROVED_STRUCTURE");
+  const volta = resolveTerritoryChangeImpact({ proposals: [{ keywordId: "s", territoryRef: "territory:crescimento" }], approvedArticles: approved, territoryByKeywordId: new Map([["p", "territory:crescimento"], ["s", "territory:leads"]]) });
+  assert.equal(volta.impacted[0].classification, "RESTORES_APPROVED_STRUCTURE");
 });

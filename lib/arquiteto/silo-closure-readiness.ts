@@ -111,6 +111,185 @@ export function resolveFormationLedger(input: {
   };
 }
 
+/**
+ * O QUE BARRA O FECHAMENTO É DO PRÓPRIO SILO (2026-09-30).
+ *
+ * O fechamento de cada Silo recebia os pares de canibalização e as
+ * contestações de fronteira da marca INTEIRA: um par de candidatos em Leads
+ * sem Tráfego Pago barrava Estratégia de Negócios, com todas as formações
+ * concluídas e os ArticleDNA gravados, e nenhum SiloDNA nascia em lugar
+ * nenhum.
+ *
+ * Aqui fica só o que é deste Silo. E um par (ou uma contestação) cujos lados
+ * a pessoa JÁ concluiu não barra mais: a decisão foi tomada no Concluir
+ * formação, e mudar artigo aprovado é revisão do artigo, não pendência do
+ * fechamento — barrar ali deixaria o Silo sem saída.
+ */
+export function closureGuardsForSilo<
+  P extends { left: string; right: string },
+  C extends { scope: { id: string }; currentSiloRef: string },
+>(input: {
+  siloRef: string;
+  pairs: readonly P[];
+  challenges: readonly C[];
+  /** O Silo de cada candidato da mesa. */
+  siloOfCandidate: ReadonlyMap<string, string>;
+  /** Formações já congeladas (concluídas) no marcador remoto. */
+  concludedCandidateRefs: ReadonlySet<string>;
+}): { pairs: P[]; challenges: C[] } {
+  const doSilo = (ref: string) => input.siloOfCandidate.get(ref) === input.siloRef;
+  return {
+    pairs: input.pairs.filter(par => doSilo(par.left) && doSilo(par.right)
+      && !(input.concludedCandidateRefs.has(par.left) && input.concludedCandidateRefs.has(par.right))),
+    challenges: input.challenges.filter(item => item.currentSiloRef === input.siloRef
+      && !input.concludedCandidateRefs.has(item.scope.id)),
+  };
+}
+
+/**
+ * QUEM É ARTIGO DESTE SILO NO FECHAMENTO (2026-09-30).
+ *
+ * Dois impasses reais da homologação, os dois sem saída na tela:
+ *
+ * 1. PONTEIRO ÓRFÃO. Keyword que saiu de um artigo (ou mudou de Silo) leva
+ *    junto o ponteiro da formação antiga, e a mesa monta com ela um fragmento
+ *    de 1–2 buscas com o MESMO ref de uma formação concluída em OUTRO Silo.
+ *    Ele nunca pode ser concluído e segurava o fechamento para sempre. Não é
+ *    artigo deste Silo: não entra como ativo.
+ *
+ * 2. APROVADO SEM "CONCLUIR FORMAÇÃO". O publicado que ganhou o primeiro
+ *    ArticleDNA pelo "Reforçar publicados" nunca passa pela conclusão. O
+ *    ArticleDNA aprovado É a decisão humana: ele entra no fechamento com a
+ *    composição e os papéis do próprio ArticleDNA, sem reescrever nada, e o
+ *    candidato dele deixa de contar como pendente.
+ */
+export type ClosureFormation = {
+  candidateRef: string;
+  territoryRef: string;
+  principalKeywordId: string;
+  members: { keywordId: string; role: "principal" | "secundaria" | "reforco" }[];
+  formationBaseHash: string;
+  slug: string | null;
+  fullPath: string | null;
+  concludedAt: string;
+  concludedBy: string;
+  materializedArticleId: string | null;
+};
+
+export function closureFormationsForSilo<F extends ClosureFormation>(input: {
+  territoryRef: string;
+  /** Todas as formações congeladas no marcador (de todos os Silos). */
+  concludedFormations: readonly F[];
+  /** Candidatos da mesa neste Silo. */
+  candidates: readonly { candidateRef: string; principalKeywordId: string }[];
+  /** ArticleDNA aprovados da marca. */
+  approvedArticles: readonly {
+    versionId: string;
+    createdAt: string;
+    createdBy: string;
+    articleId: string;
+    territoryRef: string | null;
+    principalKeywordId: string;
+    suggestedSlug: string | null;
+    references: readonly { keywordId: string; role: string }[];
+  }[];
+}): { activeCandidateRefs: string[]; formations: (F | ClosureFormation)[]; outOfScenario: string[] } {
+  const concluidaEm = new Map(input.concludedFormations.map(item => [item.candidateRef, item.territoryRef]));
+  /*
+   * NUNCA UM SEGUNDO ARTIGO PARA A MESMA PRINCIPAL (2026-09-30).
+   *
+   * Reconcluir uma formação já materializada apagava o vínculo com o
+   * ArticleDNA (`materializedArticleId: null`), e o fechamento criaria um
+   * artigo novo ao lado do aprovado. Formação sem vínculo cuja Principal já
+   * tem ArticleDNA aprovado neste Silo É aquele artigo: o vínculo volta, e
+   * nada é materializado de novo.
+   */
+  const aprovadoPorPrincipal = new Map(input.approvedArticles
+    .filter(article => article.territoryRef === input.territoryRef)
+    .map(article => [article.principalKeywordId, article.articleId]));
+  const doMarcador = input.concludedFormations
+    .filter(item => item.territoryRef === input.territoryRef)
+    .map(item => item.materializedArticleId || !aprovadoPorPrincipal.has(item.principalKeywordId)
+      ? item
+      : { ...item, materializedArticleId: aprovadoPorPrincipal.get(item.principalKeywordId)! });
+  const ativos = input.candidates
+    .filter(candidate => !concluidaEm.has(candidate.candidateRef) || concluidaEm.get(candidate.candidateRef) === input.territoryRef)
+    .map(candidate => candidate.candidateRef);
+  const materializados = new Set(doMarcador.map(item => item.materializedArticleId).filter(Boolean));
+  const usados = new Set<string>();
+  const doAcervo: ClosureFormation[] = input.approvedArticles
+    .filter(article => article.territoryRef === input.territoryRef && !materializados.has(article.articleId))
+    .map(article => {
+      const candidato = input.candidates.find(candidate => ativos.includes(candidate.candidateRef)
+        && !concluidaEm.has(candidate.candidateRef)
+        && !usados.has(candidate.candidateRef)
+        && candidate.principalKeywordId === article.principalKeywordId);
+      if (candidato) usados.add(candidato.candidateRef);
+      return {
+        candidateRef: candidato?.candidateRef ?? `article-dna:${article.articleId}`,
+        territoryRef: input.territoryRef,
+        principalKeywordId: article.principalKeywordId,
+        members: article.references.map(reference => ({
+          keywordId: reference.keywordId,
+          role: reference.role === "principal" ? "principal" as const : reference.role === "reforco_narrativo" ? "reforco" as const : "secundaria" as const,
+        })),
+        formationBaseHash: `article-dna:${article.versionId}`,
+        slug: article.suggestedSlug,
+        fullPath: null,
+        concludedAt: article.createdAt,
+        concludedBy: article.createdBy,
+        materializedArticleId: article.articleId,
+      };
+    });
+  return {
+    activeCandidateRefs: ativos,
+    formations: [...doMarcador, ...doAcervo],
+    // Formação congelada que saiu do cenário: o lote mudou e a retomada espera.
+    outOfScenario: doMarcador.filter(item => !ativos.includes(item.candidateRef)).map(item => item.candidateRef),
+  };
+}
+
+/**
+ * O ESTADO DO FECHAMENTO EM PORTUGUÊS SIMPLES, POR SILO (2026-09-30).
+ *
+ * Pilar, Suportes, SiloDNA e SiloPage nascem no fechamento; enquanto ele não
+ * acontece, Links internos não tem base. A pessoa precisa ver QUAL Silo falta
+ * e O QUÊ falta nele, não um "consolidação canônica pendente" genérico.
+ */
+export function describeSiloClosureReading(input: {
+  label: string;
+  consolidated: boolean;
+  /** Candidatos do Silo ainda não concluídos, pelo nome. */
+  pendingLabels: readonly string[];
+  blockers: readonly { code: string; detail: string }[];
+  /** Formações concluídas cuja composição saiu do cenário. */
+  outOfScenarioCount: number;
+  /** Há formação concluída neste Silo? */
+  hasConcluded: boolean;
+  planReady: boolean;
+  resumable: boolean;
+  resumptionReason: string | null;
+}): { state: "closed" | "closing" | "waiting"; text: string } {
+  if (input.consolidated) return { state: "closed", text: `${input.label}: fechado — Pilar, Suportes, SiloDNA e SiloPage gravados.` };
+  const faltas: string[] = [];
+  if (input.pendingLabels.length) {
+    faltas.push(`falta concluir ${input.pendingLabels.length} artigo(s): ${input.pendingLabels.map(nome => `“${nome}”`).join(", ")} (abra cada um e use “Manter composição” se a SERP pedir decisão; depois “Concluir formação”)`);
+  }
+  for (const bloqueio of input.blockers) {
+    if (bloqueio.code === "FORMATIONS_PENDING" || bloqueio.code === "ALREADY_CONSOLIDATED") continue;
+    faltas.push(bloqueio.detail);
+  }
+  if (input.outOfScenarioCount) {
+    faltas.push(`${input.outOfScenarioCount} formação(ões) concluída(s) mudaram de composição depois: reprocesse e conclua de novo`);
+  }
+  if (!input.hasConcluded && !input.pendingLabels.length) faltas.push("nenhum artigo concluído neste Silo");
+  if (!faltas.length && input.planReady && input.resumable) {
+    return { state: "closing", text: `${input.label}: pronto — o fechamento roda sozinho (Pilar pela cobertura de buscas, os demais como Suporte).` };
+  }
+  if (!faltas.length && input.resumptionReason) faltas.push(input.resumptionReason);
+  return { state: "waiting", text: `${input.label}: ${faltas.join(" · ") || "aguardando a releitura do acervo"}.` };
+}
+
 export type SiloClosureReadiness = {
   ready: boolean;
   blockers: { code: SiloClosureBlocker; detail: string }[];

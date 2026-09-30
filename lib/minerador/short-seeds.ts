@@ -1,4 +1,4 @@
-import { normalizeKeyword } from "../minerador/keyword-import-core.ts";
+import { normalizeKeyword } from "./keyword-import-core.ts";
 
 /**
  * Sementes curtas para o Google Ads.

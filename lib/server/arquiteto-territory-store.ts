@@ -97,6 +97,12 @@ async function findTerritoryRow(context: PipelineContext, territoryRef: string):
   return (result.data as TerritoryRow | null) || null;
 }
 
+/** Um território desta Brand pelo ref, ou `null` quando não existe. */
+export async function readTerritoryWorkflowItem(context: PipelineContext, territoryRef: string): Promise<TerritoryWorkflowItem | null> {
+  const row = await findTerritoryRow(context, territoryRef);
+  return row ? readRow(row, context.brandId) : null;
+}
+
 /**
  * O `territoryRef` é EMITIDO AQUI, no servidor, e nunca aceito do cliente na
  * criação. O browser pode usar um identificador temporário de UI enquanto o

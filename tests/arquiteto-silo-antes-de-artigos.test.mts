@@ -315,8 +315,10 @@ test("§9 — a planilha mostra os dois eixos, e a pendência normal não vira e
 test("§6 — consolidar recusa enquanto houver contestação de fronteira aberta", () => {
   const trecho = workspace.slice(workspace.indexOf("const consolidateSilos"));
   const corpo = trecho.slice(0, trecho.indexOf("\n  };"));
-  assert.match(corpo, /if \(candidateGuards\.openChallenges\.length\)/);
-  assert.match(corpo, /candidateGuards\.reconsideration\.summary/);
+  // Continua recusando — mas só pela contestação DOS Silos que consolidam e
+  // que a pessoa não manteve (2026-09-30).
+  assert.match(corpo, /if \(contestacoesDoEscopo\.length\)/);
+  assert.match(corpo, /describeSiloReconsideration\(contestacoesDoEscopo\)\.summary/);
   // A guarda é de CLIENTE e é dita como tal: o achado ainda não é persistido.
   assert.match(corpo, /guarda de CLIENTE/);
 });

@@ -131,6 +131,8 @@ export function ArticleFormationReviewPanel({
   onPreview,
   onApply,
   onCancel,
+  onRemoveFromSilo,
+  keepAlsoDecides,
 }: {
   articleLabel: string;
   /** Artigo aberto; toda proposta nasce amarrada a ele. */
@@ -212,7 +214,18 @@ export function ArticleFormationReviewPanel({
     title: string;
     what: string;
     how: string;
+    /** Por que a pendência existe, em linguagem de quem não conhece SEO. */
+    why?: string;
     resolved: boolean;
+    /**
+     * Divergência de SERP resolvida aqui mesmo: o painel substituiu a aba SERP
+     * e o "Abrir a divergência na aba SERP" ficou sem destino.
+     */
+    serpDivergence?: {
+      plain: { title: string; what: string; why: string; keep: string; apply: string; tip: string };
+      onKeep: () => void;
+      onApply: () => void;
+    };
   }[];
   /** Controle do tipo de unidade editorial, quando ele está pendente. */
   unitTypeControl: {
@@ -262,7 +275,22 @@ export function ArticleFormationReviewPanel({
   onPreview: (change: ScenarioChange) => void;
   onApply: () => void;
   onCancel: () => void;
+  /**
+   * "Tirar este artigo do Silo" (pedido do dono, 2026-09-30): só para
+   * candidato não concluído e não publicado. As keywords voltam para "sem
+   * Silo" pela mesma decisão de Silo de sempre; nada é apagado. Ausente =
+   * o botão não aparece.
+   */
+  onRemoveFromSilo?: (() => void) | null;
+  /**
+   * O que "Manter composição" decide além da SERP do próprio artigo
+   * (2026-09-30): o par que disputa o tema fica separado (quando os dois
+   * lados forem mantidos) e a fronteira contestada fica neste Silo. Dito
+   * ANTES do clique; vazio = só a SERP do artigo.
+   */
+  keepAlsoDecides?: readonly string[];
 }) {
+  const [confirmarRetirada, setConfirmarRetirada] = React.useState(false);
   const [mergeTarget, setMergeTarget] = React.useState("");
   const [serpReason, setSerpReason] = React.useState("");
   /**
@@ -417,12 +445,20 @@ export function ArticleFormationReviewPanel({
           {/* §4 — a saída é a ação editorial concreta. A recomendação da SERP
               aponta qual delas; os controles são os que já existem abaixo, e
               não há botão de "aplicar SERP" nem de "ignorar SERP". */}
-          {serp.awaitsHuman && (
+          {(serp.awaitsHuman || (keepAlsoDecides?.length ?? 0) > 0) && (
             <div className="mt-3 border-t border-divider pt-2" data-testid="architect-serp-resolution">
               <p className="text-sm leading-6 text-text-muted">
                 Para seguir, altere a composição usando os controles abaixo — ou registre que ela fica
                 como está, dizendo por quê.
               </p>
+              {keepAlsoDecides && keepAlsoDecides.length > 0 && (
+                <div className="mt-2 rounded border border-warning/40 bg-warning/10 px-2 py-1.5" data-testid="architect-serp-keep-also-decides">
+                  <p className="text-sm font-semibold text-foreground">Manter também decide:</p>
+                  <ul className="mt-1 list-disc pl-5 text-sm leading-6 text-foreground">
+                    {keepAlsoDecides.map(frase => <li key={frase}>{frase}</li>)}
+                  </ul>
+                </div>
+              )}
               <label className="mt-2 block text-sm text-text-muted" htmlFor="architect-serp-accept-reason">
                 Motivo da decisão
                 <textarea
@@ -470,6 +506,31 @@ export function ArticleFormationReviewPanel({
           <p className="mt-1 text-sm leading-6 text-text-muted">
             Toda proposta mostra o efeito antes de ser aplicada. Nenhuma delas cria ArticleDNA.
           </p>
+          {onRemoveFromSilo && (
+            <div className="mt-2 rounded-md border border-divider bg-surface-subtle p-2" data-testid="architect-review-remove-from-silo">
+              <p className="text-sm leading-6 text-text-muted">
+                Não vai usar este artigo? Tire-o do Silo: as {keywords.length} keyword(s) dele voltam para “sem Silo”, nada é apagado, e o Silo pode fechar sem ele.
+              </p>
+              {confirmarRetirada ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-sm text-warning">{`Tirar “${articleLabel}” do Silo?`}</span>
+                  <button type="button" disabled={busy} onClick={() => { setConfirmarRetirada(false); onRemoveFromSilo(); }} data-testid="architect-review-remove-from-silo-confirm"
+                    className="min-h-9 rounded border border-module-accent/50 bg-module-accent/10 px-3 text-sm font-semibold text-module-accent transition-colors hover:bg-module-accent/20 disabled:opacity-40">
+                    Confirmar
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => setConfirmarRetirada(false)}
+                    className="min-h-9 rounded border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:text-foreground disabled:opacity-40">
+                    Cancelar
+                  </button>
+                </div>
+              ) : (
+                <button type="button" disabled={busy} onClick={() => setConfirmarRetirada(true)}
+                  className="mt-2 min-h-9 rounded border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:text-foreground disabled:opacity-40">
+                  Tirar este artigo do Silo
+                </button>
+              )}
+            </div>
+          )}
           <ul className="mt-2 space-y-2">
             {keywords.map(item => (
               <li key={item.keywordId} className="rounded-md border border-divider bg-surface-subtle p-2" data-testid="architect-review-keyword">
@@ -602,9 +663,35 @@ export function ArticleFormationReviewPanel({
           <ul className="mt-2 space-y-2">
             {pendingDecisions.map(decision => (
               <li key={decision.id} className="rounded-md border border-warning/35 bg-warning-soft p-2" data-testid="architect-review-decision">
-                <p className="text-sm font-semibold text-foreground">{decision.title}</p>
-                <p className="mt-1 text-sm leading-6 text-text-muted">O que falta: {decision.what}</p>
-                <p className="text-sm leading-6 text-text-muted">Como resolver: {decision.how}</p>
+                {decision.serpDivergence ? (
+                  <div role="status" data-testid="architect-review-serp-divergence-plain">
+                    <p className="text-sm font-semibold text-warning">Atenção: {decision.serpDivergence.plain.title}</p>
+                    <p className="mt-1 text-sm leading-6 text-foreground">{decision.serpDivergence.plain.what}</p>
+                    <p className="mt-1 text-sm leading-6 text-foreground">{decision.serpDivergence.plain.why}</p>
+                    <ul className="mt-2 space-y-1 text-sm leading-6 text-foreground">
+                      <li>• {decision.serpDivergence.plain.keep}</li>
+                      <li>• {decision.serpDivergence.plain.apply}</li>
+                    </ul>
+                    <p className="mt-2 text-sm leading-6 text-text-muted">{decision.serpDivergence.plain.tip}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button type="button" disabled={busy} data-testid="architect-review-serp-divergence-keep" onClick={decision.serpDivergence.onKeep}
+                        className="min-h-9 rounded border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:border-module-accent/40 hover:text-foreground disabled:opacity-40">
+                        Manter no artigo
+                      </button>
+                      <button type="button" disabled={busy} data-testid="architect-review-serp-divergence-apply" onClick={decision.serpDivergence.onApply}
+                        className="min-h-9 rounded border border-divider px-3 text-sm font-semibold text-text-muted transition-colors hover:border-module-accent/40 hover:text-foreground disabled:opacity-40">
+                        Aplicar recomendação
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm font-semibold text-foreground">{decision.title}</p>
+                    <p className="mt-1 text-sm leading-6 text-text-muted">O que falta: {decision.what}</p>
+                    {decision.why && <p className="text-sm leading-6 text-text-muted">Por quê: {decision.why}</p>}
+                    <p className="text-sm leading-6 text-text-muted">Como resolver: {decision.how}</p>
+                  </>
+                )}
               </li>
             ))}
           </ul>

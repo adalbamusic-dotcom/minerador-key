@@ -70,26 +70,17 @@ test("B e C · cada modo começa por clique, e trocar com investigação em curs
   assert.ok(workbench.includes('data-testid="radar-search-mode"'), "o seletor existe no painel");
   assert.ok(workbench.includes("radar-search-mode-${modo.toLowerCase()}"), "com um botão por modo");
   assert.ok(workbench.includes('(["WEB", "YOUTUBE", "AMAZON"] as const)'), "os três modos da casca");
-  assert.ok(workbench.includes('role="radiogroup"'), "seleção única, nunca checkbox múltiplo");
   /*
-   * A troca some depois de iniciar: o modo congela com a investigação.
-   *
-   * Em RADAR_RESEARCH_PROFILES_1.2 a trava ganhou uma segunda origem. O estado
-   * da vista do Google continua travando o que é dele; o que ele nunca soube
-   * ver é uma investigação de VÍDEO congelada — e era por isso que Google e
-   * Amazon seguiam clicáveis depois do FINALIZE.
+   * SDD Radar 2026-09-30 (Parte A, decisão do dono): o seletor deixou de ser
+   * escolha única. O Google é a base e está sempre disponível; YouTube (vídeo)
+   * e Amazon (review) são acréscimos, liberados depois do Google finalizado.
+   * Nada trava: trocar de aba só muda o painel à vista.
    */
-  /*
-   * E em AMAZON_SEARCH_1.1 · §15 ganhou a terceira: a corrida EM CURSO.
-   *
-   * `view.state` é o pipeline do Google, NOT_STARTED por construção num
-   * artigo de produto — trocar de perfil no meio de uma coleta paga da Amazon
-   * continuava clicável, e trocava o universo sob ela em silêncio.
-   */
-  assert.ok(workbench.includes("const emCurso = Boolean(doPerfil && doPerfil.state !== \"NOT_STARTED\");"));
-  assert.ok(workbench.includes("const congelado = travadoPeloPerfil || emCurso || view.state !== \"NOT_STARTED\";"));
-  assert.ok(workbench.includes("const travadoPeloPerfil = Boolean(doPerfil?.profileLocked);"));
-  assert.ok(workbench.includes("disabled={busy || congelado}"));
+  assert.ok(workbench.includes('role="tablist"'), "abas: base e acréscimos, não escolha única");
+  assert.ok(workbench.includes('"Google · base"') && workbench.includes('"+ YouTube (vídeo)"') && workbench.includes('"+ Amazon (review)"'));
+  assert.ok(workbench.includes("const esperaGoogle = acrescimo && bloqueio === RADAR_FORMAT_EXTENSION_NEEDS_GOOGLE;"));
+  assert.ok(workbench.includes("disabled={busy || esperaGoogle}"), "só o acréscimo espera o Google finalizado");
+  assert.ok(!workbench.includes("A investigação em curso foi feita no modo atual. Zere para trocar."), "a trava antiga saiu");
 
   const semInvestigacao = radarSearchModeChange({ current: "WEB", next: "YOUTUBE", hasInvestigation: false });
   assert.equal(semInvestigacao.requiresReset, false);

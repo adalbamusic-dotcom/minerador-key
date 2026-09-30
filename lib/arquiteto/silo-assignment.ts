@@ -235,10 +235,24 @@ export function planSiloAssignment(input: {
     expectedLock: keyword.expectedLock,
     territoryRef,
     territoryRefFromAnchor: fromAnchor,
-    decision: { state, reason, source: "human", decidedAt: input.decidedAt },
+    decision: humanSiloDecision(state, reason, input.decidedAt),
   });
 
   return { ok: true, steps };
+}
+
+/**
+ * A decisão territorial HUMANA, na forma que o writer grava em
+ * `payload.territoryAssignment`. Única fábrica: a decisão de Silo da aba
+ * Silos e o "Desfazer Silo" (`territory-undo.ts`) gravam exatamente a mesma
+ * forma, e por isso a mesa lê as duas do mesmo jeito.
+ */
+export function humanSiloDecision(
+  state: KeywordTerritoryDecision["state"],
+  reason: string,
+  decidedAt: string,
+): KeywordTerritoryDecision {
+  return { state, reason, source: "human", decidedAt };
 }
 
 export type SiloAssignmentOutcome = "applied" | "partial" | "refused";

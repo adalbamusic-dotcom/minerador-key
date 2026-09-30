@@ -180,3 +180,43 @@ test("reexecução do mesmo artigo não duplica assessment e a mensagem atômica
   assert.doesNotMatch(workspace, /a execução da SERP é atômica hoje/);
   assert.match(workspace, /os assessments já confirmados anteriormente permanecem/);
 });
+
+test("divergência SERP explicada para quem não conhece SEO: o que houve, por que importa e o que cada botão faz (dono, 2026-09-30)", () => {
+  const verdict = resolveSerpFormationVerdict({
+    hasAssessment: true,
+    evidencePriority: "prioritaria",
+    keywordCount: 3,
+    observations: [observation({ keyword: "marketing digital para dentistas", currentRole: "secundaria", insufficientEvidence: false, compatibility: "incompativel", overlap: "low" })],
+  });
+  assert.equal(verdict.kind, "DIVERGENCE");
+  const plain = verdict.divergences[0].plain!;
+  assert.match(plain.title, /pode não pertencer a este artigo/);
+  assert.match(plain.what, /páginas diferentes/);
+  assert.match(plain.what, /páginas em comum: baixa/);
+  assert.match(plain.why, /Não é um erro do sistema/);
+  assert.match(plain.keep, /Manter no artigo/);
+  assert.match(plain.apply, /nada sai do artigo sozinho/);
+  const decision = checklistWith(verdict).decisions.find(item => item.kind === "serp_divergence")!;
+  assert.match(decision.why, /Por que isso importa/);
+  assert.match(decision.how, /Manter no artigo.*Aplicar recomendação/);
+  assert.match(workspace, /data-testid="architect-serp-divergence-plain"/);
+
+  const promote = resolveSerpFormationVerdict({ hasAssessment: true, evidencePriority: "prioritaria", keywordCount: 3,
+    observations: [observation({ insufficientEvidence: false, recommendationAction: "tornar_principal", currentRole: "secundaria" })] });
+  assert.match(promote.divergences[0].plain!.title, /pode representar melhor este artigo/);
+  assert.match(promote.divergences[0].plain!.apply, /URL e slug não mudam/);
+});
+
+test("painel da formação resolve a divergência ali mesmo: aviso, porquê e os dois botões", () => {
+  const panel = readFileSync("modules/arquiteto/article-formation-review.tsx", "utf8");
+  assert.match(panel, /data-testid="architect-review-serp-divergence-plain"/);
+  assert.match(panel, /data-testid="architect-review-serp-divergence-keep"/);
+  assert.match(panel, /data-testid="architect-review-serp-divergence-apply"/);
+  assert.match(panel, /Por quê: \{decision\.why\}/);
+  assert.match(workspace, /onKeep: \(\) => \{ void handleSerpRecommendationDecision\(art, divergence\.keywordId, "ignored"\); \}/);
+  assert.match(workspace, /onApply: \(\) => \{ void handleSerpRecommendationDecision\(art, divergence\.keywordId, "followed"\); \}/);
+  const promote = resolveSerpFormationVerdict({ hasAssessment: true, evidencePriority: "prioritaria", keywordCount: 3,
+    observations: [observation({ insufficientEvidence: false, principalPossiblyInadequate: true, recommendationAction: "revisar_humano", currentRole: "secundaria" })] });
+  assert.match(promote.divergences[0].plain!.why, /nunca troca a principal sozinha/);
+  assert.match(promote.divergences[0].plain!.keep, /a principal atual continua/);
+});

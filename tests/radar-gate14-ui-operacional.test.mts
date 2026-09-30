@@ -127,12 +127,12 @@ test("GATE 14 · A — Amazon deixou de ser um card principal", () => {
   assert.match(fonte, /searchMode === "AMAZON"/, "e vive dentro do modo Amazon da Pesquisa");
 });
 
-test("GATE 14 · B — a Pesquisa oferece Google, YouTube e Amazon numa escolha só", () => {
+test("GATE 14 · B — a Pesquisa oferece o Google como base e YouTube e Amazon como acréscimos (SDD Radar 2026-09-30)", () => {
   const fonte = workbench();
   assert.match(fonte, /data-testid="radar-search-mode"/);
   assert.match(fonte, /\(\["WEB", "YOUTUBE", "AMAZON"\] as const\)/);
-  assert.match(fonte, /role="radiogroup"/, "seleção única, não três lugares");
-  assert.match(fonte, /Pesquisar em/);
+  assert.match(fonte, /role="tablist"/, "base e acréscimos, não escolha única");
+  assert.match(fonte, /Base do artigo e acréscimos opcionais/);
 
   /* A engine ausente é dita no próprio botão, não escondida. */
   assert.match(fonte, /em construção/);

@@ -72,7 +72,7 @@ test("cabeçalhos: JSON em UTF-8, os do chamador preservados, e sem tamanho fixo
 });
 
 test("a rota responde o sucesso em fluxo; erros continuam pequenos, em JSON direto", () => {
-  const rota = semComentarios("../app/api/editorial/radar-export/route.ts");
+  const rota = (semComentarios("../app/api/editorial/radar-export/route.ts") + "\n" + semComentarios("../lib/server/radar-portable-export-core.ts"));
   assert.match(rota, /import \{ radarPortableExportStreamResponse \} from "@\/lib\/radar\/portable-export-response";/);
   const sucesso = rota.slice(rota.indexOf("return radarPortableExportStreamResponse({"), rota.indexOf("} catch (error) {", rota.indexOf("return radarPortableExportStreamResponse({")));
   assert.ok(sucesso.length > 200, "o retorno de sucesso foi encontrado");

@@ -216,7 +216,16 @@ export function buildTerritorialSurface(input: {
    * O estado real vai junto em `lifecycleStatus`: a mesa mostra "Consolidado"
    * ou "Rejeitado" em vez de disfarçar de candidato.
    */
-  for (const territory of [...landscape.candidateTerritories, ...landscape.confirmedTerritories, ...landscape.otherTerritories]) {
+  /*
+   * EXCEÇÃO: Silo DESFEITO e vazio. "Desfazer Silo" grava o território como
+   * `rejected` depois de devolver todas as keywords para "sem Silo" — ele não
+   * tem mais nada a mostrar, e contá-lo faria a mesa anunciar um Silo que a
+   * pessoa acabou de desfazer. Rejeitado que ainda segura keyword continua
+   * aparecendo, pela regra acima: keyword nenhuma some.
+   */
+  const territoriosNaMesa = [...landscape.candidateTerritories, ...landscape.confirmedTerritories, ...landscape.otherTerritories]
+    .filter(territory => !(territory.lifecycleStatus === "rejected" && territory.keywordRefs.length === 0));
+  for (const territory of territoriosNaMesa) {
     groups.push({
       kind: "territories",
       header: {
@@ -289,7 +298,7 @@ export function buildTerritorialSurface(input: {
       structures: landscape.existingStructures.length + siteOnly.length,
       // A contagem acompanha os grupos: o cabeçalho e a mesa não podem
       // discordar sobre quantos silos existem.
-      territories: landscape.candidateTerritories.length + landscape.confirmedTerritories.length + landscape.otherTerritories.length,
+      territories: territoriosNaMesa.length,
       inconsistencies: landscape.consistency.issues.length,
     },
   };

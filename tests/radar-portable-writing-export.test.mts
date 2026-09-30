@@ -574,7 +574,7 @@ test("J · os nomes: 'para-escrever' no novo, e o do completo intocado", () => {
 /* ================================ K ================================ */
 
 test("K · a rota: 'mode' opcional, padrão completo, e o ramo novo não lê nada a mais", async () => {
-  const rota = semComentarios(await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8"));
+  const rota = semComentarios((await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8")));
   assert.match(rota, /mode: z\.enum\(\["writing", "full"\]\)\.optional\(\)/);
   assert.match(rota, /if \(input\.mode === "writing"\) \{/);
   const ramo = rota.slice(rota.indexOf("if (input.mode === \"writing\") {"), rota.indexOf("const linhaPorArtigo ="));

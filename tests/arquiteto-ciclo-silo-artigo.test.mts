@@ -616,7 +616,9 @@ test("§1 — a fiação usa o ledger, não a contagem desta execução", () => 
   const trecho = workspace.slice(workspace.indexOf("const confirmArticleFormation"));
   const corpo = trecho.slice(0, trecho.indexOf("\n  }, ["));
   assert.match(corpo, /const ledger = resolveFormationLedger\(\{/);
-  assert.match(corpo, /remoteConcludedRefs: \(marcador\.concludedFormations \|\| \[\]\)/);
+  // O acumulado remoto, lido pela MESMA regra do fechamento (órfão fora, aprovado sem conclusão dentro).
+  assert.match(corpo, /concludedFormations: marcador\.concludedFormations \|\| \[\],/);
+  assert.match(corpo, /remoteConcludedRefs: leituraDoSilo\.formations\.map\(item => item\.candidateRef\)/);
   assert.match(corpo, /concludedCandidateRefs: ledger\.concludedFormationRefs/);
   // A contagem só desta execução não pode voltar.
   assert.doesNotMatch(corpo, /concludedCandidateRefs: \[\s*\.\.\.criadosConfirmados/);

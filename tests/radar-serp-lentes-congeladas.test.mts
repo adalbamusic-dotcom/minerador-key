@@ -526,7 +526,7 @@ test("R3 · o dossiê entrega as lentes congeladas, sem digest bruto, e as lacun
  * do Google finalizado não entravam num dossiê de vídeo; agora entram, com o
  * Google como camada SUPPORT (o vídeo continua PRIMARY).
  */
-test("R3 · perfil YOUTUBE com o Google finalizado: as lentes congeladas do Google continuam no dossiê de vídeo", async () => {
+test("Google base (SDD Radar 2026-09-30) · YouTube acrescentado ao Google finalizado: as lentes congeladas do Google continuam no dossiê", async () => {
   const { research } = await snapshotDoCache();
   const congelada = await congelar(research);
   const lentes = radarFrozenSerpLensesOf(congelada.payload.finalizedBundle);
@@ -536,10 +536,10 @@ test("R3 · perfil YOUTUBE com o Google finalizado: as lentes congeladas do Goog
     youtubeFrozenInvestigation: { finalizedAt: "2026-09-23T13:00:00.000Z", runRef: { runId: "yt-1", runFingerprint: "fp", collectedAt: "2026-09-23T12:30:00.000Z", universeSize: 4, queriesExecuted: 1 }, limitations: [] },
   };
   const entregue = dossie(payload, "2026-09-23T13:00:00.000Z");
-  assert.equal(entregue.primaryResearchProfile, "YOUTUBE");
-  assert.equal(entregue.research.youtube?.role, "PRIMARY");
-  assert.equal(entregue.research.google?.role, "SUPPORT");
-  assert.equal(entregue.research.google?.refs[0]?.ref, research.id, "o apoio aponta para a SERP congelada");
+  assert.equal(entregue.primaryResearchProfile, "GOOGLE", "o Google é a base");
+  assert.equal(entregue.research.google?.role, "PRIMARY");
+  assert.equal(entregue.research.youtube?.role, "SUPPORT", "o YouTube é acréscimo de formato");
+  assert.equal(entregue.research.google?.refs[0]?.ref, research.id, "a camada do Google aponta para a SERP congelada");
   assert.deepEqual(entregue.serpLenses, lentes);
   assert.ok(entregue.limitations.some(frase => /Só em Celular/.test(frase)), "as divergências entre aparelhos continuam declaradas");
   assert.ok(entregue.limitations.includes("uma limitação congelada"), "as limitações do Google finalizado continuam");

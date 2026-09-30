@@ -330,7 +330,7 @@ test("J · a mesma principal chega ao Planejador e ao export", async () => {
   assert.equal(canonico.bundle.keywordContext?.principal, canonico.keywordContext.principal);
   assert.equal(canonico.keywordContext.principal, PRINCIPAL);
 
-  const rota = await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8");
+  const rota = (await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8"));
   const semComentarios = rota.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
   assert.match(semComentarios, /keywordContext: keywords \} = canonico\.dossier/);
@@ -391,7 +391,7 @@ test("§2 · keyword principal não resolvida é `null`, nunca a secundária", (
 });
 
 test("J · o arquivo exportado é identificado pela keyword, não pelo slug", async () => {
-  const rota = await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8");
+  const rota = (await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8"));
   const semComentarios = rota.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
   /*

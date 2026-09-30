@@ -19,7 +19,7 @@ import { RADAR_SOURCE_AUTHORITY_LABEL } from "./source-authority.ts";
 import type { RadarAiDiscoveryContext, RadarDiscoveryApplicability, RadarRetrievabilityKind, RadarConceptRelationKind } from "./ai-discovery-context.ts";
 import type { RadarAuthorityEvidence, RadarEeatDimension, RadarEeatSignalState, RadarSpecialistReviewKind } from "./authority-evidence.ts";
 import type { RadarCompetitiveObservedModel, RadarObservedCompetitor } from "./competitive-observed-model.ts";
-import type { RadarBundleCrossSerp, RadarBundleEditorialOutput, RadarEvidenceBundle, RadarResearchLayer } from "./evidence-bundle.ts";
+import type { RadarBundleCrossSerp, RadarBundleEditorialOutput, RadarEvidenceBundle, RadarFormatBlueprints, RadarResearchLayer } from "./evidence-bundle.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
 
 /**
@@ -254,6 +254,8 @@ export type RadarPortableResearchStatusInput = {
     editorialOutputs: readonly RadarBundleEditorialOutput[];
     serpStanding: RadarSerpStanding;
     conflicts: readonly RadarEvidenceResolution[];
+    /** SDD Radar 2026-09-30 (Parte A): vídeo e review acrescentados ao Google. Ausente sem acréscimo. */
+    formatBlueprints?: RadarFormatBlueprints;
   };
   /** `canonico.dossier.readiness` — a mesma regra que o Redator usa para recusar. */
   readiness: { ready: boolean; blocks: readonly RadarPortableReadinessBlock[] };
@@ -542,6 +544,22 @@ export function radarPortableResearchStatusMarkdown(input: RadarPortableResearch
     linhas.push(perfil === "YOUTUBE"
       ? "- O cruzamento YouTube × Google não foi gravado nesta investigação."
       : "- Não se aplica: o cruzamento entre buscas existe só na investigação de vídeo.");
+  }
+
+  /*
+   * ---- os acréscimos de formato (SDD Radar 2026-09-30, Parte A) ----
+   * Só aparece quando houve acréscimo: o CSV de todo artigo só-Google continua igual.
+   */
+  const formatos = bundle.formatBlueprints;
+  if (formatos?.video || formatos?.review) {
+    linhas.push("", "## Acréscimos de formato (o Google é a base)", "");
+    if (formatos.video) {
+      linhas.push(`- Vídeo: investigação do YouTube acrescentada${formatos.video.frozenAt ? `, congelada em ${instante(formatos.video.frozenAt) || formatos.video.frozenAt}` : ""}. O artigo também vira vídeo; o roteiro sai do blueprint de vídeo do pacote.`);
+    }
+    if (formatos.review) {
+      const tipo = typeof formatos.review.intent?.type === "string" ? ` (${limpo(formatos.review.intent.type)})` : "";
+      linhas.push(`- Review${tipo}: investigação da Amazon acrescentada${formatos.review.frozenAt ? `, congelada em ${instante(formatos.review.frozenAt) || formatos.review.frozenAt}` : ""}. O artigo também vira review; produtos, critérios e aviso de afiliado saem do blueprint comercial do pacote.`);
+    }
   }
 
   /* ---- as saídas recomendadas ---- */
@@ -1291,6 +1309,7 @@ export const RADAR_PORTABLE_DOSSIER_V3_COVERAGE: Readonly<Record<keyof RadarEvid
   specialist: "specialist_context_md e specialist_context_json",
   keywordContext: "keyword_principal, secondary_keywords e keywords_context_md",
   serpLenses: "serp_lenses_md e serp_lenses_json (pacote congelado, antes do cache) e research_status_md (Situação da SERP: lentes da SERP)",
+  formatBlueprints: "research_status_md (Acréscimos de formato: vídeo e review, com a data do congelamento); o blueprint completo do formato fica no pacote do Redator",
 };
 
 /* ============================ as três colunas ============================ */

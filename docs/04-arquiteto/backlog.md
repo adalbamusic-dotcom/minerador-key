@@ -1,3 +1,105 @@
+## Fechamento destravado sem mexer em artigo — 2026-09-30 (tarde)
+
+- [x] Ponteiro órfão não conta como formação pendente; publicado aprovado entra pelo próprio ArticleDNA.
+- [x] Pilar gravado pelo `articleId`; consolidação barrada só pela contestação do próprio Silo.
+- [x] “Manter composição” resolve o par (dois lados) e a fronteira do artigo mantido; a tela diz antes.
+- [x] Continuação do Concluir relê a seleção (fim do “aguarda a releitura”).
+- [ ] **Homologar (dono):** F5 no Arquiteto → Crescimento, Estratégia e Captação fecham (Pilar/Suporte em “Papel no Silo”) → Leads: abrir os 3 candidatos → “Manter composição” com motivo → “Concluir formação” → Leads fecha → Links internos → “Processar links”.
+- [ ] Limpar os ponteiros órfãos na cópia de trabalho (hoje só são ignorados no fechamento; as 5 keywords seguem como não agrupadas).
+
+## Fechamento dos Silos por Silo e “Tirar este artigo do Silo” — 2026-09-30
+
+- [x] O que barra o fechamento é só do próprio Silo; par já concluído não barra.
+- [x] “Fechamento dos Silos” em Links internos: o que falta em cada Silo.
+- [x] “Tirar este artigo do Silo” para candidato não concluído (keywords para “sem Silo”).
+- [ ] **Homologar (dono):** abrir o Arquiteto → conferir que Estratégia, Crescimento e Captação fecham (Pilar/Suporte na coluna “Papel no Silo”) → em Leads, tirar os três candidatos do Silo → Leads fecha → Links internos → Processar links.
+- [ ] Keywords que voltaram para “sem Silo” podem ser propostas de novo para um Silo em “Confirmar propostas novas” (só se o dono confirmar).
+
+## Concluir formação por artigo e Descartar sobras — 2026-09-30
+
+- [x] Concluir formação pede a SERP que falta (cache primeiro, plano de pagamento) e continua sozinho.
+- [x] Pendência de um artigo não trava os outros: fica de fora, nomeado, e continua candidato.
+- [x] “Descartar sobras” (preferência de tela; nada apagado) e “Mostrar de novo”.
+- [ ] **Homologar (dono):** aba Silos → “Desfazer os Silos sugeridos” (os 3 novos) → aba Artigos → “Descartar sobras” → “Concluir formação” → conferir quem concluiu e quem ficou de fora.
+- [ ] Descartar em definitivo um candidato que a pessoa não quer (hoje ele fica de fora a cada conclusão). Exige decisão de produto: onde guardar “não usar” sem sumir com a keyword.
+
+## Leitura da lista pelo código e composição menor — 2026-09-30
+
+- [x] `list_core`: núcleo do slug com a palavra própria; par captar × atrair separado pelo verbo.
+- [x] Composição que diverge encolhe uma vez pelo cache (par forte/parcial em 2+ lentes).
+- [x] Sobras: caixinha não fica desmarcada sozinha.
+- [ ] **Homologar (usuário):** “Buscar de novo” → conferir captar/atrair (Lista · núcleo do slug) e campanhas (composição menor) → passo 2 se pedir → “3 · Gravar melhorias”.
+- [ ] Avaliar: dois publicados com o MESMO núcleo (“atrair pacientes para clínica” × “… de estética”) ainda dividem keywords do mesmo grupo da SERP entre si.
+- [ ] **MCP ponta a ponta** (pedido do dono): hoje faltam ferramentas para medir Volume, criar/confirmar Silo, concluir formação de artigo novo, links internos, enviar ao Radar, investigar/finalizar no Radar e exportar “Para escrever”. Exige SDD (aprovações com `platform.decide`, custo com aceite).
+
+## Divergência de SERP explicada e Ajuda do Arquiteto — 2026-09-30
+
+- [x] Alerta em linguagem simples na divergência de SERP (o que houve, por que importa, o que cada botão faz).
+- [x] Ajuda desta área do Arquiteto com todos os processos e botões.
+- [ ] **Homologar (usuário):** abrir “marketing digital para dentistas” → Revisão → “Abrir a divergência na aba SERP” e conferir se o aviso se entende; abrir a Ajuda desta área no Arquiteto e buscar “divergência”, “custo”, “desfazer silo”.
+- [ ] Avaliar: “Aplicar recomendação” só registra a decisão; tirar a keyword ainda é manual. Um botão que já tire ou troque (com prévia) simplificaria.
+- [ ] **Decisão da divergência só no navegador** (`persistSerpState` → `writeBrowserArtifact`): levar ao banco exige rota própria (SDD curta), porque navegador não é fonte canônica.
+- [ ] Textos da tela que prometem o que não existe: “Revisar com IA” (`arquiteto-workspace.tsx`, aba IA), “Confirmar arquitetura” (o botão é “Confirmar propostas novas”) e “Reforçar publicados” citado fora do bloco avançado.
+
+## Melhorar publicados: aproveitar melhor a lista — 2026-09-30
+
+- [x] Secundárias da lista aceitas quando levam o núcleo ou uma palavra do assunto; regras de principal isoladas.
+- [x] IA lê primeiro os artigos com menos keywords.
+- [x] Par canibalizado com principais próprias (não sinônimas) e sem keyword em comum passa, com exclusão recíproca.
+- [ ] **Homologar (usuário):** "Buscar de novo" → conferir as linhas da IA (captar/atrair clínica de estética, marketing para clínica de estética, instagram não traz pacientes, campanhas sem anúncios) → "3 · Gravar melhorias".
+- [ ] Avaliar: a IA ler mais de 12 alvos por rodada.
+
+## Melhorar publicados: leitura da IA — correções da revisão (corretor) — 2026-09-30
+
+- [x] Escolha malformada da IA recusada sozinha (envelope permissivo; papel com acento normalizado; motivo longo encurtado).
+- [x] Até 12 alvos por chamada e teto de saída de 2.000 tokens.
+- [x] Prazo de 90 s por requisição para começar a conferir composições; a que sobra fica "precisa validar"; pareceres lidos uma vez.
+- [x] MCP, catálogo e cartão avisam que o prepare usa a Connection DeepSeek da marca.
+- [x] Aviso de principal mais ampla que o slug também no caminho da IA; Assunto sem papel da IA fica com a escolha que leva o núcleo, com mais volume e menos palavras.
+- [x] Núcleo do assunto exige as duas palavras.
+- [x] Recusas da IA visíveis ("Sugestões da IA recusadas pelas regras"), origem por linha e sugestão da IA derrubada pela SERP com o motivo.
+- [x] Falha da IA gravada como texto fixo, sem a mensagem crua do provider.
+- [ ] **Homologar (usuário):** medir o tempo real do prepare com a DeepSeek e a lista da AdalbaPro; conferir se algum alvo cai em "Faltou tempo nesta etapa"; abrir "Sugestões da IA recusadas" e conferir se as ruins (tráfego pago, clínica de estética facial, veterinários, agência de marketing) aparecem lá ou nem foram sugeridas.
+- [ ] Avaliar: alvo que a SERP deixa pronto e o parecer da composição rebaixa fica sem leitura da IA na mesma execução.
+- [ ] Avaliar: composição adiada por prazo com custo 0 não tem passo 2; hoje o caminho é "Buscar de novo".
+- [ ] Avaliar com dados de outras marcas as heurísticas de texto ("para …" como nicho; núcleo = duas últimas palavras antes de "para"/"sem"; sinônimos atrair/captar, paciente/cliente, consultório/clínica).
+- [ ] Registrar/decidir formalmente a regra `broaderCore` do passo 1 (principal mais ampla com o núcleo do slug), que está no working tree com teste, mas sem seção própria.
+
+## Melhorar publicados: leitura editorial da IA na lista existente — 2026-09-30
+
+- [x] Ordem do prepare: pares da SERP → leitura da IA na lista → busca nova no Google Ads só para quem ficou sem nada.
+- [x] Chamada única em lote (DeepSeek da marca, sem Thinking, limite de 40 s, apelidos curtos), guardada em `run.editorialAi` e nunca repetida no collect/apply.
+- [x] Código acima da IA: apelido fora do pedido recusado, até 3 por alvo e 6 por artigo, uma keyword por alvo, barreiras (publicada, sem volume, outro artigo, slug, restrição, cabeça genérica, outro nicho, núcleo do assunto), principal nova só com Posto Livre, atual sem volume e página que não ranqueia.
+- [x] Tela: "Leitura da IA — confira" com o motivo; "Precisa validar no Google (passo 2)" quando falta lente; gravação continua pelo parecer do cache e pelo clique do dono.
+- [x] Catálogo MCP, adendo na SDD e testes (domínio, servidor com IA simulada, DOM).
+- [ ] **Homologar (usuário) na AdalbaPro:** "1 · Buscar keywords" → conferir se "como atrair clientes para consultório" recebe "como atrair clientes"/"como atrair os clientes" e "como captar clientes para clínica de estética" recebe "como captar clientes", cada uma com o motivo; conferir que nenhuma das ruins aparece; medir o tempo do prepare; readback do run (`payload.editorialAi.status = answered`).
+- [ ] Se a DeepSeek passar de 40 s com a lista real, reduzir alvos por chamada ou dividir em duas preparações (hoje: aviso e segue sem a IA).
+- [ ] Avaliar se a linha "precisa validar" deve ter um botão próprio para validar só aquela composição (hoje: o passo 2 valida o plano inteiro).
+
+## Desfazer Silo e aba Artigos: correções da revisão (corretor) — 2026-09-30
+
+- [x] Cartão sem Sobras não manda para Sobras: leva a "Artigos novos" (Processar artigos).
+- [x] Linhas prontas desmarcadas: cartão pede a marcação (estado `select`), não "nada a fazer".
+- [x] Lease ativo: "Ver andamento" no lugar de "Continuar".
+- [x] Fileira sem números; "Gravar sem validar (N)" no passo 2; três passos em "Como funciona".
+- [x] Desfazer Silo: texto sem jargão, andamento "Desfazendo i de N…", Esc e foco no Cancelar, frase própria para "pela metade" sem keyword restante.
+- [x] Servidor do desfazer lê o envelope legado `payload.payload` de ArticleDNA e SiloDNA/SiloPage.
+- [x] Testes: recusa `KEYWORD_NOT_EDITABLE` sem escrita; envelope legado; tempo esgotado na validação; tabela dividida.
+- [ ] Homologar (usuário) os novos estados do cartão ("Marque na tabela", "Ir para Artigos novos", "Ver andamento") e o andamento do diálogo de desfazer.
+
+## Desfazer Silo sugerido e aba Artigos simples — 2026-09-30
+
+- [x] "Desfazer Silo" por Silo sem endereço publicado, com confirmação (rejeitado, nada apagado, N keywords para sem Silo e na mesa).
+- [x] "Desfazer os Silos sugeridos (N)" em lote, uma confirmação, um Silo por requisição e uma releitura.
+- [x] Servidor: `territoryUndos` no PATCH canônico; recusas antes da escrita (endereço publicado, consolidado/SiloDNA existente, SiloDNA/SiloPage aprovado, ArticleDNA aprovado com keyword do Silo, keyword publicada, keyword fora da etapa, lock vencido, já desfeito); keywords pelo writer da decisão de Silo; território por último, com lock e ator.
+- [x] Edição genérica do território não rejeita Silo.
+- [x] Silo rejeitado e vazio fora da mesa e das contagens; rejeitado com keyword continua visível.
+- [x] Catálogo MCP: ação de tela humana, sem ferramenta.
+- [x] Aba Artigos: cartão "Próximo passo" (uma frase, um botão), painel de melhoria, "Artigos novos" (Processar/Concluir formação), mesa, Sobras; o resto em "Detalhes técnicos" fechado.
+- [ ] **Homologar (usuário) no localhost/depois do deploy, na AdalbaPro:** (1) aba Silos: os 4 publicados sem "Desfazer Silo"; os 3 sugeridos com o botão; (2) "Desfazer os Silos sugeridos (3)" → confirmação com as contagens (3, 10 e 3 keywords, se nenhuma tiver ArticleDNA aprovado) → "Desfazer 3 Silos" → notificação só depois da releitura; (3) as 16 keywords aparecem em "Sem silo" e os 3 Silos somem da mesa e da contagem; (4) readback no banco: os 3 territórios com `state = rejected` e o motivo com o ator em `payload.territory.reasons`; nenhuma keyword com `payload.territoryRef` apontando para eles; (5) aba Artigos: o cartão diz o próximo passo certo e "Detalhes técnicos" abre com tudo o que havia antes.
+- [ ] Se "Processar arquitetura" voltar a propor um Silo desfeito, decidir se a proposta deve lembrar a rejeição (hoje é só proposta, sem gravação).
+- [ ] Voltar um Silo desfeito (`rejected → candidate`) não tem botão; a transição existe no domínio. Criar só se o dono pedir.
+
 ## Reforçar publicados: correções da revisão (corretor) — 2026-09-28
 
 - [x] Régua da troca: slug = último segmento da URL; dois complementos no slug não recusam a mesma entidade.

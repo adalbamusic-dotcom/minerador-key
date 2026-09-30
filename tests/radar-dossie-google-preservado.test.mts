@@ -187,80 +187,87 @@ test("R3 · dossiês sem Google finalizado ao lado de YouTube ou Amazon mantêm 
   assert.equal(dossie(SO_AMAZON).bundleHash, DOURADO.soAmazon, "só Amazon");
 });
 
-test("R3 · YouTube depois do Google finalizado: YouTube PRIMARY e o Google SUPPORT com a fotografia inteira", () => {
+/*
+ * ===== SDD Radar 2026-09-30 (Parte A): O GOOGLE É A BASE =====
+ *
+ * Antes (R3, 2026-09-28) o YouTube ou a Amazon viravam a camada PRIMARY e o
+ * Google finalizado, apoio. Decisão do dono (2026-09-30): o Google é sempre a
+ * base; YouTube (vídeo) e Amazon (review) são acréscimos, camadas SUPPORT com
+ * o blueprint do formato em `formatBlueprints`. Investigação legada sem Google
+ * finalizado continua na precedência antiga (os dourados acima não mudam).
+ */
+test("Google base · YouTube acrescentado: Google PRIMARY com a fotografia inteira, YouTube SUPPORT como acréscimo de formato", () => {
   const entregue = dossie(GOOGLE_E_YOUTUBE);
-  assert.equal(entregue.primaryResearchProfile, "YOUTUBE", "o alvo continua sendo vídeo");
-  assert.equal(entregue.research.youtube?.role, "PRIMARY");
-  const google = entregue.research.google!;
-  assert.equal(google.role, "SUPPORT", "uma única camada PRIMARY");
-  assert.equal(google.frozenAt, GOOGLE_FINALIZADO.frozenAt);
-  assert.deepEqual(google.refs[0], {
-    source: "WEB_SERP", role: "SEO_SUPPORT", ref: "serp-1", fingerprint: "hash-serp-1",
-    collectedAt: GOOGLE_FINALIZADO.frozenAt, sampleSize: GOOGLE_FINALIZADO.sample.comparablePages,
-  });
-  assert.equal(google.refs.length, 1, "o apoio aponta para o mesmo snapshot: sem referência repetida");
-  assert.deepEqual(google.counts, {
-    queries: GOOGLE_FINALIZADO.search.canonicalQueries + GOOGLE_FINALIZADO.search.auxiliaryQueries,
-    items: GOOGLE_FINALIZADO.sample.comparablePages,
-  }, "as contagens são as do congelado, não as da leitura de hoje");
-  assert.ok(google.counts.items > 0, "o controle: a fixture tem páginas comparáveis");
+  assert.equal(entregue.primaryResearchProfile, "GOOGLE", "o Google é a base");
+  assert.equal(entregue.research.google?.role, "PRIMARY");
+  const youtube = entregue.research.youtube!;
+  assert.equal(youtube.role, "SUPPORT", "uma única camada PRIMARY");
+  assert.ok(youtube.refs.every(ref => ref.role === "FORMAT_EXTENSION"), "o YouTube é acréscimo de formato, não pesquisa principal");
+  assert.deepEqual(youtube.counts, { queries: 3, items: 12 });
   assert.deepEqual(entregue.observed, VISTA.observed, "a fotografia do Google viaja inteira");
-  assert.deepEqual(entregue.researchSources, ["YOUTUBE_SERP", "WEB_SERP"]);
+  assert.deepEqual(entregue.researchSources, ["WEB_SERP", "YOUTUBE_SERP"]);
   for (const frase of GOOGLE_FINALIZADO.limitations) assert.ok(entregue.limitations.includes(frase), `limitação do Google perdida: ${frase}`);
   assert.ok(entregue.limitations.includes("vídeos curtos fora da amostra"), "e as do YouTube continuam");
+  assert.equal("formatBlueprints" in entregue, false, "sem blueprint de vídeo congelado, a chave não aparece");
   assert.doesNotThrow(() => assertRadarEvidenceProvenance(entregue));
   assert.doesNotThrow(() => assertRadarEvidenceBundleIntegrity(entregue));
-  assert.notEqual(entregue.bundleHash, DOURADO.googleEYoutubeAntes, "só este caso muda de hash: é um dossiê novo");
+  assert.notEqual(entregue.bundleHash, DOURADO.soGoogle, "o acréscimo muda o pacote: o Redator vê 'Atualização disponível'");
 });
 
-test("R3 · Amazon depois do Google finalizado: Amazon PRIMARY, Google SUPPORT comercial com a fotografia", () => {
+test("Google base · Amazon acrescentada: Google PRIMARY, Amazon SUPPORT como acréscimo de formato", () => {
   const entregue = dossie(GOOGLE_E_AMAZON);
-  assert.equal(entregue.primaryResearchProfile, "AMAZON");
-  assert.equal(entregue.research.amazon?.role, "PRIMARY");
-  const google = entregue.research.google!;
-  assert.equal(google.role, "SUPPORT");
-  assert.equal(google.refs[0].role, "SEO_COMMERCIAL_SUPPORT");
-  assert.equal(google.refs[0].ref, "serp-1");
+  assert.equal(entregue.primaryResearchProfile, "GOOGLE");
+  assert.equal(entregue.research.google?.role, "PRIMARY");
+  assert.equal(entregue.research.amazon?.role, "SUPPORT");
+  assert.ok(entregue.research.amazon!.refs.every(ref => ref.role === "FORMAT_EXTENSION"));
   assert.deepEqual(entregue.observed, VISTA.observed);
+  assert.deepEqual(entregue.researchSources, ["WEB_SERP", "AMAZON_SERP"]);
   assert.doesNotThrow(() => assertRadarEvidenceBundleIntegrity(entregue));
-  assert.notEqual(entregue.bundleHash, DOURADO.googleEAmazonAntes);
 });
 
-test("R3 · apoio que aponta para OUTRO snapshot fica como segunda referência, nunca some", () => {
-  const entregue = dossie({ ...GOOGLE_E_YOUTUBE, supportResearch: { ...APOIO_DO_YOUTUBE, serpSnapshotId: "serp-apoio-2" } });
-  assert.deepEqual(entregue.research.google!.refs.map(ref => ref.ref), ["serp-1", "serp-apoio-2"]);
-  assert.ok(entregue.research.google!.refs.every(ref => ref.role === "SEO_SUPPORT"));
+test("Google base · os blueprints de vídeo e de review viajam em formatBlueprints, e a saída de vídeo soma à do artigo", () => {
+  const multimodal = { recommended: { editorialOutput: "ARTICLE_WITH_EMBEDDED_VIDEO", rationale: ["vídeos vencem nas duas buscas"] }, observed: { crossSerpVideos: [{ signal: "CROSS_PLATFORM" }], sources: ["WEB_SERP", "YOUTUBE_SERP"] } };
+  const blueprintComercial = { profile: "AMAZON", recommended: { recommendedOutputs: [] } };
+  const entregue = dossie({
+    ...SO_GOOGLE,
+    youtubeFrozenInvestigation: { ...YOUTUBE, multimodal: { blueprint: multimodal } },
+    amazonFrozenInvestigation: { ...AMAZON, competitiveBlueprint: blueprintComercial, originalEditorialIntent: { type: "TOP_BEST", setupSignature: "sig" } },
+  });
+  assert.deepEqual(entregue.formatBlueprints?.video, { frozenAt: YOUTUBE.finalizedAt, blueprint: multimodal });
+  assert.equal(entregue.formatBlueprints?.review?.frozenAt, AMAZON.finalizedAt);
+  assert.equal(entregue.formatBlueprints?.review?.intent?.type, "TOP_BEST");
+  assert.ok(entregue.editorialOutputs.some(saida => saida.output === "ARTICLE_WITH_EMBEDDED_VIDEO"), "a saída de vídeo entra nas saídas");
+  assert.deepEqual(entregue.crossSerp?.signals, [{ signal: "CROSS_PLATFORM", count: 1 }]);
+  assert.doesNotThrow(() => assertRadarEvidenceBundleIntegrity(entregue));
 });
 
-test("R3 · o pacote com Google + YouTube continua pronto para o Planejador: o observed confere com o congelado", () => {
+test("Google base · o pacote com Google + YouTube continua pronto para o Planejador e o Redator", () => {
   const entregue = dossie(GOOGLE_E_YOUTUBE);
   assert.deepEqual(radarDossierDivergesFromFrozen(entregue, GOOGLE_FINALIZADO), []);
   const prontidao = radarPlannerHandoffReadiness({ article: ARTIGO, frozen: GOOGLE_FINALIZADO, dossier: entregue, stale: false });
   assert.equal(prontidao.ready, true, JSON.stringify(prontidao.blocks));
 });
 
-test("R3 · fotografia viva que diverge do congelado NÃO entra no apoio: vira limitação e não bloqueia o vídeo", () => {
+test("Google base · fotografia viva que diverge do congelado bloqueia, como em todo artigo Google", () => {
   const outra = vista(PAGINAS.slice(0, 7)).observed;
   assert.ok(radarObservedDivergesFromFrozen(outra, GOOGLE_FINALIZADO).length > 0, "o controle: a outra fotografia diverge");
   const entregue = dossie(GOOGLE_E_YOUTUBE, outra);
-  assert.equal(entregue.observed, null, "a leitura de hoje não viaja com o carimbo de ontem");
-  assert.ok(entregue.limitations.some(frase => frase.startsWith("A fotografia do Google finalizada não foi anexada")), entregue.limitations.join(" | "));
-  assert.equal(entregue.research.google?.role, "SUPPORT", "as referências do congelado continuam");
   const prontidao = radarPlannerHandoffReadiness({ article: ARTIGO, frozen: GOOGLE_FINALIZADO, dossier: entregue, stale: false });
-  assert.equal(prontidao.ready, true, JSON.stringify(prontidao.blocks));
+  assert.equal(prontidao.ready, false, "a leitura de hoje não viaja com o carimbo de ontem");
 });
 
-test("R3 · fotografia de outro artigo nunca entra no apoio (a identidade é conferida antes)", () => {
+test("Google base · fotografia de outro artigo nunca entra (a identidade é conferida na montagem)", () => {
   const alheia = { ...VISTA.observed, identity: { ...VISTA.observed.identity, articleId: "outro-artigo" } };
-  const entregue = dossie(GOOGLE_E_YOUTUBE, alheia);
-  assert.equal(entregue.observed, null);
-  assert.doesNotThrow(() => assertRadarEvidenceProvenance(entregue));
+  assert.throws(() => dossie(GOOGLE_E_YOUTUBE, alheia), /RADAR_EVIDENCE_BUNDLE_ARTICLE_MISMATCH/);
 });
 
-test("R3 · a precedência do perfil primário não muda: o alvo é do perfil de vídeo ou de produto", () => {
-  assert.equal(radarPrimaryProfileOfAnalysis(GOOGLE_E_YOUTUBE), "YOUTUBE");
-  assert.equal(radarPrimaryProfileOfAnalysis(GOOGLE_E_AMAZON), "AMAZON");
+test("Google base · a precedência: com o Google finalizado ele manda; sem ele, a precedência antiga (legado)", () => {
+  assert.equal(radarPrimaryProfileOfAnalysis(GOOGLE_E_YOUTUBE), "GOOGLE");
+  assert.equal(radarPrimaryProfileOfAnalysis(GOOGLE_E_AMAZON), "GOOGLE");
   assert.equal(radarPrimaryProfileOfAnalysis(SO_GOOGLE), "GOOGLE");
+  assert.equal(radarPrimaryProfileOfAnalysis(SO_YOUTUBE), "YOUTUBE");
+  assert.equal(radarPrimaryProfileOfAnalysis(SO_AMAZON), "AMAZON");
+  assert.equal(radarPrimaryProfileOfAnalysis({ youtubeFrozenInvestigation: YOUTUBE, amazonFrozenInvestigation: AMAZON }), "AMAZON");
 });
 
 test("R3 · a leitura das autoridades monta a fotografia do Google sempre que ele foi finalizado", () => {
