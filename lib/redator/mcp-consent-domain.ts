@@ -41,7 +41,7 @@ export const WRITER_MCP_SCOPE_LABELS: Record<WriterMcpScope, { title: string; de
   "writer.media.brief": { title: "Registrar mídia", description: "Registrar prompts visuais e anexar imagens geradas ao briefing existente." },
   "platform.read": { title: "Ler a plataforma", description: "Ver o que a marca tem: Assuntos, keywords, silos, artigos, páginas publicadas e em que etapa está cada coisa." },
   "minerador.write": { title: "Trabalhar no Minerador", description: "Declarar os Assuntos que você aceitar, planejar a pesquisa de keywords e importar as escolhidas. Não aprova nem exclui keywords." },
-  "arquiteto.write": { title: "Enviar ao Arquiteto", description: "Enviar ao Arquiteto as keywords que você já aprovou. Não forma nem aprova artigos e silos." },
+  "arquiteto.write": { title: "Operar o Arquiteto", description: "Enviar keywords aprovadas e preparar melhorias de publicados e Assuntos. Aplicar decisões exige também platform.decide e aceite específico da prévia." },
   "radar.write": { title: "Enviar ao Redator", description: "Enviar ao Redator os artigos cuja investigação você já finalizou no Radar." },
   "platform.decide": { title: "Delegar decisões aceitas no chat", description: "Aplicar decisões específicas que você aceitou no chat, sempre depois de prévia, hash vigente e registro do aceite. Não publica nem exclui." },
   "provider.spend": { title: "Gastar com provider", description: "Executar pesquisas pagas (DataForSEO, Google Ads) depois de mostrar o custo e você aceitar. Desmarcado por padrão." },

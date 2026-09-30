@@ -101,7 +101,7 @@ test("A2 · o plano da coleta nunca oferece só a lente principal", () => {
 /* -------------------------- A3 · sem volume no parecer -------------------- */
 
 test("A3 · a rota do parecer tira secundária sem volume do plano e da coleta e a declara como não observada", () => {
-  const rota = semComentarios(readFileSync("app/api/arquiteto/serp/route.ts", "utf8"));
+  const rota = semComentarios(readFileSync("lib/server/arquiteto-serp-http.ts", "utf8"));
   assert.match(rota, /keyword\.id === group\.principalSuggestion\.keywordId \|\| hasSearchVolume\(keyword\.volume_search\)/);
   assert.match(rota, /if \(!observableInGroup\(group, keyword\)\) continue;/);
   assert.match(rota, /group\.keywords\.filter\(keyword => observableInGroup\(group, keyword\)\)\.flatMap\(keyword => requested\.extras/);

@@ -179,7 +179,7 @@ test("(1) a trava de identidade: uma lista só para a rota e para a mesa", () =>
   assert.deepEqual(publishedIdentityKeysIn(assignment).sort(), ["clusterId", "computedSlug"]);
   assert.deepEqual(withoutPublishedIdentityKeys(assignment), { workingArticleId: "w-1", computedHierarquia: "Pilar", articleKgrDecision: "YES", territoryRef: "territory:1" });
 
-  const rota = readFileSync("app/api/arquiteto/workspace/route.ts", "utf8");
+  const rota = readFileSync("lib/server/arquiteto-workspace-http.ts", "utf8");
   assert.match(rota, /isArchitectKeywordPublished\(\{ status: keyword\?\.status \?\? null, canonicalWorkflow: \{ payload: currentPayload \} \}\)/);
   assert.match(rota, /publishedIdentityKeysIn\(update\.assignment\)\.length/);
 

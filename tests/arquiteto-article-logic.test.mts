@@ -123,7 +123,7 @@ test("grupos explicam a hipótese com razões determinísticas", () => {
 
 test("working copy expõe reserva e decisão humana sem criar Silo ou ArticleDNA", async () => {
   const workspace = await readFile("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
-  const route = await readFile("app/api/arquiteto/workspace/route.ts", "utf8");
+  const route = await readFile("lib/server/arquiteto-workspace-http.ts", "utf8");
   const canonical = await readFile("lib/arquiteto/canonical-workspace.ts", "utf8");
   assert.match(workspace, /Candidatas provisórias a Silo/);
   assert.match(workspace, /Usar em artigo/);

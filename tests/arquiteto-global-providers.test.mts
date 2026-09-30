@@ -8,7 +8,7 @@ const root = new URL("../", import.meta.url);
 const read = (path: string) => readFile(new URL(path, root), "utf8");
 
 const serpBoundary = await read("lib/arquiteto/dataforseo-serp-compatibility.ts");
-const serpRoute = await read("app/api/arquiteto/serp/route.ts");
+const serpRoute = await read("lib/server/arquiteto-serp-http.ts");
 const aiRoute = await read("app/api/revalidate-structure/route.ts");
 const aiArchitectureReview = await read("lib/arquiteto/ai-architecture-review.ts");
 /** Contrato do request compartilhado por rota, cliente e testes. */

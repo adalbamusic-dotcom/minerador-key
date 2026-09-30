@@ -152,7 +152,7 @@ class PipelineRuntimeError extends Error {
 }
 mock.module("@/lib/server/pipeline-runtime", { namedExports: {
   PipelineRuntimeError,
-  resolvePipelineContext: async () => ({ get supabase() { return banco; }, brandId: MARCA, actorUserId: "usuario-1" }),
+  resolvePipelineContext: async (input: { module: string; action: string }) => ({ ...input, get supabase() { return banco; }, brandId: MARCA, actorUserId: "usuario-1" }),
 } });
 mock.module("@/lib/server/integrations-runtime", { namedExports: {
   IntegrationRuntimeError,

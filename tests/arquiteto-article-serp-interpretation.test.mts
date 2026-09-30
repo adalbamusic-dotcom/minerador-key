@@ -388,7 +388,7 @@ test("A1 · registro legado reconstruído segue a mesma regra", () => {
 });
 
 test("A1 · a rota monta os membros pelos snapshots, não pelo grupo inteiro", () => {
-  const route = readFileSync("app/api/arquiteto/serp/route.ts", "utf8")
+  const route = readFileSync("lib/server/arquiteto-serp-http.ts", "utf8")
     .split("\n")
     .filter(line => {
       const trimmed = line.trimStart();
@@ -599,7 +599,7 @@ test("o gate lê o remoto, não o cache do navegador", () => {
 });
 
 test("a rota grava e relê antes de responder", () => {
-  const route = readFileSync("app/api/arquiteto/serp/route.ts", "utf8");
+  const route = readFileSync("lib/server/arquiteto-serp-http.ts", "utf8");
   const escrita = route.indexOf("saveArticleFormationSerpAssessment");
   const leitura = route.indexOf("readbackArticleFormationSerpAssessment(pipelineContext");
   assert.ok(escrita > -1 && leitura > -1);
@@ -610,7 +610,7 @@ test("a rota grava e relê antes de responder", () => {
 });
 
 test("a hidratação do workspace devolve a evidência remota", () => {
-  const route = readFileSync("app/api/arquiteto/workspace/route.ts", "utf8");
+  const route = readFileSync("lib/server/arquiteto-workspace-http.ts", "utf8");
   assert.match(route, /listArticleFormationSerpAssessments\(context\)/);
   assert.match(route, /articleFormationSerp,/);
   const canonical = readFileSync("lib/arquiteto/canonical-workspace.ts", "utf8");

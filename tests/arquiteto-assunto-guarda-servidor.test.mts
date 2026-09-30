@@ -387,11 +387,11 @@ test("vínculo igual ao gravado, soltar ou atribuição sem o campo: nenhuma lei
 });
 
 test("a rota da cópia de trabalho aceita o campo opcional e confere antes de gravar", () => {
-  const rota = readFileSync("app/api/arquiteto/workspace/route.ts", "utf8")
+  const rota = readFileSync("lib/server/arquiteto-workspace-http.ts", "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
   assert.match(rota, /articleSubjectAnchor: WorkingSubjectAnchorSchema\.nullable\(\)\.optional\(\),/);
-  const patch = rota.slice(rota.indexOf("export async function PATCH"));
+  const patch = rota.slice(rota.indexOf("export async function handleArchitectWorkspacePatch"));
   const guarda = patch.indexOf("await assertWorkingSubjectAnchorAssignment(context, currentPayload, update.assignment);");
   assert.ok(guarda > 0, "a rota chama a guarda");
   assert.ok(guarda < patch.indexOf("await repository.update("), "a guarda roda antes de gravar");

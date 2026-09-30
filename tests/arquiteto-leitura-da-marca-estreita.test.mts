@@ -210,7 +210,7 @@ function stripComments(source: string) {
 }
 
 const serverSource = stripComments(readFileSync(new URL("../lib/server/arquiteto-workspace.ts", import.meta.url), "utf8"));
-const routeSource = stripComments(readFileSync(new URL("../app/api/arquiteto/workspace/route.ts", import.meta.url), "utf8"));
+const routeSource = stripComments(readFileSync(new URL("../lib/server/arquiteto-workspace-http.ts", import.meta.url), "utf8"));
 
 function block(source: string, start: string, end: string) {
   const from = source.indexOf(start);
@@ -255,7 +255,7 @@ test("o handoff filtra os ids pedidos no banco e não lê mais a marca inteira",
 
 test("o PATCH não lê minerador_keywords da marca inteira na rota", () => {
   assert.doesNotMatch(routeSource, /from\("minerador_keywords"\)/);
-  const patch = block(routeSource, "export async function PATCH", "for (const update of parsed.updates || [])");
+  const patch = block(routeSource, "export async function handleArchitectWorkspacePatch", "for (const update of parsed.updates || [])");
   assert.ok(patch.indexOf("readArchitectPatchKeywords(") > 0, "a leitura continua antes do laço de gravação");
   // O pedido de leitura sai da função testada abaixo, com todos os updates.
   assert.match(patch, /readArchitectPatchKeywords\(context, architectPatchKeywordReadInput\(parsed\.updates \|\| \[\]\)\)/);
@@ -265,7 +265,7 @@ test("o GET só reconhece keywordDetail=full e ignora outro valor em vez de resp
   const schema = block(routeSource, "const QuerySchema", ";");
   assert.doesNotMatch(schema, /keywordDetail/);
   assert.match(routeSource, /searchParams\.get\("keywordDetail"\) === "full" \? "full" as const : undefined/);
-  const get = block(routeSource, "export async function GET", "export async function PATCH");
+  const get = block(routeSource, "export async function handleArchitectWorkspaceRead", "export async function handleArchitectWorkspacePatch");
   assert.match(get, /loadCanonicalArquitetoWorkspace\(context, \{ keywordDetail: keywordDetailOf\(searchParams\) \}\)/);
 });
 

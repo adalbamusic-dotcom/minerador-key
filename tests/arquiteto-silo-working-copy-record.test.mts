@@ -112,7 +112,7 @@ test("2 · ref é emitido pelo servidor e DERIVADO do território", () => {
 });
 
 test("3 · o chamador não escolhe o ref", () => {
-  const rota = readFileSync(new URL("../app/api/arquiteto/workspace/route.ts", import.meta.url), "utf8");
+  const rota = readFileSync(new URL("../lib/server/arquiteto-workspace-http.ts", import.meta.url), "utf8");
   assert.match(rota, /"workingCopyRef" in create\.workingCopy/);
   assert.match(rota, /A identidade da working copy de Silo é imutável/);
   assert.equal(/buildSiloWorkingCopyRef/.test(rota), false, "a rota não emite identidade");
@@ -242,7 +242,7 @@ const roundTrip = (state: SiloWorkingCopyState) => {
 };
 
 test("14 · o reload deriva a working copy do remoto", () => {
-  const rota = readFileSync(new URL("../app/api/arquiteto/workspace/route.ts", import.meta.url), "utf8");
+  const rota = readFileSync(new URL("../lib/server/arquiteto-workspace-http.ts", import.meta.url), "utf8");
   assert.match(rota, /listSiloWorkingCopies\(context\)/);
   assert.match(rota, /siloWorkingCopies/);
   const store = readFileSync(new URL("../lib/server/arquiteto-silo-working-copy-store.ts", import.meta.url), "utf8");
@@ -409,7 +409,7 @@ test("29 · zero providers e zero rede no contrato de domínio", () => {
 test("30 · a RPC de consolidação da 2C.1 não foi integrada", () => {
   const alvos = [
     "../lib/server/arquiteto-silo-working-copy-store.ts",
-    "../app/api/arquiteto/workspace/route.ts",
+    "../lib/server/arquiteto-workspace-http.ts",
     "../lib/arquiteto/silo-working-copy-record.ts",
   ];
   for (const alvo of alvos) {
@@ -503,7 +503,7 @@ test("35 · erro sem código de domínio propaga, e não vira replay nem conflit
 });
 
 test("36 · o chamador não fornece o ref, nem na criação nem na atualização", () => {
-  const rota = readFileSync(new URL("../app/api/arquiteto/workspace/route.ts", import.meta.url), "utf8");
+  const rota = readFileSync(new URL("../lib/server/arquiteto-workspace-http.ts", import.meta.url), "utf8");
   assert.match(rota, /"workingCopyRef" in create\.workingCopy/);
   const store = readFileSync(new URL("../lib/server/arquiteto-silo-working-copy-store.ts", import.meta.url), "utf8");
   const create = store.slice(store.indexOf("export async function createSiloWorkingCopy"), store.indexOf("export async function updateSiloWorkingCopy"));

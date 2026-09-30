@@ -58,7 +58,7 @@ test("migration cria conexão tenantizada e histórico versionado com RLS", asyn
 });
 
 test("resposta parcial preserva diagnóstico limitado das chaves retornadas pelo Google", async () => {
-  const route = await readFile(new URL("../app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts", import.meta.url), "utf8");
+  const route = await readFile(new URL("../lib/server/minerador-google-ads-metrics-http.ts", import.meta.url), "utf8");
   assert.match(route, /providerReturnedCount: allMetrics\.length/);
   assert.match(route, /providerReturnedKeywords = allMetrics\.slice\(0, 25\)/);
   assert.match(route, /canonicalKeyword: metric\.canonicalKeyword/);

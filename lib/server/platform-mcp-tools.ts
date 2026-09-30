@@ -1,3 +1,4 @@
+import { ArticleImprovementRequestSchema } from "@/lib/arquiteto/article-improvement-request";
 import "server-only";
 import { createHash } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/server";
@@ -1012,6 +1013,22 @@ export function registerPlatformTools(server: McpServer, principal: WriterMcpPri
     if (outcome.status >= 400) throw new PlatformToolFailure(String(outcome.body.code || "reinforcement_refused"), { message: outcome.body.error ?? null });
     return outcome.body.data;
   }));
+
+  server.registerTool("improve_articles", {
+    title: "Melhorar publicados e formar Assuntos",
+    description: "Uma jornada para todos os publicados e Assuntos da marca. prepare: acervo, DNAs, cache e pesquisa Google Ads gratuita (usa quota, exige aceite); status: retomar. Mostre principal, entradas/saídas, transferências, enfoques, evidência e custos. collect: só com aceite específico do plano vigente e teto total US$ 1. apply: só após aceite editorial da prévia vigente, incluindo novas keywords; cada chamada avança um artigo, até state complete. Não reescreve nem publica no site. Principal Livre pode trocar; Travada, URLs, slugs, canonical e Silo publicados preservados. Nenhuma troca de sinônimos é apresentada como solução de canibalização.",
+    inputSchema: ArticleImprovementRequestSchema.safeExtend({ userConfirmation: confirmationInput.optional() }),
+    annotations: write,
+  }, async ({ userConfirmation, ...request }) => {
+    if (request.action !== "status" && !userConfirmation) return asText({ ok: false, code: "human_confirmation_required", message: "Exiba a prévia pertinente e envie o aceite específico do usuário. Preparar usa a quota gratuita do Google Ads." });
+    const scopes = request.action === "status" ? ["platform.read"] as const : request.action === "prepare" ? ["arquiteto.write", "provider.spend"] as const : request.action === "collect" ? ["arquiteto.write", "provider.spend"] as const : ["arquiteto.write", "platform.decide", "minerador.write"] as const;
+    return call("improve_articles", scopes, { brandId: request.brandId, humanConfirmation: userConfirmation ?? null }, [{ module: "arquiteto", action: request.action === "status" ? "view" : "edit" }, ...(request.action === "apply" ? [{ module: "arquiteto", action: "approve" } as const, { module: "minerador", action: "approve" } as const] : [])], async ({ access }) => {
+      const context = await resolvePipelineContext({ brandId: access.brandId, module: "arquiteto", action: request.action === "status" ? "view" : "edit" }, { requireActorUserId: async () => principal.actorId });
+      const { handleArticleImprovement, improvementRuntime, projectImprovementRun } = await import("./arquiteto-article-improvement");
+      const outcome = await handleArticleImprovement(improvementRuntime(context), ArticleImprovementRequestSchema.parse({ ...request, brandId: access.brandId }));
+      return projectImprovementRun(outcome);
+    });
+  });
 
   /* ================================ Radar ============================= */
 

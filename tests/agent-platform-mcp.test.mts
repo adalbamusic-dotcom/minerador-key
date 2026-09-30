@@ -257,6 +257,20 @@ test("17 · pesquisa paga sem provider.spend é recusada antes de ler qualquer c
   assert.equal(body.scope, "provider.spend");
 });
 
+test("melhoria unificada não usa Google Ads sem aceite específico nem provider.spend", async () => {
+  const argumentsBase = { brandId: brand([]).brandId, action: "prepare" };
+  const send = harness(createWriterServer(principal([brand(["platform.read", "arquiteto.write"])])));
+  assert.equal(toolText(await send(80, "tools/call", { name: "improve_articles", arguments: argumentsBase })).code, "human_confirmation_required");
+  const refused = toolText(await send(81, "tools/call", { name: "improve_articles", arguments: { ...argumentsBase, userConfirmation: "Aceito usar a quota gratuita para preparar" } }));
+  assert.equal(refused.code, "scope_denied"); assert.equal(refused.scope, "provider.spend");
+});
+
+test("melhoria unificada não aplica aceite editorial sem platform.decide", async () => {
+  const send = harness(createWriterServer(principal([brand(["platform.read", "arquiteto.write", "minerador.write"])])));
+  const refused = toolText(await send(82, "tools/call", { name: "improve_articles", arguments: { brandId: brand([]).brandId, action: "apply", runId: "00000000-0000-4000-8000-0000000000aa", decisionHash: "a".repeat(64), userConfirmation: "Aceito estas melhorias da prévia" } }));
+  assert.equal(refused.code, "scope_denied"); assert.equal(refused.scope, "platform.decide");
+});
+
 test("18 · cada escrita pede o próprio escopo", async () => {
   const send = harness(createWriterServer(principal([brand(["platform.read"])])));
   const casos: Array<[string, Record<string, unknown>, string]> = [

@@ -1,3 +1,4 @@
+import { allocateReinforcementChoices } from "../../lib/arquiteto/reinforcement-allocation.ts";
 import {
   PUBLISHED_REINFORCEMENT_ACTION_LABEL,
   PUBLISHED_REINFORCEMENT_MAX_PAGES,
@@ -494,7 +495,7 @@ const TETO_DO_ARTIGO = 6;
 
 export type ReinforcementKeywordInfo = { keyword: string; volume: number | null };
 
-const PESO_FIXO = Number.MAX_SAFE_INTEGER;
+
 const chaveNova = (frase: string) => `novo:${normalizeKeyword(frase)}`;
 /** "volume 20", ou "sem volume" quando o Google Ads não mediu. */
 const comVolume = (valor: number | null | undefined) => typeof valor === "number" && Number.isFinite(valor) ? `volume ${valor.toLocaleString("pt-BR")}` : "sem volume";
@@ -506,20 +507,18 @@ const volumeTexto = (valor: number | null | undefined) => typeof valor === "numb
  * um publicado, ou é a substituta da troca dele, fica nele. A keyword nova da
  * busca em lote é comparada pela frase normalizada (`novo:…`).
  */
-export function reinforcementSuggestionOwners(cards: readonly SerpSubjectCardView[], results?: ReadonlyMap<string, ReinforcementPageResult>): Map<string, string> {
-  const melhor = new Map<string, { dono: string; peso: number }>();
-  const pesar = (chave: string, dono: string, peso: number) => {
-    const atual = melhor.get(chave);
-    if (!atual || peso > atual.peso) melhor.set(chave, { dono, peso });
-  };
-  for (const card of cards) {
-    if (card.kind !== "published") continue;
-    for (const id of card.memberKeywordIds) pesar(id, card.anchorKeywordId, PESO_FIXO);
-    if (card.swapSubstitute) pesar(card.swapSubstitute.keywordId, card.anchorKeywordId, PESO_FIXO);
-    for (const item of card.suggestions) pesar(item.keywordId, card.anchorKeywordId, item.sharedPageCount ?? 0);
-    for (const item of results?.get(card.anchorKeywordId)?.suggestions ?? []) pesar(chaveNova(item.keyword), card.anchorKeywordId, item.sharedPageCount);
+export function reinforcementSuggestionOwners(cards: readonly SerpSubjectCardView[], results?: ReadonlyMap<string, ReinforcementPageResult>, swapAccepted: (id: string) => boolean = () => false): Map<string, string> {
+  const targets = cards.filter(card => card.kind === "published");
+  const fixed = new Map<string, string>();
+  for (const card of targets) {
+    for (const id of card.memberKeywordIds) fixed.set(id, card.anchorKeywordId);
+    if (card.swapSubstitute && swapAccepted(card.anchorKeywordId)) fixed.set(card.swapSubstitute.keywordId, card.anchorKeywordId);
   }
-  return new Map([...melhor].map(([chave, valor]) => [chave, valor.dono]));
+  const edges = targets.flatMap(card => [
+    ...card.suggestions.filter(item => item.where === "leftover" || (item.where === "other_silo" && !item.inOtherArticle)).map(item => ({ targetId: card.anchorKeywordId, keywordId: item.keywordId, tier: item.level === "strong" ? 0 : 1, score: item.sharedPageCount ?? 0, volume: item.volume ?? 0 })),
+    ...(results?.get(card.anchorKeywordId)?.suggestions ?? []).map(item => ({ targetId: card.anchorKeywordId, keywordId: chaveNova(item.keyword), tier: item.level === "strong" ? 0 : 1, score: item.sharedPageCount, volume: item.adsVolume })),
+  ]);
+  return allocateReinforcementChoices({ targets: targets.map(card => ({ id: card.anchorKeywordId, capacity: Math.max(0, card.suggestionLimit - (card.swapSubstitute && swapAccepted(card.anchorKeywordId) && !card.memberKeywordIds.includes(card.swapSubstitute.keywordId) ? 1 : 0)), priority: card.memberKeywordIds.length })), edges, fixed });
 }
 
 const pertence = (owners: ReadonlyMap<string, string> | null | undefined, chave: string, dono: string) => !owners || !owners.has(chave) || owners.get(chave) === dono;
@@ -633,7 +632,7 @@ export function reinforcementTableRows(input: {
    */
   deferredPageIds?: ReadonlyMap<string, string>;
 }): ReinforcementTableRow[] {
-  const owners = input.owners ?? reinforcementSuggestionOwners(input.cards, input.results);
+  const owners = input.owners ?? reinforcementSuggestionOwners(input.cards, input.results, input.swapAccepted);
   const rotulo = new Map(input.cards.map(card => [card.anchorKeywordId, card.anchorLabel]));
   return input.cards.map(card => {
     const publicado = card.kind === "published";

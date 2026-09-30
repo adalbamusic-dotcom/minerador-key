@@ -176,7 +176,7 @@ test("9 · territoryAssignment não possui segunda referência nem lista de keyw
     );
   }
   // A rota persiste exatamente este shape.
-  const route = readFileSync(new URL("../app/api/arquiteto/workspace/route.ts", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../lib/server/arquiteto-workspace-http.ts", import.meta.url), "utf8");
   assert.match(route, /territoryAssignment: KeywordTerritoryDecisionSchema/);
   assert.equal(/KeywordTerritoryAssignmentSchema/.test(route), false);
 });
@@ -257,7 +257,7 @@ test("12 · unassigned e unaddressed são projeções derivadas, nunca arrays pe
   assert.deepEqual(buckets.incoherentKeywordIds, ["kw-broken"]);
 
   // Nenhum dos dois nomes existe como campo persistido em contrato algum.
-  for (const file of ["../lib/arquiteto/territory-record.ts", "../app/api/arquiteto/workspace/route.ts"]) {
+  for (const file of ["../lib/arquiteto/territory-record.ts", "../lib/server/arquiteto-workspace-http.ts"]) {
     const source = readFileSync(new URL(file, import.meta.url), "utf8");
     assert.equal(/unassignedKeywordIds\s*:/.test(source), false, file + " não pode persistir a projeção");
     assert.equal(/unaddressedKeywordIds\s*:/.test(source), false, file + " não pode persistir a projeção");
@@ -271,7 +271,7 @@ test("13 · o territoryRef é emitido pelo servidor, nunca pelo cliente", () => 
   assert.match(store, /brandId: context\.brandId/);
   assert.match(store, /territoryRef: current\.subject_id/);
 
-  const route = readFileSync(new URL("../app/api/arquiteto/workspace/route.ts", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../lib/server/arquiteto-workspace-http.ts", import.meta.url), "utf8");
   assert.match(route, /"territoryRef" in create\.territory/);
   assert.equal(/buildTerritoryRef/.test(route), false, "a rota não emite identidade por conta própria");
 
@@ -385,7 +385,7 @@ test("18 · o update não troca territoryRef nem brandId", () => {
   assert.ok(update.indexOf("territoryRef: current.subject_id") > spread, "ref precisa sobrescrever o draft");
   assert.ok(update.indexOf("brandId: context.brandId") > spread, "brand precisa sobrescrever o draft");
   // E a rota recusa um corpo que declare ref diferente da endereçada.
-  const rota = repoFile("app/api/arquiteto/workspace/route.ts");
+  const rota = repoFile("lib/server/arquiteto-workspace-http.ts");
   assert.match(rota, /declaredRef !== undefined && declaredRef !== update\.territoryRef/);
   assert.match(rota, /A identidade do território é imutável/);
 });

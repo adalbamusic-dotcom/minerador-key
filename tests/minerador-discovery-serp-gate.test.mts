@@ -222,7 +222,7 @@ test("nenhum outro caminho da Descoberta chama a DataForSEO", async () => {
 
   for (const route of [
     "../app/api/minerador/marcas/[brandId]/google-ads/descobrir-keywords/route.ts",
-    "../app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts",
+    "../lib/server/minerador-google-ads-metrics-http.ts",
     "../app/api/minerador/marcas/[brandId]/discovery/import/route.ts",
     "../app/api/minerador/marcas/[brandId]/discovery/sources/route.ts",
   ]) {
