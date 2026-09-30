@@ -509,7 +509,8 @@ test("nenhuma rede, nenhum provider e nenhum botão pago na tela do Assunto", ()
 
 test("não agrupadas: o predicado do domínio decide, e nenhuma keyword some", () => {
   assert.match(workspace, /splitUngroupedBySubjectAnchor\(\{\s*ungroupedKeywordIds: ungroupedArticleKeywords\.map/);
-  assert.match(workspace, /Keywords não agrupadas · \{visibleUngroupedArticleKeywords\.length\}/);
+  // Recolhida (2026-09-30): a lista continua inteira, só não empurra a jornada para baixo.
+  assert.match(workspace, /Keywords sem artigo · \{visibleUngroupedArticleKeywords\.length\}/);
   assert.match(workspace, /<SubjectConservationBadge label=\{selo\} tone="awaiting"/);
   assert.match(workspace, /<SubjectConservationBadge label=\{item\.label\} tone="trunk"/);
   assert.match(workspace, /\$\{visibleUngroupedArticleKeywords\.length\} keyword\(s\) sem grupo/);
