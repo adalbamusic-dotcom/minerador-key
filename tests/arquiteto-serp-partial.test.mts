@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const route = readFileSync("app/api/arquiteto/serp/route.ts", "utf8");
+const route = readFileSync("lib/server/arquiteto-serp-http.ts", "utf8");
 const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
 
 /** Reproduz a política do route: allSettled + erro global relançado. */

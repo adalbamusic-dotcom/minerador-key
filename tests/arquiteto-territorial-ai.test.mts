@@ -304,7 +304,7 @@ test("o provider nunca aparece na interface", () => {
 });
 
 test("o boot hidrata a proposta e não chama provider", () => {
-  const route = readFileSync("app/api/arquiteto/workspace/route.ts", "utf8");
+  const route = readFileSync("lib/server/arquiteto-workspace-http.ts", "utf8");
   const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
 
   assert.match(route, /listTerritorialAiProposals/);

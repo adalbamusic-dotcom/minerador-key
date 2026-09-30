@@ -2247,7 +2247,7 @@ test("Q19 · correção A3 · a criação de território não faz nascer primár
   assert.equal(territoryCreatePrimaryRefusal({ primaryKeyword: null }), null);
 
   // A rota aplica a trava na criação, antes de gravar.
-  const rota = semComentarios("../app/api/arquiteto/workspace/route.ts");
+  const rota = semComentarios("../lib/server/arquiteto-workspace-http.ts");
   const criacao = rota.slice(rota.indexOf("for (const create of parsed.territoryCreates || [])"), rota.indexOf("const territorioVigente"));
   const trava = criacao.indexOf("territoryCreatePrimaryRefusal(create.territory)");
   assert.ok(trava > 0 && trava < criacao.indexOf("createTerritoryWorkflowItem("), "a trava vem antes da criação");
@@ -2417,7 +2417,7 @@ test("Q12 · a leitura da primária vigente é estreita, filtrada pela marca, e 
 });
 
 test("Q13 · a rota: aceite só com ator e hora do servidor, e a porta genérica passa pela trava da primária", () => {
-  const rota = semComentarios("../app/api/arquiteto/workspace/route.ts");
+  const rota = semComentarios("../lib/server/arquiteto-workspace-http.ts");
   assert.match(rota, /territoryPrimaryAcceptances: z\.array\(z\.object\(\{[\s\S]*?acceptance: SerpPrimaryAcceptanceSchema,[\s\S]*?\}\)\.strict\(\)\)\.max\(20\)\.optional\(\),/);
   assert.match(rota, /\|\| body\.territoryPrimaryAcceptances\?\.length/);
   assert.match(rota, /readTerritoryPrimaryKeyword\(context\.supabase, context\.brandId, territoryRef\)/);

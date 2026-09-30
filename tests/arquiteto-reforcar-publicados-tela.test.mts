@@ -630,7 +630,8 @@ test("tabela única: o painel troca a grade de cartões pela tabela; o cartão v
   assert.match(painel, /row\.emptyIsError \? "text-warning" : "text-text-muted"/, "erro do Google Ads é aviso na linha");
 
   // O hook: dono único por keyword, pré-marcação nova, e os publicados gravados agora.
-  assert.match(gancho, /const owners = useMemo\(\(\) => reinforcementSuggestionOwners\(cards \|\| \[\], results\), \[cards, results\]\);/);
+  // A troca aceita reserva a substituta; a que não foi aceita continua livre para outro destino.
+  assert.match(gancho, /const owners = useMemo\(\(\) => reinforcementSuggestionOwners\(cards \|\| \[\], results, id => swapPicks\.includes\(id\)\), \[cards, results, swapPicks\]\);/);
   assert.match(gancho, /return explicitas \? new Set\(explicitas\) : reinforcementDefaultPicks\(card, owners\);/);
   assert.match(gancho, /reinforcementDefaultSearchPicks\(pageId, results\.get\(pageId\), owners\)/);
   assert.match(gancho, /setWrittenPageIds\(new Set\(result\.data\.pages\.filter\(page => page\.written\)\.map\(page => page\.publishedKeywordId\)\)\);/);

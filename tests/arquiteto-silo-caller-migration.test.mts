@@ -13,7 +13,7 @@ import { buildTerritoryRef } from "../lib/arquiteto/territory.ts";
 const read = (relative: string) => readFileSync(new URL("../" + relative, import.meta.url), "utf8");
 const STORE = "lib/server/arquiteto-silo-working-copy-store.ts";
 const ADAPTER = "lib/server/arquiteto-silo-consolidation-adapter.ts";
-const WORKSPACE_ROUTE = "app/api/arquiteto/workspace/route.ts";
+const WORKSPACE_ROUTE = "lib/server/arquiteto-workspace-http.ts";
 const CONSOLIDATION_ROUTE = "app/api/arquiteto/silo-consolidation/route.ts";
 const FORMATION = "lib/arquiteto/silo-formation.ts";
 

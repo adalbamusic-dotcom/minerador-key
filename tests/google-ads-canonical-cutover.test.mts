@@ -9,7 +9,7 @@ const rollbackPath = new URL("../supabase/scripts/google-ads-0033-rollback.sql",
 const canonicalPath = new URL("../lib/server/google-ads-canonical.ts", import.meta.url);
 const connectionRoutePath = new URL("../app/api/minerador/marcas/[brandId]/google-ads/conexao/route.ts", import.meta.url);
 const discoveryRoutePath = new URL("../app/api/minerador/marcas/[brandId]/google-ads/descobrir-keywords/route.ts", import.meta.url);
-const metricsRoutePath = new URL("../app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts", import.meta.url);
+const metricsRoutePath = new URL("../lib/server/minerador-google-ads-metrics-http.ts", import.meta.url);
 
 async function read(url: URL) {
   return readFile(url, "utf8");

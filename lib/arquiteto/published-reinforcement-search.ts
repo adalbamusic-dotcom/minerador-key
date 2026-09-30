@@ -1,3 +1,4 @@
+import { allocateReinforcementChoices } from "./reinforcement-allocation.ts";
 /**
  * REFORÇAR PUBLICADOS — A BUSCA EM LOTE PARA OS PUBLICADOS SEM PAR (2026-09-28).
  *
@@ -367,15 +368,12 @@ export function evaluateReinforcementSearch(input: {
       if (candidata.serpMeasured && !medidas.has(candidata.candidateId)) medidas.set(candidata.candidateId, candidata);
     }
   }
-  const destino = new Map<string, { pageId: string; shared: number }>();
-  for (const candidata of medidas.values()) {
-    for (const page of paginasNaRodada) {
-      const medida = input.serp.overlap(page.keywordId, candidata.candidateId);
-      const paginas = medida.strength === "unknown" ? 0 : medida.sharedPageCount;
-      const atual = destino.get(candidata.candidateId);
-      if (paginas > (atual?.shared ?? 0)) destino.set(candidata.candidateId, { pageId: page.keywordId, shared: paginas });
-    }
-  }
+  const edges = [...medidas.values()].flatMap(candidate => paginasNaRodada.flatMap(page => {
+    const convergence = measureAnchorConvergence({ ...formationKeywordOfPage(page), intent: null }, comoKeyword(candidate), { serp: input.serp });
+    if ((convergence.basis !== "serp" && convergence.basis !== "serp_and_words") || !convergence.overlap) return [];
+    return [{ targetId: page.keywordId, keywordId: candidate.candidateId, tier: convergence.basis === "serp" ? 0 : 1, score: convergence.overlap.sharedPageCount, volume: candidate.adsVolume ?? 0 }];
+  }));
+  const destino = allocateReinforcementChoices({ targets: paginasNaRodada.map(page => ({ id: page.keywordId, capacity: vagasDe(page), priority: page.articleKeywordCount ?? 1 })), edges });
   return input.pages.map(page => {
     const base = { keywordId: page.keywordId, keyword: page.keyword, url: page.url, slotsLeft: vagasDe(page) };
     if (!input.inRound.has(page.keywordId)) {
@@ -384,7 +382,7 @@ export function evaluateReinforcementSearch(input: {
     const ancora = formationKeywordOfPage(page);
     const sugestoes: ReinforcementSuggestion[] = [];
     for (const candidata of medidas.values()) {
-      if (destino.get(candidata.candidateId)?.pageId !== page.keywordId) continue;
+      if (destino.get(candidata.candidateId) !== page.keywordId) continue;
       const convergencia = measureAnchorConvergence({ ...ancora, intent: null }, comoKeyword(candidata), { serp: input.serp });
       const level: SerpSuggestionLevel | null = convergencia.basis === "serp" ? "strong" : convergencia.basis === "serp_and_words" ? "probable" : null;
       if (!level || !convergencia.overlap) continue;

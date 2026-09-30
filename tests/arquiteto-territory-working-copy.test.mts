@@ -443,7 +443,7 @@ test("17 · zero provider, zero rede, zero persistência nova nesta fase", () =>
   assert.doesNotMatch(modulo, /ArticleDNASchema|SiloDNASchema|SiloPageSchema|createVersionEnvelope/);
 
   // A persistência continua sendo a rota canônica que já existe, com lock.
-  const rota = readFileSync("app/api/arquiteto/workspace/route.ts", "utf8");
+  const rota = readFileSync("lib/server/arquiteto-workspace-http.ts", "utf8");
   assert.match(rota, /territoryRef: TerritoryRefSchema\.nullable\(\)\.optional\(\)/);
   // 2A.1: a decisão persistida NÃO carrega territoryRef. O ponteiro de
   // membership é o campo acima, e só ele.

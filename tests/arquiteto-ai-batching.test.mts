@@ -19,7 +19,7 @@ import {
 import type { ArchitectKeyword, KeywordArticleDecision, KeywordArticleReview, ProvisionalArticleGroup } from "../lib/arquiteto/contracts.ts";
 
 const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
-const workspaceRoute = readFileSync("app/api/arquiteto/workspace/route.ts", "utf8");
+const workspaceRoute = readFileSync("lib/server/arquiteto-workspace-http.ts", "utf8");
 
 /** Keyword recebida do Minerador, com o peso técnico real do registro. */
 const keywordFixture = (id: string, index: number): ArchitectKeyword => ({

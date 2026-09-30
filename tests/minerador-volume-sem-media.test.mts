@@ -363,7 +363,7 @@ function codeOnly(source: string): string {
 }
 
 test("rota: grava a resposta sem média também para a keyword que o Google Ads não devolveu, e carrega a aprovação", async () => {
-  const route = codeOnly(await readFile(new URL("../app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts", import.meta.url), "utf8"));
+  const route = codeOnly(await readFile(new URL("../lib/server/minerador-google-ads-metrics-http.ts", import.meta.url), "utf8"));
   assert.match(route, /select\("id,brand_id,keyword,status,intent,volume_search/);
   assert.match(route, /for \(const keywordId of unmatchedKeywordIds\)/);
   assert.match(route, /buildGoogleAdsEmptyVolumePatch\(keyword, \{ measuredAt: responseMeasuredAt/);
@@ -454,6 +454,6 @@ test("tela: a notificação do lote conta as sem média como processadas e não 
 });
 
 test("rota: a keyword não devolvida grava o porquê 'not_returned'", async () => {
-  const route = codeOnly(await readFile(new URL("../app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts", import.meta.url), "utf8"));
+  const route = codeOnly(await readFile(new URL("../lib/server/minerador-google-ads-metrics-http.ts", import.meta.url), "utf8"));
   assert.ok(route.includes('kind: "not_returned" });'));
 });

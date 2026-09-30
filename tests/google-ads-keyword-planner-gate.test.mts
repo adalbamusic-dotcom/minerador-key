@@ -10,7 +10,7 @@ import { generateGoogleAdsHistoricalMetrics } from "../lib/google/ads/historical
 import { generateGoogleAdsKeywordIdeas } from "../lib/google/ads/keyword-ideas.ts";
 
 const discoveryRoute = new URL("../app/api/minerador/marcas/[brandId]/google-ads/descobrir-keywords/route.ts", import.meta.url);
-const metricsRoute = new URL("../app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts", import.meta.url);
+const metricsRoute = new URL("../lib/server/minerador-google-ads-metrics-http.ts", import.meta.url);
 
 const account = createGoogleAdsKeywordAccount({ customerId: "123-456-7890", loginCustomerId: "111-222-3333" });
 const targeting = {

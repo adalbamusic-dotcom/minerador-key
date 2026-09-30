@@ -173,7 +173,7 @@ test("provider OK não é sucesso: a rota persiste E relê", () => {
 });
 
 test("o boot hidrata por leitura e nunca chama provider", () => {
-  const route = readFileSync("app/api/arquiteto/workspace/route.ts", "utf8");
+  const route = readFileSync("lib/server/arquiteto-workspace-http.ts", "utf8");
   const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
 
   assert.match(route, /listTerritorialSerpAssessments/);

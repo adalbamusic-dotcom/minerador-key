@@ -75,6 +75,22 @@ export type PlatformOperation = {
 /* ======================================================================= */
 
 export const PLATFORM_OPERATIONS: readonly PlatformOperation[] = [
+  {
+    id: "arquiteto.article_improvement", stage: "arquiteto", title: "Melhorar publicados e formar Assuntos",
+    purpose: "Analisar todos os alvos da marca, redistribuir keywords elegíveis, pesquisar lacunas e aplicar a composição final numa confirmação editorial, com diferenciação entre publicados concorrentes.",
+    requires: ["Publicados ou Assuntos declarados recebidos no Arquiteto", "Silo do destino conhecido", "Aceite da pesquisa gratuita que usa quota e da prévia editorial; plano específico antes de qualquer custo"],
+    produces: ["Prévia com principal, entradas, saídas, papéis, volumes, transferências, enfoques e motivos por alvo", "Execução retomável com ArticleDNA, parecer, composição e marcador relidos"],
+    cost: "paid_provider", decision: "human", access: "tool", chatConfirmationRequired: true,
+    tools: ["improve_articles"], screen: "arquiteto", routes: ["/api/arquiteto/article-improvement"],
+    howOnScreen: "Arquiteto → Artigos → Melhorar publicados e formar Assuntos → Preparar melhorias → revisar custo se necessário → escolher alvos → Aplicar melhorias → Confirmar e aplicar. F5 recupera a execução do servidor; Continuar melhorias aceitas retoma o mesmo lote.",
+    notes: [
+      "prepare usa acervo antes de pesquisa Google Ads (grátis, com quota); consulta todas as candidatas do cache antes de limitar as pagas. status não escreve. collect requer provider.spend, hash vigente e aceite específico do custo; teto US$ 1 para a execução inteira. apply requer platform.decide, arquiteto.write, minerador.write, permissões dos módulos e aceite específico da prévia.",
+      "Uma confirmação inclui principal Livre, substituições de apoios fracos, transferências de keywords livres e aprovação de novas keywords; Travada permanece. URL, slug, canonical, marca e Silo publicados preservados. Assunto continua declarado, fora do teto de seis. Uma ou duas buscas adequadas podem bastar; não preencher seis à força.",
+      "Principal antiga sem demanda não é âncora obrigatória de coincidência: fundamento editorial e SERP completa das candidatas podem sustentar a proposta, com origem da evidência declarada. Contradição conclusiva impede aprovação automática. Risco de ranking é aviso, não revoga Livre.",
+      "Canibalização exige enfoques distintos e exclusões recíprocas sustentados pelos dados; trocar captar clientes por atrair pacientes não basta. Se não houver diferenciação demonstrável, informar o motivo e pesquisar opções, preservando as páginas.",
+      "apply avança um alvo por chamada: repetir o mesmo runId e decisionHash até state complete, sem novo aceite para etapas internas do lote já aceito. Falha isolada fica registrada e os demais seguem. Melhoria exige mudança material, composição, ArticleDNA e marcador relidos; criar só DNA é outra contagem. A operação não reescreve nem publica externamente.",
+    ],
+  },
   /* ------------------------------- Marca -------------------------------- */
   {
     id: "marca.brand_dna",
@@ -905,25 +921,19 @@ export const PLATFORM_PLAYBOOKS: readonly PlatformPlaybook[] = [
   },
   {
     id: "reforcar_publicado_pela_serp",
-    title: "Reforçar um publicado ou um Assunto (e trocar a principal Livre)",
-    whenToUse: "O lote tem artigos publicados ou Assuntos, e o usuário quer melhorá-los; ou pergunta por que um publicado ficou sem reforço.",
+    title: "Melhorar publicados e formar Assuntos",
+    whenToUse: "O usuário quer fortalecer publicados, resolver concorrência ou formar artigos com Assuntos declarados.",
     steps: [
-      "get_platform_state: veja os publicados e Assuntos do lote e o Posto de cada principal publicada (Travado ao slug ou Livre).",
-      "Explique a régua: mesmo assunto é o que a SERP diz — 3 ou mais páginas em comum no top 10, nas 4 lentes, lidas do cache sem custo. Palavras parecidas não bastam.",
-      "Na tela do Arquiteto (Artigos → Processar artigos), cada publicado e Assunto mostra um estado. Leia-o para o usuário, com o motivo:",
-      "Reforçado: diga quantas keywords entraram e quantas pela SERP; se ainda cabem vagas, ofereça 'Buscar reforço'.",
-      "Troca proposta (só com Posto Livre): mostre a substituta, o volume, as páginas em comum e que URL, slug e canonical não mudam; a principal antiga vira secundária. Quem decide é o usuário, na tela: 'Aplicar troca' (nova versão do ArticleDNA, em revisão) ou 'Manter'. Se o botão estiver inativo, leia o motivo que ele mostra.",
-      "Par em outro Silo: mostre a proposta entre Silos; mover é decisão do usuário.",
-      "Intenção diferente: com 3 ou mais páginas em comum, nem a intenção OBSERVADA na SERP barra (é aviso na sugestão, D2.3.1); com 2 páginas ou menos, a intenção observada diferente separa e a revisão é do usuário no Minerador. A Lógica diferente é sempre só aviso quando a SERP mede o par.",
-      "Para gravar os reforços e a troca aceita nos publicados: preview_published_reinforcement mostra o que será gravado (o primeiro ArticleDNA do publicado quando ainda não existe, as keywords e a troca); quem confirma é o usuário, na tela, na tabela 'Reforçar publicados', com 'Gravar reforços'. Nunca diga 'conclua a formação' para um publicado.",
-      "Sugestões para confirmar (e a lista 'Sugestões de reforço' de qualquer cartão): leia as de maior volume, com o nível (Forte vem marcada, Provável desmarcada) e o motivo; nunca proponha keyword sem volume. Quem aplica é o usuário, na tela, com 'Aplicar selecionadas' e a confirmação (até o teto de 6).",
-      "Sobras: mostre os maiores temas do painel 'Sobras · oportunidades de artigo novo' pelo volume somado; criar o artigo é o usuário, com 'Criar artigo novo com este grupo'.",
-      "Par em outro artigo: o par existe, mas já está em outro artigo do mesmo Silo (muitas vezes outro publicado que disputa o mesmo assunto). Diga qual keyword, onde está e quantas páginas divide com cada lado; mover é decisão do usuário, na tela ('Abrir o artigo' e 'Mover para…'). Nunca diga 'sem par no lote' nesse caso.",
-      "Posto Livre sem substituta: diga isso, com o motivo de cada candidata recusada (sem volume maior, intenção diferente, só vizinhança do Google), e ofereça 'Buscar reforço'. Se a melhor substituta ficou fora de um artigo cheio, diga qual é e que o usuário precisa liberar uma vaga.",
-      "Posto não declarado: nada é proposto; diga que o Minerador mostra 'Travado ao slug' por padrão, conte qual seria a troca se o usuário declarar 'Livre' e peça a declaração na Revisão Humana.",
-      "Sem SERP no cache: diga se venceu (e há quantos dias; validade de 30) ou se nunca foi coletada. A medida não é possível; a coleta é paga e passa pelo plano de 'Validar pela SERP' com confirmação.",
-      "Sem par no lote: diga 'nenhuma keyword deste lote trata do mesmo assunto no Google' e ofereça, na tela, 'Buscar keywords para os publicados sem par' (em lote, Google Ads + SERP das melhores, teto de US$ 1,00 por rodada, uma confirmação). Publicados que disputam o mesmo assunto entre si seguem pela diferenciação.",
-      "Se a busca não achar keyword com volume: 'tema sem demanda no Google'. Não cole keyword de outro assunto; a decisão fica com o usuário.",
+      "get_platform_state: confira marca, publicados, Assuntos, DNAs aprovados e Posto das principais. Não trate SiloPage como Article.",
+      "Com aceite para usar a quota gratuita do Google Ads, improve_articles action prepare prepara a marca inteira. Na tela: Arquiteto → Artigos → Melhorar publicados e formar Assuntos → Preparar melhorias.",
+      "Mostre a prévia: principal atual e proposta com demanda, entradas, saídas, transferências, enfoque, exclusões e motivo por alvo. Dados do DNA são de leitura; nunca invente volume ou compatibilidade.",
+      "Principal Livre sem demanda pode usar o fundamento editorial e SERP completa da candidata se a antiga for inconclusiva. SERP conclusiva contraditória impede a proposta; Travada ou Posto desconhecido ficam preservados.",
+      "Cache antes de custo: se falta evidência, mostre lentes, consultas e faixa do plano. improve_articles action collect exige aceite específico, hash vigente e provider.spend; teto total US$ 1. Cancelar permite aplicar alvos prontos. Google Ads gratuito não é chamada SERP paga.",
+      "Keywords pertencem a um artigo só: distribua entre publicados e Assuntos antes de novos candidatos, até seis incluindo a antiga principal publicada. O Assunto é fundamento fora das seis. Uma ou duas keywords adequadas podem bastar.",
+      "Páginas concorrentes precisam de enfoques sustentados e exclusões recíprocas; trocar captar por atrair não demonstra solução. Mostre lacunas restantes com honestidade.",
+      "Após aceite editorial específico da prévia, improve_articles action apply com decisionHash, targetIds e approveNewKeywords quando necessário, platform.decide e permissões dos módulos. Import, Lógica, métricas, aprovação, handoff, working copy, ArticleDNA e parecer final são executados pelo mesmo núcleo da tela.",
+      "Enquanto state applying, continue apply com o mesmo runId e hash, sem pedir outro aceite para etapas internas. status retoma após interrupção. Resuma melhoria gravada, DNA criado, sem mudança e falha; só diga sucesso depois do readback. A execução não reescreve o site nem publica externamente.",
+      "Rotas e painéis anteriores continuam disponíveis para operações pontuais, mas não exigem repetir Processar artigos entre duas confirmações nesta jornada.",
     ],
   },
   {
@@ -959,7 +969,7 @@ export const PLATFORM_SEO_RULES: readonly { rule: string; why: string }[] = [
   { rule: "Publicado é protegido: URL, slug, canonical e principal não mudam sem decisão humana.", why: "Mudar publicado perde tráfego já conquistado." },
   { rule: "O lote diz o objetivo: com publicados ou Assuntos no lote, reforce-os (até 6 keywords por artigo) e deixe a sobra sem encaixe em Keywords não agrupadas; artigo novo com as sobras só por ação explícita do dono.", why: "Quem manda publicados e Assuntos quer melhorá-los, não criar artigos concorrentes." },
   { rule: "Mesmo assunto é o que a SERP diz: 3+ páginas em comum no top 10 nas 4 lentes (cache já pago). Palavras e Lógica só apoiam; 1 ou nenhuma página em comum é outro assunto.", why: "O Google agrupa pela intenção que ele mesmo observa; palavras parecidas colam keyword de outro assunto e deixam de fora a que ele trata como a mesma busca." },
-  { rule: "Principal publicada com Posto Livre é para trocar: proponha a substituta com volume maior, mesma intenção e SERP em comum; URL, slug e canonical ficam, a antiga vira secundária, e só o humano aplica. Posto Travado ao slug: só reforço.", why: "O dono soltou a principal porque ela não tem volume; trocar a keyword sem mexer no endereço ganha demanda sem perder o que a página já conquistou." },
+  { rule: "Principal publicada com Posto Livre é para trocar: proponha a substituta com demanda medida e intenção preservada; quando a antiga sem demanda for inconclusiva, use fundamento editorial e SERP completa da candidata, com aviso na prévia; URL, slug e canonical ficam, a antiga vira secundária, e só o humano aplica. Posto Travado ao slug: só reforço.", why: "O dono soltou a principal porque ela não tem volume; trocar a keyword sem mexer no endereço ganha demanda sem perder o que a página já conquistou." },
   { rule: "Dado de concorrente é pesquisa: parafrasear e confrontar, nunca copiar.", why: "Conteúdo original e sem risco de direito autoral." },
 ];
 
@@ -969,7 +979,7 @@ export const PLATFORM_SEO_RULES: readonly { rule: string; why: string }[] = [
 
 export const AGENT_CONDUCT_RULES: readonly string[] = [
   "Comece por get_platform_state e find_topic_in_platform. Não proponha nada antes de saber o que a marca já tem.",
-  "Proponha; o usuário decide. Aprovações são humanas e ficam na tela — mande o link da tela e confira depois com get_platform_state.",
+  "Proponha; o usuário decide. Operações com chatConfirmationRequired podem aplicar o aceite específico da prévia com platform.decide, hash vigente e auditoria; as demais aprovações ficam na tela.",
   "A IA nunca declara Assunto por conta própria: declare só o que o usuário aceitou, e envie o aceite em userConfirmation.",
   "Nada pago sem o custo mostrado e aceito. Use sempre o modo plan antes do execute.",
   "Nunca exclua, nunca publique, nunca troque a principal de um publicado.",

@@ -14,7 +14,7 @@ import {
 
 const panel = readFileSync(new URL("../components/editorial/dna-panels.tsx", import.meta.url), "utf8");
 const workspace = readFileSync(new URL("../modules/minerador/minerador-workspace.tsx", import.meta.url), "utf8");
-const volumeRoute = readFileSync(new URL("../app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts", import.meta.url), "utf8");
+const volumeRoute = readFileSync(new URL("../lib/server/minerador-google-ads-metrics-http.ts", import.meta.url), "utf8");
 
 test("R2 deriva tendência determinística do histórico mensal", () => {
   const history = (values: number[]) => values.map((searches, index) => ({ year: 2026, month: index + 1, searches }));

@@ -22,7 +22,7 @@ test("conexão só é marcada como validada a partir da conta resolvida server-s
 });
 
 test("rota de métricas não aceita customerId e rota de conexão expõe somente o status env", async () => {
-  const metricsRoute = await readFile(new URL("../app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts", import.meta.url), "utf8");
+  const metricsRoute = await readFile(new URL("../lib/server/minerador-google-ads-metrics-http.ts", import.meta.url), "utf8");
   const connectionRoute = await readFile(new URL("../app/api/minerador/marcas/[brandId]/google-ads/conexao/route.ts", import.meta.url), "utf8");
   assert.match(metricsRoute, /GoogleAdsVolumeRequestSchema/);
   assert.doesNotMatch(metricsRoute, /customerId:\s*input\./);

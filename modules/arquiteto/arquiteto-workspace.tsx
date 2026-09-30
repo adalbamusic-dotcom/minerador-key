@@ -1,5 +1,7 @@
 "use client";
 
+import { ArticleImprovementPanel } from "./article-improvement-panel";
+
 import { GLOBAL_WORKFLOW_STATUSES, GLOBAL_WORKFLOW_LABELS, globalWorkflowStatus, type GlobalWorkflowStatus } from "@/lib/editorial/global-workflow-status";
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import { useBrand } from "@/components/brand-context";
@@ -17153,7 +17155,10 @@ export default function ArquitetoPage() {
             )}
           </section>
         )}
+        {workspaceMode === "articles" && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} />}
         {workspaceMode === "articles" && serpSubjectCards.length > 0 && (
+          <details className="border-b border-divider bg-surface-subtle px-4 py-3" data-testid="architect-serp-subject-advanced">
+          <summary className="cursor-pointer text-sm font-semibold text-foreground">Análise por keyword (avançado): mesmo assunto no Google, trocas e reforços um a um</summary>
           <SerpSubjectDiagnosisPanel
             cards={serpSubjectCards}
             summary={serpSubjectSummary}
@@ -17174,6 +17179,7 @@ export default function ArquitetoPage() {
             reinforcement={publishedReinforcement}
             keywordOf={serpSubjectKeywordOf}
           />
+          </details>
         )}
         {workspaceMode === "articles" && (
           <PublishedDifferentiationSection

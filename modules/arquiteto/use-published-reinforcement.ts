@@ -151,7 +151,7 @@ export function usePublishedReinforcement(input: {
   }, [assinatura, brandId]);
 
   const results = useMemo(() => new Map<string, ReinforcementPageResult>((search.run?.pages || []).map(page => [page.keywordId, page])), [search.run]);
-  const owners = useMemo(() => reinforcementSuggestionOwners(cards || [], results), [cards, results]);
+  const owners = useMemo(() => reinforcementSuggestionOwners(cards || [], results, id => swapPicks.includes(id)), [cards, results, swapPicks]);
 
   /* ------------------------------ marcações ------------------------------ */
 

@@ -4,7 +4,7 @@ import test from "node:test";
 import { resolveArticleProcessScope, scopedArticleProcessNotification } from "../lib/arquiteto/article-process-scope.ts";
 
 const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
-const serpRoute = readFileSync("app/api/arquiteto/serp/route.ts", "utf8");
+const serpRoute = readFileSync("lib/server/arquiteto-serp-http.ts", "utf8");
 
 // Lote real do smoke: 5 artigos, 14 keywords (1 + 5 + 6 + 1 + 1).
 const articles = [

@@ -65,7 +65,7 @@ test("consumidores ativos usam a nomenclatura canônica e preservam KGR como atr
     "app/api/marcas/route.ts",
     "app/api/minerador/marcas/[brandId]/dataforseo/allintitle/route.ts",
     "app/api/minerador/marcas/[brandId]/google-ads/descobrir-keywords/route.ts",
-    "app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts",
+    "lib/server/minerador-google-ads-metrics-http.ts",
     "lib/minerador/keyword-import-core.ts",
     "lib/server/authz.ts",
     "lib/server/arquiteto-workspace.ts",

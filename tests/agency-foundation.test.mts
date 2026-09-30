@@ -4,7 +4,7 @@ import test from "node:test";
 
 const migrationPath = new URL("../supabase/migrations/0014_agency_foundation.sql", import.meta.url);
 const contextPath = new URL("../lib/server/agency-context.ts", import.meta.url);
-const googleAdsPath = new URL("../app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts", import.meta.url);
+const googleAdsPath = new URL("../lib/server/minerador-google-ads-metrics-http.ts", import.meta.url);
 const dataForSeoPath = new URL("../app/api/minerador/marcas/[brandId]/dataforseo/allintitle/route.ts", import.meta.url);
 const serperPath = new URL("../lib/radar/serper-provider-core.ts", import.meta.url);
 

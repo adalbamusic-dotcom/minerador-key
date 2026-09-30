@@ -91,7 +91,7 @@ const semComentarios = (caminho: string) => readFileSync(new URL(caminho, import
   })
   .join("\n");
 
-const rota = semComentarios("../app/api/arquiteto/serp/route.ts");
+const rota = semComentarios("../lib/server/arquiteto-serp-http.ts");
 const fronteira = semComentarios("../lib/arquiteto/dataforseo-serp-compatibility.ts");
 
 /** O trecho de código entre duas âncoras únicas. */

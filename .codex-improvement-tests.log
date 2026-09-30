@@ -1,0 +1,999 @@
+✔ migration cria fundação aditiva e proíbe duas agências operacionais ativas por marca (13.4187ms)
+✔ RLS de agência exige membership explícita e não usa owner, slug ou e-mail como fallback (3.5264ms)
+✔ contratos server-side compõem acesso à marca e membership da agência sem materializar admin global (3.7157ms)
+✔ fixtures preservam isolamento entre agências, marcas e papéis (2.3463ms)
+✔ consumidores de providers permanecem inalterados pela fundação (13.813ms)
+✔ reexecução valida policies existentes e não as recria cegamente (6.4832ms)
+✔ 5 Articles produzem 5 execuções independentes, não um request gigante (4.8001ms)
+✔ a orquestração roda com concurrency = 1 (21.661ms)
+✔ Article de 1, 5 e 6 keywords continua sendo um request por Article (0.8408ms)
+✔ o payload por Article fica dentro do limite mesmo no artigo cheio (1.9467ms)
+✔ a projeção estratégica descarta o peso técnico sem perder o fato arquitetural (0.4441ms)
+✔ a SERP entra como veredito e observações, não como snapshot cru (0.5222ms)
+✔ o silo viaja como fronteira, não como grafo completo (0.7954ms)
+✔ erro em um Article não cancela os demais (1.0293ms)
+✔ o guard de tamanho falha só o Article que excede, com motivo específico (1.8859ms)
+✔ no-op não vira proposta: zero material em Workbench e no Article (0.4625ms)
+✔ Workbench e Article contam a mesma proposta material (1.0943ms)
+✔ a proposta material aparece no Article de origem e não cruza artigos (0.6867ms)
+✔ o estado por Article distingue no-op, proposta e erro (1.9898ms)
+✔ sem storage canônico da revisão, o lote não inventa fallback local (2.0709ms)
+✔ o pedido estrutural de persistência da revisão está registrado (35.3697ms)
+✔ volume alto sozinho não cria candidata a Silo (9.6673ms)
+✔ termo específico não vira candidata apenas por volume (4.4499ms)
+✔ termo curto e amplo pode ser reservado como candidata forte (1.986ms)
+✔ oportunidade KGR é evidência secundária e não cria Pilar nem ArticleDNA (1.7623ms)
+✔ nenhuma keyword é descartada e refs individuais permanecem nos grupos (19.4739ms)
+✔ null permanece null, zero real permanece zero e decisão humana não é sobrescrita (1.962ms)
+✔ motor do Lote 3 é determinístico e não consulta SERP ou IA (18.1399ms)
+✔ grupos explicam a hipótese com razões determinísticas (1.0581ms)
+✔ working copy expõe reserva e decisão humana sem criar Silo ou ArticleDNA (16.9108ms)
+✔ a intenção observada é inferida dos resultados (2.2319ms)
+✔ SERP vazia é indefinida, não uma intenção qualquer (0.3174ms)
+✔ empate real é misto, não o primeiro da lista (0.2293ms)
+✔ o interpretador não consulta a intenção declarada pelo Minerador (1.3729ms)
+✔ URL repetida é convergência forte; domínio repetido é sinal fraco (0.637ms)
+✔ SERPs sem nada em comum não convergem (0.2283ms)
+✔ a Principal que alcança o grupo é sustentada (0.7075ms)
+✔ alternativa melhor é apontada, nunca aplicada (0.8111ms)
+✔ sem sobreposição nenhuma a Principal fica inconclusiva (0.3177ms)
+✔ grupo convergente é sustentado (1.5247ms)
+✔ uma busca de fora vira recomendação de remover; duas, de separar (0.663ms)
+✔ Principal sustentada e grupo a dividir são perguntas diferentes (0.913ms)
+✔ A1 · o defeito, fixado: membro vazio vira 'de fora' e o parecer recomenda dividir (0.4177ms)
+✔ A1 · secundária sem snapshot é NÃO OBSERVADA: fora de total e de outsiders, nunca DIVERGENCE (1.4772ms)
+✔ A1 · secundária CONSULTADA e de fato distinta continua sendo 'de fora' (2.6873ms)
+✔ A1 · snapshot presente e vazio continua membro: foi consultada e voltou vazia (1.8405ms)
+✔ A1 · a leitura de resultado é a mesma da rota: tipo manual vence o inferido (0.8225ms)
+✔ A1 · grupo parcialmente observado: a conta é só das observadas, e a explicação diz quem ficou de fora (1.0126ms)
+✔ A1 · sem a SERP da Principal, nada converge nem é de fora (0.5009ms)
+✔ A1 · registro legado reconstruído segue a mesma regra (1.8091ms)
+✔ A1 · a rota monta os membros pelos snapshots, não pelo grupo inteiro (20.1824ms)
+✔ a viabilidade descreve o observado e nunca promete resultado (0.644ms)
+✔ a evidência é do candidato e não pertence a nenhum ArticleDNA (0.3732ms)
+✔ a linha remota é recusada quando não concorda consigo mesma (4.4342ms)
+✔ resolução humana de outra composição é recusada na leitura (1.3951ms)
+✔ A1 · o registro guarda as buscas não observadas, e o registro antigo continua legível (2.841ms)
+✔ não existe decisão genérica de ignorar a SERP (0.5812ms)
+✔ interpretação e registro são domínio puro (1.323ms)
+✔ o gate lê o remoto, não o cache do navegador (0.9649ms)
+✔ a rota grava e relê antes de responder (8.7684ms)
+✔ a hidratação do workspace devolve a evidência remota (2.51ms)
+✔ o painel mostra as duas perguntas e o mercado observado (0.271ms)
+✔ A3 · uma lente só dá EXATAMENTE o parecer de hoje (24.4394ms)
+✔ A3 · par convergente em 1 de 4 lentes NÃO converge (1.059ms)
+✔ A3 · par convergente em 2 de 4 lentes converge (1.129ms)
+✔ A3 · 'de fora' exige sobreposição NENHUMA em todas as lentes e intenção diferente na maioria (12.2563ms)
+✔ A3 · lente faltante nunca vira 'de fora': ela só não vota (0.6199ms)
+✔ A3 · viabilidade, intenção e tipo dominante vêm SÓ da lente principal (1.4986ms)
+✔ A5 · o marcador: pedidas, observadas, faltantes, pares por lente e o portão de datas por keyword (7.3901ms)
+✔ A5 · o parser preserva o marcador, e a linha antiga sem ele continua legível (6.9928ms)
+✔ humano válido: grava, com leitura estreita por id (33.0728ms)
+✔ IA como attachedBy: recusada, nada gravado (2.9677ms)
+✔ attachedBy de outra pessoa que não o ator da requisição: recusado (2.0774ms)
+✔ keyword de outra marca: recusada sem ler o pacote dela (2.1256ms)
+✔ keyword que o pacote não declara Assunto: recusada (2.7847ms)
+✔ snapshot divergente do pacote: recusado (2.2276ms)
+✔ subject igual ao da versão anterior: grava sem conferir a keyword (quem carrega não prende de novo) (2.2879ms)
+✔ sem Assunto: nenhuma leitura nova, a gravação é a de antes (1.3133ms)
+✔ restauração: o autor gravado é o humano de então; IA continua recusada (2.7292ms)
+✔ SiloDNA: Assunto novo num Silo SEM página grava; COM página é recusado com motivo claro (7.05ms)
+✔ par SiloDNA + SiloPage (consolidação): o Assunto carregado da versão anterior passa; o novo é conferido (7.3802ms)
+✔ a resposta de erro carrega o código do Assunto, aditivo ao contrato (0.3322ms)
+✔ vínculo da cópia de trabalho: humano válido aceito; IA, outra marca e não declarado recusados (2.3543ms)
+✔ vínculo igual ao gravado, soltar ou atribuição sem o campo: nenhuma leitura (0.1932ms)
+✖ a rota da cópia de trabalho aceita o campo opcional e confere antes de gravar (1.6267ms)
+✔ Q7: subject igual ao anterior, mas a principal vira o próprio Assunto sem Volume validado: recusado (4.0404ms)
+✔ Q7: com Volume validado no pacote, carregar o Assunto como principal grava (3.6763ms)
+✔ Q7: a versão anterior já tinha o Assunto como principal, nada é relido (1.9891ms)
+✔ consolidação: IA, outro ator, outra marca, não declarado e pacote divergente são recusados (2.6414ms)
+✔ consolidação: Assunto carregado igual ao vigente passa sem ler a keyword; novo válido passa sem a trava da página (1.1043ms)
+✔ consolidação: sem Assunto, só a leitura estreita da versão vigente; perder o Assunto é recusado (0.6721ms)
+✔ o adaptador da consolidação confere o Assunto depois dos gates e antes da RPC (1.946ms)
+✔ nenhuma chamada de rede (0.0867ms)
+✔ SERP do Arquiteto usa a Connection global DataForSEO sem capability específica de SERP (1.9357ms)
+✔ Revisar com IA usa o resolver global DeepSeek e preserva falha sem fallback (3.6309ms)
+✔ a proposta da IA só chega inteira e admite rejeição antes da aplicação (1.1117ms)
+✔ a experiência do Arquiteto apresenta ações funcionais sem infraestrutura (11.6869ms)
+✔ a confirmação do ArticleDNA é protegida, lê o canônico e não envia ao Radar (3.9377ms)
+✔ falhas de SERP e IA são traduzidas para mensagens funcionais (0.7121ms)
+✔ diagnóstico sanitizado da IA identifica a etapa real da resposta (0.4486ms)
+✔ índice = todas as colunas de minerador_keywords menos analise_semantica; linha inteira = índice + analise_semantica (1.4631ms)
+✔ o servidor do Arquiteto não lê minerador_keywords com select('*') e sempre filtra a marca (0.3489ms)
+✔ a montagem usa o índice por padrão e a linha inteira só das recebidas (0.1523ms)
+✔ o handoff filtra os ids pedidos no banco e não lê mais a marca inteira (0.2319ms)
+✖ o PATCH não lê minerador_keywords da marca inteira na rota (0.7381ms)
+✖ o GET só reconhece keywordDetail=full e ignora outro valor em vez de responder 400 (0.2946ms)
+✔ o bootstrap do cliente não grava o índice estreito nas fontes de recuperação (8.3465ms)
+✔ PATCH: só o update com articleKgrDecision pede as colunas de KGR (0.3389ms)
+✔ PATCH: decisão de KGR com workflowItemId em maiúsculas ainda lê kgr_score e analise_semantica (1.4377ms)
+✔ montagem: availableKeywords traz todas as vivas da marca sem analise_semantica; keywords traz a linha inteira das recebidas (2.6671ms)
+✔ montagem: mesma resposta que a leitura completa, fora o analise_semantica das não recebidas (13.1859ms)
+✔ montagem: sem recebidas não lê linha inteira nenhuma (0.8358ms)
+✔ montagem: recebida apagada, de outra marca ou com id fora do formato continua recusando com 409 (1.5635ms)
+✔ handoff: lê só os ids pedidos, nas duas passagens, e recusa com 403 id de outra marca (2.5814ms)
+✔ handoff: id pedido em maiúsculas continua recusado com 403, como no filtro em memória de antes (0.7143ms)
+✔ handoff: pedidos acima de 100 ids vão em lotes (15.755ms)
+✔ PATCH: só os subject_id enviados; status por padrão, KGR só no item com decisão; sem filtro de deleted_at (0.7192ms)
+✔ PATCH: sem updates não lê nada (0.3356ms)
+✔ 5 artigos e 14 keywords permanecem contagens distintas no escopo (1.2692ms)
+✔ a mensagem da Lógica não chama keyword de artigo (0.4265ms)
+✔ artigo unitário mantém singular e a contagem de keywords (0.1724ms)
+✔ a tarefa da Lógica publica as duas contagens a partir do escopo canônico (0.3856ms)
+✔ a SERP de formação processa por artigo, com as keywords daquele artigo (0.2586ms)
+✔ o erro da SERP deixa de ser genérico e declara o efeito no lote (1.3404ms)
+✔ o servidor devolve estágio e código reais para a SERP (0.3232ms)
+✔ a IA não chama o provider para artigo sem SERP válida (0.4708ms)
+✔ A1 · Silo publicado: o tipo marcado + a publicação conferida viram DECLARAÇÃO, com endereço (19.1195ms)
+✔ A2 · papel de site desconhecido não vira declaração nenhuma — nem 'other', nem 'article' (0.3472ms)
+✔ A3 · sem nada marcado não há declaração — o acervo antigo não fica declarado (0.2628ms)
+✔ A4 · o MESMO valor muda de peso com a publicação: potencial na nova, declaração na publicada (0.9743ms)
+✔ A5 · o humano vence o papel observado no site (0.414ms)
+✔ A6 · site_origin gravado como TEXTO JSON continua sendo lido (1.5628ms)
+✔ A7 · keyword sem declaração não ganha o campo — ausência não vira dado (0.3625ms)
+✔ A8 · o PACOTE APROVADO vale mais que a linha viva (0.3034ms)
+✔ A9 · o padrão 'article' do Minerador NÃO é declaração (0.2875ms)
+✔ A10 · o posto vem do Minerador: travado, revisável ou livre (0.5217ms)
+✔ A11 · landing page e página de serviço também chegam como potencial (0.2799ms)
+✔ B1 · a lente é dispositivo + sistema, e sem sistema declarado ela diz só o dispositivo (0.1695ms)
+✔ B2 · os domínios citados pelo AI Overview entram como concorrência (1.302ms)
+✔ B3 · os blocos entregues juntam o que a feature declara e o que a contagem bruta registrou (0.2453ms)
+✔ B4 · com as lentes concordando entre si, sobreposição em uma lente só não basta (0.9148ms)
+✔ B5 · um domínio em comum não sustenta agrupamento, e a recusa diz o mínimo exigido (0.2284ms)
+✔ B6 · com sobreposição nas duas lentes a SERP sustenta o agrupamento (0.2098ms)
+✔ B7 · a cobertura do universo agrega perguntas e lentes observadas (0.4523ms)
+✔ C1 · sobreposição é contra as OUTRAS candidatas: sozinha, nenhuma keyword é forte (0.7848ms)
+✔ C2 · forte numa lente só não passa — evidência de um dispositivo é evidência fraca (15.8254ms)
+✔ C3 · lente com orgânico abaixo do piso não conta como concordância (0.4721ms)
+✔ C4 · a ordenação segue a nota, e a nota é soma declarada — não peso oculto (0.3492ms)
+✔ D1 · ORIGEM 2 · a declaração publicada elege sem SERP e traz o endereço junto (0.6751ms)
+✔ D2 · sem nenhuma publicada declarada Silo a origem 2 RECUSA — não elege a mais parecida (0.2766ms)
+✔ D3 · duas publicadas declaradas Silo são DOIS Silos, e a recusa diz isso (0.2786ms)
+✔ D4 · ORIGEM 1 · a SERP elege a mais competitiva e a evidência fica gravada (0.5827ms)
+✔ D5 · sem candidata forte a SERP RECUSA, e o motivo de cada uma fica visível (0.3136ms)
+✔ D6 · ORIGEM 3 · a eleição manual exige motivo, ator e keyword (0.2255ms)
+✔ D7 · a precedência é humano > publicado > SERP, e o fato vence a evidência (0.6421ms)
+✔ D8 · todas as origens recusando produz uma recusa só, com todos os bloqueios (0.3788ms)
+✔ E1 · cada origem carrega SÓ a evidência que produz — misturar é recusado (2.525ms)
+✔ E2 · o território aceita a primária e continua aceitando a ausência dela (5.8458ms)
+✔ E3 · a keyword do Arquiteto aceita a declaração e continua válida sem ela (1.7518ms)
+✔ F1 · o sistema operacional é opcional e nulo por padrão: coleta antiga continua válida (24.5509ms)
+✔ F2 · os termos do related_searches moram em items[]: o bloco deixa de chegar vazio (1.4942ms)
+✔ F3 · o mesmo bloco em formato de objeto também é lido (0.9286ms)
+✔ G1 · a keyword publicada declarada Silo vira a primária E a semente, no lugar da cabeça léxica (3.4967ms)
+✔ G2 · uma publicada declarada ARTIGO não vira primária de Silo (0.5234ms)
+✔ G3 · duas publicadas declaradas Silo no mesmo grupo viram DOIS Silos, cada um com a sua primária (0.7179ms)
+✔ G4 · a proposta continua determinística: nenhum carimbo de tempo entra nela (0.6224ms)
+✔ G5 · o draft do Silo carrega a primária eleita — e segue sem ela quando não houve eleição (0.5002ms)
+✔ H1 · sem eleição a mesa DIZ a ausência — não mostra a entidade central no lugar (0.7199ms)
+✔ H2 · a primária publicada chega à mesa com a origem e o endereço (0.2291ms)
+✔ H3 · cada origem tem a sua frase: SERP mostra evidência, humano mostra motivo (0.1688ms)
+✔ H4 · o painel de revisão renderiza a primária do Silo (0.6799ms)
+✔ I1 · a divergência é 0 quando as lentes devolvem o mesmo universo, e 1 quando não dividem nada (0.1774ms)
+✔ I2 · sustentar-se numa lente divergente conta como robustez, não como fraqueza (0.3185ms)
+✔ I2b · com só 2 lentes observadas, a divergência NÃO conta em dobro: uma lente não decide sozinha (0.3305ms)
+✔ I3 · com as lentes concordando, o crédito não existe e uma lente só continua reprovando (0.1755ms)
+✔ I4 · quando o universo muda entre dispositivos, o par se mantém pela lente que resistiu (0.2472ms)
+✔ I4b · 2 lentes com divergência alta e 1 concordante NÃO sustentam o agrupamento (0.3083ms)
+✔ I4c · as lentes COMPARÁVEIS são as observadas dos dois lados: 4 de um lado e 2 do outro não dobram (0.2352ms)
+✔ I4d · lentes da mesma keyword com mais de 7 dias de diferença: a divergência NÃO conta em dobro, e é dito (0.7917ms)
+✔ I2c · a força também não credita a divergência entre lentes de datas diferentes (0.4765ms)
+✔ K6e · a observação da SERP por keyword leva a data da lente; o plano lê só `meta` e não oferece recoleta (8.3577ms)
+✔ I5 · a discordância entre origens não some: vira registro para a decisão humana (0.5923ms)
+✔ J1 · volume alto com SERP do mesmo universo vira PROPOSTA pendente, nunca troca aplicada (6.2599ms)
+✔ J2 · primária TRAVADA continua produzindo a proposta, com o bloqueio dito (0.4579ms)
+✔ J3 · sem SERP do mesmo universo, volume sozinho não troca primária de página publicada (1.157ms)
+✔ J4 · empate técnico não mexe no que está publicado e indexado (3.1696ms)
+✔ J5 · volume ausente não vira zero: sem os dois números não há comparação (0.5846ms)
+✔ J6 · a proposta fala o vocabulário que o acervo já grava (0.4508ms)
+✔ J7 · o reforço respeita o teto do domínio e diz por que cada uma ficou de fora (0.5211ms)
+✔ J8 · página no teto não recebe reforço nenhum (0.2981ms)
+✔ K1 · as quatro lentes do produto são o padrão da coleta (0.1724ms)
+✔ K2 · as lentes do Arquiteto SÃO as do cache de SERP — uma autoridade só (0.7154ms)
+✔ K3 · o registro por escopo não é mais escrito: o cache é a persistência (4.0531ms)
+✔ K4 · sem SERP da primária a leitura RECUSA em vez de comparar as secundárias entre si (0.7959ms)
+✔ K5 · com a SERP coletada, a secundária do mesmo universo reforça e pode desafiar a primária (0.7839ms)
+✔ K6 · a rota consulta o CACHE antes da credencial e só paga as lentes que faltam (12.0427ms)
+✔ K6b · lente paga e recusada pelo provider vira LACUNA com o motivo dele, nunca some (4.6075ms)
+✔ K6c · a observação devolvida leva os citados pelo AI Overview e as buscas relacionadas, sem somar de novo (6.5369ms)
+✔ K6d · SERP por keyword: extras gravam SEM corpo e a canônica é paga com 20, com corpo (10.4326ms)
+✔ K7 · a mesa tem a porta da coleta e o painel da leitura (11.4222ms)
+✔ L1 · sem lente declarada o pedido continua exatamente o de antes (0.6415ms)
+✔ L2 · a lente entra no CORPO do pedido: duas lentes do mesmo dispositivo não podem ser a mesma consulta (0.4209ms)
+✔ L3 · par dispositivo/sistema inválido é RECUSADO, não corrigido em silêncio (0.32ms)
+✔ L4 · as quatro lentes do produto são pares válidos (0.195ms)
+✔ M1 · o mesmo concorrente não conta duas vezes por causa do www. (0.3531ms)
+✔ M2 · o formato que só uma lente entrega é dito — é ele que muda a página (0.4731ms)
+✔ M3 · lentes iguais não produzem exclusividade nenhuma (0.1788ms)
+✔ M4 · o payload completo é opt-in e a coleta por keyword o exige (1.5032ms)
+✔ N1 · potencial de Silo vira cabeça do próprio Silo, com a primária PROVISÓRIA (0.5736ms)
+✔ N2 · o Silo declarado atrai os vizinhos mesmo quando o léxico sugeria outro Silo (0.8725ms)
+✔ N3 · keyword declarada Artigo nunca vira semente de Silo, mesmo sendo a cabeça do grupo (0.3476ms)
+✔ N4 · grupo inteiro declarado não-Silo não inventa Silo nenhum (0.6784ms)
+✔ N5 · Silo declarado que já existe no acervo não é duplicado (0.3372ms)
+✔ N6 · lote sem declaração nenhuma produz exatamente a proposta de antes (0.3357ms)
+✔ N7 · a primeira etapa é LÓGICA: nenhum provider no caminho da separação Silo × Artigo (2.3851ms)
+✔ N8 · 200 keywords: toda keyword sai com destino, e a lógica responde rápido (3.749ms)
+✔ P1 · o cliente envia o Silo inteiro em lotes, sem cortar em 12 (10.2738ms)
+✔ P2 · o CLIENTE mescla os lotes do mesmo Silo por keyword + lente (11.1709ms)
+✔ A6 · SERP por keyword: `plan` só lê o cache; `execute` paga até o autorizado (1.8144ms)
+✔ A6 · a mesa: plano primeiro, uma confirmação para os lotes, cada lote com o número do seu plano (10.7416ms)
+✔ Q1 · lista nova sem primária: a SERP das 4 lentes PROPÕE — decisão pendente, sem carimbo, nada gravável sozinho (3.2899ms)
+✔ Q2 · uma lente só: a SERP RECUSA, nada é proposto e nada pode ser aceito (0.4372ms)
+✔ Q3 · sem SERP das candidatas não há proposta — a mesa não inventa primária (0.1842ms)
+✔ Q4 · precedência: primária HUMANA vence a SERP — a discordância aparece e nada se aplica (0.5566ms)
+✔ Q5 · precedência: publicada vence a SERP; travada, a proposta aparece com o bloqueio dito (0.9694ms)
+✔ Q16 · correção A3 · publicada: liderar a SERP sem a folga de volume NÃO abre decisão (regra de 2026-09-20) (2.316ms)
+✔ Q17 · correção A3 · Silo publicado, existente ou de origem desconhecida SEM primária: a SERP só informa, nada se aceita (1.6513ms)
+✔ Q18 · correção A3 · o aceite só vale para keyword DESTE Silo, na marca ativa (lido do banco) (0.8382ms)
+✔ Q19 · correção A3 · a criação de território não faz nascer primária de SERP nem humana (5.8749ms)
+✔ Q6 · a SERP que confirma a primária atual não abre decisão nenhuma (§9: sem mudança real, nada novo) (0.5541ms)
+✔ Q7 · primária de SERP já aceita e a SERP de agora aponta outra: nova PROPOSTA sobre a atual, que continua até o aceite (0.5126ms)
+✔ Q8 · só as candidatas do Silo votam; candidata sem SERP é dita, não some (0.4403ms)
+✔ Q9 · o ACEITE grava a primária com o ator e a hora do servidor; território antigo continua válido (1.2643ms)
+✔ Q10 · o aceite é RECUSADO sobre primária humana ou publicada, sobre proposta vencida e sem mudança real (0.6263ms)
+✔ Q11 · a edição genérica do território não troca nem apaga a primária (0.6293ms)
+✔ Q12 · a leitura da primária vigente é estreita, filtrada pela marca, e falha FECHADA (1.6659ms)
+✔ Q13 · a rota: aceite só com ator e hora do servidor, e a porta genérica passa pela trava da primária (2.9811ms)
+✔ Q14 · o cliente só aceita pela porta própria e só dá sucesso com o readback da primária aceita (1.1378ms)
+✔ Q15 · a mesa: a proposta é derivada, o aceite é um clique humano em dois passos, e a coleta vale sem primária (13.203ms)
+✔ Q20 · correção A3 · a mesa passa a origem gravada do Silo e o volume; o painel diz por que nada se aceita (10.77ms)
+✔ R1 · as lentes da Qualificação do Minerador viram uma linha — e a legada não mostra nada (0.4738ms)
+✔ R2 · a mesa mostra as lentes do handoff onde já mostra a intenção recebida (10.8234ms)
+✔ R3 · o parecer diz quais lentes ficaram de fora e por quê, uma vez por lente e motivo (14.073ms)
+✔ fixture: 4 Silos, 21 artigos publicados e 130 livres (1.6451ms)
+✔ (1) aprovada com Vínculo publicado é publicada; livre e candidata não são (1.367ms)
+✔ (1) o Vínculo vem do PACOTE APROVADO do item, não da linha viva (0.1888ms)
+✔ (1) a projeção canônica marca a publicada pelo Vínculo e não herda a lista como Silo (15.6421ms)
+✔ (1) a trava de identidade: uma lista só para a rota e para a mesa (7.3882ms)
+✔ (2) endereço normalizado: protocolo, www, barra, query e caixa não mudam a posição (1.3701ms)
+✔ (2) cada artigo publicado entra no Silo cuja URL o contém — 20 de 21, e 1 fora (2.605ms)
+✔ (2) outra marca não entra; Silo com endereço duplicado é conflito, não palpite (4.2467ms)
+✔ (2) a proposta põe cada publicada no Silo que o site declara e cobre o lote inteiro (7.1631ms)
+✔ (3) remontar: as livres se reagrupam em torno do publicado, e publicada não semeia Silo novo (4.8694ms)
+✔ (3) sem as entradas novas, a proposta é a de antes (retrocompatível) (1.9859ms)
+✔ (3) a publicada só ganha membership no Silo que o site declara (1.5179ms)
+✔ reprocessar publicado já no Silo consolidado é no-op, não exige sucessor (0.5197ms)
+✔ (3) a livre que repete a publicada entra nela; o resto fica no núcleo dela (2.6769ms)
+✔ (3) o teto de seis vale para o artigo publicado (0.9289ms)
+✔ (3) a mesa usa a remontagem e a membership pela URL (7.439ms)
+✔ (2) o slug do Silo publicado é o caminho da URL declarada, não o texto da keyword (2.4585ms)
+✔ (2) identidade publicada: canônico primeiro, caixa preservada, home e texto solto não viram slug (0.4876ms)
+✔ (2) o território do Silo publicado nasce protegido, com publishedSlug e canonical da declaração (12.6811ms)
+✔ publicados declarados são efetiváveis no primeiro processamento sem confirmar proposta livre (7.6612ms)
+✔ Silo publicado efetivado libera Artigos sem clicar Confirmar arquitetura (5.276ms)
+✔ (2) Silo publicado já no acervo é reconhecido pelo endereço (ou pela primária) e não duplica (4.3002ms)
+✔ (2) artigo publicado entra pelo endereço do Silo que já é território, mesmo sem a cabeça no lote (2.2731ms)
+✔ (2) conflito do endereço chega à linha com o motivo real, não como 'fora de Silo' (2.2782ms)
+✔ (3) publicada já em território sem Silo declarado pelo site: a membership vigente é preservada (0.449ms)
+✔ (3) revisão humana com publicada não principal, ou duas publicadas, sai com conflito dito (3.4858ms)
+✔ a lente é explícita: desktop é a canônica desktop-windows, mobile é android (3.1996ms)
+✔ o pedido da formação é advanced e cai na MESMA chave que o Minerador gravou (0.9628ms)
+✔ entrada regular, de outra lente ou vencida não atende a formação (0.4874ms)
+✔ códigos divergentes entre chave e config são detectados (0.3687ms)
+✔ acerto normaliza com a proveniência da ENTRADA e registra a lente enviada (26.0163ms)
+✔ data gravada com deslocamento vira o formato que o snapshot aceita (4.2893ms)
+✔ corpo em cache que não normaliza LANÇA — e a rota paga em vez de reprovar o artigo (1.3129ms)
+✔ task recusada (40501): a chamada devolve o diagnóstico; só a observação recusa (45.1282ms)
+✔ status raiz inválido (40100): o diagnóstico também volta, e a observação recusa (1.1988ms)
+✔ HTTP não-2xx e JSON inválido continuam lançando na própria chamada (1.3602ms)
+✔ o núcleo não lança na resposta recusada: devolve o diagnóstico e não grava (0.3789ms)
+✔ lote de corpos degradado com zero faltas iniciais: a quota é avaliada para o LOTE, não para 1 (0.845ms)
+✔ faltas parciais + degradação: reavalia o que ainda não virou uso succeeded (0.2991ms)
+✔ reavaliações paralelas são uma só; e a recusa da quota propaga sem travar a próxima (0.5142ms)
+✔ resolve que descobre códigos divergentes aumenta a previsão e reavalia na hora (0.2509ms)
+✔ a rota não paga mais pelo utilitário regular (0.2484ms)
+✔ o cache é lido em modo meta ANTES de resolver credencial e quota (0.1999ms)
+✔ a quota conta só as faltas, e com zero faltas o resolve não é chamado (0.4053ms)
+✔ acerto que degrada em falta é previsto e a quota reavaliada ANTES de pagar — nunca com 1 unidade fixa (0.558ms)
+✔ a chave usa os códigos-alvo e a divergência com a config descarta os acertos (0.233ms)
+✔ um único relógio por requisição (0.1802ms)
+✔ D6 · cache ilegível não proíbe a coleta: plano com custo máximo; só a análise com cache devolve 503 (0.3799ms)
+✔ os corpos são lidos por lote — principais de todos os grupos, secundárias por grupo, candidatas (0.4102ms)
+✔ o acerto normaliza com collectedAt e providerRequestId da entrada (0.2462ms)
+✔ a falta paga por collectAndCacheSerp, com os ganchos do diagnóstico, e normaliza o corpo CRU (0.434ms)
+✔ o uso só é registrado para faltas pagas (0.2516ms)
+✔ o snapshot registra a lente enviada; o parecer continua com o snapshot completo (0.3031ms)
+✔ R5 — a rota não lê tabela com select("*") (0.0989ms)
+✔ A2 · a profundidade da canônica do Arquiteto é a mesma da CALL 3 do Minerador (0.1313ms)
+✔ A2 · só a canônica sobe para 20; as extras ficam na profundidade pedida (0.4303ms)
+✔ A2 · só a canônica grava corpo quando o Arquiteto paga pela SERP por keyword (0.1529ms)
+✔ A2 · falta paga com 20 e acerto de 20 dão o MESMO snapshot para um pedido de 10 (8.9095ms)
+✔ A2 · coleta na profundidade do pedido passa intacta: o corpo de antes (0.4225ms)
+✔ A2 · o diagnóstico da falta conta o corpo recortado: as mesmas contagens do acerto (0.6644ms)
+✔ A2 · as três rotas pagam a canônica com 20 e continuam LENDO a profundidade pedida (0.3025ms)
+✔ A3 · o pedido pede as quatro lentes; `device` continua como forma legada de uma lente só (0.6363ms)
+✔ A3 · digest e corpo da MESMA SERP dão os mesmos fatos (fixture real) (6.4691ms)
+✔ A3 · a única diferença declarada: o digest não traz vídeo com título e URL próprios (12.6553ms)
+✔ A6 · o plano conta as faltas por lente, as condicionais e o custo em faixa (1.5964ms)
+✔ A6 · a execução só paga o autorizado: sem autorização ou com plano maior, nada é pago (0.4542ms)
+✔ A6 · as saídas do plano levam o número exato que a execução pode pagar (27.9983ms)
+✔ A6 · os lotes da SERP por keyword somam num plano só (0.9066ms)
+✔ A8 · lentes da mesma consulta com mais de 7 dias de diferença são marcadas; a recoleta é só pedida (1.2611ms)
+✔ A8 · keyword do acervo usa o resolvedor do Minerador e cai na MESMA chave que ele grava (0.8513ms)
+✔ A8 · o targeting é lido no servidor, da marca ativa, em coluna estreita — nunca de outra marca (0.9979ms)
+✔ A6 · modo plan: devolve o plano ANTES de credencial, quota, corpo e qualquer pagamento (0.3323ms)
+✔ A6 · execução: autorização antes de pagar, orçamento em TODO caminho pago, 409 sem pagar (0.5452ms)
+✔ A3 · as extras são lidas pelo digest para toda keyword e pagas SEM corpo (0.3536ms)
+✔ A3/A5 · pedido legado grava o parecer de antes; pedido com lentes grava o voto agregado e o marcador (0.3629ms)
+✔ A8 · a rota lê os códigos do Minerador no servidor, pela marca do contexto, antes do cache (0.3939ms)
+✔ A6 · 'Validar SERP': as quatro lentes, o plano primeiro, e só a escolha libera a execução (1.1319ms)
+✔ A6 · 'Validar SERP dos silos': as quatro lentes e o plano antes do pagamento (0.4368ms)
+✔ A6 · a prévia: tudo em cache segue sem perguntar; cancelar resolve sem pagar (1.5933ms)
+✔ A5 · os pareceres mostram as lentes; o parecer legado não mostra nada (1.7108ms)
+✔ correção A2 · rota que não recolhe: o plano MARCA as lentes antigas e NÃO oferece recoleta paga (0.4253ms)
+✔ correção A2 · a mesma consulta extra em dois artigos: paga uma vez, e só é condicional se TODOS a pedirem com condição (0.1918ms)
+✔ correção A2 · o orçamento reserva as faltas PLANEJADAS: a degradação de um artigo não tira a vaga de outro (0.1014ms)
+✔ correção A2 · a rota de formação reserva o plano e paga cada consulta extra uma vez por requisição (0.2157ms)
+✔ A2 · o lote da coleta tem só keyword com volume dos Silos em formação; sem volume nunca é coletada (3.75ms)
+✔ A2 · blocos cabem no teto da rota keyword-serp e o escopo do ledger é estável (0.8434ms)
+✔ A2 · Processar artigos coleta o lote ANTES da formação, sempre nas 4 lentes, e keyword-serp continua o núcleo (1.0676ms)
+✔ A2 · o plano da coleta nunca oferece só a lente principal (0.4091ms)
+✔ A3 · a rota do parecer tira secundária sem volume do plano e da coleta e a declara como não observada (23.4806ms)
+✔ A1 · mesa e fechamento convergem: sem Aplicar KGR = Não aplicável (article_decision), nunca bloqueia (35.441ms)
+✔ A1 · Aplicar KGR Sim sem allintitle bloqueia com KGR_APPLICABLE_WITHOUT_METRIC até medir (0.907ms)
+✔ A1 · regra antiga gravada fecha como aplicada, sem abrir pendência (0.4664ms)
+✔ A1 · o checklist só cobra o KGR quando o artigo o aplica sem allintitle (1.1544ms)
+✔ guarda · a troca da regra (v1 → v2) não abre sucessora; decisão humana e Principal trocada abrem (1.474ms)
+✔ guarda · a tela usa a guarda, não a comparação de JSON (0.4637ms)
+✔ A4 · reaproveita a medição do Arquiteto e depois a do Minerador, até 30 dias; Recalcular paga (0.545ms)
+✔ A4 · o plano do allintitle entra no mesmo diálogo e na mesma autorização, uma consulta por artigo (0.436ms)
+✔ A4 · a medição vai para kgrIdentity (campos existentes), não decide e guarda poucas medições (16.534ms)
+✔ A4 · a mesa junta a medição mais nova da working copy à identidade do ArticleDNA, sem trocar a decisão (0.4583ms)
+✔ A4 · a rota do allintitle só lê o Minerador e grava no item de workflow do Arquiteto (1.6427ms)
+✔ A5 · a consulta nas 4 lentes da fase Silos é manual, opcional e nunca coleta keyword sem volume (0.6648ms)
+✔ correção · medir o allintitle sem Aplicar KGR não abre sucessora do ArticleDNA (3.6996ms)
+✔ correção · com Aplicar KGR, a medição nova é revisão real (0.7418ms)
+✔ correção · reformar artigo com identidade antiga mantém a identidade e não abre sucessora (1.1707ms)
+✔ correção · decisão humana nova e Principal trocada continuam valendo (0.304ms)
+✔ correção · a conclusão da formação e o preparo reconciliam a identidade antes de comparar (1.0875ms)
+✔ 5 de 5 concluídos mantém o lote completo (1.6942ms)
+✔ 4 sucessos e 1 falha específica preservam os assessments válidos (1.471ms)
+✔ 1 sucesso e 4 falhas específicas ainda entregam o assessment válido (0.4227ms)
+✔ erro global encerra o lote inteiro (0.8241ms)
+✔ o route isola por Article e devolve failures e summary aditivos (0.459ms)
+✔ a falha por Article carrega estágio, código e motivo reais (0.2954ms)
+✔ o cliente persiste somente assessments válidos e marca o artigo falho (0.7574ms)
+✔ cada artigo com erro mostra estágio, motivo e retry só daquela unidade (2.4532ms)
+✔ a IA fica bloqueada apenas para o artigo sem SERP válida (0.7503ms)
+✔ nenhuma SERP automática e nenhuma movimentação de KeywordDNA (1.3466ms)
+✔ 1 · create da working copy usa a RPC transacional (3.2889ms)
+✔ 2 · update da working copy usa a RPC transacional (1.67ms)
+✔ 3 · o caminho canônico não usa WorkflowRepository para a working copy (2.1844ms)
+✔ 4 · o create não usa INSERT direto antigo (1.6063ms)
+✔ 5 · o update envia o expectedLock obtido da linha remota (3.1896ms)
+✔ 6 · stale lock não vira sucesso nem erro genérico (1.6416ms)
+✔ 7 · território consolidado devolve WORKING_COPY_ALREADY_CONSUMED (1.4866ms)
+✔ 8 · lifecycle não editável tem código próprio, distinto de consumida (0.2281ms)
+✔ 9 · o reload lê a working copy remota (6.0942ms)
+✔ 10 · a working copy remota é a autoridade, não a projeção local (15.0902ms)
+✔ 11 · buildCopy não escolhe scores[0] como Pilar (55.1356ms)
+✔ 12 · volume não escolhe Pilar (10.0798ms)
+✔ 13 · KGR não escolhe Pilar (9.4229ms)
+✔ 14 · centralidade não escolhe Pilar (19.1244ms)
+✔ 15 · ordem não escolhe Pilar (7.4047ms)
+✔ 16 · a IA não seleciona Pilar (0.7196ms)
+✔ 17 · a decisão humana de Pilar fecha a estrutura (6.5516ms)
+✔ 18 · o contrato remoto guarda a decisão inteira e a composição decidida (0.5861ms)
+✔ 19 · exclusões humanas fazem parte do estado remoto (0.3989ms)
+✔ 20 · a readiness roda no servidor, sobre o snapshot remoto (2.8224ms)
+✔ 21 · a proveniência do SiloDNA é comparada com a working copy remota (2.3801ms)
+✔ 22 · o lock_version remoto é a fonte, e o snapshot é o mesmo da RPC (1.852ms)
+✔ 23 · a SiloPage não duplica a proveniência (3.104ms)
+✔ 24 · a consolidação usa a RPC A (1.2369ms)
+✔ 25 · o caminho canônico não chama a 2C.1 nem a primitiva do par (2.4857ms)
+✔ 26 · os status de SiloDNA e SiloPage continuam independentes (2.3532ms)
+✔ 27 · o replay reutiliza o mesmo envelope: o adapter não reconstrói (1.2017ms)
+✔ 28 · o replay não regenera versionId (2.1119ms)
+✔ 29 · o replay não regenera createdAt (3.4769ms)
+✔ 30 · divergência de binding não vira sucesso, e cada recusa mantém código (1.5687ms)
+✔ 31 · erro stale não vira sucesso (1.2051ms)
+✔ 32 · sucesso só depois do readback remoto completo (1.3319ms)
+✔ 33 · pós-consolidação a working copy fica somente leitura (1.4344ms)
+✔ 34 · nenhum lifecycle `consumed` foi criado (1.8522ms)
+✔ 35 · lista_id não reaparece como Silo nem como território (7.4819ms)
+✔ 36 · zero chamadas a provider em todo o caminho novo (4.1061ms)
+✔ 1 · working copy remota válida vira linha canônica (8.0232ms)
+✔ 2 · ref é emitido pelo servidor e DERIVADO do território (53.0013ms)
+✔ 3 · o chamador não escolhe o ref (47.3633ms)
+✔ 4 · source_entity_id é igual ao subject_id (0.9539ms)
+✔ 5 · source_entity_id não é UUID cru vulnerável à purga da 0047 (6.7157ms)
+✔ 6 · article_id é nulo por contrato (1.5187ms)
+✔ 7 · contractVersion errado é recusado (1.3454ms)
+✔ 8 · Brand divergente bloqueia (1.1029ms)
+✔ 9 · território divergente bloqueia (2.0417ms)
+✔ 10 · território ausente bloqueia (8.8751ms)
+✔ 11 · registro territorial incoerente bloqueia (0.8814ms)
+✔ 12 · lock stale bloqueia a atualização (6.2209ms)
+✔ 13 · update preserva a identidade (4.1649ms)
+✔ 14 · o reload deriva a working copy do remoto (4.8947ms)
+✔ 15 · Pilar humano sobrevive ao round-trip (0.663ms)
+✔ 16 · Suportes sobrevivem ao round-trip (0.4104ms)
+✔ 17 · exclusões sobrevivem ao round-trip, com a decisão inteira (1.2679ms)
+✔ 18 · criação lógica duplicada não gera segunda working copy (3.098ms)
+✔ 19 · território consolidated bloqueia edição: working copy já consumida (0.3514ms)
+✔ 20 · rejected, superseded e archived bloqueiam a edição (0.4668ms)
+✔ 21 · React e recuperação local não são autoridade (47.5847ms)
+✔ 22 · lista_id não é identidade de working copy (1.2504ms)
+✔ 23 · slug e nome não são identidade (0.69ms)
+✔ 24 · working article id não é referência final (1.7146ms)
+✔ 25 · a divisão proposta pela IA não escolhe Pilar por selectedIds[0] (0.7032ms)
+✔ 26 · a sugestão automática nunca vira Pilar (0.4365ms)
+✔ 27 · decisão humana de Pilar passa (0.2502ms)
+✔ 28 · decisão não humana e decisão obsoleta são recusadas (0.3047ms)
+✔ 29 · zero providers e zero rede no contrato de domínio (0.7523ms)
+✔ 30 · a RPC de consolidação da 2C.1 não foi integrada (45.1052ms)
+✔ 31 · duas criações sequenciais para o mesmo território dão o MESMO ref (0.6412ms)
+✔ 32 · retry após resposta perdida não muda o ref (0.9231ms)
+✔ 33 · duas criações concorrentes derivam o mesmo ref e colidem na UNIQUE (11.3236ms)
+✔ 34 · criação sobre working copy existente vira replay, sem sobrescrever (2.917ms)
+✔ 35 · erro sem código de domínio propaga, e não vira replay nem conflito (2.4142ms)
+✔ 36 · o chamador não fornece o ref, nem na criação nem na atualização (3.0363ms)
+✔ 37 · outro território dá outro ref (0.2638ms)
+✔ 38 · workingCopyRef do payload divergente do subject_id é incoerente (0.3262ms)
+✔ 39 · source_entity_id divergente do ref é incoerente (0.32ms)
+✔ 40 · SiloWorkingCopy.id legado pode diferir do ref: são conceitos distintos (0.3938ms)
+✔ 41 · o territoryRef determina exatamente o ref esperado (0.8104ms)
+✔ 42 · o ref derivado continua namespaced contra a purga da 0047 (1.6126ms)
+✔ dúvida que exige SERP sem parecer bloqueia com motivo funcional (5.8412ms)
+✔ SERP desatualizada bloqueia a IA — evidência velha não sustenta proposta (0.4973ms)
+✔ dúvida sem SERP exigida roda a IA sem chamar provider de SERP (0.2707ms)
+✔ SERP vigente libera a IA (0.19ms)
+✔ ref fora do universo enviado é recusada (7.6019ms)
+✔ identidade emitida pela IA é recusada como usurpação de autoridade (14.7252ms)
+✔ keyword fora do universo é recusada (0.4179ms)
+✔ proposta inválida cai sozinha, sem derrubar a análise boa (0.5087ms)
+✔ no_op e maintain são resultados válidos, não erro (0.4574ms)
+✔ a proposta vira UMA linha por pergunta, sem migration (3.0006ms)
+✔ a referência à SERP prova de qual versão da evidência a proposta saiu (1.6301ms)
+✔ dúvida sem SERP grava serpRef nulo, sem inventar evidência (0.4098ms)
+✔ a autoridade do processo mora no payload, não no campo state (0.5239ms)
+✔ mudar a arquitetura analisada desatualiza a proposta (0.3787ms)
+✔ a SERP mudar desatualiza a IA que a usou (0.245ms)
+✔ a base ignora ruído de UI (0.732ms)
+✔ a IA territorial não reaproveita o contrato de Article (21.1583ms)
+✔ a IA não escreve território nem toca no registro da SERP (24.24ms)
+✔ provider OK não é sucesso: a rota persiste E relê (8.3365ms)
+✔ o provider nunca aparece na interface (29.8373ms)
+✔ o boot hidrata a proposta e não chama provider (33.6431ms)
+✔ falha de execução preserva a proposta válida anterior (10.5252ms)
+✔ a pergunta vira UMA linha por marca, sem tabela nem artifact_type novo (13.599ms)
+✔ a identidade não depende de existir território (2.5317ms)
+✔ mesma base, mesmo hash — ordem dos fatos não muda o resultado (0.8664ms)
+✔ mudar o que define a pergunta desatualiza o parecer (1.1209ms)
+✔ a base ignora ruído visual e normaliza a consulta (2.0731ms)
+✔ stale não apaga: o parecer continua legível (2.3943ms)
+✔ linha incoerente é recusada, nunca reconciliada em silêncio (2.441ms)
+✔ o estado da linha espelha a recomendação, e só ela (0.2717ms)
+✔ a persistência reusa a tabela genérica: nenhuma DDL nova (5.5267ms)
+✔ provider OK não é sucesso: a rota persiste E relê (14.6306ms)
+✔ o boot hidrata por leitura e nunca chama provider (23.0307ms)
+✔ falha de consulta preserva o parecer válido anterior (10.477ms)
+✔ 1 · assigned com territoryRef é válido (4.149ms)
+✔ 2 · assigned sem territoryRef é inválido (0.5178ms)
+✔ 3 · explicit_unassigned com territoryRef é inválido (0.3518ms)
+✔ 4 · explicit_unassigned com null é válido e exige motivo (1.0771ms)
+✔ 5 · ausência de decisão com null é unaddressed, e nunca decisão humana (0.3369ms)
+✔ 6 · payload legado sem os campos novos parseia e resolve unaddressed (0.2796ms)
+✔ 7 · lista_id nunca vira territoryRef (1.0231ms)
+✔ 8 · siloId nunca vira territoryRef (6.2283ms)
+✔ 9 · territoryAssignment não possui segunda referência nem lista de keywords (9.8139ms)
+✔ 10 · o TerritoryCandidate tem registro canônico e sobrevive ao round-trip de serialização (4.0545ms)
+✔ 11 · a operação parcial mora no território, em cópia única sob um único lock (2.4614ms)
+✔ 12 · unassigned e unaddressed são projeções derivadas, nunca arrays persistidos (12.7552ms)
+✔ 13 · o territoryRef é emitido pelo servidor, nunca pelo cliente (36.5112ms)
+✔ 14 · o CHECK de state no schema é de comprimento, não de vocabulário fechado (82.0427ms)
+✔ 15 · nenhum consumer existente enxerga um item territorial (542.1708ms)
+✔ 16 · subject_id divergente do territoryRef do payload é RECUSADO (0.508ms)
+✔ 17 · marca_id divergente do brandId do payload é RECUSADO, sem fallback (0.7278ms)
+✔ 18 · o update não troca territoryRef nem brandId (1.5503ms)
+✔ 19 · source_entity_id segue o contrato auditado e é imune ao predicado de purga (1.19ms)
+✔ 20 · round-trip de serialização NÃO é prova de persistência remota (0.7091ms)
+✔ 1 · cada keyword está em exatamente um território ou explicitamente unassigned (14.7613ms)
+✔ 2 · a projeção é derivada; keywordRefs não é gravada em lugar nenhum (2.2555ms)
+✔ 3 · mover A → B produz um patch por keyword, sobre a fonte canônica (3.0394ms)
+✔ mudança de membership exige motivo e recusa alvo inválido (2.3292ms)
+✔ 4 · lote parcial bloqueia confirmação e formação de Article (1.6852ms)
+✔ 5 · candidato sem narrativa, entidade, intenção ou fronteira não confirma (1.4354ms)
+✔ 6/7 · confirmado libera Article; candidato não (0.6883ms)
+✔ 8/9 · rejeitado e substituído não formam Article (0.9811ms)
+✔ critério que depende da Etapa 0 fica adiado, nunca inventado (1.5748ms)
+✔ 10 · split exige continuidade escolhida pelo humano (1.0723ms)
+✔ 11/12 · merge exige sobrevivente humano e recusa duas âncoras existentes (1.4536ms)
+✔ 13 · lista_id nunca gera território (0.663ms)
+✔ 14 · Article legado sem Silo é sinalizado, nunca movido (0.4488ms)
+✔ 15/16 · cenário territorial exige level=silo e diff cruzado é recusado (57.8309ms)
+✔ 17 · zero provider, zero rede, zero persistência nova nesta fase (2.398ms)
+✔ 0033 cria somente configuração tipada por binding e mantém os identificadores externos fora da tabela (11.0953ms)
+✔ preflight e post-verifier são catálogos read-only em um único result set (2.6492ms)
+✔ rollback é artefato local explícito e não remove o legado (2.1085ms)
+✔ rotas Google Ads usam somente a infraestrutura server-side da Plataforma (1.8774ms)
+✔ consumidores Google Ads usam as capabilities canônicas do Minerador (1.4086ms)
+✔ Discovery e Metrics usam Research Customer ID global sem exigir binding da Brand (1.4745ms)
+✔ configuração canônica rejeita targeting divergente e não consulta persistência dinâmica (1.3344ms)
+✔ Discovery e Metrics não usam SearchStream como preflight (31.9527ms)
+✔ Keyword Planner pode ser chamado sem metadata de Customer (4.8878ms)
+✔ fixture de transporte nunca perde a classificação depois de iniciar (3.363ms)
+✔ fixture HTTP preserva response, request-id e erro seguro (36.5519ms)
+✔ Resultado e KD começam em Sem medição (13.9622ms)
+✔ Medir resultados fica bloqueado com Resultado e KD em Sem medição (0.3234ms)
+✔ qualquer outra opção em Resultado ou em KD libera a medição (0.3278ms)
+✔ a tela desabilita a ação e explica o motivo enquanto a medição está bloqueada (2.6016ms)
+✔ a explicação do bloqueio é texto essencial legível em todas as larguras (3.4448ms)
+✔ Sem medição esconde medições do banco e do CSV, e a tabela diz quantas (4.0852ms)
+✔ a função que dispara a medição recusa antes de chamar a DataForSEO (9.7692ms)
+✔ reiniciar os filtros volta Resultado e KD para Sem medição (13.0415ms)
+✔ depois de medir, só o filtro que ficou em Sem medição passa para Todos (19.6709ms)
+✔ nenhum outro caminho da Descoberta chama a DataForSEO (63.4147ms)
+✔ os popovers de Resultado e KD explicam o bloqueio sem chamar provider (2.0682ms)
+✔ o title do filtro em Sem medição considera o outro filtro SEO (10.6911ms)
+✔ rejeita customerId mascarado e exige IDs completos na configuração (5.546ms)
+✔ conexão só é marcada como validada a partir da conta resolvida server-side (0.6518ms)
+✔ rota de métricas não aceita customerId e rota de conexão expõe somente o status env (11.0863ms)
+✔ R2 deriva tendência determinística do histórico mensal (2.4643ms)
+✔ R2 distingue medição Google Ads válida de volume legado ou nulo (0.4476ms)
+✖ Perfil apresenta R2 como demanda operacional e preserva targeting técnico nos detalhes (2.6945ms)
+✔ R7 humaniza CPC brasileiro sem alterar a moeda bruta (31.8422ms)
+✔ CPC da medição do Processador é a fonte numérica da coluna e preserva zero (1.4025ms)
+✔ CPC revalidado nulo aparece como ausência e não como zero (0.258ms)
+✔ moeda real tem precedência e Brasil só completa moeda ausente (1.0486ms)
+✔ CPC da Discovery permanece importado até a medição do Processador (1.123ms)
+✖ Volume continua sendo a única etapa e relê a medição persistida para refletir CPC (1.0825ms)
+✔ GoogleAdsError do provider preserva diagnóstico sanitizado e não é reclassificado (2.0985ms)
+✔ falha de transporte iniciada no provider continua identificada como provider_request (0.7192ms)
+✔ falhas pós-provider recebem o estágio de persistência exato (2.0995ms)
+✔ persistência parcial fica explícita e segredo nunca atravessa o diagnóstico (0.555ms)
+✔ fluxo mockado completo chega ao estado completed com provider respondido (0.2036ms)
+✔ rota instrumenta provider e todos os pontos de persistência sem afetar a Discovery (22.0332ms)
+✔ particiona internamente o lote técnico sem exigir seleção manual menor (6.2436ms)
+✔ associa somente keywords correspondentes e preserva as não retornadas (0.3ms)
+✔ a projeção Google Ads só usa valor confirmado e mantém proveniência (0.642ms)
+✔ a página e a Extensão não mantêm um caminho ativo para RapidAPI de volume (5.7092ms)
+✔ migration cria conexão tenantizada e histórico versionado com RLS (1.2292ms)
+✔ resposta parcial preserva diagnóstico limitado das chaves retornadas pelo Google (0.8164ms)
+✔ 0036 renomeia as relações existentes sem recriar ou apagar dados (7.5851ms)
+✔ 0036 usa o próximo número livre após 0035 e tem preflight/verifier/rollback locais (4.5594ms)
+✔ consumidores ativos usam a nomenclatura canônica e preservam KGR como atributo (19.8505ms)
+✔ diagnóstico: resposta sem média gravada vale como Volume processado e a keyword é aprovável (2.258ms)
+✔ diagnóstico: o volume segue null, o KGR não é calculável e não vira exigência (0.2425ms)
+✔ diagnóstico: o processo Volume fica completo sem completar o KGR (0.8525ms)
+✔ diagnóstico: a célula mostra o 0 apagado a partir do registro, sem tentativa de sessão (sobrevive ao recarregar) (0.2137ms)
+✔ diagnóstico: o painel Google Ads diz Medido · sem média oficial, não Anterior/importado (0.2444ms)
+✔ diagnóstico: o readback que antes virava 'medição recebida, mas o readback não confirmou' agora é empty (0.3034ms)
+✔ diagnóstico: a trava do servidor e a da tela dizem o mesmo — aprovada depois da ativação passa (8.9517ms)
+✔ sem registro, falha de medição, outro provider ou data ilegível continuam exigindo Volume (0.8154ms)
+✔ medição com número dispensa a nota, e a prontidão de sempre não ganha campo novo (0.227ms)
+✔ erro de verdade continua erro: releitura sem o registro desta resposta ou sem linha (0.1709ms)
+✔ readback de número confirma pela data da medição gravada (0.5369ms)
+✔ medir de novo: número novo substitui a resposta sem média (0.1778ms)
+✔ medir de novo: resposta sem média não apaga o número anterior e registra a nova data (0.2053ms)
+✔ medir de novo: resposta sem média sobre resposta sem média atualiza a data (0.1088ms)
+✔ linha com status legado publicado também registra a resposta sem média (0.1209ms)
+✔ falha nova não apaga resposta anterior: a marcação compensatória só vale para quem nunca respondeu (0.1045ms)
+✔ remedir o mesmo número mudaria a assinatura só pela data; a rota carrega a aprovação (3.7329ms)
+✔ número diferente é mudança real: a aprovada vai para revisão (3.8545ms)
+✔ aprovada sem média: nova resposta sem média não rebaixa; número novo rebaixa (1.6809ms)
+✔ aprovada com número: resposta sem média registrada depois não rebaixa (1.0209ms)
+✔ aprovada que já estava em revisão continua em revisão: a remedição não esconde a divergência (0.5919ms)
+✔ sem aprovação não há o que carregar (0.1179ms)
+✔ rota: grava a resposta sem média também para a keyword que o Google Ads não devolveu, e carrega a aprovação (1.1496ms)
+✔ tela: o lote classifica pelo readback, e resposta sem média nunca vira failed (2.3293ms)
+✔ volume importado + resposta sem média: NÃO vale como processado e não leva o número ao Arquiteto (1.0262ms)
+✔ resposta sem média grava o porquê: devolvida sem média ou não devolvida no lote (0.2611ms)
+✔ o porquê da resposta vazia é proveniência: trocar de 'não devolvida' para 'sem média' não rebaixa a aprovada (0.9272ms)
+✔ célula e aprovação leem o 'sem média' pela mesma regra: outro provider não mostra o 0 apagado (0.1776ms)
+✔ tela: a notificação do lote conta as sem média como processadas e não as chama de inelegíveis (2.1995ms)
+✔ rota: a keyword não devolvida grava o porquê 'not_returned' (0.5431ms)
+ℹ tests 586
+ℹ suites 0
+ℹ pass 581
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2056.5665
+
+✖ failing tests:
+
+test at tests\arquiteto-assunto-guarda-servidor.test.mts:389:1
+✖ a rota da cópia de trabalho aceita o campo opcional e confere antes de gravar (1.6267ms)
+  AssertionError [ERR_ASSERTION]: a rota chama a guarda
+      at TestContext.<anonymous> (file:///C:/Users/scalb/Documentos/adalba-pro/minerador-key/tests/arquiteto-assunto-guarda-servidor.test.mts:396:10)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests\arquiteto-leitura-da-marca-estreita.test.mts:256:1
+✖ o PATCH não lê minerador_keywords da marca inteira na rota (0.7381ms)
+  AssertionError [ERR_ASSERTION]: trecho export async function PATCH → for (const update of parsed.updates || []) não encontrado
+      at block (file:///C:/Users/scalb/Documentos/adalba-pro/minerador-key/tests/arquiteto-leitura-da-marca-estreita.test.mts:218:10)
+      at TestContext.<anonymous> (file:///C:/Users/scalb/Documentos/adalba-pro/minerador-key/tests/arquiteto-leitura-da-marca-estreita.test.mts:258:17)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests\arquiteto-leitura-da-marca-estreita.test.mts:264:1
+✖ o GET só reconhece keywordDetail=full e ignora outro valor em vez de responder 400 (0.2946ms)
+  AssertionError [ERR_ASSERTION]: trecho export async function GET → export async function PATCH não encontrado
+      at block (file:///C:/Users/scalb/Documentos/adalba-pro/minerador-key/tests/arquiteto-leitura-da-marca-estreita.test.mts:218:10)
+      at TestContext.<anonymous> (file:///C:/Users/scalb/Documentos/adalba-pro/minerador-key/tests/arquiteto-leitura-da-marca-estreita.test.mts:268:15)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests\minerador-google-ads-demand.test.mts:37:1
+✖ Perfil apresenta R2 como demanda operacional e preserva targeting técnico nos detalhes (2.6945ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /formatGoogleAdsCpcMicros\(/. Input:
+  
+  '"use client";\r\n' +
+    'import Link from "next/link";\r\n' +
+    'import { useId, useState, type ReactNode } from "react";\r\n' +
+    'import type { ArticleDNA, SiloDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";\r\n' +
+    'import { legacyVersionReference } from "@/lib/arquiteto/versioning";\r\n' +
+    'import { useBrand } from "@/components/brand-context";\r\n' +
+    'import { InfoHint } from "@/components/info-hint";\r\n' +
+    'import { InlineLabelCluster } from "@/components/inline-label-cluster";\r\n' +
+    'import { useEditorialPipeline } from "@/components/editorial-pipeline-context";\r\n' +
+    'import { buildRadarArticleHref, radarCanonicalRouteKey } from "@/lib/radar/route-resolution";\r\n' +
+    'import { dataForSeoRecordValue } from "@/lib/minerador/dataforseo-competition";\r\n' +
+    'import { deriveGoogleAdsDemandTrend, formatGoogleAdsCpcTableValue, googleAdsDemandTrendLabel, hasGoogleAdsDemandEvidence } from "@/lib/minerador/google-ads-demand";\r\n' +
+    'import { dataForSeoKeywordDifficultyStateLabel, readDataForSeoKeywordDifficultyEvidence } from "@/lib/minerador/dataforseo-keyword-overview-core";\r\n' +
+    'import { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";\r\n' +
+    'import { calculateKgrFromMetrics, hasLegacyPendingKgrApplicability, isInKgrInterestVolumeRange, KGR_INTEREST_VOLUME_RANGE_LABEL, kgrDecisionLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";\r\n' +
+    'import { serpCollectionLabel, serpEvidenceStrengthPresentation, serpLensEvidencePresentation } from "@/lib/minerador/serp-semantic-evidence";\r\n' +
+    'import { qualificationVersionLabel, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";\r\n' +
+    '\r\n' +
+    'import { canCompleteHumanReview, humanReviewRecord, type HumanReviewAction } from "@/lib/minerador/human-review";\r\n' +
+    'import { deriveHumanReviewUiState, humanReviewStatePill, humanReviewStateSummary } from "@/lib/minerador/human-review-ui-state";\r\n' +
+    'import { buildKeywordDecisionSummary, type KeywordDecisionSummary, type KeywordDecisionSummaryState } from "@/lib/minerador/keyword-decision-summary";\r\n' +
+    'import { processorKgrStateLabel, processorVolumeStateLabel } from "@/lib/minerador/processor-revalidation";\r\n' +
+    'import { dnaMaturityLabel } from "@/lib/minerador/dna-maturity";\r\n' +
+    'import { volumeEligibilityLabel, type VolumeEligibilityStatus } from "@/lib/minerador/volume-eligibility";\r\n' +
+    'import { readSiteOrigin } from "@/lib/minerador/publication-link";\r\n' +
+    'import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS } from "@/lib/minerador/editorial-status";\r\n' +
+    'import { keywordPageTypeStance, parseKeywordPageTypeChoice } from "@/lib/minerador/keyword-page-type";\r\n' +
+    'import { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";\r\n' +
+    'import type { KeywordSubjectResolution } from "@/lib/minerador/keyword-subject";\r\n' +
+    'import { subjectReviewWarning, vinculoSelectValues } from "@/lib/minerador/vinculo-screen";\r\n' +
+    'import { NATIVE_SELECT_THEME } from "@/lib/ui/native-select-theme";\r\n' +
+    'import { keywordUrlRelationLabel } from "@/lib/minerador/publication-link";\r\n' +
+    'import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";\r\n' +
+    'import { mineradorProcessPresentation, type MineradorProcessAttempt, type MineradorProcessName, type MineradorProcessState } from "@/lib/minerador/process-state";\r\n' +
+    'import { createSemanticConsolidationDraft, resolveSemanticAxis, semanticConsolidationBySerp, type SemanticAxisResolution, type SemanticConsolidationAxis, type SemanticConsolidationAxisDraft, type SemanticConsolidationDraft, type SemanticSerpStrength } from "@/lib/minerador/semantic-consolidation-draft";\r\n' +
+    'import { ConfidenceBadge, ProvenancePanel, VersionBadge } from "./pipeline-ui";\r\n' +
+    'import { VinculoPageTypeSelect, VinculoPostSelect, VinculoSubjectFields, VinculoSubjectSelect } from "./vinculo-selects";\r\n' +
+    '\r\n' +
+    'type ProfileRecord = Record<string, unknown>;\r\n' +
+    'type ProfileFieldValue = unknown;\r\n' +
+    '\r\n' +
+    'type KeywordProfileData = {\r\n' +
+    '  listName?: string | null;\r\n' +
+    '  googleAds?: {\r\n' +
+    '    eligibility?: string | null;\r\n' +
+    '    eligibilityStatus?: string | null;\r\n' +
+    '    measurement?: ProfileRecord | null;\r\n' +
+    '  };\r\n' +
+    '  dataForSeo?: {\r\n' +
+    '    measurement?: ProfileRecord | null;\r\n' +
+    '    history?: ProfileRecord[];\r\n' +
+    '    overview?: ProfileRecord | null;\r\n' +
+    '  };\r\n' +
+    '  kgr?: {\r\n' +
+    '    volumeUsed?: number | null;\r\n' +
+    '    allintitleUsed?: number | null;\r\n' +
+    '    score?: number | null;\r\n' +
+    '    calculable?: boolean;\r\n' +
+    '    applicability?: string | null;\r\n' +
+    '    decision?: string | null;\r\n' +
+    '    measurement?: string | null;\r\n' +
+    '    consistency?: string | null;\r\n' +
+    '    history?: ProfileRecord[];\r\n' +
+    '    justification?: string | null;\r\n' +
+    '  };\r\n' +
+    '};\r\n' +
+    '\r\n' +
+    'function recordValue(value: unknown): ProfileRecord | null {\r\n' +
+    '  return value && typeof value === "object" && !Array.isArray(value) ? value as ProfileRecord : null;\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function googleAdsRecordValue(value: unknown): ProfileRecord | null {\r\n' +
+    '  const objectValue = recordValue(value);\r\n' +
+    '  if (objectValue) return objectValue;\r\n' +
+    '  if (typeof value !== "string" || !value.trim().startsWith("{")) return null;\r\n' +
+    '  try {\r\n' +
+    '    const parsed = JSON.parse(value) as unknown;\r\n' +
+    '    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ProfileRecord : null;\r\n' +
+    '  } catch {\r\n' +
+    '    return null;\r\n' +
+    '  }\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function firstRecord(...values: unknown[]): ProfileRecord | null {\r\n' +
+    '  for (const value of values) {\r\n' +
+    '    const result = recordValue(value);\r\n' +
+    '    if (result) return result;\r\n' +
+    '  }\r\n' +
+    '  return null;\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function displayValue(value: unknown, fallback = "Não informado"): string {\r\n' +
+    '  if (value === null || value === undefined || value === "") return fallback;\r\n' +
+    '  if (typeof value === "boolean") return value ? "Sim" : "Não";\r\n' +
+    '  if (typeof value === "number") return Number.isFinite(value) ? value.toLocaleString("pt-BR") : fallback;\r\n' +
+    '  if (Array.isArray(value)) return value.map(item => displayValue(item, "—")).join(", ") || fallback;\r\n' +
+    '  if (typeof value === "object") return Object.entries(value).map(([key, item]) => `${key}: ${displayValue(item, "—")}`).join(" · ") || fallback;\r\n' +
+    '  return String(value);\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function profileDate(value: unknown): string {\r\n' +
+    '  if (typeof value !== "string" || !value) return "Não informado";\r\n' +
+    '  const timestamp = Date.parse(value);\r\n' +
+    '  if (!Number.isFinite(timestamp)) return value;\r\n' +
+    '  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(timestamp);\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function profileConfidence(value: unknown): string {\r\n' +
+    '  if (value === null || value === undefined || value === "") return "Confiança pendente";\r\n' +
+    '  const numeric = typeof value === "number" ? value : Number(value);\r\n' +
+    '  if (!Number.isFinite(numeric)) return "Confiança pendente";\r\n' +
+    '  return `${Math.round((numeric <= 1 ? numeric * 100 : numeric))}% confiança`;\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function profileNonNegativeNumber(value: unknown): number | null {\r\n' +
+    '  const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;\r\n' +
+    '  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function kgrCalculationStateLabel(input: { volume: unknown; allintitle: unknown; consistency?: unknown }): string {\r\n' +
+    '  const volume = profileNonNegativeNumber(input.volume);\r\n' +
+    '  if (volume === null) return isMeaningfulProfileValue(input.volume) ? "Medição insuficiente" : "Aguardando volume";\r\n' +
+    '  if (volume === 0) return "Volume zero";\r\n' +
+    '\r\n' +
+    '  const allintitle = profileNonNegativeNumber(input.allintitle);\r\n' +
+    '  if (allintitle === null) return isMeaningfulProfileValue(input.allintitle) ? "Medição insuficiente" : "Aguardando Resultado";\r\n' +
+    '  if (calculateKgrFromMetrics(volume, allintitle) === null) return "Medição insuficiente";\r\n' +
+    '\r\n' +
+    '  const consistency = normalizeProfileMarker(String(input.consistency || ""));\r\n' +
+    '  if (consistency === "incompatibilidade comprovada") return "Medição inconsistente";\r\n' +
+    '  return "Calculável";\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function profileAdsCompetition(value: unknown): string | null {\r\n' +
+    '  if (!isMeaningfulProfileValue(value)) return null;\r\n' +
+    '\r\n' +
+    '  const normalized = normalizeProfileMarker(String(value));\r\n' +
+    '\r\n' +
+    '  return (\r\n' +
+    '    {\r\n' +
+    '      low: "Baixa",\r\n' +
+    '      medium: "Média",\r\n' +
+    '      high: "Alta",\r\n' +
+    '    } as Record<string, string>\r\n' +
+    '  )[normalized] || String(value);\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function funnelPresentationValue(value: unknown): unknown {\r\n' +
+    '  return normalizeProfileMarker(String(value || "")) === "nao classificavel" ? "Indefinido" : value;\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function profileTargeting(value: unknown): string {\r\n' +
+    '  const item = recordValue(value);\r\n' +
+    '  if (!item) return typeof value === "string" ? value : "Não informado";\r\n' +
+    '  const languageValue = item.languageCode || item.language;\r\n' +
+    '  const languageMarker = languageValue ? normalizeProfileMarker(String(languageValue)).replace(/[\\s_-]/g, "") : "";\r\n' +
+    '  const language = languageValue\r\n' +
+    '    ? ["pt", "ptbr", "portugues", "languageconstants/1014"].includes(languageMarker) ? "Português" : "Idioma configurado"\r\n' +
+    '    : null;\r\n' +
+    '  const geoTargetConstants = Array.isArray(item.geoTargetConstants) ? item.geoTargetConstants : [];\r\n' +
+    '  const locationValue = item.countryCode || item.country || item.locationCode || geoTargetConstants[0];\r\n' +
+    '  const locationMarker = locationValue ? normalizeProfileMarker(String(locationValue)).replace(/\\s+/g, "") : "";\r\n' +
+    '  const location = locationValue\r\n' +
+    '    ? ["br", "brasil", "2076", "geotargetconstants/2076"].includes(locationMarker) ? "Brasil" : "Local configurado"\r\n' +
+    '    : null;\r\n' +
+    '  const networkValue = item.keywordPlanNetwork || item.network;\r\n' +
+    '  const networkMarker = networkValue ? normalizeProfileMarker(String(networkValue)).replace(/[\\s_-]/g, "") : "";\r\n' +
+    '  const network = networkValue\r\n' +
+    '    ? networkMarker === "googlesearch" ? "Google Search" : networkMarker === "googlesearchandpartners" ? "Google Search + parceiros" : "Rede configurada"\r\n' +
+    '    : null;\r\n' +
+    '  return [language, location, network].filter(Boolean).join(" · ") || "Não informado";\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function profileJson(value: unknown): string {\r\n' +
+    '  try {\r\n' +
+    '    return JSON.stringify(value, null, 2);\r\n' +
+    '  } catch {\r\n' +
+    '    return String(value);\r\n' +
+    '  }\r\n' +
+    '}\r\n' +
+    '\r\n' +
+    'function normalizeProfileMarker(value: string): string {\r\n' +
+    '  return value.trim().toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "")'... 83163 more characters
+  
+      at TestContext.<anonymous> (file:///C:/Users/scalb/Documentos/adalba-pro/minerador-key/tests/minerador-google-ads-demand.test.mts:42:10)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '"use client";\r\nimport Link from "next/link";\r\nimport { useId, useState, type ReactNode } from "react";\r\nimport type { ArticleDNA, SiloDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";\r\nimport { legacyVersionReference } from "@/lib/arquiteto/versioning";\r\nimport { useBrand } from "@/components/brand-context";\r\nimport { InfoHint } from "@/components/info-hint";\r\nimport { InlineLabelCluster } from "@/components/inline-label-cluster";\r\nimport { useEditorialPipeline } from "@/components/editorial-pipeline-context";\r\nimport { buildRadarArticleHref, radarCanonicalRouteKey } from "@/lib/radar/route-resolution";\r\nimport { dataForSeoRecordValue } from "@/lib/minerador/dataforseo-competition";\r\nimport { deriveGoogleAdsDemandTrend, formatGoogleAdsCpcTableValue, googleAdsDemandTrendLabel, hasGoogleAdsDemandEvidence } from "@/lib/minerador/google-ads-demand";\r\nimport { dataForSeoKeywordDifficultyStateLabel, readDataForSeoKeywordDifficultyEvidence } from "@/lib/minerador/dataforseo-keyword-overview-core";\r\nimport { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";\r\nimport { calculateKgrFromMetrics, hasLegacyPendingKgrApplicability, isInKgrInterestVolumeRange, KGR_INTEREST_VOLUME_RANGE_LABEL, kgrDecisionLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";\r\nimport { serpCollectionLabel, serpEvidenceStrengthPresentation, serpLensEvidencePresentation } from "@/lib/minerador/serp-semantic-evidence";\r\nimport { qualificationVersionLabel, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";\r\n\r\nimport { canCompleteHumanReview, humanReviewRecord, type HumanReviewAction } from "@/lib/minerador/human-review";\r\nimport { deriveHumanReviewUiState, humanReviewStatePill, humanReviewStateSummary } from "@/lib/minerador/human-review-ui-state";\r\nimport { buildKeywordDecisionSummary, type KeywordDecisionSummary, type KeywordDecisionSummaryState } from "@/lib/minerador/keyword-decision-summary";\r\nimport { processorKgrStateLabel, processorVolumeStateLabel } from "@/lib/minerador/processor-revalidation";\r\nimport { dnaMaturityLabel } from "@/lib/minerador/dna-maturity";\r\nimport { volumeEligibilityLabel, type VolumeEligibilityStatus } from "@/lib/minerador/volume-eligibility";\r\nimport { readSiteOrigin } from "@/lib/minerador/publication-link";\r\nimport { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS } from "@/lib/minerador/editorial-status";\r\nimport { keywordPageTypeStance, parseKeywordPageTypeChoice } from "@/lib/minerador/keyword-page-type";\r\nimport { resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";\r\nimport type { KeywordSubjectResolution } from "@/lib/minerador/keyword-subject";\r\nimport { subjectReviewWarning, vinculoSelectValues } from "@/lib/minerador/vinculo-screen";\r\nimport { NATIVE_SELECT_THEME } from "@/lib/ui/native-select-theme";\r\nimport { keywordUrlRelationLabel } from "@/lib/minerador/publication-link";\r\nimport { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";\r\nimport { mineradorProcessPresentation, type MineradorProcessAttempt, type MineradorProcessName, type MineradorProcessState } from "@/lib/minerador/process-state";\r\nimport { createSemanticConsolidationDraft, resolveSemanticAxis, semanticConsolidationBySerp, type SemanticAxisResolution, type SemanticConsolidationAxis, type SemanticConsolidationAxisDraft, type SemanticConsolidationDraft, type SemanticSerpStrength } from "@/lib/minerador/semantic-consolidation-draft";\r\nimport { ConfidenceBadge, ProvenancePanel, VersionBadge } from "./pipeline-ui";\r\nimport { VinculoPageTypeSelect, VinculoPostSelect, VinculoSubjectFields, VinculoSubjectSelect } from "./vinculo-selects";\r\n\r\ntype ProfileRecord = Record<string, unknown>;\r\ntype ProfileFieldValue = unknown;\r\n\r\ntype KeywordProfileData = {\r\n  listName?: string | null;\r\n  googleAds?: {\r\n    eligibility?: string | null;\r\n    eligibilityStatus?: string | null;\r\n    measurement?: ProfileRecord | null;\r\n  };\r\n  dataForSeo?: {\r\n    measurement?: ProfileRecord | null;\r\n    history?: ProfileRecord[];\r\n    overview?: ProfileRecord | null;\r\n  };\r\n  kgr?: {\r\n    volumeUsed?: number | null;\r\n    allintitleUsed?: number | null;\r\n    score?: number | null;\r\n    calculable?: boolean;\r\n    applicability?: string | null;\r\n    decision?: string | null;\r\n    measurement?: string | null;\r\n    consistency?: string | null;\r\n    history?: ProfileRecord[];\r\n    justification?: string | null;\r\n  };\r\n};\r\n\r\nfunction recordValue(value: unknown): ProfileRecord | null {\r\n  return value && typeof value === "object" && !Array.isArray(value) ? value as ProfileRecord : null;\r\n}\r\n\r\nfunction googleAdsRecordValue(value: unknown): ProfileRecord | null {\r\n  const objectValue = recordValue(value);\r\n  if (objectValue) return objectValue;\r\n  if (typeof value !== "string" || !value.trim().startsWith("{")) return null;\r\n  try {\r\n    const parsed = JSON.parse(value) as unknown;\r\n    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ProfileRecord : null;\r\n  } catch {\r\n    return null;\r\n  }\r\n}\r\n\r\nfunction firstRecord(...values: unknown[]): ProfileRecord | null {\r\n  for (const value of values) {\r\n    const result = recordValue(value);\r\n    if (result) return result;\r\n  }\r\n  return null;\r\n}\r\n\r\nfunction displayValue(value: unknown, fallback = "Não informado"): string {\r\n  if (value === null || value === undefined || value === "") return fallback;\r\n  if (typeof value === "boolean") return value ? "Sim" : "Não";\r\n  if (typeof value === "number") return Number.isFinite(value) ? value.toLocaleString("pt-BR") : fallback;\r\n  if (Array.isArray(value)) return value.map(item => displayValue(item, "—")).join(", ") || fallback;\r\n  if (typeof value === "object") return Object.entries(value).map(([key, item]) => `${key}: ${displayValue(item, "—")}`).join(" · ") || fallback;\r\n  return String(value);\r\n}\r\n\r\nfunction profileDate(value: unknown): string {\r\n  if (typeof value !== "string" || !value) return "Não informado";\r\n  const timestamp = Date.parse(value);\r\n  if (!Number.isFinite(timestamp)) return value;\r\n  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(timestamp);\r\n}\r\n\r\nfunction profileConfidence(value: unknown): string {\r\n  if (value === null || value === undefined || value === "") return "Confiança pendente";\r\n  const numeric = typeof value === "number" ? value : Number(value);\r\n  if (!Number.isFinite(numeric)) return "Confiança pendente";\r\n  return `${Math.round((numeric <= 1 ? numeric * 100 : numeric))}% confiança`;\r\n}\r\n\r\nfunction profileNonNegativeNumber(value: unknown): number | null {\r\n  const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;\r\n  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;\r\n}\r\n\r\nfunction kgrCalculationStateLabel(input: { volume: unknown; allintitle: unknown; consistency?: unknown }): string {\r\n  const volume = profileNonNegativeNumber(input.volume);\r\n  if (volume === null) return isMeaningfulProfileValue(input.volume) ? "Medição insuficiente" : "Aguardando volume";\r\n  if (volume === 0) return "Volume zero";\r\n\r\n  const allintitle = profileNonNegativeNumber(input.allintitle);\r\n  if (allintitle === null) return isMeaningfulProfileValue(input.allintitle) ? "Medição insuficiente" : "Aguardando Resultado";\r\n  if (calculateKgrFromMetrics(volume, allintitle) === null) return "Medição insuficiente";\r\n\r\n  const consistency = normalizeProfileMarker(String(input.consistency || ""));\r\n  if (consistency === "incompatibilidade comprovada") return "Medição inconsistente";\r\n  return "Calculável";\r\n}\r\n\r\nfunction profileAdsCompetition(value: unknown): string | null {\r\n  if (!isMeaningfulProfileValue(value)) return null;\r\n\r\n  const normalized = normalizeProfileMarker(String(value));\r\n\r\n  return (\r\n    {\r\n      low: "Baixa",\r\n      medium: "Média",\r\n      high: "Alta",\r\n    } as Record<string, string>\r\n  )[normalized] || String(value);\r\n}\r\n\r\nfunction funnelPresentationValue(value: unknown): unknown {\r\n  return normalizeProfileMarker(String(value || "")) === "nao classificavel" ? "Indefinido" : value;\r\n}\r\n\r\nfunction profileTargeting(value: unknown): string {\r\n  const item = recordValue(value);\r\n  if (!item) return typeof value === "string" ? value : "Não informado";\r\n  const languageValue = item.languageCode || item.language;\r\n  const languageMarker = languageValue ? normalizeProfileMarker(String(languageValue)).replace(/[\\s_-]/g, "") : "";\r\n  const language = languageValue\r\n    ? ["pt", "ptbr", "portugues", "languageconstants/1014"].includes(languageMarker) ? "Português" : "Idioma configurado"\r\n    : null;\r\n  const geoTargetConstants = Array.isArray(item.geoTargetConstants) ? item.geoTargetConstants : [];\r\n  const locationValue = item.countryCode || item.country || item.locationCode || geoTargetConstants[0];\r\n  const locationMarker = locationValue ? normalizeProfileMarker(String(locationValue)).replace(/\\s+/g, "") : "";\r\n  const location = locationValue\r\n    ? ["br", "brasil", "2076", "geotargetconstants/2076"].includes(locationMarker) ? "Brasil" : "Local configurado"\r\n    : null;\r\n  const networkValue = item.keywordPlanNetwork || item.network;\r\n  const networkMarker = networkValue ? normalizeProfileMarker(String(networkValue)).replace(/[\\s_-]/g, "") : "";\r\n  const network = networkValue\r\n    ? networkMarker === "googlesearch" ? "Google Search" : networkMarker === "googlesearchandpartners" ? "Google Search + parceiros" : "Rede configurada"\r\n    : null;\r\n  return [language, location, network].filter(Boolean).join(" · ") || "Não informado";\r\n}\r\n\r\nfunction profileJson(value: unknown): string {\r\n  try {\r\n    return JSON.stringify(value, null, 2);\r\n  } catch {\r\n    return String(value);\r\n  }\r\n}\r\n\r\nfunction normalizeProfileMarker(value: string): string {\r\n  return value.trim().toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "")'... 83163 more characters,
+    expected: /formatGoogleAdsCpcMicros\(/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests\minerador-google-ads-demand.test.mts:148:1
+✖ Volume continua sendo a única etapa e relê a medição persistida para refletir CPC (1.0825ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /select\("id,volume_search,kgr_score,volume_source,analise_semantica"\)/. Input:
+  
+  '"use client";\r\n' +
+    '\r\n' +
+    'import { useState, useEffect, useRef, Fragment, useMemo, useCallback, type DragEvent, type ReactNode } from "react";\r\n' +
+    'import Papa from "papaparse";\r\n' +
+    'import { \r\n' +
+    '  Loader2, \r\n' +
+    '  ArrowUpDown,\r\n' +
+    '  Trash2,\r\n' +
+    '  X,\r\n' +
+    '  Plus,\r\n' +
+    '  RefreshCw,\r\n' +
+    '  FolderPlus,\r\n' +
+    '  ArrowRight,\r\n' +
+    '  AlertTriangle,\r\n' +
+    '  BarChart3,\r\n' +
+    '  Check,\r\n' +
+    '  FileSpreadsheet,\r\n' +
+    '  Brain,\r\n' +
+    '  Search,\r\n' +
+    '  ChevronDown,\r\n' +
+    '  ChevronRight,\r\n' +
+    '  Building2,\r\n' +
+    '  MoreHorizontal,\r\n' +
+    '  CheckCheck,\r\n' +
+    '} from "lucide-react";\r\n' +
+    'import { HistoryControls } from "@/components/editorial/history-controls";\r\n' +
+    'import { useLocalHistory } from "@/components/editorial/use-local-history";\r\n' +
+    'import { useBrand } from "@/components/brand-context";\r\n' +
+    'import { AppMenu } from "@/components/app-menu";\r\n' +
+    'import { InfoHint } from "@/components/info-hint";\r\n' +
+    'import { InlineLabelCluster } from "@/components/inline-label-cluster";\r\n' +
+    'import { KeywordDnaPanel } from "@/components/editorial/dna-panels";\r\n' +
+    'import { VinculoPageTypeSelect, VinculoPostSelect, VinculoSubjectFields, VinculoSubjectSelect } from "@/components/editorial/vinculo-selects";\r\n' +
+    'import { useGlobalTopbarControlsRegistration, type GlobalTopbarModuleControls } from "@/components/global-topbar";\r\n' +
+    'import { MineradorLastOrganizationRestorer } from "./last-organization-restorer";\r\n' +
+    'import { DeleteConfirmation, PublishedDeleteConfirmation, RecoveryAction } from "@/components/lifecycle/delete-confirmation";\r\n' +
+    'import type { DeletionImpactEntry } from "@/lib/lifecycle";\r\n' +
+    'import { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";\r\n' +
+    'import { useNoticeCenter } from "@/components/global-notice-center";\r\n' +
+    'import { useRouter } from "next/navigation";\r\n' +
+    'import {\r\n' +
+    '  autoClassifyIntent,\r\n' +
+    '  autoDetectNiche,\r\n' +
+    '  deriveLogicalKeywordDna,\r\n' +
+    '  mergeLogicalKeywordSemantic,\r\n' +
+    '} from "@/lib/arquiteto/keyword-dna-engine";\r\n' +
+    'import { persistMineradorArquitetoHandoff } from "@/lib/arquiteto/canonical-workspace";\r\n' +
+    'import { buildMineradorSiteSyncPlan, loadMineradorSiteSyncSnapshot, uniqueSiteSyncCandidates, type MineradorSiteSyncCandidate, type MineradorSiteSyncPlan } from "@/lib/minerador/site-sync-adapter";\r\n' +
+    'import { classifyKgrMeasurement, hasLegacyPendingKgrApplicability, isInKgrInterestVolumeRange, KGR_INTEREST_VOLUME_RANGE_LABEL, kgrApplicabilityLabel, kgrDecisionLabel, kgrMeasurementLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";\r\n' +
+    'import { describeKgrApplicabilityBatch, planKgrApplicabilityBatch } from "@/lib/minerador/kgr-applicability-batch";\r\n' +
+    'import { describeHumanReviewCompletionBatch, planHumanReviewCompletionBatch } from "@/lib/minerador/human-review-completion-batch";\r\n' +
+    'import { applyHumanReviewField, applyHumanReviewKgrApplicability, canCompleteHumanReview, completeHumanReview, humanReviewRecord, isHumanReviewCompleted, type HumanReviewAction } from "@/lib/minerador/human-review";\r\n' +
+    'import { evaluateMineradorArquitetoHandoffBatch } from "@/lib/minerador/arquiteto-handoff-gates";\r\n' +
+    'import { describeMineradorResultsBatchPlan, planMineradorResultsBatch } from "@/lib/minerador/results-batch-plan";\r\n' +
+    'import { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";\r\n' +
+    'import { assessVolumeKgrConsistency, hasExplicitZeroMeasurement, volumeKgrConsistencyLabel, type VolumeKgrConsistency } from "@/lib/minerador/volume-kgr-consistency";\r\n' +
+    'import { combinedKgrFilterValue, combinedVinculoFilterValue, deriveMineradorTableRows, KGR_FILTER_GROUPS, parseCombinedKgrFilter, parseCombinedVinculoFilter, PROCESS_RUN_FILTER_OPTIONS, VINCULO_FILTER_GROUPS } from "@/lib/minerador/table-view";\r\n' +
+    'import { processorCpcCell, processorKdCell, processorResultsCell, processorVolumeCell, type ProcessorCellState, type ProcessorRunFilter } from "@/lib/minerador/processor-table-cells";\r\n' +
+    'import { BATCH_STOPPED_BY_USER_REASON, formatBatchElapsed, formatBatchFailures, formatBatchProgress, formatBatchProgressCompact, formatBatchProgressDetail, formatBatchSummary, reclassifyBatchItemsAsFailed, runProgressiveBatch, type BatchChunkResult, type BatchItemOutcome, type BatchProgressSnapshot, type ProgressiveBatchInput } from "@/lib/ui/batch-progress";\r\n' +
+    'import { NATIVE_SELECT_THEME } from "@/lib/ui/native-select-theme";\r\n' +
+    'import { mineradorLastOrganizationKey, mineradorOrganizationButtonSummary, mineradorOrganizationLabels, type MineradorOrganizationValues } from "@/lib/minerador/last-organization";\r\n' +
+    'import { primaryKeywordPolicyLabel, readPrimaryKeywordPolicy, setPrimaryKeywordPolicy, type PrimaryKeywordPolicy } from "@/lib/minerador/primary-keyword-policy";\r\n' +
+    'import { keywordPageTypeLabel, keywordPageTypeStanding, setKeywordPageType } from "@/lib/minerador/keyword-page-type";\r\n' +
+    'import { KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL, keywordVinculoChoiceLabels, keywordVinculoChoicesSummary, resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";\r\n' +
+    'import { isKeywordSubjectActorId, setKeywordSubject, withdrawKeywordSubject } from "@/lib/minerador/keyword-subject";\r\n' +
+    'import { subjectDestinationCatalogKey, validateSubjectDestination, type SubjectDestinationCatalogHit } from "@/lib/minerador/subject-destination";\r\n' +
+    'import { planVinculoBatchChoices, VINCULO_BATCH_READBACK_COLUMNS, type VinculoBatchReadbackRow } from "@/lib/minerador/vinculo-batch";\r\n' +
+    'import {\r\n' +
+    '  chooseVinculoBatchSelect,\r\n' +
+    '  commonVinculoSelectValues,\r\n' +
+    '  describeVinculoBatchChoicesConfirmation,\r\n' +
+    '  describeVinculoBatchChoicesResult,\r\n' +
+    '  EMPTY_VINCULO_BATCH_CHOICES,\r\n' +
+    '  isSubjectDeclareChoice,\r\n' +
+    '  keywordsWithoutLogic,\r\n' +
+    '  describeSubjectSkipped,\r\n' +
+    '  partitionSubjectKeywords,\r\n' +
+    '  pickKeywordSubjectKeys,\r\n' +
+    '  VINCULO_BATCH_POST_DISABLED_BY_SUBJECT,\r\n' +
+    '  VINCULO_MIXED_LABEL,\r\n' +
+    '  vinculoBatchActionsFromChoices,\r\n' +
+    '  vinculoBatchPostDisabled,\r\n' +
+    '  vinculoBatchSelectValue,\r\n' +
+    '  type VinculoBatchChoiceGroupKey,\r\n' +
+    '  type VinculoBatchChoices,\r\n' +
+    '  vinculoReadbackConfirmed,\r\n' +
+    '} from "@/lib/minerador/vinculo-screen";\r\n' +
+    'import { applyFunnelQualification, classifyKeywordFunnel } from "@/lib/minerador/keyword-qualification";\r\n' +
+    'import { classifyVolumeReadback, readVolumeEligibility, volumeEligibilityLabel, type VolumeReadbackOutcome } from "@/lib/minerador/volume-eligibility";\r\n' +
+    'import { formatGoogleAdsCpcTableValue } from "@/lib/minerador/google-ads-demand";\r\n' +
+    'import { buildLogicalOutputContract, buildLogicalProcessorMetadata, hasCompleteLogicalOutputContract, hasCurrentLogicalProcessorMetadata, logicalSemanticRecordsEqual, validateLogicalKeywordOutput } from "@/lib/minerador/logical-processor";\n' +
+    'import { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";\n' +
+    'import { MINERADOR_KEYWORDS_TABLE, MINERADOR_LISTING_VIEW, withMeasurementSeries } from "@/lib/minerador/listing-payload";\r\n' +
+    'import { readCanonicalKeywordDna, readLogicalIntentLabel, readLogicalNiche } from "@/lib/minerador/logical-read-model";\r\n' +
+    'import { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";\r\n' +
+    'import { resolveMineradorProcessState, type MineradorAttemptState, type MineradorProcessAttempt, type MineradorProcessName } from "@/lib/minerador/process-state";\r\n' +
+    'import { type SemanticConsolidationDraft } from "@/lib/minerador/semantic-consolidation-draft";\r\n' +
+    'import { candidateFromCatalogMatch, deriveSitePageStructure, matchKeywordToCatalog, sitePageRoleLabel, type SiteCatalogEntryLike } from "@/lib/minerador/site-catalog-match";\r\n' +
+    'import { isConclusiveSerpEvidence, type SerpSemanticEvidence } from "@/lib/minerador/serp-semantic-evidence";\r\n' +
+    'import { KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE, semanticDraftFromQualification, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";\r\n' +
+    'import { createIndexedDbQualificationVersionCacheStorage, qualificationVersionCachePruneForListing, resolveCurrentKeywordSemanticQualificationsWithCache, type QualificationVersionCachePrune } from "@/lib/minerador/semantic-qualification-version-cache";\r\n' +
+    'import { applyPublicationLinkAction, readPublicationLink, readSiteOrigin, type PublicationLinkEvidence } from "@/lib/minerador/publication-link";\r\n' +
+    'import {\r\n' +
+    '  keywordRecoveryRemainingLabel,\r\n' +
+    '  resolveKeywordPublication,\r\n' +
+    '} from "@/lib/minerador/keyword-lifecycle";\r\n' +
+    'import { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS, MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus, type EditorialKeywordStatus } from "@/lib/minerador/editorial-status";\r\n' +
+    'import { applyApproval, resolveApprovalReadiness, VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE } from "@/lib/minerador/approved-package";\r\n' +
+    'import type { KeywordTableOrderMode } from "@/lib/minerador/manual-order";\r\n' +
+    'import { manualImportListaId, resolveLegacyCsvSilo } from "@/lib/minerador/legacy-import";\r\n' +
+    'import { KeywordTableBulkBarShell } from "./keyword-table/keyword-table-bulk-bar-shell";\r\n' +
+    'import { KeywordTableEmptyState } from "./keyword-table/keyword-table-empty-state";\r\n' +
+    'import { KeywordTableHeader } from "./keyword-table/keyword-table-header";\r\n' +
+    'import { KeywordTableOrganizeButton } from "./keyword-table/keyword-table-organize-button";\r\n' +
+    'import { KeywordSelectionCell, KeywordSelectionHeader } from "./keyword-table/keyword-table-selection";\r\n' +
+    'import { KeywordTableShell } from "./keyword-table/keyword-table-shell";\r\n' +
+    'import { useKeywordTableSelection } from "./keyword-table/use-keyword-table-selection";\r\n' +
+    'import { keywordTableMinimumWidth, useKeywordTableResponsiveWidths } from "./keyword-table/use-keyword-table-responsive-widths";\r\n' +
+    'import { KeywordTableDragHandle, KeywordTableOrderModeSelect } from "./keyword-table/keyword-table-order";\r\n' +
+    'import { useKeywordTableOrder } from "./keyword-table/use-keyword-table-order";\r\n' +
+    'import { KeywordTableColumnResizeHandle, KeywordTableRowResizeHandle, useKeywordTableColumnResize, useKeywordTableRowResize } from "./keyword-table/keyword-table-resize";\r\n' +
+    'import { MineradorProcessAction } from "./minerador-process-action";\r\n' +
+    'import { DiscoverySourceControls, type DiscoverySourceControlsHandle, type DiscoverySourceResponse } from "./discovery/discovery-source-controls";\r\n' +
+    'import { DiscoverySourceTopbarActions } from "./disc'... 322145 more characters
+  
+      at TestContext.<anonymous> (file:///C:/Users/scalb/Documentos/adalba-pro/minerador-key/tests/minerador-google-ads-demand.test.mts:151:10)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:787:18)
+      at Test.postRun (node:internal/test_runner/test:1247:19)
+      at Test.run (node:internal/test_runner/test:1175:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '"use client";\r\n\r\nimport { useState, useEffect, useRef, Fragment, useMemo, useCallback, type DragEvent, type ReactNode } from "react";\r\nimport Papa from "papaparse";\r\nimport { \r\n  Loader2, \r\n  ArrowUpDown,\r\n  Trash2,\r\n  X,\r\n  Plus,\r\n  RefreshCw,\r\n  FolderPlus,\r\n  ArrowRight,\r\n  AlertTriangle,\r\n  BarChart3,\r\n  Check,\r\n  FileSpreadsheet,\r\n  Brain,\r\n  Search,\r\n  ChevronDown,\r\n  ChevronRight,\r\n  Building2,\r\n  MoreHorizontal,\r\n  CheckCheck,\r\n} from "lucide-react";\r\nimport { HistoryControls } from "@/components/editorial/history-controls";\r\nimport { useLocalHistory } from "@/components/editorial/use-local-history";\r\nimport { useBrand } from "@/components/brand-context";\r\nimport { AppMenu } from "@/components/app-menu";\r\nimport { InfoHint } from "@/components/info-hint";\r\nimport { InlineLabelCluster } from "@/components/inline-label-cluster";\r\nimport { KeywordDnaPanel } from "@/components/editorial/dna-panels";\r\nimport { VinculoPageTypeSelect, VinculoPostSelect, VinculoSubjectFields, VinculoSubjectSelect } from "@/components/editorial/vinculo-selects";\r\nimport { useGlobalTopbarControlsRegistration, type GlobalTopbarModuleControls } from "@/components/global-topbar";\r\nimport { MineradorLastOrganizationRestorer } from "./last-organization-restorer";\r\nimport { DeleteConfirmation, PublishedDeleteConfirmation, RecoveryAction } from "@/components/lifecycle/delete-confirmation";\r\nimport type { DeletionImpactEntry } from "@/lib/lifecycle";\r\nimport { useSupabaseSession as useSession } from "@/components/auth/supabase-session-context";\r\nimport { useNoticeCenter } from "@/components/global-notice-center";\r\nimport { useRouter } from "next/navigation";\r\nimport {\r\n  autoClassifyIntent,\r\n  autoDetectNiche,\r\n  deriveLogicalKeywordDna,\r\n  mergeLogicalKeywordSemantic,\r\n} from "@/lib/arquiteto/keyword-dna-engine";\r\nimport { persistMineradorArquitetoHandoff } from "@/lib/arquiteto/canonical-workspace";\r\nimport { buildMineradorSiteSyncPlan, loadMineradorSiteSyncSnapshot, uniqueSiteSyncCandidates, type MineradorSiteSyncCandidate, type MineradorSiteSyncPlan } from "@/lib/minerador/site-sync-adapter";\r\nimport { classifyKgrMeasurement, hasLegacyPendingKgrApplicability, isInKgrInterestVolumeRange, KGR_INTEREST_VOLUME_RANGE_LABEL, kgrApplicabilityLabel, kgrDecisionLabel, kgrMeasurementLabel, kgrTechnicalTone, readKgrApplicability, type KgrApplicability } from "@/lib/minerador/kgr-applicability";\r\nimport { describeKgrApplicabilityBatch, planKgrApplicabilityBatch } from "@/lib/minerador/kgr-applicability-batch";\r\nimport { describeHumanReviewCompletionBatch, planHumanReviewCompletionBatch } from "@/lib/minerador/human-review-completion-batch";\r\nimport { applyHumanReviewField, applyHumanReviewKgrApplicability, canCompleteHumanReview, completeHumanReview, humanReviewRecord, isHumanReviewCompleted, type HumanReviewAction } from "@/lib/minerador/human-review";\r\nimport { evaluateMineradorArquitetoHandoffBatch } from "@/lib/minerador/arquiteto-handoff-gates";\r\nimport { describeMineradorResultsBatchPlan, planMineradorResultsBatch } from "@/lib/minerador/results-batch-plan";\r\nimport { canonicalIntentLabel, normalizeIntentKey } from "@/lib/minerador/intent-taxonomy";\r\nimport { assessVolumeKgrConsistency, hasExplicitZeroMeasurement, volumeKgrConsistencyLabel, type VolumeKgrConsistency } from "@/lib/minerador/volume-kgr-consistency";\r\nimport { combinedKgrFilterValue, combinedVinculoFilterValue, deriveMineradorTableRows, KGR_FILTER_GROUPS, parseCombinedKgrFilter, parseCombinedVinculoFilter, PROCESS_RUN_FILTER_OPTIONS, VINCULO_FILTER_GROUPS } from "@/lib/minerador/table-view";\r\nimport { processorCpcCell, processorKdCell, processorResultsCell, processorVolumeCell, type ProcessorCellState, type ProcessorRunFilter } from "@/lib/minerador/processor-table-cells";\r\nimport { BATCH_STOPPED_BY_USER_REASON, formatBatchElapsed, formatBatchFailures, formatBatchProgress, formatBatchProgressCompact, formatBatchProgressDetail, formatBatchSummary, reclassifyBatchItemsAsFailed, runProgressiveBatch, type BatchChunkResult, type BatchItemOutcome, type BatchProgressSnapshot, type ProgressiveBatchInput } from "@/lib/ui/batch-progress";\r\nimport { NATIVE_SELECT_THEME } from "@/lib/ui/native-select-theme";\r\nimport { mineradorLastOrganizationKey, mineradorOrganizationButtonSummary, mineradorOrganizationLabels, type MineradorOrganizationValues } from "@/lib/minerador/last-organization";\r\nimport { primaryKeywordPolicyLabel, readPrimaryKeywordPolicy, setPrimaryKeywordPolicy, type PrimaryKeywordPolicy } from "@/lib/minerador/primary-keyword-policy";\r\nimport { keywordPageTypeLabel, keywordPageTypeStanding, setKeywordPageType } from "@/lib/minerador/keyword-page-type";\r\nimport { KEYWORD_VINCULO_SUBJECT_DECLARED_WITHOUT_NOTE_LABEL, keywordVinculoChoiceLabels, keywordVinculoChoicesSummary, resolveKeywordVinculo } from "@/lib/minerador/keyword-vinculo";\r\nimport { isKeywordSubjectActorId, setKeywordSubject, withdrawKeywordSubject } from "@/lib/minerador/keyword-subject";\r\nimport { subjectDestinationCatalogKey, validateSubjectDestination, type SubjectDestinationCatalogHit } from "@/lib/minerador/subject-destination";\r\nimport { planVinculoBatchChoices, VINCULO_BATCH_READBACK_COLUMNS, type VinculoBatchReadbackRow } from "@/lib/minerador/vinculo-batch";\r\nimport {\r\n  chooseVinculoBatchSelect,\r\n  commonVinculoSelectValues,\r\n  describeVinculoBatchChoicesConfirmation,\r\n  describeVinculoBatchChoicesResult,\r\n  EMPTY_VINCULO_BATCH_CHOICES,\r\n  isSubjectDeclareChoice,\r\n  keywordsWithoutLogic,\r\n  describeSubjectSkipped,\r\n  partitionSubjectKeywords,\r\n  pickKeywordSubjectKeys,\r\n  VINCULO_BATCH_POST_DISABLED_BY_SUBJECT,\r\n  VINCULO_MIXED_LABEL,\r\n  vinculoBatchActionsFromChoices,\r\n  vinculoBatchPostDisabled,\r\n  vinculoBatchSelectValue,\r\n  type VinculoBatchChoiceGroupKey,\r\n  type VinculoBatchChoices,\r\n  vinculoReadbackConfirmed,\r\n} from "@/lib/minerador/vinculo-screen";\r\nimport { applyFunnelQualification, classifyKeywordFunnel } from "@/lib/minerador/keyword-qualification";\r\nimport { classifyVolumeReadback, readVolumeEligibility, volumeEligibilityLabel, type VolumeReadbackOutcome } from "@/lib/minerador/volume-eligibility";\r\nimport { formatGoogleAdsCpcTableValue } from "@/lib/minerador/google-ads-demand";\r\nimport { buildLogicalOutputContract, buildLogicalProcessorMetadata, hasCompleteLogicalOutputContract, hasCurrentLogicalProcessorMetadata, logicalSemanticRecordsEqual, validateLogicalKeywordOutput } from "@/lib/minerador/logical-processor";\nimport { deriveLogicalKeywordBatchItem } from "@/lib/minerador/logical-batch";\nimport { MINERADOR_KEYWORDS_TABLE, MINERADOR_LISTING_VIEW, withMeasurementSeries } from "@/lib/minerador/listing-payload";\r\nimport { readCanonicalKeywordDna, readLogicalIntentLabel, readLogicalNiche } from "@/lib/minerador/logical-read-model";\r\nimport { resolveCanonicalKeywordSnapshot } from "@/lib/minerador/canonical-keyword-snapshot";\r\nimport { resolveMineradorProcessState, type MineradorAttemptState, type MineradorProcessAttempt, type MineradorProcessName } from "@/lib/minerador/process-state";\r\nimport { type SemanticConsolidationDraft } from "@/lib/minerador/semantic-consolidation-draft";\r\nimport { candidateFromCatalogMatch, deriveSitePageStructure, matchKeywordToCatalog, sitePageRoleLabel, type SiteCatalogEntryLike } from "@/lib/minerador/site-catalog-match";\r\nimport { isConclusiveSerpEvidence, type SerpSemanticEvidence } from "@/lib/minerador/serp-semantic-evidence";\r\nimport { KEYWORD_SEMANTIC_QUALIFICATION_ARTIFACT_TYPE, semanticDraftFromQualification, type KeywordSemanticQualification } from "@/lib/minerador/keyword-semantic-qualification";\r\nimport { createIndexedDbQualificationVersionCacheStorage, qualificationVersionCachePruneForListing, resolveCurrentKeywordSemanticQualificationsWithCache, type QualificationVersionCachePrune } from "@/lib/minerador/semantic-qualification-version-cache";\r\nimport { applyPublicationLinkAction, readPublicationLink, readSiteOrigin, type PublicationLinkEvidence } from "@/lib/minerador/publication-link";\r\nimport {\r\n  keywordRecoveryRemainingLabel,\r\n  resolveKeywordPublication,\r\n} from "@/lib/minerador/keyword-lifecycle";\r\nimport { isLegacyPublishedStatus, MINERADOR_EDITORIAL_STATUS_OPTIONS, MINERADOR_EDITORIAL_STATUSES, resolveEditorialKeywordStatus, type EditorialKeywordStatus } from "@/lib/minerador/editorial-status";\r\nimport { applyApproval, resolveApprovalReadiness, VOLUME_PROCESSED_WITHOUT_AVERAGE_NOTE } from "@/lib/minerador/approved-package";\r\nimport type { KeywordTableOrderMode } from "@/lib/minerador/manual-order";\r\nimport { manualImportListaId, resolveLegacyCsvSilo } from "@/lib/minerador/legacy-import";\r\nimport { KeywordTableBulkBarShell } from "./keyword-table/keyword-table-bulk-bar-shell";\r\nimport { KeywordTableEmptyState } from "./keyword-table/keyword-table-empty-state";\r\nimport { KeywordTableHeader } from "./keyword-table/keyword-table-header";\r\nimport { KeywordTableOrganizeButton } from "./keyword-table/keyword-table-organize-button";\r\nimport { KeywordSelectionCell, KeywordSelectionHeader } from "./keyword-table/keyword-table-selection";\r\nimport { KeywordTableShell } from "./keyword-table/keyword-table-shell";\r\nimport { useKeywordTableSelection } from "./keyword-table/use-keyword-table-selection";\r\nimport { keywordTableMinimumWidth, useKeywordTableResponsiveWidths } from "./keyword-table/use-keyword-table-responsive-widths";\r\nimport { KeywordTableDragHandle, KeywordTableOrderModeSelect } from "./keyword-table/keyword-table-order";\r\nimport { useKeywordTableOrder } from "./keyword-table/use-keyword-table-order";\r\nimport { KeywordTableColumnResizeHandle, KeywordTableRowResizeHandle, useKeywordTableColumnResize, useKeywordTableRowResize } from "./keyword-table/keyword-table-resize";\r\nimport { MineradorProcessAction } from "./minerador-process-action";\r\nimport { DiscoverySourceControls, type DiscoverySourceControlsHandle, type DiscoverySourceResponse } from "./discovery/discovery-source-controls";\r\nimport { DiscoverySourceTopbarActions } from "./disc'... 322145 more characters,
+    expected: /select\("id,volume_search,kgr_score,volume_source,analise_semantica"\)/,
+    operator: 'match',
+    diff: 'simple'
+  }

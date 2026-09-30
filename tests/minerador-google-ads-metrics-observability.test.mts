@@ -4,7 +4,7 @@ import test from "node:test";
 import { GoogleAdsError } from "../lib/google/ads/errors.ts";
 import { buildGoogleAdsMetricsFailure, GOOGLE_ADS_HISTORICAL_METRICS_ENDPOINT, type GoogleAdsMetricsExecutionState } from "../lib/minerador/google-ads-metrics-diagnostics.ts";
 
-const routePath = new URL("../app/api/minerador/marcas/[brandId]/google-ads/metricas-keywords/route.ts", import.meta.url);
+const routePath = new URL("../lib/server/minerador-google-ads-metrics-http.ts", import.meta.url);
 
 function state(stage: GoogleAdsMetricsExecutionState["internalStage"], overrides: Partial<GoogleAdsMetricsExecutionState> = {}): GoogleAdsMetricsExecutionState {
   return {
