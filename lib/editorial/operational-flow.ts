@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ArticleDNA, ContentDocument, SiloDNA, SiloPage, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts.ts";
-import { ArticleArchitectureStatusSchema, ArticleControlContextSchema, ArticleKeywordReferenceSchema, ArticleKgrIdentitySchema, EditorialUnitTypeSchema, KeywordUrlRelationshipSchema, VersionedContentPlanSchema, VersionedSiloPageSchema } from "../arquiteto/contracts.ts";
+import { ArticleArchitectureStatusSchema, ArticleControlContextSchema, ArticleKeywordReferenceSchema, ArticleKgrIdentitySchema, EditorialUnitTypeSchema, KeywordUrlRelationshipSchema, VersionedSiloPageSchema } from "../arquiteto/contracts.ts";
 import { SerpFormationAssessmentSchema } from "../arquiteto/serp-formation.ts";
 import type { ArticleInternalLinks, ResolvedSiloContext } from "../arquiteto/radar-handoff-context.ts";
 import type { ArchitectSerpProvenance } from "../arquiteto/radar-handoff-gate.ts";
@@ -14,24 +14,18 @@ import { isArticleKeywordCountValid } from "../arquiteto/domain-rules.ts";
  * importá-la do módulo dono. Era o último fio da dependência.
  */
 import { RadarHydrationSnapshotSchema, createRadarHydrationSnapshot, type RadarHydrationSnapshot, type RadarHydrationSourceKeyword } from "../radar/hydration.ts";
-import { RadarPlannerHandoffSchema, VersionedRadarAnalysisSchema, type RadarPlannerHandoff } from "../radar/analysis-contracts.ts";
+import { VersionedRadarAnalysisSchema } from "../radar/analysis-contracts.ts";
 import { buildArticleControlContext } from "../arquiteto/strategic-context.ts";
 
 export const WorkflowOriginSchema = z.enum(["real", "local"]);
 export const ArchitectWorkflowStateSchema = z.enum(["draft", "analyzing", "conflicts", "awaiting_approval", "approved", "blocked", "sent_radar"]);
 /*
- * ===== RADAR_TO_WRITER_HANDOFF_1 · §18 · O DESTINO MUDOU DE NOME =====
+ * ===== O DESTINO DO RADAR É O REDATOR =====
  *
- * `sent_writer` entra ao lado de `sent_planner`, e não no lugar dele. Itens
- * enviados ao Planejador antes deste gate existem no banco com aquele estado;
- * retirá-lo do enum faria a leitura recusar a linha inteira e o artigo sumiria
- * da planilha de quem opera.
- *
- * O fluxo NOVO nunca produz `sent_planner`: ele é histórico legível, não
- * destino disponível.
+ * `sent_planner` saiu com a aposentadoria do Planejador (2026-10-01): o
+ * preflight confirmou zero linhas com esse estado.
  */
-export const RadarWorkflowStateSchema = z.enum(["imported", "research_pending", "researching", "needs_review", "conflicts", "awaiting_approval", "approved", "sent_planner", "sent_writer"]);
-export const PlannerWorkflowStateSchema = z.enum(["draft", "planning", "pending", "awaiting_review", "approved", "sent_writer"]);
+export const RadarWorkflowStateSchema = z.enum(["imported", "research_pending", "researching", "needs_review", "conflicts", "awaiting_approval", "approved", "sent_writer"]);
 export const PublicationWorkflowStateSchema = z.enum(["draft", "writing", "awaiting_review", "in_review", "approved", "ready_to_export", "queued", "exported", "published", "update_due", "blocked", "archived"]);
 export const PublicationHistoryEntrySchema = z.object({
   id: z.string(),
@@ -93,24 +87,8 @@ export const RadarItemSchema = z.object({
     }).strict()),
   }).strict().nullable().optional(),
 });
-export const PlannerItemSchema = z.object({
-  id: z.string(), brandId: z.string(), articleId: z.string(), radarItemId: z.string(), title: z.string(), slug: z.string(), siloId: z.string(),
-  format: z.string(), intent: z.string(), state: PlannerWorkflowStateSchema, contentPlanVersionId: z.string().nullable(), importedAt: z.string().datetime({ offset: true }), updatedAt: z.string().datetime({ offset: true }), origin: WorkflowOriginSchema, lockVersion: z.number().int().positive().default(1),
-  unitType: EditorialUnitTypeSchema.default("article"), radarHandoff: RadarPlannerHandoffSchema.optional(),
-});
 export const OperationalPublicationSchema = z.object({
   id: z.string(), brandId: z.string(), articleId: z.string(),
-  /**
-   * ORIGEM PLANEJADOR — nula quando o documento veio do Radar.
-   *
-   * Eram obrigatorios, e isso impedia documento de origem Radar de entrar em
-   * Publicacoes. O banco ja aceitava nulo (`content_plan_version_id` nulavel,
-   * e `planner_item_id` nem existe como coluna): o bloqueio era so aqui.
-   *
-   * Aditivo: registro antigo com os dois preenchidos continua valido.
-   */
-  plannerItemId: z.string().nullable().default(null),
-  contentPlanVersionId: z.string().nullable().default(null),
   /** ORIGEM RADAR — a analise que produziu o documento, quando for o caso. */
   radarOrigin: z.object({
     analysisVersionId: z.string().min(1),
@@ -142,17 +120,14 @@ export const OperationalPublicationSchema = z.object({
   history: z.array(PublicationHistoryEntrySchema).default([]),
 }).superRefine((publication, context) => {
   /*
-   * TODO REGISTRO DECLARA UMA ORIGEM.
-   *
-   * A obrigatoriedade do plano garantia isso por acidente. Removida ela, o
-   * que sustenta a garantia e esta regra: plano OU Radar. Nenhuma das duas e
-   * registro orfao — ninguem saberia de onde o conteudo veio.
+   * TODO REGISTRO DECLARA UMA ORIGEM — e, desde a aposentadoria do
+   * Planejador (2026-10-01), a única origem é o pacote do Radar.
    */
-  if (!publication.contentPlanVersionId && !publication.radarOrigin) {
+  if (!publication.radarOrigin) {
     context.addIssue({
       code: "custom",
       path: ["radarOrigin"],
-      message: "O registro precisa declarar uma origem: plano editorial ou pacote do Radar.",
+      message: "O registro precisa declarar a origem: o pacote do Radar.",
     });
   }
 });
@@ -169,12 +144,11 @@ export type RadarArticleHandoffContext = {
 };
 
 export type RadarItem = z.infer<typeof RadarItemSchema>;
-export type PlannerItem = z.infer<typeof PlannerItemSchema>;
 export type OperationalPublication = z.infer<typeof OperationalPublicationSchema>;
 
-export const PermissionModuleSchema = z.enum(["marca", "minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes", "administracao"]);
+export const PermissionModuleSchema = z.enum(["marca", "minerador", "arquiteto", "radar", "redator", "publicacoes", "administracao"]);
 export const PermissionActionSchema = z.enum(["view", "comment", "create", "edit", "review", "approve", "export", "publish", "manage"]);
-export const CollaboratorRoleSchema = z.enum(["owner", "brand_admin", "strategist", "analyst", "planner", "writer", "editor", "reviewer", "eeat_specialist", "medical_reviewer", "publisher", "viewer", "external_collaborator"]);
+export const CollaboratorRoleSchema = z.enum(["owner", "brand_admin", "strategist", "analyst", "writer", "editor", "reviewer", "eeat_specialist", "medical_reviewer", "publisher", "viewer", "external_collaborator"]);
 export const ModulePermissionSchema = z.object({ module: PermissionModuleSchema, actions: z.array(PermissionActionSchema) });
 /*
  * DATA DE COLUNA ACEITA DESLOCAMENTO — e não só "Z".
@@ -312,39 +286,11 @@ export function setRadarState(items: RadarItem[], ids: string[], target: RadarIt
   const allowed: Record<RadarItem["state"], RadarItem["state"][]> = {
     imported: ["research_pending"], research_pending: ["researching", "awaiting_approval"], researching: ["needs_review", "conflicts"],
     needs_review: ["awaiting_approval", "conflicts"], conflicts: ["needs_review"], awaiting_approval: ["approved", "needs_review"],
-    /*
-     * §18 · `approved → sent_writer` é a transição do fluxo vigente.
-     *
-     * CORTE 2 · `approved → sent_planner` SAIU. O valor continua no enum
-     * porque linha antiga precisa fazer parse, e `sent_planner → approved`
-     * continua existindo pela mesma razão: um artigo entregue ao Planejador no
-     * fluxo antigo precisa conseguir seguir pelo novo. O que deixou de existir
-     * é o caminho de ENTRADA — nada mais chega a `sent_planner`.
-     */
+    /* §18 · `approved → sent_writer` é a transição do fluxo vigente. */
     approved: ["sent_writer", "needs_review"],
-    sent_planner: ["approved"],
     sent_writer: ["approved"],
   };
   return items.map(item => ids.includes(item.id) && allowed[item.state].includes(target) ? { ...item, state: target, updatedAt: now, lockVersion: item.lockVersion + 1 } : item);
-}
-
-function approvedHandoffForRadarItem(item: RadarItem, brandId: string): RadarPlannerHandoff | undefined {
-  const versions = item.analysisVersions.filter(version => version.payload.status === "approved").sort((left, right) => right.versionNumber - left.versionNumber);
-  for (const version of versions) {
-    const parsed = RadarPlannerHandoffSchema.safeParse(version.payload.plannerPackage);
-    if (parsed.success && parsed.data.status === "APPROVED" && parsed.data.brandId === brandId && parsed.data.radarItemId === item.id && parsed.data.articleId === item.articleId && parsed.data.articleDnaVersionId === item.articleDnaVersionId) return parsed.data;
-  }
-  return undefined;
-}
-
-export function importRadarToPlanner(existing: PlannerItem[], radarItems: RadarItem[], brandId: string, now = new Date().toISOString(), handoffs: Record<string, RadarPlannerHandoff> = {}) {
-  const existingIds = new Set(existing.map(item => item.articleId));
-  const additions = radarItems.filter(item => item.brandId === brandId && item.state === "approved" && !existingIds.has(item.articleId)).map(item => PlannerItemSchema.parse({
-    id: `planner:${item.articleId}`, brandId, articleId: item.articleId, radarItemId: item.id, title: item.title, slug: item.slug,
-    siloId: item.siloId, format: item.format, intent: item.intent, state: "draft", contentPlanVersionId: null,
-    importedAt: now, updatedAt: now, origin: "local", lockVersion: 1, radarHandoff: handoffs[item.id] || approvedHandoffForRadarItem(item, brandId),
-  }));
-  return [...existing, ...additions];
 }
 
 /**
@@ -358,9 +304,7 @@ export function importRadarToPlanner(existing: PlannerItem[], radarItems: RadarI
  *
  * A autoridade agora é ContentDocument + origem Radar + estado atual.
  *
- * `plannerItemId` e `contentPlanVersionId` continuam no schema, **nulos**. Eles
- * descrevem registro antigo; não são exigência de registro novo. A invariante
- * "todo registro declara alguma origem" continua valendo — pelo `radarOrigin`.
+ * A invariante "todo registro declara a origem" vale pelo `radarOrigin`.
  *
  * O v2 é EXIGIDO, não assumido: um documento v1 chegando aqui significaria que
  * alguém reabriu o caminho do Planejador, e o erro precisa dizer isso em vez de
@@ -372,7 +316,6 @@ export function createWriterPublication(input: { brandId: string; document: Cont
   const articleId = document.articleDnaRef.entityId;
   return OperationalPublicationSchema.parse({
     id: `publication:${articleId}`, brandId, articleId,
-    plannerItemId: null, contentPlanVersionId: null,
     /*
      * PROJEÇÃO, e não repasse do objeto inteiro.
      *
@@ -405,8 +348,6 @@ export function validateInvitationAccess(invitation: BrandInvitation, module: z.
 export function createDevelopmentInvitation(input: Omit<BrandInvitation, "id" | "createdAt" | "delivery" | "tokenId" | "status">, now = new Date()) {
   return BrandInvitationSchema.parse({ ...input, id: crypto.randomUUID(), createdAt: now.toISOString(), status: "pending", delivery: "development_adapter", tokenId: crypto.randomUUID() });
 }
-
-export function parseOperationalPlan(value: unknown) { return VersionedContentPlanSchema.parse(value); }
 
 // --- Reconciliacao do workspace do Arquiteto ---
 import { ArchitectArticleDnaRecoverySchema, architectArticleDnaRecoveryKey } from "./architect-recovery.ts";

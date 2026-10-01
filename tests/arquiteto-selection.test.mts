@@ -14,24 +14,30 @@ import { applyCanonicalSiloNames, assignSiloToArticleMembers, canonicalSiloOptio
 
 const visible = ["art-a", "art-b", "art-c", "art-d", "art-e", "art-f"];
 
-test("clique comum alterna somente o artigo e preserva os demais", () => {
-  const added = applyArticleSelectionClick({
+test("clique comum troca a seleção pelo artigo clicado (como no Minerador); clicar de novo no único selecionado limpa", () => {
+  const only = applyArticleSelectionClick({
     selectedIds: new Set(["art-a", "art-c"]),
     visibleIds: visible,
     id: "art-b",
     anchorId: "art-a",
   });
-  assert.deepEqual([...added.selectedIds], ["art-a", "art-c", "art-b"]);
-  assert.equal(added.anchorId, "art-b");
+  assert.deepEqual([...only.selectedIds], ["art-b"]);
+  assert.equal(only.anchorId, "art-b");
 
-  const removed = applyArticleSelectionClick({
-    selectedIds: added.selectedIds,
-    visibleIds: visible,
-    id: "art-c",
-    anchorId: added.anchorId,
-  });
-  assert.deepEqual([...removed.selectedIds], ["art-a", "art-b"]);
-  assert.equal(removed.anchorId, "art-c");
+  const cleared = applyArticleSelectionClick({ selectedIds: only.selectedIds, visibleIds: visible, id: "art-b", anchorId: only.anchorId });
+  assert.deepEqual([...cleared.selectedIds], []);
+
+  // Espaço na caixa (teclado) alterna e preserva os demais.
+  const keyboard = applyArticleSelectionClick({ selectedIds: new Set(["art-a"]), visibleIds: visible, id: "art-c", anchorId: "art-a", keyboard: true });
+  assert.deepEqual([...keyboard.selectedIds], ["art-a", "art-c"]);
+});
+
+test("Shift não move a âncora: o segundo Shift+clique estica a partir da mesma origem", () => {
+  const first = applyArticleSelectionClick({ selectedIds: new Set(["art-b"]), visibleIds: visible, id: "art-d", anchorId: "art-b", shiftKey: true });
+  assert.deepEqual([...first.selectedIds], ["art-b", "art-c", "art-d"]);
+  assert.equal(first.anchorId, "art-b");
+  const second = applyArticleSelectionClick({ selectedIds: first.selectedIds, visibleIds: visible, id: "art-f", anchorId: first.anchorId, shiftKey: true });
+  assert.deepEqual([...second.selectedIds], ["art-b", "art-c", "art-d", "art-e", "art-f"]);
 });
 
 test("linhas de artigos usam a identidade persistente da working copy, não keywords ou cluster", () => {

@@ -215,7 +215,8 @@ describe("Workbench de processos do Arquiteto", () => {
     assert.match(workspace, /persistInternalLinkGraph\(/);
     assert.match(workspace, /lockVersion: linksPersistedLockVersion/);
     assert.match(workspace, /setLinksSaveState\("idle"\);[\s\S]*?updateInternalLinkGraphWorkingCopy/);
-    assert.match(workspace, /Nenhuma mudança estrutural foi feita; uma versão equivalente não será criada/);
+    // Grafo igual ao aprovado não gera versão nova — e isso é aviso, não erro (2026-09-30).
+    assert.match(workspace, /já descreve estas relações: nada novo a confirmar/);
     assert.match(workspace, /linksAuthenticatedActor/);
     assert.match(workspace, /Conflito de versão/);
     assert.match(workspace, /Erro de persistência/);

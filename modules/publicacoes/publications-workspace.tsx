@@ -26,7 +26,7 @@ const field = "h-7 w-full rounded border border-divider bg-surface-subtle px-2 t
 const card = "rounded border border-slate-800 bg-[#090a0e] p-2";
 
 type LegacyPublication = {
-  id: string; brandId: string; articleId: string; plannerItemId: string; contentPlanVersionId: string; documentId: string;
+  id: string; brandId: string; articleId: string; documentId: string;
   title: string; slug: string; siloId: string; hierarchy: string; state: "published" | "approved"; responsible: string | null;
   destination: string | null; createdAt: string; updatedAt: string; origin: "real"; source: "briefing"; unitType: "article";
 };
@@ -53,7 +53,7 @@ export function PublicationsWorkspace() {
   if (!pipeline.snapshot || !selectedBrandId) return <EmptyPipelineState title="Marca sem dados" description={pipeline.error || "Selecione uma marca autorizada."}/>;
 
   const workflowRows: PublicationRow[] = pipeline.operationalPublications.map(item => ({ ...item, source: "workflow" as const }));
-  const legacyRows: PublicationRow[] = pipeline.snapshot.briefings.map(item => ({ id: `briefing:${item.id}`, brandId: selectedBrandId, articleId: item.id, plannerItemId: "", contentPlanVersionId: "", documentId: "", title: item.titulo || item.keyword_principal, slug: item.slug_sugerido || "", siloId: item.silo_id, hierarchy: item.hierarquia || "", state: item.status?.toLowerCase() === "publicado" ? "published" : "approved", responsible: null, destination: item.canonical, createdAt: item.created_at || new Date(0).toISOString(), updatedAt: item.updated_at || item.created_at || new Date(0).toISOString(), origin: "real", source: "briefing", unitType: "article" }));
+  const legacyRows: PublicationRow[] = pipeline.snapshot.briefings.map(item => ({ id: `briefing:${item.id}`, brandId: selectedBrandId, articleId: item.id, documentId: "", title: item.titulo || item.keyword_principal, slug: item.slug_sugerido || "", siloId: item.silo_id, hierarchy: item.hierarquia || "", state: item.status?.toLowerCase() === "publicado" ? "published" : "approved", responsible: null, destination: item.canonical, createdAt: item.created_at || new Date(0).toISOString(), updatedAt: item.updated_at || item.created_at || new Date(0).toISOString(), origin: "real", source: "briefing", unitType: "article" }));
   const allRows = [...workflowRows, ...legacyRows];
   /*
    * ===== A BIBLIOTECA PROJETA `content_documents` =====
@@ -201,7 +201,7 @@ function PublicationPublishForm({ row, busy, onPublish, onNotice, update = false
 }
 
 function PublicationExpanded({ row }: { row: PublicationRow }) {
-  return <dl className="grid gap-2 md:grid-cols-4"><Detail label="Artigo" value={row.articleId}/><Detail label="Unidade" value={row.unitType === "silo_page" ? "Página do silo" : "Artigo"}/><Detail label="Plano editorial" value={row.contentPlanVersionId || "legado"}/><Detail label="Conteúdo do artigo" value={row.documentId || "ausente"}/><Detail label="Destino" value={isWorkflow(row) ? row.destination || "não definido" : row.destination || "não definido"}/><Detail label="URL final" value={isWorkflow(row) ? row.destinationUrl || "não registrada" : "não registrada"}/><Detail label="Última exportação" value={isWorkflow(row) ? row.lastExportFileName || "não exportado" : "não aplicável"}/><div className={card}><strong className="text-[9px] uppercase text-slate-500">Histórico</strong>{isWorkflow(row) && row.history.length ? <ul className="mt-1 space-y-1">{row.history.slice().reverse().map(event => <li key={event.id} className="text-[9px] text-slate-400">{new Date(event.occurredAt).toLocaleString("pt-BR")} · {event.action}{event.destinationUrl ? ` · ${event.destinationUrl}` : ""}</li>)}</ul> : <p className="mt-1 text-[9px] text-slate-600">Nenhum evento operacional registrado.</p>}</div></dl>;
+  return <dl className="grid gap-2 md:grid-cols-4"><Detail label="Artigo" value={row.articleId}/><Detail label="Unidade" value={row.unitType === "silo_page" ? "Página do silo" : "Artigo"}/><Detail label="Conteúdo do artigo" value={row.documentId || "ausente"}/><Detail label="Destino" value={isWorkflow(row) ? row.destination || "não definido" : row.destination || "não definido"}/><Detail label="URL final" value={isWorkflow(row) ? row.destinationUrl || "não registrada" : "não registrada"}/><Detail label="Última exportação" value={isWorkflow(row) ? row.lastExportFileName || "não exportado" : "não aplicável"}/><div className={card}><strong className="text-[9px] uppercase text-slate-500">Histórico</strong>{isWorkflow(row) && row.history.length ? <ul className="mt-1 space-y-1">{row.history.slice().reverse().map(event => <li key={event.id} className="text-[9px] text-slate-400">{new Date(event.occurredAt).toLocaleString("pt-BR")} · {event.action}{event.destinationUrl ? ` · ${event.destinationUrl}` : ""}</li>)}</ul> : <p className="mt-1 text-[9px] text-slate-600">Nenhum evento operacional registrado.</p>}</div></dl>;
 }
 
 function Detail({ label, value }: { label: string; value: string }) { return <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">{label}</dt><dd className="mt-1 break-words text-[10px] text-slate-300">{value}</dd></div>; }

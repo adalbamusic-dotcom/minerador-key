@@ -41,7 +41,7 @@
 import { RadarWriterBundleRecordSchema, type RadarAnalysisVersion, type RadarWriterBundleRecord } from "../radar/analysis-contracts.ts";
 import { radarFrozenObservedAtOfAnalysis } from "../radar/evidence-bundle-runtime.ts";
 import { assertRadarEvidenceBundleIntegrity, radarEvidenceBundleMatchesArticle, type RadarEvidenceBinding, type RadarEvidenceBundle } from "../radar/evidence-bundle.ts";
-import type { RadarPlannerHandoffReadiness } from "../radar/planner-handoff.ts";
+import type { RadarHandoffReadiness } from "../radar/handoff-readiness.ts";
 import { ContentDocumentSchema, type ArticleDNA, type ContentDocument, type SiloDNA, type VersionEnvelope } from "../arquiteto/contracts.ts";
 import { buildRadarDocument, radarDocumentId, radarWriterDocumentIdentity, resolveRadarImportEligibility, type RadarImportOutcome } from "../redator/radar-import.ts";
 import { radarWriterMayNotFor } from "../redator/writer-handoff.ts";
@@ -54,8 +54,8 @@ import { contentHash } from "../arquiteto/versioning.ts";
 export class RadarWriterSendError extends Error {
   readonly code: string;
   readonly status: number;
-  readonly readiness: RadarPlannerHandoffReadiness | null;
-  constructor(code: string, message: string, status = 409, readiness: RadarPlannerHandoffReadiness | null = null) {
+  readonly readiness: RadarHandoffReadiness | null;
+  constructor(code: string, message: string, status = 409, readiness: RadarHandoffReadiness | null = null) {
     super(message);
     this.name = "RadarWriterSendError";
     this.code = code;
@@ -170,7 +170,7 @@ export const radarWriterHandoffPorts: RadarWriterHandoffPorts = {
      * existe em `editorial_artifact_versions` quebraria a chave estrangeira —
      * e, se não quebrasse, mentiria sobre a existência de um plano.
      */
-    await new ContentDocumentRepository().create(brandId, document, articleId, null, articleDnaVersionId, slug, hash, actorId);
+    await new ContentDocumentRepository().create(brandId, document, articleId, articleDnaVersionId, slug, hash, actorId);
   },
 
   async transitionRadar({ id, expectedLock, actorId }) {

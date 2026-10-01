@@ -6,7 +6,7 @@ import { assertEditorialPermission } from "@/lib/server/editorial-authorization"
 import { ArtifactRepository, ContentDocumentRepository, InvitationRepository, PublicationRepository, SerpSnapshotRepository, ViewPreferenceRepository, WorkflowRepository } from "@/lib/server/editorial-repositories";
 import { PersistenceUnavailableError } from "@/lib/server/editorial-db";
 import { PersistedEditorialWorkspaceSchema } from "@/lib/editorial/persistence-contracts";
-import type { PlannerItem, RadarItem } from "@/lib/editorial/operational-flow";
+import type { RadarItem } from "@/lib/editorial/operational-flow";
 
 const QuerySchema = z.string().uuid();
 
@@ -71,8 +71,8 @@ export async function GET(request: NextRequest) {
       return vazio;
     };
 
-    const workflow = valor(0, { radar: [] as RadarItem[], planner: [] as PlannerItem[], incompatible: [] as IncompatibleRecord[] });
-    const artifacts = valor(1, { articles: [], silos: [], plans: [], events: [], incompatible: [] as IncompatibleRecord[] });
+    const workflow = valor(0, { radar: [] as RadarItem[], incompatible: [] as IncompatibleRecord[] });
+    const artifacts = valor(1, { articles: [], silos: [], events: [], incompatible: [] as IncompatibleRecord[] });
     const documents = valor(2, [] as never[]);
     const publications = valor(3, [] as never[]);
     const invitations = valor(4, [] as never[]);
@@ -87,19 +87,19 @@ export async function GET(request: NextRequest) {
     const estado: WorkspaceLoadState = workflowCaiu
       ? "read_failure"
       : resolveLoadState({
-        loadedCount: workflow.radar.length + workflow.planner.length + artifacts.articles.length + artifacts.silos.length,
+        loadedCount: workflow.radar.length + artifacts.articles.length + artifacts.silos.length,
         incompatibleCount: incompatible.length + falhas.length,
       });
 
     const montado = {
-      mode: "server", radarItems: workflow.radar, plannerItems: workflow.planner,
-      articleVersions: artifacts.articles, siloVersions: artifacts.silos, versionEvents: artifacts.events, contentPlans: artifacts.plans,
+      mode: "server", radarItems: workflow.radar,
+      articleVersions: artifacts.articles, siloVersions: artifacts.silos, versionEvents: artifacts.events,
       serpRecords: serp.records, serpReviews: reviews.reviews,
       serpPersistenceMode: serp.available && reviews.available ? "server" : "local_fallback",
       documents, publications, invitations, views, loadedAt: new Date().toISOString(),
       loadDiagnostics: {
         state: estado,
-        loadedCount: workflow.radar.length + workflow.planner.length,
+        loadedCount: workflow.radar.length,
         incompatible,
         message: falhas.length
           ? `Seção(ões) que não puderam ser lidas: ${falhas.map(falha => `${falha.secao} (${falha.message})`).join(" · ")}`
@@ -129,7 +129,7 @@ export async function GET(request: NextRequest) {
     console.info("[workspace] leitura", {
       requestId, marcaId, actorUserId: profile.userId, state: estado,
       counts: {
-        radar: workflow.radar.length, planner: workflow.planner.length,
+        radar: workflow.radar.length,
         articles: artifacts.articles.length, silos: artifacts.silos.length,
         events: artifacts.events.length, serpSnapshots: serp.records.length, serpReviews: reviews.reviews.length,
       },

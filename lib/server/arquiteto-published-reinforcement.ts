@@ -7,6 +7,7 @@ import { articleApprovalRevalidationIssues } from "@/lib/arquiteto/article-appro
 import { contentHash, createVersionEnvelope } from "@/lib/arquiteto/versioning";
 import { buildCanonicalWorkflowWorkspaceItems, type CanonicalWorkflowItem, type CanonicalWorkspaceKeyword } from "@/lib/arquiteto/canonical-workspace";
 import { buildSerpSubjectIndex } from "@/lib/arquiteto/serp-subject-overlap";
+import { articleSerpIntentOf } from "@/lib/arquiteto/article-serp-gate";
 import { serpObservedBarrier } from "@/lib/arquiteto/serp-subject-convergence";
 import { serpSuggestionMatch } from "@/lib/arquiteto/serp-subject-suggestions";
 import type { ArticleFormationKeyword } from "@/lib/arquiteto/article-formation";
@@ -134,6 +135,25 @@ export function inProcessRequestHeaders(original: Headers): Headers {
   return headers;
 }
 
+/**
+ * O vínculo do parecer da SERP com a formação gravada (2026-10-01): o mesmo
+ * que o "Gravar melhorias" faz. A tela procura o parecer pela `formationRef`
+ * da mesa, com o hash da composição dela; sem isto, o artigo aprovado aparecia
+ * "SERP · Não executada" e o "Pronto para Radar" recusava.
+ */
+export type PublishedSerpBinding = {
+  /** `assessmentId:formationBaseHash` do parecer que a aprovação usou (`serpReference`). */
+  sourceVersionId: string;
+  formationRef: string;
+  territoryRef: string;
+  principalKeywordId: string;
+  members: Array<{ keywordId: string; role: "principal" | "secundaria" | "reforco" }>;
+  /** A intenção de cada membro, pela mesma fórmula do hash esperado da mesa (`articleSerpIntentOf`). */
+  intents: Array<{ keywordId: string; intent: string | null }>;
+  articleId: string;
+  fullPath: string | null;
+};
+
 export type PublishedReinforcementDeps = {
   store: DifferentiationStoreContext;
   now: () => Date;
@@ -153,6 +173,8 @@ export type PublishedReinforcementDeps = {
    * não exige permissão no Minerador).
    */
   loadMinerador?: () => Promise<PublishedReinforcementMineradorPorts>;
+  /** Liga o parecer da SERP e o marcador à formação gravada (só no apply). */
+  bindSerpToFormation?: (input: PublishedSerpBinding) => Promise<void>;
 };
 
 export type PublishedReinforcementOutcomeBody = { status: number; body: Record<string, unknown> };
@@ -706,6 +728,35 @@ export async function handlePublishedReinforcement(deps: PublishedReinforcementD
     } catch (error) {
       parar(`o ArticleDNA não foi gravado: ${error instanceof Error ? error.message.slice(0, 160) : "erro"}`);
       break;
+    }
+    /*
+     * CONCLUIR GRAVA TUDO (regra do dono, 2026-10-01): o parecer da SERP que a
+     * aprovação usou passa a responder pela formação da mesa, com o aceite
+     * humano, e a formação entra no marcador como concluída. Antes ficava só
+     * sob a ref do candidato calculado: a ficha dizia "Não executada" e o
+     * portão do Radar recusava o artigo recém-aprovado.
+     */
+    if (deps.bindSerpToFormation) {
+      const membros = composicao.ids.filter(id => rows.has(id)).map(id => ({
+        keywordId: id,
+        role: composicao.mesaRoles[id] === "principal" ? "principal" as const : composicao.mesaRoles[id] === "reforco_narrativo" ? "reforco" as const : "secundaria" as const,
+      }));
+      try {
+        await deps.bindSerpToFormation({
+          sourceVersionId: plan.serpReference.versionId,
+          formationRef,
+          territoryRef: territorio,
+          principalKeywordId: membros.find(membro => membro.role === "principal")?.keywordId ?? payload.principalKeywordId,
+          members: membros,
+          intents: membros.map(membro => ({ keywordId: membro.keywordId, intent: articleSerpIntentOf(rows.get(membro.keywordId) ?? {}) })),
+          articleId: payload.articleId,
+          fullPath: facts.page.url ?? null,
+        });
+        resultado.partial!.push("o parecer da SERP e a conclusão na formação");
+      } catch (error) {
+        parar(`o ArticleDNA foi gravado, mas o parecer da SERP não foi ligado à formação (${error instanceof Error ? error.message.slice(0, 160) : "erro"}). Rode "Gravar reforços" de novo.`);
+        break;
+      }
     }
     outcomes.push(resultado);
   }

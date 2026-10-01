@@ -424,7 +424,7 @@ export function ArticleFormationPanel({
               <ul className="mt-1 space-y-0.5 text-sm leading-6 text-text-muted" data-testid="architect-waiting-details">
                 {waiting.rows.map(row => (
                   <li key={row.keywordId}>
-                    <span className="text-foreground">{row.keyword}</span>
+                    <span className="text-keyword">{row.keyword}</span>
                     {row.siloName ? ` · ${row.siloName}` : ""} · {row.reason}
                   </li>
                 ))}
@@ -525,7 +525,7 @@ export function ArticleFormationPanel({
                 Candidato: {nomeDaKeyword(selectedCandidate.principalKeywordId)}
               </p>
               <p className="mt-1 text-sm text-text-muted">
-                Principal sugerida: <span className="text-foreground">{nomeDaKeyword(selectedCandidate.principalKeywordId)}</span>
+                Principal sugerida: <span className="text-keyword">{nomeDaKeyword(selectedCandidate.principalKeywordId)}</span>
               </p>
               {selectedCandidateSerp && <div className="mt-2" data-testid="architect-candidate-serp-subject">{selectedCandidateSerp}</div>}
 
@@ -536,7 +536,7 @@ export function ArticleFormationPanel({
                     <span className="inline-block w-4 font-semibold text-module-accent" title={ROLE_TITLES[item.role]}>
                       {ROLE_LABELS[item.role]}
                     </span>
-                    <span className="min-w-0 flex-1 truncate">{nomeDaKeyword(item.keywordId)}</span>
+                    <span className="min-w-0 flex-1 text-keyword">{nomeDaKeyword(item.keywordId)}</span>
                     {/* A proposta é do Arquiteto; a decisão é de quem revisa. */}
                     {item.role !== "principal" && (
                       <button

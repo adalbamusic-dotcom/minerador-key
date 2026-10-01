@@ -23,34 +23,27 @@ import {
 
 const source = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("01 · os estágios declarados são identificadores, e o Planejador não tem nenhum", () => {
-  assert.equal(MODULE_STAGE.planejador, null, "PLANEJADOR_STAGE precisa ser NONE");
-  assert.equal(MODULE_STAGE.redator, 6, "REDACTOR_STAGE = 6");
-  assert.equal(MODULE_STAGE.publicacoes, 7, "PUBLICACOES_STAGE = 7");
-  assert.equal(MODULE_STAGE.conta, 8, "CONTA_STAGE = 8");
+test("01 · com o Planejador aposentado, o Redator é o estágio 5", () => {
+  assert.equal(Object.hasOwn(MODULE_STAGE, "planejador"), false, "o Planejador voltou à árvore");
   assert.equal(MODULE_STAGE.radar, 4);
-  /*
-   * A posição 5 fica DECLARADA E NÃO ATRIBUÍDA. Se alguém derivar o estágio de
-   * um índice de array, vai precisar inventar uma etapa para preencher o vão —
-   * e foi exatamente isso que a decisão de produto proibiu.
-   */
-  assert.equal(Object.values(MODULE_STAGE).includes(5), false, "ninguém pode ocupar o estágio 5");
+  assert.equal(MODULE_STAGE.redator, 5, "REDACTOR_STAGE = 5");
+  assert.equal(MODULE_STAGE.publicacoes, 6, "PUBLICACOES_STAGE = 6");
+  assert.equal(MODULE_STAGE.conta, 7, "CONTA_STAGE = 7");
 });
 
-test("02 · o Planejador saiu do menu sem que a rota fosse apagada", () => {
-  assert.equal(menuEntriesForRole("cliente").some(item => item.id === "planejador"), false);
-  assert.equal(menuEntriesForRole("admin").some(item => item.id === "planejador"), false);
-  /* E a rota continua registrada: apagá-la tiraria do ar os planos já aprovados. */
-  assert.equal(PRODUCT_MODULES.planejador.href, "/planejador");
-  assert.equal(PRODUCT_MODULES.planejador.historical, true);
+test("02 · o Planejador saiu do menu e do registro (2026-10-01)", () => {
+  assert.equal(menuEntriesForRole("cliente").some(item => (item.id as string) === "planejador"), false);
+  assert.equal(menuEntriesForRole("admin").some(item => (item.id as string) === "planejador"), false);
+  /* A rota antiga redireciona para o Radar; o registro não a conhece mais. */
+  assert.equal(Object.hasOwn(PRODUCT_MODULES, "planejador"), false);
 });
 
 test("03 · o fluxo editorial vai do Radar direto ao Redator", () => {
-  assert.equal(PRODUCT_FLOW.includes("planejador"), false, "o Planejador voltou à esteira");
+  assert.equal((PRODUCT_FLOW as string[]).includes("planejador"), false, "o Planejador voltou à esteira");
   assert.equal(PRODUCT_FLOW.indexOf("redator") - PRODUCT_FLOW.indexOf("radar"), 1,
     "o Radar precisa entregar direto ao Redator");
   assert.equal(PRODUCT_FLOW.at(-1), "publicacoes", "Publicações é o fim do pipeline editorial");
-  /* Conta é estágio 8 da plataforma, não etapa de produção: não entra na esteira. */
+  /* Conta é estágio 7 da plataforma, não etapa de produção: não entra na esteira. */
   assert.equal(PRODUCT_FLOW.includes("conta"), false);
 });
 
@@ -66,7 +59,8 @@ test("04 · o Planejador não tem estado de pipeline, nem mesmo bloqueado", () =
 test("05 · a documentação canônica descreve Radar → Redator → Publicações", async () => {
   const fluxo = await source("../docs/00-produto/fluxo-oficial.md");
   assert.match(fluxo, /Marca → Minerador → Arquiteto → Radar → Redator → Publicações/);
-  assert.match(fluxo, /PLANEJADOR_STAGE = NONE/);
+  // Aposentado em 2026-10-01 (SDD sdd-aposentar-planejador-2026-10-01).
+  assert.match(fluxo, /Planejador foi aposentado em 2026-10-01/);
   assert.match(fluxo, /REDACTOR_STAGE = 6/);
   assert.equal(/Radar → Planejador|Planejador → Redator/.test(fluxo), false,
     "a documentação voltou a descrever o fluxo antigo");
@@ -89,15 +83,11 @@ test("06 · nenhuma tela do pipeline oferece caminho de escrita pelo Planejador"
   }
 });
 
-test("07 · a leitura do legado é preservada — remoção lógica não apaga vocabulário", async () => {
+test("07 · o vocabulário do Planejador saiu do contrato (preflight = 0)", async () => {
   const fluxo = await source("../lib/editorial/operational-flow.ts");
-  /*
-   * `sent_planner` CONTINUA no enum de propósito: linha antiga precisa ser
-   * legível. O que sai é a transição que o produz, não o valor.
-   */
-  assert.match(fluxo, /"sent_planner"/, "o valor legado sumiu e linha antiga deixa de fazer parse");
-  assert.match(fluxo, /plannerItemId: z\.string\(\)\.nullable\(\)\.default\(null\)/,
-    "plannerItemId precisa continuar legível e nulável");
+  assert.equal(/"sent_planner"/.test(fluxo), false, "sent_planner voltou ao enum");
+  assert.equal(/plannerItemId: z\./.test(fluxo), false, "plannerItemId voltou ao contrato");
+  assert.equal(/contentPlanVersionId: z\./.test(fluxo), false, "contentPlanVersionId voltou ao contrato");
 });
 
 test("08 · documento novo nasce v2; as fábricas v1 seguem isoladas no caminho histórico", async () => {
@@ -142,8 +132,6 @@ test("11 · nenhuma tela chama os métodos removidos do contexto", async () => {
   const telas = await Promise.all([
     source("../components/editorial-pipeline-context.tsx"),
     source("../components/editorial/professional-writer.tsx"),
-    source("../modules/planejador/planner-page.tsx"),
-    source("../modules/planejador/planner-cockpit-workspace.tsx"),
   ]);
   for (const fonte of telas) {
     for (const metodo of ["preparePlannerItems(", "savePlannerPlan(", "approvePlannerItems(", "startWriting("]) {
@@ -152,15 +140,13 @@ test("11 · nenhuma tela chama os métodos removidos do contexto", async () => {
   }
 });
 
-test("12 · o Planejador continua respondendo e não grava mais nada", async () => {
-  const planner = await source("../modules/planejador/planner-page.tsx");
-  const cockpit = await source("../modules/planejador/planner-cockpit-workspace.tsx");
-  /* Leitura preservada: a rota existe, o cockpit abre, a grade lista. */
-  assert.match(planner, /OperationalDataGrid/);
-  assert.match(cockpit, /Somente leitura/);
-  /* Escrita removida: nenhum botão de preparar, aprovar ou abrir o Redator. */
-  assert.equal(/Preparar plano|Aprovar versão|Salvar cópia|Enviar ao Redator/.test(planner + cockpit), false,
-    "o Planejador voltou a oferecer escrita");
+test("12 · o módulo do Planejador foi apagado (2026-10-01)", async () => {
+  for (const caminho of [
+    "../modules/planejador/planner-page.tsx",
+    "../modules/planejador/planner-cockpit-workspace.tsx",
+    "../lib/planejador/content-plan.ts",
+    "../app/(brand)/[brandRef]/planejador/page.tsx",
+  ]) await assert.rejects(source(caminho), /ENOENT/, `${caminho} voltou`);
 });
 
 test("13 · a publicação nasce do documento, sem PlannerItem e sem ContentPlan", async () => {
@@ -170,7 +156,7 @@ test("13 · a publicação nasce do documento, sem PlannerItem e sem ContentPlan
   assert.equal(/export async function createOperationalPlan/.test(fluxo), false, "a fábrica de ContentPlan voltou");
   assert.match(fluxo, /export function createWriterPublication/);
   /* A origem declarada é o Radar; plano e item ficam nulos, não fabricados. */
-  assert.match(fluxo, /plannerItemId: null, contentPlanVersionId: null/);
+  assert.equal(/plannerItemId|contentPlanVersionId/.test(fluxo.slice(fluxo.indexOf("export function createWriterPublication"))), false, "a publicação nova não cita plano");
   assert.match(fluxo, /schemaVersion !== 2/, "o v2 precisa ser exigido, não assumido");
 });
 

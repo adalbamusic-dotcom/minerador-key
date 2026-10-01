@@ -4,7 +4,6 @@ import {
   ProductEvidenceDNASchema,
   SerpSnapshotSchema,
   VersionedArticleDNASchema,
-  VersionedContentPlanSchema,
   VersionedSiloDNASchema,
   ArticleArchitectureStatusSchema,
   ArticleKgrIdentitySchema,
@@ -83,7 +82,7 @@ export const ProductEvidenceInputSchema = z.object({ articleId: z.string(), prod
 export const EditorialLocalWorkspaceSchema = z.object({
   articleVersions: z.record(z.string(), VersionedArticleDNASchema), siloVersions: z.record(z.string(), VersionedSiloDNASchema),
   serpRecords: z.array(SerpCollectionRecordSchema), serpReviews: z.array(SerpReviewRecordSchema).default([]), productEvidence: z.array(ProductEvidenceDNASchema),
-  contentPlans: z.record(z.string(), VersionedContentPlanSchema), documents: z.record(z.string(), ContentDocumentSchema),
+  documents: z.record(z.string(), ContentDocumentSchema),
 });
 
 export const EDITORIAL_STAGES: EditorialStage[] = ["marca", "keywords", "artigos", "silos", "serp", "planejamento", "documentos"];

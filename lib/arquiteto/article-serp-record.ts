@@ -96,6 +96,13 @@ export const ArticleFormationSerpPayloadSchema = z.object({
     groupReason: z.string().min(1),
     outsiders: z.array(z.object({ keywordId: z.string().min(1), keyword: z.string().min(1), reason: z.string().min(1) })),
     observedIntent: z.string().min(1),
+    /**
+     * Funil e participação de cada intenção nas quatro lentes (2026-10-01):
+     * a SERP tem a última palavra sobre intenção e funil do artigo. Opcional
+     * e aditivo — parecer antigo não os tem.
+     */
+    observedFunnel: z.string().min(1).optional(),
+    intentShares: z.object({ informacional: z.number(), comercial: z.number(), transacional: z.number(), lenses: z.number().int().nonnegative(), results: z.number().int().nonnegative() }).optional(),
     dominantType: z.string().min(1),
     viability: z.string().min(1),
     viabilityText: z.string().min(1),

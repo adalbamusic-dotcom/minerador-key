@@ -14,6 +14,10 @@
    *
    * identity-new       → endereço de conteúdo ainda NÃO publicado
    * identity-published → endereço de conteúdo já publicado no site
+   *                      (blue-500 do Tailwind, desde 2026-10-01: o
+   *                      action-accent #193cb8 era escuro demais para ler um
+   *                      link sobre o fundo escuro. O action-accent da raiz
+   *                      NÃO muda — só o papel do link publicado.)
    * identity-slug      → slug e canonical, em qualquer estado: são a
    *                      identidade SEO da página, não o endereço dela
    * keyword            → toda keyword renderizada, em qualquer superfície
@@ -23,7 +27,7 @@
    * (pendente, atenção, sucesso) que muda por outro motivo.
    */
   --identity-new: var(--module-accent);
-  --identity-published: var(--action-accent);
+  --identity-published: var(--color-blue-500, oklch(62.3% 0.214 259.815));
   --identity-slug: var(--context-accent);
   --keyword: #e0fbff;
   --success: #1fcb0a;
@@ -98,6 +102,29 @@
   --color-danger-soft: var(--danger-soft);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+/*
+ * KEYWORD E SLUG SEMPRE INTEIROS — REGRA RAIZ DA PLATAFORMA (dono, 2026-10-01).
+ *
+ * A keyword é o dado mais importante da plataforma, e o slug é a identidade
+ * SEO da página: nenhum dos dois pode aparecer cortado com "…". Esta regra
+ * fica FORA de qualquer @layer de propósito: estilo sem camada vence as
+ * utilities do Tailwind, então `truncate`, `line-clamp-*` e `whitespace-nowrap`
+ * escritos num componente não conseguem cortar uma keyword nem um slug. Se
+ * faltar espaço, o texto quebra linha (inclusive dentro de um slug longo).
+ *
+ * Vale para todo elemento com `text-keyword` ou `text-identity-slug` — por
+ * isso keyword e slug têm de usar essas classes (sistema-visual §5.0.1).
+ */
+.text-keyword,
+.text-identity-slug {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
 }
 
 body {

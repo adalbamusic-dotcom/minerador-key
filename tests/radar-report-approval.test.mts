@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { approveRadarReport, radarReportApprovalIssues, type ApproveRadarReportInput, type RadarApprovalGateInput } from "../lib/radar/report-approval.ts";
 import { RadarAnalysisPayloadSchema, RadarExtractionPageSchema, type RadarAnalysisVersion } from "../lib/radar/analysis-contracts.ts";
-import { isRadarPlannerHandoff } from "../lib/radar/planner-handoff.ts";
+import { isRadarApprovedPackage } from "../lib/radar/handoff-readiness.ts";
 import { buildRadarCompetitiveReport } from "../lib/radar/competitive-report.ts";
 import type { SerpResearchSnapshot } from "../lib/radar/serp/contracts.ts";
 import type { ArticleDNA, VersionEnvelope } from "../lib/arquiteto/contracts.ts";
@@ -133,7 +133,7 @@ test("as duas superfícies chamam a mesma autoridade, e nenhuma reimplementa a d
   // exatamente assim que existiam duas implementações do mesmo ato.
   for (const [nome, fonte] of [["Workbench", workbench], ["detalhe", detalhe]] as const) {
     assert.equal(/buildRadarEvidencePackage\(/.test(fonte), false, `${nome} não pode montar o pacote por fora`);
-    assert.equal(/buildRadarPlannerHandoff\(/.test(fonte), false, `${nome} não pode montar o handoff por fora`);
+    assert.equal(/buildRadarApprovedPackage\(/.test(fonte), false, `${nome} não pode montar o handoff por fora`);
   }
 
   // E o Workbench não pode voltar a chamar de "aprovado" um flag de sessão.
@@ -141,7 +141,7 @@ test("as duas superfícies chamam a mesma autoridade, e nenhuma reimplementa a d
 
   const autoridade = readFileSync("lib/radar/report-approval.ts", "utf8");
   assert.match(autoridade, /buildRadarEvidencePackage\(/);
-  assert.match(autoridade, /buildRadarPlannerHandoff\(/);
+  assert.match(autoridade, /buildRadarApprovedPackage\(/);
 });
 
 /* ------------------------------- B · gates equivalentes ------------------ */
@@ -220,7 +220,7 @@ test("snapshot sucessor não herda a aprovação do anterior", async () => {
 
 /* ------------------------------- G · package ----------------------------- */
 
-test("somente a aprovação canônica gera pacote e handoff v2 no plannerPackage", async () => {
+test("somente a aprovação canônica gera pacote e handoff v2 no approvedPackage", async () => {
   let persistido: RadarAnalysisVersion | null = null;
   const result = await approveRadarReport(approvalInput({
     persist: async successor => { persistido = successor; return { persistenceMode: "remote", readbackConfirmed: true }; },
@@ -239,10 +239,10 @@ test("somente a aprovação canônica gera pacote e handoff v2 no plannerPackage
   assert.equal(gravado!.payload.approvedBy, "ator-1");
   assert.equal(gravado!.payload.competitiveReport?.status, "approved");
 
-  // O Planejador só encontra o envelope se ele estiver em `plannerPackage`
-  // como handoff v2 — o pacote v1 passaria no schema e sumiria na leitura.
-  assert.equal(isRadarPlannerHandoff(gravado!.payload.plannerPackage), true);
-  const handoff = gravado!.payload.plannerPackage as { status: string; radarItemId: string; articleDnaVersionId: string; serp: { snapshotId: string } };
+  // Desde 2026-10-01 o pacote aprovado tem campo próprio; o legado não é mais escrito.
+  assert.equal(isRadarApprovedPackage(gravado!.payload.approvedPackage), true);
+  assert.equal(gravado!.payload.plannerPackage ?? null, null, "nada novo no campo do Planejador");
+  const handoff = gravado!.payload.approvedPackage as { status: string; radarItemId: string; articleDnaVersionId: string; serp: { snapshotId: string } };
   assert.equal(handoff.status, "APPROVED");
   assert.equal(handoff.radarItemId, radarItemId);
   assert.equal(handoff.articleDnaVersionId, articleDnaVersionId);

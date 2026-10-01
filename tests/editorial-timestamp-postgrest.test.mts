@@ -40,10 +40,12 @@ const executable = (source: string) =>
     return !trimmed.startsWith("*") && !trimmed.startsWith("/*") && !trimmed.startsWith("//");
   }).join("\n");
 
-const documentoV1 = {
-  schemaVersion: 1 as const,
+/* Documento de origem Radar (v2): desde 2026-10-01 é a única forma. */
+const documentoV2 = {
+  schemaVersion: 2 as const,
   id: "doc-1", title: "Documento", status: "planejado" as const,
-  contentPlanRef: { entityId: "plan", versionId: "plan-v1", contentHash: `sha256:${"a".repeat(64)}` },
+  radarOrigin: { radarItemId: "radar-1", articleId: "art", analysisVersionId: "analysis-1", analysisVersionNumber: 1, evidenceBundleHash: "bundle-1", articleDnaVersionId: "art-v1", articleDnaContentHash: `sha256:${"a".repeat(64)}`, siloDnaVersionId: null, importedAt: "2026-09-18T03:51:49.236Z", importedBy: "ator" },
+  importedContext: { source: "radar" as const, capturedAt: "2026-09-18T03:51:49.236Z", dossier: null, editorialContext: [], visualGuidance: [], pendingDecisions: [] },
   brandDnaRef: { entityId: "brand", versionId: "brand-v1", contentHash: `sha256:${"a".repeat(64)}` },
   keywordDnaRefs: [{ entityId: "kw", versionId: "kw-v1", contentHash: `sha256:${"a".repeat(64)}` }],
   siloDnaRef: { entityId: "silo", versionId: "silo-v1", contentHash: `sha256:${"a".repeat(64)}` },
@@ -61,7 +63,7 @@ const documentoV1 = {
 
 test("01 · o documento persistido aceita o timestamp COM deslocamento", () => {
   const registro = {
-    document: documentoV1, lockVersion: 1, contentHash: "sha256:x",
+    document: documentoV2, lockVersion: 1, contentHash: "sha256:x",
     updatedAt: POSTGREST, userState: null,
   };
   assert.equal(PersistedDocumentSchema.safeParse(registro).success, true,
@@ -70,7 +72,7 @@ test("01 · o documento persistido aceita o timestamp COM deslocamento", () => {
 
 test("02 · o formato da própria aplicação continua valendo", () => {
   const registro = {
-    document: documentoV1, lockVersion: 1, contentHash: "sha256:x",
+    document: documentoV2, lockVersion: 1, contentHash: "sha256:x",
     updatedAt: APLICACAO, userState: null,
   };
   assert.equal(PersistedDocumentSchema.safeParse(registro).success, true,
@@ -79,7 +81,7 @@ test("02 · o formato da própria aplicação continua valendo", () => {
 
 test("03 · o estado de leitura do usuário tem o mesmo problema e a mesma cura", () => {
   const registro = {
-    document: documentoV1, lockVersion: 1, contentHash: "sha256:x", updatedAt: POSTGREST,
+    document: documentoV2, lockVersion: 1, contentHash: "sha256:x", updatedAt: POSTGREST,
     userState: {
       cursorPosition: 0, scrollTop: 0, leftPanelOpen: true, rightPanelOpen: true,
       lastOpenedAt: POSTGREST,
@@ -122,7 +124,7 @@ test("05 · a mesa com UM documento real continua válida", () => {
     radarItems: [], plannerItems: [], articleVersions: [], siloVersions: [],
     versionEvents: [], contentPlans: [],
     documents: [{
-      document: documentoV1, lockVersion: 1, contentHash: "sha256:x",
+      document: documentoV2, lockVersion: 1, contentHash: "sha256:x",
       updatedAt: POSTGREST, userState: null,
     }],
     publications: [], invitations: [], views: [],

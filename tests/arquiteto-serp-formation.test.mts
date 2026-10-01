@@ -432,3 +432,45 @@ test("ação de artigo publicado explica a preservação e não pede outra verif
   assert.doesNotMatch(workspace, /Verificar identidade/);
   assert.doesNotMatch(workspace, /handleVerifyPublication/);
 });
+
+test("intenção 'Pendente' na coluna do Minerador não apaga a intenção da análise: o DNA nasce informacional e sem 'Pendente' auxiliar (regra do dono, 2026-09-30)", () => {
+  const pendente = ProvisionalArticleGroupSchema.parse({ ...group, id: "intent-pendente", keywords: [
+    keyword("kw-1", "captação de pacientes", { intent: "Pendente", analise_semantica: { intencao_principal: "Informativa" } }),
+    keyword("kw-2", "atrair pacientes", { intent: "Pendente" }),
+  ] });
+  const article = deterministicArticleDnaPayload(pendente, "brand-1");
+  assert.equal(article.mainIntent, "informational");
+  assert.equal(article.intentProfile?.primaryIntent, "informational");
+  assert.ok(!article.auxiliaryIntents.includes("Pendente"), "'Pendente' é revisão por fazer, não intenção auxiliar");
+  const principal = article.keywordReferences.find(reference => reference.keywordId === "kw-1")!;
+  assert.equal(principal.normalizedIntent, "informational");
+  assert.deepEqual(principal.coveredIntentions, ["Informativa"]);
+  // Sem intenção em lugar nenhum: continua desconhecida — não se inventa.
+  const semNada = deterministicArticleDnaPayload(ProvisionalArticleGroupSchema.parse({ ...group, id: "intent-vazia", keywords: [keyword("kw-1", "captação de pacientes", { intent: "Pendente", analise_semantica: { entidade_central: "captação" } }), keyword("kw-2", "atrair pacientes", { intent: "Pendente", analise_semantica: { entidade_central: "captação" } })] }), "brand-1");
+  assert.equal(semNada.mainIntent, "unknown");
+});
+
+test("concluir com principal ou slug fora do par KGR candidato não deixa pendência: o vínculo vira 'não se aplica' com o par anterior guardado, e o tipo de unidade derivado fica confirmado", async () => {
+  const candidate = { isKgrArticle: true as const, source: "minerador" as const, bindingStatus: "candidate" as const, boundSlug: "slug-do-par-kgr" };
+  const kgrGroup = ProvisionalArticleGroupSchema.parse({ ...group, id: "kgr-divergente", kgrIdentity: candidate, keywords: [keyword("kw-1", "captação de pacientes", { kgrIdentity: candidate }), keyword("kw-2", "atrair pacientes")], principalSuggestion: { ...group.principalSuggestion, keywordId: "kw-1" } });
+  const current = await createVersionEnvelope({ entityId: "kgr-divergente", versionNumber: 1, origin: "system", changeReason: "fixture", createdBy: "system", payload: deterministicArticleDnaPayload(kgrGroup, "brand-1") });
+  const successor = await confirmArticleArchitecture(current, "kw-2", "human-1", "2026-09-30T12:00:00.000Z");
+  assert.deepEqual(successor.payload.humanPendingDecisions, [], "nenhuma pendência que nenhum botão resolve");
+  assert.equal(successor.payload.kgrIdentity?.bindingStatus, "not_applicable");
+  assert.equal(successor.payload.kgrIdentity?.isKgrArticle, false);
+  assert.equal(successor.payload.kgrIdentity?.humanDecision?.previousBoundSlug, "slug-do-par-kgr");
+  assert.equal(successor.payload.kgrIdentity?.confirmedBy, "human-1");
+  assert.ok(successor.payload.alerts.some(alert => /Vínculo KGR candidato não se aplica/.test(alert)));
+  assert.equal(successor.payload.unitClassification?.status, "human_confirmed");
+  assert.equal(successor.payload.unitClassification?.confirmedBy, "human-1");
+  assert.equal(successor.payload.primaryKeywordDecision?.status, "confirmed");
+  assert.ok(!JSON.stringify(successor.payload.primaryKeywordPolicyContext).includes("Ã"), "texto sem mojibake");
+});
+
+test("'Informativa' (rótulo canônico do Minerador) é intenção informacional também na classificação do artigo — não 'Ambígua' (2026-10-01)", async () => {
+  const { normalizeIntentLabel } = await import("../lib/arquiteto/article-classification-closure.ts");
+  assert.equal(normalizeIntentLabel("Informativa"), "INFORMATIONAL");
+  assert.equal(normalizeIntentLabel("Comercial investigativa"), "COMMERCIAL_INVESTIGATION");
+  assert.equal(normalizeIntentLabel("Pendente"), null);
+  assert.equal(normalizeSearchIntent("Informativa"), "informational");
+});

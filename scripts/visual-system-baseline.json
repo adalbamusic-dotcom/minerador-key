@@ -25,9 +25,6 @@
     "modules/conta/account-page.tsx": 29,
     "modules/minerador/discovery/discovery-table-placeholder.tsx": 1,
     "modules/minerador/minerador-workspace.tsx": 168,
-    "modules/planejador/content-plan-editor.tsx": 26,
-    "modules/planejador/planner-page.tsx": 2,
-    "modules/publicacoes/publications-page.tsx": 5,
     "modules/publicacoes/publications-workspace.tsx": 25,
     "modules/redator/writer-page.tsx": 18
   }

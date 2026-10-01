@@ -1,3 +1,4 @@
+import { normalizeIntentKey } from "../minerador/intent-taxonomy.ts";
 /**
  * FECHAMENTO DAS CLASSIFICAÇÕES DO ARTICLE.
  *
@@ -115,6 +116,15 @@ export function normalizeIntentLabel(raw: string | null | undefined): ArticleTer
   if (!texto) return null;
   const direto = INTENT_BY_NORMALIZED[texto.toLowerCase()];
   if (direto) return direto;
+  /*
+   * A TAXONOMIA DO MINERADOR VEM ANTES DO TEXTO LIVRE (2026-10-01).
+   *
+   * "Informativa" — o rótulo canônico que o Minerador grava — não casava com
+   * /informacion/ e virava null: toda Principal informativa saía "Ambígua", e
+   * o artigo ficava "Incompatível" sem conflito nenhum.
+   */
+  const canonica = normalizeIntentKey(texto);
+  if (canonica !== "unknown") return INTENT_BY_NORMALIZED[canonica];
   // `unknown` do enum do Minerador significa "não classificamos" — estado de
   // processo. Ele NÃO vira intenção terminal por tradução; quem decide isso é
   // a resolução abaixo, com a evidência inteira na mão.
@@ -149,6 +159,10 @@ export type ClassificationEvidence = {
   serpObservedIntent: string | null;
   /** A SERP vigente misturou intenções de forma relevante? */
   serpMixedIntent: boolean;
+  /** Funil que a SERP mostra (topo/meio/fundo/misto), pelas quatro lentes. Ausente em parecer antigo. */
+  serpObservedFunnel?: string | null;
+  /** Participação de cada intenção na SERP, em %, para dizer o porquê. */
+  serpIntentShares?: { informacional: number; comercial: number; transacional: number; lenses: number; results: number } | null;
   /** A SERP foi executada e está vigente para esta composição. */
   serpResolved: boolean;
   /**
@@ -203,6 +217,9 @@ export type ClassificationEvidence = {
 const contarUnicos = (valores: readonly (ArticleTerminalIntent | ArticleTerminalFunnel | null)[]) =>
   [...new Set(valores.filter(Boolean))];
 
+const serpSharesText = (shares: NonNullable<ClassificationEvidence["serpIntentShares"]>) =>
+  `informacional ${shares.informacional}% · comercial ${shares.comercial}% · transacional ${shares.transacional}% (${shares.lenses} lente${shares.lenses === 1 ? "" : "s"}, ${shares.results} resultados)`;
+
 function resolveIntent(evidence: ClassificationEvidence): ResolvedField<ArticleTerminalIntent> {
   const principal = normalizeIntentLabel(evidence.principalIntent);
   const daComposicao = contarUnicos(evidence.compositionIntents.map(normalizeIntentLabel)) as ArticleTerminalIntent[];
@@ -217,7 +234,25 @@ function resolveIntent(evidence: ClassificationEvidence): ResolvedField<ArticleT
     };
   }
 
-  // Principal e SERP concordam, ou só uma delas fala: valor forte.
+  /*
+   * A SERP TEM A ÚLTIMA PALAVRA (dono, 2026-10-01).
+   *
+   * O Minerador entrega um padrão genérico (Google Ads); a SERP é dado real
+   * das quatro lentes. Quando ela mostra uma intenção, é ELA que vale — mesmo
+   * com participação baixa, mesmo contra a Principal ou a composição. O que
+   * o Minerador declarava fica dito no motivo, não decide.
+   */
+  if (daSerp) {
+    const declarada = principal && principal !== daSerp ? ` O Minerador declarava ${principal}; a SERP corrige.` : "";
+    const fatia = evidence.serpIntentShares ? ` Participação na SERP: ${serpSharesText(evidence.serpIntentShares)}.` : "";
+    return {
+      value: daSerp,
+      source: "serp",
+      reason: `A SERP vigente mostra intenção ${daSerp}.${fatia}${declarada}`,
+    };
+  }
+
+  // Sem SERP com intenção: Principal e composição (o padrão do Minerador).
   const candidatos = contarUnicos([principal, daSerp]) as ArticleTerminalIntent[];
   if (candidatos.length === 1) {
     const unico = candidatos[0];
@@ -271,6 +306,13 @@ function resolveIntent(evidence: ClassificationEvidence): ResolvedField<ArticleT
 
 function resolveFunnel(evidence: ClassificationEvidence): ResolvedField<ArticleTerminalFunnel> {
   const principal = normalizeFunnelLabel(evidence.principalFunnel);
+  // A SERP tem a última palavra também sobre o funil (dono, 2026-10-01).
+  const daSerp = evidence.serpObservedFunnel && evidence.serpObservedFunnel !== "indefinido" ? normalizeFunnelLabel(evidence.serpObservedFunnel) : null;
+  if (daSerp) {
+    const declarado = principal && principal !== daSerp ? ` O Minerador declarava ${principal}; a SERP corrige.` : "";
+    const fatia = evidence.serpIntentShares ? ` Participação na SERP: ${serpSharesText(evidence.serpIntentShares)}.` : "";
+    return { value: daSerp, source: "serp", reason: `A SERP vigente mostra funil ${daSerp}.${fatia}${declarado}` };
+  }
   const daComposicao = contarUnicos(evidence.compositionFunnels.map(normalizeFunnelLabel)) as ArticleTerminalFunnel[];
   const todos = contarUnicos([principal, ...daComposicao]) as ArticleTerminalFunnel[];
 
@@ -459,6 +501,72 @@ function resolveProtection(evidence: ClassificationEvidence): ResolvedField<Arti
     : { value: "PUBLISHED_REVISABLE", source: "principal", reason: "Página publicada cuja identidade permanece revisável." };
 }
 
+/**
+ * O RETRATO DA CLASSIFICAÇÃO, MONTADO NUM LUGAR SÓ (2026-10-01).
+ *
+ * A tela (`classificationEvidenceFor`) e o "Gravar melhorias" do servidor
+ * montam a mesma evidência: intenção e funil de cada keyword (KeywordDNA
+ * primeiro), a intenção observada no parecer da SERP e o KGR do artigo. Antes
+ * só a tela sabia montar, e a melhoria gravava a sucessora com a classificação
+ * da composição ANTERIOR. Nenhum score novo, nenhuma métrica recalculada.
+ */
+export function buildClassificationEvidence(input: {
+  principal: { intent: string | null; funnel: string | null };
+  secondaries: readonly { intent: string | null; funnel: string | null }[];
+  keywordCount: number;
+  serpInterpretation: { observedIntent: string; observedFunnel?: string | null; intentShares?: ClassificationEvidence["serpIntentShares"] } | null;
+  serpResolved: boolean;
+  kgr: {
+    principalKgrScore: number | null;
+    principalApplicability: ClassificationEvidence["principalKgrApplicability"];
+    fullKgr: boolean;
+    source: string;
+    decision: string;
+    requiresHumanDecision: boolean;
+    applyKgr: boolean;
+  };
+  principalIsSubject: boolean;
+  isPublished: boolean;
+  principalProtected: boolean;
+}): ClassificationEvidence {
+  const { principal, secondaries } = input;
+  // Conflito de compatibilidade é divergência de intenção declarada em
+  // relação à Principal — a mesma leitura que o resumo já fazia.
+  const avaliadas = secondaries.filter(item => item.intent).length;
+  const conflitos = principal.intent
+    ? secondaries.filter(item => item.intent && item.intent !== principal.intent).length
+    : 0;
+  const observada = input.serpInterpretation?.observedIntent ?? null;
+  return {
+    principalIntent: principal.intent,
+    compositionIntents: secondaries.map(item => item.intent),
+    serpObservedIntent: observada === "indefinido" ? null : observada,
+    serpMixedIntent: observada === "misto",
+    serpObservedFunnel: input.serpInterpretation?.observedFunnel ?? null,
+    serpIntentShares: input.serpInterpretation?.intentShares ?? null,
+    serpResolved: input.serpResolved,
+    principalFunnel: principal.funnel,
+    compositionFunnels: secondaries.map(item => item.funnel),
+    principalKgrScore: input.kgr.principalKgrScore,
+    principalKgrApplicability: input.kgr.principalApplicability,
+    fullKgr: input.kgr.fullKgr,
+    humanKgrDecision: input.kgr.source === "HUMAN_DECISION" && (input.kgr.decision === "YES" || input.kgr.decision === "NO")
+      ? input.kgr.decision
+      : null,
+    awaitingHumanKgrDecision: input.kgr.requiresHumanDecision,
+    // "Aplicar KGR" do artigo: a mesa e o ArticleDNA fecham com a mesma resposta.
+    articleAppliesKgr: input.kgr.applyKgr,
+    compatibilityConflicts: conflitos,
+    compatibilityEvaluated: avaliadas,
+    // Uma keyword não tem par: a compatibilidade não se aplica, e isso é
+    // resultado terminal, não incerteza — exceto publicado e Assunto (D2/D3).
+    compositionKeywordCount: input.keywordCount,
+    principalIsSubject: input.principalIsSubject,
+    isPublished: input.isPublished,
+    principalProtected: input.principalProtected,
+  };
+}
+
 export function resolveArticleClassification(evidence: ClassificationEvidence): ArticleClassification {
   const kgrApplicability = resolveKgrApplicability(evidence);
   return {
@@ -586,4 +694,49 @@ export const PROCESS_STATE_WORDS = ["pendente", "não recebido", "nao recebido",
 export function isProcessStateWord(label: string): boolean {
   const normalizado = label.trim().toLowerCase();
   return PROCESS_STATE_WORDS.some(palavra => normalizado === palavra);
+}
+
+/* ------------- a decisão da SERP gravada no ArticleDNA (2026-10-01) ------------- */
+
+const INTENCAO_NORMALIZADA: Partial<Record<ArticleTerminalIntent, "informational" | "commercial_investigation" | "transactional" | "navigational" | "local" | "mixed">> = {
+  INFORMATIONAL: "informational",
+  COMMERCIAL_INVESTIGATION: "commercial_investigation",
+  TRANSACTIONAL: "transactional",
+  NAVIGATIONAL: "navigational",
+  LOCAL: "local",
+  MIXED: "mixed",
+};
+const ETAPA_DO_FUNIL: Partial<Record<ArticleTerminalFunnel, string>> = {
+  TOP: "Topo de funil (SERP)",
+  MIDDLE: "Meio de funil (SERP)",
+  BOTTOM: "Fundo de funil (SERP)",
+  MIXED: "Funil misto (SERP)",
+};
+
+/**
+ * CONCLUIR GRAVA O QUE A SERP DECIDIU (dono, 2026-10-01).
+ *
+ * A classificação já dá a última palavra à SERP; sem isto, o ArticleDNA
+ * continuava com `mainIntent`, `intentProfile` e `journeyStage` do padrão
+ * genérico do Minerador, e a ficha mostrava duas respostas para a mesma
+ * pergunta. Só os campos que a SERP decidiu (`source = "serp"`) mudam; o
+ * rótulo do Minerador continua em `intentProfile.originalLabel`, como
+ * proveniência. Sem SERP decidindo, o payload volta igual.
+ */
+export function applySerpDecisionToArticle<T extends {
+  mainIntent: string;
+  journeyStage: string;
+  intentProfile?: { primaryIntent: string; articlePurpose?: string; status?: string } & Record<string, unknown>;
+}>(payload: T, classification: Pick<ArticleClassification, "intent" | "funnel">): T {
+  const intencao = classification.intent.source === "serp" ? INTENCAO_NORMALIZADA[classification.intent.value] : undefined;
+  const etapa = classification.funnel.source === "serp" ? ETAPA_DO_FUNIL[classification.funnel.value] : undefined;
+  if (!intencao && !etapa) return payload;
+  return {
+    ...payload,
+    ...(intencao ? {
+      mainIntent: intencao,
+      ...(payload.intentProfile ? { intentProfile: { ...payload.intentProfile, primaryIntent: intencao, articlePurpose: intencao, status: "confirmed" } } : {}),
+    } : {}),
+    ...(etapa ? { journeyStage: etapa } : {}),
+  };
 }

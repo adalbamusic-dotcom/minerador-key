@@ -5,7 +5,7 @@ import { buildRadarDeepResearchView } from "../lib/radar/deep-research-view.ts";
 import { buildRadarEvidenceBundle } from "../lib/radar/evidence-bundle.ts";
 import { buildRadarEvidenceBundleFromAnalysis } from "../lib/radar/evidence-bundle-runtime.ts";
 import { buildRadarAuthorityEvidence } from "../lib/radar/authority-evidence.ts";
-import { radarPlannerHandoffReadiness, type RadarPlannerHandoffReadiness } from "../lib/radar/planner-handoff.ts";
+import { radarHandoffReadiness, type RadarHandoffReadiness } from "../lib/radar/handoff-readiness.ts";
 import { radarPortableSerpSources } from "../lib/radar/portable-evidence-pack.ts";
 import { RADAR_WRITING_RULES } from "../lib/radar/portable-writer-context.ts";
 import { RADAR_WRITER_MAY_NOT } from "../lib/redator/writer-handoff.ts";
@@ -147,7 +147,7 @@ const dossieDoGoogle = (): RadarEvidenceBundle => buildRadarEvidenceBundle({
   }],
 });
 
-const PRONTO: RadarPlannerHandoffReadiness = { ready: true, headline: "Pacote para planejamento pronto", blocks: [] };
+const PRONTO: RadarHandoffReadiness = { ready: true, headline: "Pacote para o Redator pronto", blocks: [] };
 
 const statusDoGoogle = (patch: Partial<RadarPortableResearchStatusInput> = {}): RadarPortableResearchStatusInput => ({
   frozenObservedAt: CONGELADO_EM,
@@ -334,7 +334,7 @@ test("1 · research_status_md · o artigo que o Redator recusaria sai ROTULADO, 
   const bundle = dossieDoGoogle();
 
   /* A prontidão REAL: perfil Google sem o congelado daquele pipeline. */
-  const recusada = radarPlannerHandoffReadiness({ article: FUNDAMENTO, frozen: null, dossier: bundle });
+  const recusada = radarHandoffReadiness({ article: FUNDAMENTO, frozen: null, dossier: bundle });
   assert.equal(recusada.ready, false, "a bancada precisa produzir uma prontidão recusada");
 
   const md = radarPortableResearchStatusMarkdown(statusDoGoogle({ bundle, readiness: recusada }));
@@ -367,7 +367,7 @@ test("1 · research_status_md · YouTube: sinal cruzado, apoio do Google e bloqu
   const bundle = dossieDoYoutube();
 
   /* A prontidão REAL de um fundamento que mudou de versão: o `detail` cita as duas versões. */
-  const recusada = radarPlannerHandoffReadiness({ article: { ...FUNDAMENTO, articleDnaVersionId: OUTRA_VERSAO }, frozen: null, dossier: bundle });
+  const recusada = radarHandoffReadiness({ article: { ...FUNDAMENTO, articleDnaVersionId: OUTRA_VERSAO }, frozen: null, dossier: bundle });
   assert.ok(recusada.blocks.some(bloco => bloco.code === "ARTICLE_VERSION_MISMATCH" && bloco.detail.includes(VERSAO)),
     "a bancada precisa exercitar um detalhe com id");
 

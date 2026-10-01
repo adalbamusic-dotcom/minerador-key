@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { allocateReinforcementChoices } from "../lib/arquiteto/reinforcement-allocation.ts";
-import { planArticleImprovements, carriesSlugCore, slugCoreWords, improvementEditorialFit, type ImprovementTarget, type ImprovementKeyword, type ImprovementEvidence } from "../lib/arquiteto/article-improvement.ts";
+import { planArticleImprovements, volumelessPrincipalSwap, carriesSlugCore, slugCoreWords, improvementEditorialFit, type ImprovementTarget, type ImprovementKeyword, type ImprovementEvidence } from "../lib/arquiteto/article-improvement.ts";
 import { resolveKeywordDnaSignals } from "../lib/arquiteto/keyword-dna-signals.ts";
 
 const dna = (id: string, text = "captação de pacientes") => resolveKeywordDnaSignals({ keywordId: id, text, semantic: { entidade_central: "captação de pacientes", problema_percebido: "poucos agendamentos", publico: "gestores de clínicas", resultado_desejado: "ampliar agendamentos", intencao_principal: "Informativa" } });
@@ -129,4 +129,58 @@ test("decisão 2026-09-30: publicado Livre sem volume ganha principal mais ampla
   assert.match(livre.reasons.join(" "), /Principal mais ampla, com volume/);
   const travado = planArticleImprovements({ targets: [{ ...alvo, post: "locked" }], keywords, evidence })[0];
   assert.equal(travado.principalId, "chk", "Travado não troca");
+});
+
+test("principal sem volume com Posto Livre: a secundária com mais volume do próprio artigo assume, sem entrar nem sair nada, mesmo sem par da SERP (caso real 'instagram não traz pacientes', 2026-10-01)", () => {
+  // A secundária com volume não divide páginas com a frase da página e não leva o slug: os passos de keyword nova não a escolhiam.
+  const alvo = page("ig", { theme: "instagram não traz pacientes", slug: "instagram-nao-traz-pacientes", memberIds: ["ig", "insta"] });
+  const keywords = [
+    term("ig", { keyword: "instagram não traz pacientes", published: true, volume: null, volumeValidated: false, ownerId: "ig" }),
+    term("insta", { keyword: "como atrair clientes pelo instagram", volume: 70, ownerId: "ig" }),
+  ];
+  const result = planArticleImprovements({ targets: [alvo], keywords, evidence: [] })[0];
+  assert.equal(result.status, "ready", JSON.stringify(result.reasons));
+  assert.equal(result.principalId, "insta");
+  assert.deepEqual(result.addIds, []); assert.deepEqual(result.removeIds, []);
+  assert.deepEqual(result.memberIds, ["ig", "insta"]);
+  assert.match(result.reasons.join(" "), /Principal sem volume com Posto Livre/);
+  // Travada, ou principal com volume: não troca por esta regra.
+  assert.equal(planArticleImprovements({ targets: [{ ...alvo, post: "locked" }], keywords, evidence: [] })[0].principalId, "ig");
+  const comVolume = keywords.map(k => k.id === "ig" ? { ...k, volume: 30, volumeValidated: true } : k);
+  assert.notEqual(planArticleImprovements({ targets: [alvo], keywords: comVolume, evidence: [] })[0].principalId === "insta" && planArticleImprovements({ targets: [alvo], keywords: comVolume, evidence: [] })[0].reasons.some(r => /Principal sem volume/.test(r)), true);
+});
+
+test("a nova principal é a do artigo com mais sentido com o slug, não a de maior volume; o volume só desempata (dono, 2026-10-01)", () => {
+  const alvo = page("pg", { theme: "como atrair pacientes para clínica de estética", slug: "como-atrair-pacientes-para-clinica-de-estetica", memberIds: ["pg", "amplo", "proximo"] });
+  const keywords = [
+    term("pg", { keyword: "como atrair pacientes para clínica de estética", published: true, volume: null, volumeValidated: false, ownerId: "pg" }),
+    term("amplo", { keyword: "marketing digital para negócios", volume: 5400, ownerId: "pg" }),
+    term("proximo", { keyword: "como atrair pacientes para clínica", volume: 20, ownerId: "pg" }),
+  ];
+  const result = planArticleImprovements({ targets: [alvo], keywords, evidence: [] })[0];
+  assert.equal(result.status, "ready", JSON.stringify(result.reasons));
+  assert.equal(result.principalId, "proximo", "a de volume 20 tem mais sentido com o slug do que a de 5.400");
+  assert.match(result.reasons.join(" "), /mais próxima do slug/);
+  // Nenhuma palavra em comum com o slug: não troca.
+  const semSentido = keywords.filter(k => k.id !== "proximo");
+  assert.notEqual(planArticleImprovements({ targets: [{ ...alvo, memberIds: ["pg", "amplo"] }], keywords: semSentido, evidence: [] })[0].principalId, "amplo");
+});
+
+test("publicado com principal COM volume fica travado ao slug: candidata de mais volume entra como apoio, não vira principal (dono, 2026-10-01)", () => {
+  const result = planArticleImprovements({ targets: [page("old")], keywords: [term("old", { published: true, volume: 70, volumeValidated: true }), term("new", { volume: 210 })], evidence: [proof("old", "new")] })[0];
+  assert.equal(result.principalId, "old");
+  assert.deepEqual(result.addIds, ["new"]);
+});
+
+test("principal sem volume: a IA propõe primeiro; a troca pela keyword que já está no artigo fica pronta como reserva (o servidor a usa quando a SERP da IA não confirma) — caso real 'instagram não traz pacientes', 2026-10-01", () => {
+  const alvo = page("ig", { theme: "instagram não traz pacientes", slug: "instagram-nao-traz-pacientes", memberIds: ["ig", "insta"] });
+  const keywords = [
+    term("ig", { keyword: "instagram não traz pacientes", published: true, volume: null, volumeValidated: false, ownerId: "ig" }),
+    term("insta", { keyword: "como atrair clientes pelo instagram", volume: 70, ownerId: "ig" }),
+  ];
+  const troca = volumelessPrincipalSwap(alvo, new Map(keywords.map(k => [k.id, k])));
+  assert.ok(troca);
+  assert.equal(troca.principalId, "insta"); assert.deepEqual(troca.addIds, []); assert.equal(troca.status, "ready"); assert.equal(troca.evidenceBasis, "serp");
+  // Travado ou principal com volume: sem troca.
+  assert.equal(volumelessPrincipalSwap({ ...alvo, post: "locked" }, new Map(keywords.map(k => [k.id, k]))), null);
 });

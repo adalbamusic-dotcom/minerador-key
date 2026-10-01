@@ -112,16 +112,11 @@ test("06 · registro de publicação órfão não vira linha da biblioteca edito
 
 test("07 · a origem é declarada, não inferida do título", () => {
   assert.equal(projetar([documento()])[0].origin, "radar");
-  /*
-   * O v1 é montado do zero, e não espalhando o v2: o schema é `.strict()`, e
-   * `radarOrigin: undefined` espalhado ainda é uma CHAVE presente — a primeira
-   * versão deste teste falhou exatamente aí.
-   */
+  /* O documento com plano (v1) saiu em 2026-10-01: o contrato o recusa. */
   const base = documento() as unknown as Record<string, unknown>;
   const comum = { ...base };
   delete comum.radarOrigin; delete comum.importedContext;
-  const v1 = ContentDocumentSchema.parse({ ...comum, schemaVersion: 1, contentPlanRef: ref("plan-1", "plan") });
-  assert.equal(projetar([v1])[0].origin, "planner");
+  assert.equal(ContentDocumentSchema.safeParse({ ...comum, schemaVersion: 1, contentPlanRef: ref("plan-1", "plan") }).success, false);
 });
 
 test("08 · a linha carrega versão corrente e updated_at quando a leitura os traz", () => {
@@ -205,11 +200,10 @@ test("14 · salvar rascunho e finalizar reusam o caminho que já existe", async 
 
 test("15 · a Fila não tem caminho local-first", async () => {
   const workspace = await fonte("../modules/publicacoes/publications-workspace.tsx");
-  const page = await fonte("../modules/publicacoes/publications-page.tsx");
   const contexto = await fonte("../components/editorial-pipeline-context.tsx");
   const contrato = await fonte("../lib/editorial/persistence-contracts.ts");
   const rota = await fonte("../app/api/editorial/workflow/route.ts");
-  for (const [nome, fonteArquivo] of [["workspace", workspace], ["page", page]] as const) {
+  for (const [nome, fonteArquivo] of [["workspace", workspace]] as const) {
     assert.equal(/pipeline\.importApprovedToPublications/.test(fonteArquivo), false, nome + " ainda chama o caminho local-first");
   }
   assert.equal(/importApprovedToPublications: publicationIds/.test(contexto), false, "o método saiu do contexto");

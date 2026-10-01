@@ -1,13 +1,28 @@
 import { WorkspaceLoadDiagnosticsSchema, emptyLoadDiagnostics } from "./partial-read.ts";
 import { z } from "zod";
-import { ContentDocumentSchema, VersionedArticleDNASchema, VersionedContentPlanSchema, VersionedSiloDNASchema, VersionedSiloPageSchema, VersionStatusEventSchema } from "../arquiteto/contracts.ts";
-import { BrandInvitationSchema, OperationalPublicationSchema, PlannerItemSchema, RadarItemSchema } from "./operational-flow.ts";
+import { ContentDocumentSchema, VersionedArticleDNASchema, VersionedSiloDNASchema, VersionedSiloPageSchema, VersionStatusEventSchema } from "../arquiteto/contracts.ts";
+import { BrandInvitationSchema, OperationalPublicationSchema, RadarItemSchema } from "./operational-flow.ts";
 import { SavedGridViewSchema } from "./data-grid.ts";
 import { AIReviewAnnotationSchema } from "./operational-contracts.ts";
 import { SerpCollectionRecordSchema, SerpReviewRecordSchema } from "./contracts.ts";
 import { RadarHydrationSnapshotSchema } from "../radar/hydration.ts";
 import { ListedContentDocumentSchema } from "./content-document-listing.ts";
 import { SerpMergeConflictSchema } from "../radar/serp-merge.ts";
+
+/*
+ * LEITURA TOLERANTE DO QUE VEIO DO PLANEJADOR (aposentado em 2026-10-01).
+ *
+ * Um snapshot local antigo pode carregar uma anotação de IA do módulo
+ * `planejador` ou um convite com papel `planner`. Recusar o item é certo;
+ * recusar o snapshot inteiro por causa dele apagaria estado válido. Só o item
+ * que não cabe mais no contrato fica de fora.
+ */
+function toleratedArray<T extends z.ZodTypeAny>(schema: T) {
+  return z.array(z.unknown()).transform(items => items.flatMap(item => {
+    const parsed = schema.safeParse(item);
+    return parsed.success ? [parsed.data as z.output<T>] : [];
+  }));
+}
 
 export const PersistenceModeSchema = z.enum(["server", "local_fallback", "unavailable"]);
 export type PersistenceMode = z.infer<typeof PersistenceModeSchema>;
@@ -42,18 +57,16 @@ export type PersistedDocumentDetail = z.infer<typeof PersistedDocumentDetailSche
 export const PersistedEditorialWorkspaceSchema = z.object({
   mode: PersistenceModeSchema,
   radarItems: z.array(RadarItemSchema),
-  plannerItems: z.array(PlannerItemSchema),
   articleVersions: z.array(VersionedArticleDNASchema),
   siloVersions: z.array(VersionedSiloDNASchema),
   versionEvents: z.array(VersionStatusEventSchema),
-  contentPlans: z.array(VersionedContentPlanSchema),
   serpRecords: z.array(SerpCollectionRecordSchema).default([]),
   serpReviews: z.array(SerpReviewRecordSchema).default([]),
   serpMergeConflicts: z.array(SerpMergeConflictSchema).default([]),
   serpPersistenceMode: z.enum(["server", "local_fallback"]).default("local_fallback"),
   documents: z.array(PersistedDocumentSchema),
   publications: z.array(OperationalPublicationSchema),
-  invitations: z.array(BrandInvitationSchema),
+  invitations: toleratedArray(BrandInvitationSchema),
   views: z.array(SavedGridViewSchema),
   /**
    * ADITIVO. Cliente antigo ignora e continua funcionando.
@@ -76,7 +89,6 @@ export const LocalWorkflowRecoverySchema = z.object({
   siloVersions: z.record(z.string(), VersionedSiloDNASchema),
   siloPageVersions: z.record(z.string(), VersionedSiloPageSchema).default({}),
   versionEvents: z.array(VersionStatusEventSchema),
-  contentPlans: z.record(z.string(), VersionedContentPlanSchema),
   /*
    * E1 · a cópia local guarda os documentos na forma de LISTAGEM: sem o bundle,
    * com o marcador. Cópia antiga, com o documento completo, continua legível.
@@ -84,14 +96,13 @@ export const LocalWorkflowRecoverySchema = z.object({
    */
   documents: z.record(z.string(), ListedContentDocumentSchema),
   radarItems: z.array(RadarItemSchema),
-  plannerItems: z.array(PlannerItemSchema),
   serpRecords: z.array(SerpCollectionRecordSchema).default([]),
   serpReviews: z.array(SerpReviewRecordSchema).default([]),
   serpMergeConflicts: z.array(SerpMergeConflictSchema).default([]),
   operationalPublications: z.array(OperationalPublicationSchema),
   documentLocks: z.record(z.string(), z.number().int().positive()),
   selectedEntityId: z.string().nullable(),
-  aiReviewAnnotations: z.array(AIReviewAnnotationSchema).default([]),
+  aiReviewAnnotations: toleratedArray(AIReviewAnnotationSchema).default([]),
   savedAt: z.string().datetime({ offset: true }),
 });
 export type LocalWorkflowRecovery = z.infer<typeof LocalWorkflowRecoverySchema>;
@@ -146,8 +157,8 @@ export const WorkflowCommandSchema = z.discriminatedUnion("action", [
    * handoff com readback, e handoff com readback não pode ser disparado por um
    * `void` sem espera, como esta união permite.
    *
-   * O vocabulário de LEITURA continua: `plannerItemId`, `contentPlanVersionId`
-   * e `sent_planner` permanecem legíveis onde já foram gravados.
+   * `plannerItemId`, `contentPlanVersionId` e `sent_planner` saíram do contrato
+   * na aposentadoria do Planejador (2026-10-01); o preflight confirmou zero linhas.
    */
   /*
    * CORTE 3.5 · `import_publications` saiu junto com o caminho local-first que

@@ -78,10 +78,3 @@ export function documentoV2SemDossie(id = "doc-sem-dossie") {
   return { ...doc, importedContext: { ...doc.importedContext, dossier: null } };
 }
 
-/** v1 do Planejador, sem `writingBrief` (chave AUSENTE no payload). */
-export function documentoV1(id = "doc-v1") {
-  return {
-    ...base, id, schemaVersion: 1 as const, status: "planejado" as const, editorContent: null,
-    contentPlanRef: referencia("plano"),
-  };
-}

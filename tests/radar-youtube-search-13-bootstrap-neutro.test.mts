@@ -116,7 +116,8 @@ test("§11.C · BOOTSTRAP_SETS_PRIMARY_MODE = NO — o contêiner nasce sem modo
   assert.equal(container.payload.competitiveReport, null);
   assert.equal(container.payload.competitiveness, null);
   assert.equal(container.payload.finalizedBundle, null);
-  assert.equal(container.payload.plannerPackage, null);
+  assert.equal(container.payload.approvedPackage, null);
+  assert.equal("plannerPackage" in container.payload, false, "a análise nova não nasce com o campo do Planejador");
 
   /*
    * E A IDENTIDADE DA SERP É NULA, não inventada.

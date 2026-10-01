@@ -276,16 +276,15 @@ test("VÍDEOS 3.5 · a camada vive no dossiê, amarrada à versão do ArticleDNA
   assert.equal(/fetch\(|localStorage|server-only/.test(codigo), false);
 });
 
-test("VÍDEOS 3.5 · o handoff do Planejador entrega o dossiê inteiro, com a camada dentro", () => {
+test("VÍDEOS 3.5 · o envio ao Redator entrega o dossiê inteiro, com a camada dentro", () => {
   /*
-   * O CONTRATO JÁ EXISTIA E NÃO PRECISOU MUDAR: o handoff v3 entrega o
-   * `dossier` verbatim. Bastou a camada existir dentro dele — foi por isso que
-   * este gate não criou tabela, rota nem versão de matcher.
+   * O envelope v3 do Planejador saiu em 2026-10-01. Quem entrega agora é o
+   * envio ao Redator, e ele passa o dossiê canônico verbatim. Bastou a camada
+   * existir dentro dele — foi por isso que este gate não criou tabela, rota
+   * nem versão de matcher.
    */
-  const handoff = ler("../lib/radar/planner-handoff.ts");
-  assert.match(handoff, /dossier: RadarEvidenceBundle;/);
-  assert.match(handoff, /A fotografia inteira da rodada congelada\. O que o Planejador consome\./);
-  assert.match(handoff, /binding: RadarPlannerArticleFoundation;/);
+  const handoff = ler("../lib/server/radar-writer-send.ts");
+  assert.match(handoff, /const dossie = canonico\.dossier;/);
 
   /* E o dossiê que ele carrega é o tipo que agora tem a camada de vídeo. */
   assert.match(dossie(), /export type RadarEvidenceBundle = \{[\s\S]*?video: RadarVideoEvidenceLayer \| null;[\s\S]*?\};/);
@@ -295,11 +294,11 @@ test("VÍDEOS 3.5 · o handoff do Planejador entrega o dossiê inteiro, com a ca
    *
    * É isso que garante que a camada chega inteira: uma cópia manual perderia
    * `video` em silêncio no dia em que alguém acrescentasse um campo e
-   * esquecesse de copiá-lo — e o Planejador receberia um dossiê sem vídeo sem
+   * esquecesse de copiá-lo — e o Redator receberia um dossiê sem vídeo sem
    * que nada falhasse.
    */
-  assert.match(handoff, /    dossier: input\.dossier,/);
-  assert.equal(/dossier: \{[\s\S]{0,200}\.\.\.input\.dossier/.test(handoff), false, "ninguém remonta o dossiê no caminho");
+  assert.match(handoff, /    dossier: dossie,/);
+  assert.equal(/dossier: \{[\s\S]{0,200}\.\.\.dossie/.test(handoff), false, "ninguém remonta o dossiê no caminho");
 });
 
 test("VÍDEOS 3.5 · o gate não criou tabela, rota, migration nem versão de matcher", () => {

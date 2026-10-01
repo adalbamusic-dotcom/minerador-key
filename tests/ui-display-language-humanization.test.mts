@@ -11,9 +11,8 @@ test("canonical technical names have human-readable display labels", async () =>
     source("modules/arquiteto/arquiteto-workspace.tsx"),
     source("modules/radar/radar-page.tsx"),
     source("modules/radar/radar-analysis-page.tsx"),
-    source("modules/planejador/planner-cockpit-workspace.tsx"),
     source("modules/redator/writer-page.tsx"),
-    source("modules/publicacoes/publications-page.tsx"),
+    source("modules/publicacoes/publications-workspace.tsx"),
   ]);
   const ui = files.join("\n");
 
@@ -24,7 +23,6 @@ test("canonical technical names have human-readable display labels", async () =>
     "Arquitetura do silo",
     "Página do silo",
     "Análise da SERP",
-    "Plano editorial",
     "Conteúdo do artigo",
     "Perfil semântico da keyword",
     "Pacote de evidências do Radar",
@@ -38,9 +36,8 @@ test("known visible labels no longer expose canonical class-like names", async (
     source("components/editorial/dna-panels.tsx"),
     source("modules/radar/radar-page.tsx"),
     source("modules/radar/radar-analysis-page.tsx"),
-    source("modules/planejador/planner-cockpit-workspace.tsx"),
     source("modules/redator/writer-page.tsx"),
-    source("modules/publicacoes/publications-page.tsx"),
+    source("modules/publicacoes/publications-workspace.tsx"),
   ]);
   const ui = files.join("\n");
 

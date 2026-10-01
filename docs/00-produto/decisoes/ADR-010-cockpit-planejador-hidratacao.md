@@ -1,8 +1,10 @@
 # ADR-010 — Cockpit hidratado do Planejador
 
+> **Superada em 2026-10-01** pela aposentadoria do Planejador (`docs/compartilhado/sdd-aposentar-planejador-2026-10-01.md`). Histórica: não orienta implementação.
+
 ## Status
 
-Aceita para a sprint de implementação local de 2026-07-20.
+Superada em 2026-10-01 (era: aceita para a sprint de implementação local de 2026-07-20).
 
 ## Contexto
 

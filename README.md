@@ -16,7 +16,6 @@ Next.js 16 (App Router), React 19, TypeScript, Tailwind, Zod, NextAuth, Supabase
 | Minerador | `/{brandRef}/minerador` |
 | Arquiteto | `/{brandRef}/arquiteto` |
 | Radar | `/{brandRef}/radar`, `/{brandRef}/radar/{articleId}` |
-| Planejador | `/{brandRef}/planejador` |
 | Redator | `/{brandRef}/redator` |
 | Publicações | `/{brandRef}/publicacoes` |
 | Conta | `/{brandRef}/conta` |
@@ -27,7 +26,7 @@ Next.js 16 (App Router), React 19, TypeScript, Tailwind, Zod, NextAuth, Supabase
 
 O repositório é um monólito modular. A documentação canônica está em [docs/README.md](docs/README.md): cada módulo possui `spec.md`, `estado-atual.md` e `backlog.md`; os contratos globais de pipeline, estado e sistema visual ficam em `docs/00-produto/` e `docs/compartilhado/`. Documentos históricos foram preservados em `docs/_arquivo/` e não são fonte de verdade.
 
-Fluxo oficial: `Marca → Minerador → Arquiteto → Radar → Planejador → Redator → Publicações`.
+Fluxo oficial: `Marca → Minerador → Arquiteto → Radar → Redator → Publicações`.
 
 ## Estado da fundação
 

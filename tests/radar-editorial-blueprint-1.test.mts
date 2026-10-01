@@ -544,9 +544,9 @@ test("M e N · a evidência anterior continua inteira e rastreável", async () =
   assert.match(projecao, /blueprint: blueprintEditorial,/, "o dossiê de candidatos continua na view");
   assert.match(projecao, /articleModel: buildRadarEditorialArticleModel\(/, "e a síntese é derivada dele");
 
-  /* E o handoff ao Planejador continua levando o dossiê de candidatos. */
-  const handoff = await readFile(new URL("../lib/radar/planner-handoff.ts", import.meta.url), "utf8");
-  assert.match(handoff, /editorialBlueprint/, "RADAR_EVIDENCE_BUNDLE_COMPATIBLE");
+  /* E a investigação congelada continua levando o dossiê de candidatos (o envelope do Planejador saiu em 2026-10-01). */
+  const congelado = await readFile(new URL("../lib/radar/investigation-finalization.ts", import.meta.url), "utf8");
+  assert.match(congelado, /blueprint: FrozenBlueprintSchema/, "RADAR_EVIDENCE_BUNDLE_COMPATIBLE");
 
   /* A tela de candidatos não foi apagada — foi recolhida. */
   const workbench = await readFile(new URL("../modules/radar/radar-r3-workbench.tsx", import.meta.url), "utf8");

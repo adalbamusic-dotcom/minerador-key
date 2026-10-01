@@ -425,7 +425,7 @@ export function ArticleFormationReviewPanel({
             <ul className="mt-1 space-y-0.5 text-sm leading-6 text-warning" data-testid="architect-review-serp-outsiders">
               {serp.parecer.outsiders.map(item => (
                 <li key={item.keyword}>
-                  <span className="text-foreground">{item.keyword}</span> — {item.reason}
+                  <span className="text-keyword">{item.keyword}</span> — {item.reason}
                 </li>
               ))}
             </ul>

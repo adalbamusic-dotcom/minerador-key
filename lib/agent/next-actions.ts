@@ -92,7 +92,7 @@ export function resolveNextActions(state: PlatformStateSnapshot): { actions: Nex
    * estado 'approved' da esteira, que o fluxo atual não grava.
    */
   const noRedator = (item: PlatformStateSnapshot["radar"]["items"][number]) =>
-    item.hasDocument || item.state === "sent_writer" || item.state === "sent_planner";
+    item.hasDocument || item.state === "sent_writer";
   const emInvestigacao = state.radar.items.filter(item => !noRedator(item) && !item.finalizedAt);
   if (emInvestigacao.length) {
     push("radar.investigate", `${emInvestigacao.length} artigo(s) em investigação no Radar.`, emInvestigacao.map(item => item.articleId));

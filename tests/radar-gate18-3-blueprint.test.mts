@@ -9,8 +9,6 @@ import { buildRadarResearchQueryPlan } from "../lib/radar/research-query-plan.ts
 import { radarResearchUniverseFingerprint } from "../lib/radar/research-curation.ts";
 import { autoDecideRadarReference } from "../lib/radar/research-auto-selection.ts";
 import { freezeRadarEvidenceBundle, radarFinalizationReadiness } from "../lib/radar/investigation-finalization.ts";
-import { buildRadarEvidenceBundle } from "../lib/radar/evidence-bundle.ts";
-import { buildRadarPlannerEvidenceHandoff } from "../lib/radar/planner-handoff.ts";
 import { buildRadarResetPayload } from "../lib/radar/radar-reset.ts";
 import { buildRadarReportSummary } from "../lib/radar/operational-view.ts";
 import type { RadarArticleResearchContext } from "../lib/radar/article-research-context.ts";
@@ -25,7 +23,7 @@ import type { RadarExtractionPage, RadarObservedLink } from "../lib/radar/analys
  *
  * O que estes testes protegem é a fronteira dessa camada. Ela PROPÕE blocos com
  * o porquê ao lado; ela não decide H2, ordem final, título nem contagem de
- * palavras — isso continua sendo do Planejador. E nada aqui é inventado: cada
+ * palavras — isso continua sendo do Redator. E nada aqui é inventado: cada
  * bloco, pauta e oportunidade aponta para a evidência que o sustenta.
  *
  * REAL_PROVIDER_CALLS = 0, com sentinela no fim.
@@ -181,7 +179,7 @@ test("GATE 18.3 · D e E — nenhum H2 obrigatório, nenhuma contagem de palavra
    * A FRONTEIRA QUE NÃO PODE SER ATRAVESSADA.
    *
    * O Radar propõe nome de TRABALHO e tendência de posição. Congelar "H2 final"
-   * ou "1800 palavras" aqui tomaria do Planejador uma decisão que depende do
+   * ou "1800 palavras" aqui tomaria do Redator uma decisão que depende do
    * Silo inteiro e do calendário — e o faria com menos informação.
    */
   const serializado = JSON.stringify(blueprint);
@@ -496,52 +494,6 @@ test("GATE 18.3 · Q, R e S — o reset limpa as pautas correntes e preserva o r
   } as never);
   assert.ok(!("existingContent" in payloadZerado), "o reset não tem campo de vídeo para apagar");
   assert.ok(!("expertEvidence" in payloadZerado), "nem de contribuição do especialista");
-});
-
-/* ==========  T e U · O PLANEJADOR ENCONTRA PRONTO  ============== */
-
-test("GATE 18.3 · T e U — o handoff expõe o blueprint, e o Planejador não o remonta", () => {
-  const view = vista();
-  const congelamento = freezeRadarEvidenceBundle({
-    readiness: radarFinalizationReadiness({
-      started: true, stale: false, alreadyFinalized: false,
-      pending: 0, analyzed: view.observed.sample.analyzedSuccess,
-      failed: view.observed.sample.failedFinal, sufficiency: view.sufficiency,
-    }),
-    observed: view.observed, record: registro(), mode: "WEB", sufficiency: view.sufficiency,
-    blueprint: view.blueprint, frozenBy: "ator", frozenAt: "2026-09-10T13:00:00.000Z",
-  });
-  assert.equal(congelamento.ok, true);
-  if (!congelamento.ok) return;
-
-  const handoff = buildRadarPlannerEvidenceHandoff({
-    article: ARTIGO,
-    frozen: congelamento.bundle,
-    dossier: buildRadarEvidenceBundle({ observed: view.observed, serp: { current: true, sufficient: true, valid: true } }),
-    blueprint: view.blueprint,
-    preparedBy: "ator", preparedAt: "2026-09-10T14:00:00.000Z",
-  });
-  assert.equal(handoff.ok, true);
-  if (!handoff.ok) return;
-
-  /* T — está lá, direto, sem o Planejador precisar cavar. */
-  assert.deepEqual(handoff.handoff.editorialBlueprint.sections.map(item => item.id), view.blueprint.sections.map(item => item.id));
-  assert.deepEqual(handoff.handoff.editorialBlueprint.specialistBriefs, view.blueprint.specialistBriefs);
-  assert.deepEqual(handoff.handoff.editorialBlueprint.videoBriefs, view.blueprint.videoBriefs);
-
-  /*
-   * U — E A EVIDÊNCIA ORIGINAL CONTINUA VIAJANDO INTEIRA.
-   *
-   * O blueprint é PROJEÇÃO, não substituição: o Planejador pode conferir
-   * qualquer recomendação contra o modelo que a originou.
-   */
-  assert.ok(handoff.handoff.dossier.observed!.concepts.all.length > 0, "o modelo bruto continua junto");
-  assert.ok(handoff.handoff.dossier.observed!.aiDiscovery.answerableUnits.length > 0);
-  assert.deepEqual(
-    handoff.handoff.editorialBlueprint.sections.map(item => item.conceptId).sort(),
-    [...new Set(view.observed.aiDiscovery.answerableUnits.map(unit => unit.concept.id))].sort(),
-    "cada bloco corresponde a um conceito do modelo",
-  );
 });
 
 /* ==========  §21 e §25 · A LEITURA  ============================= */

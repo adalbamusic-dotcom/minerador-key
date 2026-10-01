@@ -112,7 +112,7 @@ export function resolveRadarImportEligibility(input: RadarImportEligibilityInput
   /*
    * A PRONTIDÃO É A CANÔNICA, não o texto da tela.
    *
-   * `radarPlannerHandoffReadiness` é a mesma regra que o Planejador usa. Ler
+   * `radarHandoffReadiness` é a mesma regra que o Planejador usa. Ler
    * "Finalizado" na interface e confiar seria aceitar como prova aquilo que a
    * própria tela pode estar mostrando errado.
    */
@@ -149,9 +149,7 @@ export function resolveRadarImportEligibility(input: RadarImportEligibilityInput
     }
     return {
       eligible: false, outcome: "atualizacao_disponivel", code: null,
-      reason: existente.schemaVersion === 1
-        ? "Já existe documento deste artigo vindo de plano editorial. A base não é substituída aqui."
-        : "Já existe documento deste artigo com pacote anterior. A base não é substituída aqui.",
+      reason: "Já existe documento deste artigo com pacote anterior. A base não é substituída aqui.",
     };
   }
 

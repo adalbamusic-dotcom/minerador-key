@@ -89,7 +89,8 @@ test("painel expandido mostra fatos da Principal, aplicabilidade do KGR e compat
   assert.match(workspace, /Compatibilidade/);
   assert.match(workspace, /KeywordDnaReadonlyPanel/);
   assert.match(workspace, /role="Principal"/);
-  assert.match(workspace, /art\.supportKeywords\.map\(\(keyword, index\) => <KeywordDnaReadonlyPanel/);
+  // A principal trocada no DNA do publicado não se repete entre os apoios (2026-10-01).
+  assert.match(workspace, /art\.supportKeywords\.filter\(keyword => keyword !== art\.displayPrincipalObj\)\.map\(\(keyword, index\) => <KeywordDnaReadonlyPanel/);
   assert.match(readFileSync("components/editorial/article-dna-readonly-panel.tsx", "utf8"), /Ver definição completa do artigo/);
   assert.match(readFileSync("components/editorial/keyword-dna-readonly-panel.tsx", "utf8"), /Ver perfil completo da keyword/);
   assert.match(workspace, /\["logic", "serp", "ai", "review"\]/);

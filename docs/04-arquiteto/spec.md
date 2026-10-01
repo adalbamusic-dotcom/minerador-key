@@ -1,3 +1,32 @@
+## 40. A SERP tem a última palavra sobre intenção e funil — 2026-10-01
+
+Decisão do dono. Substitui, no ponto da intenção, a herança da §26.
+
+1. **O Minerador entrega um padrão genérico.** A intenção e o funil que chegam no KeywordDNA vêm
+   de leitura geral do Google. Eles são o ponto de partida e são sempre confrontados com a SERP.
+2. **A SERP decide, pelas quatro lentes e pela porcentagem.** Cada resultado de cada lente vota
+   numa intenção. A de maior participação vence, mesmo com porcentagem baixa, porque é dado
+   real. Empate no topo é *misto*. O funil sai da intenção observada:
+   - informacional → topo;
+   - comercial → meio;
+   - transacional → fundo.
+
+   A leitura fica gravada no parecer em `observedFunnel` e `intentShares` (aditivo).
+3. **A classificação do artigo segue a SERP** quando ela mostra intenção ou funil, mesmo contra a
+   Principal ou a composição. O motivo diz a participação na SERP e o que o Minerador declarava.
+   Sem SERP com intenção, vale o padrão do Minerador, como antes.
+4. **Concluir grava o que a SERP decidiu no ArticleDNA.** Isso vale para o Concluir formação, o
+   Gravar melhorias e o Reforçar publicados. Os campos gravados são `mainIntent`,
+   `intentProfile.primaryIntent/articlePurpose/status` e `journeyStage`. O rótulo do Minerador
+   fica em `intentProfile.originalLabel`, como proveniência. O KeywordDNA continua sendo do
+   Minerador: o Arquiteto não o reescreve.
+5. **Faltou dado, nova coleta.** Lente faltando nunca vira decisão. O plano de pagamento lista só
+   a lente que falta, e a pessoa escolhe pagar ou seguir pelo cache. *Indefinido*, quando nenhum
+   resultado dá sinal de intenção, não é falta de coleta: aí vale o padrão do Minerador.
+6. **O portão do Radar confere a SERP do ArticleDNA aprovado.** Vale o parecer que a aprovação
+   gravou (`serpAssessmentRef`), se descrever exatamente a composição do DNA. Mudança pendente
+   na mesa não recusa o DNA aprovado; ela vira uma versão nova quando for gravada.
+
 ## 39. Reforçar publicados e mensagens que dizem o que foi gravado — 2026-09-28
 
 Regras permanentes (no código desde 2026-09-28; homologação manual pendente). Fonte: [SDD aprovada](sdd-reforcar-publicados-2026-09-28.md).

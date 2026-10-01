@@ -1,7 +1,7 @@
 import type { RadarItem } from "../editorial/operational-flow.ts";
 import { parseBrandRef } from "../tenant-routing.ts";
 
-type RadarTenantModule = "radar" | "arquiteto" | "planejador";
+type RadarTenantModule = "radar" | "arquiteto";
 
 function validBrandRef(brandRef: string | null | undefined) {
   if (!brandRef) return null;

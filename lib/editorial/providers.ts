@@ -1,8 +1,7 @@
-import type { ContentDocument, ProductEvidenceDNA, SerpSnapshot, VersionEnvelope } from "../arquiteto/contracts.ts";
+import type { ContentDocument, ProductEvidenceDNA, SerpSnapshot } from "../arquiteto/contracts.ts";
 import { ContentDocumentSchema, ProductEvidenceDNASchema, SerpSnapshotSchema } from "../arquiteto/contracts.ts";
-import { contentHash, createVersionEnvelope, legacyVersionReference, toVersionReference } from "../arquiteto/versioning.ts";
+import { contentHash, legacyVersionReference } from "../arquiteto/versioning.ts";
 import { ExternalSimilarityInputSchema, ExternalSimilarityResultSchema, ProductEvidenceInputSchema, SerpCollectionRecordSchema, SerpQueryInputSchema, type SerpCollectionRecord, type SerpQueryInput } from "./contracts.ts";
-import type { ContentPlan } from "../arquiteto/contracts.ts";
 import { ExternalSourceSuggestionSchema, GuardianFindingSchema, InternalLinkAssignmentSchema, PublicationRecordSchema } from "./operational-contracts.ts";
 
 export interface SerpProvider { collectSnapshot(input: SerpQueryInput): Promise<SerpCollectionRecord> }
@@ -52,32 +51,35 @@ export const mockProductEvidenceProvider: ProductEvidenceProvider = {
   },
 };
 
-export async function createMockPlanAndDocument(brandId: string) {
+/**
+ * Documento de demonstração, na forma que todo documento tem desde a
+ * aposentadoria do Planejador (2026-10-01): v2, de origem Radar, sem plano.
+ */
+export async function createMockDocument(brandId: string) {
   const brandRef = legacyVersionReference(`mock-brand-${brandId}`, { mock: true });
   const keywordRef = legacyVersionReference(`mock-keyword-${brandId}`, { mock: true });
   const articleRef = legacyVersionReference(`mock-article-${brandId}`, { mock: true });
   const siloRef = legacyVersionReference(`mock-silo-${brandId}`, { mock: true });
   const serpHash = await contentHash({ mock: "serp" });
-  const planPayload: ContentPlan = {
-    schemaVersion: 1, planId: `mock-plan-${brandId}`, brandDnaRef: brandRef, keywordDnaRefs: [keywordRef], articleDnaRef: articleRef,
-    siloDnaRef: siloRef, serpEvidenceRefs: [{ artifactId: `mock-serp-${brandId}`, artifactType: "serp_snapshot", contentHash: serpHash }],
-    productEvidenceRefs: [], originalityReportRef: null,
-    approvedOutline: [{ id: "mock-section-1", heading: "Introdução", objective: "Apresentar o problema sem promessas genéricas.", keywordDnaRefs: [keywordRef] }],
-    writingInstructions: ["Demonstração local; não utilizar como planejamento aprovado."], humanPendingDecisions: ["Executar SERP real."],
-  };
-  const plan = await createVersionEnvelope({ entityId: planPayload.planId, versionNumber: 1, origin: "system", changeReason: "Demonstração local sob demanda.", createdBy: "mock-provider", payload: planPayload });
-  const provenance = { keywordDnaRefs: [keywordRef], evidenceRefs: planPayload.serpEvidenceRefs, sourceIds: ["mock-source"] };
-  const document: ContentDocument = ContentDocumentSchema.parse({ schemaVersion: 1, id: `mock-document-${brandId}`, title: "Documento editorial simulado",
-    status: "planejado", contentPlanRef: toVersionReference(plan), brandDnaRef: brandRef, keywordDnaRefs: [keywordRef], siloDnaRef: siloRef,
-    articleDnaRef: articleRef, serpSnapshotRefs: planPayload.serpEvidenceRefs, evidenceRefs: [], sourceIds: ["mock-source"], linkMap: [],
-    instructions: planPayload.writingInstructions,
+  const serpRefs = [{ artifactId: `mock-serp-${brandId}`, artifactType: "serp_snapshot" as const, contentHash: serpHash }];
+  const provenance = { keywordDnaRefs: [keywordRef], evidenceRefs: serpRefs, sourceIds: ["mock-source"] };
+  const document: ContentDocument = ContentDocumentSchema.parse({ schemaVersion: 2, id: `mock-document-${brandId}`, title: "Documento editorial simulado",
+    status: "planejado", brandDnaRef: brandRef, keywordDnaRefs: [keywordRef], siloDnaRef: siloRef,
+    articleDnaRef: articleRef, serpSnapshotRefs: serpRefs, evidenceRefs: [], sourceIds: ["mock-source"], linkMap: [],
+    instructions: ["Demonstração local; não utilizar como pacote aprovado."],
+    radarOrigin: {
+      radarItemId: `mock-radar-${brandId}`, articleId: articleRef.entityId, analysisVersionId: `mock-analysis-${brandId}`, analysisVersionNumber: 1,
+      evidenceBundleHash: serpHash, articleDnaVersionId: articleRef.versionId, articleDnaContentHash: articleRef.contentHash,
+      siloDnaVersionId: siloRef.versionId, importedAt: new Date(0).toISOString(), importedBy: "mock-provider",
+    },
+    importedContext: { source: "radar", capturedAt: new Date(0).toISOString(), dossier: null, editorialContext: [], visualGuidance: [], pendingDecisions: [] },
     blocks: [
       { id: "mock-h1", type: "heading", level: 1, text: "Título demonstrativo", provenance },
       { id: "mock-p1", type: "paragraph", text: "Este bloco mostra como o futuro documento preservará proveniência.", provenance },
       { id: "mock-product", type: "product_block", productEvidenceId: "mock-product", title: "Evidência de produto", summary: "Espaço reservado para evidência validada.", provenance },
       { id: "mock-comparison", type: "comparison", title: "Comparação editorial", columns: ["Critério", "Direção"], rows: [["Originalidade", "Adicionar experiência própria"]], provenance },
     ] });
-  return { plan: plan as VersionEnvelope<ContentPlan>, document };
+  return { document };
 }
 
 export function createMockOperationalBundle(brandId: string, articleId = "mock-article", targetArticleId = "mock-target") {

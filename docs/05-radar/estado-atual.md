@@ -1,5 +1,31 @@
 # Estado atual — Radar
 
+## Planejador aposentado: o Radar entrega ao Redator — 2026-10-01
+
+**Verificado no código e confirmado por teste. Validado manualmente: não. Nada foi gravado no banco remoto.**
+
+- `lib/radar/planner-handoff.ts` virou `lib/radar/handoff-readiness.ts` (só a prontidão
+  de entrega). O envelope V3 do Planejador e `radar-planner-send.ts` saíram.
+- O Relatório diz "Pacote para o Redator?" e "Pronto para o Redator".
+- O pacote aprovado do relatório (RadarApprovedPackage) é gravado em `approvedPackage`.
+  `plannerPackage`, `plannerTransfer` e `plannerBundle` são opcionais e só de leitura;
+  `radarApprovedPackageOf` lê o novo e cai no legado. O reset zera os três.
+- `writerTransfer` usa `RadarTransferReceiptSchema`.
+- Pendência: a etiqueta `packageType: "radar_planner_handoff"` continua no pacote gravado
+  (dado já existente); sai na migração de banco.
+- SDD: `docs/compartilhado/sdd-aposentar-planejador-2026-10-01.md` §8.2.
+
+## Keyword inteira e com a sobra da planilha — 2026-10-01
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- Na planilha, a coluna Artigo (onde está a keyword) é `fill: true`. Ela recebe toda a sobra
+  de largura. A `OperationalDataGrid` ganhou `fill` como campo opcional e aditivo, e Planejador
+  e Publicações não mudam.
+- A keyword da linha deixou de ser cortada com “…”. A regra raiz do `globals.css` também vale
+  aqui: `.text-keyword` nunca trunca.
+- Contrato: `docs/compartilhado/sistema-visual.md` §5.0.1.
+
 ## Google base, YouTube/Amazon acréscimos, ponto do especialista — 2026-09-30
 
 ```text

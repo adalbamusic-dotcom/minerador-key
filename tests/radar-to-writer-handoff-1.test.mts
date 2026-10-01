@@ -722,10 +722,8 @@ test("M · nenhum fluxo novo chama sendRadarToPlanner", async () => {
       `${alvo} ainda usa o caminho do Planejador`);
   }
 
-  /* E o serviço antigo continua existindo, mas declarado como legado. */
-  const legado = await readFile(new URL("../lib/server/radar-planner-send.ts", import.meta.url), "utf8");
-  assert.match(legado, /@deprecated Use `sendRadarToWriter`/);
-  assert.match(legado, /ESTE CAMINHO NÃO É MAIS OPERACIONAL/);
+  /* E o serviço antigo não existe mais: o Planejador foi aposentado em 2026-10-01. */
+  await assert.rejects(readFile(new URL("../lib/server/radar-planner-send.ts", import.meta.url), "utf8"), /ENOENT/);
 });
 
 /* ================================= N ================================= */
@@ -747,26 +745,15 @@ test("N · nenhuma superfície do Radar oferece “Enviar ao Planejador”", asy
   /*
    * §1 e §19 · O PLANEJADOR SAIU DA NAVEGAÇÃO DE WORKFLOW.
    *
-   * E SÓ dela: a rota continua registrada em `PRODUCT_MODULES` porque o
-   * histórico precisa continuar alcançável. Tirar as duas coisas ao mesmo
-   * tempo apagaria os planos já aprovados da vista de quem os aprovou.
+   * Desde a aposentadoria (2026-10-01) ele saiu também do registro: a rota
+   * antiga redireciona para o Radar e o Redator passou a ser o estágio 5.
    */
   const navegacao = await readFile(new URL("../lib/editorial/navigation.ts", import.meta.url), "utf8");
   const fluxo = navegacao.slice(navegacao.indexOf("export const PRODUCT_FLOW"), navegacao.indexOf("export const LEGACY_REDIRECTS"));
   assert.equal(/"planejador"/.test(fluxo), false, "o Planejador voltou ao fluxo de navegação");
   assert.match(fluxo, /"radar", "redator"/, "o Radar precisa entregar direto ao Redator");
-  assert.ok(navegacao.includes(`planejador: { label: "Planejador", href: "/planejador", historical: true }`),
-    "a rota do histórico do Planejador não pode sumir");
-  /*
-   * REMOÇÃO LÓGICA · a rota responde e deixa de ser oferecida.
-   *
-   * `historical: true` é o que separa as duas coisas. O menu passou a filtrar
-   * por essa marca, então o Planejador some da navegação sem que o caminho
-   * para os planos já aprovados seja apagado junto.
-   */
-  assert.match(navegacao, /!item\.historical/, "o menu precisa filtrar rota histórica");
-  assert.match(navegacao, /planejador: null, admin: null/, "PLANEJADOR_STAGE = NONE precisa estar declarado");
-  assert.match(navegacao, /redator: 6, publicacoes: 7, conta: 8/, "os estágios declarados mudaram");
+  assert.equal(/planejador: \{ label: "Planejador"/.test(navegacao), false, "o Planejador voltou ao registro");
+  assert.match(navegacao, /redator: 5, publicacoes: 6, conta: 7/, "os estágios declarados mudaram");
 
   /* E nenhuma tela do Redator convida a abrir o Planejador. */
   for (const tela of ["../modules/redator/writer-page.tsx", "../components/editorial/professional-writer.tsx"]) {

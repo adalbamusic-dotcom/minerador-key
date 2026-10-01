@@ -2,7 +2,7 @@ import { parseAgencyRef } from "./agency-routing.ts";
 import { parseBrandRef, tenantModuleFromPathname, type TenantRouteModule } from "./tenant-routing.ts";
 import type { NoticeScope } from "./visual-notice-contract.ts";
 
-const tenantModules: readonly TenantRouteModule[] = ["marca", "conta", "minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes"];
+const tenantModules: readonly TenantRouteModule[] = ["marca", "conta", "minerador", "arquiteto", "radar", "redator", "publicacoes"];
 
 function scopePart(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9:_-]+/g, "-");

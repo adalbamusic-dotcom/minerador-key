@@ -22,7 +22,7 @@ type ContextIndex = {
   pendingOnboarding: PendingAgencyOnboarding | null;
 };
 
-const tenantModules: TenantRouteModule[] = ["marca", "conta", "minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes"];
+const tenantModules: TenantRouteModule[] = ["marca", "conta", "minerador", "arquiteto", "radar", "redator", "publicacoes"];
 const platformAdminLabel = "Administração global";
 const agencyLabel = "Minha Agência";
 const noBrandAccessLabel = "Você ainda não possui acesso editorial a uma marca. Este é um estado válido: aguarde um convite ou vínculo explícito.";

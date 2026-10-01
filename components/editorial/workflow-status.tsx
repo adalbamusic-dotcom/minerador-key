@@ -31,7 +31,6 @@ const STATUS_META: Record<string, { label: string; tone: string; group: "process
   approved: { label: "Aprovado", tone: "border-emerald-900 text-emerald-300", group: "approved" },
   sent_architect: { label: "Importado no Arquiteto", tone: "border-cyan-900 text-cyan-300", group: "sent" },
   sent_radar: { label: "Importado no Radar", tone: "border-cyan-900 text-cyan-300", group: "sent" },
-  sent_planner: { label: "Importado no Planejador", tone: "border-cyan-900 text-cyan-300", group: "sent" },
   sent_writer: { label: "Importado no Redator", tone: "border-cyan-900 text-cyan-300", group: "sent" },
   ready_to_export: { label: "Importado em Publicações", tone: "border-cyan-900 text-cyan-300", group: "sent" },
   queued: { label: "Na fila", tone: "border-pending/40 text-pending", group: "sent" },

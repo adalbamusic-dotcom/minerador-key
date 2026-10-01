@@ -1,6 +1,8 @@
 # ADR-009 — ContentPlan definitivo e sucessores imutáveis
 
-- **Status:** Aceita
+> **Superada em 2026-10-01** pela aposentadoria do Planejador (`docs/compartilhado/sdd-aposentar-planejador-2026-10-01.md`). Histórica: não orienta implementação.
+
+- **Status:** Superada (2026-10-01)
 - **Data:** 2026-07-20
 - **Módulo proprietário:** Planejador
 - **Módulos consumidores:** Redator, Publicações e workflow editorial

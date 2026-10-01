@@ -1,10 +1,10 @@
 import { radarCompetitiveBlueprintViewOfAnalysis } from "../radar/competitive-blueprint-view.ts";
 import { buildRadarEvidenceBundleFromAnalysis, radarPrimaryProfileOfAnalysis } from "../radar/evidence-bundle-runtime.ts";
-import { radarPlannerHandoffReadiness } from "../radar/planner-handoff.ts";
+import { radarHandoffReadiness } from "../radar/handoff-readiness.ts";
 import type { RadarAnalysisVersion } from "../radar/analysis-contracts.ts";
 import type { RadarEvidenceBundle } from "../radar/evidence-bundle.ts";
 import type { RadarCompetitiveBlueprintView } from "../radar/competitive-blueprint-view.ts";
-import type { RadarPlannerArticleFoundation, RadarPlannerHandoffReadiness } from "../radar/planner-handoff.ts";
+import type { RadarArticleFoundation, RadarHandoffReadiness } from "../radar/handoff-readiness.ts";
 import type { RadarResearchProfile } from "../radar/research-profile.ts";
 import { radarKeywordContextOf } from "../radar/keyword-context.ts";
 import type { RadarKeywordContext } from "../radar/keyword-context.ts";
@@ -15,12 +15,13 @@ import type { RadarCanonicalAuthorities } from "./radar-canonical-authorities.ts
  *
  * ==================== POR QUE ISTO VIROU MÓDULO ====================
  *
- * O envio ao Planejador resolvia esta cadeia dentro de `sendRadarToPlanner`:
+ * O envio ao Planejador (aposentado em 2026-10-01) resolvia esta cadeia dentro
+ * de `sendRadarToPlanner`; hoje a resolvem o envio ao Redator e o export:
  *
  *     análise corrente
  *        → radarCompetitiveBlueprintViewOfAnalysis   (blueprint canônico)
  *        → buildRadarEvidenceBundleFromAnalysis      (o dossiê e o hash dele)
- *        → radarPlannerHandoffReadiness              (dá para entregar?)
+ *        → radarHandoffReadiness              (dá para entregar?)
  *
  * O export precisa EXATAMENTE do mesmo resultado. §16 exige que o dossiê
  * exportado e o entregue tenham a mesma identidade, o mesmo hash e a mesma
@@ -41,7 +42,7 @@ import type { RadarCanonicalAuthorities } from "./radar-canonical-authorities.ts
 
 export type RadarCanonicalDossier = {
   analysis: RadarAnalysisVersion;
-  article: RadarPlannerArticleFoundation;
+  article: RadarArticleFoundation;
   profile: RadarResearchProfile;
   blueprintView: RadarCompetitiveBlueprintView;
   bundle: RadarEvidenceBundle;
@@ -49,7 +50,7 @@ export type RadarCanonicalDossier = {
   authorities: RadarCanonicalAuthorities | null;
   /** §7 · a mesma composição que o Planejador recebe e o export projeta. */
   keywordContext: RadarKeywordContext;
-  readiness: RadarPlannerHandoffReadiness;
+  readiness: RadarHandoffReadiness;
 };
 
 export type RadarCanonicalDossierResult =
@@ -65,7 +66,7 @@ export type RadarCanonicalDossierResult =
  */
 export function resolveRadarCanonicalDossier(entrada: {
   analysis: RadarAnalysisVersion;
-  article: RadarPlannerArticleFoundation;
+  article: RadarArticleFoundation;
   observedAt: string;
   /**
    * ===== PARITY_1 · §2 · AS AUTORIDADES DO RADAR, JÁ LIDAS =====
@@ -156,7 +157,7 @@ export function resolveRadarCanonicalDossier(entrada: {
   });
   if (!resolucao.ok) return { ok: false, code: "radar_bundle_unavailable", reason: resolucao.reason };
 
-  const readiness = radarPlannerHandoffReadiness({
+  const readiness = radarHandoffReadiness({
     article: entrada.article,
     frozen: payload.finalizedBundle,
     dossier: resolucao.bundle,

@@ -10,7 +10,7 @@ export type EditorialModule = z.infer<typeof PermissionModuleSchema>;
 export type EditorialAction = z.infer<typeof PermissionActionSchema>;
 
 const capabilityForModule = (module: EditorialModule) => module === "marca" ? "brand_data" : module;
-const allAgencyCapabilities = new Set(["brand_data", "brand_collaborators", "brand_dna", "minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes", "activity", "notifications"]);
+const allAgencyCapabilities = new Set(["brand_data", "brand_collaborators", "brand_dna", "minerador", "arquiteto", "radar", "redator", "publicacoes", "activity", "notifications"]);
 
 export async function assertEditorialPermission(profile: CanonicalSessionProfile, marcaId: string, module: EditorialModule, action: EditorialAction) {
   await assertCanAccessMarca(profile.userId, marcaId, profile);

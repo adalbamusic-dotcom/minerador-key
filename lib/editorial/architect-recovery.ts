@@ -58,7 +58,6 @@ export interface ArchitectRecoveryAuditInput {
   siloPages: Record<string, unknown>;
   versionEvents: unknown[];
   radarItems?: unknown[];
-  plannerItems?: unknown[];
   documents?: Record<string, unknown>;
   operationalPublications?: unknown[];
   historyEntries?: unknown[];
@@ -347,7 +346,7 @@ export function auditArchitectWorkspace(input: ArchitectRecoveryAuditInput): Arc
     return listOf(snapshot?.provisionalGroups);
   }), publishedArticles).forEach(id => recoverableNewArticleIds.add(id));
   articleIdsFromDnaMap(allArticleDnas).forEach(id => { if (!publishedArticles.has(id)) recoverableNewArticleIds.add(id); });
-  [...(input.radarItems || []), ...(input.plannerItems || []), ...(input.operationalPublications || [])].forEach(item => {
+  [...(input.radarItems || []), ...(input.operationalPublications || [])].forEach(item => {
     const record = recordOf(item);
     const id = stringOf(record?.articleId);
     if (id && !publishedArticles.has(id) && articleDnaKeywordIds.size) recoverableNewArticleIds.add(id);

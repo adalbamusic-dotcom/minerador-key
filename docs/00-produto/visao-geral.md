@@ -14,10 +14,10 @@ Marca fornece contexto; Minerador registra e qualifica keywords; Arquiteto organ
 
 ## Pipeline estratégico
 
-`BrandDNA → KeywordDNA → ArticleDNA / SiloDNA / SiloPage / InternalLinkGraph → SERP → ContentPlan → ContentDocument → PublicationRecord`.
+`BrandDNA → KeywordDNA → ArticleDNA / SiloDNA / SiloPage / InternalLinkGraph → SERP → ContentDocument → PublicationRecord`.
 
 `InternalLinkGraph` pertence ao Arquiteto e registra relações persistentes por
-Brand. Radar e Planejador podem receber uma referência versionada para leitura,
+Brand. Radar e Redator podem receber uma referência versionada para leitura,
 sem reagrupamento ou mutação do grafo; a próxima frente é a experiência
 funcional de Links Internos.
 
@@ -57,7 +57,7 @@ reexecutado smoke remoto nesta tarefa.
 
 `FUNCTIONAL_AREA_DEVELOPMENT`
 
-`Marca → Minerador → Arquiteto → Radar → Planejador → Redator → Publicações`
+`Marca → Minerador → Arquiteto → Radar → Redator → Publicações`
 
 A fundação global está congelada. O backlog funcional não autoriza novas
 migrations, limpeza ou reforma transversal sem um gate próprio.
@@ -77,7 +77,7 @@ smoke real**, sem transformar as demais áreas em homologadas automaticamente:
 
 A humanização preserva `technical canonical name != display label`: nomes como
 `BrandDNA`, `KeywordDNA`, `ArticleDNA`, `SiloDNA`, `SiloPage`,
-`InternalLinkGraph`, `ContentPlan`,
+`InternalLinkGraph`,
 `ContentDocument` e `PublicationRecord` continuam canônicos internamente e
 recebem labels compreensíveis na interface.
 
@@ -90,7 +90,6 @@ recebem labels compreensíveis na interface.
 | Minerador | importação, filtros, KGR e exportação no Supabase legado |
 | Arquiteto | lógica editorial, ArticleDNA, SiloDNA, SiloPage, InternalLinkGraph e propostas de IA |
 | Radar | investigação competitiva do ArticleDNA formado, em quatro áreas (Pesquisa, Vídeos, Especialista, Relatório); Pesquisa Google Fase 1 homologada em runtime real com DataForSEO, persistência remota e bundle congelado; YouTube e Amazon são frentes próprias |
-| Planejador | criação e aprovação inicial de ContentPlan |
 | Redator | editor Tiptap e abertura de documentos |
 | Publicações | planilha/esqueleto de entrega |
 | Conta | visão de conta |

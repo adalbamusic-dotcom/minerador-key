@@ -94,9 +94,6 @@ const CONSUMIDORES = [
   "components/editorial/professional-writer.tsx",
   "modules/arquiteto/arquiteto-workspace.tsx",
   "modules/marca/brand-page.tsx",
-  "modules/planejador/planner-cockpit-workspace.tsx",
-  "modules/planejador/planner-page.tsx",
-  "modules/publicacoes/publications-page.tsx",
   "modules/publicacoes/publications-workspace.tsx",
   "modules/radar/radar-analysis-page.tsx",
   "modules/radar/radar-page.tsx",
@@ -143,8 +140,6 @@ const ROTAS_DA_MESA: Record<string, { arquivos: string[]; consumidor: string }> 
   "/{brandRef}/arquiteto": { arquivos: [LAYOUT_MARCA, "app/(brand)/[brandRef]/arquiteto/page.tsx"], consumidor: "modules/arquiteto/arquiteto-workspace.tsx" },
   "/{brandRef}/radar": { arquivos: [LAYOUT_MARCA, "app/(brand)/[brandRef]/radar/page.tsx"], consumidor: "modules/radar/radar-page.tsx" },
   "/{brandRef}/radar/{articleId}": { arquivos: [LAYOUT_MARCA, "app/(brand)/[brandRef]/radar/[articleId]/page.tsx"], consumidor: "modules/radar/radar-analysis-page.tsx" },
-  "/{brandRef}/planejador": { arquivos: [LAYOUT_MARCA, "app/(brand)/[brandRef]/planejador/page.tsx"], consumidor: "modules/planejador/planner-page.tsx" },
-  "/{brandRef}/planejador/{contentPlanId}": { arquivos: [LAYOUT_MARCA, "app/(brand)/[brandRef]/planejador/[contentPlanId]/page.tsx"], consumidor: "modules/planejador/planner-cockpit-workspace.tsx" },
   "/{brandRef}/redator": { arquivos: [LAYOUT_MARCA, "app/(brand)/[brandRef]/redator/page.tsx"], consumidor: "modules/redator/writer-page.tsx" },
   "/{brandRef}/publicacoes": { arquivos: [LAYOUT_MARCA, "app/(brand)/[brandRef]/publicacoes/page.tsx"], consumidor: "modules/publicacoes/publications-workspace.tsx" },
 };

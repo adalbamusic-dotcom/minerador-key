@@ -4,14 +4,13 @@ O Minerador qualifica KGR/não KGR, métricas, intenção e publicação. O Arqu
 
 `Marca → Minerador → Arquiteto → Radar → Redator → Publicações`
 
-Desde 2026-09-18 o **Planejador está removido do pipeline operacional**. O Radar
+O **Planejador foi aposentado em 2026-10-01** (SDD `docs/compartilhado/sdd-aposentar-planejador-2026-10-01.md`), depois da remoção lógica de 2026-09-18. O Radar
 entrega diretamente ao Redator, que planeja e escreve, e o Redator entrega
 diretamente a Publicações. O que era a etapa de planejamento virou a fase
-`planejado` do documento; `ContentPlan` deixou de ser etapa e pode existir como
-artefato interno de quem escreve. Dados históricos do Planejador são preservados
-e nenhum artigo é movido automaticamente. A rota `/planejador` continua
-respondendo para leitura; o que deixou de existir é **caminho de escrita nova**
-por ela.
+`planejado` do documento; `ContentPlan` não existe mais como artefato: o
+Redator planeja dentro do `ContentDocument`. Nenhum artigo foi movido; o banco
+tinha zero dados do Planejador. `/{brandRef}/planejador` redireciona para o
+Radar; não há página, módulo, artefato nem permissão do Planejador.
 
 O Planejador não volta como etapa. As funções úteis de planejamento serão
 transferidas para uma aba da Marca, onde fazem sentido como planejamento inicial
@@ -32,7 +31,7 @@ declarada e não atribuída: nenhuma etapa foi criada para preenchê-la.
 | 6 | **Redator** | `REDACTOR_STAGE = 6` |
 | 7 | **Publicações** | `PUBLICACOES_STAGE = 7` |
 | 8 | **Conta** | `CONTA_STAGE = 8`; fora do pipeline editorial |
-| — | ~~Planejador~~ | `PLANEJADOR_STAGE = NONE` |
+| — | ~~Planejador~~ | aposentado em 2026-10-01 |
 
 A declaração vive em `MODULE_STAGE`, em `lib/editorial/navigation.ts`.
 `PRODUCT_FLOW` continua sendo apenas o pipeline editorial e por isso não inclui
@@ -44,9 +43,9 @@ Conta.
 | Minerador | listas e keywords | keywords qualificadas e KeywordDNA | Verificado no código: tela e tabelas legadas; a forma exata da transferência ainda não foi verificada ponta a ponta |
 | Arquiteto | keywords da marca | ArticleDNA, SiloDNA, SiloPage e InternalLinkGraph | Verificado no código: contratos, rotas e fundação persistente; validação funcional da aba Links Internos ainda pendente |
 | Radar | ArticleDNA aprovado | `RadarEvidenceBundle` → `RadarFrozenEvidenceBundle` → dossiê canônico entregue ao Redator, e o dossiê editorial portátil | Verificado no código; a Fase 1 do modo Google foi **homologada em runtime real** (2026-09-11). Os três perfis — Google, YouTube e Amazon — estão implementados e resolvem pelo mesmo dossiê canônico desde 2026-09-17; a aceitação manual de YouTube, Amazon e export é do USER. |
-| ~~Planejador~~ | — | — | **Removido do pipeline em 2026-09-18** (`PLANEJADOR_STAGE = NONE`). Rota e dados históricos preservados; nenhum caminho de escrita nova passa por ele. O banco real confirmou **zero** linhas de `ContentPlan`, `stage='planner'` e `sent_planner` |
+| ~~Planejador~~ | — | — | **Aposentado em 2026-10-01**: sem rota, módulo, artefato nem permissão. O banco confirmou **zero** dados do Planejador |
 | Redator | dossiê canônico do Radar | plano interno + ContentDocument | Verificado no código: entrada direta do Radar, Tiptap e criação de documento; aprovação final é parcial |
-| Publicações | documento aprovado do Redator | registro de publicação | **Caminho direto ainda não implementado.** Hoje `publication_records` só nasce por `start_writing`, que exige ContentPlan do Planejador — é o bloqueio ativo do corte |
+| Publicações | documento aprovado do Redator | registro de publicação | Verificado no código: caminho direto do Redator (`/api/redator/publication-handoff`, `createWriterPublication`) a partir do documento v2 aprovado; não usa ContentPlan |
 
 Transferências exigem marca compatível, seleção explícita, idempotência e o estado de aprovação exigido pelo módulo. A seleção de UI nunca pode decidir por si só o que é renderizado ou persistido.
 

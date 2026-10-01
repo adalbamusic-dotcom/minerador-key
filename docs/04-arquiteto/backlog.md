@@ -1,3 +1,76 @@
+## Fechamento e ficha — 2026-10-01
+
+- [x] Ficha mostra a principal do DNA e a página como secundária.
+- [x] Fechamento relê a versão vigente no servidor antes da sucessora.
+- [x] Sem aviso de Silo já fechado quando o par cobre os artigos.
+- [ ] SiloDNA sucessor automático quando um artigo novo entra num Silo já fechado (hoje: aviso com o nome; precisa SDD).
+
+## Tabela do publicado e Concluir — 2026-10-01
+
+- [x] Concluir tira o publicado e segue com os novos.
+- [x] Keywords da mesa fora do DNA: candidatas do artigo; as que sobram vão para “Keywords não agrupadas”.
+- [x] Principal com volume travada ao slug.
+- [ ] **Homologar (dono):** “Buscar keywords (grátis)” → linhas de dentistas e atrair pacientes para clínica → “Gravar melhorias”.
+- [ ] Adendo à SDD do MCP: providers pagos com orçamento por marca (aguarda o texto e a aprovação).
+
+## Principal sem volume — 2026-10-01
+
+- [x] Publicado Livre sem volume troca pela keyword do artigo mais próxima do slug (volume só desempata).
+- [x] Tela mostra a principal do ArticleDNA nos publicados.
+- [ ] **Homologar (dono):** “Buscar keywords (grátis)” → as 2 linhas de troca (instagram; atrair pacientes para clínica de estética) → “3 · Gravar melhorias” → Links internos.
+
+## SERP com a última palavra — 2026-10-01
+
+- [x] Intenção e funil pela SERP (4 lentes, porcentagem), na classificação e no ArticleDNA.
+- [x] Portão do Radar pela SERP do ArticleDNA aprovado.
+- [x] Publicado sem caminho: o Processar e o Concluir apontam o “Melhorar publicados”.
+- [ ] **Homologar (dono):** depois de reiniciar o `next dev`, marcar “Pronto para Radar” em
+  dentistas e cosméticos.
+- [x] “tráfego pago vs orgânico”: linha “Atualizar o DNA com a SERP” no Melhorar publicados (grava classificação, intenção e funil da SERP sem mudar a composição).
+- [ ] Mesa com mudança pendente do “Reforçar” (dentistas com duas principais na formação):
+  decidir se a pendência é gravada ou descartada.
+- [ ] Supabase: incidente e cota excedida (restrição em 20/10/2026, se continuar acima).
+
+## Pendências fechadas — 2026-10-01
+
+- [x] Coluna da keyword recebe toda a sobra de largura (Arquiteto e Radar); regra no contrato.
+- [x] Keyword “Bruto” sem intenção: a Lógica do Minerador roda ao gravar a melhoria.
+- [x] Reforçar publicados liga o parecer da SERP à formação e conclui no marcador.
+- [x] Ficha “Silo · Estado” lê o Silo do território.
+- [x] Melhoria recalcula classificação e intenções auxiliares.
+- [ ] **Homologar (dono):** no “Gravar reforços” de um publicado, conferir que a ficha mostra a
+  SERP executada e que o “Pronto para Radar” passa. Os artigos já aprovados antes desta correção
+  precisam de um novo “Gravar reforços” para ganhar o vínculo.
+
+## Seleção, link publicado e keyword inteira — 2026-10-01
+
+- [x] Seleção das planilhas igual à do Minerador (clique, Ctrl, Shift), inclusive na aba Silos.
+- [x] Link publicado em `blue-500` (`identity-published`), em toda a plataforma.
+- [x] Keyword e slug nunca cortados: regra raiz em `globals.css` e no contrato visual.
+- [ ] **Homologar (dono):** reiniciar o `next dev` se as cores não mudarem. Depois conferir na
+  planilha:
+  - clique troca a seleção;
+  - Ctrl soma ou tira a linha;
+  - Shift estende a seleção.
+- [ ] `tests/arquiteto-selection.test.mts` (fora das suítes) tem duas âncoras estruturais velhas
+  (“Mover selecionados para Silo”, `handleDeleteSelectedNonPublished`).
+- [ ] O guard visual (`test:visual-system`) está acima da linha de base em arquivos de outras
+  áreas: Redator, Publicações e `arquiteto-workbench`.
+
+## Concluir grava tudo no DNA — 2026-10-01
+
+- [x] Melhoria mede no Google Ads (grátis) o volume de outra era e grava no Minerador ao gravar.
+- [x] Intenção pela taxonomia do Minerador (“Informativa”); “Pendente” não vira intenção.
+- [x] Hash do parecer da melhoria igual ao da mesa (fim do “desatualizado” pós-melhoria).
+- [x] Conclusão humana resolve o vínculo KGR (sem pendência) e confirma o tipo de unidade derivado.
+- [ ] **Homologar (dono):** no “tráfego pago vs orgânico”, “Buscar keywords (grátis)” → a linha
+  propõe a troca da principal → “Gravar melhorias” → a SERP do artigo não fica “desatualizada”.
+- [ ] Reforçar publicados: gravar o parecer sob a `formationRef` nova, com `humanResolution` e
+  marcador. Hoje o gate não acha o parecer: aparece “Não executada”.
+- [ ] Ficha “Silo · Estado”: ler o `siloId` do ArticleDNA/território, não o da linha do
+  Minerador. Hoje mostra “Pronto para Silos” com o Silo fechado.
+- [ ] Melhoria com DNA existente: recalcular `classification` e `auxiliaryIntents` na sucessora.
+
 ## Recuperação dos Silos — 2026-09-30 (noite)
 
 - [x] Reprocessar não duplica Silo consolidado nem recria Silo desfeito.

@@ -5,7 +5,7 @@ import { z } from "zod";
  * conteúdo para um gabarito existente; consumidores e estrutura esperada não
  * são dados persistidos da Marca.
  */
-export const SkillDefinitionModuleSchema = z.enum(["minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes"]);
+export const SkillDefinitionModuleSchema = z.enum(["minerador", "arquiteto", "radar", "redator", "publicacoes"]);
 
 export const SkillDefinitionSectionImportanceSchema = z.enum(["recommended", "optional"]);
 
@@ -39,8 +39,8 @@ const brandVoice: SkillDefinition = SkillDefinitionSchema.parse({
   key: "brand_voice",
   label: "Voz da Marca",
   description: "Orienta como a Marca deve se expressar na produção editorial.",
-  ownerModule: "planejador",
-  consumerModules: ["minerador", "planejador", "redator"],
+  ownerModule: "redator",
+  consumerModules: ["minerador", "redator"],
   acceptedExtensions: [".md"],
   acceptedMimeTypes: ["text/markdown", "text/x-markdown", "text/plain"],
   maxFileSizeBytes: 512 * 1024,

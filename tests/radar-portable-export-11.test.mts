@@ -179,7 +179,7 @@ const modeloDePerfil = (patch: Partial<RadarEditorialProfileModel> = {}): RadarE
   evidenceNeeds: [],
   specialistNeeds: [],
   limitations: ["Benefícios e atributos do PDP não foram lidos nesta investigação."],
-  readiness: { state: "READY", label: "Pronto para o Planejador", reasons: [] },
+  readiness: { state: "READY", label: "Pronto para o Redator", reasons: [] },
   promotionLinks: [{
     asin: "B0DBRR5BP4", productName: "NIVEA Q10 Sérum Antissinais Expert Dupla Ação 30ml",
     amazonUrl: "https://www.amazon.com.br/dp/B0DBRR5BP4",

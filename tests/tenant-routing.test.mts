@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildBrandRef, buildTenantPath, isTenantId, parseBrandRef, switchTenantPath, tenantModuleFromPathname } from "../lib/tenant-routing.ts";
-import { legacyTargetFromPathname, isLegacyTenantTarget } from "../lib/legacy-routing.ts";
+import { legacyTargetFromPathname, isLegacyTenantTarget, retiredBrandModuleTarget } from "../lib/legacy-routing.ts";
 import { buildAdminPath } from "../lib/admin-routing.ts";
 
 const tenant = "9f7b1d84-54a5-4bd2-aee0-1136d4a7f64f";
@@ -26,11 +26,18 @@ test("brand switching retains module, drops entity query and falls back to brand
 });
 
 test("all legacy module paths remain recognized as redirect targets", () => {
-  for (const [path, target] of Object.entries({ marca: "/", conta: "/conta", minerador: "/minerador", arquiteto: "/arquiteto", radar: "/radar", planejador: "/planejador", redator: "/redator", publicacoes: "/publicacoes" })) {
+  for (const [path, target] of Object.entries({ marca: "/", conta: "/conta", minerador: "/minerador", arquiteto: "/arquiteto", radar: "/radar", planejador: "/radar", redator: "/redator", publicacoes: "/publicacoes" })) {
     assert.equal(legacyTargetFromPathname(`/${path}`), target);
     assert.equal(isLegacyTenantTarget(target), true);
   }
   assert.equal(legacyTargetFromPathname("/admin"), null);
+});
+
+test("o Planejador aposentado leva ao Radar da mesma marca", () => {
+  assert.equal(retiredBrandModuleTarget("/adalba-pro--b1/planejador"), "/adalba-pro--b1/radar");
+  assert.equal(retiredBrandModuleTarget("/adalba-pro--b1/planejador/plano-9"), "/adalba-pro--b1/radar");
+  assert.equal(retiredBrandModuleTarget("/adalba-pro--b1/radar"), null);
+  assert.equal(retiredBrandModuleTarget("/adalba-pro--b1/planejadores"), null);
 });
 
 test("admin tabs have a single canonical path", () => {

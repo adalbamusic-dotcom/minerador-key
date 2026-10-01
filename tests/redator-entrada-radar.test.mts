@@ -10,8 +10,6 @@ import {
 import {
   ContentDocumentSchema,
   ContentDocumentV2Schema,
-  documentContentPlanRef,
-  documentWritingBrief,
   isRadarOriginDocument,
 } from "../lib/arquiteto/contracts.ts";
 import { OperationalPublicationSchema } from "../lib/editorial/operational-flow.ts";
@@ -78,10 +76,8 @@ test("01 · o documento v2 nasce sem ContentPlan e o schema RECUSA a chave", () 
     "um documento de origem Radar não pode carregar referência de plano");
 });
 
-test("02 · o acessor devolve null para v2 e o plano real para v1", () => {
+test("02 · todo documento é de origem Radar", () => {
   const v2 = montar();
-  assert.equal(documentContentPlanRef(v2), null);
-  assert.equal(documentWritingBrief(v2), undefined, "v2 não tem briefing de plano");
   assert.equal(isRadarOriginDocument(v2), true);
 });
 
@@ -195,17 +191,6 @@ test("12 · pacote novo sobre documento existente avisa, NÃO substitui", () => 
   assert.match(resultado.reason, /não é substituída/);
 });
 
-test("13 · documento legado v1 é preservado diante de pacote do Radar", () => {
-  const resultado = resolveRadarImportEligibility({
-    brandId: BRAND, dossier: dossie(),
-    existingDocument: { id: "doc-legado", schemaVersion: 1 },
-  });
-  assert.equal(resultado.eligible, false);
-  if (resultado.eligible) return;
-  assert.equal(resultado.outcome, "atualizacao_disponivel");
-  assert.match(resultado.reason, /plano editorial/, "o motivo diz que a origem anterior era plano");
-});
-
 /* ---- 4 · pendências: escrever sim, aprovar não ------------------------- */
 
 test("14 · rascunho com pendências é permitido; aprovação é que trava", () => {
@@ -285,7 +270,7 @@ test("17 · contexto importado fica FORA do texto escrito", () => {
 
 /* ---- 5 · compatibilidade ----------------------------------------------- */
 
-test("18 · documento v1 continua válido, intocado", () => {
+test("18 · documento v1 (com plano) é recusado desde a aposentadoria do Planejador", () => {
   const v1 = {
     schemaVersion: 1 as const,
     id: "doc-v1", title: "Antigo", status: "escrevendo" as const,
@@ -298,10 +283,7 @@ test("18 · documento v1 continua válido, intocado", () => {
     editorContent: null,
     metadata: { slug: "antigo", principalKeyword: "x", metaTitle: "", metaDescription: "", socialTitle: "", socialDescription: "", canonical: null, indexationStatus: "noindex" as const, plannedImages: [] },
   };
-  const parsed = ContentDocumentSchema.safeParse(v1);
-  assert.equal(parsed.success, true, parsed.success ? "" : JSON.stringify(parsed.error.issues));
-  assert.equal(documentContentPlanRef(v1 as never)?.versionId, "plan-v1");
-  assert.equal(isRadarOriginDocument(v1 as never), false);
+  assert.equal(ContentDocumentSchema.safeParse(v1).success, false, "o preflight deu zero documentos v1; o contrato não os aceita mais");
 });
 
 test("19 · Publicações aceita origem Radar sem plano, e exige ALGUMA origem", () => {
@@ -318,12 +300,12 @@ test("19 · Publicações aceita origem Radar sem plano, e exige ALGUMA origem",
     ...base, radarOrigin: { analysisVersionId: "analysis-v3", evidenceBundleHash: "bundle-hash-1" },
   });
   assert.equal(comRadar.success, true, comRadar.success ? "" : JSON.stringify(comRadar.error.issues));
-  if (comRadar.success) assert.equal(comRadar.data.contentPlanVersionId, null);
+  if (comRadar.success) assert.equal(Object.hasOwn(comRadar.data, "contentPlanVersionId"), false);
 
-  // Origem plano, como antes: aceito.
+  // Só plano, sem Radar: recusado desde a aposentadoria do Planejador (2026-10-01).
   assert.equal(OperationalPublicationSchema.safeParse({
     ...base, plannerItemId: "planner-1", contentPlanVersionId: "plan-v1",
-  }).success, true);
+  }).success, false);
 
   // NENHUMA origem: recusado. É isto que substitui a obrigatoriedade do plano.
   const semOrigem = OperationalPublicationSchema.safeParse(base);

@@ -1,3 +1,5 @@
+import { applyKeywordSelectionClick } from "../minerador/keyword-selection.ts";
+
 export type ArticleSelectionClickOptions = {
   selectedIds: Set<string>;
   visibleIds: string[];
@@ -5,6 +7,8 @@ export type ArticleSelectionClickOptions = {
   anchorId: string | null;
   shiftKey?: boolean;
   additiveKey?: boolean;
+  /** Espaço/Enter na caixa: alterna o item sob foco, nunca limpa o resto. */
+  keyboard?: boolean;
 };
 
 export type ArticleSelectionResult = {
@@ -72,6 +76,23 @@ export function selectionRangeIndices(startIndex: number, endIndex: number, leng
   }
 }
 
+/**
+ * AS TRÊS SELEÇÕES DE UMA PLANILHA — AS MESMAS DO MINERADOR (2026-10-01).
+ *
+ *   clique          — a seleção passa a ser SÓ o item clicado (clicar de novo
+ *                     no único selecionado limpa);
+ *   Ctrl/Cmd+clique — alterna o item e preserva os demais;
+ *   Shift+clique    — intervalo da âncora até o item, na ordem visual; a
+ *                     âncora NÃO se move, para o próximo Shift esticar dela.
+ *
+ * Antes, o clique simples alternava como se o Ctrl estivesse sempre
+ * pressionado (Ctrl e clique eram indistinguíveis) e o Shift movia a âncora
+ * para o destino, encurtando o trecho a cada tentativa. Uma regra só para
+ * todas as planilhas da plataforma: `applyKeywordSelectionClick`.
+ *
+ * Shift sem âncora visível (oculta por filtro, ou primeira vez) soma o item,
+ * sem apagar o que já estava marcado: Shift diz "estender", nunca "trocar".
+ */
 export function applyArticleSelectionClick({
   selectedIds,
   visibleIds,
@@ -79,24 +100,15 @@ export function applyArticleSelectionClick({
   anchorId,
   shiftKey = false,
   additiveKey = false,
+  keyboard = false,
 }: ArticleSelectionClickOptions): ArticleSelectionResult {
-  const next = new Set(selectedIds);
-  const clickedIndex = visibleIds.indexOf(id);
-  const anchorIndex = anchorId ? visibleIds.indexOf(anchorId) : -1;
-
-  if (shiftKey && clickedIndex >= 0 && anchorIndex >= 0) {
-    const [start, end] = anchorIndex <= clickedIndex
-      ? [anchorIndex, clickedIndex]
-      : [clickedIndex, anchorIndex];
-    if (!additiveKey) next.clear();
-    visibleIds.slice(start, end + 1).forEach(articleId => next.add(articleId));
-  } else if (next.has(id)) {
-    next.delete(id);
-  } else {
+  const anchorVisible = Boolean(anchorId) && visibleIds.includes(anchorId as string);
+  if (shiftKey && !anchorVisible) {
+    const next = new Set(selectedIds);
     next.add(id);
+    return { selectedIds: next, anchorId: id };
   }
-
-  return { selectedIds: next, anchorId: id };
+  return applyKeywordSelectionClick({ selectedIds, visibleIds, id, anchorId: anchorVisible ? anchorId : null, shiftKey, additiveKey, keyboard });
 }
 
 export function toggleVisibleArticleSelection(selectedIds: Set<string>, visibleIds: string[]): Set<string> {

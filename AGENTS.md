@@ -18,7 +18,7 @@ drift. A fundação global — banco, Auth, Agency/Brand e integrações — fic
 congelada; mudanças futuras exigem evidência nova e gate próprio.
 
 A fase vigente é `FUNCTIONAL_AREA_DEVELOPMENT`, na ordem:
-`Marca → Minerador → Arquiteto → Radar → Planejador → Redator → Publicações`.
+`Marca → Minerador → Arquiteto → Radar → Redator → Publicações`.
 Não reabrir o refresh para desenvolver uma área funcional.
 
 ## 1. Fontes de verdade
@@ -67,11 +67,15 @@ Tenant editorial canônico: `brandId = public.marcas.id`.
 
 Pipeline editorial:
 
-`Marca → Minerador → Arquiteto → Radar → Planejador → Redator → Publicações`
+`Marca → Minerador → Arquiteto → Radar → Redator → Publicações`
 
 Artefatos canônicos:
 
-`BrandDNA → KeywordDNA → ArticleDNA → SiloDNA/SiloPage → InternalLinkGraph → RadarApprovedPackage → ContentPlan → ContentDocument → PublicationRecord`
+`BrandDNA → KeywordDNA → ArticleDNA → SiloDNA/SiloPage → InternalLinkGraph → RadarApprovedPackage → ContentDocument → PublicationRecord`
+
+O Planejador foi aposentado (SDD `docs/compartilhado/sdd-aposentar-planejador-2026-10-01.md`):
+não existe mais como área, etapa, rota nem artefato. O Radar entrega ao Redator,
+que planeja e escreve.
 
 Princípio de composição:
 
@@ -85,8 +89,7 @@ Fronteiras dos módulos:
 - **Minerador:** KeywordDNA;
 - **Arquiteto:** ArticleDNA + SiloDNA/SiloPage + InternalLinkGraph;
 - **Radar:** investigação + evidências + RadarApprovedPackage;
-- **Planejador:** ContentPlan;
-- **Redator:** ContentDocument;
+- **Redator:** planejamento e escrita do ContentDocument;
 - **Publicações:** PublicationRecord.
 
 Estado estrutural do InternalLinkGraph:
@@ -97,7 +100,7 @@ Estado estrutural do InternalLinkGraph:
 
 Próxima frente do Graph: implementação funcional/UI da aba Links Internos.
 
-O Radar não reagrupa keywords, não redefine papéis e não troca silenciosamente a principal. O Planejador não refaz a investigação da SERP.
+O Radar não reagrupa keywords, não redefine papéis e não troca silenciosamente a principal. O Redator não refaz a investigação da SERP.
 
 ## 3. Módulo proprietário
 
@@ -167,7 +170,6 @@ Rotas:
 - `/{brandRef}/arquiteto`;
 - `/{brandRef}/radar`;
 - `/{brandRef}/radar/{articleId}`;
-- `/{brandRef}/planejador`;
 - `/{brandRef}/redator`;
 - `/{brandRef}/publicacoes`;
 - `/{brandRef}/conta`;
@@ -204,7 +206,7 @@ SDD.
 ## 7. Radar e SERP
 
 O Radar recebe o `ArticleDNA` como contrato do artigo formado e entrega
-investigação, evidências e `RadarApprovedPackage` ao Planejador.
+investigação, evidências e `RadarApprovedPackage` ao Redator.
 
 Pode conferir ou atualizar snapshots, investigar concorrentes, estruturas, semântica, perguntas, fontes e evidências, além de registrar conflitos, lacunas e oportunidades.
 
@@ -317,7 +319,7 @@ Ações como enviar, exportar ou publicar não são status editoriais.
 - não gerar nem sugerir FAQ automaticamente;
 - FAQ legado não é removido automaticamente;
 - padrão visual normal: uma capa e dois ou três respiros;
-- Planejador cria plano visual e prompts de imagem;
+- o Redator cria o plano visual e os prompts de imagem;
 - artigo KGR pode reunir até seis keywords somente com intenção e coerência reais;
 - conteúdo KGR novo mantém forte alinhamento entre principal e slug;
 - termos de maior volume e cauda menor tendem a Pilar quando houver centralidade;
@@ -461,11 +463,10 @@ SDD: `docs/compartilhado/sdd-plataforma-para-agentes-mcp-2026-09-26.md`.
 2. Minerador — qualificação e KeywordDNA;
 3. Arquiteto — ArticleDNA, SiloDNA, SiloPage e InternalLinkGraph;
 4. Radar — investigação, SERP, evidências e RadarApprovedPackage;
-5. Planejador — ContentPlan;
-6. Redator — ContentDocument;
-7. Publicações — PublicationRecord;
-8. Conta — preferências e segurança;
-9. Admin — gestão da plataforma.
+5. Redator — ContentDocument;
+6. Publicações — PublicationRecord;
+7. Conta — preferências e segurança;
+8. Admin — gestão da plataforma.
 
 ## Sistema visual compartilhado
 

@@ -336,6 +336,7 @@ export const RADAR_YOUTUBE_RESET_KEEPS = [
   "benchmark",
   "competitiveReport",
   "finalizedBundle",
+  "approvedPackage",
   "plannerPackage",
 ] as const;
 

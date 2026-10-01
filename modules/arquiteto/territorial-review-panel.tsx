@@ -85,7 +85,7 @@ export function TerritorialReviewPanel({
           <p className={view.current.primaryKeyword ? "text-foreground" : "text-text-muted"} data-testid="architect-review-primary-keyword">
             {view.current.primaryKeyword?.note || "Este Silo ainda não tem keyword primária eleita."}
           </p>
-          {view.current.slug && <p className="text-text-muted">{view.current.slug}</p>}
+          {view.current.slug && <p className="text-identity-slug">{view.current.slug}</p>}
           {view.current.decision && (
             <p className="text-text-muted">
               Decisão humana: {view.current.decision.reason}

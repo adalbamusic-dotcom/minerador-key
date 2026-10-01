@@ -4,7 +4,7 @@ import test from "node:test";
 import { articleRadarGateIssues, resolveArticleRadarReadiness, resolveArticleSiloReadiness } from "../lib/arquiteto/article-phase.ts";
 import { projectArticleDnaForArchitect, type ArticleDnaProjectionInput } from "../lib/arquiteto/article-dna-projection.ts";
 import { createVersionEnvelope } from "../lib/arquiteto/versioning.ts";
-import { importArticlesToRadar, importRadarToPlanner } from "../lib/editorial/operational-flow.ts";
+import { importArticlesToRadar } from "../lib/editorial/operational-flow.ts";
 import type { ArticleDNA, VersionEnvelope } from "../lib/arquiteto/contracts.ts";
 
 const workspace = readFileSync("modules/arquiteto/arquiteto-workspace.tsx", "utf8");
@@ -41,7 +41,6 @@ test("aprovar ArticleDNA sem Silo não quebra e não cria RadarItem, PlannerItem
 
   const radar = importArticlesToRadar([], [version], "brand-1");
   assert.equal(radar.length, 0);
-  assert.equal(importRadarToPlanner([], radar, "brand-1").length, 0);
   // O Silo do RadarItem é RESOLVIDO pelo território, não exigido do payload —
   // e sem contexto resolvido o artigo continua não virando item, que é o que
   // este teste protege.

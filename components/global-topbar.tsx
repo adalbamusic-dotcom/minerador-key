@@ -66,7 +66,6 @@ const moduleTitles: Record<string, string> = {
   minerador: "Minerador",
   arquiteto: "Arquiteto",
   radar: "Radar",
-  planejador: "Planejador",
   redator: "Redator",
   publicacoes: "Publicações",
 };

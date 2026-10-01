@@ -11,7 +11,8 @@ const visualSystem = readFileSync("docs/compartilhado/sistema-visual.md", "utf8"
 
 test("os três papéis têm alias semântico central com o valor oficial", () => {
   assert.match(globals, /--identity-new: var\(--module-accent\);/);
-  assert.match(globals, /--identity-published: var\(--action-accent\);/);
+  // Link publicado em blue-500 (dono, 2026-10-01): o action-accent da raiz não muda.
+  assert.match(globals, /--identity-published: var\(--color-blue-500, oklch\(62\.3% 0\.214 259\.815\)\);/);
   assert.match(globals, /--keyword: #e0fbff;/);
   assert.match(globals, /--module-accent: #10DDE0;/);
   assert.match(globals, /--action-accent: #193cb8;/);
@@ -46,16 +47,14 @@ test("a keyword usa a cor oficial também fora do Minerador e do Arquiteto", () 
   const radarPage = readFileSync("modules/radar/radar-page.tsx", "utf8");
   const radarMirror = readFileSync("modules/radar/radar-r3-profile-mirror.tsx", "utf8");
   const radarAnalysis = readFileSync("modules/radar/radar-analysis-page.tsx", "utf8");
-  const planner = readFileSync("modules/planejador/planner-page.tsx", "utf8");
   // Descobrir Keywords: a célula da keyword não pode voltar a text-foreground.
   assert.match(discovery, /const keywordCell = "[^"]*text-keyword/);
   // Componentes genéricos recebem tom opcional; só o campo da keyword o usa.
   assert.ok(radarWorkbench.includes('<ContextValue label="Keyword principal" value={model.keyword} tone="keyword"/>'));
-  assert.ok(radarPage.includes('text-sm text-keyword">{data.r3.keyword}'));
+  assert.ok(radarPage.includes('<span className="mt-1 block text-sm"><span className="text-keyword">{data.r3.keyword}</span>'));
   assert.ok(radarPage.includes('<Field label="Keyword principal" tone="keyword"'));
   assert.ok(radarMirror.includes('<Field label="Keyword principal" tone="keyword"'));
   assert.ok(radarAnalysis.includes('<Field label="Keyword principal" tone="keyword"'));
-  assert.ok(planner.includes('<Field label="Keyword principal" tone="keyword"'));
 });
 
 test("contagem e identificador NÃO recebem a cor de keyword", () => {
@@ -84,6 +83,20 @@ test("nenhum componente repete o valor bruto das três cores", () => {
   }
 });
 
+test("keyword e slug nunca são cortados: regra raiz, fora de @layer, vence truncate e line-clamp (dono, 2026-10-01)", () => {
+  const inicio = globals.indexOf(".text-keyword,");
+  assert.ok(inicio >= 0, "regra raiz da keyword ausente");
+  const bloco = globals.slice(inicio, globals.indexOf("}", inicio));
+  assert.match(bloco, /\.text-identity-slug/);
+  assert.match(bloco, /white-space: normal;/);
+  assert.match(bloco, /text-overflow: clip;/);
+  assert.match(bloco, /-webkit-line-clamp: unset;/);
+  // Fora de @layer: nenhuma camada aberta antes da regra.
+  // Sem comentários: o próprio comentário da regra cita "@layer".
+  assert.doesNotMatch(globals.slice(0, inicio).replace(/\/\*[\s\S]*?\*\//g, ""), /@layer/);
+  assert.match(visualSystem, /nunca aparecem cortados/);
+});
+
 test("a regra está registrada na fonte canônica do sistema visual", () => {
   assert.match(visualSystem, /identity-new/);
   assert.match(visualSystem, /identity-published/);
@@ -91,4 +104,16 @@ test("a regra está registrada na fonte canônica do sistema visual", () => {
   // O valor oficial e a exclusividade precisam estar escritos, não só no código.
   assert.match(visualSystem, /#e0fbff/);
   assert.match(visualSystem, /exclusivamente para a keyword/);
+});
+
+test("toda sobra de largura vai para a coluna da keyword: uma <col> por coluna no Arquiteto e fill no Radar (dono, 2026-10-01)", () => {
+  // No Arquiteto, o cabeçalho tem uma <col> por coluna; "Papel no Silo" tinha ficado sem a sua.
+  assert.match(architect, /siloRole: 104/);
+  assert.match(architect, /keyword: \{ min: 240, max: 1600, flexible: true, fill: true \}/);
+  assert.match(architect, /columnId="siloRole"/);
+  const radarPage = readFileSync("modules/radar/radar-page.tsx", "utf8");
+  assert.match(radarPage, /id: "article", header: "Artigo"[^\n]*fill: true/);
+  const grid = readFileSync("components/editorial/operational-data-grid.tsx", "utf8");
+  assert.match(grid, /column\.fill && !widths\[column\.id\] \? undefined/);
+  assert.match(visualSystem, /toda sobra de largura de uma planilha vai para a coluna da keyword/);
 });

@@ -506,7 +506,7 @@ test("§10 — o readback lê o servidor e não depende mais de radarItems", asy
 
 test("§11 — marcar como pronto não passa por nenhum writer de artefato", async () => {
   const source = await workspaceSource();
-  const inicio = source.indexOf("const markSelectedReadyForRadar = async () => {");
+  const inicio = source.indexOf("const markSelectedReadyForRadar = async (depoisDaSerp = false) => {");
   assert.ok(inicio > 0, "handler da ação em lote não encontrado");
   // O corpo vai até a próxima declaração de topo do componente.
   const resto = source.slice(inicio + 20);

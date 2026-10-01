@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { buildRadarEvidenceBundleFromAnalysis, radarPrimaryProfileOfAnalysis } from "../lib/radar/evidence-bundle-runtime.ts";
 import { assertRadarEvidenceBundleIntegrity, assertRadarEvidenceProvenance } from "../lib/radar/evidence-bundle.ts";
-import { radarDossierDivergesFromFrozen, radarObservedDivergesFromFrozen, radarPlannerHandoffReadiness } from "../lib/radar/planner-handoff.ts";
+import { radarDossierDivergesFromFrozen, radarObservedDivergesFromFrozen, radarHandoffReadiness } from "../lib/radar/handoff-readiness.ts";
 import { freezeRadarEvidenceBundle, radarFinalizationReadiness } from "../lib/radar/investigation-finalization.ts";
 import { buildRadarDeepResearchView } from "../lib/radar/deep-research-view.ts";
 import { startRadarDeepResearch } from "../lib/radar/deep-research.ts";
@@ -244,7 +244,7 @@ test("Google base · os blueprints de vídeo e de review viajam em formatBluepri
 test("Google base · o pacote com Google + YouTube continua pronto para o Planejador e o Redator", () => {
   const entregue = dossie(GOOGLE_E_YOUTUBE);
   assert.deepEqual(radarDossierDivergesFromFrozen(entregue, GOOGLE_FINALIZADO), []);
-  const prontidao = radarPlannerHandoffReadiness({ article: ARTIGO, frozen: GOOGLE_FINALIZADO, dossier: entregue, stale: false });
+  const prontidao = radarHandoffReadiness({ article: ARTIGO, frozen: GOOGLE_FINALIZADO, dossier: entregue, stale: false });
   assert.equal(prontidao.ready, true, JSON.stringify(prontidao.blocks));
 });
 
@@ -252,7 +252,7 @@ test("Google base · fotografia viva que diverge do congelado bloqueia, como em 
   const outra = vista(PAGINAS.slice(0, 7)).observed;
   assert.ok(radarObservedDivergesFromFrozen(outra, GOOGLE_FINALIZADO).length > 0, "o controle: a outra fotografia diverge");
   const entregue = dossie(GOOGLE_E_YOUTUBE, outra);
-  const prontidao = radarPlannerHandoffReadiness({ article: ARTIGO, frozen: GOOGLE_FINALIZADO, dossier: entregue, stale: false });
+  const prontidao = radarHandoffReadiness({ article: ARTIGO, frozen: GOOGLE_FINALIZADO, dossier: entregue, stale: false });
   assert.equal(prontidao.ready, false, "a leitura de hoje não viaja com o carimbo de ontem");
 });
 

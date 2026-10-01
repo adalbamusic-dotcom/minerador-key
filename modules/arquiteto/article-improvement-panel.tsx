@@ -39,10 +39,16 @@ export function ImprovementProgress({ activity, now, done, total, unit }: { acti
     note="o andamento fica guardado no servidor" testId="architect-improvement-progress" />;
 }
 
-function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false }: {
+function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primaryButtonClassName, hasLeftovers = false, selectedTargetIds = [] }: {
   brandId: string | null; onApplied: () => void; buttonClassName: string; primaryButtonClassName: string;
   /** A aba mostra Sobras agora: sem elas, o cartão não manda para um lugar vazio. */
   hasLeftovers?: boolean;
+  /**
+   * Publicados marcados na planilha (2026-10-01): "Buscar keywords" analisa só
+   * eles. Sem nenhum marcado, analisa todos, como antes. Gravar continua
+   * valendo só para as linhas marcadas na tabela desta análise.
+   */
+  selectedTargetIds?: readonly string[];
 }) {
   const mounted = useRef(false);
   const [leaseActive, setLeaseActive] = useState(false);
@@ -77,6 +83,7 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
       ...(action === "collect" || action === "apply" ? { decisionHash: current?.decisionHash } : {}),
       ...(action === "collect" ? { authorizedCostUsd: current?.costs.estimatedCostUsd.max } : {}),
       ...(action === "apply" && !current?.acceptedIds ? { targetIds: [...selected], approveNewKeywords: true } : {}),
+      ...(action === "prepare" && selectedTargetIds.length ? { targetIds: [...selectedTargetIds] } : {}),
     }) });
     // The platform answers a timeout with an HTML page, not JSON.
     const body = await response.json().catch(() => { throw new Error("TEMPO_ESGOTADO"); });
@@ -201,6 +208,9 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
           <InfoHint title="Como funciona" description="1 · Buscar keywords com volume para cada publicado e Assunto (Google Ads grátis; a leitura da IA usa a Connection DeepSeek da marca): primeiro os pares da SERP que já estão no cache, depois a leitura da IA na lista da marca (confira o motivo de cada uma), depois a leitura da lista pelo código (keywords que são o núcleo do slug, com a palavra do próprio slug) e, só para quem ficar sem nada, busca nova no Google Ads. 2 · Validar no Google só as que têm volume (pago, com prévia). 3 · Gravar as melhorias que você marcar." />
         </h3>
         <p className="text-text-muted">URL, slug e canonical nunca mudam.</p>
+        <p className="text-text-muted" data-testid="architect-improvement-scope">{selectedTargetIds.length
+          ? `A busca analisa só os ${selectedTargetIds.length} publicado(s) marcado(s) na planilha.`
+          : "Sem publicado marcado na planilha, a busca analisa todos. Gravar vale só para as linhas marcadas abaixo."}</p>
       </div>
       <div className="flex flex-wrap gap-2">
         {collecting && !inCard("resume_collect") && <button className={buttonClassName} disabled={busy} onClick={() => void execute("collect")}>Continuar validação (sem custo novo)</button>}
@@ -241,7 +251,9 @@ function ArticleImprovementSession({ brandId, onApplied, buttonClassName, primar
                 {p.transfers.length > 0 && <p className="text-text-muted">{p.transfers.length} keyword(s) mudam de Silo para o do artigo.</p>}
                 <p className="text-text-muted">{before.count} → {after.count} keywords · volume {number(before.volume)} → {number(after.volume)}</p>
                 {origin && <p className="text-text-muted" data-testid="architect-improvement-origin">Origem: {origin}</p>}
-              </> : <p className="text-text-muted">Nada a mudar.</p>}
+              </> : p.serpRefresh
+                ? <p data-testid="architect-improvement-serp-refresh">Atualizar o DNA com a SERP: intenção {p.serpRefresh.intent} · funil {p.serpRefresh.funnel}. <span className="text-text-muted">A composição não muda.</span></p>
+                : <p className="text-text-muted">Nada a mudar.</p>}
               {p.exclusions.length > 0 && <p className="text-text-muted">Não cobrir: {p.exclusions.join("; ")}</p>}
               {isListReading(p) && (p.aiReasons?.length ?? 0) > 0 && <div className="mt-1" data-testid="architect-improvement-ai-reading">
                 <p className="font-medium text-foreground">{p.evidenceBasis === "list_core" ? IMPROVEMENT_LIST_CORE_LABEL : IMPROVEMENT_AI_LABEL}</p>

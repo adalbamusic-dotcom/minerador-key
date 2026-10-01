@@ -1419,14 +1419,14 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
   };
 
   const columns: OperationalGridColumn<RadarItem>[] = [
-    { id: "article", header: "Artigo", value: row => `${row.title} ${resolveRowKeyword(row).keyword} ${row.hierarchy}`, pinned: "left", sortable: true, width: 280, render: row => { const data = rowWorkbenchData(row); const isFocused = row.articleId === activeArticleId; return <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><strong className="block truncate text-sm text-foreground">{data.r3.title}</strong>{isFocused && <span className="shrink-0 rounded border border-context-accent/35 px-1.5 py-0.5 text-xs font-semibold text-context-accent">Em foco</span>}</div>{/*
+    { id: "article", header: "Artigo", value: row => `${row.title} ${resolveRowKeyword(row).keyword} ${row.hierarchy}`, pinned: "left", sortable: true, width: 280, fill: true, render: row => { const data = rowWorkbenchData(row); const isFocused = row.articleId === activeArticleId; return <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><strong className="block truncate text-sm text-foreground">{data.r3.title}</strong>{isFocused && <span className="shrink-0 rounded border border-context-accent/35 px-1.5 py-0.5 text-xs font-semibold text-context-accent">Em foco</span>}</div>{/*
       * A COR DA KEYWORD PERTENCE À KEYWORD.
       *
       * A linha inteira vinha em `text-keyword` — silo e versão do ArticleDNA
       * junto. O papel é do VALOR da keyword; nome de silo e versão são
       * metadado, e a coluna Conteúdo já é dona deles.
       */}
-      <span className="mt-1 block truncate text-sm"><span className="text-keyword">{data.r3.keyword}</span><span className="text-text-muted"> · {data.r3.hierarchy}</span></span></div>; } },
+      <span className="mt-1 block text-sm"><span className="text-keyword">{data.r3.keyword}</span><span className="text-text-muted"> · {data.r3.hierarchy}</span></span></div>; } },
     /*
      * PESQUISA — a mesma leitura do card, pelo mesmo selector.
      *
@@ -3457,6 +3457,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
         structuralDecisions: [],
         competitiveness: null,
         competitiveReport: null,
+        approvedPackage: null,
         plannerPackage: null,
         plannerTransfer: null,
       }, sessionId(session), undefined, crypto.randomUUID());

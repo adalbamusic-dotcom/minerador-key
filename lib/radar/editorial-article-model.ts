@@ -1589,7 +1589,7 @@ export function buildRadarEditorialArticleModel(input: {
     .filter(opcao => !observadasNoArtigo.has(normalizar(opcao)));
 
   const titleSuggestion = candidatasDeTitulo[0]
-    || (principal ? `${principal.charAt(0).toUpperCase()}${principal.slice(1)}` : "Título a definir com o Planejador");
+    || (principal ? `${principal.charAt(0).toUpperCase()}${principal.slice(1)}` : "Título a definir no Redator");
   const titleAlternatives = candidatasDeTitulo.slice(1, 3);
 
   /*
@@ -1749,7 +1749,7 @@ export function buildRadarEditorialArticleModel(input: {
 
   const readiness = motivos.length
     ? { state: "PARTIAL" as const, label: `Parcial · ${motivos.join(" · ")}`, reasons: motivos }
-    : { state: "READY" as const, label: "Pronto para o Planejador", reasons: [] };
+    : { state: "READY" as const, label: "Pronto para o Redator", reasons: [] };
 
   return {
     articleIdentity: {

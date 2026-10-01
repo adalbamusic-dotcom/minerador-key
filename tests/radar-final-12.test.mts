@@ -306,7 +306,7 @@ test("§7 · não existe prontidão de lote separada da individual", () => {
   const lote = pagina.slice(pagina.indexOf("const sendToPlanner"), pagina.indexOf("const radarItemIdsForArticles") > pagina.indexOf("const sendToPlanner")
     ? pagina.indexOf("const radarItemIdsForArticles")
     : pagina.indexOf("const sendToPlanner") + 1200);
-  assert.equal(/buildRadarEvidenceBundle|radarPlannerHandoffReadiness/.test(lote), false, "o lote não monta nem avalia nada");
+  assert.equal(/buildRadarEvidenceBundle|radarHandoffReadiness/.test(lote), false, "o lote não monta nem avalia nada");
 });
 
 /* ===================== §5 · o vocabulário fechado ===================== */

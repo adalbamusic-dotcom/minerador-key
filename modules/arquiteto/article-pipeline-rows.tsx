@@ -63,7 +63,7 @@ export function ArticlePipelineRows({ rows }: { rows: readonly ArticlePipelineRo
                     <span className="shrink-0 rounded border border-divider px-1.5 text-xs font-bold uppercase tracking-widest text-text-muted">
                       Keyword
                     </span>
-                    <span className="truncate text-foreground" title={row.keyword}>{row.keyword}</span>
+                    <span className="text-keyword" title={row.keyword}>{row.keyword}</span>
                   </span>
                   {/* Silo só aparece quando existe vínculo real. */}
                   <span className={`truncate ${row.siloName ? "text-foreground" : "text-text-muted"}`}>

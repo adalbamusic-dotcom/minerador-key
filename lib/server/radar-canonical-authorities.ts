@@ -40,7 +40,7 @@ import type { RadarVideoEvidenceLayer } from "../radar/video-evidence.ts";
  *          ↓
  *   resolveRadarCanonicalDossier    (puro — uma vez, lá)
  *          ↓
- *     ├── sendRadarToPlanner   → grava o bundle V3
+ *     ├── sendRadarToWriter    → entrega o dossiê ao Redator
  *     └── portable export      → projeta Markdown e CSV
  *
  * O export continua DERIVADO: ele formata o que este módulo resolveu, e não

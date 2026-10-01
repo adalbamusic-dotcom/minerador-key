@@ -16,7 +16,7 @@ async function source(path: string) {
 test("constrói somente a rota Radar tenantizada com brandRef e ID canônico", () => {
   assert.equal(buildRadarArticleHref({ brandRef, articleId: "article-dna-v1" }), `/${brandRef}/radar/article-dna-v1`);
   assert.equal(buildRadarArchitectHref({ brandRef, articleId: "article-1" }), `/${brandRef}/arquiteto?articleId=article-1`);
-  assert.equal(buildRadarModuleHref({ brandRef, module: "planejador" }), `/${brandRef}/planejador`);
+  assert.equal(buildRadarModuleHref({ brandRef, module: "radar" }), `/${brandRef}/radar`);
   assert.equal(buildRadarArticleHref({ brandRef: tenantId, articleId: "article-dna-v1" }), null);
   assert.equal(buildRadarArticleHref({ brandRef: "adalba-pro", articleId: "article-dna-v1" }), null);
 });
@@ -36,22 +36,19 @@ test("a rota dinâmica valida o tenant antes de renderizar e recebe brandRef", a
 });
 
 test("consumidores deixam de montar o detalhe global do Radar", async () => {
-  const [radar, analysis, planner, dna, shared] = await Promise.all([
+  const [radar, analysis, dna, shared] = await Promise.all([
     source("modules/radar/radar-page.tsx"),
     source("modules/radar/radar-analysis-page.tsx"),
-    source("modules/planejador/planner-page.tsx"),
     source("components/editorial/dna-panels.tsx"),
     source("components/editorial/operational-screen-shared.tsx"),
   ]);
 
   assert.match(radar, /buildRadarArticleHref\(\{ brandRef, articleId: radarCanonicalRouteKey\(row\) \}\)/);
   assert.match(analysis, /buildRadarArticleHref/);
-  assert.match(planner, /buildRadarArticleHref/);
-  assert.match(planner, /radarCanonicalRouteKey\(radar\)/);
   assert.match(dna, /buildRadarArticleHref\(\{ brandRef: activeBrandRef, articleId: radarCanonicalRouteKey\(radarItem\) \}\)/);
   assert.match(shared, /buildRadarArticleHref\(\{ brandRef: activeBrandRef, articleId: radarCanonicalRouteKey\(item\) \}\)/);
 
-  for (const content of [radar, analysis, planner, dna, shared]) {
+  for (const content of [radar, analysis, dna, shared]) {
     assert.doesNotMatch(content, /\/radar\/\$\{encodeURIComponent\(/, "nenhum consumidor deve montar /radar/{id} global");
   }
 });

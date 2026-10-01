@@ -7,7 +7,7 @@ import type { RadarEvidenceBundle } from "./evidence-bundle.ts";
 import { radarFrozenObservedAtOfAnalysis } from "./evidence-bundle-runtime.ts";
 import { radarFrozenSerpStandingOf } from "./investigation-finalization.ts";
 import type { RadarKeywordContext } from "./keyword-context.ts";
-import type { RadarPlannerHandoffReadiness } from "./planner-handoff.ts";
+import type { RadarHandoffReadiness } from "./handoff-readiness.ts";
 import type { RadarPortableDossierGapsInput } from "./portable-dossier-gaps.ts";
 import {
   buildRadarPortableExportRow,
@@ -142,7 +142,7 @@ export function radarPortableExportDossierGapsInput(input: {
   analysis: { finalizedBundle?: unknown };
   profile: RadarResearchProfile;
   bundle: RadarEvidenceBundle;
-  readiness: RadarPlannerHandoffReadiness;
+  readiness: RadarHandoffReadiness;
   article: { articleDnaVersionId: string | null | undefined; articleDnaContentHash: string | null | undefined };
   exportedAt: string;
   /**

@@ -279,7 +279,8 @@ const workbenchCodigo = workbench
   .join("\n");
 
 test("§2 — Papel no Silo tem coluna própria, derivada do SiloDNA", () => {
-  assert.equal(codigo.includes(">Papel no Silo</th>"), true);
+  // Com a sua própria <col> e a alça de largura (2026-10-01).
+  assert.equal(codigo.includes('>Papel no Silo<KeywordTableColumnResizeHandle columnId="siloRole"'), true);
   assert.equal(codigo.includes('data-testid="architect-silo-role-cell"'), true);
   // A célula lê a projeção do SiloDNA — nunca volume, posição ou nº de links.
   assert.equal(codigo.includes("linksHierarchy?.roleByArticleId.get("), true);

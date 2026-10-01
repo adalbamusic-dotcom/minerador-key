@@ -122,7 +122,8 @@ test("o painel readonly não possui nenhum controle de edição da KeywordDNA", 
 
 test("Principal e apoio usam o mesmo componente readonly, empilhados", () => {
   assert.match(workspace, /role="Principal"/);
-  assert.match(workspace, /art\.supportKeywords\.map\(\(keyword, index\) => <KeywordDnaReadonlyPanel/);
+  // A principal trocada no DNA do publicado não se repete entre os apoios (2026-10-01).
+  assert.match(workspace, /art\.supportKeywords\.filter\(keyword => keyword !== art\.displayPrincipalObj\)\.map\(\(keyword, index\) => <KeywordDnaReadonlyPanel/);
   assert.match(readonlyPanel, /break-words/);
   assert.equal(readonlyPanel.includes("break-all"), false);
 });

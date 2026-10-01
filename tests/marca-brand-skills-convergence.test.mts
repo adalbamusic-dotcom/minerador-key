@@ -100,7 +100,7 @@ test("renomear não toca a identidade técnica, o gabarito nem o hash", async ()
 test("Context Pack entrega o rascunho atual da Care Glow sem aplicá-lo automaticamente", async () => {
   const draft = await importBrandSkill(careGlowInput);
   assert.equal(draft.status, "draft");
-  for (const module of ["minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes"] as const) {
+  for (const module of ["minerador", "arquiteto", "radar", "redator", "publicacoes"] as const) {
     assert.equal(selectAvailableSkills({ skills: [draft], brandId: "brand-a", module }).length, 1);
     const pack = getBrandContextPack({ brandId: "brand-a", module, skills: [draft], now });
     assert.equal(pack.skills.length, 1);
@@ -115,7 +115,7 @@ test("Context Pack entrega a versão corrente e nunca marca disponibilidade como
   const pack = getBrandContextPack({ brandId: "brand-a", module: "redator", skills: [active], now });
   assert.equal(pack.skills.length, 1);
   assert.equal(pack.skills[0].applied, false);
-  assert.deepEqual(pack.skills[0].consumerModules, ["minerador", "planejador", "redator"]);
+  assert.deepEqual(pack.skills[0].consumerModules, ["minerador", "redator"]);
   assert.deepEqual(pack.provenance.skillVersions, [{ definitionKey: "brand_voice", version: 1, contentHash: active.contentHash }]);
   const mineradorPack = getBrandContextPack({ brandId: "brand-a", module: "minerador", skills: [active], now });
   assert.equal(mineradorPack.skills.length, 1);
@@ -184,7 +184,7 @@ test("front e projeção usam a taxonomia canônica do contrato", async () => {
 test("o gabarito é dono do arquivo aceito e dos consumidores", () => {
   assert.deepEqual(definition.acceptedExtensions, [".md"]);
   assert.ok(definition.acceptedMimeTypes.includes("text/markdown"));
-  assert.deepEqual(definition.consumerModules, ["minerador", "planejador", "redator"]);
+  assert.deepEqual(definition.consumerModules, ["minerador", "redator"]);
   assert.ok(definition.expectedSections.some(section => section.importance === "recommended"));
   assert.ok(definition.expectedSections.some(section => section.importance === "optional"));
   assert.ok(definition.expectedSections.every(section => Array.isArray(section.aliases)));

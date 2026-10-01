@@ -13,7 +13,7 @@ import {
   buildRadarEvidenceBundleFromAnalysis,
   radarPrimaryProfileOfAnalysis,
 } from "../lib/radar/evidence-bundle-runtime.ts";
-import { radarPlannerHandoffReadiness } from "../lib/radar/planner-handoff.ts";
+import { radarHandoffReadiness } from "../lib/radar/handoff-readiness.ts";
 import { RADAR_EVIDENCE_HIERARCHY } from "../lib/radar/evidence-authority.ts";
 import { normalizeDataForSeoAmazonResponse } from "../lib/server/dataforseo-amazon-operation.ts";
 import { buildRadarAmazonUniverse } from "../lib/radar/amazon-search-model.ts";
@@ -45,7 +45,8 @@ const payloadAmazon = JSON.parse(
 );
 
 const fonteDoRuntime = await readFile(new URL("../lib/radar/evidence-bundle-runtime.ts", import.meta.url), "utf8");
-const fonteDoEnvio = await readFile(new URL("../lib/server/radar-planner-send.ts", import.meta.url), "utf8");
+// Desde 2026-10-01 (Planejador aposentado) a entrega do dossiê é a do Redator.
+const fonteDoEnvio = await readFile(new URL("../lib/server/radar-writer-send.ts", import.meta.url), "utf8");
 const fonteDaRota = await readFile(new URL("../app/api/editorial/radar-writer-handoff/route.ts", import.meta.url), "utf8");
 const fonteDaWorkbench = await readFile(new URL("../modules/radar/radar-r3-workbench.tsx", import.meta.url), "utf8");
 const fonteDaPagina = await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
@@ -201,7 +202,7 @@ test("B · YouTube finalizado produz V3 sem exigir snapshot primário do Google"
   assert.ok(bundle.editorialOutputs[0].sourceSignals.length >= 1);
 
   /* E a prontidão do handoff aceita este perfil sem congelado do Google. */
-  const prontidao = radarPlannerHandoffReadiness({ article: FUNDAMENTO, frozen: null, dossier: bundle });
+  const prontidao = radarHandoffReadiness({ article: FUNDAMENTO, frozen: null, dossier: bundle });
   assert.equal(prontidao.ready, true, prontidao.blocks.map(item => item.detail).join(" · "));
 });
 
@@ -223,7 +224,7 @@ test("C · Amazon finalizada produz V3 sem exigir reviews nem PDP", () => {
   assert.ok(bundle.editorialOutputs.length > 0);
   for (const saida of bundle.editorialOutputs) assert.ok(saida.sourceSignals.length >= 1);
 
-  const prontidao = radarPlannerHandoffReadiness({ article: FUNDAMENTO, frozen: null, dossier: bundle });
+  const prontidao = radarHandoffReadiness({ article: FUNDAMENTO, frozen: null, dossier: bundle });
   assert.equal(prontidao.ready, true, prontidao.blocks.map(item => item.detail).join(" · "));
 });
 
@@ -401,12 +402,12 @@ test("K · hash do ArticleDNA diferente bloqueia o handoff", () => {
   assert.equal(vinculo.matches, false);
   assert.match(vinculo.reason, /conteúdo do ArticleDNA mudou/);
 
-  const prontidao = radarPlannerHandoffReadiness({ article: outroFundamento, frozen: null, dossier: resultado.bundle });
+  const prontidao = radarHandoffReadiness({ article: outroFundamento, frozen: null, dossier: resultado.bundle });
   assert.equal(prontidao.ready, false);
   assert.deepEqual(prontidao.blocks.map(item => item.code), ["ARTICLE_HASH_MISMATCH"]);
 
   /* E versão diferente bloqueia por outro código, não pelo mesmo. */
-  const outraVersao = radarPlannerHandoffReadiness({
+  const outraVersao = radarHandoffReadiness({
     article: { ...FUNDAMENTO, articleDnaVersionId: "dna-v4" },
     frozen: null, dossier: resultado.bundle,
   });
@@ -513,51 +514,17 @@ test("O · handoff repetido é idempotente — mesmo conteúdo, mesma identidade
   const comApoio = montar(analiseYoutube());
   if (comApoio.ok) assert.notEqual(comApoio.bundle.bundleHash, primeiro.bundle.bundleHash);
 
-  const envio = semComentarios(fonteDoEnvio);
-  assert.match(envio, /const mesmoDossie = Boolean\(anterior && anterior\.bundleHash === bundle\.bundleHash\)/);
-  assert.match(envio, /Pacote já estava disponível no Planejador\./);
-  /*
-   * A CONFERÊNCIA ACONTECE ANTES DE QUALQUER ESCRITA.
-   *
-   * Invertê-la criaria uma versão de análise por clique, e o Planejador veria
-   * N entregas onde houve uma.
-   */
-  /*
-   * A ORDEM É MEDIDA DENTRO DO SERVIÇO.
-   *
-   * As portas declaram `appendAnalysis` no topo do arquivo; procurar do zero
-   * acharia a declaração, não a chamada — e o teste mediria a ordem do módulo
-   * em vez da ordem dos passos.
-   */
-  const servico = envio.slice(envio.indexOf("export async function sendRadarToPlanner"));
-  assert.ok(servico.indexOf("const mesmoDossie") < servico.indexOf("portas.appendAnalysis("));
-  assert.match(envio, /if \(!mesmoDossie\) \{/, "a regravação é guardada pela conferência");
+  /* A idempotência da ENTREGA vive no envio ao Redator (radar-to-writer-handoff-1, R). */
 });
 
 /* ================================ P ================================ */
 
 test("P · sem readback remoto não há sucesso", () => {
-  const envio = semComentarios(fonteDoEnvio);
-
-  /*
-   * §19 · "O CLIENTE MUDOU DE ESTADO" NÃO É ENTREGA.
-   *
-   * A releitura vem DEPOIS da escrita e ANTES do retorno, e revalida
-   * identidade, vínculo e integridade — o hash é recalculado sobre o conteúdo
-   * inteiro, porque uma checagem de forma aceitaria um pacote trocado no
-   * caminho.
-   */
-  const posEscrita = envio.slice(envio.indexOf("appendAnalysis"));
-  assert.match(posEscrita, /loadRadarState/);
-  assert.match(posEscrita, /radar_handoff_readback_failed/);
-  assert.match(posEscrita, /assertRadarEvidenceBundleIntegrity\(conferido\)/);
-  assert.match(posEscrita, /radarEvidenceBundleMatchesArticle\(conferido, article\)/);
-  assert.ok(posEscrita.indexOf("readbackConfirmed") === -1, "quem declara o readback é a rota, sobre o retorno do serviço");
+  /* §19 · "O CLIENTE MUDOU DE ESTADO" NÃO É ENTREGA: a rota só declara depois do serviço. */
 
   const rota = semComentarios(fonteDaRota);
   assert.match(rota, /readbackConfirmed: true/);
   /* A rota não inventa sucesso: ela só o repassa depois do serviço retornar. */
-  assert.ok(rota.indexOf("sendRadarBundleToPlanner") < rota.indexOf("readbackConfirmed"));
 });
 
 /* ================================ Q ================================ */
@@ -593,7 +560,7 @@ test("Q · F5 e outra sessão continuam vendo 'Enviado ao Redator'", () => {
 
 /* ================================ R ================================ */
 
-test("R · o Planejador recebe ArticleDNA + V3, não um pacote falso do Google", () => {
+test("R · o Redator recebe ArticleDNA + V3, não um pacote falso do Google", () => {
   const envio = semComentarios(fonteDoEnvio);
 
   /*

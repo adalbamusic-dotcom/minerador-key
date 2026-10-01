@@ -6,12 +6,6 @@ export const RedatorPromptContextSchema = z.object({
   documentId: z.string().min(1),
   sectionId: z.string().min(1),
   sectionLabel: z.string().min(1),
-  /*
-   * Documento do Radar (v2) nao tem plano: a ausencia viaja como `null`, em
-   * vez de uma referencia inventada. Antes o schema exigia a referencia e
-   * recusava todo pedido de secao de documento v2.
-   */
-  contentPlanRef: VersionReferenceSchema.nullable(),
   articleDnaRef: VersionReferenceSchema,
   siloDnaRef: VersionReferenceSchema,
   keywordDnaRefs: z.array(VersionReferenceSchema).min(1),

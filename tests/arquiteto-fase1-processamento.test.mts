@@ -115,7 +115,9 @@ test("§3 · composição com secundária sem avaliação continua AMBÍGUA", ()
 });
 
 test("§3 · a mesa informa o tamanho da composição para a classificação", () => {
-  assert.match(workspace, /compositionKeywordCount: input\.keywordIds\.length/);
+  // Desde 2026-10-01 o retrato é montado no lib (o mesmo do "Gravar melhorias").
+  assert.match(workspace, /keywordCount: input\.keywordIds\.length/);
+  assert.match(workspace, /buildClassificationEvidence\(/);
 });
 
 /* ============ §2 · uma autoridade visual de SERP ====================== */

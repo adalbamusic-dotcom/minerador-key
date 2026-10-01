@@ -255,7 +255,7 @@ function tituloDeTrabalho(input: {
     .filter(opcao => !observados.has(normalizar(opcao)));
 
   return {
-    titulo: candidatas[0] || (principal ? `${principal}` : "Título a definir com o Planejador"),
+    titulo: candidatas[0] || (principal ? `${principal}` : "Título a definir no Redator"),
     alternativas: candidatas.slice(1, 3),
   };
 }
@@ -401,7 +401,7 @@ function prontidao(input: { evidenceNeeds: string[]; specialistNeeds: string[]; 
 
   return motivos.length
     ? { state: "PARTIAL" as const, label: `Parcial · ${motivos.join(" · ")}`, reasons: motivos }
-    : { state: "READY" as const, label: "Pronto para o Planejador", reasons: [] };
+    : { state: "READY" as const, label: "Pronto para o Redator", reasons: [] };
 }
 
 /* ============================ o perfil YOUTUBE =========================== */

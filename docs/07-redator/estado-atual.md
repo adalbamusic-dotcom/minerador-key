@@ -1,5 +1,18 @@
 # Estado atual — Redator
 
+## Documento só de origem Radar — 2026-10-01
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- `ContentDocumentSchema` é o v2 (origem Radar). O v1, com `contentPlanRef`, saiu com a
+  aposentadoria do Planejador: o preflight deu zero documentos com plano.
+- A semeadura e a visão do MCP ainda selecionam `contentPlanRef`, só como sentinela: o
+  `.strict()` recusa documento que o carregue, igual à leitura inteira.
+- O pedido de seção não carrega mais `contentPlanRef`. A biblioteca de Publicações declara
+  sempre origem `radar`.
+- `DocumentRepository.create` não recebe nem grava `content_plan_version_id` (a coluna sai
+  na migration F7, que o usuário aplica depois do deploy).
+
 ## Nota de diferenciação no envio do Radar — 2026-09-27
 
 - **Verificado no código:** quando o ArticleDNA fixado tem linhas `Diferenciação: ` no campo `differentiation` (gravadas pelo "Aceitar grupo" do Arquiteto), `lib/redator/radar-import.ts` as acrescenta ao `editorialContext`, depois das linhas do Assunto (até 4). `lib/server/radar-writer-send.ts` passa o campo. Sem nota, o documento sai igual ao de antes. Exemplo de linha: "não cobrir tráfego pago; é do artigo X; linkar para ele".
