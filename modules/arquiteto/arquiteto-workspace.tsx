@@ -6282,6 +6282,15 @@ export default function ArquitetoPage() {
     }
   };
 
+  /** Principal → artigo, só quando a principal não é a própria página (troca de principal). */
+  const articleIdByPrincipalKeyword = useMemo(() => {
+    const mapa = new Map<string, string>();
+    for (const [articleId, version] of Object.entries(acceptedArticleDnas)) {
+      const principal = version.payload.principalKeywordId;
+      if (principal && principal !== articleId && !mapa.has(principal)) mapa.set(principal, articleId);
+    }
+    return mapa;
+  }, [acceptedArticleDnas]);
   const articleDnaEntryFor = useCallback((input: { articleId?: string | null; candidateRef?: string | null }) => {
     // A partição do cenário responde em QUALQUER aba, não só na de Artigos.
     //
@@ -6294,7 +6303,28 @@ export default function ArquitetoPage() {
     const doCenario = input.candidateRef
       ? materializationPartition.matched.get(input.candidateRef) ?? null
       : null;
-    const key = doCenario || (input.candidateRef ? null : (input.articleId || null));
+    /*
+     * PUBLICADO COM A PRINCIPAL TROCADA (2026-10-01).
+     *
+     * O ArticleDNA do publicado fica registrado pelo id da página (a keyword
+     * publicada). Quando a melhoria troca a principal por outra keyword, a linha
+     * passa a ser identificada pela principal nova — e a busca por id não casava:
+     * a linha ficava sem papel no Silo e sem aprovação. A principal é única por
+     * artigo, então ela localiza o ArticleDNA sem ambiguidade.
+     */
+    /*
+     * PUBLICADO PRESO A UMA FORMAÇÃO ANTIGA DA MESA (2026-10-01).
+     *
+     * A página publicada tem identidade estável: o ArticleDNA dela é gravado
+     * pelo id da página. Quando a linha chega com o `candidateRef` de uma
+     * formação que não casa com mais nada, o publicado ficava sem Definição,
+     * sem papel no Silo e sem aprovação — mesmo com ArticleDNA aprovado.
+     * Só o publicado cai no acervo; artigo novo continua respondido só pelo cenário.
+     */
+    const publicadoDireto = !doCenario && input.candidateRef && input.articleId
+      && acceptedArticleDnas[input.articleId]?.payload.publishedIdentityRef ? input.articleId : null;
+    const direto = input.candidateRef ? publicadoDireto : (input.articleId || null);
+    const key = doCenario || (direto && !acceptedArticleDnas[direto] ? articleIdByPrincipalKeyword.get(direto) ?? direto : direto);
     const autoridade = key ? articleVersionAuthorities.get(key) : undefined;
     return {
       key,
@@ -6308,7 +6338,7 @@ export default function ArquitetoPage() {
       /* A revisão em andamento sobre ela — existir não a invalida. */
       workingProposal: autoridade?.workingProposal ?? null,
     };
-  }, [acceptedArticleDnas, articleVersionAuthorities, materializationPartition]);
+  }, [acceptedArticleDnas, articleIdByPrincipalKeyword, articleVersionAuthorities, materializationPartition]);
   const articleDnaForGrid = useCallback(
     (articleId: string | null | undefined, candidateRef?: string | null) =>
       articleDnaEntryFor({ articleId, candidateRef }).version,
@@ -7896,6 +7926,25 @@ export default function ArquitetoPage() {
     })
     .filter((context): context is { siloId: string; siloDna: VersionEnvelope<SiloDNA>; siloPage: VersionEnvelope<SiloPage>; workingCopy: SiloWorkingCopy | null } => Boolean(context)),
   [acceptedSiloDnas, acceptedSiloPages, selectedBrandId, siloWorkingCopies, remoteTerritories]);
+  /**
+   * O SILO DE UMA LINHA, PARA OS LINKS.
+   *
+   * `article.siloId` vem da keyword e fica vazio quando o Silo foi decidido na
+   * fase Silos — que é o caso de todo artigo de Silo fechado. A fonte é o
+   * SiloDNA aprovado (quem lista o artigo) e, na falta dele, o ArticleDNA.
+   */
+  const linksSiloOfArticle = (article: (typeof articlesList)[number]) => {
+    const idDaLinha = articleEntityIdFor(article);
+    // Publicado com a principal trocada: o artigo é achado pela principal nova.
+    const entityId = idDaLinha && !acceptedArticleDnas[idDaLinha] ? articleIdByPrincipalKeyword.get(idDaLinha) ?? idDaLinha : idDaLinha;
+    if (entityId) {
+      const contexto = linkSiloContexts.find(context => context.siloDna.payload.articleReferences.some(reference => reference.articleId === entityId));
+      if (contexto) return contexto.siloId;
+      const dna = acceptedArticleDnas[entityId]?.payload.siloId;
+      if (dna) return String(dna);
+    }
+    return article.siloId ? String(article.siloId) : null;
+  };
   const resolvedLinksSiloId = linksSelectedSiloId && linkSiloContexts.some(context => context.siloId === linksSelectedSiloId)
     ? linksSelectedSiloId
     : linkSiloContexts[0]?.siloId || null;
@@ -8234,12 +8283,12 @@ export default function ArquitetoPage() {
    */
   const processarLinks = async () => {
     const marcados = articlesList.filter(article => selectedArticleIds.has(article.id));
-    const silosMarcados = [...new Set(marcados.map(article => String(article.siloId || "")).filter(Boolean))];
+    const silosMarcados = [...new Set(marcados.map(article => linksSiloOfArticle(article) || "").filter(Boolean))];
     const alvos = marcados.length
       ? linkSiloContexts.filter(context => silosMarcados.includes(context.siloId))
       : linksSelectedContext ? [linksSelectedContext] : [];
     const semGrafo = silosMarcados.filter(siloId => !linkSiloContexts.some(context => context.siloId === siloId)).length;
-    const semSilo = marcados.filter(article => !article.siloId).length;
+    const semSilo = marcados.filter(article => !linksSiloOfArticle(article)).length;
     if (semGrafo || semSilo) {
       showNotification("warning", [
         semGrafo ? `${semGrafo} Silo(s) da seleção ainda não têm SiloDNA e SiloPage aprovados e consolidados: os links deles ficam para depois.` : "",
@@ -8361,7 +8410,7 @@ export default function ArquitetoPage() {
     if (workspaceMode !== "links" || !selectedArticleIds.size || linksIsDirty || linksLoading || linksSaveState === "saving") return;
     const silos = new Set(articlesList
       .filter(article => selectedArticleIds.has(article.id))
-      .map(article => String(article.siloId || ""))
+      .map(article => linksSiloOfArticle(article) || "")
       .filter(Boolean));
     if (silos.size !== 1) return;
     const [siloId] = [...silos];
@@ -8530,7 +8579,7 @@ export default function ArquitetoPage() {
      * descreve um estado interno da tela, não o que falta fazer.
      */
     const doSilo = linksSelectedContext
-      ? articlesList.filter(article => String(article.siloId || "") === String(linksSelectedContext.siloId))
+      ? articlesList.filter(article => linksSiloOfArticle(article) === String(linksSelectedContext.siloId))
       : [];
     /*
      * Links usa a CANÔNICA APROVADA. Uma proposta em edição sobre ela não

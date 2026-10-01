@@ -89,3 +89,19 @@ test("a tela abre a cópia pela composição vigente e processa os Silos marcado
   assert.match(abrir, /internalLinkGraphBasisIsCurrent\(existente, base\)/, "cópia com base antiga é rebaseada");
   assert.match(abrir, /rebaseInternalLinkGraph\(\{ previousEdges: aprovado\.edges/);
 });
+
+test("o Silo da linha vem do SiloDNA, não da keyword (a keyword não carrega Silo decidido na fase Silos)", () => {
+  const fonte = readFileSync(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
+  const processar = fonte.slice(fonte.indexOf("const processarLinks = async () => {"), fonte.indexOf("const handleApproveLinks = async"));
+  assert.match(processar, /linksSiloOfArticle\(article\)/);
+  assert.equal(processar.includes("article.siloId"), false, "o campo da keyword nunca trazia o Silo fechado");
+  const silo = fonte.slice(fonte.indexOf("const linksSiloOfArticle = "), fonte.indexOf("const resolvedLinksSiloId = "));
+  assert.match(silo, /articleReferences\.some/);
+});
+
+test("publicado com formação antiga na mesa ou principal trocada continua achando o próprio ArticleDNA", () => {
+  const fonte = readFileSync(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
+  const entrada = fonte.slice(fonte.indexOf("const articleDnaEntryFor = useCallback"), fonte.indexOf("const articleDnaForGrid = useCallback"));
+  assert.match(entrada, /publishedIdentityRef/, "só o publicado cai no ArticleDNA da página");
+  assert.match(entrada, /articleIdByPrincipalKeyword\.get/);
+});

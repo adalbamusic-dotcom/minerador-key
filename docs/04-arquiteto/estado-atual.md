@@ -16,6 +16,12 @@
 - **Seleção:** "Processar links" processa o Silo de cada linha marcada, um de cada vez (sem
   marcação, o Silo do seletor). Silo sem SiloDNA/SiloPage consolidados é avisado e pulado.
 - **Concorrência:** a cadeia usa o lock confirmado da própria cópia, não o estado da aba.
+- **Segunda rodada (mesmo dia):** a seleção não chegava a nenhum Silo ("N artigo(s) marcado(s) ainda sem Silo"):
+  a linha lê `siloId` da keyword, que fica vazio quando o Silo é decidido na fase Silos. Agora o Silo da linha
+  vem do SiloDNA que lista o artigo (`linksSiloOfArticle`), e a mesma leitura serve ao efeito de seguir a seleção.
+- **Publicados sem papel e sem aprovação:** linha publicada presa a uma formação antiga da mesa (`candidateRef`
+  que não casa) ou com a principal trocada por outra keyword não achava o próprio ArticleDNA. Agora o publicado
+  cai no ArticleDNA da página (`publishedIdentityRef`) e a principal nova também localiza o artigo.
 - Testes: `tests/arquiteto-links-rebase-composicao.test.mts` (em `test:arquiteto`), suíte
   do Arquiteto 2720/0, testes estruturais de links 51/0, `test:agent` 65/0.
 - O aviso "Não foi possível ler o status operacional gravado (HTTP 500)" foi passageiro: a mesma
