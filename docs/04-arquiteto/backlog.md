@@ -1,5 +1,14 @@
 ## Fechamento e ficha — 2026-10-01
 
+## Links internos sobre a composição vigente — 2026-10-01
+
+- [x] Sucessora e cópia existente rebaseadas para as versões atuais dos artigos.
+- [x] "Processar links" segue as linhas marcadas (vários Silos, um por vez).
+- [ ] Homologação do usuário: marcar os artigos de "Crescimento de Clínicas" e de "Leads sem
+  Tráfego Pago" → Processar links → conferir os nós com as principais atuais → Confirmar links →
+  o aviso "O grafo aprovado descreve versões anteriores" some e os artigos passam no portão do Radar.
+- [ ] Coluna/indicador por artigo de "links internos aprovados" na planilha (hoje só o mapa mostra).
+
 - [x] Ficha mostra a principal do DNA e a página como secundária.
 - [x] Fechamento relê a versão vigente no servidor antes da sucessora.
 - [x] Sem aviso de Silo já fechado quando o par cobre os artigos.

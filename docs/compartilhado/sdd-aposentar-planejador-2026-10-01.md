@@ -267,7 +267,10 @@ Nada foi gravado no banco remoto.
   "radar_planner_handoff"` (valor do schema v2 já gravado). Trocar a etiqueta é
   mudança de contrato de dado gravado; fica para a migração de banco (Turso).
 - `buildRadarPlannerPackage` (pacote v1 legado) só é usado por testes; sai na F8.
-- F7: o usuário aplica a migration **depois do deploy** deste código.
+- F7: **aplicada pelo usuário em 2026-10-01** (`db query -f` + `migration repair`). Readback da
+  própria migration: capability `planejador` ativa = 0, CHECKs que citam o Planejador = 0, colunas
+  `content_plan_version_id` = 0. O código desta entrega precisa estar no deploy: o código antigo
+  ainda gravava a coluna.
 - F8: arquivar `docs/06-planejador` e limpar as docs do Radar e do Redator.
 
 ## 9. Fora desta SDD

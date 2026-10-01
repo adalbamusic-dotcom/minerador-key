@@ -347,6 +347,7 @@ import { useLocalHistory } from "@/components/editorial/use-local-history";
 import { authenticatedArchitectActor } from "@/lib/arquiteto/f5-integrity";
 import { createInternalLinkGraph, createInternalLinkGraphWorkingCopy, inferInternalLinkGraphRelationType, isInternalLinkGraphRelationCompatible, updateInternalLinkGraphWorkingCopy } from "@/lib/arquiteto/internal-link-graph";
 import { loadInternalLinkGraphWorkingCopy, loadInternalLinkGraphs, persistInternalLinkGraph, persistInternalLinkGraphWorkingCopy, InternalLinkGraphWorkingCopyPersistenceError } from "@/lib/arquiteto/internal-link-graph-persistence";
+import { internalLinkGraphBasisIsCurrent, rebaseInternalLinkGraph } from "@/lib/arquiteto/internal-link-graph-rebase";
 import { ArquitetoExportError, type ArquitetoExportGraph, type ArquitetoExportInput, type ArquitetoExportSilo } from "@/lib/arquiteto/export-source";
 import { buildArquitetoBackup } from "@/lib/arquiteto/backup-export";
 import { buildArquitetoEditorialExport } from "@/lib/arquiteto/editorial-export";
@@ -7975,15 +7976,22 @@ export default function ArquitetoPage() {
     return typeof keyword === "string" && keyword.trim() ? keyword : article.suggestedSlug || fallback;
   };
 
-  const buildInitialLinksWorkingCopy = async (): Promise<InternalLinkGraphWorkingCopy> => {
-    if (!selectedBrandId || !linksSelectedContext || !linksGraphId) throw new Error("Selecione um Silo com SiloDNA e SiloPage antes de abrir a working copy.");
-    const silo = linksSelectedContext.siloDna.payload;
+  type LinksSiloContext = (typeof linkSiloContexts)[number];
+  /**
+   * A COMPOSIÇÃO VIGENTE DO SILO, como nós do grafo.
+   *
+   * É dela que toda cópia nasce — inclusive a sucessora de um grafo aprovado.
+   * Copiar os nós do aprovado fazia a sucessora falar de versões antigas dos
+   * artigos, e o portão do Radar continuava recusando-os depois da aprovação.
+   */
+  const linksBasisFor = (context: LinksSiloContext) => {
+    if (!selectedBrandId) throw new Error("Selecione uma Brand antes de abrir a working copy.");
+    const silo = context.siloDna.payload;
     const articleVersions = silo.articleReferences
       .map(reference => acceptedArticleDnas[reference.articleId])
       .filter((version): version is VersionEnvelope<ArticleDNA> => Boolean(version));
     if (articleVersions.length !== silo.articleReferences.length) throw new Error("A base do Silo referencia ArticleDNA que não está disponível no workspace.");
-    const actorId = linksAuthenticatedActor();
-    const siloPage = linksSelectedContext.siloPage;
+    const siloPage = context.siloPage;
     const nodes: InternalLinkGraphNode[] = [
       {
         nodeId: `silo-page:${silo.siloId}`,
@@ -8008,20 +8016,28 @@ export default function ArquitetoPage() {
         } satisfies InternalLinkGraphNode;
       }),
     ];
+    return {
+      nodes,
+      baseSiloDnaVersionRef: linkReferenceForVersion(context.siloDna),
+      baseSiloPageVersionRef: linkReferenceForVersion(siloPage),
+      participatingArticleDnaVersionRefs: articleVersions.map(linkReferenceForVersion),
+    };
+  };
+
+  const buildInitialLinksWorkingCopy = async (): Promise<InternalLinkGraphWorkingCopy> => {
+    if (!selectedBrandId || !linksSelectedContext || !linksGraphId) throw new Error("Selecione um Silo com SiloDNA e SiloPage antes de abrir a working copy.");
+    const base = linksBasisFor(linksSelectedContext);
     return createInternalLinkGraphWorkingCopy({
       graphId: linksGraphId,
       brandId: selectedBrandId,
-      siloId: silo.siloId,
+      siloId: linksSelectedContext.siloDna.payload.siloId,
       baseGraphVersionId: linksApprovedGraph?.graphVersionId || null,
       baseGraphContentHash: linksApprovedGraph?.contentHash || null,
-      baseSiloDnaVersionRef: linkReferenceForVersion(linksSelectedContext.siloDna),
-      baseSiloPageVersionRef: linkReferenceForVersion(siloPage),
-      participatingArticleDnaVersionRefs: articleVersions.map(linkReferenceForVersion),
-      nodes,
+      ...base,
       edges: [],
       warnings: [],
       conflicts: [],
-      createdBy: actorId,
+      createdBy: linksAuthenticatedActor(),
       metadata: {},
     });
   };
@@ -8090,7 +8106,9 @@ export default function ArquitetoPage() {
       });
       // lock_version is a remote concurrency token. Local edits update the
       // content/hash immediately but keep the last confirmed remote token.
-      const resultado = { ...next, lockVersion: linksPersistedLockVersion || atual.lockVersion };
+      // Na cadeia (`base`), a cópia já carrega o lock confirmado; o estado da aba
+      // pode ser de outro Silo ou de antes da sucessora.
+      const resultado = { ...next, lockVersion: base ? base.lockVersion : linksPersistedLockVersion || atual.lockVersion };
       setLinksWorkingCopy(resultado);
       setLinksSaveState("idle");
       setLinksError(null);
@@ -8124,23 +8142,9 @@ export default function ArquitetoPage() {
     }
     setLinksSaveState("saving");
     try {
-      const successor = await createInternalLinkGraphWorkingCopy({
-        graphId: linksApprovedGraph.graphId,
-        brandId: linksApprovedGraph.brandId,
-        siloId: linksApprovedGraph.siloId,
-        baseGraphVersionId: linksApprovedGraph.graphVersionId,
-        baseGraphContentHash: linksApprovedGraph.contentHash,
-        baseSiloDnaVersionRef: linksApprovedGraph.baseSiloDnaVersionRef,
-        baseSiloPageVersionRef: linksApprovedGraph.baseSiloPageVersionRef,
-        participatingArticleDnaVersionRefs: linksApprovedGraph.participatingArticleDnaVersionRefs,
-        nodes: linksApprovedGraph.nodes,
-        edges: linksApprovedGraph.edges,
-        warnings: linksApprovedGraph.warnings,
-        conflicts: linksApprovedGraph.conflicts,
-        createdBy: linksAuthenticatedActor(),
-        metadata: {},
-      });
-      const aberta = await persistLinksWorkingCopy(successor, "create");
+      if (!linksSelectedContext) throw new Error("Selecione o Silo do grafo antes de abrir a sucessora.");
+      // A sucessora nasce da composição VIGENTE, não da aprovada (ver `abrirCopiaVigente`).
+      const aberta = await abrirCopiaVigente(linksSelectedContext);
       setLinksScenario("working");
       showNotification("success", "Working copy sucessora aberta a partir da versão aprovada.");
       return aberta;
@@ -8166,42 +8170,112 @@ export default function ArquitetoPage() {
    *
    * NADA aqui aprova: ao fim, a working copy está proposta e salva.
    */
+  /**
+   * Abre a cópia do Silo SOBRE A COMPOSIÇÃO VIGENTE.
+   *
+   * - cópia existente com base atual: segue como está;
+   * - cópia existente com base antiga (a aprovação não apaga a cópia): troca a
+   *   base, leva as arestas que ainda cabem e grava;
+   * - sem cópia: nasce da composição vigente, herdando do aprovado só as
+   *   arestas que ainda cabem.
+   */
+  const abrirCopiaVigente = async (context: LinksSiloContext): Promise<InternalLinkGraphWorkingCopy> => {
+    if (!selectedBrandId) throw new Error("Selecione uma Brand antes de processar os links.");
+    const actorId = linksAuthenticatedActor();
+    const grafos = (await loadInternalLinkGraphs(selectedBrandId))
+      .filter(graph => graph.siloId === context.siloId)
+      .sort((left, right) => right.versionNumber - left.versionNumber);
+    const aprovado = grafos.find(graph => graph.workflowStatus === "approved") || null;
+    const graphId = grafos[0]?.graphId || `arquiteto:internal-links:${context.siloId}`;
+    const existente = await loadInternalLinkGraphWorkingCopy(selectedBrandId, graphId);
+    const base = linksBasisFor(context);
+    const linhagem = { baseGraphVersionId: aprovado?.graphVersionId || null, baseGraphContentHash: aprovado?.contentHash || null };
+    if (existente) {
+      const mesmaLinhagem = existente.baseGraphVersionId === linhagem.baseGraphVersionId;
+      if (internalLinkGraphBasisIsCurrent(existente, base) && mesmaLinhagem) return existente;
+      const rebase = rebaseInternalLinkGraph({ previousEdges: existente.edges, currentNodes: base.nodes });
+      const proxima = await updateInternalLinkGraphWorkingCopy({
+        previous: existente,
+        changes: { ...base, nodes: rebase.nodes, edges: rebase.edges, ...linhagem },
+        actorId,
+      });
+      const gravada = await persistLinksWorkingCopy({ ...proxima, lockVersion: existente.lockVersion }, "edit");
+      if (rebase.dropped.length) showNotification("info", `${rebase.dropped.length} relação(ões) não cabem mais na composição atual do Silo e saíram da cópia; a derivação estrutural recompõe o que faltar.`);
+      return gravada;
+    }
+    const herdadas = aprovado ? rebaseInternalLinkGraph({ previousEdges: aprovado.edges, currentNodes: base.nodes }) : { nodes: base.nodes, edges: [], dropped: [] };
+    const copia = await createInternalLinkGraphWorkingCopy({
+      graphId,
+      brandId: selectedBrandId,
+      siloId: context.siloId,
+      ...linhagem,
+      ...base,
+      nodes: herdadas.nodes,
+      edges: herdadas.edges,
+      warnings: aprovado?.warnings || [],
+      conflicts: aprovado?.conflicts || [],
+      createdBy: actorId,
+      metadata: {},
+    });
+    return persistLinksWorkingCopy(copia, "create");
+  };
+
+  /**
+   * PROCESSAR LINKS — a ação que PROPÕE, sobre os Silos MARCADOS.
+   *
+   * Com linhas marcadas, processa o Silo de cada uma (um de cada vez); sem
+   * marcação, o Silo escolhido no seletor. O grafo é por Silo: um artigo
+   * marcado leva o Silo inteiro, porque link interno é relação entre páginas.
+   *
+   * A cópia é passada adiante entre as etapas em vez de relida do estado:
+   * dentro de um mesmo clique o React ainda não refletiu o `set` anterior.
+   *
+   * NADA aqui aprova: ao fim, cada working copy está proposta e salva.
+   */
   const processarLinks = async () => {
-    if (!linksSelectedContext) {
-      showNotification("error", "Selecione o Silo do grafo antes de processar os links.");
+    const marcados = articlesList.filter(article => selectedArticleIds.has(article.id));
+    const silosMarcados = [...new Set(marcados.map(article => String(article.siloId || "")).filter(Boolean))];
+    const alvos = marcados.length
+      ? linkSiloContexts.filter(context => silosMarcados.includes(context.siloId))
+      : linksSelectedContext ? [linksSelectedContext] : [];
+    const semGrafo = silosMarcados.filter(siloId => !linkSiloContexts.some(context => context.siloId === siloId)).length;
+    const semSilo = marcados.filter(article => !article.siloId).length;
+    if (semGrafo || semSilo) {
+      showNotification("warning", [
+        semGrafo ? `${semGrafo} Silo(s) da seleção ainda não têm SiloDNA e SiloPage aprovados e consolidados: os links deles ficam para depois.` : "",
+        semSilo ? `${semSilo} artigo(s) marcado(s) ainda sem Silo.` : "",
+      ].filter(Boolean).join(" "));
+    }
+    if (!alvos.length) {
+      if (!marcados.length) showNotification("error", "Selecione o Silo do grafo antes de processar os links.");
       return;
     }
     setLinksLoading(true);
     try {
-      // Sucessora quando já existe grafo aprovado: aprovar de novo por cima do
-      // mesmo artefato apagaria a versão que o humano já fechou.
-      const aberta = linksWorkingCopy
-        || (linksApprovedGraph ? await handleCreateLinksSuccessor() : await handleOpenLinksWorkingCopy());
-      if (!aberta) return;
-
-      const comEstrutura = await generateStructuralLinks(aberta);
-      if (!comEstrutura) return;
-
-      /*
-       * §7 — ZERO ARESTA SEM PROVA, NUNCA MAIS.
-       *
-       * Esta mensagem dizia "o Silo não tem duas páginas linkáveis" sobre um
-       * Silo com seis. Ela não era a conclusão do motor: era um palpite sobre
-       * por que a lista tinha voltado vazia. Quem responde agora é o readout,
-       * que já nomeou cada página bloqueada e cada par recusado.
-       */
-      if (!comEstrutura.edges.length) return;
-      await generateLinkAnchors(comEstrutura);
+      for (const contexto of alvos) {
+        // A mesa mostra o Silo que está sendo processado.
+        if (contexto.siloId !== resolvedLinksSiloId || alvos.length > 1) handleLinksSiloChange(contexto.siloId);
+        const aberta = await abrirCopiaVigente(contexto).catch(error => {
+          showNotification("error", `${contexto.siloDna.payload.name || contexto.siloId}: ${error instanceof Error ? error.message : "não foi possível abrir a working copy."}`);
+          return null;
+        });
+        if (!aberta) continue;
+        setLinksScenario("working");
+        const comEstrutura = await generateStructuralLinks(aberta);
+        /*
+         * §7 — ZERO ARESTA SEM PROVA: quem explica a lista vazia é o readout,
+         * que já nomeou cada página bloqueada e cada par recusado.
+         */
+        if (!comEstrutura || !comEstrutura.edges.length) continue;
+        await generateLinkAnchors(comEstrutura);
+      }
+      if (alvos.length > 1) showNotification("success", `Links processados em ${alvos.length} Silo(s) da seleção. Revise e confirme cada um: nada foi aprovado.`);
     } finally {
       setLinksLoading(false);
       /*
-       * O "salvando" é um LATCH, e ele mentia.
-       *
-       * Várias etapas desta sequência marcam `saving` e só desmarcam no
-       * caminho feliz ou no `catch`; um `return` no meio deixava o estado
-       * preso, e a fase passava a recusar tudo com "Há uma operação em curso"
-       * — sem operação nenhuma em curso. Ao sair daqui nada mais está em voo:
-       * `idle` diz a verdade, e a working copy continua não confirmada.
+       * O "salvando" é um LATCH: um `return` no meio deixava o estado preso e a
+       * fase recusava tudo com "Há uma operação em curso". Ao sair daqui nada
+       * mais está em voo.
        */
       setLinksSaveState(atual => (atual === "saving" ? "idle" : atual));
     }
@@ -8809,7 +8883,7 @@ export default function ArquitetoPage() {
         changes: { edges: atualizadas },
         actorId: linksAuthenticatedActor(),
       });
-      const persistida = { ...proximo, lockVersion: linksPersistedLockVersion ?? copia.lockVersion };
+      const persistida = { ...proximo, lockVersion: base ? copia.lockVersion : linksPersistedLockVersion ?? copia.lockVersion };
       await persistLinksWorkingCopy(persistida, "edit");
       const aceitas = resposta.proposals.length;
       const recusadas = resposta.rejected.length;

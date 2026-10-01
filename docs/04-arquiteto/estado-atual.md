@@ -1,5 +1,26 @@
 ## Troca da principal sem volume como reserva da leitura da IA — 2026-10-01
 
+## Links internos: cópia sobre a composição vigente e Silos marcados — 2026-10-01
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Causa do "nenhum artigo ganhou link":** a sucessora do grafo copiava o aprovado inteiro
+  (nós, versões dos artigos, SiloDNA/SiloPage de base). Depois da troca de principal, cada
+  "Processar links" e cada aprovação continuavam descrevendo as versões ANTIGAS, e o portão
+  do Radar recusava os mesmos artigos. A aprovação também não apaga a working copy do servidor,
+  então o reprocessamento caía nela, com a mesma base velha, e a aprovação dizia "nada novo a confirmar".
+- **Agora:** `abrirCopiaVigente` monta a base pela composição atual do Silo (`linksBasisFor`).
+  Cópia existente com base antiga é rebaseada (`lib/arquiteto/internal-link-graph-rebase.ts`):
+  ficam só as relações cujas pontas existem e cujo tipo combina com os papéis atuais; o resto sai
+  com motivo, a derivação estrutural recompõe e a IA refaz as âncoras.
+- **Seleção:** "Processar links" processa o Silo de cada linha marcada, um de cada vez (sem
+  marcação, o Silo do seletor). Silo sem SiloDNA/SiloPage consolidados é avisado e pulado.
+- **Concorrência:** a cadeia usa o lock confirmado da própria cópia, não o estado da aba.
+- Testes: `tests/arquiteto-links-rebase-composicao.test.mts` (em `test:arquiteto`), suíte
+  do Arquiteto 2720/0, testes estruturais de links 51/0, `test:agent` 65/0.
+- O aviso "Não foi possível ler o status operacional gravado (HTTP 500)" foi passageiro: a mesma
+  rota respondeu 200 na releitura (instabilidade do Supabase).
+
 **Verificado no código e confirmado por teste (lib). A reserva no servidor não tem teste de ponta
 a ponta. Validado na tela: não.**
 
