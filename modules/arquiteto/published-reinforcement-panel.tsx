@@ -241,7 +241,7 @@ function ReinforcementTableLine({ row, controller, open, highlighted, busy, onTo
           </button>
         </td>
         <td className={celula}>
-          <span className="block break-words text-foreground">{row.principal.keyword}</span>
+          <span className="block break-words text-keyword">{row.principal.keyword}</span>
           <span className="block text-text-muted">{row.principal.volumeLabel}</span>
           {row.pageNote && <span className="block text-text-muted">{row.pageNote}</span>}
           {row.swap && (

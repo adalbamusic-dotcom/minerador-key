@@ -654,21 +654,19 @@ test("VÍDEOS 1 · T — o snapshot congelado não muda quando o blueprint vivo 
   assert.equal(JSON.stringify(congelamento.bundle.blueprint?.videoBriefSnapshots), antes);
 });
 
-/* ==========  U · O HANDOFF CONTINUA COMPATÍVEL  ================= */
+/* ==========  U · O SNAPSHOT DE VÍDEO É DO BUNDLE  ================= */
 
-test("VÍDEOS 1 · U — PlannerHandoff segue em v3, sem contrato novo", async () => {
-  const { RADAR_PLANNER_CONTRACT_VERSION } = await import("../lib/radar/planner-handoff.ts");
-
+test("VÍDEOS 1 · U — o envelope do Planejador não existe mais; o snapshot fica no bundle", () => {
   /*
-   * O campo é ADITIVO e OPCIONAL dentro do bundle congelado. Ele não altera a
-   * forma do envelope do Planejador, que já carrega o blueprint inteiro — não
-   * há contrato novo a versionar, então não existe v4.
+   * O envelope V3 de entrega ao Planejador saiu com a aposentadoria do
+   * Planejador (2026-10-01). A pauta de vídeos viaja no bundle congelado, que
+   * é o que o Redator recebe — não há segundo lugar para duplicá-la.
    */
-  assert.equal(RADAR_PLANNER_CONTRACT_VERSION, 3);
-
-  const handoff = readFileSync(new URL("../lib/radar/planner-handoff.ts", import.meta.url), "utf8");
-  assert.match(handoff, /editorialBlueprint: input\.blueprint/, "o handoff continua levando o blueprint completo");
-  assert.ok(!/videoBriefSnapshots/.test(handoff), "o snapshot é do bundle; o handoff não o duplica");
+  const handoff = readFileSync(new URL("../lib/radar/handoff-readiness.ts", import.meta.url), "utf8");
+  assert.ok(!/RADAR_PLANNER_CONTRACT_VERSION/.test(handoff), "o contrato do Planejador saiu");
+  assert.ok(!/videoBriefSnapshots/.test(handoff), "o snapshot é do bundle; a prontidão não o duplica");
+  const congelado = readFileSync(new URL("../lib/radar/investigation-finalization.ts", import.meta.url), "utf8");
+  assert.match(congelado, /videoBriefSnapshots/, "o bundle congelado carrega a pauta de vídeos");
 });
 
 /* ==========  A PRIMEIRA CAMADA HUMANA  ========================== */

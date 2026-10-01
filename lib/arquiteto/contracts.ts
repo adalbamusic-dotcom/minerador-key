@@ -1574,223 +1574,16 @@ export const ArtifactReferenceSchema = z.object({
 }).strict();
 export type ArtifactReference = z.infer<typeof ArtifactReferenceSchema>;
 
-export const ContentPlanSectionSchema = z.object({
-  id: z.string().min(1),
-  level: z.union([z.literal(2), z.literal(3)]),
-  heading: z.string().min(1),
-  objective: z.string().min(1),
-  topics: z.array(z.string()),
-  questions: z.array(z.string()),
-  entities: z.array(z.string()),
-  objections: z.array(z.string()),
-  keywordDnaRefs: z.array(VersionReferenceSchema),
-  evidenceRefs: z.array(ArtifactReferenceSchema),
-  order: z.number().int().nonnegative().optional(),
-  suggestedHeading: z.string().nullable().optional(),
-  decidedHeading: z.string().nullable().optional(),
-  argumentativeFunction: z.string().nullable().optional(),
-  wordRange: z.object({ min: z.number().int().nonnegative().nullable(), ideal: z.number().int().nonnegative().nullable(), max: z.number().int().nonnegative().nullable() }).strict().nullable().optional(),
-  paragraphRange: z.object({ min: z.number().int().nonnegative().nullable(), max: z.number().int().nonnegative().nullable() }).strict().nullable().optional(),
-  estimatedParagraphs: z.number().int().nonnegative().nullable().optional(),
-  excludedTopics: z.array(z.string()).optional(),
-  internalLinks: z.array(z.string()).optional(),
-  externalLinks: z.array(z.string()).optional(),
-  imageId: z.string().nullable().optional(),
-  ctaId: z.string().nullable().optional(),
-  instructions: z.array(z.string()).optional(),
-  restrictions: z.array(z.string()).optional(),
-  alerts: z.array(z.string()).optional(),
-  origin: z.enum(["observed", "planner", "human"]).optional(),
-  humanDecision: z.string().nullable().optional(),
-}).strict();
-export type ContentPlanSection = z.infer<typeof ContentPlanSectionSchema>;
-
-export const ContentPlanAnchorCandidateSchema = z.object({
-  id: z.string().min(1), text: z.string().min(1), reason: z.string().min(1), approved: z.boolean(),
-}).strict();
-
-export const ContentPlanInternalLinkSchema = z.object({
-  id: z.string().min(1), targetArticleId: z.string().min(1), targetSlug: z.string().min(1),
-  reason: z.string().min(1), suggestedPosition: z.string().min(1), candidates: z.array(ContentPlanAnchorCandidateSchema),
-  required: z.boolean(), status: z.enum(["suggested", "approved", "rejected"]), humanApproved: z.boolean(),
-}).strict();
-
-export const ContentPlanSourceSchema = z.object({
-  id: z.string().min(1), claim: z.string().min(1), entity: z.string().min(1),
-  sourceType: z.string().min(1), candidateUrl: z.string().url().nullable(), title: z.string().nullable(),
-  reason: z.string().min(1), evidenceRef: ArtifactReferenceSchema.nullable(), status: z.enum(["suggested", "approved", "rejected", "needs_source"]), humanApproved: z.boolean(),
-}).strict();
-
-export const ContentPlanBriefItemSchema = z.object({
-  id: z.string().min(1), text: z.string().min(1), origin: z.enum(["observed", "planner", "human"]),
-  priority: z.enum(["required", "useful", "optional"]).default("useful"),
-  classification: z.string().nullable().default(null), sectionId: z.string().nullable().default(null),
-  status: z.enum(["pending", "accepted", "rejected", "covered"]).default("pending"), humanDecision: z.string().nullable().default(null),
-}).strict();
-
-export const ContentPlanBlockSchema = z.object({
-  id: z.string().min(1),
-  type: z.enum(["intro", "conclusion", "faq", "table", "comparison", "checklist", "list", "step_by_step", "quote", "alert", "cta", "image", "special"]),
-  sectionId: z.string().nullable().default(null), order: z.number().int().nonnegative().default(0),
-  objective: z.string().min(1), instructions: z.array(z.string()).default([]), origin: z.enum(["observed", "planner", "human"]).default("planner"),
-  humanDecision: z.string().nullable().default(null), alert: z.string().nullable().default(null),
-}).strict();
-
-export const ContentPlanGabaritoSchema = z.object({
-  globalWords: z.object({ min: z.number().int().nonnegative().nullable(), ideal: z.number().int().nonnegative().nullable(), max: z.number().int().nonnegative().nullable() }).strict(),
-  paragraphRange: z.object({ min: z.number().int().nonnegative().nullable(), max: z.number().int().nonnegative().nullable() }).strict(),
-  estimatedParagraphs: z.number().int().nonnegative().nullable(),
-  tone: z.string().nullable(), depth: z.string().nullable(), detail: z.string().nullable(),
-  counts: z.object({ h2: z.number().int().nonnegative(), h3: z.number().int().nonnegative(), intro: z.number().int().nonnegative(), conclusion: z.number().int().nonnegative(), faq: z.number().int().nonnegative(), tables: z.number().int().nonnegative(), comparisons: z.number().int().nonnegative(), checklists: z.number().int().nonnegative(), lists: z.number().int().nonnegative(), quotes: z.number().int().nonnegative(), images: z.number().int().nonnegative(), internalLinks: z.number().int().nonnegative(), externalLinks: z.number().int().nonnegative(), cta: z.number().int().nonnegative(), specialBlocks: z.number().int().nonnegative() }).strict(),
-  alerts: z.array(z.string()).default([]), humanDecision: z.string().nullable().default(null),
-}).strict();
-
-export const ContentPlanImageBriefSchema = z.object({
-  id: z.string().min(1), position: z.string().min(1), objective: z.string().min(1), subject: z.string().min(1),
-  visualFunction: z.string().min(1), requiredElements: z.array(z.string()), avoid: z.array(z.string()),
-  aspectRatio: z.string().min(1), prompt: z.string().nullable(), altText: z.string().nullable(), status: z.enum(["planned", "prompt_ready", "approved", "rejected"]), humanApproved: z.boolean(),
-}).strict();
-
-export const ContentPlanContextSourceSchema = z.object({
-  id: z.string().min(1),
-  brandId: z.string().min(1),
-  sourceType: z.enum(["brand_dna", "legacy_brand", "material", "skill", "prompt"]),
-  versionId: z.string().nullable(),
-  label: z.string().min(1),
-  purpose: z.string().min(1),
-  origin: z.string().min(1),
-  applied: z.boolean(),
-  humanDecision: z.string().nullable(),
-}).strict();
-export type ContentPlanContextSource = z.infer<typeof ContentPlanContextSourceSchema>;
-
-export const ContentPlanKeywordCoverageSchema = z.object({
-  keywordId: z.string().min(1),
-  keywordDnaId: z.string().min(1),
-  role: z.enum(["principal", "secundaria", "reforco_narrativo"]),
-  status: z.enum(["covered", "partial", "unassigned", "outside_boundary", "conflict", "upstream_review"]),
-  sectionIds: z.array(z.string().min(1)),
-  target: z.string().min(1),
-  contributions: z.array(z.string().min(1)),
-  conflicts: z.array(z.string().min(1)),
-  origin: z.enum(["article_dna", "planner_interpretation", "human"]),
-  humanDecision: z.string().nullable(),
-}).strict();
-export type ContentPlanKeywordCoverage = z.infer<typeof ContentPlanKeywordCoverageSchema>;
-
-export const ContentPlanKeywordStrategySchema = z.object({
-  version: z.literal("planner-keyword-strategy-v1"),
-  primary: z.object({
-    keywordId: z.string().min(1), keywordDnaId: z.string().min(1), keywordDnaVersionId: z.string().min(1), text: z.string().nullable(),
-    intent: z.string().min(1), volume: z.number().nonnegative().nullable(), kgrScore: z.number().nonnegative().nullable(), resultCount: z.number().int().nonnegative().nullable(), tailLength: z.number().int().nonnegative().nullable(),
-  }).strict(),
-  secondary: z.array(z.object({
-    keywordId: z.string().min(1), keywordDnaId: z.string().min(1), keywordDnaVersionId: z.string().min(1), role: z.enum(["secundaria", "reforco_narrativo"]), text: z.string().nullable(),
-    intent: z.string().min(1).nullable(), volume: z.number().nonnegative().nullable(), incrementalVolume: z.number().nonnegative().nullable(), contribution: z.string().min(1),
-    rationale: z.string().min(1), conflicts: z.array(z.string().min(1)), origin: z.string().min(1),
-  }).strict()).max(5),
-  keywordCount: z.number().int().min(1).max(MAX_KEYWORDS_PER_ARTICLE),
-  maxKeywords: z.literal(MAX_KEYWORDS_PER_ARTICLE),
-  volume: z.object({
-    principal: z.number().nonnegative().nullable(), secondarySum: z.number().nonnegative().nullable(), combined: z.number().nonnegative().nullable(),
-    knownCount: z.number().int().nonnegative(), totalCount: z.number().int().positive(), coverage: z.enum(["complete", "partial", "unavailable"]),
-    label: z.string().min(1), purpose: z.string().min(1), overlapRisk: z.enum(["low", "medium", "high", "unknown"]),
-  }).strict(),
-  kgr: z.object({
-    status: z.enum(["qualified", "not_qualified", "unknown", "conflict"]), score: z.number().nonnegative().nullable(), resultCount: z.number().int().nonnegative().nullable(),
-    tailLength: z.number().int().nonnegative().nullable(), source: z.string().min(1), boundSlug: z.string().nullable(), keywordDnaVersionId: z.string().min(1),
-  }).strict(),
-  slugCoherence: z.enum(["high", "medium", "low", "protected_published", "unknown"]),
-  hierarchy: z.object({ role: z.enum(["Pilar", "Suporte", "Reforco Narrativo"]), rank: z.number().int().positive().nullable(), status: z.enum(["suggested", "human_confirmed", "conflict"]), rationale: z.array(z.string().min(1)).min(1) }).strict(),
-  compatibility: z.enum(["compatible", "conflict", "unknown"]),
-  overlapRisk: z.enum(["low", "medium", "high", "unknown"]),
-  groupingRationale: z.string().min(1),
-  semanticNarrative: z.array(z.string().min(1)).min(1),
-  coverage: z.array(ContentPlanKeywordCoverageSchema).min(1).max(MAX_KEYWORDS_PER_ARTICLE),
-  publicationProtection: z.object({ isPublished: z.boolean(), protectedFields: z.array(z.enum(["slug", "canonical", "url", "brand", "principal"])) }).strict(),
-  alerts: z.array(z.string().min(1)),
-}).strict();
-export type ContentPlanKeywordStrategy = z.infer<typeof ContentPlanKeywordStrategySchema>;
-
-export const ContentPlanDetailsSchema = z.object({
-  brandId: z.string().min(1),
-  editorialUnitType: EditorialUnitTypeSchema,
-  editorialUnitId: z.string().min(1),
-  articleId: z.string().nullable(),
-  siloPageId: z.string().nullable(),
-  siloId: z.string().nullable(),
-  strategy: z.object({
-    primaryIntent: z.string().min(1), secondaryIntents: z.array(z.string()), intentValidation: z.enum(["pending", "validated", "conflict", "insufficient"]),
-    validationNotes: z.array(z.string()), angle: z.string().min(1), promise: z.string().min(1), differentiation: z.array(z.string()), boundary: z.string().min(1),
-  }).strict(),
-  strategyContext: z.object({
-    sourceRefs: z.array(ContentPlanContextSourceSchema),
-    applied: z.boolean(),
-    appliedAt: z.string().datetime().nullable(),
-    humanDecision: z.string().nullable(),
-    conflicts: z.array(z.string()),
-  }).strict().optional(),
-  keywordStrategy: ContentPlanKeywordStrategySchema.optional(),
-  structure: z.object({ h1: z.string().min(1), sections: z.array(ContentPlanSectionSchema).min(1) }).strict(),
-  internalLinks: z.array(ContentPlanInternalLinkSchema),
-  sources: z.array(ContentPlanSourceSchema),
-  evidenceRefs: z.array(ArtifactReferenceSchema),
-  cta: z.object({ text: z.string().min(1), objective: z.string().min(1), placement: z.string().min(1) }).strict(),
-  images: z.array(ContentPlanImageBriefSchema),
-  skills: z.object({ skillIds: z.array(z.string()), promptIds: z.array(z.string()) }).strict(),
-  metadata: z.object({
-    slug: z.string().min(1), canonical: z.string().url().nullable(), principalKeywordId: z.string().min(1),
-    metaTitle: z.string(), metaDescription: z.string(), socialTitle: z.string(), socialDescription: z.string(), indexationStatus: z.enum(["noindex", "index"]),
-  }).strict(),
-  radar: z.object({
-    researchLoadId: z.string().nullable(),
-    serpSnapshotIds: z.array(z.string()),
-    analysisVersionId: z.string().nullable().default(null),
-    analysisMode: z.enum(["kgr_light", "competitive_full"]).nullable().default(null),
-    analysisEnforcement: z.enum(["advisory", "required"]).nullable().default(null),
-    packageHash: z.string().nullable().default(null),
-    requirements: z.array(z.string()).default([]),
-    recommendations: z.array(z.string()).default([]),
-    observedData: z.array(z.string()).default([]),
-    humanDecisions: z.array(z.string()).default([]),
-    evidencePackage: z.record(z.string(), z.unknown()).nullable().default(null),
-  }).strict(),
-  review: z.object({ workflowStatus: z.string(), publicationStatus: z.string(), transferStatus: z.string(), humanNotes: z.array(z.string()) }).strict(),
-  gabarito: ContentPlanGabaritoSchema.optional(),
-  blocks: z.array(ContentPlanBlockSchema).default([]),
-  questions: z.array(ContentPlanBriefItemSchema).default([]),
-  entities: z.array(ContentPlanBriefItemSchema).default([]),
-  objections: z.array(ContentPlanBriefItemSchema).default([]),
-  guardianInstructions: z.array(z.string()).default([]),
-  alerts: z.array(z.string()).default([]),
-}).strict();
-export type ContentPlanDetails = z.infer<typeof ContentPlanDetailsSchema>;
-
-export const ContentPlanSchema = z.object({
-  schemaVersion: z.union([z.literal(1), z.literal(2)]),
-  planId: z.string().min(1),
-  brandDnaRef: VersionReferenceSchema,
-  keywordDnaRefs: z.array(VersionReferenceSchema).min(1),
-  articleDnaRef: VersionReferenceSchema,
-  siloDnaRef: VersionReferenceSchema,
-  serpEvidenceRefs: z.array(ArtifactReferenceSchema),
-  productEvidenceRefs: z.array(ArtifactReferenceSchema),
-  originalityReportRef: ArtifactReferenceSchema.nullable(),
-  approvedOutline: z.array(z.object({ id: z.string(), heading: z.string(), objective: z.string(), keywordDnaRefs: z.array(VersionReferenceSchema) })).min(1),
-  writingInstructions: z.array(z.string()),
-  humanPendingDecisions: z.array(z.string()),
-  planning: ContentPlanDetailsSchema.optional(),
-}).strict().superRefine((plan, context) => {
-  if (plan.schemaVersion === 2 && !plan.planning) context.addIssue({ code: "custom", path: ["planning"], message: "ContentPlan v2 precisa do bloco editorial definitivo." });
-});
-export type ContentPlan = z.infer<typeof ContentPlanSchema>;
+/*
+ * A família `ContentPlan` saiu com a aposentadoria do Planejador (2026-10-01).
+ * O documento nasce do pacote do Radar (`ContentDocumentV2`).
+ */
 
 export const VersionedBrandDNASchema = versionEnvelopeSchema(BrandDNASchema);
 export const VersionedKeywordDNASchema = versionEnvelopeSchema(KeywordDNASchema);
 export const VersionedArticleDNASchema = versionEnvelopeSchema(ArticleDNASchema);
 export const VersionedSiloDNASchema = versionEnvelopeSchema(SiloDNASchema);
 export const VersionedSiloPageSchema = versionEnvelopeSchema(SiloPageSchema);
-export const VersionedContentPlanSchema = versionEnvelopeSchema(ContentPlanSchema);
 
 export const SerpResultSchema = z.object({
   position: z.number().int().positive(),
@@ -1900,14 +1693,6 @@ const contentDocumentSharedShape = {
   }).default({ slug: "", principalKeyword: "", metaTitle: "", metaDescription: "", socialTitle: "", socialDescription: "", canonical: null, indexationStatus: "noindex", plannedImages: [] }),
 } as const;
 
-/** v1 — nasceu de plano aprovado no Planejador. O plano é obrigatório. */
-export const ContentDocumentV1Schema = z.object({
-  ...contentDocumentSharedShape,
-  schemaVersion: z.literal(1),
-  contentPlanRef: VersionReferenceSchema,
-  writingBrief: z.object({ planVersionId: z.string().min(1), details: ContentPlanDetailsSchema, guardianInstructions: z.array(z.string()), alerts: z.array(z.string()), provenance: ProvenanceSchema }).strict().optional(),
-}).strict();
-export type ContentDocumentV1 = z.infer<typeof ContentDocumentV1Schema>;
 
 /**
  * A PROCEDÊNCIA DO PACOTE DO RADAR.
@@ -1990,11 +1775,12 @@ export const ImportedRadarContextSchema = z.object({
 export type ImportedRadarContext = z.infer<typeof ImportedRadarContextSchema>;
 
 /**
- * v2 — nasceu do pacote canônico do Radar. NÃO tem ContentPlan.
+ * O DOCUMENTO NASCE DO PACOTE CANÔNICO DO RADAR.
  *
- * `.strict()` recusa `contentPlanRef` aqui de propósito: um documento sem
- * plano que carregasse uma referência inventada mentiria para todo consumidor
- * a jusante. Ausência declarada é melhor que id fictício.
+ * `schemaVersion: 2` continua declarado: é o valor gravado em todo documento
+ * existente. O v1 (com `contentPlanRef`) saiu com o Planejador em 2026-10-01 —
+ * o preflight confirmou zero documentos com plano. `.strict()` continua
+ * recusando `contentPlanRef`.
  */
 export const ContentDocumentV2Schema = z.object({
   ...contentDocumentSharedShape,
@@ -2004,36 +1790,17 @@ export const ContentDocumentV2Schema = z.object({
 }).strict();
 export type ContentDocumentV2 = z.infer<typeof ContentDocumentV2Schema>;
 
-/**
- * UNIÃO DISCRIMINADA, e não campo opcional.
- *
- * Tornar `contentPlanRef` opcional deixaria um documento v1 SEM plano passar
- * no schema. O plano é obrigatório na origem Planejador e inexistente na
- * origem Radar; um schema que aceita os dois estados em qualquer origem não
- * descreve nenhuma das duas.
- */
-export const ContentDocumentSchema = z.discriminatedUnion("schemaVersion", [
-  ContentDocumentV1Schema,
-  ContentDocumentV2Schema,
-]);
-
-/** O plano, quando existe. Evita `schemaVersion === 1` espalhado por aí. */
-export const documentContentPlanRef = (document: ContentDocument): VersionReference | null =>
-  document.schemaVersion === 1 ? document.contentPlanRef : null;
+export const ContentDocumentSchema = ContentDocumentV2Schema;
 
 /** Origem Radar, quando for o caso. Guard para o consumidor narrar sozinho. */
 export const isRadarOriginDocument = (document: ContentDocument): document is ContentDocumentV2 =>
   document.schemaVersion === 2;
 
-/** O briefing do plano, quando existe. O v2 não tem — e não finge ter. */
-export const documentWritingBrief = (document: ContentDocument) =>
-  document.schemaVersion === 1 ? document.writingBrief : undefined;
 export type ContentDocument = z.infer<typeof ContentDocumentSchema>;
 
 export const SectionWritingRequestSchema = z.object({
   documentId: z.string(),
   sectionId: z.string(),
-  contentPlanRef: VersionReferenceSchema,
   articleDnaRef: VersionReferenceSchema,
   siloDnaRef: VersionReferenceSchema,
   keywordDnaRefs: z.array(VersionReferenceSchema).min(1),

@@ -3,7 +3,7 @@ import { ConfidenceSchema, VersionReferenceSchema } from "../arquiteto/contracts
 
 export const AIReviewAnnotationSchema = z.object({
   id: z.string().min(1),
-  module: z.enum(["minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes"]),
+  module: z.enum(["minerador", "arquiteto", "radar", "redator", "publicacoes"]),
   entityId: z.string().min(1),
   action: z.string().min(1),
   summary: z.string().min(1),

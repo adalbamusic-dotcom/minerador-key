@@ -5,7 +5,6 @@ export const CONTEXT_HELP_AREAS = [
   "minerador",
   "arquiteto",
   "radar",
-  "planejador",
   "redator",
   "publicacoes",
 ] as const;
@@ -39,7 +38,6 @@ export const CONTEXT_HELP_AREA_LABELS: Record<ContextHelpArea, string> = {
   minerador: "Minerador",
   arquiteto: "Arquiteto",
   radar: "Radar",
-  planejador: "Planejador",
   redator: "Redator",
   publicacoes: "Publicações",
 };

@@ -164,7 +164,7 @@ test("o Radar não emite outline final, meta de H2/H3, palavras ou densidade", (
     "lib/radar/competitive-benchmark.ts",
     "lib/radar/competitor-extractor.ts",
     "lib/radar/evidence-package.ts",
-    "lib/radar/planner-handoff.ts",
+    "lib/radar/handoff-readiness.ts",
     "lib/radar/competitive-report.ts",
   ]) {
     const fonte = readFileSync(arquivo, "utf8");

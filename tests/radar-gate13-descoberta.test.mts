@@ -581,7 +581,7 @@ test("GATE 13 · R — a camada entra no dossiê serializável, amarrada ao fund
   );
 
   /* O Planejador ainda não é ligado: o handoff continua fora deste gate. */
-  assert.equal(/aiDiscovery/.test(readFileSync("lib/radar/planner-handoff.ts", "utf8")), false);
+  assert.equal(/aiDiscovery/.test(readFileSync("lib/radar/handoff-readiness.ts", "utf8")), false);
 });
 
 test("GATE 13 · S — a camada não conhece rede, serviço externo nem nota", () => {

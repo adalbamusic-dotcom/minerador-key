@@ -442,9 +442,9 @@ test("K · o ArticleDNA não é alterado por nada disto", async () => {
     "ARTICLE_DNA_MUTATED = NO",
   );
 
-  /* §9 · o handoff carrega a exigência, e ele não é o ArticleDNA. */
-  const handoff = await readFile(new URL("../lib/radar/planner-handoff.ts", import.meta.url), "utf8");
-  assert.match(handoff, /affiliateDisclosureRequired: boolean;/);
+  /* §9 · o modelo editorial do Radar carrega a exigência, e ele não é o ArticleDNA. */
+  const modelo = await readFile(new URL("../lib/radar/editorial-profile-model.ts", import.meta.url), "utf8");
+  assert.match(modelo, /affiliateDisclosureRequired: boolean;/);
 });
 
 test("§3 · o perfil de VÍDEO não ganha links de prateleira", async () => {

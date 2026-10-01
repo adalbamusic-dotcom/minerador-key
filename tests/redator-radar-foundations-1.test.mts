@@ -404,9 +404,9 @@ test("M2 · sem dossiê, v1 ou dossiê fora do contrato: o mesmo desfecho da lei
   assert.equal(fundamentosPelasConsultasEstreitas(semDossie).cabeca.dossier, null);
 
   const v1 = { schemaVersion: 1, id: "doc-v1", title: "antigo", blocks: [], status: "planejado", ...vinculosV1() };
+  /* O v1 saiu com o Planejador (2026-10-01): a leitura inteira o recusa, a estreita também. */
   const cabecaV1 = writerSeedHeadFromRow(simularPostgrest({ content_hash: "h", payload: v1 }, WRITER_SEED_DOCUMENT_SELECT));
-  assert.equal(cabecaV1?.dossier, null);
-  assert.equal(cabecaV1?.document.schemaVersion, 1);
+  assert.equal(cabecaV1, null);
 
   /* Perfil fora do enum: a leitura inteira recusava pelo schema; a estreita também. */
   const marte = documentoV2({}, { researchProfile: "MARTE" });
@@ -440,12 +440,11 @@ test("M3 · vínculo com DNA ou origem fora do contrato é incompatível, como n
   assert.equal(cabecaDe({ ...valido, contentPlanRef: referencia("plano") }), null, "v2 com plano");
 
   const v1 = { schemaVersion: 1, id: "doc-v1", title: "antigo", blocks: [], status: "planejado", ...vinculosV1() };
-  assert.equal(cabecaDe(v1)?.document.schemaVersion, 1);
+  /* Desde 2026-10-01 todo v1 é recusado, com ou sem plano. */
+  assert.equal(cabecaDe(v1), null, "v1 com plano");
   const v1SemPlano: Record<string, unknown> = { ...v1 };
   delete v1SemPlano.contentPlanRef;
   assert.equal(cabecaDe(v1SemPlano), null, "v1 sem plano");
-  assert.equal(cabecaDe({ ...v1, radarOrigin: origemRadar() }), null, "v1 com origem Radar");
-  assert.equal(cabecaDe({ ...v1, siloDnaRef: null }), null, "v1 com SiloDNA nulo");
 });
 
 test("N · forma das consultas (R16): nada de payload inteiro, bundle só por caminho, fatias pequenas e com identidade", () => {

@@ -43,7 +43,7 @@ const fonteDoPainelAmazon = await readFile(new URL("../modules/radar/radar-amazo
 const fonteDoPainelYoutube = await readFile(new URL("../modules/radar/radar-youtube-search-panel.tsx", import.meta.url), "utf8");
 const fonteDaPagina = await readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8");
 const fonteDoContexto = await readFile(new URL("../components/editorial-pipeline-context.tsx", import.meta.url), "utf8");
-const fonteDoEnvelope = await readFile(new URL("../lib/radar/planner-handoff.ts", import.meta.url), "utf8");
+const fonteDoEnvelope = await readFile(new URL("../lib/radar/handoff-readiness.ts", import.meta.url), "utf8");
 
 /* ============================ a investigação real ============================ */
 
@@ -241,8 +241,8 @@ test("§11 · nenhum caminho morto continua alcançável em runtime", () => {
    * ============ O QUE FOI AUDITADO, UM POR UM ============
    *
    * `importApprovedToPlanner`  REMOVIDO no 1.2 — movia a esteira sem dossiê.
-   * `buildRadarPlannerEvidenceHandoff`  TEST_ONLY — depreciado, sem runtime.
-   * `RadarPlannerHandoffV3`  TEST_ONLY — depreciado, exercitado pelo Gate 16.
+   * `buildRadarPlannerEvidenceHandoff`  REMOVIDO em 2026-10-01 (Planejador aposentado).
+   * `RadarPlannerHandoffV3`  REMOVIDO em 2026-10-01 (Planejador aposentado).
    *
    * Um caminho morto que ainda FUNCIONA é uma arma carregada: alguém o
    * encontraria e voltaria a usá-lo.
@@ -252,9 +252,9 @@ test("§11 · nenhum caminho morto continua alcançável em runtime", () => {
     assert.equal(/buildRadarPlannerEvidenceHandoff/.test(fonte), false, `${nome} monta o envelope depreciado`);
   }
 
-  /* §12 · e o envelope continua marcado, para ninguém o tomar por ativo. */
-  assert.match(fonteDoEnvelope, /@deprecated Use `RadarEvidenceBundle` \(V3\)/);
-  assert.match(fonteDoEnvelope, /@deprecated §6 · Use `sendRadarToPlanner`/);
+  /* §12 · e o envelope saiu do domínio (Planejador aposentado em 2026-10-01): não há o que reativar. */
+  assert.equal(/export function buildRadarPlannerEvidenceHandoff/.test(fonteDoEnvelope), false);
+  assert.equal(/RadarPlannerHandoffV3/.test(semComentarios(fonteDoEnvelope)), false);
 });
 
 /* ===================== §15 · IDs técnicos na visão normal ===================== */

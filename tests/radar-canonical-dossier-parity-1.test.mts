@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { sendRadarToPlanner, type RadarPlannerHandoffPorts } from "../lib/server/radar-planner-send.ts";
 import {
   radarCanonicalEvidenceIndex,
   resolveRadarCanonicalDossier,
@@ -272,65 +271,11 @@ const dossieCanonico = (autoridades: RadarCanonicalAuthorities, perfil: "GOOGLE"
   return resultado.dossier;
 };
 
-/**
- * O ENVIO REAL, CONTRA PORTAS — e o que ele GRAVA fica capturado.
- *
- * O que interessa não é a resposta do serviço: é o `plannerBundle` que ele
- * persiste, porque é ele que o Planejador lê depois.
+/*
+ * O ENVIO AO PLANEJADOR FOI APOSENTADO (2026-10-01). A entrega do dossiê ao
+ * Redator tem os próprios testes (`radar-to-writer-handoff-1`); aqui fica a
+ * paridade entre o dossiê canônico e o export portátil.
  */
-async function enviar(autoridades: RadarCanonicalAuthorities) {
-  const analises = [analiseDoArtigo("YOUTUBE")];
-  const itemRadar = {
-    id: "wf-radar-1", marca_id: "marca-1", article_id: "artigo-1", stage: "radar",
-    state: "approved", lock_version: 1,
-    payload: {
-      title: "Artigo", slug: "artigo", siloId: "silo-1", hierarchy: "pilar",
-      principalKeywordId: "kw-1", format: "artigo", intent: "informacional", unitType: "article",
-      articleDnaVersionId: "dna-v3", articleDnaContentHash: "sha256:abc",
-    },
-    source_version_id: "dna-v3", source_content_hash: "sha256:abc",
-    created_at: "2026-09-01T10:00:00.000Z", updated_at: "2026-09-01T10:00:00.000Z",
-  };
-
-  let gravada: { payload: { plannerBundle: unknown } } | null = null;
-  let destino: typeof itemRadar | null = null;
-  const chamadas: string[] = [];
-
-  const portas: RadarPlannerHandoffPorts = {
-    loadCanonicalAuthorities: async () => { chamadas.push("loadCanonicalAuthorities"); return autoridades; },
-    loadRadarState: async () => {
-      chamadas.push("loadRadarState");
-      return { lockVersion: 1, analyses: (gravada ? [...analises, gravada] : analises) as never };
-    },
-    appendAnalysis: async ({ analysis }) => {
-      chamadas.push("appendAnalysis");
-      gravada = analysis as never;
-    },
-    loadArticleFoundation: async () => FUNDAMENTO,
-    /* O destino nasce ausente e passa a existir depois da importação. */
-    findWorkflowItem: async ({ stage }) => (stage === "radar" ? itemRadar : destino) as never,
-    importPlannerItem: async () => {
-      chamadas.push("importPlannerItem");
-      destino = { ...itemRadar, id: "wf-planner-1", stage: "planner", state: "draft" };
-      return { id: destino.id };
-    },
-    transitionRadar: async () => { chamadas.push("transitionRadar"); },
-    appendDecision: async () => { chamadas.push("appendDecision"); },
-  };
-
-  const resultado = await sendRadarToPlanner(
-    { brandId: "marca-1", articleId: "artigo-1", actorId: "user-1", sentAt: "2026-09-17T12:00:00.000Z" },
-    portas,
-  );
-
-  /*
-   * O campo do bundle é declarado como desconhecido no contrato de propósito: o
-   * registro é o ENVELOPE, e a validação do conteúdo é do V3. Aqui a leitura
-   * é tipada porque o teste sabe o que acabou de mandar gravar.
-   */
-  const plannerBundle = resultado.record as typeof resultado.record & { bundle: RadarEvidenceBundle };
-  return { resultado, chamadas, plannerBundle };
-}
 
 /* ================================ §2 · a auditoria ================================ */
 
@@ -379,7 +324,7 @@ test("§2 · a auditoria: toda autoridade factual nasce no dossiê canônico", a
 
 /* ================================ §3, §4 e §13 ================================ */
 
-test("§13 · o especialista e o vídeo chegam ao dossiê, ao Planejador e ao export", async () => {
+test("§13 · o especialista e o vídeo chegam ao dossiê e ao export", async () => {
   const autoridades = autoridadesCheias();
   const dossie = dossieCanonico(autoridades);
 
@@ -389,12 +334,6 @@ test("§13 · o especialista e o vídeo chegam ao dossiê, ao Planejador e ao ex
   assert.equal(dossie.bundle.specialist!.items[0].originalText, CONTRIBUICAO);
   assert.equal(dossie.bundle.video!.results[0].extracts[0].originalText, TRECHO);
 
-  /* 2 · o que o envio GRAVA — é isto que o Planejador lê depois. */
-  const { plannerBundle } = await enviar(autoridades);
-  assert.ok(plannerBundle.bundle.specialist, "§4 · o Planejador recebeu o dossiê sem especialista");
-  assert.ok(plannerBundle.bundle.video, "§3 · o Planejador recebeu o dossiê sem a biblioteca de vídeos");
-  assert.equal(plannerBundle.bundle.specialist!.items[0].extractedSummary, dossie.bundle.specialist!.items[0].extractedSummary);
-  assert.equal(plannerBundle.bundle.video!.summary.extracts, dossie.bundle.video!.summary.extracts);
 
   /* 3 · e o export DERIVA os dois da mesma camada. */
   const projecaoDoVideo = radarPortableVideoContext(dossie.bundle.video);
@@ -491,11 +430,10 @@ test("§7 · a relação seção → evidência é recuperável do dossiê, não
 
 /* ================================ §15 ================================ */
 
-test("§15 · paridade semântica entre canônico, Planejador e export", async () => {
+test("§15 · paridade semântica entre canônico e export", async () => {
   const autoridades = autoridadesCheias();
   /* A comparação é sobre a MESMA análise: o envio roda sobre o perfil de vídeo. */
   const dossie = dossieCanonico(autoridades, "YOUTUBE");
-  const { plannerBundle } = await enviar(autoridades);
 
   const projecao = buildRadarPortableExportRow({
     profile: dossie.profile,
@@ -522,14 +460,6 @@ test("§15 · paridade semântica entre canônico, Planejador e export", async (
    * contrato. O que precisa coincidir é a EVIDÊNCIA: identidade do fundamento,
    * identidade do dossiê, perfil, limitações e as camadas quando existem.
    */
-  assert.equal(plannerBundle.binding.articleDnaVersionId, dossie.bundle.binding.articleDnaVersionId);
-  assert.equal(plannerBundle.binding.articleDnaContentHash, dossie.bundle.binding.articleDnaContentHash);
-  assert.equal(plannerBundle.bundleId, dossie.bundle.bundleId);
-  assert.equal(plannerBundle.bundleHash, dossie.bundle.bundleHash);
-  assert.equal(plannerBundle.primaryResearchProfile, dossie.profile);
-
-  assert.deepEqual(plannerBundle.bundle.limitations, dossie.bundle.limitations);
-  assert.equal(plannerBundle.bundle.competitiveBlueprint?.articleId, dossie.bundle.competitiveBlueprint?.articleId);
 
   /* O export leva as MESMAS limitações, com a formatação dele. */
   for (const limitacao of dossie.bundle.limitations) {
@@ -537,11 +467,11 @@ test("§15 · paridade semântica entre canônico, Planejador e export", async (
   }
 
   /* E as duas camadas aparecem nos dois lados. */
-  assert.ok(plannerBundle.bundle.video && projecao.video_context_md.includes(TRECHO));
-  assert.ok(plannerBundle.bundle.specialist && projecao.specialist_context_md.includes(CONTRIBUICAO));
+  assert.ok(dossie.bundle.video && projecao.video_context_md.includes(TRECHO));
+  assert.ok(dossie.bundle.specialist && projecao.specialist_context_md.includes(CONTRIBUICAO));
 
-  /* §1 · o Planejador NÃO recebe read model portátil. */
-  const pacote = JSON.stringify(plannerBundle);
+  /* §1 · o dossiê canônico NÃO carrega read model portátil. */
+  const pacote = JSON.stringify(dossie.bundle);
   for (const readModel of ["writer_brief_md", "writer_context_md", "competitive_radiography_md", "# MISSÃO"]) {
     assert.equal(pacote.includes(readModel), false, `§1 · read model portátil no handoff: ${readModel}`);
   }
@@ -561,10 +491,6 @@ test("§14 · artigo sem vídeo e sem especialista continua válido", async () =
   assert.equal(dossie.bundle.video, null);
   assert.equal(dossie.bundle.specialist, null);
 
-  const { plannerBundle } = await enviar(SEM_AUTORIDADES);
-  assert.equal(plannerBundle.bundle.video, null);
-  assert.equal(plannerBundle.bundle.specialist, null);
-
   /* E o export diz isso em voz alta, em vez de deixar a célula vazia. */
   assert.match(radarPortableVideoContext(null).note, /Nenhum vídeo da biblioteca/);
   assert.match(radarPortableSpecialistContext(null).note, /Nenhuma contribuição especializada recebida/);
@@ -579,7 +505,7 @@ test("§10 e §11 · nenhum contrato novo, nenhuma segunda rota de envio", async
   const dossie = dossieCanonico(autoridadesCheias());
   assert.equal(dossie.bundle.bundleVersion, 3);
 
-  const envio = await readFile(new URL("../lib/server/radar-planner-send.ts", import.meta.url), "utf8");
+  const envio = await readFile(new URL("../lib/server/radar-writer-send.ts", import.meta.url), "utf8");
   const semComentarios = envio.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 
   /* §11 · a ordem do envio continua a mesma, com uma leitura a mais no começo. */
@@ -588,20 +514,7 @@ test("§10 e §11 · nenhum contrato novo, nenhuma segunda rota de envio", async
   assert.equal(/RadarEvidenceBundleV4|bundleVersion: 4/.test(semComentarios), false, "§10 · contrato novo");
 
   /* E o envio continua sendo a ÚNICA autoridade de envio. */
-  assert.match(semComentarios, /export async function sendRadarToPlanner/);
-});
-
-test("§11 · a ordem dos passos do envio não mudou", async () => {
-  const { chamadas } = await enviar(autoridadesCheias());
-
-  /*
-   * A LEITURA DAS AUTORIDADES ACONTECE ANTES DA RESOLUÇÃO, e a gravação
-   * continua depois dela. Inverter qualquer um dos dois produziria um dossiê
-   * gravado sem as camadas — que é o defeito que este gate fecha.
-   */
-  assert.ok(chamadas.indexOf("loadCanonicalAuthorities") < chamadas.indexOf("appendAnalysis"));
-  assert.ok(chamadas.indexOf("appendAnalysis") < chamadas.indexOf("transitionRadar"));
-  assert.ok(chamadas.indexOf("transitionRadar") < chamadas.indexOf("appendDecision"));
+  assert.match(semComentarios, /export async function sendRadarToWriter/);
 });
 
 /* ================================ §17 ================================ */

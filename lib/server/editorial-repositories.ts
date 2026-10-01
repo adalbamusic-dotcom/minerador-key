@@ -3,10 +3,10 @@ import { hasInlineAnalysisRun, mergeAnalysisRun, splitAnalysisRun } from "@/lib/
 import { radarGoogleResearchIsFinalized } from "@/lib/radar/google-research-write-lock";
 import { compactRadarResearchForRead } from "@/lib/radar/research-read-model";
 import "server-only";
-import type { ArticleDNA, ContentDocument, ContentPlan, SiloDNA, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts";
-import { VersionedArticleDNASchema, VersionedContentPlanSchema, VersionedSiloDNASchema, VersionStatusEventSchema, ContentDocumentSchema } from "../arquiteto/contracts";
-import type { BrandInvitation, OperationalPublication, PlannerItem, RadarItem } from "../editorial/operational-flow";
-import { BrandInvitationSchema, OperationalPublicationSchema, PlannerItemSchema, RadarItemSchema } from "../editorial/operational-flow";
+import type { ArticleDNA, ContentDocument, SiloDNA, VersionEnvelope, VersionStatusEvent } from "../arquiteto/contracts";
+import { VersionedArticleDNASchema, VersionedSiloDNASchema, VersionStatusEventSchema, ContentDocumentSchema } from "../arquiteto/contracts";
+import type { BrandInvitation, OperationalPublication, RadarItem } from "../editorial/operational-flow";
+import { BrandInvitationSchema, CollaboratorRoleSchema, OperationalPublicationSchema, PermissionModuleSchema, RadarItemSchema } from "../editorial/operational-flow";
 import type { SavedGridView } from "../editorial/data-grid";
 import { SavedGridViewSchema } from "../editorial/data-grid";
 import { firstIssueMessage, rejectedPaths, type IncompatibleRecord } from "../editorial/partial-read.ts";
@@ -66,7 +66,7 @@ function versionPayload<T>(row: RemoteArtifactRow, schema: { safeParse: (value: 
 }
 
 export class ArtifactRepository {
-  async save<T>(marcaId: string, type: "article_dna" | "silo_dna" | "content_plan", version: VersionEnvelope<T>, status: VersionStatusEvent["status"], actorId: string) {
+  async save<T>(marcaId: string, type: "article_dna" | "silo_dna", version: VersionEnvelope<T>, status: VersionStatusEvent["status"], actorId: string) {
     const row = { version_id: version.versionId, entity_id: version.entityId, marca_id: marcaId, artifact_type: type, version_number: version.versionNumber,
       previous_version_id: version.previousVersionId, content_hash: version.contentHash, origin: version.origin, change_reason: version.changeReason,
       status, payload: version, created_by: actorId, created_at: version.createdAt };
@@ -83,9 +83,9 @@ export class ArtifactRepository {
   }
 
   async list(marcaId: string) {
-    const { data, error } = await client().from("editorial_artifact_versions").select("artifact_type,payload,version_id,entity_id,version_number,previous_version_id,content_hash,origin,change_reason,created_by,created_at").eq("marca_id", marcaId).in("artifact_type", ["article_dna", "silo_dna", "content_plan"]);
+    const { data, error } = await client().from("editorial_artifact_versions").select("artifact_type,payload,version_id,entity_id,version_number,previous_version_id,content_hash,origin,change_reason,created_by,created_at").eq("marca_id", marcaId).in("artifact_type", ["article_dna", "silo_dna"]);
     unwrap(data, error);
-    const articles: VersionEnvelope<ArticleDNA>[] = []; const silos: VersionEnvelope<SiloDNA>[] = []; const plans: VersionEnvelope<ContentPlan>[] = [];
+    const articles: VersionEnvelope<ArticleDNA>[] = []; const silos: VersionEnvelope<SiloDNA>[] = [];
     const incompatible: IncompatibleRecord[] = [];
     for (const row of (data || []) as RemoteArtifactRow[]) {
       /*
@@ -95,7 +95,6 @@ export class ArtifactRepository {
        */
       const artefato = row.artifact_type === "article_dna" ? { schema: VersionedArticleDNASchema, destino: articles }
         : row.artifact_type === "silo_dna" ? { schema: VersionedSiloDNASchema, destino: silos }
-        : row.artifact_type === "content_plan" ? { schema: VersionedContentPlanSchema, destino: plans }
         : null;
       if (!artefato) continue;
       const parsedArtifact = artefato.schema.safeParse(versionPayload(row, artefato.schema as never));
@@ -112,8 +111,8 @@ export class ArtifactRepository {
       }
       (artefato.destino as unknown[]).push(parsedArtifact.data);
     }
-    const versionIds = [...articles, ...silos, ...plans].map(version => version.versionId);
-    if (!versionIds.length) return { articles, silos, plans, events: [] as VersionStatusEvent[], incompatible };
+    const versionIds = [...articles, ...silos].map(version => version.versionId);
+    if (!versionIds.length) return { articles, silos, events: [] as VersionStatusEvent[], incompatible };
     const { data: eventRows, error: eventError } = await client().from("editorial_version_status_events").select("id,version_id,status,reason,actor_id,occurred_at").in("version_id", versionIds).order("occurred_at");
     unwrap(eventRows, eventError);
     // Evento inválido não pode derrubar os artefatos que já foram lidos.
@@ -133,11 +132,12 @@ export class ArtifactRepository {
       }
       events.push(parsedEvent.data);
     }
-    return { articles, silos, plans, events, incompatible };
+    return { articles, silos, events, incompatible };
   }
 }
 
-type WorkflowStage = "radar" | "planner";
+/* O estágio `planner` saiu com o Planejador (M1 em 2026-09-18; aposentadoria em 2026-10-01). */
+type WorkflowStage = "radar";
 
 const WORKFLOW_TABELA = "editorial_workflow_items";
 const WORKFLOW_VIEW_LISTAGEM = "editorial_workflow_items_listagem";
@@ -178,7 +178,7 @@ export class WorkflowRepository {
       .from(fonte)
       .select("id,marca_id,article_id,stage,state,payload,lock_version,created_at,updated_at")
       .eq("marca_id", marcaId)
-      .in("stage", ["radar", "planner"]);
+      .eq("stage", "radar");
 
     let { data, error } = await lerDe(fonteDaListagemWorkflow);
     if (error && fonteDaListagemWorkflow !== WORKFLOW_TABELA && viewDeWorkflowAusente(error)) {
@@ -186,12 +186,12 @@ export class WorkflowRepository {
       fonteDaListagemWorkflow = WORKFLOW_TABELA;
       ({ data, error } = await lerDe(WORKFLOW_TABELA));
     }
-    unwrap(data, error); const radar: RadarItem[] = []; const planner: PlannerItem[] = []; const incompatible: IncompatibleRecord[] = [];
+    unwrap(data, error); const radar: RadarItem[] = []; const incompatible: IncompatibleRecord[] = [];
     for (const row of data || []) {
       /*
        * safeParse POR LINHA. Antes, `.parse()` dentro do laço derrubava a
        * consulta inteira por causa de um registro em formato anterior — e
-       * junto iam os artigos bons e os itens do Planejador da mesma marca.
+       * junto iam os artigos bons da mesma marca.
        *
        * O schema NÃO foi afrouxado: o registro incompatível continua fora da
        * lista de itens. Ele passa a ser NOMEADO em vez de sumir.
@@ -235,8 +235,7 @@ export class WorkflowRepository {
         }
         : bruto;
       const base = { ...(payload as object), id: row.id, brandId: row.marca_id, articleId: row.article_id, state: row.state, lockVersion: row.lock_version, importedAt: isoDate(row.created_at), updatedAt: isoDate(row.updated_at), origin: "real" };
-      const schema = row.stage === "radar" ? RadarItemSchema : PlannerItemSchema;
-      const parsed = schema.safeParse(base);
+      const parsed = RadarItemSchema.safeParse(base);
       if (!parsed.success) {
         incompatible.push({
           kind: "workflow_item",
@@ -248,10 +247,9 @@ export class WorkflowRepository {
         });
         continue;
       }
-      if (row.stage === "radar") radar.push(parsed.data as RadarItem);
-      else planner.push(parsed.data as PlannerItem);
+      radar.push(parsed.data as RadarItem);
     }
-    return { radar, planner, incompatible };
+    return { radar, incompatible };
   }
 
   /*
@@ -789,11 +787,11 @@ export class ContentDocumentRepository {
   }
 
   /**
-   * ===== RADAR_TO_WRITER_HANDOFF_1 · O DOCUMENTO PODE NASCER SEM PLANO =====
+   * ===== O DOCUMENTO NASCE DO RADAR =====
    *
-   * `planVersionId` passou a aceitar `null`. A coluna sempre aceitou — o que
-   * exigia plano era esta assinatura, escrita quando o único caminho até o
-   * Redator passava pelo Planejador.
+   * Desde a aposentadoria do Planejador (2026-10-01) não existe plano: a
+   * assinatura não recebe mais `planVersionId` e a linha não cita a coluna
+   * `content_plan_version_id`, que sai na migration F7.
    *
    * O `upsert` com `ignoreDuplicates` continua sendo a idempotência: repetir a
    * entrega do mesmo artigo devolve o documento existente em vez de criar um
@@ -806,7 +804,7 @@ export class ContentDocumentRepository {
     return ContentDocumentSchema.parse(data.payload);
   }
 
-  async create(marcaId: string, document: ContentDocument, articleId: string, planVersionId: string | null, articleVersionId: string, slug: string, hash: string, actorId: string) {
+  async create(marcaId: string, document: ContentDocument, articleId: string, articleVersionId: string, slug: string, hash: string, actorId: string) {
     /*
      * §18 · O ESTADO DA LINHA SEGUE O DO DOCUMENTO.
      *
@@ -816,7 +814,7 @@ export class ContentDocumentRepository {
      * Redator desaparecer do banco no instante em que ela começa.
      */
     const status = document.status === "planejado" ? "planned" : document.status === "em_revisao" ? "in_review" : document.status === "aprovado" ? "approved" : "writing";
-    const { data, error } = await client().from("content_documents").upsert({ id: document.id, marca_id: marcaId, article_id: articleId, content_plan_version_id: planVersionId,
+    const { data, error } = await client().from("content_documents").upsert({ id: document.id, marca_id: marcaId, article_id: articleId,
       article_dna_version_id: articleVersionId, status, title: document.title, slug, payload: document, content_hash: hash, created_by: actorId, updated_by: actorId },
       { onConflict: "marca_id,article_id", ignoreDuplicates: true }).select("*").maybeSingle();
     if (error) mapPersistenceError(error); if (data) return data;
@@ -928,7 +926,7 @@ export class PublicationRepository {
     unwrap(data, error); return (data || []).map(row => OperationalPublicationSchema.parse({ ...(row.payload as object), state: row.status, lockVersion: row.lock_version, updatedAt: isoDate(row.updated_at) }));
   }
   async create(marcaId: string, publication: OperationalPublication, actorId: string) {
-    const { data, error } = await client().from("publication_records").upsert({ marca_id: marcaId, article_id: publication.articleId, content_plan_version_id: publication.contentPlanVersionId,
+    const { data, error } = await client().from("publication_records").upsert({ marca_id: marcaId, article_id: publication.articleId,
       document_id: publication.documentId, status: publication.state, payload: publication, created_by: actorId, updated_by: actorId }, { onConflict: "marca_id,article_id", ignoreDuplicates: true }).select("*").maybeSingle();
     if (error) mapPersistenceError(error); return data;
   }
@@ -946,7 +944,7 @@ export class PublicationRepository {
     const current = await this.find(marcaId, publicationId);
     if (!current) return null;
     if (current.publication.brandId !== publication.brandId || current.publication.articleId !== publication.articleId || current.publication.slug !== publication.slug ||
-      current.publication.documentId !== publication.documentId || current.publication.contentPlanVersionId !== publication.contentPlanVersionId || current.publication.unitType !== publication.unitType ||
+      current.publication.documentId !== publication.documentId || current.publication.unitType !== publication.unitType ||
       (current.publication.state === "published" && current.publication.destinationUrl !== publication.destinationUrl)) {
       throw new PublicationProtectionError("Campos estruturais de uma publicação não podem ser alterados.");
     }
@@ -1021,8 +1019,8 @@ export class InvitationRepository {
   async list(marcaId: string) {
     const { data, error } = await client().from("brand_invitations").select("id,marca_id,email,status,expires_at,created_at,created_by,role_id,brand_roles(slug),brand_invitation_permissions(module,action)").eq("marca_id", marcaId);
     unwrap(data, error); return (data || []).map(row => { const roleRelation = row.brand_roles as unknown as { slug?: string } | null; const permissionsRows = row.brand_invitation_permissions as unknown as Array<{ module: string; action: string }>;
-      const grouped = new Map<string, string[]>(); for (const permission of permissionsRows || []) grouped.set(permission.module, [...(grouped.get(permission.module) || []), permission.action]);
-      return BrandInvitationSchema.parse({ id: row.id, brandId: row.marca_id, email: row.email, role: roleRelation?.slug || "viewer", permissions: [...grouped].map(([module, actions]) => ({ module, actions })), status: row.status,
+      const grouped = new Map<string, string[]>(); for (const permission of (permissionsRows || []).filter(item => PermissionModuleSchema.safeParse(item.module).success)) grouped.set(permission.module, [...(grouped.get(permission.module) || []), permission.action]);
+      return BrandInvitationSchema.parse({ id: row.id, brandId: row.marca_id, email: row.email, role: CollaboratorRoleSchema.safeParse(roleRelation?.slug).success ? roleRelation!.slug : "viewer", permissions: [...grouped].map(([module, actions]) => ({ module, actions })), status: row.status,
         expiresAt: isoDate(row.expires_at), createdAt: isoDate(row.created_at), createdBy: row.created_by, delivery: "not_sent", tokenId: `persisted:${row.id}` }); });
   }
 }

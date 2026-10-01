@@ -15,7 +15,7 @@ import test from "node:test";
  * `supabase-js` real; só o `fetch` global é trocado, e ele recusa rede):
  *
  *   forma       a listagem não pede a coluna `payload` nem o bundle; o v2 com
- *               dossiê volta parcial e MARCADO; v1 e v2 sem dossiê, inteiros;
+ *               dossiê volta parcial e MARCADO; v2 sem dossiê, inteiro;
  *   paridade    listagem + bundle gravado = o documento que a rota devolvia;
  *   salvamento  a cópia parcial NUNCA apaga o bundle: a rota lê o bundle
  *               verbatim da linha e recalcula o hash; lock vencido e pacote
@@ -155,13 +155,13 @@ const pedidosA = (tabela: string, metodo?: string) => pedidos.filter(pedido => p
 
 const { ContentDocumentRepository } = await import("../lib/server/editorial-repositories.ts");
 const { OptimisticLockError } = await import("../lib/server/editorial-db.ts");
-const { ContentDocumentSchema, ContentDocumentV1Schema, ContentDocumentV2Schema, ImportedRadarContextSchema, RadarWriterDossierSchema } = await import("../lib/arquiteto/contracts.ts");
+const { ContentDocumentSchema, ContentDocumentV2Schema, ImportedRadarContextSchema, RadarWriterDossierSchema } = await import("../lib/arquiteto/contracts.ts");
 const { contentHash } = await import("../lib/arquiteto/versioning.ts");
 const listagem = await import("../lib/editorial/content-document-listing.ts");
 const { DocumentSaveInputSchema, LocalWorkflowRecoverySchema, PersistedDocumentSchema, PersistedDocumentDetailSchema } = await import("../lib/editorial/persistence-contracts.ts");
 const { NextRequest } = await import("next/server");
 const rota = await import("../app/api/editorial/documents/route.ts");
-const { bundleDoRadar, documentoV1, documentoV2ComDossie, documentoV2SemDossie, MARCADOR_DO_BUNDLE } = await import("./editorial-documento-e1-fixtures.mts");
+const { bundleDoRadar, documentoV2ComDossie, documentoV2SemDossie, MARCADOR_DO_BUNDLE } = await import("./editorial-documento-e1-fixtures.mts");
 
 /* ======================= fixtures ======================= */
 
@@ -182,7 +182,6 @@ function linha(marca: string, documento: Documento, extra: Partial<Linha> = {}):
 function semear() {
   banco.content_documents = [
     linha(MARCA_A, documentoV2ComDossie("doc-a")),
-    linha(MARCA_A, documentoV1("doc-a-v1")),
     linha(MARCA_A, documentoV2SemDossie("doc-a-sem-dossie")),
     linha(MARCA_B, documentoV2ComDossie("doc-b")),
   ];
@@ -214,11 +213,11 @@ test("01 · a listagem pede campo por caminho: nem a coluna `payload`, nem o bun
   assert.equal(leitura.params.get("marca_id"), `eq.${MARCA_A}`, "R4: a marca filtra na consulta");
 });
 
-test("02 · o v2 com dossiê volta PARCIAL e marcado; v1 e v2 sem dossiê voltam inteiros", async () => {
+test("02 · o v2 com dossiê volta PARCIAL e marcado; o v2 sem dossiê volta inteiro", async () => {
   semear();
   const lista = await new ContentDocumentRepository().list(MARCA_A, ATOR);
   const porId = new Map(lista.map(item => [item.document.id, item.document]));
-  assert.deepEqual([...porId.keys()].sort(), ["doc-a", "doc-a-sem-dossie", "doc-a-v1"]);
+  assert.deepEqual([...porId.keys()].sort(), ["doc-a", "doc-a-sem-dossie"]);
 
   const parcial = porId.get("doc-a")!;
   assert.equal(listagem.isPartialContentDocument(parcial), true);
@@ -228,13 +227,11 @@ test("02 · o v2 com dossiê volta PARCIAL e marcado; v1 e v2 sem dossiê voltam
   assert.equal(JSON.stringify(lista).includes(MARCADOR_DO_BUNDLE), false, "nenhum byte do bundle sai na listagem");
   assert.equal(ContentDocumentSchema.safeParse(parcial).success, false, "a cópia parcial não passa no schema do documento completo");
 
-  for (const id of ["doc-a-v1", "doc-a-sem-dossie"]) {
+  for (const id of ["doc-a-sem-dossie"]) {
     const documento = porId.get(id)!;
     assert.equal(listagem.isPartialContentDocument(documento), false);
     assert.deepEqual(documento, ContentDocumentSchema.parse(linhaDe(id).payload), `${id} sai igual ao parse do payload inteiro`);
   }
-  /* Chave ausente continua ausente: o v1 sem `writingBrief` não ganha um. */
-  assert.equal("writingBrief" in porId.get("doc-a-v1")!, false);
 });
 
 test("03 · PARIDADE: a cópia parcial + o bundle gravado = o documento que a mesa devolvia", async () => {
@@ -274,7 +271,7 @@ test("04 · tamanho: a listagem não cresce com o bundle", async () => {
 
 test("05 · o select deriva do schema: todo campo entra, só o bundle fica de fora", () => {
   const select = listagem.CONTENT_DOCUMENT_LISTING_SELECT;
-  const campos = new Set([...Object.keys(ContentDocumentV1Schema.shape), ...Object.keys(ContentDocumentV2Schema.shape)]);
+  const campos = new Set(Object.keys(ContentDocumentV2Schema.shape));
   for (const campo of campos) {
     if (campo === "importedContext") continue;
     assert.ok(select.includes(`:payload->${campo},`) || select.endsWith(`:payload->${campo}`), `campo do documento fora da listagem: ${campo}`);
@@ -449,7 +446,7 @@ test("17 · a cópia local aceita a forma de listagem e a cópia antiga, com o d
   });
   assert.equal(LocalWorkflowRecoverySchema.safeParse(recuperacao({ [completo.id]: listagem.toListingForm(completo) })).success, true);
   assert.equal(LocalWorkflowRecoverySchema.safeParse(recuperacao({ [completo.id]: completo })).success, true, "cópia gravada antes do E1 continua legível");
-  const formas = listagem.toListingForms({ [completo.id]: completo, v1: ContentDocumentSchema.parse(documentoV1("v1")) });
+  const formas = listagem.toListingForms({ [completo.id]: completo });
   assert.equal(listagem.isPartialContentDocument(formas[completo.id]), true);
   assert.equal(JSON.stringify(formas).includes(MARCADOR_DO_BUNDLE), false, "a cópia local não guarda o bundle");
 });
@@ -560,7 +557,8 @@ test("22 · CUSTO NO BANCO · a projeção tem 29 seletores de caminho; cada um 
    * ser revistos ANTES de aceitar o novo número.
    */
   const seletores = listagem.CONTENT_DOCUMENT_LISTING_SELECT.split(",");
-  assert.equal(seletores.length, 29, `seletores de caminho na listagem: ${seletores.length}`);
+  /* 27 desde 2026-10-01: `contentPlanRef` e `writingBrief` saíram com o documento v1. */
+  assert.equal(seletores.length, 27, `seletores de caminho na listagem: ${seletores.length}`);
   assert.ok(seletores.every(item => /^[a-z]_[A-Za-z]+:payload->/.test(item)), "todo seletor é um caminho dentro de `payload`");
 });
 
@@ -579,7 +577,4 @@ test("23 · o rascunho de recuperação por documento nunca traz o bundle do nav
   outroPacote.importedContext.dossier.bundleHash = "sha256:outro-pacote";
   assert.equal(listagem.recoveryOverServerDocument(servidor, ContentDocumentSchema.parse(outroPacote)), null, "outro pacote: não se aplica");
   assert.equal(listagem.recoveryOverServerDocument(servidor, ContentDocumentSchema.parse(documentoV2ComDossie("outro-doc"))), null, "outro documento: não se aplica");
-  const v1 = ContentDocumentSchema.parse(documentoV1("doc-v1"));
-  const v1Editado = ContentDocumentSchema.parse({ ...v1, title: "v1 editado" });
-  assert.deepEqual(listagem.recoveryOverServerDocument(v1, v1Editado), v1Editado, "v1 (sem pacote): comportamento de antes");
 });

@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { register } from "node:module";
 import { mock, test } from "node:test";
 import { ArticleDNASchema, ProvisionalArticleGroupSchema } from "../lib/arquiteto/contracts.ts";
-import { articleSerpBaseHash, resolveArticleFormationSerpState } from "../lib/arquiteto/article-serp-gate.ts";
-import { resolveKeywordDnaSignals } from "../lib/arquiteto/keyword-dna-signals.ts";
+import { articleSerpBaseHash, articleSerpIntentOf, resolveArticleFormationSerpState } from "../lib/arquiteto/article-serp-gate.ts";
 import { suggestArticleSlug } from "../lib/arquiteto/article-formation.ts";
 import { SERP_SUBJECT_LENS_LABELS } from "../lib/arquiteto/serp-subject-overlap.ts";
 import { linhaDaMesa, declarado } from "./arquiteto-assunto-fixtures.mts";
@@ -27,6 +26,9 @@ let external = false, qualification: string[] = [];
 let disjoint = new Set<string>(), events: string[] = [], incompleteUntilPaid = false;
 // Keywords que o Google separa da principal: a composição com elas diverge (par "nenhuma" nas 4 lentes).
 let diverge = new Set<string>();
+// Volume de outra era (provider antigo): medido de novo no Google Ads no preparo, gravado no "Gravar melhorias".
+let legacyVolumes = new Map<string, number | null>(), legacyAsked: string[] = [], legacyFail = false, measured: string[][] = [];
+let logicRan: string[] = [];
 const discoveredPhrase = "captação de pacientes para clínica de estética";
 const clone = (v: any) => structuredClone(v);
 // Postgres JSONB does not keep key order and drops undefined: the mock behaves the same.
@@ -43,7 +45,7 @@ const runtime: any = { context, authorize: async (module: string, action: string
 mock.module("../lib/server/arquiteto-territory-store.ts", { namedExports: { listTerritoryWorkflowItems: async () => [{territoryRef:territory,territory:{lifecycleStatus:"confirmed",centralEntity:"clínica de estética",macroIntent:"Informativa",slugState:{publishedSlug:"captacao-de-pacientes"}}}] } });
 const workspace = () => ({ workflowItems: [], keywords: clone(rows), articleDnas: clone(articles), siloDnas: [] });
 function setup() {
-  journal=[]; articles=[]; assessments=[]; marker=null; paid=0; plansMissing=0; failReadback=false; failPatch=false; incomplete=false; wrongRole=false; external=false;qualification=[];disjoint=new Set();events=[];incompleteUntilPaid=false;diverge=new Set();
+  journal=[]; articles=[]; assessments=[]; marker=null; paid=0; plansMissing=0; failReadback=false; failPatch=false; incomplete=false; wrongRole=false; external=false;qualification=[];disjoint=new Set();events=[];incompleteUntilPaid=false;diverge=new Set();legacyVolumes=new Map();legacyAsked=[];legacyFail=false;measured=[];logicRan=[];
   rows = [oldId,newId].map((id,i) => ({ id, brand_id: brandId, keyword: i ? "captação de pacientes para clínica de estética" : "como captar clientes para clínica de estética", intent: "Informativa", volume_search: i ? 50 : null, volume_source: i ? "google_ads" : null, analise_semantica: semantic, isPublished: !i, publishedUrl: !i ? url : undefined, primaryKeywordPolicy: !i ? "reviewable" : "free", territoryRef: i ? "territory:other" : territory, keywordDnaRef: { entityId: id, versionId: `${id}:v1`, contentHash: `sha256:${"a".repeat(64)}` }, canonicalWorkflow: { id: `workflow-${id}`, lockVersion: 1, payload: { semanticQualification: { intent: "Informativa", semanticState: "conclusive" }, approvedDna: { analiseSemantica: semantic } } } }));
 }
 mock.module("../lib/arquiteto/canonical-workspace.ts", { namedExports: { buildCanonicalWorkflowWorkspaceItems: (_w: any,k: any) => k } });
@@ -53,7 +55,14 @@ mock.module("../lib/server/arquiteto-differentiation-store.ts", { namedExports: 
   readPublishedFootprints: async (_c: any, queries: any[]) => ({ missingLenses: [], footprints: queries.map(q => ({ ...q, lenses: SERP_SUBJECT_LENS_LABELS.map(lens => ({ lens, urls: (disjoint.has(q.keywordId) ? ["https://outro.org/1","https://outro.org/2","https://outro.org/3","https://outro.org/4"] : ["https://example.org/1","https://example.org/2","https://example.org/3","https://example.org/4"]) })) })) }),
 } });
 mock.module("../lib/server/arquiteto-differentiation-runtime.ts", { namedExports: {
-  readGoogleAdsAverageVolumes: async () => { assert.ok(external);return new Map([[normalizeKeyword(discoveredPhrase),50]]); },
+  readGoogleAdsAverageVolumes: async (input: any) => {
+    if (!external) {
+      legacyAsked.push(...input.keywords);
+      if (legacyFail) throw new Error("Google Ads fora do ar");
+      return new Map(input.keywords.filter((k: string) => legacyVolumes.has(normalizeKeyword(k))).map((k: string) => [normalizeKeyword(k), legacyVolumes.get(normalizeKeyword(k))!]));
+    }
+    return new Map([[normalizeKeyword(discoveredPhrase),50]]);
+  },
   // A IA real nunca é chamada nos testes: a do runtime injetado é simulada.
   proposeArticleImprovementAiPicks: async () => { throw new Error("IA real proibida nos testes"); },
 } });
@@ -99,7 +108,10 @@ mock.module("../lib/minerador/subject-discovery-import.ts", { namedExports: { ..
   rows.push({...clone(rows[0]),id:newId,keyword:input.request.items[0].keyword,isPublished:false,publishedUrl:undefined,volume_search:null,volume_source:null,territoryRef:null,analise_semantica:logic.update.analise_semantica,primaryKeywordPolicy:"free",keywordDnaRef:{entityId:newId,versionId:`${newId}:v1`,contentHash:`sha256:${"c".repeat(64)}`},canonicalWorkflow:{id:`workflow-${newId}`,lockVersion:1,payload:{approvedDna:{analiseSemantica:logic.update.analise_semantica}}}});return {ok:true};
 } } });
 mock.module("../lib/server/minerador-keyword-decision-core.ts", { namedExports: {
-  runKeywordLogicWithCore: async ()=>{assert.ok(external);qualification.push("logic");return {readbackConfirmed:true,missingIds:[]};},
+  runKeywordLogicWithCore: async (input:any)=>{
+    // Membro sem intenção: a Lógica do Minerador (grátis, determinística) preenche a intenção.
+    if (!external) { logicRan.push(...input.keywordIds); for (const id of input.keywordIds) { const row = rows.find(r => r.id === id); row.intent = "Informativa"; row.analise_semantica = { ...row.analise_semantica, intencao_principal: "Informativa" }; } return {readbackConfirmed:true,missingIds:[]}; }
+    qualification.push("logic");return {readbackConfirmed:true,missingIds:[]};},
   readDecisionKeywords: async()=>({rows:[rows[1]],missingCount:0}),keywordDecisionEntries:()=>[{outcome:"applied"}],
   applyKeywordDecisionEntries:async()=>{qualification.push("approve");return[{outcome:"applied"}];},
 } });
@@ -109,11 +121,15 @@ mock.module("../lib/server/google-ads-canonical.ts", { namedExports: {
 } });
 mock.module("../lib/google/ads/keyword-ideas.ts",{namedExports:{generateGoogleAdsKeywordIdeas:async()=>{events.push("busca");return {ideas:[{keyword:discoveredPhrase}],nextPageToken:null};}}});
 mock.module("../lib/server/arquiteto-published-reinforcement.ts", { namedExports: { stableUuid: (...parts: string[]) => parts.includes("improvement") ? "dddddddd-0000-4000-8000-000000000001" : "eeeeeeee-0000-4000-8000-000000000001" } });
+mock.module("../lib/server/minerador-volume-measure.ts", { namedExports: { measureKeywordVolume: async (_c: any, ids: string[]) => {
+  measured.push([...ids]);
+  return { outcomes: ids.map(id => { const row = rows.find(r => r.id === id); const v = legacyVolumes.get(normalizeKeyword(row.keyword)); if (typeof v === "number") { row.volume_search = v; row.volume_source = "google_ads"; } return { keywordId: id, keyword: row.keyword, outcome: typeof v === "number" ? "confirmed" : "failed", volume: v ?? null, reason: typeof v === "number" ? undefined : "Sem medição confirmada." }; }) };
+} } });
 const {handleArticleImprovement,projectImprovementRun}=await import("../lib/server/arquiteto-article-improvement.ts");
 function assertReloadGate(kind:"published"|"subject") {
   const formation=marker.payload.concludedFormations[0];
   const bound=assessments.find(a=>a.candidateRef===formation.candidateRef).payload;
-  const expected=articleSerpBaseHash({territoryRef:territory,principalKeywordId:formation.principalKeywordId,roles:formation.members,suggestedSlug:kind==="published"?null:suggestArticleSlug({principal:rows.find(r=>r.id===formation.principalKeywordId),siloSlug:"captacao-de-pacientes"}),intents:formation.members.map((m:any)=>{const row=rows.find(r=>r.id===m.keywordId);return {keywordId:m.keywordId,intent:resolveKeywordDnaSignals({keywordId:row.id,text:row.keyword,semanticQualification:row.canonicalWorkflow.payload.semanticQualification,semantic:row.canonicalWorkflow.payload.approvedDna.analiseSemantica}).intent};}),siloContext:{centralEntity:"clínica de estética",macroIntent:"Informativa"}});
+  const expected=articleSerpBaseHash({territoryRef:territory,principalKeywordId:formation.principalKeywordId,roles:formation.members,suggestedSlug:kind==="published"?null:suggestArticleSlug({principal:rows.find(r=>r.id===formation.principalKeywordId),siloSlug:"captacao-de-pacientes"}),intents:formation.members.map((m:any)=>{const row=rows.find(r=>r.id===m.keywordId);return {keywordId:m.keywordId,intent:articleSerpIntentOf(row)};}),siloContext:{centralEntity:"clínica de estética",macroIntent:"Informativa"}});
   assert.equal(bound.formationBaseHash,expected);
   const gate=resolveArticleFormationSerpState({candidateRef:formation.candidateRef,expectedBaseHash:expected,observed:{formationBaseHash:bound.formationBaseHash,verdict:bound.verdict,lensesComplete:true,humanDecisionBaseHash:bound.humanResolution.formationBaseHash}});
   assert.notEqual(gate.state,"stale");assert.notEqual(gate.state,"missing");
@@ -382,4 +398,134 @@ test("o Google separa todas as entradas da página: a linha diz 'outro assunto' 
   assert.match(p.reasons.join(" "), /O Google trata “captação de pacientes para clínica de estética” como outro assunto/, JSON.stringify(p.reasons));
   assert.match(p.reasons.join(" "), /Sobras/);
   assert.equal(paid, 0);
+});
+
+test("volume de outra era é medido no Google Ads no preparo e a principal sem volume é trocada; a medição é gravada no Minerador ao gravar (caso real 'tráfego pago vs orgânico', 2026-09-30)", async()=>{
+  setup();
+  rows[1].volume_search = 140; rows[1].volume_source = "previous";
+  legacyVolumes = new Map([[normalizeKeyword(rows[1].keyword), 50]]);
+  const run = await prepare();
+  assert.ok(legacyAsked.includes(rows[1].keyword), "a keyword com volume antigo foi medida");
+  const p = run.proposals[0];
+  assert.equal(p.status, "ready", JSON.stringify(p.reasons));
+  assert.equal(p.principalId, newId, "a principal sem volume dá lugar à medida");
+  assert.ok(run.notices.some((n: string) => /medidas agora no Google Ads \(grátis\): 1 com volume/.test(n)), JSON.stringify(run.notices));
+  assert.equal(rows[1].volume_source, "previous", "o preparo só lê: nada gravado antes do aceite");
+  assert.equal(measured.length, 0);
+  const result = await apply(run);
+  assert.equal(result.outcomes[0].status, "improved", JSON.stringify(result.outcomes));
+  assert.deepEqual(measured, [[newId]], "grava só a medição do que entrou no artigo, pelo núcleo do Medir volume");
+  assert.equal(rows[1].volume_source, "google_ads");
+  const dna = articles[0].payload;
+  assert.equal(dna.principalKeywordId, newId); assert.equal(dna.primaryKeywordMetrics.volumeSearch, 50); assert.equal(dna.canonical, url);
+  assert.equal(paid, 0);
+});
+
+test("volume antigo: Google Ads fora do ar avisa e não inventa volume; já medida no Google Ads não é medida de novo", async()=>{
+  setup();
+  rows[1].volume_search = 140; rows[1].volume_source = "previous"; legacyFail = true;
+  const run = await prepare();
+  assert.notEqual(run.proposals[0].status, "ready");
+  assert.ok(run.notices.some((n: string) => /Não deu para medir no Google Ads o volume antigo/.test(n)));
+  assert.equal(articles.length, 0);
+  setup();
+  rows[0].volume_source = "google_ads";
+  await prepare();
+  assert.ok(!legacyAsked.includes(rows[0].keyword), "medida sem média não volta a ser pedida a cada preparo");
+});
+
+test("keyword 'Bruto' (coluna 'Pendente', análise sem intenção): o parecer gravado pela melhoria tem o MESMO hash que a mesa espera — não nasce desatualizado (caso real 'tráfego pago vs orgânico', 2026-09-30)", async()=>{
+  setup();
+  for (const row of rows) { row.intent = "Pendente"; row.analise_semantica = { ...semantic, intencao_principal: undefined }; }
+  const run = await prepare();
+  assert.equal(run.proposals[0].status, "ready", JSON.stringify(run.proposals[0].reasons));
+  const result = await apply(run);
+  assert.equal(result.outcomes[0].status, "improved", JSON.stringify(result.outcomes));
+  assertReloadGate("published");
+});
+
+test("keyword 'Bruto' sem intenção em lugar nenhum: ao gravar, a Lógica do Minerador (grátis) preenche a intenção antes do DNA — o artigo não nasce 'unknown' (2026-10-01)", async()=>{
+  setup();
+  for (const row of rows) {
+    row.intent = "Pendente"; row.analise_semantica = { ...semantic, intencao_principal: undefined };
+    row.canonicalWorkflow.payload.semanticQualification = { semanticState: "pending" };
+    row.canonicalWorkflow.payload.approvedDna = { analiseSemantica: {} };
+  }
+  const run = await prepare();
+  assert.equal(run.proposals[0].status, "ready", JSON.stringify(run.proposals[0].reasons));
+  const result = await apply(run);
+  assert.equal(result.outcomes[0].status, "improved", JSON.stringify(result.outcomes));
+  assert.deepEqual([...logicRan].sort(), [oldId, newId].sort(), "a Lógica rodou nos membros sem intenção");
+  assert.match(result.outcomes[0].message, /Lógica do Minerador preencheu/);
+  assert.equal(articles[0].payload.mainIntent, "informational");
+  assert.equal(qualification.includes("approve"), false, "nada é aprovado no Minerador");
+  assertReloadGate("published");
+});
+
+test("a sucessora da melhoria leva a classificação e as intenções auxiliares da composição NOVA, não as da anterior (2026-10-01)", async()=>{
+  setup();
+  const run = await prepare();
+  const result = await apply(run);
+  assert.equal(result.outcomes[0].status, "improved", JSON.stringify(result.outcomes));
+  const dna = articles[0].payload;
+  assert.ok(dna.classification, "classificação gravada na sucessora");
+  assert.equal(dna.classification.intent.value, "INFORMATIONAL", JSON.stringify(dna.classification.intent));
+  assert.ok(!dna.auxiliaryIntents.includes("Pendente"));
+});
+
+test("publicado aprovado sem classificação e com intenção 'unknown': a linha 'Atualizar o DNA com a SERP' aparece pronta e grava a decisão da SERP sem mudar a composição (caso real 'tráfego pago vs orgânico', 2026-10-01)", async()=>{
+  setup();
+  // Nada a melhorar na composição: a candidata não tem volume validado.
+  rows[1].volume_source = "previous";
+  const { buildFirstPublishedArticleDna } = await import("../lib/arquiteto/published-reinforcement.ts");
+  const { createVersionEnvelope } = await import("../lib/arquiteto/versioning.ts");
+  const primeiro = buildFirstPublishedArticleDna({ brandId, page: { keywordId: oldId, keyword: rows[0].keyword, url, canonical: url }, territoryRef: territory, keywords: [rows[0]], roles: { [oldId]: "principal" }, siloVersions: [] });
+  assert.ok(primeiro.ok);
+  const assessmentId = `serp-formation:${brandId}:${oldId}:v1`, hashSerp = "serpbase:aaaaaaaaaaaaaaaa";
+  const dnaPayload = { ...primeiro.payload, mainIntent: "unknown", classification: undefined, architectureStatus: "architecture_confirmed", serpAssessmentRef: { entityId: assessmentId, versionId: `${assessmentId}:${hashSerp}`, contentHash: `sha256:${"c".repeat(64)}` } };
+  delete (dnaPayload as any).classification;
+  articles.push(await createVersionEnvelope({ entityId: oldId, versionNumber: 3, origin: "human", changeReason: "fixture", createdBy: actorUserId, payload: dnaPayload as never }));
+  const lentes = { requested: [...SERP_SUBJECT_LENS_LABELS], observed: [...SERP_SUBJECT_LENS_LABELS], missing: [] };
+  assessments.push({ candidateRef: oldId, payload: { formationBaseHash: hashSerp, verdict: "COMPATIBLE", humanResolution: { formationBaseHash: hashSerp }, assessment: { id: assessmentId, contentHash: `sha256:${"c".repeat(64)}`, recommendations: [{ keywordId: oldId, currentRole: "principal" }] }, interpretation: { observedIntent: "informacional", observedFunnel: "topo", intentShares: { informacional: 70, comercial: 20, transacional: 10, lenses: 4, results: 40 }, lenses: lentes } } });
+
+  const run = await prepare();
+  const p = run.proposals[0];
+  assert.equal(p.status, "ready", JSON.stringify(p));
+  assert.ok(p.serpRefresh, "linha de atualização pela SERP");
+  assert.deepEqual(p.addIds, []); assert.deepEqual(p.removeIds, []);
+  assert.match(p.reasons.join(" "), /Atualizar o DNA com a SERP/);
+  assert.ok(run.notices.some((n: string) => /atualizados com a SERP vigente/.test(n)));
+
+  const result = await apply(run);
+  assert.equal(result.outcomes[0].status, "improved", JSON.stringify(result.outcomes));
+  const gravado = articles.at(-1)!;
+  assert.equal(gravado.versionNumber, 4);
+  assert.equal(gravado.payload.mainIntent, "informational");
+  assert.equal(gravado.payload.classification.intent.value, "INFORMATIONAL");
+  assert.equal(gravado.payload.classification.intent.source, "serp");
+  assert.equal(gravado.payload.journeyStage, "Topo de funil (SERP)");
+  assert.deepEqual(gravado.payload.keywordReferences.map((r: any) => r.keywordId), [oldId], "a composição não muda");
+  assert.equal(gravado.payload.canonical, url);
+  assert.ok(marker.payload.concludedFormations.some((f: any) => f.materializedArticleId === oldId), "a formação entra no marcador");
+  assert.equal(paid, 0);
+});
+
+test("keyword que está na formação da mesa do publicado e fora do DNA é do próprio artigo: ao gravar, a que não entra é liberada para 'Keywords não agrupadas', nomeada (caso real 'dentistas', 2026-10-01)", async()=>{
+  setup();
+  const ref = "article-formation:mesa-do-publicado";
+  rows[0].articleFormationRef = ref; rows[0].canonicalWorkflow.payload.articleFormationRef = ref;
+  const sobra = "aaaaaaaa-0000-4000-8000-000000000009";
+  rows.push({ ...clone(rows[0]), id: sobra, keyword: "keyword antiga sem volume validado", isPublished: false, publishedUrl: undefined, primaryKeywordPolicy: "free", volume_search: 30, volume_source: "previous", articleFormationRef: ref, articleFormationDecision: { operation: "move", role: "secundaria", source: "human" }, keywordDnaRef: { entityId: sobra, versionId: `${sobra}:v1`, contentHash: `sha256:${"e".repeat(64)}` }, canonicalWorkflow: { ...clone(rows[0].canonicalWorkflow), id: `workflow-${sobra}`, payload: { ...clone(rows[0].canonicalWorkflow.payload), articleFormationRef: ref, articleFormationDecision: { operation: "move", role: "secundaria", source: "human" } } } });
+  const { buildFirstPublishedArticleDna } = await import("../lib/arquiteto/published-reinforcement.ts");
+  const { createVersionEnvelope } = await import("../lib/arquiteto/versioning.ts");
+  const primeiro = buildFirstPublishedArticleDna({ brandId, page: { keywordId: oldId, keyword: rows[0].keyword, url, canonical: url }, territoryRef: territory, keywords: [rows[0]], roles: { [oldId]: "principal" }, siloVersions: [] });
+  assert.ok(primeiro.ok);
+  articles.push(await createVersionEnvelope({ entityId: oldId, versionNumber: 1, origin: "human", changeReason: "fixture", createdBy: actorUserId, payload: primeiro.payload }));
+  const run = await prepare();
+  assert.equal(run.proposals[0].status, "ready", JSON.stringify(run.proposals[0]));
+  const result = await apply(run);
+  assert.equal(result.outcomes[0].status, "improved", JSON.stringify(result.outcomes));
+  const liberada = rows.find(r => r.id === sobra);
+  assert.equal(liberada.articleFormationRef ?? null, null, "liberada da formação da mesa");
+  assert.match(result.outcomes[0].message, /keyword antiga sem volume validado.*liberada para “Keywords não agrupadas”/);
 });

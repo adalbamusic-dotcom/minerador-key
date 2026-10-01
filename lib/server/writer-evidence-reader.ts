@@ -253,7 +253,7 @@ export async function readWriterEvidenceManifest(context: WriterEvidenceContext,
   } else {
     ausentes.push({
       sourceKey: "radar.bundle", owner: "radar",
-      reason: head.schemaVersion === 1 ? "documento do Planejador (v1): não há dossiê do Radar" : "documento sem dossiê (anterior ao gate): não inferir evidências",
+      reason: "documento sem dossiê (anterior ao gate): não inferir evidências",
     });
   }
 
@@ -614,7 +614,7 @@ export async function readWriterFoundations(context: WriterEvidenceContext, docu
       .map(item => ({ topic: cortar(item.topic, 160), state: texto(item.state), relatedSectionTitle: cortar(item.relatedSectionTitle, 160), extracts: lista(item.extracts).length })),
   } : null;
 
-  if (!head.dossier) ausentes.push({ field: "bundle", reason: head.schemaVersion === 1 ? "documento do Planejador (v1): sem dossiê do Radar" : "documento sem dossiê: não inferir evidências" });
+  if (!head.dossier) ausentes.push({ field: "bundle", reason: "documento sem dossiê: não inferir evidências" });
   else if (head.dossier.researchProfile !== "GOOGLE") ausentes.push({ field: "competitors/questions", reason: `fotografia do Google ausente no perfil ${head.dossier.researchProfile}` });
   if (!projecao) ausentes.push({ field: "article", reason: isLegacyVersionReference(head.refs.articleDnaRef) ? "ArticleDNA com referência legada" : "a versão fixada do ArticleDNA não existe nesta Marca" });
   if (head.dossier && !video) ausentes.push({ field: "video", reason: "o pacote não trouxe evidência audiovisual" });
@@ -1229,7 +1229,7 @@ export async function readWriterSectionMaterial(context: WriterEvidenceContext, 
   const projecao = await readWriterArticleProjection(context, head);
   const linhasDaVirada = projecao?.fields.subject ? await readWriterEditorialContext(context, head) : [];
   const ausentes: WriterSectionMaterial["absent"][number][] = [];
-  if (!head.dossier) ausentes.push({ field: "bundle", reason: head.schemaVersion === 1 ? "documento do Planejador (v1): sem dossiê do Radar" : "documento sem dossiê: não inferir evidências" });
+  if (!head.dossier) ausentes.push({ field: "bundle", reason: "documento sem dossiê: não inferir evidências" });
   else if (head.dossier.researchProfile !== "GOOGLE") ausentes.push({ field: "questions/gaps/entities/claims", reason: `fotografia do Google ausente no perfil ${head.dossier.researchProfile}` });
   if (!projecao) ausentes.push({ field: "article", reason: isLegacyVersionReference(head.refs.articleDnaRef) ? "ArticleDNA com referência legada" : "a versão fixada do ArticleDNA não existe nesta Marca" });
   if (head.dossier && head.dossier.researchProfile === "GOOGLE") {

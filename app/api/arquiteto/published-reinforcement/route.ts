@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
 import { PublishedReinforcementRequestSchema, handlePublishedReinforcement, inProcessRequestHeaders, type PublishedReinforcementDeps } from "@/lib/server/arquiteto-published-reinforcement";
-import { publishedReinforcementReadDeps } from "@/lib/server/arquiteto-published-reinforcement-deps";
+import { publishedReinforcementReadDeps, publishedReinforcementSerpBinding } from "@/lib/server/arquiteto-published-reinforcement-deps";
 import { differentiationErrorResponse } from "@/lib/server/arquiteto-differentiation-http";
 import { appendArquitetoArtifact } from "@/lib/server/arquiteto-persistence";
 import { createMineradorArquitetoHandoff } from "@/lib/server/arquiteto-workspace";
@@ -64,6 +64,8 @@ export async function POST(request: NextRequest) {
         const gravada = await appendArquitetoArtifact(context, "article_dna", version, "approved");
         return { status: gravada.status, versionId: gravada.version.versionId };
       };
+      // O parecer da SERP e a conclusão na formação: o aceite é decisão de aprovar.
+      deps.bindSerpToFormation = publishedReinforcementSerpBinding(context, await resolvePipelineContext({ brandId: body.brandId, module: "arquiteto", action: "approve" }));
     }
     if (aplicar) deps.loadMinerador = async () => {
       // Cada módulo tocado confere a própria permissão, com o mesmo ator.

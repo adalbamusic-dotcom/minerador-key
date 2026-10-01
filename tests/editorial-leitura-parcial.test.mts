@@ -99,17 +99,16 @@ test("06 · o leitor de artefatos e o de eventos têm a mesma proteção", () =>
   assert.ok(!fonte.includes("VersionStatusEventSchema.parse({ eventId"), "evento sem map com parse estrito");
 });
 
-test("07 · um item inválido do Radar não pode ocultar os do Planejador", () => {
-  // Os dois saem do MESMO laço e da mesma consulta. A prova é estrutural: a
-  // recusa da linha precede o preenchimento dos dois estágios.
+test("07 · um item inválido do Radar não oculta os demais", () => {
+  // A prova é estrutural: a recusa da linha precede o preenchimento. O estágio
+  // do Planejador saiu em 2026-10-01; a consulta lê só o Radar.
   const fonte = executable(read(REPOS));
-  const inicio = fonte.indexOf("async list(marcaId: string) {");
-  const corpo = fonte.slice(inicio, fonte.indexOf("async find(id: string)", inicio));
+  const inicio = fonte.indexOf("export class WorkflowRepository");
+  const corpo = fonte.slice(inicio, fonte.indexOf("return { radar, incompatible };", inicio) + 40);
   const guarda = corpo.indexOf("continue;");
   const empurraRadar = corpo.indexOf("radar.push(");
-  const empurraPlanner = corpo.indexOf("planner.push(");
-  assert.ok(guarda > 0 && guarda < empurraRadar && guarda < empurraPlanner);
-  assert.match(corpo, /return \{ radar, planner, incompatible \}/);
+  assert.ok(guarda > 0 && guarda < empurraRadar);
+  assert.match(corpo, /return \{ radar, incompatible \}/);
 });
 
 /* ---- propagação até a tela --------------------------------------------- */

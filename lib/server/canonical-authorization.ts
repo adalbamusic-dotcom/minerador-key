@@ -22,7 +22,7 @@ const ALL_TENANT_PERMISSIONS = TENANT_MODULES.flatMap((module) =>
   ["view", "comment", "create", "edit", "review", "approve", "export", "publish", "manage"].map((action) => `${module}:${action}`),
 );
 const AGENCY_TENANT_MODULES = TENANT_MODULES.filter((module) => module !== "conta");
-const AGENCY_CAPABILITIES = ["brand_data", "brand_collaborators", "brand_dna", "minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes", "activity", "notifications"] as const;
+const AGENCY_CAPABILITIES = ["brand_data", "brand_collaborators", "brand_dna", "minerador", "arquiteto", "radar", "redator", "publicacoes", "activity", "notifications"] as const;
 
 function agencyCapabilityForModule(module: TenantModule) {
   return module === "marca" ? "brand_data" : module;

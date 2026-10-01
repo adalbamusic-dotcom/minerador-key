@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { ContentDocumentSchema } from "../lib/arquiteto/contracts.ts";
-import { createMockPlanAndDocument } from "../lib/editorial/providers.ts";
+import { createMockDocument } from "../lib/editorial/providers.ts";
 import { CAROUSEL_SEED_SYSTEM_PROMPT, SCRIPT_SEED_SYSTEM_PROMPT } from "../lib/redator/deliverable-seed.ts";
 import { guardianDivergenceCategory, runGuardian } from "../lib/redator/guardian.ts";
 import { buildImprovePrompt, buildSectionWritingPrompt, createSectionPromptContext, IMPROVE_SYSTEM_PROMPT, SECTION_WRITING_SYSTEM_PROMPT } from "../lib/redator/prompts.ts";
@@ -279,7 +279,7 @@ const divergencia = (id: string, extra: Linha = {}) => ({
 });
 
 test("Guardião · sem divergência, o relatório é o de antes; com elas, intenção, evidência e canibalização", async () => {
-  const { document } = await createMockPlanAndDocument("brand-1");
+  const { document } = await createMockDocument("brand-1");
   const semDatas = (relatorio: Linha) => ({ ...relatorio, generatedAt: null });
   assert.deepEqual(semDatas(runGuardian(document, "h")), semDatas(runGuardian(document, "h", {})));
   assert.equal("notices" in runGuardian(document, "h", { notices: [] }), false, "aviso só quando há aviso");
@@ -327,7 +327,7 @@ test("instruções · seção e melhoria proíbem FAQ, tratam terceiros como pes
 });
 
 test("instruções · documento do Radar (v2, sem plano) monta o pedido de seção; o pacote vai compacto e a ausência é dita", async () => {
-  const { document } = await createMockPlanAndDocument("brand-1");
+  const { document } = await createMockDocument("brand-1");
   const { contentPlanRef: _plano, writingBrief: _briefing, ...semPlano } = document as Linha;
   void _plano; void _briefing;
   const v2 = ContentDocumentSchema.parse({
@@ -338,7 +338,7 @@ test("instruções · documento do Radar (v2, sem plano) monta o pedido de seç�
   const secao = v2.blocks.find(block => block.type === "heading")!;
   const pacote = buildWriterSectionEvidencePackage(materialGrande(), foco)!;
   const contexto = createSectionPromptContext(v2, secao.id, "", { package: pacote, notice: null });
-  assert.equal(contexto.contentPlanRef, null, "o v2 não tem plano e o pedido não inventa um");
+  assert.equal("contentPlanRef" in contexto, false, "o pedido de seção não carrega plano");
   const prompt = buildSectionWritingPrompt(contexto);
   assert.ok(prompt.includes(JSON.stringify(pacote)), "o pacote vai compacto, como foi medido");
   assert.match(prompt, /Não crie FAQ/);

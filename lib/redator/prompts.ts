@@ -1,4 +1,3 @@
-import { documentContentPlanRef } from "../arquiteto/contracts.ts";
 import type { ContentDocument } from "../arquiteto/contracts.ts";
 import { RedatorPromptContextSchema, type RedatorPromptContext } from "./contracts.ts";
 import { WRITER_EVIDENCE_GUARDS } from "./writer-evidence-catalog.ts";
@@ -27,9 +26,6 @@ export function createSectionPromptContext(document: ContentDocument, sectionId:
     documentId: document.id,
     sectionId,
     sectionLabel,
-    // Documento de origem Radar nao tem plano. O pedido de secao carrega a
-    // ausencia declarada em vez de uma referencia inventada.
-    contentPlanRef: documentContentPlanRef(document),
     articleDnaRef: document.articleDnaRef,
     siloDnaRef: document.siloDnaRef,
     keywordDnaRefs: document.keywordDnaRefs,
@@ -45,7 +41,7 @@ export function createSectionPromptContext(document: ContentDocument, sectionId:
 function contextText(context: RedatorPromptContext) {
   return JSON.stringify({
     section: { id: context.sectionId, label: context.sectionLabel },
-    references: { plan: context.contentPlanRef, article: context.articleDnaRef, silo: context.siloDnaRef, keywords: context.keywordDnaRefs },
+    references: { article: context.articleDnaRef, silo: context.siloDnaRef, keywords: context.keywordDnaRefs },
     instructions: context.instructions.map(item => clamp(item)),
     previousBlocks: context.previousBlocks.map(block => ({ id: block.id, type: block.type, text: "text" in block ? clamp(block.text, 1600) : undefined })),
     pendingItems: context.pendingItems,

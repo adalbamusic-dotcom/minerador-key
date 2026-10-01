@@ -76,7 +76,7 @@ const modeloComercial = (patch: Partial<RadarEditorialProfileModel> = {}): Radar
   evidenceNeeds: [],
   specialistNeeds: [],
   limitations: ["Benefícios e atributos do PDP não foram lidos nesta investigação."],
-  readiness: { state: "READY", label: "Pronto para o Planejador", reasons: [] },
+  readiness: { state: "READY", label: "Pronto para o Redator", reasons: [] },
   promotionLinks: [{
     asin: "B0DBRR5BP4", productName: "NIVEA Q10 Sérum Antissinais Expert Dupla Ação 30ml, Previne e Reduz Rugas",
     amazonUrl: "https://www.amazon.com.br/dp/B0DBRR5BP4",
@@ -178,7 +178,8 @@ test("B, C e R · uma linha por artigo, e o lote não duplica", () => {
 /* ================================ §16 ================================ */
 
 test("§16 · a paridade é estrutural — envio e export usam a mesma resolução", async () => {
-  const envio = await readFile(new URL("../lib/server/radar-planner-send.ts", import.meta.url), "utf8");
+  // Desde 2026-10-01 (Planejador aposentado) o envio do dossiê é o do Redator.
+  const envio = await readFile(new URL("../lib/server/radar-writer-send.ts", import.meta.url), "utf8");
 
   /*
    * Isto é o que torna §16 impossível de quebrar por descuido: não há duas
@@ -197,7 +198,9 @@ test("§16 · a paridade é estrutural — envio e export usam a mesma resoluç�
    * cada chamada — e o mesmo artigo, enviado e exportado, chegaria ao Redator
    * com duas identidades de evidência.
    */
-  assert.match(envio, /resolveRadarCanonicalDossier\(\{ analysis: corrente, article, observedAt: entrada\.sentAt, authorities: autoridades \}\)/);
+  // O instante vem da fotografia congelada ou do envio — nunca de um relógio lido na resolução.
+  assert.match(envio, /const observedAt = radarFrozenObservedAtOfAnalysis\(corrente\.payload\) \?\? entrada\.sentAt;/);
+  assert.match(envio, /resolveRadarCanonicalDossier\(\{ analysis: corrente, article, observedAt, authorities: autoridades \}\)/);
 
   /*
    * PARITY_1 · §2 · E AS AUTORIDADES SÃO AS MESMAS QUE O EXPORT LÊ.

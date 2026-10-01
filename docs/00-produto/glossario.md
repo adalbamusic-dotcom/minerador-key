@@ -5,7 +5,7 @@
 - **ArticleDNA** — identidade editorial de um artigo, com keyword principal, referências e regras.
 - **SiloDNA** — regras e fronteiras de um silo editorial.
 - **SiloPage** — página editorial de um silo; não é SiloDNA.
-- **ContentPlan** — plano editorial versionado que orienta um documento.
+- **ContentPlan** — *aposentado em 2026-10-01*: era o plano editorial do Planejador. O plano agora vive dentro do `ContentDocument`, feito pelo Redator.
 - **ContentDocument** — documento de redação, incluindo conteúdo e proveniência compacta.
 - **Keyword principal** — âncora de busca do artigo: a keyword com demanda que identifica o foco central e é dona do slug, do KGR e do H1. Quando o artigo tem Assunto declarado, a principal continua sendo a âncora; o Assunto não a substitui.
 - **Pilar** — unidade editorial ampla que organiza conteúdos de suporte.
@@ -28,8 +28,8 @@
 
 - **RadarEvidenceBundle** — camada versionada de evidência que o Radar acrescenta ao ArticleDNA aprovado, sem reescrevê-lo.
 - **RadarFrozenEvidenceBundle** — o bundle congelado no `FINALIZE`, amarrado a `articleId`, versão e hash do ArticleDNA.
-- **ArticleWorkingDossier** — leitura conceitual de `ArticleDNA + RadarEvidenceBundle`; é o que o Planejador consome.
-- **PlannerHandoff v3** — envelope de entrega ao Planejador (`RADAR_PLANNER_CONTRACT_VERSION = 3`), que inclui o Blueprint diretamente.
+- **ArticleWorkingDossier** — leitura conceitual de `ArticleDNA + RadarEvidenceBundle`; é o que o Redator consome.
+- **PlannerHandoff v3** — *histórico*: era o envelope de entrega ao Planejador, aposentado em 2026-10-01. A prontidão de entrega do Radar vive em `lib/radar/handoff-readiness.ts`.
 - **modo de pesquisa** — universo competitivo de uma investigação: `Google`, `YouTube` ou `Amazon`. Seleção única, escolhida antes de começar e gravada na investigação. Modo não é área.
 - **área Vídeos** — ingestão deliberada de fontes que o USER escolhe; não há SERP e a fonte não vira concorrente automaticamente. Não confundir com `Pesquisa → YouTube`.
 - **RadarCompetitiveObservedModel** — autoridade única da observação competitiva: amostra, intenção, formatos, estrutura, conceitos, perguntas, entidades, lacunas, diferenciações, conflitos, concorrentes, suficiência e limitações.
@@ -48,7 +48,7 @@
 - **perfil de pesquisa** — o mesmo que "modo de pesquisa" no vocabulário anterior: `Google`, `YouTube` ou `Amazon`. Descreve COMO se investigou, nunca o que será publicado.
 - **saída editorial** — o que se produz a partir do perfil: blueprint editorial e artigo-modelo (Google), blueprint audiovisual e roteiro-modelo (YouTube), blueprint comercial (Amazon). Perfil ≠ saída.
 - **RadarCanonicalAuthorities** — as autoridades do Radar lidas de uma vez: fotografia do pipeline do Google, biblioteca de vídeos casada, contribuições do especialista e contexto de pesquisa.
-- **RadarCanonicalDossier** — o resultado de `resolveRadarCanonicalDossier`. Alimenta o envio ao Planejador e o export portátil com o mesmo conteúdo semântico.
+- **RadarCanonicalDossier** — o resultado de `resolveRadarCanonicalDossier`. Alimenta o envio ao Redator e o export portátil com o mesmo conteúdo semântico.
 - **keywordContext** — principal, secundárias e reforços narrativos. O papel vem do ArticleDNA; o texto, da hidratação amarrada ao mesmo `articleDnaVersionId`. Título, slug e consulta da SERP nunca substituem a keyword.
 - **RadarVideoEvidenceLayer** — a biblioteca de vídeos casada com as pautas, com trecho ancorado no tempo. Não confundir com a SERP de vídeo.
 - **RadarSpecialistEvidenceLayer** — as contribuições com decisão humana ativa, com a necessidade que cada uma responde.
@@ -67,7 +67,7 @@
 - **`RadarWriterDossier`** — a estrutura canônica que viaja DENTRO do documento do Redator: perfil, contexto de keyword, o bundle inteiro e as invariantes. Não é markdown.
 - **`RADAR_WRITER_MAY_NOT`** — o que o Redator não pode redefinir: keyword principal, Silo, cobertura obrigatória, intenção, slug e canonical protegidos, composição de secundárias. Viaja com o pacote.
 - **`RADAR_WRITER_MAY_DECIDE`** — o que ele decide: estrutura final, sequência, evidência por seção, links, mídia, metadados de SEO, CTA e instruções de redação.
-- **fase de planejamento do Redator** — `ContentDocument.status = "planejado"`. A escrita começa em `escrevendo`. `ContentPlan` pode existir aí dentro como artefato interno; ele deixou de ser etapa.
+- **fase de planejamento do Redator** — `ContentDocument.status = "planejado"`. A escrita começa em `escrevendo`. `ContentPlan` não existe mais como artefato.
 - **`sent_writer`** — o estado do item do Radar depois da entrega. `sent_planner` continua legível no enum porque existe no banco; o fluxo novo não o produz.
 - **documento de origem Radar** — `ContentDocumentV2`, nasce sem `ContentPlan`, com `radarOrigin` (identidade e hash do pacote) e `importedContext.dossier` (a estrutura canônica).
 

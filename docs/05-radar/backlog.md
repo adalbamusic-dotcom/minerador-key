@@ -1,5 +1,13 @@
 # Backlog — Radar
 
+## Aposentadoria do Planejador — 2026-10-01
+
+- [x] Prontidão e textos do Relatório apontam para o Redator.
+- [x] Pacote aprovado em `approvedPackage`; campos `planner*` só de leitura.
+- [ ] Trocar a etiqueta `packageType: "radar_planner_handoff"` (dado gravado) na migração de banco.
+- [ ] Remover `buildRadarPlannerPackage` (pacote v1 legado, só usado em testes) na F8.
+- [ ] Homologação manual: aprovar um relatório e conferir `approvedPackage` no readback.
+
 ## Google base e parecer direto do especialista — 2026-09-30
 
 - [x] Parte A: Google base; YouTube e Amazon como acréscimos (tela, rota paga, pacote, CSV status).

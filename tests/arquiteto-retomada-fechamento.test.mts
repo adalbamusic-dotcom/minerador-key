@@ -660,3 +660,14 @@ test("Links internos mostra a barra de progresso com o nome do que está em curs
   const melhoria = readFileSync("modules/arquiteto/article-improvement-panel.tsx", "utf8");
   assert.match(melhoria, /<OperationProgress label=\{ACTIVITY_LABELS\[activity\.action\]\}/);
 });
+
+test("Links segue a seleção, e 'Pronto para Radar' relê a SERP velha antes de recusar", () => {
+  // O Silo do grafo acompanha as linhas marcadas quando são todas de um Silo fechado.
+  assert.match(codigo, /if \(silos\.size !== 1\) return;/);
+  assert.match(codigo, /handleLinksSiloChange\(siloId\);/);
+  const marcar = codigo.slice(codigo.indexOf("const markSelectedReadyForRadar = async (depoisDaSerp = false) => {"));
+  const corpo = marcar.slice(0, marcar.indexOf("\n  const markReadyRef"));
+  assert.match(corpo, /return estado === "stale" \|\| estado === "missing" \|\| estado === "incomplete";/);
+  assert.match(corpo, /await confirmSerpValidationRef\.current\(grupos\);\s*setPendingReadyRetry\(true\);/);
+  assert.match(codigo, /void markReadyRef\.current\(true\);/);
+});

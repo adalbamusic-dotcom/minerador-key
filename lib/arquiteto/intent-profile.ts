@@ -1,20 +1,21 @@
 import type { ArticleKeywordReference, ArchitectKeyword, KeywordDnaProvenanceSnapshot, NormalizedSearchIntent, ArticleIntentProfile, IntentCompatibility } from "./contracts.ts";
 import { ArticleIntentProfileSchema } from "./contracts.ts";
+import { normalizeIntentKey } from "../minerador/intent-taxonomy.ts";
 
 const labelKey = (value: unknown) => typeof value === "string"
   ? value.trim().toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\s-]+/g, "_")
   : "";
 
-/** Normaliza somente a intenção de busca; CTA, hierarquia e formato não entram nesta decisão. */
+/**
+ * Normaliza somente a intenção de busca; CTA, hierarquia e formato não entram nesta decisão.
+ *
+ * UMA TAXONOMIA SÓ: a do Minerador (`normalizeIntentKey`). A lista própria
+ * daqui não conhecia "Informativa" — o rótulo canônico que o Minerador grava
+ * — nem "Comercial investigativa" e "Vendas": o ArticleDNA nascia com
+ * intenção "unknown" em quase todo artigo informativo (achado em 2026-09-30).
+ */
 export function normalizeSearchIntent(value: unknown): NormalizedSearchIntent {
-  const key = labelKey(value);
-  if (["informativo", "informacional", "informational", "informative", "info"].includes(key)) return "informational";
-  if (["comercial", "investigacao_comercial", "investigacao_de_compra", "commercial_investigation", "commercial", "comparacao", "comparativo"].includes(key)) return "commercial_investigation";
-  if (["transacional", "transactional", "compra", "comprar", "venda"].includes(key)) return "transactional";
-  if (["navegacional", "navegacional", "navigational", "navegacao", "marca"].includes(key)) return "navigational";
-  if (["local", "localizada", "local_search"].includes(key)) return "local";
-  if (["misto", "mista", "mixed"].includes(key)) return "mixed";
-  return "unknown";
+  return normalizeIntentKey(value);
 }
 
 export function intentCompatibility(primary: NormalizedSearchIntent, secondary: NormalizedSearchIntent, role: ArticleKeywordReference["role"]): IntentCompatibility {
@@ -27,8 +28,40 @@ export function intentCompatibility(primary: NormalizedSearchIntent, secondary: 
   return role === "secundaria" || role === "reforco_narrativo" ? "adjacent" : "outlier";
 }
 
+/**
+ * O PRIMEIRO RÓTULO QUE É INTENÇÃO DE VERDADE.
+ *
+ * A coluna `intent` do Minerador vem "Pendente" enquanto a revisão não roda;
+ * "Pendente" é texto não vazio, então o `||` parava nele e o ArticleDNA
+ * nascia com intenção "unknown" mesmo quando a análise semântica ou o
+ * KeywordDNA aprovado já diziam "Informativa". Rótulo que não normaliza para
+ * uma intenção conhecida é ausência, não resposta.
+ */
+export function firstKnownIntentLabel(...labels: unknown[]): string | undefined {
+  for (const label of labels) {
+    if (typeof label === "string" && label.trim() && normalizeSearchIntent(label) !== "unknown") return label.trim();
+  }
+  return undefined;
+}
+
+/** Os rótulos de intenção de uma keyword, na ordem de autoridade: KeywordDNA aprovado, análise, coluna. */
+export function keywordIntentLabels(keyword: Pick<ArchitectKeyword, "intent" | "analise_semantica">, snapshot?: KeywordDnaProvenanceSnapshot): unknown[] {
+  const workflow = (keyword as { canonicalWorkflow?: { payload?: Record<string, unknown> } }).canonicalWorkflow?.payload;
+  const qualification = workflow?.semanticQualification as Record<string, unknown> | undefined;
+  const approved = (workflow?.approvedDna as Record<string, unknown> | undefined)?.analiseSemantica as Record<string, unknown> | undefined;
+  return [
+    qualification?.intent,
+    approved?.intencao_principal,
+    keyword.intent,
+    (keyword.analise_semantica as Record<string, unknown> | null | undefined)?.intencao_principal,
+    // O retrato "legacy:" é montado da própria linha e cai em "informational"
+    // quando não há intenção: ler dele seria inventar a resposta.
+    snapshot && !snapshot.versionReference.versionId.startsWith("legacy:") ? snapshot.payload.searchIntent : undefined,
+  ];
+}
+
 function sourceIntent(keyword: ArchitectKeyword, snapshot?: KeywordDnaProvenanceSnapshot) {
-  return normalizeSearchIntent(keyword.intent || (keyword.analise_semantica as Record<string, unknown> | null | undefined)?.intencao_principal || snapshot?.payload.searchIntent);
+  return normalizeSearchIntent(firstKnownIntentLabel(...keywordIntentLabels(keyword, snapshot)));
 }
 
 export function buildArticleIntentProfile(input: {
@@ -38,7 +71,7 @@ export function buildArticleIntentProfile(input: {
 }): ArticleIntentProfile {
   const principalSnapshot = input.principalReference.keywordDnaSnapshot;
   const semantic = input.principal.analise_semantica as Record<string, unknown> | null | undefined;
-  const originalLabel = input.principal.intent || semantic?.intencao_principal;
+  const originalLabel = firstKnownIntentLabel(...keywordIntentLabels(input.principal, principalSnapshot)) ?? (input.principal.intent || semantic?.intencao_principal);
   const primaryIntent = sourceIntent(input.principal, principalSnapshot);
   const architectureConfirmed = input.principal.keywordUrlRelation === "confirmed_primary"
     && input.principal.architectureStatus === "architecture_confirmed";

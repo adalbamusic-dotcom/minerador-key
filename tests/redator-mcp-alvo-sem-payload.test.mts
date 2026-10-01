@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createClient } from "@supabase/supabase-js";
 import { createMcpHandler } from "@modelcontextprotocol/server";
-import { createMockPlanAndDocument } from "../lib/editorial/providers.ts";
+import { createMockDocument } from "../lib/editorial/providers.ts";
 /*
  * Leitor de evidências, Fase 1: o leitor do servidor roda nesta suíte
  * (test:redator:mcp, que resolve `@/` e `server-only`) sem mexer no
@@ -49,7 +49,7 @@ const brandB = "00000000-0000-4000-8000-000000000005";
 const documentA = "writer:doc-marca-a";
 const documentB = "writer:doc-marca-b";
 
-const { document } = await createMockPlanAndDocument(brandA.brandId);
+const { document } = await createMockDocument(brandA.brandId);
 const fullRows: Record<string, Record<string, unknown>> = {
   [documentA]: { id: documentA, marca_id: brandA.brandId, article_id: "article-a", payload: document, content_hash: "hash-a", lock_version: 3, status: "escrevendo", updated_at: "2026-09-23T10:00:00+00:00" },
   [documentB]: { id: documentB, marca_id: brandB, article_id: "article-b", payload: document, content_hash: "hash-b", lock_version: 1, status: "escrevendo", updated_at: "2026-09-23T10:00:00+00:00" },
@@ -321,8 +321,9 @@ test("D4 · documento e briefing leem caminhos numa leitura só, sem o dossiê; 
   const v1 = await callTool("get_writer_document", { documentId: documentA });
   assert.equal(v1.ok, true, JSON.stringify(v1));
   const v1Result = v1.result as { document: Record<string, unknown>; contentHash: string; lockVersion: number };
-  assert.equal(v1Result.document.schemaVersion, 1);
-  assert.deepEqual(v1Result.document.contentPlanRef, document.schemaVersion === 1 ? document.contentPlanRef : null);
+  /* O documento sem dossiê (anterior ao gate) é v2 como todos desde 2026-10-01. */
+  assert.equal(v1Result.document.schemaVersion, 2);
+  assert.deepEqual(v1Result.document.radarOrigin, document.radarOrigin);
   assert.equal(v1Result.document.blocks && (v1Result.document.blocks as unknown[]).length, document.blocks.length);
   assert.equal(v1Result.contentHash, "hash-a");
   assert.equal(v1Result.lockVersion, 3);
@@ -349,7 +350,7 @@ test("D4 · documento e briefing leem caminhos numa leitura só, sem o dossiê; 
   const briefV1 = await callTool("get_writer_brief", { documentId: documentA });
   assert.equal(briefV1.ok, true, JSON.stringify(briefV1));
   assert.equal((briefV1.result as { dossier: unknown }).dossier, null);
-  assert.equal((briefV1.result as { radarOrigin: unknown }).radarOrigin, null);
+  assert.deepEqual((briefV1.result as { radarOrigin: unknown }).radarOrigin, document.radarOrigin);
 });
 
 /* ============================ Fase 0 · leituras estreitas ============================ */
@@ -601,11 +602,11 @@ test("Fase 0 · a semeadura lê só os caminhos dos fundamentos, sempre pela Mar
   assert.ok(lidos < JSON.stringify(payloadV2()).length / 5, `semeadura leu ${lidos} B`);
 });
 
-test("Fase 0 · semeadura: v1 para na primeira consulta; outra Marca é document_not_found", async () => {
+test("Fase 0 · semeadura: documento sem dossiê para na primeira consulta; outra Marca é document_not_found", async () => {
   queries.length = 0;
   const v1 = await writerSeedDocument(brandA.brandId, documentA);
   assert.equal(v1.foundations, null);
-  assert.equal(v1.document.schemaVersion, 1);
+  assert.equal(v1.document.schemaVersion, 2);
   assert.deepEqual(documentSelectsOf(queries), [WRITER_SEED_DOCUMENT_SELECT]);
 
   queries.length = 0;

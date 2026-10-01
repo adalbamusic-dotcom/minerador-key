@@ -186,6 +186,74 @@ export function observedIntentOf(results: readonly SerpResultFact[]): ObservedIn
   return "informacional";
 }
 
+/* ------------- intenção e funil nas QUATRO lentes, com porcentagem ------------- */
+
+export const OBSERVED_FUNNELS = ["topo", "meio", "fundo", "misto", "indefinido"] as const;
+export type ObservedFunnel = (typeof OBSERVED_FUNNELS)[number];
+
+export type SerpIntentReading = {
+  intent: ObservedIntent;
+  funnel: ObservedFunnel;
+  /** Participação de cada intenção nos sinais lidos, em % inteiros (somam ~100). */
+  shares: { informacional: number; comercial: number; transacional: number };
+  /** Quantas lentes trouxeram resultados e quantos resultados foram lidos. */
+  lenses: number;
+  results: number;
+};
+
+const FUNIL_DA_INTENCAO: Record<ObservedIntent, ObservedFunnel> = {
+  informacional: "topo",
+  comercial: "meio",
+  transacional: "fundo",
+  navegacional: "fundo",
+  misto: "misto",
+  indefinido: "indefinido",
+};
+
+/**
+ * A SERP TEM A ÚLTIMA PALAVRA SOBRE INTENÇÃO E FUNIL (dono, 2026-10-01).
+ *
+ * O Minerador entrega um padrão genérico (o do Google Ads). O que decide é o
+ * que os resultados REAIS mostram nas quatro janelas (lentes): cada resultado
+ * de cada lente vota, e a intenção vencedora é a de maior participação —
+ * mesmo baixa, porque é dado real. Empate no topo é "misto"; nenhum sinal é
+ * "indefinido" (e aí falta coleta, não opinião). O funil sai da intenção
+ * observada: informacional → topo, comercial → meio, transacional → fundo.
+ */
+export function serpIntentReadingOf(lenses: readonly { members: readonly { results: readonly SerpResultFact[] }[] }[]): SerpIntentReading {
+  let comercial = 0, transacional = 0, informacional = 0, resultados = 0, lentesComDados = 0;
+  for (const lente of lenses) {
+    const todos = lente.members.flatMap(member => member.results);
+    if (todos.length) lentesComDados += 1;
+    for (const result of todos) {
+      resultados += 1;
+      const texto = `${result.title} ${result.snippet} ${result.url}`.toLowerCase();
+      if (contem(texto, TRANSACIONAL)) transacional += 1;
+      if (contem(texto, COMERCIAL)) comercial += 1;
+      if (contem(texto, INFORMACIONAL)) informacional += 1;
+      if (TIPOS_COMERCIAIS.has(result.inferredType)) comercial += 1;
+      if (TIPOS_TRANSACIONAIS.has(result.inferredType)) transacional += 1;
+      if (TIPOS_INFORMACIONAIS.has(result.inferredType)) informacional += 1;
+    }
+  }
+  const total = comercial + transacional + informacional;
+  const pct = (valor: number) => (total ? Math.round(valor * 100 / total) : 0);
+  const shares = { informacional: pct(informacional), comercial: pct(comercial), transacional: pct(transacional) };
+  const maior = Math.max(comercial, transacional, informacional);
+  const empatados = [comercial, transacional, informacional].filter(valor => valor === maior).length;
+  const intent: ObservedIntent = !maior ? "indefinido"
+    : empatados > 1 ? "misto"
+      : maior === transacional ? "transacional"
+        : maior === comercial ? "comercial"
+          : "informacional";
+  return { intent, funnel: FUNIL_DA_INTENCAO[intent], shares, lenses: lentesComDados, results: resultados };
+}
+
+/** "informacional 62% · comercial 25% · transacional 13% (4 lentes, 40 resultados)". */
+export function describeSerpIntentReading(reading: Pick<SerpIntentReading, "shares" | "lenses" | "results">): string {
+  return `informacional ${reading.shares.informacional}% · comercial ${reading.shares.comercial}% · transacional ${reading.shares.transacional}% (${reading.lenses} lente${reading.lenses === 1 ? "" : "s"}, ${reading.results} resultados)`;
+}
+
 /** O tipo de página que domina os resultados. */
 export function dominantTypeOf(results: readonly SerpResultFact[]): string {
   const contagem = new Map<string, number>();
@@ -641,6 +709,8 @@ export type ArticleSerpLensReading = {
 };
 
 export type ArticleSerpLensesInterpretation = ArticleSerpInterpretation & {
+  /** Intenção e funil lidos nas quatro lentes, com a participação de cada intenção. */
+  intentReading: SerpIntentReading;
   lensReadings: ArticleSerpLensReading[];
   /** Lentes em que a Principal foi observada. */
   observedLenses: string[];
@@ -704,8 +774,12 @@ export function interpretArticleSerpAcrossLenses(input: {
     };
   });
   const observadas = lensReadings.filter(reading => reading.verdict !== null);
+  // A intenção do parecer é a das QUATRO lentes (não só a da principal).
+  const intentReading = serpIntentReadingOf(lentes);
   return {
     ...parecer,
+    observedIntent: intentReading.intent === "indefinido" ? parecer.observedIntent : intentReading.intent,
+    intentReading,
     lensReadings,
     observedLenses: observadas.map(reading => reading.lens),
     agreeingLenses: observadas.filter(reading => reading.verdict === parecer.verdict).length,

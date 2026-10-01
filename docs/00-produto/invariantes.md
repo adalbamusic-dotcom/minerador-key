@@ -65,9 +65,9 @@
   Minerador Key trata processamento pesado, podendo retomar jobs quando voltar
   a estar online. O webhook não executa processamento pesado.
 - O Radar investiga e organiza evidências do ArticleDNA recebido, usando a
-  infraestrutura SERP compartilhada e preparando o `PlannerHandoff v3` para o
-  Planejador. Não forma ArticleDNA, troca principal, altera slug/canonical,
-  modifica SiloDNA nem envia conteúdo diretamente ao Redator.
+  infraestrutura SERP compartilhada e entregando o pacote aprovado ao Redator
+  (o Planejador foi aposentado em 2026-10-01). Não forma ArticleDNA, troca principal, altera slug/canonical,
+  modifica SiloDNA nem escreve o artigo.
 
 ```text
 PLATFORM_INTEGRATION_FOUNDATION = READY
@@ -102,7 +102,7 @@ TELEGRAM_INBOUND_E2E = PENDING
     qualificadas prevalecem sobre recorrência de mercado em matéria de fato, e
     o conflito fica escrito dos dois lados em vez de ser resolvido em silêncio.
 28. Estrutura de links internos é do Arquiteto; aplicação evidencial é do
-    Radar; integração no `ContentPlan` é do Planejador. Relação `REQUIRED` sem
+    Radar; integração no documento é do Redator. Relação `REQUIRED` sem
     contexto sustentado vira
     `applicationStatus = REQUIRED_RELATION_WITHOUT_SUPPORTED_PLACEMENT` com
     `recommendedOccurrences = 0`; zero ocorrências não remove a relação.
@@ -116,9 +116,9 @@ TELEGRAM_INBOUND_E2E = PENDING
     SiloDNA, SiloPage, InternalLinkGraph, o histórico append-only, os vídeos
     deliberadamente registrados e as contribuições reais do especialista.
     `RESET` não inicia pesquisa nova.
-32. O `RadarEditorialBlueprint` é projeção editorial, não `ContentPlan`. Não
+32. O `RadarEditorialBlueprint` é projeção editorial, não plano final. Não
     fixa H2 final, título final, contagem de palavras nem ordem rígida; o
-    `ContentPlan` continua sendo decisão do Planejador.
+    plano final do artigo é decisão do Redator.
 33. O cliente envia `sourceId` e não escolhe URL arbitrária; o servidor resolve
     o id contra o plano e as candidatas persistidas. Duas URLs do mesmo domínio
     são fontes distintas. Falha HTTP legítima vira limitação declarada;
@@ -160,7 +160,7 @@ TELEGRAM_INBOUND_E2E = PENDING
     `writer_brief_md`, `writer_context_md` e `competitive_radiography_md` são
     read models portáteis: não são autoridade factual e não viajam no handoff.
 40. Todo `evidenceRef` usado pelo blueprint final resolve a partir do dossiê
-    ENTREGUE ao Planejador, e não apenas a partir do export.
+    ENTREGUE ao Redator, e não apenas a partir do export.
 41. O papel e a composição das keywords vêm do ArticleDNA
     (`keywordReferences[].role`); o texto vem da hidratação amarrada ao mesmo
     `articleDnaVersionId`. Nunca resolver a keyword principal por título, slug,
@@ -179,7 +179,7 @@ TELEGRAM_INBOUND_E2E = PENDING
 44. `seoTitle`, `metaDescription`, Open Graph, Twitter, `robots` e schema podem
     permanecer não definidos na fase Radar. O Radar exporta direção e
     restrições, com os campos ausentes nomeados, e não inventa decisão do
-    Planejador ou do Redator.
+    Redator.
 45. O plano visual canônico é uma capa e duas ou três imagens de respiro. FAQ
     não faz parte do padrão. Cada imagem declara função, seção e a origem da
     necessidade; sem estrutura editorial não há plano visual.
@@ -198,12 +198,12 @@ Estas regras são canônicas. Uma exceção exige proposta SDD aprovada e atuali
     de prontidão nem parada de navegação, e desde 2026-09-18 está **removido do
     pipeline**: `PLANEJADOR_STAGE = NONE`. Nenhum documento pode descrever
     `Radar → Planejador → Redator` como fluxo vigente, e nenhum caminho de
-    escrita nova pode passar por ele. A rota `/planejador` continua respondendo
-    para leitura do histórico — remoção lógica não é apagar o passado.
+    escrita nova pode passar por ele. Desde 2026-10-01 ele está **aposentado**:
+    sem rota, módulo, artefato nem permissão (SDD `docs/compartilhado/sdd-aposentar-planejador-2026-10-01.md`).
 48. O Redator planeja e escreve. Ele decide estrutura final de H2/H3, sequência
     narrativa, aplicação da evidência por seção, links, mídia, metadados de SEO
-    finais, CTA e instruções de redação, e pode montar um `ContentPlan` interno
-    antes de escrever. `ContentPlan` deixou de ser ETAPA; não deixou de existir.
+    finais, CTA e instruções de redação, e planeja dentro do próprio
+    `ContentDocument`. `ContentPlan` não existe mais como artefato (2026-10-01).
 49. O Redator **não** pode trocar a keyword principal, reconfigurar o Silo,
     remover cobertura obrigatória, alterar a intenção declarada, alterar slug ou
     canonical protegidos, nem substituir a composição de secundárias por decisão
@@ -229,10 +229,10 @@ Estas regras são canônicas. Uma exceção exige proposta SDD aprovada e atuali
     `writer_context_md`, `writer_brief_md` e `competitive_radiography_md`
     continuam sendo read models portáteis do CSV e não substituem o dossiê no
     documento.
-53. `sendRadarToPlanner` é legado: sem rota, sem botão e sem transição. Ele
-    permanece no repositório porque define o que `plannerBundle` e
-    `sent_planner` significam nos registros já gravados. Dados históricos do
-    Planejador são preservados e nenhum artigo é movido automaticamente.
+53. `sendRadarToPlanner` foi apagado com a aposentadoria do Planejador
+    (2026-10-01). Os campos `plannerBundle`/`plannerPackage`/`plannerTransfer` de
+    análises antigas continuam aceitos na leitura e ignorados; o preflight
+    confirmou zero `sent_planner`. Nenhum artigo é movido automaticamente.
 54. A entrega ao Redator não exige migration. `editorial_workflow_items.stage`
     já aceita `writer`, `state` é texto livre e
     `content_documents.content_plan_version_id` é nulável na `0028`, que
@@ -401,3 +401,17 @@ cada módulo está no `estado-atual.md` dele.
     principal, secundária e reforço, e nunca é secundária nem reforço do mesmo
     artigo. Nenhuma keyword declarada Assunto some: sem artigo, ela fica em
     "Keywords não agrupadas".
+
+## Aposentadoria do Planejador — 2026-10-01
+
+84. O Planejador **não existe** como área, etapa, rota, módulo, artefato,
+    permissão nem capability. `ContentPlan` saiu da cadeia canônica:
+    `… → RadarApprovedPackage → ContentDocument → PublicationRecord`. O Redator
+    planeja e escreve. Supera as invariantes 59–64, que descreviam a remoção
+    lógica de 2026-09-18 (rota preservada, vocabulário de leitura preservado).
+85. `/{brandRef}/planejador` redireciona para o Radar; não há página do
+    Planejador. Leitura tolerante só para payload antigo do Radar (campos
+    `planner*` aceitos e ignorados). O preflight de 2026-10-01 confirmou zero
+    linhas de plano, de `planner`, de `sent_planner`, de documentos e
+    publicações com plano, e de permissões do Planejador.
+86. A skill `brand_voice` pertence ao Redator.

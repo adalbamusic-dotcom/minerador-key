@@ -9,7 +9,7 @@ import { buildRadarSerpLensSet, radarSerpMissingLens, radarSerpObservedLens } fr
 import { buildRadarFrozenSerpLensBlock, radarFrozenSerpLensesFromLensSet } from "../lib/radar/serp/frozen-lenses.ts";
 import { buildRadarEvidenceBundleFromAnalysis } from "../lib/radar/evidence-bundle-runtime.ts";
 import type { RadarEvidenceBundle } from "../lib/radar/evidence-bundle.ts";
-import type { RadarPlannerHandoffReadiness } from "../lib/radar/planner-handoff.ts";
+import type { RadarHandoffReadiness } from "../lib/radar/handoff-readiness.ts";
 import type { SerpResearchSnapshot, SerpSearchInput } from "../lib/radar/serp/contracts.ts";
 import {
   RADAR_PORTABLE_FROZEN_LENSES_SINCE,
@@ -554,7 +554,7 @@ test("3 · a SERP congelada só ganha nome quando id E assinatura batem com o bl
 
 /* ============================== 4 · a situação e as limitações ============================== */
 
-const PRONTO: RadarPlannerHandoffReadiness = { ready: true, headline: "Pacote pronto", blocks: [] };
+const PRONTO: RadarHandoffReadiness = { ready: true, headline: "Pacote pronto", blocks: [] };
 
 const situacao = (bundle: RadarEvidenceBundle, analysis: unknown, profile: "GOOGLE" | "YOUTUBE" = "GOOGLE") => radarPortableDossierGapColumns(radarPortableExportDossierGapsInput({
   analysis: analysis as { finalizedBundle?: unknown }, profile, bundle, readiness: PRONTO,

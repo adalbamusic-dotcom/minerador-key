@@ -21,7 +21,6 @@
 
 import { z } from "zod";
 import {
-  ContentDocumentV1Schema,
   ContentDocumentV2Schema,
   ImportedRadarContextSchema,
   RadarWriterDossierSchema,
@@ -95,13 +94,18 @@ const CAMPOS_DA_SEMENTE = ["id", "schemaVersion", "title", "status", "blocks"] a
  * OS VÍNCULOS DO TEXTO COM OS DNAs E A ORIGEM.
  *
  * A semeadura não os usa, mas os valida: são eles que dizem de que BrandDNA,
- * ArticleDNA, SiloDNA, KeywordDNAs e pacote do Radar (v2) ou plano (v1) o
- * documento nasceu. Documento com vínculo fora do contrato não vira contexto
+ * ArticleDNA, SiloDNA, KeywordDNAs e pacote do Radar o documento nasceu (o v1,
+ * com plano, saiu com o Planejador em 2026-10-01). Documento com vínculo fora do contrato não vira contexto
  * de IA, como a leitura inteira recusava. Medido em 2026-09-23 no documento
  * GOOGLE: 2.486 B a mais e ~60 ms a mais de banco na primeira consulta
  * (146 → 208 ms e 125 → 190 ms, médias de 3 execuções, duas ordens).
  * Os outros campos do documento (metadados, refs de SERP e evidência, linkMap,
  * editorContent, o resto do importedContext) não são relidos aqui.
+ */
+/*
+ * `contentPlanRef` entra só como SENTINELA: o documento com plano saiu em
+ * 2026-10-01, e o `.strict()` dos vínculos recusa quem ainda o carregar — o
+ * mesmo desfecho da leitura inteira.
  */
 const CAMPOS_DE_VINCULO = ["brandDnaRef", "keywordDnaRefs", "siloDnaRef", "articleDnaRef", "radarOrigin", "contentPlanRef"] as const;
 /** O dossiê sem o bundle, inteiro: é pequeno e é validado pelo contrato. */
@@ -156,14 +160,12 @@ export const WRITER_SEED_BUNDLE_SELECTS: readonly string[] = Array.from(
 ].join(","));
 
 const WriterSeedDocumentSchema = ContentDocumentV2Schema
-  .pick({ id: true, title: true, status: true, blocks: true })
-  .extend({ schemaVersion: z.union([ContentDocumentV1Schema.shape.schemaVersion, ContentDocumentV2Schema.shape.schemaVersion]) })
+  .pick({ id: true, schemaVersion: true, title: true, status: true, blocks: true })
   .strict();
 export type WriterSeedDocument = z.infer<typeof WriterSeedDocumentSchema>;
 
 const VINCULOS_COMUNS = { brandDnaRef: true, keywordDnaRefs: true, siloDnaRef: true, articleDnaRef: true } as const;
-/** `.strict()`: v2 com plano, ou v1 com origem Radar, falham como no schema do documento inteiro. */
-const WriterSeedLinksV1Schema = ContentDocumentV1Schema.pick({ ...VINCULOS_COMUNS, contentPlanRef: true }).strict();
+/** `.strict()`: vínculo fora do contrato falha como no schema do documento inteiro. */
 const WriterSeedLinksV2Schema = ContentDocumentV2Schema.pick({ ...VINCULOS_COMUNS, radarOrigin: true }).strict();
 
 const WriterSeedDossierHeadSchema = RadarWriterDossierSchema.omit({ bundle: true }).strict();
@@ -171,7 +173,7 @@ export type WriterSeedDossierHead = Omit<RadarWriterDossier, "bundle">;
 
 export type WriterSeedHead = {
   document: WriterSeedDocument;
-  /** `null` quando o documento não veio do Radar com dossiê (v1, ou v2 sem dossiê). */
+  /** `null` quando o documento não tem dossiê (gravado antes do gate). */
   dossier: WriterSeedDossierHead | null;
   contentHash: string;
   /** As linhas do envio (F4.2). `[]` sem dossiê e sem Assunto. */
@@ -189,10 +191,9 @@ export function writerSeedHeadFromRow(linha: Linha): WriterSeedHead | null {
   const documento = WriterSeedDocumentSchema.safeParse(presentes(linha, DOCUMENTO, CAMPOS_DA_SEMENTE));
   if (!documento.success || typeof linha.content_hash !== "string") return null;
   const vinculos = presentes(linha, DOCUMENTO, CAMPOS_DE_VINCULO);
-  const esquemaDosVinculos = documento.data.schemaVersion === 2 ? WriterSeedLinksV2Schema : WriterSeedLinksV1Schema;
-  if (!esquemaDosVinculos.safeParse(vinculos).success) return null;
+  if (!WriterSeedLinksV2Schema.safeParse(vinculos).success) return null;
   const camposDoDossie = presentes(linha, DOSSIE, CAMPOS_DO_DOSSIE);
-  if (documento.data.schemaVersion !== 2 || !Object.keys(camposDoDossie).length) {
+  if (!Object.keys(camposDoDossie).length) {
     return { document: documento.data, dossier: null, contentHash: linha.content_hash, editorialContext: [] };
   }
   const dossie = WriterSeedDossierHeadSchema.safeParse(camposDoDossie);
@@ -248,6 +249,7 @@ export function writerSeedDossierFromRows(head: WriterSeedDossierHead, linhas: r
 const VISAO = "v_";
 const CAMPOS_DA_VISAO = [
   "id", "schemaVersion", "title", "status", "blocks", "metadata",
+  /* `contentPlanRef`: sentinela de recusa, como em CAMPOS_DE_VINCULO. */
   "brandDnaRef", "keywordDnaRefs", "siloDnaRef", "articleDnaRef", "radarOrigin", "contentPlanRef",
 ] as const;
 
@@ -261,17 +263,15 @@ const CAMPOS_COMUNS_DA_VISAO = {
   id: true, schemaVersion: true, title: true, status: true, blocks: true, metadata: true,
   brandDnaRef: true, keywordDnaRefs: true, siloDnaRef: true, articleDnaRef: true,
 } as const;
-/** `.strict()`: v2 com plano, ou v1 com origem Radar, é documento fora do contrato — como no schema inteiro. */
-const WriterDocumentViewV1Schema = ContentDocumentV1Schema.pick({ ...CAMPOS_COMUNS_DA_VISAO, contentPlanRef: true }).strict();
+/** `.strict()`: documento fora do contrato — como no schema inteiro. */
 const WriterDocumentViewV2Schema = ContentDocumentV2Schema.pick({ ...CAMPOS_COMUNS_DA_VISAO, radarOrigin: true }).strict();
-export type WriterDocumentView = z.infer<typeof WriterDocumentViewV1Schema> | z.infer<typeof WriterDocumentViewV2Schema>;
+export type WriterDocumentView = z.infer<typeof WriterDocumentViewV2Schema>;
 
 /** `null` = fora do contrato do dono; o MCP responde `document_incompatible`. */
 export function writerDocumentViewFromRow(linha: Linha): WriterDocumentView | null {
   const campos = presentes(linha, VISAO, CAMPOS_DA_VISAO);
-  const esquema = campos.schemaVersion === 1 ? WriterDocumentViewV1Schema : campos.schemaVersion === 2 ? WriterDocumentViewV2Schema : null;
-  if (!esquema) return null;
-  const lido = esquema.safeParse(campos);
+  if (campos.schemaVersion !== 2) return null;
+  const lido = WriterDocumentViewV2Schema.safeParse(campos);
   return lido.success ? lido.data : null;
 }
 
@@ -300,39 +300,38 @@ export const WRITER_BRIEF_SELECT = [
 const CAMPOS_COMUNS_DO_BRIEFING = {
   articleDnaRef: true, keywordDnaRefs: true, siloDnaRef: true, instructions: true, linkMap: true, sourceIds: true, evidenceRefs: true,
 } as const;
-const WriterBriefV1Schema = ContentDocumentV1Schema.pick(CAMPOS_COMUNS_DO_BRIEFING).strict();
 const WriterBriefV2Schema = ContentDocumentV2Schema.pick({ ...CAMPOS_COMUNS_DO_BRIEFING, radarOrigin: true }).strict();
 const PendenciasDoBriefingSchema = ImportedRadarContextSchema.shape.pendingDecisions;
 const ContextoEditorialDoBriefingSchema = ImportedRadarContextSchema.shape.editorialContext;
 const CabecalhoDoDossieSchema = RadarWriterDossierSchema.omit({ bundle: true }).strict();
 
 export type WriterBriefView = {
-  schemaVersion: 1 | 2;
-  fields: z.infer<typeof WriterBriefV1Schema> & { radarOrigin?: z.infer<typeof WriterBriefV2Schema>["radarOrigin"] };
+  schemaVersion: 2;
+  fields: z.infer<typeof WriterBriefV2Schema>;
   pendingDecisions: z.infer<typeof PendenciasDoBriefingSchema>;
-  /** As linhas do envio (F4.1). `[]` na v1 e sem Assunto. */
+  /** As linhas do envio (F4.1). `[]` sem Assunto. */
   editorialContext: z.infer<typeof ContextoEditorialDoBriefingSchema>;
-  /** `null`: v1, ou v2 sem dossiê (anterior ao gate). */
+  /** `null`: documento sem dossiê (anterior ao gate). */
   dossier: z.infer<typeof CabecalhoDoDossieSchema> | null;
 };
 
 /** `null` = fora do contrato do dono. Dossiê com campo faltando é incompatível; sem nenhum campo, ausente. */
 export function writerBriefFromRow(linha: Linha): WriterBriefView | null {
   const versao = linha[`${BRIEFING}schemaVersion`];
-  if (versao !== 1 && versao !== 2) return null;
+  if (versao !== 2) return null;
   const campos = presentes(linha, BRIEFING, CAMPOS_DO_BRIEFING.filter(campo => campo !== "schemaVersion"));
-  const lido = (versao === 2 ? WriterBriefV2Schema : WriterBriefV1Schema).safeParse(campos);
+  const lido = WriterBriefV2Schema.safeParse(campos);
   if (!lido.success) return null;
-  const pendencias = versao === 2 ? PendenciasDoBriefingSchema.safeParse(linha[`${BRIEFING}pendingDecisions`] ?? undefined) : null;
-  if (pendencias && !pendencias.success) return null;
-  const contextoEditorial = versao === 2 ? ContextoEditorialDoBriefingSchema.safeParse(linha[`${BRIEFING}editorialContext`] ?? undefined) : null;
-  if (contextoEditorial && !contextoEditorial.success) return null;
+  const pendencias = PendenciasDoBriefingSchema.safeParse(linha[`${BRIEFING}pendingDecisions`] ?? undefined);
+  if (!pendencias.success) return null;
+  const contextoEditorial = ContextoEditorialDoBriefingSchema.safeParse(linha[`${BRIEFING}editorialContext`] ?? undefined);
+  if (!contextoEditorial.success) return null;
   const cabecalho = presentes(linha, DOSSIE, CABECALHO_DO_DOSSIE);
   let dossier: WriterBriefView["dossier"] = null;
-  if (versao === 2 && Object.keys(cabecalho).length) {
+  if (Object.keys(cabecalho).length) {
     const dossie = CabecalhoDoDossieSchema.safeParse(cabecalho);
     if (!dossie.success) return null;
     dossier = dossie.data;
   }
-  return { schemaVersion: versao, fields: lido.data, pendingDecisions: pendencias?.data ?? [], editorialContext: contextoEditorial?.data ?? [], dossier };
+  return { schemaVersion: 2, fields: lido.data, pendingDecisions: pendencias.data, editorialContext: contextoEditorial.data, dossier };
 }

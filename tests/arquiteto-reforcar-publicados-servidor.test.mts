@@ -733,3 +733,30 @@ test("Corretor: troca sem o parecer da composição — a mesa grava a troca com
   assert.equal(semTroca.status, "refused");
   assert.match(semTroca.refusal, /como principal, por decisão sua: confirme a composição na mesa antes/);
 });
+
+test("aplicar liga o parecer da SERP à formação gravada e conclui a formação — sem isso a ficha dizia 'Não executada' (2026-10-01)", async () => {
+  const { mesa, deps, pareceres } = montar();
+  pareceres[0].composition = { keywordIds: [K_PUB, K_A, K_B], principalKeywordId: K_PUB };
+  const vinculos: Array<Record<string, unknown>> = [];
+  const comVinculo = () => deps({ bindSerpToFormation: async input => { vinculos.push(structuredClone(input) as never); } });
+  const previa = dados(await handlePublishedReinforcement(comVinculo(), pedido()));
+  const certo = await handlePublishedReinforcement(comVinculo(), pedido({ mode: "apply", decisionHash: previa.decisionHash, operationRequestId: "44444444-4444-4444-8444-444444444444" }));
+  assert.equal(certo.status, 200, JSON.stringify(certo.body));
+  assert.equal(vinculos.length, 1, "um vínculo por artigo gravado");
+  const [vinculo] = vinculos as Array<{ sourceVersionId: string; formationRef: string; territoryRef: string; principalKeywordId: string; members: Array<{ keywordId: string; role: string }>; articleId: string }>;
+  const ref = mesa.itens.find(entrada => entrada.subjectId === K_PUB)!.payload.articleFormationRef;
+  assert.equal(vinculo.formationRef, ref, "a ref da formação da mesa, a que a tela procura");
+  assert.equal(vinculo.sourceVersionId, "assessment-pub:base-1", "o parecer que a aprovação usou");
+  assert.equal(vinculo.territoryRef, TERRITORIO);
+  assert.equal(vinculo.principalKeywordId, K_PUB);
+  assert.deepEqual(vinculo.members.map(membro => membro.keywordId).sort(), [K_PUB, K_A, K_B].sort());
+  assert.equal(vinculo.articleId, K_PUB);
+
+  // Falha no vínculo: o DNA fica gravado, e a pessoa é avisada para gravar de novo.
+  const outro = montar();
+  outro.pareceres[0].composition = { keywordIds: [K_PUB, K_A, K_B], principalKeywordId: K_PUB };
+  const falha = () => outro.deps({ bindSerpToFormation: async () => { throw new Error("releitura vazia"); } });
+  const previa2 = dados(await handlePublishedReinforcement(falha(), pedido()));
+  const saida = await handlePublishedReinforcement(falha(), pedido({ mode: "apply", decisionHash: previa2.decisionHash, operationRequestId: "55555555-5555-4555-8555-555555555555" }));
+  assert.match(JSON.stringify(saida.body), /parecer da SERP não foi ligado à formação/);
+});

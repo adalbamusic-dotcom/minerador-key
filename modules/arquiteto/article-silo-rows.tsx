@@ -100,7 +100,7 @@ export function ArticleSiloPageRow({
         </td>
         <td className="border-r border-divider/60 px-3 py-2 align-top">
           <span className="text-sm font-semibold text-foreground">{view.siloLabel}</span>
-          <span className="mt-0.5 block truncate font-mono text-sm text-text-muted" title={view.siloSlug || undefined}>
+          <span className={`mt-0.5 block font-mono text-sm ${view.siloSlug ? "text-identity-slug" : "text-text-muted"}`} title={view.siloSlug || undefined}>
             {view.siloSlug || "página ainda não definida"}
           </span>
         </td>

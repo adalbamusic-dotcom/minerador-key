@@ -1,6 +1,6 @@
 import { ArticleDNASchema, PrimaryKeywordPolicyContextSchema, type ArticleDNA, type VersionEnvelope } from "./contracts.ts";
 import { createVersionEnvelope } from "./versioning.ts";
-import { resolveArticleSerpStrategy, resolveEditorialUnitPurpose } from "./unit-strategy.ts";
+import { editorialUnitTypeIsDerived, resolveArticleSerpStrategy, resolveEditorialUnitPurpose } from "./unit-strategy.ts";
 import { normalizeSearchIntent } from "./intent-profile.ts";
 
 /**
@@ -32,16 +32,37 @@ export function confirmedArticlePayload(
   const kgrPrincipalMatches = !currentKgr?.principalKeywordDnaId || [selected.keywordId, selectedKeywordDnaId, selected.keywordDnaVersionId].includes(currentKgr.principalKeywordDnaId);
   const kgrSlugMatches = !currentKgr?.boundSlug || currentKgr.boundSlug === current.suggestedSlug;
   const canConfirmKgr = Boolean(currentKgr?.isKgrArticle && currentKgr.bindingStatus === "candidate" && kgrPrincipalMatches && kgrSlugMatches);
-  const kgrConflict = Boolean(currentKgr?.isKgrArticle && currentKgr.bindingStatus === "candidate" && !canConfirmKgr);
+  /*
+   * A CONCLUSÃO HUMANA RESOLVE O VÍNCULO KGR, NÃO O DEIXA PENDENTE.
+   *
+   * Antes, principal ou slug diferentes do par KGR candidato viravam
+   * "conflict" + "Resolver a divergência do vínculo KGR…" em
+   * `humanPendingDecisions` — uma pendência que nenhum botão resolvia e que o
+   * índice canônico do servidor recusa no "Pronto para Radar". O par candidato
+   * é sugestão do Minerador; quem concluiu escolheu outra principal ou outro
+   * slug, e isso É a decisão: o artigo deixa de ser KGR daquele par, com o par
+   * anterior guardado em `humanDecision` (nada some, nada fica pendente).
+   */
+  const kgrDesvinculado = Boolean(currentKgr?.isKgrArticle && !canConfirmKgr
+    && (currentKgr.bindingStatus === "candidate" || currentKgr.bindingStatus === "conflict"));
   const nextKgrIdentity = currentKgr
     ? {
       ...currentKgr,
       primaryKeywordId: principalKeywordId,
       principalKeywordDnaId: currentKgr.principalKeywordDnaId || selectedKeywordDnaId,
       ...(canConfirmKgr ? { bindingStatus: "confirmed" as const, status: "confirmed" as const, source: "human_confirmation" as const, boundSlug: current.suggestedSlug, confirmedAt: now, confirmedBy: actorId, purpose: "Par principal–slug confirmado por decisão arquitetural humana." } : {}),
-      ...(kgrConflict ? { bindingStatus: "conflict" as const, status: "conflict" as const } : {}),
+      ...(kgrDesvinculado ? {
+        isKgrArticle: false, bindingStatus: "not_applicable" as const, status: "not_kgr" as const, source: "human_confirmation" as const,
+        principalKeywordDnaId: selectedKeywordDnaId, boundSlug: undefined, confirmedAt: now, confirmedBy: actorId,
+        purpose: "A conclusão humana fixou principal e slug fora do par KGR candidato; o artigo segue sem vínculo KGR.",
+        humanDecision: { decision: "kgr_not_applicable", previousBindingStatus: currentKgr!.bindingStatus, previousPrincipalKeywordDnaId: currentKgr!.principalKeywordDnaId ?? null, previousBoundSlug: currentKgr!.boundSlug ?? null, actorId, decidedAt: now },
+      } : {}),
     }
     : undefined;
+  // Tipo de unidade derivado (artigo, guia…) vira decisão gravada; conflito ou desconhecido continuam honestos.
+  const nextUnitClassification = current.unitClassification && current.unitClassification.status !== "human_confirmed" && editorialUnitTypeIsDerived(current.unitClassification)
+    ? { ...current.unitClassification, status: "human_confirmed" as const, confirmedAt: now, confirmedBy: actorId }
+    : current.unitClassification;
   const previousPolicy = current.primaryKeywordPolicy || current.primaryKeywordPolicyContext?.policy || "unknown";
   const sourcePolicy = current.primaryKeywordPolicyContext?.sourcePolicy || previousPolicy;
   const policyContext = PrimaryKeywordPolicyContextSchema.parse({
@@ -49,21 +70,21 @@ export function confirmedArticlePayload(
     policy: "locked", currentKeyword: selectedText, sourcePolicy: String(sourcePolicy), source: "human_confirmation",
     actorId, decidedAt: now, history: [
       ...(current.primaryKeywordPolicyContext?.history || []),
-      { previous: previousPolicy, next: "locked", actorId, changedAt: now, reason: "ConfirmaÃ§Ã£o humana da principal e da arquitetura." },
+      { previous: previousPolicy, next: "locked", actorId, changedAt: now, reason: "Confirmação humana da principal e da arquitetura." },
     ],
   });
   const candidates = (current.primaryKeywordCandidates || []).map(candidate => candidate.keywordId === principalKeywordId
     ? { ...candidate, status: "confirmed" as const, source: "human" as const }
     : candidate.keywordId === previousPrincipalId
-      ? { ...candidate, status: "rejected" as const, source: "human" as const, reason: "Principal anterior substituÃ­da por decisÃ£o humana; identidade publicada preservada." }
+      ? { ...candidate, status: "rejected" as const, source: "human" as const, reason: "Principal anterior substituída por decisão humana; identidade publicada preservada." }
       : candidate);
-  const nextSerpStrategy = current.unitClassification ? resolveArticleSerpStrategy({
-    unit: current.unitClassification, primaryIntent: normalizeSearchIntent(current.mainIntent), published: Boolean(current.publishedIdentityRef),
+  const nextSerpStrategy = nextUnitClassification ? resolveArticleSerpStrategy({
+    unit: nextUnitClassification, primaryIntent: normalizeSearchIntent(current.mainIntent), published: Boolean(current.publishedIdentityRef),
     principalKeywordId, primaryKeywordPolicy: "locked", slug: current.suggestedSlug, keywordUrlRelation: "confirmed_primary",
     architectureStatus: "architecture_confirmed", kgrIdentity: nextKgrIdentity,
   }) : undefined;
-  const nextUnitPurpose = current.unitClassification && nextSerpStrategy ? resolveEditorialUnitPurpose({
-    unit: current.unitClassification, primaryIntent: nextSerpStrategy.primaryIntent, audience: current.audience, searchNeed: current.problem,
+  const nextUnitPurpose = nextUnitClassification && nextSerpStrategy ? resolveEditorialUnitPurpose({
+    unit: nextUnitClassification, primaryIntent: nextSerpStrategy.primaryIntent, audience: current.audience, searchNeed: current.problem,
     published: Boolean(current.publishedIdentityRef), lifecycleMode: nextSerpStrategy.lifecycleMode,
   }) : undefined;
   const payload = ArticleDNASchema.parse({
@@ -77,11 +98,12 @@ export function confirmedArticlePayload(
     primaryKeywordPolicyContext: policyContext,
     primaryKeywordCandidates: candidates,
     primaryKeywordDecision: { status: "confirmed", previousKeywordId: previousPrincipalId, selectedKeywordId: principalKeywordId, actorId, decidedAt: now, reason: "Principal confirmada pela arquitetura; URL, slug e canonical preservados." },
+    ...(nextUnitClassification ? { unitClassification: nextUnitClassification } : {}),
     ...(nextSerpStrategy ? { serpStrategy: nextSerpStrategy } : {}),
     ...(nextUnitPurpose ? { unitPurpose: nextUnitPurpose } : {}),
     ...(nextKgrIdentity ? { kgrIdentity: nextKgrIdentity } : {}),
-    humanPendingDecisions: [...current.humanPendingDecisions, ...(kgrConflict ? ["Resolver a divergência do vínculo KGR antes de considerar a identidade confirmada."] : [])],
-    alerts: [...current.alerts, "Arquitetura confirmada por decisão humana; identidade publicada preservada."],
+    humanPendingDecisions: current.humanPendingDecisions.filter(item => !/vínculo KGR/.test(item)),
+    alerts: [...current.alerts, "Arquitetura confirmada por decisão humana; identidade publicada preservada.", ...(kgrDesvinculado ? ["Vínculo KGR candidato não se aplica: a conclusão humana fixou outra principal ou outro slug (par anterior guardado na decisão)."] : [])],
   });
   return payload;
 }

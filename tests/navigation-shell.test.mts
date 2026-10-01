@@ -11,7 +11,7 @@ test("rotas canonicas obrigatorias possuem page ou route handler", async () => {
     "app/login/page.tsx", "app/cadastro/page.tsx", "app/auth/callback/route.ts", "app/(personal)/conta/page.tsx",
     "app/(admin)/admin/page.tsx", "app/(admin)/admin/usuarios/page.tsx", "app/(admin)/admin/agencias/page.tsx", "app/(admin)/admin/marcas/page.tsx",
     "app/(agency)/agencias/[agencyRef]/page.tsx", "app/(agency)/agencias/[agencyRef]/membros/page.tsx", "app/(agency)/agencias/[agencyRef]/marcas/page.tsx", "app/(agency)/agencias/[agencyRef]/configuracoes/page.tsx",
-    "app/(brand)/[brandRef]/page.tsx", "app/(brand)/[brandRef]/minerador/page.tsx", "app/(brand)/[brandRef]/arquiteto/page.tsx", "app/(brand)/[brandRef]/radar/page.tsx", "app/(brand)/[brandRef]/planejador/page.tsx", "app/(brand)/[brandRef]/redator/page.tsx", "app/(brand)/[brandRef]/publicacoes/page.tsx",
+    "app/(brand)/[brandRef]/page.tsx", "app/(brand)/[brandRef]/minerador/page.tsx", "app/(brand)/[brandRef]/arquiteto/page.tsx", "app/(brand)/[brandRef]/radar/page.tsx", "app/(brand)/[brandRef]/redator/page.tsx", "app/(brand)/[brandRef]/publicacoes/page.tsx",
   ].map(exists));
 });
 

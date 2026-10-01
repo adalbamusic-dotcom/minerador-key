@@ -131,12 +131,21 @@ test("funil sem padrão fecha como INDETERMINATE", () => {
   assert.equal(misto.funnel.value, "MIXED");
 });
 
-test("composição que diverge da Principal fecha a intenção como MIXED", () => {
+test("sem SERP, composição que diverge da Principal fecha a intenção como MIXED", () => {
   const resolvida = resolveArticleClassification(evidencia({
     compositionIntents: ["transacional"],
+    serpObservedIntent: null,
   }));
   assert.equal(resolvida.intent.value, "MIXED");
   assert.equal(resolvida.intent.source, "group");
+});
+
+test("com SERP, a SERP tem a última palavra: o rótulo divergente da composição não muda a intenção (dono, 2026-10-01)", () => {
+  const resolvida = resolveArticleClassification(evidencia({
+    compositionIntents: ["transacional"],
+  }));
+  assert.equal(resolvida.intent.value, "INFORMATIONAL");
+  assert.equal(resolvida.intent.source, "serp");
 });
 
 /* ----------------------------- KGR ---------------------------------------- */

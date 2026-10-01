@@ -14,7 +14,7 @@ import { buildRadarResearchQueryPlan } from "../lib/radar/research-query-plan.ts
 import { radarResearchUniverseFingerprint } from "../lib/radar/research-curation.ts";
 import { autoDecideRadarReference } from "../lib/radar/research-auto-selection.ts";
 import { freezeRadarEvidenceBundle, radarFinalizationReadiness } from "../lib/radar/investigation-finalization.ts";
-import { radarPlannerHandoffReadiness } from "../lib/radar/planner-handoff.ts";
+import { radarHandoffReadiness } from "../lib/radar/handoff-readiness.ts";
 import { buildRadarReportSummary, radarOperationalRow, radarOperationalStatus, RADAR_OPERATIONAL_STATUS_LABEL } from "../lib/radar/operational-view.ts";
 import { radarActionOutcome, radarClaimAction, type RadarActionClaim } from "../lib/radar/operational-actions.ts";
 import { RadarAnalysisPayloadSchema } from "../lib/radar/analysis-contracts.ts";
@@ -417,12 +417,12 @@ test("GATE 17 · Q e R — o reset cria versão nova e não reescreve o passado"
 
 test("GATE 17 · L — depois do reset o PlannerHandoff volta a bloqueado", () => {
   /* Antes: congelado íntegro, pacote pronto. */
-  const antes = radarPlannerHandoffReadiness({ article: ARTIGO, frozen: congelar(), stale: false });
+  const antes = radarHandoffReadiness({ article: ARTIGO, frozen: congelar(), stale: false });
   assert.equal(antes.ready, true, "a fixture precisa começar pronta");
 
   /* Depois: sem congelado corrente, o contrato recusa — e diz por quê. */
   const depoisDoReset = buildRadarResetPayload(payloadCheio());
-  const depois = radarPlannerHandoffReadiness({ article: ARTIGO, frozen: depoisDoReset.finalizedBundle, stale: false });
+  const depois = radarHandoffReadiness({ article: ARTIGO, frozen: depoisDoReset.finalizedBundle, stale: false });
   assert.equal(depois.ready, false, "PLANNER_HANDOFF_READY_AFTER_RESET = NO");
   assert.deepEqual(depois.blocks.map(item => item.code), ["NOT_FINALIZED"]);
   assert.equal(depois.blocks[0].message, "Finalize a pesquisa antes de preparar o pacote.");

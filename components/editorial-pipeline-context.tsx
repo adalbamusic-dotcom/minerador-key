@@ -2,12 +2,12 @@
 
 import { blockedByIncompleteDependencies, emptyLoadDiagnostics, type WorkspaceLoadDiagnostics } from "@/lib/editorial/partial-read";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ArticleDNA, ContentDocument, ContentPlan, ProductEvidenceDNA, SiloDNA, SiloPage, VersionEnvelope, VersionStatusEvent } from "@/lib/arquiteto/contracts";
+import type { ArticleDNA, ContentDocument, ProductEvidenceDNA, SiloDNA, SiloPage, VersionEnvelope, VersionStatusEvent } from "@/lib/arquiteto/contracts";
 import { EditorialSnapshotSchema, SerpCollectionRecordSchema, SerpReviewRecordSchema, type EditorialSnapshot, type SerpCollectionRecord, type SerpReviewRecord } from "@/lib/editorial/contracts";
 import { mockProductEvidenceProvider, mockSerpProvider } from "@/lib/editorial/providers";
 import { createMockOperationalBundle } from "@/lib/editorial/providers";
 import type { AIReviewAnnotation, BrandMaterial, BrandPrompt, BrandSkill, ExternalSourceSuggestion, GuardianFinding, InternalLinkAssignment, PublicationRecord } from "@/lib/editorial/operational-contracts";
-import type { BrandInvitation, OperationalPublication, PlannerItem, RadarArticleHandoffContext, RadarItem } from "@/lib/editorial/operational-flow";
+import type { BrandInvitation, OperationalPublication, RadarArticleHandoffContext, RadarItem } from "@/lib/editorial/operational-flow";
 import { buildRadarHandoffContexts, type RadarHandoffBlocked } from "@/lib/arquiteto/radar-handoff-context";
 import type { InternalLinkGraph } from "@/lib/arquiteto/contracts";
 import { OperationalPublicationSchema, RadarItemSchema, approvedArticleVersions, approvedSiloPageVersions, createDevelopmentInvitation,
@@ -71,7 +71,6 @@ interface BrandWorkspace {
    */
   localRecoveryRemoteConfirmed: boolean;
   productEvidence: ProductEvidenceDNA[];
-  contentPlans: Record<string, VersionEnvelope<ContentPlan>>;
   /**
    * E1 · a listagem da mesa traz o documento v2 com dossiê SEM o pacote do
    * Radar, na forma parcial marcada (`isPartialContentDocument`). O documento
@@ -87,7 +86,6 @@ interface BrandWorkspace {
   guardianFindings: GuardianFinding[];
   publications: PublicationRecord[];
   radarItems: RadarItem[];
-  plannerItems: PlannerItem[];
   operationalPublications: OperationalPublication[];
   invitations: BrandInvitation[];
   persistenceMode: PersistenceMode;
@@ -129,8 +127,8 @@ interface BrandWorkspace {
 }
 
 const emptyWorkspace = (): BrandWorkspace => ({ architectImportedKeywordIds: [], articleVersions: {}, siloVersions: {}, siloPageVersions: {}, versionEvents: [], serpRecords: [], serpReviews: [], serpMergeConflicts: [], serpPersistenceMode: "local_fallback", serpReviewReadbackSnapshotIds: [],
-  productEvidence: [], contentPlans: {}, documents: {}, selectedEntityId: null, skills: [], prompts: [], materials: [],
-  internalLinks: [], externalSources: [], guardianFindings: [], publications: [], radarItems: [], plannerItems: [],
+  productEvidence: [], documents: {}, selectedEntityId: null, skills: [], prompts: [], materials: [],
+  internalLinks: [], externalSources: [], guardianFindings: [], publications: [], radarItems: [],
   operationalPublications: [], invitations: [], documentUpdatedAt: {}, persistenceMode: "local_fallback", localRecoveryWarning: null, localRecoveryRemoteConfirmed: false, loadDiagnostics: emptyLoadDiagnostics(), documentLocks: {}, documentUserStates: {}, documentUserStatesReady: false, moduleState: {}, backgroundTasks: [], aiReviewAnnotations: [] });
 
 function latestRadarSnapshotFingerprint(workspace: BrandWorkspace, articleId: string) {
@@ -159,11 +157,9 @@ function saveLocalSerpRecovery(actorUserId: string, brandId: string, workspace: 
       siloVersions: workspace.siloVersions,
       siloPageVersions: workspace.siloPageVersions,
       versionEvents: workspace.versionEvents,
-      contentPlans: workspace.contentPlans,
       /* E1 · a cópia local nunca guarda o pacote do Radar: forma de listagem. */
       documents: toListingForms(workspace.documents),
       radarItems: workspace.radarItems,
-      plannerItems: workspace.plannerItems,
       serpRecords: record ? [...workspace.serpRecords.filter(item => item.id !== record.id), record] : workspace.serpRecords,
       serpReviews: review ? [...workspace.serpReviews.filter(item => item.id !== review.id), review] : workspace.serpReviews,
       serpMergeConflicts: workspace.serpMergeConflicts,
@@ -191,11 +187,9 @@ function saveLocalRadarAnalysisRecovery(actorUserId: string, brandId: string, wo
       siloVersions: workspace.siloVersions,
       siloPageVersions: workspace.siloPageVersions,
       versionEvents: workspace.versionEvents,
-      contentPlans: workspace.contentPlans,
       /* E1 · idem: forma de listagem. */
       documents: toListingForms(workspace.documents),
       radarItems: workspace.radarItems,
-      plannerItems: workspace.plannerItems,
       serpRecords: workspace.serpRecords,
       serpReviews: workspace.serpReviews,
       serpMergeConflicts: workspace.serpMergeConflicts,
@@ -475,7 +469,6 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
   const restoreOperationalSnapshot = useCallback((module: EditorialHistoryModule, snapshot: Partial<BrandWorkspace>) => updateWorkspace(current => {
     if (module === "arquiteto") return { ...current, articleVersions: snapshot.articleVersions ?? current.articleVersions, siloVersions: snapshot.siloVersions ?? current.siloVersions, siloPageVersions: snapshot.siloPageVersions ?? current.siloPageVersions, versionEvents: snapshot.versionEvents ?? current.versionEvents, aiReviewAnnotations: snapshot.aiReviewAnnotations ?? current.aiReviewAnnotations };
     if (module === "radar") return { ...current, radarItems: snapshot.radarItems ?? current.radarItems, serpRecords: snapshot.serpRecords ?? current.serpRecords, serpReviews: snapshot.serpReviews ?? current.serpReviews, serpMergeConflicts: snapshot.serpMergeConflicts ?? current.serpMergeConflicts, productEvidence: snapshot.productEvidence ?? current.productEvidence };
-    if (module === "planejador") return { ...current, plannerItems: snapshot.plannerItems ?? current.plannerItems, contentPlans: snapshot.contentPlans ?? current.contentPlans, internalLinks: snapshot.internalLinks ?? current.internalLinks, externalSources: snapshot.externalSources ?? current.externalSources };
     /* E1 · desfazer não rebaixa a parcial o documento que a memória tem completo, com o mesmo pacote. */
     if (module === "redator") return { ...current, documents: snapshot.documents ? keepLoadedBundles(snapshot.documents, current.documents) : current.documents, guardianFindings: snapshot.guardianFindings ?? current.guardianFindings, operationalPublications: snapshot.operationalPublications ?? current.operationalPublications };
     if (module === "publicacoes") return { ...current, operationalPublications: snapshot.operationalPublications ?? current.operationalPublications };
@@ -509,12 +502,6 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         return;
       }
       const body = await response.json(); const persisted = PersistedEditorialWorkspaceSchema.parse(body.data);
-      const persistedPlans = persisted.contentPlans.reduce<Record<string, VersionEnvelope<ContentPlan>>>((plans, version) => {
-        plans[version.versionId] = version;
-        const current = plans[version.entityId];
-        if (!current || current.versionNumber < version.versionNumber) plans[version.entityId] = version;
-        return plans;
-      }, {});
       updateWorkspace(current => {
         const articleVersions = { ...current.articleVersions, ...Object.fromEntries(persisted.articleVersions.map(version => [version.payload.articleId, version])) };
         const siloVersions = { ...current.siloVersions, ...Object.fromEntries(persisted.siloVersions.map(version => [version.payload.siloId, version])) };
@@ -546,13 +533,12 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         return { ...current, persistenceMode: persisted.mode, loadDiagnostics: persisted.loadDiagnostics, serpPersistenceMode: persisted.serpPersistenceMode,
         localRecoveryWarning: avisoVigente?.message ?? null,
         localRecoveryRemoteConfirmed: avisoVigente?.remoteConfirmed ?? false,
-        radarItems, plannerItems: persisted.plannerItems.length ? persisted.plannerItems : current.plannerItems,
+        radarItems,
         serpRecords: serpMerge.records, serpMergeConflicts: serpMerge.conflicts,
         serpReviews: persisted.serpReviews.length ? [...current.serpReviews.filter(review => !persisted.serpReviews.some(incoming => incoming.id === review.id)), ...persisted.serpReviews] : current.serpReviews,
         articleVersions,
         siloVersions,
         versionEvents: mergeVersionEvents(current.versionEvents, persisted.versionEvents),
-        contentPlans: { ...current.contentPlans, ...persistedPlans },
         /*
          * E1 · a listagem chega sem o pacote do Radar. O documento que a memória
          * já tem completo, com o MESMO pacote, continua completo: rebaixá-lo a
@@ -618,10 +604,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
           serpRecords: Array.isArray(partial.serpRecords) ? partial.serpRecords : [],
           serpReviews: Array.isArray(partial.serpReviews) ? partial.serpReviews : [],
           serpMergeConflicts: Array.isArray(partial.serpMergeConflicts) ? partial.serpMergeConflicts : [],
-          contentPlans: partial.contentPlans && typeof partial.contentPlans === "object" ? partial.contentPlans : {},
           documents: partial.documents && typeof partial.documents === "object" ? partial.documents : {},
           radarItems: Array.isArray(partial.radarItems) ? partial.radarItems : [],
-          plannerItems: Array.isArray(partial.plannerItems) ? partial.plannerItems : [],
           operationalPublications: Array.isArray(partial.operationalPublications) ? partial.operationalPublications : [],
           documentLocks: partial.documentLocks && typeof partial.documentLocks === "object" ? partial.documentLocks : {},
           selectedEntityId: typeof partial.selectedEntityId === "string" ? partial.selectedEntityId : null,
@@ -648,7 +632,6 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
           serpRecords: recovered.serpRecords,
           serpReviews: recovered.serpReviews,
           serpMergeConflicts: recovered.serpMergeConflicts,
-          contentPlans: recovered.contentPlans,
           /*
            * E1 · o documento restaurado entra na forma de LISTAGEM, mesmo de
            * cópia antiga que ainda o guardava inteiro: o bundle local nunca vira
@@ -657,7 +640,6 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
            */
           documents: { ...toListingForms(recovered.documents), ...current.documents },
           radarItems: recovered.radarItems,
-          plannerItems: recovered.plannerItems,
           operationalPublications: recovered.operationalPublications,
           documentLocks: { ...recovered.documentLocks, ...current.documentLocks },
           selectedEntityId: recovered.selectedEntityId,
@@ -715,7 +697,6 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
         serpRecords: current.serpRecords,
         serpReviews: current.serpReviews,
         serpMergeConflicts: current.serpMergeConflicts,
-        contentPlans: current.contentPlans,
         /*
          * E1 · a cópia de continuidade guarda a forma de LISTAGEM: sem o pacote
          * do Radar (até 4,5 MB por documento aberto) e marcada como parcial. O
@@ -723,7 +704,6 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
          */
         documents: toListingForms(current.documents),
         radarItems: current.radarItems,
-        plannerItems: current.plannerItems,
         operationalPublications: current.operationalPublications,
         documentLocks: current.documentLocks,
         selectedEntityId: current.selectedEntityId,

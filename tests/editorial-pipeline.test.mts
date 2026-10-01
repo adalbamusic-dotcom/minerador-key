@@ -8,7 +8,7 @@ import { adaptLegacyBrand, adaptLegacyKeyword } from "../lib/editorial/adapters.
 import { EditorialSnapshotSchema, EditorialStageSchema, SerpCollectionRecordSchema } from "../lib/editorial/contracts.ts";
 import { derivePipelineStates, menuEntriesForRole } from "../lib/editorial/navigation.ts";
 import { LEGACY_REDIRECTS } from "../lib/editorial/navigation.ts";
-import { createMockPlanAndDocument, mockProductEvidenceProvider, mockSerpProvider } from "../lib/editorial/providers.ts";
+import { createMockDocument, mockProductEvidenceProvider, mockSerpProvider } from "../lib/editorial/providers.ts";
 import { createMockOperationalBundle } from "../lib/editorial/providers.ts";
 import { ExternalSourceSuggestionSchema, InternalLinkAssignmentSchema, PublicationRecordSchema } from "../lib/editorial/operational-contracts.ts";
 import { PipelineStateSummary } from "../lib/editorial/render-smoke.ts";
@@ -34,9 +34,8 @@ test("menu oficial restringe Admin e não expõe Inteligência Editorial", () =>
   assert.equal(admin.some(item => item.id === "admin" && item.href === "/admin"), true);
   assert.equal(client.some(item => item.label.includes("Inteligência")), false);
   assert.deepEqual(client.filter(item => !["conta"].includes(item.id)).map(item => item.href), ["/marca", "/minerador", "/arquiteto", "/radar", "/redator", "/publicacoes"]);
-  /* REMOÇÃO LÓGICA DO PLANEJADOR: o menu não o oferece mais. A rota continua
-   * registrada em PRODUCT_MODULES como `historical` — ver o teste do handoff. */
-  assert.equal(client.some(item => item.id === "planejador"), false, "o Planejador voltou ao menu");
+  /* O Planejador foi aposentado em 2026-10-01: nem o menu nem o registro o conhecem. */
+  assert.equal(client.some(item => (item.id as string) === "planejador"), false, "o Planejador voltou ao menu");
 });
 
 test("estado local permanece isolado por marca", () => {
@@ -57,7 +56,7 @@ test("estados do pipeline não contam mocks como progresso", () => {
 });
 
 test("rotas técnicas antigas possuem destino operacional único", () => {
-  assert.deepEqual(LEGACY_REDIRECTS, { marca: "/marca", keywords: "/minerador", artigos: "/arquiteto", silos: "/arquiteto?painel=silo", serp: "/radar", planejamento: "/planejador", documentos: "/redator" });
+  assert.deepEqual(LEGACY_REDIRECTS, { marca: "/marca", keywords: "/minerador", artigos: "/arquiteto", silos: "/arquiteto?painel=silo", serp: "/radar", planejamento: "/radar", documentos: "/redator" });
 });
 
 test("BrandDNA legado é explícito e não vira versão aprovada", () => {
@@ -85,9 +84,10 @@ test("evidência diferencia opinião de consumidor de fato técnico", async () =
   assert.equal(evidence.sources.some(source => source.evidenceType === "technical_fact"), false);
 });
 
-test("ContentPlan e ContentDocument simulados preservam referências e proveniência", async () => {
-  const { plan, document } = await createMockPlanAndDocument("brand-1");
-  assert.equal(plan.payload.keywordDnaRefs.length, 1);
+test("ContentDocument simulado preserva referências e proveniência", async () => {
+  const { document } = await createMockDocument("brand-1");
+  assert.equal(document.keywordDnaRefs.length, 1);
+  assert.equal(document.schemaVersion, 2, "o documento nasce do Radar");
   assert.equal(ContentDocumentSchema.safeParse(document).success, true);
   assert.ok(document.blocks.every(block => block.provenance.keywordDnaRefs.length > 0));
   assert.ok(document.blocks.some(block => block.type === "product_block"));
@@ -118,14 +118,12 @@ test("publicação simulada é tipada e identificada", () => {
   assert.equal(PublicationRecordSchema.safeParse(publication).success, true); assert.equal(publication.origin, "mock");
 });
 
-test("rotas oficiais separam Marca, Conta, Radar, Planejador, Redator e Publicações", async () => {
+test("rotas oficiais separam Marca, Conta, Radar, Redator e Publicações", async () => {
   const modulePaths = [
     "../modules/marca/brand-page.tsx",
     "../modules/conta/account-page.tsx",
     "../modules/radar/radar-page.tsx",
-    "../modules/planejador/planner-page.tsx",
     "../modules/redator/writer-page.tsx",
-    "../modules/publicacoes/publications-page.tsx",
   ];
   for (const path of modulePaths) {
     const source = await readFile(new URL(path, import.meta.url), "utf8");

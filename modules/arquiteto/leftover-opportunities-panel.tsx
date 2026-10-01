@@ -99,7 +99,7 @@ function OpportunityGroup({ group, busy, onCreate, primaryButtonClassName }: {
             <li key={member.keywordId} className="flex items-start gap-2 text-sm leading-6">
               <input id={id} type="checkbox" className="mt-1 h-4 w-4 shrink-0" disabled={busy} checked={marcadas.has(member.keywordId)} onChange={() => alternar(member.keywordId)} />
               <label htmlFor={id} className="min-w-0">
-                <span className="font-medium text-foreground">{member.keyword}</span>
+                <span className="font-medium text-keyword">{member.keyword}</span>
                 <span className="text-text-muted">{` · volume ${member.volumeLabel}${member.leader ? " · principal" : ` · ${member.reason}`}`}</span>
                 {member.warning && <span className="block text-warning">{member.warning}</span>}
               </label>

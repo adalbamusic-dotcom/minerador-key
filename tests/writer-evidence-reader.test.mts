@@ -26,7 +26,7 @@ const { deriveSerpSemanticEvidence } = await import("../lib/minerador/serp-seman
 const { resolveCanonicalKeywordSnapshot } = await import("../lib/minerador/canonical-keyword-snapshot.ts");
 const { ArticleDNASchema, ContentDocumentV2Schema } = await import("../lib/arquiteto/contracts.ts");
 const { SERP_CACHE_LENSES, serpCacheLensLabel, serpCacheSubjectId, normalizeSerpCacheKeyword } = await import("../lib/editorial/serp-cache.ts");
-const { mockSerpProvider, createMockPlanAndDocument } = await import("../lib/editorial/providers.ts");
+const { mockSerpProvider, createMockDocument } = await import("../lib/editorial/providers.ts");
 const { RADAR_WRITER_MAY_NOT } = await import("../lib/redator/writer-handoff.ts");
 
 type Linha = Record<string, unknown>;
@@ -208,7 +208,7 @@ function dossieCorrompido() {
 }
 
 const bundleYoutube = () => ({ ...bundleGoogle(), primaryResearchProfile: "YOUTUBE", observed: null, video: null, specialist: null });
-const { document: documentoPlanejador } = await createMockPlanAndDocument(brandA);
+const { document: documentoPlanejador } = await createMockDocument(brandA);
 
 const corpoCanonico = {
   status_code: 20000,
@@ -1111,14 +1111,14 @@ test("Arquiteto e Publicações · parecer sem o assessment bruto, grafo congela
   conferirFormaDaLeitura();
 });
 
-test("legado · v1 do Planejador e perfil YOUTUBE declaram a ausência, nunca lista vazia", async () => {
+test("legado · documento sem dossiê e perfil YOUTUBE declaram a ausência, nunca lista vazia", async () => {
   reiniciar("pendente");
   const v1 = await readWriterFoundations(contexto(), documentV1);
   assert.equal(v1.bundle, null);
-  assert.ok(v1.absent.some(item => item.field === "bundle" && /Planejador/.test(item.reason)));
+  assert.ok(v1.absent.some(item => item.field === "bundle" && /sem dossiê/.test(item.reason)));
   assert.equal(v1.article, null);
   const manifestoV1 = await readWriterEvidenceManifest(contexto(), documentV1);
-  assert.ok(manifestoV1.absent.some(([chave, , motivo]) => chave === "radar.bundle" && /v1/.test(motivo)));
+  assert.ok(manifestoV1.absent.some(([chave, , motivo]) => chave === "radar.bundle" && /sem dossiê/.test(motivo)));
   assert.equal(manifestoV1.bundle, null);
   const youtube = await readWriterEvidenceManifest(contexto(), documentYoutube);
   assert.ok(youtube.absent.some(([chave, , motivo]) => chave === "radar.bundle.observed" && /YOUTUBE/.test(motivo)));

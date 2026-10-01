@@ -2,7 +2,7 @@ import { ArticleDNASchema, KeywordDnaProvenanceSnapshotSchema, SiloDNASchema, Si
 import { deepFreeze, legacyVersionReference, toVersionReference } from "./versioning.ts";
 import { resolvePublishedIdentity } from "./serp-formation.ts";
 import { adaptKeywordIdentityContext, resolvePrimaryKeywordPolicy } from "./identity-context.ts";
-import { buildArticleIntentProfile, normalizeSearchIntent } from "./intent-profile.ts";
+import { buildArticleIntentProfile, firstKnownIntentLabel, keywordIntentLabels, normalizeSearchIntent } from "./intent-profile.ts";
 import { calculateArticleHierarchyStrategy, calculateArticleKeywordStrategy, calculateArticleStrategicPurpose, calculateArticleVolumeStrategy, deriveArticleKgrIdentity } from "./strategic-context.ts";
 import { resolveArticleSerpStrategy, resolveEditorialUnitPurpose, suggestEditorialUnitClassification } from "./unit-strategy.ts";
 import { assertArticleFormation } from "./article-formation-rules.ts";
@@ -161,11 +161,11 @@ export function articleKeywordReference(keyword: ArchitectKeyword, role: Article
   return {
     keywordId: keyword.id, keywordDnaVersionId: reference.versionId, keywordDnaContentHash: reference.contentHash, role,
     strategicContribution: purpose,
-    coveredIntentions: [keyword.intent || "A confirmar"], requiredTopics: [], excludedTopics: [],
+    coveredIntentions: [firstKnownIntentLabel(...keywordIntentLabels(keyword)) || keyword.intent || "A confirmar"], requiredTopics: [], excludedTopics: [],
     classificationOrigin: keyword.analise_semantica?.dna_origem === "logico_deterministico" ? "system" : reference.versionId.startsWith("legacy:") ? "legacy" : "ai",
     confidence: confidence(keyword.analise_semantica?.dna_confianca), humanConfirmed: keyword.analise_semantica?.dna_revisao_humana === "aprovado",
-    originalIntentLabel: keyword.intent || (typeof keyword.analise_semantica?.intencao_principal === "string" ? keyword.analise_semantica.intencao_principal : undefined),
-    normalizedIntent: normalizeSearchIntent(keyword.intent || keyword.analise_semantica?.intencao_principal),
+    originalIntentLabel: firstKnownIntentLabel(...keywordIntentLabels(keyword)) || keyword.intent || (typeof keyword.analise_semantica?.intencao_principal === "string" ? keyword.analise_semantica.intencao_principal : undefined),
+    normalizedIntent: normalizeSearchIntent(firstKnownIntentLabel(...keywordIntentLabels(keyword))),
     volume,
     resultCount: typeof (keyword as Record<string, unknown>).results_allintitle === "number" ? (keyword as Record<string, unknown>).results_allintitle as number : null,
     kgrScore: typeof keyword.kgr_score === "number" ? keyword.kgr_score : null,
@@ -250,7 +250,8 @@ export function deterministicArticleDnaPayload(group: ProvisionalArticleGroup, b
     hierarchy: group.suggestedHierarchy, suggestedSlug, canonical: publicationIdentity?.status === "coherent" ? publicationIdentity.canonical || null : null,
     mainIntent: intentProfile.primaryIntent,
     intentProfile, volumeStrategy, hierarchyStrategy, strategicPurpose, keywordStrategy, unitClassification, unitPurpose, serpStrategy,
-    auxiliaryIntents: [...new Set(group.keywords.filter(keyword => keyword.id !== principalId).map(keyword => keyword.intent).filter(Boolean))],
+    // Só intenção conhecida: "Pendente" é a revisão do Minerador por fazer, não uma intenção auxiliar.
+    auxiliaryIntents: [...new Set(group.keywords.filter(keyword => keyword.id !== principalId).map(keyword => firstKnownIntentLabel(...keywordIntentLabels(keyword))).filter((label): label is string => Boolean(label)))],
     audience: text(semantic.publico, pending), problem: text(semantic.problema_percebido, pending), desiredResult: text(semantic.resultado_desejado, pending),
     journeyStage: text(semantic.etapa_jornada, pending), brandObjective: text(semantic.objetivo_marca, pending),
     promise: text(semantic.promessa, `Cobrir com clareza o tema “${principal.keyword}”.`), angle: text(semantic.angulo, pending), cta: text(semantic.cta, pending),

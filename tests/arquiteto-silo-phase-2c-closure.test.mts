@@ -642,7 +642,7 @@ test("27 · a leitura do Radar é por marca, não por usuário", () => {
   // no banco, qualquer sessão com acesso à mesma Brand o veria. Não ver em
   // outro navegador prova que a escrita remota não aconteceu.
   const repos = executable(read("lib/server/editorial-repositories.ts"));
-  const consulta = repos.slice(repos.indexOf('.in("stage", ["radar", "planner"])') - 400, repos.indexOf('.in("stage", ["radar", "planner"])') + 60);
+  const consulta = repos.slice(repos.indexOf('.eq("stage", "radar")') - 400, repos.indexOf('.eq("stage", "radar")') + 60);
   assert.match(consulta, /\.eq\("marca_id", marcaId\)/);
   assert.ok(!/\.eq\("created_by"/.test(consulta), "não filtra por autor");
   assert.ok(!/\.eq\("updated_by"/.test(consulta), "nem por quem atualizou");

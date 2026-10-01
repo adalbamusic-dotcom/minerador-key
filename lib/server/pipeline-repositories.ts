@@ -5,7 +5,7 @@ import { PipelineRuntimeError, persisted, pipelineErrorFromSupabase, readMany, r
 import { canonicalUuidOrGenerate, canonicalUuidOrNull, normalizePersistenceTimestamp } from "./serp-persistence-adapter";
 
 export type PipelineJsonObject = Record<string, unknown>;
-export type ArtifactType = "article_dna" | "silo_dna" | "silo_page" | "content_plan" | "article_architecture_ai_review";
+export type ArtifactType = "article_dna" | "silo_dna" | "silo_page" | "article_architecture_ai_review";
 
 type PipelineRepositoryContext = Pick<PipelineContext, "actorUserId" | "brandId" | "supabase">;
 type PipelineRow = Record<string, unknown>;
@@ -322,7 +322,6 @@ export type ContentDocumentCreateInput = {
   id: string;
   articleId: string;
   articleDnaVersionId?: string | null;
-  contentPlanVersionId?: string | null;
   currentVersionId?: string | null;
   status: string;
   title: string;
@@ -333,7 +332,6 @@ export type ContentDocumentCreateInput = {
 
 export type ContentDocumentUpdateInput = {
   articleDnaVersionId?: string | null;
-  contentPlanVersionId?: string | null;
   currentVersionId?: string | null;
   status?: string;
   title?: string;
@@ -359,7 +357,6 @@ export class ContentDocumentRepository extends ContextBoundRepository {
       marca_id: this.brandId,
       article_id: input.articleId,
       article_dna_version_id: input.articleDnaVersionId ?? null,
-      content_plan_version_id: input.contentPlanVersionId ?? null,
       current_version_id: input.currentVersionId ?? null,
       status: input.status,
       title: input.title,
@@ -376,7 +373,6 @@ export class ContentDocumentRepository extends ContextBoundRepository {
     requireLock(expectedLock);
     const changes = {
       ...(input.articleDnaVersionId !== undefined ? { article_dna_version_id: input.articleDnaVersionId } : {}),
-      ...(input.contentPlanVersionId !== undefined ? { content_plan_version_id: input.contentPlanVersionId } : {}),
       ...(input.currentVersionId !== undefined ? { current_version_id: input.currentVersionId } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.title !== undefined ? { title: input.title } : {}),
@@ -465,7 +461,7 @@ export class ContentDocumentUserStateRepository extends ContextBoundRepository {
 
 export type SavedViewInput = {
   id?: string;
-  module: "marca" | "minerador" | "arquiteto" | "radar" | "planejador" | "redator" | "publicacoes";
+  module: "marca" | "minerador" | "arquiteto" | "radar" | "redator" | "publicacoes";
   name: string;
   settings: PipelineJsonObject;
   isDefault: boolean;
@@ -502,7 +498,6 @@ export class SavedViewRepository extends ContextBoundRepository {
 export type PublicationCreateInput = {
   id?: string;
   articleId: string;
-  contentPlanVersionId?: string | null;
   documentId?: string | null;
   status: string;
   publishedUrl?: string | null;
@@ -530,7 +525,6 @@ export class PublicationRecordRepository extends ContextBoundRepository {
       id: input.id ?? crypto.randomUUID(),
       marca_id: this.brandId,
       article_id: input.articleId,
-      content_plan_version_id: input.contentPlanVersionId ?? null,
       document_id: input.documentId ?? null,
       status: input.status,
       published_url: input.publishedUrl ?? null,
@@ -547,7 +541,6 @@ export class PublicationRecordRepository extends ContextBoundRepository {
   async update(id: string, expectedLock: number, input: PublicationUpdateInput): Promise<PipelineMutationResult<PipelineRow>> {
     requireLock(expectedLock);
     const result = await this.client.from("publication_records").update({
-      content_plan_version_id: input.contentPlanVersionId ?? null,
       document_id: input.documentId ?? null,
       status: input.status,
       published_url: input.publishedUrl ?? null,

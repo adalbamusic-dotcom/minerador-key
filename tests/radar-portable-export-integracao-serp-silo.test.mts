@@ -43,7 +43,7 @@ import { readDataForSeoTargetCodes } from "../lib/minerador/dataforseo-serp-core
 import type { SerpSearchInput } from "../lib/radar/serp/contracts.ts";
 import type { RadarExtractionPage } from "../lib/radar/analysis-contracts.ts";
 import type { RadarArticleResearchContext } from "../lib/radar/article-research-context.ts";
-import type { RadarPlannerHandoffReadiness } from "../lib/radar/planner-handoff.ts";
+import type { RadarHandoffReadiness } from "../lib/radar/handoff-readiness.ts";
 
 /*
  * ===== A INTEGRAÇÃO DO EXPORT PORTÁTIL — SERP, Redator e silo (2026-09-23) =====
@@ -214,7 +214,7 @@ const DOSSIE = buildRadarEvidenceBundle({
   editorialOutputs: [],
 });
 
-const PRONTO: RadarPlannerHandoffReadiness = { ready: true, headline: "Pacote para planejamento pronto", blocks: [] };
+const PRONTO: RadarHandoffReadiness = { ready: true, headline: "Pacote para o Redator pronto", blocks: [] };
 
 const ANALISE = {
   serpSnapshotId: ID_DO_REGISTRO,

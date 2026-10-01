@@ -1,7 +1,6 @@
 import { z } from "zod";
 import {
   ContentDocumentSchema,
-  ContentDocumentV1Schema,
   ContentDocumentV2Schema,
   ImportedRadarContextSchema,
   RadarWriterDossierSchema,
@@ -25,8 +24,8 @@ import {
  * parcial NÃO passa nele, então nenhum caminho que valida o documento completo
  * a aceita por engano. O schema completo não foi afrouxado.
  *
- * Só o documento v2 com dossiê perde algo na listagem. O v1 e o v2 sem dossiê
- * saem inteiros — para eles a listagem É o documento completo.
+ * Só o documento com dossiê perde algo na listagem. O documento sem dossiê
+ * sai inteiro — para eles a listagem É o documento completo.
  */
 
 /** O dossiê como a listagem o entrega: tudo menos o bundle, com o marcador. */
@@ -173,7 +172,6 @@ export function keepLoadedBundles(
  * listagem sem ninguém lembrar de acrescentá-lo aqui. Só o bundle fica de fora.
  */
 const CAMPOS_DO_DOCUMENTO = [...new Set([
-  ...Object.keys(ContentDocumentV1Schema.shape),
   ...Object.keys(ContentDocumentV2Schema.shape),
 ])].filter(campo => campo !== "importedContext");
 const CAMPOS_DO_CONTEXTO = Object.keys(ImportedRadarContextSchema.shape).filter(campo => campo !== "dossier");

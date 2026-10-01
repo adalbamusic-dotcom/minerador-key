@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildRadarEvidencePackage } from "../lib/radar/evidence-package.ts";
-import { buildRadarPlannerHandoff, radarHandoffToContentPlanInput } from "../lib/radar/planner-handoff.ts";
+import { buildRadarApprovedPackage } from "../lib/radar/handoff-readiness.ts";
 
 const payload = {
   brandId: "brand-1", articleId: "article-1", mode: "kgr_light", modeHumanReason: "fixture", serpSnapshotId: "serp-1", serpSnapshotVersion: 1, serpSnapshotHash: "a".repeat(64),
@@ -27,7 +27,7 @@ function report() {
 }
 
 test("novo snapshot DataForSEO gera handoff e preserva identidade, aprovação e proveniência", async () => {
-  const handoff = await buildRadarPlannerHandoff({ packageData: await packageFor("dataforseo"), approvedReport: report(), brandId: "brand-1", radarItemId: "radar-1", articleId: "article-1", articleDnaVersionId: "article-dna-1", siloDnaVersionId: "silo-v1", sourceAnalysisVersionId: "analysis-1", sourceAnalysisVersionNumber: 1, selectedBy: "human", now: "2026-08-26T12:00:00.000Z" });
+  const handoff = await buildRadarApprovedPackage({ packageData: await packageFor("dataforseo"), approvedReport: report(), brandId: "brand-1", radarItemId: "radar-1", articleId: "article-1", articleDnaVersionId: "article-dna-1", siloDnaVersionId: "silo-v1", sourceAnalysisVersionId: "analysis-1", sourceAnalysisVersionNumber: 1, selectedBy: "human", now: "2026-08-26T12:00:00.000Z" });
   assert.equal(handoff.status, "APPROVED");
   assert.equal(handoff.serp.provider, "dataforseo");
   assert.equal(handoff.provenance.provider, "dataforseo");
@@ -35,11 +35,10 @@ test("novo snapshot DataForSEO gera handoff e preserva identidade, aprovação e
   assert.equal(handoff.expertEvidence.length, 0);
   assert.equal(handoff.productEvidence.length, 0);
   assert.match(handoff.hash, /^sha256:[a-f0-9]{64}$/);
-  assert.equal(radarHandoffToContentPlanInput(handoff).evidencePackage, handoff);
 });
 
 test("pacote histórico Serper válido e aprovado gera handoff sem perder a provenance", async () => {
-  const handoff = await buildRadarPlannerHandoff({ packageData: await packageFor("serper"), approvedReport: report(), brandId: "brand-1", radarItemId: "radar-1", articleId: "article-1", articleDnaVersionId: "article-dna-1", sourceAnalysisVersionId: "analysis-1", sourceAnalysisVersionNumber: 1, selectedBy: "human" });
+  const handoff = await buildRadarApprovedPackage({ packageData: await packageFor("serper"), approvedReport: report(), brandId: "brand-1", radarItemId: "radar-1", articleId: "article-1", articleDnaVersionId: "article-dna-1", sourceAnalysisVersionId: "analysis-1", sourceAnalysisVersionNumber: 1, selectedBy: "human" });
   assert.equal(handoff.status, "APPROVED");
   assert.equal(handoff.serp.provider, "serper");
   assert.equal(handoff.evidencePackage.serp.provider, "serper");

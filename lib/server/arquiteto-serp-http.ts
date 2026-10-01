@@ -39,7 +39,7 @@ import { IntegrationRuntimeError, integrationRuntimeErrorResponse, recordIntegra
 import { resolvePipelineContext } from "@/lib/server/pipeline-runtime";
 import { readbackArticleFormationSerpAssessment, saveArticleFormationSerpAssessment } from "@/lib/server/arquiteto-article-serp-store";
 import { hasSearchVolume } from "@/lib/arquiteto/serp-subject-suggestions";
-import {
+import { serpIntentReadingOf,
   NO_VOLUME_NOT_OBSERVED_REASON,
   formationLensesMarkerOf,
   interpretArticleSerp,
@@ -1110,6 +1110,7 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
        */
       let lensesMarker: SerpLensesMarker | null = null;
       let interpretation: ReturnType<typeof interpretArticleSerp>;
+      let leituraDasLentes: ReturnType<typeof serpIntentReadingOf> | null = null;
       if (requested.legacy) {
         interpretation = interpretArticleSerp({
           candidateRef: assessment.articleId,
@@ -1141,9 +1142,12 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
           withExtras: requested.extras.length > 0,
         });
         interpretation = across;
+        leituraDasLentes = across.intentReading;
         lensSummaries.push({ candidateRef: assessment.articleId, lenses: lensesMarker });
       }
 
+      // Intenção e funil pela SERP, com a participação de cada intenção (4 lentes quando houver).
+      const leituraDaIntencao = leituraDasLentes ?? serpIntentReadingOf([{ members }]);
       const saved = await saveArticleFormationSerpAssessment(pipelineContext, {
         candidateRef: assessment.articleId,
         territoryRef,
@@ -1159,6 +1163,8 @@ export async function handleArchitectFormationSerp(request: Request, authorizedC
           groupReason: interpretation.group.reason,
           outsiders: interpretation.group.outsiders.map(item => ({ ...item })),
           observedIntent: interpretation.observedIntent,
+          observedFunnel: leituraDaIntencao.funnel,
+          intentShares: { ...leituraDaIntencao.shares, lenses: leituraDaIntencao.lenses, results: leituraDaIntencao.results },
           dominantType: interpretation.dominantType,
           viability: interpretation.viability.level,
           viabilityText: interpretation.viability.text,

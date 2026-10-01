@@ -320,7 +320,7 @@ test("14 · o CHECK de state no schema é de comprimento, não de vocabulário f
 test("15 · nenhum consumer existente enxerga um item territorial", () => {
   // Toda leitura da tabela precisa estar estreitada por stage ou subject_type.
   const readers: Array<[string, string]> = [
-    ["lib/server/editorial-repositories.ts", 'in("stage", ["radar", "planner"])'],
+    ["lib/server/editorial-repositories.ts", 'eq("stage", "radar")'],
     ["lib/server/arquiteto-workspace.ts", 'eq("subject_type", "keyword")'],
     ["lib/server/arquiteto-territory-store.ts", 'eq("subject_type", TERRITORY_SUBJECT_TYPE)'],
   ];
@@ -329,11 +329,11 @@ test("15 · nenhum consumer existente enxerga um item territorial", () => {
   }
 
   // O consumer de state com vocabulário fechado (allowed[item.state]) só recebe
-  // RadarItem, e RadarItem só nasce de stage radar.
+  // RadarItem, e RadarItem só nasce de stage radar — a consulta lê só esse estágio.
   const flow = repoFile("lib/editorial/operational-flow.ts");
   assert.match(flow, /allowed\[item\.state\]/);
   const editorial = repoFile("lib/server/editorial-repositories.ts");
-  assert.match(editorial, /row\.stage === "radar"/);
+  assert.match(editorial, /\.eq\("stage", "radar"\)/);
 
   // A list() genérica de pipeline-repositories não estreita nada — e está morta.
   const pipeline = repoFile("lib/server/pipeline-repositories.ts");

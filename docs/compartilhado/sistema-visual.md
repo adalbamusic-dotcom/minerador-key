@@ -145,7 +145,7 @@ aliases semânticos em `app/globals.css`:
 | Papel | Alias | Token base | Valor | Onde se aplica |
 | --- | --- | --- | --- | --- |
 | identidade nova | `identity-new` | `module-accent` | `#10DDE0` | endereço de conteúdo ainda não publicado |
-| identidade publicada | `identity-published` | `action-accent` | `#193cb8` | **link e URL** de conteúdo declarado como publicado |
+| identidade publicada | `identity-published` | `blue-500` do Tailwind (não o `action-accent`) | `oklch(62.3% 0.214 259.815)` | **link e URL** de conteúdo declarado como publicado |
 | identidade do slug | `identity-slug` | `context-accent` | `#12A1E0` | **slug e canonical**, em qualquer estado |
 | keyword | `keyword` | — (valor próprio) | `#e0fbff` | toda keyword renderizada: planilha, cards, painéis, listas e detalhes |
 
@@ -162,7 +162,29 @@ Regras:
   natureza quando o conteúdo é publicado — mudam de imutabilidade, e isso é
   comunicado por selo, não recolorindo o dado;
 - keyword mantém a mesma cor em qualquer módulo — o papel é da keyword, não da
-  tela onde ela aparece.
+  tela onde ela aparece;
+- **link publicado tem uma cor só em toda a plataforma: `identity-published`,
+  o `blue-500` do Tailwind** (decisão do dono, 2026-10-01). O `#193cb8` do
+  `action-accent` era escuro demais para ler um link sobre o fundo escuro. A
+  troca é só do papel do link: o `action-accent` da raiz continua `#193cb8`
+  para ação e seleção forte;
+- **keyword e slug nunca aparecem cortados** (`…`), em nenhuma tela — Minerador,
+  Arquiteto, Radar e as demais (decisão do dono, 2026-10-01). São o dado mais
+  importante da plataforma e sempre aparecem inteiros: sem espaço, quebram
+  linha. A regra é raiz, em `app/globals.css`, sobre `.text-keyword` e
+  `.text-identity-slug`, fora de qualquer `@layer` — por isso vence
+  `truncate`, `line-clamp-*` e `whitespace-nowrap` escritos no componente.
+  Consequência: toda keyword usa `text-keyword` e todo slug ou canonical usa
+  `text-identity-slug`; texto de keyword com outra classe escapa da regra e é
+  defeito;
+- **toda sobra de largura de uma planilha vai para a coluna da keyword**
+  (dono, 2026-10-01). A coluna da keyword nunca fica espremida com espaço
+  livre à direita: nas mesas com colunas redimensionáveis
+  (`useKeywordTableResponsiveWidths`) ela é a coluna `fill` — recebe toda a
+  sobra e é a última a encolher —, e na `OperationalDataGrid` (Radar,
+  Planejador, Publicações) é a coluna com `fill: true`. Cada coluna do
+  cabeçalho tem a sua própria `<col>`/largura: coluna nova sem largura empurra
+  as larguras das seguintes e joga a sobra na última.
 
 **`#e0fbff` é cor oficial da paleta e existe exclusivamente para a keyword.**
 Não é alias de outro papel: a keyword é o dado central do produto e não pode

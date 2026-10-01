@@ -9,6 +9,15 @@ export type ImprovementKeyword = {
   id: string; keyword: string; volume: number | null; volumeValidated: boolean;
   signals: KeywordDnaSignals; ownerId: string | null; published: boolean;
   territoryRef: string | null; external: boolean;
+  /**
+   * Volume antigo (outra era/provider) medido AGORA no Google Ads, no preparo,
+   * só em leitura. "Gravar melhorias" grava a medição no Minerador antes de
+   * comparar a composição; sem isso a keyword nunca contava como volume
+   * validado e a principal publicada sem volume ficava para sempre.
+   */
+  volumePendingWrite?: boolean;
+  /** Já medida no Google Ads (mesmo sem média): não é medida de novo no preparo. */
+  googleAdsMeasured?: boolean;
 };
 export type ImprovementTarget = {
   id: string; kind: "published" | "subject"; theme: string; note: string | null;
@@ -34,6 +43,12 @@ export type ImprovementProposal = {
   aiReasons?: { keywordId: string; reason: string }[];
   /** A composição escolhida pela IA ainda não tem as quatro lentes no cache: passo 2 (pago, com prévia). */
   needsValidation?: boolean;
+  /**
+   * "Atualizar o DNA com a SERP" (2026-10-01): a composição não muda; o DNA
+   * aprovado ganha a classificação, a intenção e o funil que a SERP vigente
+   * dele decidiu. `recordVersionId` é o parecer (`serpAssessmentRef`) lido.
+   */
+  serpRefresh?: { recordVersionId: string; intent: string; funnel: string; detail: string };
 };
 /**
  * Uma escolha da IA já conferida pelas barreiras do código (a IA tem a menor
@@ -318,7 +333,16 @@ export function planArticleImprovements(input: {
     const added = [...owners].filter(([id, owner]) => owner === target.id && !kept.includes(id)).map(([id]) => id);
     const candidates = [...kept, ...added].filter(id => eligible.some(e => e.targetId === target.id && e.keywordId === id)).map(id => byId.get(id)!).sort((a, b) => (eligible.find(e => e.targetId === target.id && e.keywordId === a.id)?.tier ?? 2) - (eligible.find(e => e.targetId === target.id && e.keywordId === b.id)?.tier ?? 2) || b.volume! - a.volume!);
     const old = byId.get(target.primaryId ?? "");
-    const needsPrimary = (target.kind === "subject" || target.post === "free") && (!old?.volumeValidated || (candidates[0]?.volume ?? 0) > (old.volume ?? 0));
+    /*
+     * Publicado: só a principal SEM volume é Livre para trocar (dono,
+     * 2026-10-01: "só as que têm volume estão travadas ao slug"). Antes, uma
+     * candidata com mais volume trocava a principal com volume ("marketing
+     * digital para dentistas" 70 → "marketing para dentistas" 210). O Assunto
+     * segue como antes: ganha a principal de maior volume.
+     */
+    const needsPrimary = target.kind === "subject"
+      ? !old?.volumeValidated || (candidates[0]?.volume ?? 0) > (old.volume ?? 0)
+      : target.post === "free" && !old?.volumeValidated;
     const principalId = needsPrimary ? candidates[0]?.id ?? target.primaryId : target.primaryId;
     // Avoid churn: a weak support leaves only when there is a real replacement.
     const weak = target.memberIds.filter(id => !kept.includes(id));
@@ -405,8 +429,69 @@ export function planArticleImprovements(input: {
     }
     guardCannibalPairs(input.targets, proposals, byId, (i, j) => fresh.has(i) || fresh.has(j));
   }
+  /*
+   * 5 · PRINCIPAL SEM VOLUME COM POSTO LIVRE: troca pela keyword do artigo
+   * com mais sentido com o slug (`volumelessPrincipalSwap`). Aqui, só para
+   * quem ficou sem proposta pronta; quando a IA ou a lista propõem e a SERP
+   * não confirma, o servidor tenta esta troca depois (refreshPlan).
+   */
+  input.targets.forEach((target, index) => {
+    if (proposals[index].status === "ready") return;
+    const troca = volumelessPrincipalSwap(target, byId, input.ranking?.[target.id], id => observations.get(`${target.id}:${id}`)?.contradiction === true);
+    if (troca) proposals[index] = troca;
+  });
   for (const p of proposals) { p.exclusions = [...new Set(p.exclusions)]; p.reasons = [...new Set(p.reasons)]; }
   return proposals;
+}
+
+/*
+ * PRINCIPAL SEM VOLUME COM POSTO LIVRE TROCA PELA KEYWORD DO PRÓPRIO ARTIGO
+ * COM MAIS SENTIDO COM O SLUG (dono, 2026-10-01).
+ *
+ * Só a principal com volume fica travada ao slug; a que não tem volume é Livre
+ * para ser trocada. Assume a keyword com volume JÁ NO ARTIGO (não publicada,
+ * sem outro dono) que tem mais sentido com o slug — não a de maior volume:
+ * primeiro a que leva o núcleo do slug, depois a que divide mais palavras com
+ * ele (sinônimos atrair/captar, paciente/cliente), depois a mais enxuta; o
+ * volume só desempata. Sem palavra em comum com o slug, não troca. A página
+ * fica secundária: nada entra nem sai, URL, slug e canonical ficam. Ao
+ * gravar, a SERP desta composição é relida pelo cache e decide.
+ */
+export function volumelessPrincipalSwap(
+  target: ImprovementTarget,
+  byId: ReadonlyMap<string, ImprovementKeyword>,
+  ranking?: boolean | null,
+  contradicts: (keywordId: string) => boolean = () => false,
+): ImprovementProposal | null {
+  if (target.kind !== "published" || target.post !== "free" || !target.territoryRef) return null;
+  const atual = byId.get(target.primaryId ?? "");
+  if (atual?.volumeValidated && (atual.volume ?? 0) > 0) return null;
+  const doSlug = aliased(slugWords(targetSubjectText(target)), CORE_ALIASES);
+  const nucleo = aliased(slugCoreWords(targetSubjectText(target)), CORE_ALIASES);
+  const afinidade = (k: ImprovementKeyword) => {
+    const palavras = aliased(slugWords(k.keyword), CORE_ALIASES);
+    const comuns = [...palavras].filter(word => doSlug.has(word)).length;
+    return { nucleo: nucleo.size > 0 && [...nucleo].every(word => palavras.has(word)) ? 1 : 0, comuns, precisao: palavras.size ? comuns / palavras.size : 0 };
+  };
+  const melhor = target.memberIds
+    .map(id => byId.get(id))
+    .filter((k): k is ImprovementKeyword => Boolean(k) && k!.id !== target.primaryId && !k!.published && k!.volumeValidated && (k!.volume ?? 0) > 0 && (!k!.ownerId || k!.ownerId === target.id) && !contradicts(k!.id))
+    .map(k => ({ k, a: afinidade(k) }))
+    .filter(item => item.a.comuns > 0)
+    .sort((x, y) => y.a.nucleo - x.a.nucleo || y.a.comuns - x.a.comuns || y.a.precisao - x.a.precisao || (y.k.volume ?? 0) - (x.k.volume ?? 0))[0]?.k;
+  if (!melhor) return null;
+  return {
+    targetId: target.id, kind: target.kind, theme: target.theme,
+    currentPrimaryId: target.primaryId, principalId: melhor.id, memberIds: [...target.memberIds],
+    addIds: [], removeIds: [], transfers: [], angle: angleOf(melhor), exclusions: [],
+    reasons: [
+      "URL, slug, canonical e Silo publicados preservados.",
+      `Principal sem volume com Posto Livre: “${melhor.keyword}” (${melhor.volume}), já no artigo e a mais próxima do slug em sentido e palavras, assume; “${atual?.keyword ?? target.theme}” fica como secundária. Nada entra nem sai.`,
+      "A SERP desta composição é relida pelo cache ao gravar e decide.",
+      ...(ranking === true ? ["A página ranqueia hoje para a frase antiga: risco de ranking é aviso, não revoga o Posto Livre."] : []),
+    ],
+    status: "ready", evidenceBasis: "serp",
+  };
 }
 
 /**

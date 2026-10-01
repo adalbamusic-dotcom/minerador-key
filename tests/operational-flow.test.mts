@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { applyGridQuery, defaultGridView, gridViewStorageKey, reorderIds, saveGridView, selectionState, selectAllVisible } from "../lib/editorial/data-grid.ts";
 import { articleApprovalIssues, createDevelopmentInvitation, createWriterPublication,
-  effectiveVersionStatus, importApprovedWriterItems, importArticlesToRadar, importRadarToPlanner, mergeVersionEvents, setRadarState, siloDnaPreflight, validateInvitationAccess } from "../lib/editorial/operational-flow.ts";
+  effectiveVersionStatus, importApprovedWriterItems, importArticlesToRadar, mergeVersionEvents, setRadarState, siloDnaPreflight, validateInvitationAccess } from "../lib/editorial/operational-flow.ts";
 import { assertNoImplicitSensitiveAccess, assertOperationalInvitationAccess } from "../lib/server/operational-permissions.ts";
 import { ContentDocumentSchema, type ArticleDNA, type SiloDNA, type VersionEnvelope } from "../lib/arquiteto/contracts.ts";
 import { createStatusEvent, createVersionEnvelope } from "../lib/arquiteto/versioning.ts";
@@ -14,10 +14,6 @@ import { ArchitectRecoverySnapshotSchema, ArchitectReviewRecoverySchema, archite
 
 const operationalModuleSources = async () => (await Promise.all([
   readFile(new URL("../modules/radar/radar-page.tsx", import.meta.url), "utf8"),
-  readFile(new URL("../modules/planejador/planner-page.tsx", import.meta.url), "utf8"),
-  readFile(new URL("../modules/planejador/planner-cockpit-workspace.tsx", import.meta.url), "utf8"),
-  readFile(new URL("../modules/planejador/content-plan-editor.tsx", import.meta.url), "utf8"),
-  readFile(new URL("../modules/publicacoes/publications-page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../modules/publicacoes/publications-workspace.tsx", import.meta.url), "utf8"),
   readFile(new URL("../modules/redator/writer-page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../components/editorial/professional-writer.tsx", import.meta.url), "utf8"),
@@ -69,7 +65,6 @@ test("artigo aprovado sem Silo não é projetado ao Radar nem ao Planejador", as
   const radar = importArticlesToRadar([], [version], "brand-1");
 
   assert.equal(radar.length, 0);
-  assert.equal(importRadarToPlanner([], radar, "brand-1").length, 0);
 
   const withSilo = await articleVersion(articlePayload({ siloId: "silo-1" }));
   const complete = importArticlesToRadar([], [withSilo], "brand-1");
@@ -82,11 +77,11 @@ test("Radar importa sem duplicar e somente a marca correta", async () => {
   assert.equal(first.length, 1); assert.equal(second.length, 1); assert.equal(importArticlesToRadar([], [version], "brand-2").length, 0);
 });
 
-test("Radar exige revisão antes da aprovação e Planejador importa somente aprovados", async () => {
+test("Radar exige revisão antes da aprovação", async () => {
   const version = await articleVersion(); let radar = importArticlesToRadar([], [version], "brand-1");
   radar = setRadarState(radar, [radar[0].id], "approved"); assert.equal(radar[0].state, "research_pending");
   radar = setRadarState(radar, [radar[0].id], "awaiting_approval"); radar = setRadarState(radar, [radar[0].id], "approved");
-  const planner = importRadarToPlanner([], radar, "brand-1"); assert.equal(planner.length, 1); assert.equal(importRadarToPlanner(planner, radar, "brand-1").length, 1);
+  assert.equal(radar[0].state, "approved");
 });
 
 /*
@@ -125,8 +120,7 @@ test("Publicação nasce do ContentDocument v2 e declara origem Radar, sem plano
   assert.equal(publication.articleId, article.payload.articleId);
   assert.equal(publication.state, "draft");
   /* A origem é o Radar, e ela é a única que o registro novo declara. */
-  assert.equal(publication.plannerItemId, null);
-  assert.equal(publication.contentPlanVersionId, null);
+  assert.equal(Object.hasOwn(publication, "contentPlanVersionId"), false, "o plano saiu do contrato");
   assert.equal(publication.radarOrigin?.evidenceBundleHash, "hash-bundle");
   /* `documentId` obrigatório no contrato, mesmo com a coluna nulável no banco. */
   assert.ok(publication.documentId.length > 0);
@@ -227,7 +221,7 @@ test("interface operacional identifica mocks e usa o Redator Tiptap real", async
   const source = await operationalModuleSources();
   const writer = await readFile(new URL("../components/editorial/professional-writer.tsx", import.meta.url), "utf8");
   const architect = await readFile(new URL("../modules/arquiteto/arquiteto-workspace.tsx", import.meta.url), "utf8");
-  assert.match(source, /Importar do Arquiteto/); assert.match(source, /Nenhum artigo importado do Radar/); assert.match(source, /Dados simulados/);
+  assert.match(source, /Importar do Arquiteto/); assert.match(source, /Dados simulados/);
   /*
      * CORTE 3.5 · `Importar do Redator` era o botão local-first de Publicações.
      * Ele gravava a tela antes da resposta do servidor. A entrada passou a ser
@@ -384,7 +378,7 @@ test("recuperação de importações é isolada por marca e cobre todas as etapa
   assert.notEqual(workflowRecoveryStorageKey("actor-1", "brand-1"), workflowRecoveryStorageKey("actor-1", "brand-2"));
   assert.notEqual(workflowRecoveryStorageKey("actor-1", "brand-1"), workflowRecoveryStorageKey("actor-2", "brand-1"));
   const provider = await readFile(new URL("../components/editorial-pipeline-context.tsx", import.meta.url), "utf8");
-  for (const field of ["architectImportedKeywordIds", "articleVersions", "radarItems", "plannerItems", "documents", "operationalPublications"]) {
+  for (const field of ["architectImportedKeywordIds", "articleVersions", "radarItems", "documents", "operationalPublications"]) {
     assert.match(provider, new RegExp(field));
   }
   assert.match(provider, /LocalWorkflowRecoverySchema\.parse/);
@@ -593,7 +587,7 @@ test("Arquiteto fixa cabeçalho, numera artigos e respeita a ordem operacional",
 test("recuperação geral mantém anotações da Revisão IA após reload", async () => {
   const contracts = await readFile(new URL("../lib/editorial/persistence-contracts.ts", import.meta.url), "utf8");
   const provider = await readFile(new URL("../components/editorial-pipeline-context.tsx", import.meta.url), "utf8");
-  assert.match(contracts, /aiReviewAnnotations: z\.array\(AIReviewAnnotationSchema\)\.default\(\[\]\)/);
+  assert.match(contracts, /aiReviewAnnotations: toleratedArray\(AIReviewAnnotationSchema\)\.default\(\[\]\)/);
   assert.match(provider, /aiReviewAnnotations: recovered\.aiReviewAnnotations/);
   assert.match(provider, /aiReviewAnnotations: current\.aiReviewAnnotations/);
 });

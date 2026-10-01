@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createMockPlanAndDocument } from "../lib/editorial/providers.ts";
+import { createMockDocument } from "../lib/editorial/providers.ts";
 import { OperationalPublicationSchema } from "../lib/editorial/operational-flow.ts";
 import { PublicationActionRequestSchema } from "../lib/publicacoes/contracts.ts";
 import { applyPublicationAction } from "../lib/publicacoes/domain.ts";
@@ -10,7 +10,7 @@ const now = "2026-07-20T12:00:00.000Z";
 
 function publication(overrides: Record<string, unknown> = {}) {
   return OperationalPublicationSchema.parse({
-    id: "publication:article-1", brandId: "brand-1", articleId: "article-1", plannerItemId: "planner:article-1", contentPlanVersionId: "plan:1", documentId: "document:article-1",
+    id: "publication:article-1", brandId: "brand-1", articleId: "article-1", radarOrigin: { analysisVersionId: "analysis-1", evidenceBundleHash: "bundle-1" }, documentId: "document:article-1",
     title: "Artigo de teste", slug: "artigo-de-teste", siloId: "silo-1", hierarchy: "suporte", state: "ready_to_export", responsible: null, destination: null,
     createdAt: now, updatedAt: now, origin: "local", lockVersion: 1, unitType: "article", ...overrides,
   });
@@ -46,7 +46,7 @@ test("reedição e exportação de atualização preservam URL publicada", () =>
 });
 
 test("exportação gera arquivo real determinístico e não inventa URL", async () => {
-  const { document } = await createMockPlanAndDocument("brand-1");
+  const { document } = await createMockDocument("brand-1");
   const current = publication({ documentId: document.id });
   const markdown = await createPublicationExport(current, document, "markdown");
   assert.match(markdown.fileName, /artigo-de-teste\.md$/); assert.match(markdown.content, /title: "Artigo de teste"/); assert.match(markdown.content, /published_url: ""/);

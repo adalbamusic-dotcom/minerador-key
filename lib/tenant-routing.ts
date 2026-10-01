@@ -1,13 +1,13 @@
 export const TENANT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BRAND_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export type TenantRouteModule = "marca" | "conta" | "minerador" | "arquiteto" | "radar" | "planejador" | "redator" | "publicacoes";
+export type TenantRouteModule = "marca" | "conta" | "minerador" | "arquiteto" | "radar" | "redator" | "publicacoes";
 export interface ParsedBrandRef { brandSlug: string; brandId: string; }
 export interface TenantRouteInput { brandId: string; brandName: string; module: TenantRouteModule; }
 
 const modulePaths: Record<TenantRouteModule, string> = {
   marca: "/", conta: "/conta", minerador: "/minerador", arquiteto: "/arquiteto", radar: "/radar",
-  planejador: "/planejador", redator: "/redator", publicacoes: "/publicacoes",
+  redator: "/redator", publicacoes: "/publicacoes",
 };
 const safeSwitchQuery = new Set(["secao", "painel", "tab", "view", "q", "search", "filter", "sort", "order"]);
 

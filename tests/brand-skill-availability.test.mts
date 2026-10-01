@@ -8,7 +8,7 @@ import { careGlowSkillFile } from "./care-glow-skill.fixture.ts";
 
 const brandId = "09762023-d0d4-4c24-b34e-d0fdfd43f891";
 const now = "2026-08-28T12:00:00.000Z";
-const modules: SkillDefinitionModule[] = ["minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes"];
+const modules: SkillDefinitionModule[] = ["minerador", "arquiteto", "radar", "redator", "publicacoes"];
 
 async function draftVoice(inputBrandId = brandId) {
   return importBrandSkill({

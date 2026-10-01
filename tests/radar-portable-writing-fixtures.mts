@@ -21,7 +21,7 @@ import {
 import type { SerpSearchInput } from "../lib/radar/serp/contracts.ts";
 import type { RadarExtractionPage } from "../lib/radar/analysis-contracts.ts";
 import type { RadarArticleResearchContext } from "../lib/radar/article-research-context.ts";
-import type { RadarPlannerHandoffReadiness } from "../lib/radar/planner-handoff.ts";
+import type { RadarHandoffReadiness } from "../lib/radar/handoff-readiness.ts";
 import type { RadarEditorialProfileModel } from "../lib/radar/editorial-profile-model.ts";
 
 /*
@@ -180,7 +180,7 @@ export const DOSSIE = buildRadarEvidenceBundle({
   editorialOutputs: [],
 });
 
-export const PRONTO: RadarPlannerHandoffReadiness = { ready: true, headline: "Pacote para planejamento pronto", blocks: [] };
+export const PRONTO: RadarHandoffReadiness = { ready: true, headline: "Pacote para o Redator pronto", blocks: [] };
 
 const ANALISE = {
   serpSnapshotId: ID_DO_REGISTRO,
@@ -291,7 +291,7 @@ const modeloDoPerfil = (patch: Partial<RadarEditorialProfileModel> = {}): RadarE
   evidenceNeeds: [],
   specialistNeeds: [],
   limitations: ["Benefícios e atributos do PDP não foram lidos nesta investigação."],
-  readiness: { state: "READY", label: "Pronto para o Planejador", reasons: [] },
+  readiness: { state: "READY", label: "Pronto para o Redator", reasons: [] },
   promotionLinks: [],
   affiliateDisclosureRequired: false,
   comparisonCriteria: ["Faixa de preço", "Nota de avaliação"],

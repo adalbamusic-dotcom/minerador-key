@@ -1,3 +1,305 @@
+## Troca da principal sem volume como reserva da leitura da IA — 2026-10-01
+
+## Links internos: cópia sobre a composição vigente e Silos marcados — 2026-10-01
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Causa do "nenhum artigo ganhou link":** a sucessora do grafo copiava o aprovado inteiro
+  (nós, versões dos artigos, SiloDNA/SiloPage de base). Depois da troca de principal, cada
+  "Processar links" e cada aprovação continuavam descrevendo as versões ANTIGAS, e o portão
+  do Radar recusava os mesmos artigos. A aprovação também não apaga a working copy do servidor,
+  então o reprocessamento caía nela, com a mesma base velha, e a aprovação dizia "nada novo a confirmar".
+- **Agora:** `abrirCopiaVigente` monta a base pela composição atual do Silo (`linksBasisFor`).
+  Cópia existente com base antiga é rebaseada (`lib/arquiteto/internal-link-graph-rebase.ts`):
+  ficam só as relações cujas pontas existem e cujo tipo combina com os papéis atuais; o resto sai
+  com motivo, a derivação estrutural recompõe e a IA refaz as âncoras.
+- **Seleção:** "Processar links" processa o Silo de cada linha marcada, um de cada vez (sem
+  marcação, o Silo do seletor). Silo sem SiloDNA/SiloPage consolidados é avisado e pulado.
+- **Concorrência:** a cadeia usa o lock confirmado da própria cópia, não o estado da aba.
+- **Segunda rodada (mesmo dia):** a seleção não chegava a nenhum Silo ("N artigo(s) marcado(s) ainda sem Silo"):
+  a linha lê `siloId` da keyword, que fica vazio quando o Silo é decidido na fase Silos. Agora o Silo da linha
+  vem do SiloDNA que lista o artigo (`linksSiloOfArticle`), e a mesma leitura serve ao efeito de seguir a seleção.
+- **Publicados sem papel e sem aprovação:** linha publicada presa a uma formação antiga da mesa (`candidateRef`
+  que não casa) ou com a principal trocada por outra keyword não achava o próprio ArticleDNA. Agora o publicado
+  cai no ArticleDNA da página (`publishedIdentityRef`) e a principal nova também localiza o artigo.
+- Testes: `tests/arquiteto-links-rebase-composicao.test.mts` (em `test:arquiteto`), suíte
+  do Arquiteto 2720/0, testes estruturais de links 51/0, `test:agent` 65/0.
+- O aviso "Não foi possível ler o status operacional gravado (HTTP 500)" foi passageiro: a mesma
+  rota respondeu 200 na releitura (instabilidade do Supabase).
+
+**Verificado no código e confirmado por teste (lib). A reserva no servidor não tem teste de ponta
+a ponta. Validado na tela: não.**
+
+- **Situação nos dados:** os 2 publicados ainda sem volume (“instagram não traz pacientes”, “como
+  atrair pacientes para clínica de estética”) receberam proposta da leitura da IA com keyword
+  nova de fora. A SERP dela não confirmou, e a linha ficou “evidência insuficiente”, então a troca
+  interna nunca era tentada.
+- **Correção:**
+  - a troca virou `volumelessPrincipalSwap` (lib);
+  - no planejador, a IA continua vindo primeiro;
+  - no servidor (`refreshPlan`), quando a proposta da IA ou da lista cai na SERP, a troca interna
+    é conferida pelo cache, sem custo, e entra no lugar quando a SERP confirma.
+- **Gatilho:** “Melhorar publicados” → “1 · Buscar keywords (grátis)” → “3 · Gravar melhorias”.
+  O “Concluir formação” não troca a principal de publicado.
+
+## Ficha da principal trocada; avisos do fechamento — 2026-10-01
+
+**Verificado no código e confirmado por teste. Validado na tela: não.** O Arquiteto local
+respondeu 503/500 intermitentes, o que coincide com o incidente do Supabase.
+
+- **Ficha:** o cartão “Principal” é a principal do ArticleDNA. A página publicada vem logo
+  abaixo como “Página publicada · secundária (URL, slug e canonical)”. Antes a página aparecia
+  como “PRINCIPAL”, sem volume, e a principal real como “PRINCIPAL 1”.
+- **“A versão anterior informada não corresponde à versão canônica vigente”:** o fechamento
+  gravava a sucessora com a versão que a tela tinha. A melhoria já tinha gravado outra no
+  servidor. `materializeLegacyArticleSiloIds` agora relê o acervo e os status remotos antes de
+  gravar.
+- **“O Silo já tem par canônico…” (uma vez por Silo a cada Concluir):** nos dados, os 4 artigos
+  concluídos já estão no SiloDNA dos seus Silos. Quando o par já cobre todos os artigos
+  concluídos, não há aviso. Quando um artigo concluído não estiver no SiloDNA de um Silo fechado,
+  o aviso o nomeia: incluí-lo pede versão nova do SiloDNA, que ainda não é automática.
+- **Testes:** `test:arquiteto` 2717, `:dom` 17 e `test:agent` 65, sem falhas.
+
+## Publicado sai do Concluir; a tabela do publicado volta a bater com o DNA — 2026-10-01
+
+**Verificado no código e confirmado por teste. Conferido nos dados (só leitura). Validado na
+tela: não.**
+
+- **Recusa do Concluir:** “1 artigo passa do teto de 6” e “1 formação com conflito aberto” eram
+  dois publicados, porque a formação da mesa deles cresceu além do DNA aprovado:
+  - “marketing digital para dentistas”: 9 keywords e duas principais na mesa, 4 no DNA;
+  - “como atrair pacientes para clínica”: 7 keywords e duas principais na mesa, 4 no DNA.
+- **Concluir:** o publicado selecionado sai da conclusão com o caminho dito (“Melhorar
+  publicados”). Os artigos novos selecionados seguem.
+- **Melhorar publicados:**
+  - as keywords da formação da mesa fora do DNA passam a ser candidatas do próprio artigo;
+  - entram as que a SERP e o sentido sustentam, até o teto de 6;
+  - ao gravar, as que sobram são liberadas para “Keywords não agrupadas”, nomeadas na mensagem;
+  - a principal com volume fica travada ao slug.
+- **Testes:** `test:arquiteto` 2717, `:lentes` 76 e `test:agent` 65, sem falhas.
+
+## Principal sem volume e Livre troca pela keyword mais próxima do slug — 2026-10-01
+
+**Verificado no código, confirmado por teste e conferido nos dados (só leitura). Validado na
+tela: não.**
+
+- **Dados:** a atualização com a SERP gravou 17 DNAs. Dos 21 publicados com DNA, 19 já têm a
+  principal com volume. Sobram 2 sem volume e com Posto Livre:
+  - “instagram não traz pacientes”, com “como atrair clientes pelo instagram”;
+  - “como atrair pacientes para clínica de estética”, com “como atrair os clientes”.
+- **Regra nova no planejador** (`planArticleImprovements`, passo 5): o publicado Livre cuja
+  principal não tem volume troca pela keyword com volume já no artigo que tem mais sentido com o
+  slug. A ordem de escolha:
+  1. a que leva o núcleo do slug;
+  2. a que divide mais palavras com o slug (com sinônimos);
+  3. a mais enxuta.
+
+  O volume só desempata. Sem nenhuma palavra em comum com o slug, não há troca. Nada entra nem
+  sai do artigo.
+- **Tela:** a linha e o “Resumo do artigo” mostravam a página publicada como Principal, com
+  “Volume —”, mesmo com o DNA já trocado. Agora mostram a principal do ArticleDNA
+  (`displayPrincipalObj`). A página segue como identidade publicada.
+- **Aviso do Processar:** “Bloqueado para concluir” não lista mais publicados, que nunca passam
+  pelo Concluir.
+- **Testes:** `test:arquiteto` 2716, `:lentes` 75, `:dom` 17 e `test:agent` 65, sem falhas.
+
+## “Atualizar o DNA com a SERP” no Melhorar publicados — 2026-10-01
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Quando a linha aparece pronta:** publicado ou Assunto com ArticleDNA aprovado, cujo parecer
+  (`serpAssessmentRef`) cumpre as três condições:
+  - descreve a composição do DNA;
+  - está completo nas 4 lentes;
+  - é aceito.
+
+  E o DNA está sem classificação, ou com intenção/funil diferentes do que a SERP decidiu.
+- **Gravação:**
+  - versão nova aprovada com a classificação e o `mainIntent`, `intentProfile` e
+    `journeyStage` da SERP;
+  - a formação no marcador como concluída;
+  - tudo relido.
+
+  A composição, a URL, o slug e o canonical não mudam, e não há custo.
+- **Caso real:** “tráfego pago vs orgânico para clínica de estética”. O DNA v3 estava sem
+  classificação e com intenção “unknown”; a SERP das 4 lentes diz “informacional”.
+- **Código:** `serpRefreshCheck`, `planSerpRefreshes` e `applySerpRefresh`, em
+  `lib/server/arquiteto-article-improvement.ts`. A proposta ganhou o campo aditivo
+  `serpRefresh`, e o painel mostra a linha.
+- **Testes:** `test:arquiteto` 2714, `:lentes` 75, `:servidor` 99, `:dom` 17 e `test:agent` 65,
+  sem falhas.
+
+## SERP com a última palavra; Radar pela SERP do DNA aprovado — 2026-10-01
+
+**Verificado no código e confirmado por teste. Conferido nos dados reais, só leitura pela API.
+Validado na tela: não.**
+
+- **Intenção e funil pela SERP** (spec §40):
+  - `serpIntentReadingOf` lê as 4 lentes e calcula a participação de cada intenção e o funil;
+  - o parecer grava `observedFunnel` e `intentShares`;
+  - a classificação dá a última palavra à SERP;
+  - `applySerpDecisionToArticle` grava a decisão no ArticleDNA, no Concluir formação e no Gravar
+    melhorias.
+- **Recusas do “Pronto para Radar”** em “marketing digital para dentistas” e “agência de
+  marketing para cosméticos”:
+  - **Causa:** o portão conferia a SERP do candidato da mesa. Nos dois artigos, a mesa tinha
+    mudança pendente do “Reforçar”: uma keyword a mais em cosméticos; 9 keywords e duas principais
+    em dentistas.
+  - **O que os dados mostram:** o parecer da aprovação de cada DNA descreve exatamente a
+    composição do DNA, nas 4 lentes, COMPATIBLE e aceito.
+  - **Correção:** o portão do Radar lê esse parecer (`resolveApprovedArticleSerpGate`). A
+    releitura do “Pronto para Radar” só relê quem não o tem.
+- **Publicado sem caminho** (“tráfego pago vs orgânico”):
+  - **Situação:** o DNA v3 já tem a principal trocada (“trafego organico e pago”). Faltam a
+    classificação e a intenção, que está “unknown”; a SERP das 4 lentes diz “informacional”.
+  - **Correção:** o Processar trata como publicado todo candidato que contém uma página no ar. O
+    Concluir aponta o “Melhorar publicados” em vez de “nenhum artigo pronto”.
+- **Teste novo:** `tests/arquiteto-serp-ultima-palavra.test.mts`.
+- **Testes:** `test:arquiteto` 2714, `:lentes` 74, `:servidor` 99, `:dom` 17 e `test:agent` 65,
+  sem falhas; tsc limpo.
+- **Supabase:**
+  - o painel mostra incidente técnico em investigação;
+  - a organização passou da cota no ciclo anterior, e os projetos ficam restritos a partir de
+    20/10/2026 se continuar acima.
+
+## Keyword com toda a sobra de largura; quatro pendências fechadas — 2026-10-01
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Coluna da keyword espremida:**
+  - **Causa:** “Papel no Silo” entrou no cabeçalho sem a sua `<col>`. Eram 12 colunas e 11
+    larguras, cada largura caía na coluna seguinte e a sobra ia para “Status”.
+  - **Correção:** cada coluna tem a sua largura (`siloRole`). A keyword é a coluna `fill`:
+    recebe toda a sobra e é a última a encolher.
+  - **No Radar:** a `OperationalDataGrid` ganhou `fill` (opcional e aditivo), e a coluna Artigo
+    (keyword) do Radar o usa.
+  - **Contrato:** `sistema-visual.md` §5.0.1.
+- **Intenção “Informativa”:** a classificação do artigo também não reconhecia o rótulo. Toda
+  Principal informativa saía “Ambígua”. Agora a classificação usa a taxonomia do Minerador.
+- **Keyword “Bruto” sem intenção:** o “Gravar melhorias” roda, nos membros sem intenção, a
+  Lógica determinística do Minerador (grátis; intenção, nicho e funil; não aprova) antes de
+  montar o artigo. Aprovar continua no Minerador.
+- **Reforçar publicados:** depois do ArticleDNA, o parecer da SERP passa a responder pela
+  formação da mesa, com o hash esperado e o aceite humano, e a formação entra no marcador como
+  concluída. Fim do “SERP · Não executada”. O vínculo no servidor é
+  `publishedReinforcementSerpBinding`.
+- **Ficha “Silo · Estado”:** passa a ler o SiloDNA do território do artigo
+  (`canonicalSiloDnaForArticle`), não o `siloId` antigo da linha. O pai do artigo também prefere
+  o Silo do território.
+- **Melhoria com DNA existente:** a sucessora recalcula a classificação e as intenções auxiliares
+  da composição nova. O retrato vem de `buildClassificationEvidence` (lib), o mesmo da tela.
+- **Testes:**
+  - `test:arquiteto` 2707, `:lentes` 74, `:servidor` 99, `:dom` 17 e `test:agent` 65, sem
+    falhas;
+  - `identity-keyword-colors` 10.
+- **Não testado contra o banco:** o vínculo real do Reforçar (`publishedReinforcementSerpBinding`)
+  só foi coberto pela porta simulada.
+
+## Seleção das planilhas, link publicado e keyword inteira — 2026-10-01
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.** A tela local
+estava sem sessão, e o dev server não recarregou o CSS.
+
+- **Seleção.** Artigos, Links e a tabela de keywords da aba Silos seguem as mesmas três regras
+  do Minerador (`applyKeywordSelectionClick`):
+  - clique seleciona só a linha clicada;
+  - Ctrl/Cmd alterna a linha;
+  - Shift seleciona da âncora até a linha, na ordem em que as linhas aparecem.
+- **O que estava errado na seleção:**
+  - o clique comum alternava a linha como se o Ctrl estivesse preso;
+  - o Shift movia a âncora para o destino;
+  - um Shift ou Ctrl com tremor virava pintura por arraste e engolia o clique;
+  - na aba Silos, o clique só alternava a linha e não havia Shift.
+- **Shift sem âncora visível** (escondida por filtro) soma a linha sem apagar o resto.
+  Espaço no teclado alterna a linha.
+- **Link publicado** usa uma cor só em toda a plataforma: `identity-published` = `blue-500`. O
+  `action-accent` da raiz continua `#193cb8`. O link publicado da SiloPage, que era teal, passou
+  para essa cor.
+- **Keyword e slug sempre inteiros.** A regra é raiz, em `app/globals.css`, fora de `@layer`:
+  `.text-keyword` e `.text-identity-slug` vencem `truncate` e `line-clamp`. Keywords e slugs que
+  usavam outra classe passaram para `text-keyword` e `text-identity-slug`:
+  - Formação;
+  - Revisão;
+  - Linhas do pipeline;
+  - Sobras;
+  - Reforçar publicados;
+  - SiloPage;
+  - cabeçalho do Silo;
+  - Radar.
+- **Contrato:** `docs/compartilhado/sistema-visual.md` §5.0.1.
+- **Testes:**
+  - `test:arquiteto` 2706, `:lentes` 72, `:servidor` 98, `:dom` 17 e `test:agent` 65, sem
+    falhas;
+  - `identity-keyword-colors` 9/9;
+  - `test:visual-system` 28/29: a falha já existia, é dívida acima da linha de base em Redator,
+    Publicações e no workspace. No HEAD eram 106 e agora são 105.
+
+## Melhoria mede volume antigo; Concluir não deixa pendência no DNA — 2026-10-01 (madrugada)
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- **Por que a melhoria não propôs a troca em “tráfego pago vs orgânico para clínica de
+  estética”:** as keywords do artigo (“tráfego pago e orgânico” 140, “trafego organico e pago”
+  140, “tráfego orgânico” 1000, “oque é trafego organico” 590) vieram de outra era. O volume
+  delas é de outro provider (“Bruto”, origem `previous`) e o planejador só aceita volume do
+  Google Ads (`volume_source = google_ads`). Nenhuma era elegível, e a principal sem volume
+  ficava.
+  - Agora o “Buscar keywords (grátis)” mede essas keywords no Google Ads. São as do artigo e as
+    do mesmo tema, até 300, em leitura grátis. Quem já foi medido no Google Ads não é medido de
+    novo.
+  - O “Gravar melhorias” grava a medição no Minerador antes de comparar a composição, pelo mesmo
+    núcleo do “Medir volume” e com releitura. Se a medição não for gravada, nada é gravado no
+    artigo.
+- **Intenção:**
+  - A lista própria do Arquiteto não conhecia “Informativa”, o rótulo que o Minerador grava, e o
+    ArticleDNA nascia com intenção “unknown”. O Arquiteto passou a usar a taxonomia do
+    Minerador (`normalizeIntentKey`).
+  - “Pendente” é ausência e não vira mais intenção auxiliar. O retrato `legacy:` não inventa
+    “informational”.
+- **SERP “desatualizada” logo depois da melhoria:** o servidor calculava o hash do parecer com
+  outra intenção, diferente da usada pela mesa. Agora os dois usam `articleSerpIntentOf`.
+- **Concluir sem pendência:**
+  - Principal ou slug fora do par KGR candidato não gravam mais “Resolver a divergência do
+    vínculo KGR” em `humanPendingDecisions`, pendência que o servidor recusava no “Pronto para
+    Radar”. O vínculo passa a “não se aplica”, com o par anterior guardado na decisão.
+  - O tipo de unidade derivado fica confirmado, no Concluir e na aprovação dos publicados. A ficha
+    mostra “Artigo · sugerido” em vez de “A definir”.
+  - O texto da política, que estava corrompido (mojibake), foi corrigido.
+- **Continua aberto (dado):** keyword Bruto sem intenção em lugar nenhum segue com intenção
+  desconhecida e “Incompatível”. Isso é a revisão do Minerador (nicho/funil/intenção) por fazer.
+- **Arquivos:**
+  - `lib/server/arquiteto-article-improvement.ts`
+  - `lib/arquiteto/article-improvement.ts`
+  - `lib/arquiteto/intent-profile.ts`
+  - `lib/arquiteto/adapters.ts`
+  - `lib/arquiteto/architecture-confirmation.ts`
+  - `lib/arquiteto/published-reinforcement.ts`
+  - `lib/arquiteto/article-serp-gate.ts`
+  - `modules/arquiteto/arquiteto-workspace.tsx`
+  - catálogo
+- **Testes:** `test:arquiteto` 2706, `:lentes` 72, `:servidor` 98, `:dom` 17 e `test:agent` 65,
+  sem falhas; tsc limpo.
+
+## Links segue a seleção; “Pronto para Radar” relê a SERP velha — 2026-09-30 (noite)
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- O dono processou e aprovou o InternalLinkGraph v2 de Crescimento de Clínicas (14 relações).
+- **“Pronto para Radar” recusado** nos 5 artigos de Crescimento com “a composição mudou depois
+  da coleta”: as melhorias mudaram a composição depois da leitura da SERP. Agora o “Aplicar
+  status → Pronto para Radar” relê essa SERP antes, pelo mesmo caminho do Processar (cache
+  primeiro; lente que falta entra no plano de pagamento, com escolha), e depois marca sozinho
+  (`pendingReadyRetry`).
+- **Links obedece à seleção:** com as linhas marcadas todas de um Silo fechado, o “Silo do grafo”
+  muda para ele. Não troca com alteração não salva nem com operação em curso.
+- “Nenhuma mudança estrutural foi feita…” deixou de ser erro: confirmar um grafo igual ao
+  aprovado avisa que nada mudou.
+- **Aberto (dado, não código):** “tráfego pago vs orgânico para clínica de estética” tem a
+  Principal publicada sem volume (Bruto) e aparece “Incompatível” (intenção comercial
+  investigativa × secundárias informativas). A troca da Principal publicada vai pelo “Melhorar
+  publicados”, que preserva URL, slug e canonical.
+- **Testes:** `test:arquiteto` 2704 e `test:agent` 65, sem falhas.
+
 ## Barra de progresso nos Links internos — 2026-09-30 (noite)
 
 **Verificado no código, confirmado por teste e visto na tela local (carregamento, só leitura).**

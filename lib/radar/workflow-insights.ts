@@ -1,4 +1,4 @@
-import type { RadarAnalysisVersion, RadarPlannerTransfer } from "./analysis-contracts.ts";
+import type { RadarAnalysisVersion, RadarTransferReceipt } from "./analysis-contracts.ts";
 
 export type RadarInvestigationState = "not_started" | "in_progress" | "awaiting_approval" | "approved" | "blocked";
 export type RadarTransferState = "not_sent" | "sent" | "update_available";
@@ -11,7 +11,7 @@ export function deriveRadarInvestigationState(input: { analysis: RadarAnalysisVe
   return "in_progress";
 }
 
-export function deriveRadarTransferState(input: { currentVersionNumber: number; analysisStatus: string | null; transfer: RadarPlannerTransfer | null; fallbackSentVersionNumber?: number | null }) {
+export function deriveRadarTransferState(input: { currentVersionNumber: number; analysisStatus: string | null; transfer: RadarTransferReceipt | null; fallbackSentVersionNumber?: number | null }) {
   const sentVersionNumber = input.transfer?.sourceAnalysisVersionNumber ?? input.fallbackSentVersionNumber ?? null;
   if (sentVersionNumber === null) return { state: "not_sent" as const, sentVersionNumber: null, receipt: false };
   const receipt = Boolean(input.transfer && input.analysisStatus === "approved" && input.currentVersionNumber === sentVersionNumber + 1);

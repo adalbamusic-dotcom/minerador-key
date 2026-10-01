@@ -70,7 +70,8 @@ export type EditorialLibraryRow = {
   deliveryStatus: DeliveryStatus;
   /** O estado cru do documento, para quem precisa da distinção fina. */
   documentStatus: ContentDocument["status"];
-  origin: "radar" | "planner";
+  /* Desde 2026-10-01 (Planejador aposentado) todo documento nasce do Radar. */
+  origin: "radar";
   currentVersionId: string | null;
   updatedAt: string | null;
   /** Só existe quando há registro real de publicação. */
@@ -146,7 +147,7 @@ export function projectEditorialLibrary(input: {
       writerStatus: writerStatusOf(document.status),
       deliveryStatus: deliveryStatusOf(publicacao?.state),
       documentStatus: document.status,
-      origin: (document.schemaVersion === 2 ? "radar" : "planner") as EditorialLibraryRow["origin"],
+      origin: "radar" as const,
       currentVersionId: input.currentVersionByDocument?.[document.id] ?? null,
       updatedAt: input.updatedAtByDocument?.[document.id] ?? publicacao?.updatedAt ?? null,
       publicationStatus: publicacao?.state ?? null,

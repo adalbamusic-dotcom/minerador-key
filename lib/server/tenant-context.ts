@@ -3,7 +3,7 @@ import "server-only";
 import { AuthzError, requireCanonicalSessionProfile, type CanonicalSessionProfile } from "@/lib/server/authz";
 import { TENANT_ID_PATTERN } from "@/lib/tenant-routing";
 
-export const TENANT_MODULES = ["marca", "conta", "minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes"] as const;
+export const TENANT_MODULES = ["marca", "conta", "minerador", "arquiteto", "radar", "redator", "publicacoes"] as const;
 export type TenantModule = (typeof TENANT_MODULES)[number];
 export type TenantRole = "owner" | "brand_admin" | "editor" | "reviewer" | "specialist" | "reader";
 
@@ -58,7 +58,7 @@ async function resolveAgencyBrandAccess(profile: CanonicalSessionProfile, brandI
     const restrictedCapabilities = (restrictions.data || []).map(item => item.capability);
     let capabilities: string[];
     if (isAgencyOwner || membership?.role === "agency_admin") {
-      capabilities = ["brand_data", "brand_collaborators", "brand_dna", "minerador", "arquiteto", "radar", "planejador", "redator", "publicacoes", "activity", "notifications"];
+      capabilities = ["brand_data", "brand_collaborators", "brand_dna", "minerador", "arquiteto", "radar", "redator", "publicacoes", "activity", "notifications"];
     } else {
       const grants = await profile.supabase.from("agency_membership_capabilities").select("capability").eq("membership_id", membership!.id).eq("granted", true);
       if (grants.error) throw new AuthzError(503, "Nao foi possivel validar as capabilities da Agency.");

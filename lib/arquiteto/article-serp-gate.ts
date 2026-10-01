@@ -51,6 +51,22 @@ export type ArticleSerpBase = {
   siloContext: { centralEntity: string | null; macroIntent: string | null };
 };
 
+/**
+ * A INTENÇÃO QUE ENTRA NA PERGUNTA À SERP — UMA FÓRMULA SÓ.
+ *
+ * A mesa calcula o hash esperado com `analise_semantica.intencao_principal ||
+ * intent`; o "Gravar melhorias" calculava com os sinais do KeywordDNA. Em
+ * keyword "Bruto" (análise vazia, coluna "Pendente") as duas davam
+ * "pendente" × nada, e o parecer recém-gravado nascia "desatualizado" na
+ * tela: o "Pronto para Radar" recusava um artigo que acabara de ser aprovado.
+ * Tela e servidor chamam esta função; mudar a fórmula envelhece pareceres.
+ */
+export function articleSerpIntentOf(keyword: { intent?: unknown; analise_semantica?: unknown }): string | null {
+  const semantic = keyword.analise_semantica && typeof keyword.analise_semantica === "object" ? keyword.analise_semantica as Record<string, unknown> : {};
+  const texto = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+  return texto(semantic.intencao_principal) || texto(keyword.intent);
+}
+
 export function articleSerpBaseHash(base: ArticleSerpBase): string {
   const canonical = JSON.stringify([
     base.territoryRef,

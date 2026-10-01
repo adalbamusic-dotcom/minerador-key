@@ -156,21 +156,21 @@ portáteis do CSV.
 
 Não cria ContentPlan nem estrutura final do artigo.
 
-## Planejador — removido do pipeline em 2026-09-18
+## Planejador — aposentado em 2026-10-01
 
-`PLANEJADOR_STAGE = NONE`. Não é etapa, gate, destino de botão, condição de
-prontidão nem parada de navegação, não aparece no menu e não tem estado de
-pipeline. Nenhum artigo novo passa por aqui e **nenhum caminho de escrita nova
-existe por ele**.
+Não existe: sem rota, módulo, artefato, permissão nem capability (SDD
+`docs/compartilhado/sdd-aposentar-planejador-2026-10-01.md`). A remoção lógica
+de 2026-09-18 fechou a escrita; a aposentadoria retirou o resto. Nenhum artigo
+passa por aqui.
 
 O que ele fazia — compilar inteligência aprovada em especificação executável —
 é hoje a fase de planejamento DENTRO do Redator. As funções de planejamento
 inicial de projeto, produto, serviço e campanha serão transferidas para uma aba
 da Marca, onde fazem sentido.
 
-Dados históricos permanecem legíveis: `ContentPlan`, `PlannerItem` e o estado
-`sent_planner` continuam no vocabulário de leitura, e nenhum artigo é movido
-automaticamente. A rota `/planejador` continua respondendo.
+Leitura tolerante só para payload antigo do Radar (campos `planner*` aceitos e
+ignorados). `/{brandRef}/planejador` redireciona para o Radar. O preflight de
+2026-10-01 confirmou zero dados do Planejador no banco.
 
 **Não há migração de conteúdo.** O banco real confirmou zero linhas de
 `ContentPlan`, zero `stage='planner'`, zero `sent_planner`, e as tabelas
@@ -193,8 +193,8 @@ decisões e versões — como ESTRUTURA, não markdown.
 Decide: estrutura final de H2/H3, sequência narrativa, aplicação da evidência
 por seção, links internos e externos, plano de mídia, metadados de SEO finais,
 CTA, instruções de redação, formulação, sintaxe, ritmo e coesão. Pode montar um
-`ContentPlan` interno antes de escrever — ele é artefato de quem escreve, não
-etapa do fluxo.
+plano dentro do próprio `ContentDocument` antes de escrever — `ContentPlan` não
+existe mais como artefato.
 
 Não pode: trocar a keyword principal, reconfigurar o Silo, remover cobertura
 obrigatória, alterar a intenção declarada, alterar slug ou canonical

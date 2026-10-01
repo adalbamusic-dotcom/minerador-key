@@ -1,5 +1,4 @@
 import { contentHash } from "../arquiteto/versioning.ts";
-import type { BrandSkill as LegacyBrandSkill } from "../editorial/operational-contracts.ts";
 import { BrandSkillSchema, type BrandSkillRecord, type BrandSkillReference } from "./brand-skill-contracts.ts";
 import { validateSkillMarkdown, type MarkdownValidationResult } from "./brand-skill-markdown.ts";
 import { findSkillDefinition, requireSkillDefinition, type SkillDefinition, type SkillDefinitionModule } from "./skill-definitions.ts";
@@ -53,5 +52,3 @@ export function resolveBrandSkill(input: { skills: BrandSkillRecord[]; brandId: 
     .find(skill => skill.definitionKey === input.definitionKey) || null;
 }
 export function toBrandSkillReference(skill: BrandSkillRecord): BrandSkillReference { return { brandId: skill.brandId, definitionKey: skill.definitionKey, name: skill.name, originalMarkdown: skill.originalMarkdown, normalizedContent: skill.normalizedContent, structureDiagnostics: skill.structureDiagnostics, sourceFilename: skill.sourceFilename, versionId: skill.versionId || null, version: skill.version, contentHash: skill.contentHash, lifecycleStatus: skill.status, provenance: skill.provenance, consumerModules: consumerModulesOf(skill), applied: false }; }
-/** The only compatibility adapter retained for the legacy Planner contract. */
-export function toLegacyBrandSkill(skill: BrandSkillRecord): LegacyBrandSkill { const definition = requireSkillDefinition(skill.definitionKey); return { id: brandSkillIdentity(skill), brandId: skill.brandId, name: skill.name, description: definition.description, rules: skill.structureDiagnostics.filter(item => item.match !== "not_found").map(item => item.matchedHeading || item.label), status: skill.status === "active" ? "approved" : skill.status === "archived" ? "archived" : "draft", origin: "local" }; }

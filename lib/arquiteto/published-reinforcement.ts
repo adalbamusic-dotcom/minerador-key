@@ -32,6 +32,7 @@
 import { ArticleDNASchema, type ArchitectKeyword, type ArticleDNA, type ProvisionalArticleGroup, type SiloDNA, type VersionEnvelope, type VersionReference } from "./contracts.ts";
 import { articleKeywordReference, deterministicArticleDnaPayload } from "./adapters.ts";
 import { guardPublishedArticleProposal } from "./published-guard.ts";
+import { editorialUnitTypeIsDerived } from "./unit-strategy.ts";
 import { bindArticleParentForMaterialization } from "./article-silo-materialization.ts";
 import { MAX_ARTICLE_KEYWORDS } from "./article-formation.ts";
 import {
@@ -621,8 +622,19 @@ export function withReinforcementKeywords(input: {
 export function withHumanArticleApproval(payload: ArticleDNA, serpAssessmentRef: VersionReference | null): ArticleDNA {
   const alerta = "Arquitetura confirmada por decisão humana (Reforçar publicados); identidade publicada preservada.";
   const referencia = serpAssessmentRef ?? payload.serpAssessmentRef ?? null;
+  /*
+   * A aprovação grava o que decidiu (regra do dono, 2026-09-30): o tipo de
+   * unidade derivado vira confirmado, nada sai daqui "a definir". A decisão
+   * da principal NÃO muda aqui: `primaryKeywordDecision.status = "confirmed"`
+   * significa "troca confirmada" para a régua da troca, e o Posto revisável
+   * do publicado continua sendo o do Minerador.
+   */
+  const unidade = payload.unitClassification && payload.unitClassification.status !== "human_confirmed" && editorialUnitTypeIsDerived(payload.unitClassification)
+    ? { ...payload.unitClassification, status: "human_confirmed" as const }
+    : payload.unitClassification;
   return ArticleDNASchema.parse({
     ...payload,
+    ...(unidade ? { unitClassification: unidade } : {}),
     architectureStatus: "architecture_confirmed",
     ...(referencia ? { serpAssessmentRef: referencia } : {}),
     alerts: payload.alerts.includes(alerta) ? payload.alerts : [...payload.alerts, alerta],

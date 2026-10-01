@@ -17,7 +17,7 @@ import { buildBrandRef } from "@/lib/tenant-routing";
 
 export const CANONICAL_AGENCY_CAPABILITIES = [
   "brand_data", "brand_collaborators", "brand_dna", "minerador", "arquiteto", "radar",
-  "planejador", "redator", "publicacoes", "activity", "notifications",
+  "redator", "publicacoes", "activity", "notifications",
 ] as const;
 
 export type AgencyCapability = typeof CANONICAL_AGENCY_CAPABILITIES[number];

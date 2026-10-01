@@ -110,12 +110,15 @@ import {
   ARTICLE_KGR_LABELS,
   ARTICLE_PROTECTION_LABELS,
   resolveArticleClassification,
+  buildClassificationEvidence,
+  applySerpDecisionToArticle,
   CLASSIFICATION_BLOCKER_LABELS,
   unresolvedClassificationMessage,
   unresolvedClassifications,
   type ClassificationEvidence,
 } from "@/lib/arquiteto/article-classification-closure";
 import { buildRadarHandoffPlan } from "@/lib/arquiteto/radar-handoff-gate";
+import { resolveApprovedArticleSerpGate, type ApprovedSerpRecord } from "@/lib/arquiteto/approved-article-serp-gate";
 import { buildArchitectureWorkingProposal, formatProposalCounters, intentIsKnown, proposalCoversScope, resolveKeywordDnaSignals, type KeywordDnaSignals } from "@/lib/arquiteto/architecture-working-proposal";
 import { detectCandidateOverlap, detectSlugCollisions, reservedForSiloPage, unresolvedCannibalization, type CandidateOverlapRisk } from "@/lib/arquiteto/article-candidate-guards";
 import { describeRadarReadback, verifyRadarHandoffReadback } from "@/lib/arquiteto/radar-handoff-readback";
@@ -152,7 +155,7 @@ import { SERP_LENS_LABELS, describeQualificationLenses, describeSerpLensesMarker
 import { TERRITORIAL_AI_BLOCK_SIZE, TERRITORIAL_AI_KEYWORD_LIMIT, TERRITORIAL_SERP_BLOCK_SIZE, executePaidSerpBlocks, formatSerpBlockProgress, planPaidSerpBlocks, runPaidSerpBlocks, serpBlockPrefix, splitFormationSerpBlocks, splitTerritorialAiQuestions, territorialAiKeywordScope } from "@/lib/arquiteto/serp-blocks";
 import { runProgressiveBatch } from "@/lib/ui/batch-progress";
 import { SerpPaidPlanDialog } from "./serp-paid-plan-dialog";
-import { ARTICLE_SERP_STATE_LABELS, articleSerpBaseHash, articleSerpBaseOf, articleSerpLensesComplete, resolveArticleFormationSerpState, serpWasExecutedFor, summarizeArticleSerpGate, type ArticleSerpGateState } from "@/lib/arquiteto/article-serp-gate";
+import { ARTICLE_SERP_STATE_LABELS, articleSerpBaseHash, articleSerpBaseOf, articleSerpIntentOf, articleSerpLensesComplete, resolveArticleFormationSerpState, serpWasExecutedFor, summarizeArticleSerpGate, type ArticleSerpGateState } from "@/lib/arquiteto/article-serp-gate";
 import { comparePrincipalCandidates, simulateScenarioChange, type ScenarioChange, type ScenarioKeyword } from "@/lib/arquiteto/formation-scenario";
 import { ArticleFormationReviewPanel, type EvidenceState } from "./article-formation-review";
 import { ARTICLE_FORMATION_MARKER_CONTRACT_VERSION, ARTICLE_FORMATION_SCENARIO_LABELS, resolveArticleFormationScenarioState, type ArticleFormationMarkerPayload } from "@/lib/arquiteto/article-formation-marker";
@@ -344,6 +347,7 @@ import { useLocalHistory } from "@/components/editorial/use-local-history";
 import { authenticatedArchitectActor } from "@/lib/arquiteto/f5-integrity";
 import { createInternalLinkGraph, createInternalLinkGraphWorkingCopy, inferInternalLinkGraphRelationType, isInternalLinkGraphRelationCompatible, updateInternalLinkGraphWorkingCopy } from "@/lib/arquiteto/internal-link-graph";
 import { loadInternalLinkGraphWorkingCopy, loadInternalLinkGraphs, persistInternalLinkGraph, persistInternalLinkGraphWorkingCopy, InternalLinkGraphWorkingCopyPersistenceError } from "@/lib/arquiteto/internal-link-graph-persistence";
+import { internalLinkGraphBasisIsCurrent, rebaseInternalLinkGraph } from "@/lib/arquiteto/internal-link-graph-rebase";
 import { ArquitetoExportError, type ArquitetoExportGraph, type ArquitetoExportInput, type ArquitetoExportSilo } from "@/lib/arquiteto/export-source";
 import { buildArquitetoBackup } from "@/lib/arquiteto/backup-export";
 import { buildArquitetoEditorialExport } from "@/lib/arquiteto/editorial-export";
@@ -632,17 +636,27 @@ const LANDING_PURPOSE_LABELS: Record<Exclude<LandingPagePurpose, undefined>, str
  * partir do qual a grade passa a rolar horizontalmente — acima disso ela cabe
  * na área operacional sem barra horizontal.
  */
+/*
+ * UMA <col> POR COLUNA, E A SOBRA É DA KEYWORD (dono, 2026-10-01).
+ *
+ * "Papel no Silo" entrou no cabeçalho sem a sua <col>: eram 12 colunas e 11
+ * larguras, cada largura caía na coluna seguinte e o resto ia para "Status" —
+ * a keyword ficava espremida com a tela sobrando à direita. Agora cada coluna
+ * tem a sua largura, e a keyword é a coluna `fill`: recebe toda a sobra e é a
+ * última a encolher (sistema-visual §5.0.1).
+ */
 const architectColumnWidths: Record<string, number> = {
-  index: 40, selection: 52, expand: 40, article: 168, keyword: 280, keywordCount: 104,
-  articleDefinition: 120, silo: 128, actions: 176, approval: 148, status: 148,
+  index: 40, selection: 52, expand: 40, article: 150, keyword: 320, keywordCount: 104,
+  siloRole: 104, articleDefinition: 120, silo: 128, actions: 176, approval: 132, status: 132,
 };
 const architectColumnConstraints: Record<string, KeywordTableColumnConstraint> = {
   index: { min: 36, max: 64 },
   selection: { min: 44, max: 72 },
   expand: { min: 36, max: 56 },
   article: { min: 120, max: 420, flexible: true },
-  keyword: { min: 180, max: 720, flexible: true },
+  keyword: { min: 240, max: 1600, flexible: true, fill: true },
   keywordCount: { min: 84, max: 200 },
+  siloRole: { min: 88, max: 180 },
   articleDefinition: { min: 96, max: 220 },
   silo: { min: 96, max: 260, flexible: true },
   actions: { min: 132, max: 300, priority: "protected" },
@@ -728,7 +742,7 @@ export default function ArquitetoPage() {
     setArticleVersions: setAcceptedArticleDnas, setSiloVersions: setAcceptedSiloDnas, setSiloPageVersions: setAcceptedSiloPages, addVersionEvents,
     selectedEntityId, setSelectedEntityId, setArchitectImportedKeywordIds, importApprovedToRadar, importApprovedSiloPagesToRadar, radarItems,
     backgroundTasks, runBackgroundTask, consumeBackgroundTask, dismissBackgroundTask, addAiReviewAnnotations, restoreOperationalSnapshot,
-    plannerItems, documents, operationalPublications } = useEditorialPipeline();
+    documents, operationalPublications } = useEditorialPipeline();
 
   // Data
   const [siloOptions, setSiloOptions] = useState<CanonicalSiloOption[]>([]);
@@ -1036,6 +1050,8 @@ export default function ArquitetoPage() {
    * operacionais que vierem — nunca para recortar a visão do motor.
    */
   const [selectedSiloKeywordIds, setSelectedSiloKeywordIds] = useState<ReadonlySet<string>>(new Set());
+  // Âncora do Shift+clique na tabela da aba Silos (a mesma regra das outras planilhas).
+  const siloKeywordAnchorRef = useRef<string | null>(null);
   const [siloWorkingCopies, setSiloWorkingCopies] = useState<SiloWorkingCopy[]>([]);
   const [pendingSiloReview, setPendingSiloReview] = useState<SiloReviewProposal | null>(null);
   const [rejectedSiloReviewIds, setRejectedSiloReviewIds] = useState<Set<string>>(new Set());
@@ -1225,6 +1241,8 @@ export default function ArquitetoPage() {
   const [loading,           setLoading]           = useState(true);
   const [saving,            setSaving]            = useState(false);
   const [updating,          setUpdating]          = useState(false);
+  /* "Pronto para Radar" esperando o render com a SERP relida. */
+  const [pendingReadyRetry, setPendingReadyRetry] = useState(false);
   const [loadingKeywords,   setLoadingKeywords]   = useState(false);
   const architectTasks = useMemo(() => backgroundTasks.filter(task => ["logical_grouping", "keyword_review", "article_dna", "silo_dna", "silo_page"].includes(task.type)), [backgroundTasks]);
   const runningArchitectTask = (type: "logical_grouping" | "keyword_review" | "article_dna" | "silo_dna" | "silo_page") =>
@@ -3112,7 +3130,8 @@ export default function ArquitetoPage() {
   const classificationEvidenceFor = useCallback((input: {
     principalKeywordId: string;
     keywordIds: readonly string[];
-    serpInterpretation: { observedIntent: string } | null;
+    // Funil e participação de cada intenção vêm junto (parecer novo): a SERP tem a última palavra.
+    serpInterpretation: { observedIntent: string; observedFunnel?: string | null; intentShares?: { informacional: number; comercial: number; transacional: number; lenses: number; results: number } | null } | null;
     serpResolved: boolean;
     kgr: ReturnType<typeof readArticleKgrDecision>;
     isPublished: boolean;
@@ -3153,41 +3172,14 @@ export default function ArquitetoPage() {
       };
     };
 
-    const principal = semanticaDe(input.principalKeywordId);
-    const secundarias = input.keywordIds
-      .filter(id => id !== input.principalKeywordId)
-      .map(semanticaDe);
-
-    // Conflito de compatibilidade é divergência de intenção declarada em
-    // relação à Principal — a mesma leitura que o resumo já fazia.
-    const avaliadas = secundarias.filter(item => item.intent).length;
-    const conflitos = principal.intent
-      ? secundarias.filter(item => item.intent && item.intent !== principal.intent).length
-      : 0;
-
-    const observada = input.serpInterpretation?.observedIntent ?? null;
-    return {
-      principalIntent: principal.intent,
-      compositionIntents: secundarias.map(item => item.intent),
-      serpObservedIntent: observada === "indefinido" ? null : observada,
-      serpMixedIntent: observada === "misto",
+    // O retrato é montado pelo construtor do lib — o mesmo do "Gravar melhorias".
+    return buildClassificationEvidence({
+      principal: semanticaDe(input.principalKeywordId),
+      secondaries: input.keywordIds.filter(id => id !== input.principalKeywordId).map(semanticaDe),
+      keywordCount: input.keywordIds.length,
+      serpInterpretation: input.serpInterpretation,
       serpResolved: input.serpResolved,
-      principalFunnel: principal.funnel,
-      compositionFunnels: secundarias.map(item => item.funnel),
-      principalKgrScore: input.kgr.principalKgrScore,
-      principalKgrApplicability: input.kgr.principalApplicability,
-      fullKgr: input.kgr.fullKgr,
-      humanKgrDecision: input.kgr.source === "HUMAN_DECISION" && (input.kgr.decision === "YES" || input.kgr.decision === "NO")
-        ? input.kgr.decision
-        : null,
-      awaitingHumanKgrDecision: input.kgr.requiresHumanDecision,
-      // "Aplicar KGR" do artigo: a mesa e o ArticleDNA fecham com a mesma resposta.
-      articleAppliesKgr: input.kgr.applyKgr,
-      compatibilityConflicts: conflitos,
-      compatibilityEvaluated: avaliadas,
-      // Uma keyword não tem par: a compatibilidade não se aplica, e isso é
-      // resultado terminal, não incerteza — exceto publicado e Assunto (D2/D3).
-      compositionKeywordCount: input.keywordIds.length,
+      kgr: input.kgr,
       // D3 — o artigo do Assunto, com Principal livre, também é tronco: nunca "Não aplicável".
       principalIsSubject: Boolean(input.carriesSubject) || (() => {
         const linha = masterList.find(item => String(item.id) === input.principalKeywordId);
@@ -3195,7 +3187,7 @@ export default function ArquitetoPage() {
       })(),
       isPublished: input.isPublished,
       principalProtected: input.principalProtected,
-    };
+    });
   }, [masterList]);
 
   /**
@@ -3521,7 +3513,7 @@ export default function ArquitetoPage() {
     const unresolvedConflicts = articleConflictsFor({ candidateRef: article.candidateRef }).length;
     return resolveArticleSiloReadiness({
       hasArticleDna: Boolean(version),
-      siloAssigned: Boolean(article.siloId && acceptedSiloDnas[String(article.siloId)]),
+      siloAssigned: Boolean(canonicalSiloDnaForArticle(article)),
       reviewPending: process.review.state === "PENDING" || process.review.state === "IN_REVIEW",
       unresolvedConflicts,
       approved: Boolean(canonical),
@@ -6290,6 +6282,15 @@ export default function ArquitetoPage() {
     }
   };
 
+  /** Principal → artigo, só quando a principal não é a própria página (troca de principal). */
+  const articleIdByPrincipalKeyword = useMemo(() => {
+    const mapa = new Map<string, string>();
+    for (const [articleId, version] of Object.entries(acceptedArticleDnas)) {
+      const principal = version.payload.principalKeywordId;
+      if (principal && principal !== articleId && !mapa.has(principal)) mapa.set(principal, articleId);
+    }
+    return mapa;
+  }, [acceptedArticleDnas]);
   const articleDnaEntryFor = useCallback((input: { articleId?: string | null; candidateRef?: string | null }) => {
     // A partição do cenário responde em QUALQUER aba, não só na de Artigos.
     //
@@ -6302,7 +6303,28 @@ export default function ArquitetoPage() {
     const doCenario = input.candidateRef
       ? materializationPartition.matched.get(input.candidateRef) ?? null
       : null;
-    const key = doCenario || (input.candidateRef ? null : (input.articleId || null));
+    /*
+     * PUBLICADO COM A PRINCIPAL TROCADA (2026-10-01).
+     *
+     * O ArticleDNA do publicado fica registrado pelo id da página (a keyword
+     * publicada). Quando a melhoria troca a principal por outra keyword, a linha
+     * passa a ser identificada pela principal nova — e a busca por id não casava:
+     * a linha ficava sem papel no Silo e sem aprovação. A principal é única por
+     * artigo, então ela localiza o ArticleDNA sem ambiguidade.
+     */
+    /*
+     * PUBLICADO PRESO A UMA FORMAÇÃO ANTIGA DA MESA (2026-10-01).
+     *
+     * A página publicada tem identidade estável: o ArticleDNA dela é gravado
+     * pelo id da página. Quando a linha chega com o `candidateRef` de uma
+     * formação que não casa com mais nada, o publicado ficava sem Definição,
+     * sem papel no Silo e sem aprovação — mesmo com ArticleDNA aprovado.
+     * Só o publicado cai no acervo; artigo novo continua respondido só pelo cenário.
+     */
+    const publicadoDireto = !doCenario && input.candidateRef && input.articleId
+      && acceptedArticleDnas[input.articleId]?.payload.publishedIdentityRef ? input.articleId : null;
+    const direto = input.candidateRef ? publicadoDireto : (input.articleId || null);
+    const key = doCenario || (direto && !acceptedArticleDnas[direto] ? articleIdByPrincipalKeyword.get(direto) ?? direto : direto);
     const autoridade = key ? articleVersionAuthorities.get(key) : undefined;
     return {
       key,
@@ -6316,7 +6338,7 @@ export default function ArquitetoPage() {
       /* A revisão em andamento sobre ela — existir não a invalida. */
       workingProposal: autoridade?.workingProposal ?? null,
     };
-  }, [acceptedArticleDnas, articleVersionAuthorities, materializationPartition]);
+  }, [acceptedArticleDnas, articleIdByPrincipalKeyword, articleVersionAuthorities, materializationPartition]);
   const articleDnaForGrid = useCallback(
     (articleId: string | null | undefined, candidateRef?: string | null) =>
       articleDnaEntryFor({ articleId, candidateRef }).version,
@@ -6379,6 +6401,26 @@ export default function ArquitetoPage() {
    * "sem silo", o mesmo artigo aparecia aprovado, com pai declarado, e
    * listado em ARTIGOS SEM SILO.
    */
+  /*
+   * O SILODNA DO ARTIGO É O DO TERRITÓRIO DELE (2026-10-01).
+   *
+   * A ficha lia `art.siloId` — o Silo antigo gravado na linha da keyword do
+   * Minerador — e, sem SiloDNA nele, dizia "Pronto para Silos" num artigo cujo
+   * Silo já estava fechado. O território vem do ArticleDNA (ou da linha), e o
+   * SiloDNA aceito daquele território é o Silo do artigo; o `siloId` antigo só
+   * vale quando o território não tem SiloDNA.
+   */
+  const canonicalSiloDnaForArticle = (art: (typeof articlesList)[number]) => {
+    const dna = articleDnaEntryFor({ articleId: articleEntityIdFor(art), candidateRef: art.candidateRef }).version;
+    const territoryRef = dna?.payload.territoryRef
+      || (typeof art.mainKeywordObj?.territoryRef === "string" ? art.mainKeywordObj.territoryRef : null)
+      || null;
+    const porTerritorio = territoryRef
+      ? Object.values(acceptedSiloDnas).find(version => version.payload.territoryRef === territoryRef)
+      : undefined;
+    return porTerritorio || (art.siloId ? acceptedSiloDnas[String(art.siloId)] : undefined);
+  };
+
   const articleParentFor = (art: (typeof articlesList)[number]) => {
     const dna = articleDnaEntryFor({ articleId: articleEntityIdFor(art), candidateRef: art.candidateRef }).version;
     const territoryRef = dna?.payload.territoryRef
@@ -6398,10 +6440,11 @@ export default function ArquitetoPage() {
       territoryRef,
       territoryName: territorio?.territory.name || territorio?.territory.centralEntity || null,
       territoryConfirmed: siloIsHumanDecided(territorio?.territory.lifecycleStatus),
-      canonicalSiloId: (typeof art.siloId === "string" && art.siloId.trim() ? art.siloId : null)
-        || canonico?.payload.siloId
+      // O Silo do território vem primeiro; o `siloId` antigo da linha só sem ele.
+      canonicalSiloId: canonico?.payload.siloId
+        || (typeof art.siloId === "string" && art.siloId.trim() ? art.siloId : null)
         || null,
-      canonicalSiloName: art.siloName || canonico?.payload.name || null,
+      canonicalSiloName: canonico?.payload.name || art.siloName || null,
     });
   };
 
@@ -6606,6 +6649,21 @@ export default function ArquitetoPage() {
         // Volume só decide quando não há formação, como no patrimônio publicado.
         || [...c.keywords].sort((left, right) => (right.volume_search || 0) - (left.volume_search || 0))[0];
       const supportKeywords = c.keywords.filter(keyword => keyword !== main);
+      /*
+       * PUBLICADO COM A PRINCIPAL TROCADA NO ARTICLEDNA (2026-10-01).
+       *
+       * `main` continua sendo a página publicada: ela é a identidade (URL,
+       * slug, canonical) e a chave do ArticleDNA. Mas a linha e o "Resumo do
+       * artigo" mostravam a página como Principal ("Volume Principal: —")
+       * depois que o DNA já tinha trocado para a keyword com volume — e a
+       * pessoa via uma principal sem volume que já não existia. A principal
+       * EXIBIDA é a do DNA aprovado.
+       */
+      const dnaDoPublicado = c.isPublished && main ? acceptedArticleDnas[String(main.id)] : undefined;
+      const principalDoDna = dnaDoPublicado && dnaDoPublicado.payload.principalKeywordId !== String(main?.id)
+        ? c.keywords.find(keyword => String(keyword.id) === dnaDoPublicado.payload.principalKeywordId)
+          ?? masterList.find(keyword => String(keyword.id) === dnaDoPublicado.payload.principalKeywordId)
+        : undefined;
       const aiReviewAnnotations: AIReviewAnnotation[] = [main, ...supportKeywords]
         .map(keyword => keyword?.aiReviewAnnotation)
         .filter((annotation): annotation is AIReviewAnnotation => Boolean(annotation));
@@ -6635,7 +6693,9 @@ export default function ArquitetoPage() {
           ? toSlug((main ? main.siloName : c.siloName) || "")
           : null,
         isPublished: c.isPublished,
-        keywordPrincipal: main?.keyword || "",
+        keywordPrincipal: principalDoDna?.keyword || main?.keyword || "",
+        /** A principal do ArticleDNA, quando o publicado já a trocou (só exibição). */
+        displayPrincipalObj: principalDoDna ?? null,
         slug: main?.computedSlug || toSlug(main?.keyword || ""),
         hierarquia: main?.computedHierarquia || "Pilar",
         volume: main?.volume_search ?? null,
@@ -6679,7 +6739,7 @@ export default function ArquitetoPage() {
         hierarquia: customHierarquias[art.id] || (position === 0 ? "Pilar" : `Suporte ${position}`),
       };
     });
-  }, [masterList, reservedSiloHeadIds, confirmedTerritoryRefs, formationCandidateByKeyword, customHierarquias, workspaceMode]);
+  }, [masterList, reservedSiloHeadIds, confirmedTerritoryRefs, formationCandidateByKeyword, customHierarquias, workspaceMode, acceptedArticleDnas]);
 
 
   /** Leitura durável da revisão IA por Article, já com política de STALE. */
@@ -7007,7 +7067,6 @@ export default function ArquitetoPage() {
       siloPages: acceptedSiloPages,
       versionEvents,
       radarItems,
-      plannerItems,
       documents,
       operationalPublications,
       historyEntries: masterHistory.entries,
@@ -7061,7 +7120,6 @@ export default function ArquitetoPage() {
           siloPages: acceptedSiloPages,
           versionEvents,
           radarItems,
-          plannerItems,
           documents,
           operationalPublications,
           historyEntries: masterHistory.entries,
@@ -7588,6 +7646,17 @@ export default function ArquitetoPage() {
     if (event.button !== 0 || event.isPrimary === false) return;
     if (selectionDragRef.current) return;
     event.stopPropagation();
+    /*
+     * COM MODIFICADOR, QUEM MANDA É O CLIQUE (como no Minerador).
+     *
+     * Shift e Ctrl descrevem intervalo e alternância; a pintura por arraste
+     * repinta a partir da linha pressionada. Um Shift+clique com tremor de
+     * 6px virava pintura e o clique real era engolido pelo supressor.
+     */
+    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+      suppressSelectionClickRef.current = false;
+      return;
+    }
     const currentSelectedArticleIds = selectedArticleIdsRef.current;
     const currentVisibleArticleIds = visibleArticleIdsRef.current;
     const drag: ArticleSelectionDrag = {
@@ -7683,6 +7752,8 @@ export default function ArquitetoPage() {
         : null,
       shiftKey: event.shiftKey,
       additiveKey: event.ctrlKey || event.metaKey,
+      // `detail === 0` é ativação por teclado (Espaço): alterna, não troca.
+      keyboard: event.detail === 0,
     });
     markSelectionInteraction(event.shiftKey ? event.ctrlKey || event.metaKey ? "ctrl-shift-click" : "shift-click" : event.ctrlKey || event.metaKey ? "additive-click" : "click");
     setSelectedArticleIds(result.selectedIds);
@@ -7855,6 +7926,25 @@ export default function ArquitetoPage() {
     })
     .filter((context): context is { siloId: string; siloDna: VersionEnvelope<SiloDNA>; siloPage: VersionEnvelope<SiloPage>; workingCopy: SiloWorkingCopy | null } => Boolean(context)),
   [acceptedSiloDnas, acceptedSiloPages, selectedBrandId, siloWorkingCopies, remoteTerritories]);
+  /**
+   * O SILO DE UMA LINHA, PARA OS LINKS.
+   *
+   * `article.siloId` vem da keyword e fica vazio quando o Silo foi decidido na
+   * fase Silos — que é o caso de todo artigo de Silo fechado. A fonte é o
+   * SiloDNA aprovado (quem lista o artigo) e, na falta dele, o ArticleDNA.
+   */
+  const linksSiloOfArticle = (article: (typeof articlesList)[number]) => {
+    const idDaLinha = articleEntityIdFor(article);
+    // Publicado com a principal trocada: o artigo é achado pela principal nova.
+    const entityId = idDaLinha && !acceptedArticleDnas[idDaLinha] ? articleIdByPrincipalKeyword.get(idDaLinha) ?? idDaLinha : idDaLinha;
+    if (entityId) {
+      const contexto = linkSiloContexts.find(context => context.siloDna.payload.articleReferences.some(reference => reference.articleId === entityId));
+      if (contexto) return contexto.siloId;
+      const dna = acceptedArticleDnas[entityId]?.payload.siloId;
+      if (dna) return String(dna);
+    }
+    return article.siloId ? String(article.siloId) : null;
+  };
   const resolvedLinksSiloId = linksSelectedSiloId && linkSiloContexts.some(context => context.siloId === linksSelectedSiloId)
     ? linksSelectedSiloId
     : linkSiloContexts[0]?.siloId || null;
@@ -7935,15 +8025,22 @@ export default function ArquitetoPage() {
     return typeof keyword === "string" && keyword.trim() ? keyword : article.suggestedSlug || fallback;
   };
 
-  const buildInitialLinksWorkingCopy = async (): Promise<InternalLinkGraphWorkingCopy> => {
-    if (!selectedBrandId || !linksSelectedContext || !linksGraphId) throw new Error("Selecione um Silo com SiloDNA e SiloPage antes de abrir a working copy.");
-    const silo = linksSelectedContext.siloDna.payload;
+  type LinksSiloContext = (typeof linkSiloContexts)[number];
+  /**
+   * A COMPOSIÇÃO VIGENTE DO SILO, como nós do grafo.
+   *
+   * É dela que toda cópia nasce — inclusive a sucessora de um grafo aprovado.
+   * Copiar os nós do aprovado fazia a sucessora falar de versões antigas dos
+   * artigos, e o portão do Radar continuava recusando-os depois da aprovação.
+   */
+  const linksBasisFor = (context: LinksSiloContext) => {
+    if (!selectedBrandId) throw new Error("Selecione uma Brand antes de abrir a working copy.");
+    const silo = context.siloDna.payload;
     const articleVersions = silo.articleReferences
       .map(reference => acceptedArticleDnas[reference.articleId])
       .filter((version): version is VersionEnvelope<ArticleDNA> => Boolean(version));
     if (articleVersions.length !== silo.articleReferences.length) throw new Error("A base do Silo referencia ArticleDNA que não está disponível no workspace.");
-    const actorId = linksAuthenticatedActor();
-    const siloPage = linksSelectedContext.siloPage;
+    const siloPage = context.siloPage;
     const nodes: InternalLinkGraphNode[] = [
       {
         nodeId: `silo-page:${silo.siloId}`,
@@ -7968,20 +8065,28 @@ export default function ArquitetoPage() {
         } satisfies InternalLinkGraphNode;
       }),
     ];
+    return {
+      nodes,
+      baseSiloDnaVersionRef: linkReferenceForVersion(context.siloDna),
+      baseSiloPageVersionRef: linkReferenceForVersion(siloPage),
+      participatingArticleDnaVersionRefs: articleVersions.map(linkReferenceForVersion),
+    };
+  };
+
+  const buildInitialLinksWorkingCopy = async (): Promise<InternalLinkGraphWorkingCopy> => {
+    if (!selectedBrandId || !linksSelectedContext || !linksGraphId) throw new Error("Selecione um Silo com SiloDNA e SiloPage antes de abrir a working copy.");
+    const base = linksBasisFor(linksSelectedContext);
     return createInternalLinkGraphWorkingCopy({
       graphId: linksGraphId,
       brandId: selectedBrandId,
-      siloId: silo.siloId,
+      siloId: linksSelectedContext.siloDna.payload.siloId,
       baseGraphVersionId: linksApprovedGraph?.graphVersionId || null,
       baseGraphContentHash: linksApprovedGraph?.contentHash || null,
-      baseSiloDnaVersionRef: linkReferenceForVersion(linksSelectedContext.siloDna),
-      baseSiloPageVersionRef: linkReferenceForVersion(siloPage),
-      participatingArticleDnaVersionRefs: articleVersions.map(linkReferenceForVersion),
-      nodes,
+      ...base,
       edges: [],
       warnings: [],
       conflicts: [],
-      createdBy: actorId,
+      createdBy: linksAuthenticatedActor(),
       metadata: {},
     });
   };
@@ -8050,7 +8155,9 @@ export default function ArquitetoPage() {
       });
       // lock_version is a remote concurrency token. Local edits update the
       // content/hash immediately but keep the last confirmed remote token.
-      const resultado = { ...next, lockVersion: linksPersistedLockVersion || atual.lockVersion };
+      // Na cadeia (`base`), a cópia já carrega o lock confirmado; o estado da aba
+      // pode ser de outro Silo ou de antes da sucessora.
+      const resultado = { ...next, lockVersion: base ? base.lockVersion : linksPersistedLockVersion || atual.lockVersion };
       setLinksWorkingCopy(resultado);
       setLinksSaveState("idle");
       setLinksError(null);
@@ -8084,23 +8191,9 @@ export default function ArquitetoPage() {
     }
     setLinksSaveState("saving");
     try {
-      const successor = await createInternalLinkGraphWorkingCopy({
-        graphId: linksApprovedGraph.graphId,
-        brandId: linksApprovedGraph.brandId,
-        siloId: linksApprovedGraph.siloId,
-        baseGraphVersionId: linksApprovedGraph.graphVersionId,
-        baseGraphContentHash: linksApprovedGraph.contentHash,
-        baseSiloDnaVersionRef: linksApprovedGraph.baseSiloDnaVersionRef,
-        baseSiloPageVersionRef: linksApprovedGraph.baseSiloPageVersionRef,
-        participatingArticleDnaVersionRefs: linksApprovedGraph.participatingArticleDnaVersionRefs,
-        nodes: linksApprovedGraph.nodes,
-        edges: linksApprovedGraph.edges,
-        warnings: linksApprovedGraph.warnings,
-        conflicts: linksApprovedGraph.conflicts,
-        createdBy: linksAuthenticatedActor(),
-        metadata: {},
-      });
-      const aberta = await persistLinksWorkingCopy(successor, "create");
+      if (!linksSelectedContext) throw new Error("Selecione o Silo do grafo antes de abrir a sucessora.");
+      // A sucessora nasce da composição VIGENTE, não da aprovada (ver `abrirCopiaVigente`).
+      const aberta = await abrirCopiaVigente(linksSelectedContext);
       setLinksScenario("working");
       showNotification("success", "Working copy sucessora aberta a partir da versão aprovada.");
       return aberta;
@@ -8126,42 +8219,112 @@ export default function ArquitetoPage() {
    *
    * NADA aqui aprova: ao fim, a working copy está proposta e salva.
    */
+  /**
+   * Abre a cópia do Silo SOBRE A COMPOSIÇÃO VIGENTE.
+   *
+   * - cópia existente com base atual: segue como está;
+   * - cópia existente com base antiga (a aprovação não apaga a cópia): troca a
+   *   base, leva as arestas que ainda cabem e grava;
+   * - sem cópia: nasce da composição vigente, herdando do aprovado só as
+   *   arestas que ainda cabem.
+   */
+  const abrirCopiaVigente = async (context: LinksSiloContext): Promise<InternalLinkGraphWorkingCopy> => {
+    if (!selectedBrandId) throw new Error("Selecione uma Brand antes de processar os links.");
+    const actorId = linksAuthenticatedActor();
+    const grafos = (await loadInternalLinkGraphs(selectedBrandId))
+      .filter(graph => graph.siloId === context.siloId)
+      .sort((left, right) => right.versionNumber - left.versionNumber);
+    const aprovado = grafos.find(graph => graph.workflowStatus === "approved") || null;
+    const graphId = grafos[0]?.graphId || `arquiteto:internal-links:${context.siloId}`;
+    const existente = await loadInternalLinkGraphWorkingCopy(selectedBrandId, graphId);
+    const base = linksBasisFor(context);
+    const linhagem = { baseGraphVersionId: aprovado?.graphVersionId || null, baseGraphContentHash: aprovado?.contentHash || null };
+    if (existente) {
+      const mesmaLinhagem = existente.baseGraphVersionId === linhagem.baseGraphVersionId;
+      if (internalLinkGraphBasisIsCurrent(existente, base) && mesmaLinhagem) return existente;
+      const rebase = rebaseInternalLinkGraph({ previousEdges: existente.edges, currentNodes: base.nodes });
+      const proxima = await updateInternalLinkGraphWorkingCopy({
+        previous: existente,
+        changes: { ...base, nodes: rebase.nodes, edges: rebase.edges, ...linhagem },
+        actorId,
+      });
+      const gravada = await persistLinksWorkingCopy({ ...proxima, lockVersion: existente.lockVersion }, "edit");
+      if (rebase.dropped.length) showNotification("info", `${rebase.dropped.length} relação(ões) não cabem mais na composição atual do Silo e saíram da cópia; a derivação estrutural recompõe o que faltar.`);
+      return gravada;
+    }
+    const herdadas = aprovado ? rebaseInternalLinkGraph({ previousEdges: aprovado.edges, currentNodes: base.nodes }) : { nodes: base.nodes, edges: [], dropped: [] };
+    const copia = await createInternalLinkGraphWorkingCopy({
+      graphId,
+      brandId: selectedBrandId,
+      siloId: context.siloId,
+      ...linhagem,
+      ...base,
+      nodes: herdadas.nodes,
+      edges: herdadas.edges,
+      warnings: aprovado?.warnings || [],
+      conflicts: aprovado?.conflicts || [],
+      createdBy: actorId,
+      metadata: {},
+    });
+    return persistLinksWorkingCopy(copia, "create");
+  };
+
+  /**
+   * PROCESSAR LINKS — a ação que PROPÕE, sobre os Silos MARCADOS.
+   *
+   * Com linhas marcadas, processa o Silo de cada uma (um de cada vez); sem
+   * marcação, o Silo escolhido no seletor. O grafo é por Silo: um artigo
+   * marcado leva o Silo inteiro, porque link interno é relação entre páginas.
+   *
+   * A cópia é passada adiante entre as etapas em vez de relida do estado:
+   * dentro de um mesmo clique o React ainda não refletiu o `set` anterior.
+   *
+   * NADA aqui aprova: ao fim, cada working copy está proposta e salva.
+   */
   const processarLinks = async () => {
-    if (!linksSelectedContext) {
-      showNotification("error", "Selecione o Silo do grafo antes de processar os links.");
+    const marcados = articlesList.filter(article => selectedArticleIds.has(article.id));
+    const silosMarcados = [...new Set(marcados.map(article => linksSiloOfArticle(article) || "").filter(Boolean))];
+    const alvos = marcados.length
+      ? linkSiloContexts.filter(context => silosMarcados.includes(context.siloId))
+      : linksSelectedContext ? [linksSelectedContext] : [];
+    const semGrafo = silosMarcados.filter(siloId => !linkSiloContexts.some(context => context.siloId === siloId)).length;
+    const semSilo = marcados.filter(article => !linksSiloOfArticle(article)).length;
+    if (semGrafo || semSilo) {
+      showNotification("warning", [
+        semGrafo ? `${semGrafo} Silo(s) da seleção ainda não têm SiloDNA e SiloPage aprovados e consolidados: os links deles ficam para depois.` : "",
+        semSilo ? `${semSilo} artigo(s) marcado(s) ainda sem Silo.` : "",
+      ].filter(Boolean).join(" "));
+    }
+    if (!alvos.length) {
+      if (!marcados.length) showNotification("error", "Selecione o Silo do grafo antes de processar os links.");
       return;
     }
     setLinksLoading(true);
     try {
-      // Sucessora quando já existe grafo aprovado: aprovar de novo por cima do
-      // mesmo artefato apagaria a versão que o humano já fechou.
-      const aberta = linksWorkingCopy
-        || (linksApprovedGraph ? await handleCreateLinksSuccessor() : await handleOpenLinksWorkingCopy());
-      if (!aberta) return;
-
-      const comEstrutura = await generateStructuralLinks(aberta);
-      if (!comEstrutura) return;
-
-      /*
-       * §7 — ZERO ARESTA SEM PROVA, NUNCA MAIS.
-       *
-       * Esta mensagem dizia "o Silo não tem duas páginas linkáveis" sobre um
-       * Silo com seis. Ela não era a conclusão do motor: era um palpite sobre
-       * por que a lista tinha voltado vazia. Quem responde agora é o readout,
-       * que já nomeou cada página bloqueada e cada par recusado.
-       */
-      if (!comEstrutura.edges.length) return;
-      await generateLinkAnchors(comEstrutura);
+      for (const contexto of alvos) {
+        // A mesa mostra o Silo que está sendo processado.
+        if (contexto.siloId !== resolvedLinksSiloId || alvos.length > 1) handleLinksSiloChange(contexto.siloId);
+        const aberta = await abrirCopiaVigente(contexto).catch(error => {
+          showNotification("error", `${contexto.siloDna.payload.name || contexto.siloId}: ${error instanceof Error ? error.message : "não foi possível abrir a working copy."}`);
+          return null;
+        });
+        if (!aberta) continue;
+        setLinksScenario("working");
+        const comEstrutura = await generateStructuralLinks(aberta);
+        /*
+         * §7 — ZERO ARESTA SEM PROVA: quem explica a lista vazia é o readout,
+         * que já nomeou cada página bloqueada e cada par recusado.
+         */
+        if (!comEstrutura || !comEstrutura.edges.length) continue;
+        await generateLinkAnchors(comEstrutura);
+      }
+      if (alvos.length > 1) showNotification("success", `Links processados em ${alvos.length} Silo(s) da seleção. Revise e confirme cada um: nada foi aprovado.`);
     } finally {
       setLinksLoading(false);
       /*
-       * O "salvando" é um LATCH, e ele mentia.
-       *
-       * Várias etapas desta sequência marcam `saving` e só desmarcam no
-       * caminho feliz ou no `catch`; um `return` no meio deixava o estado
-       * preso, e a fase passava a recusar tudo com "Há uma operação em curso"
-       * — sem operação nenhuma em curso. Ao sair daqui nada mais está em voo:
-       * `idle` diz a verdade, e a working copy continua não confirmada.
+       * O "salvando" é um LATCH: um `return` no meio deixava o estado preso e a
+       * fase recusava tudo com "Há uma operação em curso". Ao sair daqui nada
+       * mais está em voo.
        */
       setLinksSaveState(atual => (atual === "saving" ? "idle" : atual));
     }
@@ -8174,7 +8337,7 @@ export default function ArquitetoPage() {
       return;
     }
     if (linksApprovedGraph && linksWorkingCopy.contentHash === linksApprovedGraph.contentHash) {
-      showNotification("error", "Nenhuma mudança estrutural foi feita; uma versão equivalente não será criada.");
+      showNotification("info", `O grafo aprovado v${linksApprovedGraph.versionNumber} já descreve estas relações: nada novo a confirmar.`);
       return;
     }
     setLinksSaveState("saving");
@@ -8237,6 +8400,24 @@ export default function ArquitetoPage() {
   // until the human approves it. Dirty means only "not confirmed remotely";
   // comparison against the approved graph belongs to the review summary.
   const linksIsDirty = Boolean(linksWorkingCopy && linksSaveState !== "saved");
+  /*
+   * LINKS OBEDECE À SELEÇÃO (pedido do dono, 2026-09-30). O grafo é por Silo:
+   * quando as linhas marcadas são todas de um Silo fechado, o "Silo do grafo"
+   * passa a ser ele — "Processar links" trabalha sobre o que está marcado.
+   * Não troca com alteração não salva nem com operação em curso.
+   */
+  useEffect(() => {
+    if (workspaceMode !== "links" || !selectedArticleIds.size || linksIsDirty || linksLoading || linksSaveState === "saving") return;
+    const silos = new Set(articlesList
+      .filter(article => selectedArticleIds.has(article.id))
+      .map(article => linksSiloOfArticle(article) || "")
+      .filter(Boolean));
+    if (silos.size !== 1) return;
+    const [siloId] = [...silos];
+    if (siloId === resolvedLinksSiloId || !linkSiloContexts.some(context => context.siloId === siloId)) return;
+    handleLinksSiloChange(siloId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceMode, selectedArticleIds, linksIsDirty, linksLoading, linksSaveState, articlesList, resolvedLinksSiloId, linkSiloContexts]);
   const linksSelectedNode = linksSelectedNodeId ? linkNodeById.get(linksSelectedNodeId) || null : null;
 
   /**
@@ -8398,7 +8579,7 @@ export default function ArquitetoPage() {
      * descreve um estado interno da tela, não o que falta fazer.
      */
     const doSilo = linksSelectedContext
-      ? articlesList.filter(article => String(article.siloId || "") === String(linksSelectedContext.siloId))
+      ? articlesList.filter(article => linksSiloOfArticle(article) === String(linksSelectedContext.siloId))
       : [];
     /*
      * Links usa a CANÔNICA APROVADA. Uma proposta em edição sobre ela não
@@ -8751,7 +8932,7 @@ export default function ArquitetoPage() {
         changes: { edges: atualizadas },
         actorId: linksAuthenticatedActor(),
       });
-      const persistida = { ...proximo, lockVersion: linksPersistedLockVersion ?? copia.lockVersion };
+      const persistida = { ...proximo, lockVersion: base ? copia.lockVersion : linksPersistedLockVersion ?? copia.lockVersion };
       await persistLinksWorkingCopy(persistida, "edit");
       const aceitas = resposta.proposals.length;
       const recusadas = resposta.rejected.length;
@@ -12495,7 +12676,7 @@ export default function ArquitetoPage() {
     return {
       keywordId: String(keyword.id),
       keyword: String(keyword.keyword || ""),
-      intent: texto(semantic.intencao_principal) || keyword.intent || null,
+      intent: articleSerpIntentOf(keyword),
       volume: keyword.volume_search ?? null,
       kgr: keyword.kgr ?? null,
       entity: texto(semantic.entidade_central),
@@ -12954,10 +13135,27 @@ export default function ArquitetoPage() {
    *
    * `buildRadarHandoffPlan` é o mesmo portão que responde o gate do lote.
    */
+  /*
+   * A SERP QUE O RADAR CONFERE É A DO ARTICLEDNA APROVADO (2026-10-01).
+   *
+   * Com mudança pendente na mesa ("Reforçar" que acrescentou keyword, troca só
+   * na mesa), o candidato da tabela deixa de ser o artigo aprovado e o portão
+   * recusava um DNA aprovado com parecer completo e aceito. Vale o parecer que
+   * a aprovação gravou (`serpAssessmentRef`), se descrever a composição do DNA;
+   * sem ele, o portão da mesa, como antes.
+   */
+  const radarSerpGateFor = (article: (typeof articlesList)[number]) => {
+    const { version, canonical } = articleDnaEntryFor({ articleId: articleEntityIdFor(article), candidateRef: article.candidateRef });
+    const doDna = version && canonical
+      ? resolveApprovedArticleSerpGate({ articleId: version.payload.articleId, dna: version.payload, records: remoteArticleSerp as unknown as ApprovedSerpRecord[] })
+      : null;
+    return doDna ?? (article.candidateRef ? articleSerpGates.get(article.candidateRef) : undefined);
+  };
+
   const selectedArticleRadarPlan = useMemo(() => buildRadarHandoffPlan(selectedArticlesForRadar.map(article => {
     const dna = articleDnaEntryFor({ articleId: articleEntityIdFor(article), candidateRef: article.candidateRef }).version;
     const pai = articleParentFor(article);
-    const gate = article.candidateRef ? articleSerpGates.get(article.candidateRef) : undefined;
+    const gate = radarSerpGateFor(article);
     const coberto = Boolean(dna && approvedLinkGraphs.some(graph =>
       graph.nodes.some(node => node.articleDnaVersionRef?.versionId === dna.versionId)));
     return {
@@ -13005,7 +13203,7 @@ export default function ArquitetoPage() {
           || item.materializedArticleId === (dna?.payload.articleId || article.id)),
       humanPendingDecisions: dna?.payload.humanPendingDecisions ?? [],
     };
-  })), [selectedArticlesForRadar, articleDnaEntryFor, articleFormationMarker, articleSerpGates, approvedLinkGraphs, versionEvents, remoteTerritories, acceptedSiloDnas]);
+  })), [selectedArticlesForRadar, articleDnaEntryFor, articleFormationMarker, articleSerpGates, approvedLinkGraphs, versionEvents, remoteTerritories, acceptedSiloDnas, remoteArticleSerp]);
 
   const selectedArticleRadarGateIssues = useMemo(
     () => [...new Set(selectedArticleRadarPlan.blocked.flatMap(item => item.blockers))],
@@ -13327,8 +13525,33 @@ export default function ArquitetoPage() {
       showNotification(refused.length?"warning":"success",(body.data.confirmed?.length || 0)+" artigo(s) confirmados. "+refused.map((r:{articleId:string;blockers:string[]})=>r.articleId+": "+r.blockers.join(" ")).join(" · "));
     } catch(error){showNotification("error",error instanceof Error?error.message:"Falha no status global.");} finally{setUpdating(false);}
   };
-  const markSelectedReadyForRadar = async () => {
+  const markSelectedReadyForRadar = async (depoisDaSerp = false) => {
     if(workspaceMode !== "links") return;
+    /*
+     * SERP VELHA NÃO É RECUSA: É RELEITURA (pedido do dono, 2026-09-30).
+     *
+     * Artigo melhorado depois da leitura da SERP voltava "a composição mudou
+     * depois da coleta" e ficava preso. O mesmo caminho do Processar/Concluir:
+     * cache primeiro, plano de pagamento só para lente que falta, a pessoa
+     * escolhe. Depois do render com os pareceres novos, a marcação segue sozinha.
+     */
+    if (!depoisDaSerp) {
+      // Só relê quem não tem a SERP do próprio ArticleDNA aprovado valendo.
+      const velhas = selectedArticlesForRadar
+        .filter(article => {
+          const estado = radarSerpGateFor(article)?.state;
+          return estado === "stale" || estado === "missing" || estado === "incomplete";
+        })
+        .map(article => article.candidateRef ? String(article.candidateRef) : null)
+        .filter((ref): ref is string => Boolean(ref));
+      const grupos = serpGroupsForCandidates(velhas);
+      if (grupos.length) {
+        showNotification("info", `${grupos.length} artigo(s) com a SERP anterior à composição atual. Relendo pelo cache primeiro; só lente que falta entra no plano de pagamento. Depois a marcação continua.`);
+        await confirmSerpValidationRef.current(grupos);
+        setPendingReadyRetry(true);
+        return;
+      }
+    }
     const plano = planReadyForRadarBatch(selectedArticleOperational.map(item => item.input));
     const nomeDe = (articleId: string) => selectedArticleOperational.find(item => item.input.articleId === articleId)?.label || articleId;
     // A recusa é POR ARTIGO. Um lote meio bloqueado virando um erro único
@@ -13377,6 +13600,14 @@ export default function ArquitetoPage() {
       setUpdating(false);
     }
   };
+
+  const markReadyRef = useRef(markSelectedReadyForRadar);
+  markReadyRef.current = markSelectedReadyForRadar;
+  useEffect(() => {
+    if (!pendingReadyRetry || serpBusy || updating) return;
+    setPendingReadyRetry(false);
+    void markReadyRef.current(true);
+  }, [pendingReadyRetry, serpBusy, updating]);
 
   /**
    * Candidatos que JÁ têm ArticleDNA aprovado equivalente.
@@ -13430,8 +13661,20 @@ export default function ArquitetoPage() {
    * "Reforçar publicados" para os publicados (nunca "Concluir formação").
    * Os contadores do §4 continuam no domínio (`buildArticleRunReadout`).
    */
+  /*
+   * PUBLICADO É QUEM CARREGA UMA PÁGINA NO AR, NÃO SÓ QUEM A TEM DE PRINCIPAL
+   * (2026-10-01). Quando a formação escolhe para principal uma keyword com
+   * volume e a página publicada (sem volume) fica de secundária — o caso
+   * "tráfego pago vs orgânico para clínica de estética" —, o Processar dizia
+   * "artigo novo: Concluir formação", e o Concluir recusava por ser publicado.
+   * Beco sem saída. O caminho do publicado é "Melhorar publicados".
+   */
+  // O Concluir lê o conjunto vigente sem entrar nas dependências do callback.
+  const publishedKeywordIdSetRef = useRef(publishedKeywordIdSet);
+  publishedKeywordIdSetRef.current = publishedKeywordIdSet;
   const publishedCandidateRefs = useMemo(() => new Set(articleFormationUniverses.flatMap(universe => universe.candidates
-    .filter(candidate => publishedKeywordIdSet.has(candidate.principalKeywordId))
+    .filter(candidate => publishedKeywordIdSet.has(candidate.principalKeywordId)
+      || candidate.keywords.some(item => publishedKeywordIdSet.has(item.keywordId)))
     .map(candidate => candidate.candidateRef))), [articleFormationUniverses, publishedKeywordIdSet]);
   const readoutDaExecucao = useCallback(
     (coletadosAgora: ReadonlySet<string>, refs?: ReadonlySet<string>, execucao?: ExecucaoDaSerp) => {
@@ -13451,12 +13694,14 @@ export default function ArquitetoPage() {
    * vez do `candidateRef`.
    */
   const anunciarBloqueios = useCallback((coletadosAgora: ReadonlySet<string>, refs?: ReadonlySet<string>, execucao?: ExecucaoDaSerp) => {
+    // Publicado nunca passa pelo "Concluir formação": o bloqueio dele não é
+    // "para concluir" (o caminho dele é o "Melhorar publicados", 2026-10-01).
     const detalhe = formatArticleRunBlockers(
-      linhasDaExecucao(coletadosAgora, refs, execucao),
+      linhasDaExecucao(coletadosAgora, refs, execucao).filter(linha => !publishedCandidateRefs.has(linha.articleId)),
       candidateRef => articlesList.find(article => article.candidateRef === candidateRef)?.keywordPrincipal || candidateRef,
     );
     if (detalhe) showNotification("warning", `Bloqueado para concluir — ${detalhe}`);
-  }, [articlesList, linhasDaExecucao, showNotification]);
+  }, [articlesList, linhasDaExecucao, showNotification, publishedCandidateRefs]);
 
   /*
    * D6 — O READOUT DEPOIS DO READBACK, COM OS GATES DE AGORA.
@@ -14018,7 +14263,8 @@ export default function ArquitetoPage() {
          * O payload acima é montado do zero, então sem este passo reconcluir
          * apagaria o Assunto.
          */
-        let artigoDaFormacao: ArticleDNA = { ...confirmado, classification: classificacao };
+        // A SERP tem a última palavra: intenção e funil que ela decidiu entram no DNA.
+        let artigoDaFormacao: ArticleDNA = applySerpDecisionToArticle({ ...confirmado, classification: classificacao }, classificacao);
         const assuntoPreso = aprovado.subjectKeywordId ?? null;
         const assuntoGravado = acceptedArticleDnas[articleId]?.payload.subject ?? null;
         if (assuntoPreso || assuntoGravado) {
@@ -14226,10 +14472,32 @@ export default function ArquitetoPage() {
     const bloqueados: string[] = [];
     let materializados = 0;
 
-    for (const vigente of Object.values(acceptedArticleDnas)) {
+    /*
+     * O VIGENTE É O DO SERVIDOR (2026-10-01).
+     *
+     * "Gravar melhorias" e "Atualizar o DNA com a SERP" gravam versões novas
+     * no servidor; a tela podia estar uma versão atrás e a sucessora era
+     * recusada: "A versão anterior informada não corresponde à versão
+     * canônica vigente". Antes de gravar, relê o acervo e os status remotos.
+     */
+    let vigentes = Object.values(acceptedArticleDnas);
+    const aprovadasNoRemoto = new Set<string>();
+    try {
+      const remoto = await loadCanonicalArquitetoArtifacts(selectedBrandId);
+      const ultimas = new Map<string, VersionEnvelope<ArticleDNA>>();
+      for (const versao of remoto.articleDnas as VersionEnvelope<ArticleDNA>[]) {
+        const atual = ultimas.get(versao.payload.articleId);
+        if (!atual || atual.versionNumber < versao.versionNumber) ultimas.set(versao.payload.articleId, versao);
+      }
+      if (ultimas.size) vigentes = [...ultimas.values()];
+      for (const item of remoto.statuses) if (item.status === "approved") aprovadasNoRemoto.add(item.versionId);
+    } catch {
+      // Sem o remoto, segue com o que a tela tem; a portaria do servidor recusa o que estiver velho.
+    }
+    for (const vigente of vigentes) {
       // Só o que está aprovado e ainda incompleto. Rascunho não é dívida, e
       // artigo já conforme não precisa de versão nova.
-      if (effectiveVersionStatus(vigente.versionId, versionEvents) !== "approved") continue;
+      if (effectiveVersionStatus(vigente.versionId, versionEvents) !== "approved" && !aprovadasNoRemoto.has(vigente.versionId)) continue;
       const contrato = readArticleSiloContract(vigente.payload);
       const semClassificacao = !vigente.payload.classification;
       if (contrato.state === "CURRENT" && !semClassificacao) continue;
@@ -14819,6 +15087,31 @@ export default function ArquitetoPage() {
       ...universe,
       candidates: universe.candidates.filter(candidate => !concluidaEm.has(candidate.candidateRef) || concluidaEm.get(candidate.candidateRef) === universe.siloRef),
     }));
+    /*
+     * PUBLICADO SAI DO CONCLUIR COM O CAMINHO DITO (2026-10-01).
+     *
+     * A formação da mesa de um publicado pode ter crescido além do DNA aprovado
+     * (reforço antigo: "marketing digital para dentistas" com 9 keywords e duas
+     * principais). Ela entrava na portaria do Concluir e voltava "passa do teto
+     * de 6" e "conflito aberto" — recusa sem saída, porque publicado nunca é
+     * gravado por aqui. Ele sai antes da portaria; os artigos novos seguem.
+     */
+    if (humano) {
+      const publicados = publishedKeywordIdSetRef.current;
+      const doPublicado = (candidate: (typeof universosSelecionados)[number]["candidates"][number]) =>
+        publicados.has(candidate.principalKeywordId) || candidate.keywords.some(item => publicados.has(item.keywordId));
+      const nomes = universosSelecionados.flatMap(universe => universe.candidates.filter(doPublicado)
+        .map(candidate => candidateGuards.rotuloDoCandidato.get(candidate.candidateRef) || candidate.candidateRef));
+      if (nomes.length) {
+        universosSelecionados = universosSelecionados.map(universe => ({ ...universe, candidates: universe.candidates.filter(candidate => !doPublicado(candidate)) }));
+        const restam = universosSelecionados.some(universe => universe.candidates.length > 0);
+        showNotification("info", `${nomes.map(nome => `"${nome}"`).join(", ")} ${nomes.length === 1 ? "é artigo publicado" : "são artigos publicados"}: publicado não passa pelo "Concluir formação" (URL, slug e canonical protegidos). Para gravar, trocar a principal sem volume ou acertar as keywords que estão na tabela e fora do DNA: cartão "Melhorar publicados" → "1 · Buscar keywords (grátis)" → "3 · Gravar melhorias".${restam ? " Os artigos novos selecionados seguem para a conclusão." : " Nada foi gravado."}`);
+        if (!restam) {
+          document.querySelector("[data-testid=\"architect-article-improvement\"]")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          return;
+        }
+      }
+    }
     setFormationBusy(true);
     try {
       /**
@@ -14970,6 +15263,21 @@ export default function ArquitetoPage() {
       }
       if (!portaria.ok) {
         const impeditivos = portaria.gates.filter(gate => !gate.ok).map(gate => gate.detail);
+        /*
+         * PUBLICADO TEM CAMINHO PRÓPRIO, E A MENSAGEM DIZ QUAL (2026-10-01).
+         *
+         * "Nenhum artigo do cenário está pronto" deixava a pessoa sem saída
+         * quando o selecionado era um publicado: ele nunca passa pelo Concluir
+         * (URL, slug e canonical protegidos). O caminho é o "Melhorar
+         * publicados", que troca a principal sem volume e grava a composição.
+         */
+        const publicadosSelecionados = plano.blocked.filter(item => item.code === "PUBLISHED_COLLISION");
+        if (!impeditivos.length && !plano.approved.length && publicadosSelecionados.length) {
+          const nomes = publicadosSelecionados.map(item => `"${candidateGuards.rotuloDoCandidato.get(item.candidateRef) || item.candidateRef}"`).join(", ");
+          showNotification("info", `${nomes} ${publicadosSelecionados.length === 1 ? "é artigo publicado" : "são artigos publicados"}: publicado não passa pelo "Concluir formação" (URL, slug e canonical protegidos). Para gravar, trocar a principal sem volume ou ajustar as keywords: cartão "Melhorar publicados", no topo da aba Artigos → "1 · Buscar keywords (grátis)" → "3 · Gravar melhorias". Nada foi gravado.`);
+          document.querySelector("[data-testid=\"architect-article-improvement\"]")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          return;
+        }
         showNotification("error", impeditivos.length
           ? `A formação não foi concluída: ${impeditivos.join(" ")}`
           : "A formação não foi concluída: nenhum artigo do cenário está pronto para virar ArticleDNA.");
@@ -15238,8 +15546,25 @@ export default function ArquitetoPage() {
            * A formação concluída continua concluída; o que não acontece é o
            * fechamento. O motivo é a notícia — e `FORMATIONS_PENDING` é o caso
            * comum, não um erro: faltam formações, e isso já foi dito acima.
+           *
+           * SILO JÁ FECHADO COM ESTES ARTIGOS NÃO É AVISO (2026-10-01): quando o
+           * par canônico já referencia todos os artigos concluídos do Silo, não
+           * há o que consolidar — "o Silo já tem par canônico" aparecia uma vez
+           * por Silo a cada Concluir, como se algo tivesse falhado.
            */
-          const soPendencia = closurePlan.blockers.every(item => item.code === "FORMATIONS_PENDING");
+          const parDoSilo = canonicalSiloPairFor(siloRef);
+          const foraDoSiloDna = parDoSilo.siloDna
+            ? leituraDoSilo.formations
+              .map(item => item.materializedArticleId || item.candidateRef)
+              .filter(articleId => !parDoSilo.siloDna!.payload.articleReferences.some(reference => String(reference.articleId) === String(articleId)))
+            : [];
+          const jaFechado = parDoSilo.complete && foraDoSiloDna.length === 0;
+          const soPendencia = closurePlan.blockers.every(item => item.code === "FORMATIONS_PENDING" || (jaFechado && item.code === "ALREADY_CONSOLIDATED"));
+          if (!soPendencia && parDoSilo.complete && foraDoSiloDna.length) {
+            const nomes = foraDoSiloDna.map(articleId => articleLabelFor(articleId)).join(", ");
+            showNotification("warning", `O Silo “${parDoSilo.siloDna!.payload.name || siloRef}” já está fechado e ${foraDoSiloDna.length === 1 ? "este artigo concluído não está" : "estes artigos concluídos não estão"} no SiloDNA dele: ${nomes}. Incluir artigo em Silo fechado pede uma versão nova do SiloDNA (ainda não automática); os artigos continuam concluídos.`);
+            continue;
+          }
           if (!soPendencia) {
             showNotification("warning", "A consolidação canônica do Silo ainda não pode acontecer — "
               + closurePlan.blockers.map(item => item.detail).join(" · "));
@@ -18086,7 +18411,9 @@ export default function ArquitetoPage() {
           * (3) a mesa com o resultado, (4) Sobras. O resto fica em
           * "Detalhes técnicos", fechado, no fim.
           */}
-        {articleMode && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities} />}
+        {/* Publicados marcados na planilha: "Buscar keywords" analisa só eles (sem marcação, todos). */}
+        {articleMode && <ArticleImprovementPanel brandId={selectedBrandId} onApplied={() => { setCanonicalWorkspaceReload(current => current + 1); setSerpSubjectReload(current => current + 1); }} buttonClassName={ARCHITECT_UI.toolbarButton} primaryButtonClassName={ARCHITECT_UI.primaryButton} hasLeftovers={hasLeftoverOpportunities}
+          selectedTargetIds={articlesList.filter(article => article.isPublished && selectedArticleIds.has(article.id) && article.mainKeywordObj?.id).map(article => String(article.mainKeywordObj!.id))} />}
         {/* Artigos novos: os dois atos da formação continuam à mão sem abrir
             os detalhes. Mesmos handlers e mesmas travas do painel de formação. */}
         {articleMode && (
@@ -18238,7 +18565,7 @@ export default function ArquitetoPage() {
                     * `supportArticleIds` —, nunca de volume, posição, slug ou
                     * quantidade de links.
                     */}
-                  <th className="relative border-r border-divider px-2 py-2 text-center">Papel no Silo</th>
+                  <th className="relative border-r border-divider px-2 py-2 text-center">Papel no Silo<KeywordTableColumnResizeHandle columnId="siloRole" label="Papel no Silo" onStart={columnResize.startResize} /></th>
                   <th className="relative border-r border-divider px-2 py-2 text-center">Definição do artigo<KeywordTableColumnResizeHandle columnId="articleDefinition" label="Definição do artigo" onStart={columnResize.startResize} /></th>
                   <th className="relative border-r border-divider px-2 py-2">Silo<KeywordTableColumnResizeHandle columnId="silo" label="Silo" onStart={columnResize.startResize} /></th>
                   <th className="relative border-r border-divider px-2 py-2 text-right">Ações<KeywordTableColumnResizeHandle columnId="actions" label="Ações" onStart={columnResize.startResize} /></th>
@@ -18305,6 +18632,17 @@ export default function ArquitetoPage() {
                         if (proximo.has(keywordId)) proximo.delete(keywordId); else proximo.add(keywordId);
                         return proximo;
                       }),
+                      onClick: (keywordId, gesture, visibleIds) => {
+                        const resultado = applyArticleSelectionClick({
+                          selectedIds: new Set(selectedSiloKeywordIds),
+                          visibleIds: [...visibleIds],
+                          id: keywordId,
+                          anchorId: siloKeywordAnchorRef.current,
+                          ...gesture,
+                        });
+                        siloKeywordAnchorRef.current = resultado.anchorId;
+                        setSelectedSiloKeywordIds(resultado.selectedIds);
+                      },
                       onToggleAll: (keywordIds, marcar) => setSelectedSiloKeywordIds(anterior => {
                         const proximo = new Set(anterior);
                         for (const keywordId of keywordIds) {
@@ -18334,7 +18672,7 @@ export default function ArquitetoPage() {
                       {!articleMode && <>
                       {/* Cabeçalho do Silo — somente informações, ações ficam no rodapé */}
                       <tr className={`border-l-2 ${siloColor.border} border-y border-slate-800/70 bg-slate-900/45`}>
-                        <td colSpan={workspaceMode === "links" ? 11 : 10} className="px-3 py-2">
+                        <td colSpan={architectColumnIds.length} className="px-3 py-2">
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0 flex items-center gap-2">
                               {/* Checkbox da Página do Silo (teal) — sempre visível, disabled sem SiloDNA */}
@@ -18383,7 +18721,7 @@ export default function ArquitetoPage() {
                                 <span className={`text-sm font-semibold ${siloColor.headerText}`}>
                                    {group.siloName}
                                 </span>
-                                {hasCanonicalSilo && <span className="truncate font-mono text-sm text-blue-200 select-all">/{group.siloSlug}</span>}
+                                {hasCanonicalSilo && <span className="font-mono text-sm text-identity-slug select-all">/{group.siloSlug}</span>}
                                   <span className={`shrink-0 rounded border px-1.5 py-0.5 text-xs font-medium text-slate-300 ${siloColor.countBg} ${siloColor.countBorder}`}>
                                   {group.articles.length} {group.articles.length === 1 ? "artigo" : "artigos"}
                                 </span>
@@ -18440,7 +18778,7 @@ export default function ArquitetoPage() {
                         const siloDnaVersion = acceptedSiloDnas[String(group.siloId)];
                         return (
                           <tr className="border-b border-divider bg-surface">
-                            <td colSpan={workspaceMode === "links" ? 11 : 10} className="border-l-2 border-l-module-accent px-6 py-6 lg:px-10">
+                            <td colSpan={architectColumnIds.length} className="border-l-2 border-l-module-accent px-6 py-6 lg:px-10">
                               <div className="rounded-lg border border-teal-800/50 bg-teal-950/20 p-5">
                                 <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 pb-2 mb-3">
                                   <div>
@@ -18456,7 +18794,7 @@ export default function ArquitetoPage() {
                                 {pageVersion ? (
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px]">
                                     <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">Slug</dt><dd className="mt-0.5 text-teal-300 font-mono">/{pageVersion.payload.slug}</dd></div>
-                                    <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">Publicação</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.publicationStatus === "published" ? "Publicado" : "Novo"} · verificação {pageVersion.payload.publicationVerification.status}</dd>{pageVersion.payload.publishedUrl && <a href={pageVersion.payload.publishedUrl} target="_blank" rel="noopener noreferrer" className="mt-0.5 block truncate text-teal-300 hover:text-teal-200" title={pageVersion.payload.publishedUrl}>{pageVersion.payload.publishedUrl}</a>}{pageVersion.payload.publicationStatus === "published" && pageVersion.payload.publishedUrl && <button type="button" onClick={() => void handleVerifySiloPage(pageVersion)} disabled={verifyingSiloPageId === pageVersion.payload.siloPageId} className="mt-1 rounded border border-teal-900/70 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-teal-300 hover:border-teal-700 disabled:opacity-40">{verifyingSiloPageId === pageVersion.payload.siloPageId ? "Conferindo…" : "Conferir identidade"}</button>}</div>
+                                    <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">Publicação</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.publicationStatus === "published" ? "Publicado" : "Novo"} · verificação {pageVersion.payload.publicationVerification.status}</dd>{pageVersion.payload.publishedUrl && <a href={pageVersion.payload.publishedUrl} target="_blank" rel="noopener noreferrer" className="mt-0.5 block truncate text-identity-published hover:underline" title={pageVersion.payload.publishedUrl}>{pageVersion.payload.publishedUrl}</a>}{pageVersion.payload.publicationStatus === "published" && pageVersion.payload.publishedUrl && <button type="button" onClick={() => void handleVerifySiloPage(pageVersion)} disabled={verifyingSiloPageId === pageVersion.payload.siloPageId} className="mt-1 rounded border border-teal-900/70 px-2 py-1 text-[8px] font-bold uppercase tracking-wider text-teal-300 hover:border-teal-700 disabled:opacity-40">{verifyingSiloPageId === pageVersion.payload.siloPageId ? "Conferindo…" : "Conferir identidade"}</button>}</div>
                                     <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">H1</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.h1}</dd></div>
                                     <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">SEO Title</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.seoTitle}</dd></div>
                                     <div><dt className="text-[8px] font-bold uppercase tracking-wider text-slate-600">Meta Description</dt><dd className="mt-0.5 text-slate-200">{pageVersion.payload.metaDescription}</dd></div>
@@ -18558,14 +18896,17 @@ export default function ArquitetoPage() {
                    });
                    const articleIdentityContext = articleSerpIdentityFor(art);
                    const kgrBoundSlug = articleDnaVersion?.payload.kgrIdentity?.boundSlug || art.mainKeywordObj?.kgrIdentity?.boundSlug || null;
-                   const siloDnaVersion = art.siloId ? acceptedSiloDnas[String(art.siloId)] : undefined;
+                   const siloDnaVersion = canonicalSiloDnaForArticle(art);
                    const articleDnaStatus = articleAuthority.canonical ? "approved" : articleDnaVersion ? "proposed" : null;
                     const articleProcess = articleProcessReadModelFor(art);
                     const pendingAiReview = articleProcess.review.state === "PENDING";
                     const pendingArticleDecisions = (pendingKeywordReview?.review.decisions || []).filter(decision => [art.mainKeywordObj, ...art.supportKeywords].some(keyword => String(keyword?.id) === String(decision.keywordId)));
-                    const expandedPanelSummary = art.mainKeywordObj
-                      ? summarizeArticleExpandedPanel(art.mainKeywordObj, art.supportKeywords)
-                      : null;
+                    // Publicado com a principal trocada: o resumo mede a principal do DNA.
+                    const expandedPanelSummary = art.displayPrincipalObj
+                      ? summarizeArticleExpandedPanel(art.displayPrincipalObj, [art.mainKeywordObj, ...art.supportKeywords].filter(keyword => keyword && keyword !== art.displayPrincipalObj))
+                      : art.mainKeywordObj
+                        ? summarizeArticleExpandedPanel(art.mainKeywordObj, art.supportKeywords)
+                        : null;
                     const articleKgr = articleKgrDecisionFor(art);
                     const { classification: articleClassification } = articleClassificationFor(art);
                     const articleSiloReadiness = articleSiloReadinessFor(art, articleProcess, articleKgr);
@@ -18797,7 +19138,7 @@ export default function ArquitetoPage() {
                       {isExpanded && (
                         <MemoizedArticleSubtree revision={articleRowRevision} processTab={expandedProcessTab} render={() => (
                           <tr className="border-b border-divider bg-surface">
-                          <td colSpan={workspaceMode === "links" ? 11 : 10} className="border-l-2 border-l-module-accent px-6 py-6 lg:px-10">
+                          <td colSpan={architectColumnIds.length} className="border-l-2 border-l-module-accent px-6 py-6 lg:px-10">
                             <section data-testid="architect-article-expanded-panel" className="border-b border-divider pb-4 pl-4">
                               {/*
                                 * §8 — A ENTRADA DA FORMAÇÃO, ANTES DE PROCESSAR.
@@ -19010,7 +19351,10 @@ export default function ArquitetoPage() {
                                       versionStatus: articleDnaStatus,
                                       principalKeyword: art.keywordPrincipal,
                                       supportKeywords: art.supportKeywords.map(keyword => ({ keyword: keyword.keyword, role: manualKeywordRoleFor(keyword) })),
-                                      unitTypeLabel: expandedUnitSuggestion?.status === "human_confirmed" ? EDITORIAL_UNIT_LABELS[expandedUnitSuggestion.type] : null,
+                                      // Mesma régua do checklist (editorialUnitTypeIsDerived): derivado não é "A definir".
+                                      unitTypeLabel: expandedUnitSuggestion?.status === "human_confirmed"
+                                        ? EDITORIAL_UNIT_LABELS[expandedUnitSuggestion.type]
+                                        : editorialUnitTypeIsDerived(expandedUnitSuggestion) ? `${EDITORIAL_UNIT_LABELS[expandedUnitSuggestion!.type]} · sugerido` : null,
                                       kgr: {
                                         label: articleKgr.label,
                                         source: articleKgr.source,
@@ -19049,16 +19393,27 @@ export default function ArquitetoPage() {
                                         url: publicationUrlFor(art) || null,
                                         published: art.isPublished,
                                       },
-                                      siloLabel: art.siloId && siloDnaVersion ? `${art.siloName || "Silo"} · v${siloDnaVersion.versionNumber}` : articleSiloReadiness.label,
+                                      siloLabel: siloDnaVersion ? `${siloDnaVersion.payload.name || art.siloName || "Silo"} · v${siloDnaVersion.versionNumber}` : articleSiloReadiness.label,
                                       linksLabel: articleRadarReadiness.state === "sent" ? "Enviado ao Radar" : (linksApprovedGraph ? "InternalLinkGraph aprovado" : linksWorkingCopy ? "Working copy em edição" : "Não iniciados"),
                                     }} />
-                                    {art.mainKeywordObj && <KeywordDnaReadonlyPanel
-                                      keyword={art.mainKeywordObj}
+                                    {/*
+                                      * PUBLICADO COM A PRINCIPAL TROCADA (2026-10-01): o cartão
+                                      * "Principal" é a principal do ArticleDNA; a página publicada
+                                      * vem logo abaixo como secundária e identidade (URL, slug e
+                                      * canonical). Antes a página aparecia como "PRINCIPAL" sem
+                                      * volume e a principal real como "PRINCIPAL 1".
+                                      */}
+                                    {(art.displayPrincipalObj || art.mainKeywordObj) && <KeywordDnaReadonlyPanel
+                                      keyword={art.displayPrincipalObj || art.mainKeywordObj}
                                       role="Principal"
                                     />}
-                                    {art.supportKeywords.length === 0
+                                    {art.displayPrincipalObj && art.mainKeywordObj && <KeywordDnaReadonlyPanel
+                                      keyword={art.mainKeywordObj}
+                                      role="Página publicada · secundária (URL, slug e canonical)"
+                                    />}
+                                    {art.supportKeywords.filter(keyword => keyword !== art.displayPrincipalObj).length === 0
                                       ? <section className="rounded-md border border-divider bg-surface-subtle p-3"><p className="text-sm font-semibold text-foreground">Secundárias e reforços</p><p className="mt-2 text-sm text-text-muted">Nenhuma keyword de apoio vinculada.</p></section>
-                                      : art.supportKeywords.map((keyword, index) => <KeywordDnaReadonlyPanel
+                                      : art.supportKeywords.filter(keyword => keyword !== art.displayPrincipalObj).map((keyword, index) => <KeywordDnaReadonlyPanel
                                         key={keyword.id}
                                         keyword={keyword}
                                         /*
@@ -19077,7 +19432,7 @@ export default function ArquitetoPage() {
                                         role={`${MANUAL_KEYWORD_ROLE_LABELS[formationRoleFor(art, keyword)]} ${index + 1}`}
                                         headerExtra={<select value={manualKeywordRoleFor(keyword)} onChange={event => handleManualKeywordRoleChange(art, keyword, event.target.value as ManualKeywordRole)} disabled={art.isPublished} aria-label={`Definir papel de ${keyword.keyword} no artigo`} className={`${ARCHITECT_UI.control} min-h-8 text-sm disabled:cursor-not-allowed disabled:opacity-50`}>{(Object.keys(MANUAL_KEYWORD_ROLE_LABELS) as ManualKeywordRole[]).filter(role => role !== "principal" || !art.isPublished).map(role => <option key={role} value={role}>{MANUAL_KEYWORD_ROLE_LABELS[role]}</option>)}</select>}
                                       />)}
-                                    <section className="rounded-md border border-divider bg-surface-subtle p-3"><p className="text-sm font-semibold text-foreground">Silo</p><p className="mt-1 text-sm text-text-muted">{art.siloId && siloDnaVersion ? `${art.siloName || "Silo"} · ${art.hierarquia} · v${siloDnaVersion.versionNumber}` : articleSiloReadiness.state === "ready" ? "Pronto para Silos; nenhum silo é criado por este painel." : articleSiloReadiness.reasons.join(" ") || "Não iniciado."}</p></section>
+                                    <section className="rounded-md border border-divider bg-surface-subtle p-3"><p className="text-sm font-semibold text-foreground">Silo</p><p className="mt-1 text-sm text-text-muted">{siloDnaVersion ? `${siloDnaVersion.payload.name || art.siloName || "Silo"} · ${siloRoleByArticleId.get(String(articleDnaVersion?.payload.articleId || "")) || art.hierarquia} · v${siloDnaVersion.versionNumber}` : articleSiloReadiness.state === "ready" ? "Pronto para Silos; nenhum silo é criado por este painel." : articleSiloReadiness.reasons.join(" ") || "Não iniciado."}</p></section>
                                     {/*
                                       * §6 — O QUE ESTE ARTIGO LINKA, LIDO DO GRAFO.
                                       *

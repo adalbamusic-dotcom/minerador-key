@@ -193,13 +193,14 @@ export const RadarSemanticTermSchema = z.object({
 }).strict();
 export type RadarSemanticTerm = z.infer<typeof RadarSemanticTermSchema>;
 
-export const RadarPlannerTransferSchema = z.object({
+/** Recibo de envio entre etapas (versão da análise, quando e por quem). */
+export const RadarTransferReceiptSchema = z.object({
   sourceAnalysisVersionId: z.string().min(1),
   sourceAnalysisVersionNumber: z.number().int().positive(),
   sentAt: z.string().datetime(),
   sentBy: z.string().min(1),
 }).strict();
-export type RadarPlannerTransfer = z.infer<typeof RadarPlannerTransferSchema>;
+export type RadarTransferReceipt = z.infer<typeof RadarTransferReceiptSchema>;
 
 /**
  * ============ O DOSSIÊ V3 ENTREGUE AO PLANEJADOR — RADAR_FINAL_1 ============
@@ -630,8 +631,23 @@ export const RadarAnalysisPayloadSchema = z.object({
    * simplesmente não têm bundle.
    */
   finalizedBundle: RadarFrozenEvidenceBundleSchema.nullable().default(null),
-  plannerPackage: z.union([RadarPlannerHandoffSchema, RadarEvidencePackageSchema, LegacyRadarPlannerPackageSchema]).nullable(),
-  plannerTransfer: RadarPlannerTransferSchema.nullable().default(null),
+  /*
+   * ====== O PACOTE APROVADO DO RADAR (RadarApprovedPackage) ======
+   *
+   * Campo próprio desde a aposentadoria do Planejador (2026-10-01). Antes ele
+   * era gravado em `plannerPackage`; a leitura usa `radarApprovedPackageOf`,
+   * que aceita os dois, e nada novo é gravado no campo antigo.
+   */
+  approvedPackage: RadarPlannerHandoffSchema.nullable().default(null),
+  /*
+   * LEGADO DO PLANEJADOR — LIDO, NUNCA ESCRITO (aposentadoria em 2026-10-01).
+   *
+   * Análises gravadas antes carregam estes campos; o payload é `.strict()` e
+   * recusaria a linha inteira sem eles. Opcionais: a análise nova não os tem.
+   * O reset ainda os zera, para um pacote antigo não voltar pela leitura.
+   */
+  plannerPackage: z.union([RadarPlannerHandoffSchema, RadarEvidencePackageSchema, LegacyRadarPlannerPackageSchema]).nullable().optional(),
+  plannerTransfer: RadarTransferReceiptSchema.nullable().optional(),
   /*
    * ====== O DOSSIÊ V3 ENTREGUE — RADAR_FINAL_1 · §18 ======
    *
@@ -641,7 +657,7 @@ export const RadarAnalysisPayloadSchema = z.object({
    *
    * Aditivo com `.default(null)`: toda análise já gravada continua legível.
    */
-  plannerBundle: RadarPlannerBundleRecordSchema.nullable().default(null),
+  plannerBundle: RadarPlannerBundleRecordSchema.nullable().optional(),
   /*
    * ====== O DOSSIÊ ENTREGUE AO REDATOR — RADAR_TO_WRITER_HANDOFF_1 ======
    *
@@ -657,7 +673,7 @@ export const RadarAnalysisPayloadSchema = z.object({
    * Aditivo com `.default(null)`: toda análise já gravada continua legível.
    */
   writerBundle: RadarWriterBundleRecordSchema.nullable().default(null),
-  writerTransfer: RadarPlannerTransferSchema.nullable().default(null),
+  writerTransfer: RadarTransferReceiptSchema.nullable().default(null),
   status: RadarAnalysisStatusSchema,
   humanNotes: z.array(z.string()),
   approvedAt: z.string().datetime().nullable(),
@@ -791,7 +807,7 @@ export async function createRadarAnalysisContext(input: {
     semanticTerms: [], structuralDecisions: [], competitiveness: null,
     keywordDecisions: input.article.payload.keywordReferences.map(reference => ({ keywordId: reference.keywordId, decision: "keep", note: "" })),
     competitiveReport: null, deepResearch: null, researchTarget: null, supportResearch: null, researchPackage: null, amazonEditorialSetup: null, amazonSearch: null, amazonBlueprint: null, amazonFrozenInvestigation: null, youtubeSearch: null, youtubeFrozenInvestigation: null, finalizedBundle: null,
-    plannerPackage: null, plannerTransfer: null, plannerBundle: null, researchTransport: "FULL", status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
+    researchTransport: "FULL", status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
   });
   const version = await createVersionEnvelope({
     entityId: `radar-analysis:${input.article.payload.articleId}`,
@@ -840,7 +856,7 @@ export async function createRadarAnalysisVersion(input: {
     ],
     selectedCompetitorIds: [], extractionIds: [], extractions: [], benchmark: null, semanticTerms: [], structuralDecisions: [], competitiveness: null,
     keywordDecisions: input.article.payload.keywordReferences.map(reference => ({ keywordId: reference.keywordId, decision: "keep", note: "" })),
-    competitiveReport: null, deepResearch: input.deepResearch || null, finalizedBundle: null, plannerPackage: null, plannerTransfer: null, plannerBundle: null, researchTransport: "FULL", status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
+    competitiveReport: null, deepResearch: input.deepResearch || null, finalizedBundle: null, researchTransport: "FULL", status: "draft", humanNotes: [], approvedAt: null, approvedBy: null,
   });
   const entityId = input.previous?.entityId || `radar-analysis:${input.article.payload.articleId}`;
   const version = await createVersionEnvelope({ entityId, versionNumber: (input.previous?.versionNumber || 0) + 1, previousVersionId: input.previous?.versionId || null, origin: "human", changeReason: input.previous ? "Nova decisão humana na análise do Radar." : "Análise Radar criada após SERP real.", createdBy: input.actorId, createdAt: now, payload });
@@ -871,6 +887,13 @@ export async function createRadarAnalysisSuccessor(previous: RadarAnalysisVersio
   const payload = RadarAnalysisPayloadSchema.parse({ ...previous.payload, ...payloadPatch, status: targetStatus, approvedAt: targetStatus === "approved" ? payloadPatch.approvedAt || now : null, approvedBy: targetStatus === "approved" ? payloadPatch.approvedBy || actorId : null, plannerPackage: targetStatus === "approved" ? payloadPatch.plannerPackage ?? previous.payload.plannerPackage : null, plannerTransfer: payloadPatch.plannerTransfer ?? previous.payload.plannerTransfer });
   const version = await createVersionEnvelope({ entityId: previous.entityId, versionId, versionNumber: previous.versionNumber + 1, previousVersionId: previous.versionId, origin: "human", changeReason: "Atualização humana da curadoria/análise do Radar.", createdBy: actorId, createdAt: now, payload });
   return VersionedRadarAnalysisSchema.parse(version);
+}
+
+/** O pacote aprovado: o campo próprio, ou o legado gravado antes de 2026-10-01. */
+export function radarApprovedPackageOf(payload: Pick<RadarAnalysisPayload, "approvedPackage" | "plannerPackage">): RadarPlannerHandoff | null {
+  if (payload.approvedPackage) return payload.approvedPackage;
+  const legado = RadarPlannerHandoffSchema.safeParse(payload.plannerPackage);
+  return legado.success ? legado.data : null;
 }
 
 export function buildRadarPlannerPackage(payload: RadarAnalysisPayload): RadarAnalysisPayload["plannerPackage"] {

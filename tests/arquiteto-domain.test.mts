@@ -3,7 +3,6 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import {
   ArticleDNASchema,
-  ContentPlanSchema,
   ContentDocumentSchema,
   OriginalityReportSchema,
   SerpArchitectureImpactSchema,
@@ -519,8 +518,10 @@ test("relatorio de originalidade nasce aguardando SERP externa", () => {
 
 test("ContentDocument converte blocos para semente Tiptap", () => {
   const document = {
-    schemaVersion: 1 as const, id: "doc-1", title: "SEO", status: "planejado" as const,
-    contentPlanRef: ref("plan-1"), brandDnaRef: ref("brand-1"), keywordDnaRefs: [ref("kw-1")],
+    schemaVersion: 2 as const, id: "doc-1", title: "SEO", status: "planejado" as const,
+    radarOrigin: { radarItemId: "radar-1", articleId: "article-1", analysisVersionId: "analysis-1", analysisVersionNumber: 1, evidenceBundleHash: "bundle-1", articleDnaVersionId: "article-1-v1", articleDnaContentHash: "sha256:a", siloDnaVersionId: null, importedAt: "2026-10-01T00:00:00.000Z", importedBy: "u" },
+    importedContext: { source: "radar" as const, capturedAt: "2026-10-01T00:00:00.000Z", dossier: null, editorialContext: [], visualGuidance: [], pendingDecisions: [] },
+    brandDnaRef: ref("brand-1"), keywordDnaRefs: [ref("kw-1")],
     siloDnaRef: ref("silo-1"), articleDnaRef: ref("article-1"),
     serpSnapshotRefs: [], evidenceRefs: [], sourceIds: [], linkMap: [], instructions: [],
     blocks: [
@@ -610,15 +611,6 @@ test("ArticleDNA e SiloDNA exigem referencias exatas", () => {
   assert.equal(SiloDNASchema.safeParse({ ...siloDna, articleReferences: siloDna.articleReferences.slice(0, 1) }).success, false);
 });
 
-test("ContentPlan registra todas as versoes e ContentDocument mantem proveniencia compacta", () => {
-  const plan = { schemaVersion: 1, planId: "plan-1", brandDnaRef: ref("brand-1"), keywordDnaRefs: [ref("kw-1"), ref("kw-2")],
-    articleDnaRef: ref("article-1"), siloDnaRef: ref("silo-1"), serpEvidenceRefs: [{ artifactId: "serp-1", artifactType: "serp_snapshot", contentHash: "legacy:serp" }],
-    productEvidenceRefs: [], originalityReportRef: null, approvedOutline: [{ id: "s1", heading: "Introducao", objective: "Contextualizar", keywordDnaRefs: [ref("kw-1")] }],
-    writingInstructions: [], humanPendingDecisions: [] };
-  assert.equal(ContentPlanSchema.safeParse(plan).success, true);
-  assert.doesNotMatch(JSON.stringify(plan), /perceivedProblem|desiredResult/);
-});
-
 test("hidratacao detecta referencia ausente, hash divergente, desatualizada e ciclo", async () => {
   const repository = new InMemoryVersionRepository();
   const first = await createVersionEnvelope({ entityId: "a", versionNumber: 1, origin: "human", changeReason: "Inicial", createdBy: "u", payload: { dependencies: [] } });
@@ -668,12 +660,6 @@ test("ProductEvidenceDNA exige fonte e confianca validas", () => {
   assert.equal(ProductEvidenceDNASchema.safeParse(evidence).success, true);
   assert.equal(ProductEvidenceDNASchema.safeParse({ ...evidence, sources: [] }).success, false);
   assert.equal(ProductEvidenceDNASchema.safeParse({ ...evidence, confidence: 2 }).success, false);
-});
-
-test("proveniencia compacta rejeita DNA integral duplicado", () => {
-  assert.equal(ContentPlanSchema.safeParse({ schemaVersion: 1, planId: "p", brandDnaRef: { ...ref("brand"), payload: { positioning: "duplicado" } },
-    keywordDnaRefs: [ref("kw")], articleDnaRef: ref("article"), siloDnaRef: ref("silo"), serpEvidenceRefs: [], productEvidenceRefs: [],
-    originalityReportRef: null, approvedOutline: [{ id: "s", heading: "H", objective: "O", keywordDnaRefs: [ref("kw")] }], writingInstructions: [], humanPendingDecisions: [] }).success, false);
 });
 
 test("adaptador legado cria referencia explicita sem fingir persistencia", () => {

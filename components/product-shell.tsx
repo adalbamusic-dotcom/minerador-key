@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type CSSProperties } from "react";
 import { useSupabaseSession } from "@/components/auth/supabase-session-context";
-import { Building2, ChevronDown, ChevronLeft, ChevronRight, CircleUser, FilePenLine, Gauge, Key, Library, Menu, Network, Radar, Shield, Sparkles, Store, X } from "lucide-react";
+import { Building2, ChevronDown, ChevronLeft, ChevronRight, CircleUser, FilePenLine, Key, Library, Menu, Network, Radar, Shield, Sparkles, Store, X } from "lucide-react";
 import { PRODUCT_FLOW, menuEntriesForRole, type ProductModule } from "@/lib/editorial/navigation";
 import { useBrand } from "./brand-context";
 import type { TenantContext } from "@/lib/server/tenant-context";
@@ -25,7 +25,6 @@ const icons: Record<ProductModule, typeof Building2> = {
   minerador: Key,
   arquiteto: Network,
   radar: Radar,
-  planejador: Gauge,
   redator: FilePenLine,
   publicacoes: Library,
   conta: CircleUser,

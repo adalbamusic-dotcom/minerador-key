@@ -1,4 +1,4 @@
-export type EditorialHistoryModule = "minerador" | "arquiteto" | "radar" | "planejador" | "redator" | "publicacoes";
+export type EditorialHistoryModule = "minerador" | "arquiteto" | "radar" | "redator" | "publicacoes";
 
 export interface EditorialHistoryEntry<T> {
   id: string;

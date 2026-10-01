@@ -6,7 +6,7 @@ import { buildCanonicalWorkflowWorkspaceItems } from "@/lib/arquiteto/canonical-
 import { deterministicArticleDnaPayload } from "@/lib/arquiteto/adapters";
 import { PUBLISHED_REINFORCEMENT_SWAP_REASON, serpAssessmentComposition, serpCompositionMismatch } from "@/lib/arquiteto/published-formation-serp";
 import { suggestArticleSlug } from "@/lib/arquiteto/article-formation";
-import { articleSerpBaseHash } from "@/lib/arquiteto/article-serp-gate";
+import { articleSerpBaseHash, articleSerpIntentOf } from "@/lib/arquiteto/article-serp-gate";
 import type { SerpFormationAssessment } from "@/lib/arquiteto/serp-formation";
 import { siloIsHumanDecided } from "@/lib/arquiteto/territory";
 import { bindArticleParentForMaterialization } from "@/lib/arquiteto/article-silo-materialization";
@@ -14,9 +14,12 @@ import { articleApprovalRevalidationIssues } from "@/lib/arquiteto/article-appro
 import { publishedPrimaryPostOf } from "@/lib/arquiteto/published-primary-swap";
 import { buildFirstPublishedArticleDna, withHumanArticleApproval } from "@/lib/arquiteto/published-reinforcement";
 import { resolveKeywordDnaSignals } from "@/lib/arquiteto/keyword-dna-signals";
+import { applySerpDecisionToArticle, buildClassificationEvidence, resolveArticleClassification, unresolvedClassifications, ARTICLE_INTENT_LABELS, ARTICLE_FUNNEL_LABELS } from "@/lib/arquiteto/article-classification-closure";
+import { resolveApprovedArticleSerpGate, type ApprovedSerpRecord } from "@/lib/arquiteto/approved-article-serp-gate";
+import { readArticleKgrDecision } from "@/lib/arquiteto/article-kgr-decision";
 import { readArchitectSubjectStanding, planSubjectAttachment, attachSubjectToArticleDna } from "@/lib/arquiteto/declared-subject";
 import { shortSeedsOf, sharesTheme } from "@/lib/minerador/short-seeds";
-import { ARTICLE_IMPROVEMENT_VERSION, carriesSlugCore, planArticleImprovements, improvementEditorialFit, isListReading, serpSupportedMembers, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence } from "@/lib/arquiteto/article-improvement";
+import { ARTICLE_IMPROVEMENT_VERSION, volumelessPrincipalSwap, carriesSlugCore, planArticleImprovements, improvementEditorialFit, isListReading, serpSupportedMembers, type ImprovementKeyword, type ImprovementTarget, type ImprovementProposal, type ImprovementEvidence } from "@/lib/arquiteto/article-improvement";
 import { buildImprovementAiPrompt, editorialAiRecord, improvementAiEligibleTargets, improvementAiList, improvementAiTargets, IMPROVEMENT_AI_TIMEOUT_MS, validateImprovementAiPicks, type ImprovementEditorialAi } from "@/lib/arquiteto/article-improvement-ai";
 import { readPageRanking, rankingBlocksSwap } from "@/lib/arquiteto/published-differentiation";
 import { buildSerpSubjectIndex, SERP_SUBJECT_LENS_LABELS } from "@/lib/arquiteto/serp-subject-overlap";
@@ -27,6 +30,7 @@ import { importSubjectDiscoveryWithCore } from "@/lib/minerador/subject-discover
 import { loadCanonicalArquitetoWorkspace, createMineradorArquitetoHandoff } from "./arquiteto-workspace";
 import { readDifferentiationBrandKeywords, readPublishedFootprints } from "./arquiteto-differentiation-store";
 import { proposeArticleImprovementAiPicks, readGoogleAdsAverageVolumes } from "./arquiteto-differentiation-runtime";
+import { measureKeywordVolume } from "./minerador-volume-measure";
 import { handleArchitectWorkspacePatch } from "./arquiteto-workspace-http";
 import { handleArchitectFormationSerp } from "./arquiteto-serp-http";
 import { handleGoogleAdsKeywordMetrics } from "./minerador-google-ads-metrics-http";
@@ -134,9 +138,27 @@ async function readInputs(context: PipelineContext, requested?: string[]) {
       ? { centralEntity: territory.centralEntity, macroIntent: territory.macroIntent, slug: territory.slugState.publishedSlug || territory.slugState.confirmed || territory.slugState.proposals?.[0]?.slug || null }
       : { centralEntity: null, macroIntent: null, slug: null };
   }
+  /*
+   * A FORMAÇÃO DA MESA DE UM PUBLICADO É DELE (2026-10-01).
+   *
+   * Reforço antigo deixava keywords na formação da mesa do publicado sem
+   * entrar no ArticleDNA ("marketing digital para dentistas": 9 na mesa, 4 no
+   * DNA). Elas contavam como "de outra formação" e não podiam nem entrar no
+   * artigo nem sair dele. Agora são candidatas DO PRÓPRIO artigo: entram as que
+   * a SERP e o sentido sustentam (teto de 6), e ao gravar as que sobram são
+   * liberadas para "Keywords não agrupadas", nomeadas — nenhuma some.
+   */
+  const formacaoDoAlvo = new Map<string, string>();
+  for (const target of targets) {
+    if (target.kind !== "published") continue;
+    for (const id of target.memberIds) { const ref = text(rows.get(id)?.articleFormationRef); if (ref && !formacaoDoAlvo.has(ref)) formacaoDoAlvo.set(ref, target.id); }
+  }
   const selected = requested ? targets.filter(t => requested.includes(t.id)) : targets;
   if (requested?.some(id => !selected.some(t => t.id === id))) throw refusal("Um dos alvos não pertence à marca ou não está recebido no Arquiteto.");
-  const keywords: ImprovementKeyword[] = [...rows.values()].filter(r => !readArchitectSubjectStanding(r).declared).map(r => ({ id: r.id, keyword: r.keyword, volume: r.volume_search ?? null, volumeValidated: String(r.volume_source ?? object(r.demandEvidence).source ?? "").toLowerCase() === "google_ads" && (r.volume_search ?? 0) > 0, signals: signals(r), ownerId: owned.get(r.id) ?? (text(r.articleFormationRef) && object(r.articleFormationDecision).source === "human" ? `formation:${r.articleFormationRef}` : null), published: Boolean(r.isPublished) || brand.pages.some(p => p.keywordId === r.id), territoryRef: text(r.territoryRef), external: false }));
+  const keywords: ImprovementKeyword[] = [...rows.values()].filter(r => !readArchitectSubjectStanding(r).declared).map(r => {
+    const googleAds = String(r.volume_source ?? object(r.demandEvidence).source ?? "").toLowerCase() === "google_ads";
+    return { id: r.id, keyword: r.keyword, volume: r.volume_search ?? null, volumeValidated: googleAds && (r.volume_search ?? 0) > 0, signals: signals(r), ownerId: owned.get(r.id) ?? formacaoDoAlvo.get(text(r.articleFormationRef) ?? "") ?? (text(r.articleFormationRef) && object(r.articleFormationDecision).source === "human" ? `formation:${r.articleFormationRef}` : null), published: Boolean(r.isPublished) || brand.pages.some(p => p.keywordId === r.id), territoryRef: text(r.territoryRef), external: false, ...(googleAds ? { googleAdsMeasured: true } : {}) };
+  });
   return { workspace, rows, targets: selected, keywords };
 }
 type EvidenceRead = { evidence: ImprovementEvidence[]; ranking: Record<string, boolean | null> };
@@ -174,7 +196,8 @@ function baseHash(group: ProvisionalArticleGroup) {
   return articleSerpBaseHash({ territoryRef: group.territoryRef!, principalKeywordId: group.principalSuggestion.keywordId,
     roles: group.keywordIds.map(keywordId => ({ keywordId, role: keywordId === group.principalSuggestion.keywordId ? "principal" : "secundaria" })),
     suggestedSlug: target?.kind === "published" ? null : suggestArticleSlug({ principal: group.keywords.find(k => k.id === group.principalSuggestion.keywordId)!, siloSlug: target?.siloContext?.slug ?? null }),
-    intents: group.keywords.map(k => ({ keywordId: k.id, intent: signals(k as Row).intent })),
+    // A MESMA intenção que a mesa usa no hash esperado (articleSerpIntentOf).
+    intents: group.keywords.map(k => ({ keywordId: k.id, intent: articleSerpIntentOf(k) })),
     siloContext: { centralEntity: target?.siloContext?.centralEntity ?? null, macroIntent: target?.siloContext?.macroIntent ?? null },
   });
 }
@@ -261,6 +284,44 @@ async function readEditorialAi(runtime: ImprovementRuntime, run: ImprovementRun,
   if (eligible > targets.length) run.notices.push(`Leitura da IA: ${eligible - targets.length} publicado(s) ou Assunto(s) além dos ${targets.length} desta leitura ficaram só com as regras e a busca gratuita nesta preparação (limite por chamada da IA).`);
 }
 /** Pagination and direct/expanded seeds share a memo; no repeated seed calls. */
+/*
+ * VOLUME ANTIGO É MEDIDO DE NOVO NO PREPARO (pedido do dono, 2026-09-30).
+ *
+ * "tráfego pago vs orgânico para clínica de estética" ficou com a principal
+ * publicada sem volume porque as keywords do próprio artigo vieram de outra
+ * era (volume de outro provider, "Bruto" no Minerador): sem `volume_source =
+ * google_ads` nenhuma contava como volume validado, e a troca nunca era
+ * proposta — mesmo "trafego organico e pago" levando o núcleo do slug. Aqui
+ * elas são medidas no Google Ads (grátis, só leitura) para a proposta
+ * enxergar a demanda real; "Gravar melhorias" grava a medição no Minerador.
+ */
+const OLD_VOLUME_MEASURE_LIMIT = 300;
+async function measureOldVolumes(context: PipelineContext, run: ImprovementRun) {
+  const membros = new Set(run.targets.flatMap(target => target.memberIds));
+  const alvo = run.keywords
+    .filter(k => !k.external && !k.volumeValidated && !k.googleAdsMeasured && (membros.has(k.id) || run.targets.some(target => sharesTheme(target.theme, k.keyword))))
+    .slice(0, OLD_VOLUME_MEASURE_LIMIT);
+  if (!alvo.length) return;
+  try {
+    const volumes = await readGoogleAdsAverageVolumes({ actorUserId: context.actorUserId, agencyId: null, brandId: context.brandId, keywords: alvo.map(k => k.keyword) });
+    // Só volume positivo muda a prévia: "sem média" não valida nada, e a
+    // keyword segue como estava (sem volume validado), sem gravação pendente.
+    let comVolume = 0, semMedia = 0;
+    for (const k of alvo) {
+      const medido = volumes.get(normalizeKeyword(k.keyword));
+      if (medido === undefined) continue;
+      if (typeof medido !== "number" || medido <= 0) { semMedia++; continue; }
+      k.volume = medido;
+      k.volumeValidated = true;
+      k.volumePendingWrite = true;
+      comVolume++;
+    }
+    if (comVolume || semMedia) run.notices.push(`${comVolume + semMedia} keyword(s) com volume antigo foram medidas agora no Google Ads (grátis): ${comVolume} com volume${semMedia ? `, ${semMedia} sem média oficial` : ""}.${comVolume ? " A medição é gravada no Minerador ao “Gravar melhorias”." : ""}`);
+  } catch (error) {
+    run.notices.push(`Não deu para medir no Google Ads o volume antigo de ${alvo.length} keyword(s): ${error instanceof Error ? error.message : "provider indisponível"}. Elas seguem sem volume validado nesta prévia.`);
+  }
+}
+
 async function discover(context: PipelineContext, targets: ImprovementTarget[], existing: ImprovementKeyword[], notices: string[], budgetMs = 35000) {
   const canonical = await resolveGoogleAdsCanonicalContext({ actorUserId: context.actorUserId, agencyId: null, brandId: context.brandId, operation: "discovery" });
   const { client } = await createGoogleAdsCanonicalClient({ context: canonical });
@@ -329,6 +390,7 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     const input = await readInputs(context, request.targetIds);
     const run: ImprovementRun = { version: ARTICLE_IMPROVEMENT_VERSION, runId: randomUUID(), brandId: context.brandId, actorId: context.actorUserId, createdAt: new Date().toISOString(), state: "prepared", leaseUntil: null, decisionHash: "", sourceHashes: Object.fromEntries(input.targets.map(t => [t.id, sourceHash(t, input.workspace, input.rows)])), targets: input.targets, keywords: input.keywords, beforeAssignments: Object.fromEntries([...input.rows].map(([id, row]) => [id, Object.fromEntries(Object.entries(object(object(row.canonicalWorkflow).payload)).filter(([key]) => ["territoryRef", "territoryAssignment", "articleFormationRef", "articleFormationDecision", "articleSubjectAnchor", "workingArticleId"].includes(key)))])), proposals: [], costs: { paidQueries: 0, estimatedCostUsd: { min: 0, max: 0 }, missingDetails: [] }, reservedCostUsd: 0, notices: [], outcomes: [], acceptedIds: null };
     const started = Date.now();
+    await measureOldVolumes(context, run);
     const { evidence, ranking } = await evidenceOf(context, run.targets, run.keywords);
     // 1 · pares da SERP (cache).
     run.proposals = planArticleImprovements({ targets: run.targets, keywords: run.keywords, evidence, ranking, listReading: false });
@@ -342,6 +404,7 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
     const discoverBudgetMs = Math.max(5000, Math.min(35000, PREPARE_SEARCH_DEADLINE_MS - (Date.now() - started)));
     if (gaps.length) try { run.keywords = await discover(context, gaps, run.keywords, run.notices, discoverBudgetMs); } catch (error) { run.notices.push(`Pesquisa gratuita incompleta: ${error instanceof Error ? error.message : "provider indisponível"}. O acervo continua válido.`); }
     await refreshPlan(runtime, run, input.rows, started + (runtime.compositionDeadlineMs ?? COMPOSITION_DEADLINE_MS));
+    await planSerpRefreshes(context, run, input);
     run.decisionHash = decisionHashOf(run);
     await new WorkflowRepository(context).create({ subjectType: SUBJECT_TYPE, subjectId: run.runId, stage: "architect", state: "prepared", sourceEntityId: run.runId, payload: run as unknown as Record<string, unknown> });
     return (await findRun(context, run.runId)).run;
@@ -399,7 +462,9 @@ export async function handleArticleImprovement(runtime: ImprovementRuntime, requ
       current = await saveRun(context, current, run);
       if (groupsThisRequest > 0 && Date.now() - started > START_WINDOW_MS) return current.run;
     }
-    await refreshPlan(runtime, run, input.rows, started + (runtime.compositionDeadlineMs ?? COMPOSITION_DEADLINE_MS)); run.state = "prepared"; delete run.collect; run.decisionHash = decisionHashOf(run);
+    await refreshPlan(runtime, run, input.rows, started + (runtime.compositionDeadlineMs ?? COMPOSITION_DEADLINE_MS));
+    await planSerpRefreshes(context, run, input);
+    run.state = "prepared"; delete run.collect; run.decisionHash = decisionHashOf(run);
     return (await saveRun(context, current, run)).run;
   }
   // One human confirmation persists the accepted set. Subsequent requests only
@@ -570,12 +635,165 @@ async function refreshPlan(runtime: ImprovementRuntime, run: ImprovementRun, exi
     catch { unreadable(proposal); }
   }
   await judge(again, false);
+  /*
+   * A LEITURA DA IA OU DA LISTA CAIU NA SERP: TENTA A TROCA INTERNA (2026-10-01).
+   *
+   * A IA propunha keyword nova de fora, a SERP não confirmava e a linha ficava
+   * "evidência insuficiente" — a principal sem volume ficava. A troca pela
+   * keyword que já está no artigo (volumelessPrincipalSwap) é conferida aqui
+   * pelo mesmo cache, sem custo, e entra no lugar quando a SERP confirma.
+   */
+  const reservas: Checked[] = [];
+  const byIdTroca = new Map(run.keywords.map(k => [k.id, k]));
+  run.proposals = run.proposals.map(proposal => {
+    if (proposal.status === "ready" || !isListReading(proposal) || Date.now() > deadlineAt) return proposal;
+    const target = run.targets.find(t => t.id === proposal.targetId);
+    const troca = target ? volumelessPrincipalSwap(target, byIdTroca) : null;
+    if (!troca) return proposal;
+    troca.reasons.push(`A leitura da ${proposal.evidenceBasis === "list_core" ? "lista" : "IA"} propôs keyword nova, mas a SERP dela não confirmou; a troca usa a keyword que já está no artigo.`);
+    return troca;
+  });
+  for (const proposal of run.proposals.filter(p => p.status === "ready" && p.reasons.some(r => /a troca usa a keyword que já está no artigo/.test(r)))) {
+    const group = makeGroup(run.targets.find(t => t.id === proposal.targetId)!, proposal, rows);
+    try { await serpOperation(runtime.context, group, "execute", 0); reservas.push({ proposal, group }); }
+    catch { unreadable(proposal); }
+  }
+  await judge(reservas, false);
   run.costs = { paidQueries: calls, estimatedCostUsd: { min: Number(minimum.toFixed(6)), max: Number(maximum.toFixed(6)) }, missingDetails: details, ...(cacheUnavailable ? { cacheUnavailable: true } : {}) };
+}
+
+/*
+ * ATUALIZAR O DNA COM A SERP (pedido do dono, 2026-10-01).
+ *
+ * Publicado já aprovado, com o parecer da SERP da própria composição completo
+ * nas 4 lentes, mas com o DNA sem classificação ou com intenção/funil
+ * diferentes do que a SERP decidiu (caso real: "tráfego pago vs orgânico",
+ * intenção "unknown" e a SERP dizendo informacional). A melhoria dizia "nada a
+ * melhorar" e não havia botão que regravasse. Agora a linha aparece pronta, a
+ * composição não muda, e a gravação é uma versão nova aprovada do DNA com a
+ * decisão da SERP — o mesmo cálculo da tela (buildClassificationEvidence) e a
+ * mesma escrita no DNA (applySerpDecisionToArticle).
+ */
+type SerpRefreshCheck = { article: Workspace["articleDnas"][number]; recordVersionId: string; candidateRef: string; formationBaseHash: string; payload: ArticleDNA; intent: string; funnel: string; detail: string };
+function latestArticleOf(target: ImprovementTarget, workspace: Workspace) {
+  return workspace.articleDnas
+    .filter(a => a.entityId === target.id || a.payload.articleId === target.id || a.payload.subject?.keywordId === target.id || a.payload.publishedIdentityRef?.sourceKeywordDnaIds?.includes(target.id))
+    .sort((a, b) => b.versionNumber - a.versionNumber)[0];
+}
+function serpRefreshCheck(target: ImprovementTarget, workspace: Workspace, rows: Map<string, Row>, records: readonly ApprovedSerpRecord[]): SerpRefreshCheck | null {
+  const article = latestArticleOf(target, workspace);
+  const ref = article?.payload.serpAssessmentRef?.versionId;
+  if (!article || !ref) return null;
+  const gate = resolveApprovedArticleSerpGate({ articleId: article.payload.articleId, dna: article.payload, records });
+  if (!gate || gate.blocksConclusion) return null;
+  const record = records.find(r => `${r.payload.assessment.id}:${r.payload.formationBaseHash}` === ref)!;
+  const principalId = article.payload.principalKeywordId;
+  const ids = article.payload.keywordReferences.map(reference => String(reference.keywordId));
+  const principalRow = rows.get(principalId);
+  if (!principalRow) return null;
+  const semanticaDe = (keywordId: string) => {
+    const row = rows.get(keywordId);
+    const semantic = object(row?.analise_semantica);
+    const texto = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+    return { intent: row ? signals(row).intent : null, funnel: texto(semantic.funil) || texto(semantic.funnel) };
+  };
+  const kgr = readArticleKgrDecision({
+    kgrIdentity: article.payload.kgrIdentity,
+    principal: principalRow as unknown as ArchitectKeyword,
+    principalKeywordId: principalId,
+    supports: ids.filter(id => id !== principalId).map(id => rows.get(id)).filter(Boolean) as unknown as ArchitectKeyword[],
+  });
+  const evidencia = buildClassificationEvidence({
+    principal: semanticaDe(principalId),
+    secondaries: ids.filter(id => id !== principalId).map(semanticaDe),
+    keywordCount: ids.length,
+    serpInterpretation: (record.payload.interpretation ?? null) as { observedIntent: string; observedFunnel?: string | null; intentShares?: { informacional: number; comercial: number; transacional: number; lenses: number; results: number } | null } | null,
+    serpResolved: true,
+    kgr,
+    principalIsSubject: target.kind === "subject" || readArchitectSubjectStanding(principalRow).declared,
+    isPublished: Boolean(article.payload.publishedIdentityRef),
+    principalProtected: principalRow.primaryKeywordPolicy === "locked",
+  });
+  if (unresolvedClassifications(evidencia).length) return null;
+  const classificacao = resolveArticleClassification(evidencia);
+  const payload = ArticleDNASchema.parse(applySerpDecisionToArticle({ ...article.payload, classification: classificacao }, classificacao));
+  const muda = !article.payload.classification
+    || stableHash(article.payload.classification) !== stableHash(classificacao)
+    || payload.mainIntent !== article.payload.mainIntent
+    || payload.journeyStage !== article.payload.journeyStage;
+  if (!muda) return null;
+  const intent = ARTICLE_INTENT_LABELS[classificacao.intent.value] ?? classificacao.intent.value;
+  const funnel = ARTICLE_FUNNEL_LABELS[classificacao.funnel.value] ?? classificacao.funnel.value;
+  const antes = !article.payload.classification
+    ? `O DNA estava sem classificação e com intenção “${article.payload.mainIntent}”.`
+    : `O DNA dizia intenção “${article.payload.mainIntent}” e funil “${article.payload.journeyStage}”.`;
+  return { article, recordVersionId: ref, candidateRef: record.candidateRef, formationBaseHash: record.payload.formationBaseHash, payload, intent, funnel, detail: `${antes} ${classificacao.intent.reason}` };
+}
+async function planSerpRefreshes(context: PipelineContext, run: ImprovementRun, input: Awaited<ReturnType<typeof readInputs>>) {
+  let records: ApprovedSerpRecord[];
+  try { records = (await listArticleFormationSerpAssessments(context)) as unknown as ApprovedSerpRecord[]; } catch { return; }
+  let quantos = 0;
+  run.proposals = run.proposals.map(proposal => {
+    if (proposal.status === "ready") return proposal;
+    const target = run.targets.find(t => t.id === proposal.targetId);
+    const check = target ? serpRefreshCheck(target, input.workspace, input.rows, records) : null;
+    if (!check) return proposal;
+    quantos++;
+    const ids = check.article.payload.keywordReferences.map(reference => String(reference.keywordId));
+    return {
+      targetId: proposal.targetId, kind: proposal.kind, theme: proposal.theme,
+      currentPrimaryId: check.article.payload.principalKeywordId, principalId: check.article.payload.principalKeywordId, memberIds: ids,
+      addIds: [], removeIds: [], transfers: [], angle: "", exclusions: [],
+      reasons: [`Atualizar o DNA com a SERP: intenção ${check.intent}, funil ${check.funnel}. ${check.detail}`],
+      status: "ready", evidenceBasis: "serp",
+      serpRefresh: { recordVersionId: check.recordVersionId, intent: check.intent, funnel: check.funnel, detail: check.detail },
+    };
+  });
+  if (quantos) run.notices.push(`${quantos} DNA(s) aprovado(s) podem ser atualizados com a SERP vigente (intenção e funil decididos pelas 4 lentes), sem mudar a composição.`);
+}
+async function applySerpRefresh(runtime: ImprovementRuntime, run: ImprovementRun, proposal: ImprovementProposal, target: ImprovementTarget, input: Awaited<ReturnType<typeof readInputs>>): Promise<Outcome> {
+  const context = runtime.context;
+  // Resposta perdida depois de gravar: a versão desta execução já existe.
+  const committed = input.workspace.articleDnas.find(a => a.changeReason.includes(`[run:${run.runId}]`) && a.entityId === latestArticleOf(target, input.workspace)?.entityId);
+  if (committed) return { targetId: target.id, status: "improved", message: "Atualização desta execução recuperada e relida; nenhuma versão duplicada.", versionId: committed.versionId };
+  if (sourceHash(target, input.workspace, input.rows) !== run.sourceHashes[target.id]) throw refusal("O artigo, suas keywords ou o Silo mudaram desde a prévia. Prepare novamente.");
+  const records = (await listArticleFormationSerpAssessments(context)) as unknown as ApprovedSerpRecord[];
+  const check = serpRefreshCheck(target, input.workspace, input.rows, records);
+  if (!check || check.recordVersionId !== proposal.serpRefresh!.recordVersionId) throw refusal("A SERP ou o DNA mudaram desde a prévia. Prepare novamente.");
+  const now = new Date().toISOString();
+  const version = await createVersionEnvelope({
+    entityId: check.article.entityId,
+    versionNumber: check.article.versionNumber + 1,
+    previousVersionId: check.article.versionId,
+    origin: "human",
+    changeReason: `Atualizar o DNA com a SERP: intenção ${check.intent} e funil ${check.funnel} decididos pela SERP vigente (4 lentes); composição, URL, slug e canonical preservados. [run:${run.runId}]`,
+    createdBy: context.actorUserId,
+    payload: check.payload,
+  });
+  const issues = articleApprovalRevalidationIssues({ version, authorizedBrandId: context.brandId });
+  if (issues.length) throw refusal(`A aprovação não passou na revalidação: ${issues.map(i => i.detail).join(" ")}`);
+  const written = await appendArquitetoArtifact(await runtime.authorize("arquiteto", "approve"), "article_dna", version, "approved");
+  // A formação entra no marcador como concluída, se ainda não estiver.
+  const marker = await readArticleFormationMarker(context);
+  const articleId = check.payload.articleId;
+  if (!(marker?.payload.concludedFormations ?? []).some(f => f.materializedArticleId === articleId)) {
+    const principalId = check.payload.principalKeywordId;
+    const candidateRef = text(input.rows.get(principalId)?.articleFormationRef) ?? check.candidateRef;
+    const members = check.payload.keywordReferences.map(reference => ({ keywordId: String(reference.keywordId), role: reference.keywordId === principalId ? "principal" as const : reference.role === "reforco_narrativo" ? "reforco" as const : "secundaria" as const }));
+    const concluded = { candidateRef, territoryRef: check.payload.territoryRef ?? target.territoryRef!, principalKeywordId: principalId, members, formationBaseHash: check.formationBaseHash, slug: check.payload.suggestedSlug ?? null, fullPath: target.url ?? null, concludedAt: now, concludedBy: context.actorUserId, materializedArticleId: articleId };
+    const formations = [...(marker?.payload.concludedFormations ?? []).filter(f => f.candidateRef !== candidateRef), concluded];
+    await saveArticleFormationMarker(context, { contractVersion: "article-formation-marker-v1", baseHash: marker?.payload.baseHash ?? check.formationBaseHash, processedAt: now, confirmation: { status: "partial", confirmedAt: now, confirmedArticleCount: formations.length, coveredKeywordCount: new Set(formations.flatMap(f => f.members.map(m => m.keywordId))).size, pendingSiloCount: marker?.payload.confirmation.pendingSiloCount ?? 0, failedCount: marker?.payload.confirmation.failedCount ?? 0 }, concludedFormations: formations });
+  }
+  const readback = await loadCanonicalArquitetoWorkspace(context);
+  const dna = readback.articleDnas.find(a => a.versionId === written.version.versionId);
+  if (!dna || dna.contentHash !== written.version.contentHash) throw refusal("A releitura do DNA atualizado não confirmou a gravação.");
+  return { targetId: target.id, status: "improved", message: `DNA atualizado com a SERP e relido: intenção ${check.intent}, funil ${check.funnel}. Composição, URL, slug e canonical não mudaram.`, versionId: dna.versionId };
 }
 
 async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, proposal: ImprovementProposal): Promise<Outcome> {
   const context = runtime.context, target = run.targets.find(t => t.id === proposal.targetId)!;
   let input = await readInputs(context, [target.id]);
+  if (proposal.serpRefresh) return applySerpRefresh(runtime, run, proposal, target, input);
   // The last article may have committed before its journal response was lost.
   // Recover only when the DNA, marker and every assignment prove this run;
   // never create a second version merely to acknowledge the first one.
@@ -591,6 +809,20 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
     throw refusal("Há gravação parcial desta execução. Prepare uma nova prévia para revisar a composição atual.");
   }
   if (sourceHash(target, input.workspace, input.rows) !== run.sourceHashes[target.id]) throw refusal("O artigo, suas keywords ou o Silo mudaram desde a prévia. Prepare novamente.");
+  /*
+   * A medição do preparo vira dado gravado ANTES da comparação: é o mesmo
+   * núcleo do "Medir volume" do Minerador, com releitura. O que a pessoa
+   * aceitou na prévia (volume medido no Google Ads) é o que fica no Minerador
+   * e no ArticleDNA — nada sai daqui com o volume antigo pendente.
+   */
+  const aMedir = [...new Set([...proposal.memberIds, proposal.principalId ?? ""])]
+    .filter(id => id && run.keywords.find(k => k.id === id)?.volumePendingWrite);
+  if (aMedir.length) {
+    const medicao = await measureKeywordVolume(await runtime.authorize("minerador", "edit"), aMedir);
+    const falhas = medicao.outcomes.filter(item => item.outcome === "failed");
+    if (falhas.length) throw refusal(`A medição de volume no Google Ads não foi gravada para ${falhas.length} keyword(s) (${falhas[0].reason || "sem confirmação"}). Nada foi gravado no artigo; tente de novo.`);
+    input = await readInputs(context, [target.id]);
+  }
   let members = [...proposal.memberIds], principalId = proposal.principalId!;
   let transfers = [...proposal.transfers];
   // Só o que muda o artigo conta como "mudou": texto, volume, Silo, dono e publicação.
@@ -606,10 +838,34 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
       if (!input.rows.has(id)) throw refusal("Uma keyword da prévia saiu do Arquiteto. Prepare novamente para revisar os dados atuais.");
       continue;
     }
-    if (!accepted || !current || stableHash(materialOf(current)) !== stableHash(materialOf(accepted))) {
+    // Volume medido no preparo: o número gravado agora pode diferir por
+    // arredondamento do provider; o que a prévia aceitou é "validado".
+    const comparar = (k: ImprovementKeyword) => accepted?.volumePendingWrite ? { ...materialOf(k), volume: null } : materialOf(k);
+    if (!accepted || !current || stableHash(comparar(current)) !== stableHash(comparar(accepted))) {
       const nome = (current ?? accepted)?.keyword ?? id;
       throw refusal(`A keyword "${nome}" mudou desde a prévia (volume, Silo ou artigo). Prepare novamente para revisar os dados atuais.`);
     }
+  }
+  /*
+   * KEYWORD SEM INTENÇÃO GANHA A LÓGICA DO MINERADOR AO GRAVAR (2026-10-01).
+   *
+   * Keyword "Bruto" (revisão do Minerador por fazer) entrava no artigo sem
+   * intenção em lugar nenhum: o ArticleDNA nascia "unknown" e o artigo
+   * "Incompatível". A Lógica do botão do Minerador é determinística e grátis
+   * (intenção, nicho e funil; sem provider, sem aprovar, decisão humana
+   * preservada) — a mesma que a melhoria já roda nas keywords novas. Ela
+   * roda aqui nos membros sem intenção, antes de montar o grupo, e a releitura
+   * leva o resultado ao hash da SERP e ao ArticleDNA. Aprovar o KeywordDNA
+   * continua sendo decisão humana no Minerador.
+   */
+  const semIntencao = members.filter(id => !run.keywords.find(k => k.id === id)?.external && input.rows.has(id) && !signals(input.rows.get(id)!).intent);
+  let logicaAplicada = 0;
+  if (semIntencao.length) {
+    const edit = await runtime.authorize("minerador", "edit");
+    const logica = await runKeywordLogicWithCore({ brandId: context.brandId, keywordIds: semIntencao, db: edit.supabase });
+    if (!logica.readbackConfirmed || logica.missingIds.length) throw refusal("A Lógica do Minerador não foi confirmada nas keywords sem intenção. Nada foi gravado no artigo; tente de novo.");
+    logicaAplicada = semIntencao.length;
+    input = await readInputs(context, [target.id]);
   }
   const newIds = members.filter(id => run.keywords.find(k => k.id === id)?.external);
   if (newIds.length) {
@@ -679,6 +935,46 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
     if (!attached.ok) throw refusal(attached.reason);
     payload = attached.value;
   }
+  /*
+   * A SUCESSORA FALA DA COMPOSIÇÃO NOVA (regra do dono, 2026-10-01).
+   *
+   * O spread do DNA anterior carregava `classification` e `auxiliaryIntents`
+   * da composição velha: outra principal, outras keywords, e a ficha mostrava
+   * a classificação de um artigo que não existe mais. Agora as duas são
+   * recalculadas aqui, pela mesma evidência da tela (KeywordDNA, parecer da
+   * SERP desta composição e KGR do artigo). Se a regra devolve a decisão ao
+   * humano (KGR aplicável sem métrica), a classificação velha sai e a tela
+   * mostra a leitura ao vivo — nunca a de outra composição.
+   */
+  {
+    const semanticaDe = (keywordId: string) => {
+      const row = input.rows.get(keywordId);
+      const semantic = object(row?.analise_semantica);
+      const texto = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+      return { intent: row ? signals(row).intent : null, funnel: texto(semantic.funil) || texto(semantic.funnel) };
+    };
+    const kgr = readArticleKgrDecision({
+      kgrIdentity: payload.kgrIdentity,
+      principal: primaryRow as unknown as ArchitectKeyword,
+      principalKeywordId: principalId,
+      supports: members.filter(id => id !== principalId).map(id => input.rows.get(id)).filter(Boolean) as unknown as ArchitectKeyword[],
+    });
+    const evidencia = buildClassificationEvidence({
+      principal: semanticaDe(principalId),
+      secondaries: members.filter(id => id !== principalId).map(semanticaDe),
+      keywordCount: members.length,
+      serpInterpretation: (assessment.payload as { interpretation?: { observedIntent: string; observedFunnel?: string | null; intentShares?: { informacional: number; comercial: number; transacional: number; lenses: number; results: number } | null } | null }).interpretation ?? null,
+      serpResolved: true,
+      kgr,
+      principalIsSubject: target.kind === "subject" || readArchitectSubjectStanding(primaryRow).declared,
+      isPublished: target.kind === "published",
+      principalProtected: primaryRow.primaryKeywordPolicy === "locked",
+    });
+    const classificacao = unresolvedClassifications(evidencia).length ? undefined : resolveArticleClassification(evidencia);
+    const comClassificacao = { ...payload, auxiliaryIntents: recalculated.auxiliaryIntents, classification: classificacao };
+    // A SERP tem a última palavra: intenção e funil que ela decidiu entram no DNA.
+    payload = ArticleDNASchema.parse(classificacao ? applySerpDecisionToArticle(comClassificacao, classificacao) : comClassificacao);
+  }
   payload = withHumanArticleApproval(payload, { entityId: assessment.payload.assessment.id, versionId: `${assessment.payload.assessment.id}:${assessment.payload.formationBaseHash}`, contentHash: assessment.payload.assessment.contentHash });
   const formationRef = text(input.rows.get(target.memberIds[0] ?? target.id)?.articleFormationRef) ?? `article-formation:${stableUuid(context.brandId, target.id, "improvement")}`;
   // The provider uses the published identity; the workbench uses the working
@@ -687,7 +983,11 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   await resolveArticleFormationSerpAssessment(await runtime.authorize("arquiteto", "approve"), { candidateRef: formationRef, resolution: resolved.payload.humanResolution! });
   const bound = await readbackArticleFormationSerpAssessment(context, formationRef);
   if (bound.payload.formationBaseHash !== baseHash(group) || bound.payload.humanResolution?.decidedBy !== context.actorUserId) throw refusal("O vínculo entre a SERP e a formação não foi relido.");
-  const updates = [...new Set([...members, ...proposal.removeIds])].map(id => {
+  // Quem está na formação da mesa e não ficou no artigo é liberado (vai para "Keywords não agrupadas").
+  const liberadas = target.kind === "published"
+    ? [...input.rows.values()].filter(row => text(row.articleFormationRef) === formationRef && !members.includes(row.id) && !proposal.removeIds.includes(row.id)).map(row => row.id)
+    : [];
+  const updates = [...new Set([...members, ...proposal.removeIds, ...liberadas])].map(id => {
     const row = input.rows.get(id)!; const workflow = object(row.canonicalWorkflow);
     if (!workflow.id) throw refusal("Membro não recebido no Arquiteto.");
     return { workflowItemId: String(workflow.id), expectedLock: Number(workflow.lockVersion), assignment: members.includes(id) ? { articleFormationRef: formationRef, articleFormationDecision: { operation: "move", role: id === principalId ? "principal" : "secundaria", reason: target.kind === "published" && principalId !== target.id && [target.id, principalId].includes(id) ? PUBLISHED_REINFORCEMENT_SWAP_REASON : "Melhoria da composição aceita pelo humano na prévia.", source: "human", decidedAt: now }, ...(target.kind === "subject" ? { articleSubjectAnchor: id === principalId ? { candidateRef: formationRef, subjectKeywordId: target.id, attachedBy: context.actorUserId, attachedAt: now } : null } : {}), ...(transfers.includes(id) ? { territoryRef: target.territoryRef, territoryAssignment: { state: "existing_silo_match", source: "human", reason: "Transferência aceita na prévia de melhoria.", decidedAt: now } } : {}) } : { articleFormationRef: null, articleFormationDecision: null, ...(target.kind === "subject" ? { articleSubjectAnchor: null } : {}) } };
@@ -707,7 +1007,7 @@ async function applyTarget(runtime: ImprovementRuntime, run: ImprovementRun, pro
   const dna = readback.articleDnas.find(a => a.versionId === written.version.versionId), rows = projected(readback, context.brandId);
   if (!dna || dna.contentHash !== written.version.contentHash || !markerReadback.payload.concludedFormations.some(f => f.materializedArticleId === payload.articleId && f.formationBaseHash === baseHash(group)) || members.some(id => text(rows.get(id)?.articleFormationRef) !== formationRef || object(rows.get(id)?.articleFormationDecision).role !== (id === principalId ? "principal" : "secundaria") || (transfers.includes(id) && text(rows.get(id)?.territoryRef) !== target.territoryRef)) || proposal.removeIds.some(id => text(rows.get(id)?.articleFormationRef))) throw refusal("A releitura não confirmou DNA, composição e marcador. Revise o progresso antes de retomar.");
   const material = proposal.addIds.length > 0 || proposal.removeIds.length > 0 || proposal.principalId !== proposal.currentPrimaryId || proposal.exclusions.length > 0;
-  return { targetId: target.id, status: material ? "improved" : currentArticle ? "unchanged" : "dna_created", message: material ? "Melhoria material gravada e relida." : currentArticle ? "Composição já adequada." : "Primeiro ArticleDNA criado; composição não foi ampliada.", versionId: dna.versionId };
+  return { targetId: target.id, status: material ? "improved" : currentArticle ? "unchanged" : "dna_created", message: `${material ? "Melhoria material gravada e relida." : currentArticle ? "Composição já adequada." : "Primeiro ArticleDNA criado; composição não foi ampliada."}${liberadas.length ? ` A tabela voltou a bater com o artigo: ${liberadas.map(id => `“${input.rows.get(id)?.keyword ?? id}”`).join(", ")} ${liberadas.length === 1 ? "foi liberada" : "foram liberadas"} para “Keywords não agrupadas” (nenhuma foi apagada).` : ""}${logicaAplicada ? ` A Lógica do Minerador preencheu intenção, nicho e funil de ${logicaAplicada} keyword(s) sem intenção (aprovar continua no Minerador).` : ""}`, versionId: dna.versionId };
 }
 
 export function improvementRuntime(context: PipelineContext): ImprovementRuntime {

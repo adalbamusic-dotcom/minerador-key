@@ -12,8 +12,8 @@
  *   1. o portão confere identidade, SERP aprovada e atual, e evidências;
  *   2. o relatório competitivo é consolidado como `approved`;
  *   3. `buildRadarEvidencePackage` monta o pacote;
- *   4. `buildRadarPlannerHandoff` monta o handoff v2;
- *   5. a sucessora é persistida com o handoff em `plannerPackage`;
+ *   4. `buildRadarApprovedPackage` monta o handoff v2;
+ *   5. a sucessora é persistida com o handoff em `approvedPackage`;
  *   6. o READBACK encerra — não o POST que não lançou exceção.
  *
  * Os builders NÃO são reimplementados: são os mesmos que a rota de detalhe já
@@ -32,12 +32,12 @@
  */
 
 import type { ArticleDNA, VersionEnvelope } from "../arquiteto/contracts.ts";
-import { analysisApprovalIssues, createRadarAnalysisSuccessor, type RadarAnalysisVersion, type RadarExpertEvidence } from "./analysis-contracts.ts";
+import { analysisApprovalIssues, createRadarAnalysisSuccessor, radarApprovedPackageOf, type RadarAnalysisVersion, type RadarExpertEvidence } from "./analysis-contracts.ts";
 import { isComparableRadarExtraction } from "./analysis-insights.ts";
 import { resolveRadarInvestigationSufficiency } from "./investigation-sufficiency.ts";
 import { buildRadarCompetitiveReport } from "./competitive-report.ts";
 import { buildRadarEvidencePackage } from "./evidence-package.ts";
-import { buildRadarPlannerHandoff, isRadarPlannerHandoff } from "./planner-handoff.ts";
+import { buildRadarApprovedPackage } from "./handoff-readiness.ts";
 import type { SerpResearchSnapshot } from "./serp/contracts.ts";
 import type { RadarKgrStrategy } from "./strategy-context.ts";
 import type { RadarSerpReviewCurrentness } from "./serp-review-state.ts";
@@ -234,8 +234,8 @@ export type RadarApprovalResult =
 function alreadyApprovedFor(input: ApproveRadarReportInput) {
   const payload = input.analysis.payload;
   if (payload.status !== "approved") return null;
-  const handoff = payload.plannerPackage;
-  if (!isRadarPlannerHandoff(handoff)) return null;
+  const handoff = radarApprovedPackageOf(payload);
+  if (!handoff) return null;
   if (handoff.brandId !== input.identity.brandId
     || handoff.articleId !== input.identity.articleId
     || handoff.articleDnaVersionId !== input.identity.articleDnaVersionId
@@ -292,7 +292,7 @@ export async function approveRadarReport(input: ApproveRadarReportInput): Promis
     competitiveReport: report,
   });
 
-  const handoff = await buildRadarPlannerHandoff({
+  const handoff = await buildRadarApprovedPackage({
     packageData,
     approvedReport: report,
     brandId: input.identity.brandId,
@@ -317,16 +317,12 @@ export async function approveRadarReport(input: ApproveRadarReportInput): Promis
   });
 
   /*
-   * `plannerPackage` recebe o HANDOFF v2, não o pacote de evidências.
-   *
-   * É por esse campo que `approvedHandoffForRadarItem` encontra o envelope na
-   * importação ao Planejador, e ele o lê com `RadarPlannerHandoffSchema`.
-   * Gravar o pacote v1 aqui passaria no schema — a união aceita os dois — e
-   * deixaria o Planejador sem envelope, silenciosamente.
+   * `approvedPackage` recebe o HANDOFF v2 (RadarApprovedPackage). Desde
+   * 2026-10-01 ele tem campo próprio; `plannerPackage` é só leitura do legado.
    */
   const successor = await createRadarAnalysisSuccessor(
     input.analysis,
-    { status: "approved", competitiveReport: report, approvedAt, approvedBy: input.selectedBy, plannerPackage: handoff },
+    { status: "approved", competitiveReport: report, approvedAt, approvedBy: input.selectedBy, approvedPackage: handoff },
     input.selectedBy,
     undefined,
     approvalVersionId,

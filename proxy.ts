@@ -1,9 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { legacyTargetFromPathname } from "@/lib/legacy-routing";
+import { legacyTargetFromPathname, retiredBrandModuleTarget } from "@/lib/legacy-routing";
 import { refreshSupabaseSession } from "@/lib/supabase/session-proxy";
 
 export async function proxy(request: NextRequest) {
   const sessionResponse = await refreshSupabaseSession(request);
+  const retired = retiredBrandModuleTarget(request.nextUrl.pathname);
+  if (retired) {
+    const destino = NextResponse.redirect(new URL(retired, request.url), 308);
+    sessionResponse.cookies.getAll().forEach(cookie => destino.cookies.set(cookie));
+    return destino;
+  }
   const target = legacyTargetFromPathname(request.nextUrl.pathname);
   if (!target) return sessionResponse;
   const url = new URL("/selecionar-marca", request.url);

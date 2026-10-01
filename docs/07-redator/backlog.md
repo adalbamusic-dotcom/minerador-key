@@ -1,5 +1,11 @@
 # Backlog — Redator
 
+## Aposentadoria do Planejador — 2026-10-01
+
+- [x] Documento v1 e família `ContentPlan` fora do contrato; mock de teste é v2.
+- [x] Nenhuma escrita cita `content_plan_version_id`.
+- [ ] Usuário: deploy, depois aplicar `supabase/migrations/20261001120000_aposentar_planejador.sql`.
+
 ## Nota de diferenciação do Arquiteto — 2026-09-27
 
 - [x] `editorialContext` recebe as linhas `Diferenciação: ` do ArticleDNA fixado (aditivo; sem nota, nada muda).

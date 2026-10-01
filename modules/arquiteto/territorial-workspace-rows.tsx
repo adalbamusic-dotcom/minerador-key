@@ -304,7 +304,7 @@ function SiloPageRow({
             <Cell value={originLabel(header.origin)} />
             {/* Página / Slug, com procedência do slug ao lado. */}
             <span className="flex min-w-0 items-baseline gap-1.5" data-testid="architect-structure-page">
-              <span className="truncate text-foreground" title={header.slug || "—"}>{header.slug || "—"}</span>
+              <span className={header.slug ? "text-identity-slug" : "text-text-muted"} title={header.slug || "—"}>{header.slug || "—"}</span>
               {header.slug && (
                 <span className={`shrink-0 text-xs ${slugKind === "published" || slugKind === "page" ? "text-positive-soft" : "text-text-muted"}`}>
                   {slugKind === "published" || slugKind === "page" ? "Publicada" : "Proposto"}
@@ -488,6 +488,7 @@ function KeywordRow({
   controls,
   proposed,
   selection,
+  visibleKeywordIds,
   dna,
   vinculo = null,
   expandida = false,
@@ -500,6 +501,8 @@ function KeywordRow({
   controls: SiloAssignmentControls | null;
   proposed?: ProposedDestination | null;
   selection?: KeywordSelectionControls | null;
+  /** Ordem visual das keywords na tabela, para o Shift+clique. */
+  visibleKeywordIds?: readonly string[];
   dna?: KeywordDnaInspection | null;
   /** O Vínculo como o Minerador o diz — posto e tipo de página. */
   vinculo?: KeywordVinculoLine | null;
@@ -527,7 +530,10 @@ function KeywordRow({
               <input
                 type="checkbox"
                 checked={selection.selected.has(row.keywordId)}
-                onChange={() => selection.onToggle(row.keywordId)}
+                onClick={selection.onClick
+                  ? event => selection.onClick!(row.keywordId, { shiftKey: event.shiftKey, additiveKey: event.ctrlKey || event.metaKey, keyboard: event.detail === 0 }, visibleKeywordIds ?? [row.keywordId])
+                  : undefined}
+                onChange={selection.onClick ? () => undefined : () => selection.onToggle(row.keywordId)}
                 aria-label={`Selecionar ${keywordLabel}`}
                 data-testid="architect-keyword-select"
                 className="h-3.5 w-3.5 shrink-0 accent-module-accent"
@@ -646,9 +652,16 @@ export type ProposedDestination = { silo: string; status: string; basis?: string
  * acaba. A seleção serve para a pessoa inspecionar e para as ações operacionais
  * que vierem depois — nunca para quebrar a visão global do motor.
  */
+export type KeywordSelectionGesture = { shiftKey: boolean; additiveKey: boolean; keyboard: boolean };
 export type KeywordSelectionControls = {
   selected: ReadonlySet<string>;
   onToggle: (keywordId: string) => void;
+  /**
+   * Clique da planilha: clique troca, Ctrl alterna, Shift estende — a mesma
+   * regra do Minerador. `visibleIds` é a ordem em que as linhas aparecem
+   * (seções recolhidas ficam de fora), para o Shift medir o que se vê.
+   */
+  onClick?: (keywordId: string, gesture: KeywordSelectionGesture, visibleIds: readonly string[]) => void;
   onToggleAll: (keywordIds: readonly string[], marcar: boolean) => void;
 };
 
@@ -815,6 +828,10 @@ export function TerritorialWorkspaceRows({
     if (current) current.groups.push(group);
     else sections.push({ kind: group.kind, groups: [group] });
   }
+  // A ordem em que as linhas aparecem: o Shift+clique mede o que se vê.
+  const visibleKeywordIds = sections
+    .filter(section => !collapsed.has(section.kind))
+    .flatMap(section => section.groups.flatMap(group => group.rows.map(row => row.keywordId)));
 
   return (
     <>
@@ -874,6 +891,7 @@ export function TerritorialWorkspaceRows({
                       controls={controls}
                       proposed={proposedByKeywordId?.get(row.keywordId) ?? null}
                       selection={selection}
+                      visibleKeywordIds={visibleKeywordIds}
                       dna={dnaByKeywordId?.get(row.keywordId) ?? null}
                       vinculo={vinculoByKeywordId?.get(row.keywordId) ?? null}
                       expandida={expandidas.has(row.keywordId)}

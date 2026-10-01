@@ -31,7 +31,7 @@ import { radarDeclaredFunnel, type RadarAiDiscoveryContext } from "./ai-discover
 import { radarIsSubjectTurnSection } from "./declared-subject.ts";
 import { radarConclusiveIntent, radarDeclaredKeywordIntent } from "./editorial-identity.ts";
 import { radarObservedSufficiencyLabel, type RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
-import { radarPlannerHandoffReadiness } from "./planner-handoff.ts";
+import { radarHandoffReadiness } from "./handoff-readiness.ts";
 import { radarSearchModeLabel, type RadarPrimarySearchMode } from "./search-mode.ts";
 
 import type { RadarArticleResearchContext, RadarResearchKeyword } from "./article-research-context.ts";
@@ -679,7 +679,7 @@ export function buildRadarReportSummary(input: {
    *
    * Manter o relatório lendo a leitura viva depois de finalizar produziria uma
    * prévia que discorda da evidência congelada — duas verdades sobre a mesma
-   * investigação, e a que o Planejador vai receber é a congelada.
+   * investigação, e a que o Redator vai receber é a congelada.
    */
   const congelado = input.view.finalizedBundle;
   const competitivo = buildRadarCompetitiveSummary(observed);
@@ -758,7 +758,7 @@ export function buildRadarReportSummary(input: {
    * A PERGUNTA QUE FECHA O CICLO: a investigação está congelada?
    *
    * Enquanto não está, tudo aqui descreve uma leitura que ainda pode mudar.
-   * Depois de congelada, o que o Planejador vai receber é o bundle — com
+   * Depois de congelada, o que o Redator vai receber é o bundle — com
    * identidade própria, para se poder provar depois qual evidência foi usada.
    */
   const congelamento: RadarReportCheck = congelado
@@ -779,12 +779,12 @@ export function buildRadarReportSummary(input: {
   /*
    * §30 — A PRONTIDÃO DO PACOTE VEM DO VALIDADOR, NÃO DE UMA REGRA LOCAL.
    *
-   * O Relatório responde "dá para planejar?" e o handoff responde a mesma
+   * O Relatório responde "dá para entregar ao Redator?" e o handoff responde a mesma
    * pergunta na hora de entregar. Se as duas respostas nascerem de lugares
    * diferentes, uma delas vai mentir — e vai ser a da tela, que é a que a
    * pessoa lê. Aqui ela apenas consulta a autoridade e mostra o resultado.
    */
-  const prontidao = radarPlannerHandoffReadiness({
+  const prontidao = radarHandoffReadiness({
     article: {
       brandId: observed.identity.brandId,
       articleId: observed.identity.articleId,
@@ -797,15 +797,15 @@ export function buildRadarReportSummary(input: {
   const pacote: RadarReportCheck = prontidao.ready
     ? {
       id: "handoff",
-      question: "Pacote para planejamento?",
+      question: "Pacote para o Redator?",
       state: "READY",
       detail: congelado?.acknowledgedInsufficiency
-        ? "Pronto para o Planejador, com a insuficiência declarada junto."
-        : "Pronto para o Planejador.",
+        ? "Pronto para o Redator, com a insuficiência declarada junto."
+        : "Pronto para o Redator.",
     }
     : {
       id: "handoff",
-      question: "Pacote para planejamento?",
+      question: "Pacote para o Redator?",
       /* Falta finalizar ainda vem; divergência é problema aberto, não etapa. */
       state: prontidao.blocks.some(item => item.code === "NOT_FINALIZED") ? "PENDING" : "PARTIAL",
       detail: prontidao.blocks.map(item => item.message).join(" "),

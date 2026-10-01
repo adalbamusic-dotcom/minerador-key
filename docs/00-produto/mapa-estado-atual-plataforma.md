@@ -70,8 +70,8 @@ Em aberto: aceitação manual de YouTube, Amazon, do export e da entrega ao
 Redator; e as dívidas registradas no
 [backlog do Radar](../05-radar/backlog.md).
 
-## Planejador — fora do fluxo operacional (2026-09-17)
-Não é etapa entre o Radar e o Redator. O `ContentPlan` determinístico e a rota `/planejador` permanecem para leitura do histórico; nenhum artigo novo passa por aqui e nada é movido automaticamente.
+## Planejador — aposentado (2026-10-01)
+Não existe: sem rota, módulo, artefato nem permissão (SDD `docs/compartilhado/sdd-aposentar-planejador-2026-10-01.md`). `/{brandRef}/planejador` redireciona para o Radar. O banco tinha zero dados do Planejador.
 
 ## Redator
 Recebe o dossiê canônico do Radar e é responsável por PLANEJAR e ESCREVER: estrutura final, sequência, evidência por seção, links, mídia, metadados de SEO, CTA e o texto, com Tiptap, save, versionamento, revisão e aprovação. Pode montar um `ContentPlan` interno. Não reabre a estratégia nem redefine o que o Article é.

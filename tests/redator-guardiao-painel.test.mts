@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 
-import { createMockPlanAndDocument } from "../lib/editorial/providers.ts";
+import { createMockDocument } from "../lib/editorial/providers.ts";
 import { runGuardian } from "../lib/redator/guardian.ts";
 import {
   WRITER_GUARDIAN_SUBJECT_NOT_READ_NOTICE,
@@ -73,7 +73,7 @@ test("avisos: o código técnico sai, a frase fica legível", () => {
 });
 
 test("com o guardião real: o Assunto não escrito vira aviso do servidor, e o resumo conta esse aviso", async () => {
-  const { document } = await createMockPlanAndDocument("brand-1");
+  const { document } = await createMockDocument("brand-1");
   const local = runGuardian(document, "local");
   const servidor = runGuardian(document, "hash-servidor", {
     subject: { phrase: "gestão de clínicas veterinárias independentes", destinationUrl: "https://exemplo.test/destino" },

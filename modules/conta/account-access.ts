@@ -13,7 +13,6 @@ export const ACCOUNT_MODULES = [
   { id: "minerador", label: "Minerador" },
   { id: "arquiteto", label: "Arquiteto" },
   { id: "radar", label: "Radar" },
-  { id: "planejador", label: "Planejador" },
   { id: "redator", label: "Redator" },
   { id: "publicacoes", label: "Publicações" },
   { id: "conta", label: "Conta" },
