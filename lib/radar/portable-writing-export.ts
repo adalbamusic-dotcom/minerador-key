@@ -2,6 +2,8 @@ import { RADAR_WRITER_MAY_NOT_SUBJECT, radarWriterMayNotFor } from "../redator/w
 import { WRITER_EVIDENCE_LIMITS } from "../redator/writer-evidence-catalog.ts";
 import { RADAR_AMAZON_INTENT_LABELS, type RadarAmazonEditorialIntentType } from "./amazon-editorial-target.ts";
 import { radarClaimNeedsFactualSupport } from "./claim-evidence.ts";
+import { radarTextAdheresToCore, radarUbiquitousStems } from "./intent-adherence.ts";
+import { radarSemanticStems } from "./semantic-concept-model.ts";
 import { RADAR_SUBJECT_MUST_COVER_REASON, radarSubjectCtaDirection, radarSubjectTurnTitle } from "./declared-subject.ts";
 import { RADAR_AMAZON_EDITORIAL_OUTPUT_LABELS } from "./competitive-blueprint.ts";
 import { RADAR_EDITORIAL_OUTPUT_LABELS } from "./multimodal-blueprint.ts";
@@ -153,6 +155,12 @@ export type RadarWritingArticleContext = {
   /** Endereço interno, só para achar o artigo entre os membros do silo. Nunca sai. */
   articleId: string | null;
   publication: RadarWritingPublication | null;
+  /**
+   * 2026-10-02 · Aditivo: o Silo vai NA LINHA do artigo. É o export dos
+   * selecionados quando a seleção cruza mais de um Silo e a linha de topo não
+   * pode carregar todos. Sem ele, nada muda.
+   */
+  siloInline?: boolean;
 };
 
 export type RadarWritingExportArticle = {
@@ -398,7 +406,7 @@ const VAZIAS = new Set([
   "aqui", "mais", "muito", "ser", "ter", "fazer", "pode", "sao", "e", "ja",
 ]);
 
-const palavrasDeConteudo = (valor: string | null | undefined): Set<string> => new Set(
+export const radarWritingContentWords = (valor: string | null | undefined): Set<string> => new Set(
   radarWritingCompareKey(valor).split(" ").filter(palavra => palavra.length > 2 && !VAZIAS.has(palavra)),
 );
 
@@ -466,7 +474,7 @@ function formatoLegivel(input: RadarPortableExportInput, editorial: RadarPortabl
  * entrada. Aqui elas são montadas de novo, e não relidas de colunas: reler o
  * Markdown do formato completo seria projetar uma projeção.
  */
-function projecoes(input: RadarPortableExportInput) {
+export function radarWritingProjections(input: RadarPortableExportInput) {
   const blueprint = input.blueprintView.blueprint;
   const editorial = radarPortableEditorialOf({
     profile: input.profile,
@@ -556,7 +564,8 @@ function assuntoDe(input: RadarPortableExportInput, editorial: RadarPortableEdit
   };
 }
 
-type Projecoes = ReturnType<typeof projecoes>;
+export type RadarWritingProjections = ReturnType<typeof radarWritingProjections>;
+type Projecoes = RadarWritingProjections;
 
 /* ============================== o silo e os links ============================== */
 
@@ -575,13 +584,13 @@ const rotuloDoMembro = (membro: Pick<Membro, "principalKeyword" | "title" | "slu
  * ser único. Na dúvida, o destino fica "não resolvido" — e nunca inventado.
  */
 function membroDoDestino(textos: readonly string[], membros: readonly Membro[], genericas: ReadonlySet<string>): Membro | null {
-  const alvo = new Set(textos.flatMap(item => [...palavrasDeConteudo(item)]));
+  const alvo = new Set(textos.flatMap(item => [...radarWritingContentWords(item)]));
   const distintivas = [...alvo].filter(palavra => !genericas.has(palavra));
   if (!distintivas.length) return null;
   let melhor: { membro: Membro; pontos: number } | null = null;
   let empate = false;
   for (const membro of membros) {
-    const doMembro = palavrasDeConteudo([membro.principalKeyword, semMolduraDoTema(membro.title), (membro.slug || "").replace(/-/g, " ")].join(" "));
+    const doMembro = radarWritingContentWords([membro.principalKeyword, semMolduraDoTema(membro.title), (membro.slug || "").replace(/-/g, " ")].join(" "));
     const pontos = distintivas.filter(palavra => doMembro.has(palavra)).length;
     if (!pontos) continue;
     if (!melhor || pontos > melhor.pontos) { melhor = { membro, pontos }; empate = false; } else if (pontos === melhor.pontos) empate = true;
@@ -623,9 +632,9 @@ function linksDeEscrita(p: Projecoes, contexto: RadarWritingArticleContext, prin
   const irmaos = (silo?.members || []).filter(membro => membro.articleId !== contexto.articleId);
   const pilar = irmaos.find(membro => membro.role === "Pilar") || null;
   const genericas = new Set([
-    ...palavrasDeConteudo(silo?.label),
-    ...palavrasDeConteudo(silo?.centralEntity),
-    ...palavrasDeConteudo(principal),
+    ...radarWritingContentWords(silo?.label),
+    ...radarWritingContentWords(silo?.centralEntity),
+    ...radarWritingContentWords(principal),
   ]);
   const paginaDoSilo = silo?.siloPage || null;
   const destinoDaPagina = paginaDoSilo
@@ -699,7 +708,7 @@ const YMYL_SENSIVEL = new Set(["MATERIAL", "HIGH"]);
 
 type Afirmacao = RadarAuthorityEvidence["claims"][number];
 
-function afirmacoesSemFonte(autoridade: RadarAuthorityEvidence | null, serp: RadarPortableSerpEvidence): Array<{ afirmacao: string; mercado: string | null }> {
+export function radarWritingUnsupportedClaims(autoridade: RadarAuthorityEvidence | null, serp: RadarPortableSerpEvidence): Array<{ afirmacao: string; mercado: string | null }> {
   if (autoridade) {
     const sustentadas = new Set(autoridade.factualEvidence.filter(item => item.supportType === "SUPPORTS").map(item => item.claimId));
     return autoridade.claims
@@ -744,9 +753,28 @@ const conflitoDeYmyl = (p: Projecoes): string | null => conflitoDeYmylDetalhado(
 
 /* ============================== o especialista ============================== */
 
-type Contribuicao = { rotulo: string; linha: string; aviso: string | null; secao: string | null };
+type TipoDoParecer = "FECHAMENTO" | "CTA" | "DIRETRIZ";
+export type RadarWritingSpecialistContribution = Contribuicao;
+type Contribuicao = { rotulo: string; linha: string; aviso: string | null; secao: string | null; tipo: TipoDoParecer | null; resposta: string };
 
-function contribuicoesDoEspecialista(p: Projecoes): Contribuicao[] {
+/*
+ * A VOZ DO ESPECIALISTA NA VIRADA FINAL E NO CTA (SDD diretriz editorial, 2026-10-02).
+ *
+ * O parecer direto de fechamento, de CTA ou de diretriz tem lugar certo no
+ * artigo. Sem o tipo, ele ia para a coluna de fontes como "sem ponto de
+ * aplicação" e o fecho continuava derivado de um cabeçalho de concorrente.
+ */
+const APLICACAO_DO_TIPO: Record<TipoDoParecer, string> = {
+  FECHAMENTO: "fechamento do artigo (virada final)",
+  CTA: "chamada final (CTA)",
+  DIRETRIZ: "o artigo inteiro (diretriz)",
+};
+const tipoDoParecer = (kind: string | null | undefined): TipoDoParecer | null =>
+  kind === "FECHAMENTO" || kind === "CTA" || kind === "DIRETRIZ" ? kind : null;
+const vozDoEspecialista = (especialista: readonly Contribuicao[], tipo: TipoDoParecer) => especialista.filter(item => item.tipo === tipo);
+const falaDoEspecialista = (item: Contribuicao) => `${entreAspas(item.resposta)} (${item.rotulo}; atribuir como fala do especialista, sem inventar nome ou credencial)`;
+
+export function radarWritingSpecialistContributions(p: Projecoes): Contribuicao[] {
   if (p.especialista.state !== "RECEIVED") return [];
   return p.especialista.items.filter(item => item.approved).map((item, indice) => {
     const pergunta = texto(item.requirementQuestion) || texto(item.questionsSent[0]) || null;
@@ -756,10 +784,11 @@ function contribuicoesDoEspecialista(p: Projecoes): Contribuicao[] {
     const resposta = item.contribution.length > RADAR_WRITING_EXPORT_LIMITS.specialistAnswerChars
       ? `${item.contribution.slice(0, RADAR_WRITING_EXPORT_LIMITS.specialistAnswerChars - 3).trimEnd()} […]`
       : item.contribution;
-    const aplicacao = ehPreenchimento(item.appliesTo) || /ainda n[aã]o definida/i.test(item.appliesTo) ? null : texto(item.appliesTo);
-    const secao = aplicacao ? p.secoes.find(secao => {
-      const alvo = palavrasDeConteudo(aplicacao);
-      const cab = palavrasDeConteudo(`${secao.heading} ${secao.readerQuestion || ""}`);
+    const tipo = tipoDoParecer(item.kind);
+    const aplicacao = tipo ? APLICACAO_DO_TIPO[tipo] : ehPreenchimento(item.appliesTo) || /ainda n[aã]o definida/i.test(item.appliesTo) ? null : texto(item.appliesTo);
+    const secao = aplicacao && !tipo ? p.secoes.find(secao => {
+      const alvo = radarWritingContentWords(aplicacao);
+      const cab = radarWritingContentWords(`${secao.heading} ${secao.readerQuestion || ""}`);
       return [...alvo].filter(palavra => cab.has(palavra)).length >= Math.max(1, Math.ceil(alvo.size / 2));
     }) ?? null : null;
     /*
@@ -770,8 +799,8 @@ function contribuicoesDoEspecialista(p: Projecoes): Contribuicao[] {
      * antes de usar: descartar em silêncio apagaria uma decisão humana.
      */
     const avisos: string[] = [];
-    const doAssunto = palavrasDeConteudo(assunto);
-    if (doAssunto.size && ![...doAssunto].some(palavra => palavrasDeConteudo(item.contribution).has(palavra))) {
+    const doAssunto = radarWritingContentWords(assunto);
+    if (!tipo && doAssunto.size && ![...doAssunto].some(palavra => radarWritingContentWords(item.contribution).has(palavra))) {
       avisos.push(`aceita, mas a resposta não trata de ${entreAspas(assunto || "")}; conferir antes de usar`);
     }
     if (!aplicacao) avisos.push("sem ponto de aplicação definido");
@@ -780,6 +809,8 @@ function contribuicoesDoEspecialista(p: Projecoes): Contribuicao[] {
     return {
       rotulo,
       secao: secao?.heading ?? null,
+      tipo,
+      resposta,
       aviso: avisos.length ? avisos.join("; ") : null,
       linha: [
         `${rotulo} · Pergunta: ${entreAspas(assunto || pergunta || "ponto preparado pela investigação")}`,
@@ -851,8 +882,31 @@ function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: R
     linhas.push(`Canonical: ${texto(input.article.canonical)}`);
   }
 
+  if (contexto.siloInline) linhas.push(...siloNaLinha(contexto));
   linhas.push(`Não altere: ${naoAltere(publicado, p.assunto).join("; ")}.`);
   return linhas.join("\n");
+}
+
+/**
+ * O SILO NA LINHA DO ARTIGO (2026-10-02, pedido do dono).
+ *
+ * "Só os selecionados" saía "sem o contexto do Silo": sem ordem narrativa, sem
+ * SiloPage, sem os irmãos que os links pedem. Quando a seleção cruza Silos, o
+ * contexto de cada um vai na linha do próprio artigo, curto.
+ */
+function siloNaLinha(contexto: RadarWritingArticleContext): string[] {
+  const silo = contexto.silo;
+  if (!silo || silo.kind !== "silo") return ["Silo: sem silo resolvido no Radar; escreva sem pressupor ordem narrativa nem irmãos."];
+  const pagina = silo.siloPage;
+  const endereco = pagina ? pagina.publishedUrl || pagina.canonical || (pagina.slug ? `/${pagina.slug}` : null) : null;
+  return [
+    `Silo: ${silo.label}${silo.draft ? " (rascunho no Arquiteto: a composição pode mudar)" : ""}`,
+    ...(util(silo.centralEntity) ? [`Tema central do Silo: ${silo.centralEntity}`] : []),
+    ...(pagina ? [`SiloPage: ${endereco || "endereço não registrado"} (${pagina.status})`] : []),
+    ...(silo.excludedTopics.length ? [`Fora do Silo (não cobrir): ${silo.excludedTopics.join(" · ")}`] : []),
+    "Ordem narrativa do Silo:",
+    ...silo.members.map(membro => `${membro.position} · ${papelLegivel(membro.role) || membro.role} · ${rotuloDoMembro(membro)}${membro.slug ? ` · /${membro.slug}` : ""}${membro.articleId === contexto.articleId ? " · ESTE ARTIGO" : membro.inThisFile ? " · neste arquivo" : ` · ${membro.statusLabel}`}`),
+  ];
 }
 
 /**
@@ -876,7 +930,7 @@ function naoAltere(publicado: boolean, assunto: Pick<AssuntoDeEscrita, "phrase">
   return [...itens.slice(0, 1), "o papel no Silo", ...itens.slice(1), ...(publicado ? ["a URL publicada"] : [])];
 }
 
-function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto: RadarWritingArticleContext, perguntaDeAbertura: string | null): string {
+function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto: RadarWritingArticleContext, perguntaDeAbertura: string | null, especialista: readonly Contribuicao[] = []): string {
   const promessa = util(p.editorial.readerPromise) || util(semMolduraDoTema(input.article.promise) === texto(input.article.promise) ? input.article.promise : null);
   const leitor = util(input.article.audience);
   const direcaoDaAbertura = util(p.editorial.openingOrHook);
@@ -897,8 +951,13 @@ function colunaPromessa(input: RadarPortableExportInput, p: Projecoes, contexto:
     ...linhasDoTronco(p),
     ...(perguntaDeAbertura ? [`Abertura: responder ${entreAspas(perguntaDeAbertura)} logo no primeiro parágrafo, de forma direta, antes de contextualizar.`] : []),
     ...(direcaoDaAbertura ? [`Direção da abertura: ${comPontoFinal(direcaoDaAbertura)}`] : []),
-    ...(fechamento ? [`Fechamento: ${comPontoFinal(fechamento)}`] : []),
-    ...(chamada ? [`Chamada final: ${comPontoFinal(chamada)}`] : []),
+    ...(vozDoEspecialista(especialista, "DIRETRIZ").map(item => `Diretriz do especialista (vale para o artigo inteiro): ${falaDoEspecialista(item)}.`)),
+    ...(vozDoEspecialista(especialista, "FECHAMENTO").length
+      ? vozDoEspecialista(especialista, "FECHAMENTO").map(item => `Fechamento — virada final na voz do especialista: ${falaDoEspecialista(item)}.`)
+      : fechamento ? [`Fechamento: ${comPontoFinal(fechamento)}`] : []),
+    ...(vozDoEspecialista(especialista, "CTA").length
+      ? vozDoEspecialista(especialista, "CTA").map(item => `Chamada final — argumento do especialista: ${falaDoEspecialista(item)}.`)
+      : chamada ? [`Chamada final: ${comPontoFinal(chamada)}`] : []),
     ...linhaDoDestino(p),
     ...(depois.length ? [`Próximo passo do leitor: ${depois.join(" ou ")}.`] : []),
   ];
@@ -1082,8 +1141,12 @@ function colunaEstrutura(
     ...(faqOmitidas ? [`A seção de perguntas frequentes do modelo ficou de fora (sem FAQ): as perguntas vão dentro das seções.`] : []),
   ];
   const fechamento = util(p.editorial.conclusion);
+  const fechoDoEspecialista = vozDoEspecialista(especialista, "FECHAMENTO")[0] ?? null;
+  const linhaDoFecho = fechoDoEspecialista
+    ? `Fechamento: virada final na voz do especialista (${fechoDoEspecialista.rotulo}); ver promessa_e_leitor.`
+    : fechamento ? `Fechamento: ${comPontoFinal(fechamento)}` : null;
   return {
-    celula: [...cabecalho, ...corpo, ...(fechamento ? ["", `Fechamento: ${comPontoFinal(fechamento)}`] : [])].join("\n"),
+    celula: [...cabecalho, ...corpo, ...(linhaDoFecho ? ["", linhaDoFecho] : [])].join("\n"),
     faqOmitidas,
   };
 }
@@ -1093,15 +1156,28 @@ function colunaEstrutura(
 const STATUS_DE_PERGUNTA = new Set(["ARTICLE_QUESTION_CONFIRMED", "MARKET_QUESTION_UNDERCOVERED"]);
 const PRIORIDADE: Record<string, string> = { HIGH: "prioridade alta", MEDIUM: "prioridade média", LOW: "prioridade baixa" };
 
-function perguntaDeAberturaDe(p: Projecoes): string | null {
-  const central = p.descoberta?.answerableUnits
+export function radarWritingOpeningQuestion(p: Projecoes): string | null {
+  /*
+   * A ABERTURA RESPONDE A PERGUNTA DO LEITOR DESTE ARTIGO (SDD 2026-10-02).
+   *
+   * A mais recorrente da amostra podia ser "10 principais influencers de IA do
+   * Instagram" — recorrente e alheia ao artigo. Só vale pergunta que adere ao
+   * núcleo: principal e complementares.
+   */
+  const nucleo = new Set([p.dna.principalKeyword, ...p.keywords.map(item => item.keyword)]
+    .flatMap(valor => radarSemanticStems(texto(valor) || "")));
+  const centrais = (p.descoberta?.answerableUnits || [])
     .filter(unidade => unidade.importance === "CORE")
-    .sort((a, b) => b.marketRecurrence.pages - a.marketRecurrence.pages)[0]?.questionOrNeed || null;
-  if (central) return radarWritingDecodeEntities(central);
-  const doBlueprint = p.blueprint?.profile === "GOOGLE" ? p.blueprint.observed.questions[0]?.statement : null;
-  if (doBlueprint) return radarWritingDecodeEntities(doBlueprint);
-  const observada = p.serp.questions.filter(item => STATUS_DE_PERGUNTA.has(item.status)).sort((a, b) => b.pages - a.pages)[0]?.question || null;
-  return observada ? radarWritingDecodeEntities(observada) : null;
+    .sort((a, b) => b.marketRecurrence.pages - a.marketRecurrence.pages)
+    .map(unidade => unidade.questionOrNeed);
+  const doBlueprint = p.blueprint?.profile === "GOOGLE" ? p.blueprint.observed.questions.map(item => item.statement) : [];
+  const observadas = p.serp.questions.filter(item => STATUS_DE_PERGUNTA.has(item.status)).sort((a, b) => b.pages - a.pages).map(item => item.question);
+  const todas = [...centrais, ...doBlueprint, ...observadas].filter((valor): valor is string => Boolean(texto(valor)));
+  /* Só raiz da PRINCIPAL vira cenário (ex.: "instagram"). */
+  const daPrincipal = new Set(radarSemanticStems(texto(p.dna.principalKeyword) || ""));
+  const onipresentes = new Set([...radarUbiquitousStems(todas)].filter(raiz => daPrincipal.has(raiz)));
+  const escolhida = nucleo.size ? todas.find(pergunta => radarTextAdheresToCore(pergunta, nucleo, onipresentes)) : todas[0];
+  return escolhida ? radarWritingDecodeEntities(escolhida) : null;
 }
 
 function colunaCobrir(input: RadarPortableExportInput, p: Projecoes, contexto: RadarWritingArticleContext, perguntaDeAbertura: string | null): { celula: string; conflitos: string[] } {
@@ -1170,7 +1246,7 @@ function colunaCobrir(input: RadarPortableExportInput, p: Projecoes, contexto: R
 
   /* ---- perguntas dentro das seções ---- */
   const naoProntas = new Set((p.descoberta?.answerableUnits || []).filter(unidade => unidade.readiness !== "READY").map(unidade => radarWritingCompareKey(unidade.questionOrNeed)));
-  const semFonte = new Set(afirmacoesSemFonte(p.autoridade, p.serp).map(item => radarWritingCompareKey(item.afirmacao)));
+  const semFonte = new Set(radarWritingUnsupportedClaims(p.autoridade, p.serp).map(item => radarWritingCompareKey(item.afirmacao)));
   const jaNaEstrutura = new Set(p.secoes.flatMap(secao => [radarWritingCompareKey(secao.readerQuestion), radarWritingCompareKey(secao.heading)]).filter(Boolean));
   jaNaEstrutura.add(radarWritingCompareKey(perguntaDeAbertura));
   const candidatas = [
@@ -1199,7 +1275,7 @@ function colunaCobrir(input: RadarPortableExportInput, p: Projecoes, contexto: R
       .filter(relacao => relacao.basis === "OBSERVED")
       .flatMap(relacao => [relacao.subject, relacao.object]),
   ].map(item => radarWritingDecodeEntities(item).trim()), radarWritingCompareKey)
-    .filter(item => !item.endsWith("?") && palavrasDeConteudo(item).size >= 2 && !chavesForaDoEscopo.has(radarWritingCompareKey(item)))
+    .filter(item => !item.endsWith("?") && radarWritingContentWords(item).size >= 2 && !chavesForaDoEscopo.has(radarWritingCompareKey(item)))
     .map(item => (item === item.toUpperCase() ? item.toLowerCase() : item))
     .slice(0, RADAR_WRITING_EXPORT_LIMITS.terms);
 
@@ -1347,7 +1423,7 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
     }
   }
 
-  const semFonte = afirmacoesSemFonte(p.autoridade, p.serp);
+  const semFonte = radarWritingUnsupportedClaims(p.autoridade, p.serp);
   if (semFonte.length) {
     linhas.push("Não afirmar como fato sem fonte:");
     for (const item of unicosPorChave(semFonte, entrada => radarWritingCompareKey(entrada.afirmacao)).slice(0, 6)) {
@@ -1363,7 +1439,13 @@ function colunaFontes(p: Projecoes, especialista: readonly Contribuicao[], video
     }
   }
 
-  linhas.push(especialista.length ? "Especialista:" : "Especialista: sem contribuição aceita.");
+  const pendentes = p.especialista.pending;
+  linhas.push(especialista.length
+    ? "Especialista:"
+    : pendentes
+      ? `Especialista: ${pendentes} parecer(es) recebido(s) aguardando aceite no Radar. Eles NÃO entram no texto até serem aceitos (Radar → Especialista → Respostas recebidas).`
+      : "Especialista: sem contribuição aceita.");
+  if (especialista.length && pendentes) linhas.push(`- Há ainda ${pendentes} parecer(es) aguardando aceite no Radar; não usar até serem aceitos.`);
   for (const item of especialista) linhas.push(`- ${item.linha}`);
 
   if (videos.length) {
@@ -1605,7 +1687,7 @@ const finalizarLinha = (linha: RadarWritingExportRow): RadarWritingExportRow => 
  * sabe da página publicada. A entrada é a MESMA do formato completo.
  */
 export function buildRadarWritingExportArticle(input: RadarPortableExportInput, contexto: RadarWritingArticleContext): RadarWritingExportArticle {
-  const p = projecoes(input);
+  const p = radarWritingProjections(input);
   const membro = contexto.silo?.members.find(item => item.articleId === contexto.articleId) || null;
   const papel = (membro && membro.role !== "sem silo" ? papelLegivel(membro.role) : null) || papelLegivel(p.dna.siloRole);
   const posicao = membro?.position ?? contexto.filePosition;
@@ -1615,7 +1697,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   const publicado = Boolean(publicacao?.published || input.article.publishedProtected);
 
   const links = linksDeEscrita(p, contexto, principal);
-  const especialista = contribuicoesDoEspecialista(p);
+  const especialista = radarWritingSpecialistContributions(p);
   const videos = p.video.briefs
     .filter(brief => brief.coverage.startsWith("Sustentada") && brief.extracts.length)
     .flatMap(brief => brief.extracts.slice(0, 1).map(trecho => ({ brief, trecho })))
@@ -1629,7 +1711,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
 
   const visual = colunaVisual(input, p);
   const estrutura = colunaEstrutura(input, p, links, especialista, visual.imagens, videosPorSecao);
-  const perguntaDeAbertura = perguntaDeAberturaDe(p);
+  const perguntaDeAbertura = radarWritingOpeningQuestion(p);
   const cobrir = colunaCobrir(input, p, contexto, perguntaDeAbertura);
   const titulo = colunaTitulo(input, p);
 
@@ -1653,7 +1735,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
   if (conflitoYmyl) ressalvas.push(conflitoYmyl.texto);
   /* A afirmação que o conflito já nomeia não vira um segundo motivo com a mesma frase. */
   const jaNoConflito = new Set(conflitoYmyl?.nomeadas || []);
-  const semFonte = unicosPorChave(afirmacoesSemFonte(p.autoridade, p.serp), item => radarWritingCompareKey(item.afirmacao))
+  const semFonte = unicosPorChave(radarWritingUnsupportedClaims(p.autoridade, p.serp), item => radarWritingCompareKey(item.afirmacao))
     .filter(item => !jaNoConflito.has(radarWritingCompareKey(item.afirmacao)));
   const sensivel = temaSensivel(p);
   if (semFonte.length) {
@@ -1702,7 +1784,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     ordem: `${posicao} · ${papel || "Artigo"}`,
     pode_escrever: decisao.celula,
     artigo: colunaArtigo(input, p, contexto, papel),
-    promessa_e_leitor: conteudo(() => colunaPromessa(input, p, contexto, perguntaDeAbertura)),
+    promessa_e_leitor: conteudo(() => colunaPromessa(input, p, contexto, perguntaDeAbertura, especialista)),
     titulo_e_seo: conteudo(() => titulo.celula),
     estrutura: conteudo(() => estrutura.celula),
     cobrir_e_superar: conteudo(() => cobrir.celula),
@@ -1752,6 +1834,8 @@ export type RadarWritingTopRowInput = {
   siteUrl: string | null;
   /** A lista "Evitar" das imagens, quando é a mesma em todos os artigos do arquivo. */
   sharedVisualAvoid?: string | null;
+  /** 2026-10-02 · Aditivo: export dos selecionados com o Silo na linha de cada artigo. */
+  siloPerRow?: boolean;
 };
 
 /**
@@ -1809,7 +1893,9 @@ export function buildRadarWritingTopRow(input: RadarWritingTopRowInput): RadarWr
     : [
       input.silo?.kind === "no_silo"
         ? "Artigos sem silo resolvido no Radar: escreva cada um sem pressupor ordem narrativa, papel no Silo nem artigos irmãos."
-        : "Artigos avulsos, sem o contexto do Silo: exporte o Silo completo para ter a ordem narrativa e os destinos dos links.",
+        : input.siloPerRow
+          ? "Artigos selecionados de mais de um Silo: o Silo, o papel, a ordem narrativa e os destinos dos links de cada um vão na linha do próprio artigo."
+          : "Artigos avulsos, sem o contexto do Silo: exporte o Silo completo para ter a ordem narrativa e os destinos dos links.",
       "Artigos neste arquivo:",
       ...artigos.map((item, indice) => `${indice + 1} · ${item.label}${item.published ? " · publicado" : ""}`),
     ].join("\n");

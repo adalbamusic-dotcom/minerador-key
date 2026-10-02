@@ -147,6 +147,25 @@ function radarRecuperacaoSemEspaco(error: unknown): boolean {
   return candidato.name === "QuotaExceededError" || candidato.name === "NS_ERROR_DOM_QUOTA_REACHED" || candidato.code === 22 || candidato.code === 1014;
 }
 
+/**
+ * A VERSÃO VIGENTE DE CADA ARTEFATO, NÃO A ÚLTIMA DA LISTA (2026-10-01).
+ *
+ * A leitura remota traz TODAS as versões, da mais nova para a mais velha.
+ * `Object.fromEntries` deixava a ÚLTIMA entrada vencer — a v1 —, e o Radar
+ * recusava a coleta com "a versão do ArticleDNA local diverge da versão
+ * transportada pelo item": o item estava na v4, a tela na v1. Aqui vence o
+ * maior `versionNumber`; a cópia da memória só fica se for mais nova.
+ */
+function latestVersionByKey<T extends { versionNumber: number }>(current: Record<string, T>, incoming: readonly T[], keyOf: (version: T) => string): Record<string, T> {
+  const result: Record<string, T> = { ...current };
+  for (const version of incoming) {
+    const key = keyOf(version);
+    const existing = result[key];
+    if (!existing || existing.versionNumber <= version.versionNumber) result[key] = version;
+  }
+  return result;
+}
+
 function saveLocalSerpRecovery(actorUserId: string, brandId: string, workspace: BrandWorkspace, record: SerpCollectionRecord | null, review?: SerpReviewRecord): LocalRecoveryOutcome {
   if (typeof window === "undefined") return { saved: false, reason: "não há navegador neste contexto de execução" };
   try {
@@ -503,8 +522,8 @@ export function EditorialPipelineProvider({ children }: { children: React.ReactN
       }
       const body = await response.json(); const persisted = PersistedEditorialWorkspaceSchema.parse(body.data);
       updateWorkspace(current => {
-        const articleVersions = { ...current.articleVersions, ...Object.fromEntries(persisted.articleVersions.map(version => [version.payload.articleId, version])) };
-        const siloVersions = { ...current.siloVersions, ...Object.fromEntries(persisted.siloVersions.map(version => [version.payload.siloId, version])) };
+        const articleVersions = latestVersionByKey(current.articleVersions, persisted.articleVersions, version => version.payload.articleId);
+        const siloVersions = latestVersionByKey(current.siloVersions, persisted.siloVersions, version => version.payload.siloId);
         const incomingRadar = persisted.radarItems.length ? mergeRadarItemsPreservingLocalState(persisted.radarItems, current.radarItems) : current.radarItems;
         const radarItems = reconcileRadarItems(incomingRadar, articleVersions, selectedBrandId, sourceSnapshot?.keywords || snapshots[workspaceKey]?.keywords || [], siloVersions);
         const serpMerge = persisted.serpRecords.length ? mergeSerpRecordsPreservingPayload(persisted.serpRecords, current.serpRecords) : { records: current.serpRecords, conflicts: current.serpMergeConflicts };

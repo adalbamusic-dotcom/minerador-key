@@ -453,5 +453,11 @@ test("GATE 14 · o relatório responde perguntas em vez de exibir um contador", 
 
   const fonte = workbench();
   assert.match(fonte, /data-testid="radar-report-summary"/);
-  assert.match(fonte, /data-testid="radar-report-blockers"/);
+  /*
+   * O RELATÓRIO VIROU PAINEL (pedido do dono, 2026-10-02): mostra a intenção e o
+   * estado SEO, sem bloco de alerta. O que falta aparece como nota baixa no pilar.
+   */
+  assert.match(fonte, /data-testid="radar-report-seo-chart"/);
+  assert.match(fonte, /data-testid="radar-report-article-data"/);
+  assert.doesNotMatch(fonte, /data-testid="radar-report-blockers"/);
 });

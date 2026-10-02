@@ -575,10 +575,10 @@ test("J · os nomes: 'para-escrever' no novo, e o do completo intocado", () => {
 
 test("K · a rota: 'mode' opcional, padrão completo, e o ramo novo não lê nada a mais", async () => {
   const rota = semComentarios((await readFile(new URL("../app/api/editorial/radar-export/route.ts", import.meta.url), "utf8") + "\n" + await readFile(new URL("../lib/server/radar-portable-export-core.ts", import.meta.url), "utf8")));
-  assert.match(rota, /mode: z\.enum\(\["writing", "full"\]\)\.optional\(\)/);
+  assert.match(rota, /mode: z\.enum\(\["writing", "full", "video"\]\)\.optional\(\)/);
   assert.match(rota, /if \(input\.mode === "writing"\) \{/);
   const ramo = rota.slice(rota.indexOf("if (input.mode === \"writing\") {"), rota.indexOf("const linhaPorArtigo ="));
-  assert.match(ramo, /radarPortableWritingExport\(\{ articles: montadas, lenses: lentes, plan: plano, publications: publicacoes, today: exportedAt \}\)/);
+  assert.match(ramo, /radarPortableWritingExport\(\{ articles: montadas, lenses: lentes, plan: plano, selectionPlan: planoDaSelecao, publications: publicacoes, today: exportedAt \}\)/);
   assert.equal(/await |Repository\(|lookupSerpCache|supabase|\.from\(/.test(ramo), false, "o ramo 'Para escrever' faz leitura própria");
   assert.equal(/radarPortableExportCsv|buildRadarPortableExportRow/.test(ramo), false, "o ramo novo monta o formato completo");
   /* A página publicada sai do ArticleDNA já lido no laço. */
@@ -618,7 +618,7 @@ test("K · a tela: o card 'Exportar para escrever' — escopo em rádio de 14px,
   assert.deepEqual([...grupo.matchAll(/type="radio" name="radar-escopo-do-export" value="([a-z]+)"/g)].map(item => item[1]), ["silo", "selecionados"]);
   assert.match(grupo, /Silo completo \(recomendado\)/);
   assert.match(grupo, /Só os artigos selecionados/);
-  assert.match(grupo, /Mesmo formato, sem o contexto do Silo\./);
+  assert.match(grupo, /Mesmo formato, com o Silo, o papel e os links de cada artigo\./);
   assert.match(grupo, /Sem seleção: vão todos os artigos prontos do Radar\./, "a regra de quando não há seleção deixou de ser dita");
   assert.equal(/<button/.test(grupo), false);
   assert.equal(/text-xs|#[0-9a-f]{3,6}\b|rgb\(|text-\[1[0-3]px\]/i.test(card), false, "texto abaixo de 14px ou cor fixa no card");
@@ -652,7 +652,7 @@ test("K · a tela: o card 'Exportar para escrever' — escopo em rádio de 14px,
     "Esc só fecha o card com o foco dentro dele");
   assert.equal(/onKeyDown/.test(card), false, "o Esc voltou a morar só no card");
   assert.deepEqual([...card.matchAll(/onClick=\{\(\) => \{ fecharCardDeExport\((true|false)\); ([a-zA-Z.]+)/g)].map(item => `${item[1]} ${item[2]}`),
-    ["true void", "true void", "true void", "false grid.exportRows"], "um export assíncrono saiu do card sem devolver o foco");
+    ["true void", "true void", "true void", "true void", "false grid.exportRows"], "um export assíncrono saiu do card sem devolver o foco");
   const fechar = barra.slice(barra.indexOf("const fecharCardDeExport"), barra.indexOf("return <>", barra.indexOf("const fecharCardDeExport")));
   assert.match(fechar, /if \(aposExportAssincrono\) devolverFocoAposExportRef\.current = true;\s*botaoDoExportRef\.current\?\.focus\(\);/);
   const semNotas = semComentarios(pagina);
@@ -664,7 +664,8 @@ test("K · a tela: o card 'Exportar para escrever' — escopo em rádio de 14px,
   for (const funcao of ["const exportarSilosCompletos", "const exportarDossiesFinalizados"]) {
     const inicio = codigo.indexOf(funcao);
     const corpo = codigo.slice(inicio, codigo.indexOf("};", codigo.indexOf("finally", inicio)));
-    assert.match(codigo.slice(inicio, inicio + 80), /= async \(modo: RadarExportMode\) =>/, `${funcao} não recebe o formato de quem clicou`);
+    /* 2026-10-02 · o dos selecionados também recebe "video" (CSV para vídeo e redes sociais). */
+    assert.match(codigo.slice(inicio, inicio + 80), /= async \(modo: RadarExportMode(?: \| "video")?\) =>/, `${funcao} não recebe o formato de quem clicou`);
     assert.match(corpo, /mode: modo \}/, `${funcao} não manda o formato de quem clicou`);
   }
   assert.match(codigo, /useState<"silo" \| "selecionados">\("silo"\)/, "o padrão do card é o silo completo");

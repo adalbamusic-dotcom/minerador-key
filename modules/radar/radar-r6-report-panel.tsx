@@ -13,6 +13,8 @@ type RadarR6ReportPanelProps = {
   onGenerate?: () => void;
   onReview?: () => void;
   onApprove?: () => void;
+  /** Painel só de leitura: sem revisar nem aprovar (pedido do dono, 2026-10-02). */
+  informational?: boolean;
 };
 
 const inset = "rounded-md border border-divider bg-surface-subtle p-3";
@@ -22,8 +24,8 @@ function Count({ label, value }: { label: string; value: number }) {
   return <span className="text-sm text-text-muted"><strong className="text-foreground">{value}</strong> {label}</span>;
 }
 
-export function RadarR6ReportPanel({ report, canonicalApproved = false, onGenerate, onReview, onApprove }: RadarR6ReportPanelProps) {
-  const status = canonicalApproved ? "Aprovado · versão remota confirmada" : report ? radarR6ReportStateLabel(report.state) : "Aguardando geração";
+export function RadarR6ReportPanel({ report, canonicalApproved = false, onGenerate, onReview, onApprove, informational = false }: RadarR6ReportPanelProps) {
+  const status = informational ? (report ? "Leitura consolidada" : "Aguardando geração") : canonicalApproved ? "Aprovado · versão remota confirmada" : report ? radarR6ReportStateLabel(report.state) : "Aguardando geração";
   const canGenerate = Boolean(onGenerate && (!report || report.state === "NOT_STARTED" || report.stale));
   const canReview = report?.state === "REPORT_GENERATED";
   // Pré-condição de BOTÃO. Quem decide se a aprovação vale é `approveRadarReport`.
@@ -37,9 +39,9 @@ export function RadarR6ReportPanel({ report, canonicalApproved = false, onGenera
       {!report || report.state === "NOT_STARTED" ? <div><p className="text-sm text-text-muted">O relatório competitivo é gerado por ação explícita depois da amostra analisada, e é ele que a aprovação exige.</p><button type="button" className={`${button} mt-3`} onClick={onGenerate} disabled={!canGenerate}>Gerar relatório competitivo</button></div> : <>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <p className="max-w-4xl text-sm leading-6 text-foreground">{report.summary}</p>
-          <span className="shrink-0 rounded-full border border-divider px-3 py-1 text-sm text-text-muted">{canonicalApproved ? "Aprovado no remoto" : report.final ? "Pronto para aprovar" : "Prévia revisável"}</span>
+          {!informational && <span className="shrink-0 rounded-full border border-divider px-3 py-1 text-sm text-text-muted">{canonicalApproved ? "Aprovado no remoto" : report.final ? "Pronto para aprovar" : "Prévia revisável"}</span>}
         </div>
-        {report.pendingContributions.length > 0 && <div className="mt-3 rounded-md border border-warning/50 bg-warning-soft/20 p-3 text-sm text-foreground"><strong>PENDÊNCIA</strong><p className="mt-1 text-text-muted">{report.pendingContributions.join(" ")}</p></div>}
+        {!informational && report.pendingContributions.length > 0 && <div className="mt-3 rounded-md border border-warning/50 bg-warning-soft/20 p-3 text-sm text-foreground"><strong>PENDÊNCIA</strong><p className="mt-1 text-text-muted">{report.pendingContributions.join(" ")}</p></div>}
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2" aria-label="Resumo de evidências consolidadas">
           <Count label="referências SERP" value={report.evidence.serp.references.length}/>
           <Count label="evidências Amazon" value={report.evidence.amazon.evidenceIds.length}/>
@@ -55,7 +57,7 @@ export function RadarR6ReportPanel({ report, canonicalApproved = false, onGenera
           <section className={inset}><h3 className="text-sm font-semibold text-foreground">Recomendações editoriais</h3>{report.recommendations.length ? <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-text-muted">{report.recommendations.map(recommendation => <li key={recommendation}>{recommendation}</li>)}</ul> : <p className="mt-2 text-sm text-text-muted">Nenhuma recomendação local.</p>}</section>
         </div>
         <details className="mt-3 rounded-md border border-divider bg-surface p-3"><summary className="cursor-pointer text-sm font-semibold text-foreground">Fontes e proveniência do consolidado</summary><div className="mt-3 grid gap-3 md:grid-cols-3"><SourceList title="SERP" values={report.evidence.serp.references} empty="Nenhuma referência aprovada"/><SourceList title="Amazon" values={[...report.evidence.amazon.evidenceIds, ...report.evidence.amazon.summaries]} empty="Nenhuma evidência Amazon"/><SourceList title="ExpertEvidence" values={[...report.evidence.expert.contributionIds, ...report.evidence.expert.summaries]} empty="Nenhuma evidência revisada"/></div><p className="mt-3 text-sm text-text-muted">ArticleDNA {report.provenance.articleDnaVersionId} · snapshot SERP {report.provenance.serpSnapshotId || "não disponível"} · análise {report.provenance.analysisVersionId || "não disponível"}. IDs técnicos permanecem neste detalhe; perguntas de especialista continuam sendo solicitações, não evidências.</p></details>
-        <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={button} onClick={onGenerate} disabled={!canGenerate}>Gerar relatório competitivo novamente</button><button type="button" className={button} onClick={onReview} disabled={!canReview || !onReview}>Marcar relatório revisado</button><button type="button" className={`${button} border-context-accent`} onClick={onApprove} disabled={!canApprove || !onApprove}>{canonicalApproved ? "Relatório aprovado" : "Aprovar relatório"}</button></div>
+        {informational ? <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={button} onClick={onGenerate} disabled={!canGenerate}>Gerar relatório competitivo novamente</button></div> : <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={button} onClick={onGenerate} disabled={!canGenerate}>Gerar relatório competitivo novamente</button><button type="button" className={button} onClick={onReview} disabled={!canReview || !onReview}>Marcar relatório revisado</button><button type="button" className={`${button} border-context-accent`} onClick={onApprove} disabled={!canApprove || !onApprove}>{canonicalApproved ? "Relatório aprovado" : "Aprovar relatório"}</button></div>}
       </>}
     </div>
   </details>;

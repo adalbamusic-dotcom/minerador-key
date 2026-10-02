@@ -101,6 +101,7 @@ import { RadarR3ProfileMirror } from "./radar-r3-profile-mirror";
 import { RadarR4BulkOperationsBar, RadarR5QueueProgress, type RadarR5QueueView } from "./radar-r4-bulk-operations-bar";
 import { useRadarAnalysisReadback } from "./use-radar-analysis-readback";
 import { useRadarSerpReviewReadback } from "./use-radar-serp-review-readback";
+import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
 
 /**
  * A BIBLIOTECA SEM ARTIGO CONTINUA SENDO UMA CHAVE — RADAR_LIVE_UX_2.2 · §2.
@@ -928,6 +929,12 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
       if (corpo.decisions && action === "PROCESS_SELECTED") {
         setNotice(`${corpo.enqueued} enfileirada(s) · ${corpo.reusedText} com texto reutilizado`);
       }
+      /*
+       * O "salvando" desliga no SUCESSO também (2026-10-02). Ficava ligado depois
+       * de selecionar ou processar: a área mostrava "Registrando…" para sempre e o
+       * "Casar pautas com o conteúdo" ficava desabilitado até recarregar a página.
+       */
+      setVideoAction(atual => ({ ...atual, saving: false, error: null }));
     } catch (error) {
       setVideoAction(atual => ({ ...atual, saving: false, error: error instanceof Error ? error.message : "Falha na ação da biblioteca." }));
       return;
@@ -1463,8 +1470,11 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
      * "34 necessidades" não ajuda ninguém a decidir: 34 é muito ou pouco? O
      * que a coluna responde agora é quantas verificações estão prontas e
      * quantos pontos seguem em aberto — a mesma leitura do card.
+     *
+     * 2026-10-02 · O relatório virou painel informativo (pedido do dono): a
+     * coluna mostra o estado SEO, a mesma média do gráfico, e não alerta.
      */
-    { id: "report", header: "Relatório", value: row => rowWorkbenchData(row).reportState, width: 190, render: row => { const data = rowWorkbenchData(row); const localReport = data.reportState !== "NOT_STARTED"; const resumo = data.r3.deepResearch ? buildRadarReportSummary({ observed: data.r3.deepResearch.observed, view: data.r3.deepResearch, youtube: radarYoutubeReportEvidence(projecaoDePesquisa(row)), amazon: radarAmazonReportEvidence({ projecao: projecaoAmazon(row), payload: analiseCorrenteDe(row)?.payload || null }) }) : null; const exigidos = resumo?.checks.filter(item => item.state !== "NOT_REQUIRED").length || 0; return <div><strong className="block text-sm text-foreground">{localReport ? radarR6ReportStateLabel(data.reportState) : data.r3.report.status}</strong><span className="mt-1 block text-sm text-text-muted">{resumo ? `${resumo.checks.filter(item => item.state === "READY").length} de ${exigidos} pronta(s) · ${resumo.blockers.length} em aberto` : `${data.r3.report.needs} necessidade(s) · ${data.r3.report.sentToWriter ? "Redator" : "Não enviado"}`}</span></div>; } },
+    { id: "report", header: "Relatório", value: row => rowWorkbenchData(row).reportState, width: 190, render: row => { const data = rowWorkbenchData(row); const localReport = data.reportState !== "NOT_STARTED"; const resumo = data.r3.deepResearch ? buildRadarReportSummary({ observed: data.r3.deepResearch.observed, view: data.r3.deepResearch, youtube: radarYoutubeReportEvidence(projecaoDePesquisa(row)), amazon: radarAmazonReportEvidence({ projecao: projecaoAmazon(row), payload: analiseCorrenteDe(row)?.payload || null }) }) : null; const exigidos = resumo?.checks.filter(item => item.state !== "NOT_REQUIRED").length || 0; const placar = resumo ? radarSeoGuidelineState(resumo.checks, { specialistAccepted: data.r3.specialist.reviewedEvidence }) : null; return <div><strong className="block text-sm text-foreground">{placar ? (placar.overall === null ? "Estado SEO sem pilares" : `Estado SEO: ${placar.overall}%`) : localReport ? radarR6ReportStateLabel(data.reportState) : data.r3.report.status}</strong><span className="mt-1 block text-sm text-text-muted">{resumo ? `${resumo.checks.filter(item => item.state === "READY").length} de ${exigidos} verificação(ões) pronta(s)` : `${data.r3.report.needs} necessidade(s) · ${data.r3.report.sentToWriter ? "Redator" : "Não enviado"}`}</span></div>; } },
     { id: "nextAction", header: "Próxima ação", value: row => operationalRowFor(row).nextAction, width: 235, render: row => <span className="block whitespace-normal text-sm leading-5 text-foreground">{operationalRowFor(row).nextAction}</span> },
     { id: "format", header: "Formato", value: row => row.format, filterOptions: [...new Set(pipeline.radarItems.map(item => item.format))].map(value => ({ label: value, value })), width: 110 },
     /*
@@ -2486,7 +2496,8 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
    * divergência apareceria num artigo já escrito.
    */
   /* O formato vem de quem clicou: "Exportar CSV" manda "writing"; o Avançado, "full". */
-  const exportarDossiesFinalizados = async (modo: RadarExportMode) => {
+  /* 2026-10-02 · "video" é o CSV para vídeo e redes sociais: sem estrutura de artigo. */
+  const exportarDossiesFinalizados = async (modo: RadarExportMode | "video") => {
     if (exportando) return;
     if (!selectedBrandId) { setNotice("Selecione uma marca antes de exportar."); return; }
 
@@ -4335,7 +4346,7 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
                 <input type="radio" name="radar-escopo-do-export" value="selecionados" checked={escopoDoExport === "selecionados"} onChange={() => setEscopoDoExport("selecionados")} className="mt-1 shrink-0 accent-context-accent focus-visible:ring-2 focus-visible:ring-context-accent/40" data-testid="radar-export-escopo-selecionados" />
                 <span className="block min-w-0">
                   <strong className="block font-semibold">Só os artigos selecionados</strong>
-                  <span className="mt-0.5 block text-text-muted">Mesmo formato, sem o contexto do Silo.</span>
+                  <span className="mt-0.5 block text-text-muted">Mesmo formato, com o Silo, o papel e os links de cada artigo.</span>
                   <span className="mt-0.5 block text-text-muted" data-testid="radar-export-resumo-selecao">{semSelecaoNoExport ? "Sem seleção: vão todos os artigos prontos do Radar." : `${selectedArticleIds.length} ${selectedArticleIds.length === 1 ? "artigo selecionado" : "artigos selecionados"}`}</span>
                 </span>
               </label>
@@ -4349,6 +4360,22 @@ export function RadarPage({ brandRef }: { brandRef: string }) {
           >
             <Download className="h-4 w-4" aria-hidden="true" />
             <span>Exportar CSV</span>
+          </button>
+          {/*
+            * 2026-10-02 · A SAÍDA PARA VÍDEO E REDES SOCIAIS (pedido do dono).
+            *
+            * Dados, evidências e diretrizes de roteiro do YouTube, sem estrutura
+            * de artigo. Vai pela seleção (ou por todos os prontos), em um arquivo.
+            */}
+          <button
+            type="button"
+            onClick={() => { fecharCardDeExport(true); void exportarDossiesFinalizados("video"); }}
+            disabled={exportando}
+            className="mt-2 block w-full rounded border border-divider px-3 py-2 text-left text-sm text-foreground transition-colors hover:border-context-accent hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
+            data-testid="radar-export-video"
+          >
+            <strong className="block font-semibold">CSV para vídeo e redes sociais</strong>
+            <span className="mt-0.5 block text-text-muted">Roteiro de YouTube e cortes: SERP do YouTube, perguntas, fatos com fonte e especialista, sem a estrutura do artigo. {semSelecaoNoExport ? "Vão todos os prontos." : "Vão os selecionados."}</span>
           </button>
           <div className="mt-3 border-t border-divider pt-2">
             <button

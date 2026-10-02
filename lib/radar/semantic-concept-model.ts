@@ -38,6 +38,7 @@ import { isComparableRadarExtraction } from "./analysis-insights.ts";
 import { radarTopicIsNoise, radarTopicTokens, radarRecurrenceThreshold, type RadarTopicClass } from "./topic-classification.ts";
 
 import type { RadarExtractionPage } from "./analysis-contracts.ts";
+import { radarCleanCompetitorHeading } from "./heading-cleanup.ts";
 
 /* ============================ o vocabulário ============================== */
 
@@ -454,7 +455,8 @@ export function radarSemanticObservations(input: {
     const total = page.headingOutline.length || 1;
     page.headingOutline.forEach((heading, index) => {
       if (heading.level === 1) return;
-      const texto = heading.text.trim();
+      // A moldura de listicle ("2.", "10 principais") sai antes de qualquer uso (SDD 2026-10-02).
+      const texto = radarCleanCompetitorHeading(heading.text);
       if (!texto) return;
       const ruido = radarSemanticIsNoise(texto);
       const { type, faceted, term } = radarSemanticType(texto);

@@ -383,10 +383,12 @@ function RadarSpecialistDirectEntry({ brandId, articleId, articleDnaVersionId, e
           requirement: tipo === "RESPOSTA" && ponto ? { id: ponto.requirementId, question: ponto.specificQuestion || null, kind: ponto.kind || null } : null,
         }),
       });
-      const corpo = await resposta.json().catch(() => ({})) as { error?: string };
+      const corpo = await resposta.json().catch(() => ({})) as { error?: string; accepted?: boolean };
       if (!resposta.ok) { setDesfecho({ ok: false, message: corpo.error || "Não foi possível enviar o parecer." }); return; }
       setTexto("");
-      setDesfecho({ ok: true, message: "Parecer enviado. Ele aparece em Respostas recebidas para revisão; só entra no artigo depois de aceito." });
+      setDesfecho({ ok: true, message: corpo.accepted
+        ? "Parecer gravado e aceito: ele entra no artigo (fechamento, CTA ou diretriz) no próximo envio ao Redator."
+        : "Parecer enviado. Ele aparece em Respostas recebidas para revisão; só entra no artigo depois de aceito." });
       onSent();
     } catch {
       setDesfecho({ ok: false, message: "Sem resposta do servidor. Confira em Respostas recebidas antes de enviar de novo." });
@@ -402,6 +404,7 @@ function RadarSpecialistDirectEntry({ brandId, articleId, articleDnaVersionId, e
     <div className="mt-3 grid gap-3 md:grid-cols-2">
       <label className="block text-sm text-foreground">Especialista
         <select value={especialista} onChange={event => setExpertId(event.target.value)} disabled={enviando} className="mt-1 min-h-10 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm text-foreground" data-testid="radar-specialist-direct-expert">
+          <option value="self">Eu mesmo (quem está logado)</option>
           {experts.map(expert => <option value={expert.id} key={expert.id}>{expert.displayName}{expert.specialty ? ` · ${expert.specialty}` : ""}</option>)}
         </select>
       </label>
@@ -502,6 +505,10 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
   /** A contribuição cuja classificação está aberta para correção — §5. */
   const [editandoClassificacao, setEditandoClassificacao] = useState("");
   const [decidindo, setDecidindo] = useState("");
+  /* Reedição do próprio parecer (canal Plataforma). */
+  const [editandoTexto, setEditandoTexto] = useState<{ id: string; texto: string } | null>(null);
+  const [salvandoTexto, setSalvandoTexto] = useState(false);
+  const [desfechoDoTexto, setDesfechoDoTexto] = useState<{ id: string; ok: boolean; message: string } | null>(null);
   /**
    * O DESFECHO DA DECISÃO, AO LADO DA DECISÃO — SPECIALIST_3.1 · §6.
    *
@@ -1222,6 +1229,37 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
     contributionsByRequirement.set(requirementId, [...(contributionsByRequirement.get(requirementId) || []), contribution]);
   }
   const resultPoints = reviewPoints.filter(point => (contributionsByRequirement.get(point.requirementId) || []).length > 0);
+  /*
+   * O PARECER DIRETO TEM PONTO PRÓPRIO (`direto:…`) e não é ponto da investigação.
+   * Sem esta lista ele nunca aparecia aqui, e não havia como aceitar nem reeditar
+   * (2026-10-02).
+   */
+  const pontosDaInvestigacao = new Set(reviewPoints.map(point => point.requirementId));
+  const directContributions = [...contributionsByRequirement.entries()]
+    .filter(([requirementId]) => !pontosDaInvestigacao.has(requirementId))
+    .flatMap(([, lista]) => lista);
+
+  const salvarTexto = async (contribution: RadarExpertContributionRecord) => {
+    if (!editandoTexto || editandoTexto.id !== contribution.id || !editandoTexto.texto.trim() || salvandoTexto) return;
+    setSalvandoTexto(true);
+    setDesfechoDoTexto(null);
+    try {
+      const resposta = await fetch("/api/editorial/expert-contributions/platform", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brandId, contributionId: contribution.id, text: editandoTexto.texto }),
+      });
+      const corpo = await resposta.json().catch(() => ({})) as { error?: string };
+      if (!resposta.ok) { setDesfechoDoTexto({ id: contribution.id, ok: false, message: corpo.error || "Não foi possível salvar o parecer." }); return; }
+      setEditandoTexto(null);
+      setDesfechoDoTexto({ id: contribution.id, ok: true, message: "Parecer salvo. O texto anterior fica no histórico da contribuição." });
+      leituraDaArea.refresh();
+    } catch {
+      setDesfechoDoTexto({ id: contribution.id, ok: false, message: "Sem resposta do servidor. Atualize a área antes de tentar de novo." });
+    } finally {
+      setSalvandoTexto(false);
+    }
+  };
 
   /**
    * UMA LINHA DE ESTADO, NA ORDEM DO QUE PEDE ATENÇÃO.
@@ -1280,6 +1318,19 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
       {/* O ORIGINAL É A AUTORIDADE DE FIDELIDADE — recolhido, jamais substituído. */}
       <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-text-muted">Resposta original</p>
       <details className="mt-1 rounded-md border border-divider p-2" data-testid="radar-specialist-original-text"><summary className="cursor-pointer text-sm text-text-muted">Ver texto completo</summary><p className="mt-2 whitespace-pre-wrap text-sm leading-5 text-foreground">{originalText}</p></details>
+
+      {contribution.provider === "platform" && (editandoTexto?.id === contribution.id
+        ? <div className="mt-2 space-y-2" data-testid="radar-specialist-edit-text">
+          <label className="block text-sm text-foreground">Editar o parecer
+            <textarea value={editandoTexto.texto} onChange={event => setEditandoTexto({ id: contribution.id, texto: event.target.value })} rows={6} disabled={salvandoTexto} className="mt-1 min-h-32 w-full rounded-md border border-divider bg-surface-elevated px-3 py-2 text-sm leading-6 text-foreground" />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={primaryAction} disabled={salvandoTexto || !editandoTexto.texto.trim()} onClick={() => void salvarTexto(contribution)}>{salvandoTexto ? "Salvando…" : "Salvar parecer"}</button>
+            <button type="button" className={action} disabled={salvandoTexto} onClick={() => setEditandoTexto(null)}>Cancelar</button>
+          </div>
+        </div>
+        : <button type="button" className={`${action} mt-2`} onClick={() => setEditandoTexto({ id: contribution.id, texto: extracao.originalText || "" })} data-testid="radar-specialist-edit-text-open">Editar texto</button>)}
+      {desfechoDoTexto?.id === contribution.id && <p className={`mt-2 text-sm ${desfechoDoTexto.ok ? "text-success" : "text-warning"}`} role="status">{desfechoDoTexto.message}</p>}
 
       {/*
         * A CLASSIFICAÇÃO CHEGA SUGERIDA, COM A ORIGEM DECLARADA — §5.
@@ -1461,9 +1512,10 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
           </details>
         </section>}
 
-        {!loading && experts.length > 0 && <RadarSpecialistDirectEntry
+        {/* O parecer direto não depende de especialista cadastrado: "Eu mesmo" cobre a Marca sem cadastro. */}
+        {!loading && <RadarSpecialistDirectEntry
           brandId={brandId} articleId={articleId} articleDnaVersionId={articleDnaVersionId}
-          experts={experts} requirements={requirements} defaultExpertId={selectedExpertId || contributions[0]?.expertId || experts[0]?.id || ""}
+          experts={experts} requirements={requirements} defaultExpertId={selectedExpertId || contributions[0]?.expertId || experts[0]?.id || "self"}
           onSent={() => leituraDaArea.refresh()}
         />}
 
@@ -1778,6 +1830,11 @@ export function RadarExpertBriefPanel({ brandId, articleId, articleDnaVersionId,
         <h5 className="text-sm font-semibold text-foreground">Respostas sem ponto de revisão associado</h5>
         <p className="mt-1 text-sm text-text-muted">Chegaram por pautas que não nasceram de um ponto preparado. A associação a um requisito não é feita automaticamente sem evidência suficiente.</p>
         <div className="mt-3 space-y-3">{unassignedContributions.map(contribution => contributionCard(contribution, briefById.get(contribution.briefId) || null))}</div>
+      </section>}
+      {directContributions.length > 0 && <section className="mt-4 rounded-md border border-divider bg-surface-subtle p-3" data-testid="radar-specialist-result-direct">
+        <h5 className="text-sm font-semibold text-foreground">Pareceres diretos (fechamento, CTA, diretriz)</h5>
+        <p className="mt-1 text-sm text-text-muted">Escritos na plataforma. O do próprio especialista já entra aceito; aqui dá para mudar a decisão e reeditar o texto.</p>
+        <div className="mt-3 space-y-3">{directContributions.map(contribution => contributionCard(contribution, briefById.get(contribution.briefId) || null))}</div>
       </section>}
       {articleContributions.length > 0 && <p className="mt-3 text-sm text-text-muted">A contribuição remota não vira ExpertEvidence automaticamente.</p>}
     </section>

@@ -1,5 +1,84 @@
 # Estado atual — Radar
 
+## Relatório informativo, CSV de vídeo e Silo nos selecionados — 2026-10-02
+
+**Verificado no código e confirmado por teste. Validado no local pelo desenvolvimento (leitura da tela e POST de
+exportação, que não grava); homologação do dono pendente.**
+
+- **Relatório = painel informativo.** A aba mostra keyword principal, intenção declarada × SERP (e se concordam),
+  formato dominante, funil, Silo e papel, e o gráfico "Estado SEO do artigo": um pilar por diretriz do Google e das
+  respostas de IA (intenção e SERP, cobertura semântica, respostas claras, fontes, especialista, links, multimídia,
+  estrutura), com nota 0/50/100 e média dos que se aplicam (`lib/radar/seo-guidelines.ts`). Sem "Em aberto", sem
+  "Marcar revisado"/"Aprovar relatório" na aba (`RadarR6ReportPanel informational`). Card e coluna da planilha
+  mostram "Estado SEO: N%". O envio ao Redator nunca dependeu da aprovação do relatório.
+- **Pilar do especialista** conta parecer aceito (`specialist.reviewedEvidence`). Limite: a tela só conhece o
+  parecer depois que a área Especialista é aberta (o painel dela é quem lê as contribuições) — antes disso o pilar
+  sai "Não se aplica". Mesmo comportamento antigo da coluna Especialista.
+- **CSV para vídeo e redes sociais** (`mode: "video"`, `lib/radar/portable-video-export.ts`, botão no card de
+  exportação): 13 colunas sem estrutura de artigo — SERP do YouTube (vídeos no topo com URL limpa, canais, padrões
+  de título, termos, lacunas), vídeos que a SERP do Google mostra, intenção e formato (longos × Shorts, durações,
+  faixa recomendada), perguntas do público aderentes ao núcleo (sem pergunta retórica de concorrente), termos,
+  fatos com fonte e afirmações sem fonte, especialista (fechamento/CTA), biblioteca da marca, diretrizes de roteiro
+  (gancho, capítulos, CTA para o artigo), cortes para Shorts/Reels/TikTok e carrossel, prompt. A pesquisa do
+  YouTube vale em qualquer perfil; a congelada vence a corrida viva; sem ela, "Com ressalva".
+- **"Só os selecionados" leva o Silo.** O núcleo monta o plano por silo também na seleção (`selectionOnly`): irmão
+  não marcado sai "fora desta seleção". Seleção de um Silo só abre pela linha "Silo"; seleção que cruza Silos põe
+  Silo, papel e ordem narrativa na linha de cada artigo (`siloInline`). Links internos resolvem o destino pelo slug
+  do irmão (no artigo do Instagram: Pilar "leads qualificados" → `/qualificados`).
+- **Vídeos:** "Casar pautas com o conteúdo" voltou a habilitar — a ação da biblioteca ficava presa em "Registrando…".
+- **Especialista:** aceitar, usar como apoio, citação literal, rejeitar e "Editar texto" (PATCH com histórico em
+  `original_metadata.edits`) aparecem também para o parecer direto.
+- Arquivos: `lib/radar/seo-guidelines.ts` (novo), `lib/radar/portable-video-export.ts` (novo),
+  `modules/radar/radar-r3-workbench.tsx`, `modules/radar/radar-r6-report-panel.tsx`, `modules/radar/radar-page.tsx`,
+  `lib/radar/portable-writing-export.ts` (exporta projeções; silo na linha), `lib/radar/portable-writing-batch.ts`,
+  `lib/radar/portable-silo-export.ts` (status aditivo `not_selected`), `lib/radar/portable-export-batch.ts`
+  (campo opcional `youtube`), `lib/server/radar-portable-export-core.ts`, `app/api/editorial/radar-export/route.ts`
+  (enum aditivo `video`), `lib/agent/platform-catalog.ts`. Consumidores preservados: formato completo e export por
+  silo inalterados; MCP `get_article_for_writing` usa o mesmo núcleo sem plano da seleção (sai como antes).
+- Testes: `tests/radar-seo-guidelines.test.mts`, `tests/radar-portable-video-export.test.mts` (corrida real do
+  YouTube da fixture); testes estruturais do card e da rota atualizados para o novo contrato. Radar 2708/0,
+  Redator 357/0, agent 65/0.
+
+## Diretriz editorial — F1 entregue no código — 2026-10-02
+
+**Verificado no código e confirmado por teste. Validado manualmente: parcial (CSV gerado no local).** SDD:
+`docs/05-radar/sdd-diretriz-editorial-pela-serp-2026-10-02.md` (aprovada: F1 já, F2 em seguida).
+
+- **Especialista:** o parecer do próprio especialista logado ("Eu mesmo" ou o registro dele) entra já aceito,
+  com releitura. O tipo do parecer atravessa até o CSV: Fechamento conduz a virada final, CTA a chamada final,
+  Diretriz vale para o artigo inteiro. Parecer pendente aparece no CSV ("aguardando aceite no Radar").
+- **Cabeçalhos limpos:** `radarCleanCompetitorHeading` tira numeração e contagem de listicle ("2.", "10 principais")
+  antes de virar seção, pergunta ou termo (`lib/radar/heading-cleanup.ts`).
+- **Aderência ao núcleo:** seção, abertura e diferencial exigem duas raízes do núcleo ou uma distintiva; raiz
+  onipresente da principal ("instagram") não basta (`lib/radar/intent-adherence.ts`). Diferencial por raridade
+  exige ao menos 2 páginas.
+- **Limite conhecido:** o export lê a investigação CONGELADA; artigos finalizados antes continuam com o texto
+  derivado na finalização. O H1, a promessa, a estrutura rica e os prompts de imagem dependem da F2 (síntese pela
+  IA com revisão humana). Link para Pilar não publicado ainda sai como "destino não resolvido" (F2).
+- Testes: `tests/radar-heading-cleanup.test.mts`, `tests/radar-intent-adherence.test.mts`, regressões do parecer
+  direto; suíte do Radar 2698/0; Redator 357/0; Arquiteto 2737/0; agent 65/0. Saídas douradas do CSV inalteradas.
+
+## Texto da keyword pelo snapshot do ArticleDNA — 2026-10-01
+
+**Verificado no código e confirmado por teste. Validado manualmente: não.**
+
+- Sintoma: "A keyword … (principal) não teve o texto resolvido", artigo "Não hidratado" e nenhuma consulta central
+  de SERP ("instagram não traz pacientes", principal trocada pela melhoria no Arquiteto).
+- Causa: a hidratação só achava o texto na lista de keywords do Minerador carregada na tela. Com o Radar aberto
+  direto, ou com uma principal nova que não está nessa lista, o texto não vinha.
+- Correção: `createRadarHydrationSnapshot` e o contexto de pesquisa usam o snapshot da KeywordDNA gravado na
+  própria referência do ArticleDNA (`keywordDnaSnapshot.sourceKeywordSnapshot.keyword`). É a mesma keyword, pelo
+  mesmo id: nada é casado por texto. Referência sem snapshot e sem lista continua fora, sem invenção.
+- A reconciliação refaz a hidratação que descreve uma versão ANTERIOR do ArticleDNA (antes ela pulava qualquer
+  item já hidratado, e a troca de principal deixava o Radar preso na composição velha). O nome do Silo vem do
+  SiloDNA aprovado quando a lista do Minerador não traz.
+- **Causa principal (encontrada no local):** a tela montava o mapa de artigos com `Object.fromEntries` sobre a lista
+  remota, que vem da versão mais nova para a mais velha; a última entrada (v1) vencia. O item do Radar estava na v4 e
+  a coleta recusava com "A versão do ArticleDNA local diverge da versão transportada pelo item do Radar". Agora
+  `latestVersionByKey` (em `components/editorial-pipeline-context.tsx`) fica com o maior `versionNumber` — vale para
+  ArticleDNA e SiloDNA. Validado no local: a linha mostra a principal da v4 e o Silo, com "Iniciar Pesquisa Google".
+- Teste: `tests/radar-hydration.test.mts`; suíte do Radar 2687/0.
+
 ## Planejador aposentado: o Radar entrega ao Redator — 2026-10-01
 
 **Verificado no código e confirmado por teste. Validado manualmente: não. Nada foi gravado no banco remoto.**

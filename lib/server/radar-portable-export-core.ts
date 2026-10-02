@@ -29,6 +29,7 @@ import {
   type RadarPortableExportAssembledArticle,
 } from "@/lib/radar/portable-export-batch";
 import { radarPortableWritingExport } from "@/lib/radar/portable-writing-batch";
+import { radarVideoExportYoutubeOf } from "@/lib/radar/portable-video-export";
 import type { RadarWritingPublication } from "@/lib/radar/portable-writing-export";
 import type { RadarCanonicalItemIdentity } from "@/lib/server/radar-canonical-authorities";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
@@ -60,12 +61,20 @@ export type RadarPortableExportAssembly = {
   lentes: Awaited<ReturnType<typeof radarPortableExportReadLenses>>;
   /** Só com `groupBy: "silo"`. */
   plano: ReturnType<typeof planRadarSiloExport> | null;
+  /** 2026-10-02 · Só com `selectionSiloContext` e sem `groupBy`: o Silo de cada selecionado. */
+  planoDaSelecao: ReturnType<typeof planRadarSiloExport> | null;
 };
 
 export async function assembleRadarPortableExport(input: {
   brandId: string;
   articleIds: readonly string[];
   groupBy?: "silo";
+  /**
+   * 2026-10-02 · Aditivo: o export dos SELECIONADOS também leva o Silo. O plano
+   * marca o irmão não selecionado como "fora desta seleção", e não como "não
+   * enviado ao Radar" — que era o motivo de o avulso sair sem Silo.
+   */
+  selectionSiloContext?: boolean;
   /** O cliente das leituras de alvo e do cache: a sessão da tela ou o operacional do MCP (sempre filtrado pela marca). */
   supabase: LeitorDoCache;
   actorUserId: string;
@@ -348,6 +357,19 @@ export async function assembleRadarPortableExport(input: {
        * o bundle e os snapshots já estão em memória.
        */
       lentesCongeladas: radarPortableExportFrozenLensesInput({ profile: perfil, bundle, analysis: payload, records: snapshots.records }),
+      /*
+       * 2026-10-02 · A PESQUISA DO YOUTUBE, EM QUALQUER PERFIL.
+       *
+       * No artigo do Google ela é o complemento opcional para converter o
+       * artigo em vídeo. Fotografia vence a corrida viva; nenhuma coleta.
+       */
+      youtube: radarVideoExportYoutubeOf({
+        run: payload.youtubeSearch,
+        frozen: payload.youtubeFrozenInvestigation,
+        declaredIntent: radarDeclaredArticleIntent(article.payload),
+        editorialTopics: contexto?.editorialTopics || [],
+        generatedAt: exportedAt,
+      }),
     });
 
     identificacao.push({
@@ -449,7 +471,18 @@ export async function assembleRadarPortableExport(input: {
     })
     : null;
 
-  return { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano };
+  const planoDaSelecao = !plano && input.selectionSiloContext
+    ? planRadarSiloExport({
+      today: exportedAt,
+      brandId: input.brandId,
+      items: itensDoSilo,
+      siloVersions: artefatos.silos,
+      memberDescriptors: radarSiloMemberDescriptorsWithTitles(artefatos.articles, input.brandId),
+      selectionOnly: true,
+    })
+    : null;
+
+  return { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao };
 }
 
 /**

@@ -174,6 +174,8 @@ export type RadarPortableSpecialistItem = {
   appliesTo: string;
   quote: string | null;
   limitations: string[];
+  /** Tipo do ponto: REVIEW_POINT…, ou FECHAMENTO, CTA e DIRETRIZ do parecer direto. Opcional (aditivo). */
+  kind?: string | null;
 };
 
 export type RadarPortableSpecialistContext = {
@@ -219,6 +221,7 @@ export function radarPortableSpecialistContext(layer: RadarSpecialistEvidenceLay
       approved: radarSpecialistDecisionIsActive(item.humanDecision),
       appliesTo: item.editorialUse,
       quote: item.quote,
+      kind: item.requirementKind || null,
       /*
        * "APOIO" NÃO SUSTENTA AFIRMAÇÃO FACTUAL, e isso precisa viajar.
        *

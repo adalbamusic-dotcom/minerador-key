@@ -74,7 +74,23 @@ function snapshotForReference(
 ) {
   const source = sourceKeywords.find(candidate => sourceMatches(candidate, reference.keywordId));
   const keyword = stringOf(source?.keyword);
-  if (!source || !keyword) return null;
+  if (!source || !keyword) {
+    /*
+     * SEM A LISTA DO MINERADOR, A PRÓPRIA REFERÊNCIA RESPONDE (2026-10-01).
+     *
+     * O Radar aberto direto (sem passar pelo Arquiteto) não tem a lista de
+     * keywords carregada, e a principal trocada pela melhoria pode nem estar
+     * nela. O ArticleDNA guarda, em cada referência, o snapshot da KeywordDNA
+     * com o texto — é a MESMA keyword (mesmo id), não um casamento por texto.
+     */
+    const doSnapshot = stringOf(reference.keywordDnaSnapshot?.sourceKeywordSnapshot?.keyword);
+    if (!doSnapshot) return null;
+    return RadarHydrationKeywordSchema.parse({
+      referenceKeywordId: reference.keywordId, canonicalKeywordId: reference.keywordId, sourceKeywordId: reference.keywordId, originalKeywordId: reference.keywordId,
+      aliases: [], keywordDnaVersionId: reference.keywordDnaVersionId, keyword: doSnapshot,
+      role: reference.role, brandId, siloId: article.siloId || null, siloName: null, isPublished: Boolean(article.publishedIdentityRef) && reference.keywordId === article.articleId,
+    });
+  }
   const ids = sourceIds(source);
   const canonicalKeywordId = stringOf(source.canonicalKeywordId) || stringOf(source.keywordId) || stringOf(source.sourceKeywordId) || stringOf(source.originalKeywordId) || stringOf(source.id);
   const sourceKeywordId = stringOf(source.sourceKeywordId) || stringOf(source.keywordId);
@@ -123,7 +139,8 @@ export function createRadarHydrationSnapshot(input: {
   if (!principalSource) return null;
   const resolvido = input.resolvedSilo || null;
   const siloId = resolvido?.siloId || input.article.payload.siloId || principalSource.siloId;
-  const siloName = resolvido?.siloName || principalSource.siloName || null;
+  // Sem a lista do Minerador, o nome do Silo vem do SiloDNA aprovado.
+  const siloName = resolvido?.siloName || principalSource.siloName || input.silo?.payload.name || null;
   const silo = siloId ? RadarHydrationSiloSchema.parse({
     id: siloId,
     name: siloName,
@@ -148,8 +165,12 @@ export function reconcileRadarItems(
   siloVersions: Record<string, VersionEnvelope<SiloDNA>> = {},
 ) {
   return items.map(item => {
-    if (item.brandId !== brandId || item.hydration?.principalKeyword?.keyword) return item;
+    if (item.brandId !== brandId) return item;
     const article = articleVersions[item.articleId];
+    // Hidratação de uma versão ANTERIOR do ArticleDNA (ex.: principal trocada) não vale mais.
+    const vigente = item.hydration?.principalKeyword?.keyword
+      && (!article || item.hydration.articleDnaVersionId === article.versionId);
+    if (vigente) return item;
     if (!article || article.payload.brandId !== brandId) return item;
     const hydration = createRadarHydrationSnapshot({ brandId, article, sourceKeywords, silo: article.payload.siloId ? siloVersions[article.payload.siloId] : undefined, source: "reconciled" });
     return hydration ? { ...item, hydration } : item;

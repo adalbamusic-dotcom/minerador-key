@@ -961,7 +961,7 @@ test("§29 · continua um único botão Exportar, com os produtos dentro", async
    */
   const botoes = [...barra.matchAll(/data-testid="radar-export-[a-z-]+"/g)].map(item => item[0]);
   assert.ok(botoes.includes('data-testid="radar-export-csv"'), "§29 · o card perdeu o botão 'Exportar CSV'");
-  assert.equal(botoes.length, 13, "§29 · o botão da barra e as doze marcas do card — nada além disso");
+  assert.equal(botoes.length, 14, "§29 · o botão da barra e as treze marcas do card (2026-10-02: + vídeo) — nada além disso");
   const foraDoMenu = barra.slice(0, barra.indexOf('role="dialog"'));
   assert.deepEqual([...foraDoMenu.matchAll(/data-testid="radar-export-[a-z-]+"/g)].map(item => item[0]), ['data-testid="radar-export-menu"'],
     "§29 · um item de export saiu do card para a barra");

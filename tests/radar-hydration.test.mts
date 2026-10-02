@@ -70,3 +70,43 @@ test("reconcilia item antigo do Radar sem duplicar nem alterar identidade", () =
   assert.equal(repaired[0].hydration?.source, "reconciled");
   assert.equal(repaired[0].hydration?.principalKeyword?.keyword, "captação de pacientes sem tráfego pago");
 });
+
+test("sem a lista do Minerador, o texto vem do snapshot da própria referência (mesmo id)", () => {
+  // Caso real (2026-10-01): Radar aberto direto e principal trocada pela melhoria.
+  const comSnapshot = {
+    ...version,
+    payload: {
+      ...article,
+      keywordReferences: article.keywordReferences.map(reference => ({
+        ...reference,
+        keywordDnaSnapshot: reference.keywordId === sourceKeyword.id ? { sourceKeywordSnapshot: { keyword: "atrair clientes pelo instagram" } } : undefined,
+      })),
+    },
+  } as any;
+  const hydration = createRadarHydrationSnapshot({ brandId, article: comSnapshot, sourceKeywords: [], source: "reconciled", capturedAt: "2026-10-01T00:00:00.000Z" });
+  assert.ok(hydration, "a principal com snapshot hidrata mesmo sem lista");
+  assert.equal(hydration.principalKeyword?.keyword, "atrair clientes pelo instagram");
+  assert.equal(hydration.principalKeyword?.referenceKeywordId, sourceKeyword.id, "a identidade é a da referência");
+  assert.equal(hydration.keywordSnapshots.length, 1, "referência sem snapshot e sem lista continua fora — nada é inventado");
+});
+
+test("hidratação de versão anterior do ArticleDNA é refeita na reconciliação", () => {
+  const antiga = createRadarHydrationSnapshot({ brandId, article: version, sourceKeywords: [sourceKeyword], source: "arquiteto_import", capturedAt: "2026-07-20T00:00:00.000Z" });
+  assert.ok(antiga);
+  const nova = { ...version, versionId: "article-v2" } as any;
+  const item = { brandId, articleId: article.articleId, hydration: antiga } as any;
+  const [reconciliado] = reconcileRadarItems([item], { [article.articleId]: nova }, brandId, [sourceKeyword]);
+  assert.equal(reconciliado.hydration?.articleDnaVersionId, "article-v2", "a hidratação acompanha a versão vigente");
+  const [mantido] = reconcileRadarItems([item], { [article.articleId]: version }, brandId, [sourceKeyword]);
+  assert.equal(mantido, item, "versão igual: nada muda");
+});
+
+test("a tela fica com a versão de MAIOR número do ArticleDNA, não com a última da lista", async () => {
+  // A leitura remota vem da mais nova para a mais velha; Object.fromEntries deixava a v1 vencer.
+  const { readFile } = await import("node:fs/promises");
+  const fonte = await readFile(new URL("../components/editorial-pipeline-context.tsx", import.meta.url), "utf8");
+  assert.equal(fonte.includes("Object.fromEntries(persisted.articleVersions"), false);
+  assert.equal(fonte.includes("Object.fromEntries(persisted.siloVersions"), false);
+  assert.match(fonte, /latestVersionByKey\(current\.articleVersions, persisted\.articleVersions/);
+  assert.match(fonte, /existing\.versionNumber <= version\.versionNumber/);
+});

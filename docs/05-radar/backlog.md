@@ -1,5 +1,24 @@
 # Backlog — Radar
 
+## Relatório, CSV de vídeo e Silo nos selecionados — 2026-10-02
+
+- [x] Relatório como painel informativo com intenção e gráfico de estado SEO; sem revisão nem alerta na aba.
+- [x] CSV para vídeo e redes sociais (`mode: "video"`), sem estrutura de artigo.
+- [x] "Só os selecionados" com o Silo, o papel e os destinos dos links.
+- [x] "Casar pautas com o conteúdo" destravado; aceitar/editar o parecer direto do especialista.
+- [ ] Hidratar o especialista sem abrir a área: a coluna Especialista e o pilar do Relatório só conhecem o parecer aceito depois que o painel do especialista monta.
+- [ ] Homologar (dono): abrir o Relatório; exportar "CSV para vídeo e redes sociais" e "Só os selecionados"; casar os 3 vídeos de teste; aceitar e reeditar o parecer.
+- [ ] Rodar a pesquisa do YouTube no artigo do Instagram (paga, decisão do dono) para o CSV de vídeo trazer formato, duração e concorrência em vídeo.
+
+## Diretriz editorial pela SERP — 2026-10-02
+
+- [x] F1: especialista no fechamento/CTA/diretriz, pendente visível, "Eu mesmo" aceito; cabeçalhos limpos; aderência ao núcleo.
+- [ ] F2: diretriz sintetizada pela IA (promessa, abertura, H1, H2 com evidências e termos LSI/entidades, diferenciais pela intenção, virada final e CTA na voz do especialista, plano visual com prompt/ALT/legenda), revisão humana no Radar, campo novo opcional no dossiê.
+- [ ] F2: link para Pilar não publicado com URL planejada (SiloPage + slug sugerido), marcado "a publicar".
+- [ ] Vídeos (D4): SERP com vídeo vira sinal de formato e sugestão de embed; biblioteca da marca no ponto certo; acréscimo YouTube vira roteiro no Redator.
+- [ ] F3: verificação factual das fontes (`buildRadarFactualEvidence` sem chamador).
+- [ ] Homologar (dono): reescrever o parecer com "Eu mesmo" no artigo do Instagram → conferir "aceito" → exportar o CSV → ver o fechamento na voz do especialista.
+
 ## Aposentadoria do Planejador — 2026-10-01
 
 - [x] Prontidão e textos do Relatório apontam para o Redator.
@@ -15,6 +34,7 @@
 - [x] **Dono:** aplicar `20260930120000_expert_contribution_platform_channel.sql` (`db query -f` + `migration repair`). Conferido por leitura remota.
 - [x] Parte B: campo “Escrever o parecer aqui” + `submitPlatformExpertContribution` + rota `POST /api/editorial/expert-contributions/platform`.
 - [x] Parte B: tipos sem ponto de revisão (FECHAMENTO, CTA, DIRETRIZ) entram pela pauta própria com ponto sintético `direto:`.
+- [x] 2026-10-01: opção "Eu mesmo (quem está logado)" (prevista em B2.1 e faltante). O bloco sumia com a Marca sem especialista cadastrado; agora aparece sempre e o servidor cria ou reaproveita o `brand_experts` de quem digita (`metadata.platformUserId`). Validado no local: o campo aparece com as opções.
 - [ ] **Homologar (dono):** Radar → artigo → Especialista → “Escrever o parecer aqui” → enviar → aparece em Respostas recebidas com canal “Plataforma” → aceitar → finalizar → o parecer aparece no Redator e no CSV “Para escrever”.
 - [ ] Redator lê `formatBlueprints` (roteiro de vídeo e produtos do review).
 - [ ] CSV do review: produtos, links e aviso de afiliado quando a Amazon é acréscimo.

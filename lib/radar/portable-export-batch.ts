@@ -33,6 +33,7 @@ import {
 } from "./portable-silo-export.ts";
 import { latestRadarR5SerpReview } from "./r5-sequential.ts";
 import type { RadarResearchProfile } from "./research-profile.ts";
+import type { RadarVideoExportYoutube } from "./portable-video-export.ts";
 
 /**
  * ===== A MONTAGEM DO LOTE DO EXPORT PORTÁTIL — as pontes puras da rota =====
@@ -342,6 +343,11 @@ export type RadarPortableExportAssembledArticle = {
    * observação fora do pacote. Sem elas, a coluna sai como antes.
    */
   lentesCongeladas?: RadarPortableFrozenLensesInput | null;
+  /**
+   * 2026-10-02 · Aditivo: a pesquisa do YouTube do artigo, para o export de
+   * vídeo e redes sociais. Os outros formatos não a leem.
+   */
+  youtube?: RadarVideoExportYoutube | null;
 };
 
 /**

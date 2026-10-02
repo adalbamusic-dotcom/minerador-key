@@ -111,3 +111,15 @@ test("o catálogo do MCP conhece a rota do parecer direto", async () => {
   assert.match(catalogo, /"\/api\/editorial\/expert-contributions\/platform"/);
   assert.doesNotMatch(catalogo, /Parte B, aguarda a migration do dono/);
 });
+
+test("\"Eu mesmo\": o campo aparece sem especialista cadastrado e o servidor resolve quem está logado", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const painel = await readFile(new URL("../modules/radar/radar-expert-brief-panel.tsx", import.meta.url), "utf8");
+  assert.equal(painel.includes("{!loading && experts.length > 0 && <RadarSpecialistDirectEntry"), false, "o campo não pode depender de cadastro");
+  assert.match(painel, /<option value="self">Eu mesmo \(quem está logado\)<\/option>/);
+  const rota = await readFile(new URL("../app/api/editorial/expert-contributions/platform/route.ts", import.meta.url), "utf8");
+  assert.match(rota, /z\.literal\(PLATFORM_SELF_EXPERT\)/);
+  const nucleo = await readFile(new URL("../lib/server/expert-platform-contribution.ts", import.meta.url), "utf8");
+  assert.match(nucleo, /contains\("metadata", \{ platformUserId: actorUserId \}\)/, "a segunda vez reaproveita o mesmo registro");
+  assert.match(nucleo, /origin: "platform_self"/);
+});

@@ -60,8 +60,9 @@ import type { RadarArticleResearchContext } from "./article-research-context.ts"
 import type { RadarCompetitorClass, RadarCompetitorUniverse } from "./competitor-universe.ts";
 import type { RadarEditorialComparison, RadarComparisonRow } from "./editorial-comparison.ts";
 import type { RadarResearchReference } from "./research-reference.ts";
-import { radarSemanticType, type RadarSemanticConcept, type RadarSemanticConceptModel, type RadarQuestionCluster } from "./semantic-concept-model.ts";
+import { radarSemanticStems, radarSemanticType, type RadarSemanticConcept, type RadarSemanticConceptModel, type RadarQuestionCluster } from "./semantic-concept-model.ts";
 import { radarTopicTokens } from "./topic-classification.ts";
+import { radarTextAdheresToCore, radarUbiquitousStems } from "./intent-adherence.ts";
 
 /* ============================ identidade ================================= */
 
@@ -801,9 +802,20 @@ export function buildRadarCompetitiveObservedModel(input: {
       evidence: row.evidence,
     }));
 
-  /* Pouco coberto pelo mercado e ancorado ao artigo também é diferencial observável. */
+  /*
+   * Pouco coberto pelo mercado e ancorado ao artigo também é diferencial observável —
+   * desde que ADIRA ao núcleo do artigo e tenha ao menos 2 páginas (SDD diretriz
+   * editorial, 2026-10-02). Raridade sozinha não é diferencial: "Ative o Instagram
+   * Shopping" é raro e não responde a "como atrair clientes pelo instagram".
+   */
+  const nucleo = new Set([...input.context.resolvedKeywordTexts, input.context.article.promise]
+    .flatMap(texto => radarSemanticStems(texto || "")));
+  /* Só raiz da PRINCIPAL vira cenário; tópico declarado nunca é rebaixado. */
+  const daPrincipal = new Set(input.context.resolvedKeywordTexts.flatMap(texto => radarSemanticStems(texto)));
+  const onipresentes = new Set([...radarUbiquitousStems(all.map(item => item.canonicalLabel))].filter(raiz => daPrincipal.has(raiz)));
   for (const conceito of concepts.undercovered) {
     if (differentiations.some(item => item.subject === conceito.canonicalLabel)) continue;
+    if (conceito.sourceCount < 2 || !radarTextAdheresToCore(conceito.canonicalLabel, nucleo, onipresentes)) continue;
     differentiations.push({
       subject: conceito.canonicalLabel,
       basis: "SERP_EVIDENCE",
