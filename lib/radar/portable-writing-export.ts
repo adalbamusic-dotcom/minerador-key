@@ -1,4 +1,5 @@
 import { RADAR_WRITER_MAY_NOT_SUBJECT, radarWriterMayNotFor } from "../redator/writer-handoff.ts";
+import { radarCompetitorTopics } from "./competitor-topics.ts";
 import { WRITER_EVIDENCE_LIMITS } from "../redator/writer-evidence-catalog.ts";
 import { RADAR_AMAZON_INTENT_LABELS, type RadarAmazonEditorialIntentType } from "./amazon-editorial-target.ts";
 import { radarClaimNeedsFactualSupport } from "./claim-evidence.ts";
@@ -128,14 +129,16 @@ export type RadarWritingVerdict = "Sim" | "Com ressalva" | "Não";
  * linha de 20 mil: a última seção saía cortada e a SERP resumida inteira virava
  * "[…] Cortado" — justo o índice que dá sentido aos ids S, P e C da estrutura.
  * O CSV é para escrever FORA da plataforma (o Redator tem os seus fundamentos,
- * com corte próprio); 14 mil na estrutura e 32 mil no artigo seguem longe dos
+ * com corte próprio); 14 mil na estrutura e 40 mil no artigo (32 → 40 mil com os temas dos concorrentes, 2026-10-02) seguem longe dos
  * 32.767 por célula do Excel. A ordem do corte passa a ser "cobrir e superar",
  * fontes, plano visual e, por último, a SERP, que nunca some inteira.
  */
 export const RADAR_WRITING_EXPORT_LIMITS = {
   cellChars: 6_000,
   structureChars: 14_000,
-  articleChars: 32_000,
+  /** 2026-10-02 · A SERP resumida ganhou os temas dos concorrentes (H2/H3 das páginas lidas): teto próprio. */
+  serpChars: 10_000,
+  articleChars: 40_000,
   /** O mínimo da célula cortável no primeiro passe: o começo da SERP (índice S/P/C) fica. */
   cutFloorChars: 1_500,
   foundationsBytes: WRITER_EVIDENCE_LIMITS.foundationsMaxBytes,
@@ -148,6 +151,12 @@ export const RADAR_WRITING_EXPORT_LIMITS = {
   specialistAnswerChars: 400,
   verdictReasons: 4,
 } as const;
+
+/** 2026-10-02 · O teto de cada célula: a estrutura e a SERP têm o seu; as demais, o comum. */
+export const radarWritingCellLimit = (coluna: RadarWritingExportColumn): number =>
+  coluna === "estrutura" ? RADAR_WRITING_EXPORT_LIMITS.structureChars
+    : coluna === "serp_resumida" ? RADAR_WRITING_EXPORT_LIMITS.serpChars
+      : RADAR_WRITING_EXPORT_LIMITS.cellChars;
 
 /** A estimativa que a tela mostra antes do clique: o alvo típico, não o teto. */
 export const RADAR_WRITING_EXPORT_TYPICAL_CHARS_PER_ARTICLE = 10_000;
@@ -993,6 +1002,13 @@ function colunaArtigo(input: RadarPortableExportInput, p: Projecoes, contexto: R
     const politica = radarWritingCompareKey(publicacao?.principalPolicy);
     linhas.push(
       `Publicado: ${url || "sim (URL publicada não registrada no pacote)"} — preservar URL, slug e canonical`,
+      /* 2026-10-02 · a estrutura atual da página, lida na exportação: a atualização parte dela. */
+      ...(publicacao?.currentStructure
+        ? [
+          `Estrutura publicada atual (lida da página na exportação): H1 ${entreAspas(publicacao.currentStructure.h1 || "sem H1 legível")}${publicacao.currentStructure.h2.length ? `; ${publicacao.currentStructure.h2.length} H2: ${publicacao.currentStructure.h2.map(item => entreAspas(cortar(item, 80))).join(" · ")}` : "; nenhum H2 legível"}.`,
+          "Atualização: o que a página já cobre e continua na planta fica (pode ser reescrito e reordenado); seção existente que a planta não tem só sai com decisão humana — leve-a como pendência fora do texto.",
+        ]
+        : []),
       `Canonical: ${canonical || "não registrado no pacote; não criar um novo"}`,
       politica === "locked"
         ? "Principal: travada — não trocar"
@@ -1462,6 +1478,17 @@ export function radarWritingOpeningQuestion(p: Projecoes, foraDoEscopo: (valor: 
   return escolhida ? radarWritingDecodeEntities(escolhida) : null;
 }
 
+/*
+ * 2026-10-02 · A LIMITAÇÃO DIZ DE QUAL CAMADA FALA. "Nenhuma página foi
+ * visitada" é verdade da leitura multiformato e dos recursos da SERP (vídeos,
+ * blocos), não da investigação, que leu as páginas comparáveis — o CSV dizia as
+ * duas coisas ao mesmo tempo. Com páginas lidas, a frase nomeia a camada.
+ */
+function limitacaoDaCamada(limitacao: string, paginasLidas: number): string {
+  if (!paginasLidas || !/nenhuma p[aá]gina foi visitada/i.test(limitacao)) return limitacao;
+  return `A leitura multiformato e dos recursos da SERP (vídeos e blocos) usa só o que a SERP devolveu: nenhum vídeo foi assistido ou transcrito. As ${paginasLidas} páginas comparáveis, estas sim, foram lidas pela investigação (base das medidas e dos temas dos concorrentes)`;
+}
+
 function colunaCobrir(
   input: RadarPortableExportInput,
   p: Projecoes,
@@ -1655,7 +1682,7 @@ function colunaCobrir(
     ...p.limitacoes
       .filter(item => /n[aã]o traz|n[aã]o foram lid|n[aã]o foi lid|nenhum v[ií]deo foi assistido|n[aã]o foi coletad|n[aã]o foram coletad/i.test(item))
       .slice(0, 3)
-      .map(item => `Não afirmar o que depende disto: ${comPontoFinal(semPontoFinal(item))}`),
+      .map(item => `Não afirmar o que depende disto: ${comPontoFinal(semPontoFinal(limitacaoDaCamada(item, amostra)))}`),
   ];
 
   /* O que o ArticleDNA declara ou exige e o Radar marcou fora do escopo pede decisão humana: vai ao veredito. */
@@ -1709,6 +1736,37 @@ function resumoDeLentes(leituras: ReadonlyArray<{ label: string; domains: readon
   ];
 }
 
+/*
+ * 2026-10-02 · EM QUE LENTE CADA PÁGINA APARECEU. A revisão pediu ligar cada
+ * decisão à janela da SERP (achado → janela → URL → decisão → seção). As lentes
+ * lidas (o pacote congelado primeiro; sem ele, o cache) dizem, por domínio,
+ * "em todas as 4 lentes" ou "só em celular · iOS"; a planta põe isso ao lado de
+ * cada evidência S da seção. Uma lente só não é conferência: nada é dito.
+ */
+function lentesLidas(lentes: RadarPortableSerpLenses | null): Array<{ label: string; domains: readonly string[] }> {
+  if (!lentes) return [];
+  const pacote = lentes.frozenPackage;
+  if (pacote?.state === "frozen" && pacote.canonical) {
+    const lidas = pacote.canonical.readings.filter(item => item.observed).map(item => ({ label: item.label, domains: item.competitorDomains }));
+    if (lidas.length >= 2) return lidas;
+  }
+  const principal = lentes.keywords.find(item => item.role === "principal") || lentes.keywords[0];
+  return (principal?.readings || []).filter(item => item.observed).map(item => ({ label: item.label, domains: item.competitorDomains }));
+}
+
+export function radarWritingDomainLenses(lentes: RadarPortableSerpLenses | null): ((dominio: string) => string | null) | null {
+  const lidas = lentesLidas(lentes);
+  if (lidas.length < 2) return null;
+  const limpo = (dominio: string) => dominio.toLowerCase().replace(/^www\./, "");
+  return dominio => {
+    const alvo = limpo(dominio);
+    const onde = lidas.filter(item => item.domains.some(outro => limpo(outro) === alvo)).map(item => item.label);
+    if (!onde.length) return null;
+    if (onde.length === lidas.length) return `em todas as ${lidas.length} lentes`;
+    return `só em ${onde.join(" e ")} (${onde.length} de ${lidas.length} lentes)`;
+  };
+}
+
 function linhasDasLentes(lentes: RadarPortableSerpLenses | null): string[] {
   if (!lentes) return [LENTES_NAO_CONFERIDAS];
   const pacote = lentes.frozenPackage;
@@ -1757,12 +1815,47 @@ function linhasDosComparaveis(p: Projecoes): string[] {
   ];
 }
 
+/*
+ * 2026-10-02 · O QUE OS CONCORRENTES LIDOS COBREM, PELOS H2/H3 DELES
+ * (`competitor-topics.ts`). O CSV listava QUAIS páginas foram lidas, não O QUE
+ * elas tratam: o redator via 6 links e 13 conceitos de 1 página. Agora os temas,
+ * com quantas páginas tratam cada um e os cabeçalhos de exemplo; os de 1 página
+ * só, à parte. A régua do "não cobrir" vale aqui também.
+ */
+const TEMAS_RECORRENTES_NA_LINHA = 10;
+const TEMAS_UNICOS_NA_LINHA = 8;
+
+export function radarWritingCompetitorTopicsOf(input: RadarPortableExportInput, p: Projecoes) {
+  const paginas = input.competitorOutlines || [];
+  if (!paginas.length) return null;
+  const foraDoEscopo = radarWritingOutOfScope(p);
+  return radarCompetitorTopics({
+    pages: paginas,
+    core: [p.dna.principalKeyword, ...p.dna.secondaryKeywords, ...p.dna.narrativeReinforcements, p.assunto?.phrase || ""].filter((valor): valor is string => Boolean(valor)),
+    outOfScope: valor => foraDoEscopo(valor),
+  });
+}
+
+function linhasDosTemas(input: RadarPortableExportInput, p: Projecoes): string[] {
+  const leitura = radarWritingCompetitorTopicsOf(input, p);
+  if (!leitura?.topics.length) return [];
+  const recorrentes = leitura.topics.filter(item => item.pages >= 2).slice(0, TEMAS_RECORRENTES_NA_LINHA);
+  const unicos = leitura.topics.filter(item => item.pages < 2).slice(0, TEMAS_UNICOS_NA_LINHA);
+  return [
+    `O que os concorrentes lidos cobrem (H2/H3 das ${leitura.sampleSize} páginas comparáveis; ${leitura.headingsRead} cabeçalhos lidos; a recorrência mostra o que a amostra trata, não o que funciona):`,
+    ...(recorrentes.length
+      ? recorrentes.map(item => `- ${item.label} · ${item.pages} de ${item.sampleSize} páginas · ex.: ${item.headings.map(entreAspas).join("; ")}`)
+      : ["- Nenhum tema aparece em mais de uma página: a amostra trata o assunto de jeitos diferentes."]),
+    ...(unicos.length ? [`Tratado por 1 página só (diferencial possível, se servir ao leitor): ${unicos.map(item => entreAspas(item.label)).join("; ")}.`] : []),
+  ];
+}
+
 function colunaSerp(input: RadarPortableExportInput, p: Projecoes): string {
   const serp = p.serpObservada;
   if (!serp) return "";
   const cabecalho = "Referência de pesquisa, não conteúdo a copiar: não reproduza frases nem títulos de terceiros.";
   if (!serp.available) {
-    return [cabecalho, `SERP: ${comPontoFinal(serp.unavailableReason || "a coleta referenciada pelo dossiê não está disponível")}`, ...linhasDosComparaveis(p), ...linhasDasLentes(p.lentes)].join("\n");
+    return [cabecalho, `SERP: ${comPontoFinal(serp.unavailableReason || "a coleta referenciada pelo dossiê não está disponível")}`, ...linhasDosComparaveis(p), ...linhasDosTemas(input, p), ...linhasDasLentes(p.lentes)].join("\n");
   }
   const principal = radarWritingCompareKey(input.article.principalKeyword);
   const consulta = texto(serp.query);
@@ -1799,6 +1892,7 @@ function colunaSerp(input: RadarPortableExportInput, p: Projecoes): string {
     ...(consulta && principal && radarWritingCompareKey(consulta) !== principal ? [`Atenção: a consulta difere da keyword principal ("${input.article.principalKeyword}").`] : []),
     ...(organicos.length ? ["Topo orgânico, na ordem entre os orgânicos (a posição na página conta também os recursos da SERP):", ...organicos] : []),
     ...linhasDosComparaveis(p),
+    ...linhasDosTemas(input, p),
     ...(formatos.length ? [`Formatos dominantes: ${formatos.join(" · ")}`] : []),
     ...(aiOverview
       ? [aiOverview.shown
@@ -2025,7 +2119,7 @@ function colunaVisual(input: RadarPortableExportInput, p: Projecoes): { celula: 
     aEscrever.push(`Respiro ${respiro} (seção, ALT, legenda, prompt)`);
   }
   if (aEscrever.length) linhas.push(`A escrever a partir do conteúdo real da seção (o pacote não trazia texto utilizável): ${aEscrever.join("; ")}.`);
-  if (faltantes) linhas.push("Prompts das imagens: com artigo-modelo aprovado no Radar (feito a partir da SERP), eles saem dele; sem ele, escreva-os a partir do conteúdo real de cada trecho.");
+  if (faltantes) linhas.push("Prompts das imagens: com artigo-modelo da SERP organizado no Radar, eles saem dele; sem ele, escreva-os a partir do conteúdo real de cada trecho.");
   const evitar = unicosPorChave(plano.flatMap(imagem => imagem.negativeGuidance), radarWritingCompareKey).map(semPontoFinal);
   if (evitar.length) linhas.push(`${EVITAR}${evitar.join("; ")}.`);
   return { celula: linhas.join("\n"), imagens };
@@ -2083,8 +2177,9 @@ function colunaPrompt(contexto: RadarWritingArticleContext, especificas: readonl
   }
   const topo = contexto.topRowLabel;
   return [
-    `Escreva em português do Brasil ${formas.o} ${unidade.noun} descrit${formas.terminacao} nesta linha, com as regras gerais da linha "${topo}" deste arquivo (leve as duas linhas juntas para a IA). Em resumo: a estrutura é sugestão, e a estrutura final e a extensão são decisão de quem redige; keyword principal no H1, no primeiro parágrafo e com naturalidade no corpo; cada seção abre respondendo a pergunta dela; sem seção de perguntas frequentes; a SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos; não invente fatos, fontes, depoimentos nem URLs; só os links L1, L2… indicados. Entregue H1, SEO title, meta description e o texto em Markdown${unidade.editorial ? ", com a data de atualização visível" : ""}.`,
+    `Escreva em português do Brasil ${formas.o} ${unidade.noun} descrit${formas.terminacao} nesta linha, com as regras gerais da linha "${topo}" deste arquivo (${contexto.brandVoice ? `leve as três linhas juntas para a IA: "${topo}", "Voz da marca" e esta` : "leve as duas linhas juntas para a IA"}). Em resumo: a estrutura é sugestão, e a estrutura final e a extensão são decisão de quem redige; keyword principal no H1, no primeiro parágrafo e com naturalidade no corpo; cada seção abre respondendo a pergunta dela; sem seção de perguntas frequentes; a SERP e os trechos de concorrentes são pesquisa: não copie frases nem títulos; não invente fatos, fontes, depoimentos nem URLs; só os links L1, L2… indicados. Entregue H1, SEO title, meta description e o texto em Markdown${unidade.editorial ? ", com a data de atualização visível" : ""}.`,
     ...(especificas.length ? [`${formas.neste} ${unidade.noun}:`, ...especificas.map(item => `- ${comPontoFinal(item)}`)] : []),
+    /* 2026-10-02 · D10 (decisão do dono): o prompt sai fechado — sem "proposta" nem "aguardando aprovação". */
   ].join("\n");
 }
 
@@ -2139,7 +2234,7 @@ function cortarCelula(celula: string, limite: number, motivo: string): string {
 function dentroDosLimites(linha: RadarWritingExportRow): RadarWritingExportRow {
   const saida = { ...linha };
   for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) {
-    const limite = coluna === "estrutura" ? RADAR_WRITING_EXPORT_LIMITS.structureChars : RADAR_WRITING_EXPORT_LIMITS.cellChars;
+    const limite = radarWritingCellLimit(coluna);
     saida[coluna] = cortarCelula(saida[coluna], limite, `Célula cortada no limite de ${numeroBr(limite)} caracteres.`);
   }
   const total = () => RADAR_WRITING_EXPORT_COLUMNS.reduce((soma, coluna) => soma + saida[coluna].length, 0);
@@ -2329,7 +2424,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     prompt: colunaPrompt(contexto, especificas, decisao.verdict === "Não" ? decisao.primeira : null, unidade),
   };
   /* O artigo-modelo APROVADO decide as colunas de planta; o resto continua como era. */
-  if (contexto.blueprint && !soIdentidade) Object.assign(linha, radarArticleBlueprintColumns(contexto.blueprint, videosAoVivo, { slug: texto(publicacao?.slug) || texto(input.article.slug), publishedUrl: texto(publicacao?.publishedUrl) }));
+  if (contexto.blueprint && !soIdentidade) Object.assign(linha, radarArticleBlueprintColumns(contexto.blueprint, videosAoVivo, { slug: texto(publicacao?.slug) || texto(input.article.slug), publishedUrl: texto(publicacao?.publishedUrl) }, radarWritingDomainLenses(p.lentes)));
   if (contexto.brandVoice && !soIdentidade) {
     linha.promessa_e_leitor = [
       linha.promessa_e_leitor,

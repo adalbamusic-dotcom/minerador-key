@@ -241,7 +241,7 @@ function radarPortableVideoSelected(
 export function radarPortableVideoUsageLine(item: RadarPortableVideoSelected, planSections: readonly string[] | null = null): string {
   const citavel = item.usage === "EMBED" || item.usage === "QUOTE" || item.usage === "SUPPORT";
   const noPlano = citavel && planSections ? planSections.filter(Boolean) : [];
-  const secoesDoPlano = ` · seção do artigo-modelo aprovado ${noPlano.map(secao => `"${secao}"`).join(", ")}`;
+  const secoesDoPlano = ` · seção do artigo-modelo ${noPlano.map(secao => `"${secao}"`).join(", ")}`;
   /*
    * 2026-10-02 · CADA VÍDEO DIZ O CANAL. O vídeo selecionado pode ser de outro
    * canal, e Citação e Apoio são atribuídos a ele; sem canal registrado na
@@ -253,8 +253,8 @@ export function radarPortableVideoUsageLine(item: RadarPortableVideoSelected, pl
     if (noPlano.length) partes.push(secoesDoPlano);
     else if (planSections) {
       partes.push(item.section
-        ? ` · seção sugerida "${item.section}" (o artigo-modelo aprovado não pôs o vídeo em seção nenhuma)`
-        : " · seção: a que o vídeo responde (o artigo-modelo aprovado não indicou)");
+        ? ` · seção sugerida "${item.section}" (o artigo-modelo não pôs o vídeo em seção nenhuma)`
+        : " · seção: a que o vídeo responde (o artigo-modelo não indicou)");
     } else partes.push(item.section ? ` · seção sugerida "${item.section}"` : " · seção: a que o vídeo responde (definir no artigo-modelo)");
   }
   if (item.usage === "SUPPORT" || item.usage === "QUOTE") {

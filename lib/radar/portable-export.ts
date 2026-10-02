@@ -1,4 +1,5 @@
 import type { RadarCompetitiveBlueprint } from "./competitive-blueprint.ts";
+import type { RadarCompetitorOutlinePage } from "./competitor-topics.ts";
 import type { RadarCompetitiveBlueprintView } from "./competitive-blueprint-view.ts";
 import type { RadarCompetitiveObservedModel } from "./competitive-observed-model.ts";
 import type { RadarEditorialArticleModel } from "./editorial-article-model.ts";
@@ -684,6 +685,12 @@ export type RadarPortableExportInput = {
   profileModel?: RadarEditorialProfileModel | null;
   /** A fotografia do pipeline do Google, quando o perfil é GOOGLE. */
   googleObserved?: RadarCompetitiveObservedModel | null;
+  /**
+   * 2026-10-02 · Aditivo: os H2/H3 das páginas comparáveis lidas (das extrações
+   * gravadas), para a leitura dos temas dos concorrentes (`competitor-topics.ts`).
+   * Fora do congelamento e do hash. Ausente = a linha de antes.
+   */
+  competitorOutlines?: RadarCompetitorOutlinePage[] | null;
   /** §3 · o contexto resolvido, de onde sai o DNA das keywords. */
   researchContext?: RadarArticleResearchContext | null;
   /** §8 · o universo da corrida de YouTube, quando existe. */

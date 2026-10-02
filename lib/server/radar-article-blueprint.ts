@@ -9,6 +9,7 @@ import {
   radarArticleBlueprintAiFailure,
   radarArticleBlueprintAiFailureMessage,
   radarArticleBlueprintPayloadToStore,
+  radarArticleBlueprintPendingNotes,
   radarArticleBlueprintPrompt,
   radarArticleBlueprintRetryNote,
   radarSanitizeArticleBlueprint,
@@ -104,9 +105,18 @@ async function gravarVersao(client: SupabaseClient, input: {
 }): Promise<RadarArticleBlueprintRow> {
   const atuais = await listRadarArticleBlueprints(client, input.brandId, input.articleId);
   const versao = (atuais[0]?.versionNumber || 0) + 1;
+  /*
+   * 2026-10-02 · D10 (decisão do dono): O ARTIGO-MODELO SAI CONCLUÍDO. "Em tudo o
+   * que tem a ver com o entregável — CSV, Redator e MCP — não pode ir algo
+   * inconcluso nem com aviso de aprovação." Organizar (com a passada de
+   * correção) e editar gravam a versão já concluída, com quem a gerou ou
+   * editou e o momento; a edição do dono vira a versão vigente sem outro passo.
+   * A versão concluída continua imutável no banco: mudar é gravar outra.
+   */
+  const agora = new Date().toISOString();
   const insercao = await client.from("radar_article_blueprints").insert({
     brand_id: input.brandId, article_id: input.articleId, bundle_hash: input.bundleHash,
-    version_number: versao, state: "DRAFT", origin: input.origin,
+    version_number: versao, state: "APPROVED", approved_by: input.actorUserId, approved_at: agora, origin: input.origin,
     /* 2026-10-02 · a marca de aprovação é do export, nunca do banco. */
     payload: radarArticleBlueprintPayloadToStore(input.payload), validation: input.validation, created_by: input.actorUserId,
   }).select(COLUNAS).single();
@@ -201,8 +211,54 @@ export async function generateRadarArticleBlueprint(input: { client: SupabaseCli
   const brief = buildRadarArticleBlueprintBrief({ entrada: montada.entrada, silo, articleId: input.articleId, publication: publicacao, brandVoice: brandVoice.kind === "available" ? brandVoice.voice : null });
   const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, brandId: input.brandId, client: input.client, quotaUnits: 1 });
   const resposta = await requestRadarArticleBlueprintAi({ provider, brief, articleId: input.articleId });
-  const { payload, notes } = radarSanitizeArticleBlueprint(resposta.ai, brief);
-  return gravarVersao(input.client, { brandId: input.brandId, articleId: input.articleId, bundleHash: montada.bundleHash!, origin: "ai", payload, validation: [...resposta.notes, ...notes], actorUserId: input.actorUserId });
+  const fechada = await fecharArtigoModelo({ provider, brief, ai: resposta.ai, articleId: input.articleId, allowFix: resposta.calls === 1 });
+  return gravarVersao(input.client, { brandId: input.brandId, articleId: input.articleId, bundleHash: montada.bundleHash!, origin: "ai", payload: fechada.payload, validation: [...resposta.notes, ...fechada.notes], actorUserId: input.actorUserId });
+}
+
+/**
+ * 2026-10-02 · D10 · FECHAR A PLANTA ANTES DE GRAVAR.
+ *
+ * A conferência acha o que pede ação (origem de outro assunto, afirmação
+ * absoluta, seções repetidas, abertura de outro assunto). Com pendência, UMA
+ * chamada a mais devolve a planta inteira corrigida; fica a que tem menos
+ * pendência. Depois, a conferência FECHA o que dá para fechar sem IA (a origem
+ * errada sai). O que ainda restar fica registrado na versão (o painel mostra),
+ * nunca no entregável. A correção falhando não derruba nada: grava-se a primeira.
+ */
+export async function fecharArtigoModelo(input: {
+  provider: ProvedorDaIa;
+  brief: RadarArticleBlueprintBrief;
+  ai: RadarArticleBlueprintAi;
+  articleId?: string;
+  fetchImpl?: typeof fetch;
+  /** A rota tem 300 s: depois de uma nova tentativa, não há tempo para a correção (a conferência ainda fecha o que dá). */
+  allowFix?: boolean;
+}): Promise<{ payload: RadarArticleBlueprintPayload; notes: string[]; calls: 0 | 1 }> {
+  const primeira = radarSanitizeArticleBlueprint(input.ai, input.brief);
+  const pendentes = radarArticleBlueprintPendingNotes(primeira.notes).pending;
+  let escolhida = input.ai;
+  let chamadas: 0 | 1 = 0;
+  if (pendentes.length && input.allowFix !== false) {
+    chamadas = 1;
+    try {
+      const { system, user } = radarArticleBlueprintPrompt(input.brief, { fix: { previous: input.ai, pending: pendentes } });
+      const corrigida = await generateStructuredAI({
+        provider: input.provider, system, user, schema: RadarArticleBlueprintAiSchema,
+        maxTokens: RADAR_ARTICLE_BLUEPRINT_LIMITS.maxTokens, thinkingMode: "disabled",
+        timeoutMs: RADAR_ARTICLE_BLUEPRINT_TIMEOUTS_MS.retry, fetchImpl: input.fetchImpl,
+      });
+      const conferida = radarSanitizeArticleBlueprint(corrigida, input.brief);
+      if (radarArticleBlueprintPendingNotes(conferida.notes).pending.length <= pendentes.length) escolhida = corrigida;
+    } catch (error) {
+      console.warn("[radar-article-blueprint] correcao_falhou", { articleId: input.articleId ?? null, message: error instanceof Error ? error.message.slice(0, 200) : String(error) });
+    }
+  }
+  const fechada = radarSanitizeArticleBlueprint(escolhida, input.brief, { close: true });
+  return {
+    payload: fechada.payload,
+    notes: [...(chamadas ? [`Passada de correção: ${pendentes.length} pendência(s) enviada(s) de volta à IA (1 chamada a mais).`] : []), ...fechada.notes],
+    calls: chamadas,
+  };
 }
 
 export async function editRadarArticleBlueprint(input: { client: SupabaseClient; brandId: string; articleId: string; blueprintId: string; edit: RadarArticleBlueprintEdit; actorUserId: string }): Promise<RadarArticleBlueprintRow> {

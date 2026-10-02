@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK,
   RADAR_ARTICLE_BLUEPRINT_LIMITS,
   RadarArticleBlueprintAiSchema,
   buildRadarArticleBlueprintBrief,
@@ -385,33 +384,32 @@ test("a falha da IA vira frase clara; só corte, formato e resposta vazia pedem 
 
 const payloadDoCaso = () => radarSanitizeArticleBlueprint(RadarArticleBlueprintAiSchema.parse(respostaCrua()), pacoteDoCaso()).payload;
 
-test("CSV: a proposta da IA sai marcada em cada coluna; aprovada, sai como antes", () => {
+/*
+ * 2026-10-02 · D10 (decisão do dono): o entregável sai CONCLUÍDO. Este teste
+ * provava a marca "PROPOSTA DA IA" na proposta; agora prova que nenhuma versão
+ * — rascunho antigo ou concluída — leva marca de proposta ou de aprovação.
+ */
+test("CSV: o artigo-modelo sai concluído — sem marca de proposta nem de aprovação, em qualquer estado", () => {
   const payload = payloadDoCaso();
-  const proposta = radarArticleBlueprintColumns({ ...payload, approval: "DRAFT" });
-  assert.ok(proposta.estrutura.startsWith(`${RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK}. A SERP montou o esqueleto e a IA organizou`));
-  assert.equal(RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK, "PROPOSTA DA IA — aguardando aprovação no Radar (Pesquisa → Artigo-modelo da SERP)");
-  for (const coluna of ["promessa_e_leitor", "titulo_e_seo", "links_internos", "plano_visual"] as const) {
-    assert.ok(proposta[coluna].startsWith("PROPOSTA DA IA — aguardando aprovação no Radar.\n"), coluna);
-  }
-  assert.equal(proposta.estrutura.includes("ARTIGO-MODELO APROVADO"), false);
+  const rascunho = radarArticleBlueprintColumns({ ...payload, approval: "DRAFT" });
+  const concluido = radarArticleBlueprintColumns({ ...payload, approval: "APPROVED" });
+  assert.deepEqual(rascunho, concluido, "o estado não muda o entregável");
+  assert.deepEqual(radarArticleBlueprintColumns(payload), concluido);
+  assert.ok(concluido.estrutura.startsWith("ARTIGO-MODELO DA SERP (planta concluída do artigo; a redação é de quem escreve)."));
+  assert.equal(/PROPOSTA DA IA|aguardando aprovação|APROVADO|antes de aprovar|confira\)/.test(JSON.stringify(concluido)), false);
 
-  const aprovado = radarArticleBlueprintColumns({ ...payload, approval: "APPROVED" });
-  assert.ok(aprovado.estrutura.startsWith("ARTIGO-MODELO APROVADO (planta do artigo ideal; a redação é de quem escreve)."));
-  assert.equal(JSON.stringify(aprovado).includes("PROPOSTA DA IA"), false, "aprovado, a marca some");
-  assert.deepEqual(radarArticleBlueprintColumns(payload), aprovado, "sem estado informado, o texto é o do aprovado — como antes");
-
-  /* A origem na SERP e o descarte, só em versões que os têm. */
-  assert.match(aprovado.estrutura, /## Por que o perfil não traz pacientes\n- Pergunta do leitor: [^\n]*\n- Vem do esqueleto da SERP: M1 "Por que o perfil não traz pacientes"; M2 "Bio e destaques"\n/);
-  assert.match(aprovado.estrutura, /## Parcerias com influenciadoras\n- Pergunta do leitor: [^\n]*\n- Vem da SERP: origem não indicada \(a IA acrescentou sem evidência; confira\)\n/);
-  assert.match(aprovado.estrutura, /\nDescartado do esqueleto da SERP: M5 "Anúncios pagos" \(anúncio pago é outro artigo do Silo\); M3 "Ative o Instagram Shopping" \(fora do escopo do pacote\)\.\n/);
-  assert.match(aprovado.estrutura, /E-E-A-T: Autoria: Dra\. Ana Lima/);
+  /* A origem na SERP e o descarte, só em versões que os têm; seção sem origem é dita como proposta editorial. */
+  assert.match(concluido.estrutura, /## Por que o perfil não traz pacientes\n- Pergunta do leitor: [^\n]*\n- Vem do esqueleto da SERP: M1 "Por que o perfil não traz pacientes"; M2 "Bio e destaques"\n/);
+  assert.match(concluido.estrutura, /## Parcerias com influenciadoras\n- Pergunta do leitor: [^\n]*\n- Origem: proposta editorial do artigo \(não vem de uma seção da SERP\)\n/);
+  assert.match(concluido.estrutura, /\nDescartado do esqueleto da SERP: M5 "Anúncios pagos" \(anúncio pago é outro artigo do Silo\); M3 "Ative o Instagram Shopping" \(fora do escopo do pacote\)\.\n/);
+  assert.match(concluido.estrutura, /E-E-A-T: Autoria: Dra\. Ana Lima/);
 
   const antiga = structuredClone(payload) as RadarArticleBlueprintPayload;
   for (const secao of antiga.blueprint.sections) delete secao.from;
   delete antiga.blueprint.discarded;
   delete antiga.skeleton;
   delete antiga.unit;
-  assert.equal(/Vem d|Descartado do esqueleto|Tipo da unidade/.test(radarArticleBlueprintColumns(antiga).estrutura), false, "versão anterior sai como antes");
+  assert.equal(/Vem d|Origem:|Descartado do esqueleto|Tipo da unidade/.test(radarArticleBlueprintColumns(antiga).estrutura), false, "versão anterior sai como antes");
 });
 
 test("CSV: campo que veio vazio não deixa rótulo solto", () => {
@@ -441,7 +439,11 @@ test("CSV: campo que veio vazio não deixa rótulo solto", () => {
   assert.equal(radarArticleBlueprintColumns(cheio).plano_visual, "Plano visual: 1 imagem(ns).\nCapa · agenda cheia\n  Prompt: consultório\n  Proporção: 16:9 (referência; ajuste ao layout do site e à voz da marca)\n  ALT: Consultório com agenda\n  Legenda: A agenda vem do perfil");
 });
 
-test("CSV: a proposta leva as pendências que o servidor achou; a aprovada sai como antes", () => {
+/*
+ * 2026-10-02 · D10: as notas da conferência ficam na versão (o painel do Radar
+ * mostra) e NUNCA no entregável — a planta vai fechada.
+ */
+test("CSV: as notas da conferência não vão ao entregável; ficam na versão e não vão ao banco como marca", () => {
   const brief = pacoteDoCaso({ authors: [] });
   const ai = RadarArticleBlueprintAiSchema.parse(respostaCrua({
     title: { h1: "Como o que considerar sobre stories para atrair clientes", seoTitle: "SEO", metaDescription: "Meta." },
@@ -449,29 +451,33 @@ test("CSV: a proposta leva as pendências que o servidor achou; a aprovada sai c
     discarded: [],
   }));
   const { payload, notes } = radarSanitizeArticleBlueprint(ai, brief);
-  const proposta = radarArticleBlueprintColumns({ ...payload, approval: "DRAFT", validation: notes, origin: "ai" }).estrutura;
-  const linhas = proposta.split("\n");
-  assert.ok(linhas[0].startsWith(RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK));
-  assert.equal(linhas[1], "Pendências da proposta (o servidor conferiu a resposta da IA contra o pacote):");
-  for (const pendencia of [/O H1 não traz a keyword principal inteira/, /A pergunta da abertura .* não fala da keyword principal/, /"Parcerias com influenciadoras" não diz de onde vem na SERP/, /Plano visual com 1 respiro\(s\): a regra pede dois ou três/, /não usou nem descartou 1 seção/]) {
-    assert.ok(linhas.some(linha => linha.startsWith("- ") && pendencia.test(linha)), `pendência ausente: ${pendencia}`);
+  assert.ok(radarArticleBlueprintPendingNotes(notes).pending.length > 0, "a conferência acha o que pede ação");
+  for (const estado of ["DRAFT", "APPROVED"] as const) {
+    for (const origem of ["ai", "human_edit"] as const) {
+      const estrutura = radarArticleBlueprintColumns({ ...payload, approval: estado, validation: notes, origin: origem }).estrutura;
+      assert.doesNotMatch(estrutura, /Pendências da proposta|antes de aprovar|ver no Radar/, `${estado}/${origem}`);
+    }
   }
-  assert.ok(!linhas.some(linha => /^- .*removida/.test(linha)), "correção já aplicada não é pendência");
-  assert.match(proposta, /\nOutras \d+ nota\(s\) da conferência são correções já aplicadas pelo servidor ou registro \(ver no Radar\)\.\n/);
-
-  /* Edição do dono: a pendência pode já estar resolvida, e o CSV diz isso. */
-  assert.match(radarArticleBlueprintColumns({ ...payload, approval: "DRAFT", validation: notes, origin: "human_edit" }).estrutura, /\nPendências da proposta \(achadas na resposta da IA; a edição do dono pode já ter resolvido alguma — confira\):\n/);
-  /* Aprovada, ou proposta sem as notas lidas: como antes. */
-  assert.doesNotMatch(radarArticleBlueprintColumns({ ...payload, approval: "APPROVED", validation: notes }).estrutura, /Pendências da proposta/);
-  assert.equal(radarArticleBlueprintColumns({ ...payload, approval: "DRAFT" }).estrutura, radarArticleBlueprintColumns({ ...payload, approval: "DRAFT", validation: [] }).estrutura);
-  assert.doesNotMatch(radarArticleBlueprintColumns({ ...payload, approval: "DRAFT" }).estrutura, /Pendências da proposta/);
   /* Nada disso vai ao banco. */
   const guardado = radarArticleBlueprintPayloadToStore({ ...payload, approval: "DRAFT", validation: notes, origin: "ai" });
   assert.equal("validation" in guardado || "origin" in guardado || "approval" in guardado, false);
   assert.deepEqual(radarArticleBlueprintPendingNotes(["Seção \"X\" removida: FAQ não integra o fluxo.", "Falta o link para o Pilar (Y)."]), { pending: ["Falta o link para o Pilar (Y)."], corrected: 1 });
+
+  /* Fechar: a origem que não trata do assunto da seção SAI (a planta vai concluída). */
+  const fechada = radarSanitizeArticleBlueprint(RadarArticleBlueprintAiSchema.parse(respostaCrua({
+    sections: [
+      secaoCrua("Por que o perfil não traz pacientes", { from: ["M1"] }),
+      secaoCrua("Anúncios que trazem agenda", { from: ["M4"] }),
+      secaoCrua("Frequência de postagem", { from: ["C1"] }),
+    ],
+  })), pacoteDoCaso(), { close: true });
+  const anuncio = fechada.payload.blueprint.sections.find(item => item.h2 === "Anúncios que trazem agenda")!;
+  assert.deepEqual(anuncio.from, [], "M4 (stories) não trata de anúncios: sai");
+  assert.ok(fechada.notes.some(nota => /origem M4 \("Stories que convertem"\) removida/.test(nota)));
 });
 
-test("CSV para escrever: a proposta vai na linha do artigo, marcada; o bloco de vídeos não a chama de aprovada", () => {
+/* 2026-10-02 · D10: na linha do artigo, a planta do pacote vigente vai concluída, em qualquer estado; a coluna de vídeos usa a dela. */
+test("CSV para escrever: a planta vai na linha do artigo, concluída; a coluna de vídeos usa a dela em qualquer estado", () => {
   const plano = planoDoSilo();
   const brief = buildRadarArticleBlueprintBrief({ entrada: entradaGoogle(), silo: plano.files[0].writing!, articleId: ARTIGO, publication: null });
   const ai = RadarArticleBlueprintAiSchema.parse(respostaCrua({
@@ -485,14 +491,13 @@ test("CSV para escrever: a proposta vai na linha do artigo, marcada; o bloco de 
     articles: montadasDoSilo().map(item => item.articleId === ARTIGO ? { ...item, blueprint: { ...payload, approval } } : item),
     lenses: LEITURA_DAS_LENTES, plan: plano, today: EXPORTADO_EM,
   }).files![0].csv;
-  const proposta = com("DRAFT");
-  assert.ok(proposta.includes(RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK));
-  assert.equal(proposta.includes("ARTIGO-MODELO APROVADO"), false);
-  const aprovado = com("APPROVED");
-  assert.ok(aprovado.includes("ARTIGO-MODELO APROVADO"));
-  assert.equal(aprovado.includes("PROPOSTA DA IA"), false);
+  const rascunho = com("DRAFT");
+  const concluido = com("APPROVED");
+  assert.equal(rascunho, concluido);
+  assert.ok(concluido.includes("ARTIGO-MODELO DA SERP (planta concluída do artigo"));
+  assert.equal(/PROPOSTA DA IA|aguardando aprovação|ARTIGO-MODELO APROVADO/.test(concluido), false);
 
-  assert.equal(radarArticleBlueprintVideoSections({ ...payload, videos: [], approval: "DRAFT" }, { title: "x", url: null }), null, "a proposta não é o artigo-modelo aprovado");
+  assert.deepEqual(radarArticleBlueprintVideoSections({ ...payload, videos: [], approval: "DRAFT" }, { title: "x", url: null }), []);
   assert.deepEqual(radarArticleBlueprintVideoSections({ ...payload, videos: [], approval: "APPROVED" }, { title: "x", url: null }), []);
 });
 

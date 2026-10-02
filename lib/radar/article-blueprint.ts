@@ -20,6 +20,8 @@ import { radarOutOfScopeMatcher } from "./out-of-scope.ts";
 import {
   radarWritingCleanUrl,
   radarWritingCompareKey,
+  radarWritingCompetitorTopicsOf,
+  RADAR_WRITING_FUNCTION_WORDS,
   radarWritingDecodeEntities,
   radarWritingProjections,
   radarWritingRhetoricalQuestion,
@@ -481,6 +483,42 @@ function esqueletoDaSerp(secoes: readonly RadarPortableSection[], tocaFora: (val
   return saida;
 }
 
+/*
+ * 2026-10-02 · OS TEMAS QUE OS CONCORRENTES LIDOS COBREM ENTRAM NO ESQUELETO.
+ *
+ * O modelo editorial da SERP chegava com UMA seção ("stories") no artigo do
+ * Instagram, e a IA pendurava todas as seções nela. Os temas tratados por 2+
+ * páginas comparáveis (pelos H2/H3 delas, `competitor-topics.ts`) viram seções
+ * M a mais, com a contagem e os cabeçalhos de exemplo no "cobrir". O que o
+ * modelo editorial já tem não se repete.
+ */
+function esqueletoComTemas(
+  base: RadarArticleBlueprintSkeletonItem[],
+  temas: ReadonlyArray<{ label: string; pages: number; sampleSize: number; headings: string[] }>,
+): RadarArticleBlueprintSkeletonItem[] {
+  const saida = [...base];
+  const vistos = new Set(base.map(item => radarWritingCompareKey(item.heading)));
+  for (const tema of temas.filter(item => item.pages >= 2)) {
+    if (saida.length >= L.skeleton) break;
+    const chave = radarWritingCompareKey(tema.label);
+    if (!chave || vistos.has(chave)) continue;
+    vistos.add(chave);
+    saida.push({
+      id: `M${saida.length + 1}`,
+      level: 2,
+      parent: null,
+      heading: corte(tema.label, L.shortChars),
+      readerQuestion: null,
+      cover: [`tema tratado por ${tema.pages} de ${tema.sampleSize} páginas comparáveis (cabeçalhos dos concorrentes: não copie)`, ...tema.headings.slice(1, 3).map(item => corte(item, 120))],
+      mustCover: false,
+      needsSource: false,
+      needsSpecialist: false,
+      outOfScope: false,
+    });
+  }
+  return saida;
+}
+
 /* ============================== a voz compacta ============================== */
 
 const semAcento = (valor: string) => valor.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -697,7 +735,7 @@ export function buildRadarArticleBlueprintBrief(input: {
     silo: input.silo && input.silo.kind === "silo"
       ? { label: input.silo.label, centralEntity: input.silo.centralEntity, excludedTopics: input.silo.excludedTopics }
       : null,
-    skeleton: esqueletoDaSerp(p.editorial.sections, tocaFora),
+    skeleton: esqueletoComTemas(esqueletoDaSerp(p.editorial.sections, tocaFora), radarWritingCompetitorTopicsOf(input.entrada, p)?.topics || []),
     skeletonFrame: {
       workingTitle: limpo(p.editorial.title) || null,
       promise: limpo(p.editorial.readerPromise) ? corte(limpo(p.editorial.readerPromise), L.textChars) : null,
@@ -740,7 +778,7 @@ const nomesDosAutores = (autores: readonly RadarArticleBlueprintAuthor[]) =>
  * O PEDIDO À IA. `short` é a SEGUNDA tentativa, depois de uma resposta cortada
  * ou fora do formato (2026-10-02): mesmas regras, saída menor.
  */
-export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, opcoes: { short?: boolean } = {}): { system: string; user: string } {
+export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, opcoes: { short?: boolean; fix?: { previous: unknown; pending: readonly string[] } } = {}): { system: string; user: string } {
   const m = brief.measures;
   const a = brief.article;
   const system = [
@@ -767,6 +805,8 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
     "15. AUTORIA (E-E-A-T): quando o pacote disser quem assina, o eeat cita essa pessoa pelo nome cadastrado, sem credencial além do cadastro; sem quem assine, diga em eeat que falta definir.",
     `16. TAMANHO: no máximo ${L.sections} seções, ${L.h3} H3 por seção e ${L.explain} itens em explain; uma frase por campo de texto. A resposta inteira cabe em ~4 mil tokens.`,
     "17. AFIRMAÇÕES: answerFirst e explain não transformam a dificuldade do leitor em regra universal ('foi desenhado para', 'nunca', 'sempre', 'raramente', 'pacientes prontos para comprar') sem evidência citada; escreva de forma delimitada e, se for afirmação sobre plataforma, algoritmo ou comportamento do público, ponha um link externo com fonte a obter. Não prescreva gratuidade, urgência, oferta exclusiva, condição especial, depoimento nem antes/depois como receita: só se a voz da marca e o pacote sustentarem.",
+    "19. UMA ENTREGA POR SEÇÃO: cada seção entrega algo diferente ao leitor (diagnóstico, ajuste, conteúdo, próximo passo, alternativa…); duas seções não tratam do mesmo assunto com nomes diferentes ('como usar de forma estratégica' e 'estratégias práticas' são a mesma). O conteúdo prático chega cedo, logo depois do diagnóstico.",
+    "20. DEMONSTRAÇÃO E PREMISSA: em seção que ensina a fazer, practical descreve a demonstração (ex.: um exemplo ilustrativo antes → o ajuste → depois), nunca uma cena decorativa. A promessa e o ângulo dizem o que o leitor aprende, sem regra universal: eles viram a premissa do vídeo, dos cortes e do carrossel.",
     "18. ORIGEM: cada id em from trata do assunto da seção. Não use a mesma seção M em seções de assuntos diferentes; seção comercial da marca (oferta, transição) vem da voz da marca e da evidência que a sustenta, sem fingir que veio de uma seção M.",
     ...(opcoes.short
       ? ["SAÍDA CURTA (a resposta anterior veio cortada ou fora do formato): no máximo 5 seções, 2 H3 por seção, 2 itens em explain, sem alternatives, uma frase curta por campo e prompts de imagem de até 250 caracteres. Feche o JSON."]
@@ -829,6 +869,21 @@ export function radarArticleBlueprintPrompt(brief: RadarArticleBlueprintBrief, o
       visual: [{ slot: "CAPA", section: null, concept: "", prompt: "", alt: "", caption: "" }],
       eeat: [""], warnings: [""],
     }),
+    /*
+     * 2026-10-02 · D10 · A PASSADA DE CORREÇÃO. O entregável sai concluído: com
+     * pendência na conferência, a IA recebe a planta anterior e a lista, e
+     * devolve a planta INTEIRA corrigida (nada de "a revisar").
+     */
+    ...(opcoes.fix
+      ? [
+        "",
+        "# CORREÇÃO OBRIGATÓRIA",
+        "A planta abaixo foi conferida contra o pacote e tem estas pendências. Devolva a planta INTEIRA, no mesmo formato, já corrigida: troque a origem que não trata do assunto da seção, delimite ou sustente as afirmações absolutas, junte ou diferencie seções repetidas, faça a abertura responder à keyword principal. Não deixe nada para revisar depois.",
+        ...opcoes.fix.pending.map(item => `- ${item}`),
+        "Planta anterior:",
+        JSON.stringify(opcoes.fix.previous),
+      ]
+      : []),
   ].join("\n");
   return { system, user };
 }
@@ -998,7 +1053,35 @@ const nucleoDoPacote = (brief: RadarArticleBlueprintBrief) =>
  * esqueleto que a IA não usou nem descartou é dita; o que toca o fora do escopo
  * sai também do H3 e da origem.
  */
-export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief: RadarArticleBlueprintBrief): { payload: RadarArticleBlueprintPayload; notes: string[] } {
+/**
+ * 2026-10-02 · A AFIRMAÇÃO ABSOLUTA: transforma a dificuldade do leitor em regra
+ * universal ("foi feito para entretenimento", "procuram no Google, não no
+ * Instagram"). A conferência a aponta (e a passada de correção a resolve); o
+ * CSV de vídeo não a repete como premissa.
+ */
+/*
+ * 2026-10-02 · TÍTULOS GENÉRICOS DO MESMO TIPO. "Como usar o Instagram de forma
+ * estratégica" e "Estratégias práticas para atrair clientes pelo Instagram" não
+ * dividem palavras de assunto — só a palavra genérica ("estratégia"). Quando o
+ * que sobra de cada título, tirando a keyword e as palavras genéricas, é quase
+ * nada e as duas usam o mesmo genérico, os nomes não distinguem as entregas.
+ */
+const RAIZES_GENERICAS = ["estrateg", "pratic", "dica", "forma", "maneira", "tatic", "acao", "acoes", "passo", "usar", "uso", "aplic", "melhor", "funcion", "cert"];
+const generica = (raiz: string) => RAIZES_GENERICAS.some(item => raiz.startsWith(item));
+
+export function titulosGenericosIguais(a: string, b: string, comuns: ReadonlySet<string> = new Set()): boolean {
+  const raizes = (titulo: string) => radarSemanticStems(titulo).filter(raiz => !comuns.has(raiz) && !RADAR_WRITING_FUNCTION_WORDS.has(raiz));
+  const ra = raizes(a);
+  const rb = raizes(b);
+  const especificas = (lista: string[]) => lista.filter(raiz => !generica(raiz));
+  const generico = (lista: string[]) => RAIZES_GENERICAS.filter(item => lista.some(raiz => raiz.startsWith(item)));
+  const emComum = generico(ra).filter(item => generico(rb).includes(item));
+  return emComum.length > 0 && especificas(ra).length <= 1 && especificas(rb).length <= 1;
+}
+
+export const RADAR_ABSOLUTE_CLAIM =/\b(nunca|sempre|jamais|ningu[eé]m|todo mundo|(n[aã]o )?foi (feito|feita|desenhad[oa]|criad[oa]) para|procura[mr]? no [a-z]+, n[aã]o no|n[aã]o serve para|s[oó] serve para)\b/i;
+
+export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief: RadarArticleBlueprintBrief, opcoes: { close?: boolean } = {}): { payload: RadarArticleBlueprintPayload; notes: string[] } {
   const notes: string[] = [];
   const evidencias = new Set(brief.evidence.map(item => item.id));
   const esqueleto = brief.skeleton || [];
@@ -1062,15 +1145,21 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
      * considerar sobre". Sem nenhuma em comum, a origem fica, com aviso.
      */
     const raizesDaSecao = new Set(radarSemanticStems([secao.h2, secao.readerQuestion, ...secao.h3].join(" ")));
+    const origemErrada = new Set<string>();
     for (const id of from) {
       const m = doEsqueleto.get(id);
       /* H3 do esqueleto citado junto do seu H2: quem decide o assunto é o H2. */
       if (!m || (m.parent && from.includes(m.parent))) continue;
       const distintas = radarSemanticStems(m.heading).filter(raiz => !raizesComuns.has(raiz));
       if (distintas.length && !distintas.some(raiz => raizesDaSecao.has(raiz))) {
-        notes.push(`Seção "${secao.h2}" cita ${id} ("${m.heading}") como origem, mas não trata do assunto dela: confira a origem antes de aprovar.`);
+        origemErrada.add(id);
+        /* 2026-10-02 · D10 · fechando, a origem errada SAI (a planta vai concluída); antes, pendência para a correção. */
+        notes.push(opcoes.close
+          ? `Seção "${secao.h2}": origem ${id} ("${m.heading}") removida — não trata do assunto da seção.`
+          : `Seção "${secao.h2}" cita ${id} ("${m.heading}") como origem, mas não trata do assunto dela: confira a origem antes de aprovar.`);
       }
     }
+    const fromFinal = opcoes.close ? from.filter(id => !origemErrada.has(id)) : from;
     if (radarWritingRhetoricalQuestion(secao.readerQuestion)) notes.push(`Seção "${secao.h2}": a pergunta do leitor é retórica de concorrente; troque pela dúvida real.`);
     const links = secao.internalLinks.filter(link => candidatos.has(link.candidate));
     if (links.length < secao.internalLinks.length) notes.push(`Seção "${secao.h2}": link interno para destino fora do Silo removido.`);
@@ -1085,7 +1174,7 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
     if (naoCitavel) notes.push(`Seção "${secao.h2}": o vídeo ${secao.video} é de ${RADAR_VIDEO_USAGE_LABEL[naoCitavel]} (não citável); saiu do campo vídeo da seção.`);
     return [{
       ...secao,
-      from,
+      from: fromFinal,
       h3,
       evidence: evidencia,
       internalLinks: links,
@@ -1096,6 +1185,35 @@ export function radarSanitizeArticleBlueprint(ai: RadarArticleBlueprintAi, brief
       bold: secao.bold.filter(item => item.split(/\s+/).length <= 6),
     }];
   });
+  /*
+   * 2026-10-02 · AFIRMAÇÃO ABSOLUTA E SEÇÕES QUASE IGUAIS — a revisão do CSV
+   * real achou as duas na proposta mesmo com a regra no pedido ("foi feito para
+   * entretenimento", "procuram no Google, não no Instagram"; "Como usar o
+   * Instagram de forma estratégica" × "Estratégias práticas…"). O servidor não
+   * reescreve: aponta, e a pendência vai com a proposta até o dono decidir.
+   */
+  for (const secao of secoes) {
+    const frase = [secao.answerFirst, ...secao.explain].find(texto => RADAR_ABSOLUTE_CLAIM.test(texto));
+    if (frase) notes.push(`Seção "${secao.h2}" afirma de forma absoluta ("${corte(frase, 140)}"): delimite ou sustente com fonte antes de aprovar.`);
+  }
+  /* 2026-10-02 · a premissa também: promessa, ângulo, abertura e virada alimentam o vídeo, os cortes e o carrossel. */
+  for (const [onde, frase] of [["A promessa", ai.promise], ["O ângulo", ai.angle.statement], ["A direção da abertura", ai.opening.direction], ["A virada do fechamento", ai.closing.turn]] as const) {
+    if (frase && RADAR_ABSOLUTE_CLAIM.test(frase)) notes.push(`${onde} afirma de forma absoluta ("${corte(frase, 140)}"): delimite antes de aprovar — ela vira a premissa do vídeo, dos cortes e do carrossel.`);
+  }
+  const raizesDoTitulo = secoes.map(secao => new Set(radarSemanticStems(`${secao.h2} ${secao.readerQuestion}`).filter(raiz => !raizesComuns.has(raiz))));
+  for (let i = 0; i < secoes.length; i += 1) {
+    for (let j = i + 1; j < secoes.length; j += 1) {
+      /* O radical não é uniforme ("estrategic" × "estrategi"): mesma raiz quando uma começa pela outra (5+ letras). */
+      const comuns = [...raizesDoTitulo[i]].filter(raiz => [...raizesDoTitulo[j]].some(outra => raiz === outra || (Math.min(raiz.length, outra.length) >= 5 && (raiz.startsWith(outra) || outra.startsWith(raiz))))).length;
+      const uniao = new Set([...raizesDoTitulo[i], ...raizesDoTitulo[j]]).size;
+      if (comuns >= 2 && uniao && comuns / uniao >= 0.5) {
+        notes.push(`Seções "${secoes[i].h2}" e "${secoes[j].h2}" tratam quase do mesmo assunto: junte ou dê a cada uma uma entrega diferente antes de aprovar.`);
+      } else if (titulosGenericosIguais(secoes[i].h2, secoes[j].h2, raizesComuns)) {
+        notes.push(`Seções "${secoes[i].h2}" e "${secoes[j].h2}" têm títulos genéricos do mesmo tipo (estratégia, dicas, prática): dê a cada uma o nome da entrega dela antes de aprovar.`);
+      }
+    }
+  }
+
   if (secoes.length < 3) {
     throw new RadarArticleBlueprintInvalidError("O artigo-modelo da IA ficou com menos de três seções válidas; gere de novo.", notes);
   }
@@ -1309,9 +1427,22 @@ function textoDaEvidencia(texto: string): string {
   return resto ? `${corte(resto, 70)} · ${url}` : url;
 }
 
-const rotuloDaEvidencia = (payload: RadarArticleBlueprintPayload, ids: readonly string[]) =>
+/* 2026-10-02 · a evidência S diz em que lente (janela) da SERP a página apareceu, quando o export sabe. */
+function lenteDaEvidencia(texto: string, lentesDoDominio: ((dominio: string) => string | null) | null): string {
+  if (!lentesDoDominio) return "";
+  const url = texto.split(" · ").find(parte => /^https?:\/\//i.test(parte));
+  if (!url) return "";
+  try {
+    const onde = lentesDoDominio(new URL(url).hostname);
+    return onde ? ` · ${onde}` : "";
+  } catch {
+    return "";
+  }
+}
+
+const rotuloDaEvidencia = (payload: RadarArticleBlueprintPayload, ids: readonly string[], lentesDoDominio: ((dominio: string) => string | null) | null = null) =>
   ids.map(id => payload.evidence.find(item => item.id === id)).filter((item): item is RadarArticleBlueprintEvidence => Boolean(item))
-    .map(item => `${item.id} (${textoDaEvidencia(item.text)})`);
+    .map(item => `${item.id} (${textoDaEvidencia(item.text)}${lenteDaEvidencia(item.text, lentesDoDominio)})`);
 
 /** "Cobrir com clareza o tema “X”." é a moldura da promessa padrão do Arquiteto: o destino é o X. */
 const semMolduraDoTema = (valor: string): string => {
@@ -1341,7 +1472,6 @@ function prefixoDaUrlPublicada(article: { slug: string | null; publishedUrl: str
  * com a estrutura organizada — e diz, no topo de cada coluna, que é proposta.
  */
 export const RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK = "PROPOSTA DA IA — aguardando aprovação no Radar (Pesquisa → Artigo-modelo da SERP)";
-const MARCA_CURTA_DA_PROPOSTA = "PROPOSTA DA IA — aguardando aprovação no Radar.";
 
 /**
  * 2026-10-02 · AS SEÇÕES DO PLANO APROVADO EM QUE UM VÍDEO ENTRA (Adendo B).
@@ -1355,7 +1485,8 @@ const MARCA_CURTA_DA_PROPOSTA = "PROPOSTA DA IA — aguardando aprovação no Ra
  * coluna de fontes fala do artigo-modelo APROVADO, e a proposta não é.
  */
 export function radarArticleBlueprintVideoSections(payload: RadarArticleBlueprintPayload, video: { title: string; url: string | null }): string[] | null {
-  if (!payload.videos || payload.approval === "DRAFT") return null;
+  /* 2026-10-02 · D10 · a planta do pacote vigente vale como concluída: a coluna de fontes usa a dela. */
+  if (!payload.videos) return null;
   const ids = new Set(payload.videos.filter(item => mesmoVideo(item, video)).map(item => item.id));
   return payload.blueprint.sections.filter(secao => secao.video && ids.has(secao.video)).map(secao => secao.h2);
 }
@@ -1402,7 +1533,8 @@ function origemDaSecao(payload: RadarArticleBlueprintPayload, secao: { from?: st
   const doEsqueleto = new Map((payload.skeleton || []).map(item => [item.id, item]));
   const secoesM = secao.from.map(id => doEsqueleto.get(id)).filter((item): item is RadarArticleBlueprintSkeletonItem => Boolean(item));
   if (secoesM.length) return [`- Vem do esqueleto da SERP: ${secoesM.map(item => `${item.id} "${item.heading}"`).join("; ")}`];
-  if (!secao.from.length && !secao.evidence.length) return ["- Vem da SERP: origem não indicada (a IA acrescentou sem evidência; confira)"];
+  /* 2026-10-02 · D10 · o entregável não pede conferência: a seção sem origem na SERP é dita como proposta editorial. */
+  if (!secao.from.length && !secao.evidence.length) return ["- Origem: proposta editorial do artigo (não vem de uma seção da SERP)"];
   return [];
 }
 
@@ -1424,6 +1556,8 @@ export function radarArticleBlueprintColumns(
   aoVivo: readonly RadarArticleBlueprintLiveVideo[] | null = null,
   /** 2026-10-02 · Aditivo: a publicação deste artigo, para o prefixo provável dos destinos planejados. */
   publicacao: { slug: string | null; publishedUrl: string | null } | null = null,
+  /** 2026-10-02 · Aditivo: em que lente da SERP cada domínio apareceu (`radarWritingDomainLenses`). */
+  lentesDoDominio: ((dominio: string) => string | null) | null = null,
 ): {
   promessa_e_leitor: string;
   titulo_e_seo: string;
@@ -1433,8 +1567,13 @@ export function radarArticleBlueprintColumns(
 } {
   const b = payload.blueprint;
   const m = payload.measures;
-  const proposta = payload.approval === "DRAFT";
-  const marcar = (celula: string) => (proposta ? `${MARCA_CURTA_DA_PROPOSTA}\n${celula}` : celula);
+  /*
+   * 2026-10-02 · D10 (decisão do dono): O ENTREGÁVEL SAI CONCLUÍDO. CSV, Redator
+   * e MCP não recebem "proposta", "aguardando aprovação" nem pendência: a
+   * planta vai fechada (organizar corrige e fecha antes de gravar). Versão
+   * antiga ainda em rascunho sai igual, sem marca; o que a conferência
+   * registrou fica no painel do Radar.
+   */
   const candidato = new Map(payload.linkCandidates.map(item => [item.id, item]));
   const fonte = new Map(payload.sources.map(item => [item.id, item]));
   const status = (item: RadarArticleBlueprintLinkCandidate) => item.status === "PUBLISHED" ? "publicado" : item.status === "PLANNED" ? "planejado: use o caminho, sem domínio, e não invente URL" : "não resolvido: marque a âncora e não invente URL";
@@ -1444,37 +1583,16 @@ export function radarArticleBlueprintColumns(
   const enderecoDoDestino = (item: RadarArticleBlueprintLinkCandidate): string => {
     if (!item.destination) return "";
     if (item.status === "PLANNED" && prefixo && item.destination.startsWith("/") && !item.destination.startsWith(`${prefixo}/`)) {
-      return ` → ${item.destination} (caminho provável: ${prefixo}${item.destination}, com o prefixo da URL publicada deste artigo; confirme antes de publicar)`;
+      /* 2026-10-02 · UM destino por link: o caminho com o prefixo do Silo; o slug do Arquiteto e a confirmação vão como pendência, à parte. */
+      return ` → ${prefixo}${item.destination} (planejado: caminho do Silo, o mesmo prefixo da URL publicada deste artigo; slug do Arquiteto ${item.destination})`;
     }
-    return ` → ${item.destination}`;
+    return ` → ${item.destination} (${status(item)})`;
   };
   const descartados = b.discarded ?? [];
   const doEsqueleto = new Map((payload.skeleton || []).map(item => [item.id, item]));
-  /*
-   * 2026-10-02 · AS PENDÊNCIAS DA PROPOSTA. O que o servidor achou ao conferir a
-   * resposta da IA (H1 sem a principal, abertura de outro assunto, seção sem
-   * origem, respiros a menos…) vai junto da proposta, para quem escreve não
-   * tomar como pronta uma planta que o próprio servidor marcou. Só na proposta,
-   * e só quando o export leu as notas da versão; a aprovada sai como antes.
-   */
-  const conferencia = proposta && payload.validation?.length ? radarArticleBlueprintPendingNotes(payload.validation) : null;
-  const pendencias = conferencia && (conferencia.pending.length || conferencia.corrected)
-    ? [
-      ...(conferencia.pending.length
-        ? [payload.origin === "human_edit"
-          ? "Pendências da proposta (achadas na resposta da IA; a edição do dono pode já ter resolvido alguma — confira):"
-          : "Pendências da proposta (o servidor conferiu a resposta da IA contra o pacote):",
-        ...conferencia.pending.map(nota => `- ${nota}`)]
-        : ["Pendências da proposta: nenhuma além da aprovação do dono."]),
-      ...(conferencia.corrected ? [`Outras ${conferencia.corrected} nota(s) da conferência são correções já aplicadas pelo servidor ou registro (ver no Radar).`] : []),
-    ]
-    : [];
 
   const estrutura = [
-    proposta
-      ? `${RADAR_ARTICLE_BLUEPRINT_DRAFT_MARK}. A SERP montou o esqueleto e a IA organizou; até o dono aprovar, trate como sugestão (a redação é de quem escreve).`
-      : "ARTIGO-MODELO APROVADO (planta do artigo ideal; a redação é de quem escreve).",
-    ...pendencias,
+    "ARTIGO-MODELO DA SERP (planta concluída do artigo; a redação é de quem escreve).",
     ...(payload.unit ? [`Tipo da unidade: ${payload.unit.label}${payload.unit.format ? ` · formato: ${payload.unit.format}` : ""}.`] : []),
     ...(payload.brandVoice ? [`Voz da marca usada no plano: Skill "${payload.brandVoice.name}" v${payload.brandVoice.version}.`] : []),
     `Medidas do plano: ${m.plan.sections} H2 · ${m.plan.h3} H3 · ~${m.plan.paragraphs} parágrafos · ${m.plan.bold} negritos · ${m.plan.images} imagens (capa + ${m.plan.respites} respiros) · ${m.plan.internalLinks} links internos · ${m.plan.externalLinks} links externos${m.plan.wordsMin && m.plan.wordsMax ? ` · ${m.plan.wordsMin}–${m.plan.wordsMax} palavras` : ""}.`,
@@ -1495,7 +1613,7 @@ export function radarArticleBlueprintColumns(
       ...secao.explain.map(item => `- Explicar: ${item}`),
       `- ~${secao.paragraphs} parágrafo(s)${secao.bold.length ? ` · negrito em: ${secao.bold.join(", ")}` : ""}`,
       ...(secao.terms.length ? [`- Termos a nomear: ${secao.terms.join(" · ")}`] : []),
-      ...(secao.evidence.length ? [`- Evidências: ${rotuloDaEvidencia(payload, secao.evidence).join("; ")}`] : []),
+      ...(secao.evidence.length ? [`- Evidências: ${rotuloDaEvidencia(payload, secao.evidence, lentesDoDominio).join("; ")}`] : []),
       ...secao.internalLinks.map(link => { const destino = candidato.get(link.candidate); return `- Link interno: âncora "${link.anchor}" → ${destino ? rotuloDoDestino(destino) : link.candidate}`; }),
       ...secao.externalLinks.map(link => `- Link externo: ${link.claim} → ${link.source && fonte.get(link.source) ? fonte.get(link.source)!.url : `fonte a obter${link.sourceType ? ` (${link.sourceType})` : ""}`}`),
       ...(secao.specialist ? [`- Especialista: usar ${secao.specialist}`] : []),
@@ -1520,14 +1638,14 @@ export function radarArticleBlueprintColumns(
       `Aplique somente estes ${links.length} link(s), com a âncora indicada (pode ajustar concordância):`,
       ...links.map(({ secao, link }, indice) => {
         const destino = candidato.get(link.candidate);
-        return `L${indice + 1} · âncora "${link.anchor}" → ${destino ? `${destino.role} "${rotuloDoDestino(destino)}"${enderecoDoDestino(destino)} (${status(destino)})` : link.candidate} · onde: seção "${secao}"${link.reason ? ` · por quê: ${link.reason}` : ""}`;
+        return `L${indice + 1} · âncora "${link.anchor}" → ${destino ? `${destino.role} "${rotuloDoDestino(destino)}"${enderecoDoDestino(destino) || ` (${status(destino)})`}` : link.candidate} · onde: seção "${secao}"${link.reason ? ` · por quê: ${link.reason}` : ""}`;
       }),
     ].join("\n")
-    : proposta ? "Nenhum link interno na proposta da IA." : "Nenhum link interno no artigo-modelo aprovado.";
+    : "Nenhum link interno no artigo-modelo.";
 
   return {
-    promessa_e_leitor: marcar([`Leitor: ${b.reader}`, `Promessa: ${b.promise}`, `Ângulo: ${b.angle.statement}${b.angle.evidence.length ? ` [${rotuloDaEvidencia(payload, b.angle.evidence).join("; ")}]` : ""}`].join("\n")),
-    titulo_e_seo: marcar([
+    promessa_e_leitor: ([`Leitor: ${b.reader}`, `Promessa: ${b.promise}`, `Ângulo: ${b.angle.statement}${b.angle.evidence.length ? ` [${rotuloDaEvidencia(payload, b.angle.evidence).join("; ")}]` : ""}`].join("\n")),
+    titulo_e_seo: ([
       `H1: ${b.title.h1}`,
       ...(b.title.alternatives.length ? [`Alternativas: ${b.title.alternatives.join(" · ")}`] : []),
       `SEO title: ${b.title.seoTitle}`,
@@ -1535,8 +1653,8 @@ export function radarArticleBlueprintColumns(
       `Keyword principal em: ${b.keywordPlan.principalPlacement.join(", ") || "H1 e primeiro parágrafo"}`,
     ].join("\n")),
     estrutura,
-    links_internos: marcar(linksInternos),
-    plano_visual: marcar([
+    links_internos: (linksInternos),
+    plano_visual: ([
       `Plano visual: ${b.visual.length} imagem(ns).`,
       ...b.visual.map(item => [
         `${item.slot === "CAPA" ? "Capa" : `Respiro ${item.slot.slice(1)}`}${item.section ? ` · seção "${item.section}"` : ""}${item.concept ? ` · ${item.concept}` : ""}`,

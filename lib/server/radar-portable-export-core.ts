@@ -38,6 +38,8 @@ import type { RadarBrandVoiceState } from "@/lib/radar/brand-voice";
 import type { RadarWritingPublication } from "@/lib/radar/portable-writing-export";
 import type { RadarCanonicalItemIdentity } from "@/lib/server/radar-canonical-authorities";
 import type { ArticleDNA, VersionEnvelope } from "@/lib/arquiteto/contracts";
+import { radarCompetitorOutlinesOf, radarIsNavigationHeading, radarIsSiteIdentityHeading } from "@/lib/radar/competitor-topics";
+import { extractCompetitorPage } from "@/lib/radar/competitor-extractor";
 
 /**
  * ===== O DOSSIÊ PORTÁTIL, MONTADO NUM LUGAR SÓ (SDD MCP ponta a ponta, F1) =====
@@ -89,6 +91,13 @@ export async function assembleRadarPortableExport(input: {
   supabase: LeitorDoCache;
   actorUserId: string;
   exportedAt?: string;
+  /**
+   * 2026-10-02 · Aditivo: lê a estrutura ATUAL da página publicada (H1 e H2),
+   * para a atualização preservar o que existe. Opcional e injetado: a rota de
+   * exportação e o MCP passam o leitor real (o mesmo extrator das páginas
+   * concorrentes, só GET, com tempo limite); sem ele, nada é lido.
+   */
+  readPublishedStructure?: (url: string) => Promise<{ h1: string | null; h2: string[] } | null>;
 }): Promise<RadarPortableExportAssembly> {
   const exportedAt = input.exportedAt ?? new Date().toISOString();
   const artefatos = await new ArtifactRepository().list(input.brandId);
@@ -341,6 +350,8 @@ export async function assembleRadarPortableExport(input: {
       articleModel: modeloDoArtigo,
       profileModel: modeloDoPerfil,
       googleObserved: autoridades.google?.observed ?? null,
+      /* 2026-10-02 · os H2/H3 das páginas comparáveis lidas, para a leitura dos temas dos concorrentes (fora do hash). */
+      competitorOutlines: perfil === "GOOGLE" ? radarCompetitorOutlinesOf(payload.extractions, autoridades.google?.observed?.competitors) : null,
       researchContext: contexto,
       youtubeUniverse: perfil === "YOUTUBE" ? payload.youtubeSearch?.universe || [] : [],
       youtubeQueries: perfil === "YOUTUBE"
@@ -532,7 +543,46 @@ export async function assembleRadarPortableExport(input: {
 
   const brandVoice: RadarBrandVoiceState = montadas.length ? await readRadarBrandVoice(input.brandId) : { kind: "none" };
 
+  /*
+   * 2026-10-02 · A ESTRUTURA PUBLICADA ATUAL. "Estrutura publicada atual
+   * indisponível" deixava a atualização às cegas. Com o leitor, até 10 páginas
+   * publicadas do lote são lidas em paralelo; falha ou tempo esgotado deixa a
+   * página como antes (a ressalva continua). Nada é gravado.
+   */
+  if (input.readPublishedStructure) {
+    const lidas = [...publicacoes.entries()].filter(([, item]) => item.published && item.publishedUrl).slice(0, 10);
+    await Promise.all(lidas.map(async ([articleId, item]) => {
+      try {
+        const estrutura = await input.readPublishedStructure!(item.publishedUrl!);
+        if (estrutura && (estrutura.h1 || estrutura.h2.length)) publicacoes.set(articleId, { ...item, currentStructure: { h1: estrutura.h1, h2: estrutura.h2, updatedAt: null } });
+      } catch {
+        /* página fora do ar, bloqueada ou lenta: a ressalva de antes continua */
+      }
+    }));
+  }
+
   return { exportedAt, montadas, identificacao, recusados, publicacoes, lentes, plano, planoDaSelecao, brandVoice };
+}
+
+/** 2026-10-02 · O leitor real da estrutura publicada: o extrator das páginas concorrentes (GET, validação de URL, tempo limite). */
+const hostDaUrl = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+};
+
+export async function radarReadPublishedStructure(url: string): Promise<{ h1: string | null; h2: string[] } | null> {
+  const pagina = await extractCompetitorPage(url, { timeoutMs: 8000 });
+  const esboco = pagina.headingOutline || [];
+  if (!esboco.length) return null;
+  return {
+    h1: esboco.find(item => item.level === 1)?.text?.trim() || null,
+    /* sem rodapé, caixa de autor e navegação ("Adalba", "Leia também") */
+    h2: esboco.filter(item => item.level === 2).map(item => item.text.replace(/\s+/g, " ").trim())
+      .filter(item => item && !radarIsNavigationHeading(item) && !radarIsSiteIdentityHeading(item, hostDaUrl(url))).slice(0, 25),
+  };
 }
 
 /**
@@ -549,7 +599,7 @@ export async function radarWritingExportForArticle(input: {
   | { ok: true; csv: string; filename: string | null; blocked: boolean; exportedAt: string }
   | { ok: false; code: string; reason: string }
 > {
-  const montagem = await assembleRadarPortableExport({ brandId: input.brandId, articleIds: [input.articleId], supabase: input.supabase, actorUserId: input.actorUserId });
+  const montagem = await assembleRadarPortableExport({ brandId: input.brandId, articleIds: [input.articleId], supabase: input.supabase, actorUserId: input.actorUserId, readPublishedStructure: radarReadPublishedStructure });
   if (!montagem.montadas.length) {
     const recusa = montagem.recusados[0];
     return { ok: false, code: recusa?.code ?? "radar_export_empty", reason: recusa?.reason ?? "O artigo não tem investigação finalizada para exportar." };

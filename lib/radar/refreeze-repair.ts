@@ -116,7 +116,7 @@ function consequencias(profile: RadarRefreezeProfile, mode: RadarRefreezeMode): 
       ...(profile === "GOOGLE"
         ? ["São duas gravações: reabrir e congelar. O ensaio já confirmou que o congelamento passa; se a segunda falhar mesmo assim, a investigação fica reaberta (nada se perde) e \"Finalizar pesquisa\" conclui."]
         : []),
-      "O pacote muda de identidade: o artigo-modelo da SERP é organizado de novo (1 chamada de IA, mais 1 se a resposta vier cortada) e precisa da sua aprovação.",
+      "O pacote muda de identidade: o artigo-modelo da SERP é organizado de novo (1 chamada de IA, mais 1 se a resposta vier cortada ou precisar de correção) e sai concluído para o CSV, o Redator e o MCP.",
       "Se o pacote já foi enviado ao Redator, ele passa a mostrar \"Atualização disponível\".",
       `URL, slug, canonical, keyword principal, papel e Silo não mudam; ${OUTROS[profile]}.`,
     ];
@@ -128,7 +128,7 @@ function consequencias(profile: RadarRefreezeProfile, mode: RadarRefreezeMode): 
       ...(profile === "GOOGLE"
         ? ["A SERP pode vir do cache (4 lentes, 30 dias); as páginas são lidas de novo. Curadoria, análise e finalização seguem como numa pesquisa nova (finaliza sozinha sem pendência)."]
         : ["A finalização segue como numa coleta nova (sozinha, sem pendência)."]),
-      "Depois, o artigo-modelo da SERP é organizado de novo (1 chamada de IA) e precisa da sua aprovação.",
+      "Depois, o artigo-modelo da SERP é organizado de novo (1 chamada de IA, mais 1 se precisar de correção) e sai concluído.",
       "URL, slug, canonical, keyword principal, papel e Silo não mudam.",
     ];
   }

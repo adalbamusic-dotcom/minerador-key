@@ -441,7 +441,8 @@ test("D · o CSV de vídeo lista os modos mesmo sem casamento", () => {
   assert.equal(semCasamento.state, "NO_LIBRARY");
   const linha = buildRadarVideoExportArticle(entradaGoogle({ videoContext: semCasamento }), { position: 1, youtube: null }).row;
   /* 2026-10-02 · o cabeçalho do bloco é "Vídeos selecionados pela marca", o mesmo do CSV para escrever. */
-  assert.match(linha.biblioteca_da_marca, /Vídeos selecionados pela marca \(modo de uso escolhido no Radar, decisão do dono\):/);
+  /* 2026-10-02 · sem casamento, a coluna diz que falta o casamento — não que nada foi selecionado. */
+  assert.match(linha.biblioteca_da_marca, /Nenhum trecho casado com as pautas ainda \(o casamento confere a fala do vídeo contra cada pauta\)\. Os vídeos que a marca selecionou, cada um com o trecho candidato:/);
   assert.match(linha.biblioteca_da_marca, /Incorporar no artigo · "Tour pela clínica"/);
   assert.match(linha.biblioteca_da_marca, /Contexto · "Bastidores do Instagram"/);
 
@@ -528,7 +529,7 @@ test("D · o vídeo da seção do artigo-modelo sai resolvido no CSV e segue o m
   const apoio = exportar(plano("V1"), USOS);
   assert.deepEqual(linhasDeVideo(apoio.estrutura), ['- Vídeo da marca: "Palestra Instagram" (https://www.youtube.com/watch?v=apoio000001) · Apoio (modo atual no Radar) · trecho na coluna de fontes: V1']);
   /* E o bloco dos modos diz a seção do plano para o Apoio. */
-  assert.match(apoio.fontes_e_especialista, /Apoio · "Palestra Instagram"[^\n]*· seção do artigo-modelo aprovado "Primeira"/);
+  assert.match(apoio.fontes_e_especialista, /Apoio · "Palestra Instagram"[^\n]*· seção do artigo-modelo "Primeira"/);
 
   /* Versão sem retrato (gerada antes): a linha de antes, sem inventar. */
   const antiga = { ...plano("V2") };
@@ -552,12 +553,12 @@ test("D · Incorporar: a seção que o artigo-modelo aprovado escolheu chega ao 
 
   const comPlano = exportar(embed.id);
   assert.deepEqual(linhasDeVideo(comPlano.estrutura), ['- Vídeo da marca: "Tour pela clínica" (https://www.youtube.com/watch?v=embed000001) · Incorporar no artigo']);
-  assert.match(comPlano.fontes_e_especialista, /Incorporar no artigo · "Tour pela clínica"[^\n]*· seção do artigo-modelo aprovado "Primeira"/);
+  assert.match(comPlano.fontes_e_especialista, /Incorporar no artigo · "Tour pela clínica"[^\n]*· seção do artigo-modelo "Primeira"/);
   assert.doesNotMatch(comPlano.fontes_e_especialista, /definir no artigo-modelo/, "o bloco não devolve a decisão ao artigo-modelo já aprovado");
 
   /* O plano aprovado não pôs o vídeo em seção: o CSV diz isso, em vez de "definir no artigo-modelo". */
   const semSecao = exportar(null);
-  assert.match(semSecao.fontes_e_especialista, /Incorporar no artigo · "Tour pela clínica"[^\n]*· seção: a que o vídeo responde \(o artigo-modelo aprovado não indicou\)/);
+  assert.match(semSecao.fontes_e_especialista, /Incorporar no artigo · "Tour pela clínica"[^\n]*· seção: a que o vídeo responde \(o artigo-modelo não indicou\)/);
 
   /* Sem artigo-modelo, a linha é exatamente a de antes. */
   const semPlano = buildRadarWritingExportArticle(entradaGoogle({ videoContext: radarPortableVideoContext(camada(), USOS) }), CONTEXTO).row;

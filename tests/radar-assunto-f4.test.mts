@@ -16,6 +16,7 @@ import { RADAR_SUBJECT_MUST_COVER_REASON, RADAR_SUBJECT_NO_SIGNAL, radarSubjectT
 import {
   RADAR_WRITING_EXPORT_COLUMNS,
   RADAR_WRITING_EXPORT_LIMITS,
+  radarWritingCellLimit,
   RADAR_WRITING_SUBJECT_H1_NO_SIGNAL,
   RADAR_WRITING_SUBJECT_WORKING_TITLE,
   buildRadarWritingExportArticle,
@@ -93,7 +94,7 @@ const linhasDe = (celula: string) => celula.split("\n");
 
 function dentroDosLimites(row: RadarWritingExportRow) {
   for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) {
-    const limite = coluna === "estrutura" ? RADAR_WRITING_EXPORT_LIMITS.structureChars : RADAR_WRITING_EXPORT_LIMITS.cellChars;
+    const limite = radarWritingCellLimit(coluna);
     assert.ok(row[coluna].length <= limite, `${coluna}: ${row[coluna].length} > ${limite}`);
   }
   const total = RADAR_WRITING_EXPORT_COLUMNS.reduce((soma, coluna) => soma + row[coluna].length, 0);
@@ -121,12 +122,18 @@ function dentroDosLimites(row: RadarWritingExportRow) {
  *     respiro(s)", com o respiro 2 declarado para a estrutura final.
  * YouTube (linha só de identidade) ficou idêntico.
  */
+/*
+ * 2026-10-02 · D10 · renovado: a única diferença é a frase dos prompts de imagem
+ * ("com artigo-modelo aprovado no Radar (feito a partir da SERP)" → "com
+ * artigo-modelo da SERP organizado no Radar"); conferido revertendo só essa
+ * frase, com o qual o snapshot anterior volta a bater.
+ */
 const SNAPSHOT = {
-  silo: { sha: "b239453d29119b9e1ccd555eaaae7da52c3cd06e5bdcb8d964701edb8cb230a7", len: 19253 },
-  saude: { sha: "9211b763870d18f3435dbf03b845a8e16d1a29129b94f2147ad58557ab11a0e9", len: 23637 },
+  silo: { sha: "9d600505e21b39bbc5dd7b71b1303c6bc6785533935906e245acdb7443df8112", len: 19238 },
+  saude: { sha: "811c509ba604246187e6584ae5f6af56be1fdc426c0dc4c46d9d4fe9d1ef718b", len: 23622 },
   artigos: {
     google: "2f5bcbb8a4a7ce04a5474e00263525cc320b97b895e26ec5cf456cf0d5aba031",
-    amazon: "7a5a5dfc18f160dcbf36cc14ef497d8f8c4f85b7389c0892155975aa6060c96d",
+    amazon: "b609c3bc5c61491ac35bb7098c28b9585dff5d0bbacc1b51fcbe31fe6ebd9e94",
     youtube: "0b0118248360fabc79e06be63916b91bd3f6aadd0c6b99fb06d3c4baabd5137a",
     saude: "ccf777cf43b9c4a6a92326f2b9642efca843faf2e289816c0b01aaf7e2bcd6e9",
   },

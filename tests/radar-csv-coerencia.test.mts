@@ -10,6 +10,7 @@ import type { RadarVideoUsage } from "../lib/radar/video-library.ts";
 import {
   RADAR_WRITING_EXPORT_COLUMNS,
   RADAR_WRITING_EXPORT_LIMITS,
+  radarWritingCellLimit,
   RADAR_WRITING_LEGACY_FAQ,
   RADAR_WRITING_NO_APPROVED_LINK,
   buildRadarWritingExportArticle,
@@ -495,7 +496,7 @@ test("8 · plano visual: capa + 2 ou 3 respiros; com menos seções, o respiro q
   assert.match(curto, /^Plano visual do pacote \(quem redige confirma\): uma capa e 2 respiro\(s\)\./);
   assert.match(curto, /Regra: capa \+ 2 ou 3 respiros\. A estrutura deste pacote só ancora 1 respiro\(s\) em seção/);
   assert.match(curto, /^Respiro 2 · definir a seção na estrutura final \(sugestão: antes do fechamento\) · 4:3/m);
-  assert.match(curto, /Prompts das imagens: com artigo-modelo aprovado no Radar \(feito a partir da SERP\), eles saem dele/);
+  assert.match(curto, /Prompts das imagens: com artigo-modelo da SERP organizado no Radar, eles saem dele/);
   /* Com seções suficientes, nada muda: 3 respiros e nenhuma nota. */
   const cheio = linha(entradaGoogle()).plano_visual;
   assert.match(cheio, /uma capa e 3 respiro\(s\)\./);
@@ -560,7 +561,7 @@ test("os limites de célula e de artigo continuam valendo com as linhas novas", 
   for (const entrada of [entradaGoogle(), entradaGoogleSaude(), entradaAmazon(true)]) {
     const row = linha(entrada, { ...AVULSO, topRowLabel: "Silo", silo: planoDoSilo().files[0].writing! });
     for (const coluna of RADAR_WRITING_EXPORT_COLUMNS) {
-      const limite = coluna === "estrutura" ? RADAR_WRITING_EXPORT_LIMITS.structureChars : RADAR_WRITING_EXPORT_LIMITS.cellChars;
+      const limite = radarWritingCellLimit(coluna);
       assert.ok(row[coluna].length <= limite, `${coluna}: ${row[coluna].length}`);
     }
     assert.ok(tudo(row).length <= RADAR_WRITING_EXPORT_LIMITS.articleChars + RADAR_WRITING_EXPORT_COLUMNS.length);

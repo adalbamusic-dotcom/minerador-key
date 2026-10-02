@@ -205,7 +205,9 @@ test("organizar em série: um por vez, com progresso, e a falha de um não para 
   ]);
   assert.match(radarArticleBlueprintSeriesSummary(resultado), /^Artigo-modelo da SERP: 1 organizado\(s\) e 2 com falha \(3 chamadas de IA no lote\)\. As investigações continuam finalizadas/);
   assert.match(radarArticleBlueprintSeriesSummary({ done: [], failed: [{ message: "A resposta da IA veio cortada." }] }), /^A investigação continua finalizada, mas a IA não organizou o artigo-modelo da SERP: A resposta da IA veio cortada\. Use "Organizar de novo \(IA\)"/);
-  assert.match(radarArticleBlueprintSeriesSummary({ done: ["a1"], failed: [] }), /^Artigo-modelo da SERP organizado pela IA\. Revise e aprove/);
+  /* 2026-10-02 · D10: organizado é concluído; a frase não pede aprovação. */
+  assert.match(radarArticleBlueprintSeriesSummary({ done: ["a1"], failed: [] }), /^Artigo-modelo da SERP organizado e concluído: já vai ao CSV, ao Redator e ao MCP\./);
+  assert.doesNotMatch(radarArticleBlueprintSeriesSummary({ done: ["a1"], failed: [] }), /aprove|proposta/i);
 });
 
 test("o pedido de organizar: POST 'generate' com o custo aceito, e o erro do servidor chega como veio", async () => {
@@ -278,7 +280,8 @@ test("o painel: título, explicação e o estado do trabalho pedido pela página
   const html = (estado: RadarArticleBlueprintJob | null) => renderToStaticMarkup(createElement(RadarArticleBlueprintPanel, { brandId: "marca", articleId: "artigo", job: estado }));
   const emCurso = html(job("running"));
   assert.match(emCurso, /<h3[^>]*>Artigo-modelo da SERP<\/h3>/);
-  assert.match(emCurso, /A SERP monta o esqueleto; a IA organiza; você aprova\./);
+  /* 2026-10-02 · D10: a planta sai concluída; quem quer mudar, edita. */
+  assert.match(emCurso, /A SERP monta o esqueleto, a IA organiza e corrige o que a conferência apontar, e a planta sai concluída para o CSV, o Redator e o MCP\./);
   assert.match(emCurso, /data-testid="radar-article-blueprint-organizing"[^>]*>Organizando o artigo-modelo da SERP com a IA… a investigação já está finalizada\./);
   const falhou = html(job("failed", "A resposta da IA veio cortada (passou do tamanho máximo)."));
   assert.match(falhou, /A investigação está finalizada, mas a IA não organizou o artigo-modelo: A resposta da IA veio cortada/);
@@ -357,15 +360,16 @@ test("refinalizada com a IA falhando: com o vigente informado, nada vai ao CSV; 
   assert.equal(deduzido.shown?.id, "v1");
   assert.equal(deduzido.currentConfirmed, false, "sem o vigente, a escolha é dedução");
 
-  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "APPROVED", origin: "ai" }, true), "Aprovado — vai ao CSV e ao Redator");
-  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "APPROVED", origin: "ai" }, false), "Aprovado — vai ao CSV e ao Redator se for do congelamento vigente");
-  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "DRAFT", origin: "ai" }, true), "Proposta da IA — aguardando aprovação");
-  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "DRAFT", origin: "human_edit" }, false), "Editado — aguardando aprovação");
+  /* 2026-10-02 · D10: organizar e editar gravam concluído; o rascunho é só de versões antigas. */
+  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "APPROVED", origin: "ai" }, true), "Concluído — vai ao CSV, ao Redator e ao MCP");
+  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "APPROVED", origin: "ai" }, false), "Concluído — vai aos entregáveis se for do congelamento vigente");
+  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "DRAFT", origin: "ai" }, true), "Versão antiga em rascunho — vai ao CSV assim mesmo; conclua ou organize de novo");
+  assert.equal(radarArticleBlueprintPanelStateLabel({ state: "DRAFT", origin: "human_edit" }, false), "Versão antiga em rascunho — vai ao CSV assim mesmo; conclua ou organize de novo");
 
   const fonte = semComentarios(readFileSync(new URL("../modules/radar/radar-article-blueprint-panel.tsx", import.meta.url), "utf8"));
   assert.match(fonte, /const vaiAoCsvConferido = Boolean\(atual && atual === vaiAoCsv && escolha\.currentConfirmed\);/);
   assert.match(fonte, /radarArticleBlueprintPanelStateLabel\(atual, vaiAoCsvConferido\)/);
-  assert.equal((fonte.match(/"Aprovado — vai ao CSV e ao Redator"/g) || []).length, 1, "o rótulo afirmativo mora só no helper, atrás da conferência");
+  assert.equal((fonte.match(/"Concluído — vai ao CSV, ao Redator e ao MCP"/g) || []).length, 1, "o rótulo afirmativo mora só no helper, atrás da conferência");
 });
 
 test("PROVIDER_CALLS = 0", () => {

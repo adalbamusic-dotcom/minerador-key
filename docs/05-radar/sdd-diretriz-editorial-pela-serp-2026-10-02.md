@@ -364,3 +364,22 @@ Salvaguardas para as situações a que se destina.
 - Testes: domínio do diagnóstico (Google, YouTube, comparação sem carimbos de tempo), servidor Amazon
   (`dryRun` sem escrita, nada a reparar sem escrita, recongelar numa escrita, recusa sem fotografia), regras
   estruturais da tela (prévia antes da escrita, ensaio antes de reabrir, pago só depois do readback do reset).
+
+## D10 — O entregável sai concluído (decisão do dono, 2026-10-02) — IMPLEMENTADO EM CÓDIGO
+
+Pedido do dono: "em tudo que tenha a ver com o entregável, CSV, e o que vai para o Redator e MCP, eles não
+podem receber algo inconcluso, nem com esse aviso de precisa de aprovação. Então coloca tudo concluído, o
+prompt já finalizado, ou fechado." **Substitui D8** e a parte de D5 que exigia aprovação para o artigo-modelo
+valer. É uma exceção do dono, para o artigo-modelo, à regra "IA aplicada não significa aprovada" (AGENTS §9):
+a decisão humana passa a ser **editar** (cada edição vira a versão vigente) ou **organizar de novo**.
+
+- Organizar grava a versão já concluída (`state = APPROVED`, com autor e momento; o CHECK do banco já aceita,
+  sem migration). Com pendência na conferência (origem M de outro assunto, afirmação absoluta, seções quase
+  iguais, abertura de outro assunto), UMA chamada a mais devolve a planta corrigida; a conferência fecha o que
+  dá sem IA (a origem errada sai). O resto fica registrado na versão (painel), nunca no entregável.
+- Editar grava outra versão concluída. "Concluir esta versão" só aparece para rascunho antigo.
+- CSV para escrever, CSV de vídeo, Redator e MCP: sem "PROPOSTA DA IA", "aguardando aprovação", pendência ou
+  "rascunho para revisão"; seção sem origem na SERP sai como "proposta editorial do artigo"; o prompt sai
+  fechado.
+- Testes: `tests/radar-artigo-modelo-concluido.test.mts` e os testes de marcação reescritos para provar a
+  ausência das marcas.

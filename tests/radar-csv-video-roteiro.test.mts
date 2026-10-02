@@ -543,11 +543,12 @@ test("11 · vídeo × artigo: a seção do artigo-modelo, o que o vídeo acresce
   const entrada = entradaDoAssunto(INSTAGRAM);
   const aprovado = linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "APPROVED") }).diretrizes_de_roteiro;
   assert.match(aprovado, /^Vídeo × artigo \(o vídeo faz parte do artigo\):$/m);
-  assert.match(aprovado, /^- Complementa a seção "Roteiro de três stories" do artigo-modelo \(aprovado\)\.$/m, "a seção com entrega prática é onde a demonstração rende");
+  /* 2026-10-02 · D10: sem "(aprovado)" nem "(proposta…)": a planta vai concluída. */
+  assert.match(aprovado, /^- Complementa a seção "Roteiro de três stories" do artigo-modelo da SERP\.$/m, "a seção com entrega prática é onde a demonstração rende");
   assert.match(aprovado, /^- O que o vídeo acrescenta: a demonstração de "um roteiro de três stories para a semana", com exemplo prático, sem repetir o texto\.$/m);
   assert.match(aprovado, /^- Onde fica: incorporado no artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\), nessa seção\.$/m);
   assert.match(aprovado, /^- Na descrição do vídeo: o link do artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\)\.$/m);
-  assert.match(linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "DRAFT") }).diretrizes_de_roteiro, /do artigo-modelo \(proposta da IA, ainda sem aprovação\)\./);
+  assert.doesNotMatch(linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "DRAFT") }).diretrizes_de_roteiro, /proposta da IA|aprovação/);
   assert.match(linhaDe(entrada).diretrizes_de_roteiro, /^- Complementa a seção: a definir no artigo-modelo/m);
 
   /* A landing page fala de si; sem endereço, a descrição diz quando ele existe. */
@@ -727,27 +728,35 @@ test("14 · consultas que repetem outra (palavra duplicada, prefixo sobre busca 
 });
 
 test("15 · cada concorrente diz a relevância para o público: mesmo, próximo, geral ou outro público", () => {
-  const entrada = entradaDoAssunto({ ...INSTAGRAM, audience: "Biomédicas estetas e profissionais de estética que atendem em clínicas. Querem agenda cheia." });
+  const entrada = entradaDoAssunto({ ...INSTAGRAM, audience: "Biomédicas estetas e profissionais de estética que atendem em clínicas e consultórios. Querem agenda cheia." });
   const youtube = youtubeCom([INSTAGRAM.principal], [
     { title: "Como captar clientes na estética pelo Instagram", em: [1] },
     { title: "Como atrair clientes de advocacia pelo Instagram", em: [1] },
     { title: "Captar clientes pela internet: o guia", em: [1] },
     { title: "Seis dicas de alcance no Instagram", em: [1] },
+    { title: "Como atrair clientes com conteúdo útil no Instagram", em: [1] },
+    { title: "Marketing médico: pacientes pelo Instagram", channel: "Consultório em dia", em: [1] },
+    { title: "A psicologia das pessoas que não usam Instagram", em: [1] },
   ]);
   const serp = linhaDe(entrada, { youtube }).serp_youtube;
   const relevancia = (titulo: string) => serp.split("\n")[serp.split("\n").findIndex(linha => linha.includes(titulo)) + 1].replace(/^.*relevância: /, "");
   assert.equal(relevancia("na estética"), "mesmo público: referência principal");
   assert.equal(relevancia("de advocacia"), "outro público: inspiração pontual, sem transportar recomendação");
-  assert.equal(relevancia("pela internet"), "público próximo: referência de abordagem");
-  assert.equal(relevancia("dicas de alcance"), "tema geral: referência de formato e apresentação");
-  assert.match(serp, /^Relevância para o público \(pelo título e pelo canal; posição e visualizações não medem retenção nem contatos\): 1 mesmo público[^\n]*1 outro público/m);
+  /* 2026-10-02 · mesma dor (termo da busca, clínica/consultório) não é o mesmo público: a profissão decide. */
+  assert.equal(relevancia("pela internet"), "mesma dor, público vizinho: referência de abordagem (não transportar o público)");
+  assert.equal(relevancia("Marketing médico"), "mesma dor, público vizinho: referência de abordagem (não transportar o público)", "pacientes e consultório: vizinho, não biomédicas estetas");
+  assert.equal(relevancia("conteúdo útil"), "tema geral: referência de formato e apresentação");
+  /* Só a plataforma, que todo título da amostra cita: fora do tema, por melhor posição que tenha. */
+  assert.equal(relevancia("psicologia das pessoas"), "fora do tema da busca (só cita a plataforma): fica fora das recomendações");
+  assert.equal(relevancia("dicas de alcance"), "fora do tema da busca (só cita a plataforma): fica fora das recomendações");
+  assert.match(serp, /^Relevância para o público \(pelo título e pelo canal; posição e visualizações não medem retenção nem contatos\): 1 mesmo público[^\n]*1 outro público[^\n]*2 fora do tema/m);
 });
 
 test("16 · com a planta do artigo-modelo, cada capítulo diz o que entregar, o que mostrar e a fonte; cortes e carrossel com conteúdo próprio", () => {
   const entrada = entradaDoAssunto(INSTAGRAM);
   const linha = linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "APPROVED"), youtube: youtubeDe(INSTAGRAM.principal, "instagram para clínicas") });
   const roteiro = linha.diretrizes_de_roteiro;
-  assert.match(roteiro, /^Capítulos do vídeo principal \(3, da planta do artigo-modelo da SERP, aprovado; viram os marcadores de tempo da descrição\)/m);
+  assert.match(roteiro, /^Capítulos do vídeo principal \(3, da planta do artigo-modelo da SERP; viram os marcadores de tempo da descrição\)/m);
   assert.match(roteiro, /^1\. Por que o perfil não traz pacientes\n {3}Pergunta do público: "Por que o perfil não traz pacientes\?"\n {3}Entregar: Resposta direta\./m);
   assert.match(roteiro, /^2\. Roteiro de três stories\n[\s\S]*? {3}Mostrar na tela: um roteiro de três stories para a semana\./m);
   assert.match(roteiro, /^Ritmo que a SERP do YouTube sugere \(referência, não roteiro\): HOOK → /m);
@@ -759,12 +768,14 @@ test("16 · com a planta do artigo-modelo, cada capítulo diz o que entregar, o 
   /* Três capítulos, três cortes, na ordem do vídeo; o que tem entrega prática diz o que mostrar. */
   assert.match(cortes, /^2\. Do capítulo 2 \(Roteiro de três stories\):\n {3}Gancho: "Roteiro de três stories\?"\n {3}Ideia única: Resposta direta\.\n {3}Mostrar: um roteiro de três stories para a semana\.\n {3}Fechamento: convite para o vídeo longo ou o artigo\.$/m);
   assert.match(cortes, /^Carrossel \(Instagram e LinkedIn\), 5 lâminas, uma mensagem por lâmina e cada uma puxando a próxima:$/m);
-  assert.match(cortes, /^- Lâmina 1 \(capa\): Promessa\.$/m);
+  /* 2026-10-02 · a capa é chamada para o público: o H1 da planta, não a promessa (instrução ao redator). */
+  assert.match(cortes, /^- Lâmina 1 \(capa\): Como atrair clientes pelo Instagram: o guia da clínica\.$/m);
   assert.match(cortes, /^- Lâmina 2: Por que o perfil não traz pacientes — Resposta direta\. Puxa a próxima: "Roteiro de três stories"\.$/m);
   assert.match(cortes, /^- Lâmina 5: CTA para o artigo \(https:\/\/clinica-exemplo\.com\.br\/como-atrair-clientes-pelo-instagram\), sem prometer resultado\.$/m);
 
   /* Proposta da IA: o capítulo avisa. Sem planta: a sequência de antes. */
-  assert.match(linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "DRAFT") }).diretrizes_de_roteiro, /proposta da IA, ainda sem aprovação: confira antes de gravar/);
+  /* 2026-10-02 · D10: o rascunho antigo também sai sem aviso de aprovação. */
+  assert.doesNotMatch(linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "DRAFT") }).diretrizes_de_roteiro, /proposta da IA|confira antes de gravar/);
   assert.doesNotMatch(linhaDe(entrada).diretrizes_de_roteiro, /da planta do artigo-modelo/);
 });
 
@@ -795,9 +806,51 @@ test("18 · a fala do vídeo: o trecho ligado ao tema (não a saudação), o cap
   ]);
   const entrada = entradaDoAssunto(INSTAGRAM, { videoContext: contexto });
   const biblioteca = linhaDe(entrada, { blueprint: artigoModeloDe(entrada, "APPROVED") }).biblioteca_da_marca;
-  assert.match(biblioteca, /^ {2}Trecho ligado ao tema \(transcrição automática, por volta de \d+% do vídeo; ache o tempo exato antes de usar\): "[^"]*contato no perfil/m);
+  /* 2026-10-02 · o estado do vídeo e o trecho candidato; sem duração registrada, a posição em %. */
+  assert.match(biblioteca, /^ {2}Estado: selecionado pela marca · trecho candidato encontrado · falta conferir o tempo e as palavras no vídeo para virar trecho casado\.$/m);
+  assert.match(biblioteca, /^ {2}Trecho candidato \(transcrição automática, por volta de \d+% do vídeo \(sem duração registrada; achar o tempo no vídeo\)\): "[^"]*contato no perfil/m);
+  assert.match(biblioteca, /^Nenhum trecho casado com as pautas ainda/m, "a coluna não diz que nada foi selecionado quando há seleção");
   assert.match(biblioteca, /^ {2}Ponto a explicar: capítulo "Por que o perfil não traz pacientes" · uso: Apoio, atribuído ao canal\.$/m);
   assert.match(biblioteca, /^ {2}Fala em inglês: traduza e revise antes de usar/m);
+});
+
+test("19 · premissa sem regra universal, demonstração em vez de cena, gancho sem conector, tempo estimado e problema → solução reconhecido", async () => {
+  const { radarVideoDurationSeconds, radarVideoHookQuestion, radarVideoPremise } = await import("../lib/radar/portable-video-export.ts");
+  const { radarYoutubeTitleOpportunities, radarYoutubeTitlePatterns } = await import("../lib/radar/youtube-blueprint.ts");
+  const entrada = entradaDoAssunto(INSTAGRAM);
+  const planta = artigoModeloDe(entrada, "APPROVED");
+  const absoluta = {
+    ...planta,
+    blueprint: {
+      ...planta.blueprint,
+      promise: "Mostrar como a clínica reconhece se o perfil alcança pessoas da região interessadas no atendimento.",
+      sections: planta.blueprint.sections.map((secao, indice) => indice === 0
+        ? { ...secao, answerFirst: "O Instagram foi feito para entretenimento, não para agendar.", explain: ["Pacientes procuram no Google, não no Instagram.", "A bio diz serviço, cidade e contato."], h3: ["Perfil antes", "O ajuste", "Perfil depois"], practical: null }
+        : secao),
+    },
+  };
+  const roteiro = linhaDe(entrada, { blueprint: absoluta }).diretrizes_de_roteiro;
+  assert.match(roteiro, /^Premissa do vídeo: O vídeo mostra como a clínica reconhece se o perfil alcança pessoas da região interessadas no atendimento\.$/m, "a promessa vira frase de quem fala");
+  assert.doesNotMatch(roteiro, /foi feito para entretenimento|procuram no Google, não no Instagram/, "a frase absoluta não vira capítulo");
+  assert.match(roteiro, /Entregar: a resposta a "Por que o perfil não traz pacientes\?" pelo que a pesquisa sustenta, sem regra universal/);
+  assert.match(roteiro, /Explicar: A bio diz serviço, cidade e contato\./);
+  assert.match(roteiro, /Mostrar na tela: passo a passo num exemplo identificado como ilustrativo: Perfil antes → O ajuste → Perfil depois\./, "demonstração pelos passos da seção");
+  assert.match(roteiro, /reorganize se o vídeo render mais abrindo pela demonstração/);
+  assert.equal(radarVideoPremise({ ...planta, blueprint: { ...planta.blueprint, promise: "O Instagram nunca traz pacientes." } }), 'O vídeo responde "Como atrair clientes pelo Instagram?" com o que a pesquisa sustenta.', "promessa absoluta não vira premissa");
+
+  assert.equal(radarVideoHookQuestion("Então como eu posso usar o Instagram para atrair clientes?"), "Como eu posso usar o Instagram para atrair clientes?");
+  assert.equal(radarVideoHookQuestion("Mas por que não funciona?"), "Por que não funciona?");
+  assert.equal(radarVideoHookQuestion("O perfil serve?"), "O perfil serve?");
+
+  assert.equal(radarVideoDurationSeconds("PT8M45S"), 525);
+  assert.equal(radarVideoDurationSeconds("8:45"), 525);
+  assert.equal(radarVideoDurationSeconds("1:02:10"), 3730);
+  assert.equal(radarVideoDurationSeconds("600"), 600);
+  assert.equal(radarVideoDurationSeconds("sem duração"), null);
+
+  const padroes = radarYoutubeTitlePatterns(["Por que o Instagram não traz pacientes (e o que fazer diferente)", "POR QUE meu INSTAGRAM NÃO traz CLIENTES? AJUSTES SIMPLES que FAZEM VENDER", "Como atrair clientes"]);
+  assert.equal(padroes.find(item => item.id === "PROBLEMA_SOLUCAO")?.count, 2);
+  assert.ok(!radarYoutubeTitleOpportunities(padroes).some(item => /^Problema → solução/.test(item)), "não é oportunidade o que a amostra já usa");
 });
 
 test("PROVIDER_CALLS = 0 e AI_CALLS = 0", () => {

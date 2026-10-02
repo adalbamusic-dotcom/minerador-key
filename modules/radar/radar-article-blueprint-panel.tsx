@@ -95,10 +95,11 @@ export function radarArticleBlueprintPanelChoice<V extends VersaoParaEscolha>(ve
  * vai se for do congelamento vigente — o painel não afirma o que não sabe.
  */
 export function radarArticleBlueprintPanelStateLabel(versao: Pick<Versao, "state" | "origin">, vaiAoCsvConferido: boolean): string {
+  /* 2026-10-02 · D10 · organizar e editar gravam a versão concluída: ela é a que vai ao CSV, ao Redator e ao MCP. */
   if (versao.state === "APPROVED") {
-    return vaiAoCsvConferido ? "Aprovado — vai ao CSV e ao Redator" : "Aprovado — vai ao CSV e ao Redator se for do congelamento vigente";
+    return vaiAoCsvConferido ? "Concluído — vai ao CSV, ao Redator e ao MCP" : "Concluído — vai aos entregáveis se for do congelamento vigente";
   }
-  return versao.origin === "human_edit" ? "Editado — aguardando aprovação" : "Proposta da IA — aguardando aprovação";
+  return "Versão antiga em rascunho — vai ao CSV assim mesmo; conclua ou organize de novo";
 }
 
 type SecaoEditada = { h2: string; readerQuestion: string; answerFirst: string; remove: boolean };
@@ -140,7 +141,7 @@ export function radarPhase1WithArticleBlueprint(acao: RadarPhase1Action, artigos
     info: [
       acao.info,
       `Depois de congelar, a IA organiza o artigo-modelo da SERP sobre o pacote congelado: ${chamadas} (DeepSeek, cota da marca); se a resposta vier cortada, o servidor tenta mais 1 vez.`,
-      "Se a IA falhar, a investigação continua finalizada e o painel \"Artigo-modelo da SERP\" oferece organizar de novo. A estrutura só vale como aprovada depois que você aprovar.",
+      "Se a IA falhar, a investigação continua finalizada e o painel \"Artigo-modelo da SERP\" oferece organizar de novo. O artigo-modelo sai concluído: com pendência na conferência, a IA corrige numa chamada a mais.",
     ].filter(Boolean).join(" "),
   };
 }
@@ -198,8 +199,8 @@ export function radarArticleBlueprintSeriesSummary(resultado: { done: readonly s
   const total = resultado.done.length + resultado.failed.length;
   if (!resultado.failed.length) {
     return total === 1
-      ? "Artigo-modelo da SERP organizado pela IA. Revise e aprove em Pesquisa → Artigo-modelo da SERP; até lá, o CSV \"Para escrever\" sai com ele marcado como proposta."
-      : `Artigo-modelo da SERP organizado em ${total} artigo(s) (${radarArticleBlueprintCallsLabel(total)}). Revise e aprove cada um em Pesquisa → Artigo-modelo da SERP.`;
+      ? "Artigo-modelo da SERP organizado e concluído: já vai ao CSV, ao Redator e ao MCP. Para mudar, edite em Pesquisa → Artigo-modelo da SERP; a edição vira a versão vigente."
+      : `Artigo-modelo da SERP organizado e concluído em ${total} artigo(s) (${radarArticleBlueprintCallsLabel(total)}). Para mudar, edite em Pesquisa → Artigo-modelo da SERP.`;
   }
   const primeira = resultado.failed[0].message;
   return total === 1
@@ -339,7 +340,7 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
         setAviso({ ok: false, texto: [corpo.error || "A ação não foi concluída.", ...(corpo.notes || [])].join(" ") });
         return;
       }
-      setAviso({ ok: true, texto: acao === "generate" ? "Artigo-modelo da SERP organizado pela IA. Revise, edite se precisar e aprove." : acao === "edit" ? "Edição salva como nova versão." : "Artigo-modelo aprovado: o CSV 'Para escrever' perde a marca de proposta e o Redator passa a usá-lo." });
+      setAviso({ ok: true, texto: acao === "generate" ? "Artigo-modelo da SERP organizado e concluído: já vai aos entregáveis." : acao === "edit" ? "Edição salva como a versão vigente: já vai aos entregáveis." : "Versão concluída: já vai ao CSV, ao Redator e ao MCP." });
       setEditando(false);
       setConfirmando(false);
       setRevisarNova(false);
@@ -383,7 +384,7 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div>
         <h3 className="text-base font-semibold text-foreground">Artigo-modelo da SERP</h3>
-        <p className="mt-1 text-sm leading-6 text-text-muted">A SERP monta o esqueleto; a IA organiza; você aprova. Enquanto não aprovar, o CSV &quot;Para escrever&quot; já sai com esta estrutura marcada como proposta da IA; aprovado, a marca some e ele chega ao Redator.</p>
+        <p className="mt-1 text-sm leading-6 text-text-muted">A SERP monta o esqueleto, a IA organiza e corrige o que a conferência apontar, e a planta sai concluída para o CSV, o Redator e o MCP. Para mudar, edite: a edição vira a versão vigente.</p>
       </div>
       {atual && <span className={`rounded-full border px-3 py-1 text-sm ${corDoEstado(atual)}`} data-testid="radar-article-blueprint-state">v{atual.versionNumber} · {radarArticleBlueprintPanelStateLabel(atual, vaiAoCsvConferido)}</span>}
     </div>
@@ -403,8 +404,8 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
         : "Nenhuma versão é do pacote vigente: organize de novo; até lá, o CSV sai sem artigo-modelo."}
     </p>}
     {!carregando && escolha.newerDraft && vaiAoCsv && <div className={`${bloco} flex flex-wrap items-center justify-between gap-2`} data-testid="radar-article-blueprint-newer-draft">
-      <p className="text-sm leading-6 text-pending">Há uma proposta mais nova deste congelamento (v{escolha.newerDraft.versionNumber}) aguardando aprovação. O CSV e o Redator seguem com a aprovada (v{vaiAoCsv.versionNumber}) até você aprovar a nova.</p>
-      <button type="button" className={botao} onClick={() => { setRevisarNova(!revisarNova); setEditando(false); }}>{revisarNova ? `Voltar à aprovada (v${vaiAoCsv.versionNumber})` : `Revisar a proposta v${escolha.newerDraft.versionNumber}`}</button>
+      <p className="text-sm leading-6 text-pending">Há uma versão antiga em rascunho mais nova (v{escolha.newerDraft.versionNumber}). Os entregáveis seguem com a concluída (v{vaiAoCsv.versionNumber}); conclua o rascunho se ele for o certo.</p>
+      <button type="button" className={botao} onClick={() => { setRevisarNova(!revisarNova); setEditando(false); }}>{revisarNova ? `Voltar à concluída (v${vaiAoCsv.versionNumber})` : `Ver o rascunho v${escolha.newerDraft.versionNumber}`}</button>
     </div>}
     {!carregando && !atual && !organizandoPelaPagina && !falhaDaPagina && !semTabela && <p className="text-sm leading-6 text-text-muted" data-testid="radar-article-blueprint-empty">
       Ainda não há artigo-modelo organizado para esta investigação (por exemplo, ela foi finalizada antes desta etapa existir). Organize quando quiser: a IA trabalha sobre o pacote congelado.
@@ -420,8 +421,8 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
       </div>
       : <div className="flex flex-wrap gap-2">
         <button type="button" className={atual ? botao : botaoPrincipal} disabled={travado || semTabela} onClick={() => setConfirmando(true)} data-testid="radar-article-blueprint-generate">{rotuloDeOrganizar}</button>
-        {atual && atual.state === "DRAFT" && !editando && <button type="button" className={botao} disabled={travado} onClick={abrirEdicao}>Editar</button>}
-        {atual && atual.state === "DRAFT" && !editando && <button type="button" className={botaoPrincipal} disabled={travado} onClick={() => void enviar("approve", { blueprintId: atual.id })} data-testid="radar-article-blueprint-approve">{ocupado === "approve" ? "Aprovando…" : "Aprovar artigo-modelo"}</button>}
+        {atual && !editando && <button type="button" className={botao} disabled={travado} onClick={abrirEdicao}>Editar</button>}
+        {atual && atual.state === "DRAFT" && !editando && <button type="button" className={botaoPrincipal} disabled={travado} onClick={() => void enviar("approve", { blueprintId: atual.id })} data-testid="radar-article-blueprint-approve">{ocupado === "approve" ? "Concluindo…" : "Concluir esta versão"}</button>}
       </div>)}
 
     {atual && atual.validation.length > 0 && <div className={bloco}>
@@ -498,7 +499,7 @@ export function RadarArticleBlueprintPanel({ brandId, articleId, job = null, cur
         return <li key={`${indice}-${secao.h2}`} className={bloco}>
           <p className="text-sm font-semibold text-foreground">H2 · {secao.h2}</p>
           {origem.length > 0 && <p className="mt-1 text-sm text-text-muted" data-testid="radar-article-blueprint-origin">Vem da SERP: {origem.join(" · ")}</p>}
-          {semOrigem && <p className="mt-1 text-sm text-warning" data-testid="radar-article-blueprint-no-origin">Sem origem na SERP: a IA acrescentou sem evidência. Remova ou confirme antes de aprovar.</p>}
+          {semOrigem && <p className="mt-1 text-sm text-text-muted" data-testid="radar-article-blueprint-no-origin">Proposta editorial do artigo: não vem de uma seção da SERP.</p>}
           <p className="mt-1 text-sm text-text-muted">Pergunta: {secao.readerQuestion}</p>
           <p className="text-sm text-foreground">Abre respondendo: {secao.answerFirst}</p>
           {secao.h3.length > 0 && <ul className="mt-1 list-disc pl-5 text-sm text-text-muted">{secao.h3.map(h3 => <li key={h3}>H3 · {h3}</li>)}</ul>}
