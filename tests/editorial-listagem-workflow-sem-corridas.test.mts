@@ -110,15 +110,28 @@ const migracaoCompacta = readFileSync(
   "utf8",
 ).replace(SEM_COMENTARIO, "");
 
-/** Só o corpo da função de compactação: a poda mora no mesmo arquivo. */
-const corpoCompactacao = migracaoCompacta.slice(
-  migracaoCompacta.indexOf("CREATE OR REPLACE FUNCTION public.editorial_radar_versao_compactada"),
-  migracaoCompacta.indexOf("COMMENT ON FUNCTION public.editorial_radar_versao_compactada"),
+/*
+ * 2026-10-02 · o corpo vigente mora em 20261002130000: a compactação passou a
+ * ser POR PERFIL. A antiga esvaziava toda corrida quando QUALQUER fotografia
+ * existia — e um artigo do Google finalizado perdia, na listagem, a pesquisa
+ * do YouTube ainda viva (a tela dizia "Nenhuma coleta ainda" sobre 51 vídeos).
+ */
+const migracaoPorPerfil = readFileSync(
+  new URL("../supabase/migrations/20261002130000_compactacao_por_perfil.sql", import.meta.url),
+  "utf8",
+).replace(SEM_COMENTARIO, "");
+
+/** Só o corpo da função de compactação, na versão vigente. */
+const corpoCompactacao = migracaoPorPerfil.slice(
+  migracaoPorPerfil.indexOf("CREATE OR REPLACE FUNCTION public.editorial_radar_versao_compactada"),
+  migracaoPorPerfil.indexOf("COMMENT ON FUNCTION public.editorial_radar_versao_compactada"),
 );
 
 function investigacaoCongelada() {
   return {
     finalizedBundle: { resumo: "congelado" },
+    amazonFrozenInvestigation: { resumo: "congelado" },
+    youtubeFrozenInvestigation: { resumo: "congelado" },
     amazonSearch: { items: ["peso"] },
     youtubeSearch: { items: ["peso"] },
     extractions: [{ url: "https://exemplo.test/1", body: "peso" }],
@@ -160,18 +173,66 @@ test("a marca COMPACT acompanha a perda — nem a mais, nem a menos", () => {
   const viva = { amazonSearch: { items: [1] }, extractions: [{ a: 1 }] };
   assert.equal(radarResearchIsFrozen(viva), false);
   assert.equal((compactRadarResearchForRead(viva as never) as Record<string, unknown>).researchTransport, undefined);
-  assert.match(corpoCompactacao, /WHEN NOT congelada THEN p_versao/, "a view devolve intacta a não congelada");
+  // A view só reescreve o payload quando algum perfil de fato perde conteúdo.
+  assert.match(
+    corpoCompactacao,
+    /WHEN tira_amostra OR tira_amazon OR tira_youtube THEN jsonb_set\(p_versao, ARRAY\['payload'\], pl, true\)\s+ELSE p_versao/,
+    "a view devolve intacta a versão sem perda",
+  );
 
   // Congelada sem nada a perder: intacta e SEM marca. Marcar aqui recusaria
   // escrita legítima, porque a base não é lossy.
   const congeladaVazia = { finalizedBundle: { x: 1 }, amazonSearch: null, youtubeSearch: null, extractions: [] };
   const semPerda = compactRadarResearchForRead(congeladaVazia as never) as Record<string, unknown>;
   assert.equal(semPerda.researchTransport, undefined, "nada perdido, nada marcado");
-  assert.match(corpoCompactacao, /WHEN NOT tem_corrida AND NOT tem_amostra THEN p_versao/, "a view faz o mesmo");
 
   // NULL não pode virar compactação: payload ausente faria `jsonb_typeof`
   // devolver NULL, e um NULL em `NOT congelada` cairia no ELSE.
   assert.match(corpoCompactacao, /coalesce\(/, "os sinais são coalescidos para false");
+});
+
+test("cada corrida só sai quando a fotografia DO SEU perfil existe (2026-10-02)", () => {
+  // O caso que quebrou: Google finalizado + pesquisa do YouTube viva, sem
+  // fotografia própria. A corrida viva é a única cópia; tirá-la escondia a
+  // coleta e o botão de finalizar depois de recarregar.
+  const googleCongeladoYoutubeVivo = {
+    finalizedBundle: { resumo: "congelado" },
+    youtubeSearch: { state: "COLLECTED", items: ["51 vídeos"] },
+    extractions: [{ url: "https://exemplo.test/1", body: "peso" }],
+  };
+  const lida = compactRadarResearchForRead(googleCongeladoYoutubeVivo as never) as Record<string, unknown>;
+  assert.deepEqual(lida.youtubeSearch, googleCongeladoYoutubeVivo.youtubeSearch, "a corrida viva do YouTube passa inteira");
+  assert.deepEqual(lida.extractions, [], "a amostra do Google, congelada, sai");
+  assert.equal(lida.researchTransport, "COMPACT", "algo saiu: marca");
+
+  // O mesmo vale para a Amazon e para o caminho inverso (YouTube congelado,
+  // Google ainda em coleta: a amostra fica).
+  const amazonViva = { youtubeFrozenInvestigation: { x: 1 }, youtubeSearch: { items: [1] }, amazonSearch: { items: [2] } };
+  const lidaAmazon = compactRadarResearchForRead(amazonViva as never) as Record<string, unknown>;
+  assert.equal(lidaAmazon.youtubeSearch, null, "a corrida do YouTube congelado sai");
+  assert.deepEqual(lidaAmazon.amazonSearch, amazonViva.amazonSearch, "a da Amazon viva fica");
+  const googleVivo = { youtubeFrozenInvestigation: { x: 1 }, extractions: [{ a: 1 }] };
+  const lidaGoogle = compactRadarResearchForRead(googleVivo as never) as Record<string, unknown>;
+  assert.deepEqual(lidaGoogle.extractions, googleVivo.extractions, "sem finalizedBundle a amostra do Google fica");
+  assert.equal(lidaGoogle.researchTransport, undefined, "nada saiu, nada marcado");
+
+  // A view casa cada campo com a SUA fotografia — nunca com um "congelada" global.
+  assert.match(corpoCompactacao, /'youtubeFrozenInvestigation'\) = 'object'\s+AND jsonb_typeof\(pl -> 'youtubeSearch'\) = 'object', false\) AS tira_youtube/);
+  assert.match(corpoCompactacao, /'amazonFrozenInvestigation'\) = 'object'\s+AND jsonb_typeof\(pl -> 'amazonSearch'\) = 'object', false\) AS tira_amazon/);
+  assert.match(corpoCompactacao, /'finalizedBundle'\) = 'object'\s+AND jsonb_typeof\(pl -> 'extractions'\) = 'array'/);
+  assert.match(corpoCompactacao, /CASE WHEN tira_youtube\s+THEN jsonb_set\(pl, ARRAY\['youtubeSearch'\]/);
+  assert.match(corpoCompactacao, /CASE WHEN tira_amazon\s+THEN jsonb_set\(pl, ARRAY\['amazonSearch'\]/);
+  assert.match(corpoCompactacao, /CASE WHEN tira_amostra\s+THEN jsonb_set\(pl, ARRAY\['extractions'\]/);
+  assert.doesNotMatch(corpoCompactacao, /congelada/, "o sinal global antigo não volta");
+
+  // A migration só troca o corpo: mesma assinatura, mesmo search_path fixo.
+  assert.match(corpoCompactacao, /SET search_path = pg_catalog, public, pg_temp/);
+  const rollback = readFileSync(
+    new URL("../supabase/rollback/20261002130000_compactacao_por_perfil.rollback.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(rollback, /CREATE OR REPLACE FUNCTION public\.editorial_radar_versao_compactada\(p_versao jsonb\)/);
+  assert.match(rollback, /WHEN NOT congelada THEN p_versao/, "o rollback devolve o corpo antigo");
 });
 
 test("a trava existe mesmo: base COMPACT não gera versão nova", () => {

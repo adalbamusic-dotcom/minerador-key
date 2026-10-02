@@ -146,12 +146,12 @@ export function radarPhase1WithArticleBlueprint(acao: RadarPhase1Action, artigos
 }
 
 /** POST "generate": organizar o artigo-modelo da SERP de um artigo finalizado. */
-export async function postRadarArticleBlueprintOrganize(input: { brandId: string; articleId: string; fetchImpl?: typeof fetch }): Promise<RadarArticleBlueprintOrganizeResult> {
+export async function postRadarArticleBlueprintOrganize(input: { brandId: string; articleId: string; ifMissing?: boolean; fetchImpl?: typeof fetch }): Promise<RadarArticleBlueprintOrganizeResult> {
   try {
     const resposta = await (input.fetchImpl ?? fetch)(RADAR_ARTICLE_BLUEPRINT_ROUTE, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "generate", brandId: input.brandId, articleId: input.articleId, confirmPaid: true }),
+      body: JSON.stringify({ action: "generate", brandId: input.brandId, articleId: input.articleId, confirmPaid: true, ...(input.ifMissing ? { ifMissing: true } : {}) }),
     });
     const corpo = await resposta.json().catch(() => ({})) as { success?: boolean; error?: string; notes?: string[]; version?: { versionNumber?: unknown } };
     if (!resposta.ok || !corpo.success) return { ok: false, message: [corpo.error || "A IA não organizou o artigo-modelo da SERP.", ...(corpo.notes || [])].join(" ") };

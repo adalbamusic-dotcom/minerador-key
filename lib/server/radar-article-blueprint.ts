@@ -187,10 +187,16 @@ export async function requestRadarArticleBlueprintAi(input: {
 }
 
 /** 1 chamada de IA, paga (2 só se a primeira vier cortada ou fora do formato), por clique explícito do dono. */
-export async function generateRadarArticleBlueprint(input: { client: SupabaseClient; brandId: string; articleId: string; actorUserId: string }): Promise<RadarArticleBlueprintRow> {
+export async function generateRadarArticleBlueprint(input: { client: SupabaseClient; brandId: string; articleId: string; actorUserId: string; ifMissing?: boolean }): Promise<RadarArticleBlueprintRow> {
   /* Onde gravar tem de existir ANTES da chamada paga: sem a tabela, nada de IA. */
-  await listRadarArticleBlueprints(input.client, input.brandId, input.articleId);
+  const existentes = await listRadarArticleBlueprints(input.client, input.brandId, input.articleId);
   const { montada, silo, publicacao, brandVoice } = await montagemDoArtigo(input);
+  /* Só se faltar (encadeamento automático): o mesmo pacote já organizado não paga a IA de novo. */
+  if (input.ifMissing) {
+    const doPacote = existentes.filter(item => item.bundleHash === montada.bundleHash);
+    const reaproveitada = doPacote.find(item => item.state === "APPROVED") || doPacote[0];
+    if (reaproveitada) return reaproveitada;
+  }
   /* A voz da marca (Skill corrente, Adendo C) entra em trechos por assunto, com teto (2026-10-02). */
   const brief = buildRadarArticleBlueprintBrief({ entrada: montada.entrada, silo, articleId: input.articleId, publication: publicacao, brandVoice: brandVoice.kind === "available" ? brandVoice.voice : null });
   const provider = await resolveDeepSeekCanonicalConfig({ actorUserId: input.actorUserId, brandId: input.brandId, client: input.client, quotaUnits: 1 });

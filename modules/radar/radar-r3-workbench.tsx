@@ -1504,7 +1504,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
           * investigação finalizada: ele organiza o pacote congelado.
           */}
         {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} canonicalLens={lenteDaCanonica(model.serp.view?.record.research)}
-          articleBlueprint={model.deepResearch.finalizedBundle && brandId && articleId ? <RadarArticleBlueprintPanel brandId={brandId} articleId={articleId} job={articleBlueprintJob} /> : null} />}
+          articleBlueprint={model.deepResearch.finalizedBundle && brandId && articleId ? <RadarArticleBlueprintPanel brandId={brandId} articleId={articleId} job={articleBlueprintJob} currentBundleHash={model.deepResearch.finalizedBundle.bundleHash} /> : null} />}
         {/*
           * AMAZON NÃO É UM LUGAR SEPARADO — é um dos destinos da pesquisa.
           *

@@ -236,7 +236,7 @@ Sem tabela nova: leitura server-side da versão ativa pelo repositório de Skill
 aditivos e opcionais no lote do export e no payload do artigo-modelo (`brandVoice`). Sem Skill ativa, tudo
 sai como hoje, com o aviso.
 
-## Adendo D — Artigo-modelo dentro da SERP e finalização automática (2026-10-02) — DECIDIDO PELO DONO
+## Adendo D — Artigo-modelo dentro da SERP e finalização automática (2026-10-02) — DECIDIDO PELO DONO, IMPLEMENTADO EM CÓDIGO
 
 ### D.1 Artigo-modelo é dado da SERP
 
@@ -265,10 +265,36 @@ Defeitos do YouTube encontrados no mapeamento (corrigidos junto): a projeção i
 apoio já coletado (ficava "Coletando" sem botão de finalizar); a gravação do apoio usava trava de versão velha
 e engolia o 409; o gerador de consultas duplicava o prefixo ("como como …").
 
+### D.3 Implementação (2026-10-02) — verificado no código e confirmado por teste
+
+- **D7:** o artigo-modelo recebe o esqueleto da SERP com ids (`M…`) e organiza só ele; schema e limites
+  compactos, fatias da voz por assunto em vez da Skill inteira, `thinkingMode` desligado e 1 nova tentativa
+  quando a resposta vem cortada ou inválida. Congelar (Google, YouTube ou Amazon) encadeia a organização. O
+  encadeamento manda `ifMissing`: se o MESMO `bundleHash` já tem versão (aprovada primeiro), ela é devolvida
+  ANTES de resolver o provider — acrescentar YouTube ou Amazon a um artigo do Google não paga a IA de novo. O
+  botão "Organizar de novo (IA)" não manda a opção.
+- **D8:** o export lê, por lote, a aprovada do pacote vigente, senão a proposta mais nova do mesmo pacote, com
+  a marca `PROPOSTA DA IA — aguardando aprovação no Radar`. O Redator segue só com a aprovada.
+- **D9:** `radarGoogleAutoFinalizeDecision` (Google) e `radarProfileAutoFinalizeDecision` (YouTube e Amazon)
+  decidem; a tela usa as MESMAS ações dos botões. Pendência para e diz o motivo e o botão manual
+  (`radarProfileManualStepLabel`). Os botões de coleta dizem "· e finaliza (+ 1 chamada de IA)"; o de
+  finalizar, "· inclui 1 chamada de IA".
+- **Defeito encontrado na homologação (corrigido):** a cópia de leitura esvaziava TODA corrida quando
+  QUALQUER fotografia existia. Com o Google finalizado, a coleta viva do YouTube (51 vídeos gravados) sumia da
+  tela depois de recarregar ("Nenhuma coleta ainda") e o botão de finalizar não aparecia — o automático nunca
+  teria em que agir. Agora cada corrida só sai quando a fotografia DO SEU perfil existe:
+  `compactRadarResearchForRead` (TS) e a função `editorial_radar_versao_compactada` (migration
+  `20261002130000_compactacao_por_perfil.sql`, rollback em `supabase/rollback/`), com teste de paridade.
+  A migration é aplicada pelo dono; sem ela, o servidor Next já corrige a compactação dele, mas a view continua
+  entregando a cópia antiga à listagem.
+- **Pendente de decisão do dono:** o clique manual em "Analisar" na Amazon continua encadeando o congelamento
+  quando não há pendência (hoje: sim, pela mesma função do automático).
+
 ## Decisões pendentes do Adendo
 
 - **D5:** APROVADO pelo dono em 2026-10-02 — botão "Gerar artigo-modelo (IA)" depois de finalizar, 1
   chamada por artigo com custo mostrado; revisão, edição e aprovação humana; só o aprovado vai ao CSV e ao
-  Redator. Começa primeiro.
+  Redator. Começa primeiro. (Substituído em parte por D7 e D8: organiza ao finalizar, e o CSV leva a
+  proposta marcada até a aprovação; o Redator continua só com o aprovado.)
 - **D6:** APROVADO pelo dono em 2026-10-02 — modos de uso dos vídeos com migration aditiva, depois do
   artigo-modelo.
