@@ -437,7 +437,8 @@ test("§9 · COMPETITIVE_GAPS nascem da diferença entre o ArticleDNA e a SERP",
   const corrida = corridaReal();
   const soLongForm = { ...corrida, universe: corrida.universe.filter(item => item.universeClass === "COMPARABLE_LONG_FORM") };
   const semShorts = buildRadarYoutubeBlueprint({ run: soLongForm, declaredIntent: null, editorialTopics: [], generatedAt: "2026-09-14T19:00:00.000Z" });
-  assert.ok(semShorts.recommended.gaps.some(item => item.kind === "FORMATO_AUSENTE" && /Shorts/.test(item.statement)));
+  /* 2026-10-02 · a frase diz o que a AMOSTRA mostra ("Nenhum Short identificado na amostra coletada"), não que não há disputa. */
+  assert.ok(semShorts.recommended.gaps.some(item => item.kind === "FORMATO_AUSENTE" && /^Nenhum Short identificado na amostra coletada/.test(item.statement)));
 });
 
 /* ==================== §10 e §11 · o blueprint final ==================== */

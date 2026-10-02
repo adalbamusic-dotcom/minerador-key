@@ -231,8 +231,24 @@ export type RadarPortableResearchLayer =
     refs: ReadonlyArray<{ collectedAt: string | null }>;
   };
 
-/** O bloqueio da prontidão: código e frase. O `detail` fica fora — ele carrega ids. */
-export type RadarPortableReadinessBlock = { code: string; message: string };
+/**
+ * O bloqueio da prontidão: código e frase. O `detail` em geral fica fora — ele
+ * carrega ids. 2026-10-02 · Aditivo: na divergência dossiê × congelado o detalhe
+ * é uma contagem ("Links recomendados: 5 no dossiê, 3 no congelado") e é o
+ * único jeito de saber O QUE divergiu; ele entra quando não traz id.
+ */
+export type RadarPortableReadinessBlock = { code: string; message: string; detail?: string };
+
+const UUID_NO_TEXTO = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const CODIGOS_COM_DETALHE = new Set(["DOSSIER_DIVERGES"]);
+
+function motivoDoBloqueio(bloco: RadarPortableReadinessBlock): string {
+  const base = BLOQUEIO[bloco.code]?.motivo || semPontoFinal(limpo(bloco.message)) || "a prontidão recusou o pacote sem nomear o motivo";
+  /* O id é conferido no texto CRU: `limpo` troca o UUID por um marcador, e o detalhe com id não entra. */
+  if (!CODIGOS_COM_DETALHE.has(bloco.code) || !bloco.detail || UUID_NO_TEXTO.test(bloco.detail)) return base;
+  const detalhe = semPontoFinal(limpo(bloco.detail));
+  return detalhe ? `${base} (${detalhe})` : base;
+}
 
 export type RadarPortableResearchStatusInput = {
   /**
@@ -379,7 +395,7 @@ export function radarPortableWriterReadiness(input: Pick<RadarPortableResearchSt
   const pronto = input.readiness.ready && input.articleDnaIdentityComplete !== false;
   if (pronto) return { state: "READY", label: RADAR_PORTABLE_WRITER_READY_LABEL, reasons: [], actions: [] };
 
-  const motivos = blocos.map(bloco => BLOQUEIO[bloco.code]?.motivo || semPontoFinal(limpo(bloco.message)) || "a prontidão recusou o pacote sem nomear o motivo");
+  const motivos = blocos.map(motivoDoBloqueio);
   const acoes = blocos.map(bloco => BLOQUEIO[bloco.code]?.acao || "confira a investigação no Radar");
   return {
     state: "BLOCKED",

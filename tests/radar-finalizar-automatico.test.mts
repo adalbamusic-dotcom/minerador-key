@@ -345,7 +345,8 @@ test("YouTube · o fim do START e do repetir apoio encadeiam o congelamento — 
     "void organizarArtigosModeloDaSerp([target.articleId]);",
   ]);
   const rotina = fatia(fonte, "const congelarInvestigacaoYoutube = async", "const finalizarYoutubeSemPendencia = async");
-  assert.ok(rotina.includes("return gravarYoutube(target, { youtubeFrozenInvestigation: congelada }, entrada.base);"), "a base relida é a base da escrita");
+  /* 2026-10-02 · Adendo E · a montagem virou `fotografiaDoYoutube` (o reparo compara antes de gravar); a escrita é a mesma. */
+  assert.ok(rotina.includes("gravarYoutube(target, { youtubeFrozenInvestigation: fotografiaDoYoutube(target, entrada) }, entrada.base)"), "a base relida é a base da escrita");
   assert.ok(rotina.includes("multimodalDoArtigo(target, { corrida: entrada.run, registros: serpRecordsAtuaisRef.current })"), "nada do render anterior entra na fotografia");
 });
 

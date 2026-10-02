@@ -13,6 +13,7 @@ import { radarAutoFinalizeButtonLabel, radarAutoFinalizePendingNotice, radarAuto
 import { RadarCompetitiveBlueprintSection } from "./radar-competitive-blueprint";
 import { RadarProfileBlueprintSection } from "./radar-profile-blueprint";
 import type { RadarEditorialProfileModel } from "@/lib/radar/editorial-profile-model";
+import { RadarRefreezePanel, type RadarRefreezeHandlers } from "./radar-refreeze-panel";
 
 /**
  * PESQUISA → AMAZON — AMAZON_SEARCH_1.1 · §8 a §20 e AMAZON_SEARCH_2 · §5 a §30.
@@ -73,6 +74,8 @@ export type RadarAmazonSearchPanelProps = {
   /** §25 · o congelamento, por decisão humana. */
   onFinalize?: () => void;
   onReset?: () => void;
+  /** 2026-10-02 · Adendo E · reparar o congelamento da Amazon (recongelar grátis ou zerar e coletar). */
+  refreeze?: RadarRefreezeHandlers | null;
   /**
    * 2026-10-02 · D9 · POR QUE A COLETA NÃO FINALIZOU SOZINHA.
    *
@@ -179,7 +182,7 @@ function PacoteDaPesquisa({ pacote, busy, counts, onRetrySupport }: {
   </section>;
 }
 
-export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReason, pacote, projecao, blueprintView, editorialModel, evidenceExtras, targetSetup, counts, frozen, sampleSummary, provenanceSummary, lazySample, lazyProvenance, onLoadSample, onLoadProvenance, onStart, onRetrySupport, onAnalyze, onFinalize, onReset, autoFinalizePending = null }: RadarAmazonSearchPanelProps) {
+export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReason, pacote, projecao, blueprintView, editorialModel, evidenceExtras, targetSetup, counts, frozen, sampleSummary, provenanceSummary, lazySample, lazyProvenance, onLoadSample, onLoadProvenance, onStart, onRetrySupport, onAnalyze, onFinalize, onReset, autoFinalizePending = null, refreeze = null }: RadarAmazonSearchPanelProps) {
   const finalizada = projecao.state === "FINALIZED";
   /*
    * A CORRIDA EFETIVA — a do payload quando ela veio, a buscada quando não.
@@ -343,6 +346,8 @@ export function RadarAmazonSearchPanel({ run, plannedQueries, busy, blockedReaso
           data-testid="radar-amazon-view-blueprint"
         >Ver blueprint</button>}
 
+        {/* 2026-10-02 · Adendo E · o reparo cirúrgico só existe sobre uma fotografia. */}
+        {finalizada && refreeze && <RadarRefreezePanel profile="AMAZON" disabled={busy} {...refreeze} />}
         {run && <button type="button" className={button} disabled={busy} onClick={() => onReset?.()} data-testid="radar-amazon-reset">
           {finalizada ? "Reabrir / zerar investigação" : "Zerar pesquisa Amazon"}
         </button>}

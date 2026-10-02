@@ -433,11 +433,12 @@ test("CSV: campo que veio vazio não deixa rótulo solto", () => {
   assert.match(colunas.estrutura, /- Link externo: Postar com frequência aumenta o alcance\. → fonte a obter$/m);
   assert.doesNotMatch(colunas.links_internos, /por quê: $/m);
   assert.match(colunas.links_internos, /onde: seção "Por que o perfil não traz pacientes"$/m);
-  assert.equal(colunas.plano_visual, "Plano visual: 1 imagem(ns).\nCapa\n  Prompt: consultório");
+  /* 2026-10-02 · prompt sem proporção ganha a referência (capa 16:9, respiro 4:3). */
+  assert.equal(colunas.plano_visual, "Plano visual: 1 imagem(ns).\nCapa\n  Prompt: consultório\n  Proporção: 16:9 (referência; ajuste ao layout do site e à voz da marca)");
   /* Com os campos preenchidos, o texto é o de antes. */
   const cheio = structuredClone(payload) as RadarArticleBlueprintPayload;
   cheio.blueprint.visual = [{ slot: "CAPA", section: null, concept: "agenda cheia", prompt: "consultório", alt: "Consultório com agenda", caption: "A agenda vem do perfil" }];
-  assert.equal(radarArticleBlueprintColumns(cheio).plano_visual, "Plano visual: 1 imagem(ns).\nCapa · agenda cheia\n  Prompt: consultório\n  ALT: Consultório com agenda\n  Legenda: A agenda vem do perfil");
+  assert.equal(radarArticleBlueprintColumns(cheio).plano_visual, "Plano visual: 1 imagem(ns).\nCapa · agenda cheia\n  Prompt: consultório\n  Proporção: 16:9 (referência; ajuste ao layout do site e à voz da marca)\n  ALT: Consultório com agenda\n  Legenda: A agenda vem do perfil");
 });
 
 test("CSV: a proposta leva as pendências que o servidor achou; a aprovada sai como antes", () => {

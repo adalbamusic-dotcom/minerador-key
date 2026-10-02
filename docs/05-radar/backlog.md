@@ -1,5 +1,39 @@
 # Backlog — Radar
 
+## Reparar congelamento, por perfil — 2026-10-02 (noite)
+
+- [x] Adendo E escrito e aprovado; domínio, painel e os três perfis implementados; catálogo MCP.
+- [ ] **Dono:** no artigo do Instagram, abrir "Reparar congelamento (Google)", ler a prévia e confirmar (grátis); depois aprovar o artigo-modelo reorganizado e exportar o CSV.
+- [ ] **Dono:** testar a prévia do YouTube e da Amazon num artigo finalizado (só leitura) e, se quiser, o caminho pago.
+- [ ] Gravar no congelado a versão da regra de leitura, para o bloqueio dizer "a regra mudou depois do congelamento; repare".
+- [ ] Teste de servidor da Amazon com repositório falso (hoje estrutural).
+- [ ] Varrer outros artigos com congelado anterior à limpeza de cabeçalhos (ex.: marca 09762023-…).
+
+## Briefing do CSV de vídeo — 2026-10-02 (tarde)
+
+- [x] Capítulos da planta com entregar, explicar, mostrar e fonte; gancho pela abertura da planta.
+- [x] Cortes com gancho, ideia única, mostrar, fonte e fechamento; carrossel por lâmina.
+- [x] Consultas repetidas ditas; perspectivas distintas; relevância dos concorrentes para o público.
+- [x] Lacunas e oportunidades de título sem afirmar além da amostra.
+- [x] Trecho da transcrição ligado ao tema; idioma e transcrição automática avisados.
+- [ ] Tempo do trecho: guardar os segmentos com tempo da transcrição e devolver início e fim.
+- [ ] Ligar o trecho ao "Casar pautas com o conteúdo" (hoje o casamento não achou trecho para nenhuma pauta).
+- [ ] Coleta do YouTube nova com o plano corrigido (paga, decisão do dono) para tirar as consultas repetidas da amostra.
+
+## Revisão do CSV do Instagram — 2026-10-02 (manhã)
+
+- [x] CSV sem truncar a estrutura nem apagar a SERP (tetos 14/32 mil, SERP por último, com piso).
+- [x] URL de evidência inteira; destino de link pelo nome; caminho provável com o prefixo do Silo; proporção das imagens.
+- [x] Abertura única com artigo-modelo; pergunta de abertura da principal.
+- [x] Aviso de origem M de outro assunto; regras novas no pedido à IA.
+- [x] Relatório lê o artigo-modelo (estrutura e links).
+- [x] Bloqueio por divergência diz o que divergiu.
+- [ ] **Dono decide:** "Recongelar com a leitura atual" (reaproveita extrações, sem provider, versão sucessora, clique humano) — precisa de SDD/adendo; ou reset + nova coleta paga.
+- [ ] Gravar a versão da regra semântica no congelado para o bloqueio dizer "a regra de leitura mudou depois do congelamento".
+- [ ] Outro artigo com congelado anterior à limpeza de cabeçalhos (marca 09762023-…) pode estar bloqueado do mesmo jeito.
+- [ ] Coluna "Relatório" da lista do Radar ler o artigo-modelo.
+- [ ] Vocabulário da voz da marca não chega à planta ("Google Meu Perfil" × "Perfil da Empresa no Google").
+
 ## Artigo-modelo da SERP, autoria, CSV de vídeo e finalização automática — 2026-10-02 (madrugada)
 
 - [x] Frente A: artigo-modelo organizado ao finalizar (D7), proposta marcada no CSV (D8), `ifMissing`, nova tentativa.

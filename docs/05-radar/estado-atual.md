@@ -1,5 +1,100 @@
 # Estado atual — Radar
 
+## Reparar congelamento, por perfil — 2026-10-02 (noite)
+
+**Verificado no código e confirmado por teste. NÃO validado na tela nem executado no artigo do Instagram: o
+reparo grava (Google, YouTube, Amazon) e o caminho pago coleta — homologação do dono.** SDD: Adendo E
+(`sdd-diretriz-editorial-pela-serp-2026-10-02.md`), aprovado pelo dono.
+
+- **Domínio** `lib/radar/refreeze-repair.ts`: decisão NOTHING / REFREEZE / RECOLLECT / NOT_FINALIZED,
+  comparação sem carimbos (tempo, autor, hash), diferenças rotuladas, projeção reaberta do Google e as
+  consequências ditas antes da escrita.
+- **Painel** `modules/radar/radar-refreeze-panel.tsx`: "Reparar congelamento (Google | YouTube | Amazon)",
+  só sobre a fotografia; prévia que só lê; "Recongelar com a leitura atual" ou "Zerar e coletar de novo (pago)".
+- **Google** (`radar-page.tsx`): prévia relê o servidor, projeta reaberta, mede a divergência com a MESMA régua
+  do bloqueio (`radarObservedDivergesFromFrozen`) e ensaia `finalizeRadarDeepResearch` +
+  `freezeRadarEvidenceBundle`; recongelar = reabrir (trava já aceita) + `finalizarInvestigacaoGoogle` sobre a
+  linha relida. Pago = `buildRadarResetPayload` com `requireRemote` e readback, depois `startDeepResearch`.
+- **YouTube**: `resolveRadarFrozenRun` + `fotografiaDoYoutube` (a montagem do Finalizar, agora separada da
+  escrita); recongelar numa escrita. Pago = reset confirmado pelo servidor + `startYoutubeSearch`.
+- **Amazon**: ação `refreeze` (com `dryRun`) na rota; `refreezeRadarAmazonInvestigation` usa as MESMAS
+  `validarColetaAmazon`, `montarBlueprintAmazon` e `fotografiaAmazon` de analisar e finalizar; uma escrita.
+  Pago = reset confirmado + `startAmazonSearch`.
+- **Continuação do pago:** a coleta começa quando a tela mostra o perfil zerado (o início lê o artigo do
+  render); outro artigo aberto no meio cancela, com aviso. Hooks antes do retorno antecipado da página.
+- **Correção do que eu disse antes:** recongelar NÃO reaproveita o artigo-modelo atual — o hash do dossiê
+  muda; a prévia avisa a nova organização (1 chamada de IA) e a nova aprovação.
+- Testes: `tests/radar-reparo-congelamento.test.mts` (9); ajustados `radar-amazon-search-11`,
+  `radar-editorial-profiles-21`, `radar-finalizar-automatico`. Radar 2869/0, Redator 357/0, MCP 134/0,
+  agent 65/0; tsc e eslint sem erro; sistema visual só com a falha antiga de `professional-writer.tsx`.
+- **Limites:** o Google grava em duas escritas (o ensaio reduz o risco; se a segunda falhar, fica reaberto e
+  "Finalizar pesquisa" conclui); o servidor da Amazon é testado de forma estrutural (lê o repositório de
+  artefatos); homologação na tela pendente.
+
+## Briefing do CSV de vídeo — 2026-10-02 (tarde)
+
+**Verificado no código e confirmado por teste. Validado no local por POST de leitura (`mode: "video"`, artigo do
+Instagram): capítulos da planta, cortes e carrossel com conteúdo, relevância dos concorrentes, consultas repetidas
+marcadas, trecho do tema nas transcrições, aviso de inglês, sem célula cortada.**
+
+- **Capítulos da planta** (`capitulosDaPlanta`): com artigo-modelo (e fora do formato curto), cada seção vira um
+  capítulo com pergunta do público, "Entregar" (a resposta que abre), "Explicar", "Mostrar na tela" (entrega
+  prática ou conceito da imagem) e "Antes de afirmar" (link externo que pede fonte). Os blocos da SERP do YouTube
+  ficam como ritmo. Proposta da IA é avisada ("confira antes de gravar").
+- **Gancho:** com planta, só a abertura dela, e só se fala da principal; preposição ("pelo") não conta como raiz
+  do tema (`RADAR_WRITING_FUNCTION_WORDS`, vale também para a abertura do CSV para escrever).
+- **Cortes e carrossel:** cada corte com gancho, ideia única, o que mostrar, fonte e fechamento; o carrossel com
+  capa (promessa), uma lâmina por capítulo com a primeira oração inteira, "Puxa a próxima" e lâmina de CTA.
+- **Pesquisa do YouTube:** consulta que repete outra (palavra duplicada; prefixo sobre busca já enquadrada) é
+  dita, e "aparece em N consultas distintas" conta perspectivas; cada vídeo do topo tem relevância para o público
+  (mesmo, próximo, geral, outro) pelo título e pelo canal, com resumo; lacunas na frase da amostra ("Nenhum Short
+  identificado…", "Pouca credencial visível…"), inclusive nas corridas gravadas antes; "Ranking" não é oportunidade
+  quando há lista na amostra; o padrão "Lista numerada" virou "Lista (dicas, melhores, top)".
+- **Fala dos vídeos selecionados:** o leitor traz o corpo da transcrição corrente com teto de 20 mil caracteres
+  (`textBody`, aditivo); o CSV mostra a janela que mais nomeia o tema e os capítulos (a saudação perde ponto), a
+  posição aproximada, o capítulo que ela sustenta e o aviso de idioma (inglês: traduzir e revisar) ou de
+  transcrição automática.
+- Célula do CSV de vídeo: 6 → 10 mil caracteres (`RADAR_VIDEO_EXPORT_CELL_CHARS`).
+- Testes: `radar-csv-video-roteiro` 14–18 (novos) e ajustes em 4, 10, 10b, 12; `radar-youtube-search-2-blueprint`
+  §9. Radar, Redator 357/0, MCP 134/0, agent 65/0; tsc e eslint limpos.
+- **Limites:** sem tempo por trecho (a transcrição lida é texto corrido): o tempo exato se acha no vídeo; as frases
+  dos capítulos vêm da planta — a proposta atual ainda tem afirmações categóricas, que a próxima organização trata;
+  o bloqueio por divergência continua até recongelar.
+
+## Revisão do CSV do Instagram: integridade, links, Relatório e o bloqueio — 2026-10-02 (manhã)
+
+**Verificado no código e confirmado por teste. Validado no local por POST de leitura em `/api/editorial/radar-export`
+(artigo do Instagram): nenhuma célula cortada (~29 mil caracteres na linha), nenhuma URL com "…", destinos pelo
+nome, caminho provável com o prefixo do Silo, proporção nas imagens, abertura única.**
+
+- **Corte do CSV:** estrutura até 14 mil e artigo até 32 mil (eram 8 e 20 mil); ordem do corte: "cobrir e superar",
+  fontes, plano visual e, por último, a SERP resumida, que guarda ao menos 1.500 caracteres (`cutFloorChars`).
+  O CSV é para escrever fora da plataforma; o Redator tem os seus fundamentos com corte próprio.
+- **Planta no CSV** (`radarArticleBlueprintColumns`): URL de evidência inteira (o corte em 90 caracteres caía no
+  endereço); destino do link sem a moldura "Cobrir com clareza o tema…" (também no brief); caminho planejado
+  ganha "caminho provável" com o prefixo da URL publicada deste artigo quando o último trecho dela é o slug;
+  imagem sem proporção ganha a referência (capa 16:9, respiro 4:3).
+- **Abertura única:** com artigo-modelo, "cobrir e superar" remete à abertura dele; sem ele, a pergunta de
+  abertura prefere a que divide ao menos duas raízes com a principal (vale também para o gancho do CSV de vídeo).
+- **Conferência da IA:** aviso quando a seção cita uma M de outro assunto ("…cita M1 … mas não trata do
+  assunto dela"); o pedido ganhou regras de abertura, imagem (proporção, sem texto legível, SVG para diagrama,
+  nada de tela fictícia de resultado), afirmação delimitada (sem regra universal, sem receita de gratuidade,
+  urgência ou antes/depois) e origem. Valem nas próximas organizações; versões já gravadas não mudam.
+- **Relatório:** "Estrutura editorial" e "Links internos" leem o artigo-modelo do pacote congelado (proposta 50%,
+  aprovada 100%; links só com os destinos do grafo). Planta de outro pacote não conta.
+- **Bloqueio por divergência:** o CSV diz o que divergiu (sem id). No artigo do Instagram: os conceitos e as
+  afirmações a sustentar (12 × 13). **Causa (diagnóstico, só leitura):** o congelado é de 2026-10-02 02:44Z; a
+  limpeza de cabeçalhos de concorrentes (`radarCleanCompetitorHeading`, commit 8624781) entrou depois e mudou os
+  ids dos conceitos sobre as MESMAS extrações. Refinalizar não grava (`finalizeRadarDeepResearch` recusa
+  investigação finalizada); o único caminho hoje é o reset, que refaz a coleta paga. A divergência é real e
+  continua bloqueando. O artigo-modelo foi organizado sobre o dossiê de hoje (`bundle-hash:7fd9706e`), por isso
+  o painel e o Relatório não o reconhecem como do pacote congelado.
+- Testes: `tests/radar-csv-revisao-pacote.test.mts` (8); ajustados `radar-portable-writing-export`,
+  `radar-csv-video-roteiro`, `radar-artigo-modelo-serp`. Radar 2855/0, Redator 357/0, MCP 134/0, agent 65/0;
+  tsc e eslint limpos.
+- **Limites:** recongelar com a leitura atual exige decisão do dono (workflow e artefato congelado: SDD);
+  a coluna "Relatório" da lista do Radar ainda usa a leitura antiga (a planta é lida só no painel do artigo).
+
 ## Artigo-modelo da SERP, autoria, CSV de vídeo e finalização automática — 2026-10-02 (madrugada)
 
 **Verificado no código e confirmado por teste. Validado no local (POST de leitura em `/api/editorial/radar-export`):

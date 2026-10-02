@@ -163,7 +163,8 @@ test("E, F e G · a ordem do apoio é a da consequência, e o retry não repaga 
   assert.equal(/action: "collect"/.test(corpo), false, "o retry nunca manda a intenção de coletar");
 
   /* E o servidor separa as duas intenções — não é só o cliente que promete. */
-  assert.match(rota, /action: z\.enum\(\["collect", "retry-support", "analyze", "finalize"(, "resolve-product")?\]\)/);
+  /* 2026-10-02 · Adendo E · `refreeze` (reparo do congelamento, sem provider) entrou ao fim da lista. */
+  assert.match(rota, /action: z\.enum\(\["collect", "retry-support", "analyze", "finalize"(, "resolve-product")?(, "refreeze")?\]\)/);
   const ondeRetry = rota.indexOf('input.action === "retry-support"');
   assert.ok(ondeRetry > 0, "o servidor tem um ramo próprio para o retry do apoio");
 });

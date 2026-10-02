@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { RadarArticleBlueprintEdit, RadarArticleBlueprintPayload, RadarArticleBlueprintSkeletonItem } from "@/lib/radar/article-blueprint";
+import { radarArticleBlueprintReportFacts, type RadarArticleBlueprintEdit, type RadarArticleBlueprintPayload, type RadarArticleBlueprintReportFacts, type RadarArticleBlueprintSkeletonItem } from "@/lib/radar/article-blueprint";
 import type { RadarPhase1Action } from "@/lib/radar/serp-phase1";
 
 /**
@@ -235,6 +235,26 @@ async function lerVersoes(brandId: string, articleId: string): Promise<Leitura> 
   } catch {
     return { error: "Sem resposta do servidor ao ler o artigo-modelo.", missingTable: false };
   }
+}
+
+/**
+ * 2026-10-02 · O ARTIGO-MODELO PARA O RELATÓRIO. Só leitura (GET): a versão do
+ * pacote vigente pela mesma regra do painel e do export, resumida para os
+ * pilares de estrutura e links. `null` enquanto lê, sem versão ou com erro —
+ * e aí o Relatório fica com a leitura de antes.
+ */
+export function useRadarArticleBlueprintForReport(brandId: string | null, articleId: string | null, currentBundleHash: string | null): ({ approval: "APPROVED" | "DRAFT" } & RadarArticleBlueprintReportFacts) | null {
+  const [versoes, setVersoes] = useState<Versao[] | null>(null);
+  useEffect(() => {
+    if (!brandId || !articleId || !currentBundleHash) return;
+    let vivo = true;
+    void lerVersoes(brandId, articleId).then(leitura => { if (vivo) setVersoes("error" in leitura ? [] : leitura.versions); });
+    return () => { vivo = false; };
+  }, [brandId, articleId, currentBundleHash]);
+  if (!versoes || !currentBundleHash) return null;
+  const escolhida = radarArticleBlueprintPanelChoice(versoes, currentBundleHash).shown;
+  if (!escolhida || escolhida.bundleHash !== currentBundleHash) return null;
+  return { approval: escolhida.state, ...radarArticleBlueprintReportFacts(escolhida.payload) };
 }
 
 /** 2026-10-02 · De onde a seção veio: as seções M do esqueleto e as evidências, pelo que a versão guardou. */

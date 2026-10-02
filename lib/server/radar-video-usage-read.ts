@@ -60,6 +60,13 @@ export async function readRadarArticleVideoUsages(
 
 /** O teto da prévia de texto de um vídeo selecionado. Nunca a transcrição inteira. */
 const PREVIA = 600;
+/**
+ * 2026-10-02 · O teto do CORPO lido para escolher o trecho ligado ao tema (CSV
+ * de vídeo). O começo da fala costuma ser saudação ("olá pessoal, sejam bem
+ * vindos"); o trecho útil está adiante. 20 mil caracteres cobrem uns 15 minutos
+ * de fala, só dos vídeos que a marca selecionou com modo.
+ */
+const CORPO = 20_000;
 
 /**
  * OS MODOS DO LOTE, para o export — UMA leitura de vínculos para todos os artigos.
@@ -153,6 +160,7 @@ export async function readRadarVideoUsagesForExport(
      */
     const precisamDePrevia = [...new Set(comModo.map(linha => linha.videoSourceId))];
     const previas = new Map<string, string>();
+    const corpos = new Map<string, string>();
     if (precisamDePrevia.length) {
       const versoes = await client.from("radar_video_source_texts")
         .select("id,video_source_id,processing_version")
@@ -184,9 +192,13 @@ export async function readRadarVideoUsagesForExport(
               /* Só a versão escolhida, e da fonte que a escolheu. */
               const fonte = escolhidas.get(String(linha.id));
               if (!fonte || fonte !== String(linha.video_source_id) || previas.has(fonte)) continue;
-              const bruto = typeof linha.transcript_text === "string" ? linha.transcript_text.slice(0, PREVIA * 2) : "";
+              const bruto = typeof linha.transcript_text === "string" ? linha.transcript_text.slice(0, CORPO) : "";
               const texto = textoOuNulo(bruto);
-              if (texto) previas.set(fonte, texto.replace(/\s+/g, " ").slice(0, PREVIA));
+              if (texto) {
+                const corrido = texto.replace(/\s+/g, " ");
+                previas.set(fonte, corrido.slice(0, PREVIA));
+                corpos.set(fonte, corrido);
+              }
             }
           }
         }
@@ -207,6 +219,7 @@ export async function readRadarVideoUsagesForExport(
         duration: textoOuNulo(meta.duration),
         description: textoOuNulo(meta.video_description),
         textPreview: previas.get(linha.videoSourceId) ?? null,
+        textBody: corpos.get(linha.videoSourceId) ?? null,
       });
       saida.set(linha.articleId, lista);
     }

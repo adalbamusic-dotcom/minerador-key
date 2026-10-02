@@ -122,11 +122,22 @@ export type RadarWritingVerdict = "Sim" | "Com ressalva" | "Não";
  * Quando a linha passa do teto, corta-se primeiro a SERP resumida, depois o
  * "cobrir e superar", e o corte é declarado na própria célula. Ordem, veredito,
  * identidade, estrutura, links, produtos e prompt nunca são cortados.
+ *
+ * 2026-10-02 · TETOS NOVOS E A SERP POR ÚLTIMO. Com o artigo-modelo, a
+ * estrutura passou de 8 mil (6 H2 com origem, evidências, links e imagem) e a
+ * linha de 20 mil: a última seção saía cortada e a SERP resumida inteira virava
+ * "[…] Cortado" — justo o índice que dá sentido aos ids S, P e C da estrutura.
+ * O CSV é para escrever FORA da plataforma (o Redator tem os seus fundamentos,
+ * com corte próprio); 14 mil na estrutura e 32 mil no artigo seguem longe dos
+ * 32.767 por célula do Excel. A ordem do corte passa a ser "cobrir e superar",
+ * fontes, plano visual e, por último, a SERP, que nunca some inteira.
  */
 export const RADAR_WRITING_EXPORT_LIMITS = {
   cellChars: 6_000,
-  structureChars: 8_000,
-  articleChars: 20_000,
+  structureChars: 14_000,
+  articleChars: 32_000,
+  /** O mínimo da célula cortável no primeiro passe: o começo da SERP (índice S/P/C) fica. */
+  cutFloorChars: 1_500,
   foundationsBytes: WRITER_EVIDENCE_LIMITS.foundationsMaxBytes,
   thirdPartyExcerptChars: 160,
   titleChars: 90,
@@ -422,6 +433,9 @@ const semMolduraDoTema = (valor: string | null | undefined): string | null => {
 };
 
 const EH_FAQ = /\b(faq|perguntas frequentes|d[uú]vidas frequentes)\b/i;
+
+/** 2026-10-02 · Palavras funcionais que o radical não remove: não contam como raiz do tema. */
+export const RADAR_WRITING_FUNCTION_WORDS: ReadonlySet<string> = new Set(["pelo", "pela", "pelos", "pelas", "para", "como", "com", "sem", "sobre", "que", "dos", "das", "nos", "nas", "uma", "uns", "umas", "seu", "sua", "seus", "suas", "mais"]);
 
 const VAZIAS = new Set([
   "a", "as", "o", "os", "um", "uma", "de", "da", "do", "das", "dos", "em", "na", "no", "nas", "nos",
@@ -1430,7 +1444,21 @@ export function radarWritingOpeningQuestion(p: Projecoes, foraDoEscopo: (valor: 
   /* Só raiz da PRINCIPAL vira cenário (ex.: "instagram"). */
   const daPrincipal = new Set(radarSemanticStems(texto(p.dna.principalKeyword) || ""));
   const onipresentes = new Set([...radarUbiquitousStems(todas)].filter(raiz => daPrincipal.has(raiz)));
-  const escolhida = nucleo.size ? todas.find(pergunta => radarTextAdheresToCore(pergunta, nucleo, onipresentes)) : todas[0];
+  const aderentes = nucleo.size ? todas.filter(pergunta => radarTextAdheresToCore(pergunta, nucleo, onipresentes)) : todas;
+  /*
+   * 2026-10-02 · ENTRE AS ADERENTES, A QUE FALA DA PRINCIPAL. "Como captar
+   * clientes pelo WhatsApp?" adere pelo "clientes", mas é outro canal; a
+   * abertura de "como atrair clientes pelo instagram" vinha dela. Primeiro a
+   * que divide ao menos duas raízes com a principal; sem nenhuma, a de antes.
+   */
+  /* Preposição ("pelo", "para") não é raiz do tema: "…clientes pelo WhatsApp" não fala da principal por ela. */
+  const raizesDaPrincipal = [...daPrincipal].filter(raiz => !RADAR_WRITING_FUNCTION_WORDS.has(raiz));
+  const minimo = Math.min(2, raizesDaPrincipal.length);
+  const daPropriaPrincipal = minimo ? aderentes.find(pergunta => {
+    const raizes = new Set(radarSemanticStems(pergunta));
+    return raizesDaPrincipal.filter(raiz => raizes.has(raiz)).length >= minimo;
+  }) : undefined;
+  const escolhida = daPropriaPrincipal ?? aderentes[0];
   return escolhida ? radarWritingDecodeEntities(escolhida) : null;
 }
 
@@ -1489,7 +1517,14 @@ function colunaCobrir(
 
   /* ---- como superar a SERP, a partir dos campos estruturados ---- */
   const movimentos: string[] = [];
-  if (perguntaDeAbertura) {
+  /*
+   * 2026-10-02 · COM O ARTIGO-MODELO, A ABERTURA É A DELE. Duas aberturas no
+   * mesmo arquivo (a da planta e a desta coluna) davam ordens contraditórias a
+   * quem escreve; aqui fica só a remissão.
+   */
+  if (contexto.blueprint) {
+    movimentos.push("Abertura: a do artigo-modelo (coluna estrutura); as perguntas abaixo entram nas seções.");
+  } else if (perguntaDeAbertura) {
     const vezes = p.serp.questions.find(item => radarWritingCompareKey(item.question) === radarWritingCompareKey(perguntaDeAbertura));
     movimentos.push(`Responder ${entreAspas(perguntaDeAbertura)} logo no primeiro parágrafo${vezes ? ` (${vezes.pages} de ${vezes.sampleSize} páginas tratam)` : ""}.`);
   }
@@ -2085,7 +2120,7 @@ function veredito(bloqueios: readonly string[], ressalvas: readonly string[]): {
 
 /* ============================== os limites da linha ============================== */
 
-const CORTAVEIS: readonly RadarWritingExportColumn[] = ["serp_resumida", "cobrir_e_superar", "fontes_e_especialista", "plano_visual"];
+const CORTAVEIS: readonly RadarWritingExportColumn[] = ["cobrir_e_superar", "fontes_e_especialista", "plano_visual", "serp_resumida"];
 
 function cortarCelula(celula: string, limite: number, motivo: string): string {
   if (celula.length <= limite) return celula;
@@ -2108,12 +2143,16 @@ function dentroDosLimites(linha: RadarWritingExportRow): RadarWritingExportRow {
     saida[coluna] = cortarCelula(saida[coluna], limite, `Célula cortada no limite de ${numeroBr(limite)} caracteres.`);
   }
   const total = () => RADAR_WRITING_EXPORT_COLUMNS.reduce((soma, coluna) => soma + saida[coluna].length, 0);
-  for (const coluna of CORTAVEIS) {
-    const excesso = total() - RADAR_WRITING_EXPORT_LIMITS.articleChars;
-    if (excesso <= 0) break;
-    const alvo = Math.max(0, saida[coluna].length - excesso);
-    const motivo = `Cortado para o artigo caber em ${numeroBr(RADAR_WRITING_EXPORT_LIMITS.articleChars)} caracteres.`;
-    saida[coluna] = alvo < motivo.length + 10 ? `[…] ${motivo}` : cortarCelula(saida[coluna], alvo, motivo);
+  const motivo = `Cortado para o artigo caber em ${numeroBr(RADAR_WRITING_EXPORT_LIMITS.articleChars)} caracteres.`;
+  /* Primeiro passe: cada cortável guarda o começo. Só se ainda não couber, o segundo corta sem piso. */
+  for (const piso of [RADAR_WRITING_EXPORT_LIMITS.cutFloorChars, 0]) {
+    for (const coluna of CORTAVEIS) {
+      const excesso = total() - RADAR_WRITING_EXPORT_LIMITS.articleChars;
+      if (excesso <= 0) return saida;
+      if (saida[coluna].length <= piso) continue;
+      const alvo = Math.max(piso, saida[coluna].length - excesso);
+      saida[coluna] = alvo < motivo.length + 10 ? `[…] ${motivo}` : cortarCelula(saida[coluna], alvo, motivo);
+    }
   }
   return saida;
 }
@@ -2290,7 +2329,7 @@ export function buildRadarWritingExportArticle(input: RadarPortableExportInput, 
     prompt: colunaPrompt(contexto, especificas, decisao.verdict === "Não" ? decisao.primeira : null, unidade),
   };
   /* O artigo-modelo APROVADO decide as colunas de planta; o resto continua como era. */
-  if (contexto.blueprint && !soIdentidade) Object.assign(linha, radarArticleBlueprintColumns(contexto.blueprint, videosAoVivo));
+  if (contexto.blueprint && !soIdentidade) Object.assign(linha, radarArticleBlueprintColumns(contexto.blueprint, videosAoVivo, { slug: texto(publicacao?.slug) || texto(input.article.slug), publishedUrl: texto(publicacao?.publishedUrl) }));
   if (contexto.brandVoice && !soIdentidade) {
     linha.promessa_e_leitor = [
       linha.promessa_e_leitor,

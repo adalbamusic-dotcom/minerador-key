@@ -347,7 +347,8 @@ test("L · UM START visível, e o painel não chama provider nem grava", () => {
    * rota, e nenhuma porta lateral nasce ao lado dela.
    */
   const idas = pagina.match(/"\/api\/editorial\/radar-amazon-search"/g) || [];
-  assert.equal(idas.length, 4, "collect, retry-support, resolve-product e o caminho de analyze/finalize");
+  /* 2026-10-02 · Adendo E · e o reparo do congelamento (`refreeze`, sem provider), pela MESMA rota. */
+  assert.equal(idas.length, 5, "collect, retry-support, resolve-product, o caminho de analyze/finalize e o refreeze");
   assert.equal((pagina.match(/action: "collect"/g) || []).length, 2, "um START de YouTube e um da Amazon");
 });
 

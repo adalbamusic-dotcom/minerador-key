@@ -47,7 +47,8 @@ import { buildRadarSerpLensCoverage } from "@/lib/radar/serp-lens-coverage";
 import { radarAuxiliaryLensLabel, radarCanonicalLensLabel, radarFrozenLensView } from "./radar-serp-lens-view";
 import { radarCandidateEvidenceLabel } from "./radar-subject-turn-view";
 import { radarSeoGuidelineState } from "@/lib/radar/seo-guidelines";
-import { RadarArticleBlueprintPanel, radarPhase1WithArticleBlueprint, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
+import { RadarRefreezePanel, type RadarRefreezeHandlers } from "./radar-refreeze-panel";
+import { RadarArticleBlueprintPanel, radarPhase1WithArticleBlueprint, useRadarArticleBlueprintForReport, type RadarArticleBlueprintJob } from "./radar-article-blueprint-panel";
 
 /** A cobertura de lentes da SERP canônica viva, para a linha da consulta central. */
 function lenteDaCanonica(research: SerpResearchSnapshot | null | undefined) {
@@ -142,6 +143,8 @@ type RadarR3WorkbenchProps = {
   /** A curadoria do universo pesquisado: marcar (rascunho) e confirmar (escrita). */
   /** Zera a investigação deste artigo de teste. Não toca nos fundamentos. */
   onResetInvestigation?: () => void;
+  /** 2026-10-02 · Adendo E · reparar o congelamento do Google (recongelar grátis ou zerar e coletar). */
+  googleRefreeze?: RadarRefreezeHandlers | null;
   /** O modo da pesquisa principal e a troca, disponível antes de iniciar. */
   searchMode?: RadarPrimarySearchMode;
   /**
@@ -380,6 +383,8 @@ function ResearchUnavailable({ model }: { model: RadarR3Model }) {
  * provider que não passe por um clique.
  */
 export type RadarYoutubeSearchTab = {
+  /** 2026-10-02 · Adendo E · reparar o congelamento do YouTube. */
+  refreeze?: RadarRefreezeHandlers | null;
   run: RadarYoutubeSearchRun | null;
   plannedQueries: number;
   busy: boolean;
@@ -420,6 +425,8 @@ export type RadarYoutubeSearchTab = {
  * clique — e, neste perfil, por um clique só.
  */
 export type RadarAmazonSearchTab = {
+  /** 2026-10-02 · Adendo E · reparar o congelamento da Amazon. */
+  refreeze?: RadarRefreezeHandlers | null;
   run: RadarAmazonSearchRun | null;
   plannedQueries: number;
   busy: boolean;
@@ -540,7 +547,7 @@ function WriterHandoff({ tab }: { tab: RadarWriterHandoffTab }) {
   </div>;
 }
 
-function DeepResearch({ view, busy, searchMode, researchProjection, researchBlueprint, onSearchModeChange, onStart, onAnalyze, onFinalize, onReset, onRecover, youtubeSearch, amazonSearch, writerHandoff, googleResearch, evidenceExtras, articleBlueprint = null, canonicalLens = null }: { articleBlueprint?: React.ReactNode; canonicalLens?: { snapshotId: string; label: string } | null; view: RadarDeepResearchView; busy: boolean; searchMode: RadarPrimarySearchMode; researchProjection?: RadarResearchProfileProjection | null; researchBlueprint?: RadarCompetitiveBlueprintView | null; onSearchModeChange?: (mode: RadarPrimarySearchMode) => void; onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onReset?: () => void; onRecover?: () => void; youtubeSearch?: RadarYoutubeSearchTab; amazonSearch?: RadarAmazonSearchTab; writerHandoff?: RadarWriterHandoffTab; googleResearch?: RadarGoogleResearchTab; evidenceExtras?: React.ReactNode }) {
+function DeepResearch({ view, busy, searchMode, researchProjection, researchBlueprint, onSearchModeChange, onStart, onAnalyze, onFinalize, onReset, onRecover, youtubeSearch, amazonSearch, writerHandoff, googleResearch, evidenceExtras, articleBlueprint = null, canonicalLens = null, refreeze = null }: { refreeze?: RadarRefreezeHandlers | null; articleBlueprint?: React.ReactNode; canonicalLens?: { snapshotId: string; label: string } | null; view: RadarDeepResearchView; busy: boolean; searchMode: RadarPrimarySearchMode; researchProjection?: RadarResearchProfileProjection | null; researchBlueprint?: RadarCompetitiveBlueprintView | null; onSearchModeChange?: (mode: RadarPrimarySearchMode) => void; onStart?: () => void; onAnalyze?: () => void; onFinalize?: () => void; onReset?: () => void; onRecover?: () => void; youtubeSearch?: RadarYoutubeSearchTab; amazonSearch?: RadarAmazonSearchTab; writerHandoff?: RadarWriterHandoffTab; googleResearch?: RadarGoogleResearchTab; evidenceExtras?: React.ReactNode }) {
   /*
    * ====== 1.2 · §1 · O PERFIL MANDA NESTA SEÇÃO INTEIRA ======
    *
@@ -665,6 +672,7 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
       onToggleVideo={youtubeSearch.onToggleVideo}
       onFinalize={youtubeSearch.onFinalize}
       onReset={youtubeSearch.onReset}
+      refreeze={youtubeSearch.refreeze ?? null}
       autoFinalizePending={youtubeSearch.autoFinalizePending}
     />}
 
@@ -699,6 +707,7 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
       onAnalyze={amazonSearch.onAnalyze}
       onFinalize={amazonSearch.onFinalize}
       onReset={amazonSearch.onReset}
+      refreeze={amazonSearch.refreeze ?? null}
       autoFinalizePending={amazonSearch.autoFinalizePending}
     />}
 
@@ -1041,6 +1050,8 @@ function DeepResearch({ view, busy, searchMode, researchProjection, researchBlue
         * Zerar é ação de bancada, não de operação: discreta, sem borda de ação,
         * e só aparece quando existe investigação para descartar.
         */}
+      {/* 2026-10-02 · Adendo E · o reparo cirúrgico do Google só existe sobre a investigação congelada. */}
+      {refreeze && view.finalizedBundle && <RadarRefreezePanel profile="GOOGLE" disabled={busy} {...refreeze} />}
       {onReset && view.state !== "NOT_STARTED" && <button type="button" data-testid="radar-reset-investigation" className="inline-flex min-h-10 items-center justify-center rounded-md px-3 py-2 text-sm text-text-muted transition-colors hover:text-warning focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50" disabled={busy} onClick={onReset} title="Descarta a investigação deste artigo de teste. Os fundamentos não são tocados.">Zerar investigação</button>}
       {/*
         * BOTÃO MORTO NÃO É INFORMAÇÃO.
@@ -1341,7 +1352,9 @@ function ArticleContextBand({ model }: { model: RadarR3Model }) {
  * estado SEO em relação às diretrizes do Google e das respostas de IA. Não pede
  * revisão e não alerta: o que falta aparece como nota baixa no pilar.
  */
-function ReportSummaryPanel({ model }: { model: RadarR3Model }) {
+function ReportSummaryPanel({ model, brandId = null, articleId = null }: { model: RadarR3Model; brandId?: string | null; articleId?: string | null }) {
+  /* 2026-10-02 · o artigo-modelo da SERP do pacote vigente: estrutura e links passam a ler a planta. */
+  const planta = useRadarArticleBlueprintForReport(brandId, articleId, model.deepResearch?.finalizedBundle?.bundleHash ?? null);
   if (!model.deepResearch) return null;
   const materiais = model.r4?.existingContent || [];
   const resumo = buildRadarReportSummary({
@@ -1349,7 +1362,7 @@ function ReportSummaryPanel({ model }: { model: RadarR3Model }) {
     view: model.deepResearch,
     videos: { registered: materiais.filter(item => item.state !== "IGNORED_FOR_ARTICLE").length, transcribed: 0 },
   });
-  const placar = radarSeoGuidelineState(resumo.checks, { specialistAccepted: model.specialist.reviewedEvidence });
+  const placar = radarSeoGuidelineState(resumo.checks, { specialistAccepted: model.specialist.reviewedEvidence, articleBlueprint: planta });
   const intencao = model.deepResearch.observed.intent;
   const dna = model.article?.payload || null;
   const dados: Array<[string, string]> = [
@@ -1389,7 +1402,7 @@ function ReportSummaryPanel({ model }: { model: RadarR3Model }) {
   </section>;
 }
 
-export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportGenerate, onStartDeepResearch, youtubeSearch, amazonSearch, writerHandoff, googleResearch, onRecoverSerp, onFinalizeInvestigation, articleBlueprintJob = null, onResetInvestigation, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection = null, researchBlueprint = null, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
+export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideoSources, onExtractVideoText, onFetchVideoMetadata, onProvideVideoTranscript, onUploadVideoMedia, onLibraryAction, articleId = null, onReloadLibrary, onRunMatching, model, refreshing, reviewingSerp = false, serpAction = null, onAnalyzeSerpSelection, onTopicChange, onTopicRemove, onTopicMove, onTopicAdd, onTopicReview, onTopicUndo, onTopicRedo, canUndoTopics = false, canRedoTopics = false, onTopicAdjacent, topicQueuePosition, topicQueueTotal, onReportGenerate, onStartDeepResearch, youtubeSearch, amazonSearch, writerHandoff, googleResearch, onRecoverSerp, onFinalizeInvestigation, articleBlueprintJob = null, onResetInvestigation, googleRefreeze = null, searchMode = RADAR_DEFAULT_SEARCH_MODE, researchProjection = null, researchBlueprint = null, onSearchModeChange, onAmazonStateChange, expertContext, onExpertEvidenceChange }: RadarR3WorkbenchProps) {
   const [expandedArea, setExpandedArea] = useState<RadarR3Area | null>(null);
 
   /*
@@ -1503,7 +1516,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
           * modelo do artigo (era um painel solto depois da área). Só existe com a
           * investigação finalizada: ele organiza o pacote congelado.
           */}
-        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} canonicalLens={lenteDaCanonica(model.serp.view?.record.research)}
+        {model.deepResearch && <DeepResearch view={model.deepResearch} busy={refreshing || reviewingSerp || serpAction !== null} searchMode={searchMode} researchProjection={researchProjection} researchBlueprint={researchBlueprint} onSearchModeChange={onSearchModeChange} onStart={onStartDeepResearch} onAnalyze={onAnalyzeSerpSelection} onFinalize={onFinalizeInvestigation} onReset={onResetInvestigation} refreeze={googleRefreeze ?? null} onRecover={onRecoverSerp} youtubeSearch={youtubeSearch} amazonSearch={amazonSearch} writerHandoff={writerHandoff} googleResearch={googleResearch} evidenceExtras={areaDeEvidencia} canonicalLens={lenteDaCanonica(model.serp.view?.record.research)}
           articleBlueprint={model.deepResearch.finalizedBundle && brandId && articleId ? <RadarArticleBlueprintPanel brandId={brandId} articleId={articleId} job={articleBlueprintJob} currentBundleHash={model.deepResearch.finalizedBundle.bundleHash} /> : null} />}
         {/*
           * AMAZON NÃO É UM LUGAR SEPARADO — é um dos destinos da pesquisa.
@@ -1570,7 +1583,7 @@ export function RadarR3Workbench({ brandId = null, videoSources, onRegisterVideo
         <RadarR3SpecialistPanel model={model} expertContext={expertContext} onExpertEvidenceChange={onExpertEvidenceChange} onTopicChange={onTopicChange} onTopicRemove={onTopicRemove} onTopicMove={onTopicMove} onTopicAdd={onTopicAdd} onTopicReview={onTopicReview} onTopicUndo={onTopicUndo} onTopicRedo={onTopicRedo} canUndoTopics={canUndoTopics} canRedoTopics={canRedoTopics} onTopicAdjacent={onTopicAdjacent} topicQueuePosition={topicQueuePosition} topicQueueTotal={topicQueueTotal} />
       </div>}
       {expandedArea === "relatorio" && <div key={model.articleId} className="space-y-3">
-        <ReportSummaryPanel model={model} />
+        <ReportSummaryPanel model={model} brandId={brandId} articleId={articleId} />
         <RadarR6ReportPanel report={model.r6Report} canonicalApproved={model.report.approved} onGenerate={onReportGenerate} informational />
       </div>}
     </div>

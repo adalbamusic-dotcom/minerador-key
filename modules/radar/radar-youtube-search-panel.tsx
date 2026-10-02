@@ -20,6 +20,7 @@ import { radarAutoFinalizeButtonLabel, radarAutoFinalizePendingNotice, radarAuto
 import { RadarCompetitiveBlueprintSection } from "./radar-competitive-blueprint";
 import { RadarProfileBlueprintSection } from "./radar-profile-blueprint";
 import type { RadarEditorialProfileModel } from "@/lib/radar/editorial-profile-model";
+import { RadarRefreezePanel, type RadarRefreezeHandlers } from "./radar-refreeze-panel";
 
 /** Os rótulos das peças, em português — a tela não mostra o enum. */
 const RADAR_PIECE_LABELS: Record<RadarMultimodalBlueprint["recommended"]["pieces"][number]["piece"], string> = {
@@ -95,6 +96,8 @@ export type RadarYoutubeSearchPanelProps = {
   onToggleVideo?: (videoId: string) => void;
   onFinalize?: () => void;
   onReset?: () => void;
+  /** 2026-10-02 · Adendo E · reparar o congelamento do YouTube (recongelar grátis ou zerar e coletar). */
+  refreeze?: RadarRefreezeHandlers | null;
   /**
    * 2026-10-02 · D9 · POR QUE A COLETA NÃO FINALIZOU SOZINHA.
    *
@@ -579,7 +582,7 @@ function BlueprintMultiformato({ blueprint }: { blueprint: RadarMultimodalBluepr
   </section>;
 }
 
-export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReason, frozen, pacote, projecao, blueprintView, editorialModel, evidenceExtras, multimodal, sampleSummary, provenanceSummary, lazySample, lazyProvenance, onLoadSample, onLoadProvenance, onStart, onToggleVideo, onFinalize, onReset, onRetrySupport, autoFinalizePending = null }: RadarYoutubeSearchPanelProps) {
+export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReason, frozen, pacote, projecao, blueprintView, editorialModel, evidenceExtras, multimodal, sampleSummary, provenanceSummary, lazySample, lazyProvenance, onLoadSample, onLoadProvenance, onStart, onToggleVideo, onFinalize, onReset, onRetrySupport, autoFinalizePending = null, refreeze = null }: RadarYoutubeSearchPanelProps) {
   /*
    * ============ 2.2 · §2 · A CORRIDA EFETIVA ============
    *
@@ -718,6 +721,8 @@ export function RadarYoutubeSearchPanel({ run, plannedQueries, busy, blockedReas
           * faria a única ação que sobra desaparecer de uma investigação
           * finalizada.
           */}
+        {/* 2026-10-02 · Adendo E · o reparo cirúrgico só existe sobre uma fotografia. */}
+        {finalizada && refreeze && <RadarRefreezePanel profile="YOUTUBE" disabled={busy} {...refreeze} />}
         {(corrida || frozen) && <button type="button" className={button} disabled={busy} onClick={() => onReset?.()} data-testid="radar-youtube-reset">
           {finalizada ? "Reabrir / zerar investigação" : "Zerar pesquisa YouTube"}
         </button>}
